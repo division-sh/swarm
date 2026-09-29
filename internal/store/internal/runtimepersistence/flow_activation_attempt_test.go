@@ -24,8 +24,118 @@ type flowActivationAttemptTestStore interface {
 	VerifyDynamicFlowRuntimeActivationAttempt(context.Context, runtimepipeline.DynamicFlowRuntimeActivationAttempt) error
 	MarkDynamicFlowRuntimeTopologyReadyForAttempt(context.Context, runtimepipeline.DynamicFlowRuntimeActivationAttempt, runtimepipeline.DynamicFlowRuntimeReadinessPlan, time.Time) (runtimepipeline.DynamicFlowRuntimeTopologyReadyResult, error)
 	RetireDynamicFlowRuntimeActivationAttempt(context.Context, runtimepipeline.DynamicFlowRuntimeActivationAttempt) error
+	RetireDynamicFlowRuntimeActivationAttempts(context.Context, []runtimepipeline.DynamicFlowRuntimeActivationAttempt) error
 	AbandonDynamicFlowRuntimeActivationAttempt(context.Context, runtimepipeline.DynamicFlowRuntimeActivationAttempt) error
 	ReconcileDynamicFlowRuntimeReadinessPlans(context.Context, []runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation, time.Time) ([]runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliationResult, error)
+}
+
+func TestFlowActivationAttemptBatchRetirementBothStores(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		open func(*testing.T) (flowActivationAttemptTestStore, *sql.DB, bool)
+	}{
+		{"postgres", func(t *testing.T) (flowActivationAttemptTestStore, *sql.DB, bool) {
+			_, db, cleanup := testutil.StartPostgres(t)
+			t.Cleanup(cleanup)
+			return storetest.AdmitPostgresRuntimeStore(t, db), db, false
+		}},
+		{"sqlite", func(t *testing.T) (flowActivationAttemptTestStore, *sql.DB, bool) {
+			selected := storetest.StartSQLiteRuntimeStore(t)
+			return selected, storetest.Database(selected), true
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			selected, db, sqlite := tc.open(t)
+			ctx := testAuthorActivityContext()
+			runID := uuid.NewString()
+			hash := mustExternalStoreTestSourceArtifactFact().BundleHash()
+			requireReadinessRun(t, ctx, db, sqlite, runID, hash)
+			paths := []string{"account/batch-a", "account/batch-b"}
+			for _, path := range paths {
+				seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runID, uuid.NewString(), path, hash)
+			}
+			acquire := runtimestartupownership.AcquireRequest{OwnerID: "flow-batch-test", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()}
+			process, err := selected.AcquireProcessCapability(ctx, acquire)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = process.Release(context.Background()) })
+			sourceSet, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{{BundleHash: hash}}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := process.InstallCompleteSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: sourceSet}); err != nil {
+				t.Fatal(err)
+			}
+			grant, err := process.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{BundleHash: hash, RuntimeInstanceID: acquire.RuntimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: sourceSet.Revision})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := grant.AdmitExecution(ctx); err != nil {
+				t.Fatal(err)
+			}
+			binding, err := grant.ProcessExecutionBinding()
+			if err != nil {
+				t.Fatal(err)
+			}
+			attempts := make([]runtimepipeline.DynamicFlowRuntimeActivationAttempt, 0, len(paths))
+			for _, path := range paths {
+				readiness, found, err := selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(path))
+				if err != nil || !found {
+					t.Fatalf("load %s readiness: found=%v err=%v", path, found, err)
+				}
+				admitted, err := selected.BeginDynamicFlowRuntimeActivation(ctx, readiness.Plan, readiness.PlanRevision, binding)
+				if err != nil || !admitted.Acknowledged {
+					t.Fatalf("admit %s attempt: result=%+v err=%v", path, admitted, err)
+				}
+				attempts = append(attempts, admitted.Attempt)
+			}
+			forgedBinding := binding
+			forgedBinding.ProcessBootID = uuid.NewString()
+			forged, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt(attempts[1].ID(), attempts[1].RunID(), attempts[1].InstancePath(), attempts[1].PlanRevision(), forgedBinding)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := selected.RetireDynamicFlowRuntimeActivationAttempts(ctx, []runtimepipeline.DynamicFlowRuntimeActivationAttempt{attempts[0], forged}); err == nil {
+				t.Fatal("forged batch member settled valid predecessor")
+			}
+			for _, attempt := range attempts {
+				if err := selected.VerifyDynamicFlowRuntimeActivationAttempt(ctx, attempt); err != nil {
+					t.Fatalf("failed batch changed %s: %v", attempt.InstancePath(), err)
+				}
+			}
+			if err := selected.RetireDynamicFlowRuntimeActivationAttempts(ctx, attempts[:0]); err == nil {
+				t.Fatal("empty retirement batch accepted")
+			}
+			if err := selected.RetireDynamicFlowRuntimeActivationAttempts(ctx, []runtimepipeline.DynamicFlowRuntimeActivationAttempt{attempts[0], attempts[0]}); err == nil {
+				t.Fatal("duplicate retirement batch accepted")
+			}
+			oversized := make([]runtimepipeline.DynamicFlowRuntimeActivationAttempt, runtimepipeline.DynamicFlowRuntimeRetirementBatchLimit+1)
+			for i := range oversized {
+				oversized[i] = attempts[0]
+			}
+			if err := selected.RetireDynamicFlowRuntimeActivationAttempts(ctx, oversized); err == nil {
+				t.Fatal("oversized retirement batch accepted")
+			}
+			if err := selected.RetireDynamicFlowRuntimeActivationAttempts(ctx, attempts); err != nil {
+				t.Fatalf("retire exact batch: %v", err)
+			}
+			if err := selected.RetireDynamicFlowRuntimeActivationAttempts(ctx, attempts); err != nil {
+				t.Fatalf("retry exact batch: %v", err)
+			}
+			for _, attempt := range attempts {
+				if err := selected.VerifyDynamicFlowRuntimeActivationAttempt(ctx, attempt); err == nil {
+					t.Fatalf("retired %s still admitted", attempt.InstancePath())
+				}
+				if err := selected.AbandonDynamicFlowRuntimeActivationAttempt(ctx, attempt); err == nil {
+					t.Fatalf("failed disposition replaced orderly retirement of %s", attempt.InstancePath())
+				}
+			}
+		})
+	}
 }
 
 func TestFlowActivationAttemptAdmissionBothStores(t *testing.T) {

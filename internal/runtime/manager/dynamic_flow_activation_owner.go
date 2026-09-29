@@ -250,6 +250,11 @@ func (am *AgentManager) settleDynamicFlowAttemptDurably(ctx context.Context, act
 	return am.workflowInstances.RetireDynamicFlowRuntimeActivationAttempt(ctx, active.receipt)
 }
 
+type joinedFlowRetirement struct {
+	key    dynamicFlowRuntimeReadinessKey
+	active *dynamicFlowActiveAttempt
+}
+
 // A joined manager generation no longer owns executable flow work. Release
 // process projections before making its exact durable attempt reusable.
 func (am *AgentManager) retireDynamicFlowAttemptsAfterJoin(ctx context.Context) error {
@@ -262,6 +267,30 @@ func (am *AgentManager) retireDynamicFlowAttemptsAfterJoin(ctx context.Context) 
 	}
 	am.dynamicFlowReadinessMu.Unlock()
 	var result error
+	batch := make([]joinedFlowRetirement, 0, runtimepipeline.DynamicFlowRuntimeRetirementBatchLimit)
+	finish := func(entries []joinedFlowRetirement, committed bool) {
+		am.dynamicFlowReadinessMu.Lock()
+		defer am.dynamicFlowReadinessMu.Unlock()
+		for _, entry := range entries {
+			if am.dynamicFlowActiveAttempts[entry.key] != entry.active {
+				continue
+			}
+			if committed {
+				delete(am.dynamicFlowActiveAttempts, entry.key)
+			} else {
+				entry.active.retiring = false
+			}
+		}
+	}
+	flush := func() {
+		if len(batch) == 0 {
+			return
+		}
+		retireErr := am.retireJoinedDynamicFlowAttemptBatch(ctx, batch)
+		result = errors.Join(result, retireErr)
+		finish(batch, retireErr == nil)
+		batch = batch[:0]
+	}
 	for key, active := range attempts {
 		am.dynamicFlowReadinessMu.Lock()
 		current := am.dynamicFlowActiveAttempts[key] == active
@@ -281,17 +310,36 @@ func (am *AgentManager) retireDynamicFlowAttemptsAfterJoin(ctx context.Context) 
 			result = errors.Join(result, fmt.Errorf("flow activation attempt %s retains unsettled local retirement", key.instancePath))
 			continue
 		}
-		result = errors.Join(result, am.settleDynamicFlowAttemptAfterJoin(ctx, key, active))
-		am.dynamicFlowReadinessMu.Lock()
-		if am.dynamicFlowActiveAttempts[key] == active {
-			active.retiring = false
+		deferDurable := active.retirementKind != flowActivationFailedRetirement
+		settleErr := am.settleDynamicFlowAttemptAfterJoin(ctx, key, active, deferDurable)
+		result = errors.Join(result, settleErr)
+		if settleErr == nil && deferDurable {
+			batch = append(batch, joinedFlowRetirement{key: key, active: active})
+			if len(batch) == runtimepipeline.DynamicFlowRuntimeRetirementBatchLimit {
+				flush()
+			}
+			continue
 		}
-		am.dynamicFlowReadinessMu.Unlock()
+		finish([]joinedFlowRetirement{{key: key, active: active}}, settleErr == nil)
 	}
+	flush()
 	return result
 }
 
-func (am *AgentManager) settleDynamicFlowAttemptAfterJoin(ctx context.Context, key dynamicFlowRuntimeReadinessKey, active *dynamicFlowActiveAttempt) (result error) {
+func (am *AgentManager) retireJoinedDynamicFlowAttemptBatch(ctx context.Context, entries []joinedFlowRetirement) (result error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			result = fmt.Errorf("retire joined flow activation batch: %v", recovered)
+		}
+	}()
+	attempts := make([]runtimepipeline.DynamicFlowRuntimeActivationAttempt, 0, len(entries))
+	for _, entry := range entries {
+		attempts = append(attempts, entry.active.receipt)
+	}
+	return am.workflowInstances.RetireDynamicFlowRuntimeActivationAttempts(ctx, attempts)
+}
+
+func (am *AgentManager) settleDynamicFlowAttemptAfterJoin(ctx context.Context, key dynamicFlowRuntimeReadinessKey, active *dynamicFlowActiveAttempt, deferDurable bool) (result error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			result = fmt.Errorf("retire joined flow activation attempt %s: %v", key.instancePath, recovered)
@@ -324,13 +372,11 @@ func (am *AgentManager) settleDynamicFlowAttemptAfterJoin(ctx context.Context, k
 		active.timersRetired = true
 		am.dynamicFlowReadinessMu.Unlock()
 	}
+	if deferDurable {
+		return nil
+	}
 	if err := am.settleDynamicFlowAttemptDurably(ctx, active); err != nil {
 		return fmt.Errorf("retire flow activation attempt %s: %w", key.instancePath, err)
 	}
-	am.dynamicFlowReadinessMu.Lock()
-	if am.dynamicFlowActiveAttempts[key] == active {
-		delete(am.dynamicFlowActiveAttempts, key)
-	}
-	am.dynamicFlowReadinessMu.Unlock()
 	return nil
 }

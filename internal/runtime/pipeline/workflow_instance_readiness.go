@@ -183,6 +183,8 @@ type DynamicFlowRuntimeTopologyReadyResult struct {
 	Acknowledged bool
 }
 
+const DynamicFlowRuntimeRetirementBatchLimit = 128
+
 type DynamicFlowRuntimeReadinessPersistence interface {
 	ReconcileDynamicFlowRuntimeReadinessPlans(context.Context, []DynamicFlowRuntimeReadinessPlanReconciliation, time.Time) ([]DynamicFlowRuntimeReadinessPlanReconciliationResult, error)
 	LoadDynamicFlowRuntimeReadiness(context.Context, string, runtimeflowidentity.Route) (DynamicFlowRuntimeReadiness, bool, error)
@@ -192,6 +194,7 @@ type DynamicFlowRuntimeReadinessPersistence interface {
 	VerifyDynamicFlowRuntimeActivationAttempt(context.Context, DynamicFlowRuntimeActivationAttempt) error
 	MarkDynamicFlowRuntimeTopologyReadyForAttempt(context.Context, DynamicFlowRuntimeActivationAttempt, DynamicFlowRuntimeReadinessPlan, time.Time) (DynamicFlowRuntimeTopologyReadyResult, error)
 	RetireDynamicFlowRuntimeActivationAttempt(context.Context, DynamicFlowRuntimeActivationAttempt) error
+	RetireDynamicFlowRuntimeActivationAttempts(context.Context, []DynamicFlowRuntimeActivationAttempt) error
 	AbandonDynamicFlowRuntimeActivationAttempt(context.Context, DynamicFlowRuntimeActivationAttempt) error
 }
 

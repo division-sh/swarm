@@ -524,6 +524,10 @@ func (*startupReadinessFinalizationStore) RetireDynamicFlowRuntimeActivationAtte
 	return errors.New("unexpected readiness activation retirement")
 }
 
+func (*startupReadinessFinalizationStore) RetireDynamicFlowRuntimeActivationAttempts(context.Context, []runtimepipeline.DynamicFlowRuntimeActivationAttempt) error {
+	return errors.New("unexpected readiness activation retirement batch")
+}
+
 func (*startupReadinessFinalizationStore) AbandonDynamicFlowRuntimeActivationAttempt(context.Context, runtimepipeline.DynamicFlowRuntimeActivationAttempt) error {
 	return errors.New("unexpected readiness activation abandonment")
 }

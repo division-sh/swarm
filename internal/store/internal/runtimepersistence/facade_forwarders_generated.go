@@ -1155,6 +1155,10 @@ func (s *PostgresStore) RetireDynamicFlowRuntimeActivationAttempt(ctx context.Co
 	return s.pipelinePostgresOwner.RetireDynamicFlowRuntimeActivationAttempt(ctx, attempt)
 }
 
+func (s *PostgresStore) RetireDynamicFlowRuntimeActivationAttempts(ctx context.Context, attempts []pipeline.DynamicFlowRuntimeActivationAttempt) error {
+	return s.pipelinePostgresOwner.RetireDynamicFlowRuntimeActivationAttempts(ctx, attempts)
+}
+
 func (s *PostgresStore) ReviseRunSource(ctx context.Context, request runlifecycle.SourceRevisionRequest) (runlifecycle.MutationDisposition, error) {
 	return s.runLifecyclePostgresOwner.ReviseRunSource(ctx, request)
 }
@@ -2365,6 +2369,10 @@ func (s *SQLiteRuntimeStore) RetireConnectedChannelActivation(ctx context.Contex
 
 func (s *SQLiteRuntimeStore) RetireDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt pipeline.DynamicFlowRuntimeActivationAttempt) error {
 	return s.pipelineSQLiteOwner.RetireDynamicFlowRuntimeActivationAttempt(ctx, attempt)
+}
+
+func (s *SQLiteRuntimeStore) RetireDynamicFlowRuntimeActivationAttempts(ctx context.Context, attempts []pipeline.DynamicFlowRuntimeActivationAttempt) error {
+	return s.pipelineSQLiteOwner.RetireDynamicFlowRuntimeActivationAttempts(ctx, attempts)
 }
 
 func (s *SQLiteRuntimeStore) ReviseRunSource(ctx context.Context, request runlifecycle.SourceRevisionRequest) (runlifecycle.MutationDisposition, error) {

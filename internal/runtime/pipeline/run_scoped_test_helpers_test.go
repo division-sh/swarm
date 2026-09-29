@@ -260,6 +260,10 @@ func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) RetireDynamicFlowRun
 	return errors.New("in-memory readiness fixture has no activation attempt")
 }
 
+func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) RetireDynamicFlowRuntimeActivationAttempts(context.Context, []DynamicFlowRuntimeActivationAttempt) error {
+	return errors.New("in-memory readiness fixture has no activation attempt")
+}
+
 func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) AbandonDynamicFlowRuntimeActivationAttempt(context.Context, DynamicFlowRuntimeActivationAttempt) error {
 	return errors.New("in-memory readiness fixture has no activation attempt")
 }
