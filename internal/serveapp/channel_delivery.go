@@ -457,13 +457,13 @@ func (d *serveChannelDeliveryDispatcher) currentCompiledDelivery(ctx context.Con
 	return selected, compiled.Plan, lease.Release, nil
 }
 
-func (d *serveChannelDeliveryDispatcher) selectedActionCapacity(ctx context.Context, candidate runtimechanneldelivery.Candidate) (int, error) {
+func (d *serveChannelDeliveryDispatcher) selectedPresentationBounds(ctx context.Context, candidate runtimechanneldelivery.Candidate) (packs.PresentationBounds, error) {
 	_, plan, release, err := d.currentCompiledDelivery(ctx, candidate)
 	if err != nil {
-		return 0, err
+		return packs.PresentationBounds{}, err
 	}
 	defer release()
-	return plan.ActionCapacity()
+	return plan.PresentationBounds()
 }
 
 func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, candidate runtimechanneldelivery.Candidate, prepared runtimechanneldelivery.PreparedRender, operation string, previousReference any) error {
@@ -499,11 +499,11 @@ func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, ca
 		}
 		actions = append(actions, map[string]any{"label": action.Label, "token": action.Token})
 	}
-	capacity, err := plan.ActionCapacity()
+	bounds, err := plan.PresentationBounds()
 	if err != nil {
 		return err
 	}
-	if len(actions) > capacity || (candidate.SourceKind == "card" && prepared.Frozen.ActionPage == nil) {
+	if len(actions) > bounds.Actions || prepared.Frozen.ActionPage == nil || prepared.Frozen.Bounds != bounds {
 		return fmt.Errorf("channel delivery actions exceed selected compiled capacity")
 	}
 	semanticInput := map[string]any{

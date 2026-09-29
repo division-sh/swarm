@@ -3,6 +3,7 @@ package channeldelivery
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
@@ -81,7 +82,7 @@ func ResolveCurrentNativeInboxEntryTx(ctx context.Context, tx *sql.Tx, text oper
 			AND c.activation_revision=a.activation_revision AND c.interface_key=a.interface_key
 			AND c.binding_revision=a.binding_revision
 			AND c.context_publication_generation=a.context_publication_generation AND c.state='current'
-		JOIN channel_native_settings s ON s.setting_id=c.setting_id AND s.state='installed'
+		JOIN channel_native_settings s ON s.setting_id=c.setting_id
 			AND s.principal_id=b.principal_id AND s.provider=a.provider
 			AND s.conversation_reference=b.conversation_reference AND s.language_code=''
 			AND s.pack_id=a.channel_pack_id AND s.pack_version=a.channel_pack_version
@@ -104,7 +105,7 @@ func ResolveCurrentNativeInboxEntryTx(ctx context.Context, tx *sql.Tx, text oper
 				AND c.activation_revision=a.activation_revision AND c.interface_key=a.interface_key
 				AND c.binding_revision=a.binding_revision
 				AND c.context_publication_generation=a.context_publication_generation AND c.state='current'
-			JOIN channel_native_settings s ON s.setting_id=c.setting_id AND s.state='installed'
+			JOIN channel_native_settings s ON s.setting_id=c.setting_id
 				AND s.principal_id=b.principal_id AND s.provider=a.provider
 				AND s.conversation_reference=b.conversation_reference AND s.language_code=''
 				AND s.pack_id=a.channel_pack_id AND s.pack_version=a.channel_pack_version
@@ -132,5 +133,14 @@ func ResolveCurrentNativeInboxEntryTx(ctx context.Context, tx *sql.Tx, text oper
 	if rows.Next() {
 		return render.ResolvedNativeEntry{}, false, fmt.Errorf("native inbox entry resolves multiple current settings")
 	}
-	return result, true, rows.Err()
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return render.ResolvedNativeEntry{}, false, err
+	}
+	count, err := currentNativeConsumersTx(ctx, tx, result.SettingID, postgres)
+	if err != nil || count != 1 {
+		return render.ResolvedNativeEntry{}, false, errors.Join(err, fmt.Errorf("native inbox entry requires one current connection"))
+	}
+	// Discovery keeps a known generation retryable. Usability is admitted only
+	// by fresh provider qualification and PlanNativeInboxResponseTx.
+	return result, true, nil
 }

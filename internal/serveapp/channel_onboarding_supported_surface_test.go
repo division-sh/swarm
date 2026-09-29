@@ -851,7 +851,7 @@ func runChannelOnboardingCLIJourney(t *testing.T, configPath, endpoint string, p
 	t.Helper()
 	stdout, stderr := &lockedBuffer{}, &lockedBuffer{}
 	done := make(chan int, 1)
-	args := []string{"--config", configPath, "channel", verb, "telegram", "--yes", "--api-server", endpoint}
+	args := []string{"--config", configPath, "channel", verb, "telegram", "--yes", "--client-language", "en", "--api-server", endpoint}
 
 	priorStdin := os.Stdin
 	input, err := os.CreateTemp(t.TempDir(), "channel-onboarding-input-*")

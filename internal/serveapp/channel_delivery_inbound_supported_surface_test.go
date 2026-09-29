@@ -157,6 +157,14 @@ func TestChannelDeliveryOrderedInputE2E(t *testing.T) {
 	}
 }
 
+func TestChannelDeliveryOrderedInputRetainedRestartE2E(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			runChannelDeliveryInboundDispositionE2E(t, backend, "ordered_input_restart")
+		})
+	}
+}
+
 func TestChannelDeliveryCancelInputE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -177,6 +185,14 @@ func TestChannelDeliveryBareInputChooserE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			runChannelDeliveryInboundDispositionE2E(t, backend, "draft_chooser")
+		})
+	}
+}
+
+func TestChannelDeliveryChooserRetainedAnswerRestartE2E(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			runChannelDeliveryInboundDispositionE2E(t, backend, "draft_chooser_restart")
 		})
 	}
 }
@@ -270,6 +286,10 @@ func (r telegramLongNoticeLLMRuntime) ContinueManagedSession(ctx context.Context
 
 func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario string) {
 	t.Helper()
+	retainedInteraction := scenario == "ordered_input_restart" || scenario == "draft_chooser_restart"
+	if retainedInteraction {
+		scenario = strings.TrimSuffix(scenario, "_restart")
+	}
 	nativeInboxScenario := scenario == "inbox" || scenario == "inbox_loss" || scenario == "inbox_restart"
 	isolateCLIAPIConfigEnv(t)
 	configureStandingLifecycleCredentials(t)
@@ -621,6 +641,18 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		provider.LoseNextDeliveryAcknowledgment()
 	}
 	callbackURL, signing, _ := provider.Registration()
+	var restartInteraction func() (string, string)
+	if retainedInteraction {
+		restartInteraction = func() (string, string) {
+			if code := process.stop(); code != 0 {
+				t.Fatalf("interaction restart exited %d: %s", code, process.outputString())
+			}
+			process = startServeRuntimeTestProcess(t, opts)
+			process.waitForReadyLine()
+			callback, secret, _ := provider.Registration()
+			return callback, secret
+		}
+	}
 	if scenario == "action_pages" {
 		proveChannelPagedCardActions(t, provider, callbackURL, signing)
 		return
@@ -751,7 +783,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		if len(admitted.EventNames) != 0 {
 			t.Fatalf("ordered draft begin leaked business events: %v", admitted.EventNames)
 		}
-		proveChannelOrderedInputText(t, provider, callbackURL, signing)
+		proveChannelOrderedInputText(t, provider, callbackURL, signing, restartInteraction)
 		return
 	}
 	if scenario == "cancel_input" || scenario == "skip_input" {
@@ -765,7 +797,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		if len(admitted.EventNames) != 0 {
 			t.Fatalf("draft begin leaked business events: %v", admitted.EventNames)
 		}
-		proveChannelBareInputChooser(t, provider, callbackURL, signing)
+		proveChannelBareInputChooser(t, provider, callbackURL, signing, restartInteraction)
 		return
 	}
 	if scenario == "quoted_two" {
@@ -1033,7 +1065,7 @@ func proveChannelInvalidInputText(t *testing.T, provider *telegramapi.Double, ca
 	}
 }
 
-func proveChannelOrderedInputText(t *testing.T, provider *telegramapi.Double, callbackURL, signing string) {
+func proveChannelOrderedInputText(t *testing.T, provider *telegramapi.Double, callbackURL, signing string, restart func() (string, string)) {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	waitForEdit := func(fragment string) {
@@ -1073,6 +1105,10 @@ func proveChannelOrderedInputText(t *testing.T, provider *telegramapi.Double, ca
 		if strings.Contains(fmt.Sprint(edit["text"]), "Decision: retire") {
 			t.Fatalf("partial ordered answer decided card: %v", edit)
 		}
+	}
+	if restart != nil {
+		callbackURL, signing = restart()
+		deadline = time.Now().Add(20 * time.Second)
 	}
 	postAnswer(9106, "true")
 	waitForEdit("Decision: retire")
@@ -1139,7 +1175,7 @@ func proveChannelInputControl(t *testing.T, provider *telegramapi.Double, callba
 	}
 }
 
-func proveChannelBareInputChooser(t *testing.T, provider *telegramapi.Double, callbackURL, signing string) {
+func proveChannelBareInputChooser(t *testing.T, provider *telegramapi.Double, callbackURL, signing string, restart func() (string, string)) {
 	t.Helper()
 	beginOtherChannelDraft(t, provider, callbackURL, signing, 3)
 	deadline := time.Now().Add(25 * time.Second)
@@ -1185,6 +1221,10 @@ func proveChannelBareInputChooser(t *testing.T, provider *telegramapi.Double, ca
 			t.Fatalf("ambiguous answer did not produce a chooser: deliveries=%v edits=%v", provider.Delivery(3), provider.Edits())
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+	if restart != nil {
+		callbackURL, signing = restart()
+		deadline = time.Now().Add(25 * time.Second)
 	}
 	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
 		"update_id": time.Now().UnixMilli() + 1500,

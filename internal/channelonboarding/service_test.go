@@ -16,6 +16,32 @@ import (
 	"github.com/google/uuid"
 )
 
+func TestRetryRejectsIncompleteLocaleBeforeRebindOrEffectReconciliation(t *testing.T) {
+	now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	predecessor := testCandidate(strings.Repeat("a", 64), "support")
+	successor := predecessor
+	successor.Coordinate.ContextPublicationGeneration++
+	catalog, err := NewCandidateCatalog([]Candidate{successor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	op := testSucceededOperation(predecessor, now)
+	op.Phase = PhaseDeliveringConfirmation
+	events := []string{}
+	store := &cancellationTestStore{op: op, events: &events}
+	confirmation := &recordingTestConfirmation{events: &events, disposition: EffectRebindDisposition{RetryAllowed: true}}
+	service := &Service{
+		store: store, effects: confirmation, catalog: func() (*CandidateCatalog, error) { return catalog, nil },
+		now: func() time.Time { return now },
+	}
+	if _, err := service.Retry(context.Background(), RetryInput{OperationID: op.OperationID, ExpectedLocaleRevision: 1}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("invalid locale input=%v", err)
+	}
+	if len(events) != 0 || store.op.Revision != op.Revision || !store.op.Coordinate.Matches(op.Coordinate) {
+		t.Fatalf("invalid locale input mutated authority: events=%v operation=%#v", events, store.op)
+	}
+}
+
 func TestOverdueIdentityTerminalizesOnboardingAndReleasesWrittenCredentials(t *testing.T) {
 	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
 	candidate := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
@@ -1953,8 +1979,9 @@ func (s *cancellationTestStore) ReserveChannelOnboarding(ctx context.Context, re
 		SlotKey: req.SlotKey(), PrincipalID: req.PrincipalID, Verb: req.Verb, Provider: req.Provider,
 		Interface: req.Interface, Coordinate: req.Coordinate, TargetSelector: req.TargetSelector,
 		Posture: req.Posture, Ceremony: req.Ceremony, Phase: PhasePreparing, Revision: 1,
-		SaveProof: req.SaveProof, CredentialReservations: append([]CredentialReservation(nil), req.CredentialReservations...),
-		RequestedAt: req.RequestedAt, UpdatedAt: req.RequestedAt,
+		SaveProof: req.SaveProof, ClientLanguage: req.ClientLanguage, ClientLocaleRevision: 1,
+		CredentialReservations: append([]CredentialReservation(nil), req.CredentialReservations...),
+		RequestedAt:            req.RequestedAt, UpdatedAt: req.RequestedAt,
 	}
 	if s.cancelAfterReserve != nil {
 		s.cancelAfterReserve()
@@ -1969,6 +1996,11 @@ func (s *cancellationTestStore) GetChannelOnboarding(ctx context.Context, operat
 		return Operation{}, ErrNotFound
 	}
 	return s.op, nil
+}
+
+func (s *cancellationTestStore) SetChannelClientLocale(ctx context.Context, req SetClientLocaleRequest) (Operation, error) {
+	s.observe(ctx)
+	return Operation{}, fmt.Errorf("unexpected client locale mutation in cancellation fixture")
 }
 
 func (s *cancellationTestStore) ListChannelOnboardingOperations(ctx context.Context) ([]Operation, error) {

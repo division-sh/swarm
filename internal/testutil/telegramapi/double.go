@@ -17,6 +17,7 @@ type Double struct {
 	registrations                 map[string]registration
 	resourceIDs                   map[string]int64
 	commands                      map[string][]map[string]any
+	launchers                     map[string]string
 	commandWrites                 []map[string]any
 	commandReadbacks              int
 	commandReadbackFailures       int
@@ -42,6 +43,16 @@ type registration struct {
 	signingSecret string
 }
 
+// Caller holds mu. Rotated/aliased credentials address the same bot's settings;
+// SetResourceID is the explicit way to model a genuinely different physical bot.
+func (p *Double) physicalResourceKey(credential string) string {
+	id := p.resourceIDs[strings.TrimSpace(credential)]
+	if id == 0 {
+		id = 420079
+	}
+	return fmt.Sprint(id)
+}
+
 type responseBarrier struct {
 	arrived chan struct{}
 	release chan struct{}
@@ -51,6 +62,9 @@ type responseBarrier struct {
 func (p *Double) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	credential := credentialFromPath(request.URL.Path)
+	p.mu.Lock()
+	physical := p.physicalResourceKey(credential)
+	p.mu.Unlock()
 	switch {
 	case strings.HasSuffix(request.URL.Path, "/getMe"):
 		p.mu.Lock()
@@ -77,7 +91,7 @@ func (p *Double) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		key, err := commandScopeKey(credential, payload.Scope, payload.LanguageCode)
+		key, err := commandScopeKey(physical, payload.Scope, payload.LanguageCode)
 		if err != nil || len(payload.Commands) > 100 {
 			http.Error(w, "invalid command scope", http.StatusBadRequest)
 			return
@@ -121,7 +135,7 @@ func (p *Double) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		key, err := commandScopeKey(credential, payload.Scope, payload.LanguageCode)
+		key, err := commandScopeKey(physical, payload.Scope, payload.LanguageCode)
 		if err != nil {
 			http.Error(w, "invalid command scope", http.StatusBadRequest)
 			return
@@ -143,6 +157,23 @@ func (p *Double) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 			commands = []map[string]any{}
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": commands})
+	case strings.HasSuffix(request.URL.Path, "/getChatMenuButton"):
+		var payload map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		chat := ""
+		if raw, supplied := payload["chat_id"]; supplied {
+			chat = fmt.Sprint(raw)
+		}
+		p.mu.Lock()
+		launcher := p.launchers[physical+":"+chat]
+		p.mu.Unlock()
+		if launcher == "" {
+			launcher = "default"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"type": launcher}})
 	case strings.HasSuffix(request.URL.Path, "/setWebhook"):
 		var payload map[string]any
 		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
@@ -155,7 +186,7 @@ func (p *Double) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 		if p.registrations == nil {
 			p.registrations = map[string]registration{}
 		}
-		p.registrations[credential] = registration{callbackURL: p.callbackURL, signingSecret: p.signingSecret}
+		p.registrations[physical] = registration{callbackURL: p.callbackURL, signingSecret: p.signingSecret}
 		p.registrationRequests = append(p.registrationRequests, clonePayload(payload))
 		loseResponse := p.loseNextRegistrationResponse
 		p.loseNextRegistrationResponse = false
@@ -181,7 +212,7 @@ func (p *Double) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
 	case strings.HasSuffix(request.URL.Path, "/getWebhookInfo"):
 		p.mu.Lock()
-		callbackURL := p.registrations[credential].callbackURL
+		callbackURL := p.registrations[physical].callbackURL
 		p.mu.Unlock()
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"url": callbackURL}})
 	case strings.HasSuffix(request.URL.Path, "/sendMessage"):
@@ -334,16 +365,29 @@ func (p *Double) PauseNextCommandApply() (<-chan struct{}, func()) {
 }
 
 func (p *Double) SeedCommands(credential string, scope map[string]any, language string, commands []map[string]any) error {
-	key, err := commandScopeKey(credential, scope, language)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	key, err := commandScopeKey(p.physicalResourceKey(credential), scope, language)
 	if err != nil {
 		return err
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	if p.commands == nil {
 		p.commands = map[string][]map[string]any{}
 	}
 	p.commands[key] = append([]map[string]any(nil), commands...)
+	return nil
+}
+
+func (p *Double) SeedLauncher(credential, chat, launcher string) error {
+	if credential == "" || (launcher != "commands" && launcher != "default" && launcher != "web_app") {
+		return fmt.Errorf("invalid launcher fixture")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.launchers == nil {
+		p.launchers = map[string]string{}
+	}
+	p.launchers[p.physicalResourceKey(credential)+":"+chat] = launcher
 	return nil
 }
 
@@ -362,7 +406,7 @@ func (p *Double) SetResourceID(credential string, resourceID int64) {
 func (p *Double) RegistrationForCredential(credential string) (string, string, int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	current := p.registrations[strings.TrimSpace(credential)]
+	current := p.registrations[p.physicalResourceKey(credential)]
 	return current.callbackURL, current.signingSecret, len(p.registrationRequests)
 }
 

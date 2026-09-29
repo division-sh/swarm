@@ -42,17 +42,20 @@ func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxSettings(ctx contex
 	return nil
 }
 
-func (d *serveChannelDeliveryDispatcher) resolveNativeInboxEntry(ctx context.Context, text operatorchannel.InboundText) (runtimechanneldelivery.ResolvedNativeEntry, bool, error) {
+func (d *serveChannelDeliveryDispatcher) resolveNativeInboxEntry(ctx context.Context, text operatorchannel.InboundText) (runtimechanneldelivery.ResolvedNativeEntry, runtimechanneldelivery.NativeEntryDisposition, error) {
 	if d == nil || d.store == nil || d.activations == nil || d.manager == nil || d.ingress == nil || d.credentials == nil || d.now == nil {
-		return runtimechanneldelivery.ResolvedNativeEntry{}, false, fmt.Errorf("native inbox entry owners are unavailable")
+		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryUnavailable, fmt.Errorf("native inbox entry owners are unavailable")
 	}
 	entry, found, err := d.store.ResolveCurrentNativeInboxEntry(ctx, text)
-	if err != nil || !found {
-		return runtimechanneldelivery.ResolvedNativeEntry{}, found, err
+	if err != nil {
+		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryUnavailable, err
+	}
+	if !found {
+		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryRejected, nil
 	}
 	activations, err := d.activations.ListCurrentConnectedChannelActivations(ctx)
 	if err != nil {
-		return runtimechanneldelivery.ResolvedNativeEntry{}, false, err
+		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryUnavailable, err
 	}
 	var selected channelonboarding.ConnectedChannelActivation
 	for _, activation := range activations {
@@ -60,23 +63,29 @@ func (d *serveChannelDeliveryDispatcher) resolveNativeInboxEntry(ctx context.Con
 			continue
 		}
 		if selected.ActivationID != "" {
-			return runtimechanneldelivery.ResolvedNativeEntry{}, false, fmt.Errorf("native inbox activation is duplicated")
+			return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryUnavailable, fmt.Errorf("native inbox activation is duplicated")
 		}
 		selected = activation
 	}
-	if selected.ActivationID == "" || selected.PrincipalID != entry.PrincipalID ||
+	if selected.ActivationID == "" {
+		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryUnavailable, nil
+	}
+	if selected.PrincipalID != entry.PrincipalID ||
 		selected.Interface.Key() != entry.InterfaceKey || selected.BindingRevision != entry.BindingRevision ||
 		selected.Provider != text.Provider || selected.ConversationRef != text.ConversationRef {
-		return runtimechanneldelivery.ResolvedNativeEntry{}, false, nil
+		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryRejected, nil
 	}
 	registration, current := d.ingress.ChannelRegistrationCurrent(ctx, d.now().UTC(),
 		channelonboarding.LearnedBindingID(selected.SlotKey), selected.TargetSelector, selected.Provider)
-	if !current || !registration.Current || registration.Registration.SlotID != entry.ResourceSlotID {
-		return runtimechanneldelivery.ResolvedNativeEntry{}, false, nil
+	if !current || !registration.Current {
+		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryUnavailable, nil
+	}
+	if registration.Registration.SlotID != entry.ResourceSlotID {
+		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryRejected, nil
 	}
 	lease, current, err := d.manager.AcquireChannelActivationPublication(selected.Coordinate.BundleHash, selected.Coordinate.ContextPublicationGeneration)
 	if err != nil || !current {
-		return runtimechanneldelivery.ResolvedNativeEntry{}, false, err
+		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryUnavailable, err
 	}
 	defer lease.Release()
 	var plan packs.OutboundBindingPlan
@@ -88,24 +97,31 @@ func (d *serveChannelDeliveryDispatcher) resolveNativeInboxEntry(ctx context.Con
 			continue
 		}
 		if matched {
-			return runtimechanneldelivery.ResolvedNativeEntry{}, false, fmt.Errorf("native inbox compiled activation is duplicated")
+			return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryUnavailable, fmt.Errorf("native inbox compiled activation is duplicated")
 		}
 		plan, matched = compiled.Plan, true
 	}
 	if !matched {
-		return runtimechanneldelivery.ResolvedNativeEntry{}, false, nil
+		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryUnavailable, fmt.Errorf("native inbox compiled publication is unavailable")
+	}
+	if err := d.reconcileNativeInboxActivation(ctx, selected); err != nil {
+		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryUnavailable, err
+	}
+	qualification, err := d.native.ReadNativeInboxQualification(ctx, selected.ActivationID)
+	if err != nil || qualification.State != channelnative.QualificationQualified || qualification.SettingID != entry.SettingID || qualification.SettingGeneration != entry.SettingGeneration {
+		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryUnavailable, errors.Join(err, fmt.Errorf("native inbox entry has no exact current client qualification"))
 	}
 	address, err := d.readNativeInboxAddress(ctx, plan, selected.CredentialAdmissions)
 	if err != nil {
-		return runtimechanneldelivery.ResolvedNativeEntry{}, false, err
+		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryUnavailable, err
 	}
 	if text.ConversationScope == operatorchannel.ConversationScopeShared && text.EntryAddress == "" {
-		return runtimechanneldelivery.ResolvedNativeEntry{}, false, nil
+		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryRejected, nil
 	}
 	if text.EntryAddress != "" && !strings.EqualFold(text.EntryAddress, address) {
-		return runtimechanneldelivery.ResolvedNativeEntry{}, false, nil
+		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryRejected, nil
 	}
-	return entry, true, nil
+	return entry, runtimechanneldelivery.NativeEntryAccepted, nil
 }
 
 func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxActivation(ctx context.Context, activation channelonboarding.ConnectedChannelActivation) error {
@@ -158,49 +174,139 @@ func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxActivation(ctx cont
 	if err != nil {
 		return err
 	}
+	recordFailure := func(state channelnative.QualificationState, cause error) error {
+		return errors.Join(cause, d.recordNativeQualification(context.WithoutCancel(ctx), activation, setting, state, cause.Error(), packs.NativeInboxReadback{}))
+	}
+	profile, err := compiled.Plan.NativeInboxProfile()
+	if err != nil {
+		return recordFailure(channelnative.QualificationInvalid, err)
+	}
+	if setting.ClientLanguage == "" {
+		return recordFailure(channelnative.QualificationMissing, fmt.Errorf("native inbox requires an explicit client-language declaration; use swarm channel resume %s --client-language en or fr", activation.OperationID))
+	}
+	if err := profile.ValidateLanguage(setting.ClientLanguage); err != nil {
+		return recordFailure(channelnative.QualificationInvalid, err)
+	}
 	if setting.State == "uncertain" || setting.State == "unavailable" {
-		return fmt.Errorf("native inbox setting is %s and needs administrative recovery", setting.State)
+		return recordFailure(channelnative.QualificationInvalid, fmt.Errorf("native inbox setting is %s and needs administrative recovery", setting.State))
 	}
 	if _, err := d.readNativeInboxAddress(ctx, compiled.Plan, activation.CredentialAdmissions); err != nil {
-		return fmt.Errorf("native inbox bot address is unavailable: %w", err)
+		return recordFailure(channelnative.QualificationInvalid, fmt.Errorf("native inbox bot address is unavailable: %w", err))
 	}
-	observed, err := d.readNativeInboxCommands(ctx, compiled.Plan, activation.CredentialAdmissions, setting)
+	readback, err := d.readNativeInboxQualification(ctx, compiled.Plan, activation.CredentialAdmissions, setting, profile)
 	if err != nil {
-		return err
+		return recordFailure(channelnative.QualificationInvalid, err)
 	}
 	desired, err := channelnative.DesiredCommands(setting.SettingID, setting.Generation)
 	if err != nil {
 		return err
 	}
-	if setting.State == "installed" {
-		if bytes.Equal(observed, desired) {
-			return nil
+	if setting.State == "installed" || setting.State == "retired" {
+		if err := profile.Qualify(setting.ClientLanguage, readback, desired); err != nil {
+			return recordFailure(channelnative.QualificationInvalid, err)
 		}
-		if err := d.native.MarkNativeInboxSettingUnavailable(ctx, setting.SettingID, setting.Generation); err != nil {
-			return err
-		}
-		return fmt.Errorf("native inbox readback contradicts installed setting")
-	}
-	if setting.State == "retired" {
-		matched, err := d.native.ConfirmRetiredNativeInboxSettingReadback(ctx, setting.SettingID, setting.Generation, observed)
-		if err != nil {
-			return err
-		}
-		if !matched {
-			return fmt.Errorf("native inbox readback contradicts retired setting")
-		}
-		return nil
+		return d.recordNativeQualification(ctx, activation, setting, channelnative.QualificationQualified, "", readback)
 	}
 	if setting.State != "planned" {
 		return fmt.Errorf("native inbox setting has unknown state %q", setting.State)
 	}
-	if !bytes.Equal(observed, []byte("[]")) {
-		if err := d.native.MarkNativeInboxSettingUnavailable(ctx, setting.SettingID, setting.Generation); err != nil {
+	if !bytes.Equal(readback.FallbackCommands, []byte("[]")) {
+		return recordFailure(channelnative.QualificationInvalid, fmt.Errorf("native inbox provider fallback is already occupied; foreign settings are never overwritten"))
+	}
+	prospective := readback
+	prospective.FallbackCommands = desired
+	if err := profile.Qualify(setting.ClientLanguage, prospective, desired); err != nil {
+		return recordFailure(channelnative.QualificationInvalid, err)
+	}
+	if err := d.installNativeInboxCommands(ctx, activation, compiled.Plan, setting); err != nil {
+		return recordFailure(channelnative.QualificationInvalid, err)
+	}
+	readback, err = d.readNativeInboxQualification(ctx, compiled.Plan, activation.CredentialAdmissions, setting, profile)
+	if err != nil {
+		return recordFailure(channelnative.QualificationInvalid, err)
+	}
+	if err := profile.Qualify(setting.ClientLanguage, readback, desired); err != nil {
+		return recordFailure(channelnative.QualificationInvalid, err)
+	}
+	return d.recordNativeQualification(ctx, activation, setting, channelnative.QualificationQualified, "", readback)
+}
+
+func (d *serveChannelDeliveryDispatcher) recordNativeQualification(ctx context.Context, activation channelonboarding.ConnectedChannelActivation,
+	setting channelnative.Setting, state channelnative.QualificationState, reason string, readback packs.NativeInboxReadback) error {
+	hash := ""
+	if state == channelnative.QualificationQualified {
+		body, err := canonicaljson.Bytes(readback)
+		if err != nil {
 			return err
 		}
-		return fmt.Errorf("native inbox provider setting is already occupied")
+		hash = operatorchannel.Hash("native-inbox-qualification-v1", string(body))
 	}
-	return d.installNativeInboxCommands(ctx, activation, compiled.Plan, setting)
+	return d.native.RecordNativeInboxQualification(ctx, channelnative.QualificationRequest{
+		SettingID: setting.SettingID, SettingGeneration: setting.Generation, ActivationID: activation.ActivationID,
+		ActivationRevision: activation.Revision, ContextGeneration: int64(activation.Coordinate.ContextPublicationGeneration),
+		BindingRevision: activation.BindingRevision, EntryContractHash: setting.EntryContractHash,
+		ClientLanguage: setting.ClientLanguage, LocaleRevision: setting.ClientLocaleRevision,
+		State: state, Reason: reason, ReadbackHash: hash, ObservedAt: d.now().UTC(),
+	})
+}
+
+func (d *serveChannelDeliveryDispatcher) readNativeInboxQualification(ctx context.Context, plan packs.OutboundBindingPlan,
+	admissions []channelonboarding.CredentialAdmission, setting channelnative.Setting, profile packs.CompiledNativeInboxProfile) (packs.NativeInboxReadback, error) {
+	readback := packs.NativeInboxReadback{Shared: setting.ScopeKind == "chat_member"}
+	selected, err := d.readNativeInboxLanguageCommands(ctx, plan, admissions, setting, setting.ClientLanguage)
+	if err != nil {
+		return readback, err
+	}
+	readback.SelectedCommands = selected
+	if setting.State == "planned" || bytes.Equal(selected, []byte("[]")) {
+		fallback, err := d.readNativeInboxCommands(ctx, plan, admissions, setting)
+		if err != nil {
+			return readback, err
+		}
+		readback.FallbackCommands = fallback
+	}
+	if readback.Shared {
+		return readback, nil
+	}
+	readback.ChatLauncher, err = d.readNativeInboxLauncher(ctx, plan, admissions, profile.DirectLauncherRead())
+	if err != nil {
+		return readback, err
+	}
+	if profile.InheritsLauncher(readback.ChatLauncher) {
+		readback.DefaultLauncher, err = d.readNativeInboxLauncher(ctx, plan, admissions, profile.DefaultLauncherRead())
+	}
+	return readback, err
+}
+
+func (d *serveChannelDeliveryDispatcher) readNativeInboxLauncher(ctx context.Context, plan packs.OutboundBindingPlan, admissions []channelonboarding.CredentialAdmission, operation string) (string, error) {
+	_, input, err := plan.PrepareOperation(operation, map[string]any{})
+	if err != nil {
+		return "", err
+	}
+	toolID, tool, err := plan.ConnectorOperation(operation)
+	if err != nil {
+		return "", err
+	}
+	if tool.Effect() != runtimecontracts.ActivityEffectClassReadOnly {
+		return "", fmt.Errorf("native inbox launcher requires a compiled read-only operation")
+	}
+	credentials, err := resolveChannelDeliveryCredentials(ctx, d.credentials, plan, admissions, tool)
+	if err != nil {
+		return "", err
+	}
+	output, err := (runtimeregistration.HTTPExecutor{Client: d.httpClient}).Read(ctx, toolID, tool, input, credentials)
+	if err != nil {
+		return "", err
+	}
+	projected, err := plan.ProjectOperationOutput(operation, output)
+	if err != nil {
+		return "", err
+	}
+	launcher, ok := projected["launcher"].(string)
+	if !ok || launcher == "" {
+		return "", fmt.Errorf("native inbox launcher readback is incomplete")
+	}
+	return launcher, nil
 }
 
 func (d *serveChannelDeliveryDispatcher) readNativeInboxAddress(ctx context.Context, plan packs.OutboundBindingPlan, admissions []channelonboarding.CredentialAdmission) (string, error) {
@@ -250,6 +356,9 @@ func nativeInboxOperation(scopeKind, action string) (string, error) {
 
 func nativeInboxInput(setting channelnative.Setting, includeCommands bool) (map[string]any, error) {
 	input := map[string]any{}
+	if !includeCommands {
+		input["language_code"] = ""
+	}
 	if setting.ScopeKind == "chat_member" {
 		if setting.MemberReference == "" {
 			return nil, fmt.Errorf("shared native inbox scope lacks member reference")
@@ -273,6 +382,10 @@ func nativeInboxInput(setting channelnative.Setting, includeCommands bool) (map[
 }
 
 func (d *serveChannelDeliveryDispatcher) readNativeInboxCommands(ctx context.Context, plan packs.OutboundBindingPlan, admissions []channelonboarding.CredentialAdmission, setting channelnative.Setting) ([]byte, error) {
+	return d.readNativeInboxLanguageCommands(ctx, plan, admissions, setting, "")
+}
+
+func (d *serveChannelDeliveryDispatcher) readNativeInboxLanguageCommands(ctx context.Context, plan packs.OutboundBindingPlan, admissions []channelonboarding.CredentialAdmission, setting channelnative.Setting, language string) ([]byte, error) {
 	operation, err := nativeInboxOperation(setting.ScopeKind, "read")
 	if err != nil {
 		return nil, err
@@ -281,6 +394,7 @@ func (d *serveChannelDeliveryDispatcher) readNativeInboxCommands(ctx context.Con
 	if err != nil {
 		return nil, err
 	}
+	semanticInput["language_code"] = language
 	_, input, err := plan.PrepareOperation(operation, semanticInput)
 	if err != nil {
 		return nil, err
