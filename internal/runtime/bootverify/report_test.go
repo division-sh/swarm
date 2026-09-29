@@ -4477,10 +4477,9 @@ func TestHandlerEntityFieldWriters_TracksSetsGateAndClearTargets(t *testing.T) {
 	}
 }
 
-func TestNestedQueryRowsDoNotCreateExecutableWriters(t *testing.T) {
+func TestQueryWriterUsesOnlyAdmittedTopLevelTarget(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{
 		StoreAs: "entity.executed_rows",
-		Queries: []runtimecontracts.QuerySpec{{StoreAs: "entity.unexecuted_rows"}},
 	}}
 
 	writers := handlerEntityFieldWriters(handler)

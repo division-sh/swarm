@@ -578,7 +578,6 @@ type ComputeSpec struct {
 	Operation   ComputeOperation       `yaml:"operation"`
 	Tiers       []ComputeTier          `yaml:"tiers"`
 	Keys        ComputeKeyConfig       `yaml:"keys"`
-	Params      map[string]any         `yaml:"params"`
 	StoreAs     string                 `yaml:"store_as"`
 	Description string                 `yaml:"description"`
 	ValueField  string                 `yaml:"value_field"`
@@ -749,7 +748,6 @@ type GroupBySpec struct {
 	StorePath paths.Path `yaml:"-"`
 }
 type FilterSpec struct {
-	Predicate  string     `yaml:"predicate"`
 	Source     string     `yaml:"source"`
 	SourcePath paths.Path `yaml:"-"`
 	ItemsFrom  string     `yaml:"items_from"`
@@ -759,14 +757,13 @@ type FilterSpec struct {
 	StorePath  paths.Path `yaml:"-"`
 }
 type ReduceSpec struct {
-	Operation  string                     `yaml:"operation"`
-	Source     string                     `yaml:"source"`
-	SourcePath paths.Path                 `yaml:"-"`
-	StoreAs    string                     `yaml:"store_as"`
-	StorePath  paths.Path                 `yaml:"-"`
-	ItemsFrom  string                     `yaml:"items_from"`
-	ItemsPath  paths.Path                 `yaml:"-"`
-	Params     map[string]ExpressionValue `yaml:"params"`
+	Operation  string     `yaml:"operation"`
+	Source     string     `yaml:"source"`
+	SourcePath paths.Path `yaml:"-"`
+	StoreAs    string     `yaml:"store_as"`
+	StorePath  paths.Path `yaml:"-"`
+	ItemsFrom  string     `yaml:"items_from"`
+	ItemsPath  paths.Path `yaml:"-"`
 }
 type CountSpec struct {
 	Source     string     `yaml:"source"`
@@ -797,26 +794,23 @@ type GateSpec struct {
 	Value any    `yaml:"value"`
 }
 type QuerySpec struct {
-	Operation    string      `yaml:"operation"`
-	Source       string      `yaml:"source"`
-	SourcePath   paths.Path  `yaml:"-"`
-	StoreAs      string      `yaml:"store_as"`
-	StorePath    paths.Path  `yaml:"-"`
-	Entities     string      `yaml:"entities"`
-	EntitiesPath paths.Path  `yaml:"-"`
-	Filter       string      `yaml:"filter"`
-	GroupBy      string      `yaml:"group_by"`
-	GroupByPath  paths.Path  `yaml:"-"`
-	Count        bool        `yaml:"count"`
-	Select       []string    `yaml:"select"`
-	Queries      []QuerySpec `yaml:"-"`
+	Source       string     `yaml:"source"`
+	SourcePath   paths.Path `yaml:"-"`
+	StoreAs      string     `yaml:"store_as"`
+	StorePath    paths.Path `yaml:"-"`
+	Entities     string     `yaml:"entities"`
+	EntitiesPath paths.Path `yaml:"-"`
+	Filter       string     `yaml:"filter"`
+	GroupBy      string     `yaml:"group_by"`
+	GroupByPath  paths.Path `yaml:"-"`
+	Count        bool       `yaml:"count"`
+	Select       []string   `yaml:"select"`
 }
 
 func (s *QuerySpec) hydratePaths() {
 	if s == nil {
 		return
 	}
-	s.Operation = strings.TrimSpace(s.Operation)
 	s.Source = strings.TrimSpace(s.Source)
 	s.SourcePath = paths.Parse(s.Source)
 	s.StoreAs = strings.TrimSpace(s.StoreAs)
@@ -826,9 +820,6 @@ func (s *QuerySpec) hydratePaths() {
 	s.Filter = strings.TrimSpace(s.Filter)
 	s.GroupBy = strings.TrimSpace(s.GroupBy)
 	s.GroupByPath = paths.Parse(s.GroupBy)
-	for i := range s.Queries {
-		s.Queries[i].hydratePaths()
-	}
 }
 
 type EntitySchema struct {
