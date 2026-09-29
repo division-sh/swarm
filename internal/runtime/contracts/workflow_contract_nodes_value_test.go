@@ -36,3 +36,41 @@ func TestNodeValueFieldsRejectDuplicateEffectiveAliasKeys(t *testing.T) {
 		t.Fatalf("expected source-located duplicate effective key, got %v", err)
 	}
 }
+
+func TestProjectNodeTimerValuePreservesNestedCoordinates(t *testing.T) {
+	source, err := yamlsource.Load([]byte("node:\n  timers:\n    - {id: retry, delay: 1m, recurring: true}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := source.Document("nodes.yaml").Root()
+	nodes, err := root.Lookup("node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	timers, err := nodes.Value.Lookup("timers")
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, err := timers.Value.Sequence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	timer, err := projectNodeTimerValue(items[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if timer.ID != "retry" || timer.Delay != "1m" || !timer.Recurring {
+		t.Fatalf("wrong timer projection: %#v", timer)
+	}
+	retired, err := yamlsource.Load([]byte("node:\n  timers:\n    - {delay_seconds: 7}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodes, _ = retired.Document("nodes.yaml").Root().Lookup("node")
+	timers, _ = nodes.Value.Lookup("timers")
+	items, _ = timers.Value.Sequence()
+	_, err = projectNodeTimerValue(items[0])
+	if err == nil || !strings.Contains(err.Error(), "nodes.yaml:3:") || !strings.Contains(err.Error(), "delay_seconds") {
+		t.Fatalf("expected source-located retired timer field, got %v", err)
+	}
+}

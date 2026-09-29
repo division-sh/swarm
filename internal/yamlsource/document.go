@@ -207,6 +207,7 @@ func (v Value) Sequence() ([]Value, error) {
 
 type MappingField struct {
 	Name                       string
+	KeyTag                     string
 	KeyLocation                Location
 	Value                      Value
 	FromMerge                  bool
@@ -359,6 +360,7 @@ func collectMappingFields(node *yaml.Node, file, path string, introduction Locat
 		name := keyNode.Value
 		out = append(out, MappingField{
 			Name:                       name,
+			KeyTag:                     keyNode.Tag,
 			KeyLocation:                keyLocation,
 			Value:                      Value{node: valueNode, file: file, path: mappingChildPath(path, name), introduction: introduction},
 			FromMerge:                  fromMerge,
