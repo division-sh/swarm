@@ -146,6 +146,10 @@ func projectNodeHandlerValue(value yamlsource.Value) (SystemNodeEventHandler, er
 			out.Guard, err = projectNodeGuardValue(field)
 		case "data_accumulation":
 			out.DataAccumulation, err = projectNodeDataAccumulationValue(field)
+		case "loop":
+			out.Loop, err = projectNodeLoopValue(field)
+		case "compute":
+			out.Compute, err = projectNodeComputeValue(field)
 		case "on_success":
 			out.OnSuccess, err = projectNodeOnSuccessValue(field)
 		case "sets_gate":
