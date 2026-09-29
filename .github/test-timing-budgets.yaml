@@ -11,6 +11,9 @@ hard:
     limit_seconds: 540
     justification: Existing ceiling for the required 20-journey served lifecycle matrix; the 492s primary baseline remains measured without an automatic confirmation pass.
   unit_command_seconds:
+    conformance-2394-core:
+      limit_seconds: 300
+      justification: Exact core conformance command measured 241s against the prior 240s ceiling in CI 36515817055; all 64 entries passed without skips and sibling budgets remain unchanged.
     conformance-2394-reporter:
       limit_seconds: 480
       justification: Exact 500-row reporter conformance proof measured 421s on CI; this bound retains every selected test without widening the broad tier.

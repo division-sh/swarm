@@ -55,7 +55,7 @@ hard:
 	}
 }
 
-func TestCommittedReporterCommandBudgetsAreExactAndDeclared(t *testing.T) {
+func TestCommittedUnitCommandBudgetsAreExactAndDeclared(t *testing.T) {
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -78,9 +78,17 @@ func TestCommittedReporterCommandBudgetsAreExactAndDeclared(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]float64{"conformance-2394-reporter": 480, "serveapp-i-reporter": 780}
+	want := map[string]float64{"conformance-2394-core": 300, "conformance-2394-reporter": 480, "serveapp-i-reporter": 780}
 	if len(budget.Hard.UnitCommandSeconds) != len(want) {
-		t.Fatalf("unit command budgets = %v, want only reporter units", budget.Hard.UnitCommandSeconds)
+		t.Fatalf("unit command budgets = %v, want only named units", budget.Hard.UnitCommandSeconds)
+	}
+	if budget.Hard.MaxShardCommandSeconds.LimitSeconds != 240 {
+		t.Fatalf("shared broad command budget = %+v, want unchanged 240s", budget.Hard.MaxShardCommandSeconds)
+	}
+	for _, id := range []string{"conformance-2394-core", "conformance-2394-pressure"} {
+		if proof.Units[id].BudgetClass != "broad" {
+			t.Fatalf("%s budget class = %q, want broad", id, proof.Units[id].BudgetClass)
+		}
 	}
 	for id, limit := range want {
 		got, ok := budget.Hard.UnitCommandSeconds[id]

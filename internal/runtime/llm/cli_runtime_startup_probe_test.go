@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -17,6 +18,32 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
+
+func TestCLIStartupProbeJoinsStderrBeforeWait(t *testing.T) {
+	for _, found := range []bool{false, true} {
+		t.Run(map[bool]string{false: "failed_before_init", true: "init_observed"}[found], func(t *testing.T) {
+			stdoutCh := make(chan cliStartupProbeResult, 1)
+			stderrCh := make(chan [][]byte, 1)
+			stdoutCh <- cliStartupProbeResult{found: found}
+			stderrCh <- [][]byte{[]byte("OAuth token expired")}
+			cancels := 0
+			waits := 0
+			result, lines, err := joinCLIStartupProbeReaders(stdoutCh, stderrCh, func() { cancels++ }, func() error {
+				waits++
+				if len(stderrCh) != 0 {
+					return errors.New("Wait called before stderr reader finished")
+				}
+				return nil
+			})
+			if err != nil || result.found != found || string(joinRawLines(lines)) != "OAuth token expired" {
+				t.Fatalf("joined result=%+v stderr=%q err=%v", result, joinRawLines(lines), err)
+			}
+			if waits != 1 || cancels != map[bool]int{false: 0, true: 1}[found] {
+				t.Fatalf("waits=%d cancels=%d for found=%t", waits, cancels, found)
+			}
+		})
+	}
+}
 
 func TestStartupProbeConsumesSessionContractWithoutExecutionFrame(t *testing.T) {
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
