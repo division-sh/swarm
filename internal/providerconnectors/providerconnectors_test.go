@@ -934,7 +934,7 @@ func TestProviderConnectorPackVerificationFailsClosed(t *testing.T) {
 		{
 			name: "retired scalar action capability",
 			mutate: func(t *testing.T, files fstest.MapFS) {
-				replaceConnectorPackFile(t, files, "pack.yaml", "call_provider_actions:\n      - telegram.answer_callback\n      - telegram.apply_webhook\n      - telegram.edit_message\n      - telegram.identify_bot\n      - telegram.install_inbox_commands\n      - telegram.install_shared_inbox_commands\n      - telegram.read_bot_address\n      - telegram.read_inbox_commands\n      - telegram.read_shared_inbox_commands\n      - telegram.read_webhook\n      - telegram.send_interactive\n      - telegram.send_message", "call_provider_action: telegram.send_message")
+				replaceConnectorPackFile(t, files, "pack.yaml", "call_provider_actions:\n      - telegram.answer_callback\n      - telegram.apply_webhook\n      - telegram.edit_message\n      - telegram.identify_bot\n      - telegram.install_inbox_commands\n      - telegram.install_shared_inbox_commands\n      - telegram.read_bot_address\n      - telegram.read_chat_menu_button\n      - telegram.read_default_menu_button\n      - telegram.read_inbox_commands\n      - telegram.read_shared_inbox_commands\n      - telegram.read_webhook\n      - telegram.send_interactive\n      - telegram.send_message", "call_provider_action: telegram.send_message")
 			},
 			want: "field call_provider_action not found",
 		},
