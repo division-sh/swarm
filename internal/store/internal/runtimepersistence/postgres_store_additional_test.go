@@ -1615,8 +1615,8 @@ func TestManagerStore_LiveConversationPersistenceRequiresCanonicalLiveSession(t 
 	if err == nil {
 		t.Fatal("expected live conversation persistence without a live session row to fail")
 	}
-	if !strings.Contains(err.Error(), "no exact active memory row found") {
-		t.Fatalf("unexpected error: %v", err)
+	if !errors.Is(err, runtimesessions.ErrSessionLeased) {
+		t.Fatalf("missing live session refusal = %v, want exact-grant refusal", err)
 	}
 
 	var count int
