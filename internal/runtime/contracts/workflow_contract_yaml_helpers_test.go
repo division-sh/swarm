@@ -4,12 +4,13 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
 )
 
 func TestDecodeStringListNode_NormalizesScalarAndSequenceForms(t *testing.T) {
 	var scalar yaml.Node
-	if err := yaml.Unmarshal([]byte("check.requested\n"), &scalar); err != nil {
+	if err := decodeNodeTestYAML([]byte("check.requested\n"), &scalar); err != nil {
 		t.Fatalf("yaml.Unmarshal scalar: %v", err)
 	}
 	gotScalar, err := decodeStringListNode(scalar.Content[0])
@@ -21,7 +22,7 @@ func TestDecodeStringListNode_NormalizesScalarAndSequenceForms(t *testing.T) {
 	}
 
 	var seq yaml.Node
-	if err := yaml.Unmarshal([]byte("- a\n-  b  \n"), &seq); err != nil {
+	if err := decodeNodeTestYAML([]byte("- a\n-  b  \n"), &seq); err != nil {
 		t.Fatalf("yaml.Unmarshal sequence: %v", err)
 	}
 	gotSeq, err := decodeStringListNode(seq.Content[0])
@@ -33,17 +34,22 @@ func TestDecodeStringListNode_NormalizesScalarAndSequenceForms(t *testing.T) {
 	}
 }
 
-func TestDecodeBoolNode_PreservesConditionalCompatibility(t *testing.T) {
-	var node yaml.Node
-	if err := yaml.Unmarshal([]byte("conditional\n"), &node); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
-	}
-	got, err := decodeBoolNode(node.Content[0])
-	if err != nil {
-		t.Fatalf("decodeBoolNode: %v", err)
-	}
-	if !got {
-		t.Fatal("expected conditional to decode as true")
+func TestNodeValueBoolRejectsLegacyConditional(t *testing.T) {
+	for _, body := range []string{"true\n", "false\n", "conditional\n"} {
+		snapshot, err := yamlsource.Load([]byte(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := nodeValueBool(snapshot.Document("nodes.yaml").Root(), "test boolean")
+		if body == "conditional\n" {
+			if err == nil {
+				t.Fatal("legacy conditional accepted as a boolean")
+			}
+			continue
+		}
+		if err != nil || got != (body == "true\n") {
+			t.Fatalf("%q: got %v, %v", body, got, err)
+		}
 	}
 }
 

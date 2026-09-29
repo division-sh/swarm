@@ -5,14 +5,13 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
-	"gopkg.in/yaml.v3"
 )
 
 func TestCompiledTransitionRootTopologyUsesExactSchema(t *testing.T) {
 	decode := func(raw string) FlowSchemaDocument {
 		t.Helper()
 		var schema FlowSchemaDocument
-		if err := yaml.Unmarshal([]byte(raw), &schema); err != nil {
+		if err := decodeNodeTestYAML([]byte(raw), &schema); err != nil {
 			t.Fatal(err)
 		}
 		return schema

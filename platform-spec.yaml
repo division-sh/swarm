@@ -327,6 +327,26 @@ contract_formats:
   authoritative_yaml_source:
     canonical_owner: platform-spec.yaml#filesystem_source_model
     scope: All authored YAML is admitted once as exact bytes by AdmittedSourceArtifact; consumers use admitted provenance and never reopen host paths.
+  node_declarations:
+    owner_file: <flow-path>/nodes.yaml
+    canonical_admission: internal/yamlsource.Value projected by internal/runtime/contracts
+    rule: >
+      The complete nodes.yaml root, including system-node declarations, state and
+      gate schemas, timers, event handlers, rule and completion rows, join
+      outcomes, policy-sheet rows, expressions, and nested handler primitives,
+      is admitted from one source-aware value tree. The projector consumes
+      effective keys with exact duplicate, alias, merge, presence, and source
+      location evidence before constructing typed contracts. Node identity is
+      the declaration map key. Retired fields fail at admission; a raw YAML
+      node decoder or alternate node-root projection cannot supply authority.
+      Typed contract validators remain the semantic owners of their supported
+      operations after projection.
+    provenance: >
+      Effective node-declaration provenance retains authored coordinates for
+      declaration and nested values and composes with event-catalog provenance;
+      neither owner replaces the other's ledger. Verification, description,
+      plan construction, and retained-source reconstruction consume the same
+      admitted projection.
   loader_defaults:
     canonical_owner: platform-spec.yaml#filesystem_source_model.local_root_selection
     rule: Omission on a source-aware local command selects exactly the captured invocation directory; one positional directory is the only alternate. There is no upward or fallback discovery.

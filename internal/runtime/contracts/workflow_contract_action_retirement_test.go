@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 )
 
 func requireRetiredHandlerAction(t *testing.T, err error, key string) {
@@ -24,7 +22,7 @@ func TestRetiredHandlerActionsRejectedOnPresence(t *testing.T) {
 	} {
 		t.Run(value, func(t *testing.T) {
 			var handler SystemNodeEventHandler
-			err := yaml.Unmarshal([]byte("action: "+value+"\n"), &handler)
+			err := decodeNodeTestYAML([]byte("action: "+value+"\n"), &handler)
 			requireRetiredHandlerAction(t, err, "action")
 		})
 	}
@@ -48,7 +46,7 @@ func TestRetiredHandlerActionOptionsRejected(t *testing.T) {
 			for _, value := range []string{"null", "''", "{}", "[]", "false", "{nested: value}", "payload.id"} {
 				t.Run(site.name+"/"+key+"/"+value, func(t *testing.T) {
 					var handler SystemNodeEventHandler
-					err := yaml.Unmarshal([]byte(fmt.Sprintf(site.pattern, key, value)), &handler)
+					err := decodeNodeTestYAML([]byte(fmt.Sprintf(site.pattern, key, value)), &handler)
 					requireRetiredHandlerAction(t, err, key)
 				})
 			}
@@ -62,16 +60,16 @@ func TestRetiredHandlerActionAliasesRejected(t *testing.T) {
 			for _, site := range []string{"handler: {%s}", "handler: {rules: [{%s}]}", "handler: {on_complete: [{%s}]}", "handler: {on_success: {%s}}", "handler: {join: {%s}}", "handler: {join: {on_complete: {%s}}}", "handler: {join: {timeout: {after: 1h, %s}}}"} {
 				t.Run(key+"/"+row+"/"+site, func(t *testing.T) {
 					raw := "value: &value null\nretired: &retired {" + key + ": null}\n" + fmt.Sprintf(site, row) + "\n"
-					var doc struct{ Handler SystemNodeEventHandler }
-					requireRetiredHandlerAction(t, yaml.Unmarshal([]byte(raw), &doc), key)
+					var handler SystemNodeEventHandler
+					requireRetiredHandlerAction(t, decodeNodeTestMember([]byte(raw), "handler", &handler), key)
 				})
 			}
 		}
 		for _, target := range []string{"handler: *retired", "handler: {rules: [*retired]}", "handler: {rules: {chosen: *retired}}", "handler: {on_complete: [*retired]}"} {
 			t.Run(key+"/row_alias/"+target, func(t *testing.T) {
-				var doc struct{ Handler SystemNodeEventHandler }
+				var handler SystemNodeEventHandler
 				raw := "retired: &retired {" + key + ": null}\n" + target + "\n"
-				requireRetiredHandlerAction(t, yaml.Unmarshal([]byte(raw), &doc), key)
+				requireRetiredHandlerAction(t, decodeNodeTestMember([]byte(raw), "handler", &handler), key)
 			})
 		}
 	}
@@ -82,7 +80,7 @@ func TestRetiredHandlerActionDirectRuleAdmission(t *testing.T) {
 		for _, raw := range []string{key + ": null\n", "<<: &retired {" + key + ": ''}\n", key + ": &value {}\n"} {
 			t.Run(raw, func(t *testing.T) {
 				var rule HandlerRuleEntry
-				requireRetiredHandlerAction(t, yaml.Unmarshal([]byte(raw), &rule), key)
+				requireRetiredHandlerAction(t, decodeNodeTestYAML([]byte(raw), &rule), key)
 			})
 		}
 	}
@@ -113,7 +111,7 @@ func TestLoadWorkflowContractBundleRejectsRetiredHandlerActions(t *testing.T) {
 func TestHandlerActionRetirementPreservesOtherActionConcepts(t *testing.T) {
 	t.Run("emit_template_specialization", func(t *testing.T) {
 		var handler SystemNodeEventHandler
-		err := yaml.Unmarshal([]byte(`emit: {event: scored, fields: {id: "${payload.id}"}}
+		err := decodeNodeTestYAML([]byte(`emit: {event: scored, fields: {id: "${payload.id}"}}
 rules:
   - when: payload.score > 0
     emit: {fields: {label: positive}}
@@ -130,20 +128,20 @@ rules:
 	})
 	t.Run("activity_and_business_field_names", func(t *testing.T) {
 		var handler SystemNodeEventHandler
-		err := yaml.Unmarshal([]byte("activity: {tool: notify_human, input: {action: payload.action, template: payload.template, config_from: payload.config_from}}\n"), &handler)
+		err := decodeNodeTestYAML([]byte("activity: {tool: notify_human, input: {action: payload.action, template: payload.template, config_from: payload.config_from}}\n"), &handler)
 		if err != nil || handler.Activity.Tool != "notify_human" || len(handler.Activity.Input) != 3 {
 			t.Fatalf("activity input rejected as handler action: %#v, %v", handler.Activity, err)
 		}
 	})
 	t.Run("timer_action", func(t *testing.T) {
 		var timer WorkflowTimerContract
-		if err := yaml.Unmarshal([]byte("id: expiry\naction: expire\ndelay: 1h\n"), &timer); err != nil || timer.Action != "expire" {
+		if err := decodeNodeTestYAML([]byte("id: expiry\naction: expire\ndelay: 1h\n"), &timer); err != nil || timer.Action != "expire" {
 			t.Fatalf("timer action changed: %#v, %v", timer, err)
 		}
 	})
 	t.Run("data_accumulation_source_event", func(t *testing.T) {
 		var handler SystemNodeEventHandler
-		err := yaml.Unmarshal([]byte("data_accumulation: {source_event: work.received}\n"), &handler)
+		err := decodeNodeTestYAML([]byte("data_accumulation: {source_event: work.received}\n"), &handler)
 		if err != nil || handler.DataAccumulation.SourceEvent != "work.received" {
 			t.Fatalf("source_event confused with retired config_from: %#v, %v", handler.DataAccumulation, err)
 		}
@@ -151,7 +149,7 @@ rules:
 	t.Run("retired_names_are_not_reserved_rule_labels", func(t *testing.T) {
 		for _, label := range []string{"action", "template", "config_from", "evidence_target", "instance_id_from"} {
 			var handler SystemNodeEventHandler
-			err := yaml.Unmarshal([]byte("rules: {"+label+": {else: true, emit: result}}\n"), &handler)
+			err := decodeNodeTestYAML([]byte("rules: {"+label+": {else: true, emit: result}}\n"), &handler)
 			if err != nil || len(handler.Rules) != 1 || handler.Rules[0].ID != label || handler.Rules[0].Emit.EventType() != "result" {
 				t.Fatalf("display label %q became reserved: %#v, %v", label, handler.Rules, err)
 			}

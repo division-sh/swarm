@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
-	"gopkg.in/yaml.v3"
 )
 
 func TestWorkflowContractBundleNodeContractSourceUsesCanonicalRootNodeTable(t *testing.T) {
@@ -575,7 +574,7 @@ func mustTemplateInstanceField(t testing.TB, raw string) TemplateInstanceField {
 func TestTypeDiagnosticsUseAuthorFacingVocabulary(t *testing.T) {
 	t.Run("scalar alias", func(t *testing.T) {
 		var scalar ScalarTypeDecl
-		err := yaml.Unmarshal([]byte("future_scalar\n"), &scalar)
+		err := decodeNodeTestYAML([]byte("future_scalar\n"), &scalar)
 		if err == nil || !strings.Contains(err.Error(), "supported built-in scalar") {
 			t.Fatalf("scalar alias error = %v", err)
 		}
@@ -753,7 +752,7 @@ vertical_name: text
 
 func TestEntityContractsDocumentDecode_RejectsRetiredParserLocalForms(t *testing.T) {
 	var doc EntityContractsDocument
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 vertical:
   _state_model:
     state_field: current_state
@@ -767,7 +766,7 @@ vertical:
 
 func TestTypeCatalogDocumentDecode_RejectsInlineObjectField(t *testing.T) {
 	var doc TypeCatalogDocument
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 types:
   Brand:
     palette:
@@ -782,7 +781,7 @@ types:
 
 func TestTypeCatalogDocumentDecode_PreservesNamedFieldOptionalityAndMergedMappings(t *testing.T) {
 	var doc TypeCatalogDocument
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 types:
   Contact:
     <<: &contact_fields
@@ -817,7 +816,7 @@ func TestTypeCatalogDocumentDecode_RejectsInvalidOptionalMarkers(t *testing.T) {
 	for _, typeRef := range []string{"text??", "text? ", "[text?]"} {
 		t.Run(typeRef, func(t *testing.T) {
 			var doc TypeCatalogDocument
-			err := yaml.Unmarshal([]byte("types:\n  Item:\n    value: '"+typeRef+"'\n"), &doc)
+			err := decodeNodeTestYAML([]byte("types:\n  Item:\n    value: '"+typeRef+"'\n"), &doc)
 			if err == nil || !strings.Contains(err.Error(), "optional") {
 				t.Fatalf("yaml.Unmarshal error = %v, want optional-marker rejection", err)
 			}
@@ -827,7 +826,7 @@ func TestTypeCatalogDocumentDecode_RejectsInvalidOptionalMarkers(t *testing.T) {
 
 func TestEntityContractsDocumentDecode_PreservesOptionalTopLevelField(t *testing.T) {
 	var doc EntityContractsDocument
-	err := yaml.Unmarshal([]byte("item:\n  label: text?\n"), &doc)
+	err := decodeNodeTestYAML([]byte("item:\n  label: text?\n"), &doc)
 	if err != nil || !doc["item"].Fields["label"].IsOptional {
 		t.Fatalf("decoded entity = %#v, error = %v", doc, err)
 	}
@@ -835,7 +834,7 @@ func TestEntityContractsDocumentDecode_PreservesOptionalTopLevelField(t *testing
 
 func TestCustomContractDocumentsDecodeMergeExpandedMappings(t *testing.T) {
 	var entities EntityContractsDocument
-	if err := yaml.Unmarshal([]byte("<<: &entities\n  item: {}\n"), &entities); err != nil {
+	if err := decodeNodeTestYAML([]byte("<<: &entities\n  item: {}\n"), &entities); err != nil {
 		t.Fatalf("yaml.Unmarshal entities: %v", err)
 	}
 	if _, ok := entities["item"]; !ok {
@@ -846,7 +845,7 @@ func TestCustomContractDocumentsDecodeMergeExpandedMappings(t *testing.T) {
 	}
 
 	var types TypeCatalogDocument
-	if err := yaml.Unmarshal([]byte("<<: &catalog\n  types:\n    Item: {}\n"), &types); err != nil {
+	if err := decodeNodeTestYAML([]byte("<<: &catalog\n  types:\n    Item: {}\n"), &types); err != nil {
 		t.Fatalf("yaml.Unmarshal types: %v", err)
 	}
 	if _, ok := types.Types["Item"]; !ok {

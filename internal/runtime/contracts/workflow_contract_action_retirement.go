@@ -3,11 +3,14 @@ package contracts
 import (
 	"fmt"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
 func retiredHandlerActionFieldError(context, key string) error {
+	switch context {
+	case "handler", "rule", "rules", "on_complete", "on_success", "join", "join.on_complete", "join.timeout":
+	default:
+		return nil
+	}
 	switch strings.TrimSpace(key) {
 	case "condition":
 		if context == "rules" {
@@ -19,52 +22,4 @@ func retiredHandlerActionFieldError(context, key string) error {
 	default:
 		return nil
 	}
-}
-
-// Inspect presence before decoding values; YAML aliases and merged mappings
-// cannot erase a retired declaration, even when another key overrides it.
-func validateRetiredHandlerActionFields(node *yaml.Node, context string) error {
-	resolved, err := resolveHandlerRuleYAMLNode(node)
-	if err != nil {
-		return err
-	}
-	if resolved == nil || resolved.Kind != yaml.MappingNode {
-		return nil
-	}
-	for i := 0; i+1 < len(resolved.Content); i += 2 {
-		key, err := resolveHandlerRuleYAMLNode(resolved.Content[i])
-		if err != nil {
-			return err
-		}
-		// Failed shape classification leaves mapping-valued keys as possible keyed labels.
-		if context == "rules_unclassified" && key.Value == "condition" {
-			value, err := resolveHandlerRuleYAMLNode(resolved.Content[i+1])
-			if err != nil {
-				return err
-			}
-			if value.Kind != yaml.MappingNode {
-				return retiredHandlerActionFieldError("rules", key.Value)
-			}
-		}
-		if err := retiredHandlerActionFieldError(context, key.Value); err != nil {
-			return err
-		}
-		if key.Value != "<<" || key.Tag != "!!merge" {
-			continue
-		}
-		merged, err := resolveHandlerRuleYAMLNode(resolved.Content[i+1])
-		if err != nil {
-			return err
-		}
-		if merged.Kind == yaml.SequenceNode {
-			for _, entry := range merged.Content {
-				if err := validateRetiredHandlerActionFields(entry, context); err != nil {
-					return err
-				}
-			}
-		} else if err := validateRetiredHandlerActionFields(merged, context); err != nil {
-			return err
-		}
-	}
-	return nil
 }

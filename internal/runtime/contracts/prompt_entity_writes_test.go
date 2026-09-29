@@ -6,14 +6,12 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 )
 
 func TestAgentEntityWriteRule_UnmarshalYAML(t *testing.T) {
 	t.Run("all", func(t *testing.T) {
 		var rule AgentEntityWriteRule
-		if err := yaml.Unmarshal([]byte("all\n"), &rule); err != nil {
+		if err := decodeNodeTestYAML([]byte("all\n"), &rule); err != nil {
 			t.Fatalf("yaml.Unmarshal: %v", err)
 		}
 		if !rule.All {
@@ -26,7 +24,7 @@ func TestAgentEntityWriteRule_UnmarshalYAML(t *testing.T) {
 
 	t.Run("explicit list", func(t *testing.T) {
 		var rule AgentEntityWriteRule
-		if err := yaml.Unmarshal([]byte("- one\n- two\n"), &rule); err != nil {
+		if err := decodeNodeTestYAML([]byte("- one\n- two\n"), &rule); err != nil {
 			t.Fatalf("yaml.Unmarshal: %v", err)
 		}
 		if rule.All {

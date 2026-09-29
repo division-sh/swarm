@@ -15,7 +15,7 @@ func TestReceiverCompositionAuthoritativeSpec(t *testing.T) {
 		t.Fatal(err)
 	}
 	var document map[string]any
-	if err := yaml.Unmarshal(content, &document); err != nil {
+	if err := decodeNodeTestYAML(content, &document); err != nil {
 		t.Fatal(err)
 	}
 	for _, check := range []struct {

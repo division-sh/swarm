@@ -28,7 +28,7 @@ func TestExpressionValueR2Authoring(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			var got ExpressionValue
-			if err := yaml.Unmarshal([]byte(test.source), &got); err != nil {
+			if err := decodeNodeTestYAML([]byte(test.source), &got); err != nil {
 				t.Fatal(err)
 			}
 			if got.Kind != test.kind || got.CEL != test.cel || !reflect.DeepEqual(got.Literal, test.literal) {
@@ -50,7 +50,7 @@ func TestExpressionValueR2PreservesYAMLAliases(t *testing.T) {
 		var row struct {
 			Value ExpressionValue `yaml:"value"`
 		}
-		if err := yaml.Unmarshal([]byte(tc.source), &row); err != nil {
+		if err := decodeNodeTestYAML([]byte(tc.source), &row); err != nil {
 			t.Fatalf("%s: %v", tc.source, err)
 		}
 		if !row.Value.HasLiteralValue() || !reflect.DeepEqual(row.Value.Literal, tc.want) {
@@ -73,7 +73,7 @@ func TestExpressionValueR2DataWriteAliasOperands(t *testing.T) {
 		{"op: set\ntarget: entity.details\nkey: details\nvalue: {a: &v 1, b: *v}\n", map[string]any{"a": 1, "b": 1}},
 	} {
 		var write WorkflowDataWrite
-		if err := yaml.Unmarshal([]byte(tc.source), &write); err != nil {
+		if err := decodeNodeTestYAML([]byte(tc.source), &write); err != nil {
 			t.Fatalf("write %q: %v", tc.source, err)
 		}
 		if !write.Value.HasLiteralValue() || !reflect.DeepEqual(write.Value.Literal, tc.want) {
@@ -110,37 +110,37 @@ func TestExpressionValueR2SharedAuthoringSurfaces(t *testing.T) {
 	}{
 		{"emit.fields", func(source string) (ExpressionValue, error) {
 			var spec EmitSpec
-			err := yaml.Unmarshal([]byte("event: observed\nfields:\n  value: "+source+"\n"), &spec)
+			err := decodeNodeTestYAML([]byte("event: observed\nfields:\n  value: "+source+"\n"), &spec)
 			return spec.Fields["value"], err
 		}},
 		{"activity.input", func(source string) (ExpressionValue, error) {
 			var spec ActivitySpec
-			err := yaml.Unmarshal([]byte("tool: record\ninput:\n  value: "+source+"\n"), &spec)
+			err := decodeNodeTestYAML([]byte("tool: record\ninput:\n  value: "+source+"\n"), &spec)
 			return spec.Input["value"], err
 		}},
 		{"stage gate context", func(source string) (ExpressionValue, error) {
 			var spec FlowStageGateDeclaration
-			err := yaml.Unmarshal([]byte("decision: review\ncontext:\n  value: "+source+"\noutcomes:\n  accepted: {advances_to: done}\n"), &spec)
+			err := decodeNodeTestYAML([]byte("decision: review\ncontext:\n  value: "+source+"\noutcomes:\n  accepted: {advances_to: done}\n"), &spec)
 			return spec.Context["value"], err
 		}},
 		{"guard escalation", func(source string) (ExpressionValue, error) {
 			var spec GuardSpec
-			err := yaml.Unmarshal([]byte("check: false\non_fail:\n  escalate:\n    event: review.failed\n    fields:\n      value: "+source+"\n"), &spec)
+			err := decodeNodeTestYAML([]byte("check: false\non_fail:\n  escalate:\n    event: review.failed\n    fields:\n      value: "+source+"\n"), &spec)
 			return spec.OnFailSpec.Escalation.Fields["value"], err
 		}},
 		{"data write value", func(source string) (ExpressionValue, error) {
 			var write WorkflowDataWrite
-			err := yaml.Unmarshal([]byte("target_field: result\nvalue: "+source+"\n"), &write)
+			err := decodeNodeTestYAML([]byte("target_field: result\nvalue: "+source+"\n"), &write)
 			return write.Value, err
 		}},
 		{"data write key", func(source string) (ExpressionValue, error) {
 			var write WorkflowDataWrite
-			err := yaml.Unmarshal([]byte("op: append\ntarget: entity.by_id.items\nkey: "+source+"\nvalue: 1\n"), &write)
+			err := decodeNodeTestYAML([]byte("op: append\ntarget: entity.by_id.items\nkey: "+source+"\nvalue: 1\n"), &write)
 			return write.Key, err
 		}},
 		{"data write index", func(source string) (ExpressionValue, error) {
 			var write WorkflowDataWrite
-			err := yaml.Unmarshal([]byte("op: update\ntarget: entity.items\nindex: "+source+"\nvalue: 1\n"), &write)
+			err := decodeNodeTestYAML([]byte("op: update\ntarget: entity.items\nindex: "+source+"\nvalue: 1\n"), &write)
 			return write.Index, err
 		}},
 	}
@@ -192,13 +192,13 @@ func TestExpressionValueR2RejectsDuplicateNormalizedFields(t *testing.T) {
 			switch {
 			case len(source) >= 5 && source[:5] == "event":
 				var value EmitSpec
-				err = yaml.Unmarshal([]byte(source), &value)
+				err = decodeNodeTestYAML([]byte(source), &value)
 			case len(source) >= 4 && source[:4] == "tool":
 				var value ActivitySpec
-				err = yaml.Unmarshal([]byte(source), &value)
+				err = decodeNodeTestYAML([]byte(source), &value)
 			default:
 				var value FlowStageGateDeclaration
-				err = yaml.Unmarshal([]byte(source), &value)
+				err = decodeNodeTestYAML([]byte(source), &value)
 			}
 			if err == nil {
 				t.Fatal("accepted duplicate normalized field")
@@ -214,13 +214,13 @@ func TestExpressionValueR2RejectsRetiredAndMalformedForms(t *testing.T) {
 	} {
 		t.Run(source, func(t *testing.T) {
 			var got ExpressionValue
-			if err := yaml.Unmarshal([]byte(source), &got); err == nil {
+			if err := decodeNodeTestYAML([]byte(source), &got); err == nil {
 				t.Fatalf("accepted %s", source)
 			}
 		})
 	}
 	var escaped ExpressionValue
-	if err := yaml.Unmarshal([]byte(`{literal: {kind: cel, cel: payload.id}}`), &escaped); err != nil {
+	if err := decodeNodeTestYAML([]byte(`{literal: {kind: cel, cel: payload.id}}`), &escaped); err != nil {
 		t.Fatal(err)
 	}
 	if !escaped.HasLiteralValue() || !reflect.DeepEqual(escaped.Literal, map[string]any{"kind": "cel", "cel": "payload.id"}) {
@@ -230,7 +230,7 @@ func TestExpressionValueR2RejectsRetiredAndMalformedForms(t *testing.T) {
 
 func TestExpressionValueR2DataWritePreservesAuthoredNull(t *testing.T) {
 	var write WorkflowDataWrite
-	if err := yaml.Unmarshal([]byte("op: set\ntarget: entity.items\nkey: null\nvalue: null\n"), &write); err != nil {
+	if err := decodeNodeTestYAML([]byte("op: set\ntarget: entity.items\nkey: null\nvalue: null\n"), &write); err != nil {
 		t.Fatal(err)
 	}
 	if !write.Key.HasLiteralValue() || !write.Value.HasLiteralValue() || !reflect.DeepEqual(write.Key.Literal, nil) || !reflect.DeepEqual(write.Value.Literal, nil) {

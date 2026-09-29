@@ -126,5 +126,8 @@ func projectNodeComputeValue(value yamlsource.Value) (*ComputeSpec, error) {
 			out.Tiers = append(out.Tiers, tier)
 		}
 	}
+	if err := validateTieredWeightedAverageSpec(*out); err != nil {
+		return nil, err
+	}
 	return out, nil
 }

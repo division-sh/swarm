@@ -51,7 +51,7 @@ func projectNodeActivityValue(value yamlsource.Value) (ActivitySpec, error) {
 		}
 		canonical := strings.TrimSpace(raw)
 		if canonical == "" || canonical != raw {
-			return ActivitySpec{}, fmt.Errorf("INVALID-ACTIVITY-APPROVAL: activity.approval.decision %q at %s must be a non-empty canonical value", raw, decision.Location())
+			return ActivitySpec{}, fmt.Errorf("INVALID-ACTIVITY-APPROVAL: activity.approval.decision %q is not canonical at %s (must be non-empty without surrounding whitespace)", raw, decision.Location())
 		}
 		out.Approval = &ActivityApprovalSpec{Decision: canonical}
 	}
@@ -138,7 +138,7 @@ func projectNodeGuardOnFailValue(value yamlsource.Value) (string, GuardFailureSp
 		}
 		escalation, present := fields["escalate"]
 		if !present {
-			return "", GuardFailureSpec{}, fmt.Errorf("guard.on_fail object form at %s requires escalate", value.Location())
+			return "", GuardFailureSpec{}, fmt.Errorf("guard.on_fail object form requires escalate at %s", value.Location())
 		}
 		emit, err := projectNodeGuardEscalationValue(escalation)
 		if err != nil {
@@ -153,6 +153,9 @@ func projectNodeGuardOnFailValue(value yamlsource.Value) (string, GuardFailureSp
 }
 
 func projectNodeGuardEscalationValue(value yamlsource.Value) (EmitSpec, error) {
+	if value.Presence() != yamlsource.PresenceMapping && value.Presence() != yamlsource.PresenceEmptyMapping {
+		return EmitSpec{}, fmt.Errorf("guard.on_fail.escalate must be a mapping at %s", value.Location())
+	}
 	fields, err := nodeValueFields(value, "guard.on_fail.escalate", guardOnFailEscalateFieldOptions, nil)
 	if err != nil {
 		return EmitSpec{}, err
