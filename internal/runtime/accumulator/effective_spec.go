@@ -28,10 +28,10 @@ func EffectiveSpecForHandler(source semanticview.Source, node runtimeidentity.Ex
 	if handlerEvent == "" {
 		handlerEvent = strings.TrimSpace(pin.EventType())
 	}
-	if dedup := strings.TrimSpace(spec.DedupBy); dedup != "" {
+	if dedup := strings.TrimSpace(spec.DedupBy); spec.DedupBySet || dedup != "" {
 		return nil, fmt.Errorf("receiver handler %s.%s accumulate.dedup_by %q must not redeclare fan-in dedup_by; declare it once on the receiver input pin resolution", node.NodeID(), handlerEvent, dedup)
 	}
-	if window := strings.TrimSpace(spec.Window); window != "" {
+	if window := strings.TrimSpace(spec.Window); spec.WindowSet || window != "" {
 		return nil, fmt.Errorf("receiver handler %s.%s accumulate.window %q must not redeclare fan-in window; declare it once on the receiver input pin resolution", node.NodeID(), handlerEvent, window)
 	}
 	resolution := pin.Resolution()

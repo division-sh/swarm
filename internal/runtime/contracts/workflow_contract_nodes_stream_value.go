@@ -14,6 +14,8 @@ func projectNodeAccumulateValue(value yamlsource.Value) (*AccumulateSpec, error)
 		return nil, err
 	}
 	var out AccumulateSpec
+	_, out.WindowSet = fields["window"]
+	_, out.DedupBySet = fields["dedup_by"]
 	for _, entry := range []struct {
 		key    string
 		target *string
