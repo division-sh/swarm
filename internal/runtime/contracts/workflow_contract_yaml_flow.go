@@ -583,7 +583,6 @@ func decodeExactFlowPinFieldSequence(node *yaml.Node, owner string) ([]string, e
 	return fields, nil
 }
 
-
 func validateTieredWeightedAverageSpec(spec ComputeSpec) error {
 	if spec.Operation != ComputeOpWeightedAverage || len(spec.Tiers) == 0 {
 		return nil
