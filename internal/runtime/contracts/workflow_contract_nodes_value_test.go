@@ -31,7 +31,19 @@ func TestNodeValueFieldsRejectDuplicateEffectiveAliasKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = nodeValueFields(source.Document("nodes.yaml").Root(), "nodes", map[string]struct{}{"node": {}}, nil)
+	nodes, err := source.Document("nodes.yaml").Root().Lookup("node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = nodeValueFields(nodes.Value, "node", map[string]struct{}{"handler": {}, "duplicate": {}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicate, err := nodes.Value.Lookup("duplicate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = nodeValueFields(duplicate.Value, "handler", map[string]struct{}{"emit": {}}, nil)
 	if err == nil || !strings.Contains(err.Error(), "duplicate effective YAML key") || !strings.Contains(err.Error(), "nodes.yaml:") {
 		t.Fatalf("expected source-located duplicate effective key, got %v", err)
 	}
@@ -72,5 +84,32 @@ func TestProjectNodeTimerValuePreservesNestedCoordinates(t *testing.T) {
 	_, err = projectNodeTimerValue(items[0])
 	if err == nil || !strings.Contains(err.Error(), "nodes.yaml:3:") || !strings.Contains(err.Error(), "delay_seconds") {
 		t.Fatalf("expected source-located retired timer field, got %v", err)
+	}
+}
+
+func TestProjectNodeEmitValuePreservesR2AndRetiredRouting(t *testing.T) {
+	source, err := yamlsource.Load([]byte("emit: &reply\n  event: task.completed\n  fields: {answer: '${payload.answer}', fixed: null}\nother: *reply\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lookup, err := source.Document("nodes.yaml").Root().Lookup("other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	emit, err := projectNodeEmitValue(lookup.Value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if emit.Event != "task.completed" || !emit.Fields["answer"].HasCELValue() || !emit.Fields["fixed"].HasLiteralValue() {
+		t.Fatalf("wrong emit projection: %#v", emit)
+	}
+	retired, err := yamlsource.Load([]byte("emit: {event: task.completed, broadcast: false}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lookup, _ = retired.Document("nodes.yaml").Root().Lookup("emit")
+	_, err = projectNodeEmitValue(lookup.Value)
+	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "nodes.yaml:") {
+		t.Fatalf("expected source-located routing retirement, got %v", err)
 	}
 }
