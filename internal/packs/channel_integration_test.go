@@ -1291,7 +1291,9 @@ func TestDifferentialMockRegistrationExecutesThroughProviderNeutralLifecycle(t *
 	other.Target.Selector = "ingress:alerts/mock:mock"
 	other.Target.FlowPath = "alerts/mock"
 	other.Target.Alias = "alerts"
-	if err := controller.Reconcile(context.Background(), exposure, []runtimepublicingress.RegistrationPair{pair, other}); err == nil || !strings.Contains(err.Error(), "selected by both") {
+	err = controller.Reconcile(context.Background(), exposure, []runtimepublicingress.RegistrationPair{pair, other})
+	var collision *runtimepublicingress.SlotCollisionError
+	if !errors.As(err, &collision) || collision.SlotID != "mock:workspace_webhook:mock-workspace:alpha" || len(collision.Selections) != 2 {
 		t.Fatalf("slot collision error = %v", err)
 	}
 	if identified, applied := transport.counts(); identified != 2 || applied != 0 {
