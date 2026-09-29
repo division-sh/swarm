@@ -379,7 +379,7 @@ func TestMandatorySoakEvidenceRequiresBothFullBackendReceipts(t *testing.T) {
 			case "wrong selection":
 				changed[0].GoTimeout = "30m"
 			case "overrun":
-				changed[0].ElapsedSeconds = 1501
+				changed[0].ElapsedSeconds = 1951
 			case "failed":
 				changed[0].ExitCode = 1
 			}

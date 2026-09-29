@@ -1,7 +1,8 @@
 # Baseline: workflow run 29069663107 on tree cb2fa4caf5588689ffb3bd9591596a91364f96f0.
 # Hard limits change only through reviewed edits with updated one-line justification.
 # Package scheduling history is generated in .github/test-timing-weights.json.
-# Evaluate each primary exactly once. Overruns remain failures, not automatic reruns.
+# Evaluate each primary exactly once. Baseline overruns warn within the fixed
+# evaluator buffer; buffered-ceiling overruns fail. No automatic reruns.
 version: 1
 hard:
   max_shard_command_seconds:

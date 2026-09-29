@@ -3,6 +3,8 @@ package testtiming
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -271,7 +273,7 @@ func TestEvaluateBudgetReportsOverrunWithoutRepeatingWork(t *testing.T) {
 	for _, unit := range plan.Units {
 		elapsed := 10.0
 		if unit.ID == "broad-01" {
-			elapsed = 271
+			elapsed = 352
 		}
 		values = append(values, timingTestEvidence(plan, unit.ID, AttemptPrimary, elapsed))
 	}
@@ -294,7 +296,7 @@ func TestUnitCommandBudgetDoesNotRelaxSiblingClass(t *testing.T) {
 	}
 	values := make([]CommandEvidence, 0, len(plan.Units))
 	for _, unit := range plan.Units {
-		elapsed := 300.0
+		elapsed := 352.0
 		if unit.ID == "catalog" {
 			elapsed = 390
 		}
@@ -315,6 +317,119 @@ func TestUnitCommandBudgetDoesNotRelaxSiblingClass(t *testing.T) {
 				t.Fatalf("unrelated broad unit = %+v", surface)
 			}
 		}
+	}
+}
+
+func TestCommandBudgetBufferBoundariesAndVisibleWarning(t *testing.T) {
+	plan := timingTestPlan(t)
+	for _, tc := range []struct {
+		name        string
+		baseline    float64
+		elapsed     float64
+		ceiling     float64
+		wantStatus  BudgetStatus
+		wantWarning bool
+	}{
+		{name: "below 240 baseline", baseline: 240, elapsed: 239.999, ceiling: 312, wantStatus: BudgetPass},
+		{name: "at 240 baseline", baseline: 240, elapsed: 240, ceiling: 312, wantStatus: BudgetPass},
+		{name: "above 240 baseline", baseline: 240, elapsed: 240.001, ceiling: 312, wantStatus: BudgetPass, wantWarning: true},
+		{name: "at 312 ceiling", baseline: 240, elapsed: 312, ceiling: 312, wantStatus: BudgetPass, wantWarning: true},
+		{name: "above 312 ceiling", baseline: 240, elapsed: 312.001, ceiling: 312, wantStatus: BudgetFail},
+		{name: "at 300 baseline", baseline: 300, elapsed: 300, ceiling: 390, wantStatus: BudgetPass},
+		{name: "above 300 baseline", baseline: 300, elapsed: 300.001, ceiling: 390, wantStatus: BudgetPass, wantWarning: true},
+		{name: "at 390 ceiling", baseline: 300, elapsed: 390, ceiling: 390, wantStatus: BudgetPass, wantWarning: true},
+		{name: "above 390 ceiling", baseline: 300, elapsed: 390.001, ceiling: 390, wantStatus: BudgetFail},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			policy := timingTestPolicy()
+			if tc.baseline == 300 {
+				policy.Hard.MaxShardCommandSeconds.LimitSeconds = 240
+				policy.Hard.UnitCommandSeconds = map[string]CommandBudget{"broad-01": {LimitSeconds: 300, Justification: "test named baseline"}}
+			} else {
+				policy.Hard.MaxShardCommandSeconds.LimitSeconds = tc.baseline
+			}
+			var evidence []CommandEvidence
+			for _, unit := range plan.Units {
+				elapsed := 10.0
+				if unit.ID == "broad-01" {
+					elapsed = tc.elapsed
+				}
+				evidence = append(evidence, timingTestEvidence(plan, unit.ID, AttemptPrimary, elapsed))
+			}
+			result := EvaluateBudget(policy, EvaluationOptions{Plan: plan}, evidence)
+			if result.Status != tc.wantStatus {
+				t.Fatalf("status = %s, want %s: %+v", result.Status, tc.wantStatus, result)
+			}
+			for _, surface := range result.Surfaces {
+				if surface.Surface != "broad-01" {
+					continue
+				}
+				if surface.Status != tc.wantStatus || surface.LimitSeconds != tc.baseline || surface.BufferedCeilingSeconds != tc.ceiling || surface.PrimarySeconds == nil || *surface.PrimarySeconds != tc.elapsed {
+					t.Fatalf("surface = %+v, want baseline %.3f, ceiling %.3f, elapsed %.3f, status %s", surface, tc.baseline, tc.ceiling, tc.elapsed, tc.wantStatus)
+				}
+				if (len(surface.Warnings) > 0) != tc.wantWarning {
+					t.Fatalf("warnings = %v, want warning %t", surface.Warnings, tc.wantWarning)
+				}
+				if tc.wantStatus == BudgetFail && !strings.Contains(strings.Join(surface.Problems, "; "), "buffered timing ceiling") {
+					t.Fatalf("failure problems = %v, want buffered-ceiling failure", surface.Problems)
+				}
+			}
+			var artifact, summary bytes.Buffer
+			if err := WriteBudgetJSON(&artifact, result); err != nil {
+				t.Fatal(err)
+			}
+			if err := WriteBudgetMarkdown(&summary, result); err != nil {
+				t.Fatal(err)
+			}
+			var decoded BudgetResult
+			if err := json.Unmarshal(artifact.Bytes(), &decoded); err != nil {
+				t.Fatal(err)
+			}
+			var found bool
+			for _, surface := range decoded.Surfaces {
+				if surface.Surface == "broad-01" {
+					found = surface.LimitSeconds == tc.baseline && surface.BufferedCeilingSeconds == tc.ceiling && surface.PrimarySeconds != nil && *surface.PrimarySeconds == tc.elapsed
+				}
+			}
+			if !found || !strings.Contains(summary.String(), fmt.Sprintf("%.3fs | %.3fs", tc.baseline, tc.ceiling)) {
+				t.Fatalf("baseline/ceiling not visible in artifact or summary:\n%s\n%s", artifact.String(), summary.String())
+			}
+			if strings.Contains(summary.String(), "## Performance Warnings") != tc.wantWarning {
+				t.Fatalf("performance warning visibility = %t, want %t:\n%s", strings.Contains(summary.String(), "## Performance Warnings"), tc.wantWarning, summary.String())
+			}
+		})
+	}
+}
+
+func TestCommandBudgetBufferDoesNotCompoundOrAdmitInvalidEvidence(t *testing.T) {
+	plan := timingTestPlan(t)
+	policy := timingTestPolicy()
+	policy.Hard.MaxShardCommandSeconds.LimitSeconds = 240
+	var evidence []CommandEvidence
+	for _, unit := range plan.Units {
+		elapsed := 10.0
+		if unit.ID == "broad-01" {
+			elapsed = 313
+		}
+		evidence = append(evidence, timingTestEvidence(plan, unit.ID, AttemptPrimary, elapsed))
+	}
+	for i := 0; i < 2; i++ {
+		result := EvaluateBudget(policy, EvaluationOptions{Plan: plan}, evidence)
+		if result.Status != BudgetFail || policy.Hard.MaxShardCommandSeconds.LimitSeconds != 240 {
+			t.Fatalf("evaluation %d compounded or changed baseline: result %+v policy %+v", i, result, policy)
+		}
+		for _, surface := range result.Surfaces {
+			if surface.Surface == "broad-01" && surface.BufferedCeilingSeconds != 312 {
+				t.Fatalf("evaluation %d buffered ceiling = %.3f, want 312", i, surface.BufferedCeilingSeconds)
+			}
+		}
+	}
+	if got := EvaluateBudget(policy, EvaluationOptions{Plan: plan}, evidence[:1]).Status; got != BudgetIncomplete {
+		t.Fatalf("missing evidence status = %s, want INCOMPLETE", got)
+	}
+	evidence[0].PlanDigest = "invalid"
+	if got := EvaluateBudget(policy, EvaluationOptions{Plan: plan}, evidence).Status; got != BudgetIncomplete {
+		t.Fatalf("invalid evidence status = %s, want INCOMPLETE", got)
 	}
 }
 
