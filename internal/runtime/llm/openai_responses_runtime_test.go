@@ -90,7 +90,7 @@ func TestOpenAIResponsesManagedRequestEncodesCanonicalExecutionFrame(t *testing.
 	runtime, err := RuntimeFactory{
 		Cfg:                  cfg,
 		Sessions:             registry,
-		LiveSessions:         registry,
+		LiveSessions:         newTransientLiveSessionAcquirer(registry),
 		Conversations:        conversations,
 		LockOwner:            "worker-1",
 		Credentials:          testProviderCredentialResolver(t, "OPENAI_API_KEY", "test-key").Store,

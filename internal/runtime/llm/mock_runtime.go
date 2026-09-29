@@ -127,7 +127,7 @@ func (r *MockRuntime) recoverManagedCompletionContinuation(ctx context.Context, 
 }
 
 func (r *MockRuntime) PrepareManagedSession(ctx context.Context, session *Session) error {
-	return prepareManagedSessionForTurn(ctx, session, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns, r.events)
+	return prepareManagedSessionForTurn(ctx, session, r.sessions, r.liveSessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns, r.events)
 }
 
 func (r *MockRuntime) ContinueForkChatSession(ctx context.Context, session *Session, call ForkChatCall) (*Response, error) {
@@ -147,12 +147,16 @@ func (r *MockRuntime) continueSession(ctx context.Context, session *Session, mes
 		return nil, err
 	}
 	entityID := actor.EffectiveEntityID()
-	lease, resolved, err := acquireContinuedMemory(ctx, r.sessions, session, r.lockOwner)
+	previousTurnCount := session.TurnCount
+	lease, resolved, err := acquireContinuedMemory(ctx, r.liveSessions, session, r.lockOwner)
 	if err != nil {
 		if lease != nil {
 			err = releasePreProviderSessionLease(ctx, r.sessions, lease, session.AgentID, r.events, err)
 		}
 		return nil, sessionAcquireFailure(err, session.AgentID)
+	}
+	if err := requireManagedAcquiredBase(ctx, session, previousTurnCount, managed); err != nil {
+		return nil, releasePreProviderSessionLease(ctx, r.sessions, lease, session.AgentID, r.events, err)
 	}
 	if resolved.Enabled() {
 		defer func() {
@@ -166,9 +170,9 @@ func (r *MockRuntime) continueSession(ctx context.Context, session *Session, mes
 			logPublisherRuntime(ctx, r.events, "warn", "session_lease_heartbeat_failed", "Refreshing the mock session lease heartbeat failed", session.AgentID, session.ID, entityID, nil, heartbeatErr)
 		})
 		defer stopHeartbeat()
-		if lease.SessionID != session.ID {
-			LogSessionAdoptedForRun(ctx, r.events, resolved.Identity, session.ID, lease.SessionID)
-			session.ID = lease.SessionID
+		if session.adoptedFromID != "" {
+			LogSessionAdoptedForRun(ctx, r.events, resolved.Identity, session.adoptedFromID, lease.SessionID)
+			session.adoptedFromID = ""
 		}
 	}
 	if err := requireInboundDeliveryActiveForSession(ctx, r.events, session, "error", "Marking the reused mock agent delivery in progress failed", map[string]any{"memory_enabled": resolved.Enabled()}, entityID); err != nil {
@@ -235,7 +239,7 @@ func (r *MockRuntime) continueSession(ctx context.Context, session *Session, mes
 		return nil, unacknowledgedCompletionError(settlementErr)
 	}
 	handoffCtx := context.WithoutCancel(ctx)
-	if settled.Drained() {
+	if settled.NoCurrentProjection() {
 		return nil, settlementErr
 	}
 	if err := requireCurrentProviderProjection(handoffCtx, session.AgentID); err != nil {
@@ -343,7 +347,9 @@ func executeMockCompletionWithExecutor(ctx context.Context, actor runtimeactors.
 		return nil, nil, estimatedMockUsage(request, nil, model), dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "mock_provider_executor_missing", "mock-python-adapter", "execute_completion", nil))
 	}
 	dispatch.markProviderInvocationStarted()
-	result, err := execute(heartbeatCtx, pythonmodule.Request{
+	providerCtx, stopProvider := completionProviderContext(ctx, heartbeatCtx)
+	defer stopProvider()
+	result, err := execute(providerCtx, pythonmodule.Request{
 		ModuleID: "agent.mock." + actor.ID, RowID: actor.Mock.SourcePath, Digest: actor.Mock.Digest,
 		Entry: mockperformance.EntryHandle, Source: actor.Mock.Source, Input: request,
 		Fuel: mockperformance.ExecutionFuel, MemoryPages: mockperformance.ExecutionMemoryPages, OutputBytes: mockperformance.ExecutionOutputBytes,
@@ -353,7 +359,7 @@ func executeMockCompletionWithExecutor(ctx context.Context, actor runtimeactors.
 	}
 	raw := append([]byte(nil), result.Output...)
 	dispatch.evidence = map[string]any{"response_fingerprint": runtimeeffects.Fingerprint(raw), "fuel_consumed": result.FuelConsumed, "module_digest": actor.Mock.Digest}
-	if err := waitMockPostToolTail(heartbeatCtx, actor.Mock, postToolRound); err != nil {
+	if err := waitMockPostToolTail(providerCtx, actor.Mock, postToolRound); err != nil {
 		return nil, raw, estimatedMockUsage(request, raw, model), dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
 	}
 	if err := attempt.MarkResponseObserved(heartbeatCtx, dispatch.evidence); !dispatch.retainCommittedMutation(err, runtimeeffects.MutationObservation) {

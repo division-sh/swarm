@@ -8,20 +8,21 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
-func prepareManagedSessionForTurn(ctx context.Context, s *Session, registry sessions.Registry, lockOwner string, rotateAfter int, sink any) error {
+func prepareManagedSessionForTurn(ctx context.Context, s *Session, registry sessions.Registry, acquirer LiveSessionAcquirer, lockOwner string, rotateAfter int, sink any) error {
 	if s == nil {
 		return errors.New("managed session is required")
 	}
-	if !s.Memory.Enabled || rotateAfter <= 0 || s.TurnCount < rotateAfter {
+	if !s.Memory.Enabled {
 		return nil
 	}
 	if registry == nil {
 		return errors.New("managed session rotation requires a live session registry")
 	}
-	lease, resolved, err := acquireContinuedMemory(ctx, registry, s, lockOwner)
+	lease, resolved, err := acquireContinuedMemory(ctx, acquirer, s, lockOwner)
 	if err != nil {
 		if lease != nil {
 			err = releasePreProviderSessionLease(ctx, registry, lease, s.AgentID, sink, err)
@@ -30,6 +31,14 @@ func prepareManagedSessionForTurn(ctx context.Context, s *Session, registry sess
 	}
 	if !resolved.Enabled() || lease == nil {
 		return errors.New("managed session rotation requires an exact live lease")
+	}
+	if s.adoptedFromID != "" {
+		LogSessionAdoptedForRun(ctx, sink, resolved.Identity, s.adoptedFromID, lease.SessionID)
+		s.adoptedFromID = ""
+		return releasePreProviderSessionLease(ctx, registry, lease, s.AgentID, sink, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_capability_turn_identity_mismatch", "llm-conversation", "prepare_session", map[string]any{"session_id": s.ID}))
+	}
+	if rotateAfter <= 0 || s.TurnCount < rotateAfter {
+		return releasePreProviderSessionLease(ctx, registry, lease, s.AgentID, sink, nil)
 	}
 	if strings.TrimSpace(lease.SessionID) != strings.TrimSpace(s.ID) {
 		return releasePreProviderSessionLease(ctx, registry, lease, s.AgentID, sink,

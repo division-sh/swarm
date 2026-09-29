@@ -184,7 +184,7 @@ func (r *OpenAICompatibleRuntime) recoverManagedCompletionContinuation(ctx conte
 }
 
 func (r *OpenAICompatibleRuntime) PrepareManagedSession(ctx context.Context, session *Session) error {
-	return prepareManagedSessionForTurn(ctx, session, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns, r.events)
+	return prepareManagedSessionForTurn(ctx, session, r.sessions, r.liveSessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns, r.events)
 }
 
 func (r *OpenAICompatibleRuntime) ContinueForkChatSession(ctx context.Context, s *Session, call ForkChatCall) (*Response, error) {
@@ -202,12 +202,16 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 	actor, _ := runtimeactors.ActorFromContext(ctx)
 	entityID := actor.EffectiveEntityID()
 
-	lease, resolved, err := acquireContinuedMemory(ctx, r.sessions, s, r.lockOwner)
+	previousTurnCount := s.TurnCount
+	lease, resolved, err := acquireContinuedMemory(ctx, r.liveSessions, s, r.lockOwner)
 	if err != nil {
 		if lease != nil {
 			err = releasePreProviderSessionLease(ctx, r.sessions, lease, s.AgentID, r.events, err)
 		}
 		return nil, sessionAcquireFailure(err, s.AgentID)
+	}
+	if err := requireManagedAcquiredBase(ctx, s, previousTurnCount, managed); err != nil {
+		return nil, releasePreProviderSessionLease(ctx, r.sessions, lease, s.AgentID, r.events, err)
 	}
 	if resolved.Enabled() {
 		defer func() { retErr = releaseCompletedSessionLease(ctx, r.sessions, lease, s.AgentID, r.events, retErr) }()
@@ -222,9 +226,9 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 		})
 		defer stopLeaseHeartbeat()
 
-		if lease.SessionID != s.ID {
-			LogSessionAdoptedForRun(ctx, r.events, resolved.Identity, s.ID, lease.SessionID)
-			s.ID = lease.SessionID
+		if s.adoptedFromID != "" {
+			LogSessionAdoptedForRun(ctx, r.events, resolved.Identity, s.adoptedFromID, lease.SessionID)
+			s.adoptedFromID = ""
 		}
 	}
 	if err := requireInboundDeliveryActiveForSession(ctx, r.events, s, "error", "Marking the reused agent delivery in progress failed", map[string]any{
@@ -373,7 +377,7 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 		return nil, unacknowledgedCompletionError(settlementErr)
 	}
 	handoffCtx := context.WithoutCancel(ctx)
-	if settled.Drained() {
+	if settled.NoCurrentProjection() {
 		return nil, settlementErr
 	}
 
@@ -498,7 +502,9 @@ func (r *OpenAICompatibleRuntime) sendRequest(ctx context.Context, payload []byt
 		dispatch.state = runtimeeffects.StateTerminalFailure
 		return nil, openAICompatibleResponse{}, dispatch, err
 	}
-	req = req.WithContext(heartbeatCtx)
+	providerCtx, stopProvider := completionProviderContext(ctx, heartbeatCtx)
+	defer stopProvider()
+	req = req.WithContext(providerCtx)
 	if err := attempt.MarkLaunched(heartbeatCtx); !dispatch.retainCommittedMutation(err, runtimeeffects.MutationLaunch) {
 		dispatch.state = runtimeeffects.StateTerminalFailure
 		return nil, openAICompatibleResponse{}, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)

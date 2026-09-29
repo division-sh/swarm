@@ -264,21 +264,31 @@ type Attempt struct {
 	OperationID      string
 	AttemptID        string
 	// AuthorizationAcknowledged is set only after the authorization commit is acknowledged.
-	AuthorizationAcknowledged bool `json:"-"`
-	Token                     LifecycleToken
-	Authority                 Authority
-	Kind                      Kind
-	Class                     EffectClass
-	Adapter                   string
-	Transport                 string
-	Ordinal                   int
-	AuthorizedAt              time.Time
-	Origin                    CompletionOrigin
-	completionRequest         []byte
-	completionPayload         json.RawMessage
-	completionSurface         *managedcapabilities.Surface
-	completionPhase           CompletionProjectionPhase
-	completionSuccessor       *agentframe.ToolContinuation
+	AuthorizationAcknowledged  bool `json:"-"`
+	Token                      LifecycleToken
+	Authority                  Authority
+	Kind                       Kind
+	Class                      EffectClass
+	Adapter                    string
+	Transport                  string
+	Ordinal                    int
+	AuthorizedAt               time.Time
+	Origin                     CompletionOrigin
+	completionRequest          []byte
+	completionPayload          json.RawMessage
+	completionSurface          *managedcapabilities.Surface
+	completionPhase            CompletionProjectionPhase
+	completionSuccessor        *agentframe.ToolContinuation
+	recoveredContinuationGrant *SessionGrant
+}
+
+// RecoveredContinuationGrant is set only by a recovered controller handle.
+// A raw selected-store caller cannot designate its own projection as recovery.
+func (a Attempt) RecoveredContinuationGrant() (SessionGrant, bool) {
+	if a.recoveredContinuationGrant == nil {
+		return SessionGrant{}, false
+	}
+	return *a.recoveredContinuationGrant, true
 }
 
 // SessionGrant is the immutable provider-attempt attachment to one session acquisition.
@@ -489,7 +499,6 @@ type CompletionContinuationRequest struct {
 type CompletionConversationProjection struct {
 	GrantID           string
 	LockOwner         string
-	Recovered         bool
 	Payload           json.RawMessage
 	SessionID         string
 	Identity          agentmemory.Identity
@@ -693,6 +702,7 @@ func (h *Handle) BindRecoveredContinuationGrant(grant SessionGrant) error {
 		return fmt.Errorf("recovered continuation requires a fresh exact session grant")
 	}
 	h.continuationGrant = grant
+	h.attempt.recoveredContinuationGrant = &grant
 	return nil
 }
 
@@ -1265,7 +1275,6 @@ func (h *Handle) ProjectCompletionConversation(ctx context.Context, projection C
 		return runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "completion_continuation_store_missing", "external-effects", "project_completion", nil)
 	}
 	if h.recovered {
-		projection.Recovered = true
 		projection.GrantID = h.continuationGrant.GrantID
 		projection.LockOwner = h.continuationGrant.LockOwner
 	} else {

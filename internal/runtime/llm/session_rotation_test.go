@@ -29,7 +29,7 @@ func TestPrepareManagedSessionRotatesExactCompletedRootBeforeNextFrame(t *testin
 		ID: oldSessionID, AgentID: identity.AgentID(), Memory: testMemory(), MemoryIdentity: identity,
 		TurnCount: 1, Messages: []Message{{Role: "user", Content: "first"}, {Role: "assistant", Content: "done"}},
 	}
-	if err := prepareManagedSessionForTurn(ctx, session, registry, "worker-1", 1, nil); err != nil {
+	if err := prepareManagedSessionForTurn(ctx, session, registry, newTransientLiveSessionAcquirer(registry), "worker-1", 1, nil); err != nil {
 		t.Fatal(err)
 	}
 	if session.ID == oldSessionID || session.TurnCount != 0 || len(session.Messages) != 1 ||
@@ -61,7 +61,7 @@ func TestPrepareManagedSessionRejectsStaleSessionWithoutRotation(t *testing.T) {
 		ID: "stale-session", AgentID: identity.AgentID(), Memory: testMemory(), MemoryIdentity: identity,
 		TurnCount: 1, Messages: []Message{{Role: "assistant", Content: "done"}},
 	}
-	if err := prepareManagedSessionForTurn(ctx, session, registry, "worker-1", 1, nil); err == nil || !strings.Contains(err.Error(), "changed before rotation") {
+	if err := prepareManagedSessionForTurn(ctx, session, registry, newTransientLiveSessionAcquirer(registry), "worker-1", 1, nil); err == nil || !strings.Contains(err.Error(), "managed_capability_turn_identity_mismatch") {
 		t.Fatalf("stale preparation error=%v", err)
 	}
 	current, err := registry.Acquire(ctx, identity, "worker-1")
@@ -69,7 +69,7 @@ func TestPrepareManagedSessionRejectsStaleSessionWithoutRotation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _, _ = registry.ReleaseOutcome(context.Background(), current) }()
-	if current.SessionID != lease.SessionID || session.ID != "stale-session" {
+	if current.SessionID != lease.SessionID || session.ID != current.SessionID {
 		t.Fatalf("stale preparation mutated current=%#v session=%#v", current, session)
 	}
 }

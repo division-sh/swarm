@@ -86,7 +86,7 @@ func TestOpenAICompatibleManagedRequestEncodesCanonicalExecutionFrame(t *testing
 	runtime, err := RuntimeFactory{
 		Cfg:                  cfg,
 		Sessions:             registry,
-		LiveSessions:         registry,
+		LiveSessions:         newTransientLiveSessionAcquirer(registry),
 		Conversations:        conversations,
 		LockOwner:            "worker-1",
 		Credentials:          testProviderCredentialResolver(t, "OPENAI_COMPATIBLE_API_KEY", "test-key").Store,
@@ -179,7 +179,7 @@ func TestAnthropicManagedRequestEncodesCanonicalExecutionFrame(t *testing.T) {
 	runtime := NewAnthropicAPIRuntime(&config.Config{LLM: config.LLMConfig{Models: llmselection.ModelAliases{
 		"hostile-alias": {llmselection.BackendAnthropic: "hostile-config-model"},
 	}}}, registry, "worker-1", nil, nil)
-	runtime.liveSessions = registry
+	runtime.liveSessions = newTransientLiveSessionAcquirer(registry)
 	runtime.apiURL = server.URL
 	runtime.apiKey = "test-key"
 	runtime.completionController = liveTestCompletionController(harness, harness, harness, harness)

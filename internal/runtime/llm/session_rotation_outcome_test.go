@@ -21,6 +21,7 @@ type rotationOutcomeRegistry struct {
 	acquireCancel, releaseCancel      context.CancelFunc
 	committed                         *sessions.Lease
 	acquires, rotations, releases     int
+	releaseFaultAfter                 int
 }
 
 func (r *rotationOutcomeRegistry) Acquire(ctx context.Context, id agentmemory.Identity, owner string) (*sessions.Lease, error) {
@@ -53,7 +54,8 @@ func (r *rotationOutcomeRegistry) Rotate(ctx context.Context, predecessor *sessi
 
 func (r *rotationOutcomeRegistry) ReleaseOutcome(ctx context.Context, lease *sessions.Lease) (sessions.ReleaseResult, error) {
 	r.releases++
-	if r.releaseCancel != nil {
+	fault := r.releaseFaultAfter == 0 || r.releases >= r.releaseFaultAfter
+	if fault && r.releaseCancel != nil {
 		r.releaseCancel()
 	}
 	if err := ctx.Err(); err != nil {
@@ -64,7 +66,10 @@ func (r *rotationOutcomeRegistry) ReleaseOutcome(ctx context.Context, lease *ses
 		return sessions.ReleaseResult{}, errors.New("attempted predecessor release after committed rotation")
 	}
 	result, err := r.Registry.ReleaseOutcome(ctx, lease)
-	return result, errors.Join(err, r.releaseErr)
+	if fault {
+		return result, errors.Join(err, r.releaseErr)
+	}
+	return result, err
 }
 
 func TestSessionRotationRetainsAcknowledgedLeaseAndErrors(t *testing.T) {
@@ -103,7 +108,7 @@ func TestSessionRotationRetainsAcknowledgedLeaseAndErrors(t *testing.T) {
 					result, err = MaybeRotateAfterParseFailures(ctx, session, registry, predecessor, 1, nil)
 				case "prepare":
 					registry.cancel, registry.releaseErr = cancel, cleanup
-					err = prepareManagedSessionForTurn(ctx, session, registry, "worker-1", 1, nil)
+					err = prepareManagedSessionForTurn(ctx, session, registry, newTransientLiveSessionAcquirer(registry), "worker-1", 1, nil)
 				}
 				if !errors.Is(err, failure) {
 					t.Fatalf("lost rotation error: %v", err)
@@ -151,7 +156,7 @@ func TestSessionPreparationAndProvidersReleaseAcknowledgedAcquireOnError(t *test
 			var err error
 			switch name {
 			case "prepare":
-				err = prepareManagedSessionForTurn(ctx, session, registry, "worker-1", 1, nil)
+				err = prepareManagedSessionForTurn(ctx, session, registry, newTransientLiveSessionAcquirer(registry), "worker-1", 1, nil)
 			case "anthropic":
 				_, err = NewAnthropicAPIRuntime(cfg, registry, "worker-1", nil, nil).continueSession(ctx, session, Message{}, nil)
 			case "cli":
@@ -241,7 +246,7 @@ func TestPrepareManagedSessionRetainsRotationAfterAcknowledgedReleaseError(t *te
 		TurnCount: 1, Messages: []Message{{Role: "assistant", Content: "done"}},
 	}
 	publisher := &eventPublisherStub{}
-	if err := prepareManagedSessionForTurn(ctx, session, registry, "worker-1", 1, publisher); err != nil {
+	if err := prepareManagedSessionForTurn(ctx, session, registry, newTransientLiveSessionAcquirer(registry), "worker-1", 1, publisher); err != nil {
 		t.Fatalf("acknowledged rotated lease release aborted next turn: %v", err)
 	}
 	if registry.rotations != 1 || registry.releases != 1 || session.ID == oldLease.SessionID || session.ID != registry.committed.SessionID {

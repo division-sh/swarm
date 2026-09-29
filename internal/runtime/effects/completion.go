@@ -242,12 +242,13 @@ func (s DrainedCompletionSettlement) CompletionSettlement() CompletionSettlement
 type CompletionSettlementDisposition string
 
 const (
-	CompletionSettlementCurrent CompletionSettlementDisposition = "current"
-	CompletionSettlementDrained CompletionSettlementDisposition = "drained"
+	CompletionSettlementCurrent      CompletionSettlementDisposition = "current"
+	CompletionSettlementDrained      CompletionSettlementDisposition = "drained"
+	CompletionSettlementEvidenceOnly CompletionSettlementDisposition = "evidence_only"
 )
 
 func (d CompletionSettlementDisposition) Valid() bool {
-	return d == CompletionSettlementCurrent || d == CompletionSettlementDrained
+	return d == CompletionSettlementCurrent || d == CompletionSettlementDrained || d == CompletionSettlementEvidenceOnly
 }
 
 // CompletionSettlementResult is selected-store truth about a terminal
@@ -285,6 +286,10 @@ func AdmitCommittedCompletionContinuation(result CompletionSettlementResult, att
 
 func (r CompletionSettlementResult) Drained() bool {
 	return r.Disposition == CompletionSettlementDrained
+}
+
+func (r CompletionSettlementResult) NoCurrentProjection() bool {
+	return r.Disposition == CompletionSettlementDrained || r.Disposition == CompletionSettlementEvidenceOnly
 }
 
 type CompletionSpendProjection struct {

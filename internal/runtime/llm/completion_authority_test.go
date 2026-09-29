@@ -401,7 +401,7 @@ func TestAllNormalProviderSuccessPathsConsumeCanonicalDrainedDisposition(t *test
 			if settlement < 0 {
 				t.Fatalf("adapter has no canonical settlement result consumer")
 			}
-			drained := strings.Index(source[settlement:], "if settled.Drained()")
+			drained := strings.Index(source[settlement:], "if settled.NoCurrentProjection()")
 			mutable := strings.Index(source[settlement:], candidate.mutableMarker)
 			if drained < 0 || mutable < 0 || drained >= mutable {
 				t.Fatalf("adapter chronology settlement=%d drained=%d mutable=%d", settlement, drained, mutable)
@@ -463,11 +463,11 @@ func TestAllManagedAdaptersGateAdoptedSessionIdentityBeforeProviderLaunch(t *tes
 		adoption   string
 		launchCall string
 	}{
-		{file: "api_runtime.go", adoption: "if lease.SessionID != s.ID", launchCall: "r.sendAdmittedRequest("},
-		{file: "openai_compatible_runtime.go", adoption: "if lease.SessionID != s.ID", launchCall: "r.sendAdmittedRequest("},
-		{file: "openai_responses_runtime.go", adoption: "if lease.SessionID != s.ID", launchCall: "r.sendAdmittedRequest("},
-		{file: "cli_runtime.go", adoption: "if lease.SessionID != s.ID", launchCall: "r.runWithPreparedPrompt("},
-		{file: "mock_runtime.go", adoption: "if lease.SessionID != session.ID", launchCall: "executeMockCompletion("},
+		{file: "api_runtime.go", adoption: "requireManagedAcquiredBase(", launchCall: "r.sendAdmittedRequest("},
+		{file: "openai_compatible_runtime.go", adoption: "requireManagedAcquiredBase(", launchCall: "r.sendAdmittedRequest("},
+		{file: "openai_responses_runtime.go", adoption: "requireManagedAcquiredBase(", launchCall: "r.sendAdmittedRequest("},
+		{file: "cli_runtime.go", adoption: "requireManagedAcquiredBase(", launchCall: "r.runWithPreparedPrompt("},
+		{file: "mock_runtime.go", adoption: "requireManagedAcquiredBase(", launchCall: "executeMockCompletion("},
 	}
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {

@@ -225,7 +225,7 @@ func (r *ClaudeCLIRuntime) recoverManagedCompletionContinuation(ctx context.Cont
 }
 
 func (r *ClaudeCLIRuntime) PrepareManagedSession(ctx context.Context, session *Session) error {
-	return prepareManagedSessionForTurn(ctx, session, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns, r.events)
+	return prepareManagedSessionForTurn(ctx, session, r.sessions, r.liveSessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns, r.events)
 }
 
 func (r *ClaudeCLIRuntime) ContinueForkChatSession(ctx context.Context, s *Session, call ForkChatCall) (*Response, error) {
@@ -243,12 +243,16 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 	actor, _ := runtimeactors.ActorFromContext(ctx)
 	entityID := actor.EffectiveEntityID()
 
-	lease, resolved, err := acquireContinuedMemory(ctx, r.sessions, s, r.lockOwner)
+	previousTurnCount := s.TurnCount
+	lease, resolved, err := acquireContinuedMemory(ctx, r.liveSessions, s, r.lockOwner)
 	if err != nil {
 		if lease != nil {
 			err = releasePreProviderSessionLease(ctx, r.sessions, lease, s.AgentID, r.events, err)
 		}
 		return nil, sessionAcquireFailure(err, s.AgentID)
+	}
+	if err := requireManagedAcquiredBase(ctx, s, previousTurnCount, managed); err != nil {
+		return nil, releasePreProviderSessionLease(ctx, r.sessions, lease, s.AgentID, r.events, err)
 	}
 	if resolved.Enabled() {
 		defer func() { retErr = releaseCompletedSessionLease(ctx, r.sessions, lease, s.AgentID, r.events, retErr) }()
@@ -263,9 +267,9 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 		})
 		defer stopLeaseHeartbeat()
 
-		if lease.SessionID != s.ID {
-			LogSessionAdoptedForRun(ctx, r.events, resolved.Identity, s.ID, lease.SessionID)
-			s.ID = lease.SessionID
+		if s.adoptedFromID != "" {
+			LogSessionAdoptedForRun(ctx, r.events, resolved.Identity, s.adoptedFromID, lease.SessionID)
+			s.adoptedFromID = ""
 		}
 		s.ProviderSessionID = strings.TrimSpace(lease.ProviderSessionID)
 	}
@@ -541,7 +545,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 		return nil, unacknowledgedCompletionError(settlementErr)
 	}
 	handoffCtx := context.WithoutCancel(ctx)
-	if settled.Drained() {
+	if settled.NoCurrentProjection() {
 		return nil, settlementErr
 	}
 	projected, err := projectCompletionContinuation(handoffCtx, dispatch, s, resp)

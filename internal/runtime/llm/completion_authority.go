@@ -90,6 +90,26 @@ func completionInvocationGate(caller, heartbeat context.Context) error {
 	return nil
 }
 
+// Only the provider primitive follows the caller's cancellation. The
+// heartbeat context remains process-owned for observation and settlement.
+func completionProviderContext(caller, heartbeat context.Context) (context.Context, func()) {
+	provider, cancel := context.WithCancelCause(heartbeat)
+	done := make(chan struct{})
+	stop := context.AfterFunc(caller, func() {
+		defer close(done)
+		cancel(context.Cause(caller))
+	})
+	if caller.Err() != nil {
+		cancel(context.Cause(caller))
+	}
+	return provider, func() {
+		if !stop() {
+			<-done
+		}
+		cancel(nil)
+	}
+}
+
 const completionContinuationVersion = "provider-response-continuation.v1"
 
 type completionProjection struct {
@@ -220,6 +240,9 @@ func recoverCompletionContinuation(ctx context.Context, controller *runtimeeffec
 		}
 		continuationLease, err = registry.Acquire(ctx, session.MemoryIdentity, lockOwner)
 		if err != nil {
+			if continuationLease != nil {
+				err = releasePreProviderSessionLease(ctx, registry, continuationLease, session.AgentID, nil, err)
+			}
 			return nil, true, err
 		}
 		if err := continuationLease.ValidateFor(session.MemoryIdentity, session.ID); err != nil {
