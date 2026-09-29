@@ -237,12 +237,16 @@ func validateInterfaceDefinition(identity string, definition runtimecontracts.Pa
 			}
 		}
 	}
-	for name, event := range definition.Events {
+	return validateInterfaceEvents(identity, definition.Events, definition.Schemas)
+}
+
+func validateInterfaceEvents(identity string, eventDefinitions map[string]runtimecontracts.PackInterfaceEvent, schemas map[string]runtimecontracts.ToolInputSchema) error {
+	for name, event := range eventDefinitions {
 		if len(event.RequiredFields) == 0 {
 			return fmt.Errorf("platform interface %q event %q requires required_fields", identity, name)
 		}
 		for fieldName, field := range event.RequiredFields {
-			if err := validateInterfaceField(identity+" event "+name+" required_fields."+fieldName, field, definition.Schemas); err != nil {
+			if err := validateInterfaceField(identity+" event "+name+" required_fields."+fieldName, field, schemas); err != nil {
 				return err
 			}
 		}
@@ -250,7 +254,7 @@ func validateInterfaceDefinition(identity string, definition runtimecontracts.Pa
 			if _, exists := event.RequiredFields[fieldName]; exists {
 				return fmt.Errorf("platform interface %q event %q field %q is both required and optional", identity, name, fieldName)
 			}
-			if err := validateInterfaceField(identity+" event "+name+" optional_fields."+fieldName, field, definition.Schemas); err != nil {
+			if err := validateInterfaceField(identity+" event "+name+" optional_fields."+fieldName, field, schemas); err != nil {
 				return err
 			}
 		}
@@ -1274,31 +1278,9 @@ func projectChannelOperationMappings(name string, mappings []compiledChannelMapp
 	out := map[string]any{}
 	for _, mapping := range mappings {
 		if mapping.usesEach {
-			itemsValue, ok := mapping.each.lookup(environment)
-			if !ok {
-				return nil, fmt.Errorf("channel operation %q source %q is missing", name, mapping.each.syntax)
-			}
-			items, ok := itemsValue.([]any)
-			if !ok {
-				return nil, fmt.Errorf("channel operation %q source %q is not an array", name, mapping.each.syntax)
-			}
-			projected := make([]any, 0, len(items))
-			for _, item := range items {
-				object := map[string]any{}
-				for _, itemMapping := range mapping.item {
-					value, ok := itemMapping.source.lookup(map[string]any{"item": item})
-					if !ok {
-						return nil, fmt.Errorf("channel operation %q item source %q is missing", name, itemMapping.source.syntax)
-					}
-					if err := itemMapping.target.set(object, value); err != nil {
-						return nil, err
-					}
-				}
-				if mapping.wrapItemAsList {
-					projected = append(projected, []any{object})
-				} else {
-					projected = append(projected, object)
-				}
+			projected, err := projectChannelOperationItems(name, mapping, environment)
+			if err != nil {
+				return nil, err
 			}
 			if err := mapping.target.set(out, projected); err != nil {
 				return nil, err
@@ -1314,6 +1296,36 @@ func projectChannelOperationMappings(name string, mappings []compiledChannelMapp
 		}
 	}
 	return out, nil
+}
+
+func projectChannelOperationItems(name string, mapping compiledChannelMapping, environment map[string]any) ([]any, error) {
+	itemsValue, ok := mapping.each.lookup(environment)
+	if !ok {
+		return nil, fmt.Errorf("channel operation %q source %q is missing", name, mapping.each.syntax)
+	}
+	items, ok := itemsValue.([]any)
+	if !ok {
+		return nil, fmt.Errorf("channel operation %q source %q is not an array", name, mapping.each.syntax)
+	}
+	projected := make([]any, 0, len(items))
+	for _, item := range items {
+		object := map[string]any{}
+		for _, itemMapping := range mapping.item {
+			value, ok := itemMapping.source.lookup(map[string]any{"item": item})
+			if !ok {
+				return nil, fmt.Errorf("channel operation %q item source %q is missing", name, itemMapping.source.syntax)
+			}
+			if err := itemMapping.target.set(object, value); err != nil {
+				return nil, err
+			}
+		}
+		if mapping.wrapItemAsList {
+			projected = append(projected, []any{object})
+		} else {
+			projected = append(projected, object)
+		}
+	}
+	return projected, nil
 }
 
 func interfaceOperationSchema(fields map[string]runtimecontracts.PackInterfaceField, schemas, opaque map[string]runtimecontracts.ToolInputSchema) (runtimecontracts.ToolInputSchema, error) {

@@ -104,6 +104,31 @@ func RequireNoticeActionTx(ctx context.Context, tx *sql.Tx, action operatorchann
 	return state, nil
 }
 
+func hydrateFrozenChannelAction(action render.Action, renderRaw []byte, renderHash string, position int) (render.Action, error) {
+	renderRaw, err := canonicaljson.Canonicalize(renderRaw)
+	if err != nil {
+		return render.Action{}, fmt.Errorf("canonicalize exact channel action render: %w", err)
+	}
+	frozen, err := render.Decode(renderRaw, renderHash)
+	if err != nil {
+		return render.Action{}, fmt.Errorf("decode exact channel action render: %w", err)
+	}
+	expected, err := actionsForFrozen(frozen)
+	if err != nil || position < 1 || position > len(expected) {
+		return render.Action{}, fmt.Errorf("channel action position contradicts immutable render: %w", err)
+	}
+	if choice := expected[position-1]; choice.Kind != action.Kind ||
+		choice.Verdict != action.Verdict || choice.Label != action.Label {
+		return render.Action{}, fmt.Errorf("channel action contradicts immutable render projection")
+	} else {
+		action.DraftID = choice.DraftID
+		action.CardID = choice.CardID
+		action.TextPublicationID = choice.TextPublicationID
+		action.RecoveryDeliveryID = choice.RecoveryDeliveryID
+	}
+	return action, nil
+}
+
 func resolveActionFactTx(ctx context.Context, tx interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }, fact operatorchannel.ActionFact, postgres, mutation bool) (render.ResolvedAction, bool, error) {
@@ -220,26 +245,9 @@ func resolveActionFactTx(ctx context.Context, tx interface {
 	if verdict.Valid {
 		resolved.Action.Verdict = verdict.String
 	}
-	renderRaw, err = canonicaljson.Canonicalize(renderRaw)
+	resolved.Action, err = hydrateFrozenChannelAction(resolved.Action, renderRaw, resolved.RenderHash, position)
 	if err != nil {
-		return render.ResolvedAction{}, false, fmt.Errorf("canonicalize exact channel action render: %w", err)
-	}
-	frozen, err := render.Decode(renderRaw, resolved.RenderHash)
-	if err != nil {
-		return render.ResolvedAction{}, false, fmt.Errorf("decode exact channel action render: %w", err)
-	}
-	expected, err := actionsForFrozen(frozen)
-	if err != nil || position < 1 || position > len(expected) {
-		return render.ResolvedAction{}, false, fmt.Errorf("channel action position contradicts immutable render: %w", err)
-	}
-	if choice := expected[position-1]; choice.Kind != resolved.Action.Kind ||
-		choice.Verdict != resolved.Action.Verdict || choice.Label != resolved.Action.Label {
-		return render.ResolvedAction{}, false, fmt.Errorf("channel action contradicts immutable render projection")
-	} else {
-		resolved.Action.DraftID = choice.DraftID
-		resolved.Action.CardID = choice.CardID
-		resolved.Action.TextPublicationID = choice.TextPublicationID
-		resolved.Action.RecoveryDeliveryID = choice.RecoveryDeliveryID
+		return render.ResolvedAction{}, false, err
 	}
 	if resolved.Action.Token != fact.Token || resolved.Action.Label == "" ||
 		resolved.ActivationID == "" || resolved.BindingRevision < 1 || resolved.ActivationRevision < 1 {
