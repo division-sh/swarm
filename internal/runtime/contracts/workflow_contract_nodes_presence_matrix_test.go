@@ -12,6 +12,55 @@ type nodePresenceShape struct {
 	value string
 }
 
+// Admission outcomes are field-specific. Semantic requiredness that depends on
+// the enclosing stage/operation is exercised by the supported branch tests.
+var nodeScalarFieldAdmission = map[string][8]bool{
+	"node.description":     {true, false, true, true, false, false, false, false},
+	"node.execution_type":  {true, false, true, true, false, false, false, false},
+	"node.state_table":     {true, false, true, true, false, false, false, false},
+	"timer.id":             {true, false, true, true, false, false, false, false},
+	"timer.stage":          {true, false, true, true, false, false, false, false},
+	"timer.event":          {true, false, true, true, false, false, false, false},
+	"timer.owner":          {true, false, true, true, false, false, false, false},
+	"timer.action":         {true, false, true, true, false, false, false, false},
+	"timer.cancellation":   {true, false, true, true, false, false, false, false},
+	"timer.delay":          {true, false, true, true, false, false, false, false},
+	"timer.start_on":       {true, false, true, true, false, false, false, false},
+	"timer.cancel_on":      {true, false, true, true, false, false, false, false},
+	"handler.description":  {true, false, true, true, false, false, false, false},
+	"handler.advances_to":  {true, false, true, true, false, false, false, false},
+	"state.description":    {true, false, true, true, false, false, false, false},
+	"activity.id":          {true, false, true, true, false, false, false, false},
+	"activity.tool":        {true, false, true, true, false, false, false, false},
+	"guard.id":             {true, false, true, true, false, false, false, false},
+	"guard.check":          {true, false, true, true, false, false, false, false},
+	"guard.policy_ref":     {true, false, true, true, false, false, false, false},
+	"query.source":         {true, false, true, true, false, false, false, false},
+	"query.entities":       {true, false, true, true, false, false, false, false},
+	"query.filter":         {true, false, true, true, false, false, false, false},
+	"query.group_by":       {true, false, true, true, false, false, false, false},
+	"query.store_as":       {true, false, true, true, false, false, false, false},
+	"group_by.items_from":  {true, false, true, true, false, false, false, false},
+	"group_by.key":         {true, false, true, true, false, false, false, false},
+	"group_by.store_as":    {true, false, true, true, false, false, false, false},
+	"filter.source":        {true, false, true, true, false, false, false, false},
+	"filter.items_from":    {true, false, true, true, false, false, false, false},
+	"filter.condition":     {true, false, true, true, false, false, false, false},
+	"filter.store_as":      {true, false, true, true, false, false, false, false},
+	"reduce.source":        {true, false, false, true, false, false, false, false},
+	"reduce.items_from":    {true, false, false, true, false, false, false, false},
+	"reduce.operation":     {true, false, true, true, false, false, false, false},
+	"reduce.store_as":      {true, false, true, true, false, false, false, false},
+	"count.source":         {true, false, false, true, false, false, false, false},
+	"count.items_from":     {true, false, false, true, false, false, false, false},
+	"count.condition":      {true, false, true, true, false, false, false, false},
+	"count.store_as":       {true, false, true, true, false, false, false, false},
+	"compute.store_as":     {true, false, true, true, false, false, false, false},
+	"compute.description":  {true, false, true, true, false, false, false, false},
+	"compute.value_field":  {true, false, false, false, false, false, false, false},
+	"compute.weight_field": {true, false, false, false, false, false, false, false},
+}
+
 func TestW4ScalarFieldPresenceAndTypedProjection(t *testing.T) {
 	for _, group := range []struct {
 		name, base string
@@ -32,6 +81,10 @@ func TestW4ScalarFieldPresenceAndTypedProjection(t *testing.T) {
 		{"compute", "operation: pick_or_average\n", func() any { return new(ComputeSpec) }, map[string]string{"store_as": "StoreAs", "description": "Description", "value_field": "ValueField", "weight_field": "WeightField"}},
 	} {
 		for field, carrier := range group.fields {
+			accepted, recorded := nodeScalarFieldAdmission[group.name+"."+field]
+			if !recorded {
+				t.Fatalf("missing approved field ledger for %s.%s", group.name, field)
+			}
 			t.Run(group.name+"."+field, func(t *testing.T) {
 				for index, shape := range nodePresenceShapes("payload.rows", "[payload.rows]", "{value: payload.rows}") {
 					t.Run(shape.name, func(t *testing.T) {
@@ -43,7 +96,7 @@ func TestW4ScalarFieldPresenceAndTypedProjection(t *testing.T) {
 						}
 						out := group.newTarget()
 						err := decodeNodeTestYAML([]byte(body), out)
-						want := index == 0 || index == 2 || index == 3
+						want := accepted[index]
 						if (err == nil) != want {
 							t.Fatalf("admitted=%t want=%t: %v", err == nil, want, err)
 						}

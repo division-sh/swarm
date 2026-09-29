@@ -28,6 +28,13 @@ func projectNodeDeclarationsValue(root yamlsource.Value) (map[string]SystemNodeC
 	}
 	out := make(map[string]SystemNodeContract, len(fields))
 	for _, field := range fields {
+		annotations, err := nodeHandlerAnnotations(field.Value)
+		if err != nil {
+			return nil, err
+		}
+		if err := field.Value.ValidateExpansion(annotations...); err != nil {
+			return nil, err
+		}
 		projected, err := projectSystemNodeValue(field.Value)
 		if err != nil {
 			return nil, fmt.Errorf("node %q: %w", field.Name, err)
@@ -35,7 +42,7 @@ func projectNodeDeclarationsValue(root yamlsource.Value) (map[string]SystemNodeC
 		projected.admissionProvenance = map[string]EffectiveValueProvenance{
 			"declaration": authoredSourceProvenance(field.Value),
 		}
-		if err := collectNodeValueProvenance(field.Value, "", projected.admissionProvenance); err != nil {
+		if err := collectNodeValueProvenance(field.Value, "", projected.admissionProvenance, annotations); err != nil {
 			return nil, fmt.Errorf("node %q provenance: %w", field.Name, err)
 		}
 		out[field.Name] = projected

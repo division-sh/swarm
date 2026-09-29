@@ -16,19 +16,8 @@ func projectNodeActivityValue(value yamlsource.Value) (ActivitySpec, error) {
 		return ActivitySpec{}, err
 	}
 	var out ActivitySpec
-	if id, present := fields["id"]; present {
-		out.ID, err = nodeValueText(id, "activity.id")
-		if err != nil {
-			return ActivitySpec{}, err
-		}
-		out.ID = strings.TrimSpace(out.ID)
-	}
-	if tool, present := fields["tool"]; present {
-		out.Tool, err = nodeValueText(tool, "activity.tool")
-		if err != nil {
-			return ActivitySpec{}, err
-		}
-		out.Tool = strings.TrimSpace(out.Tool)
+	if err := nodeValueTexts(fields, map[string]*string{"id": &out.ID, "tool": &out.Tool}, true); err != nil {
+		return ActivitySpec{}, err
 	}
 	if input, present := fields["input"]; present {
 		out.Input, err = projectNodeExpressionFields(input, "activity.input")
@@ -72,19 +61,10 @@ func projectNodeGuardValue(value yamlsource.Value) (*GuardSpec, error) {
 		return nil, err
 	}
 	out := &GuardSpec{}
-	for _, entry := range []struct {
-		key    string
-		target *string
-	}{
-		{"id", &out.ID}, {"check", &out.Check}, {"policy_ref", &out.PolicyRef},
-	} {
-		if field, present := fields[entry.key]; present {
-			*entry.target, err = nodeValueText(field, "guard."+entry.key)
-			if err != nil {
-				return nil, err
-			}
-			*entry.target = strings.TrimSpace(*entry.target)
-		}
+	if err := nodeValueTexts(fields, map[string]*string{
+		"id": &out.ID, "check": &out.Check, "policy_ref": &out.PolicyRef,
+	}, true); err != nil {
+		return nil, err
 	}
 	if checks, present := fields["checks"]; present {
 		items, err := checks.Sequence()
@@ -97,17 +77,8 @@ func projectNodeGuardValue(value yamlsource.Value) (*GuardSpec, error) {
 				return nil, err
 			}
 			var check GuardCheck
-			if id, present := checkFields["id"]; present {
-				check.ID, err = nodeValueText(id, "guard.checks.id")
-				if err != nil {
-					return nil, err
-				}
-			}
-			if expression, present := checkFields["check"]; present {
-				check.Check, err = nodeValueText(expression, "guard.checks.check")
-				if err != nil {
-					return nil, err
-				}
+			if err := nodeValueTexts(checkFields, map[string]*string{"id": &check.ID, "check": &check.Check}, false); err != nil {
+				return nil, err
 			}
 			out.Checks = append(out.Checks, check)
 		}
