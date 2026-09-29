@@ -15,19 +15,19 @@ const (
 )
 
 type EffectiveValueProvenance struct {
-	Origin         EffectiveValueOrigin
-	RuleID         string
-	InputPaths     []string
-	PackIdentity   string
-	SourceFile     string
-	SourceLine     int
-	SourceColumn   int
-	SourcePresence string
+	Origin         EffectiveValueOrigin `json:"origin" yaml:"origin"`
+	RuleID         string               `json:"rule_id,omitempty" yaml:"rule_id,omitempty"`
+	InputPaths     []string             `json:"input_paths,omitempty" yaml:"input_paths,omitempty"`
+	PackIdentity   string               `json:"pack_identity,omitempty" yaml:"pack_identity,omitempty"`
+	SourceFile     string               `json:"source_file,omitempty" yaml:"source_file,omitempty"`
+	SourceLine     int                  `json:"source_line,omitempty" yaml:"source_line,omitempty"`
+	SourceColumn   int                  `json:"source_column,omitempty" yaml:"source_column,omitempty"`
+	SourcePresence string               `json:"source_presence,omitempty" yaml:"source_presence,omitempty"`
 }
 
 type EffectiveProvenanceEntry struct {
-	Path       string
-	Provenance EffectiveValueProvenance
+	Path       string                   `json:"path" yaml:"path"`
+	Provenance EffectiveValueProvenance `json:"provenance" yaml:"provenance"`
 }
 
 // EffectiveProvenanceLedger is the immutable provenance owner for admitted
