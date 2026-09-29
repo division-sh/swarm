@@ -5,4 +5,4 @@ conformance:
     - catalog.verify.boot_diagnostics
   diagnostic:
     category: "DEPRECATED"
-    contains: "deprecated field \"logic\""
+    contains: "handler logic is retired"

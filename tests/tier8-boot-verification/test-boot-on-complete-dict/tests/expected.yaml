@@ -5,4 +5,4 @@ conformance:
     - catalog.verify.boot_diagnostics
   diagnostic:
     category: "DIALECT-OC-ORDER"
-    contains: "on_complete is dict, must be ordered list"
+    contains: "must be an ordered list"
