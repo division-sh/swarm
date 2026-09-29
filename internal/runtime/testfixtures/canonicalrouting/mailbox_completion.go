@@ -126,7 +126,7 @@ func CopyHumanTaskOwnership(t testing.TB, mode string) string {
 			writeClosedVariantFile(t, root, name, string(parent)+"\n"+string(child))
 		}
 		applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "      advances_to: active\n", "")
-		applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "    observer.requested:\n      create_entity: true\n", "    observer.requested:\n")
+		applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "    observer.requested:\n      create_entity: true\n", "    observer.requested: {}\n")
 		for _, name := range []string{"agents.yaml", "mocks/observer.py"} {
 			child, err := os.ReadFile(filepath.Join(root, "observers", name))
 			if err != nil {

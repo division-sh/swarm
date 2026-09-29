@@ -2,8 +2,10 @@ package authoringview
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -22,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateflowpilot"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatereply"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
+	"gopkg.in/yaml.v3"
 )
 
 func TestBuildShowsReplyPairedTopology(t *testing.T) {
@@ -72,6 +75,59 @@ func TestBuildExposesComposedNodeAndEventProvenance(t *testing.T) {
 	}
 	if !nodeFound || !eventFound {
 		t.Fatalf("describe projection lacks composed provenance: node=%t event=%t", nodeFound, eventFound)
+	}
+}
+
+func TestEffectiveProvenanceWireFormat(t *testing.T) {
+	entries := []runtimecontracts.EffectiveProvenanceEntry{{
+		Path: "nodes[worker].execution_type",
+		Provenance: runtimecontracts.EffectiveValueProvenance{
+			Origin: runtimecontracts.EffectiveValueOriginAuthored, SourceFile: "nodes.yaml",
+			SourceLine: 2, SourceColumn: 19, SourcePresence: "scalar",
+		},
+	}, {
+		Path: "nodes[worker].produces",
+		Provenance: runtimecontracts.EffectiveValueProvenance{
+			Origin: runtimecontracts.EffectiveValueOriginDerived,
+		},
+	}}
+	want := `[{
+		"path":"nodes[worker].execution_type",
+		"provenance":{"origin":"authored","source_file":"nodes.yaml","source_line":2,"source_column":19,"source_presence":"scalar"}
+	},{"path":"nodes[worker].produces","provenance":{"origin":"derived"}}]`
+	var expected any
+	if err := json.Unmarshal([]byte(want), &expected); err != nil {
+		t.Fatal(err)
+	}
+	for _, format := range []string{"json", "yaml"} {
+		t.Run(format, func(t *testing.T) {
+			var raw []byte
+			var actual any
+			var err error
+			if format == "json" {
+				raw, err = json.Marshal(entries)
+				if err == nil {
+					err = json.Unmarshal(raw, &actual)
+				}
+			} else {
+				raw, err = yaml.Marshal(entries)
+				if err == nil {
+					err = yaml.Unmarshal(raw, &actual)
+				}
+				if err == nil {
+					raw, err = json.Marshal(actual)
+				}
+				if err == nil {
+					err = json.Unmarshal(raw, &actual)
+				}
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(actual, expected) {
+				t.Fatalf("provenance wire keys or omission differ: %s", raw)
+			}
+		})
 	}
 }
 
