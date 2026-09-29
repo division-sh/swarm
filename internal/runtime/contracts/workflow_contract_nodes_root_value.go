@@ -150,6 +150,10 @@ func projectNodeHandlerValue(value yamlsource.Value) (SystemNodeEventHandler, er
 			out.Loop, err = projectNodeLoopValue(field)
 		case "compute":
 			out.Compute, err = projectNodeComputeValue(field)
+		case "rules":
+			out.Rules, err = projectNodeRuleRowsValue(field, handlerRuleDecodeContextRules)
+		case "on_complete":
+			out.OnComplete, err = projectNodeRuleRowsValue(field, handlerRuleDecodeContextOnComplete)
 		case "on_success":
 			out.OnSuccess, err = projectNodeOnSuccessValue(field)
 		case "sets_gate":
