@@ -4,7 +4,6 @@ test-node:
   produces: [task.acknowledged]
   event_handlers:
     task.completed:
-      from: "flow-a/agent-1"
       advances_to: done
       emit:
         event: task.acknowledged
