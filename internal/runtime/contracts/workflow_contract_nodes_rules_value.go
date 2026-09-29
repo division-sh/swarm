@@ -89,6 +89,16 @@ func projectNodeKeyedRulesValue(value yamlsource.Value, context handlerRuleDecod
 		}
 		if row.ID == "" {
 			row.ID = label
+			if row.Compute != nil {
+				switch {
+				case row.Compute.Lookup != nil:
+					row.Compute.Lookup.RowID = label
+				case row.Compute.Validation != nil:
+					row.Compute.Validation.RowID = label
+				case row.Compute.Module != nil:
+					row.Compute.Module.RowID = label
+				}
+			}
 		}
 		rows = append(rows, row)
 	}
@@ -189,7 +199,13 @@ func projectNodeRuleEntryValue(value yamlsource.Value, context handlerRuleDecode
 			return HandlerRuleEntry{}, err
 		}
 	case "lookup", "validate", "compute_module":
-		return HandlerRuleEntry{}, fmt.Errorf("source-aware %s policy row projection is not yet implemented at %s", selected, fields[selected].Location())
+		if !out.Emit.Empty() || out.AdvancesTo != "" || !out.Activity.Empty() || out.DataAccumulation.HasWrites() || out.FanOut != nil || out.Compute != nil {
+			return HandlerRuleEntry{}, fmt.Errorf("POLICY-SHEET-ROW: %s row at %s derives a value only and cannot declare branch outputs", selected, fields[selected].Location())
+		}
+		out.PolicyRow, out.Compute, err = projectNodePolicyValueRow(fields[selected], selected, out.ID)
+		if err != nil {
+			return HandlerRuleEntry{}, err
+		}
 	}
 	return out, nil
 }
