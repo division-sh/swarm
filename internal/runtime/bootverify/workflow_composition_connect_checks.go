@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/accumulator"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -231,7 +232,7 @@ func validateFanInBarrierJoinConsistency(source semanticview.Source, flowID stri
 			findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s declares accumulate for a barrier fan-in; use handler.join as the sole finite-barrier owner", label, plan.HandlerEvent), flowID))
 		}
 		resolution := pin.Resolution()
-		if authored := strings.TrimSpace(handler.Join.Members.By); authored != "" {
+		if authored := strings.TrimSpace(handler.Join.Members.By); handler.Join.Members.BySet || authored != "" {
 			findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s join.members.by derives from resolution.dedup_by (%s); remove authored by: %s", label, plan.HandlerEvent, strings.Join(resolution.DedupBy, ", "), authored), flowID))
 		}
 		window := strings.TrimSpace(resolution.Window)
@@ -241,7 +242,7 @@ func validateFanInBarrierJoinConsistency(source semanticview.Source, flowID stri
 		if window != "" {
 			if handler.Join.Window == nil || strings.TrimSpace(handler.Join.Window.From) == "" {
 				findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s requires join.window.from to snapshot the lifecycle window paired with resolution.window %s", label, plan.HandlerEvent, window), flowID))
-			} else if authored := strings.TrimSpace(handler.Join.Window.By); authored != "" {
+			} else if authored := strings.TrimSpace(handler.Join.Window.By); handler.Join.Window.BySet || authored != "" {
 				findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s join.window.by derives from resolution.window (%s); remove authored by: %s", label, plan.HandlerEvent, window, authored), flowID))
 			}
 		}
@@ -286,11 +287,8 @@ func validateFanInAccumulatorConsistency(source semanticview.Source, flowID stri
 			findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s for fan-in input must declare accumulate", endpoint.NodeID, endpoint.HandlerEvent), flowID))
 			continue
 		}
-		if dedup := strings.TrimSpace(handler.Accumulate.DedupBy); dedup != "" {
-			findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s accumulate.dedup_by %q must not redeclare fan-in dedup_by; declare it once on the receiver input pin resolution", endpoint.NodeID, endpoint.HandlerEvent, dedup), flowID))
-		}
-		if window := strings.TrimSpace(handler.Accumulate.Window); window != "" {
-			findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s accumulate.window %q must not redeclare fan-in window; declare it once on the receiver input pin resolution", endpoint.NodeID, endpoint.HandlerEvent, window), flowID))
+		if _, err := accumulator.EffectiveSpecForHandler(source, node, endpoint.HandlerEvent, handler.Accumulate); err != nil {
+			findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", err.Error(), flowID))
 		}
 	}
 	if !matchedHandler {

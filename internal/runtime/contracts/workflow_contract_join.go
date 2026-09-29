@@ -32,6 +32,7 @@ type JoinSpec struct {
 	outputFound     bool
 	completeFound   bool
 	remainingFound  bool
+	timeoutFound    bool
 }
 
 type JoinMembersSpec struct {
@@ -41,7 +42,7 @@ type JoinMembersSpec struct {
 	ByPath          paths.Path `yaml:"-"`
 	FromFanOut      bool       `yaml:"from_fan_out"`
 	fromFound       bool
-	byFound         bool
+	BySet           bool `yaml:"-"`
 	fromFanOutFound bool
 }
 
@@ -58,6 +59,7 @@ type JoinWindowSpec struct {
 	FromPath paths.Path `yaml:"-"`
 	By       string     `yaml:"by"`
 	ByPath   paths.Path `yaml:"-"`
+	BySet    bool       `yaml:"-"`
 }
 
 type JoinTimeoutSpec struct {
@@ -151,12 +153,12 @@ func (s JoinSpec) ValidateAuthoredShape() error {
 	}
 	add("stage", s.stageFound || strings.TrimSpace(s.Stage) != "")
 	add("members.from", s.Members.fromFound || strings.TrimSpace(s.Members.From) != "")
-	add("members.by", s.Members.byFound || strings.TrimSpace(s.Members.By) != "")
+	add("members.by", s.Members.BySet || strings.TrimSpace(s.Members.By) != "")
 	add("window", s.windowFound || s.Window != nil)
 	add("output", s.outputFound || strings.TrimSpace(s.Output) != "")
 	add("complete_when", s.completeFound || strings.TrimSpace(s.CompleteWhen) != "")
 	add("remaining", s.remainingFound || strings.TrimSpace(s.Remaining) != "")
-	add("timeout", s.TimeoutFound)
+	add("timeout", s.timeoutFound || s.TimeoutFound)
 	if len(forbidden) != 0 {
 		return fmt.Errorf("fan-out delivery join forbids arrival-only fields %s", strings.Join(forbidden, ", "))
 	}
