@@ -36,6 +36,7 @@ func projectNodeJoinValue(value yamlsource.Value) (*JoinSpec, error) {
 	_, out.outputFound = fields["output"]
 	_, out.completeFound = fields["complete_when"]
 	_, out.remainingFound = fields["remaining"]
+	_, out.timeoutFound = fields["timeout"]
 	if out.ID == "" {
 		out.ID = out.Stage
 	}
@@ -107,7 +108,7 @@ func projectNodeJoinMembersValue(value yamlsource.Value) (JoinMembersSpec, error
 		}
 		out.By = strings.TrimSpace(out.By)
 		out.ByPath = paths.Parse(out.By)
-		out.byFound = true
+		out.BySet = true
 	}
 	if fanOut, present := fields["from_fan_out"]; present {
 		out.FromFanOut, err = nodeValueBool(fanOut, "join.members.from_fan_out")
@@ -140,6 +141,7 @@ func projectNodeJoinWindowValue(value yamlsource.Value) (*JoinWindowSpec, error)
 		}
 		out.By = strings.TrimSpace(out.By)
 		out.ByPath = paths.Parse(out.By)
+		out.BySet = true
 	}
 	return out, nil
 }

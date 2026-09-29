@@ -39,3 +39,42 @@ func TestProjectNodeJoinValueRejectsArrivalFieldsInFanOutMode(t *testing.T) {
 		t.Fatalf("expected source-located fan-out shape rejection, got %v", err)
 	}
 }
+
+func TestW4DeliveryJoinForbiddenFieldPresence(t *testing.T) {
+	const base = "id: delivered\nmembers: {from_fan_out: true}\non_complete: {emit: batch.completed}\n"
+	for _, field := range []string{"stage", "window", "output", "complete_when", "remaining", "timeout", "members.from", "members.by"} {
+		t.Run(field, func(t *testing.T) {
+			for _, shape := range nodePresenceShapes("waiting", "[waiting]", "{from: entity.batch, by: payload.batch}") {
+				t.Run(shape.name, func(t *testing.T) {
+					body := base
+					if shape.name != "missing" {
+						if member, found := strings.CutPrefix(field, "members."); found {
+							body = strings.Replace(body, "members: {from_fan_out: true}", "members:\n  from_fan_out: true\n  "+member+": "+shape.value, 1)
+						} else {
+							body += field + ": " + shape.value + "\n"
+						}
+					}
+					var join JoinSpec
+					err := decodeNodeTestYAML([]byte(body), &join)
+					if shape.name == "missing" {
+						if err != nil || !join.IsFanOutDeliveryBarrier() || join.ID != "delivered" || join.OnComplete.Emit.Event != "batch.completed" {
+							t.Fatalf("valid delivery join lost its typed facts: %#v, %v", join, err)
+						}
+					} else if err == nil {
+						t.Fatalf("delivery join admitted forbidden %s in %s state: %#v", field, shape.name, join)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestW4ArrivalJoinNullTimeoutRemainsOmitted(t *testing.T) {
+	var join JoinSpec
+	if err := decodeNodeTestYAML([]byte("stage: awaiting\nmembers: {from: entity.ids, by: payload.id}\ntimeout: null\n"), &join); err != nil {
+		t.Fatal(err)
+	}
+	if join.Mode() != WorkflowJoinModeArrival || join.TimeoutFound || !join.timeoutFound || join.Members.By != "payload.id" || !join.Members.BySet {
+		t.Fatalf("arrival mode/null timeout meaning changed: %#v", join)
+	}
+}
