@@ -77,9 +77,7 @@ func MaybeRotateAfterTurn(ctx context.Context, s *Session, registry sessions.Reg
 	s.ProviderSessionID = ""
 	s.TurnCount = 0
 	s.ParseFailures = 0
-	s.Messages = []Message{
-		{Role: "system", Content: "Previous session summary:\n" + summary},
-	}
+	s.Messages = RotationCheckpointConversation(summary)
 	if sink != nil {
 		LogSessionRotatedForRun(ctx, sink, s.MemoryIdentity, oldSessionID, lease.SessionID, fmt.Sprintf("turn_limit_reached:%d", rotateAfter), oldTurnCount, oldParseFailures)
 	} else {
@@ -120,9 +118,7 @@ func MaybeRotateAfterParseFailures(ctx context.Context, s *Session, registry ses
 	s.ProviderSessionID = ""
 	s.TurnCount = 0
 	s.ParseFailures = 0
-	s.Messages = []Message{
-		{Role: "system", Content: "Previous session summary:\n" + summary},
-	}
+	s.Messages = RotationCheckpointConversation(summary)
 	if sink != nil {
 		LogSessionRotatedForRun(ctx, sink, s.MemoryIdentity, oldSessionID, lease.SessionID, fmt.Sprintf("parse_failures_threshold:%d", threshold), oldTurnCount, oldParseFailures)
 	} else {
@@ -171,6 +167,13 @@ func BuildRotationCheckpoint(reason string, s *Session) string {
 		return fmt.Sprintf("rotation_reason=%s", reason)
 	}
 	return fmt.Sprintf("rotation_reason=%s\n%s", reason, summary)
+}
+
+func RotationCheckpointConversation(summary string) []Message {
+	if strings.TrimSpace(summary) == "" {
+		return []Message{}
+	}
+	return []Message{{Role: "system", Content: "Previous session summary:\n" + summary}}
 }
 
 func LogSessionRotated(identity agentmemory.Identity, oldSessionID, newSessionID, reason string, turnCount, parseFailures int) {

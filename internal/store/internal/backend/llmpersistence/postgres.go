@@ -158,6 +158,9 @@ func (s *LLMPostgresOwner) UpsertConversation(ctx context.Context, lease *runtim
 			if _, err := requirePostgresLiveSessionAuthority(sqlCtx, tx, identity, "upsert_conversation", false); err != nil {
 				return err
 			}
+			if err := requirePostgresCurrentSessionGrantTx(sqlCtx, tx, lease); err != nil {
+				return err
+			}
 			var storedSessionID, storedRunID string
 			err := tx.QueryRowContext(sqlCtx, `
 		UPDATE agent_sessions SET conversation=$1::jsonb, turn_count=$2,
@@ -166,7 +169,7 @@ func (s *LLMPostgresOwner) UpsertConversation(ctx context.Context, lease *runtim
 			  AND agent_name_owner=$7 AND agent_name_source=$8 AND agent_route_presence=$9
 			  AND flow_scope_key=$10 AND flow_instance_id=$11 AND flow_instance=$12
 			  AND memory_enabled=$13 AND memory_source=$14 AND status='active'
-			  AND lease_holder=$15 AND lease_grant_id=$16 AND lease_expires_at>clock_timestamp()
+			  AND lease_holder=$15 AND lease_grant_id=$16
 			RETURNING session_id::text, run_id::text
 		`, string(messages), rec.TurnCount, state, strings.TrimSpace(rec.SessionID), identity.RunID,
 				fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey,
@@ -330,6 +333,9 @@ func (s *LLMPostgresOwner) UpdateLiveSessionWatchdog(ctx context.Context, lease 
 			if _, err := requirePostgresLiveSessionAuthority(sqlCtx, tx, identity, "update_watchdog", false); err != nil {
 				return err
 			}
+			if err := requirePostgresCurrentSessionGrantTx(sqlCtx, tx, lease); err != nil {
+				return err
+			}
 			var storedSessionID, storedRunID string
 			err := tx.QueryRowContext(sqlCtx, `
 			UPDATE agent_sessions SET runtime_state=COALESCE(runtime_state,'{}'::jsonb) || $1::jsonb,updated_at=now()
@@ -337,7 +343,7 @@ func (s *LLMPostgresOwner) UpdateLiveSessionWatchdog(ctx context.Context, lease 
 			  AND agent_name_owner=$5 AND agent_name_source=$6 AND agent_route_presence=$7
 			  AND flow_scope_key=$8 AND flow_instance_id=$9 AND flow_instance=$10
 			  AND memory_enabled=TRUE AND status='active'
-			  AND lease_holder=$11 AND lease_grant_id=$12 AND lease_expires_at>clock_timestamp()
+			  AND lease_holder=$11 AND lease_grant_id=$12
 			RETURNING session_id::text, run_id::text
 		`, patch, update.SessionID, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource,
 				fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, lease.LockOwner, lease.GrantID).Scan(&storedSessionID, &storedRunID)
