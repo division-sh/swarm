@@ -31,7 +31,7 @@ func TestRetiredBuilderSemanticReferencesStayExplicit(t *testing.T) {
 	}
 
 	expectedCounts := map[string]int{
-		".github/audit-artifacts/issue-2447-postimplementation.md":                     1,
+		".github/audit-artifacts/issue-2447-postimplementation.md":                     2,
 		".github/complexity-baseline.json":                                             81,
 		".github/audit-artifacts/issue-2007-failure-class.yaml":                        14,
 		".github/audit-artifacts/issue-2378-failure-class.yaml":                        82,
