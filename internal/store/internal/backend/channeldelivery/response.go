@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
+	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/store/internal/backend/decisionpersistence"
 	"github.com/google/uuid"
@@ -25,6 +26,15 @@ func PlanNativeInboxResponseTx(ctx context.Context, tx *sql.Tx, text operatorcha
 		return "", err
 	}
 	entry, found, err := ResolveCurrentNativeInboxEntryTx(ctx, tx, text, postgres)
+	if err == nil && found {
+		qualification, qualificationErr := ReadNativeInboxQualificationTx(ctx, tx, entry.ActivationID, postgres)
+		if qualificationErr != nil {
+			return "", qualificationErr
+		}
+		if qualification.State != channelnative.QualificationQualified || qualification.SettingID != entry.SettingID || qualification.SettingGeneration != entry.SettingGeneration {
+			return "", fmt.Errorf("native inbox response requires exact current client qualification")
+		}
+	}
 	if err != nil {
 		return "", err
 	}
@@ -51,7 +61,7 @@ func PlanNativeInboxResponseTx(ctx context.Context, tx *sql.Tx, text operatorcha
 	if len(recovery) == 0 {
 		frozen, err = render.FreezeResponse(text.PublicationID, fullText, audience)
 	} else {
-		frozen, err = render.FreezeRecoveryInbox(text.PublicationID, fullText, recovery, 0, audience)
+		frozen, err = render.FreezeRecoveryInbox(text.PublicationID, fullText, recovery, audience)
 	}
 	if err != nil {
 		return "", err
@@ -148,7 +158,7 @@ func PlanDraftChooserTx(ctx context.Context, tx *sql.Tx, text operatorchannel.In
 	if len(choices) < 2 {
 		return "", fmt.Errorf("draft chooser no longer has multiple current prompts")
 	}
-	frozen, err := render.FreezeDraftChooser(text.PublicationID, text.PublicationID, choices, 0, audience)
+	frozen, err := render.FreezeDraftChooser(text.PublicationID, text.PublicationID, choices, audience)
 	if err != nil {
 		return "", err
 	}
@@ -314,36 +324,6 @@ func PlanActionResponseTx(ctx context.Context, tx *sql.Tx, action operatorchanne
 			return "", fmt.Errorf("view-full page audience changed")
 		}
 		frozen, err = render.FreezeResponsePage(action.PublicationID, source, sourceRenderID, index, audience)
-	case "next_draft_page":
-		if inboxText != "" {
-			return "", fmt.Errorf("draft chooser page cannot receive caller content")
-		}
-		stored, current, loadErr := LoadRender(ctx, tx, resolved.RenderID, postgres)
-		if loadErr != nil {
-			return "", loadErr
-		}
-		if !current || stored.Frozen.Hash != resolved.RenderHash || stored.Frozen.Audience != audience ||
-			stored.Frozen.DraftChooser == nil {
-			return "", fmt.Errorf("draft chooser page lacks current immutable source")
-		}
-		chooser := stored.Frozen.DraftChooser
-		frozen, err = render.FreezeDraftChooser(action.PublicationID, chooser.TextPublicationID,
-			stored.Frozen.DraftChoices, chooser.PageIndex+1, audience)
-	case "next_recovery_page":
-		if inboxText != "" {
-			return "", fmt.Errorf("recovery page cannot receive caller content")
-		}
-		stored, current, loadErr := LoadRender(ctx, tx, resolved.RenderID, postgres)
-		if loadErr != nil {
-			return "", loadErr
-		}
-		if !current || stored.Frozen.Hash != resolved.RenderHash || stored.Frozen.Audience != audience ||
-			stored.Frozen.Recovery == nil {
-			return "", fmt.Errorf("recovery page lacks current immutable source")
-		}
-		recovery := stored.Frozen.Recovery
-		frozen, err = render.FreezeRecoveryInbox(action.PublicationID, recovery.BaseText,
-			stored.Frozen.RecoveryChoices, recovery.PageIndex+1, audience)
 	case "select_draft":
 		if inboxText != "" {
 			return "", fmt.Errorf("draft choice teaching cannot receive caller content")

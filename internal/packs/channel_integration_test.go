@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -41,6 +42,42 @@ import (
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 )
+
+func TestChannelNormativeOperationInventoryMatchesCompiledEffects(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "platform-spec.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		ToolModel struct {
+			Channel struct {
+				Operations struct {
+					Names   []string          `yaml:"exact_operations"`
+					Effects map[string]string `yaml:"effects"`
+				} `yaml:"operation_model"`
+			} `yaml:"hitl_channel_pack_interface"`
+		} `yaml:"tool_model"`
+	}
+	if err := yaml.Unmarshal(body, &document); err != nil {
+		t.Fatal(err)
+	}
+	registry, channel, trigger, connector := loadTelegramChannelCompilerInputs(t)
+	plan, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventory := document.ToolModel.Channel.Operations
+	sort.Strings(inventory.Names)
+	if !reflect.DeepEqual(inventory.Names, plan.OperationNames()) || len(inventory.Effects) != len(inventory.Names) {
+		t.Fatalf("normative operations=%v effects=%v compiled=%v", inventory.Names, inventory.Effects, plan.OperationNames())
+	}
+	for _, name := range inventory.Names {
+		effect, err := plan.OperationEffectClass(name)
+		if err != nil || inventory.Effects[name] != string(effect) {
+			t.Fatalf("%s normative effect=%q compiled=%q: %v", name, inventory.Effects[name], effect, err)
+		}
+	}
+}
 
 func TestChannelSchemaAdmissionRejectsRecursiveMalformedSchemasAtEveryTypedBoundary(t *testing.T) {
 	tests := []struct {
@@ -87,6 +124,30 @@ func TestChannelSchemaAdmissionRejectsRecursiveMalformedSchemasAtEveryTypedBound
 func TestChannelGenerationRejectsProgrammaticEmptyEnum(t *testing.T) {
 	if _, err := runtimecontracts.NewToolInputSchema(runtimecontracts.ToolSchemaString, runtimecontracts.ToolSchemaEnum()); err == nil || !strings.Contains(err.Error(), "enum must contain at least one value") {
 		t.Fatalf("schema admission empty enum error = %v", err)
+	}
+}
+
+func TestNativeInboxReadPinsTheExplicitSelectedLocale(t *testing.T) {
+	registry, channel, trigger, connector := loadTelegramChannelCompilerInputs(t)
+	structural, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := packs.NewOutboundBindingPlan("native-locale-proof", structural, "1001", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, locale := range []string{"en", "fr", ""} {
+		for _, operation := range []string{"read_inbox_entry", "read_shared_inbox_entry"} {
+			input := map[string]any{"language_code": locale}
+			if operation == "read_shared_inbox_entry" {
+				input["member_reference"] = "7000"
+			}
+			_, prepared, err := plan.PrepareOperation(operation, input)
+			if err != nil || prepared["language_code"] != locale {
+				t.Fatalf("%s/%q did not read the selected locale: input=%v err=%v", operation, locale, prepared, err)
+			}
+		}
 	}
 }
 
@@ -290,8 +351,8 @@ func TestTelegramChannelPackCompilesThroughAcceptedProductionInventories(t *test
 	if err != nil {
 		t.Fatalf("NewOutboundBindingPlan: %v", err)
 	}
-	if capacity, err := binding.ActionCapacity(); err != nil || capacity != 8 {
-		t.Fatalf("Telegram selected action capacity = %d, %v", capacity, err)
+	if capacity, err := binding.PresentationBounds(); err != nil || capacity.Actions != 8 || capacity.TextRunes != 4096 || capacity.LabelRunes != 64 {
+		t.Fatalf("Telegram selected action capacity = %+v, %v", capacity, err)
 	}
 	if subject, err := plan.CapabilitySubject(); err != nil || subject.Kind != packs.SubjectChannelPack || subject.Status != packs.StatusAvailable {
 		t.Fatalf("channel pack subject = %#v, err=%v", subject, err)
@@ -597,8 +658,8 @@ func TestProductionCompilerAcceptsStructurallyDifferentTighterSatisfier(t *testi
 	if err != nil {
 		t.Fatalf("NewOutboundBindingPlan(mock): %v", err)
 	}
-	if capacity, err := binding.ActionCapacity(); err != nil || capacity != 2 {
-		t.Fatalf("mock selected action capacity = %d, %v", capacity, err)
+	if capacity, err := binding.PresentationBounds(); err != nil || capacity.Actions != 2 || capacity.TextRunes != 512 || capacity.LabelRunes != 24 {
+		t.Fatalf("mock selected action capacity = %+v, %v", capacity, err)
 	}
 	_, prepared, err := binding.PrepareOperation("acknowledge_interaction", map[string]any{
 		"interaction_reference": map[string]any{"cursor": "cursor-a"},
@@ -644,15 +705,7 @@ func TestChannelGoldenCardDifferentialSatisfierParity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	presentation, truncated, err := channeldelivery.PresentationText(frozen)
-	if err != nil || truncated || len(frozen.Choices) != 1 {
-		t.Fatalf("golden card presentation = %q, truncated=%t, choices=%d, err=%v", presentation, truncated, len(frozen.Choices), err)
-	}
 	token := uuid.NewString()
-	semantic := map[string]any{
-		"presentation": map[string]any{"text": presentation},
-		"actions":      []any{map[string]any{"label": "accept", "token": token}},
-	}
 	registry := loadChannelInterfaceRegistry(t)
 	mockChannel, mockTrigger, mockConnector := mockChannelSatisfier()
 	mockPlan, err := packs.CompileChannel(registry, mockChannel, []packs.TriggerPackDescriptor{mockTrigger}, []packs.ConnectorPackDescriptor{mockConnector})
@@ -672,6 +725,22 @@ func TestChannelGoldenCardDifferentialSatisfierParity(t *testing.T) {
 			binding, err := packs.NewOutboundBindingPlan("golden", tc.plan, tc.destination, nil)
 			if err != nil {
 				t.Fatal(err)
+			}
+			bounds, err := binding.PresentationBounds()
+			if err != nil {
+				t.Fatal(err)
+			}
+			selected, err := channeldelivery.WithPresentation(frozen, bounds, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			presentation, truncated, err := channeldelivery.PresentationText(selected)
+			if err != nil || truncated || len(selected.Choices) != 1 {
+				t.Fatalf("golden card presentation = %q, truncated=%t, choices=%d, err=%v", presentation, truncated, len(selected.Choices), err)
+			}
+			semantic := map[string]any{
+				"presentation": map[string]any{"text": presentation},
+				"actions":      []any{map[string]any{"label": "accept", "token": token}},
 			}
 			_, providerInput, err := binding.PrepareOperation("deliver", semantic)
 			if err != nil {
@@ -804,7 +873,7 @@ func TestChannelNativeInboxOperationsRemainProviderNeutral(t *testing.T) {
 			if _, ok := install["commands"]; !ok {
 				t.Fatalf("install dropped exact commands: %#v", install)
 			}
-			_, read, err := binding.PrepareOperation("read_inbox_entry", map[string]any{})
+			_, read, err := binding.PrepareOperation("read_inbox_entry", map[string]any{"language_code": ""})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -835,7 +904,7 @@ func TestChannelNativeInboxOperationsRemainProviderNeutral(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, sharedRead, err := binding.PrepareOperation("read_shared_inbox_entry", map[string]any{"member_reference": member})
+			_, sharedRead, err := binding.PrepareOperation("read_shared_inbox_entry", map[string]any{"member_reference": member, "language_code": ""})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -868,6 +937,7 @@ func TestChannelNativeInboxCapabilityConformance(t *testing.T) {
 	for _, operation := range []string{
 		"identify_inbox_address", "install_inbox_entry", "read_inbox_entry",
 		"install_shared_inbox_entry", "read_shared_inbox_entry",
+		"read_inbox_launcher", "read_default_inbox_launcher",
 	} {
 		t.Run(operation, func(t *testing.T) {
 			channel, trigger, connector := mockChannelSatisfier()
@@ -1939,6 +2009,8 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 	}, "command", "description")
 	inboxInstall := mockArraySchema(1, 1, inboxCommand)
 	inboxReadback := mockArraySchema(0, 100, inboxCommand)
+	clientLanguage := runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string"), runtimecontracts.ToolSchemaEnum("", "en", "fr"))
+	launcher := runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string"), runtimecontracts.ToolSchemaEnum("commands", "default", "web_app"))
 	connectorTools := map[string]runtimecontracts.ToolSchemaEntry{
 		"mock.deliver": mockConnectorTool(mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{
 			"destination": destination, "body": text512, "controls": actions,
@@ -1955,7 +2027,7 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 		"mock.read_inbox": runtimecontracts.MustToolSchemaEntry(
 			runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassReadOnly),
 			runtimecontracts.WithToolSchemas(
-				mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"destination": destination}, "destination"),
+				mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"destination": destination, "language": clientLanguage}, "destination", "language"),
 				mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"commands": inboxReadback}, "commands"),
 			),
 		),
@@ -1965,7 +2037,7 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 		"mock.read_member_inbox": runtimecontracts.MustToolSchemaEntry(
 			runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassReadOnly),
 			runtimecontracts.WithToolSchemas(
-				mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"destination": destination, "member": externalAccount}, "destination", "member"),
+				mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"destination": destination, "member": externalAccount, "language": clientLanguage}, "destination", "member", "language"),
 				mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"commands": inboxReadback}, "commands"),
 			),
 		),
@@ -1974,6 +2046,20 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 			runtimecontracts.WithToolSchemas(
 				mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{}),
 				mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"address": mockStringSchema(5, 32, "")}, "address"),
+			),
+		),
+		"mock.read_room_launcher": runtimecontracts.MustToolSchemaEntry(
+			runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassReadOnly),
+			runtimecontracts.WithToolSchemas(
+				mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"destination": destination}, "destination"),
+				mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"mode": launcher}, "mode"),
+			),
+		),
+		"mock.read_default_launcher": runtimecontracts.MustToolSchemaEntry(
+			runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassReadOnly),
+			runtimecontracts.WithToolSchemas(
+				mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{}),
+				mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"mode": launcher}, "mode"),
 			),
 		),
 		"mock.identify_workspace": mockRegistrationTool(
@@ -2009,6 +2095,11 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 	}
 	manifest := packs.ChannelManifest{
 		Provider: "mock",
+		NativeInbox: &packs.NativeInboxProfile{
+			Kind: "scoped_commands_v1", ClientLanguages: []string{"en", "fr"},
+			DirectLauncherRead: "read_inbox_launcher", DefaultLauncherRead: "read_default_inbox_launcher",
+			CommandsLauncher: "commands", InheritedLauncher: "default",
+		},
 		Registration: &packs.ChannelRegistrationProfile{
 			Slot: packs.ChannelRegistrationSlot{
 				Namespace: "workspace_webhook",
@@ -2050,18 +2141,22 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 				"destination.queue": {From: "context.destination.queue"}, "commands": {From: "input.commands"},
 			}},
 			"read_inbox_entry": {Tool: "mock.read_inbox", Input: map[string]packs.ChannelMapping{
-				"destination.queue": {From: "context.destination.queue"},
+				"destination.queue": {From: "context.destination.queue"}, "language": {From: "input.language_code"},
 			}, Output: map[string]packs.ChannelMapping{"commands": {From: "result.commands"}}},
 			"install_shared_inbox_entry": {Tool: "mock.install_member_inbox", Input: map[string]packs.ChannelMapping{
 				"destination.queue": {From: "context.destination.queue"}, "member.principal": {From: "input.member_reference.principal"},
 				"commands": {From: "input.commands"},
 			}},
 			"read_shared_inbox_entry": {Tool: "mock.read_member_inbox", Input: map[string]packs.ChannelMapping{
-				"destination.queue": {From: "context.destination.queue"}, "member.principal": {From: "input.member_reference.principal"},
+				"destination.queue": {From: "context.destination.queue"}, "member.principal": {From: "input.member_reference.principal"}, "language": {From: "input.language_code"},
 			}, Output: map[string]packs.ChannelMapping{"commands": {From: "result.commands"}}},
 			"identify_inbox_address": {Tool: "mock.read_address", Output: map[string]packs.ChannelMapping{
 				"address_reference": {From: "result.address"},
 			}},
+			"read_inbox_launcher": {Tool: "mock.read_room_launcher", Input: map[string]packs.ChannelMapping{
+				"destination.queue": {From: "context.destination.queue"},
+			}, Output: map[string]packs.ChannelMapping{"launcher": {From: "result.mode"}}},
+			"read_default_inbox_launcher": {Tool: "mock.read_default_launcher", Output: map[string]packs.ChannelMapping{"launcher": {From: "result.mode"}}},
 		},
 		Events: map[string]packs.ChannelEventBinding{
 			"action": {Event: "mock.action", Fields: map[string]string{

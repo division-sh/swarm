@@ -119,6 +119,13 @@ func (s *DecisionSQLiteOwner) ProposedEffectReadback(ctx context.Context, cardID
 	return proposedEffectReadback(ctx, s.backend, cardID, false)
 }
 
+func ProposedEffectReadbackInTx(ctx context.Context, tx *sql.Tx, cardID string, postgres bool) (decisioncard.ProposedEffectReadback, error) {
+	if tx == nil {
+		return decisioncard.ProposedEffectReadback{}, fmt.Errorf("proposed effect readback requires a transaction")
+	}
+	return proposedEffectReadback(ctx, tx, cardID, postgres)
+}
+
 func proposedEffectReadback(ctx context.Context, db decisionCardSQL, cardID string, postgres bool) (decisioncard.ProposedEffectReadback, error) {
 	continuation, err := loadProposedEffectContinuation(ctx, db, cardID, postgres, false)
 	if err != nil {
