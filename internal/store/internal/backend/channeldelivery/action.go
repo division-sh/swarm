@@ -12,11 +12,11 @@ import (
 	"github.com/google/uuid"
 )
 
-// AdvanceCardActionPageTx moves one verified tap to the next immutable page
+// AdvanceActionPageTx moves one verified tap to the next immutable page
 // and settles that tap atomically with the selected plan pointer.
-func AdvanceCardActionPageTx(ctx context.Context, tx *sql.Tx, action operatorchannel.InboundAction,
+func AdvanceActionPageTx(ctx context.Context, tx *sql.Tx, action operatorchannel.InboundAction,
 	expected render.ResolvedAction, postgres bool) error {
-	if tx == nil || expected.SourceKind != PlanCard || expected.Action.Kind != "more_controls" ||
+	if tx == nil || expected.Action.Kind != "more_controls" ||
 		expected.Action.Token != action.Token {
 		return fmt.Errorf("card action page requires an exact verified control")
 	}
@@ -41,7 +41,7 @@ func AdvanceCardActionPageTx(ctx context.Context, tx *sql.Tx, action operatorcha
 	if err != nil {
 		return err
 	}
-	if !found || plan.SourceKind != PlanCard || plan.State != "sent" ||
+	if !found || plan.SourceKind != expected.SourceKind || plan.State != "sent" ||
 		plan.CurrentRenderID != resolved.RenderID || plan.CurrentReceiptID != resolved.ReceiptOperationID {
 		return fmt.Errorf("card action page has no exact sent plan")
 	}
@@ -51,7 +51,7 @@ func AdvanceCardActionPageTx(ctx context.Context, tx *sql.Tx, action operatorcha
 	}
 	if !found || stored.Frozen.Hash != resolved.RenderHash || stored.Frozen.ActionPage == nil ||
 		stored.Frozen.ActionPage.Index != plan.ActionPageIndex ||
-		stored.Frozen.ActionPage.Capacity != plan.ActionCapacity {
+		stored.Frozen.Bounds != plan.Bounds {
 		return fmt.Errorf("card action page contradicts current frozen render")
 	}
 	pages, err := render.ActionPageCount(stored.Frozen)
@@ -197,30 +197,14 @@ func actionsForFrozen(frozen render.Frozen) ([]render.Action, error) {
 		}
 	}
 	if frozen.DraftChooser != nil {
-		start := frozen.DraftChooser.PageIndex * render.DraftChooserPageSize
-		end := start + render.DraftChooserPageSize
-		if end > len(frozen.DraftChoices) {
-			end = len(frozen.DraftChoices)
-		}
-		for _, choice := range frozen.DraftChoices[start:end] {
+		for _, choice := range frozen.DraftChoices {
 			desired = append(desired, render.Action{Kind: "select_draft", DraftID: choice.DraftID, CardID: choice.CardID,
 				TextPublicationID: frozen.DraftChooser.TextPublicationID, Label: choice.Label})
 		}
-		if end < len(frozen.DraftChoices) {
-			desired = append(desired, render.Action{Kind: "next_draft_page", Label: "More choices"})
-		}
 	}
 	if frozen.Recovery != nil {
-		start := frozen.Recovery.PageIndex * render.DraftChooserPageSize
-		end := start + render.DraftChooserPageSize
-		if end > len(frozen.RecoveryChoices) {
-			end = len(frozen.RecoveryChoices)
-		}
-		for _, choice := range frozen.RecoveryChoices[start:end] {
+		for _, choice := range frozen.RecoveryChoices {
 			desired = append(desired, render.Action{Kind: "resend", RecoveryDeliveryID: choice.DeliveryID, Label: choice.Label})
-		}
-		if end < len(frozen.RecoveryChoices) {
-			desired = append(desired, render.Action{Kind: "next_recovery_page", Label: "More uncertain"})
 		}
 	}
 	if frozen.SourceKind == PlanSummary {
@@ -237,7 +221,7 @@ func actionsForFrozen(frozen render.Frozen) ([]render.Action, error) {
 		return nil, err
 	}
 	if truncated {
-		desired = append(desired, render.Action{Kind: "view_full", Label: "View full"})
+		desired = append([]render.Action{{Kind: "view_full", Label: "View full"}}, desired...)
 	}
 	if page := frozen.ActionPage; page != nil {
 		if len(desired) > page.Capacity {
@@ -257,6 +241,9 @@ func actionsForFrozen(frozen render.Frozen) ([]render.Action, error) {
 			paged := append([]render.Action(nil), desired[start:end]...)
 			desired = append(paged, render.Action{Kind: "more_controls", Label: "More choices"})
 		}
+	}
+	for index := range desired {
+		desired[index].Label = frozen.Bounds.Label(desired[index].Label)
 	}
 	return desired, nil
 }
