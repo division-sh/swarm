@@ -41,6 +41,32 @@ type goldenWorkloadOptions struct {
 	processGOMAXPROCS   int
 	runDeadline         time.Duration
 	publicBoundaryProof bool
+	repeatSequential    bool
+}
+
+func TestGoldenAgentWorkloadSequentialRunsBothStores(t *testing.T) {
+	releaseRoot := goldenReleaseRoot(t)
+	binaryPath := buildReleaseBinary(t, releaseRoot)
+	lifecycleBinary := buildOwnedMockLifecycleBinary(t, releaseRoot)
+	options := goldenWorkloadOptions{
+		lifecycleBinary:   lifecycleBinary,
+		candidateIDs:      goldenBurstCandidateIDs(),
+		processGOMAXPROCS: goldenBurstGOMAXPROCS,
+		runDeadline:       goldenBurstDeadline,
+		repeatSequential:  true,
+	}
+	t.Run("sqlite", func(t *testing.T) {
+		root := filepath.Join(releaseRoot, "sequential-runs-sqlite")
+		runGoldenAgentWorkload(t, binaryPath, root, goldenSQLiteStore(root), false, options)
+	})
+	t.Run("postgres", func(t *testing.T) {
+		dsn := strings.TrimSpace(os.Getenv(goldenPostgresEnv))
+		if dsn == "" {
+			t.Fatalf("%s is required for the dual-store sequential-run proof", goldenPostgresEnv)
+		}
+		root := filepath.Join(releaseRoot, "sequential-runs-postgres")
+		runGoldenAgentWorkload(t, binaryPath, root, goldenPostgresStore(t, dsn), false, options)
+	})
 }
 
 func TestGoldenAgentWorkloadSQLiteSmoke(t *testing.T) {
@@ -620,7 +646,22 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 		process = start()
 	}
 	waitForGoldenTerminalRun(t, process, store, runID, runDeadline)
-	assertGoldenPublicProof(t, process.rpc, runID, restart, options.candidateIDs, preRestartRuntimeLog)
+	firstEvidence := assertGoldenPublicProof(t, process.rpc, runID, restart, options.candidateIDs, preRestartRuntimeLog, 1)
+	if options.repeatSequential {
+		secondRunID := goldenPublishIngressWithKey(t, process.rpc, bundleHash, options.candidateIDs, "golden-search-ingress-second")
+		if secondRunID == runID {
+			t.Fatal("second ingress reused the first run")
+		}
+		waitForGoldenTerminalRun(t, process, store, secondRunID, options.runDeadline)
+		secondEvidence := assertGoldenPublicProof(t, process.rpc, secondRunID, false, options.candidateIDs, nil, 2)
+		if firstEvidence.Scout.RunID == secondEvidence.Scout.RunID {
+			t.Fatalf("singleton scouts share run identity: first=%#v second=%#v", firstEvidence.Scout, secondEvidence.Scout)
+		}
+		firstAfterSecond := assertGoldenPublicProof(t, process.rpc, runID, false, options.candidateIDs, nil, 2)
+		if !reflect.DeepEqual(firstEvidence, firstAfterSecond) {
+			t.Fatalf("second run changed first run's terminal evidence: before=%#v after=%#v", firstEvidence, firstAfterSecond)
+		}
+	}
 	if options.publicBoundaryProof {
 		assertSelectedRootConnectedReadbacks(t, process, runID, binaryPath, projectRoot, configOperand, tokenOperand, env)
 	}
@@ -773,6 +814,10 @@ func goldenServedBundleHash(t *testing.T, rpc *releaseRPCClient, wantPosture str
 }
 
 func goldenPublishIngress(t *testing.T, rpc *releaseRPCClient, bundleHash string, candidateIDs []string) string {
+	return goldenPublishIngressWithKey(t, rpc, bundleHash, candidateIDs, "golden-search-ingress")
+}
+
+func goldenPublishIngressWithKey(t *testing.T, rpc *releaseRPCClient, bundleHash string, candidateIDs []string, idempotencyKey string) string {
 	t.Helper()
 	var result struct {
 		EventID       string `json:"event_id"`
@@ -786,7 +831,7 @@ func goldenPublishIngress(t *testing.T, rpc *releaseRPCClient, bundleHash string
 		"event_name":      "search.requested",
 		"payload":         map[string]any{"query": "golden workload", "candidate_ids": candidateIDs},
 		"emitter":         "releasee2e",
-		"idempotency_key": "golden-search-ingress",
+		"idempotency_key": idempotencyKey,
 	}, &result); err != nil {
 		t.Fatal(err)
 	}
@@ -1073,6 +1118,16 @@ type goldenEntitySet struct {
 	candidates map[string]goldenEntitySummary
 }
 
+// EventCount includes later diagnostic logs, so the cross-run invariant uses terminal business evidence.
+type goldenTerminalRunEvidence struct {
+	RunID          string
+	Status         string
+	EntityCount    int
+	Scout          goldenEntitySummary
+	ScoutRequested goldenEvent
+	ScoutCompleted goldenEvent
+}
+
 type goldenAgentSummary struct {
 	AgentID       string `json:"agent_id"`
 	Role          string `json:"role"`
@@ -1090,7 +1145,7 @@ type goldenConversation struct {
 	Status        string `json:"status"`
 }
 
-func assertGoldenPublicProof(t *testing.T, rpc *releaseRPCClient, runID string, restarted bool, candidateIDs []string, preRestartRuntimeLog *goldenRuntimeLog) {
+func assertGoldenPublicProof(t *testing.T, rpc *releaseRPCClient, runID string, restarted bool, candidateIDs []string, preRestartRuntimeLog *goldenRuntimeLog, expectedIdleScouts int) goldenTerminalRunEvidence {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -1098,7 +1153,7 @@ func assertGoldenPublicProof(t *testing.T, rpc *releaseRPCClient, runID string, 
 	if err := rpc.call(ctx, "run.diagnose", map[string]any{"run_id": runID}, &diagnosis); err != nil {
 		t.Fatal(err)
 	}
-	if diagnosis.Run.Status != "completed" || !diagnosis.TestQuiescence.Ready || goldenActiveWork(diagnosis.TestQuiescence) != 0 || len(diagnosis.FailedDeliveries) != 0 {
+	if diagnosis.Run.RunID != runID || diagnosis.Run.Status != "completed" || !diagnosis.TestQuiescence.Ready || goldenActiveWork(diagnosis.TestQuiescence) != 0 || len(diagnosis.FailedDeliveries) != 0 {
 		t.Fatalf("run.diagnose = %#v, want completed, quiescent, and failure-free (restarted=%t)", diagnosis, restarted)
 	}
 	if restarted {
@@ -1107,8 +1162,8 @@ func assertGoldenPublicProof(t *testing.T, rpc *releaseRPCClient, runID string, 
 
 	entities := listGoldenEntities(t, ctx, rpc, runID)
 	entitySet := assertGoldenEntities(t, ctx, rpc, runID, entities, candidateIDs)
-	agents := waitForGoldenAgentTeardown(t, ctx, rpc)
-	assertGoldenAgentTeardown(t, agents)
+	agents := waitForGoldenAgentTeardown(t, ctx, rpc, expectedIdleScouts)
+	assertGoldenAgentTeardown(t, agents, expectedIdleScouts)
 
 	events, err := listGoldenEvents(ctx, rpc, runID)
 	if err != nil {
@@ -1160,6 +1215,14 @@ func assertGoldenPublicProof(t *testing.T, rpc *releaseRPCClient, runID string, 
 			}
 			assertGoldenDeliveryTarget(t, event, delivery)
 		}
+	}
+	return goldenTerminalRunEvidence{
+		RunID:          diagnosis.Run.RunID,
+		Status:         diagnosis.Run.Status,
+		EntityCount:    diagnosis.Run.EntityCount,
+		Scout:          entitySet.scout,
+		ScoutRequested: goldenSingleNamedEvent(t, events, "scout.requested"),
+		ScoutCompleted: goldenSingleNamedEvent(t, events, "scout/scout.completed"),
 	}
 }
 
@@ -1345,7 +1408,7 @@ func assertGoldenEntities(t *testing.T, ctx context.Context, rpc *releaseRPCClie
 	return result
 }
 
-func waitForGoldenAgentTeardown(t *testing.T, ctx context.Context, rpc *releaseRPCClient) []goldenAgentSummary {
+func waitForGoldenAgentTeardown(t *testing.T, ctx context.Context, rpc *releaseRPCClient, expectedIdleScouts int) []goldenAgentSummary {
 	t.Helper()
 	var agents []goldenAgentSummary
 	err := pollReleaseCondition(ctx, 10*time.Millisecond, func() (bool, error) {
@@ -1356,12 +1419,16 @@ func waitForGoldenAgentTeardown(t *testing.T, ctx context.Context, rpc *releaseR
 			return false, err
 		}
 		agents = result.Agents
-		if len(agents) != 1 {
+		if len(agents) != expectedIdleScouts {
 			return false, nil
 		}
-		agent := agents[0]
-		return agent.AgentID == "scout-worker" && agent.Role == "golden_scout" &&
-			agent.FlowInstance == "scout" && agent.ExecutionMode == "mock" && agent.Status == "idle", nil
+		for _, agent := range agents {
+			if agent.AgentID != "scout-worker" || agent.Role != "golden_scout" ||
+				agent.FlowInstance != "scout" || agent.ExecutionMode != "mock" || agent.Status != "idle" {
+				return false, nil
+			}
+		}
+		return true, nil
 	})
 	if err != nil {
 		t.Fatalf("wait for terminal child-agent teardown: %v; last agent.list=%#v", err, agents)
@@ -1369,10 +1436,10 @@ func waitForGoldenAgentTeardown(t *testing.T, ctx context.Context, rpc *releaseR
 	return agents
 }
 
-func assertGoldenAgentTeardown(t *testing.T, agents []goldenAgentSummary) {
+func assertGoldenAgentTeardown(t *testing.T, agents []goldenAgentSummary, expectedIdleScouts int) {
 	t.Helper()
-	if len(agents) != 1 {
-		t.Fatalf("agent.list = %#v, want only the idle singleton scout after child teardown", agents)
+	if len(agents) != expectedIdleScouts {
+		t.Fatalf("agent.list = %#v, want %d idle singleton scouts after child teardown", agents, expectedIdleScouts)
 	}
 	agent := agents[0]
 	if agent.AgentID != "scout-worker" || agent.Role != "golden_scout" || agent.FlowInstance != "scout" ||
