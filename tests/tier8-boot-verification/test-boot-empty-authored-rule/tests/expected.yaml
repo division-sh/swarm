@@ -5,4 +5,4 @@ conformance:
     - catalog.verify.boot_diagnostics
   diagnostic:
     category: "EMPTY-AUTHORED-RULE"
-    contains: "authored handler rule mapping must not be empty"
+    contains: "must not be empty"

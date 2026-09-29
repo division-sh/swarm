@@ -5,4 +5,4 @@ conformance:
     - catalog.verify.boot_diagnostics
   diagnostic:
     category: "DIALECT-GUARD"
-    contains: "guard is string"
+    contains: "must be {id, check}, got scalar"
