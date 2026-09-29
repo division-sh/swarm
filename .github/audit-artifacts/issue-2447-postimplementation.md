@@ -1,17 +1,18 @@
 # Post-Implementation Proof Audit: #2447 R1.4
 
-Agent-g. **Current-master integration is complete; final whole-suite
-qualification is in progress.** The complexity ratchet and approved LSF-044
+Agent-g. **Current-master integration and final default-profile qualification
+are complete; independent PR review remains required.** The complexity ratchet and approved LSF-044
 test-contract repair are rebased on `origin/master@a907854ae`. The committed
-executable/baseline head before this documentation-only update is `bab48509c`.
+executable/baseline head qualified before this documentation-only update is `55d2a31e4`.
 Subsequent changes to this artifact do not alter the measured Go snapshot; the
 baseline intentionally carries no circular commit SHA.
 
 The prior `0e21ee7f1` qualification record remains below as historical evidence,
 not current merge proof. Its LSF-045 blocker was repaired independently by Agent A
 and merged through PR #2402 (`486ea4161`); G consumed that implementation from
-master without duplicating it. LSF-046 was host `/tmp` inode exhaustion, and the
-current run uses a private disk-backed `TMPDIR`/`GOTMPDIR`. All six retained-data
+master without duplicating it. LSF-046 was host `/tmp` inode exhaustion. The
+current host's `/tmp` is disk-backed with sufficient blocks and inodes; final
+qualification uses the short `/tmp/g` temporary root. All six retained-data
 shards and the complete dual-store golden workload now pass in that environment.
 No production runtime, `platform-spec.yaml`, module dependency, `go.mod`, `go.sum`
 or vendored source is changed by this branch.
@@ -37,9 +38,29 @@ or vendored source is changed by this branch.
   metadata omission: `.github/complexity-baseline.json` was absent from the
   action-retirement corpus ledger. That row is now explicitly classified and its
   focused proof passes. This failed attempt is not claimed as qualification.
-- One fresh final `swarm-test --full` run is required on the repaired, rebased
-  head. Its result will be bound in the PR proof-audit comment; no retry of an
-  unchanged failed head is used as proof.
+- A subsequent expanded run completed its preceding units, then failed the
+  private-PostgreSQL serve partition before server startup. The long temporary
+  root combined with test names exceeded the Unix socket path limit. The exact
+  previously failing partition passes with `/tmp/g`, including the real
+  lost-COMMIT-response test; no product assertion or code changed. This is an
+  environment correction, not evidence of a runtime fix.
+- The next expanded run was interrupted and produced an incomplete receipt. It
+  is not a passing qualification or a newly classified production defect.
+- The user's explicit proof clarification does not require `--full`. Final
+  qualification therefore uses plain `go run ./cmd/swarm-test`: the canonical
+  completion-bearing local profile, not a raw package wildcard or an expanded
+  coverage claim. The separate dual-store golden/burst and focused/race proofs
+  remain required and already pass. No expanded-profile success is claimed.
+
+### Final Current-Master Proof Receipts
+
+- `TMPDIR=/tmp/g GOTMPDIR=/tmp/g TEST_POSTGRES_BIN=/usr/lib/postgresql/16/bin go run ./cmd/swarm-test`: **PASS**, all **14** planned local-profile units, exit 0. The runner selected uncached count-one execution and validated required execution records. The receipt binds code head `55d2a31e4`; the final follow-up changes this Markdown only, not any Go source, test, baseline, workflow or proof selector.
+- Within that qualification: complexity command PASS16.127s, dual-store golden restart/SIGKILL PASS28.22s, compiled SQLite lifecycle smoke PASS22.39s, and complete EventBus package PASS35.527s. The separate current-master dual-store burst iterations 1/2 remain PASS166.425s together with restart; default smoke is not awarded burst credit.
+- Fresh `go test ./cmd/swarm-complexity -race -count=3 -timeout=5m`: PASS31.436s. `go vet ./cmd/swarm-complexity`, formatting and `git diff --check` pass.
+- Current-master complete fork race x3 PASS21.373s; affected persistence disposal/setup/poison/scan and healthy sibling race x3 PASS29.112s. Fork held-lock and exact keyed failed-COMMIT count100 PASS24.426s; persistence held-lock count100 PASS24.016s.
+- Fresh exact corpus/action and route-inventory positive/negative controls PASS25.388s; final retirement-reference control PASS3.343s. These classify evidence only and preserve every existing search/assertion.
+- The exact previously failing private-PostgreSQL serve partition passes with the short temporary root, including lost response, graceful cancellation, loss/restart, remote possession, silent monitoring and composed startup-abort controls. Log SHA256: `54a9ff84748c9f278805a5811b70e70c409a8c9124dc0859919d36a575858ba6`.
+- Default qualification log `/home/youmew/.cache/agent-g-2447-local-qualification.log` SHA256: `8ef8fa53680324b880dd2b84aa3c7e2bea0660b8d37a73b8b218d268b1c676a2`. Exact baseline SHA256: `1e3fb18597dd153d3f633d8a01da0c4de46a9f8dc04dfd957075eeee7c59d585`. Interrupted expanded-run SHA256: `faa9185534f5e718e34024baf518391b7ae4f69686fc3364372a8f2a23e4fba1`; it remains incomplete, not green.
 
 ## Governing Contract and Closure Boundary
 
@@ -58,8 +79,8 @@ complexity control (#2447 / R1.4); broader parent: durable Recovery acceptance
 boundaries (#2407). This was an absent acceptance invariant, not a local runtime
 symptom. The approved slice closes only the missing ratchet, not hotspot reduction.
 
-Intended closure level: **failure class eliminated**. Implementation closure is
-claimed; final whole-suite qualification and independent review remain outstanding.
+Intended closure level: **failure class eliminated**. Implementation and required
+default-profile qualification are complete; hosted CI and independent review remain outstanding.
 Current achieved level: **chosen working class closed**. The whole known local/CI consumer family is migrated;
 there is no second score implementation or local baseline ceiling that can approve
 growth. Both counts >=30 must independently not increase. This is NOT a promise
@@ -92,7 +113,8 @@ new exported library, production dependency or custom complexity algorithm.
 | Existing CI planner/timing tooling | Different concept, proven by unchanged execution-SHA planning and separate job; no parallel complexity interpretation there. |
 | Historical score/keep-map readers | Historical only, not current approval authority; missing eligibility evidence continues to block future factoring. |
 | Repository-wide route-authority drift census | Different semantic concept: reads callable names as searchable text, not scores or executable route authority. Exact baseline path classified in its existing inventory; no search exclusion or test-assertion change. |
-| Retired-transport reference census | Different semantic concept: its existing exact-count table classifies the JSON's 81 metadata references and this audit's single test-name reference. No path-wide exclusion or assertion removed. |
+| Retired-transport reference census | Different semantic concept: its existing exact-count table classifies the JSON's 81 metadata references and this audit's two classified reference lines. No path-wide exclusion or assertion removed. |
+| Retired action corpus | Different semantic concept: `TestActionRetirementCorpusLedgerIsComplete` classifies exact generated measurement evidence, not authored actions or interpreters. Its complete-search assertion is unchanged. |
 | Monthly delta publication / protection administration | Explicitly split / tracked separately in #2407 R1.5 / R1.3. No second checker or invented publication framework. |
 | Runtime/golden consumers | Different semantic concept; production and golden fixture code stays unchanged. The separately approved disposal-observation test repair is tabulated below. |
 
@@ -133,11 +155,12 @@ unit controls; workflow assertions are not the only proof.
 | Artifact output / local-CI owner divergence | execution-proven through the same corrected path | Exact command `-head HEAD -base origin/master -evidence ...` and real event-driven `run`, strict baseline check; workflow invokes that same executable. Actual hosted CI remains a separate merge check. |
 | New artifact references unclassified by route-authority text census | reproduced and fixed | `TestFinalFlowInstanceAuthoringFixture_RouteAuthorityBypassInventoryStaysClassified`, `TestRouteAuthorityDriftInventoryCoversRepoWideSearchDimensions`, and `TestRouteAuthorityDriftInventoryRejectsNarrowOrStaleAudit` pass unchanged after exact metadata-path classification. No runtime routing or search bypass added. |
 | New artifact references unclassified by retirement census | reproduced and fixed | `TestRetiredBuilderSemanticReferencesStayExplicit`: exact-count classification additions only; all existing search and refusal assertions retained. |
-| Unchanged supported runtime workload | execution-proven through the same corrected path | Earlier default releasee2e package PASS636.150s includes smoke; final explicit dual-store restart/SIGKILL and burst iterations 1/2 PASS317.294s. Final full releasee2e failed six nested builds from inode exhaustion, not the golden assertions. No whole-suite pass claimed. |
-| PostgreSQL failed-commit immediate competing-lock assertion | reproduced and fixed | #2353 LSF-044 bounded test-only approval; commit `054b888e5` replaces the false post-disposal timing requirement with actual server acquisition. Detailed sibling table and pending integrated qualification below. |
+| New measurement references unclassified by action-retirement corpus | reproduced and fixed | `TestActionRetirementCorpusLedgerIsComplete` passes after one exact baseline-path classification, with its exhaustive search unchanged. |
+| Unchanged supported runtime workload | execution-proven through the same corrected path | Current-master managed full-profile dual-store restart/SIGKILL and burst iterations 1/2 PASS166.425s; all six retained-data shards pass. Default-profile smoke and integrated qualification are recorded separately, not substituted for burst coverage. |
+| PostgreSQL failed-commit immediate competing-lock assertion | reproduced and fixed | #2353 LSF-044 bounded test-only approval; rebased commit `95792c7e8` replaces the false post-disposal timing requirement with actual server acquisition. Detailed sibling table below. |
 | Later factoring, runtime ownership and monthly publication | split / escalated as separate class | #2447 later family gate; #2443/#2250 and R4-R7; #2407 R1.3/R1.5. No closure credit assigned. |
 
-## Qualification and Measurements
+## Historical Qualification and Current Measurements
 
 - `go test ./cmd/swarm-complexity -race -count=3 -timeout=5m`: PASS (70.062s), including final refusal controls.
 - `go vet ./cmd/swarm-complexity`: PASS.
@@ -168,7 +191,11 @@ post-disposal observations; no workload fixture or search/refusal assertion chan
 
 ## Parent, Watchlist and Architecture Decision
 
-#2447 and #2407 remain OPEN. The explicitly ordered acceptance-boundary slice does
+#2447 remains OPEN for the factoring parent. #2407 is now CLOSED in GitHub;
+it remains the historical R1.4 governing context, not an open tracker or a closure
+claim made by this PR. #2443 was separately closed by merged #2474, now included
+in this base; its runtime work is not G's contribution. #2250 remains OPEN for
+broader architecture debt. The explicitly ordered acceptance-boundary slice does
 not absorb hotspot extraction, branch protection or reporting. Parent sibling
 probing and action remain the approved model: roughly **11-13** future factoring
 families, low confidence until salvage eligibility and active-lane coordination;
@@ -218,7 +245,7 @@ No passing sibling is misrepresented as an independently reproduced failure.
 Original full-suite and unchanged-base failures above remain valid historical
 receipts. The repair removes an invalid distributed timing guarantee, not a
 production cleanup bug. The repaired assertion class passes its full-load
-packages; independent review and overall qualification remain outstanding, so
+packages and final default qualification; independent review remains outstanding, so
 #2353 LSF-044 stays repair-open. Architecture tracking remains in existing nodes,
 docs `ca5db26` incorporated by fast-forward and qualification refinement `4a395cc`
 published. Effort/ROI: one small
@@ -262,7 +289,10 @@ The issue and canonical #2353 body record both new findings. The original
 complexity and LSF-044 approvals remain valid; no further implementation beyond
 their boundary is started and no normal review-ready PR is claimed.
 
-Architecture feedback is tracked in existing #2447/#2407 and #2443/#2250. Scores
+## Architecture Feedback and Limits
+
+Architecture feedback remains tracked in open #2447/#2250; #2407 and #2443 are
+historical governing/architecture records, not pending obligations reopened here. Scores
 can reward relocating complexity without repairing semantic ownership; keep
 future extraction behavior-preserving and family-approved. Long-run direction is
 the already-owned decomposition program, not a new metrics/runtime framework.
