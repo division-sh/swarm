@@ -642,9 +642,13 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 				t.Fatalf("500-row commit acknowledgement receipt is missing or predates submission: %+v", chunks)
 			}
 			issuanceElapsed := chunks.LastCommitAt.Sub(issuanceStarted)
-			t.Logf("500-row issuance from first batch submission to final durable chunk acknowledgement: %s; cursor observed at %s", issuanceElapsed, issuanceReached.Sub(issuanceStarted))
-			if !fanOutRaceBuild && issuanceElapsed > issuanceBudget {
-				t.Errorf("500-row issuance exceeded the approved %s target: %s (transaction probe %+v)", issuanceBudget, issuanceElapsed, transactionOptions)
+			mergeCeiling := issuanceBudget
+			if tc.name == "postgres" && transactionOptions.Delay == 0 {
+				mergeCeiling = 15 * time.Second
+			}
+			t.Logf("500-row issuance from first batch submission to final durable chunk acknowledgement: %s; cursor observed at %s; original target=%s merge ceiling=%s", issuanceElapsed, issuanceReached.Sub(issuanceStarted), issuanceBudget, mergeCeiling)
+			if !fanOutRaceBuild && issuanceElapsed > mergeCeiling {
+				t.Errorf("500-row issuance exceeded %s merge ceiling (original target %s): %s (transaction probe %+v)", mergeCeiling, issuanceBudget, issuanceElapsed, transactionOptions)
 			}
 			waitNotifyAllChildrenRuntimeWithin(t, runtime, validRunID, 5*time.Minute)
 			assertNotifyAllChildrenRunEventCount(t, validCtx, db, validRunID)

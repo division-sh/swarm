@@ -37411,6 +37411,14 @@ durable_pipeline_processing_obligation_authority:
       its exact failure. An acknowledged business commit is not reclassified by later cleanup failure, while a
       later independent route or deferred-publication failure must not be hidden by an earlier successful phase.
       Decision-route publication keeps its distinct processed/quarantined writes through the selected-store owner.
+    node_delivery_error_boundary: >
+      Failure before an exact node-delivery claim is acquired is not handler execution or an event-level dead-letter
+      decision. Pipeline returns the original cancellation, selected-store, and independent joined failure branches;
+      its unconsumed carrier returns exactly once to the same continuation owner and the durable delivery remains
+      pending. Only an acquired claim may enter the node attempt's handler-failure settlement path. A returned carrier
+      without delivery-settlement evidence never authorizes event-level settlement, and EventBus rejects that mismatch
+      rather than manufacturing terminal evidence. Acknowledged commits retain their committed outcome even when
+      later cleanup reports an independent error.
     retry_release: >
       A typed execution outcome outside the durable disposition vocabulary. It stops current dispatch and leaves the
       exact durable obligation replayable solely by releasing its current claim; it is never encoded as deferred.
