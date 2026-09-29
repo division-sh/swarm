@@ -180,7 +180,7 @@ func LoadWorkflowContractBundleFromArtifact(repoRoot string, artifact *sourceart
 	if err := validateWorkflowContractBundleLoadConstraints(bundle); err != nil {
 		return nil, err
 	}
-	populateEffectiveEventProvenance(bundle)
+	populateEffectiveProvenance(bundle)
 	if _, err := BuildDurableDataCatalog(bundle); err != nil {
 		return nil, fmt.Errorf("compile durable data catalog: %w", err)
 	}

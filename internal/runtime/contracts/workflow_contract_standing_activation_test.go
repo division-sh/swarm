@@ -3,13 +3,11 @@ package contracts
 import (
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 )
 
 func TestFlowSchemaStandingIngressStrictDecode(t *testing.T) {
 	var doc FlowSchemaDocument
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 name: chat
 mode: singleton
 activation: standing
@@ -40,7 +38,7 @@ ingress:
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var invalid FlowSchemaDocument
-			err := yaml.Unmarshal([]byte(tc.yaml), &invalid)
+			err := decodeNodeTestYAML([]byte(tc.yaml), &invalid)
 			if err == nil || !strings.Contains(err.Error(), tc.field) || !strings.Contains(err.Error(), "not supported") {
 				t.Fatalf("strict decode error = %v, want unsupported field %q", err, tc.field)
 			}
@@ -50,7 +48,7 @@ ingress:
 
 func TestFlowSchemaInboundAdmissionStrictDecode(t *testing.T) {
 	var doc FlowSchemaDocument
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 name: events
 mode: singleton
 activation: standing
@@ -90,7 +88,7 @@ ingress:
 			block := strings.ReplaceAll(tc.block, "\n", "\n      ")
 			body := "name: chat\nmode: singleton\nactivation: standing\ningress:\n  providers:\n    - provider: telegram\n      " + block + "\n"
 			var invalid FlowSchemaDocument
-			err := yaml.Unmarshal([]byte(body), &invalid)
+			err := decodeNodeTestYAML([]byte(body), &invalid)
 			if err == nil || !strings.Contains(err.Error(), tc.field) || !strings.Contains(err.Error(), "not supported") {
 				t.Fatalf("strict decode error = %v, want unsupported field %q", err, tc.field)
 			}

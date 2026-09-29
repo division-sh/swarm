@@ -2,8 +2,6 @@ package contracts
 
 import (
 	"testing"
-
-	"gopkg.in/yaml.v3"
 )
 
 func TestSystemNodeContractTracksProducesDeclarationPresence(t *testing.T) {
@@ -19,7 +17,7 @@ func TestSystemNodeContractTracksProducesDeclarationPresence(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var node SystemNodeContract
-			if err := yaml.Unmarshal([]byte(tc.yaml), &node); err != nil {
+			if err := decodeNodeTestYAML([]byte(tc.yaml), &node); err != nil {
 				t.Fatalf("decode node: %v", err)
 			}
 			if node.ProducesDeclared != tc.declared || len(node.Produces) != tc.count {

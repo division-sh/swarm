@@ -5,14 +5,13 @@ import (
 	"testing"
 
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
-	"gopkg.in/yaml.v3"
 )
 
 func TestHandlerRuleIdentityDerivesFromCanonicalDeclarationSite(t *testing.T) {
 	decode := func(raw string) HandlerRuleEntry {
 		t.Helper()
 		var handler SystemNodeEventHandler
-		if err := yaml.Unmarshal([]byte(raw), &handler); err != nil {
+		if err := decodeNodeTestYAML([]byte(raw), &handler); err != nil {
 			t.Fatal(err)
 		}
 		node, err := runtimeidentity.AdmitExecutableNodeDeclaration("scout", "router")
@@ -45,7 +44,7 @@ func TestHandlerRuleReorderIsDeleteAndAdd(t *testing.T) {
 	decode := func(raw string) map[string]runtimeidentity.DeclarationIdentity {
 		t.Helper()
 		var handler SystemNodeEventHandler
-		if err := yaml.Unmarshal([]byte(raw), &handler); err != nil {
+		if err := decodeNodeTestYAML([]byte(raw), &handler); err != nil {
 			t.Fatal(err)
 		}
 		node, err := runtimeidentity.AdmitExecutableNodeDeclaration("scout", "router")
@@ -76,7 +75,7 @@ func TestHandlerRuleReorderIsDeleteAndAdd(t *testing.T) {
 
 func TestHandlerRuleIdentitySeparatesFlowsAndEvents(t *testing.T) {
 	var handler SystemNodeEventHandler
-	if err := yaml.Unmarshal([]byte("rules:\n  - {else: true}\n"), &handler); err != nil {
+	if err := decodeNodeTestYAML([]byte("rules:\n  - {else: true}\n"), &handler); err != nil {
 		t.Fatal(err)
 	}
 	qualify := func(flowPath, event string) runtimeidentity.DeclarationIdentity {
@@ -106,8 +105,8 @@ func TestHandlerRuleIdentitySeparatesFlowsAndEvents(t *testing.T) {
 
 func TestAuthoredElementIDIsRetired(t *testing.T) {
 	var handler SystemNodeEventHandler
-	err := yaml.Unmarshal([]byte("rules:\n  - element_id: 00000000-0000-4000-8000-000000000001\n    else: true\n"), &handler)
-	if err == nil || !strings.Contains(err.Error(), "RETIRED: rule.element_id") {
+	err := decodeNodeTestYAML([]byte("rules:\n  - element_id: 00000000-0000-4000-8000-000000000001\n    else: true\n"), &handler)
+	if err == nil || !strings.Contains(err.Error(), `RETIRED: rule field "element_id"`) {
 		t.Fatalf("retired element_id error = %v", err)
 	}
 }

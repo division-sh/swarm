@@ -5,12 +5,11 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
-	"gopkg.in/yaml.v3"
 )
 
 func TestActivityApprovalYAMLIsStrictAndCanonical(t *testing.T) {
 	var valid ActivitySpec
-	if err := yaml.Unmarshal([]byte("tool: provider.write\napproval: {decision: support_reply}\n"), &valid); err != nil {
+	if err := decodeNodeTestYAML([]byte("tool: provider.write\napproval: {decision: support_reply}\n"), &valid); err != nil {
 		t.Fatal(err)
 	}
 	if valid.Approval == nil || valid.Approval.Decision != "support_reply" {
@@ -28,7 +27,7 @@ func TestActivityApprovalYAMLIsStrictAndCanonical(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var got ActivitySpec
-			err := yaml.Unmarshal([]byte(tc.yaml), &got)
+			err := decodeNodeTestYAML([]byte(tc.yaml), &got)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("Unmarshal error = %v, want %q", err, tc.want)
 			}

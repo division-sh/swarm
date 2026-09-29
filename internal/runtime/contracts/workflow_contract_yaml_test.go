@@ -8,7 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"gopkg.in/yaml.v3"
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 func containsString(values []string, target string) bool {
@@ -22,13 +22,13 @@ func containsString(values []string, target string) bool {
 
 func TestFlowConnectDecodePinsCanonicalEventCentricShape(t *testing.T) {
 	var connect FlowConnect
-	if err := yaml.Unmarshal([]byte("event: work.ready\nfrom: producer\nto: consumer\nrename: work.accepted\n"), &connect); err != nil {
+	if err := decodeNodeTestYAML([]byte("event: work.ready\nfrom: producer\nto: consumer\nrename: work.accepted\n"), &connect); err != nil {
 		t.Fatalf("decode canonical connect row: %v", err)
 	}
 	if connect.Event != "work.ready" || connect.From != "producer" || connect.To != "consumer" || connect.Rename != "work.accepted" {
 		t.Fatalf("canonical connect = %#v", connect)
 	}
-	if err := yaml.Unmarshal([]byte("event: producer/work.ready\nfrom: producer\nto: consumer\nrename: consumer/work.accepted\n"), &connect); err != nil {
+	if err := decodeNodeTestYAML([]byte("event: producer/work.ready\nfrom: producer\nto: consumer\nrename: consumer/work.accepted\n"), &connect); err != nil {
 		t.Fatalf("decode canonical slash-qualified connect row: %v", err)
 	}
 	if connect.Event != "producer/work.ready" || connect.Rename != "consumer/work.accepted" {
@@ -55,7 +55,7 @@ func TestFlowConnectDecodePinsCanonicalEventCentricShape(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var invalid FlowConnect
-			err := yaml.Unmarshal([]byte(tc.yaml), &invalid)
+			err := decodeNodeTestYAML([]byte(tc.yaml), &invalid)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.want)
 			}
@@ -65,7 +65,7 @@ func TestFlowConnectDecodePinsCanonicalEventCentricShape(t *testing.T) {
 
 func TestToolSchemaEntryDecodeRejectsDuplicateManagedCredentialTokenHeadersBeforeCanonicalizing(t *testing.T) {
 	var tool ToolSchemaEntry
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 category: provider_connector
 handler_type: http
 managed_credential:
@@ -88,7 +88,7 @@ http:
 
 func TestFlowSchemaDocumentDecodeStagesKeyedMap(t *testing.T) {
 	var doc FlowSchemaDocument
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 name: validation
 stages:
   queued:
@@ -119,7 +119,7 @@ stages:
 
 func TestFlowSchemaDocumentDecodeStageTimersUseCanonicalSyntax(t *testing.T) {
 	var doc FlowSchemaDocument
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 name: validation
 stages:
   awaiting_review:
@@ -153,7 +153,7 @@ stages:
 
 func TestFlowSchemaDocumentDecodeTypedStageGate(t *testing.T) {
 	var doc FlowSchemaDocument
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 name: launch
 stages:
   awaiting_launch_approval:
@@ -223,7 +223,7 @@ outcomes:
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var gate FlowStageGateDeclaration
-			err := yaml.Unmarshal([]byte(tc.gate), &gate)
+			err := decodeNodeTestYAML([]byte(tc.gate), &gate)
 			if err == nil || !strings.Contains(err.Error(), "duplicate normalized key") {
 				t.Fatalf("decode error = %v, want normalized collision", err)
 			}
@@ -233,7 +233,7 @@ outcomes:
 
 func TestFlowSchemaDocumentRejectsGateOutcomeWithoutAdvance(t *testing.T) {
 	var doc FlowSchemaDocument
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 name: launch
 stages:
   awaiting:
@@ -251,7 +251,7 @@ stages:
 
 func TestFlowSchemaDocumentRejectsUnknownGateField(t *testing.T) {
 	var doc FlowSchemaDocument
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 name: launch
 stages:
   awaiting:
@@ -269,7 +269,7 @@ stages:
 
 func TestFlowSchemaDocumentDecodeBoundedLoopCanonicalSyntax(t *testing.T) {
 	var schema FlowSchemaDocument
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 stages:
   drafting: {initial: true}
   review: {}
@@ -296,7 +296,7 @@ func TestToolSchemaEntryDecodeRejectsRetiredHandlerTypesAtLexicalAdmission(t *te
 	for _, handler := range []string{"workflow_registered", "api_call"} {
 		t.Run(handler, func(t *testing.T) {
 			var tool ToolSchemaEntry
-			err := yaml.Unmarshal([]byte(`
+			err := decodeNodeTestYAML([]byte(`
 handler_type: `+handler+`
 input_schema: {type: object}
 output_schema: {type: object}
@@ -314,12 +314,12 @@ func TestSystemNodeEventHandlerDecodeLoopOperationRequiresExactOperationAndFrom(
 		"loop: {repeat: revision, close: revision, from: review}",
 	} {
 		var handler SystemNodeEventHandler
-		if err := yaml.Unmarshal([]byte(raw), &handler); err == nil {
+		if err := decodeNodeTestYAML([]byte(raw), &handler); err == nil {
 			t.Fatalf("decode %q succeeded, want closed loop operation error", raw)
 		}
 	}
 	var handler SystemNodeEventHandler
-	if err := yaml.Unmarshal([]byte("loop: {repeat: revision, from: review}\nadvances_to: drafting\n"), &handler); err != nil {
+	if err := decodeNodeTestYAML([]byte("loop: {repeat: revision, from: review}\nadvances_to: drafting\n"), &handler); err != nil {
 		t.Fatalf("decode canonical operation: %v", err)
 	}
 	if handler.Loop == nil || handler.Loop.Repeat != "revision" || handler.Loop.From != "review" {
@@ -330,7 +330,7 @@ func TestSystemNodeEventHandlerDecodeLoopOperationRequiresExactOperationAndFrom(
 func TestSystemNodeEventHandlerRejectsRetiredTopLevelLoopShadowFields(t *testing.T) {
 	for _, field := range []string{"completion_rule", "policy_ref"} {
 		var handler SystemNodeEventHandler
-		if err := yaml.Unmarshal([]byte(field+": legacy\n"), &handler); err == nil {
+		if err := decodeNodeTestYAML([]byte(field+": legacy\n"), &handler); err == nil {
 			t.Fatalf("decode retired handler field %s succeeded", field)
 		}
 	}
@@ -340,7 +340,7 @@ func TestFlowSchemaDocumentDecodeStageTimersRejectSupersededFields(t *testing.T)
 	for _, field := range []string{"delay", "interrupting", "repeat"} {
 		t.Run(field, func(t *testing.T) {
 			var doc FlowSchemaDocument
-			err := yaml.Unmarshal([]byte(fmt.Sprintf(`
+			err := decodeNodeTestYAML([]byte(fmt.Sprintf(`
 name: validation
 stages:
   awaiting_review:
@@ -358,7 +358,7 @@ stages:
 
 func TestFlowSchemaDocumentDecodeStageTimersRequireExplicitIDOnDerivedCollision(t *testing.T) {
 	var doc FlowSchemaDocument
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 name: validation
 stages:
   awaiting_review:
@@ -375,7 +375,7 @@ stages:
 
 func TestFlowSchemaDocumentDecodeStageTimersRejectExplicitIDCollisionAcrossStages(t *testing.T) {
 	var doc FlowSchemaDocument
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 name: validation
 stages:
   awaiting_review:
@@ -398,7 +398,7 @@ stages:
 
 func TestFlowSchemaDocumentDecodeStagesExplicitEmpty(t *testing.T) {
 	var doc FlowSchemaDocument
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 name: discovery
 stages: []
 `), &doc); err != nil {
@@ -414,7 +414,7 @@ stages: []
 
 func TestSystemNodeHandlerDecodeJoinCanonicalShape(t *testing.T) {
 	var nodes map[string]SystemNodeContract
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 coordinator:
   execution_type: system_node
   event_handlers:
@@ -476,15 +476,15 @@ func TestSystemNodeHandlerDecodeJoinRejectsUnsupportedFields(t *testing.T) {
 		`join: {stage: waiting, members: {from: entity.ids, by: payload.id}, output: payload.result, timeout: {after: 1h, repeat: 2}}`,
 	} {
 		var handler SystemNodeEventHandler
-		if err := yaml.Unmarshal([]byte(input), &handler); err == nil {
-			t.Fatalf("yaml.Unmarshal(%q) error = nil", input)
+		if err := decodeNodeTestYAML([]byte(input), &handler); err == nil {
+			t.Fatalf("decodeNodeTestYAML(%q) error = nil", input)
 		}
 	}
 }
 
 func TestFlowSchemaDocumentDecodeRejectsNonEmptyStageSequence(t *testing.T) {
 	var doc FlowSchemaDocument
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 name: validation
 stages:
   - id: queued
@@ -668,7 +668,7 @@ func TestFlowSchemaDocumentDecodeRejectsRetiredCarriesBeforeNestedSource(t *test
 
 func TestFlowSchemaDocumentDecode_RejectsUnsupportedOutputPinFields(t *testing.T) {
 	var doc FlowSchemaDocument
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 name: invalid-output-pins
 pins:
   outputs:
@@ -683,7 +683,7 @@ pins:
 
 func TestFlowSchemaDocumentDecode_PreservesClosedOutputPinSinkEnum(t *testing.T) {
 	var doc FlowSchemaDocument
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 name: harness-output
 pins:
   outputs:
@@ -711,7 +711,7 @@ pins:
 		t.Run(tc.name, func(t *testing.T) {
 			var invalid FlowSchemaDocument
 			raw := "name: harness-output\npins:\n  outputs:\n    events:\n      - event: work.completed\n        sink: " + tc.sink + "\n"
-			err := yaml.Unmarshal([]byte(raw), &invalid)
+			err := decodeNodeTestYAML([]byte(raw), &invalid)
 			if err == nil || !strings.Contains(err.Error(), `output event pin sink must be "harness"`) {
 				t.Fatalf("yaml.Unmarshal error = %v, want closed sink-enum rejection", err)
 			}
@@ -745,7 +745,7 @@ func TestFlowConnectDecodeRejectsRetiredDeliveryAndReplyOnPresence(t *testing.T)
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var connect FlowConnect
-			err := yaml.Unmarshal([]byte("event: work.ready\nfrom: producer\nto: consumer\n"+tc.field+"\n"), &connect)
+			err := decodeNodeTestYAML([]byte("event: work.ready\nfrom: producer\nto: consumer\n"+tc.field+"\n"), &connect)
 			if err == nil {
 				t.Fatal("yaml.Unmarshal succeeded, want retired connect field rejection")
 			}
@@ -778,7 +778,7 @@ func TestFlowSchemaDocumentDecode_RejectsRetiredAndUnsupportedTopLevelFields(t *
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var doc FlowSchemaDocument
-			err := yaml.Unmarshal([]byte("name: invalid-schema\n"+tc.field+"\n"), &doc)
+			err := decodeNodeTestYAML([]byte("name: invalid-schema\n"+tc.field+"\n"), &doc)
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.wantErr)
 			}
@@ -811,7 +811,7 @@ func TestFlowSchemaDocumentDecode_RejectsRetiredAndUnsupportedTopLevelFields(t *
 
 func TestFlowTemplateInstanceDecodeAcceptsScalarIdentity(t *testing.T) {
 	var doc FlowSchemaDocument
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 name: template-flow
 mode: template
 instance: scope_id
@@ -848,7 +848,7 @@ func TestFlowTemplateInstanceDecodeRejectsRetiredMappingForms(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var doc FlowSchemaDocument
-			err := yaml.Unmarshal([]byte("name: template-flow\nmode: template\ninstance: "+tc.instance+"\n"), &doc)
+			err := decodeNodeTestYAML([]byte("name: template-flow\nmode: template\ninstance: "+tc.instance+"\n"), &doc)
 			if err == nil || !strings.Contains(err.Error(), "instance: <field>") {
 				t.Fatalf("yaml.Unmarshal error = %v, want scalar instance teaching error", err)
 			}
@@ -858,7 +858,7 @@ func TestFlowTemplateInstanceDecodeRejectsRetiredMappingForms(t *testing.T) {
 
 func TestFlowSchemaDocumentDecode_PreservesSingletonMode(t *testing.T) {
 	var doc FlowSchemaDocument
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 name: coordinator-flow
 mode: singleton
 `), &doc); err != nil {
@@ -871,8 +871,8 @@ mode: singleton
 
 func TestHandlerRuleEntryDecode_RejectsLegacyComputeExpressionShorthand(t *testing.T) {
 	var rule HandlerRuleEntry
-	err := yaml.Unmarshal([]byte(`
-condition: "else"
+	err := decodeNodeTestYAML([]byte(`
+else: true
 compute:
   store_as: entity.composite
   expression: "weighted_average(accumulated.scores, accumulated.weights)"
@@ -884,7 +884,7 @@ compute:
 
 func TestSystemNodeEventHandlerDecode_RejectsTopLevelEmitWhenRulesExistWithoutRuleEmit(t *testing.T) {
 	var handler SystemNodeEventHandler
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 emit: root.done
 rules:
   pass:
@@ -900,7 +900,7 @@ rules:
 
 func TestSystemNodeEventHandlerDecode_RejectsRuleLevelSetsGate(t *testing.T) {
 	var handler SystemNodeEventHandler
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 rules:
   gated:
     else: true
@@ -920,7 +920,7 @@ rules:
 
 func TestSystemNodeEventHandlerDecode_RejectsRetiredPayloadTransform(t *testing.T) {
 	var handler SystemNodeEventHandler
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 payload_transform:
   fields:
     score: payload.score
@@ -933,7 +933,7 @@ emit: score.ready
 
 func TestSystemNodeEventHandlerDecode_RejectsRetiredBranch(t *testing.T) {
 	var handler SystemNodeEventHandler
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 branch:
   - condition: payload.priority == 'urgent'
     then:
@@ -950,7 +950,7 @@ branch:
 
 func TestSystemNodeEventHandlerDecode_LowersPolicySheetSelectionRows(t *testing.T) {
 	var handler SystemNodeEventHandler
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 rules:
   - id: cto_revision_gate
     when: "payload.spec_revision > entity.last_cto_reviewed_revision && entity.revision_count >= policy.inner_revision_max"
@@ -1024,7 +1024,7 @@ rules:
 
 func TestSystemNodeEventHandlerDecode_LowersPolicySheetLookupValueRows(t *testing.T) {
 	var handler SystemNodeEventHandler
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 rules:
   - id: scaffold_paths
     lookup:
@@ -1083,7 +1083,7 @@ rules:
 
 func TestSystemNodeEventHandlerDecode_LowersPolicySheetValidateValueRows(t *testing.T) {
 	var handler SystemNodeEventHandler
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 rules:
   - id: validate_manifest
     validate:
@@ -1133,7 +1133,7 @@ rules:
 
 func TestSystemNodeEventHandlerDecode_LowersPolicySheetComputeModuleValueRows(t *testing.T) {
 	var handler SystemNodeEventHandler
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 rules:
   - id: render_bundle
     compute_module:
@@ -1185,7 +1185,7 @@ rules:
 
 func TestSystemNodeEventHandlerDecode_PreservesPolicyRowWordsAsRuleIDsInKeyedMap(t *testing.T) {
 	var handler SystemNodeEventHandler
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 rules:
   case:
     when: payload.mode == "case"
@@ -1541,7 +1541,7 @@ switch:
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var handler SystemNodeEventHandler
-			err := yaml.Unmarshal([]byte(tt.body), &handler)
+			err := decodeNodeTestYAML([]byte(tt.body), &handler)
 			if err == nil || !strings.Contains(err.Error(), tt.contains) {
 				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tt.contains)
 			}
@@ -1551,7 +1551,7 @@ switch:
 
 func TestSystemNodeEventHandlerDecode_AllowsAbsentAndDuplicatePolicyDisplayLabels(t *testing.T) {
 	var handler SystemNodeEventHandler
-	if err := yaml.Unmarshal([]byte(`rules:
+	if err := decodeNodeTestYAML([]byte(`rules:
   - when: payload.ok
     advances_to: ok
   - id: repeated-label
@@ -1595,7 +1595,7 @@ func TestSystemNodeEventHandlerDecode_RecognizesEverySingletonRuleFieldFamily(t 
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var handler SystemNodeEventHandler
-			if err := yaml.Unmarshal([]byte(tc.raw), &handler); err != nil {
+			if err := decodeNodeTestYAML([]byte(tc.raw), &handler); err != nil {
 				t.Fatal(err)
 			}
 			if len(handler.Rules) != 1 {
@@ -1620,7 +1620,7 @@ func TestSystemNodeEventHandlerDecode_KeyedLabelsNeverBecomeSingletonGrammar(t *
     advances_to: done
 `, context, label)
 				var handler SystemNodeEventHandler
-				if err := yaml.Unmarshal([]byte(raw), &handler); err != nil {
+				if err := decodeNodeTestYAML([]byte(raw), &handler); err != nil {
 					t.Fatal(err)
 				}
 				rows := handler.Rules
@@ -1639,7 +1639,7 @@ func TestSystemNodeEventHandlerDecode_RejectsAmbiguousRuleMapping(t *testing.T) 
 	for _, context := range []string{"rules"} {
 		t.Run(context, func(t *testing.T) {
 			var handler SystemNodeEventHandler
-			err := yaml.Unmarshal([]byte(context+`: {activity: {id: ambiguous}}
+			err := decodeNodeTestYAML([]byte(context+`: {activity: {id: ambiguous}}
 `), &handler)
 			if err == nil || !strings.Contains(err.Error(), "AMBIGUOUS-RULE-GRAMMAR") {
 				t.Fatalf("yaml.Unmarshal error = %v, want ambiguous grammar rejection", err)
@@ -1654,7 +1654,7 @@ func TestSystemNodeEventHandlerDecode_RejectsMappingOnComplete(t *testing.T) {
 		"on_complete: {activity: {id: ambiguous}}\n",
 	} {
 		var handler SystemNodeEventHandler
-		err := yaml.Unmarshal([]byte(raw), &handler)
+		err := decodeNodeTestYAML([]byte(raw), &handler)
 		if err == nil || !strings.Contains(err.Error(), "DIALECT-OC-ORDER") {
 			t.Fatalf("yaml.Unmarshal error = %v, want ordered-list rejection for %s", err, raw)
 		}
@@ -1672,7 +1672,7 @@ func TestSystemNodeEventHandlerDecode_RejectsEmptyAuthoredRows(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var handler SystemNodeEventHandler
-			err := yaml.Unmarshal([]byte(tc.raw), &handler)
+			err := decodeNodeTestYAML([]byte(tc.raw), &handler)
 			if err == nil || !strings.Contains(err.Error(), "EMPTY-AUTHORED-RULE") {
 				t.Fatalf("yaml.Unmarshal error = %v, want empty authored row rejection", err)
 			}
@@ -1696,7 +1696,7 @@ func TestSystemNodeEventHandlerDecode_RejectsInvalidKeyedRuleShape(t *testing.T)
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var handler SystemNodeEventHandler
-			err := yaml.Unmarshal([]byte(tc.raw), &handler)
+			err := decodeNodeTestYAML([]byte(tc.raw), &handler)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.want)
 			}
@@ -1718,13 +1718,11 @@ handler:
   rules:
     %q: *rule
 `, label)
-			var document struct {
-				Handler SystemNodeEventHandler `yaml:"handler"`
-			}
-			if err := yaml.Unmarshal([]byte(raw), &document); err != nil {
+			var handler SystemNodeEventHandler
+			if err := decodeNodeTestMember([]byte(raw), "handler", &handler); err != nil {
 				t.Fatal(err)
 			}
-			rules := document.Handler.Rules
+			rules := handler.Rules
 			if len(rules) != 1 || rules[0].ID != label || rules[0].AdvancesTo != "done" {
 				t.Fatalf("aliased keyed row = %#v", rules)
 			}
@@ -1733,20 +1731,18 @@ handler:
 }
 
 func TestHandlerRuleMappingClassifierRejectsAliasCycles(t *testing.T) {
-	mapping := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-	alias := &yaml.Node{Kind: yaml.AliasNode, Alias: mapping}
-	mapping.Content = []*yaml.Node{
-		{Kind: yaml.ScalarNode, Tag: "!!str", Value: "selected"},
-		alias,
+	snapshot, err := yamlsource.Load([]byte("worker:\n  event_handlers:\n    task.ready:\n      rules: &cycle {selected: *cycle}\n"))
+	if err == nil {
+		_, err = projectNodeDeclarationsValue(snapshot.Document("nodes.yaml").Root())
 	}
-	if _, err := classifyHandlerRuleMapping(mapping); err == nil || !strings.Contains(err.Error(), "YAML-ALIAS-CYCLE") {
-		t.Fatalf("classifyHandlerRuleMapping error = %v, want alias-cycle rejection", err)
+	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "cycle") {
+		t.Fatalf("node-root alias-cycle error = %v, want rejection", err)
 	}
 }
 
 func TestSystemNodeEventHandlerDecode_RejectsRetiredClearTarget(t *testing.T) {
 	var handler SystemNodeEventHandler
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 clear:
   target: entity.summary
 `), &handler)
@@ -1757,7 +1753,7 @@ clear:
 
 func TestSystemNodeEventHandlerDecode_PreservesCanonicalClearTargets(t *testing.T) {
 	var handler SystemNodeEventHandler
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 clear:
   targets:
     - entity.summary
@@ -1772,13 +1768,11 @@ clear:
 
 func TestHandlerRuleEntryDecode_AcceptsSpecComputeMetadataFields(t *testing.T) {
 	var rule HandlerRuleEntry
-	if err := yaml.Unmarshal([]byte(`
-condition: "else"
+	if err := decodeNodeTestYAML([]byte(`
+else: true
 compute:
   operation: pick_or_average
   description: choose the strongest score
-  params:
-    strategy: strict
   store_as: entity.composite
   keys:
     numeric_keys: [score]
@@ -1791,15 +1785,23 @@ compute:
 	if got := rule.Compute.Description; got != "choose the strongest score" {
 		t.Fatalf("Compute.Description = %q", got)
 	}
-	if got := rule.Compute.Params["strategy"]; got != "strict" {
-		t.Fatalf("Compute.Params[strategy] = %#v", got)
+	if got := rule.Compute.Keys.NumericKeys; len(got) != 1 || got[0] != "score" {
+		t.Fatalf("Compute.Keys.NumericKeys = %#v", got)
+	}
+}
+
+func TestHandlerRuleEntryDecode_RejectsInertComputeParams(t *testing.T) {
+	var rule HandlerRuleEntry
+	err := decodeNodeTestYAML([]byte("else: true\ncompute:\n  operation: pick_or_average\n  params: {strategy: strict}\n"), &rule)
+	if err == nil || !strings.Contains(err.Error(), `RETIRED: compute field "params"`) {
+		t.Fatalf("inert compute.params accepted: %v", err)
 	}
 }
 
 func TestHandlerRuleEntryDecode_AcceptsPickOrAverageOperation(t *testing.T) {
 	var rule HandlerRuleEntry
-	if err := yaml.Unmarshal([]byte(`
-condition: "else"
+	if err := decodeNodeTestYAML([]byte(`
+else: true
 compute:
   operation: pick_or_average
   store_as: entity.composite
@@ -1818,8 +1820,8 @@ compute:
 
 func TestHandlerRuleEntryDecode_RejectsWeightedSumOperation(t *testing.T) {
 	var rule HandlerRuleEntry
-	err := yaml.Unmarshal([]byte(`
-condition: "else"
+	err := decodeNodeTestYAML([]byte(`
+else: true
 compute:
   operation: weighted_sum
   store_as: entity.composite
@@ -1833,8 +1835,8 @@ compute:
 
 func TestHandlerRuleEntryDecode_RejectsLegacyOutputFieldAlias(t *testing.T) {
 	var rule HandlerRuleEntry
-	err := yaml.Unmarshal([]byte(`
-condition: "else"
+	err := decodeNodeTestYAML([]byte(`
+else: true
 compute:
   operation: pick_or_average
   output_field: composite
@@ -1876,7 +1878,7 @@ func TestFlowPinsDecode_AcceptsOptionMappingsAndScalarPermissions(t *testing.T) 
 
 func TestFlowPinsDecode_PreservesCanonicalScalarEventEntries(t *testing.T) {
 	var schema FlowSchemaDocument
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 states:
   - pending
 initial_state: pending
@@ -1907,7 +1909,7 @@ func TestW2RejectsAuthoredPinName(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var schema FlowSchemaDocument
-			err := yaml.Unmarshal([]byte(tc.raw), &schema)
+			err := decodeNodeTestYAML([]byte(tc.raw), &schema)
 			if err == nil || !strings.Contains(err.Error(), "pin name is unsupported") {
 				t.Fatalf("yaml.Unmarshal error = %v, want retired pin-name rejection", err)
 			}
@@ -1930,7 +1932,7 @@ func TestW2RejectsRetiredPinMetadataAndNonLocalEvents(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var schema FlowSchemaDocument
-			err := yaml.Unmarshal([]byte(tc.raw), &schema)
+			err := decodeNodeTestYAML([]byte(tc.raw), &schema)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.want)
 			}
@@ -1960,7 +1962,7 @@ func TestW2RejectsNullEmptyAndRedundantPinForms(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var schema FlowSchemaDocument
-			err := yaml.Unmarshal([]byte(tc.raw), &schema)
+			err := decodeNodeTestYAML([]byte(tc.raw), &schema)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.want)
 			}
@@ -2020,7 +2022,7 @@ func TestW2LoaderRejectsResolutionFromOutsideInstanceSelectionModes(t *testing.T
 
 func TestSystemNodeContractDecode_PreservesSupportedTopLevelFields(t *testing.T) {
 	var node SystemNodeContract
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 description: Worker node
 execution_type: system_node
 subscribes_to: [task.requested]
@@ -2066,7 +2068,7 @@ func TestWorkflowTimerContractDecode_RejectsRetiredDurationAliases(t *testing.T)
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var timer WorkflowTimerContract
-			err := yaml.Unmarshal([]byte(`
+			err := decodeNodeTestYAML([]byte(`
 id: reminder
 event: timer.reminder
 `+tc.field+`
@@ -2080,13 +2082,13 @@ event: timer.reminder
 
 func TestWorkflowTimerContractDecode_RejectsMixedCanonicalAndRetiredDurationAlias(t *testing.T) {
 	var timer WorkflowTimerContract
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 id: reminder
 event: timer.reminder
 delay: 30m
 delay_minutes: 30
 `), &timer)
-	if err == nil || !strings.Contains(err.Error(), "cannot be combined with canonical delay") {
+	if err == nil || !strings.Contains(err.Error(), `RETIRED: timer field "delay_minutes"`) {
 		t.Fatalf("yaml.Unmarshal error = %v, want mixed canonical+retired alias rejection", err)
 	}
 }
@@ -2103,17 +2105,15 @@ func TestWorkflowTimerContractDecode_RejectsMergedRetiredDurationAliases(t *test
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			var doc struct {
-				Timer WorkflowTimerContract `yaml:"timer"`
-			}
-			err := yaml.Unmarshal([]byte(`
+			var timer WorkflowTimerContract
+			err := decodeNodeTestMember([]byte(`
 timer_defaults: &timer_defaults
   `+tc.field+`
 timer:
   <<: *timer_defaults
   id: reminder
   event: timer.reminder
-`), &doc)
+`), "timer", &timer)
 			if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), strings.Split(tc.field, ":")[0]) {
 				t.Fatalf("yaml.Unmarshal error = %v, want merged retired alias rejection for %s", err, tc.field)
 			}
@@ -2123,7 +2123,7 @@ timer:
 
 func TestWorkflowTimerContractDecode_PreservesCanonicalDelay(t *testing.T) {
 	var timer WorkflowTimerContract
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 id: reminder
 event: timer.reminder
 delay: 7d
@@ -2137,7 +2137,7 @@ delay: 7d
 
 func TestFlowSchemaDocumentDecode_PreservesRequiredAgentSubscribesTo(t *testing.T) {
 	var schema FlowSchemaDocument
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 name: worker
 required_agents:
   - role: analyst
@@ -2164,7 +2164,7 @@ func TestFlowSchemaDocumentDecode_TracksRequiredAgentsPresence(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var schema FlowSchemaDocument
-			if err := yaml.Unmarshal([]byte(tc.yamlText), &schema); err != nil {
+			if err := decodeNodeTestYAML([]byte(tc.yamlText), &schema); err != nil {
 				t.Fatalf("yaml.Unmarshal: %v", err)
 			}
 			if schema.RequiredAgentsDeclared != tc.declared {
@@ -2190,7 +2190,7 @@ func TestSystemNodeContractDecode_RejectsRetiredAndUnsupportedTopLevelFields(t *
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var node SystemNodeContract
-			err := yaml.Unmarshal([]byte(tc.field+"\n"), &node)
+			err := decodeNodeTestYAML([]byte(tc.field+"\n"), &node)
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.wantErr)
 			}
@@ -2223,7 +2223,7 @@ func TestSystemNodeContractDecode_RejectsRetiredAndUnsupportedTopLevelFields(t *
 
 func TestEntitySchemaDecode_AcceptsMappingInitialValue(t *testing.T) {
 	var schema EntitySchema
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 scoring_phase:
   revision_count:
     type: integer
@@ -2251,7 +2251,7 @@ scoring_phase:
 
 func TestEntitySchemaDecode_RejectsScalarInitialSuffix(t *testing.T) {
 	var schema EntitySchema
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 scoring_phase:
   revision_count: integer initial 0
 `), &schema)
@@ -2262,7 +2262,7 @@ scoring_phase:
 
 func TestEntitySchemaDecode_RejectsMappingWithoutType(t *testing.T) {
 	var schema EntitySchema
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 scoring_phase:
   revision_count:
     initial: 0
@@ -2274,7 +2274,7 @@ scoring_phase:
 
 func TestFanOutSpecDecode_RejectsLegacyStructuredEmitMapping(t *testing.T) {
 	var spec FanOutSpec
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 items_from: payload.items
 emit_mapping:
   key_field: item.kind
@@ -2289,7 +2289,7 @@ emit_mapping:
 
 func TestFanOutSpecDecode_RejectsLegacyEmitPerItem(t *testing.T) {
 	var spec FanOutSpec
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 items_from: payload.items
 emit_per_item: routed.item
 `), &spec)
@@ -2300,20 +2300,20 @@ emit_per_item: routed.item
 
 func TestFanOutSpecDecode_RejectsRetiredTarget(t *testing.T) {
 	var spec FanOutSpec
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 items_from: payload.items
 target: worker-a
 emit:
   event: routed.item
 `), &spec)
-	if err == nil || !strings.Contains(err.Error(), `fan_out field "target" is retired`) {
+	if err == nil || !strings.Contains(err.Error(), `RETIRED: fan_out field "target"`) {
 		t.Fatalf("yaml.Unmarshal error = %v, want retired fan_out target rejection", err)
 	}
 }
 
 func TestFanOutSpecDecode_RejectsUnknownFieldWithCanonicalOptions(t *testing.T) {
 	var spec FanOutSpec
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 items_from: payload.items
 foreach: payload.items
 emit:
@@ -2336,7 +2336,7 @@ emit:
 
 func TestFanOutSpecDecode_RejectsExplicitZeroMaxItems(t *testing.T) {
 	var spec FanOutSpec
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 items_from: payload.items
 as: line_item
 identity: line_item.id
@@ -2353,7 +2353,7 @@ emit:
 
 func TestFanOutSpecDecode_RejectsExplicitNullMaxItems(t *testing.T) {
 	var spec FanOutSpec
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 items_from: payload.items
 as: line_item
 identity: line_item.id
@@ -2370,7 +2370,7 @@ emit:
 
 func TestFanOutSpecDecode_RejectsNestedItemsSource(t *testing.T) {
 	var spec FanOutSpec
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 items_from: payload.items.missing
 as: line_item
 identity: line_item.id
@@ -2386,7 +2386,7 @@ emit:
 
 func TestFanOutSpecDecode_DistinguishesOmittedMaxItems(t *testing.T) {
 	var spec FanOutSpec
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 items_from: payload.items
 as: line_item
 identity: line_item.id
@@ -2404,7 +2404,7 @@ emit:
 
 func TestGroupBySpecDecode_HydratesPaths(t *testing.T) {
 	var spec GroupBySpec
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 items_from: payload.items
 key: category
 store_as: entity.grouped
@@ -2424,7 +2424,7 @@ store_as: entity.grouped
 
 func TestWorkflowDataWriteDecode_TreatsScalarValueAsLiteral(t *testing.T) {
 	var write WorkflowDataWrite
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 target_field: category
 value: premium
 `), &write); err != nil {
@@ -2446,7 +2446,7 @@ value: premium
 
 func TestWorkflowDataAccumulationDecode_PreservesCanonicalWriteForms(t *testing.T) {
 	var spec WorkflowDataAccumulation
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 writes:
   - stage_one_result
   - source_field: result
@@ -2485,7 +2485,7 @@ writes:
 
 func TestWorkflowDataWriteDecode_PreservesContainedOperationForms(t *testing.T) {
 	var spec WorkflowDataAccumulation
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 writes:
   - op: append
     target: entity.verticals.active_jobs
@@ -2528,7 +2528,7 @@ writes:
 
 func TestWorkflowDataWriteDecode_RejectsAmbiguousContainedOperationShape(t *testing.T) {
 	var spec WorkflowDataAccumulation
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 writes:
   - op: append
     target_path: entity.verticals.active_jobs
@@ -2555,7 +2555,7 @@ func TestWorkflowDataWriteDecode_RejectsContainedSetOrMergeIndex(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var spec WorkflowDataAccumulation
-			err := yaml.Unmarshal([]byte(fmt.Sprintf(`
+			err := decodeNodeTestYAML([]byte(fmt.Sprintf(`
 writes:
   - op: %s
     target: entity.verticals
@@ -2576,7 +2576,7 @@ writes:
 
 func TestWorkflowDataWriteDecode_PreservesTargetPathAuthoring(t *testing.T) {
 	var write WorkflowDataWrite
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 source_field: summary
 target_path: entity.analysis.summary
 `), &write); err != nil {
@@ -2595,7 +2595,7 @@ target_path: entity.analysis.summary
 
 func TestWorkflowDataWriteDecode_RejectsConflictingTargetFieldAndTargetPath(t *testing.T) {
 	var write WorkflowDataWrite
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 source_field: summary
 target_field: analysis
 target_path: entity.analysis.summary
@@ -2610,12 +2610,12 @@ target_path: entity.analysis.summary
 
 func TestWorkflowDataAccumulationDecode_RejectsLegacySourceAlias(t *testing.T) {
 	var spec WorkflowDataAccumulation
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 writes: [value]
 source: payload.value
 `), &spec)
 	if err != nil {
-		if strings.Contains(err.Error(), "unsupported workflow data accumulation field") {
+		if strings.Contains(err.Error(), `data_accumulation field "source" is not supported`) {
 			return
 		}
 		t.Fatalf("yaml.Unmarshal error = %v", err)
@@ -2625,7 +2625,7 @@ source: payload.value
 
 func TestSystemNodeEventHandlerDecode_PreservesCreateEntity(t *testing.T) {
 	var handler SystemNodeEventHandler
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 create_entity: true
 emit: scoring.requested
 `), &handler); err != nil {
@@ -2644,7 +2644,7 @@ func TestSystemNodeEventHandlerDecodeRejectsRetiredReceiverSelectors(t *testing.
 		for _, body := range []string{"null", "{}", "true", "{by: {account_id: payload.account_id}}", "{where: {account_id: payload.account_id}}"} {
 			t.Run(name+"/"+body, func(t *testing.T) {
 				var handler SystemNodeEventHandler
-				err := yaml.Unmarshal([]byte(name+": "+body+"\ncreate_entity: true\nemit: receiver.ready\n"), &handler)
+				err := decodeNodeTestYAML([]byte(name+": "+body+"\ncreate_entity: true\nemit: receiver.ready\n"), &handler)
 				if err == nil || !strings.Contains(err.Error(), "RETIRED:") || !strings.Contains(err.Error(), name) || !strings.Contains(err.Error(), "composition boundary") {
 					t.Fatalf("retired receiver selector accepted or lacks teaching error: %v", err)
 				}
@@ -2655,7 +2655,7 @@ func TestSystemNodeEventHandlerDecodeRejectsRetiredReceiverSelectors(t *testing.
 
 func TestSystemNodeEventHandlerDecode_RejectsEventlessRuleEmitWithoutTemplate(t *testing.T) {
 	var handler SystemNodeEventHandler
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 rules:
   done:
     else: true
@@ -2670,7 +2670,7 @@ rules:
 
 func TestSystemNodeEventHandlerDecode_RejectsTieredWeightedAverageWithoutDimensionKey(t *testing.T) {
 	var handler SystemNodeEventHandler
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 compute:
   operation: weighted_average
   keys:
@@ -2687,7 +2687,7 @@ compute:
 
 func TestSystemNodeEventHandlerDecode_RejectsTieredWeightedAverageWithoutScoreKeys(t *testing.T) {
 	var handler SystemNodeEventHandler
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 compute:
   operation: weighted_average
   keys:
@@ -2704,7 +2704,7 @@ compute:
 
 func TestWorkflowDataWriteDecode_RetiresExpressionAliasInListForm(t *testing.T) {
 	var write WorkflowDataWrite
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 target_field: dimensions_requested
 expression: policy.scoring_dimensions
 `), &write)
@@ -2715,7 +2715,7 @@ expression: policy.scoring_dimensions
 
 func TestWorkflowDataWriteDecode_PreservesLiteralValue(t *testing.T) {
 	var write WorkflowDataWrite
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 target_field: scoring_rubric
 value: corpus_rubric
 `), &write); err != nil {
@@ -2731,7 +2731,7 @@ value: corpus_rubric
 
 func TestWorkflowDataAccumulationDecode_RejectsShorthandMapping(t *testing.T) {
 	var spec WorkflowDataAccumulation
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 dimensions_requested:
   expression: policy.scoring_dimensions
 `), &spec)
@@ -2742,7 +2742,7 @@ dimensions_requested:
 
 func TestExpressionValueDecode_RetiresExpressionAliasInMappingForm(t *testing.T) {
 	var expr ExpressionValue
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 expression: entity.score + 1
 `), &expr)
 	if err == nil || !strings.Contains(err.Error(), "retired expression value") {
@@ -2752,7 +2752,7 @@ expression: entity.score + 1
 
 func TestExpressionValueDecode_PreservesScalarAsLiteralOutsideEmitFields(t *testing.T) {
 	var expr ExpressionValue
-	if err := yaml.Unmarshal([]byte(`target_state`), &expr); err != nil {
+	if err := decodeNodeTestYAML([]byte(`target_state`), &expr); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
 	if expr.Kind != ExpressionKindLiteral {
@@ -2765,7 +2765,7 @@ func TestExpressionValueDecode_PreservesScalarAsLiteralOutsideEmitFields(t *test
 
 func TestEmitSpecDecode_R2ValuesOnEmitFields(t *testing.T) {
 	var spec EmitSpec
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 event: signals.category_ready
 fields:
   mode: ${payload.mode}
@@ -2798,7 +2798,7 @@ fields:
 
 func TestGuardSpecDecode_OnFailEscalateObjectFields(t *testing.T) {
 	var spec GuardSpec
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 id: score_check
 check: payload.score >= policy.threshold
 on_fail:
@@ -2839,7 +2839,7 @@ on_fail:
 
 func TestGuardSpecDecode_RejectsNestedScalarEscalateShortcut(t *testing.T) {
 	var spec GuardSpec
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 id: score_check
 check: payload.score >= policy.threshold
 on_fail:
@@ -2882,7 +2882,7 @@ on_fail:
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var spec GuardSpec
-			err := yaml.Unmarshal([]byte(tc.body), &spec)
+			err := decodeNodeTestYAML([]byte(tc.body), &spec)
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.wantErr)
 			}
@@ -2892,7 +2892,7 @@ on_fail:
 
 func TestGuardSpecDecode_RejectsUnknownOnFailFieldWithCanonicalOptions(t *testing.T) {
 	var spec GuardSpec
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 id: score_check
 check: payload.score >= policy.threshold
 on_fail:
@@ -2915,7 +2915,7 @@ on_fail:
 
 func TestAccumulateSpecDecode_RejectsUnknownFieldWithCanonicalOptions(t *testing.T) {
 	var spec AccumulateSpec
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 into: entity.items
 source: payload.items
 `), &spec)
@@ -2937,7 +2937,7 @@ source: payload.items
 
 func TestEmitSpecDecode_AcceptsLiteralObjectFieldMappings(t *testing.T) {
 	var spec EmitSpec
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 event: signals.category_ready
 fields:
   batch:
@@ -2953,8 +2953,8 @@ fields:
 
 func TestHandlerRuleEntryDecode_PreservesRuleLevelFanOut(t *testing.T) {
 	var rule HandlerRuleEntry
-	if err := yaml.Unmarshal([]byte(`
-condition: "payload.mode == 'parallel'"
+	if err := decodeNodeTestYAML([]byte(`
+when: "payload.mode == 'parallel'"
 fan_out:
   items_from: payload.items
   as: line_item
@@ -2983,7 +2983,7 @@ data_accumulation:
 
 func TestSystemNodeEventHandlerDecode_AllowsOnSuccessEmitWithRules(t *testing.T) {
 	var handler SystemNodeEventHandler
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 on_success:
   emit:
     event: handler.succeeded
@@ -3015,7 +3015,7 @@ rules:
 
 func TestSystemNodeEventHandlerDecode_AllowsRulesEmitTemplateSpecialization(t *testing.T) {
 	var handler SystemNodeEventHandler
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 emit:
   event: account.bucketed
   fields:
@@ -3154,7 +3154,7 @@ rules:
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var handler SystemNodeEventHandler
-			err := yaml.Unmarshal([]byte(tc.raw), &handler)
+			err := decodeNodeTestYAML([]byte(tc.raw), &handler)
 			if err == nil || !strings.Contains(err.Error(), tc.contains) {
 				t.Fatalf("yaml.Unmarshal error = %v, want containing %q", err, tc.contains)
 			}
@@ -3253,7 +3253,7 @@ rules:
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var handler SystemNodeEventHandler
-			err := yaml.Unmarshal([]byte(tc.raw), &handler)
+			err := decodeNodeTestYAML([]byte(tc.raw), &handler)
 			if err == nil || !strings.Contains(err.Error(), tc.contains) {
 				t.Fatalf("yaml.Unmarshal error = %v, want containing %q", err, tc.contains)
 			}
@@ -3263,7 +3263,7 @@ rules:
 
 func TestEntityFieldDeclDecode_PreservesMaterializeFromProjection(t *testing.T) {
 	var field EntityFieldDecl
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 type: list<DimensionVerdict>
 materialize_from: scoring-node.dimensions_received
 project:
@@ -3282,7 +3282,7 @@ project:
 
 func TestEntityFieldDeclDecode_PreservesIndexed(t *testing.T) {
 	var field EntityFieldDecl
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 type: text
 indexed: true
 `), &field); err != nil {
@@ -3295,7 +3295,7 @@ indexed: true
 
 func TestEntityFieldDeclDecode_PreservesUnusedReaderReason(t *testing.T) {
 	var field EntityFieldDecl
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 type: text
 _unused_reader_reason: External operator readout
 `), &field); err != nil {
@@ -3308,7 +3308,7 @@ _unused_reader_reason: External operator readout
 
 func TestEntityFieldDeclDecode_RejectsShortUnusedReaderReason(t *testing.T) {
 	var field EntityFieldDecl
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 type: text
 _unused_reader_reason: short
 `), &field)
@@ -3319,7 +3319,7 @@ _unused_reader_reason: short
 
 func TestAccumulateSpecDecode_PreservesDescriptionAndRejectsUnknownField(t *testing.T) {
 	var spec AccumulateSpec
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 into: dimensions_received
 description: all dimension receipts have arrived
 dedup_by: payload.dimension
@@ -3333,7 +3333,7 @@ dedup_by: payload.dimension
 		t.Fatalf("Description = %q", got)
 	}
 
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 legacy_buffer: dimensions_received
 `), &spec)
 	if err == nil || !strings.Contains(err.Error(), `accumulate field "legacy_buffer" is not supported.`) {
@@ -3352,7 +3352,7 @@ func TestAccumulateSpecDecodeRejectsRetiredFiniteBarrierFields(t *testing.T) {
 	for _, field := range []string{"expected_from", "completion", "threshold", "timeout_ms", "on_complete", "on_timeout"} {
 		t.Run(field, func(t *testing.T) {
 			var spec AccumulateSpec
-			err := yaml.Unmarshal([]byte("into: items\n"+field+": retired\n"), &spec)
+			err := decodeNodeTestYAML([]byte("into: items\n"+field+": retired\n"), &spec)
 			if err == nil || !strings.Contains(err.Error(), `accumulate field "`+field+`" is not supported`) {
 				t.Fatalf("yaml.Unmarshal error = %v, want retired field rejection", err)
 			}
@@ -3428,7 +3428,7 @@ emit:
 
 func TestEnumTypeDeclDecode_RetiresSequenceFormWithTeachingCodemod(t *testing.T) {
 	var decl EnumTypeDecl
-	err := yaml.Unmarshal([]byte(`[low, medium, high]`), &decl)
+	err := decodeNodeTestYAML([]byte(`[low, medium, high]`), &decl)
 	if err == nil || !strings.Contains(err.Error(), "RETIRED: enum declaration uses the sequence form") || !strings.Contains(err.Error(), "default: low") {
 		t.Fatalf("sequence form error = %v, want teaching codemod naming default: low", err)
 	}
@@ -3436,7 +3436,7 @@ func TestEnumTypeDeclDecode_RetiresSequenceFormWithTeachingCodemod(t *testing.T)
 
 func TestEnumTypeDeclDecode_RetiresScalarShorthandWithTeachingCodemod(t *testing.T) {
 	var decl EnumTypeDecl
-	err := yaml.Unmarshal([]byte(`fast`), &decl)
+	err := decodeNodeTestYAML([]byte(`fast`), &decl)
 	if err == nil || !strings.Contains(err.Error(), "RETIRED: enum declaration uses the scalar shorthand") || !strings.Contains(err.Error(), "default: fast") {
 		t.Fatalf("scalar shorthand error = %v, want teaching codemod naming default: fast", err)
 	}
@@ -3444,7 +3444,7 @@ func TestEnumTypeDeclDecode_RetiresScalarShorthandWithTeachingCodemod(t *testing
 
 func TestEnumTypeDeclDecode_RejectsDuplicateKeys(t *testing.T) {
 	var decl EnumTypeDecl
-	err := yaml.Unmarshal([]byte("values: [low, high]\ndefault: low\ndefault: high\n"), &decl)
+	err := decodeNodeTestYAML([]byte("values: [low, high]\ndefault: low\ndefault: high\n"), &decl)
 	if err == nil || !strings.Contains(err.Error(), `repeats key "default"`) {
 		t.Fatalf("duplicate key error = %v, want duplicate-key rejection", err)
 	}
@@ -3452,7 +3452,7 @@ func TestEnumTypeDeclDecode_RejectsDuplicateKeys(t *testing.T) {
 
 func TestEnumTypeDeclDecode_UnknownFieldListsValidOptions(t *testing.T) {
 	var decl EnumTypeDecl
-	err := yaml.Unmarshal([]byte("values: [low, high]\ndefualt: low\n"), &decl)
+	err := decodeNodeTestYAML([]byte("values: [low, high]\ndefualt: low\n"), &decl)
 	if err == nil {
 		t.Fatal("unknown enum field accepted")
 	}
@@ -3471,7 +3471,7 @@ func TestEnumTypeDeclDecode_UnknownFieldListsValidOptions(t *testing.T) {
 
 func TestEnumTypeDeclDecode_RequiresDefault(t *testing.T) {
 	var decl EnumTypeDecl
-	err := yaml.Unmarshal([]byte("values: [low, medium, high]\n"), &decl)
+	err := decodeNodeTestYAML([]byte("values: [low, medium, high]\n"), &decl)
 	if err == nil || !strings.Contains(err.Error(), "requires default") || !strings.Contains(err.Error(), "default: low") {
 		t.Fatalf("missing default error = %v, want teaching codemod naming default: low", err)
 	}
@@ -3479,7 +3479,7 @@ func TestEnumTypeDeclDecode_RequiresDefault(t *testing.T) {
 
 func TestEnumTypeDeclDecode_RejectsNonMemberDefaultNamingMembers(t *testing.T) {
 	var decl EnumTypeDecl
-	err := yaml.Unmarshal([]byte("values: [low, medium, high]\ndefault: urgent\n"), &decl)
+	err := decodeNodeTestYAML([]byte("values: [low, medium, high]\ndefault: urgent\n"), &decl)
 	if err == nil || !strings.Contains(err.Error(), `default "urgent" is not a declared member`) || !strings.Contains(err.Error(), "low, medium, high") {
 		t.Fatalf("non-member default error = %v, want error naming the declared members", err)
 	}
@@ -3487,7 +3487,7 @@ func TestEnumTypeDeclDecode_RejectsNonMemberDefaultNamingMembers(t *testing.T) {
 
 func TestEnumTypeDeclDecode_AcceptsCanonicalMappingForm(t *testing.T) {
 	var decl EnumTypeDecl
-	if err := yaml.Unmarshal([]byte("values: [low, medium, high]\ndefault: medium\n"), &decl); err != nil {
+	if err := decodeNodeTestYAML([]byte("values: [low, medium, high]\ndefault: medium\n"), &decl); err != nil {
 		t.Fatalf("canonical mapping form rejected: %v", err)
 	}
 	if !reflect.DeepEqual(decl.Values, []string{"low", "medium", "high"}) || decl.Default != "medium" {
@@ -3497,7 +3497,7 @@ func TestEnumTypeDeclDecode_AcceptsCanonicalMappingForm(t *testing.T) {
 
 func TestEnumTypeDeclDecode_EmptyScalarShorthandRequiresMappingForm(t *testing.T) {
 	var decl EnumTypeDecl
-	err := yaml.Unmarshal([]byte(`""`), &decl)
+	err := decodeNodeTestYAML([]byte(`""`), &decl)
 	if err == nil || !strings.Contains(err.Error(), "requires the mapping form") {
 		t.Fatalf("empty scalar shorthand error = %v, want mapping-form guidance", err)
 	}
@@ -3505,7 +3505,7 @@ func TestEnumTypeDeclDecode_EmptyScalarShorthandRequiresMappingForm(t *testing.T
 
 func TestEnumTypeDeclDecode_NonScalarDefaultGetsAuthorMessage(t *testing.T) {
 	var decl EnumTypeDecl
-	err := yaml.Unmarshal([]byte("values: [low, high]\ndefault: [low]\n"), &decl)
+	err := decodeNodeTestYAML([]byte("values: [low, high]\ndefault: [low]\n"), &decl)
 	if err == nil || !strings.Contains(err.Error(), "default must be a scalar member") {
 		t.Fatalf("non-scalar default error = %v, want author-facing scalar-member message", err)
 	}
@@ -3516,7 +3516,7 @@ func TestEnumTypeDeclDecode_NonScalarDefaultGetsAuthorMessage(t *testing.T) {
 
 func TestTypeCatalogDecode_RejectsNullEnumEntry(t *testing.T) {
 	var catalog TypeCatalogDocument
-	err := yaml.Unmarshal([]byte("enums:\n  Mode:\n"), &catalog)
+	err := decodeNodeTestYAML([]byte("enums:\n  Mode:\n"), &catalog)
 	if err == nil || !strings.Contains(err.Error(), `enum Mode is declared without values`) {
 		t.Fatalf("null enum entry error = %v, want load-time teaching rejection", err)
 	}
@@ -3524,7 +3524,7 @@ func TestTypeCatalogDecode_RejectsNullEnumEntry(t *testing.T) {
 
 func TestTypeCatalogDecode_RejectsEmptyEnumKey(t *testing.T) {
 	var catalog TypeCatalogDocument
-	err := yaml.Unmarshal([]byte("enums:\n  \"\":\n    values: [low]\n    default: low\n"), &catalog)
+	err := decodeNodeTestYAML([]byte("enums:\n  \"\":\n    values: [low]\n    default: low\n"), &catalog)
 	if err == nil || !strings.Contains(err.Error(), "empty name") {
 		t.Fatalf("empty enum key error = %v, want empty-name rejection", err)
 	}
@@ -3532,7 +3532,7 @@ func TestTypeCatalogDecode_RejectsEmptyEnumKey(t *testing.T) {
 
 func TestTypeCatalogDecode_RejectsWhitespacePaddedEnumKey(t *testing.T) {
 	var catalog TypeCatalogDocument
-	err := yaml.Unmarshal([]byte("enums:\n  \" Mode\":\n    values: [low]\n    default: low\n"), &catalog)
+	err := decodeNodeTestYAML([]byte("enums:\n  \" Mode\":\n    values: [low]\n    default: low\n"), &catalog)
 	if err == nil || !strings.Contains(err.Error(), "surrounding whitespace") {
 		t.Fatalf("whitespace-padded enum key error = %v, want whitespace rejection", err)
 	}
@@ -3540,7 +3540,7 @@ func TestTypeCatalogDecode_RejectsWhitespacePaddedEnumKey(t *testing.T) {
 
 func TestEnumTypeDeclValidate_SharedInvariantNondeterministicFree(t *testing.T) {
 	var catalog TypeCatalogDocument
-	err := yaml.Unmarshal([]byte("enums:\n  zebra:\n  alpha:\n    values: [low]\n    default: low\n"), &catalog)
+	err := decodeNodeTestYAML([]byte("enums:\n  zebra:\n  alpha:\n    values: [low]\n    default: low\n"), &catalog)
 	if err == nil || !strings.Contains(err.Error(), "enum zebra is declared without values") {
 		t.Fatalf("multi-enum validation error = %v, want sorted deterministic first error naming zebra", err)
 	}

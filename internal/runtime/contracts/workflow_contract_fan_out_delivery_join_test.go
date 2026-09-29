@@ -3,8 +3,6 @@ package contracts
 import (
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 )
 
 func TestFanOutDeliveryJoinStrictClosedGrammar(t *testing.T) {
@@ -17,7 +15,7 @@ on_complete:
     event: batch.completed
 `
 	var admitted JoinSpec
-	if err := yaml.Unmarshal([]byte(canonical), &admitted); err != nil {
+	if err := decodeNodeTestYAML([]byte(canonical), &admitted); err != nil {
 		t.Fatalf("decode canonical fan-out delivery join: %v", err)
 	}
 	if admitted.Mode() != WorkflowJoinModeFanOutDelivery || !admitted.Members.FromFanOut {
@@ -42,7 +40,7 @@ on_complete:
 	for name, document := range hostile {
 		t.Run(name, func(t *testing.T) {
 			var spec JoinSpec
-			if err := yaml.Unmarshal([]byte(document), &spec); err == nil {
+			if err := decodeNodeTestYAML([]byte(document), &spec); err == nil {
 				t.Fatalf("hostile fan-out delivery join decoded as %#v", spec)
 			}
 		})
@@ -65,7 +63,7 @@ join:
       event: batch.completed
 `
 	var handler SystemNodeEventHandler
-	if err := yaml.Unmarshal([]byte(canonical), &handler); err != nil {
+	if err := decodeNodeTestYAML([]byte(canonical), &handler); err != nil {
 		t.Fatalf("decode paired fan-out delivery handler: %v", err)
 	}
 	if err := ValidateJoinHandlerIsolation(handler); err != nil {
@@ -79,7 +77,7 @@ join:
 	} {
 		t.Run(name, func(t *testing.T) {
 			var candidate SystemNodeEventHandler
-			if err := yaml.Unmarshal([]byte(document), &candidate); err != nil {
+			if err := decodeNodeTestYAML([]byte(document), &candidate); err != nil {
 				return
 			}
 			if err := ValidateJoinHandlerIsolation(candidate); err == nil {
