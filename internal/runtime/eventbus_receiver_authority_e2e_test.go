@@ -545,9 +545,9 @@ pins:
     events: [task.assigned]
 `,
 		"entities.yaml": "test_entity: {}\n",
-		"events.yaml": `task.assigned: {}
-task.completed: {}
-task.finalized: {}
+		"events.yaml": `task.assigned:
+task.completed:
+task.finalized:
 `,
 		"agents.yaml": `upstream-agent:
   id: upstream-agent

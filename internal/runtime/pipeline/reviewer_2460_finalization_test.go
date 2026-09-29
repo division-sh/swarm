@@ -146,7 +146,7 @@ func TestCommittedAttemptFailureNotificationKeepsRetryContinuationBothStores(t *
 			bundle := loadWorkflowTempBundle(t, map[string]string{
 				"schema.yaml":   "name: retry-cleanup\ninitial_state: queued\nstates: [queued, done]\nterminal_states: [done]\n",
 				"entities.yaml": "test_entity: {}\n",
-				"events.yaml":   "source.evt: {}\nsource.done: {}\n",
+				"events.yaml":   "source.evt:\nsource.done:\n",
 				"nodes.yaml":    "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      advances_to: done\n      emit: {event: source.done}\n",
 			})
 			module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)
@@ -208,7 +208,7 @@ func TestReview2460HandlerCompletedPanicReleasesCommittedContinuationBothStores(
 			bundle := loadWorkflowTempBundle(t, map[string]string{
 				"schema.yaml":   "name: committed-cleanup\ninitial_state: queued\nstates: [queued, done]\nterminal_states: [done]\n",
 				"entities.yaml": "test_entity: {}\n",
-				"events.yaml":   "source.evt: {}\nsource.done: {}\n",
+				"events.yaml":   "source.evt:\nsource.done:\n",
 				"nodes.yaml":    "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      advances_to: done\n      emit: {event: source.done}\n",
 			})
 			module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)

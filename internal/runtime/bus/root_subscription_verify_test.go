@@ -25,7 +25,7 @@ func TestRootPinCannotSatisfyUnconnectedPrivateSourceInput(t *testing.T) {
 				}
 				for path, body := range map[string]string{
 					"schema.yaml":       rootSchema,
-					"events.yaml":       "thing.created: {}\n",
+					"events.yaml":       "thing.created:\n",
 					"child/schema.yaml": "name: child\nmode: " + mode + "\npins:\n  inputs:\n    events: [thing.created]\n",
 					"child/nodes.yaml":  "observer:\n  execution_type: system_node\n  subscribes_to: [thing.created]\n  event_handlers:\n    thing.created:\n      guard: {id: admit, check: 'true'}\n",
 				} {

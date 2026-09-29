@@ -348,9 +348,10 @@ units:
     budget_class: full
   local-release-golden-restart:
     packages: [github.com/division-sh/swarm/internal/releasee2e]
-    run: '^TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends$'
+    run: '^Test(GoldenAgentWorkloadRestartAndForcedKillOnBothBackends|PayloadlessEventPublicPersistenceJourneyBothStores)$'
     required_children:
       TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends: [sqlite, postgres]
+      TestPayloadlessEventPublicPersistenceJourneyBothStores: [sqlite, postgres]
     count_mode: count-1
     environment_id: local-postgres-gateway-empty-v1
     budget_class: full
@@ -544,6 +545,8 @@ units:
     packages:
       - github.com/division-sh/swarm/internal/releasee2e
     run: '^(Test($|[^CDG].*|GoldenI.*|Channel.*|Claude.*|Command.*|CompiledProcessLifecycle.*)|Example.*|Fuzz.*)$'
+    required_children:
+      TestPayloadlessEventPublicPersistenceJourneyBothStores: [sqlite, postgres]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full

@@ -19,8 +19,8 @@ pins:
     events: [ack]
 `)
 	writeClosedVariantFile(t, root, "entities.yaml", "work:\n  marker: text\n")
-	writeClosedVariantFile(t, root, "events.yaml", `seed: {}
-select: {}
+	writeClosedVariantFile(t, root, "events.yaml", `seed:
+select:
 selected:
   marker: text
 ack:

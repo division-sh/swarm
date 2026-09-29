@@ -191,7 +191,7 @@ pins:
 		"events.yaml": `order.started:
   expected: "[text]"
   dispatch_id: text
-order.dispatched: {}
+order.dispatched:
 item.completed:
   dispatch_id: text
   member_id: text

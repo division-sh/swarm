@@ -327,7 +327,7 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 			bundle := loadWorkflowTempBundle(t, map[string]string{
 				"schema.yaml":   "name: delivery-retry\ninitial_state: queued\nstates: [queued, done]\nterminal_states: [done]\n",
 				"entities.yaml": "test_entity: {}\n",
-				"events.yaml":   "source.evt: {}\nnode.completed: {}\n",
+				"events.yaml":   "source.evt:\nnode.completed:\n",
 				"nodes.yaml":    "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      emit: node.completed\n",
 			})
 			bundle.Policy = runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
@@ -463,7 +463,7 @@ func newDeliveryAuthorityCoordinator(t *testing.T, db *sql.DB) (*PipelineCoordin
 	bundle := loadWorkflowTempBundle(t, map[string]string{
 		"schema.yaml":   "name: delivery-authority\ninitial_state: queued\nstates: [queued, done]\nterminal_states: [done]\n",
 		"entities.yaml": "test_entity: {}\n",
-		"events.yaml":   "source.evt: {}\n",
+		"events.yaml":   "source.evt:\n",
 		"nodes.yaml":    "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      advances_to: done\n",
 	})
 	module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)

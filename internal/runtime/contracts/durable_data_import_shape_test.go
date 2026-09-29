@@ -62,7 +62,7 @@ func TestDurableDataImportShapeFieldlessEventUsesEmptyArray(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	root := t.TempDir()
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: fieldless-import-shape\n")
-	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "empty.ping: {}\n")
+	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "empty.ping:\n")
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 	if err != nil {
 		t.Fatal(err)

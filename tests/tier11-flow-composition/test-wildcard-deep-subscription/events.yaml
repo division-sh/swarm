@@ -1,7 +1,7 @@
-pipeline.start: {}
-pipeline.complete: {}
-task.done: {}
-child/work.begin: {}
-child/work.finished: {}
-child/grandchild/task.start: {}
-child/grandchild/task.done: {}
+pipeline.start:
+pipeline.complete:
+task.done:
+child/work.begin:
+child/work.finished:
+child/grandchild/task.start:
+child/grandchild/task.done:

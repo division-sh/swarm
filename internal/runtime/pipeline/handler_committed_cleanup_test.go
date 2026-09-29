@@ -21,7 +21,7 @@ func TestHandlerCommittedCleanupErrorRetainsExactOutcomeBothStores(t *testing.T)
 			bundle := loadWorkflowTempBundle(t, map[string]string{
 				"schema.yaml":   "name: committed-cleanup\ninitial_state: queued\nstates: [queued, done]\nterminal_states: [done]\n",
 				"entities.yaml": "test_entity: {}\n",
-				"events.yaml":   "source.evt: {}\nsource.done: {}\n",
+				"events.yaml":   "source.evt:\nsource.done:\n",
 				"nodes.yaml":    "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      advances_to: done\n      emit: {event: source.done}\n",
 			})
 			module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)
@@ -90,7 +90,7 @@ func TestGuardRejectedSettlementSurvivesContinuationCleanupFailureBothStores(t *
 			bundle := loadWorkflowTempBundle(t, map[string]string{
 				"schema.yaml":   "name: terminal-no-engine\ninitial_state: queued\nstates: [queued, done]\nterminal_states: [done]\n",
 				"entities.yaml": "test_entity: {}\n",
-				"events.yaml":   "source.evt: {}\n",
+				"events.yaml":   "source.evt:\n",
 				"nodes.yaml":    "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      guard: {id: reject-check, check: 'false', on_fail: reject}\n      advances_to: done\n",
 			})
 			module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)

@@ -34,7 +34,7 @@ connect:
   - {from: ., event: state.seeded, to: selected-state-flow/at-t}
   - {from: ., event: state.closed, to: selected-state-flow/at-t}
 `)
-	writeClosedVariantFile(t, root, "events.yaml", "item.received: {}\nreview.ready: {}\nstate.seeded:\n  name: text\nstate.closed: {}\n")
+	writeClosedVariantFile(t, root, "events.yaml", "item.received:\nreview.ready:\nstate.seeded:\n  name: text\nstate.closed:\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `test-node:
   execution_type: system_node
   subscribes_to: [item.received, review.ready]

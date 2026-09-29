@@ -15,8 +15,8 @@ func TestProviderSourceLivenessUsesLocalIdentityInExactDeclaringFlow(t *testing.
 	root := writeDeadEventSchemaFixture(t, deadEventSchemaFixtureOptions{
 		name: "provider-local-liveness",
 		flows: map[string]deadEventSchemaFlowFiles{
-			"provider": {events: "ticket.ready: {}\n"},
-			"importer": {events: "ticket.ready: {}\n"},
+			"provider": {events: "ticket.ready:\n"},
+			"importer": {events: "ticket.ready:\n"},
 		},
 	})
 	repo := repoRootForBootverifyTest(t)

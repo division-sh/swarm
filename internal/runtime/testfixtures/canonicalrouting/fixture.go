@@ -66,6 +66,7 @@ const (
 // ordinary package evidence for the complete-bundle ownership guard.
 type ParserSnippet struct {
 	document yaml.Node
+	source   []byte
 }
 
 func NewParserSnippet(t testing.TB, source string) ParserSnippet {
@@ -74,7 +75,7 @@ func NewParserSnippet(t testing.TB, source string) ParserSnippet {
 	if err := yaml.Unmarshal([]byte(source), &doc); err != nil {
 		t.Fatalf("parse routing snippet: %v", err)
 	}
-	return ParserSnippet{document: doc}
+	return ParserSnippet{document: doc, source: []byte(source)}
 }
 
 // Decode supplies one parsed document to a parser contract under test. It does
@@ -86,9 +87,9 @@ func (snippet ParserSnippet) Decode(target any) error {
 	return snippet.document.Content[0].Decode(target)
 }
 
-// SourceBytes returns an owned serialization for presence-aware admission tests.
+// SourceBytes retains authored spelling for presence-aware admission tests.
 func (snippet ParserSnippet) SourceBytes() ([]byte, error) {
-	return yaml.Marshal(&snippet.document)
+	return bytes.Clone(snippet.source), nil
 }
 
 // ExampleRoot returns the checked-in positive authoring owner for a routing pattern.

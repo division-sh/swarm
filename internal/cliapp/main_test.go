@@ -3658,7 +3658,7 @@ ticket:
     initial: ""
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
-timer.reminder: {}
+timer.reminder:
 `)
 	timerBlock := `
     - id: reminder
@@ -3779,7 +3779,7 @@ writer:
       - research_context
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "events.yaml"), `
-task.assigned: {}
+task.assigned:
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), `
 closer:
@@ -4031,7 +4031,7 @@ func writeWorkflowValidationDeadEventSchemaFixture(t *testing.T) string {
 
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: dead-event-schema\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
-root.unused: {}
+root.unused:
 `)
 	return root
 }

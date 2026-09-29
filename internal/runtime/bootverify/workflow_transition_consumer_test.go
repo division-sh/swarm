@@ -345,11 +345,11 @@ item:
   window: {type: text, initial: window}
 `)
 		writeBootverifyFixtureFile(t, filepath.Join(root, flow, "events.yaml"), `
-direct: {}
-selected: {}
-inherited: {}
-completed: {}
-tick: {}
+direct:
+selected:
+inherited:
+completed:
+tick:
 arrived:
   member: text
   window: text

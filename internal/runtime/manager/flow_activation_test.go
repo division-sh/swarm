@@ -5529,7 +5529,7 @@ func loadRootAndFlowStaticAgentSource(t *testing.T) semanticview.Source {
 	root := t.TempDir()
 
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: root-and-flow-static-agents\n")
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "events.yaml"), "task.assigned: {}\ntask.completed: {}\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "events.yaml"), "task.assigned:\ntask.completed:\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "agents.yaml"), `
 test-agent:
   type: generic
@@ -5542,7 +5542,7 @@ test-agent:
 `)
 
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "ops-flow", "schema.yaml"), "name: ops-flow\n")
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "ops-flow", "events.yaml"), "work.requested: {}\nwork.completed: {}\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "ops-flow", "events.yaml"), "work.requested:\nwork.completed:\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "ops-flow", "agents.yaml"), `
 operator:
   type: generic

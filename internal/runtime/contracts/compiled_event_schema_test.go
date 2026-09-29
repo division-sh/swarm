@@ -19,7 +19,7 @@ item.created:
   entity_id: string?
   item_id: uuid
   note: text?
-item.*: {}
+item.*:
 `)
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 	if err != nil {
@@ -97,7 +97,7 @@ func TestCompiledEventSchemasPreserveFilesystemFlowOwner(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	root := t.TempDir()
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: event-owner-root\n")
-	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "root.started: {}\n")
+	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "root.started:\n")
 	writeFixtureFile(t, filepath.Join(root, "orders", "schema.yaml"), "name: orders\n")
 	writeFixtureFile(t, filepath.Join(root, "orders", "events.yaml"), "ready:\n  order_id: text\n")
 

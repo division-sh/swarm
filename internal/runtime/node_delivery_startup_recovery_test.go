@@ -740,7 +740,7 @@ pins:
   inputs:
     events: [task.requested, task.completed]
 `
-	files["events.yaml"] += "task.completed: {}\n"
+	files["events.yaml"] += "task.completed:\n"
 	files["nodes.yaml"] = strings.ReplaceAll(files["nodes.yaml"], "task.requested:\n      advances_to: done", "task.requested: {}")
 	return loadRuntimeTempBundle(t, files)
 }

@@ -108,7 +108,7 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 		// A real handler outcome shares the gate event. This is a mixed-site
 		// counterexample, not an extra producer to satisfy a gate-only fixture.
 		nodes += "worker:\n  execution_type: system_node\n  subscribes_to: [work.handled]\n  event_handlers:\n    work.handled:\n      emit:\n        event: work.completed\n        fields: {result: {literal: handled}}\n"
-		events += "work.handled: {}\n"
+		events += "work.handled:\n"
 		schema += "      - work.handled\n"
 		schema += "  outputs:\n    events: [work.completed]\n"
 		if variant == LifecycleStaticMixedOutput {
@@ -226,7 +226,7 @@ func CopyLifecycleEmitterHandlerFamilies(t testing.TB) string {
 	t.Helper()
 	root := CopyLifecycleEmitter(t, LifecycleGateLocal)
 	writeClosedVariantFile(t, root, "families/schema.yaml", "name: handler-families\n")
-	events := "direct: {}\nrouted: {}\naudit: {}\nescalated: {}\nspecialized:\n  bucket: text\nitem:\n  id: text\n"
+	events := "direct:\nrouted:\naudit:\nescalated:\nspecialized:\n  bucket: text\nitem:\n  id: text\n"
 	nodes := `worker:
   execution_type: system_node
   event_handlers:
@@ -332,14 +332,14 @@ func CopyLifecycleEmitterExistingLifecycleFamilies(t testing.TB) string {
 	nodes = strings.Replace(nodes, "on_complete: {advances_to: ready}", "on_complete: {advances_to: ready, emit: join.completed}", 1)
 	nodes = strings.Replace(nodes, "timeout: {after: 1h, advances_to: attention}", "timeout: {after: 1h, advances_to: attention, emit: join.expired}", 1)
 	writeClosedVariantFile(t, root, "nodes.yaml", nodes)
-	events := lifecycleStaticRead(t, root, "events.yaml") + "join.completed: {}\njoin.expired: {}\ncreated: {}\nreminder: {}\nexpired: {}\n"
+	events := lifecycleStaticRead(t, root, "events.yaml") + "join.completed:\njoin.expired:\ncreated:\nreminder:\nexpired:\n"
 	writeClosedVariantFile(t, root, "events.yaml", events)
 	schema := lifecycleStaticRead(t, root, "schema.yaml")
 	schema = strings.Replace(schema, "  dispatching: {}", "  dispatching:\n    timers:\n      - {id: reminder, after: 1h, emit: reminder}\n      - {id: expired, after: 2h, emit: expired, advances_to: attention}\n      - {id: internal, after: 3h, advances_to: attention}", 1)
 	schema += "auto_emit_on_create: {event: created}\n"
 	writeClosedVariantFile(t, root, "schema.yaml", schema)
 	writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\nauto_emit_on_create: {event: created}\n")
-	writeClosedVariantFile(t, root, "child/events.yaml", "created: {}\n")
+	writeClosedVariantFile(t, root, "child/events.yaml", "created:\n")
 	return root
 }
 

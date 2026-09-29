@@ -2,4 +2,4 @@ conflict.submitted:
   strategy: string
   value_a: string
   value_b: string
-conflict.resolved: {}
+conflict.resolved:

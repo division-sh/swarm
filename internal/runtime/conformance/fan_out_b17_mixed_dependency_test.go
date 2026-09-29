@@ -302,7 +302,7 @@ func b17MixedNestedSource(t *testing.T) string {
 		{"schema.yaml", "      - account.task.completed\nconnect:\n", "      - account.task.completed\n      - account.notification.completed\nconnect:\n"},
 		{"schema.yaml", "  - event: account.task.completed\n    from: account/task\n    to: .\n", "  - event: account.task.completed\n    from: account/task\n    to: .\n  - event: account.notification.completed\n    from: account\n    to: .\n"},
 		{"account/schema.yaml", "      - account.tasks.completed\n", "      - account.tasks.completed\n      - account.notification.completed\n"},
-		{"account/events.yaml", "account.task.requested:\n", "account.notification.completed: {}\naccount.task.requested:\n"},
+		{"account/events.yaml", "account.task.requested:\n", "account.notification.completed:\naccount.task.requested:\n"},
 	} {
 		path := filepath.Join(root, edit.file)
 		raw, err := os.ReadFile(path)

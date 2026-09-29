@@ -84,7 +84,7 @@ pins:
     max_attempts: 3
     escape: {advances_to: exhausted}
 `
-		events = "items.ready:\n  items: '[text]'\n  revision_id: text\nitems.child:\n  value: text\n  revision_id: text\nbatch.completed:\n  total: integer\n  revision_id: text\nreview.start: {}\nreview.retry:\n  revision_id: text\nreview.closed:\n  revision_id: text\n"
+		events = "items.ready:\n  items: '[text]'\n  revision_id: text\nitems.child:\n  value: text\n  revision_id: text\nbatch.completed:\n  total: integer\n  revision_id: text\nreview.start:\nreview.retry:\n  revision_id: text\nreview.closed:\n  revision_id: text\n"
 		nodes += "      loop: {admit: revision, from: review}\n"
 	}
 	nodes += `      fan_out:

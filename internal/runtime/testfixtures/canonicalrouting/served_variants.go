@@ -94,7 +94,7 @@ func CopyRootIngressServedExternalEvent(t testing.TB) string {
   item_id: text?
 `, `item.processed:
   item_id: text?
-external.observed: {}
+external.observed:
 `)
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - item.processed\n", "      - item.processed\n      - external.observed\n  outputs:\n    events: [external.observed]\n")
 	return root
@@ -121,7 +121,7 @@ pins:
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "events: [external.observed]\n", "events: [external.observed, fork.source_message, item.processed]\nconnect:\n  - {event: fork.source_message, from: ., to: fork-source}\n  - {event: item.processed, from: ., to: fork-source}\n")
 	writeClosedVariantFile(t, root, "fork-source/entities.yaml", "conversation: {}\n")
 	writeClosedVariantFile(t, root, "fork-source/nodes.yaml", "owner:\n  execution_type: system_node\n  event_handlers:\n    fork.source_message:\n      create_entity: true\n      advances_to: active\n    item.processed:\n      advances_to: done\n")
-	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "external.observed: {}\n", "external.observed: {}\nfork.source_message:\n  note: text\n")
+	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "external.observed:\n", "external.observed:\nfork.source_message:\n  note: text\n")
 	writeClosedVariantFile(t, root, "fork-source/agents.yaml", `fork-source-agent:
   id: fork-source-agent
   role: researcher

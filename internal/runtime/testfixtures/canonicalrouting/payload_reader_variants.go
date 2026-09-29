@@ -30,7 +30,7 @@ func CopyLocalWildcardPayload(t testing.TB, variant LocalWildcardPayloadVariant)
 	root := t.TempDir()
 	files := map[string]string{
 		"schema.yaml":          "name: wildcard-payload-proof\npins:\n  inputs: {events: [start]}\n  outputs: {events: [start]}\nconnect:\n  - {event: start, from: ., to: worker}\n",
-		"events.yaml":          "start: {}\n",
+		"events.yaml":          "start:\n",
 		"worker/schema.yaml":   "name: worker\nmode: static\ninitial_state: active\nstates: [active]\npins:\n  inputs:\n    events: [start]\n",
 		"worker/entities.yaml": "work: {}\n",
 		"worker/events.yaml":   "task.done:\n  work_id: text\ntask.failed:\n  work_id: " + secondType + "\n",

@@ -220,6 +220,7 @@ func writeDescribeText(out io.Writer, view authoringview.View) {
 	fmt.Fprintf(out, "describe: source=%s\n", view.SourceHash)
 	fmt.Fprintf(out, "source authority: %s\n", view.SourceAuthority)
 	fmt.Fprintln(out, "validation: structural; live readiness: not evaluated")
+	writeDescribeEvents(out, view.Root.Events, "")
 	if view.Root.PrimaryEntity != nil {
 		fmt.Fprintf(out, "root primary entity: %s\n", view.Root.PrimaryEntity.Type)
 	}
@@ -231,6 +232,7 @@ func writeDescribeText(out io.Writer, view authoringview.View) {
 				label += " (" + flow.Mode + ")"
 			}
 			fmt.Fprintf(out, "  - %s\n", label)
+			writeDescribeEvents(out, flow.Events, "    ")
 			if flow.Activation != "" {
 				fmt.Fprintf(out, "    activation: %s\n", flow.Activation)
 			}
@@ -557,6 +559,20 @@ func routingResolutionDetail(resolution *routingtopology.Resolution) string {
 		return fmt.Sprintf(" reply=%s correlation=%s", resolution.Reply.Role, resolution.Reply.CorrelationKey)
 	}
 	return ""
+}
+
+func writeDescribeEvents(out io.Writer, events []authoringview.EventView, indent string) {
+	if len(events) == 0 {
+		return
+	}
+	fmt.Fprintf(out, "%sevents:\n", indent)
+	for _, event := range events {
+		fields := "no fields"
+		if len(event.Fields) > 0 {
+			fields = "fields: " + strings.Join(event.Fields, ", ")
+		}
+		fmt.Fprintf(out, "%s  - %s (%s)\n", indent, event.Name, fields)
+	}
 }
 
 func describeQuietValues(view authoringview.View) []string {

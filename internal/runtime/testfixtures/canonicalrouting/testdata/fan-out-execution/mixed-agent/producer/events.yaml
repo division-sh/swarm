@@ -1,4 +1,4 @@
-mixed.none: {}
-mixed.one: {}
-mixed.multi: {}
-mixed.agent: {}
+mixed.none:
+mixed.one:
+mixed.multi:
+mixed.agent:

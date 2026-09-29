@@ -279,6 +279,8 @@ type Scalar struct {
 	Value            string
 	Tag              string
 	Style            Style
+	Anchor           string
+	Alias            string
 	Location         Location
 	ResolvedLocation Location
 }
@@ -288,13 +290,18 @@ func (v Value) Scalar() (Scalar, error) {
 	if node == nil || node.Kind != yaml.ScalarNode {
 		return Scalar{}, fmt.Errorf("%s at %s is %s, want scalar", v.path, v.Location(), v.Presence())
 	}
-	return Scalar{
+	out := Scalar{
 		Value:            node.Value,
 		Tag:              node.Tag,
 		Style:            Style(node.Style),
+		Anchor:           node.Anchor,
 		Location:         v.Location(),
 		ResolvedLocation: v.ResolvedLocation(),
-	}, nil
+	}
+	if authored := authoredValueNode(v.node); authored != nil && authored.Kind == yaml.AliasNode {
+		out.Alias = authored.Value
+	}
+	return out, nil
 }
 
 func (v Value) Sequence() ([]Value, error) {

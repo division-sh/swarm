@@ -1635,7 +1635,7 @@ stages:
 		"entities.yaml": "test_entity: {}\n",
 	}
 	if !terminal {
-		files["events.yaml"] = "launch.approved: {}\n"
+		files["events.yaml"] = "launch.approved:\n"
 	}
 	for name, contents := range files {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0o600); err != nil {

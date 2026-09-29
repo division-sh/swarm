@@ -122,7 +122,7 @@ func TestRuntimePayloadAdmissionStrictOriginalBytes(t *testing.T) {
 }
 
 func TestRuntimePayloadAdmissionEmptyObjectIsNotNull(t *testing.T) {
-	admitter := testRuntimePayloadAdmitter(t, loadRootPayloadBundle(t, "empty.completed: {}\n", ""))
+	admitter := testRuntimePayloadAdmitter(t, loadRootPayloadBundle(t, "empty.completed:\n", ""))
 	for _, raw := range []string{"", "{}", "{ }"} {
 		event, err := admitRuntimePayload(admitter, "empty.completed", []byte(raw))
 		if err != nil {

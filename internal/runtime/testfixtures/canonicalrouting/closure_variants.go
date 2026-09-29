@@ -89,11 +89,11 @@ func CopyEventMetadataAuthority(t testing.TB, variant EventMetadataAuthorityVari
 	if agents != "" {
 		writeClosedVariantFile(t, root, "agents.yaml", agents)
 	}
-	events := "external.requested: {}\ntask.start: {}\ntask.done:\n"
+	events := "external.requested:\ntask.start:\ntask.done:\n"
 	if taskDoneSwarm != "" {
 		events += "  swarm:\n" + taskDoneSwarm
 	} else {
-		events += "  description: internally produced completion\n"
+		events += "  # internally produced completion\n"
 	}
 	writeClosedVariantFile(t, root, "events.yaml", events)
 	writeClosedVariantFile(t, root, "nodes.yaml", "worker:\n  execution_type: system_node\n"+timerBlock+"  event_handlers:\n    task.start:\n      emit:\n        event: task.done\nobserver:\n  execution_type: system_node\n  event_handlers:\n    task.done: {}\n")
@@ -315,13 +315,13 @@ func copyTimerStateCancelReachability(t testing.TB, settings timerStateCancelSet
 		connections += "  - {event: " + event + ", from: ., to: support}\n"
 	}
 	writeClosedVariantFile(t, root, "schema.yaml", "name: timer-state-cancel-reachability\npins:\n  inputs:\n    events: ["+pinList+"]\n  outputs:\n    events: ["+pinList+"]\nconnect:\n"+connections)
-	writeClosedVariantFile(t, root, "events.yaml", "ticket.opened: {}\nticket.closed:\n  entity_id: string\nadmin.done: {}\nadmin.review: {}\n")
+	writeClosedVariantFile(t, root, "events.yaml", "ticket.opened:\nticket.closed:\n  entity_id: string\nadmin.done:\nadmin.review:\n")
 	terminalStates := "[done]"
 	if settings.treatReviewAsTerminalActivation {
 		terminalStates = "[review, done]"
 	}
 	writeClosedVariantFile(t, root, "support/schema.yaml", "name: support\ninitial_state: waiting\nterminal_states: "+terminalStates+"\nstates: [waiting, active, review, done]\npins:\n  inputs:\n    events: ["+pinList+"]\n")
-	writeClosedVariantFile(t, root, "support/events.yaml", "timer.reminder: {}\n")
+	writeClosedVariantFile(t, root, "support/events.yaml", "timer.reminder:\n")
 	timerBlock := "    - id: reminder\n      owner: support-node\n      event: timer.reminder\n      delay: 1m\n      start_on: " + settings.startOn + "\n"
 	if settings.cancelOn != "" {
 		timerBlock += "      cancel_on: " + settings.cancelOn + "\n"
@@ -359,7 +359,7 @@ func CopyVerifyStateSchemaFloat(t testing.TB) string {
 	removeClosedVariantFiles(t, root, "entities.yaml", "nodes.yaml", "events.yaml")
 	writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\ninitial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events: [task.assigned]\n")
 	writeClosedVariantFile(t, root, "child/entities.yaml", "case: {}\n")
-	writeClosedVariantFile(t, root, "events.yaml", "task.assigned: {}\n")
+	writeClosedVariantFile(t, root, "events.yaml", "task.assigned:\n")
 	writeClosedVariantFile(t, root, "child/nodes.yaml", "accumulator:\n  execution_type: system_node\n  subscribes_to: [task.assigned]\n  event_handlers:\n    task.assigned:\n      advances_to: done\n  state_schema:\n    fields:\n      composite: float\n")
 	return root
 }
@@ -372,7 +372,7 @@ func CopyVerifyAccumulatorEntityProjection(t testing.TB) string {
 	writeClosedVariantFile(t, root, "schema.yaml", "name: verify-accumulator-entity-projection\ninitial_state: collecting\nterminal_states: [complete]\nstates: [collecting, complete]\npins:\n  inputs:\n    events: [score.dimension_complete]\n  outputs:\n    events:\n      - event: score.completed\n        sink: harness\n")
 	writeClosedVariantFile(t, root, "types.yaml", "types:\n  DimensionScore:\n    dimension: text\n    tier: integer\n    score: integer\n    evidence: text\n    confidence: text\n")
 	writeClosedVariantFile(t, root, "entities.yaml", "vertical:\n  scores:\n    type: list<DimensionScore>\n    materialize_from: scorer.dimensions_received\n")
-	writeClosedVariantFile(t, root, "events.yaml", "score.dimension_complete:\n  expected_dimensions: integer\n  vertical_id: string\n  dimension: text\n  tier: integer\n  score: integer\n  evidence: text\n  confidence: text\nscore.completed: {}\n")
+	writeClosedVariantFile(t, root, "events.yaml", "score.dimension_complete:\n  expected_dimensions: integer\n  vertical_id: string\n  dimension: text\n  tier: integer\n  score: integer\n  evidence: text\n  confidence: text\nscore.completed:\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", "scorer:\n  execution_type: system_node\n  subscribes_to: [score.dimension_complete]\n  produces: [score.completed]\n  event_handlers:\n    score.dimension_complete:\n      accumulate:\n        into: dimensions_received\n        from: payload\n      emit:\n        event: score.completed\n      advances_to: complete\n  state_schema:\n    fields:\n      dimensions_received: list<DimensionScore>\n")
 	return root
 }
@@ -403,7 +403,7 @@ func CopyVerifyModelAlias(t testing.TB, variant VerifyModelAliasVariant) string 
 	writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\ninitial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events: [task.assigned]\n")
 	writeClosedVariantFile(t, root, "child/entities.yaml", "case: {}\n")
 	writeClosedVariantFile(t, root, "child/agents.yaml", fmt.Sprintf("worker:\n  id: worker\n  type: factory\n  role: worker\n  intent: prompts/worker.md\n  model: %s\n  memory: false\n  subscriptions: [task.assigned]\n", model))
-	writeClosedVariantFile(t, root, "events.yaml", "task.assigned: {}\n")
+	writeClosedVariantFile(t, root, "events.yaml", "task.assigned:\n")
 	writeClosedVariantFile(t, root, "child/nodes.yaml", "closer:\n  execution_type: system_node\n  subscribes_to: [task.assigned]\n  event_handlers:\n    task.assigned:\n      advances_to: done\n")
 	writeClosedVariantFile(t, root, "child/prompts/worker.md", "Handle the task.\n")
 	return root

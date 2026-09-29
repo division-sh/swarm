@@ -43,7 +43,7 @@ func CopyImportBoundaryAlias(t testing.TB, variant ImportBoundaryAliasVariant) s
 
 	connect := ""
 	rootSchema := "name: import-boundary-alias\n"
-	rootEvents := "\nparent.lead_captured: {}\nparent.lead_enriched: {}\n"
+	rootEvents := "\nparent.lead_captured:\nparent.lead_enriched:\n"
 	if connected {
 		connect = `
 connect:
@@ -66,7 +66,7 @@ pins:
     events:
       - parent.lead_captured
 `
-		rootEvents = "\nparent.lead_captured: {}\n"
+		rootEvents = "\nparent.lead_captured:\n"
 	}
 
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), rootSchema+connect)
@@ -90,9 +90,9 @@ pins:
     events:
       - work.completed
 `)
-	workerEvents := "work.completed: {}\n"
+	workerEvents := "work.completed:\n"
 	if !connected {
-		workerEvents += "work.requested: {}\n"
+		workerEvents += "work.requested:\n"
 	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "worker", "events.yaml"), workerEvents)
 	workerNodes := `

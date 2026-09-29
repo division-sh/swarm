@@ -1057,7 +1057,7 @@ func sqliteFlowActivationBundle(t *testing.T) *runtimecontracts.WorkflowContract
 		"schema.yaml":          "name: flow-activation-proof\n",
 		"review/schema.yaml":   "name: review\nmode: template\nstages:\n  pending: {initial: true}\npins:\n  inputs:\n    events: [task.started]\n",
 		"review/entities.yaml": "review_item: {}\n",
-		"review/events.yaml":   "task.started: {}\n",
+		"review/events.yaml":   "task.started:\n",
 	})
 	// The actor authority fixture supplies its admitted test intent separately
 	// from the compiled flow declaration.

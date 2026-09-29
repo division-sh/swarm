@@ -97,12 +97,16 @@ func admitEventCatalogDocument(document yamlsource.Document) (map[string]EventCa
 
 func admitEventCatalogEntry(name string, declaration yamlsource.MappingField) (EventCatalogEntry, error) {
 	value := declaration.Value
-	if value.Presence() != yamlsource.PresenceMapping && value.Presence() != yamlsource.PresenceEmptyMapping {
-		return EventCatalogEntry{}, fmt.Errorf("declaration at %s is %s, want mapping", value.Location(), value.Presence())
-	}
-	fields, err := value.Mapping()
+	bare, err := admitEventDeclarationShape(name, value)
 	if err != nil {
 		return EventCatalogEntry{}, err
+	}
+	var fields []yamlsource.MappingField
+	if !bare {
+		fields, err = value.Mapping()
+		if err != nil {
+			return EventCatalogEntry{}, err
+		}
 	}
 	for _, field := range fields {
 		if _, retired := retiredEventCatalogMetadataFields[field.Name]; retired {
@@ -115,9 +119,12 @@ func admitEventCatalogEntry(name string, declaration yamlsource.MappingField) (E
 			return EventCatalogEntry{}, fmt.Errorf("RETIRED: nested events.yaml payload blocks are no longer supported; move payload fields to the event top level")
 		}
 	}
-	fields, err = uniqueYAMLMappingFields(value, "event "+name)
-	if err != nil {
-		return EventCatalogEntry{}, err
+	if !bare {
+		var err error
+		fields, err = uniqueYAMLMappingFields(value, "event "+name)
+		if err != nil {
+			return EventCatalogEntry{}, err
+		}
 	}
 	byName := make(map[string]yamlsource.MappingField, len(fields))
 	for _, field := range fields {
@@ -193,6 +200,9 @@ func admitEventCatalogEntry(name string, declaration yamlsource.MappingField) (E
 		InputPaths: eventFieldTypePaths(payloadFieldNames),
 	}
 
+	if !bare && len(entry.Payload.Properties) == 0 {
+		return EventCatalogEntry{}, payloadlessEventDeclarationError(name, "mapping")
+	}
 	if entry.BusinessKeyField != "" {
 		field, ok := entry.Payload.Properties[entry.BusinessKeyField]
 		if !ok {
@@ -206,6 +216,45 @@ func admitEventCatalogEntry(name string, declaration yamlsource.MappingField) (E
 		}
 	}
 	return entry, nil
+}
+
+func payloadlessEventDeclarationError(name, variant string) error {
+	return fmt.Errorf("an event with no fields is declared bare \u2014 write `%s:` (remove the `%s`).", name, variant)
+}
+
+func admitEventDeclarationShape(name string, value yamlsource.Value) (bool, error) {
+	switch value.Presence() {
+	case yamlsource.PresenceNull:
+		scalar, err := value.Scalar()
+		if err != nil {
+			return false, err
+		}
+		variant := scalar.Value
+		switch {
+		case scalar.Alias != "":
+			variant = "*" + scalar.Alias
+		case scalar.Anchor != "":
+			variant = "&" + scalar.Anchor
+		case scalar.Style&yamlsource.TaggedStyle != 0:
+			variant = "!!null"
+		}
+		if variant != "" {
+			return false, payloadlessEventDeclarationError(name, variant)
+		}
+		return true, nil
+	case yamlsource.PresenceEmptyMapping:
+		return false, payloadlessEventDeclarationError(name, "{}")
+	case yamlsource.PresenceEmptyScalar:
+		variant := `""`
+		if scalar, err := value.Scalar(); err == nil && scalar.Style&yamlsource.SingleQuotedStyle != 0 {
+			variant = "''"
+		}
+		return false, payloadlessEventDeclarationError(name, variant)
+	case yamlsource.PresenceMapping:
+		return false, nil
+	default:
+		return false, fmt.Errorf("declaration at %s is %s, want mapping", value.Location(), value.Presence())
+	}
 }
 
 func populateEventPayloadFieldAdmissionProvenance(entry *EventCatalogEntry, fieldName string, value yamlsource.Value) error {

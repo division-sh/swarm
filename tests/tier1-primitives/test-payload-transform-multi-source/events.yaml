@@ -1,4 +1,4 @@
-export.requested: {}
+export.requested:
 item.exported:
   id: string?
   name: string?

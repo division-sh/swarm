@@ -1,9 +1,9 @@
-work.opened: {}
+work.opened:
 work.annotated:
   review_note: text
 work.assessed:
   business_brief: text
-work.consume: {}
+work.consume:
 work.completed:
   business_brief: text
   note_supplied: boolean

@@ -1,4 +1,4 @@
-timer.scheduled: {}
-timer.cancel_requested: {}
-timer.check: {}
-timer.cancelled: {}
+timer.scheduled:
+timer.cancel_requested:
+timer.check:
+timer.cancelled:
