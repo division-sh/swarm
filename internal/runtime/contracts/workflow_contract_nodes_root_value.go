@@ -140,6 +140,12 @@ func projectNodeHandlerValue(value yamlsource.Value) (SystemNodeEventHandler, er
 			out.AdvancesTo = strings.TrimSpace(out.AdvancesTo)
 		case "emit":
 			out.Emit, err = projectNodeEmitValue(field)
+		case "activity":
+			out.Activity, err = projectNodeActivityValue(field)
+		case "guard":
+			out.Guard, err = projectNodeGuardValue(field)
+		case "data_accumulation":
+			out.DataAccumulation, err = projectNodeDataAccumulationValue(field)
 		case "on_success":
 			out.OnSuccess, err = projectNodeOnSuccessValue(field)
 		case "sets_gate":
