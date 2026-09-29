@@ -1,4 +1,11 @@
 provider: telegram
+native_inbox:
+  kind: scoped_commands_v1
+  client_languages: [en, fr]
+  direct_launcher_read: read_inbox_launcher
+  default_launcher_read: read_default_inbox_launcher
+  commands_launcher: commands
+  inherited_launcher: default
 onboarding:
   activation: webhook_registration
   ceremony: authenticated_text_challenge
@@ -93,6 +100,7 @@ operations:
     tool: telegram.read_inbox_commands
     input:
       chat_id: context.destination
+      language_code: input.language_code
     output:
       commands: result.commands
   install_shared_inbox_entry:
@@ -106,12 +114,23 @@ operations:
     input:
       chat_id: context.destination
       user_id: input.member_reference
+      language_code: input.language_code
     output:
       commands: result.commands
   identify_inbox_address:
     tool: telegram.read_bot_address
     output:
       address_reference: result.address
+  read_inbox_launcher:
+    tool: telegram.read_chat_menu_button
+    input:
+      chat_id: context.destination
+    output:
+      launcher: result.launcher
+  read_default_inbox_launcher:
+    tool: telegram.read_default_menu_button
+    output:
+      launcher: result.launcher
 events:
   action:
     event: inbound.telegram.callback_action

@@ -55,6 +55,8 @@ interfaces:
               command: {type: string, minLength: 1, maxLength: 32}
               description: {type: string, minLength: 1, maxLength: 256}
         inbox_address: {type: string, minLength: 5, maxLength: 32}
+        inbox_language: {type: string, enum: ['', en, fr]}
+        inbox_launcher: {type: string, enum: [commands, default, web_app]}
       operations:
         deliver:
           effect_class: non_idempotent_write
@@ -87,6 +89,8 @@ interfaces:
             destination: {opaque: destination}
         read_inbox_entry:
           effect_class: read_only
+          input:
+            language_code: {schema: inbox_language}
           context:
             destination: {opaque: destination}
           output:
@@ -102,6 +106,7 @@ interfaces:
           effect_class: read_only
           input:
             member_reference: {opaque: external_account_reference}
+            language_code: {schema: inbox_language}
           context:
             destination: {opaque: destination}
           output:
@@ -110,6 +115,16 @@ interfaces:
           effect_class: read_only
           output:
             address_reference: {schema: inbox_address}
+        read_inbox_launcher:
+          effect_class: read_only
+          context:
+            destination: {opaque: destination}
+          output:
+            launcher: {schema: inbox_launcher}
+        read_default_inbox_launcher:
+          effect_class: read_only
+          output:
+            launcher: {schema: inbox_launcher}
       events:
         action:
           required_fields:
@@ -10681,6 +10696,14 @@ tool_model:
     connected_channel_onboarding:
       issue: '#2079'
       implementation_status: implemented
+      physical_bot_ownership_rule: >
+        One physical bot resource admits one current ingress connection serving many business conversations.
+        Different targets or credential aliases do not create independent physical registration namespaces.
+        Preserve exact same-semantic-pair candidate/predecessor handoff, identity confirmation and current binding
+        joins. Reject competing independent connections with a typed durable collision outcome while preserving the
+        surviving connection. Original #2241 M51 simultaneous independent context-consumer sharing is superseded,
+        not reproduced and fixed by one-bot conversation evidence. Reusable multi-store identity and correct-bot
+        replies remain separately audited under #2500; they grant no additional operator mailbox authority.
       canonical_owners:
         provider_profile: admitted ChannelOnboardingProfile compiled with the exact swarm.hitl-channel/v2 satisfaction plan
         context_coordinate: ChannelRuntimeContextCoordinate
@@ -10944,7 +10967,24 @@ tool_model:
       - deliver
       - edit
       - acknowledge_interaction
-      effect: non_idempotent_write
+      - install_inbox_entry
+      - read_inbox_entry
+      - install_shared_inbox_entry
+      - read_shared_inbox_entry
+      - identify_inbox_address
+      - read_inbox_launcher
+      - read_default_inbox_launcher
+      effects:
+        deliver: non_idempotent_write
+        edit: non_idempotent_write
+        acknowledge_interaction: non_idempotent_write
+        install_inbox_entry: non_idempotent_write
+        read_inbox_entry: read_only
+        install_shared_inbox_entry: non_idempotent_write
+        read_shared_inbox_entry: read_only
+        identify_inbox_address: read_only
+        read_inbox_launcher: read_only
+        read_default_inbox_launcher: read_only
       presentation: closed non-empty text
       actions: ordered closed label/token rows; an empty list is valid and edit with an empty list clears controls
       acknowledgement_context: >
@@ -10955,7 +10995,7 @@ tool_model:
       - resolve exactly one trigger and connector dependency by immutable pack id and role from the accepted inventory
       - reject duplicate pack ids across trigger, connector, and channel roles
       - require exact operation and event key sets; missing, duplicate, or unknown rows fail admission
-      - require exact non_idempotent_write effect equality between interface operation and connector tool
+      - require exact compiled effect equality between each interface operation and connector tool; both read_only and non_idempotent_write are explicit, never inferred by the caller
       - recursively require every required interface input/context leaf to be consumed once and every required connector target leaf to be assigned once
       - reject duplicate or ancestor/descendant overlap in mapped targets and recursively consumed item sources; the compiler records one topology that runtime preparation consumes
       - prove recursively that every admitted source value is assignable to its target, including object requiredness and additional-properties policy, array items and bounds, enums, patterns, and scalar bounds
@@ -15107,12 +15147,14 @@ platform_tables:
         setting generation, so a stale menu entry never borrows successor authority. The provider
         slot comes from verified registration identity;
         credential aliases and runtime contexts are not independent settings. A current setting
-        may have several compatible activation consumers. Unknown launched writes remain durable
+        has one exact current connection authority; independent registrations for the same bot
+        are unsupported. Retained predecessor consumers describe sequential handoff history,
+        not simultaneous sharing. Unknown launched writes remain durable
         and block overlapping successor writes and usable readiness, even if a later readback
         happens to match. Retirement is local only and never deletes a remote command.
         A compatible current successor may reclaim a locally retired generation only when its
         original install has settled, its retained readback hash matches the exact desired
-        commands, and a fresh provider readback still matches. This reuses the same command
+        commands, and fresh compiled effective-locale/launcher qualification succeeds. This reuses the same command
         without a new write; a mismatch becomes unavailable, while an uncertain predecessor
         remains non-usable. An incompatible or never-installed retired setting cannot borrow
         that readback or entry authority.
@@ -15152,9 +15194,20 @@ platform_tables:
         );
     channel_native_setting_consumers:
       description: >-
-        Exact current activation/context references to one physical setting. A compatible
-        sibling remains attached when another context retires. The last consumer's retirement
-        fences local entry authority without issuing a provider delete.
+        Exact current connection reference and retained predecessor history for one physical
+        setting. Sequential handoff preserves generation/effect evidence; contradictory
+        simultaneous current authority is invalid. Stale predecessor retirement cannot fence
+        the successor. Last-current retirement fences local entry without a provider delete.
+        Client qualification is independent of acknowledged installation. It pins the explicitly
+        declared language/revision, compiled profile, physical setting generation and exact
+        activation/context. Missing, invalid or stale qualification withholds native usability.
+        A locale change invalidates the qualification but never rewrites install history or
+        causes an install replay. Fresh reads consume selected exact-scope commands before
+        fallback and private chat launcher before the default launcher; lower-precedence
+        settings do not contradict an effective valid selection. Reconciliation, prelaunch,
+        native entry admission and restart require current qualification. Foreign command or
+        launcher settings are neither deleted nor overwritten. English labels qualify explicit
+        English and French clients; no language inference, translation or all-device claim exists.
       ddl: |
         CREATE TABLE channel_native_setting_consumers (
             setting_id UUID NOT NULL REFERENCES channel_native_settings(setting_id),
@@ -15164,6 +15217,16 @@ platform_tables:
             binding_revision BIGINT NOT NULL CHECK (binding_revision > 0),
             context_publication_generation BIGINT NOT NULL CHECK (context_publication_generation > 0),
             state TEXT NOT NULL CHECK (state IN ('current','retired')),
+            qualification_state TEXT NOT NULL DEFAULT 'missing' CHECK (qualification_state IN ('missing','invalid','stale','qualified')),
+            qualification_locale_revision BIGINT NOT NULL DEFAULT 0,
+            qualification_setting_generation BIGINT NOT NULL DEFAULT 0,
+            qualification_activation_revision BIGINT NOT NULL DEFAULT 0,
+            qualification_binding_revision BIGINT NOT NULL DEFAULT 0,
+            qualification_context_generation BIGINT NOT NULL DEFAULT 0,
+            qualification_contract_hash TEXT NOT NULL DEFAULT '',
+            qualification_readback_hash TEXT NOT NULL DEFAULT '',
+            qualification_reason TEXT NOT NULL DEFAULT '',
+            qualification_observed_at TIMESTAMPTZ,
             updated_at TIMESTAMPTZ NOT NULL,
             PRIMARY KEY (setting_id, activation_id),
             UNIQUE (activation_id),
@@ -15180,7 +15243,11 @@ platform_tables:
         previously used destination. The first verified connection also freezes one bounded
         count-only summary of older pending notices; those notices are never planned individually.
         A response plan is a separate, inbound-publication-owned readback responsibility.
-        A card plan pins the compiled channel's finite action capacity before its first render.
+        Every plan pins the compiled channel's finite action, text and label bounds before
+        provider presentation. All families use the same immutable, monotonic action-page
+        visits, including recovery, draft chooser, notices, summary and response navigation.
+        Full semantic text and unabridged choice labels remain in the render/hash; excerpts,
+        deterministic View full pages and bounded labels consume that pinned contract.
         When all controls do not fit, one immutable action page is visible at a time and a
         More choices control cycles through every page on the same card receipt. The selected
         page visit is durable and monotonic even when visible choices cycle, and a canonical
@@ -15216,6 +15283,8 @@ platform_tables:
             current_render_id UUID,
             current_receipt_operation_id UUID,
             action_capacity BIGINT NOT NULL DEFAULT 0 CHECK (action_capacity >= 0),
+            text_capacity BIGINT NOT NULL DEFAULT 0 CHECK (text_capacity >= 0),
+            label_capacity BIGINT NOT NULL DEFAULT 0 CHECK (label_capacity >= 0),
             action_page_index BIGINT NOT NULL DEFAULT 0 CHECK (action_page_index >= 0),
             resend_generation BIGINT NOT NULL DEFAULT 0 CHECK (resend_generation >= 0),
             resend_of_delivery_id UUID REFERENCES channel_delivery_plans(delivery_id),
@@ -15235,7 +15304,12 @@ platform_tables:
         checked together at selected-store admission and readback. A provider excerpt or page
         never replaces this full input. A new card or independent dispatch state creates a
         separate render member; previously shown input is never overwritten. This table owns
-        no verdict, provider effect attempt, or acknowledgment state. An active principal-owned
+        no verdict, provider effect attempt, or acknowledgment state. Proposed-effect dispatch
+        text consumes the canonical proposed-effect readback, including the exact activity attempt
+        status; an approved verdict or released continuation does not imply successful dispatch.
+        A deferred pending card renders its canonical deferred-until timestamp without inventing
+        a verdict, hiding the deferral, or removing still-authorized pending-card controls.
+        An active principal-owned
         card draft contributes only its verdict, next declared field, position and expiry to a
         new frozen card render after the exact draft change; private entered values never enter
         render input, group output, or the public change cursor. A chooser freezes the complete
@@ -15297,7 +15371,7 @@ platform_tables:
             action_token UUID PRIMARY KEY,
             render_id UUID NOT NULL REFERENCES channel_delivery_renders(render_id),
             action_position INTEGER NOT NULL CHECK (action_position > 0),
-            action_kind TEXT NOT NULL CHECK (action_kind IN ('verdict','view_full','open_inbox','next_page','acknowledge_notice','cancel_input','skip_input','select_draft','next_draft_page','resend','next_recovery_page','more_controls')),
+            action_kind TEXT NOT NULL CHECK (action_kind IN ('verdict','view_full','open_inbox','next_page','acknowledge_notice','cancel_input','skip_input','select_draft','resend','more_controls')),
             verdict TEXT,
             label TEXT NOT NULL,
             created_at TIMESTAMPTZ NOT NULL,
@@ -15341,6 +15415,8 @@ platform_tables:
             phase TEXT NOT NULL CHECK (phase IN ('preparing','credentials_admitted','activating_provider','awaiting_external_identity','awaiting_operator_confirmation','publishing_activation','publishing_process_activation','promoting_registration','retiring_predecessor','delivering_confirmation','succeeded','failed','retired')),
             operation_revision BIGINT NOT NULL CHECK (operation_revision > 0),
             save_proof BOOLEAN NOT NULL,
+            client_language TEXT NOT NULL DEFAULT '',
+            client_locale_revision BIGINT NOT NULL DEFAULT 1 CHECK (client_locale_revision > 0),
             credential_reservations TEXT NOT NULL,
             credential_admissions TEXT NOT NULL DEFAULT '[]',
             identity_operation_id UUID,
@@ -15560,7 +15636,11 @@ platform_tables:
         again in the publication transaction; a changed selection fails without committing
         either an operator intent or a business event. Bare text with no such draft remains
         ordinary business publication. Quoted and native-entry text remain reserved for
-        exact operator admission and never fall back to business publication.
+        exact operator admission and never fall back to business publication. Unknown, stale,
+        foreign or wrong-address native entries settle once as entry_rejected without a
+        response, principal mutation or later revival. Temporary owner, publication or
+        provider readback unavailability remains pending for retry. Delivery reconciliation
+        continues across other valid intents; rejection grants no private-response authority.
       ddl: |
         CREATE TABLE operator_channel_text_intents (
             publication_id UUID PRIMARY KEY,
@@ -33226,7 +33306,7 @@ api_specification:
       ChannelOnboardingOperation:
         type: object
         additionalProperties: false
-        required: [operation_id, principal_id, verb, provider, interface, coordinate, target_selector, activation_posture, identity_ceremony, phase, revision, save_proof, credential_reservations, requested_at, updated_at]
+        required: [operation_id, principal_id, verb, provider, interface, coordinate, target_selector, activation_posture, identity_ceremony, phase, revision, save_proof, client_language, client_locale_revision, credential_reservations, requested_at, updated_at]
         properties:
           operation_id: {$ref: '#/components/schemas/OpaqueId'}
           principal_id: {$ref: '#/components/schemas/OpaqueId'}
@@ -33240,6 +33320,8 @@ api_specification:
           phase: {type: string, enum: [preparing, credentials_admitted, activating_provider, awaiting_external_identity, awaiting_operator_confirmation, publishing_activation, publishing_process_activation, promoting_registration, retiring_predecessor, delivering_confirmation, succeeded, failed, retired]}
           revision: {type: integer, minimum: 1}
           save_proof: {type: boolean}
+          client_language: {type: string}
+          client_locale_revision: {type: integer, minimum: 1}
           credential_reservations:
             type: array
             minItems: 1
@@ -33302,12 +33384,25 @@ api_specification:
         additionalProperties: false
         required: [ready, reason, coordinate, activation_revision, binding_revision, observed_at]
         properties:
+          native_inbox: {$ref: '#/components/schemas/NativeInboxQualification'}
           ready: {type: boolean}
           reason: {type: string, enum: [ready, runtime_context_coordinate_invalid, channel_plan_unavailable, activation_not_current, binding_not_current, proof_not_current, credentials_not_current, confirmation_not_terminal_success, target_not_current, exposure_not_current, registration_not_current, session_not_current]}
           coordinate: {$ref: '#/components/schemas/ChannelRuntimeContextCoordinate'}
           activation_generation: {type: string, minLength: 1}
           activation_revision: {type: integer, minimum: 0}
           binding_revision: {type: integer, minimum: 0}
+          observed_at: {$ref: '#/components/schemas/Timestamp'}
+      NativeInboxQualification:
+        type: object
+        additionalProperties: false
+        required: [state, client_language, locale_revision]
+        properties:
+          state: {type: string, enum: [missing, invalid, stale, qualified]}
+          client_language: {type: string}
+          locale_revision: {type: integer, minimum: 0}
+          setting_id: {$ref: '#/components/schemas/OpaqueId'}
+          setting_generation: {type: integer, minimum: 1}
+          reason: {type: string}
           observed_at: {$ref: '#/components/schemas/Timestamp'}
       ConnectedChannelActivation:
         type: object
@@ -33361,7 +33456,7 @@ api_specification:
       ChannelOnboardingResult:
         type: object
         additionalProperties: false
-        required: [operation, candidate]
+        required: [operation]
         properties:
           operation: {$ref: '#/components/schemas/ChannelOnboardingOperation'}
           candidate: {$ref: '#/components/schemas/ChannelOnboardingCandidate'}
@@ -37683,6 +37778,11 @@ api_specification:
           schema:
             type: boolean
             default: true
+        - name: client_language
+          required: false
+          schema:
+            type: string
+            minLength: 1
         - name: idempotency_key
           required: false
           schema:
@@ -37700,11 +37800,18 @@ api_specification:
     channel.onboarding_retry:
       tier: must_have
       description: Resume the same durable onboarding responsibility from settled component evidence. It never blindly resends uncertain provider work or rotates credentials merely because the client retried.
+      locale_requalification: >-
+        Supplying client_language requires expected_locale_revision. The canonical setup owner
+        validates the declaration against the compiler-pinned provider profile and advances
+        only that declaration's revision. Reconciliation requalifies provider settings without
+        reinstalling an acknowledged generation. Missing language is not an English default.
       scope: {required: [control:channels]}
       idempotency: exact durable operation phase/revision and external-effect journal state.
       params:
       - {name: operation_id, required: true, schema: {$ref: '#/components/schemas/OpaqueId'}}
       - {name: provider_credential, required: false, schema: {type: string, minLength: 1, writeOnly: true}}
+      - {name: client_language, required: false, schema: {type: string, minLength: 1}}
+      - {name: expected_locale_revision, required: false, schema: {type: integer, minimum: 1}}
       - {name: idempotency_key, required: false, schema: {type: string}}
       result: {name: result, required: true, schema: {$ref: '#/components/schemas/ChannelOnboardingResult'}}
       errors: [CHANNEL_OPERATION_NOT_FOUND, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, CHANNEL_CREDENTIAL_REQUIRED]

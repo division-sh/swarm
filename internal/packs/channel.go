@@ -277,6 +277,7 @@ func validateInterfaceField(subject string, field runtimecontracts.PackInterface
 
 type ChannelManifest struct {
 	source       yamlsource.Value
+	NativeInbox  *NativeInboxProfile                         `yaml:"native_inbox"`
 	Provider     string                                      `yaml:"provider"`
 	OpaqueTypes  map[string]runtimecontracts.ToolInputSchema `yaml:"opaque_types"`
 	Operations   map[string]ChannelOperationBinding          `yaml:"operations"`
@@ -606,6 +607,7 @@ func validateChannelPath(raw string) error {
 }
 
 type SatisfactionPlan struct {
+	nativeInbox       *CompiledNativeInboxProfile
 	interfaceRef      channelPlanIdentity
 	channel           PackIdentity
 	trigger           PackIdentity
@@ -1497,6 +1499,13 @@ func CompileChannel(registry *InterfaceRegistry, channel LoadedChannelPack, trig
 			return SatisfactionPlan{}, fmt.Errorf("channel pack %q webhook onboarding requires registration", channel.Envelope.ID)
 		}
 		plan.onboarding = &compiled
+	}
+	if _, err := plan.PresentationBounds(); err != nil {
+		return SatisfactionPlan{}, fmt.Errorf("channel pack %q presentation bounds: %w", channel.Envelope.ID, err)
+	}
+	plan.nativeInbox, err = compileNativeInboxProfile(channel.Manifest.NativeInbox, plan)
+	if err != nil {
+		return SatisfactionPlan{}, fmt.Errorf("channel pack %q native inbox: %w", channel.Envelope.ID, err)
 	}
 	plan.generation, err = compileSatisfactionPlanGeneration(plan)
 	if err != nil {

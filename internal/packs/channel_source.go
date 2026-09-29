@@ -20,7 +20,7 @@ func parseChannelManifestAt(body []byte, file string) (ChannelManifest, error) {
 	if err := root.ValidateExpansion(); err != nil {
 		return ChannelManifest{}, err
 	}
-	f, err := channelFields(root, "provider", "opaque_types", "operations", "events", "registration", "onboarding")
+	f, err := channelFields(root, "provider", "opaque_types", "operations", "events", "registration", "onboarding", "native_inbox")
 	if err != nil {
 		return ChannelManifest{}, err
 	}
@@ -30,6 +30,13 @@ func parseChannelManifestAt(body []byte, file string) (ChannelManifest, error) {
 	}
 	if err := admitChannelBindings(root, f, &out); err != nil {
 		return out, err
+	}
+	if v, ok := f["native_inbox"]; ok {
+		profile, e := admitChannelNativeInbox(v)
+		if e != nil {
+			return out, e
+		}
+		out.NativeInbox = &profile
 	}
 	if v, ok := f["registration"]; ok {
 		profile, e := admitChannelRegistration(v)
@@ -44,6 +51,48 @@ func parseChannelManifestAt(body []byte, file string) (ChannelManifest, error) {
 			return out, e
 		}
 		out.Onboarding = &profile
+	}
+	return out, nil
+}
+
+func admitChannelNativeInbox(value yamlsource.Value) (NativeInboxProfile, error) {
+	f, err := channelFields(value, "kind", "client_languages", "direct_launcher_read", "default_launcher_read", "commands_launcher", "inherited_launcher")
+	var out NativeInboxProfile
+	if err != nil {
+		return out, err
+	}
+	for _, name := range []string{"kind", "direct_launcher_read", "default_launcher_read", "commands_launcher", "inherited_launcher"} {
+		text, e := channelRequiredText(value, f, name)
+		if e != nil {
+			return out, e
+		}
+		switch name {
+		case "kind":
+			out.Kind = text
+		case "direct_launcher_read":
+			out.DirectLauncherRead = text
+		case "default_launcher_read":
+			out.DefaultLauncherRead = text
+		case "commands_launcher":
+			out.CommandsLauncher = text
+		case "inherited_launcher":
+			out.InheritedLauncher = text
+		}
+	}
+	languages, err := channelRequired(value, f, "client_languages")
+	if err != nil {
+		return out, err
+	}
+	rows, err := languages.Sequence()
+	if err != nil {
+		return out, err
+	}
+	for _, row := range rows {
+		text, e := channelText(row)
+		if e != nil {
+			return out, e
+		}
+		out.ClientLanguages = append(out.ClientLanguages, text)
 	}
 	return out, nil
 }
