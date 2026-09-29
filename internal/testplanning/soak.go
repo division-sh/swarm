@@ -7,14 +7,16 @@ import (
 )
 
 const (
-	SoakPackage   = "github.com/division-sh/swarm/internal/runtime/conformance"
-	SoakTest      = "TestIssue2394TwentyTwoIntentFifteenMinuteSoakBothStores"
-	SoakRun       = "^" + SoakTest + "$"
-	SoakGoTimeout = "22m"
+	SoakPackage             = "github.com/division-sh/swarm/internal/runtime/conformance"
+	SoakTest                = "TestIssue2394TwentyTwoIntentFifteenMinuteSoakBothStores"
+	SoakRun                 = "^" + SoakTest + "$"
+	SoakGoTimeout           = "22m"
+	ServedReporterPackage   = "github.com/division-sh/swarm/internal/serveapp"
+	ServedReporterRun       = "^TestIssue2394Served(OriginalReporter.*|ReporterTransactionCensusBothStores)$"
+	ServedReporterGoTimeout = "15m"
 )
 
-// Only the lead-approved full-window proof may use the longer budget or a
-// backend partition. All other proofs retain whole top-level selection.
+// SoakBackend recognizes only the two approved backend-partitioned soak cells.
 func SoakBackend(run string) (string, bool) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		if run == SoakRun+"/^"+backend+"$" {
@@ -24,6 +26,8 @@ func SoakBackend(run string) (string, bool) {
 	return "", false
 }
 
+// The served reporter's longer timeout keeps its ratified drain ceiling
+// reachable without splitting or omitting either backend's whole proof.
 func validateSoakSelection(packages []string, run, skip, timeout, count, budget string) error {
 	if budget == "soak" {
 		_, ok := SoakBackend(run)
@@ -32,8 +36,11 @@ func validateSoakSelection(packages []string, run, skip, timeout, count, budget 
 		}
 		return nil
 	}
+	if timeout == ServedReporterGoTimeout && len(packages) == 1 && packages[0] == ServedReporterPackage && run == ServedReporterRun && skip == "" && count == "count-1" && budget == "full" {
+		return nil
+	}
 	if timeout != "" || strings.Contains(run, "/") {
-		return fmt.Errorf("only the mandatory soak may set a timeout or backend filter")
+		return fmt.Errorf("only the mandatory soak or exact served reporter may set a timeout; only the soak may filter a backend")
 	}
 	if skip != "" && (skip != SoakRun || len(packages) != 1 || packages[0] != SoakPackage) {
 		return fmt.Errorf("only the exact separately executed soak may be excluded")

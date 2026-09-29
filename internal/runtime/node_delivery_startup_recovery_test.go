@@ -1029,7 +1029,7 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 			if poisonSnapshot.Status != runtimedelivery.StatusDeadLetter || poisonSnapshot.ReasonCode != "handler_terminal_failure" {
 				t.Fatalf("poison delivery = status:%s reason:%s, want committed terminal-handler dead letter", poisonSnapshot.Status, poisonSnapshot.ReasonCode)
 			}
-			assertRecoveredNodeDelivery(t, ctx, selected, healthy.ID(), healthyRoute, 1)
+			waitForRecoveredNodeDelivery(t, ctx, selected, healthy.ID(), healthyRoute, 1)
 		})
 	}
 }
