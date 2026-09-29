@@ -184,35 +184,83 @@ func ListPendingTextIntents(ctx context.Context, tx *sql.Tx, afterPublicationID 
 }
 
 func RequireTextIntentTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, postgres bool) error {
-	if tx == nil {
-		return fmt.Errorf("channel text admission requires a selected transaction")
-	}
-	if err := text.Validate(); err != nil {
-		return err
-	}
-	query := `SELECT provider, provider_event_id, interface_key, fact, provider_authorization, state
-		FROM operator_channel_text_intents WHERE publication_id=?`
-	if postgres {
-		query = `SELECT provider, provider_event_id, interface_key, fact, provider_authorization, state
-			FROM operator_channel_text_intents WHERE publication_id=$1::uuid`
-	}
-	var provider, providerEventID, interfaceKey, authorization, state string
-	var raw []byte
-	err := tx.QueryRowContext(ctx, query, text.PublicationID).Scan(&provider, &providerEventID, &interfaceKey, &raw, &authorization, &state)
-	if errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("verified channel text intent is absent")
-	}
+	state, _, err := requireExactTextIntentTx(ctx, tx, text, postgres, false)
 	if err != nil {
 		return err
 	}
+	if state != "pending" {
+		return fmt.Errorf("verified channel text intent is not pending")
+	}
+	return nil
+}
+
+func requireExactTextIntentTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, postgres, lock bool) (string, string, error) {
+	if tx == nil {
+		return "", "", fmt.Errorf("channel text admission requires a selected transaction")
+	}
+	if err := text.Validate(); err != nil {
+		return "", "", err
+	}
+	query := `SELECT provider, provider_event_id, interface_key, fact, provider_authorization, state, COALESCE(disposition, '')
+		FROM operator_channel_text_intents WHERE publication_id=?`
+	if postgres {
+		query = `SELECT provider, provider_event_id, interface_key, fact, provider_authorization, state, COALESCE(disposition, '')
+			FROM operator_channel_text_intents WHERE publication_id=$1::uuid`
+		if lock {
+			query += ` FOR UPDATE`
+		}
+	}
+	var provider, providerEventID, interfaceKey, authorization, state, disposition string
+	var raw []byte
+	err := tx.QueryRowContext(ctx, query, text.PublicationID).Scan(&provider, &providerEventID, &interfaceKey, &raw, &authorization, &state, &disposition)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", fmt.Errorf("verified channel text intent is absent")
+	}
+	if err != nil {
+		return "", "", err
+	}
 	var stored operatorchannel.TextFact
 	if err := json.Unmarshal(raw, &stored); err != nil {
-		return err
+		return "", "", err
 	}
 	if provider != text.Provider || providerEventID != text.ProviderEventID ||
 		interfaceKey != text.Interface.Key() || authorization != text.ProviderAuthorization ||
-		stored != text.TextFact || state != "pending" {
-		return fmt.Errorf("verified channel text intent contradicts admitted fact")
+		stored != text.TextFact || (state != "pending" && state != "settled") {
+		return "", "", fmt.Errorf("verified channel text intent contradicts admitted fact")
+	}
+	return state, disposition, nil
+}
+
+// RejectNativeEntryTx settles an exact verified occurrence without publishing
+// a response or granting principal, draft, mailbox or business authority.
+func RejectNativeEntryTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, postgres bool) error {
+	if text.EntryReference == "" {
+		return fmt.Errorf("native entry rejection requires an entry fact")
+	}
+	state, disposition, err := requireExactTextIntentTx(ctx, tx, text, postgres, true)
+	if err != nil {
+		return err
+	}
+	if state == "settled" {
+		if disposition != "entry_rejected" {
+			return fmt.Errorf("native entry already has another disposition")
+		}
+		return nil
+	}
+	query := `UPDATE operator_channel_text_intents SET state='settled', disposition='entry_rejected', settled_at=? WHERE publication_id=? AND state='pending'`
+	if postgres {
+		query = `UPDATE operator_channel_text_intents SET state='settled', disposition='entry_rejected', settled_at=$1 WHERE publication_id=$2::uuid AND state='pending'`
+	}
+	result, err := tx.ExecContext(ctx, query, time.Now().UTC(), text.PublicationID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return fmt.Errorf("native entry rejection lost its pending occurrence")
 	}
 	return nil
 }

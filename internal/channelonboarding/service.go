@@ -188,16 +188,19 @@ type StartInput struct {
 	IdempotencyKey     string
 	ProviderCredential string
 	SaveProof          bool
+	ClientLanguage     string
 }
 
 type RetryInput struct {
-	OperationID        string
-	ProviderCredential string
+	OperationID            string
+	ProviderCredential     string
+	ClientLanguage         string
+	ExpectedLocaleRevision int64
 }
 
 type Result struct {
 	Operation         Operation                  `json:"operation"`
-	Candidate         Candidate                  `json:"candidate"`
+	Candidate         *Candidate                 `json:"candidate,omitempty"`
 	IdentityOperation *operatorchannel.Operation `json:"identity_operation,omitempty"`
 	Binding           *operatorchannel.Binding   `json:"binding,omitempty"`
 	Readiness         *ConnectedChannelReadiness `json:"readiness,omitempty"`
@@ -240,6 +243,15 @@ func (s *Service) Start(ctx context.Context, input StartInput) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	if input.ClientLanguage != "" {
+		profile, err := candidate.Plan.NativeInboxProfile()
+		if err != nil {
+			return Result{}, err
+		}
+		if err := profile.ValidateLanguage(input.ClientLanguage); err != nil {
+			return Result{}, fmt.Errorf("%w: %v", ErrInvalidRequest, err)
+		}
+	}
 	reservations := credentialReservations(candidate)
 	durable := candidate.Coordinate.DurableIdentity()
 	requestHash := operatorchannel.Hash(
@@ -248,7 +260,7 @@ func (s *Service) Start(ctx context.Context, input StartInput) (Result, error) {
 		durable.PackInventoryGeneration, durable.PlanGeneration.Diagnostic(),
 		candidate.Interface.Key(), candidate.Target.Selector, string(candidate.Posture), string(candidate.Ceremony),
 		candidate.ProviderCredentialRole, candidate.SigningCredentialRole, candidate.ConfirmationOperation,
-		candidate.ConnectionHealth, fmt.Sprint(input.SaveProof),
+		candidate.ConnectionHealth, fmt.Sprint(input.SaveProof), input.ClientLanguage,
 	)
 	requestKey := operatorchannel.Hash("channel-onboarding-key-v1", principal.ID, strings.TrimSpace(input.IdempotencyKey))
 	if strings.TrimSpace(input.IdempotencyKey) == "" {
@@ -258,13 +270,16 @@ func (s *Service) Start(ctx context.Context, input StartInput) (Result, error) {
 		OperationID: uuid.NewString(), RequestKeyHash: requestKey, RequestHash: requestHash, PrincipalID: principal.ID,
 		Verb: input.Verb, Provider: candidate.Provider, Interface: candidate.Interface, Coordinate: candidate.Coordinate,
 		TargetSelector: candidate.Target.Selector, Posture: candidate.Posture, Ceremony: candidate.Ceremony,
-		SaveProof: input.SaveProof, CredentialReservations: reservations, RequestedAt: s.now().UTC(),
+		SaveProof: input.SaveProof, ClientLanguage: input.ClientLanguage, CredentialReservations: reservations, RequestedAt: s.now().UTC(),
 	}
 	if existing, found, err := findOperationByRequestKey(ctx, s.store, requestKey); err != nil {
 		return Result{}, err
 	} else if found {
 		if existing.RequestHash != requestHash {
 			return Result{}, fmt.Errorf("%w: onboarding idempotency key was already used with different semantic input", ErrConflict)
+		}
+		if existing.Phase == PhaseFailed || existing.Phase == PhaseRetired {
+			return s.Get(ctx, existing.OperationID)
 		}
 		existing, candidate, err = s.bindCurrentCandidate(context.WithoutCancel(ctx), existing)
 		if err != nil {
@@ -295,11 +310,11 @@ func (s *Service) Get(ctx context.Context, operationID string) (Result, error) {
 	candidate, err := s.currentCandidate(op)
 	if err != nil {
 		if errors.Is(err, ErrConflict) || errors.Is(err, ErrNotFound) {
-			return s.result(ctx, op, historicalCandidate(op))
+			return s.result(ctx, op, nil)
 		}
 		return Result{Operation: op}, err
 	}
-	return s.result(ctx, op, candidate)
+	return s.result(ctx, op, &candidate)
 }
 
 // ReadbackConnectedChannels composes retained identity state with every exact
@@ -459,9 +474,54 @@ func (s *Service) Retry(ctx context.Context, input RetryInput) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	if op.Phase == PhaseFailed || op.Phase == PhaseRetired {
+		if input.ClientLanguage != "" || input.ExpectedLocaleRevision != 0 {
+			return Result{Operation: op}, fmt.Errorf("%w: terminal onboarding cannot acquire a client qualification", ErrConflict)
+		}
+		return s.Get(ctx, op.OperationID)
+	}
+	if input.ClientLanguage == "" && input.ExpectedLocaleRevision != 0 {
+		return Result{Operation: op}, fmt.Errorf("%w: locale revision requires an explicit language", ErrInvalidRequest)
+	}
+	if input.ClientLanguage != "" {
+		candidate, err := s.currentCandidate(op)
+		if err != nil {
+			return Result{Operation: op}, err
+		}
+		profile, err := candidate.Plan.NativeInboxProfile()
+		if err != nil {
+			return Result{Operation: op}, err
+		}
+		if err := profile.ValidateLanguage(input.ClientLanguage); err != nil {
+			return Result{Operation: op}, fmt.Errorf("%w: %v", ErrInvalidRequest, err)
+		}
+		if input.ExpectedLocaleRevision < 1 {
+			return Result{Operation: op}, fmt.Errorf("%w: client language requires its observed locale revision", ErrInvalidRequest)
+		}
+	}
 	rebound, candidate, err := s.bindCurrentCandidate(context.WithoutCancel(ctx), op)
 	if err != nil {
 		return Result{Operation: op}, fmt.Errorf("bind onboarding retry to current candidate: %w", err)
+	}
+	if input.ClientLanguage != "" {
+		profile, err := candidate.Plan.NativeInboxProfile()
+		if err != nil {
+			return Result{Operation: rebound}, err
+		}
+		if err := profile.ValidateLanguage(input.ClientLanguage); err != nil {
+			return Result{Operation: rebound}, fmt.Errorf("%w: %v", ErrInvalidRequest, err)
+		}
+		principal, err := s.identities.Principal()
+		if err != nil {
+			return Result{Operation: rebound}, err
+		}
+		rebound, err = s.store.SetChannelClientLocale(ctx, SetClientLocaleRequest{
+			OperationID: rebound.OperationID, PrincipalID: principal.ID, ExpectedRevision: input.ExpectedLocaleRevision,
+			Language: input.ClientLanguage, Now: s.now().UTC(),
+		})
+		if err != nil {
+			return Result{Operation: op}, err
+		}
 	}
 	result, err := s.driveLocked(context.WithoutCancel(ctx), rebound, candidate, input.ProviderCredential)
 	if err != nil {
@@ -723,7 +783,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 	}
 	op = current
 	if !op.Coordinate.Matches(candidate.Coordinate) {
-		return Result{Operation: op, Candidate: candidate}, fmt.Errorf("%w: onboarding operation is not fenced to the exact current runtime occurrence", ErrRevisionConflict)
+		return Result{Operation: op, Candidate: &candidate}, fmt.Errorf("%w: onboarding operation is not fenced to the exact current runtime occurrence", ErrRevisionConflict)
 	}
 	for {
 		switch op.Phase {
@@ -765,7 +825,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 					if failErr != nil {
 						return Result{}, errors.Join(err, failErr)
 					}
-					return s.result(ctx, failed, candidate)
+					return s.result(ctx, failed, &candidate)
 				}
 				releaseErr := s.releaseCandidateCredentials(context.WithoutCancel(ctx), op.CredentialAdmissions)
 				reset, resetErr := s.store.AdvanceChannelOnboarding(context.WithoutCancel(ctx), AdvanceRequest{
@@ -792,7 +852,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 					if failErr != nil {
 						return Result{}, errors.Join(err, failErr)
 					}
-					return s.result(ctx, failed, candidate)
+					return s.result(ctx, failed, &candidate)
 				}
 				return s.blockedResult(ctx, op, candidate, fmt.Errorf("refresh channel activation candidates: %w", err))
 			}
@@ -816,7 +876,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 			}
 			op = next
 			if blocked {
-				result, err := s.result(ctx, op, candidate)
+				result, err := s.result(ctx, op, &candidate)
 				if err != nil {
 					return result, fmt.Errorf("project channel awaiting external identity: %w", err)
 				}
@@ -845,7 +905,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 					if failErr != nil {
 						return Result{}, failErr
 					}
-					return s.result(ctx, failed, candidate)
+					return s.result(ctx, failed, &candidate)
 				}
 			}
 			decision, err := s.reconcileConfirmedBinding(ctx, op)
@@ -860,7 +920,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 				continue
 			}
 			if decision.blocked {
-				return s.result(ctx, op, candidate)
+				return s.result(ctx, op, &candidate)
 			}
 			op, err = s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{
 				OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: PhasePublishingActivation,
@@ -885,7 +945,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 				continue
 			}
 			if decision.blocked {
-				return s.result(ctx, op, candidate)
+				return s.result(ctx, op, &candidate)
 			}
 			binding := decision.binding
 			op, _, err = s.store.PublishConnectedChannelActivation(ctx, PublishActivationRequest{
@@ -975,7 +1035,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 				return Result{}, fmt.Errorf("%w: confirmation dispatcher returned operation %q for exact operation %q", ErrConflict, confirmation.OperationID, op.ConfirmationOperationID)
 			}
 			if !confirmation.TerminalSuccess {
-				return s.result(ctx, op, candidate)
+				return s.result(ctx, op, &candidate)
 			}
 			op, err = s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{
 				OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: PhaseSucceeded,
@@ -985,7 +1045,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 				return Result{}, err
 			}
 		case PhaseSucceeded, PhaseFailed, PhaseRetired:
-			return s.result(ctx, op, candidate)
+			return s.result(ctx, op, &candidate)
 		default:
 			return Result{}, fmt.Errorf("%w: unsupported onboarding phase %q", ErrConflict, op.Phase)
 		}
@@ -1555,7 +1615,7 @@ func historicalCandidate(op Operation) Candidate {
 	}
 }
 
-func (s *Service) result(ctx context.Context, op Operation, candidate Candidate) (Result, error) {
+func (s *Service) result(ctx context.Context, op Operation, candidate *Candidate) (Result, error) {
 	result := Result{Operation: op, Candidate: candidate}
 	if op.IdentityOperationID != "" {
 		identityOp, err := s.identities.GetOperation(ctx, op.IdentityOperationID)
@@ -1568,7 +1628,11 @@ func (s *Service) result(ctx context.Context, op Operation, candidate Candidate)
 	if binding, err := s.identities.CurrentBinding(ctx, op.Interface); err == nil {
 		result.Binding = &binding
 	}
-	readiness, found, err := s.readiness.ProjectConnectedChannelReadiness(ctx, op, candidate)
+	readinessCandidate := historicalCandidate(op)
+	if candidate != nil {
+		readinessCandidate = *candidate
+	}
+	readiness, found, err := s.readiness.ProjectConnectedChannelReadiness(ctx, op, readinessCandidate)
 	if err != nil {
 		return result, err
 	}
@@ -1579,7 +1643,7 @@ func (s *Service) result(ctx context.Context, op Operation, candidate Candidate)
 }
 
 func (s *Service) blockedResult(ctx context.Context, op Operation, candidate Candidate, cause error) (Result, error) {
-	result, err := s.result(ctx, op, candidate)
+	result, err := s.result(ctx, op, &candidate)
 	return result, errors.Join(cause, err)
 }
 
