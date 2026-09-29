@@ -13,6 +13,36 @@ import (
 	"github.com/google/uuid"
 )
 
+func selectChosenDraftTx(ctx context.Context, tx *sql.Tx, text render.PendingText, at time.Time, resolved render.ResolvedAction, postgres bool) (render.InputDraftCandidate, error) {
+	var selected render.InputDraftCandidate
+	cursor := ""
+	for {
+		candidates, next, err := ListCurrentInputDraftsTx(ctx, tx, text.Fact, at, cursor, 200, false, postgres)
+		if err != nil {
+			return render.InputDraftCandidate{}, err
+		}
+		for _, candidate := range candidates {
+			if candidate.DraftID == resolved.Action.DraftID {
+				if selected.DraftID != "" || candidate.CardID != resolved.Action.CardID {
+					return render.InputDraftCandidate{}, fmt.Errorf("draft choice conflicts with current card")
+				}
+				selected = candidate
+			}
+		}
+		if next == "" {
+			break
+		}
+		if next == cursor {
+			return render.InputDraftCandidate{}, fmt.Errorf("draft choice cursor did not advance")
+		}
+		cursor = next
+	}
+	if selected.DraftID == "" {
+		return render.InputDraftCandidate{}, fmt.Errorf("draft choice no longer names a current draft")
+	}
+	return selected, nil
+}
+
 func PreviewCurrentInputDraftTextTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText,
 	at time.Time, draftID string, postgres bool) (decisioncard.InputFieldProgress, string, error) {
 	_, resolved, err := RequireCurrentInputDraftTx(ctx, tx, text, at, draftID, false, postgres)
@@ -70,31 +100,9 @@ func RequireChosenInputDraftTx(ctx context.Context, tx *sql.Tx, action operatorc
 	if err != nil || !current || bound.PrincipalID != resolved.PrincipalID || bound.BindingRevision != resolved.BindingRevision {
 		return render.InputDraftCandidate{}, render.PendingText{}, render.ResolvedText{}, fmt.Errorf("draft choice answer no longer has current principal: %w", err)
 	}
-	var selected render.InputDraftCandidate
-	cursor := ""
-	for {
-		candidates, next, err := ListCurrentInputDraftsTx(ctx, tx, text.Fact, at, cursor, 200, false, postgres)
-		if err != nil {
-			return render.InputDraftCandidate{}, render.PendingText{}, render.ResolvedText{}, err
-		}
-		for _, candidate := range candidates {
-			if candidate.DraftID == resolved.Action.DraftID {
-				if selected.DraftID != "" || candidate.CardID != resolved.Action.CardID {
-					return render.InputDraftCandidate{}, render.PendingText{}, render.ResolvedText{}, fmt.Errorf("draft choice conflicts with current card")
-				}
-				selected = candidate
-			}
-		}
-		if next == "" {
-			break
-		}
-		if next == cursor {
-			return render.InputDraftCandidate{}, render.PendingText{}, render.ResolvedText{}, fmt.Errorf("draft choice cursor did not advance")
-		}
-		cursor = next
-	}
-	if selected.DraftID == "" {
-		return render.InputDraftCandidate{}, render.PendingText{}, render.ResolvedText{}, fmt.Errorf("draft choice no longer names a current draft")
+	selected, err := selectChosenDraftTx(ctx, tx, text, at, resolved, postgres)
+	if err != nil {
+		return render.InputDraftCandidate{}, render.PendingText{}, render.ResolvedText{}, err
 	}
 	return selected, text, bound, nil
 }
