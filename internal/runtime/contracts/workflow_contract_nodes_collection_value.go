@@ -16,19 +16,10 @@ func projectNodeGroupByValue(value yamlsource.Value) (*GroupBySpec, error) {
 		return nil, err
 	}
 	var out GroupBySpec
-	for _, entry := range []struct {
-		key    string
-		target *string
-	}{
-		{"items_from", &out.ItemsFrom}, {"key", &out.Key}, {"store_as", &out.StoreAs},
-	} {
-		if field, present := fields[entry.key]; present {
-			*entry.target, err = nodeValueText(field, "group_by."+entry.key)
-			if err != nil {
-				return nil, err
-			}
-			*entry.target = strings.TrimSpace(*entry.target)
-		}
+	if err := nodeValueTexts(fields, map[string]*string{
+		"items_from": &out.ItemsFrom, "key": &out.Key, "store_as": &out.StoreAs,
+	}, true); err != nil {
+		return nil, err
 	}
 	out.ItemsPath = paths.Parse(out.ItemsFrom)
 	out.KeyPath = paths.Parse(out.Key)
@@ -46,20 +37,11 @@ func projectNodeFilterValue(value yamlsource.Value) (*FilterSpec, error) {
 		return nil, err
 	}
 	var out FilterSpec
-	for _, entry := range []struct {
-		key    string
-		target *string
-	}{
-		{"source", &out.Source}, {"items_from", &out.ItemsFrom},
-		{"condition", &out.Condition}, {"store_as", &out.StoreAs},
-	} {
-		if field, present := fields[entry.key]; present {
-			*entry.target, err = nodeValueText(field, "filter."+entry.key)
-			if err != nil {
-				return nil, err
-			}
-			*entry.target = strings.TrimSpace(*entry.target)
-		}
+	if err := nodeValueTexts(fields, map[string]*string{
+		"source": &out.Source, "items_from": &out.ItemsFrom,
+		"condition": &out.Condition, "store_as": &out.StoreAs,
+	}, true); err != nil {
+		return nil, err
 	}
 	out.SourcePath = paths.Parse(out.Source)
 	out.ItemsPath = paths.Parse(out.ItemsFrom)
@@ -77,20 +59,11 @@ func projectNodeReduceValue(value yamlsource.Value) (*ReduceSpec, error) {
 		return nil, err
 	}
 	var out ReduceSpec
-	for _, entry := range []struct {
-		key    string
-		target *string
-	}{
-		{"operation", &out.Operation}, {"source", &out.Source},
-		{"items_from", &out.ItemsFrom}, {"store_as", &out.StoreAs},
-	} {
-		if field, present := fields[entry.key]; present {
-			*entry.target, err = nodeValueText(field, "reduce."+entry.key)
-			if err != nil {
-				return nil, err
-			}
-			*entry.target = strings.TrimSpace(*entry.target)
-		}
+	if err := nodeValueTexts(fields, map[string]*string{
+		"operation": &out.Operation, "source": &out.Source,
+		"items_from": &out.ItemsFrom, "store_as": &out.StoreAs,
+	}, true, "source", "items_from"); err != nil {
+		return nil, err
 	}
 	out.SourcePath = paths.Parse(out.Source)
 	out.ItemsPath = paths.Parse(out.ItemsFrom)
@@ -106,20 +79,11 @@ func projectNodeCountValue(value yamlsource.Value) (*CountSpec, error) {
 		return nil, err
 	}
 	var out CountSpec
-	for _, entry := range []struct {
-		key    string
-		target *string
-	}{
-		{"source", &out.Source}, {"items_from", &out.ItemsFrom},
-		{"condition", &out.Condition}, {"store_as", &out.StoreAs},
-	} {
-		if field, present := fields[entry.key]; present {
-			*entry.target, err = nodeValueText(field, "count."+entry.key)
-			if err != nil {
-				return nil, err
-			}
-			*entry.target = strings.TrimSpace(*entry.target)
-		}
+	if err := nodeValueTexts(fields, map[string]*string{
+		"source": &out.Source, "items_from": &out.ItemsFrom,
+		"condition": &out.Condition, "store_as": &out.StoreAs,
+	}, true, "source", "items_from"); err != nil {
+		return nil, err
 	}
 	out.SourcePath = paths.Parse(out.Source)
 	out.ItemsPath = paths.Parse(out.ItemsFrom)

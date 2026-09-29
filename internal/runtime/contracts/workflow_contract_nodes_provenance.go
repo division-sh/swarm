@@ -8,7 +8,40 @@ import (
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
-func collectNodeValueProvenance(value yamlsource.Value, prefix string, out map[string]EffectiveValueProvenance) error {
+func nodeHandlerAnnotations(value yamlsource.Value) ([]yamlsource.Value, error) {
+	if value.Presence() != yamlsource.PresenceMapping && value.Presence() != yamlsource.PresenceEmptyMapping {
+		return nil, nil
+	}
+	handlers, err := value.Lookup("event_handlers")
+	if err != nil || handlers.Presence == yamlsource.PresenceMissing {
+		return nil, err
+	}
+	fields, err := handlers.Value.Mapping()
+	if err != nil {
+		return nil, err
+	}
+	var annotations []yamlsource.Value
+	for _, field := range fields {
+		if field.Value.Presence() != yamlsource.PresenceMapping && field.Value.Presence() != yamlsource.PresenceEmptyMapping {
+			continue
+		}
+		note, err := field.Value.Lookup("_note")
+		if err != nil {
+			return nil, err
+		}
+		if note.Presence != yamlsource.PresenceMissing {
+			annotations = append(annotations, note.Value)
+		}
+	}
+	return annotations, nil
+}
+
+func collectNodeValueProvenance(value yamlsource.Value, prefix string, out map[string]EffectiveValueProvenance, annotations []yamlsource.Value) error {
+	for _, note := range annotations {
+		if note.SemanticPath() == value.SemanticPath() {
+			return nil
+		}
+	}
 	switch value.Presence() {
 	case yamlsource.PresenceMapping, yamlsource.PresenceEmptyMapping:
 		fields, err := value.Mapping()
@@ -18,7 +51,7 @@ func collectNodeValueProvenance(value yamlsource.Value, prefix string, out map[s
 		for _, field := range fields {
 			path := nodeProvenanceMapPath(prefix, field.Name)
 			out[path] = authoredSourceProvenance(field.Value)
-			if err := collectNodeValueProvenance(field.Value, path, out); err != nil {
+			if err := collectNodeValueProvenance(field.Value, path, out, annotations); err != nil {
 				return err
 			}
 		}
@@ -30,7 +63,7 @@ func collectNodeValueProvenance(value yamlsource.Value, prefix string, out map[s
 		for index, item := range items {
 			path := prefix + fmt.Sprintf("[%d]", index)
 			out[path] = authoredSourceProvenance(item)
-			if err := collectNodeValueProvenance(item, path, out); err != nil {
+			if err := collectNodeValueProvenance(item, path, out, annotations); err != nil {
 				return err
 			}
 		}

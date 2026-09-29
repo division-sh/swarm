@@ -2,7 +2,6 @@ package contracts
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
@@ -23,23 +22,11 @@ func projectNodeQueryValue(value yamlsource.Value) (*QuerySpec, error) {
 		return nil, fmt.Errorf("query at %s must not be empty", value.Location())
 	}
 	var out QuerySpec
-	for _, entry := range []struct {
-		key    string
-		target *string
-	}{
-		{"source", &out.Source}, {"entities", &out.Entities},
-		{"filter", &out.Filter}, {"group_by", &out.GroupBy},
-		{"store_as", &out.StoreAs},
-	} {
-		field, present := fields[entry.key]
-		if !present {
-			continue
-		}
-		text, err := nodeValueText(field, "query."+entry.key)
-		if err != nil {
-			return nil, err
-		}
-		*entry.target = strings.TrimSpace(text)
+	if err := nodeValueTexts(fields, map[string]*string{
+		"source": &out.Source, "entities": &out.Entities,
+		"filter": &out.Filter, "group_by": &out.GroupBy, "store_as": &out.StoreAs,
+	}, true); err != nil {
+		return nil, err
 	}
 	if count, present := fields["count"]; present {
 		out.Count, err = nodeValueBool(count, "query.count")

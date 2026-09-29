@@ -348,6 +348,13 @@ contract_formats:
       typed mode or derived from a pin; empty and aliased values cannot masquerade
       as omission. A delivery join rejects every authored timeout, including
       null, without changing ordinary arrival-join null timeout omission.
+      Branch exclusions inspect authored key presence, not projected zero values.
+      Internal compute value_field and weight_field carriers are not authorable.
+      Optional reduce/count source and items_from fields, when authored, must
+      be non-empty scalars; items_from retains precedence over source.
+      Ordinary on_complete rejects authored activity in every presence state.
+      Semantic-validator diagnostics retain the complete source path and
+      authored, introduction and resolved coordinates.
     provenance: >
       Effective node-declaration provenance retains authored coordinates for
       declaration and nested values and composes with event-catalog provenance;
@@ -355,6 +362,14 @@ contract_formats:
       plan construction, and retained-source reconstruction consume the same
       admitted projection. Public provenance uses snake_case field names and
       omits absent optional evidence, without changing the underlying ledger.
+      Handler _note annotations retain their outer provenance occurrence only;
+      their descendants are not effective behavior. This exemption is scoped to
+      the annotation occurrence, not its anchor or any business-data field named
+      _note. Before projection or provenance expansion, active node source trees
+      are bounded to 65,536 expanded source nodes by the source-value owner.
+      Repeated merge expansion is also bounded before allocating effective
+      mappings. Excess expansion fails closed as YAML-EXPANSION-LIMIT; aliases
+      referenced from active data remain counted even if anchored in annotations.
   loader_defaults:
     canonical_owner: platform-spec.yaml#filesystem_source_model.local_root_selection
     rule: Omission on a source-aware local command selects exactly the captured invocation directory; one positional directory is the only alternate. There is no upward or fallback discovery.
@@ -4050,12 +4065,13 @@ handler_specification:
           source field is a hard load error. Durable-data versions are not authored fan_out sources.
         as: string — required simple identifier that binds the current item for this row's emit.fields expressions.
           `fan_out.item`, bare `item`, and `fan_out.identity` are not authoring namespaces.
-        identity: optional expression over the item alias that declares the stable per-item key. For a statically
+        identity: optional non-empty scalar expression over the item alias that declares the stable per-item key. For a statically
           scalar list item, omission defaults identity to the `as` alias. Object, list, dynamic, or otherwise unresolved
           item types require an explicit identity and fail closed on omission. It is verification metadata, not a
           second expression namespace. Bootverify must prove `fan_out.emit.fields` carries the effective expression so
           downstream join/dedup contracts can bind to the emitted payload.
-        max_items: optional positive integer tightening the platform ceiling. An authored zero is invalid; only omission
+        max_items: optional positive YAML integer tightening the platform ceiling. Floating-point, quoted numeric,
+          boolean, null and other non-integer values are rejected before projection. An authored zero is invalid; only omission
           selects the platform ceiling. The platform ceiling is always enforced even when authors omit max_items.
         emit: string or object — per-item event to emit, optionally with local fields payload construction. During
           fan_out.emit.fields only, the item alias and platform-provided `fan_out.index` are available.

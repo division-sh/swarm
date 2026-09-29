@@ -2,7 +2,6 @@ package contracts
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
@@ -13,20 +12,11 @@ func projectNodeLoopValue(value yamlsource.Value) (*LoopOperationSpec, error) {
 		return nil, err
 	}
 	out := &LoopOperationSpec{}
-	for _, entry := range []struct {
-		key    string
-		target *string
-	}{
-		{"start", &out.Start}, {"admit", &out.Admit}, {"repeat", &out.Repeat},
-		{"close", &out.Close}, {"from", &out.From},
-	} {
-		if field, present := fields[entry.key]; present {
-			*entry.target, err = nodeValueText(field, "loop."+entry.key)
-			if err != nil {
-				return nil, err
-			}
-			*entry.target = strings.TrimSpace(*entry.target)
-		}
+	if err := nodeValueTexts(fields, map[string]*string{
+		"start": &out.Start, "admit": &out.Admit, "repeat": &out.Repeat,
+		"close": &out.Close, "from": &out.From,
+	}, true); err != nil {
+		return nil, err
 	}
 	if _, _, err := out.Operation(); err != nil {
 		return nil, fmt.Errorf("handler loop operation at %s: %w", value.Location(), err)
@@ -40,25 +30,14 @@ func projectNodeLoopValue(value yamlsource.Value) (*LoopOperationSpec, error) {
 func projectNodeComputeValue(value yamlsource.Value) (*ComputeSpec, error) {
 	fields, err := nodeValueFields(value, "compute", map[string]struct{}{
 		"operation": {}, "tiers": {}, "keys": {}, "store_as": {},
-		"description": {}, "value_field": {}, "weight_field": {},
+		"description": {},
 	}, map[string]string{"params": "compute.params is not executed; use declared compute inputs"})
 	if err != nil {
 		return nil, err
 	}
 	out := &ComputeSpec{}
-	for _, entry := range []struct {
-		key    string
-		target *string
-	}{
-		{"store_as", &out.StoreAs}, {"description", &out.Description},
-		{"value_field", &out.ValueField}, {"weight_field", &out.WeightField},
-	} {
-		if field, present := fields[entry.key]; present {
-			*entry.target, err = nodeValueText(field, "compute."+entry.key)
-			if err != nil {
-				return nil, err
-			}
-		}
+	if err := nodeValueTexts(fields, map[string]*string{"store_as": &out.StoreAs, "description": &out.Description}, false); err != nil {
+		return nil, err
 	}
 	if operation, present := fields["operation"]; present {
 		name, err := nodeValueText(operation, "compute.operation")
