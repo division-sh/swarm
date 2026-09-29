@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
-	"gopkg.in/yaml.v3"
 )
 
 func TestCompiledTransitionPreservesDistinctRuleCarriers(t *testing.T) {
@@ -13,7 +12,7 @@ func TestCompiledTransitionPreservesDistinctRuleCarriers(t *testing.T) {
 		t.Fatal(err)
 	}
 	var handler SystemNodeEventHandler
-	if err := yaml.Unmarshal([]byte("rules:\n  - {id: first, when: payload.ready, advances_to: done}\n  - {id: second, else: true, advances_to: done}\n"), &handler); err != nil {
+	if err := decodeNodeTestYAML([]byte("rules:\n  - {id: first, when: payload.ready, advances_to: done}\n  - {id: second, else: true, advances_to: done}\n"), &handler); err != nil {
 		t.Fatal(err)
 	}
 	handler, err = QualifySystemNodeHandlerRuleRefsForEvent(node, "work.requested", handler)

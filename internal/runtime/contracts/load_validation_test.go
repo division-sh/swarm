@@ -8,7 +8,6 @@ import (
 
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
-	"gopkg.in/yaml.v3"
 )
 
 func TestValidateWorkflowContractBundleLoadConstraintsRejectsOnCompleteAndRules(t *testing.T) {
@@ -91,7 +90,7 @@ func TestValidateWorkflowContractBundleLoadConstraintsAllowsMissingExecutionType
 
 func TestValidateWorkflowContractBundleLoadConstraintsRejectsNodeIDMismatch(t *testing.T) {
 	var nodes map[string]SystemNodeContract
-	err := yaml.Unmarshal([]byte("worker:\n  id: worker-alias\n"), &nodes)
+	err := decodeNodeTestYAML([]byte("worker:\n  id: worker-alias\n"), &nodes)
 	if err == nil || !strings.Contains(err.Error(), retiredNodeID) {
 		t.Fatalf("unexpected load validation error: %v", err)
 	}
@@ -99,7 +98,7 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsNodeIDMismatch(t *t
 
 func TestValidateWorkflowContractBundleLoadConstraintsRejectsRenderedNodeIDTemplate(t *testing.T) {
 	var nodes map[string]SystemNodeContract
-	err := yaml.Unmarshal([]byte("worker:\n  id: worker-{instance_id}\n"), &nodes)
+	err := decodeNodeTestYAML([]byte("worker:\n  id: worker-{instance_id}\n"), &nodes)
 	if err == nil || !strings.Contains(err.Error(), retiredNodeID) {
 		t.Fatalf("unexpected node template admission: %v", err)
 	}
@@ -391,7 +390,7 @@ func writeFieldReconciliationBundle(t *testing.T, root, schemaExtra, nodes strin
 
 func TestAgentRegistryEntryRejectsRetiredModelTierField(t *testing.T) {
 	var entry AgentRegistryEntry
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 role: researcher
 type: managed
 model: regular
@@ -405,7 +404,7 @@ subscriptions: [scan.requested]
 
 func TestAgentRegistryEntryDecodesPythonMockPerformance(t *testing.T) {
 	var entry AgentRegistryEntry
-	err := yaml.Unmarshal([]byte("id: assistant\nmodel: regular\nmemory: false\nmock:\n  kind: python\n  module: mocks/assistant.py\n"), &entry)
+	err := decodeNodeTestYAML([]byte("id: assistant\nmodel: regular\nmemory: false\nmock:\n  kind: python\n  module: mocks/assistant.py\n"), &entry)
 	if err != nil {
 		t.Fatalf("decode agent: %v", err)
 	}
@@ -416,7 +415,7 @@ func TestAgentRegistryEntryDecodesPythonMockPerformance(t *testing.T) {
 
 func TestEffectiveAgentRegistryEntryAppliesLayer1PlatformDefaults(t *testing.T) {
 	var entry AgentRegistryEntry
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 role: researcher
 model: regular
 subscriptions: [scan.requested]
@@ -460,7 +459,7 @@ func TestAgentRegistryEntryRejectsExplicitInvalidLayer1Values(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var entry AgentRegistryEntry
-			err := yaml.Unmarshal([]byte(`
+			err := decodeNodeTestYAML([]byte(`
 role: researcher
 model: regular
 subscriptions: [scan.requested]
@@ -488,7 +487,7 @@ func TestAgentRegistryEntryRejectsRetiredMemoryModeFieldsAndAliases(t *testing.T
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var entry AgentRegistryEntry
-			err := yaml.Unmarshal([]byte(`
+			err := decodeNodeTestYAML([]byte(`
 role: researcher
 type: managed
 model: regular
@@ -515,7 +514,7 @@ func TestAgentRegistryEntryRejectsUnsupportedLayerSyntaxAndUnknownFields(t *test
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var entry AgentRegistryEntry
-			err := yaml.Unmarshal([]byte(`
+			err := decodeNodeTestYAML([]byte(`
 role: researcher
 model: regular
 subscriptions: [scan.requested]
@@ -529,7 +528,7 @@ subscriptions: [scan.requested]
 
 func TestLoadWorkflowContractBundleRejectsRetiredPromptInputs(t *testing.T) {
 	var entry AgentRegistryEntry
-	err := yaml.Unmarshal([]byte("prompt_inputs: [customer_name, order_type]\n"), &entry)
+	err := decodeNodeTestYAML([]byte("prompt_inputs: [customer_name, order_type]\n"), &entry)
 	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "intent:") {
 		t.Fatalf("yaml.Unmarshal error = %v, want retired prompt_inputs teaching error", err)
 	}
@@ -682,7 +681,7 @@ func TestValidateWorkflowCriteriaContractsRejectsInvalidCriteriaShapes(t *testin
 
 func TestAgentAndEventCriteriaCitationYAMLDecode(t *testing.T) {
 	var agent AgentRegistryEntry
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 role: cto
 model: regular
 subscriptions: [spec.review_requested]
@@ -831,7 +830,7 @@ func TestAgentRegistryEntryRejectsRetiredAuthoringAliases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var entry AgentRegistryEntry
-			err := yaml.Unmarshal([]byte(`
+			err := decodeNodeTestYAML([]byte(`
 role: researcher
 type: managed
 model: regular

@@ -47,6 +47,34 @@ func TestBuildShowsReplyPairedTopology(t *testing.T) {
 	}
 }
 
+func TestBuildExposesComposedNodeAndEventProvenance(t *testing.T) {
+	repoRoot := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		filepath.Join(repoRoot, "examples", "routing", "template-create-minted-key"),
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := Build(context.Background(), semanticview.Wrap(bundle), BuildOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var nodeFound, eventFound bool
+	for _, entry := range view.EffectiveProvenance {
+		if strings.HasPrefix(entry.Path, "nodes[") {
+			nodeFound = true
+		}
+		if strings.HasPrefix(entry.Path, "events[") {
+			eventFound = true
+		}
+	}
+	if !nodeFound || !eventFound {
+		t.Fatalf("describe projection lacks composed provenance: node=%t event=%t", nodeFound, eventFound)
+	}
+}
+
 func TestBuildIncludesHarnessInputSourceAndOutputSink(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(

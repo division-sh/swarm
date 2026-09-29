@@ -7,6 +7,20 @@ import (
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
+var guardOnFailFieldOptions = map[string]struct{}{"escalate": {}}
+
+var guardOnFailEscalateFieldOptions = map[string]struct{}{
+	"event": {}, "from": {}, "fields": {},
+}
+
+var accumulateFieldOptions = map[string]struct{}{
+	"into": {}, "from": {}, "description": {}, "window": {}, "dedup_by": {},
+}
+
+var fanOutFieldOptions = map[string]struct{}{
+	"items_from": {}, "as": {}, "identity": {}, "max_items": {}, "emit": {},
+}
+
 // nodeValueFields admits one node-family mapping without losing the authored
 // location of aliases, merges, or duplicate effective fields.
 func nodeValueFields(value yamlsource.Value, owner string, allowed map[string]struct{}, retired map[string]string) (map[string]yamlsource.Value, error) {
@@ -24,6 +38,9 @@ func nodeValueFields(value yamlsource.Value, owner string, allowed map[string]st
 			return nil, fmt.Errorf("duplicate effective YAML key %q at %s and %s for %s", field.Name, previous, field.KeyLocation, field.Value.SemanticPath())
 		}
 		seen[field.Name] = field.KeyLocation
+		if err := retiredHandlerActionFieldError(owner, field.Name); err != nil {
+			return nil, fmt.Errorf("%w at %s", err, field.IntroductionLocation())
+		}
 		if reason, ok := retired[field.Name]; ok {
 			return nil, fmt.Errorf("RETIRED: %s field %q at %s: %s", owner, field.Name, field.IntroductionLocation(), reason)
 		}
@@ -185,8 +202,8 @@ func projectNodeEmitValue(value yamlsource.Value) (EmitSpec, error) {
 		fields, err := nodeValueFields(value, "emit", map[string]struct{}{
 			"event": {}, "from": {}, "fields": {},
 		}, map[string]string{
-			"target":    "use declared connect or accepted output pins",
-			"broadcast": "use declared connect or accepted output pins",
+			"target":    "RETIRED-EMIT-ROUTING: emit.target; use declared connect or accepted output pins",
+			"broadcast": "RETIRED-EMIT-ROUTING: emit.broadcast; use declared connect or accepted output pins",
 		})
 		if err != nil {
 			return EmitSpec{}, err

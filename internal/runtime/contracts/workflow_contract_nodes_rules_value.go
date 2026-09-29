@@ -13,7 +13,7 @@ var retiredNodeRuleFields = map[string]string{
 	"payload_transform": "use rule-local emit.fields",
 	"switch":            "use when/case/range selection rows",
 	"threshold":         "use when/case/range selection rows",
-	"policy":            "enhance rules in place rather than creating a second policy-sheet owner",
+	"policy":            "a second policy-sheet authoring owner is unsupported; enhance rules in place",
 	"temporal":          "outside the selection-row grammar",
 	"join":              "outside the selection-row grammar",
 	"loop":              "outside the selection-row grammar",
@@ -23,7 +23,7 @@ var retiredNodeRuleFields = map[string]string{
 
 func projectNodeRuleRowsValue(value yamlsource.Value, context handlerRuleDecodeContext) ([]HandlerRuleEntry, error) {
 	if value.Presence() == yamlsource.PresenceNull {
-		return nil, fmt.Errorf("%s handler rule collection at %s must not be null", context, value.Location())
+		return nil, fmt.Errorf("%s handler rule collection must not be null at %s", context, value.Location())
 	}
 	var rows []HandlerRuleEntry
 	switch value.Presence() {
@@ -53,7 +53,31 @@ func projectNodeRuleRowsValue(value yamlsource.Value, context handlerRuleDecodeC
 		case keyedErr == nil:
 			rows = keyed
 		default:
-			return nil, fmt.Errorf("invalid rules at %s (singleton: %v; keyed: %v)", value.Location(), singletonErr, keyedErr)
+			mappingFields, err := value.Mapping()
+			if err == nil {
+				if len(mappingFields) == 0 {
+					return nil, keyedErr
+				}
+				for _, entry := range mappingFields {
+					if entry.Name == "condition" && (entry.Value.Presence() == yamlsource.PresenceMapping || entry.Value.Presence() == yamlsource.PresenceEmptyMapping) {
+						return nil, keyedErr
+					}
+					if _, known := ruleFieldOptions[entry.Name]; known {
+						continue
+					}
+					if _, retired := retiredNodeRuleFields[entry.Name]; retired {
+						return nil, singletonErr
+					}
+					if retiredHandlerActionFieldError("rule", entry.Name) != nil {
+						return nil, singletonErr
+					}
+					if _, handlerField := handlerFieldOptions[entry.Name]; handlerField {
+						return nil, singletonErr
+					}
+					return nil, keyedErr
+				}
+			}
+			return nil, singletonErr
 		}
 	default:
 		return nil, fmt.Errorf("%s at %s must be a rule sequence or mapping", context, value.Location())
@@ -70,17 +94,17 @@ func projectNodeKeyedRulesValue(value yamlsource.Value, context handlerRuleDecod
 		return nil, err
 	}
 	if len(fields) == 0 {
-		return nil, fmt.Errorf("keyed rule mapping at %s must not be empty", value.Location())
+		return nil, fmt.Errorf("keyed rule mapping must contain at least one row at %s", value.Location())
 	}
 	rows := make([]HandlerRuleEntry, 0, len(fields))
 	seen := map[string]struct{}{}
 	for _, field := range fields {
 		label := strings.TrimSpace(field.Name)
 		if label == "" {
-			return nil, fmt.Errorf("keyed rule label at %s must not be empty", field.KeyLocation)
+			return nil, fmt.Errorf("keyed rule label must not be empty at %s", field.KeyLocation)
 		}
 		if _, duplicate := seen[label]; duplicate {
-			return nil, fmt.Errorf("duplicate keyed rule label %q at %s", label, field.KeyLocation)
+			return nil, fmt.Errorf("duplicate normalized key %q in keyed rules at %s", label, field.KeyLocation)
 		}
 		seen[label] = struct{}{}
 		row, err := projectNodeRuleEntryValue(field.Value, context)
@@ -106,6 +130,17 @@ func projectNodeKeyedRulesValue(value yamlsource.Value, context handlerRuleDecod
 }
 
 func projectNodeRuleEntryValue(value yamlsource.Value, context handlerRuleDecodeContext) (HandlerRuleEntry, error) {
+	if context == handlerRuleDecodeContextRules && (value.Presence() == yamlsource.PresenceMapping || value.Presence() == yamlsource.PresenceEmptyMapping) {
+		entries, err := value.Mapping()
+		if err != nil {
+			return HandlerRuleEntry{}, err
+		}
+		for _, entry := range entries {
+			if entry.Name == "condition" {
+				return HandlerRuleEntry{}, fmt.Errorf("%w at %s", retiredHandlerActionFieldError("rules", "condition"), entry.IntroductionLocation())
+			}
+		}
+	}
 	fields, err := nodeValueFields(value, "rule", ruleFieldOptions, retiredNodeRuleFields)
 	if err != nil {
 		return HandlerRuleEntry{}, err
@@ -130,7 +165,7 @@ func projectNodeRuleEntryValue(value yamlsource.Value, context handlerRuleDecode
 	}
 	if condition, present := fields["condition"]; present {
 		if context != handlerRuleDecodeContextOnComplete {
-			return HandlerRuleEntry{}, fmt.Errorf("rule.condition at %s is not accepted in %s", condition.Location(), context)
+			return HandlerRuleEntry{}, fmt.Errorf("%w at %s", retiredHandlerActionFieldError("rules", "condition"), condition.Location())
 		}
 		out.Condition, err = nodeValueText(condition, "rule.condition")
 		if err != nil {
@@ -168,7 +203,7 @@ func projectNodeRuleEntryValue(value yamlsource.Value, context handlerRuleDecode
 		}
 	}
 	if selected != "" && context != handlerRuleDecodeContextRules {
-		return HandlerRuleEntry{}, fmt.Errorf("POLICY-SHEET-ROW: %s at %s only supports typed rows under handler.rules", selected, fields[selected].Location())
+		return HandlerRuleEntry{}, fmt.Errorf("POLICY-SHEET-ROW: %s is only supported under handler.rules at %s", selected, fields[selected].Location())
 	}
 	switch selected {
 	case "when":
@@ -177,7 +212,7 @@ func projectNodeRuleEntryValue(value yamlsource.Value, context handlerRuleDecode
 			return HandlerRuleEntry{}, err
 		}
 		if strings.EqualFold(strings.TrimSpace(when), "else") {
-			return HandlerRuleEntry{}, fmt.Errorf("POLICY-SHEET-ROW: when at %s must be a predicate; use else: true", fields["when"].Location())
+			return HandlerRuleEntry{}, fmt.Errorf("POLICY-SHEET-ROW: when must be a CEL predicate at %s; use else: true", fields["when"].Location())
 		}
 		out.Condition = strings.TrimSpace(when)
 		out.PolicyRow = PolicySheetRowMetadata{Kind: PolicySheetRowKindWhen}
