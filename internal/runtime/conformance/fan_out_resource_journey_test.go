@@ -32,6 +32,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
+	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/google/uuid"
 )
 
@@ -355,15 +356,27 @@ func assertDeploymentResourceRows(t *testing.T, f *deploymentResourceFixture, se
 
 func waitDeploymentResourceLargeRun(t *testing.T, f *deploymentResourceFixture, runID string, expected int) {
 	t.Helper()
+	started := time.Now()
 	ctx, cancel := context.WithTimeout(f.ctx, 3*time.Minute)
 	defer cancel()
+	if expected == 1362 && f.postgresDSN != "" {
+		defer startDeploymentProgressProbe(t, f, runID, started)()
+	}
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
+	lastLogged := time.Time{}
 	for {
 		var cardinality, cursor int
 		var status string
+		queryStarted := time.Now()
 		if err := f.db.QueryRowContext(ctx, `SELECT status,cardinality,cursor FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment'`, runID).Scan(&status, &cardinality, &cursor); err != nil {
-			t.Fatalf("load deployment progress: %v", err)
+			stats := f.db.Stats()
+			t.Fatalf("load deployment progress after %s (query %s, pool in_use=%d open=%d wait_count=%d wait_duration=%s): %v", time.Since(started), time.Since(queryStarted), stats.InUse, stats.OpenConnections, stats.WaitCount, stats.WaitDuration, err)
+		}
+		if expected == 1362 && (lastLogged.IsZero() || time.Since(lastLogged) >= 10*time.Second || cursor == expected) {
+			stats := f.db.Stats()
+			t.Logf("deployment progress elapsed=%s status=%s cursor=%d/%d query=%s pool in_use=%d open=%d wait_count=%d wait_duration=%s", time.Since(started), status, cursor, cardinality, time.Since(queryStarted), stats.InUse, stats.OpenConnections, stats.WaitCount, stats.WaitDuration)
+			lastLogged = time.Now()
 		}
 		if cardinality != expected || cursor > cardinality {
 			t.Fatalf("deployment progress contradicts exact source: status=%s cursor=%d cardinality=%d want=%d", status, cursor, cardinality, expected)
@@ -372,6 +385,7 @@ func waitDeploymentResourceLargeRun(t *testing.T, f *deploymentResourceFixture, 
 			t.Fatalf("deployment source blocked before settlement: cursor=%d cardinality=%d", cursor, cardinality)
 		}
 		if cursor == expected {
+			settlementStarted := time.Now()
 			var outcomes, events, delivered int
 			for _, check := range []struct {
 				query string
@@ -386,13 +400,18 @@ func waitDeploymentResourceLargeRun(t *testing.T, f *deploymentResourceFixture, 
 				}
 			}
 			if outcomes == expected && events == expected && delivered == expected {
+				t.Logf("deployment exact counts elapsed=%s settlement_query=%s outcomes=%d events=%d delivered=%d", time.Since(started), time.Since(settlementStarted), outcomes, events, delivered)
+				quiescenceStarted := time.Now()
 				if err := f.runtime.bus.WaitForQuiescence(ctx); err != nil {
-					t.Fatalf("wait for deployment EventBus settlement: %v", err)
+					t.Fatalf("wait for deployment EventBus settlement after %s (wait %s): %v", time.Since(started), time.Since(quiescenceStarted), err)
 				}
+				t.Logf("deployment quiescence elapsed=%s wait=%s", time.Since(started), time.Since(quiescenceStarted))
+				summaryStarted := time.Now()
 				summary, err := f.selected.FanOutRunSummary(ctx, runID, time.Now().UTC())
 				if err != nil {
-					t.Fatalf("final deployment FanOutRunSummary: %v", err)
+					t.Fatalf("final deployment FanOutRunSummary after %s (query %s): %v", time.Since(started), time.Since(summaryStarted), err)
 				}
+				t.Logf("deployment summary elapsed=%s query=%s summary=%+v", time.Since(started), time.Since(summaryStarted), summary)
 				if summary.Owed != 0 || summary.Open != 0 || summary.Blocked != 0 || summary.Unsettled != 0 || summary.BarrierArmed != 0 || summary.BarrierPending != 0 {
 					t.Fatalf("deployment remains semantically unsettled after exact row counts: %+v", summary)
 				}
@@ -404,6 +423,64 @@ func waitDeploymentResourceLargeRun(t *testing.T, f *deploymentResourceFixture, 
 			t.Fatalf("wait for deployment settlement: %v; status=%s cursor=%d cardinality=%d want=%d", ctx.Err(), status, cursor, cardinality, expected)
 		case <-ticker.C:
 		}
+	}
+}
+
+func startDeploymentProgressProbe(t *testing.T, f *deploymentResourceFixture, runID string, started time.Time) func() {
+	t.Helper()
+	connection, err := testpostgres.ParseConnection(f.postgresDSN)
+	if err != nil {
+		t.Fatalf("parse deployment diagnostic connection: %v", err)
+	}
+	db, err := connection.Open()
+	if err != nil {
+		t.Fatalf("open deployment diagnostic connection: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+			sampleCtx, sampleCancel := context.WithTimeout(ctx, 3*time.Second)
+			sampleStarted := time.Now()
+			var status string
+			var cardinality, cursor int
+			err := db.QueryRowContext(sampleCtx, `SELECT status,cardinality,cursor FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment'`, runID).Scan(&status, &cardinality, &cursor)
+			if err != nil {
+				t.Logf("deployment independent progress elapsed=%s query=%s err=%v", time.Since(started), time.Since(sampleStarted), err)
+			} else {
+				t.Logf("deployment independent progress elapsed=%s query=%s status=%s cursor=%d/%d", time.Since(started), time.Since(sampleStarted), status, cursor, cardinality)
+			}
+			rows, err := db.QueryContext(sampleCtx, `SELECT COALESCE(wait_event_type,'none'), COALESCE(wait_event,'none'), COUNT(*) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND state<>'idle' GROUP BY 1,2 ORDER BY 1,2`)
+			if err == nil {
+				var waits []string
+				for rows.Next() {
+					var kind, event string
+					var count int
+					if scanErr := rows.Scan(&kind, &event, &count); scanErr == nil {
+						waits = append(waits, fmt.Sprintf("%s/%s:%d", kind, event, count))
+					}
+				}
+				rows.Close()
+				t.Logf("deployment postgres waits elapsed=%s %v", time.Since(started), waits)
+			} else {
+				t.Logf("deployment postgres waits elapsed=%s err=%v", time.Since(started), err)
+			}
+			sampleCancel()
+		}
+	}()
+	return func() {
+		cancel()
+		<-done
+		_ = db.Close()
 	}
 }
 
