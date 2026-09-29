@@ -3,6 +3,7 @@ package serveapp
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
@@ -113,10 +115,20 @@ func runProviderAliasAuthorityScenario(t *testing.T, scenario providerAliasScena
 							t.Fatalf("authenticated %s status=%d body=%s", alias, status, response)
 						}
 						var receipt struct {
-							EventIDs []string `json:"event_ids"`
+							PublicationID     string   `json:"publication_id"`
+							EntityID          string   `json:"entity_id"`
+							EventIDs          []string `json:"event_ids"`
+							ActionDisposition string   `json:"operator_channel_action_disposition"`
 						}
-						if err := json.Unmarshal(response, &receipt); err != nil || len(receipt.EventIDs) != 2 {
-							t.Fatalf("receipt=%s err=%v, want raw and normalized identities", response, err)
+						if err := json.Unmarshal(response, &receipt); err != nil {
+							t.Fatalf("decode receipt=%s: %v", response, err)
+						}
+						if shape == "callback" {
+							if len(receipt.EventIDs) != 0 || (!scenario.ackLoss && receipt.ActionDisposition != "pending") {
+								t.Fatalf("callback receipt=%s, want operator action intent and no business events", response)
+							}
+						} else if len(receipt.EventIDs) != 2 {
+							t.Fatalf("text receipt=%s, want raw and normalized identities", response)
 						}
 						if fault != nil {
 							fault.mu.Lock()
@@ -126,26 +138,31 @@ func runProviderAliasAuthorityScenario(t *testing.T, scenario providerAliasScena
 								t.Fatalf("reconciliation changed committed batch: commits=%d recorded=%v receipt=%v", commits, recorded, receipt.EventIDs)
 							}
 						}
-						seen := map[string]bool{}
-						for _, eventID := range receipt.EventIDs {
-							name := requireProviderAliasDeliveries(t, rt.Endpoint, eventID, scenario.source(alias), normalized, scenario.receiver(alias), scenario.agents, scenario.rawConnected, scenario.noLocalConsumers, false)
-							requireProviderAliasStoredSource(t, rt, eventID, scenario.source(alias))
-							if scenario.replay && name == normalized {
-								requireProviderAliasAgentReplay(t, rt, eventID, alias)
+						if shape == "callback" {
+							requireProviderAliasActionIntent(t, rt, receipt.PublicationID, receipt.EntityID, scenario.source(alias), id)
+						} else {
+							seen := map[string]bool{}
+							for _, eventID := range receipt.EventIDs {
+								name := requireProviderAliasDeliveries(t, rt.Endpoint, eventID, scenario.source(alias), normalized, scenario.receiver(alias), scenario.agents, scenario.rawConnected, scenario.noLocalConsumers, false)
+								requireProviderAliasStoredSource(t, rt, eventID, scenario.source(alias))
+								if scenario.replay && name == normalized {
+									requireProviderAliasAgentReplay(t, rt, eventID, alias)
+								}
+								if seen[name] {
+									t.Fatalf("duplicate event kind %s", name)
+								}
+								seen[name] = true
 							}
-							if seen[name] {
-								t.Fatalf("duplicate event kind %s", name)
+							if !seen["inbound.telegram"] || !seen[normalized] {
+								t.Fatalf("event kinds=%v", seen)
 							}
-							seen[name] = true
-						}
-						if !seen["inbound.telegram"] || !seen[normalized] {
-							t.Fatalf("event kinds=%v", seen)
 						}
 						duplicateStatus, duplicateBody := postProviderAliasUpdate(t, baseURL, alias, alias+"-secret", update)
 						var duplicate struct {
-							EventIDs []string `json:"event_ids"`
+							PublicationID string   `json:"publication_id"`
+							EventIDs      []string `json:"event_ids"`
 						}
-						if err := json.Unmarshal(duplicateBody, &duplicate); err != nil || duplicateStatus != http.StatusOK || !reflect.DeepEqual(duplicate.EventIDs, receipt.EventIDs) {
+						if err := json.Unmarshal(duplicateBody, &duplicate); err != nil || duplicateStatus != http.StatusOK || duplicate.PublicationID != receipt.PublicationID || !reflect.DeepEqual(duplicate.EventIDs, receipt.EventIDs) {
 							t.Fatalf("duplicate status=%d body=%s err=%v", duplicateStatus, duplicateBody, err)
 						}
 					})
@@ -155,6 +172,37 @@ func runProviderAliasAuthorityScenario(t *testing.T, scenario providerAliasScena
 				requireProviderAliasRootConnection(t, rt, scenario.alphaReceiver)
 			}
 		})
+	}
+}
+
+func requireProviderAliasActionIntent(t *testing.T, rt servedControlProofRuntime, publicationID, entityID, flow string, updateID int) {
+	t.Helper()
+	var reader interface {
+		LoadInboundPublicationByIdentity(context.Context, string, string, string) (runtimeinbound.Record, bool, error)
+	}
+	if rt.SQLite != nil {
+		reader = rt.SQLite
+	} else {
+		reader = rt.Postgres
+	}
+	record, found, err := reader.LoadInboundPublicationByIdentity(context.Background(), "telegram", entityID, fmt.Sprint(updateID))
+	if err != nil || !found {
+		t.Fatalf("read callback publication: found=%t err=%v", found, err)
+	}
+	if record.PublicationID != publicationID || record.FlowPath != flow || record.EntityID != entityID || record.OutputCount != 0 || len(record.Events) != 0 {
+		t.Fatalf("callback lost exact provider alias or published business events: %+v", record)
+	}
+	query := `SELECT interface_key, state, disposition FROM operator_channel_action_intents WHERE publication_id=?`
+	if rt.Postgres != nil {
+		query = `SELECT interface_key, state, disposition FROM operator_channel_action_intents WHERE publication_id=$1::uuid`
+	}
+	var interfaceKey, state string
+	var disposition sql.NullString
+	if err := rt.DB.QueryRowContext(context.Background(), query, publicationID).Scan(&interfaceKey, &state, &disposition); err != nil {
+		t.Fatalf("read callback action intent: %v", err)
+	}
+	if interfaceKey == "" || (state != "pending" && state != "settled") || (state == "settled" && (!disposition.Valid || disposition.String != "rejected")) {
+		t.Fatalf("callback action intent interface=%q state=%q disposition=%v", interfaceKey, state, disposition)
 	}
 }
 
@@ -440,6 +488,16 @@ type providerPublicationAckLoss struct {
 	mu      sync.Mutex
 	commits int
 	record  runtimeinbound.Record
+}
+
+func (f *providerPublicationAckLoss) HasCurrentChannelInputDraft(ctx context.Context, text operatorchannel.InboundText, now time.Time) (bool, error) {
+	owner, ok := f.Runner.(interface {
+		HasCurrentChannelInputDraft(context.Context, operatorchannel.InboundText, time.Time) (bool, error)
+	})
+	if !ok {
+		return false, errors.New("inbound store lacks channel input draft classification")
+	}
+	return owner.HasCurrentChannelInputDraft(ctx, text, now)
 }
 
 func (f *providerPublicationAckLoss) CommitInboundPublication(ctx context.Context, command runtimeinbound.CommitCommand) (runtimeinbound.CommitResult, error) {
