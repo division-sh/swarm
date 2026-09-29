@@ -45,92 +45,108 @@ func FreezeCurrentSourceTx(ctx context.Context, tx *sql.Tx, plan Plan, postgres 
 		}
 		return channeldelivery.WithPresentation(frozen, plan.Bounds, plan.ActionPageIndex)
 	case PlanNotice:
-		query := `SELECT item_type, COALESCE(summary, ''), COALESCE(severity, 'normal'), COALESCE(notified, false),
-			COALESCE(payload, '{}'), COALESCE(from_agent, ''), COALESCE(entity_id, ''), COALESCE(flow_instance, '')
-			FROM mailbox WHERE item_id=?`
-		if postgres {
-			query = `SELECT item_type, COALESCE(summary, ''), COALESCE(severity, 'normal'), COALESCE(notified, false),
-				COALESCE(payload, '{}'), COALESCE(from_agent, ''), COALESCE(entity_id::text, ''), COALESCE(flow_instance, '')
-				FROM mailbox WHERE item_id=$1::uuid FOR UPDATE`
-		}
-		notice := channeldelivery.Notice{ID: plan.SourceID}
-		var payload any
-		if err := tx.QueryRowContext(ctx, query, plan.SourceID).Scan(&notice.Type, &notice.Summary,
-			&notice.Priority, &notice.Acknowledged, &payload, &notice.FromAgent, &notice.EntityID, &notice.FlowInstance); err != nil {
-			return channeldelivery.Frozen{}, fmt.Errorf("load exact channel notice: %w", err)
-		}
-		switch value := payload.(type) {
-		case string:
-			notice.Context = []byte(value)
-		case []byte:
-			notice.Context = value
-		default:
-			return channeldelivery.Frozen{}, fmt.Errorf("stored channel notice context has unsupported type %T", payload)
-		}
-		frozen, err := channeldelivery.FreezeNotice(notice, audience)
-		if err != nil {
-			return channeldelivery.Frozen{}, err
-		}
-		return channeldelivery.WithPresentation(frozen, plan.Bounds, plan.ActionPageIndex)
+		return freezeCurrentNoticeTx(ctx, tx, plan, audience, postgres)
 	case PlanCard:
-		card, err := decisionpersistence.LoadDecisionCardInTx(ctx, tx, plan.SourceID, postgres)
-		if err != nil {
-			return channeldelivery.Frozen{}, fmt.Errorf("load exact channel card: %w", err)
-		}
-		query := `SELECT COALESCE(MAX(change_id), 0) FROM decision_card_changes WHERE card_id=?`
-		if postgres {
-			query = `SELECT COALESCE(MAX(change_id), 0) FROM decision_card_changes WHERE card_id=$1::uuid`
-		}
-		var revision int64
-		if err := tx.QueryRowContext(ctx, query, plan.SourceID).Scan(&revision); err != nil {
-			return channeldelivery.Frozen{}, err
-		}
-		dispatch := ""
-		if card.Anchor.Kind() == decisioncard.AnchorKindProposedEffect {
-			readback, err := decisionpersistence.ProposedEffectReadbackInTx(ctx, tx, plan.SourceID, postgres)
-			if err != nil {
-				return channeldelivery.Frozen{}, fmt.Errorf("load exact card dispatch state: %w", err)
-			}
-			dispatch = readback.DispatchState
-		}
-		prompt := channeldelivery.DraftPrompt{}
-		if card.Status == decisioncard.StatusPending {
-			query = `SELECT input_draft_id, verdict, next_field_index, expires_at
-				FROM decision_card_input_drafts WHERE card_id=? AND principal_id=? AND status='active' LIMIT 2`
-			if postgres {
-				query = `SELECT input_draft_id::text, verdict, next_field_index, expires_at
-					FROM decision_card_input_drafts WHERE card_id=$1::uuid AND principal_id=$2 AND status='active' LIMIT 2`
-			}
-			rows, err := tx.QueryContext(ctx, query, plan.SourceID, plan.PrincipalID)
-			if err != nil {
-				return channeldelivery.Frozen{}, err
-			}
-			defer rows.Close()
-			for rows.Next() {
-				if prompt.DraftID != "" {
-					return channeldelivery.Frozen{}, fmt.Errorf("card has multiple active channel input drafts")
-				}
-				var expires any
-				if err := rows.Scan(&prompt.DraftID, &prompt.Verdict, &prompt.NextFieldIndex, &expires); err != nil {
-					return channeldelivery.Frozen{}, err
-				}
-				prompt.ExpiresAt, err = decodeActionTime(expires)
-				if err != nil {
-					return channeldelivery.Frozen{}, err
-				}
-			}
-			if err := rows.Err(); err != nil {
-				return channeldelivery.Frozen{}, err
-			}
-		}
-		frozen, err := channeldelivery.FreezeCard(card, revision, dispatch, audience, prompt)
-		if err != nil {
-			return channeldelivery.Frozen{}, err
-		}
-		return channeldelivery.WithPresentation(frozen, plan.Bounds, plan.ActionPageIndex)
+		return freezeCurrentCardTx(ctx, tx, plan, audience, postgres)
 	default:
 		return channeldelivery.Frozen{}, fmt.Errorf("unsupported channel render source %q", plan.SourceKind)
 	}
+}
+
+func freezeCurrentNoticeTx(ctx context.Context, tx *sql.Tx, plan Plan, audience channeldelivery.Audience, postgres bool) (channeldelivery.Frozen, error) {
+	query := `SELECT item_type, COALESCE(summary, ''), COALESCE(severity, 'normal'), COALESCE(notified, false),
+		COALESCE(payload, '{}'), COALESCE(from_agent, ''), COALESCE(entity_id, ''), COALESCE(flow_instance, '')
+		FROM mailbox WHERE item_id=?`
+	if postgres {
+		query = `SELECT item_type, COALESCE(summary, ''), COALESCE(severity, 'normal'), COALESCE(notified, false),
+			COALESCE(payload, '{}'), COALESCE(from_agent, ''), COALESCE(entity_id::text, ''), COALESCE(flow_instance, '')
+			FROM mailbox WHERE item_id=$1::uuid FOR UPDATE`
+	}
+	notice := channeldelivery.Notice{ID: plan.SourceID}
+	var payload any
+	if err := tx.QueryRowContext(ctx, query, plan.SourceID).Scan(&notice.Type, &notice.Summary,
+		&notice.Priority, &notice.Acknowledged, &payload, &notice.FromAgent, &notice.EntityID, &notice.FlowInstance); err != nil {
+		return channeldelivery.Frozen{}, fmt.Errorf("load exact channel notice: %w", err)
+	}
+	switch value := payload.(type) {
+	case string:
+		notice.Context = []byte(value)
+	case []byte:
+		notice.Context = value
+	default:
+		return channeldelivery.Frozen{}, fmt.Errorf("stored channel notice context has unsupported type %T", payload)
+	}
+	frozen, err := channeldelivery.FreezeNotice(notice, audience)
+	if err != nil {
+		return channeldelivery.Frozen{}, err
+	}
+	return channeldelivery.WithPresentation(frozen, plan.Bounds, plan.ActionPageIndex)
+}
+
+func freezeCurrentCardTx(ctx context.Context, tx *sql.Tx, plan Plan, audience channeldelivery.Audience, postgres bool) (channeldelivery.Frozen, error) {
+	card, err := decisionpersistence.LoadDecisionCardInTx(ctx, tx, plan.SourceID, postgres)
+	if err != nil {
+		return channeldelivery.Frozen{}, fmt.Errorf("load exact channel card: %w", err)
+	}
+	query := `SELECT COALESCE(MAX(change_id), 0) FROM decision_card_changes WHERE card_id=?`
+	if postgres {
+		query = `SELECT COALESCE(MAX(change_id), 0) FROM decision_card_changes WHERE card_id=$1::uuid`
+	}
+	var revision int64
+	if err := tx.QueryRowContext(ctx, query, plan.SourceID).Scan(&revision); err != nil {
+		return channeldelivery.Frozen{}, err
+	}
+	dispatch := ""
+	if card.Anchor.Kind() == decisioncard.AnchorKindProposedEffect {
+		readback, err := decisionpersistence.ProposedEffectReadbackInTx(ctx, tx, plan.SourceID, postgres)
+		if err != nil {
+			return channeldelivery.Frozen{}, fmt.Errorf("load exact card dispatch state: %w", err)
+		}
+		dispatch = readback.DispatchState
+	}
+	prompt, err := loadCurrentCardPromptTx(ctx, tx, plan, card, postgres)
+	if err != nil {
+		return channeldelivery.Frozen{}, err
+	}
+	frozen, err := channeldelivery.FreezeCard(card, revision, dispatch, audience, prompt)
+	if err != nil {
+		return channeldelivery.Frozen{}, err
+	}
+	return channeldelivery.WithPresentation(frozen, plan.Bounds, plan.ActionPageIndex)
+}
+
+func loadCurrentCardPromptTx(ctx context.Context, tx *sql.Tx, plan Plan, card decisioncard.Card, postgres bool) (channeldelivery.DraftPrompt, error) {
+	prompt := channeldelivery.DraftPrompt{}
+	if card.Status == decisioncard.StatusPending {
+		query := `SELECT input_draft_id, verdict, next_field_index, expires_at
+			FROM decision_card_input_drafts WHERE card_id=? AND principal_id=? AND status='active' LIMIT 2`
+		if postgres {
+			query = `SELECT input_draft_id::text, verdict, next_field_index, expires_at
+				FROM decision_card_input_drafts WHERE card_id=$1::uuid AND principal_id=$2 AND status='active' LIMIT 2`
+		}
+		rows, err := tx.QueryContext(ctx, query, plan.SourceID, plan.PrincipalID)
+		if err != nil {
+			return channeldelivery.DraftPrompt{}, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			if prompt.DraftID != "" {
+				return channeldelivery.DraftPrompt{}, fmt.Errorf("card has multiple active channel input drafts")
+			}
+			var expires any
+			if err := rows.Scan(&prompt.DraftID, &prompt.Verdict, &prompt.NextFieldIndex, &expires); err != nil {
+				return channeldelivery.DraftPrompt{}, err
+			}
+			prompt.ExpiresAt, err = decodeActionTime(expires)
+			if err != nil {
+				return channeldelivery.DraftPrompt{}, err
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return channeldelivery.DraftPrompt{}, err
+		}
+	}
+	return prompt, nil
 }
 
 func requireExactSourceRenderTx(ctx context.Context, tx *sql.Tx, plan Plan, frozen channeldelivery.Frozen, postgres bool) error {

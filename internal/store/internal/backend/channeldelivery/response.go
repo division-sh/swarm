@@ -245,6 +245,69 @@ func insertResponsePlanTx(ctx context.Context, tx *sql.Tx, frozen render.Frozen,
 	return deliveryID, nil
 }
 
+func freezeActionContinuationTx(ctx context.Context, tx *sql.Tx, action operatorchannel.InboundAction, resolved render.ResolvedAction, inboxText string, audience render.Audience, postgres bool) (render.Frozen, error) {
+	if inboxText != "" {
+		return render.Frozen{}, fmt.Errorf("view-full content cannot be supplied by the caller")
+	}
+	stored, current, loadErr := LoadRender(ctx, tx, resolved.RenderID, postgres)
+	if loadErr != nil {
+		return render.Frozen{}, loadErr
+	}
+	if !current || stored.Frozen.Hash != resolved.RenderHash {
+		return render.Frozen{}, fmt.Errorf("view-full action lacks its immutable render")
+	}
+	source, sourceRenderID, index := stored.Frozen, stored.RenderID, 0
+	if resolved.Action.Kind == "next_page" {
+		if source.Page == nil || source.Page.Index+1 >= source.Page.Count {
+			return render.Frozen{}, fmt.Errorf("next page action has no retained continuation")
+		}
+		sourceRenderID, index = source.Page.SourceRenderID, source.Page.Index+1
+		original, originalFound, originalErr := LoadRender(ctx, tx, sourceRenderID, postgres)
+		if originalErr != nil {
+			return render.Frozen{}, originalErr
+		}
+		if !originalFound || original.Frozen.Hash != source.Page.SourceRenderHash {
+			return render.Frozen{}, fmt.Errorf("next page original render changed")
+		}
+		source = original.Frozen
+	} else if source.Page != nil {
+		return render.Frozen{}, fmt.Errorf("view-full action cannot restart a continuation page")
+	}
+	if source.Audience != audience {
+		return render.Frozen{}, fmt.Errorf("view-full page audience changed")
+	}
+	return render.FreezeResponsePage(action.PublicationID, source, sourceRenderID, index, audience)
+}
+
+func freezeActionResponseTx(ctx context.Context, tx *sql.Tx, action operatorchannel.InboundAction, resolved render.ResolvedAction, inboxText string, audience render.Audience, postgres bool) (render.Frozen, error) {
+	var frozen render.Frozen
+	var err error
+	switch resolved.Action.Kind {
+	case "open_inbox":
+		if resolved.SourceKind != PlanSummary || inboxText == "" {
+			return render.Frozen{}, fmt.Errorf("open inbox requires a summary action and canonical list")
+		}
+		frozen, err = render.FreezeResponse(action.PublicationID, inboxText, audience)
+	case "view_full", "next_page":
+		frozen, err = freezeActionContinuationTx(ctx, tx, action, resolved, inboxText, audience, postgres)
+	case "select_draft":
+		if inboxText != "" {
+			return render.Frozen{}, fmt.Errorf("draft choice teaching cannot receive caller content")
+		}
+		if _, _, _, err = RequireChosenInputDraftTx(ctx, tx, action, time.Now().UTC(), true, postgres); err != nil {
+			return render.Frozen{}, err
+		}
+		frozen, err = render.FreezeResponse(action.PublicationID,
+			"That answer does not match the requested field. Reply with a value of the required type, or use the card controls.", audience)
+	default:
+		return render.Frozen{}, fmt.Errorf("unsupported channel navigation action %q", resolved.Action.Kind)
+	}
+	if err != nil {
+		return render.Frozen{}, err
+	}
+	return frozen, nil
+}
+
 // PlanActionResponseTx commits one requested navigation page and settles its
 // verified callback in the same selected-store transaction. View-full content
 // is derived only from the immutable source render referenced by the tap.
@@ -285,57 +348,7 @@ func PlanActionResponseTx(ctx context.Context, tx *sql.Tx, action operatorchanne
 		DeliveryEpoch: selected.DeliveryEpoch, ExternalAccountRef: action.ExternalAccountRef,
 		ConversationRef: action.ConversationRef, ConversationScope: action.ConversationScope,
 	}
-	var frozen render.Frozen
-	switch resolved.Action.Kind {
-	case "open_inbox":
-		if resolved.SourceKind != PlanSummary || inboxText == "" {
-			return "", fmt.Errorf("open inbox requires a summary action and canonical list")
-		}
-		frozen, err = render.FreezeResponse(action.PublicationID, inboxText, audience)
-	case "view_full", "next_page":
-		if inboxText != "" {
-			return "", fmt.Errorf("view-full content cannot be supplied by the caller")
-		}
-		stored, current, loadErr := LoadRender(ctx, tx, resolved.RenderID, postgres)
-		if loadErr != nil {
-			return "", loadErr
-		}
-		if !current || stored.Frozen.Hash != resolved.RenderHash {
-			return "", fmt.Errorf("view-full action lacks its immutable render")
-		}
-		source, sourceRenderID, index := stored.Frozen, stored.RenderID, 0
-		if resolved.Action.Kind == "next_page" {
-			if source.Page == nil || source.Page.Index+1 >= source.Page.Count {
-				return "", fmt.Errorf("next page action has no retained continuation")
-			}
-			sourceRenderID, index = source.Page.SourceRenderID, source.Page.Index+1
-			original, originalFound, originalErr := LoadRender(ctx, tx, sourceRenderID, postgres)
-			if originalErr != nil {
-				return "", originalErr
-			}
-			if !originalFound || original.Frozen.Hash != source.Page.SourceRenderHash {
-				return "", fmt.Errorf("next page original render changed")
-			}
-			source = original.Frozen
-		} else if source.Page != nil {
-			return "", fmt.Errorf("view-full action cannot restart a continuation page")
-		}
-		if source.Audience != audience {
-			return "", fmt.Errorf("view-full page audience changed")
-		}
-		frozen, err = render.FreezeResponsePage(action.PublicationID, source, sourceRenderID, index, audience)
-	case "select_draft":
-		if inboxText != "" {
-			return "", fmt.Errorf("draft choice teaching cannot receive caller content")
-		}
-		if _, _, _, err = RequireChosenInputDraftTx(ctx, tx, action, time.Now().UTC(), true, postgres); err != nil {
-			return "", err
-		}
-		frozen, err = render.FreezeResponse(action.PublicationID,
-			"That answer does not match the requested field. Reply with a value of the required type, or use the card controls.", audience)
-	default:
-		return "", fmt.Errorf("unsupported channel navigation action %q", resolved.Action.Kind)
-	}
+	frozen, err := freezeActionResponseTx(ctx, tx, action, resolved, inboxText, audience, postgres)
 	if err != nil {
 		return "", err
 	}

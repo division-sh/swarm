@@ -82,32 +82,44 @@ func projectChannelDeliverySettlementTx(ctx context.Context, tx *sql.Tx, settlem
 	if settlement.State != runtimeeffects.StateSettled && settlement.State != runtimeeffects.StateOutcomeUncertain {
 		return nil
 	}
+	state, providerReference, err := channelDeliveryReceiptReferenceTx(ctx, tx, settlement, postgres)
+	if err != nil {
+		return err
+	}
+	if err := persistChannelDeliveryReceiptTx(ctx, tx, settlement, postgres, state, providerReference); err != nil {
+		return err
+	}
+	return advanceChannelDeliveryPlanTx(ctx, tx, settlement, postgres, state)
+}
+
+func channelDeliveryReceiptReferenceTx(ctx context.Context, tx *sql.Tx, settlement runtimeeffects.Settlement, postgres bool) (string, any, error) {
+	authority := settlement.Authority.ChannelDelivery
 	state := "uncertain"
 	var providerReference any
 	if settlement.State == runtimeeffects.StateSettled {
 		value, ok := settlement.Evidence["projected_output"]
 		if !ok {
-			return fmt.Errorf("settled channel delivery has no compiled receipt")
+			return "", nil, fmt.Errorf("settled channel delivery has no compiled receipt")
 		}
 		raw, err := json.Marshal(value)
 		if err != nil {
-			return fmt.Errorf("encode channel delivery receipt: %w", err)
+			return "", nil, fmt.Errorf("encode channel delivery receipt: %w", err)
 		}
 		canonical, err := canonicaljson.Canonicalize(raw)
 		if err != nil {
-			return fmt.Errorf("canonicalize channel delivery receipt: %w", err)
+			return "", nil, fmt.Errorf("canonicalize channel delivery receipt: %w", err)
 		}
 		var object map[string]json.RawMessage
 		if err := json.Unmarshal(canonical, &object); err != nil || len(object) != 1 {
-			return fmt.Errorf("channel delivery receipt is not a nonempty object")
+			return "", nil, fmt.Errorf("channel delivery receipt is not a nonempty object")
 		}
 		if authority.PreviousReceiptOperationID == "" {
 			if len(object["delivery_reference"]) == 0 {
-				return fmt.Errorf("channel send receipt lacks delivery reference")
+				return "", nil, fmt.Errorf("channel send receipt lacks delivery reference")
 			}
 		} else {
 			if len(object["delivery_receipt"]) == 0 {
-				return fmt.Errorf("channel edit receipt lacks edit acknowledgment")
+				return "", nil, fmt.Errorf("channel edit receipt lacks edit acknowledgment")
 			}
 			previousQuery := `SELECT provider_reference FROM channel_delivery_receipts
 				WHERE effect_operation_id=? AND delivery_id=? AND state='sent'`
@@ -117,21 +129,26 @@ func projectChannelDeliverySettlementTx(ctx context.Context, tx *sql.Tx, settlem
 			}
 			var previousRaw []byte
 			if err := tx.QueryRowContext(ctx, previousQuery, authority.PreviousReceiptOperationID, authority.DeliveryID).Scan(&previousRaw); err != nil {
-				return fmt.Errorf("load exact channel edit predecessor: %w", err)
+				return "", nil, fmt.Errorf("load exact channel edit predecessor: %w", err)
 			}
 			var previous map[string]json.RawMessage
 			if err := json.Unmarshal(previousRaw, &previous); err != nil || len(previous["delivery_reference"]) == 0 {
-				return fmt.Errorf("channel edit predecessor lacks delivery reference")
+				return "", nil, fmt.Errorf("channel edit predecessor lacks delivery reference")
 			}
 			object["delivery_reference"] = previous["delivery_reference"]
 			canonical, err = canonicaljson.Bytes(object)
 			if err != nil {
-				return err
+				return "", nil, err
 			}
 		}
 		providerReference = string(canonical)
 		state = "sent"
 	}
+	return state, providerReference, nil
+}
+
+func persistChannelDeliveryReceiptTx(ctx context.Context, tx *sql.Tx, settlement runtimeeffects.Settlement, postgres bool, state string, providerReference any) error {
+	authority := settlement.Authority.ChannelDelivery
 	query := `INSERT INTO channel_delivery_receipts
 		(effect_operation_id, attempt_id, delivery_id, render_id, state, provider_reference, settled_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (effect_operation_id) DO NOTHING`
@@ -172,6 +189,14 @@ func projectChannelDeliverySettlementTx(ctx context.Context, tx *sql.Tx, settlem
 	} else if inserted != 1 {
 		return fmt.Errorf("channel delivery receipt insert affected %d rows", inserted)
 	}
+	return nil
+}
+
+func advanceChannelDeliveryPlanTx(ctx context.Context, tx *sql.Tx, settlement runtimeeffects.Settlement, postgres bool, state string) error {
+	authority := settlement.Authority.ChannelDelivery
+	var query string
+	var result sql.Result
+	var err error
 	if state == "sent" {
 		query = `UPDATE channel_delivery_plans SET current_receipt_operation_id=?,
 			state=CASE WHEN current_render_id=? THEN 'sent' ELSE 'rendered' END

@@ -67,231 +67,267 @@ func (p *Double) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	p.mu.Unlock()
 	switch {
 	case strings.HasSuffix(request.URL.Path, "/getMe"):
-		p.mu.Lock()
-		reject := p.rejectNextCredential
-		p.rejectNextCredential = false
-		resourceID := p.resourceIDs[credential]
-		p.mu.Unlock()
-		if reject {
-			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write([]byte(`{"ok":false,"error_code":401,"description":"Unauthorized"}`))
-			return
-		}
-		if resourceID == 0 {
-			resourceID = 420079
-		}
-		_, _ = fmt.Fprintf(w, `{"ok":true,"result":{"id":%d,"username":"SwarmTestBot"}}`, resourceID)
+		p.serveIdentity(w, request, credential)
 	case strings.HasSuffix(request.URL.Path, "/setMyCommands"):
-		var payload struct {
-			Scope        map[string]any   `json:"scope"`
-			LanguageCode string           `json:"language_code"`
-			Commands     []map[string]any `json:"commands"`
-		}
-		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		key, err := commandScopeKey(physical, payload.Scope, payload.LanguageCode)
-		if err != nil || len(payload.Commands) > 100 {
-			http.Error(w, "invalid command scope", http.StatusBadRequest)
-			return
-		}
-		p.mu.Lock()
-		barrier := p.commandApplyBarrier
-		p.commandApplyBarrier = nil
-		p.mu.Unlock()
-		if barrier != nil {
-			close(barrier.arrived)
-			<-barrier.release
-		}
-		p.mu.Lock()
-		if p.commands == nil {
-			p.commands = map[string][]map[string]any{}
-		}
-		p.commands[key] = payload.Commands
-		p.commandWrites = append(p.commandWrites, map[string]any{"scope": payload.Scope, "commands": payload.Commands, "language_code": payload.LanguageCode})
-		loseResponse := p.loseNextCommandWriteResponse
-		p.loseNextCommandWriteResponse = false
-		p.mu.Unlock()
-		if loseResponse {
-			hijacker, ok := w.(http.Hijacker)
-			if !ok {
-				http.Error(w, "provider response-loss injection requires HTTP hijacking", http.StatusInternalServerError)
-				return
-			}
-			connection, _, err := hijacker.Hijack()
-			if err == nil {
-				_ = connection.Close()
-			}
-			return
-		}
-		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+		p.serveCommandWrite(w, request, physical)
 	case strings.HasSuffix(request.URL.Path, "/getMyCommands"):
-		var payload struct {
-			Scope        map[string]any `json:"scope"`
-			LanguageCode string         `json:"language_code"`
-		}
-		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		key, err := commandScopeKey(physical, payload.Scope, payload.LanguageCode)
-		if err != nil {
-			http.Error(w, "invalid command scope", http.StatusBadRequest)
-			return
-		}
-		p.mu.Lock()
-		commands := append([]map[string]any(nil), p.commands[key]...)
-		p.commandReadbacks++
-		failReadback := p.failCommandReadbackAfterWrite && len(p.commandWrites) > 0
-		if failReadback {
-			p.commandReadbackFailures++
-		}
-		p.mu.Unlock()
-		if failReadback {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = w.Write([]byte(`{"ok":false,"description":"readback unavailable"}`))
-			return
-		}
-		if commands == nil {
-			commands = []map[string]any{}
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": commands})
+		p.serveCommandRead(w, request, physical)
 	case strings.HasSuffix(request.URL.Path, "/getChatMenuButton"):
-		var payload map[string]any
-		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		chat := ""
-		if raw, supplied := payload["chat_id"]; supplied {
-			chat = fmt.Sprint(raw)
-		}
-		p.mu.Lock()
-		launcher := p.launchers[physical+":"+chat]
-		p.mu.Unlock()
-		if launcher == "" {
-			launcher = "default"
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"type": launcher}})
+		p.serveLauncherRead(w, request, physical)
 	case strings.HasSuffix(request.URL.Path, "/setWebhook"):
-		var payload map[string]any
-		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		p.mu.Lock()
-		p.callbackURL = strings.TrimSpace(fmt.Sprint(payload["url"]))
-		p.signingSecret = strings.TrimSpace(fmt.Sprint(payload["secret_token"]))
-		if p.registrations == nil {
-			p.registrations = map[string]registration{}
-		}
-		p.registrations[physical] = registration{callbackURL: p.callbackURL, signingSecret: p.signingSecret}
-		p.registrationRequests = append(p.registrationRequests, clonePayload(payload))
-		loseResponse := p.loseNextRegistrationResponse
-		p.loseNextRegistrationResponse = false
-		barrier := p.registrationResponseBarrier
-		p.registrationResponseBarrier = nil
-		p.mu.Unlock()
-		if barrier != nil {
-			close(barrier.arrived)
-			<-barrier.release
-		}
-		if loseResponse {
-			hijacker, ok := w.(http.Hijacker)
-			if !ok {
-				http.Error(w, "provider response-loss injection requires HTTP hijacking", http.StatusInternalServerError)
-				return
-			}
-			connection, _, err := hijacker.Hijack()
-			if err == nil {
-				_ = connection.Close()
-			}
-			return
-		}
-		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+		p.serveRegistrationWrite(w, request, physical)
 	case strings.HasSuffix(request.URL.Path, "/getWebhookInfo"):
-		p.mu.Lock()
-		callbackURL := p.registrations[physical].callbackURL
-		p.mu.Unlock()
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"url": callbackURL}})
+		p.serveRegistrationRead(w, request, physical)
 	case strings.HasSuffix(request.URL.Path, "/sendMessage"):
-		var payload map[string]any
-		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		p.mu.Lock()
-		p.deliveries = append(p.deliveries, clonePayload(payload))
-		messageID := len(p.deliveries)
-		loseResponse := p.loseNextDeliveryResponse
-		p.loseNextDeliveryResponse = false
-		barrier := p.deliveryResponseBarrier
-		p.deliveryResponseBarrier = nil
-		p.mu.Unlock()
-		if barrier != nil {
-			close(barrier.arrived)
-			<-barrier.release
-		}
-		if loseResponse {
-			loseProviderResponse(w)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"message_id": messageID}})
+		p.serveDelivery(w, request)
 	case strings.HasSuffix(request.URL.Path, "/editMessageText"):
-		var payload map[string]any
-		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		messageID, ok := payload["message_id"].(float64)
-		p.mu.Lock()
-		if !ok || messageID < 1 || int(messageID) > len(p.deliveries) ||
-			payload["chat_id"] != p.deliveries[int(messageID)-1]["chat_id"] {
-			p.mu.Unlock()
-			w.WriteHeader(http.StatusBadRequest)
-			_, _ = w.Write([]byte(`{"ok":false,"description":"message not found"}`))
-			return
-		}
-		p.edits = append(p.edits, clonePayload(payload))
-		loseResponse := p.loseNextEditResponse
-		p.loseNextEditResponse = false
-		barrier := p.editResponseBarrier
-		p.editResponseBarrier = nil
-		p.mu.Unlock()
-		if barrier != nil {
-			close(barrier.arrived)
-			<-barrier.release
-		}
-		if loseResponse {
-			loseProviderResponse(w)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"message_id": int(messageID)}})
+		p.serveEdit(w, request)
 	case strings.HasSuffix(request.URL.Path, "/answerCallbackQuery"):
-		var payload map[string]any
-		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if payload["callback_query_id"] == nil {
-			w.WriteHeader(http.StatusBadRequest)
-			_, _ = w.Write([]byte(`{"ok":false,"description":"callback query required"}`))
-			return
-		}
-		p.mu.Lock()
-		p.acknowledgments = append(p.acknowledgments, clonePayload(payload))
-		loseResponse := p.loseNextAckResponse
-		p.loseNextAckResponse = false
-		p.mu.Unlock()
-		if loseResponse {
-			loseProviderResponse(w)
-			return
-		}
-		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+		p.serveAcknowledgment(w, request)
 	default:
 		http.Error(w, `{"ok":false}`, http.StatusNotFound)
 	}
+}
+
+func (p *Double) serveIdentity(w http.ResponseWriter, request *http.Request, credential string) {
+	p.mu.Lock()
+	reject := p.rejectNextCredential
+	p.rejectNextCredential = false
+	resourceID := p.resourceIDs[credential]
+	p.mu.Unlock()
+	if reject {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"ok":false,"error_code":401,"description":"Unauthorized"}`))
+		return
+	}
+	if resourceID == 0 {
+		resourceID = 420079
+	}
+	_, _ = fmt.Fprintf(w, `{"ok":true,"result":{"id":%d,"username":"SwarmTestBot"}}`, resourceID)
+}
+
+func (p *Double) serveCommandWrite(w http.ResponseWriter, request *http.Request, physical string) {
+	var payload struct {
+		Scope        map[string]any   `json:"scope"`
+		LanguageCode string           `json:"language_code"`
+		Commands     []map[string]any `json:"commands"`
+	}
+	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	key, err := commandScopeKey(physical, payload.Scope, payload.LanguageCode)
+	if err != nil || len(payload.Commands) > 100 {
+		http.Error(w, "invalid command scope", http.StatusBadRequest)
+		return
+	}
+	p.mu.Lock()
+	barrier := p.commandApplyBarrier
+	p.commandApplyBarrier = nil
+	p.mu.Unlock()
+	if barrier != nil {
+		close(barrier.arrived)
+		<-barrier.release
+	}
+	p.mu.Lock()
+	if p.commands == nil {
+		p.commands = map[string][]map[string]any{}
+	}
+	p.commands[key] = payload.Commands
+	p.commandWrites = append(p.commandWrites, map[string]any{"scope": payload.Scope, "commands": payload.Commands, "language_code": payload.LanguageCode})
+	loseResponse := p.loseNextCommandWriteResponse
+	p.loseNextCommandWriteResponse = false
+	p.mu.Unlock()
+	if loseResponse {
+		hijacker, ok := w.(http.Hijacker)
+		if !ok {
+			http.Error(w, "provider response-loss injection requires HTTP hijacking", http.StatusInternalServerError)
+			return
+		}
+		connection, _, err := hijacker.Hijack()
+		if err == nil {
+			_ = connection.Close()
+		}
+		return
+	}
+	_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+}
+
+func (p *Double) serveCommandRead(w http.ResponseWriter, request *http.Request, physical string) {
+	var payload struct {
+		Scope        map[string]any `json:"scope"`
+		LanguageCode string         `json:"language_code"`
+	}
+	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	key, err := commandScopeKey(physical, payload.Scope, payload.LanguageCode)
+	if err != nil {
+		http.Error(w, "invalid command scope", http.StatusBadRequest)
+		return
+	}
+	p.mu.Lock()
+	commands := append([]map[string]any(nil), p.commands[key]...)
+	p.commandReadbacks++
+	failReadback := p.failCommandReadbackAfterWrite && len(p.commandWrites) > 0
+	if failReadback {
+		p.commandReadbackFailures++
+	}
+	p.mu.Unlock()
+	if failReadback {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"ok":false,"description":"readback unavailable"}`))
+		return
+	}
+	if commands == nil {
+		commands = []map[string]any{}
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": commands})
+}
+
+func (p *Double) serveLauncherRead(w http.ResponseWriter, request *http.Request, physical string) {
+	var payload map[string]any
+	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	chat := ""
+	if raw, supplied := payload["chat_id"]; supplied {
+		chat = fmt.Sprint(raw)
+	}
+	p.mu.Lock()
+	launcher := p.launchers[physical+":"+chat]
+	p.mu.Unlock()
+	if launcher == "" {
+		launcher = "default"
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"type": launcher}})
+}
+
+func (p *Double) serveRegistrationWrite(w http.ResponseWriter, request *http.Request, physical string) {
+	var payload map[string]any
+	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	p.mu.Lock()
+	p.callbackURL = strings.TrimSpace(fmt.Sprint(payload["url"]))
+	p.signingSecret = strings.TrimSpace(fmt.Sprint(payload["secret_token"]))
+	if p.registrations == nil {
+		p.registrations = map[string]registration{}
+	}
+	p.registrations[physical] = registration{callbackURL: p.callbackURL, signingSecret: p.signingSecret}
+	p.registrationRequests = append(p.registrationRequests, clonePayload(payload))
+	loseResponse := p.loseNextRegistrationResponse
+	p.loseNextRegistrationResponse = false
+	barrier := p.registrationResponseBarrier
+	p.registrationResponseBarrier = nil
+	p.mu.Unlock()
+	if barrier != nil {
+		close(barrier.arrived)
+		<-barrier.release
+	}
+	if loseResponse {
+		hijacker, ok := w.(http.Hijacker)
+		if !ok {
+			http.Error(w, "provider response-loss injection requires HTTP hijacking", http.StatusInternalServerError)
+			return
+		}
+		connection, _, err := hijacker.Hijack()
+		if err == nil {
+			_ = connection.Close()
+		}
+		return
+	}
+	_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+}
+
+func (p *Double) serveRegistrationRead(w http.ResponseWriter, request *http.Request, physical string) {
+	p.mu.Lock()
+	callbackURL := p.registrations[physical].callbackURL
+	p.mu.Unlock()
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"url": callbackURL}})
+}
+
+func (p *Double) serveDelivery(w http.ResponseWriter, request *http.Request) {
+	var payload map[string]any
+	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	p.mu.Lock()
+	p.deliveries = append(p.deliveries, clonePayload(payload))
+	messageID := len(p.deliveries)
+	loseResponse := p.loseNextDeliveryResponse
+	p.loseNextDeliveryResponse = false
+	barrier := p.deliveryResponseBarrier
+	p.deliveryResponseBarrier = nil
+	p.mu.Unlock()
+	if barrier != nil {
+		close(barrier.arrived)
+		<-barrier.release
+	}
+	if loseResponse {
+		loseProviderResponse(w)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"message_id": messageID}})
+}
+
+func (p *Double) serveEdit(w http.ResponseWriter, request *http.Request) {
+	var payload map[string]any
+	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	messageID, ok := payload["message_id"].(float64)
+	p.mu.Lock()
+	if !ok || messageID < 1 || int(messageID) > len(p.deliveries) ||
+		payload["chat_id"] != p.deliveries[int(messageID)-1]["chat_id"] {
+		p.mu.Unlock()
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"ok":false,"description":"message not found"}`))
+		return
+	}
+	p.edits = append(p.edits, clonePayload(payload))
+	loseResponse := p.loseNextEditResponse
+	p.loseNextEditResponse = false
+	barrier := p.editResponseBarrier
+	p.editResponseBarrier = nil
+	p.mu.Unlock()
+	if barrier != nil {
+		close(barrier.arrived)
+		<-barrier.release
+	}
+	if loseResponse {
+		loseProviderResponse(w)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"message_id": int(messageID)}})
+}
+
+func (p *Double) serveAcknowledgment(w http.ResponseWriter, request *http.Request) {
+	var payload map[string]any
+	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if payload["callback_query_id"] == nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"ok":false,"description":"callback query required"}`))
+		return
+	}
+	p.mu.Lock()
+	p.acknowledgments = append(p.acknowledgments, clonePayload(payload))
+	loseResponse := p.loseNextAckResponse
+	p.loseNextAckResponse = false
+	p.mu.Unlock()
+	if loseResponse {
+		loseProviderResponse(w)
+		return
+	}
+	_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
 }
 
 func loseProviderResponse(w http.ResponseWriter) {

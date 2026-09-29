@@ -22,6 +22,64 @@ import (
 	runtimeregistration "github.com/division-sh/swarm/internal/runtime/registration"
 )
 
+func (d *serveChannelDeliveryDispatcher) qualifyNativeInboxActivation(ctx context.Context, activation channelonboarding.ConnectedChannelActivation, plan packs.OutboundBindingPlan, setting channelnative.Setting) error {
+	recordFailure := func(state channelnative.QualificationState, cause error) error {
+		return errors.Join(cause, d.recordNativeQualification(context.WithoutCancel(ctx), activation, setting, state, cause.Error(), packs.NativeInboxReadback{}))
+	}
+	profile, err := plan.NativeInboxProfile()
+	if err != nil {
+		return recordFailure(channelnative.QualificationInvalid, err)
+	}
+	if setting.ClientLanguage == "" {
+		return recordFailure(channelnative.QualificationMissing, fmt.Errorf("native inbox requires an explicit client-language declaration; use swarm channel resume %s --client-language en or fr", activation.OperationID))
+	}
+	if err := profile.ValidateLanguage(setting.ClientLanguage); err != nil {
+		return recordFailure(channelnative.QualificationInvalid, err)
+	}
+	if setting.State == "uncertain" || setting.State == "unavailable" {
+		return recordFailure(channelnative.QualificationInvalid, fmt.Errorf("native inbox setting is %s and needs administrative recovery", setting.State))
+	}
+	if _, err := d.readNativeInboxAddress(ctx, plan, activation.CredentialAdmissions); err != nil {
+		return recordFailure(channelnative.QualificationInvalid, fmt.Errorf("native inbox bot address is unavailable: %w", err))
+	}
+	readback, err := d.readNativeInboxQualification(ctx, plan, activation.CredentialAdmissions, setting, profile)
+	if err != nil {
+		return recordFailure(channelnative.QualificationInvalid, err)
+	}
+	desired, err := channelnative.DesiredCommands(setting.SettingID, setting.Generation)
+	if err != nil {
+		return err
+	}
+	if setting.State == "installed" || setting.State == "retired" {
+		if err := profile.Qualify(setting.ClientLanguage, readback, desired); err != nil {
+			return recordFailure(channelnative.QualificationInvalid, err)
+		}
+		return d.recordNativeQualification(ctx, activation, setting, channelnative.QualificationQualified, "", readback)
+	}
+	if setting.State != "planned" {
+		return fmt.Errorf("native inbox setting has unknown state %q", setting.State)
+	}
+	if !bytes.Equal(readback.FallbackCommands, []byte("[]")) {
+		return recordFailure(channelnative.QualificationInvalid, fmt.Errorf("native inbox provider fallback is already occupied; foreign settings are never overwritten"))
+	}
+	prospective := readback
+	prospective.FallbackCommands = desired
+	if err := profile.Qualify(setting.ClientLanguage, prospective, desired); err != nil {
+		return recordFailure(channelnative.QualificationInvalid, err)
+	}
+	if err := d.installNativeInboxCommands(ctx, activation, plan, setting); err != nil {
+		return recordFailure(channelnative.QualificationInvalid, err)
+	}
+	readback, err = d.readNativeInboxQualification(ctx, plan, activation.CredentialAdmissions, setting, profile)
+	if err != nil {
+		return recordFailure(channelnative.QualificationInvalid, err)
+	}
+	if err := profile.Qualify(setting.ClientLanguage, readback, desired); err != nil {
+		return recordFailure(channelnative.QualificationInvalid, err)
+	}
+	return d.recordNativeQualification(ctx, activation, setting, channelnative.QualificationQualified, "", readback)
+}
+
 func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxSettings(ctx context.Context) error {
 	if d == nil || d.native == nil || d.activations == nil || d.manager == nil || d.ingress == nil ||
 		d.effects == nil || d.credentials == nil || !d.posture.Valid() || d.runtimeInstanceID == "" || d.now == nil {
@@ -75,6 +133,10 @@ func (d *serveChannelDeliveryDispatcher) resolveNativeInboxEntry(ctx context.Con
 		selected.Provider != text.Provider || selected.ConversationRef != text.ConversationRef {
 		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryRejected, nil
 	}
+	return d.qualifyResolvedNativeEntry(ctx, text, entry, selected)
+}
+
+func (d *serveChannelDeliveryDispatcher) qualifyResolvedNativeEntry(ctx context.Context, text operatorchannel.InboundText, entry runtimechanneldelivery.ResolvedNativeEntry, selected channelonboarding.ConnectedChannelActivation) (runtimechanneldelivery.ResolvedNativeEntry, runtimechanneldelivery.NativeEntryDisposition, error) {
 	registration, current := d.ingress.ChannelRegistrationCurrent(ctx, d.now().UTC(),
 		channelonboarding.LearnedBindingID(selected.SlotKey), selected.TargetSelector, selected.Provider)
 	if !current || !registration.Current {
@@ -174,61 +236,7 @@ func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxActivation(ctx cont
 	if err != nil {
 		return err
 	}
-	recordFailure := func(state channelnative.QualificationState, cause error) error {
-		return errors.Join(cause, d.recordNativeQualification(context.WithoutCancel(ctx), activation, setting, state, cause.Error(), packs.NativeInboxReadback{}))
-	}
-	profile, err := compiled.Plan.NativeInboxProfile()
-	if err != nil {
-		return recordFailure(channelnative.QualificationInvalid, err)
-	}
-	if setting.ClientLanguage == "" {
-		return recordFailure(channelnative.QualificationMissing, fmt.Errorf("native inbox requires an explicit client-language declaration; use swarm channel resume %s --client-language en or fr", activation.OperationID))
-	}
-	if err := profile.ValidateLanguage(setting.ClientLanguage); err != nil {
-		return recordFailure(channelnative.QualificationInvalid, err)
-	}
-	if setting.State == "uncertain" || setting.State == "unavailable" {
-		return recordFailure(channelnative.QualificationInvalid, fmt.Errorf("native inbox setting is %s and needs administrative recovery", setting.State))
-	}
-	if _, err := d.readNativeInboxAddress(ctx, compiled.Plan, activation.CredentialAdmissions); err != nil {
-		return recordFailure(channelnative.QualificationInvalid, fmt.Errorf("native inbox bot address is unavailable: %w", err))
-	}
-	readback, err := d.readNativeInboxQualification(ctx, compiled.Plan, activation.CredentialAdmissions, setting, profile)
-	if err != nil {
-		return recordFailure(channelnative.QualificationInvalid, err)
-	}
-	desired, err := channelnative.DesiredCommands(setting.SettingID, setting.Generation)
-	if err != nil {
-		return err
-	}
-	if setting.State == "installed" || setting.State == "retired" {
-		if err := profile.Qualify(setting.ClientLanguage, readback, desired); err != nil {
-			return recordFailure(channelnative.QualificationInvalid, err)
-		}
-		return d.recordNativeQualification(ctx, activation, setting, channelnative.QualificationQualified, "", readback)
-	}
-	if setting.State != "planned" {
-		return fmt.Errorf("native inbox setting has unknown state %q", setting.State)
-	}
-	if !bytes.Equal(readback.FallbackCommands, []byte("[]")) {
-		return recordFailure(channelnative.QualificationInvalid, fmt.Errorf("native inbox provider fallback is already occupied; foreign settings are never overwritten"))
-	}
-	prospective := readback
-	prospective.FallbackCommands = desired
-	if err := profile.Qualify(setting.ClientLanguage, prospective, desired); err != nil {
-		return recordFailure(channelnative.QualificationInvalid, err)
-	}
-	if err := d.installNativeInboxCommands(ctx, activation, compiled.Plan, setting); err != nil {
-		return recordFailure(channelnative.QualificationInvalid, err)
-	}
-	readback, err = d.readNativeInboxQualification(ctx, compiled.Plan, activation.CredentialAdmissions, setting, profile)
-	if err != nil {
-		return recordFailure(channelnative.QualificationInvalid, err)
-	}
-	if err := profile.Qualify(setting.ClientLanguage, readback, desired); err != nil {
-		return recordFailure(channelnative.QualificationInvalid, err)
-	}
-	return d.recordNativeQualification(ctx, activation, setting, channelnative.QualificationQualified, "", readback)
+	return d.qualifyNativeInboxActivation(ctx, activation, compiled.Plan, setting)
 }
 
 func (d *serveChannelDeliveryDispatcher) recordNativeQualification(ctx context.Context, activation channelonboarding.ConnectedChannelActivation,
