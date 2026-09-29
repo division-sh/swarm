@@ -14,13 +14,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission channelnative.Admission, postgres bool) (channelnative.Setting, error) {
-	if tx == nil {
-		return channelnative.Setting{}, fmt.Errorf("native inbox setting requires selected transaction")
-	}
-	if err := admission.Validate(); err != nil {
-		return channelnative.Setting{}, err
-	}
+func admitNativeSettingScopeTx(ctx context.Context, tx *sql.Tx, admission channelnative.Admission, postgres bool) (channelnative.Setting, error) {
 	query := `SELECT a.provider, a.principal_id, a.interface_key, a.binding_revision,
 		a.activation_revision, a.context_publication_generation, a.channel_pack_id,
 		a.channel_pack_version, a.channel_manifest_hash, a.conversation_reference,
@@ -78,9 +72,6 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 	if accountReference == "" {
 		return channelnative.Setting{}, fmt.Errorf("native inbox binding has no verified account")
 	}
-	if err := retireStaleNativeInboxConsumersTx(ctx, tx, postgres); err != nil {
-		return channelnative.Setting{}, err
-	}
 	setting := channelnative.Setting{
 		Provider: admission.Provider, ResourceSlotID: admission.ResourceSlotID,
 		ConversationRef: admission.ConversationReference, ScopeKind: scopeKind, MemberReference: memberReference,
@@ -88,7 +79,24 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 		PrincipalID:       admission.PrincipalID,
 		ClientLanguage:    clientLanguage, ClientLocaleRevision: localeRevision,
 	}
-	query = `SELECT setting_id, principal_id, pack_id, pack_version, pack_manifest_hash,
+	return setting, nil
+}
+
+func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission channelnative.Admission, postgres bool) (channelnative.Setting, error) {
+	if tx == nil {
+		return channelnative.Setting{}, fmt.Errorf("native inbox setting requires selected transaction")
+	}
+	if err := admission.Validate(); err != nil {
+		return channelnative.Setting{}, err
+	}
+	setting, err := admitNativeSettingScopeTx(ctx, tx, admission, postgres)
+	if err != nil {
+		return channelnative.Setting{}, err
+	}
+	if err := retireStaleNativeInboxConsumersTx(ctx, tx, postgres); err != nil {
+		return channelnative.Setting{}, err
+	}
+	query := `SELECT setting_id, principal_id, pack_id, pack_version, pack_manifest_hash,
 		entry_contract_hash, entry_command, desired_commands, generation, state, COALESCE(install_operation_id, ''), readback_hash
 		FROM channel_native_settings WHERE provider=? AND resource_slot_id=? AND conversation_reference=?
 		AND scope_kind=? AND member_reference=? AND language_code=''`
@@ -101,7 +109,7 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 	var existingPrincipal, existingPack, existingVersion, existingHash, contract, existingCommand string
 	var raw []byte
 	var readbackHash sql.NullString
-	err = tx.QueryRowContext(ctx, query, admission.Provider, admission.ResourceSlotID, admission.ConversationReference, scopeKind, memberReference).
+	err = tx.QueryRowContext(ctx, query, admission.Provider, admission.ResourceSlotID, admission.ConversationReference, setting.ScopeKind, setting.MemberReference).
 		Scan(&setting.SettingID, &existingPrincipal, &existingPack, &existingVersion, &existingHash,
 			&contract, &existingCommand, &raw, &setting.Generation, &setting.State, &setting.InstallOperationID, &readbackHash)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -132,7 +140,7 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 		}
 		now := time.Now().UTC()
 		if _, err := tx.ExecContext(ctx, query, setting.SettingID, admission.Provider, admission.ResourceSlotID,
-			admission.ConversationReference, scopeKind, memberReference, admission.PackID, admission.PackVersion, admission.PackManifestHash,
+			admission.ConversationReference, setting.ScopeKind, setting.MemberReference, admission.PackID, admission.PackVersion, admission.PackManifestHash,
 			admission.EntryContractHash, setting.EntryCommand, string(desired), admission.PrincipalID, setting.InstallOperationID, now, now); err != nil {
 			return channelnative.Setting{}, fmt.Errorf("create physical native inbox setting: %w", err)
 		}
@@ -172,47 +180,10 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 			if unresolved || setting.State == "uncertain" || setting.State == "unavailable" {
 				return channelnative.Setting{}, fmt.Errorf("native inbox setting has unresolved or foreign provider state")
 			}
-			count, err := currentNativeConsumersTx(ctx, tx, setting.SettingID, postgres)
+			setting, err = advanceNativeSettingGenerationTx(ctx, tx, admission, setting, postgres)
 			if err != nil {
 				return channelnative.Setting{}, err
 			}
-			if count != 0 {
-				return channelnative.Setting{}, fmt.Errorf("incompatible native inbox setting has current consumers")
-			}
-			nextOperationID, err := channelnative.InstallOperationID(setting.SettingID, setting.Generation+1)
-			if err != nil {
-				return channelnative.Setting{}, err
-			}
-			nextCommand, err := channelnative.EntryCommand(setting.SettingID, setting.Generation+1)
-			if err != nil {
-				return channelnative.Setting{}, err
-			}
-			nextDesired, err := channelnative.DesiredCommands(setting.SettingID, setting.Generation+1)
-			if err != nil {
-				return channelnative.Setting{}, err
-			}
-			query = `UPDATE channel_native_settings SET principal_id=?, pack_id=?, pack_version=?,
-				pack_manifest_hash=?, entry_contract_hash=?, entry_command=?, desired_commands=?, generation=generation+1,
-				state='planned', install_operation_id=?, readback_hash=NULL, updated_at=?
-				WHERE setting_id=? AND state <> 'uncertain'`
-			if postgres {
-				query = `UPDATE channel_native_settings SET principal_id=$1::uuid, pack_id=$2, pack_version=$3,
-					pack_manifest_hash=$4, entry_contract_hash=$5, entry_command=$6, desired_commands=$7::jsonb, generation=generation+1,
-					state='planned', install_operation_id=$8::uuid, readback_hash=NULL, updated_at=$9
-					WHERE setting_id=$10::uuid AND state <> 'uncertain'`
-			}
-			result, err := tx.ExecContext(ctx, query, admission.PrincipalID, admission.PackID, admission.PackVersion,
-				admission.PackManifestHash, admission.EntryContractHash, nextCommand, string(nextDesired), nextOperationID, time.Now().UTC(), setting.SettingID)
-			if err != nil {
-				return channelnative.Setting{}, err
-			}
-			if rows, err := result.RowsAffected(); err != nil || rows != 1 {
-				return channelnative.Setting{}, fmt.Errorf("native inbox setting generation did not advance: %w", err)
-			}
-			setting.Generation++
-			setting.State = "planned"
-			setting.InstallOperationID = nextOperationID
-			setting.EntryCommand = nextCommand
 		}
 	}
 	// Handoff history may survive, but an independent current connection may not
@@ -256,6 +227,51 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 	}
 	setting.CurrentConsumerCount, err = currentNativeConsumersTx(ctx, tx, setting.SettingID, postgres)
 	return setting, err
+}
+
+func advanceNativeSettingGenerationTx(ctx context.Context, tx *sql.Tx, admission channelnative.Admission, setting channelnative.Setting, postgres bool) (channelnative.Setting, error) {
+	count, err := currentNativeConsumersTx(ctx, tx, setting.SettingID, postgres)
+	if err != nil {
+		return channelnative.Setting{}, err
+	}
+	if count != 0 {
+		return channelnative.Setting{}, fmt.Errorf("incompatible native inbox setting has current consumers")
+	}
+	nextOperationID, err := channelnative.InstallOperationID(setting.SettingID, setting.Generation+1)
+	if err != nil {
+		return channelnative.Setting{}, err
+	}
+	nextCommand, err := channelnative.EntryCommand(setting.SettingID, setting.Generation+1)
+	if err != nil {
+		return channelnative.Setting{}, err
+	}
+	nextDesired, err := channelnative.DesiredCommands(setting.SettingID, setting.Generation+1)
+	if err != nil {
+		return channelnative.Setting{}, err
+	}
+	query := `UPDATE channel_native_settings SET principal_id=?, pack_id=?, pack_version=?,
+		pack_manifest_hash=?, entry_contract_hash=?, entry_command=?, desired_commands=?, generation=generation+1,
+		state='planned', install_operation_id=?, readback_hash=NULL, updated_at=?
+		WHERE setting_id=? AND state <> 'uncertain'`
+	if postgres {
+		query = `UPDATE channel_native_settings SET principal_id=$1::uuid, pack_id=$2, pack_version=$3,
+			pack_manifest_hash=$4, entry_contract_hash=$5, entry_command=$6, desired_commands=$7::jsonb, generation=generation+1,
+			state='planned', install_operation_id=$8::uuid, readback_hash=NULL, updated_at=$9
+			WHERE setting_id=$10::uuid AND state <> 'uncertain'`
+	}
+	result, err := tx.ExecContext(ctx, query, admission.PrincipalID, admission.PackID, admission.PackVersion,
+		admission.PackManifestHash, admission.EntryContractHash, nextCommand, string(nextDesired), nextOperationID, time.Now().UTC(), setting.SettingID)
+	if err != nil {
+		return channelnative.Setting{}, err
+	}
+	if rows, err := result.RowsAffected(); err != nil || rows != 1 {
+		return channelnative.Setting{}, fmt.Errorf("native inbox setting generation did not advance: %w", err)
+	}
+	setting.Generation++
+	setting.State = "planned"
+	setting.InstallOperationID = nextOperationID
+	setting.EntryCommand = nextCommand
+	return setting, nil
 }
 
 func nativeSettingHasUnresolvedWriteTx(ctx context.Context, tx *sql.Tx, operationID string, postgres bool) (bool, error) {

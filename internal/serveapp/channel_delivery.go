@@ -266,6 +266,29 @@ func (d *serveChannelDeliveryDispatcher) processNoticeAction(ctx context.Context
 	return err
 }
 
+func (d *serveChannelDeliveryDispatcher) currentChannelActionActivation(ctx context.Context, pending runtimechanneldelivery.PendingAction, resolved runtimechanneldelivery.ResolvedAction) (channelonboarding.ConnectedChannelActivation, error) {
+	activations, err := d.activations.ListCurrentConnectedChannelActivations(ctx)
+	if err != nil {
+		return channelonboarding.ConnectedChannelActivation{}, err
+	}
+	var selected channelonboarding.ConnectedChannelActivation
+	for _, activation := range activations {
+		if activation.ActivationID == resolved.ActivationID {
+			if selected.ActivationID != "" {
+				return channelonboarding.ConnectedChannelActivation{}, fmt.Errorf("channel callback activation identity is duplicated")
+			}
+			selected = activation
+		}
+	}
+	if selected.ActivationID == "" || selected.Revision != resolved.ActivationRevision ||
+		selected.BindingRevision != resolved.BindingRevision || selected.PrincipalID != resolved.PrincipalID ||
+		selected.Provider != pending.Fact.Provider || selected.Interface.Key() != pending.Fact.Interface.Key() ||
+		selected.ConversationRef != pending.Fact.ConversationRef {
+		return channelonboarding.ConnectedChannelActivation{}, fmt.Errorf("channel callback activation contradicts verified fact")
+	}
+	return selected, nil
+}
+
 func (d *serveChannelDeliveryDispatcher) acknowledgeChannelAction(ctx context.Context, pending runtimechanneldelivery.PendingAction, resolved runtimechanneldelivery.ResolvedAction) error {
 	if d == nil || d.activations == nil || d.manager == nil || d.effects == nil || d.credentials == nil || d.now == nil || !d.posture.Valid() {
 		return fmt.Errorf("channel callback acknowledgment owners are unavailable")
@@ -286,24 +309,9 @@ func (d *serveChannelDeliveryDispatcher) acknowledgeChannelAction(ctx context.Co
 		}
 		return nil
 	}
-	activations, err := d.activations.ListCurrentConnectedChannelActivations(ctx)
+	selected, err := d.currentChannelActionActivation(ctx, pending, resolved)
 	if err != nil {
 		return err
-	}
-	var selected channelonboarding.ConnectedChannelActivation
-	for _, activation := range activations {
-		if activation.ActivationID == resolved.ActivationID {
-			if selected.ActivationID != "" {
-				return fmt.Errorf("channel callback activation identity is duplicated")
-			}
-			selected = activation
-		}
-	}
-	if selected.ActivationID == "" || selected.Revision != resolved.ActivationRevision ||
-		selected.BindingRevision != resolved.BindingRevision || selected.PrincipalID != resolved.PrincipalID ||
-		selected.Provider != pending.Fact.Provider || selected.Interface.Key() != pending.Fact.Interface.Key() ||
-		selected.ConversationRef != pending.Fact.ConversationRef {
-		return fmt.Errorf("channel callback activation contradicts verified fact")
 	}
 	lease, current, err := d.manager.AcquireChannelActivationPublication(selected.Coordinate.BundleHash, selected.Coordinate.ContextPublicationGeneration)
 	if err != nil {
@@ -466,11 +474,7 @@ func (d *serveChannelDeliveryDispatcher) selectedPresentationBounds(ctx context.
 	return plan.PresentationBounds()
 }
 
-func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, candidate runtimechanneldelivery.Candidate, prepared runtimechanneldelivery.PreparedRender, operation string, previousReference any) error {
-	if d == nil || d.store == nil || d.activations == nil || d.manager == nil || d.effects == nil || d.credentials == nil ||
-		!d.posture.Valid() || strings.TrimSpace(d.runtimeInstanceID) == "" || d.now == nil {
-		return fmt.Errorf("channel delivery dispatcher is incomplete")
-	}
+func validateChannelDispatch(candidate runtimechanneldelivery.Candidate, prepared runtimechanneldelivery.PreparedRender, operation string, previousReference any) error {
 	if (operation != "deliver" && operation != "edit") ||
 		(operation == "deliver" && (candidate.CurrentReceiptID != "" || previousReference != nil)) ||
 		(operation == "edit" && (candidate.CurrentReceiptID == "" || previousReference == nil)) ||
@@ -479,6 +483,17 @@ func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, ca
 		candidate.SourceID != prepared.Frozen.SourceID || candidate.SourceKind != prepared.Frozen.SourceKind ||
 		candidate.Audience != prepared.Frozen.Audience {
 		return fmt.Errorf("channel delivery candidate and render are not exact-current")
+	}
+	return nil
+}
+
+func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, candidate runtimechanneldelivery.Candidate, prepared runtimechanneldelivery.PreparedRender, operation string, previousReference any) error {
+	if d == nil || d.store == nil || d.activations == nil || d.manager == nil || d.effects == nil || d.credentials == nil ||
+		!d.posture.Valid() || strings.TrimSpace(d.runtimeInstanceID) == "" || d.now == nil {
+		return fmt.Errorf("channel delivery dispatcher is incomplete")
+	}
+	if err := validateChannelDispatch(candidate, prepared, operation, previousReference); err != nil {
+		return err
 	}
 	selected, plan, release, err := d.currentCompiledDelivery(ctx, candidate)
 	if err != nil {
