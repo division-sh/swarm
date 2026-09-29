@@ -180,12 +180,7 @@ func (r *ClaudeCLIRuntime) runUntilCLIStartupInit(ctx context.Context, args []st
 	go func() { stdoutCh <- readCLIStartupInit(stdout) }()
 	go func() { stderrCh <- readStreamLines(stderr, nil, true) }()
 
-	result := <-stdoutCh
-	if result.found {
-		cancel()
-	}
-	waitErr := cmd.Wait()
-	stderrLines := <-stderrCh
+	result, stderrLines, waitErr := joinCLIStartupProbeReaders(stdoutCh, stderrCh, cancel, cmd.Wait)
 
 	if result.err != nil {
 		return nil, result.err
@@ -219,6 +214,15 @@ func (r *ClaudeCLIRuntime) runUntilCLIStartupInit(ctx context.Context, args []st
 	failure := runtimefailures.New(runtimefailures.ClassConnectorFailure, "claude_cli_startup_surface_missing", "claude-cli-adapter", "startup_probe", nil)
 	_ = handle.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "claude_cli_startup_outcome_uncertain", "claude-cli-adapter", "startup_probe", nil, failure)
 	return nil, failure
+}
+
+func joinCLIStartupProbeReaders(stdoutCh <-chan cliStartupProbeResult, stderrCh <-chan [][]byte, cancel context.CancelFunc, wait func() error) (cliStartupProbeResult, [][]byte, error) {
+	result := <-stdoutCh
+	if result.found {
+		cancel()
+	}
+	stderrLines := <-stderrCh
+	return result, stderrLines, wait()
 }
 
 func failStartupProbePrelaunch(ctx context.Context, handle *runtimeeffects.Handle, err error) {

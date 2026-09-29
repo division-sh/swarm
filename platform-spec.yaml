@@ -22802,7 +22802,10 @@ cli_specification:
         For agent-present `cli_test` managed agents, startup validation MUST execute the Claude
         CLI/container startup probe for every managed agent before accepting MCP-only
         `tools/list` or optional `tools/call` gateway proof. Provider-native builtin surfaces
-        still additionally compare the provider-visible native tool list. Agent-free `cli_test`
+        still additionally compare the provider-visible native tool list. Startup probe stdout
+        and stderr readers MUST finish before command wait can close their pipes; terminal
+        authentication and connector failures consume the joined reader output. Observing
+        provider init cancels the probe process before joining its readers. Agent-free `cli_test`
         boot remains governed by #993 and MUST NOT require LLM/gateway startup credentials.
       split_tail:
       - '#997 local cli_test workspace image contents/default-agent Claude CLI availability is closed by cli_specification.foundations.local_cli_test_workspace_cli_availability.'
