@@ -146,7 +146,7 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 		predecessorCallback, predecessorSigning, _ := provider.Registration()
 		provider.SetResourceID("replacement-bot-token", 420080)
 		command := startChannelOnboardingCLICommand(t, opts.ConfigPath, endpoint, []string{
-			"channel", "rebind", "telegram", "--yes", "--credential-stdin",
+			"channel", "rebind", "telegram", "--yes", "--client-language", "en", "--credential-stdin",
 		}, "replacement-bot-token\n")
 		challenge := waitChannelOnboardingChallenge(t, command.stdout, command.stderr, command.done)
 		successorCallback, successorSigning := waitChannelOnboardingRegistrationForCredential(t, provider, "replacement-bot-token", 2, command)
