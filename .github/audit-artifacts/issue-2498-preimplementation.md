@@ -2,7 +2,7 @@
 
 Issue: #2498, agent-g. Parent: #2407 R1.1.
 Baseline: `origin/master@21bff28c8f582b3d515c420ad299f963822504ec`.
-Phase: corpus and bounded readback gates approved; implementation permitted, not runtime or corpus closure. Independent corpus gate: [approved](https://github.com/division-sh/swarm/issues/2498#issuecomment-5901252923). Independent readback gate: [approved](https://github.com/division-sh/swarm/issues/2498#issuecomment-5901655130). Integration baseline: `origin/master@4fccc57ec73ce54827167dddc5bbafac41ae66d2`; the earlier baseline below remains the reproduction record.
+Phase: corpus and bounded readback gates approved; implementation now frozen at the paused-restart contract stop described in `issue-2498-paused-restart-stop.md`. No runtime or corpus closure. Independent corpus gate: [approved](https://github.com/division-sh/swarm/issues/2498#issuecomment-5901252923). Independent readback gate: [approved](https://github.com/division-sh/swarm/issues/2498#issuecomment-5901655130). Integration baseline: `origin/master@4fccc57ec73ce54827167dddc5bbafac41ae66d2`; the earlier baseline below remains the reproduction record.
 
 ## Approved production-readback amendment (recorded before production edits)
 
@@ -46,6 +46,8 @@ Supported-surface proof above is mandatory, followed by the original 23-row/U1-U
 - All 23 rows and U1-U5 remain mandatory on both stores. Unreachable or nondiscriminating mutations, unsupported source grammar, another production interpreter or a required runtime repair require a new ruling. Approval is permission to implement, not R1 or merge closure; #2407 stays open.
 
 ## Implementation stop: deployment-feed public readback
+
+Historical stop, superseded by the bounded gate and production amendment above. The candidate now passes focused origin/key/schema/mixed-page proofs and real enriched API/compiled CLI deployment readback on both stores. The subsequent paused-restart refusal is a distinct contract checkpoint, not another readback failure; see the new stop artifact. No complete corpus/full-suite closure is credited.
 
 On 2026-09-30 the approved first feasibility probe reached real compiled CLI feed-only creation and acknowledged public pause on SQLite and PostgreSQL, but `run.fan_out.list` returned JSON-RPC `-32603` on both stores. Therefore M05/M09/M12's required public feed observation is blocked. This is not evidence of a settled restart, an unreachable pump checkpoint, or a recovery defect: no crash/restart proof has been credited yet.
 
@@ -145,7 +147,7 @@ Golden companion path: verified exact source -> same H readiness/auth -> public 
 
 ## 4. Canonical-owner and systematic-consumption census
 
-All owners below are real semantic or proof owners, not just the first local helper found. This is a test change: no production owner is replaced or reimplemented. `already consumes` is code-census status, not an assertion that every row has been execution-proven during this pre-audit.
+All owners below are real semantic or proof owners, not just the first local helper found. The original corpus census below is supplemented by the approved production-readback consumer table above; its bundle/wire/page projections are now in scope. `already consumes` is code-census status, not an assertion that every row has been execution-proven during this pre-audit.
 
 | Owner | Every currently known relevant consumer family / seam | Disposition and planned touch |
 |---|---|---|
