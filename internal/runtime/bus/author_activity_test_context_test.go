@@ -98,7 +98,7 @@ func (o *testFlowInstanceActivationOwner) PrepareFlowInstanceActivation(_ contex
 	}
 	if strings.TrimSpace(req.InitialState) == "" {
 		if schema, ok := req.ContractBundle.FlowSchemaByID(req.Instance.TemplateID); ok {
-			req.InitialState = schema.InitialState
+			req.InitialState = schema.LoweredInitialState()
 		}
 	}
 	readiness := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
