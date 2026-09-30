@@ -246,10 +246,6 @@ func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, bac
 	if transcript != nil {
 		requireCatalogTranscriptIdentity(t, fixtureRoot, bundle, transcript)
 	}
-	var rootSchema struct {
-		InitialState string `yaml:"initial_state"`
-	}
-	loadContractYAML(t, filepath.Join(fixtureRoot, "schema.yaml"), &rootSchema)
 	module, err := newFixtureWorkflowModule(bundle)
 	if err != nil {
 		t.Fatalf("newFixtureWorkflowModule: %v", err)
@@ -361,7 +357,7 @@ func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, bac
 		workflow:        rt.Pipeline,
 		llm:             llmRuntime,
 		bundle:          bundle,
-		initialState:    rootSchema.LoweredInitialState(),
+		initialState:    bundle.WorkflowInitialStage(),
 		startedAt:       startedAt,
 		publishedIDs:    map[string]struct{}{},
 		publishedOrder:  []string{},
