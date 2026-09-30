@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
 
@@ -21,6 +22,7 @@ const numericScatterSource = "tests/tier11-flow-composition/test-numeric-data-sc
 // Establish the approved observable interruption boundary before giving the
 // larger corpus any recovery credit. No private runtime hooks stop the pump.
 func TestGoldenNumericDataScatterParkRestartBothStores(t *testing.T) {
+	canonicalrouting.Prove(t, canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-numeric-data-scatter-park"))
 	dsn := strings.TrimSpace(os.Getenv(goldenPostgresEnv))
 	if dsn == "" {
 		t.Fatalf("%s is required for both-store numeric recovery proof", goldenPostgresEnv)

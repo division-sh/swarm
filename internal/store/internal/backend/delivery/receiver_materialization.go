@@ -152,7 +152,7 @@ func (a *Adapter) receiverMaterialized(ctx context.Context, tx *sql.Tx, route ev
 func (a *Adapter) continuationWithMaterialization(ctx context.Context, q queryer, record deliveryRecord, now time.Time) (deliverylifecycle.ClaimDisposition, deliverylifecycle.ContinuationWake, error) {
 	disposition := continuationDisposition(record, now)
 	wake := continuationWake(record, disposition, now)
-	if disposition != deliverylifecycle.ClaimTerminal && disposition != deliverylifecycle.ClaimInvariantInvalid {
+	if record.Authority.Kind() == deliverylifecycle.ExecutionAuthorityNormalRuntime && disposition != deliverylifecycle.ClaimTerminal && disposition != deliverylifecycle.ClaimInvariantInvalid {
 		parked, err := runstate.DispatchParked(ctx, q, a.dialect == DialectPostgres, record.RunID)
 		if err != nil {
 			return deliverylifecycle.ClaimInvariantInvalid, deliverylifecycle.ContinuationWake{}, err
