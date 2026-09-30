@@ -465,13 +465,14 @@ func startDeploymentProgressProbe(t *testing.T, f *deploymentResourceFixture, ru
 			 (SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status='pending'),
 			 (SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status='in_progress'),
 			 (SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status='delivered'),
-			 (SELECT COUNT(*) FROM runs r LEFT JOIN run_control_state c ON c.run_id=r.run_id WHERE r.run_id=$1 AND (r.status<>'running' OR COALESCE(c.control_status,'running')<>'running')),
+			 (SELECT COUNT(*) FROM runs r LEFT JOIN run_control_state c ON c.run_id=r.run_id WHERE r.run_id=$1 AND (r.status<>'running' OR COALESCE(c.control_status,'') NOT IN ('','running'))),
 			 (SELECT COUNT(*) FROM standing_services WHERE current_run_id=$1)`, runID).Scan(&pending, &inProgress, &delivered, &paused, &standing)
 			t.Logf("guard diagnostic trajectory elapsed=%s cursor=%d pending=%d in_progress=%d delivered=%d not_running=%d standing=%d err=%v", time.Since(started), cursor, pending, inProgress, delivered, paused, standing, err)
 			if err == nil && (paused != 0 || standing != 0) {
 				t.Errorf("diagnostic workload is not ordinary unpaused work")
 			}
 			logGuardAttribution(t, f, "periodic")
+			logHostedFanOutEnvironment(t, "periodic")
 			blockingRows, blockingErr := db.QueryContext(sampleCtx, `SELECT w.pid, b.pid, COALESCE(w.wait_event,''), EXTRACT(EPOCH FROM clock_timestamp()-w.xact_start)::float8, EXTRACT(EPOCH FROM clock_timestamp()-b.xact_start)::float8, LEFT(w.query,700), LEFT(b.query,700)
 			 FROM pg_stat_activity w CROSS JOIN LATERAL unnest(pg_blocking_pids(w.pid)) p(pid)
 			 JOIN pg_stat_activity b ON b.pid=p.pid WHERE w.datname=current_database() ORDER BY w.pid,b.pid`)
@@ -597,8 +598,10 @@ func logDeploymentResourceFailure(t *testing.T, db *sql.DB, runID string) {
 }
 
 func TestVolumeFanOutExactJobflow1362ImportRouteAndSettleBothStores(t *testing.T) {
+	defer beginHostedFanOutPhase(t)()
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
+			defer beginHostedFanOutPhase(t)()
 			f := newDeploymentResourceFixtureWithAgent(t, backend, false)
 			f.diagnosticTransactions = storetest.CollectTransactions(t, f.selected, storetest.TransactionProbeOptions{})
 			defer logGuardAttribution(t, f, "final")
@@ -615,7 +618,7 @@ func TestVolumeFanOutExactJobflow1362ImportRouteAndSettleBothStores(t *testing.T
 			runID := startDeploymentResourceRun(t, f, server, "--data", "portfolio/account.registered="+file)
 			var runState, control string
 			var standing int
-			if err := f.db.QueryRowContext(f.ctx, `SELECT r.status, COALESCE(c.control_status,'running'), (SELECT COUNT(*) FROM standing_services WHERE current_run_id=r.run_id) FROM runs r LEFT JOIN run_control_state c ON c.run_id=r.run_id WHERE r.run_id=$1`, runID).Scan(&runState, &control, &standing); err != nil || runState != "running" || control != "running" || standing != 0 {
+			if err := f.db.QueryRowContext(f.ctx, `SELECT r.status, COALESCE(c.control_status,''), (SELECT COUNT(*) FROM standing_services WHERE current_run_id=r.run_id) FROM runs r LEFT JOIN run_control_state c ON c.run_id=r.run_id WHERE r.run_id=$1`, runID).Scan(&runState, &control, &standing); err != nil || runState != "running" || (control != "" && control != "running") || standing != 0 {
 				t.Fatalf("diagnostic workload must be ordinary unpaused work: status=%s control=%s standing=%d err=%v", runState, control, standing, err)
 			}
 			assertDeploymentResourceRows(t, f, server, runID, compiled)
@@ -634,13 +637,7 @@ func logGuardAttribution(t *testing.T, f *deploymentResourceFixture, phase strin
 	if f.diagnosticTransactions == nil {
 		return
 	}
-	snapshot := f.diagnosticTransactions.Snapshot()
-	encoded, err := json.Marshal(map[string]any{"phase": phase, "guard": storetest.GuardDiagnosticSnapshot(), "transactions": snapshot.ByOperation, "total": snapshot.Total, "active": snapshot.Active})
-	if err != nil {
-		t.Errorf("encode attribution: %v", err)
-		return
-	}
-	t.Logf("guard diagnostic metrics %s", encoded)
+	logHostedFanOutTransactions(t, f.diagnosticTransactions, phase)
 }
 
 func TestDeploymentResourceRunStartPinDocumentRowsBothStores(t *testing.T) {

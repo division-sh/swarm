@@ -17,6 +17,7 @@ type GuardDiagnosticCounts struct {
 
 type guardDiagnosticAttempt struct {
 	site    string
+	phase   string
 	started time.Time
 	counts  GuardDiagnosticCounts
 }
@@ -25,6 +26,7 @@ type guardDiagnosticKey struct{}
 
 var guardDiagnostics = struct {
 	sync.Mutex
+	phase  string
 	counts map[string]GuardDiagnosticCounts
 }{counts: make(map[string]GuardDiagnosticCounts)}
 
@@ -42,13 +44,17 @@ func BeginGuardDiagnostic(ctx context.Context) (context.Context, func()) {
 			break
 		}
 	}
-	a := &guardDiagnosticAttempt{site: strings.Join(sites, " <- "), started: time.Now()}
+	guardDiagnostics.Lock()
+	phase := guardDiagnostics.phase
+	guardDiagnostics.Unlock()
+	a := &guardDiagnosticAttempt{site: strings.Join(sites, " <- "), phase: phase, started: time.Now()}
 	return context.WithValue(ctx, guardDiagnosticKey{}, a), func() {
 		a.counts.Calls = 1
 		a.counts.Wall = time.Since(a.started)
 		guardDiagnostics.Lock()
 		defer guardDiagnostics.Unlock()
-		c := guardDiagnostics.counts[a.site]
+		key := a.phase + " | " + a.site
+		c := guardDiagnostics.counts[key]
 		c.Calls++
 		c.Wall += a.counts.Wall
 		c.RunSQL += a.counts.RunSQL
@@ -58,7 +64,7 @@ func BeginGuardDiagnostic(ctx context.Context) (context.Context, func()) {
 		if a.counts.Wall > c.Maximum {
 			c.Maximum = a.counts.Wall
 		}
-		guardDiagnostics.counts[a.site] = c
+		guardDiagnostics.counts[key] = c
 	}
 }
 
@@ -81,7 +87,21 @@ func GuardDiagnosticSnapshot() map[string]GuardDiagnosticCounts {
 	defer guardDiagnostics.Unlock()
 	result := make(map[string]GuardDiagnosticCounts, len(guardDiagnostics.counts))
 	for site, counts := range guardDiagnostics.counts {
-		result[site] = counts
+		if strings.HasPrefix(site, guardDiagnostics.phase+" | ") {
+			result[site] = counts
+		}
 	}
 	return result
+}
+
+func SetGuardDiagnosticPhase(phase string) func() {
+	guardDiagnostics.Lock()
+	previous := guardDiagnostics.phase
+	guardDiagnostics.phase = phase
+	guardDiagnostics.Unlock()
+	return func() {
+		guardDiagnostics.Lock()
+		guardDiagnostics.phase = previous
+		guardDiagnostics.Unlock()
+	}
 }

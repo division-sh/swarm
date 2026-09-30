@@ -11,6 +11,7 @@ import (
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	authoractivityadapter "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity/readadapter"
+	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
 type Dialect string
@@ -115,7 +116,11 @@ func (m *Mutation) Finalize(ctx context.Context) error {
 	return nil
 }
 
-func (m *Mutation) lock(ctx context.Context) error {
+func (m *Mutation) lock(ctx context.Context) (err error) {
+	started := time.Now()
+	defer func() {
+		transactiontest.RecordActivityOrderLock(ctx, started, time.Now(), err == nil)
+	}()
 	switch m.dialect {
 	case DialectPostgres:
 		const lockOrder = `SELECT last_sequence FROM author_activity_order WHERE singleton_id = 1 FOR UPDATE`

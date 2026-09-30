@@ -5,16 +5,22 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestVolumeFanOutServingCardinalityMixedOutputPartitionEquivalenceBothStores(t *testing.T) {
+	defer beginHostedFanOutPhase(t)()
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			// The existing reporter test owns N500. These are the missing boundary
 			// and partition comparisons, not another copy of that workload.
 			for _, count := range []int{0, 1, 31, 32, 33, 64} {
 				t.Run(fmt.Sprintf("N%d", count), func(t *testing.T) {
+					defer beginHostedFanOutPhase(t)()
 					f := newSemanticProofFixture(t, backend, true)
+					collector := storetest.CollectTransactions(t, f.selected, storetest.TransactionProbeOptions{})
+					defer logHostedFanOutTransactions(t, collector, "final")
 					rows := semanticProofRows(count)
 					rejected := map[int]bool{}
 					for _, ordinal := range []int{1, 31, 32} {
@@ -91,6 +97,7 @@ func TestVolumeFanOutServingCardinalityMixedOutputPartitionEquivalenceBothStores
 						if cursor != count {
 							t.Fatalf("N%d limit%d prefix ledger=%d attempts=%+v", count, limit, cursor, attempts)
 						}
+						logHostedFanOutTransactions(t, collector, fmt.Sprintf("cap%d", limit))
 					}
 				})
 			}

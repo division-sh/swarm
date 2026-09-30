@@ -1,4 +1,5 @@
 name: CI
+# Disposable #2503 attribution only. Do not merge this workflow branch.
 
 on:
   push:
@@ -21,6 +22,7 @@ concurrency:
 
 jobs:
   complexity:
+    if: false
     name: Exact-snapshot complexity ratchet
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -148,8 +150,8 @@ jobs:
             -markdown test-results/proof-plan.md \
             "${profile_args[@]}"
 
-          echo "proof_matrix=$(jq -c --slurpfile plan test-results/proof-plan.json '{include: [.include[] | .unit as $id | select($plan[0].units[] | select(.id == $id) | .budget_class != "soak")]}' test-results/proof-matrix.json)" >> "$GITHUB_OUTPUT"
-          echo "soak_matrix=$(jq -c --slurpfile plan test-results/proof-plan.json '{include: [.include[] | .unit as $id | select($plan[0].units[] | select(.id == $id) | .budget_class == "soak")]}' test-results/proof-matrix.json)" >> "$GITHUB_OUTPUT"
+          echo "proof_matrix=$(jq -c '{include: [.include[] | select(.unit == "conformance-heavy-fanout")]}' test-results/proof-matrix.json)" >> "$GITHUB_OUTPUT"
+          echo 'soak_matrix={"include":[]}' >> "$GITHUB_OUTPUT"
           echo "profile=$(jq -r .profile test-results/proof-plan.json)" >> "$GITHUB_OUTPUT"
           echo "plan_digest=$(jq -r .digest test-results/proof-plan.json)" >> "$GITHUB_OUTPUT"
           echo "execution_sha=$execution_sha" >> "$GITHUB_OUTPUT"
@@ -175,6 +177,7 @@ jobs:
         run: go test ./internal/runtime/conformance -run '^TestCanonicalFormsRegistryRatchetsOffOwnerDecodeBypasses$' -count=1
 
   static-checks:
+    if: false
     name: Static checks
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -203,6 +206,7 @@ jobs:
         run: go vet ./...
 
   sqlite-local-dev:
+    if: false
     name: ${{ github.event_name == 'workflow_dispatch' && 'Full dispatch SQLite smoke' || 'SQLite local smoke' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -226,6 +230,7 @@ jobs:
             --api-port 18091
 
   macos-sqlite-possession:
+    if: false
     name: macOS SQLite possession
     runs-on: macos-latest
     timeout-minutes: 15
@@ -406,6 +411,7 @@ jobs:
           if-no-files-found: error
 
   semantic-smoke:
+    if: false
     name: Semantic smoke proofs
     runs-on: ubuntu-latest
     timeout-minutes: 12
@@ -461,7 +467,7 @@ jobs:
 
   timing-budget:
     name: CI timing budget
-    if: always()
+    if: false
     needs: [ci-plan, proof-unit, mandatory-soak]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -537,7 +543,7 @@ jobs:
 
   required-tests:
     name: ${{ github.event_name == 'workflow_dispatch' && 'Full dispatch summary' || 'Required test summary' }}
-    if: always()
+    if: false
     needs: [complexity, ci-plan, static-checks, sqlite-local-dev, macos-sqlite-possession, proof-unit, mandatory-soak, semantic-smoke, timing-budget]
     runs-on: ubuntu-latest
     timeout-minutes: 5

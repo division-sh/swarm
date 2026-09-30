@@ -149,6 +149,7 @@ func (s *Slot) Install(options Options) (*Collector, func(), error) {
 }
 
 type Attempt struct {
+	activityOrderAcquired                                   time.Time
 	collector                                               *Collector
 	operation                                               atomic.Value
 	readOnly, retained                                      bool
@@ -293,6 +294,13 @@ func (a *Attempt) Finish(finalErr error) {
 	a.revisionMu.Unlock()
 	a.mutationMu.Lock()
 	mutation := a.mutation
+	if !a.activityOrderAcquired.IsZero() {
+		end := a.committedAt
+		if end.IsZero() {
+			end = time.Now()
+		}
+		mutation.ActivityOrderHold = end.Sub(a.activityOrderAcquired)
+	}
 	a.mutationMu.Unlock()
 	add := func(counts Counts) Counts {
 		counts.Revision.add(revision)

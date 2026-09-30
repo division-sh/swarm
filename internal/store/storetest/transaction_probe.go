@@ -18,6 +18,7 @@ type TransactionActiveClass = transactiontest.ActiveClass
 type TransactionActivePhase = transactiontest.ActivePhase
 
 var GuardDiagnosticSnapshot = transactiontest.GuardDiagnosticSnapshot
+var SetGuardDiagnosticPhase = transactiontest.SetGuardDiagnosticPhase
 
 const (
 	DelayAllCommits                         = transactiontest.DelayAllCommits
