@@ -256,9 +256,11 @@ func EffectiveSystemNodeSubscriptions(node SystemNodeContract) []string {
 	}
 	for _, handler := range node.EventHandlers {
 		if handler.Join != nil {
-			appendSubscription("platform.join_timeout")
+			if handler.Join.Deadline != nil {
+				appendSubscription("platform.join_timeout")
+			}
 			appendSubscription("platform.join_complete")
-			break
+			appendSubscription(handler.Join.Until)
 		}
 	}
 	sort.Strings(out)
@@ -310,7 +312,7 @@ func DefaultSystemNodeHandlerSourceEvent(handler SystemNodeEventHandler, trigger
 	if handler.Join != nil {
 		join := *handler.Join
 		join.OnComplete.DataAccumulation = defaultWorkflowDataAccumulationSourceEvent(join.OnComplete.DataAccumulation, triggerEvent)
-		join.Timeout.Outcome.DataAccumulation = defaultWorkflowDataAccumulationSourceEvent(join.Timeout.Outcome.DataAccumulation, triggerEvent)
+		join.OnDeadline.DataAccumulation = defaultWorkflowDataAccumulationSourceEvent(join.OnDeadline.DataAccumulation, triggerEvent)
 		handler.Join = &join
 	}
 	return handler

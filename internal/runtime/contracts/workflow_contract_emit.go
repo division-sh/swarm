@@ -69,9 +69,9 @@ func HandlerDeclarativeEmitSites(handler SystemNodeEventHandler, plans []FanOutC
 	}
 	if handler.Join != nil {
 		completeRef, _ := handler.Join.OnComplete.DeclarationIdentity()
-		timeoutRef, _ := handler.Join.Timeout.Outcome.DeclarationIdentity()
+		deadlineRef, _ := handler.Join.OnDeadline.DeclarationIdentity()
 		add("handler.join.on_complete.emit", "handler.join.on_complete.emit", handler.Join.EffectiveID(), completeRef, 0, handler.Join.OnComplete.Emit)
-		add("handler.join.timeout.emit", "handler.join.timeout.emit", handler.Join.EffectiveID(), timeoutRef, 0, handler.Join.Timeout.Outcome.Emit)
+		add("handler.join.on_deadline.emit", "handler.join.on_deadline.emit", handler.Join.EffectiveID(), deadlineRef, 0, handler.Join.OnDeadline.Emit)
 	}
 	for _, plan := range plans {
 		site := HandlerDeclarativeEmitSite{Spec: cloneEmitSpec(plan.Emit), ItemAlias: plan.ItemAlias, RuleIndex: plan.Site.Index}
@@ -321,11 +321,11 @@ func rejectEventlessEmitSpecs(handler SystemNodeEventHandler) error {
 		if err := requireRuleEmitEvents("join.on_complete", 0, handler.Join.OnComplete); err != nil {
 			return err
 		}
-		if err := requireRuleEmitEvents("join.timeout", 0, handler.Join.Timeout.Outcome); err != nil {
+		if err := requireRuleEmitEvents("join.on_deadline", 0, handler.Join.OnDeadline); err != nil {
 			return err
 		}
 	}
-	return nil
+	return ValidateJoinClosedOutcomeScope(handler)
 }
 
 func requireRuleEmitEvents(scope string, idx int, rule HandlerRuleEntry) error {

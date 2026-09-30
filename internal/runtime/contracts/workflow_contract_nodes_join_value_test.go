@@ -42,7 +42,7 @@ func TestProjectNodeJoinValueRejectsArrivalFieldsInFanOutMode(t *testing.T) {
 
 func TestW4DeliveryJoinForbiddenFieldPresence(t *testing.T) {
 	const base = "id: delivered\nmembers: {from_fan_out: true}\non_complete: {emit: batch.completed}\n"
-	for _, field := range []string{"stage", "window", "output", "complete_when", "remaining", "timeout", "members.from", "members.by"} {
+	for _, field := range []string{"stage", "window", "output", "complete_when", "remaining", "timeout", "deadline", "on_deadline", "until", "members.from", "members.by", "members.count"} {
 		t.Run(field, func(t *testing.T) {
 			for _, shape := range nodePresenceShapes("waiting", "[waiting]", "{from: entity.batch, by: payload.batch}") {
 				t.Run(shape.name, func(t *testing.T) {
@@ -69,12 +69,12 @@ func TestW4DeliveryJoinForbiddenFieldPresence(t *testing.T) {
 	}
 }
 
-func TestW4ArrivalJoinNullTimeoutRemainsOmitted(t *testing.T) {
+func TestW4ArrivalJoinAllowsOmittedDeadline(t *testing.T) {
 	var join JoinSpec
-	if err := decodeNodeTestYAML([]byte("stage: awaiting\nmembers: {from: entity.ids, by: payload.id}\ntimeout: null\n"), &join); err != nil {
+	if err := decodeNodeTestYAML([]byte("stage: awaiting\nmembers: {from: state.ids, by: payload.id}\noutput: payload.result\non_complete: {advances_to: done}\n"), &join); err != nil {
 		t.Fatal(err)
 	}
-	if join.Mode() != WorkflowJoinModeArrival || join.TimeoutFound || !join.timeoutFound || join.Members.By != "payload.id" || !join.Members.BySet {
-		t.Fatalf("arrival mode/null timeout meaning changed: %#v", join)
+	if join.Mode() != WorkflowJoinModeArrival || join.Deadline != nil || join.Members.By != "payload.id" || !join.Members.BySet {
+		t.Fatalf("arrival membership/optional deadline meaning changed: %#v", join)
 	}
 }

@@ -52,6 +52,9 @@ func insertFanOutIntentSQL(ctx context.Context, tx *sql.Tx, postgres bool, _ *st
 	if request.OriginKind() != fanoutobligation.OriginHandler {
 		return fmt.Errorf("handler intent writer requires handler origin")
 	}
+	if err := request.Validate(); err != nil {
+		return err
+	}
 	persistedSource, err := bindFanOutSourceTx(ctx, tx, postgres, facts, request, stateFields, triggerEventID, createdAt)
 	if err != nil {
 		return err
@@ -137,6 +140,12 @@ func bindFanOutSourceTx(
 	triggerEventID string,
 	createdAt time.Time,
 ) (fanoutobligation.SourceRef, error) {
+	if err := request.Validate(); err != nil {
+		return fanoutobligation.SourceRef{}, err
+	}
+	if triggerEventID != request.Capsule.Lineage.ParentEventID {
+		return fanoutobligation.SourceRef{}, fmt.Errorf("fan-out source binding requires its exact triggering event")
+	}
 	source := request.Source
 	switch source.Kind {
 	case fanoutobligation.SourceEventPayloadField:
@@ -147,12 +156,15 @@ func bindFanOutSourceTx(
 		if event.RunID() != request.Key.RunID {
 			return fanoutobligation.SourceRef{}, fmt.Errorf("fan-out payload source run disagrees with originating intent")
 		}
-		if err := requireFanOutCollectionCardinality(event.Payload(), source.Field, request.Cardinality); err != nil {
+		if err := requireFanOutCollectionCardinality(event.Payload(), request); err != nil {
 			return fanoutobligation.SourceRef{}, err
 		}
 	case fanoutobligation.SourceEntityField:
 		if source.RunID != request.Key.RunID {
 			return fanoutobligation.SourceRef{}, fmt.Errorf("fan-out entity source run disagrees with originating intent")
+		}
+		if _, err := canonicaljson.Decode(stateFields); err != nil {
+			return fanoutobligation.SourceRef{}, fmt.Errorf("admit fan-out entity source state: %w", err)
 		}
 		var fields map[string]any
 		if err := canonicaljson.DecodePreservingNumberLexemes(stateFields, &fields); err != nil {
@@ -162,9 +174,8 @@ func bindFanOutSourceTx(
 		if !ok {
 			return fanoutobligation.SourceRef{}, fmt.Errorf("fan-out entity source field %s is absent after handler mutation", source.Field)
 		}
-		items, ok := value.([]any)
-		if !ok || len(items) != request.Cardinality {
-			return fanoutobligation.SourceRef{}, fmt.Errorf("fan-out entity source cardinality changed before persistence: got %d items, want %d", len(items), request.Cardinality)
+		if _, err := request.ProjectSource(value); err != nil {
+			return fanoutobligation.SourceRef{}, fmt.Errorf("fan-out entity source changed before persistence: %w", err)
 		}
 		mutationID, err := insertFanOutEntitySourceRevisionTx(ctx, tx, postgres, facts, request.Key.RunID, source.EntityID, source.Field, value, triggerEventID, createdAt)
 		if err != nil {
@@ -180,20 +191,20 @@ func bindFanOutSourceTx(
 	return source, nil
 }
 
-func requireFanOutCollectionCardinality(raw []byte, field string, cardinality int) error {
+func requireFanOutCollectionCardinality(raw []byte, request fanoutobligation.IntentRequest) error {
+	if _, err := canonicaljson.Decode(raw); err != nil {
+		return fmt.Errorf("admit fan-out payload source: %w", err)
+	}
 	var payload map[string]any
-	if err := json.Unmarshal(raw, &payload); err != nil {
+	if err := canonicaljson.DecodePreservingNumberLexemes(raw, &payload); err != nil {
 		return fmt.Errorf("decode fan-out payload source: %w", err)
 	}
-	value, ok := payload[strings.TrimSpace(field)]
+	value, ok := payload[request.Source.Field]
 	if !ok {
-		return fmt.Errorf("fan-out payload source field %s is absent from persisted event", strings.TrimSpace(field))
+		return fmt.Errorf("fan-out payload source field %s is absent from persisted event", request.Source.Field)
 	}
-	items, ok := value.([]any)
-	if !ok || len(items) != cardinality {
-		return fmt.Errorf("fan-out payload source cardinality disagrees with persisted event: got %d items, want %d", len(items), cardinality)
-	}
-	return nil
+	_, err := request.ProjectSource(value)
+	return err
 }
 
 func insertFanOutEntitySourceRevisionTx(

@@ -133,7 +133,7 @@ func workflowJoinDeclarationRef(source semanticview.Source, node runtimeidentity
 	var err error
 	switch plan.Mode {
 	case runtimecontracts.WorkflowJoinModeArrival:
-		ref, err = timeridentity.NewJoinRef(plan.Node, handlerEvent, handler.Join.Stage, handler.Join.EffectiveID(), "")
+		ref, err = timeridentity.NewJoinRef(plan.Node, handlerEvent, handler.Join.Stage, handler.Join.EffectiveID())
 	case runtimecontracts.WorkflowJoinModeFanOutDelivery:
 		fanOutDeclaration, identityErr := plan.FanOut.FanOut.ElementRef.DeclarationIdentity()
 		if identityErr != nil {

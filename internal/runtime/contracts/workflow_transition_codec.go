@@ -30,9 +30,9 @@ func (t CompiledTransition) Validate() error {
 				return fmt.Errorf("compiled transition requires known loop operation")
 			}
 		}
-		if e.AdvanceCarrier == HandlerAdvanceCarrierJoinTimeout {
+		if e.AdvanceCarrier == HandlerAdvanceCarrierJoinOnDeadline {
 			if e.TimerID == "" || e.EventType != "platform.join_timeout" || !e.Timed {
-				return fmt.Errorf("compiled join timeout requires exact protocol/timer identity")
+				return fmt.Errorf("compiled join deadline requires exact protocol/timer identity")
 			}
 		} else if e.EventType != e.HandlerEvent || e.TimerID != "" || e.After != "" || e.Timed {
 			return fmt.Errorf("compiled handler event/timer identity contradicts carrier")
@@ -47,7 +47,7 @@ func (t CompiledTransition) Validate() error {
 				if e.RuleRef.Valid() {
 					return fmt.Errorf("handler advance cannot own a rule reference")
 				}
-			case HandlerAdvanceCarrierRules, HandlerAdvanceCarrierOnComplete, HandlerAdvanceCarrierJoinOnComplete, HandlerAdvanceCarrierJoinTimeout:
+			case HandlerAdvanceCarrierRules, HandlerAdvanceCarrierOnComplete, HandlerAdvanceCarrierJoinOnComplete, HandlerAdvanceCarrierJoinOnDeadline:
 				if !e.RuleRef.Valid() || e.RuleRef.Flow().String() != flow.String() || e.RuleRef.Family() != "handler_rule" {
 					return fmt.Errorf("rule advance requires exact qualified rule")
 				}

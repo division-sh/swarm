@@ -137,7 +137,6 @@ type ValueExpressionOptions struct {
 	AllowBareItem    bool
 	ItemAlias        string
 	AllowJoin        bool
-	JoinOnly         bool
 	RequireBool      bool
 	JoinResultType   runtimecontracts.CatalogTypeReference
 	JoinContext      JoinContext
@@ -165,6 +164,7 @@ type JoinContext uint8
 const (
 	JoinContextArrival JoinContext = iota
 	JoinContextFanOutDelivery
+	JoinContextCountArrival
 )
 
 func ValidateValueExpression(expression string) error {
@@ -202,7 +202,7 @@ func prepareCheckedValueExpression(expression string, opts ValueExpressionOption
 		return nil, nil, fmt.Errorf("fan_out.index is only available inside fan_out.emit fields")
 	}
 	if !opts.AllowJoin && ExpressionReferencesRoot(expression, "join") {
-		return nil, nil, fmt.Errorf("join.* is only available inside join completion and timeout outcomes")
+		return nil, nil, fmt.Errorf("join.* is only available inside join completion and deadline outcomes")
 	}
 	if err := ValidateEventReferences(expression); err != nil {
 		return nil, nil, err
@@ -283,6 +283,9 @@ func validateJoinAccesses(compiled *cel.Ast, context JoinContext) error {
 		allowed["dispositions"] = struct{}{}
 	} else {
 		for _, field := range joinruntime.SupportedContextFields() {
+			if context == JoinContextCountArrival && field == "missing" {
+				continue
+			}
 			allowed[field] = struct{}{}
 		}
 	}
@@ -342,23 +345,6 @@ func validateJoinAccesses(compiled *cel.Ast, context JoinContext) error {
 
 func EvalValueExpression(expression string, ctx ValueContext) (any, error) {
 	return EvalValueExpressionWithOptions(expression, ctx, ValueExpressionOptions{})
-}
-
-func EvalJoinBool(expression string, join map[string]any, resultType runtimecontracts.CatalogTypeReference) (bool, error) {
-	value, err := EvalValueExpressionWithOptions(expression, ValueContext{Join: join}, ValueExpressionOptions{
-		AllowJoin:      true,
-		RequireBool:    true,
-		JoinResultType: resultType,
-		JoinOnly:       true,
-	})
-	if err != nil {
-		return false, err
-	}
-	result, ok := value.(bool)
-	if !ok {
-		return false, fmt.Errorf("workflow join expression returned non-bool %T", value)
-	}
-	return result, nil
 }
 
 func EvalValueExpressionWithOptions(expression string, ctx ValueContext, opts ValueExpressionOptions) (any, error) {

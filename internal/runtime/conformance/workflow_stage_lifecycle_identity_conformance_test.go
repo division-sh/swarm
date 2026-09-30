@@ -14,10 +14,10 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -92,7 +93,8 @@ func TestSingletonStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBacken
 				RunID: activation.RunID,
 				Route: runtimeflowidentity.RouteForInstancePath(activation.FlowInstance),
 			}
-			assertStageLifecycleInstanceIdentity(t, runCtx, runtime.Pipeline, flowIdentity, activation.EntityID, "collecting", "active")
+			instance := assertStageLifecycleInstanceIdentity(t, runCtx, runtime.Pipeline, flowIdentity, activation.EntityID, "collecting", "active")
+			assertStageLifecycleEntryIdentity(t, instance, flowIdentity, "construction", "", "")
 
 			memberA := uuid.NewString()
 			memberB := uuid.NewString()
@@ -101,8 +103,9 @@ func TestSingletonStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBacken
 				"member_ids": []string{memberA, memberB},
 				"batch_id":   batchID,
 			})
-			assertStageLifecycleDeliveryRoute(t, runCtx, lifecycleStore, db, setupEventID, activation)
-			assertStageLifecycleInstanceIdentity(t, runCtx, runtime.Pipeline, flowIdentity, activation.EntityID, "review", "active")
+			setupDeliveryID := assertStageLifecycleDeliveryRoute(t, runCtx, lifecycleStore, db, setupEventID, activation)
+			instance = assertStageLifecycleInstanceIdentity(t, runCtx, runtime.Pipeline, flowIdentity, activation.EntityID, "review", "active")
+			reviewEntry := assertStageLifecycleEntryIdentity(t, instance, flowIdentity, "delivery", setupEventID, setupDeliveryID)
 
 			card := loadStageLifecycleIdentityCard(t, runCtx, lifecycleStore, activation)
 			assertStageLifecycleGateIdentity(t, card, activation)
@@ -121,6 +124,10 @@ func TestSingletonStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBacken
 			}
 			if len(restored) != 1 || restored[0].Created || restored[0].RunID != activation.RunID || restored[0].EntityID != activation.EntityID {
 				t.Fatalf("restored standing activation = %#v, want same persisted route/entity/run", restored)
+			}
+			instance = assertStageLifecycleInstanceIdentity(t, runCtx, runtime.Pipeline, flowIdentity, activation.EntityID, "review", "active")
+			if entry := assertStageLifecycleEntryIdentity(t, instance, flowIdentity, "delivery", setupEventID, setupDeliveryID); entry != reviewEntry {
+				t.Fatal("restart replaced the admitted review stage entry")
 			}
 			card = loadStageLifecycleIdentityCard(t, runCtx, lifecycleStore, activation)
 			assertStageLifecycleGateIdentity(t, card, activation)
@@ -162,7 +169,8 @@ func TestSingletonStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBacken
 			if err := runtime.Bus.PublishAcknowledged(runCtx, decisionEvent); err != nil {
 				t.Fatalf("publish stage gate decision: %v", err)
 			}
-			assertStageLifecycleInstanceIdentity(t, runCtx, runtime.Pipeline, flowIdentity, activation.EntityID, "awaiting", "active")
+			instance = assertStageLifecycleInstanceIdentity(t, runCtx, runtime.Pipeline, flowIdentity, activation.EntityID, "awaiting", "active")
+			awaitingEntry := assertStageLifecycleEntryIdentity(t, instance, flowIdentity, "gate", decisionEventID, card.CardID)
 			assertStageLifecycleTimerIdentity(t, runCtx, lifecycleStore, activation, false)
 
 			publishStageLifecycleIdentityEvent(t, runCtx, runtime.Bus, module.source, activation, "scout.member.done", map[string]any{
@@ -172,6 +180,10 @@ func TestSingletonStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBacken
 			if join.Status != joinruntime.StatusOpen || join.Completed() != 1 || join.Expected() != 2 {
 				t.Fatalf("partial singleton join = %#v, want open 1/2", join)
 			}
+			retainedJoinRef := join.JoinRef()
+			if retainedJoinRef.StageEntry() != awaitingEntry {
+				t.Fatal("join arm is not bound to the admitted gate stage entry")
+			}
 
 			publishStageLifecycleIdentityEvent(t, runCtx, runtime.Bus, module.source, activation, "scout.member.done", map[string]any{
 				"member_id": memberA, "batch_id": batchID, "value": 11,
@@ -179,12 +191,20 @@ func TestSingletonStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBacken
 			// Standing singletons remain active service instances at terminal stages;
 			// template-flow deactivation is proved separately at the typed terminal owner.
 			instance = assertStageLifecycleInstanceIdentity(t, runCtx, runtime.Pipeline, flowIdentity, activation.EntityID, "complete", "active")
-			join = loadStageLifecycleJoin(t, instance, batchID)
+			join = loadStageLifecycleJoin(t, runCtx, instance, batchID)
+			if !join.JoinRef().Equal(retainedJoinRef) {
+				t.Fatal("completion replaced the retained singleton arm")
+			}
 			if join.Status != joinruntime.StatusClosed || join.CloseReason != joinruntime.CloseReasonComplete {
 				t.Fatalf("completed singleton join = %#v, want closed/complete", join)
 			}
-			if results := join.Results(); len(results) != 2 || results[0] != float64(11) || results[1] != float64(22) {
-				t.Fatalf("singleton join results = %#v, want authored membership order [11 22]", results)
+			results, err := join.Results()
+			if err != nil {
+				t.Fatalf("read singleton join results: %v", err)
+			}
+			resultJSON, err := json.Marshal(results)
+			if err != nil || string(resultJSON) != "[11,22]" {
+				t.Fatalf("singleton join results = %#v err=%v, want authored membership order [11 22]", results, err)
 			}
 			requireStageLifecyclePipelineSettlement(t, runtime, selected, activation.RunID)
 			if err := closeConformanceRuntimeGeneration(runtime, processCapability); err != nil {
@@ -379,7 +399,7 @@ func publishStageLifecycleIdentityEvent(t *testing.T, ctx context.Context, bus *
 	return eventID
 }
 
-func assertStageLifecycleDeliveryRoute(t *testing.T, ctx context.Context, selected stageLifecycleIdentityStore, db *sql.DB, eventID string, activation runtimepkg.StandingActivation) {
+func assertStageLifecycleDeliveryRoute(t *testing.T, ctx context.Context, selected stageLifecycleIdentityStore, db *sql.DB, eventID string, activation runtimepkg.StandingActivation) string {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	var (
@@ -425,6 +445,35 @@ func assertStageLifecycleDeliveryRoute(t *testing.T, ctx context.Context, select
 		}
 		t.Fatalf("authored singleton delivery status=%s reason=%s failure=%q attributes=%#v logs=%s err=%v, want delivered", snapshot.Status, snapshot.ReasonCode, failure, failureAttributes, stageLifecycleRuntimeLogs(db), err)
 	}
+	return deliveryID
+}
+
+func assertStageLifecycleEntryIdentity(t *testing.T, instance runtimepipeline.WorkflowInstance, owner runtimeflowidentity.RunScopedFlowInstance, cause, eventID, occurrenceID string) timeridentity.StageEntryRef {
+	t.Helper()
+	entry, found, err := workflowlifecycle.LoadStageEntry(instance.Bookkeeping)
+	if err != nil || !found {
+		t.Fatalf("load committed lifecycle entry: found=%v err=%v", found, err)
+	}
+	if err := entry.RequireOwner(owner.RunID, owner.Route.ScopeKey, owner.Route.InstanceID, owner.Route.InstancePath, instance.EntityID, instance.CurrentState); err != nil {
+		t.Fatalf("committed lifecycle entry owner: %v", err)
+	}
+	if entry.Cause != cause || entry.EventID != eventID || entry.OccurrenceID != occurrenceID || entry.OriginRunID != "" {
+		t.Fatalf("committed lifecycle entry = %+v, want local %s event=%q occurrence=%q", entry, cause, eventID, occurrenceID)
+	}
+	if cause == "construction" {
+		if len(instance.TransitionHistory) != 0 {
+			t.Fatal("initial construction borrowed transition evidence")
+		}
+	} else {
+		if len(instance.TransitionHistory) == 0 {
+			t.Fatal("admitted stage entry has no committed transition")
+		}
+		transition := instance.TransitionHistory[len(instance.TransitionHistory)-1]
+		if transition.TriggerEventID != eventID || transition.To != entry.Stage || transition.TransitionID != entry.TransitionID || transition.Evidence.ID() != entry.TransitionID {
+			t.Fatalf("admitted stage entry disagrees with committed transition: entry=%+v transition=%+v", entry, transition)
+		}
+	}
+	return entry
 }
 
 func stageLifecycleRuntimeLogs(db *sql.DB) string {
@@ -480,7 +529,7 @@ func waitStageLifecycleJoin(t *testing.T, ctx context.Context, pipeline *runtime
 			if instance.StorageRef != identity.Route.InstancePath || instance.EntityID != entityID {
 				t.Fatalf("persisted join identity = route:%q entity:%v, want %q/%q", instance.StorageRef, instance.EntityID, identity.Route.InstancePath, entityID)
 			}
-			activation, found := findStageLifecycleJoin(t, instance, batchID)
+			activation, found := findStageLifecycleJoin(t, ctx, instance, batchID)
 			if found && activation.Completed() == completed && instance.CurrentState == state && instance.Status == status {
 				return instance, activation
 			}
@@ -541,25 +590,19 @@ func assertStageLifecycleTimerIdentity(t *testing.T, ctx context.Context, select
 	}
 }
 
-func loadStageLifecycleJoin(t *testing.T, instance runtimepipeline.WorkflowInstance, batchID string) joinruntime.Activation {
+func loadStageLifecycleJoin(t *testing.T, ctx context.Context, instance runtimepipeline.WorkflowInstance, batchID string) joinruntime.Activation {
 	t.Helper()
-	activation, ok := findStageLifecycleJoin(t, instance, batchID)
+	activation, ok := findStageLifecycleJoin(t, ctx, instance, batchID)
 	if !ok {
 		t.Fatalf("load singleton join %q: activation is missing", batchID)
 	}
 	return activation
 }
 
-func findStageLifecycleJoin(t *testing.T, instance runtimepipeline.WorkflowInstance, batchID string) (joinruntime.Activation, bool) {
+func findStageLifecycleJoin(t *testing.T, ctx context.Context, instance runtimepipeline.WorkflowInstance, batchID string) (joinruntime.Activation, bool) {
 	t.Helper()
-	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.Gates, instance.StateBuckets)
-	if err != nil {
-		return joinruntime.Activation{}, false
+	if instance.Fields["batch_id"] != batchID {
+		t.Fatalf("singleton business batch = %#v, want %q", instance.Fields["batch_id"], batchID)
 	}
-	key := joinruntime.ActivationKey("awaiting", "awaiting", batchID)
-	activation, ok, err := joinruntime.Load(carrier.StateBuckets, conformanceFlowPathNode(t, "scout", "scout-coordinator"), key)
-	if err != nil || !ok {
-		return joinruntime.Activation{}, false
-	}
-	return activation, true
+	return findConformanceJoinActivation(t, ctx, instance, conformanceFlowPathNode(t, "scout", "scout-coordinator"), "scout.member.done", "awaiting", "awaiting")
 }

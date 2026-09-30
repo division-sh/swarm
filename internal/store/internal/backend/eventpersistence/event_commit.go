@@ -28,6 +28,7 @@ type eventCommitTxStore interface {
 	standaloneCompletionOwner() standaloneCompletionCapability
 	appendAdmittedEventTxOutcome(context.Context, *mutationprotocol.Attempt, events.AdmittedEvent, events.RouteSettlement, bool) (runtimebus.EventAppendOutcome, error)
 	RequirePipelinePublicationClaimTx(context.Context, *sql.Tx, string, runtimepipelineobligation.Claim) error
+	RequireWorkflowJoinAdmissionTx(context.Context, *sql.Tx, []runtimepipeline.WorkflowJoinAdmissionFence) error
 	CommitInitialDeliveryObligationsTx(context.Context, *mutationprotocol.Attempt, string, string, []events.DeliveryRoute, runtimedelivery.ExecutionAuthority) ([]runtimedelivery.DurableHandoffProof, error)
 	CommitInitialPipelineScopeTx(context.Context, *mutationprotocol.Attempt, string, runtimepipelineobligation.CommittedScope) error
 	CommitInitialPipelineDispositionTx(context.Context, *mutationprotocol.Attempt, string, runtimepipelineobligation.Claim, runtimepipelineobligation.Disposition) error
@@ -134,6 +135,13 @@ func (c sqlPublishCommitter) commitInitialSideEffects(ctx context.Context, req r
 }
 
 func (c sqlPublishCommitter) commitInitialSideEffectEvidence(ctx context.Context, req runtimebus.CommitPublishRequest, requirePublicationClaim bool) ([]runtimedelivery.DurableHandoffProof, error) {
+	if len(req.JoinAdmissionFences) > 0 {
+		if err := c.attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+			return c.store.RequireWorkflowJoinAdmissionTx(ctx, tx, req.JoinAdmissionFences)
+		}); err != nil {
+			return nil, err
+		}
+	}
 	for _, record := range req.ReplyCreations {
 		if err := c.store.createReplyContextTx(ctx, c.attempt, record); err != nil {
 			return nil, fmt.Errorf("commit reply context creation: %w", err)

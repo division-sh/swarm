@@ -490,7 +490,7 @@ func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
 		if edge.Source == "handler.join.on_complete" && edge.NodeID == supportNodeID && edge.EventType == "ticket.closed" && edge.To == "review" {
 			foundJoinComplete = true
 		}
-		if edge.Source == "handler.join.timeout" && edge.NodeID == supportNodeID && edge.EventType == "platform.join_timeout" && edge.TimerID == "active" && edge.After == "1h" && edge.To == "timed_out" {
+		if edge.Source == "handler.join.on_deadline" && edge.NodeID == supportNodeID && edge.EventType == "platform.join_timeout" && edge.TimerID == "active" && edge.After == "1h" && edge.To == "timed_out" {
 			foundJoinTimeout = true
 		}
 		if edge.Source == "timer" && edge.TimerID == "support.active.timed_out" && edge.After == "72h" && edge.To == "timed_out" {
@@ -537,7 +537,7 @@ func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
 		"review [terminal]",
 		fmt.Sprintf("handler.advances_to %s on ticket.opened", supportNodeID),
 		fmt.Sprintf("handler.join.on_complete %s on ticket.closed", supportNodeID),
-		fmt.Sprintf("handler.join.timeout %s on platform.join_timeout after 1h timer active", supportNodeID),
+		fmt.Sprintf("handler.join.on_deadline %s on platform.join_timeout after 1h timer active", supportNodeID),
 		"timer runtime on timer:support.active.timed_out after 72h timer support.active.timed_out",
 		"active after 48h emit ticket.sla_escalated (timer support.active.ticket.sla_escalated)",
 		"active after 72h advances_to timed_out (timer support.active.timed_out)",
@@ -560,11 +560,24 @@ func TestDescribeFanInBarrierShowsEffectiveJoinProvenance(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("describe barrier json code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 		}
-		var output describeCommandOutput
+		// Preserve the legacy wire proof until the C fixture cutover, without
+		// restoring removed provenance fields on the authored join view.
+		type legacyJoinView struct {
+			authoringview.StageGraphJoinView
+			MembersBySource string `json:"members_by_source"`
+			WindowBy        string `json:"window_by"`
+			WindowBySource  string `json:"window_by_source"`
+		}
+		var output struct {
+			StageGraphs []struct {
+				FlowID string           `json:"flow_id"`
+				Joins  []legacyJoinView `json:"joins"`
+			} `json:"stage_graphs"`
+		}
 		if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
 			t.Fatalf("decode describe barrier json: %v\n%s", err, stdout.String())
 		}
-		var joins []authoringview.StageGraphJoinView
+		var joins []legacyJoinView
 		for _, graph := range output.StageGraphs {
 			if graph.FlowID == "portfolio" {
 				joins = graph.Joins
@@ -633,7 +646,7 @@ func TestVerifyCommandRejectsTypeInvalidJoinCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated := strings.Replace(string(nodes), "      join:\n        stage: active", "      join:\n        complete_when: join.missing > 1\n        remaining: ignore\n        stage: active", 1)
+	updated := strings.Replace(string(nodes), "        on_complete:\n          advances_to: review", "        on_complete:\n          advances_to: review\n          emit:\n            event: line_item.requested\n            fields:\n              line_item_id: ${join.missing > 1}\n              line_item_index: 0", 1)
 	if updated == string(nodes) {
 		t.Fatal("join fixture mutation did not match")
 	}
@@ -685,7 +698,7 @@ types:
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated := strings.Replace(string(nodes), "      join:\n        stage: active", "      join:\n        complete_when: join.results[0] > 1\n        remaining: ignore\n        stage: active", 1)
+	updated := strings.Replace(string(nodes), "        on_complete:\n          advances_to: review", "        on_complete:\n          advances_to: review\n          emit:\n            event: line_item.requested\n            fields:\n              line_item_id: ${join.results.exists(r, r > 1)}\n              line_item_index: 0", 1)
 	if updated == string(nodes) {
 		t.Fatal("join fixture mutation did not match")
 	}
@@ -701,6 +714,29 @@ types:
 	output := decodeOutputJSON[verifyCommandResult](t, stdout.String())
 	if !reportContainsVerifyError(output.Errors, "join_validation", "no matching overload") {
 		t.Fatalf("verify --json errors = %#v, want named JoinResult typed rejection", output.Errors)
+	}
+}
+
+func TestVerifyCommandRejectsRetiredJoinGrammar(t *testing.T) {
+	for _, field := range []string{"window", "complete_when", "remaining", "timeout"} {
+		t.Run(field, func(t *testing.T) {
+			root := writeDescribeStageGraphContracts(t)
+			path := filepath.Join(root, "support", "nodes.yaml")
+			contents, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			updated := strings.Replace(string(contents), "      join:\n        stage: active", "      join:\n        "+field+": null\n        stage: active", 1)
+			if updated == string(contents) {
+				t.Fatal("retired join fixture mutation did not match")
+			}
+			writeDescribeTestFile(t, path, updated)
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", root, "--config", writeTestVerifyRuntimeConfig(t), "--json"}, &stdout, &stderr, defaultRootCommandOptions())
+			if code == 0 || !strings.Contains(stdout.String()+stderr.String(), "join field \""+field+"\" is not supported") {
+				t.Fatalf("retired field %s accepted or misdiagnosed: code=%d stdout=%s stderr=%s", field, code, stdout.String(), stderr.String())
+			}
+		})
 	}
 }
 

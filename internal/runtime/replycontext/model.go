@@ -29,6 +29,7 @@ type Record struct {
 	ProviderInputPin     string
 	ProviderOutputPin    string
 	Origin               events.RouteIdentity
+	ReturnJoins          []events.JoinAdmissionReceipt
 	RequestCorrelationID string
 	CorrelationKey       string
 	State                State
@@ -49,6 +50,7 @@ func (r Record) Normalized() Record {
 	r.ProviderInputPin = strings.TrimSpace(r.ProviderInputPin)
 	r.ProviderOutputPin = strings.TrimSpace(r.ProviderOutputPin)
 	r.Origin = r.Origin.Normalized()
+	r.ReturnJoins = (events.DeliveryContext{Joins: r.ReturnJoins}).Normalized().Joins
 	r.RequestCorrelationID = strings.TrimSpace(r.RequestCorrelationID)
 	r.CorrelationKey = strings.TrimSpace(r.CorrelationKey)
 	r.AcceptedReplyEventID = strings.TrimSpace(r.AcceptedReplyEventID)
@@ -75,6 +77,17 @@ func (r Record) Validate() error {
 	}
 	if r.Origin.Empty() {
 		return fmt.Errorf("reply context origin route is required")
+	}
+	if err := (events.DeliveryContext{Joins: r.ReturnJoins}).Validate(); err != nil {
+		return fmt.Errorf("reply context return admission: %w", err)
+	}
+	for _, receipt := range r.ReturnJoins {
+		if receipt.Disposition == events.JoinAdmissionBound {
+			entry := receipt.Ref.StageEntry()
+			if entry.RunID != r.RunID || entry.InstancePath != r.Origin.FlowInstance || entry.EntityID != r.Origin.EntityID {
+				return fmt.Errorf("reply return admission contradicts its retained origin")
+			}
+		}
 	}
 	switch r.State {
 	case StateOpen:
@@ -107,6 +120,7 @@ func (r Record) SameIdentity(other Record) bool {
 		r.ProviderInputPin == other.ProviderInputPin &&
 		r.ProviderOutputPin == other.ProviderOutputPin &&
 		r.Origin == other.Origin &&
+		r.sameReturnJoins(other) &&
 		r.RequestCorrelationID == other.RequestCorrelationID &&
 		r.CorrelationKey == other.CorrelationKey
 }

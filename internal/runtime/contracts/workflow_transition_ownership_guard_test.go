@@ -174,6 +174,38 @@ func t22RestoreTrigger(unexpected t22ErasedTrigger) runtimeengine.StateMutation 
 	want["internal/runtime/pipeline.t22RewriteTrigger::accepted trigger TriggeredAt"] = 2
 	want["internal/runtime/pipeline.t22EraseTrigger::erase typed evidence internal/runtime/engine.StateMutation"] = 1
 	want["internal/runtime/pipeline.t22RestoreTrigger::construct internal/runtime/engine.StateMutation"] = 1
+	path, raw = transitionGuardOverlay(t, "internal/runtime/pipeline/delivery_target_application.go", "")
+	for _, entry := range []struct {
+		needle, extra, boundary string
+		count                   int
+	}{
+		{
+			"if admitted, found := workflowNodeDeliveryRoute(ctx); found && len(admitted.Context.Joins) > 0 {",
+			"\n_ = workflowNodeDeliveryRoute",
+			"internal/runtime/pipeline.PipelineCoordinator.prepareDeliveryTargetApplication::call internal/runtime/pipeline.workflowNodeDeliveryRoute",
+			2,
+		},
+		{
+			"if application.Owner().EntitylessReceiver() {",
+			"\n_ = application.Event",
+			"internal/runtime/pipeline.PipelineCoordinator.loadCurrentDeliveryTargetState::call internal/runtime/pipeline.DeliveryTargetApplication.Event",
+			5,
+		},
+	} {
+		if strings.Count(string(raw), entry.needle) != 1 {
+			t.Fatal("admitted-target owner changed; update the explicit hostile insertion")
+		}
+		raw = []byte(strings.Replace(string(raw), entry.needle, entry.needle+entry.extra, 1))
+		want[entry.boundary] = entry.count
+	}
+	overlay[path] = raw
+	path, raw = transitionGuardOverlay(t, "internal/runtime/pipeline/workflow_join_admission.go", "")
+	needle = "route, admitted := workflowNodeDeliveryRoute(ctx)"
+	if strings.Count(string(raw), needle) != 1 {
+		t.Fatal("retained-refusal owner changed; update the explicit hostile insertion")
+	}
+	overlay[path] = []byte(strings.Replace(string(raw), needle, needle+"\n_ = workflowNodeDeliveryRoute", 1))
+	want["internal/runtime/pipeline.validateAdmittedReceiverAvailability::call internal/runtime/pipeline.workflowNodeDeliveryRoute"] = 2
 	path, raw = transitionGuardOverlay(t, "internal/runtime/pipeline/workflow_handler_preview.go", `
 type t22PreviewAlias = HandlerPreview
 type t22PreviewEnvelope struct { *t22PreviewAlias }
@@ -329,29 +361,35 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/pipeline.PipelineCoordinator.executeNodeHandlerPlanResultWithEmissionPlan::call internal/runtime/pipeline.DeliveryTargetApplication.Event":                      1,
 		"internal/runtime/pipeline.PipelineCoordinator.executeNodeHandlerPlanResultWithEmissionPlan::call internal/runtime/pipeline.withDeliveryTargetApplication":                        1,
 		"internal/runtime/pipeline.PipelineCoordinator.executeNodeHandlerPlanResultWithEmissionPlan::call internal/runtime/pipeline.workflowNodeEventHandlerResolutionForDeliveryContext": 1,
-		"internal/runtime/pipeline.PipelineCoordinator.loadCurrentDeliveryTargetState::call internal/runtime/pipeline.DeliveryTargetApplication.Event":                                    3,
-		"internal/runtime/pipeline.PipelineCoordinator.loadCurrentDeliveryTargetState::call internal/runtime/pipeline.DeliveryTargetApplication.Validate":                                 1,
-		"internal/runtime/pipeline.PipelineCoordinator.prepareDeliveryTargetApplication::call internal/runtime/pipeline.DeliveryTargetApplication.Validate":                               3,
-		"internal/runtime/pipeline.PipelineCoordinator.workflowNodeConnectedInputFailureApplies::call internal/runtime/pipeline.workflowNodeDeliveryRoute":                                1,
-		"internal/runtime/pipeline.PipelineCoordinator.workflowNodeDeliveryRouteMatches::call internal/runtime/pipeline.workflowNodeDeliveryRoute":                                        1,
-		"internal/runtime/pipeline.PipelineCoordinator.workflowNodeInterceptPolicy::call internal/runtime/pipeline.workflowNodeDeliveryRoute":                                             1,
-		"internal/runtime/pipeline.pipelineEngineMutationOwner.CommitEngineMutation::call internal/runtime/pipeline.DeliveryTargetApplication.Validate":                                   1,
-		"internal/runtime/pipeline.pipelineEngineMutationOwner.CommitEngineMutation::call internal/runtime/pipeline.deliveryTargetApplicationFromContext":                                 1,
-		"internal/runtime/pipeline.pipelineEngineStateRepo.LoadState::call internal/runtime/pipeline.DeliveryTargetApplication.Validate":                                                  1,
-		"internal/runtime/pipeline.pipelineEngineStateRepo.LoadState::call internal/runtime/pipeline.deliveryTargetApplicationFromContext":                                                1,
-		"internal/runtime/pipeline.pipelineEngineStateRepo.prepareMutation::call internal/runtime/pipeline.DeliveryTargetApplication.Validate":                                            1,
-		"internal/runtime/pipeline.pipelineEngineStateRepo.validateMutationTransition::call internal/runtime/correlation.InboundEventFromContext":                                         1,
-		"internal/runtime/pipeline.pipelineEngineStateRepo.validateMutationTransition::call internal/runtime/pipeline.DeliveryTargetApplication.Event":                                    1,
-		"internal/runtime/pipeline.pipelineEngineStateRepo.validateMutationTransition::call internal/runtime/pipeline.DeliveryTargetApplication.Validate":                                 1,
-		"internal/runtime/pipeline.pipelineEngineStateRepo.validateMutationTransition::call internal/runtime/pipeline.deliveryTargetApplicationFromContext":                               1,
-		"internal/runtime/pipeline.pipelineEngineStateRepo.validateMutationTransition::call internal/runtime/pipeline.workflowNodeDeliveryRoute":                                          1,
-		"internal/runtime/pipeline.pipelineEngineStateRepo.validateMutationTransition::call internal/runtime/pipeline.workflowNodeEventHandlerResolutionForDeliveryContext":               1,
-		"internal/runtime/pipeline.workflowNodeEventHandlerResolutionForDelivery::call internal/runtime/pipeline.workflowNodeEventHandlerResolutionForDeliveryContext":                    1,
-		"internal/runtime/pipeline.workflowNodeEventHandlerResolutionForDeliveryContext::call internal/runtime/pipeline.workflowNodeDeliveryRoute":                                        1,
-		"internal/runtime/pipeline.workflowNodeHandlerEventKeyForExecution::call internal/runtime/pipeline.workflowNodeEventHandlerResolutionForDeliveryContext":                          1,
-		"internal/runtime/pipeline.workflowNodeHandlerApplies::call internal/runtime/pipeline.workflowNodeEventHandlerResolutionForDeliveryContext":                                       1,
-		"internal/runtime/pipeline.workflowNodeProducerSource::call internal/runtime/pipeline.DeliveryTargetApplication.Validate":                                                         1,
-		"internal/runtime/pipeline.workflowNodeProducerSource::call internal/runtime/pipeline.deliveryTargetApplicationFromContext":                                                       1,
+		// Reload reuses the accepted event for run/ownership and retained refusal,
+		// never derives a fresh event or a replacement receiver flow.
+		"internal/runtime/pipeline.PipelineCoordinator.loadCurrentDeliveryTargetState::call internal/runtime/pipeline.DeliveryTargetApplication.Event":      4,
+		"internal/runtime/pipeline.PipelineCoordinator.loadCurrentDeliveryTargetState::call internal/runtime/pipeline.DeliveryTargetApplication.Validate":   1,
+		"internal/runtime/pipeline.PipelineCoordinator.prepareDeliveryTargetApplication::call internal/runtime/pipeline.DeliveryTargetApplication.Validate": 3,
+		// Exact admitted receipt validation and terminal retained-work refusal;
+		// neither site selects a transition or creates fresh publication authority.
+		"internal/runtime/pipeline.PipelineCoordinator.prepareDeliveryTargetApplication::call internal/runtime/pipeline.workflowNodeDeliveryRoute":                          1,
+		"internal/runtime/pipeline.validateAdmittedReceiverAvailability::call internal/runtime/pipeline.workflowNodeDeliveryRoute":                                          1,
+		"internal/runtime/pipeline.PipelineCoordinator.workflowNodeConnectedInputFailureApplies::call internal/runtime/pipeline.workflowNodeDeliveryRoute":                  1,
+		"internal/runtime/pipeline.PipelineCoordinator.workflowNodeDeliveryRouteMatches::call internal/runtime/pipeline.workflowNodeDeliveryRoute":                          1,
+		"internal/runtime/pipeline.PipelineCoordinator.workflowNodeInterceptPolicy::call internal/runtime/pipeline.workflowNodeDeliveryRoute":                               1,
+		"internal/runtime/pipeline.pipelineEngineMutationOwner.CommitEngineMutation::call internal/runtime/pipeline.DeliveryTargetApplication.Validate":                     1,
+		"internal/runtime/pipeline.pipelineEngineMutationOwner.CommitEngineMutation::call internal/runtime/pipeline.deliveryTargetApplicationFromContext":                   1,
+		"internal/runtime/pipeline.pipelineEngineStateRepo.LoadState::call internal/runtime/pipeline.DeliveryTargetApplication.Validate":                                    1,
+		"internal/runtime/pipeline.pipelineEngineStateRepo.LoadState::call internal/runtime/pipeline.deliveryTargetApplicationFromContext":                                  1,
+		"internal/runtime/pipeline.pipelineEngineStateRepo.prepareMutation::call internal/runtime/pipeline.DeliveryTargetApplication.Validate":                              1,
+		"internal/runtime/pipeline.pipelineEngineStateRepo.validateMutationTransition::call internal/runtime/correlation.InboundEventFromContext":                           1,
+		"internal/runtime/pipeline.pipelineEngineStateRepo.validateMutationTransition::call internal/runtime/pipeline.DeliveryTargetApplication.Event":                      1,
+		"internal/runtime/pipeline.pipelineEngineStateRepo.validateMutationTransition::call internal/runtime/pipeline.DeliveryTargetApplication.Validate":                   1,
+		"internal/runtime/pipeline.pipelineEngineStateRepo.validateMutationTransition::call internal/runtime/pipeline.deliveryTargetApplicationFromContext":                 1,
+		"internal/runtime/pipeline.pipelineEngineStateRepo.validateMutationTransition::call internal/runtime/pipeline.workflowNodeDeliveryRoute":                            1,
+		"internal/runtime/pipeline.pipelineEngineStateRepo.validateMutationTransition::call internal/runtime/pipeline.workflowNodeEventHandlerResolutionForDeliveryContext": 1,
+		"internal/runtime/pipeline.workflowNodeEventHandlerResolutionForDelivery::call internal/runtime/pipeline.workflowNodeEventHandlerResolutionForDeliveryContext":      1,
+		"internal/runtime/pipeline.workflowNodeEventHandlerResolutionForDeliveryContext::call internal/runtime/pipeline.workflowNodeDeliveryRoute":                          1,
+		"internal/runtime/pipeline.workflowNodeHandlerEventKeyForExecution::call internal/runtime/pipeline.workflowNodeEventHandlerResolutionForDeliveryContext":            1,
+		"internal/runtime/pipeline.workflowNodeHandlerApplies::call internal/runtime/pipeline.workflowNodeEventHandlerResolutionForDeliveryContext":                         1,
+		"internal/runtime/pipeline.workflowNodeProducerSource::call internal/runtime/pipeline.DeliveryTargetApplication.Validate":                                           1,
+		"internal/runtime/pipeline.workflowNodeProducerSource::call internal/runtime/pipeline.deliveryTargetApplicationFromContext":                                         1,
 		// Missing-executor verification reads the compiled transition inventory;
 		// it does not admit or reconstruct a transition.
 		"internal/runtime/bootverify.runtimeHandledEventRequirements::call internal/runtime/semanticview.WorkflowStageTopology": 1,
@@ -457,7 +495,6 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/bootverify.checkerContext.transitionReferences::carrier fields":                                                                 18,
 		"internal/runtime/bootverify.checkerContext.transitionReferences::edge inventory":                                                                 1,
 		"internal/runtime/bootverify.compiledLoopEscapeOwnsEdge::carrier fields":                                                                          6,
-		"internal/runtime/bootverify.joinStageCanReenter::call internal/runtime/semanticview.WorkflowStageTopology":                                       1,
 		"internal/runtime/bootverify.timerActivationStates::call internal/runtime/semanticview.WorkflowStageTopology":                                     1,
 		"internal/runtime/bootverify.timerCancelStateGraphEdges::carrier fields":                                                                          1,
 		"internal/runtime/bootverify.workflowStageGraphEdges::call internal/runtime/semanticview.WorkflowStageTopology":                                   1,

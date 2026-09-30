@@ -296,7 +296,7 @@ func compiledLifecycleTransitionForTest(pc *PipelineCoordinator, flowID, from, t
 			runtimecontracts.HandlerAdvanceCarrierRules:          handlerselection.ContextRules,
 			runtimecontracts.HandlerAdvanceCarrierOnComplete:     handlerselection.ContextOnComplete,
 			runtimecontracts.HandlerAdvanceCarrierJoinOnComplete: handlerselection.ContextJoinComplete,
-			runtimecontracts.HandlerAdvanceCarrierJoinTimeout:    handlerselection.ContextJoinTimeout,
+			runtimecontracts.HandlerAdvanceCarrierJoinOnDeadline: handlerselection.ContextJoinTimeout,
 		}
 		fact, err = handlerselection.Selected(contexts[selected.AdvanceCarrier], selected.RuleRef, "")
 		if err != nil {

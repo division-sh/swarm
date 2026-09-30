@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
@@ -65,7 +66,7 @@ func TestExecutorJoinCapturedContextFromRetainedEvidence(t *testing.T) {
 			for _, reference := range []string{"ref", "cel"} {
 				t.Run(disposition+"/"+history+"/"+reference, func(t *testing.T) {
 					repo := canonicalrouting.RepoRoot(t)
-					bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyForkLoopRetainedJoin(t), runtimecontracts.DefaultPlatformSpecFile(repo))
+					bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, a2CopyRetainedJoin(t), runtimecontracts.DefaultPlatformSpecFile(repo))
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -79,7 +80,7 @@ func TestExecutorJoinCapturedContextFromRetainedEvidence(t *testing.T) {
 					}
 					outcome.Emit.Fields["revision_id"] = value
 					outcome.DataAccumulation = runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{{TargetField: "window", Value: value}}}
-					handler.Join.OnComplete, handler.Join.Timeout.Outcome = outcome, outcome
+					handler.Join.OnComplete, handler.Join.OnDeadline = outcome, outcome
 					handler, err = completeSemanticFixtureHandlerRuleIdentity(node, "review.requested", handler)
 					if err != nil {
 						t.Fatal(err)
@@ -129,18 +130,18 @@ func TestExecutorJoinCapturedContextFromRetainedEvidence(t *testing.T) {
 						captured = child.Generation()
 						owner = correspondence.ProjectedActivations()[0]
 					}
-					ref, err := timeridentity.NewJoinRefForGeneration(node, "review.requested", "working", "reviews", "business-window", captured)
+					ref, err := timeridentity.NewJoinRef(node, "review.requested", "working", "reviews")
 					if err != nil {
 						t.Fatal(err)
 					}
-					handle, err := timeridentity.JoinTimeoutHandle(ref)
-					if disposition == "complete" {
-						handle, err = timeridentity.JoinCompleteHandle(ref)
-					}
+					route := flowidentity.StoredRoute(".", runID, runID)
+					// Fork mapping here is already-admitted test evidence, not a
+					// proof of production StageEntry fork correspondence.
+					ref, err = ref.BindStageEntry(a2EngineJoinEntry(runID, runID, "working", route), captured)
 					if err != nil {
 						t.Fatal(err)
 					}
-					join, err := joinruntime.NewActivation(handle, []string{"unchanged-business-value"}, now, now.Add(time.Hour))
+					join, err := joinruntime.NewActivation(ref, []string{"unchanged-business-value"}, nil, now, now.Add(time.Hour))
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -149,6 +150,14 @@ func TestExecutorJoinCapturedContextFromRetainedEvidence(t *testing.T) {
 							t.Fatal(err)
 						}
 						join.Close(joinruntime.CloseReasonComplete, true, false)
+						handle, err := timeridentity.JoinCompleteHandle(ref)
+						if err != nil {
+							t.Fatal(err)
+						}
+						join, err = join.WithTimerHandle(handle, now.Add(time.Hour))
+						if err != nil {
+							t.Fatal(err)
+						}
 					}
 					buckets := map[string]map[string]any{}
 					if err := loopruntime.Store(buckets, owner); err != nil {
@@ -157,11 +166,12 @@ func TestExecutorJoinCapturedContextFromRetainedEvidence(t *testing.T) {
 					if err := joinruntime.Store(buckets, join); err != nil {
 						t.Fatal(err)
 					}
+					handle := join.TimerHandle()
 					payload, _ := json.Marshal(handle.PayloadMetadata())
 					request := ExecutionRequest{
-						EntityID: identity.NormalizeEntityID(runID), Node: node, HandlerEventKey: "review.requested", Handler: handler, JoinDeclaration: ref.Declaration(),
+						EntityID: identity.NormalizeEntityID(runID), Node: node, HandlerEventKey: "review.requested", Handler: handler, Route: route, JoinDeclaration: ref.Declaration(),
 						Event: eventtest.RunCreatingRootIngress(eventtest.UUID("captured-outcome"), events.EventType(handle.EventType()), "runtime", handle.TaskID(), payload, 0, runID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, runID), now.Add(time.Hour)),
-						State: testStateSnapshot("working", map[string]any{"members": []any{"unchanged-business-value"}, "window": "not-a-revision"}, nil, buckets),
+						State: a2JoinFixtureSnapshot(t, join, map[string]any{"members": []any{"unchanged-business-value"}, "window": "not-a-revision"}, buckets),
 					}
 					result, err := exec.ExecuteSemanticFixture(context.Background(), request)
 					if err != nil {
@@ -170,10 +180,10 @@ func TestExecutorJoinCapturedContextFromRetainedEvidence(t *testing.T) {
 					if got := emittedLoopRevision(t, result); got != captured.RevisionID {
 						t.Fatalf("got revision=%s captured=%s current=%s", got, captured.RevisionID, owner.RevisionID)
 					}
-					if got := result.StateMutation.Fields["window"]; got != captured.RevisionID {
+					if got := result.StateMutation.StateCarrier.Fields["window"]; got != captured.RevisionID {
 						t.Fatalf("data write did not consume captured reference: %v", got)
 					}
-					persisted, found, err := loopruntime.Load(result.StateMutation.StateBuckets, ".", "revision")
+					persisted, found, err := loopruntime.Load(result.StateMutation.StateCarrier.StateBuckets, ".", "revision")
 					if err != nil || !found || !reflect.DeepEqual(persisted, owner) || !bytes.Equal(payload, request.Event.Payload()) {
 						t.Fatalf("outcome changed owner/payload: owner=%+v err=%v", persisted, err)
 					}

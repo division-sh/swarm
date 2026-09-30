@@ -490,22 +490,25 @@ func (r ReplyContextRef) Empty() bool {
 // DeliveryContext contains route-scoped platform metadata. It is persisted
 // with one delivery route and installed only while that route executes.
 type DeliveryContext struct {
-	Reply *ReplyContextRef `json:"reply,omitempty"`
+	Reply *ReplyContextRef       `json:"reply,omitempty"`
+	Joins []JoinAdmissionReceipt `json:"joins,omitempty"`
 }
 
 func (c DeliveryContext) Normalized() DeliveryContext {
+	normalized := DeliveryContext{Joins: normalizeJoinAdmissions(c.Joins)}
 	if c.Reply == nil {
-		return DeliveryContext{}
+		return normalized
 	}
 	reply := c.Reply.Normalized()
 	if reply.Empty() {
-		return DeliveryContext{}
+		return normalized
 	}
-	return DeliveryContext{Reply: &reply}
+	normalized.Reply = &reply
+	return normalized
 }
 
 func (c DeliveryContext) Empty() bool {
-	return c.Normalized().Reply == nil
+	return c.Normalized().Reply == nil && len(c.Joins) == 0
 }
 
 func (c DeliveryContext) ReplyContextID() string {
@@ -1033,6 +1036,19 @@ func (r DeliveryRoute) Identity() (DeliveryRouteIdentity, error) {
 // identities never omit execution facts and cannot carry a dependency.
 func (r DeliveryRoute) identity(includeMaterialization bool) (DeliveryRouteIdentity, error) {
 	r = r.Normalized()
+	if err := r.Context.Validate(); err != nil {
+		return DeliveryRouteIdentity{}, err
+	}
+	for _, receipt := range r.Context.Joins {
+		node, isNode := r.Recipient.Node()
+		if !isNode || !node.Equal(receipt.Ref.Node()) {
+			return DeliveryRouteIdentity{}, fmt.Errorf("join admission belongs to a different executable recipient")
+		}
+		entry := receipt.Ref.StageEntry()
+		if !entry.Empty() && (entry.EntityID != r.Target.Route().EntityID || entry.InstancePath != r.Target.Route().FlowInstance) {
+			return DeliveryRouteIdentity{}, fmt.Errorf("join admission belongs to a different receiver instance")
+		}
+	}
 	var initialization *ReceiverInitialization
 	if !r.Initialization.Empty() {
 		if err := r.Initialization.ValidateRoute(r); err != nil {

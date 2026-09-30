@@ -118,8 +118,8 @@ func entityAssignmentReaderPoint(handler c.SystemNodeEventHandler, reader expres
 			point.RuleKind = c.HandlerAdvanceCarrierOnComplete
 		case "handler.join.on_complete.emit":
 			point.RuleKind = c.HandlerAdvanceCarrierJoinOnComplete
-		case "handler.join.timeout.emit":
-			point.RuleKind = c.HandlerAdvanceCarrierJoinTimeout
+		case "handler.join.on_deadline.emit":
+			point.RuleKind = c.HandlerAdvanceCarrierJoinOnDeadline
 		case "handler.fan_out.emit":
 			point.Step = engine.StepFanOut
 			point.FanOut, point.FanOutAfterWrites = true, true
@@ -155,10 +155,10 @@ func entityAssignmentReaderPoint(handler c.SystemNodeEventHandler, reader expres
 			if handler.Join != nil && reader.RuleIndex == 0 {
 				rule = &handler.Join.OnComplete
 			}
-		case "join.timeout":
-			point.RuleKind = c.HandlerAdvanceCarrierJoinTimeout
+		case "join.on_deadline":
+			point.RuleKind = c.HandlerAdvanceCarrierJoinOnDeadline
 			if handler.Join != nil && reader.RuleIndex == 0 {
-				rule = &handler.Join.Timeout.Outcome
+				rule = &handler.Join.OnDeadline
 			}
 		default:
 			return point, fmt.Errorf("rule collection %s has no assignment program point", reader.RuleCollection)

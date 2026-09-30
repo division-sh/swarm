@@ -111,25 +111,26 @@ func ProjectExecutionReceiver(route events.DeliveryRoute) (ExecutionReceiver, er
 }
 
 type Capsule struct {
-	NodeKey          string                    `json:"node_key"`
-	ExecutionFlowID  string                    `json:"execution_flow_id"`
-	Route            runtimeflowidentity.Route `json:"route"`
-	EntityID         string                    `json:"entity_id,omitempty"`
-	HandlerEventKey  string                    `json:"handler_event_key"`
-	CurrentState     string                    `json:"current_state,omitempty"`
-	ChainDepth       int                       `json:"chain_depth"`
-	ProducerSource   events.RoutingSource      `json:"producer_source"`
-	Receiver         *ExecutionReceiver        `json:"receiver,omitempty"`
-	Lineage          events.EventLineage       `json:"lineage"`
-	Entity           map[string]any            `json:"entity,omitempty"`
-	PlatformEntity   map[string]any            `json:"platform_entity,omitempty"`
-	Computed         map[string]any            `json:"computed,omitempty"`
-	Accumulated      map[string]any            `json:"accumulated,omitempty"`
-	Join             map[string]any            `json:"join,omitempty"`
-	Loop             map[string]any            `json:"loop,omitempty"`
-	StateFields      map[string]any            `json:"state_fields,omitempty"`
-	StateBookkeeping map[string]any            `json:"state_bookkeeping,omitempty"`
-	StateGates       map[string]bool           `json:"state_gates,omitempty"`
+	SourceProjection runtimecontracts.FanOutPlanSemantics `json:"source_projection"`
+	NodeKey          string                               `json:"node_key"`
+	ExecutionFlowID  string                               `json:"execution_flow_id"`
+	Route            runtimeflowidentity.Route            `json:"route"`
+	EntityID         string                               `json:"entity_id,omitempty"`
+	HandlerEventKey  string                               `json:"handler_event_key"`
+	CurrentState     string                               `json:"current_state,omitempty"`
+	ChainDepth       int                                  `json:"chain_depth"`
+	ProducerSource   events.RoutingSource                 `json:"producer_source"`
+	Receiver         *ExecutionReceiver                   `json:"receiver,omitempty"`
+	Lineage          events.EventLineage                  `json:"lineage"`
+	Entity           map[string]any                       `json:"entity,omitempty"`
+	PlatformEntity   map[string]any                       `json:"platform_entity,omitempty"`
+	Computed         map[string]any                       `json:"computed,omitempty"`
+	Accumulated      map[string]any                       `json:"accumulated,omitempty"`
+	Join             map[string]any                       `json:"join,omitempty"`
+	Loop             map[string]any                       `json:"loop,omitempty"`
+	StateFields      map[string]any                       `json:"state_fields,omitempty"`
+	StateBookkeeping map[string]any                       `json:"state_bookkeeping,omitempty"`
+	StateGates       map[string]bool                      `json:"state_gates,omitempty"`
 }
 
 // Capsule business values are frozen JSON, not floating-point approximations.
@@ -380,6 +381,9 @@ func (r IntentRequest) Validate() error {
 	}
 	if r.Cardinality < 0 {
 		return errors.New("fan-out cardinality cannot be negative")
+	}
+	if err := r.ValidateSourceProjection(); err != nil {
+		return err
 	}
 	return r.Capsule.Validate()
 }

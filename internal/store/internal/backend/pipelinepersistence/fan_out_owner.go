@@ -1,7 +1,6 @@
 package pipelinepersistence
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -361,6 +360,9 @@ func admitAndLoadSelectedFanOutClaim(ctx context.Context, tx *sql.Tx, admission 
 // Hydrate the immutable source after admission, outside the SQLite writer lock.
 func loadFanOutEvaluation(ctx context.Context, db *sql.DB, postgres bool, resourceData *storedurabledata.Owner, intent fanoutobligation.Intent) (runtimepipeline.FanOutEvaluationInput, error) {
 	var input runtimepipeline.FanOutEvaluationInput
+	if err := intent.Validate(); err != nil {
+		return input, err
+	}
 	var err error
 	if intent.Request.Deployment == nil {
 		var triggers []events.PersistedReplayEvent
@@ -410,7 +412,7 @@ func loadFanOutEvaluation(ctx context.Context, db *sql.DB, postgres bool, resour
 			if input.Trigger.ID() != intent.Source.EventID {
 				return input, fmt.Errorf("fan-out payload source disagrees with triggering event")
 			}
-			input.Items, err = collectionFieldRangeFromJSON(input.Trigger.Payload(), intent.Source.Field, intent.Request.Cardinality, intent.Cursor, endOrdinal)
+			input.Items, err = collectionFieldRangeFromJSON(input.Trigger.Payload(), intent.Request, intent.Cursor, endOrdinal)
 		case fanoutobligation.SourceEntityField:
 			inLineage, lineageErr := fanoutorigin.SourceRunInLineage(ctx, db, postgres, intent.Request.Key.RunID, intent.Source.RunID)
 			if lineageErr != nil {
@@ -422,7 +424,7 @@ func loadFanOutEvaluation(ctx context.Context, db *sql.DB, postgres bool, resour
 			if err := db.QueryRowContext(ctx, `SELECT new_value FROM entity_mutations WHERE mutation_id=$1 AND run_id=$2 AND entity_id=$3 AND domain='authored_field' AND path=$4`, intent.Source.MutationID, intent.Source.RunID, intent.Source.EntityID, intent.Source.Field).Scan(&raw); err != nil {
 				return input, err
 			}
-			input.Items, err = collectionRangeFromJSON(raw, intent.Request.Cardinality, intent.Cursor, endOrdinal)
+			input.Items, err = collectionRangeFromJSON(raw, intent.Request, intent.Cursor, endOrdinal)
 		default:
 			return input, fmt.Errorf("unsupported handler fan-out source kind %q", intent.Source.Kind)
 		}
@@ -436,50 +438,38 @@ func loadFanOutEvaluation(ctx context.Context, db *sql.DB, postgres bool, resour
 	return input, nil
 }
 
-func collectionFieldRangeFromJSON(raw []byte, field string, want, start, end int) ([]any, error) {
+func collectionFieldRangeFromJSON(raw []byte, request fanoutobligation.IntentRequest, start, end int) ([]any, error) {
+	if _, err := canonicaljson.Decode(raw); err != nil {
+		return nil, fmt.Errorf("admit fan-out payload source: %w", err)
+	}
 	var object map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &object); err != nil {
+	if err := canonicaljson.DecodePreservingNumberLexemes(raw, &object); err != nil {
 		return nil, err
 	}
-	value, ok := object[strings.TrimSpace(field)]
+	value, ok := object[request.Source.Field]
 	if !ok {
-		return nil, fmt.Errorf("fan-out source field %s is absent", strings.TrimSpace(field))
+		return nil, fmt.Errorf("fan-out source field %s is absent", request.Source.Field)
 	}
-	return collectionRangeFromJSON(value, want, start, end)
+	return collectionRangeFromJSON(value, request, start, end)
 }
 
-func collectionRangeFromJSON(raw []byte, want, start, end int) ([]any, error) {
+func collectionRangeFromJSON(raw []byte, request fanoutobligation.IntentRequest, start, end int) ([]any, error) {
+	want := request.Cardinality
 	if start < 0 || end < start || end > want {
 		return nil, fmt.Errorf("fan-out source range [%d,%d) is invalid for cardinality %d", start, end, want)
 	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.UseNumber()
-	token, err := decoder.Token()
-	if err != nil || token != json.Delim('[') {
-		if err == nil {
-			err = fmt.Errorf("source value is not a collection")
-		}
+	if _, err := canonicaljson.Decode(raw); err != nil {
 		return nil, fmt.Errorf("decode fan-out source collection: %w", err)
 	}
-	items := make([]any, 0, end-start)
-	count := 0
-	for decoder.More() {
-		var item any
-		if err := decoder.Decode(&item); err != nil {
-			return nil, fmt.Errorf("decode fan-out source item %d: %w", count, err)
-		}
-		if count >= start && count < end {
-			items = append(items, item)
-		}
-		count++
+	var value any
+	if err := canonicaljson.DecodePreservingNumberLexemes(raw, &value); err != nil {
+		return nil, fmt.Errorf("decode fan-out source collection: %w", err)
 	}
-	if _, err := decoder.Token(); err != nil {
-		return nil, fmt.Errorf("close fan-out source collection: %w", err)
+	items, err := request.ProjectSource(value)
+	if err != nil {
+		return nil, err
 	}
-	if count != want {
-		return nil, fmt.Errorf("fan-out immutable source cardinality = %d, want %d", count, want)
-	}
-	return items, nil
+	return items[start:end], nil
 }
 
 func (s *fanOutPostgresOwner) ReleaseFanOutClaim(ctx context.Context, claim fanoutobligation.Claim) (runtimepipeline.FanOutClaimSettlement, error) {

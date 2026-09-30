@@ -142,7 +142,7 @@ func validIntentRequest(t *testing.T) IntentRequest {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return IntentRequest{
+	request := IntentRequest{
 		Key: IntentKey{RunID: runID, TriggeringDeliveryID: uuid.NewString(), ElementRef: element},
 		PlanRef: runtimecontracts.FanOutPlanRef{
 			BundleHash: "bundle-v2:sha256:0000000000000000000000000000000000000000000000000000000000000000",
@@ -157,6 +157,7 @@ func validIntentRequest(t *testing.T) IntentRequest {
 			CurrentState: "ready", ChainDepth: 0,
 		},
 	}
+	return a2AdmitFixtureSourceProjection(t, request)
 }
 
 func TestIntentRejectsPersistedSourceOrProgressThatDisagreesWithRequest(t *testing.T) {

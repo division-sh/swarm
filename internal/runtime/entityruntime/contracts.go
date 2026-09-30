@@ -568,13 +568,15 @@ func normalizeValueForType(contract Contract, fieldName, typeRef string, value a
 		if !ok {
 			return nil, fieldTypeError(fieldName, "must be map")
 		}
-		_, valueType, ok := MapTypeParts(typeRef)
+		keyType, valueType, ok := MapTypeParts(typeRef)
 		if !ok {
 			return nil, fieldTypeError(fieldName, "has unsupported map type "+typeRef)
 		}
 		out := make(map[string]any, len(object))
 		for key, raw := range object {
-			key = strings.TrimSpace(key)
+			if !isTextType(typeName(contract, keyType)) {
+				key = strings.TrimSpace(key)
+			}
 			if key == "" {
 				return nil, fieldTypeError(fieldName, "map key cannot be empty")
 			}

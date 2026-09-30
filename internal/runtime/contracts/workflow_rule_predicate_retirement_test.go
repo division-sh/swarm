@@ -162,8 +162,8 @@ func TestRulePredicateContextsRemainDistinct(t *testing.T) {
 				t.Fatalf("join %s error = %v", spelling, err)
 			}
 		})
-		t.Run("join-timeout-"+spelling, func(t *testing.T) {
-			_, err := ruleTestJoin("timeout:\n  after: 1h\n  " + spelling + ": payload.ready\n")
+		t.Run("join-deadline-"+spelling, func(t *testing.T) {
+			_, err := ruleTestJoin("on_deadline:\n  " + spelling + ": payload.ready\n")
 			if err == nil || !strings.Contains(err.Error(), spelling) {
 				t.Fatalf("join timeout %s error = %v", spelling, err)
 			}

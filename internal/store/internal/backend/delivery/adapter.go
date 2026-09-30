@@ -3099,6 +3099,9 @@ func queryDatabaseTime(ctx context.Context, q interface {
 
 func encodeRoute(route events.DeliveryRoute) ([]byte, []byte, []byte, []byte, []byte, error) {
 	route = route.Normalized()
+	if err := route.Context.Validate(); err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
 	target, err := json.Marshal(route.Target)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
@@ -3159,6 +3162,9 @@ func decodeRoute(
 	}
 	if err := json.Unmarshal(contextRaw, &deliveryContext); err != nil {
 		return events.DeliveryRoute{}, fmt.Errorf("decode delivery context: %w", err)
+	}
+	if err := deliveryContext.Validate(); err != nil {
+		return events.DeliveryRoute{}, fmt.Errorf("validate delivery context: %w", err)
 	}
 	if err := json.Unmarshal(projectionRaw, &projection); err != nil {
 		return events.DeliveryRoute{}, fmt.Errorf("decode delivery projection: %w", err)

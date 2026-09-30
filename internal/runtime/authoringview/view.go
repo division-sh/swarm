@@ -179,20 +179,19 @@ type StageGraphTimerView struct {
 }
 
 type StageGraphJoinView struct {
-	ID              string `json:"id"`
-	Stage           string `json:"stage"`
-	FlowPath        string `json:"flow_path"`
-	NodeID          string `json:"node_id"`
-	HandlerEvent    string `json:"handler_event"`
-	MembersFrom     string `json:"members_from"`
-	MembersBy       string `json:"members_by"`
-	MembersBySource string `json:"members_by_source,omitempty"`
-	WindowFrom      string `json:"window_from,omitempty"`
-	WindowBy        string `json:"window_by,omitempty"`
-	WindowBySource  string `json:"window_by_source,omitempty"`
-	Output          string `json:"output"`
-	TimeoutAfter    string `json:"timeout_after"`
-	FanInPin        string `json:"fan_in_pin,omitempty"`
+	ID                string `json:"id"`
+	Stage             string `json:"stage,omitempty"`
+	FlowPath          string `json:"flow_path"`
+	NodeID            string `json:"node_id"`
+	HandlerEvent      string `json:"handler_event"`
+	MembersFrom       string `json:"members_from,omitempty"`
+	MembersBy         string `json:"members_by,omitempty"`
+	MemberCount       *int   `json:"member_count,omitempty"`
+	MembersFromFanOut bool   `json:"members_from_fan_out,omitempty"`
+	Output            string `json:"output,omitempty"`
+	DeadlineAfter     string `json:"deadline_after,omitempty"`
+	DeadlineFrom      string `json:"deadline_from,omitempty"`
+	Until             string `json:"until,omitempty"`
 }
 
 type StageGraphFanOutView struct {
@@ -645,22 +644,23 @@ func buildStageGraphJoinsForFlow(source semanticview.Source, flowID string) []St
 			continue
 		}
 		item := StageGraphJoinView{
-			ID:              strings.TrimSpace(plan.Spec.EffectiveID()),
-			Stage:           strings.TrimSpace(plan.Spec.Stage),
-			FlowPath:        plan.Node.FlowPath(),
-			NodeID:          plan.Node.NodeID(),
-			HandlerEvent:    strings.TrimSpace(plan.HandlerEvent),
-			MembersFrom:     strings.TrimSpace(plan.Spec.Members.From),
-			MembersBy:       strings.TrimSpace(plan.Spec.Members.By),
-			MembersBySource: strings.TrimSpace(plan.Derivation.MembersByFrom),
-			Output:          strings.TrimSpace(plan.Spec.Output),
-			TimeoutAfter:    strings.TrimSpace(plan.Spec.Timeout.After),
-			FanInPin:        strings.TrimSpace(plan.Derivation.FanInPin),
+			ID:                strings.TrimSpace(plan.Spec.EffectiveID()),
+			Stage:             strings.TrimSpace(plan.Spec.Stage),
+			FlowPath:          plan.Node.FlowPath(),
+			NodeID:            plan.Node.NodeID(),
+			HandlerEvent:      strings.TrimSpace(plan.HandlerEvent),
+			MembersFrom:       strings.TrimSpace(plan.Spec.Members.From),
+			MembersBy:         strings.TrimSpace(plan.Spec.Members.By),
+			Output:            strings.TrimSpace(plan.Spec.Output),
+			MembersFromFanOut: plan.Spec.Members.FromFanOut,
+			Until:             plan.UntilEvent,
 		}
-		if plan.Spec.Window != nil {
-			item.WindowFrom = strings.TrimSpace(plan.Spec.Window.From)
-			item.WindowBy = strings.TrimSpace(plan.Spec.Window.By)
-			item.WindowBySource = strings.TrimSpace(plan.Derivation.WindowByFrom)
+		if plan.Spec.Members.Count != nil {
+			count := *plan.Spec.Members.Count
+			item.MemberCount = &count
+		}
+		if plan.Spec.Deadline != nil {
+			item.DeadlineAfter, item.DeadlineFrom = plan.Spec.Deadline.After, plan.Spec.Deadline.From
 		}
 		out = append(out, item)
 	}

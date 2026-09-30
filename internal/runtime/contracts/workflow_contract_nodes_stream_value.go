@@ -2,27 +2,33 @@ package contracts
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 func projectNodeAccumulateValue(value yamlsource.Value) (*AccumulateSpec, error) {
-	fields, err := nodeValueFields(value, "accumulate", accumulateFieldOptions, nil)
+	fields, err := nodeValueFields(value, "accumulate", map[string]struct{}{
+		"into": {}, "from": {}, "description": {}, "key": {},
+	}, nil)
 	if err != nil {
 		return nil, err
 	}
 	var out AccumulateSpec
-	_, out.WindowSet = fields["window"]
-	_, out.DedupBySet = fields["dedup_by"]
+	if key, present := fields["key"]; present {
+		scalar, err := key.Scalar()
+		if err != nil || scalar.Tag != "!!str" || strings.TrimSpace(scalar.Value) == "" {
+			return nil, fmt.Errorf("accumulate.key at %s must be non-empty text", key.Location())
+		}
+	}
 	if err := nodeValueTexts(fields, map[string]*string{
 		"into": &out.Into, "from": &out.From, "description": &out.Description,
-		"window": &out.Window, "dedup_by": &out.DedupBy,
-	}, true); err != nil {
+		"key": &out.Key,
+	}, true, "key"); err != nil {
 		return nil, err
 	}
-	out.WindowPath = paths.Parse(out.Window)
-	out.DedupPath = paths.Parse(out.DedupBy)
+	out.KeyPath = paths.Parse(out.Key)
 	return &out, nil
 }
 

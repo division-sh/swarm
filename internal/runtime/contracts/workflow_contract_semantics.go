@@ -151,7 +151,6 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 	}
 	for _, record := range bundle.ScopedNodeRecords() {
 		node, _ := record.Identity()
-		flowID := strings.TrimSpace(record.Source.FlowPath)
 		for eventType, handler := range record.Entry.EventHandlers {
 			handler, _ = QualifySystemNodeHandlerRuleRefsForEvent(node, eventType, handler)
 			eventType = strings.TrimSpace(eventType)
@@ -159,28 +158,14 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 			if handler.Join == nil {
 				continue
 			}
-			joinPlan := WorkflowJoinPlan{
-				Node:         node,
-				HandlerEvent: eventType,
-				Mode:         handler.Join.Mode(),
-				Spec:         *handler.Join,
-			}
-			if handler.Join.IsFanOutDeliveryBarrier() {
-				if handler.FanOut == nil {
-					return fmt.Errorf("node %s handler %s fan-out delivery join requires paired top-level fan_out", node.Key(), eventType)
-				}
-				fanOutPlan, err := bundle.CompileFanOutPlan(node, eventType, handler, WorkflowFanOutSite{
-					Source: "handler.fan_out", Kind: FanOutSiteHandler, Index: -1, Spec: handler.FanOut, Writes: handler.DataAccumulation.Writes,
-				})
-				if err != nil {
-					return fmt.Errorf("compile fan-out delivery join %s: %w", handler.Join.EffectiveID(), err)
-				}
-				joinPlan.FanOut = WorkflowFanOutDeliveryJoinPlan{FanOut: fanOutPlan.Ref}
-			} else {
-				resultType, _ := ResolveEventFieldType(bundle, flowID, eventType, joinOutputField(handler.Join.Output))
-				joinPlan.ResultType = resultType
+			joinPlan, err := bundle.CompileWorkflowJoinPlan(node, eventType, handler)
+			if err != nil {
+				return fmt.Errorf("compile join %s handler %s: %w", node.Key(), eventType, err)
 			}
 			semantics.Joins = append(semantics.Joins, joinPlan)
+			if joinPlan.UntilEvent != "" {
+				semantics.EventOwners[joinPlan.UntilEvent] = appendIfMissingString(semantics.EventOwners[joinPlan.UntilEvent], node.Key())
+			}
 		}
 	}
 	for _, record := range bundle.ScopedNodeRecords() {

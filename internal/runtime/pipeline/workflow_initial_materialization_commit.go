@@ -50,7 +50,7 @@ func (c WorkflowInitialMaterializationCommand) Validate() error {
 	if err := c.Record.Validate(); err != nil {
 		return err
 	}
-	if err := c.Lifecycle.Validate(c.Record.State.Identity.RunID, c.Record.State.Identity.Route, c.Record.State.EntityID); err != nil {
+	if err := c.Lifecycle.ValidateState(c.Record.State); err != nil {
 		return fmt.Errorf("workflow initial materialization lifecycle: %w", err)
 	}
 	if c.Lifecycle.RequestCompletionCandidate {

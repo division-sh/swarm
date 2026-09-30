@@ -21,99 +21,90 @@ func TestRun_ValidatesStagedJoinContract(t *testing.T) {
 		wantError string
 	}{
 		{name: "valid"},
-		{name: "bare join", mutate: func(h *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
-			h.Join.TimeoutFound = false
-			h.Join.Timeout = runtimecontracts.JoinTimeoutSpec{}
-		}, wantError: "bare joins are invalid"},
+		{name: "explicit membership without deadline", mutate: func(h *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
+			h.Join.Deadline = nil
+			h.Join.OnDeadlineFound = false
+			h.Join.OnDeadline = runtimecontracts.HandlerRuleEntry{}
+		}},
 		{name: "members must be list text", mutate: func(_ *runtimecontracts.SystemNodeEventHandler, b *runtimecontracts.WorkflowContractBundle) {
 			entity := b.RootEntities["Order"]
 			entity.Fields["expected"] = runtimecontracts.EntityFieldDecl{Type: "text"}
 			b.RootEntities["Order"] = entity
-		}, wantError: "must be ordered list<text>"},
-		{name: "custom completion requires remaining", mutate: func(h *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
-			h.Join.CompleteWhen = "join.completed >= 1"
-		}, wantError: "requires remaining: ignore"},
-		{name: "terminate unsupported", mutate: func(h *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
-			h.Join.CompleteWhen = "join.completed >= 1"
-			h.Join.Remaining = "terminate"
-		}, wantError: "requires remaining: ignore"},
+		}, wantError: "requires list<text> or map[text]T"},
+		{name: "deadline requires outcome", mutate: func(h *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
+			h.Join.OnDeadlineFound = false
+			h.Join.OnDeadline = runtimecontracts.HandlerRuleEntry{}
+		}, wantError: "requires non-empty on_deadline"},
+		{name: "count requires bounded closure", mutate: func(h *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
+			h.Join.Members.From = ""
+			h.Join.Members.Count = new(int)
+			h.Join.Deadline = nil
+			h.Join.OnDeadlineFound = false
+			h.Join.OnDeadline = runtimecontracts.HandlerRuleEntry{}
+		}, wantError: "requires deadline or until"},
 		{name: "unsupported dotted join fact", mutate: func(h *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
-			h.Join.CompleteWhen = "join.active == 0"
-			h.Join.Remaining = runtimecontracts.JoinRemainingIgnore
+			h.Join.OnComplete.Emit.Fields["results"] = runtimecontracts.CELExpression("join.active == 0")
 		}, wantError: "unsupported join.active"},
 		{name: "bracket join fact rejected", mutate: func(h *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
-			h.Join.CompleteWhen = `join["active"] == 0`
-			h.Join.Remaining = runtimecontracts.JoinRemainingIgnore
+			h.Join.OnComplete.Emit.Fields["results"] = runtimecontracts.CELExpression(`join["active"] == 0`)
 		}, wantError: "bracket access on join is unsupported"},
 		{name: "approved fact bracket spelling rejected", mutate: func(h *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
-			h.Join.CompleteWhen = `join["completed"] >= 1`
-			h.Join.Remaining = runtimecontracts.JoinRemainingIgnore
+			h.Join.OnComplete.Emit.Fields["results"] = runtimecontracts.CELExpression(`join["completed"] >= 1`)
 		}, wantError: "bracket access on join is unsupported"},
 		{name: "bare join root rejected", mutate: func(h *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
-			h.Join.CompleteWhen = "join == join"
-			h.Join.Remaining = runtimecontracts.JoinRemainingIgnore
+			h.Join.OnComplete.Emit.Fields["results"] = runtimecontracts.CELExpression("join == join")
 		}, wantError: "join must be accessed as join.<field>"},
-		{name: "custom completion must be boolean", mutate: func(h *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
-			h.Join.CompleteWhen = "join.expected"
-			h.Join.Remaining = runtimecontracts.JoinRemainingIgnore
-		}, wantError: "must return bool"},
-		{name: "custom completion rejects invalid missing operand", mutate: func(h *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
-			h.Join.CompleteWhen = "join.missing > 1"
-			h.Join.Remaining = runtimecontracts.JoinRemainingIgnore
+		{name: "outcome rejects invalid missing operand", mutate: func(h *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
+			h.Join.OnComplete.Emit.Fields["results"] = runtimecontracts.CELExpression("join.missing > 1")
 		}, wantError: "no matching overload"},
-		{name: "custom completion types results from output schema", mutate: func(h *runtimecontracts.SystemNodeEventHandler, bundle *runtimecontracts.WorkflowContractBundle) {
+		{name: "outcome types results from output schema", mutate: func(h *runtimecontracts.SystemNodeEventHandler, bundle *runtimecontracts.WorkflowContractBundle) {
 			event := bundle.Events["item.completed"]
 			result := event.Payload.Properties["result"]
 			result.Type = "text"
 			event.Payload.Properties["result"] = result
 			bundle.Events["item.completed"] = event
-			h.Join.CompleteWhen = "join.results[0] > 1"
-			h.Join.Remaining = runtimecontracts.JoinRemainingIgnore
+			h.Join.OnComplete.Emit.Fields["results"] = runtimecontracts.CELExpression("join.results[0] > 1")
 		}, wantError: "no matching overload"},
-		{name: "custom completion preserves named result fields", mutate: func(h *runtimecontracts.SystemNodeEventHandler, bundle *runtimecontracts.WorkflowContractBundle) {
+		{name: "outcome preserves named result fields", mutate: func(h *runtimecontracts.SystemNodeEventHandler, bundle *runtimecontracts.WorkflowContractBundle) {
 			bundle.RootTypes = runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
 				"JoinResult": {Fields: map[string]runtimecontracts.TypeFieldSpec{"value": {Type: "text"}}},
 			}}
 			event := bundle.Events["item.completed"]
 			event.Payload.Properties["result"] = runtimecontracts.EventFieldSpec{Type: "JoinResult"}
 			bundle.Events["item.completed"] = event
-			h.Join.CompleteWhen = `join.results.exists(r, r.value == "ok")`
-			h.Join.Remaining = runtimecontracts.JoinRemainingIgnore
+			h.Join.OnComplete.Emit.Fields["results"] = runtimecontracts.CELExpression(`join.results.exists(r, r.value == "ok")`)
 		}},
-		{name: "custom completion rejects named result as scalar", mutate: func(h *runtimecontracts.SystemNodeEventHandler, bundle *runtimecontracts.WorkflowContractBundle) {
+		{name: "outcome rejects named result as scalar", mutate: func(h *runtimecontracts.SystemNodeEventHandler, bundle *runtimecontracts.WorkflowContractBundle) {
 			bundle.RootTypes = runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
 				"JoinResult": {Fields: map[string]runtimecontracts.TypeFieldSpec{"value": {Type: "text"}}},
 			}}
 			event := bundle.Events["item.completed"]
 			event.Payload.Properties["result"] = runtimecontracts.EventFieldSpec{Type: "JoinResult"}
 			bundle.Events["item.completed"] = event
-			h.Join.CompleteWhen = `join.results[0] > 1`
-			h.Join.Remaining = runtimecontracts.JoinRemainingIgnore
+			h.Join.OnComplete.Emit.Fields["results"] = runtimecontracts.CELExpression(`join.results.exists(r, r > 1)`)
 		}, wantError: "no matching overload"},
-		{name: "custom completion preserves enum result", mutate: func(h *runtimecontracts.SystemNodeEventHandler, bundle *runtimecontracts.WorkflowContractBundle) {
+		{name: "outcome preserves enum result", mutate: func(h *runtimecontracts.SystemNodeEventHandler, bundle *runtimecontracts.WorkflowContractBundle) {
 			bundle.RootTypes = runtimecontracts.TypeCatalogDocument{Enums: map[string]runtimecontracts.EnumTypeDecl{"Decision": {Values: []string{"accept", "reject"}, Default: "accept"}}}
 			event := bundle.Events["item.completed"]
 			event.Payload.Properties["result"] = runtimecontracts.EventFieldSpec{Type: "Decision"}
 			bundle.Events["item.completed"] = event
-			h.Join.CompleteWhen = `join.results[0] > 1`
-			h.Join.Remaining = runtimecontracts.JoinRemainingIgnore
+			h.Join.OnComplete.Emit.Fields["results"] = runtimecontracts.CELExpression(`join.results.exists(r, r > 1)`)
 		}, wantError: "no matching overload"},
-		{name: "custom completion preserves scalar alias result", mutate: func(h *runtimecontracts.SystemNodeEventHandler, bundle *runtimecontracts.WorkflowContractBundle) {
+		{name: "outcome preserves scalar alias result", mutate: func(h *runtimecontracts.SystemNodeEventHandler, bundle *runtimecontracts.WorkflowContractBundle) {
 			bundle.RootTypes = runtimecontracts.TypeCatalogDocument{Scalars: map[string]runtimecontracts.ScalarTypeDecl{"Score": {Base: "integer"}}}
 			event := bundle.Events["item.completed"]
 			event.Payload.Properties["result"] = runtimecontracts.EventFieldSpec{Type: "Score"}
 			bundle.Events["item.completed"] = event
-			h.Join.CompleteWhen = `join.results[0].startsWith("1")`
-			h.Join.Remaining = runtimecontracts.JoinRemainingIgnore
+			h.Join.OnComplete.Emit.Fields["results"] = runtimecontracts.CELExpression(`join.results.exists(r, r.startsWith("1"))`)
 		}, wantError: "no matching overload"},
 		{name: "outcome payload forbidden", mutate: func(h *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
 			h.Join.OnComplete.Emit.Fields["results"] = runtimecontracts.CELExpression("payload.result")
-		}, wantError: "may not reference payload.*"},
-		{name: "reentry requires window", mutate: func(_ *runtimecontracts.SystemNodeEventHandler, b *runtimecontracts.WorkflowContractBundle) {
+		}, wantError: "may not reference payload"},
+		{name: "reentry is lifecycle owned", mutate: func(_ *runtimecontracts.SystemNodeEventHandler, b *runtimecontracts.WorkflowContractBundle) {
 			node := b.Nodes["join-node"]
 			node.EventHandlers["retry.requested"] = runtimecontracts.SystemNodeEventHandler{AdvancesTo: "awaiting"}
 			b.Nodes["join-node"] = node
-		}, wantError: "stage is re-entrant"},
+		}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -122,6 +113,14 @@ func TestRun_ValidatesStagedJoinContract(t *testing.T) {
 			if tc.mutate != nil {
 				tc.mutate(&h, bundle)
 				bundle.Nodes["join-node"].EventHandlers["item.completed"] = h
+			}
+			semanticviewtest.WrapRootAgents(bundle)
+			if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+				if tc.wantError == "" || !strings.Contains(err.Error(), tc.wantError) {
+					t.Fatalf("compile join: %v, want %q", err, tc.wantError)
+				}
+				t.Logf("malformed join rejected before boot validation: %v", err)
+				return
 			}
 			rebuildJoinValidationTopology(bundle)
 			report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
@@ -224,10 +223,11 @@ shared-node:
     item.received:
       join:
         stage: missing
-        members: {from: entity.expected, by: payload.member_id}
+        members: {from: state.expected, by: payload.member_id}
         output: payload.result
         on_complete: {advances_to: done}
-        timeout: {after: 1h, advances_to: failed}
+        deadline: {after: 1h, from: stage_entry}
+        on_deadline: {advances_to: failed}
 `)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
@@ -298,18 +298,19 @@ func TestRun_JoinValidationAttributesDistinctFlowFailureExactlyInEitherOrder(t *
 func joinValidationBundle() *runtimecontracts.WorkflowContractBundle {
 	spec := runtimecontracts.JoinSpec{
 		ID: "awaiting", Stage: "awaiting",
-		Members: runtimecontracts.JoinMembersSpec{From: "entity.expected", By: "payload.member_id"},
+		Members: runtimecontracts.JoinMembersSpec{From: "state.expected", By: "payload.member_id"},
 		Output:  "payload.result", OnCompleteFound: true,
-		OnComplete:   runtimecontracts.HandlerRuleEntry{AdvancesTo: "ready", Emit: runtimecontracts.EmitSpec{Event: "join.completed", Fields: map[string]runtimecontracts.ExpressionValue{"results": runtimecontracts.CELExpression("join.results")}}},
-		TimeoutFound: true,
-		Timeout:      runtimecontracts.JoinTimeoutSpec{After: "1h", Outcome: runtimecontracts.HandlerRuleEntry{AdvancesTo: "attention", Emit: runtimecontracts.EmitSpec{Event: "join.timed_out", Fields: map[string]runtimecontracts.ExpressionValue{"missing": runtimecontracts.CELExpression("join.missing")}}}},
+		OnComplete:      runtimecontracts.HandlerRuleEntry{AdvancesTo: "ready", Emit: runtimecontracts.EmitSpec{Event: "join.completed", Fields: map[string]runtimecontracts.ExpressionValue{"results": runtimecontracts.CELExpression("join.results")}}},
+		OnDeadlineFound: true,
+		Deadline:        &runtimecontracts.JoinDeadlineSpec{After: "1h", From: runtimecontracts.JoinDeadlineFromStageEntry},
+		OnDeadline:      runtimecontracts.HandlerRuleEntry{AdvancesTo: "attention", Emit: runtimecontracts.EmitSpec{Event: "join.timed_out", Fields: map[string]runtimecontracts.ExpressionValue{"missing": runtimecontracts.CELExpression("join.missing")}}},
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema:   &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "awaiting", Initial: true}, {ID: "ready"}, {ID: "attention", Terminal: true}}}},
 		RootEntities: runtimecontracts.EntityContractsDocument{"Order": {Fields: map[string]runtimecontracts.EntityFieldDecl{"expected": {Type: "[text]", Initial: []any{}}}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"item.completed": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"member_id": {Type: "text"}, "result": {Type: "jsonb"}}, Required: []string{"member_id", "result"}}},
-			"join.completed": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"results": {Type: "list<jsonb>"}}, Required: []string{"results"}}},
+			"item.completed": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"member_id": {Type: "text"}, "result": {Type: "text"}}, Required: []string{"member_id", "result"}}},
+			"join.completed": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"results": {Type: "list<text>"}}, Required: []string{"results"}}},
 			"join.timed_out": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"missing": {Type: "list<text>"}}, Required: []string{"missing"}}},
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{"join-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"item.completed": {Join: &spec}}}},

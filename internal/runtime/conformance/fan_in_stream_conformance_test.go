@@ -575,7 +575,7 @@ func fanInStreamTargetRoute(routes []events.DeliveryRoute, target events.RouteId
 func fanInStreamAccumulatorItemCount(t *testing.T, buckets map[string]map[string]any, window string) int {
 	t.Helper()
 	node := conformanceNode(t, templatefanin.ReceiverFlowID, templatefanin.ReceiverNodeID)
-	key := timeridentity.NewAccumulatorWindowBucketRef(node, templatefanin.ReceiverEvent, window).Key()
+	key := timeridentity.NewAccumulatorBucketRef(node, templatefanin.ReceiverEvent).Key()
 	nodeBucket, ok := buckets[node.Key()]
 	if !ok {
 		t.Fatalf("receiver node bucket missing from %#v", buckets)
@@ -586,7 +586,7 @@ func fanInStreamAccumulatorItemCount(t *testing.T, buckets map[string]map[string
 	}
 	raw, ok := accumulators[key].(map[string]any)
 	if !ok {
-		t.Fatalf("window accumulator %q missing from %#v", key, accumulators)
+		t.Fatalf("instance accumulator %q for business partition %q missing from %#v", key, window, accumulators)
 	}
 	switch items := raw["items"].(type) {
 	case []map[string]any:

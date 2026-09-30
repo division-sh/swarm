@@ -3,6 +3,7 @@ package workflowexpr
 import (
 	"fmt"
 
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/google/cel-go/cel"
 	celast "github.com/google/cel-go/common/ast"
 )
@@ -12,14 +13,7 @@ func validateAuthoredContextRoots(expression string, opts ValueExpressionOptions
 		return fmt.Errorf("_loop is internal; use the authored loop.* members")
 	}
 	if opts.AllowJoin {
-		for _, root := range []string{"payload", "event", "policy", "computed", "fan_out", "accumulated", "_entity"} {
-			if ExpressionReferencesRoot(expression, root) {
-				return fmt.Errorf("join expression may not reference %s.*", root)
-			}
-		}
-	}
-	if opts.JoinOnly && (ExpressionReferencesRoot(expression, "entity") || ExpressionReferencesRoot(expression, "loop")) {
-		return fmt.Errorf("join complete_when may reference only join.*")
+		return contracts.ValidateJoinOutcomeExpressionScope(expression)
 	}
 	return nil
 }
@@ -33,9 +27,6 @@ func validateLoopAccesses(compiled *cel.Ast, opts ValueExpressionOptions) error 
 	var visit func(celast.NavigableExpr) error
 	visit = func(expr celast.NavigableExpr) error {
 		if expr.Kind() == celast.IdentKind && expr.AsIdent() == "_loop" {
-			if opts.JoinOnly {
-				return fmt.Errorf("join complete_when may reference only join.*")
-			}
 			parent, ok := expr.Parent()
 			if !ok || parent.Kind() != celast.SelectKind || parent.AsSelect().Operand().ID() != expr.ID() {
 				return fmt.Errorf("loop must be accessed as loop.<defined member>")

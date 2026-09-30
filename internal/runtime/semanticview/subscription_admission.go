@@ -393,8 +393,31 @@ func ResolveExecutableNodeSubscriptionHandler(source Source, node runtimeidentit
 }
 
 func resolveExecutableNodeSubscriptionHandler(source Source, node runtimeidentity.ExecutableNode, eventType string, handlers map[string]runtimecontracts.SystemNodeEventHandler) NodeSubscriptionHandlerResolution {
-	if len(handlers) == 0 {
-		return NodeSubscriptionHandlerResolution{}
+	flowPath := ""
+	var inputEvents []string
+	if semanticScope, err := ResolveExecutableNodeSemanticScope(source, node); err == nil {
+		if _, ok := semanticScope.OwningFlow(); ok {
+			flowPath = sourceFlowPath(source, node.FlowPath())
+			inputEvents = authoredSubscriptionInputEvents(source, node.FlowPath())
+		}
+	}
+	var untilResolution NodeSubscriptionHandlerResolution
+	for _, plan := range WorkflowJoinUntilPlansForNode(source, node) {
+		admission := ClassifyExecutableNodeSubscription(source, node, plan.Spec.Until)
+		if !admission.Admitted() || (!admission.Matches(eventType) && !admission.MatchesReceiverInput(eventType, flowPath, inputEvents)) {
+			continue
+		}
+		untilResolution = NodeSubscriptionHandlerResolution{
+			Handler:         runtimecontracts.SystemNodeEventHandler{JoinUntilPlans: WorkflowJoinUntilPlansForEvent(source, node, plan.UntilEvent)},
+			HandlerEventKey: eventType,
+			Admission:       admission,
+			Matched:         true,
+		}
+		break
+	}
+	withUntil := func(handler runtimecontracts.SystemNodeEventHandler) runtimecontracts.SystemNodeEventHandler {
+		handler.JoinUntilPlans = untilResolution.Handler.JoinUntilPlans
+		return handler
 	}
 	keys := make([]string, 0, len(handlers))
 	for key := range handlers {
@@ -419,19 +442,11 @@ func resolveExecutableNodeSubscriptionHandler(source Source, node runtimeidentit
 			exact = append(exact, candidate)
 		}
 	}
-	flowPath := ""
-	var inputEvents []string
-	if semanticScope, err := ResolveExecutableNodeSemanticScope(source, node); err == nil {
-		if _, ok := semanticScope.OwningFlow(); ok {
-			flowPath = sourceFlowPath(source, node.FlowPath())
-			inputEvents = authoredSubscriptionInputEvents(source, node.FlowPath())
-		}
-	}
 	for _, candidate := range append(exact, patterns...) {
 		admission := candidate.admission
 		if admission.Pattern() && candidate.key == eventType {
 			return NodeSubscriptionHandlerResolution{
-				Handler: handlers[candidate.key], HandlerEventKey: strings.TrimSpace(candidate.key),
+				Handler: withUntil(handlers[candidate.key]), HandlerEventKey: strings.TrimSpace(candidate.key),
 				Admission: admission, Matched: true,
 			}
 		}
@@ -441,11 +456,11 @@ func resolveExecutableNodeSubscriptionHandler(source Source, node runtimeidentit
 			continue
 		}
 		return NodeSubscriptionHandlerResolution{
-			Handler: handlers[candidate.key], HandlerEventKey: strings.TrimSpace(candidate.key),
+			Handler: withUntil(handlers[candidate.key]), HandlerEventKey: strings.TrimSpace(candidate.key),
 			Admission: admission, Matched: true,
 		}
 	}
-	return NodeSubscriptionHandlerResolution{}
+	return untilResolution
 }
 
 func failedAuthoredSubscription(result AuthoredSubscriptionAdmission, failure AuthoredSubscriptionFailure, message string) AuthoredSubscriptionAdmission {

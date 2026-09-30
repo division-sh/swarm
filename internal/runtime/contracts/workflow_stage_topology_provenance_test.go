@@ -10,12 +10,14 @@ func TestWorkflowStageTopologyPreservesHandlerOriginAndEffectiveEvent(t *testing
 	joinA := JoinSpec{
 		ID: "join-a", Stage: "awaiting-a",
 		OnComplete: HandlerRuleEntry{AdvancesTo: "complete-a"},
-		Timeout:    JoinTimeoutSpec{After: "1h", Outcome: HandlerRuleEntry{AdvancesTo: "timeout-a"}},
+		Deadline:   &JoinDeadlineSpec{After: "1h", From: JoinDeadlineFromStageEntry},
+		OnDeadline: HandlerRuleEntry{AdvancesTo: "timeout-a"},
 	}
 	joinB := JoinSpec{
 		ID: "join-b", Stage: "awaiting-b",
 		OnComplete: HandlerRuleEntry{AdvancesTo: "complete-b"},
-		Timeout:    JoinTimeoutSpec{After: "2h", Outcome: HandlerRuleEntry{AdvancesTo: "timeout-b"}},
+		Deadline:   &JoinDeadlineSpec{After: "2h", From: JoinDeadlineFromStageEntry},
+		OnDeadline: HandlerRuleEntry{AdvancesTo: "timeout-b"},
 	}
 	joinNode := identitytest.RootNode(t, "join-node")
 	topology := BuildWorkflowStageTopology(
@@ -46,7 +48,7 @@ func TestWorkflowStageTopologyPreservesHandlerOriginAndEffectiveEvent(t *testing
 	assertTargets("join.b.requested", "complete-b", "timeout-b")
 
 	for _, edge := range topology.Edges {
-		if edge.Source != string(HandlerAdvanceCarrierJoinTimeout) {
+		if edge.Source != string(HandlerAdvanceCarrierJoinOnDeadline) {
 			continue
 		}
 		if edge.EventType != "platform.join_timeout" {
@@ -86,8 +88,8 @@ func TestWorkflowStageTopologyStampsLoopAndTimerOrigins(t *testing.T) {
 func TestTopologyEdgeIdentityIncludesHandlerOrigin(t *testing.T) {
 	stages := map[string]struct{}{"waiting": {}, "done": {}}
 	node := identitytest.RootNode(t, "node")
-	edges := appendTopologyEdge(nil, stages, WorkflowStageTopologyEdge{From: "waiting", To: "done", Source: "handler.join.timeout", Node: node, HandlerEvent: "a", EventType: "platform.join_timeout"})
-	edges = appendTopologyEdge(edges, stages, WorkflowStageTopologyEdge{From: "waiting", To: "done", Source: "handler.join.timeout", Node: node, HandlerEvent: "b", EventType: "platform.join_timeout"})
+	edges := appendTopologyEdge(nil, stages, WorkflowStageTopologyEdge{From: "waiting", To: "done", Source: "handler.join.on_deadline", Node: node, HandlerEvent: "a", EventType: "platform.join_timeout"})
+	edges = appendTopologyEdge(edges, stages, WorkflowStageTopologyEdge{From: "waiting", To: "done", Source: "handler.join.on_deadline", Node: node, HandlerEvent: "b", EventType: "platform.join_timeout"})
 	if len(edges) != 2 {
 		t.Fatalf("edges = %#v, want distinct handler origins", edges)
 	}

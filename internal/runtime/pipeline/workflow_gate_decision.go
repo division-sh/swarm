@@ -597,6 +597,10 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, ca
 	if err != nil {
 		return false, err
 	}
+	effect, err = effect.WithExecutionOccurrence("gate", card.CardID)
+	if err != nil {
+		return false, err
+	}
 	lifecycle, err := pc.prepareWorkflowLifecycleMutation(ctx, address.FlowInstance, &preparedState.instance, []runtimeworkflowlifecycle.Effect{effect}, true)
 	if err != nil {
 		return false, err

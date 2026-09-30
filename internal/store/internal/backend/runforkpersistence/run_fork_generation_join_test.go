@@ -6,6 +6,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"reflect"
 	"strings"
 	"testing"
@@ -16,20 +17,21 @@ func TestForkGenerationHistoricalJoinProjection(t *testing.T) {
 	now := time.Unix(100, 0)
 	for _, hostile := range []string{"retained_history", "missing_loop", "duplicate", "occupied_destination"} {
 		t.Run(hostile, func(t *testing.T) {
-			source, err := loopruntime.New("source", "entity", "", "review", "revision", "start", "draft", 4, now)
+			source, err := loopruntime.New("source", "source", "", "review", "revision", "start", "draft", 4, now)
 			if err != nil {
 				t.Fatal(err)
 			}
 			old := source.Generation()
-			ref, err := timeridentity.NewJoinRefForGeneration(forkGenerationRootNode("collector"), "result", "draft", "join", "window", old)
+			entry := a2ForkEntry(t, "source", "source", "source", "draft", "old")
+			ref, err := timeridentity.NewJoinRef(forkGenerationRootNode("collector"), "result", "draft", "join")
 			if err != nil {
 				t.Fatal(err)
 			}
-			handle, err := timeridentity.JoinTimeoutHandle(ref)
+			ref, err = ref.BindStageEntry(entry, old)
 			if err != nil {
 				t.Fatal(err)
 			}
-			join, err := joinruntime.NewActivation(handle, []string{"a", "b"}, now, now.Add(time.Hour))
+			join, err := joinruntime.NewActivation(ref, []string{"a", "b"}, nil, now, now.Add(time.Hour))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -37,7 +39,7 @@ func TestForkGenerationHistoricalJoinProjection(t *testing.T) {
 				t.Fatal(err)
 			}
 			join.Status = joinruntime.StatusClosed
-			join.CloseReason = joinruntime.CloseReasonTimeout
+			join.CloseReason = joinruntime.CloseReasonDeadline
 			join.TimerCancelled = true
 			join.OutcomePending = true
 			buckets := map[string]map[string]any{}
@@ -53,7 +55,7 @@ func TestForkGenerationHistoricalJoinProjection(t *testing.T) {
 			if err := loopruntime.Store(buckets, source); err != nil {
 				t.Fatal(err)
 			}
-			want, err := loopruntime.ForkGeneration(old, "child", "entity")
+			want, err := loopruntime.ForkGeneration(old, "child", "child")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -77,7 +79,12 @@ func TestForkGenerationHistoricalJoinProjection(t *testing.T) {
 			}
 			raw := runtimeengine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets()
 			before := projectionJSON(t, raw)
-			child, err := forkAttemptGenerationState(raw, "child", "entity")
+			entity := a2ForkEntity(t, entry, raw)
+			projection, err := runfork.ProjectEntityOwnership("source", "child", "source", "source")
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, child, _, err := projectRunForkEntityExecutionState(entity, "source", "child", projection)
 			if projectionJSON(t, raw) != before {
 				t.Fatal("join projection changed source, including on failure")
 			}
@@ -104,8 +111,9 @@ func TestForkGenerationHistoricalJoinProjection(t *testing.T) {
 			}
 			if !got.JoinRef().Declaration().Equal(join.JoinRef().Declaration()) || !reflect.DeepEqual(got.Outputs, join.Outputs) ||
 				got.Status != join.Status || got.CloseReason != join.CloseReason || got.TimerCancelled != join.TimerCancelled ||
-				got.OutcomePending != join.OutcomePending || got.OutcomeFired != join.OutcomeFired || got.CompletionEvent != join.CompletionEvent ||
-				!got.ArmedAt.Equal(join.ArmedAt) || !got.FireAt.Equal(join.FireAt) || !reflect.DeepEqual(got.Members, join.Members) {
+				got.OutcomePending != join.OutcomePending || got.OutcomeFired != join.OutcomeFired ||
+				!got.ArmedAt.Equal(join.ArmedAt) || !got.FireAt.Equal(join.FireAt) || !got.DeadlineAt.Equal(join.DeadlineAt) ||
+				!reflect.DeepEqual(got.MemberCount, join.MemberCount) || !reflect.DeepEqual(got.Members, join.Members) {
 				t.Fatal("join projection changed retained lifecycle evidence")
 			}
 		})
@@ -114,7 +122,7 @@ func TestForkGenerationHistoricalJoinProjection(t *testing.T) {
 
 func TestForkAttemptGenerationRemintsJoinHandleIdentity(t *testing.T) {
 	now := time.Date(2026, time.July, 11, 12, 0, 0, 0, time.UTC)
-	activation, err := loopruntime.New("source-run", "entity-1", "validation", "revision", "revision_id", "event-1", "drafting", 3, now)
+	activation, err := loopruntime.New("source-run", "source-run", "validation", "revision", "revision_id", "event-1", "drafting", 3, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,27 +130,33 @@ func TestForkAttemptGenerationRemintsJoinHandleIdentity(t *testing.T) {
 	if err := loopruntime.Store(buckets, activation); err != nil {
 		t.Fatal(err)
 	}
-	joinRef, err := timeridentity.NewJoinRefForGeneration(forkGenerationRootNode("review-node"), "review.result", "review", "review", "", activation.Generation())
+	entry := a2ForkEntry(t, "source-run", "source-run", "source-run", "review", "entry")
+	joinRef, err := timeridentity.NewJoinRef(forkGenerationRootNode("review-node"), "review.result", "review", "review")
 	if err != nil {
 		t.Fatal(err)
 	}
-	joinHandle, err := timeridentity.JoinTimeoutHandle(joinRef)
+	joinRef, err = joinRef.BindStageEntry(entry, activation.Generation())
 	if err != nil {
 		t.Fatal(err)
 	}
-	join, err := joinruntime.NewActivation(joinHandle, []string{"a"}, now, now.Add(time.Hour))
+	join, err := joinruntime.NewActivation(joinRef, []string{"a"}, nil, now, now.Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := joinruntime.Store(buckets, join); err != nil {
 		t.Fatal(err)
 	}
-	accumulatorRef := timeridentity.NewAccumulatorBucketRefForGeneration(forkGenerationRootNode("review-node"), "review.result", "", activation.Generation())
+	accumulatorRef := timeridentity.NewAccumulatorBucketRefForGeneration(forkGenerationRootNode("review-node"), "review.result", activation.Generation())
 	nodeBucketKey := forkGenerationRootNode("review-node").Key()
 	buckets[nodeBucketKey] = map[string]any{}
 	buckets[nodeBucketKey]["handler_accumulators"] = map[string]any{accumulatorRef.Key(): map[string]any{"count": 1}}
 	raw := runtimeengine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets()
-	forkedRaw, err := forkAttemptGenerationState(raw, "fork-run", "entity-1")
+	entity := a2ForkEntity(t, entry, raw)
+	projection, err := runfork.ProjectEntityOwnership("source-run", "fork-run", "source-run", "source-run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, forkedRaw, _, err := projectRunForkEntityExecutionState(entity, "source-run", "fork-run", projection)
 	if err != nil {
 		t.Fatal(err)
 	}

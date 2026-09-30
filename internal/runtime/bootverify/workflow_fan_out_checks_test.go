@@ -28,7 +28,7 @@ func TestRun_ValidatesFanOutCollectionContract(t *testing.T) {
 				event.Payload.Properties["line_items"] = runtimecontracts.EventFieldSpec{Type: "array"}
 				bundle.Events["order.accepted"] = event
 			},
-			wantError: "must declare an exact collection item type",
+			wantError: "collection must declare list items or map[text]T keys, got dynamic",
 		},
 		{
 			name: "missing alias",
@@ -82,7 +82,7 @@ func TestRun_ValidatesFanOutCollectionContract(t *testing.T) {
 				event.Payload.Properties["customer_id"] = runtimecontracts.EventFieldSpec{Type: "text"}
 				bundle.Events["order.accepted"] = event
 			},
-			wantError: `must reference a list/array collection field; field has type "text"`,
+			wantError: "collection must declare list items or map[text]T keys, got text",
 		},
 		{
 			name: "items source must not descend below declared collection field",

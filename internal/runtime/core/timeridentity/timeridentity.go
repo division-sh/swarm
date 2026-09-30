@@ -247,8 +247,8 @@ const (
 )
 
 type JoinArrivalRef struct {
-	stage  string
-	window string
+	stage string
+	entry StageEntryRef
 }
 
 // FanOutDeliveryRef is the immutable declaration/intent coordinate shared by
@@ -265,7 +265,6 @@ var semanticDigestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 type AccumulatorBucketRef struct {
 	Node       runtimeidentity.ExecutableNode
 	EventType  string
-	Window     string
 	Generation attemptgeneration.Generation
 }
 
@@ -397,7 +396,7 @@ func JoinCompleteHandle(ref JoinRef) (TimerHandle, error) {
 
 func newJoinHandle(kind TimerHandleKind, ref JoinRef) (TimerHandle, error) {
 	ref = ref.Normalize()
-	if !ref.Valid() {
+	if !ref.Valid() || ref.Mode() == JoinRefModeArrival && ref.StageEntry().Empty() {
 		return TimerHandle{}, fmt.Errorf("join timer handle requires a complete declaration reference")
 	}
 	return TimerHandle{kind: kind, join: ref}, nil
@@ -408,7 +407,7 @@ func (h TimerHandle) Valid() bool {
 	case TimerHandleWorkflowTimer:
 		return strings.TrimSpace(h.timerID) != ""
 	case TimerHandleJoinTimeout, TimerHandleJoinComplete:
-		return h.join.Valid() && !h.generation.Valid()
+		return h.join.Valid() && !h.generation.Valid() && (h.join.Mode() != JoinRefModeArrival || !h.join.StageEntry().Empty())
 	default:
 		return false
 	}
@@ -537,29 +536,35 @@ func parseTimerHandleMap(handleMap map[string]any) (TimerHandle, bool) {
 	}
 }
 
-func NewJoinRef(node runtimeidentity.ExecutableNode, handlerEvent, stage, joinID, window string) (JoinRef, error) {
-	return NewJoinRefForGeneration(node, handlerEvent, stage, joinID, window, attemptgeneration.Generation{})
-}
-
-func NewJoinRefForGeneration(node runtimeidentity.ExecutableNode, handlerEvent, stage, joinID, window string, generation attemptgeneration.Generation) (JoinRef, error) {
+func NewJoinRef(node runtimeidentity.ExecutableNode, handlerEvent, stage, joinID string) (JoinRef, error) {
 	ref := JoinRef{
 		node:         node,
 		handlerEvent: strings.TrimSpace(handlerEvent),
 		joinID:       strings.TrimSpace(joinID),
 		mode:         JoinRefModeArrival,
 		arrival: JoinArrivalRef{
-			stage:  strings.TrimSpace(stage),
-			window: strings.TrimSpace(window),
+			stage: strings.TrimSpace(stage),
 		},
-		generation: generation.Normalize(),
 	}
 	if !ref.Valid() {
 		return JoinRef{}, fmt.Errorf("join declaration reference requires node, handler event, stage, and join identity")
 	}
-	if generation != (attemptgeneration.Generation{}) && !ref.generation.Valid() {
-		return JoinRef{}, fmt.Errorf("join declaration reference generation is invalid")
-	}
 	return ref, nil
+}
+
+func (r JoinRef) BindStageEntry(entry StageEntryRef, generation attemptgeneration.Generation) (JoinRef, error) {
+	if r.mode != JoinRefModeArrival || entry.Validate() != nil || entry.Stage != r.Stage() {
+		return JoinRef{}, fmt.Errorf("arrival join requires its exact lifecycle stage entry")
+	}
+	if !r.arrival.entry.Empty() && r.arrival.entry != entry {
+		return JoinRef{}, fmt.Errorf("arrival join cannot replace its retained entry")
+	}
+	r.arrival.entry = entry
+	r.generation = generation.Normalize()
+	if generation != (attemptgeneration.Generation{}) && !r.generation.Valid() || !r.Valid() {
+		return JoinRef{}, fmt.Errorf("arrival join has invalid occurrence evidence")
+	}
+	return r, nil
 }
 
 // NewFanOutDeliveryJoinRef creates the declaration form. BindFanOutIntent
@@ -606,7 +611,6 @@ func (r JoinRef) Normalize() JoinRef {
 	r.joinID = strings.TrimSpace(r.joinID)
 	r.mode = JoinRefMode(strings.TrimSpace(string(r.mode)))
 	r.arrival.stage = strings.TrimSpace(r.arrival.stage)
-	r.arrival.window = strings.TrimSpace(r.arrival.window)
 	r.fanOut.bundleHash = strings.TrimSpace(r.fanOut.bundleHash)
 	r.fanOut.semanticDigest = strings.TrimSpace(r.fanOut.semanticDigest)
 	r.fanOut.triggeringDeliveryID = strings.TrimSpace(r.fanOut.triggeringDeliveryID)
@@ -622,7 +626,9 @@ func (r JoinRef) Valid() bool {
 	}
 	switch r.mode {
 	case JoinRefModeArrival:
-		return r.arrival.stage != "" && r.fanOut == (FanOutDeliveryRef{})
+		return r.arrival.stage != "" && r.fanOut == (FanOutDeliveryRef{}) &&
+			(r.arrival.entry.Empty() && r.generation == (attemptgeneration.Generation{}) ||
+				r.arrival.entry.Validate() == nil && r.arrival.entry.Stage == r.arrival.stage)
 	case JoinRefModeFanOutDelivery:
 		return r.arrival == (JoinArrivalRef{}) && r.fanOut.Valid() &&
 			r.fanOut.declaration.Flow().Equal(r.node.DeclarationIdentity().Flow())
@@ -638,7 +644,7 @@ func (r JoinRef) HandlerEvent() string                 { return r.Normalize().ha
 func (r JoinRef) Mode() JoinRefMode                    { return r.Normalize().mode }
 func (r JoinRef) Stage() string                        { return r.Normalize().arrival.stage }
 func (r JoinRef) JoinID() string                       { return r.Normalize().joinID }
-func (r JoinRef) Window() string                       { return r.Normalize().arrival.window }
+func (r JoinRef) StageEntry() StageEntryRef            { return r.arrival.entry }
 func (r JoinRef) Generation() attemptgeneration.Generation {
 	return r.Normalize().generation
 }
@@ -674,7 +680,7 @@ func (r FanOutDeliveryRef) TriggeringDeliveryID() string { return r.Normalize().
 func (r JoinRef) WithGeneration(generation attemptgeneration.Generation) (JoinRef, error) {
 	r = r.Normalize()
 	if r.mode == JoinRefModeArrival {
-		return NewJoinRefForGeneration(r.Node(), r.HandlerEvent(), r.Stage(), r.JoinID(), r.Window(), generation)
+		return r.BindStageEntry(r.StageEntry(), generation)
 	}
 	if r.mode != JoinRefModeFanOutDelivery {
 		return JoinRef{}, fmt.Errorf("join declaration mode is invalid")
@@ -690,7 +696,7 @@ func (r JoinRef) Declaration() JoinRef {
 	r = r.Normalize()
 	r.generation = attemptgeneration.Generation{}
 	if r.mode == JoinRefModeArrival {
-		r.arrival.window = ""
+		r.arrival.entry = StageEntryRef{}
 	} else if r.mode == JoinRefModeFanOutDelivery {
 		r.fanOut.triggeringDeliveryID = ""
 	}
@@ -707,7 +713,7 @@ func (r JoinRef) Key() string {
 	parts := []string{string(r.mode), r.node.Key(), r.handlerEvent, r.joinID}
 	switch r.mode {
 	case JoinRefModeArrival:
-		parts = append(parts, r.arrival.stage, r.arrival.window)
+		parts = append(parts, r.arrival.stage, r.arrival.entry.Key())
 	case JoinRefModeFanOutDelivery:
 		parts = append(parts, r.fanOut.declaration.Key(), r.fanOut.bundleHash, r.fanOut.semanticDigest, r.fanOut.triggeringDeliveryID)
 	}
@@ -738,7 +744,9 @@ func (r JoinRef) PayloadValue() map[string]any {
 	switch r.mode {
 	case JoinRefModeArrival:
 		payload["stage"] = r.arrival.stage
-		payload["window"] = r.arrival.window
+		if !r.arrival.entry.Empty() {
+			payload["stage_entry"] = r.arrival.entry
+		}
 	case JoinRefModeFanOutDelivery:
 		payload["fan_out"] = map[string]any{
 			"flow_path":              r.fanOut.declaration.Flow().String(),
@@ -753,6 +761,26 @@ func (r JoinRef) PayloadValue() map[string]any {
 		payload[attemptgeneration.PayloadKey] = generation.PayloadValue()
 	}
 	return payload
+}
+
+func (r JoinRef) MarshalJSON() ([]byte, error) {
+	if !r.Valid() {
+		return nil, fmt.Errorf("cannot encode an invalid join reference")
+	}
+	return json.Marshal(r.PayloadValue())
+}
+
+func (r *JoinRef) UnmarshalJSON(raw []byte) error {
+	var value map[string]any
+	if err := decodeStrictJSON(raw, &value); err != nil {
+		return err
+	}
+	ref, ok := joinRefFromAny(value)
+	if !ok {
+		return fmt.Errorf("invalid persisted join reference")
+	}
+	*r = ref
+	return nil
 }
 
 func ParseJoinHandle(payload map[string]any) (TimerHandle, JoinRef, bool) {
@@ -810,13 +838,22 @@ func joinRefFromAny(value any) (JoinRef, bool) {
 	var ref JoinRef
 	switch mode {
 	case JoinRefModeArrival:
-		if !onlyKeys(raw, "mode", "node", "handler_event", "stage", "join_id", "window", attemptgeneration.PayloadKey) {
+		if !onlyKeys(raw, "mode", "node", "handler_event", "stage", "join_id", "stage_entry", attemptgeneration.PayloadKey) {
 			return JoinRef{}, false
 		}
 		if _, present := raw["fan_out"]; present {
 			return JoinRef{}, false
 		}
-		ref, err = NewJoinRefForGeneration(node, asExactString(raw["handler_event"]), asExactString(raw["stage"]), asExactString(raw["join_id"]), asExactString(raw["window"]), generation)
+		ref, err = NewJoinRef(node, asExactString(raw["handler_event"]), asExactString(raw["stage"]), asExactString(raw["join_id"]))
+		if value, present := raw["stage_entry"]; present && err == nil {
+			entry, entryErr := StageEntryRefFromValue(value)
+			if entryErr != nil {
+				return JoinRef{}, false
+			}
+			ref, err = ref.BindStageEntry(entry, generation)
+		} else if generation != (attemptgeneration.Generation{}) {
+			return JoinRef{}, false
+		}
 	case JoinRefModeFanOutDelivery:
 		if !onlyKeys(raw, "mode", "node", "handler_event", "join_id", "fan_out", attemptgeneration.PayloadKey) {
 			return JoinRef{}, false
@@ -898,14 +935,8 @@ func NewAccumulatorBucketRef(node runtimeidentity.ExecutableNode, eventType stri
 	}
 }
 
-func NewAccumulatorWindowBucketRef(node runtimeidentity.ExecutableNode, eventType, window string) AccumulatorBucketRef {
+func NewAccumulatorBucketRefForGeneration(node runtimeidentity.ExecutableNode, eventType string, generation attemptgeneration.Generation) AccumulatorBucketRef {
 	ref := NewAccumulatorBucketRef(node, eventType)
-	ref.Window = strings.TrimSpace(window)
-	return ref
-}
-
-func NewAccumulatorBucketRefForGeneration(node runtimeidentity.ExecutableNode, eventType, window string, generation attemptgeneration.Generation) AccumulatorBucketRef {
-	ref := NewAccumulatorWindowBucketRef(node, eventType, window)
 	ref.Generation = generation.Normalize()
 	return ref
 }
@@ -926,14 +957,8 @@ func ParseAccumulatorBucketKey(key string) (AccumulatorBucketRef, bool) {
 		key = base
 		generationSuffix = "@generation=" + encoded
 	}
-	window := ""
-	if base, encoded, ok := strings.Cut(key, "@window="); ok {
-		key = base
-		decoded, err := base64.RawURLEncoding.DecodeString(encoded)
-		if err != nil || base64.RawURLEncoding.EncodeToString(decoded) != encoded {
-			return AccumulatorBucketRef{}, false
-		}
-		window = string(decoded)
+	if strings.Contains(key, "@window=") {
+		return AccumulatorBucketRef{}, false
 	}
 	nodeKey, eventType, ok := strings.Cut(key, ":")
 	if !ok {
@@ -943,10 +968,10 @@ func ParseAccumulatorBucketKey(key string) (AccumulatorBucketRef, bool) {
 	if err != nil {
 		return AccumulatorBucketRef{}, false
 	}
-	bucket := NewAccumulatorBucketRefForGeneration(node, eventType, window, generation)
+	bucket := NewAccumulatorBucketRefForGeneration(node, eventType, generation)
 	// A key omits revision_field. Preserve its partial reference for the admitted
 	// loop owner to complete; never disguise malformed generation as non-loop.
-	base := NewAccumulatorBucketRefForGeneration(node, eventType, window, attemptgeneration.Generation{})
+	base := NewAccumulatorBucketRefForGeneration(node, eventType, attemptgeneration.Generation{})
 	if !bucket.Valid() || base.Key()+generationSuffix != original {
 		return AccumulatorBucketRef{}, false
 	}
@@ -954,7 +979,7 @@ func ParseAccumulatorBucketKey(key string) (AccumulatorBucketRef, bool) {
 }
 
 func (r AccumulatorBucketRef) Normalize() AccumulatorBucketRef {
-	return NewAccumulatorBucketRefForGeneration(r.Node, r.EventType, r.Window, r.Generation)
+	return NewAccumulatorBucketRefForGeneration(r.Node, r.EventType, r.Generation)
 }
 
 func (r AccumulatorBucketRef) Valid() bool {
@@ -967,13 +992,6 @@ func (r AccumulatorBucketRef) Key() string {
 		return ""
 	}
 	key := r.Node.Key() + ":" + r.EventType
-	if r.Window == "" {
-		if suffix := r.Generation.KeySuffix(); suffix != "" {
-			return key + "@generation=" + suffix
-		}
-		return key
-	}
-	key += "@window=" + base64.RawURLEncoding.EncodeToString([]byte(r.Window))
 	if suffix := r.Generation.KeySuffix(); suffix != "" {
 		key += "@generation=" + suffix
 	}

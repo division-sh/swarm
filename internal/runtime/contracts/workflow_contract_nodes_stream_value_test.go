@@ -44,7 +44,29 @@ func TestProjectNodeAccumulateValueDoesNotAssignPinDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.Into != "arrivals" || out.DedupBy != "" || out.Window != "" {
-		t.Fatalf("node projection stole pin-owned defaults: %#v", out)
+	if out.Into != "arrivals" || out.Key != "" {
+		t.Fatalf("node projection invented a business key: %#v", out)
+	}
+}
+
+func TestProjectNodeAccumulateValueAdmitsOnlyAuthoredKey(t *testing.T) {
+	snapshot, err := yamlsource.Load([]byte("accumulate: {into: arrivals, key: payload.record.id}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	field, _ := snapshot.Document("nodes.yaml").Root().Lookup("accumulate")
+	out, err := projectNodeAccumulateValue(field.Value)
+	if err != nil || out.Key != "payload.record.id" || len(out.KeyPath.Segments) != 2 {
+		t.Fatalf("authored key = %#v, %v", out, err)
+	}
+	for _, retired := range []string{"window: payload.period", "window: null", "dedup_by: payload.id", "dedup_by: []", "key: null", "key: ''", "key: 12"} {
+		snapshot, err := yamlsource.Load([]byte("accumulate: {into: arrivals, " + retired + "}\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		field, _ := snapshot.Document("nodes.yaml").Root().Lookup("accumulate")
+		if _, err := projectNodeAccumulateValue(field.Value); err == nil {
+			t.Fatalf("retired/invalid field admitted: %s", retired)
+		}
 	}
 }

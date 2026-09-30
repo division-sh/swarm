@@ -494,6 +494,17 @@ func (b *endpointCensusBuilder) addNodeEndpoints() {
 			b.add(endpoint)
 		}
 		handlers := b.source.ExecutableNodeEventHandlers(nodeRef)
+		untilEvents := make(map[string]bool)
+		for _, plan := range WorkflowJoinUntilPlansForNode(b.source, nodeRef) {
+			endpoint := b.endpoint(EventEndpointConsumer, EventEndpointNodeGenerated, flowID, plan.UntilEvent)
+			endpoint.NodeID, endpoint.Node = nodeID, nodeRef
+			endpoint.HandlerEvent = plan.HandlerEvent
+			endpoint.Site = "join.until"
+			endpoint.SourceFile = strings.TrimSpace(source.File)
+			endpoint.SourceLocation = "event_handlers." + plan.HandlerEvent + ".join.until"
+			b.add(endpoint)
+			untilEvents[endpoint.Event.EventKey()] = true
+		}
 		consumerEvents := append(ExecutableNodeEffectiveSubscriptions(b.source, nodeRef), sortedMapKeys(handlers)...)
 		for _, eventType := range normalizedSortedStrings(consumerEvents) {
 			kind := EventEndpointNodeGenerated
@@ -503,6 +514,9 @@ func (b *endpointCensusBuilder) addNodeEndpoints() {
 				handlerEvent = resolution
 			}
 			endpoint := b.endpoint(EventEndpointConsumer, kind, flowID, eventType)
+			if kind == EventEndpointNodeGenerated && untilEvents[endpoint.Event.EventKey()] {
+				continue
+			}
 			endpoint.NodeID = nodeID
 			endpoint.Node = nodeRef
 			endpoint.HandlerEvent = handlerEvent
@@ -955,7 +969,11 @@ func resolveNodeHandlerProof(source Source, node runtimeidentity.ExecutableNode,
 	}
 	resolution := resolveExecutableNodeSubscriptionHandler(source, node, eventType, handlers)
 	if resolution.Matched {
-		return strings.TrimSpace(resolution.HandlerEventKey), true
+		for key := range handlers {
+			if strings.TrimSpace(key) == resolution.HandlerEventKey {
+				return resolution.HandlerEventKey, true
+			}
+		}
 	}
 	return "", false
 }

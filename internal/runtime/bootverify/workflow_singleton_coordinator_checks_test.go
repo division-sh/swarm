@@ -164,7 +164,7 @@ func TestBuildSingletonCoordinatorDemandProjection_UsesExactTypedConsumers(t *te
 	}
 }
 
-func TestBuildSingletonCoordinatorDemandProjection_CoversScopedReadersAndIntrinsicJoins(t *testing.T) {
+func TestBuildSingletonCoordinatorDemandProjection_CoversScopedReadersWithoutIntrinsicJoins(t *testing.T) {
 	tests := []struct {
 		name       string
 		entities   string
@@ -195,30 +195,13 @@ coordinator-node:
 			wantTarget: "entity.verticals",
 		},
 		{
-			name: "accumulate window",
+			name: "join state membership",
 			entities: `
 coordinator_state:
-  verticals:
-    type: map[text]VerticalState
-    initial: {}
+  members:
+    type: "[text]"
+    initial: []
 `,
-			nodes: `
-coordinator-node:
-  execution_type: system_node
-  subscribes_to: [job.received]
-  event_handlers:
-    job.received:
-      accumulate:
-        into: jobs
-        from: payload.job
-        window: entity.verticals
-`,
-			wantKind:   "entity_read.accumulate.window",
-			wantTarget: "entity.verticals",
-		},
-		{
-			name:     "payload backed join",
-			entities: "coordinator_state: {}\n",
 			nodes: `
 coordinator-node:
   execution_type: system_node
@@ -227,13 +210,12 @@ coordinator-node:
     job.received:
       join:
         stage: active
-        members: {from: payload.job, by: payload.vertical_id}
+        members: {from: state.members, by: payload.vertical_id}
         output: payload.job
         on_complete: {advances_to: done}
-        timeout: {after: 1h, advances_to: failed}
 `,
-			wantKind:   "workflow_join",
-			wantTarget: "active",
+			wantKind:   "entity_read.join.members.from",
+			wantTarget: "entity.members",
 		},
 	}
 
@@ -242,19 +224,31 @@ coordinator-node:
 			bundle := loadSingletonCoordinatorFixtureBundle(t, `name: coordinator
 stages:
   active: {initial: true}
-  done: {}
-  failed: {}
+  done: {terminal: true}
+  failed: {terminal: true}
 pins:
   inputs:
     events: [job.received]
 `, tc.entities, "", tc.nodes)
 			demands := BuildSingletonCoordinatorDemandProjection(semanticview.Wrap(bundle))
+			var matched *SingletonCoordinatorDemand
 			for _, demand := range demands {
+				if demand.Kind == "workflow_join" {
+					t.Fatalf("join declaration created intrinsic coordinator demand: %#v", demand)
+				}
 				if demand.Kind == tc.wantKind && demand.Target == tc.wantTarget && demand.FlowID == "coordinator" && demand.Node.NodeID() == "coordinator-node" && demand.SourceFile != "" {
-					return
+					if matched != nil {
+						t.Fatalf("duplicate scoped reader demand: %#v", demands)
+					}
+					matched = &demand
 				}
 			}
-			t.Fatalf("demands = %#v, want kind %q target %q with exact scoped provenance", demands, tc.wantKind, tc.wantTarget)
+			if matched == nil {
+				t.Fatalf("demands = %#v, want kind %q target %q with exact scoped provenance", demands, tc.wantKind, tc.wantTarget)
+			}
+			if got := matched.Field; got != strings.TrimPrefix(tc.wantTarget, "entity.") {
+				t.Fatalf("scoped reader field = %q, want exact target field", got)
+			}
 		})
 	}
 }
@@ -471,12 +465,13 @@ coordinator-node:
 	}
 }
 
-func TestRun_IntrinsicJoinDemandRejectsStatelessAndAcceptsStatefulCoordinator(t *testing.T) {
-	const schema = `name: coordinator
+func TestRun_CountArrivalJoinDoesNotRequireContainedCoordinatorState(t *testing.T) {
+	const schema = `
+name: coordinator
 stages:
   active: {initial: true}
-  done: {}
-  failed: {}
+  done: {terminal: true}
+  failed: {terminal: true}
 pins:
   inputs:
     events: [job.received]
@@ -489,26 +484,42 @@ coordinator-node:
     job.received:
       join:
         stage: active
-        members: {from: payload.job, by: payload.vertical_id}
+        members: {count: 1, by: payload.vertical_id}
         output: payload.job
         on_complete: {advances_to: done}
-        timeout: {after: 1h, advances_to: failed}
+        deadline: {after: 1h, from: stage_entry}
+        on_deadline: {advances_to: failed}
 `
 	tests := []struct {
-		name       string
-		entities   string
-		wantDemand bool
+		name     string
+		entities string
 	}{
-		{name: "stateless", entities: "coordinator_state: {}\n", wantDemand: true},
-		{name: "stateful", entities: "coordinator_state:\n  verticals: map[text]VerticalState\n"},
+		{name: "declared stateless primary", entities: "coordinator_state: {}\n"},
+		{name: "unused scalar", entities: "coordinator_state:\n  unused_label: text\n"},
+		{name: "unused list", entities: "coordinator_state:\n  unused_members: '[text]'\n"},
+		{name: "unused map", entities: "coordinator_state:\n  unused_verticals: map[text]VerticalState\n"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			bundle := loadSingletonCoordinatorFixtureBundle(t, schema, tc.entities, "", nodes)
-			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-			got := reportContains(report.Errors(), "singleton_coordinator_validation", "workflow_join")
-			if got != tc.wantDemand {
-				t.Fatalf("singleton coordinator errors = %#v, want workflow_join demand failure %t", report.Errors(), tc.wantDemand)
+			source := semanticview.Wrap(bundle)
+			plans := source.WorkflowJoins()
+			if len(plans) != 1 {
+				t.Fatalf("count arrival declaration was not admitted exactly: %#v", plans)
+			}
+			plan := plans[0]
+			if plan.Mode != runtimecontracts.WorkflowJoinModeArrival || plan.Spec.Members.Count == nil || *plan.Spec.Members.Count != 1 || plan.Spec.Members.From != "" || plan.Spec.Members.By != "payload.vertical_id" {
+				t.Fatalf("count arrival membership was not admitted exactly: %#v", plan)
+			}
+			if plan.Spec.Output != "payload.job" || plan.Spec.Deadline == nil || plan.Spec.Deadline.From != runtimecontracts.JoinDeadlineFromStageEntry || plan.Spec.OnDeadline.AdvancesTo != "failed" {
+				t.Fatalf("count arrival output/deadline was not admitted exactly: %#v", plan)
+			}
+			if demands := BuildSingletonCoordinatorDemandProjection(source); len(demands) != 0 {
+				t.Fatalf("count arrival or unused primary fields created coordinator demand: %#v", demands)
+			}
+			report := Run(context.Background(), source, Options{})
+			if reportContains(report.Errors(), "singleton_coordinator_validation", "") || reportContains(report.Errors(), "join_validation", "") {
+				t.Fatalf("count arrival refused without contained coordinator state: %#v", report.Errors())
 			}
 		})
 	}

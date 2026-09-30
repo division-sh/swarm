@@ -79,5 +79,4 @@ const (
 	handlerRuleDecodeContextRules          handlerRuleDecodeContext = "rules"
 	handlerRuleDecodeContextOnComplete     handlerRuleDecodeContext = "on_complete"
 	handlerRuleDecodeContextJoinOnComplete handlerRuleDecodeContext = "join.on_complete"
-	handlerRuleDecodeContextJoinTimeout    handlerRuleDecodeContext = "join.timeout"
 )

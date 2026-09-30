@@ -88,8 +88,8 @@ func committedHandlerRule(handler runtimecontracts.SystemNodeEventHandler, fact 
 			rules = []runtimecontracts.HandlerRuleEntry{handler.Join.OnComplete}
 		}
 	case handlerselection.ContextJoinTimeout:
-		if handler.Join != nil {
-			rules = []runtimecontracts.HandlerRuleEntry{handler.Join.Timeout.Outcome}
+		if handler.Join != nil && handler.Join.Deadline != nil && handler.Join.OnDeadlineFound {
+			rules = []runtimecontracts.HandlerRuleEntry{handler.Join.OnDeadline}
 		}
 	}
 	for _, rule := range rules {

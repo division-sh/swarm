@@ -97,6 +97,9 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, post
 			continue
 		}
 		sourceIntent := obligation.Intent
+		if err := sourceIntent.Request.ValidateSourceProjection(); err != nil {
+			return fmt.Errorf("fixed fork fan-out source/plan agreement: %w", err)
+		}
 		projectedCapsule, _, err := projectRunForkFanOutCapsule(ctx, tx, forkRunID, plan, obligation, original)
 		if err != nil {
 			return err
@@ -148,6 +151,11 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, post
 		var capsule fanoutobligation.Capsule
 		if err := canonicaljson.DecodePreservingNumberLexemes(capsuleRaw, &capsule); err != nil {
 			return fmt.Errorf("decode materialized fork fan-out capsule: %w", err)
+		}
+		materializedRequest := sourceIntent.Request
+		materializedRequest.PlanRef, materializedRequest.Capsule = planRef, capsule
+		if err := materializedRequest.ValidateSourceProjection(); err != nil {
+			return fmt.Errorf("materialized fork fan-out source/plan agreement: %w", err)
 		}
 		source := sourceIntent.Source
 		// Only SQL NULL proves untouched claim/service state, not an empty or zero decoded time.
@@ -244,6 +252,9 @@ func resolveRunForkFanOutPlanRefs(plan runfork.RunForkPlan, targetBundleHash str
 	}
 	resolved := make(map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef, len(plan.FanOutObligations))
 	for _, obligation := range plan.FanOutObligations {
+		if err := obligation.Intent.Request.ValidateSourceProjection(); err != nil {
+			return nil, fmt.Errorf("pending fan-out source/plan agreement: %w", err)
+		}
 		if obligation.Intent.Request.Deployment != nil {
 			if obligation.Intent.Request.PlanRef != (runtimecontracts.FanOutPlanRef{}) {
 				return nil, fmt.Errorf("deployment feed cannot carry a handler plan proof")

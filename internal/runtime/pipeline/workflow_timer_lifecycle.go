@@ -144,6 +144,10 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 	if err != nil {
 		return true, false, err
 	}
+	effect, err = effect.WithExecutionOccurrence("timer", activation.Ref.ActivationID)
+	if err != nil {
+		return true, false, err
+	}
 	lifecycle, err := pc.prepareWorkflowLifecycleMutation(ctx, address.FlowInstance, &prepared.instance, []runtimeworkflowlifecycle.Effect{effect}, true)
 	if err != nil {
 		return true, false, err

@@ -641,7 +641,7 @@ func wave1HandlerWriteTargets(node runtimeidentity.ExecutableNode, eventType str
 	}
 	if handler.Join != nil {
 		addRuleTargets("handler.join.on_complete", handler.Join.OnComplete)
-		addRuleTargets("handler.join.timeout", handler.Join.Timeout.Outcome)
+		addRuleTargets("handler.join.on_deadline", handler.Join.OnDeadline)
 	}
 	return out
 }

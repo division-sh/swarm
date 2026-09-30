@@ -25,12 +25,14 @@ func TestWorkflowContractBundleNodeContractSourceUsesCanonicalRootNodeTable(t *t
 func TestWorkflowContractBundleScopedNodeRecordsPreserveExportedTreeScopes(t *testing.T) {
 	joinHandler := func(stage string) SystemNodeEventHandler {
 		return SystemNodeEventHandler{Join: &JoinSpec{
-			Stage:        stage,
-			Members:      JoinMembersSpec{From: "payload.members", By: "payload.member_id"},
-			Output:       "payload.result",
-			OnComplete:   HandlerRuleEntry{AdvancesTo: "done"},
-			Timeout:      JoinTimeoutSpec{After: "1h", Outcome: HandlerRuleEntry{AdvancesTo: "failed"}},
-			CompleteWhen: "size(join.members) > 0",
+			Stage:           stage,
+			Members:         JoinMembersSpec{Count: new(int), By: "payload.member_id"},
+			Output:          "payload.result",
+			OnComplete:      HandlerRuleEntry{AdvancesTo: "done"},
+			OnCompleteFound: true,
+			Deadline:        &JoinDeadlineSpec{After: "1h", From: JoinDeadlineFromStageEntry},
+			OnDeadline:      HandlerRuleEntry{AdvancesTo: "failed"},
+			OnDeadlineFound: true,
 		}}
 	}
 	root := FlowContractView{
@@ -79,7 +81,23 @@ func TestWorkflowContractBundleScopedNodeRecordsPreserveExportedTreeScopes(t *te
 	}
 	bundle := &WorkflowContractBundle{
 		FlowTree: FlowTree{Root: &root},
+		Events: map[string]EventCatalogEntry{
+			"root.received": {Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{"member_id": {Type: "text"}, "result": {Type: "text"}}}},
+			"item.received": {Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{"member_id": {Type: "text"}, "result": {Type: "text"}}}},
+		},
 	}
+	bundle.FlowTree.ByID = map[string]*FlowContractView{}
+	bundle.FlowTree.ByPath = map[string]*FlowContractView{}
+	var indexViews func(*FlowContractView)
+	indexViews = func(view *FlowContractView) {
+		view.Events = bundle.Events
+		bundle.FlowTree.ByID[view.Path] = view
+		bundle.FlowTree.ByPath[view.Path] = view
+		for index := range view.Children {
+			indexViews(&view.Children[index])
+		}
+	}
+	indexViews(&root)
 
 	records := bundle.ScopedNodeRecords()
 	if len(records) != 4 {
@@ -102,7 +120,9 @@ func TestWorkflowContractBundleScopedNodeRecordsPreserveExportedTreeScopes(t *te
 		}
 	}
 
-	populateWorkflowSemantics(bundle)
+	if err := populateWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
+	}
 	if len(bundle.Semantics.Joins) != 4 {
 		t.Fatalf("exported-tree joins = %#v, want all four scoped handlers", bundle.Semantics.Joins)
 	}

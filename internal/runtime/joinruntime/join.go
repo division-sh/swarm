@@ -1,13 +1,14 @@
 package joinruntime
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -27,7 +28,8 @@ type CloseReason string
 
 const (
 	CloseReasonComplete  CloseReason = "complete"
-	CloseReasonTimeout   CloseReason = "timeout"
+	CloseReasonDeadline  CloseReason = "deadline"
+	CloseReasonUntil     CloseReason = "until"
 	CloseReasonStageExit CloseReason = "stage_exit"
 )
 
@@ -37,31 +39,33 @@ type MemberOutput struct {
 }
 
 type Activation struct {
-	handle          timeridentity.TimerHandle
-	Members         []string                `json:"members"`
-	Outputs         map[string]MemberOutput `json:"outputs"`
-	Status          Status                  `json:"status"`
-	CloseReason     CloseReason             `json:"close_reason,omitempty"`
-	ArmedAt         time.Time               `json:"armed_at"`
-	FireAt          time.Time               `json:"fire_at"`
-	TimerCancelled  bool                    `json:"timer_cancelled,omitempty"`
-	OutcomePending  bool                    `json:"outcome_pending,omitempty"`
-	OutcomeFired    bool                    `json:"outcome_fired,omitempty"`
-	CompletionEvent string                  `json:"completion_event,omitempty"`
+	handle         timeridentity.TimerHandle
+	Members        []string                `json:"members"`
+	MemberCount    *int                    `json:"member_count,omitempty"`
+	Outputs        map[string]MemberOutput `json:"outputs"`
+	Status         Status                  `json:"status"`
+	CloseReason    CloseReason             `json:"close_reason,omitempty"`
+	ArmedAt        time.Time               `json:"armed_at"`
+	FireAt         time.Time               `json:"fire_at"`
+	DeadlineAt     time.Time               `json:"deadline_at,omitempty"`
+	TimerCancelled bool                    `json:"timer_cancelled,omitempty"`
+	OutcomePending bool                    `json:"outcome_pending,omitempty"`
+	OutcomeFired   bool                    `json:"outcome_fired,omitempty"`
 }
 
 type activationJSON struct {
-	Handle          timeridentity.TimerHandle `json:"timer_handle"`
-	Members         []string                  `json:"members"`
-	Outputs         map[string]MemberOutput   `json:"outputs"`
-	Status          Status                    `json:"status"`
-	CloseReason     CloseReason               `json:"close_reason,omitempty"`
-	ArmedAt         time.Time                 `json:"armed_at"`
-	FireAt          time.Time                 `json:"fire_at"`
-	TimerCancelled  bool                      `json:"timer_cancelled,omitempty"`
-	OutcomePending  bool                      `json:"outcome_pending,omitempty"`
-	OutcomeFired    bool                      `json:"outcome_fired,omitempty"`
-	CompletionEvent string                    `json:"completion_event,omitempty"`
+	Handle         timeridentity.TimerHandle `json:"timer_handle"`
+	Members        []string                  `json:"members"`
+	MemberCount    *int                      `json:"member_count,omitempty"`
+	Outputs        map[string]MemberOutput   `json:"outputs"`
+	Status         Status                    `json:"status"`
+	CloseReason    CloseReason               `json:"close_reason,omitempty"`
+	ArmedAt        time.Time                 `json:"armed_at"`
+	FireAt         time.Time                 `json:"fire_at"`
+	DeadlineAt     time.Time                 `json:"deadline_at,omitempty"`
+	TimerCancelled bool                      `json:"timer_cancelled,omitempty"`
+	OutcomePending bool                      `json:"outcome_pending,omitempty"`
+	OutcomeFired   bool                      `json:"outcome_fired,omitempty"`
 }
 
 type AddDisposition string
@@ -73,18 +77,31 @@ const (
 	AddUnexpected           AddDisposition = "unexpected"
 )
 
-func NewActivation(handle timeridentity.TimerHandle, members []string, armedAt, fireAt time.Time) (Activation, error) {
+func NewActivation(ref timeridentity.JoinRef, members []string, count *int, armedAt, fireAt time.Time) (Activation, error) {
 	normalizedMembers, err := normalizeMembers(members)
 	if err != nil {
 		return Activation{}, err
 	}
+	handle, err := timeridentity.JoinCompleteHandle(ref)
+	if !fireAt.IsZero() {
+		handle, err = timeridentity.JoinTimeoutHandle(ref)
+	}
+	if err != nil {
+		return Activation{}, err
+	}
+	if count != nil {
+		value := *count
+		count = &value
+	}
 	activation := Activation{
-		handle:  handle,
-		Members: normalizedMembers,
-		Outputs: map[string]MemberOutput{},
-		Status:  StatusOpen,
-		ArmedAt: armedAt.UTC(),
-		FireAt:  fireAt.UTC(),
+		handle:      handle,
+		Members:     normalizedMembers,
+		MemberCount: count,
+		Outputs:     map[string]MemberOutput{},
+		Status:      StatusOpen,
+		ArmedAt:     armedAt.UTC(),
+		FireAt:      fireAt.UTC(),
+		DeadlineAt:  fireAt.UTC(),
 	}
 	if err := activation.Validate(); err != nil {
 		return Activation{}, err
@@ -102,16 +119,29 @@ func (a Activation) Validate() error {
 	if _, err := normalizeMembers(a.Members); err != nil {
 		return err
 	}
+	if a.ArmedAt.IsZero() || !a.FireAt.IsZero() && a.FireAt.Before(a.ArmedAt) {
+		return fmt.Errorf("join activation requires exact arm/deadline time")
+	}
+	if !a.DeadlineAt.IsZero() && !a.DeadlineAt.After(a.ArmedAt) {
+		return fmt.Errorf("join deadline must follow its retained stage entry")
+	}
+	if a.MemberCount != nil && (*a.MemberCount < 0 || len(a.Members) != 0 || len(a.Outputs) > *a.MemberCount) {
+		return fmt.Errorf("count join has contradictory member evidence")
+	}
 	memberSet := make(map[string]struct{}, len(a.Members))
 	for _, member := range a.Members {
 		memberSet[member] = struct{}{}
 	}
 	for member, output := range a.Outputs {
-		if _, ok := memberSet[strings.TrimSpace(member)]; !ok {
+		if _, ok := memberSet[member]; member == "" || a.MemberCount == nil && !ok {
 			return fmt.Errorf("join output member %q is not declared", member)
 		}
 		if strings.TrimSpace(output.Hash) == "" {
 			return fmt.Errorf("join output member %q has empty canonical hash", member)
+		}
+		hash, err := computemodule.CanonicalJSONHash(output.Value)
+		if err != nil || hash != output.Hash {
+			return fmt.Errorf("join output member %q contradicts its canonical value", member)
 		}
 	}
 	if a.Status == StatusOpen && a.CloseReason != "" {
@@ -123,12 +153,22 @@ func (a Activation) Validate() error {
 	if a.Status == StatusClosed && a.CloseReason == "" {
 		return fmt.Errorf("closed join activation is missing close reason")
 	}
+	if a.Status == StatusClosed {
+		switch a.CloseReason {
+		case CloseReasonComplete, CloseReasonUntil, CloseReasonDeadline, CloseReasonStageExit:
+		default:
+			return fmt.Errorf("join activation has invalid close reason %q", a.CloseReason)
+		}
+	}
+	if a.OutcomePending && a.OutcomeFired || (a.OutcomePending || a.OutcomeFired) && (a.Status != StatusClosed || a.CloseReason == CloseReasonStageExit) {
+		return fmt.Errorf("join outcome evidence contradicts its lifecycle")
+	}
 	return nil
 }
 
 func (a Activation) Key() string {
 	ref, _ := a.handle.JoinRef()
-	return ActivationKeyForGeneration(ref.Stage(), ref.JoinID(), ref.Window(), ref.Generation())
+	return ActivationKey(ref)
 }
 
 func ReplaceGeneration(buckets map[string]map[string]any, activation Activation, generation attemptgeneration.Generation) error {
@@ -177,7 +217,6 @@ func (a Activation) NodeID() string       { return a.JoinRef().NodeID() }
 func (a Activation) HandlerEvent() string { return a.JoinRef().HandlerEvent() }
 func (a Activation) Stage() string        { return a.JoinRef().Stage() }
 func (a Activation) JoinID() string       { return a.JoinRef().JoinID() }
-func (a Activation) Window() string       { return a.JoinRef().Window() }
 func (a Activation) Generation() attemptgeneration.Generation {
 	return a.JoinRef().Generation()
 }
@@ -209,53 +248,21 @@ func joinHandleForKind(kind timeridentity.TimerHandleKind, ref timeridentity.Joi
 	}
 }
 
-func ActivationKey(stage, joinID, window string) string {
-	return ActivationKeyForGeneration(stage, joinID, window, attemptgeneration.Generation{})
-}
-
-func ActivationKeyForGeneration(stage, joinID, window string, generation attemptgeneration.Generation) string {
-	stage = strings.TrimSpace(stage)
-	joinID = strings.TrimSpace(joinID)
-	window = strings.TrimSpace(window)
-	if stage == "" || joinID == "" {
+func ActivationKey(ref timeridentity.JoinRef) string {
+	if !ref.Valid() || ref.Mode() != timeridentity.JoinRefModeArrival || ref.StageEntry().Empty() {
 		return ""
 	}
-	parts := []string{stage, joinID}
-	if window != "" {
-		parts = append(parts, window)
-	}
-	for i := range parts {
-		parts[i] = base64.RawURLEncoding.EncodeToString([]byte(parts[i]))
-	}
-	key := strings.Join(parts, ".")
-	if suffix := generation.Normalize().KeySuffix(); suffix != "" {
-		key += ".generation." + suffix
-	}
-	return key
-}
-
-type CompletionEvaluator func(expression string, joinContext map[string]any) (bool, error)
-
-func CompletionSatisfied(activation Activation, completeWhen string, evaluate CompletionEvaluator) (bool, error) {
-	completeWhen = strings.TrimSpace(completeWhen)
-	if completeWhen == "" {
-		return activation.Completed() == activation.Expected(), nil
-	}
-	if evaluate == nil {
-		return false, fmt.Errorf("join completion evaluator is required")
-	}
-	return evaluate(completeWhen, activation.Context())
+	return ref.Key()
 }
 
 func SupportedContextFields() []string {
-	return []string{"expected", "completed", "missing", "results", "timed_out"}
+	return []string{"expected", "completed", "missing", "results", "timed_out", "close_reason"}
 }
 
 func (a *Activation) Add(member string, value any) (AddDisposition, error) {
 	if a == nil {
 		return "", fmt.Errorf("join activation is nil")
 	}
-	member = strings.TrimSpace(member)
 	if !a.HasMember(member) {
 		return AddUnexpected, nil
 	}
@@ -269,15 +276,24 @@ func (a *Activation) Add(member string, value any) (AddDisposition, error) {
 		}
 		return AddConflictingDuplicate, nil
 	}
+	if a.Completed() >= a.Expected() {
+		return AddUnexpected, nil
+	}
 	if a.Outputs == nil {
 		a.Outputs = map[string]MemberOutput{}
 	}
-	a.Outputs[member] = MemberOutput{Hash: hash, Value: cloneJSONValue(value)}
+	cloned, err := canonicaljson.CloneRuntimeValue(value)
+	if err != nil {
+		return "", err
+	}
+	a.Outputs[member] = MemberOutput{Hash: hash, Value: cloned}
 	return AddAccepted, nil
 }
 
 func (a Activation) HasMember(member string) bool {
-	member = strings.TrimSpace(member)
+	if a.MemberCount != nil {
+		return member != ""
+	}
 	for _, candidate := range a.Members {
 		if candidate == member {
 			return true
@@ -287,9 +303,17 @@ func (a Activation) HasMember(member string) bool {
 }
 
 func (a Activation) Completed() int { return len(a.Outputs) }
-func (a Activation) Expected() int  { return len(a.Members) }
+func (a Activation) Expected() int {
+	if a.MemberCount != nil {
+		return *a.MemberCount
+	}
+	return len(a.Members)
+}
 
 func (a Activation) Missing() []string {
+	if a.MemberCount != nil {
+		return []string{}
+	}
 	out := make([]string, 0, len(a.Members)-len(a.Outputs))
 	for _, member := range a.Members {
 		if _, ok := a.Outputs[member]; !ok {
@@ -299,24 +323,41 @@ func (a Activation) Missing() []string {
 	return out
 }
 
-func (a Activation) Results() []any {
+func (a Activation) Results() ([]any, error) {
 	out := make([]any, 0, len(a.Outputs))
-	for _, member := range a.Members {
+	members := a.Members
+	if a.MemberCount != nil {
+		members = make([]string, 0, len(a.Outputs))
+		for member := range a.Outputs {
+			members = append(members, member)
+		}
+		sort.Strings(members)
+	}
+	for _, member := range members {
 		if output, ok := a.Outputs[member]; ok {
-			out = append(out, cloneJSONValue(output.Value))
+			cloned, err := canonicaljson.CloneRuntimeValue(output.Value)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, cloned)
 		}
 	}
-	return out
+	return out, nil
 }
 
-func (a Activation) Context() map[string]any {
-	return map[string]any{
-		"expected":  a.Expected(),
-		"completed": a.Completed(),
-		"missing":   a.Missing(),
-		"results":   a.Results(),
-		"timed_out": a.CloseReason == CloseReasonTimeout,
+func (a Activation) Context() (map[string]any, error) {
+	results, err := a.Results()
+	if err != nil {
+		return nil, err
 	}
+	return map[string]any{
+		"expected":     a.Expected(),
+		"completed":    a.Completed(),
+		"missing":      a.Missing(),
+		"results":      results,
+		"timed_out":    a.CloseReason == CloseReasonDeadline,
+		"close_reason": string(a.CloseReason),
+	}, nil
 }
 
 func (a *Activation) Close(reason CloseReason, outcomePending, outcomeFired bool) bool {
@@ -341,7 +382,7 @@ func (a *Activation) CloseForStageExit() bool {
 		a.OutcomeFired = false
 		return true
 	}
-	if a.Status != StatusClosed || a.CloseReason != CloseReasonComplete || !a.OutcomePending || a.OutcomeFired {
+	if a.Status != StatusClosed || a.CloseReason == CloseReasonStageExit || !a.OutcomePending || a.OutcomeFired {
 		return false
 	}
 	// A zero-member completion is closed before its internal event fires. Stage
@@ -355,24 +396,17 @@ func Load(stateBuckets map[string]map[string]any, nodeRef runtimeidentity.Execut
 	if !nodeRef.Valid() {
 		return Activation{}, false, fmt.Errorf("join load requires exact executable node identity")
 	}
-	node := stateBuckets[joinNodeBucketKey(nodeRef)]
-	joins, _ := node[bucketKey].(map[string]any)
-	raw, ok := joins[strings.TrimSpace(key)]
-	if !ok {
-		return Activation{}, false, nil
-	}
-	encoded, err := json.Marshal(raw)
+	nodeKey := joinNodeBucketKey(nodeRef)
+	joins, err := readJoinBucket(stateBuckets[nodeKey])
 	if err != nil {
 		return Activation{}, false, err
 	}
-	var activation Activation
-	if err := decodeStrictJSON(encoded, &activation); err != nil {
-		return Activation{}, false, err
+	raw, ok := joins[key]
+	if !ok {
+		return Activation{}, false, nil
 	}
-	if activation.Outputs == nil {
-		activation.Outputs = map[string]MemberOutput{}
-	}
-	if err := activation.Validate(); err != nil {
+	activation, err := decodeActivation(raw, nodeKey, key)
+	if err != nil {
 		return Activation{}, false, err
 	}
 	return activation, true, nil
@@ -388,11 +422,14 @@ func Store(stateBuckets map[string]map[string]any, activation Activation) error 
 	}
 	nodeKey := joinNodeBucketKey(nodeRef)
 	node := stateBuckets[nodeKey]
+	joins, err := readJoinBucket(node)
+	if err != nil {
+		return err
+	}
 	if node == nil {
 		node = map[string]any{}
 		stateBuckets[nodeKey] = node
 	}
-	joins, _ := node[bucketKey].(map[string]any)
 	if joins == nil {
 		joins = map[string]any{}
 		node[bucketKey] = joins
@@ -402,7 +439,7 @@ func Store(stateBuckets map[string]map[string]any, activation Activation) error 
 		return err
 	}
 	var raw map[string]any
-	if err := json.Unmarshal(encoded, &raw); err != nil {
+	if err := decodeStrictJSON(encoded, &raw); err != nil {
 		return err
 	}
 	joins[activation.Key()] = raw
@@ -410,11 +447,11 @@ func Store(stateBuckets map[string]map[string]any, activation Activation) error 
 }
 
 func (a Activation) MarshalJSON() ([]byte, error) {
-	return json.Marshal(activationJSON{
-		Handle: a.handle, Members: a.Members, Outputs: a.Outputs, Status: a.Status,
-		CloseReason: a.CloseReason, ArmedAt: a.ArmedAt, FireAt: a.FireAt,
+	return canonicaljson.MarshalPreservingNumberKinds(activationJSON{
+		Handle: a.handle, Members: a.Members, MemberCount: a.MemberCount, Outputs: a.Outputs, Status: a.Status,
+		CloseReason: a.CloseReason, ArmedAt: a.ArmedAt, FireAt: a.FireAt, DeadlineAt: a.DeadlineAt,
 		TimerCancelled: a.TimerCancelled, OutcomePending: a.OutcomePending,
-		OutcomeFired: a.OutcomeFired, CompletionEvent: a.CompletionEvent,
+		OutcomeFired: a.OutcomeFired,
 	})
 }
 
@@ -427,17 +464,18 @@ func (a *Activation) UnmarshalJSON(raw []byte) error {
 		return err
 	}
 	*a = Activation{
-		handle: persisted.Handle, Members: persisted.Members, Outputs: persisted.Outputs,
+		handle: persisted.Handle, Members: persisted.Members, MemberCount: persisted.MemberCount, Outputs: persisted.Outputs,
 		Status: persisted.Status, CloseReason: persisted.CloseReason,
-		ArmedAt: persisted.ArmedAt, FireAt: persisted.FireAt,
+		ArmedAt: persisted.ArmedAt, FireAt: persisted.FireAt, DeadlineAt: persisted.DeadlineAt,
 		TimerCancelled: persisted.TimerCancelled, OutcomePending: persisted.OutcomePending,
-		OutcomeFired: persisted.OutcomeFired, CompletionEvent: persisted.CompletionEvent,
+		OutcomeFired: persisted.OutcomeFired,
 	}
 	return nil
 }
 
 func decodeStrictJSON(raw []byte, target any) error {
 	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.UseNumber()
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
 		return err
@@ -451,32 +489,52 @@ func decodeStrictJSON(raw []byte, target any) error {
 func List(stateBuckets map[string]map[string]any) ([]Activation, error) {
 	out := make([]Activation, 0)
 	for nodeID, node := range stateBuckets {
-		joins, _ := node[bucketKey].(map[string]any)
-		for key := range joins {
-			encoded, err := json.Marshal(joins[key])
+		joins, err := readJoinBucket(node)
+		if err != nil {
+			return nil, err
+		}
+		for key, raw := range joins {
+			activation, err := decodeActivation(raw, nodeID, key)
 			if err != nil {
 				return nil, err
-			}
-			var activation Activation
-			if err := decodeStrictJSON(encoded, &activation); err != nil {
-				return nil, fmt.Errorf("decode join activation in bucket %s: %w", nodeID, err)
-			}
-			if activation.Outputs == nil {
-				activation.Outputs = map[string]MemberOutput{}
-			}
-			if err := activation.Validate(); err != nil {
-				return nil, err
-			}
-			if joinNodeBucketKey(activation.JoinRef().Node()) != nodeID {
-				return nil, fmt.Errorf("join activation node identity contradicts its state bucket")
-			}
-			if activation.Key() != key {
-				return nil, fmt.Errorf("join activation identity contradicts its state bucket key")
 			}
 			out = append(out, activation)
 		}
 	}
 	return out, nil
+}
+
+func readJoinBucket(node map[string]any) (map[string]any, error) {
+	raw, exists := node[bucketKey]
+	if !exists {
+		return nil, nil
+	}
+	joins, ok := raw.(map[string]any)
+	if !ok || joins == nil {
+		return nil, fmt.Errorf("join state bucket requires an exact activation map")
+	}
+	return joins, nil
+}
+
+func decodeActivation(raw any, nodeKey, key string) (Activation, error) {
+	encoded, err := canonicaljson.MarshalPreservingNumberKinds(raw)
+	if err != nil {
+		return Activation{}, err
+	}
+	var activation Activation
+	if err := decodeStrictJSON(encoded, &activation); err != nil {
+		return Activation{}, fmt.Errorf("decode join activation in bucket %s: %w", nodeKey, err)
+	}
+	if activation.Outputs == nil {
+		activation.Outputs = map[string]MemberOutput{}
+	}
+	if err := activation.Validate(); err != nil {
+		return Activation{}, err
+	}
+	if joinNodeBucketKey(activation.JoinRef().Node()) != nodeKey || activation.Key() != key {
+		return Activation{}, fmt.Errorf("join activation identity contradicts its state bucket")
+	}
+	return activation, nil
 }
 
 func joinNodeBucketKey(node runtimeidentity.ExecutableNode) string {
@@ -490,7 +548,6 @@ func normalizeMembers(members []string) ([]string, error) {
 	out := make([]string, 0, len(members))
 	seen := map[string]struct{}{}
 	for _, member := range members {
-		member = strings.TrimSpace(member)
 		if member == "" {
 			return nil, fmt.Errorf("join membership contains an empty identity")
 		}
@@ -501,16 +558,4 @@ func normalizeMembers(members []string) ([]string, error) {
 		out = append(out, member)
 	}
 	return out, nil
-}
-
-func cloneJSONValue(value any) any {
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		return value
-	}
-	var out any
-	if err := json.Unmarshal(encoded, &out); err != nil {
-		return value
-	}
-	return out
 }

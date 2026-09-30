@@ -172,20 +172,6 @@ func BuildSingletonCoordinatorDemandProjection(source semanticview.Source) []Sin
 		}
 	}
 
-	for _, plan := range source.WorkflowJoins() {
-		flowID := plan.Node.FlowPath()
-		nodeID := plan.Node.Key()
-		sourceRef, _ := source.ExecutableNodeSource(plan.Node)
-		target := strings.TrimSpace(plan.Spec.ID)
-		if target == "" {
-			target = strings.TrimSpace(plan.Spec.Stage)
-		}
-		add(SingletonCoordinatorDemand{
-			FlowID: flowID, Node: plan.Node, SourceFile: sourceRef.File, Location: nodeID,
-			EventType: strings.TrimSpace(plan.HandlerEvent), Kind: "workflow_join", Target: target,
-		}, false)
-	}
-
 	for _, record := range wave1ScopedAgentRecords(source) {
 		for entityType, decl := range record.Entry.EntityWrites {
 			contract, ok := wave1ResolveEntityWriteContract(source, record.Source, entityType)

@@ -58,7 +58,7 @@ func TestPipelineRejectsFabricatedGuardCauseOnBothStores(t *testing.T) {
 		} {
 			t.Run(backend.name+"/"+tc.name, func(t *testing.T) {
 				store, ctx := backend.open(t)
-				pc := newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
+				pc := newWorkflowJoinPipelineCoordinator(t, &recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
 					Module: &pipelineFixtureWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store),
 				})
 				runID := correlation.RunIDFromContext(ctx)

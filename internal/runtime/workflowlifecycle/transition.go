@@ -128,7 +128,7 @@ func (t Transition) ValidateHandlerEvidence(handler contracts.SystemNodeEventHan
 		}
 	case handlerselection.ContextJoinTimeout:
 		if handler.Join != nil {
-			rules = []contracts.HandlerRuleEntry{handler.Join.Timeout.Outcome}
+			rules = []contracts.HandlerRuleEntry{handler.Join.OnDeadline}
 		}
 	}
 	for _, rule := range rules {

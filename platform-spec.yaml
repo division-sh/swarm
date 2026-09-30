@@ -346,8 +346,8 @@ contract_formats:
       effective node behavior.
       Authored presence survives projection when a field is forbidden by a
       typed mode or derived from a pin; empty and aliased values cannot masquerade
-      as omission. A delivery join rejects every authored timeout, including
-      null, without changing ordinary arrival-join null timeout omission.
+      as omission. Every join rejects retired timeout, window and complete_when
+      on authored presence, including null, rather than treating them as omission.
       Branch exclusions inspect authored key presence, not projected zero values.
       Internal compute value_field and weight_field carriers are not authorable.
       Optional reduce/count source and items_from fields, when authored, must
@@ -3586,7 +3586,7 @@ handler_specification:
     description: Arrows mean "must complete before". Steps at the same level are independent — the implementer may execute
       them in any order.
     graph: "\nreceiver state initialization (optional; canonical receiving-flow primary entity at the admitted composition-selected instance, never another receiver election)\n  └→ query (optional — pre-fetch cross-entity\
-      \ data into handler context)\n       └→ clear_gates (optional — reset gates before guard)\n            └→ guard\n            └→ accumulate (optional open/windowed stream admission; never waits or closes)\n                 └→ filter (optional — prune accumulated\
+      \ data into handler context)\n       └→ clear_gates (optional — reset gates before guard)\n            └→ guard\n            └→ accumulate (optional instance-scoped stream admission; never waits or closes)\n                 └→ filter (optional — prune accumulated\
       \ items)\n                      └→ reduce (optional — aggregate filtered items to single value)\n                  \
       \         └→ count (optional — count items)\n                                └→ compute\n                          \
       \           └→ emit-site selection (handler emit OR active emit set: selected rule emit/template then on_success.emit, selected on_complete emit, or fan_out emit)\n                    \
@@ -3714,25 +3714,26 @@ handler_specification:
     accumulate:
       field: accumulate
       type: object
-      purpose: Admit each event arrival into an open or windowed entity-scoped stream. It never waits for finite membership or closes a barrier.
+      purpose: Admit arrivals into an instance-scoped stream without finite membership or closure.
       sub_fields:
         into: 'string — optional explicit accumulator buffer name. Required when any entity field declares
           materialize_from: <this_node>.<into>. Must resolve to a state_schema field on this node typed as
           list<NamedType> or [NamedType]. Within one node, a given into value may be declared by at most one handler.'
         from: string — optional sender path filter
         description: string — human-readable note
-        window: 'string — optional field path for partitioning one logical accumulator into bounded windows (for
-          example payload.period_id). When declared, the runtime resolves the path on each arrival and stores/reads
-          the accumulator under a bucket identity scoped by that window value. Missing or empty runtime window values
-          fail closed for that handler execution.'
-        dedup_by: 'string — field path for deduplication. Default: "sender" (sender session ID). Set to a payload field path
-          (e.g., "payload.dimension") when accumulating items identified by content rather than sender. Duplicate arrivals
-          with the same dedup key are ignored.'
+        key: >-
+          Optional exact payload TEXT field. Missing, null, empty or non-TEXT values fail closed without coercion,
+          whitespace trimming or fallback to sender/event/payload identity. Same key and canonically equal admitted
+          business payload is idempotent and stops downstream effects; changed payload is a typed conflicting duplicate.
+          Without key, distinct durable deliveries append once each, preserving multiplicity and commit order.
+      partition: >-
+        The selected instance owns the partition. Authored window and dedup_by are retired, including explicit null.
+        Declaration and captured loop generation remain independent exact bucket identity, not business partitions.
       concept: Track accepted stream arrivals for the same entity. Each admitted non-duplicate arrival continues through the remaining handler steps in the same execution.
       finite_barrier_boundary: >-
         `expected_from`, `completion`, `threshold`, `timeout_ms`, nested `on_complete`, and nested `on_timeout` are unsupported
         and fail strict decoding. Finite declared-membership waiting, completion, timeout, persistence, and replay belong only
-        to the effective WorkflowJoinPlan and joinruntime activation. Handler-level `on_complete` is also prohibited on a
+        to the compiled WorkflowJoinPlan and joinruntime activation. Handler-level `on_complete` is also prohibited on a
         handler that declares `accumulate`.
       projection_hook: |
         After each admitted stream arrival, any same-flow
@@ -4245,7 +4246,7 @@ handler_specification:
       route_authority: >
         When `fan_out.emit` emits a pin-declared output event, routing is owned by the same output pin,
         parent connect / ConnectRoutePlan, and EventBus RoutePlan authority as
-        handler-level emit, rule emit, on_complete emit, and accumulate timeout
+        handler-level emit, rule emit, on_complete emit, and join deadline
         emit. The runtime must not route target-less fan_out output through
         direct delivery, raw subscriber lookup, RouteTable fallback, relay,
         replay/readback repair, receiver select_entity repair, or event-type
@@ -4315,6 +4316,11 @@ handler_specification:
           through contract_formats.semantic_json.workflow_cel_projection. Eager and deferred evaluation consume the same
           checked owner. No source-specific float64 conversion, numeric-string coercion, private parser, or unchecked CEL
           normalizer may reinterpret persisted values.
+          Frozen source readers validate raw JSON before decoding can discard duplicate keys, then validate the full
+          collection, including map values and list items, against the retained catalog type before selecting a range.
+          Transport decoding preserves numeric evidence and exact text keys; it is not semantic admission. Corrupt
+          sources cannot advance a cursor or publish outcomes. The existing serving owner records their typed blocked
+          diagnosis; this diagnostic revision is not a business mutation or a successful ordinal outcome.
         progress: >-
           Cardinality plus one contiguous cursor represents the unissued suffix. Each visited ordinal receives exactly
           one immutable committed-publication or deterministic semantic-rejection outcome. Cancellation terminalizes the
@@ -4484,76 +4490,92 @@ handler_specification:
       field: join
       type: object
       purpose: >-
-        Declare one stage-anchored finite-membership barrier on an arriving event. Join is the sole public barrier owner
-        for stages: bundles; open/windowed stream accumulation remains owned by accumulate.
+        Declare an arrival-membership obligation or an exact fan-out all-settled obligation. Arrival joins belong to
+        lifecycle entries, not business windows; streams remain owned by accumulate and require no closure.
       sub_fields:
         id: Optional stable simple identifier. It defaults to stage; collisions in the same flow/stage require explicit unique IDs.
         stage: Required stage in the same flow. Arrivals are admitted only against a persisted activation for this stage.
         members: >-
-          Required `{from: entity.<field>, by: payload.<field>}`. from names a declared ordered list<text> that is
-          snapshotted once at stage arm; by names the declared text member identity on each arrival and is the sole
-          membership/dedup key. For a join fed by a fan-in barrier pin, author only `from`; `by` is forbidden and derives
-          from that pin's `resolution.dedup_by`. Standalone stage joins retain explicit `from` and `by`.
-        window: >-
-          Optional `{from: entity.<field>, by: payload.<field>}` text identity. It is required when the static transition
-          graph permits re-entry into the join stage. from is snapshotted at arm and by must match exactly on arrival. For
-          a join fed by a fan-in barrier pin, author only `from`; `by` is forbidden and derives from that pin's
-          `resolution.window`.
-        output: Required top-level declared payload field captured with its canonical value/hash per admitted member.
-        complete_when: >-
-          Optional CEL boolean over join.expected, join.completed, join.missing, join.results, and join.timed_out only.
-          Omission means all declared members. Authoring the default-all tautology is unnecessary.
-        remaining: >-
-          Required exactly as ignore when complete_when is authored and forbidden otherwise. terminate is unsupported
-          until a durable contributor-lifecycle/cancellation owner is promoted.
+          Exactly one of `{from: state.<field>, by: payload.<field>}`, `{count: N, by: payload.<field>}` or
+          `{from_fan_out: true}`. Explicit membership snapshots a catalog-typed TEXT list or map with TEXT keys;
+          duplicate list members reject, list order is retained, and map keys sort lexically. Count is a literal
+          nonnegative bounded integer; its contributors are exact nonempty TEXT identities, never invented names.
+          Count, including zero, requires deadline or until. Fan-out membership uses the separate variant below.
+        output: Required catalog-typed declared payload value captured with its canonical value/hash per admitted member.
         on_complete: >-
           Required non-empty outcome using only existing data_accumulation, emit, and advances_to fields. Expressions may
-          read declared entity.*, typed join.*, and the five defined loop.* members only.
+          read declared state.*, typed join.*, and the five defined loop.* members only, never the last-arrival or until payload.
           loop.* uses the join's captured generation and owning activation cap, never the current replacement
           attempt. Authors use loop.revision_id explicitly; no join.revision_id alias, implicit payload injection,
           or inference from equal business fields is supported. A non-loop join has no loop context.
-        timeout: >-
-          Required `{after: <positive literal or policy-scalar duration>, ...outcome}`. Bare joins are invalid. The outcome
-          supports the same fields and expression roots as on_complete.
+        deadline: >-
+          Optional `{after: <positive literal or policy-scalar duration>, from: stage_entry}`. The committed entry time
+          anchors one immutable due time. Restart, arrivals and field-only revisions cannot reset it.
+        on_deadline: Required non-empty typed outcome exactly when deadline is present, with the same closed scope as on_complete.
+        until: >-
+          Optional exact same-flow event declaration, distinct from the arrival event. Its actual publication binds
+          each affected join independently and closes through on_complete. There is no on_until. Ordinary authored
+          consumers of the same event remain consumers and commit in the same handler transaction.
+      retirement: Authored window, complete_when, remaining and timeout are rejected on presence, including null.
       context:
         expected: Integer snapshotted member count.
         completed: Integer persisted admitted-member count.
-        missing: list<text> of membership-ordered member IDs without output.
-        results: List of the declared join.output payload type, membership-ordered and independent of arrival order.
-        timed_out: Boolean true only while evaluating the timeout outcome.
+        missing: Membership-ordered TEXT identities without output; empty for count joins, which invent no member names.
+        results: List of the declared output type; explicit membership order or lexical contributor order for count.
+        timed_out: Boolean derived from the deadline close reason.
+        close_reason: Typed complete, until or deadline outcome reason. Stage exit/supersession is cancellation, not success.
       expression_typing: >-
         Verify and runtime evaluation type-check every direct join.* access against the context types above. A boolean
         result alone is insufficient: expressions with invalid typed operands fail closed at load and may not reach
         execution. Bracket, dynamic, bare-root, and undeclared join access remain invalid.
       execution: >-
-        The stage transition, membership/window snapshot, typed activation, timeout intent, and any zero-member completion
-        intent commit in one selected-store transaction. Empty membership evaluates the same default-all or authored
-        complete_when plan used on arrival; an unsatisfied custom condition remains open until an arrival satisfies it or
-        timeout closes it. Arrivals never create activations. The existing entity lock and selected-store row transaction
-        admit exactly one arrival-versus-timeout close winner; losers observe closed state.
+        Constructor/transition state, lifecycle entry, member snapshot, arm and any deadline or zero-member completion
+        commit together. A no-deadline explicit join has no fabricated timer. Zero members close pending immediately.
+        Last arrival and until also persist closed-pending and exactly one declaration-bound continuation; on_complete
+        does not run inline on the last arrival. Existing entity locking and selected-store transactions choose one
+        arrival/deadline/until/exit winner. Arrivals never construct or arm a join.
+      stage_entry_identity: >-
+        The lifecycle owner identifies construction or the exact admitted delivery, timer or gate occurrence and
+        selected transition. A later entry into the same stage is distinct even when its timestamp, membership and
+        loop generation are unchanged. Field-only revisions and retries of the same committed entry create no arm.
+        Entry identity retains its exact run, instance, entity and stage; root runtime ownership uses the run identity,
+        not the root declaration name. Supported historical forks project executable ownership and retain the original
+        source-run provenance without inventing a child occurrence. Nested forks retain that original provenance.
+        Retained closed arms remain historical facts. This projection grants no unsupported node replay, pending timer
+        or selected-contract execution capability under #642.
+        Single-arm and catalog readers enforce the same exact node-bucket and activation-key correspondence. A malformed
+        retained activation map is corruption, not an absent arm; writers cannot replace it with an empty map.
       duplicate_policy: >-
         An exact same-member/same-canonical-output arrival is idempotent. The same member with different canonical output
         fails as platform.conflicting_duplicate. Non-members, arrivals before arm, and arrivals after close fail through
         platform.unexpected_arrival, platform.early_arrival, and platform.stale_arrival respectively.
-      timeout_policy: >-
-        Timeout is evaluated once at arm and fire_at is persisted. It is the only missing/dead-contributor escape in this
-        slice. join.terminated, join.active, and remaining: terminate are invalid until a real contributor lifecycle owner lands.
-      fan_in_lowering: >-
-        A receiver `resolution.mode: fan-in` pin with `aggregation: barrier` must associate with exactly one join row by
-        receiver flow, handler event, and join stage. The effective WorkflowJoinPlan carries the expanded member/window
-        identity plus provenance and is the executable owner consumed by verify, describe/graph, Executor, persistence,
-        timeout, restart, and replay. Zero or multiple matches fail closed; no join_id agreement field exists.
+      publication_binding: >-
+        A genuinely new business output binds the actual resolved receiver entry at its first canonical publication.
+        Work starting earlier or a known endpoint does not predict its future payload-selected destination. The existing
+        publication transaction fences that admission against entry/close/transition, including same-commit activation.
+        An unarmed publication retains its typed early refusal; no waiting queue or invented arm is added. Existing exact
+        delivery/reply/continuation obligations instead retain their own original receipts. Missing required evidence
+        rejects; duplicate/restart reuse the committed aggregate manifest and never bind a newer entry. Receipts are
+        per recipient/declaration, not ambient producer/parent authority. Source-generation fencing remains separate.
+        An exact paired reply resumes only its retained return topology and origin; ordinary matching connects or pub/sub
+        subscriptions cannot add a recipient. Independently authorized ordinary outputs remain separate publications.
+        A committed early refusal remains early after a later arm or terminal receiver; a bound late arrival retains
+        its typed stale disposition. Neither refusal authorizes execution or resurrects a terminal receiver. Genuinely
+        new publications targeting terminal receivers still use the ordinary strict receiver-availability contract.
+      canonical_plan: >-
+        WorkflowJoinPlan owns exact declared membership, selected output type and closure. Pins cannot supply or override
+        those facts. Ordinary compiled connect routing selects the instance; no singleton-coordinator or fan-in interpreter remains.
       finite_accumulate_retirement: >-
         Every bundle, staged or non-staged, rejects finite-barrier accumulate fields such as expected_from,
-        threshold/completion, timeout_ms, nested on_complete, and nested on_timeout. Accumulate owns only open/windowed
+        threshold/completion, timeout_ms, nested on_complete, and nested on_timeout. Accumulate owns only open
         streams and may not be paired with handler-level on_complete.
       graph_surface: >-
-        describe --graph renders stage-scoped join completion and timeout edges. Arrival-join completion and timeout
+        describe --graph renders stage-scoped join completion and deadline edges. Arrival-join completion and deadline
         originate at the declared join stage. Delivery-barrier completion originates from the ordinary handler stage
-        scope, including the exact loop-operation source when the handler is loop-scoped. Timeout edges include after
+        scope, including the exact loop-operation source when the handler is loop-scoped. Deadline edges include after
         and the join ID.
       delivery_barrier_variant:
-        authored_shape: '`members: {from_fan_out: true}` selects the fan-out delivery variant. It requires an explicit stable join `id` and a non-empty `on_complete`, and forbids stage, members.from, members.by, window, output, complete_when, remaining, and timeout. The selector binds to exactly one top-level fan_out on the same handler; missing, duplicate, or nested fan-outs fail strict loading. It is not an authored identity reference.'
+        authored_shape: '`members: {from_fan_out: true}` selects the fan-out delivery variant. It requires an explicit stable join `id` and a non-empty `on_complete`, and forbids stage, members.from, members.by, members.count, output, deadline, on_deadline, until and retired join fields. The selector binds to exactly one top-level fan_out on the same handler; missing, duplicate, or nested fan-outs fail strict loading. It is not an authored identity reference.'
         canonical_owner: The effective WorkflowJoinPlan carries the exact compiled fan-out plan identity (bundle hash, flow path, declaration family, semantic path, and semantic digest), target declaration, route, execution mode, and typed completion handle. Boot verification, semantic view, engine, persistence, schedules, replay, fork, diagnostics, and authoring consume that plan and never reconstruct identity from a bare name, handler position, event type, or current bundle.
         registration: >-
           The fan-out trigger transaction atomically persists the S1 intent and one armed barrier for that exact intent
@@ -4807,7 +4829,7 @@ handler_specification:
         with_emit: PROHIBITED in Stage 1. Use generated activity result events instead. Immediate authored emit+activity ordering
           is intentionally not defined in this slice.
         with_rules: A top-level handler activity is allowed only when the handler has no rules. In a rules handler, activity
-          must be declared on the selected handler.rules[*] branch. on_complete and join completion/timeout activity
+          must be declared on the selected handler.rules[*] branch. on_complete and join completion/deadline activity
           sites are not supported in Stage 1. Retired `handler.branch` syntax is unsupported for all handler semantics,
           including activity placement.
       execution_position: After emit.event selection point and before clear. The intent is persisted inside the handler
@@ -4871,7 +4893,7 @@ handler_specification:
         write_model: Read-only. Handler writes and entity tools may not target _entity. Emit payload construction may read _entity; these values cannot authorize another receiver.
       accumulated:
         resolves_to: 'The items array from the current handler''s accumulate step. Each item is a JSONB object
-          representing one admitted event payload in the current open/windowed stream bucket. Available to supported
+          representing one admitted business payload in the current instance-scoped stream bucket. Available to supported
           per-arrival filter, reduce, count, compute, and rules processing after stream admission.'
         usage: 'accumulated.filter(d, <condition>) — filter items by predicate. accumulated.size() — count items.
           accumulated.map(d, d.field) — extract field values. Item fields match the inbound event payload fields
@@ -4972,7 +4994,7 @@ handler_specification:
         execution_type: string — if omitted, defaults to "system_node"; any explicit non-system_node value is invalid.
         subscribes_to: list of event names this node receives. Exact handler-triggered subscriptions are derived from
           event_handlers keys when omitted. Join timeout delivery is platform-owned and derived from effective join plans.
-          Open/windowed stream accumulation derives no timeout subscription. Slash-free flow-local wildcard
+          Open stream accumulation derives no closure or deadline subscription. Slash-free flow-local wildcard
           subscriptions remain explicit.
         produces: list of event names this node emits. Omit for ordinary nodes; the effective production surface is derived
           from supported declarative emit sites. If present, this is an explicit authored assertion checked against actual
@@ -5866,7 +5888,7 @@ engine:
       storage: Entity table, bookkeeping JSONB column, independently required even when empty.
       mutation: Producers explicitly write the bookkeeping domain and an uninterpreted path; readers never infer ownership from key spelling.
     accumulator_state:
-      description: 'Structured data for admitted open/windowed stream arrivals within a handler''s accumulate pattern.'
+      description: 'Structured data for admitted instance-scoped stream arrivals within a handler''s accumulate pattern.'
       storage: Per-node state table (from nodes.yaml state_schema). Keyed by entity_id.
       mutation: Written by accumulate tracking (record arrival), data_accumulation (write payload fields), and compute steps
         (store computed values). It is cleared only by an explicit supported clear operation; stream admission has no completion cleanup.
@@ -5910,11 +5932,9 @@ engine:
     state_schema_scoping: state_schema fields are node-scoped in storage. In CEL, entity.X reads the current handler node
       state. Cross-node state reads are not supported — use events to pass data between nodes.
   accumulation_engine:
-    description: The accumulation engine is the platform subsystem for open/windowed stream admission. It tracks accepted
-      event arrivals for the same entity and never owns finite membership, completion, or timeout.
+    description: The accumulation engine owns instance-scoped stream admission, not finite membership or closure.
     tracking:
-      setup: 'When an entity first encounters an accumulate handler, the platform creates a stream bucket with an empty
-        received-key set and item list.'
+      setup: A stream bucket stores canonical business payload evidence and admitted durable delivery identities.
       bucket_identity: |
         Handler accumulator buckets are keyed by the selected authored handler
         event key after runtime handler resolution/localization, not by the
@@ -5922,63 +5942,62 @@ engine:
         event type remains event provenance and must be retained on accumulated
         item metadata and diagnostics. Compute reads and `materialize_from`
         projection reads must consume the same selected
-        handler event key. If `accumulate.window` is declared, the window value
-        is part of the accumulator bucket identity; unwindowed accumulators keep
-        the existing node/event bucket key.
-      arrival: 'Each event arrival is identified by its dedup_by key. Default: sender session ID. Can be overridden to a payload
-        field (e.g., payload.dimension). If the key was already received, the arrival is ignored (idempotent). If not, it
-        is added to the received set and persisted.'
+        handler event key and captured generation. The selected instance owns
+        the partition; no authored business-window suffix remains.
+      arrival: >-
+        A configured key is exact TEXT. Equality compares the canonical admitted business payload before stream metadata
+        decoration, preserving numeric kinds and excluding transport provenance. An equal keyed duplicate stops effects;
+        a changed keyed payload is a typed atomic conflict. An unkeyed stream appends each distinct durable delivery once.
       continuation: 'Every newly admitted arrival persists the bucket and continues through supported per-arrival handler
         steps. An exact duplicate updates no item and does not invent a completion signal.'
-    finite_boundary: 'Declared membership snapshots, all/threshold close, finite timeout, one-winner close, and completion
-      outcomes are exclusively owned by the effective WorkflowJoinPlan and joinruntime activation.'
-    idempotency: Duplicate arrivals (same item, same entity) are ignored. The received list is a set, not a list. Crash recovery
-      replays events through the same tracking — already-received items are skipped, accumulator state is consistent.
+    finite_boundary: Declared membership and closure belong only to WorkflowJoinPlan and the appropriate arrival/fanout barrier owner.
+    idempotency: Durable delivery replay has no downstream effects; distinct unkeyed deliveries preserve multiplicity and commit order.
     cleanup: Stream buckets are not implicitly archived or deleted by arrival processing.
   join_engine:
     description: >-
       The join engine is the canonical durable owner for staged finite-membership barrier activation, arrivals, deterministic
-      output assembly, timeout, and close. It consumes the typed lowered handler.join plan; route, timer, store, and test
+      output assembly, deadline, until, and close. It consumes the typed lowered handler.join plan; route, timer, store, and test
       surfaces do not reconstruct join semantics independently.
     persisted_activation:
       identity: >-
         One immutable typed declaration handle: explicit flow presence (present with the exact authored flow ID, or explicitly
-        absent for a root declaration), node, authored handler event, stage, effective join ID, optional window, and loop
-        generation. The selected execution route is a separate exact fact: root uses the selected run instance and flow-owned
+        absent for a root declaration), node, authored handler event, stage, effective join ID, lifecycle-owned StageEntryRef
+        and optional captured loop generation. The selected execution route is a separate exact fact: root uses the selected run instance and flow-owned
         declarations use the concrete flow instance. Runtime naming, source-event paths, descriptor rows, and singleton
-        fan-in cannot reconstruct or replace either fact.
+        selectors cannot reconstruct or replace either fact. Entry identity is once-only construction identity or the exact
+        admitted delivery/timer/gate occurrence and selected compiled transition, never time, field revision or loop generation alone.
       fields:
       - exact typed declaration handle
-      - ordered snapshotted members
+      - ordered snapshotted members or explicit target count
       - per-member canonical output value and hash
       - open/closed status and close reason
-      - armed_at and persisted fire_at
+      - armed_at, optional immutable deadline_at and exact continuation fire_at
       - exact timer task/event identity
       - expected-zero pending/fired completion disposition
     arm: >-
-      Stage entry snapshots members and optional window only after transition data writes are visible. Empty membership
-      evaluates the same canonical completion plan as arrival: default-all closes immediately, while authored complete_when
-      closes only when that boolean is true. A false custom condition persists an open activation and its mandatory timeout.
+      Stage entry snapshots membership after initialized/transition state is authoritative. Empty membership or count zero
+      closes pending and schedules exactly one continuation. Same-entry retries compare the retained snapshot. Non-loop
+      re-entry creates a distinct arm even at equal timestamps and retains old closed entries for exact late/replay decisions.
     arrival: >-
-      Runtime loads the persisted activation inside the entity lock and selected-store transaction, checks exact window and
-      member identity, stores canonical output, and evaluates default-all or complete_when over persisted join context.
-    ordering: join.results and join.missing always follow declared membership order, never arrival or map iteration order.
+      Runtime consumes the route's exact bound entry, loads its retained arm inside the entity lock and selected-store
+      transaction, checks member/source-generation ownership, stores canonical output and closes when all members arrive.
+    ordering: Explicit list order, lexical map keys or lexical count-contributor identities, never map iteration or arrival order.
     close: >-
-      Completion, timeout, and stage exit persist one closed reason. Completion/timeout outcomes and timer cancellation share
+      Completion, until, deadline and stage exit persist one closed reason. Outcome admission and timer cancellation share
       the selected-store transaction; in-memory scheduler registration/cancellation happens only after commit.
     generation_ownership: >-
       The declaration handle is the sole generation owner for join activation, schedule task identity, occurrence payload,
       close, stage-exit cancellation, supersession, settlement, persistence, hydration, and fork reminting. Re-entry into the
-      same stage creates the next exact generation rather than treating the unchanged stage name as an already-armed join.
-      Replacement of one generation is atomic and cannot cancel or mutate a sibling declaration or the next generation.
+      same stage creates a distinct lifecycle entry even with unchanged captured loop generation. Replacement or
+      cancellation is atomic and cannot cancel or mutate a sibling declaration or another entry.
     schedule_ownership: >-
-      A join activation that creates its mandatory completion or timeout schedule must have at least one exact owner before
+      A join activation that creates its required completion or declared deadline schedule must have at least one exact owner before
       the selected mutation can commit: either a durable generic schedule store or a process scheduler. If neither capability
       is present, generic schedule persistence fails closed and the containing join activation mutation rolls back. A
       durable-store-only path may commit for later canonical restoration; a process-scheduler-only path may own the local
       occurrence. Missing ownership is never treated as successful scheduling. Every root- or flow-owned system join
       schedule carries one canonical timer handle whose identity includes the owning flow (empty only for root), node,
-      handler event, stage, join, window, generation, and timeout/completion kind. Generic schedule admission and restoration
+      handler event, stage, join, exact lifecycle entry, captured generation, and timeout/completion kind. Generic schedule admission and restoration
       require the persisted task ID, workflow-runtime owner, fire event, and routing-source flow to agree exactly with that
       handle; durable scope fields or a valid routing-source shape alone never authorize a join timer.
     occurrence_routing: >-
@@ -5990,7 +6009,7 @@ engine:
       settlement, replay, and public readback consume the same projection and fail closed on any contradiction before state
       mutation.
     recovery: >-
-      Restart, replay, and fork consume persisted members/window/close/timer facts. They do not re-read mutable entity
+      Restart, replay, and supported fork consume persisted membership/entry/close/timer facts. They do not re-read mutable entity
       membership, synthesize an arrival-owned activation, or resurrect a closed timeout. Hydration validates every active
       join schedule before registering any wakeup; malformed persisted rows retaining join-family evidence abort both
       restoration and occurrence preparation without mutating the row or retiring its mandatory wakeup. Only a proven
@@ -8315,11 +8334,12 @@ engine:
       item: Exact element value for query.filter, filter.condition, and count.condition. Fan-out expressions use their configured item alias. Item and alias bindings inherit the compiled collection element type and never fall back to dyn.
       fan_out: Available after fan_out step for count metadata (fan_out.count). fan_out.index is available only
         while evaluating fan_out.emit.fields for one item.
-      join: Available only while evaluating join complete_when and selected on_complete/timeout outcomes. The typed fields
-        are expected, completed, missing, results, and timed_out; join is read-only and never persisted as entity state.
-      loop: Only id, activation_id, revision_id, attempt, and max_attempts are authored members. Join on_complete/timeout
+      join: Available only while evaluating selected on_complete/on_deadline outcomes. The typed arrival fields
+        are expected, completed, missing, results, timed_out and close_reason; fan-out completion instead exposes
+        total and its five disposition counts. join is read-only and never persisted as authored state.
+      loop: Only id, activation_id, revision_id, attempt, and max_attempts are authored members. Join on_complete/on_deadline
         reads the captured generation through its owning activation, including after restart or supported fork remapping;
-        it never borrows the current replacement attempt. loop is unavailable in join complete_when.
+        it never borrows the current replacement attempt. Non-loop joins have no loop context.
       accumulated: Available to supported per-arrival filter/reduce/count/compute/rules processing after stream admission
     ambient_time: >
       CEL guard/rule/filter/on_complete conditions must not call ambient time functions such as `now()` or
@@ -9224,7 +9244,8 @@ compliance:
     rules:
     - Match inbound event to handler in owning node
     - 'If handler has guard: evaluate condition. If false, reject or kill.'
-    - 'If handler has accumulate: admit the open/windowed stream arrival, persist a new non-duplicate item, and continue per arrival.'
+    - 'If handler has accumulate: admit the instance-scoped stream arrival, persist a new non-duplicate business payload, and continue per arrival.'
+    - 'An arrival join consumes the publication-bound exact lifecycle entry. Its last member, until or deadline stores one close and one declaration-bound continuation; outcome effects do not run inline on the last arrival.'
     - 'If handler has on_complete: evaluate conditions, execute matching branch.'
     - 'If handler has rules: match payload field, select the matching rule-local emit if present.'
     - 'Resolve side effects per handler_specification.rules_handler_interaction.side_effect_resolution: advances_to uses handler default with selected-entry override, sets_gate is handler-level only, and data_accumulation composes selected-entry writes before handler-level writes.'
@@ -12247,10 +12268,10 @@ flow_model:
         derived from exact authored consumers of typed map/list state. Fan-in
         input rows, contained operations, direct entity writers, agent write
         authorization, recognized entity expressions, joins, and structured
-        readers, including accumulate.from/window/dedup_by and
-        fan_out.items_from, create demand. Every effective join
-        creates intrinsic coordinator demand even when its membership paths are
-        payload-backed. Executable readers are projected by one explicit closed
+        readers, including accumulate.from and fan_out.items_from, create demand.
+        Join declarations alone create no singleton or coordinator demand; their
+        exact contained-state readers participate in the same reader census.
+        Executable readers are projected by one explicit closed
         handler/rule field census shared by demand, entity-reader coverage, and
         expression-reference validation. `query.select` entries are literal
         object field names, `activity.approval.decision` is an opaque stable
@@ -15508,6 +15529,11 @@ platform_tables:
         request event, paired request/reply topology, concrete origin route, and request correlation.
         Terminal claim is atomic: the first reply event wins, replay of that same event is idempotent,
         and a distinct later reply fails closed as platform.reply_already_terminal.
+        origin_route is one closed typed object carrying the concrete route and any exact join_admissions
+        frozen by this request. Its reader rejects malformed UTF-8, duplicate JSON keys, alternate field
+        spellings, unknown fields and null roots before decoding. Return receipts stay scoped to the
+        existing obligation and never authorize an additional recipient; source-aware join admission
+        validates their complete receiver ownership before accepting the reply.
       ddl: |
         CREATE TABLE reply_contexts (
             reply_context_id        TEXT PRIMARY KEY,

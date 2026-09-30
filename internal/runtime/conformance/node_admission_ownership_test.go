@@ -79,7 +79,7 @@ func TestNodeAdmissionUsesSourceValueWithoutRawDecoderFallback(t *testing.T) {
 	for identity := range actual {
 		parts := strings.Split(identity, ":")
 		switch parts[len(parts)-1] {
-		case "SystemNodeContract", "SystemNodeEventHandler", "HandlerRuleEntry", "NodeStateSchema", "NodeGateStateSchema", "WorkflowTimerContract", "HandlerOnSuccessSpec", "ActivitySpec", "GuardSpec", "GateSpec", "AccumulateSpec", "FanOutSpec", "GroupBySpec", "FilterSpec", "ReduceSpec", "CountSpec", "QuerySpec", "WorkflowDataWrite", "WorkflowDataAccumulation", "ComputeSpec", "JoinSpec", "JoinMembersSpec", "JoinWindowSpec", "EventEmission":
+		case "SystemNodeContract", "SystemNodeEventHandler", "HandlerRuleEntry", "NodeStateSchema", "NodeGateStateSchema", "WorkflowTimerContract", "HandlerOnSuccessSpec", "ActivitySpec", "GuardSpec", "GateSpec", "AccumulateSpec", "FanOutSpec", "GroupBySpec", "FilterSpec", "ReduceSpec", "CountSpec", "QuerySpec", "WorkflowDataWrite", "WorkflowDataAccumulation", "ComputeSpec", "JoinSpec", "JoinMembersSpec", "JoinWindowSpec", "JoinDeadlineSpec", "EventEmission":
 			t.Errorf("retired node decoder restored: %s", identity)
 		}
 	}

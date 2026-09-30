@@ -747,6 +747,9 @@ func commitPipelineTestWorkflowState(ctx context.Context, store *workflowInstanc
 		if _, err := tx.ExecContext(ctx, entityQuery, entityArgs...); err != nil {
 			return fmt.Errorf("insert pipeline test workflow entity state with %d arguments: %w", len(entityArgs), err)
 		}
+		if err := commitPipelineTestWorkflowBookkeeping(ctx, tx, store, record); err != nil {
+			return err
+		}
 		return commitPipelineTestWorkflowMutationLog(ctx, tx, store, record, before)
 	}
 	stateQuery := `
@@ -783,6 +786,9 @@ func commitPipelineTestWorkflowState(ctx context.Context, store *workflowInstanc
 		}
 		return fmt.Errorf("pipeline test workflow state changed before commit")
 	}
+	if err := commitPipelineTestWorkflowBookkeeping(ctx, tx, store, record); err != nil {
+		return err
+	}
 	if record.Transition == WorkflowEngineStateTransitionUpdateStateCreateCompanion {
 		insert := `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, terminated_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 		args := []any{record.Identity.RunID, record.Identity.Route.InstancePath, record.WorkflowName, record.Mode, string(record.Config), record.Status, nullablePipelineTestWorkflowTerminationTime(record.TerminatedAt), record.CreatedAt}
@@ -814,6 +820,15 @@ func commitPipelineTestWorkflowState(ctx context.Context, store *workflowInstanc
 		return fmt.Errorf("commit pipeline test workflow mutation log: %w", err)
 	}
 	return nil
+}
+
+func commitPipelineTestWorkflowBookkeeping(ctx context.Context, tx *sql.Tx, store *workflowInstanceStore, record WorkflowEngineStateRecord) error {
+	query := `UPDATE entity_state SET bookkeeping=? WHERE run_id=? AND entity_id=?`
+	if store.testDialect() == workflowStoreDialectPostgres {
+		query = `UPDATE entity_state SET bookkeeping=$1::jsonb WHERE run_id=$2::uuid AND entity_id=$3::uuid`
+	}
+	_, err := tx.ExecContext(ctx, query, string(record.Bookkeeping), record.Identity.RunID, record.EntityID)
+	return err
 }
 
 func nullablePipelineTestWorkflowTerminationTime(value time.Time) any {

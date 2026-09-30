@@ -85,15 +85,24 @@ func TestRunAcceptsNestedDeliveryJoinOnlyReachableTerminalStage(t *testing.T) {
 
 func TestTimerActivationUsesExactHandlerOriginForTwoJoinsOnOneNode(t *testing.T) {
 	joinNode := identitytest.RootNode(t, "join-node")
+	memberCount := 1
 	joinA := runtimecontracts.JoinSpec{
 		ID: "join-a", Stage: "awaiting-a",
+		Members:         runtimecontracts.JoinMembersSpec{Count: &memberCount, By: "payload.member_id"},
+		Output:          "payload.result",
+		OnCompleteFound: true, OnDeadlineFound: true,
 		OnComplete: runtimecontracts.HandlerRuleEntry{AdvancesTo: "complete-a"},
-		Timeout:    runtimecontracts.JoinTimeoutSpec{After: "1h", Outcome: runtimecontracts.HandlerRuleEntry{AdvancesTo: "timeout-a"}},
+		Deadline:   &runtimecontracts.JoinDeadlineSpec{After: "1h", From: runtimecontracts.JoinDeadlineFromStageEntry},
+		OnDeadline: runtimecontracts.HandlerRuleEntry{AdvancesTo: "timeout-a"},
 	}
 	joinB := runtimecontracts.JoinSpec{
 		ID: "join-b", Stage: "awaiting-b",
+		Members:         runtimecontracts.JoinMembersSpec{Count: &memberCount, By: "payload.member_id"},
+		Output:          "payload.result",
+		OnCompleteFound: true, OnDeadlineFound: true,
 		OnComplete: runtimecontracts.HandlerRuleEntry{AdvancesTo: "complete-b"},
-		Timeout:    runtimecontracts.JoinTimeoutSpec{After: "1h", Outcome: runtimecontracts.HandlerRuleEntry{AdvancesTo: "timeout-b"}},
+		Deadline:   &runtimecontracts.JoinDeadlineSpec{After: "1h", From: runtimecontracts.JoinDeadlineFromStageEntry},
+		OnDeadline: runtimecontracts.HandlerRuleEntry{AdvancesTo: "timeout-b"},
 	}
 	handlers := map[string]runtimecontracts.SystemNodeEventHandler{
 		"join.a.requested": {Join: &joinA},
@@ -108,8 +117,8 @@ func TestTimerActivationUsesExactHandlerOriginForTwoJoinsOnOneNode(t *testing.T)
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"join.a.requested": {},
-			"join.b.requested": {},
+			"join.a.requested": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"member_id": {Type: "text"}, "result": {Type: "text"}}, Required: []string{"member_id", "result"}}},
+			"join.b.requested": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"member_id": {Type: "text"}, "result": {Type: "text"}}, Required: []string{"member_id", "result"}}},
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{"join-node": {EventHandlers: handlers}},
 		Semantics: runtimecontracts.WorkflowSemanticView{
@@ -262,20 +271,23 @@ func TestLifecycleReachabilityConsumesLoopEscapeAndTimerCancelPreservesEveryOthe
 	workNode := identitytest.RootNode(t, "work-node")
 	joinNode := identitytest.RootNode(t, "join-node")
 	reviewNode := identitytest.RootNode(t, "review-node")
+	memberCount := 1
 	join := &runtimecontracts.JoinSpec{
 		ID: "approval", Stage: "joining",
+		Members:         runtimecontracts.JoinMembersSpec{Count: &memberCount, By: "payload.member_id"},
+		Output:          "payload.result",
+		OnCompleteFound: true, OnDeadlineFound: true,
 		OnComplete: runtimecontracts.HandlerRuleEntry{AdvancesTo: "joined"},
-		Timeout: runtimecontracts.JoinTimeoutSpec{
-			After:   "1h",
-			Outcome: runtimecontracts.HandlerRuleEntry{AdvancesTo: "join-timed-out"},
-		},
+		Deadline:   &runtimecontracts.JoinDeadlineSpec{After: "1h", From: runtimecontracts.JoinDeadlineFromStageEntry},
+		OnDeadline: runtimecontracts.HandlerRuleEntry{AdvancesTo: "join-timed-out"},
 	}
 	stages := []string{"waiting", "review", "joining", "joined", "join-timed-out", "expired", "escaped"}
 	topology := runtimecontracts.BuildWorkflowStageTopology(
 		".", "waiting", stages, []string{"joined", "join-timed-out", "expired", "escaped"},
 		[]runtimecontracts.HandlerTransitionSemantic{
 			{Node: workNode, EventType: "work.started", AdvancesTo: "review"},
-			{Node: joinNode, EventType: "approval.requested", AdvancesTo: "joining", Join: join},
+			{Node: joinNode, EventType: "approval.started", AdvancesTo: "joining"},
+			{Node: joinNode, EventType: "approval.requested", Join: join},
 		},
 		[]runtimecontracts.WorkflowTimerContract{{ID: "review.expire", Stage: "review", StageOwned: true, Event: runtimecontracts.WorkflowStageTimerInternalEvent, AdvancesTo: "expired"}},
 		[]runtimecontracts.WorkflowLoopPlan{{
@@ -285,11 +297,21 @@ func TestLifecycleReachabilityConsumesLoopEscapeAndTimerCancelPreservesEveryOthe
 	)
 	handlers := map[string]runtimecontracts.SystemNodeContract{
 		"work-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.started": {AdvancesTo: "review"}}},
-		"join-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"approval.requested": {AdvancesTo: "joining", Join: join}}},
+		"join-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+			"approval.started":   {AdvancesTo: "joining"},
+			"approval.requested": {Join: join},
+		}},
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		Events: map[string]runtimecontracts.EventCatalogEntry{"work.started": {}, "approval.requested": {}},
-		Nodes:  handlers,
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"work.started":     {},
+			"approval.started": {},
+			"approval.requested": {Payload: runtimecontracts.EventPayloadSpec{
+				Properties: map[string]runtimecontracts.EventFieldSpec{"member_id": {Type: "text"}, "result": {Type: "text"}},
+				Required:   []string{"member_id", "result"},
+			}},
+		},
+		Nodes: handlers,
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
 				"work-node": handlers["work-node"].EventHandlers,

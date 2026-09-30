@@ -8,20 +8,22 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
+	"github.com/division-sh/swarm/internal/runtime/eventschema"
 )
 
 type FanOutEffectiveSemantics struct {
-	PlanRef          FanOutPlanRef
-	ItemsFrom        string
-	ItemsPath        paths.Path
-	CollectionType   CatalogTypeReference
-	ItemType         ResolvedCatalogType
-	ItemAlias        string
-	Identity         string
-	IdentityDerived  bool
-	MaxItems         int
-	AuthoredMaxItems int
-	MaxItemsSet      bool
+	PlanRef              FanOutPlanRef
+	ItemsFrom            string
+	ItemsPath            paths.Path
+	CollectionType       CatalogTypeReference
+	CollectionProjection CollectionProjection
+	ItemType             ResolvedCatalogType
+	ItemAlias            string
+	Identity             string
+	IdentityDerived      bool
+	MaxItems             int
+	AuthoredMaxItems     int
+	MaxItemsSet          bool
 }
 
 type FanOutPlanRef struct {
@@ -48,25 +50,108 @@ func (r FanOutElementRef) DeclarationIdentity() (runtimeidentity.DeclarationIden
 }
 
 type FanOutCompiledPlan struct {
-	Site              FanOutSiteRef        `json:"site"`
-	Ref               FanOutPlanRef        `json:"ref"`
-	ItemsFrom         string               `json:"items_from"`
-	ItemsPath         paths.Path           `json:"items_path"`
-	CollectionType    CatalogTypeReference `json:"collection_type"`
-	ItemType          ResolvedCatalogType  `json:"item_type"`
-	ItemAlias         string               `json:"item_alias"`
-	Identity          string               `json:"identity"`
-	IdentityDerived   bool                 `json:"identity_derived"`
-	MaxItems          int                  `json:"max_items"`
-	AuthoredMaxItems  int                  `json:"authored_max_items"`
-	MaxItemsSet       bool                 `json:"max_items_set"`
-	SourceAfterWrites bool                 `json:"source_after_writes"`
-	Writes            []WorkflowDataWrite  `json:"-"`
-	Emit              EmitSpec             `json:"emit"`
+	Site                 FanOutSiteRef        `json:"site"`
+	Ref                  FanOutPlanRef        `json:"ref"`
+	ItemsFrom            string               `json:"items_from"`
+	ItemsPath            paths.Path           `json:"items_path"`
+	CollectionType       CatalogTypeReference `json:"collection_type"`
+	CollectionProjection CollectionProjection `json:"collection_projection"`
+	ItemType             ResolvedCatalogType  `json:"item_type"`
+	ItemAlias            string               `json:"item_alias"`
+	Identity             string               `json:"identity"`
+	IdentityDerived      bool                 `json:"identity_derived"`
+	MaxItems             int                  `json:"max_items"`
+	AuthoredMaxItems     int                  `json:"authored_max_items"`
+	MaxItemsSet          bool                 `json:"max_items_set"`
+	SourceAfterWrites    bool                 `json:"source_after_writes"`
+	Writes               []WorkflowDataWrite  `json:"-"`
+	Emit                 EmitSpec             `json:"emit"`
 }
 
 func (p FanOutCompiledPlan) EmittedEventType() string {
 	return p.Emit.EventType()
+}
+
+// FanOutPlanSemantics is the digest witness retained with a handler source.
+// Store readers can reject contradictory evidence without live compilation.
+type FanOutPlanSemantics struct {
+	ElementRef           FanOutElementRef     `json:"element_ref"`
+	ItemsFrom            string               `json:"items_from"`
+	CollectionType       CatalogTypeReference `json:"collection_type"`
+	CollectionProjection CollectionProjection `json:"collection_projection"`
+	ItemType             ResolvedCatalogType  `json:"item_type"`
+	ItemAlias            string               `json:"item_alias"`
+	Identity             string               `json:"identity"`
+	IdentityDerived      bool                 `json:"identity_derived"`
+	MaxItems             int                  `json:"max_items"`
+	SourceAfterWrites    bool                 `json:"source_after_writes"`
+	Emit                 EmitSpec             `json:"emit"`
+}
+
+func (s FanOutPlanSemantics) Clone() FanOutPlanSemantics {
+	s.CollectionType.Catalog = cloneTypeCatalogDocument(s.CollectionType.Catalog)
+	s.CollectionProjection = s.CollectionProjection.Clone()
+	s.ItemType = s.ItemType.Clone()
+	s.Emit = cloneEmitSpec(s.Emit)
+	return s
+}
+
+func (s FanOutPlanSemantics) ProjectSource(value any) ([]any, error) {
+	items, err := s.CollectionProjection.Project(value)
+	if err != nil {
+		return nil, err
+	}
+	schema, _ := eventSchemaForTypeRef(s.CollectionType.Type, s.CollectionType.Catalog, map[string]struct{}{})
+	if err := eventschema.ValidateValueAgainstSchema(schema, value); err != nil {
+		return nil, fmt.Errorf("fan-out source violates its admitted catalog type: %w", err)
+	}
+	return items, nil
+}
+
+func (p FanOutCompiledPlan) SemanticEvidence() FanOutPlanSemantics {
+	return FanOutPlanSemantics{
+		ElementRef: p.Ref.ElementRef, ItemsFrom: p.ItemsFrom,
+		CollectionType:       CatalogTypeReference{Type: p.CollectionType.Type, Catalog: cloneTypeCatalogDocument(p.CollectionType.Catalog)},
+		CollectionProjection: p.CollectionProjection.Clone(), ItemType: p.ItemType.Clone(),
+		ItemAlias: p.ItemAlias, Identity: p.Identity, IdentityDerived: p.IdentityDerived,
+		MaxItems: p.MaxItems, SourceAfterWrites: p.SourceAfterWrites, Emit: cloneEmitSpec(p.Emit),
+	}
+}
+
+func (s FanOutPlanSemantics) Validate(ref FanOutPlanRef) error {
+	if s.ElementRef != ref.ElementRef {
+		return fmt.Errorf("fan-out source projection declaration disagrees with plan")
+	}
+	if _, err := ValidateFanOutItemsSource(FanOutSpec{ItemsFrom: s.ItemsFrom}); err != nil {
+		return err
+	}
+	admitted, err := AdmitCollectionProjection(s.CollectionType)
+	if err != nil {
+		return err
+	}
+	if err := s.CollectionProjection.Validate(); err != nil {
+		return err
+	}
+	if admitted.Kind != s.CollectionProjection.Kind || !StructuralCatalogTypesEqual(admitted.Type, s.CollectionProjection.Type) || !StructuralCatalogTypesEqual(admitted.ItemType(), s.ItemType) {
+		return fmt.Errorf("fan-out source projection contradicts catalog-admitted type")
+	}
+	if s.MaxItems <= 0 || s.MaxItems > DefaultFanOutMaxItems || s.Identity == "" {
+		return fmt.Errorf("fan-out source projection has invalid identity or bound")
+	}
+	if err := ValidateFanOutAlias(s.ItemAlias); err != nil {
+		return err
+	}
+	if s.SourceAfterWrites && !strings.HasPrefix(s.ItemsFrom, "entity.") {
+		return fmt.Errorf("fan-out payload projection cannot select post-write state")
+	}
+	digest, err := canonicaljson.Hash(s)
+	if err != nil {
+		return fmt.Errorf("hash fan-out source projection: %w", err)
+	}
+	if digest != ref.SemanticDigest {
+		return fmt.Errorf("fan-out source projection semantic digest disagrees with plan")
+	}
+	return nil
 }
 
 type FanOutSiteKind string
@@ -161,30 +246,16 @@ func (b *WorkflowContractBundle) CompileFanOutPlan(node runtimeidentity.Executab
 		Site:      siteRef,
 		ItemsFrom: effective.ItemsFrom, ItemsPath: effective.ItemsPath,
 		CollectionType: effective.CollectionType, ItemType: effective.ItemType,
-		ItemAlias: effective.ItemAlias, Identity: effective.Identity,
+		CollectionProjection: effective.CollectionProjection,
+		ItemAlias:            effective.ItemAlias, Identity: effective.Identity,
 		IdentityDerived: effective.IdentityDerived, MaxItems: effective.MaxItems,
 		AuthoredMaxItems: effective.AuthoredMaxItems, MaxItemsSet: effective.MaxItemsSet,
 		SourceAfterWrites: b.fanOutSourceAfterWrites(node, handler, spec, effective.ItemsPath),
 		Writes:            cloneFanOutWrites(site.Writes),
 		Emit:              emit,
 	}
-	digest, err := canonicaljson.Hash(struct {
-		ElementRef        FanOutElementRef     `json:"element_ref"`
-		ItemsFrom         string               `json:"items_from"`
-		CollectionType    CatalogTypeReference `json:"collection_type"`
-		ItemType          ResolvedCatalogType  `json:"item_type"`
-		ItemAlias         string               `json:"item_alias"`
-		Identity          string               `json:"identity"`
-		IdentityDerived   bool                 `json:"identity_derived"`
-		MaxItems          int                  `json:"max_items"`
-		SourceAfterWrites bool                 `json:"source_after_writes"`
-		Emit              EmitSpec             `json:"emit"`
-	}{
-		ElementRef: FanOutElementRefFrom(ref), ItemsFrom: plan.ItemsFrom,
-		CollectionType: plan.CollectionType, ItemType: plan.ItemType,
-		ItemAlias: plan.ItemAlias, Identity: plan.Identity, IdentityDerived: plan.IdentityDerived,
-		MaxItems: plan.MaxItems, SourceAfterWrites: plan.SourceAfterWrites, Emit: plan.Emit,
-	})
+	plan.Ref.ElementRef = FanOutElementRefFrom(ref)
+	digest, err := canonicaljson.Hash(plan.SemanticEvidence())
 	if err != nil {
 		return FanOutCompiledPlan{}, fmt.Errorf("fan_out semantic plan digest: %w", err)
 	}
@@ -341,6 +412,8 @@ func (b *WorkflowContractBundle) resetFanOutPlans() {
 }
 
 func cloneFanOutCompiledPlan(plan FanOutCompiledPlan) FanOutCompiledPlan {
+	plan.CollectionProjection = plan.CollectionProjection.Clone()
+	plan.ItemType = plan.ItemType.Clone()
 	plan.ItemsPath.Segments = append([]string(nil), plan.ItemsPath.Segments...)
 	plan.Writes = cloneFanOutWrites(plan.Writes)
 	plan.Emit = cloneEmitSpec(plan.Emit)
@@ -452,10 +525,11 @@ func (b *WorkflowContractBundle) ResolveFanOutEffectiveSemantics(node runtimeide
 	if err != nil {
 		return FanOutEffectiveSemantics{}, err
 	}
-	itemType, err := resolveWorkflowCollectionItemType(collectionType, itemsPath.Segments[1:])
+	projection, err := AdmitCollectionProjection(collectionType)
 	if err != nil {
 		return FanOutEffectiveSemantics{}, fmt.Errorf("fan_out.items_from %q %w", strings.TrimSpace(spec.ItemsFrom), err)
 	}
+	itemType := projection.ItemType()
 
 	identity := strings.TrimSpace(spec.Identity)
 	derived := false
@@ -472,16 +546,17 @@ func (b *WorkflowContractBundle) ResolveFanOutEffectiveSemantics(node runtimeide
 	}
 
 	return FanOutEffectiveSemantics{
-		ItemsFrom:        strings.TrimSpace(spec.ItemsFrom),
-		ItemsPath:        itemsPath,
-		CollectionType:   collectionType,
-		ItemType:         itemType,
-		ItemAlias:        strings.TrimSpace(spec.As),
-		Identity:         identity,
-		IdentityDerived:  derived,
-		MaxItems:         EffectiveFanOutMaxItems(spec),
-		AuthoredMaxItems: spec.MaxItems,
-		MaxItemsSet:      spec.MaxItemsSet,
+		ItemsFrom:            strings.TrimSpace(spec.ItemsFrom),
+		ItemsPath:            itemsPath,
+		CollectionType:       collectionType,
+		CollectionProjection: projection,
+		ItemType:             itemType,
+		ItemAlias:            strings.TrimSpace(spec.As),
+		Identity:             identity,
+		IdentityDerived:      derived,
+		MaxItems:             EffectiveFanOutMaxItems(spec),
+		AuthoredMaxItems:     spec.MaxItems,
+		MaxItemsSet:          spec.MaxItemsSet,
 	}, nil
 }
 

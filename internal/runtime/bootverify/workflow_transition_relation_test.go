@@ -172,7 +172,7 @@ func authoredTransitionRelation(t *testing.T, family, flow string) []contracts.W
 			handler("completed", "handler.on_complete", "on_complete", "done", active, i)
 		}
 		handler("arrived", "handler.join.on_complete", "join.on_complete", "done", []string{"awaiting"}, 0)
-		handler("arrived", "handler.join.timeout", "join.timeout", "done", []string{"awaiting"}, 0)
+		handler("arrived", "handler.join.on_deadline", "join.on_deadline", "done", []string{"awaiting"}, 0)
 		timeout := &rows[len(rows)-1]
 		timeout.EventType, timeout.TimerID, timeout.After, timeout.Timed = "platform.join_timeout", "awaiting", "3h", true
 		timer := map[string]string{".": "advance", "left": "left.advance", "right": "right.advance"}[flow]
@@ -342,11 +342,11 @@ func transitionRelationDeclarations(family string) (schema, handlers, events str
     arrived:
       join:
         stage: awaiting
-        members: {from: entity.expected, by: payload.member}
-        window: {from: entity.window, by: payload.window}
+        members: {from: state.expected, by: payload.member}
         output: payload.result
         on_complete: {advances_to: done}
-        timeout: {after: 3h, advances_to: done}
+        deadline: {after: 3h, from: stage_entry}
+        on_deadline: {advances_to: done}
     tick: {}
 `, "direct:\ncreated:\nselected:\ninherited:\ncompleted:\ntick:\narrived:\n  member: text\n  window: text\n  result: text\n"
 	case "loop":

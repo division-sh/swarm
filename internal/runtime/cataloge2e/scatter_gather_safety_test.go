@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -127,6 +128,7 @@ func TestScatterGatherSafetyBothStores(t *testing.T) {
 					t.Fatalf("registration set: %v", paths)
 				}
 				done := map[string]bool{}
+				var retainedJoinRef timeridentity.JoinRef
 				check := func(completed int) {
 					t.Helper()
 					if counts := scatterGatherCounts(t, h, readContext()); counts["entity_state"] != len(items)+2 {
@@ -177,12 +179,43 @@ func TestScatterGatherSafetyBothStores(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					activation, found, err := joinruntime.Load(carrier.StateBuckets, identitytest.FlowNode(t, "collector", "gather"), joinruntime.ActivationKey("awaiting", "awaiting", "batch-one"))
+					joinNode := identitytest.FlowNode(t, "collector", "gather")
+					if collector.Fields["batch_id"] != "batch-one" {
+						t.Fatalf("collector business batch changed: %#v", collector.Fields["batch_id"])
+					}
+					if !retainedJoinRef.Valid() {
+						declaration, err := timeridentity.NewJoinRef(joinNode, "item.reported", "awaiting", "awaiting")
+						if err != nil {
+							t.Fatal(err)
+						}
+						activations, err := joinruntime.List(carrier.StateBuckets)
+						if err != nil {
+							t.Fatal(err)
+						}
+						for _, activation := range activations {
+							ref := activation.JoinRef()
+							if !ref.Declaration().Equal(declaration) {
+								continue
+							}
+							if retainedJoinRef.Valid() {
+								t.Fatal("scatter-gather fixture has multiple arms for one declaration")
+							}
+							if err := ref.StageEntry().RequireOwner(catalogRuntimeRunID, "collector", collector.InstanceID, collector.StorageRef, collector.EntityID, "awaiting"); err != nil {
+								t.Fatalf("collector arm lifecycle owner: %v", err)
+							}
+							retainedJoinRef = ref
+						}
+						if !retainedJoinRef.Valid() {
+							t.Fatal("collector lacks its exact persisted stage-entry arm")
+						}
+					}
+					activation, found, err := joinruntime.Load(carrier.StateBuckets, joinNode, joinruntime.ActivationKey(retainedJoinRef))
 					if err != nil || !found || activation.Completed() != completed || activation.Expected() != len(items) {
 						t.Fatalf("gather %+v found=%v err=%v", activation, found, err)
 					}
 					if completed == len(items) {
-						if collector.CurrentState != "complete" || activation.CloseReason != joinruntime.CloseReasonComplete || !reflect.DeepEqual(activation.Results(), expectedResults) {
+						results, err := activation.Results()
+						if err != nil || collector.CurrentState != "complete" || activation.CloseReason != joinruntime.CloseReasonComplete || !reflect.DeepEqual(results, expectedResults) {
 							t.Fatalf("final gather: %s %+v", collector.CurrentState, activation)
 						}
 					} else if collector.CurrentState != "awaiting" || activation.Status != joinruntime.StatusOpen {

@@ -994,7 +994,7 @@ func AuthorActivityEventDescriptors(source semanticview.Source) ([]runtimeauthor
 		if err := add("platform.join_complete", runtimeauthoractivity.StoryDifferent); err != nil {
 			return nil, err
 		}
-		if join.Spec.TimeoutFound || strings.TrimSpace(join.Spec.Timeout.After) != "" {
+		if join.Spec.Deadline != nil {
 			if err := add("platform.join_timeout", runtimeauthoractivity.StoryDifferent); err != nil {
 				return nil, err
 			}

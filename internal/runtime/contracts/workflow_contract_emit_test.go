@@ -12,7 +12,8 @@ func TestHandlerEmitEventsPreservesCompletionSites(t *testing.T) {
 		}},
 		Join: &JoinSpec{
 			OnComplete: HandlerRuleEntry{Emit: EmitSpec{Event: "join.completed"}},
-			Timeout:    JoinTimeoutSpec{Outcome: HandlerRuleEntry{Emit: EmitSpec{Event: "join.timed_out"}}},
+			Deadline:   &JoinDeadlineSpec{After: "1h", From: JoinDeadlineFromStageEntry},
+			OnDeadline: HandlerRuleEntry{Emit: EmitSpec{Event: "join.timed_out"}},
 		},
 	}
 

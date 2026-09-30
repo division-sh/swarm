@@ -226,8 +226,7 @@ func TestBuildStageGraphShowsFanInBarrierEffectiveJoinProvenance(t *testing.T) {
 		t.Fatalf("portfolio joins = %#v, want one", joins)
 	}
 	join := joins[0]
-	if join.MembersBy != "payload.operating_id" || join.MembersBySource != "resolution.dedup_by" ||
-		join.WindowBy != "payload.period_id" || join.WindowBySource != "resolution.window" || join.FanInPin != "operating.reported" {
+	if join.MembersBy != "payload.operating_id" || join.MembersFrom != "state.expected_operating_ids" {
 		t.Fatalf("effective join readback = %#v", join)
 	}
 }
@@ -652,15 +651,16 @@ func TestBuildStageGraphShowsFanOutMultiplicity(t *testing.T) {
 	}
 }
 
-func TestBuildStageGraphShowsJoinCompleteAndTimeoutEdges(t *testing.T) {
+func TestBuildStageGraphShowsJoinCompleteAndDeadlineEdges(t *testing.T) {
 	joinNode := identitytest.RootNode(t, "join-node")
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "awaiting", Initial: true}, {ID: "ready"}, {ID: "attention", Terminal: true}}}},
 		Semantics:  runtimecontracts.WorkflowSemanticView{InitialStage: "awaiting"},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{"join-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"item.completed": {Join: &runtimecontracts.JoinSpec{
 			ID: "line_items", Stage: "awaiting",
-			OnComplete: runtimecontracts.HandlerRuleEntry{AdvancesTo: "ready"},
-			Timeout:    runtimecontracts.JoinTimeoutSpec{After: "24h", Outcome: runtimecontracts.HandlerRuleEntry{AdvancesTo: "attention"}},
+			OnComplete:      runtimecontracts.HandlerRuleEntry{AdvancesTo: "ready"},
+			Deadline:        &runtimecontracts.JoinDeadlineSpec{After: "24h", From: "stage_entry"},
+			OnDeadlineFound: true, OnDeadline: runtimecontracts.HandlerRuleEntry{AdvancesTo: "attention"},
 		}}}}},
 	}
 	bundle.Semantics.StageTopologies = map[string]runtimecontracts.WorkflowStageTopology{".": runtimecontracts.BuildWorkflowStageTopology(
@@ -677,7 +677,7 @@ func TestBuildStageGraphShowsJoinCompleteAndTimeoutEdges(t *testing.T) {
 		switch edge.Source {
 		case string(runtimecontracts.HandlerAdvanceCarrierJoinOnComplete):
 			complete = edge
-		case string(runtimecontracts.HandlerAdvanceCarrierJoinTimeout):
+		case string(runtimecontracts.HandlerAdvanceCarrierJoinOnDeadline):
 			timeout = edge
 		}
 	}

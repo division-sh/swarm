@@ -153,7 +153,7 @@ func TestDeliveryTargetApplicationConsumesDeclarationBoundJoinTargetWithoutPaylo
 			if err != nil {
 				t.Fatal(err)
 			}
-			handle := pipelineJoinHandle(t, "", timeridentity.TimerHandleJoinComplete)
+			handle := pipelineJoinHandle(t, "", timeridentity.TimerHandleJoinComplete, testPipelineRunID, testPipelineRunID, entityID)
 			payload, err := json.Marshal(handle.PayloadMetadata())
 			if err != nil {
 				t.Fatal(err)

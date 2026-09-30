@@ -14,12 +14,13 @@ scout-coordinator:
       join:
         stage: awaiting
         members:
-          from: entity.member_ids
-        window:
-          from: entity.batch_id
+          from: state.member_ids
+          by: payload.member_id
         output: payload.value
         on_complete:
           advances_to: complete
-        timeout:
+        deadline:
           after: 10m
+          from: stage_entry
+        on_deadline:
           advances_to: timed_out

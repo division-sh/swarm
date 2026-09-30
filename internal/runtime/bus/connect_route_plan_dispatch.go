@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -153,6 +154,10 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 	if len(matched) == 0 {
 		return connectRoutePlanDispatch{Evaluation: emptyEvaluation}, nil
 	}
+	matched, replyRecord, err := r.resolveReplyPlans(ctx, matched)
+	if err != nil {
+		return connectRoutePlanDispatch{}, err
+	}
 	for attempt := 0; attempt < 3; attempt++ {
 		snapshot := connectRoutePlanSnapshot{base: r.routeTable.snapshotGeneration()}
 		evaluationCtx := runtimecorrelation.WithInboundEvent(ctx, evt)
@@ -162,7 +167,7 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 		}
 		evaluationCtx = withTemplateInstanceLifecyclePreview(evaluationCtx)
 		evaluationCtx = context.WithValue(evaluationCtx, connectRoutePlanPreviewRoutesKey{}, &connectRoutePlanPreviewRoutes{})
-		evaluated, err := r.planMatched(evaluationCtx, evt, matched, descriptors, connectRoutePlanMatchValues(evt))
+		evaluated, err := r.planMatched(evaluationCtx, evt, matched, descriptors, connectRoutePlanMatchValues(evt), replyRecord)
 		if err != nil {
 			return connectRoutePlanDispatch{}, err
 		}
@@ -179,7 +184,42 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 	return connectRoutePlanDispatch{}, exhaustedConnectRoutePlanSnapshotError()
 }
 
-func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Event, matched []runtimepinrouting.ConnectRoutePlan, descriptors []runtimepinrouting.Descriptor, values map[string]string) (connectRoutePlanDispatch, error) {
+// A paired response resumes retained return authority, not every ordinary edge
+// that happens to match its event. Missing authority still reaches typed refusal.
+func (r connectRoutePlanResolver) resolveReplyPlans(ctx context.Context, matched []runtimepinrouting.ConnectRoutePlan) ([]runtimepinrouting.ConnectRoutePlan, runtimereplycontext.Record, error) {
+	var responses []runtimepinrouting.ConnectRoutePlan
+	for _, plan := range matched {
+		if plan.ReplyRole() == runtimepinrouting.ConnectReplyRoleResponse {
+			responses = append(responses, plan)
+		}
+	}
+	if len(responses) == 0 {
+		return matched, runtimereplycontext.Record{}, nil
+	}
+	id := events.DeliveryContextFromContext(ctx).ReplyContextID()
+	if id == "" || r.replyStore == nil {
+		return responses, runtimereplycontext.Record{}, nil
+	}
+	record, err := r.replyStore.LoadReplyContext(ctx, id)
+	if errors.Is(err, runtimereplycontext.ErrNotFound) {
+		return responses, runtimereplycontext.Record{}, nil
+	}
+	if err != nil {
+		return nil, runtimereplycontext.Record{}, err
+	}
+	var exact []runtimepinrouting.ConnectRoutePlan
+	for _, plan := range responses {
+		if plan.MatchesReplyRecord(record) {
+			exact = append(exact, plan)
+		}
+	}
+	if len(exact) == 0 {
+		return responses, record, nil
+	}
+	return exact, record, nil
+}
+
+func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Event, matched []runtimepinrouting.ConnectRoutePlan, descriptors []runtimepinrouting.Descriptor, values map[string]string, replyRecord runtimereplycontext.Record) (connectRoutePlanDispatch, error) {
 	emptyEvaluation, err := events.NewConnectEvaluationLedger(nil)
 	if err != nil {
 		return connectRoutePlanDispatch{}, err
@@ -196,7 +236,7 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 	replyContextConsumed := false
 	for _, plan := range matched {
 		if plan.ReplyResolution() != nil && plan.ReplyResolution().Role() == runtimepinrouting.ConnectReplyRoleResponse {
-			routes, subscribers, claim, failure, detail, err := r.materializeReplyResponse(ctx, evt, plan, values)
+			routes, subscribers, claim, failure, detail, err := r.materializeReplyResponse(ctx, evt, plan, values, replyRecord)
 			if err != nil {
 				return connectRoutePlanDispatch{}, err
 			}
@@ -403,7 +443,7 @@ func (r connectRoutePlanResolver) materializeReplyRequest(ctx context.Context, e
 	return runtimepinrouting.NormalizeConnectDeliveryRoutes(routes), &record, nil
 }
 
-func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan, values map[string]string) ([]runtimepinrouting.ConnectDeliveryRoute, []Subscriber, *runtimereplycontext.ClaimCommand, runtimepinrouting.TargetFailure, map[string]any, error) {
+func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan, values map[string]string, record runtimereplycontext.Record) ([]runtimepinrouting.ConnectDeliveryRoute, []Subscriber, *runtimereplycontext.ClaimCommand, runtimepinrouting.TargetFailure, map[string]any, error) {
 	reply := plan.ReplyResolution().Readback()
 	contextID := events.DeliveryContextFromContext(ctx).ReplyContextID()
 	detail := map[string]any{
@@ -411,17 +451,9 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 		"connect_route_plan_request_pin":     reply.RequesterFlowID + "." + reply.RequestOutputPin,
 		"connect_route_plan_reply_pin":       reply.RequesterFlowID + "." + reply.ReplyInputPin,
 	}
-	if contextID == "" || r.replyStore == nil {
+	if contextID == "" || record.ID != contextID {
 		detail["connect_route_plan_failure"] = runtimepinrouting.FailureStaleArrival.Code()
 		return nil, nil, nil, runtimepinrouting.FailureStaleArrival, detail, nil
-	}
-	record, err := r.replyStore.LoadReplyContext(ctx, contextID)
-	if err != nil {
-		if errors.Is(err, runtimereplycontext.ErrNotFound) {
-			detail["connect_route_plan_failure"] = runtimepinrouting.FailureStaleArrival.Code()
-			return nil, nil, nil, runtimepinrouting.FailureStaleArrival, detail, nil
-		}
-		return nil, nil, nil, 0, nil, err
 	}
 	if !plan.MatchesReplyRecord(record) {
 		detail["connect_route_plan_failure"] = runtimepinrouting.FailureStaleArrival.Code()
@@ -470,6 +502,7 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 	if err := claim.Validate(); err != nil {
 		return nil, nil, nil, 0, nil, err
 	}
+	returnEvent := string(plan.ReceiverLocalEvent())
 	routes := make([]runtimepinrouting.ConnectDeliveryRoute, 0, len(subscribers))
 	for _, subscriber := range subscribers {
 		identity, _, err := r.resolveAgentCarrierIdentity(ctx, subscriber, target, TemplateInstanceLifecycleDecision{}, false)
@@ -483,11 +516,29 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 				return nil, nil, nil, 0, nil, fmt.Errorf("project reply agent plan: %w", err)
 			}
 		}
+		deliveryContext := events.DeliveryContext{}
+		if node, isNode := subscriber.Recipient.Node(); isNode {
+			for _, receipt := range record.ReturnJoins {
+				if receipt.Ref.Node().Equal(node) {
+					deliveryContext.Joins = append(deliveryContext.Joins, receipt)
+				}
+			}
+			for _, joinPlan := range runtimepipeline.WorkflowJoinAdmissionPlans(r.source, node, returnEvent) {
+				declaration, err := timeridentity.NewJoinRef(joinPlan.Node, joinPlan.HandlerEvent, joinPlan.Spec.Stage, joinPlan.Spec.EffectiveID())
+				if err != nil {
+					return nil, nil, nil, 0, nil, err
+				}
+				if _, present := deliveryContext.JoinAdmission(declaration); !present {
+					return nil, nil, nil, 0, nil, fmt.Errorf("reply context %s is missing its retained join return admission", record.ID)
+				}
+			}
+		}
 		routes = append(routes, runtimepinrouting.ConnectDeliveryRoute{
 			Recipient: subscriber.Recipient,
 			AgentPlan: plan,
 			Target:    target,
 			Handler:   subscriber.connectHandler,
+			Context:   deliveryContext,
 		})
 	}
 	detail["reply_context_id"] = contextID

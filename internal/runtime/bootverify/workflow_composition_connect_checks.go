@@ -229,26 +229,11 @@ func validateFanInBarrierJoinConsistency(source semanticview.Source, flowID stri
 		if handler.Accumulate != nil {
 			findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s declares accumulate for a barrier fan-in; use handler.join as the sole finite-barrier owner", label, plan.HandlerEvent), flowID))
 		}
-		resolution := pin.Resolution()
-		if authored := strings.TrimSpace(handler.Join.Members.By); handler.Join.Members.BySet || authored != "" {
-			findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s join.members.by derives from resolution.dedup_by (%s); remove authored by: %s", label, plan.HandlerEvent, strings.Join(resolution.DedupBy, ", "), authored), flowID))
-		}
-		window := strings.TrimSpace(resolution.Window)
-		if window == "" && handler.Join.Window != nil {
-			findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s join.window requires resolution.window on the barrier input pin; declare the payload window once on the pin or remove join.window", label, plan.HandlerEvent), flowID))
-		}
-		if window != "" {
-			if handler.Join.Window == nil || strings.TrimSpace(handler.Join.Window.From) == "" {
-				findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s requires join.window.from to snapshot the lifecycle window paired with resolution.window %s", label, plan.HandlerEvent, window), flowID))
-			} else if authored := strings.TrimSpace(handler.Join.Window.By); handler.Join.Window.BySet || authored != "" {
-				findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s join.window.by derives from resolution.window (%s); remove authored by: %s", label, plan.HandlerEvent, window, authored), flowID))
-			}
-		}
 	}
 	sort.Strings(candidates)
 	switch len(candidates) {
 	case 0:
-		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver flow %s fan-in barrier input %s requires exactly one handler.join row for event %s; add the join row with members.from, output, on_complete, and timeout", flowID, pin.EventType(), pin.EventType()), flowID))
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver flow %s fan-in barrier input %s requires exactly one handler.join row for event %s; declare canonical stage, membership, output, and closure outcomes", flowID, pin.EventType(), pin.EventType()), flowID))
 	case 1:
 	default:
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver flow %s fan-in barrier input %s matches multiple join rows %v; use distinct events or distinct stages per join", flowID, pin.EventType(), candidates), flowID))
@@ -285,7 +270,7 @@ func validateFanInAccumulatorConsistency(source semanticview.Source, flowID stri
 			findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s for fan-in input must declare accumulate", endpoint.NodeID, endpoint.HandlerEvent), flowID))
 			continue
 		}
-		if _, err := accumulator.EffectiveSpecForHandler(source, node, endpoint.HandlerEvent, handler.Accumulate); err != nil {
+		if err := accumulator.ValidateSpecForHandler(source, node, endpoint.HandlerEvent, handler.Accumulate); err != nil {
 			findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", err.Error(), flowID))
 		}
 	}

@@ -260,7 +260,7 @@ func (c WorkflowEngineMutationCommand) Validate() error {
 		if !workflowEngineStateRecordEmpty(c.State) {
 			return fmt.Errorf("workflow engine entityless mutation cannot carry workflow state")
 		}
-		if len(c.Lifecycle.Timers)+len(c.Lifecycle.Schedules)+len(c.Lifecycle.GateCards) > 0 || c.Lifecycle.RequestCompletionCandidate {
+		if c.Lifecycle.StageEntry != nil || len(c.Lifecycle.Timers)+len(c.Lifecycle.Schedules)+len(c.Lifecycle.GateCards) > 0 || c.Lifecycle.RequestCompletionCandidate {
 			return fmt.Errorf("workflow engine entityless mutation cannot carry lifecycle effects")
 		}
 		if len(c.ProposedEffects) > 0 {
@@ -276,7 +276,7 @@ func (c WorkflowEngineMutationCommand) Validate() error {
 		if err := c.State.Validate(); err != nil {
 			return err
 		}
-		if err := c.Lifecycle.Validate(c.State.Identity.RunID, c.State.Identity.Route, c.State.EntityID); err != nil {
+		if err := c.Lifecycle.ValidateState(c.State); err != nil {
 			return fmt.Errorf("workflow engine lifecycle plan: %w", err)
 		}
 	}

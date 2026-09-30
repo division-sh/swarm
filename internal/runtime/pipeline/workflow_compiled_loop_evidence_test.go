@@ -88,7 +88,7 @@ func newCompiledLoopEvidenceHarness(t *testing.T, storeCase workflowJoinStoreCas
 	t.Helper()
 	store, ctx := storeCase.open(t)
 	source := compiledLoopEvidenceSource(t)
-	pc := newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
+	pc := newWorkflowJoinPipelineCoordinator(t, &recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
 		Module: &pipelineFixtureWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store),
 	})
 	runID := runtimecorrelation.RunIDFromContext(ctx)
