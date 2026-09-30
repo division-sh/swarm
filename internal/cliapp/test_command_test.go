@@ -945,6 +945,41 @@ expect:
 	}
 }
 
+func TestScenarioSetupConsumesCompiledStoredStagePosture(t *testing.T) {
+	for _, tc := range []struct {
+		name, fixture, requested, want string
+		explicit, refuse               bool
+	}{
+		{"stateless initial", "test-clear-gates", "", "pending", false, false},
+		{"stateless explicit", "test-clear-gates", "pending", "pending", true, false},
+		{"stateless invented", "test-clear-gates", "active", "", true, true},
+		{"staged initial", "test-guard-kill", "", "pending", false, false},
+		{"staged terminal", "test-guard-kill", "killed", "killed", true, false},
+		{"staged exact case", "test-guard-kill", "Killed", "", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle := loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier1-primitives", tc.fixture))
+			runner := scenarioRunner{bundle: bundle, source: semanticview.Wrap(bundle)}
+			evaluator, err := newScenarioExpressionEvaluator("stored-stage-proof", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			entity, err := runner.evaluateScenarioSetupEntity(scenarioTestFile{}, evaluator, scenarioSetupEntity{
+				Alias: "receiver", EntityType: "test_entity", CurrentState: tc.requested, StateSet: tc.explicit,
+			})
+			if tc.refuse {
+				if err == nil || !strings.Contains(err.Error(), "current_state") {
+					t.Fatalf("invalid stored stage admitted: %+v %v", entity, err)
+				}
+				return
+			}
+			if err != nil || entity.CurrentState != tc.want {
+				t.Fatalf("stored posture = %+v err=%v, want %q", entity, err, tc.want)
+			}
+		})
+	}
+}
+
 func TestSwarmTestRejectsScenariosOutsideSupportedRoots(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")

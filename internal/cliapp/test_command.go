@@ -1576,7 +1576,7 @@ func (r scenarioRunner) evaluateScenarioSetupEntity(file scenarioTestFile, evalu
 		}
 		currentState = optionalScenarioString(value)
 	} else {
-		initial, err := graph.InitialStageRef()
+		initial, err := graph.InitialStoredStage()
 		if err == nil {
 			currentState = initial.ID()
 		}
@@ -1584,7 +1584,7 @@ func (r scenarioRunner) evaluateScenarioSetupEntity(file scenarioTestFile, evalu
 	if currentState == "" {
 		return evaluatedScenarioSetupEntity{}, fmt.Errorf("setup.entities[%s].current_state is required because flow %s has no initial state", entity.Alias, scenarioFlowLabel(flowID))
 	}
-	if _, err := graph.ResolveStage(currentState); err != nil {
+	if _, err := graph.ResolveStoredStage(currentState); err != nil {
 		return evaluatedScenarioSetupEntity{}, fmt.Errorf("setup.entities[%s].current_state %q is not declared for flow %s", entity.Alias, currentState, scenarioFlowLabel(flowID))
 	}
 	fields, err := r.evaluateScenarioSetupFields(evaluator, primary, entity)

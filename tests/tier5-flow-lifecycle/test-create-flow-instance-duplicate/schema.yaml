@@ -1,7 +1,10 @@
-stages: []
+stages:
+  idle: {initial: true}
+  spawned: {}
+  done: {terminal: true}
 pins:
   inputs:
-    events: [flow.spawn_requested]
+    events: [flow.spawn_requested, flow.finished]
   outputs:
     events:
       - flow.spawned

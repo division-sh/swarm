@@ -63,8 +63,8 @@ func TestSingletonCoordinatorPilotPipelineDispatchPersistsContainedStateReadback
 	if !ok {
 		t.Fatalf("workflowStore.Load(%s) ok=false", entityID)
 	}
-	if loaded.WorkflowName != singletoncoordinatorpilot.FlowID || loaded.CurrentState != "active" {
-		t.Fatalf("loaded singleton coordinator = storage:%q workflow:%q state:%q, want coordinator/active", loaded.StorageRef, loaded.WorkflowName, loaded.CurrentState)
+	if loaded.WorkflowName != singletoncoordinatorpilot.FlowID || loaded.CurrentState != "pending" {
+		t.Fatalf("loaded singleton coordinator = storage:%q workflow:%q state:%q, want coordinator/pending", loaded.StorageRef, loaded.WorkflowName, loaded.CurrentState)
 	}
 	leadIndex, ok := loaded.Fields["lead_index"].(map[string]any)
 	if !ok {
@@ -149,13 +149,21 @@ func newSingletonCoordinatorPilotPipelineCoordinator(t *testing.T, db *sql.DB, b
 
 func seedSingletonCoordinatorPilotInstance(t *testing.T, store *workflowInstanceStore, ctx context.Context, bundle *runtimecontracts.WorkflowContractBundle, entityID string) {
 	t.Helper()
+	graph, ok := bundle.WorkflowStageTopology(singletoncoordinatorpilot.FlowID)
+	if !ok {
+		t.Fatal("singleton coordinator fixture has no compiled stage catalog")
+	}
+	initial, err := graph.InitialStoredStage()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := store.create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      singletoncoordinatorpilot.FlowInstance,
 		StorageRef:      singletoncoordinatorpilot.FlowInstance,
 		EntityID:        entityID,
 		WorkflowName:    singletoncoordinatorpilot.FlowID,
 		WorkflowVersion: bundle.WorkflowVersion(),
-		CurrentState:    "active",
+		CurrentState:    initial.ID(),
 		Fields: map[string]any{
 			"coordinator_id": "global",
 			"lead_index":     map[string]any{},

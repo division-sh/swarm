@@ -1,5 +1,6 @@
 flow.spawn_requested:
   instance_id: string
   worker_id: string
+flow.finished:
 flow.spawned:
   worker_id: text

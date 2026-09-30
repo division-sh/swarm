@@ -90,6 +90,12 @@ func requireCatalogCreationHandlerOrders(t *testing.T, fixtureName, workerPath, 
 				})
 				for _, group := range transcript.groups {
 					for _, step := range group.steps {
+						if step.Event == "flow.finished" {
+							parent, found, err := h.workflow.Load(h.ctx, catalogRootWorkflowRoute())
+							if err != nil || !found || parent.CurrentState != "spawned" {
+								t.Fatalf("duplicate-creation parent must remain spawned until explicit finish: found=%v err=%v state=%q", found, err, parent.CurrentState)
+							}
+						}
 						if err := h.publishRuntimeEventResultForStep(step, catalogRuntimePublishTimeout, true); err != nil {
 							t.Fatal(err)
 						}
