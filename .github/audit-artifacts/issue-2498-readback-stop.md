@@ -1,5 +1,7 @@
 # Implementation Stop / New Runtime Defect
 
+Historical reproduction record. Superseded by [bounded readback approval](https://github.com/division-sh/swarm/issues/2498#issuecomment-5901655130), the recorded production amendment in the main audit, and the candidate repair. The new active stop is `issue-2498-paused-restart-stop.md`; the former frozen/no-production-change statements below describe the earlier investigation, not the current head.
+
 Agent-g, #2498, 2026-09-30. The [approved gate](https://github.com/division-sh/swarm/issues/2498#issuecomment-5901252923) was consumed and the classifier/oracle addendum was [recorded before implementation](https://github.com/division-sh/swarm/issues/2498#issuecomment-5901330932). Audit-only published head: `7d0ebd6e7`; production baseline: `origin/master@21bff28c8`. Fixture/probe WIP remains local in `/home/youmew/dev/swarm/worktrees/agent-g-2498` for independent reproduction.
 
 ## Confirmed Blocker
