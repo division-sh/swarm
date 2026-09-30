@@ -6,6 +6,11 @@ production code, a mutation runner, or another corpus executor. Every arm was
 applied alone in `/tmp/agent-g-2498-mutation-qualification`, compiled and run on
 SQLite and host PostgreSQL, then removed with an exact inverse edit.
 
+The local `.gitattributes` treats only these nine archived diff payloads as data
+for whitespace checks: unified-diff context prefixes must precede the original
+Go tabs. It does not exempt production code or other audit artifacts. Patch
+bytes and their recorded mutation evidence remain unchanged.
+
 ## Historical Diff And Current-Owner Equivalence
 
 The historical production diffs were inspected with `git show <commit> --

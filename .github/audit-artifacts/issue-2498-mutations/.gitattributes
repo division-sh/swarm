@@ -1,0 +1,2 @@
+# Unified diff context has a required space before the source's tab indentation.
+*.patch -whitespace
