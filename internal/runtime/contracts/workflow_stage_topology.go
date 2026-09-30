@@ -186,9 +186,13 @@ func BuildWorkflowStageTopology(
 						continue
 					}
 					for _, check := range transition.Guard.EffectiveChecks() {
+						guardID := check.EffectiveIdentity()
+						if guardID == "" {
+							continue
+						}
 						topology.guardTerminations = append(topology.guardTerminations, WorkflowGuardTerminationPossibility{
 							From: from, To: target, Node: transition.Node,
-							HandlerEvent: strings.TrimSpace(transition.EventType), GuardID: check.ID,
+							HandlerEvent: strings.TrimSpace(transition.EventType), GuardID: guardID,
 						})
 					}
 				}

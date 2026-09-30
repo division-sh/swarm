@@ -505,6 +505,15 @@ type GuardCheck struct {
 	Check string `yaml:"check"`
 }
 
+// EffectiveIdentity is the evaluated check's evidence label. An empty label
+// denotes a no-op, not an executable check or a possible failure.
+func (c GuardCheck) EffectiveIdentity() string {
+	if id := strings.TrimSpace(c.ID); id != "" {
+		return id
+	}
+	return strings.TrimSpace(c.Check)
+}
+
 // EffectiveChecks returns the exact checks evaluated by a guard. An authored
 // checks collection replaces the legacy top-level id/check pair.
 func (g *GuardSpec) EffectiveChecks() []GuardCheck {
