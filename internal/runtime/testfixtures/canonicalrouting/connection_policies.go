@@ -2,6 +2,7 @@ package canonicalrouting
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -53,5 +54,24 @@ func CopyMixedConnectionProjections(t testing.TB, reverse bool, intrinsic string
 		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "reuse_id: text", "reuse_id: uuid")
 	}
 	applyClosedReplacement(t, filepath.Join(root, "worker/entities.yaml"), "type: text", "type: uuid")
+	return root
+}
+
+func CopyNonCreatingInitialization(t testing.TB, connected bool) string {
+	t.Helper()
+	root := t.TempDir()
+	files := map[string]string{
+		"schema.yaml":        "name: init-test\npins:\n  inputs:\n    events: [work.ready]\n  outputs:\n    events: [work.ready]\nconnect:\n  - {event: work.ready, from: ., to: worker}\n",
+		"events.yaml":        "work.ready:\n  label: text\n",
+		"worker/schema.yaml": "name: worker\ninstance_variables:\n  variables:\n    label: text\npins:\n  inputs:\n    events:\n      - event: work.ready\n        initialize: {label: payload.label}\n",
+		"worker/nodes.yaml":  "worker:\n  execution_type: system_node\n  event_handlers:\n    work.ready:\n      guard: {check: \"payload.label != ''\"}\n",
+	}
+	if !connected {
+		files["schema.yaml"] = strings.Split(files["schema.yaml"], "connect:\n")[0]
+		files["worker/events.yaml"] = "work.ready:\n  label: text\n"
+	}
+	for path, source := range files {
+		writeClosedVariantFile(t, root, path, source)
+	}
 	return root
 }
