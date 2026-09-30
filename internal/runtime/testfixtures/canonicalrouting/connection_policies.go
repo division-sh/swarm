@@ -1,6 +1,9 @@
 package canonicalrouting
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 // CopyConnectionPolicies uses two edges to one input and one producer schema.
 // Different source keys select distinct instances, not competing schema owners.
@@ -35,5 +38,20 @@ func CopyInstanceDeclarations(t testing.TB, flows ...string) string {
 		writeClosedVariantFile(t, root, flow+"/schema.yaml", "instance: instance_key\n")
 		writeClosedVariantFile(t, root, flow+"/entities.yaml", "work:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n")
 	}
+	return root
+}
+
+func CopyMixedConnectionProjections(t testing.TB, reverse bool, intrinsic string) string {
+	t.Helper()
+	if intrinsic != "generated.uuid" && intrinsic != "event.id" {
+		t.Fatalf("unsupported intrinsic source %q", intrinsic)
+	}
+	root := CopyConnectionPolicies(t, reverse)
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "key_from: payload.creation_id", "key_from: "+intrinsic)
+	for range 2 {
+		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "creation_id: text", "creation_id: uuid")
+		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "reuse_id: text", "reuse_id: uuid")
+	}
+	applyClosedReplacement(t, filepath.Join(root, "worker/entities.yaml"), "type: text", "type: uuid")
 	return root
 }

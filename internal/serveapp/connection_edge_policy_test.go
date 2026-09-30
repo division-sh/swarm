@@ -1,16 +1,19 @@
 package serveapp
 
 import (
+	"encoding/json"
 	"reflect"
 	"sort"
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/google/uuid"
 )
 
 func TestEdgeOwnedConnectionPoliciesSharingInputBothStores(t *testing.T) {
@@ -51,6 +54,144 @@ func TestEdgeOwnedConnectionPoliciesSharingInputBothStores(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestEdgeOwnedMixedConnectionProjectionsBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, intrinsic := range []string{"generated.uuid", "event.id"} {
+			for _, reverse := range []bool{false, true} {
+				t.Run(backend+"/"+intrinsic+map[bool]string{false: "/forward", true: "/reverse"}[reverse], func(t *testing.T) {
+					root := canonicalrouting.CopyMixedConnectionProjections(t, reverse, intrinsic)
+					repo := canonicalrouting.RepoRoot(t)
+					bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
+					if err != nil {
+						t.Fatal(err)
+					}
+					plans := pinrouting.CompileConnectGraph(semanticview.Wrap(bundle)).Plans()
+					if len(plans) != 2 {
+						t.Fatalf("plans=%d", len(plans))
+					}
+					_, start := lifecycleRestartHarness(t, backend, root)
+					process, rt := start()
+					seed := publishMixedConnectionRequest(t, rt, "", "mixed-create")
+					waitPublicationSiteCompletion(t, rt, seed)
+					before := requireMixedConnectionReadback(t, rt, backend, plans, seed, intrinsic, 1)
+					if code := process.stop(); code != 0 {
+						t.Fatalf("shutdown=%d\n%s", code, process.outputString())
+					}
+					process, rt = start()
+					if got := requireMixedConnectionReadback(t, rt, backend, plans, seed, intrinsic, 1); !reflect.DeepEqual(got, before) {
+						t.Fatalf("restart reminted routes: %v -> %v", before, got)
+					}
+					publishMixedConnectionRequest(t, rt, seed, "mixed-reuse")
+					waitPublicationSiteCompletion(t, rt, seed)
+					paths := requireMixedConnectionReadback(t, rt, backend, plans, seed, intrinsic, 2)
+					if len(paths) != 3 {
+						t.Fatalf("create/reuse paths=%v, want three", paths)
+					}
+					if code := process.stop(); code != 0 {
+						t.Fatalf("final shutdown=%d\n%s", code, process.outputString())
+					}
+				})
+			}
+		}
+	}
+}
+
+func publishMixedConnectionRequest(t *testing.T, rt servedControlProofRuntime, runID, idempotency string) string {
+	t.Helper()
+	result := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+		"event_name": "work.requested", "bundle_hash": rt.BundleHash, "run_id": runID, "idempotency_key": idempotency,
+		"payload": map[string]any{"creation_id": "00000000-0000-4000-8000-000000000001", "reuse_id": "00000000-0000-4000-8000-000000000002"},
+	})
+	if runID != "" && result.RunID != runID {
+		t.Fatal("reuse changed run")
+	}
+	return result.RunID
+}
+
+func requireMixedConnectionReadback(t *testing.T, rt servedControlProofRuntime, backend string, plans []pinrouting.ConnectRoutePlan, runID, intrinsic string, publications int) []string {
+	t.Helper()
+	rows, err := rt.DB.Query("SELECT event_id FROM events WHERE run_id=$1 AND event_name='work.ready' ORDER BY event_id", runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != publications {
+		t.Fatalf("publications=%d, want%d", len(ids), publications)
+	}
+	paths := map[string]bool{}
+	for _, id := range ids {
+		var event operatorread.OperatorEventFull
+		requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": id}, &event)
+		if _, ok := event.Payload["worker_id"]; ok {
+			t.Fatal("synthetic key leaked into producer payload")
+		}
+		if len(event.Deliveries) != 2 {
+			t.Fatalf("deliveries=%+v", event.Deliveries)
+		}
+		projected := 0
+		for _, delivery := range event.Deliveries {
+			if delivery.Status != "delivered" || delivery.Target.FlowID != "worker" {
+				t.Fatalf("exact consumer unsettled: %+v", delivery)
+			}
+			query := "SELECT delivery_payload_projection FROM event_deliveries WHERE delivery_id=$1"
+			if backend == "postgres" {
+				query = "SELECT delivery_payload_projection::text FROM event_deliveries WHERE delivery_id=$1"
+			}
+			var raw string
+			if err := rt.DB.QueryRow(query, delivery.DeliveryID).Scan(&raw); err != nil {
+				t.Fatal(err)
+			}
+			var projection events.DeliveryPayloadProjection
+			if err := json.Unmarshal([]byte(raw), &projection); err != nil {
+				t.Fatal(err)
+			}
+			key := event.Payload["reuse_id"].(string)
+			if !projection.Empty() {
+				projected++
+				fields := projection.Fields()
+				key = fields["worker_id"]
+				if len(fields) != 1 {
+					t.Fatalf("unexpected projection=%v", fields)
+				}
+				if _, err := uuid.Parse(key); err != nil {
+					t.Fatalf("invalid intrinsic key %q", key)
+				}
+				if intrinsic == "event.id" && key != event.EventID {
+					t.Fatalf("event.id changed: %s != %s", key, event.EventID)
+				}
+			}
+			digest := plans[0].ReceiverKeyDigest([]contracts.TemplateInstanceKeyValue{{Field: plans[0].InstanceKey().Field(), Value: key}})
+			want := "worker/ti-" + digest[:24]
+			if delivery.Target.FlowInstance != want {
+				t.Fatalf("delivery target=%s, want%s", delivery.Target.FlowInstance, want)
+			}
+			paths[want] = true
+		}
+		if projected != 1 {
+			t.Fatalf("projected deliveries=%d, want1", projected)
+		}
+	}
+	var out []string
+	for path := range paths {
+		out = append(out, path)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func requireConnectionPolicyRoutes(t *testing.T, rt servedControlProofRuntime, plans []pinrouting.ConnectRoutePlan, runID string, want []string, publications int) {

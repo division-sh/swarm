@@ -237,7 +237,7 @@ func TestIntrinsicProjectionKeepsProducerAndReceiverSchemasDistinct(t *testing.T
 		t.Fatal("validator input pin is unavailable")
 	}
 	producer, producerOK := pin.ProducerEventSchema()
-	receiver, receiverOK, receiverErr := bundle.ConnectionInputs().ReceiverEventSchema("validator", pin.EventType())
+	receiver, receiverOK, receiverErr := bundle.ConnectionInputs().ReceiverCommonEventSchema("validator", pin.EventType())
 	if receiverErr != nil {
 		t.Fatal(receiverErr)
 	}

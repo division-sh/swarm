@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/packadmission"
+	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -558,7 +559,7 @@ func TestW2ProviderTriggerImportBindsIntrinsicProjectionAfterProducerSchema(t *t
 				t.Fatal("bound schema-only provider input pin is unavailable")
 			}
 			producer, producerOK := bound.ProducerEventSchema()
-			receiver, receiverOK, receiverErr := wrapped.ConnectionInputs().ReceiverEventSchema(flowID, bound.EventType())
+			receiver, receiverOK, receiverErr := wrapped.ConnectionInputs().ReceiverCommonEventSchema(flowID, bound.EventType())
 			if receiverErr != nil {
 				t.Fatal(receiverErr)
 			}
@@ -599,6 +600,72 @@ func TestW2ProviderTriggerImportRejectsIntrinsicProjectionCollisionAtBinding(t *
 			source, catalog := importedSyntheticProjectionSource(t, tc.mint, true)
 			if _, err := SourceWithProviderTriggerEvents(source, catalog); err == nil || !strings.Contains(err.Error(), "connection projection conflicts with producer") || !strings.Contains(err.Error(), "field conversation_reference") || !strings.Contains(err.Error(), strings.ReplaceAll(tc.name, "_", ".")) {
 				t.Fatalf("SourceWithProviderTriggerEvents error = %v, want imported projection collision", err)
+			}
+		})
+	}
+}
+
+func TestProviderMixedConnectionProjectionAndConcreteProof(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mint canonicalrouting.CreateMint
+	}{{"generated.uuid", canonicalrouting.CreateMintUUID}, {"event.id", canonicalrouting.CreateMintEventID}} {
+		t.Run(tc.name, func(t *testing.T) {
+			original, catalog := importedSyntheticProjectionSource(t, tc.mint, false)
+			bundle, ok := semanticview.Bundle(original)
+			if !ok {
+				t.Fatal("missing admitted source")
+			}
+			flowID, _ := importedSyntheticProjectionPin(t, original)
+			schema := *bundle.RootSchema
+			for _, connect := range schema.Connect {
+				if connect.Event == "inbound.telegram.text_message" {
+					connect.Resolution = runtimecontracts.FlowInputResolutionModeSelectOrCreate
+					connect.KeyFrom = "payload.conversation_reference"
+					schema.Connect = append(schema.Connect, connect)
+					break
+				}
+			}
+			bundle.RootSchema = &schema
+			bundle.FlowTree.Root.Schema = schema
+			if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+				t.Fatal(err)
+			}
+			wrapped, err := SourceWithProviderTriggerEvents(semanticview.Wrap(bundle), catalog)
+			if err != nil {
+				t.Fatal(err)
+			}
+			projection, err := packadmission.FromBundle(bundle)
+			if err != nil {
+				t.Fatal(err)
+			}
+			activity, err := providerconnectors.SourceWithConnectorPackImports(wrapped, projection.ProviderConnectors)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, source := range []semanticview.Source{wrapped, activity} {
+				const local = "inbound.telegram.text_message"
+				concrete := flowID + "/inst-1/" + local
+				common, found, err := source.ResolveEffectiveCompiledFlowEventSchema(flowID, concrete)
+				if err != nil || !found {
+					t.Fatalf("bound receiver missing: %t %v", found, err)
+				}
+				if _, ok := common.StructuralField("chat_id"); ok {
+					t.Fatal("synthetic field became guaranteed for every provider arrival")
+				}
+				if _, ok := common.StructuralField("conversation_reference"); !ok {
+					t.Fatal("common provider field missing")
+				}
+				proof := semanticview.ResolveFlowEventProof(source, flowID, concrete)
+				if !proof.HasSchema || proof.Local != local {
+					t.Fatalf("provider receiver proof=%+v", proof)
+				}
+				if _, owned := source.ConnectionInputs().ReceiverEvent("foreign", concrete); owned {
+					t.Fatal("foreign provider scope borrowed receiver")
+				}
+				if graph := runtimepinrouting.CompileConnectGraph(source); len(graph.Issues()) != 0 {
+					t.Fatalf("mixed provider plans=%v", graph.Issues())
+				}
 			}
 		})
 	}

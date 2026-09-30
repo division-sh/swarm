@@ -131,10 +131,7 @@ func TestEdgeResolutionPreservesPinInitialization(t *testing.T) {
 			}
 			bundle.RootSchema = &schema
 			bundle.FlowTree.Root.Schema = schema
-			if err := CompileWorkflowSemantics(bundle); err != nil {
-				t.Fatal(err)
-			}
-			err = bundle.ConnectionInputs().ValidateBindings()
+			err = CompileWorkflowSemantics(bundle)
 			if mode == FlowInputResolutionModeSelect {
 				if err == nil || !strings.Contains(err.Error(), "initialize requires a creating connection") {
 					t.Fatalf("select inherited initialization authority: %v", err)
@@ -142,6 +139,9 @@ func TestEdgeResolutionPreservesPinInitialization(t *testing.T) {
 				return
 			}
 			if err != nil {
+				t.Fatal(err)
+			}
+			if err := bundle.ConnectionInputs().ValidateBindings(); err != nil {
 				t.Fatal(err)
 			}
 			pin, ok := bundle.FlowInputEventPin("account", "account.ready")
