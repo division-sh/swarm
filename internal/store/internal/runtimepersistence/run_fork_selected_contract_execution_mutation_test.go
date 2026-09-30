@@ -1314,6 +1314,7 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
 	forkEventID := seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
+	finishHistory := beginForkDeliveryHistoryFixture(t, ctx, pg, materialized.ForkRunID)
 	sessionID := uuid.NewString()
 	identity := mustTestAgentIdentityForRun(materialized.ForkRunID, "agent-a", "flow-a/1")
 	fields := testAgentIdentityStorageFields(t, identity)
@@ -1396,6 +1397,7 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 	if _, err := pg.SettleSuccess(ctx, turnClaim.Claim, nil, time.Millisecond, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 		t.Fatalf("settle fork turn origin: %v", err)
 	}
+	finishHistory()
 
 	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
 		ForkRunID:             materialized.ForkRunID,
@@ -1425,6 +1427,7 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimePlatformControlEv
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
 	forkEventID := seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
+	finishHistory := beginForkDeliveryHistoryFixture(t, ctx, pg, materialized.ForkRunID)
 	forkRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a")}
 	forkEvent := commitPostgresDeliveryFixture(t, ctx, db, forkEventID, forkRoute)
 	forkClaim := claimPostgresDeliveryFixture(t, ctx, db, forkEvent, forkRoute)
@@ -1433,6 +1436,7 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimePlatformControlEv
 	}
 	seedPostgresChildEventRecordFixture(t, ctx, db, uuid.NewString(), materialized.ForkRunID, forkEventID,
 		"platform.auth_required", events.EventProducerPlatform, "runtime", entityID, "flow-a/1", []byte(`{}`), at.Add(3*time.Second))
+	finishHistory()
 
 	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
 		ForkRunID:             materialized.ForkRunID,

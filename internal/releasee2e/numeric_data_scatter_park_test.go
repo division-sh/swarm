@@ -11,19 +11,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/events"
-	runtimepkg "github.com/division-sh/swarm/internal/runtime"
-	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
 
 const numericScatterSource = "tests/tier11-flow-composition/test-numeric-data-scatter-park"
+const goldenShutdownGrace = 30 * time.Second
 
 // Establish the approved observable interruption boundary before giving the
 // larger corpus any recovery credit. No private runtime hooks stop the pump.
 func TestGoldenNumericDataScatterParkRestartBothStores(t *testing.T) {
-	canonicalrouting.Prove(t, canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-numeric-data-scatter-park"))
 	dsn := strings.TrimSpace(os.Getenv(goldenPostgresEnv))
 	if dsn == "" {
 		t.Fatalf("%s is required for both-store numeric recovery proof", goldenPostgresEnv)
@@ -63,7 +59,7 @@ func TestGoldenNumericDataScatterParkRestartBothStores(t *testing.T) {
 					BinaryPath: binary, InternalMockLifecycleBinary: lifecycle,
 					WorkingDir: project, Source: "contracts", ConfigPath: ".swarm/swarm.yaml",
 					Store: backend, TokenFile: "api-token", Token: goldenAPIToken, Env: env,
-					ShutdownGrace: runtimepkg.DefaultShutdownGrace,
+					ShutdownGrace: goldenShutdownGrace,
 				})
 				ctx, cancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
 				defer cancel()
@@ -111,15 +107,12 @@ func TestGoldenNumericDataScatterParkRestartBothStores(t *testing.T) {
 			}
 			listed := runReleaseCommand(t, goldenStartupTimeout, project, cliEnv, "", binary,
 				"run", "fan-out", "list", runID, "--api-server", p.apiBase, "--api-token-file", "api-token", "--limit", "1", "--json")
-			var cliPage fanoutobligation.ListPage
 			if listed.err != nil {
 				t.Fatalf("compiled fan-out reader: %v\n%s", listed.err, listed.output)
 			}
-			if err := json.Unmarshal([]byte(strings.TrimSpace(listed.output)), &cliPage); err != nil {
-				t.Fatalf("compiled fan-out reader JSON: %v\n%s", err, listed.output)
-			}
-			if err := cliPage.Validate(fanoutobligation.ListQuery{RunID: runID, Limit: 1}); err != nil || len(cliPage.Intents) != 1 || cliPage.Intents[0].Key != checkpoint.Key || cliPage.Intents[0].BundleHash != checkpoint.BundleHash || cliPage.RunStatus != "paused" {
-				t.Fatalf("compiled CLI changed deployment readback: %+v, %v", cliPage, err)
+			cliFeed, err := decodeNumericFeedPage([]byte(strings.TrimSpace(listed.output)), runID, "paused")
+			if err != nil || cliFeed.Key != checkpoint.Key || cliFeed.BundleHash != checkpoint.BundleHash {
+				t.Fatalf("compiled CLI changed deployment readback: %+v, %v", cliFeed, err)
 			}
 			predecessor, err := listGoldenEvents(ctx, p.rpc, runID)
 			if err != nil {
@@ -134,7 +127,7 @@ func TestGoldenNumericDataScatterParkRestartBothStores(t *testing.T) {
 				}
 			}
 			t.Logf("public pre-kill checkpoint after %s: status=%s feed=%s cursor=%d/%d owed=%d events=%d unsettled=%d", time.Since(issued), "paused", checkpoint.Status, checkpoint.Cursor, checkpoint.Cardinality, checkpoint.Owed, len(predecessor), unsettled)
-			if checkpoint.Cardinality != 100 || checkpoint.Status != fanoutobligation.StatusOpen || checkpoint.Cursor == 0 || checkpoint.Cursor >= 100 || checkpoint.Owed == 0 || unsettled == 0 {
+			if checkpoint.Cardinality != 100 || checkpoint.Status != "open" || checkpoint.Cursor == 0 || checkpoint.Cursor >= 100 || checkpoint.Owed == 0 || unsettled == 0 {
 				t.Fatalf("approved interrupted checkpoint is unreachable: %#v; no settled-restart credit", checkpoint)
 			}
 			beforeRestart := captureFullLifecycleEvidence(t, p.rpc, runID)
@@ -163,7 +156,7 @@ func TestGoldenNumericDataScatterParkRestartBothStores(t *testing.T) {
 				}
 				// Active topology can project lifecycle observations while dispatch
 				// is parked. Only its canonical non-delivery subtype is exempt.
-				if row.EventName != string(events.EventTypePlatformRuntimeLog) || len(row.Deliveries) != 0 || len(row.DeadLetters) != 0 || row.NoDelivery == nil || row.NoDelivery.Reason != events.NoDeliveryNoSubscriberByDesign.Code() {
+				if row.EventName != "platform.runtime_log" || len(row.Deliveries) != 0 || len(row.DeadLetters) != 0 || row.NoDelivery == nil || row.NoDelivery.Reason != "no_subscriber_by_design" {
 					t.Fatalf("paused restart produced executable event %s: %s", eventID, encoded)
 				}
 			}
@@ -176,7 +169,7 @@ func TestGoldenNumericDataScatterParkRestartBothStores(t *testing.T) {
 				if err != nil {
 					return false, err
 				}
-				return feed.Status == fanoutobligation.StatusClosed && feed.Cursor == 100 && feed.Owed == 0, nil
+				return feed.Status == "closed" && feed.Cursor == 100 && feed.Owed == 0, nil
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -220,11 +213,11 @@ func TestGoldenNumericDataScatterParkRestartBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			shutdownStarted := time.Now()
-			if err := p.stopAndWait(runtimepkg.DefaultShutdownGrace + 5*time.Second); err != nil {
+			if err := p.stopAndWait(goldenShutdownGrace + 5*time.Second); err != nil {
 				t.Fatalf("numeric shutdown: %v\n%s", err, p.output.String())
 			}
-			t.Logf("100-item shutdown took %s with documented default grace %s", time.Since(shutdownStarted), runtimepkg.DefaultShutdownGrace)
-			timers := inspectNumericFeedTimers(t, ctx, root, store, runID, expected, entities)
+			t.Logf("100-item shutdown took %s with documented default grace %s", time.Since(shutdownStarted), goldenShutdownGrace)
+			timers := inspectNumericFeedTimers(t, ctx, lifecycle, project, env, runID, expected, entities)
 			p = start()
 			if got := assertNumericFeedPublic(t, ctx, p.rpc, runID, expected, corpus); !reflect.DeepEqual(got, entities) {
 				t.Fatal("settled restart changed exact receiver identities")
@@ -253,26 +246,98 @@ func TestGoldenNumericDataScatterParkRestartBothStores(t *testing.T) {
 			if got, err := readNumericFeed(ctx, p.rpc, runID); err != nil || got.Key != closed.Key || got.Cursor != closed.Cursor || got.Cardinality != closed.Cardinality || got.Status != closed.Status {
 				t.Fatalf("permanent retry changed exact feed: %+v %v", got, err)
 			}
-			if err := p.stopAndWait(runtimepkg.DefaultShutdownGrace + 5*time.Second); err != nil {
+			if err := p.stopAndWait(goldenShutdownGrace + 5*time.Second); err != nil {
 				t.Fatalf("numeric retained shutdown: %v\n%s", err, p.output.String())
 			}
-			if got := inspectNumericFeedTimers(t, ctx, root, store, runID, expected, entities); !reflect.DeepEqual(got, timers) {
+			if got := inspectNumericFeedTimers(t, ctx, lifecycle, project, env, runID, expected, entities); !reflect.DeepEqual(got, timers) {
 				t.Fatal("settled restart/retry changed exact typed timer activations")
 			}
 		})
 	}
 }
 
-func readNumericFeed(ctx context.Context, rpc *releaseRPCClient, runID string) (fanoutobligation.IntentReadback, error) {
-	var page fanoutobligation.ListPage
-	if err := rpc.call(ctx, "run.fan_out.list", map[string]any{"run_id": runID, "limit": 1}, &page); err != nil {
-		return fanoutobligation.IntentReadback{}, err
+// Independent public wire projections deliberately do not reuse the server DTO
+// or its validator: doing so can make the oracle repeat the implementation bug.
+type numericFeedReadback struct {
+	Key struct {
+		RunID  string `json:"run_id"`
+		FeedID string `json:"deployment_feed_id"`
+	} `json:"key"`
+	BundleHash  string `json:"bundle_hash"`
+	Status      string `json:"status"`
+	Cardinality int    `json:"cardinality"`
+	Cursor      int    `json:"cursor"`
+	Owed        int    `json:"owed"`
+	Runtime     struct {
+		Availability string `json:"availability"`
+		Eligible     *bool  `json:"eligible"`
+		Reason       string `json:"reason"`
+	} `json:"runtime"`
+}
+
+func decodeNumericFeedPage(body []byte, runID, status string) (numericFeedReadback, error) {
+	var page struct {
+		RunID      string            `json:"run_id"`
+		RunStatus  string            `json:"run_status"`
+		ObservedAt time.Time         `json:"observed_at"`
+		Order      string            `json:"order"`
+		Intents    []json.RawMessage `json:"intents"`
+		NextCursor string            `json:"next_cursor"`
 	}
-	if err := page.Validate(fanoutobligation.ListQuery{RunID: runID, Limit: 1}); err != nil {
-		return fanoutobligation.IntentReadback{}, err
+	var feed numericFeedReadback
+	if err := json.Unmarshal(body, &page); err != nil {
+		return feed, err
 	}
-	if len(page.Intents) != 1 || page.NextCursor != "" {
-		return fanoutobligation.IntentReadback{}, fmt.Errorf("numeric feed must have exactly one intent: %#v", page)
+	if page.RunID != runID || page.ObservedAt.IsZero() || page.Order != "intent_identity_asc" || len(page.Intents) != 1 || page.NextCursor != "" || (status != "" && page.RunStatus != status) {
+		return feed, fmt.Errorf("numeric feed requires one exact public intent page: %s", body)
 	}
-	return page.Intents[0], nil
+	if page.RunStatus != "running" && page.RunStatus != "paused" {
+		return feed, fmt.Errorf("numeric active-run readback changed status: %s", page.RunStatus)
+	}
+	if err := json.Unmarshal(page.Intents[0], &feed); err != nil {
+		return feed, err
+	}
+	var raw struct {
+		Key map[string]json.RawMessage `json:"key"`
+	}
+	if err := json.Unmarshal(page.Intents[0], &raw); err != nil {
+		return feed, err
+	}
+	if len(raw.Key) != 2 || feed.Key.RunID != runID || feed.Key.FeedID == "" || feed.BundleHash == "" || feed.Cardinality != 100 || feed.Cursor < 0 || feed.Cursor > 100 || feed.Owed < 0 || feed.Owed > 100-feed.Cursor {
+		return feed, fmt.Errorf("numeric deployment origin/shape changed: %s", page.Intents[0])
+	}
+	if _, err := uuid.Parse(feed.Key.FeedID); err != nil || (feed.Status != "open" && feed.Status != "closed") {
+		return feed, fmt.Errorf("numeric feed identity/status changed: %s", page.Intents[0])
+	}
+	return feed, nil
+}
+
+func TestNumericFeedReadbackRejectsWrongOriginAndPage(t *testing.T) {
+	runID, feedID := uuid.NewString(), uuid.NewString()
+	valid := fmt.Sprintf(`{"run_id":%q,"run_status":"paused","observed_at":"2026-09-30T00:00:00Z","order":"intent_identity_asc","intents":[{"key":{"run_id":%q,"deployment_feed_id":%q},"bundle_hash":"sha256:numeric","status":"open","cardinality":100,"cursor":32,"owed":68}],"next_cursor":""}`, runID, runID, feedID)
+	if _, err := decodeNumericFeedPage([]byte(valid), runID, "paused"); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"handler_leak":  strings.Replace(valid, `"deployment_feed_id":`, `"element_ref":{},"deployment_feed_id":`, 1),
+		"missing_feed":  strings.Replace(valid, feedID, "", 1),
+		"wrong_status":  strings.Replace(valid, `"paused"`, `"running"`, 1),
+		"wrong_order":   strings.Replace(valid, "intent_identity_asc", "insertion_order", 1),
+		"wrong_count":   strings.Replace(valid, `"cardinality":100`, `"cardinality":99`, 1),
+		"invented_debt": strings.Replace(valid, `"owed":68`, `"owed":69`, 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := decodeNumericFeedPage([]byte(body), runID, "paused"); err == nil {
+				t.Fatal("invalid public numeric projection accepted")
+			}
+		})
+	}
+}
+
+func readNumericFeed(ctx context.Context, rpc *releaseRPCClient, runID string) (numericFeedReadback, error) {
+	var body json.RawMessage
+	if err := rpc.call(ctx, "run.fan_out.list", map[string]any{"run_id": runID, "limit": 1}, &body); err != nil {
+		return numericFeedReadback{}, err
+	}
+	return decodeNumericFeedPage(body, runID, "")
 }

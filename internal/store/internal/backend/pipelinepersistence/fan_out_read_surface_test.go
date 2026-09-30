@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -24,10 +26,25 @@ func TestFanOutReadMixedOriginPaginationBothStores(t *testing.T) {
 			ctx := context.Background()
 			db := fanOutReadbackTestDB(t, backend)
 			handler := seedFanOutReadbackClaim(t, db).Claim.Key
-			if _, err := db.ExecContext(ctx, `CREATE TABLE runs (run_id TEXT PRIMARY KEY, status TEXT NOT NULL)`); err != nil {
+			createSchema := runlifecyclefixture.CreateSQLiteScenarioSchema
+			if backend == "postgres" {
+				createSchema = runlifecyclefixture.CreatePostgresScenarioSchema
+			}
+			if err := createSchema(ctx, db); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := db.ExecContext(ctx, `INSERT INTO runs VALUES ($1,'paused')`, handler.RunID); err != nil {
+			dialect := runlifecyclefixture.DialectSQLite
+			if backend == "postgres" {
+				dialect = runlifecyclefixture.DialectPostgres
+			}
+			if err := runlifecyclefixture.Materialize(ctx, db, dialect, runlifecyclefixture.Fixture{
+				RunID: handler.RunID, Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := runlifecyclefixture.TransitionActive(ctx, db, dialect, runlifecycle.ActiveTransitionRequest{
+				RunID: handler.RunID, State: runlifecycle.StatePaused,
+			}); err != nil {
 				t.Fatal(err)
 			}
 			ids := []string{

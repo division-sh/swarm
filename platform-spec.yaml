@@ -37767,6 +37767,8 @@ durable_pipeline_processing_obligation_authority:
       account for parked rows without claiming, acknowledging or changing them. Invalid control, source or standing
       authority is never inferred to be harmless parking. Global ingress, running-run refusal, busy claims and retry
       blockage retain their existing startup refusal semantics.
+      Terminal or forked lifecycle is not an operator pause. Its existing retirement/selected-execution dispatch
+      fencing remains authoritative; pause classification must not replace that outcome with an active-run error.
     startup_blockage_evidence: >
       Startup admission rejects every blocked result, including an exhausted scan with remembered blockage. Existing
       recovery and selected-store claim diagnostics distinguish ingress pause before scanning or during dispatch,

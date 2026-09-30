@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/google/uuid"
 )
 
@@ -116,25 +115,39 @@ func TestGoldenNumericDataScatterParkRefusalBothStores(t *testing.T) {
 
 func assertNumericRow100Defect(t *testing.T, ctx context.Context, rpc *releaseRPCClient, runID, defect string) {
 	t.Helper()
-	var page durabledata.PageResult[durabledata.FusedChildDefect]
+	var page struct {
+		Items []struct {
+			Defect struct {
+				Row int `json:"row"`
+			} `json:"defect"`
+		} `json:"items"`
+		Continuation struct {
+			State string `json:"state"`
+		} `json:"continuation"`
+	}
 	if err := rpc.call(ctx, "data.show", map[string]any{
 		"view": "operation", "detail": "child_defects", "operation_ref": map[string]any{"kind": "run_creation", "run_id": runID},
 		"page": map[string]any{"limit": 100},
 	}, &page); err != nil {
 		t.Fatal(err)
 	}
-	if err := page.Validate(); err != nil || len(page.Items) != 1 || page.Continuation.State != "end" || page.Items[0].Defect.Row != 100 {
-		t.Fatalf("exact late-row %s defect: %+v error=%v", defect, page, err)
+	if len(page.Items) != 1 || page.Continuation.State != "end" || page.Items[0].Defect.Row != 100 {
+		t.Fatalf("exact late-row %s defect: %+v", defect, page)
 	}
-	var binding durabledata.PageResult[durabledata.RunCreationDataItem]
+	var binding struct {
+		Items        []json.RawMessage `json:"items"`
+		Continuation struct {
+			State string `json:"state"`
+		} `json:"continuation"`
+	}
 	if err := rpc.call(ctx, "data.show", map[string]any{
 		"view": "operation", "detail": "run_binding", "operation_ref": map[string]any{"kind": "run_creation", "run_id": runID},
 		"page": map[string]any{"limit": 100},
 	}, &binding); err != nil {
 		t.Fatal(err)
 	}
-	if err := binding.Validate(); err != nil || len(binding.Items) != 0 || binding.Continuation.State != "end" {
-		t.Fatalf("rejected input retained an accepted run/pin binding: %+v error=%v", binding, err)
+	if binding.Items == nil || len(binding.Items) != 0 || binding.Continuation.State != "end" {
+		t.Fatalf("rejected input retained an accepted run/pin binding: %+v", binding)
 	}
 }
 

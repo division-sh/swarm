@@ -42,16 +42,38 @@ func DispatchParked(ctx context.Context, q RowQueryer, postgres bool, runID stri
 	if strings.TrimSpace(runID) == "" {
 		return false, nil
 	}
-	if _, err := requireActiveSource(ctx, q.QueryRowContext, runID, postgres, false); err != nil {
-		return false, err
+	if q == nil {
+		return false, errors.New("dispatch lifecycle query authority is required")
 	}
-	query := `SELECT r.status, COALESCE(c.control_status, '') FROM runs r LEFT JOIN run_control_state c ON c.run_id = r.run_id WHERE r.run_id = ?`
+	query := `SELECT r.status, COALESCE(c.control_status, ''), r.bundle_hash,
+		EXISTS (SELECT 1 FROM source_artifacts a WHERE a.bundle_hash = r.bundle_hash)
+		FROM runs r LEFT JOIN run_control_state c ON c.run_id = r.run_id WHERE r.run_id = ?`
 	if postgres {
-		query = `SELECT r.status, COALESCE(c.control_status, '') FROM runs r LEFT JOIN run_control_state c ON c.run_id = r.run_id WHERE r.run_id = $1::uuid`
+		query = strings.Replace(query, "r.run_id = ?", "r.run_id = $1::uuid", 1)
 	}
-	var status, control string
-	if err := q.QueryRowContext(ctx, query, runID).Scan(&status, &control); err != nil {
+	var status, control, bundleHash string
+	var sourcePresent bool
+	if err := q.QueryRowContext(ctx, query, runID).Scan(&status, &control, &bundleHash, &sourcePresent); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, &runtimerunlifecycle.RunNotFoundError{RunID: runID}
+		}
 		return false, err
+	}
+	state, err := runtimerunlifecycle.ParseState(status)
+	if err != nil {
+		return false, err
+	}
+	if !state.Active() {
+		// Retirement is fenced by the existing dispatch owner, not an
+		// operator pause or a corrupt active-run disposition.
+		return false, nil
+	}
+	source, err := runtimecorrelation.DecodeSourceArtifactFact(bundleHash)
+	if err != nil {
+		return false, err
+	}
+	if !sourcePresent {
+		return false, &runtimerunlifecycle.SourceArtifactUnavailableError{BundleHash: source.BundleHash(), Cause: "missing_source_artifact"}
 	}
 	standing, err := standingdisposition.ReadByRun(ctx, q, postgres, runID)
 	if err != nil {

@@ -732,6 +732,7 @@ func selectedForkDiscardTestStore(t *testing.T, backend string) (selectedForkDis
 
 func seedSelectedForkDiscardDeliveries(t *testing.T, ctx context.Context, store selectedForkDiscardStore, fixture selectedCompletionFixture) ([]events.Event, []runtimedelivery.ClaimedObligation) {
 	t.Helper()
+	finishHistory := beginForkDeliveryHistoryFixture(t, ctx, store, fixture.forkRun)
 	route := testAgentDeliveryRoute(t, fixture.forkRun, "selected-agent", "fixture/selected-agent")
 	eventsByState := []events.Event{
 		eventtest.PersistedProjection(uuid.NewString(), "selected.claimed", "selected-test", "", json.RawMessage(`{}`), 0, fixture.forkRun, "", events.EventEnvelope{}, time.Now().UTC()),
@@ -751,7 +752,24 @@ func seedSelectedForkDiscardDeliveries(t *testing.T, ctx context.Context, store 
 	if _, err := store.SettleSuccess(ctx, deliveries[1].Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 		t.Fatalf("settle selected-fork delivery: %v", err)
 	}
+	finishHistory()
 	return eventsByState, deliveries
+}
+
+// Validator/discard tests construct prior delivery history, not permission to
+// execute a paused selected fork. Admit that history through the lifecycle
+// owner, then restore the materialized pause before exercising the subject.
+func beginForkDeliveryHistoryFixture(t testing.TB, ctx context.Context, store any, runID string) func() {
+	t.Helper()
+	if _, err := transitionRunForTest(ctx, store, runtimerunlifecycle.ActiveTransitionRequest{RunID: runID, State: runtimerunlifecycle.StateRunning}); err != nil {
+		t.Fatalf("admit fork delivery history fixture: %v", err)
+	}
+	return func() {
+		t.Helper()
+		if _, err := transitionRunForTest(ctx, store, runtimerunlifecycle.ActiveTransitionRequest{RunID: runID, State: runtimerunlifecycle.StatePaused}); err != nil {
+			t.Fatalf("restore materialized fork after history fixture: %v", err)
+		}
+	}
 }
 
 func loadSelectedForkDiscardProof(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, runID, executionID string) selectedForkDiscardProof {
@@ -984,6 +1002,7 @@ func TestSelectedForkDiscardDeletesClaimedAndSettledDeliveryHistoryPostgres(t *t
 	store := admitTestPostgresStore(t, db)
 	fixture := newSelectedCompletionFixture(t, store, db, false)
 	ctx := testAuthorActivityContext()
+	finishHistory := beginForkDeliveryHistoryFixture(t, ctx, store, fixture.forkRun)
 	route := testAgentDeliveryRoute(t, fixture.forkRun, "selected-agent", "fixture/selected-agent")
 	eventsByState := []events.Event{
 		eventtest.PersistedProjection(uuid.NewString(), "selected.claimed", "selected-test", "", json.RawMessage(`{}`), 0, fixture.forkRun, "", events.EventEnvelope{}, time.Now().UTC()),
@@ -1008,11 +1027,7 @@ func TestSelectedForkDiscardDeletesClaimedAndSettledDeliveryHistoryPostgres(t *t
 	if claimed.Claim.DeliveryID() == "" {
 		t.Fatal("claimed selected-fork delivery has no durable identity")
 	}
-	if _, err := transitionRunForTest(ctx, store, runtimerunlifecycle.ActiveTransitionRequest{
-		RunID: fixture.forkRun, State: runtimerunlifecycle.StatePaused,
-	}); err != nil {
-		t.Fatalf("mark selected fork materialized: %v", err)
-	}
+	finishHistory()
 	if err := store.DiscardMaterializedSelectedContractExecutionFork(ctx, fixture.forkRun); err != nil {
 		t.Fatalf("discard selected fork with delivery history: %v", err)
 	}

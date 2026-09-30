@@ -218,6 +218,9 @@ func newRuntimeShutdownDeliveryStore(t *testing.T) *runtimeShutdownDeliveryStore
 	if err := runlifecyclefixture.CreateSQLiteScenarioSchema(context.Background(), db); err != nil {
 		t.Fatalf("create runtime shutdown lifecycle schema: %v", err)
 	}
+	if err := deliveryfixture.CreateSQLiteRunAdmissionSchema(context.Background(), db); err != nil {
+		t.Fatalf("create runtime shutdown dispatch schema: %v", err)
+	}
 	adapter, err := deliveryfixture.NewAdapter(deliveryfixture.DialectSQLite)
 	if err != nil {
 		t.Fatalf("create runtime shutdown delivery adapter: %v", err)
