@@ -4,7 +4,11 @@ Agent-g, #2498, parent #2407 R1.1, 2026-09-30.
 Audited production baseline: `origin/master@4fccc57ec73ce54827167dddc5bbafac41ae66d2`.
 Candidate/probe base: `5a8167d0b`, including the separately approved readback repair `44a5f88fb`.
 Binding independent rulings: [startup/continuation class](https://github.com/division-sh/swarm/issues/2498#issuecomment-5902935619) and latest [P16 standing-authority repair: insufficient; widen class](https://github.com/division-sh/swarm/issues/2498#issuecomment-5903522698).
-**Runtime implementation remains frozen; this is a repaired gate request, not approval or closure.**
+**Approved for bounded implementation, not merge:** [final independent gate](https://github.com/division-sh/swarm/issues/2498#issuecomment-5903816439). All P01-P16/M/U/RB proof obligations and gate conditions remain binding. The frozen request below records the reviewed design, not current implementation status.
+
+Implementation placement addendum: the unchanged StandingRestart model and sole ClassifyStandingRestart decision table move from the pipeline composition package to the existing run-lifecycle domain so delivery persistence can consume the canonical reader without a delivery -> pipeline -> bus dependency cycle. Every consumer is migrated directly; no old alias, duplicate classifier or new authority/framework is introduced. The selected-store standingdisposition reader and standing desired-state writer retain their existing authority and transaction order.
+
+Implementation stop addendum: `issue-2498-standing-transition-stop.md` records P16's newly exposed process-occurrence drain entrance before suspended public reset. The candidate's pause/restart and generic-continue refusal proofs do not establish that earlier lifecycle gate. Further runtime edits are paused for its independent bounded disposition; the prior approval remains recorded, not rewritten as closure or retroactively revoked by G.
 
 This additive amendment supersedes the paused-stop artifact's proposed recovery-disabled workaround and the prior P01-P15 claim that a paused control row alone proves operator run.pause authority. P16 absorbs the standing pause producers and their generic-continue consumer into the same chosen class. The original corpus audit, 23 M rows/U1-U5 and four readback rows remain required, not restarted or credited by these probes. No production code, authoritative runtime semantics, original #2008 WIP, external handover, provider traffic or test framework changed in this audit.
 
