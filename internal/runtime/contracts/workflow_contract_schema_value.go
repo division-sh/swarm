@@ -88,6 +88,11 @@ func projectFlowSchemaValue(root yamlsource.Value) (FlowSchemaDocument, error) {
 	if err := collectNodeValueProvenance(root, "", out.admissionProvenance, nil); err != nil {
 		return FlowSchemaDocument{}, err
 	}
+	deriveSchemaProvenance(&out)
+	return out, nil
+}
+
+func deriveSchemaProvenance(out *FlowSchemaDocument) {
 	for _, direction := range []string{"inputs", "outputs"} {
 		count := len(out.Pins.Inputs.EventPins)
 		if direction == "outputs" {
@@ -114,7 +119,6 @@ func projectFlowSchemaValue(root yamlsource.Value) (FlowSchemaDocument, error) {
 			}
 		}
 	}
-	return out, nil
 }
 
 func schemaValueFields(value yamlsource.Value, owner string, allowed map[string]struct{}, retired map[string]string, nonempty bool) (map[string]yamlsource.Value, error) {
