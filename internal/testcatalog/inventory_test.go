@@ -27,31 +27,32 @@ func TestCatalogRequiredInventory(t *testing.T) {
 			verifyCounts[fixture.Metadata.Verify]++
 		}
 	}
-	if got := len(inventory.Fixtures); got != 157 {
-		t.Fatalf("fixture count = %d, want 157", got)
+	if got := len(inventory.Fixtures); got != 158 {
+		t.Fatalf("fixture count = %d, want 158", got)
 	}
-	if counts[DispositionRuntime] != 99 || counts[DispositionVerifyOnly] != 36 || counts[DispositionRetired] != 22 {
-		t.Fatalf("disposition counts = %#v, want runtime=99 verify-only=36 retired=22", counts)
+	if counts[DispositionRuntime] != 99 || counts[DispositionVerifyOnly] != 37 || counts[DispositionRetired] != 22 {
+		t.Fatalf("disposition counts = %#v, want runtime=99 verify-only=37 retired=22", counts)
 	}
-	if verifyCounts[VerifyPass] != 2 || verifyCounts[VerifyWarning] != 7 || verifyCounts[VerifyReject] != 27 {
-		t.Fatalf("verify-only counts = %#v, want pass=2 warning=7 reject=27", verifyCounts)
+	if verifyCounts[VerifyPass] != 3 || verifyCounts[VerifyWarning] != 7 || verifyCounts[VerifyReject] != 27 {
+		t.Fatalf("verify-only counts = %#v, want pass=3 warning=7 reject=27", verifyCounts)
 	}
 	if got := len(inventory.PublicCompanions()); got != 87 {
 		t.Fatalf("public companion count = %d, want 87", got)
 	}
-	if got := len(inventory.Claims); got != 24 {
-		t.Fatalf("canonical claim count = %d, want 24", got)
+	if got := len(inventory.Claims); got != 26 {
+		t.Fatalf("canonical claim count = %d, want 26", got)
 	}
-	if got := len(inventory.ExternalProofs); got != 4 {
-		t.Fatalf("external proof count = %d, want 4", got)
+	if got := len(inventory.ExternalProofs); got != 5 {
+		t.Fatalf("external proof count = %d, want 5", got)
 	}
 	wantProofs := map[string]struct {
 		executor string
 		claims   []string
 	}{
-		"examples/integrations/telegram-agent": {executor: "github.com/division-sh/swarm/internal/serveapp", claims: telegramAgentClaims()},
-		"internal/runtime/llm":                 {executor: "github.com/division-sh/swarm/internal/runtime/llm", claims: []string{"catalog.runtime.managed_hitl_api_transport", "catalog.runtime.managed_hitl_inprocess_transport"}},
-		"internal/releasee2e":                  {executor: "github.com/division-sh/swarm/internal/releasee2e", claims: []string{"catalog.runtime.managed_hitl_cli_mcp_transport"}},
+		"examples/integrations/telegram-agent":                         {executor: "github.com/division-sh/swarm/internal/serveapp", claims: telegramAgentClaims()},
+		"internal/runtime/llm":                                         {executor: "github.com/division-sh/swarm/internal/runtime/llm", claims: []string{"catalog.runtime.managed_hitl_api_transport", "catalog.runtime.managed_hitl_inprocess_transport"}},
+		"internal/releasee2e":                                          {executor: "github.com/division-sh/swarm/internal/releasee2e", claims: []string{"catalog.runtime.managed_hitl_cli_mcp_transport"}},
+		"tests/tier11-flow-composition/test-numeric-data-scatter-park": {executor: "github.com/division-sh/swarm/internal/releasee2e", claims: []string{"catalog.runtime.numeric_deployment_feed"}},
 		"internal/releasee2e/testdata/golden_agent_workload": {
 			executor: "github.com/division-sh/swarm/internal/releasee2e",
 			claims: []string{

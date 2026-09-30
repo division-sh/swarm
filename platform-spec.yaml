@@ -21897,6 +21897,28 @@ test_specification:
       - catalog.runtime.agent_turn_completion
       - catalog.runtime.agent_emission_delivery
       - catalog.runtime.agent_terminal_teardown
+    - source: tests/tier11-flow-composition/test-numeric-data-scatter-park
+      executor: github.com/division-sh/swarm/internal/releasee2e
+      proves:
+      - catalog.runtime.numeric_deployment_feed
+    compiled_process_numeric_feed_profile:
+      promoted_by: '#2498'
+      source: tests/tier11-flow-composition/test-numeric-data-scatter-park
+      executor: github.com/division-sh/swarm/internal/releasee2e
+      ci_owner: hitl-releasee2e-golden
+      proof_boundary: >-
+        The catalog owns verify-only numeric source admission; releasee2e alone executes the runtime claim.
+        Consume the strict finite expected.yaml assertions and exact 100-row checksum through the existing compiled
+        CLI and retained mock lifecycle child. Exhaustively join each original typed row to its emitted payload,
+        canonical node recipient, distinct materialized entity/route and exact stored fields. Capture genuinely
+        unsettled partial feed work at public pause before forced death; retained startup must not dispatch it
+        before public continue, then settle all 100 rows exactly. Retry the identical creation request after a
+        further retained process restart, when the transport cache is absent, and preserve its permanent receipt
+        and domain facts. Malformed numeric, required-null and duplicate-key late rows must reject the whole input
+        without an accepted version, head, run, binding, feed or delivery. Future workflow timers have no public
+        list API: typed selected-store inspection occurs only after child join, closes before restart, and receives
+        supplemental persistence credit rather than invented public-surface credit. No gather, terminal-run,
+        dormant-agent-turn, nonzero-budget, live-provider or successful history-fork credit is inferred.
     compiled_process_golden_profile:
       promoted_by: '#2168, #2321'
       source: internal/releasee2e/testdata/golden_agent_workload
@@ -22179,6 +22201,14 @@ test_specification:
         status: active
         required_disposition: verify-only
         scope: Canonical loader and boot-verification teaching diagnostics.
+      catalog.authoring.numeric_feed_fixture:
+        status: active
+        required_disposition: verify-only
+        scope: Exact numeric scatter/park source admission, without catalog runtime or replay credit.
+      catalog.runtime.numeric_deployment_feed:
+        status: active
+        required_disposition: runtime
+        scope: Compiled CLI 100-row numeric deployment feed, exact isolated receivers, whole-input refusal, retained receipt replay and interrupted pause-aware recovery on both stores.
       catalog.runtime.composition_patterns:
         status: active
         required_disposition: runtime

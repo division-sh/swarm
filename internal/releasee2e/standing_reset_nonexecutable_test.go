@@ -22,12 +22,16 @@ func TestStandingResetNonExecutablePublicBothStores(t *testing.T) {
 	lifecycle := buildOwnedMockLifecycleBinary(t, base)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			for _, product := range []string{"terminal", "terminal-revised", "terminal-suspended", "validated-invalid", "validated-invalid-revised"} {
+			for _, product := range []string{"terminal", "terminal-revised", "terminal-suspended", "validated-invalid", "validated-invalid-revised", "orphan", "terminal-orphan", "invalid-orphan", "broken-relation"} {
 				t.Run(product, func(t *testing.T) {
 					root := filepath.Join(base, backend, product)
 					store := goldenSQLiteStore(root)
 					if backend == "postgres" {
 						store = goldenPostgresStore(t, dsn)
+					}
+					if product == "orphan" || strings.HasSuffix(product, "-orphan") || product == "broken-relation" {
+						runStandingOrphanRestorationPublic(t, binary, lifecycle, root, store, product)
+						return
 					}
 					spec := prepareFullLifecycleProject(t, binary, root, store, false)
 					spec.InternalMockLifecycleBinary = lifecycle
