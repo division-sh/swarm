@@ -1,6 +1,7 @@
-initial_state: idle
-terminal_states: [done]
-states: [idle, filtered, done]
+stages:
+  idle: {initial: true}
+  filtered: {}
+  done: {terminal: true}
 pins:
   inputs:
     events: [filter.requested]

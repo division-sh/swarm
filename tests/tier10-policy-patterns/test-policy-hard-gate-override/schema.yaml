@@ -1,6 +1,8 @@
-initial_state: scoring
-terminal_states: [promoted, demoted, rejected]
-states: [scoring, promoted, demoted, rejected]
+stages:
+  scoring: {initial: true}
+  promoted: {terminal: true}
+  demoted: {terminal: true}
+  rejected: {terminal: true}
 pins:
   inputs:
     events: [score.final]

@@ -457,7 +457,7 @@ func sameFlowScopedNativeToolAgentFixture(t *testing.T) semanticview.Source {
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: same-flow-scoped-native-tool-census\n")
 	flowDir := filepath.Join(root, "operating")
 
-	writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, "schema.yaml"), "name: operating\nmode: static\ninitial_state: active\nstates: [active]\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, "schema.yaml"), "name: operating\nmode: static\nstages:\n  active: {initial: true}\n")
 	for _, project := range []string{"project-a", "project-b"} {
 		dir := filepath.Join(flowDir, "departments", project)
 
@@ -482,7 +482,7 @@ workspace_classes:
     workspace_scope: per-flow-instance
 `)
 	flowDir := filepath.Join(root, "review")
-	writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, "schema.yaml"), "name: review\nmode: static\ninitial_state: active\nstates: [active]\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, "schema.yaml"), "name: review\nmode: static\nstages:\n  active: {initial: true}\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, "agents.yaml"), `
 scoped-worker:
   id: scoped-worker
@@ -514,7 +514,7 @@ func scopedNativeToolAgentFixture(t *testing.T) semanticview.Source {
 	}
 	for _, flowID := range []string{"flow-a", "flow-b"} {
 		dir := filepath.Join(root, flowID)
-		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "schema.yaml"), "name: "+flowID+"\nmode: static\ninitial_state: active\nstates: [active]\n")
+		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "schema.yaml"), "name: "+flowID+"mode: static\nstages:\n  active: {initial: true}\n")
 		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "agents.yaml"), scopedNativeToolAgentYAML())
 	}
 	repoRoot := runtimepipeline.WorkflowRepoRoot()

@@ -1,13 +1,9 @@
 name: delivery
 mode: template
-initial_state: approved
-states:
-  - approved
-  - completed
-  - rejected
-terminal_states:
-  - completed
-  - rejected
+stages:
+  approved: {initial: true}
+  completed: {terminal: true}
+  rejected: {terminal: true}
 instance_variables:
   description: Dynamic delivery instance values.
   variables:

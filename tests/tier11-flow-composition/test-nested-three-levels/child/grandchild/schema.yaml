@@ -1,7 +1,7 @@
 name: grandchild
-initial_state: ready
-terminal_states: [finished]
-states: [ready, finished]
+stages:
+  ready: {initial: true}
+  finished: {terminal: true}
 pins:
   inputs:
     events:

@@ -1,11 +1,7 @@
-initial_state: active
-terminal_states:
-  - done
-  - escalated
-states:
-  - active
-  - done
-  - escalated
+stages:
+  active: {initial: true}
+  done: {terminal: true}
+  escalated: {terminal: true}
 pins:
   inputs:
     events:

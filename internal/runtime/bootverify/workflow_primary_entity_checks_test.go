@@ -11,11 +11,10 @@ import (
 )
 
 func TestRun_UsesSingleEntityAsPrimaryForStatefulNormalFlow(t *testing.T) {
-	bundle := loadPrimaryEntityFixtureBundle(t, `
-name: scoring
-initial_state: pending
-states: [pending, done]
-terminal_states: [done]
+	bundle := loadPrimaryEntityFixtureBundle(t, `name: scoring
+stages:
+  pending: {initial: true}
+  done: {terminal: true}
 `, `
 vertical:
   name: text
@@ -29,11 +28,10 @@ vertical:
 }
 
 func TestRun_RejectsMissingPrimaryEntityForStatefulNormalFlow(t *testing.T) {
-	bundle := loadPrimaryEntityFixtureBundle(t, `
-name: scoring
-initial_state: pending
-states: [pending, done]
-terminal_states: [done]
+	bundle := loadPrimaryEntityFixtureBundle(t, `name: scoring
+stages:
+  pending: {initial: true}
+  done: {terminal: true}
 `, "")
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -73,25 +71,20 @@ name: scoring
 }
 
 func TestRun_RejectsInvalidRootPrimaryEntityForConstructedBundle(t *testing.T) {
+	t.Run("root schema entity selector rejected at source", func(t *testing.T) {
+		repo := repoRootForBootverifyTest(t)
+		root := t.TempDir()
+		writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: root-primary-entity\nentity: vertical\n")
+		_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+		if err == nil || !strings.Contains(err.Error(), "RETIRED") {
+			t.Fatalf("root entity selector error = %v", err)
+		}
+	})
 	tests := []struct {
 		name      string
 		bundle    *runtimecontracts.WorkflowContractBundle
 		wantError string
 	}{
-		{
-			name: "root schema entity selector",
-			bundle: &runtimecontracts.WorkflowContractBundle{
-				RootSchema: &runtimecontracts.FlowSchemaDocument{
-					Name:   "root-primary-entity",
-					Entity: "vertical",
-				},
-				RootEntities: runtimecontracts.EntityContractsDocument{
-					"vertical": {Fields: map[string]runtimecontracts.EntityFieldDecl{"name": {Type: "text"}}},
-				},
-				FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{},
-			},
-			wantError: "schema.yaml entity",
-		},
 		{
 			name: "multiple root entities",
 			bundle: &runtimecontracts.WorkflowContractBundle{

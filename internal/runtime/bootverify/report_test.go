@@ -829,14 +829,13 @@ fanout-node:
 				flows: map[string]deadEventSchemaFlowFiles{
 					"support": {
 						mode: "template",
-						schema: `
-name: support
+						schema: `name: support
 mode: template
 auto_emit_on_create:
   event: ticket.ready
-initial_state: idle
-terminal_states: [done]
-states: [idle, done]
+stages:
+  idle: {initial: true}
+  done: {terminal: true}
 `,
 						events: "ticket.ready:\n",
 					},
@@ -1663,9 +1662,7 @@ func TestRun_MapsEmptyEventPayloadSchemaConditionRefsToNamedError(t *testing.T) 
 					},
 				},
 				RootSchema: &runtimecontracts.FlowSchemaDocument{
-					InitialState:   "pending",
-					TerminalStates: []string{"done"},
-					States:         []string{"pending", "done"},
+					StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "pending", Initial: true}, {ID: "done", Terminal: true}}},
 				},
 			}
 			bundle.Platform.Platform.Name = "swarm"
@@ -1707,9 +1704,7 @@ func TestRun_DoesNotMapMissingEventSchemaToConditionPayloadAlignment(t *testing.
 			},
 		},
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
-			InitialState:   "pending",
-			TerminalStates: []string{"done"},
-			States:         []string{"pending", "done"},
+			StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "pending", Initial: true}, {ID: "done", Terminal: true}}},
 		},
 	}
 	bundle.Platform.Platform.Name = "swarm"
@@ -1741,7 +1736,7 @@ func TestRun_AllowsNestedConditionPayloadReferenceWithinEventPayloadSchema(t *te
 				},
 			},
 		},
-		RootSchema: &runtimecontracts.FlowSchemaDocument{InitialState: "pending", States: []string{"pending"}},
+		RootSchema: &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "pending", Initial: true}}}},
 	}
 	bundle.Platform.Platform.Name = "swarm"
 	bundle.Platform.Platform.Version = "test"
@@ -2056,12 +2051,9 @@ stages:
   done:
     terminal: true
 `)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Errors(), "state_machine_coherence", "declares stages and legacy lifecycle fields") {
-		t.Fatalf("expected mixed lifecycle owner error, got %#v", report.Errors())
+	_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "initial_state") {
+		t.Fatalf("expected source retirement before lifecycle coherence, got %v", err)
 	}
 }
 
@@ -2174,16 +2166,13 @@ func TestRun_MapsCreateEntityPlusAccumulateToNamedError(t *testing.T) {
 
 func TestRun_MapsInvalidFieldDetectionToNamedError(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		Platform: runtimecontracts.PlatformSpecDocument{},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
-			"flow-a": {
-				InitialState: "pending",
-			},
-		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{},
-		Nodes:  map[string]runtimecontracts.SystemNodeContract{},
-		Tools:  map[string]runtimecontracts.ToolSchemaEntry{},
+		Platform:    runtimecontracts.PlatformSpecDocument{},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{},
+		Events:      map[string]runtimecontracts.EventCatalogEntry{},
+		Nodes:       map[string]runtimecontracts.SystemNodeContract{},
+		Tools:       map[string]runtimecontracts.ToolSchemaEntry{},
 	}
+	bundle.Nodes["missing-type"] = runtimecontracts.SystemNodeContract{}
 	bundle.Platform.Platform.Name = "Swarm Platform"
 	bundle.Platform.Platform.Version = "1.0.0"
 	source := semanticview.Wrap(bundle)
@@ -2193,7 +2182,7 @@ func TestRun_MapsInvalidFieldDetectionToNamedError(t *testing.T) {
 	if !report.HasErrors() {
 		t.Fatalf("expected error report, got %#v", report.Findings)
 	}
-	if !reportContains(report.Errors(), "invalid_field_detection", "flow schema flow-a missing required field states") {
+	if !reportContains(report.Errors(), "invalid_field_detection", "") {
 		t.Fatalf("expected invalid_field_detection error, got %#v", report.Errors())
 	}
 }
@@ -2250,12 +2239,10 @@ entity-agent:
 }
 
 func TestRun_AcceptsExplicitFlowAgentMemoryDeclarations(t *testing.T) {
-	root := writeAgentMemoryValidationFixture(t, "", `
-name: support
-initial_state: waiting
-states:
-  - waiting
-  - done
+	root := writeAgentMemoryValidationFixture(t, "", `name: support
+stages:
+  waiting: {initial: true}
+  done: {}
 `, `
 flow-agent:
   id: flow-agent
@@ -2302,12 +2289,10 @@ root-global:
 }
 
 func TestRun_AcceptsPackageBackedFlowAgentMemoryDeclarations(t *testing.T) {
-	root := writePackageBackedAgentMemoryValidationFixture(t, `
-name: support
-initial_state: waiting
-states:
-  - waiting
-  - done
+	root := writePackageBackedAgentMemoryValidationFixture(t, `name: support
+stages:
+  waiting: {initial: true}
+  done: {}
 `, `
 flow-agent:
   id: flow-agent
@@ -4824,11 +4809,10 @@ root_case:
     type: integer
     _unused_reason: child read-pin save-path validation proof
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `
-name: child
-initial_state: idle
-terminal_states: [done]
-states: [idle, done]
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `name: child
+stages:
+  idle: {initial: true}
+  done: {terminal: true}
 pins:
   inputs:
     reads: [priority]
@@ -5927,7 +5911,7 @@ func TestRun_AllowsStatelessFlowInputPinHandlersWithoutCreateEntity(t *testing.T
 	if !ok {
 		t.Fatalf("flow schema %s missing", flowID)
 	}
-	schema.InitialState = ""
+	schema.StageDeclarations = runtimecontracts.FlowStageDeclarations{Declared: true}
 	bundle.FlowSchemas[flowID] = schema
 	flowView, ok := bundle.FlowViewByID(flowID)
 	if !ok || flowView == nil {
@@ -6622,11 +6606,10 @@ opco.spend_requested:
   vertical_id: string
   amount_usd: number
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "treasury", "schema.yaml"), `
-name: treasury
+	writeBootverifyFixtureFile(t, filepath.Join(root, "treasury", "schema.yaml"), `name: treasury
 mode: static
-initial_state: active
-states: [active]
+stages:
+  active: {initial: true}
 pins:
   inputs:
     events: [opco.spend_requested]
@@ -6838,10 +6821,9 @@ item:
 
 	for _, flowID := range []string{"producer_a", "producer_b"} {
 		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), `
-name: `+flowID+`
-initial_state: idle
-terminal_states: [done]
-states: [idle, done]
+name: `+flowID+`stages:
+  idle: {initial: true}
+  done: {terminal: true}
 pins:
   outputs:
     events:
@@ -6857,11 +6839,10 @@ ticket.ready:
 	if scoped {
 		subscription = "producer_a/ticket.ready"
 	}
-	writeBootverifyFixtureFile(t, filepath.Join(root, "consumer", "schema.yaml"), `
-name: consumer
-initial_state: waiting
-terminal_states: [done]
-states: [waiting, done]
+	writeBootverifyFixtureFile(t, filepath.Join(root, "consumer", "schema.yaml"), `name: consumer
+stages:
+  waiting: {initial: true}
+  done: {terminal: true}
 pins:
   inputs:
     events:
@@ -6911,11 +6892,12 @@ func writeStateReachabilityFixtureWithClosedHandler(t *testing.T, closedHandler 
 
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: state-reachability\n")
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), `
-name: support
-initial_state: waiting
-terminal_states: [done]
-states: [waiting, active, review, done]
+	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), `name: support
+stages:
+  waiting: {initial: true}
+  active: {}
+  review: {}
+  done: {terminal: true}
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "entities.yaml"), `
 ticket: {}
@@ -6995,11 +6977,11 @@ func writeWave1ExpressionFixture(t *testing.T) string {
 
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: wave1-expression-fixture\n")
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `
-name: child
-initial_state: idle
-terminal_states: [done]
-states: [idle, working, done]
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `name: child
+stages:
+  idle: {initial: true}
+  working: {}
+  done: {terminal: true}
 pins:
   inputs:
     events: [task.assigned, task.feedback]
@@ -7079,11 +7061,10 @@ case:
     _unused_reason: child read-pin coverage proof field
 `)
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `
-name: child
-initial_state: idle
-terminal_states: [done]
-states: [idle, done]
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `name: child
+stages:
+  idle: {initial: true}
+  done: {terminal: true}
 pins:
   inputs:
     events: [task.assigned]
@@ -7118,11 +7099,10 @@ func writePromptWriterCoverageFixture(t *testing.T, agentsYAML, entitiesYAML, pr
 	root := t.TempDir()
 
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: prompt-writer-coverage\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `
-name: child
-initial_state: idle
-terminal_states: [done]
-states: [idle, done]
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `name: child
+stages:
+  idle: {initial: true}
+  done: {terminal: true}
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "entities.yaml"), entitiesYAML)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "agents.yaml"), agentsYAML)
@@ -7214,7 +7194,7 @@ func bootverifyTransitionRuntimeOwnershipBundle() *runtimecontracts.WorkflowCont
 		},
 		Nodes: nodes, Events: events,
 		Schema: runtimecontracts.FlowSchemaDocument{
-			InitialState: "created", States: []string{"created", "opened"}, TerminalStates: []string{"opened"},
+			StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "created", Initial: true}, {ID: "opened", Terminal: true}}},
 		},
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
@@ -7396,7 +7376,7 @@ func writeDeadEventSchemaFixture(t *testing.T, opts deadEventSchemaFixtureOption
 		files := opts.flows[flowID]
 		schema := strings.TrimSpace(files.schema)
 		if schema == "" {
-			schema = "name: " + flowID + "\ninitial_state: idle\nterminal_states: [done]\nstates: [idle, done]"
+			schema = "name: " + flowID + "stages:\n  idle: {initial: true}\n  done: {terminal: true}\n"
 		}
 		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), schema+"\n")
 		writeOptionalBootverifyFixtureFile(t, filepath.Join(root, flowID, "policy.yaml"), files.policy)

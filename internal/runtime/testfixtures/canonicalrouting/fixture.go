@@ -356,9 +356,9 @@ func AddRetiredStaticFlowForNegativeMutation(t testing.TB, root string, mutation
 	}
 	writeClosedNegativeFile(t, root, "legacy_static/schema.yaml", `name: legacy_static
 mode: static
-initial_state: active
-states: [active, archived]
-terminal_states: [archived]
+stages:
+  active: {initial: true}
+  archived: {terminal: true}
 pins:
   inputs:
     events:
@@ -395,8 +395,8 @@ func AddRootDefaultEntityIDForNegativeMutation(t testing.TB, root string) {
 	writeClosedNegativeFile(t, root, "entities.yaml", "subject:\n  display_name: text\n")
 	writeClosedNegativeFile(t, root, "events.yaml", "subject.created:\n  entity_id: text\n  display_name: text\n")
 	writeClosedNegativeFile(t, root, "schema.yaml", `name: template-select-or-create
-initial_state: active
-states: [active]
+stages:
+  active: {initial: true}
 pins:
   inputs:
     events:

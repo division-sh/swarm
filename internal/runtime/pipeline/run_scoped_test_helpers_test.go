@@ -582,7 +582,7 @@ func admitSyntheticEntityContractsForTest(
 		if flowID == "" || entityType == "" {
 			t.Fatalf("synthetic flow entity contract requires nonblank flow and entity type: flow=%q type=%q", flowID, entityType)
 		}
-		files[""+flowID+"/schema.yaml"] = fmt.Sprintf("name: %s\nmode: template\ninitial_state: active\nstates: [active]\n", flowID)
+		files[""+flowID+"/schema.yaml"] = fmt.Sprintf("name: %s\nmode: template\nstages:\n  active: {initial: true}\n", flowID)
 		files[""+flowID+"/entities.yaml"] = fmt.Sprintf("%s: {}\n", entityType)
 	}
 	if rootEntityType = strings.TrimSpace(rootEntityType); rootEntityType != "" {

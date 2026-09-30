@@ -279,9 +279,9 @@ func operatorReadbackBundle(t *testing.T) *runtimecontracts.WorkflowContractBund
 	t.Helper()
 	root := t.TempDir()
 	for path, contents := range map[string]string{
-		"schema.yaml":           "initial_state: active\nstates: [active]\n",
+		"schema.yaml":           "stages:\n  active: {initial: true}\n",
 		"entities.yaml":         "run: {}\n",
-		"scoring/schema.yaml":   "name: scoring\nmode: template\ninstance: vertical_id\ninitial_state: discovered\nstates: [discovered, pending]\n",
+		"scoring/schema.yaml":   "name: scoring\nmode: template\ninstance: vertical_id\nstages:\n  discovered: {initial: true}\n  pending: {}\n",
 		"scoring/entities.yaml": "vertical:\n  vertical_id: string\n  vertical_name: string\n",
 	} {
 		writeRunCompletionFixtureFile(t, filepath.Join(root, path), contents)

@@ -195,11 +195,12 @@ func TestJoinMembersContributeCanonicalEntityReaderCoverage(t *testing.T) {
 func TestRun_JoinValidationPreservesDuplicateScopedNodeIDs(t *testing.T) {
 	repoRoot := repoRootForBootverifyTest(t)
 	root := canonicalrouting.CopyDuplicateScopedSingletonDemand(t)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "a", "schema.yaml"), `
-name: a
+	writeBootverifyFixtureFile(t, filepath.Join(root, "a", "schema.yaml"), `name: a
 mode: singleton
-initial_state: active
-states: [active, done, failed]
+stages:
+  active: {initial: true}
+  done: {}
+  failed: {}
 pins:
   inputs:
     events:

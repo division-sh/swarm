@@ -35,7 +35,7 @@ func TestAuthoredRuleReceiverPreparationRetryDiagnosticBothStores(t *testing.T) 
 			t.Run(backend.name+"/"+variant, func(t *testing.T) {
 				store, ctx := backend.open(t)
 				bundle := loadWorkflowTempBundle(t, map[string]string{
-					"schema.yaml":   "name: delivery-authority\ninitial_state: queued\nstates: [queued, done]\nterminal_states: [done]\n",
+					"schema.yaml":   "name: delivery-authority\nstages:\n  queued: {initial: true}\n  done: {terminal: true}\n",
 					"entities.yaml": "test_entity: {}\n",
 					"events.yaml":   "source.evt:\n",
 					"nodes.yaml":    "node-a:\n  id: node-a\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      rules:\n        - id: complete\n          when: 'true'\n          advances_to: done\n        - id: unmatched\n          else: true\n",

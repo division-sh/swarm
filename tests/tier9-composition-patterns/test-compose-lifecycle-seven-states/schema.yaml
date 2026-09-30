@@ -1,6 +1,11 @@
-initial_state: created
-terminal_states: [closed]
-states: [created, setup, active, running, stable, winding_down, closed]
+stages:
+  created: {initial: true}
+  setup: {}
+  active: {}
+  running: {}
+  stable: {}
+  winding_down: {}
+  closed: {terminal: true}
 pins:
   inputs:
     events: [phase.init, phase.activate, phase.start, phase.stabilize, phase.wind_down, phase.close]

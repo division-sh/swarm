@@ -118,12 +118,6 @@ func useStagedLifecycleForFlow(t *testing.T, bundle *runtimecontracts.WorkflowCo
 		_, terminal := terminalSet[state]
 		entries = append(entries, runtimecontracts.FlowStageDeclaration{ID: state, Initial: state == strings.TrimSpace(initial), Terminal: terminal})
 	}
-	schema.InitialState = ""
-	schema.InitialStateDeclared = false
-	schema.States = nil
-	schema.StatesDeclared = false
-	schema.TerminalStates = nil
-	schema.TerminalStatesDeclared = false
 	schema.StageDeclarations = runtimecontracts.FlowStageDeclarations{Declared: true, Entries: entries}
 	bundle.FlowSchemas[flowID] = schema
 	if bundle.Semantics.FlowInitial == nil {

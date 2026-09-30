@@ -99,7 +99,12 @@ func LoadWorkflowContractBundleFromArtifact(repoRoot string, artifact *sourceart
 	for _, source := range sortedFlowSources(flowSources) {
 		schema := FlowSchemaDocument{}
 		if source.Schema != "" {
-			if err := artifact.DecodeYAML(source.Schema, &schema); err != nil {
+			document, ok := artifact.YAML(source.Schema)
+			if !ok {
+				return nil, fmt.Errorf("admitted schema source %q is missing", source.Schema)
+			}
+			schema, err = projectFlowSchemaValue(document.Root())
+			if err != nil {
 				return nil, fmt.Errorf("decode %s: %w", source.Schema, err)
 			}
 		}

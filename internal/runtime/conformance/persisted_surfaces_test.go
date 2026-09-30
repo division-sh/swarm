@@ -1732,7 +1732,7 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrite
 
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	fixtureRoot := t.TempDir()
-	writeConformanceSnapshotFixture(t, fixtureRoot, "schema.yaml", "name: mutation-proof\nstages: {}\n")
+	writeConformanceSnapshotFixture(t, fixtureRoot, "schema.yaml", "name: mutation-proof\nstages: []\n")
 	writeConformanceSnapshotFixture(t, fixtureRoot, "mutation-flow/schema.yaml", "mode: singleton\nstages:\n  done: {initial: true, terminal: true}\n")
 	writeConformanceSnapshotFixture(t, fixtureRoot, "mutation-flow/entities.yaml", "test_entity:\n  status: text\n")
 	module := loadConformanceWorkflowFixtureModule(t, fixtureRoot)
@@ -2124,7 +2124,7 @@ func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetoo
 	t.Helper()
 	repoRoot := canonicalrouting.RepoRoot(t)
 	fixtureRoot := t.TempDir()
-	writeConformanceSnapshotFixture(t, fixtureRoot, "schema.yaml", "name: review\nmode: template\ninitial_state: queued\nstates: [queued, done]\nterminal_states: [done]\n")
+	writeConformanceSnapshotFixture(t, fixtureRoot, "schema.yaml", "name: review\nmode: template\nstages:\n  queued: {initial: true}\n  done: {terminal: true}\n")
 	writeConformanceSnapshotFixture(t, fixtureRoot, "entities.yaml", "accounts:\n  score: numeric(10,2)\n  status: text\n")
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {

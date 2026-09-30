@@ -1,9 +1,10 @@
 name: registry
 mode: template
 instance: request_key
-initial_state: pending
-terminal_states: [complete]
-states: [pending, reading, complete]
+stages:
+  pending: {initial: true}
+  reading: {}
+  complete: {terminal: true}
 pins:
   inputs:
     events:

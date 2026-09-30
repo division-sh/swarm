@@ -1,9 +1,13 @@
 name: worker
 mode: template
 instance: instance_id
-initial_state: idle
-terminal_states: [done]
-states: [idle, requested, started, requested_started, awaiting_requested, done]
+stages:
+  idle: {initial: true}
+  requested: {}
+  started: {}
+  requested_started: {}
+  awaiting_requested: {}
+  done: {terminal: true}
 auto_emit_on_create:
   event: auto.started
 pins:

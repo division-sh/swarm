@@ -36,7 +36,7 @@ func TestReleaseDockerCommandAdmissionRejectsMalformedShapes(t *testing.T) {
 	}
 	releaseRoot := filepath.Dir(root)
 	admittedRoot := filepath.Join(releaseRoot, "contracts")
-	writeReleaseFile(t, filepath.Join(admittedRoot, "schema.yaml"), "stages: {}\n")
+	writeReleaseFile(t, filepath.Join(admittedRoot, "schema.yaml"), "stages: []\n")
 	envelope, err := os.MkdirTemp("", "swarm-source-")
 	if err != nil {
 		t.Fatal(err)

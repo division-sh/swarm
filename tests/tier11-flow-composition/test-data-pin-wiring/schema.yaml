@@ -1,7 +1,8 @@
 name: test-data-pin-wiring
-initial_state: idle
-terminal_states: [done]
-states: [idle, configured, done]
+stages:
+  idle: {initial: true}
+  configured: {}
+  done: {terminal: true}
 pins:
   inputs:
     events:

@@ -439,11 +439,7 @@ func buildRoot(source semanticview.Source, bundle *runtimecontracts.WorkflowCont
 	if bundle.RootSchema != nil {
 		out.RequiredAgents = requiredAgentsView(*bundle.RootSchema, bundle.RootRequiredAgentFacts(), rootFlow.Paths.SchemaFile, rootFlow.Paths.AgentsFile)
 	}
-	declared := ""
-	if bundle.RootSchema != nil {
-		declared = strings.TrimSpace(bundle.RootSchema.Entity)
-	}
-	if declared == "" && len(bundle.RootEntities) == 0 {
+	if len(bundle.RootEntities) == 0 {
 		return out, nil
 	}
 	primary, err := bundle.ResolveRootPrimaryEntity()

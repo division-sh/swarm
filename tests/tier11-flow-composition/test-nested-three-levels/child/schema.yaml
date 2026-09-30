@@ -1,7 +1,8 @@
 name: child
-initial_state: waiting
-terminal_states: [completed]
-states: [waiting, delegated, completed]
+stages:
+  waiting: {initial: true}
+  delegated: {}
+  completed: {terminal: true}
 pins:
   inputs:
     events:

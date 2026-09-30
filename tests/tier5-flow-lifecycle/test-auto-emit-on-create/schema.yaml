@@ -1,6 +1,6 @@
-initial_state: idle
-terminal_states: [spawned]
-states: [idle, spawned]
+stages:
+  idle: {initial: true}
+  spawned: {terminal: true}
 pins:
   outputs:
     events: [worker.requested]

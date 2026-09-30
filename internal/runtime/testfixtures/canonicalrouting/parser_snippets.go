@@ -90,11 +90,8 @@ func InputPinSourceParserSnippet(t testing.TB, id InputPinSourceSnippet) ParserS
 
 func W2OptionPinsParserSnippet(t testing.TB) ParserSnippet {
 	t.Helper()
-	return NewParserSnippet(t, `
-states:
-  - pending
-initial_state: pending
-terminal_states: []
+	return NewParserSnippet(t, `stages:
+  pending: {initial: true}
 pins:
   inputs:
     events:

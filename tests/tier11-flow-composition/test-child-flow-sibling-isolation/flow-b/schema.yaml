@@ -1,7 +1,7 @@
 name: flow-b
-initial_state: waiting
-terminal_states: [finished]
-states: [waiting, finished]
+stages:
+  waiting: {initial: true}
+  finished: {terminal: true}
 pins:
   inputs:
     events: [beta.start]

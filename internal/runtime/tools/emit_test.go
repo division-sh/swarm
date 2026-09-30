@@ -575,11 +575,9 @@ func TestLoadRejectsGeneratedEmitToolSchemaWithUnresolvedFlowLocalType(t *testin
 	writeEmitFixtureFile(t, filepath.Join(root, "entities.yaml"), "item:\n  item_id: uuid\n")
 	writeEmitFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: provider-schema-validation\n")
 
-	writeEmitFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), `
-name: support
-initial_state: waiting
-states:
-  - waiting
+	writeEmitFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), `name: support
+stages:
+  waiting: {initial: true}
 `)
 	writeEmitFixtureFile(t, filepath.Join(root, "support", "events.yaml"), `
 local.done:
@@ -594,11 +592,9 @@ flow-agent:
     - local.done
 `)
 
-	writeEmitFixtureFile(t, filepath.Join(root, "other", "schema.yaml"), `
-name: other
-initial_state: waiting
-states:
-  - waiting
+	writeEmitFixtureFile(t, filepath.Join(root, "other", "schema.yaml"), `name: other
+stages:
+  waiting: {initial: true}
 `)
 	writeEmitFixtureFile(t, filepath.Join(root, "other", "events.yaml"), `
 local.done:

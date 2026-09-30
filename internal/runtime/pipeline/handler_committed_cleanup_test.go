@@ -19,7 +19,7 @@ func TestHandlerCommittedCleanupErrorRetainsExactOutcomeBothStores(t *testing.T)
 		t.Run(backend.name, func(t *testing.T) {
 			store, ctx := backend.open(t)
 			bundle := loadWorkflowTempBundle(t, map[string]string{
-				"schema.yaml":   "name: committed-cleanup\ninitial_state: queued\nstates: [queued, done]\nterminal_states: [done]\n",
+				"schema.yaml":   "name: committed-cleanup\nstages:\n  queued: {initial: true}\n  done: {terminal: true}\n",
 				"entities.yaml": "test_entity: {}\n",
 				"events.yaml":   "source.evt:\nsource.done:\n",
 				"nodes.yaml":    "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      advances_to: done\n      emit: {event: source.done}\n",
@@ -88,7 +88,7 @@ func TestGuardRejectedSettlementSurvivesContinuationCleanupFailureBothStores(t *
 		t.Run(backend.name, func(t *testing.T) {
 			store, ctx := backend.open(t)
 			bundle := loadWorkflowTempBundle(t, map[string]string{
-				"schema.yaml":   "name: terminal-no-engine\ninitial_state: queued\nstates: [queued, done]\nterminal_states: [done]\n",
+				"schema.yaml":   "name: terminal-no-engine\nstages:\n  queued: {initial: true}\n  done: {terminal: true}\n",
 				"entities.yaml": "test_entity: {}\n",
 				"events.yaml":   "source.evt:\n",
 				"nodes.yaml":    "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      guard: {id: reject-check, check: 'false', on_fail: reject}\n      advances_to: done\n",

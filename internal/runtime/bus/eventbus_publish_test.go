@@ -3813,9 +3813,9 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 	}
 	admitted := loadEventBusTempBundle(t, map[string]string{
 
-		"schema.yaml":         "name: mixed-route\nmode: static\ninitial_state: active\nstates: [active]\n",
+		"schema.yaml":         "name: mixed-route\nmode: static\nstages:\n  active: {initial: true}\n",
 		"entities.yaml":       "test_entity: {}\n",
-		"child/schema.yaml":   "name: child\nmode: static\ninitial_state: active\nstates: [active]\n",
+		"child/schema.yaml":   "name: child\nmode: static\nstages:\n  active: {initial: true}\n",
 		"child/entities.yaml": "test_entity: {}\n",
 	})
 	admitted.Nodes = bundle.Nodes

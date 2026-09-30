@@ -201,16 +201,14 @@ func TestPipelineEngineEvaluatorQueryEntitiesUsesExecutingFlowID(t *testing.T) {
 
 	source := loadWorkflowTempSource(t, map[string]string{
 
-		"schema.yaml": `
-name: runtime-test
-initial_state: ready
-states: [ready]
+		"schema.yaml": `name: runtime-test
+stages:
+  ready: {initial: true}
 `,
-		"child/schema.yaml": `
-name: child
+		"child/schema.yaml": `name: child
 mode: static
-initial_state: queued
-states: [queued]
+stages:
+  queued: {initial: true}
 `,
 		"child/entities.yaml": `
 child_entity:
@@ -824,11 +822,10 @@ func TestPipelineEngineStateRepoLoadStateMissingEntityDoesNotMaterializeDefaults
 	source := loadWorkflowTempSource(t, map[string]string{
 
 		"schema.yaml": "name: runtime-test\n",
-		"review/schema.yaml": `
-name: review
+		"review/schema.yaml": `name: review
 mode: static
-initial_state: queued
-states: [queued]
+stages:
+  queued: {initial: true}
 `,
 		"review/entities.yaml": `
 review_entity:
@@ -1187,10 +1184,10 @@ func TestPipelineEnginePayloadShaper_AllowsDeclaredPayloadOnDeclarativeSurface(t
 func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsOnDeclarativeSurface(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
 
-		"schema.yaml": "initial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events: [parent.trigger]\n  outputs:\n    events: [parent.result]\n",
+		"schema.yaml": "stages:\n  idle: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    events: [parent.trigger]\n  outputs:\n    events: [parent.result]\n",
 		"events.yaml": "parent.trigger:\n  entity_id: string\nparent.result:\n  entity_id: string\n",
 
-		"child/schema.yaml": "name: child\ninitial_state: waiting\nterminal_states: [processed]\nstates: [waiting, processed]\npins:\n  inputs:\n    events: [child.start]\n  outputs:\n    events: [child.internal]\n",
+		"child/schema.yaml": "name: child\nstages:\n  waiting: {initial: true}\n  processed: {terminal: true}\npins:\n  inputs:\n    events: [child.start]\n  outputs:\n    events: [child.internal]\n",
 		"child/events.yaml": "child.start:\n  entity_id: string\nchild.internal:\n  entity_id: string\n  step: string\n",
 	})
 	bundle, ok := semanticview.Bundle(source)
@@ -1242,10 +1239,10 @@ func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsOnDeclarativeSu
 func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsForConcreteTemplateOutput(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
 
-		"schema.yaml": "initial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events: [parent.trigger]\n",
+		"schema.yaml": "stages:\n  idle: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    events: [parent.trigger]\n",
 		"events.yaml": "parent.trigger:\n  entity_id: string\n",
 
-		"child/schema.yaml": "name: child\nmode: template\ninitial_state: waiting\nterminal_states: [processed]\nstates: [waiting, processed]\npins:\n  inputs:\n    events: [child.start]\n  outputs:\n    events: [child.done]\n",
+		"child/schema.yaml": "name: child\nmode: template\nstages:\n  waiting: {initial: true}\n  processed: {terminal: true}\npins:\n  inputs:\n    events: [child.start]\n  outputs:\n    events: [child.done]\n",
 		"child/events.yaml": "child.start:\n  entity_id: string\nchild.done:\n  step: string\n",
 	})
 	bundle, ok := semanticview.Bundle(source)
@@ -1298,10 +1295,10 @@ func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsForConcreteTemp
 func TestPipelineEnginePayloadShaper_RejectsEnvelopeOnlyRequiredFieldOnDeclarativeSurface(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
 
-		"schema.yaml": "initial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events: [parent.trigger]\n  outputs:\n    events: [parent.result]\n",
+		"schema.yaml": "stages:\n  idle: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    events: [parent.trigger]\n  outputs:\n    events: [parent.result]\n",
 		"events.yaml": "parent.trigger:\n  entity_id: string\nparent.result:\n  entity_id: string\n",
 
-		"child/schema.yaml": "name: child\ninitial_state: waiting\nterminal_states: [processed]\nstates: [waiting, processed]\npins:\n  inputs:\n    events: [child.start]\n  outputs:\n    events: [child.internal]\n",
+		"child/schema.yaml": "name: child\nstages:\n  waiting: {initial: true}\n  processed: {terminal: true}\npins:\n  inputs:\n    events: [child.start]\n  outputs:\n    events: [child.internal]\n",
 		"child/events.yaml": "child.start:\n  entity_id: string\nchild.internal:\n  entity_id: string\n",
 	})
 	bundle, ok := semanticview.Bundle(source)
@@ -1351,11 +1348,11 @@ func TestPipelineEnginePayloadShaper_RejectsEnvelopeOnlyRequiredFieldOnDeclarati
 func TestValidatePipelineEmitPayload_RejectsEnumViolationOnDeclarativeSurface(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
 
-		"schema.yaml": "initial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events: [parent.trigger]\n  outputs:\n    events: [parent.result]\n",
+		"schema.yaml": "stages:\n  idle: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    events: [parent.trigger]\n  outputs:\n    events: [parent.result]\n",
 		"events.yaml": "parent.trigger:\n  entity_id: string\nparent.result:\n  entity_id: string\n",
 		"types.yaml":  "enums:\n  Mode:\n    values: [fast, deep]\n    default: fast\n",
 
-		"child/schema.yaml": "name: child\ninitial_state: waiting\nterminal_states: [processed]\nstates: [waiting, processed]\npins:\n  inputs:\n    events: [child.start]\n  outputs:\n    events: [child.internal]\n",
+		"child/schema.yaml": "name: child\nstages:\n  waiting: {initial: true}\n  processed: {terminal: true}\npins:\n  inputs:\n    events: [child.start]\n  outputs:\n    events: [child.internal]\n",
 		"child/events.yaml": "child.start:\n  entity_id: string\nchild.internal:\n  mode: Mode\n",
 	})
 
@@ -1458,11 +1455,11 @@ func TestPipelineEmitPayloadContractProducersReturnOneTypedFact(t *testing.T) {
 func TestPipelineEnginePayloadShaper_DoesNotBorrowRootSchemaForChildOutput(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
 
-		"schema.yaml": "initial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  outputs:\n    events: [handoff.completed]\n",
+		"schema.yaml": "stages:\n  idle: {initial: true}\n  done: {terminal: true}\npins:\n  outputs:\n    events: [handoff.completed]\n",
 		"types.yaml":  "types:\n  Evidence:\n    root_field: text\n",
 		"events.yaml": "handoff.completed:\n  evidence: Evidence\n",
 
-		"child/schema.yaml": "name: child\ninitial_state: waiting\nterminal_states: [processed]\nstates: [waiting, processed]\npins:\n  outputs:\n    events: [handoff.completed]\n",
+		"child/schema.yaml": "name: child\nstages:\n  waiting: {initial: true}\n  processed: {terminal: true}\npins:\n  outputs:\n    events: [handoff.completed]\n",
 	})
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
@@ -1595,7 +1592,7 @@ func (r *pipelineTestEntityCollectionPersistenceReader) QueryWorkflowEntityColle
 func TestPipelineEngineEntityCollectionReaderMaterializesDeclaredStateRows(t *testing.T) {
 	runID := uuid.NewString()
 	source := loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml":   "name: work\ninitial_state: active\nstates: [active]\n",
+		"schema.yaml":   "name: work\nstages:\n  active: {initial: true}\n",
 		"entities.yaml": "items:\n  id: text\n  status: text\n",
 	})
 	persisted := &pipelineTestEntityCollectionPersistenceReader{records: []WorkflowEntityStatePersistenceRecord{

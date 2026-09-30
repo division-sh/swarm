@@ -1,7 +1,8 @@
 name: child
-initial_state: idle
-terminal_states: [done]
-states: [idle, working, done]
+stages:
+  idle: {initial: true}
+  working: {}
+  done: {terminal: true}
 pins:
   inputs:
     events: [task.assigned, task.feedback]

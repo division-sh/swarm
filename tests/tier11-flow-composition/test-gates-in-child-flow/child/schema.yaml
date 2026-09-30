@@ -1,9 +1,6 @@
-states:
-  - idle
-  - done
-initial_state: idle
-terminal_states:
-  - done
+stages:
+  idle: {initial: true}
+  done: {terminal: true}
 pins:
   inputs:
     events:

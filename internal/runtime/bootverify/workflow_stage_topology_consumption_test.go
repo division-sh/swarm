@@ -16,7 +16,7 @@ import (
 func TestRunAcceptsTimerOnlyReachableTerminalStage(t *testing.T) {
 	root := t.TempDir()
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), `
 name: support
 stages:
@@ -58,7 +58,7 @@ func TestRunAcceptsNestedDeliveryJoinOnlyReachableTerminalStage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	schema := strings.Replace(string(schemaRaw), "states: [active]\n", "states: [active, done]\nterminal_states: [done]\n", 1)
+	schema := strings.Replace(string(schemaRaw), "  active: {initial: true}\n", "  active: {initial: true}\n  done: {terminal: true}\n", 1)
 	if schema == string(schemaRaw) {
 		t.Fatal("delivery join lifecycle fixture replacement did not apply")
 	}
