@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/packs"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	channeldelivery "github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
@@ -183,6 +184,10 @@ func TestChannelDeliveryNoticeCutIsAtomicWithMailboxBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			summaryFrozen, err = render.WithPresentation(summaryFrozen, packs.PresentationBounds{Actions: 8, TextRunes: 4096, LabelRunes: 64}, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
 			summaryRenderID, created, err := fixture.persistRender(ctx, summary.DeliveryID, summaryFrozen)
 			if err != nil || !created {
 				t.Fatalf("persist backlog summary = %s, created=%t err=%v", summaryRenderID, created, err)
@@ -205,6 +210,10 @@ func TestChannelDeliveryNoticeCutIsAtomicWithMailboxBothStores(t *testing.T) {
 				PrincipalID: plan.PrincipalID, InterfaceKey: plan.InterfaceKey, DeliveryEpoch: plan.DeliveryEpoch,
 				ExternalAccountRef: plan.ExternalAccountRef, ConversationRef: plan.ConversationRef, ConversationScope: plan.ConversationScope,
 			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			frozen, err = render.WithPresentation(frozen, packs.PresentationBounds{Actions: 8, TextRunes: 4096, LabelRunes: 64}, 0)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -700,6 +709,9 @@ func openOperatorChannelContractFixture(t *testing.T, backend string) operatorCh
 				var id string
 				var created bool
 				err := selected.backend.RunTransaction(ctx, "persist channel render", func(txctx context.Context, tx *sql.Tx) error {
+					if err := channeldelivery.SetPresentationBoundsTx(txctx, tx, deliveryID, packs.PresentationBounds{Actions: 8, TextRunes: 4096, LabelRunes: 64}, false); err != nil {
+						return err
+					}
 					var err error
 					id, created, err = channeldelivery.PersistRenderTx(txctx, tx, deliveryID, frozen, false)
 					return err
@@ -759,6 +771,10 @@ func openOperatorChannelContractFixture(t *testing.T, backend string) operatorCh
 			persistRender: func(ctx context.Context, deliveryID string, frozen render.Frozen) (string, bool, error) {
 				tx, err := db.BeginTx(ctx, nil)
 				if err != nil {
+					return "", false, err
+				}
+				if err := channeldelivery.SetPresentationBoundsTx(ctx, tx, deliveryID, packs.PresentationBounds{Actions: 8, TextRunes: 4096, LabelRunes: 64}, true); err != nil {
+					_ = tx.Rollback()
 					return "", false, err
 				}
 				id, created, err := channeldelivery.PersistRenderTx(ctx, tx, deliveryID, frozen, true)

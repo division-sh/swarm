@@ -53,6 +53,10 @@ func PlanNativeInboxResponseTx(ctx context.Context, tx *sql.Tx, text operatorcha
 		DeliveryEpoch: selected.DeliveryEpoch, ExternalAccountRef: text.ExternalAccountRef,
 		ConversationRef: text.ConversationRef, ConversationScope: text.ConversationScope,
 	}
+	fullText, err = appendUncertaintyReadbackTx(ctx, tx, audience, fullText, postgres)
+	if err != nil {
+		return "", err
+	}
 	recovery, err := ListActionableUncertainTx(ctx, tx, selected, postgres)
 	if err != nil {
 		return "", err
@@ -286,6 +290,10 @@ func freezeActionResponseTx(ctx context.Context, tx *sql.Tx, action operatorchan
 	case "open_inbox":
 		if resolved.SourceKind != PlanSummary || inboxText == "" {
 			return render.Frozen{}, fmt.Errorf("open inbox requires a summary action and canonical list")
+		}
+		inboxText, err = appendUncertaintyReadbackTx(ctx, tx, audience, inboxText, postgres)
+		if err != nil {
+			return render.Frozen{}, err
 		}
 		frozen, err = render.FreezeResponse(action.PublicationID, inboxText, audience)
 	case "view_full", "next_page":
