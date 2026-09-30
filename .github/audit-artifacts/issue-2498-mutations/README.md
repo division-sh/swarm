@@ -6,6 +6,13 @@ production code, a mutation runner, or another corpus executor. Every arm was
 applied alone in `/tmp/agent-g-2498-mutation-qualification`, compiled and run on
 SQLite and host PostgreSQL, then removed with an exact inverse edit.
 
+Final-rebase traceability: that historical candidate's reachable replacement is
+`75b601728`. The five qualified routing/classification/descriptor-owner files are
+byte-identical across `cfb6b3b5f`, `75b601728` and final candidate `723af0b1b`
+(`git diff --exit-code` for those paths). Final positive paired public execution
+is separately recorded in `issue-2498-postimplementation.md`; this trace does not
+pretend the historical red commands were rerun on the newer head.
+
 The local `.gitattributes` treats only these nine archived diff payloads as data
 for whitespace checks: unified-diff context prefixes must precede the original
 Go tabs. It does not exempt production code or other audit artifacts. Patch

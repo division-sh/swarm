@@ -6,6 +6,11 @@ Candidate/probe base: `5a8167d0b`, including the separately approved readback re
 Binding independent rulings: [startup/continuation class](https://github.com/division-sh/swarm/issues/2498#issuecomment-5902935619) and latest [P16 standing-authority repair: insufficient; widen class](https://github.com/division-sh/swarm/issues/2498#issuecomment-5903522698).
 **Approved for bounded implementation, not merge:** [final independent gate](https://github.com/division-sh/swarm/issues/2498#issuecomment-5903816439). All P01-P16/M/U/RB proof obligations and gate conditions remain binding. The frozen request below records the reviewed design, not current implementation status.
 
+Historical phase note: the later complete standing composition gate
+[5906100464](https://github.com/division-sh/swarm/issues/2498#issuecomment-5906100464)
+supersedes the process freeze recorded below. Final implementation/proof status
+is in `issue-2498-postimplementation.md`; earlier counterexamples remain evidence.
+
 Implementation placement addendum: the unchanged StandingRestart model and sole ClassifyStandingRestart decision table move from the pipeline composition package to the existing run-lifecycle domain so delivery persistence can consume the canonical reader without a delivery -> pipeline -> bus dependency cycle. Every consumer is migrated directly; no old alias, duplicate classifier or new authority/framework is introduced. The selected-store standingdisposition reader and standing desired-state writer retain their existing authority and transaction order.
 
 Implementation stop addendum: the independent process ruling at issuecomment-5905422933 is `insufficient; widen class`. `issue-2498-standing-operator-composition-preimplementation.md` supersedes the reset-only stop with the complete durable-state x child-presence command/compensation matrix and S01-S17. Fresh repeat suspend/resume and valid no-child terminal/invalid reset are not optional follow-ups. Process-lifetime coding remains frozen for one focused re-gate. Candidate pause/restart and continue refusal proof does not close those earlier gates; the prior approval remains evidence within scope.
