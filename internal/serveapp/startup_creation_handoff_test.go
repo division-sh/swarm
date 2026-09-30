@@ -144,7 +144,16 @@ func TestComposedStartupCreationPublicationHandoffOnBothStores(t *testing.T) {
 				root := t.TempDir()
 				copyReleaseFixtureTree(t, filepath.Join(repoRootForTest(), "tests/tier5-flow-lifecycle/test-auto-emit-on-create"), root)
 				writeStandingCandidateFile(t, filepath.Join(root, "nodes.yaml"), "spawner:\n  execution_type: system_node\n  subscribes_to: [flow.created]\n  produces: []\n  event_handlers:\n    flow.created: {}\n")
-				writeStandingCandidateFile(t, filepath.Join(root, "schema.yaml"), "stages: []\npins:\n  outputs:\n    events: [worker.requested]\n  inputs:\n    events: [flow.created]\nconnect:\n  - {event: worker.requested, from: ., to: worker}\n")
+				schemaPath := filepath.Join(root, "schema.yaml")
+				schemaRaw, err := os.ReadFile(schemaPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				neutralSchema := strings.Replace(string(schemaRaw), "stages:\n  idle: {initial: true}\n  spawned: {terminal: true}\n", "stages: []\n", 1)
+				if neutralSchema == string(schemaRaw) {
+					t.Fatal("canonical startup fixture lifecycle marker is missing")
+				}
+				writeStandingCandidateFile(t, schemaPath, neutralSchema)
 				for _, name := range []string{"schema.yaml", "events.yaml", "nodes.yaml"} {
 					path := filepath.Join(root, "worker", name)
 					raw, err := os.ReadFile(path)

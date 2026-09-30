@@ -1,4 +1,4 @@
-package releasee2e
+package cataloge2e
 
 import (
 	"encoding/json"
@@ -12,7 +12,7 @@ import (
 )
 
 func TestStaticDataInvocationGoldenConsumesAdmittedIdentity(t *testing.T) {
-	repo := releaseE2ERepoRoot(t)
+	repo := repoRootFromCatalogE2E(t)
 	root := filepath.Join(repo, "internal/releasee2e/testdata/static_data_invocation")
 	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
 	if err != nil {

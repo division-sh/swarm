@@ -328,7 +328,7 @@ func scopedWorkspaceBackendAgentFixtureOptions(t *testing.T, includeRootAgent bo
 	}
 	for _, flowID := range []string{"flow-a", "flow-b"} {
 		dir := filepath.Join(root, flowID)
-		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "schema.yaml"), "name: "+flowID+"mode: static\nstages:\n  active: {initial: true}\n")
+		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "schema.yaml"), "name: "+flowID+"\nmode: static\nstages: []\n")
 		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker:\n  id: shared-worker\n  model: regular\n  memory: false\n  intent:\n    inline: Exercise flow-scoped workspace backend selection.\n")
 	}
 
