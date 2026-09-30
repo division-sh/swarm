@@ -93,72 +93,88 @@ func projectSchemaIngressAdmissionValue(value yamlsource.Value) (ProjectFlowIngr
 		if !present {
 			return out, nodeValueError(value, fmt.Errorf("raw authentication is required"))
 		}
-		members, err := schemaValueFields(authentication, "raw authentication", projectFlowIngressAuthenticationFields, nil, true)
+		out.Authentication, err = projectSchemaIngressAuthenticationValue(authentication)
 		if err != nil {
 			return out, err
-		}
-		out.Authentication = &ProjectFlowIngressAuthentication{}
-		if err := schemaValueRequiredTexts(authentication, members, map[string]*string{"kind": &out.Authentication.Kind}); err != nil {
-			return out, err
-		}
-		switch out.Authentication.Kind {
-		case "none":
-			if err := schemaValueForbid(members, "header", "prefix", "encoding"); err != nil {
-				return out, err
-			}
-		case "token", "hmac_sha256":
-			if err := schemaValueRequiredTexts(authentication, members, map[string]*string{"header": &out.Authentication.Header}); err != nil {
-				return out, err
-			}
-			if err := schemaValueTexts(members, map[string]*string{"prefix": &out.Authentication.Prefix}, false); err != nil {
-				return out, err
-			}
-			if out.Authentication.Kind == "token" {
-				if err := schemaValueForbid(members, "encoding"); err != nil {
-					return out, err
-				}
-			} else if err := schemaValueTexts(members, map[string]*string{"encoding": &out.Authentication.Encoding}, true); err != nil {
-				return out, err
-			}
-		default:
-			return out, nodeValueError(authentication, fmt.Errorf("authentication.kind must be none, token or hmac_sha256"))
 		}
 		delivery, present := fields["delivery_id"]
 		if !present {
 			return out, nodeValueError(value, fmt.Errorf("raw delivery_id is required"))
 		}
-		members, err = schemaValueFields(delivery, "raw delivery_id", projectFlowIngressDeliveryIDFields, nil, true)
+		out.DeliveryID, err = projectSchemaIngressDeliveryIDValue(delivery)
 		if err != nil {
 			return out, err
 		}
-		out.DeliveryID = &ProjectFlowIngressDeliveryID{}
-		if err := schemaValueRequiredTexts(delivery, members, map[string]*string{"source": &out.DeliveryID.Source}); err != nil {
-			return out, err
-		}
-		switch out.DeliveryID.Source {
-		case "header":
-			if err := schemaValueForbid(members, "json_path"); err != nil {
-				return out, err
-			}
-			if err := schemaValueRequiredTexts(delivery, members, map[string]*string{"header": &out.DeliveryID.Header}); err != nil {
-				return out, err
-			}
-		case "json_path":
-			if err := schemaValueForbid(members, "header"); err != nil {
-				return out, err
-			}
-			if err := schemaValueRequiredTexts(delivery, members, map[string]*string{"json_path": &out.DeliveryID.JSONPath}); err != nil {
-				return out, err
-			}
-		case "body_sha256":
-			if err := schemaValueForbid(members, "header", "json_path"); err != nil {
-				return out, err
-			}
-		default:
-			return out, nodeValueError(delivery, fmt.Errorf("delivery_id.source must be header, json_path or body_sha256"))
-		}
 	default:
 		return out, nodeValueError(value, fmt.Errorf("admission.kind must be pack or raw"))
+	}
+	return out, nil
+}
+
+func projectSchemaIngressAuthenticationValue(authentication yamlsource.Value) (*ProjectFlowIngressAuthentication, error) {
+	out := &ProjectFlowIngressAuthentication{}
+	members, err := schemaValueFields(authentication, "raw authentication", projectFlowIngressAuthenticationFields, nil, true)
+	if err != nil {
+		return out, err
+	}
+	if err := schemaValueRequiredTexts(authentication, members, map[string]*string{"kind": &out.Kind}); err != nil {
+		return out, err
+	}
+	switch out.Kind {
+	case "none":
+		if err := schemaValueForbid(members, "header", "prefix", "encoding"); err != nil {
+			return out, err
+		}
+	case "token", "hmac_sha256":
+		if err := schemaValueRequiredTexts(authentication, members, map[string]*string{"header": &out.Header}); err != nil {
+			return out, err
+		}
+		if err := schemaValueTexts(members, map[string]*string{"prefix": &out.Prefix}, false); err != nil {
+			return out, err
+		}
+		if out.Kind == "token" {
+			if err := schemaValueForbid(members, "encoding"); err != nil {
+				return out, err
+			}
+		} else if err := schemaValueTexts(members, map[string]*string{"encoding": &out.Encoding}, true); err != nil {
+			return out, err
+		}
+	default:
+		return out, nodeValueError(authentication, fmt.Errorf("authentication.kind must be none, token or hmac_sha256"))
+	}
+	return out, nil
+}
+
+func projectSchemaIngressDeliveryIDValue(delivery yamlsource.Value) (*ProjectFlowIngressDeliveryID, error) {
+	out := &ProjectFlowIngressDeliveryID{}
+	members, err := schemaValueFields(delivery, "raw delivery_id", projectFlowIngressDeliveryIDFields, nil, true)
+	if err != nil {
+		return out, err
+	}
+	if err := schemaValueRequiredTexts(delivery, members, map[string]*string{"source": &out.Source}); err != nil {
+		return out, err
+	}
+	switch out.Source {
+	case "header":
+		if err := schemaValueForbid(members, "json_path"); err != nil {
+			return out, err
+		}
+		if err := schemaValueRequiredTexts(delivery, members, map[string]*string{"header": &out.Header}); err != nil {
+			return out, err
+		}
+	case "json_path":
+		if err := schemaValueForbid(members, "header"); err != nil {
+			return out, err
+		}
+		if err := schemaValueRequiredTexts(delivery, members, map[string]*string{"json_path": &out.JSONPath}); err != nil {
+			return out, err
+		}
+	case "body_sha256":
+		if err := schemaValueForbid(members, "header", "json_path"); err != nil {
+			return out, err
+		}
+	default:
+		return out, nodeValueError(delivery, fmt.Errorf("delivery_id.source must be header, json_path or body_sha256"))
 	}
 	return out, nil
 }
