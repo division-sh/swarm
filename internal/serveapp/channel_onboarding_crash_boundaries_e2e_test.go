@@ -86,7 +86,7 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 				predecessorCallback, predecessorSigning, _ = harness.provider.Registration()
 				harness.provider.SetResourceID("crash-boundary-rebind-token", 420114)
 				barrier.Arm()
-				command = startChannelOnboardingCLICommand(t, harness.opts.ConfigPath, harness.endpoint, []string{"channel", "rebind", "telegram", "--yes", "--credential-stdin"}, "crash-boundary-rebind-token\n")
+				command = startChannelOnboardingCLICommand(t, harness.opts.ConfigPath, harness.endpoint, []string{"channel", "rebind", "telegram", "--yes", "--client-language", "en", "--credential-stdin"}, "crash-boundary-rebind-token\n")
 				challenge := waitChannelOnboardingChallenge(t, command.stdout, command.stderr, command.done)
 				successorCallback, successorSigning := waitChannelOnboardingRegistrationForCredential(t, harness.provider, "crash-boundary-rebind-token", 2, command)
 				claim := submitChannelOnboardingClaimWithChatType(t, successorCallback, successorSigning, challenge, 7214, 8214, -9214, "group", "crash_boundary_rebind")
