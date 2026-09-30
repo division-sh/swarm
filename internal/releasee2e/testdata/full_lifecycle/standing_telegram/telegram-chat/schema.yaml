@@ -8,8 +8,6 @@ imports:
       event: inbound.telegram.text_message
 mode: template
 instance: conversation_reference
-stages:
-  active: {initial: true}
 pins:
   inputs:
     events:

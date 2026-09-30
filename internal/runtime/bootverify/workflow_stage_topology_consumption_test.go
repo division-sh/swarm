@@ -58,7 +58,7 @@ func TestRunAcceptsNestedDeliveryJoinOnlyReachableTerminalStage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	schema := strings.Replace(string(schemaRaw), "  active: {initial: true}\n", "  active: {initial: true}\n  done: {terminal: true}\n", 1)
+	schema := string(schemaRaw) + "\nstages:\n  active: {initial: true}\n  done: {terminal: true}\n"
 	if schema == string(schemaRaw) {
 		t.Fatal("delivery join lifecycle fixture replacement did not apply")
 	}

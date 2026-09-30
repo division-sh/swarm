@@ -14,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"gopkg.in/yaml.v3"
 )
 
 type fanOutCensusCountingSource struct {
@@ -46,11 +45,15 @@ func preparedFanOutFixture(t testing.TB, r2Mixed ...bool) (*Executor, fanoutobli
 	}
 	itemFields := map[string]rc.EventFieldSpec{"value": {Type: "integer"}, "index": {Type: "integer"}, "count": {Type: "integer"}}
 	if len(r2Mixed) > 0 && r2Mixed[0] {
-		var note rc.ExpressionValue
-		if err := yaml.Unmarshal([]byte(`'row=${row},meta=${{"missing":null}}'`), &note); err != nil {
+		admitted, err := loadNodeHandlerFixture(`emit:
+  event: value.completed
+  fields:
+    note: 'row=${row},meta=${{"missing":null}}'
+`)
+		if err != nil {
 			t.Fatal(err)
 		}
-		handler.FanOut.Emit.Fields["note"] = note
+		handler.FanOut.Emit.Fields["note"] = admitted.Emit.Fields["note"]
 		itemFields["note"] = rc.EventFieldSpec{Type: "text"}
 	}
 	schema := rc.FlowSchemaDocument{Pins: rc.FlowPins{Outputs: rc.FlowOutputPins{EventPins: []rc.FlowOutputEventPin{{Event: "item.ready", Sink: rc.FlowOutputSinkHarness}}}}}

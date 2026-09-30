@@ -7,8 +7,19 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"gopkg.in/yaml.v3"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
+
+func admitR2ValueFixture(t *testing.T, source string) (runtimecontracts.ExpressionValue, error) {
+	t.Helper()
+	root := canonicalrouting.CopyR2ValueSource(t, source)
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		return runtimecontracts.ExpressionValue{}, err
+	}
+	return bundle.Nodes["value-node"].EventHandlers["value.requested"].Emit.Fields["value"], nil
+}
 
 func TestProjectCELValuePreservesNullInsideContainers(t *testing.T) {
 	for _, tc := range []struct {
@@ -53,8 +64,8 @@ func TestR2AuthoredMixedInterpolationKeepsTypedSoleExpression(t *testing.T) {
 		{`v=${{"b":2,"a":1}}`, `v={"a":1,"b":2}`},
 		{`${[1,2]}`, []any{int64(1), int64(2)}},
 	} {
-		var expression runtimecontracts.ExpressionValue
-		if err := yaml.Unmarshal([]byte("'"+strings.ReplaceAll(tc.source, "'", "''")+"'"), &expression); err != nil {
+		expression, err := admitR2ValueFixture(t, "'"+strings.ReplaceAll(tc.source, "'", "''")+"'")
+		if err != nil {
 			t.Fatalf("decode %s: %v", tc.source, err)
 		}
 		got, err := EvalValueExpression(expression.CEL, ValueContext{})
@@ -214,8 +225,8 @@ func TestR2GeneratedCELPreservesTrailingCommentBoundaries(t *testing.T) {
 			if tc.name == "nested container" {
 				source = tc.source
 			}
-			var expression runtimecontracts.ExpressionValue
-			if err := yaml.Unmarshal([]byte(source), &expression); err != nil {
+			expression, err := admitR2ValueFixture(t, source)
+			if err != nil {
 				t.Fatal(err)
 			}
 			got, err := EvalValueExpression(expression.CEL, ValueContext{})
@@ -224,8 +235,7 @@ func TestR2GeneratedCELPreservesTrailingCommentBoundaries(t *testing.T) {
 			}
 		})
 	}
-	var malformed runtimecontracts.ExpressionValue
-	if err := yaml.Unmarshal([]byte("|-\n  v=${1 // comment}\n"), &malformed); err == nil {
+	if _, err := admitR2ValueFixture(t, "|-\n  v=${1 // comment}\n"); err == nil {
 		t.Fatal("unterminated line-comment interpolation was admitted")
 	}
 }
@@ -236,8 +246,8 @@ func TestR2DynamicContainerPreservesNullAndEscape(t *testing.T) {
 		`["${1}", null]`,
 		`{keep: "${1}", escaped: {literal: {missing: null}}}`,
 	} {
-		var expression runtimecontracts.ExpressionValue
-		if err := yaml.Unmarshal([]byte(source), &expression); err != nil {
+		expression, err := admitR2ValueFixture(t, source)
+		if err != nil {
 			t.Fatalf("%s: %v", source, err)
 		}
 		got, err := EvalValueExpression(expression.CEL, ValueContext{})
@@ -270,8 +280,8 @@ func TestR2GeneratedCELLexicalFormsValidate(t *testing.T) {
 		`${b"a}b"}`,
 		"${1 // }\n + 2}",
 	} {
-		var expression runtimecontracts.ExpressionValue
-		if err := yaml.Unmarshal([]byte("|-\n  "+strings.ReplaceAll(source, "\n", "\n  ")+"\n"), &expression); err != nil {
+		expression, err := admitR2ValueFixture(t, "|-\n  "+strings.ReplaceAll(source, "\n", "\n  ")+"\n")
+		if err != nil {
 			t.Fatalf("decode %q: %v", source, err)
 		}
 		if err := ValidateValueExpressionWithOptions(expression.CEL, ValueExpressionOptions{}); err != nil {

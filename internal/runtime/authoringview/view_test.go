@@ -1230,9 +1230,8 @@ func writeDuplicateNodeIDFlow(t testing.TB, root, flowID string) {
 	t.Helper()
 	dir := filepath.Join(root, flowID)
 	writeAuthoringViewTestFile(t, filepath.Join(dir, "schema.yaml"), `
-name: `+flowID+`mode: singleton
-stages:
-  active: {initial: true}
+name: `+flowID+`
+mode: singleton
 pins:
   inputs:
     events:

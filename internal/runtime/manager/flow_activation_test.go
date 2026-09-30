@@ -2089,21 +2089,19 @@ func TestFlowActivationCommitErrorFinalizesOnlyAcknowledgedReadiness(t *testing.
 	}
 }
 
-func TestActivateFlowInstanceRejectsRetiredSchemaEntityContradiction(t *testing.T) {
+func TestActivateFlowInstanceRejectsMissingCanonicalEntityContract(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
 	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
-	schema := bundle.FlowSchemas["review"]
-	schema.Entity = "retired_schema_selector"
-	bundle.FlowSchemas["review"] = schema
+	bundle = admitFlowActivationEntityContracts(t, bundle, map[string]string{"unrelated": "other_entity"})
 
 	err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
 	if err == nil || !strings.Contains(err.Error(), "requires one canonical entity contract") {
-		t.Fatalf("retired schema entity contradiction error = %v", err)
+		t.Fatalf("missing canonical entity error = %v", err)
 	}
 	if len(instances.creates) != 0 || len(bus.addedPaths) != 0 {
-		t.Fatalf("retired schema entity contradiction mutated activation: instances=%#v routes=%#v", instances.creates, bus.addedPaths)
+		t.Fatalf("missing entity activation mutated runtime: instances=%#v routes=%#v", instances.creates, bus.addedPaths)
 	}
 }
 

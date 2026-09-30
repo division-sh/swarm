@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"gopkg.in/yaml.v3"
 )
 
 func TestArrivalIdentifier_PriorityOrder(t *testing.T) {
@@ -222,19 +221,20 @@ func TestEmitFieldsPayload_EvaluatesYAMLLoadedR2Values(t *testing.T) {
 		{Name: "scan_id", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}},
 		{Name: "geography", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}},
 	}}
-	var spec runtimecontracts.EmitSpec
-	if err := yaml.Unmarshal([]byte(`
-event: signals.category_ready
-fields:
-  mode: ${payload.mode}
-  batch: {scan_id: "${payload.scan_id}", geography: "${payload.geography}"}
-  count: 0
-  quoted_literal: ready
-  explicit_literal:
-    literal: ready
-`), &spec); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
+	handler, err := loadNodeHandlerFixture(`emit:
+  event: signals.category_ready
+  fields:
+    mode: ${payload.mode}
+    batch: {scan_id: "${payload.scan_id}", geography: "${payload.geography}"}
+    count: 0
+    quoted_literal: ready
+    explicit_literal:
+      literal: ready
+`)
+	if err != nil {
+		t.Fatalf("source admission: %v", err)
 	}
+	spec := handler.Emit
 	base := BaseContext{
 		Payload: values.Wrap(map[string]any{
 			"mode":      "corpus",

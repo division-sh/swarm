@@ -782,7 +782,7 @@ func TestCompileConnectPlansLoadedPackagePinsExactCanonicalEventIdentity(t *test
 	}{
 		{name: "leading slash", connectLine: "  - event: /work.ready", want: "exact canonical event identity"},
 		{name: "trailing slash", connectLine: "  - event: work.ready/", want: "exact canonical event identity"},
-		{name: "normalized equal rename", connectLine: "  - event: work.ready\n    rename: /work.ready/", want: "redundant with event"},
+		{name: "normalized equal rename", connectLine: "  - event: work.ready\n    rename: /work.ready/", want: "exact canonical event identity"},
 		{name: "non-canonical rename", connectLine: "  - event: work.ready\n    rename: work.accepted/", want: "exact canonical event identity"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

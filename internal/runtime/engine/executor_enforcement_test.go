@@ -541,7 +541,7 @@ func TestExecutor_FanInInputOwnsWindowAndDedupAtRuntime(t *testing.T) {
 		found: true,
 		snapshot: StateSnapshot{
 			EntityID:     templatefanin.ReceiverFlowInstance,
-			CurrentState: "active",
+			CurrentState: source.FlowInitialStage(templatefanin.ReceiverFlowID),
 			StateCarrier: NewStateCarrier(map[string]any{}, nil, map[string]map[string]any{}),
 		},
 	}

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
@@ -33,61 +34,7 @@ func loadSchemaFragment(t *testing.T, source string) (*WorkflowContractBundle, e
 }
 
 func TestSchemaAdmissionOwnsCompleteRoot(t *testing.T) {
-	schema, err := admitSchemaFragment(`name: Complete
-mode: template
-activation: standing
-instance: work_id
-ingress:
-  alias: hooks
-  providers:
-    - provider: custom
-      signing_secret: TOKEN
-      admission:
-        kind: raw
-        authentication: {kind: token, header: X-Token, prefix: ''}
-        event: work.requested
-        delivery_id: {source: body_sha256}
-        payload: json
-imports:
-  connector_packs: [{provider: telegram, tool: telegram.send_message}]
-  provider_trigger_events: [{provider: telegram, event: inbound.telegram.text_message}]
-connect: [{event: work.requested, from: source, to: worker, rename: work.received}]
-pins:
-  inputs:
-    events:
-      - event: work.requested
-        resolution: {mode: create, from: event.id}
-        initialize: {note: payload.note}
-    reads: [note, work_id]
-  outputs:
-    events: [work.completed]
-    writes: [note]
-required_agents: [{role: worker, subscribes_to: [], emits: [work.completed], description: ''}]
-instance_variables:
-  description: Configuration
-  variables:
-    note: {type: text, default: '', length: {min: 0}}
-auto_emit_on_create: {event: work.started}
-stages:
-  waiting:
-    initial: true
-    terminal: false
-    timers: [{after: 1s, emit: work.expired}]
-    gate:
-      decision: approval
-      context: {null_value: null, zero: 0, dynamic: '${payload.note}'}
-      outcomes:
-        approve:
-          advances_to: done
-          input: {comment: {type: text, required: false, label: ''}}
-          emit: {event: work.completed, fields: {record: {note: '${payload.note}', preserved: null}}}
-  done: {terminal: true}
-loops:
-  revision:
-    revision_field: revision
-    max_attempts: 10
-    escape: {advances_to: done, emit: work.expired}
-`)
+	schema, err := admitSchemaFragment(canonicalrouting.SchemaAdmissionCompleteRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,36 +161,32 @@ func TestSchemaAdmissionProvenanceCompositionAndIsolation(t *testing.T) {
 }
 
 func TestSchemaAdmissionDocumentExpansionBudget(t *testing.T) {
-	var source strings.Builder
-	source.WriteString("instance_variables:\n  variables:\n    x:\n      type: text\n      default:\n")
-	for i := 0; i < 15; i++ {
-		if i == 0 {
-			fmt.Fprintf(&source, "        a%d: &a%d [x, x]\n", i, i)
-		} else {
-			fmt.Fprintf(&source, "        a%d: &a%d [*a%d, *a%d]\n", i, i, i-1, i-1)
-		}
-	}
-	source.WriteString("    y: {type: text, default: *a14}\n    z: {type: text, default: *a14}\n")
-	_, err := loadSchemaFragment(t, source.String())
-	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "expansion") {
-		t.Fatalf("document-wide expansion did not fail closed: %v", err)
+	for _, variant := range []string{"alias", "merge"} {
+		t.Run(variant, func(t *testing.T) {
+			var source strings.Builder
+			source.WriteString("instance_variables:\n  variables:\n    x: &variable\n      type: text\n      default:\n")
+			for i := 0; i < 15; i++ {
+				if i == 0 {
+					fmt.Fprintf(&source, "        a%d: &a%d [x, x]\n", i, i)
+				} else {
+					fmt.Fprintf(&source, "        a%d: &a%d [*a%d, *a%d]\n", i, i, i-1, i-1)
+				}
+			}
+			if variant == "merge" {
+				source.WriteString("    y: {<<: *variable}\n    z: {<<: *variable}\n")
+			} else {
+				source.WriteString("    y: {type: text, default: *a14}\n    z: {type: text, default: *a14}\n")
+			}
+			_, err := loadSchemaFragment(t, source.String())
+			if err == nil || !strings.Contains(strings.ToLower(err.Error()), "expansion") {
+				t.Fatalf("document-wide expansion did not fail closed: %v", err)
+			}
+		})
 	}
 }
 
 func TestSchemaAdmissionAliasesMergesAndDerivedProvenance(t *testing.T) {
-	schema, err := admitSchemaFragment(`name: &label Example
-stages:
-  waiting:
-    description: *label
-    initial: true
-    timers: [{after: 1s, emit: work.expired}]
-  done: {terminal: true}
-pins:
-  inputs:
-    events: [work.requested]
-  outputs:
-    events: [work.completed]
-`)
+	schema, err := admitSchemaFragment(canonicalrouting.SchemaAdmissionAliasProvenance)
 	if err != nil {
 		t.Fatal(err)
 	}

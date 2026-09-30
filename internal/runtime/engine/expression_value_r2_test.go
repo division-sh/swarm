@@ -2,12 +2,12 @@ package engine
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
-	"gopkg.in/yaml.v3"
 )
 
 func TestExpressionValueR2RuntimeTypedAndRecursive(t *testing.T) {
@@ -27,10 +27,11 @@ func TestExpressionValueR2RuntimeTypedAndRecursive(t *testing.T) {
 		{"nested", `{name: "${payload.name}", counts: ["${payload.count}", 8, 1.0]}`, map[string]any{"name": "Ada", "counts": []any{int64(7), int64(8), float64(1)}}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			var expr runtimecontracts.ExpressionValue
-			if err := yaml.Unmarshal([]byte(test.source), &expr); err != nil {
+			handler, err := loadNodeHandlerFixture("emit:\n  event: value.completed\n  fields:\n    value:\n      " + strings.ReplaceAll(test.source, "\n", "\n      "))
+			if err != nil {
 				t.Fatal(err)
 			}
+			expr := handler.Emit.Fields["value"]
 			got, present, err := evalExpressionValue(base, ExecutionState{}, expr, workflowexpr.ValueExpressionOptions{PayloadType: &payloadType})
 			if err != nil || !present {
 				t.Fatalf("evaluate: value=%#v present=%t err=%v", got, present, err)

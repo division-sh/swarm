@@ -1,6 +1,4 @@
-stages:
-  idle: {initial: true}
-  done: {terminal: true}
+name: flow-agent-fork-root
 pins:
   inputs:
     events: [worker.ready]

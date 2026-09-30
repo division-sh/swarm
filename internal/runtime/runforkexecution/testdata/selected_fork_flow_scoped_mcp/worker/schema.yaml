@@ -1,7 +1,4 @@
 name: selected-fork-flow-scoped-worker
-stages:
-  pending: {initial: true}
-  done: {terminal: true}
 pins:
   inputs:
     events:

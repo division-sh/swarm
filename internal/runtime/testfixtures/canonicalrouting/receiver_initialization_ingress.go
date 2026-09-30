@@ -14,8 +14,6 @@ imports:
     - {provider: telegram, event: inbound.telegram.text_message}
 mode: template
 instance: conversation_reference
-stages:
-  active: {initial: true}
 instance_variables:
   variables:
     initial_text: text

@@ -2007,23 +2007,23 @@ func TestRun_MapsStateMachineMismatchToNamedError(t *testing.T) {
 	}
 }
 
-func TestRun_WarnsWhenDeclaredStateIsUnreachable(t *testing.T) {
+func TestRun_RejectsMigratedUnreachableStageWithReachabilityEvidence(t *testing.T) {
 	root := writeStateReachabilityFixture(t)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if report.HasErrors() {
-		t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
+	if !report.HasErrors() {
+		t.Fatalf("expected invalid stage graph, got %#v", report.Findings)
 	}
-	if !reportContains(report.Warnings(), "semantic_drift_unreachable_state", "declares state review but no transition path from initial_state waiting reaches review") {
-		t.Fatalf("expected semantic_drift_unreachable_state warning, got %#v", report.Warnings())
+	if !reportContains(report.Errors(), "semantic_drift_unreachable_state", "declares stage review but no transition path from initial stage waiting reaches review") {
+		t.Fatalf("expected semantic_drift_unreachable_state error, got %#v", report.Errors())
 	}
-	if !reportContains(report.Warnings(), "semantic_drift_unreachable_state", "Reachable states: active, done, waiting") {
-		t.Fatalf("expected reachable-state summary, got %#v", report.Warnings())
+	if !reportContains(report.Errors(), "semantic_drift_unreachable_state", "Reachable states: active, done, waiting") {
+		t.Fatalf("expected reachable-state summary, got %#v", report.Errors())
 	}
-	if !reportContains(report.Warnings(), "semantic_drift_unreachable_state", "Unreachable states: review") {
-		t.Fatalf("expected unreachable-state summary, got %#v", report.Warnings())
+	if !reportContains(report.Errors(), "semantic_drift_unreachable_state", "Unreachable states: review") {
+		t.Fatalf("expected unreachable-state summary, got %#v", report.Errors())
 	}
 }
 
@@ -2867,15 +2867,12 @@ func TestRun_RejectsDisallowedRefNamespaceInEmitFieldExpressions(t *testing.T) {
 }
 
 func TestRun_RejectsInvalidInterpolatedEmitFieldsExpressions(t *testing.T) {
-	var handler runtimecontracts.SystemNodeEventHandler
-	if err := yaml.Unmarshal([]byte(`
+	handler := mustBootHandlerFixture(t, `
 emit:
   event: item.scored
   fields:
     bad: ${accumulated.size()}
-`), &handler); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
-	}
+`)
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"test-node": {
@@ -2907,15 +2904,12 @@ func TestRun_AcceptsYAMLScalarFanOutEmitAliasExpressions(t *testing.T) {
 }
 
 func TestRun_RejectsUnboundItemInHandlerEmitFields(t *testing.T) {
-	var handler runtimecontracts.SystemNodeEventHandler
-	if err := yaml.Unmarshal([]byte(`
+	handler := mustBootHandlerFixture(t, `
 emit:
   event: item.scored
   fields:
     bad: ${item}
-`), &handler); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
-	}
+`)
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"test-node": {
@@ -6519,8 +6513,8 @@ func TestRun_ReportsErrorForTimerCancelStateGloballyUnreachableFromStartContext(
 	if !reportContains(report.Errors(), "timer_validation", "cancel_on state review is not reachable after start_on state:active") {
 		t.Fatalf("expected timer_validation globally-unreachable cancel-state error, got %#v", report.Errors())
 	}
-	if !reportContains(report.Warnings(), "semantic_drift_unreachable_state", "declares state review") {
-		t.Fatalf("expected generic unreachable-state warning to survive as diagnostic, got %#v", report.Warnings())
+	if !reportContains(report.Errors(), "semantic_drift_unreachable_state", "declares stage review") {
+		t.Fatalf("expected unreachable-stage diagnostic alongside timer rejection, got %#v", report.Errors())
 	}
 }
 
@@ -6821,7 +6815,8 @@ item:
 
 	for _, flowID := range []string{"producer_a", "producer_b"} {
 		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), `
-name: `+flowID+`stages:
+name: `+flowID+`
+stages:
   idle: {initial: true}
   done: {terminal: true}
 pins:
@@ -7376,7 +7371,7 @@ func writeDeadEventSchemaFixture(t *testing.T, opts deadEventSchemaFixtureOption
 		files := opts.flows[flowID]
 		schema := strings.TrimSpace(files.schema)
 		if schema == "" {
-			schema = "name: " + flowID + "stages:\n  idle: {initial: true}\n  done: {terminal: true}\n"
+			schema = "name: " + flowID + "\nstages:\n  idle: {initial: true}\n  done: {terminal: true}\n"
 		}
 		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), schema+"\n")
 		writeOptionalBootverifyFixtureFile(t, filepath.Join(root, flowID, "policy.yaml"), files.policy)
