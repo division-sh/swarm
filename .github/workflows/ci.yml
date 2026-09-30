@@ -13,6 +13,10 @@ on:
         default: full
         type: choice
         options: [full, nightly, pr-common, pr-escalated]
+      source_sha:
+        description: Exact production commit to qualify without diagnostic instrumentation
+        required: false
+        type: string
   schedule:
     - cron: "17 3 * * *"
 
@@ -61,6 +65,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.source_sha || github.sha }}
           fetch-depth: 0
 
       - name: Setup Go
@@ -91,11 +96,11 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.cache/go-build
-          key: go-production-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
+          key: go-production-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ inputs.source_sha || github.sha }}
       - name: Compile production dependencies once
         if: steps.production-cache.outputs.cache-hit != 'true'
         env:
-          SOURCE_SHA: ${{ github.sha }}
+          SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
@@ -113,7 +118,7 @@ jobs:
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
-          EVENT_SHA: ${{ github.sha }}
+          EVENT_SHA: ${{ inputs.source_sha || github.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           FORCED_PROFILE: ${{ inputs.profile }}
