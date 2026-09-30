@@ -16924,8 +16924,9 @@ platform_tables:
         Storage, request and JSON readback use principal_id; changing a bearer credential for the same principal does not
         change draft authority. Ordered partial input and the next field index are owned by this row;
         progress change records contain no entered value. A quoted channel answer may select the active draft using
-        any sent receipt for its exact card at the current default destination, including a linked manual resend;
-        the original draft receipt remains its mutation anchor. No token-shaped draft decoder or compatibility alias is supported.'
+        the exact current sent receipt and render of a sent plan for its card at the current default destination,
+        including a healthy linked manual resend. The original draft receipt remains retained provenance,
+        not independent current quoted-input authority. No token-shaped draft decoder or compatibility alias is supported.'
       ddl: |
         CREATE TABLE decision_card_input_drafts (
             input_draft_id UUID PRIMARY KEY,
