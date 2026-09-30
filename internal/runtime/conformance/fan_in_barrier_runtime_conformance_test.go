@@ -139,7 +139,8 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 				t.Logf("fan-in runtime diagnostics: %#v", runtime.diagnostics.snapshot())
 				t.Fatalf("portfolio state after setup = %q, want awaiting", portfolio.CurrentState)
 			}
-			activation := loadFanInBarrierActivation(t, portfolio, periodID)
+			activation := loadFanInBarrierActivation(t, ctx, portfolio, periodID)
+			retainedJoinRef := activation.JoinRef()
 			if activation.Status != joinruntime.StatusOpen || activation.Completed() != 0 || activation.Expected() != 2 {
 				t.Fatalf("activation after setup = %#v, want open 0/2", activation)
 			}
@@ -149,7 +150,10 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 				"revenue":   22,
 			})
 			portfolio = loadFanInBarrierPortfolio(t, ctx, runtime.pipeline)
-			activation = loadFanInBarrierActivation(t, portfolio, periodID)
+			activation = loadFanInBarrierActivation(t, ctx, portfolio, periodID)
+			if !activation.JoinRef().Equal(retainedJoinRef) {
+				t.Fatal("partial arrival changed the retained barrier arm")
+			}
 			if portfolio.CurrentState != "awaiting" || activation.Status != joinruntime.StatusOpen || activation.Completed() != 1 {
 				dumpFanInBarrierEvents(t, ctx, backend, db)
 				t.Logf("fan-in runtime diagnostics: %#v", runtime.diagnostics.snapshot())
@@ -172,16 +176,19 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 				"revenue":   11,
 			})
 			portfolio = loadFanInBarrierPortfolio(t, ctx, runtime.pipeline)
-			activation = loadFanInBarrierActivation(t, portfolio, periodID)
+			activation = loadFanInBarrierActivation(t, ctx, portfolio, periodID)
+			if !activation.JoinRef().Equal(retainedJoinRef) {
+				t.Fatal("restart changed the retained barrier arm")
+			}
 			requireFanInBarrierReportTargets(t, ctx, backend, db, 2, events.RouteIdentity{
 				FlowID: "portfolio", FlowInstance: "portfolio", EntityID: runtimeflowidentity.EntityID("portfolio"),
 			})
 			if portfolio.CurrentState != "complete" || activation.Status != joinruntime.StatusClosed || activation.CloseReason != joinruntime.CloseReasonComplete {
 				t.Fatalf("completed barrier = state:%s activation:%#v", portfolio.CurrentState, activation)
 			}
-			results := activation.Results()
-			if len(results) != 2 || results[0] != float64(11) || results[1] != float64(22) {
-				t.Fatalf("barrier results = %#v, want declared membership order [11 22]", results)
+			results, err := activation.Results()
+			if err != nil || len(results) != 2 || results[0] != float64(11) || results[1] != float64(22) {
+				t.Fatalf("barrier results = %#v err=%v, want declared membership order [11 22]", results, err)
 			}
 		})
 	}
@@ -969,16 +976,14 @@ func loadFanInBarrierPortfolio(t *testing.T, ctx context.Context, pipeline *runt
 	return instance
 }
 
-func loadFanInBarrierActivation(t *testing.T, instance runtimepipeline.WorkflowInstance, periodID string) joinruntime.Activation {
+func loadFanInBarrierActivation(t *testing.T, ctx context.Context, instance runtimepipeline.WorkflowInstance, periodID string) joinruntime.Activation {
 	t.Helper()
-	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.Gates, instance.StateBuckets)
-	if err != nil {
-		t.Fatalf("load portfolio state carrier: %v", err)
+	if instance.Fields["period_id"] != periodID {
+		t.Fatalf("portfolio business period = %#v, want %q", instance.Fields["period_id"], periodID)
 	}
-	key := joinruntime.ActivationKey("awaiting", "awaiting", periodID)
-	activation, ok, err := joinruntime.Load(carrier.StateBuckets, conformanceNode(t, "portfolio", "portfolio-collector"), key)
-	if err != nil || !ok {
-		t.Fatalf("load portfolio barrier activation %q = found:%v err:%v", key, ok, err)
+	activation, ok := findConformanceJoinActivation(t, ctx, instance, conformanceNode(t, "portfolio", "portfolio-collector"), "operating.reported", "awaiting", "awaiting")
+	if !ok {
+		t.Fatalf("load portfolio barrier activation for %q: arm missing", periodID)
 	}
 	return activation
 }

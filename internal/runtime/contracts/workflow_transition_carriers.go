@@ -13,7 +13,7 @@ const (
 	HandlerAdvanceCarrierOnComplete     HandlerAdvanceCarrierKind = "handler.on_complete"
 	HandlerAdvanceCarrierRules          HandlerAdvanceCarrierKind = "handler.rules"
 	HandlerAdvanceCarrierJoinOnComplete HandlerAdvanceCarrierKind = "handler.join.on_complete"
-	HandlerAdvanceCarrierJoinTimeout    HandlerAdvanceCarrierKind = "handler.join.timeout"
+	HandlerAdvanceCarrierJoinOnDeadline HandlerAdvanceCarrierKind = "handler.join.on_deadline"
 )
 
 // HandlerAdvanceCarrier describes one authored handler site that can carry an advances_to target.
@@ -90,7 +90,9 @@ func handlerAdvanceCarriers(
 	_ = accumulate
 	if join != nil {
 		appendRuleCarriers(HandlerAdvanceCarrierJoinOnComplete, []HandlerRuleEntry{join.OnComplete})
-		appendRuleCarriers(HandlerAdvanceCarrierJoinTimeout, []HandlerRuleEntry{join.Timeout.Outcome})
+		if join.Deadline != nil {
+			appendRuleCarriers(HandlerAdvanceCarrierJoinOnDeadline, []HandlerRuleEntry{join.OnDeadline})
+		}
 	}
 	return out
 }

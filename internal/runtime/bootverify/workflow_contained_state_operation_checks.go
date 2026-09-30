@@ -97,7 +97,7 @@ func wave1ContainedStateOperations(source semanticview.Source) []wave1ContainedS
 					scope string
 					rule  runtimecontracts.HandlerRuleEntry
 				}{
-					{"handler.join.on_complete", handler.Join.OnComplete}, {"handler.join.timeout", handler.Join.Timeout.Outcome},
+					{"handler.join.on_complete", handler.Join.OnComplete}, {"handler.join.on_deadline", handler.Join.OnDeadline},
 				} {
 					refs := wave1HandlerContainedStateOperations(node, eventType, outcome.scope, outcome.rule.DataAccumulation.Writes)
 					out = append(out, wave1ContainedStateOperationsWithSource(refs, record.Source.File)...)

@@ -10,13 +10,13 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	rc "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-func TestExecutorJoinOutcomePresenceCompleteAndTimeout(t *testing.T) {
+func TestExecutorJoinOutcomePresenceCompleteAndDeadline(t *testing.T) {
 	for _, timeout := range []bool{false, true} {
 		for _, safe := range []bool{false, true} {
 			name := "complete"
@@ -35,20 +35,13 @@ func TestExecutorJoinOutcomePresenceCompleteAndTimeout(t *testing.T) {
 				}
 				outcome := rc.HandlerRuleEntry{AdvancesTo: "ready", DataAccumulation: rc.WorkflowDataAccumulation{Writes: []rc.WorkflowDataWrite{{TargetField: "captured", Value: rc.CELExpression(expression)}}}}
 				spec := rc.JoinSpec{ID: "proof", Stage: "awaiting", Output: "payload.result", OutputPath: paths.Parse("payload.result"),
-					Members:    rc.JoinMembersSpec{From: "entity.expected", FromPath: paths.Parse("entity.expected"), By: "payload.member_id", ByPath: paths.Parse("payload.member_id")},
-					OnComplete: outcome, OnCompleteFound: true, Timeout: rc.JoinTimeoutSpec{After: "1h", Outcome: outcome}, TimeoutFound: true}
+					Members:    rc.JoinMembersSpec{From: "state.expected", By: "payload.member_id"},
+					OnComplete: outcome, OnCompleteFound: true, Deadline: &rc.JoinDeadlineSpec{After: "1h", From: rc.JoinDeadlineFromStageEntry}, OnDeadline: outcome, OnDeadlineFound: true}
 				types := rc.TypeCatalogDocument{Types: map[string]rc.NamedTypeDecl{"Result": {Fields: map[string]rc.TypeFieldSpec{"note": {Type: "text", IsOptional: true}}}}}
 				node := identitytest.RootNode(t, "collector")
-				admitted, err := completeSemanticFixtureHandlerRuleIdentity(node, "item.completed", rc.SystemNodeEventHandler{Join: &spec})
-				if err != nil {
-					t.Fatal(err)
-				}
-				spec = *admitted.Join
-				bundle := &rc.WorkflowContractBundle{
-					RootTypes: types, RootEntities: rc.EntityContractsDocument{"work": {Fields: map[string]rc.EntityFieldDecl{"expected": {Type: "list<text>"}, "captured": {Type: "boolean"}}}},
-					Semantics: rc.WorkflowSemanticView{Joins: []rc.WorkflowJoinPlan{{Mode: rc.WorkflowJoinModeArrival, Node: node, HandlerEvent: "item.completed", Spec: spec, ResultType: rc.CatalogTypeReference{Type: "Result", Catalog: types}}}},
-				}
-				executor, err := NewExecutor(RuntimeDependencies{Source: sourceWithFixtureStages(semanticview.Wrap(bundle), ".", "awaiting", "awaiting", "ready"), StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}}, nil)
+				source, handler := a2TypedJoinFixtureSource(t, node, "item.completed", spec, rc.CatalogTypeReference{Type: "Result", Catalog: types}, map[string]rc.EntityFieldDecl{"expected": {Type: "[text]"}, "captured": {Type: "boolean"}})
+				spec = *handler.Join
+				executor, err := NewExecutor(RuntimeDependencies{Source: source, StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}}, nil)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -57,7 +50,9 @@ func TestExecutorJoinOutcomePresenceCompleteAndTimeout(t *testing.T) {
 				if timeout {
 					members = append(members, "b")
 				}
-				activation, err := newEngineTestJoinActivation(node, "item.completed", spec, "", members, now, now.Add(time.Hour))
+				route := flowidentity.StoredRoute(".", semanticExecutionFixtureRunID, semanticExecutionFixtureRunID)
+				entry := a2EngineJoinEntry(semanticExecutionFixtureRunID, "work-1", "awaiting", route)
+				activation, err := newEngineTestJoinActivation(node, "item.completed", spec, entry, members, now, now.Add(time.Hour))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -65,25 +60,28 @@ func TestExecutorJoinOutcomePresenceCompleteAndTimeout(t *testing.T) {
 				if err := joinruntime.Store(buckets, activation); err != nil {
 					t.Fatal(err)
 				}
-				req := ExecutionRequest{EntityID: "work-1", Node: node, HandlerEventKey: "item.completed", Handler: rc.SystemNodeEventHandler{Join: &spec}, JoinDeclaration: activation.JoinRef().Declaration(),
-					Event: eventtest.RunCreatingRootIngress("arrival", "item.completed", "", "", json.RawMessage(`{"member_id":"a","result":{}}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "work-1"), now),
-					State: testStateSnapshot("awaiting", map[string]any{"expected": members, "captured": false}, nil, buckets)}
-				result, err := executor.ExecuteSemanticFixture(context.Background(), req)
+				req := ExecutionRequest{EntityID: "work-1", Node: node, HandlerEventKey: "item.completed", Handler: handler, Route: route, JoinDeclaration: activation.JoinRef().Declaration(),
+					Event: eventtest.RunCreatingRootIngress("arrival", "item.completed", "", "", json.RawMessage(`{"member_id":"a","result":{}}`), 0, semanticExecutionFixtureRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, "work-1"), now),
+					State: a2JoinFixtureSnapshot(t, activation, map[string]any{"expected": members, "captured": false}, buckets)}
+				arrival, err := executor.ExecuteSemanticFixture(a2BoundJoinContext(t, activation), req)
+				if err != nil || arrival.Status != OutcomeWaiting || arrival.StateMutation.NextState != "" || arrival.StateMutation.StateCarrier.Fields["captured"] == true {
+					t.Fatalf("arrival evaluated closed outcome: %#v %v", arrival, err)
+				}
+				req.State.StateCarrier.StateBuckets = arrival.StateMutation.StateCarrier.StateBuckets
 				if timeout {
-					if err != nil {
-						t.Fatal(err)
-					}
-					if result.Status != OutcomeWaiting {
-						t.Fatalf("first arrival=%s", result.Status)
-					}
 					payload, marshalErr := json.Marshal(activation.TimerHandle().PayloadMetadata())
 					if marshalErr != nil {
 						t.Fatal(marshalErr)
 					}
-					req.Event = eventtest.RunCreatingRootIngress("timeout", events.EventType(activation.TimerEventType()), "runtime", activation.TimerTaskID(), payload, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "work-1"), now.Add(time.Hour))
-					req.State.StateCarrier.StateBuckets = result.StateMutation.StateCarrier.StateBuckets
-					result, err = executor.ExecuteSemanticFixture(context.Background(), req)
+					req.Event = eventtest.RuntimeControl("timeout", events.EventType(activation.TimerEventType()), "runtime", activation.TimerTaskID(), payload, 0, semanticExecutionFixtureRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, "work-1"), now.Add(time.Hour))
+				} else {
+					closed, found, err := joinruntime.Load(req.State.StateCarrier.StateBuckets, node, activation.Key())
+					if err != nil || !found {
+						t.Fatalf("load closure: %v %v", found, err)
+					}
+					req = a2JoinContinuationRequest(t, req, closed, now.Add(time.Second))
 				}
+				result, err := executor.ExecuteSemanticFixture(context.Background(), req)
 				if !safe {
 					if err == nil || !strings.Contains(err.Error(), "presence decision") {
 						t.Fatalf("unsafe outcome error=%v", err)

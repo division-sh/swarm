@@ -63,8 +63,9 @@ func TestAuthorActivityEventDescriptorsJoinDemandAndConflict(t *testing.T) {
 	}{
 		{name: "no_join"},
 		{name: "untimed_arrival", joins: []runtimecontracts.WorkflowJoinPlan{{Mode: runtimecontracts.WorkflowJoinModeArrival}}, complete: 1},
-		{name: "timed_fanout", joins: []runtimecontracts.WorkflowJoinPlan{{Mode: runtimecontracts.WorkflowJoinModeFanOutDelivery, Spec: runtimecontracts.JoinSpec{TimeoutFound: true, Timeout: runtimecontracts.JoinTimeoutSpec{After: "1h"}}}}, complete: 1, timeout: 1},
-		{name: "multiple_declarations", joins: []runtimecontracts.WorkflowJoinPlan{{Mode: runtimecontracts.WorkflowJoinModeArrival}, {Mode: runtimecontracts.WorkflowJoinModeFanOutDelivery}, {Mode: runtimecontracts.WorkflowJoinModeArrival, Spec: runtimecontracts.JoinSpec{Timeout: runtimecontracts.JoinTimeoutSpec{After: "1h"}}}}, complete: 1, timeout: 1},
+		{name: "deadline_arrival", joins: []runtimecontracts.WorkflowJoinPlan{{Mode: runtimecontracts.WorkflowJoinModeArrival, Spec: runtimecontracts.JoinSpec{Deadline: &runtimecontracts.JoinDeadlineSpec{After: "1h", From: runtimecontracts.JoinDeadlineFromStageEntry}}}}, complete: 1, timeout: 1},
+		{name: "untimed_fanout", joins: []runtimecontracts.WorkflowJoinPlan{{Mode: runtimecontracts.WorkflowJoinModeFanOutDelivery}}, complete: 1},
+		{name: "multiple_declarations", joins: []runtimecontracts.WorkflowJoinPlan{{Mode: runtimecontracts.WorkflowJoinModeArrival}, {Mode: runtimecontracts.WorkflowJoinModeFanOutDelivery}, {Mode: runtimecontracts.WorkflowJoinModeArrival, Spec: runtimecontracts.JoinSpec{Deadline: &runtimecontracts.JoinDeadlineSpec{After: "1h", From: runtimecontracts.JoinDeadlineFromStageEntry}}}}, complete: 1, timeout: 1},
 		{name: "authored_conflict", joins: []runtimecontracts.WorkflowJoinPlan{{Mode: runtimecontracts.WorkflowJoinModeArrival}}, conflict: true, reject: true},
 		{name: "invalid_compiled_mode", joins: []runtimecontracts.WorkflowJoinPlan{{}}, reject: true},
 	} {
@@ -102,7 +103,7 @@ func (r joinDescriptorRegistrar) RegisterAuthorActivityEventCatalog(scope runtim
 }
 
 func TestAuthorActivityEventDescriptorsNormalCatalogLifetime(t *testing.T) {
-	descriptors, err := AuthorActivityEventDescriptors(joinDescriptorSource{Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), joins: []runtimecontracts.WorkflowJoinPlan{{Mode: runtimecontracts.WorkflowJoinModeArrival, Spec: runtimecontracts.JoinSpec{Timeout: runtimecontracts.JoinTimeoutSpec{After: "1h"}}}}})
+	descriptors, err := AuthorActivityEventDescriptors(joinDescriptorSource{Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), joins: []runtimecontracts.WorkflowJoinPlan{{Mode: runtimecontracts.WorkflowJoinModeArrival, Spec: runtimecontracts.JoinSpec{Deadline: &runtimecontracts.JoinDeadlineSpec{After: "1h", From: runtimecontracts.JoinDeadlineFromStageEntry}}}}})
 	if err != nil {
 		t.Fatal(err)
 	}

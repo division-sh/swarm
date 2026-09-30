@@ -3,7 +3,6 @@ package replycontextstore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -62,7 +61,7 @@ func createPostgresReplyContext(ctx context.Context, db *sql.Tx, attempt *mutati
 	if err := storerunstate.RequirePostgresActiveTx(ctx, db, record.RunID); err != nil {
 		return fmt.Errorf("create reply context: %w", err)
 	}
-	origin, err := json.Marshal(record.Origin)
+	origin, err := record.EncodeOrigin()
 	if err != nil {
 		return fmt.Errorf("encode reply context origin: %w", err)
 	}
@@ -124,7 +123,7 @@ func createSQLiteReplyContextTx(ctx context.Context, db *sql.Tx, attempt *mutati
 	if err := storerunstate.RequireSQLiteActiveTx(ctx, db, record.RunID); err != nil {
 		return fmt.Errorf("create sqlite reply context: %w", err)
 	}
-	origin, err := json.Marshal(record.Origin)
+	origin, err := record.EncodeOrigin()
 	if err != nil {
 		return fmt.Errorf("encode reply context origin: %w", err)
 	}
@@ -412,7 +411,7 @@ func scanReplyContext(row replyContextRowScanner) (runtimereplycontext.Record, e
 		}
 		return runtimereplycontext.Record{}, fmt.Errorf("load reply context: %w", err)
 	}
-	if err := json.Unmarshal(originJSON, &record.Origin); err != nil {
+	if err := record.DecodeOrigin(originJSON); err != nil {
 		return runtimereplycontext.Record{}, fmt.Errorf("decode reply context origin: %w", err)
 	}
 	createdAt, ok, err := sqliteTimeValue(createdAtRaw)

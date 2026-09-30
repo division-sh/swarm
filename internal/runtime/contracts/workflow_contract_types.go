@@ -307,28 +307,6 @@ func (r HandlerRuleEntry) DeclarationIdentity() (runtimeidentity.DeclarationIden
 	return r.declarationIdentity, r.authored && r.declarationIdentity.Valid()
 }
 
-type WorkflowJoinPlan struct {
-	Node         runtimeidentity.ExecutableNode
-	HandlerEvent string
-	Mode         WorkflowJoinMode
-	Spec         JoinSpec
-	ResultType   CatalogTypeReference
-	Derivation   WorkflowJoinPlanDerivation
-	FanOut       WorkflowFanOutDeliveryJoinPlan
-}
-
-type WorkflowFanOutDeliveryJoinPlan struct {
-	FanOut FanOutPlanRef
-}
-
-type WorkflowJoinPlanDerivation struct {
-	FanInPin      string
-	MembersBy     string
-	MembersByFrom string
-	WindowBy      string
-	WindowByFrom  string
-}
-
 type WorkflowLoopPlan struct {
 	FlowID        string
 	ID            string
@@ -591,12 +569,8 @@ type AccumulateSpec struct {
 	Into        string     `yaml:"into"`
 	From        string     `yaml:"from"`
 	Description string     `yaml:"description"`
-	Window      string     `yaml:"window"`
-	WindowPath  paths.Path `yaml:"-"`
-	DedupBy     string     `yaml:"dedup_by"`
-	DedupPath   paths.Path `yaml:"-"`
-	WindowSet   bool       `yaml:"-" json:"-"`
-	DedupBySet  bool       `yaml:"-" json:"-"`
+	Key         string     `yaml:"key"`
+	KeyPath     paths.Path `yaml:"-"`
 }
 type ComputeSpec struct {
 	Operation   ComputeOperation       `yaml:"operation"`
@@ -1611,6 +1585,7 @@ type SystemNodeEventHandler struct {
 	Rules            []HandlerRuleEntry       `yaml:"rules"`
 	Accumulate       *AccumulateSpec          `yaml:"accumulate"`
 	Join             *JoinSpec                `yaml:"join"`
+	JoinUntilPlans   []WorkflowJoinPlan       `yaml:"-" json:"-"`
 	Compute          *ComputeSpec             `yaml:"compute"`
 	Query            *QuerySpec               `yaml:"query"`
 	FanOut           *FanOutSpec              `yaml:"fan_out"`

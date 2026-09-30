@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-func TestJoinPresenceAdmissionCompleteAndTimeout(t *testing.T) {
-	for _, phase := range []string{"complete_when", "on_complete", "timeout"} {
+func TestJoinPresenceAdmissionCompleteAndDeadline(t *testing.T) {
+	for _, phase := range []string{"on_complete", "on_deadline"} {
 		for _, safe := range []bool{false, true} {
 			name := phase + "/unsafe"
 			expr := `join.results.exists(r, r.note == "fallback")`
@@ -24,13 +24,10 @@ func TestJoinPresenceAdmissionCompleteAndTimeout(t *testing.T) {
 				bundle.Events["item.completed"] = event
 				handler := bundle.Nodes["join-node"].EventHandlers["item.completed"]
 				switch phase {
-				case "complete_when":
-					handler.Join.CompleteWhen = expr
-					handler.Join.Remaining = rc.JoinRemainingIgnore
 				case "on_complete":
 					handler.Join.OnComplete.Emit.Fields["results"] = rc.CELExpression(expr)
-				case "timeout":
-					handler.Join.Timeout.Outcome.Emit.Fields["missing"] = rc.CELExpression(expr)
+				case "on_deadline":
+					handler.Join.OnDeadline.Emit.Fields["missing"] = rc.CELExpression(expr)
 				}
 				bundle.Nodes["join-node"].EventHandlers["item.completed"] = handler
 				rebuildJoinValidationTopology(bundle)

@@ -321,7 +321,21 @@ func (s bundleSource) ExecutableNodeRuntimeSubscriptions(node runtimeidentity.Ex
 	if !ok {
 		return nil
 	}
-	return runtimecontracts.EffectiveSystemNodeSubscriptions(record.Entry)
+	entry := record.Entry
+	entry.EventHandlers = make(map[string]runtimecontracts.SystemNodeEventHandler, len(record.Entry.EventHandlers))
+	for eventType, handler := range record.Entry.EventHandlers {
+		if handler.Join != nil {
+			spec := *handler.Join
+			spec.Until = ""
+			handler.Join = &spec
+		}
+		entry.EventHandlers[eventType] = handler
+	}
+	subscriptions := runtimecontracts.EffectiveSystemNodeSubscriptions(entry)
+	for _, plan := range WorkflowJoinUntilPlansForNode(s, node) {
+		subscriptions = append(subscriptions, plan.Spec.Until)
+	}
+	return normalizedSortedStrings(subscriptions)
 }
 func (s bundleSource) ExecutableNodeEffectiveProduces(node runtimeidentity.ExecutableNode) []string {
 	record, ok := s.bundle.ExecutableNode(node)

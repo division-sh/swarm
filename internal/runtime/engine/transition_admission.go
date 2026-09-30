@@ -81,9 +81,9 @@ func (e *Executor) admitSelectedTransition(frame *executionFrame, next string) e
 		case handlerRuleSourceJoinOnComplete:
 			site.AdvanceCarrier = contracts.HandlerAdvanceCarrierJoinOnComplete
 		case handlerRuleSourceJoinTimeout:
-			site.AdvanceCarrier = contracts.HandlerAdvanceCarrierJoinTimeout
-			if frame.req.Handler.Join == nil {
-				return fmt.Errorf("join timeout transition lacks declaration")
+			site.AdvanceCarrier = contracts.HandlerAdvanceCarrierJoinOnDeadline
+			if frame.req.Handler.Join == nil || frame.req.Handler.Join.Deadline == nil || !frame.req.Handler.Join.OnDeadlineFound {
+				return fmt.Errorf("join deadline transition lacks declaration")
 			}
 			site.TimerID = frame.req.Handler.Join.EffectiveID()
 		default:

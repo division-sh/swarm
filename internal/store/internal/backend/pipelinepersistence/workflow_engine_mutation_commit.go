@@ -43,7 +43,8 @@ func commitWorkflowEngineState(
 			if err := requirePostgresRunActive(ctx, tx, record.Identity.RunID); err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, record.Identity.RunID+":"+record.Identity.Route.InstancePath); err != nil {
+			lockIdentity := fmt.Sprintf("%d:%s%s", len(record.Identity.RunID), record.Identity.RunID, record.Identity.Route.InstancePath)
+			if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockIdentity); err != nil {
 				return fmt.Errorf("lock workflow engine state route: %w", err)
 			}
 			written, err = commitPostgresWorkflowEngineState(ctx, tx, record, decision)

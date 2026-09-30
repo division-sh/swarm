@@ -103,10 +103,11 @@ pins:
     item.completed:
       join:
         stage: awaiting
-        members: {from: entity.expected, by: payload.member_id}
+        members: {from: state.expected, by: payload.member_id}
         output: payload.result
         on_complete: {advances_to: ready}
-        timeout: {after: ` + timeout + `, advances_to: attention}
+        deadline: {after: ` + timeout + `, from: stage_entry}
+        on_deadline: {advances_to: attention}
 `
 
 	switch flowID {

@@ -369,25 +369,23 @@ func writeDescribeStageJoins(out io.Writer, joins []authoringview.StageGraphJoin
 	if len(joins) > 0 {
 		fmt.Fprintln(out, "    joins:")
 		for _, join := range joins {
-			member := strings.TrimSpace(join.MembersBy)
-			if source := strings.TrimSpace(join.MembersBySource); source != "" {
-				member += " <- " + source
-			}
-			parts := []string{
-				join.ID + " stage " + join.Stage,
-				"members " + join.MembersFrom + " by " + member,
-				"output " + join.Output,
-				"timeout " + join.TimeoutAfter,
-			}
-			if join.WindowFrom != "" {
-				window := join.WindowBy
-				if source := strings.TrimSpace(join.WindowBySource); source != "" {
-					window += " <- " + source
+			parts := []string{join.ID}
+			if join.MembersFromFanOut {
+				parts = append(parts, "members from_fan_out")
+			} else {
+				parts = append(parts, "stage "+join.Stage)
+				if join.MemberCount != nil {
+					parts = append(parts, fmt.Sprintf("members count %d by %s", *join.MemberCount, join.MembersBy))
+				} else {
+					parts = append(parts, "members "+join.MembersFrom+" by "+join.MembersBy)
 				}
-				parts = append(parts, "window "+join.WindowFrom+" by "+window)
+				parts = append(parts, "output "+join.Output)
 			}
-			if join.FanInPin != "" {
-				parts = append(parts, "fan_in_pin "+join.FanInPin)
+			if join.DeadlineAfter != "" {
+				parts = append(parts, "deadline "+join.DeadlineAfter+" from "+join.DeadlineFrom)
+			}
+			if join.Until != "" {
+				parts = append(parts, "until "+join.Until)
 			}
 			parts = append(parts, "("+join.NodeID+" on "+join.HandlerEvent+")")
 			fmt.Fprintf(out, "      - %s\n", strings.Join(parts, " "))

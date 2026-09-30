@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	rc "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -155,7 +156,15 @@ func fanOutOwnershipFixture(t *testing.T, flow, kind string) (runfork.RunForkPla
 	frozen := func() map[string]any {
 		return map[string]any{"source_run_id": "source-run", "precise": json.Number("9007199254740993"), "nested": map[string]any{"entity_id": "source-run"}}
 	}
+	typeRef := rc.CatalogTypeReference{Type: "[text]"}
+	projection, err := rc.AdmitCollectionProjection(typeRef)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return plan, fanoutobligation.Capsule{
+		SourceProjection: rc.FanOutPlanSemantics{ElementRef: rc.FanOutElementRef{FlowPath: flow, Family: "fan_out", SemanticPath: `handlers["scatter.requested"].fan_out`},
+			ItemsFrom: "payload.items", CollectionType: typeRef, CollectionProjection: projection, ItemType: projection.ItemType(),
+			ItemAlias: "entry", Identity: "entry", IdentityDerived: true, MaxItems: 7, Emit: rc.EmitSpec{Event: "item.ready"}},
 		NodeKey: node.Key(), ExecutionFlowID: flow, EntityID: entity, Route: flowidentity.StoredRoute(flow, path, path), HandlerEventKey: "scatter.requested",
 		CurrentState: "working", ChainDepth: 2, ProducerSource: producer,
 		Receiver: &fanoutobligation.ExecutionReceiver{Node: node, Target: target},
@@ -170,7 +179,7 @@ func assertFanOutCapsuleFieldPartition(t *testing.T, source, child fanoutobligat
 	if receiverType.NumField() != 2 || receiverType.Field(0).Name != "Node" || receiverType.Field(1).Name != "Target" {
 		t.Fatal("execution receiver field census changed; publication authority must not enter the capsule")
 	}
-	immutable := []string{"NodeKey", "ExecutionFlowID", "HandlerEventKey", "CurrentState", "ChainDepth", "Lineage", "Entity", "PlatformEntity", "Computed", "Accumulated", "Join", "StateFields", "StateBookkeeping", "StateGates"}
+	immutable := []string{"SourceProjection", "NodeKey", "ExecutionFlowID", "HandlerEventKey", "CurrentState", "ChainDepth", "Lineage", "Entity", "PlatformEntity", "Computed", "Accumulated", "Join", "StateFields", "StateBookkeeping", "StateGates"}
 	executable := []string{"EntityID", "Route", "ProducerSource", "Receiver", "Loop"}
 	if len(immutable)+len(executable) != reflect.TypeOf(source).NumField() {
 		t.Fatal("capsule field census changed; classify every new field")

@@ -222,11 +222,11 @@ join-node:
     item.completed:
       join:
         stage: awaiting
-        members: {from: entity.expected, by: payload.member_id}
-        window: {from: entity.dispatch_id, by: payload.dispatch_id}
+        members: {from: state.expected, by: payload.member_id}
         output: payload.result
         on_complete: {advances_to: ready}
-        timeout: {after: 1h, advances_to: attention}
+        deadline: {after: 1h, from: stage_entry}
+        on_deadline: {advances_to: attention}
 fork-probe:
   execution_type: system_node
   subscribes_to: [fork.probe]

@@ -475,7 +475,7 @@ func entityAssignmentStepAfter(current, before Step) bool {
 
 func entityAssignmentSelectionStep(kind c.HandlerAdvanceCarrierKind) Step {
 	switch kind {
-	case c.HandlerAdvanceCarrierJoinOnComplete, c.HandlerAdvanceCarrierJoinTimeout:
+	case c.HandlerAdvanceCarrierJoinOnComplete, c.HandlerAdvanceCarrierJoinOnDeadline:
 		return StepJoin
 	case c.HandlerAdvanceCarrierOnComplete:
 		return StepOnComplete
@@ -513,8 +513,10 @@ func entityAssignmentOutcomes(handler c.SystemNodeEventHandler) []entityAssignme
 	if handler.Join != nil {
 		prefix = nil
 		appendRules(c.HandlerAdvanceCarrierJoinOnComplete, []c.HandlerRuleEntry{handler.Join.OnComplete})
-		prefix = nil
-		appendRules(c.HandlerAdvanceCarrierJoinTimeout, []c.HandlerRuleEntry{handler.Join.Timeout.Outcome})
+		if handler.Join.Deadline != nil && handler.Join.OnDeadlineFound {
+			prefix = nil
+			appendRules(c.HandlerAdvanceCarrierJoinOnDeadline, []c.HandlerRuleEntry{handler.Join.OnDeadline})
+		}
 	}
 	return out
 }

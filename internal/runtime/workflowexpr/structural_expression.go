@@ -109,10 +109,13 @@ func workflowJoinStructuralType(opts ValueExpressionOptions) (runtimecontracts.R
 		fields = append(fields,
 			runtimecontracts.ResolvedCatalogField{Name: "expected", Type: integer},
 			runtimecontracts.ResolvedCatalogField{Name: "completed", Type: integer},
-			runtimecontracts.ResolvedCatalogField{Name: "missing", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeList, Element: &runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}}},
 			runtimecontracts.ResolvedCatalogField{Name: "results", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeList, Element: &result}},
 			runtimecontracts.ResolvedCatalogField{Name: "timed_out", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeBoolean}},
+			runtimecontracts.ResolvedCatalogField{Name: "close_reason", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}},
 		)
+		if opts.JoinContext != JoinContextCountArrival {
+			fields = append(fields, runtimecontracts.ResolvedCatalogField{Name: "missing", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeList, Element: &runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}}})
+		}
 	}
 	return runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: fields}, nil
 }

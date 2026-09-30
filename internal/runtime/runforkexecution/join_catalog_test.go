@@ -24,7 +24,7 @@ type observedSelectedJoinCatalog struct {
 type selectedJoinCatalogSource struct{ semanticview.Source }
 
 func (s selectedJoinCatalogSource) WorkflowJoins() []contracts.WorkflowJoinPlan {
-	return []contracts.WorkflowJoinPlan{{Mode: contracts.WorkflowJoinModeArrival, Spec: contracts.JoinSpec{Timeout: contracts.JoinTimeoutSpec{After: "1h"}}}}
+	return []contracts.WorkflowJoinPlan{{Mode: contracts.WorkflowJoinModeArrival, Spec: contracts.JoinSpec{Deadline: &contracts.JoinDeadlineSpec{After: "1h", From: contracts.JoinDeadlineFromStageEntry}}}}
 }
 
 type observedActivationJoinCatalog struct {

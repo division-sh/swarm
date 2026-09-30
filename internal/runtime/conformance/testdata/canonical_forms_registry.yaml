@@ -481,17 +481,17 @@ rows:
 
   - id: handler.join
     ruled: mechanical-ratified
-    paths: "join.id, join.stage, join.members.*, join.window.*, join.output, join.complete_when, join.remaining, join.on_complete, join.timeout.*"
+    paths: "join.id, join.stage, join.members.from/count/by/from_fan_out, join.output, join.on_complete, join.deadline, join.on_deadline, join.until"
     owners: [projectNodeJoinValue, JoinSpec.ValidateAuthoredShape]
     information:
       derived_projection: [id_when_equal_to_stage]
-      fact: [member and window correlation]
-      choice: [completion predicate, output, outcomes, timeout]
+      fact: [member identity and lifecycle-owned stage entry]
+      choice: [membership, output, outcomes, deadline, until]
     spelling:
       canonical_candidate: omit_id_when_equal_to_stage
       retired_duplicates: [explicit_id_equal_to_stage]
       distinct_overrides: [explicit_unique_id]
-    mode_note: "Arrival joins may derive id from stage; fan-out delivery joins require explicit id and nonempty on_complete, while stage/output/window/complete_when/remaining/timeout and arrival member paths are forbidden on presence."
+    mode_note: "Arrival joins require stage, output, nonempty on_complete, and members.by plus exactly one of members.from or bounded nonnegative members.count. Count requires deadline or until including zero. Deadline uses after/from:stage_entry and on_deadline iff declared; distinct until closes through on_complete. Fan-out delivery joins require explicit id, literal members.from_fan_out:true, one same-handler top-level compiled site, and nonempty on_complete; arrival members/stage/output/deadline/on_deadline/until are forbidden on presence. window/complete_when/remaining/timeout are retired for all joins."
     corpus: {joins: 0}
 
   - id: handler.mailbox_artifact_repo

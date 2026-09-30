@@ -658,6 +658,9 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 	if err := validateRoutePlanEventProjection(evt, routePlan); err != nil {
 		return releaseFailure(err)
 	}
+	if err := eb.prepareJoinAdmission(ctx, evt, publication.prospective, &routePlan); err != nil {
+		return releaseFailure(fmt.Errorf("admit exact join recipients: %w", err))
+	}
 	if err := routePlan.ValidatePersistentDeliveries(); err != nil {
 		return releaseFailure(fmt.Errorf("validate durable route plan: %w", err))
 	}
@@ -855,14 +858,15 @@ func (p PreparedPublish) RecipientIDs() []string {
 func (p PreparedPublish) CommitRequest() CommitPublishRequest {
 	authority, _ := p.publicationClaim.bus.DeliveryAuthority()
 	request := CommitPublishRequest{
-		Event:             p.admitted,
-		RouteSettlement:   p.settlement,
-		DeliveryRoutes:    p.plan.DeliveryRoutes(),
-		DeliveryAuthority: authority,
-		ReplayScope:       runtimepipelineobligation.ScopeSubscribed,
-		PipelineClaim:     p.publicationClaim.Claim(),
-		ReplyCreations:    append([]runtimereplycontext.Record(nil), p.plan.ReplyCreations...),
-		ReplyClaims:       append([]runtimereplycontext.ClaimCommand(nil), p.plan.ReplyClaims...),
+		Event:               p.admitted,
+		RouteSettlement:     p.settlement,
+		DeliveryRoutes:      p.plan.DeliveryRoutes(),
+		DeliveryAuthority:   authority,
+		ReplayScope:         runtimepipelineobligation.ScopeSubscribed,
+		PipelineClaim:       p.publicationClaim.Claim(),
+		ReplyCreations:      append([]runtimereplycontext.Record(nil), p.plan.ReplyCreations...),
+		ReplyClaims:         append([]runtimereplycontext.ClaimCommand(nil), p.plan.ReplyClaims...),
+		JoinAdmissionFences: append([]runtimepipeline.WorkflowJoinAdmissionFence(nil), p.plan.JoinAdmissionFences...),
 	}
 	if failure := p.plan.TargetFailure; !failure.Empty() && !p.providerRawSettlement.authorizes(p.Event, p.targetFailureInput, p.plan) {
 		disposition := runtimepipelineobligation.DeadLetter(failure.Code(), targetDeliveryFailureEnvelope(failure))

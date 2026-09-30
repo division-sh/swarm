@@ -38,11 +38,6 @@ func TestJoinCapturedLoopExpressionMembers(t *testing.T) {
 			}
 		})
 	}
-	for _, expression := range []string{"loop.attempt == 1", "entity.count == 1"} {
-		if err := ValidateValueExpressionWithOptions(expression, ValueExpressionOptions{AllowJoin: true, JoinOnly: true, RequireBool: true}); err == nil {
-			t.Fatalf("complete_when admitted %s", expression)
-		}
-	}
 	const literal = `"loop.revision_id _loop.revision_id payload.revision_id"`
 	value, err := EvalValueExpressionWithOptions(literal, context, opts)
 	if err != nil || value != "loop.revision_id _loop.revision_id payload.revision_id" {

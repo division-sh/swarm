@@ -191,7 +191,7 @@ func TestAcceptedLifecycleConsumerRejectsUnownedTransitionOnBothStores(t *testin
 		t.Run(storeCase.name, func(t *testing.T) {
 			store, ctx := storeCase.open(t)
 			bundle := lifecycleStateFixtureForTest(t, "orders", "queued", "active", "lifecycle.transitioned")
-			pc := newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
+			pc := newWorkflowJoinPipelineCoordinator(t, &recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
 				Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)}, Persistence: workflowPersistenceForTest(store),
 			})
 			path := "orders/" + uuid.NewString()
@@ -272,7 +272,7 @@ func TestCompiledTransitionEvidenceRoundTripOnBothStores(t *testing.T) {
 		t.Run(storeCase.name, func(t *testing.T) {
 			store, ctx := storeCase.open(t)
 			bundle := lifecycleStateFixtureForTest(t, "orders", "queued", "active", "order.accepted")
-			pc := newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
+			pc := newWorkflowJoinPipelineCoordinator(t, &recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
 				Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)}, Persistence: workflowPersistenceForTest(store),
 			})
 			path := "orders/" + uuid.NewString()
@@ -368,7 +368,7 @@ func TestPipelineCompiledJoinTransitionEvidenceOnBothStores(t *testing.T) {
 				if outcome == "loop timeout" {
 					bundle = workflowJoinLifecycleBundleWithOptions(t, false, "reentrant")
 				}
-				pc := newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
+				pc := newWorkflowJoinPipelineCoordinator(t, &recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
 					Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)}, Persistence: workflowPersistenceForTest(store),
 					GenericSchedules: &recordingGenericScheduleWakeupOwner{},
 				})
@@ -413,9 +413,21 @@ func TestPipelineCompiledJoinTransitionEvidenceOnBothStores(t *testing.T) {
 				if outcome == "arrival" {
 					event = eventtest.RunCreatingRootIngressWithRoutingSource(uuid.NewString(), events.EventType("item.completed"), "", "", json.RawMessage(`{"member_id":"a","result":{"ok":true}}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", workflowJoinTestEnvelope(path, entityID), testWorkflowRoutingSource("orders", path, entityID), time.Now().UTC())
 					node := mustPipelineNode("orders", "join-node")
-					delivery := seedExactOnceEventDelivery(t, pc, ctx, event, node)
-					if handled, err := pc.executeNodeHandlerPlanResult(withWorkflowNodeDeliveryRoute(ctx, delivery), node, event); err != nil || !handled {
-						t.Fatalf("arrival = %v, %v", handled, err)
+					handler := pc.SemanticSource().ExecutableNodeEventHandlers(node)["item.completed"]
+					result, err := executePublishedWorkflowJoinForTest(t, pc, ctx, node, handler, workflowTriggerContext{Event: event, State: mustCurrentWorkflowState(t, pc, ctx, route, entityID), HandlerEventKey: "item.completed"})
+					if err != nil || !result.Handled {
+						t.Fatalf("arrival = %v, %v", result.Handled, err)
+					}
+					upserts, _ := committedWorkflowSchedulesForTest(t, store)
+					var completionFound bool
+					for _, schedule := range upserts {
+						if schedule.Command.EventType == joinCompleteEvent {
+							event = workflowJoinScheduleEventForTest(t, schedule.Command.TaskID+":fixture-completion", schedule, runtimecorrelation.RunIDFromContext(ctx), workflowJoinTestEnvelope(path, entityID), schedule.InitialDueAt)
+							completionFound = true
+						}
+					}
+					if !completionFound {
+						t.Fatal("arrival did not persist its completion control")
 					}
 				} else {
 					if strings.HasSuffix(outcome, "timeout") {
@@ -426,7 +438,7 @@ func TestPipelineCompiledJoinTransitionEvidenceOnBothStores(t *testing.T) {
 						dialect = authoractivityfixture.DialectSQLite
 					}
 					seedPipelineEventRecordForDialect(t, ctx, store.testDB(), dialect, event)
-					result, err := executeResolvedJoinForTest(pc, ctx, event, workflowTriggerContext{Event: event, State: mustCurrentWorkflowState(t, pc, ctx, route, entityID)})
+					result, err := executeResolvedJoinForTest(t, pc, ctx, event, workflowTriggerContext{Event: event, State: mustCurrentWorkflowState(t, pc, ctx, route, entityID)})
 					if err != nil || !result.Handled {
 						t.Fatalf("join outcome = %v, %v", result.Handled, err)
 					}
@@ -445,7 +457,7 @@ func TestPipelineCompiledJoinTransitionEvidenceOnBothStores(t *testing.T) {
 					t.Fatalf("join evidence changed its authored source/target: %#v", edge)
 				}
 				if strings.HasSuffix(outcome, "timeout") {
-					if edge.EventType != "platform.join_timeout" || string(event.Type()) != "platform.join_timeout" || !edge.Timed || edge.After != "1h" || edge.TimerID != "awaiting" || edge.AdvanceCarrier != runtimecontracts.HandlerAdvanceCarrierJoinTimeout {
+					if edge.EventType != "platform.join_timeout" || string(event.Type()) != "platform.join_timeout" || !edge.Timed || edge.After != "1h" || edge.TimerID != "awaiting" || edge.AdvanceCarrier != runtimecontracts.HandlerAdvanceCarrierJoinOnDeadline {
 						t.Fatalf("join timeout lost its protocol/timer carrier: %#v", edge)
 					}
 				} else if edge.EventType != "item.completed" || edge.Timed || edge.TimerID != "" || edge.AdvanceCarrier != runtimecontracts.HandlerAdvanceCarrierJoinOnComplete {

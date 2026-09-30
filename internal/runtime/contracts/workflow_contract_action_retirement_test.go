@@ -38,8 +38,8 @@ func TestRetiredHandlerActionOptionsRejected(t *testing.T) {
 		{"completion", "on_complete: [{condition: 'true', %s: %s}]\n"},
 		{"success", "on_success: {%s: %s}\n"},
 		{"join", "join: {%s: %s}\n"},
-		{"join_completion", "join: {stage: waiting, members: {from: entity.ids, by: payload.id}, output: payload.result, on_complete: {%s: %s}}\n"},
-		{"join_timeout", "join: {stage: waiting, members: {from: entity.ids, by: payload.id}, output: payload.result, timeout: {after: 1h, %s: %s}}\n"},
+		{"join_completion", "join: {stage: waiting, members: {from: state.ids, by: payload.id}, output: payload.result, on_complete: {%s: %s}}\n"},
+		{"join_deadline", "join: {stage: waiting, members: {from: state.ids, by: payload.id}, output: payload.result, on_complete: {advances_to: done}, deadline: {after: 1h, from: stage_entry}, on_deadline: {%s: %s}}\n"},
 	}
 	for _, site := range contexts {
 		for _, key := range []string{"action", "evidence_target", "template", "instance_id_from", "config_from"} {
@@ -57,7 +57,7 @@ func TestRetiredHandlerActionOptionsRejected(t *testing.T) {
 func TestRetiredHandlerActionAliasesRejected(t *testing.T) {
 	for _, key := range []string{"action", "evidence_target", "template", "instance_id_from", "config_from"} {
 		for _, row := range []string{key + ": *value", "<<: *retired", "<<: [*retired]", "<<: *retired, " + key + ": null"} {
-			for _, site := range []string{"handler: {%s}", "handler: {rules: [{%s}]}", "handler: {on_complete: [{%s}]}", "handler: {on_success: {%s}}", "handler: {join: {%s}}", "handler: {join: {on_complete: {%s}}}", "handler: {join: {timeout: {after: 1h, %s}}}"} {
+			for _, site := range []string{"handler: {%s}", "handler: {rules: [{%s}]}", "handler: {on_complete: [{%s}]}", "handler: {on_success: {%s}}", "handler: {join: {%s}}", "handler: {join: {stage: waiting, members: {from: state.ids, by: payload.id}, output: payload.result, on_complete: {%s}}}", "handler: {join: {stage: waiting, members: {from: state.ids, by: payload.id}, output: payload.result, on_complete: {advances_to: done}, deadline: {after: 1h, from: stage_entry}, on_deadline: {%s}}}"} {
 				t.Run(key+"/"+row+"/"+site, func(t *testing.T) {
 					raw := "value: &value null\nretired: &retired {" + key + ": null}\n" + fmt.Sprintf(site, row) + "\n"
 					var handler SystemNodeEventHandler
@@ -94,8 +94,8 @@ func TestLoadWorkflowContractBundleRejectsRetiredHandlerActions(t *testing.T) {
 			"{rules: [{" + key + ": ''}]}",
 			"{rules: {selected: {" + key + ": {}}}}",
 			"{on_complete: [{" + key + ": null}]}",
-			"{join: {on_complete: {" + key + ": null}}}",
-			"{join: {timeout: {after: 1h, " + key + ": null}}}",
+			"{join: {stage: waiting, members: {from: state.ids, by: payload.id}, output: payload.result, on_complete: {" + key + ": null}}}",
+			"{join: {stage: waiting, members: {from: state.ids, by: payload.id}, output: payload.result, on_complete: {advances_to: done}, deadline: {after: 1h, from: stage_entry}, on_deadline: {" + key + ": null}}}",
 			"{<<: &retired {" + key + ": null}}",
 		} {
 			t.Run(key+"/"+handler, func(t *testing.T) {
@@ -109,6 +109,22 @@ func TestLoadWorkflowContractBundleRejectsRetiredHandlerActions(t *testing.T) {
 }
 
 func TestHandlerActionRetirementPreservesOtherActionConcepts(t *testing.T) {
+	t.Run("join_deadline_outcome", func(t *testing.T) {
+		var handler SystemNodeEventHandler
+		err := decodeNodeTestYAML([]byte(`join:
+  stage: waiting
+  members: {from: state.ids, by: payload.id}
+  output: payload.result
+  on_complete: {advances_to: done}
+  deadline: {after: 1h, from: stage_entry}
+  on_deadline: {advances_to: expired}
+`), &handler)
+		if err != nil || handler.Join == nil || handler.Join.Deadline == nil || handler.Join.Deadline.After != "1h" ||
+			handler.Join.Deadline.From != JoinDeadlineFromStageEntry || !handler.Join.OnCompleteFound || !handler.Join.OnDeadlineFound ||
+			handler.Join.OnComplete.AdvancesTo != "done" || handler.Join.OnDeadline.AdvancesTo != "expired" {
+			t.Fatalf("supported deadline outcome changed: %#v, %v", handler.Join, err)
+		}
+	})
 	t.Run("emit_template_specialization", func(t *testing.T) {
 		var handler SystemNodeEventHandler
 		err := decodeNodeTestYAML([]byte(`emit: {event: scored, fields: {id: "${payload.id}"}}

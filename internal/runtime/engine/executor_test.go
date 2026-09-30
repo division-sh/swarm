@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/accprojection"
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -1467,9 +1468,9 @@ func TestExecutor_AccumulatorProjectionMaterializesTypedEntityFieldBeforeEmit(t 
 	}
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Accumulate: &runtimecontracts.AccumulateSpec{
-			Into:      "dimensions_received",
-			DedupBy:   "payload.dimension",
-			DedupPath: runtimecontracts.RefExpression("payload.dimension").RefPath,
+			Into:    "dimensions_received",
+			Key:     "payload.dimension",
+			KeyPath: runtimecontracts.RefExpression("payload.dimension").RefPath,
 		},
 		Emit: runtimecontracts.EmitSpec{
 			Event: "vertical.scored",
@@ -1583,9 +1584,9 @@ func TestExecutor_AccumulatorProjectionMaterializesWithoutOnComplete(t *testing.
 	exec := newAccumulatorProjectionTestExecutor(t, nil)
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Accumulate: &runtimecontracts.AccumulateSpec{
-			Into:      "dimensions_received",
-			DedupBy:   "payload.dimension",
-			DedupPath: runtimecontracts.RefExpression("payload.dimension").RefPath,
+			Into:    "dimensions_received",
+			Key:     "payload.dimension",
+			KeyPath: runtimecontracts.RefExpression("payload.dimension").RefPath,
 		},
 		Emit: runtimecontracts.EmitSpec{
 			Event: "vertical.scored",
@@ -1632,9 +1633,9 @@ func TestExecutor_AccumulatorProjectionMaterializesWithRulesBeforeEmitFields(t *
 	exec := newAccumulatorProjectionTestExecutor(t, nil)
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Accumulate: &runtimecontracts.AccumulateSpec{
-			Into:      "dimensions_received",
-			DedupBy:   "payload.dimension",
-			DedupPath: runtimecontracts.RefExpression("payload.dimension").RefPath,
+			Into:    "dimensions_received",
+			Key:     "payload.dimension",
+			KeyPath: runtimecontracts.RefExpression("payload.dimension").RefPath,
 		},
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{{
@@ -1699,9 +1700,9 @@ func TestExecutor_AccumulatorProjectionMaterializesWhenRulesDoNotMatch(t *testin
 	}})
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Accumulate: &runtimecontracts.AccumulateSpec{
-			Into:      "dimensions_received",
-			DedupBy:   "payload.dimension",
-			DedupPath: runtimecontracts.RefExpression("payload.dimension").RefPath,
+			Into:    "dimensions_received",
+			Key:     "payload.dimension",
+			KeyPath: runtimecontracts.RefExpression("payload.dimension").RefPath,
 		},
 		Rules: []runtimecontracts.HandlerRuleEntry{{
 			ID:        "too-high",
@@ -1829,9 +1830,9 @@ func TestExecutor_AccumulatorProjectionMaterializesBeforeTopLevelFanOutEmitField
 	exec := newAccumulatorProjectionTestExecutor(t, nil)
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Accumulate: &runtimecontracts.AccumulateSpec{
-			Into:      "dimensions_received",
-			DedupBy:   "payload.dimension",
-			DedupPath: runtimecontracts.RefExpression("payload.dimension").RefPath,
+			Into:    "dimensions_received",
+			Key:     "payload.dimension",
+			KeyPath: runtimecontracts.RefExpression("payload.dimension").RefPath,
 		},
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{{
@@ -1890,9 +1891,9 @@ func TestExecutor_AccumulatorProjectionBindsEntityFanOutSourceAfterProjection(t 
 	exec := newAccumulatorProjectionTestExecutor(t, nil)
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Accumulate: &runtimecontracts.AccumulateSpec{
-			Into:      "dimensions_received",
-			DedupBy:   "payload.dimension",
-			DedupPath: runtimecontracts.RefExpression("payload.dimension").RefPath,
+			Into:    "dimensions_received",
+			Key:     "payload.dimension",
+			KeyPath: runtimecontracts.RefExpression("payload.dimension").RefPath,
 		},
 		FanOut: &runtimecontracts.FanOutSpec{
 			ItemsFrom: "entity.scores",
@@ -2053,7 +2054,9 @@ func TestExecutor_AccumulatorProjectionMaterializesForQualifiedRuntimeEvent(t *t
 
 func TestExecutor_AccumulatorBucketUsesMatchedHandlerEventKeyForScopedConcreteEvents(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(stubSource(), "operating", "pending", "pending"),
+		Source: sourceWithFixtureStages(sourceWithEvents("operating", map[string]runtimecontracts.EventCatalogEntry{
+			"component.scaffolded": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{"component_id": {Type: "text"}}),
+		}), "operating", "pending", "pending"),
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
@@ -2063,8 +2066,8 @@ func TestExecutor_AccumulatorBucketUsesMatchedHandlerEventKeyForScopedConcreteEv
 	}
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Accumulate: &runtimecontracts.AccumulateSpec{
-			DedupBy:   "payload.component_id",
-			DedupPath: runtimecontracts.RefExpression("payload.component_id").RefPath,
+			Key:     "payload.component_id",
+			KeyPath: runtimecontracts.RefExpression("payload.component_id").RefPath,
 		},
 	}
 	lifecycleNode := testFlowExecutableNode(t, "operating", "lifecycle-orchestrator")
@@ -2128,11 +2131,8 @@ func TestExecutor_AccumulatorBucketUsesMatchedHandlerEventKeyForScopedConcreteEv
 	if got := len(acc.Items); got != 2 {
 		t.Fatalf("accumulator items = %d, want 2", got)
 	}
-	if got := acc.Items[0]["event_type"]; got != "component-scaffold/a/component.scaffolded" {
-		t.Fatalf("first item event_type = %#v", got)
-	}
-	if got := acc.Items[1]["event_type"]; got != "component-scaffold/b/component.scaffolded" {
-		t.Fatalf("second item event_type = %#v", got)
+	if !reflect.DeepEqual(acc.Items, []map[string]any{{"component_id": "a"}, {"component_id": "b"}}) {
+		t.Fatalf("accumulator must preserve business payloads without transport decoration: %#v", acc.Items)
 	}
 	if _, ok := loadAccumulatorForBucket(state, accumulatorBucketRef(lifecycleNode, "component-scaffold/a/component.scaffolded")); ok {
 		t.Fatalf("first concrete event bucket survived: %#v", second.StateMutation.StateCarrier.StateBuckets)
@@ -2143,29 +2143,28 @@ func TestExecutor_AccumulatorBucketUsesMatchedHandlerEventKeyForScopedConcreteEv
 }
 
 func TestExecutor_JoinUsesPersistedActivationAndMembershipOrder(t *testing.T) {
-	resultType := runtimecontracts.CatalogTypeReference{Type: "jsonb"}
+	resultType := runtimecontracts.CatalogTypeReference{Type: "JoinResult", Catalog: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
+		"JoinResult": {Fields: map[string]runtimecontracts.TypeFieldSpec{"score": {Type: "integer"}}},
+	}}}
 	spec := runtimecontracts.JoinSpec{
 		ID: "line_items", Stage: "awaiting", Output: "payload.result", OutputPath: runtimepaths.Parse("payload.result"),
-		Members:    runtimecontracts.JoinMembersSpec{From: "entity.expected", FromPath: runtimepaths.Parse("entity.expected"), By: "payload.member_id", ByPath: runtimepaths.Parse("payload.member_id")},
+		Members:    runtimecontracts.JoinMembersSpec{From: "state.expected", By: "payload.member_id"},
 		OnComplete: runtimecontracts.HandlerRuleEntry{AdvancesTo: "ready"}, OnCompleteFound: true,
-		Timeout: runtimecontracts.JoinTimeoutSpec{After: "1h", Outcome: runtimecontracts.HandlerRuleEntry{AdvancesTo: "attention"}}, TimeoutFound: true,
+		Deadline:   &runtimecontracts.JoinDeadlineSpec{After: "1h", From: runtimecontracts.JoinDeadlineFromStageEntry},
+		OnDeadline: runtimecontracts.HandlerRuleEntry{AdvancesTo: "attention"}, OnDeadlineFound: true,
 	}
-	qualified, err := completeSemanticFixtureHandlerRuleIdentity(testFlowExecutableNode(t, "orders", "join-node"), "item.completed", runtimecontracts.SystemNodeEventHandler{Join: &spec})
-	if err != nil {
-		t.Fatal(err)
-	}
-	spec = *qualified.Join
+	joinNode := testRootExecutableNode(t, "join-node")
+	source, handler := a2TypedJoinFixtureSource(t, joinNode, "item.completed", spec, resultType, map[string]runtimecontracts.EntityFieldDecl{"expected": {Type: "[text]"}})
+	spec = *handler.Join
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
-			FlowStates: map[string][]string{"orders": {"awaiting", "ready", "attention"}},
-			Name:       "orders", Joins: []runtimecontracts.WorkflowJoinPlan{{Mode: runtimecontracts.WorkflowJoinModeArrival, Node: testFlowExecutableNode(t, "orders", "join-node"), HandlerEvent: "item.completed", Spec: spec, ResultType: resultType}},
-		}}), StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}}, nil)
+		Source: source, StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	joinNode := testFlowExecutableNode(t, "orders", "join-node")
-	activation, err := newEngineTestJoinActivation(joinNode, "item.completed", spec, "", []string{"a", "b"}, now, now.Add(time.Hour))
+	route := runtimeflowidentity.StoredRoute(".", semanticExecutionFixtureRunID, semanticExecutionFixtureRunID)
+	entry := a2EngineJoinEntry(semanticExecutionFixtureRunID, "entity-1", "awaiting", route)
+	activation, err := newEngineTestJoinActivation(joinNode, "item.completed", spec, entry, []string{"a", "b"}, now, now.Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2173,12 +2172,11 @@ func TestExecutor_JoinUsesPersistedActivationAndMembershipOrder(t *testing.T) {
 	if err := joinruntime.Store(buckets, activation); err != nil {
 		t.Fatal(err)
 	}
-	handler := runtimecontracts.SystemNodeEventHandler{Join: &spec}
-	first, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID: "entity-1", Node: testFlowExecutableNode(t, "orders", "join-node"), HandlerEventKey: "item.completed", Handler: handler,
+	first, err := exec.ExecuteSemanticFixture(a2BoundJoinContext(t, activation), ExecutionRequest{
+		EntityID: "entity-1", Node: joinNode, HandlerEventKey: "item.completed", Handler: handler, Route: route,
 		JoinDeclaration: activation.JoinRef().Declaration(),
-		Event:           eventtest.RunCreatingRootIngress("evt-b", "item.completed", "", "", json.RawMessage(`{"member_id":"b","result":{"score":2}}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"), now),
-		State:           testStateSnapshot("awaiting", map[string]any{"expected": []any{"a", "b"}}, nil, buckets),
+		Event:           eventtest.RunCreatingRootIngress("evt-b", "item.completed", "", "", json.RawMessage(`{"member_id":"b","result":{"score":2}}`), 0, semanticExecutionFixtureRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"), now),
+		State:           a2JoinFixtureSnapshot(t, activation, map[string]any{"expected": []any{"a", "b"}}, buckets),
 	})
 	if err != nil {
 		t.Fatalf("first arrival: %v", err)
@@ -2186,28 +2184,35 @@ func TestExecutor_JoinUsesPersistedActivationAndMembershipOrder(t *testing.T) {
 	if first.Status != OutcomeWaiting {
 		t.Fatalf("first status = %s, want waiting", first.Status)
 	}
-	second, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID: "entity-1", Node: testFlowExecutableNode(t, "orders", "join-node"), HandlerEventKey: "item.completed", Handler: handler,
+	secondReq := ExecutionRequest{
+		EntityID: "entity-1", Node: joinNode, HandlerEventKey: "item.completed", Handler: handler, Route: route,
 		JoinDeclaration: activation.JoinRef().Declaration(),
-		Event:           eventtest.RunCreatingRootIngress("evt-a", "item.completed", "", "", json.RawMessage(`{"member_id":"a","result":{"score":1}}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"), now.Add(time.Second)),
-		State:           testStateSnapshot("awaiting", map[string]any{"expected": []any{"a", "b"}}, nil, first.StateMutation.StateCarrier.StateBuckets),
-	})
+		Event:           eventtest.RunCreatingRootIngress("evt-a", "item.completed", "", "", json.RawMessage(`{"member_id":"a","result":{"score":1}}`), 0, semanticExecutionFixtureRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"), now.Add(time.Second)),
+		State:           a2JoinFixtureSnapshot(t, activation, map[string]any{"expected": []any{"changed-after-arm"}}, first.StateMutation.StateCarrier.StateBuckets),
+	}
+	second, err := exec.ExecuteSemanticFixture(a2BoundJoinContext(t, activation), secondReq)
 	if err != nil {
 		t.Fatalf("second arrival: %v", err)
 	}
-	if second.StateMutation.NextState != "ready" {
-		t.Fatalf("next state = %q, want ready", second.StateMutation.NextState)
+	if second.Status != OutcomeWaiting || second.StateMutation.NextState != "" || len(second.EmitIntents) != 0 {
+		t.Fatalf("last arrival executed an inline outcome: %#v", second)
 	}
 	closed, ok, err := joinruntime.Load(second.StateMutation.StateCarrier.StateBuckets, joinNode, activation.Key())
 	if err != nil || !ok {
 		t.Fatalf("load closed activation = %#v, %v, %v", closed, ok, err)
 	}
-	if closed.Status != joinruntime.StatusClosed || closed.CloseReason != joinruntime.CloseReasonComplete {
+	if closed.Status != joinruntime.StatusClosed || closed.CloseReason != joinruntime.CloseReasonComplete || !closed.OutcomePending || closed.OutcomeFired {
 		t.Fatalf("closed activation = %#v", closed)
 	}
-	results := closed.Results()
-	if len(results) != 2 || results[0].(map[string]any)["score"] != float64(1) || results[1].(map[string]any)["score"] != float64(2) {
+	results, err := closed.Results()
+	encoded, marshalErr := json.Marshal(results)
+	if err != nil || marshalErr != nil || string(encoded) != `[{"score":1},{"score":2}]` {
 		t.Fatalf("results = %#v, want membership order a,b", results)
+	}
+	secondReq.State.StateCarrier.StateBuckets = second.StateMutation.StateCarrier.StateBuckets
+	completed, err := exec.ExecuteSemanticFixture(context.Background(), a2JoinContinuationRequest(t, secondReq, closed, now.Add(time.Second)))
+	if err != nil || completed.StateMutation.NextState != "ready" {
+		t.Fatalf("durable completion next state=%q error=%v", completed.StateMutation.NextState, err)
 	}
 }
 
@@ -2215,7 +2220,7 @@ func TestFanInBarrierExecutorConsumesEffectiveJoinPlan(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
 		repoRoot,
-		canonicalrouting.ExampleRoot(t, canonicalrouting.FanInBarrier),
+		a2CopyArrivalBarrier(t),
 		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
 	)
 	if err != nil {
@@ -2224,15 +2229,15 @@ func TestFanInBarrierExecutorConsumesEffectiveJoinPlan(t *testing.T) {
 	source := semanticview.Wrap(bundle)
 	portfolioNode := testFlowExecutableNode(t, "portfolio", "portfolio-collector")
 	plan, ok := semanticview.WorkflowJoinPlanForHandler(source, portfolioNode, "operating.reported")
-	if !ok || plan.Spec.Members.By != "payload.operating_id" || plan.Spec.Window == nil || plan.Spec.Window.By != "payload.period_id" {
+	if !ok || plan.Spec.Members.From != "state.expected_operating_ids" || plan.Spec.Members.By != "payload.operating_id" || plan.Spec.Deadline == nil || plan.Spec.Deadline.From != runtimecontracts.JoinDeadlineFromStageEntry {
 		t.Fatalf("effective barrier plan = %#v", plan)
 	}
 	rawHandler, ok := source.ExecutableNodeEventHandler(portfolioNode, "operating.reported")
 	if !ok || rawHandler.Join == nil {
 		t.Fatal("authored barrier handler is unavailable")
 	}
-	if rawHandler.Join.Members.By != "" || rawHandler.Join.Window == nil || rawHandler.Join.Window.By != "" {
-		t.Fatalf("authored handler contains derived identity: %#v", rawHandler.Join)
+	if rawHandler.Join.Members.By != plan.Spec.Members.By || rawHandler.Join.Members.From != plan.Spec.Members.From {
+		t.Fatalf("compiled plan borrowed identity instead of authored selectors: %#v", rawHandler.Join)
 	}
 
 	exec, err := NewExecutor(RuntimeDependencies{
@@ -2241,7 +2246,9 @@ func TestFanInBarrierExecutorConsumesEffectiveJoinPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
-	activation, err := newEngineTestJoinActivation(plan.Node, plan.HandlerEvent, plan.Spec, "2026-Q3", []string{"operating-a"}, now, now.Add(5*time.Minute))
+	route := runtimeflowidentity.DeriveRoute("portfolio", semanticExecutionFixtureRunID)
+	entry := a2EngineJoinEntry(semanticExecutionFixtureRunID, "portfolio/portfolio", "awaiting", route)
+	activation, err := newEngineTestJoinActivation(plan.Node, plan.HandlerEvent, plan.Spec, entry, []string{"operating-a"}, now, now.Add(5*time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2249,14 +2256,27 @@ func TestFanInBarrierExecutorConsumesEffectiveJoinPlan(t *testing.T) {
 	if err := joinruntime.Store(buckets, activation); err != nil {
 		t.Fatal(err)
 	}
-	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID: "portfolio/portfolio", Node: portfolioNode, HandlerEventKey: "operating.reported", Handler: rawHandler,
+	req := ExecutionRequest{
+		EntityID: "portfolio/portfolio", Node: portfolioNode, HandlerEventKey: "operating.reported", Handler: rawHandler, Route: route,
 		JoinDeclaration: activation.JoinRef().Declaration(),
-		Event:           eventtest.RunCreatingRootIngress("evt-operating-a", "operating.reported", "", "", json.RawMessage(`{"operating_id":"operating-a","period_id":"2026-Q3","revenue":42}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "portfolio/portfolio"), now),
-		State:           testStateSnapshot("awaiting", map[string]any{"expected_operating_ids": []any{"operating-a"}, "period_id": "2026-Q3"}, nil, buckets),
-	})
+		Event:           eventtest.RunCreatingRootIngress("evt-operating-a", "operating.reported", "", "", json.RawMessage(`{"operating_id":"operating-a","period_id":"2026-Q3","revenue":42}`), 0, semanticExecutionFixtureRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, "portfolio/portfolio"), now),
+		State:           a2JoinFixtureSnapshot(t, activation, map[string]any{"expected_operating_ids": []any{"operating-a"}, "period_id": "2026-Q3"}, buckets),
+	}
+	arrival, err := exec.ExecuteSemanticFixture(a2BoundJoinContext(t, activation), req)
 	if err != nil {
 		t.Fatalf("execute barrier arrival: %v", err)
+	}
+	if arrival.Status != OutcomeWaiting || arrival.StateMutation.NextState != "" {
+		t.Fatalf("arrival ran the outcome inline: %#v", arrival)
+	}
+	closed, ok, err := joinruntime.Load(arrival.StateMutation.StateCarrier.StateBuckets, portfolioNode, activation.Key())
+	if err != nil || !ok {
+		t.Fatalf("load pending closure: %v, %v", ok, err)
+	}
+	req.State.StateCarrier.StateBuckets = arrival.StateMutation.StateCarrier.StateBuckets
+	result, err := exec.ExecuteSemanticFixture(context.Background(), a2JoinContinuationRequest(t, req, closed, now.Add(time.Second)))
+	if err != nil {
+		t.Fatal(err)
 	}
 	if result.StateMutation.NextState != "complete" {
 		t.Fatalf("barrier next state = %q, want complete", result.StateMutation.NextState)
@@ -2269,11 +2289,11 @@ func TestFanInBarrierExecutorConsumesEffectiveJoinPlan(t *testing.T) {
 	}
 }
 
-func TestFanInBarrierExecutorRecordsAuthoredJoinTimeoutSelection(t *testing.T) {
+func TestFanInBarrierExecutorRecordsAuthoredJoinDeadlineSelection(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
 		repoRoot,
-		canonicalrouting.ExampleRoot(t, canonicalrouting.FanInBarrier),
+		a2CopyArrivalBarrier(t),
 		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
 	)
 	if err != nil {
@@ -2295,7 +2315,9 @@ func TestFanInBarrierExecutorRecordsAuthoredJoinTimeoutSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 8, 23, 15, 30, 0, 0, time.UTC)
-	activation, err := newEngineTestJoinActivation(node, "operating.reported", plan.Spec, "2026-Q3", []string{"operating-a"}, now, now.Add(5*time.Minute))
+	route := runtimeflowidentity.DeriveRoute("portfolio", semanticExecutionFixtureRunID)
+	entry := a2EngineJoinEntry(semanticExecutionFixtureRunID, "portfolio/portfolio", "awaiting", route)
+	activation, err := newEngineTestJoinActivation(node, "operating.reported", plan.Spec, entry, []string{"operating-a"}, now, now.Add(5*time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2308,13 +2330,13 @@ func TestFanInBarrierExecutorRecordsAuthoredJoinTimeoutSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID: "portfolio/portfolio", Node: node, HandlerEventKey: "operating.reported", Handler: handler,
+		EntityID: "portfolio/portfolio", Node: node, HandlerEventKey: "operating.reported", Handler: handler, Route: route,
 		JoinDeclaration: activation.JoinRef().Declaration(),
 		Event: eventtest.RunCreatingRootIngress(
 			"evt-join-timeout", events.EventType(activation.TimerEventType()), "runtime", activation.TimerTaskID(), payload, 0,
-			"", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "portfolio/portfolio"), now.Add(5*time.Minute),
+			semanticExecutionFixtureRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, "portfolio/portfolio"), now.Add(5*time.Minute),
 		),
-		State: testStateSnapshot("awaiting", map[string]any{"expected_operating_ids": []any{"operating-a"}, "period_id": "2026-Q3"}, nil, buckets),
+		State: a2JoinFixtureSnapshot(t, activation, map[string]any{"expected_operating_ids": []any{"operating-a"}, "period_id": "2026-Q3"}, buckets),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -2325,8 +2347,8 @@ func TestFanInBarrierExecutorRecordsAuthoredJoinTimeoutSelection(t *testing.T) {
 	if requireResolvedSelection(t, result.HandlerRuleSelection).Context() != handlerselection.ContextJoinTimeout || requireResolvedSelection(t, result.HandlerRuleSelection).Disposition() != handlerselection.DispositionSelected || !requireResolvedSelection(t, result.HandlerRuleSelection).Ref().Valid() {
 		t.Fatalf("join timeout selection = %#v", result.HandlerRuleSelection)
 	}
-	if got := requireResolvedSelection(t, result.HandlerRuleSelection).Ref().SemanticPath(); got != `nodes["portfolio-collector"].handlers["operating.reported"].join.timeout[0]` {
-		t.Fatalf("join timeout declaration path = %q", got)
+	if got := requireResolvedSelection(t, result.HandlerRuleSelection).Ref().SemanticPath(); got != `nodes["portfolio-collector"].handlers["operating.reported"].join.on_deadline[0]` {
+		t.Fatalf("join deadline declaration path = %q", got)
 	}
 }
 
@@ -2342,11 +2364,12 @@ func TestExecutor_JoinCompletionConsumesCatalogResultType(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			spec := runtimecontracts.JoinSpec{
 				ID: "line_items", Stage: "awaiting", Output: "payload.result", OutputPath: runtimepaths.Parse("payload.result"),
-				Members:      runtimecontracts.JoinMembersSpec{From: "entity.expected", FromPath: runtimepaths.Parse("entity.expected"), By: "payload.member_id", ByPath: runtimepaths.Parse("payload.member_id")},
-				CompleteWhen: tc.expression,
-				Remaining:    runtimecontracts.JoinRemainingIgnore,
-				OnComplete:   runtimecontracts.HandlerRuleEntry{AdvancesTo: "ready"}, OnCompleteFound: true,
-				Timeout: runtimecontracts.JoinTimeoutSpec{After: "1h", Outcome: runtimecontracts.HandlerRuleEntry{AdvancesTo: "attention"}}, TimeoutFound: true,
+				Members: runtimecontracts.JoinMembersSpec{From: "state.expected", By: "payload.member_id"},
+				OnComplete: runtimecontracts.HandlerRuleEntry{AdvancesTo: "ready", DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{
+					{TargetField: "checked", Value: runtimecontracts.CELExpression(tc.expression)},
+				}}}, OnCompleteFound: true,
+				Deadline:   &runtimecontracts.JoinDeadlineSpec{After: "1h", From: runtimecontracts.JoinDeadlineFromStageEntry},
+				OnDeadline: runtimecontracts.HandlerRuleEntry{AdvancesTo: "attention"}, OnDeadlineFound: true,
 			}
 			resultType := runtimecontracts.CatalogTypeReference{
 				Type: "JoinResult",
@@ -2354,24 +2377,20 @@ func TestExecutor_JoinCompletionConsumesCatalogResultType(t *testing.T) {
 					"JoinResult": {Fields: map[string]runtimecontracts.TypeFieldSpec{"score": {Type: "integer"}}},
 				}},
 			}
-			joinNode := testFlowExecutableNode(t, "orders", "join-node")
-			qualified, err := completeSemanticFixtureHandlerRuleIdentity(joinNode, "item.completed", runtimecontracts.SystemNodeEventHandler{Join: &spec})
-			if err != nil {
-				t.Fatal(err)
-			}
-			spec = *qualified.Join
-			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
-				FlowStates: map[string][]string{"orders": {"awaiting", "ready", "attention"}},
-				Name:       "orders",
-				Joins:      []runtimecontracts.WorkflowJoinPlan{{Mode: runtimecontracts.WorkflowJoinModeArrival, Node: joinNode, HandlerEvent: "item.completed", Spec: spec, ResultType: resultType}},
-			}})
+			joinNode := testRootExecutableNode(t, "join-node")
+			source, handler := a2TypedJoinFixtureSource(t, joinNode, "item.completed", spec, resultType, map[string]runtimecontracts.EntityFieldDecl{
+				"expected": {Type: "[text]"}, "checked": {Type: "boolean"},
+			})
+			spec = *handler.Join
 			exec, err := NewExecutor(RuntimeDependencies{
 				Source: source, StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
 			now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-			activation, err := newEngineTestJoinActivation(joinNode, "item.completed", spec, "", []string{"a"}, now, now.Add(time.Hour))
+			route := runtimeflowidentity.StoredRoute(".", semanticExecutionFixtureRunID, semanticExecutionFixtureRunID)
+			entry := a2EngineJoinEntry(semanticExecutionFixtureRunID, "entity-1", "awaiting", route)
+			activation, err := newEngineTestJoinActivation(joinNode, "item.completed", spec, entry, []string{"a"}, now, now.Add(time.Hour))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2379,12 +2398,22 @@ func TestExecutor_JoinCompletionConsumesCatalogResultType(t *testing.T) {
 			if err := joinruntime.Store(buckets, activation); err != nil {
 				t.Fatal(err)
 			}
-			result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-				EntityID: "entity-1", Node: testFlowExecutableNode(t, "orders", "join-node"), HandlerEventKey: "item.completed", Handler: runtimecontracts.SystemNodeEventHandler{Join: &spec},
+			req := ExecutionRequest{
+				EntityID: "entity-1", Node: joinNode, HandlerEventKey: "item.completed", Handler: handler, Route: route,
 				JoinDeclaration: activation.JoinRef().Declaration(),
-				Event:           eventtest.RunCreatingRootIngress("evt-a", "item.completed", "", "", json.RawMessage(`{"member_id":"a","result":{"score":1}}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"), now),
-				State:           testStateSnapshot("awaiting", map[string]any{"expected": []any{"a"}}, nil, buckets),
-			})
+				Event:           eventtest.RunCreatingRootIngress("evt-a", "item.completed", "", "", json.RawMessage(`{"member_id":"a","result":{"score":1}}`), 0, semanticExecutionFixtureRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"), now),
+				State:           a2JoinFixtureSnapshot(t, activation, map[string]any{"expected": []any{"a"}}, buckets),
+			}
+			arrival, err := exec.ExecuteSemanticFixture(a2BoundJoinContext(t, activation), req)
+			if err != nil || arrival.Status != OutcomeWaiting || arrival.StateMutation.NextState != "" || arrival.StateMutation.StateCarrier.Fields["checked"] != nil {
+				t.Fatalf("arrival evaluated the closed outcome: %#v, %v", arrival, err)
+			}
+			closed, ok, err := joinruntime.Load(arrival.StateMutation.StateCarrier.StateBuckets, joinNode, activation.Key())
+			if err != nil || !ok {
+				t.Fatalf("load closure: %v %v", ok, err)
+			}
+			req.State.StateCarrier.StateBuckets = arrival.StateMutation.StateCarrier.StateBuckets
+			result, err := exec.ExecuteSemanticFixture(context.Background(), a2JoinContinuationRequest(t, req, closed, now.Add(time.Second)))
 			if tc.wantErr {
 				if err == nil || !strings.Contains(err.Error(), "no matching overload") {
 					t.Fatalf("Execute error = %v, want catalog-backed typed rejection", err)
@@ -2397,28 +2426,35 @@ func TestExecutor_JoinCompletionConsumesCatalogResultType(t *testing.T) {
 			if result.StateMutation.NextState != "ready" {
 				t.Fatalf("next state = %q, want ready", result.StateMutation.NextState)
 			}
+			if result.StateMutation.StateCarrier.Fields["checked"] != true {
+				t.Fatalf("typed outcome did not evaluate named field: %#v", result.StateMutation.StateCarrier.Fields)
+			}
 		})
 	}
 }
 
-func newEngineTestJoinActivation(node identity.ExecutableNode, handlerEvent string, spec runtimecontracts.JoinSpec, window string, members []string, armedAt, fireAt time.Time) (joinruntime.Activation, error) {
-	ref, err := timeridentity.NewJoinRef(node, handlerEvent, spec.Stage, spec.EffectiveID(), window)
+func newEngineTestJoinActivation(node identity.ExecutableNode, handlerEvent string, spec runtimecontracts.JoinSpec, entry timeridentity.StageEntryRef, members []string, armedAt, fireAt time.Time) (joinruntime.Activation, error) {
+	ref, err := timeridentity.NewJoinRef(node, handlerEvent, spec.Stage, spec.EffectiveID())
 	if err != nil {
 		return joinruntime.Activation{}, err
 	}
-	handle, err := timeridentity.JoinTimeoutHandle(ref)
+	ref, err = ref.BindStageEntry(entry, attemptgeneration.Generation{})
 	if err != nil {
 		return joinruntime.Activation{}, err
 	}
-	return joinruntime.NewActivation(handle, members, armedAt, fireAt)
+	return joinruntime.NewActivation(ref, members, spec.Members.Count, armedAt, fireAt)
 }
 
 func TestExecutor_ComputeReadsAccumulatorByMatchedHandlerEventKey(t *testing.T) {
 	state := testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{})
 	lifecycleNode := testFlowExecutableNode(t, "operating", "lifecycle-orchestrator")
-	storeAccumulator(&state, lifecycleNode, "component.scaffolded", &Accumulator{
-		Items: []map[string]any{{"component_id": "a"}, {"component_id": "b"}},
-	})
+	accumulator := &Accumulator{}
+	for _, key := range []string{"a", "b"} {
+		if _, err := accumulator.Admit(&runtimecontracts.AccumulateSpec{Key: "payload.component_id"}, map[string]any{"component_id": key}, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	storeAccumulator(&state, lifecycleNode, "component.scaffolded", accumulator)
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{Name: "operating"},
 		RootEntities: runtimecontracts.EntityContractsDocument{
@@ -3596,10 +3632,11 @@ func TestExecutor_ListPrimitivesMutateState(t *testing.T) {
 		}, nil, map[string]map[string]any{}),
 	}
 	node := testRootExecutableNode(t, "node-1")
-	storeAccumulator(&initial, node, "items.submitted", &Accumulator{
-		Received: map[string]bool{"seed": true},
-		Items:    []map[string]any{{"seed": true}},
-	})
+	seedAccumulator := &Accumulator{}
+	if _, err := seedAccumulator.Admit(nil, map[string]any{"seed": true}, "seed"); err != nil {
+		t.Fatal(err)
+	}
+	storeAccumulator(&initial, node, "items.submitted", seedAccumulator)
 	repo.snapshot = &initial
 
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{

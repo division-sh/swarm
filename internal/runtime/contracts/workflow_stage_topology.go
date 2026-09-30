@@ -212,7 +212,7 @@ func BuildWorkflowStageTopology(
 					if transition.Loop == nil {
 						from = []string{strings.TrimSpace(transition.Join.Stage)}
 					}
-				case HandlerAdvanceCarrierJoinTimeout:
+				case HandlerAdvanceCarrierJoinOnDeadline:
 					if transition.Loop == nil {
 						from = []string{strings.TrimSpace(transition.Join.Stage)}
 					}
@@ -452,15 +452,15 @@ func topologyReachable(start string, edges []WorkflowStageTopologyEdge, reverse 
 }
 
 func joinTimerID(transition HandlerTransitionSemantic, carrier HandlerAdvanceCarrier) string {
-	if transition.Join != nil && carrier.Kind == HandlerAdvanceCarrierJoinTimeout {
+	if transition.Join != nil && carrier.Kind == HandlerAdvanceCarrierJoinOnDeadline {
 		return strings.TrimSpace(transition.Join.EffectiveID())
 	}
 	return ""
 }
 
 func joinTimerDelay(transition HandlerTransitionSemantic, carrier HandlerAdvanceCarrier) string {
-	if transition.Join != nil && carrier.Kind == HandlerAdvanceCarrierJoinTimeout {
-		return strings.TrimSpace(transition.Join.Timeout.After)
+	if transition.Join != nil && transition.Join.Deadline != nil && carrier.Kind == HandlerAdvanceCarrierJoinOnDeadline {
+		return strings.TrimSpace(transition.Join.Deadline.After)
 	}
 	return ""
 }

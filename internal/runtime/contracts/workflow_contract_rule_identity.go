@@ -70,8 +70,8 @@ func QualifySystemNodeHandlerRuleRefsForEvent(node runtimeidentity.ExecutableNod
 				return SystemNodeEventHandler{}, err
 			}
 		}
-		if join.TimeoutFound {
-			join.Timeout.Outcome, err = qualify("join.timeout", 0, join.Timeout.Outcome)
+		if join.OnDeadlineFound {
+			join.OnDeadline, err = qualify("join.on_deadline", 0, join.OnDeadline)
 			if err != nil {
 				return SystemNodeEventHandler{}, err
 			}
@@ -104,8 +104,8 @@ func HandlerRuleEntries(handler SystemNodeEventHandler) []HandlerRuleEntry {
 		if handler.Join.OnCompleteFound {
 			out = append(out, handler.Join.OnComplete)
 		}
-		if handler.Join.TimeoutFound {
-			out = append(out, handler.Join.Timeout.Outcome)
+		if handler.Join.OnDeadlineFound {
+			out = append(out, handler.Join.OnDeadline)
 		}
 	}
 	return out

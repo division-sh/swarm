@@ -10,13 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-var ReservedAccumulatorMetadata = map[string]struct{}{
-	"event_id":    {},
-	"event_type":  {},
-	"source":      {},
-	"received_at": {},
-}
-
 type Binding struct {
 	FlowID          string
 	EntityType      string
@@ -428,10 +421,6 @@ func validateProject(source semanticview.Source, target materializedFieldTarget,
 		expr = strings.TrimSpace(expr)
 		if sourceField, ok := strings.CutPrefix(expr, "source."); ok {
 			sourceField = strings.TrimSpace(sourceField)
-			if _, reserved := ReservedAccumulatorMetadata[sourceField]; reserved {
-				issues = append(issues, scopedIssue(binding, "project_metadata_reference", loc, fmt.Sprintf("project.%s references %q; reserved accumulator metadata is not addressable through source.*", fieldName, expr)))
-				continue
-			}
 			sourceSpec, ok := binding.SourceType.Field(sourceField)
 			if !ok {
 				issues = append(issues, scopedIssue(binding, "project_unknown_source_field", loc, fmt.Sprintf("project.%s references %q; %s is not a field of item type %s", fieldName, expr, sourceField, binding.SourceItemType)))

@@ -62,13 +62,14 @@ var systemNodeEventHandlerExecutableReaderCensus = map[string]handlerExecutableR
 	"Accumulate": func(out *[]expressionReference, _ executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
 		if handler.Accumulate != nil {
 			appendExecutableReader(out, "accumulate.from", handler.Accumulate.From, runtimepipeline.WorkflowEntityFieldLifecycleAccumulate)
-			appendExecutableReader(out, "accumulate.window", handler.Accumulate.Window, runtimepipeline.WorkflowEntityFieldLifecycleAccumulate)
-			appendExecutableReader(out, "accumulate.dedup_by", handler.Accumulate.DedupBy, runtimepipeline.WorkflowEntityFieldLifecycleAccumulate)
+			appendExecutableReader(out, "accumulate.key", handler.Accumulate.Key, runtimepipeline.WorkflowEntityFieldLifecycleAccumulate)
 		}
 	},
 	"Join": func(out *[]expressionReference, ctx executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
 		appendJoinExecutableReaders(out, ctx, handler.Join)
 	},
+	// Closure transport executes compiler-owned plans, not arrival readers.
+	"JoinUntilPlans": noHandlerExecutableReaders,
 	"Compute": func(out *[]expressionReference, _ executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
 		appendComputeExecutableReaders(out, "compute", handler.Compute, runtimepipeline.WorkflowEntityFieldLifecycleCompute)
 	},
@@ -147,6 +148,8 @@ func handlerExecutableReaderExpressionsForSource(source semanticview.Source, nod
 				out[i].JoinResultType = plan.ResultType
 				if plan.Mode == runtimecontracts.WorkflowJoinModeFanOutDelivery {
 					out[i].JoinContext = workflowexpr.JoinContextFanOutDelivery
+				} else if plan.Spec.Members.Count != nil {
+					out[i].JoinContext = workflowexpr.JoinContextCountArrival
 				}
 			}
 		}
@@ -356,27 +359,20 @@ func appendJoinExecutableReaders(out *[]expressionReference, ctx executableReade
 	}
 	phase := runtimepipeline.WorkflowEntityFieldLifecycleRule
 	beforeMembers := len(*out)
-	appendExecutableReader(out, "join.members.from", join.Members.From, phase)
+	membersFrom := join.Members.From
+	if field := joinPathField(membersFrom, "state"); field != "" {
+		membersFrom = "entity." + field
+	}
+	appendExecutableReader(out, "join.members.from", membersFrom, phase)
 	for i := beforeMembers; i < len(*out); i++ {
 		(*out)[i].CommittedStage = join.Stage
 	}
 	appendExecutableReader(out, "join.members.by", join.Members.By, phase)
-	beforeCompletion := len(*out)
-	appendExecutableReader(out, "join.complete_when", join.CompleteWhen, phase)
-	for i := beforeCompletion; i < len(*out); i++ {
-		(*out)[i].AllowJoin = true
-	}
-	if join.Window != nil {
-		beforeWindow := len(*out)
-		appendExecutableReader(out, "join.window.from", join.Window.From, phase)
-		for i := beforeWindow; i < len(*out); i++ {
-			(*out)[i].CommittedStage = join.Stage
-		}
-		appendExecutableReader(out, "join.window.by", join.Window.By, phase)
-	}
 	before := len(*out)
 	appendRulesExecutableReaders(out, ctx, "join.on_complete", []runtimecontracts.HandlerRuleEntry{join.OnComplete})
-	appendRulesExecutableReaders(out, ctx, "join.timeout", []runtimecontracts.HandlerRuleEntry{join.Timeout.Outcome})
+	if join.Deadline != nil {
+		appendRulesExecutableReaders(out, ctx, "join.on_deadline", []runtimecontracts.HandlerRuleEntry{join.OnDeadline})
+	}
 	for index := before; index < len(*out); index++ {
 		(*out)[index].AllowJoin = true
 	}

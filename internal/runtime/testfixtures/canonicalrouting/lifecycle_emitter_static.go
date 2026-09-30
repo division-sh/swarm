@@ -330,7 +330,7 @@ func CopyLifecycleEmitterExistingLifecycleFamilies(t testing.TB) string {
 	root := CopyServedJoinProof(t)
 	nodes := lifecycleStaticRead(t, root, "nodes.yaml")
 	nodes = strings.Replace(nodes, "on_complete: {advances_to: ready}", "on_complete: {advances_to: ready, emit: join.completed}", 1)
-	nodes = strings.Replace(nodes, "timeout: {after: 1h, advances_to: attention}", "timeout: {after: 1h, advances_to: attention, emit: join.expired}", 1)
+	nodes = strings.Replace(nodes, "on_deadline: {advances_to: attention}", "on_deadline: {advances_to: attention, emit: join.expired}", 1)
 	writeClosedVariantFile(t, root, "nodes.yaml", nodes)
 	events := lifecycleStaticRead(t, root, "events.yaml") + "join.completed:\njoin.expired:\ncreated:\nreminder:\nexpired:\n"
 	writeClosedVariantFile(t, root, "events.yaml", events)

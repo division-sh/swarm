@@ -60,12 +60,11 @@ func TestSelectedContractDeferredWorkAdmissionCapabilityMatrix(t *testing.T) {
 			capability: selectedContractDeferredWorkWorkflowTimer,
 		},
 		{
-			name: "workflow join timeout",
+			name: "workflow join deadline retains timeout capability",
 			plan: basePlan,
 			source: selectedDeferredWorkTestSource(nil, []runtimecontracts.WorkflowJoinPlan{{
 				Spec: runtimecontracts.JoinSpec{
-					TimeoutFound: true,
-					Timeout:      runtimecontracts.JoinTimeoutSpec{After: "1h"},
+					Deadline: &runtimecontracts.JoinDeadlineSpec{After: "1h", From: runtimecontracts.JoinDeadlineFromStageEntry},
 				},
 			}}),
 			wantCode:   selectedContractDeferredWorkOwnerUnavailable,
@@ -236,8 +235,7 @@ func TestSelectedContractDeferredWorkAdmissionRejectsSourceDrift(t *testing.T) {
 	}
 	drifted := selectedDeferredWorkTestSource(nil, []runtimecontracts.WorkflowJoinPlan{{
 		Spec: runtimecontracts.JoinSpec{
-			TimeoutFound: true,
-			Timeout:      runtimecontracts.JoinTimeoutSpec{After: "1h"},
+			Deadline: &runtimecontracts.JoinDeadlineSpec{After: "1h", From: runtimecontracts.JoinDeadlineFromStageEntry},
 		},
 	}})
 	if err := admission.validate(plan.SourceRunID, plan.ForkPoint, drifted); err == nil ||

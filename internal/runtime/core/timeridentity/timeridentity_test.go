@@ -102,8 +102,8 @@ func TestTimerHandlePayloadRoundTrip(t *testing.T) {
 	}
 }
 
-func TestAccumulatorBucketRefRetainsStreamWindowAndGenerationIdentity(t *testing.T) {
-	bucket := NewAccumulatorWindowBucketRef(identitytest.RootNode(t, "collector"), "item.arrived", "2026-Q1:closed")
+func TestAccumulatorBucketRefRetainsStreamIdentity(t *testing.T) {
+	bucket := NewAccumulatorBucketRef(identitytest.RootNode(t, "collector"), "item.arrived")
 	parsedBucket, ok := ParseAccumulatorBucketKey(bucket.Key())
 	if !ok {
 		t.Fatalf("ParseAccumulatorBucketKey(%q) failed", bucket.Key())
@@ -117,7 +117,7 @@ func TestParseAccumulatorBucketKey(t *testing.T) {
 	if _, ok := ParseAccumulatorBucketKey("collector:item.arrived"); ok {
 		t.Fatal("legacy local-node accumulator bucket key was accepted")
 	}
-	bucket := NewAccumulatorWindowBucketRef(identitytest.RootNode(t, "collector"), "item.arrived", "")
+	bucket := NewAccumulatorBucketRef(identitytest.RootNode(t, "collector"), "item.arrived")
 	parsed, ok := ParseAccumulatorBucketKey(bucket.Key())
 	if !ok || !parsed.Node.Equal(bucket.Node) || parsed.EventType != "item.arrived" {
 		t.Fatalf("parsed bucket = %#v ok=%v", parsed, ok)
@@ -140,7 +140,7 @@ func TestJoinHandleRoundTripIncludesOwningFlowAndStageIdentity(t *testing.T) {
 	}
 	parsed, ok := ParseTimerHandle(awaiting.PayloadMetadata())
 	ref, refOK := parsed.JoinRef()
-	if !ok || !refOK || !ref.Node().Equal(identitytest.FlowNode(t, "orders", "join-node")) || ref.Stage() != "awaiting" || ref.JoinID() != "shared" || ref.Window() != "window-1" {
+	if !ok || !refOK || !ref.Node().Equal(identitytest.FlowNode(t, "orders", "join-node")) || ref.Stage() != "awaiting" || ref.JoinID() != "shared" || ref.StageEntry().OccurrenceID != "window-1" {
 		t.Fatalf("parsed join handle = %#v, %v", parsed, ok)
 	}
 }
@@ -291,7 +291,7 @@ func cloneTimerPayload(t *testing.T, payload map[string]any) map[string]any {
 	return cloned
 }
 
-func mustJoinHandle(t *testing.T, kind TimerHandleKind, flowID, nodeID, handlerEvent, stage, joinID, window string, generation attemptgeneration.Generation) TimerHandle {
+func mustJoinHandle(t *testing.T, kind TimerHandleKind, flowID, nodeID, handlerEvent, stage, joinID, occurrence string, generation attemptgeneration.Generation) TimerHandle {
 	t.Helper()
 	flowPath := flowID
 	if flowPath == "" {
@@ -301,12 +301,20 @@ func mustJoinHandle(t *testing.T, kind TimerHandleKind, flowID, nodeID, handlerE
 	if err != nil {
 		t.Fatal(err)
 	}
-	return mustJoinHandleForNode(t, kind, node, handlerEvent, stage, joinID, window, generation)
+	return mustJoinHandleForNode(t, kind, node, handlerEvent, stage, joinID, occurrence, generation)
 }
 
-func mustJoinHandleForNode(t *testing.T, kind TimerHandleKind, node runtimeidentity.ExecutableNode, handlerEvent, stage, joinID, window string, generation attemptgeneration.Generation) TimerHandle {
+func mustJoinHandleForNode(t *testing.T, kind TimerHandleKind, node runtimeidentity.ExecutableNode, handlerEvent, stage, joinID, occurrence string, generation attemptgeneration.Generation) TimerHandle {
 	t.Helper()
-	ref, err := NewJoinRefForGeneration(node, handlerEvent, stage, joinID, window, generation)
+	ref, err := NewJoinRef(node, handlerEvent, stage, joinID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := StageEntryRef{RunID: "run", FlowScope: node.FlowPath(), InstanceID: "one", InstancePath: "instance/one", EntityID: "entity", Stage: stage, Cause: "construction"}
+	if occurrence != "" {
+		entry.Cause, entry.EventID, entry.OccurrenceID, entry.TransitionID = "delivery", "event", occurrence, "transition"
+	}
+	ref, err = ref.BindStageEntry(entry, generation)
 	if err != nil {
 		t.Fatal(err)
 	}

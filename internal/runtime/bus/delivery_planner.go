@@ -361,6 +361,9 @@ func (p deliveryPlanner) planAtGeneration(ctx context.Context, evt events.Event)
 			}
 			return projection.resolveRoutePlan(routePlan)
 		}
+		if routePlan.ReplyContextConsumed {
+			return projection.resolveRoutePlan(routePlan)
+		}
 		localPlan, err := p.planIndependentPubsubBranch(ctx, evt, true)
 		if err != nil {
 			return RoutePlan{}, err

@@ -23,7 +23,7 @@ func projectionState(t *testing.T) (map[string]any, loopruntime.Activation, time
 	if err != nil {
 		t.Fatal(err)
 	}
-	bucket := timeridentity.NewAccumulatorBucketRefForGeneration(node, "review.result", "window", a.Generation())
+	bucket := timeridentity.NewAccumulatorBucketRefForGeneration(node, "review.result", a.Generation())
 	buckets := map[string]map[string]any{}
 	if err := loopruntime.Store(buckets, a); err != nil {
 		t.Fatal(err)
@@ -153,7 +153,6 @@ func TestForkGenerationAccumulatorBusinessSuffixIsNotLineage(t *testing.T) {
 	acc := raw[bucket.Node.Key()].(map[string]any)["handler_accumulators"].(map[string]any)
 	delete(acc, bucket.Key())
 	bucket.EventType = "business-" + a.Generation().KeySuffix()
-	bucket.Window = "window-" + a.Generation().KeySuffix()
 	bucket.Generation = attemptgeneration.Generation{}
 	acc[bucket.Key()] = map[string]any{"value": "unchanged"}
 	want := projectionJSON(t, acc)

@@ -376,11 +376,11 @@ worker:
     arrived:
       join:
         stage: awaiting
-        members: {from: entity.expected, by: payload.member}
-        window: {from: entity.window, by: payload.window}
+        members: {from: state.expected, by: payload.member}
         output: payload.result
         on_complete: {advances_to: done}
-        timeout: {after: 3h, advances_to: done}
+        deadline: {after: 3h, from: stage_entry}
+        on_deadline: {advances_to: done}
 `)
 	}
 	repo := repoRootForBootverifyTest(t)
@@ -410,7 +410,7 @@ worker:
 				}
 				ruleRefs[edge.RuleRef.Key()] = true
 			}
-			if edge.AdvanceCarrier == runtimecontracts.HandlerAdvanceCarrierJoinTimeout {
+			if edge.AdvanceCarrier == runtimecontracts.HandlerAdvanceCarrierJoinOnDeadline {
 				if edge.HandlerEvent != "arrived" || edge.EventType != "platform.join_timeout" || edge.From != "awaiting" {
 					t.Fatalf("join lost handler versus protocol event/source distinction: %#v", edge)
 				}
@@ -418,7 +418,7 @@ worker:
 		}
 		want := map[string]int{
 			"handler.advances_to": 6, "handler.rules": 6, "handler.on_complete": 3,
-			"handler.join.on_complete": 1, "handler.join.timeout": 1, "timer": 1,
+			"handler.join.on_complete": 1, "handler.join.on_deadline": 1, "timer": 1,
 		}
 		if !reflect.DeepEqual(counts, want) || len(ruleRefs) != 2 {
 			t.Fatalf("flow %s carrier inventory = %#v, rules=%v; want %#v and two distinct rule refs", flow, counts, ruleRefs, want)

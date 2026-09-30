@@ -315,7 +315,7 @@ func TestCompiledLifecycleEmitterExistingFamilies(t *testing.T) {
 		}},
 		{"timers_join_auto_emit", func(t *testing.T) string { return canonicalrouting.CopyLifecycleEmitterExistingLifecycleFamilies(t) }, []string{
 			".|node_handler|join-node|handler.join.on_complete.emit|join.completed",
-			".|node_handler|join-node|handler.join.timeout.emit|join.expired",
+			".|node_handler|join-node|handler.join.on_deadline.emit|join.expired",
 			".|timer|||reminder",
 			".|timer|||expired",
 			".|platform|||platform.stage_timer",

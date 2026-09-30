@@ -41,14 +41,11 @@ candidate-collector:
       join:
         stage: collecting
         members:
-          from: entity.candidate_ids
+          from: state.candidate_ids
           by: payload.candidate_id
-        window:
-          from: entity.batch_id
-          by: payload.batch_id
         output: payload.summary
         on_complete:
           advances_to: complete
-        timeout:
-          after: 2m
+        deadline: {after: 2m, from: stage_entry}
+        on_deadline:
           advances_to: failed

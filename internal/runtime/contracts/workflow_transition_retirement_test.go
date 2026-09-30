@@ -18,7 +18,7 @@ func TestCompiledTransitionRetiredOwnershipRejectsPresence(t *testing.T) {
 }
 
 func TestCompiledTransitionJoinOutcomeActionsRemainUnsupported(t *testing.T) {
-	for _, outcome := range []string{"on_complete: {action: {id: noop}}", "timeout: {after: 1h, action: {id: noop}}"} {
+	for _, outcome := range []string{"on_complete: {action: {id: noop}}", "on_deadline: {action: {id: noop}}"} {
 		t.Run(outcome, func(t *testing.T) {
 			var handler SystemNodeEventHandler
 			err := decodeNodeTestYAML([]byte("join: {stage: waiting, members: {from: entity.ids, by: payload.id}, output: payload.result, "+outcome+"}"), &handler)

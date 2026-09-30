@@ -8,36 +8,33 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 )
 
-const (
-	JoinRemainingIgnore = "ignore"
-)
+const JoinDeadlineFromStageEntry = "stage_entry"
 
 var joinIDPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]*$`)
 
 type JoinSpec struct {
-	ID              string           `yaml:"id"`
-	Stage           string           `yaml:"stage"`
-	Members         JoinMembersSpec  `yaml:"members"`
-	Window          *JoinWindowSpec  `yaml:"window"`
-	Output          string           `yaml:"output"`
-	OutputPath      paths.Path       `yaml:"-"`
-	CompleteWhen    string           `yaml:"complete_when"`
-	Remaining       string           `yaml:"remaining"`
-	OnComplete      HandlerRuleEntry `yaml:"-"`
-	Timeout         JoinTimeoutSpec  `yaml:"-"`
-	OnCompleteFound bool             `yaml:"-"`
-	TimeoutFound    bool             `yaml:"-"`
+	ID              string            `yaml:"id"`
+	Stage           string            `yaml:"stage"`
+	Members         JoinMembersSpec   `yaml:"members"`
+	Output          string            `yaml:"output"`
+	OutputPath      paths.Path        `yaml:"-"`
+	OnComplete      HandlerRuleEntry  `yaml:"-"`
+	Deadline        *JoinDeadlineSpec `yaml:"deadline"`
+	OnDeadline      HandlerRuleEntry  `yaml:"-"`
+	Until           string            `yaml:"until"`
+	OnCompleteFound bool              `yaml:"-"`
+	OnDeadlineFound bool              `yaml:"-"`
 	stageFound      bool
-	windowFound     bool
 	outputFound     bool
-	completeFound   bool
-	remainingFound  bool
-	timeoutFound    bool
+	deadlineFound   bool
+	onDeadlineFound bool
+	untilFound      bool
 }
 
 type JoinMembersSpec struct {
 	From            string     `yaml:"from"`
 	FromPath        paths.Path `yaml:"-"`
+	Count           *int       `yaml:"count"`
 	By              string     `yaml:"by"`
 	ByPath          paths.Path `yaml:"-"`
 	FromFanOut      bool       `yaml:"from_fan_out"`
@@ -54,57 +51,38 @@ const (
 	WorkflowJoinModeFanOutDelivery
 )
 
-type JoinWindowSpec struct {
-	From     string     `yaml:"from"`
-	FromPath paths.Path `yaml:"-"`
-	By       string     `yaml:"by"`
-	ByPath   paths.Path `yaml:"-"`
-	BySet    bool       `yaml:"-" json:"-"`
-}
-
-type JoinTimeoutSpec struct {
-	After   string           `yaml:"after"`
-	Outcome HandlerRuleEntry `yaml:"-"`
+type JoinDeadlineSpec struct {
+	After string `yaml:"after"`
+	From  string `yaml:"from"`
 }
 
 var joinFieldOptions = map[string]struct{}{
-	"id":            {},
-	"stage":         {},
-	"members":       {},
-	"window":        {},
-	"output":        {},
-	"complete_when": {},
-	"remaining":     {},
-	"on_complete":   {},
-	"timeout":       {},
+	"id":          {},
+	"stage":       {},
+	"members":     {},
+	"output":      {},
+	"on_complete": {},
+	"deadline":    {},
+	"on_deadline": {},
+	"until":       {},
 }
 
 var joinMembersFieldOptions = map[string]struct{}{
 	"from":         {},
+	"count":        {},
 	"by":           {},
 	"from_fan_out": {},
 }
 
-var joinWindowFieldOptions = map[string]struct{}{
-	"from": {},
-	"by":   {},
-}
-
-var joinTimeoutFieldOptions = map[string]struct{}{
-	"after":             {},
-	"data_accumulation": {},
-	"emit":              {},
-	"advances_to":       {},
+var joinDeadlineFieldOptions = map[string]struct{}{
+	"after": {},
+	"from":  {},
 }
 
 var joinOutcomeFieldOptions = map[string]struct{}{
 	"data_accumulation": {},
 	"emit":              {},
 	"advances_to":       {},
-}
-
-func (s JoinSpec) HasCustomCompletion() bool {
-	return strings.TrimSpace(s.CompleteWhen) != ""
 }
 
 func (s JoinSpec) EffectiveID() string {
@@ -114,15 +92,11 @@ func (s JoinSpec) EffectiveID() string {
 	return strings.TrimSpace(s.Stage)
 }
 
-func (s JoinSpec) TimeoutOutcome() HandlerRuleEntry {
-	return s.Timeout.Outcome
-}
-
 func (s JoinSpec) Mode() WorkflowJoinMode {
 	if s.Members.FromFanOut || s.Members.fromFanOutFound {
 		return WorkflowJoinModeFanOutDelivery
 	}
-	if strings.TrimSpace(s.Stage) != "" || strings.TrimSpace(s.Members.From) != "" || strings.TrimSpace(s.Members.By) != "" {
+	if strings.TrimSpace(s.Stage) != "" || strings.TrimSpace(s.Members.From) != "" || s.Members.Count != nil || strings.TrimSpace(s.Members.By) != "" {
 		return WorkflowJoinModeArrival
 	}
 	return WorkflowJoinModeInvalid
@@ -133,10 +107,52 @@ func (s JoinSpec) IsFanOutDeliveryBarrier() bool {
 }
 
 func (s JoinSpec) ValidateAuthoredShape() error {
+	if id := s.EffectiveID(); id == "" || !joinIDPattern.MatchString(id) {
+		return fmt.Errorf("join.id must be a simple stable identifier (defaults to stage for arrival joins)")
+	}
 	if s.Mode() != WorkflowJoinModeFanOutDelivery {
+		if strings.TrimSpace(s.Stage) == "" || strings.TrimSpace(s.Output) == "" {
+			return fmt.Errorf("arrival join requires stage and output")
+		}
+		if !s.OnCompleteFound || joinOutcomeEmpty(s.OnComplete) {
+			return fmt.Errorf("arrival join requires non-empty on_complete")
+		}
+		if (strings.TrimSpace(s.Members.From) != "") == (s.Members.Count != nil) {
+			return fmt.Errorf("arrival join requires exactly one of members.from or members.count")
+		}
+		if s.Members.Count != nil && s.Members.fromFound {
+			return fmt.Errorf("members.count forbids members.from, including empty values")
+		}
+		if strings.TrimSpace(s.Members.By) == "" {
+			return fmt.Errorf("arrival join requires members.by")
+		}
+		if s.Members.Count != nil {
+			if *s.Members.Count < 0 || *s.Members.Count > DefaultFanOutMaxItems {
+				return fmt.Errorf("join.members.count must be a nonnegative integer literal at most %d", DefaultFanOutMaxItems)
+			}
+			if s.Deadline == nil && strings.TrimSpace(s.Until) == "" {
+				return fmt.Errorf("count join requires deadline or until, including count zero")
+			}
+		}
+		if s.Deadline != nil {
+			if strings.TrimSpace(s.Deadline.After) == "" || s.Deadline.From != JoinDeadlineFromStageEntry {
+				return fmt.Errorf("join.deadline requires after and from: stage_entry")
+			}
+			if !s.OnDeadlineFound || joinOutcomeEmpty(s.OnDeadline) {
+				return fmt.Errorf("join.deadline requires non-empty on_deadline")
+			}
+		} else if s.deadlineFound || s.onDeadlineFound || s.OnDeadlineFound || !joinOutcomeEmpty(s.OnDeadline) {
+			return fmt.Errorf("on_deadline is required if and only if deadline is declared")
+		}
+		if s.untilFound && strings.TrimSpace(s.Until) == "" {
+			return fmt.Errorf("join.until requires a non-empty event")
+		}
+		if strings.ContainsAny(s.Until, "*?") {
+			return fmt.Errorf("join.until requires one exact event, not a pattern")
+		}
 		return nil
 	}
-	if !s.Members.fromFanOutFound || !s.Members.FromFanOut {
+	if !s.Members.FromFanOut {
 		return fmt.Errorf("fan-out delivery join requires join.members.from_fan_out: true")
 	}
 	if strings.TrimSpace(s.ID) == "" {
@@ -154,11 +170,11 @@ func (s JoinSpec) ValidateAuthoredShape() error {
 	add("stage", s.stageFound || strings.TrimSpace(s.Stage) != "")
 	add("members.from", s.Members.fromFound || strings.TrimSpace(s.Members.From) != "")
 	add("members.by", s.Members.BySet || strings.TrimSpace(s.Members.By) != "")
-	add("window", s.windowFound || s.Window != nil)
+	add("members.count", s.Members.Count != nil)
 	add("output", s.outputFound || strings.TrimSpace(s.Output) != "")
-	add("complete_when", s.completeFound || strings.TrimSpace(s.CompleteWhen) != "")
-	add("remaining", s.remainingFound || strings.TrimSpace(s.Remaining) != "")
-	add("timeout", s.timeoutFound || s.TimeoutFound)
+	add("deadline", s.deadlineFound || s.Deadline != nil)
+	add("on_deadline", s.onDeadlineFound || s.OnDeadlineFound || !joinOutcomeEmpty(s.OnDeadline))
+	add("until", s.untilFound || s.Until != "")
 	if len(forbidden) != 0 {
 		return fmt.Errorf("fan-out delivery join forbids arrival-only fields %s", strings.Join(forbidden, ", "))
 	}

@@ -150,9 +150,12 @@ func capturedLoopOwnershipViolations(t *testing.T, overlay map[string][]byte) []
 	budget := map[string]int{
 		// These checks suppress stale work or prevent state mutation. They do
 		// not elect an expression context from a replacement generation.
-		"runtime/engine::Executor.advanceAdmittedLoop -> runtime/loopruntime::GenerationCurrent":             1,
-		"runtime/engine::Executor.stepFanOutDeliveryJoin -> runtime/loopruntime::GenerationCurrent":          1,
-		"runtime/engine::Executor.stepJoin -> runtime/loopruntime::GenerationCurrent":                        1,
+		"runtime/engine::Executor.advanceAdmittedLoop -> runtime/loopruntime::GenerationCurrent":    1,
+		"runtime/engine::Executor.stepFanOutDeliveryJoin -> runtime/loopruntime::GenerationCurrent": 1,
+		"runtime/engine::Executor.stepJoin -> runtime/loopruntime::GenerationCurrent":               1,
+		// Arrival and until share the retained-entry check; it fences execution,
+		// never selects a replacement activation or expression context.
+		"runtime/engine::currentJoinEntry -> runtime/loopruntime::GenerationCurrent":                         1,
 		"runtime/pipeline::workflowLoopGenerationCurrentInBuckets -> runtime/loopruntime::GenerationCurrent": 1,
 		"runtime/engine::ExecutionState.LoopBucket -> ExecutionState.Loop":                                   1,
 		"runtime/engine::ExecutionState.SetLoop -> ExecutionState.Loop":                                      1,

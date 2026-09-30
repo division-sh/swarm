@@ -9,7 +9,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
-	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 )
 
@@ -55,26 +54,6 @@ func projectRunForkAttemptGenerationState(raw map[string]any, forkRunID, entityI
 	}
 	for _, forked := range correspondence.ProjectedActivations() {
 		if err := loopruntime.Store(carrier.StateBuckets, forked); err != nil {
-			return nil, nil, err
-		}
-	}
-	joins, err := joinruntime.List(carrier.StateBuckets)
-	if err != nil {
-		return nil, nil, err
-	}
-	for _, activation := range joins {
-		if activation.Generation() == (attemptgeneration.Generation{}) {
-			continue
-		}
-		source, err := correspondence.AdmitSource(activation.Generation())
-		if err != nil {
-			return nil, nil, fmt.Errorf("fork join generation: %w", err)
-		}
-		child, err := correspondence.Bind(source)
-		if err != nil {
-			return nil, nil, err
-		}
-		if err := joinruntime.ReplaceGeneration(carrier.StateBuckets, activation, child.Generation()); err != nil {
 			return nil, nil, err
 		}
 	}

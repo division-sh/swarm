@@ -15,14 +15,14 @@ func TestActivationKeyIsolatesLoopGenerations(t *testing.T) {
 	first := attemptgeneration.Generation{LoopID: "revision", ActivationID: "activation", RevisionField: "revision_id", RevisionID: "rev-1", Attempt: 1}
 	second := first
 	second.RevisionID, second.Attempt = "rev-2", 2
-	if left, right := ActivationKeyForGeneration("review", "items", "window", first), ActivationKeyForGeneration("review", "items", "window", second); left == right || left == "" || right == "" {
+	if left, right := ActivationKey(testJoinRef(t, "", "items", "review", "node", "item.done", "entry", first)), ActivationKey(testJoinRef(t, "", "items", "review", "node", "item.done", "entry", second)); left == right || left == "" || right == "" {
 		t.Fatalf("generation keys collide: %q %q", left, right)
 	}
 }
 
 func TestActivationOrdersResultsByMembershipAndClassifiesDuplicates(t *testing.T) {
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	activation, err := NewActivation(testJoinHandle(t, "", "line_items", "awaiting", "node", "item.done", "dispatch-1", attemptgeneration.Generation{}), []string{"a", "b"}, now, now.Add(time.Hour))
+	activation, err := NewActivation(testJoinRef(t, "", "line_items", "awaiting", "node", "item.done", "dispatch-1", attemptgeneration.Generation{}), []string{"a", "b"}, nil, now, now.Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,11 @@ func TestActivationOrdersResultsByMembershipAndClassifiesDuplicates(t *testing.T
 	if got, err := activation.Add("a", map[string]any{"score": 1}); err != nil || got != AddAccepted {
 		t.Fatalf("add a = %q, %v", got, err)
 	}
-	if got, want := activation.Results(), []any{map[string]any{"score": float64(1)}, map[string]any{"score": float64(2)}}; !reflect.DeepEqual(got, want) {
+	got, err := activation.Results()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []any{map[string]any{"score": int64(1)}, map[string]any{"score": int64(2)}}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("results = %#v, want membership order %#v", got, want)
 	}
 	if got, err := activation.Add("a", map[string]any{"score": 1}); err != nil || got != AddExactDuplicate {
@@ -46,9 +50,30 @@ func TestActivationOrdersResultsByMembershipAndClassifiesDuplicates(t *testing.T
 	}
 }
 
+func TestA2ArrivalContextFieldsMatchRuntimeProjection(t *testing.T) {
+	at := time.Now().UTC()
+	activation, err := NewActivation(testJoinRef(t, "", "join", "awaiting", "node", "item.done", "entry", attemptgeneration.Generation{}), []string{"a"}, nil, at, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	context, err := activation.Context()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields := SupportedContextFields()
+	if len(fields) != len(context) {
+		t.Fatalf("declared context fields=%v differ from runtime projection=%#v", fields, context)
+	}
+	for _, field := range fields {
+		if _, found := context[field]; !found {
+			t.Fatalf("declared field %q has no runtime projection", field)
+		}
+	}
+}
+
 func TestActivationPersistsThroughTypedStateBuckets(t *testing.T) {
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	activation, err := NewActivation(testJoinHandle(t, "", "join", "awaiting", "node", "item.done", "", attemptgeneration.Generation{}), []string{}, now, now.Add(time.Hour))
+	activation, err := NewActivation(testJoinRef(t, "", "join", "awaiting", "node", "item.done", "", attemptgeneration.Generation{}), []string{}, nil, now, now.Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,10 +91,40 @@ func TestActivationPersistsThroughTypedStateBuckets(t *testing.T) {
 	}
 }
 
+func TestA2JoinOutputRoundTripPreservesAdmittedNumberKinds(t *testing.T) {
+	now := time.Now().UTC()
+	activation, err := NewActivation(testJoinRef(t, "", "join", "awaiting", "node", "item.done", "entry", attemptgeneration.Generation{}), []string{"a"}, nil, now, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := map[string]any{"integer": int64(1), "double": float64(1), "nested": []any{float64(2), int64(2)}}
+	if disposition, err := activation.Add("a", output); err != nil || disposition != AddAccepted {
+		t.Fatalf("add: %s %v", disposition, err)
+	}
+	buckets := map[string]map[string]any{}
+	if err := Store(buckets, activation); err != nil {
+		t.Fatal(err)
+	}
+	loaded, found, err := Load(buckets, activation.JoinRef().Node(), activation.Key())
+	if err != nil || !found {
+		t.Fatalf("load: found=%v %v", found, err)
+	}
+	results, err := loaded.Results()
+	if err != nil || !reflect.DeepEqual(results, []any{output}) {
+		t.Fatalf("numeric results changed: %#v %v", results, err)
+	}
+	if disposition, err := loaded.Add("a", output); err != nil || disposition != AddExactDuplicate {
+		t.Fatalf("readback changed duplicate identity: %s %v", disposition, err)
+	}
+	if listed, err := List(buckets); err != nil || len(listed) != 1 || !listed[0].JoinRef().Equal(activation.JoinRef()) {
+		t.Fatalf("list: %#v %v", listed, err)
+	}
+}
+
 func TestJoinActivationPersistsTypedDeclarationHandle(t *testing.T) {
 	generation := attemptgeneration.Generation{LoopID: "revision", ActivationID: "activation", RevisionField: "revision_id", RevisionID: "rev-2", Attempt: 2}
 	now := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
-	activation, err := NewActivation(testJoinHandle(t, "", "shared", "awaiting", "join-node", "item.completed", "window-1", generation), []string{"a"}, now, now.Add(time.Hour))
+	activation, err := NewActivation(testJoinRef(t, "", "shared", "awaiting", "join-node", "item.completed", "entry-1", generation), []string{"a"}, nil, now, now.Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +156,7 @@ func TestJoinActivationRejectsRetiredFlatIdentityRows(t *testing.T) {
 	now := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
 	for _, retired := range []string{"flow_id", "join_id", "timer_task_id", "loop_generation"} {
 		t.Run(retired, func(t *testing.T) {
-			activation, err := NewActivation(testJoinHandle(t, "", "shared", "awaiting", "join-node", "item.completed", "", attemptgeneration.Generation{}), []string{"a"}, now, now.Add(time.Hour))
+			activation, err := NewActivation(testJoinRef(t, "", "shared", "awaiting", "join-node", "item.completed", "", attemptgeneration.Generation{}), []string{"a"}, nil, now, now.Add(time.Hour))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -125,55 +180,115 @@ func TestJoinActivationRejectsRetiredFlatIdentityRows(t *testing.T) {
 func TestNewActivationRejectsInvalidMembership(t *testing.T) {
 	now := time.Now().UTC()
 	for _, members := range [][]string{{""}, {"a", "a"}} {
-		if _, err := NewActivation(testJoinHandle(t, "", "join", "awaiting", "node", "item.done", "", attemptgeneration.Generation{}), members, now, now.Add(time.Hour)); err == nil {
+		if _, err := NewActivation(testJoinRef(t, "", "join", "awaiting", "node", "item.done", "", attemptgeneration.Generation{}), members, nil, now, now.Add(time.Hour)); err == nil {
 			t.Fatalf("members %#v accepted", members)
 		}
 	}
 }
 
+func TestA2JoinLoadAndListRejectContradictoryBucketOwnership(t *testing.T) {
+	for _, corruption := range []string{"node", "key", "bucket_shape"} {
+		t.Run(corruption, func(t *testing.T) {
+			at := time.Now().UTC()
+			activation, err := NewActivation(testJoinRef(t, "", "join", "awaiting", "node", "item.done", "entry", attemptgeneration.Generation{}), []string{"a"}, nil, at, time.Time{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			buckets := map[string]map[string]any{}
+			if err := Store(buckets, activation); err != nil {
+				t.Fatal(err)
+			}
+			node, key := activation.JoinRef().Node(), activation.Key()
+			switch corruption {
+			case "node":
+				original := node
+				node = identitytest.RootNode(t, "other")
+				buckets[joinNodeBucketKey(node)] = buckets[joinNodeBucketKey(original)]
+				delete(buckets, joinNodeBucketKey(original))
+			case "key":
+				joins := buckets[joinNodeBucketKey(node)][bucketKey].(map[string]any)
+				wrongKey := key + "-foreign"
+				joins[wrongKey] = joins[key]
+				delete(joins, key)
+				key = wrongKey
+			case "bucket_shape":
+				buckets[joinNodeBucketKey(node)][bucketKey] = []any{"corrupt"}
+			}
+			before, err := json.Marshal(buckets)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if loaded, found, err := Load(buckets, node, key); err == nil || found {
+				t.Fatalf("single-arm reader accepted %s corruption: found=%v arm=%#v err=%v", corruption, found, loaded, err)
+			}
+			if listed, err := List(buckets); err == nil || len(listed) != 0 {
+				t.Fatalf("catalog reader accepted %s corruption: arms=%#v err=%v", corruption, listed, err)
+			}
+			if corruption == "bucket_shape" {
+				if err := Store(buckets, activation); err == nil {
+					t.Fatal("writer replaced corrupt retained state with a new activation map")
+				}
+			}
+			after, err := json.Marshal(buckets)
+			if err != nil || string(after) != string(before) {
+				t.Fatalf("corruption refusal changed persisted evidence: %v", err)
+			}
+		})
+	}
+}
+
 func TestActivationKeyIncludesStageIdentity(t *testing.T) {
-	awaiting := ActivationKey("awaiting", "shared", "window-1")
-	reviewing := ActivationKey("reviewing", "shared", "window-1")
+	awaiting := ActivationKey(testJoinRef(t, "", "shared", "awaiting", "node", "item.done", "entry-1", attemptgeneration.Generation{}))
+	reviewing := ActivationKey(testJoinRef(t, "", "shared", "reviewing", "node", "item.done", "entry-1", attemptgeneration.Generation{}))
 	if awaiting == "" || reviewing == "" || awaiting == reviewing {
 		t.Fatalf("activation keys = awaiting:%q reviewing:%q, want distinct stage-scoped identities", awaiting, reviewing)
 	}
 }
 
-func TestCompletionSatisfiedUsesOneDefaultAndCustomOwner(t *testing.T) {
+func TestA2CountUsesExactContributorIdentityAndLexicalOrder(t *testing.T) {
 	now := time.Now().UTC()
-	activation, err := NewActivation(testJoinHandle(t, "", "join", "awaiting", "node", "item.done", "", attemptgeneration.Generation{}), []string{}, now, now.Add(time.Hour))
+	count := 2
+	activation, err := NewActivation(testJoinRef(t, "", "join", "awaiting", "node", "item.done", "", attemptgeneration.Generation{}), nil, &count, now, now.Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if complete, err := CompletionSatisfied(activation, "", nil); err != nil || !complete {
-		t.Fatalf("default zero-member completion = %v, %v, want true", complete, err)
-	}
-	called := false
-	complete, err := CompletionSatisfied(activation, "join.completed >= 1", func(expression string, joinContext map[string]any) (bool, error) {
-		called = true
-		if expression != "join.completed >= 1" || joinContext["completed"] != 0 {
-			t.Fatalf("custom completion input = %q %#v", expression, joinContext)
+	for _, member := range []string{"z", " a "} {
+		if disposition, err := activation.Add(member, member); err != nil || disposition != AddAccepted {
+			t.Fatalf("count arrival %q: %s %v", member, disposition, err)
 		}
-		return false, nil
-	})
-	if err != nil || complete || !called {
-		t.Fatalf("custom zero-member completion = complete:%v called:%v err:%v, want false/true/nil", complete, called, err)
+	}
+	results, err := activation.Results()
+	if err != nil || !reflect.DeepEqual(results, []any{" a ", "z"}) || activation.Completed() != activation.Expected() || len(activation.Missing()) != 0 {
+		t.Fatalf("count result: %#v %v", activation, err)
+	}
+	if disposition, err := activation.Add(" a ", " a "); err != nil || disposition != AddExactDuplicate {
+		t.Fatalf("exact duplicate at count cap: %s %v", disposition, err)
+	}
+	if disposition, err := activation.Add(" a ", "changed"); err != nil || disposition != AddConflictingDuplicate {
+		t.Fatalf("conflicting duplicate at count cap: %s %v", disposition, err)
+	}
+	if disposition, err := activation.Add("a", "new"); err != nil || disposition != AddUnexpected {
+		t.Fatalf("whitespace was used as an identity alias: %s %v", disposition, err)
 	}
 }
 
-func testJoinHandle(t *testing.T, flowID, joinID, stage, nodeID, handlerEvent, window string, generation attemptgeneration.Generation) timeridentity.TimerHandle {
+func testJoinRef(t *testing.T, flowID, joinID, stage, nodeID, handlerEvent, occurrence string, generation attemptgeneration.Generation) timeridentity.JoinRef {
 	t.Helper()
 	node := identitytest.RootNode(t, nodeID)
 	if flowID != "" {
 		node = identitytest.FlowNode(t, flowID, nodeID)
 	}
-	ref, err := timeridentity.NewJoinRefForGeneration(node, handlerEvent, stage, joinID, window, generation)
+	ref, err := timeridentity.NewJoinRef(node, handlerEvent, stage, joinID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	handle, err := timeridentity.JoinTimeoutHandle(ref)
+	entry := timeridentity.StageEntryRef{RunID: "run", FlowScope: "flow", InstanceID: "one", InstancePath: "flow/one", EntityID: "entity", Stage: stage, Cause: "construction"}
+	if occurrence != "" {
+		entry.Cause, entry.EventID, entry.OccurrenceID, entry.TransitionID = "delivery", "event", occurrence, "transition"
+	}
+	ref, err = ref.BindStageEntry(entry, generation)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return handle
+	return ref
 }

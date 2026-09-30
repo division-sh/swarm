@@ -420,22 +420,20 @@ coordinator:
       join:
         stage: awaiting_items
         members:
-          from: entity.expected_item_ids
+          from: state.expected_item_ids
           by: payload.item_id
-        window:
-          from: entity.dispatch_id
-          by: payload.dispatch_id
         output: payload.result
-        complete_when: join.completed >= 2
-        remaining: ignore
+        until: items.cancelled
         on_complete:
           emit:
             event: items.completed
             fields:
               results: join.results
           advances_to: ready
-        timeout:
+        deadline:
           after: 24h
+          from: stage_entry
+        on_deadline:
           emit:
             event: items.timed_out
             fields:
@@ -455,14 +453,14 @@ coordinator:
 	if join.Members.FromPath.Root != paths.RootEntity || join.Members.ByPath.Root != paths.RootPayload {
 		t.Fatalf("join member paths = %#v/%#v", join.Members.FromPath, join.Members.ByPath)
 	}
-	if join.Window == nil || join.Window.FromPath.Root != paths.RootEntity || join.Window.ByPath.Root != paths.RootPayload {
-		t.Fatalf("join window = %#v", join.Window)
+	if join.Until != "items.cancelled" {
+		t.Fatalf("join until = %q", join.Until)
 	}
 	if !join.OnCompleteFound || join.OnComplete.Emit.EventType() != "items.completed" || join.OnComplete.AdvancesTo != "ready" {
 		t.Fatalf("join on_complete = %#v", join.OnComplete)
 	}
-	if !join.TimeoutFound || join.Timeout.After != "24h" || join.Timeout.Outcome.Emit.EventType() != "items.timed_out" {
-		t.Fatalf("join timeout = %#v", join.Timeout)
+	if !join.OnDeadlineFound || join.Deadline == nil || join.Deadline.After != "24h" || join.Deadline.From != JoinDeadlineFromStageEntry || join.OnDeadline.Emit.EventType() != "items.timed_out" {
+		t.Fatalf("join deadline = %#v", join.Deadline)
 	}
 }
 
@@ -2925,7 +2923,7 @@ source: payload.items
 	if got := diagnostic.Problem; got != `accumulate field "source" is not supported.` {
 		t.Fatalf("diagnostic problem = %q, want unknown accumulate field problem", got)
 	}
-	want := []string{"dedup_by", "description", "from", "into", "window"}
+	want := []string{"description", "from", "into", "key"}
 	if !reflect.DeepEqual(diagnostic.ValidOptions, want) {
 		t.Fatalf("diagnostic valid options = %#v, want %#v", diagnostic.ValidOptions, want)
 	}
@@ -3318,7 +3316,7 @@ func TestAccumulateSpecDecode_PreservesDescriptionAndRejectsUnknownField(t *test
 	if err := decodeNodeTestYAML([]byte(`
 into: dimensions_received
 description: all dimension receipts have arrived
-dedup_by: payload.dimension
+key: payload.dimension
 `), &spec); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -3345,7 +3343,7 @@ legacy_buffer: dimensions_received
 }
 
 func TestAccumulateSpecDecodeRejectsRetiredFiniteBarrierFields(t *testing.T) {
-	for _, field := range []string{"expected_from", "completion", "threshold", "timeout_ms", "on_complete", "on_timeout"} {
+	for _, field := range []string{"expected_from", "completion", "threshold", "timeout_ms", "on_complete", "on_timeout", "window", "dedup_by"} {
 		t.Run(field, func(t *testing.T) {
 			var spec AccumulateSpec
 			err := decodeNodeTestYAML([]byte("into: items\n"+field+": retired\n"), &spec)

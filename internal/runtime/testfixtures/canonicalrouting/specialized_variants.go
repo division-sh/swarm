@@ -135,13 +135,15 @@ line_item.requested:
       join:
         stage: active
         members:
-          from: entity.expected_line_item_ids
+          from: state.expected_line_item_ids
           by: payload.line_item_id
         output: payload.result
         on_complete:
           advances_to: review
-        timeout:
+        deadline:
           after: 1h
+          from: stage_entry
+        on_deadline:
           advances_to: timed_out
     ticket.sla_escalated: {}
     line_item.requested: {}

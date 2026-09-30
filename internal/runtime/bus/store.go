@@ -294,6 +294,13 @@ func (p PreparedPublishEvent) Validate() error {
 	if err := events.ValidateDeliveryRoutes(p.DeliveryRoutes); err != nil {
 		return fmt.Errorf("prepared publication delivery routes: %w", err)
 	}
+	for _, route := range p.DeliveryRoutes {
+		for _, receipt := range route.Context.Joins {
+			if entry := receipt.Ref.StageEntry(); !entry.Empty() && entry.RunID != p.Event.Event().RunID() {
+				return fmt.Errorf("prepared publication join admission belongs to another run")
+			}
+		}
+	}
 	if err := events.ValidateReceiverMaterializations(p.Event.Event(), p.DeliveryRoutes); err != nil {
 		return fmt.Errorf("prepared publication receiver dependencies: %w", err)
 	}
@@ -420,19 +427,28 @@ const (
 // mandatory initial side effects are the delivery manifest, replay scope, and
 // optional failure evidence declared here.
 type CommitPublishRequest struct {
-	Event             events.AdmittedEvent
-	RouteSettlement   events.RouteSettlement
-	DeliveryRoutes    []events.DeliveryRoute
-	DeliveryAuthority runtimedelivery.ExecutionAuthority
-	ReplayScope       runtimepipelineobligation.CommittedScope
-	PipelineClaim     runtimepipelineobligation.Claim
-	Disposition       *runtimepipelineobligation.Disposition
-	DeadLetter        *runtimedeadletters.Record
-	ReplyCreations    []runtimereplycontext.Record
-	ReplyClaims       []runtimereplycontext.ClaimCommand
+	Event               events.AdmittedEvent
+	RouteSettlement     events.RouteSettlement
+	DeliveryRoutes      []events.DeliveryRoute
+	DeliveryAuthority   runtimedelivery.ExecutionAuthority
+	ReplayScope         runtimepipelineobligation.CommittedScope
+	PipelineClaim       runtimepipelineobligation.Claim
+	Disposition         *runtimepipelineobligation.Disposition
+	DeadLetter          *runtimedeadletters.Record
+	ReplyCreations      []runtimereplycontext.Record
+	ReplyClaims         []runtimereplycontext.ClaimCommand
+	JoinAdmissionFences []runtimepipeline.WorkflowJoinAdmissionFence
 }
 
 func (r CommitPublishRequest) ValidatePreparedEvent() error {
+	for _, fence := range r.JoinAdmissionFences {
+		if err := fence.Validate(); err != nil {
+			return err
+		}
+		if fence.Owner.RunID != r.Event.Event().RunID() {
+			return fmt.Errorf("join admission fence contradicts publication run")
+		}
+	}
 	return (PreparedPublishEvent{
 		Event:          r.Event,
 		Settlement:     r.RouteSettlement,

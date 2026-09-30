@@ -31,6 +31,10 @@ func requireOriginalFanOutCarriage(ctx context.Context, source runForkSourceOwne
 
 func projectRunForkFanOutCapsule(ctx context.Context, tx *sql.Tx, forkRunID string, plan runfork.RunForkPlan, obligation runfork.RunForkFanOutObligation, original semanticview.OriginalLoopCarriage) (fanoutobligation.Capsule, *loopruntime.ForkChildReference, error) {
 	capsule := obligation.Intent.Request.Capsule
+	if err := obligation.Intent.Request.ValidateSourceProjection(); err != nil {
+		return capsule, nil, err
+	}
+	capsule.SourceProjection = capsule.SourceProjection.Clone()
 	if err := capsule.Validate(); err != nil {
 		return capsule, nil, err
 	}

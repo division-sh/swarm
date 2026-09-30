@@ -14,7 +14,7 @@ func TestJoinCapturedLoopRequiresDeclaredLoopOwner(t *testing.T) {
 		handler := bundle.Nodes["join-node"].EventHandlers["item.completed"]
 		write := runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{{TargetField: "captured", Value: runtimecontracts.RefExpression("loop.revision_id")}}}
 		if timeout {
-			handler.Join.Timeout.Outcome.DataAccumulation = write
+			handler.Join.OnDeadline.DataAccumulation = write
 		} else {
 			handler.Join.OnComplete.DataAccumulation = write
 		}
@@ -29,7 +29,7 @@ func TestJoinCapturedLoopRequiresDeclaredLoopOwner(t *testing.T) {
 
 func TestJoinCapturedLoopOutcomeValidation(t *testing.T) {
 	source := semanticviewtest.WrapRootAgents(joinValidationBundle())
-	for _, outcome := range []string{"on_complete", "timeout"} {
+	for _, outcome := range []string{"on_complete", "on_deadline"} {
 		for _, field := range []string{"id", "activation_id", "revision_id", "attempt", "max_attempts"} {
 			for _, ref := range []bool{false, true} {
 				expr := runtimecontracts.CELExpression("loop." + field)
@@ -62,10 +62,13 @@ func TestJoinCapturedLoopOutcomeValidation(t *testing.T) {
 func TestLoopAdmissionDelegatesEmptyTargetOnlyToJoinOutcomes(t *testing.T) {
 	bundle := loopValidationBundle()
 	handler := bundle.Nodes["controller"].EventHandlers["draft.ready"]
+	count := 1
 	handler.Join = &runtimecontracts.JoinSpec{
-		ID: "review", Stage: "drafting", OnCompleteFound: true, TimeoutFound: true,
+		ID: "review", Stage: "drafting", OnCompleteFound: true, OnDeadlineFound: true,
+		Members: runtimecontracts.JoinMembersSpec{Count: &count, By: "payload.revision_id"}, Output: "payload.revision_id",
 		OnComplete: runtimecontracts.HandlerRuleEntry{AdvancesTo: handler.AdvancesTo, Emit: handler.Emit},
-		Timeout:    runtimecontracts.JoinTimeoutSpec{After: "1h", Outcome: runtimecontracts.HandlerRuleEntry{AdvancesTo: "review"}},
+		Deadline:   &runtimecontracts.JoinDeadlineSpec{After: "1h", From: runtimecontracts.JoinDeadlineFromStageEntry},
+		OnDeadline: runtimecontracts.HandlerRuleEntry{AdvancesTo: "review"},
 	}
 	handler.AdvancesTo, handler.Emit = "", runtimecontracts.EmitSpec{}
 	bundle.Nodes["controller"].EventHandlers["draft.ready"] = handler
@@ -75,7 +78,7 @@ func TestLoopAdmissionDelegatesEmptyTargetOnlyToJoinOutcomes(t *testing.T) {
 	if findings := loopValidationFindings(bundle); len(findings) != 0 {
 		t.Fatalf("delegated join target rejected: %#v", findings)
 	}
-	handler.Join.Timeout.Outcome.AdvancesTo = "approved"
+	handler.Join.OnDeadline.AdvancesTo = "approved"
 	if findings := loopValidationFindings(bundle); !loopFindingContains(findings, "leaves the loop region") {
 		t.Fatalf("timeout escaped loop region: %#v", findings)
 	}

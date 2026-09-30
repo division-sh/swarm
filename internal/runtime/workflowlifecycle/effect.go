@@ -37,15 +37,17 @@ func (t Transition) To() string   { return t.to }
 func (t Transition) ID() string   { return t.id }
 
 type Effect struct {
-	kind          Kind
-	route         runtimeflowidentity.Route
-	entityID      identity.EntityID
-	stage         string
-	eventID       string
-	eventType     string
-	executionMode executionmode.Mode
-	occurredAt    time.Time
-	transition    *Transition
+	kind           Kind
+	route          runtimeflowidentity.Route
+	entityID       identity.EntityID
+	stage          string
+	eventID        string
+	eventType      string
+	executionMode  executionmode.Mode
+	occurredAt     time.Time
+	transition     *Transition
+	occurrenceKind string
+	occurrenceID   string
 }
 
 func NewInitialEntry(route runtimeflowidentity.Route, entityID identity.EntityID, stage string, mode executionmode.Mode, occurredAt time.Time) (Effect, error) {

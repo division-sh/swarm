@@ -4,75 +4,18 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 
-	"time"
-
-	"github.com/division-sh/swarm/internal/events/eventtest"
+	"gopkg.in/yaml.v3"
 )
-
-func TestArrivalIdentifier_PriorityOrder(t *testing.T) {
-	evt := eventtest.RunCreatingRootIngress("evt-1", events.EventType("test.arrival"), "agent-source", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
-	payload := map[string]any{
-		"id":       "payload-id",
-		"event_id": "payload-event",
-		"item_id":  "payload-item",
-		"source":   "payload-source",
-		"from":     "payload-from",
-		"agent_id": "payload-agent",
-		"node_id":  "payload-node",
-	}
-	if got := arrivalIdentifier(evt, payload); got != "evt-1" {
-		t.Fatalf("arrivalIdentifier = %q", got)
-	}
-
-	if got := arrivalIdentifier(eventtest.RunCreatingRootIngress("", events.EventType("test.arrival"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), payload); got != "payload-event" {
-		t.Fatalf("arrivalIdentifier payload event fallback = %q", got)
-	}
-	delete(payload, "event_id")
-	if got := arrivalIdentifier(eventtest.RunCreatingRootIngress("", events.EventType("test.arrival"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), payload); got != "payload-id" {
-		t.Fatalf("arrivalIdentifier payload id fallback = %q", got)
-	}
-	delete(payload, "id")
-	if got := arrivalIdentifier(eventtest.RunCreatingRootIngress("", events.EventType("test.arrival"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), payload); got != "payload-item" {
-		t.Fatalf("arrivalIdentifier item fallback = %q", got)
-	}
-
-	if got := arrivalIdentifier(eventtest.RunCreatingRootIngress("evt-2", events.EventType("test.arrival"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), map[string]any{"dimension": "not-identity"}); got != "evt-2" {
-		t.Fatalf("arrivalIdentifier should ignore dimension payloads, got %q", got)
-	}
-}
-
-func TestDedupIdentifier_UsesContractConfiguredKey(t *testing.T) {
-	base := BaseContext{Payload: values.Wrap(map[string]any{
-		"dimension": "retention_architecture",
-		"from":      "legacy-sender",
-	})}
-	got := dedupIdentifier(base, ExecutionState{}, eventtest.RunCreatingRootIngress("evt-1", events.EventType("test.arrival"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), &runtimecontracts.AccumulateSpec{
-		DedupBy:   "payload.dimension",
-		DedupPath: paths.Parse("payload.dimension"),
-	})
-	if got != "retention_architecture" {
-		t.Fatalf("dedupIdentifier = %q", got)
-	}
-}
-
-func TestDedupIdentifier_DefaultsToEventIdentityBeforeSource(t *testing.T) {
-	base := BaseContext{Payload: values.Wrap(map[string]any{
-		"item_id": "payload-item",
-		"source":  "legacy-source",
-	})}
-	got := dedupIdentifier(base, ExecutionState{}, eventtest.RunCreatingRootIngress("evt-1", events.EventType("test.arrival"), "agent-source", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), nil)
-	if got != "evt-1" {
-		t.Fatalf("dedupIdentifier default = %q", got)
-	}
-}
 
 func TestResolveRefRequiresExplicitScope(t *testing.T) {
 	base := BaseContext{
@@ -308,9 +251,9 @@ func TestApplyDataAccumulationToState_NormalizesTargets(t *testing.T) {
 func TestAccumulatorStoreLoad_PreservesHandlerAccumulatorBucketPath(t *testing.T) {
 	state := &StateSnapshot{}
 	node := testRootExecutableNode(t, "node-1")
-	acc := &Accumulator{
-		Received: map[string]bool{"a": true},
-		Items:    []map[string]any{{"payload": map[string]any{"score": 8}}},
+	acc := &Accumulator{}
+	if _, err := acc.Admit(nil, map[string]any{"payload": map[string]any{"score": int64(8)}}, "a"); err != nil {
+		t.Fatal(err)
 	}
 
 	storeAccumulator(state, node, events.EventType("task.completed"), acc)
@@ -331,7 +274,7 @@ func TestAccumulatorStoreLoad_PreservesHandlerAccumulatorBucketPath(t *testing.T
 	if !ok {
 		t.Fatal("expected accumulator to load")
 	}
-	if len(loaded.Items) != 1 || !loaded.Received["a"] {
+	if len(loaded.Items) != 1 || loaded.Deliveries["a"] == "" || loaded.Err() != nil {
 		t.Fatalf("loaded accumulator mismatch: %#v", loaded)
 	}
 }
@@ -484,11 +427,11 @@ func TestComputeWeightedAverageReadsFlattenedAccumulatorItems(t *testing.T) {
 	}
 }
 
-func TestComputeWeightedAverageStillSupportsLegacyNestedPayloadItems(t *testing.T) {
+func TestComputeWeightedAverageDoesNotReinterpretAuthoredPayloadField(t *testing.T) {
 	acc := &Accumulator{
 		Items: []map[string]any{
-			{"payload": map[string]any{"dimension": "build_complexity", "score": 80}},
-			{"payload": map[string]any{"dimension": "automation_completeness", "score": 70}},
+			{"dimension": "build_complexity", "score": 80, "payload": map[string]any{"dimension": "build_complexity", "score": 0}},
+			{"dimension": "automation_completeness", "score": 70, "payload": map[string]any{"dimension": "automation_completeness", "score": 0}},
 		},
 	}
 	got := computeWeightedAverage(acc, &runtimecontracts.ComputeSpec{
@@ -502,7 +445,7 @@ func TestComputeWeightedAverageStillSupportsLegacyNestedPayloadItems(t *testing.
 		},
 	})
 	if got != 75 {
-		t.Fatalf("computeWeightedAverage(legacy nested) = %v, want 75", got)
+		t.Fatalf("computeWeightedAverage(authored payload field) = %v, want 75", got)
 	}
 }
 

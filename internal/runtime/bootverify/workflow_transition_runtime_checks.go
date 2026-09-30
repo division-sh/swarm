@@ -221,17 +221,21 @@ func (c *checkerContext) eventRuntimeWiring() []Finding {
 		}
 		// Join lifecycle handlers are generated from the exact compiled declaration.
 		// A reserved event name alone does not establish a runtime owner.
-		if runtimecontracts.IsIntrinsicWorkflowRuntimeEvent(requirement.eventType) {
-			ownsJoin := false
-			for _, plan := range c.source.WorkflowJoins() {
-				if plan.Node.Equal(requirement.owner) {
-					ownsJoin = true
-					break
-				}
-			}
-			if ownsJoin {
+		ownsJoin := false
+		canonicalEvent := c.source.ResolveExecutableNodeEventReference(requirement.owner, requirement.eventType)
+		for _, plan := range c.source.WorkflowJoins() {
+			if !plan.Node.Equal(requirement.owner) {
 				continue
 			}
+			if requirement.eventType == "platform.join_complete" ||
+				(requirement.eventType == "platform.join_timeout" && plan.Spec.Deadline != nil) ||
+				(plan.UntilEvent != "" && canonicalEvent == plan.UntilEvent) {
+				ownsJoin = true
+				break
+			}
+		}
+		if ownsJoin {
+			continue
 		}
 		if !semanticview.ResolveExecutableNodeSubscriptionHandler(c.source, requirement.owner, requirement.eventType).Matched {
 			c.eventRuntimeFindings = append(c.eventRuntimeFindings, Finding{

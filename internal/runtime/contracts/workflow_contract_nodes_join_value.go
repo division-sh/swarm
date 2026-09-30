@@ -2,7 +2,6 @@ package contracts
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/yamlsource"
@@ -13,21 +12,22 @@ func projectNodeJoinValue(value yamlsource.Value) (*JoinSpec, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := joinTextScalarFields(fields, "id", "stage", "output", "until"); err != nil {
+		return nil, err
+	}
 	out := &JoinSpec{}
 	if err := nodeValueTexts(fields, map[string]*string{
 		"id": &out.ID, "stage": &out.Stage, "output": &out.Output,
-		"complete_when": &out.CompleteWhen, "remaining": &out.Remaining,
+		"until": &out.Until,
 	}, true); err != nil {
 		return nil, err
 	}
 	out.OutputPath = paths.Parse(out.Output)
-	out.Remaining = strings.ToLower(out.Remaining)
 	_, out.stageFound = fields["stage"]
-	_, out.windowFound = fields["window"]
 	_, out.outputFound = fields["output"]
-	_, out.completeFound = fields["complete_when"]
-	_, out.remainingFound = fields["remaining"]
-	_, out.timeoutFound = fields["timeout"]
+	_, out.deadlineFound = fields["deadline"]
+	_, out.onDeadlineFound = fields["on_deadline"]
+	_, out.untilFound = fields["until"]
 	if out.ID == "" {
 		out.ID = out.Stage
 	}
@@ -40,36 +40,32 @@ func projectNodeJoinValue(value yamlsource.Value) (*JoinSpec, error) {
 			return nil, err
 		}
 	}
-	if window, present := fields["window"]; present && window.Presence() != yamlsource.PresenceNull {
-		out.Window, err = projectNodeJoinWindowValue(window)
-		if err != nil {
-			return nil, err
-		}
-	}
 	if completion, present := fields["on_complete"]; present && completion.Presence() != yamlsource.PresenceNull {
-		out.OnComplete, err = projectNodeJoinOutcomeValue(completion)
+		out.OnComplete, err = projectNodeJoinOutcomeValue(completion, "join.on_complete")
 		if err != nil {
 			return nil, err
 		}
 		out.OnCompleteFound = !joinOutcomeEmpty(out.OnComplete)
 	}
-	if timeout, present := fields["timeout"]; present && timeout.Presence() != yamlsource.PresenceNull {
-		timeoutFields, err := nodeValueFields(timeout, "join.timeout", joinTimeoutFieldOptions, nil)
+	if deadline, present := fields["deadline"]; present {
+		deadlineFields, err := nodeValueFields(deadline, "join.deadline", joinDeadlineFieldOptions, nil)
 		if err != nil {
 			return nil, err
 		}
-		out.TimeoutFound = true
-		if after, present := timeoutFields["after"]; present {
-			out.Timeout.After, err = nodeValueText(after, "join.timeout.after")
-			if err != nil {
-				return nil, err
-			}
-			out.Timeout.After = strings.TrimSpace(out.Timeout.After)
+		out.Deadline = &JoinDeadlineSpec{}
+		if err := joinTextScalarFields(deadlineFields, "after", "from"); err != nil {
+			return nil, err
 		}
-		out.Timeout.Outcome, err = projectNodeJoinOutcomeFields(timeoutFields)
+		if err := nodeValueTexts(deadlineFields, map[string]*string{"after": &out.Deadline.After, "from": &out.Deadline.From}, true, "after", "from"); err != nil {
+			return nil, err
+		}
+	}
+	if outcome, present := fields["on_deadline"]; present {
+		out.OnDeadline, err = projectNodeJoinOutcomeValue(outcome, "join.on_deadline")
 		if err != nil {
 			return nil, err
 		}
+		out.OnDeadlineFound = !joinOutcomeEmpty(out.OnDeadline)
 	}
 	if err := out.ValidateAuthoredShape(); err != nil {
 		return nil, fmt.Errorf("join at %s: %w", value.Location(), err)
@@ -82,14 +78,31 @@ func projectNodeJoinMembersValue(value yamlsource.Value) (JoinMembersSpec, error
 	if err != nil {
 		return JoinMembersSpec{}, err
 	}
+	if err := joinTextScalarFields(fields, "from", "by"); err != nil {
+		return JoinMembersSpec{}, err
+	}
 	var out JoinMembersSpec
 	if err := nodeValueTexts(fields, map[string]*string{"from": &out.From, "by": &out.By}, true); err != nil {
 		return JoinMembersSpec{}, err
 	}
-	out.FromPath, out.ByPath = paths.Parse(out.From), paths.Parse(out.By)
+	out.FromPath, out.ByPath = joinMembersSourcePath(out.From), paths.Parse(out.By)
 	_, out.fromFound = fields["from"]
 	_, out.BySet = fields["by"]
+	if count, present := fields["count"]; present {
+		scalar, err := count.Scalar()
+		if err != nil || scalar.Tag != "!!int" {
+			return JoinMembersSpec{}, nodeValueError(count, fmt.Errorf("join.members.count must be a nonnegative integer literal"))
+		}
+		out.Count = new(int)
+		if err := count.Project(out.Count); err != nil {
+			return JoinMembersSpec{}, nodeValueError(count, err)
+		}
+	}
 	if fanOut, present := fields["from_fan_out"]; present {
+		scalar, scalarErr := fanOut.Scalar()
+		if scalarErr != nil || scalar.Tag != "!!bool" {
+			return JoinMembersSpec{}, nodeValueError(fanOut, fmt.Errorf("join.members.from_fan_out must be literal true"))
+		}
 		out.FromFanOut, err = nodeValueBool(fanOut, "join.members.from_fan_out")
 		if err != nil {
 			return JoinMembersSpec{}, err
@@ -99,32 +112,25 @@ func projectNodeJoinMembersValue(value yamlsource.Value) (JoinMembersSpec, error
 	return out, nil
 }
 
-func projectNodeJoinWindowValue(value yamlsource.Value) (*JoinWindowSpec, error) {
-	fields, err := nodeValueFields(value, "join.window", joinWindowFieldOptions, nil)
-	if err != nil {
-		return nil, err
+func joinTextScalarFields(fields map[string]yamlsource.Value, names ...string) error {
+	for _, name := range names {
+		if value, present := fields[name]; present {
+			scalar, err := value.Scalar()
+			if err != nil || scalar.Tag != "!!str" {
+				return nodeValueError(value, fmt.Errorf("join %s must be text", name))
+			}
+		}
 	}
-	out := &JoinWindowSpec{}
-	if err := nodeValueTexts(fields, map[string]*string{"from": &out.From, "by": &out.By}, true); err != nil {
-		return nil, err
-	}
-	out.FromPath, out.ByPath = paths.Parse(out.From), paths.Parse(out.By)
-	_, out.BySet = fields["by"]
-	return out, nil
+	return nil
 }
 
-func projectNodeJoinOutcomeValue(value yamlsource.Value) (HandlerRuleEntry, error) {
-	fields, err := nodeValueFields(value, "join.on_complete", joinOutcomeFieldOptions, nil)
+func projectNodeJoinOutcomeValue(value yamlsource.Value, owner string) (HandlerRuleEntry, error) {
+	fields, err := nodeValueFields(value, owner, joinOutcomeFieldOptions, nil)
 	if err != nil {
 		return HandlerRuleEntry{}, err
 	}
-	return projectNodeJoinOutcomeFields(fields)
-}
-
-func projectNodeJoinOutcomeFields(fields map[string]yamlsource.Value) (HandlerRuleEntry, error) {
 	var out HandlerRuleEntry
 	out.authored = true
-	var err error
 	if advances, present := fields["advances_to"]; present {
 		out.AdvancesTo, err = nodeValueText(advances, "join outcome advances_to")
 		if err != nil {

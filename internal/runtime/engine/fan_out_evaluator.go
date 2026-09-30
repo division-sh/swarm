@@ -74,6 +74,9 @@ func (e *Executor) PrepareFanOutEvaluation(ctx context.Context, intent fanoutobl
 	if err != nil {
 		return nil, err
 	}
+	if err := intent.Request.ValidateCompiledPlan(plan); err != nil {
+		return nil, err
+	}
 	if intent.Source.Kind == fanoutobligation.SourceResourceVersion {
 		return nil, fmt.Errorf("fan-out resource intent has no authored fan_out plan")
 	}
@@ -229,6 +232,7 @@ func (p *FanOutEvaluation) EvaluateOrdinal(ctx context.Context, item any, ordina
 }
 
 func cloneFanOutCapsule(c fanoutobligation.Capsule) fanoutobligation.Capsule {
+	c.SourceProjection = c.SourceProjection.Clone()
 	c.Entity, c.PlatformEntity = cloneStringAnyMap(c.Entity), cloneStringAnyMap(c.PlatformEntity)
 	c.Computed, c.Accumulated = cloneStringAnyMap(c.Computed), cloneStringAnyMap(c.Accumulated)
 	c.Join, c.Loop = cloneStringAnyMap(c.Join), cloneStringAnyMap(c.Loop)

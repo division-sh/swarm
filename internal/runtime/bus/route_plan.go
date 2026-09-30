@@ -201,6 +201,7 @@ type RoutePlan struct {
 	ActivationPlans      []runtimepipeline.FlowInstanceActivationPlan
 	ReplyCreations       []runtimereplycontext.Record
 	ReplyClaims          []runtimereplycontext.ClaimCommand
+	JoinAdmissionFences  []runtimepipeline.WorkflowJoinAdmissionFence
 }
 
 type RoutePlanLiveRecipient struct {
@@ -310,9 +311,14 @@ func normalizePlannedDeliveryRoutes(in []plannedDeliveryRoute) []plannedDelivery
 		if route.Recipient.Empty() {
 			continue
 		}
+		contextIdentity, err := route.Context.Identity()
+		if err != nil {
+			out = append(out, route)
+			continue
+		}
 		key := deliveryIntentKey{
 			recipient: route.Recipient, agentIdentity: route.AgentIdentity, target: route.Target,
-			handler: route.Handler, replyContextID: route.Context.ReplyContextID(),
+			handler: route.Handler, contextIdentity: contextIdentity,
 			projection: route.PayloadProjection.Fingerprint(), connectClaim: route.ConnectClaim,
 		}
 		if _, ok := seen[key]; ok {
@@ -429,7 +435,7 @@ func (p *RoutePlan) AddDeliveryIntents(intents ...RoutePlanDeliveryIntent) {
 
 func (p RoutePlan) WithDefaultDeliveryContext(deliveryContext events.DeliveryContext) RoutePlan {
 	p = p.Normalized()
-	deliveryContext = deliveryContext.Normalized()
+	deliveryContext = deliveryContext.ReplyOnly()
 	if deliveryContext.Empty() || p.ReplyContextConsumed {
 		return p
 	}
@@ -863,7 +869,7 @@ type deliveryIntentKey struct {
 	target          events.RouteIdentity
 	targetOwner     events.DeliveryTargetOwnership
 	handler         runtimepipeline.DeliveryTargetHandler
-	replyContextID  string
+	contextIdentity string
 	projection      string
 	connectClaim    events.ConnectExecutionClaim
 	agentLifecycle  agentLifecycleAdmission
@@ -901,18 +907,23 @@ func normalizeRoutePlanDeliveryIntents(in []RoutePlanDeliveryIntent) []RoutePlan
 			out = append(out, intent)
 			continue
 		}
+		contextIdentity, err := intent.Context.Identity()
+		if err != nil {
+			out = append(out, intent)
+			continue
+		}
 		key := deliveryIntentKey{
-			recipient:      intent.Recipient,
-			agentIdentity:  intent.AgentIdentity,
-			target:         intent.TargetBlueprint,
-			targetOwner:    intent.TargetOwnership,
-			handler:        intent.Handler,
-			replyContextID: intent.Context.ReplyContextID(),
-			projection:     intent.PayloadProjection.Fingerprint(),
-			connectClaim:   intent.ConnectClaim,
-			agentLifecycle: intent.AgentLifecycle,
-			connectPlan:    intent.ConnectPlan,
-			initialization: intent.Initialization,
+			recipient:       intent.Recipient,
+			agentIdentity:   intent.AgentIdentity,
+			target:          intent.TargetBlueprint,
+			targetOwner:     intent.TargetOwnership,
+			handler:         intent.Handler,
+			contextIdentity: contextIdentity,
+			projection:      intent.PayloadProjection.Fingerprint(),
+			connectClaim:    intent.ConnectClaim,
+			agentLifecycle:  intent.AgentLifecycle,
+			connectPlan:     intent.ConnectPlan,
+			initialization:  intent.Initialization,
 		}
 		if !intent.Materialization.Empty() {
 			var err error

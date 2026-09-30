@@ -7,7 +7,7 @@ import (
 
 func retiredHandlerActionFieldError(context, key string) error {
 	switch context {
-	case "handler", "rule", "rules", "on_complete", "on_success", "join", "join.on_complete", "join.timeout":
+	case "handler", "rule", "rules", "on_complete", "on_success", "join", "join.on_complete", "join.on_deadline":
 	default:
 		return nil
 	}

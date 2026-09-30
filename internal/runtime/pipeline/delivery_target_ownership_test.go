@@ -470,7 +470,7 @@ func TestClassifyDeliveryTargetOwnershipJoinOccurrencePreservesDeclarationOwnerB
 	if err != nil {
 		t.Fatal(err)
 	}
-	handle := pipelineJoinHandle(t, "", timeridentity.TimerHandleJoinTimeout)
+	handle := pipelineJoinHandle(t, "", timeridentity.TimerHandleJoinTimeout, testPipelineRunID, testPipelineRunID, entityID)
 	evt := exactJoinOccurrenceEvent(t, "join-declaration-owner", handle, routingSource, events.EventEnvelope{EntityID: entityID})
 	target := events.RouteIdentity{
 		FlowID: ".", FlowInstance: evt.RunID(), EntityID: entityID,

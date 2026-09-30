@@ -250,8 +250,8 @@ func completeSemanticFixtureHandlerRuleIdentity(node identity.ExecutableNode, ev
 				return runtimecontracts.SystemNodeEventHandler{}, err
 			}
 		}
-		if join.TimeoutFound {
-			join.Timeout.Outcome, err = admit("join_timeout", 0, join.Timeout.Outcome)
+		if join.OnDeadlineFound {
+			join.OnDeadline, err = admit("join_on_deadline", 0, join.OnDeadline)
 			if err != nil {
 				return runtimecontracts.SystemNodeEventHandler{}, err
 			}

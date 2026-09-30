@@ -210,7 +210,7 @@ func selectedContractDeferredWorkCapabilities(plan runfork.RunForkPlan, source s
 	if source != nil {
 		hasTimedJoin, hasFanOutBarrier := false, false
 		for _, join := range source.WorkflowJoins() {
-			if join.Spec.TimeoutFound || strings.TrimSpace(join.Spec.Timeout.After) != "" {
+			if join.Spec.Deadline != nil && strings.TrimSpace(join.Spec.Deadline.After) != "" {
 				hasTimedJoin = true
 			}
 			if join.Mode == runtimecontracts.WorkflowJoinModeFanOutDelivery {

@@ -122,6 +122,11 @@ func (pc *PipelineCoordinator) prepareDeliveryTargetApplication(
 	if err := ValidateStampedDeliveryTargetOwnership(source, evt, events.MustNodeDeliveryRecipient(handlerFact.Node()), handlerFact, handler, owner); err != nil {
 		return DeliveryTargetApplication{}, err
 	}
+	if admitted, found := workflowNodeDeliveryRoute(ctx); found && len(admitted.Context.Joins) > 0 {
+		if _, _, err := PrepareWorkflowJoinAdmission(source, evt.RunID(), string(evt.Type()), admitted, nil); err != nil {
+			return DeliveryTargetApplication{}, err
+		}
+	}
 	handlerEventType := evt.Type()
 	if handlerFact.eventType != "" {
 		handlerEventType = handlerFact.eventType
@@ -198,9 +203,11 @@ func (pc *PipelineCoordinator) prepareDeliveryTargetApplication(
 			return DeliveryTargetApplication{}, fmt.Errorf("validate exact admitted delivery target entity contract: %w", err)
 		}
 		owned := workflowInstanceOwnedByFlow(source, instance, flowID, evt.RunID())
-		unavailable := deliveryTargetWorkflowInstanceUnavailable(source, flowID, instance)
-		if !owned || unavailable {
-			return DeliveryTargetApplication{}, fmt.Errorf("exact admitted delivery target lifecycle descriptor or status conflicts with compiled receiver: flow=%q workflow=%q route=%q state=%q status=%q owned=%t unavailable=%t", flowID, instance.WorkflowName, instance.StorageRef, instance.CurrentState, instance.Status, owned, unavailable)
+		if !owned {
+			return DeliveryTargetApplication{}, fmt.Errorf("exact admitted delivery target lifecycle descriptor conflicts with compiled receiver: flow=%q workflow=%q route=%q", flowID, instance.WorkflowName, instance.StorageRef)
+		}
+		if err := validateAdmittedReceiverAvailability(ctx, source, flowID, evt, instance); err != nil {
+			return DeliveryTargetApplication{}, err
 		}
 		if err := application.applyPersistedInstance(instance, target.Presence); err != nil {
 			return DeliveryTargetApplication{}, err
@@ -213,8 +220,11 @@ func (pc *PipelineCoordinator) prepareDeliveryTargetApplication(
 		if _, err := requireWorkflowInstanceIdentity(route, identity.NormalizeEntityID(application.entityID), instance); err != nil {
 			return DeliveryTargetApplication{}, fmt.Errorf("validate exact admitted delivery target state: %w", err)
 		}
-		if !workflowInstanceOwnedByFlow(source, instance, flowID, evt.RunID()) || deliveryTargetWorkflowInstanceUnavailable(source, flowID, instance) {
+		if !workflowInstanceOwnedByFlow(source, instance, flowID, evt.RunID()) {
 			return DeliveryTargetApplication{}, fmt.Errorf("exact admitted delivery target state conflicts with compiled receiver: flow=%q workflow=%q route=%q status=%q", flowID, instance.WorkflowName, instance.StorageRef, instance.Status)
+		}
+		if err := validateAdmittedReceiverAvailability(ctx, source, flowID, evt, instance); err != nil {
+			return DeliveryTargetApplication{}, err
 		}
 		if err := application.applyPersistedInstance(instance, target.Presence); err != nil {
 			return DeliveryTargetApplication{}, err
@@ -308,12 +318,14 @@ func (pc *PipelineCoordinator) loadCurrentDeliveryTargetState(
 	if err := validateWorkflowEntityType(pc.SemanticSource(), application.FlowID(), current.EntityType); err != nil {
 		return WorkflowInstance{}, target.Presence, fmt.Errorf("validate reloaded admitted delivery target entity contract: %w", err)
 	}
-	if !workflowInstanceOwnedByFlow(pc.SemanticSource(), current, application.FlowID(), application.Event().RunID()) ||
-		deliveryTargetWorkflowInstanceUnavailable(pc.SemanticSource(), application.FlowID(), current) {
+	if !workflowInstanceOwnedByFlow(pc.SemanticSource(), current, application.FlowID(), application.Event().RunID()) {
 		return WorkflowInstance{}, target.Presence, fmt.Errorf(
 			"reloaded admitted delivery target conflicts with compiled receiver: flow=%q workflow=%q route=%q status=%q",
 			application.FlowID(), current.WorkflowName, current.StorageRef, current.Status,
 		)
+	}
+	if err := validateAdmittedReceiverAvailability(ctx, pc.SemanticSource(), application.FlowID(), application.Event(), current); err != nil {
+		return WorkflowInstance{}, target.Presence, err
 	}
 	return current, target.Presence, nil
 }

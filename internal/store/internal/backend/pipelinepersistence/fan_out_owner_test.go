@@ -231,12 +231,14 @@ func seedFanOutReadbackClaim(t *testing.T, db *sql.DB) runtimepipeline.FanOutChu
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	runID, eventID, deliveryID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	elementRef := runtimecontracts.FanOutElementRef{FlowPath: "root", Family: "handler_rule", SemanticPath: `handlers["items.ready"].rules[0]`}
+	evidence, digest := a2CollectionFixtureEvidence(t, elementRef, "payload.items", runtimecontracts.CatalogTypeReference{Type: "[jsonb]"})
 	producer, err := events.NewRootRoutingSource(uuid.NewString())
 	if err != nil {
 		t.Fatal(err)
 	}
 	capsule, err := fanoutobligation.MarshalCapsule(fanoutobligation.Capsule{
-		NodeKey: "root.fan-out", ExecutionFlowID: "root", Route: runtimeflowidentity.StoredRoute("root", "root", "root"),
+		SourceProjection: evidence,
+		NodeKey:          "root.fan-out", ExecutionFlowID: "root", Route: runtimeflowidentity.StoredRoute("root", "root", "root"),
 		HandlerEventKey: "items.ready", ProducerSource: producer,
 		Lineage:     events.EventLineage{RunID: runID, ParentEventID: eventID, ExecutionMode: executionmode.Live},
 		StateFields: map[string]any{"integer": int64(75), "double": float64(75)},
@@ -252,7 +254,7 @@ func seedFanOutReadbackClaim(t *testing.T, db *sql.DB) runtimepipeline.FanOutChu
 		run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,bundle_hash,semantic_digest,source_kind,source_event_id,source_field,
 		cardinality,cursor,status,next_chunk_size,created_at,updated_at,claim_owner,claim_generation,lease_expires_at,capsule
 	) VALUES ($1,$2,$3,$4,$5,$6,$7,'event_payload_field',$8,'items',2,0,'open',4,$9,$9,$10,1,$11,$12)`,
-		runID, deliveryID, elementRef.FlowPath, elementRef.Family, elementRef.SemanticPath, "bundle-v2:sha256:"+strings.Repeat("1", 64), "sha256:"+strings.Repeat("2", 64), eventID, now, claim.Owner, claim.LeaseUntil, string(capsule)); err != nil {
+		runID, deliveryID, elementRef.FlowPath, elementRef.Family, elementRef.SemanticPath, "bundle-v2:sha256:"+strings.Repeat("1", 64), digest, eventID, now, claim.Owner, claim.LeaseUntil, string(capsule)); err != nil {
 		t.Fatal(err)
 	}
 	failure := runtimeengine.NormalizeFailure(&runtimeengine.EmitPayloadContractError{

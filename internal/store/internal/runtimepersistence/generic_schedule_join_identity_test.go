@@ -12,11 +12,14 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
+	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -594,7 +597,27 @@ func TestJoinScheduleRestoreRejectsDriftedEventWithoutFailingTypedJoinRow(t *tes
 func selectedStoreJoinScheduleCommand(t *testing.T, runID, declarationFlowPath, flowID, flowInstance string, generation attemptgeneration.Generation) runtimegenericschedule.AdmissionCommand {
 	t.Helper()
 	entityID := uuid.NewString()
-	ref, err := timeridentity.NewJoinRefForGeneration(mustPersistenceNode(declarationFlowPath, "join-node"), "item.completed", "awaiting", "shared", "window-1", generation)
+	instancePath := flowInstance
+	if declarationFlowPath == "." {
+		entityID, instancePath = runID, runID
+	}
+	owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.RouteForInstancePath(instancePath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	effect, err := workflowlifecycle.NewInitialEntry(owner.Route, identity.NormalizeEntityID(entityID), "awaiting", executionmode.Live, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, enters, err := effect.StageEntry(owner)
+	if err != nil || !enters || entry.OriginRunID != "" {
+		t.Fatalf("join schedule lifecycle entry = %#v enters=%v err=%v", entry, enters, err)
+	}
+	ref, err := timeridentity.NewJoinRef(mustPersistenceNode(declarationFlowPath, "join-node"), "item.completed", "awaiting", "shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err = ref.BindStageEntry(entry, generation)
 	if err != nil {
 		t.Fatal(err)
 	}

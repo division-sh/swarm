@@ -22,6 +22,7 @@ type PreparedWorkflowPublicationState struct {
 	availability DeliveryTargetAvailability
 	fields       string
 	instanceID   string
+	joinState    string
 }
 
 type preparedPublicationMutation struct {
@@ -71,12 +72,38 @@ func prepareWorkflowPublicationState(record WorkflowEngineStateRecord, lifecycle
 	if err != nil {
 		return PreparedWorkflowPublicationState{}, err
 	}
+	state, err := canonicaljson.Bytes(record)
+	if err != nil {
+		return PreparedWorkflowPublicationState{}, err
+	}
 	return PreparedWorkflowPublicationState{
 		digest: sha256.Sum256(raw), source: source, runID: record.Identity.RunID,
 		route:        events.RouteIdentity{FlowID: flowID, FlowInstance: record.Identity.Route.InstancePath, EntityID: record.EntityID},
 		availability: NewDeliveryTargetAvailability(record.CurrentState, record.Status, !record.TerminatedAt.IsZero()),
 		fields:       string(record.Fields), instanceID: record.Identity.Route.InstanceID,
+		joinState: string(state),
 	}, nil
+}
+
+func (p PreparedWorkflowPublicationState) JoinAdmissionInstance(target events.RouteIdentity) (*WorkflowInstance, error) {
+	if p.Empty() || p.route != target {
+		return nil, nil
+	}
+	var record WorkflowEngineStateRecord
+	if err := json.Unmarshal([]byte(p.joinState), &record); err != nil {
+		return nil, err
+	}
+	revision := record.ExpectedRevision + 1
+	instance, err := DecodeWorkflowEntityStatePersistenceRecord(WorkflowEntityStatePersistenceRecord{
+		EntityID: record.EntityID, FlowInstance: record.Identity.Route.InstancePath, EntityType: record.EntityType,
+		CurrentState: record.CurrentState, Revision: revision, EnteredStageAt: record.EnteredStageAt,
+		Fields: record.Fields, Bookkeeping: record.Bookkeeping, Gates: record.Gates, Accumulator: record.Accumulator,
+		CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt,
+	}, record.Identity.Route, record.WorkflowName, record.WorkflowVersion, record.Mode)
+	if err != nil {
+		return nil, err
+	}
+	return &instance, nil
 }
 
 func (p PreparedWorkflowPublicationState) Empty() bool {

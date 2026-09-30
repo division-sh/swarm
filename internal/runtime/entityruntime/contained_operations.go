@@ -79,7 +79,10 @@ func NormalizeContainedOperationKey(contract Contract, keyType string, value any
 		if err != nil {
 			return "", err
 		}
-		key := strings.TrimSpace(fmt.Sprint(normalized))
+		key := fmt.Sprint(normalized)
+		if !isTextType(keyType) {
+			key = strings.TrimSpace(key)
+		}
 		if key == "" {
 			return "", fmt.Errorf("map key cannot be empty")
 		}

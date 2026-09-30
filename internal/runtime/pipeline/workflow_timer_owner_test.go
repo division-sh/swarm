@@ -1183,7 +1183,7 @@ func TestWorkflowTimerLifecycleReconcilesOnlyHandledOutcomesOnBothStores(t *test
 			assertOneStatus("discard.target", workflowTimerStatusActive)
 
 			dedupHandler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{
-				Into: "items", From: "payload", DedupBy: "payload.item_id",
+				Into: "items", From: "payload", Key: "payload.item_id",
 			}}
 			execute("dedup.event", []byte(`{"item_id":"item-1"}`), dedupHandler, true)
 			assertOneStatus("dedup.start", workflowTimerStatusActive)
@@ -2716,7 +2716,7 @@ func workflowTimerHandledOutcomeBundle(t *testing.T) *runtimecontracts.WorkflowC
 	return loadWorkflowTempBundle(t, map[string]string{
 		"schema.yaml":   "name: workflow-timer-owner-test\nstages:\n  waiting: {initial: true}\n",
 		"entities.yaml": "test_entity: {}\n",
-		"events.yaml":   "timer.accepted:\ntimer.reject.start:\ntimer.reject.target:\ntimer.discard.start:\ntimer.discard.target:\ntimer.dedup.start:\ntimer.dedup.target:\n",
+		"events.yaml":   "dedup.event:\n  item_id: text\ntimer.accepted:\ntimer.reject.start:\ntimer.reject.target:\ntimer.discard.start:\ntimer.discard.target:\ntimer.dedup.start:\ntimer.dedup.target:\n",
 		"nodes.yaml": `observer:
   execution_type: system_node
   timers:

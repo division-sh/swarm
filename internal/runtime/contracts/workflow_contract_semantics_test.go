@@ -98,13 +98,15 @@ func TestWorkflowSemanticsRuleEmitUsesHandlerAdvancesToFallback(t *testing.T) {
 }
 
 func TestWorkflowSemanticsJoinPlanPreservesDeclaringResultCatalog(t *testing.T) {
-	spec := JoinSpec{Output: "payload.result"}
+	spec := JoinSpec{Stage: "waiting", Members: JoinMembersSpec{Count: new(int), By: "payload.member"},
+		Output: "payload.result", OnCompleteFound: true, OnComplete: HandlerRuleEntry{AdvancesTo: "done"},
+		Deadline: &JoinDeadlineSpec{After: "1h", From: JoinDeadlineFromStageEntry}, OnDeadlineFound: true, OnDeadline: HandlerRuleEntry{AdvancesTo: "expired"}}
 	bundle := &WorkflowContractBundle{
 		RootTypes: TypeCatalogDocument{Types: map[string]NamedTypeDecl{
 			"JoinResult": {Fields: map[string]TypeFieldSpec{"value": {Type: "text"}}},
 		}},
 		Events: map[string]EventCatalogEntry{
-			"item.completed": {Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{"result": {Type: "JoinResult"}}}},
+			"item.completed": {Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{"member": {Type: "text"}, "result": {Type: "JoinResult"}}}},
 		},
 		Nodes: map[string]SystemNodeContract{
 			"join-node": {EventHandlers: map[string]SystemNodeEventHandler{"item.completed": {Join: &spec}}},

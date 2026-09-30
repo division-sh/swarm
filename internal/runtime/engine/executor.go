@@ -201,6 +201,12 @@ func (e *Executor) ValidateRequest(req ExecutionRequest) error {
 	if !req.Node.Valid() {
 		return fmt.Errorf("%w: exact executable node identity is required", ErrInvalidConfig)
 	}
+	if len(req.Handler.JoinUntilPlans) > 0 {
+		resolved := semanticview.ResolveExecutableNodeSubscriptionHandler(e.deps.Source, req.Node, req.HandlerEventKey)
+		if !resolved.Matched || !reflect.DeepEqual(resolved.Handler.JoinUntilPlans, req.Handler.JoinUntilPlans) {
+			return fmt.Errorf("%w: until execution requires the exact compiled closure consumers", ErrInvalidConfig)
+		}
+	}
 	if req.Route.Valid() && strings.TrimSpace(req.ExecutionFlowID.String()) == "" {
 		return fmt.Errorf("%w: exact execution flow identity is required", ErrInvalidConfig)
 	}
@@ -666,6 +672,11 @@ func (e *Executor) resolveHandlerCollectionPlan(req ExecutionRequest) (runtimeco
 }
 
 func (e *Executor) runSteps(frame *executionFrame) error {
+	if len(frame.req.Handler.JoinUntilPlans) > 0 {
+		if err := e.stepJoinUntil(frame); err != nil {
+			return err
+		}
+	}
 	for _, step := range OrderedSteps {
 		stop, err := e.runStep(frame, step)
 		if err != nil {
@@ -763,35 +774,35 @@ func (e *Executor) stepJoin(frame *executionFrame) (bool, error) {
 			"row_id": spec.EffectiveID(), "node_id": frame.req.Node.Key(), "handler_event": strings.TrimSpace(frame.req.HandlerEventKey),
 		})
 	}
-	window := ""
-	generation := attemptgeneration.Generation{}
-	if internal {
-		window = ref.Window()
-		generation = ref.Generation()
-	} else if spec.Window != nil {
-		value, ok := resolveContractPath(e.currentContext(frame), frame.state, spec.Window.ByPath, spec.Window.By)
-		if !ok || strings.TrimSpace(asString(value)) == "" {
-			return false, failures.New(failures.ClassUnexpectedArrival, "join_window_missing", "runtime.engine", "join", map[string]any{
-				"row_id": spec.EffectiveID(), "window_by": spec.Window.By,
-			})
+	if !internal {
+		context := events.DeliveryContextFromContext(frame.ctx)
+		if err := context.Validate(); err != nil {
+			return false, err
 		}
-		window = strings.TrimSpace(asString(value))
+		receipt, bound := context.JoinAdmission(declaration)
+		if !bound {
+			return false, fmt.Errorf("join execution requires its durable route admission receipt")
+		}
+		if receipt.Disposition == events.JoinAdmissionEarly {
+			return false, e.joinArrivalFailure(frame, failures.ClassEarlyArrival, "join_not_armed", spec, "", "")
+		}
+		ref = receipt.Ref
 	}
-	if !internal && frame.loopActivation != nil {
-		generation = frame.loopActivation.Generation()
+	address := frame.req.StateAddress()
+	entry := ref.StageEntry()
+	if err := entry.RequireOwner(address.FlowInstance.RunID, address.FlowInstance.Route.ScopeKey, address.FlowInstance.Route.InstanceID, address.FlowInstance.Route.InstancePath, address.EntityID.String(), spec.Stage); err != nil {
+		return false, err
 	}
-	key := joinruntime.ActivationKeyForGeneration(spec.Stage, spec.EffectiveID(), window, generation)
+	generation := ref.Generation()
+	key := joinruntime.ActivationKey(ref)
 	activation, found, err := joinruntime.Load(frame.state.State.StateCarrier.StateBuckets, frame.req.Node, key)
 	if err != nil {
 		return false, fmt.Errorf("load join activation %s: %w", key, err)
 	}
 	if !found {
-		return false, e.joinArrivalFailure(frame, failures.ClassEarlyArrival, "join_not_armed", spec, window, "")
+		return false, fmt.Errorf("bound join admission references missing retained arm %s", key)
 	}
-	expectedRef, err := timeridentity.NewJoinRefForGeneration(
-		declaration.Node(), declaration.HandlerEvent(), declaration.Stage(), declaration.JoinID(), window, generation,
-	)
-	if err != nil || !activation.JoinRef().Equal(expectedRef) {
+	if !activation.JoinRef().Equal(ref) {
 		return false, failures.New(failures.ClassUnexpectedArrival, "join_activation_identity_mismatch", "runtime.engine", "join", map[string]any{
 			"row_id": spec.EffectiveID(), "node_id": frame.req.Node.Key(), "handler_event": strings.TrimSpace(frame.req.HandlerEventKey),
 		})
@@ -802,11 +813,11 @@ func (e *Executor) stepJoin(frame *executionFrame) (bool, error) {
 			return false, err
 		}
 		if !current {
-			return false, e.joinArrivalFailure(frame, failures.ClassUnexpectedArrival, "join_generation_superseded", spec, window, "")
+			return false, e.joinArrivalFailure(frame, failures.ClassUnexpectedArrival, "join_generation_superseded", spec, entry.Key(), "")
 		}
 	}
 	if internal && timerKind == timeridentity.TimerHandleJoinComplete {
-		if activation.Status != joinruntime.StatusClosed || activation.CloseReason != joinruntime.CloseReasonComplete || !activation.OutcomePending || activation.OutcomeFired {
+		if activation.Status != joinruntime.StatusClosed || (activation.CloseReason != joinruntime.CloseReasonComplete && activation.CloseReason != joinruntime.CloseReasonUntil) || !activation.OutcomePending || activation.OutcomeFired {
 			frame.result.Status = OutcomeDiscarded
 			return true, nil
 		}
@@ -825,36 +836,40 @@ func (e *Executor) stepJoin(frame *executionFrame) (bool, error) {
 			frame.result.Status = OutcomeDiscarded
 			return true, nil
 		}
-		return false, e.joinArrivalFailure(frame, failures.ClassStaleArrival, "join_closed", spec, window, "")
+		return false, e.joinArrivalFailure(frame, failures.ClassStaleArrival, "join_closed", spec, entry.Key(), "")
 	}
 	if internal && timerKind == timeridentity.TimerHandleJoinTimeout {
-		if !activation.Close(joinruntime.CloseReasonTimeout, false, true) {
+		if !activation.Close(joinruntime.CloseReasonDeadline, false, true) {
 			frame.result.Status = OutcomeDiscarded
 			return true, nil
 		}
 		if err := e.storeJoinActivation(frame, activation); err != nil {
 			return false, err
 		}
-		timeout := spec.Timeout.Outcome
+		timeout := spec.OnDeadline
 		if err := e.selectJoinOutcome(frame, &timeout, handlerRuleSourceJoinTimeout, activation); err != nil {
 			return false, err
 		}
 		return false, nil
 	}
 	if internal {
-		return false, e.joinArrivalFailure(frame, failures.ClassUnexpectedArrival, "join_internal_event_invalid", spec, window, "")
+		return false, e.joinArrivalFailure(frame, failures.ClassUnexpectedArrival, "join_internal_event_invalid", spec, entry.Key(), "")
 	}
-	if strings.TrimSpace(frame.state.State.CurrentState) != strings.TrimSpace(spec.Stage) {
-		return false, e.joinArrivalFailure(frame, failures.ClassStaleArrival, "join_stage_closed", spec, window, "")
+	current, err := currentJoinEntry(frame, ref)
+	if err != nil {
+		return false, err
+	}
+	if !current {
+		return false, e.joinArrivalFailure(frame, failures.ClassStaleArrival, "join_stage_closed", spec, entry.Key(), "")
 	}
 	memberValue, ok := resolveContractPath(e.currentContext(frame), frame.state, spec.Members.ByPath, spec.Members.By)
-	member := strings.TrimSpace(asString(memberValue))
-	if !ok || member == "" {
-		return false, e.joinArrivalFailure(frame, failures.ClassUnexpectedArrival, "join_member_missing", spec, window, member)
+	member, text := memberValue.(string)
+	if !ok || !text || member == "" {
+		return false, e.joinArrivalFailure(frame, failures.ClassUnexpectedArrival, "join_member_missing", spec, entry.Key(), member)
 	}
 	output, ok := resolveContractPath(e.currentContext(frame), frame.state, spec.OutputPath, spec.Output)
 	if !ok {
-		return false, e.joinArrivalFailure(frame, failures.ClassUnexpectedArrival, "join_output_missing", spec, window, member)
+		return false, e.joinArrivalFailure(frame, failures.ClassUnexpectedArrival, "join_output_missing", spec, entry.Key(), member)
 	}
 	disposition, err := activation.Add(member, output)
 	if err != nil {
@@ -862,40 +877,45 @@ func (e *Executor) stepJoin(frame *executionFrame) (bool, error) {
 	}
 	switch disposition {
 	case joinruntime.AddUnexpected:
-		return false, e.joinArrivalFailure(frame, failures.ClassUnexpectedArrival, "join_member_unexpected", spec, window, member)
+		return false, e.joinArrivalFailure(frame, failures.ClassUnexpectedArrival, "join_member_unexpected", spec, entry.Key(), member)
 	case joinruntime.AddConflictingDuplicate:
-		return false, e.joinArrivalFailure(frame, failures.ClassConflictingDuplicate, "join_member_conflicting_duplicate", spec, window, member)
+		return false, e.joinArrivalFailure(frame, failures.ClassConflictingDuplicate, "join_member_conflicting_duplicate", spec, entry.Key(), member)
 	case joinruntime.AddExactDuplicate:
-		frame.state.Join = activation.Context()
+		frame.state.Join, err = activation.Context()
+		if err != nil {
+			return false, err
+		}
 		frame.result.Status = OutcomeWaiting
 		return true, nil
 	case joinruntime.AddAccepted:
 	default:
 		return false, fmt.Errorf("unsupported join add disposition %q", disposition)
 	}
-	frame.state.Join = activation.Context()
-	complete, err := joinruntime.CompletionSatisfied(activation, spec.CompleteWhen, func(expression string, joinContext map[string]any) (bool, error) {
-		frame.state.Join = joinContext
-		return workflowexpr.EvalJoinBool(expression, joinContext, frame.joinResultType)
-	})
+	frame.state.Join, err = activation.Context()
 	if err != nil {
-		return false, fmt.Errorf("join complete_when: %w", err)
+		return false, err
 	}
-	if !complete {
+	if activation.Completed() != activation.Expected() {
 		if err := e.storeJoinActivation(frame, activation); err != nil {
 			return false, err
 		}
 		frame.result.Status = OutcomeWaiting
 		return true, nil
 	}
-	activation.Close(joinruntime.CloseReasonComplete, false, true)
+	activation.Close(joinruntime.CloseReasonComplete, true, false)
+	handle, err := timeridentity.JoinCompleteHandle(ref)
+	if err != nil {
+		return false, err
+	}
+	activation, err = activation.WithTimerHandle(handle, time.Now().UTC())
+	if err != nil {
+		return false, err
+	}
 	if err := e.storeJoinActivation(frame, activation); err != nil {
 		return false, err
 	}
-	if err := e.selectJoinOutcome(frame, &spec.OnComplete, handlerRuleSourceJoinOnComplete, activation); err != nil {
-		return false, err
-	}
-	return false, nil
+	frame.result.Status = OutcomeWaiting
+	return true, nil
 }
 
 func (e *Executor) stepFanOutDeliveryJoin(frame *executionFrame, plan runtimecontracts.WorkflowJoinPlan) (bool, error) {
@@ -958,30 +978,35 @@ func (e *Executor) storeJoinActivation(frame *executionFrame, activation joinrun
 		return fmt.Errorf("store join activation: %w", err)
 	}
 	frame.result.StateMutation.SetStateBuckets(frame.state.State.StateCarrier.StateBuckets)
-	frame.state.Join = activation.Context()
-	return nil
+	var err error
+	frame.state.Join, err = activation.Context()
+	return err
 }
 
 func (e *Executor) selectJoinOutcome(frame *executionFrame, rule *runtimecontracts.HandlerRuleEntry, source handlerRuleSource, activation joinruntime.Activation) error {
 	if err := e.bindJoinLoopContext(frame, activation.JoinRef()); err != nil {
 		return err
 	}
-	frame.state.Join = activation.Context()
+	var err error
+	frame.state.Join, err = activation.Context()
+	if err != nil {
+		return err
+	}
 	frame.rule = rule
 	frame.ruleSource = source
 	frame.ruleIndex = 0
 	return e.applyRule(frame, rule)
 }
 
-func (e *Executor) joinArrivalFailure(frame *executionFrame, class failures.Class, code string, spec *runtimecontracts.JoinSpec, window, member string) error {
+func (e *Executor) joinArrivalFailure(frame *executionFrame, class failures.Class, code string, spec *runtimecontracts.JoinSpec, entry, member string) error {
 	attributes := map[string]any{
 		"row_id":        spec.EffectiveID(),
 		"stage":         strings.TrimSpace(spec.Stage),
 		"node_id":       frame.req.Node.Key(),
 		"handler_event": strings.TrimSpace(frame.req.HandlerEventKey),
 	}
-	if strings.TrimSpace(window) != "" {
-		attributes["window"] = strings.TrimSpace(window)
+	if entry != "" {
+		attributes["stage_entry"] = entry
 	}
 	if strings.TrimSpace(member) != "" {
 		attributes["member"] = strings.TrimSpace(member)
@@ -1105,7 +1130,6 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	current := e.currentContext(frame)
 	bucketRef, matched, err := e.resolveAccumulatorBucketRef(frame, spec)
 	if err != nil {
 		return false, err
@@ -1117,25 +1141,17 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 	if !ok {
 		acc = &Accumulator{}
 	}
-	if acc.Received == nil {
-		acc.Received = map[string]bool{}
+	deliveryID := ""
+	if claim, ok := runtimedelivery.ClaimFromContext(frame.ctx); ok {
+		deliveryID = claim.DeliveryID()
 	}
-	arrivalID := dedupIdentifier(current, frame.state, frame.req.Event, spec)
-	if arrivalID != "" && acc.Received[arrivalID] {
+	duplicate, err := acc.Admit(spec, frame.payload, deliveryID)
+	if err != nil {
+		return false, err
+	}
+	if duplicate {
 		frame.result.Status = OutcomeDiscarded
 		return true, nil
-	}
-	if arrivalID != "" {
-		acc.Received[arrivalID] = true
-		item := cloneStringAnyMap(frame.payload)
-		if item == nil {
-			item = map[string]any{}
-		}
-		item["event_id"] = strings.TrimSpace(frame.req.Event.ID())
-		item["event_type"] = strings.TrimSpace(string(frame.req.Event.Type()))
-		item["source"] = strings.TrimSpace(frame.req.Event.SourceAgent())
-		item["received_at"] = frame.req.Event.CreatedAt().UTC().Format(time.RFC3339Nano)
-		acc.Items = append(acc.Items, item)
 	}
 	storeAccumulatorForBucket(&frame.state.State, bucketRef, acc)
 	frame.result.StateMutation.SetStateBuckets(frame.state.State.StateCarrier.StateBuckets)
@@ -1301,6 +1317,9 @@ func (e *Executor) executeComputeSpec(frame *executionFrame, spec *runtimecontra
 		return nil
 	}
 	acc, _ := loadAccumulatorForBucket(frame.state.State, bucketRef)
+	if err := acc.Err(); err != nil {
+		return err
+	}
 	var (
 		value any
 		err   error
@@ -1801,13 +1820,20 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 		return false, nil
 	}
 	plan := active.Plan
-	resolveItems := func() []any {
-		itemsValue, _ := resolveContractPath(e.currentContext(frame), frame.state, plan.ItemsPath, plan.ItemsFrom)
-		return sliceFromAny(itemsValue)
+	resolveItems := func() ([]any, error) {
+		itemsValue, present := resolveContractPath(e.currentContext(frame), frame.state, plan.ItemsPath, plan.ItemsFrom)
+		if !present {
+			return nil, fmt.Errorf("fan_out source %s is absent", plan.ItemsFrom)
+		}
+		return plan.SemanticEvidence().ProjectSource(itemsValue)
 	}
 	var items []any
+	var err error
 	if !plan.SourceAfterWrites {
-		items = resolveItems()
+		items, err = resolveItems()
+		if err != nil {
+			return false, err
+		}
 		frame.state.FanOut = map[string]any{}
 		frame.state.SetFanOut("count", len(items))
 	}
@@ -1818,7 +1844,10 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 		return false, err
 	}
 	if plan.SourceAfterWrites {
-		items = resolveItems()
+		items, err = resolveItems()
+		if err != nil {
+			return false, err
+		}
 		frame.state.FanOut = map[string]any{}
 		frame.state.SetFanOut("count", len(items))
 	}
@@ -1940,7 +1969,8 @@ func (e *Executor) buildFanOutIntent(frame *executionFrame, plan runtimecontract
 		Source:      source,
 		Cardinality: cardinality,
 		Capsule: fanoutobligation.Capsule{
-			NodeKey: frame.req.Node.Key(), ExecutionFlowID: frame.req.ExecutionFlowID.String(), Route: frame.req.Route,
+			SourceProjection: plan.SemanticEvidence(),
+			NodeKey:          frame.req.Node.Key(), ExecutionFlowID: frame.req.ExecutionFlowID.String(), Route: frame.req.Route,
 			EntityID: frame.req.EntityID.String(), HandlerEventKey: frame.req.HandlerEventKey,
 			CurrentState: frame.state.State.CurrentState, ChainDepth: frame.req.ChainDepth,
 			ProducerSource: frame.req.ProducerSource, Receiver: receiver, Lineage: events.LineageFromEvent(frame.req.Event),
@@ -2308,6 +2338,9 @@ func (e *Executor) stepProjection(frame *executionFrame) error {
 	if !ok {
 		return fmt.Errorf("accumulator projection source missing for node %s event %s", frame.req.Node.Key(), string(handlerEventType))
 	}
+	if err := acc.Err(); err != nil {
+		return err
+	}
 	for _, binding := range result.Bindings {
 		projected, err := e.projectAccumulatorItems(frame, binding, acc.Items)
 		if err != nil {
@@ -2342,13 +2375,16 @@ func (e *Executor) resolveAccumulatorBucketRef(frame *executionFrame, spec *runt
 	if frame.hasAccumulatorBucketRef {
 		return frame.accumulatorBucketRef, true, nil
 	}
-	bucketRef, err := handlerAccumulatorBucketRefForSpec(frame.req, e.currentContext(frame), frame.state, spec)
-	if err != nil {
-		return timeridentity.AccumulatorBucketRef{}, false, err
-	}
+	bucketRef := handlerAccumulatorBucketRef(frame.req)
 	if frame.loopActivation != nil {
-		bucketRef.Generation = frame.loopActivation.Generation()
-		bucketRef = bucketRef.Normalize()
+		generation := frame.loopActivation.Generation()
+		if !generation.Valid() {
+			return timeridentity.AccumulatorBucketRef{}, false, failures.New(failures.ClassLifecycleConflict, "accumulator_scope_invalid", "accumulator", "admit", nil)
+		}
+		bucketRef = timeridentity.NewAccumulatorBucketRefForGeneration(frame.req.Node, string(handlerAccumulatorEventType(frame.req)), generation)
+	}
+	if !bucketRef.Valid() {
+		return timeridentity.AccumulatorBucketRef{}, false, failures.New(failures.ClassLifecycleConflict, "accumulator_scope_invalid", "accumulator", "admit", nil)
 	}
 	frame.accumulatorBucketRef = bucketRef
 	frame.hasAccumulatorBucketRef = true
@@ -2359,15 +2395,19 @@ func (e *Executor) effectiveAccumulatorSpec(frame *executionFrame, spec *runtime
 	if spec == nil {
 		return nil, nil
 	}
-	if e == nil || e.deps.Source == nil || frame == nil {
-		return spec, nil
+	if frame == nil || e == nil {
+		return nil, fmt.Errorf("accumulator handler scope is required")
 	}
-	return runtimeaccumulator.EffectiveSpecForHandler(
+	err := runtimeaccumulator.ValidateSpecForHandler(
 		e.deps.Source,
 		frame.req.Node,
 		string(handlerAccumulatorEventType(frame.req)),
 		spec,
 	)
+	if err != nil {
+		return nil, failures.Wrap(failures.ClassSchemaInvalid, "accumulator_key_schema_invalid", "accumulator", "admit", nil, err)
+	}
+	return spec, err
 }
 
 func (e *Executor) projectAccumulatorItems(frame *executionFrame, binding accprojection.Binding, items []map[string]any) ([]any, error) {
@@ -2444,9 +2484,6 @@ func (e *Executor) evaluateProjectionExpression(frame *executionFrame, raw any, 
 	expr = strings.TrimSpace(expr)
 	if fieldName, ok := strings.CutPrefix(expr, "source."); ok {
 		fieldName = strings.TrimSpace(fieldName)
-		if _, reserved := accprojection.ReservedAccumulatorMetadata[fieldName]; reserved {
-			return nil, fmt.Errorf("reserved accumulator metadata %q is not addressable through source.*", fieldName)
-		}
 		value, ok := source[fieldName]
 		if !ok {
 			return nil, fmt.Errorf("unknown source field %q", fieldName)
@@ -2736,6 +2773,16 @@ func (e *Executor) buildWorkflowLifecycleEffect(frame *executionFrame) (runtimew
 	if err != nil {
 		return runtimeworkflowlifecycle.Effect{}, false, err
 	}
+	if frame.result.StateMutation.Transition != nil {
+		claim, found := runtimedelivery.ClaimFromContext(frame.ctx)
+		if !found || claim.RunID() != frame.req.Event.RunID() {
+			return runtimeworkflowlifecycle.Effect{}, false, fmt.Errorf("workflow transition requires its admitted delivery occurrence")
+		}
+		effect, err = effect.WithExecutionOccurrence("delivery", claim.DeliveryID())
+		if err != nil {
+			return runtimeworkflowlifecycle.Effect{}, false, err
+		}
+	}
 	return effect, true, nil
 }
 
@@ -2748,7 +2795,7 @@ func (e *Executor) persist(ctx context.Context, frame executionFrame) (Committed
 	frame.result.StateMutation.TriggerEventType = strings.TrimSpace(string(frame.req.Event.Type()))
 	frame.result.StateMutation.TriggeredAt = frame.req.Event.CreatedAt()
 	frame.result.StateMutation.InitialFieldValues = cloneStringAnyMap(frame.req.InitialFieldValues)
-	deliveryContext := events.DeliveryContextFromContext(ctx)
+	deliveryContext := events.DeliveryContextFromContext(ctx).ReplyOnly()
 	if !deliveryContext.Empty() {
 		for i := range frame.result.EmitIntents {
 			if frame.result.EmitIntents[i].Context.Empty() {

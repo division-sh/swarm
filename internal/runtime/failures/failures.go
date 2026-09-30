@@ -792,7 +792,7 @@ func decisions(def Definition, detail Detail) (bool, bool) {
 	case ClassComputeFailure:
 		deterministic = true
 	case ClassLifecycleConflict:
-		if detail.Code == "workflow_engine_state_revision_conflict" {
+		if detail.Code == "workflow_engine_state_revision_conflict" || detail.Code == "join_publication_entry_changed" {
 			retryable = true
 		}
 	case ClassInternalFailure:

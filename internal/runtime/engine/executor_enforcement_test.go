@@ -15,10 +15,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
-	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatefanin"
 )
 
 type persistentStateRepo struct {
@@ -449,7 +447,7 @@ func TestExecutor_OnCompleteRuleComputeAppliesValue(t *testing.T) {
 }
 
 func TestExecutor_AccumulationDuplicateStopsBeforeDownstreamEffects(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := mustCompileEngineSource(&runtimecontracts.WorkflowContractBundle{
 		RootEntities: runtimecontracts.EntityContractsDocument{"subject": {Fields: map[string]runtimecontracts.EntityFieldDecl{"marker": {Type: "text"}}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"task.completed": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{
 			"item_id": {Type: "text"}, "marker": {Type: "text"},
@@ -473,9 +471,9 @@ func TestExecutor_AccumulationDuplicateStopsBeforeDownstreamEffects(t *testing.T
 	}
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Accumulate: &runtimecontracts.AccumulateSpec{
-			Into:    "items",
-			From:    "payload",
-			DedupBy: "payload.item_id",
+			Into: "items",
+			From: "payload",
+			Key:  "payload.item_id",
 		},
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{{
@@ -501,7 +499,7 @@ func TestExecutor_AccumulationDuplicateStopsBeforeDownstreamEffects(t *testing.T
 	}
 	duplicate := first
 	duplicate.Event = eventtest.RunCreatingRootIngress("evt-2",
-		"task.completed", "", "", json.RawMessage(`{"item_id":"item-1","marker":"duplicate"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+		"task.completed", "", "", json.RawMessage(`{"item_id":"item-1","marker":"first"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	duplicateResult, err := exec.ExecuteSemanticFixture(context.Background(), duplicate)
 	if err != nil {
 		t.Fatalf("second Execute error: %v", err)
@@ -527,85 +525,5 @@ func TestExecutor_AccumulationDuplicateStopsBeforeDownstreamEffects(t *testing.T
 	}
 	if got := len(acc.Items); got != 1 {
 		t.Fatalf("item count = %d, want 1", got)
-	}
-}
-
-func TestExecutor_FanInInputOwnsWindowAndDedupAtRuntime(t *testing.T) {
-	source := templatefanin.LoadSource(t, templatefanin.Options{})
-	receiverNode := testFlowExecutableNode(t, templatefanin.ReceiverFlowID, templatefanin.ReceiverNodeID)
-	handler, ok := source.ExecutableNodeEventHandler(receiverNode, templatefanin.ReceiverEvent)
-	if !ok {
-		t.Fatalf("missing fixture handler %s.%s", templatefanin.ReceiverNodeID, templatefanin.ReceiverEvent)
-	}
-	repo := &persistentStateRepo{
-		found: true,
-		snapshot: StateSnapshot{
-			EntityID:     templatefanin.ReceiverFlowInstance,
-			CurrentState: source.FlowInitialStage(templatefanin.ReceiverFlowID),
-			StateCarrier: NewStateCarrier(map[string]any{}, nil, map[string]map[string]any{}),
-		},
-	}
-	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        source,
-		StateRepo:     repo,
-		MutationOwner: stubMutationOwner{state: repo},
-		Locker:        stubLocker{},
-	}, nil)
-	if err != nil {
-		t.Fatalf("NewExecutor error: %v", err)
-	}
-
-	execute := func(eventID, operatingID, periodID string) {
-		t.Helper()
-		payload, err := json.Marshal(map[string]any{
-			"period_id":    periodID,
-			"operating_id": operatingID,
-			"revenue":      42,
-		})
-		if err != nil {
-			t.Fatalf("marshal payload: %v", err)
-		}
-		_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-			EntityID:        templatefanin.ReceiverFlowInstance,
-			Node:            receiverNode,
-			HandlerEventKey: templatefanin.ReceiverEvent,
-			Handler:         handler,
-			Event: eventtest.RunCreatingRootIngress(
-				eventID,
-				events.EventType(templatefanin.ReceiverEvent),
-				"operating",
-				"",
-				payload,
-				0,
-				"",
-				"",
-				events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, templatefanin.ReceiverFlowInstance), templatefanin.ReceiverFlowInstance),
-				time.Now().UTC(),
-			),
-		})
-		if err != nil {
-			t.Fatalf("Execute(%s, %s, %s): %v", eventID, operatingID, periodID, err)
-		}
-	}
-
-	execute("evt-q1-a", "operating-a", "2026-Q1")
-	execute("evt-q1-duplicate", "operating-a", "2026-Q1")
-	execute("evt-q2-a", "operating-a", "2026-Q2")
-
-	for _, periodID := range []string{"2026-Q1", "2026-Q2"} {
-		bucket := timeridentity.NewAccumulatorWindowBucketRef(receiverNode, templatefanin.ReceiverEvent, periodID)
-		acc, ok := loadAccumulatorForBucket(repo.snapshot, bucket)
-		if !ok {
-			t.Fatalf("missing fan-in accumulator window %s in %#v", periodID, repo.snapshot.StateCarrier.StateBuckets)
-		}
-		if got := len(acc.Items); got != 1 {
-			t.Fatalf("window %s item count = %d, want 1 after pin-owned operating_id dedup", periodID, got)
-		}
-		if !acc.Received["operating-a"] {
-			t.Fatalf("window %s received keys = %#v, want operating-a", periodID, acc.Received)
-		}
-	}
-	if _, ok := loadAccumulatorForBucket(repo.snapshot, timeridentity.NewAccumulatorBucketRef(receiverNode, templatefanin.ReceiverEvent)); ok {
-		t.Fatalf("unwindowed accumulator survived: %#v", repo.snapshot.StateCarrier.StateBuckets)
 	}
 }

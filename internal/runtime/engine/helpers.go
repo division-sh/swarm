@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeaccumulator "github.com/division-sh/swarm/internal/runtime/accumulator"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
@@ -19,47 +20,7 @@ import (
 
 const handlerAccumulatorBucketKey = "handler_accumulators"
 
-type Accumulator struct {
-	Received map[string]bool  `json:"received,omitempty"`
-	Items    []map[string]any `json:"items,omitempty"`
-}
-
-func arrivalIdentifier(evt events.Event, payload map[string]any) string {
-	candidates := []string{
-		strings.TrimSpace(evt.ID()),
-		strings.TrimSpace(asString(payload["event_id"])),
-		strings.TrimSpace(asString(payload["id"])),
-		strings.TrimSpace(asString(payload["item_id"])),
-		strings.TrimSpace(asString(payload["source"])),
-		strings.TrimSpace(asString(payload["from"])),
-		strings.TrimSpace(asString(payload["agent_id"])),
-		strings.TrimSpace(asString(payload["node_id"])),
-		strings.TrimSpace(evt.SourceAgent()),
-	}
-	for _, candidate := range candidates {
-		if candidate != "" {
-			return candidate
-		}
-	}
-	return ""
-}
-
-func dedupIdentifier(base BaseContext, state ExecutionState, evt events.Event, spec *runtimecontracts.AccumulateSpec) string {
-	if spec != nil {
-		if value, ok := resolveContractPath(base, state, spec.DedupPath, spec.DedupBy); ok {
-			if key := stringifyDedupValue(value); key != "" {
-				return key
-			}
-		} else if ref := strings.TrimSpace(spec.DedupBy); ref != "" {
-			if value := resolveRef(base, state, ref); value != nil {
-				if key := stringifyDedupValue(value); key != "" {
-					return key
-				}
-			}
-		}
-	}
-	return arrivalIdentifier(evt, base.Payload.Raw())
-}
+type Accumulator = runtimeaccumulator.State
 
 func lookupPath(source map[string]any, path string) (any, bool) {
 	source = cloneStringAnyMap(source)
@@ -265,22 +226,6 @@ func handlerAccumulatorBucketRef(req ExecutionRequest) timeridentity.Accumulator
 	return accumulatorBucketRef(req.Node, handlerAccumulatorEventType(req))
 }
 
-func handlerAccumulatorBucketRefForSpec(req ExecutionRequest, base BaseContext, state ExecutionState, spec *runtimecontracts.AccumulateSpec) (timeridentity.AccumulatorBucketRef, error) {
-	bucket := handlerAccumulatorBucketRef(req)
-	if spec == nil || strings.TrimSpace(spec.Window) == "" {
-		return bucket, nil
-	}
-	value, ok := resolveContractPath(base, state, spec.WindowPath, spec.Window)
-	if !ok {
-		return timeridentity.AccumulatorBucketRef{}, fmt.Errorf("accumulate.window %q did not resolve for node %s event %s", spec.Window, req.Node.Key(), string(handlerAccumulatorEventType(req)))
-	}
-	window := strings.TrimSpace(fmt.Sprint(value))
-	if window == "" {
-		return timeridentity.AccumulatorBucketRef{}, fmt.Errorf("accumulate.window %q resolved empty for node %s event %s", spec.Window, req.Node.Key(), string(handlerAccumulatorEventType(req)))
-	}
-	return timeridentity.NewAccumulatorWindowBucketRef(bucket.Node, bucket.EventType, window), nil
-}
-
 func loadAccumulator(state StateSnapshot, node identity.ExecutableNode, eventType events.EventType) (*Accumulator, bool) {
 	return loadAccumulatorForBucket(state, accumulatorBucketRef(node, eventType))
 }
@@ -302,16 +247,7 @@ func loadAccumulatorForBucket(state StateSnapshot, bucketRef timeridentity.Accum
 	if !ok {
 		return nil, false
 	}
-	acc := &Accumulator{
-		Received: map[string]bool{},
-		Items:    sliceOfMapsFromAny(raw.Raw()["items"]),
-	}
-	if received, ok := raw.Map("received"); ok {
-		for _, key := range received.Keys() {
-			acc.Received[strings.TrimSpace(key)] = received.Bool(key)
-		}
-	}
-	return acc, true
+	return runtimeaccumulator.Load(raw.Raw()), true
 }
 
 func storeAccumulator(state *StateSnapshot, node identity.ExecutableNode, eventType events.EventType, acc *Accumulator) {
@@ -334,13 +270,18 @@ func storeAccumulatorForBucket(state *StateSnapshot, bucketRef timeridentity.Acc
 	for _, key := range keys {
 		received[key] = acc.Received[key]
 	}
+	deliveries := map[string]any{}
+	for key, hash := range acc.Deliveries {
+		deliveries[key] = hash
+	}
 	items := make([]map[string]any, 0, len(acc.Items))
 	for _, item := range acc.Items {
 		items = append(items, cloneStringAnyMap(item))
 	}
 	accumulators.Set(bucketRef.Key(), map[string]any{
-		"received": received,
-		"items":    items,
+		"received":   received,
+		"deliveries": deliveries,
+		"items":      items,
 	})
 }
 
@@ -354,16 +295,13 @@ func accumulatorExpressionValue(acc *Accumulator) map[string]any {
 	}
 	return map[string]any{
 		"items":          items,
-		"received_count": len(acc.Received),
+		"received_count": len(acc.Items),
 	}
 }
 
 func accumulatorItemFields(item map[string]any) map[string]any {
 	if len(item) == 0 {
 		return map[string]any{}
-	}
-	if payload, ok := asObject(item["payload"]); ok && len(payload) > 0 {
-		return payload
 	}
 	return item
 }
@@ -1038,19 +976,6 @@ func normalizeStrings(values []string) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-func stringifyDedupValue(value any) string {
-	switch typed := value.(type) {
-	case nil:
-		return ""
-	case string:
-		return strings.TrimSpace(typed)
-	case []byte:
-		return strings.TrimSpace(string(typed))
-	default:
-		return strings.TrimSpace(fmt.Sprint(value))
-	}
 }
 
 func asInt(v any) int {

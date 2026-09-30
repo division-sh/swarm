@@ -640,17 +640,17 @@ func materializeRunForkEntityState(ctx context.Context, decisions runForkDecisio
 	if err != nil {
 		return fmt.Errorf("encode fork fields for entity %s: %w", entityID, err)
 	}
-	bookkeepingJSON, err := jsonMapArg(entity.Bookkeeping)
+	forkBookkeeping, forkAccumulator, correspondence, err := projectRunForkEntityExecutionState(entity, plan.SourceRunID, forkRunID, projection)
+	if err != nil {
+		return fmt.Errorf("fork execution state for entity %s: %w", entityID, err)
+	}
+	bookkeepingJSON, err := jsonMapArg(forkBookkeeping)
 	if err != nil {
 		return fmt.Errorf("encode fork bookkeeping for entity %s: %w", entityID, err)
 	}
 	gatesJSON, err := jsonMapArg(entity.Gates)
 	if err != nil {
 		return fmt.Errorf("encode fork gates for entity %s: %w", entityID, err)
-	}
-	forkAccumulator, correspondence, err := projectRunForkAttemptGenerationState(entity.Accumulator, forkRunID, entityID)
-	if err != nil {
-		return fmt.Errorf("fork loop state for entity %s: %w", entityID, err)
 	}
 	forkAccumulator, gateBindings, err := forkGateActivationState(forkAccumulator, forkRunID, meta.FlowInstance, entityID)
 	if err != nil {
@@ -690,7 +690,7 @@ func materializeRunForkEntityState(ctx context.Context, decisions runForkDecisio
 	after := runtimemutationlog.EntityStateProjection{
 		CurrentState: currentState,
 		Fields:       entity.Fields,
-		Bookkeeping:  entity.Bookkeeping,
+		Bookkeeping:  forkBookkeeping,
 		Gates:        entity.Gates,
 		Accumulator:  forkAccumulator,
 	}

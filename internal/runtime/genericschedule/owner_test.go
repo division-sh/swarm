@@ -12,12 +12,15 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
+	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -170,12 +173,33 @@ func TestFlowScheduleStillRequiresEntityForEntitylessControlSource(t *testing.T)
 
 func testJoinScheduleCommand(t *testing.T, flowID, flowInstance string, generation attemptgeneration.Generation) AdmissionCommand {
 	t.Helper()
+	runID := uuid.NewString()
 	entityID := uuid.NewString()
+	instancePath := flowInstance
 	node := identitytest.RootNode(t, "join-node")
 	if flowID != "" {
 		node = identitytest.FlowNode(t, flowID, "join-node")
+	} else {
+		entityID, instancePath = runID, runID
 	}
-	ref, err := timeridentity.NewJoinRefForGeneration(node, "item.completed", "awaiting", "shared", "window-1", generation)
+	owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.RouteForInstancePath(instancePath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	effect, err := workflowlifecycle.NewInitialEntry(owner.Route, identity.NormalizeEntityID(entityID), "awaiting", executionmode.Live, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, enters, err := effect.StageEntry(owner)
+	if err != nil || !enters {
+		t.Fatalf("join schedule construction entry: enters=%v err=%v", enters, err)
+	}
+	ref, err := timeridentity.NewJoinRef(node, "item.completed", "awaiting", "shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err = ref.BindStageEntry(entry, generation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,9 +221,9 @@ func testJoinScheduleCommand(t *testing.T, flowID, flowInstance string, generati
 		t.Fatal(err)
 	}
 	return AdmissionCommand{
-		ScheduleKey: handle.TaskID(), RunID: uuid.NewString(), EntityID: entityID, FlowInstance: flowInstance,
+		ScheduleKey: handle.TaskID(), RunID: runID, EntityID: entityID, FlowInstance: flowInstance,
 		OwnerKind: OwnerSystem, OwnerID: "workflow-runtime", EventType: handle.EventType(), Payload: payload,
-		RoutingSource: routing, ExecutionMode: executionmode.Live, Due: AbsoluteDue(time.Now().UTC().Add(time.Hour)), TaskID: handle.TaskID(),
+		RoutingSource: routing, ExecutionMode: executionmode.Live, Due: AbsoluteDue(now.Add(time.Hour)), TaskID: handle.TaskID(),
 	}
 }
 

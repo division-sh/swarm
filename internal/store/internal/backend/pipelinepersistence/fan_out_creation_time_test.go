@@ -24,6 +24,7 @@ func TestFanOutProducerFairnessIgnoresCallerAuditTimeBothStores(t *testing.T) {
 			request.Capsule.EntityID = uuid.NewString()
 			request.Source = fanoutobligation.SourceRef{Kind: fanoutobligation.SourceEntityField,
 				RunID: request.Key.RunID, EntityID: request.Capsule.EntityID, Field: "items"}
+			request.Capsule.SourceProjection, request.PlanRef.SemanticDigest = a2CollectionFixtureEvidence(t, request.PlanRef.ElementRef, "entity.items", request.Capsule.SourceProjection.CollectionType)
 			valueType := "TEXT"
 			if backend == "postgres" {
 				valueType = "JSONB"

@@ -625,6 +625,9 @@ var systemNodeEventHandlerEntityClassifiers = map[string]handlerEntityFieldClass
 	"Join": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
 		return existingWhen(handler.Join != nil)
 	},
+	"JoinUntilPlans": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
+		return existingWhen(len(handler.JoinUntilPlans) != 0)
+	},
 	"Compute": func(source semanticview.Source, flowID string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
 		if computeStoresEntityField(handler.Compute, workflowEntitySchemaFields(source, flowID)) {
 			return DeliveryTargetEntityMaterializing

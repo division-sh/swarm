@@ -7,38 +7,28 @@ import (
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
-func TestFanInBarrierContractDerivesEffectiveJoinPlan(t *testing.T) {
-	repoRoot := canonicalrouting.RepoRoot(t)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
-		repoRoot,
-		canonicalrouting.ExampleRoot(t, canonicalrouting.FanInBarrier),
-		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
-	)
+func TestWorkflowJoinViewPreservesCompilerOwnedMembership(t *testing.T) {
+	node, err := runtimeidentity.AdmitExecutableNodeDeclaration("collector", "join-node")
 	if err != nil {
-		t.Fatalf("load canonical fan-in barrier: %v", err)
+		t.Fatal(err)
 	}
-	raw := requireSingleJoinPlan(t, bundle.WorkflowJoins())
-	if raw.Spec.Members.By != "" || raw.Spec.Window == nil || raw.Spec.Window.By != "" {
-		t.Fatalf("authored join unexpectedly contains derived fields: %#v", raw.Spec)
-	}
-
+	count := 2
+	spec := runtimecontracts.JoinSpec{ID: "collected", Stage: "waiting",
+		Members:  runtimecontracts.JoinMembersSpec{Count: &count, By: "payload.member_id"},
+		Deadline: &runtimecontracts.JoinDeadlineSpec{After: "1h", From: runtimecontracts.JoinDeadlineFromStageEntry}}
+	bundle := &runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{Joins: []runtimecontracts.WorkflowJoinPlan{
+		{Node: node, HandlerEvent: "item.completed", Mode: runtimecontracts.WorkflowJoinModeArrival, Spec: spec},
+	}}}
 	effective := requireSingleJoinPlan(t, semanticview.Wrap(bundle).WorkflowJoins())
-	if effective.Spec.Members.By != "payload.operating_id" || effective.Derivation.MembersByFrom != "resolution.dedup_by" {
-		t.Fatalf("effective member derivation = %#v", effective)
+	if effective.Spec.Members.By != "payload.member_id" || *effective.Spec.Members.Count != 2 {
+		t.Fatalf("view replaced compiler membership: %#v", effective)
 	}
-	if effective.Spec.Window == nil || effective.Spec.Window.By != "payload.period_id" || effective.Derivation.WindowByFrom != "resolution.window" {
-		t.Fatalf("effective window derivation = %#v", effective)
-	}
-	if effective.Derivation.FanInPin != "operating.reported" {
-		t.Fatalf("effective fan-in pin = %q", effective.Derivation.FanInPin)
-	}
-
-	rawAfter := requireSingleJoinPlan(t, bundle.WorkflowJoins())
-	if rawAfter.Spec.Members.By != "" || rawAfter.Spec.Window == nil || rawAfter.Spec.Window.By != "" {
-		t.Fatalf("effective lowering mutated authored join: %#v", rawAfter.Spec)
+	*effective.Spec.Members.Count = 7
+	effective.Spec.Deadline.After = "9h"
+	if raw := requireSingleJoinPlan(t, bundle.WorkflowJoins()); *raw.Spec.Members.Count != 2 || raw.Spec.Deadline.After != "1h" {
+		t.Fatalf("view mutated compiler-owned declaration: %#v", raw)
 	}
 }
 
@@ -58,7 +48,7 @@ func TestWorkflowJoinPlanForRefDistinguishesRootAndSameLeafFlowDeclarations(t *t
 	}}}
 	source := semanticview.Wrap(bundle)
 	for _, node := range []runtimeidentity.ExecutableNode{root, orders} {
-		ref, err := timeridentity.NewJoinRef(node, "item.completed", "awaiting", "awaiting", "")
+		ref, err := timeridentity.NewJoinRef(node, "item.completed", "awaiting", "awaiting")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -71,7 +61,7 @@ func TestWorkflowJoinPlanForRefDistinguishesRootAndSameLeafFlowDeclarations(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	hostile, err := timeridentity.NewJoinRef(hostileNode, "item.completed", "awaiting", "awaiting", "")
+	hostile, err := timeridentity.NewJoinRef(hostileNode, "item.completed", "awaiting", "awaiting")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +86,7 @@ func TestWorkflowJoinPlanForRefPreservesDistinctFlowDeclarationsInEitherOrder(t 
 	} {
 		source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{Joins: plans}})
 		for _, node := range []runtimeidentity.ExecutableNode{first, second} {
-			ref, err := timeridentity.NewJoinRef(node, "item.completed", "awaiting", "awaiting", "")
+			ref, err := timeridentity.NewJoinRef(node, "item.completed", "awaiting", "awaiting")
 			if err != nil {
 				t.Fatal(err)
 			}

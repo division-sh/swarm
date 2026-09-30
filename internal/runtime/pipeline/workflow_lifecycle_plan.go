@@ -2,8 +2,10 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -20,7 +22,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 )
 
@@ -61,6 +62,7 @@ func (m WorkflowTimerMutation) Validate(runID string, route runtimeflowidentity.
 }
 
 type WorkflowLifecycleMutationPlan struct {
+	StageEntry                 *timeridentity.StageEntryRef
 	Timers                     []WorkflowTimerMutation
 	Schedules                  []WorkflowScheduleMutation
 	GateCards                  []WorkflowGateCardMutation
@@ -153,6 +155,11 @@ func (p WorkflowLifecycleMutationPlan) Validate(runID string, route runtimeflowi
 	if strings.TrimSpace(runID) == "" || !route.Valid() || strings.TrimSpace(entityID) == "" {
 		return fmt.Errorf("workflow lifecycle plan requires exact engine scope")
 	}
+	if p.StageEntry != nil {
+		if err := p.StageEntry.RequireOwner(runID, route.ScopeKey, route.InstanceID, route.InstancePath, entityID, p.StageEntry.Stage); err != nil {
+			return err
+		}
+	}
 	seen := make(map[string]WorkflowTimerMutationKind, len(p.Timers))
 	for index, mutation := range p.Timers {
 		if err := mutation.Validate(runID, route, entityID); err != nil {
@@ -173,6 +180,27 @@ func (p WorkflowLifecycleMutationPlan) Validate(runID string, route runtimeflowi
 		if err := mutation.Validate(runID, entityID); err != nil {
 			return fmt.Errorf("gate card mutation %d: %w", index, err)
 		}
+	}
+	return nil
+}
+
+func (p WorkflowLifecycleMutationPlan) ValidateState(record WorkflowEngineStateRecord) error {
+	if err := p.Validate(record.Identity.RunID, record.Identity.Route, record.EntityID); err != nil {
+		return err
+	}
+	var bookkeeping map[string]any
+	if err := json.Unmarshal(record.Bookkeeping, &bookkeeping); err != nil {
+		return err
+	}
+	entry, found, err := runtimeworkflowlifecycle.LoadStageEntry(bookkeeping)
+	if err != nil {
+		return err
+	}
+	if p.StageEntry != nil && (!found || entry != *p.StageEntry) {
+		return fmt.Errorf("lifecycle entry disagrees with the committing state bookkeeping")
+	}
+	if found {
+		return entry.RequireOwner(record.Identity.RunID, record.Identity.Route.ScopeKey, record.Identity.Route.InstanceID, record.Identity.Route.InstancePath, record.EntityID, record.CurrentState)
 	}
 	return nil
 }
@@ -396,6 +424,19 @@ func (pc *PipelineCoordinator) planWorkflowLifecycleEffect(ctx context.Context, 
 	default:
 		return fmt.Errorf("workflow lifecycle effect kind is unsupported")
 	}
+	entry, enters, err := effect.StageEntry(owner)
+	if err != nil {
+		return fmt.Errorf("admit lifecycle stage entry: %w", err)
+	}
+	if enters {
+		if instance.Bookkeeping == nil {
+			instance.Bookkeeping = map[string]any{}
+		}
+		if err := runtimeworkflowlifecycle.StoreStageEntry(instance.Bookkeeping, entry); err != nil {
+			return err
+		}
+		prepared.Commit.StageEntry = &entry
+	}
 	if err := pc.planWorkflowTimerEffect(ctx, owner.RunID, *instance, route, entityID, fromState, toState, cause, &prepared.Commit); err != nil {
 		return err
 	}
@@ -480,7 +521,7 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, runID
 	}
 	currentStage = strings.TrimSpace(currentStage)
 	nextStage = strings.TrimSpace(nextStage)
-	if instance == nil || entityID.IsZero() || nextStage == "" {
+	if instance == nil || entityID.IsZero() {
 		return nil
 	}
 	carrier, err := workflowInstanceStateCarrier(*instance)
@@ -491,75 +532,92 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, runID
 	if err != nil {
 		return fmt.Errorf("list join state: %w", err)
 	}
+	if nextStage == "" {
+		return pc.planPendingJoinContinuations(runID, entityID.String(), route, activations, mode, occurredAt, plan)
+	}
+	entry, found, err := runtimeworkflowlifecycle.LoadStageEntry(instance.Bookkeeping)
+	if err != nil || !found {
+		return errors.Join(err, fmt.Errorf("join arm requires its committed lifecycle entry"))
+	}
+	if err := entry.RequireOwner(runID, route.ScopeKey, route.InstanceID, route.InstancePath, entityID.String(), nextStage); err != nil {
+		return err
+	}
 	for _, activation := range activations {
-		if activation.Stage() != currentStage || activation.Stage() == nextStage || !activation.CloseForStageExit() {
+		if activation.Stage() != currentStage || activation.JoinRef().StageEntry() == entry || !activation.CloseForStageExit() {
 			continue
 		}
 		activation.TimerCancelled = true
 		if err := joinruntime.Store(carrier.StateBuckets, activation); err != nil {
 			return fmt.Errorf("close join %s on stage exit: %w", activation.Key(), err)
 		}
-		command, err := joinSchedule(pc.SemanticSource(), entityID.String(), route, activation, mode)
-		if err != nil {
-			return err
+		if !activation.FireAt.IsZero() {
+			command, err := joinSchedule(pc.SemanticSource(), entityID.String(), route, activation, mode)
+			if err != nil {
+				return err
+			}
+			command.RunID = runID
+			plan.Schedules = append(plan.Schedules, WorkflowScheduleMutation{Kind: WorkflowScheduleMutationCancel, Command: command, CancelCause: "join_stage_exit", CancelledAt: occurredAt})
 		}
-		command.RunID = runID
-		plan.Schedules = append(plan.Schedules, WorkflowScheduleMutation{Kind: WorkflowScheduleMutationCancel, Command: command, CancelCause: "join_stage_exit", CancelledAt: occurredAt})
 		plan.RequestCompletionCandidate = true
 	}
 	now := occurredAt.UTC()
 	if now.IsZero() {
 		return fmt.Errorf("workflow join lifecycle requires an exact occurrence time")
 	}
-	for _, joinPlan := range workflowJoinPlansForStage(pc.SemanticSource(), route, nextStage) {
+	owner, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, route)
+	if err != nil {
+		return err
+	}
+	for _, joinPlan := range workflowJoinPlansForStage(pc.SemanticSource(), owner, nextStage) {
+		if joinPlan.Mode != runtimecontracts.WorkflowJoinModeArrival {
+			continue
+		}
 		if joinPlan.ResultType.Empty() {
 			return fmt.Errorf("join %s has no resolved output type in the semantic plan", joinPlan.Spec.EffectiveID())
 		}
-		members, ok := joinMemberSnapshot(instance.Fields, joinPlan.Spec.Members.From)
-		if !ok {
-			return fmt.Errorf("join %s members source %s is not a unique list of non-empty text", joinPlan.Spec.EffectiveID(), joinPlan.Spec.Members.From)
-		}
-		window := ""
-		if joinPlan.Spec.Window != nil {
-			window = strings.TrimSpace(asString(instance.Fields[joinTopLevelField(joinPlan.Spec.Window.From, "entity")]))
-			if window == "" {
-				return fmt.Errorf("join %s window source %s resolved empty", joinPlan.Spec.EffectiveID(), joinPlan.Spec.Window.From)
+		members := []string{}
+		if joinPlan.Spec.Members.Count == nil {
+			var ok bool
+			members, ok = joinMemberSnapshot(instance.Fields, joinPlan)
+			if !ok {
+				return fmt.Errorf("join %s members source %s is not an admitted unique text collection", joinPlan.Spec.EffectiveID(), joinPlan.Spec.Members.From)
 			}
 		}
 		generation, _, err := workflowLoopGenerationForStage(pc.SemanticSource(), instance, nextStage)
 		if err != nil {
 			return err
 		}
-		key := joinruntime.ActivationKeyForGeneration(joinPlan.Spec.Stage, joinPlan.Spec.EffectiveID(), window, generation)
-		if _, found, err := joinruntime.Load(carrier.StateBuckets, joinPlan.Node, key); err != nil {
+		ref, err := timeridentity.NewJoinRef(joinPlan.Node, joinPlan.HandlerEvent, joinPlan.Spec.Stage, joinPlan.Spec.EffectiveID())
+		if err != nil {
+			return err
+		}
+		ref, err = ref.BindStageEntry(entry, generation)
+		if err != nil {
+			return err
+		}
+		key := joinruntime.ActivationKey(ref)
+		if existing, found, err := joinruntime.Load(carrier.StateBuckets, joinPlan.Node, key); err != nil {
 			return fmt.Errorf("load join %s: %w", key, err)
 		} else if found {
+			if !existing.JoinRef().Equal(ref) || !reflect.DeepEqual(existing.Members, members) || !reflect.DeepEqual(existing.MemberCount, joinPlan.Spec.Members.Count) {
+				return fmt.Errorf("join %s same-entry arm contradicts its immutable snapshot", key)
+			}
 			continue
 		}
-		delay := workflowTimerRenderedDelay(joinPlan.Spec.Timeout.After, workflowTimerPolicy(pc.SemanticSource(), joinPlan.Node.FlowPath()))
-		interval, ok := timeridentity.ParseDelayDuration(delay)
-		if !ok {
-			return fmt.Errorf("join %s timeout.after %q did not resolve to a positive duration", joinPlan.Spec.EffectiveID(), joinPlan.Spec.Timeout.After)
+		var due time.Time
+		if joinPlan.Spec.Deadline != nil {
+			delay := workflowTimerRenderedDelay(joinPlan.Spec.Deadline.After, workflowTimerPolicy(pc.SemanticSource(), joinPlan.Node.FlowPath()))
+			interval, ok := timeridentity.ParseDelayDuration(delay)
+			if !ok {
+				return fmt.Errorf("join %s deadline.after %q did not resolve to a positive duration", joinPlan.Spec.EffectiveID(), joinPlan.Spec.Deadline.After)
+			}
+			due = now.Add(interval)
 		}
-		ref, err := timeridentity.NewJoinRefForGeneration(joinPlan.Node, joinPlan.HandlerEvent, joinPlan.Spec.Stage, joinPlan.Spec.EffectiveID(), window, generation)
-		if err != nil {
-			return fmt.Errorf("arm join %s identity: %w", joinPlan.Spec.EffectiveID(), err)
-		}
-		handle, err := timeridentity.JoinTimeoutHandle(ref)
-		if err != nil {
-			return fmt.Errorf("arm join %s timer: %w", joinPlan.Spec.EffectiveID(), err)
-		}
-		activation, err := joinruntime.NewActivation(handle, members, now, now.Add(interval))
+		activation, err := joinruntime.NewActivation(ref, members, joinPlan.Spec.Members.Count, now, due)
 		if err != nil {
 			return fmt.Errorf("arm join %s: %w", joinPlan.Spec.EffectiveID(), err)
 		}
-		complete, err := joinruntime.CompletionSatisfied(activation, joinPlan.Spec.CompleteWhen, func(expression string, joinContext map[string]any) (bool, error) {
-			return workflowexpr.EvalJoinBool(expression, joinContext, joinPlan.ResultType)
-		})
-		if err != nil {
-			return fmt.Errorf("evaluate join %s completion at arm: %w", joinPlan.Spec.EffectiveID(), err)
-		}
-		if complete {
+		if activation.Completed() == activation.Expected() {
 			activation.Close(joinruntime.CloseReasonComplete, true, false)
 			completionHandle, handleErr := timeridentity.JoinCompleteHandle(ref)
 			if handleErr != nil {
@@ -573,6 +631,9 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, runID
 		if err := joinruntime.Store(carrier.StateBuckets, activation); err != nil {
 			return fmt.Errorf("persist join %s: %w", activation.Key(), err)
 		}
+		if activation.FireAt.IsZero() {
+			continue
+		}
 		command, err := joinSchedule(pc.SemanticSource(), entityID.String(), route, activation, mode)
 		if err != nil {
 			return err
@@ -581,6 +642,37 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, runID
 		plan.Schedules = append(plan.Schedules, WorkflowScheduleMutation{Kind: WorkflowScheduleMutationUpsert, Command: command})
 	}
 	instance.StateBuckets = carrier.PersistedStateBuckets()
+	return nil
+}
+
+func (pc *PipelineCoordinator) planPendingJoinContinuations(runID, entityID string, route runtimeflowidentity.Route, activations []joinruntime.Activation, mode executionmode.Mode, occurredAt time.Time, plan *WorkflowLifecycleMutationPlan) error {
+	for _, activation := range activations {
+		if !activation.OutcomePending || activation.TimerCancelled || activation.TimerHandle().Kind() != timeridentity.TimerHandleJoinComplete {
+			continue
+		}
+		if !activation.DeadlineAt.IsZero() {
+			handle, err := timeridentity.JoinTimeoutHandle(activation.JoinRef())
+			if err != nil {
+				return err
+			}
+			deadline, err := activation.WithTimerHandle(handle, activation.DeadlineAt)
+			if err != nil {
+				return err
+			}
+			command, err := joinSchedule(pc.SemanticSource(), entityID, route, deadline, mode)
+			if err != nil {
+				return err
+			}
+			command.RunID = runID
+			plan.Schedules = append(plan.Schedules, WorkflowScheduleMutation{Kind: WorkflowScheduleMutationCancel, Command: command, CancelCause: "join_closed", CancelledAt: occurredAt})
+		}
+		command, err := joinSchedule(pc.SemanticSource(), entityID, route, activation, mode)
+		if err != nil {
+			return err
+		}
+		command.RunID = runID
+		plan.Schedules = append(plan.Schedules, WorkflowScheduleMutation{Kind: WorkflowScheduleMutationUpsert, Command: command})
+	}
 	return nil
 }
 
