@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"slices"
 	"sort"
@@ -1186,9 +1187,19 @@ func decodeSchemaLengthRefinementValue(value yamlsource.Value) (SchemaLengthRefi
 	}
 	var out SchemaLengthRefinement
 	for _, field := range fields {
+		if field.Name != "min" && field.Name != "max" {
+			return SchemaLengthRefinement{}, nodeValueError(field.Value, NewUndefinedFieldDiagnostic("length", field.Name, schemaLengthRefinementFieldOptions))
+		}
+		scalar, err := field.Value.Scalar()
+		if err != nil || scalar.Tag != "!!int" {
+			return SchemaLengthRefinement{}, nodeValueError(field.Value, fmt.Errorf("length bound must be a nonnegative YAML integer"))
+		}
 		var bound int
 		if err := field.Value.Project(&bound); err != nil {
-			return SchemaLengthRefinement{}, fmt.Errorf("%s: %w", field.Name, err)
+			return SchemaLengthRefinement{}, nodeValueError(field.Value, fmt.Errorf("length bound must fit its integer carrier: %v", err))
+		}
+		if bound < 0 {
+			return SchemaLengthRefinement{}, nodeValueError(field.Value, fmt.Errorf("length bound must be >= 0"))
 		}
 		switch field.Name {
 		case "min":
@@ -1224,9 +1235,19 @@ func decodeSchemaRangeRefinementValue(value yamlsource.Value) (SchemaRangeRefine
 	}
 	var out SchemaRangeRefinement
 	for _, field := range fields {
+		if field.Name != "min" && field.Name != "max" {
+			return SchemaRangeRefinement{}, nodeValueError(field.Value, NewUndefinedFieldDiagnostic("range", field.Name, schemaRangeRefinementFieldOptions))
+		}
+		scalar, err := field.Value.Scalar()
+		if err != nil || (scalar.Tag != "!!int" && scalar.Tag != "!!float") {
+			return SchemaRangeRefinement{}, nodeValueError(field.Value, fmt.Errorf("range bound must be a finite YAML number"))
+		}
 		var bound float64
 		if err := field.Value.Project(&bound); err != nil {
-			return SchemaRangeRefinement{}, fmt.Errorf("%s: %w", field.Name, err)
+			return SchemaRangeRefinement{}, nodeValueError(field.Value, err)
+		}
+		if math.IsNaN(bound) || math.IsInf(bound, 0) {
+			return SchemaRangeRefinement{}, nodeValueError(field.Value, fmt.Errorf("range bound must be finite"))
 		}
 		switch field.Name {
 		case "min":
@@ -1258,115 +1279,6 @@ func decodeProjectionMapValue(value yamlsource.Value) (map[string]any, error) {
 		return nil, err
 	}
 	return out, nil
-}
-
-func decodeSchemaRefinementPattern(node *yaml.Node) (string, error) {
-	pattern, err := decodeScalarStringNode(node)
-	if err != nil {
-		return "", err
-	}
-	pattern = strings.TrimSpace(pattern)
-	if pattern == "" {
-		return "", fmt.Errorf("must not be empty")
-	}
-	if _, err := regexp.Compile(pattern); err != nil {
-		return "", fmt.Errorf("must compile as a regular expression: %w", err)
-	}
-	return pattern, nil
-}
-
-func decodeSchemaLengthRefinement(node *yaml.Node) (SchemaLengthRefinement, error) {
-	if node == nil || node.Kind != yaml.MappingNode {
-		return SchemaLengthRefinement{}, fmt.Errorf("must be a mapping with min and/or max")
-	}
-	var out SchemaLengthRefinement
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		value := node.Content[i+1]
-		switch key {
-		case "":
-			continue
-		case "min":
-			min, err := decodeIntNode(value)
-			if err != nil {
-				return SchemaLengthRefinement{}, fmt.Errorf("min: %w", err)
-			}
-			out.Min = &min
-		case "max":
-			max, err := decodeIntNode(value)
-			if err != nil {
-				return SchemaLengthRefinement{}, fmt.Errorf("max: %w", err)
-			}
-			out.Max = &max
-		default:
-			return SchemaLengthRefinement{}, NewUndefinedFieldDiagnostic("length", key, schemaLengthRefinementFieldOptions)
-		}
-	}
-	if out.Min == nil && out.Max == nil {
-		return SchemaLengthRefinement{}, fmt.Errorf("must declare min and/or max")
-	}
-	if out.Min != nil && *out.Min < 0 {
-		return SchemaLengthRefinement{}, fmt.Errorf("min must be >= 0")
-	}
-	if out.Max != nil && *out.Max < 0 {
-		return SchemaLengthRefinement{}, fmt.Errorf("max must be >= 0")
-	}
-	if out.Min != nil && out.Max != nil && *out.Min > *out.Max {
-		return SchemaLengthRefinement{}, fmt.Errorf("min must be <= max")
-	}
-	return out, nil
-}
-
-func decodeSchemaRangeRefinement(node *yaml.Node) (SchemaRangeRefinement, error) {
-	if node == nil || node.Kind != yaml.MappingNode {
-		return SchemaRangeRefinement{}, fmt.Errorf("must be a mapping with min and/or max")
-	}
-	var out SchemaRangeRefinement
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		value := node.Content[i+1]
-		switch key {
-		case "":
-			continue
-		case "min":
-			min, err := decodeFloatNode(value)
-			if err != nil {
-				return SchemaRangeRefinement{}, fmt.Errorf("min: %w", err)
-			}
-			out.Min = &min
-		case "max":
-			max, err := decodeFloatNode(value)
-			if err != nil {
-				return SchemaRangeRefinement{}, fmt.Errorf("max: %w", err)
-			}
-			out.Max = &max
-		default:
-			return SchemaRangeRefinement{}, NewUndefinedFieldDiagnostic("range", key, schemaRangeRefinementFieldOptions)
-		}
-	}
-	if out.Min == nil && out.Max == nil {
-		return SchemaRangeRefinement{}, fmt.Errorf("must declare min and/or max")
-	}
-	if out.Min != nil && out.Max != nil && *out.Min > *out.Max {
-		return SchemaRangeRefinement{}, fmt.Errorf("min must be <= max")
-	}
-	return out, nil
-}
-
-func decodeIntNode(node *yaml.Node) (int, error) {
-	var value int
-	if err := node.Decode(&value); err != nil {
-		return 0, err
-	}
-	return value, nil
-}
-
-func decodeFloatNode(node *yaml.Node) (float64, error) {
-	var value float64
-	if err := node.Decode(&value); err != nil {
-		return 0, err
-	}
-	return value, nil
 }
 
 func decodeProjectionMapNode(node *yaml.Node) (map[string]any, error) {

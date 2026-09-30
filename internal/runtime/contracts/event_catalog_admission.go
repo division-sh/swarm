@@ -415,13 +415,13 @@ func admitEventPayloadField(value yamlsource.Value) (EventFieldSpec, bool, yamls
 		}
 	}
 	if field, ok := byName["length"]; ok {
-		out.Refinements.Length, err = admitEventLengthRefinement(field.Value)
+		out.Refinements.Length, err = decodeSchemaLengthRefinementValue(field.Value)
 		if err != nil {
 			return EventFieldSpec{}, false, yamlsource.Value{}, fmt.Errorf("%s length: %w", context, err)
 		}
 	}
 	if field, ok := byName["range"]; ok {
-		out.Refinements.Range, err = admitEventRangeRefinement(field.Value)
+		out.Refinements.Range, err = decodeSchemaRangeRefinementValue(field.Value)
 		if err != nil {
 			return EventFieldSpec{}, false, yamlsource.Value{}, fmt.Errorf("%s range: %w", context, err)
 		}
@@ -477,70 +477,6 @@ func admitEventPattern(value yamlsource.Value) (string, error) {
 		return "", fmt.Errorf("must compile as a regular expression: %w", err)
 	}
 	return pattern, nil
-}
-
-func admitEventLengthRefinement(value yamlsource.Value) (SchemaLengthRefinement, error) {
-	fields, err := uniqueYAMLMappingFields(value, "length")
-	if err != nil {
-		return SchemaLengthRefinement{}, fmt.Errorf("must be a mapping with min and/or max: %w", err)
-	}
-	var out SchemaLengthRefinement
-	for _, field := range fields {
-		var number int
-		if field.Name != "min" && field.Name != "max" {
-			return SchemaLengthRefinement{}, NewUndefinedFieldDiagnostic("length", field.Name, schemaLengthRefinementFieldOptions)
-		}
-		if err := field.Value.Project(&number); err != nil {
-			return SchemaLengthRefinement{}, fmt.Errorf("%s: %w", field.Name, err)
-		}
-		if field.Name == "min" {
-			out.Min = &number
-		} else {
-			out.Max = &number
-		}
-	}
-	if out.Min == nil && out.Max == nil {
-		return SchemaLengthRefinement{}, fmt.Errorf("must declare min and/or max")
-	}
-	if out.Min != nil && *out.Min < 0 {
-		return SchemaLengthRefinement{}, fmt.Errorf("min must be >= 0")
-	}
-	if out.Max != nil && *out.Max < 0 {
-		return SchemaLengthRefinement{}, fmt.Errorf("max must be >= 0")
-	}
-	if out.Min != nil && out.Max != nil && *out.Min > *out.Max {
-		return SchemaLengthRefinement{}, fmt.Errorf("min must be <= max")
-	}
-	return out, nil
-}
-
-func admitEventRangeRefinement(value yamlsource.Value) (SchemaRangeRefinement, error) {
-	fields, err := uniqueYAMLMappingFields(value, "range")
-	if err != nil {
-		return SchemaRangeRefinement{}, fmt.Errorf("must be a mapping with min and/or max: %w", err)
-	}
-	var out SchemaRangeRefinement
-	for _, field := range fields {
-		var number float64
-		if field.Name != "min" && field.Name != "max" {
-			return SchemaRangeRefinement{}, NewUndefinedFieldDiagnostic("range", field.Name, schemaRangeRefinementFieldOptions)
-		}
-		if err := field.Value.Project(&number); err != nil {
-			return SchemaRangeRefinement{}, fmt.Errorf("%s: %w", field.Name, err)
-		}
-		if field.Name == "min" {
-			out.Min = &number
-		} else {
-			out.Max = &number
-		}
-	}
-	if out.Min == nil && out.Max == nil {
-		return SchemaRangeRefinement{}, fmt.Errorf("must declare min and/or max")
-	}
-	if out.Min != nil && out.Max != nil && *out.Min > *out.Max {
-		return SchemaRangeRefinement{}, fmt.Errorf("min must be <= max")
-	}
-	return out, nil
 }
 
 func admitEventCitation(value yamlsource.Value) (CriteriaCitation, error) {
