@@ -12,6 +12,28 @@ Phase: implementation approved, not runtime closure. Independent gate: [approved
 - M12 requires an acknowledged public pause followed by a publicly observed partial feed cursor/cardinality and pending or unsettled exact rows, captured before forced death. Retained restart and lawful continuation must close the same feed without duplicated predecessor facts. If this checkpoint cannot be reached, implementation stops for a new ruling; a settled restart cannot substitute.
 - All 23 rows and U1-U5 remain mandatory on both stores. Unreachable or nondiscriminating mutations, unsupported source grammar, another production interpreter or a required runtime repair require a new ruling. Approval is permission to implement, not R1 or merge closure; #2407 stays open.
 
+## Implementation stop: deployment-feed public readback
+
+On 2026-09-30 the approved first feasibility probe reached real compiled CLI feed-only creation and acknowledged public pause on SQLite and PostgreSQL, but `run.fan_out.list` returned JSON-RPC `-32603` on both stores. Therefore M05/M09/M12's required public feed observation is blocked. This is not evidence of a settled restart, an unreachable pump checkpoint, or a recovery defect: no crash/restart proof has been credited yet.
+
+The shared owner reproduction isolates the cause: `fanoutobligation.Intent.ReadbackAt` copies `Request.PlanRef.BundleHash` for every origin. A canonical deployment request has no handler PlanRef; its exact bundle is in `Request.Deployment.BundleHash`. Readback therefore loses the bundle, and `ListPage.Validate` rejects `invalid fan-out row 0`. New `TestDeploymentFanOutReadbackPreservesOriginBundle` fails for open and closed feeds in all three repetitions. Existing handler-readback and deployment closed-union controls pass in all three repetitions.
+
+Sibling inspection found two additional handler-only assumptions requiring classification in the repair gate: `compareReadbackKeys` omits `DeploymentFeedID`, although the selected-store SQL cursor/order includes it; and `platform-spec.yaml#FanOutIntentKey` requires handler delivery/declaration fields and forbids a deployment feed key. These are inspected gaps, not independently execution-qualified fixes. Fixing the empty bundle alone cannot honestly establish the complete deployment readback contract.
+
+Canonical owners/consumers implicated: the shared typed fan-out readback/page/key policy; `PipelinePostgresOwner.ListFanOutIntents` and `PipelineSQLiteOwner.ListFanOutIntents`; runtime `ObserveFanOutRuntimePage`; apiv1 `runFanOutListHandler`; public OpenRPC `FanOutIntentKey`/`FanOutIntentReadback`/`run.fan_out.list`; and the CLI fan-out reader. No alternate queue, recovery interpreter, or new execution owner was discovered.
+
+Implementation is frozen under the recorded stop condition. Request lead disposition for the smallest existing-owner public deployment-readback correction (both origins, key ordering/pagination and authoritative API contract), or an explicitly tracked prerequisite. No runtime repair, compatibility, new endpoint, mutation qualification, full suite, PR, or closure claim is authorized/performed by this investigation. The numeric fixture and probe remain local WIP; the old #2008 worktree and external handover remain untouched. #2407 stays open. The independent corpus approval is preserved, but does not authorize this newly discovered runtime repair.
+
+Reproduction on the approved baseline plus audit-only commits:
+
+```sh
+go test ./internal/releasee2e -run '^TestGoldenNumericDataScatterParkRestartBothStores$' -count=1 -v -timeout=5m
+go test ./internal/runtime/fanoutobligation -run '^TestDeploymentFanOutReadbackPreservesOriginBundle$' -count=3 -v
+go test ./internal/runtime/fanoutobligation -run '^Test(FanOutReadbackStateAndUnavailableMetrics|DeploymentOriginClosedUnionAndZeroRow)$' -count=3
+```
+
+The real process test requires the existing host PostgreSQL test authority and fails closed if absent. Current canonical fixture `verify` passes, with the dataset SHA-256 unchanged. Initial probe failures due to unsupported command flags/config placement were corrected within the test's invocation setup and receive no runtime-defect credit. A stopped SQLite inspection attempt without canonical bootstrap was refused as unaccepted; that is expected admission, not another defect or valid timer evidence. Future supplementary inspection must complete existing canonical schema acceptance before using typed read ports.
+
 ## 1. Classification, authority and closure boundary
 
 - Category: conformance failure-class / supported-surface backend parity.
