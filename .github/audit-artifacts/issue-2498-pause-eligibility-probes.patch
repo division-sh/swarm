@@ -457,3 +457,78 @@ index 000000000..abbbde07b
 +		})
 +	}
 +}
+diff --git a/internal/store/internal/runtimepersistence/standing_continue_audit_test.go b/internal/store/internal/runtimepersistence/standing_continue_audit_test.go
+new file mode 100644
+index 000000000..21e1b6670
+--- /dev/null
++++ b/internal/store/internal/runtimepersistence/standing_continue_audit_test.go
+@@ -0,0 +1,69 @@
++package runtimepersistence
++
++import (
++	"context"
++	"testing"
++	"time"
++
++	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
++	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
++)
++
++// This disposable audit probe asserts the defect, not the desired contract.
++func TestAuditStandingOwnedPauseContinueBypassesAuthorityBothStores(t *testing.T) {
++	for _, backend := range []string{"sqlite", "postgres"} {
++		t.Run(backend, func(t *testing.T) {
++			for _, posture := range []string{"suspended", "reset_preserved", "orphaned"} {
++				t.Run(posture, func(t *testing.T) {
++					fixture := openStandingDispositionParityFixture(t, backend)
++					ctx := testAuthorActivityRuntimeContext()
++					current := fixture.create(t, ctx, "audit-"+posture)
++					operation := runtimepipeline.StandingServiceOperation{ServiceID: current.ServiceID, Actor: "audit"}
++					if _, err := fixture.workflow.SuspendStandingService(ctx, operation); err != nil {
++						t.Fatalf("suspend: %v", err)
++					}
++					wantBefore := runtimepipeline.StandingRestartSuspended
++					switch posture {
++					case "reset_preserved":
++						reset, err := fixture.workflow.ResetStandingService(ctx, operation)
++						if err != nil {
++							t.Fatalf("reset preserving suspension: %v", err)
++						}
++						if reset.Generation != current.Generation+1 || reset.RunID == current.RunID {
++							t.Fatalf("reset did not create exact successor: %+v", reset)
++						}
++						current = reset
++					case "orphaned":
++						if _, err := fixture.workflow.ReconcileStandingServiceSet(ctx, nil); err != nil {
++							t.Fatalf("remove complete declaration set: %v", err)
++						}
++						wantBefore = runtimepipeline.StandingRestartOrphaned
++					}
++					before := assertStandingDisposition(t, ctx, fixture, current.RunID, wantBefore)
++					if before.OperatorOverride != "suspended" || before.RunState != "paused" {
++						t.Fatalf("not a retained standing-owned pause: %+v", before)
++					}
++					controller, ok := fixture.selected.(interface {
++						ContinueRunControlOutcome(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.StoreTransition, error)
++					})
++					if !ok {
++						t.Fatalf("selected store %T lacks run control owner", fixture.selected)
++					}
++					outcome, err := controller.ContinueRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{
++						RunID: current.RunID, ControlledBy: "audit", Reason: "ordinary_continue", Now: time.Now().UTC(),
++					})
++					if err != nil || !outcome.Acknowledged || outcome.State.Status != "running" || outcome.State.ControlStatus != "running" {
++						t.Fatalf("baseline continue did not demonstrate bypass: outcome=%+v err=%v", outcome, err)
++					}
++					after := assertStandingDisposition(t, ctx, fixture, current.RunID, runtimepipeline.StandingRestartInvalidCurrent)
++					if after.OperatorOverride != before.OperatorOverride || after.EffectiveState != before.EffectiveState ||
++						after.ServiceID != before.ServiceID || after.Generation != before.Generation || after.RunID != before.RunID ||
++						after.DeclarationPresent != before.DeclarationPresent || after.RunState != "running" {
++						t.Fatalf("unexpected standing mutation: before=%+v after=%+v", before, after)
++					}
++					t.Logf("BASELINE DEFECT: generic continue acknowledged running while retained standing %s authority became invalid_current", posture)
++				})
++			}
++		})
++	}
++}
