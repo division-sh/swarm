@@ -2,11 +2,20 @@ package bootverify
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
+
+func TestRun_RootContainedStateDoesNotRequireChildCoordinator(t *testing.T) {
+	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier1-primitives", "test-record-evidence"))
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	if reportContains(report.Errors(), "contained_state_operation_compliance", "") {
+		t.Fatalf("root primary entity was classified as child-only coordinator state: %#v", report.Errors())
+	}
+}
 
 func TestRun_ValidatesTypedContainedStateOperations(t *testing.T) {
 	source := semanticview.Wrap(containedStateOperationBundle(runtimecontracts.WorkflowDataWrite{

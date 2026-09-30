@@ -135,7 +135,7 @@ pins:
   outputs:
     events: [inbound.telegram.text_message]
 connect:
-  - {event: inbound.telegram.text_message, from: ., to: telegram-chat}
+  - {event: inbound.telegram.text_message, from: ., to: telegram-chat, resolution: select-or-create}
 `)
 	return root
 }

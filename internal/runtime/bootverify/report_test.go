@@ -5501,6 +5501,27 @@ func TestRun_RejectsCallerSelectedEntityIDForRootNormalInputPinMaterializers(t *
 	}
 }
 
+func TestRun_ProviderTransportEntityIDDoesNotElectCanonicalPrimary(t *testing.T) {
+	root := canonicalrouting.CopyInboundAdmissionPolicyMatrix(t)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+	source := semanticviewtest.WithProviderIngress(semanticview.Wrap(bundle), map[string][]string{"matrix": {"inbound.telegram", "inbound.intercom"}})
+	report := Run(context.Background(), source, Options{})
+	if reportContains(report.Errors(), "flow_boundary_create_entity_validation", "") {
+		t.Fatalf("provider transport entity_id acquired primary-entity authority: %#v", report.Errors())
+	}
+}
+
+func TestRun_ProviderEvidenceDoesNotHidePublicCallerSelectedEntityID(t *testing.T) {
+	root := canonicalrouting.CopyRootDefaultStaticInput(t, canonicalrouting.RootStaticMaterialize, canonicalrouting.RootStaticOptionalEntityID)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+	source := semanticview.Wrap(bundle)
+	source = semanticviewtest.WithProviderIngress(source, map[string][]string{".": source.FlowInputEvents(".")})
+	report := Run(context.Background(), source, Options{})
+	if !reportContains(report.Errors(), "flow_boundary_create_entity_validation", "caller-selected entity_id") {
+		t.Fatalf("provider evidence hid public entity acquisition: %#v", report.Errors())
+	}
+}
+
 func TestRun_AllowsCanonicalImplicitMaterializationForStatefulStaticInputPinHandlers(t *testing.T) {
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:

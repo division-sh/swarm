@@ -163,7 +163,6 @@ type providerAliasScenario struct {
 	rawConnected          bool
 	rootObserver          bool
 	rootProvider          bool
-	rootSingleton         bool
 	noLocalConsumers      bool
 	publicConnected       bool
 	omitAlphaProviderEdge bool
@@ -413,10 +412,7 @@ func writeProviderAliasAuthorityFixture(t *testing.T, scenario providerAliasScen
 		if !ok {
 			t.Fatal("missing fixture connections")
 		}
-		files["schema.yaml"] = strings.Replace(files["alpha/schema.yaml"], "mode: singleton", "mode: static", 1) + "connect:\n" + strings.ReplaceAll(connections, "from: alpha,", "from: .,")
-		if scenario.rootSingleton {
-			files["schema.yaml"] = strings.Replace(files["schema.yaml"], "mode: static", "mode: singleton", 1)
-		}
+		files["schema.yaml"] = files["alpha/schema.yaml"] + "connect:\n" + strings.ReplaceAll(connections, "from: alpha,", "from: .,")
 		files["nodes.yaml"] = files["alpha/nodes.yaml"]
 		files["entities.yaml"] = files["alpha/entities.yaml"]
 		delete(files, "alpha/schema.yaml")

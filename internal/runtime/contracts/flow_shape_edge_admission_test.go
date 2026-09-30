@@ -1,9 +1,10 @@
 package contracts
 
 import (
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestDerivedFlowShapeRejectsAuthoredMode(t *testing.T) {
@@ -127,7 +128,7 @@ func TestEdgeResolutionPreservesPinInitialization(t *testing.T) {
 			if !ok || !pin.Resolution().Empty() {
 				t.Fatal("initialization manufactured shared-pin selection policy")
 			}
-			values, err := pin.Initialization().Evaluate(map[string]any{"account_id": "one", "count": 0, "label": "kept", "active": false, "attributes": []any{}})
+			values, err := pin.Initialization().EvaluateWithIdentity(map[string]any{"count": 0, "label": "kept", "active": false, "attributes": []any{}}, map[string]any{"account_id": "one"})
 			if err != nil || values["count"] != int64(0) || values["label"] != "kept" || values["active"] != false {
 				t.Fatalf("creating edge lost typed initialization: %#v %v", values, err)
 			}
