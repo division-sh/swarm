@@ -9399,7 +9399,7 @@
     },
     {
       "name": "run.fan_out.list",
-      "description": "Read one bounded page of durable fan-out intent headers. Read-only; does not claim, release, retry, repair or hydrate immutable source values or outcomes. Filters are exact persisted predicates combined with AND; omitted filters select all statuses, including terminal rows. Fixed ascending order is triggering_delivery_id, element_ref.flow_path, element_ref.family, element_ref.semantic_path, using byte collation. Progress cannot move a row. Cursor is bound to run, complete filter and order; page size may change. Malformed or differently scoped cursors are invalid params. Each page has its own observation time and current run status; there is no cross-page snapshot promise. Concurrent arrivals before the cursor are not revisited. Durable state precedence consumes Intent.ServingAt: closed/canceled/blocked first, then unexpired lease, then future retry readiness, otherwise eligible. Expiry/due equality is eligible. Durable eligible is not runtime authorization: paused/terminal runs, retired/unavailable generations, and unavailable source admission must never be inferred eligible from it. Runtime evidence is separate; unavailable metrics and eligibility are null, never fabricated zero/false. Existing aggregate status/diagnose and direct delivery barriers are unchanged.",
+      "description": "Read one bounded page of durable fan-out intent headers. Read-only; does not claim, release, retry, repair or hydrate immutable source values or outcomes. Filters are exact persisted predicates combined with AND; omitted filters select all statuses, including terminal rows. Fixed ascending order is triggering_delivery_id, element_ref.flow_path, element_ref.family, element_ref.semantic_path, deployment_feed_id, using byte collation with absent origin-specific components represented as empty strings for ordering only. Deployment keys contain exactly run_id and deployment_feed_id; handler keys contain exactly run_id, triggering_delivery_id and element_ref. The typed origin owns bundle projection for both serving and readback; no fallback to a handler plan or the run's current bundle is permitted. Handler identity filters exclude deployment rows. Progress cannot move a row. Cursor is bound to run, complete filter and order; page size may change. Malformed or differently scoped cursors are invalid params. Each page has its own observation time and current run status; there is no cross-page snapshot promise. Concurrent arrivals before the cursor are not revisited. Durable state precedence consumes Intent.ServingAt: closed/canceled/blocked first, then unexpired lease, then future retry readiness, otherwise eligible. Expiry/due equality is eligible. Durable eligible is not runtime authorization: paused/terminal runs, retired/unavailable generations, and unavailable source admission must never be inferred eligible from it. Runtime evidence is separate; unavailable metrics and eligibility are null, never fabricated zero/false. Existing aggregate status/diagnose and direct delivery barriers are unchanged.",
       "params": [
         {
           "name": "run_id",
@@ -18998,48 +18998,71 @@
         "type": "object"
       },
       "FanOutIntentKey": {
-        "additionalProperties": false,
-        "properties": {
-          "element_ref": {
+        "description": "Exact closed origin union. Deployment feeds have no triggering delivery or authored element; empty/null handler fields are forbidden, not compatibility aliases.",
+        "oneOf": [
+          {
             "additionalProperties": false,
             "properties": {
-              "family": {
-                "enum": [
-                  "fan_out"
+              "element_ref": {
+                "additionalProperties": false,
+                "properties": {
+                  "family": {
+                    "enum": [
+                      "fan_out"
+                    ],
+                    "type": "string"
+                  },
+                  "flow_path": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "semantic_path": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "flow_path",
+                  "family",
+                  "semantic_path"
                 ],
+                "type": "object"
+              },
+              "run_id": {
+                "format": "uuid",
                 "type": "string"
               },
-              "flow_path": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "semantic_path": {
-                "minLength": 1,
+              "triggering_delivery_id": {
+                "format": "uuid",
                 "type": "string"
               }
             },
             "required": [
-              "flow_path",
-              "family",
-              "semantic_path"
+              "run_id",
+              "triggering_delivery_id",
+              "element_ref"
             ],
             "type": "object"
           },
-          "run_id": {
-            "format": "uuid",
-            "type": "string"
-          },
-          "triggering_delivery_id": {
-            "format": "uuid",
-            "type": "string"
+          {
+            "additionalProperties": false,
+            "properties": {
+              "deployment_feed_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "run_id": {
+                "format": "uuid",
+                "type": "string"
+              }
+            },
+            "required": [
+              "run_id",
+              "deployment_feed_id"
+            ],
+            "type": "object"
           }
-        },
-        "required": [
-          "run_id",
-          "triggering_delivery_id",
-          "element_ref"
-        ],
-        "type": "object"
+        ]
       },
       "FanOutIntentReadback": {
         "additionalProperties": false,

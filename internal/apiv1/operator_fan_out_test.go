@@ -52,6 +52,61 @@ func TestFanOutReadAPISchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	validator.validateMethodResult(t, "run.fan_out.list", result)
+	t.Run("deployment", func(t *testing.T) {
+		page := fanOutReadProbePage()
+		page.Intents[0].Key = fanoutobligation.IntentKey{RunID: page.RunID, DeploymentFeedID: uuid.NewString()}
+		raw, err := json.Marshal(page)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var result map[string]any
+		if err := json.Unmarshal(raw, &result); err != nil {
+			t.Fatal(err)
+		}
+		validator.validateMethodResult(t, "run.fan_out.list", result)
+		key := asMap(t, asMap(t, result["intents"].([]any)[0])["key"])
+		if len(key) != 2 || key["deployment_feed_id"] != page.Intents[0].Key.DeploymentFeedID {
+			t.Fatalf("wrong deployment wire: %+v", key)
+		}
+	})
+	for _, origin := range []string{"handler", "deployment"} {
+		for _, invalid := range []string{"missing_run", "missing_origin", "mixed", "empty_element", "null_element", "unknown"} {
+			t.Run(origin+"/"+invalid, func(t *testing.T) {
+				page := fanOutReadProbePage()
+				if origin == "deployment" {
+					page.Intents[0].Key = fanoutobligation.IntentKey{RunID: page.RunID, DeploymentFeedID: uuid.NewString()}
+				}
+				raw, err := json.Marshal(page)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var result map[string]any
+				if err := json.Unmarshal(raw, &result); err != nil {
+					t.Fatal(err)
+				}
+				key := asMap(t, asMap(t, result["intents"].([]any)[0])["key"])
+				switch invalid {
+				case "missing_run":
+					delete(key, "run_id")
+				case "missing_origin":
+					delete(key, "triggering_delivery_id")
+					delete(key, "deployment_feed_id")
+				case "mixed":
+					key["deployment_feed_id"] = uuid.NewString()
+					key["triggering_delivery_id"] = uuid.NewString()
+				case "empty_element":
+					key["element_ref"] = map[string]any{}
+				case "null_element":
+					key["element_ref"] = nil
+				case "unknown":
+					key["unknown"] = true
+				}
+				if err := validator.validateValue("$.result", validator.methods["run.fan_out.list"].Result.Schema, result); err == nil {
+					t.Fatalf("invalid %s key passed schema: %+v", origin, key)
+				}
+			})
+		}
+	}
 	runtime := asMap(t, result["intents"].([]any)[0])["runtime"]
 	for _, field := range []string{"observed_at", "eligible", "workers", "active_workers", "last_commit_ms"} {
 		value, present := asMap(t, runtime)[field]

@@ -157,13 +157,6 @@ func runtimeFanOutPlanRef(bundleHash, flowPath, family, semanticPath, digest str
 	return runtimecontracts.FanOutPlanRef{BundleHash: strings.TrimSpace(bundleHash), ElementRef: runtimeFanOutElementRef(flowPath, family, semanticPath), SemanticDigest: strings.TrimSpace(digest)}
 }
 
-func fanOutIntentBundleHash(request fanoutobligation.IntentRequest) string {
-	if request.Deployment != nil {
-		return request.Deployment.BundleHash
-	}
-	return request.PlanRef.BundleHash
-}
-
 func fanOutKeyPredicate(alias string, key fanoutobligation.IntentKey, start int) (string, []any) {
 	if alias != "" {
 		alias += "."
@@ -398,7 +391,10 @@ func loadFanOutEvaluation(ctx context.Context, db *sql.DB, postgres bool, resour
 		if resourceData == nil {
 			return input, fmt.Errorf("deployment feed requires pinned resource source owner")
 		}
-		bundleHash := fanOutIntentBundleHash(intent.Request)
+		bundleHash, bundleErr := intent.Request.OriginBundleHash()
+		if bundleErr != nil {
+			return input, bundleErr
+		}
 		source, sourceErr := resourceData.LoadPinnedSource(ctx, intent.Request.Key.RunID, bundleHash, intent.Source.Declaration)
 		if sourceErr != nil {
 			return input, sourceErr

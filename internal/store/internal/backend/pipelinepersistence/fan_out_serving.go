@@ -459,7 +459,11 @@ func observeFanOutClaim(ctx context.Context, tx *sql.Tx, admission FanOutAdmissi
 	if err != nil {
 		return fanoutobligation.Intent{}, err
 	}
-	if fanOutIntentBundleHash(intent.Request) != grant.BundleHash {
+	bundleHash, err := intent.Request.OriginBundleHash()
+	if err != nil {
+		return fanoutobligation.Intent{}, err
+	}
+	if bundleHash != grant.BundleHash {
 		return fanoutobligation.Intent{}, fanoutobligation.ErrStaleClaim
 	}
 	if err := requireFanOutGrantOrigin(intent.Request, grant); err != nil {
@@ -501,7 +505,11 @@ func requireFanOutClaimBundle(ctx context.Context, tx *sql.Tx, postgres bool, cl
 	if err != nil {
 		return err
 	}
-	if fanOutIntentBundleHash(intent.Request) != grant.BundleHash {
+	bundleHash, err := intent.Request.OriginBundleHash()
+	if err != nil {
+		return err
+	}
+	if bundleHash != grant.BundleHash {
 		return fanoutobligation.ErrStaleClaim
 	}
 	return requireFanOutGrantOrigin(intent.Request, grant)

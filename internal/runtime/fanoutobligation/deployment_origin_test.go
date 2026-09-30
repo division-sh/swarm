@@ -1,6 +1,9 @@
 package fanoutobligation
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -81,12 +84,71 @@ func TestDeploymentOriginRejectsMixedOrIncompleteIdentity(t *testing.T) {
 			if err := request.Validate(); err == nil {
 				t.Fatal("contradictory deployment origin admitted")
 			}
+			if bundle, err := request.OriginBundleHash(); err == nil || bundle != "" {
+				t.Fatalf("malformed origin projected a bundle: %q, %v", bundle, err)
+			}
 		})
 	}
 	handler := validIntentRequest(t)
 	handler.Key.DeploymentFeedID = uuid.NewString()
 	if err := handler.Validate(); err == nil {
 		t.Fatal("handler borrowed deployment feed identity")
+	}
+}
+
+func TestFanOutIntentKeyExactOriginWire(t *testing.T) {
+	for _, request := range []IntentRequest{validIntentRequest(t), deploymentRequest()} {
+		raw, err := json.Marshal(request.Key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			t.Fatal(err)
+		}
+		want := 3
+		if request.Deployment != nil {
+			want = 2
+			if fields["element_ref"] != nil || fields["triggering_delivery_id"] != nil {
+				t.Fatalf("deployment borrowed handler fields: %s", raw)
+			}
+		}
+		if len(fields) != want {
+			t.Fatalf("wrong origin wire: %s", raw)
+		}
+		var restored IntentKey
+		if err := json.Unmarshal(raw, &restored); err != nil || restored != request.Key {
+			t.Fatalf("comparable key round-trip changed: %s, %v", raw, err)
+		}
+		again, err := json.Marshal(restored)
+		if err != nil || !bytes.Equal(raw, again) {
+			t.Fatalf("noncanonical key round-trip: %s -> %s, %v", raw, again, err)
+		}
+		if bundle, err := request.OriginBundleHash(); err != nil || bundle == "" {
+			t.Fatalf("valid origin lost bundle: %q, %v", bundle, err)
+		}
+	}
+	key := deploymentRequest().Key
+	for _, raw := range []string{
+		`null`, `{}`, `[]`,
+		fmt.Sprintf(`{"run_id":%q}`, key.RunID),
+		fmt.Sprintf(`{"run_id":%q,"deployment_feed_id":null}`, key.RunID),
+		fmt.Sprintf(`{"run_id":%q,"deployment_feed_id":""}`, key.RunID),
+		fmt.Sprintf(`{"run_id":%q,"deployment_feed_id":%q,"element_ref":{}}`, key.RunID, key.DeploymentFeedID),
+		fmt.Sprintf(`{"run_id":%q,"deployment_feed_id":%q,"element_ref":null}`, key.RunID, key.DeploymentFeedID),
+		fmt.Sprintf(`{"run_id":%q,"deployment_feed_id":%q,"triggering_delivery_id":""}`, key.RunID, key.DeploymentFeedID),
+		fmt.Sprintf(`{"run_id":%q,"deployment_feed_id":%q,"extra":true}`, key.RunID, key.DeploymentFeedID),
+		fmt.Sprintf(`{"run_id":%q,"run_id":%q,"deployment_feed_id":%q}`, key.RunID, key.RunID, key.DeploymentFeedID),
+		fmt.Sprintf(`{"run_id":%q,"triggering_delivery_id":%q,"element_ref":null}`, key.RunID, key.DeploymentFeedID),
+		fmt.Sprintf(`{"run_id":%q,"triggering_delivery_id":%q,"element_ref":{"flow_path":".","family":"fan_out","semantic_path":"nodes.scatter","extra":true}}`, key.RunID, key.DeploymentFeedID),
+	} {
+		original := key
+		if err := json.Unmarshal([]byte(raw), &original); err == nil {
+			t.Fatalf("invalid origin wire admitted: %s", raw)
+		}
+		if original != key {
+			t.Fatalf("failed admission mutated key: %s", raw)
+		}
 	}
 }
 

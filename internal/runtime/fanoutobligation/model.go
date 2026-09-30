@@ -192,6 +192,61 @@ type IntentKey struct {
 	ElementRef           runtimecontracts.FanOutElementRef `json:"element_ref,omitempty"`
 }
 
+func (k IntentKey) MarshalJSON() ([]byte, error) {
+	if err := k.Validate(); err != nil {
+		return nil, err
+	}
+	if k.DeploymentFeedID != "" {
+		return json.Marshal(struct {
+			RunID            string `json:"run_id"`
+			DeploymentFeedID string `json:"deployment_feed_id"`
+		}{k.RunID, k.DeploymentFeedID})
+	}
+	return json.Marshal(struct {
+		RunID                string                            `json:"run_id"`
+		TriggeringDeliveryID string                            `json:"triggering_delivery_id"`
+		ElementRef           runtimecontracts.FanOutElementRef `json:"element_ref"`
+	}{k.RunID, k.TriggeringDeliveryID, k.ElementRef})
+}
+
+func (k *IntentKey) UnmarshalJSON(raw []byte) error {
+	// Presence is part of the closed union: empty or null handler fields are
+	// not a deployment key. Reject duplicate fields before ordinary decoding.
+	if _, err := canonicaljson.Decode(raw); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return err
+	}
+	want := []string{"run_id", "triggering_delivery_id", "element_ref"}
+	if _, deployment := fields["deployment_feed_id"]; deployment {
+		want = []string{"run_id", "deployment_feed_id"}
+	}
+	if len(fields) != len(want) {
+		return errors.New("fan-out key must carry exactly one origin")
+	}
+	for _, field := range want {
+		value, present := fields[field]
+		if !present || bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			return fmt.Errorf("fan-out key requires %s", field)
+		}
+	}
+	type wire IntentKey
+	var decoded wire
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&decoded); err != nil {
+		return err
+	}
+	next := IntentKey(decoded)
+	if err := next.Validate(); err != nil {
+		return err
+	}
+	*k = next
+	return nil
+}
+
 func (k IntentKey) Validate() error {
 	if _, err := uuid.Parse(strings.TrimSpace(k.RunID)); err != nil {
 		return errors.New("fan-out intent requires canonical run identity")
@@ -267,6 +322,18 @@ func (r IntentRequest) OriginKind() OriginKind {
 		return OriginDeployment
 	}
 	return OriginHandler
+}
+
+// OriginBundleHash projects the admitted origin, never the run's current bundle
+// or a handler plan borrowed by a deployment feed.
+func (r IntentRequest) OriginBundleHash() (string, error) {
+	if err := r.Validate(); err != nil {
+		return "", err
+	}
+	if r.Deployment != nil {
+		return r.Deployment.BundleHash, nil
+	}
+	return r.PlanRef.BundleHash, nil
 }
 
 func (r IntentRequest) Validate() error {

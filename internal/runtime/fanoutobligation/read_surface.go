@@ -211,7 +211,7 @@ func (p ListPage) Validate(q ListQuery) error {
 }
 
 func compareReadbackKeys(a, b IntentKey) int {
-	for _, pair := range [][2]string{{a.TriggeringDeliveryID, b.TriggeringDeliveryID}, {a.ElementRef.FlowPath, b.ElementRef.FlowPath}, {a.ElementRef.Family, b.ElementRef.Family}, {a.ElementRef.SemanticPath, b.ElementRef.SemanticPath}} {
+	for _, pair := range [][2]string{{a.TriggeringDeliveryID, b.TriggeringDeliveryID}, {a.ElementRef.FlowPath, b.ElementRef.FlowPath}, {a.ElementRef.Family, b.ElementRef.Family}, {a.ElementRef.SemanticPath, b.ElementRef.SemanticPath}, {a.DeploymentFeedID, b.DeploymentFeedID}} {
 		if order := strings.Compare(pair[0], pair[1]); order != 0 {
 			return order
 		}
@@ -224,8 +224,12 @@ func (i Intent) ReadbackAt(now time.Time) (IntentReadback, error) {
 	if err != nil {
 		return IntentReadback{}, err
 	}
+	bundleHash, err := i.Request.OriginBundleHash()
+	if err != nil {
+		return IntentReadback{}, err
+	}
 	row := IntentReadback{
-		Key: i.Request.Key, BundleHash: i.Request.PlanRef.BundleHash, Status: i.Status,
+		Key: i.Request.Key, BundleHash: bundleHash, Status: i.Status,
 		Cardinality: i.Request.Cardinality, Cursor: i.Cursor, NextChunkSize: i.NextChunkSize,
 		Retry: i.Retry, ClaimOwner: i.ClaimOwner, ClaimGeneration: i.ClaimGeneration,
 		CreatedAt: i.CreatedAt, UpdatedAt: i.UpdatedAt, Runtime: UnavailableRuntimeReadback(),
