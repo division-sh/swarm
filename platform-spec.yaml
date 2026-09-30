@@ -2611,7 +2611,8 @@ type_system:
       same declared domain: opaque json and object are not interchangeable.
   schema_refinements:
     description: |
-      Declared event payload fields, named-type fields, and entity fields
+      Declared event payload fields, named-type fields, entity fields, and
+      receiver instance variables
       may carry only the closed schema-refinement vocabulary listed here.
       These refinements extend the shared type/schema owner; they are not a
       handler-level validation row, not a rule artifact grammar, not CEL, and
@@ -2629,14 +2630,22 @@ type_system:
       length: |
         `length: {min, max}` is allowed only on text/string-like fields and
         list fields. Text length is character length; list length is item
-        count. At least one bound is required; bounds must be non-negative and
-        `min <= max` when both are present.
+        count. At least one bound is required. Each present bound must have
+        YAML integer kind, be nonnegative, and fit the integer carrier;
+        fractional or floating-kind values (including 1.0), null, text,
+        booleans, containers and overflow are load-time errors, not omission
+        or zero. Zero is present. `min <= max` when both are present.
       enum: |
         Enums remain closed named sets in the shared type system. Field-local
         enum dialects are not introduced by this slice.
       range: |
         `range: {min, max}` is allowed only on integer/numeric fields. At
-        least one bound is required and `min <= max` when both are present.
+        least one bound is required. Each present bound must be a finite
+        YAML integer or floating-point number; negative fractions are valid.
+        Null, non-finite values and nonnumeric kinds are load-time errors.
+        Missing bounds remain absent; zero is present. `min <= max` when
+        both are present. Existing semantic-JSON number restrictions still
+        apply when these bounds are projected into an acceptance schema.
       equal_to: |
         `equal_to: <sibling_field>` declares pure same-object field equality.
         The target must be a declared sibling field with the same resolved
