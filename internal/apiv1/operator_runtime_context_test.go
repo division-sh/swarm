@@ -869,6 +869,10 @@ func (*recordingRuntimeContextRunControlStore) RunDispatchBlocked(context.Contex
 	return false, nil
 }
 
+func (*recordingRuntimeContextRunControlStore) RunDispatchParked(context.Context, string) (bool, error) {
+	return false, nil
+}
+
 func (s *recordingRuntimeContextRunControlStore) totalCalls() int {
 	return s.stopCalls + s.pauseCalls + s.continueCalls
 }

@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/google/uuid"
 )
@@ -57,6 +59,7 @@ func TestGoldenNumericDataScatterParkRestartBothStores(t *testing.T) {
 					BinaryPath: binary, InternalMockLifecycleBinary: lifecycle,
 					WorkingDir: project, Source: "contracts", ConfigPath: ".swarm/swarm.yaml",
 					Store: backend, TokenFile: "api-token", Token: goldenAPIToken, Env: env,
+					ShutdownGrace: runtimepkg.DefaultShutdownGrace,
 				})
 				ctx, cancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
 				defer cancel()
@@ -126,10 +129,36 @@ func TestGoldenNumericDataScatterParkRestartBothStores(t *testing.T) {
 			if checkpoint.Cardinality != 100 || checkpoint.Status != fanoutobligation.StatusOpen || checkpoint.Cursor == 0 || checkpoint.Cursor >= 100 || checkpoint.Owed == 0 || unsettled == 0 {
 				t.Fatalf("approved interrupted checkpoint is unreachable: %#v; no settled-restart credit", checkpoint)
 			}
+			beforeRestart := captureFullLifecycleEvidence(t, p.rpc, runID)
 			if err := p.killAndWait(5 * time.Second); err != nil {
 				t.Fatal(err)
 			}
 			p = start()
+			retained, err := readNumericFeed(ctx, p.rpc, runID)
+			if err != nil || retained.Cursor != checkpoint.Cursor || retained.Owed != checkpoint.Owed || retained.Status != checkpoint.Status {
+				t.Fatalf("paused restart changed feed: before=%+v after=%+v error=%v\n%s", checkpoint, retained, err, p.output.String())
+			}
+			waitForFullLifecycleRunStatus(t, p.rpc, runID, "paused")
+			afterRestart := captureFullLifecycleEvidence(t, p.rpc, runID)
+			for eventID, before := range beforeRestart.EventFacts {
+				if after := afterRestart.EventFacts[eventID]; after != before {
+					t.Fatalf("paused restart changed event/delivery %s: before=%s after=%s", eventID, before, after)
+				}
+			}
+			for eventID, encoded := range afterRestart.EventFacts {
+				if _, existed := beforeRestart.EventFacts[eventID]; existed {
+					continue
+				}
+				var row fullLifecycleEvent
+				if err := json.Unmarshal([]byte(encoded), &row); err != nil {
+					t.Fatal(err)
+				}
+				// Active topology can project lifecycle observations while dispatch
+				// is parked. Only its canonical non-delivery subtype is exempt.
+				if row.EventName != string(events.EventTypePlatformRuntimeLog) || len(row.Deliveries) != 0 || len(row.DeadLetters) != 0 || row.NoDelivery == nil || row.NoDelivery.Reason != events.NoDeliveryNoSubscriberByDesign.Code() {
+					t.Fatalf("paused restart produced executable event %s: %s", eventID, encoded)
+				}
+			}
 			var continued any
 			if err := p.rpc.call(ctx, "run.continue", map[string]any{"run_id": runID, "idempotency_key": "numeric-continue-" + runID}, &continued); err != nil {
 				t.Fatal(err)
@@ -150,9 +179,36 @@ func TestGoldenNumericDataScatterParkRestartBothStores(t *testing.T) {
 			if countGoldenEvents(final, "item.registered") != 100 {
 				t.Fatalf("recovered row count = %d, want 100", countGoldenEvents(final, "item.registered"))
 			}
-			if err := p.stopAndWait(10 * time.Second); err != nil {
-				t.Fatal(err)
+			if err := pollReleaseCondition(ctx, 10*time.Millisecond, func() (bool, error) {
+				rows, err := listGoldenEvents(ctx, p.rpc, runID)
+				if err != nil {
+					return false, err
+				}
+				completed := 0
+				for _, row := range rows {
+					if row.EventName != "item.registered" {
+						continue
+					}
+					if len(row.Deliveries) != 1 || row.Deliveries[0].SubscriberType != "node" || len(row.DeadLetters) != 0 {
+						return false, fmt.Errorf("wrong intake recipient for %s: %+v", row.EventID, row)
+					}
+					delivery := row.Deliveries[0]
+					if delivery.Status == "dead_letter" {
+						return false, fmt.Errorf("intake dead letter: %+v", delivery)
+					}
+					if delivery.Status == "delivered" && delivery.Terminal {
+						completed++
+					}
+				}
+				return completed == 100, nil
+			}); err != nil {
+				t.Fatalf("numeric intake convergence: %v\n%s", err, p.output.String())
 			}
+			shutdownStarted := time.Now()
+			if err := p.stopAndWait(runtimepkg.DefaultShutdownGrace + 5*time.Second); err != nil {
+				t.Fatalf("numeric shutdown: %v\n%s", err, p.output.String())
+			}
+			t.Logf("100-item shutdown took %s with documented default grace %s", time.Since(shutdownStarted), runtimepkg.DefaultShutdownGrace)
 		})
 	}
 }

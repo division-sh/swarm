@@ -45,9 +45,10 @@ func TestRetiredStandingRestartInterpretersStayAbsent(t *testing.T) {
 func TestStandingRestartClassificationHasOneProductionOwner(t *testing.T) {
 	root := repoRootForRuntimeWriterGuard(t)
 	allowed := map[string]struct{}{
-		filepath.Join(root, "internal", "runtime", "pipeline", "standing_service_store.go"):                 {},
+		filepath.Join(root, "internal", "runtime", "runlifecycle", "standing_disposition.go"):               {},
 		filepath.Join(root, "internal", "store", "internal", "backend", "standingdisposition", "reader.go"): {},
 	}
+	definitions := 0
 	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal"), func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -62,6 +63,9 @@ func TestStandingRestartClassificationHasOneProductionOwner(t *testing.T) {
 		if !strings.Contains(string(body), "ClassifyStandingRestart(") {
 			return nil
 		}
+		if strings.Contains(string(body), "func ClassifyStandingRestart(") {
+			definitions++
+		}
 		if _, ok := allowed[path]; !ok {
 			t.Errorf("%s reconstructs standing restart disposition outside the canonical owner", path)
 		}
@@ -69,6 +73,9 @@ func TestStandingRestartClassificationHasOneProductionOwner(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("walk production standing restart classifiers: %v", err)
+	}
+	if definitions != 1 {
+		t.Fatalf("standing restart classifier definitions=%d, want exactly one", definitions)
 	}
 }
 

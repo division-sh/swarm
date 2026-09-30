@@ -185,7 +185,11 @@ func runControlError(runID string, err error) error {
 		case errors.Is(stateErr.Err, runtimeruncontrol.ErrAlreadyPaused):
 			return NewApplicationError(RunAlreadyPausedCode, false, map[string]any{"run_id": runID})
 		case errors.Is(stateErr.Err, runtimeruncontrol.ErrNotPaused):
-			return NewApplicationError(RunNotPausedCode, false, map[string]any{"run_id": runID, "current_status": currentStatus})
+			data := map[string]any{"run_id": runID, "current_status": currentStatus}
+			if stateErr.Detail != "" {
+				data["detail"] = stateErr.Detail
+			}
+			return NewApplicationError(RunNotPausedCode, false, data)
 		}
 	}
 	switch {

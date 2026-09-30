@@ -2,11 +2,14 @@
 
 Agent-g, #2498 / #2407 R1.1, 2026-09-30.
 Binding ruling: https://github.com/division-sh/swarm/issues/2498#issuecomment-5905422933.
-Current independent outcome: **insufficient; widen class**. This is the requested
-additive repair and focused re-gate request, not an approval or runtime proof audit.
+Current independent outcome: **approved for coding, not merge**, superseding the
+rejection below: https://github.com/division-sh/swarm/issues/2498#issuecomment-5906100464.
+The complete matrix and fail-closed no-op condition are binding. This remains
+the pre-implementation artifact, not a final runtime proof audit.
 Audit branch baseline: 73c35cc3e; production census: origin/master@4fccc57ec73ce54827167dddc5bbafac41ae66d2
-and the unchanged standing controller/context-manager boundaries in the local
-pause candidate. No process-lifetime implementation is authorized or changed here.
+and the unchanged standing controller/context-manager boundaries at audit time.
+The approved implementation and measured receipts are tracked separately in
+`issue-2498-implementation-progress.md`; no merge or parent closure is claimed.
 
 ## Class, Parent And Closure Decision
 

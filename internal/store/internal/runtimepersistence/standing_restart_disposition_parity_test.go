@@ -37,23 +37,23 @@ func TestStandingRestartDispositionSelectedStoreParity(t *testing.T) {
 					t.Fatalf("invalid %s run identity %q error = %v", backend, runID, err)
 				}
 			}
-			assertStandingDisposition(t, ctx, fixture, uuid.NewString(), runtimepipeline.StandingRestartOrdinary)
+			assertStandingDisposition(t, ctx, fixture, uuid.NewString(), runtimerunlifecycle.StandingRestartOrdinary)
 
 			active := fixture.create(t, ctx, "active")
-			assertStandingDisposition(t, ctx, fixture, active.RunID, runtimepipeline.StandingRestartActiveIntrinsic)
+			assertStandingDisposition(t, ctx, fixture, active.RunID, runtimerunlifecycle.StandingRestartActiveIntrinsic)
 
 			suspended := fixture.create(t, ctx, "suspended")
 			if _, err := fixture.workflow.SuspendStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: suspended.ServiceID, Actor: "test"}); err != nil {
 				t.Fatalf("suspend standing service: %v", err)
 			}
-			assertStandingDisposition(t, ctx, fixture, suspended.RunID, runtimepipeline.StandingRestartSuspended)
+			assertStandingDisposition(t, ctx, fixture, suspended.RunID, runtimerunlifecycle.StandingRestartSuspended)
 
 			orphaned := fixture.create(t, ctx, "orphaned")
 			if _, err := fixture.workflow.SuspendStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: orphaned.ServiceID, Actor: "test"}); err != nil {
 				t.Fatalf("suspend orphan candidate: %v", err)
 			}
 			fixture.setDesiredState(t, orphaned.ServiceID, false, "orphaned", "suspended")
-			assertStandingDisposition(t, ctx, fixture, orphaned.RunID, runtimepipeline.StandingRestartOrphaned)
+			assertStandingDisposition(t, ctx, fixture, orphaned.RunID, runtimerunlifecycle.StandingRestartOrphaned)
 
 			for _, terminal := range []runtimerunlifecycle.State{
 				runtimerunlifecycle.StateCompleted,
@@ -63,22 +63,22 @@ func TestStandingRestartDispositionSelectedStoreParity(t *testing.T) {
 			} {
 				declared := fixture.create(t, ctx, "terminal-declared-"+string(terminal))
 				fixture.terminalize(t, ctx, declared.RunID, terminal)
-				assertStandingDisposition(t, ctx, fixture, declared.RunID, runtimepipeline.StandingRestartTerminalDeclared)
+				assertStandingDisposition(t, ctx, fixture, declared.RunID, runtimerunlifecycle.StandingRestartTerminalDeclared)
 
 				removed := fixture.create(t, ctx, "terminal-orphaned-"+string(terminal))
 				fixture.terminalize(t, ctx, removed.RunID, terminal)
 				fixture.setDesiredState(t, removed.ServiceID, false, "orphaned", "none")
-				assertStandingDisposition(t, ctx, fixture, removed.RunID, runtimepipeline.StandingRestartTerminalOrphaned)
+				assertStandingDisposition(t, ctx, fixture, removed.RunID, runtimerunlifecycle.StandingRestartTerminalOrphaned)
 			}
 
 			invalid := fixture.create(t, ctx, "invalid")
 			fixture.setDesiredState(t, invalid.ServiceID, true, "suspended", "suspended")
-			assertStandingDisposition(t, ctx, fixture, invalid.RunID, runtimepipeline.StandingRestartInvalidCurrent)
+			assertStandingDisposition(t, ctx, fixture, invalid.RunID, runtimerunlifecycle.StandingRestartInvalidCurrent)
 
 			invalidOrphan := fixture.create(t, ctx, "invalid-orphan")
 			fixture.setDesiredState(t, invalidOrphan.ServiceID, false, "orphaned", "none")
-			disposition := assertStandingDisposition(t, ctx, fixture, invalidOrphan.RunID, runtimepipeline.StandingRestartInvalidCurrent)
-			if disposition.Remediation != runtimepipeline.StandingRestartRestoreThenReset {
+			disposition := assertStandingDisposition(t, ctx, fixture, invalidOrphan.RunID, runtimerunlifecycle.StandingRestartInvalidCurrent)
+			if disposition.Remediation != runtimerunlifecycle.StandingRestartRestoreThenReset {
 				t.Fatalf("invalid orphan remediation = %s, want restore_then_reset", disposition.Remediation)
 			}
 
@@ -87,8 +87,8 @@ func TestStandingRestartDispositionSelectedStoreParity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("reset standing service: %v", err)
 			}
-			assertStandingDisposition(t, ctx, fixture, predecessor.RunID, runtimepipeline.StandingRestartOrdinary)
-			assertStandingDisposition(t, ctx, fixture, reset.RunID, runtimepipeline.StandingRestartActiveIntrinsic)
+			assertStandingDisposition(t, ctx, fixture, predecessor.RunID, runtimerunlifecycle.StandingRestartOrdinary)
+			assertStandingDisposition(t, ctx, fixture, reset.RunID, runtimerunlifecycle.StandingRestartActiveIntrinsic)
 		})
 	}
 }
@@ -121,7 +121,7 @@ func TestStandingReconciliationNormalizesRunPauseForActiveDeclarationParity(t *t
 				t.Fatalf("reconcile operator-paused standing service: %v", err)
 			}
 			if reconciled.RunID != created.RunID || reconciled.Generation != created.Generation ||
-				reconciled.RestartDisposition.Kind != runtimepipeline.StandingRestartActiveIntrinsic ||
+				reconciled.RestartDisposition.Kind != runtimerunlifecycle.StandingRestartActiveIntrinsic ||
 				reconciled.RestartDisposition.RunState != string(runtimerunlifecycle.StateRunning) {
 				t.Fatalf("operator-paused reconciliation = %#v", reconciled)
 			}
@@ -160,7 +160,7 @@ func TestTerminalStandingMembersDoNotAbortCompleteSetParity(t *testing.T) {
 				t.Fatalf("reconcile terminal plus healthy set = %#v err=%v", results, err)
 			}
 			byService := standingResultsByService(results)
-			if got := byService[terminalCandidate.ServiceID]; got.RunID != terminal.RunID || got.Generation != terminal.Generation || got.RestartDisposition.Kind != runtimepipeline.StandingRestartTerminalDeclared {
+			if got := byService[terminalCandidate.ServiceID]; got.RunID != terminal.RunID || got.Generation != terminal.Generation || got.RestartDisposition.Kind != runtimerunlifecycle.StandingRestartTerminalDeclared {
 				t.Fatalf("terminal member result = %#v", got)
 			}
 			if healthy := byService[healthyCandidate.ServiceID]; !healthy.RestartDisposition.Executable() {
@@ -174,7 +174,7 @@ func TestTerminalStandingMembersDoNotAbortCompleteSetParity(t *testing.T) {
 			}
 			byService = standingResultsByService(results)
 			removed := byService[terminalCandidate.ServiceID]
-			if removed.RunID != terminal.RunID || removed.Generation != terminal.Generation || removed.RestartDisposition.Kind != runtimepipeline.StandingRestartTerminalOrphaned {
+			if removed.RunID != terminal.RunID || removed.Generation != terminal.Generation || removed.RestartDisposition.Kind != runtimerunlifecycle.StandingRestartTerminalOrphaned {
 				t.Fatalf("terminal removed member = %#v", removed)
 			}
 			if !byService[healthyCandidate.ServiceID].RestartDisposition.Executable() || !byService[renamedCandidate.ServiceID].RestartDisposition.Executable() {
@@ -187,7 +187,7 @@ func TestTerminalStandingMembersDoNotAbortCompleteSetParity(t *testing.T) {
 			}
 			restored := standingResultsByService(results)[terminalCandidate.ServiceID]
 			if restored.RunID != terminal.RunID || restored.Generation != terminal.Generation || restored.EffectiveState != "active" ||
-				restored.RestartDisposition.Kind != runtimepipeline.StandingRestartTerminalDeclared {
+				restored.RestartDisposition.Kind != runtimerunlifecycle.StandingRestartTerminalDeclared {
 				t.Fatalf("restored terminal member = %#v", restored)
 			}
 			reset, err := fixture.workflow.ResetStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: terminalCandidate.ServiceID, Actor: "test"})
@@ -221,13 +221,13 @@ func TestInvalidStandingMemberDoesNotAbortOrMutateCompleteSetParity(t *testing.T
 			}
 			byService := standingResultsByService(results)
 			quarantined := byService[invalid.ServiceID]
-			if quarantined.RunID != invalid.RunID || quarantined.Generation != invalid.Generation || quarantined.RestartDisposition.Kind != runtimepipeline.StandingRestartInvalidCurrent {
+			if quarantined.RunID != invalid.RunID || quarantined.Generation != invalid.Generation || quarantined.RestartDisposition.Kind != runtimerunlifecycle.StandingRestartInvalidCurrent {
 				t.Fatalf("invalid member result = %#v", quarantined)
 			}
 			if !byService[healthyCandidate.ServiceID].RestartDisposition.Executable() {
 				t.Fatalf("healthy sibling was not executable: %#v", results)
 			}
-			disposition := assertStandingDisposition(t, ctx, fixture, invalid.RunID, runtimepipeline.StandingRestartInvalidCurrent)
+			disposition := assertStandingDisposition(t, ctx, fixture, invalid.RunID, runtimerunlifecycle.StandingRestartInvalidCurrent)
 			if !disposition.DeclarationPresent || disposition.EffectiveState != "suspended" || disposition.OperatorOverride != "suspended" || disposition.RunState != "running" {
 				t.Fatalf("invalid member was mutated during complete-set reconciliation: %#v", disposition)
 			}
@@ -344,7 +344,7 @@ func TestTerminalOrphanStandingRestoreAndResetUsesLatestDeclarationSourceParity(
 			if err != nil {
 				t.Fatalf("restore terminal orphan under revised source: %v", err)
 			}
-			if restored.RestartDisposition.Kind != runtimepipeline.StandingRestartTerminalDeclared || restored.BundleHash != revised.Source.BundleHash() {
+			if restored.RestartDisposition.Kind != runtimerunlifecycle.StandingRestartTerminalDeclared || restored.BundleHash != revised.Source.BundleHash() {
 				t.Fatalf("restored terminal source = %#v", restored)
 			}
 			fixture.assertRunSource(t, ctx, created.RunID, candidate.Source.BundleHash())
@@ -375,14 +375,14 @@ func TestInvalidStandingResetUsesLatestDeclarationSourceParity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("reconcile invalid service source revision: %v", err)
 			}
-			if quarantined.RestartDisposition.Kind != runtimepipeline.StandingRestartInvalidCurrent || quarantined.BundleHash != revised.Source.BundleHash() {
+			if quarantined.RestartDisposition.Kind != runtimerunlifecycle.StandingRestartInvalidCurrent || quarantined.BundleHash != revised.Source.BundleHash() {
 				t.Fatalf("invalid source reconciliation = %#v", quarantined)
 			}
 			reset, err := fixture.workflow.ResetStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: created.ServiceID, Actor: "test"})
 			if err != nil {
 				t.Fatalf("reset invalid service: %v", err)
 			}
-			if reset.RestartDisposition.Kind != runtimepipeline.StandingRestartSuspended {
+			if reset.RestartDisposition.Kind != runtimerunlifecycle.StandingRestartSuspended {
 				t.Fatalf("invalid suspended reset disposition = %#v", reset.RestartDisposition)
 			}
 			fixture.assertRunSource(t, ctx, reset.RunID, revised.Source.BundleHash())
@@ -402,7 +402,7 @@ func TestInvalidOrphanStandingRestoreThenResetParity(t *testing.T) {
 				t.Fatalf("create standing service: %v", err)
 			}
 			fixture.setDesiredState(t, created.ServiceID, false, "orphaned", "none")
-			assertStandingDisposition(t, ctx, fixture, created.RunID, runtimepipeline.StandingRestartInvalidCurrent)
+			assertStandingDisposition(t, ctx, fixture, created.RunID, runtimerunlifecycle.StandingRestartInvalidCurrent)
 			revised := fixture.reviseCandidateSource(t, candidate, "d")
 
 			restored, err := fixture.workflow.ReconcileStandingService(ctx, revised)
@@ -438,17 +438,17 @@ func TestInvalidOrphanStandingSameSourceRestoreThenResetParity(t *testing.T) {
 					t.Fatalf("create standing service: %v", err)
 				}
 				fixture.setDesiredState(t, created.ServiceID, false, "orphaned", override)
-				assertStandingDisposition(t, ctx, fixture, created.RunID, runtimepipeline.StandingRestartInvalidCurrent)
+				assertStandingDisposition(t, ctx, fixture, created.RunID, runtimerunlifecycle.StandingRestartInvalidCurrent)
 
 				restored, err := fixture.workflow.ReconcileStandingService(ctx, candidate)
 				if err != nil {
 					t.Fatalf("restore same-source invalid orphan declaration: %v", err)
 				}
-				wantRestored := runtimepipeline.StandingRestartActiveIntrinsic
-				wantReset := runtimepipeline.StandingRestartActiveIntrinsic
+				wantRestored := runtimerunlifecycle.StandingRestartActiveIntrinsic
+				wantReset := runtimerunlifecycle.StandingRestartActiveIntrinsic
 				if override == "suspended" {
-					wantRestored = runtimepipeline.StandingRestartInvalidCurrent
-					wantReset = runtimepipeline.StandingRestartSuspended
+					wantRestored = runtimerunlifecycle.StandingRestartInvalidCurrent
+					wantReset = runtimerunlifecycle.StandingRestartSuspended
 				}
 				if restored.RestartDisposition.Kind != wantRestored || !restored.RestartDisposition.DeclarationPresent || restored.BundleHash != candidate.Source.BundleHash() {
 					t.Fatalf("restored same-source invalid orphan = %#v, want disposition %s", restored, wantRestored)
@@ -492,7 +492,7 @@ func TestSuspendedStandingResetInstallsSuccessorBeforePauseParity(t *testing.T) 
 			if err != nil {
 				t.Fatalf("direct suspended reset: %v", err)
 			}
-			if reset.RunID != nextRunID || reset.Generation != created.Generation+1 || reset.EffectiveState != "suspended" || reset.RestartDisposition.Kind != runtimepipeline.StandingRestartSuspended {
+			if reset.RunID != nextRunID || reset.Generation != created.Generation+1 || reset.EffectiveState != "suspended" || reset.RestartDisposition.Kind != runtimerunlifecycle.StandingRestartSuspended {
 				t.Fatalf("direct suspended reset = %#v", reset)
 			}
 			fixture.assertGenerationOwner(t, ctx, created.ServiceID, created.Generation, reset.Generation)
@@ -742,7 +742,7 @@ func (f standingDispositionParityFixture) terminalize(t *testing.T, ctx context.
 	}
 }
 
-func assertStandingDisposition(t *testing.T, ctx context.Context, fixture standingDispositionParityFixture, runID string, want runtimepipeline.StandingRestartDispositionKind) runtimepipeline.StandingRestartDisposition {
+func assertStandingDisposition(t *testing.T, ctx context.Context, fixture standingDispositionParityFixture, runID string, want runtimerunlifecycle.StandingRestartDispositionKind) runtimerunlifecycle.StandingRestartDisposition {
 	t.Helper()
 	disposition, err := fixture.workflow.StandingRunRestartDisposition(ctx, runID)
 	if err != nil {

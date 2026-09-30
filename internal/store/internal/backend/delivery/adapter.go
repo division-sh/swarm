@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	"math"
 	"strings"
 	"time"
@@ -434,6 +435,14 @@ func (a *Adapter) claimExactResultTx(ctx context.Context, tx *sql.Tx, attempt *m
 	default:
 		result.Disposition = ClaimInvariantInvalid
 		result.Invariant = fmt.Errorf("%w: unknown delivery status", ErrConflict)
+		return result, nil
+	}
+	parked, err := runstate.DispatchParked(ctx, tx, a.dialect == DialectPostgres, record.RunID)
+	if err != nil {
+		return ClaimResult{}, err
+	}
+	if parked {
+		result.Disposition = ClaimParked
 		return result, nil
 	}
 	ready, err := a.materializationReady(ctx, tx, record, tx)

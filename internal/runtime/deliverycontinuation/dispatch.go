@@ -26,6 +26,8 @@ const (
 	DispatchWakeInternalSubscriptionLifecycle
 	DispatchWakeCarrierReturn
 	DispatchWakeDeliveryLifecycle
+	DispatchWakeRunContinue
+	DispatchWakeIngressContinue
 )
 
 func (a DispatchWakeAuthority) String() string {
@@ -38,6 +40,10 @@ func (a DispatchWakeAuthority) String() string {
 		return "carrier_return"
 	case DispatchWakeDeliveryLifecycle:
 		return "delivery_lifecycle"
+	case DispatchWakeRunContinue:
+		return "run_continue"
+	case DispatchWakeIngressContinue:
+		return "ingress_continue"
 	default:
 		return ""
 	}

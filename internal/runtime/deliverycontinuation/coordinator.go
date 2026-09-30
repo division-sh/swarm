@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	runtimestanding "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -12,7 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 const (
@@ -63,7 +63,7 @@ type dispatchJob struct {
 // durable queue or a second eligibility clock.
 type Coordinator struct {
 	store      runtimedelivery.Store
-	restarts   runtimepipeline.StandingRestartDispositionReader
+	restarts   runtimestanding.StandingRestartDispositionReader
 	authority  runtimedelivery.ExecutionAuthority
 	workOwner  worklifetime.Occurrence
 	dispatcher Dispatcher
@@ -92,7 +92,7 @@ type Coordinator struct {
 
 func New(
 	store runtimedelivery.Store,
-	restarts runtimepipeline.StandingRestartDispositionReader,
+	restarts runtimestanding.StandingRestartDispositionReader,
 	authority runtimedelivery.ExecutionAuthority,
 	workOwner worklifetime.Occurrence,
 	dispatcher Dispatcher,
@@ -121,7 +121,7 @@ func NewSelected(
 
 func newCoordinator(
 	store runtimedelivery.Store,
-	restarts runtimepipeline.StandingRestartDispositionReader,
+	restarts runtimestanding.StandingRestartDispositionReader,
 	authority runtimedelivery.ExecutionAuthority,
 	workOwner worklifetime.Occurrence,
 	dispatcher Dispatcher,
@@ -748,7 +748,7 @@ func (c *Coordinator) scan(ctx context.Context, exhaustive bool) (time.Duration,
 				if err := c.schedule(ctx, item); err != nil {
 					return 0, false, err
 				}
-			case runtimedelivery.ClaimDeferred:
+			case runtimedelivery.ClaimDeferred, runtimedelivery.ClaimParked:
 				if err := c.observe(item.DeliveryID); err != nil {
 					return 0, false, err
 				}
@@ -904,7 +904,7 @@ func (c *Coordinator) reconcileHeld(ctx context.Context, seen map[string]struct{
 				if c.reclaimAttempt(deliveryID, held[deliveryID]) {
 					next, wake = earlierWake(next, wake, 0)
 				}
-			case runtimedelivery.ClaimDeferred, runtimedelivery.ClaimBusy:
+			case runtimedelivery.ClaimDeferred, runtimedelivery.ClaimBusy, runtimedelivery.ClaimParked:
 			case runtimedelivery.ClaimWrongAuthority:
 				return 0, false, fmt.Errorf("continuation %s crossed execution authority", deliveryID)
 			case runtimedelivery.ClaimAbsent:
