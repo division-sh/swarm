@@ -1,7 +1,7 @@
 name: agent-only
 mode: static
-initial_state: active
-states: [active]
+stages:
+  active: {initial: true}
 pins:
   inputs:
     events: [mixed.agent]

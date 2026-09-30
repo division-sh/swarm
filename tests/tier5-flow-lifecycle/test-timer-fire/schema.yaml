@@ -1,6 +1,7 @@
-initial_state: waiting
-terminal_states: [done]
-states: [waiting, checked, done]
+stages:
+  waiting: {initial: true}
+  checked: {}
+  done: {terminal: true}
 pins:
   inputs:
     events: [timer.scheduled, timer.check]

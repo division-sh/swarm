@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
 )
 
@@ -50,7 +51,7 @@ func TestExpressionValueR2PreservesYAMLAliases(t *testing.T) {
 		var row struct {
 			Value ExpressionValue `yaml:"value"`
 		}
-		if err := decodeNodeTestYAML([]byte(tc.source), &row); err != nil {
+		if err := decodeNodeTestMember([]byte(tc.source), "value", &row.Value); err != nil {
 			t.Fatalf("%s: %v", tc.source, err)
 		}
 		if !row.Value.HasLiteralValue() || !reflect.DeepEqual(row.Value.Literal, tc.want) {
@@ -59,7 +60,7 @@ func TestExpressionValueR2PreservesYAMLAliases(t *testing.T) {
 	}
 	cycle := &yaml.Node{Kind: yaml.AliasNode}
 	cycle.Alias = cycle
-	if _, err := decodeExpressionValueNode(cycle); err == nil {
+	if err := yamlsource.ValueFromNode(cycle).ValidateAcyclic(); err == nil {
 		t.Fatal("recursive alias was accepted")
 	}
 }

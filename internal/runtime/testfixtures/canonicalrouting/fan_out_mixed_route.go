@@ -24,8 +24,8 @@ pins:
 		"producer/events.yaml": "mixed.none:\nmixed.one:\nmixed.multi:\n",
 		"one/schema.yaml": `name: one
 mode: static
-initial_state: active
-states: [active]
+stages:
+  active: {initial: true}
 pins:
   inputs:
     events: [mixed.one]
@@ -39,8 +39,8 @@ pins:
 `,
 		"multi-a/schema.yaml": `name: multi-a
 mode: static
-initial_state: active
-states: [active]
+stages:
+  active: {initial: true}
 pins:
   inputs:
     events: [mixed.multi]
@@ -54,8 +54,8 @@ pins:
 `,
 		"multi-b/schema.yaml": `name: multi-b
 mode: static
-initial_state: active
-states: [active]
+stages:
+  active: {initial: true}
 pins:
   inputs:
     events: [mixed.multi]
@@ -69,8 +69,8 @@ pins:
 `,
 		"child/schema.yaml": `name: child
 mode: singleton
-initial_state: active
-states: [active]
+stages:
+  active: {initial: true}
 pins:
   inputs:
     events: [mixed.multi]

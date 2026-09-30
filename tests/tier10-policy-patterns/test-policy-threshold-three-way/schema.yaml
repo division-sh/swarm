@@ -1,6 +1,8 @@
-initial_state: evaluating
-terminal_states: [tier_a, tier_b, tier_c]
-states: [evaluating, tier_a, tier_b, tier_c]
+stages:
+  evaluating: {initial: true}
+  tier_a: {terminal: true}
+  tier_b: {terminal: true}
+  tier_c: {terminal: true}
 pins:
   inputs:
     events: [eval.submitted]

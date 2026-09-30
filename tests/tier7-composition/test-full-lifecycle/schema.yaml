@@ -1,6 +1,7 @@
-initial_state: pending
-terminal_states: [complete]
-states: [pending, validated, complete]
+stages:
+  pending: {initial: true}
+  validated: {}
+  complete: {terminal: true}
 pins:
   inputs:
     events: [order.submitted]

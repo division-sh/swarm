@@ -236,7 +236,7 @@ func TestClassifyDeliveryTargetOwnershipProjectsRootHandlerOntoSelectedRun(t *te
 	existingEntityID := eventtest.UUID("selected-root-owner")
 	flow := runtimecontracts.FlowContractView{
 		Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
-		Schema: runtimecontracts.FlowSchemaDocument{InitialState: "waiting", States: []string{"waiting", "done"}},
+		Schema: runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "waiting", Initial: true}, {ID: "done"}}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"timer.cancel": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"controller": {
@@ -585,8 +585,8 @@ func TestCompiledFanOutEntityRequirementRejectsEntitylessOwnershipAcrossSites(t 
 		"schema.yaml": "name: compiled-fan-out-entity-requirement\n",
 		"review/schema.yaml": `name: review
 mode: template
-initial_state: active
-states: [active]
+stages:
+  active: {initial: true}
 `,
 		"review/entities.yaml": `review_entity:
   items:
@@ -780,7 +780,7 @@ func deliveryTargetOwnershipSource(t *testing.T) semanticview.Source {
 	flow := runtimecontracts.FlowContractView{
 		Path: "review", Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
 		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode: runtimecontracts.FlowModeTemplate, InitialState: "active", States: []string{"active", "done"}, TerminalStates: []string{"done"},
+			Mode: runtimecontracts.FlowModeTemplate, StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "active", Initial: true}, {ID: "done", Terminal: true}}},
 			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{
 				{Event: "work.created", Resolution: runtimecontracts.FlowInputPinResolution{Mode: runtimecontracts.FlowInputResolutionModeCreate}},
 				{Event: "work.selected", Resolution: runtimecontracts.FlowInputPinResolution{Mode: runtimecontracts.FlowInputResolutionModeSelect}},

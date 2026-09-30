@@ -17,20 +17,14 @@ func checkPrimaryEntityValidation(c *checkerContext) []Finding {
 	}
 	findings := []Finding{}
 	rootEntities := bundle.RootEntityContracts()
-	if bundle.RootSchema != nil || len(rootEntities) > 1 {
-		hasEntityDeclaration := false
-		if bundle.RootSchema != nil {
-			hasEntityDeclaration = strings.TrimSpace(bundle.RootSchema.Entity) != ""
-		}
-		if hasEntityDeclaration || len(rootEntities) > 1 {
-			if _, err := bundle.ResolveRootPrimaryEntity(); err != nil {
-				findings = append(findings, Finding{
-					CheckID:  "primary_entity_validation",
-					Severity: "error",
-					Message:  fmt.Sprintf("flow <root> primary entity invalid: %v", err),
-					Location: "<root>",
-				})
-			}
+	if len(rootEntities) > 1 {
+		if _, err := bundle.ResolveRootPrimaryEntity(); err != nil {
+			findings = append(findings, Finding{
+				CheckID:  "primary_entity_validation",
+				Severity: "error",
+				Message:  fmt.Sprintf("flow <root> primary entity invalid: %v", err),
+				Location: "<root>",
+			})
 		}
 	}
 	for flowID, schema := range c.source.FlowSchemaEntries() {
@@ -39,10 +33,9 @@ func checkPrimaryEntityValidation(c *checkerContext) []Finding {
 			continue
 		}
 		entities, _ := bundle.FlowEntityContractsByID(flowID)
-		hasEntityDeclaration := strings.TrimSpace(schema.Entity) != ""
 		hasEntityContracts := len(entities) > 0
 		statefulNormal := normalPrimaryEntityFlow(c.source, flowID, schema)
-		if !hasEntityDeclaration && !hasEntityContracts && !statefulNormal {
+		if !hasEntityContracts && !statefulNormal {
 			continue
 		}
 		if _, err := bundle.ResolveFlowPrimaryEntity(flowID); err != nil {

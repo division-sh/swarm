@@ -1,11 +1,7 @@
-initial_state: retrying
-terminal_states:
-  - done
-  - escalated
-states:
-  - retrying
-  - done
-  - escalated
+stages:
+  retrying: {initial: true}
+  done: {terminal: true}
+  escalated: {terminal: true}
 pins:
   inputs:
     events:

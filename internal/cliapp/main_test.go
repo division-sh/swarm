@@ -3645,11 +3645,10 @@ func writeVerifyBootTimerCommandFixture(t *testing.T, cancelOn string) string {
 	t.Helper()
 	root := t.TempDir()
 
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
-name: verify-boot-timer
-initial_state: waiting
-terminal_states: [done]
-states: [waiting, done]
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: verify-boot-timer
+stages:
+  waiting: {initial: true}
+  done: {terminal: true}
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
 ticket:
@@ -3750,11 +3749,10 @@ func TestRunVerifyCommand_FailsForPromptDeclaredSaveWithoutEntityWrites(t *testi
 	root := t.TempDir()
 
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: verify-prompt-writer-coverage`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `
-name: child
-initial_state: idle
-terminal_states: [done]
-states: [idle, done]
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `name: child
+stages:
+  idle: {initial: true}
+  done: {terminal: true}
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "entities.yaml"), `
 case:
@@ -3917,11 +3915,10 @@ func writeVerifyAccumulatorSafetyCommandFixture(t *testing.T, opts verifyAccumul
 	t.Helper()
 	root := t.TempDir()
 
-	schema := `
-name: verify-accumulator-safety
-initial_state: collecting
-terminal_states: [done]
-states: [collecting, done]
+	schema := `name: verify-accumulator-safety
+stages:
+  collecting: {initial: true}
+  done: {terminal: true}
 `
 	if opts.publicInput {
 		schema += "pins:\n  inputs:\n    events: [item.arrived]\n"

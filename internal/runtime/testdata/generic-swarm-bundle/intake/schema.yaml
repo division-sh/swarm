@@ -1,13 +1,10 @@
 name: intake
 mode: static
-initial_state: queued
-states:
-  - queued
-  - collecting
-  - ready
-  - rejected
-terminal_states:
-  - rejected
+stages:
+  queued: {initial: true}
+  collecting: {}
+  ready: {}
+  rejected: {terminal: true}
 pins:
   inputs:
     events:

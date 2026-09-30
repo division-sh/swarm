@@ -954,11 +954,10 @@ func TestLoadWorkflowContractBundleAllowsSiblingFlowLocalWildcardAuthoritativeOw
 	repoRoot := contractRepoRoot(t)
 	root := t.TempDir()
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: wildcard-owner-test\n")
-	writeFixtureFile(t, filepath.Join(root, "flow-a", "schema.yaml"), `
-name: flow-a
-initial_state: active
-terminal_states: [done]
-states: [active, done]
+	writeFixtureFile(t, filepath.Join(root, "flow-a", "schema.yaml"), `name: flow-a
+stages:
+  active: {initial: true}
+  done: {terminal: true}
 pins:
   outputs:
     events: [task.done]
@@ -975,11 +974,10 @@ flow-a-wildcard:
     task.*:
       advances_to: done
 `)
-	writeFixtureFile(t, filepath.Join(root, "flow-b", "schema.yaml"), `
-name: flow-b
-initial_state: active
-terminal_states: [done]
-states: [active, done]
+	writeFixtureFile(t, filepath.Join(root, "flow-b", "schema.yaml"), `name: flow-b
+stages:
+  active: {initial: true}
+  done: {terminal: true}
 pins:
   outputs:
     events: [task.done]

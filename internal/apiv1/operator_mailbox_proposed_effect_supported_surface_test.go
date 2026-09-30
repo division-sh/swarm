@@ -280,9 +280,9 @@ func proposedEffectSupportedSurfaceBundle(t *testing.T, providerURL string) *run
 	t.Helper()
 	root := t.TempDir()
 	writeRunCompletionFixtureFile(t, root+"/schema.yaml", `name: proposed-effect-supported-surface
-initial_state: new
-terminal_states: [done]
-states: [new, done]
+stages:
+  new: {initial: true}
+  done: {terminal: true}
 pins:
   inputs:
     events: [thing.created]

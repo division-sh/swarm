@@ -1,7 +1,7 @@
 name: scoring
-initial_state: pending
-terminal_states: [scored]
-states: [pending, scored]
+stages:
+  pending: {initial: true}
+  scored: {terminal: true}
 pins:
   inputs:
     events: [score.requested]

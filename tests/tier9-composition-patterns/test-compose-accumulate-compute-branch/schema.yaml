@@ -1,7 +1,9 @@
 name: test-compose-accumulate-compute-branch
-initial_state: collecting
-terminal_states: [high, mid, low]
-states: [collecting, high, mid, low]
+stages:
+  collecting: {initial: true}
+  high: {terminal: true}
+  mid: {terminal: true}
+  low: {terminal: true}
 pins:
   inputs:
     events: [score.submitted]

@@ -1,6 +1,6 @@
-initial_state: queued
-terminal_states: [active]
-states: [queued, active]
+stages:
+  queued: {initial: true}
+  active: {terminal: true}
 pins:
   inputs:
     events: [slot.requested]

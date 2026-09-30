@@ -65,8 +65,8 @@ func configuredChannelAgentBundle(t *testing.T) *runtimecontracts.WorkflowContra
 		"schema.yaml": "name: channel-runtime\n",
 		"global/schema.yaml": `name: global
 mode: static
-initial_state: active
-states: [active]
+stages:
+  active: {initial: true}
 `,
 		"global/entities.yaml": "channel_state: {}\n",
 		"global/agents.yaml": `channel-sender:

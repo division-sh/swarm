@@ -62,7 +62,7 @@ func writeNestedFlowDataFixture(t *testing.T, declaredFile string, writeFile boo
 	writeFlowDataFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: nested-flow-data\n")
 	writeEmptyFlowDataContractFiles(t, root)
 	flowRoot := filepath.Join(root, "support")
-	writeFlowDataFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), "name: support\nmode: static\ninitial_state: active\nstates: [active]\n")
+	writeFlowDataFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), "name: support\nmode: static\nstages:\n  active: {initial: true}\n")
 	writeFlowDataFixtureFile(t, filepath.Join(flowRoot, "agents.yaml"), `
 worker:
   role: worker

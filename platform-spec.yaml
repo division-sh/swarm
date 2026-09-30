@@ -386,14 +386,43 @@ contract_formats:
     owned_concepts:
     - stages
     - loops
-    - initial_state
-    - terminal_states
-    - states
     - pins.inputs.events
     - pins.outputs.events
     rule: Flow reachability, declared state membership, and flow-local pin event declarations resolve against this parsed
       owner. Runtime liveness and temporal progress are separate runtime concerns. Entity ownership is not selected in
       schema.yaml for normal flows; the single flow-owned `entities.yaml` entry is authoritative.
+    source_admission: |
+      The entire non-empty schema mapping and every nested declaration are
+      admitted from the authoritative yamlsource.Value. No reflected root
+      decoder, raw-node child decoder or reconstructed receiver YAML is an
+      alternate source owner. One whole-document expansion budget precedes
+      projection and provenance. Effective schema, node and event provenance
+      compose in the same immutable ledger without overwriting other families.
+      Missing metadata is not explicit null, an empty string, mapping or list.
+      Nonempty exact text is required for supplied identities, mode choices,
+      source paths and required child references; textual annotations may be
+      empty. Structural fields require their declared mapping/list shape.
+      Unknown keys, duplicate effective keys and forbidden branch fields are
+      errors on authored presence, including null/empty/false and aliases/merges.
+      Required agents omitted means infer same-scope declared roles; [] is an
+      explicit no-role boundary. Receiver defaults remain literal data with
+      separate presence and are checked by the existing receiver type owner.
+      Imports use direct nonempty connector_packs/provider_trigger_events
+      sequences, not a nested imports envelope. Pin events/reads/writes and
+      resolution.dedup_by are nonempty sequences when supplied. Empty stages
+      mappings and null stage rows are invalid; {} remains a valid stage row.
+      Empty loops, gate context/input and receiver variables mappings remain
+      legal zero-member declarations. Raw ingress and resolution branches
+      retain their existing semantic owners and reject excluded source fields
+      before projection can erase presence. Nested errors retain semantic path
+      and introduction/resolved source coordinates.
+    retired_source_fields: |
+      initial_state, states and terminal_states are retired public authoring
+      on any presence. Declare stages instead; the compiled lifecycle kernel
+      remains an internal projection. tool_surface (including
+      role_scoped_entity_tools), entity, namespace_prefix and namespace_rule
+      are also rejected on any presence. No compatibility or old-store
+      migration is provided.
     compiled_transition_admission:
       implementation_tracker: '#2415'
       owner: The selected flow's lossless compiled lifecycle topology.
@@ -478,11 +507,11 @@ contract_formats:
         through `advances_to`, `rules`, and `on_complete` in this slice.
       stateless_form: >
         `stages: []` is the explicit stateless form for staged bundles.
-      mutual_exclusion: >
-        `stages:` is mutually exclusive with legacy lifecycle authoring fields
-        `initial_state`, `states`, and `terminal_states` in the same schema.
-        Legacy fields remain accepted as explicit legacy/kernel input until a
-        later migration removes them from public authoring.
+      retired_legacy_authoring: >
+        `initial_state`, `states`, and `terminal_states` are retired on any
+        authored presence, whether or not stages is present. Only stages owns
+        lifecycle authoring. Missing stages preserves markerless/stateless
+        posture; it does not derive an authored pending stage.
       temporal_rows:
         implementation_tracker: '#1846'
         rule: >
@@ -2389,7 +2418,8 @@ contract_formats:
     role_scoped_entity_tools:
       default_surface: 'For normal agents, the Path alpha entity-tool model is mandatory. If an actor resolves to a
         flow-owned entity contract, the platform generates role-scoped current-entity tools for that actor by default;
-        no schema.yaml opt-in flag is required or honored as a compatibility boundary.'
+        no schema.yaml opt-in flag is required or honored as a compatibility boundary.
+        Authored schema.tool_surface is retired and rejected on every presence.'
       no_contract_surface: Normal agents that do not resolve to a flow-owned entity contract receive no entity tools.
       current_entity_binding: 'Generated role-scoped entity tools operate on the current entity resolved from the triggering
         event/session context. Agent-supplied entity_id, entity_type, or flow_instance arguments are not accepted.'
@@ -2465,7 +2495,7 @@ contract_formats:
       platform_version: ">=0.7.0 <0.8.0"
 
       flows: []'
-    schema_yaml: "initial_state: waiting\nterminal_states: [done]\nstates: [waiting, done]\npins:\n  inputs:\n    events:\
+    schema_yaml: "stages:\n  waiting: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    events:\
       \ [hello.requested]\n  outputs:\n    events: [hello.completed]"
     nodes_yaml: "hello-node:\n  event_handlers:\n    hello.requested:\n      advances_to: done\n      emit:\n        event: hello.completed\n\
       \        fields:\n          result: payload.message"
@@ -3446,9 +3476,8 @@ state_machine_authority:
       named current_state remains ordinary business data and is read as
       entity.current_state; it is not the lifecycle state carrier.
     stateless_flows: |
-      Staged stateless flows declare stages: []. Legacy stateless flows may
-      declare initial_state: null, states: [], and terminal_states: []. For
-      them, _entity.current_state is null. The platform may persist pending
+      Stateless flows declare stages: [] or omit stages in markerless schemas.
+      For them, _entity.current_state is null. The platform may persist pending
       as their internal entity-state storage posture, but this does not mint
       an authored pending stage or change the null author-facing projection.
     stages_are_flat_and_flow_scoped: |
@@ -5776,8 +5805,7 @@ engine:
       within the handler atomic boundary.
     entity_state:
       description: A single string value representing where the entity is in the flow lifecycle. Set by advances_to in handler
-        execution. For staged bundles, initial and terminal values are lowered from schema.yaml stages. For legacy bundles,
-        initial value comes from schema.yaml initial_state and terminal values from schema.yaml terminal_states.
+        execution. Initial, declared and terminal values are lowered only from schema.yaml stages.
       storage: Entity table, state column, indexed.
       mutation: Only via advances_to or on_complete branch. Never by agents directly.
     authored_field_state:
@@ -5805,7 +5833,7 @@ engine:
     querying: State is queryable at any time without side effects. The platform may provide a query_flow_state tool for agents
       to read entity state, accumulator, and gates without emitting events.
     terminal_state_behavior:
-      description: When an entity reaches a terminal state (from schema.yaml terminal_states), all state is preserved. Entity
+      description: When an entity reaches a terminal state (from schema.yaml stages terminal metadata), all state is preserved. Entity
         state, accumulator state, gate state, and event history remain queryable indefinitely.
       no_cleanup: The platform does NOT clear entity data on terminal state. Terminated entities retain all accumulated data
         and decision history for post-mortem analysis.
@@ -8761,8 +8789,8 @@ engine:
       scope: per-flow
       trigger: >-
         An advances_to target is not in the flow's lowered declared state list. Or the lifecycle declaration is malformed:
-        legacy initial_state is not in states, staged lifecycle mixes stages with legacy lifecycle fields, a non-empty
-        stages mapping lacks exactly one initial stage, or a non-empty stages mapping declares no terminal stage.
+        a non-empty stages mapping lacks exactly one initial stage, or a non-empty stages mapping declares no terminal
+        stage. Retired legacy lifecycle fields fail during source admission before boot.
       when: boot-only
     - id: required_agents_match
       severity: error
@@ -12682,11 +12710,11 @@ flow_model:
   stateless_flows:
     description: 'Some flows are stateless producers — they process events without tracking entity lifecycle. A signal-processing
       flow is an example: it receives inputs, filters them, and emits results without maintaining per-entity state.'
-    schema_for_stateless: 'A stateless flow still has schema.yaml but may set initial_state: null and states: []. Events pass
+    schema_for_stateless: 'A stateless flow still has schema.yaml and may declare stages: [] or omit stages. Events pass
       through system nodes which accumulate, filter, and emit — but no entity state machine is maintained. The accumulator
       state is flow-scoped, not entity-scoped.'
     when_to_use: Producer pipelines, ETL flows, signal processing, fan-out dispatchers.
-    entity_behavior: 'In a stateless flow (initial_state: null, states: []), no state machine is maintained. advances_to
+    entity_behavior: 'In a stateless flow (stages: [] or no stages), no state machine is maintained. advances_to
       is invalid in a stateless flow handler (boot error if used). However, stateless does NOT mean entityless. If a handler
       writes entity-scoped fields (data_accumulation, accumulate tracking, compute store_as), the platform auto-materializes
       an entity for that handler invocation. This entity has no current_state and no lifecycle transitions, but it persists
@@ -12824,7 +12852,7 @@ flow_model:
       resolved_input_pin:
         location: schema.yaml pins.inputs.events
         canonical_form: |
-          An input event pin MAY be authored as an object `{event, source, resolution, initialize}` only when non-default choices are required. Otherwise it is one scalar exact local event identity. `source` is optional and is a closed enum of `external` or validation-only `harness`. For a template receiver, `resolution.mode` owns create/select/select-or-create behavior and `resolution.from` owns a supported exceptional typed identity source. `initialize` is allowed only with create or select-or-create and never supplies an alternate instance identity.
+          An input event pin MAY be authored as an object `{event, source, resolution, initialize}` only when non-default choices are required. Otherwise it is one scalar exact local event identity. `source` is optional and admits only validation-only `harness`; `external` is retired and rejected. For a template receiver, `resolution.mode` owns create/select/select-or-create behavior and `resolution.from` owns a supported exceptional typed identity source. `initialize` is allowed only with create or select-or-create and never supplies an alternate instance identity.
         scalar_form: |
           A scalar input event pin is valid when no source or resolution choice is needed. A scalar input pin on a template receiver is not a selector.
         receiver_initialization:

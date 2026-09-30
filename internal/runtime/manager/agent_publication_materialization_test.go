@@ -15,7 +15,7 @@ import (
 
 func TestMaterializedAgentEmitPermissionRetainsDeclarationOnEveryScope(t *testing.T) {
 	root := t.TempDir()
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: emit-owner-proof\nstages: {}\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: emit-owner-proof\nstages: []\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "events.yaml"), "result.done:\n  owned: text\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "agents.yaml"), "worker:\n  type: generic\n  role: worker\n  intent: {inline: Emit the root result.}\n  emit_events: [result.done]\n")
 	for _, flow := range []struct{ id, mode string }{{"left", "singleton"}, {"right", "template"}, {"nested/deeper", "template"}} {
@@ -24,7 +24,7 @@ func TestMaterializedAgentEmitPermissionRetainsDeclarationOnEveryScope(t *testin
 		writeFlowActivationFixtureFile(t, filepath.Join(root, flow.id, "events.yaml"), "result.done:\n  owned: text\n")
 		writeFlowActivationFixtureFile(t, filepath.Join(root, flow.id, "agents.yaml"), "worker:\n  type: generic\n  role: worker\n  intent: {inline: Emit this flow's result.}\n  emit_events: [result.done]\n")
 	}
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "nested", "schema.yaml"), "mode: singleton\nstages: {}\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "nested", "schema.yaml"), "mode: singleton\nstages: []\n")
 	repo := runtimepipeline.WorkflowRepoRoot()
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 	if err != nil {

@@ -48,9 +48,9 @@ pins:
         resolution: {mode: create}
         initialize:
           product_id: payload.product_id
-initial_state: initializing
-terminal_states: [ready]
-states: [initializing, ready]
+stages:
+  initializing: {initial: true}
+  ready: {terminal: true}
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `,
@@ -125,9 +125,9 @@ pins:
         resolution: {mode: create}
         initialize:
           product_id: payload.product_id
-initial_state: initializing
-terminal_states: [ready]
-states: [initializing, ready]
+stages:
+  initializing: {initial: true}
+  ready: {terminal: true}
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `,

@@ -72,12 +72,10 @@ item:
   item_id: string
 `)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-validation\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), `
-name: support
-initial_state: waiting
-states:
-  - waiting
-  - done
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), `name: support
+stages:
+  waiting: {initial: true}
+  done: {}
 `)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "agents.yaml"), `
 backend:

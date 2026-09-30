@@ -10,10 +10,10 @@ import (
 func terminalOwnershipSource(t *testing.T) semanticview.Source {
 	t.Helper()
 	return loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml":       "name: terminal-ownership\ninitial_state: ready\nstates: [ready, done, reopened]\n",
+		"schema.yaml":       "name: terminal-ownership\nstages:\n  ready: {initial: true}\n  done: {}\n  reopened: {}\n",
 		"nodes.yaml":        "reopener:\n  execution_type: system_node\n  subscribes_to: [task.reopen_requested]\n  event_handlers:\n    task.reopen_requested:\n      advances_to: reopened\n",
 		"events.yaml":       "task.reopen_requested:\n",
-		"child/schema.yaml": "name: child\nmode: template\ninitial_state: ready\nstates: [ready, done, reopened, child_only]\nterminal_states: [done]\n",
+		"child/schema.yaml": "name: child\nmode: template\nstages:\n  ready: {initial: true}\n  done: {terminal: true}\n  reopened: {}\n  child_only: {}\n",
 		"child/nodes.yaml":  "reopener:\n  execution_type: system_node\n  subscribes_to: [task.reopen_requested]\n  event_handlers:\n    task.reopen_requested:\n      advances_to: reopened\n",
 		"child/events.yaml": "task.reopen_requested:\n",
 	})

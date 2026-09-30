@@ -34,7 +34,7 @@ ingress:
 	}{
 		{name: "flow field", field: "lifecycle", yaml: "name: chat\nlifecycle: standing\n"},
 		{name: "ingress field", field: "route", yaml: "name: chat\nactivation: standing\ningress:\n  route: support\n"},
-		{name: "provider field", field: "secret", yaml: "name: chat\nactivation: standing\ningress:\n  providers:\n    - provider: telegram\n      secret: webhook_signing.telegram\n"},
+		{name: "provider field", field: "secret", yaml: "name: chat\nactivation: standing\ningress:\n  alias: support\n  providers:\n    - provider: telegram\n      secret: webhook_signing.telegram\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var invalid FlowSchemaDocument
@@ -53,6 +53,7 @@ name: events
 mode: singleton
 activation: standing
 ingress:
+  alias: partner-events
   providers:
     - provider: partner-events
       signing_secret: webhook_signing.partner
@@ -81,12 +82,12 @@ ingress:
 	}{
 		{name: "admission", field: "fallback", block: "admission:\n      fallback: raw"},
 		{name: "pack", field: "version", block: "admission:\n      pack:\n        id: provider.telegram\n        version: latest"},
-		{name: "authentication", field: "algorithm", block: "admission:\n      kind: raw\n      authentication:\n        kind: token\n        algorithm: constant_time"},
-		{name: "delivery_id", field: "query", block: "admission:\n      kind: raw\n      delivery_id:\n        source: header\n        query: id"},
+		{name: "authentication", field: "algorithm", block: "admission:\n      kind: raw\n      event: inbound.partner\n      payload: json\n      delivery_id: {source: body_sha256}\n      authentication:\n        kind: token\n        header: X-Token\n        algorithm: constant_time"},
+		{name: "delivery_id", field: "query", block: "admission:\n      kind: raw\n      event: inbound.partner\n      payload: json\n      authentication: {kind: token, header: X-Token}\n      delivery_id:\n        source: header\n        header: X-Id\n        query: id"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			block := strings.ReplaceAll(tc.block, "\n", "\n      ")
-			body := "name: chat\nmode: singleton\nactivation: standing\ningress:\n  providers:\n    - provider: telegram\n      " + block + "\n"
+			body := "name: chat\nmode: singleton\nactivation: standing\ningress:\n  alias: support\n  providers:\n    - provider: telegram\n      " + block + "\n"
 			var invalid FlowSchemaDocument
 			err := decodeNodeTestYAML([]byte(body), &invalid)
 			if err == nil || !strings.Contains(err.Error(), tc.field) || !strings.Contains(err.Error(), "not supported") {

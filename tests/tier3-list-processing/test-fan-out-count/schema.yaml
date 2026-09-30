@@ -1,6 +1,7 @@
-initial_state: pending
-terminal_states: [done]
-states: [pending, processing, done]
+stages:
+  pending: {initial: true}
+  processing: {}
+  done: {terminal: true}
 pins:
   inputs:
     events: [batch.received]

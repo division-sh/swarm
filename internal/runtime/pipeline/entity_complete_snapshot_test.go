@@ -17,7 +17,7 @@ func TestEntityLastFieldClearAndColdReloadBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			db, store := openHandlerEntityRequirementStore(t, backend)
 			source := loadWorkflowTempSource(t, map[string]string{
-				"schema.yaml":   "initial_state: active\nstates: [active]\n",
+				"schema.yaml":   "stages:\n  active: {initial: true}\n",
 				"entities.yaml": "test_entity:\n  revision_count: integer?\n",
 				"events.yaml":   "work.clear:\n",
 				"nodes.yaml": `node-a:
@@ -98,7 +98,7 @@ func TestSelectedHandlerSparsePresenceWriteAndEmitBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			db, store := openHandlerEntityRequirementStore(t, backend)
 			source := loadWorkflowTempSource(t, map[string]string{
-				"schema.yaml":   "initial_state: active\nstates: [active]\n",
+				"schema.yaml":   "stages:\n  active: {initial: true}\n",
 				"entities.yaml": "test_entity:\n  kill_reason: text?\n  observed_absence: boolean?\n",
 				"events.yaml":   "work.ready:\nwork.emitted:\n  observed_absence: boolean\n",
 				"nodes.yaml": `node-a:
@@ -160,7 +160,7 @@ func TestSelectedHandlerSparseEqualityMutationsBothStores(t *testing.T) {
 				t.Run(tc.name, func(t *testing.T) {
 					db, store := openHandlerEntityRequirementStore(t, backend)
 					source := loadWorkflowTempSource(t, map[string]string{
-						"schema.yaml": "initial_state: active\nstates: [active]\n",
+						"schema.yaml": "stages:\n  active: {initial: true}\n",
 						"entities.yaml": `test_entity:
   left: text?
   right:

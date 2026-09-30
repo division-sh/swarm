@@ -1,7 +1,7 @@
 name: child
-initial_state: idle
-terminal_states: [completed]
-states: [idle, completed]
+stages:
+  idle: {initial: true}
+  completed: {terminal: true}
 pins:
   inputs:
     events: [child.start]

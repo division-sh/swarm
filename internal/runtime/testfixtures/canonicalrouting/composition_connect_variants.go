@@ -103,9 +103,9 @@ deploy.done:
 	}
 	writeLegacyInstanceFlow(t, root, "consumer", `name: consumer
 mode: `+consumerMode+`
-`+instance+`initial_state: idle
-terminal_states: [done]
-states: [idle, done]
+`+instance+`stages:
+  idle: {initial: true}
+  done: {terminal: true}
 pins:
   inputs:
     events:

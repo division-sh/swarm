@@ -842,9 +842,9 @@ func templateInstanceDeliveryFixtureFiles() map[string]string {
 		"operating/schema.yaml": `name: operating
 mode: template
 instance: instance_id
-initial_state: initializing
-terminal_states: [ready]
-states: [initializing, ready]
+stages:
+  initializing: {initial: true}
+  ready: {terminal: true}
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `,

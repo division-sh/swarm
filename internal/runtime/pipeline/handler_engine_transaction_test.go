@@ -550,11 +550,10 @@ func TestExecuteNodeContractHandlerMintsEntityIDForEntityMaterializingHandler(t 
 	source := loadWorkflowTempSource(t, map[string]string{
 
 		"schema.yaml": "name: runtime-test\n",
-		"scoring/schema.yaml": `
-name: scoring
+		"scoring/schema.yaml": `name: scoring
 mode: static
-initial_state: queued
-states: [queued]
+stages:
+  queued: {initial: true}
 `,
 		"scoring/entities.yaml": `
 subject:
@@ -990,7 +989,7 @@ func newEmitPersistenceTestCoordinator(t *testing.T, db *sql.DB) (*PipelineCoord
 	t.Helper()
 	bus := &recordingPipelineBus{}
 	bundle := loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: validation\ninitial_state: researching\nstates: [researching, mvp_speccing]\n",
+		"schema.yaml":   "name: validation\nstages:\n  researching: {initial: true}\n  mvp_speccing: {}\n",
 		"entities.yaml": "test_entity:\n  business_brief: {type: BusinessBrief}\n",
 		"types.yaml":    "types:\n  BusinessBrief:\n    summary: text\n",
 		"events.yaml":   "research.completed:\n  business_brief: BusinessBrief?\nspec.requested:\n",
@@ -1177,11 +1176,10 @@ func TestResolveHandlerEntityIDForFlowCreateEntitySeedsInitialStateAndSchemaDefa
 	source := loadWorkflowTempSource(t, map[string]string{
 
 		"schema.yaml": "name: runtime-test\n",
-		"scoring/schema.yaml": `
-name: scoring
+		"scoring/schema.yaml": `name: scoring
 mode: static
-initial_state: queued
-states: [queued]
+stages:
+  queued: {initial: true}
 `,
 		"scoring/entities.yaml": `
 vertical:
@@ -1330,11 +1328,10 @@ func TestExecuteNodeContractHandlerCreateEntityPersistsSchemaInitialValuesBefore
 	source := loadWorkflowTempSource(t, map[string]string{
 
 		"schema.yaml": "name: runtime-test\n",
-		"validation/schema.yaml": `
-name: validation
+		"validation/schema.yaml": `name: validation
 mode: static
-initial_state: queued
-states: [queued]
+stages:
+  queued: {initial: true}
 `,
 		"validation/entities.yaml": `
 validation_entity:
@@ -1454,11 +1451,10 @@ func TestExecuteNodeContractHandlerQueryEntitiesGuardUsesWorkflowContext(t *test
 	source := loadWorkflowTempSource(t, map[string]string{
 
 		"schema.yaml": "name: runtime-test\n",
-		"validation/schema.yaml": `
-name: validation
+		"validation/schema.yaml": `name: validation
 mode: static
-initial_state: queued
-states: [queued]
+stages:
+  queued: {initial: true}
 `,
 		"validation/entities.yaml": `
 validation_request:
@@ -1567,11 +1563,10 @@ func TestExecuteNodeContractHandlerCreateEntityPersistsNonValidationChildFlowIde
 	source := loadWorkflowTempSource(t, map[string]string{
 
 		"schema.yaml": "name: runtime-test\n",
-		"review/schema.yaml": `
-name: review
+		"review/schema.yaml": `name: review
 mode: static
-initial_state: queued
-states: [queued]
+stages:
+  queued: {initial: true}
 `,
 		"review/entities.yaml": `
 review_entity:
@@ -1682,11 +1677,10 @@ func TestExecuteNodeContractHandlerCreateEntityAllowsLaterClearOfSchemaInitialVa
 	source := loadWorkflowTempSource(t, map[string]string{
 
 		"schema.yaml": "name: runtime-test\n",
-		"validation/schema.yaml": `
-name: validation
+		"validation/schema.yaml": `name: validation
 mode: static
-initial_state: queued
-states: [queued]
+stages:
+  queued: {initial: true}
 `,
 		"validation/entities.yaml": `
 validation_entity:
@@ -1785,11 +1779,10 @@ func TestPreviewContractHandlerExecutionShowsInitialValuesMaterialized(t *testin
 	source := loadWorkflowTempSource(t, map[string]string{
 
 		"schema.yaml": "name: runtime-test\n",
-		"validation/schema.yaml": `
-name: validation
+		"validation/schema.yaml": `name: validation
 mode: static
-initial_state: queued
-states: [queued]
+stages:
+  queued: {initial: true}
 `,
 		"validation/entities.yaml": `
 validation_entity:
@@ -1869,7 +1862,7 @@ func isZeroIntegerValue(v any) bool {
 
 func TestExecuteNodeContractHandlerReturnsTerminalRejectForTerminalEntity(t *testing.T) {
 	bundle := loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml": "name: demo\ninitial_state: queued\nstates: [queued, done]\nterminal_states: [done]\n",
+		"schema.yaml": "name: demo\nstages:\n  queued: {initial: true}\n  done: {terminal: true}\n",
 		"nodes.yaml":  "node-a:\n  execution_type: system_node\n  subscribes_to: [custom.trigger]\n  event_handlers:\n    custom.trigger: {}\n",
 		"events.yaml": "custom.trigger:\n",
 	})

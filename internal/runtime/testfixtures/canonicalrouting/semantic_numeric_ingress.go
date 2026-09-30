@@ -12,9 +12,9 @@ func CopySemanticNumericIngress(t testing.TB) string {
 	root := CopyScenarioRootSetup(t)
 	for name, raw := range map[string]string{
 		"schema.yaml": `name: semantic-numeric-ingress
-initial_state: waiting
-terminal_states: [done]
-states: [waiting, done]
+stages:
+  waiting: {initial: true}
+  done: {terminal: true}
 pins:
   inputs:
     events: [numeric.requested]

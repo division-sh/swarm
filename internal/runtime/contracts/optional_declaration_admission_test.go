@@ -347,7 +347,7 @@ func TestOptionalDeclarationAdmissionIsConsumedAtSupportedScopes(t *testing.T) {
 				t.Run(scope.name+"/"+role.name+"/"+document.name, func(t *testing.T) {
 					root := t.TempDir()
 					writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: optional-declaration-scope\n")
-					writeFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "name: child\nmode: static\ninitial_state: active\nstates: [active]\n")
+					writeFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "name: child\nmode: static\nstages:\n  active: {initial: true}\n")
 					targetRoot := scope.targetRoot(root)
 					target := filepath.Join(targetRoot, role.fileName)
 					writeFixtureFile(t, target, document.body)
@@ -421,7 +421,7 @@ func writeMergeProjectionBundleSkeleton(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: merge-projection\n")
-	writeFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "name: child\nmode: static\ninitial_state: active\nstates: [active]\n")
+	writeFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "name: child\nmode: static\nstages:\n  active: {initial: true}\n")
 	return root
 }
 

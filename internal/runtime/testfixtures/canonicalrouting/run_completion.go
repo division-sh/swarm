@@ -9,13 +9,9 @@ func CopyRunCompletionSystemNode(t testing.TB) string {
 run:
   topic: string
 `)
-	writeClosedVariantFile(t, root, "schema.yaml", `
-initial_state: active
-terminal_states:
-  - done
-states:
-  - active
-  - done
+	writeClosedVariantFile(t, root, "schema.yaml", `stages:
+  active: {initial: true}
+  done: {terminal: true}
 pins:
   inputs:
     events:
@@ -33,14 +29,10 @@ root-completion:
     flow.started:
       advances_to: done
 `)
-	writeClosedVariantFile(t, root, "discovery/schema.yaml", `
-name: discovery
-initial_state: active
-terminal_states:
-  - done
-states:
-  - active
-  - done
+	writeClosedVariantFile(t, root, "discovery/schema.yaml", `name: discovery
+stages:
+  active: {initial: true}
+  done: {terminal: true}
 pins:
   inputs:
     events:

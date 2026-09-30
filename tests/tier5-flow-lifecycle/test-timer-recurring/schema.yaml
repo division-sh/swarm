@@ -1,6 +1,6 @@
-initial_state: monitoring
-terminal_states: [done]
-states: [monitoring, done]
+stages:
+  monitoring: {initial: true}
+  done: {terminal: true}
 pins:
   inputs:
     events: [monitor.started, monitor.stopped, timer.tick]

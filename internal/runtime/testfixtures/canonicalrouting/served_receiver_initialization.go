@@ -49,8 +49,8 @@ work.ready:
 		"account/schema.yaml": `name: account
 mode: template
 instance: account_id
-initial_state: active
-states: [active]
+stages:
+  active: {initial: true}
 instance_variables:
   variables:
     count: {type: integer, default: 3}

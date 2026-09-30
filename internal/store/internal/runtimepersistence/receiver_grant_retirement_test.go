@@ -295,8 +295,8 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 func grantReceiverEntitySource(t *testing.T) semanticview.Source {
 	t.Helper()
 	root := t.TempDir()
-	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: grant-receiver-root\ninitial_state: active\nstates: [active, done]\nterminal_states: [done]\n")
-	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "global/schema.yaml"), "name: global\nmode: singleton\ninitial_state: active\nstates: [active, done]\nterminal_states: [done]\n")
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: grant-receiver-root\nstages:\n  active: {initial: true}\n  done: {terminal: true}\n")
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "global/schema.yaml"), "name: global\nmode: singleton\nstages:\n  active: {initial: true}\n  done: {terminal: true}\n")
 	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "global/entities.yaml"), "receiver: {}\n")
 	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(pipeline.WorkflowRepoRoot(), root, contracts.DefaultPlatformSpecFile(pipeline.WorkflowRepoRoot()))
 	if err != nil {

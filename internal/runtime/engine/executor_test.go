@@ -416,9 +416,9 @@ func sourceWithDeclarativeEmitExternalizationFlows() semanticview.Source {
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "component-scaffold"},
 		Path:  "component-scaffold",
 		Schema: runtimecontracts.FlowSchemaDocument{
-			InitialState: "ready", States: []string{"ready"},
-			Mode: runtimecontracts.FlowModeTemplate,
-			Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "component.scaffolded"}}}},
+			StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "ready", Initial: true}}},
+			Mode:              runtimecontracts.FlowModeTemplate,
+			Pins:              runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "component.scaffolded"}}}},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"component.scaffold_requested": {
@@ -6758,8 +6758,8 @@ func sourceWithChildOutputPin() semanticview.Source {
 			FlowPath: "child",
 		},
 		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode:         runtimecontracts.FlowModeTemplate,
-			InitialState: "running", States: []string{"running"},
+			Mode:              runtimecontracts.FlowModeTemplate,
+			StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "running", Initial: true}}},
 			Pins: runtimecontracts.FlowPins{
 				Outputs: runtimecontracts.FlowOutputPins{
 					EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "child.done"}},
@@ -6790,7 +6790,7 @@ func sourceWithChildOutputPin() semanticview.Source {
 func sourceWithNestedStaticOutputPin() semanticview.Source {
 	child := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "root/child"},
-		Schema: runtimecontracts.FlowSchemaDocument{InitialState: "running", States: []string{"running"}, Mode: runtimecontracts.FlowModeStatic, Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{
+		Schema: runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "running", Initial: true}}}, Mode: runtimecontracts.FlowModeStatic, Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{
 			EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "child.done"}},
 		}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"child.done": {}},
@@ -6810,7 +6810,7 @@ func sourceWithNestedStaticOutputPin() semanticview.Source {
 func sourceWithChildOutputPinAndRootConnect() semanticview.Source {
 	child := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"},
-		Schema: runtimecontracts.FlowSchemaDocument{InitialState: "running", States: []string{"running"}, Mode: runtimecontracts.FlowModeTemplate, Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{
+		Schema: runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "running", Initial: true}}}, Mode: runtimecontracts.FlowModeTemplate, Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{
 			EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "child.done"}},
 		}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"child.done": {}},
@@ -7798,11 +7798,10 @@ func loadEngineProjectionFlowBundle(t *testing.T) *runtimecontracts.WorkflowCont
 	root := t.TempDir()
 
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: projection-flow\n")
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), `
-name: scoring
-initial_state: pending
-states: [pending, scored]
-terminal_states: [scored]
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), `name: scoring
+stages:
+  pending: {initial: true}
+  scored: {terminal: true}
 pins:
   inputs:
     events:
@@ -7862,11 +7861,10 @@ func loadEngineSingletonCoordinatorFlowBundle(t *testing.T) *runtimecontracts.Wo
 	root := t.TempDir()
 
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: singleton-coordinator-runtime\n")
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "coordinator", "schema.yaml"), `
-name: coordinator
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "coordinator", "schema.yaml"), `name: coordinator
 mode: singleton
-initial_state: active
-states: [active]
+stages:
+  active: {initial: true}
 pins:
   inputs:
     events:

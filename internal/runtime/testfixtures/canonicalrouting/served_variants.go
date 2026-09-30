@@ -12,13 +12,15 @@ func CopyRootIngressServedFollowUp(t testing.TB) string {
 	root := CopyExample(t, RootIngress)
 
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), `name: routing-root-ingress
-initial_state: pending
-terminal_states: [done]
-states: [pending, processed, done]
+stages:
+  pending: {initial: true}
+  processed: {}
+  done: {terminal: true}
 `, `name: served-event-publish-followup
-initial_state: new
-terminal_states: [done]
-states: [new, waiting, done]
+stages:
+  new: {initial: true}
+  waiting: {}
+  done: {terminal: true}
 `)
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), `    item.received:
       advances_to: processed
@@ -67,9 +69,10 @@ states: [new, waiting, done]
 func CopyRootIngressServedDecisionControl(t testing.TB) string {
 	t.Helper()
 	root := CopyRootIngressServedFollowUp(t)
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), `initial_state: new
-terminal_states: [done]
-states: [new, waiting, done]
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), `stages:
+  new: {initial: true}
+  waiting: {}
+  done: {terminal: true}
 `, `stages:
   awaiting_review:
     initial: true
@@ -206,16 +209,16 @@ func CopyRootIngressLegacyTemplateTargetRoute(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 	addLegacyTemplateRoot(t, root)
-	writeClosedVariantFile(t, root, "operating/schema.yaml", `
-name: operating
+	writeClosedVariantFile(t, root, "operating/schema.yaml", `name: operating
 mode: template
 instance: instance_id
 instance_variables:
   variables:
     product_id: text
-initial_state: initializing
-terminal_states: [ready]
-states: [initializing, waiting, ready]
+stages:
+  initializing: {initial: true}
+  waiting: {}
+  ready: {terminal: true}
 pins:
   inputs:
     events:
@@ -289,16 +292,16 @@ func CopyRootIngressLegacyTemplateAutoEmit(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 	addLegacyTemplateRoot(t, root)
-	writeClosedVariantFile(t, root, "operating/schema.yaml", `
-name: operating
+	writeClosedVariantFile(t, root, "operating/schema.yaml", `name: operating
 mode: template
 instance: instance_id
 instance_variables:
   variables:
     product_id: text
-initial_state: initializing
-terminal_states: [ready]
-states: [initializing, spawning, ready]
+stages:
+  initializing: {initial: true}
+  spawning: {}
+  ready: {terminal: true}
 pins:
   inputs:
     events:
@@ -353,17 +356,19 @@ func addLegacyTemplateRoot(t testing.TB, root string) {
 	t.Helper()
 
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), `name: routing-root-ingress
-initial_state: pending
-terminal_states: [done]
-states: [pending, processed, done]
+stages:
+  pending: {initial: true}
+  processed: {}
+  done: {terminal: true}
 pins:
   inputs:
     events:
       - item.received
 `, `name: routing-root-ingress
-initial_state: new
-terminal_states: [done]
-states: [new, waiting, done]
+stages:
+  new: {initial: true}
+  waiting: {}
+  done: {terminal: true}
 pins:
   inputs:
     events:

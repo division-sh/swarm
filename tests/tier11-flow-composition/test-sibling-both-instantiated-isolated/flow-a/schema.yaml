@@ -1,7 +1,8 @@
 name: flow-a
-initial_state: new
-terminal_states: [processed]
-states: [new, active, processed]
+stages:
+  new: {initial: true}
+  active: {}
+  processed: {terminal: true}
 pins:
   inputs:
     events: [work.begin]
