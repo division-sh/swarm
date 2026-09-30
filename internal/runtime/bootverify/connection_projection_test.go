@@ -119,20 +119,7 @@ func TestConnectionCommonGuaranteesRespectEveryArrival(t *testing.T) {
 func TestConnectionStaticInitializationRequiresCreatingAuthority(t *testing.T) {
 	for _, connected := range []bool{false, true} {
 		t.Run(map[bool]string{false: "no-edge", true: "static-edge"}[connected], func(t *testing.T) {
-			root := t.TempDir()
-			files := map[string]string{
-				"schema.yaml":        "name: init-test\npins:\n  inputs:\n    events: [work.ready]\n  outputs:\n    events: [work.ready]\nconnect:\n  - {event: work.ready, from: ., to: worker}\n",
-				"events.yaml":        "work.ready:\n  label: text\n",
-				"worker/schema.yaml": "name: worker\ninstance_variables:\n  variables:\n    label: text\npins:\n  inputs:\n    events:\n      - event: work.ready\n        initialize: {label: payload.label}\n",
-				"worker/nodes.yaml":  "worker:\n  execution_type: system_node\n  event_handlers:\n    work.ready:\n      guard: {check: \"payload.label != ''\"}\n",
-			}
-			if !connected {
-				files["schema.yaml"] = strings.Split(files["schema.yaml"], "connect:\n")[0]
-				files["worker/events.yaml"] = "work.ready:\n  label: text\n"
-			}
-			for p, s := range files {
-				writeBootverifyFixtureFile(t, filepath.Join(root, p), s)
-			}
+			root := canonicalrouting.CopyNonCreatingInitialization(t, connected)
 			repo := repoRootForBootverifyTest(t)
 			_, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
 			if err == nil || !strings.Contains(err.Error(), "initialize requires a creating connection") {
