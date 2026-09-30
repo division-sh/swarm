@@ -15022,7 +15022,13 @@ platform_tables:
         A separate current recovery action may create one linked new delivery generation for the
         same pending source after checking the current default; the predecessor and its uncertainty
         remain durable. The recovery presentation states that the first message may have arrived
-        and the resend creates another message. Repeating that action cannot create another generation. Planning is not
+        and the resend creates another message. Repeating that action cannot create another generation;
+        a later occurrence after the source loses eligibility settles as stale rather than retrying.
+        Native entry and summary Open inbox freeze a small warning and canonical current source outcome
+        from retained uncertain notice/card plans for the exact current principal, interface, delivery
+        epoch and conversation. Disclosure is independent of resend eligibility and survives a linked
+        fresh copy and source completion; it grants no history-feed or mutation authority. These
+        readbacks use the same compiled bounds and immutable paging as other responses. Planning is not
         evidence that a provider write was launched, accepted, or acknowledged by a human.
       ddl: |
         CREATE TABLE channel_delivery_plans (
@@ -15100,6 +15106,10 @@ platform_tables:
         The effect journal remains the launch/attempt authority. Receipt and plan state commit atomically with that
         journal's terminal settlement, so restart never infers success from a missing receipt or resends uncertain work.
         Historical receipts survive rebind and retirement but confer no current destination authority.
+        Healthy current copies update from canonical state. An unresolved provider write may leave
+        an older physical copy visually stale, including a delayed apply after a fresh copy progresses;
+        convergence of every uncertain historical physical copy is not guaranteed. A successor's
+        acknowledgment never resolves that predecessor or authorizes automatic replay/re-edit.
       ddl: |
         CREATE TABLE channel_delivery_receipts (
             effect_operation_id UUID PRIMARY KEY REFERENCES runtime_external_effect_operations(operation_id),
@@ -15125,6 +15135,11 @@ platform_tables:
         re-rendered without its mutation control and every current receipt is edited from
         that canonical state. Historical tokens remain evidence but cannot mutate a
         successor render or destination.
+        The canonical database decision remains authoritative even when an uncertain old physical
+        copy looks actionable. Callbacks and quoted-input selection require exact healthy current
+        receipt/render authority; retained sent evidence from an uncertain plan cannot select a draft.
+        Explicit fresh-copy consent applies only to eligible pending sources and cannot revive a
+        completed decision. Late provider application cannot restore local mutation authority.
       ddl: |
         CREATE TABLE channel_delivery_actions (
             action_token UUID PRIMARY KEY,
