@@ -8,7 +8,7 @@ import (
 
 func TestWorkflowGateAuthoredInputOrderSurvivesPlanLowering(t *testing.T) {
 	var outcome FlowStageGateOutcomeDeclaration
-	err := yaml.Unmarshal([]byte("label: Review\ninput:\n  zeta: {type: text, required: true}\n  alpha: {type: integer, required: true}\nadvances_to: done\n"), &outcome)
+	err := decodeNodeTestYAML([]byte("label: Review\ninput:\n  zeta: {type: text, required: true}\n  alpha: {type: integer, required: true}\nadvances_to: done\n"), &outcome)
 	if err != nil {
 		t.Fatal(err)
 	}
