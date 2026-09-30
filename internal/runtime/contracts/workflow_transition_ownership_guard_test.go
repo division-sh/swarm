@@ -463,6 +463,13 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/bootverify.workflowStageGraphEdges::call internal/runtime/semanticview.WorkflowStageTopology":                                   1,
 		"internal/runtime/bootverify.workflowStageGraphEdges::carrier fields":                                                                             2,
 		"internal/runtime/bootverify.workflowStageGraphEdges::edge inventory":                                                                             1,
+		"internal/runtime/bootverify.authoredReachableStates::call internal/runtime/semanticview.WorkflowStageTopology":                                   1,
+		"internal/runtime/bootverify.authoredReachableStates::call internal/runtime/contracts.WorkflowStageTopology.LifecycleReachableStages":             1,
+		"internal/runtime/contracts.BuildWorkflowStageTopology::call internal/runtime/contracts.WorkflowStageTopology.GuardTerminationTarget":             1,
+		"internal/runtime/contracts.WorkflowStageTopology.LifecycleReachableStages::carrier fields":                                                       3,
+		"internal/runtime/contracts.WorkflowStageTopology.LifecycleReachableStages::edge inventory":                                                       1,
+		"internal/runtime/contracts.WorkflowStageTopology.LifecycleReachableStages::graph metadata":                                                       1,
+		"internal/runtime/contracts.WorkflowStageTopology.PossibleGuardTerminations::graph metadata":                                                      1,
 		// Selected handler and explicit guard-disposition admission.
 		"internal/runtime/engine.Executor.newExecutionFrame::call internal/runtime/engine.Executor.validateSourceStage":                        1,
 		"internal/runtime/engine.Executor.validateSourceStage::call internal/runtime/semanticview.WorkflowStageTopology":                       1,
@@ -516,9 +523,11 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/workflowlifecycle.Transition.HandlerOrigin::carrier fields":                                                                 3,
 		"internal/runtime/workflowlifecycle.Transition.validateCause::carrier fields":                                                                 6,
 		// Authoring readback projects graph fields without selecting an execution carrier.
-		"internal/runtime/authoringview.buildStageGraphEdgesForFlow::call internal/runtime/semanticview.WorkflowStageTopology": 1,
-		"internal/runtime/authoringview.buildStageGraphEdgesForFlow::carrier fields":                                           16,
-		"internal/runtime/authoringview.buildStageGraphEdgesForFlow::edge inventory":                                           2,
+		"internal/runtime/authoringview.buildStageGraphEdgesForFlow::call internal/runtime/semanticview.WorkflowStageTopology":                                    1,
+		"internal/runtime/authoringview.buildStageGraphEdgesForFlow::carrier fields":                                                                              16,
+		"internal/runtime/authoringview.buildStageGraphEdgesForFlow::edge inventory":                                                                              2,
+		"internal/runtime/authoringview.buildStageGraphGuardTerminationsForFlow::call internal/runtime/semanticview.WorkflowStageTopology":                        1,
+		"internal/runtime/authoringview.buildStageGraphGuardTerminationsForFlow::call internal/runtime/contracts.WorkflowStageTopology.PossibleGuardTerminations": 1,
 		// CLI/API scenario gate-name inventory is descriptive, not transition authority.
 		"internal/apiv1.declaredTestSetupGateNames::call internal/runtime/contracts.WorkflowContractBundle.DerivedHandlerTransitions":                1,
 		"internal/cliapp.scenarioRunner.declaredScenarioGateNames::call internal/runtime/contracts.WorkflowContractBundle.DerivedHandlerTransitions": 1,
@@ -542,7 +551,7 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/bootverify.flowIsStateless::call internal/runtime/semanticview.WorkflowStageTopology":                                                        1,
 		"internal/runtime/bootverify.flowIsStateless::graph metadata":                                                                                                  1,
 		"internal/runtime/bootverify.timerActivationStates::graph metadata":                                                                                            1,
-		"internal/runtime/contracts.BuildWorkflowStageTopology::graph metadata":                                                                                        6,
+		"internal/runtime/contracts.BuildWorkflowStageTopology::graph metadata":                                                                                        12,
 		"internal/runtime/contracts.NewWorkflowStageClassifier::graph metadata":                                                                                        1,
 		"internal/runtime/contracts.WorkflowStageClassifier.Valid::graph metadata":                                                                                     1,
 		"internal/runtime/contracts.CompiledTransition.ValidateAgainst::graph metadata":                                                                                1,
@@ -806,7 +815,9 @@ func transitionGuardCallee(fn *types.Func) string {
 		"internal/runtime/pipeline.PreviewContractHandlerExecution", "internal/runtime/pipeline.loadPreviewEngineState":
 		return "call " + key
 	case "internal/runtime/contracts.WorkflowStageTopology.AdmitTransition", "internal/runtime/contracts.CompiledTransition.ValidateAgainst",
-		"internal/runtime/contracts.WorkflowStageTopology.GuardTerminationTarget":
+		"internal/runtime/contracts.WorkflowStageTopology.GuardTerminationTarget",
+		"internal/runtime/contracts.WorkflowStageTopology.PossibleGuardTerminations",
+		"internal/runtime/contracts.WorkflowStageTopology.LifecycleReachableStages":
 		return "call " + key
 	case "internal/runtime/engine.EngineMutation.ValidateTransitionEvidence", "internal/runtime/engine.Executor.validateSourceStage",
 		"internal/runtime/pipeline.pipelineEngineStateRepo.validateMutationTransition",

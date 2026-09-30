@@ -3608,7 +3608,7 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleCollisionFailsBeforeActivation
 					Mode: canonicalrouting.TemplateInstanceRouteSelectOrCreate, SecondPin: tc.secondPin, Consumer: tc.consumer,
 				})
 				_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-				if err == nil || !strings.Contains(err.Error(), `flow input pin event "deploy.done" is declared more than once`) {
+				if err == nil || !strings.Contains(err.Error(), `pin event "deploy.done" is declared more than once`) || !strings.Contains(err.Error(), `consumer/schema.yaml:`) {
 					t.Fatalf("duplicate exact input admission error = %v", err)
 				}
 				return

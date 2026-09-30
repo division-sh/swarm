@@ -473,6 +473,18 @@ contract_formats:
         handler's kill disposition, its evaluated check prefix and failed check,
         and the compiled flow's existing kill-target selection; a fabricated
         guard name or another declared stage is not termination authority.
+        Structural stage reachability also consumes compiled possible guard
+        termination facts, separately from ordinary edges. A fact retains the
+        exact flow-local source, target, node, handler and failing-check identity
+        for an admitted kill guard. Source eligibility is the pre-guard handler
+        scope: loop admission precedes guards, and join evaluation follows them.
+        Only a reachable nonterminal source can lend reachability; the spelling
+        killed alone or a sibling flow's guard cannot. This is possibility, not
+        evidence of execution or ordinary transition authority. Describe graph
+        exposes these facts separately as guard_terminations. SCC/loop regions,
+        successful-effect assignment transfer and ordinary carrier admission
+        remain authored-edge-only. Runtime still requires the exact evaluated
+        guard prefix, failed check and separately validated durable cause.
         A self transition or no advance creates no transition
         history or stage-entry lifecycle effect.
         Stage timers apply this same no-op law only after exact compiled
@@ -21457,9 +21469,12 @@ static_analyzer:
         rule: non-create_entity handlers source from all non-terminal declared states.
       terminal_states:
         rule: terminal states are sinks in this slice.
-    rule: Reject an unreachable declared stage in the authored transition graph as hard-invalid because `stages:` is
+    rule: Reject an unreachable declared stage in the compiled lifecycle model as hard-invalid because `stages:` is
       the canonical lifecycle node authoring owner. Keep undeclared advances_to targets on hard-invalid
       state_machine_coherence. Retired lifecycle authoring does not retain a warning-only compatibility path.
+      Structural reachability includes distinct possible guard termination facts compiled by
+      contract_formats.flow_schema.compiled_transition_admission. These facts never authorize ordinary
+      execution or successful-handler writes; evaluated guard causes remain separately validated.
   slice_5_dead_declared_event_schema_surface:
     id: semantic_drift_dead_event_schema
     domain: semantic_drift

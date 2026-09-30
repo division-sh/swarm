@@ -60,7 +60,7 @@ func (c *checkerContext) stateReachability() []Finding {
 		}
 		for _, state := range sortedSetKeys(unreachable) {
 			message := fmt.Sprintf(
-				"flow %s declares %s %s but no transition path from %s %s reaches %s in the authored transition graph.\n\nReachable states: %s\nUnreachable states: %s",
+				"flow %s declares %s %s but no lawful lifecycle path from %s %s reaches %s in the compiled lifecycle model.\n\nReachable states: %s\nUnreachable states: %s",
 				validationFlowLabel(flowID),
 				declaredNoun,
 				state,
@@ -71,7 +71,7 @@ func (c *checkerContext) stateReachability() []Finding {
 				unreachableList,
 			)
 			remediation := fmt.Sprintf(
-				"If %s is intentionally unused, remove it from schema.yaml %s. If %s should be reachable, add a handler transition carrier that reaches %s.",
+				"If %s is intentionally unused, remove it from schema.yaml %s. If %s should be reachable, declare a lawful lifecycle path to %s (including a same-flow kill guard for guard termination).",
 				state,
 				ownerField,
 				state,
@@ -99,24 +99,11 @@ func (c *checkerContext) stateReachability() []Finding {
 }
 
 func authoredReachableStates(source semanticview.Source, flowID, initial string) map[string]struct{} {
-	flowID = strings.TrimSpace(flowID)
-	initial = strings.TrimSpace(initial)
-
-	reachable := map[string]struct{}{initial: {}}
-	edges := workflowStageGraphEdges(source, flowID, nil)
-	queue := []string{initial}
-	for len(queue) > 0 {
-		state := strings.TrimSpace(queue[0])
-		queue = queue[1:]
-		for next := range edges[state] {
-			if _, ok := reachable[next]; ok {
-				continue
-			}
-			reachable[next] = struct{}{}
-			queue = append(queue, next)
-		}
+	topology, ok := semanticview.WorkflowStageTopology(source, strings.TrimSpace(flowID))
+	if !ok {
+		return map[string]struct{}{}
 	}
-	return reachable
+	return topology.LifecycleReachableStages(strings.TrimSpace(initial))
 }
 
 func workflowStageGraphEdges(

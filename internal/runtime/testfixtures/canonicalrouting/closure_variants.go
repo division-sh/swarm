@@ -30,11 +30,11 @@ func CopyRuntimeAgentMemory(t testing.TB, variant RuntimeAgentMemoryVariant) str
 	writeClosedVariantFile(t, root, "support/events.yaml", "item.created:\n  entity_id: string?\n")
 	agentBody := "backend:\n  type: generic\n  role: backend\n  intent: prompts/backend.md\n  model: regular\n  memory: true\n  subscriptions:\n    - item.created\n  emit_events:\n    - item.created\n"
 	if variant == RuntimeAgentMemoryDirectFlow {
-		writeClosedVariantFile(t, root, "support/schema.yaml", "name: support\nstages:\n  waiting: {initial: true}\n")
+		writeClosedVariantFile(t, root, "support/schema.yaml", "name: support\nstages: []\n")
 		writeClosedVariantFile(t, root, "support/prompts/backend.md", "Handle support events.\n")
 		writeClosedVariantFile(t, root, "support/agents.yaml", agentBody)
 	} else {
-		writeClosedVariantFile(t, root, "support/schema.yaml", "name: support\nstages:\n  waiting: {initial: true}\npins:\n  outputs:\n    events: [item.created]\nconnect:\n  - {event: item.created, from: ., to: extras}\n")
+		writeClosedVariantFile(t, root, "support/schema.yaml", "name: support\nstages: []\npins:\n  outputs:\n    events: [item.created]\nconnect:\n  - {event: item.created, from: ., to: extras}\n")
 		writeClosedVariantFile(t, root, "support/extras/schema.yaml", "name: extras\nstages: []\npins:\n  inputs:\n    events: [item.created]\n")
 		writeClosedVariantFile(t, root, "support/extras/prompts/backend.md", "Handle support events.\n")
 		writeClosedVariantFile(t, root, "support/extras/agents.yaml", agentBody)

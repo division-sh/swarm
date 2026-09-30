@@ -1,7 +1,6 @@
 stages:
   idle: {initial: true}
-  filtered: {}
-  done: {terminal: true}
+  filtered: {terminal: true}
 pins:
   inputs:
     events: [filter.requested]

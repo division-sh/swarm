@@ -55,9 +55,7 @@ func CopyManagedNativeLifecycle(t testing.TB, agentID string) string {
 	removeClosedVariantFiles(t, root, "nodes.yaml")
 
 	writeClosedVariantFile(t, root, "schema.yaml", `name: managed-native-lifecycle
-stages:
-  pending: {initial: true}
-  done: {terminal: true}
+stages: []
 pins:
   inputs:
     events: [task.requested]
@@ -377,7 +375,7 @@ func CopyAgentSlugAdmission(t testing.TB, workflowName, agentKey, agentID string
 	root := CopyExample(t, RootIngress)
 	removeClosedVariantFiles(t, root, "nodes.yaml", "entities.yaml")
 
-	writeClosedVariantFile(t, root, "schema.yaml", "mode: static\nstages:\n  pending: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    events: [agent.requested]\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "mode: static\nstages: []\npins:\n  inputs:\n    events: [agent.requested]\n")
 	writeClosedVariantFile(t, root, "events.yaml", "agent.requested:\n")
 	writeClosedVariantFile(t, root, "agents.yaml", agentKey+":\n  id: "+agentID+"\n  role: "+agentID+"\n  intent: prompts/"+agentID+".md\n  model: regular\n  memory: false\n  subscriptions: [agent.requested]\n")
 	writeClosedVariantFile(t, root, "prompts/"+agentID+".md", "Handle assigned work.\n")

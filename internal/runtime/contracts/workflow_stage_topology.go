@@ -178,6 +178,22 @@ func BuildWorkflowStageTopology(
 			EventType: strings.TrimSpace(transition.EventType),
 			Stages:    normalizedStrings(handlerStages),
 		})
+		if target := topology.GuardTerminationTarget(); target != "" && transition.Guard != nil {
+			failure, err := transition.Guard.FailureSpec()
+			if err == nil && failure.Action == GuardFailureActionKill {
+				for _, from := range normalizedStrings(handlerStages) {
+					if _, declared := stageSet[from]; !declared || topology.stageCatalog.terminal[from] {
+						continue
+					}
+					for _, check := range transition.Guard.EffectiveChecks() {
+						topology.guardTerminations = append(topology.guardTerminations, WorkflowGuardTerminationPossibility{
+							From: from, To: target, Node: transition.Node,
+							HandlerEvent: strings.TrimSpace(transition.EventType), GuardID: check.ID,
+						})
+					}
+				}
+			}
+		}
 		for _, carrier := range HandlerTransitionAdvanceCarriers(transition) {
 			from := handlerStages
 			timed := false
@@ -275,7 +291,47 @@ func BuildWorkflowStageTopology(
 		left, right := topology.Handlers[i], topology.Handlers[j]
 		return left.Node.Key()+"\x00"+left.EventType < right.Node.Key()+"\x00"+right.EventType
 	})
+	sort.Slice(topology.guardTerminations, func(i, j int) bool {
+		left, right := topology.guardTerminations[i], topology.guardTerminations[j]
+		return left.Node.Key()+"\x00"+left.HandlerEvent+"\x00"+left.GuardID+"\x00"+left.From < right.Node.Key()+"\x00"+right.HandlerEvent+"\x00"+right.GuardID+"\x00"+right.From
+	})
 	return topology
+}
+
+func (t WorkflowStageTopology) PossibleGuardTerminations() []WorkflowGuardTerminationPossibility {
+	if !t.ValidStageCatalog() {
+		return nil
+	}
+	return append([]WorkflowGuardTerminationPossibility(nil), t.guardTerminations...)
+}
+
+// LifecycleReachableStages includes guard failure possibilities without lending
+// them to ordinary admission, successful-handler effects, SCCs or loop regions.
+func (t WorkflowStageTopology) LifecycleReachableStages(initial string) map[string]struct{} {
+	reachable := map[string]struct{}{}
+	if _, err := t.ResolveStage(initial); err != nil {
+		return reachable
+	}
+	next := map[string][]string{}
+	for _, edge := range t.Edges {
+		next[edge.From] = append(next[edge.From], edge.To)
+	}
+	for _, possibility := range t.guardTerminations {
+		next[possibility.From] = append(next[possibility.From], possibility.To)
+	}
+	reachable[initial] = struct{}{}
+	queue := []string{initial}
+	for len(queue) > 0 {
+		from := queue[0]
+		queue = queue[1:]
+		for _, to := range next[from] {
+			if _, seen := reachable[to]; !seen {
+				reachable[to] = struct{}{}
+				queue = append(queue, to)
+			}
+		}
+	}
+	return reachable
 }
 
 // StronglyConnectedComponent returns the exact component containing stage.
