@@ -16,7 +16,8 @@ func TestChannelDeliveryUncertainCopyAuthorityPublicJourney(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		for _, schedule := range []string{"applied_before_loss", "applied_after_completion"} {
 			t.Run(string(backend)+"/"+schedule, func(t *testing.T) {
-				h, db, bundleHash := startChannelAnchorJourney(t, backend, "uncertain-copy-token")
+				withSummary := schedule == "applied_after_completion"
+				h, db, bundleHash := startChannelAnchorJourney(t, backend, "uncertain-copy-token", withSummary)
 				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 					"event_name": "work.requested", "bundle_hash": bundleHash,
 					"payload": map[string]any{"seed": true}, "idempotency_key": "uncertain-copy-seed",
@@ -52,11 +53,11 @@ func TestChannelDeliveryUncertainCopyAuthorityPublicJourney(t *testing.T) {
 				postUncertainCopyCallback(t, h, inboxMessage, resendToken, 901020, http.StatusOK)
 				postUncertainCopyCallback(t, h, inboxMessage, resendToken, 901021)
 				waitChannelRejectedCallback(t, db, resendToken)
-				assertUncertainCopyWarning(t, h, cardID, "Decision: pending", 901030)
+				assertUncertainCopyWarning(t, h, cardID, "Decision: pending", 901030, withSummary)
 				h.stop(t)
 				h.start(t)
 				postUncertainCopyStaleControls(t, h, db, oldMessage, oldToken, 901040)
-				assertUncertainCopyWarning(t, h, cardID, "Decision: pending", 901050)
+				assertUncertainCopyWarning(t, h, cardID, "Decision: pending", 901050, withSummary)
 				postUncertainCopyText(t, h, fresh, "fresh-copy-private-reason", 901060)
 				waitUncertainCopyDecision(t, db, cardID)
 				waitChannelReceiptText(t, h, fresh, "Decision: reject", true)
@@ -65,11 +66,11 @@ func TestChannelDeliveryUncertainCopyAuthorityPublicJourney(t *testing.T) {
 					waitChannelReceiptText(t, h, oldMessage, "Input: reason (text) required", false)
 				}
 				postUncertainCopyStaleControls(t, h, db, oldMessage, oldToken, 901070)
-				assertUncertainCopyWarning(t, h, cardID, "Decision: reject", 901080)
+				assertUncertainCopyWarning(t, h, cardID, "Decision: reject", 901080, withSummary)
 				h.stop(t)
 				h.start(t)
 				postUncertainCopyStaleControls(t, h, db, oldMessage, oldToken, 901090)
-				assertUncertainCopyWarning(t, h, cardID, "Decision: reject", 901100)
+				assertUncertainCopyWarning(t, h, cardID, "Decision: reject", 901100, withSummary)
 				var decisions, copies, uncertainty int
 				if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, seed.RunID).Scan(&decisions); err != nil || decisions != 1 {
 					t.Fatalf("old controls or duplicate actions changed completion cardinality: %d, %v", decisions, err)
@@ -309,8 +310,26 @@ func waitUncertainCopyDecision(t *testing.T, db *sql.DB, cardID string) {
 	}
 }
 
-func assertUncertainCopyWarning(t *testing.T, h *channelOnboardingE2EHarness, cardID, decision string, update int) {
+func assertUncertainCopyWarning(t *testing.T, h *channelOnboardingE2EHarness, cardID, decision string, update int, withSummary bool) {
 	t.Helper()
+	if withSummary {
+		message, token := channelUncertaintySummaryEntry(t, h.provider)
+		callback, signing, _ := h.provider.Registration()
+		before := 0
+		for h.provider.Delivery(before) != nil {
+			before++
+		}
+		postChannelTelegramUpdate(t, callback, signing, map[string]any{
+			"update_id": update + 1,
+			"callback_query": map[string]any{
+				"id": fmt.Sprintf("uncertain-card-summary-%d", update), "from": map[string]any{"id": 7000},
+				"message": map[string]any{"message_id": message, "chat": map[string]any{"id": 1001, "type": "private"}},
+				"data":    token,
+			},
+		})
+		response := waitUncertainCopyDelivery(t, h, before, "Older copies may be outdated")
+		assertUncertainCopyWarningText(t, h.provider.Delivery(response-1), cardID, decision)
+	}
 	command := waitNativeInboxCommand(t, h.provider, "chat", "1001", "")
 	before := 0
 	for h.provider.Delivery(before) != nil {
@@ -324,12 +343,17 @@ func assertUncertainCopyWarning(t *testing.T, h *channelOnboardingE2EHarness, ca
 		},
 	})
 	message := waitUncertainCopyDelivery(t, h, before, "Older copies may be outdated")
-	text := fmt.Sprint(h.provider.Delivery(message - 1)["text"])
+	assertUncertainCopyWarningText(t, h.provider.Delivery(message-1), cardID, decision)
+}
+
+func assertUncertainCopyWarningText(t *testing.T, message map[string]any, cardID, decision string) {
+	t.Helper()
+	text := fmt.Sprint(message["text"])
 	if !strings.Contains(text, cardID[:8]) || !strings.Contains(text, decision) || strings.Contains(text, "obsolete-private-answer") {
 		t.Fatalf("uncertainty readback lost its exact canonical outcome or privacy: %s", text)
 	}
 	if decision != "Decision: pending" {
-		if _, found := telegramCallbackToken(h.provider.Delivery(message-1), "Resend card"); found {
+		if telegramHasActionPrefix(message, "Resend card") {
 			t.Fatal("completion made the uncertain terminal decision resendable")
 		}
 	}
