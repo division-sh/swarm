@@ -1,0 +1,25 @@
+name: registry
+mode: template
+stages:
+  registered:
+    initial: true
+    timers:
+      - after: 2160h
+        advances_to: archived
+  investigating:
+    timers:
+      - after: 30m
+        emit: investigation.timed_out
+  assessed:
+    timers:
+      - after: 720h
+        advances_to: archived
+  archived:
+    terminal: true
+instance: item_id
+pins:
+  inputs:
+    events:
+      - event: item.registered
+        resolution:
+          mode: select-or-create

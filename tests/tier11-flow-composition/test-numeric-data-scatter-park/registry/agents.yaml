@@ -1,0 +1,13 @@
+item-investigator:
+  type: generic
+  role: item_investigator
+  intent: prompts/item-investigator.md
+  model: regular
+  memory: false
+  max_turns_per_task: 25
+  subscriptions: [investigate.requested]
+  emit_events: [assessment.reported]
+  flow_data_access: [profile.md]
+  mock:
+    kind: python
+    module: mocks/investigator.py

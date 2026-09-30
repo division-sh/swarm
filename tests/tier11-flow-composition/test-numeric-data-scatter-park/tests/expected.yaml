@@ -1,0 +1,17 @@
+conformance:
+  disposition: verify-only
+  verify: pass
+  proves: [catalog.authoring.numeric_feed_fixture]
+numeric_feed:
+  dataset: data/items.jsonl
+  sha256: 0cfd777208bd1c36625ef4273a38190c14656ce93754d989f2d043396e5bae43
+  rows: 100
+  event: item.registered
+  receiver_flow: registry
+  receiver_node: registry-intake
+  receiver_type: item
+  receiver_stage: registered
+  state_fields: [batch_id, item_id, label, region, source_ref, openings, tags, origin, score, qualified]
+  optional_event_fields: [note]
+  timer_after: 2160h
+  dead_letters: 0
