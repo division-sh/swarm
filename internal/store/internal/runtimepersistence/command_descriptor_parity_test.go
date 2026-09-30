@@ -29,7 +29,7 @@ func TestCommandDescriptorBothStoresPreserveSelectionAndRefuseCorruption(t *test
 				source := withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 					ID: "descriptor-agent", Identity: testAgentIdentity(t, "descriptor-agent", ""),
 					Type: "worker", Role: "test", Model: "custom-at-write", LLMBackend: profile.ID,
-					Memory: agentmemory.PlatformDefault(), Config: json.RawMessage(`{}`),
+					Memory: agentmemory.Plan{}, Config: json.RawMessage(`{}`),
 					Mock: mockperformance.Performance{Kind: mockperformance.KindPython, Module: "mocks/worker.py",
 						Source: performance, Digest: "sha256:" + runtimeeffects.Fingerprint(performance)},
 				})

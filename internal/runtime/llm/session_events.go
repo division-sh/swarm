@@ -38,7 +38,6 @@ func publishAgentStarted(ctx context.Context, publisher EventPublisher, session 
 		"agent_id":               strings.TrimSpace(session.AgentID),
 		"flow_instance":          strings.TrimSpace(session.MemoryIdentity.FlowInstance()),
 		"memory_enabled":         session.Memory.Enabled,
-		"memory_source":          strings.TrimSpace(string(session.Memory.Source)),
 		"model":                  strings.TrimSpace(actor.Model),
 		"llm_backend":            strings.TrimSpace(actor.ResolvedLLMBackend),
 		"resolved_llm_provider":  strings.TrimSpace(actor.ResolvedLLMProvider),

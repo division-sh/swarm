@@ -94,10 +94,10 @@ func TestPostgresAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-			flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source,
+			flow_scope_key, flow_instance_id, flow_instance, memory_enabled,
 			conversation, turn_count, runtime_state, status, created_at, updated_at
 		) VALUES (
-			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored',
+			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE,
 			'[{"role":"assistant","content":"ready"}]'::jsonb, 0, '{}'::jsonb, 'active', $10, $11
 		)
 	`, sessionID, runID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
@@ -109,7 +109,7 @@ func TestPostgresAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 		events.EventEnvelope{Scope: events.EventScopeGlobal}, base.Add(-4*time.Minute))
 	storetest.PersistManagedAgentTurnFixture(t, ctx, storetest.ManagedAgentTurnFixture{
 		Store: selected, Selected: selected, Identity: identity, RunID: runID, SessionID: sessionID, TurnID: turnID,
-		Memory: agentmemory.Authored(true), Event: storetest.LoadCanonicalEventRecord(t, ctx, selected, eventID),
+		Memory: agentmemory.Plan{Enabled: true}, Event: storetest.LoadCanonicalEventRecord(t, ctx, selected, eventID),
 		TaskID: "task-operator-read", ParseOK: true, Latency: 10 * time.Millisecond, CreatedAt: base,
 	})
 	if _, err := selected.ListOperatorAgents(ctx, operatorread.OperatorAgentListOptions{}); err != nil {
@@ -144,6 +144,11 @@ func TestPostgresAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 }
 
 func assertConversationFrameSupportedSurface(t *testing.T, method string, result any, turnID string) {
+	for _, retired := range []string{"memory_source", "session_memory_source", "turn_memory_source"} {
+		if jsonValueHasKey(result, retired) {
+			t.Fatalf("%s exposes retired memory source %s", method, retired)
+		}
+	}
 	t.Helper()
 	switch method {
 	case "conversation.get_turn":

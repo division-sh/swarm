@@ -176,7 +176,7 @@ func managedNormalEffectStoreTestContext(t testing.TB, ctx context.Context, auth
 	runID := authority.Normal.Identity.RunID
 	target := runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: turnID, RunID: runID, AgentID: authority.Normal.AgentID,
-		AgentIdentity: authority.Normal.Identity, SessionID: sessionID, Memory: agentmemory.PlatformDefault(),
+		AgentIdentity: authority.Normal.Identity, SessionID: sessionID, Memory: agentmemory.Plan{},
 		FlowInstance: authority.Normal.Identity.FlowInstance(),
 	}
 	ctx = runtimeeffects.WithUsageTarget(ctx, target)
@@ -230,9 +230,9 @@ type managedAgentTurnFixtureOptions struct {
 func seedManagedTurnFixtureAgent(t testing.TB, ctx context.Context, store completionSettlementTestStore, runID, agentID, flowInstance string) agentmemory.Identity {
 	t.Helper()
 	identity := testAgentMemoryIdentity(t, runID, agentID, flowInstance)
-	memory := agentmemory.PlatformDefault()
+	memory := agentmemory.Plan{}
 	if strings.TrimSpace(flowInstance) != "" {
-		memory = agentmemory.Authored(true)
+		memory = agentmemory.Plan{Enabled: true}
 	}
 	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
@@ -250,10 +250,7 @@ func seedManagedTurnFixtureAgent(t testing.TB, ctx context.Context, store comple
 func persistManagedAgentTurnReadbackFixtureWithOptions(t testing.TB, ctx context.Context, store completionSettlementTestStore, rec runtimellm.AgentTurnRecord, options managedAgentTurnFixtureOptions) error {
 	t.Helper()
 	fixtureCtx := testAuthorActivityContext()
-	plan, err := rec.Memory.Normalize()
-	if err != nil {
-		return err
-	}
+	plan := rec.Memory
 	if rec.Identity == (agentmemory.Identity{}) {
 		rec.Identity = testAgentMemoryIdentity(t, rec.RunID, rec.AgentID, rec.FlowInstance)
 	}
@@ -572,7 +569,7 @@ func TestCompletionRecoveryRejectsSameSlugSiblingCapabilityPrincipal(t *testing.
 	targetA := runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(), RunID: runID,
 		AgentID: identityA.AgentID(), AgentIdentity: identityA, SessionID: uuid.NewString(),
-		Memory: agentmemory.PlatformDefault(), FlowInstance: identityA.FlowInstance(),
+		Memory: agentmemory.Plan{}, FlowInstance: identityA.FlowInstance(),
 	}
 	authorityFor := func(identity agentidentity.Identity) runtimeeffects.Authority {
 		target := targetA
@@ -597,7 +594,6 @@ func TestCompletionRecoveryRejectsSameSlugSiblingCapabilityPrincipal(t *testing.
 	evidence.UsageTarget.AgentIdentity = targetA.AgentIdentity
 	evidence.UsageTarget.SessionID = targetA.SessionID
 	evidence.UsageTarget.MemoryEnabled = targetA.Memory.Enabled
-	evidence.UsageTarget.MemorySource = string(targetA.Memory.Source)
 	evidence.UsageTarget.FlowInstance = targetA.FlowInstance
 	authorityEvidence, err := json.Marshal(evidence)
 	if err != nil {

@@ -448,7 +448,7 @@ func putTestTurnContext(t testing.TB, registry *TurnContextRegistry, token strin
 			Kind: runtimeeffects.UsageTargetAgentTurn, ID: turn.CapabilitySurface.Authority.ID,
 			RunID: turn.CapabilitySurface.Authority.RunID, AgentID: turn.CapabilitySurface.ActorID,
 			AgentIdentity: turn.LifecycleToken.Identity, SessionID: turn.CapabilitySurface.Authority.SessionID,
-			Memory: agentmemory.PlatformDefault(), FlowInstance: turn.LifecycleToken.Identity.FlowInstance(),
+			Memory: agentmemory.Plan{}, FlowInstance: turn.LifecycleToken.Identity.FlowInstance(),
 		}
 		turn.EffectAuthority = authority
 		turn.HasEffectAuthority = true

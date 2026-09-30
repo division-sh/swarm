@@ -77,7 +77,7 @@ func TestAgentDiagnoseExactDeliveryPaginationParity(t *testing.T) {
 				Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 					Identity: identity, ID: agentID, Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic",
 					FlowID: "diagnose", FlowPath: identity.FlowInstance(),
-					Memory: agentmemory.PlatformDefault(), Config: json.RawMessage(`{}`),
+					Memory: agentmemory.Plan{}, Config: json.RawMessage(`{}`),
 				}),
 				Status: "active", StartedAt: now,
 			}); err != nil {

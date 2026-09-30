@@ -17,7 +17,7 @@ import (
 const testMemoryRunID = "11111111-1111-1111-1111-111111111111"
 
 func testMemory() agentmemory.Plan {
-	return agentmemory.Authored(true)
+	return agentmemory.Plan{Enabled: true}
 }
 
 func testMemoryIdentity(agentID, flowInstance string) agentmemory.Identity {
@@ -78,7 +78,7 @@ func withTestStatelessMemory(t testing.TB, ctx context.Context, agentID, flowIns
 		identity = testMemoryIdentity(agentID, flowInstance)
 	}
 	ctx = withTestActorConcreteIdentity(ctx, identity)
-	ctx = agentmemory.WithExecution(ctx, agentmemory.Authored(false), identity)
+	ctx = agentmemory.WithExecution(ctx, agentmemory.Plan{Enabled: false}, identity)
 	return withTestOriginDeliveryClaim(ctx, testMemoryRunID, identity.AgentID())
 }
 

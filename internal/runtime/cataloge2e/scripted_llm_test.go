@@ -99,10 +99,7 @@ func (r *scriptedLLMRuntime) StartSession(ctx context.Context, agentID, systemPr
 		Tools:        append([]llm.ToolDefinition(nil), tools...),
 	}
 	if execution, ok := agentmemory.FromContext(ctx); ok {
-		plan, err := execution.Plan.Normalize()
-		if err != nil {
-			return nil, err
-		}
+		plan := execution.Plan
 		session.Memory = plan
 		session.MemoryIdentity = execution.Identity.Normalize()
 	}

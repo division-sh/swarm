@@ -66,8 +66,8 @@ func SeedConversationForkSourceForTest(ctx context.Context, selected any, fixtur
 				{`INSERT INTO agent_sessions (
 				session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 				flow_scope_key, flow_instance_id, flow_instance,
-				memory_enabled, memory_source, status, created_at, updated_at
-			) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,'authored','active',$10,$10)`,
+				memory_enabled, status, created_at, updated_at
+			) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,'active',$10,$10)`,
 					[]any{fixture.SessionID, fixture.RunID, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, now.Add(-3 * time.Minute)}},
 				{`INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES ($1::uuid,$2::uuid,'flow/forkchat','default','after','{}'::jsonb,'{"name":"After"}'::jsonb,'{}'::jsonb,2,$3,$3,$3)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(10 * time.Second)}},
 				{`INSERT INTO entity_mutations (run_id, entity_id, domain, path, old_value, new_value, writer_type, writer_id, created_at) VALUES ($1::uuid,$2::uuid,'lifecycle_state','',NULL,'"draft"'::jsonb,'platform','test',$3),($1::uuid,$2::uuid,'authored_field','name',NULL,'"Before"'::jsonb,'platform','test',$3),($1::uuid,$2::uuid,'lifecycle_state','','"draft"'::jsonb,'"after"'::jsonb,'platform','test',$4)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(-30 * time.Second), fixture.Turn1At.Add(10 * time.Second)}},
@@ -80,8 +80,8 @@ func SeedConversationForkSourceForTest(ctx context.Context, selected any, fixtur
 				{`INSERT INTO agent_sessions (
 				session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 				flow_scope_key, flow_instance_id, flow_instance,
-				memory_enabled, memory_source, status, created_at, updated_at
-			) VALUES (?,?,?,?,?,?,?,?,?,1,'authored','active',?,?)`,
+				memory_enabled, status, created_at, updated_at
+			) VALUES (?,?,?,?,?,?,?,?,?,1,'active',?,?)`,
 					[]any{fixture.SessionID, fixture.RunID, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, now.Add(-3 * time.Minute), now.Add(-3 * time.Minute)}},
 				{`INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES (?,?,'flow/forkchat','default','after','{}','{"name":"After"}','{}',2,?,?,?)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(10 * time.Second), fixture.Turn1At.Add(10 * time.Second), fixture.Turn1At.Add(10 * time.Second)}},
 				{`INSERT INTO entity_mutations (run_id, entity_id, domain, path, old_value, new_value, writer_type, writer_id, created_at) VALUES (?,?,'lifecycle_state','',NULL,'"draft"','platform','test',?),(?,?,'authored_field','name',NULL,'"Before"','platform','test',?),(?,?,'lifecycle_state','','"draft"','"after"','platform','test',?)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(-30 * time.Second), fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(-30 * time.Second), fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(10 * time.Second)}},

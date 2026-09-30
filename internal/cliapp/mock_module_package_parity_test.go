@@ -14,7 +14,6 @@ func TestVerifyCommandLoadsFlowRelativeMockModuleStandaloneAndNested(t *testing.
 	child := filepath.Join(root, "bot")
 
 	writeVerifyMockFlowFile(t, filepath.Join(child, "agents.yaml"), `assistant:
-  id: assistant
   role: helper
   model: regular
   intent: {inline: "Reply deterministically."}

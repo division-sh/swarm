@@ -16,7 +16,7 @@ func TestPersistedAgentProjectionRejectsLiveDescriptorWithMockArtifact(t *testin
 	identity := testAgentIdentity(t, "live-agent-with-inactive-artifact", "")
 	_, err := projectPersistedAgentConfig(withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 		ID: "live-agent-with-inactive-artifact", Identity: identity, Role: "reviewer", Model: "regular", LLMBackend: "anthropic",
-		ResolvedLLMBackend: "anthropic", ExecutionMode: runtimeeffects.ExecutionModeLive, Memory: agentmemory.PlatformDefault(),
+		ResolvedLLMBackend: "anthropic", ExecutionMode: runtimeeffects.ExecutionModeLive, Memory: agentmemory.Plan{},
 		Mock: mockperformance.Performance{Kind: mockperformance.KindPython, Module: "mocks/reviewer.py", Source: []byte("def handle(input): return {'text': 'mock'}\n"), Digest: "sha256:test"},
 	}), "")
 	if err == nil || !strings.Contains(err.Error(), "live runtime descriptor cannot carry a mock performance artifact") {
@@ -24,100 +24,57 @@ func TestPersistedAgentProjectionRejectsLiveDescriptorWithMockArtifact(t *testin
 	}
 }
 
-func TestPersistedAgentProjectionRejectsEnabledPlatformDefaultMemory(t *testing.T) {
-	illegal := agentmemory.Plan{Enabled: true, Source: agentmemory.SourcePlatformDefault}
-	identity := testAgentIdentity(t, "agent-invalid-memory", "review/one")
-	_, err := projectPersistedAgentConfig(runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-invalid-memory",
-		Identity: identity,
-		Role:     "reviewer",
-		Model:    "regular",
-		FlowPath: "review/one",
-		Memory:   illegal,
-	}, "")
-	if err == nil || !strings.Contains(err.Error(), `requires source "authored"`) {
-		t.Fatalf("projectPersistedAgentConfig error = %v, want authored-source requirement", err)
+func TestW5PersistedMemoryPlanPreservesEnablementAndRootRefusal(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		identity := testAgentIdentity(t, "agent-memory", "review/one")
+		cfg := withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+			ExecutionMode: "live", ID: "agent-memory", Identity: identity,
+			Role: "reviewer", Model: "regular", LLMBackend: "anthropic", ResolvedLLMBackend: "anthropic",
+			FlowPath: "review/one", Memory: agentmemory.Plan{Enabled: enabled},
+		})
+		row, err := projectPersistedAgentConfig(cfg, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		restored, err := hydratePersistedAgentConfig(row)
+		if err != nil || restored.Memory != cfg.Memory || restored.Identity != cfg.Identity {
+			t.Fatalf("enablement/identity round trip: %+v, %v", restored, err)
+		}
 	}
-
-	_, err = hydratePersistedAgentConfig(persistedAgentProjection{
-		Identity:          mustStorageFields(t, identity),
-		AgentID:           "agent-invalid-memory",
-		FlowInstance:      "review/one",
-		Role:              "reviewer",
-		Model:             "regular",
-		LLMBackend:        "anthropic",
-		MemoryEnabled:     true,
-		MemorySource:      string(agentmemory.SourcePlatformDefault),
-		ConfigJSON:        []byte(`{"config":{},"receiver_config":null}`),
-		RuntimeDescriptor: []byte(`{"type":"generic"}`),
+	root := withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+		ExecutionMode: "live", ID: "root-memory", Identity: testAgentIdentity(t, "root-memory", ""),
+		Role: "reviewer", Model: "regular", Memory: agentmemory.Plan{Enabled: true},
 	})
-	if err == nil || !strings.Contains(err.Error(), `requires source "authored"`) {
-		t.Fatalf("hydratePersistedAgentConfig error = %v, want authored-source requirement", err)
+	if _, err := projectPersistedAgentConfig(root, ""); err == nil || !strings.Contains(err.Error(), "flow-instance owner") {
+		t.Fatalf("root memory must fail closed: %v", err)
 	}
 }
 
-func TestFreshAgentsSchemaRejectsEnabledPlatformDefaultMemory(t *testing.T) {
+func TestW5FreshMemorySchemaHasNoSourceBothStores(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	_, postgresDB, _ := testutil.StartPostgres(t)
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
-
-	for _, backend := range []struct {
-		name string
-		exec func() error
-	}{
-		{
-			name: "postgres",
-			exec: func() error {
-				_, err := postgresDB.ExecContext(ctx, `
-						INSERT INTO agents (
-						agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-						flow_scope_key, flow_instance_id, flow_instance,
-							role, model, memory_enabled, memory_source,
-							lifecycle_process_authority_id, lifecycle_process_owner_id,
-							lifecycle_process_boot_id, lifecycle_generation_grant_id,
-							lifecycle_bundle_hash,
-							lifecycle_runtime_instance_id, lifecycle_runtime_generation,
-							topology_authority_kind, topology_admission, execution_lifetime
-						)
-						VALUES ('invalid-memory-postgres', 'schema-negative-test', 'runtime_created', 'present',
-							'review', 'one', 'review/one', 'reviewer', 'regular', TRUE, 'platform_default',
-							'00000000-0000-4000-8000-000000000001'::uuid, 'schema-negative-test',
-							'00000000-0000-4000-8000-000000000002'::uuid, '00000000-0000-4000-8000-000000000003'::uuid,
-							'bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-							'00000000-0000-4000-8000-000000000004'::uuid, 1,
-							'static_declaration_plan', $1::jsonb, 'durable_managed')
-				`, testAgentTopologyJSON(t))
-				return err
-			},
-		},
-		{
-			name: "sqlite",
-			exec: func() error {
-				_, err := sqliteStore.backend.ExecContext(ctx, `
-					INSERT INTO agents (
-						agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-						flow_scope_key, flow_instance_id, flow_instance,
-							role, model, memory_enabled, memory_source,
-							lifecycle_process_authority_id, lifecycle_process_owner_id,
-							lifecycle_process_boot_id, lifecycle_generation_grant_id,
-							lifecycle_bundle_hash,
-							lifecycle_runtime_instance_id, lifecycle_runtime_generation,
-							topology_authority_kind, topology_admission, execution_lifetime
-						)
-						VALUES ('invalid-memory-sqlite', 'schema-negative-test', 'runtime_created', 'present',
-							'review', 'one', 'review/one', 'reviewer', 'regular', 1, 'platform_default',
-							'00000000-0000-4000-8000-000000000001', 'schema-negative-test',
-							'00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000003',
-							'bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-							'00000000-0000-4000-8000-000000000004', 1,
-							'static_declaration_plan', ?, 'durable_managed')
-				`, testAgentTopologyJSON(t))
-				return err
-			},
-		},
-	} {
-		t.Run(backend.name, func(t *testing.T) {
-			if err := backend.exec(); err == nil {
-				t.Fatal("fresh agents schema accepted memory enabled with platform-default provenance")
+	for _, backend := range []string{"postgres", "sqlite"} {
+		t.Run(backend, func(t *testing.T) {
+			for _, table := range []string{"agents", "agent_sessions", "agent_turns", "agent_conversation_audits"} {
+				var count int
+				var err error
+				if backend == "postgres" {
+					err = postgresDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='public' AND table_name=$1 AND column_name='memory_source'`, table).Scan(&count)
+				} else {
+					err = sqliteStore.backend.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info(?) WHERE name='memory_source'`, table).Scan(&count)
+				}
+				if err != nil || count != 0 {
+					t.Fatalf("%s %s retains memory source: %d, %v", backend, table, count, err)
+				}
+				if backend == "postgres" {
+					err = postgresDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='public' AND table_name=$1 AND column_name='memory_enabled'`, table).Scan(&count)
+				} else {
+					err = sqliteStore.backend.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info(?) WHERE name='memory_enabled'`, table).Scan(&count)
+				}
+				if err != nil || count != 1 {
+					t.Fatalf("%s %s lost enablement: %d, %v", backend, table, count, err)
+				}
 			}
 		})
 	}
@@ -176,7 +133,7 @@ func TestManagerStore_LoadAgents_FailsClosedOnMalformedRuntimeDescriptor(t *test
 				INSERT INTO agents (
 					agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 					flow_scope_key, flow_instance_id, flow_instance,
-					role, model, llm_backend, memory_enabled, memory_source,
+					role, model, llm_backend, memory_enabled,
 					parent_agent_id, entity_id, config, subscriptions, emit_events, tools, permissions,
 					runtime_descriptor, status,
 					lifecycle_process_authority_id, lifecycle_process_owner_id,
@@ -186,7 +143,7 @@ func TestManagerStore_LoadAgents_FailsClosedOnMalformedRuntimeDescriptor(t *test
 					topology_authority_kind, topology_admission, execution_lifetime, run_id
 				) VALUES (
 					$1, $2, $3, $4, $5, $6, $7,
-					'reviewer', 'regular', 'anthropic', FALSE, 'platform_default',
+					'reviewer', 'regular', 'anthropic', FALSE,
 					NULL, NULL, '{"config":{},"receiver_config":null}'::jsonb, '["review.ready"]'::jsonb, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
 					$8::jsonb, 'active',
 					'00000000-0000-4000-8000-000000000001'::uuid, 'runtime-descriptor-test',

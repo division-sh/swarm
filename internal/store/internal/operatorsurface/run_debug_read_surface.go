@@ -658,7 +658,6 @@ func RunDebugTraceSessionSources() string {
 				run_id,
 				'live_session' AS session_kind,
 				memory_enabled,
-				memory_source,
 				COALESCE(status, '') AS status,
 				updated_at
 			FROM agent_sessions
@@ -668,7 +667,6 @@ func RunDebugTraceSessionSources() string {
 				run_id,
 				'turn_audit' AS session_kind,
 				memory_enabled,
-				memory_source,
 				COALESCE(status, '') AS status,
 				updated_at
 			FROM agent_conversation_audits

@@ -201,10 +201,10 @@ func TestSQLiteRunDebugTracePageIncludesStatelessAuditSessionsInWatermark(t *tes
 		INSERT INTO agent_conversation_audits (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			entity_id, memory_enabled, memory_source,
+			entity_id, memory_enabled,
 			conversation, turn_count, runtime_state, status, created_at, updated_at
 		) VALUES (
-			?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, 'platform_default',
+			?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0,
 			'[]', 0, '{}', 'active', ?, ?
 		)
 	`, sessionID, runID, fields.AgentID, fields.NameOwner, fields.NameSource,
@@ -238,7 +238,7 @@ func TestSQLiteRunDebugTracePageIncludesStatelessAuditSessionsInWatermark(t *tes
 		t.Fatalf("rows = %#v, want one task audit trace row", rows)
 	}
 	row := rows[0]
-	if row.SessionID != sessionID || row.SessionKind != "turn_audit" || row.SessionMemory || row.SessionMemorySource != "platform_default" {
+	if row.SessionID != sessionID || row.SessionKind != "turn_audit" || row.SessionMemory {
 		t.Fatalf("stateless audit session fields = %#v, want platform-default turn_audit session %s", row, sessionID)
 	}
 	if row.SessionUpdatedAt == nil || !row.SessionUpdatedAt.Equal(base.Add(5*time.Second)) {
@@ -396,10 +396,10 @@ func insertSQLiteTraceSession(t *testing.T, ctx context.Context, sqliteStore *SQ
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, memory_source,
+			memory_enabled,
 			conversation, turn_count, runtime_state, status, created_at, updated_at
 		) VALUES (
-			?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'authored',
+			?, ?, ?, ?, ?, ?, ?, ?, ?, 1,
 			'[]', 0, '{}', 'active', ?, ?
 		)
 	`, sessionID, runID, fields.AgentID, fields.NameOwner, fields.NameSource,
@@ -411,9 +411,9 @@ func insertSQLiteTraceSession(t *testing.T, ctx context.Context, sqliteStore *SQ
 
 func insertSQLiteTraceTurnWithMemory(t *testing.T, ctx context.Context, sqliteStore *SQLiteRuntimeStore, claim runtimedelivery.Claim, event events.Event, turnID, runID, agentID, sessionID string, memoryEnabled bool, createdAt time.Time) {
 	t.Helper()
-	memory := agentmemory.PlatformDefault()
+	memory := agentmemory.Plan{}
 	if memoryEnabled {
-		memory = agentmemory.Authored(true)
+		memory = agentmemory.Plan{Enabled: true}
 	}
 	identity := mustTestAgentIdentityForRun(runID, agentID, "flow-a")
 	if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, runtimedelivery.WithClaim(ctx, claim), sqliteStore, runtimellm.AgentTurnRecord{

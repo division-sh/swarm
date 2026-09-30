@@ -16,7 +16,6 @@ func CanonicalStatelessConversationVisibilitySourceSQL() string {
 			COALESCE(run_id::text, '') AS run_id,
 			flow_instance,
 			memory_enabled,
-			memory_source,
 			COALESCE(status, '') AS status,
 			COALESCE(turn_count, 0) AS turn_count,
 			COALESCE(runtime_state, '{}'::jsonb) AS runtime_state,

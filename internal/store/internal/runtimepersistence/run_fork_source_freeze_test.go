@@ -411,7 +411,7 @@ func seedRunForkFreezeExternalEffectAuthority(t *testing.T, ctx context.Context,
 	authority.Target = runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: turnID, RunID: lineage.SourceRunID,
 		AgentID: agentID, AgentIdentity: identity, SessionID: sessionID,
-		Memory: agentmemory.PlatformDefault(), FlowInstance: identity.FlowInstance(),
+		Memory: agentmemory.Plan{}, FlowInstance: identity.FlowInstance(),
 	}
 	capabilitySurface := managedCompletionTestSurface(t, authority, "test")
 	if err := (admitTestPostgresStore(t, db)).SaveManagedCapabilitySurface(ctx, capabilitySurface); err != nil {

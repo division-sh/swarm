@@ -485,9 +485,7 @@ workspace_classes:
 	writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, "schema.yaml"), "name: review\nmode: static\nstages:\n  active: {initial: true}\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, "agents.yaml"), `
 scoped-worker:
-  id: scoped-worker
   model: regular
-  memory: false
   intent:
     inline: Validate native-tool workspace admission for this scoped worker.
   workspace_class: shared_flow
@@ -528,9 +526,7 @@ func scopedNativeToolAgentFixture(t *testing.T) semanticview.Source {
 func scopedNativeToolAgentYAML() string {
 	return `
 shared-worker:
-  id: shared-worker
   model: regular
-  memory: false
   intent:
     inline: Validate native-tool admission for this scoped worker.
   native_tools:

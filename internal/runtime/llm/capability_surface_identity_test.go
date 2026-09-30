@@ -17,7 +17,7 @@ func TestProviderTurnAuthorityRequiresExactActorLifecycleAndSessionIdentity(t *t
 	identityA := testAgentIdentity("worker", "review/inst-a")
 	identityB := testAgentIdentity("worker", "review/inst-b")
 	sessionA := &Session{
-		ID: uuid.NewString(), AgentID: "worker", Memory: agentmemory.PlatformDefault(),
+		ID: uuid.NewString(), AgentID: "worker", Memory: agentmemory.Plan{},
 		MemoryIdentity: identityA,
 	}
 	sessionB := *sessionA

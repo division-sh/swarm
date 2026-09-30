@@ -106,7 +106,7 @@ func TestRunExecutionOwnershipBothStores(t *testing.T) {
 			declaredIdentity := mustTestAgentIdentityForRun(fixture.forkRun, "declared-agent", "")
 			config := withRuntimePersistenceTestIntent(t, actors.AgentConfig{
 				ExecutionMode: "live", ID: declaredIdentity.AgentID(), Identity: declaredIdentity,
-				Role: "worker", Type: "sonnet", Model: "regular", Memory: agentmemory.PlatformDefault(),
+				Role: "worker", Type: "sonnet", Model: "regular", Memory: agentmemory.Plan{},
 			})
 			declaredIdentityPlan, err := declaredIdentity.Plan()
 			if err != nil {

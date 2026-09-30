@@ -284,7 +284,7 @@ func seedSQLiteConversationForkSource(t *testing.T, s *SQLiteRuntimeStore, base 
 		query string
 		args  []any
 	}{
-		{`INSERT INTO agent_sessions (session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'authored', 'active', ?, ?)`,
+		{`INSERT INTO agent_sessions (session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, memory_enabled, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'active', ?, ?)`,
 			[]any{source.sessionID, source.runID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, base.Add(-3 * time.Minute), base.Add(-3 * time.Minute)}},
 	}
 	for _, statement := range statements {
@@ -301,7 +301,7 @@ func seedSQLiteConversationForkSource(t *testing.T, s *SQLiteRuntimeStore, base 
 	} {
 		if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, ctx, s, runtimellm.AgentTurnRecord{
 			AgentID: source.agentID, Identity: testAgentMemoryIdentity(t, source.runID, source.agentID, conversationForkSourceFlowInstance),
-			Memory: agentmemory.Authored(true), SessionID: source.sessionID, RunID: source.runID,
+			Memory: agentmemory.Plan{Enabled: true}, SessionID: source.sessionID, RunID: source.runID,
 			FlowInstance: conversationForkSourceFlowInstance, TriggerEventID: turn.eventID,
 			TriggerEventType: turn.eventType, ParseOK: true,
 		}, managedAgentTurnFixtureOptions{TurnID: turn.id, Now: turn.at}); err != nil {

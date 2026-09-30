@@ -75,10 +75,10 @@ func seedRunForkSessionProjection(t *testing.T, db *sql.DB, runID, agentID, sess
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
-			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, memory_enabled,
 			conversation, turn_count, runtime_state, status, termination_reason, terminated_at, created_at, updated_at
 		) VALUES (
-			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored', '[]'::jsonb, 0,
+			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, '[]'::jsonb, 0,
 			'{}'::jsonb, $10,
 			CASE WHEN $10::text = 'terminated' THEN 'normal' ELSE NULL END,
 			CASE WHEN $10::text = 'terminated' THEN $11::timestamptz ELSE NULL::timestamptz END, $11, $11

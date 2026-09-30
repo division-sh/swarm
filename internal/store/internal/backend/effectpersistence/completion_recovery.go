@@ -78,7 +78,6 @@ type completionRecoveryAuthorityEvidence struct {
 		AgentIdentity agentidentity.Identity `json:"agent_identity"`
 		SessionID     string                 `json:"session_id"`
 		MemoryEnabled bool                   `json:"memory_enabled"`
-		MemorySource  string                 `json:"memory_source"`
 		FlowInstance  string                 `json:"flow_instance"`
 		EntityID      string                 `json:"entity_id"`
 	} `json:"usage_target"`
@@ -368,7 +367,7 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 		Kind: runtimeeffects.UsageTargetKind(recovered.TargetKind), ID: recovered.TargetID, Ordinal: recovered.TargetOrdinal,
 		RunID: evidence.UsageTarget.RunID, AgentID: evidence.UsageTarget.AgentID,
 		AgentIdentity: evidence.UsageTarget.AgentIdentity, SessionID: evidence.UsageTarget.SessionID,
-		Memory:       agentmemory.Plan{Enabled: evidence.UsageTarget.MemoryEnabled, Source: agentmemory.Source(evidence.UsageTarget.MemorySource)},
+		Memory:       agentmemory.Plan{Enabled: evidence.UsageTarget.MemoryEnabled},
 		FlowInstance: evidence.UsageTarget.FlowInstance, EntityID: evidence.UsageTarget.EntityID,
 	}
 	if !target.Valid() {

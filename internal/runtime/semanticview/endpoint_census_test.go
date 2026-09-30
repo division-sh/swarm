@@ -540,8 +540,8 @@ func TestEndpointCensusReusesBundleYAMLAndPreservesNodeAndAgentSourceLines(t *te
 		t.Fatalf("census reparsed authoritative YAML: parse count %d -> %d", afterBundle, afterCensus)
 	}
 	assertEndpointSourceLine(t, census.Consumers(), EventEndpointNodeHandler, "complete-node", "", "task.completed", "nodes.yaml", 12)
-	assertEndpointSourceLine(t, census.Consumers(), EventEndpointAgent, "", "test-agent", "task.assigned", "agents.yaml", 6)
-	assertEndpointSourceLine(t, census.Producers(), EventEndpointAgent, "", "test-agent", "task.completed", "agents.yaml", 8)
+	assertEndpointSourceLine(t, census.Consumers(), EventEndpointAgent, "", "test-agent", "task.assigned", "agents.yaml", 5)
+	assertEndpointSourceLine(t, census.Producers(), EventEndpointAgent, "", "test-agent", "task.completed", "agents.yaml", 7)
 }
 
 func assertEndpointSourceLine(t *testing.T, endpoints []AuthoredEventEndpoint, kind EventEndpointKind, nodeID, agentID, eventType, sourceFile string, sourceLine int) {

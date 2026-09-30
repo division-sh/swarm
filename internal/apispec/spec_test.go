@@ -21,8 +21,8 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if report.MethodCount != 71 {
 		t.Fatalf("method count = %d, want 71", report.MethodCount)
 	}
-	if report.SchemaCount != 244 {
-		t.Fatalf("schema count = %d, want 244", report.SchemaCount)
+	if report.SchemaCount != 243 {
+		t.Fatalf("schema count = %d, want 243", report.SchemaCount)
 	}
 	if report.ErrorCodeCount != 68 {
 		t.Fatalf("error code count = %d, want 68", report.ErrorCodeCount)
@@ -71,11 +71,14 @@ func TestAgentMemoryPlanStateInvariantMatchesFreshSchema(t *testing.T) {
 	sessionManagement := mustMappingValue(t, engine, "agent_session_management")
 	agentMemory := mustMappingValue(t, sessionManagement, "agent_memory")
 	authoredField := mustMappingValue(t, agentMemory, "authored_field")
-	assertScalarContains(t, mustMappingValue(t, authoredField, "state_invariant"), "Memory true with platform_default provenance is invalid")
+	assertScalarContains(t, mustMappingValue(t, authoredField, "state_invariant"), "one enablement boolean")
 
 	platformTables := mustMappingValue(t, mustMappingValue(t, root, "platform_tables"), "tables")
 	agentsDDL := mustMappingValue(t, mustMappingValue(t, platformTables, "agents"), "ddl")
-	assertScalarContains(t, agentsDDL, "CHECK (NOT memory_enabled OR memory_source = 'authored')")
+	assertScalarContains(t, agentsDDL, "memory_enabled")
+	if strings.Contains(scalarValue(agentsDDL), "memory_source") {
+		t.Fatal("fresh agents schema retains redundant memory source")
+	}
 }
 
 func TestFanOutSpecMakesDurableIssuanceTheOnlyRuntimeContract(t *testing.T) {
@@ -130,8 +133,8 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if len(doc.Methods) != 71 {
 		t.Fatalf("generated OpenRPC methods = %d, want 71", len(doc.Methods))
 	}
-	if len(doc.Components.Schemas) != 244 {
-		t.Fatalf("generated OpenRPC schemas = %d, want 244", len(doc.Components.Schemas))
+	if len(doc.Components.Schemas) != 243 {
+		t.Fatalf("generated OpenRPC schemas = %d, want 243", len(doc.Components.Schemas))
 	}
 	if len(doc.Components.Errors) != 68 {
 		t.Fatalf("generated OpenRPC errors = %d, want 68", len(doc.Components.Errors))

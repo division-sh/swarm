@@ -720,7 +720,7 @@ func TestRecover_UsesCanonicalLoadedAgentMetadata(t *testing.T) {
 				FlowID:          "review",
 				Model:           "regular",
 				LLMBackend:      "anthropic",
-				Memory:          agentmemory.Authored(true),
+				Memory:          agentmemory.Plan{Enabled: true},
 				Subscriptions:   []string{"review.ready"},
 				EmitEvents:      []string{"review.completed"},
 				WorkspaceClass:  "shared_flow",
@@ -755,7 +755,7 @@ func TestRecover_UsesCanonicalLoadedAgentMetadata(t *testing.T) {
 	if hydrated.ID != "reviewer" {
 		t.Fatalf("hydrated id = %q, want reviewer", hydrated.ID)
 	}
-	if hydrated.Memory != agentmemory.Authored(true) {
+	if hydrated.Memory != (agentmemory.Plan{Enabled: true}) {
 		t.Fatalf("memory = %+v, want authored true", hydrated.Memory)
 	}
 	if len(hydrated.Subscriptions) != 1 || hydrated.Subscriptions[0] != "review/inst-1/review.ready" {

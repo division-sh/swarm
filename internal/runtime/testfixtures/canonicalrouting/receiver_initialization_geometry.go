@@ -15,7 +15,6 @@ func CopyReceiverInitializationAgentGeometry(t testing.TB) string {
       guard: {check: "payload.worker_id != ''"}
 `)
 	writeClosedVariantFile(t, root, "worker/agents.yaml", `bridge:
-  id: bridge
   model: regular
   intent:
     inline: Create the next receiver using worker_id, label and count from the admitted configuration.

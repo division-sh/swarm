@@ -619,7 +619,7 @@ func TestLLMForkChatExecutorUsesRuntimeRequestedToolsOnly(t *testing.T) {
 			SourceRunID:   sourceRunID,
 			SourceAgent: runtimeactors.AgentConfig{
 				ID: "agent-source", Type: "managed", Role: "researcher", Model: llmselection.ModelAliasRegular,
-				ExecutionMode: runtimeeffects.ExecutionModeLive, Memory: agentmemory.PlatformDefault(),
+				ExecutionMode: runtimeeffects.ExecutionModeLive, Memory: agentmemory.Plan{},
 				NativeTools: runtimeactors.NativeToolConfig{Bash: true, WebSearch: true, FileIO: true},
 			},
 			EntitySnapshot: []runfork.ConversationForkEntitySnapshot{{

@@ -192,7 +192,6 @@ web_search_provider:
 `)
 	writeCredentialsFixtureFile(t, filepath.Join(root, "worker", "agents.yaml"), `
 worker-agent:
-  id: worker-agent
   model: regular
   intent:
     inline: Research the requested subject using native web search.

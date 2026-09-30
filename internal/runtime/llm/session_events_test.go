@@ -51,7 +51,7 @@ func (s *eventPublisherStub) MarkDeliveryInProgress(_ context.Context, agentID, 
 func TestInboundDeliveryBindingAcknowledgedCleanupDoesNotRetry(t *testing.T) {
 	cleanup := errors.New("binding cleanup failed after commit")
 	publisher := &eventPublisherStub{markChanged: true, markErr: cleanup}
-	session := &Session{ID: "session-1", AgentID: "agent-1", Memory: agentmemory.Authored(true)}
+	session := &Session{ID: "session-1", AgentID: "agent-1", Memory: agentmemory.Plan{Enabled: true}}
 	if err := requireInboundDeliveryActiveForSession(context.Background(), publisher, session, diaglog.LevelWarn, "bind reused session", nil, ""); err != nil {
 		t.Fatalf("acknowledged binding was retried: %v", err)
 	}
@@ -232,8 +232,8 @@ func TestAnthropicAPIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	if got := payload["memory_enabled"]; got != false {
 		t.Fatalf("memory_enabled = %#v, want false", got)
 	}
-	if got := payload["memory_source"]; got != string(agentmemory.SourceAuthored) {
-		t.Fatalf("memory_source = %#v, want authored", got)
+	if _, ok := payload["memory_source"]; ok {
+		t.Fatal("retired memory source is still exposed")
 	}
 	if got := payload["model"]; got != "regular" {
 		t.Fatalf("model = %#v, want regular", got)
@@ -351,7 +351,7 @@ func TestPublishAgentStarted_LogsActiveTransitionOnlyAfterRealDeliveryMark(t *te
 	publishAgentStarted(ctx, publisher, &Session{
 		ID:      "session-1",
 		AgentID: "agent-1",
-		Memory:  agentmemory.Authored(true),
+		Memory:  agentmemory.Plan{Enabled: true},
 	}, events.EventType("platform.agent_started"))
 
 	if len(publisher.runtimeLogs) != 1 {
@@ -397,7 +397,7 @@ func TestPublishAgentStartedPreservesExactContextualLineage(t *testing.T) {
 	publishAgentStarted(ctx, publisher, &Session{
 		ID:      "session-1",
 		AgentID: "agent-1",
-		Memory:  agentmemory.Authored(false),
+		Memory:  agentmemory.Plan{Enabled: false},
 	}, events.EventType("platform.agent_started"))
 
 	if len(publisher.events) != 1 {
@@ -453,7 +453,7 @@ func TestEnrichTurnRecord_RootAgentIdentityRejectsInboundFlowProjection(t *testi
 	identity := agentidentitytest.RootRuntimeForRun(t, testMemoryRunID, "analysis-agent", "llm-root-agent-test")
 	rec := enrichTurnRecord(ctx, &Session{
 		ID:             "session-1",
-		Memory:         agentmemory.Authored(false),
+		Memory:         agentmemory.Plan{Enabled: false},
 		MemoryIdentity: identity,
 	}, AgentTurnRecord{
 		AgentID:   "analysis-agent",
@@ -531,7 +531,7 @@ func TestPublishAgentStarted_LogsRuntimeFailures(t *testing.T) {
 	publishAgentStarted(ctx, publisher, &Session{
 		ID:                "session-1",
 		AgentID:           "agent-1",
-		Memory:            agentmemory.Authored(true),
+		Memory:            agentmemory.Plan{Enabled: true},
 		ProviderSessionID: "provider-1",
 	}, events.EventType("platform.agent_started"))
 
@@ -607,7 +607,7 @@ func TestClaudeCLIRuntime_StatelessConversationIsNotPersisted(t *testing.T) {
 	runtime.persistConversation(unmanagedLLMTestContext(), nil, &Session{
 		ID:        "session-stateless",
 		AgentID:   "agent-stateless",
-		Memory:    agentmemory.Authored(false),
+		Memory:    agentmemory.Plan{Enabled: false},
 		Messages:  []Message{{Role: "assistant", Content: "done"}},
 		TurnCount: 1,
 	})

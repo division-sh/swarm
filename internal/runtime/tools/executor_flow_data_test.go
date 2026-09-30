@@ -129,7 +129,6 @@ func TestExecutorReadFlowDataSelectedRootUsesLocalResourceOwner(t *testing.T) {
 factory-cto:
   role: factory_cto
   intent: {inline: "Read the root flow's declared data."}
-  memory: false
   flow_data_access: [exclusions.yaml]
 `)
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "data", "exclusions.yaml"), "blocked: root\n")
@@ -137,7 +136,6 @@ factory-cto:
 factory-cto:
   role: factory_cto
   intent: {inline: "Read the child flow's declared data."}
-  memory: false
   flow_data_access: [exclusions.yaml]
 `)
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "child", "data", "exclusions.yaml"), "blocked: child\n")

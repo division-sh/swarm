@@ -65,7 +65,7 @@ func TestManagedProvidersExecuteCanonicalNotifyHumanThroughSelectedStore(t *test
 			)
 			ctx = runtimecorrelation.WithInboundEvent(ctx, event)
 
-			withoutExecutor, err := llm.NewManagedConversation(seed, "mutation", definitions, agentmemory.Authored(false), 4, provider.runtime)
+			withoutExecutor, err := llm.NewManagedConversation(seed, "mutation", definitions, agentmemory.Plan{Enabled: false}, 4, provider.runtime)
 			if err != nil {
 				t.Fatalf("NewManagedConversation mutation: %v", err)
 			}
@@ -73,7 +73,7 @@ func TestManagedProvidersExecuteCanonicalNotifyHumanThroughSelectedStore(t *test
 				t.Fatalf("missing real executor mutation error = %v", err)
 			}
 
-			conversation, err := llm.NewManagedConversation(seed, "task-1", definitions, agentmemory.Authored(false), 4, provider.runtime)
+			conversation, err := llm.NewManagedConversation(seed, "task-1", definitions, agentmemory.Plan{Enabled: false}, 4, provider.runtime)
 			if err != nil {
 				t.Fatalf("NewManagedConversation: %v", err)
 			}
@@ -281,7 +281,7 @@ func managedHITLProviderActor(t *testing.T, backend string) models.AgentConfig {
 	identity := agentidentitytest.RootRuntimeForRun(t, hitlProviderTestRunID, "hitl-agent", "hitl-provider-conformance")
 	actor := models.AgentConfig{
 		ID: "hitl-agent", Identity: identity, Role: "matcher", ExecutionMode: runtimeeffects.ExecutionModeLive,
-		EntityID: "11111111-1111-4111-8111-111111111111", FlowPath: "", Memory: agentmemory.Authored(false),
+		EntityID: "11111111-1111-4111-8111-111111111111", FlowPath: "", Memory: agentmemory.Plan{Enabled: false},
 	}
 	if backend == llmselection.BackendMock {
 		source := []byte(fmt.Sprintf(`
@@ -344,7 +344,7 @@ func managedHITLProviderContext(t *testing.T, harness *effecttest.Harness, actor
 	ctx = managedexecution.WithAdmission(ctx, admission)
 	ctx = models.WithActor(ctx, actor)
 	ctx = runtimecorrelation.WithRunID(ctx, hitlProviderTestRunID)
-	ctx = agentmemory.WithExecution(ctx, agentmemory.Authored(false), actor.Identity)
+	ctx = agentmemory.WithExecution(ctx, agentmemory.Plan{Enabled: false}, actor.Identity)
 	if actor.ExecutionMode == runtimeeffects.ExecutionModeMock {
 		ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeMock)
 	}

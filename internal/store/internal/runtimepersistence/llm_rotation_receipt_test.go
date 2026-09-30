@@ -40,7 +40,7 @@ func TestSelectedManagedRotationRequiresLifecycleAuthorityBothStores(t *testing.
 		identity := agentmemory.Identity(mustTestAgentIdentityForRun(fixture.runID, "managed-agent", "support/instance-1"))
 		seedTestAgentRow(t, testAuthorActivityContext(), selected.db, selected.postgres, identity, "active")
 		token := runtimeeffects.LifecycleToken{Identity: identity, AgentID: identity.AgentID(), RuntimeEpoch: 1, Generation: 1}
-		base := agentmemory.WithExecution(runtimeeffects.WithLifecycleToken(testAuthorActivityContext(), token), agentmemory.Authored(true), identity)
+		base := agentmemory.WithExecution(runtimeeffects.WithLifecycleToken(testAuthorActivityContext(), token), agentmemory.Plan{Enabled: true}, identity)
 		ctx, cancel := context.WithTimeout(base, 20*time.Second)
 		defer cancel()
 		owner := selected.selected.(llmSessionAttemptJourneyOwner)
@@ -49,7 +49,7 @@ func TestSelectedManagedRotationRequiresLifecycleAuthorityBothStores(t *testing.
 		if err != nil || acquired == nil {
 			t.Fatalf("lifecycle-authorized acquire=%+v err=%v", acquired, err)
 		}
-		session := &runtimellm.Session{ID: acquired.SessionID, AgentID: identity.AgentID(), Memory: agentmemory.Authored(true), MemoryIdentity: identity,
+		session := &runtimellm.Session{ID: acquired.SessionID, AgentID: identity.AgentID(), Memory: agentmemory.Plan{Enabled: true}, MemoryIdentity: identity,
 			TurnCount: 1, Messages: []runtimellm.Message{{Role: "assistant", Content: "first turn"}}}
 		adapter := runtimellm.NewMockRuntime(&config.Config{LLM: config.LLMConfig{Session: config.LLMSessionConfig{RotateAfterTurns: 1}}}, registry, "managed-worker", nil, nil, nil)
 		if err := adapter.PrepareManagedSession(ctx, session); err != nil || session.ID == acquired.SessionID {

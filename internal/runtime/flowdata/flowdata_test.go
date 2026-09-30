@@ -68,7 +68,6 @@ worker:
   role: worker
   intent: {inline: Validate one nested physical declaration.}
   model: regular
-  memory: false
   flow_data_access: [`+declaredFile+`]
 `)
 	writeEmptyFlowDataContractFiles(t, flowRoot)

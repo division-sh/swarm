@@ -397,14 +397,14 @@ model: regular
 model_tier: sonnet
 subscriptions: [scan.requested]
 `), &entry)
-	if err == nil || !strings.Contains(err.Error(), "model_tier is retired") {
+	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "model_tier") {
 		t.Fatalf("yaml.Unmarshal error = %v, want retired model_tier rejection", err)
 	}
 }
 
 func TestAgentRegistryEntryDecodesPythonMockPerformance(t *testing.T) {
 	var entry AgentRegistryEntry
-	err := decodeNodeTestYAML([]byte("id: assistant\nmodel: regular\nmemory: false\nmock:\n  kind: python\n  module: mocks/assistant.py\n"), &entry)
+	err := decodeNodeTestYAML([]byte("intent: {inline: business intent}\nid: assistant\nmodel: regular\nmock:\n  kind: python\n  module: mocks/assistant.py\n"), &entry)
 	if err != nil {
 		t.Fatalf("decode agent: %v", err)
 	}
@@ -416,6 +416,7 @@ func TestAgentRegistryEntryDecodesPythonMockPerformance(t *testing.T) {
 func TestEffectiveAgentRegistryEntryAppliesLayer1PlatformDefaults(t *testing.T) {
 	var entry AgentRegistryEntry
 	err := decodeNodeTestYAML([]byte(`
+intent: {inline: business intent}
 role: researcher
 model: regular
 subscriptions: [scan.requested]
@@ -436,7 +437,7 @@ subscriptions: [scan.requested]
 	if effective.WorkspaceClass != "" {
 		t.Fatalf("workspace_class = %q, want empty", effective.WorkspaceClass)
 	}
-	for _, field := range []string{"type", "memory", "max_turns_per_task", "workspace_class"} {
+	for _, field := range []string{"type", "max_turns_per_task", "workspace_class"} {
 		if got := effective.EffectiveSourceForField(field); got != AgentFieldSourcePlatformDefault {
 			t.Fatalf("%s source = %q, want %q", field, got, AgentFieldSourcePlatformDefault)
 		}
@@ -452,7 +453,7 @@ func TestAgentRegistryEntryRejectsExplicitInvalidLayer1Values(t *testing.T) {
 		body     string
 		contains string
 	}{
-		{name: "invalid_memory", body: "memory: sometimes\n", contains: "cannot unmarshal"},
+		{name: "invalid_memory", body: "memory: sometimes\n", contains: "must be a boolean"},
 		{name: "zero_max_turns", body: "max_turns_per_task: 0\n", contains: "max_turns_per_task must be positive"},
 		{name: "negative_max_turns", body: "max_turns_per_task: -1\n", contains: "max_turns_per_task must be positive"},
 	}
@@ -460,6 +461,7 @@ func TestAgentRegistryEntryRejectsExplicitInvalidLayer1Values(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var entry AgentRegistryEntry
 			err := decodeNodeTestYAML([]byte(`
+intent: {inline: business intent}
 role: researcher
 model: regular
 subscriptions: [scan.requested]
@@ -477,12 +479,12 @@ func TestAgentRegistryEntryRejectsRetiredMemoryModeFieldsAndAliases(t *testing.T
 		body     string
 		contains string
 	}{
-		{name: "conversation_mode", body: "conversation_mode: task\n", contains: "conversation_mode is retired"},
-		{name: "session_scope", body: "session_scope: flow\n", contains: "session_scope is retired"},
-		{name: "session_scope_authority", body: "session_scope_authority: platform_internal\n", contains: "session_scope_authority is retired"},
-		{name: "mode_global", body: "mode: global\n", contains: "mode is retired"},
-		{name: "mode_unknown", body: "mode: forever\n", contains: "mode is retired"},
-		{name: "mode_stateless", body: "mode: stateless\n", contains: "mode is retired"},
+		{name: "conversation_mode", body: "conversation_mode: task\n", contains: "RETIRED"},
+		{name: "session_scope", body: "session_scope: flow\n", contains: "RETIRED"},
+		{name: "session_scope_authority", body: "session_scope_authority: platform_internal\n", contains: "RETIRED"},
+		{name: "mode_global", body: "mode: global\n", contains: "RETIRED"},
+		{name: "mode_unknown", body: "mode: forever\n", contains: "RETIRED"},
+		{name: "mode_stateless", body: "mode: stateless\n", contains: "RETIRED"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -507,8 +509,8 @@ func TestAgentRegistryEntryRejectsUnsupportedLayerSyntaxAndUnknownFields(t *test
 		body     string
 		contains string
 	}{
-		{name: "profile", body: "profile: cheap\n", contains: "reserved for future agent-defaults/profile support"},
-		{name: "runtime_id_template", body: "runtime_id_template: worker-{entity_id}\n", contains: "reserved for future agent-defaults/profile support"},
+		{name: "profile", body: "profile: cheap\n", contains: "RETIRED"},
+		{name: "runtime_id_template", body: "runtime_id_template: worker-{entity_id}\n", contains: "RETIRED"},
 		{name: "unknown", body: "surprise_field: true\n", contains: `agent field "surprise_field" is not supported.`},
 	}
 	for _, tt := range tests {
@@ -682,6 +684,7 @@ func TestValidateWorkflowCriteriaContractsRejectsInvalidCriteriaShapes(t *testin
 func TestAgentAndEventCriteriaCitationYAMLDecode(t *testing.T) {
 	var agent AgentRegistryEntry
 	if err := decodeNodeTestYAML([]byte(`
+intent: {inline: business intent}
 role: cto
 model: regular
 subscriptions: [spec.review_requested]
@@ -823,9 +826,9 @@ func TestAgentRegistryEntryRejectsRetiredAuthoringAliases(t *testing.T) {
 		body     string
 		contains string
 	}{
-		{name: "tools_tier2", body: "tools_tier2: [lookup_data]\n", contains: "tools_tier2 is retired"},
-		{name: "subscriptions_bootstrap", body: "subscriptions_bootstrap: [scan.requested]\n", contains: "subscriptions_bootstrap is retired"},
-		{name: "subscribes_to", body: "subscribes_to: [scan.requested]\n", contains: "subscribes_to is retired for agents.yaml"},
+		{name: "tools_tier2", body: "tools_tier2: [lookup_data]\n", contains: "RETIRED"},
+		{name: "subscriptions_bootstrap", body: "subscriptions_bootstrap: [scan.requested]\n", contains: "RETIRED"},
+		{name: "subscribes_to", body: "subscribes_to: [scan.requested]\n", contains: "RETIRED"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

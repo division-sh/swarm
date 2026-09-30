@@ -226,7 +226,6 @@ sender:
   role: sender
   intent: {inline: Exercise nested provider connector projection.}
   model: regular
-  memory: false
   subscriptions: [work.requested]
 `)
 	write(filepath.Join(flowRoot, "events.yaml"), "work.requested:\n")

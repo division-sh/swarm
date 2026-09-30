@@ -119,24 +119,23 @@ func TestAgentDeclarationIDPresenceMatrix(t *testing.T) {
 		{name: "literal override", field: "  id: public-worker"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			source := "worker:\n  role: worker\n"
+			source := "worker:\n  intent: {inline: business intent}\n  role: worker\n"
 			if tc.field != "" {
-				source = "worker:\n" + tc.field + "\n  role: worker\n"
+				source = "worker:\n  intent: {inline: business intent}\n" + tc.field + "\n  role: worker\n"
 			}
 			var entries map[string]AgentRegistryEntry
-			if err := decodeNodeTestYAML([]byte(source), &entries); err != nil {
-				t.Fatal(err)
-			}
-			normalized, err := normalizeAgentRegistryEntries(entries, "agents.yaml")
+			err := decodeNodeTestYAML([]byte(source), &entries)
 			if tc.wantErr {
-				if err == nil || !strings.Contains(err.Error(), "id is authored but empty") {
-					t.Fatalf("normalize error = %v, want authored-empty rejection", err)
+				if err == nil || !strings.Contains(err.Error(), "id") {
+					t.Fatalf("admission error = %v, want authored invalid-id rejection", err)
 				}
 				return
 			}
 			if err != nil {
 				t.Fatal(err)
 			}
+			normalized, err := normalizeAgentRegistryEntries(entries, "agents.yaml")
+			if err != nil { t.Fatal(err) }
 			got, err := DeclaredAgentID("worker", normalized["worker"])
 			if err != nil {
 				t.Fatal(err)
@@ -154,8 +153,8 @@ func TestAgentDeclarationIDPresenceMatrix(t *testing.T) {
 
 func TestAgentDeclarationRejectsDuplicateEffectiveNames(t *testing.T) {
 	for _, source := range []string{
-		"worker:\n  role: worker\nalias:\n  id: worker\n  role: alias\n",
-		"first:\n  id: shared\n  role: first\nsecond:\n  id: shared\n  role: second\n",
+		"worker:\n  intent: {inline: worker}\n  role: worker\nalias:\n  intent: {inline: alias}\n  id: worker\n  role: alias\n",
+		"first:\n  intent: {inline: first}\n  id: shared\n  role: first\nsecond:\n  intent: {inline: second}\n  id: shared\n  role: second\n",
 	} {
 		var entries map[string]AgentRegistryEntry
 		if err := decodeNodeTestYAML([]byte(source), &entries); err != nil {
@@ -557,7 +556,6 @@ pins:
 `)
 	writeFixtureFile(t, filepath.Join(root, "agents.yaml"), `
 control-plane:
-  id: control-plane
   role: control-plane
   intent: {inline: "Coordinate contract-test evidence events."}
   subscriptions:
@@ -614,7 +612,6 @@ parent.started:
 `)
 	writeFixtureFile(t, filepath.Join(root, "parent", "agents.yaml"), `
 parent-agent:
-  id: parent-agent
   role: parent-agent
   intent: {inline: "Coordinate the parent flow."}
 `)
@@ -638,7 +635,6 @@ child.completed:
 `)
 	writeFixtureFile(t, filepath.Join(root, "parent", "child", "agents.yaml"), `
 child-agent:
-  id: child-agent
   role: child-agent
   intent: {inline: "Execute the child flow."}
 `)

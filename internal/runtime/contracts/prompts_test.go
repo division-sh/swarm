@@ -14,9 +14,9 @@ import (
 func TestResolvedAgentIntent_LocalScopedDeclarationOwner(t *testing.T) {
 	repo := repoRoot(t)
 	root := writePromptTestBundle(t, repo)
-	writePromptFixtureFile(t, filepath.Join(root, "extras", "agents.yaml"), "ops-lead:\n  id: ops-lead\n  role: extras-ops-lead\n  intent: prompts/ops-lead.md\n")
+	writePromptFixtureFile(t, filepath.Join(root, "extras", "agents.yaml"), "ops-lead:\n  role: extras-ops-lead\n  intent: prompts/ops-lead.md\n")
 	writePromptFixtureFile(t, filepath.Join(root, "extras", "prompts", "ops-lead.md"), "Extras-local intent.\n")
-	writePromptFixtureFile(t, filepath.Join(root, "intake", "agents.yaml"), "ops-lead:\n  id: ops-lead\n  role: flow-ops-lead\n  intent: prompts/ops-lead.md\n")
+	writePromptFixtureFile(t, filepath.Join(root, "intake", "agents.yaml"), "ops-lead:\n  role: flow-ops-lead\n  intent: prompts/ops-lead.md\n")
 	writePromptFixtureFile(t, filepath.Join(root, "intake", "prompts", "ops-lead.md"), "Flow-local intent.\n")
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 	if err != nil {
@@ -24,7 +24,11 @@ func TestResolvedAgentIntent_LocalScopedDeclarationOwner(t *testing.T) {
 	}
 	var entry AgentRegistryEntry
 	for _, record := range bundleAgentRecords(bundle) {
-		if record.Entry.ID == "ops-lead" && record.Entry.ResolvedIntent.Provenance == "agents.yaml#agents.ops-lead.intent" {
+		id, err := DeclaredAgentID(record.LogicalID, record.Entry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if id == "ops-lead" && record.Entry.ResolvedIntent.Provenance == "agents.yaml#agents.ops-lead.intent" {
 			entry = record.Entry
 			break
 		}
@@ -51,7 +55,11 @@ func TestResolvedAgentIntent_LocalScopedDeclarationOwner(t *testing.T) {
 	}
 	gotScoped := map[string]string{}
 	for _, record := range bundleAgentRecords(bundle) {
-		if record.Entry.ID == "ops-lead" {
+		id, err := DeclaredAgentID(record.LogicalID, record.Entry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if id == "ops-lead" {
 			gotScoped[record.Entry.ResolvedIntent.Provenance] = record.Entry.ResolvedIntent.Content
 		}
 	}
@@ -77,7 +85,7 @@ func writePromptFixtureFile(t testing.TB, path, content string) {
 
 func TestResolvedAgentIntent_InlineExactBytes(t *testing.T) {
 	var source runtimeagentintent.Source
-	if err := source.UnmarshalYAML(yamlScalarNodeForTest{value: ""}.node()); err == nil {
+	if err := decodeNodeTestYAML([]byte("''"), &source); err == nil {
 		t.Fatal("empty local scalar accepted")
 	}
 	content := "  retain leading and trailing bytes  \n"
@@ -136,11 +144,9 @@ func TestResolvedAgentIntent_DuplicateCanonicalCoordinateFailsClosed(t *testing.
 	root := writePromptTestBundle(t, repo)
 	agentsPath := filepath.Join(root, "agents.yaml")
 	if err := os.WriteFile(agentsPath, []byte(`first:
-  id: first
   role: first
   intent: prompts/ops-lead.md
 second:
-  id: second
   role: second
   intent: prompts/ops-lead.md
 `), 0o644); err != nil {
@@ -166,11 +172,9 @@ func TestResolvedAgentIntent_CaseCollidingCanonicalCoordinatesFailClosed(t *test
 		t.Skip("case-insensitive filesystem cannot represent the collision fixture")
 	}
 	if err := os.WriteFile(filepath.Join(root, "agents.yaml"), []byte(`first:
-  id: first
   role: first
   intent: prompts/Ops-Lead.md
 second:
-  id: second
   role: second
   intent: prompts/ops-lead.md
 `), 0o644); err != nil {
@@ -305,7 +309,7 @@ func TestResolvedAgentIntentLocalFile_IsRelativeToExactDeclaringAgentsYAML(t *te
 	if err := os.MkdirAll(filepath.Join(flowDir, "prompts"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(flowDir, "agents.yaml"), []byte("child:\n  id: child\n  role: child\n  intent: prompts/child.md\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(flowDir, "agents.yaml"), []byte("child:\n  role: child\n  intent: prompts/child.md\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(flowDir, "prompts", "child.md"), []byte("Flow-local intent.\n"), 0o644); err != nil {
@@ -323,8 +327,13 @@ func TestResolvedAgentIntentLocalFile_IsRelativeToExactDeclaringAgentsYAML(t *te
 	}
 	var entry AgentRegistryEntry
 	var ok bool
-	for _, candidate := range bundle.ScopedAgentEntries() {
-		if candidate.ID == "child" {
+	for _, record := range bundle.AgentDeclarationRecords() {
+		candidate := EffectiveAgentRegistryEntry(record.LogicalID, record.Entry)
+		id, err := DeclaredAgentID(record.LogicalID, candidate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if id == "child" {
 			entry, ok = candidate, true
 			break
 		}

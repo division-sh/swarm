@@ -73,10 +73,10 @@ func (s *LLMSQLiteOwner) acquireSQLiteLiveSession(ctx context.Context, identity 
 				if _, err := tx.ExecContext(txctx, `
 				INSERT INTO agent_sessions (
 					session_id, run_id, agent_id, agent_name_owner, agent_name_source,
-					agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source,
+					agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, memory_enabled,
 					conversation, turn_count, runtime_state, lease_holder, lease_grant_id, lease_expires_at,
 					status, created_at, updated_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'authored', '[]', 0, '{}', ?, ?, ?, 'active', ?, ?)
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, '[]', 0, '{}', ?, ?, ?, 'active', ?, ?)
 			`, sessionID, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 					fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, lockOwner, grantID, expires, now, now); err != nil {
 					return fmt.Errorf("insert sqlite session row: %w", err)
@@ -369,10 +369,10 @@ func (s *LLMSQLiteOwner) Rotate(ctx context.Context, leaseInput *runtimesessions
 			if _, err := tx.ExecContext(txctx, `
 			INSERT INTO agent_sessions (
 				session_id, run_id, agent_id, agent_name_owner, agent_name_source,
-				agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source,
+				agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, memory_enabled,
 				conversation, turn_count, runtime_state, lease_holder, lease_grant_id, lease_expires_at, status, created_at, updated_at,
 				rotation_operation_id, rotation_request_digest, rotation_result
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'authored', ?, 0, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 0, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)
 		`, newID, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 				fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, string(conversation), runtimeState, lockOwner, newGrantID, expires, now, now,
 				rotationReceiptValue(rotation.OperationID, rotation.OperationID != ""), rotationReceiptValue(request.Digest, rotation.OperationID != ""), receiptJSON); err != nil {

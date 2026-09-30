@@ -81,7 +81,7 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 			Model:         "regular",
 			LLMBackend:    "anthropic",
 			ExecutionMode: "live",
-			Memory:        agentmemory.PlatformDefault(),
+			Memory:        agentmemory.Plan{},
 			Config:        json.RawMessage(`{}`),
 		}),
 		Status:    "active",
@@ -421,7 +421,7 @@ func TestSQLiteRuntimeStoreUpsertAgentIgnoresAmbientPipelineTransaction(t *testi
 			Model:         "regular",
 			LLMBackend:    "anthropic",
 			ExecutionMode: "live",
-			Memory:        agentmemory.PlatformDefault(),
+			Memory:        agentmemory.Plan{},
 			Config:        json.RawMessage(`{}`),
 		}),
 		Status:    "active",
@@ -1626,7 +1626,7 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 			Model:         "regular",
 			LLMBackend:    "anthropic",
 			ExecutionMode: "live",
-			Memory:        agentmemory.Authored(true),
+			Memory:        agentmemory.Plan{Enabled: true},
 			FlowPath:      "global",
 			Config:        json.RawMessage(`{}`),
 		}),
@@ -1683,7 +1683,7 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 		SessionID: lease.SessionID,
 		AgentID:   identity.AgentID(),
 		Identity:  identity,
-		Memory:    agentmemory.Authored(true),
+		Memory:    agentmemory.Plan{Enabled: true},
 		Messages:  []runtimellm.Message{{Role: "user", Content: "hello"}},
 		Summary:   "greeting",
 		TurnCount: 1,
@@ -1723,7 +1723,7 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	}
 	if err := persistManagedAgentTurnReadbackFixture(t, runtimedelivery.WithClaim(ctx, claimed.Claim), store, runtimellm.AgentTurnRecord{
 		AgentID:          "agent-1",
-		Memory:           agentmemory.Authored(true),
+		Memory:           agentmemory.Plan{Enabled: true},
 		SessionID:        lease.SessionID,
 		RunID:            runID,
 		FlowInstance:     identity.FlowInstance(),
@@ -1776,7 +1776,7 @@ func TestSQLiteRuntimeStore_StatelessAuditUsesExplicitMemoryPlan(t *testing.T) {
 
 	if err := persistManagedAgentTurnReadbackFixture(t, ctx, store, runtimellm.AgentTurnRecord{
 		AgentID:        "task-agent",
-		Memory:         agentmemory.PlatformDefault(),
+		Memory:         agentmemory.Plan{},
 		SessionID:      sessionID,
 		RunID:          runID,
 		RequestPayload: []byte(`{"kind":"task"}`),
@@ -1788,22 +1788,22 @@ func TestSQLiteRuntimeStore_StatelessAuditUsesExplicitMemoryPlan(t *testing.T) {
 	}
 
 	var count int
-	var entityID, flowInstance, conversation, persistedRunID, status, memorySource string
+	var entityID, flowInstance, conversation, persistedRunID, status string
 	var memoryEnabled bool
 	if err := store.backend.QueryRowContext(ctx, `
 		SELECT COUNT(*), COALESCE(MAX(entity_id), ''), COALESCE(MAX(flow_instance), ''),
 		       COALESCE(MAX(conversation), ''), COALESCE(MAX(run_id), ''), COALESCE(MAX(status), ''),
-		       MAX(memory_enabled), COALESCE(MAX(memory_source), '')
+		       MAX(memory_enabled)
 		FROM agent_conversation_audits
 		WHERE session_id = ?
-	`, sessionID).Scan(&count, &entityID, &flowInstance, &conversation, &persistedRunID, &status, &memoryEnabled, &memorySource); err != nil {
+	`, sessionID).Scan(&count, &entityID, &flowInstance, &conversation, &persistedRunID, &status, &memoryEnabled); err != nil {
 		t.Fatalf("read stateless audit row: %v", err)
 	}
 	if count != 1 {
 		t.Fatalf("audit row count = %d, want 1", count)
 	}
-	if entityID != "" || flowInstance != "" || memoryEnabled || memorySource != "platform_default" {
-		t.Fatalf("audit identity entity_id=%q flow_instance=%q memory=%v source=%q", entityID, flowInstance, memoryEnabled, memorySource)
+	if entityID != "" || flowInstance != "" || memoryEnabled {
+		t.Fatalf("audit identity entity_id=%q flow_instance=%q memory=%v ", entityID, flowInstance, memoryEnabled)
 	}
 	if persistedRunID != runID || status != "active" {
 		t.Fatalf("audit run/status = %q/%q, want %q/active", persistedRunID, status, runID)
@@ -1836,7 +1836,7 @@ func TestSQLiteRuntimeStore_StatelessAuditPersistsEntityMetadata(t *testing.T) {
 
 	if err := persistManagedAgentTurnReadbackFixture(t, ctx, store, runtimellm.AgentTurnRecord{
 		AgentID:        "task-agent",
-		Memory:         agentmemory.Authored(false),
+		Memory:         agentmemory.Plan{Enabled: false},
 		SessionID:      sessionID,
 		RunID:          runID,
 		EntityID:       entityID,
@@ -1849,21 +1849,21 @@ func TestSQLiteRuntimeStore_StatelessAuditPersistsEntityMetadata(t *testing.T) {
 	}
 
 	var count int
-	var gotEntityID, flowInstance, conversation, memorySource string
+	var gotEntityID, flowInstance, conversation string
 	var memoryEnabled bool
 	if err := store.backend.QueryRowContext(ctx, `
 		SELECT COUNT(*), COALESCE(MAX(entity_id), ''), COALESCE(MAX(flow_instance), ''),
-		       COALESCE(MAX(conversation), ''), MAX(memory_enabled), COALESCE(MAX(memory_source), '')
+		       COALESCE(MAX(conversation), ''), MAX(memory_enabled)
 		FROM agent_conversation_audits
 		WHERE session_id = ?
-	`, sessionID).Scan(&count, &gotEntityID, &flowInstance, &conversation, &memoryEnabled, &memorySource); err != nil {
+	`, sessionID).Scan(&count, &gotEntityID, &flowInstance, &conversation, &memoryEnabled); err != nil {
 		t.Fatalf("read entity stateless audit row: %v", err)
 	}
 	if count != 1 {
 		t.Fatalf("audit row count = %d, want 1", count)
 	}
-	if gotEntityID != entityID || flowInstance != "" || memoryEnabled || memorySource != "authored" {
-		t.Fatalf("audit entity=%q flow_instance=%q memory=%v source=%q", gotEntityID, flowInstance, memoryEnabled, memorySource)
+	if gotEntityID != entityID || flowInstance != "" || memoryEnabled {
+		t.Fatalf("audit entity=%q flow_instance=%q memory=%v ", gotEntityID, flowInstance, memoryEnabled)
 	}
 	if conversation != "[]" {
 		t.Fatalf("conversation = %s, want empty stateless audit snapshot", conversation)
@@ -1893,7 +1893,7 @@ func TestSQLiteRuntimeStore_StatelessAuditPersistsFlowInstanceMetadata(t *testin
 
 	if err := persistManagedAgentTurnReadbackFixture(t, ctx, store, runtimellm.AgentTurnRecord{
 		AgentID:        "task-agent",
-		Memory:         agentmemory.PlatformDefault(),
+		Memory:         agentmemory.Plan{},
 		SessionID:      sessionID,
 		RunID:          runID,
 		FlowInstance:   flowInstance,
@@ -1906,21 +1906,21 @@ func TestSQLiteRuntimeStore_StatelessAuditPersistsFlowInstanceMetadata(t *testin
 	}
 
 	var count int
-	var entityID, gotFlowInstance, conversation, memorySource string
+	var entityID, gotFlowInstance, conversation string
 	var memoryEnabled bool
 	if err := store.backend.QueryRowContext(ctx, `
 		SELECT COUNT(*), COALESCE(MAX(entity_id), ''), COALESCE(MAX(flow_instance), ''),
-		       COALESCE(MAX(conversation), ''), MAX(memory_enabled), COALESCE(MAX(memory_source), '')
+		       COALESCE(MAX(conversation), ''), MAX(memory_enabled)
 		FROM agent_conversation_audits
 		WHERE session_id = ?
-	`, sessionID).Scan(&count, &entityID, &gotFlowInstance, &conversation, &memoryEnabled, &memorySource); err != nil {
+	`, sessionID).Scan(&count, &entityID, &gotFlowInstance, &conversation, &memoryEnabled); err != nil {
 		t.Fatalf("read flow stateless audit row: %v", err)
 	}
 	if count != 1 {
 		t.Fatalf("audit row count = %d, want 1", count)
 	}
-	if gotFlowInstance != flowInstance || entityID != "" || memoryEnabled || memorySource != "platform_default" {
-		t.Fatalf("audit entity=%q flow_instance=%q memory=%v source=%q", entityID, gotFlowInstance, memoryEnabled, memorySource)
+	if gotFlowInstance != flowInstance || entityID != "" || memoryEnabled {
+		t.Fatalf("audit entity=%q flow_instance=%q memory=%v ", entityID, gotFlowInstance, memoryEnabled)
 	}
 	if conversation != "[]" {
 		t.Fatalf("conversation = %s, want empty stateless audit snapshot", conversation)
@@ -1957,7 +1957,7 @@ func TestSQLiteRuntimeStoreLifecycleTerminationCleansMutableRuntimeState(t *test
 			Model:         "regular",
 			LLMBackend:    "anthropic",
 			ExecutionMode: "live",
-			Memory:        agentmemory.Authored(true),
+			Memory:        agentmemory.Plan{Enabled: true},
 			FlowPath:      "global",
 			Config:        json.RawMessage(`{}`),
 		}),
@@ -1974,7 +1974,7 @@ func TestSQLiteRuntimeStoreLifecycleTerminationCleansMutableRuntimeState(t *test
 		SessionID: lease.SessionID,
 		AgentID:   identity.AgentID(),
 		Identity:  identity,
-		Memory:    agentmemory.Authored(true),
+		Memory:    agentmemory.Plan{Enabled: true},
 		Messages:  []runtimellm.Message{{Role: "user", Content: "hello"}},
 		Summary:   "session",
 		TurnCount: 1,
@@ -1988,7 +1988,7 @@ func TestSQLiteRuntimeStoreLifecycleTerminationCleansMutableRuntimeState(t *test
 		Identity:       identity,
 		RunID:          identity.RunID,
 		FlowInstance:   identity.FlowInstance(),
-		Memory:         agentmemory.PlatformDefault(),
+		Memory:         agentmemory.Plan{},
 		RequestPayload: []byte(`{"kind":"stateless"}`),
 		ResponseRaw:    []byte(`{"ok":true}`),
 		ParseOK:        true,

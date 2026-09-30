@@ -9,13 +9,13 @@ import (
 )
 
 func TestValidateAgentMemoryConfig(t *testing.T) {
-	if err := agentmemory.ValidateFlowOwnership(agentmemory.PlatformDefault(), ""); err != nil {
+	if err := agentmemory.ValidateFlowOwnership(agentmemory.Plan{}, ""); err != nil {
 		t.Fatalf("root stateless config: %v", err)
 	}
-	if err := agentmemory.ValidateFlowOwnership(agentmemory.Authored(true), ""); err == nil || !strings.Contains(err.Error(), "flow-instance owner") {
+	if err := agentmemory.ValidateFlowOwnership(agentmemory.Plan{Enabled: true}, ""); err == nil || !strings.Contains(err.Error(), "flow-instance owner") {
 		t.Fatalf("root remembered error = %v", err)
 	}
-	if err := agentmemory.ValidateFlowOwnership(agentmemory.Authored(true), "support/chat-a"); err != nil {
+	if err := agentmemory.ValidateFlowOwnership(agentmemory.Plan{Enabled: true}, "support/chat-a"); err != nil {
 		t.Fatalf("flow memory config: %v", err)
 	}
 }

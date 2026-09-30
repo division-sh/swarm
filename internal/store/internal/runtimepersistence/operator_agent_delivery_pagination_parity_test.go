@@ -40,7 +40,7 @@ func TestOperatorAgentDeliveryPagesBoundHydrationParity(t *testing.T) {
 			if err := agentfixture.UpsertStatic(t, ctx, selected, runtimemanager.PersistedAgent{
 				Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 					ID: "agent-a", Identity: identity, Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live",
-					Memory: agentmemory.PlatformDefault(), Config: json.RawMessage(`{}`),
+					Memory: agentmemory.Plan{}, Config: json.RawMessage(`{}`),
 				}),
 				Status: "active", StartedAt: now,
 			}); err != nil {

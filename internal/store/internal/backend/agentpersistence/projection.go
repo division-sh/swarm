@@ -45,7 +45,6 @@ type PersistedAgentProjection struct {
 	Model             string
 	LLMBackend        string
 	MemoryEnabled     bool
-	MemorySource      string
 	ParentAgentID     string
 	EntityID          string
 	ConfigJSON        []byte
@@ -120,10 +119,7 @@ func ProjectPersistedAgentConfig(cfg runtimeactors.AgentConfig, parentAgentID st
 	if err != nil {
 		return PersistedAgentProjection{}, err
 	}
-	memory, err := cfg.Memory.Normalize()
-	if err != nil {
-		return PersistedAgentProjection{}, fmt.Errorf("invalid memory plan: %w", err)
-	}
+	memory := cfg.Memory
 	if err := agentmemory.ValidateFlowOwnership(memory, cfg.FlowPath); err != nil {
 		return PersistedAgentProjection{}, err
 	}
@@ -153,7 +149,6 @@ func ProjectPersistedAgentConfig(cfg runtimeactors.AgentConfig, parentAgentID st
 		Model:             modelAlias,
 		LLMBackend:        llmBackend,
 		MemoryEnabled:     memory.Enabled,
-		MemorySource:      string(memory.Source),
 		ParentAgentID:     nullable(strings.TrimSpace(parentAgentID), strings.TrimSpace(cfg.ParentAgent)),
 		EntityID:          cfg.EffectiveEntityID(),
 		ConfigJSON:        configJSON,
@@ -185,10 +180,7 @@ func HydratePersistedAgentConfig(row PersistedAgentProjection) (runtimeactors.Ag
 		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid llm_backend %q: %w", strings.TrimSpace(row.AgentID), llmBackend, err)
 	}
 	llmBackend = profile.ID
-	memory, err := agentmemory.NewPlan(row.MemoryEnabled, agentmemory.Source(row.MemorySource))
-	if err != nil {
-		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid memory plan: %w", strings.TrimSpace(row.AgentID), err)
-	}
+	memory := agentmemory.Plan{Enabled: row.MemoryEnabled}
 	config, receiverConfig, err := decodeAgentConfigEnvelope(row.ConfigJSON)
 	if err != nil {
 		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid config envelope: %w", strings.TrimSpace(row.AgentID), err)

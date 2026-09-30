@@ -214,12 +214,12 @@ func TestSettledProviderResponseContinuesExactReclaimedDeliveryPostgres(t *testi
 
 func TestSettledProviderResponseRebindsStatelessSessionSQLite(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	proveSettledProviderResponseRebindsStatelessSession(t, newCompletionSettlementFixtureWithMemory(t, store, store.backend.ConstructionHandle(), true, agentmemory.PlatformDefault()))
+	proveSettledProviderResponseRebindsStatelessSession(t, newCompletionSettlementFixtureWithMemory(t, store, store.backend.ConstructionHandle(), true, agentmemory.Plan{}))
 }
 
 func TestSettledProviderResponseRebindsStatelessSessionPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	proveSettledProviderResponseRebindsStatelessSession(t, newCompletionSettlementFixtureWithMemory(t, admitTestPostgresStore(t, db), db, false, agentmemory.PlatformDefault()))
+	proveSettledProviderResponseRebindsStatelessSession(t, newCompletionSettlementFixtureWithMemory(t, admitTestPostgresStore(t, db), db, false, agentmemory.Plan{}))
 }
 
 func TestSettledProviderResponseContinuationAdvancesExactActiveTurnSQLite(t *testing.T) {
@@ -249,8 +249,8 @@ func proveCompletionResponseSuccessorCheckpointMatrix(t *testing.T, store comple
 		name string
 		plan agentmemory.Plan
 	}{
-		{name: "memory", plan: agentmemory.Authored(true)},
-		{name: "stateless", plan: agentmemory.PlatformDefault()},
+		{name: "memory", plan: agentmemory.Plan{Enabled: true}},
+		{name: "stateless", plan: agentmemory.Plan{}},
 	}
 	for _, memoryPlan := range memoryPlans {
 		for adapterIndex, adapter := range adapters {
@@ -539,7 +539,7 @@ func proveSettledProviderResponseRebindsStatelessSession(t *testing.T, fixture c
 	successorCtx = runtimedelivery.WithClaim(successorCtx, reclaimed.Claim)
 	controller := newCompletionControllerForTest(fixture.store)
 	successorCtx = runtimeeffects.WithController(successorCtx, controller)
-	continuation, found, err := controller.RecoverCompletionContinuation(successorCtx, currentSessionID, agentmemory.PlatformDefault())
+	continuation, found, err := controller.RecoverCompletionContinuation(successorCtx, currentSessionID, agentmemory.Plan{})
 	if err != nil || !found {
 		t.Fatalf("recover stateless completion continuation: found=%v err=%v", found, err)
 	}
@@ -550,7 +550,7 @@ func proveSettledProviderResponseRebindsStatelessSession(t *testing.T, fixture c
 	}
 	projection := runtimeeffects.CompletionConversationProjection{
 		Payload: continuationSnapshot.Payload, SessionID: currentSessionID,
-		Identity: settlement.AgentTurn.Identity, Memory: agentmemory.PlatformDefault(),
+		Identity: settlement.AgentTurn.Identity, Memory: agentmemory.Plan{},
 		ExpectedTurnCount: 0, TurnCount: 1, Messages: json.RawMessage(`[{"role":"user","content":"hello"},{"role":"assistant","content":"done"}]`),
 	}
 	if err := continuation.ProjectCompletionConversation(successorCtx, projection); err != nil {
@@ -1482,15 +1482,11 @@ func proveCompletionProviderHeadStaleAuthorityCannotSettle(t *testing.T, fixture
 }
 
 func newCompletionSettlementFixture(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool) completionSettlementFixture {
-	return newCompletionSettlementFixtureWithMemory(t, store, db, sqlite, agentmemory.Authored(true))
+	return newCompletionSettlementFixtureWithMemory(t, store, db, sqlite, agentmemory.Plan{Enabled: true})
 }
 
 func newCompletionSettlementFixtureWithMemory(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool, memory agentmemory.Plan) completionSettlementFixture {
 	t.Helper()
-	memory, err := memory.Normalize()
-	if err != nil {
-		t.Fatalf("normalize completion memory plan: %v", err)
-	}
 	ctx := testAuthorActivityContext()
 	now := time.Now().UTC()
 	agentID := "completion-settlement-agent"
@@ -1521,7 +1517,7 @@ func newCompletionSettlementFixtureWithMemory(t *testing.T, store completionSett
 	if sqlite {
 		requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(db), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 		if memory.Enabled {
-			if _, err := db.ExecContext(ctx, `INSERT INTO agent_sessions (session_id,run_id,agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,memory_enabled,memory_source,conversation,turn_count,runtime_state,lease_holder,lease_grant_id,lease_expires_at,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,1,'authored','[]',0,?,?,?,?,'active',?,?)`,
+			if _, err := db.ExecContext(ctx, `INSERT INTO agent_sessions (session_id,run_id,agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,memory_enabled,conversation,turn_count,runtime_state,lease_holder,lease_grant_id,lease_expires_at,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,1,'[]',0,?,?,?,?,'active',?,?)`,
 				sessionID, runID, identityFields.AgentID, identityFields.NameOwner, identityFields.NameSource,
 				identityFields.RoutePresence, identityFields.FlowScopeKey, identityFields.FlowInstanceID, identityFields.FlowInstancePath,
 				`{"provider_session_id":"provider-head-current"}`, leaseHolder, grantID, now.Add(10*time.Minute), now, now); err != nil {
@@ -1531,7 +1527,7 @@ func newCompletionSettlementFixtureWithMemory(t *testing.T, store completionSett
 	} else {
 		requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 		if memory.Enabled {
-			if _, err := db.ExecContext(ctx, `INSERT INTO agent_sessions (session_id,run_id,agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,memory_enabled,memory_source,conversation,turn_count,runtime_state,lease_holder,lease_grant_id,lease_expires_at,status,created_at,updated_at) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,'authored','[]'::jsonb,0,$10::jsonb,$11,$12,$13,'active',$14,$14)`,
+			if _, err := db.ExecContext(ctx, `INSERT INTO agent_sessions (session_id,run_id,agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,memory_enabled,conversation,turn_count,runtime_state,lease_holder,lease_grant_id,lease_expires_at,status,created_at,updated_at) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,'[]'::jsonb,0,$10::jsonb,$11,$12,$13,'active',$14,$14)`,
 				sessionID, runID, identityFields.AgentID, identityFields.NameOwner, identityFields.NameSource,
 				identityFields.RoutePresence, identityFields.FlowScopeKey, identityFields.FlowInstanceID, identityFields.FlowInstancePath,
 				`{"provider_session_id":"provider-head-current"}`, leaseHolder, grantID, now.Add(10*time.Minute), now); err != nil {

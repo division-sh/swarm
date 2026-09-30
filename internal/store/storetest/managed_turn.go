@@ -83,10 +83,7 @@ func PersistManagedAgentTurnFixture(t testing.TB, ctx context.Context, fixture M
 	if err := identity.Validate(); err != nil {
 		t.Fatalf("managed turn fixture identity: %v", err)
 	}
-	memory, err := fixture.Memory.Normalize()
-	if err != nil {
-		t.Fatalf("managed turn fixture memory: %v", err)
-	}
+	memory := fixture.Memory
 	if strings.TrimSpace(fixture.RunID) == "" || strings.TrimSpace(fixture.SessionID) == "" || strings.TrimSpace(fixture.TurnID) == "" {
 		t.Fatal("managed turn fixture requires run, session, and turn IDs")
 	}

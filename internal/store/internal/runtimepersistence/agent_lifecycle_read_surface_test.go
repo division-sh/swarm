@@ -242,7 +242,7 @@ func seedAgentLifecycleSession(t *testing.T, ctx context.Context, pg *PostgresSt
 	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ExecutionMode: "live", ID: fields.AgentID, Identity: identity, Role: "worker", Type: "managed",
-			Model: "test", Memory: agentmemory.Authored(true), FlowPath: fields.FlowInstancePath,
+			Model: "test", Memory: agentmemory.Plan{Enabled: true}, FlowPath: fields.FlowInstancePath,
 		}),
 		Status: "active", StartedAt: time.Now().UTC(),
 	}); err != nil {
@@ -252,9 +252,9 @@ func seedAgentLifecycleSession(t *testing.T, ctx context.Context, pg *PostgresSt
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, memory_source, conversation, runtime_state, status
+			memory_enabled, conversation, runtime_state, status
 		)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored', '[]'::jsonb, '{}'::jsonb, 'active')
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, '[]'::jsonb, '{}'::jsonb, 'active')
 	`, sessionID, runID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath); err != nil {
 		t.Fatalf("seed lifecycle session %s: %v", sessionID, err)
 	}

@@ -3,20 +3,16 @@ package contracts
 import (
 	"strings"
 	"testing"
-
-	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 )
 
-func TestEffectiveAgentMemoryPreservesPresenceAndProvenance(t *testing.T) {
+func TestEffectiveAgentMemoryPreservesEnablementOnly(t *testing.T) {
 	tests := []struct {
-		name       string
-		yaml       string
-		enabled    bool
-		provenance agentmemory.Source
+		name    string
+		yaml    string
+		enabled bool
 	}{
-		{name: "omitted", yaml: "role: helper\n", enabled: false, provenance: agentmemory.SourcePlatformDefault},
-		{name: "explicit false", yaml: "role: helper\nmemory: false\n", enabled: false, provenance: agentmemory.SourceAuthored},
-		{name: "explicit true", yaml: "role: helper\nmemory: true\n", enabled: true, provenance: agentmemory.SourceAuthored},
+		{name: "omitted", yaml: "intent: {inline: helper}\nrole: helper\n", enabled: false},
+		{name: "explicit true", yaml: "intent: {inline: helper}\nrole: helper\nmemory: true\n", enabled: true},
 	}
 
 	for _, tt := range tests {
@@ -26,8 +22,8 @@ func TestEffectiveAgentMemoryPreservesPresenceAndProvenance(t *testing.T) {
 				t.Fatalf("yaml.Unmarshal: %v", err)
 			}
 			effective := EffectiveAgentRegistryEntry("helper", entry)
-			if effective.MemoryPlan.Enabled != tt.enabled || effective.MemoryPlan.Source != tt.provenance {
-				t.Fatalf("memory plan = %#v, want enabled=%v provenance=%q", effective.MemoryPlan, tt.enabled, tt.provenance)
+			if effective.MemoryPlan.Enabled != tt.enabled || effective.EffectiveSourceForField("memory") != "" {
+				t.Fatalf("memory plan = %#v, want enabled=%v without a separate source", effective.MemoryPlan, tt.enabled)
 			}
 		})
 	}

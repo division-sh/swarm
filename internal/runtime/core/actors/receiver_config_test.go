@@ -40,13 +40,16 @@ func TestReceiverConfigCarrierFailsClosed(t *testing.T) {
 
 func TestReceiverConfigMergeAndNormalizationDoNotAlias(t *testing.T) {
 	base := AgentConfig{Config: json.RawMessage(`{"opaque":1}`), ReceiverConfig: json.RawMessage(`{"value":7.0}`)}
-	copy := MergeAgentConfig(base, AgentConfig{})
+	copy := base
+	copy.NormalizeRuntimeDescriptor()
 	copy.Config[0], copy.ReceiverConfig[0] = '[', '['
 	if string(base.Config) != `{"opaque":1}` || string(base.ReceiverConfig) != `{"value":7.0}` {
 		t.Fatal("normalization aliases source bytes")
 	}
 	patch := AgentConfig{ReceiverConfig: json.RawMessage(`{"value":8.0}`)}
-	copy = MergeAgentConfig(base, patch)
+	copy = base
+	copy.ReceiverConfig = patch.ReceiverConfig
+	copy.NormalizeRuntimeDescriptor()
 	patch.ReceiverConfig[0] = '['
 	if string(copy.ReceiverConfig) != `{"value":8.0}` || string(copy.Config) != `{"opaque":1}` {
 		t.Fatal("receiver replacement aliases patch or replaces agent namespace")

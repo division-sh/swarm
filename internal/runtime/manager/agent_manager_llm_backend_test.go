@@ -187,13 +187,13 @@ func TestAuthoredMockStaticAndInstantiatedAgentsSpawnPersistRecoverMock(t *testi
 		},
 	})
 	staticCfg, err := buildStaticFlowAgentConfig(managerIdentityTestRunID, source, managerTestFlowAgentNamePlan(t, source, "static-support", "static-worker"), "static-support", "static-support", "static-worker", managerTestAgentEntry("static-worker", runtimecontracts.AgentRegistryEntry{
-		ID: "static-worker", Role: "worker", Model: "regular", MemoryPlan: agentmemory.PlatformDefault(), Mock: artifact,
+		ID: "static-worker", Role: "worker", Model: "regular", MemoryPlan: agentmemory.Plan{}, Mock: artifact,
 	}), nil)
 	if err != nil {
 		t.Fatalf("buildStaticFlowAgentConfig: %v", err)
 	}
 	instantiatedCfg, err := buildFlowAgentConfig(managerIdentityTestRunID, source, managerTestFlowAgentNamePlan(t, source, "template-support", "worker"), "template-support", "inst-1", "entity-1", "template-support/inst-1", "worker", managerTestAgentEntry("worker", runtimecontracts.AgentRegistryEntry{
-		ID: "template-worker", Role: "worker", Model: "regular", MemoryPlan: agentmemory.PlatformDefault(), Mock: artifact,
+		ID: "template-worker", Role: "worker", Model: "regular", MemoryPlan: agentmemory.Plan{}, Mock: artifact,
 	}), map[string]string{"instance_id": "inst-1"}, nil, nil)
 	if err != nil {
 		t.Fatalf("buildFlowAgentConfig: %v", err)

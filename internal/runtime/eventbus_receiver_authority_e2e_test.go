@@ -171,10 +171,7 @@ func (r *closedReceiverManagedLLM) StartSession(ctx context.Context, agentID, sy
 		Tools: append([]llm.ToolDefinition(nil), tools...),
 	}
 	if execution, ok := agentmemory.FromContext(ctx); ok {
-		plan, err := execution.Plan.Normalize()
-		if err != nil {
-			return nil, err
-		}
+		plan := execution.Plan
 		session.Memory = plan
 		session.MemoryIdentity = execution.Identity.Normalize()
 	}
@@ -550,13 +547,11 @@ task.completed:
 task.finalized:
 `,
 		"agents.yaml": `upstream-agent:
-  id: upstream-agent
   intent: {inline: "Emit task.completed for the assigned task."}
   model: regular
   subscriptions: [task.assigned]
   emit_events: [task.completed]
 downstream-agent:
-  id: downstream-agent
   intent: {inline: "Observe the finalized task."}
   model: regular
   subscriptions: [task.finalized]

@@ -23,9 +23,7 @@ workspace_classes:
 
 		writeBootverifyFixtureFile(t, filepath.Join(dir, "agents.yaml"), `
 shared-worker:
-  id: shared-worker
   model: regular
-  memory: false
   intent:
     inline: Validate workspace-class ownership for this scoped worker.
   workspace_class: missing

@@ -159,7 +159,6 @@ func writePromptTestBundle(t *testing.T, repoRoot string) string {
 	}
 	agentsRaw = append(agentsRaw, []byte(strings.TrimLeft(`
 ops-lead:
-  id: ops-lead
   role: ops_lead
   intent: prompts/ops-lead.md
   manager_fallback: control-plane

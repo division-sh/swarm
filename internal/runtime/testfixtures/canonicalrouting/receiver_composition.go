@@ -317,12 +317,10 @@ pins:
       advances_to: done
 `)
 	writeClosedVariantFile(t, root, "sink/agents.yaml", `observer:
-  id: observer
   role: observer
   model: regular
   intent: {inline: 'Observe the received result.'}
   subscriptions: [work.completed]
-  memory: false
   mock:
     kind: python
     module: mocks/observer.py

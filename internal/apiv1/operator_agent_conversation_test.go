@@ -132,7 +132,6 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 			Type:         "managed",
 			Model:        "cheap",
 			Memory:       true,
-			MemorySource: "authored",
 			FlowInstance: "research/inst-1",
 			Status:       "running",
 		}}},
@@ -562,7 +561,6 @@ func TestOperatorAgentHandlersSerializeLifecycleStatusFromReadOwner(t *testing.T
 		Type:         "managed",
 		Model:        "cheap",
 		Memory:       true,
-		MemorySource: "authored",
 		FlowInstance: "research/inst-1",
 		Status:       "idle",
 	}

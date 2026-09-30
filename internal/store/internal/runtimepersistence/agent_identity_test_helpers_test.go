@@ -136,9 +136,9 @@ func seedTestAgentRow(
 	if status == "" {
 		status = "active"
 	}
-	memory := agentmemory.PlatformDefault()
+	memory := agentmemory.Plan{}
 	if strings.TrimSpace(fields.FlowInstancePath) != "" {
-		memory = agentmemory.Authored(true)
+		memory = agentmemory.Plan{Enabled: true}
 	}
 	cfg := withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 		ExecutionMode: "live",
@@ -163,7 +163,7 @@ func seedTestAgentRow(
 		INSERT INTO agents (
 			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 			flow_scope_key, flow_instance_id, flow_instance,
-			role, model, llm_backend, memory_enabled, memory_source,
+			role, model, llm_backend, memory_enabled,
 			runtime_descriptor, status, created_at, config,
 			lifecycle_phase, lifecycle_generation, lifecycle_runtime_epoch, lifecycle_run_mode,
 			lifecycle_process_authority_id, lifecycle_process_owner_id,
@@ -171,12 +171,12 @@ func seedTestAgentRow(
 			lifecycle_bundle_hash,
 			lifecycle_runtime_instance_id, lifecycle_runtime_generation,
 			topology_authority_kind, topology_admission, execution_lifetime, run_id
-		) VALUES (?, ?, ?, ?, ?, ?, ?, 'worker', 'regular', 'claude_cli', ?, ?, ?, ?, ?, ?, 'running', 1, 1, 'standard', ?, ?, ?, ?, ?, ?, 1, 'static_declaration_plan', ?, 'durable_managed', ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, 'worker', 'regular', 'claude_cli', ?, ?, ?, ?, ?, 'running', 1, 1, 'standard', ?, ?, ?, ?, ?, ?, 1, 'static_declaration_plan', ?, 'durable_managed', ?)
 	`
 	args := []any{
 		fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-		memory.Enabled, string(memory.Source), projection.RuntimeDescriptor, status, now, string(projection.ConfigJSON),
+		memory.Enabled, projection.RuntimeDescriptor, status, now, string(projection.ConfigJSON),
 		processAuthorityID, "store-test-seed", processBootID, generationGrantID,
 		testAgentTopologyBundleHash, runtimeInstanceID, testAgentTopologyJSON(t), fields.RunID,
 	}
@@ -185,7 +185,7 @@ func seedTestAgentRow(
 			INSERT INTO agents (
 				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 				flow_scope_key, flow_instance_id, flow_instance,
-				role, model, llm_backend, memory_enabled, memory_source,
+				role, model, llm_backend, memory_enabled,
 				runtime_descriptor, status, created_at, config,
 				lifecycle_phase, lifecycle_generation, lifecycle_runtime_epoch, lifecycle_run_mode,
 				lifecycle_process_authority_id, lifecycle_process_owner_id,
@@ -193,7 +193,7 @@ func seedTestAgentRow(
 				lifecycle_bundle_hash,
 				lifecycle_runtime_instance_id, lifecycle_runtime_generation,
 				topology_authority_kind, topology_admission, execution_lifetime, run_id
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, 'worker', 'regular', 'claude_cli', $8, $9, $10::jsonb, $11, $12, $13::jsonb, 'running', 1, 1, 'standard', $14::uuid, $15, $16::uuid, $17::uuid, $18, $19::uuid, 1, 'static_declaration_plan', $20::jsonb, 'durable_managed', $21::uuid)
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, 'worker', 'regular', 'claude_cli', $8, $9::jsonb, $10, $11, $12::jsonb, 'running', 1, 1, 'standard', $13::uuid, $14, $15::uuid, $16::uuid, $17, $18::uuid, 1, 'static_declaration_plan', $19::jsonb, 'durable_managed', $20::uuid)
 		`
 	}
 	if _, err := db.ExecContext(ctx, query, args...); err != nil {

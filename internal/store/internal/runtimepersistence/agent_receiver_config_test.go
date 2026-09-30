@@ -31,7 +31,7 @@ func TestAgentReceiverConfigNativeNamespacesBothStores(t *testing.T) {
 			cfg := withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 				ID: "receiver-storage-proof", Identity: testAgentIdentity(t, "receiver-storage-proof", "review/item"),
 				ExecutionMode: "live", Role: "worker", Type: "worker", Model: "regular", LLMBackend: "claude_cli",
-				Memory: agentmemory.Authored(true), FlowPath: "review/item",
+				Memory: agentmemory.Plan{Enabled: true}, FlowPath: "review/item",
 				Config:         json.RawMessage(`{"opaque":[7,7.0,null]}`),
 				ReceiverConfig: json.RawMessage(`{"flow_path":"business-path","model":"business-model","mode":"business-mode","constraints":{"memory":"business-memory"},"nested":{"archived_record":{"system_prompt":"business"}},"list":[{"system_prompt":"business"},7,7.0,null],"exponent":7e0}`),
 			})

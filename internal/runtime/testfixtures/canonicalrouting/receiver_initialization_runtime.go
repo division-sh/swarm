@@ -140,7 +140,6 @@ auto_emit_on_create:
   product_id: string?
 `,
 		"operating/agents.yaml": `ceo:
-  type: generic
   role: ceo
   intent: {inline: "Initialize the product for this operating instance."}
   model: regular

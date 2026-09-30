@@ -58,7 +58,7 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID: agentID, Identity: identity, Role: "worker", Type: "sonnet", Model: "regular", FlowID: "global",
 			ExecutionMode: runtimeeffects.ExecutionModeLive,
-			Memory:        agentmemory.Authored(true), FlowPath: "global",
+			Memory:        agentmemory.Plan{Enabled: true}, FlowPath: "global",
 			Config: []byte(`{}`),
 		}),
 		Status: "active", HiredBy: "test", StartedAt: now,
@@ -112,9 +112,9 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 			INSERT INTO agent_sessions (
 				session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 				agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-				memory_enabled, memory_source,
+				memory_enabled,
 				conversation, turn_count, runtime_state, status, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'authored', ?, 7, ?, 'suspended', ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 7, ?, 'suspended', ?, ?)
 		`, suspendedID, suspendedRunID, identityFields.AgentID, identityFields.NameOwner, identityFields.NameSource,
 			identityFields.RoutePresence, identityFields.FlowScopeKey, identityFields.FlowInstanceID, identityFields.FlowInstancePath,
 			`[{"role":"user","content":"old suspended"}]`, `{"provider_session_id":"old-suspended"}`, now, now)
@@ -124,9 +124,9 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 			INSERT INTO agent_sessions (
 				session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 				agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-				memory_enabled, memory_source,
+				memory_enabled,
 				conversation, turn_count, runtime_state, status, created_at, updated_at
-			) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored', $10::jsonb, 7, $11::jsonb, 'suspended', $12, $12)
+			) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, $10::jsonb, 7, $11::jsonb, 'suspended', $12, $12)
 		`, suspendedID, suspendedRunID, identityFields.AgentID, identityFields.NameOwner, identityFields.NameSource,
 			identityFields.RoutePresence, identityFields.FlowScopeKey, identityFields.FlowInstanceID, identityFields.FlowInstancePath,
 			`[{"role":"user","content":"old suspended"}]`, `{"provider_session_id":"old-suspended"}`, now)

@@ -222,18 +222,18 @@ func seedOperatorConversationProjectionSession(
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, memory_source, status, turn_count, conversation, runtime_state,
+			memory_enabled, status, turn_count, conversation, runtime_state,
 			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'authored', 'active', ?, '[]', '{}', ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'active', ?, '[]', '{}', ?, ?)
 	`
 	if !backend.sqlite {
 		query = `
 			INSERT INTO agent_sessions (
 				session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 				agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-				memory_enabled, memory_source, status, turn_count, conversation, runtime_state,
+				memory_enabled, status, turn_count, conversation, runtime_state,
 				created_at, updated_at
-			) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored', 'active', $10, '[]'::jsonb, '{}'::jsonb, $11, $12)
+			) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'active', $10, '[]'::jsonb, '{}'::jsonb, $11, $12)
 		`
 	}
 	operatorConversationProjectionExec(
@@ -294,7 +294,7 @@ func seedOperatorConversationProjectionTurn(
 			AgentID:       seed.identity.AgentID(),
 			AgentIdentity: seed.identity,
 			SessionID:     seed.sessionID,
-			Memory:        agentmemory.Authored(true),
+			Memory:        agentmemory.Plan{Enabled: true},
 			FlowInstance:  seed.identity.FlowInstance(),
 			EntityID:      seed.entityID,
 		}
@@ -317,7 +317,7 @@ func seedOperatorConversationProjectionTurn(
 	}
 	if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, ctx, backend.settlement, runtimellm.AgentTurnRecord{
 		AgentID: seed.identity.AgentID(), Identity: seed.identity,
-		Memory: agentmemory.Authored(true), SessionID: seed.sessionID, RunID: seed.runID,
+		Memory: agentmemory.Plan{Enabled: true}, SessionID: seed.sessionID, RunID: seed.runID,
 		FlowInstance: seed.identity.FlowInstance(), EntityID: seed.entityID,
 		TriggerEventID: seed.triggerEventID, TriggerEventType: seed.triggerType, TaskID: seed.taskID,
 		TurnBlocks: blocks, ParseOK: seed.parseOK, Latency: time.Duration(seed.latencyMS) * time.Millisecond,

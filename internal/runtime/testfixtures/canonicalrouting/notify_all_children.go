@@ -15,11 +15,9 @@ const (
 )
 
 const canonicalNotifyAllChildrenAgents = `account-worker:
-  type: generic
   role: account_worker
   intent: prompts/account-worker.md
   model: regular
-  memory: false
   subscriptions:
     - account.notify.requested
   emit_events:
@@ -350,7 +348,6 @@ portfolio-coordinator:
 	case 1:
 		applyClosedReplacement(t, accountAgents, canonicalNotifyAllChildrenAgents, `reader:
   id: account-reader
-  type: generic
   role: reader-v1
   intent: {inline: "Read account registration events."}
   model: regular
@@ -358,7 +355,6 @@ portfolio-coordinator:
     - account.registered
 retired:
   id: account-retired
-  type: generic
   role: retired
   intent: {inline: "Handle account notification requests."}
   model: regular
@@ -369,7 +365,6 @@ retired:
 		applyClosedReplacement(t, manifestFile, `version: "1.0.0"`, `version: "2.0.0"`)
 		applyClosedReplacement(t, accountAgents, canonicalNotifyAllChildrenAgents, `reader:
   id: account-reader
-  type: generic
   role: reader-v2
   intent: {inline: "Read account registration and notification events."}
   model: regular
@@ -378,7 +373,6 @@ retired:
     - account.notify.requested
 writer:
   id: account-writer
-  type: generic
   role: writer
   intent: {inline: "Write account notification results."}
   model: regular
@@ -389,7 +383,6 @@ writer:
 		applyClosedReplacement(t, manifestFile, `version: "1.0.0"`, `version: "3.0.0"`)
 		applyClosedReplacement(t, accountAgents, canonicalNotifyAllChildrenAgents, `reader:
   id: account-reader
-  type: generic
   role: reader-v3
   intent: {inline: "Read account registration and notification events."}
   model: regular
@@ -398,7 +391,6 @@ writer:
     - account.notify.requested
 writer:
   id: account-writer
-  type: generic
   role: writer
   intent: {inline: "Write account notification results."}
   model: regular
@@ -406,7 +398,6 @@ writer:
     - account.notify.requested
 retired:
   id: account-retired
-  type: generic
   role: returned
   intent: {inline: "Handle account notification requests."}
   model: regular

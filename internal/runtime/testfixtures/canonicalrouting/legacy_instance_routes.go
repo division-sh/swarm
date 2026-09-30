@@ -109,9 +109,9 @@ pins:
 		if opts.Consumer == TemplateInstanceAgentConsumer {
 			consumerNodes = ""
 		}
-		consumerAgents = "consumer-agent:\n  id: consumer-agent\n  model: regular\n  intent:\n    inline: Consume connected deployment events.\n  subscriptions: [" + subscriptions + "]\n"
+		consumerAgents = "consumer-agent:\n  model: regular\n  intent:\n    inline: Consume connected deployment events.\n  subscriptions: [" + subscriptions + "]\n"
 		if opts.Consumer == TemplateInstanceNodeAndTwoAgentConsumer {
-			consumerAgents += "audit-agent:\n  id: audit-agent\n  model: regular\n  intent:\n    inline: Audit connected deployment events.\n  subscriptions: [" + subscriptions + "]\n"
+			consumerAgents += "audit-agent:\n  model: regular\n  intent:\n    inline: Audit connected deployment events.\n  subscriptions: [" + subscriptions + "]\n"
 		}
 	} else if opts.Consumer != TemplateInstanceNodeConsumer {
 		t.Fatalf("unsupported template instance consumer %d", opts.Consumer)
@@ -170,7 +170,6 @@ deploy.done:
           vertical_id: ${payload.vertical_id}
 `)
 	writeClosedVariantFile(t, root, "flows/producer/agents.yaml", `beta-worker:
-  id: beta-worker
   model: regular
   intent:
     inline: Preserve static source-set authority.

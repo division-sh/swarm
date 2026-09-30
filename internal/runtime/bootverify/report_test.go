@@ -2190,7 +2190,6 @@ func TestRun_MapsInvalidFieldDetectionToNamedError(t *testing.T) {
 func TestRun_DefaultsOmittedAgentMemoryButKeepsModelExplicit(t *testing.T) {
 	root := writeAgentMemoryValidationFixture(t, `
 root-defaulted:
-  id: root-defaulted
   intent: {inline: "Exercise default memory validation."}
   model: regular
   subscriptions:
@@ -2205,7 +2204,6 @@ root-defaulted:
 
 	root = writeAgentMemoryValidationFixture(t, `
 root-missing-model:
-  id: root-missing-model
   intent: {inline: "Exercise missing model validation."}
   subscriptions:
     - item.created
@@ -2223,7 +2221,6 @@ func TestRun_AcceptsFlowAgentMemoryInStatelessFlow(t *testing.T) {
 name: support
 `, `
 entity-agent:
-  id: entity-agent
   intent: {inline: "Exercise stateless flow memory."}
   model: regular
   memory: true
@@ -2245,14 +2242,12 @@ stages:
   done: {}
 `, `
 flow-agent:
-  id: flow-agent
   intent: {inline: "Exercise flow memory."}
   model: regular
   memory: true
   subscriptions:
     - support/item.created
 entity-agent:
-  id: entity-agent
   intent: {inline: "Exercise entity memory."}
   model: regular
   memory: true
@@ -2295,14 +2290,12 @@ stages:
   done: {}
 `, `
 flow-agent:
-  id: flow-agent
   intent: {inline: "Exercise package flow memory."}
   model: regular
   memory: true
   subscriptions:
     - support/item.created
 entity-agent:
-  id: entity-agent
   intent: {inline: "Exercise package entity memory."}
   model: regular
   memory: true
@@ -2325,7 +2318,6 @@ func TestRun_AcceptsPackageBackedFlowAgentMemoryInStatelessFlow(t *testing.T) {
 name: support
 `, `
 entity-agent:
-  id: entity-agent
   intent: {inline: "Exercise package stateless memory."}
   model: regular
   memory: true
@@ -4510,7 +4502,6 @@ func TestRun_AttributesReaderCoverageToResolvedRootContractOwner(t *testing.T) {
 func TestRun_EntityWriterCoverageCountsExplicitAgentEntityWritesList(t *testing.T) {
 	root := writePromptWriterCoverageFixture(t, `
 writer:
-  id: writer
   role: writer
   intent: prompts/writer.md
   workspace_class: factory
@@ -4539,7 +4530,6 @@ case:
 func TestRun_ReportsPromptCreateEntityWithoutEntityWritesAuthorization(t *testing.T) {
 	root := writePromptWriterCoverageFixture(t, `
 writer:
-  id: writer
   role: writer
   intent: prompts/writer.md
   workspace_class: factory
@@ -4562,7 +4552,6 @@ case:
 func TestRun_ReportsPromptSaveEntityFieldWithoutMatchingEntityWritesAuthorization(t *testing.T) {
 	root := writePromptWriterCoverageFixture(t, `
 writer:
-  id: writer
   role: writer
   intent: prompts/writer.md
   workspace_class: factory
@@ -4592,7 +4581,6 @@ case:
 func TestRun_PromptSaveEntityFieldAllowsDeclaredDottedPathAuthorizedByRootField(t *testing.T) {
 	root := writePromptWriterCoverageFixture(t, `
 writer:
-  id: writer
   role: writer
   intent: prompts/writer.md
   workspace_class: factory
@@ -4623,7 +4611,6 @@ types:
 func TestRun_ReportsPromptSaveEntityFieldDottedPathWithoutRootAuthorization(t *testing.T) {
 	root := writePromptWriterCoverageFixture(t, `
 writer:
-  id: writer
   role: writer
   intent: prompts/writer.md
   workspace_class: factory
@@ -4658,7 +4645,6 @@ types:
 func TestRun_ReportsPromptSaveEntityFieldMultilineDottedPathWithoutRootAuthorization(t *testing.T) {
 	root := writePromptWriterCoverageFixture(t, `
 writer:
-  id: writer
   role: writer
   intent: prompts/writer.md
   workspace_class: factory
@@ -4693,7 +4679,6 @@ types:
 func TestRun_ReportsPromptSaveEntityFieldUndeclaredDottedPath(t *testing.T) {
 	root := writePromptWriterCoverageFixture(t, `
 writer:
-  id: writer
   role: writer
   intent: prompts/writer.md
   workspace_class: factory
@@ -4724,7 +4709,6 @@ types:
 func TestRun_ReportsPromptSaveEntityFieldUndeclaredDottedPathWithAllAuthorization(t *testing.T) {
 	root := writePromptWriterCoverageFixture(t, `
 writer:
-  id: writer
   role: writer
   intent: prompts/writer.md
   workspace_class: factory
@@ -4754,7 +4738,6 @@ types:
 func TestRun_ReportsPromptSaveEntityFieldReadOnlyListSelectorWithAllAuthorization(t *testing.T) {
 	root := writePromptWriterCoverageFixture(t, `
 writer:
-  id: writer
   role: writer
   intent: prompts/writer.md
   workspace_class: factory
@@ -4784,7 +4767,6 @@ types:
 func TestRun_ReportsPromptSaveEntityFieldRootReadPinWithAllAuthorization(t *testing.T) {
 	root := writePromptWriterCoverageFixture(t, `
 writer:
-  id: writer
   role: writer
   intent: prompts/writer.md
   workspace_class: factory
@@ -4823,7 +4805,6 @@ pins:
 func TestRun_PromptEntityWritesPrefersFlowScopedAuthorization(t *testing.T) {
 	root := writePromptWriterCoverageFixture(t, `
 writer:
-  id: writer
   type: factory
   role: writer
   intent: prompts/writer.md
@@ -4868,7 +4849,6 @@ case:
 `)
 		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "agents.yaml"), `
 writer:
-  id: writer
   type: factory
   role: writer
   intent: prompts/writer.md

@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -766,8 +765,7 @@ func TestBuildShowsEffectiveAgentPlatformDefaultProvenance(t *testing.T) {
 
 	rootAgent := agentByID(t, view.Root.Agents, "root-agent")
 	assertDefaultedAgentField(t, rootAgent, "type", runtimecontracts.DefaultAgentType)
-	assertDefaultedAgentField(t, rootAgent, "memory", false)
-	assertDefaultedAgentField(t, rootAgent, "memory_source", agentmemory.SourcePlatformDefault)
+	assertAgentMemoryValueOnly(t, rootAgent, false)
 	assertDefaultedAgentField(t, rootAgent, "max_turns_per_task", runtimecontracts.DefaultAgentMaxTurnsPerTask)
 	assertDefaultedAgentField(t, rootAgent, "workspace_class", "")
 	if got := rootAgent.Fields["model"].Source; got != runtimecontracts.AgentFieldSourceAuthored {
@@ -777,8 +775,7 @@ func TestBuildShowsEffectiveAgentPlatformDefaultProvenance(t *testing.T) {
 	analysis := flowByID(t, view, "analysis")
 	flowAgent := agentByID(t, analysis.Agents, "analyzer")
 	assertDefaultedAgentField(t, flowAgent, "type", runtimecontracts.DefaultAgentType)
-	assertDefaultedAgentField(t, flowAgent, "memory", false)
-	assertDefaultedAgentField(t, flowAgent, "memory_source", agentmemory.SourcePlatformDefault)
+	assertAgentMemoryValueOnly(t, flowAgent, false)
 	assertDefaultedAgentField(t, flowAgent, "max_turns_per_task", runtimecontracts.DefaultAgentMaxTurnsPerTask)
 	assertDefaultedAgentField(t, flowAgent, "workspace_class", "")
 }
@@ -797,6 +794,16 @@ func TestBuildRendersEffectivePublicAgentNameInsteadOfLocalCoordinate(t *testing
 	view := mustBuild(t, semanticviewtest.WrapRootAgents(bundle), nil)
 	if len(view.Root.Agents) != 1 || view.Root.Agents[0].ID != "public-worker" {
 		t.Fatalf("root agents = %#v, want effective public-worker readback", view.Root.Agents)
+	}
+}
+
+func assertAgentMemoryValueOnly(t testing.TB, agent AgentView, want bool) {
+	t.Helper()
+	if got := agent.Fields["memory"]; got.Value != want || got.Source != "" {
+		t.Fatalf("memory = %#v, want value-only %v", got, want)
+	}
+	if _, ok := agent.Fields["memory_source"]; ok {
+		t.Fatal("retired memory source is still exposed")
 	}
 }
 

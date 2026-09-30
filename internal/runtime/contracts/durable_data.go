@@ -7,7 +7,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	"gopkg.in/yaml.v3"
 )
 
 // DurableDataAccessRef names one immutable resource declaration in the
@@ -15,27 +14,6 @@ import (
 type DurableDataAccessRef struct {
 	FlowPath string `json:"flow_path,omitempty"`
 	Data     string `json:"data"`
-}
-
-func (r *DurableDataAccessRef) UnmarshalYAML(node *yaml.Node) error {
-	if node == nil || node.Kind != yaml.MappingNode || node.Tag == "!!null" {
-		return fmt.Errorf("data_access entries must be non-null mappings")
-	}
-	if err := validateClosedMapping("data_access entry", node, map[string]struct{}{"flow_path": {}, "data": {}}); err != nil {
-		return err
-	}
-	data := yamlMappingValueNode(node, "data")
-	if data == nil || data.Kind != yaml.ScalarNode || data.Tag == "!!null" || data.Value == "" || strings.TrimSpace(data.Value) != data.Value {
-		return fmt.Errorf("data_access data must be a non-empty scalar without surrounding whitespace")
-	}
-	r.Data = data.Value
-	if flow := yamlMappingValueNode(node, "flow_path"); flow != nil {
-		if flow.Kind != yaml.ScalarNode || flow.Tag == "!!null" || flow.Value == "" || strings.TrimSpace(flow.Value) != flow.Value {
-			return fmt.Errorf("data_access flow_path must be a canonical non-empty flow path")
-		}
-		r.FlowPath = flow.Value
-	}
-	return nil
 }
 
 // DurableDataDeclaration is the loader-owned semantic record. Authored map

@@ -348,7 +348,7 @@ func TestForkedSourceManagedExternalEffectAdmissionTransitionsAndRecoveryRefuse(
 			authority.Target = runtimeeffects.UsageTarget{
 				Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(), RunID: fixture.sourceRun,
 				AgentID: token.AgentID, AgentIdentity: identity, SessionID: uuid.NewString(),
-				Memory: agentmemory.PlatformDefault(), FlowInstance: identity.FlowInstance(),
+				Memory: agentmemory.Plan{}, FlowInstance: identity.FlowInstance(),
 			}
 			ctx := runtimecorrelation.WithRunID(testAuthorActivitySourceArtifactContext(), fixture.sourceRun)
 			if current, err := surface.IsExternalEffectAuthorityCurrent(ctx, authority); err != nil || current {
@@ -403,7 +403,7 @@ func seedForkedExternalEffectAttempt(t *testing.T, fixture *forkedConsumerTestBa
 	authority.Target = runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: turnID, RunID: fixture.sourceRun,
 		AgentID: agentID, AgentIdentity: identity, SessionID: sessionID,
-		Memory: agentmemory.PlatformDefault(), FlowInstance: identity.FlowInstance(),
+		Memory: agentmemory.Plan{}, FlowInstance: identity.FlowInstance(),
 	}
 	capabilitySurface := managedCompletionTestSurface(t, authority, "native_command")
 	capabilityStore := managedCapabilityTestStore(fixture.sqlite)

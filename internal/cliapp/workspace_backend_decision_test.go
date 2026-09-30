@@ -314,7 +314,7 @@ func scopedWorkspaceBackendAgentFixtureOptions(t *testing.T, includeRootAgent bo
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), "item:\n  item_id: string\n")
 	rootAgents := ""
 	if includeRootAgent {
-		rootAgents = "root-mock:\n  id: root-mock\n  model: regular\n  memory: false\n  intent:\n    inline: Exercise root workspace backend selection.\n  mock:\n    kind: python\n    module: mocks/root-mock.py\n"
+		rootAgents = "root-mock:\n  model: regular\n  intent:\n    inline: Exercise root workspace backend selection.\n  mock:\n    kind: python\n    module: mocks/root-mock.py\n"
 	}
 	if rootAgents != "" {
 		writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), rootAgents)
@@ -324,12 +324,12 @@ func scopedWorkspaceBackendAgentFixtureOptions(t *testing.T, includeRootAgent bo
 	for _, project := range []string{"project-a", "project-b"} {
 		dir := filepath.Join(root, "packages", project)
 
-		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker:\n  id: shared-worker\n  model: regular\n  memory: false\n  intent:\n    inline: Exercise project-scoped workspace backend selection.\n")
+		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker:\n  model: regular\n  intent:\n    inline: Exercise project-scoped workspace backend selection.\n")
 	}
 	for _, flowID := range []string{"flow-a", "flow-b"} {
 		dir := filepath.Join(root, flowID)
 		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "schema.yaml"), "name: "+flowID+"\nmode: static\nstages: []\n")
-		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker:\n  id: shared-worker\n  model: regular\n  memory: false\n  intent:\n    inline: Exercise flow-scoped workspace backend selection.\n")
+		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker:\n  model: regular\n  intent:\n    inline: Exercise flow-scoped workspace backend selection.\n")
 	}
 
 	repoRoot := RepoRoot()

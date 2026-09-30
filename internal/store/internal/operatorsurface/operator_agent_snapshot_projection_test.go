@@ -18,20 +18,20 @@ func TestOperatorAgentSummaryPublishesCanonicalMemoryFacts(t *testing.T) {
 			Role:     "worker",
 			Type:     "managed",
 			Model:    "cheap",
-			Memory:   agentmemory.Authored(true),
+			Memory:   agentmemory.Plan{Enabled: true},
 			FlowPath: "support/chat-1",
 		},
 	}, operatorAgentProjection{LifecycleState: "active"}, 0)
 	if err != nil {
 		t.Fatalf("memory summary: %v", err)
 	}
-	if !memorySummary.Memory || memorySummary.MemorySource != string(agentmemory.SourceAuthored) {
-		t.Fatalf("memory summary = enabled:%v source:%q, want authored true", memorySummary.Memory, memorySummary.MemorySource)
+	if !memorySummary.Memory {
+		t.Fatal("memory summary must be enabled")
 	}
 	if memorySummary.FlowInstance != "support/chat-1" {
 		t.Fatalf("FlowInstance = %q, want support/chat-1", memorySummary.FlowInstance)
 	}
-	assertOperatorAgentSummaryMemoryJSON(t, memorySummary, `"memory":true`, `"memory_source":"authored"`)
+	assertOperatorAgentSummaryMemoryJSON(t, memorySummary, `"memory":true`)
 
 	defaultSummary, err := operatorAgentSummaryFromPersisted(runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: "stateless-agent",
@@ -39,16 +39,16 @@ func TestOperatorAgentSummaryPublishesCanonicalMemoryFacts(t *testing.T) {
 			Role:     "worker",
 			Type:     "managed",
 			Model:    "cheap",
-			Memory:   agentmemory.PlatformDefault(),
+			Memory:   agentmemory.Plan{},
 		},
 	}, operatorAgentProjection{}, 0)
 	if err != nil {
 		t.Fatalf("default summary: %v", err)
 	}
-	if defaultSummary.Memory || defaultSummary.MemorySource != string(agentmemory.SourcePlatformDefault) {
-		t.Fatalf("default memory summary = enabled:%v source:%q, want platform-default false", defaultSummary.Memory, defaultSummary.MemorySource)
+	if defaultSummary.Memory {
+		t.Fatal("default memory summary must be disabled")
 	}
-	assertOperatorAgentSummaryMemoryJSON(t, defaultSummary, `"memory":false`, `"memory_source":"platform_default"`)
+	assertOperatorAgentSummaryMemoryJSON(t, defaultSummary, `"memory":false`)
 }
 
 func operatorAgentProjectionTestIdentity(t *testing.T, agentID, flow string) agentidentity.Identity {
@@ -83,7 +83,7 @@ func assertOperatorAgentSummaryMemoryJSON(t *testing.T, summary any, expected ..
 			t.Fatalf("summary json = %s, want %s", text, fragment)
 		}
 	}
-	for _, retired := range []string{"conversation_mode", "session_scope", `"mode"`} {
+	for _, retired := range []string{"memory_source", "conversation_mode", "session_scope", `"mode"`} {
 		if strings.Contains(text, retired) {
 			t.Fatalf("summary json = %s, must not expose retired %s", text, retired)
 		}

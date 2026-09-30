@@ -144,7 +144,6 @@ type agentSummary struct {
 	Type         string `json:"type"`
 	Model        string `json:"model"`
 	Memory       bool   `json:"memory"`
-	MemorySource string `json:"memory_source"`
 	FlowInstance string `json:"flow_instance,omitempty"`
 	Status       string `json:"status"`
 }
@@ -167,11 +166,6 @@ var agentValidStatuses = map[string]struct{}{
 	"paused":     {},
 	"failed":     {},
 	"terminated": {},
-}
-
-var agentValidMemorySources = map[string]struct{}{
-	"authored":         {},
-	"platform_default": {},
 }
 
 func newAgentCommand(opts rootCommandOptions) *cobra.Command {
@@ -807,7 +801,6 @@ func validateAgentSummary(agent agentSummary) error {
 		{name: "role", value: agent.Role},
 		{name: "type", value: agent.Type},
 		{name: "model", value: agent.Model},
-		{name: "memory_source", value: agent.MemorySource},
 		{name: "status", value: agent.Status},
 	} {
 		if strings.TrimSpace(field.value) == "" {
@@ -816,9 +809,6 @@ func validateAgentSummary(agent agentSummary) error {
 	}
 	if _, ok := agentValidStatuses[strings.TrimSpace(agent.Status)]; !ok {
 		return fmt.Errorf("status=%q is not a valid AgentStatus", agent.Status)
-	}
-	if _, ok := agentValidMemorySources[strings.TrimSpace(agent.MemorySource)]; !ok {
-		return fmt.Errorf("memory_source=%q is not a valid AgentMemorySource", agent.MemorySource)
 	}
 	return nil
 }
@@ -869,7 +859,6 @@ func writeAgentListResult(out io.Writer, result agentListResult) {
 			formatCLIHumanCode(cliHumanCodeAgentStatus, agent.Status),
 			agent.Model,
 			fmt.Sprintf("%t", agent.Memory),
-			formatCLIHumanCode(cliHumanCodeMemorySource, agent.MemorySource),
 			agent.FlowInstance,
 		})
 	}
@@ -881,7 +870,6 @@ func writeAgentListResult(out io.Writer, result agentListResult) {
 			{Header: "STATUS"},
 			{Header: "MODEL"},
 			{Header: "MEMORY"},
-			{Header: "MEMORY_SOURCE"},
 			{Header: "FLOW_INSTANCE", IdentifierFamily: cliIdentifierFamilyFlowInstance},
 		},
 		Rows:         rows,
@@ -1014,7 +1002,7 @@ func writeAgentDetailResult(out io.Writer, result agentDetailResult) {
 	rows := []cliLabeledDetailRow{
 		{Label: "identity", Value: fmt.Sprintf("role %s, type %s", agent.Role, agent.Type)},
 		{Label: "model", Value: agent.Model},
-		{Label: "memory", Value: fmt.Sprintf("%t (%s)", agent.Memory, formatCLIHumanCode(cliHumanCodeMemorySource, agent.MemorySource))},
+		{Label: "memory", Value: fmt.Sprintf("%t", agent.Memory)},
 	}
 	if agent.FlowInstance != "" {
 		rows = append(rows, cliLabeledDetailRow{Label: "flow instance", Value: agent.FlowInstance})

@@ -179,7 +179,6 @@ connect:
     work.ready: {}
 `)
 	writeClosedVariantFile(t, root, "agents.yaml", `root-agent:
-  id: root-agent
   model: regular
   intent:
     inline: Consume connected root work events.

@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
@@ -22,6 +23,36 @@ func decodeNodeTestSnippet(t interface {
 // decodeNodeTestYAML keeps fragment fixtures on the supported nodes.yaml
 // projection. Other contract families still use their own YAML admission.
 func decodeNodeTestYAML(body []byte, target any) error {
+	switch out := target.(type) {
+	case *AgentRegistryEntry:
+		snapshot, err := yamlsource.Load(body)
+		if err != nil {
+			return err
+		}
+		*out, err = projectAgentValue("worker", snapshot.Document("agents.yaml").Root())
+		return err
+	case *map[string]AgentRegistryEntry:
+		snapshot, err := yamlsource.Load(body)
+		if err != nil {
+			return err
+		}
+		*out, err = projectAgentDeclarationsValue(snapshot.Document("agents.yaml").Root())
+		return err
+	case *AgentEntityWriteRule:
+		snapshot, err := yamlsource.Load(body)
+		if err != nil {
+			return err
+		}
+		*out, err = projectAgentWriteRuleValue(snapshot.Document("agents.yaml").Root())
+		return err
+	case *agentintent.Source:
+		snapshot, err := yamlsource.Load(body)
+		if err != nil {
+			return err
+		}
+		*out, err = agentintent.AdmitSource(snapshot.Document("agents.yaml").Root())
+		return err
+	}
 	// Schema fragments enter the same complete root as bundle loading; wrapping
 	// is test fixture construction, never a production admission fallback.
 	var envelope string

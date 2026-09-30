@@ -97,10 +97,10 @@ func writeFlowDataAccessFixture(t *testing.T, access []string, files map[string]
 		for name, content := range files {
 			writeBootverifyFixtureFile(t, filepath.Join(root, "data", filepath.FromSlash(name)), content)
 		}
-		writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "root-agent:\n  id: root-agent\n  role: root_agent\n  intent: {inline: 'Exercise root flow data access.'}\n  memory: false\n"+accessYAML)
+		writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "root-agent:\n  role: root_agent\n  intent: {inline: 'Exercise root flow data access.'}\n"+accessYAML)
 		return root
 	}
-	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "agents.yaml"), "factory-cto:\n  id: factory-cto\n  role: factory_cto\n  intent: {inline: 'Exercise flow data access.'}\n  memory: false\n"+accessYAML)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "agents.yaml"), "factory-cto:\n  role: factory_cto\n  intent: {inline: 'Exercise flow data access.'}\n"+accessYAML)
 	return root
 }
 
@@ -118,7 +118,6 @@ worker:
   role: worker
   intent: {inline: "<!-- TODO validate one nested physical declaration. -->"}
   model: regular
-  memory: false
   flow_data_access: [missing.md]
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(flowRoot, "data", "placeholder.md"), "placeholder\n")

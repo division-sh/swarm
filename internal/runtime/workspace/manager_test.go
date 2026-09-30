@@ -120,7 +120,7 @@ func TestValidateAgentWorkspaceClassesCensusesAmbiguousScopedDeclarations(t *tes
 	for _, project := range []string{"project-a", "project-b"} {
 		dir := filepath.Join(root, project)
 		writeWorkspaceValidationFile(t, filepath.Join(dir, "schema.yaml"), "name: "+project+"\n")
-		writeWorkspaceValidationFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker:\n  id: shared-worker\n  model: regular\n  memory: false\n  intent:\n    inline: Exercise scoped workspace-class validation.\n  workspace_class: missing\n")
+		writeWorkspaceValidationFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker:\n  model: regular\n  intent:\n    inline: Exercise scoped workspace-class validation.\n  workspace_class: missing\n")
 	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {

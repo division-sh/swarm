@@ -31,7 +31,7 @@ func TestPostgresRuntimeSessionRotationPreservesCommittedHandoffOutcome(t *testi
 				seedSpecAgent(t, base, store, "a1", "", "")
 				seedSpecMemoryRun(t, base, db)
 				identity := specMemoryIdentity("a1", "global")
-				memory := agentmemory.Authored(true)
+				memory := agentmemory.Plan{Enabled: true}
 				ctx := agentmemory.WithExecution(base, memory, identity)
 				lease, err := store.Acquire(ctx, identity, "worker-1")
 				if err != nil {

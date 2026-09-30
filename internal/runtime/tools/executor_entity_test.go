@@ -466,7 +466,6 @@ validation_case:
 `,
 			AgentsYAML: `
 validation-orchestrator:
-  id: validation-orchestrator
   role: validation_orchestrator
   intent: {inline: "Validate the current entity using only its declared contract surface."}
   tools:
@@ -2942,16 +2941,12 @@ func roleScopedEntityToolAgentYAML(actor models.AgentConfig) string {
 	var builder strings.Builder
 	builder.WriteString(strings.TrimSpace(actor.ID))
 	builder.WriteString(":\n")
-	builder.WriteString("  id: ")
-	builder.WriteString(strings.TrimSpace(actor.ID))
-	builder.WriteString("\n")
 	builder.WriteString("  intent: {inline: \"Exercise the declared role-scoped entity tool contract.\"}\n")
 	if role := strings.TrimSpace(actor.Role); role != "" {
 		builder.WriteString("  role: ")
 		builder.WriteString(role)
 		builder.WriteString("\n")
 	}
-	builder.WriteString("  memory: false\n")
 	if len(actor.Tools) > 0 {
 		builder.WriteString("  tools:\n")
 		for _, tool := range actor.Tools {
@@ -3111,16 +3106,12 @@ func entityToolAgentYAML(actor models.AgentConfig) string {
 	var builder strings.Builder
 	builder.WriteString(strings.TrimSpace(actor.ID))
 	builder.WriteString(":\n")
-	builder.WriteString("  id: ")
-	builder.WriteString(strings.TrimSpace(actor.ID))
-	builder.WriteString("\n")
 	builder.WriteString("  intent: {inline: \"Exercise the declared entity tool contract.\"}\n")
 	if role := strings.TrimSpace(actor.Role); role != "" {
 		builder.WriteString("  role: ")
 		builder.WriteString(role)
 		builder.WriteString("\n")
 	}
-	builder.WriteString("  memory: false\n")
 	if len(actor.Tools) > 0 {
 		builder.WriteString("  tools:\n")
 		for _, tool := range actor.Tools {

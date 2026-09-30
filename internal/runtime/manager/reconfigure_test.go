@@ -87,7 +87,7 @@ func TestReconfigureAgent_SameCurrentPreservesExecutionIdentityWithoutFactoryInv
 	cfg := managerTestAgentConfig(models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "same-current-agent", Tools: []string{"tool-a"},
-		Memory: agentmemory.Authored(true), FlowPath: "same-current/instance",
+		Memory: agentmemory.Plan{Enabled: true}, FlowPath: "same-current/instance",
 	})
 	if err := spawnManagerTestAgent(am, cfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
@@ -133,7 +133,7 @@ func TestReconfigureAgent_TopologyOnlyRebindPreservesMemory(t *testing.T) {
 	}, AgentManagerOptions{Sessions: registry})
 	cfg := managerTestAgentConfig(models.AgentConfig{
 		ExecutionMode: "live", ID: "topology-memory-agent",
-		Memory: agentmemory.Authored(true), FlowPath: "review/instance-1",
+		Memory: agentmemory.Plan{Enabled: true}, FlowPath: "review/instance-1",
 	})
 	if err := spawnManagerTestAgent(am, cfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
@@ -178,7 +178,7 @@ func TestReconfigureAgent_MemoryEnabledConfigChangeRotatesExactIdentity(t *testi
 	am := newTestAgentManagerWithOptions(t, nil, func(cfg models.AgentConfig) (Agent, error) {
 		return reconfigureTestAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{Sessions: registry})
-	cfg := managerTestAgentConfig(models.AgentConfig{ExecutionMode: "live", ID: "memory-agent", Memory: agentmemory.Authored(true), FlowPath: "review/inst-1"})
+	cfg := managerTestAgentConfig(models.AgentConfig{ExecutionMode: "live", ID: "memory-agent", Memory: agentmemory.Plan{Enabled: true}, FlowPath: "review/inst-1"})
 	if err := spawnManagerTestAgent(am, cfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
@@ -201,13 +201,13 @@ func TestReconfigureAgent_ExplicitFalseTerminatesReusableMemory(t *testing.T) {
 	am := newTestAgentManagerWithOptions(t, nil, func(cfg models.AgentConfig) (Agent, error) {
 		return reconfigureTestAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{Sessions: registry})
-	cfg := managerTestAgentConfig(models.AgentConfig{ExecutionMode: "live", ID: "disable-memory-agent", Memory: agentmemory.Authored(true), FlowPath: "support/inst-1"})
+	cfg := managerTestAgentConfig(models.AgentConfig{ExecutionMode: "live", ID: "disable-memory-agent", Memory: agentmemory.Plan{Enabled: true}, FlowPath: "support/inst-1"})
 	if err := spawnManagerTestAgent(am, cfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	lease := acquireReconfigureMemory(t, am, registry, cfg)
 
-	if err := reconfigureAgentThroughLifecycleForTest(t, am, cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Memory: agentmemory.Authored(false)}); err != nil {
+	if err := reconfigureMemoryThroughLifecycleForTest(t, am, cfg.ID, cfg.FlowPath, false); err != nil {
 		t.Fatalf("ReconfigureAgent(memory false): %v", err)
 	}
 	if _, ok := registry.Snapshot(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath)); ok {
@@ -218,7 +218,7 @@ func TestReconfigureAgent_ExplicitFalseTerminatesReusableMemory(t *testing.T) {
 		t.Fatalf("memory history = %#v, want exact terminated predecessor", history)
 	}
 	got, _ := testAgentConfig(t, am, cfg.ID, cfg.FlowPath)
-	if got.Memory != agentmemory.Authored(false) {
+	if got.Memory != (agentmemory.Plan{Enabled: false}) {
 		t.Fatalf("memory plan = %+v, want authored false", got.Memory)
 	}
 }
@@ -228,11 +228,11 @@ func TestReconfigureAgent_ExplicitTrueStartsFreshAndOmissionRetains(t *testing.T
 	am := newTestAgentManagerWithOptions(t, nil, func(cfg models.AgentConfig) (Agent, error) {
 		return reconfigureTestAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{Sessions: registry})
-	cfg := managerTestAgentConfig(models.AgentConfig{ExecutionMode: "live", ID: "enable-memory-agent", Memory: agentmemory.Authored(false), FlowPath: "support/inst-1"})
+	cfg := managerTestAgentConfig(models.AgentConfig{ExecutionMode: "live", ID: "enable-memory-agent", Memory: agentmemory.Plan{Enabled: false}, FlowPath: "support/inst-1"})
 	if err := spawnManagerTestAgent(am, cfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
-	if err := reconfigureAgentThroughLifecycleForTest(t, am, cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Memory: agentmemory.Authored(true)}); err != nil {
+	if err := reconfigureMemoryThroughLifecycleForTest(t, am, cfg.ID, cfg.FlowPath, true); err != nil {
 		t.Fatalf("ReconfigureAgent(memory true): %v", err)
 	}
 	if _, ok := registry.Snapshot(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath)); ok || len(registry.History(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath))) != 0 {
@@ -243,7 +243,7 @@ func TestReconfigureAgent_ExplicitTrueStartsFreshAndOmissionRetains(t *testing.T
 		t.Fatalf("ReconfigureAgent(omitted memory): %v", err)
 	}
 	got, _ := testAgentConfig(t, am, cfg.ID, cfg.FlowPath)
-	if got.Memory != agentmemory.Authored(true) {
+	if got.Memory != (agentmemory.Plan{Enabled: true}) {
 		t.Fatalf("omitted memory changed plan to %+v", got.Memory)
 	}
 	current, ok := registry.Snapshot(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath))

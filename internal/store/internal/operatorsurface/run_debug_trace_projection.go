@@ -24,12 +24,11 @@ type runDebugTraceTurn struct {
 }
 
 type runDebugTraceSession struct {
-	runID        string
-	kind         string
-	memory       bool
-	memorySource string
-	status       string
-	updatedAt    time.Time
+	runID     string
+	kind      string
+	memory    bool
+	status    string
+	updatedAt time.Time
 }
 
 func (s *RunPostgres) loadProjectedRunDebugTrace(ctx context.Context, runID string, opts operatorread.RunDebugTraceQueryOptions) ([]operatorread.RunDebugTraceRow, string, error) {
@@ -138,16 +137,14 @@ func loadPostgresRunDebugTraceInputs(ctx context.Context, db eventReadQueryer, r
 		var rawFailure []byte
 		if err := db.QueryRowContext(ctx, `
 		SELECT turn_id::text, COALESCE(trigger_event_id::text, ''), COALESCE(trigger_event_type, ''),
-		       COALESCE(flow_instance, ''), COALESCE(memory_enabled, false), COALESCE(memory_source, ''),
-		       COALESCE(entity_id::text, ''), COALESCE(task_id, ''), COALESCE(parse_ok, false),
+		       COALESCE(flow_instance, ''), COALESCE(memory_enabled, false), COALESCE(entity_id::text, ''), COALESCE(task_id, ''), COALESCE(parse_ok, false),
 		       COALESCE(retry_count, 0), COALESCE(failure, 'null'::jsonb), created_at,
 		       COALESCE(agent_id, ''), COALESCE(session_id::text, '')
 		FROM agent_turns
 		WHERE run_id = $1::uuid AND turn_id = $2::uuid
 	`, runID, reference.TurnID).Scan(
 			&turn.row.TurnID, &turn.row.TurnTriggerEventID, &turn.row.TurnTriggerEventType,
-			&turn.row.TurnFlowInstance, &turn.row.TurnMemory, &turn.row.TurnMemorySource,
-			&turn.row.TurnEntityID, &turn.row.TurnTaskID, &turn.row.TurnParseOK,
+			&turn.row.TurnFlowInstance, &turn.row.TurnMemory, &turn.row.TurnEntityID, &turn.row.TurnTaskID, &turn.row.TurnParseOK,
 			&turn.row.TurnRetryCount, &rawFailure, &turn.row.TurnCreatedAt,
 			&turn.agentID, &turn.sessionID,
 		); err != nil {
@@ -167,7 +164,7 @@ func loadPostgresRunDebugTraceInputs(ctx context.Context, db eventReadQueryer, r
 	for sessionID := range referencedRunDebugTraceSessions(references, inputs.turns) {
 		rows, err := db.QueryContext(ctx, `
 		SELECT session_id::text, COALESCE(run_id::text, ''), session_kind,
-		       COALESCE(memory_enabled, false), COALESCE(memory_source, ''), COALESCE(status, ''), updated_at
+		       COALESCE(memory_enabled, false), COALESCE(status, ''), updated_at
 		FROM (`+RunDebugTraceSessionSources()+`) trace_sessions
 		WHERE session_id = $1::uuid AND (run_id = $2::uuid OR run_id IS NULL)
 		ORDER BY session_id, session_kind
@@ -178,7 +175,7 @@ func loadPostgresRunDebugTraceInputs(ctx context.Context, db eventReadQueryer, r
 		for rows.Next() {
 			var loadedID string
 			var session runDebugTraceSession
-			if err := rows.Scan(&loadedID, &session.runID, &session.kind, &session.memory, &session.memorySource, &session.status, &session.updatedAt); err != nil {
+			if err := rows.Scan(&loadedID, &session.runID, &session.kind, &session.memory, &session.status, &session.updatedAt); err != nil {
 				rows.Close()
 				return runDebugTraceInputs{}, fmt.Errorf("scan referenced run debug trace session: %w", err)
 			}
@@ -238,16 +235,14 @@ func loadSQLiteRunDebugTraceInputs(ctx context.Context, db eventReadQueryer, run
 		var rawFailure, createdRaw any
 		if err := db.QueryRowContext(ctx, `
 		SELECT turn_id, COALESCE(trigger_event_id, ''), COALESCE(trigger_event_type, ''),
-		       COALESCE(flow_instance, ''), COALESCE(memory_enabled, 0), COALESCE(memory_source, ''),
-		       COALESCE(entity_id, ''), COALESCE(task_id, ''), COALESCE(parse_ok, 0),
+		       COALESCE(flow_instance, ''), COALESCE(memory_enabled, 0), COALESCE(entity_id, ''), COALESCE(task_id, ''), COALESCE(parse_ok, 0),
 		       COALESCE(retry_count, 0), COALESCE(failure, 'null'), created_at,
 		       COALESCE(agent_id, ''), COALESCE(session_id, '')
 		FROM agent_turns
 		WHERE run_id = ? AND turn_id = ?
 	`, runID, reference.TurnID).Scan(
 			&turn.row.TurnID, &turn.row.TurnTriggerEventID, &turn.row.TurnTriggerEventType,
-			&turn.row.TurnFlowInstance, &turn.row.TurnMemory, &turn.row.TurnMemorySource,
-			&turn.row.TurnEntityID, &turn.row.TurnTaskID, &turn.row.TurnParseOK,
+			&turn.row.TurnFlowInstance, &turn.row.TurnMemory, &turn.row.TurnEntityID, &turn.row.TurnTaskID, &turn.row.TurnParseOK,
 			&turn.row.TurnRetryCount, &rawFailure, &createdRaw,
 			&turn.agentID, &turn.sessionID,
 		); err != nil {
@@ -272,11 +267,11 @@ func loadSQLiteRunDebugTraceInputs(ctx context.Context, db eventReadQueryer, run
 	for sessionID := range referencedRunDebugTraceSessions(references, inputs.turns) {
 		rows, err := db.QueryContext(ctx, `
 		SELECT session_id, COALESCE(run_id, ''), session_kind,
-		       COALESCE(memory_enabled, 0), COALESCE(memory_source, ''), COALESCE(status, ''), updated_at
+		       COALESCE(memory_enabled, 0), COALESCE(status, ''), updated_at
 		FROM (
-			SELECT session_id, run_id, 'live_session' AS session_kind, memory_enabled, memory_source, status, updated_at FROM agent_sessions
+			SELECT session_id, run_id, 'live_session' AS session_kind, memory_enabled, status, updated_at FROM agent_sessions
 			UNION ALL
-			SELECT session_id, run_id, 'turn_audit' AS session_kind, memory_enabled, memory_source, status, updated_at FROM agent_conversation_audits
+			SELECT session_id, run_id, 'turn_audit' AS session_kind, memory_enabled, status, updated_at FROM agent_conversation_audits
 		) trace_sessions
 		WHERE session_id = ? AND (run_id = ? OR run_id IS NULL)
 		ORDER BY session_id, session_kind
@@ -288,7 +283,7 @@ func loadSQLiteRunDebugTraceInputs(ctx context.Context, db eventReadQueryer, run
 			var loadedID string
 			var session runDebugTraceSession
 			var updatedRaw any
-			if err := rows.Scan(&loadedID, &session.runID, &session.kind, &session.memory, &session.memorySource, &session.status, &updatedRaw); err != nil {
+			if err := rows.Scan(&loadedID, &session.runID, &session.kind, &session.memory, &session.status, &updatedRaw); err != nil {
 				rows.Close()
 				return runDebugTraceInputs{}, fmt.Errorf("scan referenced sqlite run debug trace session: %w", err)
 			}
@@ -449,7 +444,6 @@ func appendProjectedTraceRow(out []operatorread.RunDebugTraceRow, event operator
 		row.TurnTriggerEventType = turn.row.TurnTriggerEventType
 		row.TurnFlowInstance = turn.row.TurnFlowInstance
 		row.TurnMemory = turn.row.TurnMemory
-		row.TurnMemorySource = turn.row.TurnMemorySource
 		row.TurnEntityID = turn.row.TurnEntityID
 		row.TurnTaskID = turn.row.TurnTaskID
 		row.TurnParseOK = turn.row.TurnParseOK
@@ -462,7 +456,6 @@ func appendProjectedTraceRow(out []operatorread.RunDebugTraceRow, event operator
 		row.SessionID = sessionID
 		row.SessionKind = session.kind
 		row.SessionMemory = session.memory
-		row.SessionMemorySource = session.memorySource
 		row.SessionStatus = session.status
 		row.SessionUpdatedAt = TraceTimePtr(session.updatedAt)
 	}

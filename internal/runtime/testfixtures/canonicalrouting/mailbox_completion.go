@@ -69,7 +69,6 @@ pins:
   role: observer
   intent: {inline: 'Observe the completed human operation.'}
   model: regular
-  memory: false
   permissions: [ask_human]
   subscriptions: [observer.requested, human_task.approved, human_task.rejected, human_task.deferred, human_task.expired]
   mock:

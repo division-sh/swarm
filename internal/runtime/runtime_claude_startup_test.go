@@ -812,9 +812,7 @@ func ambiguousScopedClaudeStartupSource(t *testing.T) semanticview.Source {
 	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "entities.yaml"), "item:\n  item_id: string\n")
 	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "agents.yaml"), `
 root-mock:
-  id: root-mock
   model: regular
-  memory: false
   intent:
     inline: Exercise the mocked Claude startup census.
   mock:
@@ -831,7 +829,7 @@ root-mock:
 	} {
 		dir := filepath.Join(root, "packages", project.name)
 
-		writeAgentFreeRuntimeFixtureFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker:\n  id: shared-worker\n  model: "+project.model+"\n  memory: false\n  intent:\n    inline: Exercise the scoped Claude startup census.\n")
+		writeAgentFreeRuntimeFixtureFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker:\n  id: shared-worker\n  model: "+project.model+"\n  intent:\n    inline: Exercise the scoped Claude startup census.\n")
 	}
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))

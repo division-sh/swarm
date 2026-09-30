@@ -811,7 +811,7 @@ func claudeAttemptProofAgentConfig(surfaces ...claudeAttemptProofSurface) runtim
 		ID:            "claude-attempt-proof-agent", Type: "sonnet", Role: "worker", FlowID: "global", Model: "regular",
 		LLMBackend: "claude_cli", ResolvedLLMBackend: "claude_cli", ResolvedLLMProvider: "claude",
 		ResolvedLLMTransport: "cli", ResolvedModel: "sonnet",
-		Memory: agentmemory.Authored(surface.memory), FlowPath: "proof/inst-1",
+		Memory: agentmemory.Plan{Enabled: surface.memory}, FlowPath: "proof/inst-1",
 		Identity: claudeAttemptProofAgentIdentity(),
 	}
 	return serveTestAgentConfig(cfg)
@@ -959,17 +959,17 @@ func requireClaudeAttemptProofSessionSurface(t *testing.T, backend claudeAttempt
 		return
 	}
 
-	query := `SELECT flow_instance, memory_enabled, memory_source, COALESCE(json_extract(runtime_state, '$.provider_session_id'), '') FROM agent_sessions WHERE agent_id=? AND status='active'`
+	query := `SELECT flow_instance, memory_enabled, COALESCE(json_extract(runtime_state, '$.provider_session_id'), '') FROM agent_sessions WHERE agent_id=? AND status='active'`
 	if backend.name == "postgres" {
-		query = `SELECT flow_instance, memory_enabled, memory_source, COALESCE(runtime_state->>'provider_session_id', '') FROM agent_sessions WHERE agent_id=$1 AND status='active'`
+		query = `SELECT flow_instance, memory_enabled, COALESCE(runtime_state->>'provider_session_id', '') FROM agent_sessions WHERE agent_id=$1 AND status='active'`
 	}
-	var flowInstance, memorySource, providerHead string
+	var flowInstance, providerHead string
 	var memoryEnabled bool
-	if err := backend.db.QueryRowContext(backend.context(), query, claudeAttemptProofAgentConfig().ID).Scan(&flowInstance, &memoryEnabled, &memorySource, &providerHead); err != nil {
+	if err := backend.db.QueryRowContext(backend.context(), query, claudeAttemptProofAgentConfig().ID).Scan(&flowInstance, &memoryEnabled, &providerHead); err != nil {
 		t.Fatalf("load %s session surface: %v", surface.name, err)
 	}
-	if flowInstance != "proof/inst-1" || !memoryEnabled || memorySource != string(agentmemory.SourceAuthored) || providerHead != attemptID {
-		t.Fatalf("%s memory=(flow=%q enabled=%v source=%q head=%q), want (proof/inst-1 true authored %q)", surface.name, flowInstance, memoryEnabled, memorySource, providerHead, attemptID)
+	if flowInstance != "proof/inst-1" || !memoryEnabled || providerHead != attemptID {
+		t.Fatalf("%s memory=(flow=%q enabled=%v head=%q), want (proof/inst-1 true %q)", surface.name, flowInstance, memoryEnabled, providerHead, attemptID)
 	}
 }
 

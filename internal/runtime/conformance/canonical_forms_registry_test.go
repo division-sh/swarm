@@ -145,6 +145,7 @@ type canonicalFormsRegistry struct {
 	Rows              []canonicalFormsRow            `yaml:"rows"`
 	DecoderCoverage   map[string]map[string][]string `yaml:"decoder_coverage"`
 	DecoderRetired    map[string]map[string][]string `yaml:"decoder_retired"`
+	DecoderDeleted    map[string]map[string][]string `yaml:"decoder_deleted"`
 	DecoderExclusions map[string]map[string][]string `yaml:"decoder_exclusions"`
 	DecodeBypasses    canonicalDecodeBypassInventory `yaml:"decode_bypasses"`
 	Wave1             canonicalFormsWave1            `yaml:"wave_1"`
@@ -332,6 +333,15 @@ func TestCanonicalFormsRegistryOwnsCompleteDecoderInventory(t *testing.T) {
 	actual, err := collectCustomYAMLDecoders(root)
 	if err != nil {
 		t.Fatalf("collect custom YAML decoders: %v", err)
+	}
+	for file, mappings := range record.DecoderDeleted {
+		for rowID, receivers := range mappings {
+			if _, exists := rows[rowID]; !exists { t.Fatalf("deleted decoder references unknown row %q", rowID) }
+			for _, receiver := range receivers {
+				identity := canonicalDecoderIdentity(file, receiver)
+				if _, exists := actual[identity]; exists { t.Fatalf("deleted decoder restored: %s", identity) }
+			}
+		}
 	}
 	classified := make(map[string]string, len(expectedReachable)+len(expectedRetired))
 	for identity, rowID := range expectedReachable {

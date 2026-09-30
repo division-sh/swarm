@@ -211,7 +211,7 @@ func TestForkedSourceSessionTurnAndConversationConsumersRefuse(t *testing.T) {
 			identity := testAgentMemoryIdentity(t, fixture.sourceRun, "freeze-agent", "freeze/flow")
 			lease := &runtimesessions.Lease{SessionID: uuid.NewString(), Identity: identity, LockOwner: "worker", GrantID: uuid.NewString(), ExpiresAt: time.Now().Add(time.Minute)}
 			conversation := runtimellm.ConversationRecord{
-				SessionID: lease.SessionID, AgentID: identity.AgentID(), Identity: identity, Memory: agentmemory.Authored(true),
+				SessionID: lease.SessionID, AgentID: identity.AgentID(), Identity: identity, Memory: agentmemory.Plan{Enabled: true},
 				TurnCount: 1, Status: "active",
 			}
 			watchdog := runtimellm.ConversationWatchdogUpdate{

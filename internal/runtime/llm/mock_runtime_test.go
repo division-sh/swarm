@@ -187,7 +187,7 @@ func TestMockEffectFenceRejectsEveryExternalAdapterBeforeAuthorization(t *testin
 	harness := effecttest.New()
 	ctx := harness.Context("mock-effect-fence")
 	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeMock)
-	ctx = agentmemory.WithExecution(ctx, agentmemory.PlatformDefault(), agentmemory.Identity{})
+	ctx = agentmemory.WithExecution(ctx, agentmemory.Plan{}, agentmemory.Identity{})
 	for _, registration := range runtimeeffects.Registrations() {
 		if registration.Adapter == "mock_python" {
 			continue

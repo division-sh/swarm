@@ -514,7 +514,7 @@ func (am *AgentManager) ensureExecutableAgentLifecycle(ctx context.Context, iden
 		if running {
 			transitionCtx = runCtx
 		}
-		if _, err := am.replaceExecutionIdentityConfigWithTopology(transitionCtx, identity, "start", "", nil, am.semanticSource, false, nil, nil); err != nil {
+		if _, err := am.replaceExecutionIdentityConfigWithTopology(transitionCtx, identity, "start", "", nil, am.semanticSource, nil, nil); err != nil {
 			return executableAgentReadiness{}, err
 		}
 		readiness, err := am.lifecycle.executableReadinessByIdentity(identity)
@@ -712,7 +712,6 @@ func (am *AgentManager) reconfigureAgentIdentityExactWithTopology(
 		"",
 		&cfg,
 		source,
-		true,
 		topology,
 		nil,
 	)

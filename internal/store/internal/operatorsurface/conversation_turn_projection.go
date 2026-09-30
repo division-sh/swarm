@@ -227,8 +227,7 @@ func (s conversationProjection) loadOperatorConversationSummary(ctx context.Cont
 	}
 	row := s.queryRow(ctx, fmt.Sprintf(`
 		SELECT CAST(session_id AS TEXT), agent_id, COALESCE(CAST(run_id AS TEXT), ''), kind,
-			COALESCE(flow_instance, ''), memory_enabled, memory_source,
-			COALESCE(status, ''), COALESCE(turn_count, 0), COALESCE(message_count, 0),
+			COALESCE(flow_instance, ''), memory_enabled, COALESCE(status, ''), COALESCE(turn_count, 0), COALESCE(message_count, 0),
 			COALESCE(CAST(runtime_state AS TEXT), '{}'), started_at, ended_at, updated_at
 		FROM (
 			%s
@@ -245,7 +244,7 @@ func (s conversationProjection) loadOperatorConversationSummary(ctx context.Cont
 	)
 	if err := row.Scan(
 		&item.SessionID, &item.AgentID, &item.RunID, &item.Kind, &item.FlowInstance,
-		&item.Memory, &item.MemorySource, &item.Status, &item.TurnCount, &item.MessageCount,
+		&item.Memory, &item.Status, &item.TurnCount, &item.MessageCount,
 		&runtimeStateRaw, &startedAtRaw, &endedAtRaw, &updatedAtRaw,
 	); errors.Is(err, sql.ErrNoRows) {
 		return operatorread.OperatorConversationSummary{}, operatorread.ErrSessionNotFound

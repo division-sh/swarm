@@ -64,7 +64,7 @@ func TestForkChatRetainsExactResponseAfterAcknowledgedTurnIncrementError(t *test
 	runtime := NewMockRuntime(&config.Config{LLM: config.LLMConfig{Models: llmselection.ModelAliases{
 		llmselection.ModelAliasRegular: {llmselection.BackendMock: "mock-regular"},
 	}}}, registry, "worker-1", nil, publisher, liveTestCompletionController(probe, probe, probe, probe))
-	memory := agentmemory.Authored(true)
+	memory := agentmemory.Plan{Enabled: true}
 	conversation, err := NewForkChatConversation("fork-agent", "fork", "inspect", nil, memory, 2, runtime)
 	if err != nil {
 		t.Fatal(err)

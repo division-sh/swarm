@@ -50,7 +50,7 @@ func (e *LLMForkChatExecutor) ExecuteForkChat(ctx context.Context, prepared runf
 	actor = resolved.Actor
 	tools := conversationForkChatToolDefinitions(prepared)
 	toolExec := newConversationForkChatToolExecutor(prepared)
-	conv, err := runtimellm.NewForkChatConversation(actor.ID, prepared.Fork.ForkID, conversationForkChatSystemPrompt(prepared), tools, agentmemory.PlatformDefault(), 8, resolved.Runtime)
+	conv, err := runtimellm.NewForkChatConversation(actor.ID, prepared.Fork.ForkID, conversationForkChatSystemPrompt(prepared), tools, agentmemory.Plan{}, 8, resolved.Runtime)
 	if err != nil {
 		return runfork.ConversationForkChatExecution{}, fmt.Errorf("prepare conversation fork chat turn: %w", err)
 	}
@@ -96,7 +96,7 @@ func conversationForkChatActor(prepared runfork.ConversationForkChatPrepared) ru
 	actor.ID = strings.TrimSpace(prepared.Fork.SourceAgentID)
 	actor.Type = "forkchat"
 	actor.Role = "forkchat"
-	actor.Memory = agentmemory.PlatformDefault()
+	actor.Memory = agentmemory.Plan{}
 	actor.Tools = append([]string(nil), prepared.AvailableTools...)
 	actor.Subscriptions = nil
 	actor.EmitEvents = nil

@@ -34,9 +34,9 @@ func TestCLIHumanCodePhrasesMatchCurrentCanonicalValues(t *testing.T) {
 func TestCLIHumanCodePhraseParityRejectsSpecOnlyDrift(t *testing.T) {
 	projection := loadCLIHumanCodeProjectionSpec(t)
 	families := humanProjectionMappingValue(projection, "families")
-	memorySource := humanProjectionMappingValue(families, "memory_source")
-	phrases := humanProjectionMappingValue(memorySource, "phrases")
-	humanProjectionMappingValue(phrases, "platform_default").Value = "platform supplied"
+	agentStatus := humanProjectionMappingValue(families, "agent_status")
+	phrases := humanProjectionMappingValue(agentStatus, "phrases")
+	humanProjectionMappingValue(phrases, "running").Value = "agent executing"
 
 	if got := cliHumanCodePhrasesFromSpec(t, projection); reflect.DeepEqual(userfacing.HumanCodePhrases(), got) {
 		t.Fatal("spec-only phrase drift did not break implementation parity")
@@ -151,7 +151,7 @@ func cliHumanCodePhrasesFromSpec(t *testing.T, projection *yaml.Node) map[userfa
 	}
 	knownSpecFamilies := map[string]bool{
 		"run_status": true, "operational_state": true, "agent_status": true,
-		"memory_source": true, "delivery_status": true,
+		"delivery_status":       true,
 		"provider_subject_kind": true, "provider_subject_status": true, "provider_capability": true,
 		"provider_guarantee": true, "provider_requirement_status": true,
 		"run_blocking_tuples": true, "agent_lifecycle_tuples": true, "watchdog_tuples": true,
@@ -166,7 +166,6 @@ func cliHumanCodePhrasesFromSpec(t *testing.T, projection *yaml.Node) map[userfa
 		"run_status":                  userfacing.HumanCodeRunStatus,
 		"operational_state":           userfacing.HumanCodeOperationalState,
 		"agent_status":                userfacing.HumanCodeAgentStatus,
-		"memory_source":               userfacing.HumanCodeMemorySource,
 		"delivery_status":             userfacing.HumanCodeDeliveryStatus,
 		"provider_subject_kind":       userfacing.HumanCodeProviderSubjectKind,
 		"provider_subject_status":     userfacing.HumanCodeProviderSubjectStatus,
@@ -274,10 +273,10 @@ func TestCLIHumanCodeUnknownValuesRemainVerbatim(t *testing.T) {
 func TestCLIHumanCodePublicConsumersUseSharedProjector(t *testing.T) {
 	required := map[string][]string{
 		"agent_replay.go\x00writeAgentReplayResult":                    {string(userfacing.HumanCodeDeliveryStatus)},
-		"agents.go\x00writeAgentListResult":                            {string(userfacing.HumanCodeAgentStatus), string(userfacing.HumanCodeMemorySource)},
+		"agents.go\x00writeAgentListResult":                            {string(userfacing.HumanCodeAgentStatus)},
 		"agents.go\x00writeAgentDeliveryLifecycleListResult":           {string(userfacing.HumanCodeDeliveryStatus)},
 		"agents.go\x00writeAgentDiagnosisResult":                       {string(userfacing.HumanCodeAgentLifecycleBlockingLayer), string(userfacing.HumanCodeAgentLifecycleState), string(userfacing.HumanCodeAgentStatus), string(userfacing.HumanCodeWatchdogAction), string(userfacing.HumanCodeWatchdogBlockingLayer), string(userfacing.HumanCodeWatchdogOutcome), string(userfacing.HumanCodeWatchdogState)},
-		"agents.go\x00writeAgentDetailResult":                          {string(userfacing.HumanCodeAgentStatus), string(userfacing.HumanCodeMemorySource)},
+		"agents.go\x00writeAgentDetailResult":                          {string(userfacing.HumanCodeAgentStatus)},
 		"cli_identifier_resolver.go\x00newCLIIdentifierAmbiguousError": {"<dynamic>"},
 		"diagnostics.go\x00diagnosticRunStatusLabel":                   {string(userfacing.HumanCodeRunStatus)},
 		"diagnostics.go\x00writeDiagnosticRunDiagnosis":                {string(userfacing.HumanCodeDeliveryStatus), string(userfacing.HumanCodeOperationalState), string(userfacing.HumanCodeRunBlockingLayer), string(userfacing.HumanCodeRunBlockingReason)},
@@ -302,7 +301,6 @@ func TestCLIHumanCodePublicConsumersUseSharedProjector(t *testing.T) {
 		"cliHumanCodeRunBlockingLayer":            string(userfacing.HumanCodeRunBlockingLayer),
 		"cliHumanCodeRunBlockingReason":           string(userfacing.HumanCodeRunBlockingReason),
 		"cliHumanCodeAgentStatus":                 string(userfacing.HumanCodeAgentStatus),
-		"cliHumanCodeMemorySource":                string(userfacing.HumanCodeMemorySource),
 		"cliHumanCodeDeliveryStatus":              string(userfacing.HumanCodeDeliveryStatus),
 		"cliHumanCodeAgentLifecycleState":         string(userfacing.HumanCodeAgentLifecycleState),
 		"cliHumanCodeAgentLifecycleBlockingLayer": string(userfacing.HumanCodeAgentLifecycleBlockingLayer),

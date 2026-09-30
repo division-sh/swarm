@@ -81,8 +81,8 @@ func TestConversationForkRawSeedOverlapsRuntimeDiagnostic(t *testing.T) {
 	_, err = db.ExecContext(ctx, `INSERT INTO agent_sessions (
 		session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 		flow_scope_key, flow_instance_id, flow_instance,
-		memory_enabled, memory_source, status, created_at, updated_at
-	) VALUES (?,?,?,?,?,?,?,?,?,1,'authored','active',?,?)`,
+		memory_enabled, status, created_at, updated_at
+	) VALUES (?,?,?,?,?,?,?,?,?,1,'active',?,?)`,
 		uuid.NewString(), identity.RunID, identity.AgentID, identity.NameOwner, identity.NameSource,
 		identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, now, now)
 	if err == nil || !strings.Contains(err.Error(), "SQLITE_BUSY") {

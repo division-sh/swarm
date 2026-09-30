@@ -43,7 +43,7 @@ func TestOperatorDeadLetterEvidenceIsScopedToExactDeliveryParity(t *testing.T) {
 			if err := agentfixture.UpsertStatic(t, ctx, selected, runtimemanager.PersistedAgent{
 				Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 					Identity: identity, ID: "agent-a", Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live",
-					Memory: agentmemory.PlatformDefault(), FlowPath: "global", Config: json.RawMessage(`{}`),
+					Memory: agentmemory.Plan{}, FlowPath: "global", Config: json.RawMessage(`{}`),
 				}),
 				Status: "active", StartedAt: now,
 			}); err != nil {
@@ -135,7 +135,7 @@ func TestOperatorRunTerminalizationPreservesExactDeadLetterEvidenceParity(t *tes
 			if err := agentfixture.UpsertStatic(t, ctx, selected, runtimemanager.PersistedAgent{
 				Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 					Identity: identity, ID: "terminal-agent", Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live",
-					Memory: agentmemory.PlatformDefault(), FlowPath: "global", Config: json.RawMessage(`{}`),
+					Memory: agentmemory.Plan{}, FlowPath: "global", Config: json.RawMessage(`{}`),
 				}),
 				Status: "active", StartedAt: now,
 			}); err != nil {

@@ -14,7 +14,6 @@ import (
 
 	runtimeflowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"golang.org/x/text/unicode/norm"
-	"gopkg.in/yaml.v3"
 )
 
 type SourceKind string
@@ -34,54 +33,6 @@ type Source struct {
 	Inline   string     `json:"inline,omitempty"`
 	Import   string     `json:"import,omitempty"`
 	Override string     `json:"override,omitempty"`
-}
-
-func (s *Source) UnmarshalYAML(node *yaml.Node) error {
-	if node == nil {
-		return fmt.Errorf("agent intent source is required")
-	}
-	switch node.Kind {
-	case yaml.ScalarNode:
-		if node.Tag != "" && node.Tag != "!!str" {
-			return fmt.Errorf("agent intent scalar must be a local file path")
-		}
-		*s = Source{Kind: SourceLocal, Local: strings.TrimSpace(node.Value)}
-		return s.ValidateSyntax()
-	case yaml.MappingNode:
-		values := map[string]string{}
-		for i := 0; i+1 < len(node.Content); i += 2 {
-			key := strings.TrimSpace(node.Content[i].Value)
-			if _, exists := values[key]; exists {
-				return fmt.Errorf("agent intent source repeats key %q", key)
-			}
-			if key != "inline" && key != "import" && key != "override" {
-				return fmt.Errorf("agent intent source key %q is unsupported; use local scalar, inline, or import", key)
-			}
-			value := node.Content[i+1]
-			if value.Kind != yaml.ScalarNode || (value.Tag != "" && value.Tag != "!!str") {
-				return fmt.Errorf("agent intent source %s must be text", key)
-			}
-			if key == "inline" {
-				values[key] = value.Value
-			} else {
-				values[key] = strings.TrimSpace(value.Value)
-			}
-		}
-		_, hasInline := values["inline"]
-		_, hasImport := values["import"]
-		_, hasOverride := values["override"]
-		switch {
-		case hasInline && !hasImport && !hasOverride && len(values) == 1:
-			*s = Source{Kind: SourceInline, Inline: values["inline"]}
-		case hasImport && !hasInline && len(values) <= 2 && (!hasOverride || len(values) == 2):
-			*s = Source{Kind: SourceImport, Import: values["import"], Override: values["override"]}
-		default:
-			return fmt.Errorf("agent intent source must be exactly inline, import, or import with override")
-		}
-		return s.ValidateSyntax()
-	default:
-		return fmt.Errorf("agent intent source must be a local path scalar or a typed mapping")
-	}
 }
 
 func (s Source) ValidateSyntax() error {

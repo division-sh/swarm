@@ -1,49 +1,31 @@
 package agentmemory
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 )
 
-func TestPlanPreservesValueAndProvenance(t *testing.T) {
-	tests := []struct {
-		name    string
-		enabled bool
-		source  Source
-	}{
-		{name: "omitted false", enabled: false, source: SourcePlatformDefault},
-		{name: "authored false", enabled: false, source: SourceAuthored},
-		{name: "authored true", enabled: true, source: SourceAuthored},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			plan, err := NewPlan(tt.enabled, tt.source)
-			if err != nil {
-				t.Fatalf("NewPlan: %v", err)
-			}
-			if plan.Enabled != tt.enabled || plan.Source != tt.source {
-				t.Fatalf("plan = %#v, want enabled=%v source=%q", plan, tt.enabled, tt.source)
-			}
-		})
-	}
-}
-
-func TestPlanRejectsEnabledPlatformDefaultProvenance(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		plan Plan
-	}{
-		{name: "explicit platform default", plan: Plan{Enabled: true, Source: SourcePlatformDefault}},
-		{name: "empty source normalizes to platform default", plan: Plan{Enabled: true}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if _, err := tc.plan.Normalize(); err == nil || !strings.Contains(err.Error(), `requires source "authored"`) {
-				t.Fatalf("Normalize error = %v, want authored-source requirement", err)
-			}
-		})
+func TestPlanContainsOnlyEnablement(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		plan := Plan{Enabled: enabled}
+		raw, err := json.Marshal(plan)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := `{"enabled":false}`
+		if enabled {
+			want = `{"enabled":true}`
+		}
+		if string(raw) != want {
+			t.Fatalf("plan = %s, want %s", raw, want)
+		}
+		var restored Plan
+		if err := json.Unmarshal(raw, &restored); err != nil || restored != plan {
+			t.Fatalf("restored = %#v, err = %v", restored, err)
+		}
 	}
 }
 

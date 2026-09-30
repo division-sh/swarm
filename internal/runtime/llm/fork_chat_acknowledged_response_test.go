@@ -41,7 +41,7 @@ func TestForkChatRetainsCommittedAssistantThroughCleanupError(t *testing.T) {
 		llmselection.ModelAliasRegular: {llmselection.BackendMock: "mock-regular"},
 	}}}, sessions.NewInMemoryRegistry(time.Minute), "worker-1", nil, nil,
 		liveTestCompletionController(probe, probe, probe, probe))
-	conversation, err := NewForkChatConversation("fork-agent", "fork", "inspect", nil, agentmemory.PlatformDefault(), 2, runtime)
+	conversation, err := NewForkChatConversation("fork-agent", "fork", "inspect", nil, agentmemory.Plan{}, 2, runtime)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestForkChatDoesNotAcknowledgeResponseWithoutSettlement(t *testing.T) {
 			return &Response{Message: Message{Role: "assistant", Content: "uncommitted"}}, failure
 		},
 	}
-	conversation, err := NewForkChatConversation("fork-agent", "fork", "inspect", nil, agentmemory.PlatformDefault(), 2, runtime)
+	conversation, err := NewForkChatConversation("fork-agent", "fork", "inspect", nil, agentmemory.Plan{}, 2, runtime)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -190,9 +190,7 @@ func validateCompletionContinuation(continuation completionContinuationEnvelope,
 	if continuation.Response.ToolOutputAuthority == nil || continuation.Response.ToolOutputAuthority.Validate() != nil {
 		return runtimefailures.New(runtimefailures.ClassSchemaInvalid, "completion_continuation_tool_output_authority_invalid", "llm-completion-authority", "recover_completion", map[string]any{"adapter": strings.TrimSpace(adapter)})
 	}
-	if _, err := projection.Memory.Normalize(); err != nil {
-		return runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "completion_continuation_memory_invalid", "llm-completion-authority", "recover_completion", nil, err)
-	}
+
 	return nil
 }
 

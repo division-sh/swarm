@@ -1898,9 +1898,9 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 					INSERT INTO agent_sessions (
 						session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 						agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-						memory_enabled, memory_source, status, created_at, updated_at
+						memory_enabled, status, created_at, updated_at
 					)
-					VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored', 'active', $10, $10)
+					VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'active', $10, $10)
 				`, uuid.NewString(), forkRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
 					fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, at)
 				return err
@@ -1916,9 +1916,9 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 					INSERT INTO agent_conversation_audits (
 						session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 						agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-						memory_enabled, memory_source, runtime_state, status, created_at, updated_at
+						memory_enabled, runtime_state, status, created_at, updated_at
 					)
-					VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, FALSE, 'authored', '{}'::jsonb, 'active', $10, $10)
+					VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, FALSE, '{}'::jsonb, 'active', $10, $10)
 				`, uuid.NewString(), forkRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
 					fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, at)
 				return err
@@ -1942,8 +1942,8 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 					INSERT INTO agent_sessions (
 						session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 						agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-						memory_enabled, memory_source, status, created_at, updated_at
-					) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,'authored','active',$10,$10)
+						memory_enabled, status, created_at, updated_at
+					) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,'active',$10,$10)
 				`, sessionID, originRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
 					fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, at); err != nil {
 					return err
@@ -1954,7 +1954,7 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 				)
 				if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, ctx, pg, runtimellm.AgentTurnRecord{
 					AgentID: identity.AgentID(), Identity: identity,
-					RunID: originRunID, FlowInstance: identity.FlowInstance(), Memory: agentmemory.Authored(true), SessionID: sessionID,
+					RunID: originRunID, FlowInstance: identity.FlowInstance(), Memory: agentmemory.Plan{Enabled: true}, SessionID: sessionID,
 					TriggerEventID: event.ID(), TriggerEventType: string(event.Type()), ParseOK: true,
 				}, managedAgentTurnFixtureOptions{TurnID: turnID, Now: at, OriginEvent: &event}); err != nil {
 					return err

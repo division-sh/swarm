@@ -72,8 +72,8 @@ func loadOptionalAgentDeclarationsFromSource(artifact *sourceartifact.AdmittedSo
 	if err != nil || !present {
 		return map[string]AgentRegistryEntry{}, err
 	}
-	entries := map[string]AgentRegistryEntry{}
-	if err := artifact.DecodeYAML(label, &entries); err != nil {
+	entries, err := projectAgentDeclarationsValue(admission.document.Root())
+	if err != nil {
 		return nil, wrapLoaderDiagnosticFile(err, label)
 	}
 	return entries, admission.RequireLive(len(entries))
@@ -174,8 +174,8 @@ func loadOptionalAgentDeclarations(path string) (map[string]AgentRegistryEntry, 
 	if err != nil || !present {
 		return map[string]AgentRegistryEntry{}, err
 	}
-	entries := map[string]AgentRegistryEntry{}
-	if err := admission.source.Decode(&entries); err != nil {
+	entries, err := projectAgentDeclarationsValue(admission.document.Root())
+	if err != nil {
 		return nil, wrapLoaderDiagnosticFile(err, path)
 	}
 	return entries, admission.RequireLive(len(entries))

@@ -19,7 +19,7 @@ import (
 
 func (r servedEventPublishBlockingLLMRuntime) StartSession(ctx context.Context, agentID string, systemPrompt string, tools []runtimellm.ToolDefinition) (*runtimellm.Session, error) {
 	execution, ok := agentmemory.FromContext(ctx)
-	memory := agentmemory.PlatformDefault()
+	memory := agentmemory.Plan{}
 	if ok {
 		memory = execution.Plan
 	}
@@ -166,7 +166,7 @@ func (s *servedSQLiteDirectiveFaultStore) RecordDirectiveExecuted(ctx context.Co
 
 func (servedLiveAgentProofLLMRuntime) StartSession(ctx context.Context, agentID string, systemPrompt string, tools []runtimellm.ToolDefinition) (*runtimellm.Session, error) {
 	execution, ok := agentmemory.FromContext(ctx)
-	memory := agentmemory.PlatformDefault()
+	memory := agentmemory.Plan{}
 	if ok {
 		memory = execution.Plan
 	}

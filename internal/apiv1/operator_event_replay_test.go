@@ -347,7 +347,7 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 				sourceTurnID := uuid.NewString()
 				sourceFrame := storetest.PersistManagedAgentTurnFixture(t, ctx, storetest.ManagedAgentTurnFixture{
 					Store: frameStore, Selected: f.store, Identity: agentIdentity, RunID: runID,
-					SessionID: uuid.NewString(), TurnID: sourceTurnID, Memory: agentmemory.Authored(false),
+					SessionID: uuid.NewString(), TurnID: sourceTurnID, Memory: agentmemory.Plan{Enabled: false},
 					Event: original, DeliveryRoute: &originalRoute, DeliveryCommitted: true, ParseOK: true, CreatedAt: createdAt.Add(time.Minute), ExecutionMode: executionmode.Mock, Adapter: "mock_python",
 				})
 				for _, route := range originalRoutes {
@@ -450,7 +450,7 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 				replayTurnID := uuid.NewString()
 				replayFrame := storetest.PersistManagedAgentTurnFixture(t, ctx, storetest.ManagedAgentTurnFixture{
 					Store: frameStore, Selected: f.store, Identity: agentIdentity, RunID: runID,
-					SessionID: uuid.NewString(), TurnID: replayTurnID, Memory: agentmemory.Authored(false),
+					SessionID: uuid.NewString(), TurnID: replayTurnID, Memory: agentmemory.Plan{Enabled: false},
 					Event: persistedSnapshot, DeliveryRoute: &replayRoute, DeliveryCommitted: true, ParseOK: true, CreatedAt: replayAt.Add(time.Minute), ExecutionMode: executionmode.Mock, Adapter: "mock_python",
 				})
 				if sourceFrame.Frame.FrameID != "agent-frame:v1:"+sourceTurnID || replayFrame.Frame.FrameID != "agent-frame:v1:"+replayTurnID {
