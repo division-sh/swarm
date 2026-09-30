@@ -41,10 +41,15 @@ func (r channelAnchorLLMRuntime) ContinueManagedSession(ctx context.Context, ses
 	response := &runtimellm.Response{
 		Message: runtimellm.Message{Role: "assistant", Content: "Observed."}, SessionID: session.ID, CapabilitySurface: &observed,
 	}
-	if message.Role != "tool" && strings.HasSuffix(call.Frame().Turn.Event.Type, "observer.requested") {
+	event := call.Frame().Turn.Event.Type
+	if message.Role != "tool" && (strings.HasSuffix(event, "observer.requested") || strings.HasSuffix(event, "notice.requested")) {
 		tool := runtimellm.ToolCall{ID: "human-" + session.ID, Name: "ask_human", Arguments: map[string]any{
 			"scope": "flow", "category": "review", "description": "Review the observed work.",
 		}}
+		if strings.HasSuffix(event, "notice.requested") {
+			tool.Name = "notify_human"
+			tool.Arguments = map[string]any{"summary": "Observed notice", "context": map[string]any{"proof": "mailbox-completion"}}
+		}
 		var payload struct {
 			DeadlineAt string `json:"deadline_at"`
 		}
@@ -67,7 +72,7 @@ func (r channelAnchorLLMRuntime) ContinueManagedSession(ctx context.Context, ses
 func TestChannelDeliveryRealAnchorProducersPublicJourney(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
-			h, db, bundleHash := startChannelAnchorJourney(t, backend, "anchor-token")
+			h, db, bundleHash := startChannelAnchorJourney(t, backend, "anchor-token", false)
 			for _, kind := range []decisioncard.AnchorKind{decisioncard.AnchorKindStageGate, decisioncard.AnchorKindHumanTask, decisioncard.AnchorKindProposedEffect} {
 				t.Run(string(kind), func(t *testing.T) {
 					seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
@@ -190,11 +195,11 @@ func TestChannelDeliveryRealAnchorProducersPublicJourney(t *testing.T) {
 	}
 }
 
-func startChannelAnchorJourney(t *testing.T, backend servedparity.Backend, token string) (*channelOnboardingE2EHarness, *sql.DB, string) {
+func startChannelAnchorJourney(t *testing.T, backend servedparity.Backend, token string, withSummary bool) (*channelOnboardingE2EHarness, *sql.DB, string) {
 	t.Helper()
 	h := newChannelOnboardingE2EHarness(t, backend, true)
 	h.opts.AbandonActiveRuns = false
-	writeChannelAnchorJourneySource(t, h.opts.SourceRoot)
+	writeChannelAnchorJourneySource(t, h.opts.SourceRoot, withSummary)
 	h.opts.TestLLMRuntime = channelAnchorLLMRuntime{}
 	credentials, err := runtimecredentials.NewFileStore(h.credentialPath)
 	if err != nil {
@@ -205,7 +210,6 @@ func startChannelAnchorJourney(t *testing.T, backend servedparity.Backend, token
 	}
 	h.start(t)
 	t.Cleanup(func() { h.stop(t) })
-	runChannelOnboardingCLIJourney(t, h.opts.ConfigPath, h.endpoint, h.provider, "connect", token, 1001, "private", 0)
 	driver := "sqlite"
 	if backend == servedparity.BackendExplicitPostgres {
 		driver = "postgres"
@@ -220,12 +224,23 @@ func startChannelAnchorJourney(t *testing.T, backend servedparity.Backend, token
 	if len(identity.SourceArtifacts) != 1 {
 		t.Fatalf("anchor journey requires one admitted source: %+v", identity)
 	}
+	if withSummary {
+		requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
+			"event_name": "notice.requested", "bundle_hash": identity.SourceArtifacts[0].BundleHash,
+			"payload": map[string]any{"seed": true}, "idempotency_key": "uncertainty-summary-notice",
+		})
+		onlyPublicChannelNoticeID(t, h.rpcEndpoint(), "")
+	}
+	runChannelOnboardingCLIJourney(t, h.opts.ConfigPath, h.endpoint, h.provider, "connect", token, 1001, "private", 0)
 	return h, db, identity.SourceArtifacts[0].BundleHash
 }
 
-func writeChannelAnchorJourneySource(t *testing.T, root string) {
+func writeChannelAnchorJourneySource(t *testing.T, root string, withNotice bool) {
 	t.Helper()
 	fixture := canonicalrouting.CopyMailboxCompletionMatrix(t)
+	if withNotice {
+		fixture = canonicalrouting.CopyMailboxNoticeCompletion(t)
+	}
 	if err := filepath.WalkDir(fixture, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -250,7 +265,7 @@ func writeChannelAnchorJourneySource(t *testing.T, root string) {
 			if err := yaml.Unmarshal(body, &events); err != nil {
 				return err
 			}
-			for _, event := range []string{"work.requested", "observer.requested", "effect.requested"} {
+			for _, event := range []string{"work.requested", "observer.requested", "effect.requested", "notice.requested"} {
 				delete(events, event)
 			}
 			body, err = yaml.Marshal(events)
@@ -286,11 +301,15 @@ func writeChannelAnchorJourneySource(t *testing.T, root string) {
 	inputs, outputs := map[string]any{"events": []any{}}, map[string]any{"events": []any{}}
 	schema["pins"] = map[string]any{"inputs": inputs, "outputs": outputs}
 	connects := []any{}
-	for _, event := range []string{"work.requested", "observer.requested", "effect.requested"} {
+	events := []string{"work.requested", "observer.requested", "effect.requested"}
+	if withNotice {
+		events = append(events, "notice.requested")
+	}
+	for _, event := range events {
 		inputs["events"] = append(inputs["events"].([]any), event)
 		outputs["events"] = append(outputs["events"].([]any), event)
 		target := "reviews"
-		if event == "observer.requested" {
+		if event == "observer.requested" || event == "notice.requested" {
 			target = "observers"
 		}
 		connects = append(connects, map[string]any{"event": event, "from": ".", "to": target})
@@ -303,7 +322,11 @@ func writeChannelAnchorJourneySource(t *testing.T, root string) {
 	if err := os.WriteFile(path, body, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte("work.requested:\n  seed: boolean\nobserver.requested:\n  seed: boolean\n  deadline_at: text?\neffect.requested:\n  seed: boolean\n"), 0o600); err != nil {
+	eventDocument := "work.requested:\n  seed: boolean\nobserver.requested:\n  seed: boolean\n  deadline_at: text?\neffect.requested:\n  seed: boolean\n"
+	if withNotice {
+		eventDocument += "notice.requested:\n  seed: boolean\n"
+	}
+	if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte(eventDocument), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
