@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
 	"strings"
@@ -27,13 +28,13 @@ func decodeNodeTestYAML(body []byte, target any) error {
 	var project func(FlowSchemaDocument)
 	switch out := target.(type) {
 	case *FlowConnect:
-		envelope, project = "connect:\n  -", func(s FlowSchemaDocument) { *out = s.Connect[0] }
+		envelope, project = canonicalrouting.SchemaConnectParserEnvelope, func(s FlowSchemaDocument) { *out = s.Connect[0] }
 	case *FlowPins:
-		envelope, project = "pins:", func(s FlowSchemaDocument) { *out = s.Pins }
+		envelope, project = canonicalrouting.SchemaPinsParserEnvelope, func(s FlowSchemaDocument) { *out = s.Pins }
 	case *FlowInputPins:
-		envelope, project = "pins:\n  inputs:", func(s FlowSchemaDocument) { *out = s.Pins.Inputs }
+		envelope, project = canonicalrouting.SchemaInputPinsParserEnvelope, func(s FlowSchemaDocument) { *out = s.Pins.Inputs }
 	case *FlowOutputPins:
-		envelope, project = "pins:\n  outputs:", func(s FlowSchemaDocument) { *out = s.Pins.Outputs }
+		envelope, project = canonicalrouting.SchemaOutputPinsParserEnvelope, func(s FlowSchemaDocument) { *out = s.Pins.Outputs }
 	case *FlowInstanceVariables:
 		envelope, project = "instance_variables:", func(s FlowSchemaDocument) { *out = s.InstanceVariables }
 	case *FlowVariable:

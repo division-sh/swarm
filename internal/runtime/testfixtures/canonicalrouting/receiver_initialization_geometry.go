@@ -33,8 +33,6 @@ func CopyReceiverInitializationGeometry(t testing.TB) string {
 	files := map[string]string{
 		"manifest.yaml": "name: receiver-initialization-geometry\nversion: 1.0.0\n",
 		"schema.yaml": `name: receiver-initialization-geometry
-stages:
-  active: {initial: true}
 pins:
   inputs:
     events: [work.requested]
@@ -69,8 +67,6 @@ worker.requested:
 		"worker/schema.yaml": `name: worker
 mode: template
 instance: worker_id
-stages:
-  active: {initial: true}
 instance_variables:
   variables:
     label: text
@@ -118,8 +114,6 @@ leaf.requested:
 		"worker/leaf/schema.yaml": `name: leaf
 mode: template
 instance: worker_id
-stages:
-  active: {initial: true}
 instance_variables:
   variables:
     label: text

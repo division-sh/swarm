@@ -23,6 +23,12 @@ func TestSchemaAdmissionFieldPresenceMatrix(t *testing.T) {
 	connect := "connect:\n  - event: work.requested\n    from: source\n    to: worker\n    %s\n"
 	inputPin := "pins:\n  inputs:\n    events:\n      - event: work.requested\n        resolution: {mode: create, from: event.id}\n        %s\n"
 	outputPin := "pins:\n  outputs:\n    events:\n      - event: work.completed\n        sink: harness\n        %s\n"
+	ingress := "ingress:\n  alias: hooks\n  providers: [{provider: partner}]\n  %s\n"
+	provider := "ingress:\n  alias: hooks\n  providers:\n    - provider: partner\n      %s\n"
+	admission := "ingress:\n  alias: hooks\n  providers:\n    - provider: partner\n      admission:\n        kind: pack\n        pack: {id: partner}\n        %s\n"
+	rawAdmission := "ingress:\n  alias: hooks\n  providers:\n    - provider: partner\n      admission:\n        kind: raw\n        authentication: {kind: token, header: X-Token}\n        delivery_id: {source: body_sha256}\n        event: work.received\n        payload: json\n        %s\n"
+	authentication := "ingress:\n  alias: hooks\n  providers:\n    - provider: partner\n      admission:\n        kind: raw\n        delivery_id: {source: body_sha256}\n        event: work.received\n        payload: json\n        authentication:\n          kind: hmac_sha256\n          header: X-Signature\n          %s\n"
+	delivery := "ingress:\n  alias: hooks\n  providers:\n    - provider: partner\n      admission:\n        kind: raw\n        authentication: {kind: token, header: X-Token}\n        event: work.received\n        payload: json\n        delivery_id:\n          source: header\n          header: X-Id\n          %s\n"
 	rows := []row{
 		{"name", root, "name", "Example", "", "", "MES"},
 		{"mode", root, "mode", "static", "", "", "MS"},
@@ -64,10 +70,12 @@ func TestSchemaAdmissionFieldPresenceMatrix(t *testing.T) {
 		{"variable", "instance_variables:\n  variables:\n    %s\n", "note", "text", "{type: text}", "[text]", "SPQ"},
 		{"variable.type", variable, "type", "text", "", "", "S"},
 		{"variable.description", variable, "description", "Note", "", "", "MES"},
+		{"instance_variables.description", "instance_variables:\n  variables: {}\n  %s\n", "description", "Configuration", "", "", "MES"},
 		{"variable.default", variable, "default", "abc", "{a: b}", "[a, b]", "MNESOPZQ"},
 		{"variable.pattern", variable, "pattern", "'[a-z]+'", "", "", "MS"},
 		{"variable.length", variable, "length", "x", "{min: 0, max: 10}", "", "MP"},
 		{"variable.equal_to", variable, "equal_to", "other", "", "", "MS"},
+		{"variable.range", "instance_variables:\n  variables:\n    value:\n      type: numeric\n      %s\n", "range", "x", "{min: -0.5, max: 10}", "", "MP"},
 		{"auto_emit", root, "auto_emit_on_create", "x", "{event: work.started}", "", "MP"},
 		{"auto_emit.event", "auto_emit_on_create:\n  description: Start\n  %s\n", "event", "work.started", "", "", "S"},
 		{"auto_emit.description", "auto_emit_on_create:\n  event: work.started\n  %s\n", "description", "Start", "", "", "MES"},
@@ -79,6 +87,31 @@ func TestSchemaAdmissionFieldPresenceMatrix(t *testing.T) {
 		{"imports", root, "imports", "x", "{connector_packs: [{provider: telegram, tool: telegram.send_message}]}", "", "MP"},
 		{"imports.connector_packs", "imports:\n  %s\n", "connector_packs", "x", "", "[{provider: telegram, tool: telegram.send_message}]", "Q"},
 		{"imports.provider_trigger_events", "imports:\n  %s\n", "provider_trigger_events", "x", "", "[{provider: telegram, event: inbound.telegram.text_message}]", "Q"},
+		{"import.connector.provider", "imports:\n  connector_packs:\n    - tool: telegram.send_message\n      %s\n", "provider", "telegram", "", "", "S"},
+		{"import.connector.tool", "imports:\n  connector_packs:\n    - provider: telegram\n      %s\n", "tool", "telegram.send_message", "", "", "S"},
+		{"import.trigger.provider", "imports:\n  provider_trigger_events:\n    - event: inbound.telegram.text_message\n      %s\n", "provider", "telegram", "", "", "S"},
+		{"import.trigger.event", "imports:\n  provider_trigger_events:\n    - provider: telegram\n      %s\n", "event", "inbound.telegram.text_message", "", "", "S"},
+		{"ingress", root, "ingress", "x", "{alias: hooks, providers: [{provider: partner}]}", "", "MP"},
+		{"ingress.alias", ingress, "alias", "hooks", "", "", "S"},
+		{"ingress.providers", ingress, "providers", "x", "", "[{provider: partner}]", "Q"},
+		{"provider.provider", provider, "provider", "partner", "", "", "S"},
+		{"provider.signing_secret", provider, "signing_secret", "TOKEN", "", "", "MS"},
+		{"provider.admission", provider, "admission", "x", "{kind: pack, pack: {id: partner}}", "", "MP"},
+		{"admission.kind", admission, "kind", "pack", "", "", "MS"},
+		{"admission.acknowledge", admission, "acknowledge", "empty", "", "", "MS"},
+		{"admission.pack", admission, "pack", "x", "{id: partner}", "", "MP"},
+		{"admission.pack.id", "ingress:\n  alias: hooks\n  providers:\n    - provider: partner\n      admission:\n        pack:\n          %s\n", "id", "partner", "", "", "S"},
+		{"admission.authentication", rawAdmission, "authentication", "x", "{kind: token, header: X-Token}", "", "P"},
+		{"admission.event", rawAdmission, "event", "work.received", "", "", "S"},
+		{"admission.payload", rawAdmission, "payload", "json", "", "", "S"},
+		{"admission.delivery_id", rawAdmission, "delivery_id", "x", "{source: body_sha256}", "", "P"},
+		{"authentication.kind", authentication, "kind", "token", "", "", "S"},
+		{"authentication.header", authentication, "header", "X-Signature", "", "", "S"},
+		{"authentication.prefix", authentication, "prefix", "Token", "", "", "MES"},
+		{"authentication.encoding", authentication, "encoding", "hex", "", "", "MS"},
+		{"delivery.source", delivery, "source", "header", "", "", "S"},
+		{"delivery.header", delivery, "header", "X-Id", "", "", "S"},
+		{"delivery.json_path", strings.ReplaceAll(delivery, "source: header\n          header: X-Id", "source: json_path"), "json_path", "$.id", "", "", "S"},
 		{"pins", root, "pins", "x", "{inputs: {events: [work.requested]}}", "", "MP"},
 		{"pins.inputs", "pins:\n  outputs: {events: [work.completed]}\n  %s\n", "inputs", "x", "{events: [work.requested]}", "", "MP"},
 		{"pins.outputs", "pins:\n  inputs: {events: [work.requested]}\n  %s\n", "outputs", "x", "{events: [work.completed]}", "", "MP"},
@@ -98,15 +131,22 @@ func TestSchemaAdmissionFieldPresenceMatrix(t *testing.T) {
 			// Remove the fixture's original spelling of the varied field, not its siblings.
 			template := tc.template
 			lines := strings.Split(template, "\n")
+			fieldIndent := 0
+			for _, line := range lines {
+				if strings.Contains(line, "%s") {
+					fieldIndent = len(line) - len(strings.TrimLeft(line, " "))
+				}
+			}
 			for i, line := range lines {
 				trimmed := strings.TrimSpace(line)
+				indent := len(line) - len(strings.TrimLeft(line, " "))
 				if strings.Contains(line, "%s") {
 					continue
 				}
-				if strings.HasPrefix(trimmed, tc.key+":") {
+				if indent == fieldIndent && strings.HasPrefix(trimmed, tc.key+":") {
 					lines[i] = ""
 				}
-				if strings.HasPrefix(trimmed, "- "+tc.key+":") {
+				if indent+2 == fieldIndent && strings.HasPrefix(trimmed, "- "+tc.key+":") {
 					lines[i] = line[:strings.Index(line, "-")] + "-"
 				}
 			}

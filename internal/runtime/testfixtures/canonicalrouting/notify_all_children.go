@@ -114,7 +114,7 @@ account.created:
   template_instance_key: text?
   template_instance_source_event: text?
 `)
-		applyClosedReplacement(t, accountSchema, "states: [active, completed]\n", `states: [active, completed]
+		applyClosedReplacement(t, accountSchema, "  completed: {terminal: true}\n", `  completed: {terminal: true}
 auto_emit_on_create:
   event: account.created
 `)
