@@ -342,7 +342,19 @@ units:
     budget_class: full
   local-delivery-continuation:
     packages: [github.com/division-sh/swarm/internal/runtime/deliverycontinuation]
-    run: '^TestCoordinator(HeldDispatchDoesNotBlockIndependentDelivery|QueuedDispatchOwnsQuiescenceUntilJoined|CapacityBoundedScanResumesNextPage|ReconcilesMissingEntriesInBoundedExactBatches|RejectsMismatchedBatchedObservationIdentity|RetirementCancellationIsNotReportedAsExecutionFailure|StopsAfterFatalDispatchWithoutPolling)$'
+    run: '^TestCoordinator(HeldDispatchDoesNotBlockIndependentDelivery|QueuedDispatchOwnsQuiescenceUntilJoined|CapacityBoundedScanResumesNextPage|ReconcilesMissingEntriesInBoundedExactBatches|RejectsMismatchedBatchedObservationIdentity|RetirementCancellationIsNotReportedAsExecutionFailure|RetirementDispatchOutcomeMatrix|StopsAfterFatalDispatchWithoutPolling)$'
+    required_children:
+      TestCoordinatorRetirementDispatchOutcomeMatrix:
+        [normal/before_acquire_live, normal/before_acquire_canceled, normal/after_acquire_live, normal/after_acquire_canceled,
+         normal/settled_before_retire_live, normal/settled_before_retire_canceled, normal/independent_live, normal/independent_canceled,
+         normal/joined_retirement_live, normal/joined_retirement_canceled, normal/joined_cancellation_live, normal/joined_cancellation_canceled,
+         normal/invalid_result_live, normal/invalid_result_canceled, normal/carrier_cleanup_live, normal/carrier_cleanup_canceled,
+         normal/lease_cleanup_live, normal/lease_cleanup_canceled, normal/unowned_retirement_live, normal/unowned_retirement_canceled, normal/parent_cancel_canceled,
+         selected/before_acquire_live, selected/before_acquire_canceled, selected/after_acquire_live, selected/after_acquire_canceled,
+         selected/settled_before_retire_live, selected/settled_before_retire_canceled, selected/independent_live, selected/independent_canceled,
+         selected/joined_retirement_live, selected/joined_retirement_canceled, selected/joined_cancellation_live, selected/joined_cancellation_canceled,
+         selected/invalid_result_live, selected/invalid_result_canceled, selected/carrier_cleanup_live, selected/carrier_cleanup_canceled,
+         selected/lease_cleanup_live, selected/lease_cleanup_canceled, selected/unowned_retirement_live, selected/unowned_retirement_canceled, selected/parent_cancel_canceled]
     count_mode: count-1
     environment_id: local-postgres-gateway-empty-v1
     budget_class: full
@@ -374,6 +386,8 @@ units:
     budget_class: full
   local-runtime-bus-full:
     packages: [github.com/division-sh/swarm/internal/runtime/bus]
+    required_children:
+      TestCoordinatorRetirementRealEventBusDispatch: [normal/before_acquire, normal/after_acquire, selected/before_acquire, selected/after_acquire]
     count_mode: count-1
     environment_id: local-postgres-gateway-empty-v1
     budget_class: broad

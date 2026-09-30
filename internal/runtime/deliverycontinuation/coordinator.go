@@ -634,7 +634,10 @@ func (c *Coordinator) dispatch(ctx context.Context) {
 					err = fmt.Errorf("dispatch delivery continuation %s returned unknown disposition", job.deliveryID)
 				}
 			}
-			if job.lease.Context().Err() != nil && ordinaryCoordinatorStop(job.lease.Context(), err, true) {
+			c.mu.Lock()
+			retired := c.retired
+			c.mu.Unlock()
+			if ordinaryCoordinatorStop(job.lease.Context(), err, retired) {
 				err = nil
 			}
 			deferred := err == nil && result.Disposition() == DispatchDeferred
