@@ -192,3 +192,19 @@ and `7bbdf376b77ab13ef9a0471af8ace9f8a6d5ea254b589d2f81f522f00d44684f`.
 These qualify already-required P rows through the existing owners, not a new
 failure-class expansion or U1-U5 mutation claim. Rebase and final-head default
 qualification remain required; master is now `8fac0f2e7`, not `abdb07bfe`.
+
+The careful final rebase preserves master input-pin retirement text and its new
+catalog classification, adding only the numeric verify-pass row. All 25 candidate
+commits are retained; range-diff shows only those two intended conflict repairs.
+Rebased API/catalog/proof-plan guards and the five actual standing/pause composition
+proofs pass (1.910s / 1.397s / 19.641s; serve composition 24.271s).
+
+S11's explicit pipeline-exclusion cancellation leaves the exact child/gateway
+untouched. Its real admitted webhook body then exposed compensation returning
+before the gateway request joined, restoring the child and failing reopen on both
+stores. The existing transition now records whether it fenced admission and joins
+that exact gateway's admitted requests before resource restoration, even after
+caller cancellation. No detached cleanup or cancellation suppression. This named
+S11 before/after control is expected FAIL 3.790s then PASS race x3 37.078s on both
+stores; the request is real gateway admission, not a successful provider-message
+claim. Complete public message/settlement proof remains the existing served journey.

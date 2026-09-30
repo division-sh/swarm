@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -250,6 +253,76 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 			if err != nil {
 				t.Fatal(err)
 			}
+			pipelineBarrier, err := selected.Bus.BeginPipelineParentTransition(selectedCtx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			blockedCtx, blockedCancel := context.WithTimeout(selectedCtx, 10*time.Millisecond)
+			blockedResult, blockedErr := controller.SuspendStandingService(blockedCtx, runtimepipeline.StandingServiceOperation{ServiceID: serviceID})
+			blockedCancel()
+			pipelineBarrier.Done()
+			if !errors.Is(blockedErr, context.DeadlineExceeded) || blockedResult.CommittedMutation != "" {
+				t.Fatalf("pipeline-exclusion cancellation changed standing authority: %+v, %v", blockedResult, blockedErr)
+			}
+			assertChild(true, targets[0].RunID, targets[0].Generation)
+			assertGateway(true)
+			body, writer := io.Pipe()
+			t.Cleanup(func() { _ = body.Close(); _ = writer.Close() })
+			ingressDone := make(chan struct{})
+			go func() {
+				defer close(ingressDone)
+				request := httptest.NewRequest(http.MethodPost, "/webhooks/chat/telegram", body)
+				target := targets[0]
+				selected.InboundGateway.HandleResolvedWebhook(httptest.NewRecorder(), request, runtimepkg.InboundTarget{
+					ServiceID: target.ServiceID, Provider: target.Provider, Alias: target.Alias,
+					AdmissionPlan: target.AdmissionPlan, SigningSecret: target.SigningSecret,
+				}, selectedModule.SemanticSource())
+			}()
+			// Reading this partial request proves real gateway admission is held.
+			if _, err := writer.Write([]byte(`{}`)); err != nil {
+				t.Fatal(err)
+			}
+			ingressCtx, ingressCancel := context.WithCancel(selectedCtx)
+			defer ingressCancel()
+			ingressTransition := make(chan error, 1)
+			go func() {
+				result, err := controller.SuspendStandingService(ingressCtx, runtimepipeline.StandingServiceOperation{ServiceID: serviceID})
+				if result.CommittedMutation != "" {
+					err = errors.Join(err, fmt.Errorf("ingress-wait cancellation acknowledged %s", result.CommittedMutation))
+				}
+				ingressTransition <- err
+			}()
+			for deadline := time.Now().Add(5 * time.Second); ; {
+				probe, err := manager.BeginStandingRunRecovery(selectedCtx, targets[0].RunID, origin)
+				if errors.Is(err, worklifetime.ErrAdmissionFenced) {
+					break
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := probe.Done(); err != nil {
+					t.Fatal(err)
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("standing command did not fence the admitted request")
+				}
+				time.Sleep(time.Millisecond)
+			}
+			ingressCancel()
+			select {
+			case err := <-ingressTransition:
+				t.Fatalf("compensation returned before actual gateway request joined: %v", err)
+			case <-time.After(20 * time.Millisecond):
+			}
+			if err := writer.Close(); err != nil {
+				t.Fatal(err)
+			}
+			<-ingressDone
+			if err := <-ingressTransition; !errors.Is(err, context.Canceled) {
+				t.Fatalf("ingress-wait cancellation lost original failure: %v", err)
+			}
+			assertChild(true, targets[0].RunID, targets[0].Generation)
+			assertGateway(true)
 			held, err := manager.BeginStandingRunRecovery(selectedCtx, targets[0].RunID, origin)
 			if err != nil {
 				t.Fatal(err)

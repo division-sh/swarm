@@ -2153,6 +2153,7 @@ type serveStandingServiceTransition struct {
 	occurrence            *runtime.StandingServiceTransition
 	pipelineRecovery      *runtimebus.PipelineParentTransition
 	previousAdmissionOpen bool
+	admissionFenced       bool
 	candidate             runtimepipeline.StandingServiceCandidate
 	expected              runtimepipeline.StandingServiceReconciliation
 }
@@ -2283,6 +2284,7 @@ func (c *serveStandingServiceController) closeAndDrain(ctx context.Context, owne
 			pipelineRecovery.Done()
 			return nil, err
 		}
+		transition.admissionFenced = true
 	}
 	transition.occurrence, err = c.manager.BeginStandingServiceOperation(ctx, expected, drain || !expected.RestartDisposition.Executable())
 	if err != nil {
@@ -2312,6 +2314,11 @@ func (c *serveStandingServiceController) restoreAdmission(owner *runtime.Runtime
 	serviceID := transition.expected.ServiceID
 	if err := transition.Wait(context.Background()); err != nil {
 		return fmt.Errorf("join standing service %s before compensation: %w", serviceID, err)
+	}
+	if transition.admissionFenced && owner.InboundGateway != nil {
+		if err := owner.InboundGateway.WaitForStandingServiceAdmission(context.Background(), serviceID); err != nil {
+			return fmt.Errorf("join standing service %s ingress before compensation: %w", serviceID, err)
+		}
 	}
 	if transition.expected.RestartDisposition.Executable() {
 		current, found, err := owner.Pipeline.LoadReconciledStandingService(context.Background(), transition.candidate)
