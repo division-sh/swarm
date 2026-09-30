@@ -37717,7 +37717,11 @@ durable_pipeline_processing_obligation_authority:
     recovery: >
       Global, per-run, startup, periodic, ingress-resume, and selected-fork recovery select without an age cutoff,
       acquire the same event-identity exclusion, recheck mutable eligibility, and return one immutable event, exact
-      committed scope, and opaque current claim. Canonical hydration that retains exact event evidence but proves the
+      committed scope, and opaque current claim.
+      Recovery transfers exact node delivery execution to continuations, not event-wide timer or decision coordination.
+      Subscribed publications without node delivery routes still invoke the canonical event coordinator before
+      acknowledgement; a receipt without that execution cannot settle an accepted paused outcome after continue.
+      Canonical hydration that retains exact event evidence but proves the
       event unsafe to dispatch returns a typed terminal pre-dispatch disposition bound to that same claim; the recovery
       consumer, never the store hydration path, commits it and emits aftermath evidence without invoking any interceptor,
       recipient, provider, or handler. Missing or invalid committed scope is such typed quarantined work and retains the
