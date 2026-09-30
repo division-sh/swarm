@@ -487,7 +487,7 @@ type runtimeTestDurableEventStore interface {
 	runtimebus.PreparedPublishEventReader
 	runtimebus.TargetFailureDeadLetterRecorder
 	runtimebus.RunOriginReader
-	runtimepipeline.StandingRestartDispositionReader
+	runtimerunlifecycle.StandingRestartDispositionReader
 }
 
 func runtimeTestDurableDependencies(durable runtimeTestDurableEventStore) runtimebus.DurableDependencies {

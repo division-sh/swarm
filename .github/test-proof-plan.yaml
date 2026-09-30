@@ -561,6 +561,8 @@ units:
     run: '^(Test($|[^CDG].*|GoldenI.*|Channel.*|Claude.*|Command.*|CompiledProcessLifecycle.*)|Example.*|Fuzz.*)$'
     required_children:
       TestPayloadlessEventPublicPersistenceJourneyBothStores: [sqlite, postgres]
+      TestStandingPauseAuthorityPublicBothStores: [sqlite, postgres]
+      TestStandingResetNonExecutablePublicBothStores: [sqlite, postgres]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full

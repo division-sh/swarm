@@ -9105,7 +9105,7 @@
     },
     {
       "name": "run.continue",
-      "description": "Resume a paused run.",
+      "description": "Resume an operator-paused run with paired paused lifecycle/control and canonical standing permission. Suspended or orphaned current standing generations refuse RUN_NOT_PAUSED without mutation; use standing controls. The committed transition wakes handed work even when no pipeline work remains.",
       "params": [
         {
           "name": "run_id",
@@ -9252,6 +9252,10 @@
                 "properties": {
                   "current_status": {
                     "$ref": "#/components/schemas/RunStatus"
+                  },
+                  "detail": {
+                    "description": "Canonical standing-control guidance when suspension or orphaning owns the paused generation; generic run.continue cannot clear that authority.",
+                    "type": "string"
                   },
                   "run_id": {
                     "$ref": "#/components/schemas/OpaqueId"
@@ -12303,7 +12307,7 @@
     },
     {
       "name": "standing.reset",
-      "description": "Destructively quiesce and retire the current standing generation, preserve its evidence, create the deterministic next generation, clear current state, and rematerialize from the declaration without store surgery.",
+      "description": "Destructively quiesce and retire N, preserve its evidence, and create deterministic N+1 under the latest declaration source. Preserve the standing suspended override without materialization; otherwise publish executable N+1. Valid suspended, terminal-declared or validated-invalid N may have no process child, but recovery exclusion and ingress fencing remain required. Broken relation or invalid process composition refuses without store surgery.",
       "params": [
         {
           "name": "service_id",
@@ -12436,7 +12440,7 @@
     },
     {
       "name": "standing.resume",
-      "description": "Clear a persistent standing-service suspension and reconstruct its routes, agents, schedules, and ingress from the currently loaded declaration. Orphaned services refuse until the declaration is restored.",
+      "description": "Clear a persistent standing-service suspension and publish its routes, agents, schedules, and exact child before reopening ingress. Fresh repeated resume of already-active N preserves the same child and publication as an exact no-op. Orphaned services refuse until declaration restore; terminal or invalid current generations require reset. Disposition-read errors refuse.",
       "params": [
         {
           "name": "service_id",
@@ -12569,7 +12573,7 @@
     },
     {
       "name": "standing.suspend",
-      "description": "Persistently suspend a declaration-owned standing service, quiesce active deliveries, sessions, and timers, pause its current run, and withdraw inbound publication. The override survives restart.",
+      "description": "Persistently suspend a declaration-owned standing service, quiesce active deliveries, sessions, and timers, pause its current run, and withdraw inbound publication. The override survives restart. Fresh repeated suspend of valid suspended N is an exact no-op without child drain; disposition-read errors refuse rather than acknowledging a no-op.",
       "params": [
         {
           "name": "service_id",
@@ -24804,6 +24808,10 @@
               "properties": {
                 "current_status": {
                   "$ref": "#/components/schemas/RunStatus"
+                },
+                "detail": {
+                  "description": "Canonical standing-control guidance when suspension or orphaning owns the paused generation; generic run.continue cannot clear that authority.",
+                  "type": "string"
                 },
                 "run_id": {
                   "$ref": "#/components/schemas/OpaqueId"

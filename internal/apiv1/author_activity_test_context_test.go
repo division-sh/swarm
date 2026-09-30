@@ -86,7 +86,7 @@ type apiTestDurableEventStore interface {
 	runtimebus.PreparedPublishEventReader
 	runtimebus.TargetFailureDeadLetterRecorder
 	runtimebus.RunOriginReader
-	runtimepipeline.StandingRestartDispositionReader
+	runtimerunlifecycle.StandingRestartDispositionReader
 }
 
 func testAuthorActivityRuntimeContext(ctx context.Context) context.Context {

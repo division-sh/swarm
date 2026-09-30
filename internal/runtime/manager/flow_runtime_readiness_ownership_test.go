@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	runtimestanding "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"sync"
 	"testing"
 
@@ -56,7 +57,7 @@ func TestDynamicReadinessOwnershipIsMemoizedOnlyWithinOneInspection(t *testing.T
 		store.projection.CurrentCompleted = append(store.projection.CurrentCompleted, row(foreignRun, n))
 	}
 	am := newFlowActivationManager(t, &flowActivationTestBus{}, store)
-	am.roles.StandingRestarts = flowActivationStandingRestarts{ownedRun: runtimepipeline.StandingRestartOrdinary}
+	am.roles.StandingRestarts = flowActivationStandingRestarts{ownedRun: runtimestanding.StandingRestartOrdinary}
 	owner := &countedReadinessOwnership{
 		AgentLifecyclePersistence: am.lifecycle.persistence(),
 		states:                    map[string]RunExecutionOwnership{ownedRun: RunExecutionOwned, foreignRun: RunExecutionForeign},

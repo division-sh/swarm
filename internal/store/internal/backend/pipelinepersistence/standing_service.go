@@ -269,11 +269,11 @@ func (s *PipelineSQLiteOwner) PublishStandingService(ctx context.Context, servic
 	return newSQLiteStandingServiceAdapter(s).PublishStandingService(ctx, serviceID, runID, generation)
 }
 
-func (s *PipelinePostgresOwner) StandingRunRestartDisposition(ctx context.Context, runID string) (runtimepipeline.StandingRestartDisposition, error) {
+func (s *PipelinePostgresOwner) StandingRunRestartDisposition(ctx context.Context, runID string) (runtimerunlifecycle.StandingRestartDisposition, error) {
 	return newPostgresStandingServiceAdapter(s).StandingRunRestartDisposition(ctx, runID)
 }
 
-func (s *PipelineSQLiteOwner) StandingRunRestartDisposition(ctx context.Context, runID string) (runtimepipeline.StandingRestartDisposition, error) {
+func (s *PipelineSQLiteOwner) StandingRunRestartDisposition(ctx context.Context, runID string) (runtimerunlifecycle.StandingRestartDisposition, error) {
 	return newSQLiteStandingServiceAdapter(s).StandingRunRestartDisposition(ctx, runID)
 }
 
@@ -428,7 +428,7 @@ func (s *standingServiceAdapter) ReconcileStandingServiceSet(ctx context.Context
 			if err != nil {
 				return err
 			}
-			if result.RestartDisposition.Kind != runtimepipeline.StandingRestartInvalidCurrent && !signalQueued {
+			if result.RestartDisposition.Kind != runtimerunlifecycle.StandingRestartInvalidCurrent && !signalQueued {
 				if err := s.queueDeliveryContinuationSignal(txctx); err != nil {
 					return err
 				}
@@ -478,24 +478,24 @@ func (s *standingServiceAdapter) SuspendStandingService(ctx context.Context, ope
 	}
 	var result runtimepipeline.StandingServiceReconciliation
 	err := s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		current, found, err := s.loadStandingServiceTx(txctx, tx, operation.ServiceID)
+		current, err := s.loadStandingOperationTx(txctx, tx, operation)
 		if err != nil {
 			return err
-		}
-		if !found {
-			return &runtimepipeline.StandingServiceError{ServiceID: operation.ServiceID, Err: runtimepipeline.ErrStandingServiceNotFound}
 		}
 		if !current.DeclarationPresent {
 			return fmt.Errorf("standing service %s is orphaned; restore its declaration before suspending it", operation.ServiceID)
 		}
-		if current.OperatorOverride == "suspended" && current.EffectiveState == "suspended" {
-			result = current.StandingServiceReconciliation
-			result.Transition = "suspended"
-			result.RestartDisposition, err = s.readStandingRestartDispositionTx(txctx, tx, current.RunID, current.ServiceID, current.Generation)
-			return nil
+		if current.RestartDisposition.Kind != runtimerunlifecycle.StandingRestartActiveIntrinsic && current.RestartDisposition.Kind != runtimerunlifecycle.StandingRestartSuspended {
+			return fmt.Errorf("standing service %s cannot suspend: %s", operation.ServiceID, current.RestartDisposition.RunControlGuidance())
 		}
 		if _, err := s.requireStandingRunSourceTx(txctx, tx, current, true); err != nil {
 			return err
+		}
+		if current.RestartDisposition.Kind == runtimerunlifecycle.StandingRestartSuspended {
+			result = current.StandingServiceReconciliation
+			result.Transition = "suspended"
+			result.CommittedMutation = runtimerunlifecycle.MutationExactNoop
+			return nil
 		}
 		now := time.Now().UTC()
 		cancellations, err := s.quiesceStandingRunTx(txctx, tx, current.RunID, current.BundleHash, "standing_suspended", "cancelled", now)
@@ -521,6 +521,7 @@ func (s *standingServiceAdapter) SuspendStandingService(ctx context.Context, ope
 		result.EffectiveState = "suspended"
 		result.Reason = operation.Reason
 		result.TimerCancellations = cancellations
+		result.CommittedMutation = runtimerunlifecycle.MutationApplied
 		result.RestartDisposition, err = s.readStandingRestartDispositionTx(txctx, tx, current.RunID, current.ServiceID, current.Generation)
 		if err != nil {
 			return err
@@ -543,12 +544,9 @@ func (s *standingServiceAdapter) ResumeStandingService(ctx context.Context, oper
 	}
 	var result runtimepipeline.StandingServiceReconciliation
 	err := s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		current, found, err := s.loadStandingServiceTx(txctx, tx, operation.ServiceID)
+		current, err := s.loadStandingOperationTx(txctx, tx, operation)
 		if err != nil {
 			return err
-		}
-		if !found {
-			return &runtimepipeline.StandingServiceError{ServiceID: operation.ServiceID, Err: runtimepipeline.ErrStandingServiceNotFound}
 		}
 		if !current.DeclarationPresent {
 			return fmt.Errorf("standing service %s is orphaned; restore its declaration before running `swarm standing resume %s`", operation.ServiceID, operation.ServiceID)
@@ -556,14 +554,17 @@ func (s *standingServiceAdapter) ResumeStandingService(ctx context.Context, oper
 		if err := s.admitStandingServiceRunTx(txctx, tx, current.RunID, operation.ExecutionPosture); err != nil {
 			return err
 		}
-		if current.OperatorOverride == "none" && current.EffectiveState == "active" {
-			result = current.StandingServiceReconciliation
-			result.Transition = "operator_resumed"
-			result.RestartDisposition, err = s.readStandingRestartDispositionTx(txctx, tx, current.RunID, current.ServiceID, current.Generation)
-			return nil
+		if current.RestartDisposition.Kind != runtimerunlifecycle.StandingRestartActiveIntrinsic && current.RestartDisposition.Kind != runtimerunlifecycle.StandingRestartSuspended {
+			return fmt.Errorf("standing service %s cannot resume: %s", operation.ServiceID, current.RestartDisposition.RunControlGuidance())
 		}
 		if _, err := s.requireStandingRunSourceTx(txctx, tx, current, true); err != nil {
 			return err
+		}
+		if current.RestartDisposition.Kind == runtimerunlifecycle.StandingRestartActiveIntrinsic {
+			result = current.StandingServiceReconciliation
+			result.Transition = "operator_resumed"
+			result.CommittedMutation = runtimerunlifecycle.MutationExactNoop
+			return nil
 		}
 		now := time.Now().UTC()
 		if err := s.setStandingRunRunningTx(txctx, tx, current.RunID, operation.Reason, operation.Actor, now); err != nil {
@@ -581,6 +582,7 @@ func (s *standingServiceAdapter) ResumeStandingService(ctx context.Context, oper
 		result.Transition = "operator_resumed"
 		result.EffectiveState = "active"
 		result.Reason = operation.Reason
+		result.CommittedMutation = runtimerunlifecycle.MutationApplied
 		result.RestartDisposition, err = s.readStandingRestartDispositionTx(txctx, tx, current.RunID, current.ServiceID, current.Generation)
 		if err != nil {
 			return err
@@ -604,12 +606,9 @@ func (s *standingServiceAdapter) ResetStandingService(ctx context.Context, opera
 	var result runtimepipeline.StandingServiceReconciliation
 	err := s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var cancellations []runtimetimercancellation.Ref
-		current, found, err := s.loadStandingServiceTx(txctx, tx, operation.ServiceID)
+		current, err := s.loadStandingOperationTx(txctx, tx, operation)
 		if err != nil {
 			return err
-		}
-		if !found {
-			return &runtimepipeline.StandingServiceError{ServiceID: operation.ServiceID, Err: runtimepipeline.ErrStandingServiceNotFound}
 		}
 		if !current.DeclarationPresent {
 			return fmt.Errorf("standing service %s is orphaned; restore its declaration before resetting it", operation.ServiceID)
@@ -701,6 +700,7 @@ func (s *standingServiceAdapter) ResetStandingService(ctx context.Context, opera
 		candidate := runtimepipeline.StandingServiceCandidate{ServiceID: current.ServiceID, FlowPath: current.FlowPath, InstanceID: current.InstanceID, EntityID: current.EntityID, Source: declarationSource}
 		result = standingResult(candidate, nextRunID, nextGeneration, current.PublicationSequence, "reset", effectiveState, operation.Reason)
 		result.TimerCancellations = cancellations
+		result.CommittedMutation = runtimerunlifecycle.MutationApplied
 		result.RestartDisposition, err = s.readStandingRestartDispositionTx(txctx, tx, nextRunID, current.ServiceID, nextGeneration)
 		if err != nil {
 			return err
@@ -810,13 +810,13 @@ func (s *standingServiceAdapter) reconcileStandingServiceTx(ctx context.Context,
 		return runtimepipeline.StandingServiceReconciliation{}, err
 	}
 	switch disposition.Kind {
-	case runtimepipeline.StandingRestartActiveIntrinsic, runtimepipeline.StandingRestartSuspended, runtimepipeline.StandingRestartOrphaned:
+	case runtimerunlifecycle.StandingRestartActiveIntrinsic, runtimerunlifecycle.StandingRestartSuspended, runtimerunlifecycle.StandingRestartOrphaned:
 		return s.resumeStandingServiceTx(ctx, tx, current, candidate)
-	case runtimepipeline.StandingRestartTerminalOrphaned:
+	case runtimerunlifecycle.StandingRestartTerminalOrphaned:
 		return s.reconcileResetRequiredStandingServiceTx(ctx, tx, current, candidate, disposition)
-	case runtimepipeline.StandingRestartTerminalDeclared:
+	case runtimerunlifecycle.StandingRestartTerminalDeclared:
 		return s.reconcileResetRequiredStandingServiceTx(ctx, tx, current, candidate, disposition)
-	case runtimepipeline.StandingRestartInvalidCurrent:
+	case runtimerunlifecycle.StandingRestartInvalidCurrent:
 		return s.reconcileResetRequiredStandingServiceTx(ctx, tx, current, candidate, disposition)
 	default:
 		return runtimepipeline.StandingServiceReconciliation{}, fmt.Errorf("standing service %s returned unsupported current disposition %q", current.ServiceID, disposition.Kind)
@@ -868,10 +868,10 @@ func (s *standingServiceAdapter) PublishStandingService(ctx context.Context, ser
 	return sequence, err
 }
 
-func (s *standingServiceAdapter) StandingRunRestartDisposition(ctx context.Context, runID string) (runtimepipeline.StandingRestartDisposition, error) {
+func (s *standingServiceAdapter) StandingRunRestartDisposition(ctx context.Context, runID string) (runtimerunlifecycle.StandingRestartDisposition, error) {
 	runID = strings.TrimSpace(runID)
 	if s == nil || s.db == nil {
-		return runtimepipeline.StandingRestartDisposition{}, fmt.Errorf("workflow instance store is required")
+		return runtimerunlifecycle.StandingRestartDisposition{}, fmt.Errorf("workflow instance store is required")
 	}
 	return storestandingdisposition.ReadByRun(ctx, s.db, !s.isSQLite(), runID)
 }
@@ -1214,13 +1214,13 @@ func (s *standingServiceAdapter) reconcileResetRequiredStandingServiceTx(
 	tx *sql.Tx,
 	current standingServiceRow,
 	candidate runtimepipeline.StandingServiceCandidate,
-	disposition runtimepipeline.StandingRestartDisposition,
+	disposition runtimerunlifecycle.StandingRestartDisposition,
 ) (runtimepipeline.StandingServiceReconciliation, error) {
 	bundleHash := candidate.Source.BundleHash()
 	sourceChanged := current.BundleHash != bundleHash
 	restoreDeclaration := !current.DeclarationPresent
 	if !sourceChanged && !restoreDeclaration {
-		if disposition.Kind == runtimepipeline.StandingRestartTerminalDeclared {
+		if disposition.Kind == runtimerunlifecycle.StandingRestartTerminalDeclared {
 			return standingResultFromRow(current, "stopped", "standing_generation_terminal", disposition), nil
 		}
 		return standingResultFromRow(current, "quarantined", "standing_current_state_inconsistent", disposition), nil
@@ -1235,7 +1235,7 @@ func (s *standingServiceAdapter) reconcileResetRequiredStandingServiceTx(
 	if sourceChanged {
 		revisionSequence++
 	}
-	if restoreDeclaration && disposition.Kind == runtimepipeline.StandingRestartInvalidCurrent && sourceChanged {
+	if restoreDeclaration && disposition.Kind == runtimerunlifecycle.StandingRestartInvalidCurrent && sourceChanged {
 		if _, err := s.reviseRunSource(ctx, tx, runtimerunlifecycle.SourceRevisionRequest{
 			RunID: current.RunID, Source: candidate.Source,
 		}); err != nil {
@@ -1262,7 +1262,7 @@ func (s *standingServiceAdapter) reconcileResetRequiredStandingServiceTx(
 	current.RevisionSequence = revisionSequence
 	transition := "revised"
 	reason := "standing_declaration_source_revised"
-	if restoreDeclaration && disposition.Kind == runtimepipeline.StandingRestartTerminalOrphaned {
+	if restoreDeclaration && disposition.Kind == runtimerunlifecycle.StandingRestartTerminalOrphaned {
 		transition = "restored_stopped"
 		reason = "standing_terminal_declaration_restored"
 	} else if restoreDeclaration {
@@ -1281,7 +1281,7 @@ func (s *standingServiceAdapter) orphanStandingServiceTx(ctx context.Context, tx
 	if err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, err
 	}
-	if disposition.Kind == runtimepipeline.StandingRestartInvalidCurrent {
+	if disposition.Kind == runtimerunlifecycle.StandingRestartInvalidCurrent {
 		return standingResultFromRow(current, "quarantined", "standing_current_state_inconsistent", disposition), nil
 	}
 	currentState, err := runtimerunlifecycle.ParseState(current.RunStatus)
@@ -1495,13 +1495,13 @@ func (s *standingServiceAdapter) readStandingRestartDispositionTx(
 	runID string,
 	serviceID string,
 	generation int64,
-) (runtimepipeline.StandingRestartDisposition, error) {
+) (runtimerunlifecycle.StandingRestartDisposition, error) {
 	disposition, err := storestandingdisposition.ReadByRun(ctx, tx, !s.isSQLite(), runID)
 	if err != nil {
-		return runtimepipeline.StandingRestartDisposition{}, err
+		return runtimerunlifecycle.StandingRestartDisposition{}, err
 	}
 	if !disposition.ExactCurrent() || disposition.ServiceID != serviceID || disposition.Generation != generation {
-		return runtimepipeline.StandingRestartDisposition{}, fmt.Errorf(
+		return runtimerunlifecycle.StandingRestartDisposition{}, fmt.Errorf(
 			"standing restart disposition changed during mutation: run_id=%s service_id=%s generation=%d",
 			runID,
 			serviceID,
@@ -1511,7 +1511,31 @@ func (s *standingServiceAdapter) readStandingRestartDispositionTx(
 	return disposition, nil
 }
 
-func standingResultFromRow(current standingServiceRow, transition, reason string, disposition runtimepipeline.StandingRestartDisposition) runtimepipeline.StandingServiceReconciliation {
+// The process barrier captures an observation, not mutation permission. Prove
+// the complete current product again under the selected-store transaction.
+func (s *standingServiceAdapter) loadStandingOperationTx(ctx context.Context, tx *sql.Tx, operation runtimepipeline.StandingServiceOperation) (standingServiceRow, error) {
+	current, found, err := s.loadStandingServiceTx(ctx, tx, operation.ServiceID)
+	if err != nil {
+		return standingServiceRow{}, err
+	}
+	if !found {
+		return standingServiceRow{}, &runtimepipeline.StandingServiceError{ServiceID: operation.ServiceID, Err: runtimepipeline.ErrStandingServiceNotFound}
+	}
+	if _, err := s.requirePresentRunSource(ctx, tx, current.RunID); err != nil {
+		return standingServiceRow{}, err
+	}
+	current.RestartDisposition, err = s.readStandingRestartDispositionTx(ctx, tx, current.RunID, current.ServiceID, current.Generation)
+	if err != nil {
+		return standingServiceRow{}, err
+	}
+	current.RunStatus = current.RestartDisposition.RunState
+	if expected := operation.Expected; expected != nil && !expected.SameAuthority(current.StandingServiceReconciliation) {
+		return standingServiceRow{}, fmt.Errorf("standing service %s authority changed before mutation", operation.ServiceID)
+	}
+	return current, nil
+}
+
+func standingResultFromRow(current standingServiceRow, transition, reason string, disposition runtimerunlifecycle.StandingRestartDisposition) runtimepipeline.StandingServiceReconciliation {
 	result := current.StandingServiceReconciliation
 	result.Transition = transition
 	result.Reason = reason

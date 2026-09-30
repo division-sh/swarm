@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	runtimestanding "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"strings"
 	"time"
 
@@ -354,7 +355,7 @@ func (pc *PipelineCoordinator) PublishStandingService(ctx context.Context, servi
 	return pc.workflowStore.PublishStandingService(ctx, serviceID, runID, generation)
 }
 
-func (pc *PipelineCoordinator) StandingRunRestartDisposition(ctx context.Context, runID string) (StandingRestartDisposition, error) {
+func (pc *PipelineCoordinator) StandingRunRestartDisposition(ctx context.Context, runID string) (runtimestanding.StandingRestartDisposition, error) {
 	return pc.workflowStore.StandingRunRestartDisposition(ctx, runID)
 }
 

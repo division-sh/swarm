@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	runtimestanding "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"sort"
 	"strings"
 	"time"
@@ -12,7 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 )
 
@@ -361,7 +361,7 @@ func (rt *Runtime) inspectDeliveryRecoveryInventory(ctx context.Context) (runtim
 func partitionDeliveryRecoveryInventory(
 	ctx context.Context,
 	inventory runtimedelivery.RecoveryInventory,
-	restarts runtimepipeline.StandingRestartDispositionReader,
+	restarts runtimestanding.StandingRestartDispositionReader,
 ) (runtimedelivery.RecoveryInventory, int, error) {
 	if !inventory.HasWork() {
 		return runtimedelivery.RecoveryInventory{}, 0, nil

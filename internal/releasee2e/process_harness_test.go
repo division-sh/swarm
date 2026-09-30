@@ -97,6 +97,7 @@ type releaseProcessSpec struct {
 	Env                         []string
 	WorkspaceBackend            string
 	DefaultExecutionSelection   bool
+	ShutdownGrace               time.Duration
 	RedactValues                []string
 }
 
@@ -123,13 +124,17 @@ func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServePr
 		workspaceBackend = "host"
 	}
 	args := []string{"serve"}
+	shutdownGrace := options.ShutdownGrace
+	if shutdownGrace == 0 {
+		shutdownGrace = 2 * time.Second
+	}
 	if !options.DefaultExecutionSelection {
 		args = append(args, "--backend", "claude_cli", "--workspace-backend", workspaceBackend)
 	}
 	args = append(args,
 		"--api-listen-addr", fmt.Sprintf("127.0.0.1:%d", options.APIPort),
 		"--mcp-listen-addr", "127.0.0.1:0",
-		"--shutdown-grace", "2s",
+		"--shutdown-grace", shutdownGrace.String(),
 		"--no-color",
 	)
 	if options.MCPListenHost != "" {
@@ -170,13 +175,14 @@ func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServePr
 			t.Fatal("internal mock lifecycle does not own public exposure/registration proof")
 		}
 		request, err := json.Marshal(struct {
-			ConfigPath string
-			Source     string
-			Store      string
-			Dev        bool
-			APIPort    int
-			Token      string
-		}{options.ConfigPath, options.Source, options.Store, options.Dev, options.APIPort, options.Token})
+			ConfigPath    string
+			Source        string
+			Store         string
+			Dev           bool
+			APIPort       int
+			Token         string
+			ShutdownGrace time.Duration
+		}{options.ConfigPath, options.Source, options.Store, options.Dev, options.APIPort, options.Token, shutdownGrace})
 		if err != nil {
 			t.Fatal(err)
 		}

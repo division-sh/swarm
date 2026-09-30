@@ -280,7 +280,7 @@ func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtim
 					closeErr := eb.closePipelineScanLocked(context.WithoutCancel(ctx), request)
 					return result, errors.Join(processErr, closeErr)
 				}
-				if errors.Is(processErr, errStandingRestartParked) {
+				if errors.Is(processErr, errStandingRestartParked) || errors.Is(processErr, errRunDispatchParked) {
 					continue
 				}
 				if errors.Is(processErr, ErrRunDispatchBlocked) {
@@ -583,6 +583,7 @@ func (eb *EventBus) settleClaimedDecisionRoute(ctx context.Context, work runtime
 }
 
 func (eb *EventBus) ReleaseRuntimeIngressQueue(ctx context.Context, limit int) (runtimepipelineobligation.SweepResult, error) {
+	defer eb.SignalDeliveryContinuations()
 	return eb.SweepPipelineObligations(ctx, limit)
 }
 
@@ -590,9 +591,8 @@ func (eb *EventBus) PreflightRuntimeIngressQueue(ctx context.Context) error {
 	return eb.preflightPipelineResume(ctx, runtimepipelineobligation.GlobalResumeAdmissionRequest())
 }
 
-// ReleaseRunQueue owns only the #2106 half. Executable delivery backlog is
-// continuously recovered by #2105's agent/node owners and is not republished
-// or acknowledged through this pipeline operation.
+// ReleaseRunQueue does not republish handed deliveries. An admitted continue
+// must also wake their existing owner even when there is no pipeline work.
 func (eb *EventBus) ReleaseRunQueue(ctx context.Context, runID string, limit int) (runtimepipelineobligation.SweepResult, error) {
 	if eb == nil || eb.pipelineObligations == nil {
 		return runtimepipelineobligation.SweepResult{}, errors.New("pipeline obligation owner is required")
@@ -606,6 +606,7 @@ func (eb *EventBus) ReleaseRunQueue(ctx context.Context, runID string, limit int
 	if runID == "" {
 		return runtimepipelineobligation.SweepResult{}, errors.New("run ID is required")
 	}
+	defer eb.SignalDeliveryContinuations()
 	if limit <= 0 {
 		limit = DefaultOutboxSweeperConfig().Limit
 	}

@@ -3,6 +3,8 @@ package serveapp
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -21,6 +23,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -122,7 +125,8 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 			}
 			primaryModule := stubWorkflowModule{source: semanticview.Wrap(primaryBundle)}
 			primary := newStandingRuntimeContextRuntime(t, process, primaryStores, primaryModule, primaryFact, runtimeInstanceID, catalog)
-			selected := newStandingRuntimeContextRuntime(t, process, selectedStores, selectedModule, selectedFact, runtimeInstanceID, catalog)
+			faults := &standingRuntimeContextFaultOwner{}
+			selected := newStandingRuntimeContextRuntime(t, process, selectedStores, selectedModule, selectedFact, runtimeInstanceID, catalog, faults)
 			capability, _, grant := installSelectedStoreTestProcessTopology(t, selectedStores, selected, selectedModule.SemanticSource(), selectedFact, runtimeInstanceID)
 			t.Cleanup(func() {
 				if err := selected.Shutdown(); err != nil {
@@ -179,20 +183,104 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 			t.Cleanup(selectedRegistration.Release)
 
 			controller := &serveStandingServiceController{manager: manager, supervisor: newProcessLifecycleSupervisor(nil, primary)}
+			rollbackFault := errors.New("standing desired-state transaction refused")
+			faults.before = rollbackFault
+			if failed, err := controller.SuspendStandingService(selectedCtx, runtimepipeline.StandingServiceOperation{ServiceID: serviceID}); !errors.Is(err, rollbackFault) || failed.CommittedMutation != "" {
+				t.Fatalf("active rollback lost failure/outcome: result=%+v err=%v", failed, err)
+			}
+			faults.before = nil
+			assertChild := func(present bool, runID string, generation int64) {
+				t.Helper()
+				origin, err := runtimerunlifecycle.StandingGenerationRunOrigin(serviceID, generation)
+				if err != nil {
+					t.Fatal(err)
+				}
+				lease, err := manager.BeginStandingRunRecovery(context.Background(), runID, origin)
+				if present && err != nil {
+					t.Fatalf("exact child is not admitted: %v", err)
+				}
+				if !present && err == nil {
+					_ = lease.Done()
+					t.Fatal("non-executable/failed publication acquired a child")
+				}
+				if lease != nil {
+					if err := lease.Done(); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			assertChild(true, targets[0].RunID, targets[0].Generation)
+			origin, err := runtimerunlifecycle.StandingGenerationRunOrigin(serviceID, targets[0].Generation)
+			if err != nil {
+				t.Fatal(err)
+			}
+			held, err := manager.BeginStandingRunRecovery(selectedCtx, targets[0].RunID, origin)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = held.Done() })
+			cancelCtx, cancel := context.WithCancel(selectedCtx)
+			defer cancel()
+			cancelledResult := make(chan error, 1)
+			go func() {
+				result, err := controller.SuspendStandingService(cancelCtx, runtimepipeline.StandingServiceOperation{ServiceID: serviceID})
+				if result.CommittedMutation != "" {
+					err = errors.Join(err, fmt.Errorf("cancelled transition acknowledged %s", result.CommittedMutation))
+				}
+				cancelledResult <- err
+			}()
+			deadline := time.After(5 * time.Second)
+			for {
+				probe, err := manager.BeginStandingRunRecovery(selectedCtx, targets[0].RunID, origin)
+				if errors.Is(err, worklifetime.ErrAdmissionFenced) {
+					break
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := probe.Done(); err != nil {
+					t.Fatal(err)
+				}
+				select {
+				case <-deadline:
+					t.Fatal("standing command did not fence held work")
+				case <-time.After(time.Millisecond):
+				}
+			}
+			cancel()
+			select {
+			case err := <-cancelledResult:
+				t.Fatalf("cancelled command returned before held child joined: %v", err)
+			default:
+			}
+			if err := held.Done(); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case err := <-cancelledResult:
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("cancelled standing command = %v", err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("cancelled standing command did not settle after child joined")
+			}
+			assertChild(true, targets[0].RunID, targets[0].Generation)
 			handlers := apiv1.OperatorStandingServiceHandlers(apiv1.StandingServiceHandlerOptions{
 				Controller:  controller,
 				Idempotency: selectedStores.Idempotency(),
 			})
+			serial := 0
 			invoke := func(action string) standingRuntimeContextOperationResult {
 				t.Helper()
+				serial++
 				method := "standing." + action
 				handler := handlers[method]
 				if handler == nil {
 					t.Fatalf("%s handler is unavailable", method)
 				}
 				req := apiv1.Request{
-					Method: method, ActorTokenID: "standing-owner-test", RequestHash: "request-" + action,
-					Params: map[string]any{"service_id": serviceID, "reason": "selected-owner-test", "idempotency_key": "idem-" + action},
+					Method: method, ActorTokenID: "standing-owner-test", RequestHash: fmt.Sprintf("request-%s-%d", action, serial),
+					Params: map[string]any{"service_id": serviceID, "reason": "selected-owner-test", "idempotency_key": fmt.Sprintf("idem-%s-%d", action, serial)},
 				}
 				requestCtx := runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.RuntimeScope(runtimeInstanceID))
 				requestCtx = runtimecorrelation.WithRuntimeInstanceID(requestCtx, runtimeInstanceID)
@@ -222,13 +310,50 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 			if suspended.Generation != 1 || suspended.EffectiveState != "suspended" || selectedSignals.Load() != 1 {
 				t.Fatalf("selected suspend = %#v signals=%d, want generation 1 suspended and one signal", suspended, selectedSignals.Load())
 			}
+			if repeated := invoke("suspend"); repeated.RunID != suspended.RunID || selectedSignals.Load() != 1 {
+				t.Fatalf("fresh repeat suspend changed N or emitted another continuation: %+v", repeated)
+			}
+			assertChild(false, suspended.RunID, suspended.Generation)
+			faults.before = rollbackFault
+			if failed, err := controller.ResetStandingService(selectedCtx, runtimepipeline.StandingServiceOperation{ServiceID: serviceID}); !errors.Is(err, rollbackFault) || failed.CommittedMutation != "" {
+				t.Fatalf("no-child rollback lost failure/outcome: result=%+v err=%v", failed, err)
+			}
+			faults.before = nil
+			assertChild(false, suspended.RunID, suspended.Generation)
+			resetWhileSuspended := invoke("reset")
+			if resetWhileSuspended.Generation != 2 || resetWhileSuspended.EffectiveState != "suspended" || selectedSignals.Load() != 2 {
+				t.Fatalf("reset did not preserve suspension without a child: %+v", resetWhileSuspended)
+			}
 			resumed := invoke("resume")
-			if resumed.RunID != suspended.RunID || resumed.Generation != 1 || resumed.EffectiveState != "active" || selectedSignals.Load() != 1 {
-				t.Fatalf("selected resume = %#v signals=%d, want same generation active and no terminal signal", resumed, selectedSignals.Load())
+			if resumed.RunID != resetWhileSuspended.RunID || resumed.Generation != 2 || resumed.EffectiveState != "active" || selectedSignals.Load() != 2 {
+				t.Fatalf("selected resume = %#v signals=%d, want same suspended successor active and no terminal signal", resumed, selectedSignals.Load())
+			}
+			if repeated := invoke("resume"); repeated.RunID != resumed.RunID || selectedSignals.Load() != 2 {
+				t.Fatalf("fresh repeat resume changed N or emitted another continuation: %+v", repeated)
 			}
 			reset := invoke("reset")
-			if reset.RunID == resumed.RunID || reset.Generation != 2 || reset.EffectiveState != "active" || selectedSignals.Load() != 2 {
-				t.Fatalf("selected reset = %#v signals=%d, want generation 2 active and second signal", reset, selectedSignals.Load())
+			if reset.RunID == resumed.RunID || reset.Generation != 3 || reset.EffectiveState != "active" || selectedSignals.Load() != 3 {
+				t.Fatalf("selected reset = %#v signals=%d, want generation 3 active and third signal", reset, selectedSignals.Load())
+			}
+			assertChild(true, reset.RunID, reset.Generation)
+			cleanupFault := errors.New("acknowledged standing cleanup failure")
+			faults.after = cleanupFault
+			committed, err := controller.SuspendStandingService(selectedCtx, runtimepipeline.StandingServiceOperation{ServiceID: serviceID})
+			if !errors.Is(err, cleanupFault) || committed.CommittedMutation != runtimerunlifecycle.MutationApplied || committed.RunID != reset.RunID || committed.Generation != reset.Generation || !committed.DeliveryContinuationRequired || selectedSignals.Load() != 4 {
+				t.Fatalf("postcommit failure erased desired state: result=%+v err=%v signals=%d", committed, err, selectedSignals.Load())
+			}
+			faults.after = nil
+			assertChild(false, reset.RunID, reset.Generation)
+			publicationFault := errors.New("standing publication refused after acknowledged resume")
+			faults.publication = publicationFault
+			committed, err = controller.ResumeStandingService(selectedCtx, runtimepipeline.StandingServiceOperation{ServiceID: serviceID})
+			if !errors.Is(err, publicationFault) || committed.CommittedMutation != runtimerunlifecycle.MutationApplied || !committed.RestartDisposition.Executable() || committed.Generation != reset.Generation || committed.RunID != reset.RunID {
+				t.Fatalf("publication failure erased committed resume: result=%+v err=%v", committed, err)
+			}
+			faults.publication = nil
+			assertChild(false, reset.RunID, reset.Generation)
+			if retried, err := controller.ResumeStandingService(selectedCtx, runtimepipeline.StandingServiceOperation{ServiceID: serviceID}); err == nil || retried.CommittedMutation != "" {
+				t.Fatalf("fresh retry hid missing executable child: result=%+v err=%v", retried, err)
 			}
 			if primarySignals.Load() != 0 {
 				t.Fatalf("primary delivery continuation signals = %d, want 0", primarySignals.Load())
@@ -244,7 +369,7 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 			if err != nil {
 				t.Fatalf("list selected standing statuses: %v", err)
 			}
-			if len(selectedStatuses) != 1 || selectedStatuses[0].BundleHash != selectedHash || selectedStatuses[0].Generation != 2 {
+			if len(selectedStatuses) != 1 || selectedStatuses[0].BundleHash != selectedHash || selectedStatuses[0].Generation != 3 {
 				t.Fatalf("selected standing source/generation = %#v", selectedStatuses)
 			}
 		})
@@ -305,6 +430,7 @@ func newStandingRuntimeContextRuntime(
 	fact runtimecorrelation.SourceArtifactFact,
 	runtimeInstanceID string,
 	catalog *providertriggers.CatalogSnapshot,
+	faults ...*standingRuntimeContextFaultOwner,
 ) *runtimepkg.Runtime {
 	t.Helper()
 	credentials := processIngressCredentialStore{
@@ -317,6 +443,14 @@ func newStandingRuntimeContextRuntime(
 		Credentials: credentials, ProviderCredentials: credentials,
 		DisablePersistentStartupRecovery: true, LLMRuntime: servedNoopLLMRuntime{},
 	})
+	if len(faults) != 0 {
+		owner, ok := deps.RunBundleAvailability.(runtimepipeline.WorkflowPersistenceOwner)
+		if !ok {
+			t.Fatalf("selected store %T does not provide the complete workflow owner", deps.RunBundleAvailability)
+		}
+		faults[0].WorkflowPersistenceOwner = owner
+		deps.WorkflowPersistence = runtimepipeline.NewWorkflowPersistence(faults[0])
+	}
 	rt, err := runtimepkg.NewRuntime(context.Background(), deps)
 	if err != nil {
 		t.Fatalf("build runtime context %s: %v", fact.BundleHash(), err)
@@ -326,6 +460,33 @@ func newStandingRuntimeContextRuntime(
 	}
 	t.Cleanup(func() { _ = rt.Shutdown() })
 	return rt
+}
+
+type standingRuntimeContextFaultOwner struct {
+	runtimepipeline.WorkflowPersistenceOwner
+	before, after, publication error
+}
+
+func (o *standingRuntimeContextFaultOwner) SuspendStandingService(ctx context.Context, operation runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error) {
+	if o.before != nil {
+		return runtimepipeline.StandingServiceReconciliation{}, o.before
+	}
+	result, err := o.WorkflowPersistenceOwner.SuspendStandingService(ctx, operation)
+	return result, errors.Join(err, o.after)
+}
+
+func (o *standingRuntimeContextFaultOwner) ResetStandingService(ctx context.Context, operation runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error) {
+	if o.before != nil {
+		return runtimepipeline.StandingServiceReconciliation{}, o.before
+	}
+	return o.WorkflowPersistenceOwner.ResetStandingService(ctx, operation)
+}
+
+func (o *standingRuntimeContextFaultOwner) PublishStandingService(ctx context.Context, serviceID, runID string, generation int64) (int64, error) {
+	if o.publication != nil {
+		return 0, o.publication
+	}
+	return o.WorkflowPersistenceOwner.PublishStandingService(ctx, serviceID, runID, generation)
 }
 
 func registerStandingRuntimeContextSignal(

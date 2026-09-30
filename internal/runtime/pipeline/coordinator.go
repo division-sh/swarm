@@ -1055,7 +1055,7 @@ func admitWorkflowNodeDelivery(
 	}
 	postCommitErr := claimErr
 	switch claimResult.Disposition {
-	case runtimedelivery.ClaimDeferred, runtimedelivery.ClaimBusy:
+	case runtimedelivery.ClaimDeferred, runtimedelivery.ClaimBusy, runtimedelivery.ClaimParked:
 		if err := returnCarrier(nil); err != nil {
 			return workflowNodeDeliveryAdmission{}, errors.Join(postCommitErr, err)
 		}

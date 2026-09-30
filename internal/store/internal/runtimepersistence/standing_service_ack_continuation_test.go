@@ -10,6 +10,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -88,12 +89,12 @@ func TestStandingServiceAcknowledgedCleanupErrorStillSignalsContinuationBothStor
 			t.Cleanup(registration.Release)
 
 			missing, err := workflow.SuspendStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: "project/missing", Actor: "test"})
-			if err == nil || missing.DeliveryContinuationRequired || signals.Load() != 0 {
+			if err == nil || missing.CommittedMutation != "" || missing.DeliveryContinuationRequired || signals.Load() != 0 {
 				t.Fatalf("unacknowledged suspend = %+v, err=%v, signals=%d", missing, err, signals.Load())
 			}
 
 			suspended, err := workflow.SuspendStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: suspendedCandidate.ServiceID, Actor: "test"})
-			if !errors.Is(err, cleanupFault) || !errors.Is(err, handoffFault) || !suspended.DeliveryContinuationRequired || suspended.EffectiveState != "suspended" || signals.Load() != 1 {
+			if !errors.Is(err, cleanupFault) || !errors.Is(err, handoffFault) || suspended.CommittedMutation != runtimerunlifecycle.MutationApplied || !suspended.DeliveryContinuationRequired || suspended.EffectiveState != "suspended" || signals.Load() != 1 {
 				t.Fatalf("acknowledged suspend = %+v, err=%v, signals=%d", suspended, err, signals.Load())
 			}
 

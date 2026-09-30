@@ -16,9 +16,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -538,6 +540,7 @@ func (s *sqlitePipelineObligationStore) OpenScan(ctx context.Context, request ru
 }
 
 type pipelineBatchBackend struct {
+	parked     func(context.Context, string) (bool, error)
 	reserve    func(string) (func(), bool)
 	retain     func(runtimepipelineobligation.Claim, func()) error
 	boundary   func(context.Context, runtimepipelineobligation.ClaimQuery) (*pipelineCandidate, error)
@@ -559,6 +562,9 @@ func (s *postgresPipelineObligationStore) ClaimBatch(ctx context.Context, scan r
 		return runtimepipelineobligation.ScanBatch{}, runtimepipelineobligation.ErrStaleScan
 	}
 	batch, err := claimPipelineBatch(ctx, state, limit, pipelineBatchBackend{
+		parked: func(ctx context.Context, runID string) (bool, error) {
+			return runstate.DispatchParked(ctx, s.backend, true, runID)
+		},
 		reserve:    s.postgresPipelineClaims().recoveryTransitions.reserve,
 		retain:     s.retainRecoveryTransition,
 		boundary:   s.postgresPipelineBoundary,
@@ -586,6 +592,9 @@ func (s *sqlitePipelineObligationStore) ClaimBatch(ctx context.Context, scan run
 		return runtimepipelineobligation.ScanBatch{}, runtimepipelineobligation.ErrStaleScan
 	}
 	batch, err := claimPipelineBatch(ctx, state, limit, pipelineBatchBackend{
+		parked: func(ctx context.Context, runID string) (bool, error) {
+			return runstate.DispatchParked(ctx, s.backend, false, runID)
+		},
 		reserve:    s.recoveryTransitions.reserve,
 		retain:     s.retainRecoveryTransition,
 		boundary:   s.sqlitePipelineBoundary,
@@ -675,6 +684,13 @@ func claimPipelineBatch(
 				state.examined[candidate.insertionSequence] = struct{}{}
 			}
 			batch.Examined++
+			parked, err := backend.parked(ctx, candidate.runID)
+			if err != nil {
+				return batch, err
+			}
+			if parked {
+				continue
+			}
 			done, admitted := backend.reserve(candidate.runID)
 			if !admitted {
 				batch.LocallyBlocked = true
@@ -1516,6 +1532,15 @@ type pipelineQueryer interface {
 }
 
 func loadClaimedPipelineWork(ctx context.Context, q pipelineQueryer, claim runtimepipelineobligation.Claim, postgres bool) (runtimepipelineobligation.ClaimedWork, error) {
+	if claim.Purpose() != runtimepipelineobligation.PurposePublication {
+		eligible, err := pipelineDispatchEligible(ctx, q, claim.EventID(), postgres)
+		if err != nil {
+			return runtimepipelineobligation.ClaimedWork{}, err
+		}
+		if !eligible {
+			return runtimepipelineobligation.ClaimedWork{}, runtimepipelineobligation.ErrIneligible
+		}
+	}
 	var (
 		records []events.PersistedReplayEvent
 		outcome sql.NullString
@@ -1591,6 +1616,9 @@ func LoadCommittedScope(ctx context.Context, q rowQueryer, eventID string, postg
 }
 
 func postgresPipelineEligible(ctx context.Context, q pipelineQueryer, eventID string, purpose runtimepipelineobligation.Purpose) (bool, error) {
+	if eligible, err := pipelineDispatchEligible(ctx, q, eventID, true); err != nil || !eligible {
+		return false, err
+	}
 	var eligible bool
 	switch purpose {
 	case runtimepipelineobligation.PurposeRecovery:
@@ -1632,6 +1660,9 @@ func postgresPipelineEligible(ctx context.Context, q pipelineQueryer, eventID st
 }
 
 func sqlitePipelineEligible(ctx context.Context, q pipelineQueryer, eventID string, purpose runtimepipelineobligation.Purpose) (bool, error) {
+	if eligible, err := pipelineDispatchEligible(ctx, q, eventID, false); err != nil || !eligible {
+		return false, err
+	}
 	var eligible bool
 	switch purpose {
 	case runtimepipelineobligation.PurposeRecovery:
@@ -1669,6 +1700,26 @@ func sqlitePipelineEligible(ctx context.Context, q pipelineQueryer, eventID stri
 	default:
 		return false, fmt.Errorf("pipeline claim purpose %q cannot hydrate work", purpose)
 	}
+}
+
+func pipelineDispatchEligible(ctx context.Context, q pipelineQueryer, eventID string, postgres bool) (bool, error) {
+	query := `SELECT COALESCE(run_id, '') FROM events WHERE event_id = ?`
+	if postgres {
+		query = `SELECT COALESCE(run_id::text, '') FROM events WHERE event_id = $1::uuid`
+	}
+	var runID string
+	if err := q.QueryRowContext(ctx, query, eventID).Scan(&runID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	parked, err := runstate.DispatchParked(ctx, q, postgres, runID)
+	var inactive *runtimerunlifecycle.RunNotActiveError
+	if errors.As(err, &inactive) {
+		return false, nil
+	}
+	return !parked, err
 }
 
 func (s *PipelinePostgresOwner) postgresPipelineBoundary(ctx context.Context, query runtimepipelineobligation.ClaimQuery) (*pipelineCandidate, error) {
@@ -2695,82 +2746,79 @@ func (s *PipelineSQLiteOwner) releaseSQLitePipelineClaimLocked(claim runtimepipe
 }
 
 func (s *postgresPipelineObligationStore) GlobalWorkPresence(ctx context.Context) (runtimepipelineobligation.GlobalWorkPresence, error) {
-	var out runtimepipelineobligation.GlobalWorkPresence
-	args := diagnosticDirectReplayEventArgs()
-	err := s.backend.QueryRowContext(ctx, fmt.Sprintf(`
-		SELECT (EXISTS (
-			SELECT 1 FROM events e
-			LEFT JOIN runs run ON run.run_id = e.run_id
-			LEFT JOIN event_receipts receipt ON receipt.event_id = e.event_id AND receipt.subscriber_type = 'platform' AND receipt.subscriber_id = 'pipeline'
-			WHERE receipt.event_id IS NULL
-			  AND (e.run_id IS NULL OR run.status IN (`+runLifecycleActiveStateSQLValues+`))
-			  AND NOT EXISTS (SELECT 1 FROM decision_card_route_obligations route WHERE route.event_id = e.event_id AND route.status <> 'completed')
-			  AND %s
-		)), EXISTS (
-			SELECT 1 FROM decision_card_route_obligations route JOIN runs run ON run.run_id = route.run_id
-				WHERE route.status = 'pending' AND route.next_attempt_at <= now() AND run.status IN (`+runLifecycleActiveStateSQLValues+`)
-		), COALESCE((
-			SELECT MIN(e.created_at) FROM events e
-				LEFT JOIN runs run ON run.run_id = e.run_id
-				LEFT JOIN event_receipts receipt ON receipt.event_id = e.event_id AND receipt.subscriber_type = 'platform' AND receipt.subscriber_id = 'pipeline'
-				WHERE receipt.event_id IS NULL
-				  AND (e.run_id IS NULL OR run.status IN (`+runLifecycleActiveStateSQLValues+`))
-				  AND NOT EXISTS (SELECT 1 FROM decision_card_route_obligations route WHERE route.event_id = e.event_id AND route.status <> 'completed')
-				  AND %s
-		), '0001-01-01'::timestamptz)`,
-		postgresDiagnosticDirectReplayExclusionSQL("e", 1),
-		postgresDiagnosticDirectReplayExclusionSQL("e", 1)), args...).Scan(&out.ProcessingEligible, &out.DecisionRouteDue, &out.OldestEligibleEvent)
+	out, err := runnablePipelinePresence(ctx, s.postgresPipelineBoundary, s.postgresPipelineCandidates,
+		func(ctx context.Context, runID string) (bool, error) {
+			return runstate.DispatchParked(ctx, s.backend, true, runID)
+		})
 	if err != nil {
 		return out, err
 	}
-	fanOutReady, err := s.fanOutWorkPresence(ctx)
-	out.ProcessingEligible = out.ProcessingEligible || fanOutReady
+	ready, err := s.fanOutWorkPresence(ctx)
+	out.ProcessingEligible = out.ProcessingEligible || ready
 	return out, err
 }
 
 func (s *sqlitePipelineObligationStore) GlobalWorkPresence(ctx context.Context) (runtimepipelineobligation.GlobalWorkPresence, error) {
-	var (
-		out       runtimepipelineobligation.GlobalWorkPresence
-		oldestRaw any
-	)
-	diagnostics := diagnosticDirectReplayEventArgs()
-	args := make([]any, 0, len(diagnostics)*2+1)
-	args = append(args, diagnostics...)
-	args = append(args, time.Now().UTC())
-	args = append(args, diagnostics...)
-	err := s.backend.QueryRowContext(ctx, `
-		SELECT (EXISTS (
-			SELECT 1 FROM events e
-			LEFT JOIN runs run ON run.run_id = e.run_id
-			LEFT JOIN event_receipts receipt ON receipt.event_id = e.event_id AND receipt.subscriber_type = 'platform' AND receipt.subscriber_id = 'pipeline'
-			WHERE receipt.event_id IS NULL
-			  AND (e.run_id IS NULL OR run.status IN (`+runLifecycleActiveStateSQLValues+`))
-			  AND NOT EXISTS (SELECT 1 FROM decision_card_route_obligations route WHERE route.event_id = e.event_id AND route.status <> 'completed')
-			  AND `+sqliteDiagnosticDirectReplayExclusionSQL("e")+`
-		)), EXISTS (
-			SELECT 1 FROM decision_card_route_obligations route JOIN runs run ON run.run_id = route.run_id
-				WHERE route.status = 'pending' AND route.next_attempt_at <= ? AND run.status IN (`+runLifecycleActiveStateSQLValues+`)
-		), (
-			SELECT MIN(e.created_at) FROM events e
-				LEFT JOIN runs run ON run.run_id = e.run_id
-				LEFT JOIN event_receipts receipt ON receipt.event_id = e.event_id AND receipt.subscriber_type = 'platform' AND receipt.subscriber_id = 'pipeline'
-				WHERE receipt.event_id IS NULL
-				  AND (e.run_id IS NULL OR run.status IN (`+runLifecycleActiveStateSQLValues+`))
-				  AND NOT EXISTS (SELECT 1 FROM decision_card_route_obligations route WHERE route.event_id = e.event_id AND route.status <> 'completed')
-				  AND `+sqliteDiagnosticDirectReplayExclusionSQL("e")+`
-			)`, args...).Scan(
-		&out.ProcessingEligible, &out.DecisionRouteDue, &oldestRaw)
+	out, err := runnablePipelinePresence(ctx, s.sqlitePipelineBoundary, s.sqlitePipelineCandidates,
+		func(ctx context.Context, runID string) (bool, error) {
+			return runstate.DispatchParked(ctx, s.backend, false, runID)
+		})
 	if err != nil {
 		return out, err
 	}
-	if oldest, ok, parseErr := sqliteTimeValue(oldestRaw); parseErr != nil {
-		return out, fmt.Errorf("parse oldest SQLite pipeline obligation: %w", parseErr)
-	} else if ok {
-		out.OldestEligibleEvent = oldest
-	}
-	fanOutReady, err := s.fanOutWorkPresence(ctx)
-	out.ProcessingEligible = out.ProcessingEligible || fanOutReady
+	ready, err := s.fanOutWorkPresence(ctx)
+	out.ProcessingEligible = out.ProcessingEligible || ready
 	return out, err
+}
+
+// Presence uses the same bounded membership and dispatch owner as recovery,
+// without acquiring claims or excluding paused facts from outstanding debt.
+func runnablePipelinePresence(ctx context.Context,
+	boundary func(context.Context, runtimepipelineobligation.ClaimQuery) (*pipelineCandidate, error),
+	candidates func(context.Context, runtimepipelineobligation.ClaimQuery, *pipelineCandidate, *pipelineCandidate, map[int64]struct{}, int) ([]pipelineCandidate, error),
+	parked func(context.Context, string) (bool, error),
+) (out runtimepipelineobligation.GlobalWorkPresence, err error) {
+	for _, query := range []runtimepipelineobligation.ClaimQuery{runtimepipelineobligation.DecisionRouteQuery(), runtimepipelineobligation.GlobalRecoveryQuery()} {
+		through, err := boundary(ctx, query)
+		if err != nil {
+			return out, err
+		}
+		if through == nil {
+			continue
+		}
+		var after *pipelineCandidate
+		found := false
+		for !found {
+			page, err := candidates(ctx, query, after, through, nil, pipelineCandidatePageSize)
+			if err != nil {
+				return out, err
+			}
+			for _, candidate := range page {
+				after = &candidate
+				isParked, err := parked(ctx, candidate.runID)
+				if err != nil {
+					return out, err
+				}
+				if isParked {
+					continue
+				}
+				if query.Purpose == runtimepipelineobligation.PurposeDecisionRoute {
+					out.DecisionRouteDue = true
+					found = true
+					break
+				} else {
+					out.ProcessingEligible = true
+					if out.OldestEligibleEvent.IsZero() || candidate.createdAt.Before(out.OldestEligibleEvent) {
+						out.OldestEligibleEvent = candidate.createdAt
+					}
+				}
+			}
+			if len(page) < pipelineCandidatePageSize {
+				break
+			}
+		}
+	}
+	return out, nil
 }
 
 func (s *postgresPipelineObligationStore) SummarizeRun(ctx context.Context, runID string) (runtimepipelineobligation.RunSummary, error) {

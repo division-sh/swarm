@@ -146,7 +146,16 @@ func TestEventBusRunControlContinueReleasesPendingDeliveryWithPipelineReceipt(t 
 		t.Fatalf("Publish paused run event: %v", err)
 	}
 	requireNoBusEvent(t, ch, "paused run with pipeline receipt before continue")
-	acknowledgePipelineTestEvent(t, ctx, pg, eventID)
+	// Arrange already-handed debt through publication authority. Recovery must
+	// not acquire paused work merely to prepare this test's checkpoint.
+	owner := pg.PipelineObligations()
+	work, err := owner.ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposePublication)
+	if err != nil {
+		t.Fatalf("claim publication for handed checkpoint: %v", err)
+	}
+	if _, err := owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("test_handed")); err != nil {
+		t.Fatalf("commit handed checkpoint: %v", err)
+	}
 	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 1 {
 		t.Fatalf("queued event pipeline receipts = %d, want 1", got)
 	}
