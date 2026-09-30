@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestDoubleBotSettingsBelongToPhysicalResourceNotCredential(t *testing.T) {
@@ -59,6 +60,49 @@ func TestDoubleBotSettingsBelongToPhysicalResourceNotCredential(t *testing.T) {
 				t.Fatalf("launcher=%q want=%q", launcherResult.Result.Type, test.launcher)
 			}
 		})
+	}
+}
+
+func TestDoubleDelayedLostEditAppliesAfterSuccessor(t *testing.T) {
+	provider := &Double{}
+	server := httptest.NewServer(provider)
+	defer server.Close()
+	post := func(method, body string) error {
+		response, err := http.Post(server.URL+"/botcredential/"+method, "application/json", bytes.NewBufferString(body))
+		if err == nil {
+			_ = response.Body.Close()
+		}
+		return err
+	}
+	if err := post("sendMessage", `{"chat_id":"42","text":"original"}`); err != nil {
+		t.Fatal(err)
+	}
+	arrived, apply := provider.LoseNextEditAcknowledgmentBeforeApply()
+	defer apply()
+	if err := post("editMessageText", `{"chat_id":"42","message_id":1,"text":"old prompt"}`); err == nil {
+		t.Fatal("delayed provider write retained its acknowledgment")
+	}
+	<-arrived
+	if len(provider.Edits()) != 0 {
+		t.Fatal("old provider write applied before explicit release")
+	}
+	if err := post("sendMessage", `{"chat_id":"42","text":"fresh copy"}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := post("editMessageText", `{"chat_id":"42","message_id":2,"text":"terminal successor"}`); err != nil {
+		t.Fatal(err)
+	}
+	apply()
+	deadline := time.Now().Add(time.Second)
+	for len(provider.Edits()) != 2 {
+		if time.Now().After(deadline) {
+			t.Fatal("provider did not apply its retained old write")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	edits := provider.Edits()
+	if edits[0]["text"] != "terminal successor" || edits[1]["text"] != "old prompt" {
+		t.Fatalf("provider schedule did not apply the old write after successor progress: %v", edits)
 	}
 }
 
