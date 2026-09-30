@@ -1490,16 +1490,14 @@ func (m *RuntimeContextManager) beginStandingServiceTransition(ctx context.Conte
 	transition := &StandingServiceTransition{manager: m, serviceID: serviceID}
 	m.mu.Lock()
 	transition.previouslySuppressed = m.standingServiceSuppressedLocked(serviceID)
-	if expected != nil {
-		if err := m.validateStandingOperationLocked(ctx, *expected); err != nil {
-			m.mu.Unlock()
-			return nil, err
-		}
-		if !drain {
-			transition.settled = true
-			m.mu.Unlock()
-			return transition, nil
-		}
+	if err := m.validateStandingOperationLocked(ctx, expected); err != nil {
+		m.mu.Unlock()
+		return nil, err
+	}
+	if expected != nil && !drain {
+		transition.settled = true
+		m.mu.Unlock()
+		return transition, nil
 	}
 	for _, entry := range m.contexts {
 		if entry == nil || entry.standing == nil || entry.standing[serviceID] == nil {
@@ -1558,7 +1556,10 @@ func (m *RuntimeContextManager) beginStandingServiceTransition(ctx context.Conte
 	return transition, nil
 }
 
-func (m *RuntimeContextManager) validateStandingOperationLocked(ctx context.Context, expected runtimepipeline.StandingServiceReconciliation) error {
+func (m *RuntimeContextManager) validateStandingOperationLocked(ctx context.Context, expected *runtimepipeline.StandingServiceReconciliation) error {
+	if expected == nil {
+		return nil
+	}
 	serviceID := expected.ServiceID
 	var selected *runtimeContextEntry
 	var child *worklifetime.StandingOccurrence
@@ -1566,17 +1567,15 @@ func (m *RuntimeContextManager) validateStandingOperationLocked(ctx context.Cont
 		if entry == nil || entry.context == nil {
 			continue
 		}
-		for _, target := range entry.context.StandingTargets {
-			if strings.TrimSpace(target.ServiceID) != serviceID {
-				continue
-			}
-			if (selected != nil && selected != entry) || !runtimeContextEntryLoaded(entry) || entry.context.BundleHash() != expected.BundleHash {
-				return fmt.Errorf("standing service %s has conflicting process source ownership", serviceID)
-			}
+		declares, err := validateStandingOperationDeclaration(entry, *expected)
+		if err != nil {
+			return err
+		}
+		if declares && selected != nil && selected != entry {
+			return fmt.Errorf("standing service %s has conflicting process source ownership", serviceID)
+		}
+		if declares {
 			selected = entry
-			if expected.RestartDisposition.Executable() && !standingTargetMatchesOperation(target, expected) {
-				return fmt.Errorf("standing service %s executable target conflicts with durable authority", serviceID)
-			}
 		}
 		if occurrence := entry.standing[serviceID]; occurrence != nil {
 			if child != nil || selected != entry {
@@ -1603,6 +1602,23 @@ func (m *RuntimeContextManager) validateStandingOperationLocked(ctx context.Cont
 		return fmt.Errorf("standing service %s process occurrence is unavailable: %w", serviceID, err)
 	}
 	return lease.Done()
+}
+
+func validateStandingOperationDeclaration(entry *runtimeContextEntry, expected runtimepipeline.StandingServiceReconciliation) (bool, error) {
+	declares := false
+	for _, target := range entry.context.StandingTargets {
+		if strings.TrimSpace(target.ServiceID) != expected.ServiceID {
+			continue
+		}
+		if declares || !runtimeContextEntryLoaded(entry) || entry.context.BundleHash() != expected.BundleHash {
+			return false, fmt.Errorf("standing service %s has conflicting process source ownership", expected.ServiceID)
+		}
+		declares = true
+		if expected.RestartDisposition.Executable() && !standingTargetMatchesOperation(target, expected) {
+			return false, fmt.Errorf("standing service %s executable target conflicts with durable authority", expected.ServiceID)
+		}
+	}
+	return declares, nil
 }
 
 func standingTargetMatchesOperation(target StandingTarget, expected runtimepipeline.StandingServiceReconciliation) bool {
