@@ -13,10 +13,12 @@ trigger:
       receipt_failure_detail: flow_instance_already_exists
       receipt_failure_attributes:
         flow_instance: worker-flow/ti-bc9c6acffc914a7ed5a2793b
+    - event: flow.finished
+      payload: {}
 
 expected:
 
-  entity_state: pending
+  entity_state: done
   dead_letter: true
   emitted_events:
     - flow.spawned

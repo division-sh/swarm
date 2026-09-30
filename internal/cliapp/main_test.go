@@ -3326,14 +3326,14 @@ func TestRunVerifyCommandFormatsSchemaLoaderDiagnostics(t *testing.T) {
 		{
 			name:     "document mapping shape",
 			schema:   "invalid-schema-shape",
-			wants:    []string{"ERROR: schema.yaml must be a mapping.", "Location:", "schema.yaml", "Remediation:"},
+			wants:    []string{"schema.yaml:1:1", "must be a mapping", "got scalar"},
 			notWants: []string{"flow schema document must be a mapping", "load Swarm contracts", "resolve contracts"},
 		},
 		{
 			name:     "field valid options",
 			schema:   "name: invalid-schema-field\nbogus: true\n",
-			wants:    []string{"ERROR: schema field \"bogus\" is not supported.", "Valid options:", "terminal_states", "Remediation:"},
-			notWants: []string{"UNDEFINED-FIELD", "not in platform spec", "load Swarm contracts", "resolve contracts"},
+			wants:    []string{"ERROR: schema field \"bogus\" is not supported.", "Valid options:", "stages", "Remediation:"},
+			notWants: []string{"UNDEFINED-FIELD", "not in platform spec", "load Swarm contracts", "resolve contracts", "terminal_states"},
 		},
 	}
 	for _, test := range tests {
@@ -3565,7 +3565,7 @@ func TestRunVerifyCommandRejectsAncestorEventNameWithoutReceiverLocalDeclaration
 	}
 }
 
-func TestRunVerifyCommand_EscalatedWarningUsesBlockingAnalyzerOutput(t *testing.T) {
+func TestRunVerifyCommand_UnreachableStageUsesBlockingAnalyzerOutput(t *testing.T) {
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 
 	root := filepath.Join(RepoRoot(), "tests", "tier8-boot-verification", "test-boot-state-machine-unreachable")
@@ -3585,9 +3585,9 @@ func TestRunVerifyCommand_EscalatedWarningUsesBlockingAnalyzerOutput(t *testing.
 	}
 	errText := stderr.String()
 	for _, want := range []string{
-		"verify failed: boot verification blocked by policy-escalated findings:",
+		"verify failed: boot verification failed:",
 		"[BLOCKER] semantic_drift_unreachable_state @",
-		"declares state review but no transition path",
+		"declares stage review but no lawful lifecycle path",
 	} {
 		if !strings.Contains(errText, want) {
 			t.Fatalf("verify stderr missing %q:\n%s", want, errText)
@@ -3614,14 +3614,11 @@ func TestRunVerifyCommand_EscalatedWarningUsesBlockingAnalyzerOutput(t *testing.
 	if verifyJSON.OK {
 		t.Fatalf("verify --json ok = true, want false: %#v", verifyJSON)
 	}
-	if len(verifyJSON.Errors) != 0 {
-		t.Fatalf("verify --json errors = %#v, want warning-only structured failure", verifyJSON.Errors)
+	if !verifyFindingOutputsContain(verifyJSON.Errors, "semantic_drift_unreachable_state", "hard_invalidity", "declares stage review but no lawful lifecycle path") {
+		t.Fatalf("verify --json errors = %#v, want structured unreachable-stage hard invalidity", verifyJSON.Errors)
 	}
-	if len(verifyJSON.Warnings) == 0 {
-		t.Fatalf("verify --json warnings = %#v, want semantic_drift_unreachable_state", verifyJSON.Warnings)
-	}
-	if !verifyFindingOutputsContain(verifyJSON.Warnings, "semantic_drift_unreachable_state", "semantic_drift_warning", "declares state review but no transition path") {
-		t.Fatalf("verify --json warnings = %#v, want structured semantic_drift_unreachable_state warning", verifyJSON.Warnings)
+	if verifyFindingOutputsContain(verifyJSON.Warnings, "semantic_drift_unreachable_state", "semantic_drift_warning", "review") {
+		t.Fatalf("verify --json downgraded unreachable-stage hard invalidity: %#v", verifyJSON.Warnings)
 	}
 }
 
@@ -4667,16 +4664,16 @@ func writeVerifyMissingPinWarningFixture(t *testing.T) string {
 	return canonicalrouting.CopyVerifyMissingPin(t)
 }
 
-func TestExecutionValidation_UnreachableStateReturnsWarningSurface(t *testing.T) {
+func TestExecutionValidation_UnreachableStageReturnsHardInvalidity(t *testing.T) {
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 
 	err := validateExecutionFixture(context.Background(), semanticview.Wrap(loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-state-machine-unreachable"))), executionposture.Live)
 	if err == nil {
-		t.Fatal("validateExecutionFixture error = nil, want warning-only failure from unreachable declared state")
+		t.Fatal("validateExecutionFixture error = nil, want hard invalidity from unreachable declared stage")
 	}
 	for _, want := range []string{
 		"semantic_drift_unreachable_state",
-		"declares state review but no transition path from initial_state waiting reaches review",
+		"declares stage review but no lawful lifecycle path from initial stage waiting reaches review",
 		"Reachable states: active, done, waiting",
 		"Unreachable states: review",
 	} {
