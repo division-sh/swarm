@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
@@ -194,6 +196,60 @@ func TestStandingOperatorCancellationJoinsHeldChildBeforeRestore(t *testing.T) {
 		t.Fatalf("captured child did not reopen after join: %v", err)
 	}
 	if err := lease.Done(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStandingOperatorCancelledSchedulerParkRetainsExactOwnerUntilJoin(t *testing.T) {
+	manager, expected := standingOperatorProcessFixture(t)
+	entry := manager.contexts[runtimeContextTestHashA]
+	child := entry.standing[expected.ServiceID]
+	started, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	entry.runtime.Scheduler = runtimeContextTestScheduler(t, entry.workOwner, func(context.Context, genericschedule.Wakeup) {
+		close(started)
+		<-release
+	})
+	lease, err := child.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := entry.runtime.Scheduler.RegisterGenericScheduleWakeup(lease.Context(), runtimeContextTestWakeup(t, "cancelled-park", time.Now())); err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.Done(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("exact standing callback did not start")
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	transition, err := manager.BeginStandingServiceOperation(cancelled, expected, true)
+	if !errors.Is(err, context.Canceled) || transition == nil {
+		t.Fatalf("failed parking lost retained transition: transition=%+v err=%v", transition, err)
+	}
+	if err := transition.Restore(cancelled); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled parking reopened a live callback: %v", err)
+	}
+	if _, err := child.Begin(context.Background()); err == nil {
+		t.Fatal("failed parking released execution before the callback joined")
+	}
+	releaseOnce.Do(func() { close(release) })
+	if err := transition.Restore(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if entry.standing[expected.ServiceID] != child || manager.standingServiceSuppressedLocked(expected.ServiceID) {
+		t.Fatal("parking compensation changed exact child or prior suppression")
+	}
+	restored, err := child.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := restored.Done(); err != nil {
 		t.Fatal(err)
 	}
 }

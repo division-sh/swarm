@@ -1,0 +1,13 @@
+diff --git a/internal/store/internal/backend/agentpersistence/projection.go b/internal/store/internal/backend/agentpersistence/projection.go
+index d13a0aff6..bba36e3b3 100644
+--- a/internal/store/internal/backend/agentpersistence/projection.go
++++ b/internal/store/internal/backend/agentpersistence/projection.go
+@@ -251,7 +251,7 @@ func HydratePersistedAgentConfig(row PersistedAgentProjection) (runtimeactors.Ag
+ 		Permissions:          permissions,
+ 		Criteria:             append([]string(nil), desc.Criteria...),
+ 		FlowDataAccess:       append([]string(nil), desc.FlowDataAccess...),
+-		BudgetEnvelope:       desc.BudgetEnvelope,
++		BudgetEnvelope:       0,
+ 		NativeTools:          desc.NativeTools,
+ 		WorkspaceClass:       desc.WorkspaceClass,
+ 		ManagerFallback:      desc.ManagerFallback,

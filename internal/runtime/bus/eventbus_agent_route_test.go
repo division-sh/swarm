@@ -251,6 +251,9 @@ func newExactHandoffProofStore(t *testing.T, failOnce bool) *exactHandoffProofSt
 	if err := runlifecyclefixture.CreateSQLiteScenarioSchema(context.Background(), db); err != nil {
 		t.Fatalf("create exact handoff lifecycle schema: %v", err)
 	}
+	if err := deliveryfixture.CreateSQLiteRunAdmissionSchema(context.Background(), db); err != nil {
+		t.Fatalf("create exact handoff run admission schema: %v", err)
+	}
 	adapter, err := deliveryfixture.NewAdapter(deliveryfixture.DialectSQLite)
 	if err != nil {
 		t.Fatalf("create exact handoff adapter: %v", err)

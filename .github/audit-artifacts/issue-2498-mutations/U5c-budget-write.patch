@@ -1,0 +1,13 @@
+diff --git a/internal/store/internal/backend/agentpersistence/projection.go b/internal/store/internal/backend/agentpersistence/projection.go
+index d13a0aff6..f40989cff 100644
+--- a/internal/store/internal/backend/agentpersistence/projection.go
++++ b/internal/store/internal/backend/agentpersistence/projection.go
+@@ -294,7 +294,7 @@ func marshalPersistedAgentRuntimeDescriptor(cfg runtimeactors.AgentConfig, model
+ 		Intent:               cfg.Intent,
+ 		Criteria:             append([]string(nil), cfg.Criteria...),
+ 		FlowDataAccess:       append([]string(nil), cfg.FlowDataAccess...),
+-		BudgetEnvelope:       cfg.BudgetEnvelope,
++		BudgetEnvelope:       0,
+ 	}
+ 	if !descExecutionModeMatchesBackend(llmBackend, desc.ExecutionMode) {
+ 		return nil, fmt.Errorf("execution_mode %q conflicts with llm_backend %q", desc.ExecutionMode, strings.TrimSpace(llmBackend))
