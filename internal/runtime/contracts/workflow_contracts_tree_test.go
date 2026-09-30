@@ -135,7 +135,9 @@ func TestAgentDeclarationIDPresenceMatrix(t *testing.T) {
 				t.Fatal(err)
 			}
 			normalized, err := normalizeAgentRegistryEntries(entries, "agents.yaml")
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			got, err := DeclaredAgentID("worker", normalized["worker"])
 			if err != nil {
 				t.Fatal(err)
