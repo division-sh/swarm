@@ -220,6 +220,24 @@ func TestHandedOnlyContinueSignalsBothStores(t *testing.T) {
 	}
 }
 
+func TestStoppedRunKeepsExistingDispatchBlockBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newCompleteEventDispatchFixture(t, backend, false)
+			controller := runtimeruncontrol.NewController(f.store.(runtimeruncontrol.Store), f.bus, runtimeruncontrol.Options{})
+			if _, err := controller.Stop(f.ctx, runtimeruncontrol.TransitionRequest{RunID: f.event.RunID(), Reason: "retired"}); err != nil {
+				t.Fatal(err)
+			}
+			if blocked, err := controller.QueueableRunDispatchBlocked(f.ctx, f.event.RunID()); err != nil || !blocked {
+				t.Fatalf("retired block=%t error=%v", blocked, err)
+			}
+			if parked, err := controller.QueueableRunDispatchParked(f.ctx, f.event.RunID()); err != nil || parked {
+				t.Fatalf("retirement became pause/error: parked=%t error=%v", parked, err)
+			}
+		})
+	}
+}
+
 func TestUnownedPausedContinueRefusesBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {

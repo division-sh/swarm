@@ -5,7 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -18,10 +18,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
-	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
-	"github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/store/storetest"
 	"gopkg.in/yaml.v3"
 )
 
@@ -159,10 +155,7 @@ func assertNumericFeedPublic(t *testing.T, ctx context.Context, rpc *releaseRPCC
 		byID[entity.EntityID], byKey[key], paths[entity.FlowInstance] = entity, entity, true
 	}
 	observed := map[string]bool{}
-	receiver, err := identity.ParseExecutableNode(expected.Feed.ReceiverFlow, expected.Feed.ReceiverNode)
-	if err != nil {
-		t.Fatal(err)
-	}
+	receiver := base64.RawURLEncoding.EncodeToString([]byte(expected.Feed.ReceiverFlow)) + "." + base64.RawURLEncoding.EncodeToString([]byte(expected.Feed.ReceiverNode))
 	events, err := listGoldenEvents(ctx, rpc, runID)
 	if err != nil {
 		t.Fatal(err)
@@ -183,7 +176,7 @@ func assertNumericFeedPublic(t *testing.T, ctx context.Context, rpc *releaseRPCC
 		}
 		delivery := event.Deliveries[0]
 		entity, exists := byID[delivery.Target.EntityID]
-		if !exists || entity != byKey[key] || delivery.SubscriberType != "node" || delivery.SubscriberID != receiver.Key() ||
+		if !exists || entity != byKey[key] || delivery.SubscriberType != "node" || delivery.SubscriberID != receiver ||
 			delivery.Target.Kind != "materializing_entity" || delivery.Target.FlowID != expected.Feed.ReceiverFlow || delivery.Target.FlowInstance != entity.FlowInstance || delivery.Status != "delivered" || !delivery.Terminal {
 			t.Fatalf("numeric row %s delivered to wrong receiver: %+v entity=%+v", key, delivery, entity)
 		}
@@ -218,59 +211,36 @@ func TestNumericFeedAssertionsRejectMissingAndUnknownFields(t *testing.T) {
 	}
 }
 
-// Timer rows have no public list API. Inspect through the canonical typed store
-// only after the child has stopped and joined, then close this handle before
-// starting the successor. This is explicitly supplementary persistence credit.
-func inspectNumericFeedTimers(t *testing.T, ctx context.Context, root string, selected goldenStoreSelection, runID string, expected numericFeedExpectations, entities map[string]goldenEntitySummary) map[string]pipeline.WorkflowTimerActivation {
+// Timer rows have no public API. The already-built internal lifecycle child
+// owns this supplementary typed persistence proof, after serve has joined.
+func inspectNumericFeedTimers(t *testing.T, ctx context.Context, binary, project string, env []string, runID string, expected numericFeedExpectations, entities map[string]goldenEntitySummary) map[string]json.RawMessage {
 	t.Helper()
-	var db *sql.DB
-	var reader pipeline.WorkflowTimerActivationPersistence
-	if selected.name == "sqlite" {
-		var err error
-		db, err = sql.Open("sqlite", filepath.Join(root, "runtime.db"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		reader = storetest.AdmitSQLiteRuntimeStore(t, db)
-	} else {
-		if selected.inspectionConnector == nil {
-			t.Fatal("exact isolated PostgreSQL inspection connector is missing")
-		}
-		db = sql.OpenDB(selected.inspectionConnector)
-		reader = storetest.AdmitPostgresRuntimeStore(t, db)
+	if err := ctx.Err(); err != nil {
+		t.Fatal(err)
 	}
-	defer func() {
-		if err := db.Close(); err != nil {
-			t.Error(err)
-		}
-	}()
-	activations, err := reader.ListWorkflowTimerActivations(ctx, runID, "", false)
+	output := filepath.Join(t.TempDir(), "timer-inspection.json")
+	targets := map[string]string{}
+	for _, entity := range entities {
+		targets[entity.EntityID] = entity.FlowInstance
+	}
+	request, err := json.Marshal(map[string]any{"ConfigPath": ".swarm/swarm.yaml", "RunID": runID, "Flow": expected.Feed.ReceiverFlow, "After": expected.Feed.TimerAfter, "Entities": targets, "Output": output})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(activations) != len(entities) {
-		t.Fatalf("typed numeric timer inventory=%d, want %d", len(activations), len(entities))
+	result := runReleaseCommand(t, 30*time.Second, project, append(append([]string{}, env...), "SWARM_NUMERIC_TIMER_INSPECTION="+string(request)), "", binary, "-test.run=^TestOwnedNumericTimerInspection$", "-test.v")
+	if result.err != nil {
+		t.Fatalf("supplementary typed timer child: %v\n%s", result.err, result.output)
 	}
-	after, err := time.ParseDuration(expected.Feed.TimerAfter)
+	body, err := os.ReadFile(output)
 	if err != nil {
 		t.Fatal(err)
 	}
-	byEntity := map[string]pipeline.WorkflowTimerActivation{}
-	for _, activation := range activations {
-		if err := activation.Validate(); err != nil {
-			t.Fatal(err)
-		}
-		if activation.RunID != runID || activation.Status != "active" || activation.Recurring || activation.Ref.Cause != timeridentity.WorkflowTimerActivationCauseInitial ||
-			activation.FireAt.Sub(activation.CreatedAt) != after || activation.Route.ScopeKey != expected.Feed.ReceiverFlow || byEntity[activation.EntityID].EntityID != "" {
-			t.Fatalf("wrong initial numeric timer: %+v", activation)
-		}
-		byEntity[activation.EntityID] = activation
+	var byEntity map[string]json.RawMessage
+	if err := json.Unmarshal(body, &byEntity); err != nil {
+		t.Fatal(err)
 	}
-	for key, entity := range entities {
-		activation, exists := byEntity[entity.EntityID]
-		if !exists || activation.Route.InstancePath != entity.FlowInstance {
-			t.Fatalf("item %s lost exact timer/receiver ownership: entity=%+v timer=%+v", key, entity, activation)
-		}
+	if len(byEntity) != len(entities) {
+		t.Fatalf("timer inspection returned %d/%d exact rows", len(byEntity), len(entities))
 	}
 	return byEntity
 }

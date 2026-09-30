@@ -1,10 +1,40 @@
 # Post-Implementation Proof Audit: #2498
 
-Agent-g, 2026-09-30. Qualification candidate: `723af0b1b`, rebased on
+Agent-g, 2026-09-30. Historical local qualification candidate: `723af0b1b`, rebased on
 `origin/master@8fac0f2e7`. **Final public-corpus qualification and all 14 required
 default units pass. This is a candidate proof audit for independent merge review,
 not merge approval or closure of either parent.** Later commits contain audit
-metadata only; the qualified production/test/spec tree is unchanged.
+metadata only at `277641150`; that head subsequently failed CI. **That local
+receipt does not establish final-head merge readiness.** The bounded CI repair
+below supersedes the old final-head claim; exact repaired-head CI is required.
+
+## CI Repair And Proof Supplement
+
+CI run 36723873326 on `277641150` exposed the following concrete gaps. No test
+was skipped, made permissive, or assigned a longer deadline to hide a failure.
+
+| Failure | Repair through existing authority | Proof / status |
+|---|---|---|
+| Static formatting | Format the changed pipeline test fixture | Whole-tree gofmt census empty |
+| Catalog replay partitions/census/references | Count the new verify-only source in the closed 158-row census; runtime/replay allocation stays 99/94+5 | Census and proof-reference controls pass |
+| Route and persistence authority guards | Classify the exact new pause-test consumer and every changed resolved finding; preserve exhaustive searches | Unchanged guard assertions; no exclusions |
+| Release E2E imports server DTOs, validators and private store | Independent public wire projections and negative origin/page oracles; migrate only supplementary typed timer inspection into the already-compiled internal lifecycle harness | Numeric public/restart/refusal journey passes both stores, 107.264s; public-boundary assertion passes |
+| Partial shutdown fixtures lack dispatch schema | Consume existing canonical fixture schema helper | All four failed shutdown controls pass |
+| Fork history fixtures claim ordinary work while paused | Explicitly construct historical delivery rows through lifecycle-owned running admission and restore materialized pause before validator/discard; no supported selected-execution credit inferred from setup | Both-store discard and PostgreSQL activation controls pass, 3.322s |
+| Retired normal delivery becomes fatal active-run error | Canonical pause guard distinguishes terminal/forked lifecycle from pause and retains existing dispatch fence; co-read run/control/source facts rather than four separate queries | Real both-store pending-source fork journey passes; stopped-run block/park negative controls pass |
+| PostgreSQL 500-row ceiling exceeded (15.200s versus 15s) | Preserve workload/ceiling and investigate new admission cost; reduce redundant reads within the same canonical guard | Both-store three-repetition control passes, 103.249s; exact-head CI required; no causal timing closure claimed |
+| Timing and required-summary aggregate failures | No runner/budget relaxation | Must converge from all required exact-head checks |
+
+Fixture historical seeding does not grant selected-fork runtime execution and
+does not make an ordinary paused claim legal. The real selected authority
+controls and P01-P16 negative admission tests remain required. Timer inspection
+remains supplementary H/persistence credit, never a public timer API or live
+provider claim. The public tests no longer repeat the server's validator.
+
+The same approved owners and finite classes apply; no new owner, schema,
+framework, vendor dependency, compatibility behavior, parent closure or gate
+widening. Final qualification and the exact new head are recorded in the PR
+proof audit after required checks complete.
 
 ## Binding Boundary And Closure
 
