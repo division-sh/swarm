@@ -361,7 +361,7 @@ func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, bac
 		workflow:        rt.Pipeline,
 		llm:             llmRuntime,
 		bundle:          bundle,
-		initialState:    strings.TrimSpace(rootSchema.InitialState),
+		initialState:    rootSchema.LoweredInitialState(),
 		startedAt:       startedAt,
 		publishedIDs:    map[string]struct{}{},
 		publishedOrder:  []string{},
