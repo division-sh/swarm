@@ -3,6 +3,7 @@ package channeldelivery
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -105,6 +106,9 @@ func PlanManualResendTx(ctx context.Context, tx *sql.Tx, action operatorchannel.
 	if err := tx.QueryRowContext(ctx, query, resolved.Action.RecoveryDeliveryID, selected.PrincipalID,
 		selected.InterfaceKey, selected.DeliveryEpoch, selected.ExternalAccountRef, selected.ConversationRef,
 		string(selected.ConversationScope)).Scan(&kind, &sourceID, &generation); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", SettleUnappliedActionIntentTx(ctx, tx, action, render.ActionStale, postgres)
+		}
 		return "", fmt.Errorf("manual resend predecessor is no longer actionable: %w", err)
 	}
 	newID := uuid.NewString()

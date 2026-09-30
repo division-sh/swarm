@@ -374,6 +374,7 @@ func successfulOperatorChannelRuntimeResult(methodName string) any {
 			"target_selector": "ingress:support:telegram", "activation_posture": "webhook_registration",
 			"identity_ceremony": "authenticated_text_challenge", "phase": "awaiting_external_identity", "revision": 2,
 			"save_proof": true, "credential_reservations": []any{map[string]any{"role": "bot_token", "store_key": "channel.telegram.bot_token"}},
+			"client_language": "en", "client_locale_revision": 1,
 			"requested_at": "2026-08-24T12:00:00Z", "updated_at": "2026-08-24T12:00:01Z",
 		}
 		candidate := map[string]any{
