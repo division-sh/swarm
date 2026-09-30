@@ -336,10 +336,14 @@ func TestCanonicalFormsRegistryOwnsCompleteDecoderInventory(t *testing.T) {
 	}
 	for file, mappings := range record.DecoderDeleted {
 		for rowID, receivers := range mappings {
-			if _, exists := rows[rowID]; !exists { t.Fatalf("deleted decoder references unknown row %q", rowID) }
+			if _, exists := rows[rowID]; !exists {
+				t.Fatalf("deleted decoder references unknown row %q", rowID)
+			}
 			for _, receiver := range receivers {
 				identity := canonicalDecoderIdentity(file, receiver)
-				if _, exists := actual[identity]; exists { t.Fatalf("deleted decoder restored: %s", identity) }
+				if _, exists := actual[identity]; exists {
+					t.Fatalf("deleted decoder restored: %s", identity)
+				}
 			}
 		}
 	}

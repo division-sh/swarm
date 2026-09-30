@@ -83,23 +83,10 @@ func projectAgentValue(key string, value yamlsource.Value) (AgentRegistryEntry, 
 				out.Memory, err = agentValueBool(field)
 			case "max_turns_per_task":
 				out.MaxTurnsPerTask, err = agentValueInteger(field)
-				if err == nil && out.MaxTurnsPerTask <= 0 {
-					err = fmt.Errorf("max_turns_per_task must be positive")
-				}
 			case "entity_writes":
 				out.EntityWrites, err = projectAgentWritesValue(field)
 			case "native_tools":
-				var native map[string]yamlsource.Value
-				native, err = nodeValueFields(field, "native_tools", map[string]struct{}{"bash": {}, "web_search": {}, "file_io": {}}, nil)
-				out.NativeTools = map[string]any{}
-				for _, capability := range sortedContractKeys(native) {
-					var enabled bool
-					enabled, err = agentValueBool(native[capability])
-					if err != nil {
-						break
-					}
-					out.NativeTools[capability] = enabled
-				}
+				out.NativeTools, err = projectAgentNativeValue(field)
 			case "mock":
 				err = projectAgentMockValue(field, &out)
 			case "data_access":
@@ -109,27 +96,62 @@ func projectAgentValue(key string, value yamlsource.Value) (AgentRegistryEntry, 
 		if err != nil {
 			return AgentRegistryEntry{}, nodeValueError(field, err)
 		}
-		if name == "type" && strings.TrimSpace(out.Type) == "" {
-			return AgentRegistryEntry{}, nodeValueError(field, fmt.Errorf("type must be non-empty text"))
+		text := ""
+		if texts[name] != nil {
+			text = *texts[name]
 		}
-		if name == "id" && out.ID != strings.TrimSpace(out.ID) {
-			return AgentRegistryEntry{}, nodeValueError(field, fmt.Errorf("id must be canonical non-empty text"))
-		}
-		duplicate := name == "id" && strings.TrimSpace(out.ID) == key ||
-			name == "type" && strings.TrimSpace(out.Type) == DefaultAgentType ||
-			name == "memory" && !out.Memory ||
-			name == "max_turns_per_task" && out.MaxTurnsPerTask == DefaultAgentMaxTurnsPerTask ||
-			name == "workspace_class" && strings.TrimSpace(out.WorkspaceClass) == ""
-		if duplicate {
-			spelling := name
-			if name == "memory" {
-				spelling = "memory: false"
-			}
-			return AgentRegistryEntry{}, nodeValueError(field, fmt.Errorf("RETIRED: %s is the default; remove it", spelling))
+		if err := validateAgentAuthoredSpelling(key, name, text, out.Memory, out.MaxTurnsPerTask); err != nil {
+			return AgentRegistryEntry{}, nodeValueError(field, err)
 		}
 	}
 	if _, err := DeclaredAgentID(key, out); err != nil {
 		return AgentRegistryEntry{}, nodeValueError(value, err)
+	}
+	return out, nil
+}
+
+func validateAgentAuthoredSpelling(key, name, text string, memory bool, turns int) error {
+	duplicate := false
+	switch name {
+	case "id":
+		if text != strings.TrimSpace(text) {
+			return fmt.Errorf("id must be canonical non-empty text")
+		}
+		duplicate = text == key
+	case "type":
+		if strings.TrimSpace(text) == "" {
+			return fmt.Errorf("type must be non-empty text")
+		}
+		duplicate = strings.TrimSpace(text) == DefaultAgentType
+	case "memory":
+		duplicate = !memory
+		name = "memory: false"
+	case "max_turns_per_task":
+		if turns <= 0 {
+			return fmt.Errorf("max_turns_per_task must be positive")
+		}
+		duplicate = turns == DefaultAgentMaxTurnsPerTask
+	case "workspace_class":
+		duplicate = strings.TrimSpace(text) == ""
+	}
+	if duplicate {
+		return fmt.Errorf("RETIRED: %s is the default; remove it", name)
+	}
+	return nil
+}
+
+func projectAgentNativeValue(value yamlsource.Value) (map[string]any, error) {
+	fields, err := nodeValueFields(value, "native_tools", map[string]struct{}{"bash": {}, "web_search": {}, "file_io": {}}, nil)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]any{}
+	for _, capability := range sortedContractKeys(fields) {
+		enabled, err := agentValueBool(fields[capability])
+		if err != nil {
+			return nil, nodeValueError(fields[capability], err)
+		}
+		out[capability] = enabled
 	}
 	return out, nil
 }
