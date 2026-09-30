@@ -93,7 +93,7 @@ func TestReceiverInstanceEventSchemaRetainsReceiverGeneratedKey(t *testing.T) {
 	if !ok {
 		t.Fatal("receiver pin missing")
 	}
-	receiver, receiverOK, err := source.ConnectionInputs().ReceiverEventSchema("validator", "validation.requested")
+	receiver, receiverOK, err := source.ConnectionInputs().ReceiverCommonEventSchema("validator", "validation.requested")
 	if err != nil {
 		t.Fatal(err)
 	}

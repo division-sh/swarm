@@ -389,10 +389,10 @@ func (s providerTriggerEventSource) ConnectionInputs() runtimecontracts.Compiled
 }
 
 func (s providerTriggerEventSource) ResolveEffectiveCompiledFlowEventSchema(flowID, eventType string) (runtimecontracts.CompiledEventSchema, bool, error) {
+	if schema, owned, err := s.connectionInputs.ReceiverCommonEventSchema(flowID, eventType); err != nil || owned {
+		return schema, owned, err
+	}
 	if pin, ok := s.FlowInputEventPin(flowID, eventType); ok {
-		if schema, owned, err := s.connectionInputs.ReceiverEventSchema(flowID, pin.EventType()); err != nil || owned {
-			return schema, owned, err
-		}
 		if schema, owned := pin.ReceiverEventSchema(); owned {
 			return schema, true, nil
 		}

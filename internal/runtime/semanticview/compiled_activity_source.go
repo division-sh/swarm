@@ -23,7 +23,7 @@ func CompileActivityToolBindings(source Source) (Source, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := compiledActivitySource{Source: source, compiled: bundleSource{bundle: compiled}, inputPins: map[string][]contracts.CompiledFlowInputPin{}}
+	out := compiledActivitySource{Source: source, compiled: bundleSource{bundle: compiled}, inputPins: map[string][]contracts.CompiledFlowInputPin{}, outputPins: map[string][]contracts.CompiledFlowOutputPin{}}
 	for _, scope := range source.FlowScopes() {
 		pins := out.compiled.FlowInputEventPins(scope.ID)
 		for index, pin := range pins {
@@ -46,6 +46,11 @@ func CompileActivityToolBindings(source Source) (Source, error) {
 			}
 		}
 		out.inputPins[scope.ID] = pins
+		outputs, err := activityOutputPins(source, out.compiled, scope.ID)
+		if err != nil {
+			return nil, err
+		}
+		out.outputPins[scope.ID] = outputs
 	}
 	out.connectionInputs = contracts.CompileConnectionInputs(compiled, out)
 	if err := out.connectionInputs.ValidateBindings(); err != nil {
@@ -58,6 +63,7 @@ type compiledActivitySource struct {
 	Source
 	compiled         bundleSource
 	inputPins        map[string][]contracts.CompiledFlowInputPin
+	outputPins       map[string][]contracts.CompiledFlowOutputPin
 	connectionInputs contracts.CompiledConnectionInputs
 }
 
@@ -98,10 +104,10 @@ func (s compiledActivitySource) ResolveExecutableNodeEventCatalogEntry(node iden
 	return s.ResolveFlowEventCatalogEntry(node.FlowPath(), s.ResolveExecutableNodeEventReference(node, event))
 }
 func (s compiledActivitySource) ResolveEffectiveCompiledFlowEventSchema(flowID, event string) (contracts.CompiledEventSchema, bool, error) {
+	if schema, owned, err := s.connectionInputs.ReceiverCommonEventSchema(flowID, event); err != nil || owned {
+		return schema, owned, err
+	}
 	if pin, ok := s.FlowInputEventPin(flowID, event); ok {
-		if schema, owned, err := s.connectionInputs.ReceiverEventSchema(flowID, pin.EventType()); err != nil || owned {
-			return schema, owned, err
-		}
 		if schema, exists := pin.ReceiverEventSchema(); exists {
 			return schema, true, nil
 		}
@@ -133,8 +139,39 @@ func (s compiledActivitySource) FlowInputEventPin(flowID, event string) (contrac
 	return contracts.CompiledFlowInputPin{}, false
 }
 func (s compiledActivitySource) FlowOutputEventPins(flowID string) []contracts.CompiledFlowOutputPin {
-	return s.compiled.FlowOutputEventPins(flowID)
+	if strings.TrimSpace(flowID) == "" {
+		flowID = "."
+	}
+	return append([]contracts.CompiledFlowOutputPin(nil), s.outputPins[flowID]...)
 }
 func (s compiledActivitySource) FlowOutputEventPin(flowID, event string) (contracts.CompiledFlowOutputPin, bool) {
-	return s.compiled.FlowOutputEventPin(flowID, event)
+	for _, pin := range s.FlowOutputEventPins(flowID) {
+		if pin.EventType() == event {
+			return pin, true
+		}
+	}
+	return contracts.CompiledFlowOutputPin{}, false
+}
+
+func activityOutputPins(source Source, compiled bundleSource, flowID string) ([]contracts.CompiledFlowOutputPin, error) {
+	pins := compiled.FlowOutputEventPins(flowID)
+	for index, pin := range pins {
+		if _, exists := pin.EventSchema(); exists {
+			continue
+		}
+		previous, ok := source.FlowOutputEventPin(flowID, pin.EventType())
+		if !ok {
+			continue
+		}
+		imported, exists := previous.EventSchema()
+		if !exists || imported.Classification() != contracts.CompiledEventSchemaImported {
+			continue
+		}
+		bound, err := pin.BindImportedEventSchema(imported)
+		if err != nil {
+			return nil, err
+		}
+		pins[index] = bound
+	}
+	return pins, nil
 }

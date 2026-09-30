@@ -257,16 +257,14 @@ func concreteTemplateInstanceLocalEventForProof(source Source, scope FlowScope, 
 	if !strings.Contains(remainder, "/") || eventProofRemainderTargetsDescendantScope(source, scopePath, remainder) {
 		return ""
 	}
+	if local, owned := source.ConnectionInputs().ReceiverEvent(scope.ID, canonical); owned {
+		return local
+	}
 	compiled, ok, err := source.ResolveEffectiveCompiledFlowEventSchema(scope.ID, canonical)
 	if err != nil || !ok {
 		return ""
 	}
 	local := runtimeeventidentity.LeafName(canonical)
-	if pin, matched := source.FlowInputEventPin(scope.ID, local); matched {
-		if receiver, owned := pin.ReceiverEventSchema(); owned && receiver.AcceptanceSchemaDigest() == compiled.AcceptanceSchemaDigest() {
-			return pin.EventType()
-		}
-	}
 	if compiled.FlowPath() == scope.ID && runtimeeventidentity.LeafName(compiled.EventName()) == local {
 		return local
 	}

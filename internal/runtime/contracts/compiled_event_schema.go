@@ -312,22 +312,33 @@ func (b *WorkflowContractBundle) ResolveCompiledFlowEventSchema(flowID, eventTyp
 	if !exists {
 		return CompiledEventSchema{}, false, nil
 	}
+	name, ok := bindings.resolveEventName(eventType)
+	return bindings.bindings[name], ok, nil
+}
+
+// resolveEventName is shared by admitted producer and receiver bindings. A
+// concrete occurrence cannot borrow an event from a descendant declaration.
+func (bindings compiledFlowEventSchemas) resolveEventName(eventType string) (string, bool) {
 	name := eventidentity.Normalize(eventType)
-	compiled, ok := bindings.bindings[name]
-	if !ok && bindings.template && strings.HasPrefix(name, bindings.path+"/") {
+	if _, ok := bindings.bindings[name]; ok {
+		return name, true
+	}
+	if bindings.template && strings.HasPrefix(name, bindings.path+"/") {
 		remainder := strings.TrimPrefix(name, bindings.path+"/")
 		for _, descendant := range bindings.descendants {
 			if remainder == descendant || strings.HasPrefix(remainder, descendant+"/") {
-				return CompiledEventSchema{}, false, nil
+				return "", false
 			}
 		}
 		// Concrete template spellings are readback projections of this
 		// declaration, never another declaration or receiver authority.
 		if strings.Contains(remainder, "/") {
-			compiled, ok = bindings.bindings[eventidentity.LeafName(remainder)]
+			local := eventidentity.LeafName(remainder)
+			_, ok := bindings.bindings[local]
+			return local, ok
 		}
 	}
-	return compiled, ok, nil
+	return "", false
 }
 
 // compileEventSchemaBindings admits producer declarations before pins capture
@@ -386,8 +397,9 @@ func (b *WorkflowContractBundle) compileEventSchemaBindings() error {
 	return nil
 }
 
-// ResolveEffectiveCompiledFlowEventSchema returns the exact receiver schema
-// when a flow input pin owns one, otherwise the producer declaration. It does
+// ResolveEffectiveCompiledFlowEventSchema returns common receiver guarantees
+// for an input, otherwise the producer declaration. Exact delivery acceptance
+// remains owned by the selected compiled connection. It does
 // not rebuild structural evidence from the JSON-schema readback projection.
 func (b *WorkflowContractBundle) ResolveEffectiveCompiledFlowEventSchema(flowID, eventType string) (CompiledEventSchema, bool, error) {
 	if b == nil {
@@ -396,10 +408,10 @@ func (b *WorkflowContractBundle) ResolveEffectiveCompiledFlowEventSchema(flowID,
 	if _, ok := b.exactFlowEventDeclarationView(flowID); !ok {
 		return CompiledEventSchema{}, false, nil
 	}
+	if schema, owned, err := b.connectionInputs.ReceiverCommonEventSchema(flowID, eventType); err != nil || owned {
+		return schema, owned, err
+	}
 	if pin, ok := b.flowInputEventPinForResolvedEvent(flowID, eventType); ok {
-		if schema, owned, err := b.connectionInputs.ReceiverEventSchema(flowID, pin.EventType()); err != nil || owned {
-			return schema, owned, err
-		}
 		if schema, owned := pin.ReceiverEventSchema(); owned {
 			return schema, true, nil
 		}

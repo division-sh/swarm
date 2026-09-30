@@ -254,7 +254,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 	bundle.Semantics = semantics
 	populateEventSchemaOwnershipIndex(bundle)
 	bundle.connectionInputs = CompileConnectionInputs(bundle, bundle)
-	return nil
+	return bundle.connectionInputs.ValidateInitialization()
 }
 
 // CompileWorkflowSemantics compiles a fully admitted in-memory bundle through

@@ -288,17 +288,8 @@ func (b *WorkflowContractBundle) flowInputEventPinForResolvedEvent(flowID, event
 		flowID = "."
 	}
 	requested := eventidentity.Normalize(eventType)
-	if binding, exists := b.compiledEventSchemas[flowID]; exists && binding.template && strings.HasPrefix(requested, binding.path+"/") {
-		remainder := strings.TrimPrefix(requested, binding.path+"/")
-		instance, local, concrete := strings.Cut(remainder, "/")
-		if concrete {
-			for _, descendant := range binding.descendants {
-				if instance == descendant || strings.HasPrefix(descendant, instance+"/") {
-					return CompiledFlowInputPin{}, false
-				}
-			}
-			requested = eventidentity.Normalize(local)
-		}
+	if local, owned := b.connectionInputs.ReceiverEvent(flowID, requested); owned {
+		return b.FlowInputEventPin(flowID, local)
 	}
 	for _, pin := range b.FlowInputEventPins(flowID) {
 		local := eventidentity.Normalize(pin.EventType())
