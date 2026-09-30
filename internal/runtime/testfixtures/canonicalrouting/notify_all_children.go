@@ -73,6 +73,7 @@ func CopyNotifyAllChildren(t testing.TB, opts NotifyAllChildrenOptions) string {
 		applyClosedReplacement(t, connectFile, `  - event: account.notify.requested
     from: portfolio
     to: account
+    resolution: select
 `, "")
 	}
 	if opts.OmitOutputPin {
