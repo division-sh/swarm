@@ -150,3 +150,45 @@ readiness claim.
 No new issue, framework, schema, migration, compatibility path, vendor dependency
 or changes to the separate #2008 WIP. #2407/#2250 remain open. No new semantic
 gate is requested for these ordinary in-scope proof obligations.
+
+### Final Pause-Consumer Proof Completion
+
+The default candidate qualification at `f2b7a9113` passed all 14 planned units
+(log `agent-g-2498-final-default-qualification`, SHA256
+`e1a9f11382df60873de5655f50d33904a7a303e68997e5bc4d474d20764ff4ff`).
+That receipt does not qualify the newer master or the later changes below.
+
+- P06 now executes real composed two-context startup on one selected store,
+  preserving each source's paused unhanded facts while later running work
+  settles. Fresh delivery authority is asserted independently; legitimate
+  authority rebinding is not mistaken for executing the paused delivery.
+- P07's real authenticated public continue starts with a deliberately prepared
+  already-handed-only backlog and no open pipeline work. No manual wake occurs
+  after continue. Removing only ReleaseRunQueue's continuation signal in a
+  disposable candidate fails both stores (124.844s, delivered=0); restoring it
+  passes both (3.994s). This controlled selected-store precondition is not a
+  claim that publication while paused naturally hands off the event.
+- P14 missing and contradictory control authority is invalid, never harmless
+  parking. Actual selected-store scans/claims leave the exact delivery unchanged.
+- P15's real timer and accepted mailbox verdict are retained while paused.
+  Their first supported-public execution exposed recovery skipping the pipeline
+  coordinator when there are no node routes: both events received a success
+  receipt without their transition. The correction reuses the existing
+  event-wide interceptor path only when no exact node delivery exists. Node
+  execution remains continuation-owned; no event-name exception, timer/decision
+  owner rewrite or new adapter is introduced. Both stores now transition only
+  after public continue, with exactly one occurrence event (PASS 8.181s).
+- Closed receiver projection and P14 controls pass race x3 (30.026s); composed
+  P06, public P07 and P15 pass race x3 together (137.277s). API specification and
+  proof-plan guards pass (4.066s / 23.129s). The default canary plan now selects
+  these real proofs and requires their exact backend children.
+
+The P15 before/after logs are respectively SHA256
+`196c9d4485535f1114e9cd04b88355b7d4e35b3a78846e42e05003396003d770`
+and `12097d7997246a0670c2f0940147433441a8cd2dc815a200bb577fa126639d90`.
+The P07 signal-removal/restoration logs are respectively SHA256
+`c07875b35a275b5ede051cc2cff65be0f823960b08731669b6c2fe87306db094`
+and `7bbdf376b77ab13ef9a0471af8ace9f8a6d5ea254b589d2f81f522f00d44684f`.
+These qualify already-required P rows through the existing owners, not a new
+failure-class expansion or U1-U5 mutation claim. Rebase and final-head default
+qualification remain required; master is now `8fac0f2e7`, not `abdb07bfe`.
