@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	"math"
 	"strings"
 	"time"
@@ -437,15 +436,13 @@ func (a *Adapter) claimExactResultTx(ctx context.Context, tx *sql.Tx, attempt *m
 		result.Invariant = fmt.Errorf("%w: unknown delivery status", ErrConflict)
 		return result, nil
 	}
-	if record.Authority.Kind() == ExecutionAuthorityNormalRuntime {
-		parked, err := runstate.DispatchParked(ctx, tx, a.dialect == DialectPostgres, record.RunID)
-		if err != nil {
-			return ClaimResult{}, err
-		}
-		if parked {
-			result.Disposition = ClaimParked
-			return result, nil
-		}
+	parked, err := a.normalDispatchParked(ctx, tx, record)
+	if err != nil {
+		return ClaimResult{}, err
+	}
+	if parked {
+		result.Disposition = ClaimParked
+		return result, nil
 	}
 	ready, err := a.materializationReady(ctx, tx, record, tx)
 	if err != nil {
