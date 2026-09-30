@@ -125,6 +125,7 @@ type executionFrame struct {
 	collectionPlan            runtimecontracts.WorkflowHandlerCollectionPlan
 	joinLoopGeneration        attemptgeneration.Generation
 	entityMutations           *entityruntime.MutationPlan
+	discardedJoin             bool
 }
 
 type handlerRuleSource string
@@ -511,12 +512,24 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 			SetExecutionFailure(&result, err, "runtime.engine", "compute_replay_trace")
 			return err
 		}
+		if frame.discardedJoin {
+			// An obsolete join occurrence has no accepted state effect. Its exact
+			// claim still settles through the coordinator's no-op outcome path;
+			// committing an unchanged snapshot would mutate the new entry's revision.
+			result = frame.result
+			return nil
+		}
 		if err := e.validateEntityMutationList(&frame); err != nil {
 			result = frame.result
 			SetExecutionFailure(&result, err, "runtime.engine", "entity_final_candidate")
 			return err
 		}
 		result = frame.result
+		if req.Preview {
+			// Preview evaluates the same candidate but cannot prepare durable
+			// lifecycle occurrences or claim a successful mutation.
+			return nil
+		}
 		committed, err := e.persist(lockCtx, frame)
 		result = frame.result
 		result.Committed = committed.Committed
@@ -552,6 +565,9 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 		return result, err
 	}
 	postCommitErr = errors.Join(postCommitErr, err)
+	if req.Preview {
+		return result, postCommitErr
+	}
 	result.EmitIntents = append([]EmitIntent(nil), intents...)
 	result.ActivityIntents = append([]ActivityIntent(nil), activityIntents...)
 	result.ActivityRequestIntents = append([]EmitIntent(nil), activityRequests...)
@@ -684,6 +700,7 @@ func (e *Executor) runSteps(frame *executionFrame) error {
 		}
 		frame.result.ExecutedSteps = append(frame.result.ExecutedSteps, step)
 		if stop {
+			frame.discardedJoin = step == StepJoin && frame.result.Status == OutcomeDiscarded
 			frame.resolveNonRuleObservation()
 			return nil
 		}

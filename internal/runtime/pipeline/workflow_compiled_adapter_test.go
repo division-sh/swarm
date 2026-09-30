@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"slices"
 	"strings"
@@ -162,6 +163,9 @@ func newCompiledAdapterFixture(t *testing.T, backend string, bundle *contracts.W
 		path = flow + "/" + uuid.NewString()
 	}
 	f := &compiledAdapterFixture{t: t, db: db, store: store, pc: pc, bundle: bundle, ctx: ctx, flow: flow, path: path, entityID: uuid.NewString(), bus: bus}
+	if !seed {
+		f.entityID = FlowInstanceEntityID(path)
+	}
 	f.node = pipelineSourceNode(t, pc.SemanticSource(), flow, "router")
 	if seed {
 		instance := materializedWorkflowInstanceForTest(WorkflowInstance{
@@ -236,6 +240,48 @@ func (f *compiledAdapterFixture) execute(event string, evt events.Event) (contra
 	return executeNodeContractHandlerWithHandoff(f.t, f.pc, f.ctx, f.node, handler, workflowTriggerContext{Event: evt, HandlerEventKey: event, State: f.state()}, false)
 }
 
+// Existing-recipient component controls publish and claim here. First
+// materialization and pre-admission refusal specimens are separate proofs.
+func (f *compiledAdapterFixture) executeExistingRecipient(event string, evt events.Event) (contractHandlerExecutionResult, error) {
+	f.t.Helper()
+	if _, found := f.load(); !found {
+		f.t.Fatal("claimed component execution requires an already-existing recipient")
+	}
+	return f.executeAdmittedRecipient(event, evt, events.MustExistingEntityTarget(events.RouteIdentity{
+		FlowID: f.flow, FlowInstance: f.path, EntityID: f.entityID,
+	}))
+}
+
+func (f *compiledAdapterFixture) executeMaterializingRecipient(event string, evt events.Event) (contractHandlerExecutionResult, error) {
+	f.t.Helper()
+	if _, found := f.load(); found || f.entityID != FlowInstanceEntityID(f.path) {
+		f.t.Fatal("first materialization requires absence and the exact canonical future entity")
+	}
+	return f.executeAdmittedRecipient(event, evt, events.MustMaterializingEntityTarget(events.RouteIdentity{
+		FlowID: f.flow, FlowInstance: f.path, EntityID: f.entityID,
+	}))
+}
+
+func (f *compiledAdapterFixture) executeAdmittedRecipient(event string, evt events.Event, target events.DeliveryTargetOwnership) (contractHandlerExecutionResult, error) {
+	f.t.Helper()
+	handler, ok := f.pc.SemanticSource().ExecutableNodeEventHandlers(f.node)[event]
+	if !ok {
+		f.t.Fatalf("missing authored handler %s", event)
+	}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(f.node), Target: target}
+	ctx, err := persistWorkflowJoinPublicationForTest(f.t, f.pc, f.ctx, evt, route, true)
+	if err != nil {
+		return contractHandlerExecutionResult{}, err
+	}
+	result, err := executeClaimedWorkflowJoinForTest(f.t, f.pc, ctx, f.node, handler, workflowTriggerContext{
+		Event: evt, HandlerEventKey: event, State: f.state(),
+	})
+	if result.Committed {
+		err = errors.Join(err, f.pc.transferCommittedHandlerFollowUp(ctx, result.FollowUp, nil))
+	}
+	return result, err
+}
+
 func TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores(t *testing.T) {
 	bundle := compiledAdapterSource(t)
 	source := semanticview.Wrap(bundle)
@@ -246,7 +292,7 @@ func TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores(t *testing.T) {
 				t.Run(backend+"/"+from+"/"+event, func(t *testing.T) {
 					f := newCompiledAdapterFixture(t, backend, bundle, ".", from, true)
 					evt := f.event(event)
-					result, err := f.execute(event, evt)
+					result, err := f.executeExistingRecipient(event, evt)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -313,7 +359,7 @@ func TestPipelineCompiledTransitionNoOpOnBothStores(t *testing.T) {
 				if err != nil || len(timersBefore) != 1 {
 					t.Fatalf("initial timer missing: %v %#v", err, timersBefore)
 				}
-				result, err := f.execute(event, f.event(event))
+				result, err := f.executeExistingRecipient(event, f.event(event))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -348,7 +394,7 @@ func TestPipelineCompiledTransitionGuardDispositionOnBothStores(t *testing.T) {
 				f := newCompiledAdapterFixture(t, backend, bundle, ".", "ready", true)
 				before, _ := f.load()
 				evt := f.event(event)
-				result, err := f.execute(event, evt)
+				result, err := f.executeExistingRecipient(event, evt)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -379,7 +425,7 @@ func TestPipelineCompiledTransitionGuardDispositionOnBothStores(t *testing.T) {
 		t.Run(backend+"/child_kill", func(t *testing.T) {
 			f := newCompiledAdapterFixture(t, backend, bundle, "child", "ready", true)
 			evt := f.event("kill")
-			result, err := f.execute("kill", evt)
+			result, err := f.executeExistingRecipient("kill", evt)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -411,7 +457,7 @@ func TestGuardKillUsesExactStageInEitherDeclarationOrderBothStores(t *testing.T)
 				bundle := compiledAdapterSourceWithKillStages(t, tc.stages)
 				f := newCompiledAdapterFixture(t, backend, bundle, ".", "ready", true)
 				evt := f.event("kill")
-				result, err := f.execute("kill", evt)
+				result, err := f.executeExistingRecipient("kill", evt)
 				if err != nil || result.Outcome == nil || result.Outcome.Status != HandlerOutcomeKilled {
 					t.Fatalf("kill disposition: result=%#v err=%v", result, err)
 				}
@@ -784,7 +830,7 @@ func TestPipelineCompiledTransitionInitialAdmissionOnBothStores(t *testing.T) {
 		t.Run(backend+"/first_event", func(t *testing.T) {
 			f := newCompiledAdapterFixture(t, backend, bundle, ".", "", false)
 			evt := f.event("direct")
-			_, err := f.execute("direct", evt)
+			_, err := f.executeMaterializingRecipient("direct", evt)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -859,7 +905,7 @@ func TestPipelineCompiledTransitionInitialAdmissionOnBothStores(t *testing.T) {
 					t.Fatalf("initial replay repeated timer effects: %v %#v", err, timersAfter)
 				}
 				if stateless {
-					if _, err := f.execute("noop", f.event("noop")); err != nil {
+					if _, err := f.executeExistingRecipient("noop", f.event("noop")); err != nil {
 						t.Fatalf("stateless no-advance: %v", err)
 					}
 					if after, _ := f.load(); after.CurrentState != "pending" || len(after.TransitionHistory) != 0 {
@@ -981,7 +1027,7 @@ func TestCompiledTransitionPreviewExecutionAgreementOnBothStores(t *testing.T) {
 				if !reflect.DeepEqual(before, afterPreview) || f.bus.publishedCount() != 0 {
 					t.Fatal("preview wrote durable or public effects")
 				}
-				result, err := f.execute(event, evt)
+				result, err := f.executeExistingRecipient(event, evt)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -1024,7 +1070,7 @@ func TestCompiledTransitionPreviewExecutionAgreementOnBothStores(t *testing.T) {
 			if !reflect.DeepEqual(before, afterPreview) || f.bus.publishedCount() != 0 {
 				t.Fatal("template preview wrote durable or public effects")
 			}
-			result, err := f.execute("guarded", evt)
+			result, err := f.executeExistingRecipient("guarded", evt)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1048,7 +1094,7 @@ func TestCompiledTransitionPreviewExecutionAgreementOnBothStores(t *testing.T) {
 			if _, found := f.load(); found {
 				t.Fatal("initial preview created an instance")
 			}
-			result, err := f.execute("direct", evt)
+			result, err := f.executeMaterializingRecipient("direct", evt)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1104,7 +1150,7 @@ func TestCompiledTransitionPreviewExecutionAgreementOnBothStores(t *testing.T) {
 				"nodes.yaml":    "router:\n  execution_type: system_node\n  event_handlers:\n    start:\n      loop: {start: revision, from: ready}\n      advances_to: drafting\n    admit:\n      loop: {admit: revision, from: drafting}\n      advances_to: review\n    repeat:\n      loop: {repeat: revision, from: review}\n      advances_to: drafting\n",
 			})
 			f := newCompiledAdapterFixture(t, backend, loopBundle, ".", "ready", true)
-			if _, err := f.execute("start", f.event("start")); err != nil {
+			if _, err := f.executeExistingRecipient("start", f.event("start")); err != nil {
 				t.Fatal(err)
 			}
 			started, _ := f.load()
@@ -1117,7 +1163,7 @@ func TestCompiledTransitionPreviewExecutionAgreementOnBothStores(t *testing.T) {
 				t.Fatalf("missing loop activation: %v", err)
 			}
 			payload := mustJSON(map[string]any{"revision_id": activation.RevisionID})
-			if _, err := f.execute("admit", f.eventPayload("admit", payload)); err != nil {
+			if _, err := f.executeExistingRecipient("admit", f.eventPayload("admit", payload)); err != nil {
 				t.Fatal(err)
 			}
 			before, _ := f.load()
@@ -1134,7 +1180,7 @@ func TestCompiledTransitionPreviewExecutionAgreementOnBothStores(t *testing.T) {
 			if !reflect.DeepEqual(before, afterPreview) {
 				t.Fatal("loop preview changed activation")
 			}
-			result, err := f.execute("repeat", evt)
+			result, err := f.executeExistingRecipient("repeat", evt)
 			if err != nil {
 				t.Fatal(err)
 			}
