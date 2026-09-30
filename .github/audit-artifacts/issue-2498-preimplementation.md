@@ -2,7 +2,40 @@
 
 Issue: #2498, agent-g. Parent: #2407 R1.1.
 Baseline: `origin/master@21bff28c8f582b3d515c420ad299f963822504ec`.
-Phase: corpus gate approved; implementation frozen at the runtime-defect stop below, not runtime closure. Independent gate: [approved](https://github.com/division-sh/swarm/issues/2498#issuecomment-5901252923), with the following binding addendum recorded before implementation.
+Phase: corpus and bounded readback gates approved; implementation permitted, not runtime or corpus closure. Independent corpus gate: [approved](https://github.com/division-sh/swarm/issues/2498#issuecomment-5901252923). Independent readback gate: [approved](https://github.com/division-sh/swarm/issues/2498#issuecomment-5901655130). Integration baseline: `origin/master@4fccc57ec73ce54827167dddc5bbafac41ae66d2`; the earlier baseline below remains the reproduction record.
+
+## Approved production-readback amendment (recorded before production edits)
+
+The readback gate supersedes only the runtime-change stop condition below. The chosen additional working class is **public fan-out obligation readback parity across handler and deployment origins**. Its immediate parent is durable fan-out issuance/progress ownership; its broader coverage parent remains #2407. This is complete closure of that bounded class, not a pump, pause, recovery or performance redesign. Both classes must close before #2498 is complete. The local empty-bundle error is an entry point, not the boundary.
+
+Canonical semantic owners remain `fanoutobligation.IntentRequest` and `IntentKey`. Add one fail-closed typed origin-bundle projection consumed by readback and serving; delete `pipelinepersistence.fanOutIntentBundleHash`. Keep the comparable key, but explicitly serialize/parse the two disjoint origins. `ListPage`/cursor and the shared selected-store query project five-component byte ordering, not new scheduling authority. Authoritative governing references are `durable_data_resources.deployment_origin`, OpenRPC `FanOutIntentKey`, `FanOutIntentReadback`, `FanOutListPage`, and `run.fan_out.list`; the handler-only public contract must change in the same PR.
+
+| Manifestation | Planned exact proof |
+|---|---|
+| RB1: deployment readback loses the origin bundle for open/closed feeds | `TestDeploymentFanOutReadbackPreservesOriginBundle`; canonical projection malformed-origin/handler controls; selected-store readback on both stores |
+| RB2: distinct deployment feeds compare equal; mixed-origin paging diverges from SQL | `TestFanOutReadMixedOriginPaginationBothStores`, limits 1/2, continuation through a reopened handle, open/closed/paused facts, wrong run/filter refusal and exact handler-only filters |
+| RB3: deployment wire key includes empty handler fields and OpenRPC forbids deployment | Comparable-key JSON/cursor exact round-trip, mixed/missing/unknown/null-field refusals; `TestFanOutReadAPISchema` both-origin result and negative schema controls; authoritative spec union and ordering update |
+| RB4: real enriched API/compiled CLI consumers reject valid deployment readback | Existing real `run start --data` and `run.pause` process gates, enriched `run.fan_out.list`, compiled `run fan-out` consumer, on SQLite/PostgreSQL before resuming M05/M09/M12 |
+
+Systematic consumption census (exhaustive for this class):
+
+| Consumer | Disposition |
+|---|---|
+| `Intent.ReadbackAt` | moved to canonical typed bundle projection in this work |
+| `fan_out_owner.go` pinned source loading and `fan_out_serving.go` ordinary/selected grant checks | moved to canonical projection; remove the local duplicate |
+| both stores' `ListFanOutIntents`, `fanOutKeyPredicate`, exact execution observations | already consume typed request/key; align page/cursor comparator, prove both origins |
+| cursor JSON encode/decode and `ListPage.Validate` | already consume key; moved to canonical disjoint wire and five-component ordering |
+| `ObserveFanOutRuntimePage` | already consumes exact keys and row bundle versus observed grant; real enriched deployment proof required |
+| apiv1 `runFanOutListHandler`, OpenRPC result validator | already consume page validation; move schema to disjoint key alternatives and execute both origins |
+| CLI fan-out reader | already consumes page validation; real compiled deployment-origin consumption required |
+| handler-only declaration/source admission and handler filters | different origin-specific concept; retained exact handler tests and mixed-page exclusion controls |
+| `run.diagnose` | different aggregate concept, not an exact obligation-key page; no change or closure credit |
+
+No additional live interpreter was found. Old handler-shaped public deployment wire/schema and the store-local bundle interpreter become invalid; no fallback, migration, compatibility, new filter/endpoint, queue, framework or second readback owner. Runtime production readback closure is feasible in this PR; fixing only the bundle would leave two same-concept interpreters live and is explicitly insufficient.
+
+Tracker action: update #2498 body/audit now, refine existing semantic node `durable_fan_out_issuance_and_progress_ownership` in addition to the invariant-suite node. The watchlist promotion check supports absorbing this finite projection class now, not the broader serving/performance siblings (#2394) or all #2407 rows. Parent remains open, with its other four acceptance-program rows unchanged; no remaining child tail is claimed closed by this repair. Correct stale R1.1 gate-pending accounting in the final proof record. Architecture feedback (handler-shaped DTO over two origins) is tracked in these existing nodes/#2498; fix now through the existing typed owner, roughly one bounded implementation/proof pass, high ROI across all public consumers. No new issue or POTENTIAL_ISSUES entry.
+
+Supported-surface proof above is mandatory, followed by the original 23-row/U1-U5 corpus and final default `swarm-test`. No corpus, restart or parent closure follows from unit tests alone. Stop/re-gate only for a new production owner, broader contract, unreachable recovery checkpoint or nondiscriminating mutation. The original stop text below is historical evidence, superseded by this recorded approval rather than erased.
 
 ## Approved gate addendum
 
