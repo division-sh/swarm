@@ -95,6 +95,26 @@ func TestConnectionResolutionClosedAdmission(t *testing.T) {
 	}
 }
 
+func TestCompiledConnectionInputEvidenceIsDetached(t *testing.T) {
+	catalog := TypeCatalogDocument{Types: map[string]NamedTypeDecl{
+		"Key": {Fields: map[string]TypeFieldSpec{"name": {Type: "text"}}},
+	}}
+	input := CompiledConnectionInput{value: &compiledConnectionInputValue{
+		evidence: FlowInputInstanceSourceTypeEvidence{
+			SourceType:   CatalogTypeReference{Catalog: catalog},
+			ReceiverType: CatalogTypeReference{Catalog: catalog},
+		},
+	}}
+	returned := input.SourceEvidence()
+	returned.SourceType.Catalog.Types["Key"].Fields["name"] = TypeFieldSpec{Type: "integer"}
+	delete(returned.ReceiverType.Catalog.Types, "Key")
+	for _, got := range []CatalogTypeReference{input.SourceEvidence().SourceType, input.SourceEvidence().ReceiverType} {
+		if got.Catalog.Types["Key"].Fields["name"].Type != "text" {
+			t.Fatal("returned type catalog mutated compiled connection evidence")
+		}
+	}
+}
+
 func TestEdgeResolutionPreservesPinInitialization(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	for _, mode := range []FlowInputResolutionMode{FlowInputResolutionModeCreate, FlowInputResolutionModeSelectOrCreate, FlowInputResolutionModeSelect} {

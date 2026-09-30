@@ -3,6 +3,7 @@ package serveapp
 import (
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/operatorread"
@@ -111,10 +112,30 @@ func requireConnectionPolicyRoutes(t *testing.T, rt servedControlProofRuntime, p
 		if len(event.Deliveries) != 2 {
 			t.Fatalf("public delivery readback=%+v, want two edge deliveries", event.Deliveries)
 		}
+		var wantTargets []string
+		for _, plan := range plans {
+			field := strings.TrimPrefix(plan.InstanceKey().Readback().SourcePath, "payload.")
+			key, ok := event.Payload[field].(string)
+			if !ok {
+				t.Fatalf("public payload lacks source field %s: %#v", field, event.Payload)
+			}
+			digest := plan.ReceiverKeyDigest([]contracts.TemplateInstanceKeyValue{{Field: plan.InstanceKey().Field(), Value: key}})
+			wantTargets = append(wantTargets, "worker/ti-"+digest[:24])
+		}
+		var gotTargets []string
 		for _, delivery := range event.Deliveries {
 			if delivery.Status != "delivered" {
 				t.Fatalf("unsettled edge delivery: %+v", delivery)
 			}
+			if delivery.Target.FlowID != "worker" {
+				t.Fatalf("public readback changed receiver ownership: %+v", delivery.Target)
+			}
+			gotTargets = append(gotTargets, delivery.Target.FlowInstance)
+		}
+		sort.Strings(wantTargets)
+		sort.Strings(gotTargets)
+		if !reflect.DeepEqual(gotTargets, wantTargets) {
+			t.Fatalf("public edge targets=%v, want %v", gotTargets, wantTargets)
 		}
 	}
 }
