@@ -3631,6 +3631,9 @@ handler_specification:
       deferred post-commit dispatch. Consumers use the committed publication's exact event, including its timestamp
       and route projection; they MUST NOT reconstruct a second event with the same ID after COMMIT or retry a failed
       staged handoff as a fresh publication.
+      Handler preview validates and evaluates the same candidate and compiled transition evidence without entering
+      mutation or lifecycle preparation. It has no admitted delivery occurrence, cannot settle a claim or report
+      committed effects, and never writes state, history, arms, schedules, publications or activity requests.
     consequence: Since independent steps (advances_to, sets_gate, data_accumulation) commit together, their relative execution
       order is cosmetic. The database sees one atomic write. An implementer may write data before or after state advance —
       the result is identical.
@@ -5990,6 +5993,9 @@ engine:
       close, stage-exit cancellation, supersession, settlement, persistence, hydration, and fork reminting. Re-entry into the
       same stage creates a distinct lifecycle entry even with unchanged captured loop generation. Replacement or
       cancellation is atomic and cannot cancel or mutate a sibling declaration or another entry.
+      An obsolete join continuation discarded before outcome execution performs no entity write, including no revision
+      increment. Its exact delivery claim still settles once through the canonical no-op settlement path. This does not
+      change guard-discard handling for an admitted outcome or the evidence retained when a join outcome actually executes.
     schedule_ownership: >-
       A join activation that creates its required completion or declared deadline schedule must have at least one exact owner before
       the selected mutation can commit: either a durable generic schedule store or a process scheduler. If neither capability
