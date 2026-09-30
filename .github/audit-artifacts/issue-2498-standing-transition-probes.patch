@@ -1,0 +1,52 @@
+diff --git a/internal/serveapp/standing_runtime_context_owner_test.go b/internal/serveapp/standing_runtime_context_owner_test.go
+index 0ef1e545b..5dcf7d5fc 100644
+--- a/internal/serveapp/standing_runtime_context_owner_test.go
++++ b/internal/serveapp/standing_runtime_context_owner_test.go
+@@ -224,0 +225,4 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
++			resetWhileSuspended := invoke("reset")
++			if resetWhileSuspended.Generation != 2 || resetWhileSuspended.EffectiveState != "suspended" {
++				t.Fatalf("reset did not preserve suspension: %+v", resetWhileSuspended)
++			}
+diff --git a/internal/runtime/standing_retired_transition_probe_test.go b/internal/runtime/standing_retired_transition_probe_test.go
+new file mode 100644
+index 000000000..221e9aca7
+--- /dev/null
++++ b/internal/runtime/standing_retired_transition_probe_test.go
+@@ -0,0 +1,37 @@
++package runtime
++
++import (
++	"context"
++	"testing"
++)
++
++func TestAuditStandingOperatorTransitionAfterRetirement(t *testing.T) {
++	catalog := runtimeAdmissionTestCatalog(t, "a")
++	definition := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
++	definition.Runtime.Scheduler = runtimeContextTestScheduler(t, definition.WorkOwner, nil)
++	manager, err := newTestRuntimeContextManager(t, nil, definition)
++	if err != nil {
++		t.Fatal(err)
++	}
++	serviceID := definition.StandingTargets[0].ServiceID
++	transition, err := manager.BeginStandingServiceTransition(context.Background(), serviceID)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := transition.Wait(context.Background()); err != nil {
++		t.Fatal(err)
++	}
++	if err := transition.Retire(context.Background()); err != nil {
++		t.Fatal(err)
++	}
++	use, _, err := manager.AcquireStandingService(context.Background(), serviceID)
++	if err != nil {
++		t.Fatalf("declared service lost operator context: %v", err)
++	}
++	if err := use.Done(); err != nil {
++		t.Fatal(err)
++	}
++	if _, err := manager.BeginStandingServiceTransition(context.Background(), serviceID); err != nil {
++		t.Fatalf("loaded retired service cannot reach its next operator transaction: %v", err)
++	}
++}
