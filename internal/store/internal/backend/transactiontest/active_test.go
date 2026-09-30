@@ -4,10 +4,15 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
 func TestActiveTransactionTailClassification(t *testing.T) {
+	synctest.Test(t, testActiveTransactionTailClassification)
+}
+
+func testActiveTransactionTailClassification(t *testing.T) {
 	var slot Slot
 	collector, restore, err := slot.Install(Options{Delay: 20 * time.Millisecond, DelayScope: DelayAllCommits})
 	if err != nil {
@@ -44,10 +49,8 @@ func TestActiveTransactionTailClassification(t *testing.T) {
 		close(done)
 	}()
 	delayClass := ActiveClass{Operation: PipelineSettlement, Phase: PhaseCommitDelay, Retained: true}
-	deadline := time.Now().Add(time.Second)
-	for collector.Snapshot().ActiveByClass[delayClass] == 0 && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
+	// Hold virtual time at the real BeforeCommit delay, rather than sampling a wall-clock window.
+	synctest.Wait()
 	assertActive(delayClass, 1)
 	<-done
 	assertActive(ActiveClass{Operation: PipelineSettlement, Phase: PhaseCommitCall, Retained: true}, 1)
