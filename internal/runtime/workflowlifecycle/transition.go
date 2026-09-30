@@ -103,10 +103,7 @@ func (t Transition) ValidateHandlerEvidence(handler contracts.SystemNodeEventHan
 		}
 		var labels []string
 		for _, check := range handler.Guard.EffectiveChecks() {
-			label := strings.TrimSpace(check.ID)
-			if label == "" {
-				label = strings.TrimSpace(check.Check)
-			}
+			label := check.EffectiveIdentity()
 			if label != "" {
 				labels = append(labels, label)
 			}

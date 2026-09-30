@@ -4327,8 +4327,11 @@ func TestExecutor_GuardRecursesAndUsesRegistryCheck(t *testing.T) {
 			Guard: &runtimecontracts.GuardSpec{
 				Check: "shadowed.top.level.check",
 				Checks: []runtimecontracts.GuardCheck{
-					{ID: "payload_score", Check: "payload.score > 5"},
-					{ID: "registry_guard"},
+					{},
+					{ID: " payload_score ", Check: "payload.score > 5"},
+					{Check: " payload.score > 5 "},
+					{ID: " registry_guard "},
+					{},
 				},
 			},
 		},
@@ -4339,7 +4342,7 @@ func TestExecutor_GuardRecursesAndUsesRegistryCheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if got := result.GuardsEvaluated; !reflect.DeepEqual(got, []string{"payload_score", "registry_guard"}) {
+	if got := result.GuardsEvaluated; !reflect.DeepEqual(got, []string{"payload_score", "payload.score > 5", "registry_guard"}) {
 		t.Fatalf("GuardsEvaluated = %#v", got)
 	}
 }

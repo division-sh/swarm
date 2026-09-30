@@ -2976,7 +2976,7 @@ func (e *Executor) evaluateGuardSpec(frame *executionFrame, spec *runtimecontrac
 	effective := spec.EffectiveChecks()
 	evaluated := make([]string, 0, len(effective))
 	for _, check := range effective {
-		passed, ids, err := e.evaluateGuardCheck(frame, check.ID, check.Check, spec.PolicyRef)
+		passed, ids, err := e.evaluateGuardCheck(frame, check)
 		evaluated = append(evaluated, ids...)
 		if err != nil {
 			return false, evaluated, err
@@ -2988,50 +2988,48 @@ func (e *Executor) evaluateGuardSpec(frame *executionFrame, spec *runtimecontrac
 	return true, evaluated, nil
 }
 
-func (e *Executor) evaluateGuardCheck(frame *executionFrame, id, check, policyRef string) (bool, []string, error) {
-	id = strings.TrimSpace(id)
-	check = strings.TrimSpace(check)
+func (e *Executor) evaluateGuardCheck(frame *executionFrame, guard runtimecontracts.GuardCheck) (bool, []string, error) {
+	label := guard.EffectiveIdentity()
+	if label == "" {
+		return true, nil, nil
+	}
+	id := strings.TrimSpace(guard.ID)
+	check := strings.TrimSpace(guard.Check)
+	evaluated := []string{label}
 	if check != "" {
 		passed, err := e.evaluator.EvalBool(check, e.currentContext(frame), joinExpressionOptions(frame))
 		if err == nil {
-			evaluated := []string{check}
-			if id != "" {
-				evaluated = []string{id}
-			}
 			return passed, evaluated, nil
 		}
 		if err != ErrNotImplemented || id == "" {
-			return false, []string{firstNonEmpty(id, check)}, err
+			return false, evaluated, err
 		}
-	}
-	if id == "" {
-		return true, nil, nil
 	}
 	guardKey := identity.NormalizeGuardKey(id)
 	if e.deps.GuardRegistry == nil {
-		return false, []string{id}, fmt.Errorf("guard %q requires runtime registry", id)
+		return false, evaluated, fmt.Errorf("guard %q requires runtime registry", id)
 	}
 	entry, ok := e.deps.GuardRegistry.Guard(guardKey)
 	if !ok || !e.deps.GuardRegistry.IsExecutable(guardKey) {
-		return false, []string{id}, fmt.Errorf("guard %q is not executable", id)
+		return false, evaluated, fmt.Errorf("guard %q is not executable", id)
 	}
 	if strings.TrimSpace(entry.Check) != "" {
 		passed, err := e.evaluator.EvalBool(entry.Check, e.currentContext(frame), joinExpressionOptions(frame))
 		if err == nil {
-			return passed, []string{id}, nil
+			return passed, evaluated, nil
 		}
 		if err != ErrNotImplemented {
-			return false, []string{id}, err
+			return false, evaluated, err
 		}
 	}
 	if e.deps.GuardRunner != nil {
 		execCtx := e.executionContext(frame, StepGuard)
 		passed, handled, err := e.deps.GuardRunner.EvaluateGuard(frame.ctx, guardKey, entry, execCtx)
 		if handled || err != nil {
-			return passed, []string{id}, err
+			return passed, evaluated, err
 		}
 	}
-	return false, []string{id}, fmt.Errorf("guard %q is not executable", id)
+	return false, evaluated, fmt.Errorf("guard %q is not executable", id)
 }
 
 func (e *Executor) selectRule(frame *executionFrame, rules []runtimecontracts.HandlerRuleEntry, source handlerRuleSource) (*runtimecontracts.HandlerRuleEntry, int, error) {

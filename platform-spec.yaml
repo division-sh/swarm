@@ -476,7 +476,14 @@ contract_formats:
         Structural stage reachability also consumes compiled possible guard
         termination facts, separately from ordinary edges. A fact retains the
         exact flow-local source, target, node, handler and failing-check identity
-        for an admitted kill guard. Source eligibility is the pre-guard handler
+        for an admitted kill guard. Effective check identity is the trimmed id
+        when present, otherwise the trimmed inline check expression; compilation,
+        execution and durable cause validation consume that same identity.
+        A check with neither an id nor an expression is a no-op: it evaluates no
+        check and contributes no possible termination. Empty check rows and
+        policy_ref-only annotations cannot make a stage reachable. Named registry
+        checks remain executable candidates; anonymous inline checks require no
+        newly mandatory id. Source eligibility is the pre-guard handler
         scope: loop admission precedes guards, and join evaluation follows them.
         Only a reachable nonterminal source can lend reachability; the spelling
         killed alone or a sibling flow's guard cannot. This is possibility, not

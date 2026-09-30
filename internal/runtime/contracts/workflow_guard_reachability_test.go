@@ -8,6 +8,41 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 )
 
+func TestGuardTerminationEffectiveCheckIdentity(t *testing.T) {
+	node := identitytest.RootNode(t, "router")
+	for _, tc := range []struct {
+		name  string
+		guard GuardSpec
+		want  []string
+	}{
+		{"on fail only", GuardSpec{}, nil},
+		{"empty chain", GuardSpec{Checks: []GuardCheck{{}}}, nil},
+		{"policy only", GuardSpec{PolicyRef: "threshold"}, nil},
+		{"whitespace only", GuardSpec{ID: " ", Check: " \t"}, nil},
+		{"unnamed", GuardSpec{Check: " payload.score >= 70 "}, []string{"payload.score >= 70"}},
+		{"unnamed chain", GuardSpec{Checks: []GuardCheck{{Check: " payload.first "}, {Check: "payload.second"}}}, []string{"payload.first", "payload.second"}},
+		{"named", GuardSpec{ID: " score_check ", Check: "false"}, []string{"score_check"}},
+		{"registry", GuardSpec{ID: " registered_check "}, []string{"registered_check"}},
+		{"mixed chain", GuardSpec{Check: "shadowed", Checks: []GuardCheck{{}, {ID: " first ", Check: "true"}, {Check: " false "}, {ID: "registry"}, {}}}, []string{"false", "first", "registry"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.guard.OnFail = "kill"
+			graph := BuildWorkflowStageTopology(".", "ready", []string{"ready", "killed"}, []string{"killed"}, []HandlerTransitionSemantic{{Node: node, EventType: "work", Guard: &tc.guard}}, nil, nil)
+			var ids []string
+			for _, possibility := range graph.PossibleGuardTerminations() {
+				ids = append(ids, possibility.GuardID)
+			}
+			if !reflect.DeepEqual(ids, tc.want) {
+				t.Fatalf("effective identities = %v, want %v", ids, tc.want)
+			}
+			_, reachable := graph.LifecycleReachableStages("ready")["killed"]
+			if reachable != (len(tc.want) != 0) {
+				t.Fatalf("non-executing check lent reachability: %v", reachable)
+			}
+		})
+	}
+}
+
 func TestGuardTerminationPossibilityIsNotTransitionAuthority(t *testing.T) {
 	node := identitytest.RootNode(t, "router")
 	guard := &GuardSpec{Checks: []GuardCheck{{ID: "first", Check: "true"}, {ID: "second", Check: "false"}}, OnFail: "kill"}
