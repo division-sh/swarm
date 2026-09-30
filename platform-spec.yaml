@@ -12056,6 +12056,11 @@ flow_model:
         and writes are legal without caller-selected entity_id; caller-selected
         or multi-row acquisition remains invalid. No placeholder entity fields
         or permissive resolver fallback may satisfy these obligations.
+        An entity_id field in an admitted provider envelope is transport data,
+        not primary-entity selection authority; public or harness input authority
+        still requires caller-selection rejection even if provider evidence is
+        also present. Selected-root contained state uses the root primary owner,
+        never a child-only singleton coordinator contract.
     composition_model:
       status: references_existing_owner
       canonical_routing_owner: platform-spec.yaml#flow_model.composition_routing

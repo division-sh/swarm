@@ -14,7 +14,7 @@ func checkContainedStateOperationCompliance(c *checkerContext) []Finding {
 	findings := make([]Finding, 0)
 	bundle, _ := semanticview.Bundle(c.source)
 	for _, ref := range wave1ContainedStateOperations(c.source) {
-		if schema, ok := c.source.FlowSchemaByID(ref.flowID()); ok && schema.EffectiveMode() == runtimecontracts.FlowModeStatic {
+		if schema, ok := c.source.FlowSchemaByID(ref.flowID()); ok && schema.EffectiveMode() == runtimecontracts.FlowModeStatic && ref.flowID() != semanticview.RootExecutionFlowID(c.source) {
 			if bundle == nil {
 				findings = append(findings, containedStateOperationFinding(ref, "singleton coordinator owner is unavailable"))
 				continue

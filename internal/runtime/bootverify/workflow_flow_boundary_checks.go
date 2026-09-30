@@ -282,7 +282,8 @@ func (c *checkerContext) flowBoundaryCreateEntityValidation() []Finding {
 				}
 				nodeRef, _ := semanticview.ResolveExecutableNodeDeclaration(c.source, validationScope.semanticFlowID, nodeID)
 				if bootverifyHandlerMaterializesEntity(c.source, nodeRef, eventType, validationScope.semanticFlowID, handler) &&
-					flowInputEventDeclaresPayloadField(c.source, validationScope.semanticFlowID, eventType, "entity_id") {
+					flowInputEventDeclaresPayloadField(c.source, validationScope.semanticFlowID, eventType, "entity_id") &&
+					flowInputHasCallerSelectedIdentity(c.source, validationScope.semanticFlowID, eventType) {
 					c.flowBoundaryCreateEntityFindings = append(c.flowBoundaryCreateEntityFindings, Finding{
 						CheckID:  "flow_boundary_create_entity_validation",
 						Severity: "error",
@@ -337,6 +338,15 @@ func flowInputEventDeclaresPayloadField(source semanticview.Source, flowID, even
 	}
 	_, ok := semanticview.ResolveEventSchema(source, flowID, eventType).Field(field)
 	return ok
+}
+
+func flowInputHasCallerSelectedIdentity(source semanticview.Source, flowID, eventType string) bool {
+	producer := runtimepinrouting.ResolveFlowInputProducer(source, flowID, eventType)
+	// A provider envelope's entity_id is transport data, not entity acquisition
+	// authority. Public or harness admission still permits caller-supplied data.
+	return producer.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryExternalIngress) ||
+		producer.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryHarnessInjection) ||
+		!producer.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryIntrinsicIngress)
 }
 
 func bootverifyHandlerMaterializesEntity(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType, flowID string, handler runtimecontracts.SystemNodeEventHandler) bool {
