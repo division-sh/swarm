@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -40,6 +41,7 @@ func TestGoldenNumericDataScatterParkRestartBothStores(t *testing.T) {
 			writeReleaseFile(t, filepath.Join(root, "go.mod"), "module numeric-hostile-ancestor\n\ngo 1.23.0\n")
 			project := filepath.Join(root, "yaml-project")
 			copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), numericScatterSource), filepath.Join(project, "contracts"))
+			expected, corpus := loadNumericFeedCorpus(t, filepath.Join(project, "contracts"))
 			writeReleaseFile(t, filepath.Join(project, ".swarm/swarm.yaml"), goldenRuntimeConfig(store))
 			writeReleaseFile(t, filepath.Join(project, "api-token"), goldenAPIToken+"\n")
 			env := goldenProcessEnv(t, root, store.passwordEnv, 0)
@@ -71,13 +73,17 @@ func TestGoldenNumericDataScatterParkRestartBothStores(t *testing.T) {
 				return p
 			}
 			p := start()
+			creationEndpoint := p.apiBase
 			runID := uuid.NewString()
 			issued := time.Now()
-			result := runReleaseCommand(t, goldenStartupTimeout, project, cliEnv, "", binary,
-				"run", "start", "--connect", p.apiBase,
-				"--bundle-hash", goldenServedBundleHash(t, p.rpc, "mock_only"),
-				"--run-id", runID, "--idempotency-key", "numeric-"+runID,
-				"--data", "item.registered=contracts/data/items.jsonl", "--no-follow")
+			bundleHash := goldenServedBundleHash(t, p.rpc, "mock_only")
+			create := func() releaseCommandResult {
+				return runReleaseCommand(t, goldenStartupTimeout, project, cliEnv, "", binary,
+					"run", "start", "--connect", p.apiBase, "--bundle-hash", bundleHash,
+					"--run-id", runID, "--idempotency-key", "numeric-"+runID,
+					"--data", "item.registered=contracts/data/items.jsonl", "--no-follow")
+			}
+			result := create()
 			if result.err != nil || !strings.Contains(result.output, "run_id="+runID) {
 				t.Fatalf("numeric compiled run start: %v\n%s", result.err, result.output)
 			}
@@ -206,11 +212,53 @@ func TestGoldenNumericDataScatterParkRestartBothStores(t *testing.T) {
 			}); err != nil {
 				t.Fatalf("numeric intake convergence: %v\n%s", err, p.output.String())
 			}
+			entities := assertNumericFeedPublic(t, ctx, p.rpc, runID, expected, corpus)
+			creation := readNumericCreationReceipt(t, ctx, p.rpc, runID)
+			settled := captureFullLifecycleEvidence(t, p.rpc, runID)
+			closed, err := readNumericFeed(ctx, p.rpc, runID)
+			if err != nil {
+				t.Fatal(err)
+			}
 			shutdownStarted := time.Now()
 			if err := p.stopAndWait(runtimepkg.DefaultShutdownGrace + 5*time.Second); err != nil {
 				t.Fatalf("numeric shutdown: %v\n%s", err, p.output.String())
 			}
 			t.Logf("100-item shutdown took %s with documented default grace %s", time.Since(shutdownStarted), runtimepkg.DefaultShutdownGrace)
+			timers := inspectNumericFeedTimers(t, ctx, root, store, runID, expected, entities)
+			p = start()
+			if got := assertNumericFeedPublic(t, ctx, p.rpc, runID, expected, corpus); !reflect.DeepEqual(got, entities) {
+				t.Fatal("settled restart changed exact receiver identities")
+			}
+			restored := captureFullLifecycleEvidence(t, p.rpc, runID)
+			for eventID, facts := range settled.EventFacts {
+				if got := restored.EventFacts[eventID]; got != facts {
+					t.Fatalf("settled restart changed event/delivery %s", eventID)
+				}
+			}
+			replayed := create()
+			wantOutput := strings.ReplaceAll(result.output, creationEndpoint, p.apiBase)
+			if replayed.err != nil || replayed.output != wantOutput {
+				t.Fatalf("permanent creation retry after process loss: err=%v before=%s after=%s", replayed.err, result.output, replayed.output)
+			}
+			if got := readNumericCreationReceipt(t, ctx, p.rpc, runID); !reflect.DeepEqual(got, creation) {
+				t.Fatal("permanent creation receipt changed on retry")
+			}
+			if got := assertNumericFeedPublic(t, ctx, p.rpc, runID, expected, corpus); !reflect.DeepEqual(got, entities) {
+				t.Fatal("permanent retry recreated or retargeted receivers")
+			}
+			afterReplay := captureFullLifecycleEvidence(t, p.rpc, runID)
+			if !reflect.DeepEqual(afterReplay, restored) {
+				t.Fatal("permanent retry changed frozen run/domain facts")
+			}
+			if got, err := readNumericFeed(ctx, p.rpc, runID); err != nil || got.Key != closed.Key || got.Cursor != closed.Cursor || got.Cardinality != closed.Cardinality || got.Status != closed.Status {
+				t.Fatalf("permanent retry changed exact feed: %+v %v", got, err)
+			}
+			if err := p.stopAndWait(runtimepkg.DefaultShutdownGrace + 5*time.Second); err != nil {
+				t.Fatalf("numeric retained shutdown: %v\n%s", err, p.output.String())
+			}
+			if got := inspectNumericFeedTimers(t, ctx, root, store, runID, expected, entities); !reflect.DeepEqual(got, timers) {
+				t.Fatal("settled restart/retry changed exact typed timer activations")
+			}
 		})
 	}
 }

@@ -2022,34 +2022,24 @@ func TestWorkflowTimerGlobalRestoreDefersStandingUntilRunScopedAdoptionOnBothSto
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.open(t)
 			standingCtx := ctx
+			flowPath := "standing-workflow-timer"
+			sourceFact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+			if !ok {
+				t.Fatal("standing timer test context missing bundle source fact")
+			}
+			bundleHash := sourceFact.BundleHash()
 			if store.isSQLite() {
 				if _, err := store.testDB().ExecContext(ctx, `
-						CREATE TABLE standing_services (
-							service_id TEXT NOT NULL,
-							current_run_id TEXT NOT NULL,
-							current_generation INTEGER NOT NULL,
-							declaration_present BOOLEAN NOT NULL,
-							effective_state TEXT NOT NULL,
-							operator_override TEXT NOT NULL
-						)
-					`); err != nil {
-					t.Fatalf("create standing ownership fixture: %v", err)
-				}
-				if _, err := store.testDB().ExecContext(ctx, `
 						INSERT INTO standing_services (
-							service_id, current_run_id, current_generation,
-							declaration_present, effective_state, operator_override
-						) VALUES (?, ?, 1, TRUE, 'active', 'none')
-					`, uuid.NewString(), runtimecorrelation.RunIDFromContext(ctx)); err != nil {
+							service_id, flow_path, instance_id, entity_id, declaration_present,
+							operator_override, effective_state, current_bundle_hash,
+							revision_sequence, current_generation, current_run_id, publication_state,
+							publication_sequence, created_at, updated_at
+						) VALUES (?, ?, ?, ?, TRUE, 'none', 'active', ?, 1, 1, ?, 'pending', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+						`, runtimeflowidentity.StandingServiceID(flowPath), flowPath, flowPath, uuid.NewString(), bundleHash, runtimecorrelation.RunIDFromContext(ctx)); err != nil {
 					t.Fatalf("seed standing ownership fixture: %v", err)
 				}
 			} else {
-				flowPath := "standing-workflow-timer"
-				sourceFact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
-				if !ok {
-					t.Fatal("standing timer test context missing bundle source fact")
-				}
-				bundleHash := sourceFact.BundleHash()
 				if _, err := store.testDB().ExecContext(ctx, `
 					INSERT INTO standing_services (
 						service_id, flow_path, instance_id, entity_id, declaration_present,
