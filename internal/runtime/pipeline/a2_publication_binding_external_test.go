@@ -592,7 +592,7 @@ pins:
       - {event: item.completed, resolution: {mode: select}}
 `,
 		"orders/entities.yaml": "order_state:\n  order_id: {type: text, indexed: true}\n  expected: \"[text]\"\n",
-		"orders/events.yaml":   "manual.abort: {}\ndispatch.completed: {}\n",
+		"orders/events.yaml":   "manual.abort:\ndispatch.completed:\n",
 		"orders/nodes.yaml": `collector:
   execution_type: system_node
   event_handlers:

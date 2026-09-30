@@ -62,7 +62,7 @@ pins:
     id: text
     marker: text
 `,
-		"events.yaml": `seed: {}
+		"events.yaml": `seed:
 item.keyed: &item
   id: text?
   marker: text
