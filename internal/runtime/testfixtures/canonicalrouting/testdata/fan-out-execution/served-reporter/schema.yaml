@@ -26,3 +26,4 @@ connect:
   - event: account.notify.requested
     from: portfolio
     to: account
+    resolution: select

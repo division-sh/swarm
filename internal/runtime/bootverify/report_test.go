@@ -5511,6 +5511,26 @@ func TestRun_ProviderTransportEntityIDDoesNotElectCanonicalPrimary(t *testing.T)
 	}
 }
 
+func TestRun_FanOutExecutionOverlaysRetainConnectionPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		copy func(testing.TB) string
+	}{
+		{"served-reporter", canonicalrouting.CopyServedFanOutReporter},
+		{"mixed-agent", canonicalrouting.CopyFanOutMixedAgentRoute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), tc.copy(t), runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+			for _, check := range []string{"composition_connect_validation", "input_pin_wiring", "pin_target_resolution"} {
+				if reportContains(report.Errors(), check, "") {
+					t.Fatalf("execution overlay lost connection authority: %#v", report.Errors())
+				}
+			}
+		})
+	}
+}
+
 func TestRun_ProviderEvidenceDoesNotHidePublicCallerSelectedEntityID(t *testing.T) {
 	root := canonicalrouting.CopyRootDefaultStaticInput(t, canonicalrouting.RootStaticMaterialize, canonicalrouting.RootStaticOptionalEntityID)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
