@@ -121,7 +121,9 @@ func quotedCardReceiptMatchesTx(ctx context.Context, tx *sql.Tx, text operatorch
 		JOIN channel_delivery_defaults selected ON selected.singleton_id=1 AND selected.state='current'
 			AND selected.interface_key=plan.interface_key AND selected.delivery_epoch=plan.delivery_epoch
 			AND selected.binding_revision=plan.binding_revision AND selected.principal_id=plan.principal_id
-		WHERE receipt.state='sent' AND plan.state<>'retired' AND plan.source_kind='card' AND plan.source_id=?
+		WHERE receipt.state='sent' AND plan.state='sent'
+		AND plan.current_receipt_operation_id=receipt.effect_operation_id AND plan.current_render_id=receipt.render_id
+		AND plan.source_kind='card' AND plan.source_id=?
 		AND plan.principal_id=? AND plan.interface_key=? AND plan.binding_revision=?
 		AND plan.external_account_reference=? AND plan.conversation_reference=? AND plan.conversation_scope=?`
 	if postgres {
@@ -130,7 +132,9 @@ func quotedCardReceiptMatchesTx(ctx context.Context, tx *sql.Tx, text operatorch
 			JOIN channel_delivery_defaults selected ON selected.singleton_id=1 AND selected.state='current'
 				AND selected.interface_key=plan.interface_key AND selected.delivery_epoch=plan.delivery_epoch
 				AND selected.binding_revision=plan.binding_revision AND selected.principal_id=plan.principal_id
-			WHERE receipt.state='sent' AND plan.state<>'retired' AND plan.source_kind='card' AND plan.source_id=$1::uuid
+			WHERE receipt.state='sent' AND plan.state='sent'
+			AND plan.current_receipt_operation_id=receipt.effect_operation_id AND plan.current_render_id=receipt.render_id
+			AND plan.source_kind='card' AND plan.source_id=$1::uuid
 			AND plan.principal_id=$2::uuid AND plan.interface_key=$3 AND plan.binding_revision=$4
 			AND plan.external_account_reference=$5 AND plan.conversation_reference=$6 AND plan.conversation_scope=$7`
 	}

@@ -497,20 +497,7 @@ func FreezeCard(card decisioncard.Card, revision int64, dispatchState string, au
 		lines = append(lines, "Entity: "+scope.EntityID)
 	}
 	lines = append(lines, "Context: "+string(contextJSON))
-	switch card.Status {
-	case decisioncard.StatusPending:
-		lines = append(lines, "Decision: pending")
-		if !card.DeferredUntil.IsZero() {
-			lines = append(lines, "Deferred until: "+card.DeferredUntil.UTC().Format(time.RFC3339Nano))
-		}
-	case decisioncard.StatusDecided:
-		lines = append(lines, "Decision: "+card.Verdict, "Actor: "+card.DecidedBy,
-			"At: "+card.DecidedAt.UTC().Format(time.RFC3339Nano))
-	case decisioncard.StatusSuperseded:
-		lines = append(lines, "The flow moved on. No action was taken.")
-	case decisioncard.StatusExpired:
-		lines = append(lines, "The decision expired. No action was taken.")
-	}
+	lines = append(lines, cardDecisionLines(card)...)
 	if dispatchState != "" {
 		lines = append(lines, "Dispatch: "+dispatchState)
 	}
@@ -543,6 +530,35 @@ func FreezeCard(card decisioncard.Card, revision int64, dispatchState string, au
 		input["draft_prompt"] = promptInput
 	}
 	return freeze(input, "card", card.CardID, revision, audience, fullText)
+}
+
+// CardDecisionReadback uses the same canonical outcome projection as the full
+// card, without copying private draft/answer values or granting controls.
+func CardDecisionReadback(card decisioncard.Card) (string, error) {
+	if err := card.Validate(); err != nil {
+		return "", err
+	}
+	return strings.Join(cardDecisionLines(card), "; "), nil
+}
+
+func cardDecisionLines(card decisioncard.Card) []string {
+	switch card.Status {
+	case decisioncard.StatusPending:
+		lines := []string{"Decision: pending"}
+		if !card.DeferredUntil.IsZero() {
+			lines = append(lines, "Deferred until: "+card.DeferredUntil.UTC().Format(time.RFC3339Nano))
+		}
+		return lines
+	case decisioncard.StatusDecided:
+		return []string{"Decision: " + card.Verdict, "Actor: " + card.DecidedBy,
+			"At: " + card.DecidedAt.UTC().Format(time.RFC3339Nano)}
+	case decisioncard.StatusSuperseded:
+		return []string{"The flow moved on. No action was taken."}
+	case decisioncard.StatusExpired:
+		return []string{"The decision expired. No action was taken."}
+	default:
+		return nil
+	}
 }
 
 func FreezeNotice(notice Notice, audience Audience) (Frozen, error) {
