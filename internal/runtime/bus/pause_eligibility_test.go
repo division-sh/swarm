@@ -235,6 +235,55 @@ func TestUnownedPausedContinueRefusesBothStores(t *testing.T) {
 	}
 }
 
+func TestPausedEligibilityRejectsBrokenControlBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, posture := range []string{"missing_control", "contradictory_control"} {
+			t.Run(backend+"/"+posture, func(t *testing.T) {
+				f := newCompleteEventDispatchFixture(t, backend, false)
+				work, err := f.store.PipelineObligations().ClaimEvent(f.ctx, f.event.ID(), runtimepipelineobligation.PurposeRecovery)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := f.store.PipelineObligations().Settle(f.ctx, work.Claim, runtimepipelineobligation.Acknowledged("handed")); err != nil {
+					t.Fatal(err)
+				}
+				controller := runtimeruncontrol.NewController(f.store.(runtimeruncontrol.Store), f.bus, runtimeruncontrol.Options{})
+				if _, err := controller.Pause(f.ctx, runtimeruncontrol.TransitionRequest{RunID: f.event.RunID(), Reason: "control-corruption-proof"}); err != nil {
+					t.Fatal(err)
+				}
+				query := `DELETE FROM run_control_state WHERE run_id=$1`
+				if posture == "contradictory_control" {
+					query = `UPDATE run_control_state SET control_status='running' WHERE run_id=$1`
+				}
+				if _, err := f.db.ExecContext(f.ctx, query, f.event.RunID()); err != nil {
+					t.Fatal(err)
+				}
+				route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(f.agentID), AgentIdentity: f.identity}
+				id, err := runtimedelivery.DeliveryID(f.event.ID(), route)
+				if err != nil {
+					t.Fatal(err)
+				}
+				before, err := f.store.Snapshot(f.ctx, id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				page, err := f.store.ScanDeliveryContinuations(f.ctx, before.Authority, runtimedelivery.ContinuationCursor{}, 100)
+				if err != nil || len(page.Items) != 1 || page.Items[0].Disposition != runtimedelivery.ClaimInvariantInvalid || page.Items[0].Invariant == nil {
+					t.Fatalf("corrupt control was treated as parked debt: page=%+v err=%v", page, err)
+				}
+				claimed, claimErr := f.store.ClaimDelivery(f.ctx, before.Authority, f.event, route)
+				if claimErr == nil || claimed.Acknowledged || claimed.Disposition == runtimedelivery.ClaimAcquired {
+					t.Fatalf("corrupt control acquired a delivery: %+v, %v", claimed, claimErr)
+				}
+				after, err := f.store.Snapshot(f.ctx, id)
+				if err != nil || !reflect.DeepEqual(before, after) {
+					t.Fatalf("refusal changed delivery: before=%+v after=%+v err=%v", before, after, err)
+				}
+			})
+		}
+	}
+}
+
 func TestMixedPausedRunningRecoveryBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {

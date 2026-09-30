@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -50,8 +51,9 @@ func (receiverProjectionEffectStore) SettleExternalAttempt(context.Context, runt
 }
 
 type receiverProjectionInterceptor struct {
-	eventErr error
-	routeErr error
+	eventErr   error
+	routeErr   error
+	eventCalls atomic.Int64
 }
 
 type continuationPassthroughInterceptor struct{}
@@ -239,6 +241,7 @@ func TestAcceptedReceiverDispatchRetainsChannelExecutionAuthority(t *testing.T) 
 }
 
 func (i *receiverProjectionInterceptor) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
+	i.eventCalls.Add(1)
 	i.eventErr = validateClosedReceiverContext(ctx, evt)
 	return true, nil, runtimepipelineobligation.Continue(), i.eventErr
 }
@@ -285,6 +288,9 @@ func TestPersistedReplayUsesClosedReceiverProjection(t *testing.T) {
 		hostilePublisherContext(t), evt, runtimepipelineobligation.ScopeSubscribed, nil, true, false,
 	); err != nil {
 		t.Fatalf("replay persisted receiver: %v", err)
+	}
+	if calls := interceptor.eventCalls.Load(); calls != 1 {
+		t.Fatalf("event-wide coordinator calls = %d, want exactly one without a node delivery", calls)
 	}
 	if interceptor.eventErr != nil {
 		t.Fatal(interceptor.eventErr)

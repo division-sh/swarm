@@ -2662,7 +2662,9 @@ func (eb *EventBus) publishPersistedRecipientsWithScope(ctx context.Context, evt
 	deferred := []events.Event(nil)
 	if replayInterceptors && scope == runtimepipelineobligation.ScopeSubscribed {
 		var outcome runtimepipelineobligation.ExecutionOutcome
-		if dispatchRecipients {
+		// Continuations own exact node deliveries, not event-wide coordination
+		// for accepted timer and decision events without node delivery routes.
+		if dispatchRecipients || len(nodeDeliveryRoutes(deliveryRoutes)) == 0 {
 			var interception deliveryRouteInterception
 			interception, err = eb.runInterceptorsForDeliveryRoutes(ctx, evt, deliveryRoutes)
 			eventPassthrough = interception.EventPassthrough
