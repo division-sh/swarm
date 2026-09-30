@@ -408,9 +408,10 @@ func targetOwnerArcFixture(
 			id: test.sourcePath, path: test.sourcePath, mode: sourceMode,
 			outputs: []runtimecontracts.FlowOutputEventPin{{Event: localEvent}},
 		}
-		bundle = connectRoutePlanTestBundle([]connectRoutePlanTestFlow{producer, receiver}, []runtimecontracts.FlowConnect{{
+		bundle = connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{producer, receiver}, []runtimecontracts.FlowConnect{{
 			Event: localEvent, From: producer.id, To: receiver.id,
 		}})
+
 		bundle.Semantics.Name = "root-workflow"
 		instancePath := test.sourcePath
 		if test.sourceKind == targetOwnerArcTemplate {
@@ -618,10 +619,10 @@ func TestEventBusPoisonedMixedOwnerFanOutFailsAtomicallyThenLegalOwnersAgree(t *
 	existingRoute := events.RouteIdentity{FlowID: "fanout/existing", FlowInstance: "fanout/existing", EntityID: eventtest.UUID("mixed-owner-existing")}.Normalized()
 	poisonedStore := newTargetRouteMemoryStore()
 	poisonedStore.setTargetOwnerRoutes(sourceRoute, existingRoute)
-	poisonedBundle := connectRoutePlanTestBundle(
+	poisonedBundle := connectRoutePlanTestBundle(t,
 		[]connectRoutePlanTestFlow{producer, existing, materializing, entityless, poison},
-		[]runtimecontracts.FlowConnect{connect("existing"), connect("materializing"), connect("entityless"), connect("poison")},
-	)
+		[]runtimecontracts.FlowConnect{connect("existing"), connect("materializing"), connect("entityless"), connect("poison")})
+
 	poisonedBus, err := newScopedTestEventBus(poisonedStore, EventBusOptions{ContractBundle: semanticview.Wrap(poisonedBundle)})
 	if err != nil {
 		t.Fatalf("create poisoned fan-out EventBus: %v", err)
@@ -646,10 +647,10 @@ func TestEventBusPoisonedMixedOwnerFanOutFailsAtomicallyThenLegalOwnersAgree(t *
 
 	legalStore := newTargetRouteMemoryStore()
 	legalStore.setTargetOwnerRoutes(sourceRoute, existingRoute)
-	legalBundle := connectRoutePlanTestBundle(
+	legalBundle := connectRoutePlanTestBundle(t,
 		[]connectRoutePlanTestFlow{producer, existing, materializing, entityless},
-		[]runtimecontracts.FlowConnect{connect("existing"), connect("materializing"), connect("entityless")},
-	)
+		[]runtimecontracts.FlowConnect{connect("existing"), connect("materializing"), connect("entityless")})
+
 	interceptor := &connectRoutePlanNodeInterceptor{}
 	legalBus, err := newScopedTestEventBus(legalStore, EventBusOptions{
 		ContractBundle: semanticview.Wrap(legalBundle), Interceptors: []EventInterceptor{interceptor},

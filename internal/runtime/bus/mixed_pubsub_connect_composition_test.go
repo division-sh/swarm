@@ -77,7 +77,7 @@ func TestMixedPubsubConnectCompositionMultiBoundary(t *testing.T) {
 			name = "reverse connect order"
 		}
 		t.Run(name, func(t *testing.T) {
-			source := mixedFanoutToFanoutSource(reverse)
+			source := mixedFanoutToFanoutSource(t, reverse)
 			owners := mixedStaticOwners("producer", "left", "right", "left-sink", "right-sink")
 			store := newTargetRouteMemoryStore()
 			store.setTargetOwners(owners...)
@@ -123,7 +123,7 @@ func TestMixedPubsubConnectCompositionMultiBoundary(t *testing.T) {
 }
 
 func TestMixedPubsubConnectCompositionConcurrentSources(t *testing.T) {
-	source := mixedFanoutToFanoutSource(false)
+	source := mixedFanoutToFanoutSource(t, false)
 	owners := mixedStaticOwners("producer", "left", "right", "left-sink", "right-sink")
 	ownerByFlow := mixedOwnerMap(owners)
 	store := newTargetRouteMemoryStore()
@@ -163,7 +163,7 @@ func TestMixedPubsubConnectCompositionConcurrentSources(t *testing.T) {
 
 func TestMixedPubsubConnectCompositionNodeAgentConnect(t *testing.T) {
 	const eventName = "deploy.done"
-	source := semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
+	source := semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{
 		{
 			id: "producer", mode: runtimecontracts.FlowModeStatic,
 			outputs: []runtimecontracts.FlowOutputEventPin{{Event: eventName}},
@@ -273,7 +273,7 @@ func assertMixedNodeAgentConnectRoutes(t testing.TB, routes []events.DeliveryRou
 	}
 }
 
-func mixedFanoutToFanoutSource(reverse bool) semanticview.Source {
+func mixedFanoutToFanoutSource(t testing.TB, reverse bool) semanticview.Source {
 	localNode := func(id, event string) map[string]runtimecontracts.SystemNodeContract {
 		return map[string]runtimecontracts.SystemNodeContract{
 			id: {
@@ -333,7 +333,7 @@ func mixedFanoutToFanoutSource(reverse bool) semanticview.Source {
 			connects[left], connects[right] = connects[right], connects[left]
 		}
 	}
-	return semanticview.Wrap(connectRoutePlanTestBundle(flows, connects))
+	return semanticview.Wrap(connectRoutePlanTestBundle(t, flows, connects))
 }
 
 func mixedStaticOwners(flowIDs ...string) []ActiveTargetDescriptor {
@@ -404,7 +404,7 @@ func assertMixedEventProjection(t testing.TB, event events.Event, wantFlowInstan
 }
 
 func TestMixedPubsubConnectCompositionReplayUsesCommittedRoutes(t *testing.T) {
-	source := mixedPubsubConnectStaticSource()
+	source := mixedPubsubConnectStaticSource(t)
 	routeTable, err := DeriveRouteTable(source)
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)

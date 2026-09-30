@@ -43,7 +43,7 @@ func TestExternalIngressConnectionOnlyChangesAuthorizedBranch(t *testing.T) {
 					connections = []runtimecontracts.FlowConnect{{Event: eventName, From: origin, To: receiver}}
 				}
 				source := providerOutputAuthorizedTestSource{
-					Source:        semanticview.Wrap(connectRoutePlanTestBundle(flows, connections)),
+					Source:        semanticview.Wrap(connectRoutePlanTestBundle(t, flows, connections)),
 					declaringFlow: origin, generation: authorization.Generation(),
 					authorizations: []runtimeprovideroutput.Authorization{authorization},
 				}

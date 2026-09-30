@@ -32,6 +32,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	"github.com/google/uuid"
@@ -201,7 +202,7 @@ func TestConnectRoutePlanEventConsumersEnforceProducerMode(t *testing.T) {
 			if !tc.source.Empty() {
 				tc.source.EntityID = eventtest.UUID("entity-1")
 			}
-			source := semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{{
+			source := semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{{
 				id: "producer", mode: tc.mode,
 				outputs: []runtimecontracts.FlowOutputEventPin{{Event: "deploy.done"}},
 			}}, []runtimecontracts.FlowConnect{{Event: "deploy.done", From: "producer", To: "missing"}}))
@@ -223,7 +224,7 @@ func TestConnectRoutePlanEventConsumersEnforceProducerMode(t *testing.T) {
 	diagnosticEvent := connectRoutePlanStaticProducerEvent("", "producer/deploy.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
 		Source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: eventtest.UUID("entity-1")},
 	}, time.Unix(1, 0).UTC())
-	diagnosticSource := semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{{
+	diagnosticSource := semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{{
 		id: "producer", mode: "static",
 		outputs: []runtimecontracts.FlowOutputEventPin{{Event: "deploy.done"}},
 	}}, nil))
@@ -265,7 +266,7 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 				t.Run(name, func(t *testing.T) {
 					runID := uuid.NewString()
 					ctx := runtimecorrelation.WithRunID(context.Background(), runID)
-					source := connectReceiverPinCollisionSource(producerMode, rootReceiver, subscriberType, false)
+					source := connectReceiverPinCollisionSource(t, producerMode, rootReceiver, subscriberType, false)
 					store := newTargetRouteMemoryStore()
 					producerEntityID := eventtest.UUID("producer-entity")
 					receiverEntityID := eventtest.UUID("receiver-entity")
@@ -364,7 +365,7 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 }
 
 func TestConnectRoutePlanReceiverPinCollisionGuardPreservesLegalFanoutAndDuplicateEdges(t *testing.T) {
-	source := connectReceiverPinCollisionSource("static", false, "node", true)
+	source := connectReceiverPinCollisionSource(t, "static", false, "node", true)
 	store := newConnectRoutePlanStaticStore()
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
@@ -397,7 +398,7 @@ func TestConnectRoutePlanReceiverPinCollisionGuardPreservesLegalFanoutAndDuplica
 	} {
 		t.Run("public "+tc.name, func(t *testing.T) {
 			store := newConnectRoutePlanStaticStore()
-			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: connectReceiverPinLegalSource(tc.shape)})
+			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: connectReceiverPinLegalSource(t, tc.shape)})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
@@ -421,7 +422,7 @@ func TestConnectRoutePlanReceiverPinCollisionGuardPreservesLegalFanoutAndDuplica
 }
 
 func TestMixedPubsubConnectCompositionMatchedConnectPreservesLocal(t *testing.T) {
-	source := mixedPubsubConnectStaticSource()
+	source := mixedPubsubConnectStaticSource(t)
 	routeTable, err := DeriveRouteTable(source)
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
@@ -497,7 +498,7 @@ func TestMixedPubsubConnectCompositionMatchedConnectPreservesLocal(t *testing.T)
 }
 
 func TestMixedPubsubConnectCompositionTypedSourceOutranksConnectedEnvelopeTarget(t *testing.T) {
-	source := mixedPubsubConnectStaticSource()
+	source := mixedPubsubConnectStaticSource(t)
 	store := newTargetRouteMemoryStore()
 	producerOwner := testSelectedRunTargetOwner("producer-owner", "producer", "producer-owner")
 	consumerOwner := connectRoutePlanStaticOwner()
@@ -549,7 +550,7 @@ func TestMixedPubsubConnectCompositionTypedSourceOutranksConnectedEnvelopeTarget
 }
 
 func TestMixedPubsubConnectCompositionNoConnectMatchPreservesLocal(t *testing.T) {
-	source := mixedPubsubConnectNoMatchSource()
+	source := mixedPubsubConnectNoMatchSource(t)
 	store := newTargetRouteMemoryStore()
 	producerOwner := testSelectedRunTargetOwner("producer-owner", "producer", "producer-owner")
 	store.setTargetOwners(producerOwner)
@@ -577,7 +578,7 @@ func TestMixedPubsubConnectCompositionNoConnectMatchPreservesLocal(t *testing.T)
 }
 
 func TestMixedPubsubConnectCompositionConnectFailureIsAtomic(t *testing.T) {
-	source := mixedPubsubConnectFailureSource()
+	source := mixedPubsubConnectFailureSource(t)
 	store := newTargetRouteMemoryStore()
 	producerOwner := testSelectedRunTargetOwner("producer-owner", "producer", "producer-owner")
 	store.setTargetOwners(producerOwner)
@@ -611,8 +612,8 @@ func TestMixedPubsubConnectCompositionConnectFailureIsAtomic(t *testing.T) {
 	}
 }
 
-func mixedPubsubConnectStaticSource() semanticview.Source {
-	return semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
+func mixedPubsubConnectStaticSource(t testing.TB) semanticview.Source {
+	return semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{
 		{
 			id: "producer", mode: "static",
 			outputs: []runtimecontracts.FlowOutputEventPin{{Event: "deploy.done"}},
@@ -637,8 +638,8 @@ func mixedPubsubConnectStaticSource() semanticview.Source {
 	}}))
 }
 
-func mixedPubsubConnectNoMatchSource() semanticview.Source {
-	return semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
+func mixedPubsubConnectNoMatchSource(t testing.TB) semanticview.Source {
+	return semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{
 		{
 			id: "producer", mode: "static",
 			outputs: []runtimecontracts.FlowOutputEventPin{
@@ -666,8 +667,8 @@ func mixedPubsubConnectNoMatchSource() semanticview.Source {
 	}}))
 }
 
-func mixedPubsubConnectFailureSource() semanticview.Source {
-	return semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
+func mixedPubsubConnectFailureSource(t testing.TB) semanticview.Source {
+	return semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{
 		{
 			id: "producer", mode: "static",
 			outputs: []runtimecontracts.FlowOutputEventPin{{Event: "deploy.done"}},
@@ -685,7 +686,7 @@ func mixedPubsubConnectFailureSource() semanticview.Source {
 }
 
 func TestConnectRoutePlanReceiverPinCollisionFailsBeforeReplyContextMutation(t *testing.T) {
-	source := connectReceiverPinCollisionSource("static", false, "node", false)
+	source := connectReceiverPinCollisionSource(t, "static", false, "node", false)
 	routeTable, err := DeriveRouteTable(source)
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
@@ -755,7 +756,7 @@ func connectRoutePlanConcreteProducerEvent(id string, eventType events.EventType
 	return eventtest.RunCreatingRootIngressWithRoutingSource(id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, source, createdAt)
 }
 
-func connectReceiverPinCollisionSource(producerMode string, rootReceiver bool, subscriberType string, mixed bool) semanticview.Source {
+func connectReceiverPinCollisionSource(t testing.TB, producerMode string, rootReceiver bool, subscriberType string, mixed bool) semanticview.Source {
 	inputs := []runtimecontracts.FlowInputEventPin{
 		{Event: "work.accepted"},
 		{Event: "work.audited"},
@@ -787,12 +788,12 @@ func connectReceiverPinCollisionSource(producerMode string, rootReceiver bool, s
 		}
 	}
 	if !rootReceiver {
-		return semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{producer, consumer}, connects))
+		return semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{producer, consumer}, connects))
 	}
 	for index := range connects {
 		connects[index].To = "."
 	}
-	bundle := connectRoutePlanTestBundle([]connectRoutePlanTestFlow{producer}, connects)
+	bundle := connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{producer}, connects)
 	rootSchema := runtimecontracts.FlowSchemaDocument{
 		Name: "root-receiver-collision",
 
@@ -818,7 +819,7 @@ func connectReceiverPinCollisionSource(producerMode string, rootReceiver bool, s
 	return semanticview.Wrap(bundle)
 }
 
-func connectReceiverPinLegalSource(shape string) semanticview.Source {
+func connectReceiverPinLegalSource(t testing.TB, shape string) semanticview.Source {
 	inputs := []runtimecontracts.FlowInputEventPin{
 		{Event: "work.accepted"},
 		{Event: "work.audited"},
@@ -838,7 +839,7 @@ func connectReceiverPinLegalSource(shape string) semanticview.Source {
 			"accept-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.accepted": existingOwnerHandlerFixture()}},
 		}
 	}
-	return semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
+	return semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{
 		{id: "producer", mode: "static", outputs: []runtimecontracts.FlowOutputEventPin{{Event: "work.ready"}}},
 		{id: "consumer", mode: "static", inputs: inputs, nodes: nodes},
 	}, connects))
@@ -1064,12 +1065,13 @@ func (s *targetRouteMemoryStore) UpsertCommittedReplayScope(_ context.Context, e
 }
 
 func TestStaticConnectRouteUsesExactPersistedTargetOwner(t *testing.T) {
-	source := connectRoutePlanStaticSource(runtimecontracts.FlowConnect{
+	source := connectRoutePlanStaticSource(t, runtimecontracts.FlowConnect{
 		Event:  "deploy.done",
 		From:   "producer",
 		To:     "consumer",
 		Rename: "deploy.completed",
 	})
+
 	store := newConnectRoutePlanStaticStore()
 	interceptor := &connectRoutePlanNodeInterceptor{}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
@@ -1143,12 +1145,13 @@ func TestStaticConnectRouteUsesExactPersistedTargetOwner(t *testing.T) {
 }
 
 func TestEventBusPublish_ConnectRoutePlanRejectsConflictingAdmittedTargetBeforePersistence(t *testing.T) {
-	source := connectRoutePlanStaticSource(runtimecontracts.FlowConnect{
+	source := connectRoutePlanStaticSource(t, runtimecontracts.FlowConnect{
 		Event:  "deploy.done",
 		From:   "producer",
 		To:     "consumer",
 		Rename: "deploy.completed",
 	})
+
 	store := newConnectRoutePlanStaticStore()
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
@@ -1185,7 +1188,7 @@ func TestEventBusPublish_ConnectRoutePlanRejectsConflictingAdmittedTargetBeforeP
 }
 
 func TestEventBusConnectRouteDeliversToLiveAgentCarrier(t *testing.T) {
-	source := semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
+	source := semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{
 		{
 			id:   "producer",
 			mode: "static",
@@ -1815,12 +1818,13 @@ func TestEventBusPublish_RootConnectRoutePlanDoesNotCaptureChildScopedSameNameEv
 }
 
 func TestEventBusCheckPublishRecipientPlan_ConnectRoutePlanUsesSelectedOwner(t *testing.T) {
-	source := connectRoutePlanStaticSource(runtimecontracts.FlowConnect{
+	source := connectRoutePlanStaticSource(t, runtimecontracts.FlowConnect{
 		Event:  "deploy.done",
 		From:   "producer",
 		To:     "consumer",
 		Rename: "deploy.completed",
 	})
+
 	store := newConnectRoutePlanStaticStore()
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
@@ -1849,7 +1853,7 @@ func TestEventBusCheckPublishRecipientPlan_ConnectRoutePlanUsesSelectedOwner(t *
 }
 
 func TestConnectRecipientEvaluationUsesCompiledReceiverPin(t *testing.T) {
-	source := connectRoutePlanStaticSource(runtimecontracts.FlowConnect{Event: "deploy.done", From: "producer", To: "consumer", Rename: "deploy.completed"})
+	source := connectRoutePlanStaticSource(t, runtimecontracts.FlowConnect{Event: "deploy.done", From: "producer", To: "consumer", Rename: "deploy.completed"})
 	graph := runtimepinrouting.CompileConnectGraph(source)
 	plans := graph.Plans()
 	if len(plans) != 1 {
@@ -1921,7 +1925,7 @@ func TestConnectRecipientEvaluationRejectsUnrelatedTemplateSameLeaf(t *testing.T
 }
 
 func TestCompiledRoutingProducerKindMatrix(t *testing.T) {
-	source := connectRoutePlanStaticSource(runtimecontracts.FlowConnect{Event: "deploy.done", From: "producer", To: "consumer", Rename: "deploy.completed"})
+	source := connectRoutePlanStaticSource(t, runtimecontracts.FlowConnect{Event: "deploy.done", From: "producer", To: "consumer", Rename: "deploy.completed"})
 	route := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: eventtest.UUID("producer-kind-matrix")}
 	staticSource, err := events.NewStaticFlowRoutingSource(route)
 	if err != nil {
@@ -1992,7 +1996,7 @@ func TestCompiledRoutingProducerKindMatrix(t *testing.T) {
 }
 
 func TestEventBusMultiPlanMatchedEmptyPersistsEveryPlanOutcome(t *testing.T) {
-	source := semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
+	source := semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{
 		{id: "producer", mode: "static", outputs: []runtimecontracts.FlowOutputEventPin{{Event: "work.done"}}},
 		{id: "consumer-a", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Event: "work.done"}}, nodes: map[string]runtimecontracts.SystemNodeContract{
 			"consumer-a-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.done": {}}},
@@ -2040,7 +2044,7 @@ func TestEventBusMultiPlanMatchedEmptyPersistsEveryPlanOutcome(t *testing.T) {
 }
 
 func TestEventBusConnectRecipientRegistrationExpandsWildcardOverDeclaredInputs(t *testing.T) {
-	source := semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
+	source := semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{
 		{
 			id: "producer", mode: "static",
 			outputs: []runtimecontracts.FlowOutputEventPin{{Event: "deploy.done"}},
@@ -2092,7 +2096,7 @@ func TestConnectRoutePlanDescriptorsLoadOnlyForRuntimeResolution(t *testing.T) {
 		},
 	}
 
-	staticPlans := runtimepinrouting.CompileConnectGraph(connectRoutePlanStaticSource(runtimecontracts.FlowConnect{
+	staticPlans := runtimepinrouting.CompileConnectGraph(connectRoutePlanStaticSource(t, runtimecontracts.FlowConnect{
 		Event: "deploy.done", From: "producer", To: "consumer", Rename: "deploy.completed",
 	})).Plans()
 	if len(staticPlans) != 1 {
@@ -2115,12 +2119,13 @@ func TestConnectRoutePlanDescriptorsLoadOnlyForRuntimeResolution(t *testing.T) {
 }
 
 func TestEventBusPublish_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
-	source := connectRoutePlanStaticSource(runtimecontracts.FlowConnect{
+	source := connectRoutePlanStaticSource(t, runtimecontracts.FlowConnect{
 		Event:  "deploy.done",
 		From:   "producer",
 		To:     "consumer",
 		Rename: "deploy.completed",
 	})
+
 	store := &connectRoutePlanMutationStore{targetRouteMemoryStore: newConnectRoutePlanStaticStore()}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
@@ -2149,12 +2154,13 @@ func TestEventBusPublish_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
 }
 
 func TestEnginePublication_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
-	source := connectRoutePlanStaticSource(runtimecontracts.FlowConnect{
+	source := connectRoutePlanStaticSource(t, runtimecontracts.FlowConnect{
 		Event:  "deploy.done",
 		From:   "producer",
 		To:     "consumer",
 		Rename: "deploy.completed",
 	})
+
 	store := &connectRoutePlanMutationStore{targetRouteMemoryStore: newConnectRoutePlanStaticStore()}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
@@ -4305,7 +4311,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps(t
 }
 
 func TestMixedPubsubConnectCompositionMatchedZeroConnectRecipientsPreservesLocal(t *testing.T) {
-	source := semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
+	source := semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{
 		{
 			id:   "producer",
 			mode: "static",
@@ -4390,7 +4396,7 @@ func TestMixedPubsubConnectCompositionMatchedZeroConnectRecipientsPreservesLocal
 }
 
 func TestEventBusPublish_ConnectRoutePlanFailsClosedForInvalidLoweredPlan(t *testing.T) {
-	source := semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
+	source := semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{
 		{
 			id:   "producer",
 			mode: "static",
@@ -4443,7 +4449,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForInvalidLoweredPlan(t *tes
 }
 
 func TestEventBusPublish_ConnectRoutePlanFailureSkipsRecipientPlanMaterializer(t *testing.T) {
-	source := semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
+	source := semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{
 		{
 			id:   "producer",
 			mode: "static",
@@ -4938,8 +4944,8 @@ func mustBusTemplateInstanceField(t testing.TB, raw string) runtimecontracts.Tem
 	return field
 }
 
-func connectRoutePlanStaticSource(connect runtimecontracts.FlowConnect) semanticview.Source {
-	return semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
+func connectRoutePlanStaticSource(t testing.TB, connect runtimecontracts.FlowConnect) semanticview.Source {
+	return semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{
 		{
 			id:   "producer",
 			mode: "static",
@@ -5002,7 +5008,8 @@ func newConnectRoutePlanStaticStore() *targetRouteMemoryStore {
 	return store
 }
 
-func connectRoutePlanTestBundle(flows []connectRoutePlanTestFlow, connects []runtimecontracts.FlowConnect) *runtimecontracts.WorkflowContractBundle {
+func connectRoutePlanTestBundle(t testing.TB, flows []connectRoutePlanTestFlow, connects []runtimecontracts.FlowConnect) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
 	views := map[string]runtimecontracts.FlowContractView{
 		".": {
 			Paths:  runtimecontracts.FlowContractPaths{FlowPath: ".", SchemaFile: "schema.yaml"},
@@ -5018,6 +5025,7 @@ func connectRoutePlanTestBundle(flows []connectRoutePlanTestFlow, connects []run
 	agentRefsByURI := map[string]runtimecontracts.ContractURIRef{}
 	workflowName := ""
 	rootEntities := runtimecontracts.EntityContractsDocument{}
+	var templates []string
 	for _, flow := range flows {
 		flowPath := strings.TrimSpace(flow.path)
 		if flowPath == "" {
@@ -5037,13 +5045,16 @@ func connectRoutePlanTestBundle(flows []connectRoutePlanTestFlow, connects []run
 			}
 		}
 		schema := runtimecontracts.FlowSchemaDocument{
-
 			Pins: runtimecontracts.FlowPins{
 				Inputs:  runtimecontracts.FlowInputPins{EventPins: flow.inputs},
 				Outputs: runtimecontracts.FlowOutputPins{EventPins: flow.outputs},
 			},
 		}
 		view := views[flowPath]
+		if flow.mode == runtimecontracts.FlowModeTemplate {
+			schema.Instance = semanticviewtest.InstanceField("instance_key")
+			templates = append(templates, flowPath)
+		}
 		view.Paths = runtimecontracts.FlowContractPaths{
 			FlowPath: flowPath, SchemaFile: filepath.Join(flowPath, "schema.yaml"), EventsFile: filepath.Join(flowPath, "events.yaml"),
 		}
@@ -5162,6 +5173,9 @@ func connectRoutePlanTestBundle(flows []connectRoutePlanTestFlow, connects []run
 			ByPath: byPath,
 		},
 		FlowSchemas: flowSchemas,
+	}
+	if len(templates) > 0 {
+		bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, templates...)
 	}
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 		panic(err)

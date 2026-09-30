@@ -40,9 +40,7 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events:
-      - event: work.ready
-      - event: other.ready
+    events: [work.ready, other.ready]
 `, "", "observer_state:\n  item_id: {type: text}\n", `observe:
   execution_type: system_node
   subscribes_to: [work.ready, other.ready]
