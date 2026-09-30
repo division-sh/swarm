@@ -3612,7 +3612,7 @@ handler_specification:
       purpose: When true, the handler materializes the canonical receiving-flow primary entity before any other processing.
         All subsequent handler steps (guard, data_accumulation, advances_to, emit, etc.) operate on that canonical entity.
         The inbound event's entity_id is parent/source context only and is ignored for state ownership; the receiving-flow
-        entity starts at the flow's initial_state with schema-declared initial values already materialized.
+        entity starts at the flow's compiled initial stage with schema-declared initial values already materialized.
       default: false — handler consumes its admitted receiver ownership; inbound source entity identity is not inherited as state
       when_to_use: When an event arriving from outside the flow represents a new entity entering this flow's lifecycle.
         Example — vertical.discovered arriving at scoring creates scoring's canonical primary entity. Without create_entity,
@@ -3622,7 +3622,7 @@ handler_specification:
         the entity context for the entire handler.
       entity_creation:
         entity_id: Canonical receiving-flow primary entity identity derived from flow-instance/run context, not caller payload identity
-        initial_state: From the flow's schema.yaml initial_state
+        initial_stage: From the schema.yaml stages entry with initial: true; markerless/stateless flows have no authored initial stage
         flow_instance: Current flow instance path
         fields: Only explicit `initial:` values and admitted bindings materialize root fields at create_entity time.
           Other roots remain absent; declaration alone is not assignment evidence.
@@ -3639,7 +3639,7 @@ handler_specification:
           schema initial values and earlier step outputs, but not on same-handler top-level data_accumulation writes.'
         with_rules: 'ALLOWED. rule conditions evaluate according to the handler dependency graph. They may rely on schema initial
           values and earlier step outputs, but not on same-handler top-level data_accumulation writes.'
-        with_advances_to: ALLOWED. Advances the new entity from initial_state to the target state.
+        with_advances_to: ALLOWED. Advances the new entity from its compiled initial stage to the target stage.
       note_on_static_flows: 'Retired for authored stateful static/default-static multi-row ownership. A static input-pin
         handler MUST NOT use create_entity to materialize arbitrary receiving-flow rows over time. Authors must model the state
         as one primary entity with contained state, a mode: template flow instance, a singleton flow whose authored usage
@@ -21430,10 +21430,10 @@ static_analyzer:
     - handler_specification.handler_fields.accumulate
     - contract_formats.flow_schema
     scope:
-      description: For every stateful flow, verify that each declared state is reachable from initial_state in the authored
+      description: For every stateful staged flow, verify that each declared stage is reachable from the compiled initial stage in the authored
         transition graph built from the accepted slice-4 transition carriers.
       applies_to:
-      - stateful flows only
+      - stateful staged flows only
       excludes:
       - structural invalid target validation
       - missing terminal-path reasoning
@@ -21452,14 +21452,14 @@ static_analyzer:
         rule: Effective WorkflowJoinPlan timeout outcomes with advances_to contribute possible edges.
     source_state_derivation:
       create_entity_handlers:
-        rule: create_entity handlers source from initial_state only.
+        rule: create_entity handlers source from the compiled initial stage only.
       non_create_entity_handlers:
         rule: non-create_entity handlers source from all non-terminal declared states.
       terminal_states:
         rule: terminal states are sinks in this slice.
-    rule: Emit warning when a declared state is unreachable from initial_state in the authored transition graph. Keep invalid
-      undeclared advances_to targets on hard-invalid state_machine_coherence. For staged bundles, the same unreachable
-      lifecycle-node condition is hard-invalid because `stages:` is the canonical lifecycle node authoring owner.
+    rule: Reject an unreachable declared stage in the authored transition graph as hard-invalid because `stages:` is
+      the canonical lifecycle node authoring owner. Keep undeclared advances_to targets on hard-invalid
+      state_machine_coherence. Retired lifecycle authoring does not retain a warning-only compatibility path.
   slice_5_dead_declared_event_schema_surface:
     id: semantic_drift_dead_event_schema
     domain: semantic_drift
