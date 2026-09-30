@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -31,13 +32,29 @@ func TestChannelDeliveryCompiledRenderFailureDoesNotStarveReceiptUpdates(t *test
 				messages[index] = waitChannelAnchorReceipt(t, db, cards[index])
 			}
 			// Negative fault injection only: neither source cards nor authority are fabricated.
-			result, err := db.Exec(`UPDATE channel_delivery_renders SET render_input='{}'
+			injectionCtx, cancelInjection := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancelInjection()
+			conn, err := db.Conn(injectionCtx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Close()
+			if backend == servedparity.BackendDefaultSQLite {
+				// The served writer may hold SQLite's lock; configure only this fault-injection connection.
+				if _, err := conn.ExecContext(injectionCtx, `PRAGMA busy_timeout=5000`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			result, err := conn.ExecContext(injectionCtx, `UPDATE channel_delivery_renders SET render_input='{}'
 				WHERE render_id IN (SELECT current_render_id FROM channel_delivery_plans WHERE source_id=$1)`, cards[0])
 			if err != nil {
 				t.Fatal(err)
 			}
 			if rows, err := result.RowsAffected(); err != nil || rows != 1 {
 				t.Fatalf("fault did not address one actual frozen render: rows=%d err=%v", rows, err)
+			}
+			if err := conn.Close(); err != nil {
+				t.Fatal(err)
 			}
 			var deferred map[string]any
 			requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.defer", map[string]any{
