@@ -4,6 +4,10 @@ Issue: #2498, agent-g. Parent: #2407 R1.1.
 Baseline: `origin/master@21bff28c8f582b3d515c420ad299f963822504ec`.
 Phase: corpus and bounded readback gates approved; implementation now frozen at the paused-restart contract stop described in `issue-2498-paused-restart-stop.md`. No runtime or corpus closure. Independent corpus gate: [approved](https://github.com/division-sh/swarm/issues/2498#issuecomment-5901252923). Independent readback gate: [approved](https://github.com/division-sh/swarm/issues/2498#issuecomment-5901655130). Integration baseline: `origin/master@4fccc57ec73ce54827167dddc5bbafac41ae66d2`; the earlier baseline below remains the reproduction record.
 
+## Pending pause-eligibility gate amendment
+
+The latest independent gate is [insufficient; widen class](https://github.com/division-sh/swarm/issues/2498#issuecomment-5902935619). `issue-2498-pause-eligibility-preimplementation.md` is the complete additive owner/consumer/spec/proof/tracker repair for pause-aware executable-work eligibility across startup, continuations and public continue. It includes execution-proven agent/node bypasses and SQLite continue provenance parity, not only the startup refusal. Its P01-P15 matrix supplements every original M/RB/U row. Runtime remains frozen until a fresh explicit gate. The proposed recovery-disabled workaround in the historical stop is rejected; no runtime, successful restart or corpus closure is claimed.
+
 ## Approved production-readback amendment (recorded before production edits)
 
 The readback gate supersedes only the runtime-change stop condition below. The chosen additional working class is **public fan-out obligation readback parity across handler and deployment origins**. Its immediate parent is durable fan-out issuance/progress ownership; its broader coverage parent remains #2407. This is complete closure of that bounded class, not a pump, pause, recovery or performance redesign. Both classes must close before #2498 is complete. The local empty-bundle error is an entry point, not the boundary.
