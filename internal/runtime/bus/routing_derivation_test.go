@@ -256,10 +256,12 @@ pins:
 `)
 	write(filepath.Join(root, "events.yaml"), "root.start:\n")
 
-	write(filepath.Join(root, "orders", "schema.yaml"), `
-name: orders
-mode: `+mode+`
-stages:
+	instance := ""
+	if mode == runtimecontracts.FlowModeTemplate {
+		instance = "instance: order_id\n"
+		write(filepath.Join(root, "orders", "entities.yaml"), "order:\n  order_id: text\n")
+	}
+	write(filepath.Join(root, "orders", "schema.yaml"), "name: orders\n"+instance+`stages:
   active: {initial: true}
   done: {terminal: true}
 pins:
