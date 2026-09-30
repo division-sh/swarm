@@ -127,7 +127,8 @@ func TestRunScopedTemplateFlowAndAgentExecutionSupportedSurfaceBothStores(t *tes
 				t.Fatal("run B did not reach the real managed-provider boundary")
 			}
 
-			assertCatalogRunScopedFlowOwner(t, h, selected, runB, flowPath, "idle", true)
+			waitForCatalogRunScopedSpawnSettlement(t, h, runB, flowPath)
+			assertCatalogRunScopedFlowOwner(t, h, selected, runB, flowPath, "awaiting_observed", true)
 			assertCatalogRunScopedAgent(t, h, selected, runB, flowPath, "in_progress")
 
 			controller := runtimeruncontrol.NewController(selected, h.rt.Bus, runtimeruncontrol.Options{})
@@ -479,6 +480,39 @@ func assertCatalogRunScopedFlowOwner(
 	for _, route := range routes {
 		if route.Identity != owner {
 			t.Fatalf("route identity = %#v, want %#v", route.Identity, owner)
+		}
+	}
+}
+
+func waitForCatalogRunScopedSpawnSettlement(t testing.TB, h *runtimeHarness, runID, flowPath string) {
+	t.Helper()
+	owner, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, runtimeflowidentity.RouteForInstancePath(flowPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(catalogRunContext(h, runID), catalogRuntimePublishTimeout)
+	defer cancel()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		instance, found, err := h.workflow.Load(ctx, owner)
+		if err != nil || !found {
+			t.Fatalf("load blocked worker: found=%v err=%v", found, err)
+		}
+		if instance.CurrentState != "idle" {
+			if instance.CurrentState != "awaiting_observed" || len(instance.TransitionHistory) != 1 {
+				t.Fatalf("blocked worker advanced without the creating occurrence: %+v", instance)
+			}
+			cause := instance.TransitionHistory[0].Evidence
+			if cause.From() != "idle" || cause.To() != "awaiting_observed" {
+				t.Fatalf("worker creation lost its initial idle stage: %+v", instance.TransitionHistory)
+			}
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("creating delivery did not settle while provider was blocked: %v", ctx.Err())
+		case <-ticker.C:
 		}
 	}
 }
