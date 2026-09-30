@@ -51,7 +51,6 @@ effect-revision:
     telegram_send_message.revision_requested: {}
 `)
 	writeClosedVariantFile(t, root, "observers/schema.yaml", `name: observers
-mode: singleton
 stages: []
 pins:
   inputs:
@@ -105,7 +104,6 @@ func CopyHumanTaskOwnership(t testing.TB, mode string) string {
 	switch mode {
 	case "singleton":
 	case "static":
-		applyClosedReplacement(t, filepath.Join(root, "observers/schema.yaml"), "mode: singleton", "mode: static")
 		applyClosedReplacement(t, filepath.Join(root, "observers/nodes.yaml"), "      create_entity: true\n", "      emit:\n        event: observer.started\n        fields: {seed: \"${payload.seed}\", deadline_at: \"${payload.deadline_at}\"}\n")
 		writeClosedVariantFile(t, root, "observers/events.yaml", "observer.started:\n  seed: boolean\n  deadline_at: text\n")
 		applyClosedReplacement(t, filepath.Join(root, "observers/agents.yaml"), "subscriptions: [observer.requested,", "subscriptions: [observer.started,")
@@ -135,8 +133,8 @@ func CopyHumanTaskOwnership(t testing.TB, mode string) string {
 	case "template":
 		writeClosedVariantFile(t, root, "observers/entities.yaml", "observer:\n  case_id: text\n")
 		applyClosedReplacement(t, filepath.Join(root, "observers/nodes.yaml"), "      create_entity: true\n", "      create_entity: true\n      data_accumulation:\n        writes:\n          - {target_field: case_id, value: \"${payload.case_id}\"}\n")
-		applyClosedReplacement(t, filepath.Join(root, "observers/schema.yaml"), "mode: singleton", "mode: template\ninstance: case_id")
-		applyClosedReplacement(t, filepath.Join(root, "observers/schema.yaml"), "    events: [observer.requested]", "    events:\n      - {event: observer.requested, resolution: {mode: create}}")
+		applyClosedReplacement(t, filepath.Join(root, "observers/schema.yaml"), "name: observers\n", "name: observers\ninstance: case_id\n")
+		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - {event: observer.requested, from: ., to: observers}\n", "  - {event: observer.requested, from: ., to: observers, resolution: create}\n")
 		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - observer.requested\n", "      - observer.requested\n      - observer.seed\n")
 		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "observer.requested:\n  seed: boolean\n", "observer.requested:\n  case_id: text\n  seed: boolean\n")
 		for name, suffix := range map[string]string{

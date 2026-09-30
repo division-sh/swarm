@@ -12,11 +12,10 @@ func CopyCompleteObserverDependencies(t testing.TB) string {
   active: {initial: true}
   done: {terminal: true}
 connect:
-  - {event: work.ready, from: producer, to: observer}
-  - {event: other.ready, from: other, to: observer}
+  - {event: work.ready, from: producer, to: observer, resolution: select}
+  - {event: other.ready, from: other, to: observer, resolution: select}
 `)
 	writeLegacyInstanceFlow(t, root, "producer", `name: producer
-mode: template
 instance: item_id
 stages:
   active: {initial: true}
@@ -26,7 +25,6 @@ pins:
     events: [work.ready]
 `, "work.ready:\n  item_id: text\n", "producer_state:\n  item_id: {type: text}\n", "")
 	writeLegacyInstanceFlow(t, root, "other", `name: other
-mode: template
 instance: item_id
 stages:
   active: {initial: true}
@@ -36,7 +34,6 @@ pins:
     events: [other.ready]
 `, "other.ready:\n  item_id: text\n", "other_state:\n  item_id: {type: text}\n", "")
 	writeLegacyInstanceFlow(t, root, "observer", `name: observer
-mode: template
 instance: item_id
 stages:
   active: {initial: true}
@@ -45,9 +42,7 @@ pins:
   inputs:
     events:
       - event: work.ready
-        resolution: {mode: select}
       - event: other.ready
-        resolution: {mode: select}
 `, "", "observer_state:\n  item_id: {type: text}\n", `observe:
   execution_type: system_node
   subscribes_to: [work.ready, other.ready]

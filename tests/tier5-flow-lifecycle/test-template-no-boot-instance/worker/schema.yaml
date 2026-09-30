@@ -1,4 +1,3 @@
-mode: template
 instance: task_id
 stages:
   idle: {initial: true}
@@ -6,5 +5,4 @@ stages:
 pins:
   inputs:
     events:
-      - event: task.requested
-        resolution: {mode: select}
+      - task.requested

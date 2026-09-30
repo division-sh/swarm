@@ -9,4 +9,3 @@ pins:
   outputs:
     events:
       - micro.done
-mode: static

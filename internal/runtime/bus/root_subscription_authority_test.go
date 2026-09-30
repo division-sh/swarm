@@ -16,7 +16,7 @@ import (
 )
 
 func TestRootInputSourceLoadedConsumerCardinality(t *testing.T) {
-	for _, mode := range []string{"static", "singleton"} {
+	for _, mode := range []string{"static"} {
 		for _, connected := range [][]string{nil, {"first"}, {"first", "second"}, {"second"}} {
 			for _, local := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%s/edges=%s/local=%t", mode, strings.Join(connected, "+"), local), func(t *testing.T) {
@@ -30,7 +30,7 @@ func TestRootInputSourceLoadedConsumerCardinality(t *testing.T) {
 					node := "observer:\n  execution_type: system_node\n  subscribes_to: [thing.created]\n  event_handlers:\n    thing.created:\n      guard: {id: admit, check: 'true'}\n"
 					files := map[string]string{"schema.yaml": schema, "events.yaml": "thing.created:\n"}
 					for _, child := range []string{"first", "second"} {
-						files[child+"/schema.yaml"] = "name: " + child + "\nmode: " + mode + "\n"
+						files[child+"/schema.yaml"] = "name: " + child + "\n"
 						for _, wired := range connected {
 							if wired == child {
 								files[child+"/schema.yaml"] += "pins:\n  inputs:\n    events: [thing.created]\n"

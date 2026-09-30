@@ -119,19 +119,11 @@ func admitFlowExecutionRoutingSource(source semanticview.Source, ownerType, owne
 		}
 		return events.NewConcreteTemplateInstanceRoutingSource(route)
 	case runtimecontracts.FlowModeStatic:
-		if flowPath == "" {
-			return events.RoutingSource{}, fmt.Errorf("static %s %q routing source requires declared flow path", ownerType, ownerID)
+		if flowPath == "" || (route.FlowInstance != "" && route.FlowInstance != flowPath && !strings.HasPrefix(route.FlowInstance, flowPath+"/")) {
+			return events.RoutingSource{}, fmt.Errorf("static %s %q routing source requires an instance owned by flow path %q", ownerType, ownerID, flowPath)
 		}
 		// A static declaration is the complete producer identity. Inbound
 		// wildcard descendants must not become a second instance dialect.
-		route.FlowInstance = flowPath
-		return events.NewStaticFlowRoutingSource(route)
-	case runtimecontracts.FlowModeSingleton:
-		if flowPath == "" || (route.FlowInstance != "" && route.FlowInstance != flowPath && !strings.HasPrefix(route.FlowInstance, flowPath+"/")) {
-			return events.RoutingSource{}, fmt.Errorf("singleton %s %q routing source requires an instance owned by flow path %q", ownerType, ownerID, flowPath)
-		}
-		// Singleton runtime instances are concrete lifecycle rows, but their
-		// authored routing identity is the one static flow endpoint.
 		route.FlowInstance = flowPath
 		return events.NewStaticFlowRoutingSource(route)
 	default:

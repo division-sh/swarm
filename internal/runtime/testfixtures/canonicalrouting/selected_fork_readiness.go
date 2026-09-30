@@ -126,12 +126,13 @@ func CopySelectedForkReadiness(t testing.TB, declarations int, frontier string) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	childSchema = []byte(strings.Replace(string(childSchema), "      - event: worker.ready", "      - event: worker.inspect\n        resolution: {mode: select}\n      - event: worker.ready", 1))
+	childSchema = []byte(strings.Replace(string(childSchema), "      - worker.ready", "      - worker.inspect\n      - worker.ready", 1))
+	rootSchema = []byte(strings.ReplaceAll(string(rootSchema), "to: worker-flow}", "to: worker-flow, resolution: select}"))
 	if declarations == 0 {
 		childSchema = []byte(strings.Replace(string(childSchema), "  outputs:\n    events: [worker.observed]\n", "", 1))
-		childSchema = []byte(strings.Replace(string(childSchema), "      - event: worker.ready\n        resolution: {mode: select}\n", "", 1))
+		childSchema = []byte(strings.Replace(string(childSchema), "      - worker.ready\n", "", 1))
 		rootSchema = []byte(strings.ReplaceAll(string(rootSchema), "[worker.ready, ", "["))
-		rootSchema = []byte(strings.Replace(string(rootSchema), "  - {event: worker.ready, from: ., to: worker-flow}\n", "", 1))
+		rootSchema = []byte(strings.Replace(string(rootSchema), "  - {event: worker.ready, from: ., to: worker-flow, resolution: select}\n", "", 1))
 		rootEventsPath := filepath.Join(root, "events.yaml")
 		rootEvents, err := os.ReadFile(rootEventsPath)
 		if err != nil {
@@ -144,8 +145,8 @@ func CopySelectedForkReadiness(t testing.TB, declarations int, frontier string) 
 	}
 	if frontier == "mixed" || frontier == "mixed_progress" {
 		rootSchema = []byte(strings.ReplaceAll(string(rootSchema), ", worker.inspect", ""))
-		rootSchema = []byte(strings.Replace(string(rootSchema), "  - {event: worker.inspect, from: ., to: worker-flow}\n", "", 1))
-		childSchema = []byte(strings.Replace(string(childSchema), "      - event: worker.inspect\n        resolution: {mode: select}\n", "", 1))
+		rootSchema = []byte(strings.Replace(string(rootSchema), "  - {event: worker.inspect, from: ., to: worker-flow, resolution: select}\n", "", 1))
+		childSchema = []byte(strings.Replace(string(childSchema), "      - worker.inspect\n", "", 1))
 		rootEvents, err := os.ReadFile(filepath.Join(root, "events.yaml"))
 		if err != nil {
 			t.Fatal(err)
@@ -157,8 +158,8 @@ func CopySelectedForkReadiness(t testing.TB, declarations int, frontier string) 
 	}
 	if strings.HasPrefix(frontier, "activity_loop") {
 		rootSchema = []byte(strings.ReplaceAll(string(rootSchema), "worker.inspect]", "worker.inspect, worker.retry]"))
-		rootSchema = append(rootSchema, []byte("  - {event: worker.retry, from: ., to: worker-flow}\n")...)
-		childSchema = []byte(strings.Replace(string(childSchema), "    events:\n", "    events:\n      - event: worker.retry\n        resolution: {mode: select}\n", 1))
+		rootSchema = append(rootSchema, []byte("  - {event: worker.retry, from: ., to: worker-flow, resolution: select}\n")...)
+		childSchema = []byte(strings.Replace(string(childSchema), "    events:\n", "    events:\n      - worker.retry\n", 1))
 		childEvents, err := os.ReadFile(filepath.Join(root, "worker-flow/events.yaml"))
 		if err != nil {
 			t.Fatal(err)
@@ -185,8 +186,8 @@ func CopySelectedForkReadiness(t testing.TB, declarations int, frontier string) 
 			continue
 		}
 		input := event + ".requested"
-		rootSchema = []byte(strings.Replace(string(rootSchema), "{event: "+event+", from: ., to: worker-flow}", "{event: "+event+", from: ., to: worker-flow, rename: "+input+"}", 1))
-		childSchema = []byte(strings.Replace(string(childSchema), "- event: "+event+"\n", "- event: "+input+"\n", 1))
+		rootSchema = []byte(strings.Replace(string(rootSchema), "{event: "+event+", from: ., to: worker-flow, resolution: select}", "{event: "+event+", from: ., to: worker-flow, rename: "+input+", resolution: select}", 1))
+		childSchema = []byte(strings.Replace(string(childSchema), "- "+event+"\n", "- "+input+"\n", 1))
 		for file, addition := range map[string]string{
 			"worker-flow/events.yaml": event + ":\n  worker_id: text\n",
 			"worker-flow/nodes.yaml":  fmt.Sprintf("\n%s-entry:\n  execution_type: system_node\n  subscribes_to: [%s]\n  event_handlers:\n    %s:\n      emit:\n        event: %s\n        fields:\n          worker_id: payload.worker_id\n", strings.ReplaceAll(event, ".", "-"), input, input, event),

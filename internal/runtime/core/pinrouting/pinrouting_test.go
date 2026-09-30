@@ -150,7 +150,7 @@ func TestAdmitNodeExecutionRoutingSourceUsesSelectedRootEntityAuthority(t *testi
 func TestAdmitNodeExecutionRoutingSourceUsesNestedFilesystemFlowOwner(t *testing.T) {
 	flow := runtimecontracts.FlowContractView{
 		Path: "orders/reconciliation", Paths: runtimecontracts.FlowContractPaths{FlowPath: "orders/reconciliation", NodesFile: "orders/reconciliation/nodes.yaml"},
-		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate},
+		Schema: runtimecontracts.FlowSchemaDocument{Instance: mustTemplateInstanceField(t, "instance_id")},
 		Nodes:  map[string]runtimecontracts.SystemNodeContract{"shared": {}},
 	}
 	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{flow}}
@@ -186,7 +186,7 @@ func TestAdmitAgentExecutionRoutingSourceSeparatesFilesystemDeclarationFromRunti
 		Paths: runtimecontracts.FlowContractPaths{
 			FlowPath: "telegram-ingress/telegram-chat", AgentsFile: "telegram-ingress/telegram-chat/agents.yaml",
 		},
-		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate},
+		Schema: runtimecontracts.FlowSchemaDocument{Instance: mustTemplateInstanceField(t, "conversation_reference")},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"phrase-bot": runtimecontracts.EffectiveAgentRegistryEntry("phrase-bot", runtimecontracts.AgentRegistryEntry{ID: "phrase-bot", Role: "phrase-bot"}),
 		},
@@ -268,7 +268,7 @@ func TestAdmitAgentExecutionRoutingSourceUsesFilesystemDeclarationOwningFlow(t *
 		{name: "template", mode: runtimecontracts.FlowModeTemplate, instanceID: "inst-1", instancePath: "support/inst-1", entityID: "entity-one", wantKind: events.RoutingSourceConcreteTemplateInstance},
 		{name: "entityless_template", mode: runtimecontracts.FlowModeTemplate, instanceID: "inst-1", instancePath: "support/inst-1", wantKind: events.RoutingSourceConcreteTemplateInstance},
 		{name: "static", mode: runtimecontracts.FlowModeStatic, instanceID: "support", instancePath: "support", entityID: "entity-one", wantKind: events.RoutingSourceStaticFlow},
-		{name: "singleton", mode: runtimecontracts.FlowModeSingleton, instanceID: "support", instancePath: "support", entityID: "entity-one", wantKind: events.RoutingSourceStaticFlow},
+		{name: "singleton", mode: runtimecontracts.FlowModeStatic, instanceID: "support", instancePath: "support", entityID: "entity-one", wantKind: events.RoutingSourceStaticFlow},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			source := loadFilesystemAgentOwnedByFlowSource(t, tc.mode)
@@ -316,7 +316,12 @@ func loadFilesystemAgentOwnedByFlowSource(t *testing.T, mode string) semanticvie
 		}
 	}
 	write(filepath.Join(root, "schema.yaml"), "name: filesystem-flow-agent\n")
-	write(filepath.Join(root, "support", "schema.yaml"), "name: support\nmode: "+mode+"\nstages:\n  waiting: {initial: true}\n  done: {terminal: true}\n")
+	instance := ""
+	if mode == runtimecontracts.FlowModeTemplate {
+		instance = "instance: instance_id\n"
+		write(filepath.Join(root, "support", "entities.yaml"), "support:\n  instance_id: text\n")
+	}
+	write(filepath.Join(root, "support", "schema.yaml"), "name: support\n"+instance+"stages:\n  waiting: {initial: true}\n  done: {terminal: true}\n")
 	write(filepath.Join(root, "support", "agents.yaml"), "backend:\n  role: backend\n  intent: {inline: \"Handle backend work.\"}\n  model: regular\n")
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
@@ -338,7 +343,7 @@ func TestPinDeclaredOutputRecognizesExactRootOutputOnly(t *testing.T) {
 func testPinRoutingSource(sink runtimecontracts.FlowOutputSink, events map[string]runtimecontracts.EventCatalogEntry) semanticview.Source {
 	child := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "child", SchemaFile: "child/schema.yaml"},
-		Schema: runtimecontracts.FlowSchemaDocument{Mode: "template", Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{
+		Schema: runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{
 			EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "child.done", Sink: sink}},
 		}}},
 		Path: "child",

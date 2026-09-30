@@ -27,7 +27,7 @@ vertical:
 	}
 }
 
-func TestRun_RejectsMissingPrimaryEntityForStatefulNormalFlow(t *testing.T) {
+func TestRun_AllowsFieldlessStagedStaticFlow(t *testing.T) {
 	bundle := loadPrimaryEntityFixtureBundle(t, `name: scoring
 stages:
   pending: {initial: true}
@@ -36,12 +36,12 @@ stages:
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "primary_entity_validation", "has no declared entity types") {
-		t.Fatalf("expected missing primary_entity_validation error, got %#v", report.Errors())
+	if reportContains(report.Errors(), "primary_entity_validation", "") {
+		t.Fatalf("fieldless stages must not manufacture entity demand: %#v", report.Errors())
 	}
 }
 
-func TestRun_RejectsMissingPrimaryEntityForStagedStatefulNormalFlow(t *testing.T) {
+func TestRun_AllowsFieldlessExpandedStages(t *testing.T) {
 	bundle := loadPrimaryEntityFixtureBundle(t, `
 name: scoring
 stages:
@@ -53,8 +53,8 @@ stages:
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "primary_entity_validation", "has no declared entity types") {
-		t.Fatalf("expected missing primary_entity_validation error for staged stateful flow, got %#v", report.Errors())
+	if reportContains(report.Errors(), "primary_entity_validation", "") {
+		t.Fatalf("fieldless stages must not manufacture entity demand: %#v", report.Errors())
 	}
 }
 
@@ -67,6 +67,23 @@ name: scoring
 
 	if reportContains(report.Errors(), "primary_entity_validation", "") {
 		t.Fatalf("unexpected primary_entity_validation error: %#v", report.Errors())
+	}
+}
+
+func TestRun_RequiresPrimaryEntityForActualOperation(t *testing.T) {
+	for _, handler := range []string{"create_entity: true", "advances_to: done", "data_accumulation: {writes: [{target_field: entity.count, value: '${payload.count}'}]}"} {
+		t.Run(handler, func(t *testing.T) {
+			root := t.TempDir()
+			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: operation-demand\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), "name: scoring\nstages:\n  pending: {initial: true}\n  done: {terminal: true}\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "scoring", "events.yaml"), "work.ready:\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "scoring", "nodes.yaml"), "worker:\n  execution_type: system_node\n  event_handlers:\n    work.ready:\n      "+handler+"\n")
+			bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+			if !reportContains(report.Errors(), "primary_entity_validation", "no declared entity") {
+				t.Fatalf("actual operation without primary entity admitted: %#v", report.Errors())
+			}
+		})
 	}
 }
 

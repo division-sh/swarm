@@ -5,4 +5,4 @@ pins:
   outputs:
     events: [worker.ready]
 connect:
-  - {event: worker.ready, from: ., to: worker-flow}
+  - {event: worker.ready, from: ., to: worker-flow, resolution: select}

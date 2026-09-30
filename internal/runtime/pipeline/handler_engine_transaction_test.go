@@ -91,7 +91,7 @@ func handlerTestWorkflowModuleWithBundle(bundle *runtimecontracts.WorkflowContra
 	}
 	flow := runtimecontracts.FlowContractView{
 		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "."},
-		Schema: runtimecontracts.FlowSchemaDocument{Name: flowID, Mode: "static"},
+		Schema: runtimecontracts.FlowSchemaDocument{Name: flowID},
 		Nodes:  nodes,
 		Path:   ".",
 	}
@@ -487,7 +487,7 @@ func pipelineSourceWithStructuredRendererModule(t *testing.T, outputSchema map[s
 	if err := os.WriteFile(modulePath, raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: render\nmode: static\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: render\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "nodes.yaml"), []byte("node-a:\n  execution_type: system_node\n"), 0o644); err != nil {
@@ -551,7 +551,6 @@ func TestExecuteNodeContractHandlerMintsEntityIDForEntityMaterializingHandler(t 
 
 		"schema.yaml": "name: runtime-test\n",
 		"scoring/schema.yaml": `name: scoring
-mode: static
 stages:
   queued: {initial: true}
 `,
@@ -1177,7 +1176,6 @@ func TestResolveHandlerEntityIDForFlowCreateEntitySeedsInitialStateAndSchemaDefa
 
 		"schema.yaml": "name: runtime-test\n",
 		"scoring/schema.yaml": `name: scoring
-mode: static
 stages:
   queued: {initial: true}
 `,
@@ -1309,14 +1307,14 @@ func TestResolveHandlerEntityIDForFlowCreateEntityDoesNotSeedSubjectID(t *testin
 		t.Fatalf("resolve handler entity identity: %v", err)
 	}
 
-	if want := FlowInstanceEntityID("scoring/scoring"); gotID != want {
+	if want := FlowInstanceEntityID("scoring"); gotID != want {
 		t.Fatalf("entityID = %q, want canonical flow primary %q", gotID, want)
 	}
 	if got := strings.TrimSpace(asString(state.Metadata["subject_id"])); got != "" {
 		t.Fatalf("state subject_id = %q, want empty", got)
 	}
-	if strings.TrimSpace(state.Control.FlowPath) != "scoring/scoring" || strings.TrimSpace(state.Control.InstanceID) != "scoring" {
-		t.Fatalf("typed state control = %#v, want scoring/scoring and scoring", state.Control)
+	if strings.TrimSpace(state.Control.FlowPath) != "scoring" || strings.TrimSpace(state.Control.InstanceID) != "scoring" {
+		t.Fatalf("typed state control = %#v, want scoring and scoring", state.Control)
 	}
 }
 
@@ -1329,7 +1327,6 @@ func TestExecuteNodeContractHandlerCreateEntityPersistsSchemaInitialValuesBefore
 
 		"schema.yaml": "name: runtime-test\n",
 		"validation/schema.yaml": `name: validation
-mode: static
 stages:
   queued: {initial: true}
 `,
@@ -1452,7 +1449,6 @@ func TestExecuteNodeContractHandlerQueryEntitiesGuardUsesWorkflowContext(t *test
 
 		"schema.yaml": "name: runtime-test\n",
 		"validation/schema.yaml": `name: validation
-mode: static
 stages:
   queued: {initial: true}
 `,
@@ -1564,7 +1560,6 @@ func TestExecuteNodeContractHandlerCreateEntityPersistsNonValidationChildFlowIde
 
 		"schema.yaml": "name: runtime-test\n",
 		"review/schema.yaml": `name: review
-mode: static
 stages:
   queued: {initial: true}
 `,
@@ -1678,7 +1673,6 @@ func TestExecuteNodeContractHandlerCreateEntityAllowsLaterClearOfSchemaInitialVa
 
 		"schema.yaml": "name: runtime-test\n",
 		"validation/schema.yaml": `name: validation
-mode: static
 stages:
   queued: {initial: true}
 `,
@@ -1780,7 +1774,6 @@ func TestPreviewContractHandlerExecutionShowsInitialValuesMaterialized(t *testin
 
 		"schema.yaml": "name: runtime-test\n",
 		"validation/schema.yaml": `name: validation
-mode: static
 stages:
   queued: {initial: true}
 `,

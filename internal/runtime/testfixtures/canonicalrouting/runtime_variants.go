@@ -12,7 +12,7 @@ func CopyGeneratedActivity(t testing.TB, nested, subscribeResults bool) string {
 
 		writeClosedVariantFile(t, root, "schema.yaml", "name: nested-generated-activity-topology\nstages: []\npins:\n  inputs:\n    events: [request]\n  outputs:\n    events: [request]\nconnect:\n  - {event: request, from: ., to: child}\n")
 		flowRoot = "child/"
-		writeClosedVariantFile(t, root, flowRoot+"schema.yaml", "name: child\nmode: static\nstages: []\npins:\n  inputs:\n    events: [request]\n")
+		writeClosedVariantFile(t, root, flowRoot+"schema.yaml", "name: child\nstages: []\npins:\n  inputs:\n    events: [request]\n")
 	} else {
 
 		writeClosedVariantFile(t, root, "schema.yaml", "name: generated-activity-topology\nstages: []\npins:\n  inputs:\n    events: [request]\n")
@@ -83,6 +83,6 @@ func CopyLegacyStaticCreate(t testing.TB, withTimer bool) string {
 		timerEvent = "timer.check:\n"
 		timer = "  timers:\n    - id: check_timer\n      event: timer.check\n      delay: 1h\n      start_on: event:thing.created\n"
 	}
-	writeLegacyInstanceFlow(t, root, "validation", "name: validation\nmode: static\nstages:\n  new: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    events: ["+inputs+"]\n  outputs:\n    events:\n      - event: thing.emitted\n        sink: harness\n", "thing.emitted:\n  amount: integer\n  who: text\n"+timerEvent, "widget:\n  amount:\n    type: integer\n    initial: 0\n  who:\n    type: text\n    initial: \"\"\n  counter:\n    type: integer\n    initial: 0\n", "w-node:\n  execution_type: system_node\n  subscribes_to: ["+inputs+"]\n  produces: ["+produces+"]\n"+timer+"  event_handlers:\n    thing.created:\n      create_entity: true\n      data_accumulation:\n        source_event: thing.created\n        writes:\n          - source_field: amount\n            target_field: amount\n          - source_field: who\n            target_field: who\n          - target_field: counter\n            value: \"${entity.counter + 1}\"\n      sets_gate: ready\n      advances_to: done\n      emit:\n        event: thing.emitted\n        fields:\n          amount: \"${entity.amount}\"\n          who: \"${entity.who}\"\n")
+	writeLegacyInstanceFlow(t, root, "validation", "name: validation\nstages:\n  new: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    events: ["+inputs+"]\n  outputs:\n    events:\n      - event: thing.emitted\n        sink: harness\n", "thing.emitted:\n  amount: integer\n  who: text\n"+timerEvent, "widget:\n  amount:\n    type: integer\n    initial: 0\n  who:\n    type: text\n    initial: \"\"\n  counter:\n    type: integer\n    initial: 0\n", "w-node:\n  execution_type: system_node\n  subscribes_to: ["+inputs+"]\n  produces: ["+produces+"]\n"+timer+"  event_handlers:\n    thing.created:\n      create_entity: true\n      data_accumulation:\n        source_event: thing.created\n        writes:\n          - source_field: amount\n            target_field: amount\n          - source_field: who\n            target_field: who\n          - target_field: counter\n            value: \"${entity.counter + 1}\"\n      sets_gate: ready\n      advances_to: done\n      emit:\n        event: thing.emitted\n        fields:\n          amount: \"${entity.amount}\"\n          who: \"${entity.who}\"\n")
 	return root
 }

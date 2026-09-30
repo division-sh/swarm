@@ -30,6 +30,7 @@ type WorkflowContractBundle struct {
 	flowEntities          map[string]EntityContractsDocument
 	eventOwnership        []eventSchemaOwnershipRow
 	eventOwnersByFlow     map[string][]eventSchemaOwnershipRow
+	connectionInputs      CompiledConnectionInputs
 	compiledEventSchemas  map[string]compiledFlowEventSchemas
 	activityToolsByFlow   map[string]map[string]ToolSchemaEntry
 	effectiveProvenance   EffectiveProvenanceLedger
@@ -1183,7 +1184,6 @@ func (r ScopedNodeRecord) Identity() (runtimeidentity.ExecutableNode, error) {
 
 type FlowSchemaDocument struct {
 	Name                   string                   `yaml:"name"`
-	Mode                   string                   `yaml:"mode"`
 	Activation             string                   `yaml:"activation"`
 	Ingress                *ProjectFlowIngress      `yaml:"ingress"`
 	Connect                []FlowConnect            `yaml:"connect"`
@@ -1199,6 +1199,15 @@ type FlowSchemaDocument struct {
 	admissionProvenance    map[string]EffectiveValueProvenance
 }
 
+// EffectiveMode is derived from the admitted identity declaration, never an
+// independently authored cardinality or lifecycle switch.
+func (s FlowSchemaDocument) EffectiveMode() string {
+	if !s.Instance.Empty() {
+		return FlowModeTemplate
+	}
+	return FlowModeStatic
+}
+
 const FlowActivationStanding = "standing"
 
 type FlowSchemaImports struct {
@@ -1207,9 +1216,8 @@ type FlowSchemaImports struct {
 }
 
 const (
-	FlowModeStatic    = "static"
-	FlowModeTemplate  = "template"
-	FlowModeSingleton = "singleton"
+	FlowModeStatic   = "static"
+	FlowModeTemplate = "template"
 )
 
 const (
@@ -1367,7 +1375,6 @@ func (s FlowOutputSink) Valid() bool {
 
 type FlowInputPinResolution struct {
 	Mode           FlowInputResolutionMode `yaml:"mode"`
-	From           string                  `yaml:"from"`
 	Aggregation    string                  `yaml:"aggregation"`
 	Window         string                  `yaml:"window"`
 	DedupBy        []string                `yaml:"dedup_by"`
@@ -1376,13 +1383,15 @@ type FlowInputPinResolution struct {
 	CorrelationKey string                  `yaml:"correlation_key"`
 }
 type FlowConnect struct {
-	OwnerFlowPath string `yaml:"-"`
-	SourceFile    string `yaml:"-"`
-	SourceLine    int    `yaml:"-"`
-	Event         string `yaml:"event"`
-	From          string `yaml:"from"`
-	To            string `yaml:"to"`
-	Rename        string `yaml:"rename"`
+	OwnerFlowPath string                  `yaml:"-"`
+	SourceFile    string                  `yaml:"-"`
+	SourceLine    int                     `yaml:"-"`
+	Event         string                  `yaml:"event"`
+	From          string                  `yaml:"from"`
+	To            string                  `yaml:"to"`
+	Rename        string                  `yaml:"rename"`
+	Resolution    FlowInputResolutionMode `yaml:"resolution"`
+	KeyFrom       string                  `yaml:"key_from"`
 }
 type FlowRequiredAgent struct {
 	Role         string   `yaml:"role"`

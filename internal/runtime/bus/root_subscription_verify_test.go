@@ -15,7 +15,7 @@ import (
 )
 
 func TestRootPinCannotSatisfyUnconnectedPrivateSourceInput(t *testing.T) {
-	for _, mode := range []string{"static", "singleton"} {
+	for _, mode := range []string{"static"} {
 		for _, rootPin := range []bool{true, false} {
 			t.Run(fmt.Sprintf("%s/root_pin=%t", mode, rootPin), func(t *testing.T) {
 				root := t.TempDir()
@@ -26,7 +26,7 @@ func TestRootPinCannotSatisfyUnconnectedPrivateSourceInput(t *testing.T) {
 				for path, body := range map[string]string{
 					"schema.yaml":       rootSchema,
 					"events.yaml":       "thing.created:\n",
-					"child/schema.yaml": "name: child\nmode: " + mode + "\npins:\n  inputs:\n    events: [thing.created]\n",
+					"child/schema.yaml": "name: child\npins:\n  inputs:\n    events: [thing.created]\n",
 					"child/nodes.yaml":  "observer:\n  execution_type: system_node\n  subscribes_to: [thing.created]\n  event_handlers:\n    thing.created:\n      guard: {id: admit, check: 'true'}\n",
 				} {
 					file := filepath.Join(root, path)

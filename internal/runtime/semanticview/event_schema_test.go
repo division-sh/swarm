@@ -131,12 +131,16 @@ note: Full payload schema is owned by the diagnostic subtype.
 }
 
 func TestResolveFlowEventProof_TemplateInstanceOutputUsesTemplateCatalog(t *testing.T) {
+	field, err := runtimecontracts.ParseTemplateInstanceField("instance_id")
+	if err != nil {
+		t.Fatal(err)
+	}
 	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}}
 	root.Children = []runtimecontracts.FlowContractView{{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"},
 		Path:  "child",
 		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode: "template",
+			Instance: field,
 			Pins: runtimecontracts.FlowPins{
 				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "child.done"}}},
 			},
@@ -197,14 +201,14 @@ func TestResolveFlowEventProof_TemplateInstanceOutputUsesTemplateCatalog(t *test
 func TestResolveFlowEventProof_TemplateDescendantPathDoesNotBecomeInstanceLocalEvent(t *testing.T) {
 	root := runtimecontracts.FlowContractView{}
 	child := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"}, Schema: runtimecontracts.FlowSchemaDocument{Mode: "template"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"}, Schema: runtimecontracts.FlowSchemaDocument{},
 		Path: "child",
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"micro.done": {},
 		},
 	}
 	grandchild := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "grandchild"}, Schema: runtimecontracts.FlowSchemaDocument{Mode: "static"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "grandchild"}, Schema: runtimecontracts.FlowSchemaDocument{},
 		Path: "child/grandchild",
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"micro.done": {},

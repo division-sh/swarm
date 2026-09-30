@@ -12,6 +12,8 @@ connect:
   - event: worker.requested
     from: .
     to: worker
+    resolution: create
   - event: work.assign
     from: .
     to: worker
+    resolution: select

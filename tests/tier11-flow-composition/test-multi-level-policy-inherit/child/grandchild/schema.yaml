@@ -9,4 +9,3 @@ pins:
     events:
       - event: grandchild.passed
         sink: harness
-mode: static

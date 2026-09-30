@@ -219,7 +219,7 @@ func loadNestedProviderConnectorAgentSource(t *testing.T) semanticview.Source {
 	write(filepath.Join(root, "parent", "schema.yaml"), "name: parent\n")
 	write(filepath.Join(root, "parent", "child", "schema.yaml"), "name: child\n")
 	flowRoot := filepath.Join(root, "parent", "child", "support")
-	write(filepath.Join(flowRoot, "schema.yaml"), "name: support\nmode: static\nstages:\n  active: {initial: true}\n")
+	write(filepath.Join(flowRoot, "schema.yaml"), "name: support\nstages:\n  active: {initial: true}\n")
 	write(filepath.Join(flowRoot, "agents.yaml"), `
 sender:
   id: public-sender

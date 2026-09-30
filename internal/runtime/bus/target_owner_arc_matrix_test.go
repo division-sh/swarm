@@ -45,13 +45,13 @@ type targetOwnerArcCase struct {
 
 func TestEventBusCrossFlowMaterializingTargetOwnershipMatrix(t *testing.T) {
 	tests := []targetOwnerArcCase{
-		{name: "root node to direct singleton", sourceKind: targetOwnerArcRoot, receiverMode: runtimecontracts.FlowModeSingleton, receiverPath: "receiver", producerType: events.EventProducerNode},
-		{name: "static child node to nested singleton", sourceKind: targetOwnerArcStatic, sourcePath: "left/worker", receiverMode: runtimecontracts.FlowModeSingleton, receiverPath: "left/worker/result", producerType: events.EventProducerNode},
-		{name: "singleton child node to nested singleton", sourceKind: targetOwnerArcSingleton, sourcePath: "left/worker", receiverMode: runtimecontracts.FlowModeSingleton, receiverPath: "left/worker/result", producerType: events.EventProducerNode},
-		{name: "singleton child agent to nested singleton", sourceKind: targetOwnerArcSingleton, sourcePath: "left/agent", receiverMode: runtimecontracts.FlowModeSingleton, receiverPath: "left/agent/result", producerType: events.EventProducerAgent},
-		{name: "concrete template node to nested singleton", sourceKind: targetOwnerArcTemplate, sourcePath: "right/worker", receiverMode: runtimecontracts.FlowModeSingleton, receiverPath: "right/worker/result", producerType: events.EventProducerNode},
-		{name: "concrete template agent to nested singleton", sourceKind: targetOwnerArcTemplate, sourcePath: "right/agent", receiverMode: runtimecontracts.FlowModeSingleton, receiverPath: "right/agent/result", producerType: events.EventProducerAgent},
-		{name: "flow owned control to nested singleton", sourceKind: targetOwnerArcFlowOwnedControl, sourcePath: "control/worker", receiverMode: runtimecontracts.FlowModeSingleton, receiverPath: "control/worker/result"},
+		{name: "root node to direct singleton", sourceKind: targetOwnerArcRoot, receiverMode: runtimecontracts.FlowModeStatic, receiverPath: "receiver", producerType: events.EventProducerNode},
+		{name: "static child node to nested singleton", sourceKind: targetOwnerArcStatic, sourcePath: "left/worker", receiverMode: runtimecontracts.FlowModeStatic, receiverPath: "left/worker/result", producerType: events.EventProducerNode},
+		{name: "singleton child node to nested singleton", sourceKind: targetOwnerArcSingleton, sourcePath: "left/worker", receiverMode: runtimecontracts.FlowModeStatic, receiverPath: "left/worker/result", producerType: events.EventProducerNode},
+		{name: "singleton child agent to nested singleton", sourceKind: targetOwnerArcSingleton, sourcePath: "left/agent", receiverMode: runtimecontracts.FlowModeStatic, receiverPath: "left/agent/result", producerType: events.EventProducerAgent},
+		{name: "concrete template node to nested singleton", sourceKind: targetOwnerArcTemplate, sourcePath: "right/worker", receiverMode: runtimecontracts.FlowModeStatic, receiverPath: "right/worker/result", producerType: events.EventProducerNode},
+		{name: "concrete template agent to nested singleton", sourceKind: targetOwnerArcTemplate, sourcePath: "right/agent", receiverMode: runtimecontracts.FlowModeStatic, receiverPath: "right/agent/result", producerType: events.EventProducerAgent},
+		{name: "flow owned control to nested singleton", sourceKind: targetOwnerArcFlowOwnedControl, sourcePath: "control/worker", receiverMode: runtimecontracts.FlowModeStatic, receiverPath: "control/worker/result"},
 	}
 	covered := make(map[targetOwnerArcSourceKind]bool, len(tests))
 	for _, test := range tests {
@@ -69,12 +69,12 @@ func TestEventBusCrossFlowMaterializingTargetOwnershipMatrix(t *testing.T) {
 
 func TestEventBusNestedCrossFlowTargetOwnershipMatrix(t *testing.T) {
 	for _, test := range []targetOwnerArcCase{
-		{name: "static parent to nested singleton", sourceKind: targetOwnerArcStatic, sourcePath: "left/worker", receiverMode: runtimecontracts.FlowModeSingleton, receiverPath: "left/worker/result"},
+		{name: "static parent to nested singleton", sourceKind: targetOwnerArcStatic, sourcePath: "left/worker", receiverMode: runtimecontracts.FlowModeStatic, receiverPath: "left/worker/result"},
 		{name: "singleton parent to nested static selects distinct receiver", sourceKind: targetOwnerArcSingleton, sourcePath: "left/worker", receiverMode: runtimecontracts.FlowModeStatic, receiverPath: "left/worker/result", existing: true},
-		{name: "singleton parent to nested singleton is distinct", sourceKind: targetOwnerArcSingleton, sourcePath: "left/worker", receiverMode: runtimecontracts.FlowModeSingleton, receiverPath: "left/worker/result"},
-		{name: "existing singleton owner wins", sourceKind: targetOwnerArcStatic, sourcePath: "left/source", receiverMode: runtimecontracts.FlowModeSingleton, receiverPath: "left/existing", existing: true},
-		{name: "concrete template to nested singleton is distinct", sourceKind: targetOwnerArcTemplate, sourcePath: "right/worker", receiverMode: runtimecontracts.FlowModeSingleton, receiverPath: "right/worker/result"},
-		{name: "sibling repeated leaf uses full path", sourceKind: targetOwnerArcSingleton, sourcePath: "left/worker/result", receiverMode: runtimecontracts.FlowModeSingleton, receiverPath: "right/worker/result", sourceEntity: runtimeflowidentity.EntityID("unrelated/worker/result")},
+		{name: "singleton parent to nested singleton is distinct", sourceKind: targetOwnerArcSingleton, sourcePath: "left/worker", receiverMode: runtimecontracts.FlowModeStatic, receiverPath: "left/worker/result"},
+		{name: "existing singleton owner wins", sourceKind: targetOwnerArcStatic, sourcePath: "left/source", receiverMode: runtimecontracts.FlowModeStatic, receiverPath: "left/existing", existing: true},
+		{name: "concrete template to nested singleton is distinct", sourceKind: targetOwnerArcTemplate, sourcePath: "right/worker", receiverMode: runtimecontracts.FlowModeStatic, receiverPath: "right/worker/result"},
+		{name: "sibling repeated leaf uses full path", sourceKind: targetOwnerArcSingleton, sourcePath: "left/worker/result", receiverMode: runtimecontracts.FlowModeStatic, receiverPath: "right/worker/result", sourceEntity: runtimeflowidentity.EntityID("unrelated/worker/result")},
 		{name: "nested child to distinct static owner", sourceKind: targetOwnerArcSingleton, sourcePath: "left/worker/result", receiverMode: runtimecontracts.FlowModeStatic, receiverPath: "archive/worker/result", existing: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -400,7 +400,7 @@ func targetOwnerArcFixture(
 	} else {
 		sourceMode := runtimecontracts.FlowModeStatic
 		if test.sourceKind == targetOwnerArcSingleton {
-			sourceMode = runtimecontracts.FlowModeSingleton
+			sourceMode = runtimecontracts.FlowModeStatic
 		} else if test.sourceKind == targetOwnerArcTemplate {
 			sourceMode = runtimecontracts.FlowModeTemplate
 		}
@@ -433,7 +433,7 @@ func targetOwnerArcFixture(
 }
 
 func targetOwnerArcHandler(mode string) runtimecontracts.SystemNodeEventHandler {
-	if strings.TrimSpace(mode) == runtimecontracts.FlowModeSingleton {
+	if strings.TrimSpace(mode) == runtimecontracts.FlowModeStatic {
 		return runtimecontracts.SystemNodeEventHandler{CreateEntity: true}
 	}
 	return existingOwnerHandlerFixture()
@@ -448,7 +448,7 @@ func TestEventBusCrossFlowTargetOwnerRejectsForeignSourceBeforePersistence(t *te
 func testEventBusCrossFlowTargetOwnerRejectsWrongFullPathBeforePersistence(t *testing.T) {
 	test := targetOwnerArcCase{
 		name: "wrong full path", sourceKind: targetOwnerArcSingleton, sourcePath: "left/worker/result",
-		receiverMode: runtimecontracts.FlowModeSingleton, receiverPath: "right/worker/result", producerType: events.EventProducerNode,
+		receiverMode: runtimecontracts.FlowModeStatic, receiverPath: "right/worker/result", producerType: events.EventProducerNode,
 	}
 	runID := uuid.NewString()
 	source, eventType, _, _, _ := targetOwnerArcFixture(t, test, runID)
@@ -608,7 +608,7 @@ func TestEventBusPoisonedMixedOwnerFanOutFailsAtomicallyThenLegalOwnersAgree(t *
 		}
 	}
 	existing := receiver("existing", runtimecontracts.FlowModeStatic, existingOwnerHandlerFixture())
-	materializing := receiver("materializing", runtimecontracts.FlowModeSingleton, runtimecontracts.SystemNodeEventHandler{CreateEntity: true})
+	materializing := receiver("materializing", runtimecontracts.FlowModeStatic, runtimecontracts.SystemNodeEventHandler{CreateEntity: true})
 	entityless := receiver("entityless", runtimecontracts.FlowModeStatic, runtimecontracts.SystemNodeEventHandler{})
 	poison := receiver("poison", runtimecontracts.FlowModeStatic, existingOwnerHandlerFixture())
 	connect := func(id string) runtimecontracts.FlowConnect {

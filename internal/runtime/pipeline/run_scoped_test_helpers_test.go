@@ -547,7 +547,7 @@ func testEntityContractsForType(entityType string) runtimecontracts.EntityContra
 func testRootEntityContractSource(workflowName, entityType string) semanticview.Source {
 	root := runtimecontracts.FlowContractView{
 		Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
-		Schema: runtimecontracts.FlowSchemaDocument{Name: strings.TrimSpace(workflowName), Mode: runtimecontracts.FlowModeStatic},
+		Schema: runtimecontracts.FlowSchemaDocument{Name: strings.TrimSpace(workflowName)},
 	}
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Semantics:    runtimecontracts.WorkflowSemanticView{Name: strings.TrimSpace(workflowName)},
@@ -582,8 +582,8 @@ func admitSyntheticEntityContractsForTest(
 		if flowID == "" || entityType == "" {
 			t.Fatalf("synthetic flow entity contract requires nonblank flow and entity type: flow=%q type=%q", flowID, entityType)
 		}
-		files[""+flowID+"/schema.yaml"] = fmt.Sprintf("name: %s\nmode: template\nstages:\n  active: {initial: true}\n", flowID)
-		files[""+flowID+"/entities.yaml"] = fmt.Sprintf("%s: {}\n", entityType)
+		files[""+flowID+"/schema.yaml"] = fmt.Sprintf("name: %s\nstages:\n  active: {initial: true}\n", flowID)
+		files[""+flowID+"/entities.yaml"] = fmt.Sprintf("%s:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n", entityType)
 	}
 	if rootEntityType = strings.TrimSpace(rootEntityType); rootEntityType != "" {
 		files["entities.yaml"] = fmt.Sprintf("%s: {}\n", rootEntityType)

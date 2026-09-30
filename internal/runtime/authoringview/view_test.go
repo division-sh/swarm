@@ -352,8 +352,22 @@ func TestBuildShowsDistinctProducerAndReceiverSchemasForIntrinsicProjection(t *t
 		t.Fatalf("validator input pins = %#v, want one", validator.InputPins)
 	}
 	pin := validator.InputPins[0]
-	if pin.ProducerSchemaDigest == "" || pin.ReceiverSchemaDigest == "" || pin.ProducerSchemaDigest == pin.ReceiverSchemaDigest {
-		t.Fatalf("validator schema roles = producer:%q receiver:%q, want distinct immutable digests", pin.ProducerSchemaDigest, pin.ReceiverSchemaDigest)
+	if pin.ProducerSchemaDigest == "" || pin.ProducerSchemaDigest != pin.ReceiverSchemaDigest {
+		t.Fatalf("shared pin unexpectedly owns an edge projection: %+v", pin)
+	}
+	var connect runtimecontracts.FlowConnect
+	for _, candidate := range bundle.CompositionConnects() {
+		if candidate.To == "validator" {
+			connect = candidate
+		}
+	}
+	input, ok, err := bundle.ConnectionInput(connect)
+	if err != nil || !ok {
+		t.Fatalf("compiled edge input: %v, %t", err, ok)
+	}
+	receiver, ok := input.ReceiverEventSchema()
+	if !ok || receiver.AcceptanceSchemaDigest() == pin.ProducerSchemaDigest {
+		t.Fatalf("edge projection lost its distinct acceptance schema: %+v", receiver)
 	}
 }
 
@@ -919,7 +933,7 @@ func TestBuildShowsStatelessSingletonWithoutCoordinatorError(t *testing.T) {
 	source := semanticview.Wrap(bundle)
 	view := mustBuild(t, source, nil)
 	flow := flowByID(t, view, "telegram-ingress")
-	if flow.Mode != runtimecontracts.FlowModeSingleton || flow.PrimaryEntity == nil {
+	if flow.Mode != runtimecontracts.FlowModeStatic || flow.PrimaryEntity == nil {
 		t.Fatalf("stateless singleton view = %#v", flow)
 	}
 	if flow.SingletonCoordinator != nil || flow.SingletonError != "" {
@@ -1160,7 +1174,7 @@ root-agent:
   subscriptions: [root.requested]
   emit_events: [root.done]
 `)
-	flowSchema := "name: analysis\nmode: static\n"
+	flowSchema := "name: analysis\n"
 	if explicitFlowRequiredAgents {
 		flowSchema += "required_agents: []\n"
 	}
@@ -1189,7 +1203,6 @@ func loadDefaultedTemplatePolicySource(t testing.TB) semanticview.Source {
 	writeAuthoringViewTestFile(t, filepath.Join(root, "schema.yaml"), "name: defaulted-template-policy\n")
 	writeAuthoringViewTestFile(t, filepath.Join(root, "scoring", "schema.yaml"), `
 name: scoring
-mode: template
 instance: account_id
 `)
 	writeAuthoringViewTestFile(t, filepath.Join(root, "scoring", "entities.yaml"), `
@@ -1238,7 +1251,6 @@ func writeDuplicateNodeIDFlow(t testing.TB, root, flowID string) {
 	dir := filepath.Join(root, flowID)
 	writeAuthoringViewTestFile(t, filepath.Join(dir, "schema.yaml"), `
 name: `+flowID+`
-mode: singleton
 pins:
   inputs:
     events:

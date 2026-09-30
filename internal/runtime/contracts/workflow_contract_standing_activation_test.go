@@ -9,7 +9,6 @@ func TestFlowSchemaStandingIngressStrictDecode(t *testing.T) {
 	var doc FlowSchemaDocument
 	if err := decodeNodeTestYAML([]byte(`
 name: chat
-mode: singleton
 activation: standing
 ingress:
   alias: support
@@ -50,7 +49,6 @@ func TestFlowSchemaInboundAdmissionStrictDecode(t *testing.T) {
 	var doc FlowSchemaDocument
 	if err := decodeNodeTestYAML([]byte(`
 name: events
-mode: singleton
 activation: standing
 ingress:
   alias: partner-events
@@ -87,7 +85,7 @@ ingress:
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			block := strings.ReplaceAll(tc.block, "\n", "\n      ")
-			body := "name: chat\nmode: singleton\nactivation: standing\ningress:\n  alias: support\n  providers:\n    - provider: telegram\n      " + block + "\n"
+			body := "name: chat\nactivation: standing\ningress:\n  alias: support\n  providers:\n    - provider: telegram\n      " + block + "\n"
 			var invalid FlowSchemaDocument
 			err := decodeNodeTestYAML([]byte(body), &invalid)
 			if err == nil || !strings.Contains(err.Error(), tc.field) || !strings.Contains(err.Error(), "not supported") {

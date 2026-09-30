@@ -30,9 +30,7 @@ func checkTemplateInstanceValidation(c *checkerContext) []Finding {
 		if flowID == "" {
 			continue
 		}
-		isTemplate := strings.TrimSpace(schema.Mode) == "template"
-		hasInstance := !schema.Instance.Empty()
-		if !isTemplate && !hasInstance {
+		if schema.Instance.Empty() {
 			continue
 		}
 		resolved, err := bundle.ResolveFlowTemplateInstance(flowID)

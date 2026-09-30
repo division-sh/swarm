@@ -15,6 +15,7 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
@@ -617,7 +618,7 @@ func TestWorkflowNodeConnectedInputEventHandlerResolution_DoesNotInferClaimFromF
 }
 
 func TestWorkflowNodeConnectedInputHandlerMatchesConcreteTemplateProducer(t *testing.T) {
-	source := testWorkflowNodeConnectedInputSource("template")
+	source := testWorkflowNodeConnectedInputSource(t, "template")
 	evt := eventtest.RunCreatingRootIngressWithRoutingSource("", "producer/inst-1/deploy.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
 		EntityID:     "receiver-entity",
 		FlowInstance: "receiver",
@@ -647,7 +648,7 @@ func TestWorkflowNodeConnectedInputHandlerEnforcesProducerMode(t *testing.T) {
 		{name: "template concrete name without route", mode: "template", eventType: "producer/inst-1/deploy.done"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			source := testWorkflowNodeConnectedInputSource(tc.mode)
+			source := testWorkflowNodeConnectedInputSource(t, tc.mode)
 			sourceRoute := tc.source
 			if !sourceRoute.Empty() {
 				sourceRoute.EntityID = "producer-entity"
@@ -759,11 +760,15 @@ func workflowNodeStampedConnectRoute(t testing.TB, source semanticview.Source, r
 	return events.DeliveryRoute{}
 }
 
-func testWorkflowNodeConnectedInputSource(producerMode string) semanticview.Source {
+func testWorkflowNodeConnectedInputSource(t testing.TB, producerMode string) semanticview.Source {
+	var instance runtimecontracts.TemplateInstanceField
+	if producerMode == runtimecontracts.FlowModeTemplate {
+		instance = semanticviewtest.InstanceField("instance_key")
+	}
 	producer := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "producer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode: producerMode,
+			Instance: instance,
 			Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{
 				Event: "deploy.done",
 			}}}},
@@ -810,6 +815,7 @@ func testWorkflowNodeConnectedInputSource(producerMode string) semanticview.Sour
 			},
 		},
 	}
+	bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, "producer")
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 		panic(err)
 	}
@@ -823,14 +829,13 @@ func TestWorkflowPersistedFlowModeUsesClosedStoreRepresentation(t *testing.T) {
 		want     string
 	}{
 		{name: "static", authored: runtimecontracts.FlowModeStatic, want: runtimecontracts.FlowModeStatic},
-		{name: "singleton", authored: runtimecontracts.FlowModeSingleton, want: runtimecontracts.FlowModeStatic},
+		{name: "singleton", authored: runtimecontracts.FlowModeStatic, want: runtimecontracts.FlowModeStatic},
 		{name: "template", authored: runtimecontracts.FlowModeTemplate, want: runtimecontracts.FlowModeTemplate},
 		{name: "omitted", want: runtimecontracts.FlowModeStatic},
-		{name: "unsupported", authored: "hostile-mode", want: ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			source := testWorkflowNodeConnectedInputSource(tt.authored)
+			source := testWorkflowNodeConnectedInputSource(t, tt.authored)
 			if got := workflowPersistedFlowMode(source, "producer"); got != tt.want {
 				t.Fatalf("workflowPersistedFlowMode() = %q, want %q", got, tt.want)
 			}
@@ -842,7 +847,7 @@ func testWorkflowNodeConnectedInputCollisionSource() semanticview.Source {
 	producer := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "producer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode: "static",
+
 			Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "deploy.done"}}}},
 		},
 		Path: "producer", Events: map[string]runtimecontracts.EventCatalogEntry{"deploy.done": {}},
@@ -858,7 +863,7 @@ func testWorkflowNodeConnectedInputCollisionSource() semanticview.Source {
 	receiver := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "receiver"},
 		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode: "static",
+
 			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: receiverInputs}},
 		},
 		Path: "receiver", Events: map[string]runtimecontracts.EventCatalogEntry{"deploy.accepted": {}, "deploy.audited": {}},
@@ -896,7 +901,7 @@ func testWorkflowNodeConnectedInputCollisionSource() semanticview.Source {
 }
 
 func TestWorkflowNodeHandlerResolution_TargetRouteConsumesDeclaredInputEventIdentity(t *testing.T) {
-	source := workflowNodeDirectTemplateDeliverySource()
+	source := workflowNodeDirectTemplateDeliverySource(t)
 	evt := eventtest.RunCreatingRootIngress("", "account.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
 	evt = eventtest.TargetRouted(evt, events.RouteIdentity{
 		FlowID:       "account_case",
@@ -912,7 +917,7 @@ func TestWorkflowNodeHandlerResolution_TargetRouteConsumesDeclaredInputEventIden
 }
 
 func TestWorkflowNodeHandlerResolution_DirectConcreteDeliveryConsumesExactTargetOwner(t *testing.T) {
-	source := workflowNodeDirectTemplateDeliverySource()
+	source := workflowNodeDirectTemplateDeliverySource(t)
 	producerRoute := events.RouteIdentity{FlowID: "account_case", FlowInstance: "account_case/ti-1", EntityID: "entity-1"}
 	evt := eventtest.RunCreatingRootIngressWithRoutingSource(
 		"", "account_case/ti-1/account.ready", "", "", []byte(`{}`), 0, "", "",
@@ -943,17 +948,16 @@ func TestWorkflowNodeHandlerResolution_DirectConcreteDeliveryConsumesExactTarget
 	}
 }
 
-func workflowNodeDirectTemplateDeliverySource() semanticview.Source {
+func workflowNodeDirectTemplateDeliverySource(t testing.TB) semanticview.Source {
 	accountCase := runtimecontracts.FlowContractView{
 		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "account_case"},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"account.ready": {}},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode: "template",
-			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{
-					Event: "account.ready",
-				}}},
-			},
+		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
+			InstanceField("instance_key"), Pins: runtimecontracts.FlowPins{
+			Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{
+				Event: "account.ready",
+			}}},
+		},
 		},
 		Path: "account_case",
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
@@ -975,6 +979,7 @@ func workflowNodeDirectTemplateDeliverySource() semanticview.Source {
 			},
 		},
 	}
+	bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, "account_case")
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 		panic(err)
 	}

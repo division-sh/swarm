@@ -12,7 +12,6 @@ func CopyProviderReceiverInitialization(t testing.TB) string {
 imports:
   provider_trigger_events:
     - {provider: telegram, event: inbound.telegram.text_message}
-mode: template
 instance: conversation_reference
 instance_variables:
   variables:
@@ -25,7 +24,6 @@ pins:
   inputs:
     events:
       - event: inbound.telegram.text_message
-        resolution: {mode: select-or-create}
         initialize:
           initial_text: payload.text
           message_number: payload.provider_message_reference

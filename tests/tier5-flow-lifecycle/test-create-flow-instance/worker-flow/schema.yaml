@@ -1,5 +1,4 @@
 name: worker-flow
-mode: template
 instance: worker_id
 stages:
   idle: {initial: true}
@@ -11,7 +10,6 @@ auto_emit_on_create:
 pins:
   inputs:
     events:
-      - event: flow.spawned
-        resolution: {mode: create}
+      - flow.spawned
   outputs:
     events: [worker.ready, worker.observed]

@@ -18,7 +18,15 @@ func CopyStateOnlyAcquisition(t testing.TB, workflowName string, modes map[strin
 	if targetFlow != "." {
 		rootSchema += "  outputs:\n    events: [test.node_emitted.selector, test.node_emitted.upserter]\nconnect:\n"
 		for _, name := range []string{"test.node_emitted.selector", "test.node_emitted.upserter"} {
-			rootSchema += fmt.Sprintf("  - {event: %s, from: ., to: %s}\n", name, targetFlow)
+			policy := ""
+			if modes[targetFlow] == "template" {
+				resolution := "select"
+				if name == "test.node_emitted.upserter" {
+					resolution = "select-or-create"
+				}
+				policy = ", resolution: " + resolution
+			}
+			rootSchema += fmt.Sprintf("  - {event: %s, from: ., to: %s%s}\n", name, targetFlow, policy)
 		}
 	}
 	writeClosedVariantFile(t, root, "schema.yaml", rootSchema)
@@ -40,16 +48,11 @@ func CopyStateOnlyAcquisition(t testing.TB, workflowName string, modes map[strin
 		if path == "." {
 			schema = strings.Replace(schema, "name: .", "name: "+workflowName, 1) + strings.TrimPrefix(rootSchema, "name: "+workflowName+"\n")
 		} else {
-			schema += "mode: " + mode + "\n"
 			if mode == "template" {
 				schema += "instance: instance_key\n"
 			}
 			if path == targetFlow {
-				if mode == "template" {
-					schema += "pins:\n  inputs:\n    events:\n      - {event: test.node_emitted.selector, resolution: {mode: select}}\n      - {event: test.node_emitted.upserter, resolution: {mode: select-or-create}}\n"
-				} else {
-					schema += "pins:\n  inputs:\n    events: [test.node_emitted.selector, test.node_emitted.upserter]\n"
-				}
+				schema += "pins:\n  inputs:\n    events: [test.node_emitted.selector, test.node_emitted.upserter]\n"
 			}
 		}
 		writeClosedVariantFile(t, root, filepath.ToSlash(filepath.Join(path, "schema.yaml")), schema)

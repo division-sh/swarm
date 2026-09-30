@@ -135,7 +135,7 @@ func retiredToolSourceForScope(
 		flow := &runtimecontracts.FlowContractView{
 			Paths:     runtimecontracts.FlowContractPaths{FlowPath: "flow-fixture", AgentsFile: "flow-fixture/agents.yaml"},
 			Path:      "flow-fixture",
-			Schema:    runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic},
+			Schema:    runtimecontracts.FlowSchemaDocument{},
 			Agents:    agents,
 			AgentURIs: map[string]string{"worker": ownerURI},
 		}

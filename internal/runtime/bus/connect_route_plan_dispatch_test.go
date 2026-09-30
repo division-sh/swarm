@@ -794,8 +794,8 @@ func connectReceiverPinCollisionSource(producerMode string, rootReceiver bool, s
 	}
 	bundle := connectRoutePlanTestBundle([]connectRoutePlanTestFlow{producer}, connects)
 	rootSchema := runtimecontracts.FlowSchemaDocument{
-		Name:    "root-receiver-collision",
-		Mode:    runtimecontracts.FlowModeStatic,
+		Name: "root-receiver-collision",
+
 		Pins:    runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: inputs}},
 		Connect: append([]runtimecontracts.FlowConnect(nil), bundle.FlowTree.Root.Schema.Connect...),
 	}
@@ -5006,7 +5006,7 @@ func connectRoutePlanTestBundle(flows []connectRoutePlanTestFlow, connects []run
 	views := map[string]runtimecontracts.FlowContractView{
 		".": {
 			Paths:  runtimecontracts.FlowContractPaths{FlowPath: ".", SchemaFile: "schema.yaml"},
-			Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic},
+			Schema: runtimecontracts.FlowSchemaDocument{},
 			Path:   ".",
 		},
 	}
@@ -5029,15 +5029,15 @@ func connectRoutePlanTestBundle(flows []connectRoutePlanTestFlow, connects []run
 				schemaFile := filepath.Join(ancestor, "schema.yaml")
 				views[ancestor] = runtimecontracts.FlowContractView{
 					Paths:  runtimecontracts.FlowContractPaths{FlowPath: ancestor, SchemaFile: schemaFile},
-					Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic},
+					Schema: runtimecontracts.FlowSchemaDocument{},
 					Path:   ancestor,
 				}
 				flowSources[ancestor] = runtimecontracts.FlowSource{FlowPath: ancestor, Schema: schemaFile}
-				flowSchemas[ancestor] = runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic}
+				flowSchemas[ancestor] = runtimecontracts.FlowSchemaDocument{}
 			}
 		}
 		schema := runtimecontracts.FlowSchemaDocument{
-			Mode: flow.mode,
+
 			Pins: runtimecontracts.FlowPins{
 				Inputs:  runtimecontracts.FlowInputPins{EventPins: flow.inputs},
 				Outputs: runtimecontracts.FlowOutputPins{EventPins: flow.outputs},

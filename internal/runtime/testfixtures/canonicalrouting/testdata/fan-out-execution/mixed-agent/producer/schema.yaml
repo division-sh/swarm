@@ -1,5 +1,4 @@
 name: producer
-mode: static
 pins:
   outputs:
     events: [mixed.none, mixed.one, mixed.multi, mixed.agent]

@@ -38,11 +38,10 @@ func CopyPublicationActivity(t testing.TB, mode, providerURL string, approval bo
 	}
 	schema := "name: publication-activity\npins:\n  inputs:\n    events:\n      - activity.requested\n  outputs:\n    events:\n" + outputs
 	if template {
-		schema = strings.Replace(schema, "name: publication-activity\n", "name: publication-activity\nmode: template\ninstance: case_id\n", 1)
-		schema = strings.Replace(schema, "      - activity.requested\n", "      - {event: activity.requested, resolution: {mode: select-or-create}}\n", 1)
+		schema = strings.Replace(schema, "name: publication-activity\n", "name: publication-activity\ninstance: case_id\n", 1)
 		writeClosedVariantFile(t, root, "events.yaml", request+"activity.dispatch:\n  key: case_id\n  case_id: text\n  message: text\n")
 		writeClosedVariantFile(t, root, "nodes.yaml", "driver:\n  execution_type: system_node\n  subscribes_to: [activity.requested]\n  event_handlers:\n    activity.requested:\n      emit: {event: activity.dispatch, fields: {case_id: \"${payload.case_id}\", message: \"${payload.message}\"}}\n")
-		connects += fmt.Sprintf("  - {event: activity.dispatch, from: ., to: %s, rename: activity.requested}\n", flow)
+		connects += fmt.Sprintf("  - {event: activity.dispatch, from: ., to: %s, rename: activity.requested, resolution: select-or-create}\n", flow)
 		writeClosedVariantFile(t, root, "schema.yaml", "name: activity-driver\npins:\n  inputs:\n    events:\n      - activity.requested\n  outputs:\n    events:\n      - activity.dispatch\nconnect:\n"+connects)
 		writeClosedVariantFile(t, root, prefix+"entities.yaml", "work:\n  case_id: {type: text, _unused_reason: receiver identity}\n")
 		if mode == "nested_template" {

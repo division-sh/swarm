@@ -23,14 +23,15 @@ func TestTemplateFlowMaterializationValidatesCompleteCommittedConfig(t *testing.
 		wantErr   bool
 	}{
 		{"nil", nil, nil, true},
-		{"empty", nil, map[string]any{}, false},
-		{"optional default absent", map[string]runtimecontracts.FlowVariable{"count": {Type: "integer", IsOptional: true, HasDefault: true, Default: 99}}, map[string]any{}, false},
-		{"required absent", map[string]runtimecontracts.FlowVariable{"count": {Type: "integer"}}, map[string]any{}, true},
-		{"required default absent", map[string]runtimecontracts.FlowVariable{"count": {Type: "integer", HasDefault: true, Default: 99}}, map[string]any{}, true},
-		{"wrong type", map[string]runtimecontracts.FlowVariable{"count": {Type: "integer"}}, map[string]any{"count": "7"}, true},
-		{"null", map[string]runtimecontracts.FlowVariable{"count": {Type: "integer"}}, map[string]any{"count": nil}, true},
-		{"selected type change", map[string]runtimecontracts.FlowVariable{"count": {Type: "boolean"}}, map[string]any{"count": int64(7)}, true},
-		{"undeclared", nil, map[string]any{"count": int64(7)}, true},
+		{"empty missing identity", nil, map[string]any{}, true},
+		{"identity only", nil, map[string]any{"instance_key": "one"}, false},
+		{"optional default absent", map[string]runtimecontracts.FlowVariable{"count": {Type: "integer", IsOptional: true, HasDefault: true, Default: 99}}, map[string]any{"instance_key": "one"}, false},
+		{"required absent", map[string]runtimecontracts.FlowVariable{"count": {Type: "integer"}}, map[string]any{"instance_key": "one"}, true},
+		{"required default absent", map[string]runtimecontracts.FlowVariable{"count": {Type: "integer", HasDefault: true, Default: 99}}, map[string]any{"instance_key": "one"}, true},
+		{"wrong type", map[string]runtimecontracts.FlowVariable{"count": {Type: "integer"}}, map[string]any{"instance_key": "one", "count": "7"}, true},
+		{"null", map[string]runtimecontracts.FlowVariable{"count": {Type: "integer"}}, map[string]any{"instance_key": "one", "count": nil}, true},
+		{"selected type change", map[string]runtimecontracts.FlowVariable{"count": {Type: "boolean"}}, map[string]any{"instance_key": "one", "count": int64(7)}, true},
+		{"undeclared", nil, map[string]any{"instance_key": "one", "count": int64(7)}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bundle := testFlowBundle(t, "")
@@ -45,7 +46,7 @@ func TestTemplateFlowMaterializationValidatesCompleteCommittedConfig(t *testing.
 			if err != nil || plan.Config == nil || !reflect.DeepEqual(plan.Config, tc.config) || len(plan.Agents) != 1 {
 				t.Fatalf("valid committed config changed: %#v %v", plan, err)
 			}
-			if string(plan.Agents[0].Config.ReceiverConfig) != "{}" {
+			if string(plan.Agents[0].Config.ReceiverConfig) != `{"instance_key":"one"}` {
 				t.Fatalf("empty config acquired defaults: %s", plan.Agents[0].Config.ReceiverConfig)
 			}
 		})
@@ -69,7 +70,7 @@ func TestReceiverConfigRecoveryRejectsInvalidEvidenceBeforeMutation(t *testing.T
 				declareReceiverConfig(t, bundle, map[string]runtimecontracts.FlowVariable{"count": {Type: "integer"}})
 				setFlowActivationManagerSemanticSource(first, semanticview.Wrap(bundle))
 				req := testActivationRequest(bundle, "review", "one", "parent", "review/one")
-				req.Config = map[string]any{"count": 7}
+				req.Config = map[string]any{"instance_key": "one", "count": 7}
 				ctx := testAuthorActivityContext(context.Background())
 				prepared, err := first.PrepareFlowInstanceActivation(ctx, req)
 				if err != nil {
@@ -87,11 +88,11 @@ func TestReceiverConfigRecoveryRejectsInvalidEvidenceBeforeMutation(t *testing.T
 				case "empty":
 					stored.Config = map[string]any{}
 				case "wrong type":
-					stored.Config = map[string]any{"count": "corrupt"}
+					stored.Config = map[string]any{"instance_key": "one", "count": "corrupt"}
 				case "null":
-					stored.Config = map[string]any{"count": nil}
+					stored.Config = map[string]any{"instance_key": "one", "count": nil}
 				case "undeclared":
-					stored.Config = map[string]any{"count": 7, "foreign": true}
+					stored.Config = map[string]any{"instance_key": "one", "count": 7, "foreign": true}
 				case "selected type change", "new required default":
 					source = testFlowBundle(t, "")
 					variables := map[string]runtimecontracts.FlowVariable{"count": {Type: "boolean"}}
@@ -167,7 +168,7 @@ func TestReceiverConfigRecoveryRejectsInvalidEvidenceBeforeMutation(t *testing.T
 				// A failed attempt must not poison a subsequent valid recovery.
 				stored.Config = validConfig
 				if mode == "selected type change" {
-					stored.Config = map[string]any{"count": true}
+					stored.Config = map[string]any{"instance_key": "one", "count": true}
 				}
 				if mode == "new required default" {
 					stored.Config["new"] = int64(5)
@@ -186,7 +187,7 @@ func TestReceiverConfigRecoveryRejectsInvalidEvidenceBeforeMutation(t *testing.T
 	}
 }
 
-func TestEnsureReceiverConfigPreservesEmptyVersusMissingEvidence(t *testing.T) {
+func TestEnsureReceiverConfigPreservesIdentityOnlyVersusMissingEvidence(t *testing.T) {
 	for _, missing := range []bool{false, true} {
 		t.Run(map[bool]string{false: "empty", true: "missing"}[missing], func(t *testing.T) {
 			instances := &flowActivationTestInstanceStore{}
@@ -220,7 +221,7 @@ func TestEnsureReceiverConfigPreservesEmptyVersusMissingEvidence(t *testing.T) {
 				t.Fatalf("valid empty evidence: created=%v err=%v", created, err)
 			}
 			cfg, found := testFlowActivationAgentConfig(t, restarted, "reviewer", "review/one")
-			if !found || string(cfg.ReceiverConfig) != "{}" {
+			if !found || string(cfg.ReceiverConfig) != `{"instance_key":"one"}` {
 				t.Fatalf("empty evidence changed: %s", cfg.ReceiverConfig)
 			}
 		})

@@ -134,6 +134,8 @@ func TestSchemaAdmissionDiskCatalogRetainedParity(t *testing.T) {
 
 func TestSchemaAdmissionInvalidSourceParity(t *testing.T) {
 	for _, source := range []string{
+		"mode: static\n", "mode: template\n", "mode: singleton\n", "mode: null\n", "mode: ''\n", "mode: {}\n", "mode: []\n",
+		"mode: static\nmode: template\n", "name: &shape static\nmode: *shape\n",
 		"tool_surface: null\n",
 		"stages: {waiting: {initial: 'true'}}\n",
 		"instance_variables: {variables: {note: {type: text, length: {min: -0.5}}}}\n",

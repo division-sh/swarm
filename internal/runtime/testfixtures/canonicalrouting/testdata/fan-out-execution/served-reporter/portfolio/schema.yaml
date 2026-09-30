@@ -1,5 +1,4 @@
 name: portfolio
-mode: singleton
 stages: []
 pins:
   inputs:

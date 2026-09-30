@@ -7,4 +7,3 @@ pins:
     events: [b.start]
   outputs:
     writes: [shared_field]
-mode: static

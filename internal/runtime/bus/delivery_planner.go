@@ -1086,7 +1086,7 @@ func routedExactSameInstanceNoTargetNodeDeliveryIntents(source semanticview.Sour
 		if node, ok := subscriber.Recipient.Node(); ok && source != nil {
 			if scope, found := source.FlowScopeByID(node.FlowPath()); found {
 				switch strings.ToLower(strings.TrimSpace(scope.Mode)) {
-				case runtimecontracts.FlowModeStatic, runtimecontracts.FlowModeSingleton:
+				case runtimecontracts.FlowModeStatic:
 					targetFlowInstance = strings.Trim(strings.TrimSpace(subscriber.Path), "/")
 				}
 			}

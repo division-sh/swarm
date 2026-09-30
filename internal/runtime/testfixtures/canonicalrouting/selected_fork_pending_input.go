@@ -67,7 +67,7 @@ func CopySelectedForkPendingInput(t testing.TB, variant SelectedForkPendingInput
 				files["schema.yaml"] = strings.Replace(files["schema.yaml"], "connect:\n", "connect:\n  - {event: work.seeded, from: ., to: a_finished}\n  - {event: work.first, from: ., to: a_finished}\n", 1)
 			}
 			if variant == PendingInputConnectedSiblings {
-				files["schema.yaml"] += "  - {event: work.seeded, from: ., to: sibling}\n  - {event: " + eventName + ", from: ., to: sibling}\n  - {event: " + eventName + ", from: ., to: on_demand}\n"
+				files["schema.yaml"] += "  - {event: work.seeded, from: ., to: sibling}\n  - {event: " + eventName + ", from: ., to: sibling}\n  - {event: " + eventName + ", from: ., to: on_demand, resolution: select-or-create}\n"
 			}
 		} else {
 			delete(files, "events.yaml")
@@ -82,7 +82,7 @@ func CopySelectedForkPendingInput(t testing.TB, variant SelectedForkPendingInput
 		writeClosedVariantFile(t, root, "a_finished/nodes.yaml", "controller:\n  execution_type: system_node\n  subscribes_to: [work.seeded, work.first]\n  event_handlers:\n    work.seeded:\n      create_entity: true\n      advances_to: ready\n    work.first:\n      advances_to: done\n")
 	}
 	if variant == PendingInputConnectedSiblings {
-		writeClosedVariantFile(t, root, "on_demand/schema.yaml", "name: on_demand\nmode: template\ninstance: token\nstages:\n  ready: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    events:\n      - event: work.first\n        resolution: {mode: select-or-create}\n")
+		writeClosedVariantFile(t, root, "on_demand/schema.yaml", "name: on_demand\ninstance: token\nstages:\n  ready: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    events: [work.first]\n")
 		writeClosedVariantFile(t, root, "on_demand/entities.yaml", "work:\n  token: {type: text, indexed: true, _unused_reason: receiver instance identity}\n")
 		writeClosedVariantFile(t, root, "on_demand/nodes.yaml", "controller:\n  execution_type: system_node\n  subscribes_to: [work.first]\n  event_handlers:\n    work.first:\n      advances_to: done\n")
 	}
@@ -93,10 +93,10 @@ func CopySelectedInputValidationProbe(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	for name, body := range map[string]string{
-		"schema.yaml":       "name: selected-input\nmode: static\npins:\n  inputs:\n    events:\n      - thing.created\n",
+		"schema.yaml":       "name: selected-input\npins:\n  inputs:\n    events:\n      - thing.created\n",
 		"events.yaml":       "thing.created:\n",
 		"nodes.yaml":        "worker:\n  execution_type: system_node\n  subscribes_to: [thing.created]\n  event_handlers:\n    thing.created:\n      guard:\n        id: selected_owner\n        check: '_entity.id != \"\"'\n",
-		"child/schema.yaml": "name: child\nmode: static\npins:\n  inputs:\n    events:\n      - thing.created\n",
+		"child/schema.yaml": "name: child\npins:\n  inputs:\n    events:\n      - thing.created\n",
 		"child/events.yaml": "thing.created:\n",
 		"child/nodes.yaml":  "worker:\n  execution_type: system_node\n  subscribes_to: [thing.created]\n  event_handlers:\n    thing.created:\n      guard:\n        id: selected_owner\n        check: '_entity.id != \"\"'\n",
 	} {

@@ -1,5 +1,4 @@
 name: worker
-mode: template
 instance: instance_id
 stages:
   idle: {initial: true}
@@ -13,6 +12,5 @@ auto_emit_on_create:
 pins:
   inputs:
     events:
-      - event: worker.requested
-        resolution: {mode: create}
+      - worker.requested
       - auto.started

@@ -3,10 +3,46 @@ package semanticviewtest
 import (
 	"fmt"
 	"strings"
+	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
+
+// InstanceField admits an explicit scalar identity for in-memory test sources.
+func InstanceField(field string) runtimecontracts.TemplateInstanceField {
+	value, err := runtimecontracts.ParseTemplateInstanceField(field)
+	if err != nil {
+		panic(err)
+	}
+	return value
+}
+
+// WithInstanceDeclarations loads the identity catalogs required by explicit
+// in-memory template fixtures. It does not infer or repair their flow shape.
+func WithInstanceDeclarations(t testing.TB, base *runtimecontracts.WorkflowContractBundle, flows ...string) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	repo := canonicalrouting.RepoRoot(t)
+	admitted, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyInstanceDeclarations(t, flows...), runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	admitted.Semantics = base.Semantics
+	admitted.FlowTree = base.FlowTree
+	admitted.FlowSchemas = base.FlowSchemas
+	admitted.RootSchema = base.RootSchema
+	admitted.Nodes = base.Nodes
+	admitted.Events = base.Events
+	admitted.Agents = base.Agents
+	admitted.Tools = base.Tools
+	admitted.Policy = base.Policy
+	admitted.RootTypes = base.RootTypes
+	admitted.RootEntities = base.RootEntities
+	admitted.URIRegistry = base.URIRegistry
+	admitted.SourceArtifact = base.SourceArtifact
+	return admitted
+}
 
 type rootAgentsSource struct {
 	semanticview.Source

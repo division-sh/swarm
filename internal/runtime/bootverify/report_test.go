@@ -830,7 +830,6 @@ fanout-node:
 					"support": {
 						mode: "template",
 						schema: `name: support
-mode: template
 auto_emit_on_create:
   event: ticket.ready
 stages:
@@ -1389,7 +1388,7 @@ func TestRun_RejectsRequiredAgentRoleFallbackWithoutMapKey(t *testing.T) {
 func TestRun_ReportsRequiredAgentSubscriptionMismatchForTemplateFlow(t *testing.T) {
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-child-flow-pin-wiring"))
 	schema := bundle.FlowSchemas["child"]
-	schema.Mode = "template"
+	schema.Instance = mustBootverifyTemplateInstanceField(t, "work_id")
 	schema.RequiredAgents = []runtimecontracts.FlowRequiredAgent{{
 		Role:         "worker",
 		SubscribesTo: []string{"work.completed"},
@@ -4070,7 +4069,7 @@ func TestRun_RootInputDoesNotImplicitlySubscribeSameNamedChild(t *testing.T) {
 	root := t.TempDir()
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: root\npins:\n  inputs:\n    events: [work.started]\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "work.started: {value: text}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "name: child\nmode: static\npins:\n  inputs:\n    events: [work.started]\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "name: child\npins:\n  inputs:\n    events: [work.started]\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "events.yaml"), "work.started: {value: text}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), "observer:\n  execution_type: system_node\n  subscribes_to: [work.started]\n  event_handlers:\n    work.started: {}\n")
 	repo := repoRootForBootverifyTest(t)
@@ -5448,7 +5447,7 @@ func TestRun_DoesNotRequireRetiredStaticAcquisitionForStatefulInputPinHandlers(t
 	}
 }
 
-func TestRun_RejectsCreateEntityForStatefulStaticInputPinHandlers(t *testing.T) {
+func TestRun_AllowsCanonicalCreateEntityForStatefulStaticInputPinHandlers(t *testing.T) {
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-child-flow-pin-wiring"))
 	flowID := "child"
 	flowView, ok := bundle.FlowViewByID(flowID)
@@ -5464,12 +5463,12 @@ func TestRun_RejectsCreateEntityForStatefulStaticInputPinHandlers(t *testing.T) 
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "flow_boundary_create_entity_validation", "static multi-row entity ownership is retired") {
-		t.Fatalf("expected retired static create_entity error, got %#v", report.Errors())
+	if reportContains(report.Errors(), "flow_boundary_create_entity_validation", "") || reportContains(report.Errors(), "primary_entity_validation", "") {
+		t.Fatalf("canonical-primary create_entity must not depend on authored mode: %#v", report.Errors())
 	}
 }
 
-func TestRun_RejectsCreateEntityForStagedStatefulStaticInputPinHandlers(t *testing.T) {
+func TestRun_AllowsCanonicalCreateEntityForStagedStatefulStaticInputPinHandlers(t *testing.T) {
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-child-flow-pin-wiring"))
 	flowID := "child"
 	useStagedLifecycleForFlow(t, bundle, flowID, "pending", []string{"pending", "done"}, []string{"done"})
@@ -5486,8 +5485,8 @@ func TestRun_RejectsCreateEntityForStagedStatefulStaticInputPinHandlers(t *testi
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "flow_boundary_create_entity_validation", "static multi-row entity ownership is retired") {
-		t.Fatalf("expected retired static create_entity error for staged flow, got %#v", report.Errors())
+	if reportContains(report.Errors(), "flow_boundary_create_entity_validation", "") || reportContains(report.Errors(), "primary_entity_validation", "") {
+		t.Fatalf("staged canonical-primary create_entity must not depend on authored mode: %#v", report.Errors())
 	}
 }
 
@@ -5502,7 +5501,7 @@ func TestRun_RejectsCallerSelectedEntityIDForRootNormalInputPinMaterializers(t *
 	}
 }
 
-func TestRun_RejectsImplicitMaterializationForStatefulStaticInputPinHandlers(t *testing.T) {
+func TestRun_AllowsCanonicalImplicitMaterializationForStatefulStaticInputPinHandlers(t *testing.T) {
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
   execution_type: system_node
@@ -5518,9 +5517,8 @@ treasury-node:
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "flow_boundary_create_entity_validation", "implicit entity materialization") ||
-		!reportContains(report.Errors(), "flow_boundary_create_entity_validation", "static multi-row entity ownership is retired") {
-		t.Fatalf("expected retired static implicit materialization error, got %#v", report.Errors())
+	if reportContains(report.Errors(), "flow_boundary_create_entity_validation", "") || reportContains(report.Errors(), "primary_entity_validation", "") {
+		t.Fatalf("canonical-primary writes must not depend on authored mode: %#v", report.Errors())
 	}
 }
 
@@ -5793,14 +5791,8 @@ treasury-node:
 }
 
 func TestRun_AllowsTemplateFlowInputPinHandlersWithoutCreateEntity(t *testing.T) {
-	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-child-flow-pin-wiring"))
-	flowID := "child"
-	schema, ok := bundle.FlowSchemas[flowID]
-	if !ok {
-		t.Fatalf("flow schema %s missing", flowID)
-	}
-	schema.Mode = "template"
-	bundle.FlowSchemas[flowID] = schema
+	bundle := loadFixtureBundle(t, filepath.Join("examples", "routing", "template-create-minted-key"))
+	flowID := "validator"
 	flowView, ok := bundle.FlowViewByID(flowID)
 	if !ok || flowView == nil {
 		t.Fatalf("flow view %s missing", flowID)
@@ -6581,7 +6573,6 @@ opco.spend_requested:
   amount_usd: number
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "treasury", "schema.yaml"), `name: treasury
-mode: static
 stages:
   active: {initial: true}
 pins:

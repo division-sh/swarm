@@ -54,7 +54,7 @@ func ApplyFanInNegativeMutation(t testing.TB, root string, mutation FanInNegativ
 	case FanInEventIDDedup:
 		applyClosedReplacement(t, receiverSchema, "          dedup_by: [payload.operating_id]\n", "          dedup_by: [event.id]\n")
 	case FanInNonSingletonReceiver:
-		applyClosedReplacement(t, receiverSchema, "mode: singleton\n", "mode: static\n")
+		applyClosedReplacement(t, receiverSchema, "name: portfolio\n", "name: portfolio\ninstance: last_revenue\n")
 	case FanInMissingReceiverHandler:
 		applyClosedReplacement(t, receiverNodes, "  subscribes_to: [operating.reported]\n", "  subscribes_to: []\n")
 		applyClosedReplacement(t, receiverNodes, "  event_handlers:\n    operating.reported:\n      accumulate:\n        into: operating_reports\n        from: payload\n      data_accumulation:\n        writes:\n          - op: set\n            target: entity.reports\n            key: ${payload.operating_id}\n            value: ${payload}\n          - source_field: revenue\n            target_field: last_revenue\n", "  event_handlers: {}\n")

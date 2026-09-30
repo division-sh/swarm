@@ -11,7 +11,7 @@ import (
 func TestEmitPublicationSchemaRefusalRemainsVisibleToValidators(t *testing.T) {
 	for _, mode := range []string{runtimecontracts.FlowModeStatic, "template"} {
 		t.Run(mode, func(t *testing.T) {
-			bundle := emitRoutePlanTestBundle([]emitRoutePlanTestFlow{{id: "left", mode: mode}, {id: "right", mode: mode}}, nil)
+			bundle := emitRoutePlanTestBundle(t, []emitRoutePlanTestFlow{{id: "left", mode: mode}, {id: "right", mode: mode}}, nil)
 			for _, flow := range []string{"left", "right"} {
 				bundle.FlowTree.ByID[flow].Events = map[string]runtimecontracts.EventCatalogEntry{
 					"result.done": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"value": {Type: "text"}}}},
@@ -72,7 +72,7 @@ func TestEmitPublicationSchemaRefusalRemainsVisibleToValidators(t *testing.T) {
 }
 
 func TestEmitPublicationSchemaAndPermissionRequireExactDeclaration(t *testing.T) {
-	bundle := emitRoutePlanTestBundle([]emitRoutePlanTestFlow{
+	bundle := emitRoutePlanTestBundle(t, []emitRoutePlanTestFlow{
 		{id: "left", mode: runtimecontracts.FlowModeStatic},
 		{id: "right", mode: runtimecontracts.FlowModeStatic},
 	}, nil)

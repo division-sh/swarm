@@ -1045,7 +1045,7 @@ func sqliteFlowActivationBundle(t *testing.T) *runtimecontracts.WorkflowContract
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
 			"review": {
-				Mode: "template",
+
 				Pins: runtimecontracts.FlowPins{
 					Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "task.started"}}},
 				},
@@ -1055,7 +1055,7 @@ func sqliteFlowActivationBundle(t *testing.T) *runtimecontracts.WorkflowContract
 	}
 	bundle := loadLifecyclePersistenceFixtureForTest(t, map[string]string{
 		"schema.yaml":          "name: flow-activation-proof\n",
-		"review/schema.yaml":   "name: review\nmode: template\nstages:\n  pending: {initial: true}\npins:\n  inputs:\n    events: [task.started]\n",
+		"review/schema.yaml":   "name: review\nstages:\n  pending: {initial: true}\npins:\n  inputs:\n    events: [task.started]\n",
 		"review/entities.yaml": "review_item: {}\n",
 		"review/events.yaml":   "task.started:\n",
 	})
@@ -1565,7 +1565,7 @@ func TestSQLiteRuntimeStorePipelineWorkflowInstanceOwner(t *testing.T) {
 	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	bundle := loadLifecyclePersistenceFixtureForTest(t, map[string]string{
 		"schema.yaml":        "name: persistence-proof\n",
-		"root/schema.yaml":   "name: root\nmode: template\nstages:\n  qualified: {initial: true}\n",
+		"root/schema.yaml":   "name: root\nstages:\n  qualified: {initial: true}\n",
 		"root/entities.yaml": "company:\n  score: decimal\n",
 	})
 	options := completeWorkflowTestCoordinatorOptions(runtimepipeline.NewWorkflowPersistence(store), store)

@@ -272,7 +272,6 @@ root_lookup:
 `)
 	writeFixtureFile(t, filepath.Join(root, "worker", "schema.yaml"), `
 name: worker
-mode: static
 `)
 	writeFixtureFile(t, filepath.Join(root, "worker", "tools.yaml"), `
 flow_lookup:
@@ -602,7 +601,6 @@ shared:
 `)
 	writeFixtureFile(t, filepath.Join(root, "parent", "schema.yaml"), `
 name: parent
-mode: static
 `)
 	writeFixtureFile(t, filepath.Join(root, "parent", "nodes.yaml"), `
 parent-node:
@@ -625,7 +623,6 @@ shared:
 `)
 	writeFixtureFile(t, filepath.Join(root, "parent", "child", "schema.yaml"), `
 name: child
-mode: static
 `)
 	writeFixtureFile(t, filepath.Join(root, "parent", "child", "nodes.yaml"), `
 child-node:

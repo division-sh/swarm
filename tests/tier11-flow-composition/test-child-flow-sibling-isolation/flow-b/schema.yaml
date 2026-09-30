@@ -5,4 +5,3 @@ stages:
 pins:
   inputs:
     events: [beta.start]
-mode: static

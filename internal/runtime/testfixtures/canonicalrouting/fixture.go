@@ -355,7 +355,6 @@ func AddRetiredStaticFlowForNegativeMutation(t testing.TB, root string, mutation
 		t.Fatalf("unsupported retired static mutation %q", mutation)
 	}
 	writeClosedNegativeFile(t, root, "legacy_static/schema.yaml", `name: legacy_static
-mode: static
 stages:
   active: {initial: true}
   archived: {terminal: true}

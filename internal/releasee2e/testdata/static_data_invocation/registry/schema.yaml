@@ -1,5 +1,4 @@
 name: registry
-mode: template
 instance: request_key
 stages:
   pending: {initial: true}
@@ -8,7 +7,6 @@ stages:
 pins:
   inputs:
     events:
-      - event: child.requested
-        resolution: {mode: select-or-create}
+      - child.requested
   outputs:
     events: [child.completed]

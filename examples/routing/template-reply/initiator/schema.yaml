@@ -1,5 +1,4 @@
 name: initiator
-mode: static
 pins:
   inputs:
     events:

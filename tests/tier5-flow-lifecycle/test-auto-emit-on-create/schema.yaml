@@ -10,3 +10,4 @@ connect:
   - event: worker.requested
     from: .
     to: worker
+    resolution: create

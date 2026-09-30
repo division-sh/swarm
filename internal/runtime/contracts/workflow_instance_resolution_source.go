@@ -30,15 +30,18 @@ type FlowInputInstanceSourceTypeEvidence struct {
 
 func ResolveFlowInputInstanceSource(mode FlowInputResolutionMode, raw string) (FlowInputInstanceSource, error) {
 	path := strings.TrimSpace(raw)
+	if raw != path {
+		return FlowInputInstanceSource{}, fmt.Errorf("key_from must use an exact canonical source spelling")
+	}
 	switch path {
 	case FlowInputInstanceSourceGeneratedUUIDPath:
 		if mode != FlowInputResolutionModeCreate {
-			return FlowInputInstanceSource{}, fmt.Errorf("generated.uuid is only valid for resolution mode create; selecting pins must source an existing payload field")
+			return FlowInputInstanceSource{}, fmt.Errorf("generated.uuid is only valid for resolution create; selecting connections must source an existing payload field")
 		}
 		return FlowInputInstanceSource{Kind: FlowInputInstanceSourceGeneratedUUID, Path: path}, nil
 	case FlowInputInstanceSourceEventIDPath:
 		if mode != FlowInputResolutionModeCreate {
-			return FlowInputInstanceSource{}, fmt.Errorf("event.id is only valid for resolution mode create; selecting pins must source an existing payload field")
+			return FlowInputInstanceSource{}, fmt.Errorf("event.id is only valid for resolution create; selecting connections must source an existing payload field")
 		}
 		return FlowInputInstanceSource{Kind: FlowInputInstanceSourceEventID, Path: path}, nil
 	}
@@ -57,26 +60,25 @@ func (s FlowInputInstanceSource) RequiresDeliveryProjection() bool {
 
 // ResolveFlowInputInstanceSourceType centralizes source parsing, authoritative
 // source-type resolution, and receiver compatibility.
-func (b *WorkflowContractBundle) ResolveFlowInputInstanceSourceType(schemaProvider FlowEventStructuralTypeProvider, flowID string, pin CompiledFlowInputPin, instance TemplateInstanceContract) (FlowInputInstanceSourceTypeEvidence, error) {
-	return b.resolveFlowInputInstanceSourceType(schemaProvider, flowID, pin, instance, true)
+func (b *WorkflowContractBundle) ResolveFlowInputInstanceSourceType(schemaProvider FlowEventStructuralTypeProvider, flowID string, connect FlowConnect, pin CompiledFlowInputPin, instance TemplateInstanceContract) (FlowInputInstanceSourceTypeEvidence, error) {
+	return b.resolveFlowInputInstanceSourceType(schemaProvider, flowID, connect, pin, instance, true)
 }
 
-func (b *WorkflowContractBundle) resolveFlowInputInstanceSourceType(schemaProvider FlowEventStructuralTypeProvider, flowID string, pin CompiledFlowInputPin, instance TemplateInstanceContract, requireCompatibility bool) (FlowInputInstanceSourceTypeEvidence, error) {
+func (b *WorkflowContractBundle) resolveFlowInputInstanceSourceType(schemaProvider FlowEventStructuralTypeProvider, flowID string, connect FlowConnect, pin CompiledFlowInputPin, instance TemplateInstanceContract, requireCompatibility bool) (FlowInputInstanceSourceTypeEvidence, error) {
 	if instance.Field.Empty() {
 		return FlowInputInstanceSourceTypeEvidence{}, fmt.Errorf("receiver flow %s must declare instance: <field>", strings.TrimSpace(flowID))
 	}
 	field := instance.Field.Path()
-	resolution := pin.Resolution()
-	rawSource := strings.TrimSpace(resolution.From)
+	rawSource := connect.KeyFrom
 	defaultSource := "payload." + field
 	if rawSource == "" {
 		rawSource = defaultSource
 	} else if rawSource == defaultSource {
-		return FlowInputInstanceSourceTypeEvidence{}, fmt.Errorf("resolution.from %q is redundant; omit it to derive the receiver instance source", rawSource)
+		return FlowInputInstanceSourceTypeEvidence{}, fmt.Errorf("key_from %q is redundant; omit it to derive the receiver instance source", rawSource)
 	}
-	source, err := ResolveFlowInputInstanceSource(resolution.Mode, rawSource)
+	source, err := ResolveFlowInputInstanceSource(connect.Resolution, rawSource)
 	if err != nil {
-		return FlowInputInstanceSourceTypeEvidence{}, fmt.Errorf("resolution source %q is invalid for mode %s: %w", rawSource, FlowInputResolutionModeCode(resolution.Mode), err)
+		return FlowInputInstanceSourceTypeEvidence{}, fmt.Errorf("key_from %q is invalid for resolution %s: %w", rawSource, FlowInputResolutionModeCode(connect.Resolution), err)
 	}
 
 	receiverDecl, ok := instance.PrimaryEntity.Contract.Fields[field]
@@ -117,9 +119,7 @@ func (b *WorkflowContractBundle) resolveFlowInputInstanceSourceType(schemaProvid
 func resolveFlowInputInstanceEventFieldType(bundle *WorkflowContractBundle, schemaProvider FlowEventStructuralTypeProvider, flowID string, pin CompiledFlowInputPin, field string) (CatalogTypeReference, bool, bool) {
 	var schema CompiledEventSchema
 	var ok bool
-	if schema, ok = pin.ReceiverEventSchema(); !ok {
-		schema, ok = pin.ProducerEventSchema()
-	}
+	schema, ok = pin.ProducerEventSchema()
 	if !ok && bundle != nil {
 		var err error
 		schema, ok, err = bundle.ResolveEffectiveCompiledFlowEventSchema(flowID, pin.EventType())

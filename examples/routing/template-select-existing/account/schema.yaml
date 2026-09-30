@@ -1,12 +1,7 @@
 name: account
-mode: template
 instance: account_id
 pins:
   inputs:
     events:
-      - event: account.setup
-        resolution:
-          mode: select-or-create
-      - event: account.ready
-        resolution:
-          mode: select
+      - account.setup
+      - account.ready

@@ -45,7 +45,14 @@ func TestActivateFlowInstanceAdmitsReceiverConfigBeforeAllConsumers(t *testing.T
 			})
 			setFlowActivationManagerSemanticSource(manager, semanticview.Wrap(bundle))
 			req := testActivationRequest(bundle, "review", "one", "parent", "review/one")
-			req.Config = tc.config
+			req.Config = cloneFlowConfig(tc.config)
+			if req.Config == nil {
+				req.Config = map[string]any{}
+			}
+			req.Config["instance_key"] = "one"
+			if tc.want != nil {
+				tc.want["instance_key"] = "one"
+			}
 			err := manager.ActivateFlowInstance(testAuthorActivityContext(context.Background()), req)
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
@@ -107,7 +114,8 @@ func TestEnsureFlowInstanceReuseCannotReplaceCommittedConfigOrPendingAutoEmit(t 
 				setFlowActivationManagerSemanticSource(first, semanticview.Wrap(bundle))
 				req := testActivationRequest(bundle, "review", "one", "parent", "review/one")
 				committedConfig := map[string]any{
-					"name": "committed", "priority": int64(7), "status": false, "flow_path": []any{"business", "path"},
+					"instance_key": "one",
+					"name":         "committed", "priority": int64(7), "status": false, "flow_path": []any{"business", "path"},
 					"nested": map[string]any{"values": []any{int64(7), float64(7), nil}},
 				}
 				req.Config = cloneFlowConfig(committedConfig)
@@ -180,7 +188,7 @@ func TestFlowActivationPreparedConfigDoesNotAliasNestedCallerValues(t *testing.T
 	declareReceiverConfig(t, bundle, map[string]runtimecontracts.FlowVariable{"nested": {Type: "json"}})
 	setFlowActivationManagerSemanticSource(manager, semanticview.Wrap(bundle))
 	req := testActivationRequest(bundle, "review", "one", "parent", "review/one")
-	req.Config = map[string]any{"nested": []any{map[string]any{"integer": int64(5), "double": float64(5), "number": json.Number("5.0"), "null": nil}}}
+	req.Config = map[string]any{"instance_key": "one", "nested": []any{map[string]any{"integer": int64(5), "double": float64(5), "number": json.Number("5.0"), "null": nil}}}
 	plan, err := manager.PrepareFlowInstanceActivation(testAuthorActivityContext(context.Background()), req)
 	if err != nil {
 		t.Fatal(err)
@@ -253,15 +261,15 @@ func TestReceiverConfigRecoverySourceRevisionDoesNotReadmitDefaults(t *testing.T
 			if err != nil || !found || after.Plan.BundleHash != revisedFact.BundleHash() || after.Plan.BundleHash == before.Plan.BundleHash || after.Plan.CreationEvent == nil || string(after.Plan.CreationEvent.Payload) != string(before.Plan.CreationEvent.Payload) {
 				t.Fatalf("revised creation lost stored config: %#v %v", after, err)
 			}
-			if len(restartBus.published) != 1 || string(restartBus.published[0].Type()) != "review/one/task.revised" || string(restartBus.published[0].Payload()) != `{"name":"committed","priority":7}` {
+			if len(restartBus.published) != 1 || string(restartBus.published[0].Type()) != "review/one/task.revised" || string(restartBus.published[0].Payload()) != `{"instance_key":"one","name":"committed","priority":7}` {
 				t.Fatalf("revised autoemit did not consume stored config: %#v", restartBus.published)
 			}
 			stored, found, err := instances.Load(ctx, testActivationFlowIdentity(req))
-			if err != nil || !found || !reflect.DeepEqual(stored.Config, map[string]any{"name": "committed", "priority": int64(7)}) {
+			if err != nil || !found || !reflect.DeepEqual(stored.Config, map[string]any{"instance_key": "one", "name": "committed", "priority": int64(7)}) {
 				t.Fatalf("recovery reapplied defaults: %#v %v", stored.Config, err)
 			}
 			cfg, found := testFlowActivationAgentConfig(t, restarted, "reviewer", "review/one")
-			if !found || string(cfg.ReceiverConfig) != `{"name":"committed","priority":7}` {
+			if !found || string(cfg.ReceiverConfig) != `{"instance_key":"one","name":"committed","priority":7}` {
 				t.Fatalf("agent recovery reapplied defaults: %s", cfg.ReceiverConfig)
 			}
 		})
@@ -288,7 +296,7 @@ func TestTemplateFlowMaterializationRequiresExactCommittedConfig(t *testing.T) {
 	if plan, err := TemplateFlowMaterialization(source, "review", path, "entity-1", nil); err == nil || !strings.Contains(err.Error(), "exact committed receiver configuration") || len(plan.Agents) != 0 {
 		t.Fatalf("missing evidence acquired materialization: %#v %v", plan, err)
 	}
-	config := map[string]any{"key": "original-business-key", "nested": []any{map[string]any{"integer": int64(7), "double": float64(7), "null": nil}}}
+	config := map[string]any{"instance_key": "original-business-key", "key": "original-business-key", "nested": []any{map[string]any{"integer": int64(7), "double": float64(7), "null": nil}}}
 	plan, err := TemplateFlowMaterialization(source, "review", path, "entity-1", config)
 	if err != nil {
 		t.Fatal(err)

@@ -14,7 +14,6 @@ import (
 func TestRun_ValidatesSingletonCoordinatorWithContainedState(t *testing.T) {
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
 name: coordinator
-mode: singleton
 pins:
   inputs:
     events: [job.received]
@@ -30,7 +29,6 @@ pins:
 func TestRun_AllowsStatelessSingletonWithIndependentAgentMemory(t *testing.T) {
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
 name: coordinator
-mode: singleton
 pins:
   inputs:
     events: [job.received]
@@ -52,11 +50,10 @@ memory-agent:
 	}
 }
 
-func TestRun_RejectsSingletonCoordinatorTemplateInstanceMix(t *testing.T) {
+func TestRun_AllowsTemplateContainedDeclarationWithoutCoordinatorDemand(t *testing.T) {
 
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
 name: coordinator
-mode: singleton
 instance: vertical_id
 pins:
   inputs:
@@ -69,15 +66,14 @@ coordinator_state:
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "singleton_coordinator_validation", "must not declare template instance") {
-		t.Fatalf("expected singleton_coordinator_validation template instance error, got %#v", report.Errors())
+	if reportContains(report.Errors(), "singleton_coordinator_validation", "") {
+		t.Fatalf("an inert typed declaration must not manufacture coordinator demand: %#v", report.Errors())
 	}
 }
 
 func TestRun_RejectsSingletonCoordinatorUnresolvedContainedType(t *testing.T) {
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
 name: coordinator
-mode: singleton
 pins:
   inputs:
     events: [job.received]
@@ -88,15 +84,14 @@ coordinator_state:
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "singleton_coordinator_validation", "MissingType") {
-		t.Fatalf("expected singleton_coordinator_validation unresolved contained type error, got %#v", report.Errors())
+	if _, err := bundle.ResolveFlowSingletonCoordinator("coordinator"); err == nil || !strings.Contains(err.Error(), "MissingType") {
+		t.Fatalf("coordinator demand must reject unresolved contained type, got %v (report=%#v)", err, report.Errors())
 	}
 }
 
 func TestRun_DoesNotTreatBareStaticFlowAsSingletonCoordinator(t *testing.T) {
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
 name: coordinator
-mode: static
 pins:
   inputs:
     events: [job.received]
@@ -115,7 +110,6 @@ coordinator_state:
 func TestRun_SingletonCoordinatorRejectsDynamicContainedTargetPath(t *testing.T) {
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
 name: coordinator
-mode: singleton
 pins:
   inputs:
     events: [job.received]
@@ -246,7 +240,6 @@ coordinator-node:
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			bundle := loadSingletonCoordinatorFixtureBundle(t, `name: coordinator
-mode: singleton
 stages:
   active: {initial: true}
   done: {}
@@ -285,7 +278,6 @@ func TestBuildSingletonCoordinatorDemandProjection_PreservesDuplicateScopedNodeI
 func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatQuerySelectAsExpression(t *testing.T) {
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
 name: coordinator
-mode: singleton
 pins:
   inputs:
     events: [job.received]
@@ -411,7 +403,6 @@ func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFields
 			}
 			bundle := loadSingletonCoordinatorFixtureBundle(t, `
 name: coordinator
-mode: singleton
 pins:
   inputs:
     events: [job.received]
@@ -441,7 +432,6 @@ coordinator-node:
 func TestBuildSingletonCoordinatorDemandProjection_TreatsLoopFromAsStageIdentifier(t *testing.T) {
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
 name: coordinator
-mode: singleton
 stages:
   entity.verticals: {initial: true}
   review: {}
@@ -483,7 +473,6 @@ coordinator-node:
 
 func TestRun_IntrinsicJoinDemandRejectsStatelessAndAcceptsStatefulCoordinator(t *testing.T) {
 	const schema = `name: coordinator
-mode: singleton
 stages:
   active: {initial: true}
   done: {}

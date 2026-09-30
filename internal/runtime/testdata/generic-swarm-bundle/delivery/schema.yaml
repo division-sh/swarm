@@ -1,5 +1,5 @@
 name: delivery
-mode: template
+instance: item_id
 stages:
   approved: {initial: true}
   completed: {terminal: true}

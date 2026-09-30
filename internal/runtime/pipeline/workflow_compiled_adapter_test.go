@@ -93,7 +93,7 @@ func compiledAdapterSourceWithKillStages(t *testing.T, killStages string, initia
       guard: {id: discard-check, check: "false", on_fail: discard}
       advances_to: done
 `,
-		"child/schema.yaml":   "name: child\nmode: template\nstages:\n  ready: {initial: true}\n  shared: {terminal: true}\n  foreign_only: {}\n  done: {terminal: true}\n  killed: {terminal: true}\n",
+		"child/schema.yaml":   "name: child\nstages:\n  ready: {initial: true}\n  shared: {terminal: true}\n  foreign_only: {}\n  done: {terminal: true}\n  killed: {terminal: true}\n",
 		"child/entities.yaml": "test_entity:\n  marker: text\n",
 		"child/events.yaml":   "direct:\nkill:\nguarded:\nguard_observed:\n  marker: text\n",
 		"child/nodes.yaml": `router:

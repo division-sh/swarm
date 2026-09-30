@@ -694,7 +694,7 @@ func loadFlowDataToolSourceWithAccess(t *testing.T, access []string) (semanticvi
 
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: flow-data-test\n")
 
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), "name: support\nmode: static\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), "name: support\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "support", "entities.yaml"), "support_state:\n  support_id: string\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "support", "agents.yaml"), `
 factory-cto:
@@ -704,7 +704,7 @@ factory-cto:
 `+toolFlowDataAccessYAML(access))
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "support", "data", "exclusions.yaml"), "blocked: true\n")
 
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "other", "schema.yaml"), "name: other\nmode: static\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "other", "schema.yaml"), "name: other\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "other", "entities.yaml"), "other_state:\n  other_id: string\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "other", "agents.yaml"), `
 factory-cto:
@@ -732,7 +732,7 @@ func loadResourceDataToolSourceWithEventName(t *testing.T, eventName string) (se
 
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: resource-data-test\n")
 
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), "name: support\nmode: static\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), "name: support\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "support", "entities.yaml"), "support_state:\n  support_id: string\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "support", "agents.yaml"), fmt.Sprintf(`
 factory-cto:

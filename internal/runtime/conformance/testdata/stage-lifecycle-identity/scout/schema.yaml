@@ -1,5 +1,4 @@
 name: scout
-mode: singleton
 stages:
   collecting:
     initial: true

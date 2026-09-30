@@ -15,6 +15,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 )
 
 const toolTestRunID = "22222222-2222-4222-8222-222222222222"
@@ -110,7 +111,7 @@ func TestExecSchedulePreservesImportedTemplateAgentRoutingSource(t *testing.T) {
 		Paths: runtimecontracts.FlowContractPaths{
 			FlowPath: flowPath, AgentsFile: "/contracts/telegram-ingress/telegram-chat/agents.yaml",
 		},
-		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate},
+		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.InstanceField("instance_key")},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			agentID: runtimecontracts.EffectiveAgentRegistryEntry(agentID, runtimecontracts.AgentRegistryEntry{ID: agentID, Role: agentID}),
 		},
@@ -119,6 +120,7 @@ func TestExecSchedulePreservesImportedTemplateAgentRoutingSource(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{FlowTree: runtimecontracts.FlowTree{
 		Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{flowID: &root.Children[0]},
 	}}
+	bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, flowID)
 	source := toolTestSourceWithDeclaredAgent(t, bundle, agentID, flowID)
 	declarations := semanticview.AgentDeclarations(source)
 	if len(declarations) != 1 {

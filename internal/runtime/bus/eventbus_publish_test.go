@@ -45,6 +45,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
@@ -3740,8 +3741,8 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 		Path:  "child",
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"},
 		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode: runtimecontracts.FlowModeStatic, StageDeclarations: stages,
-			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "route.start"}}}},
+			StageDeclarations: stages,
+			Pins:              runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "route.start"}}}},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"route.start": {},
@@ -3759,8 +3760,8 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 		Path:  ".",
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
 		Schema: runtimecontracts.FlowSchemaDocument{
-			Name: "mixed-route",
-			Mode: runtimecontracts.FlowModeStatic, StageDeclarations: stages,
+			Name:              "mixed-route",
+			StageDeclarations: stages,
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"route.start": {},
@@ -3813,9 +3814,9 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 	}
 	admitted := loadEventBusTempBundle(t, map[string]string{
 
-		"schema.yaml":         "name: mixed-route\nmode: static\nstages:\n  active: {initial: true}\n",
+		"schema.yaml":         "name: mixed-route\nstages:\n  active: {initial: true}\n",
 		"entities.yaml":       "test_entity: {}\n",
-		"child/schema.yaml":   "name: child\nmode: static\nstages:\n  active: {initial: true}\n",
+		"child/schema.yaml":   "name: child\nstages:\n  active: {initial: true}\n",
 		"child/entities.yaml": "test_entity: {}\n",
 	})
 	admitted.Nodes = bundle.Nodes
@@ -4447,8 +4448,8 @@ func TestEventBusPublish_RecordsNestedFlowConnectLocalizedEvent(t *testing.T) {
 func TestEventBusPublish_RecordsNestedTemplateInstanceLocalizedEvent(t *testing.T) {
 	grandchild := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "child/grandchild"},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode: "template",
+		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
+			InstanceField("instance_key"),
 		},
 		Path: "child/grandchild",
 		Nodes: map[string]runtimecontracts.SystemNodeContract{

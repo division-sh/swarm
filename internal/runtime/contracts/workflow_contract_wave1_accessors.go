@@ -26,15 +26,8 @@ func (b *WorkflowContractBundle) ResolveFlowTemplateInstance(flowID string) (Tem
 	if !ok {
 		return TemplateInstanceContract{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s template instance is unavailable: schema not found", flowID)
 	}
-	mode := strings.TrimSpace(schema.Mode)
-	if mode != FlowModeTemplate {
-		if !schema.Instance.Empty() {
-			return TemplateInstanceContract{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s declares instance but is not mode: template", flowID)
-		}
-		return TemplateInstanceContract{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s is not mode: template", flowID)
-	}
 	if schema.Instance.Empty() {
-		return TemplateInstanceContract{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s mode: template must declare instance: <field>", flowID)
+		return TemplateInstanceContract{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s must declare instance: <field>", flowID)
 	}
 	primary, err := b.ResolveFlowPrimaryEntity(flowID)
 	if err != nil {
@@ -64,11 +57,8 @@ func (b *WorkflowContractBundle) ResolveFlowSingleton(flowID string) (SingletonC
 	if !ok {
 		return SingletonContract{}, fmt.Errorf("INVALID-SINGLETON: flow %s singleton is unavailable: schema not found", flowID)
 	}
-	if mode := strings.TrimSpace(schema.Mode); mode != FlowModeSingleton {
-		return SingletonContract{}, fmt.Errorf("INVALID-SINGLETON: flow %s is not mode: singleton", flowID)
-	}
 	if !schema.Instance.Empty() {
-		return SingletonContract{}, fmt.Errorf("INVALID-SINGLETON: flow %s mode: singleton must not declare template instance", flowID)
+		return SingletonContract{}, fmt.Errorf("INVALID-SINGLETON: flow %s has a template instance key, not static cardinality", flowID)
 	}
 	primary, err := b.ResolveFlowPrimaryEntity(flowID)
 	if err != nil {

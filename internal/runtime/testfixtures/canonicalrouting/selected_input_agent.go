@@ -11,8 +11,13 @@ func CopySelectedInputAgentProbe(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	for _, flow := range []struct{ path, mode string }{{"", "static"}, {"child", "static"}, {"templ", "template"}} {
+		instance := ""
+		if flow.mode == "template" {
+			instance = "instance: work_id\n"
+			writeClosedVariantFile(t, root, filepath.Join(flow.path, "entities.yaml"), "work:\n  work_id: text\n")
+		}
 		for file, body := range map[string]string{
-			"schema.yaml": "name: selected-input-agent\nmode: " + flow.mode + "\npins:\n  inputs:\n    events:\n      - work.ready\n",
+			"schema.yaml": "name: selected-input-agent\n" + instance + "pins:\n  inputs:\n    events:\n      - work.ready\n",
 			"events.yaml": "work.ready:\n",
 			"agents.yaml": "worker:\n  model: regular\n  intent:\n    inline: Complete the selected input.\n  subscriptions: [work.ready]\n",
 		} {

@@ -22,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 	"github.com/google/uuid"
 )
@@ -319,9 +320,11 @@ func sourceMutationFact(t testing.TB, marker string) runtimecorrelation.SourceAr
 
 func sourceMutationRouteSource() semanticview.Source {
 	flow := runtimecontracts.FlowContractView{
-		Path:   "work",
-		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "work"},
-		Schema: runtimecontracts.FlowSchemaDocument{Mode: "template"},
+		Path:  "work",
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "work"},
+		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
+			InstanceField("instance_key"),
+		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"task.completed": {},
 			"task.requested": {},
@@ -339,7 +342,7 @@ func sourceMutationRouteSource() semanticview.Source {
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{"work": &root.Children[0]},
 		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"work": {Mode: "template"}},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"work": {}},
 	}
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 		panic(err)

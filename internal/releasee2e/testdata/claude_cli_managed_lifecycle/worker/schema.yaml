@@ -1,5 +1,4 @@
 name: claude-cli-release-worker
-mode: singleton
 stages:
   pending: {initial: true}
   active: {}

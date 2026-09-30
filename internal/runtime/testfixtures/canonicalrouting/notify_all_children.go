@@ -116,12 +116,8 @@ account.created:
 auto_emit_on_create:
   event: account.created
 `)
-		applyClosedReplacement(t, accountSchema, `      - event: account.notify.requested
-        resolution:
-          mode: select
-`, `      - event: account.notify.requested
-        resolution:
-          mode: select
+		applyClosedReplacement(t, accountSchema, `      - account.notify.requested
+`, `      - account.notify.requested
   outputs:
     events:
       - account.created
@@ -284,15 +280,13 @@ portfolio.notify.completed:
           - source_field: eligible
             target_field: eligible
 `, "")
-			applyClosedReplacement(t, accountSchema, `      - event: account.registered
-        resolution:
-          mode: select-or-create
-`, "")
+			applyClosedReplacement(t, accountSchema, "      - account.registered\n", "")
 		}
 		if opts.NumericReporterSink {
 			applyClosedReplacement(t, connectFile, `  - event: account.registered
     from: portfolio
     to: account
+    resolution: select-or-create
 `, `  - event: account.registered
     from: portfolio
     to: .
@@ -310,6 +304,7 @@ portfolio.notify.completed:
 			applyClosedReplacement(t, connectFile, `  - event: account.registered
     from: portfolio
     to: account
+    resolution: select-or-create
 `, "")
 			applyClosedReplacement(t, ownerNodes, "portfolio-coordinator:\n", `numeric-registration-observer:
   execution_type: system_node

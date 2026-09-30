@@ -47,13 +47,22 @@ func CompileActivityToolBindings(source Source) (Source, error) {
 		}
 		out.inputPins[scope.ID] = pins
 	}
+	out.connectionInputs = contracts.CompileConnectionInputs(compiled, out)
+	if err := out.connectionInputs.ValidateBindings(); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
 type compiledActivitySource struct {
 	Source
-	compiled  bundleSource
-	inputPins map[string][]contracts.CompiledFlowInputPin
+	compiled         bundleSource
+	inputPins        map[string][]contracts.CompiledFlowInputPin
+	connectionInputs contracts.CompiledConnectionInputs
+}
+
+func (s compiledActivitySource) ConnectionInputs() contracts.CompiledConnectionInputs {
+	return s.connectionInputs
 }
 
 func (s compiledActivitySource) semanticSourceCore() sourceCore {
@@ -90,6 +99,9 @@ func (s compiledActivitySource) ResolveExecutableNodeEventCatalogEntry(node iden
 }
 func (s compiledActivitySource) ResolveEffectiveCompiledFlowEventSchema(flowID, event string) (contracts.CompiledEventSchema, bool, error) {
 	if pin, ok := s.FlowInputEventPin(flowID, event); ok {
+		if schema, owned, err := s.connectionInputs.ReceiverEventSchema(flowID, pin.EventType()); err != nil || owned {
+			return schema, owned, err
+		}
 		if schema, exists := pin.ReceiverEventSchema(); exists {
 			return schema, true, nil
 		}

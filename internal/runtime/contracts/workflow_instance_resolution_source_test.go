@@ -11,7 +11,7 @@ func TestInputPinResolutionGeneratedSourceModeMatrix(t *testing.T) {
 	for _, mode := range []FlowInputResolutionMode{FlowInputResolutionModeSelect, FlowInputResolutionModeSelectOrCreate, FlowInputResolutionModeFanIn, FlowInputResolutionModeReply} {
 		t.Run(FlowInputResolutionModeCode(mode), func(t *testing.T) {
 			_, err := ResolveFlowInputInstanceSource(mode, FlowInputInstanceSourceGeneratedUUIDPath)
-			if err == nil || !strings.Contains(err.Error(), "only valid for resolution mode create") {
+			if err == nil || !strings.Contains(err.Error(), "only valid for resolution create") {
 				t.Fatalf("ResolveFlowInputInstanceSource error = %v, want create-only rejection", err)
 			}
 		})
@@ -57,15 +57,17 @@ func TestInputPinResolutionSelectingSourceMustBeTopLevelPayload(t *testing.T) {
 }
 
 func TestInputPinResolutionPayloadSourceUsesCanonicalPathSpelling(t *testing.T) {
-	source, err := ResolveFlowInputInstanceSource(FlowInputResolutionModeSelect, "  payload.account_id  ")
+	source, err := ResolveFlowInputInstanceSource(FlowInputResolutionModeSelect, "payload.account_id")
 	if err != nil {
 		t.Fatalf("ResolveFlowInputInstanceSource: %v", err)
 	}
 	if source.Path != "payload.account_id" {
 		t.Fatalf("source path = %q, want canonical payload.account_id", source.Path)
 	}
-	if _, err := ResolveFlowInputInstanceSource(FlowInputResolutionModeSelect, "payload. account_id"); err == nil {
-		t.Fatal("internally spaced payload source succeeded, want fail-closed canonical spelling")
+	for _, path := range []string{"  payload.account_id  ", "payload. account_id"} {
+		if _, err := ResolveFlowInputInstanceSource(FlowInputResolutionModeSelect, path); err == nil {
+			t.Fatalf("non-canonical payload source %q succeeded", path)
+		}
 	}
 }
 
@@ -92,7 +94,7 @@ func TestResolveFlowInputInstanceSourceTypeRejectsProducerReceiverTypeMismatch(t
 	}
 	bundle := instanceResolutionTestBundle(events)
 	pin := mustCompileInputPinForTest(t, "account", "account.ready")
-	_, err = bundle.ResolveFlowInputInstanceSourceType(nil, "account", pin, instance)
+	_, err = bundle.ResolveFlowInputInstanceSourceType(nil, "account", FlowConnect{Resolution: FlowInputResolutionModeSelect}, pin, instance)
 	if err == nil || !strings.Contains(err.Error(), "key_types_incompatible") {
 		t.Fatalf("ResolveFlowInputInstanceSourceType error = %v, want producer/receiver mismatch", err)
 	}
@@ -133,12 +135,12 @@ func TestResolveFlowInputInstanceSourceTypeAcceptsScalarAliasesAndIntrinsicUUID(
 		t.Run(tc.name, func(t *testing.T) {
 			pin, err := CompileFlowInputPin(
 				FlowPinCompilationContext{FlowID: "account", FlowPath: "account"},
-				FlowInputEventPin{Event: "account.ready", Resolution: FlowInputPinResolution{Mode: tc.mode, From: tc.from}},
+				FlowInputEventPin{Event: "account.ready"},
 			)
 			if err != nil {
 				t.Fatalf("CompileFlowInputPin: %v", err)
 			}
-			evidence, err := bundle.ResolveFlowInputInstanceSourceType(nil, "account", pin, instance)
+			evidence, err := bundle.ResolveFlowInputInstanceSourceType(nil, "account", FlowConnect{Resolution: tc.mode, KeyFrom: tc.from}, pin, instance)
 			if err != nil {
 				t.Fatalf("ResolveFlowInputInstanceSourceType: %v", err)
 			}
@@ -163,6 +165,41 @@ func instanceResolutionTestBundle(events map[string]EventCatalogEntry) *Workflow
 		panic(err)
 	}
 	return bundle
+}
+
+func TestConnectKeySourceOmissionAndRedundancy(t *testing.T) {
+	field, err := ParseTemplateInstanceField("account_id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance := TemplateInstanceContract{FlowID: "account", Field: field, PrimaryEntity: PrimaryEntityContract{
+		Contract: EntityContract{Fields: map[string]EntityFieldDecl{"account_id": {Type: "text"}}},
+	}}
+	bundle := instanceResolutionTestBundle(map[string]EventCatalogEntry{"account.ready": {Payload: EventPayloadSpec{
+		Properties: map[string]EventFieldSpec{"account_id": {Type: "text"}, "external_id": {Type: "text"}},
+		Required:   []string{"account_id", "external_id"},
+	}}})
+	pin := mustCompileInputPinForTest(t, "account", "account.ready")
+	for _, mode := range []FlowInputResolutionMode{FlowInputResolutionModeCreate, FlowInputResolutionModeSelect, FlowInputResolutionModeSelectOrCreate} {
+		for _, tc := range []struct{ name, from, want string }{
+			{"omitted", "", "payload.account_id"},
+			{"alternate", "payload.external_id", "payload.external_id"},
+			{"redundant", "payload.account_id", ""},
+		} {
+			t.Run(FlowInputResolutionModeCode(mode)+"/"+tc.name, func(t *testing.T) {
+				evidence, err := bundle.ResolveFlowInputInstanceSourceType(nil, "account", FlowConnect{Resolution: mode, KeyFrom: tc.from}, pin, instance)
+				if tc.want == "" {
+					if err == nil || !strings.Contains(err.Error(), "key_from") || !strings.Contains(err.Error(), "redundant; omit it") {
+						t.Fatalf("redundant source admission = %v", err)
+					}
+					return
+				}
+				if err != nil || evidence.Source.Path != tc.want {
+					t.Fatalf("source=%+v err=%v, want %s", evidence.Source, err, tc.want)
+				}
+			})
+		}
+	}
 }
 
 func TestRequireInstanceSourceTypesCompatiblePreservesIntegerConstraints(t *testing.T) {

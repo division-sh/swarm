@@ -53,11 +53,7 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 		siblingRequestSchemas += fmt.Sprintf("%s:\n  case_id: text\n  value: %s\n", siblingRequest, valueType)
 		siblingProducers += fmt.Sprintf("sibling-%s:\n  execution_type: system_node\n  subscribes_to: [%s]\n  event_handlers:\n    %s:\n      emit: {event: %s, fields: {case_id: \"${payload.case_id}\", value: \"${payload.value}\"}}\n", family, siblingRequest, siblingRequest, result)
 		connects += fmt.Sprintf("  - {event: %s, from: ., to: sibling}\n", siblingRequest)
-		if mode == "template" {
-			inputPins += fmt.Sprintf("      - {event: %s, resolution: {mode: select-or-create}}\n", request)
-		} else {
-			inputPins += "      - " + request + "\n"
-		}
+		inputPins += "      - " + request + "\n"
 		outputPins += "      - " + result + "\n"
 		connects += fmt.Sprintf("  - {event: %s, from: %s, to: sink}\n", result, scope)
 		requestSchemas += fmt.Sprintf("%s:\n  key: case_id\n  case_id: text\n  choice: integer\n  items: '[%s]'\n", request, valueType)
@@ -135,13 +131,13 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 	} else {
 		rootSchema := "name: publication-driver\npins:\n  inputs:\n    events:\n"
 		if mode == "template" {
-			sourceSchema = strings.Replace(sourceSchema, "name: publication-source\n", "name: publication-source\nmode: template\ninstance: case_id\n", 1)
+			sourceSchema = strings.Replace(sourceSchema, "name: publication-source\n", "name: publication-source\ninstance: case_id\n", 1)
 			rootSchema += requestSchemasToPins(families) + "  outputs:\n    events:\n"
 			driver, driverSchemas := "", ""
 			for _, family := range families {
 				request, dispatch := family+".requested", family+".dispatch"
 				rootSchema += "      - " + dispatch + "\n"
-				connects += fmt.Sprintf("  - {event: %s, from: ., to: source, rename: %s}\n", dispatch, request)
+				connects += fmt.Sprintf("  - {event: %s, from: ., to: source, rename: %s, resolution: select-or-create}\n", dispatch, request)
 				driverSchemas += fmt.Sprintf("%s:\n  key: case_id\n  case_id: text\n  choice: integer\n  items: '[%s]'\n", request, valueType)
 				driverSchemas += fmt.Sprintf("%s:\n  key: case_id\n  case_id: text\n  choice: integer\n  items: '[%s]'\n", dispatch, valueType)
 				driver += fmt.Sprintf("%s:\n  execution_type: system_node\n  subscribes_to: [%s]\n  event_handlers:\n    %s:\n      emit: {event: %s, fields: {case_id: \"${payload.case_id}\", choice: \"${payload.choice}\", items: \"${payload.items}\"}}\n", family, request, request, dispatch)

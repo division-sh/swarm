@@ -20,6 +20,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 	"github.com/google/uuid"
 )
@@ -1214,7 +1215,9 @@ func TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan(t *t
 	store := &directRecipientTransactionalStore{}
 	flow := runtimecontracts.FlowContractView{
 		Path: "review", Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
-		Schema: runtimecontracts.FlowSchemaDocument{Mode: "template"},
+		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
+			InstanceField("instance_key"),
+		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"task.started": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"target-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"task.started": {}}},

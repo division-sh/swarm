@@ -5,4 +5,4 @@ pins:
   outputs:
     events: [task.requested]
 connect:
-  - {event: task.requested, from: ., to: worker}
+  - {event: task.requested, from: ., to: worker, resolution: select}

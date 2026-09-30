@@ -9,3 +9,4 @@ connect:
   - event: flow.spawned
     from: .
     to: worker-flow
+    resolution: create

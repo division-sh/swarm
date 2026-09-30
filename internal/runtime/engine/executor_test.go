@@ -411,14 +411,14 @@ func structuredRendererExecutionRequest(t *testing.T, moduleSpec *runtimecontrac
 	}
 }
 
-func sourceWithDeclarativeEmitExternalizationFlows() semanticview.Source {
+func sourceWithDeclarativeEmitExternalizationFlows(t testing.TB) semanticview.Source {
 	component := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "component-scaffold"},
 		Path:  "component-scaffold",
-		Schema: runtimecontracts.FlowSchemaDocument{
-			StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "ready", Initial: true}}},
-			Mode:              runtimecontracts.FlowModeTemplate,
-			Pins:              runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "component.scaffolded"}}}},
+		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
+			InstanceField("instance_key"), StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "ready", Initial: true}}},
+
+			Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "component.scaffolded"}}}},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"component.scaffold_requested": {
@@ -452,7 +452,7 @@ func sourceWithDeclarativeEmitExternalizationFlows() semanticview.Source {
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "operating"},
 		Path:  "operating",
 		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode: runtimecontracts.FlowModeStatic,
+
 			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "component.scaffolded"}}}},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"component.scaffolded": {}},
@@ -494,7 +494,7 @@ func sourceWithDeclarativeEmitExternalizationFlows() semanticview.Source {
 			},
 		},
 	}
-	return mustCompileEngineSource(bundle)
+	return mustCompileEngineSource(semanticviewtest.WithInstanceDeclarations(t, bundle, "component-scaffold"))
 }
 
 func sourceWithPolicy(flowID string, values map[string]any) semanticview.Source {
@@ -6397,7 +6397,7 @@ func TestExecutor_EmitIntentUsesExplicitProducerSourceWhenStateFlowPathNormalize
 }
 
 func TestExecutor_DeclarativeEmitSurfacesUseProducerSourceRouteNamespace(t *testing.T) {
-	source := sourceWithDeclarativeEmitExternalizationFlows()
+	source := sourceWithDeclarativeEmitExternalizationFlows(t)
 	producerSource, err := events.NewConcreteTemplateInstanceRoutingSource(events.RouteIdentity{
 		FlowID: "component-scaffold", FlowInstance: "component-scaffold/component-1", EntityID: "component-entity",
 	})
@@ -6498,7 +6498,7 @@ func TestExecutor_DeclarativeEmitSurfacesUseProducerSourceRouteNamespace(t *test
 }
 
 func TestExecutor_FanOutEmitUsesProducerSourceRouteNamespace(t *testing.T) {
-	source := sourceWithDeclarativeEmitExternalizationFlows()
+	source := sourceWithDeclarativeEmitExternalizationFlows(t)
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
 		t.Fatal("fan-out route namespace fixture has no contract bundle")
@@ -6550,7 +6550,7 @@ func TestExecutor_FanOutEmitUsesProducerSourceRouteNamespace(t *testing.T) {
 }
 
 func TestExecutor_ChildPinOutputRejectsCompleteParentWithoutConsumer(t *testing.T) {
-	source := sourceWithChildOutputPin()
+	source := sourceWithChildOutputPin(t)
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        source,
 		StateRepo:     stubStateRepo{},
@@ -6609,7 +6609,7 @@ func TestExecutor_ChildPinOutputRejectsCompleteParentWithoutConsumer(t *testing.
 }
 
 func TestExecutor_LoweredConnectEmissionRemainsTargetlessBeforeEventBus(t *testing.T) {
-	source := sourceWithChildOutputPinAndRootConnect()
+	source := sourceWithChildOutputPinAndRootConnect(t)
 	graph := runtimepinrouting.CompileConnectGraph(source)
 	if len(graph.Plans()) != 1 || len(graph.Issues()) != 0 {
 		t.Fatalf("compiled plans/issues = %#v/%#v, want one valid child-to-root connect", graph.Plans(), graph.Issues())
@@ -6733,7 +6733,7 @@ func TestExecutor_NestedStaticOutputRejectsMissingOrEntitylessCurrentDelivery(t 
 
 func TestExecutor_ChildPinOutputRejectsIncompleteStoredParentRoute(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source: sourceWithChildOutputPin(), StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}}, nil)
+		Source: sourceWithChildOutputPin(t), StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
@@ -6755,14 +6755,13 @@ func TestExecutor_ChildPinOutputRejectsIncompleteStoredParentRoute(t *testing.T)
 	}
 }
 
-func sourceWithChildOutputPin() semanticview.Source {
+func sourceWithChildOutputPin(t testing.TB) semanticview.Source {
 	child := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{
 			FlowPath: "child",
 		},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode:              runtimecontracts.FlowModeTemplate,
-			StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "running", Initial: true}}},
+		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
+			InstanceField("instance_key"), StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "running", Initial: true}}},
 			Pins: runtimecontracts.FlowPins{
 				Outputs: runtimecontracts.FlowOutputPins{
 					EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "child.done"}},
@@ -6787,13 +6786,13 @@ func sourceWithChildOutputPin() semanticview.Source {
 			},
 		},
 	}
-	return mustCompileEngineSource(bundle)
+	return mustCompileEngineSource(semanticviewtest.WithInstanceDeclarations(t, bundle, "child"))
 }
 
 func sourceWithNestedStaticOutputPin() semanticview.Source {
 	child := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "root/child"},
-		Schema: runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "running", Initial: true}}}, Mode: runtimecontracts.FlowModeStatic, Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{
+		Schema: runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "running", Initial: true}}}, Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{
 			EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "child.done"}},
 		}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"child.done": {}},
@@ -6810,10 +6809,11 @@ func sourceWithNestedStaticOutputPin() semanticview.Source {
 	return mustCompileEngineSource(bundle)
 }
 
-func sourceWithChildOutputPinAndRootConnect() semanticview.Source {
+func sourceWithChildOutputPinAndRootConnect(t testing.TB) semanticview.Source {
 	child := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"},
-		Schema: runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "running", Initial: true}}}, Mode: runtimecontracts.FlowModeTemplate, Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{
+		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
+			InstanceField("instance_key"), StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "running", Initial: true}}}, Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{
 			EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "child.done"}},
 		}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"child.done": {}},
@@ -6835,7 +6835,7 @@ func sourceWithChildOutputPinAndRootConnect() semanticview.Source {
 			ByID: map[string]*runtimecontracts.FlowContractView{".": &root, "child": &root.Children[0]},
 		},
 	}
-	return mustCompileEngineSource(bundle)
+	return mustCompileEngineSource(semanticviewtest.WithInstanceDeclarations(t, bundle, "child"))
 }
 
 func TestExecutor_DataAccumulationTargetPathWritesNestedEntityLeaf(t *testing.T) {
@@ -7865,7 +7865,6 @@ func loadEngineSingletonCoordinatorFlowBundle(t *testing.T) *runtimecontracts.Wo
 
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: singleton-coordinator-runtime\n")
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "coordinator", "schema.yaml"), `name: coordinator
-mode: singleton
 stages:
   active: {initial: true}
 pins:

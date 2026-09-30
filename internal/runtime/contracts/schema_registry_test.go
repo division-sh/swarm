@@ -520,7 +520,7 @@ func TestEventSchemaForFlowEvent_UsesDeclaringFlowTypeCatalogForOverride(t *test
 	reviewFlow := FlowContractView{
 		Paths:  FlowContractPaths{FlowPath: "review"},
 		Path:   "review",
-		Schema: FlowSchemaDocument{Mode: "template"},
+		Schema: FlowSchemaDocument{Instance: mustTemplateInstanceField(t, "review_id")},
 		Events: map[string]EventCatalogEntry{
 			"task.requested": {
 				Payload: EventPayloadSpec{

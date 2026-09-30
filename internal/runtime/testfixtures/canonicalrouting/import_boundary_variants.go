@@ -26,7 +26,7 @@ func CopyImportBoundaryAlias(t testing.TB, variant ImportBoundaryAliasVariant) s
 		"consumer/nodes.yaml", "consumer/schema.yaml", "consumer")
 	parentSubscription := "parent.lead_enriched"
 	connected := false
-	mode := "static"
+	instance := ""
 	switch variant {
 	case ImportBoundaryAliasBindOnly:
 	case ImportBoundaryAliasBindOnlyWildcardOutput:
@@ -36,7 +36,8 @@ func CopyImportBoundaryAlias(t testing.TB, variant ImportBoundaryAliasVariant) s
 	case ImportBoundaryAliasConnectedWithLocalOutputObserver:
 		connected = true
 	case ImportBoundaryAliasTemplateBindOnly:
-		mode = "template"
+		instance = "instance: work_id\n"
+		writeBootverifyFixtureFile(t, filepath.Join(root, "worker", "entities.yaml"), "work:\n  work_id: text\n")
 	default:
 		t.Fatalf("unsupported import-boundary alias variant %d", variant)
 	}
@@ -81,8 +82,7 @@ parent-listener:
 
 	writeBootverifyFixtureFile(t, filepath.Join(root, "worker", "schema.yaml"), `
 name: worker
-mode: `+mode+`
-pins:
+`+instance+`pins:
   inputs:
     events:
       - work.requested

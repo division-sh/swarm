@@ -8,4 +8,3 @@ pins:
   outputs:
     events:
       - task.done
-mode: static

@@ -1,5 +1,4 @@
 name: processing
-mode: static
 stages:
   ready: {initial: true}
   approved: {}

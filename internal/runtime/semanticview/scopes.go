@@ -90,7 +90,7 @@ func (c RootExecutionCoordinate) Matches(flowID, runID string) bool {
 }
 
 func flowModeFromView(view runtimecontracts.FlowContractView) string {
-	if mode := strings.TrimSpace(view.Schema.Mode); mode != "" {
+	if mode := strings.TrimSpace(view.Schema.EffectiveMode()); mode != "" {
 		return mode
 	}
 	return runtimecontracts.FlowModeStatic

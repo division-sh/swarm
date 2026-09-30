@@ -8,7 +8,7 @@ func CopyReceiverConfigComposedOwner(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	for name, content := range map[string]string{
-		"schema.yaml":   "name: typed-owner-matrix\nstages:\n  pending: {initial: true}\n  review: {}\n  done: {}\npins:\n  outputs:\n    events: [items.child]\nconnect:\n  - {event: items.child, from: ., to: review}\n",
+		"schema.yaml":   "name: typed-owner-matrix\nstages:\n  pending: {initial: true}\n  review: {}\n  done: {}\npins:\n  outputs:\n    events: [items.child]\nconnect:\n  - {event: items.child, from: ., to: review, resolution: select-or-create}\n",
 		"entities.yaml": "root:\n  account_id: string\n  handled: boolean\n",
 		"events.yaml":   "request:\nitems.ready:\n  items: '[string]'\nitems.child:\n  request_id: string\n  label: string\n  nested: json\n",
 		"nodes.yaml": `fan-out-source:
@@ -31,7 +31,6 @@ func CopyReceiverConfigComposedOwner(t testing.TB) string {
             nested: "${[7, 7.0]}"
 `,
 		"review/schema.yaml": `name: review
-mode: template
 instance: request_id
 instance_variables:
   variables:
@@ -44,7 +43,6 @@ pins:
   inputs:
     events:
       - event: items.child
-        resolution: {mode: select-or-create}
         initialize: {label: payload.label, nested: payload.nested}
 `,
 		"review/entities.yaml": "review_item:\n  request_id: string\n",

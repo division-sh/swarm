@@ -14,14 +14,8 @@ func CopyTwoDeploymentFeeds(t testing.TB) string {
 	if err := os.Remove(filepath.Join(root, NotifyAllChildrenChildFlowID, "agents.yaml")); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(root, NotifyAllChildrenChildFlowID, "schema.yaml")
-	replaceDeploymentFixtureExactlyOnce(t, path, `      - event: account.notify.requested
-        resolution:
-          mode: select
-`, `      - event: account.notify.requested
-        resolution:
-          mode: select-or-create
-`)
+	path := filepath.Join(root, "schema.yaml")
+	replaceDeploymentFixtureExactlyOnce(t, path, "    resolution: select\n", "    resolution: select-or-create\n")
 	return root
 }
 
@@ -42,8 +36,8 @@ func CopySelectedDeploymentResource(t testing.TB, route string, keyed bool) stri
 			t.Fatal(err)
 		}
 	case "dynamic":
-		replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "consumer/schema.yaml"), "mode: singleton\n", "mode: template\ninstance: account_id\n")
-		replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "consumer/schema.yaml"), "    events: [root.ready]\n", "    events:\n      - event: root.ready\n        resolution:\n          mode: select-or-create\n")
+		replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "consumer/schema.yaml"), "name: consumer\n", "name: consumer\ninstance: account_id\n")
+		replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "schema.yaml"), "    to: consumer\n", "    to: consumer\n    resolution: select-or-create\n")
 		replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "consumer/entities.yaml"), "consumer_state:\n  entity_id: text\n", "consumer_state:\n  entity_id: text\n  account_id: text\n")
 	case "root":
 		if err := os.RemoveAll(filepath.Join(root, "consumer")); err != nil {

@@ -1,5 +1,4 @@
 name: provider
-mode: static
 pins:
   inputs:
     events:

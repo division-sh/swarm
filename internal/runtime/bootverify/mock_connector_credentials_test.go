@@ -388,7 +388,7 @@ root-node:
 		{name: "flow-live", live: includeLive},
 	} {
 		dir := filepath.Join(root, child.name)
-		writeBootverifyFixtureFile(t, filepath.Join(dir, "schema.yaml"), "name: "+child.name+"\nmode: static\n")
+		writeBootverifyFixtureFile(t, filepath.Join(dir, "schema.yaml"), "name: "+child.name+"\n")
 		module := "mocks/shared-worker.py"
 		writeScopedReachabilityAgentFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker", module, child.live, scopedReachabilityNativeTools(includeInvalidNativeTools))
 		if !child.live {

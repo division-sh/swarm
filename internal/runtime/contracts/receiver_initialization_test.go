@@ -261,7 +261,7 @@ func TestCompiledInputInitializeIsImmutableAndDigestSensitive(t *testing.T) {
 		return c
 	}
 	context := FlowPinCompilationContext{FlowID: "worker", FlowPath: "worker", EventSchema: schema, Configuration: makeConfig(3)}
-	authored := FlowInputEventPin{Event: "work.requested", Resolution: FlowInputPinResolution{Mode: FlowInputResolutionModeCreate}, Initialize: map[string]string{"count": "payload.count"}}
+	authored := FlowInputEventPin{Event: "work.requested", Initialize: map[string]string{"count": "payload.count"}}
 	first, err := CompileFlowInputPin(context, authored)
 	if err != nil {
 		t.Fatal(err)
@@ -287,7 +287,7 @@ func TestCompiledInputInitializeIsImmutableAndDigestSensitive(t *testing.T) {
 	if err != nil || got["count"] != int64(7) {
 		t.Fatalf("mutated binding: %#v %v", got, err)
 	}
-	for _, mode := range []FlowInputResolutionMode{FlowInputResolutionModeNone, FlowInputResolutionModeSelect, FlowInputResolutionModeFanIn, FlowInputResolutionModeReply} {
+	for _, mode := range []FlowInputResolutionMode{FlowInputResolutionModeSelect, FlowInputResolutionModeFanIn, FlowInputResolutionModeReply} {
 		authored.Resolution.Mode = mode
 		if _, err := CompileFlowInputPin(context, authored); err == nil {
 			t.Fatalf("initialize accepted for mode %v", mode)
@@ -305,7 +305,7 @@ func TestReceiverInitializationDigestPreservesDefaultNumberKinds(t *testing.T) {
 			t.Fatal(err)
 		}
 		pin, err := CompileFlowInputPin(FlowPinCompilationContext{FlowID: "worker", FlowPath: "worker", Configuration: config}, FlowInputEventPin{
-			Event: "work.requested", Resolution: FlowInputPinResolution{Mode: FlowInputResolutionModeCreate},
+			Event: "work.requested",
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -350,8 +350,7 @@ func TestReceiverInitializationImportedSchemaBindingIsExact(t *testing.T) {
 		t.Fatal(err)
 	}
 	pin, err := CompileFlowInputPin(FlowPinCompilationContext{FlowID: "worker", FlowPath: "worker", Configuration: config}, FlowInputEventPin{
-		Event:      "work.requested",
-		Resolution: FlowInputPinResolution{Mode: FlowInputResolutionModeCreate}, Initialize: map[string]string{"count": "payload.count"},
+		Event: "work.requested", Initialize: map[string]string{"count": "payload.count"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -406,15 +405,17 @@ func TestReceiverInitializationCreationCorpusLoads(t *testing.T) {
 				t.Fatal(err)
 			}
 			creates := 0
-			for flowID := range bundle.FlowSchemas {
-				for _, pin := range bundle.FlowInputEventPins(flowID) {
-					if pin.Resolution().Mode == FlowInputResolutionModeCreate {
-						creates++
-					}
+			for _, connect := range bundle.CompositionConnects() {
+				input, _, err := bundle.ConnectionInput(connect)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if input.Mode() == FlowInputResolutionModeCreate {
+					creates++
 				}
 			}
 			if creates != 1 {
-				t.Fatalf("creating receiver pins=%d, want1", creates)
+				t.Fatalf("creating connections=%d, want1", creates)
 			}
 		})
 	}

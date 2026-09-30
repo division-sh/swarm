@@ -1,13 +1,9 @@
 name: validator
-mode: template
 instance: validation_case_id
 pins:
   inputs:
     events:
-      - event: validation.requested
-        resolution:
-          mode: create
-          from: generated.uuid
+      - validation.requested
   outputs:
     events:
       - validation.started

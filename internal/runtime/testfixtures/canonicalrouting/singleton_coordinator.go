@@ -43,7 +43,6 @@ func CopyDuplicateScopedSingletonDemand(t testing.TB) string {
 	for _, flowID := range []string{"a", "b"} {
 		writeSingletonCoordinatorFile(t, root, filepath.Join(flowID, "schema.yaml"), `
 name: `+flowID+`
-mode: singleton
 pins:
   inputs:
     events:
@@ -89,7 +88,6 @@ func writeSingletonCoordinatorFlow(t testing.TB, root string, variant SingletonC
 	}
 	writeSingletonCoordinatorFile(t, root, "schema.yaml", "name: singleton-coordinator-pilot\npins:\n  inputs:\n    events: [lead.observed]\n  outputs:\n    events: [lead.observed]\nconnect:\n  - event: lead.observed\n    from: .\n    to: coordinator\n")
 	writeSingletonCoordinatorFile(t, root, "coordinator/schema.yaml", `name: coordinator
-mode: singleton
 stages: []
 pins:
   inputs:
@@ -151,7 +149,6 @@ coordinator-indexer:
 func writeStatelessPayloadJoinSingletonCoordinatorFlow(t testing.TB, root string) {
 	t.Helper()
 	writeSingletonCoordinatorFile(t, root, "coordinator/schema.yaml", `name: coordinator
-mode: singleton
 stages:
   active: {initial: true}
   done: {}
@@ -194,9 +191,7 @@ types:
 
 func writeStatelessFanInSingletonCoordinatorFlow(t testing.TB, root string) {
 	t.Helper()
-	writeSingletonCoordinatorFile(t, root, "coordinator/schema.yaml", `
-name: coordinator
-mode: singleton
+	writeSingletonCoordinatorFile(t, root, "coordinator/schema.yaml", `name: coordinator
 pins:
   inputs:
     events:

@@ -11,6 +11,8 @@ connect:
   - event: operating.report.requested
     from: ingress
     to: operating
+    resolution: create
+    key_from: event.id
   - event: operating.reported
     from: operating
     to: portfolio

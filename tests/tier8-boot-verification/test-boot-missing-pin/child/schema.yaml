@@ -9,4 +9,3 @@ pins:
   outputs:
     events:
       - task.result
-mode: static

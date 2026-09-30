@@ -73,8 +73,6 @@ func validateInputPinResolution(source semanticview.Source, flowID string, pin r
 	resolution := pin.Resolution()
 	location := flowID
 	switch resolution.Mode {
-	case runtimecontracts.FlowInputResolutionModeCreate, runtimecontracts.FlowInputResolutionModeSelect, runtimecontracts.FlowInputResolutionModeSelectOrCreate:
-		return validateCanonicalInstanceInputPinResolution(source, flowID, pin)
 	case runtimecontracts.FlowInputResolutionModeFanIn:
 		return validateFanInInputPinResolution(source, flowID, pin)
 	case runtimecontracts.FlowInputResolutionModeReply:
@@ -93,7 +91,7 @@ func validateReplyInputPinResolution(source semanticview.Source, flowID string, 
 	resolution := pin.Resolution()
 	location := flowID
 	var findings []Finding
-	if resolution.From != "" || resolution.Aggregation != "" || resolution.Window != "" || len(resolution.DedupBy) > 0 || resolution.Singleton != "" {
+	if resolution.Aggregation != "" || resolution.Window != "" || len(resolution.DedupBy) > 0 || resolution.Singleton != "" {
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", "resolution mode reply may only declare replies_to and correlation_key", location))
 	}
 	requestPinName := strings.TrimSpace(resolution.RepliesTo)
@@ -132,7 +130,7 @@ func validateFanInInputPinResolution(source semanticview.Source, flowID string, 
 	resolution := pin.Resolution()
 	aggregation := strings.ToLower(strings.TrimSpace(resolution.Aggregation))
 	location := flowID
-	if resolution.From != "" || resolution.RepliesTo != "" || resolution.CorrelationKey != "" {
+	if resolution.RepliesTo != "" || resolution.CorrelationKey != "" {
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", "resolution mode fan-in may only declare aggregation, window, dedup_by, and singleton", location))
 	}
 	if aggregation != "stream" && aggregation != "barrier" {
@@ -322,37 +320,6 @@ func outputPinRequiredPayloadFieldExists(source semanticview.Source, flowID stri
 	}
 	resolved, ok := semanticview.ResolveEventSchema(source, flowID, pin.EventType()).Field(field)
 	return ok && !resolved.IsOptional
-}
-
-func validateCanonicalInstanceInputPinResolution(source semanticview.Source, flowID string, pin runtimecontracts.CompiledFlowInputPin) []Finding {
-	var findings []Finding
-	resolution := pin.Resolution()
-	mode := resolution.Mode
-	modeText := runtimecontracts.FlowInputResolutionModeCode(mode)
-	location := flowID
-	if resolution.Aggregation != "" || resolution.Window != "" || len(resolution.DedupBy) > 0 || resolution.Singleton != "" || resolution.RepliesTo != "" || resolution.CorrelationKey != "" {
-		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode %s may only declare mode and from", modeText), location))
-	}
-	bundle, ok := semanticview.Bundle(source)
-	if !ok || bundle == nil {
-		return append(findings, inputPinResolutionFinding(flowID, pin, "receiver_instance_key_unavailable", "receiver instance key owner is unavailable for input pin resolution", location))
-	}
-	instance, err := bundle.ResolveFlowTemplateInstance(flowID)
-	if err != nil {
-		return append(findings, inputPinResolutionFinding(flowID, pin, "receiver_instance_key_invalid", err.Error(), location))
-	}
-	if instance.Field.Empty() {
-		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode %s requires receiver `instance: <field>`", modeText), location))
-		return findings
-	}
-	if _, err := bundle.ResolveFlowInputInstanceSourceType(source, flowID, pin, instance); err != nil {
-		reason := "instance_resolution_invalid"
-		if strings.Contains(err.Error(), "key_types_incompatible") {
-			reason = "key_types_incompatible"
-		}
-		findings = append(findings, inputPinResolutionFinding(flowID, pin, reason, err.Error(), location))
-	}
-	return findings
 }
 
 func inputPinResolutionFinding(flowID string, pin runtimecontracts.CompiledFlowInputPin, reason, detail, location string) Finding {

@@ -1,5 +1,4 @@
 name: agent-only
-mode: static
 stages:
   active: {initial: true}
 pins:

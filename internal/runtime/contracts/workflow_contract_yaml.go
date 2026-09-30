@@ -22,7 +22,6 @@ func hasAnyYAMLMappingKey(node *yaml.Node, keys ...string) bool {
 
 var flowSchemaDocumentFields = map[string]struct{}{
 	"name":                {},
-	"mode":                {},
 	"activation":          {},
 	"ingress":             {},
 	"connect":             {},

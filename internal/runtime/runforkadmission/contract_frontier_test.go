@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
@@ -90,7 +91,7 @@ func TestAdmitContractFrontier_SelectedContractChangesRecipients(t *testing.T) {
 func TestAdmitContractFrontier_ConnectMatchesConcreteTemplateSourceEndpoint(t *testing.T) {
 	plan := testRunForkPlan("producer/inst-1/scan.requested", runfork.RunForkPendingClassificationPending, "node", "source-node")
 	plan.PendingWork[0].RoutingSource = testConcreteRoutingSource(t, "producer", "producer/inst-1")
-	source := testContractFrontierTemplateConnectSource()
+	source := testContractFrontierTemplateConnectSource(t)
 
 	admission, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
@@ -112,7 +113,7 @@ func TestAdmitContractFrontier_ConnectMatchesConcreteTemplateSourceEndpoint(t *t
 func TestAdmitContractFrontier_ConnectRejectsConcreteTemplateIdentityWhenSourceRouteIsAbsent(t *testing.T) {
 	plan := testRunForkPlan("producer/inst-1/scan.requested", runfork.RunForkPendingClassificationPending, "node", "source-node")
 	plan.PendingWork[0].RoutingSource = events.NoRoutingSource()
-	source := testContractFrontierTemplateConnectSource()
+	source := testContractFrontierTemplateConnectSource(t)
 
 	admission, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
@@ -134,7 +135,7 @@ func TestAdmitContractFrontier_ConnectRejectsConcreteTemplateIdentityWhenSourceR
 func TestAdmitContractFrontier_ConnectRejectsUnrelatedTemplateSameLeaf(t *testing.T) {
 	plan := testRunForkPlan("unrelated/inst-1/scan.requested", runfork.RunForkPendingClassificationPending, "node", "source-node")
 	plan.PendingWork[0].RoutingSource = testConcreteRoutingSource(t, "unrelated", "unrelated/inst-1")
-	source := testContractFrontierTemplateConnectSource()
+	source := testContractFrontierTemplateConnectSource(t)
 
 	admission, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
@@ -165,7 +166,7 @@ func TestSelectedContractAdmissionsEnforceProducerMode(t *testing.T) {
 		{name: "singleton rejects descendant identity", mode: "singleton", eventName: "producer/inst-1/scan.requested", source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			source := testContractFrontierConnectSource(tc.mode)
+			source := testContractFrontierConnectSource(t, tc.mode)
 			frontierPlan := testRunForkPlan(tc.eventName, runfork.RunForkPendingClassificationPending, "node", "source-node")
 			frontierPlan.PendingWork[0].RoutingSource = testRoutingSourceForRoute(t, tc.source)
 			frontier, err := AdmitContractFrontier(ContractFrontierRequest{
@@ -421,7 +422,7 @@ func TestAdmitContractFrontier_SelectedDeadLetterRemainsExecutableFrontier(t *te
 func TestAdmitContractFrontier_MaterializesSourceFlowInstanceRoutes(t *testing.T) {
 	plan := testRunForkPlan("review/inst-1/task.started", runfork.RunForkPendingClassificationPending, "node", "source-node")
 	plan.PendingWork[0].RoutingSource = testConcreteRoutingSource(t, "review", "review/inst-1")
-	source := testContractFrontierTemplateSource()
+	source := testContractFrontierTemplateSource(t)
 
 	admission, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
@@ -455,7 +456,7 @@ func TestAdmitContractFrontier_UsesExactPendingTargetWhenRoutingSourceIsAbsent(t
 	plan.PendingWork[0].DeliveryRoute.Target = events.MustExistingEntityTarget(events.RouteIdentity{
 		FlowID: "review", FlowInstance: "review/inst-1", EntityID: "entity-1",
 	})
-	source := testContractFrontierTemplateSource()
+	source := testContractFrontierTemplateSource(t)
 
 	admission, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan: plan, Source: source, ContractSelection: SelectedContractSelection(source),
@@ -480,7 +481,7 @@ func TestAdmitContractFrontier_FailsClosedWithoutSelectedSource(t *testing.T) {
 func TestAdmitContractFrontier_DoesNotInferFlowInstanceRouteFromEventName(t *testing.T) {
 	plan := testRunForkPlan("review/inst-1/task.started", runfork.RunForkPendingClassificationPending, "node", "source-node")
 	plan.PendingWork[0].RoutingSource = events.NoRoutingSource()
-	source := testContractFrontierTemplateSource()
+	source := testContractFrontierTemplateSource(t)
 
 	admission, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
@@ -520,7 +521,7 @@ func TestAdmitContractFrontier_UsesExactPersistedReceiverOwnersForTemplateRoute(
 			plan := testRunForkPlan("review/inst-1/task.started", runfork.RunForkPendingClassificationPending, "node", "source-node")
 			plan.PendingWork[0].RoutingSource = events.NoRoutingSource()
 			tc.mutate(&plan.PendingWork[0])
-			source := testContractFrontierTemplateSource()
+			source := testContractFrontierTemplateSource(t)
 
 			admission, err := AdmitContractFrontier(ContractFrontierRequest{
 				Plan: plan, Source: source,
@@ -561,7 +562,7 @@ func TestAdmitContractFrontier_RejectsPendingAgentFromAnotherRun(t *testing.T) {
 		Recipient:     events.MustAgentDeliveryRecipient("review-agent"),
 		AgentIdentity: identity,
 	}
-	source := testContractFrontierTemplateSource()
+	source := testContractFrontierTemplateSource(t)
 
 	_, err = AdmitContractFrontier(ContractFrontierRequest{
 		Plan: plan, Source: source,
@@ -661,13 +662,11 @@ func testContractFrontierSource(nodeID string) semanticview.Source {
 	return semanticview.Wrap(mustCompileContractFrontierBundle(bundle))
 }
 
-func testContractFrontierTemplateSource() semanticview.Source {
+func testContractFrontierTemplateSource(t testing.TB) semanticview.Source {
 	review := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode: "template",
-		},
-		Path: "review",
+		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "review"},
+		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.InstanceField("instance_key")},
+		Path:   "review",
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"reviewer": {
 				SubscribesTo: []string{"task.started"},
@@ -679,7 +678,7 @@ func testContractFrontierTemplateSource() semanticview.Source {
 		},
 	}
 	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Path: ".", Children: []runtimecontracts.FlowContractView{review}}
-	return semanticview.Wrap(mustCompileContractFrontierBundle(&runtimecontracts.WorkflowContractBundle{
+	return semanticview.Wrap(mustCompileContractFrontierBundle(semanticviewtest.WithInstanceDeclarations(t, &runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name:    "test-workflow",
 			Version: "v-test",
@@ -694,11 +693,11 @@ func testContractFrontierTemplateSource() semanticview.Source {
 				"review": &root.Children[0],
 			},
 		},
-	}))
+	}, "review")))
 }
 
-func testContractFrontierTemplateConnectSource() semanticview.Source {
-	return testContractFrontierConnectSource("template")
+func testContractFrontierTemplateConnectSource(t testing.TB) semanticview.Source {
+	return testContractFrontierConnectSource(t, "template")
 }
 
 func testContractFrontierRootConnectSource(t testing.TB) semanticview.Source {
@@ -714,11 +713,15 @@ func testContractFrontierRootConnectSource(t testing.TB) semanticview.Source {
 	return semanticview.Wrap(bundle)
 }
 
-func testContractFrontierConnectSource(producerMode string) semanticview.Source {
+func testContractFrontierConnectSource(t testing.TB, producerMode string) semanticview.Source {
+	var instance runtimecontracts.TemplateInstanceField
+	if producerMode == runtimecontracts.FlowModeTemplate {
+		instance = semanticviewtest.InstanceField("instance_key")
+	}
 	producer := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "producer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode: producerMode,
+			Instance: instance,
 			Pins: runtimecontracts.FlowPins{
 				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "scan.requested"}}},
 			},
@@ -730,11 +733,9 @@ func testContractFrontierConnectSource(producerMode string) semanticview.Source 
 	}
 	unrelated := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "unrelated"},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode: "template",
-			Pins: runtimecontracts.FlowPins{
-				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "scan.requested"}}},
-			},
+		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.InstanceField("instance_key"), Pins: runtimecontracts.FlowPins{
+			Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "scan.requested"}}},
+		},
 		},
 		Path: "unrelated",
 		Events: map[string]runtimecontracts.EventCatalogEntry{
@@ -786,7 +787,7 @@ func testContractFrontierConnectSource(producerMode string) semanticview.Source 
 			},
 		},
 	}
-	return semanticview.Wrap(mustCompileContractFrontierBundle(bundle))
+	return semanticview.Wrap(mustCompileContractFrontierBundle(semanticviewtest.WithInstanceDeclarations(t, bundle, "producer", "unrelated")))
 }
 
 func mustCompileContractFrontierBundle(bundle *runtimecontracts.WorkflowContractBundle) *runtimecontracts.WorkflowContractBundle {

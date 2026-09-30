@@ -285,7 +285,7 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 			StorageRef:         flowPath,
 			EntityID:           flowEntityID,
 			EntityType:         strings.TrimSpace(entityContract.EntityType),
-			InstanceKind:       strings.TrimSpace(schema.Mode),
+			InstanceKind:       strings.TrimSpace(schema.EffectiveMode()),
 			ParentFlowID:       strings.TrimSpace(instance.ParentRoute.FlowID),
 			ParentFlowInstance: strings.Trim(instance.ParentRoute.FlowInstance, "/"),
 			ParentEntityID:     strings.TrimSpace(instance.ParentEntityID),
@@ -522,7 +522,7 @@ func TemplateFlowMaterialization(source semanticview.Source, flowID, instancePat
 		return TemplateFlowMaterializationPlan{}, fmt.Errorf("flow contract view not found: %s", flowID)
 	}
 	schema, ok := source.FlowSchemaByID(flowID)
-	if !ok || !strings.EqualFold(strings.TrimSpace(schema.Mode), runtimecontracts.FlowModeTemplate) {
+	if !ok || !strings.EqualFold(strings.TrimSpace(schema.EffectiveMode()), runtimecontracts.FlowModeTemplate) {
 		return TemplateFlowMaterializationPlan{}, fmt.Errorf("flow %s is not a template flow", flowID)
 	}
 	instanceID := runtimeflowidentity.LogicalInstanceID(instancePath)

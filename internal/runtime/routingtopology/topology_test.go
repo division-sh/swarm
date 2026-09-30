@@ -178,14 +178,14 @@ func TestBuildProjectsRunnableStaticConnect(t *testing.T) {
 	connect := runtimecontracts.FlowConnect{SourceFile: "schema.yaml", SourceLine: 1, Event: "work.ready", From: "producer", To: "consumer"}
 	producer := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "producer"},
-		Schema: runtimecontracts.FlowSchemaDocument{Mode: "static", Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{
+		Schema: runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{
 			EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "work.ready"}},
 		}}},
 		Path: "producer", Events: map[string]runtimecontracts.EventCatalogEntry{"work.ready": {}},
 	}
 	consumer := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "consumer"},
-		Schema: runtimecontracts.FlowSchemaDocument{Mode: "static", Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{
+		Schema: runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{
 			EventPins: []runtimecontracts.FlowInputEventPin{{Event: "work.ready"}},
 		}}},
 		Path: "consumer", Events: map[string]runtimecontracts.EventCatalogEntry{"work.ready": {}},

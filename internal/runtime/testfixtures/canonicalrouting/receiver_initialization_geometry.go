@@ -38,7 +38,7 @@ pins:
   outputs:
     events: [worker.requested]
 connect:
-  - {event: worker.requested, from: ., to: worker}
+  - {event: worker.requested, from: ., to: worker, resolution: select-or-create}
 `,
 		"entities.yaml": "root: {}\n",
 		"events.yaml": `work.requested:
@@ -64,7 +64,6 @@ worker.requested:
           count: ${payload.count}
 `,
 		"worker/schema.yaml": `name: worker
-mode: template
 instance: worker_id
 instance_variables:
   variables:
@@ -76,12 +75,11 @@ pins:
   inputs:
     events:
       - event: worker.requested
-        resolution: {mode: select-or-create}
         initialize: {label: payload.label, count: payload.count}
   outputs:
     events: [leaf.requested]
 connect:
-  - {event: leaf.requested, from: ., to: leaf}
+  - {event: leaf.requested, from: ., to: leaf, resolution: select-or-create}
 `,
 		"worker/events.yaml": `worker.ready:
   worker_id: text
@@ -111,7 +109,6 @@ leaf.requested:
           count: ${payload.count + 1}
 `,
 		"worker/leaf/schema.yaml": `name: leaf
-mode: template
 instance: worker_id
 instance_variables:
   variables:
@@ -123,7 +120,6 @@ pins:
   inputs:
     events:
       - event: leaf.requested
-        resolution: {mode: select-or-create}
         initialize: {label: payload.label, count: payload.count}
 `,
 		"worker/leaf/events.yaml": `leaf.ready:

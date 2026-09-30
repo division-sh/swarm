@@ -1087,14 +1087,14 @@ func workflowJoinLifecycleFixtureFiles(review bool, loop string) map[string]stri
 		"schema.yaml":   "name: workflow-join-lifecycle\n",
 		"entities.yaml": "test_entity: {}\n",
 		"orders/schema.yaml": `name: orders
-mode: template
+instance: instance_key
 stages:
   dispatching: {}
   awaiting: {initial: true}
   ready: {terminal: true}
   attention: {terminal: true}
 `,
-		"orders/entities.yaml": "test_entity:\n  expected: list<text>\n",
+		"orders/entities.yaml": "test_entity:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n  expected: list<text>\n",
 		"orders/types.yaml":    "types:\n  ItemResult:\n    ok: boolean\n  LineItem:\n    id: text\n",
 		"orders/events.yaml": `item.completed:
   member_id: text
@@ -1178,7 +1178,8 @@ join-node:
 	for _, name := range []string{"schema.yaml", "entities.yaml", "events.yaml", "types.yaml", "nodes.yaml"} {
 		files[name] = files["orders/"+name]
 	}
-	files["schema.yaml"] = strings.Replace(files["schema.yaml"], "name: orders\nmode: template", "name: workflow-join-lifecycle", 1)
+	files["schema.yaml"] = strings.Replace(files["schema.yaml"], "name: orders", "name: workflow-join-lifecycle", 1)
+	files["schema.yaml"] = strings.Replace(files["schema.yaml"], "instance: instance_key\n", "", 1)
 	return files
 }
 

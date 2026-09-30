@@ -107,7 +107,8 @@ func TestPlatformSpecFlowInstanceAuthoringSourceAuthority(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, templateModel, "rule"), "process/case/job state")
 	assertScalarContains(t, mustMappingValue(t, templateModel, "rule"), "independent lifecycle")
 	assertScalarContains(t, mustMappingValue(t, templateModel, "rule"), "instance: <field>")
-	assertScalarContains(t, mustMappingValue(t, templateModel, "rule"), "sole create/select/select-or-create behavior owner")
+	assertScalarContains(t, mustMappingValue(t, templateModel, "rule"), "Each ordinary incoming connection")
+	assertScalarContains(t, mustMappingValue(t, templateModel, "rule"), "Shared input pins do not own ordinary selection policy")
 	assertScalarContains(t, mustMappingValue(t, templateModel, "primary_entity_dependency"), "ResolveFlowPrimaryEntity")
 	assertScalarContains(t, mustMappingValue(t, templateModel, "primary_entity_dependency"), "`schema.yaml entity`")
 	assertScalarContains(t, mustMappingValue(t, templateModel, "key_rule"), "top-level scalar or enum field")
@@ -126,14 +127,15 @@ func TestPlatformSpecFlowInstanceAuthoringSourceAuthority(t *testing.T) {
 	assertScalarValue(t, mustMappingValue(t, primaryEntity, "canonical_code_owner"), "internal/runtime/contracts.WorkflowContractBundle.ResolveRootPrimaryEntity / ResolveFlowPrimaryEntity")
 	assertScalarContains(t, mustMappingValue(t, primaryEntity, "single_entity_rule"), "exactly one entity type")
 	assertScalarContains(t, mustMappingValue(t, primaryEntity, "single_entity_rule"), "schema.yaml entity")
-	assertScalarContains(t, mustMappingValue(t, primaryEntity, "stateful_presence_rule"), "stateful normal child flow")
+	assertScalarContains(t, mustMappingValue(t, primaryEntity, "stateful_presence_rule"), "actual entity-demanding operation")
+	assertScalarContains(t, mustMappingValue(t, primaryEntity, "stateful_presence_rule"), "Stages alone do not manufacture entity demand")
 
 	composition := mustMappingValue(t, authoring, "composition_model")
 	assertScalarValue(t, mustMappingValue(t, composition, "canonical_routing_owner"), "platform-spec.yaml#flow_model.composition_routing")
 	assertScalarValue(t, mustMappingValue(t, composition, "route_plan_owner"), "platform-spec.yaml#contract_formats.event_schema.routing_derivation.route_plan_authority")
-	assertScalarContains(t, mustMappingValue(t, composition, "rule"), "owns only the directed edge")
-	assertScalarValue(t, mustYAMLPath(t, composition, "public_target_revision", "revise"), "remove parent-owned receiver identity, cardinality, and lifecycle syntax")
-	assertScalarValue(t, mustYAMLPath(t, composition, "public_target_revision", "prefer"), "edge-only connect + receiver-owned scalar instance/resolution semantics")
+	assertScalarContains(t, mustMappingValue(t, composition, "rule"), "ordinary per-edge instance selection/source policy")
+	assertScalarValue(t, mustYAMLPath(t, composition, "public_target_revision", "revise"), "retire shared-pin ordinary policy without changing deferred fan-in or reply syntax")
+	assertScalarValue(t, mustYAMLPath(t, composition, "public_target_revision", "prefer"), "receiver-owned scalar instance + connection-owned ordinary resolution/key_from")
 	assertScalarValue(t, mustYAMLPath(t, composition, "split_children", "output_pin_key_carries"), "#1544")
 	assertScalarValue(t, mustYAMLPath(t, composition, "split_children", "connect_to_instance_route_planning"), "#1545")
 	assertScalarValue(t, mustYAMLPath(t, composition, "split_children", "retired_connect_key_adapters"), "#2087")
@@ -160,18 +162,18 @@ func TestPlatformSpecFlowInstanceAuthoringSourceAuthority(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, contained, "rule"), "promoted to a child/template")
 
 	effectiveMode := mustMappingValue(t, authoring, "effective_flow_mode_model")
-	assertScalarValue(t, mustMappingValue(t, effectiveMode, "implementation_tracker"), "#2238")
-	assertScalarContains(t, mustMappingValue(t, effectiveMode, "canonical_code_owner"), "ResolveEffectiveFlowMode")
-	assertScalarContains(t, mustMappingValue(t, effectiveMode, "rule"), "MUST agree")
-	assertScalarContains(t, mustMappingValue(t, effectiveMode, "rule"), "before semantic source publication")
-	if !sequenceContainsScalar(mustMappingValue(t, effectiveMode, "non_authoritative_paths"), "raw ProjectFlowRef.Mode after contract loading") {
-		t.Fatal("effective_flow_mode_model must retire raw package mode as behavioral authority")
+	assertScalarValue(t, mustMappingValue(t, effectiveMode, "implementation_tracker"), "#2438")
+	assertScalarContains(t, mustMappingValue(t, effectiveMode, "canonical_code_owner"), "FlowSchemaDocument.EffectiveMode")
+	assertScalarContains(t, mustMappingValue(t, effectiveMode, "rule"), "Authored `mode` is invalid on presence")
+	assertScalarContains(t, mustMappingValue(t, effectiveMode, "rule"), "Singleton is not")
+	if !sequenceContainsScalar(mustMappingValue(t, effectiveMode, "non_authoritative_paths"), "authored mode in any selected or retained source") {
+		t.Fatal("effective_flow_mode_model must retire authored mode as behavioral authority")
 	}
 
 	cardinality := mustMappingValue(t, authoring, "singleton_cardinality_model")
 	assertScalarValue(t, mustMappingValue(t, cardinality, "implementation_tracker"), "#2238")
 	assertScalarContains(t, mustMappingValue(t, cardinality, "canonical_code_owner"), "ResolveFlowSingleton")
-	assertScalarContains(t, mustMappingValue(t, cardinality, "rule"), "cardinality and lifecycle only")
+	assertScalarContains(t, mustMappingValue(t, cardinality, "rule"), "existing singleton cardinality resolver")
 	assertScalarContains(t, mustMappingValue(t, cardinality, "rule"), "empty or scalar-only")
 	assertScalarContains(t, mustMappingValue(t, cardinality, "rule"), "does not by itself grant coordinator")
 
@@ -188,7 +190,7 @@ func TestPlatformSpecFlowInstanceAuthoringSourceAuthority(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, coordinator, "lifecycle_policy"), "archive, roll up, clean up, or promote")
 	assertScalarContains(t, mustMappingValue(t, coordinator, "promotion_rule"), "#1553")
 	for _, want := range []string{
-		"bare mode: static used as singleton/coordinator proof",
+		"static shape used as coordinator proof without an exact typed contained-state consumer",
 		"coordinator demand exists but the singleton primary entity lacks typed contained map/list state",
 		"singleton flow contained map/list value or item types do not resolve",
 		"agent conversation/session memory is used as coordinator state authority",
@@ -199,7 +201,7 @@ func TestPlatformSpecFlowInstanceAuthoringSourceAuthority(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"mode: static as implicit coordinator declaration",
+		"static shape alone as implicit coordinator declaration",
 		"agent memory intent as lifecycle or coordinator authority",
 	} {
 		if !sequenceContainsScalar(mustMappingValue(t, coordinator, "non_authoritative_paths"), want) {

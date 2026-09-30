@@ -1,5 +1,4 @@
 name: golden-agent-scout
-mode: singleton
 stages:
   pending: {initial: true}
   active: {}

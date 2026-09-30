@@ -522,7 +522,7 @@ support:
     support.drafted:
       activity: {id: send_support_reply, tool: telegram.send_message, approval: {decision: support_reply}}
 `,
-		"flow-a/schema.yaml":   "name: flow-a\nmode: static\nstages:\n  pending: {initial: true}\n",
+		"flow-a/schema.yaml":   "name: flow-a\nstages:\n  pending: {initial: true}\n",
 		"flow-a/entities.yaml": "default:\n  name: text\n",
 		"flow-a/events.yaml":   "review.accepted:\nreview.inspect:\n",
 		"flow-a/nodes.yaml": `writer:

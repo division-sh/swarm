@@ -152,6 +152,7 @@ func populateEffectiveEventProjectionProvenance(bundle *WorkflowContractBundle, 
 	if bundle == nil || builder == nil {
 		return
 	}
+	projectionInputs := map[string][]string{}
 	for _, row := range effectiveEventSchemaOwnershipRows(bundle) {
 		ownerEvent := resolvedEventSchemaKey(bundle, row.producerFlowID, row.producerEvent)
 		ownerPrefix := effectiveEventProvenancePrefix(row.ownerFlowPath, ownerEvent)
@@ -166,15 +167,32 @@ func populateEffectiveEventProjectionProvenance(bundle *WorkflowContractBundle, 
 				InputPaths: []string{ownerPrefix + "." + relativePath},
 			})
 		}
-		if pin, ok := bundle.FlowInputEventPin(row.receiverFlowID, row.receiverEvent); ok {
-			if projection, projected := pin.Projection(); projected {
-				inputPath := pin.Provenance().SourceFile
-				builder.set(projectionPrefix+".fields."+projection.Field+".type", EffectiveValueProvenance{
-					Origin: EffectiveValueOriginDerived, RuleID: eventReceiverProjectionRule, InputPaths: []string{inputPath},
-				})
+		if input, ok, err := bundle.ConnectionInput(row.connect); err == nil && ok {
+			evidence := input.SourceEvidence()
+			if evidence.Source.RequiresDeliveryProjection() {
+				path := projectionPrefix + ".fields." + evidence.Field.Path() + ".type"
+				projectionInputs[path] = append(projectionInputs[path], effectiveConnectionSourcePath(bundle, row.connect))
 			}
 		}
 	}
+	for path, inputs := range projectionInputs {
+		sort.Strings(inputs)
+		builder.set(path, EffectiveValueProvenance{
+			Origin: EffectiveValueOriginDerived, RuleID: eventReceiverProjectionRule, InputPaths: inputs,
+		})
+	}
+}
+
+func effectiveConnectionSourcePath(bundle *WorkflowContractBundle, connect FlowConnect) string {
+	schema, ok := bundle.FlowSchemaByID(connect.OwnerFlowPath)
+	if ok {
+		for index, authored := range schema.Connect {
+			if authored.WithOwnerSource(connect.OwnerFlowPath, connect.SourceFile) == connect {
+				return "schemas[" + strconv.Quote(connect.OwnerFlowPath) + "].connect[" + strconv.Itoa(index) + "].key_from"
+			}
+		}
+	}
+	return connect.AuthoredLocation()
 }
 
 func effectiveEventProvenancePrefix(packageKey, eventName string) string {

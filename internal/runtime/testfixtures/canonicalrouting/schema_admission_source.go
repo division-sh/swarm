@@ -2,7 +2,6 @@ package canonicalrouting
 
 // Closed parser fixtures exercise schema families, not a runnable topology.
 const SchemaAdmissionCompleteRoot = `name: Complete
-mode: template
 activation: standing
 instance: work_id
 ingress:
@@ -19,12 +18,11 @@ ingress:
 imports:
   connector_packs: [{provider: telegram, tool: telegram.send_message}]
   provider_trigger_events: [{provider: telegram, event: inbound.telegram.text_message}]
-connect: [{event: work.requested, from: source, to: worker, rename: work.received}]
+connect: [{event: work.requested, from: source, to: worker, rename: work.received, resolution: create, key_from: event.id}]
 pins:
   inputs:
     events:
       - event: work.requested
-        resolution: {mode: create, from: event.id}
         initialize: {note: payload.note}
     reads: [note, work_id]
   outputs:

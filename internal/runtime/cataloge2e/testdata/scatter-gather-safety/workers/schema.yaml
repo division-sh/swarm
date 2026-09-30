@@ -1,5 +1,4 @@
 name: workers
-mode: template
 instance: item_id
 stages:
   registered:
@@ -11,9 +10,7 @@ stages:
 pins:
   inputs:
     events:
-      - event: item.registered
-        resolution: {mode: select-or-create}
-      - event: item.finished
-        resolution: {mode: select}
+      - item.registered
+      - item.finished
   outputs:
     events: [item.reported]

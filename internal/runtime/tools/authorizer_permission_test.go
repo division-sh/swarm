@@ -206,7 +206,7 @@ func TestToolAuthorizer_ExplicitEmitEventsAllowEmitTool(t *testing.T) {
 }
 
 func TestToolAuthorizer_ScopedEmitEventsAllowLocalEmitTool(t *testing.T) {
-	bundle := emitRoutePlanTestBundle([]emitRoutePlanTestFlow{{id: "discovery", mode: runtimecontracts.FlowModeStatic}}, nil)
+	bundle := emitRoutePlanTestBundle(t, []emitRoutePlanTestFlow{{id: "discovery", mode: runtimecontracts.FlowModeStatic}}, nil)
 	bundle.FlowTree.ByID["discovery"].Events = map[string]runtimecontracts.EventCatalogEntry{
 		"category.assessed": {
 			Payload: runtimecontracts.EventPayloadSpec{

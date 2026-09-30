@@ -310,7 +310,7 @@ func recipientAuthoritySource(t *testing.T, receivers []recipientAuthorityReceiv
 	t.Helper()
 	producer := runtimecontracts.FlowContractView{
 		Path: "producer", Paths: runtimecontracts.FlowContractPaths{FlowPath: "producer"},
-		Schema: runtimecontracts.FlowSchemaDocument{Mode: "static", Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "scan.requested"}}}}},
+		Schema: runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "scan.requested"}}}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
 	}
 	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{producer}}
@@ -323,7 +323,7 @@ func recipientAuthoritySource(t *testing.T, receivers []recipientAuthorityReceiv
 	for _, declaration := range receivers {
 		flow := runtimecontracts.FlowContractView{
 			Path: declaration.path, Paths: runtimecontracts.FlowContractPaths{FlowPath: declaration.path},
-			Schema: runtimecontracts.FlowSchemaDocument{Mode: "static"}, Events: map[string]runtimecontracts.EventCatalogEntry{},
+			Schema: runtimecontracts.FlowSchemaDocument{}, Events: map[string]runtimecontracts.EventCatalogEntry{},
 		}
 		handlers := map[string]runtimecontracts.SystemNodeEventHandler{}
 		for _, pin := range declaration.pins {

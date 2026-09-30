@@ -73,7 +73,7 @@ func TestAdmitSelectedContractRouteHistoryDerivesSelectedRoutesWithoutMutating(t
 func TestAdmitSelectedContractRouteHistoryConnectMatchesConcreteTemplateSourceEndpoint(t *testing.T) {
 	plan := testRunForkPlan("producer/inst-1/scan.requested", runfork.RunForkPendingClassificationDeliveredCompleted, "node", "source-node")
 	plan.PendingWork[0].RoutingSource = testConcreteRoutingSource(t, "producer", "producer/inst-1")
-	source := testContractFrontierTemplateConnectSource()
+	source := testContractFrontierTemplateConnectSource(t)
 	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
 		Source:            source,
@@ -167,7 +167,7 @@ func testW2CompiledConnectRoute(t testing.TB, subscriberID string) events.Delive
 func TestAdmitSelectedContractRouteHistoryRejectsConcreteTemplateIdentityWhenSourceRouteIsAbsent(t *testing.T) {
 	plan := testRunForkPlan("producer/inst-1/scan.requested", runfork.RunForkPendingClassificationDeliveredCompleted, "node", "source-node")
 	plan.PendingWork[0].RoutingSource = events.NoRoutingSource()
-	source := testContractFrontierTemplateConnectSource()
+	source := testContractFrontierTemplateConnectSource(t)
 	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
 		Source:            source,
@@ -192,7 +192,7 @@ func TestAdmitSelectedContractRouteHistoryRejectsConcreteTemplateIdentityWhenSou
 }
 
 func TestSelectedContractAdmissionsRejectConflictingExplicitTemplateIdentity(t *testing.T) {
-	source := testContractFrontierTemplateConnectSource()
+	source := testContractFrontierTemplateConnectSource(t)
 	frontierPlan := testRunForkPlan("producer/inst-1/scan.requested", runfork.RunForkPendingClassificationPending, "node", "source-node")
 	frontierPlan.PendingWork[0].RoutingSource = testConcreteRoutingSource(t, "unrelated", "unrelated/inst-1")
 	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
@@ -237,7 +237,7 @@ func TestSelectedContractAdmissionsRejectConflictingExplicitTemplateIdentity(t *
 func TestAdmitSelectedContractRouteHistoryConnectRejectsUnrelatedTemplateSameLeaf(t *testing.T) {
 	plan := testRunForkPlan("unrelated/inst-1/scan.requested", runfork.RunForkPendingClassificationDeliveredCompleted, "node", "source-node")
 	plan.PendingWork[0].RoutingSource = testConcreteRoutingSource(t, "unrelated", "unrelated/inst-1")
-	source := testContractFrontierTemplateConnectSource()
+	source := testContractFrontierTemplateConnectSource(t)
 	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
 		Source:            source,
@@ -314,7 +314,7 @@ func TestAdmitSelectedContractRouteHistoryDoesNotDuplicateFrontierRecipients(t *
 func TestAdmitSelectedContractRouteHistoryClassifiesDynamicFlowInstances(t *testing.T) {
 	plan := testRunForkPlan("review/inst-1/task.started", runfork.RunForkPendingClassificationDeliveredCompleted, "node", "source-node")
 	plan.PendingWork[0].RoutingSource = testConcreteRoutingSource(t, "review", "review/inst-1")
-	source := testContractFrontierTemplateSource()
+	source := testContractFrontierTemplateSource(t)
 	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
 		Source:            source,

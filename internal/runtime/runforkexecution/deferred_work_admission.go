@@ -236,16 +236,9 @@ func selectedContractSourceCanCreateDynamicFlow(source semanticview.Source) bool
 		return false
 	}
 	graph := runtimepinrouting.CompileConnectGraph(source)
-	for flowID := range source.FlowSchemaEntries() {
-		for _, pin := range source.FlowInputEventPins(flowID) {
-			if !selectedContractFlowInputResolutionRequiresDynamicFlowOwner(pin.Resolution().Mode) {
-				continue
-			}
-			for _, edge := range graph.Edges() {
-				if edge.Consumer().MatchesInputPin(strings.TrimSpace(flowID), pin) {
-					return true
-				}
-			}
+	for _, plan := range graph.Plans() {
+		if key := plan.InstanceKey(); key != nil && selectedContractFlowInputResolutionRequiresDynamicFlowOwner(key.Mode()) {
+			return true
 		}
 	}
 	return false

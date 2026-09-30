@@ -14,7 +14,7 @@ func TestResolveAgentRegistryEntryRejectsRoleInferencePreservesExactName(t *test
 			FlowPath: "support",
 		},
 		Path:   "support",
-		Schema: runtimecontracts.FlowSchemaDocument{Mode: "singleton"},
+		Schema: runtimecontracts.FlowSchemaDocument{},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"flow-responder": {
 				ID:   "authored-responder",

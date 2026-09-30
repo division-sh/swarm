@@ -840,7 +840,6 @@ func templateInstanceDeliveryFixtureFiles() map[string]string {
 	return map[string]string{
 		"schema.yaml": "name: test\n",
 		"operating/schema.yaml": `name: operating
-mode: template
 instance: instance_id
 stages:
   initializing: {initial: true}

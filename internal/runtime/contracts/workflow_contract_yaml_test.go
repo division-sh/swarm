@@ -597,18 +597,18 @@ func TestFlowSchemaDocumentDecode_PreservesInputPinResolutionModes(t *testing.T)
 	if len(pins) != 6 {
 		t.Fatalf("input EventPins len = %d, want 6", len(pins))
 	}
-	create := pins[0]
-	if got, want := create.Resolution.Mode, FlowInputResolutionModeCreate; got != want {
-		t.Fatalf("create Resolution.Mode = %q, want %q", got, want)
+	create := doc.Connect[0]
+	if got, want := create.Resolution, FlowInputResolutionModeCreate; got != want {
+		t.Fatalf("create Resolution = %q, want %q", got, want)
 	}
-	if got, want := create.Resolution.From, FlowInputInstanceSourceGeneratedUUIDPath; got != want {
-		t.Fatalf("create Resolution.From = %q, want %q", got, want)
+	if got, want := create.KeyFrom, FlowInputInstanceSourceGeneratedUUIDPath; got != want {
+		t.Fatalf("create KeyFrom = %q, want %q", got, want)
 	}
-	if got := pins[1].Resolution.From; got != "" {
-		t.Fatalf("select default Resolution.From = %q, want omitted", got)
+	if got := doc.Connect[1].KeyFrom; got != "" {
+		t.Fatalf("select default KeyFrom = %q, want omitted", got)
 	}
-	if got, want := pins[2].Resolution.From, "payload.external_account_id"; got != want {
-		t.Fatalf("select-or-create Resolution.From = %q, want %q", got, want)
+	if got, want := doc.Connect[2].KeyFrom, "payload.external_account_id"; got != want {
+		t.Fatalf("select-or-create KeyFrom = %q, want %q", got, want)
 	}
 	if got, want := pins[3].Resolution.Aggregation, "stream"; got != want {
 		t.Fatalf("fan-in aggregation = %q, want %q", got, want)
@@ -816,12 +816,11 @@ func TestFlowTemplateInstanceDecodeAcceptsScalarIdentity(t *testing.T) {
 	var doc FlowSchemaDocument
 	if err := decodeNodeTestYAML([]byte(`
 name: template-flow
-mode: template
 instance: scope_id
 `), &doc); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
-	if got, want := doc.Mode, "template"; got != want {
+	if got, want := doc.EffectiveMode(), "template"; got != want {
 		t.Fatalf("Mode = %q, want %q", got, want)
 	}
 	if got, want := doc.Instance.Path(), "scope_id"; got != want {
@@ -851,7 +850,7 @@ func TestFlowTemplateInstanceDecodeRejectsRetiredMappingForms(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var doc FlowSchemaDocument
-			err := decodeNodeTestYAML([]byte("name: template-flow\nmode: template\ninstance: "+tc.instance+"\n"), &doc)
+			err := decodeNodeTestYAML([]byte("name: template-flow\ninstance: "+tc.instance+"\n"), &doc)
 			if err == nil || !strings.Contains(err.Error(), "instance: <field>") {
 				t.Fatalf("yaml.Unmarshal error = %v, want scalar instance teaching error", err)
 			}
@@ -859,15 +858,14 @@ func TestFlowTemplateInstanceDecodeRejectsRetiredMappingForms(t *testing.T) {
 	}
 }
 
-func TestFlowSchemaDocumentDecode_PreservesSingletonMode(t *testing.T) {
+func TestFlowSchemaDocumentDecode_DerivesKeylessStaticShape(t *testing.T) {
 	var doc FlowSchemaDocument
 	if err := decodeNodeTestYAML([]byte(`
 name: coordinator-flow
-mode: singleton
 `), &doc); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
-	if got, want := doc.Mode, "singleton"; got != want {
+	if got, want := doc.EffectiveMode(), "static"; got != want {
 		t.Fatalf("Mode = %q, want %q", got, want)
 	}
 }
@@ -1952,7 +1950,7 @@ func TestW2RejectsNullEmptyAndRedundantPinForms(t *testing.T) {
 		{name: "empty outputs", raw: "pins:\n  outputs: {}\n", want: "pins.outputs must be a non-empty mapping"},
 		{name: "null input events", raw: "pins:\n  inputs:\n    events: null\n", want: "is null, want sequence"},
 		{name: "empty output events", raw: "pins:\n  outputs:\n    events: []\n", want: "non-empty sequence"},
-		{name: "optionless input mapping", raw: "pins:\n  inputs:\n    events:\n      - event: work.requested\n", want: "mapping requires a non-default source or resolution"},
+		{name: "optionless input mapping", raw: "pins:\n  inputs:\n    events:\n      - event: work.requested\n", want: "mapping requires a non-default source, resolution or initialize"},
 		{name: "optionless output mapping", raw: "pins:\n  outputs:\n    events:\n      - event: work.completed\n", want: "mapping requires a non-default sink"},
 		{name: "duplicate event", raw: "pins:\n  inputs:\n    events: [work.requested, work.requested]\n", want: "declared more than once"},
 		{name: "duplicate read", raw: "pins:\n  inputs:\n    reads: [entity.status, entity.status]\n", want: "declared more than once"},
@@ -2013,7 +2011,7 @@ func TestW2LoaderRejectsResolutionFromOutsideInstanceSelectionModes(t *testing.T
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := LoadWorkflowContractBundleWithOverrides(repo, tc.root(t), DefaultPlatformSpecFile(repo))
-			if err == nil || !strings.Contains(err.Error(), "may only declare") {
+			if err == nil || !strings.Contains(err.Error(), "resolution.from is retired") {
 				t.Fatalf("bundle load error = %v, want %s resolution.from rejection", err, tc.name)
 			}
 		})

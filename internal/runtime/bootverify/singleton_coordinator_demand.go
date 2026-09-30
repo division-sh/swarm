@@ -69,7 +69,7 @@ func BuildSingletonCoordinatorDemandProjection(source semanticview.Source) []Sin
 	flows := map[string]singletonDemandFlow{}
 	for flowID, schema := range source.FlowSchemaEntries() {
 		flowID = strings.TrimSpace(flowID)
-		if flowID == "" || strings.TrimSpace(schema.Mode) != runtimecontracts.FlowModeSingleton {
+		if flowID == "" || schema.EffectiveMode() != runtimecontracts.FlowModeStatic {
 			continue
 		}
 		singleton, err := bundle.ResolveFlowSingleton(flowID)

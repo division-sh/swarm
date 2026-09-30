@@ -58,9 +58,45 @@ func projectSchemaConnectValue(value yamlsource.Value) ([]FlowConnect, error) {
 		if row.Rename != "" && eventidentity.Normalize(row.Rename) == eventidentity.Normalize(row.Event) {
 			return nil, nodeValueError(item, fmt.Errorf("connect.rename is redundant with event"))
 		}
+		if err := projectSchemaConnectResolutionValue(fields, &row); err != nil {
+			return nil, err
+		}
 		out = append(out, row)
 	}
 	return out, nil
+}
+
+func projectSchemaConnectResolutionValue(fields map[string]yamlsource.Value, row *FlowConnect) error {
+	if resolution, present := fields["resolution"]; present {
+		text, err := schemaValueText(resolution, true)
+		if err != nil {
+			return err
+		}
+		row.Resolution, err = ParseFlowInputResolutionMode(text)
+		if err != nil || !ordinaryInstanceResolution(row.Resolution) {
+			return nodeValueError(resolution, fmt.Errorf("connect.resolution must be create, select or select-or-create; fan-in and reply remain input-pin policies"))
+		}
+	}
+	key, present := fields["key_from"]
+	if !present {
+		return nil
+	}
+	var err error
+	row.KeyFrom, err = schemaValueText(key, true)
+	if err != nil {
+		return err
+	}
+	if !ordinaryInstanceResolution(row.Resolution) {
+		return nodeValueError(key, fmt.Errorf("connect.key_from requires an explicit connect.resolution"))
+	}
+	if _, err := ResolveFlowInputInstanceSource(row.Resolution, row.KeyFrom); err != nil {
+		return nodeValueError(key, err)
+	}
+	return nil
+}
+
+func ordinaryInstanceResolution(mode FlowInputResolutionMode) bool {
+	return mode == FlowInputResolutionModeCreate || mode == FlowInputResolutionModeSelect || mode == FlowInputResolutionModeSelectOrCreate
 }
 
 func projectSchemaImportsValue(value yamlsource.Value) (FlowSchemaImports, error) {
@@ -241,8 +277,8 @@ func projectSchemaPinValue(value yamlsource.Value, direction string) (FlowInputE
 				input.Initialize, err = projectSchemaInitializeValue(initialize)
 			}
 		}
-		if err == nil && direction == "inputs" && input.Source.Empty() && input.Resolution.Empty() {
-			err = fmt.Errorf("input event pin mapping requires a non-default source or resolution; use a scalar event when no options are needed")
+		if err == nil && direction == "inputs" && input.Source.Empty() && input.Resolution.Empty() && len(input.Initialize) == 0 {
+			err = fmt.Errorf("input event pin mapping requires a non-default source, resolution or initialize; use a scalar event when no options are needed")
 		}
 		if err == nil && direction == "outputs" && output.Sink == FlowOutputSinkNone {
 			err = fmt.Errorf("output event pin mapping requires a non-default sink; use a scalar event when no options are needed")
@@ -274,7 +310,7 @@ func projectSchemaResolutionValue(value yamlsource.Value) (FlowInputPinResolutio
 	if retired.Presence != yamlsource.PresenceMissing {
 		return FlowInputPinResolution{}, nodeValueError(retired.Value, NewRetiredResolutionInstanceKeyDiagnostic())
 	}
-	fields, err := schemaValueFields(value, "input pin resolution", inputEventPinResolutionFieldOptions, nil, true)
+	fields, err := schemaValueFields(value, "input pin resolution", inputEventPinResolutionFieldOptions, map[string]string{"from": "ordinary input-pin resolution.from is retired; use optional key_from on each creating/selecting connect row"}, true)
 	var out FlowInputPinResolution
 	if err != nil {
 		return out, err
@@ -288,7 +324,7 @@ func projectSchemaResolutionValue(value yamlsource.Value) (FlowInputPinResolutio
 		return out, nodeValueError(value, err)
 	}
 	if err := schemaValueTexts(fields, map[string]*string{
-		"from": &out.From, "aggregation": &out.Aggregation, "window": &out.Window,
+		"aggregation": &out.Aggregation, "window": &out.Window,
 		"singleton": &out.Singleton, "replies_to": &out.RepliesTo, "correlation_key": &out.CorrelationKey,
 	}, true); err != nil {
 		return out, err

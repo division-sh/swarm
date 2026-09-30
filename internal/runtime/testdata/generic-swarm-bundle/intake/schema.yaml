@@ -1,5 +1,4 @@
 name: intake
-mode: static
 stages:
   queued: {initial: true}
   collecting: {}
