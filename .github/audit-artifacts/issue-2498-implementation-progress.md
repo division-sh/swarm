@@ -208,3 +208,19 @@ caller cancellation. No detached cleanup or cancellation suppression. This named
 S11 before/after control is expected FAIL 3.790s then PASS race x3 37.078s on both
 stores; the request is real gateway admission, not a successful provider-message
 claim. Complete public message/settlement proof remains the existing served journey.
+
+## Final Candidate Qualification
+
+The complete `issue-2498-postimplementation.md` supersedes this progress artifact
+for current closure accounting. Candidate `723af0b1b` on master `8fac0f2e7` passes
+all 14 required default swarm-test units (zero failed actions), completed
+2026-09-30T13:39:20Z. SHA256:
+`270536a0b96bd2cd9ec06b24180a85f8c4a7d3a40f0cc2e53912739d20730a38`.
+The separate final public numeric/refusal/sequential-golden/standing matrix passes
+both stores in294.959s, SHA256:
+`50f5ee4275eb7f368dadbc39970e57117808ece6108d5c09baa3ba9717c91e27`.
+Focused owner matrices, race controls and no-hotspot-growth complexity pass.
+The final artifact maps all 65 S/P/M/RB/U rows, including the explicit #642 split
+and preserved #2353 safety residual. Watchlist closeout7f9e932 is published.
+No production/test/spec edits follow qualification. Independent merge review
+remains required; neither parent is closed and #2008 WIP is unchanged.
