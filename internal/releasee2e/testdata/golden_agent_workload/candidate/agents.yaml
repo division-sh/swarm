@@ -4,6 +4,7 @@ candidate-worker:
   intent: prompts/candidate-worker.md
   model: regular
   memory: false
+  flow_data_access: [profile.md]
   subscriptions: [candidate.work.requested]
   emit_events: [candidate.analyzed]
   mock:

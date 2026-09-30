@@ -1,6 +1,6 @@
 investigate.requested:
   item_id: text
-investigation.timed_out: {}
+investigation.timed_out:
 assessment.reported:
   match_score: integer
   verdict: text

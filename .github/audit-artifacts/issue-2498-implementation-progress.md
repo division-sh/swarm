@@ -42,23 +42,44 @@ CLI/authenticated RPC and the existing retained internal mock lifecycle child
 | `TestStandingPauseAuthorityPublicBothStores` + `TestStandingResetNonExecutablePublicBothStores` | PASS together 112.741s through swarm-test | Fresh CLI/RPC no-ops, actual SQL rollback injection, suspended resets/restart/resume, exact historical replay, terminal current/revised/retained-override and validated-invalid current/revised reset; S02-S08/S14 components |
 | Canonical standing owner/deletion guards | PASS 0.223s | One production classifier, retired interpreters absent, inbound consumes canonical reader |
 | API specification and OpenRPC generation check | PASS | Contract coherence only, not runtime closure |
+| `TestStandingResetNonExecutablePublicBothStores/{sqlite,postgres}/{orphan,terminal-orphan,invalid-orphan,broken-relation}` | PASS 74.401s | All three CLI/RPC commands refuse orphan and unknown services; exact cold declaration restoration then reset succeeds; broken relation refuses startup before readiness |
+| `TestServedParityHarnessStandingServiceLifecycle` | PASS 14.909s, both stores | Real held connector route and scheduler drain, joined suspension/reset and lawful fresh-child resume; S01/S15 components |
+| `TestGoldenNumericDataScatterParkRestartBothStores` | PASS 90.084s through swarm-test | Exact 32/100 unsettled public checkpoint, paused restart and continue, 100 exact numeric row/event/materializing-recipient/entity chains, 100 typed initial timer activations preserved after restart/retry, permanent creation receipt unchanged after process/cache loss; M01-M12 components |
+| `TestGoldenNumericDataScatterParkRefusalBothStores` | PASS 21.574s | Late malformed numeric, required null and duplicate key each produce exact public row-100 defect and empty run binding; public versions/head history/run inventory unchanged and run/feed absent; M13 |
+| `TestPersistedAgentReadinessFieldsBothStores` | PASS 1.727s | Exact nonzero budget 1.25 and flow-data capability, canonical revision unchanged across independent hydration reads; M19 supplementary store credit only |
+| `TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends` | PASS 27.776s through swarm-test | Real field-bearing candidate activation/turn, graceful restart and forced recovery on both stores; M18 H credit, not public/live-provider or nonzero-budget credit |
+| Catalog, test-planning and API-spec packages | PASS 1.318s / 17.469s / 1.917s | Disjoint numeric structural/runtime claims, existing sole executor and both-store CI children |
 
 The earlier four-product public control passed 67.898s; the later five-product
-receipt above supersedes it. A broad default swarm-test attempt exited 1 without
-a retained actionable failure summary; it earns no qualification credit and
-must be rerun with complete captured evidence.
+receipt above supersedes it. The reconciled default qualification attempt failed
+and earns no full-suite credit. Its captured evidence isolated incomplete SQLite
+test schemas, a missing numeric routing-proof registration, and the candidate's
+ordinary-pause guard incorrectly applied to selected-fork claims. The selected
+fork branch now delegates to its pre-existing selected-state/live-lease fence;
+ordinary claims/continuations alone consume normal dispatch-parked admission.
+Canonical fixture schemas and proof registration were corrected without a
+production fallback. Manager and fork packages then passed (20.812s / 154.310s).
+Pipeline's sole remaining failure was an obsolete test-local standing table;
+its canonical-fixture correction passed the exact timer test three times (1.425s),
+but the complete pipeline package still needs the final-head rerun.
+
+Rebase onto `origin/master@abdb07bfe` preserves the earlier approved commits and
+newer continuation/lifetime contracts. The measured committed complexity ratchet
+at `e442870f7` remains cognitive 594/594 and cyclomatic 282/282, with no hotspot
+growth; the later test additions still require their own committed measurement.
 
 ## Remaining Mandatory Qualification
 
-- Reconcile current origin/master and independently measure the committed
+- Recheck current origin/master and measure the complete committed candidate
   complexity baseline without increasing either hotspot count.
-- Complete S09/S10 public orphan/restoration/corruption cases and remaining
-  S11-S17 barrier, cleanup, source/control-race and composed process proofs.
-  Existing held-route/scheduler and selected-store controls must be executed and
-  explicitly mapped; a test name or shared-owner assertion is not proof.
+- Complete and explicitly map remaining S10-S17 barrier, cleanup,
+  source/control-race and composed reset/shutdown proofs. The public orphan and
+  corruption rows and held-route/scheduler receipt above do not substitute for
+  every invalid composition or race.
 - Execute the original P01-P16/RB1-RB4 preserved controls and full numeric/
-  paired-agent M01-M23 corpus, including typed timer inventory and permanent
-  receipt replay. U1-U5 admitted behavioral mutation receipts remain required.
+  paired-agent M01-M23 corpus and its unchanged burst/safety controls.
+  U1-U5 admitted behavioral mutation receipts remain required; positive timer,
+  permanent-receipt and field-bearing restart rows above do not pay mutation credit.
 - Run final default `go run ./cmd/swarm-test` on the reconciled committed head,
   preserve failure evidence, and publish the complete manifestation proof audit
   before requesting PR review. No `--full` or direct whole-tree go test used.
