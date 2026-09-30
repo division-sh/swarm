@@ -2628,6 +2628,7 @@
     {"path":"internal/serveapp/channel_delivery_scan_isolation_supported_surface_test.go","class":"test"},
     {"path":"internal/serveapp/channel_delivery_temporal_supported_surface_test.go","class":"test"},
     {"path":"internal/serveapp/channel_delivery_uncertain_copy_supported_surface_test.go","class":"test"},
+    {"path":"internal/serveapp/channel_delivery_uncertain_notice_supported_surface_test.go","class":"test"},
     {"path":"internal/serveapp/channel_delivery_worker.go","class":"authored"},
     {"path":"internal/serveapp/channel_delivery_worker_test.go","class":"test"},
     {"path":"internal/serveapp/channel_duplicate_bot_supported_surface_test.go","class":"test"},
