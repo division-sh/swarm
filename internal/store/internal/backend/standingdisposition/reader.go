@@ -5,10 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	runtimestanding "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"strings"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/google/uuid"
 )
 
@@ -18,16 +18,16 @@ type queryRower interface {
 
 // ReadByRun is the selected-store fact reader for the total exact-current
 // disposition. Both mutation/recovery owners and diagnostics consume it.
-func ReadByRun(ctx context.Context, q queryRower, postgres bool, runID string) (runtimepipeline.StandingRestartDisposition, error) {
+func ReadByRun(ctx context.Context, q queryRower, postgres bool, runID string) (runtimestanding.StandingRestartDisposition, error) {
 	runID = strings.TrimSpace(runID)
 	if q == nil {
-		return runtimepipeline.StandingRestartDisposition{}, errors.New("standing restart selected-store reader is required")
+		return runtimestanding.StandingRestartDisposition{}, errors.New("standing restart selected-store reader is required")
 	}
 	if runID == "" {
-		return runtimepipeline.StandingRestartDisposition{}, errors.New("standing restart run_id is required")
+		return runtimestanding.StandingRestartDisposition{}, errors.New("standing restart run_id is required")
 	}
 	if _, err := uuid.Parse(runID); err != nil {
-		return runtimepipeline.StandingRestartDisposition{}, fmt.Errorf("standing restart run_id: %w", err)
+		return runtimestanding.StandingRestartDisposition{}, fmt.Errorf("standing restart run_id: %w", err)
 	}
 	query := `
 		SELECT ss.service_id, ss.flow_path, ss.instance_id, ss.entity_id,
@@ -65,7 +65,7 @@ func ReadByRun(ctx context.Context, q queryRower, postgres bool, runID string) (
 		`
 		args = []any{runID}
 	}
-	var fact runtimepipeline.StandingRestartFact
+	var fact runtimestanding.StandingRestartFact
 	var flowPath, instanceID, entityID, originKind, originServiceID string
 	var originGeneration int64
 	var owners, generationRelations int
@@ -76,20 +76,20 @@ func ReadByRun(ctx context.Context, q queryRower, postgres bool, runID string) (
 		&originKind, &originServiceID, &originGeneration, &owners, &generationRelations,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		return runtimepipeline.ClassifyStandingRestart(runtimepipeline.StandingRestartFact{})
+		return runtimestanding.ClassifyStandingRestart(runtimestanding.StandingRestartFact{})
 	}
 	if err != nil {
-		return runtimepipeline.StandingRestartDisposition{}, fmt.Errorf("read standing restart disposition for run %s: %w", runID, err)
+		return runtimestanding.StandingRestartDisposition{}, fmt.Errorf("read standing restart disposition for run %s: %w", runID, err)
 	}
 	if owners != 1 {
-		return runtimepipeline.StandingRestartDisposition{}, fmt.Errorf("standing restart run %s has %d exact current owners", runID, owners)
+		return runtimestanding.StandingRestartDisposition{}, fmt.Errorf("standing restart run %s has %d exact current owners", runID, owners)
 	}
 	if strings.TrimSpace(flowPath) == "" || strings.TrimSpace(instanceID) == "" {
-		return runtimepipeline.StandingRestartDisposition{}, fmt.Errorf("standing restart run %s has incomplete service identity", runID)
+		return runtimestanding.StandingRestartDisposition{}, fmt.Errorf("standing restart run %s has incomplete service identity", runID)
 	}
 	wantServiceID := runtimeflowidentity.StandingServiceID(flowPath)
 	if fact.ServiceID != wantServiceID {
-		return runtimepipeline.StandingRestartDisposition{}, fmt.Errorf(
+		return runtimestanding.StandingRestartDisposition{}, fmt.Errorf(
 			"standing restart run %s service identity %s does not match flow_path owner %s",
 			runID,
 			fact.ServiceID,
@@ -97,20 +97,20 @@ func ReadByRun(ctx context.Context, q queryRower, postgres bool, runID string) (
 		)
 	}
 	if _, err := uuid.Parse(strings.TrimSpace(entityID)); err != nil {
-		return runtimepipeline.StandingRestartDisposition{}, fmt.Errorf("standing restart run %s entity identity: %w", runID, err)
+		return runtimestanding.StandingRestartDisposition{}, fmt.Errorf("standing restart run %s entity identity: %w", runID, err)
 	}
 	if generationRelations != 1 {
-		return runtimepipeline.StandingRestartDisposition{}, fmt.Errorf(
+		return runtimestanding.StandingRestartDisposition{}, fmt.Errorf(
 			"standing restart run %s has %d exact active generation relations",
 			runID,
 			generationRelations,
 		)
 	}
 	if strings.TrimSpace(fact.RunState) == "" {
-		return runtimepipeline.StandingRestartDisposition{}, fmt.Errorf("standing restart run %s current pointer has no referenced run", runID)
+		return runtimestanding.StandingRestartDisposition{}, fmt.Errorf("standing restart run %s current pointer has no referenced run", runID)
 	}
 	if originKind != "standing_generation" || originServiceID != fact.ServiceID || originGeneration != fact.Generation {
-		return runtimepipeline.StandingRestartDisposition{}, fmt.Errorf(
+		return runtimestanding.StandingRestartDisposition{}, fmt.Errorf(
 			"standing restart run %s origin identity mismatch: kind=%s service_id=%s generation=%d",
 			runID,
 			originKind,
@@ -119,5 +119,5 @@ func ReadByRun(ctx context.Context, q queryRower, postgres bool, runID string) (
 		)
 	}
 	fact.ExactCurrent = true
-	return runtimepipeline.ClassifyStandingRestart(fact)
+	return runtimestanding.ClassifyStandingRestart(fact)
 }

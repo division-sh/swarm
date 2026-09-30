@@ -437,8 +437,8 @@ func TestServeRuntimeContextStandingTargetsPreservesNonExecutableDeclarations(t 
 		[]runtimepkg.StandingTarget{active},
 		[]runtimepkg.StandingTarget{{ServiceID: active.ServiceID, Provider: active.Provider}, stopped},
 		[]runtimepkg.StandingActivation{
-			{ServiceID: active.ServiceID, RestartDisposition: runtimepipeline.StandingRestartDisposition{Kind: runtimepipeline.StandingRestartActiveIntrinsic}},
-			{ServiceID: stopped.ServiceID, RestartDisposition: runtimepipeline.StandingRestartDisposition{Kind: runtimepipeline.StandingRestartTerminalDeclared}},
+			{ServiceID: active.ServiceID, RestartDisposition: storerunlifecycle.StandingRestartDisposition{Kind: storerunlifecycle.StandingRestartActiveIntrinsic}},
+			{ServiceID: stopped.ServiceID, RestartDisposition: storerunlifecycle.StandingRestartDisposition{Kind: storerunlifecycle.StandingRestartTerminalDeclared}},
 		},
 	)
 	if len(got) != 2 {

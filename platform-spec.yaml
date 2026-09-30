@@ -12241,7 +12241,7 @@ flow_model:
         provider_catalog: internal/providertriggers.CatalogSnapshot
         admission_plan: internal/providertriggers.InboundAdmissionPlan
         durable_identity_and_desired_state: private runtime/pipeline workflow persistence over standing_services plus standing_service_generations plus standing_service_journal
-        restart_disposition: internal/runtime/pipeline.ClassifyStandingRestart over the complete selected-store exact-current fact product
+        restart_disposition: internal/runtime/runlifecycle.ClassifyStandingRestart over the complete selected-store exact-current fact product
         startup_reconciliation: internal/runtime/pipeline.PipelineCoordinator.ReconcileStandingServiceSet
         lifecycle_materialization: internal/runtime.Runtime.EnsureStandingTargets
         process_registry: internal/runtime.RuntimeContextManager
@@ -12311,8 +12311,15 @@ flow_model:
         Reconciliation normalizes an active_intrinsic declaration to running while retaining exact N. A generic public
         run.pause changes only run-scoped control and does not create the durable standing suspension override, so restart
         writes control_reason=standing_reconcile and resumes intrinsic execution. Only standing.suspend owns persistent
-        standing suspension; standing resume clears that override, writes running, and owns the next immediate completion
-        request. Restoring an orphan likewise normalizes lifecycle according to its retained override.
+        standing suspension; applied standing resume clears that override, writes running, and owns the next immediate completion
+        request. Restoring an orphan likewise normalizes lifecycle according to its retained override. Generic run.continue
+        consumes the exact-current standing disposition inside its run-control transaction: ordinary and active_intrinsic
+        permit an otherwise valid operator pause; suspended, orphaned, terminal and invalid current generations refuse
+        without mutating lifecycle, control, override, generation, completion candidate or executable work. Paused control
+        alone is not proof of generic release authority. The canonical disposition model and sole decision table reside
+        in internal/runtime/runlifecycle; the selected-store standingdisposition reader proves its complete fact product.
+        Standing mutations retain parent-before-run lock order. Generic continue uses the non-locking canonical standing
+        read under its existing run fence and must not acquire an inverted standing-parent lock.
         service_id, current_generation, current_run_id, instance_id, and entity_id are the standing semantic authority. The
         standing instance continues to use the ordinary canonical flow-instance identity owner; a special path namespace,
         source-equality validator, entity_state scan, or alternate route matcher is forbidden.
@@ -12321,16 +12328,32 @@ flow_model:
         It resolves alias/provider to exactly one loaded BundleContext and context-complete target.
         Dispatch MUST use that selected context's source, immutable admission plan, credential store, ingress controller,
         store, EventBus, and runtime. Primary-runtime fallback, request-time provider catalog lookup, and parallel alias
-        registries are forbidden. Operator suspend and reset first close service-scoped gateway admission, withdraw that
-        service from manager visibility, and drain already-admitted publication plus runtime work before beginning the
-        durable lifecycle mutation. New requests fail with service-unavailable semantics while that barrier is closed.
-        A pre-commit failure restores manager visibility and reopens admission only after the drain; restoration failure
-        leaves the service fail closed. Resume and an active reset publish committed targets before reopening admission.
+        registries are forbidden. Standing commands consume the exact-current selected-store observation and the context
+        manager's exact child-presence authority, not command permission inferred from a missing process child. Every command
+        retains pipeline recovery exclusion through mutation and captured resource disposition. Commands that change execution
+        close service-scoped gateway admission and drain admitted ingress; an executable predecessor additionally fences, parks
+        and drains its exact child before mutation. Valid suspended, terminal-declared and validated-invalid reset may have no
+        child, but retain the same recovery exclusion and ingress barrier. New requests fail with service-unavailable semantics
+        while that barrier is closed. The writer revalidates the captured complete authority under parent-before-run locking
+        before both writes and no-ops, and returns acknowledged applied/exact-noop evidence. Disposition-read errors refuse.
+        A pre-commit failure restores only an actually captured, still-authorized unretired child and its schedules, and reopens
+        ingress only if this operation closed a previously open gate. No-child rollback preserves prior suppression. An
+        acknowledged commit followed by cleanup/publication failure preserves its identity/outcome and never restores N.
+        A fresh active resume is a true no-op: it preserves the exact existing child, schedules, publication and admission.
+        Applied resume and executable reset publish committed targets before reopening admission; suspended reset publishes none.
         Process shutdown atomically rejects new admission while manager visibility is serialized. Before quiescence begins,
         RuntimeContextManager marks every loaded context unavailable. Requests fail with service-unavailable semantics.
         Already-admitted requests remain owned through publication/result drain and cleanup. Shutdown grace expiry
         reports incomplete drain and may request cancellation, but does not prove cleanup or permit dependency release
         before joining. Requests that resolved a context but have not entered its gateway fail closed.
+      operator_transition_matrix:
+        active_intrinsic_exact_child: 'Suspend drains/retires the exact child; resume is an acknowledged exact no-op; reset drains/retires N and conditionally publishes N+1.'
+        suspended_no_child: 'Fresh suspend is an acknowledged exact no-op; resume creates one child for N; reset creates suspended N+1 without a child.'
+        terminal_declared_no_child: 'Suspend/resume refuse with reset guidance; reset uses the latest declaration source and preserves the override, publishing only executable N+1.'
+        validated_invalid_current_no_child: 'Suspend/resume refuse; reset consumes existing exact relation/source remediation and the retained override. A reader error is not this typed state.'
+        orphaned_no_child: 'All three refuse until complete-set declaration restore; terminal restore retains N and then requires reset.'
+        invalid_composition: 'Missing/stale/foreign/fenced child for executable N, any live child for non-executable N, ambiguous/unloaded declaration or broken identity/source/relation refuses without synthetic child or foreign retirement.'
+        competing_transition: 'Prepared, fenced and retiring resources remain owned by the existing serialized operation and compensation; a transient map gap is not absence authority.'
       admission_order: >
         The selected provider manifest may authenticate a protocol challenge without delivery. For deliveries, the mapped
         canonical event name MUST match an exact external input pin on the selected flow before publication-ledger
@@ -17257,7 +17280,9 @@ platform_tables:
             run.continue first commits the exact paused-to-running lifecycle and control transition. It then performs
             immediate per-run durable recovery through the canonical pipeline-obligation owner. Failure or caller
             cancellation after commit never becomes an ordinary transition error, because replaying that error could
-            replay an already-committed transition.
+            replay an already-committed transition. The existing EventBus release path also signals its exact-generation
+            delivery continuation owner after every admitted continue, including zero pipeline candidates and postcommit
+            failure/cancellation. Handed deliveries are not republished or re-acknowledged by pipeline recovery.
           result_contract: >
             TransitionResult carries one typed post-commit recovery result with the accumulated settled, examined,
             exhausted, and blocked facts plus exactly one disposition: not_configured, exhausted, blocked, failed, or
@@ -17703,7 +17728,12 @@ run_model:
       failure mid-run.'
     pause_resume: 'Run-scoped pause/resume is owned by run.pause and run.continue. Operator run-control transition
       state is persisted in run_control_state so run.continue can distinguish operator-paused runs from materialized
-      fork rows that also use runs.status=paused. It gates dispatch for one run while in-flight events complete.
+      fork rows that also use runs.status=paused. Continue requires paired paused lifecycle/control on both stores and
+      canonical exact-current standing permission; it never manufactures control or clears standing suspension.
+      Active lifecycle includes paused topology, outstanding debt and already-owned settlement, but not fresh execution.
+      The existing selected-store run guard consumes lifecycle/control and standing disposition for fresh pipeline and
+      delivery admission. Valid paused debt remains durable and parked without new attempts or recipient effects;
+      missing, contradictory or invalid authority fails closed. It gates dispatch for one run while in-flight events complete.
       After continue commits, its canonical typed post-commit recovery result distinguishes exhausted, blocked,
       failed, cancelled, and unconfigured immediate recovery without returning an ordinary error that could cause
       the committed transition to be replayed. Runtime-scoped external ingress pause/resume is a separate global
@@ -26889,7 +26919,7 @@ cli_specification:
       tier: must_have
       implementation_status: implemented
       owner: /v1/rpc standing.suspend
-      behavior: Persistently overrides a declaration-owned standing service to suspended and quiesces its current generation through the canonical standing-service desired-state owner.
+      behavior: Persistently overrides a declaration-owned standing service to suspended and quiesces its current generation through the canonical standing-service desired-state owner. A fresh repeat on valid suspended N is an exact no-op without a child; keyed replay is distinct.
       proof_expectations:
       - exact /v1/rpc standing.suspend call with service_id plus optional reason and idempotency_key
       - full standing service UUID is required; invalid input and malformed success results fail closed
@@ -26900,7 +26930,7 @@ cli_specification:
       tier: must_have
       implementation_status: implemented
       owner: /v1/rpc standing.resume
-      behavior: Clears the persistent suspended override and reconciles the standing service from its current declaration and source revision.
+      behavior: Clears the persistent suspended override and publishes one exact child for N before ingress reopens. A fresh repeat on already-active N preserves its existing child, schedules and publication without reconstruction; keyed replay is distinct.
       proof_expectations:
       - exact /v1/rpc standing.resume call with service_id plus optional reason and idempotency_key
       - full standing service UUID is required; invalid input and malformed success results fail closed
@@ -26911,7 +26941,7 @@ cli_specification:
       tier: must_have
       implementation_status: implemented
       owner: /v1/rpc standing.reset
-      behavior: Journaled destructive replacement of the current standing generation followed by fresh materialization under the same stable service identity.
+      behavior: Journaled replacement of N by N+1 under the latest declaration source and stable service identity. Suspended reset preserves the override and has no child; terminal-declared or validated-invalid N may also reset without a child. Only executable N+1 is materialized.
       proof_expectations:
       - exact /v1/rpc standing.reset call with service_id plus optional reason and idempotency_key
       - full standing service UUID is required; invalid input and malformed success results fail closed
@@ -34100,6 +34130,9 @@ api_specification:
             $ref: '#/components/schemas/OpaqueId'
           current_status:
             $ref: '#/components/schemas/RunStatus'
+          detail:
+            type: string
+            description: Canonical standing-control guidance when suspension or orphaning owns the paused generation; generic run.continue cannot clear that authority.
       SELECTED_FORK_CONTROL_UNSUPPORTED:
         type: object
         additionalProperties: false
@@ -35015,7 +35048,7 @@ api_specification:
       - DATA_INTEGRITY_ERROR
     standing.suspend:
       tier: must_have
-      description: Persistently suspend a declaration-owned standing service, quiesce active deliveries, sessions, and timers, pause its current run, and withdraw inbound publication. The override survives restart.
+      description: Persistently suspend a declaration-owned standing service, quiesce active deliveries, sessions, and timers, pause its current run, and withdraw inbound publication. The override survives restart. Fresh repeated suspend of valid suspended N is an exact no-op without child drain; disposition-read errors refuse rather than acknowledging a no-op.
       scope:
         required: [write:runs]
       idempotency: per the convention.
@@ -35030,7 +35063,7 @@ api_specification:
       errors: [STANDING_SERVICE_NOT_FOUND, IDEMPOTENCY_CONFLICT]
     standing.resume:
       tier: must_have
-      description: Clear a persistent standing-service suspension and reconstruct its routes, agents, schedules, and ingress from the currently loaded declaration. Orphaned services refuse until the declaration is restored.
+      description: Clear a persistent standing-service suspension and publish its routes, agents, schedules, and exact child before reopening ingress. Fresh repeated resume of already-active N preserves the same child and publication as an exact no-op. Orphaned services refuse until declaration restore; terminal or invalid current generations require reset. Disposition-read errors refuse.
       scope:
         required: [write:runs]
       idempotency: per the convention.
@@ -35045,7 +35078,7 @@ api_specification:
       errors: [STANDING_SERVICE_NOT_FOUND, IDEMPOTENCY_CONFLICT]
     standing.reset:
       tier: must_have
-      description: Destructively quiesce and retire the current standing generation, preserve its evidence, create the deterministic next generation, clear current state, and rematerialize from the declaration without store surgery.
+      description: Destructively quiesce and retire N, preserve its evidence, and create deterministic N+1 under the latest declaration source. Preserve the standing suspended override without materialization; otherwise publish executable N+1. Valid suspended, terminal-declared or validated-invalid N may have no process child, but recovery exclusion and ingress fencing remain required. Broken relation or invalid process composition refuses without store surgery.
       scope:
         required: [write:runs]
       idempotency: per the convention.
@@ -35123,7 +35156,7 @@ api_specification:
       - IDEMPOTENCY_CONFLICT
     run.continue:
       tier: should_have
-      description: Resume a paused run.
+      description: Resume an operator-paused run with paired paused lifecycle/control and canonical standing permission. Suspended or orphaned current standing generations refuse RUN_NOT_PAUSED without mutation; use standing controls. The committed transition wakes handed work even when no pipeline work remains.
       scope:
         required:
         - write:runs
@@ -37427,7 +37460,8 @@ process_local_work_lifetime_authority:
       retains that occurrence through durable claim settlement or release; missing, stale, conflicting, fenced, or
       retired ownership fails closed. A standing-generation claim observed before its runtime context installs that
       exact occurrence owner is released and remains blocked for a later scan; it never executes as ownerless work.
-      Suspend and reset acquire one typed pipeline-recovery transition before fencing
+      All three standing commands acquire one typed pipeline-recovery transition before process staging or mutation;
+      a fresh active resume preserves admission and its exact existing child. Suspend and reset acquire that transition before fencing
       the occurrence. That transition first drains any recovery scan that could already have registered a selected-store
       claim, excludes later scans, and remains held through parent terminalization and occurrence restore or retirement.
       Acquisition is bounded by the parent transition context; cancellation or deadline expiry fails without acquiring
@@ -37435,20 +37469,26 @@ process_local_work_lifetime_authority:
       Parent terminalization therefore never races the claim-before-origin-read interval and does not poll, infer an
       owner, override a current admitted claim, or weaken the selected-store fail-busy contract.
     standing_service: >
-      Suspend and reset first close domain admission and fence the exact standing occurrence, then park and join every
+      For an executable predecessor, suspend and reset first close domain admission and fence the exact standing occurrence, then park and join every
       exact-owner process-local scheduler projection, including future one-shot and recurring timers, before draining active
       descendants. One opaque scheduler-owned parked authority remains reachable through timeout and rollback; bare schedule
-      values are not transition authority. Pre-commit failure waits for every predecessor callback to settle, reopens the same
+      values are not transition authority. A validated non-executable no-child command retains explicit absence and prior
+      suppression under that existing owner, plus pipeline exclusion and domain admission fencing; it never waits, retires
+      or restores a nonexistent child. The child-only drain entrance still refuses absent occurrences. Pre-commit failure
+      revalidates current durable authority, waits for every captured predecessor callback to settle, reopens the same
       unretired occurrence, restores each eligible projection under its exact original complete execution owner, and only then
       republishes ingress. Restore reserves every exact target key, retires and joins the exact armed or firing incumbent, and
       rejects concurrent register, cancel, park, restore, scheduler stop, or competing transition until that reservation
       settles. A fenced or retired original owner makes rollback fail closed with ingress still suppressed; rollback never
-      weakens Manager-composed ownership to the standing projection. Successful suspend retires the occurrence with no local
-      timer projection. Resume and reset prepare a fresh, unselectable process occurrence from the committed
+      weakens Manager-composed ownership to the standing projection. No-child rollback retains previously closed ingress
+      and suppression. Successful applied suspend retires the captured occurrence with no local timer projection; fresh
+      repeat suspend is an acknowledged exact no-op. Applied resume and executable reset prepare a fresh, unselectable process occurrence from the committed
       service/run/generation identity; canonical activation and timer producers execute under that exact owner, then targets
       and occurrence publish atomically. They rehydrate only the new generation's canonical durable timer facts and never copy
       predecessor run-bound schedule structs. A timeout or failed compensation remains unavailable rather than publishing a
-      fenced or partially restored occurrence.
+      fenced or partially restored occurrence. Fresh active resume preserves its exact child and schedule authority rather
+      than preparing another. Acknowledged commit plus later cleanup error retains the committed outcome and joins the
+      captured resource disposition without caller cancellation; it never resurrects predecessor authority.
   shutdown_and_store_release:
     terminal_completion: >
       Committed flow termination retains one bounded Manager-owned completion under the exact existing runtime and,
@@ -37684,6 +37724,13 @@ durable_pipeline_processing_obligation_authority:
       exhausted result reports the remembered local blockage. Only the global runtime-ingress pause may stop a batch
       immediately. Cancellation, query or processing error, cursor close, and cursor abandonment release every outstanding
       cursor claim and invalidate the cursor; later recovery reclaims the durable obligation from a fresh cursor.
+      Valid persisted paused lifecycle/control with canonical ordinary or active_intrinsic permission is non-runnable
+      debt, not remembered blockage. The canonical run guard parks it before claim admission and rechecks mutable
+      permission during hydration and dispatch. Canonical suspended/orphaned standing work remains withdrawn under its
+      existing owner, never ordinary recovery authority. Raw page membership, boundary and bounded examination still
+      account for parked rows without claiming, acknowledging or changing them. Invalid control, source or standing
+      authority is never inferred to be harmless parking. Global ingress, running-run refusal, busy claims and retry
+      blockage retain their existing startup refusal semantics.
     startup_blockage_evidence: >
       Startup admission rejects every blocked result, including an exhausted scan with remembered blockage. Existing
       recovery and selected-store claim diagnostics distinguish ingress pause before scanning or during dispatch,

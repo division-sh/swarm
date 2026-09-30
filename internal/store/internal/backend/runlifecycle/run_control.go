@@ -13,6 +13,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	storestandingdisposition "github.com/division-sh/swarm/internal/store/internal/backend/standingdisposition"
 	"github.com/google/uuid"
 )
@@ -53,6 +54,13 @@ func (s *RunLifecyclePostgresOwner) RunDispatchBlocked(ctx context.Context, runI
 		return false, fmt.Errorf("load run dispatch control state: %w", err)
 	}
 	return blocked, nil
+}
+
+func (s *RunLifecyclePostgresOwner) RunDispatchParked(ctx context.Context, runID string) (bool, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return false, err
+	}
+	return runstate.DispatchParked(ctx, s.backend, true, runID)
 }
 
 func (s *RunLifecyclePostgresOwner) runControlTransition(ctx context.Context, req runtimeruncontrol.TransitionRequest, action string) (runtimeruncontrol.StoreTransition, error) {
@@ -217,6 +225,9 @@ func (s *RunLifecyclePostgresOwner) continueRunControlTx(ctx context.Context, tx
 	if lifecycleState != runtimerunlifecycle.StatePaused || state.ControlStatus != "paused" {
 		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrNotPaused, RunID: state.RunID, CurrentStatus: state.Status}
 	}
+	if err := requireGenericContinueAuthority(ctx, tx, true, state); err != nil {
+		return runtimeruncontrol.State{}, err
+	}
 	if _, err := (postgresRunLifecycleMutation{store: s, tx: tx, attempt: attempt}).TransitionActive(ctx, runtimerunlifecycle.ActiveTransitionRequest{
 		RunID: state.RunID,
 		State: runtimerunlifecycle.StateRunning,
@@ -242,6 +253,22 @@ func (s *RunLifecyclePostgresOwner) continueRunControlTx(ctx context.Context, tx
 	state.ControlledBy = req.ControlledBy
 	state.UpdatedAt = req.Now.UTC()
 	return state, nil
+}
+
+func requireGenericContinueAuthority(ctx context.Context, tx *sql.Tx, postgres bool, state runtimeruncontrol.State) error {
+	// Standing writers lock their parent before this run. Do not acquire that
+	// parent here: its canonical read is protected by our existing run fence.
+	disposition, err := storestandingdisposition.ReadByRun(ctx, tx, postgres, state.RunID)
+	if err != nil {
+		return err
+	}
+	if disposition.UsesGenericRecovery() || disposition.Executable() {
+		return nil
+	}
+	return &runtimeruncontrol.StateError{
+		Err: runtimeruncontrol.ErrNotPaused, RunID: state.RunID, CurrentStatus: state.Status,
+		Detail: fmt.Sprintf("owned by standing service %s; %s", disposition.ServiceID, disposition.RunControlGuidance()),
+	}
 }
 
 func (s *RunLifecyclePostgresOwner) stopRunControlTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, state runtimeruncontrol.State, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {

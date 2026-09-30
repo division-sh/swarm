@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	runtimestanding "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -221,10 +222,10 @@ type flowActivationTestInstanceStore struct {
 	lifecycleModes             []executionmode.Mode
 }
 
-type flowActivationStandingRestarts map[string]runtimepipeline.StandingRestartDispositionKind
+type flowActivationStandingRestarts map[string]runtimestanding.StandingRestartDispositionKind
 
-func (s flowActivationStandingRestarts) StandingRunRestartDisposition(_ context.Context, runID string) (runtimepipeline.StandingRestartDisposition, error) {
-	return runtimepipeline.StandingRestartDisposition{Kind: s[strings.TrimSpace(runID)]}, nil
+func (s flowActivationStandingRestarts) StandingRunRestartDisposition(_ context.Context, runID string) (runtimestanding.StandingRestartDisposition, error) {
+	return runtimestanding.StandingRestartDisposition{Kind: s[strings.TrimSpace(runID)]}, nil
 }
 
 type flowActivationTestStore struct {
@@ -3672,10 +3673,10 @@ func TestRecoverableStateSnapshotIncludesReadinessOnlyPendingWork(t *testing.T) 
 func TestDynamicFlowRuntimeReadinessExcludesNonExecutableStandingRuns(t *testing.T) {
 	bundleHash := authorActivityTestSourceArtifactFact.BundleHash()
 	runKinds := flowActivationStandingRestarts{
-		uuid.NewString(): runtimepipeline.StandingRestartOrdinary,
-		uuid.NewString(): runtimepipeline.StandingRestartActiveIntrinsic,
-		uuid.NewString(): runtimepipeline.StandingRestartSuspended,
-		uuid.NewString(): runtimepipeline.StandingRestartOrphaned,
+		uuid.NewString(): runtimestanding.StandingRestartOrdinary,
+		uuid.NewString(): runtimestanding.StandingRestartActiveIntrinsic,
+		uuid.NewString(): runtimestanding.StandingRestartSuspended,
+		uuid.NewString(): runtimestanding.StandingRestartOrphaned,
 	}
 	instances := &flowActivationTestInstanceStore{readiness: map[string]runtimepipeline.DynamicFlowRuntimeReadiness{}}
 	index := 0
@@ -3706,7 +3707,7 @@ func TestDynamicFlowRuntimeReadinessExcludesNonExecutableStandingRuns(t *testing
 	}
 	for _, item := range projection.CurrentPending {
 		kind := runKinds[item.Plan.RunID]
-		if kind != runtimepipeline.StandingRestartOrdinary && kind != runtimepipeline.StandingRestartActiveIntrinsic {
+		if kind != runtimestanding.StandingRestartOrdinary && kind != runtimestanding.StandingRestartActiveIntrinsic {
 			t.Fatalf("non-executable readiness escaped filter: run=%s kind=%s", item.Plan.RunID, kind)
 		}
 	}

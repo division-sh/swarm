@@ -35,6 +35,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
@@ -369,6 +370,7 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 		agentID    string
 		nodeID     string
 		state      string
+		paused     bool
 		foreign    bool
 		wantDenied bool
 	}{
@@ -377,6 +379,11 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 		{name: "future_failed", agentID: "startup-agent", state: "future_failed", wantDenied: true},
 		{name: "busy_in_progress", agentID: "startup-agent", state: "busy", wantDenied: true},
 		{name: "reclaimable_in_progress", nodeID: "complete-task", state: "reclaimable", wantDenied: true},
+		{name: "paused_pending_agent", agentID: "startup-agent", state: "pending", paused: true, wantDenied: true},
+		{name: "paused_pending_node", nodeID: "complete-task", state: "pending", paused: true, wantDenied: true},
+		{name: "paused_future_failed", agentID: "startup-agent", state: "future_failed", paused: true, wantDenied: true},
+		{name: "paused_busy_in_progress", agentID: "startup-agent", state: "busy", paused: true, wantDenied: true},
+		{name: "paused_reclaimable_in_progress", nodeID: "complete-task", state: "reclaimable", paused: true, wantDenied: true},
 		{name: "foreign_bundle_excluded", agentID: "foreign-agent", state: "pending", foreign: true},
 		{name: "empty_control"},
 	}
@@ -473,6 +480,16 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 						}
 					}
 
+					if test.paused {
+						controlStore, ok := selected.(runtimeruncontrol.Store)
+						if !ok {
+							t.Fatalf("selected store %T lacks run control", selected)
+						}
+						control := runtimeruncontrol.NewController(controlStore, nil, runtimeruncontrol.Options{})
+						if _, err := control.Pause(currentCtx, runtimeruncontrol.TransitionRequest{RunID: currentRunID, Reason: "operator-pause"}); err != nil {
+							t.Fatalf("pause retained delivery debt: %v", err)
+						}
+					}
 					workflowPersistence := runtimepipeline.NewWorkflowPersistence(selected)
 					if backend == "sqlite" {
 						workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected)
@@ -775,7 +792,7 @@ func startNodeDeliveryContinuation(
 	ctx context.Context,
 	eventBus *runtimebus.EventBus,
 	selected runtimedelivery.Store,
-	restarts runtimepipeline.StandingRestartDispositionReader,
+	restarts runtimerunlifecycle.StandingRestartDispositionReader,
 	workOwner worklifetime.Occurrence,
 	eventID string,
 	route events.DeliveryRoute,

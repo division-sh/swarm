@@ -310,7 +310,7 @@ func TestTerminalStandingGenerationDoesNotSeedCompletionCandidateParity(t *testi
 				t.Fatalf("reconcile terminal standing generation: %v", err)
 			}
 			if stopped.Transition != "revised" || stopped.RunID != fresh.RunID || stopped.Generation != fresh.Generation || stopped.BundleHash != secondHash ||
-				stopped.RestartDisposition.Kind != runtimepipeline.StandingRestartTerminalDeclared {
+				stopped.RestartDisposition.Kind != runtimerunlifecycle.StandingRestartTerminalDeclared {
 				t.Fatalf("terminal standing result = %#v", stopped)
 			}
 			awaitRunLifecycleState(t, candidateStore, fresh.RunID, runtimerunlifecycle.StateCancelled)
@@ -362,7 +362,7 @@ func TestTerminalStandingGenerationDoesNotSeedCompletionCandidateParity(t *testi
 			}
 			if suspendedStopped.Transition != "revised" || suspendedStopped.EffectiveState != "suspended" || suspendedStopped.BundleHash != secondHash ||
 				suspendedStopped.RunID != suspendedFresh.RunID || suspendedStopped.Generation != suspendedFresh.Generation ||
-				suspendedStopped.RestartDisposition.Kind != runtimepipeline.StandingRestartTerminalDeclared {
+				suspendedStopped.RestartDisposition.Kind != runtimerunlifecycle.StandingRestartTerminalDeclared {
 				t.Fatalf("terminal suspended result = %#v", suspendedStopped)
 			}
 			state, duePresent, _ = loadRunLifecycleCandidateFacts(t, fixture, ctx, suspendedFresh.RunID)

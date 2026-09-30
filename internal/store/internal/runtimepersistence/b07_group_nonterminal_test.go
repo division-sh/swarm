@@ -105,6 +105,10 @@ func (g *b07SecondMemberGate) QueueableRunDispatchBlocked(ctx context.Context, _
 	return g.QueueableIngressPaused(ctx)
 }
 
+func (*b07SecondMemberGate) QueueableRunDispatchParked(context.Context, string) (bool, error) {
+	return false, nil
+}
+
 type b07CountDispatch struct{ calls map[string]int }
 
 func (p *b07CountDispatch) Intercept(_ context.Context, event events.Event) (bool, []events.Event, pipelineobligation.ExecutionOutcome, error) {

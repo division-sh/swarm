@@ -151,8 +151,8 @@ func (unexpectedDurableTestRoles) RecordDeadLetterOutcome(context.Context, runti
 func (unexpectedDurableTestRoles) LoadRunOrigin(context.Context, string) (runtimerunlifecycle.RunOrigin, error) {
 	return runtimerunlifecycle.ScenarioSetupRunOrigin(), nil
 }
-func (unexpectedDurableTestRoles) StandingRunRestartDisposition(context.Context, string) (runtimepipeline.StandingRestartDisposition, error) {
-	return runtimepipeline.ClassifyStandingRestart(runtimepipeline.StandingRestartFact{})
+func (unexpectedDurableTestRoles) StandingRunRestartDisposition(context.Context, string) (runtimerunlifecycle.StandingRestartDisposition, error) {
+	return runtimerunlifecycle.ClassifyStandingRestart(runtimerunlifecycle.StandingRestartFact{})
 }
 
 // ExactDurableTestDependencies projects synthetic test stores into the same
@@ -255,7 +255,7 @@ func DurableTestDependencyProjection(selected any) DurableDependencies {
 	if role, ok := selected.(RunOriginReader); ok {
 		deps.RunOrigins = role
 	}
-	if role, ok := selected.(runtimepipeline.StandingRestartDispositionReader); ok {
+	if role, ok := selected.(runtimerunlifecycle.StandingRestartDispositionReader); ok {
 		deps.StandingRestarts = role
 	}
 	return deps

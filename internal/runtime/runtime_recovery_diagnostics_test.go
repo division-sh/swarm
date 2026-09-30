@@ -33,6 +33,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimestanding "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/testutil"
 )
@@ -75,8 +76,8 @@ func (startupRecoveryWorkflowOwner) ListActiveWorkflowTimerActivationsForRoute(c
 	return nil, nil
 }
 
-func (startupRecoveryWorkflowOwner) StandingRunRestartDisposition(context.Context, string) (runtimepipeline.StandingRestartDisposition, error) {
-	return runtimepipeline.ClassifyStandingRestart(runtimepipeline.StandingRestartFact{})
+func (startupRecoveryWorkflowOwner) StandingRunRestartDisposition(context.Context, string) (runtimestanding.StandingRestartDisposition, error) {
+	return runtimestanding.ClassifyStandingRestart(runtimestanding.StandingRestartFact{})
 }
 
 func (startupRecoveryWorkflowOwner) ClaimFanOutIntent(context.Context, runtimepipeline.FanOutClaimRequest) (runtimefanout.Intent, runtimefanout.Claim, bool, error) {
@@ -809,14 +810,14 @@ func TestStartupRecoveryDecisionAdmissionMatrix(t *testing.T) {
 	}
 }
 
-type startupRecoveryDispositionMap map[string]runtimepipeline.StandingRestartDispositionKind
+type startupRecoveryDispositionMap map[string]runtimestanding.StandingRestartDispositionKind
 
-func (m startupRecoveryDispositionMap) StandingRunRestartDisposition(_ context.Context, runID string) (runtimepipeline.StandingRestartDisposition, error) {
+func (m startupRecoveryDispositionMap) StandingRunRestartDisposition(_ context.Context, runID string) (runtimestanding.StandingRestartDisposition, error) {
 	kind, ok := m[runID]
 	if !ok {
-		return runtimepipeline.StandingRestartDisposition{}, errors.New("missing test standing restart disposition")
+		return runtimestanding.StandingRestartDisposition{}, errors.New("missing test standing restart disposition")
 	}
-	return runtimepipeline.StandingRestartDisposition{Kind: kind}, nil
+	return runtimestanding.StandingRestartDisposition{Kind: kind}, nil
 }
 
 func TestDeliveryRecoveryInventoryPartitionsEveryRunByStandingDisposition(t *testing.T) {
@@ -830,13 +831,13 @@ func TestDeliveryRecoveryInventoryPartitionsEveryRunByStandingDisposition(t *tes
 		{RunID: "invalid", Pending: 7},
 	}}
 	restarts := startupRecoveryDispositionMap{
-		"ordinary":          runtimepipeline.StandingRestartOrdinary,
-		"active":            runtimepipeline.StandingRestartActiveIntrinsic,
-		"suspended":         runtimepipeline.StandingRestartSuspended,
-		"orphaned":          runtimepipeline.StandingRestartOrphaned,
-		"terminal-declared": runtimepipeline.StandingRestartTerminalDeclared,
-		"terminal-orphaned": runtimepipeline.StandingRestartTerminalOrphaned,
-		"invalid":           runtimepipeline.StandingRestartInvalidCurrent,
+		"ordinary":          runtimestanding.StandingRestartOrdinary,
+		"active":            runtimestanding.StandingRestartActiveIntrinsic,
+		"suspended":         runtimestanding.StandingRestartSuspended,
+		"orphaned":          runtimestanding.StandingRestartOrphaned,
+		"terminal-declared": runtimestanding.StandingRestartTerminalDeclared,
+		"terminal-orphaned": runtimestanding.StandingRestartTerminalOrphaned,
+		"invalid":           runtimestanding.StandingRestartInvalidCurrent,
 	}
 
 	blocking, standing, err := partitionDeliveryRecoveryInventory(context.Background(), inventory, restarts)
