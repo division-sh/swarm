@@ -27,7 +27,7 @@ func TestPersistedAgentReadinessFieldsBothStores(t *testing.T) {
 			cfg := withRuntimePersistenceTestIntent(t, actors.AgentConfig{
 				ID: "readiness-fields", Identity: testAgentIdentity(t, "readiness-fields", "review/item"),
 				ExecutionMode: "live", Role: "worker", Type: "worker", Model: "regular", LLMBackend: "claude_cli",
-				Memory: agentmemory.Authored(false), FlowPath: "review/item",
+				Memory: agentmemory.Plan{Enabled: false}, FlowPath: "review/item",
 				FlowDataAccess: []string{"profile.md"}, BudgetEnvelope: 1.25,
 				Config: json.RawMessage(`{}`),
 			})
