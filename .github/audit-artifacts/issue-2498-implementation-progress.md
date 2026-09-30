@@ -114,8 +114,19 @@ events existed. This concurrent run earns no safety closure. Isolated matched
 candidate/master reverse-100 controls pass (20.541s/24.517s total; reverse
 settlement 10.693s/14.433s). That comparison does not reconstruct the initial
 failure or establish a performance fix. The failure receipt is retained; no
-deadline, workload or runtime performance owner was changed. Complete isolated
-six-variant and final default qualification remain required.
+deadline, workload or runtime performance owner was changed. The complete
+isolated six-variant corpus subsequently passes both stores (54.633s), without
+changing those limits. That pass qualifies this execution, not a fix or causal
+classification of the earlier deadline failure. Final default qualification
+remains required.
+
+The served lifecycle proof now also makes all three authenticated public commands
+refuse fenced, durable-suspended/live-child and durable-active/missing-child
+compositions, without changing the exact service/run/generation/state. Its explicit
+test setup uses the existing selected-store writers and actual child owner;
+runtime.nuke reconstructs the next fresh child before the held shutdown control.
+PASS 10.755s, both stores. The initial setup lacked the canonical author-activity
+scope and was corrected as a test precondition, not a production fallback.
 
 Master was re-fetched and remains `abdb07bfe`. API-spec passes (4.151s). None of
 these additional receipts is a final Post-Implementation Proof Audit or PR
@@ -129,8 +140,9 @@ readiness claim.
   every invalid composition or race.
 - Execute the original P01-P16/RB1-RB4 preserved controls and full numeric/
   paired-agent M01-M23 corpus and its unchanged burst/safety controls.
-  U1-U5 admitted behavioral mutation receipts remain required; positive timer,
-  permanent-receipt and field-bearing restart rows above do not pay mutation credit.
+  The separate nine-arm U1-U5 admitted behavioral mutation receipts are complete;
+  positive timer, permanent-receipt and field-bearing restart rows alone do not
+  pay that credit.
 - Run final default `go run ./cmd/swarm-test` on the reconciled committed head,
   preserve failure evidence, and publish the complete manifestation proof audit
   before requesting PR review. No `--full` or direct whole-tree go test used.
