@@ -567,6 +567,35 @@ func TestChannelDeliveryCardActionAdmissionSelectedStoreParity(t *testing.T) {
 			quoted.MessageReference = `{"id":93}`
 			quoted.ReplyToReference = `{"id":91}`
 			admitText(quoted)
+			if drafts, _, err := selected.ListCurrentChannelInputDrafts(ctx, quoted, now.Add(time.Minute), "", 2); err != nil || len(drafts) != 0 {
+				t.Fatalf("unsettled prompt retained quoted-input authority: %+v, %v", drafts, err)
+			}
+			editID, err := runtimeeffects.ChannelDeliveryOperationID(candidate.DeliveryID, prompted.RenderID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			editAuthority := authority
+			editAuthority.ID = editID
+			editAuthority.ChannelDelivery.EffectOperationID = editID
+			editAuthority.ChannelDelivery.RenderID = prompted.RenderID
+			editAuthority.ChannelDelivery.RenderHash = prompted.Frozen.Hash
+			editAuthority.ChannelDelivery.PreviousReceiptOperationID = operationID
+			editCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(
+				testAuthorActivityContextForBundle(activation.Coordinate.BundleHash), editAuthority),
+				runtimeeffects.NewController(selected).WithExecutionPosture(executionposture.Live))
+			edit, err := runtimeeffects.BeginChannelDelivery(editCtx, []byte("prompt edit"), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := edit.MarkLaunched(editCtx); err != nil {
+				t.Fatal(err)
+			}
+			if err := edit.MarkResponseObserved(editCtx, map[string]any{"provider": "edited"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := edit.Succeed(editCtx, map[string]any{"projected_output": map[string]any{"delivery_receipt": map[string]any{"id": 91}}}); err != nil {
+				t.Fatal(err)
+			}
 			if drafts, next, err := selected.ListCurrentChannelInputDrafts(ctx, quoted, now.Add(time.Minute), "", 2); err != nil || len(drafts) != 1 || drafts[0].CardID != card.CardID || next != "" {
 				t.Fatalf("quoted draft candidates = %+v next=%q err=%v", drafts, next, err)
 			}
