@@ -1,0 +1,14 @@
+item:
+  batch_id: text
+  item_id: text
+  label: text
+  region: text
+  source_ref: text
+  openings: integer
+  tags: text
+  origin: text
+  score: numeric
+  qualified: boolean
+  match_score: integer
+  verdict: text
+  matches_summary: text
