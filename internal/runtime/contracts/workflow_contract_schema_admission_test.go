@@ -132,6 +132,49 @@ func TestSchemaAdmissionDiskCatalogRetainedParity(t *testing.T) {
 	}
 }
 
+func TestSchemaAdmissionInvalidSourceParity(t *testing.T) {
+	for _, source := range []string{
+		"tool_surface: null\n",
+		"stages: {waiting: {initial: 'true'}}\n",
+		"instance_variables: {variables: {note: {type: text, length: {min: -0.5}}}}\n",
+		"ingress: {alias: hooks, providers: [{provider: partner, admission: {kind: pack, event: ''}}]}\n",
+	} {
+		t.Run(source, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "schema.yaml"), []byte(source), 0600); err != nil {
+				t.Fatal(err)
+			}
+			repo := repoRootForContractsTest(t)
+			_, diskErr := LoadWorkflowContractBundleWithOverrides(repo, dir, DefaultPlatformSpecFile(repo))
+			if diskErr == nil {
+				t.Fatal("invalid source admitted from disk")
+			}
+			artifact, err := sourceartifact.AdmitDirectory(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fact, err := sourceartifact.PersistedFromArtifact(artifact, time.Unix(1, 0))
+			if err != nil {
+				t.Fatal(err)
+			}
+			catalog, err := fact.Decode()
+			if err != nil {
+				t.Fatal(err)
+			}
+			retained, err := sourceartifact.DecodeLogical(catalog.LogicalBlob())
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, candidate := range []*sourceartifact.AdmittedSourceArtifact{catalog, retained} {
+				_, err := LoadWorkflowContractBundleFromArtifact(repo, candidate, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
+				if err == nil || err.Error() != diskErr.Error() || !bytes.Equal(candidate.LogicalBlob(), artifact.LogicalBlob()) || candidate.BundleHash() != artifact.BundleHash() {
+					t.Fatalf("source or refusal changed: disk=%v retained=%v", diskErr, err)
+				}
+			}
+		})
+	}
+}
+
 func TestSchemaAdmissionProvenanceCompositionAndIsolation(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, filepath.Join(repo, "examples/routing/template-create-minted-key"), DefaultPlatformSpecFile(repo))
