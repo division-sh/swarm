@@ -14,7 +14,7 @@ func TestChannelDeliveryHumanTemporalReceiptPublicJourney(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		for _, transition := range []string{"defer_restart", "expire_restart", "stop_supersedes"} {
 			t.Run(string(backend)+"/"+transition, func(t *testing.T) {
-				h, db, bundleHash := startChannelAnchorJourney(t, backend, "temporal-token")
+				h, db, bundleHash := startChannelAnchorJourney(t, backend, "temporal-token", false)
 				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 					"event_name": "work.requested", "bundle_hash": bundleHash,
 					"payload": map[string]any{"seed": true}, "idempotency_key": "temporal-seed",
