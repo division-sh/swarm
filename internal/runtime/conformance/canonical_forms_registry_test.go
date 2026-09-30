@@ -794,9 +794,11 @@ func TestCanonicalFormsRegistryPinsWave2RetirementsAndOwners(t *testing.T) {
 func TestCanonicalFormsRegistryWave2ProductionConsumersUseCompiledPins(t *testing.T) {
 	root := conformanceRepoRoot(t)
 	allowedAdmissionOwners := map[string]struct{}{
-		"internal/runtime/contracts/event_schema_ownership.go":      {},
-		"internal/runtime/contracts/workflow_contract_connect.go":   {},
-		"internal/runtime/contracts/workflow_contract_semantics.go": {},
+		"internal/runtime/contracts/event_schema_ownership.go":                 {},
+		"internal/runtime/contracts/workflow_contract_connect.go":              {},
+		"internal/runtime/contracts/workflow_contract_schema_value.go":         {},
+		"internal/runtime/contracts/workflow_contract_schema_routing_value.go": {},
+		"internal/runtime/contracts/workflow_contract_semantics.go":            {},
 	}
 	var bypasses []string
 	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal", "runtime"), func(path string, entry os.DirEntry, walkErr error) error {
