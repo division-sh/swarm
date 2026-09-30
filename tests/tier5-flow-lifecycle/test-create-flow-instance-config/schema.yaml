@@ -1,7 +1,4 @@
-stages:
-  idle: {initial: true}
-  spawned: {}
-  done: {terminal: true}
+stages: []
 pins:
   inputs:
     events: [flow.spawn_with_config]

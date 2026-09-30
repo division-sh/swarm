@@ -16,7 +16,7 @@ trigger:
 
 expected:
 
-  entity_state: spawned
+  entity_state: pending
   dead_letter: true
   emitted_events:
     - flow.spawned

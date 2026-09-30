@@ -9,4 +9,3 @@ test-node:
         fields:
           worker_id: ${payload.instance_id}
           config: ${payload.config}
-      advances_to: spawned

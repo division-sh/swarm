@@ -161,8 +161,7 @@ func CopyInboundAdmissionPolicyMatrix(t testing.TB) string {
 		"matrix/schema.yaml": `name: matrix
 mode: singleton
 activation: standing
-stages:
-  active: {initial: true}
+stages: []
 ingress:
   alias: matrix
   providers:

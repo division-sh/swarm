@@ -2,7 +2,6 @@ name: test-compose-clear-gates-reenter
 stages:
   reviewing: {initial: true}
   approved: {terminal: true}
-  done: {terminal: true}
 pins:
   inputs:
     events: [review.done, review.insufficient]

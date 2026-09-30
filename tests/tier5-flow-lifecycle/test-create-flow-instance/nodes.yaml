@@ -8,4 +8,3 @@ test-node:
         event: flow.spawned
         fields:
           worker_id: ${payload.worker_id}
-      advances_to: spawned

@@ -341,6 +341,14 @@ func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, bac
 	if transcript != nil {
 		startedAt = transcript.observationBoundary()
 	}
+	graph, ok := semanticview.WorkflowStageTopology(semanticview.Wrap(bundle), ".")
+	if !ok {
+		t.Fatal("runtime harness requires the compiled root stage catalog")
+	}
+	initial, err := graph.InitialStoredStage()
+	if err != nil {
+		t.Fatalf("runtime harness initial stored stage: %v", err)
+	}
 	h := &runtimeHarness{
 		t:               t,
 		fixtureRoot:     fixtureRoot,
@@ -357,7 +365,7 @@ func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, bac
 		workflow:        rt.Pipeline,
 		llm:             llmRuntime,
 		bundle:          bundle,
-		initialState:    bundle.WorkflowInitialStage(),
+		initialState:    initial.ID(),
 		startedAt:       startedAt,
 		publishedIDs:    map[string]struct{}{},
 		publishedOrder:  []string{},
