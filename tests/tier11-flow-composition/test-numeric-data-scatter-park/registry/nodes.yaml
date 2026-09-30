@@ -1,0 +1,69 @@
+registry-intake:
+  execution_type: system_node
+  subscribes_to: [item.registered]
+  event_handlers:
+    item.registered:
+      data_accumulation:
+        writes:
+          - source_field: batch_id
+            target_field: batch_id
+          - source_field: item_id
+            target_field: item_id
+          - source_field: label
+            target_field: label
+          - source_field: region
+            target_field: region
+          - source_field: source_ref
+            target_field: source_ref
+          - source_field: openings
+            target_field: openings
+          - source_field: tags
+            target_field: tags
+          - source_field: origin
+            target_field: origin
+          - source_field: score
+            target_field: score
+          - source_field: qualified
+            target_field: qualified
+      rules:
+        - id: qualified_for_investigation
+          when: "payload.qualified == true && policy.investigate == true"
+          advances_to: investigating
+          emit:
+            event: investigate.requested
+            fields:
+              item_id: payload.item_id
+        - id: parked
+          else: true
+registry-finalize:
+  execution_type: system_node
+  subscribes_to: [assessment.reported, investigation.timed_out]
+  event_handlers:
+    assessment.reported:
+      guard:
+        id: still_investigating
+        check: "_entity.current_state == 'investigating'"
+        on_fail: discard
+      data_accumulation:
+        writes:
+          - source_field: match_score
+            target_field: match_score
+          - source_field: verdict
+            target_field: verdict
+          - source_field: matches_summary
+            target_field: matches_summary
+      advances_to: assessed
+    investigation.timed_out:
+      guard:
+        id: still_investigating_timeout
+        check: "_entity.current_state == 'investigating'"
+        on_fail: discard
+      data_accumulation:
+        writes:
+          - target_field: match_score
+            value: 0
+          - target_field: verdict
+            value: timed_out
+          - target_field: matches_summary
+            value: Investigation timed out before the agent reported.
+      advances_to: assessed

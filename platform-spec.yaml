@@ -12778,7 +12778,7 @@ flow_model:
       resolved_input_pin:
         location: schema.yaml pins.inputs.events
         canonical_form: |
-          An input event pin MAY be authored as an object `{event, source, resolution, initialize}` only when non-default choices are required. Otherwise it is one scalar exact local event identity. `source` is optional and is a closed enum of `external` or validation-only `harness`. For a template receiver, `resolution.mode` owns create/select/select-or-create behavior and `resolution.from` owns a supported exceptional typed identity source. `initialize` is allowed only with create or select-or-create and never supplies an alternate instance identity.
+          An input event pin MAY be authored as an object `{event, source, resolution, initialize}` only when non-default choices are required. Otherwise it is one scalar exact local event identity. `source` is optional and its only current value is validation-only `harness`; `source: external` is retired on presence without compatibility. For a template receiver, `resolution.mode` owns create/select/select-or-create behavior and `resolution.from` owns a supported exceptional typed identity source. `initialize` is allowed only with create or select-or-create and never supplies an alternate instance identity.
         scalar_form: |
           A scalar input event pin is valid when no source or resolution choice is needed. A scalar input pin on a template receiver is not a selector.
         receiver_initialization:
