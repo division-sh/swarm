@@ -56,13 +56,14 @@ func deploymentResourceSourceWithAgent(t *testing.T, includeAgent bool) semantic
 }
 
 type deploymentResourceFixture struct {
-	selected    notifyAllChildrenStore
-	db          *sql.DB
-	postgresDSN string
-	source      semanticview.Source
-	runtime     notifyAllChildrenRuntime
-	topology    *notifyAllChildrenProcessTopology
-	ctx         context.Context
+	selected               notifyAllChildrenStore
+	db                     *sql.DB
+	postgresDSN            string
+	source                 semanticview.Source
+	runtime                notifyAllChildrenRuntime
+	topology               *notifyAllChildrenProcessTopology
+	ctx                    context.Context
+	diagnosticTransactions *storetest.TransactionCollector
 }
 
 type deploymentFanOutDiagnostic struct {

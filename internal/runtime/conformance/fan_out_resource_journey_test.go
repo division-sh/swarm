@@ -32,6 +32,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/google/uuid"
 )
@@ -459,6 +460,34 @@ func startDeploymentProgressProbe(t *testing.T, f *deploymentResourceFixture, ru
 			} else {
 				t.Logf("deployment independent progress elapsed=%s query=%s status=%s cursor=%d/%d", time.Since(started), time.Since(sampleStarted), status, cursor, cardinality)
 			}
+			var pending, inProgress, delivered, paused, standing int
+			err = db.QueryRowContext(sampleCtx, `SELECT
+			 (SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status='pending'),
+			 (SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status='in_progress'),
+			 (SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status='delivered'),
+			 (SELECT COUNT(*) FROM runs r LEFT JOIN run_control_state c ON c.run_id=r.run_id WHERE r.run_id=$1 AND (r.status<>'running' OR COALESCE(c.control_status,'running')<>'running')),
+			 (SELECT COUNT(*) FROM standing_services WHERE current_run_id=$1)`, runID).Scan(&pending, &inProgress, &delivered, &paused, &standing)
+			t.Logf("guard diagnostic trajectory elapsed=%s cursor=%d pending=%d in_progress=%d delivered=%d not_running=%d standing=%d err=%v", time.Since(started), cursor, pending, inProgress, delivered, paused, standing, err)
+			if err == nil && (paused != 0 || standing != 0) {
+				t.Errorf("diagnostic workload is not ordinary unpaused work")
+			}
+			logGuardAttribution(t, f, "periodic")
+			blockingRows, blockingErr := db.QueryContext(sampleCtx, `SELECT w.pid, b.pid, COALESCE(w.wait_event,''), EXTRACT(EPOCH FROM clock_timestamp()-w.xact_start)::float8, EXTRACT(EPOCH FROM clock_timestamp()-b.xact_start)::float8, LEFT(w.query,700), LEFT(b.query,700)
+			 FROM pg_stat_activity w CROSS JOIN LATERAL unnest(pg_blocking_pids(w.pid)) p(pid)
+			 JOIN pg_stat_activity b ON b.pid=p.pid WHERE w.datname=current_database() ORDER BY w.pid,b.pid`)
+			if blockingErr == nil {
+				for blockingRows.Next() {
+					var waiter, blocker int
+					var event, waitingSQL, blockingSQL string
+					var waitingAge, blockingAge sql.NullFloat64
+					if err := blockingRows.Scan(&waiter, &blocker, &event, &waitingAge, &blockingAge, &waitingSQL, &blockingSQL); err == nil {
+						t.Logf("guard diagnostic blocker elapsed=%s waiter=%d blocker=%d wait=%s waiter_xact_s=%v blocker_xact_s=%v waiting_sql=%q blocking_sql=%q", time.Since(started), waiter, blocker, event, waitingAge, blockingAge, waitingSQL, blockingSQL)
+					}
+				}
+				blockingRows.Close()
+			} else {
+				t.Logf("guard diagnostic blocker query: %v", blockingErr)
+			}
 			rows, err := db.QueryContext(sampleCtx, `SELECT COALESCE(wait_event_type,'none'), COALESCE(wait_event,'none'), COUNT(*) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND state<>'idle' GROUP BY 1,2 ORDER BY 1,2`)
 			if err == nil {
 				var waits []string
@@ -571,6 +600,8 @@ func TestVolumeFanOutExactJobflow1362ImportRouteAndSettleBothStores(t *testing.T
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newDeploymentResourceFixtureWithAgent(t, backend, false)
+			f.diagnosticTransactions = storetest.CollectTransactions(t, f.selected, storetest.TransactionProbeOptions{})
+			defer logGuardAttribution(t, f, "final")
 			input := jobflowDeploymentRows(t)
 			_, compiled := deploymentResourceVersion(t, f, input)
 			if len(compiled.Rows) != 1362 {
@@ -582,6 +613,11 @@ func TestVolumeFanOutExactJobflow1362ImportRouteAndSettleBothStores(t *testing.T
 			}
 			server := f.operatorServer(t)
 			runID := startDeploymentResourceRun(t, f, server, "--data", "portfolio/account.registered="+file)
+			var runState, control string
+			var standing int
+			if err := f.db.QueryRowContext(f.ctx, `SELECT r.status, COALESCE(c.control_status,'running'), (SELECT COUNT(*) FROM standing_services WHERE current_run_id=r.run_id) FROM runs r LEFT JOIN run_control_state c ON c.run_id=r.run_id WHERE r.run_id=$1`, runID).Scan(&runState, &control, &standing); err != nil || runState != "running" || control != "running" || standing != 0 {
+				t.Fatalf("diagnostic workload must be ordinary unpaused work: status=%s control=%s standing=%d err=%v", runState, control, standing, err)
+			}
 			assertDeploymentResourceRows(t, f, server, runID, compiled)
 			old := f.runtime
 			join := beginServingLifetimeJoin(old, nil)
@@ -592,6 +628,19 @@ func TestVolumeFanOutExactJobflow1362ImportRouteAndSettleBothStores(t *testing.T
 			t.Logf("%s: %d document events, receiver instances, settlements and public rows survived restart", backend, len(compiled.Rows))
 		})
 	}
+}
+
+func logGuardAttribution(t *testing.T, f *deploymentResourceFixture, phase string) {
+	if f.diagnosticTransactions == nil {
+		return
+	}
+	snapshot := f.diagnosticTransactions.Snapshot()
+	encoded, err := json.Marshal(map[string]any{"phase": phase, "guard": storetest.GuardDiagnosticSnapshot(), "transactions": snapshot.ByOperation, "total": snapshot.Total, "active": snapshot.Active})
+	if err != nil {
+		t.Errorf("encode attribution: %v", err)
+		return
+	}
+	t.Logf("guard diagnostic metrics %s", encoded)
 }
 
 func TestDeploymentResourceRunStartPinDocumentRowsBothStores(t *testing.T) {

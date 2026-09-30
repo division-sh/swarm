@@ -17,6 +17,8 @@ type TransactionRevisionCounts = transactiontest.RevisionCounts
 type TransactionActiveClass = transactiontest.ActiveClass
 type TransactionActivePhase = transactiontest.ActivePhase
 
+var GuardDiagnosticSnapshot = transactiontest.GuardDiagnosticSnapshot
+
 const (
 	DelayAllCommits                         = transactiontest.DelayAllCommits
 	DelayAllWrites                          = transactiontest.DelayAllWrites

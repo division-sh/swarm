@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/standingdisposition"
+	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
 const ActiveStateSQLValues = "'" +
@@ -39,6 +41,8 @@ type RowQueryer interface {
 // The caller takes the existing run fence before using this to admit a new claim.
 // Active remains broader: paused topology and already-owned settlement survive.
 func DispatchParked(ctx context.Context, q RowQueryer, postgres bool, runID string) (bool, error) {
+	ctx, finishDiagnostic := transactiontest.BeginGuardDiagnostic(ctx)
+	defer finishDiagnostic()
 	if strings.TrimSpace(runID) == "" {
 		return false, nil
 	}
@@ -53,7 +57,10 @@ func DispatchParked(ctx context.Context, q RowQueryer, postgres bool, runID stri
 	}
 	var status, control, bundleHash string
 	var sourcePresent bool
-	if err := q.QueryRowContext(ctx, query, runID).Scan(&status, &control, &bundleHash, &sourcePresent); err != nil {
+	sqlStarted := time.Now()
+	sqlErr := q.QueryRowContext(ctx, query, runID).Scan(&status, &control, &bundleHash, &sourcePresent)
+	transactiontest.RecordGuardDiagnosticSQL(ctx, false, time.Since(sqlStarted))
+	if err := sqlErr; err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, &runtimerunlifecycle.RunNotFoundError{RunID: runID}
 		}

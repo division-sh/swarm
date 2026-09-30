@@ -7,8 +7,10 @@ import (
 	"fmt"
 	runtimestanding "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"strings"
+	"time"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	"github.com/google/uuid"
 )
 
@@ -69,12 +71,14 @@ func ReadByRun(ctx context.Context, q queryRower, postgres bool, runID string) (
 	var flowPath, instanceID, entityID, originKind, originServiceID string
 	var originGeneration int64
 	var owners, generationRelations int
+	sqlStarted := time.Now()
 	err := q.QueryRowContext(ctx, query, args...).Scan(
 		&fact.ServiceID, &flowPath, &instanceID, &entityID,
 		&fact.RunID, &fact.Generation, &fact.DeclarationPresent,
 		&fact.EffectiveState, &fact.OperatorOverride, &fact.RunState,
 		&originKind, &originServiceID, &originGeneration, &owners, &generationRelations,
 	)
+	transactiontest.RecordGuardDiagnosticSQL(ctx, true, time.Since(sqlStarted))
 	if errors.Is(err, sql.ErrNoRows) {
 		return runtimestanding.ClassifyStandingRestart(runtimestanding.StandingRestartFact{})
 	}

@@ -55,27 +55,29 @@ type Counts struct {
 	// Durations are summed wall time across attempts; concurrent spans overlap.
 	// PermitWait applies to SQLite writers. PoolWait excludes failed pool
 	// acquisitions; retained PostgreSQL sessions already own their connection.
-	BeginAttempts    uint64
-	Begun            uint64
-	ReadCommits      uint64
-	WriteCommits     uint64
-	Failed           uint64
-	CommitAttempts   uint64
-	CommitFailures   uint64
-	RollbackAttempts uint64
-	CleanupFailures  uint64
-	DelayedCommits   uint64
-	InjectedDelay    time.Duration
-	DelayDuration    time.Duration
-	PermitWait       time.Duration
-	PoolWait         time.Duration
-	BeginDuration    time.Duration
-	CommitDuration   time.Duration
-	CleanupDuration  time.Duration
-	Mutation         MutationCounts
-	Revision         RevisionCounts
-	FirstCommitAt    time.Time
-	LastCommitAt     time.Time
+	BeginAttempts     uint64
+	Begun             uint64
+	ReadCommits       uint64
+	WriteCommits      uint64
+	Failed            uint64
+	CommitAttempts    uint64
+	CommitFailures    uint64
+	RollbackAttempts  uint64
+	CleanupFailures   uint64
+	DelayedCommits    uint64
+	InjectedDelay     time.Duration
+	DelayDuration     time.Duration
+	PermitWait        time.Duration
+	PoolWait          time.Duration
+	BeginDuration     time.Duration
+	CommitDuration    time.Duration
+	OperationDuration time.Duration
+	HoldDuration      time.Duration
+	CleanupDuration   time.Duration
+	Mutation          MutationCounts
+	Revision          RevisionCounts
+	FirstCommitAt     time.Time
+	LastCommitAt      time.Time
 }
 
 type Snapshot struct {
@@ -157,6 +159,8 @@ type Attempt struct {
 	committedAt                                             time.Time
 	commitStarted                                           time.Time
 	commitDuration                                          time.Duration
+	operationStarted                                        time.Time
+	operationDuration                                       time.Duration
 	revisionMu                                              sync.Mutex
 	revision                                                RevisionCounts
 	mutationMu                                              sync.Mutex
@@ -207,6 +211,7 @@ func Mark(ctx context.Context, operation Operation) {
 func (a *Attempt) Begun() {
 	if a != nil {
 		a.begun = true
+		a.operationStarted = time.Now()
 		a.reclassify(PhaseOperation)
 	}
 }
@@ -232,6 +237,7 @@ func (a *Attempt) BeforeCommit() {
 	if a == nil {
 		return
 	}
+	a.operationDuration = time.Since(a.operationStarted)
 	op := a.operation.Load().(Operation)
 	options := a.collector.options
 	apply := options.DelayScope == DelayAllCommits ||
@@ -271,6 +277,17 @@ func (a *Attempt) Finish(finalErr error) {
 	if a == nil {
 		return
 	}
+	holdDuration := time.Duration(0)
+	if !a.operationStarted.IsZero() {
+		end := a.committedAt
+		if end.IsZero() {
+			end = time.Now()
+		}
+		holdDuration = end.Sub(a.operationStarted)
+		if a.operationDuration == 0 {
+			a.operationDuration = holdDuration
+		}
+	}
 	a.revisionMu.Lock()
 	revision := a.revision
 	a.revisionMu.Unlock()
@@ -281,6 +298,8 @@ func (a *Attempt) Finish(finalErr error) {
 		counts.Revision.add(revision)
 		counts.Mutation.add(mutation)
 		counts.CommitDuration += a.commitDuration
+		counts.OperationDuration += a.operationDuration
+		counts.HoldDuration += holdDuration
 		counts.DelayDuration += a.delayDuration
 		counts.PermitWait += a.permitWait
 		counts.PoolWait += a.poolWait
