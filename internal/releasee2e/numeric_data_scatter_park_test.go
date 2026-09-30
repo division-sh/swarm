@@ -2,6 +2,7 @@ package releasee2e
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -75,12 +76,39 @@ func TestGoldenNumericDataScatterParkRestartBothStores(t *testing.T) {
 			if result.err != nil || !strings.Contains(result.output, "run_id="+runID) {
 				t.Fatalf("numeric compiled run start: %v\n%s", result.err, result.output)
 			}
-			pauseFullLifecycleRun(t, p.rpc, runID)
 			ctx, cancel := context.WithTimeout(context.Background(), goldenRunDeadline)
 			defer cancel()
+			if err := pollReleaseCondition(ctx, 10*time.Millisecond, func() (bool, error) {
+				feed, err := readNumericFeed(ctx, p.rpc, runID)
+				if err != nil {
+					return false, err
+				}
+				if feed.Cursor == feed.Cardinality {
+					return false, fmt.Errorf("feed finished before a partial checkpoint was observable: %+v", feed)
+				}
+				return feed.Cursor > 0, nil
+			}); err != nil {
+				t.Fatalf("public partial-work checkpoint: %v\nprocess evidence:\n%s", err, p.output.String())
+			}
+			pauseFullLifecycleRun(t, p.rpc, runID)
 			checkpoint, err := readNumericFeed(ctx, p.rpc, runID)
 			if err != nil {
 				t.Fatalf("public numeric checkpoint: %v\nprocess evidence:\n%s", err, p.output.String())
+			}
+			if checkpoint.Runtime.Availability != "available" || checkpoint.Runtime.Eligible == nil || *checkpoint.Runtime.Eligible || checkpoint.Runtime.Reason != "run_paused" {
+				t.Fatalf("runtime-enriched paused readback lost exact admission: %+v", checkpoint.Runtime)
+			}
+			listed := runReleaseCommand(t, goldenStartupTimeout, project, cliEnv, "", binary,
+				"run", "fan-out", "list", runID, "--api-server", p.apiBase, "--api-token-file", "api-token", "--limit", "1", "--json")
+			var cliPage fanoutobligation.ListPage
+			if listed.err != nil {
+				t.Fatalf("compiled fan-out reader: %v\n%s", listed.err, listed.output)
+			}
+			if err := json.Unmarshal([]byte(strings.TrimSpace(listed.output)), &cliPage); err != nil {
+				t.Fatalf("compiled fan-out reader JSON: %v\n%s", err, listed.output)
+			}
+			if err := cliPage.Validate(fanoutobligation.ListQuery{RunID: runID, Limit: 1}); err != nil || len(cliPage.Intents) != 1 || cliPage.Intents[0].Key != checkpoint.Key || cliPage.Intents[0].BundleHash != checkpoint.BundleHash || cliPage.RunStatus != "paused" {
+				t.Fatalf("compiled CLI changed deployment readback: %+v, %v", cliPage, err)
 			}
 			predecessor, err := listGoldenEvents(ctx, p.rpc, runID)
 			if err != nil {
@@ -95,7 +123,7 @@ func TestGoldenNumericDataScatterParkRestartBothStores(t *testing.T) {
 				}
 			}
 			t.Logf("public pre-kill checkpoint after %s: status=%s feed=%s cursor=%d/%d owed=%d events=%d unsettled=%d", time.Since(issued), "paused", checkpoint.Status, checkpoint.Cursor, checkpoint.Cardinality, checkpoint.Owed, len(predecessor), unsettled)
-			if checkpoint.Cardinality != 100 || checkpoint.Status != fanoutobligation.StatusOpen || checkpoint.Cursor >= 100 || checkpoint.Owed == 0 {
+			if checkpoint.Cardinality != 100 || checkpoint.Status != fanoutobligation.StatusOpen || checkpoint.Cursor == 0 || checkpoint.Cursor >= 100 || checkpoint.Owed == 0 || unsettled == 0 {
 				t.Fatalf("approved interrupted checkpoint is unreachable: %#v; no settled-restart credit", checkpoint)
 			}
 			if err := p.killAndWait(5 * time.Second); err != nil {
