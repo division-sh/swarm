@@ -1,5 +1,10 @@
 # Pre-Implementation Coverage Audit: P16 Process-Transition Addendum
 
+Superseded scope: independent gate5905422933 ruled `insufficient; widen class`.
+This reset-focused request is historical evidence, not current permission.
+`issue-2498-standing-operator-composition-preimplementation.md` replaces its
+P16a-P16e boundary with the complete command/durable-state/child-presence matrix.
+
 Agent-g, #2498 / #2407 R1.1, 2026-09-30.
 Implementation baseline: origin/master@4fccc57ec73ce54827167dddc5bbafac41ae66d2.
 Candidate audit head before this addendum: d75edc2a5, with uncommitted pause repair.
