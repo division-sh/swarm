@@ -25,6 +25,16 @@ was skipped, made permissive, or assigned a longer deadline to hide a failure.
 | PostgreSQL 500-row ceiling exceeded (15.200s versus 15s) | Preserve workload/ceiling and investigate new admission cost; reduce redundant reads within the same canonical guard | Both-store three-repetition control passes, 103.249s; exact-head CI required; no causal timing closure claimed |
 | Timing and required-summary aggregate failures | No runner/budget relaxation | Must converge from all required exact-head checks |
 
+CI run 36731411597 on `68920cbda` passed every original failing job and both
+mandatory soaks, but reported incomplete evidence for the new timer inspection
+subprocess entry: all assertions passed, while the entry intentionally skips
+outside its numeric lifecycle parent. Classify only that exact entry through
+the existing finite parent-owned subprocess mechanism. Plan guards require both
+numeric public parent proofs in every CI profile and reject a wildcard exclusion;
+their exact output file and timer inventory assertions remain unchanged. No
+standalone or public proof credit is assigned to the helper. The superseding
+exact-head CI and final local qualification remain required.
+
 Fixture historical seeding does not grant selected-fork runtime execution and
 does not make an ordinary paused claim legal. The real selected authority
 controls and P01-P16 negative admission tests remain required. Timer inspection
