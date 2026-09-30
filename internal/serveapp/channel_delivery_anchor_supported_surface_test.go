@@ -197,10 +197,37 @@ func TestChannelDeliveryRealAnchorProducersPublicJourney(t *testing.T) {
 
 func startChannelAnchorJourney(t *testing.T, backend servedparity.Backend, token string, withSummary bool) (*channelOnboardingE2EHarness, *sql.DB, string) {
 	t.Helper()
+	return startChannelAnchorJourneyWithDraftTTL(t, backend, token, withSummary, 0)
+}
+
+func startChannelAnchorJourneyWithDraftTTL(t *testing.T, backend servedparity.Backend, token string, withSummary bool, draftTTL time.Duration) (*channelOnboardingE2EHarness, *sql.DB, string) {
+	t.Helper()
 	h := newChannelOnboardingE2EHarness(t, backend, true)
 	h.opts.AbandonActiveRuns = false
 	writeChannelAnchorJourneySource(t, h.opts.SourceRoot, withSummary)
 	h.opts.TestLLMRuntime = channelAnchorLLMRuntime{}
+	if draftTTL > 0 {
+		body, err := os.ReadFile(h.opts.ConfigPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var config map[string]any
+		if err := yaml.Unmarshal(body, &config); err != nil {
+			t.Fatal(err)
+		}
+		runtimeConfig, ok := config["runtime"].(map[string]any)
+		if !ok {
+			t.Fatal("channel journey config lacks its runtime section")
+		}
+		runtimeConfig["decision_card_input_draft_ttl"] = draftTTL.String()
+		body, err = yaml.Marshal(config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(h.opts.ConfigPath, body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	credentials, err := runtimecredentials.NewFileStore(h.credentialPath)
 	if err != nil {
 		t.Fatal(err)
