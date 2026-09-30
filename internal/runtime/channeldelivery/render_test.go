@@ -136,6 +136,41 @@ func TestChannelRenderFreezesFullOrderedCardWithoutPrivateAnswerEcho(t *testing.
 		strings.Contains(decided.FullText, "private-answer") || decided.Hash == frozen.Hash {
 		t.Fatalf("decided render = %#v", decided)
 	}
+	readback, err := CardDecisionReadback(card)
+	if err != nil || !strings.Contains(readback, "Decision: revise") || !strings.Contains(readback, "Actor: "+principalID) || strings.Contains(readback, "private-answer") {
+		t.Fatalf("bounded decision readback lost canonical outcome or exposed input: %q, %v", readback, err)
+	}
+	warning := "Inbox\nOlder copies may be outdated. Current state:\n" + strings.Repeat("card [12345678] "+readback+"\n", 8)
+	response, err := FreezeResponse(uuid.NewString(), warning, audience)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err = WithPresentation(response, packs.PresentationBounds{Actions: 2, TextRunes: 512, LabelRunes: 24}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reconstructed strings.Builder
+	for index := 0; ; index++ {
+		page, err := FreezeResponsePage(uuid.NewString(), response, uuid.NewString(), index, audience)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text, truncated, err := PresentationText(page)
+		if err != nil || truncated || len([]rune(text)) > 512 {
+			t.Fatalf("uncertainty readback page escaped compiled bounds: %q, %t, %v", text, truncated, err)
+		}
+		parts := strings.SplitN(page.FullText, "\n", 2)
+		if len(parts) != 2 {
+			t.Fatal("uncertainty readback page has no immutable body")
+		}
+		reconstructed.WriteString(parts[1])
+		if index+1 == page.Page.Count {
+			break
+		}
+	}
+	if reconstructed.String() != warning {
+		t.Fatal("tighter compiled bounds lost retained uncertainty/canonical outcome")
+	}
 	if _, err := FreezeCard(card, 18, "sent", audience, DraftPrompt{}); err == nil {
 		t.Fatal("non-effect card accepted dispatch state")
 	}

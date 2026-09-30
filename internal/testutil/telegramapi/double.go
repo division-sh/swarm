@@ -35,6 +35,7 @@ type Double struct {
 	registrationResponseBarrier   *responseBarrier
 	deliveryResponseBarrier       *responseBarrier
 	editResponseBarrier           *responseBarrier
+	delayedLostEdit               *responseBarrier
 	commandApplyBarrier           *responseBarrier
 }
 
@@ -290,6 +291,18 @@ func (p *Double) serveEdit(w http.ResponseWriter, request *http.Request) {
 		_, _ = w.Write([]byte(`{"ok":false,"description":"message not found"}`))
 		return
 	}
+	delayed := p.delayedLostEdit
+	p.delayedLostEdit = nil
+	if delayed != nil {
+		p.mu.Unlock()
+		loseProviderResponse(w)
+		close(delayed.arrived)
+		<-delayed.release
+		p.mu.Lock()
+		p.edits = append(p.edits, clonePayload(payload))
+		p.mu.Unlock()
+		return
+	}
 	p.edits = append(p.edits, clonePayload(payload))
 	loseResponse := p.loseNextEditResponse
 	p.loseNextEditResponse = false
@@ -504,6 +517,16 @@ func (p *Double) PauseNextEditResponse() (<-chan struct{}, func()) {
 	defer p.mu.Unlock()
 	barrier := newResponseBarrier()
 	p.editResponseBarrier = barrier
+	return barrier.arrived, barrier.releaseResponse
+}
+
+// LoseNextEditAcknowledgmentBeforeApply models a lost connection with the
+// provider still owning a write that may apply after a successor has progressed.
+func (p *Double) LoseNextEditAcknowledgmentBeforeApply() (<-chan struct{}, func()) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	barrier := newResponseBarrier()
+	p.delayedLostEdit = barrier
 	return barrier.arrived, barrier.releaseResponse
 }
 
