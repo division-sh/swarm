@@ -345,7 +345,7 @@ func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *
 		VALUES
 			(gen_random_uuid(), $1::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, '{}'::jsonb,
 				'worker-1', gen_random_uuid()::text, now() + interval '1 minute', 'active', now(), now()),
-			(gen_random_uuid(), $2::uuid, $10, $11, $12, $13, $14, $15, $16, TRUE, 'authored', '{}'::jsonb,
+			(gen_random_uuid(), $2::uuid, $10, $11, $12, $13, $14, $15, $16, TRUE, '{}'::jsonb,
 				'worker-1', gen_random_uuid()::text, now() - interval '1 minute', 'active', now(), now())
 	`, blockedRunID, readyRunID, blockedFields.AgentID, blockedFields.NameOwner,
 		blockedFields.NameSource, blockedFields.RoutePresence, blockedFields.FlowScopeKey,

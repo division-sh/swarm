@@ -4007,14 +4007,13 @@ func writeServeRuntimeNativeBashFixture(t *testing.T) string {
 	root := writeServeRuntimeAgentSlugFixture(t, "native-bash-docker-required", agentID)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), fmt.Sprintf(`
 %s:
-  id: %s
   role: %s
   intent: prompts/%s.md
   model: regular
   native_tools:
     bash: true
   subscriptions: [agent.requested]
-`, agentID, agentID, agentID, agentID))
+`, agentID, agentID, agentID))
 	return root
 }
 

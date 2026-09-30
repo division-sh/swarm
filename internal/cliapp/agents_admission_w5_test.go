@@ -9,15 +9,13 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/authoringview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateflowpilot"
 )
 
 func TestW5AgentsVerifyAndDescribeSupportedSurface(t *testing.T) {
-	root := t.TempDir()
-	writeDescribeTestFile(t, filepath.Join(root, "schema.yaml"), "name: agent-admission\nstages: []\npins:\n  inputs:\n    events: [task.ready]\n  outputs:\n    events: [task.ready]\nconnect:\n  - event: task.ready\n    from: .\n    to: child\n")
-	writeDescribeTestFile(t, filepath.Join(root, "events.yaml"), "task.ready:\n")
-	writeDescribeTestFile(t, filepath.Join(root, "agents.yaml"), "worker:\n  model: regular\n  intent: {inline: root business intent}\n  subscriptions: [task.ready]\n")
-	writeDescribeTestFile(t, filepath.Join(root, "child", "schema.yaml"), "name: child\nmode: static\nstages: []\npins:\n  inputs:\n    events: [task.ready]\n")
-	writeDescribeTestFile(t, filepath.Join(root, "child", "agents.yaml"), "worker:\n  model: regular\n  memory: true\n  intent: {inline: child business intent}\n  subscriptions: [task.ready]\n")
+	root := templateflowpilot.Write(t, templateflowpilot.Options{})
+	writeDescribeTestFile(t, filepath.Join(root, "agents.yaml"), "worker:\n  model: regular\n  intent: {inline: root business intent}\n  subscriptions: [account.requested]\n")
+	writeDescribeTestFile(t, filepath.Join(root, "account", "agents.yaml"), "worker:\n  model: regular\n  memory: true\n  intent: {inline: account business intent}\n  subscriptions: [account.ready]\n")
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", root, "--config", writeTestVerifyRuntimeConfig(t), "--json"}, &stdout, &stderr, defaultRootCommandOptions())
 	if code != 0 {
@@ -33,7 +31,7 @@ func TestW5AgentsVerifyAndDescribeSupportedSurface(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &view); err != nil {
 		t.Fatal(err)
 	}
-	if len(view.Root.Agents) != 1 || len(view.Flows) != 1 || len(view.Flows[0].Agents) != 1 {
+	if len(view.Root.Agents) != 1 || len(view.Flows) != 2 || view.Flows[0].ID != "account" || len(view.Flows[0].Agents) != 1 {
 		t.Fatalf("scoped agents missing: %+v", view)
 	}
 	for _, scope := range []struct {

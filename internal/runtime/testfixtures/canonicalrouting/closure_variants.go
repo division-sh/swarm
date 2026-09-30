@@ -402,7 +402,7 @@ func CopyVerifyModelAlias(t testing.TB, variant VerifyModelAliasVariant) string 
 	removeClosedVariantFiles(t, root, "entities.yaml", "nodes.yaml", "events.yaml")
 	writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\nstages:\n  idle: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    events: [task.assigned]\n")
 	writeClosedVariantFile(t, root, "child/entities.yaml", "case: {}\n")
-	writeClosedVariantFile(t, root, "child/agents.yaml", fmt.Sprintf("worker:\n  id: worker\n  type: factory\n  role: worker\n  intent: prompts/worker.md\n  model: %s\n  memory: false\n  subscriptions: [task.assigned]\n", model))
+	writeClosedVariantFile(t, root, "child/agents.yaml", fmt.Sprintf("worker:\n  type: factory\n  role: worker\n  intent: prompts/worker.md\n  model: %s\n  subscriptions: [task.assigned]\n", model))
 	writeClosedVariantFile(t, root, "events.yaml", "task.assigned:\n")
 	writeClosedVariantFile(t, root, "child/nodes.yaml", "closer:\n  execution_type: system_node\n  subscribes_to: [task.assigned]\n  event_handlers:\n    task.assigned:\n      advances_to: done\n")
 	writeClosedVariantFile(t, root, "child/prompts/worker.md", "Handle the task.\n")

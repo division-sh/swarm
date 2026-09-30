@@ -13,7 +13,7 @@ var retiredAgentFields = map[string]string{
 	"conversation_mode": "conversation_mode is retired; use memory", "session_scope": "agent field session_scope is retired; memory identity is run, agent and flow instance",
 	"session_scope_authority": "session_scope_authority is retired; use memory", "tools_tier2": "tools_tier2 is retired; use tools",
 	"subscriptions_bootstrap": "subscriptions_bootstrap is retired; use subscriptions", "subscribes_to": "subscribes_to is retired for agents.yaml; use subscriptions",
-	"prompt_ref": "prompt_ref is retired; declare exactly one intent: source", "prompt_inputs": "prompt_inputs is retired; declare exactly one intent: source",
+	"prompt_ref": "agent field prompt_ref is retired; declare exactly one intent: source", "prompt_inputs": "agent field prompt_inputs is retired; declare exactly one intent: source",
 	"profile": "agent profiles are unsupported", "agent_defaults": "agent defaults are unsupported",
 	"agent_profiles": "agent profiles are unsupported", "runtime_id_template": "agent identity is declaration x instance route",
 }
@@ -55,7 +55,7 @@ func projectAgentValue(key string, value yamlsource.Value) (AgentRegistryEntry, 
 		return AgentRegistryEntry{}, err
 	}
 	if _, present := fields["intent"]; !present {
-		return AgentRegistryEntry{}, nodeValueError(value, fmt.Errorf("intent is required"))
+		return AgentRegistryEntry{}, nodeValueError(value, (agentintent.Source{}).ValidateSyntax())
 	}
 	out := AgentRegistryEntry{AuthoredFields: map[string]bool{}}
 	texts := map[string]*string{
