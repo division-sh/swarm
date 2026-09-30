@@ -20,7 +20,7 @@ const (
 	SingletonCoordinatorPilotBadListIndex
 	SingletonCoordinatorPilotDemandProjection
 	SingletonCoordinatorPilotStatelessFanIn
-	SingletonCoordinatorPilotStatelessPayloadJoin
+	SingletonCoordinatorPilotStatelessCountJoin
 )
 
 // CopySingletonCoordinatorPilot materializes the canonical singleton
@@ -82,8 +82,8 @@ func writeSingletonCoordinatorFlow(t testing.TB, root string, variant SingletonC
 		writeStatelessFanInSingletonCoordinatorFlow(t, root)
 		return
 	}
-	if variant == SingletonCoordinatorPilotStatelessPayloadJoin {
-		writeStatelessPayloadJoinSingletonCoordinatorFlow(t, root)
+	if variant == SingletonCoordinatorPilotStatelessCountJoin {
+		writeStatelessCountJoinSingletonCoordinatorFlow(t, root)
 		return
 	}
 	writeSingletonCoordinatorFile(t, root, "schema.yaml", "name: singleton-coordinator-pilot\npins:\n  inputs:\n    events: [lead.observed]\n  outputs:\n    events: [lead.observed]\nconnect:\n  - event: lead.observed\n    from: .\n    to: coordinator\n")
@@ -146,13 +146,13 @@ coordinator-indexer:
 	writeSingletonCoordinatorFile(t, root, "coordinator/nodes.yaml", nodes)
 }
 
-func writeStatelessPayloadJoinSingletonCoordinatorFlow(t testing.TB, root string) {
+func writeStatelessCountJoinSingletonCoordinatorFlow(t testing.TB, root string) {
 	t.Helper()
 	writeSingletonCoordinatorFile(t, root, "coordinator/schema.yaml", `name: coordinator
 stages:
   active: {initial: true}
-  done: {}
-  failed: {}
+  done: {terminal: true}
+  failed: {terminal: true}
 pins:
   inputs:
     events:
@@ -173,10 +173,11 @@ coordinator-node:
     job.received:
       join:
         stage: active
-        members: {from: payload.job, by: payload.vertical_id}
+        members: {count: 1, by: payload.vertical_id}
         output: payload.job
         on_complete: {advances_to: done}
-        timeout: {after: 1h, advances_to: failed}
+        deadline: {after: 1h, from: stage_entry}
+        on_deadline: {advances_to: failed}
 `)
 }
 

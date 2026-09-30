@@ -66,7 +66,7 @@ func TestExecutorJoinCapturedContextFromRetainedEvidence(t *testing.T) {
 			for _, reference := range []string{"ref", "cel"} {
 				t.Run(disposition+"/"+history+"/"+reference, func(t *testing.T) {
 					repo := canonicalrouting.RepoRoot(t)
-					bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, a2CopyRetainedJoin(t), runtimecontracts.DefaultPlatformSpecFile(repo))
+					bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyForkLoopRetainedJoin(t), runtimecontracts.DefaultPlatformSpecFile(repo))
 					if err != nil {
 						t.Fatal(err)
 					}

@@ -7859,6 +7859,9 @@ vertical:
 score.dimension_complete:
   dimension: text
   score: integer
+score.unregistered_dimension_complete:
+  dimension: text
+  score: integer
 vertical.scored:
   scores: "[DimensionScore]"
 `)
@@ -7869,7 +7872,7 @@ scoring-node:
     score.dimension_complete:
       accumulate:
         into: dimensions_received
-        dedup_by: payload.dimension
+        key: payload.dimension
       emit:
         event: vertical.scored
         fields:

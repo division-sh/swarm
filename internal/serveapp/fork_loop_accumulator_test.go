@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
@@ -126,13 +127,20 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 						if !ok || len(items) != 1 {
 							t.Fatalf("current child items: %#v", bucket)
 						}
-						item := items[0].(map[string]any)
-						if item["event_id"] != activityidentity.ForkLineageEventID(fork.ForkRunID, frontier) || item["revision_id"] != want.RevisionID || item["token"] != "loop-notice-proof" {
-							t.Fatalf("current child execution evidence: %#v", item)
+						wantPayload := map[string]any{"revision_id": want.RevisionID, "token": "loop-notice-proof"}
+						if !reflect.DeepEqual(items[0], wantPayload) {
+							t.Fatalf("current child execution evidence: %#v", items[0])
 						}
-						if !reflect.DeepEqual(bucket["received"], map[string]any{"loop-notice-proof": true}) {
+						canonical, err := canonicaljson.Bytes(wantPayload)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if !reflect.DeepEqual(bucket["received"], map[string]any{"loop-notice-proof": canonicaljson.HashBytes(canonical)}) {
 							t.Fatalf("current child dedup evidence: %#v", bucket)
 						}
+						// Accumulation retains the authored payload, not injected event
+						// metadata. Prove its lineage through the actual delivery/effect.
+						requireForkLoopStateEffect(t, rt, fork.ForkRunID, activityidentity.ForkLineageEventID(fork.ForkRunID, frontier), want.RevisionID)
 					}
 					if _, exists := child[key]; exists {
 						t.Fatal("child retained source generation key")
