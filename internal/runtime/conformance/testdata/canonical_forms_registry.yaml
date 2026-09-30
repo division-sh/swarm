@@ -210,7 +210,7 @@ rows:
       canonical_candidate: retained_fan_in_and_reply_pin_policies_only
       retired_duplicates: [carries, carry_type, carry_optional, carry_convert, ordinary_pin_resolution, resolution.from]
       distinct_overrides: [multi_item_dedup_by]
-    corpus: {carry_rows: 0, from_overrides: 4}
+    corpus: {carry_rows: 0, from_overrides: 0}
 
   - id: flow.output_pin_route_projection
     ruled: issue-2352

@@ -15,7 +15,6 @@ const (
 )
 
 type eventSchemaOwnershipRow struct {
-	connect               FlowConnect
 	ownerFlowPath         string
 	producerEndpoint      string
 	producerFlowID        string
@@ -90,7 +89,6 @@ func compileEventSchemaOwnershipRow(bundle *WorkflowContractBundle, connect Flow
 	receiverEvent = packageEndpointLocalEvent(bundle, receiverFlowID, receiverEvent, true)
 	receiver, receiverName, receiverOK := connectEndpointEventDeclaration(bundle, receiverFlowID, receiverEvent, true)
 	return eventSchemaOwnershipRow{
-		connect:               connect,
 		ownerFlowPath:         normalizedConnectOwnerFlowPath(connect.OwnerFlowPath),
 		producerEndpoint:      strings.TrimSpace(connect.From),
 		producerFlowID:        producerFlowID,
