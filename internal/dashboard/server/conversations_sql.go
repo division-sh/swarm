@@ -15,7 +15,6 @@ func conversationSummaryFromOperator(item operatorread.OperatorConversationSumma
 		Kind:         strings.TrimSpace(item.Kind),
 		FlowInstance: strings.TrimSpace(item.FlowInstance),
 		Memory:       item.Memory,
-		MemorySource: strings.TrimSpace(item.MemorySource),
 		Status:       strings.TrimSpace(item.Status),
 		TurnCount:    item.TurnCount,
 		Summary:      strings.TrimSpace(item.Summary),

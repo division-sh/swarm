@@ -23,7 +23,7 @@ type optionalDeclarationRoleTestCase struct {
 func optionalDeclarationRoleTestCases() []optionalDeclarationRoleTestCase {
 	return []optionalDeclarationRoleTestCase{
 		{
-			name: "agents", fileName: "agents.yaml", valid: "worker: {}\n", merged: "<<: &declarations\n  worker:\n    intent: {inline: test intent}\n    model: regular\n", blank: "\"\": {}\n", collide: "worker: {}\n\" worker \": {}\n",
+			name: "agents", fileName: "agents.yaml", valid: "worker: {intent: {inline: test intent}, model: regular}\n", merged: "<<: &declarations\n  worker:\n    intent: {inline: test intent}\n    model: regular\n", blank: "\"\": {}\n", collide: "worker: {}\n\" worker \": {}\n",
 			load: func(path string) (int, error) {
 				value, err := loadOptionalAgentDeclarations(path)
 				return len(value), err

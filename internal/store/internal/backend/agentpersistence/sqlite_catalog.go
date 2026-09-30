@@ -35,8 +35,7 @@ func LoadSQLiteAgentsTx(ctx context.Context, tx *sql.Tx) ([]runtimemanager.Persi
 const sqliteAgentRegistryQuery = `
 		SELECT run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 		       flow_scope_key, flow_instance_id, flow_instance,
-		       role, model, llm_backend, memory_enabled, memory_source,
-		       COALESCE(parent_agent_id, ''), COALESCE(entity_id, ''), config, runtime_descriptor,
+		       role, model, llm_backend, memory_enabled, COALESCE(parent_agent_id, ''), COALESCE(entity_id, ''), config, runtime_descriptor,
 		       subscriptions, emit_events, tools, permissions,
 		       status, created_at,
 			       lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase, lifecycle_run_mode,
@@ -61,8 +60,7 @@ func scanSQLiteAgents(rows *sql.Rows) ([]runtimemanager.PersistedAgent, error) {
 		var topologyRaw []byte
 		if err := rows.Scan(&row.Identity.RunID, &row.AgentID, &row.Identity.NameOwner, &row.Identity.NameSource, &row.Identity.RoutePresence,
 			&row.Identity.FlowScopeKey, &row.Identity.FlowInstanceID, &row.Identity.FlowInstancePath,
-			&row.Role, &row.Model, &row.LLMBackend, &row.MemoryEnabled, &row.MemorySource,
-			&row.ParentAgentID, &row.EntityID, &row.ConfigJSON, &row.RuntimeDescriptor, &row.SubscriptionsJSON, &row.EmitEventsJSON,
+			&row.Role, &row.Model, &row.LLMBackend, &row.MemoryEnabled, &row.ParentAgentID, &row.EntityID, &row.ConfigJSON, &row.RuntimeDescriptor, &row.SubscriptionsJSON, &row.EmitEventsJSON,
 			&row.ToolsJSON, &row.PermissionsJSON, &rec.Status, &startedAt, &rec.LifecycleEpoch, &lifecycleGeneration, &rec.LifecyclePhase, &rec.LifecycleRunMode,
 			&rec.ProcessBinding.ProcessAuthorityID, &rec.ProcessBinding.ProcessOwnerID,
 			&rec.ProcessBinding.ProcessBootID, &rec.ProcessBinding.GenerationGrantID,

@@ -85,7 +85,6 @@ func CopyTemplateSelectAgentOnlyWithUnrelatedNode(t testing.TB) string {
     account.setup: {}
 `)
 	writeClosedVariantFile(t, root, "account/agents.yaml", `account-agent:
-  id: account-agent
   model: regular
   intent:
     inline: Consume account readiness events.

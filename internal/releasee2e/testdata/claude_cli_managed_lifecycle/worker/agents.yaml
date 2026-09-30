@@ -1,9 +1,7 @@
 release-worker:
-  id: release-worker
   role: release-worker
   intent: prompts/release-worker.md
   model: regular
-  memory: false
   native_tools:
     web_search: true
   subscriptions: [agent.requested]

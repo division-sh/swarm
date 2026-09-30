@@ -339,11 +339,11 @@ func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, memory_source, runtime_state,
+			memory_enabled, runtime_state,
 			lease_holder, lease_grant_id, lease_expires_at, status, created_at, updated_at
 		)
 		VALUES
-			(gen_random_uuid(), $1::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored', '{}'::jsonb,
+			(gen_random_uuid(), $1::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, '{}'::jsonb,
 				'worker-1', gen_random_uuid()::text, now() + interval '1 minute', 'active', now(), now()),
 			(gen_random_uuid(), $2::uuid, $10, $11, $12, $13, $14, $15, $16, TRUE, 'authored', '{}'::jsonb,
 				'worker-1', gen_random_uuid()::text, now() - interval '1 minute', 'active', now(), now())
@@ -391,19 +391,19 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now.Add(-5 * time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "scan.requested", events.EventProducerPlatform, "builder", entityID, "", now)
 	event := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
-	seedRunDebugAgent(t, pg, ctx, runID, "agent-source", entityID, agentmemory.Authored(true), "flow-a")
+	seedRunDebugAgent(t, pg, ctx, runID, "agent-source", entityID, agentmemory.Plan{Enabled: true}, "flow-a")
 	identity := mustTestAgentIdentityForRun(runID, "agent-source", "flow-a")
 	fields := testAgentIdentityStorageFields(t, identity)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, memory_source,
+			memory_enabled,
 			conversation, turn_count, runtime_state,
 			lease_holder, lease_expires_at, status, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored',
+			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE,
 			'[]'::jsonb, 0, '{}'::jsonb,
 			NULL, NULL, 'active', $10, $11
 		)
@@ -434,7 +434,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 	}
 	if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, runtimedelivery.WithClaim(ctx, claimed.Claim), pg, runtimellm.AgentTurnRecord{
 		AgentID: identity.AgentID(), Identity: identity,
-		RunID: runID, FlowInstance: identity.FlowInstance(), Memory: agentmemory.Authored(true), SessionID: sessionID,
+		RunID: runID, FlowInstance: identity.FlowInstance(), Memory: agentmemory.Plan{Enabled: true}, SessionID: sessionID,
 		EntityID: entityID, TriggerEventID: eventID, TriggerEventType: "scan.requested", TaskID: "task-1",
 		RequestPayload: []byte(`{}`), ResponseRaw: []byte(`{}`), ParseOK: true, Latency: 12 * time.Millisecond, RetryCount: 1,
 	}, managedAgentTurnFixtureOptions{TurnID: turnID, Now: now.Add(2 * time.Second), OriginEvent: &event}); err != nil {
@@ -475,10 +475,10 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 	if got.DeliveryPayloadProjection == nil || got.DeliveryPayloadProjection.Fields()["validation_case_id"] != projectedInstanceID {
 		t.Fatalf("delivery payload projection = %#v, want validation_case_id %q", got.DeliveryPayloadProjection, projectedInstanceID)
 	}
-	if got.SessionID != sessionID || got.SessionKind != "live_session" || !got.SessionMemory || got.SessionMemorySource != "authored" {
+	if got.SessionID != sessionID || got.SessionKind != "live_session" || !got.SessionMemory {
 		t.Fatalf("session trace = %#v", got)
 	}
-	if !got.TurnMemory || got.TurnMemorySource != "authored" || got.TurnFlowInstance != "flow-a" {
+	if !got.TurnMemory || got.TurnFlowInstance != "flow-a" {
 		t.Fatalf("turn memory trace = %#v", got)
 	}
 	if got.TurnID != turnID || got.TurnTriggerEventID != eventID || got.TurnTaskID != "task-1" || got.TurnRetryCount != 1 {
@@ -505,19 +505,19 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_SinceUsesRowMaterializationWaterm
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base.Add(-time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "scan.requested", events.EventProducerPlatform, "builder", entityID, "", base)
 	event := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
-	seedRunDebugAgent(t, pg, ctx, runID, "agent-late", entityID, agentmemory.Authored(true), "flow-a")
+	seedRunDebugAgent(t, pg, ctx, runID, "agent-late", entityID, agentmemory.Plan{Enabled: true}, "flow-a")
 	identity := mustTestAgentIdentityForRun(runID, "agent-late", "flow-a")
 	fields := testAgentIdentityStorageFields(t, identity)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, memory_source,
+			memory_enabled,
 			conversation, turn_count, runtime_state,
 			lease_holder, lease_expires_at, status, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored',
+			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE,
 			'[]'::jsonb, 0, '{}'::jsonb,
 			NULL, NULL, 'active', $10, $11
 		)
@@ -544,7 +544,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_SinceUsesRowMaterializationWaterm
 	lateDelivery := lateDeliveryCommit.Snapshot
 	if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, runtimedelivery.WithClaim(ctx, claimed.Claim), pg, runtimellm.AgentTurnRecord{
 		AgentID: identity.AgentID(), Identity: identity,
-		RunID: runID, FlowInstance: identity.FlowInstance(), Memory: agentmemory.Authored(true), SessionID: sessionID,
+		RunID: runID, FlowInstance: identity.FlowInstance(), Memory: agentmemory.Plan{Enabled: true}, SessionID: sessionID,
 		EntityID: entityID, TriggerEventID: eventID, TriggerEventType: "scan.requested", TaskID: "task-late",
 		RequestPayload: []byte(`{}`), ResponseRaw: []byte(`{}`), ParseOK: true, Latency: 12 * time.Millisecond,
 	}, managedAgentTurnFixtureOptions{TurnID: turnID, Now: base.Add(3 * time.Second), OriginEvent: &event}); err != nil {
@@ -581,19 +581,19 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_UsesTaskAuditSessionWhenLiveSessi
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now.Add(-5 * time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "task.started", events.EventProducerPlatform, "builder", entityID, "", now)
 	event := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
-	seedRunDebugAgent(t, pg, ctx, runID, "agent-task", entityID, agentmemory.PlatformDefault(), "flow-a")
+	seedRunDebugAgent(t, pg, ctx, runID, "agent-task", entityID, agentmemory.Plan{}, "flow-a")
 	identity := mustTestAgentIdentityForRun(runID, "agent-task", "flow-a")
 	fields := testAgentIdentityStorageFields(t, identity)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			entity_id, memory_enabled, memory_source, conversation,
+			entity_id, memory_enabled, conversation,
 			turn_count, runtime_state, status, created_at, updated_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10::uuid,
-			FALSE, 'platform_default', '[]'::jsonb, 0, '{}'::jsonb, 'active', $11, $12
+			FALSE, '[]'::jsonb, 0, '{}'::jsonb, 'active', $11, $12
 		)
 	`, sessionID, runID, fields.AgentID, fields.NameOwner, fields.NameSource,
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
@@ -610,7 +610,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_UsesTaskAuditSessionWhenLiveSessi
 	}
 	if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, runtimedelivery.WithClaim(ctx, claimed.Claim), pg, runtimellm.AgentTurnRecord{
 		AgentID: identity.AgentID(), Identity: identity,
-		RunID: runID, FlowInstance: identity.FlowInstance(), Memory: agentmemory.PlatformDefault(), SessionID: sessionID,
+		RunID: runID, FlowInstance: identity.FlowInstance(), Memory: agentmemory.Plan{}, SessionID: sessionID,
 		EntityID: entityID, TriggerEventID: eventID, TriggerEventType: "task.started", TaskID: "task-2",
 		RequestPayload: []byte(`{}`), ResponseRaw: []byte(`{}`), ParseOK: true, Latency: 8 * time.Millisecond,
 	}, managedAgentTurnFixtureOptions{TurnID: turnID, Now: now.Add(3 * time.Second), OriginEvent: &event}); err != nil {
@@ -630,10 +630,10 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_UsesTaskAuditSessionWhenLiveSessi
 		t.Fatalf("trace len = %d, want 1", len(rows))
 	}
 	got := rows[0]
-	if got.SessionID != sessionID || got.SessionKind != "turn_audit" || got.SessionMemory || got.SessionMemorySource != "platform_default" {
+	if got.SessionID != sessionID || got.SessionKind != "turn_audit" || got.SessionMemory {
 		t.Fatalf("task audit trace = %#v", got)
 	}
-	if got.TurnMemory || got.TurnMemorySource != "platform_default" || got.TurnFlowInstance != "flow-a" {
+	if got.TurnMemory || got.TurnFlowInstance != "flow-a" {
 		t.Fatalf("stateless turn trace = %#v", got)
 	}
 }

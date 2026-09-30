@@ -2565,7 +2565,6 @@ pins:
   entity_id: text?
 `)
 	writeRunCompletionFixtureFile(t, root+"/agents.yaml", `workflow-runtime:
-  id: workflow-runtime
   role: review_observer
   model: regular
   intent: {inline: "Observe review requests."}

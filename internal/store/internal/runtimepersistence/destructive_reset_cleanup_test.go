@@ -733,9 +733,9 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, memory_source, status
+			memory_enabled, status
 		)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored', 'active')
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'active')
 	`, activeSessionID, runID, agentFields.AgentID, agentFields.NameOwner, agentFields.NameSource,
 		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath); err != nil {
 		t.Fatalf("seed active session: %v", err)
@@ -744,10 +744,10 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, memory_source, status, termination_reason, terminated_at, successor_session_id
+			memory_enabled, status, termination_reason, terminated_at, successor_session_id
 		) VALUES (
 			$1::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10,
-			TRUE, 'authored', 'terminated', 'cancelled', now(), $2::uuid
+			TRUE, 'terminated', 'cancelled', now(), $2::uuid
 		)
 	`, predecessorSessionID, activeSessionID, preservedRunID, preservedAgentFields.AgentID, preservedAgentFields.NameOwner, preservedAgentFields.NameSource,
 		preservedAgentFields.RoutePresence, preservedAgentFields.FlowScopeKey, preservedAgentFields.FlowInstanceID, preservedAgentFields.FlowInstancePath); err != nil {
@@ -1464,9 +1464,9 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, memory_source, status
+			memory_enabled, status
 		)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored', 'active')
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'active')
 	`, sessionID, runA, agentFields.AgentID, agentFields.NameOwner, agentFields.NameSource,
 		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath); err != nil {
 		t.Fatalf("seed agent session: %v", err)
@@ -1489,7 +1489,7 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	turnID := uuid.NewString()
 	if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID: agentIdentity.AgentID(), Identity: agentIdentity,
-		RunID: runA, FlowInstance: agentIdentity.FlowInstance(), Memory: agentmemory.Authored(true), SessionID: sessionID,
+		RunID: runA, FlowInstance: agentIdentity.FlowInstance(), Memory: agentmemory.Plan{Enabled: true}, SessionID: sessionID,
 		EntityID:       entityID,
 		RequestPayload: []byte(`{}`), ResponseRaw: []byte(`{}`), ParseOK: true,
 	}, managedAgentTurnFixtureOptions{TurnID: turnID, Now: seededAt}); err != nil {
@@ -1498,9 +1498,9 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	if _, err := pg.backend.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (
 			run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-			flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source, status
+			flow_scope_key, flow_instance_id, flow_instance, memory_enabled, status
 		)
-		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, FALSE, 'authored', 'active')
+		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, FALSE, 'active')
 	`, runA, agentFields.AgentID, agentFields.NameOwner, agentFields.NameSource, agentFields.RoutePresence,
 		agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath); err != nil {
 		t.Fatalf("seed agent audit: %v", err)

@@ -349,7 +349,20 @@ func scopedAliasMockConnectorFixture(t *testing.T, includeLive bool) (semanticvi
 }
 
 func scopedAliasMockConnectorFixtureWithNativeTools(t *testing.T, includeLive bool) (semanticview.Source, *providerconnectors.MockResponsePlan) {
-	return scopedAliasMockConnectorFixtureOptions(t, includeLive, true)
+	source, plan := scopedAliasMockConnectorFixtureOptions(t, includeLive, false)
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("scoped fixture has no canonical bundle")
+	}
+	// Unknown authored capabilities now fail during source admission. Retain
+	// this independent defensive-check proof using a deliberately invalid model.
+	for _, path := range []string{"project-live", "project-mock", "flow-live", "flow-mock"} {
+		flow := bundle.FlowTree.ByID[path]
+		entry := flow.Agents["shared-worker"]
+		entry.NativeTools = map[string]any{"hidden_capability": true}
+		flow.Agents["shared-worker"] = entry
+	}
+	return semanticview.Wrap(bundle), plan
 }
 
 func scopedAliasMockConnectorFixtureOptions(t *testing.T, includeLive, includeInvalidNativeTools bool) (semanticview.Source, *providerconnectors.MockResponsePlan) {
@@ -398,7 +411,7 @@ root-node:
 
 func writeScopedReachabilityAgentFile(t *testing.T, path, agentID, module string, live bool, extra ...string) {
 	t.Helper()
-	contents := agentID + ":\n  id: " + agentID + "\n  model: regular\n  memory: false\n  intent:\n    inline: Inspect provider reachability for this test fixture.\n"
+	contents := agentID + ":\n  model: regular\n  intent:\n    inline: Inspect provider reachability for this test fixture.\n"
 	if !live {
 		contents += "  mock:\n    kind: python\n    module: " + module + "\n"
 	}

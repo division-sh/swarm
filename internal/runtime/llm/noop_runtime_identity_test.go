@@ -10,7 +10,7 @@ import (
 
 func TestNoopRuntimeStartSessionPreservesExactExecutionIdentity(t *testing.T) {
 	identity := testMemoryIdentity("agent-1", "support/instance-1")
-	for _, plan := range []agentmemory.Plan{testMemory(), agentmemory.Authored(false)} {
+	for _, plan := range []agentmemory.Plan{testMemory(), agentmemory.Plan{Enabled: false}} {
 		ctx := agentmemory.WithExecution(context.Background(), plan, identity)
 		session, err := NewNoopRuntime(MockProviderContract()).StartSession(ctx, identity.AgentID(), "system", nil)
 		if err != nil {

@@ -18,7 +18,6 @@ worker:
   role: worker
   intent: {inline: Exercise canonical physical declaration ownership.}
   model: regular
-  memory: false
   subscriptions: [work.requested]
 `)
 
@@ -66,7 +65,7 @@ func TestAgentDeclarationRecordsPreserveDistinctSameIDPhysicalDeclarations(t *te
 	for _, side := range []string{"left", "right"} {
 		flowRoot := filepath.Join(root, side)
 		writeFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), "name: "+side+"\n")
-		writeFixtureFile(t, filepath.Join(flowRoot, "agents.yaml"), "worker:\n  role: "+side+"-worker\n  intent: {inline: Exercise distinct physical identity.}\n  model: regular\n  memory: false\n")
+		writeFixtureFile(t, filepath.Join(flowRoot, "agents.yaml"), "worker:\n  role: "+side+"-worker\n  intent: {inline: Exercise distinct physical identity.}\n  model: regular\n")
 	}
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
 	if err != nil {

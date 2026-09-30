@@ -126,7 +126,6 @@ pins:
 	writeClosedVariantFile(t, root, "fork-source/nodes.yaml", "owner:\n  execution_type: system_node\n  event_handlers:\n    fork.source_message:\n      create_entity: true\n      advances_to: active\n    item.processed:\n      advances_to: done\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "external.observed:\n", "external.observed:\nfork.source_message:\n  note: text\n")
 	writeClosedVariantFile(t, root, "fork-source/agents.yaml", `fork-source-agent:
-  id: fork-source-agent
   role: researcher
   intent: prompts/fork-source-agent.md
   model: regular
@@ -169,7 +168,6 @@ pins:
 	writeClosedVariantFile(t, root, "hold/nodes.yaml", "owner:\n  execution_type: system_node\n  event_handlers:\n    item.agent_hold:\n      create_entity: true\n      advances_to: active\n    item.processed:\n      advances_to: done\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "item.processed:\n", "item.agent_hold:\n  note: text\nitem.processed:\n")
 	writeClosedVariantFile(t, root, "hold/agents.yaml", `load-agent:
-  id: load-agent
   role: load_agent
   intent: prompts/load-agent.md
   model: regular
@@ -193,7 +191,6 @@ func CopyRootIngressServedLiveAgent(t testing.TB) string {
 func addServedItemProcessedAgent(t testing.TB, root, prompt string) {
 	t.Helper()
 	writeClosedVariantFile(t, root, "agents.yaml", `load-agent:
-  id: load-agent
   role: load_agent
   intent: prompts/load-agent.md
   model: regular

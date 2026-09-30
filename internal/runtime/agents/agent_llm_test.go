@@ -821,7 +821,7 @@ func TestLLMAgentOnEvent_FiltersRoleScopedToolsByTurnEntityEligibility(t *testin
 		ID:            "market-research-agent",
 		Identity:      agentidentitytest.RootRuntimeForRun(t, runID, "market-research-agent", "agent-llm-test"),
 		Role:          "market_research",
-		Memory:        agentmemory.Authored(false),
+		Memory:        agentmemory.Plan{Enabled: false},
 		ExecutionMode: runtimeeffects.ExecutionModeLive,
 	}, "You are here."))
 	if err != nil {
@@ -873,7 +873,7 @@ func TestLLMAgentBoardStep_UsesExactContextAwareDefinitionsForDirective(t *testi
 		ID:            "market-research-agent",
 		Identity:      agentidentitytest.RootRuntimeForRun(t, testBoardDirectiveRunID, "market-research-agent", "agent-llm-test"),
 		Role:          "market_research",
-		Memory:        agentmemory.Authored(false),
+		Memory:        agentmemory.Plan{Enabled: false},
 		ExecutionMode: runtimeeffects.ExecutionModeLive,
 	}, "You are here."))
 	if err != nil {
@@ -1176,7 +1176,7 @@ func TestHumanTaskOutcomeSurvivesAgentScopeResetAndRepeatedDelivery(t *testing.T
 		ExecutionMode: runtimeeffects.ExecutionModeLive,
 		ID:            "reviewer",
 		Identity:      agentidentitytest.RootRuntimeForRun(t, runID, "reviewer", "agent-llm-test"),
-		Memory:        agentmemory.Authored(false),
+		Memory:        agentmemory.Plan{Enabled: false},
 	}, runtime, nil, nil)
 	evt := eventtest.RunCreatingRootIngress(
 		"human-task-outcome", events.EventType("human_task.approved"), "runtime", "",
@@ -1208,7 +1208,7 @@ func TestLLMAgent_StatelessTurnBudgetFailureResetsConversationAndRetries(t *test
 			Identity:      agentidentitytest.RootRuntimeForRun(t, runID, "spec-reviewer", "agent-llm-test"),
 			Role:          "spec_reviewer",
 			EntityID:      "ent-1",
-			Memory:        agentmemory.Authored(false),
+			Memory:        agentmemory.Plan{Enabled: false},
 		},
 		rt,
 		nil,

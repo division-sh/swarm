@@ -64,10 +64,10 @@ func TestAgentMemoryConformance_IdentityIsCompleteBeforeAcquire(t *testing.T) {
 func TestAgentMemoryConformance_RootMemoryFailsClosed(t *testing.T) {
 	t.Parallel()
 
-	if err := agentmemory.ValidateFlowOwnership(agentmemory.PlatformDefault(), ""); err != nil {
+	if err := agentmemory.ValidateFlowOwnership(agentmemory.Plan{}, ""); err != nil {
 		t.Fatalf("stateless root: %v", err)
 	}
-	if err := agentmemory.ValidateFlowOwnership(agentmemory.Authored(true), ""); err == nil || !strings.Contains(err.Error(), "flow-instance owner") {
+	if err := agentmemory.ValidateFlowOwnership(agentmemory.Plan{Enabled: true}, ""); err == nil || !strings.Contains(err.Error(), "flow-instance owner") {
 		t.Fatalf("remembered root error = %v", err)
 	}
 }

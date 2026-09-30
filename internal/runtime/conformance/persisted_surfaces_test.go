@@ -148,7 +148,7 @@ func TestCanonicalTurnSummarySurface_RoundTripsThroughConversationReader(t *test
 	sessionID := uuid.NewString()
 	if err := persistConformanceAgentTurnReadbackFixture(t, ctx, db, pg, runtimellm.AgentTurnRecord{
 		AgentID:   "agent-1",
-		Memory:    agentmemory.PlatformDefault(),
+		Memory:    agentmemory.Plan{},
 		SessionID: sessionID,
 		RunID:     runID,
 		TurnBlocks: []runtimellm.TurnBlock{
@@ -228,7 +228,7 @@ func TestCanonicalSessionWatchdogSurface_RoundTripsThroughConversationReader(t *
 		SessionID: sessionID,
 		AgentID:   "agent-1",
 		Identity:  identity,
-		Memory:    agentmemory.Authored(true),
+		Memory:    agentmemory.Plan{Enabled: true},
 		Messages: []runtimellm.Message{
 			{Role: "assistant", Content: "Still working on it."},
 		},
@@ -354,7 +354,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 		base = worklifetime.WithProcess(base, conformanceTestProcessOwner(t))
 		base = worklifetime.WithOccurrence(base, workOwner)
 		base = managedConformanceExecutionContext(t, base, "reused-live-session")
-		base = agentmemory.WithExecution(base, agentmemory.Authored(true), lifecycleToken.Identity)
+		base = agentmemory.WithExecution(base, agentmemory.Plan{Enabled: true}, lifecycleToken.Identity)
 		base = runtimecorrelation.WithRunID(base, runID)
 		base = runtimebus.WithInboundEvent(base, evt)
 		if claim, ok := claims[evt.ID()]; ok {
@@ -366,7 +366,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 			Identity:      lifecycleToken.Identity,
 			Type:          "stub",
 			Model:         "regular",
-			Memory:        agentmemory.Authored(true),
+			Memory:        agentmemory.Plan{Enabled: true},
 			FlowPath:      "support/inst-1",
 		})
 	}
@@ -555,7 +555,7 @@ printf '{"result":"ok"}'
 		base = worklifetime.WithProcess(base, conformanceTestProcessOwner(t))
 		base = worklifetime.WithOccurrence(base, workOwner)
 		base = managedConformanceExecutionContext(t, base, "cli-session-failure")
-		base = agentmemory.WithExecution(base, agentmemory.Authored(true), lifecycleToken.Identity)
+		base = agentmemory.WithExecution(base, agentmemory.Plan{Enabled: true}, lifecycleToken.Identity)
 		base = runtimecorrelation.WithRunID(base, runID)
 		base = runtimebus.WithInboundEvent(base, evt)
 		if deliveryClaim.DeliveryID() != "" {
@@ -566,7 +566,7 @@ printf '{"result":"ok"}'
 			ID:            "agent-1",
 			Identity:      lifecycleToken.Identity,
 			Type:          "stub",
-			Memory:        agentmemory.Authored(true),
+			Memory:        agentmemory.Plan{Enabled: true},
 			FlowPath:      "support/inst-1",
 		})
 	}
@@ -653,7 +653,7 @@ func TestConversationPersistenceDoesNotPromoteAuditRowsIntoLiveSessions(t *testi
 		SessionID: missingSessionID,
 		AgentID:   "agent-1",
 		Identity:  missingIdentity,
-		Memory:    agentmemory.Authored(true),
+		Memory:    agentmemory.Plan{Enabled: true},
 		Messages:  []runtimellm.Message{{Role: "assistant", Content: "should fail"}},
 		Summary:   "should fail",
 		TurnCount: 1,
@@ -668,7 +668,7 @@ func TestConversationPersistenceDoesNotPromoteAuditRowsIntoLiveSessions(t *testi
 		SessionID: auditSessionID,
 		AgentID:   "agent-1",
 		RunID:     runID,
-		Memory:    agentmemory.Authored(false),
+		Memory:    agentmemory.Plan{Enabled: false},
 		TurnBlocks: []runtimellm.TurnBlock{
 			{Kind: "assistant_text", Text: "done"},
 			{Kind: "outcome", Text: "done"},
@@ -1668,7 +1668,7 @@ func TestCanonicalRuntimeLogTurnBlockSurface_IsOmittedFromPublicConversationProj
 	sessionID := uuid.NewString()
 	if err := persistConformanceAgentTurnReadbackFixture(t, ctx, db, pg, runtimellm.AgentTurnRecord{
 		AgentID:   "agent-1",
-		Memory:    agentmemory.PlatformDefault(),
+		Memory:    agentmemory.Plan{},
 		RunID:     runID,
 		SessionID: sessionID,
 		TurnBlocks: []runtimellm.TurnBlock{
@@ -1953,7 +1953,7 @@ func newConformanceManagedConversation(t *testing.T, agentID string, identity ag
 		Transport:      string(contract.Transport),
 		ModelAlias:     "regular",
 		Model:          "regular",
-	}, "", nil, agentmemory.Authored(true), 10, runtime)
+	}, "", nil, agentmemory.Plan{Enabled: true}, 10, runtime)
 	if err != nil {
 		t.Fatalf("create managed conformance conversation: %v", err)
 	}

@@ -686,14 +686,7 @@ func (c *checkerContext) appendInvalidExecutableNodeFindings(record runtimecontr
 
 func appendAgentMemoryFindings(findings []Finding, scopeLabel string, proof semanticview.AgentMemoryProof, agentID string, agent runtimecontracts.AgentRegistryEntry) []Finding {
 	agentLabel := scopedObjectLabel(scopeLabel, agentID)
-	if _, err := agent.MemoryPlan.Normalize(); err != nil {
-		return append(findings, Finding{
-			CheckID:  "invalid_field_detection",
-			Severity: "error",
-			Message:  fmt.Sprintf("agent %s has invalid memory plan: %v", agentLabel, err),
-			Location: agentLabel,
-		})
-	}
+
 	if agent.MemoryPlan.Enabled && strings.TrimSpace(proof.OwningFlowID) == "" {
 		return append(findings, Finding{
 			CheckID:  "invalid_field_detection",

@@ -1645,72 +1645,7 @@ type AgentRegistryEntry struct {
 	Implementation         string                          `yaml:"implementation"`
 	AuthoredFields         map[string]bool                 `yaml:"-" json:"-"`
 	EffectiveFieldSources  map[string]string               `yaml:"-" json:"-"`
-}
-
-type agentRegistryEntryYAML AgentRegistryEntry
-
-func (e *AgentRegistryEntry) UnmarshalYAML(value *yaml.Node) error {
-	authoredFields, err := validateAgentRegistryEntryYAMLFields(value)
-	if err != nil {
-		return err
-	}
-	if authoredFields["max_turns_per_task"] {
-		for i := 0; value != nil && value.Kind == yaml.MappingNode && i+1 < len(value.Content); i += 2 {
-			if strings.TrimSpace(value.Content[i].Value) != "max_turns_per_task" {
-				continue
-			}
-			if strings.TrimSpace(value.Content[i+1].Value) == "" {
-				return fmt.Errorf("agent field max_turns_per_task must be positive when authored")
-			}
-		}
-	}
-	var decoded agentRegistryEntryYAML
-	if err := value.Decode(&decoded); err != nil {
-		return err
-	}
-	if authoredFields["max_turns_per_task"] && decoded.MaxTurnsPerTask <= 0 {
-		return fmt.Errorf("agent field max_turns_per_task must be positive when authored")
-	}
-	*e = AgentRegistryEntry(decoded)
-	e.AuthoredFields = authoredFields
-	return nil
-}
-
-func validateAgentRegistryEntryYAMLFields(value *yaml.Node) (map[string]bool, error) {
-	authoredFields := map[string]bool{}
-	if value != nil && value.Kind == yaml.MappingNode {
-		for i := 0; i+1 < len(value.Content); i += 2 {
-			field := strings.TrimSpace(value.Content[i].Value)
-			authoredFields[field] = true
-			switch field {
-			case "model_tier":
-				return nil, fmt.Errorf("RETIRED: agent field model_tier is retired; use model")
-			case "mode":
-				return nil, fmt.Errorf("RETIRED: agent field mode is retired; use memory: true or memory: false")
-			case "conversation_mode":
-				return nil, fmt.Errorf("RETIRED: agent field conversation_mode is retired; use memory")
-			case "session_scope":
-				return nil, fmt.Errorf("RETIRED: agent field session_scope is retired; memory identity is the current run, agent, and flow instance")
-			case "session_scope_authority":
-				return nil, fmt.Errorf("RETIRED: agent field session_scope_authority is retired; use memory")
-			case "tools_tier2":
-				return nil, fmt.Errorf("RETIRED: agent field tools_tier2 is retired; use tools")
-			case "subscriptions_bootstrap":
-				return nil, fmt.Errorf("RETIRED: agent field subscriptions_bootstrap is retired; use subscriptions")
-			case "subscribes_to":
-				return nil, fmt.Errorf("RETIRED: agent field subscribes_to is retired for agents.yaml; use subscriptions")
-			case "prompt_ref", "prompt_inputs":
-				return nil, fmt.Errorf("RETIRED: agent field %s is retired; declare exactly one intent source with intent:", field)
-			case "profile", "agent_defaults", "agent_profiles", "runtime_id_template":
-				return nil, fmt.Errorf("UNSUPPORTED: agent field %s is reserved for future agent-defaults/profile support and is not accepted by Layer 1 platform defaults", field)
-			default:
-				if !supportedAgentRegistryEntryField(field) {
-					return nil, NewUndefinedFieldDiagnostic("agent", field, agentRegistryEntryFieldOptions)
-				}
-			}
-		}
-	}
-	return authoredFields, nil
+	admissionProvenance    map[string]EffectiveValueProvenance
 }
 
 var agentRegistryEntryFieldOptions = map[string]struct{}{

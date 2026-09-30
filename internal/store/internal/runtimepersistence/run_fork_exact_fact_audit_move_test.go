@@ -20,7 +20,7 @@ func TestRunForkExactFactsAdmittedAuditMoveBothStores(t *testing.T) {
 		ctx := testAuthorActivityContext()
 		ensure := func(ctx context.Context, attempt *mutationprotocol.Attempt, f runForkRevisionMatrixFixture) error {
 			identity := mustTestAgentIdentityForRun(f.runID, "revision-matrix-agent", "")
-			record := llm.AgentTurnRecord{RunID: f.runID, AgentID: identity.AgentID(), Identity: identity, Memory: agentmemory.PlatformDefault(), SessionID: old.auditID}
+			record := llm.AgentTurnRecord{RunID: f.runID, AgentID: identity.AgentID(), Identity: identity, Memory: agentmemory.Plan{}, SessionID: old.auditID}
 			// The actual writer contributes both the previous and destination owners.
 			switch selected := s.selected.(type) {
 			case *PostgresStore:

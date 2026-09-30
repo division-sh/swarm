@@ -1112,10 +1112,10 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 					INSERT INTO agent_sessions (
 						session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 						agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-						memory_enabled, memory_source,
+						memory_enabled,
 						status, created_at, updated_at
 					)
-					VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored',
+					VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE,
 						'active', $10, $10)
 				`, uuid.NewString(), sourceRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
 					fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
@@ -1132,10 +1132,10 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 					INSERT INTO agent_conversation_audits (
 						session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 						agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-						entity_id, memory_enabled, memory_source,
+						entity_id, memory_enabled,
 						runtime_state, status, created_at, updated_at
 					)
-					VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10::uuid, FALSE, 'authored',
+					VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10::uuid, FALSE,
 						'{}'::jsonb, 'active', $11, $11)
 				`, uuid.NewString(), sourceRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
 					fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
@@ -1161,7 +1161,7 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 				}
 				if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, runtimedelivery.WithClaim(ctx, claimed.Claim), pg, runtimellm.AgentTurnRecord{
 					AgentID: identity.AgentID(), Identity: identity,
-					RunID: sourceRunID, FlowInstance: identity.FlowInstance(), Memory: agentmemory.Authored(false), SessionID: sessionID,
+					RunID: sourceRunID, FlowInstance: identity.FlowInstance(), Memory: agentmemory.Plan{Enabled: false}, SessionID: sessionID,
 					EntityID: entityID, TriggerEventID: eventID, TriggerEventType: string(event.Type()), TaskID: "task-a", ParseOK: true,
 				}, managedAgentTurnFixtureOptions{TurnID: turnID, Now: at.Add(time.Minute), OriginEvent: &event}); err != nil {
 					return err
@@ -1349,11 +1349,11 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, memory_source,
+			memory_enabled,
 			conversation, turn_count, runtime_state, status, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored',
+			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE,
 			'[]'::jsonb, 0, '{}'::jsonb, 'active', $10, $10
 		)
 	`, sessionID, materialized.ForkRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
@@ -1365,11 +1365,11 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 		INSERT INTO agent_conversation_audits (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			entity_id, memory_enabled, memory_source,
+			entity_id, memory_enabled,
 			conversation, turn_count, runtime_state, status, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10::uuid, FALSE, 'authored',
+			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10::uuid, FALSE,
 			'[]'::jsonb, 1, '{}'::jsonb, 'active', $11, $11
 		)
 	`, uuid.NewString(), materialized.ForkRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
@@ -1389,7 +1389,7 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 	}
 	if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, runtimedelivery.WithClaim(ctx, turnClaim.Claim), pg, runtimellm.AgentTurnRecord{
 		AgentID: identity.AgentID(), Identity: identity,
-		RunID: materialized.ForkRunID, FlowInstance: identity.FlowInstance(), Memory: agentmemory.Authored(true), SessionID: sessionID,
+		RunID: materialized.ForkRunID, FlowInstance: identity.FlowInstance(), Memory: agentmemory.Plan{Enabled: true}, SessionID: sessionID,
 		EntityID: entityID, TriggerEventID: turnEvent.ID(), TriggerEventType: string(turnEvent.Type()), ParseOK: true, Latency: time.Millisecond,
 	}, managedAgentTurnFixtureOptions{TurnID: turnID, Now: at.Add(3 * time.Second), OriginEvent: &turnEvent}); err != nil {
 		t.Fatalf("seed fork turn: %v", err)
@@ -1859,10 +1859,10 @@ func seedSelectedContractSourceConversationHistoryWithDelivery(t *testing.T, db 
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, memory_source,
+			memory_enabled,
 			status, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored',
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE,
 			'active', $10, $10)
 	`, sessionID, sourceRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, at); err != nil {
@@ -1872,10 +1872,10 @@ func seedSelectedContractSourceConversationHistoryWithDelivery(t *testing.T, db 
 		INSERT INTO agent_conversation_audits (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			entity_id, memory_enabled, memory_source,
+			entity_id, memory_enabled,
 			runtime_state, status, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10::uuid, FALSE, 'authored',
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10::uuid, FALSE,
 			'{}'::jsonb, 'active', $11, $11)
 	`, auditID, sourceRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
@@ -1893,7 +1893,7 @@ func seedSelectedContractSourceConversationHistoryWithDelivery(t *testing.T, db 
 	}
 	if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, runtimedelivery.WithClaim(ctx, claimed.Claim), pg, runtimellm.AgentTurnRecord{
 		AgentID: identity.AgentID(), Identity: identity,
-		RunID: sourceRunID, FlowInstance: identity.FlowInstance(), Memory: agentmemory.Authored(true), SessionID: sessionID,
+		RunID: sourceRunID, FlowInstance: identity.FlowInstance(), Memory: agentmemory.Plan{Enabled: true}, SessionID: sessionID,
 		EntityID: entityID, TriggerEventID: eventID, TriggerEventType: string(event.Type()), TaskID: "task-a", ParseOK: true,
 	}, managedAgentTurnFixtureOptions{TurnID: turnID, Now: at, OriginEvent: &event}); err != nil {
 		t.Fatalf("seed source turn: %v", err)
@@ -1936,10 +1936,10 @@ func seedPostTActiveConversationCoupling(t *testing.T, db *sql.DB, sourceRunID, 
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, memory_source,
+			memory_enabled,
 			status, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored',
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE,
 			'active', $10, $10)
 	`, sessionID, sourceRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,

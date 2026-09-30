@@ -357,7 +357,7 @@ func TestSelectedStoreAgentSnapshotHandlersPreserveOutputContractAcrossBackends(
 				t.Fatalf("%s agent.list error = %#v", backend.name, list.Error)
 			}
 			listed := requireAgentSnapshotRPCListItem(t, list.Result, fixture.identity.AgentID())
-			if listed["status"] != "idle" || listed["memory"] != true || listed["memory_source"] != "authored" {
+			if listed["status"] != "idle" || listed["memory"] != true {
 				t.Fatalf("%s agent.list canonical output = %#v", backend.name, listed)
 			}
 
@@ -464,17 +464,6 @@ func TestAgentOperatorSnapshotRejectsMalformedRelatedAuthorityAcrossBackends(t *
 				name: "opaque config",
 				mutate: func(t *testing.T, f agentSnapshotBoundaryFixture) {
 					f.updateJSON(t, "agents", "config", `[]`, "agent_id", f.identity.AgentID())
-				},
-			},
-			{
-				name: "memory plan",
-				mutate: func(t *testing.T, f agentSnapshotBoundaryFixture) {
-					f.withRelaxedCheckConstraints(t, "agents", "memory_source", func(exec agentSnapshotMutationExec) {
-						f.execDialect(t, exec,
-							`UPDATE agents SET memory_enabled=1, memory_source='platform_default' WHERE agent_id=?`,
-							`UPDATE agents SET memory_enabled=TRUE, memory_source='platform_default' WHERE agent_id=$1`,
-							f.identity.AgentID())
-					})
 				},
 			},
 			{
@@ -592,7 +581,7 @@ func newAgentSnapshotBoundaryFixture(t *testing.T, backend agentSnapshotBackend)
 			Config: runtimeactors.AgentConfig{
 				Identity: identity, ID: agentID, Role: "worker", Type: "managed", Model: "regular",
 				ExecutionMode: "live", ResolvedLLMBackend: "anthropic", FlowID: "flow",
-				FlowPath: identity.FlowInstance(), Memory: agentmemory.Authored(true), Config: json.RawMessage(`{}`),
+				FlowPath: identity.FlowInstance(), Memory: agentmemory.Plan{Enabled: true}, Config: json.RawMessage(`{}`),
 				Intent: apiTestResolvedIntent(t, agentID, "Prove one atomic operator agent snapshot."),
 			},
 			Status: "active", StartedAt: startedAt,
@@ -765,16 +754,16 @@ func (f agentSnapshotBoundaryFixture) insertSession(t *testing.T, exec agentSnap
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, time.Now().UTC()}
 	query := `INSERT INTO agent_sessions (
 		session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-		flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source,
+		flow_scope_key, flow_instance_id, flow_instance, memory_enabled,
 		conversation, turn_count, runtime_state, status, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'authored', '[]', 0, '{}', 'active', ?, ?)`
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, '[]', 0, '{}', 'active', ?, ?)`
 	args = append(args, args[len(args)-1])
 	if !f.backend.sqlite {
 		query = `INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-			flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source,
+			flow_scope_key, flow_instance_id, flow_instance, memory_enabled,
 			conversation, turn_count, runtime_state, status, created_at, updated_at
-		) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored', '[]'::jsonb, 0, '{}'::jsonb, 'active', $10, $11)`
+		) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, '[]'::jsonb, 0, '{}'::jsonb, 'active', $10, $11)`
 	}
 	if _, err := exec.ExecContext(f.ctx, query, args...); err != nil {
 		t.Fatalf("insert %s agent session: %v", f.backend.name, err)
@@ -867,7 +856,7 @@ func (f agentSnapshotBoundaryFixture) seedTurnWithOutputContract(t *testing.T, t
 	turnID := uuid.NewString()
 	storetest.PersistManagedAgentTurnFixture(t, f.ctx, storetest.ManagedAgentTurnFixture{
 		Store: f.store, Selected: f.store, Identity: f.identity, RunID: f.runID,
-		SessionID: f.sessionID, TurnID: turnID, Memory: agentmemory.Authored(true), Event: event,
+		SessionID: f.sessionID, TurnID: turnID, Memory: agentmemory.Plan{Enabled: true}, Event: event,
 		TaskID: taskID, EntityID: entityID, ParseOK: parseOK, Latency: time.Millisecond, CreatedAt: createdAt,
 		TurnBlocks: blocks,
 	})
@@ -989,9 +978,9 @@ func (f agentSnapshotBoundaryFixture) insertSQLiteRenamedSession(t *testing.T, e
 	now := time.Now().UTC()
 	if _, err := exec.ExecContext(f.ctx, `INSERT INTO agent_sessions_snapshot_source (
 		session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-		flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source,
+		flow_scope_key, flow_instance_id, flow_instance, memory_enabled,
 		conversation, turn_count, runtime_state, status, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'authored', '[]', 0, '{}', 'active', ?, ?)`,
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, '[]', 0, '{}', 'active', ?, ?)`,
 		sessionID, f.runID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, now, now); err != nil {
 		t.Fatalf("insert sqlite successor session: %v", err)

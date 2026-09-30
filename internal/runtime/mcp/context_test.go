@@ -34,7 +34,7 @@ func managedClaudeProviderTurnTestContext(t testing.TB, executionKind managedcap
 	harness.Token.Identity = identity
 	target := runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(), RunID: identity.RunID, AgentID: actorID,
-		AgentIdentity: identity, SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(),
+		AgentIdentity: identity, SessionID: uuid.NewString(), Memory: agentmemory.Plan{},
 		FlowInstance: identity.FlowInstance(),
 	}
 	var (

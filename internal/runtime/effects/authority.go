@@ -69,9 +69,7 @@ func (t UsageTarget) Valid() bool {
 			identity.AgentID() != strings.TrimSpace(t.AgentID) {
 			return false
 		}
-		memory, err := t.Memory.Normalize()
-		return err == nil &&
-			(!memory.Enabled || strings.TrimSpace(t.FlowInstance) != "") &&
+		return (!t.Memory.Enabled || strings.TrimSpace(t.FlowInstance) != "") &&
 			identity.FlowInstance() == strings.Trim(strings.TrimSpace(t.FlowInstance), "/")
 	case UsageTargetConversationForkCompletion:
 		return t.Ordinal > 0 && validUUIDs(t.RunID)
@@ -335,8 +333,8 @@ func (a Authority) Evidence() map[string]any {
 			"kind": a.Target.Kind, "id": a.Target.ID, "ordinal": a.Target.Ordinal,
 			"run_id": a.Target.RunID, "agent_id": a.Target.AgentID, "session_id": a.Target.SessionID,
 			"agent_identity": a.Target.AgentIdentity,
-			"memory_enabled": a.Target.Memory.Enabled, "memory_source": a.Target.Memory.Source,
-			"flow_instance": a.Target.FlowInstance, "entity_id": a.Target.EntityID,
+			"memory_enabled": a.Target.Memory.Enabled,
+			"flow_instance":  a.Target.FlowInstance, "entity_id": a.Target.EntityID,
 		}
 	}
 	switch a.Kind {

@@ -7563,11 +7563,11 @@ engine:
       authored_field:
         name: memory
         type: boolean
-        omitted: false with provenance platform_default
-        explicit_false: false with provenance authored
-        explicit_true: true with provenance authored
-        state_invariant: Memory true with platform_default provenance is invalid. Typed plan construction, runtime/store
-          admission, persistence hydration, and fresh-schema constraints fail closed on that impossible pair.
+        omitted: false
+        explicit_false: 'RETIRED: memory: false is the default; remove it.'
+        explicit_true: true
+        state_invariant: Memory is one enablement boolean. No independent source enum is authored, persisted,
+          fingerprinted or surfaced. Enabled memory requires the exact run, agent and flow-instance owner.
       semantics:
         'false': Every invocation starts with fresh in-process/provider conversation state. Append-only turn and audit
           evidence may remain durable but is never hydrated into later requests.
@@ -7597,7 +7597,7 @@ engine:
       precedence:
       - Explicit authored agent field wins.
       - If the field is omitted and listed in this section, the platform default is materialized into the effective
-        agent entry with provenance `platform_default`.
+        agent entry with provenance `platform_default`, except memory whose effective view carries only its value.
       - If the field is omitted and not listed in this section, no platform default exists.
       fields:
         type:
@@ -7606,11 +7606,10 @@ engine:
             effective semantics.
         memory:
           default: false
-          provenance: platform_default
-          rationale: Omission is explicit stateless execution; authored false/true preserve authored provenance.
+          rationale: Omission is stateless execution; only memory true is authorable. No independent memory provenance exists.
         max_turns_per_task:
           default: 100
-          authored_constraint: When explicitly authored, the value MUST be positive.
+          authored_constraint: When explicitly authored, the value MUST be a positive integer other than the default 100.
           rationale: Promotes the historical LLM-agent runtime fallback into contracts-owned effective semantics.
         workspace_class:
           default: absent/empty
@@ -7621,7 +7620,17 @@ engine:
         manager_fallback: No platform default in Layer 1; explicit value only.
       generated_view:
         rule: Generated/expanded views MUST show each effective Layer 1 field value and whether it was authored
-          directly or platform-defaulted, including the `memory` fact and provenance.
+          directly or platform-defaulted, except memory which is shown only by value.
+      authored_admission:
+        owner: scoped yamlsource.Value agent-family projection before effective normalization
+        rules:
+        - Both disk and admitted-artifact loaders use the same complete agents.yaml projection.
+        - Missing, null, empty and scalar/container kinds remain distinct until field-specific admission.
+        - Unknown or retired fields fail on presence, including nested write/access/native/mock fields and aliases/merges.
+        - Text fields do not coerce numbers or booleans; lists admit only text items; integer fields reject floating kinds.
+        - Matching map-key id, type generic, memory false, max_turns_per_task 100 and empty workspace_class retire with omission guidance.
+        - Declared nondefault identity, intent bytes, grants, scope and all runtime lifecycle/authorization semantics are unchanged.
+        - Complete document expansion is bounded before projection; child declarations cannot reset the budget.
       unsupported_layer_syntax:
         rule: Authored `agent_defaults`, named `profile`, `agent_profiles`, and `runtime_id_template` syntax is not
           accepted by Layer 1. These fields/blocks MUST fail closed or be separately gated before implementation.
@@ -7709,8 +7718,7 @@ engine:
       - 'terminated rows may receive successor_session_id later, but status and termination_reason do not change.'
     agent_memory_contract:
       canonical_plan:
-        fields: [enabled, source]
-        sources: [authored, platform_default]
+        fields: [enabled]
         owner: Effective contract normalization compiles the authored field once; all runtime and read consumers carry
           the typed plan rather than reinterpreting source YAML or persisted strings.
       normal_identity:
@@ -15041,7 +15049,6 @@ platform_tables:
             model                       TEXT NOT NULL,
             llm_backend                 TEXT NOT NULL DEFAULT 'anthropic' CHECK (llm_backend IN ('anthropic', 'claude_cli', 'openai_compatible', 'openai_responses', 'mock', 'local')),
             memory_enabled              BOOLEAN NOT NULL DEFAULT FALSE,
-            memory_source               TEXT NOT NULL DEFAULT 'platform_default' CHECK (memory_source IN ('authored', 'platform_default')),
             parent_agent_id             TEXT,
             entity_id                   UUID,
             config                      JSONB NOT NULL DEFAULT '{}',
@@ -15072,7 +15079,6 @@ platform_tables:
             created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             PRIMARY KEY (run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance),
             CHECK ((agent_route_presence = 'root' AND flow_scope_key = '' AND flow_instance_id = '' AND flow_instance = '') OR (agent_route_presence = 'present' AND NULLIF(flow_scope_key, '') IS NOT NULL AND NULLIF(flow_instance_id, '') IS NOT NULL AND NULLIF(flow_instance, '') IS NOT NULL)),
-            CHECK (NOT memory_enabled OR memory_source = 'authored'),
             INDEX idx_agents_name (run_id, agent_id),
             INDEX idx_agents_flow (run_id, flow_instance) WHERE flow_instance <> '',
             INDEX idx_agents_role (run_id, role),
@@ -15954,7 +15960,6 @@ platform_tables:
             flow_instance_id     TEXT NOT NULL,
             flow_instance        TEXT NOT NULL,
             memory_enabled       BOOLEAN NOT NULL DEFAULT TRUE CHECK (memory_enabled = TRUE),
-            memory_source        TEXT NOT NULL DEFAULT 'authored' CHECK (memory_source = 'authored'),
             conversation         JSONB NOT NULL DEFAULT '[]',
             turn_count           INTEGER NOT NULL DEFAULT 0,
             runtime_state        JSONB NOT NULL DEFAULT '{}',
@@ -16167,7 +16172,6 @@ platform_tables:
             session_id                      UUID NOT NULL,
             flow_instance                   TEXT NOT NULL,
             memory_enabled                  BOOLEAN NOT NULL,
-            memory_source                   TEXT NOT NULL CHECK (memory_source IN ('authored', 'platform_default')),
             entity_id                       UUID,
             trigger_event_id                UUID,
             trigger_event_type              TEXT,
@@ -16230,7 +16234,6 @@ platform_tables:
             flow_instance        TEXT NOT NULL,
             entity_id            UUID,
             memory_enabled       BOOLEAN NOT NULL DEFAULT FALSE CHECK (memory_enabled = FALSE),
-            memory_source        TEXT NOT NULL CHECK (memory_source IN ('authored', 'platform_default')),
             conversation         JSONB NOT NULL DEFAULT '[]',
             turn_count           INTEGER NOT NULL DEFAULT 0,
             runtime_state        JSONB NOT NULL DEFAULT '{}',
@@ -19536,7 +19539,6 @@ platform_events:
         agent_id: string
         flow_instance: string?
         memory_enabled: boolean
-        memory_source: string (authored | platform_default)
         model: string
         llm_backend: string
         resolved_llm_provider: string
@@ -23972,9 +23974,6 @@ cli_specification:
             agent_status:
               machine_owner: components.schemas.AgentStatus and operatorAgentProjection.v1Status
               phrases: {idle: idle, running: running, paused: paused, failed: failed, terminated: terminated}
-            memory_source:
-              machine_owner: internal/runtime/agentmemory.Source and persisted memory_source
-              phrases: {authored: authored, platform_default: platform default}
             delivery_status:
               machine_owner: persisted event_deliveries.status contract and components.schemas.DeliveryStatus
               phrases: {pending: pending, in_progress: in progress, delivered: delivered, failed: failed, dead_letter: dead letter}
@@ -30742,11 +30741,6 @@ api_specification:
           idempotency_replayed:
             type: boolean
             description: False for first execution; true when returned from the API idempotency replay path.
-      AgentMemorySource:
-        type: string
-        enum:
-        - authored
-        - platform_default
       ExecutionMode:
         type: string
         enum: [live, mock]
@@ -30767,7 +30761,6 @@ api_specification:
         - type
         - model
         - memory
-        - memory_source
         - execution_mode
         - status
         properties:
@@ -30782,8 +30775,6 @@ api_specification:
           memory:
             type: boolean
             description: Whether prior turns are loaded for this agent's exact run and flow instance. False does not imply that diagnostic turn evidence is absent.
-          memory_source:
-            $ref: '#/components/schemas/AgentMemorySource'
           execution_mode:
             $ref: '#/components/schemas/ExecutionMode'
           flow_instance:
@@ -32315,11 +32306,6 @@ api_specification:
             type: string
           session_memory:
             type: boolean
-          session_memory_source:
-            type: string
-            enum:
-            - authored
-            - platform_default
           session_status:
             type: string
           session_updated_at:
@@ -32334,11 +32320,6 @@ api_specification:
             type: string
           turn_memory:
             type: boolean
-          turn_memory_source:
-            type: string
-            enum:
-            - authored
-            - platform_default
           turn_entity_id:
             $ref: '#/components/schemas/OpaqueId'
           turn_task_id:

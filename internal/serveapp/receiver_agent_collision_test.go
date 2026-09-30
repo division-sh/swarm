@@ -118,12 +118,12 @@ func requireServedReceiverAgentCollision(t *testing.T, rt servedControlProofRunt
 		time.Sleep(20 * time.Millisecond)
 	}
 	waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, runID)
-	var path, entityID, flowRaw, agentID, raw, descriptor, tools, permissions, memorySource, model string
+	var path, entityID, flowRaw, agentID, raw, descriptor, tools, permissions, model string
 	var memory bool
 	if err := rt.DB.QueryRow(`SELECT f.instance_path,e.entity_id,CAST(f.config AS TEXT) FROM flow_instances f JOIN entity_state e ON e.run_id=f.run_id AND e.flow_instance=f.instance_path WHERE f.run_id=$1 AND f.flow_template='account'`, runID).Scan(&path, &entityID, &flowRaw); err != nil {
 		t.Fatal(err)
 	}
-	if err := rt.DB.QueryRow(`SELECT agent_id,CAST(config AS TEXT),CAST(runtime_descriptor AS TEXT),CAST(tools AS TEXT),CAST(permissions AS TEXT),memory_enabled,memory_source,model FROM agents WHERE run_id=$1 AND flow_instance=$2`, runID, path).Scan(&agentID, &raw, &descriptor, &tools, &permissions, &memory, &memorySource, &model); err != nil {
+	if err := rt.DB.QueryRow(`SELECT agent_id,CAST(config AS TEXT),CAST(runtime_descriptor AS TEXT),CAST(tools AS TEXT),CAST(permissions AS TEXT),memory_enabled,model FROM agents WHERE run_id=$1 AND flow_instance=$2`, runID, path).Scan(&agentID, &raw, &descriptor, &tools, &permissions, &memory, &model); err != nil {
 		t.Fatal(err)
 	}
 	var envelope, flow map[string]any
@@ -214,7 +214,7 @@ func requireServedReceiverAgentCollision(t *testing.T, rt servedControlProofRunt
 	if count != turns || deliveries != turns {
 		t.Fatalf("turns/delivered first claims=%d/%d want=%d", count, deliveries, turns)
 	}
-	return map[string]any{"agent": agentID, "path": path, "entity": entityID, "descriptor": authority, "tools": tools, "permissions": permissions, "memory_source": memorySource, "model": model, "config": envelope}
+	return map[string]any{"agent": agentID, "path": path, "entity": entityID, "descriptor": authority, "tools": tools, "permissions": permissions, "memory": memory, "model": model, "config": envelope}
 }
 
 type receiverCollisionProvider struct {

@@ -29,9 +29,7 @@ type ClaudeStateRequest struct {
 }
 
 func ClaudeSessionState(memory agentmemory.Plan, identity agentidentity.Identity, session string) (ClaudeStateRequest, error) {
-	if _, err := memory.Normalize(); err != nil {
-		return ClaudeStateRequest{}, err
-	}
+
 	if err := agentmemory.ValidateIdentity(identity, memory.Enabled); err != nil {
 		return ClaudeStateRequest{}, err
 	}

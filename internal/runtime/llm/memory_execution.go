@@ -56,12 +56,9 @@ func (r resolvedMemoryExecution) Enabled() bool { return r.Plan.Enabled }
 func resolveMemoryExecution(ctx context.Context, agentID string) (resolvedMemoryExecution, error) {
 	execution, ok := agentmemory.FromContext(ctx)
 	if !ok {
-		return resolvedMemoryExecution{Plan: agentmemory.PlatformDefault()}, nil
+		return resolvedMemoryExecution{Plan: agentmemory.Plan{}}, nil
 	}
-	plan, err := execution.Plan.Normalize()
-	if err != nil {
-		return resolvedMemoryExecution{}, err
-	}
+	plan := execution.Plan
 	identity := execution.Identity.Normalize()
 	if err := agentmemory.ValidateIdentity(identity, false); err != nil {
 		return resolvedMemoryExecution{}, err

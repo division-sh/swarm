@@ -28,7 +28,7 @@ func CopyRuntimeAgentMemory(t testing.TB, variant RuntimeAgentMemoryVariant) str
 	removeClosedVariantFiles(t, root, "events.yaml")
 	writeClosedVariantFile(t, root, "support/entities.yaml", "support_item:\n  entity_id:\n    type: string\n    _unused_reason: startup scope fixture field\n")
 	writeClosedVariantFile(t, root, "support/events.yaml", "item.created:\n  entity_id: string?\n")
-	agentBody := "backend:\n  type: generic\n  role: backend\n  intent: prompts/backend.md\n  model: regular\n  memory: true\n  subscriptions:\n    - item.created\n  emit_events:\n    - item.created\n"
+	agentBody := "backend:\n  role: backend\n  intent: prompts/backend.md\n  model: regular\n  memory: true\n  subscriptions:\n    - item.created\n  emit_events:\n    - item.created\n"
 	if variant == RuntimeAgentMemoryDirectFlow {
 		writeClosedVariantFile(t, root, "support/schema.yaml", "name: support\nstages: []\n")
 		writeClosedVariantFile(t, root, "support/prompts/backend.md", "Handle support events.\n")
@@ -72,10 +72,10 @@ func CopyEventMetadataAuthority(t testing.TB, variant EventMetadataAuthorityVari
 		taskDoneSwarm = "    source: worker\n"
 	case EventMetadataAuthorityTaskProducerAgent:
 		taskDoneSwarm = "    producer: reviewer\n"
-		agents = "reviewer-agent:\n  id: reviewer-agent\n  role: reviewer\n  intent: {inline: 'Review and emit task completion.'}\n  emit_events: [task.done]\n"
+		agents = "reviewer-agent:\n  role: reviewer\n  intent: {inline: 'Review and emit task completion.'}\n  emit_events: [task.done]\n"
 	case EventMetadataAuthorityTaskConsumerAgent:
 		taskDoneSwarm = "    consumer: reviewer\n"
-		agents = "reviewer-agent:\n  id: reviewer-agent\n  role: reviewer\n  intent: {inline: 'Review completed tasks.'}\n  subscriptions: [task.done]\n"
+		agents = "reviewer-agent:\n  role: reviewer\n  intent: {inline: 'Review completed tasks.'}\n  subscriptions: [task.done]\n"
 	case EventMetadataAuthorityTaskProducerTimer:
 		taskDoneSwarm = "    producer: reminder\n"
 		timerBlock = "  timers:\n    - id: reminder\n      owner: worker\n      event: task.done\n      delay: 1m\n      start_on: event:task.start\n"
@@ -214,7 +214,7 @@ func copyTimerValidation(t testing.TB, settings timerValidationSettings) string 
 	writeClosedVariantFile(t, root, "support/schema.yaml", "name: support\nstages:\n  waiting: {initial: true}\n  active: {}\n  done: {terminal: true}\n"+flowPins)
 	agents := ""
 	if settings.flowAgent {
-		agents = "reminder-agent:\n  intent: {inline: 'Handle timer reminders.'}\n  model: regular\n  memory: false\n  subscriptions: [timer.reminder]\n  emit_events: []\n"
+		agents = "reminder-agent:\n  intent: {inline: 'Handle timer reminders.'}\n  model: regular\n  subscriptions: [timer.reminder]\n  emit_events: []\n"
 	}
 	if agents != "" {
 		writeClosedVariantFile(t, root, "support/agents.yaml", agents)

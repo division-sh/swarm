@@ -1441,7 +1441,7 @@ func selectedAgentTurnTarget(runID string) runtimeeffects.UsageTarget {
 	return runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(), RunID: runID,
 		AgentID: "selected-agent", AgentIdentity: identity, SessionID: uuid.NewString(),
-		Memory: agentmemory.PlatformDefault(), FlowInstance: "selected-test",
+		Memory: agentmemory.Plan{}, FlowInstance: "selected-test",
 	}
 }
 

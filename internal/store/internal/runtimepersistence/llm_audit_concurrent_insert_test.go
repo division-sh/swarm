@@ -26,7 +26,7 @@ func TestLLMPostgresConcurrentFirstAuditInsertCapturesBothOwners(t *testing.T) {
 	record := func(run string) runtimellm.AgentTurnRecord {
 		identity := mustTestAgentIdentityForRun(run, "revision-matrix-agent", "")
 		return runtimellm.AgentTurnRecord{SessionID: sessionID, RunID: run, Identity: identity,
-			AgentID: identity.AgentID(), FlowInstance: identity.FlowInstance(), Memory: agentmemory.PlatformDefault()}
+			AgentID: identity.AgentID(), FlowInstance: identity.FlowInstance(), Memory: agentmemory.Plan{}}
 	}
 	runMutation := func(write func(context.Context, *mutationprotocol.Attempt) error) error {
 		return mutationprotocol.RunPostgres(ctx, store.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, store.runLifecycleCandidates,

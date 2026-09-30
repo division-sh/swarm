@@ -73,7 +73,7 @@ func (h *Harness) Context(identity string) context.Context {
 	ctx = managedexecution.WithAdmission(ctx, admission)
 	target := runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(), RunID: h.Token.Identity.RunID, AgentID: h.Token.AgentID,
-		AgentIdentity: h.Token.Identity, SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(),
+		AgentIdentity: h.Token.Identity, SessionID: uuid.NewString(), Memory: agentmemory.Plan{},
 		FlowInstance: h.Token.Identity.FlowInstance(),
 	}
 	ctx = runtimeeffects.WithUsageTarget(ctx, target)
@@ -99,7 +99,7 @@ func (h *Harness) CompletionContext(identity string) context.Context {
 		RunID: h.Token.Identity.RunID, AgentID: h.Token.AgentID,
 		AgentIdentity: h.Token.Identity, SessionID: "22222222-2222-4222-8222-222222222222",
 		FlowInstance: h.Token.Identity.FlowInstance(),
-		Memory:       agentmemory.PlatformDefault(),
+		Memory:       agentmemory.Plan{},
 	}
 	ctx = runtimeeffects.WithUsageTarget(ctx, target)
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{

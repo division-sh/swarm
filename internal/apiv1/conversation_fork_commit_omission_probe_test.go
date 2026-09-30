@@ -69,7 +69,7 @@ func newConversationForkCommitFixture(t *testing.T, backend string) (context.Con
 	if err := storetest.UpsertStaticAgentFixture(t, ctx, selected, manager.PersistedAgent{
 		Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 			Identity: identity, ID: agentID, Role: "researcher", Type: "managed", Model: "cheap",
-			ExecutionMode: "live", ResolvedLLMBackend: "anthropic", FlowPath: "flow/a", Memory: agentmemory.Authored(true),
+			ExecutionMode: "live", ResolvedLLMBackend: "anthropic", FlowPath: "flow/a", Memory: agentmemory.Plan{Enabled: true},
 		}), Status: "active", StartedAt: now.Add(-5 * time.Minute),
 	}); err != nil {
 		t.Fatal(err)
@@ -81,7 +81,7 @@ func newConversationForkCommitFixture(t *testing.T, backend string) (context.Con
 	})
 	storetest.PersistManagedAgentTurnFixture(t, ctx, storetest.ManagedAgentTurnFixture{
 		Store: selected, Selected: selected, Identity: identity, RunID: runID, SessionID: sessionID,
-		TurnID: turnID, Memory: agentmemory.Authored(true), Event: history[0], ParseOK: true, CreatedAt: now.Add(-2 * time.Minute),
+		TurnID: turnID, Memory: agentmemory.Plan{Enabled: true}, Event: history[0], ParseOK: true, CreatedAt: now.Add(-2 * time.Minute),
 	})
 	return ctx, selected, db, now, sessionID, turnID
 }

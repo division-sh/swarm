@@ -134,9 +134,9 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, memory_source, status
+			memory_enabled, status
 		)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored', 'active')
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'active')
 	`, activeSessionID, evt.RunID(), controlPlaneFields.AgentID, controlPlaneFields.NameOwner,
 		controlPlaneFields.NameSource, controlPlaneFields.RoutePresence, controlPlaneFields.FlowScopeKey,
 		controlPlaneFields.FlowInstanceID, controlPlaneFields.FlowInstancePath); err != nil {

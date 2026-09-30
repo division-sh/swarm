@@ -891,9 +891,9 @@ func TestRunForkPlanner_RunScopedActiveSessionAndTurnRemainBlockers(t *testing.T
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, memory_source, status, created_at, updated_at
+			memory_enabled, status, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored', 'active', $10, $10)
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'active', $10, $10)
 	`, sessionID, runID, fields.AgentID, fields.NameOwner, fields.NameSource,
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
 		at.Add(-time.Second)); err != nil {
@@ -910,7 +910,7 @@ func TestRunForkPlanner_RunScopedActiveSessionAndTurnRemainBlockers(t *testing.T
 	}
 	if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, runtimedelivery.WithClaim(ctx, claimed.Claim), pg, runtimellm.AgentTurnRecord{
 		AgentID: identity.AgentID(), Identity: identity,
-		RunID: runID, FlowInstance: identity.FlowInstance(), Memory: agentmemory.Authored(true), SessionID: sessionID,
+		RunID: runID, FlowInstance: identity.FlowInstance(), Memory: agentmemory.Plan{Enabled: true}, SessionID: sessionID,
 		TriggerEventID: eventID, TriggerEventType: "fork.session", ParseOK: true,
 	}, managedAgentTurnFixtureOptions{TurnID: turnID, Now: at, OriginEvent: &event}); err != nil {
 		t.Fatalf("seed active turn: %v", err)
@@ -955,9 +955,9 @@ func TestRunForkPlanner_ActiveConversationAuditRemainsPolicyBlocker(t *testing.T
 		INSERT INTO agent_conversation_audits (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, memory_source, runtime_state, status, created_at, updated_at
+			memory_enabled, runtime_state, status, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, FALSE, 'authored', '{}'::jsonb, 'active', $10, $10)
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, FALSE, '{}'::jsonb, 'active', $10, $10)
 	`, auditSessionID, runID, fields.AgentID, fields.NameOwner, fields.NameSource,
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
 		at.Add(-time.Second)); err != nil {
@@ -998,10 +998,10 @@ func TestRunForkPlanner_TerminatedSessionBeforeForkIsLineageOnly(t *testing.T) {
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, memory_source, status, termination_reason, terminated_at, created_at, updated_at
+			memory_enabled, status, termination_reason, terminated_at, created_at, updated_at
 		)
 		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9,
-			TRUE, 'authored', 'terminated', 'normal', $10, $11, $10)
+			TRUE, 'terminated', 'normal', $10, $11, $10)
 	`, sessionID, runID, fields.AgentID, fields.NameOwner, fields.NameSource,
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
 		at.Add(-time.Second), at.Add(-time.Minute)); err != nil {
@@ -1038,9 +1038,9 @@ func TestRunForkPlanner_TerminatedAuditStillBlocksWithoutAtForkTerminationProof(
 		INSERT INTO agent_conversation_audits (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, memory_source, runtime_state, status, created_at, updated_at
+			memory_enabled, runtime_state, status, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, FALSE, 'authored', '{}'::jsonb, 'terminated', $10, $11)
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, FALSE, '{}'::jsonb, 'terminated', $10, $11)
 	`, auditSessionID, runID, fields.AgentID, fields.NameOwner, fields.NameSource,
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
 		at.Add(-time.Second), at.Add(time.Second)); err != nil {

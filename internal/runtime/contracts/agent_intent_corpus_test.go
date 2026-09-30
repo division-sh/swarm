@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
 )
 
@@ -123,8 +124,8 @@ func classifyAgentIntentCorpusFile(t testing.TB, path, negativeClass string) (st
 		if intentNode == nil {
 			t.Fatalf("agent %q has no explicit intent: source", agentID)
 		}
-		var source runtimeagentintent.Source
-		if err := source.UnmarshalYAML(intentNode); err != nil {
+		source, err := runtimeagentintent.AdmitSource(yamlsource.ValueFromNode(intentNode))
+		if err != nil {
 			t.Fatalf("agent %q intent: %v", agentID, err)
 		}
 		if source.Kind != runtimeagentintent.SourceLocal {

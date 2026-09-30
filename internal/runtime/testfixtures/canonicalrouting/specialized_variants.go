@@ -304,7 +304,6 @@ func CopyVerifyLintEvidence(t testing.TB, missingEmitSchema bool) string {
 `)
 	if missingEmitSchema {
 		writeClosedVariantFile(t, root, "child/agents.yaml", `strict-schema-agent:
-  id: strict-schema-agent
   role: strict_schema_agent
   intent: prompts/strict-schema-agent.md
   model: regular

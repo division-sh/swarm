@@ -95,7 +95,7 @@ func testOperatorAgentConfigForIdentity(identity agentidentity.Identity, role st
 		Type:          "managed",
 		Model:         "cheap",
 		ExecutionMode: "live",
-		Memory:        agentmemory.PlatformDefault(),
+		Memory:        agentmemory.Plan{},
 		FlowPath:      "global",
 		Config:        json.RawMessage(`{}`),
 	})
@@ -123,8 +123,8 @@ func TestOperatorConversationReadSurfaceListUsesCanonicalProjection(t *testing.T
 	mock.ExpectQuery("SELECT\\s+conversations\\.session_id,\\s+conversations\\.agent_id,\\s+conversations\\.run_id,.*FROM \\(").
 		WithArgs("agent-1", runID, 3).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"session_id", "agent_id", "run_id", "kind", "flow_instance", "memory_enabled", "memory_source", "status", "turn_count", "message_count", "runtime_state", "started_at", "ended_at", "updated_at",
-		}).AddRow("sess-1", "agent-1", runID, "live_session", "global", true, "authored", "active", 2, 4, []byte(`{"summary":"brief"}`), now, nil, now))
+			"session_id", "agent_id", "run_id", "kind", "flow_instance", "memory_enabled", "status", "turn_count", "message_count", "runtime_state", "started_at", "ended_at", "updated_at",
+		}).AddRow("sess-1", "agent-1", runID, "live_session", "global", true, "active", 2, 4, []byte(`{"summary":"brief"}`), now, nil, now))
 	mock.ExpectQuery("(?s)WITH ordered AS.*FROM agent_turns.*ORDER BY created_at DESC, turn_id DESC").
 		WithArgs("sess-1").
 		WillReturnRows(sqlmock.NewRows([]string{

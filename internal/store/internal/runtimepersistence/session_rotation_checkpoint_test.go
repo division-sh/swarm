@@ -51,7 +51,7 @@ func TestSelectedRotationCheckpointIsAcquiredBaseBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				session := &runtimellm.Session{ID: predecessor.SessionID, AgentID: identity.AgentID(), Memory: agentmemory.Authored(true), MemoryIdentity: identity, Messages: hydrated.Messages, TurnCount: hydrated.TurnCount}
+				session := &runtimellm.Session{ID: predecessor.SessionID, AgentID: identity.AgentID(), Memory: agentmemory.Plan{Enabled: true}, MemoryIdentity: identity, Messages: hydrated.Messages, TurnCount: hydrated.TurnCount}
 				var successor *sessions.Lease
 				if reason == "parse_failure" {
 					session.ParseFailures = 1

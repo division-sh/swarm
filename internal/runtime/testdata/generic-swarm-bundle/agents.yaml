@@ -1,5 +1,4 @@
 control-plane:
-  id: control-plane
   role: control-plane
   intent:
     inline: |
@@ -16,7 +15,6 @@ control-plane:
   emit_events:
     - item.created
 worker-a:
-  id: worker-a
   role: worker
   intent: {inline: "Process assigned generic bundle work as worker A."}
   manager_fallback: control-plane
@@ -29,7 +27,6 @@ worker-a:
     - item.completed
     - item.rejected
 worker-b:
-  id: worker-b
   role: worker
   intent: {inline: "Process assigned generic bundle work as worker B."}
   manager_fallback: control-plane

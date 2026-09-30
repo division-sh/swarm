@@ -53,7 +53,7 @@ func TestPostgresLLMExactRevisionFactsUseStoredUUIDCoordinates(t *testing.T) {
 			}
 			record := runtimellm.AgentTurnRecord{
 				SessionID: spell(sessionID), RunID: identity.RunID, Identity: identity,
-				AgentID: identity.AgentID(), FlowInstance: identity.FlowInstance(), Memory: agentmemory.PlatformDefault(),
+				AgentID: identity.AgentID(), FlowInstance: identity.FlowInstance(), Memory: agentmemory.Plan{},
 			}
 			owner := &LLMPostgresOwner{}
 			write := func() error {

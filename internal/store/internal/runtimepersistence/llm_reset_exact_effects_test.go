@@ -37,9 +37,9 @@ func seedLLMExactSession(t *testing.T, s exactFactStore, runID, agent, status st
 	}
 	_, err := s.db.ExecContext(ctx, `INSERT INTO agent_sessions (
 		session_id,run_id,agent_id,agent_name_owner,agent_name_source,agent_route_presence,
-		flow_scope_key,flow_instance_id,flow_instance,memory_enabled,memory_source,
+		flow_scope_key,flow_instance_id,flow_instance,memory_enabled,
 		conversation,turn_count,runtime_state,status,termination_reason,terminated_at,created_at,updated_at
-	) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,TRUE,'authored','[]',0,'{}',$10,$11,$12,$13,$13)`,
+	) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,TRUE,'[]',0,'{}',$10,$11,$12,$13,$13)`,
 		id, runID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, status, reason, terminated, at)
 	if err != nil {

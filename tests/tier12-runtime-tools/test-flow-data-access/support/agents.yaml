@@ -1,5 +1,4 @@
 reference-agent:
-  id: reference-agent
   role: reference_reader
   model: regular
   intent: prompts/reference-agent.md

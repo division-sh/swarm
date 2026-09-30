@@ -214,7 +214,7 @@ func persistedIntentTestAgent(t testing.TB) runtimeactors.AgentConfig {
 		LLMBackend:         "claude_cli",
 		ResolvedLLMBackend: "claude_cli",
 		ExecutionMode:      runtimeeffects.ExecutionModeLive,
-		Memory:             agentmemory.Authored(false),
+		Memory:             agentmemory.Plan{Enabled: false},
 		Intent:             intent,
 		Prompt:             prompt,
 		Criteria:           []string{"quality"},

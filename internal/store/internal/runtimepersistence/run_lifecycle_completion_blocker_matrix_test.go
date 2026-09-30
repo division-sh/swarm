@@ -281,9 +281,9 @@ func insertCompletionBlockerSession(
 	query := `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
-			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, memory_enabled,
 			lease_holder, lease_grant_id, lease_expires_at, status
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE, 'authored', ?, ?, ?, 'active')`
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE, ?, ?, ?, 'active')`
 	args := []any{
 		uuid.NewString(), runID, fields.AgentID, fields.NameOwner, fields.NameSource,
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
@@ -293,9 +293,9 @@ func insertCompletionBlockerSession(
 		query = `
 			INSERT INTO agent_sessions (
 				session_id, run_id, agent_id, agent_name_owner, agent_name_source,
-				agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source,
+				agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, memory_enabled,
 				lease_holder, lease_grant_id, lease_expires_at, status
-			) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored', $10, $11, $12, 'active')`
+			) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, $10, $11, $12, 'active')`
 	}
 	_, err := fixture.db.ExecContext(ctx, query, args...)
 	return err
@@ -350,7 +350,7 @@ func insertCompletionBlockerEffect(
 	authority.Target = effects.UsageTarget{
 		Kind: effects.UsageTargetAgentTurn, ID: targetID, RunID: runID,
 		AgentID: identity.AgentID(), AgentIdentity: identity, SessionID: sessionID,
-		Memory: agentmemory.PlatformDefault(), FlowInstance: identity.FlowInstance(), EntityID: runID,
+		Memory: agentmemory.Plan{}, FlowInstance: identity.FlowInstance(), EntityID: runID,
 	}
 	surface := managedCompletionTestSurface(t, authority, "mock_python")
 	if err := fixture.store.(interface {

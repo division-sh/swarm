@@ -199,7 +199,7 @@ func gatewayStoryCapabilitySurface(t *testing.T, gateway *runtimemcp.Gateway, ac
 	authority := runtimeeffects.NormalAgentAuthority(token, "gateway-story-owner", time.Now().UTC().Add(time.Hour))
 	authority.Target = runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: turnID, RunID: runID, AgentID: actor.ID,
-		AgentIdentity: actor.Identity, SessionID: sessionID, Memory: agentmemory.PlatformDefault(),
+		AgentIdentity: actor.Identity, SessionID: sessionID, Memory: agentmemory.Plan{},
 		FlowInstance: actor.CanonicalFlowPath(),
 	}
 	binding := managedcapabilities.DeliveryBinding{
@@ -267,9 +267,7 @@ stages:
 `)
 	writeGatewayStoryFixture(t, filepath.Join(root, "story", "agents.yaml"), `
 story-writer:
-  id: story-writer
   role: story-writer
-  memory: false
   intent:
     inline: Write and send the requested story.
   tools: [send_story]

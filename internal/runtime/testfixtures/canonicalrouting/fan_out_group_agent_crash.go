@@ -8,11 +8,9 @@ func CopyFanOutGroupAgentCrash(t testing.TB) string {
 	t.Helper()
 	root := CopyForkFanOutCarrier(t, false, false)
 	writeClosedVariantFile(t, root, "agents.yaml", `item-worker:
-  type: generic
   role: item_worker
   intent: {inline: Emit the processed value and exact request event identity.}
   model: regular
-  memory: false
   subscriptions: [items.child]
   emit_events: [items.processed]
   mock:

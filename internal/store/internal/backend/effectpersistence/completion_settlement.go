@@ -488,7 +488,7 @@ func insertCompletionTargetPostgres(ctx context.Context, tx *sql.Tx, llm *storel
 	err = tx.QueryRowContext(ctx, `
 		INSERT INTO agent_turns (
 			turn_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-			flow_scope_key, flow_instance_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
+			flow_scope_key, flow_instance_id, session_id, flow_instance, memory_enabled, entity_id,
 			trigger_event_id, trigger_event_type, task_id, capability_surface_id, tool_calls,
 			emitted_events,
 			request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count,
@@ -496,13 +496,13 @@ func insertCompletionTargetPostgres(ctx context.Context, tx *sql.Tx, llm *storel
 			cache_read_input_tokens, cache_creation_input_tokens, cache_creation_5m_input_tokens,
 			cache_creation_1h_input_tokens, provider_reported_cost_usd, failure, created_at
 		) VALUES (
-			$1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9::uuid,$10,$11,$12,NULLIF($13,'')::uuid,
-			NULLIF($14,'')::uuid,NULLIF($15,''),NULLIF($16,''),$17::uuid,$18::jsonb,$19::jsonb,
-			$20::jsonb,$21::jsonb,$22::jsonb,$23,$24,$25,$26,$27::uuid,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38::jsonb,$39
+			$1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9::uuid,$10,$11,NULLIF($12,'')::uuid,
+			NULLIF($13,'')::uuid,NULLIF($14,''),NULLIF($15,''),$16::uuid,$17::jsonb,$18::jsonb,
+			$19::jsonb,$20::jsonb,$21::jsonb,$22,$23,$24,$25,$26::uuid,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37::jsonb,$38
 		)
 		RETURNING run_id::text, turn_id::text
 	`, t.TurnID, t.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-		fields.FlowScopeKey, fields.FlowInstanceID, t.SessionID, fields.FlowInstancePath, t.Memory.Enabled, string(t.Memory.Source), t.EntityID,
+		fields.FlowScopeKey, fields.FlowInstanceID, t.SessionID, fields.FlowInstancePath, t.Memory.Enabled, t.EntityID,
 		t.TriggerEventID, t.TriggerEventType, t.TaskID, t.CapabilitySurfaceID, completionJSON(t.ToolCalls, `[]`),
 		completionJSON(t.EmittedEvents, `[]`),
 		completionNullableJSON(t.RequestPayload), completionNullableJSON(t.ResponsePayload), completionJSON(t.TurnBlocks, `[]`), t.ParseOK, t.LatencyMS, t.RetryCount,
@@ -550,16 +550,16 @@ func insertCompletionTargetSQLite(ctx context.Context, tx *sql.Tx, llm *storellm
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO agent_turns (
 			turn_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-			flow_scope_key, flow_instance_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
+			flow_scope_key, flow_instance_id, session_id, flow_instance, memory_enabled, entity_id,
 			trigger_event_id, trigger_event_type, task_id, capability_surface_id, tool_calls,
 			emitted_events,
 			request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count,
 			agent_frame_bytes, completion_attempt_id, execution_mode, resolved_model, usage_exactness, input_tokens, output_tokens,
 			cache_read_input_tokens, cache_creation_input_tokens, cache_creation_5m_input_tokens,
 			cache_creation_1h_input_tokens, provider_reported_cost_usd, failure, created_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 	`, t.TurnID, sqliteNullString(t.RunID), fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-		fields.FlowScopeKey, fields.FlowInstanceID, t.SessionID, fields.FlowInstancePath, t.Memory.Enabled, string(t.Memory.Source), sqliteNullString(t.EntityID),
+		fields.FlowScopeKey, fields.FlowInstanceID, t.SessionID, fields.FlowInstancePath, t.Memory.Enabled, sqliteNullString(t.EntityID),
 		sqliteNullString(t.TriggerEventID), sqliteNullString(t.TriggerEventType), sqliteNullString(t.TaskID), t.CapabilitySurfaceID, completionJSON(t.ToolCalls, `[]`),
 		completionJSON(t.EmittedEvents, `[]`),
 		completionNullableJSON(t.RequestPayload), completionNullableJSON(t.ResponsePayload), completionJSON(t.TurnBlocks, `[]`), t.ParseOK, t.LatencyMS, t.RetryCount,

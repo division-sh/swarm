@@ -8,7 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 )
 
-func TestMergeAgentConfigBuildsCompleteParentBearingCandidate(t *testing.T) {
+func TestAgentConfigNormalizationPreservesParentBearingCandidate(t *testing.T) {
 	identity := agentidentitytest.Runtime(
 		t, "worker", "agent-config-merge-test", "review", "inst-1", "review/inst-1",
 	)
@@ -16,11 +16,11 @@ func TestMergeAgentConfigBuildsCompleteParentBearingCandidate(t *testing.T) {
 		ID: "worker", Identity: identity, Role: "worker", Model: "regular",
 		ParentAgent: "old-parent", ManagerFallback: "old-parent", FlowPath: identity.FlowInstance(),
 	}
-	patch := AgentConfig{
-		Model: "fast", ParentAgent: "new-parent", ManagerFallback: "fallback-parent",
-	}
-
-	candidate := MergeAgentConfig(base, patch)
+	candidate := base
+	candidate.Model = "fast"
+	candidate.ParentAgent = "new-parent"
+	candidate.ManagerFallback = "fallback-parent"
+	candidate.NormalizeRuntimeDescriptor()
 	if candidate.Model != "fast" ||
 		candidate.ParentAgent != "new-parent" ||
 		candidate.ManagerFallback != "fallback-parent" {

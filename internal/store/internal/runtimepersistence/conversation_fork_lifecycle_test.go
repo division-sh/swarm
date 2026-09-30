@@ -651,10 +651,10 @@ func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time) conver
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, memory_source,
+			memory_enabled,
 			status, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored', 'active', $10, $10)
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'active', $10, $10)
 	`, source.sessionID, source.runID, fields.AgentID, fields.NameOwner, fields.NameSource,
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, base.Add(-3*time.Minute)); err != nil {
 		t.Fatalf("seed session: %v", err)
@@ -668,7 +668,7 @@ func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time) conver
 	} {
 		if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, ctx, store, runtimellm.AgentTurnRecord{
 			AgentID: source.agentID, Identity: testAgentMemoryIdentity(t, source.runID, source.agentID, conversationForkSourceFlowInstance),
-			Memory: agentmemory.Authored(true), SessionID: source.sessionID, RunID: source.runID,
+			Memory: agentmemory.Plan{Enabled: true}, SessionID: source.sessionID, RunID: source.runID,
 			FlowInstance: conversationForkSourceFlowInstance, TriggerEventID: turn.eventID,
 			TriggerEventType: turn.eventType, ParseOK: true,
 		}, managedAgentTurnFixtureOptions{TurnID: turn.id, Now: turn.at}); err != nil {

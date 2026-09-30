@@ -70,7 +70,6 @@ stages:
 `,
 		"global/entities.yaml": "channel_state: {}\n",
 		"global/agents.yaml": `channel-sender:
-  type: generic
   role: worker
   intent: {inline: "Deliver provider-neutral channel operations."}
   model: regular

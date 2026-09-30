@@ -149,7 +149,7 @@ func seedSelectedStoreIntentAgent(t testing.TB, ctx context.Context, store agent
 		LLMBackend:         "anthropic",
 		ResolvedLLMBackend: "anthropic",
 		ExecutionMode:      runtimeeffects.ExecutionModeLive,
-		Memory:             agentmemory.Authored(false),
+		Memory:             agentmemory.Plan{Enabled: false},
 		Intent:             intent,
 		Prompt:             prompt,
 		Criteria:           []string{"hostile-replacement"},

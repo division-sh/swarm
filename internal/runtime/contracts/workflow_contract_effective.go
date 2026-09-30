@@ -51,13 +51,7 @@ func EffectiveAgentRegistryEntry(logicalID string, entry AgentRegistryEntry) Age
 		setAgentFieldSourceIfEmpty(effective.EffectiveFieldSources, "type", AgentFieldSourceAuthored)
 	}
 
-	memorySource := agentmemory.SourcePlatformDefault
-	if effective.AuthoredFields["memory"] {
-		memorySource = agentmemory.SourceAuthored
-	}
-	effective.MemoryPlan, _ = agentmemory.NewPlan(effective.Memory, memorySource)
-	effective.EffectiveFieldSources["memory"] = string(memorySource)
-	effective.EffectiveFieldSources["memory_source"] = string(memorySource)
+	effective.MemoryPlan = agentmemory.Plan{Enabled: effective.Memory}
 
 	if effective.MaxTurnsPerTask <= 0 {
 		effective.MaxTurnsPerTask = DefaultAgentMaxTurnsPerTask

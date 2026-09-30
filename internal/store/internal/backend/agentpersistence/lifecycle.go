@@ -833,11 +833,11 @@ func applyPostgresLifecycleSessionMutation(ctx context.Context, tx *sql.Tx, req 
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, memory_source,
+			memory_enabled,
 			conversation, turn_count, runtime_state, lease_holder, lease_expires_at,
 			status, created_at, updated_at
 		) VALUES (
-			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored',
+			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE,
 			'[]'::jsonb, 0, $10::jsonb, NULL, NULL, $11, $12, $12
 		)
 	`, mutation.SuccessorSessionID, row.RunID, fields.AgentID, fields.NameOwner,
@@ -916,10 +916,10 @@ func applySQLiteLifecycleSubordinate(ctx context.Context, tx *sql.Tx, req runtim
 				INSERT INTO agent_sessions (
 					session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 					agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-					memory_enabled, memory_source,
+					memory_enabled,
 					conversation, turn_count, runtime_state, lease_holder, lease_expires_at,
 					status, created_at, updated_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'authored', '[]', 0, ?, NULL, NULL, ?, ?, ?)
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, '[]', 0, ?, NULL, NULL, ?, ?, ?)
 			`, mutation.SuccessorSessionID, row.RunID, fields.AgentID, fields.NameOwner,
 				fields.NameSource, fields.RoutePresence, fields.FlowScopeKey,
 				fields.FlowInstanceID, fields.FlowInstancePath,
@@ -1093,21 +1093,21 @@ func applyPostgresLifecycleCell(ctx context.Context, tx *sql.Tx, req runtimemana
 			INSERT INTO agents (
 				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 				flow_scope_key, flow_instance_id, flow_instance,
-				role, model, llm_backend, memory_enabled, memory_source, parent_agent_id, entity_id,
+				role, model, llm_backend, memory_enabled, parent_agent_id, entity_id,
 				config, subscriptions, emit_events, tools, permissions, runtime_descriptor, status, turn_count, last_active_at, created_at,
 					lifecycle_phase, lifecycle_generation, lifecycle_runtime_epoch, lifecycle_config_revision, lifecycle_run_mode, lifecycle_last_transition_id,
 					lifecycle_process_authority_id, lifecycle_process_owner_id, lifecycle_process_boot_id, lifecycle_generation_grant_id,
 					lifecycle_bundle_hash, lifecycle_runtime_instance_id, lifecycle_runtime_generation,
 					topology_authority_kind, topology_admission, execution_lifetime, run_id)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULLIF($13,''), NULLIF($14,'')::uuid,
-				$15::jsonb, $16::jsonb, $17::jsonb, $18::jsonb, $19::jsonb, $20::jsonb, $21, 0, $22, $23,
-					$24, $25, $26, $27, $28, $29::uuid, $30::uuid, $31, $32::uuid, $33::uuid,
-					$34, $35::uuid, $36, $37, $38::jsonb, $39, $40::uuid)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULLIF($12,''), NULLIF($13,'')::uuid,
+				$14::jsonb, $15::jsonb, $16::jsonb, $17::jsonb, $18::jsonb, $19::jsonb, $20, 0, $21, $22,
+					$23, $24, $25, $26, $27, $28::uuid, $29::uuid, $30, $31::uuid, $32::uuid,
+					$33, $34::uuid, $35, $36, $37::jsonb, $38, $39::uuid)
 			ON CONFLICT (
 				run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 				flow_scope_key, flow_instance_id, flow_instance
 			) DO UPDATE SET role=EXCLUDED.role, model=EXCLUDED.model,
-				llm_backend=EXCLUDED.llm_backend, memory_enabled=EXCLUDED.memory_enabled, memory_source=EXCLUDED.memory_source, parent_agent_id=EXCLUDED.parent_agent_id,
+				llm_backend=EXCLUDED.llm_backend, memory_enabled=EXCLUDED.memory_enabled, parent_agent_id=EXCLUDED.parent_agent_id,
 				entity_id=EXCLUDED.entity_id, config=EXCLUDED.config, subscriptions=EXCLUDED.subscriptions, emit_events=EXCLUDED.emit_events,
 				tools=EXCLUDED.tools, permissions=EXCLUDED.permissions, runtime_descriptor=EXCLUDED.runtime_descriptor, status=EXCLUDED.status,
 				last_active_at=EXCLUDED.last_active_at, lifecycle_phase=EXCLUDED.lifecycle_phase,
@@ -1125,8 +1125,7 @@ func applyPostgresLifecycleCell(ctx context.Context, tx *sql.Tx, req runtimemana
 				execution_lifetime=EXCLUDED.execution_lifetime
 		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-			projection.Role, projection.Model, projection.LLMBackend, projection.MemoryEnabled, projection.MemorySource,
-			projection.ParentAgentID, projection.EntityID, string(projection.ConfigJSON), string(projection.SubscriptionsJSON), string(projection.EmitEventsJSON),
+			projection.Role, projection.Model, projection.LLMBackend, projection.MemoryEnabled, projection.ParentAgentID, projection.EntityID, string(projection.ConfigJSON), string(projection.SubscriptionsJSON), string(projection.EmitEventsJSON),
 			string(projection.ToolsJSON), string(projection.PermissionsJSON), string(projection.RuntimeDescriptor), lifecycleAgentStatus(req), req.Now.UTC(), startedAt.UTC(),
 			string(result.Phase), req.TargetGeneration, req.TargetEpoch, req.ConfigRevision, string(req.RunMode), result.TransitionID,
 			req.ProcessBinding.ProcessAuthorityID, req.ProcessBinding.ProcessOwnerID,
@@ -1183,18 +1182,18 @@ func applySQLiteLifecycleCellTx(ctx context.Context, tx *sql.Tx, req runtimemana
 			INSERT INTO agents (
 				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 				flow_scope_key, flow_instance_id, flow_instance,
-				role, model, llm_backend, memory_enabled, memory_source, parent_agent_id, entity_id,
+				role, model, llm_backend, memory_enabled, parent_agent_id, entity_id,
 				config, subscriptions, emit_events, tools, permissions, runtime_descriptor, status, turn_count, last_active_at, created_at,
 					lifecycle_phase, lifecycle_generation, lifecycle_runtime_epoch, lifecycle_config_revision, lifecycle_run_mode, lifecycle_last_transition_id,
 					lifecycle_process_authority_id, lifecycle_process_owner_id, lifecycle_process_boot_id, lifecycle_generation_grant_id,
 					lifecycle_bundle_hash, lifecycle_runtime_instance_id, lifecycle_runtime_generation,
 					topology_authority_kind, topology_admission, execution_lifetime, run_id)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(
 				run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 				flow_scope_key, flow_instance_id, flow_instance
 			) DO UPDATE SET role=excluded.role, model=excluded.model,
-				llm_backend=excluded.llm_backend, memory_enabled=excluded.memory_enabled, memory_source=excluded.memory_source, parent_agent_id=excluded.parent_agent_id,
+				llm_backend=excluded.llm_backend, memory_enabled=excluded.memory_enabled, parent_agent_id=excluded.parent_agent_id,
 				entity_id=excluded.entity_id, config=excluded.config, subscriptions=excluded.subscriptions, emit_events=excluded.emit_events,
 				tools=excluded.tools, permissions=excluded.permissions, runtime_descriptor=excluded.runtime_descriptor, status=excluded.status,
 				last_active_at=excluded.last_active_at, lifecycle_phase=excluded.lifecycle_phase,
@@ -1212,8 +1211,7 @@ func applySQLiteLifecycleCellTx(ctx context.Context, tx *sql.Tx, req runtimemana
 				execution_lifetime=excluded.execution_lifetime
 		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-			projection.Role, projection.Model, projection.LLMBackend, projection.MemoryEnabled, projection.MemorySource,
-			nullString(projection.ParentAgentID), nullUUID(projection.EntityID), string(projection.ConfigJSON), string(projection.SubscriptionsJSON),
+			projection.Role, projection.Model, projection.LLMBackend, projection.MemoryEnabled, nullString(projection.ParentAgentID), nullUUID(projection.EntityID), string(projection.ConfigJSON), string(projection.SubscriptionsJSON),
 			string(projection.EmitEventsJSON), string(projection.ToolsJSON), string(projection.PermissionsJSON), string(projection.RuntimeDescriptor), lifecycleAgentStatus(req),
 			req.Now.UTC(), startedAt.UTC(), string(result.Phase), req.TargetGeneration, req.TargetEpoch, req.ConfigRevision, string(req.RunMode), result.TransitionID,
 			req.ProcessBinding.ProcessAuthorityID, req.ProcessBinding.ProcessOwnerID,

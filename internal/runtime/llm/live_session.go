@@ -36,7 +36,7 @@ func (a transientLiveSessionAcquirer) AcquireLiveSession(ctx context.Context, id
 		return lease, ConversationRecord{}, err
 	}
 	return lease, ConversationRecord{
-		SessionID: lease.SessionID, AgentID: identity.AgentID(), Identity: identity, Memory: agentmemory.Authored(true),
+		SessionID: lease.SessionID, AgentID: identity.AgentID(), Identity: identity, Memory: agentmemory.Plan{Enabled: true},
 		RetryReason: lease.RetryReason, RetriesFromSessionID: lease.RetriesFromSessionID,
 		Status: "active",
 	}, nil

@@ -60,9 +60,7 @@ func writeRetiredSelectedContractFixture(t *testing.T, name string) string {
 	root := t.TempDir()
 	writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: selected-retired-tool\n")
 	writeSelectedContractFixtureFile(t, filepath.Join(root, "agents.yaml"), `worker:
-  id: worker
   role: worker
-  memory: false
   intent:
     inline: Reject this selected source before execution.
   tools: [`+name+`]
