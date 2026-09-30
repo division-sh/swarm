@@ -118,6 +118,9 @@ func newPipelineTestDeliveryOwner(t interface {
 	dialect := deliveryfixture.DialectPostgres
 	if sqlite {
 		dialect = deliveryfixture.DialectSQLite
+		if err := deliveryfixture.CreateSQLiteRunAdmissionSchema(context.Background(), db); err != nil {
+			t.Fatalf("create pipeline delivery run admission schema: %v", err)
+		}
 	}
 	adapter, err := deliveryfixture.NewAdapter(dialect)
 	if err != nil {

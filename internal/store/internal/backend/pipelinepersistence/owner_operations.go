@@ -2802,15 +2802,9 @@ func runnablePipelinePresence(ctx context.Context,
 				if isParked {
 					continue
 				}
-				if query.Purpose == runtimepipelineobligation.PurposeDecisionRoute {
-					out.DecisionRouteDue = true
+				if observeRunnablePipelineCandidate(&out, query, candidate) {
 					found = true
 					break
-				} else {
-					out.ProcessingEligible = true
-					if out.OldestEligibleEvent.IsZero() || candidate.createdAt.Before(out.OldestEligibleEvent) {
-						out.OldestEligibleEvent = candidate.createdAt
-					}
 				}
 			}
 			if len(page) < pipelineCandidatePageSize {
@@ -2819,6 +2813,18 @@ func runnablePipelinePresence(ctx context.Context,
 		}
 	}
 	return out, nil
+}
+
+func observeRunnablePipelineCandidate(out *runtimepipelineobligation.GlobalWorkPresence, query runtimepipelineobligation.ClaimQuery, candidate pipelineCandidate) bool {
+	if query.Purpose == runtimepipelineobligation.PurposeDecisionRoute {
+		out.DecisionRouteDue = true
+		return true
+	}
+	out.ProcessingEligible = true
+	if out.OldestEligibleEvent.IsZero() || candidate.createdAt.Before(out.OldestEligibleEvent) {
+		out.OldestEligibleEvent = candidate.createdAt
+	}
+	return false
 }
 
 func (s *postgresPipelineObligationStore) SummarizeRun(ctx context.Context, runID string) (runtimepipelineobligation.RunSummary, error) {
