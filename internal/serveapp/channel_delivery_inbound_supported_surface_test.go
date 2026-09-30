@@ -245,6 +245,14 @@ func TestChannelDeliveryBacklogSummaryOpenInboxE2E(t *testing.T) {
 	}
 }
 
+func TestChannelDeliveryUncertainNoticeSummaryReadbackE2E(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			runChannelDeliveryInboundDispositionE2E(t, backend, "notice_uncertainty_readback")
+		})
+	}
+}
+
 func TestChannelDeliveryBacklogOpenInboxAcrossPublicPagesE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -397,12 +405,14 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	publicListener := reserveChannelOnboardingListener(t)
 	publicListen := publicListener.Addr().String()
 	redirectExternalHosts(t, map[string]string{"hooks.channel-onboarding.test": "http://" + publicListen})
-	var configPath string
+	var configPath, observerDSN string
 	if backend == "postgres" {
 		dsn, _, _ := testutil.StartPostgres(t)
+		observerDSN = dsn
 		configPath = writeChannelOnboardingPostgresRuntimeConfig(t, dsn)
 	} else {
 		sqlitePath := filepath.Join(t.TempDir(), "channel-inbound.sqlite")
+		observerDSN = sqlitePath
 		configPath = writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, channelOnboardingHostWorkspaceFields())
 	}
 	enableChannelOnboardingRecoveryOnStartup(t, configPath)
@@ -415,7 +425,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		StoreMode: backend, StoreModeSet: true,
 	}
 	if scenario == "notice" || scenario == "notice_ack" || scenario == "shared_audience" || scenario == "summary_open" ||
-		scenario == "summary_open_many" || scenario == "delivery_loss_resend" {
+		scenario == "summary_open_many" || scenario == "delivery_loss_resend" || scenario == "notice_uncertainty_readback" {
 		opts.TestLLMRuntime = telegramNoticeLLMRuntime{}
 	} else if scenario == "view_full" {
 		opts.TestLLMRuntime = telegramLongNoticeLLMRuntime{}
@@ -424,7 +434,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	t.Cleanup(func() { _ = process.stop() })
 	process.waitForReadyLine()
 	endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString())
-	if scenario == "summary_open" || scenario == "summary_open_many" {
+	if scenario == "summary_open" || scenario == "summary_open_many" || scenario == "notice_uncertainty_readback" {
 		rpcEndpoint := endpoint + "/v1/rpc"
 		var identity apiv1.RuntimeIdentityResult
 		requireServedJSONRPCResult(t, rpcEndpoint, "runtime.identity", map[string]any{}, &identity)
@@ -629,7 +639,13 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		time.Sleep(250 * time.Millisecond)
 		provider.LoseNextDeliveryAcknowledgment()
 	}
-	if scenario == "delivery_loss_resend" {
+	var preconnectionNoticeID string
+	if scenario == "notice_uncertainty_readback" {
+		preconnectionNoticeID = onlyPublicChannelNoticeID(t, endpoint+"/v1/rpc", "")
+		waitChannelCardMessageID(t, provider, "telegram-ingress")
+		channelUncertaintySummaryEntry(t, provider)
+	}
+	if scenario == "delivery_loss_resend" || scenario == "notice_uncertainty_readback" {
 		deadline := time.Now().Add(15 * time.Second)
 		for provider.Delivery(1) == nil {
 			if time.Now().After(deadline) {
@@ -756,6 +772,19 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 			t.Fatal("lost-response notice source did not enter the business flow")
 		}
 		proveChannelManualResendAfterLostNotice(t, provider, callbackURL, signing)
+		return
+	}
+	if scenario == "notice_uncertainty_readback" {
+		if len(admitted.EventNames) == 0 {
+			t.Fatal("uncertain notice source did not enter the business flow")
+		}
+		proveChannelUncertainNoticeReadback(t, provider, backend, observerDSN, endpoint+"/v1/rpc", preconnectionNoticeID, func() {
+			if code := process.stop(); code != 0 {
+				t.Fatalf("uncertain notice restart exited %d: %s", code, process.outputString())
+			}
+			process = startServeRuntimeTestProcess(t, opts)
+			process.waitForReadyLine()
+		})
 		return
 	}
 	if scenario == "edit_loss_resend" {

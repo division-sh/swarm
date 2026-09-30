@@ -19,7 +19,7 @@ func TestChannelDeliveryCompiledRenderFailureDoesNotStarveReceiptUpdates(t *test
 			previousLog := log.Writer()
 			log.SetOutput(io.MultiWriter(previousLog, workerLog))
 			defer log.SetOutput(previousLog)
-			h, db, bundleHash := startChannelAnchorJourney(t, backend, "scan-token")
+			h, db, bundleHash := startChannelAnchorJourney(t, backend, "scan-token", false)
 			var cards [2]string
 			var messages [2]int
 			for index := range cards {
