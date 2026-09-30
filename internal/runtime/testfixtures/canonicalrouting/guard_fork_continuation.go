@@ -1,12 +1,16 @@
 package canonicalrouting
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 // CopyGuardForkContinuation adds a real guard outcome before the existing
 // selected root-agent frontier. It does not bypass historical replay admission.
 func CopyGuardForkContinuation(t testing.TB) string {
 	t.Helper()
-	root := CopyExample(t, ArtifactID("tests/tier12-runtime-fork/test-selected-contract-fork-execution"))
+	root := t.TempDir()
+	copyTree(t, filepath.Join(RepoRoot(t), "tests/tier12-runtime-fork/test-selected-contract-fork-execution"), root)
 	writeClosedVariantFile(t, root, "schema.yaml", `stages:
   ready: {initial: true}
   killed: {terminal: true}
