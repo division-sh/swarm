@@ -486,7 +486,7 @@ pins:
       - {event: halt.requested, resolution: {mode: select}}
 `, flow)
 		files[flow+"/entities.yaml"] = "order_state:\n  order_id: {type: text, indexed: true}\n  expected: \"[text]\"\n  halt_count: {type: integer, initial: 0}\n"
-		files[flow+"/events.yaml"] = "manual.abort: {}\ndispatch.completed: {}\nitem.completed:\n  member_id: text\n  result: JoinResult\nalternate.completed:\n  member_id: text\n  result: JoinResult\nhalt.observed:\n  order_id: text\n  count: integer\n"
+		files[flow+"/events.yaml"] = "manual.abort:\ndispatch.completed:\nitem.completed:\n  member_id: text\n  result: JoinResult\nalternate.completed:\n  member_id: text\n  result: JoinResult\nhalt.observed:\n  order_id: text\n  count: integer\n"
 		for _, name := range []string{"first.closed", "second.closed"} {
 			files[flow+"/events.yaml"] += name + ":\n  expected: integer\n  completed: integer\n  missing: \"[text]\"\n  results: \"[JoinResult]\"\n  timed_out: boolean\n  close_reason: text\n"
 		}

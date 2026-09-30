@@ -93,7 +93,7 @@ pins:
     events: [item.ready]
 `,
 		"entities.yaml": "work:\n  items:\n    type: map[text][integer]\n    initial: {before: [999]}\n",
-		"events.yaml": `seed: {}
+		"events.yaml": `seed:
 batch.ready:
   items: map[text][integer]
 batch.replace:

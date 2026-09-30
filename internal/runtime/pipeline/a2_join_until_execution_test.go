@@ -18,7 +18,7 @@ func TestA2UntilClosesMultipleJoinsAndPreservesOrdinaryHandlerOnBothStores(t *te
 		t.Run(backend.name, func(t *testing.T) {
 			h := newExactWorkflowJoinHarness(t, backend, "orders", "awaiting", []any{"a", "b"})
 			files := workflowJoinLifecycleFixtureFiles(false, "")
-			files["orders/events.yaml"] += "halt.requested: {}\nfirst.closed: {}\nsecond.closed: {}\nhalt.observed: {}\nalternate.completed:\n  member_id: text\n  result: ItemResult\n"
+			files["orders/events.yaml"] += "halt.requested:\nfirst.closed:\nsecond.closed:\nhalt.observed:\nalternate.completed:\n  member_id: text\n  result: ItemResult\n"
 			files["orders/nodes.yaml"] = strings.Replace(files["orders/nodes.yaml"], "on_complete: {advances_to: ready}", "until: halt.requested\n        on_complete: {emit: {event: first.closed}}", 1)
 			files["orders/nodes.yaml"] += `    alternate.completed:
       join:

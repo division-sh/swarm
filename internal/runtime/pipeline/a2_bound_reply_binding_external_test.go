@@ -606,7 +606,7 @@ pins:
     events: [provider.requested]
 `,
 		"requester/entities.yaml": "request_state:\n  order_id: {type: text, indexed: true}\n  expected: \"[text]\"\n",
-		"requester/events.yaml":   "request.send: {}\nmanual.abort: {}\ndispatch.completed: {}\nprovider.requested:\n  order_id: text\n",
+		"requester/events.yaml":   "request.send:\nmanual.abort:\ndispatch.completed:\nprovider.requested:\n  order_id: text\n",
 		"requester/nodes.yaml": `requester:
   execution_type: system_node
   event_handlers:

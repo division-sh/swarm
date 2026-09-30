@@ -239,7 +239,7 @@ types:
     accepted: boolean
     decision: Decision
 `,
-		"events.yaml": fmt.Sprintf("item.completed:\n  member_id: text\n  result: %s\nhalt.requested: {}\n", resultType),
+		"events.yaml": fmt.Sprintf("item.completed:\n  member_id: text\n  result: %s\nhalt.requested:\n", resultType),
 		"nodes.yaml": `collector:
   execution_type: system_node
   event_handlers:
