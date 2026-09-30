@@ -2630,6 +2630,7 @@
     {"path":"internal/serveapp/channel_delivery.go","class":"authored"},
     {"path":"internal/serveapp/channel_delivery_anchor_supported_surface_test.go","class":"test"},
     {"path":"internal/serveapp/channel_delivery_budget_supported_surface_test.go","class":"test"},
+    {"path":"internal/serveapp/channel_delivery_draft_temporal_supported_surface_test.go","class":"test"},
     {"path":"internal/serveapp/channel_delivery_inbound_supported_surface_test.go","class":"test"},
     {"path":"internal/serveapp/channel_delivery_recovery_supported_surface_test.go","class":"test"},
     {"path":"internal/serveapp/channel_delivery_scan_isolation_supported_surface_test.go","class":"test"},
