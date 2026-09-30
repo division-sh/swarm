@@ -2,6 +2,8 @@
 
 Agent-g, #2498, 2026-09-30. Base `origin/master@4fccc57ec73ce54827167dddc5bbafac41ae66d2`. Bounded production readback commit: `44a5f88fb`. The corpus gate and bounded readback gate remain recorded approvals, not closure. The readback amendment was posted before production edits; semantic watchlist repair is docs master `771c598`, with active checkpoint-stop refinement `1b957a9`.
 
+Historical stop evidence is preserved below. Gate5902935619 rejects the recovery-disabled proposal and requires the complete pause-aware executable-work eligibility class. The additive `issue-2498-pause-eligibility-preimplementation.md` supplies the repaired census/probes/proposed spec delta and requests a fresh independent gate. No option below is authorization to change runtime or substitute the interrupted-work proof.
+
 ## Completed Bounded Repair / Evidence
 
 The candidate uses `IntentRequest.OriginBundleHash` in readback and store source/grant checks, deleting the store-local duplicate. Comparable `IntentKey` now owns strict disjoint wire encoding/decoding; deployment wire is exactly `run_id`/`deployment_feed_id`. In-memory page ordering includes all five SQL/cursor components. Authoritative OpenRPC schema/order and generated `openrpc.json` change together. No fallback, compatibility, new endpoint/filter, queue or framework.
