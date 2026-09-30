@@ -1,0 +1,459 @@
+diff --git a/internal/runtime/bus/pause_eligibility_audit_test.go b/internal/runtime/bus/pause_eligibility_audit_test.go
+new file mode 100644
+index 000000000..d87f8d011
+--- /dev/null
++++ b/internal/runtime/bus/pause_eligibility_audit_test.go
+@@ -0,0 +1,338 @@
++package bus_test
++
++import (
++	"context"
++	"errors"
++	"fmt"
++	"reflect"
++	"sync/atomic"
++	"testing"
++	"time"
++
++	"github.com/division-sh/swarm/internal/events"
++	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
++	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
++	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
++	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
++	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
++	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
++	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
++	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
++	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
++	"github.com/division-sh/swarm/internal/store/storetest"
++	"github.com/google/uuid"
++)
++
++// Audit-only baseline counterexample. Passing means the defect was reproduced,
++// not that paused execution is acceptable. No production code is changed.
++func TestAuditPausedHandedAgentExecutesBeforeContinueBothStores(t *testing.T) {
++	for _, backend := range []string{"sqlite", "postgres"} {
++		for _, state := range []string{"pending", "failed", "stale_in_progress"} {
++			t.Run(backend+"/"+state, func(t *testing.T) {
++				f := newCompleteEventDispatchFixture(t, backend, false)
++				owner := f.store.PipelineObligations()
++				work, err := owner.ClaimEvent(f.ctx, f.event.ID(), runtimepipelineobligation.PurposeRecovery)
++				if err != nil {
++					t.Fatal(err)
++				}
++				if _, err := owner.Settle(f.ctx, work.Claim, runtimepipelineobligation.Acknowledged("audit_handed")); err != nil {
++					t.Fatal(err)
++				}
++				route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(f.agentID), AgentIdentity: f.identity}
++				id, err := runtimedelivery.DeliveryID(f.event.ID(), route)
++				if err != nil {
++					t.Fatal(err)
++				}
++				if state != "pending" {
++					claim, err := storetest.ClaimDelivery(f.ctx, f.store, f.event, route)
++					if err != nil {
++						t.Fatal(err)
++					}
++					if state == "failed" {
++						failure := runtimefailures.FromError(errors.New("audit retry"), "audit", "retry")
++						if _, err := f.store.SettleFailure(f.ctx, claim.Claim, runtimedelivery.Settlement{
++							Disposition: runtimedelivery.FailureRetry, Failure: &failure.Failure,
++							RetryBase: time.Nanosecond, RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation(),
++						}); err != nil {
++							t.Fatal(err)
++						}
++					} else {
++						auditExpireDeliveryClaim(t, f, id)
++					}
++				}
++				controller := runtimeruncontrol.NewController(f.store.(runtimeruncontrol.Store), f.bus, runtimeruncontrol.Options{})
++				f.bus.SetRunDispatchGate(controller)
++				if _, err := controller.Pause(f.ctx, runtimeruncontrol.TransitionRequest{RunID: f.event.RunID(), Reason: "audit"}); err != nil {
++					t.Fatal(err)
++				}
++				before, err := f.store.Snapshot(f.ctx, id)
++				if err != nil {
++					t.Fatal(err)
++				}
++				page, err := f.store.ScanDeliveryContinuations(f.ctx, before.Authority, runtimedelivery.ContinuationCursor{}, 100)
++				if err != nil {
++					t.Fatal(err)
++				}
++				if len(page.Items) != 1 {
++					t.Fatalf("paused scan items = %d", len(page.Items))
++				}
++				intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "global/agents.yaml#agents."+f.agentID+".intent", "Audit pause eligibility.")
++				if err != nil {
++					t.Fatal(err)
++				}
++				f.source = completeEventAgentSource(f.agentID, string(f.event.Type()), intent)
++				seen := make(chan events.Event, 4)
++				generation := f.newRecordingManager(t, seen)
++				managerCtx := f.managedContext(t)
++				if _, err := generation.manager.HydrateForStartup(managerCtx); err != nil {
++					t.Fatal(err)
++				}
++				if err := generation.manager.Run(managerCtx); err != nil {
++					t.Fatal(err)
++				}
++				f.startDeliveryContinuations(t, managerCtx, generation)
++				assertCompleteEventDelivery(t, seen, f.event)
++				if blocked, err := controller.QueueableRunDispatchBlocked(f.ctx, f.event.RunID()); err != nil || !blocked {
++					t.Fatalf("pause state = %t, %v", blocked, err)
++				}
++				deadline := time.Now().Add(3 * time.Second)
++				var after runtimedelivery.Snapshot
++				for {
++					after, err = f.store.Snapshot(f.ctx, id)
++					if err != nil {
++						t.Fatal(err)
++					}
++					if after.Status == "delivered" {
++						break
++					}
++					if time.Now().After(deadline) {
++						t.Fatalf("not settled: %+v", after)
++					}
++					time.Sleep(time.Millisecond)
++				}
++				result, err := controller.Continue(f.ctx, runtimeruncontrol.TransitionRequest{RunID: f.event.RunID(), Reason: "audit release"})
++				if err != nil {
++					t.Fatal(err)
++				}
++				if result.Recovery.Sweep.Examined != 0 {
++					t.Fatalf("already handed event selected: %+v", result.Recovery)
++				}
++				if err := generation.coordinator.Synchronize(context.Background()); err != nil {
++					t.Fatal(err)
++				}
++				select {
++				case event := <-seen:
++					t.Fatalf("duplicate after continue: %s", event.ID())
++				default:
++				}
++				t.Logf("BASELINE DEFECT: paused %s selected and OnEvent executed; status %s -> %s; pipeline receipt=%d; continue examined=%d", state, before.Status, after.Status, retryReleasePipelineReceiptCount(t, f, f.event.ID()), result.Recovery.Sweep.Examined)
++			})
++		}
++	}
++}
++
++type auditSignalCounter struct {
++	*deliverycontinuation.Coordinator
++	signals atomic.Int64
++}
++
++func (c *auditSignalCounter) Signal() { c.signals.Add(1); c.Coordinator.Signal() }
++
++// Observes the real continue/empty-sweep notification path. This does not
++// pretend baseline runtime can park its broken delivery dispatcher safely.
++func TestAuditHandedOnlyContinueDoesNotSignalBothStores(t *testing.T) {
++	for _, backend := range []string{"sqlite", "postgres"} {
++		t.Run(backend, func(t *testing.T) {
++			f := newCompleteEventDispatchFixture(t, backend, false)
++			work, err := f.store.PipelineObligations().ClaimEvent(f.ctx, f.event.ID(), runtimepipelineobligation.PurposeRecovery)
++			if err != nil {
++				t.Fatal(err)
++			}
++			if _, err := f.store.PipelineObligations().Settle(f.ctx, work.Claim, runtimepipelineobligation.Acknowledged("audit_handed")); err != nil {
++				t.Fatal(err)
++			}
++			route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(f.agentID), AgentIdentity: f.identity}
++			proof, err := f.store.ProveHandoff(f.ctx, f.event.ID(), route)
++			if err != nil {
++				t.Fatal(err)
++			}
++			before, err := f.store.Snapshot(f.ctx, proof.DeliveryID())
++			if err != nil {
++				t.Fatal(err)
++			}
++			process := worklifetime.NewProcess()
++			owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{RuntimeInstanceID: before.Authority.ExecutionID(), BundleHash: before.Authority.SourceArtifact().BundleHash()})
++			if err != nil {
++				t.Fatal(err)
++			}
++			coordinator, err := deliverycontinuation.New(f.store, f.store, before.Authority, owner, f.bus, nil)
++			if err != nil {
++				t.Fatal(err)
++			}
++			t.Cleanup(func() {
++				if err := coordinator.Retire(context.Background()); err != nil {
++					t.Error(err)
++				}
++				if _, err := owner.RetireAndWait(context.Background()); err != nil {
++					t.Error(err)
++				}
++				process.Retire()
++				if _, err := process.Join(context.Background()); err != nil {
++					t.Error(err)
++				}
++			})
++			counter := &auditSignalCounter{Coordinator: coordinator}
++			if err := f.bus.SetDeliveryContinuationOwner(counter); err != nil {
++				t.Fatal(err)
++			}
++			controller := runtimeruncontrol.NewController(f.store.(runtimeruncontrol.Store), f.bus, runtimeruncontrol.Options{})
++			if _, err := controller.Pause(f.ctx, runtimeruncontrol.TransitionRequest{RunID: f.event.RunID(), Reason: "audit"}); err != nil {
++				t.Fatal(err)
++			}
++			result, err := controller.Continue(f.ctx, runtimeruncontrol.TransitionRequest{RunID: f.event.RunID(), Reason: "audit wake"})
++			if err != nil {
++				t.Fatal(err)
++			}
++			after, err := f.store.Snapshot(f.ctx, proof.DeliveryID())
++			if err != nil {
++				t.Fatal(err)
++			}
++			if result.Recovery.Sweep.Examined != 0 || counter.signals.Load() != 0 || !reflect.DeepEqual(before, after) {
++				t.Fatalf("baseline continue=%+v signals=%d changed=%t", result.Recovery, counter.signals.Load(), !reflect.DeepEqual(before, after))
++			}
++			t.Log("BASELINE DEFECT: acknowledged handed-only continue has zero pipeline work and sends zero coordinator notifications; pending handoff unchanged")
++		})
++	}
++}
++
++func TestAuditUnownedPausedContinueBackendDivergence(t *testing.T) {
++	for _, backend := range []string{"sqlite", "postgres"} {
++		t.Run(backend, func(t *testing.T) {
++			f := newCompleteEventDispatchFixture(t, backend, false)
++			if _, err := f.store.TransitionActiveRun(f.ctx, runtimerunlifecycle.ActiveTransitionRequest{RunID: f.event.RunID(), State: runtimerunlifecycle.StatePaused}); err != nil {
++				t.Fatal(err)
++			}
++			result, err := f.store.(runtimeruncontrol.Store).ContinueRunControlOutcome(f.ctx, runtimeruncontrol.TransitionRequest{RunID: f.event.RunID()})
++			if backend == "postgres" {
++				if !errors.Is(err, runtimeruncontrol.ErrNotPaused) || result.Acknowledged {
++					t.Fatalf("unowned PG continue = %+v, %v", result, err)
++				}
++				t.Log("CONTROL: PostgreSQL refuses paused-without-control")
++			} else {
++				if err != nil || !result.Acknowledged || result.State.Status != "running" {
++					t.Fatalf("baseline SQLite continue = %+v, %v", result, err)
++				}
++				t.Log("BASELINE DEFECT: SQLite manufactures ordinary continue authority from paused lifecycle without operator control")
++			}
++		})
++	}
++}
++
++func TestAuditMixedPausedRunningRecoveryBothStores(t *testing.T) {
++	for _, backend := range []string{"sqlite", "postgres"} {
++		t.Run(backend, func(t *testing.T) {
++			f := newCompleteEventDispatchFixture(t, backend, false)
++			runningID := uuid.NewString()
++			seedCompleteEventDispatchRun(t, f.ctx, f.db, backend, runningID, f.event.CreatedAt())
++			running := newRetryReleaseRunRoot(runningID, f.event.CreatedAt().Add(time.Microsecond))
++			storetest.CommitSemanticEventWithRoutes(t, f.ctx, f.store, running, nil, runtimepipelineobligation.ScopeSubscribed)
++			controller := runtimeruncontrol.NewController(f.store.(runtimeruncontrol.Store), f.bus, runtimeruncontrol.Options{})
++			f.bus.SetRunDispatchGate(controller)
++			if _, err := controller.Pause(f.ctx, runtimeruncontrol.TransitionRequest{RunID: f.event.RunID(), Reason: "mixed audit"}); err != nil {
++				t.Fatal(err)
++			}
++			route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(f.agentID), AgentIdentity: f.identity}
++			id, err := runtimedelivery.DeliveryID(f.event.ID(), route)
++			if err != nil {
++				t.Fatal(err)
++			}
++			before, err := f.store.Snapshot(f.ctx, id)
++			if err != nil {
++				t.Fatal(err)
++			}
++			if err := runtimepipeline.NewRecoveryManagerWith(f.bus).RecoverToExhaustion(f.ctx); err == nil {
++				t.Fatal("baseline should refuse mixed paused work")
++			}
++			after, err := f.store.Snapshot(f.ctx, id)
++			if err != nil {
++				t.Fatal(err)
++			}
++			if !reflect.DeepEqual(before, after) {
++				t.Fatal("paused delivery changed during pipeline sweep")
++			}
++			if retryReleasePipelineReceiptCount(t, f, f.event.ID()) != 0 || retryReleasePipelineReceiptCount(t, f, running.ID()) != 1 {
++				t.Fatal("wrong mixed receipts")
++			}
++			t.Log("BASELINE DEFECT: running sibling settled and paused delivery unchanged, but remembered paused blockage still refuses startup")
++		})
++	}
++}
++
++func auditExpireDeliveryClaim(t *testing.T, f completeEventDispatchFixture, id string) {
++	t.Helper()
++	tx, err := f.db.BeginTx(f.ctx, nil)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer tx.Rollback()
++	start, end := time.Now().UTC().Add(-2*time.Hour), time.Now().UTC().Add(-time.Hour)
++	deliverySQL := "UPDATE event_deliveries SET created_at = ?, started_at = ?, updated_at = ? WHERE delivery_id = ? AND status = 'in_progress'"
++	attemptSQL := "UPDATE event_delivery_attempts SET started_at = ?, lease_expires_at = ? WHERE delivery_id = ? AND open_marker = TRUE"
++	deliveryArgs := []any{start, start, end, id}
++	if f.dialect == "postgres" {
++		deliverySQL = "UPDATE event_deliveries SET created_at = $1, started_at = $1, updated_at = $2 WHERE delivery_id = $3::uuid AND status = 'in_progress'"
++		attemptSQL = "UPDATE event_delivery_attempts SET started_at = $1, lease_expires_at = $2 WHERE delivery_id = $3::uuid AND open_marker = TRUE"
++		deliveryArgs = []any{start, end, id}
++	}
++	for _, query := range []struct {
++		sql  string
++		args []any
++	}{{deliverySQL, deliveryArgs}, {attemptSQL, []any{start, end, id}}} {
++		result, err := tx.ExecContext(f.ctx, query.sql, query.args...)
++		if err != nil {
++			t.Fatal(err)
++		}
++		if count, err := result.RowsAffected(); err != nil || count != 1 {
++			t.Fatalf("expiry affected=%d error=%v", count, err)
++		}
++	}
++	if err := tx.Commit(); err != nil {
++		t.Fatal(err)
++	}
++}
++
++func TestAuditPausedUnhandedRecoveryRefusesThenContinueReleasesBothStores(t *testing.T) {
++	for _, backend := range []string{"sqlite", "postgres"} {
++		t.Run(backend, func(t *testing.T) {
++			f := newCompleteEventDispatchFixture(t, backend, false)
++			ch := f.subscribe(t, f.event.Type())
++			controller := runtimeruncontrol.NewController(f.store.(runtimeruncontrol.Store), f.bus, runtimeruncontrol.Options{})
++			f.bus.SetRunDispatchGate(controller)
++			if _, err := controller.Pause(f.ctx, runtimeruncontrol.TransitionRequest{RunID: f.event.RunID(), Reason: "audit"}); err != nil {
++				t.Fatal(err)
++			}
++			err := runtimepipeline.NewRecoveryManagerWith(f.bus).RecoverToExhaustion(f.ctx)
++			if err == nil || err.Error() != "pipeline recovery blocked before explicit exhaustion" {
++				t.Fatalf("baseline refusal = %v", err)
++			}
++			select {
++			case delivery := <-ch:
++				_ = delivery.Complete()
++				t.Fatal("unhanded paused execution")
++			default:
++			}
++			if n := retryReleasePipelineReceiptCount(t, f, f.event.ID()); n != 0 {
++				t.Fatalf("paused receipts = %d", n)
++			}
++			result, err := controller.Continue(f.ctx, runtimeruncontrol.TransitionRequest{RunID: f.event.RunID(), Reason: "audit release"})
++			if err != nil {
++				t.Fatal(err)
++			}
++			assertCompleteLocalDelivery(t, ch, f.event)
++			if result.Recovery.Sweep.Settled != 1 || retryReleasePipelineReceiptCount(t, f, f.event.ID()) != 1 {
++				t.Fatalf("release = %+v", result.Recovery)
++			}
++			t.Log(fmt.Sprintf("BASELINE DEFECT: paused unhanded startup refuses; continue preserves event and releases exactly once on %s", backend))
++		})
++	}
++}
+diff --git a/internal/runtime/pipeline/pause_eligibility_audit_test.go b/internal/runtime/pipeline/pause_eligibility_audit_test.go
+new file mode 100644
+index 000000000..abbbde07b
+--- /dev/null
++++ b/internal/runtime/pipeline/pause_eligibility_audit_test.go
+@@ -0,0 +1,109 @@
++package pipeline_test
++
++import (
++	"context"
++	"testing"
++	"time"
++
++	"github.com/division-sh/swarm/internal/events"
++	"github.com/division-sh/swarm/internal/events/eventtest"
++	"github.com/division-sh/swarm/internal/packadmission"
++	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
++	"github.com/division-sh/swarm/internal/runtime/contracts"
++	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
++	"github.com/division-sh/swarm/internal/runtime/pipeline"
++	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
++	"github.com/division-sh/swarm/internal/runtime/runcontrol"
++	"github.com/division-sh/swarm/internal/runtime/semanticview"
++	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
++	"github.com/google/uuid"
++)
++
++// Counterexample through the real engine/selected-store mutation, not a node
++// callback mock. A pass records a baseline violation, never repair credit.
++func TestAuditPausedHandedNodeMutatesBeforeContinueBothStores(t *testing.T) {
++	for _, backend := range []struct {
++		name string
++		open func(*testing.T) gateRecoveryStoreCase
++	}{{"sqlite", openSQLiteGateRecoveryStore}, {"postgres", openPostgresGateRecoveryStore}} {
++		t.Run(backend.name, func(t *testing.T) {
++			s := backend.open(t)
++			runID := uuid.NewString()
++			insertGateRecoveryRun(t, s, runID)
++			ctx := withLiveGateExecution(testAuthorActivityContext(t, context.Background()))
++			repo := canonicalrouting.RepoRoot(t)
++			bundle, err := contracts.LoadWorkflowContractBundleWithOptions(repo, canonicalrouting.CopySelectionRetry(t), contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
++			if err != nil {
++				t.Fatal(err)
++			}
++			source := semanticview.Wrap(bundle)
++			var nodes []pipeline.WorkflowNode
++			for _, row := range []struct{ id, event string }{{"seed", "seed"}, {"select", "select"}, {"final", "selected"}} {
++				nodes = append(nodes, pipeline.WorkflowNode{Node: externalPipelineSourceNode(t, source, ".", row.id), Subscriptions: []events.EventType{events.EventType(row.event)}, ExecutionType: contracts.SystemNodeExecutionType})
++			}
++			bus, err := newScopedTestEventBus(t, s.events, runtimebus.EventBusOptions{ContractBundle: source})
++			if err != nil {
++				t.Fatal(err)
++			}
++			bus.SetInterceptors(newGateRecoveryCoordinator(bus, s, pipeline.PipelineCoordinatorOptions{Module: proposedEffectProofModule{source: source, nodes: nodes}}))
++			publish := func(name string) events.Event {
++				t.Helper()
++				event := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType(name), "operator", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
++				if err := bus.PublishAcknowledged(ctx, event); err != nil {
++					t.Fatal(err)
++				}
++				wait, cancel := context.WithTimeout(ctx, 5*time.Second)
++				defer cancel()
++				if err := bus.WaitForQuiescence(wait); err != nil {
++					t.Fatal(err)
++				}
++				return event
++			}
++			publish("seed")
++			controller := runcontrol.NewController(s.events.(runcontrol.Store), bus, runcontrol.Options{})
++			bus.SetRunDispatchGate(controller)
++			if _, err := controller.Pause(ctx, runcontrol.TransitionRequest{RunID: runID, Reason: "audit"}); err != nil {
++				t.Fatal(err)
++			}
++			event := publish("select")
++			var before int
++			if err := s.db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='selected'`, runID).Scan(&before); err != nil || before != 0 {
++				t.Fatalf("paused publication executed: %d %v", before, err)
++			}
++			owner := s.events.PipelineObligations()
++			work, err := owner.ClaimEvent(ctx, event.ID(), pipelineobligation.PurposeRecovery)
++			if err != nil {
++				t.Fatal(err)
++			}
++			if _, err := owner.Settle(ctx, work.Claim, pipelineobligation.Acknowledged("audit_handed")); err != nil {
++				t.Fatal(err)
++			}
++			prepared, found, err := s.events.LoadPreparedPublishEvent(ctx, event.ID())
++			if err != nil || !found || len(prepared.DeliveryRoutes) != 1 {
++				t.Fatalf("route: %+v %v", prepared, err)
++			}
++			proof, err := s.events.ProveHandoff(ctx, event.ID(), prepared.DeliveryRoutes[0])
++			if err != nil {
++				t.Fatal(err)
++			}
++			if err := bus.ReleaseDeliveryContinuation(proof.DeliveryID()); err != nil {
++				t.Fatal(err)
++			}
++			if err := bus.AcceptCommittedDeliveryHandoffs([]deliverylifecycle.DurableHandoffProof{proof}); err != nil {
++				t.Fatal(err)
++			}
++			result := bus.DispatchDeliveryContinuation(ctx, prepared.Event.Event(), prepared.DeliveryRoutes[0])
++			if err := result.Failure(); err != nil {
++				t.Fatal(err)
++			}
++			var after int
++			if err := s.db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='selected'`, runID).Scan(&after); err != nil || after != 1 {
++				t.Fatalf("baseline node mutation = %d %v", after, err)
++			}
++			if blocked, err := controller.QueueableRunDispatchBlocked(ctx, runID); err != nil || !blocked {
++				t.Fatalf("pause = %t %v", blocked, err)
++			}
++			t.Logf("BASELINE DEFECT: paused handed node authored selected event; before=%d after=%d disposition=%v", before, after, result.Disposition())
++		})
++	}
++}
