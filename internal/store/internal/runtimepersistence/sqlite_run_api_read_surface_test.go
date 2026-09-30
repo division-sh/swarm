@@ -322,7 +322,7 @@ func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(
 		)
 		VALUES
 			(?, ?, ?, ?, ?, ?, ?, ?, ?, 1, '{}', 'worker-1', lower(hex(randomblob(16))), ?, 'active', ?, ?),
-			(?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'authored', '{}', 'worker-1', lower(hex(randomblob(16))), ?, 'active', ?, ?)
+			(?, ?, ?, ?, ?, ?, ?, ?, ?, 1, '{}', 'worker-1', lower(hex(randomblob(16))), ?, 'active', ?, ?)
 		`, uuid.NewString(), blockedRunID,
 		blockedFields.AgentID, blockedFields.NameOwner, blockedFields.NameSource,
 		blockedFields.RoutePresence, blockedFields.FlowScopeKey, blockedFields.FlowInstanceID, blockedFields.FlowInstancePath,

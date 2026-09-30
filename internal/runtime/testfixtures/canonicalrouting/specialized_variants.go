@@ -61,7 +61,6 @@ pins:
     events: [task.requested]
 `)
 	writeClosedVariantFile(t, root, "agents.yaml", fmt.Sprintf(`%s:
-  id: %s
   type: stub
   role: researcher
   model: regular
@@ -71,7 +70,7 @@ pins:
   subscriptions:
     - task.requested
   emit_events: []
-`, agentID, agentID, agentID))
+`, agentID, agentID))
 	writeClosedVariantFile(t, root, filepath.Join("prompts", agentID+".md"), "Operate as the managed native lifecycle test agent.\n")
 	for file, contents := range map[string]string{
 		"events.yaml": "task.requested:\n",
@@ -375,7 +374,11 @@ func CopyAgentSlugAdmission(t testing.TB, workflowName, agentKey, agentID string
 
 	writeClosedVariantFile(t, root, "schema.yaml", "mode: static\nstages: []\npins:\n  inputs:\n    events: [agent.requested]\n")
 	writeClosedVariantFile(t, root, "events.yaml", "agent.requested:\n")
-	writeClosedVariantFile(t, root, "agents.yaml", agentKey+":\n  id: "+agentID+"\n  role: "+agentID+"\n  intent: prompts/"+agentID+".md\n  model: regular\n  memory: false\n  subscriptions: [agent.requested]\n")
+	identity := ""
+	if agentID != agentKey {
+		identity = "  id: " + agentID + "\n"
+	}
+	writeClosedVariantFile(t, root, "agents.yaml", agentKey+":\n"+identity+"  role: "+agentID+"\n  intent: prompts/"+agentID+".md\n  model: regular\n  subscriptions: [agent.requested]\n")
 	writeClosedVariantFile(t, root, "prompts/"+agentID+".md", "Handle assigned work.\n")
 	return root
 }

@@ -70,7 +70,7 @@ func CopyManagedEmitPublication(t testing.TB, mode string) string {
 			nodes = strings.ReplaceAll(nodes, "work.requested", "sibling.requested")
 		}
 		writeClosedVariantFile(t, root, filepath.Join(flow, "nodes.yaml"), nodes)
-		writeClosedVariantFile(t, root, filepath.Join(flow, "agents.yaml"), "writer:\n  role: "+role+"\n  intent: {inline: 'Emit the exact scoped result in the required value field.'}\n  model: regular\n  memory: false\n  subscriptions: [work.started]\n  emit_events: [work.result"+extraEmit+"]\n  mock:\n    kind: python\n    module: mocks/writer.py\n")
+		writeClosedVariantFile(t, root, filepath.Join(flow, "agents.yaml"), "writer:\n  role: "+role+"\n  intent: {inline: 'Emit the exact scoped result in the required value field.'}\n  model: regular\n  subscriptions: [work.started]\n  emit_events: [work.result"+extraEmit+"]\n  mock:\n    kind: python\n    module: mocks/writer.py\n")
 		bad := "    if input[\"round\"] == 1 and frame[\"event\"][\"payload\"][\"case_id\"] == \"hostile\":\n        return {\"calls\": [{\"name\": \"emit_foreign_only\", \"arguments\": {}}], \"usage\": {\"input_tokens\": 1, \"output_tokens\": 1}}\n"
 		if sibling {
 			bad = ""

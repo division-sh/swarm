@@ -829,7 +829,7 @@ root-mock:
 	} {
 		dir := filepath.Join(root, "packages", project.name)
 
-		writeAgentFreeRuntimeFixtureFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker:\n  id: shared-worker\n  model: "+project.model+"\n  intent:\n    inline: Exercise the scoped Claude startup census.\n")
+		writeAgentFreeRuntimeFixtureFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker:\n  model: "+project.model+"\n  intent:\n    inline: Exercise the scoped Claude startup census.\n")
 	}
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
