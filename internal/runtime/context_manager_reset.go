@@ -90,7 +90,11 @@ func (m *RuntimeContextManager) installResetRuntimeContexts(publish, recovered b
 	}
 	prepared := newRuntimeContextManagerState(m.availability)
 	prepared.nextPublicationGeneration = m.nextPublicationGeneration
-	prepared.suppressedStandingServices = maps.Clone(m.suppressedStandingServices)
+	// Staging starts a fresh execution epoch. Publication retains only the
+	// suppression reconstructed from that epoch's durable standing dispositions.
+	if publish {
+		prepared.suppressedStandingServices = maps.Clone(m.suppressedStandingServices)
+	}
 	discardPrepared := func() {
 		for _, entry := range prepared.contexts {
 			for _, occurrence := range entry.standing {
