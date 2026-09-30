@@ -693,7 +693,7 @@ func testContractFrontierTemplateSource(t testing.TB) semanticview.Source {
 				"review": &root.Children[0],
 			},
 		},
-	}, "review")))
+	}, canonicalrouting.CopyInstanceDeclarations(t, "review"))))
 }
 
 func testContractFrontierTemplateConnectSource(t testing.TB) semanticview.Source {
@@ -787,7 +787,7 @@ func testContractFrontierConnectSource(t testing.TB, producerMode string) semant
 			},
 		},
 	}
-	return semanticview.Wrap(mustCompileContractFrontierBundle(semanticviewtest.WithInstanceDeclarations(t, bundle, "producer", "unrelated")))
+	return semanticview.Wrap(mustCompileContractFrontierBundle(semanticviewtest.WithInstanceDeclarations(t, bundle, canonicalrouting.CopyInstanceDeclarations(t, "producer", "unrelated"))))
 }
 
 func mustCompileContractFrontierBundle(bundle *runtimecontracts.WorkflowContractBundle) *runtimecontracts.WorkflowContractBundle {

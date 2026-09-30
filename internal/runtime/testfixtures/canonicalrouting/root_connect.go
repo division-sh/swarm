@@ -44,7 +44,7 @@ instance: operating_id
 pins:
   inputs:
     events:
-      - event: opco.product_initialization_requested
+      - opco.product_initialization_requested
 `,
 		"operating/entities.yaml": `operating:
   operating_id:

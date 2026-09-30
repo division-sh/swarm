@@ -117,10 +117,10 @@ func TestFinalFlowInstanceAuthoringFixture_FailClosedMatrix(t *testing.T) {
 			loadError:   true,
 		},
 		{
-			name:        "retired static create_entity",
+			name:        "caller-selected static create_entity",
 			opts:        finalflowinstanceauthoring.Options{StaticCreateEntity: true},
 			checkID:     "flow_boundary_create_entity_validation",
-			wantMessage: "static multi-row entity ownership is retired",
+			wantMessage: "caller-selected entity_id",
 		},
 		{
 			name:        "retired static select_entity",
@@ -135,10 +135,10 @@ func TestFinalFlowInstanceAuthoringFixture_FailClosedMatrix(t *testing.T) {
 			wantMessage: "RETIRED: handler field",
 		},
 		{
-			name:        "retired static missing acquisition",
+			name:        "caller-selected static implicit materialization",
 			opts:        finalflowinstanceauthoring.Options{StaticMissingAcquisition: true},
 			checkID:     "flow_boundary_create_entity_validation",
-			wantMessage: "static multi-row entity ownership is retired",
+			wantMessage: "caller-selected entity_id",
 		},
 		{
 			name:        "retired root default caller-selected entity id",

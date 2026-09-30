@@ -739,8 +739,8 @@ func TestSelectedForkReceiverStaticAcquisitionBootRefusal(t *testing.T) {
 	bundle := loadWorkflowValidationBundleAt(t, root)
 	report := bootverify.Run(context.Background(), semanticview.Wrap(bundle), bootverify.Options{})
 	findings := fmt.Sprint(report.Errors())
-	if !strings.Contains(findings, "flow_boundary_create_entity_validation") || !strings.Contains(findings, "stateful static multi-row entity ownership is retired") {
-		t.Fatalf("retired static acquisition did not reject at real boot: %s", findings)
+	if !strings.Contains(findings, "flow_boundary_create_entity_validation") || !strings.Contains(findings, "caller-selected entity_id") {
+		t.Fatalf("caller-selected static acquisition did not reject at real boot: %s", findings)
 	}
 }
 

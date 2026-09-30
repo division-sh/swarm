@@ -815,7 +815,7 @@ func testWorkflowNodeConnectedInputSource(t testing.TB, producerMode string) sem
 			},
 		},
 	}
-	bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, "producer")
+	bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, canonicalrouting.CopyInstanceDeclarations(t, "producer"))
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 		panic(err)
 	}
@@ -979,7 +979,7 @@ func workflowNodeDirectTemplateDeliverySource(t testing.TB) semanticview.Source 
 			},
 		},
 	}
-	bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, "account_case")
+	bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, canonicalrouting.CopyInstanceDeclarations(t, "account_case"))
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 		panic(err)
 	}

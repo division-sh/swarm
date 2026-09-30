@@ -55,6 +55,10 @@ func TestPrimaryEntityConformance(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			root := writePrimaryEntityConformanceFixture(t, tc.flowSchema, tc.flowEntities)
+			if tc.wantBootError != "" {
+				writePrimaryEntityConformanceFile(t, filepath.Join(root, "scoring", "events.yaml"), "score.requested:\n")
+				writePrimaryEntityConformanceFile(t, filepath.Join(root, "scoring", "nodes.yaml"), "writer:\n  execution_type: system_node\n  event_handlers:\n    score.requested:\n      create_entity: true\n      advances_to: done\n")
+			}
 			repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 			if tc.wantLoadError != "" {

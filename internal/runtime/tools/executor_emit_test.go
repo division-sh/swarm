@@ -86,7 +86,7 @@ func TestHandleEmitToolPreservesImportedAgentSemanticSource(t *testing.T) {
 			ByID: map[string]*runtimecontracts.FlowContractView{flowID: &root.Children[0]},
 		},
 	}
-	bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, flowID)
+	bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, canonicalrouting.CopyInstanceDeclarations(t, flowID))
 	source := toolTestSourceWithDeclaredAgent(t, bundle, agentID, flowID)
 	declaration := semanticview.AgentDeclarations(source)
 	if len(declaration) != 1 {
@@ -614,7 +614,7 @@ func TestHandleEmitTool_PreservesAdmittedChildFlowOwnerAndExecutionMode(t *testi
 		},
 	}
 	bundle.FlowTree.ByID["validation"].Events["research.completed"] = bundle.Events["research.completed"]
-	source := toolTestSourceWithDeclaredAgent(t, semanticviewtest.WithInstanceDeclarations(t, bundle, "validation"), "business-research-agent", "validation", "research.completed")
+	source := toolTestSourceWithDeclaredAgent(t, semanticviewtest.WithInstanceDeclarations(t, bundle, canonicalrouting.CopyInstanceDeclarations(t, "validation")), "business-research-agent", "validation", "research.completed")
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
@@ -825,7 +825,7 @@ func TestHandleEmitTool_RejectsCompleteParentWithoutConsumer(t *testing.T) {
 			"analyzer-flow": &analyzerFlow,
 		},
 	}
-	source := toolTestSourceWithDeclaredAgent(t, semanticviewtest.WithInstanceDeclarations(t, bundle, "analyzer-flow"), "analyzer", "analyzer-flow", "analysis.done")
+	source := toolTestSourceWithDeclaredAgent(t, semanticviewtest.WithInstanceDeclarations(t, bundle, canonicalrouting.CopyInstanceDeclarations(t, "analyzer-flow")), "analyzer", "analyzer-flow", "analysis.done")
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
@@ -915,7 +915,7 @@ func TestHandleEmitTool_FailsClosedOnIncompleteStoredParentRoute(t *testing.T) {
 			"analyzer-flow": &analyzerFlow,
 		},
 	}
-	source := toolTestSourceWithDeclaredAgent(t, semanticviewtest.WithInstanceDeclarations(t, bundle, "analyzer-flow"), "analyzer", "analyzer-flow", "analysis.done")
+	source := toolTestSourceWithDeclaredAgent(t, semanticviewtest.WithInstanceDeclarations(t, bundle, canonicalrouting.CopyInstanceDeclarations(t, "analyzer-flow")), "analyzer", "analyzer-flow", "analysis.done")
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
@@ -1992,7 +1992,7 @@ func emitRoutePlanTestBundle(t testing.TB, flows []emitRoutePlanTestFlow, connec
 		FlowSchemas: flowSchemas,
 	}
 	if len(templates) > 0 {
-		return semanticviewtest.WithInstanceDeclarations(t, bundle, templates...)
+		return semanticviewtest.WithInstanceDeclarations(t, bundle, canonicalrouting.CopyInstanceDeclarations(t, templates...))
 	}
 	return bundle
 }

@@ -62,14 +62,14 @@ func TestProviderIngressDeclaringFlowAuthority(t *testing.T) {
 				}
 				sender = "."
 			}
-			connections := []map[string]any{{"event": "inbound.telegram.text_message", "from": sender, "to": "telegram-chat"}}
+			connections := []map[string]any{{"event": "inbound.telegram.text_message", "from": sender, "to": "telegram-chat", "resolution": "select-or-create"}}
 			want := map[string][]string{sender: {"telegram-chat"}}
 			if tc.fanout {
-				connections = append(connections, map[string]any{"event": "inbound.telegram.text_message", "from": sender, "to": "copied-chat"})
+				connections = append(connections, map[string]any{"event": "inbound.telegram.text_message", "from": sender, "to": "copied-chat", "resolution": "select-or-create"})
 				want[sender] = []string{"copied-chat", "telegram-chat"}
 			}
 			if tc.copyIngress {
-				connections = append(connections, map[string]any{"event": "inbound.telegram.text_message", "from": "other-ingress", "to": "copied-chat"})
+				connections = append(connections, map[string]any{"event": "inbound.telegram.text_message", "from": "other-ingress", "to": "copied-chat", "resolution": "select-or-create"})
 				want["other-ingress"] = []string{"copied-chat"}
 			}
 			mutateProviderAuthorityYAML(t, filepath.Join(root, "schema.yaml"), func(schema map[string]any) { schema["connect"] = connections })
@@ -271,7 +271,7 @@ func TestProviderIngressBindingRemovalDoesNotTransferConnections(t *testing.T) {
 	})
 	mutateProviderAuthorityYAML(t, filepath.Join(root, "schema.yaml"), func(schema map[string]any) {
 		connections := schema["connect"].([]any)
-		schema["connect"] = append(connections, map[string]any{"event": "inbound.telegram.text_message", "from": "other-ingress", "to": "telegram-chat"})
+		schema["connect"] = append(connections, map[string]any{"event": "inbound.telegram.text_message", "from": "other-ingress", "to": "telegram-chat", "resolution": "select-or-create"})
 	})
 	for _, step := range []struct {
 		remove string

@@ -190,7 +190,7 @@ func CopyForkReceiverRepeatedOwnership(t testing.TB, receivers []ForkReceiver) s
 func CopyForkReceiverStaticAcquisitionRefusal(t testing.TB) string {
 	t.Helper()
 	root := CopyForkReceiverOwnership(t, []ForkReceiver{{Path: "consumer", Policy: ForkReceiverExplicitCreate}}, false)
-	applyClosedReplacement(t, filepath.Join(root, "consumer/schema.yaml"), "name: consumer\n", "name: consumer\n")
+	applyClosedReplacement(t, filepath.Join(root, "producer/events.yaml"), "work.ready:\n", "work.ready:\n  entity_id: uuid?\n")
 	return root
 }
 

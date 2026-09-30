@@ -5175,7 +5175,7 @@ func connectRoutePlanTestBundle(t testing.TB, flows []connectRoutePlanTestFlow, 
 		FlowSchemas: flowSchemas,
 	}
 	if len(templates) > 0 {
-		bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, templates...)
+		bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, canonicalrouting.CopyInstanceDeclarations(t, templates...))
 	}
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 		panic(err)

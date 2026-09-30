@@ -15,14 +15,14 @@ func TestCatalogRejectsStaticCreateEntityHandlerFixture(t *testing.T) {
 	bundle := loadFixtureBundle(t, fixtureRoot)
 	report := runtimebootverify.Run(testAuthorActivityContext(context.Background()), semanticview.Wrap(bundle), runtimebootverify.Options{})
 
-	if !catalogCreateEntityFindingContains(report.Errors(), "flow_boundary_create_entity_validation", "static multi-row entity ownership is retired") {
-		t.Fatalf("expected retired static create_entity validation error, got %#v", report.Errors())
+	if !catalogCreateEntityFindingContains(report.Errors(), "flow_boundary_create_entity_validation", "caller-selected entity_id") {
+		t.Fatalf("expected caller-selected static create_entity validation error, got %#v", report.Errors())
 	}
 }
 
 func writeCreateEntityExactOnceFixture(t *testing.T) string {
 	t.Helper()
-	return canonicalrouting.CopyLegacyStaticCreate(t, false)
+	return canonicalrouting.CopyStaticMultiEntityRetirement(t, canonicalrouting.StaticRetirementCreate)
 }
 
 func catalogCreateEntityFindingContains(findings []runtimebootverify.Finding, checkID, substr string) bool {

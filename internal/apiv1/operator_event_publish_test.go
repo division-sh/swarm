@@ -1294,7 +1294,7 @@ func TestOperatorEventPublishPrivateTemplateDeniedBeforePublication(t *testing.T
 
 func TestPublicEventInputEligibilityIgnoresChildAndCatalogOnlyOwners(t *testing.T) {
 	const name = "review.requested"
-	root := eventPublishRootTemplateCollisionTestBundle()
+	root := eventPublishRootTemplateCollisionTestBundle(t)
 	if _, err := resolveEventPublicationEventName(semanticview.Wrap(root), name); err != nil {
 		t.Fatal(err)
 	}
@@ -1305,7 +1305,7 @@ func TestPublicEventInputEligibilityIgnoresChildAndCatalogOnlyOwners(t *testing.
 	}
 	for _, source := range []semanticview.Source{
 		semanticview.Wrap(flowScopedEventPublishTestBundle()),
-		semanticview.Wrap(eventPublishTemplateInputTestBundle(name, false)),
+		semanticview.Wrap(eventPublishTemplateInputTestBundle(t, name, false)),
 	} {
 		for _, event := range []string{name, "operating/" + name, "repo-scaffold/repo_scaffold.repo_commit_succeeded"} {
 			if _, err := resolveEventPublicationEventName(source, event); err == nil {
@@ -1345,7 +1345,7 @@ func TestOperatorEventPublishMissingTemplateInputFailsClosedBeforeLowerPrecedenc
 			for _, eventName := range []string{"review.requested", "operating/review.requested"} {
 				eventName := eventName
 				t.Run(strings.ReplaceAll(eventName, "/", "_"), func(t *testing.T) {
-					bundle := eventPublishTemplateInputTestBundle("review.requested", false)
+					bundle := eventPublishTemplateInputTestBundle(t, "review.requested", false)
 					bundle.FlowSchemas["operating"] = runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
 						InstanceField("instance_key"),
 					}
@@ -2549,8 +2549,8 @@ func eventPublishTargetRouteTestBundle(t testing.TB) *runtimecontracts.WorkflowC
 	return bundle
 }
 
-func eventPublishRootTemplateCollisionTestBundle() *runtimecontracts.WorkflowContractBundle {
-	return eventPublishTemplateInputTestBundle("review.requested", true)
+func eventPublishRootTemplateCollisionTestBundle(t testing.TB) *runtimecontracts.WorkflowContractBundle {
+	return eventPublishTemplateInputTestBundle(t, "review.requested", true)
 }
 
 func eventPublishRootTemplateCollisionSource(t *testing.T) *runtimecontracts.WorkflowContractBundle {
@@ -2593,7 +2593,8 @@ pins:
 	return bundle
 }
 
-func eventPublishTemplateInputTestBundle(eventName string, authoredRoot bool) *runtimecontracts.WorkflowContractBundle {
+func eventPublishTemplateInputTestBundle(t testing.TB, eventName string, authoredRoot bool) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
 	operating := runtimecontracts.FlowContractView{
 		Path:  "operating",
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "operating"},
@@ -2623,6 +2624,7 @@ func eventPublishTemplateInputTestBundle(eventName string, authoredRoot bool) *r
 			},
 		},
 	}
+	bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, canonicalrouting.CopyInstanceDeclarations(t, "operating"))
 	if !authoredRoot {
 		return mustCompileEventPublishTestBundle(bundle)
 	}
