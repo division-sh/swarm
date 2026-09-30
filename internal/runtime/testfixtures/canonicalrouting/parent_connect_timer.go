@@ -8,7 +8,6 @@ func CopyParentConnectTimer(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, ParentConnect)
 	writeClosedVariantFile(t, root, "producer/schema.yaml", `name: producer
-mode: static
 stages:
   waiting:
     initial: true

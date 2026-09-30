@@ -571,7 +571,7 @@ func TestSelectedContractStaticAgentRecordsIncludeInferredFlowRequiredAgents(t *
 		Paths: runtimecontracts.FlowContractPaths{
 			FlowPath: "analysis",
 		},
-		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic},
+		Schema: runtimecontracts.FlowSchemaDocument{},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"analyzer": {
 				Type:           "generic",

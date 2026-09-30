@@ -16,7 +16,7 @@ pins:
   outputs:
     events: [work.ready]
 connect:
-  - {event: work.ready, from: ., to: account}
+  - {event: work.ready, from: ., to: account, resolution: select-or-create}
 `,
 		"types.yaml": `types:
   InitializationValues:
@@ -47,7 +47,6 @@ work.ready:
           values: ${payload.values}
 `,
 		"account/schema.yaml": `name: account
-mode: template
 instance: account_id
 instance_variables:
   variables:
@@ -60,8 +59,6 @@ pins:
   inputs:
     events:
       - event: work.ready
-        resolution:
-          mode: select-or-create
         initialize:
           count: payload.values.count
           label: payload.values.label

@@ -452,7 +452,6 @@ func loadStoreBackendSelectionWorkflowBundle(t *testing.T) *runtimecontracts.Wor
 	root := t.TempDir()
 
 	writeStoreBackendSelectionFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: store-backend-selection
-mode: static
 stages:
   idle: {initial: true, terminal: true}
 `)

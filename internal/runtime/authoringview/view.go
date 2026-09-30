@@ -268,7 +268,6 @@ type InputPinView struct {
 	FlowPath                 string            `json:"flow_path,omitempty"`
 	Source                   string            `json:"source,omitempty"`
 	ResolutionMode           string            `json:"resolution_mode,omitempty"`
-	ResolutionFrom           string            `json:"resolution_from,omitempty"`
 	ResolutionAggregation    string            `json:"resolution_aggregation,omitempty"`
 	ResolutionWindow         string            `json:"resolution_window,omitempty"`
 	ResolutionDedupBy        []string          `json:"resolution_dedup_by,omitempty"`
@@ -481,7 +480,7 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 		item := FlowView{
 			ID:          flowID,
 			Path:        flowID,
-			Mode:        strings.TrimSpace(schema.Mode),
+			Mode:        strings.TrimSpace(schema.EffectiveMode()),
 			SourceFiles: flowSourceFiles(flow),
 			Events:      eventViews(flow.Events),
 			Agents:      agents,
@@ -507,7 +506,7 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 		} else {
 			item.PrimaryEntityError = err.Error()
 		}
-		if strings.TrimSpace(schema.Mode) == runtimecontracts.FlowModeTemplate || !schema.Instance.Empty() {
+		if strings.TrimSpace(schema.EffectiveMode()) == runtimecontracts.FlowModeTemplate || !schema.Instance.Empty() {
 			if instance, err := bundle.ResolveFlowTemplateInstance(flowID); err == nil {
 				item.TemplateInstance = &TemplateInstanceView{
 					Field:         instance.Field.Path(),
@@ -519,15 +518,11 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 				item.TemplateError = err.Error()
 			}
 		}
-		if strings.TrimSpace(schema.Mode) == runtimecontracts.FlowModeSingleton {
-			if _, err := bundle.ResolveFlowSingleton(flowID); err != nil {
+		if schema.EffectiveMode() == runtimecontracts.FlowModeStatic && len(demandsByFlow[flowID]) > 0 {
+			if singleton, err := bundle.ResolveFlowSingletonCoordinator(flowID); err == nil {
+				item.SingletonCoordinator = singletonCoordinatorView(singleton, flow.Paths.SchemaFile)
+			} else {
 				item.SingletonError = err.Error()
-			} else if len(demandsByFlow[flowID]) > 0 {
-				if singleton, err := bundle.ResolveFlowSingletonCoordinator(flowID); err == nil {
-					item.SingletonCoordinator = singletonCoordinatorView(singleton, flow.Paths.SchemaFile)
-				} else {
-					item.SingletonError = err.Error()
-				}
 			}
 		}
 		item.ContainedOperations = opsByFlow[flowID]
@@ -1077,7 +1072,7 @@ func inputPinViews(source semanticview.Source, flowID string, pins []runtimecont
 			Initialize: pin.Initialization().Bindings(),
 			Event:      pin.EventType(), ResolvedEvent: source.ResolveFlowEventReference(flowID, pin.EventType()),
 			FlowPath: pin.FlowPath(), Source: runtimecontracts.FlowInputPinSourceCode(pin.Source()),
-			ResolutionMode: runtimecontracts.FlowInputResolutionModeCode(resolution.Mode), ResolutionFrom: resolution.From,
+			ResolutionMode:        runtimecontracts.FlowInputResolutionModeCode(resolution.Mode),
 			ResolutionAggregation: resolution.Aggregation, ResolutionWindow: resolution.Window,
 			ResolutionDedupBy: resolution.DedupBy, ResolutionSingleton: resolution.Singleton,
 			ResolutionRepliesTo: resolution.RepliesTo, ResolutionCorrelationKey: resolution.CorrelationKey,

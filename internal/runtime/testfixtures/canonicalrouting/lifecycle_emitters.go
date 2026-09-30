@@ -294,7 +294,6 @@ func CopyLifecycleNestedTemplates(t testing.TB) string {
 			output := side + "." + command.event
 			inputs += fmt.Sprintf("      - %s\n", input)
 			outputs += "      - " + output + "\n"
-			connects += fmt.Sprintf("  - {event: %s, from: ., to: outer/%s, rename: %s}\n", output, side, command.event)
 			for _, event := range []string{input, output} {
 				events += fmt.Sprintf("%s:\n  key: case_id\n  case_id: text\n  %s: %s\n", event, command.field, command.typ)
 			}
@@ -304,19 +303,21 @@ func CopyLifecycleNestedTemplates(t testing.TB) string {
 			if command.name == "seed" {
 				mode = "select-or-create"
 			}
-			loopInputs += fmt.Sprintf("      - event: %s\n        resolution: {mode: %s}\n", command.event, mode)
+			connects += fmt.Sprintf("  - {event: %s, from: ., to: outer/%s, rename: %s, resolution: %s}\n", output, side, command.event, mode)
+			loopInputs += fmt.Sprintf("      - %s\n", command.event)
 		}
 		raw, err := os.ReadFile(filepath.Join(root, prefix+"schema.yaml"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		schema := strings.Replace(string(raw), "name: lifecycle-loop\n", "name: lifecycle-loop\nmode: template\ninstance: case_id\n", 1)
+		schema := strings.Replace(string(raw), "name: lifecycle-loop\n", "name: lifecycle-loop\ninstance: case_id\n", 1)
 		begin := strings.Index(schema, "      - work.requested")
 		end := strings.Index(schema, "  outputs:")
 		if begin < 0 || end <= begin {
 			t.Fatal("loop template input boundary missing")
 		}
 		schema = schema[:begin] + loopInputs + schema[end:]
+		schema = strings.Replace(schema, "    to: sink\n", "    to: sink\n    resolution: select-or-create\n", 1)
 		writeClosedVariantFile(t, root, prefix+"schema.yaml", schema)
 		writeClosedVariantFile(t, root, prefix+"events.yaml", "loop.escaped:\n  key: revision_id\n  revision_id: text\n")
 		writeClosedVariantFile(t, root, prefix+"entities.yaml", "work:\n  case_id: {type: text, _unused_reason: receiver instance identity}\n")
@@ -336,8 +337,7 @@ func CopyLifecycleNestedTemplates(t testing.TB) string {
 		if err != nil {
 			t.Fatal(err)
 		}
-		sink := strings.Replace(string(raw), "name: review\n", "name: review\nmode: template\ninstance: revision_id\n", 1)
-		sink = strings.Replace(sink, "    events: [loop.escaped]\n", "    events:\n      - event: loop.escaped\n        resolution: {mode: select-or-create}\n", 1)
+		sink := strings.Replace(string(raw), "name: review\n", "name: review\ninstance: revision_id\n", 1)
 		writeClosedVariantFile(t, root, prefix+"sink/schema.yaml", sink)
 	}
 	writeClosedVariantFile(t, root, "schema.yaml", "name: template-driver\nstages:\n  active: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    events:\n      - work.observed\n      - work.finished\n"+inputs+"  outputs:\n    events:\n"+outputs+"connect:\n"+connects)

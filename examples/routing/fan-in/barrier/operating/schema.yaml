@@ -1,13 +1,9 @@
 name: operating
-mode: template
 instance: operating_id
 pins:
   inputs:
     events:
-      - event: operating.report.requested
-        resolution:
-          mode: create
-          from: event.id
+      - operating.report.requested
   outputs:
     events:
       - operating.reported

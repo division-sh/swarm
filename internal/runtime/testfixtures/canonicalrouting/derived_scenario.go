@@ -39,9 +39,7 @@ fulfillment.requested:
 	files := map[string]string{
 
 		"schema.yaml": rootSchema,
-		"fulfillment/schema.yaml": `
-name: fulfillment
-mode: static
+		"fulfillment/schema.yaml": `name: fulfillment
 pins:
   inputs:
     events:

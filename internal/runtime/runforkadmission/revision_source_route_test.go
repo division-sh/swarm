@@ -85,7 +85,7 @@ func TestRevisionProjectedSourceRouteDrivesFrontierAndHistoryAcrossReceiverConte
 		}
 	}
 
-	source := runforkadmission.ContractFrontierTemplateConnectSourceForTest()
+	source := runforkadmission.ContractFrontierTemplateConnectSourceForTest(t)
 	selection := runforkadmission.SelectedContractSelection(source)
 	frontier, err := runforkadmission.AdmitContractFrontier(runforkadmission.ContractFrontierRequest{Plan: plan, Source: source, ContractSelection: selection})
 	if err != nil {
@@ -117,7 +117,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 		routingSource     events.RoutingSource
 		explicitSelector  bool
 		deliveryStatus    string
-		source            func() semanticview.Source
+		source            func(testing.TB) semanticview.Source
 		wantFrontier      []string
 		wantHistory       []string
 		wantHistoryEvents int
@@ -176,8 +176,10 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			eventName:        "producer/scan.requested",
 			sourceRoute:      events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: "11111111-1111-4111-8111-111111111111"},
 			explicitSelector: true,
-			source:           func() semanticview.Source { return runforkadmission.ContractFrontierConnectSourceForTest("static") },
-			wantHistory:      []string{consumerNode}, wantHistoryEvents: 1,
+			source: func(t testing.TB) semanticview.Source {
+				return runforkadmission.ContractFrontierConnectSourceForTest(t, "static")
+			},
+			wantHistory: []string{consumerNode}, wantHistoryEvents: 1,
 			wantHistoryCodes: []string{nonMutating, flowHistory}, wantRouteFacts: true,
 		},
 		{
@@ -186,8 +188,10 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			sourceRoute:      events.RouteIdentity{EntityID: "33333333-3333-4333-8333-333333333333"},
 			routingSource:    eventtest.RootRoutingSource("33333333-3333-4333-8333-333333333333"),
 			explicitSelector: true,
-			source:           func() semanticview.Source { return runforkadmission.ContractFrontierRootConnectSourceForTest(t) },
-			wantHistory:      []string{consumerNode}, wantHistoryEvents: 1,
+			source: func(t testing.TB) semanticview.Source {
+				return runforkadmission.ContractFrontierRootConnectSourceForTest(t)
+			},
+			wantHistory: []string{consumerNode}, wantHistoryEvents: 1,
 			wantHistoryCodes: []string{nonMutating},
 		},
 		{
@@ -254,7 +258,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 				t.Fatalf("fork point source route = %#v, want normalized %#v", got, want)
 			}
 
-			source := tc.source()
+			source := tc.source(t)
 			selection := runforkadmission.SelectedContractSelection(source)
 			frontier, err := runforkadmission.AdmitContractFrontier(runforkadmission.ContractFrontierRequest{Plan: plan, Source: source, ContractSelection: selection})
 			if err != nil {

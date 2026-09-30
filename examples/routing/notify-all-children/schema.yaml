@@ -33,6 +33,8 @@ connect:
   - event: account.registered
     from: portfolio
     to: account
+    resolution: select-or-create
   - event: account.notify.requested
     from: portfolio
     to: account
+    resolution: select

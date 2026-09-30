@@ -99,7 +99,7 @@ func TestCreateSyntheticCarryRejectsStaticallyAuthoredProducerCollision(t *testi
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-	if !reportContains(report.Errors(), "composition_connect_validation", "producer event validation.requested field validation_case_id conflicts with receiver-owned resolution projection generated.uuid") {
+	if !reportContains(report.Errors(), "composition_connect_validation", "producer event validation.requested field validation_case_id conflicts with connection projection generated.uuid") {
 		t.Fatalf("expected producer/synthetic carry collision blocker, got %#v", report.Errors())
 	}
 }
@@ -207,10 +207,14 @@ func TestRun_FailsClosedForInvalidCreateInputResolution(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			root := writeCreateResolutionCompositionConnectFixture(t, tc.opts)
-			if tc.opts.mode == runtimecontracts.FlowInputResolutionModeFanOut {
+			if tc.opts.mode == runtimecontracts.FlowInputResolutionModeFanOut || tc.opts.source == "generated.random" {
 				repoRoot := repoRootForBootverifyTest(t)
 				_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-				if err == nil || !strings.Contains(err.Error(), "mode fan-out may only declare mode") {
+				want := tc.want
+				if tc.opts.mode == runtimecontracts.FlowInputResolutionModeFanOut {
+					want = "connect.resolution must be"
+				}
+				if err == nil || !strings.Contains(err.Error(), want) {
 					t.Fatalf("expected immutable pin compilation rejection, got %v", err)
 				}
 				return
@@ -236,7 +240,7 @@ func TestCanonicalResolutionAdmissionBlocksOutOfModeFromBeforeBootVerification(t
 		{name: "reply", root: canonicalrouting.CopyTemplateReplyWithInertFrom},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, tc.root(t), runtimecontracts.DefaultPlatformSpecFile(repoRoot)); err == nil || !strings.Contains(err.Error(), "may only declare") {
+			if _, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, tc.root(t), runtimecontracts.DefaultPlatformSpecFile(repoRoot)); err == nil || !strings.Contains(err.Error(), "resolution.from is retired") {
 				t.Fatalf("bundle load error = %v, want canonical rejection before boot verification", err)
 			}
 		})
@@ -357,7 +361,7 @@ func TestRun_FailsClosedForInvalidFanInStreamInputResolution(t *testing.T) {
 		{name: "missing window", opts: templatefanin.Options{MissingWindow: true}, want: "requires window"},
 		{name: "missing singleton", opts: templatefanin.Options{MissingSingleton: true}, want: "requires explicit singleton"},
 		{name: "wrong singleton", opts: templatefanin.Options{WrongSingleton: true}, want: "must be the receiver singleton route or a child"},
-		{name: "non-singleton receiver", opts: templatefanin.Options{NonSingletonReceiver: true}, want: "is not mode: singleton"},
+		{name: "non-singleton receiver", opts: templatefanin.Options{NonSingletonReceiver: true}, want: "has a template instance key"},
 		{name: "missing receiver handler", opts: templatefanin.Options{MissingReceiverHandler: true}, want: "has no handler for fan-in input event operating.reported"},
 		{name: "missing accumulate", opts: templatefanin.Options{MissingAccumulate: true}, want: "for fan-in input must declare accumulate"},
 		{name: "accumulator dedup redeclaration", opts: templatefanin.Options{AccumulateDedupMismatch: true}, want: "accumulate.dedup_by \"payload.period_id\" must not redeclare fan-in dedup_by"},

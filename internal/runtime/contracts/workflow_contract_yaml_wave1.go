@@ -83,10 +83,12 @@ var providerTriggerEventImportFieldOptions = map[string]struct{}{
 }
 
 var flowConnectFieldOptions = map[string]struct{}{
-	"event":  {},
-	"from":   {},
-	"to":     {},
-	"rename": {},
+	"resolution": {},
+	"key_from":   {},
+	"event":      {},
+	"from":       {},
+	"to":         {},
+	"rename":     {},
 }
 
 var typeCatalogFieldOptions = map[string]struct{}{

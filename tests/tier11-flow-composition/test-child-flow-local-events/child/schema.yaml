@@ -10,4 +10,3 @@ pins:
     events:
       - event: child.done
         sink: harness
-mode: static

@@ -30,7 +30,6 @@ connect:
     flow.finished: {advances_to: done}
 `)
 	writeClosedVariantFile(t, root, "guarded/schema.yaml", `name: guarded
-mode: singleton
 stages:
   ready: {initial: true}
   killed: {terminal: true}

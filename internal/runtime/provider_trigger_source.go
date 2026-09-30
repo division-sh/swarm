@@ -160,11 +160,16 @@ func SourceWithProviderTriggerEvents(source semanticview.Source, catalog *provid
 	if err != nil {
 		return nil, err
 	}
-	return providerTriggerEventSource{
+	out := providerTriggerEventSource{
 		Source: source, generation: catalog.Generation(), imported: imported, owners: owners,
 		byFlow: byFlow, outputs: outputs, ingressEvents: ingressEvents, compiledInputPins: compiledInputPins, compiledOutputPins: compiledOutputPins, compiledByFlow: compiledByFlow,
 		compiledCatalog: catalogSchemas["."],
-	}, nil
+	}
+	out.connectionInputs = runtimecontracts.CompileConnectionInputs(bundle, out)
+	if err := out.connectionInputs.ValidateBindings(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func bindProviderTriggerOutputPins(source semanticview.Source, compiledByFlow map[string]map[string]runtimecontracts.CompiledEventSchema) (map[string][]runtimecontracts.CompiledFlowOutputPin, error) {
@@ -376,10 +381,18 @@ type providerTriggerEventSource struct {
 	compiledOutputPins map[string][]runtimecontracts.CompiledFlowOutputPin
 	compiledByFlow     map[string]map[string]runtimecontracts.CompiledEventSchema
 	compiledCatalog    map[string]runtimecontracts.CompiledEventSchema
+	connectionInputs   runtimecontracts.CompiledConnectionInputs
+}
+
+func (s providerTriggerEventSource) ConnectionInputs() runtimecontracts.CompiledConnectionInputs {
+	return s.connectionInputs
 }
 
 func (s providerTriggerEventSource) ResolveEffectiveCompiledFlowEventSchema(flowID, eventType string) (runtimecontracts.CompiledEventSchema, bool, error) {
 	if pin, ok := s.FlowInputEventPin(flowID, eventType); ok {
+		if schema, owned, err := s.connectionInputs.ReceiverEventSchema(flowID, pin.EventType()); err != nil || owned {
+			return schema, owned, err
+		}
 		if schema, owned := pin.ReceiverEventSchema(); owned {
 			return schema, true, nil
 		}

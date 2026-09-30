@@ -584,7 +584,6 @@ func TestCompiledFanOutEntityRequirementRejectsEntitylessOwnershipAcrossSites(t 
 
 		"schema.yaml": "name: compiled-fan-out-entity-requirement\n",
 		"review/schema.yaml": `name: review
-mode: template
 stages:
   active: {initial: true}
 `,
@@ -780,11 +779,12 @@ func deliveryTargetOwnershipSource(t *testing.T) semanticview.Source {
 	flow := runtimecontracts.FlowContractView{
 		Path: "review", Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
 		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode: runtimecontracts.FlowModeTemplate, StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "active", Initial: true}, {ID: "done", Terminal: true}}},
+			Instance:          mustDeliveryTargetTemplateField(t),
+			StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "active", Initial: true}, {ID: "done", Terminal: true}}},
 			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{
-				{Event: "work.created", Resolution: runtimecontracts.FlowInputPinResolution{Mode: runtimecontracts.FlowInputResolutionModeCreate}},
-				{Event: "work.selected", Resolution: runtimecontracts.FlowInputPinResolution{Mode: runtimecontracts.FlowInputResolutionModeSelect}},
-				{Event: "work.upserted", Resolution: runtimecontracts.FlowInputPinResolution{Mode: runtimecontracts.FlowInputResolutionModeSelectOrCreate}},
+				{Event: "work.created"},
+				{Event: "work.selected"},
+				{Event: "work.upserted"},
 			}}},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"work.ready": {}, "work.created": {}, "work.selected": {}, "work.upserted": {}, "work.keyed": {}},
@@ -822,6 +822,15 @@ func deliveryTargetOwnershipSource(t *testing.T) semanticview.Source {
 
 func deliveryTargetOwnershipNode(id string, handler runtimecontracts.SystemNodeEventHandler) runtimecontracts.SystemNodeContract {
 	return deliveryTargetOwnershipEventNode(id, "work.ready", handler)
+}
+
+func mustDeliveryTargetTemplateField(t testing.TB) runtimecontracts.TemplateInstanceField {
+	t.Helper()
+	field, err := runtimecontracts.ParseTemplateInstanceField("instance_key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return field
 }
 
 func deliveryTargetOwnershipEventNode(id, eventType string, handler runtimecontracts.SystemNodeEventHandler) runtimecontracts.SystemNodeContract {

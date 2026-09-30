@@ -1226,7 +1226,7 @@ func flowSchemaIsTemplate(source semanticview.Source, flowID string) bool {
 	if !ok {
 		return false
 	}
-	return strings.EqualFold(strings.TrimSpace(schema.Mode), "template")
+	return strings.EqualFold(strings.TrimSpace(schema.EffectiveMode()), "template")
 }
 
 func flowIsStateless(source semanticview.Source, flowID string) bool {

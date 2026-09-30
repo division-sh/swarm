@@ -119,7 +119,7 @@ pins:
 	case "orders":
 		writeClosedVariantFile(t, root, "schema.yaml", "name: join-eventbus-proof\n")
 		removeClosedVariantFiles(t, root, "entities.yaml", "events.yaml", "nodes.yaml")
-		writeLegacyInstanceFlow(t, root, "orders", "mode: template\ninstance: order_id\n"+joinSchema,
+		writeLegacyInstanceFlow(t, root, "orders", "instance: order_id\n"+joinSchema,
 			joinEvents, joinEntities+"  order_id: {type: text, _unused_reason: receiver instance identity}\n", joinNodes)
 		writeClosedVariantFile(t, root, "orders/types.yaml", joinTypes)
 	default:
@@ -188,7 +188,6 @@ connect:
 `)
 	removeClosedVariantFiles(t, root, "producer/nodes.yaml", "producer/agents.yaml")
 	writeLegacyInstanceFlow(t, root, "producer", `name: producer
-mode: template
 instance: producer_id
 pins:
   outputs:

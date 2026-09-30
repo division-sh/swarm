@@ -14,9 +14,11 @@ connect:
   - event: requester.setup
     from: initiator
     to: requester
+    resolution: select-or-create
   - event: requester.requested
     from: initiator
     to: requester
+    resolution: select
   - event: provider.requested
     from: requester
     to: provider

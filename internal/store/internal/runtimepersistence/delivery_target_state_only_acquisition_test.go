@@ -77,10 +77,10 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 			return stateOnlyAcquisitionSourceWithMode(t, "owner", runtimecontracts.FlowModeTemplate)
 		}, true},
 		{"parent-singleton-child-template", "parent", "parent", "parent/child/instance", func(t *testing.T) semanticview.Source {
-			return stateOnlyNestedAcquisitionSource(t, "parent", runtimecontracts.FlowModeSingleton, "child", runtimecontracts.FlowModeTemplate, "parent")
+			return stateOnlyNestedAcquisitionSource(t, "parent", runtimecontracts.FlowModeStatic, "child", runtimecontracts.FlowModeTemplate, "parent")
 		}, false},
 		{"parent-template-child-singleton", "parent", "parent/instance", "parent/child", func(t *testing.T) semanticview.Source {
-			return stateOnlyNestedAcquisitionSource(t, "parent", runtimecontracts.FlowModeTemplate, "child", runtimecontracts.FlowModeSingleton, "parent")
+			return stateOnlyNestedAcquisitionSource(t, "parent", runtimecontracts.FlowModeTemplate, "child", runtimecontracts.FlowModeStatic, "parent")
 		}, true},
 		{"nested-template", "parent/child", "parent/child/instance", "parent/instance", func(t *testing.T) semanticview.Source {
 			return stateOnlyNestedAcquisitionSource(t, "parent", runtimecontracts.FlowModeTemplate, "child", runtimecontracts.FlowModeTemplate, "parent/child")
@@ -264,9 +264,9 @@ func TestWorkflowEntityStateSelectionOwnerUsesExactAuthoredScope(t *testing.T) {
 		path       string
 		want       bool
 	}{
-		{name: "singleton exact", parentMode: runtimecontracts.FlowModeSingleton, path: "parent", want: true},
-		{name: "singleton rejects concrete suffix", parentMode: runtimecontracts.FlowModeSingleton, path: "parent/instance"},
-		{name: "singleton rejects nested template", parentMode: runtimecontracts.FlowModeSingleton, path: "parent/child/instance"},
+		{name: "singleton exact", parentMode: runtimecontracts.FlowModeStatic, path: "parent", want: true},
+		{name: "singleton rejects concrete suffix", parentMode: runtimecontracts.FlowModeStatic, path: "parent/instance"},
+		{name: "singleton rejects nested template", parentMode: runtimecontracts.FlowModeStatic, path: "parent/child/instance"},
 		{name: "template direct instance", parentMode: runtimecontracts.FlowModeTemplate, path: "parent/instance", want: true},
 		{name: "template rejects authored child singleton", parentMode: runtimecontracts.FlowModeTemplate, path: "parent/child"},
 		{name: "template rejects authored child instance", parentMode: runtimecontracts.FlowModeTemplate, path: "parent/child/instance"},
@@ -276,7 +276,7 @@ func TestWorkflowEntityStateSelectionOwnerUsesExactAuthoredScope(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			source := stateOnlyNestedAcquisitionSource(t, parentID, test.parentMode, childID, runtimecontracts.FlowModeSingleton, parentID)
+			source := stateOnlyNestedAcquisitionSource(t, parentID, test.parentMode, childID, runtimecontracts.FlowModeStatic, parentID)
 			owner, err := runtimepipeline.AdmitWorkflowEntityStateSelectionOwner(source, parentID, "")
 			if err != nil {
 				t.Fatal(err)
@@ -332,7 +332,7 @@ func openStateOnlyAcquisitionStoreWithSource(t *testing.T, backend string, sourc
 }
 
 func stateOnlyAcquisitionSource(t *testing.T, flowID string) semanticview.Source {
-	return stateOnlyAcquisitionSourceWithMode(t, flowID, runtimecontracts.FlowModeSingleton)
+	return stateOnlyAcquisitionSourceWithMode(t, flowID, runtimecontracts.FlowModeStatic)
 }
 
 func stateOnlyAcquisitionSourceWithMode(t *testing.T, flowID, mode string) semanticview.Source {
@@ -353,8 +353,8 @@ func stateOnlySiblingAcquisitionSource(t *testing.T, firstID, firstMode, secondI
 
 func stateOnlyDeepAcquisitionSource(t *testing.T, parentID, childID, grandchildID string) semanticview.Source {
 	return loadStateOnlyAcquisitionSource(t, "state-only-deep-acquisition", map[string]string{
-		parentID:                 runtimecontracts.FlowModeSingleton,
-		parentID + "/" + childID: runtimecontracts.FlowModeSingleton,
+		parentID:                 runtimecontracts.FlowModeStatic,
+		parentID + "/" + childID: runtimecontracts.FlowModeStatic,
 		parentID + "/" + childID + "/" + grandchildID: runtimecontracts.FlowModeTemplate,
 	}, parentID+"/"+childID+"/"+grandchildID)
 }

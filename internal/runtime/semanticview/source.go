@@ -46,6 +46,7 @@ type Source interface {
 	FlowInputEventPins(flowID string) []runtimecontracts.CompiledFlowInputPin
 	FlowOutputEventPins(flowID string) []runtimecontracts.CompiledFlowOutputPin
 	FlowInputEventPin(flowID, pinName string) (runtimecontracts.CompiledFlowInputPin, bool)
+	ConnectionInputs() runtimecontracts.CompiledConnectionInputs
 	FlowOutputEventPin(flowID, pinName string) (runtimecontracts.CompiledFlowOutputPin, bool)
 	FlowWritePins(flowID string) []string
 	WritePinOwners(pin string) []string

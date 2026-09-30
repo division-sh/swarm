@@ -162,7 +162,7 @@ func AdmitWorkflowEntityStateSelectionOwner(source semanticview.Source, flowID, 
 		}
 		cardinality := workflowEntityStateSelectionCardinalityUnknown
 		switch strings.ToLower(strings.TrimSpace(candidate.Mode)) {
-		case runtimecontracts.FlowModeStatic, runtimecontracts.FlowModeSingleton:
+		case runtimecontracts.FlowModeStatic:
 			cardinality = workflowEntityStateSelectionExact
 		case runtimecontracts.FlowModeTemplate:
 			cardinality = workflowEntityStateSelectionTemplate

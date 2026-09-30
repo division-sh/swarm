@@ -16,14 +16,12 @@ connect:
   - {event: mixed.multi, from: producer, to: child}
 `,
 		"producer/schema.yaml": `name: producer
-mode: static
 pins:
   outputs:
     events: [mixed.none, mixed.one, mixed.multi]
 `,
 		"producer/events.yaml": "mixed.none:\nmixed.one:\nmixed.multi:\n",
 		"one/schema.yaml": `name: one
-mode: static
 stages:
   active: {initial: true}
 pins:
@@ -38,7 +36,6 @@ pins:
     mixed.one: {}
 `,
 		"multi-a/schema.yaml": `name: multi-a
-mode: static
 stages:
   active: {initial: true}
 pins:
@@ -53,7 +50,6 @@ pins:
     mixed.multi: {}
 `,
 		"multi-b/schema.yaml": `name: multi-b
-mode: static
 stages:
   active: {initial: true}
 pins:
@@ -68,7 +64,6 @@ pins:
     mixed.multi: {}
 `,
 		"child/schema.yaml": `name: child
-mode: singleton
 stages:
   active: {initial: true}
 pins:

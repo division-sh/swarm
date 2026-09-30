@@ -14,7 +14,7 @@ func TestPipelineExpressionPreservesExactExecutionFlowOnBothStores(t *testing.T)
 		"schema.yaml":         "name: display-name-is-not-a-flow\nstages:\n  ready: {initial: true}\n",
 		"entities.yaml":       "root_entity:\n  root_only: text\n",
 		"events.yaml":         "query.requested:\n  value: text\n",
-		"child/schema.yaml":   "name: child\nmode: static\nstages:\n  ready: {initial: true}\n",
+		"child/schema.yaml":   "name: child\nstages:\n  ready: {initial: true}\n",
 		"child/entities.yaml": "child_entity:\n  child_only: text\n",
 		"child/events.yaml":   "query.requested:\n  value: text\n",
 	})

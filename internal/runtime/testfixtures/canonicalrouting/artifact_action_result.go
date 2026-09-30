@@ -36,7 +36,6 @@ func artifactActionResultDeliveryFixtureFiles() map[string]string {
 	return map[string]string{
 		"schema.yaml": "name: artifact-action-result-delivery\n",
 		"repo-scaffold/schema.yaml": `name: repo-scaffold
-mode: template
 instance: request_id
 stages:
   ready: {initial: true}
@@ -91,7 +90,7 @@ repo_scaffold.repo_commit_failed:
 
 func artifactActionResultStaticDeliveryFixtureFiles() map[string]string {
 	files := artifactActionResultDeliveryFixtureFiles()
-	files["repo-scaffold/schema.yaml"] = strings.Replace(files["repo-scaffold/schema.yaml"], "mode: template", "mode: static", 1)
+	files["repo-scaffold/schema.yaml"] = strings.Replace(files["repo-scaffold/schema.yaml"], "instance: request_id\n", "", 1)
 	return files
 }
 

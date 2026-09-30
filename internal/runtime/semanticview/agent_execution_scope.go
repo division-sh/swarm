@@ -97,7 +97,7 @@ func ResolveAgentExecutionSemanticScope(source Source, actor models.AgentConfig)
 		if route.ScopeKey != flowPath || route.InstancePath == flowPath || !strings.HasPrefix(route.InstancePath, flowPath+"/") {
 			return AgentExecutionSemanticScope{}, fmt.Errorf("template agent execution route %q is not a concrete instance of declaration flow %q", route.InstancePath, flowPath)
 		}
-	case runtimecontracts.FlowModeStatic, runtimecontracts.FlowModeSingleton:
+	case runtimecontracts.FlowModeStatic:
 		if route.InstancePath != flowPath {
 			return AgentExecutionSemanticScope{}, fmt.Errorf("agent execution route %q conflicts with declaration flow path %q", route.InstancePath, flowPath)
 		}

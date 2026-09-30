@@ -5,4 +5,3 @@ stages:
 pins:
   inputs:
     events: [task.record]
-mode: static

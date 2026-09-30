@@ -6,4 +6,3 @@ stages:
 pins:
   inputs:
     events: [work.begin]
-mode: static

@@ -209,7 +209,7 @@ func Derive(source semanticview.Source, flowID, instanceID string) Instance {
 	instanceID = strings.TrimSpace(instanceID)
 	instancePath := normalizeRef(InstancePath(source, flowID, instanceID))
 	if source != nil {
-		if schema, ok := source.FlowSchemaByID(strings.TrimSpace(flowID)); ok && !strings.EqualFold(strings.TrimSpace(schema.Mode), "template") {
+		if schema, ok := source.FlowSchemaByID(strings.TrimSpace(flowID)); ok && !strings.EqualFold(strings.TrimSpace(schema.EffectiveMode()), "template") {
 			instancePath = scopeKey
 			instanceID = LogicalInstanceID(scopeKey)
 		}

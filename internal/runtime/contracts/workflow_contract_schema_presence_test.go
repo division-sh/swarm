@@ -21,7 +21,7 @@ func TestSchemaAdmissionFieldPresenceMatrix(t *testing.T) {
 	variable := "instance_variables:\n  variables:\n    note:\n      type: text\n      %s\n"
 	required := "required_agents:\n  - role: worker\n    %s\n"
 	connect := "connect:\n  - event: work.requested\n    from: source\n    to: worker\n    %s\n"
-	inputPin := "pins:\n  inputs:\n    events:\n      - event: work.requested\n        resolution: {mode: create, from: event.id}\n        %s\n"
+	inputPin := "pins:\n  inputs:\n    events:\n      - event: work.requested\n        initialize: {note: payload.note}\n        %s\n"
 	outputPin := "pins:\n  outputs:\n    events:\n      - event: work.completed\n        sink: harness\n        %s\n"
 	ingress := "ingress:\n  alias: hooks\n  providers: [{provider: partner}]\n  %s\n"
 	provider := "ingress:\n  alias: hooks\n  providers:\n    - provider: partner\n      %s\n"
@@ -31,7 +31,7 @@ func TestSchemaAdmissionFieldPresenceMatrix(t *testing.T) {
 	delivery := "ingress:\n  alias: hooks\n  providers:\n    - provider: partner\n      admission:\n        kind: raw\n        authentication: {kind: token, header: X-Token}\n        event: work.received\n        payload: json\n        delivery_id:\n          source: header\n          header: X-Id\n          %s\n"
 	rows := []row{
 		{"name", root, "name", "Example", "", "", "MES"},
-		{"mode", root, "mode", "static", "", "", "MS"},
+		{"mode", root, "mode", "static", "", "", "M"},
 		{"activation", root, "activation", "standing", "", "", "MS"},
 		{"instance", root, "instance", "work_id", "", "", "MS"},
 		{"stages", root, "stages", "x", "{waiting: {initial: true}, done: {terminal: true}}", "[x]", "MPZ"},
@@ -84,6 +84,8 @@ func TestSchemaAdmissionFieldPresenceMatrix(t *testing.T) {
 		{"connect.from", connect, "from", "source", "", "", "S"},
 		{"connect.to", connect, "to", "worker", "", "", "S"},
 		{"connect.rename", connect, "rename", "work.received", "", "", "MS"},
+		{"connect.resolution", connect, "resolution", "select", "", "", "MS"},
+		{"connect.key_from", strings.ReplaceAll(connect, "    %s", "    resolution: create\n    %s"), "key_from", "event.id", "", "", "MS"},
 		{"imports", root, "imports", "x", "{connector_packs: [{provider: telegram, tool: telegram.send_message}]}", "", "MP"},
 		{"imports.connector_packs", "imports:\n  %s\n", "connector_packs", "x", "", "[{provider: telegram, tool: telegram.send_message}]", "Q"},
 		{"imports.provider_trigger_events", "imports:\n  %s\n", "provider_trigger_events", "x", "", "[{provider: telegram, event: inbound.telegram.text_message}]", "Q"},
@@ -121,8 +123,8 @@ func TestSchemaAdmissionFieldPresenceMatrix(t *testing.T) {
 		{"pins.outputs.writes", "pins:\n  outputs:\n    events: [work.completed]\n    %s\n", "writes", "x", "", "[note]", "MQ"},
 		{"inputPin.event", inputPin, "event", "work.requested", "", "", "S"},
 		{"inputPin.source", inputPin, "source", "harness", "", "", "MS"},
-		{"inputPin.resolution", inputPin, "resolution", "x", "{mode: create, from: event.id}", "", "P"},
-		{"inputPin.initialize", inputPin, "initialize", "x", "{note: payload.note}", "", "MP"},
+		{"inputPin.resolution", "pins: \n  inputs:\n    events:\n      - event: work.requested\n        %s\n", "resolution", "x", "{mode: fan-out}", "", "P"},
+		{"inputPin.initialize", strings.ReplaceAll(inputPin, "        initialize: {note: payload.note}", "        source: harness"), "initialize", "x", "{note: payload.note}", "", "MP"},
 		{"outputPin.event", outputPin, "event", "work.completed", "", "", "S"},
 		{"outputPin.sink", outputPin, "sink", "harness", "", "", "S"},
 	}
@@ -249,7 +251,7 @@ func TestSchemaAdmissionIngressBranchPresenceMatrix(t *testing.T) {
 func TestSchemaAdmissionResolutionPresenceDoesNotBypassMode(t *testing.T) {
 	for _, mode := range []string{"create", "select", "select-or-create", "fan-in", "fan-out", "reply"} {
 		for _, key := range []string{"from", "aggregation", "window", "dedup_by", "singleton", "replies_to", "correlation_key"} {
-			allowed := (mode == "create" || mode == "select" || mode == "select-or-create") && key == "from" || mode == "fan-in" && (key == "aggregation" || key == "window" || key == "dedup_by" || key == "singleton") || mode == "reply" && (key == "replies_to" || key == "correlation_key")
+			allowed := mode == "fan-in" && (key == "aggregation" || key == "window" || key == "dedup_by" || key == "singleton") || mode == "reply" && (key == "replies_to" || key == "correlation_key")
 			t.Run(mode+"/"+key, func(t *testing.T) {
 				for _, raw := range []string{"null", "''", "{}", "[]"} {
 					source := "pins: {inputs: {events: [{event: work.requested, resolution: {mode: " + mode + ", " + key + ": " + raw + "}}]}}\n"

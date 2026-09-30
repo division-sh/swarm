@@ -338,7 +338,7 @@ func (b *WorkflowContractBundle) compileEventSchemaBindings() error {
 	bindings := make(map[string]compiledFlowEventSchemas)
 	views := b.FlowViews()
 	for _, view := range views {
-		scope := compiledFlowEventSchemas{path: view.Path, template: view.Schema.Mode == "template", bindings: make(map[string]CompiledEventSchema)}
+		scope := compiledFlowEventSchemas{path: view.Path, template: view.Schema.EffectiveMode() == "template", bindings: make(map[string]CompiledEventSchema)}
 		for _, descendant := range views {
 			if strings.HasPrefix(descendant.Path, view.Path+"/") {
 				scope.descendants = append(scope.descendants, strings.TrimPrefix(descendant.Path, view.Path+"/"))
@@ -397,6 +397,9 @@ func (b *WorkflowContractBundle) ResolveEffectiveCompiledFlowEventSchema(flowID,
 		return CompiledEventSchema{}, false, nil
 	}
 	if pin, ok := b.flowInputEventPinForResolvedEvent(flowID, eventType); ok {
+		if schema, owned, err := b.connectionInputs.ReceiverEventSchema(flowID, pin.EventType()); err != nil || owned {
+			return schema, owned, err
+		}
 		if schema, owned := pin.ReceiverEventSchema(); owned {
 			return schema, true, nil
 		}

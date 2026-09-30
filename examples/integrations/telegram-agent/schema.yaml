@@ -12,6 +12,8 @@ connect:
   - event: inbound.telegram.text_message
     from: .
     to: telegram-chat
+    resolution: select-or-create
   - event: inbound.telegram.text_message
     from: telegram-ingress
     to: telegram-chat
+    resolution: select-or-create

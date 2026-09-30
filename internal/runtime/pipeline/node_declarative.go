@@ -73,7 +73,7 @@ func canonicalHandlerRoute(source semanticview.Source, flowID, statePath string,
 			return workflowInstanceRouteForExecution(source, flowID, statePath)
 		}
 		if source != nil {
-			if schema, ok := source.FlowSchemaByID(flowID); ok && strings.EqualFold(strings.TrimSpace(schema.Mode), "template") {
+			if schema, ok := source.FlowSchemaByID(flowID); ok && strings.EqualFold(strings.TrimSpace(schema.EffectiveMode()), "template") {
 				return workflowInstanceRouteForExecution(source, flowID, evt.FlowInstance())
 			}
 		}

@@ -13,7 +13,7 @@ func CopyNotifyAllChildrenNestedServing(t testing.TB) string {
 	root := CopyNotifyAllChildren(t, NotifyAllChildrenOptions{FanOutDeliveryBarrier: true})
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - portfolio.notify.requested\n  outputs:\n", "      - portfolio.notify.requested\n      - account.tasks.completed\n      - account.task.completed\n  outputs:\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - portfolio.notify.requested\nconnect:\n", "      - portfolio.notify.requested\n      - account.tasks.completed\n      - account.task.completed\nconnect:\n")
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - event: account.notify.requested\n    from: portfolio\n    to: account\n", "  - event: account.notify.requested\n    from: portfolio\n    to: account\n  - event: account.tasks.completed\n    from: account\n    to: .\n  - event: account.task.completed\n    from: account/task\n    to: .\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - event: account.notify.requested\n    from: portfolio\n    to: account\n    resolution: select\n", "  - event: account.notify.requested\n    from: portfolio\n    to: account\n    resolution: select\n  - event: account.tasks.completed\n    from: account\n    to: .\n  - event: account.task.completed\n    from: account/task\n    to: .\n")
 	applyClosedReplacement(t, filepath.Join(root, "portfolio", "nodes.yaml"),
 		"            command: ${payload.command}\n", "            command: ${payload.command}\n            task_ids: {literal: [prepare, publish]}\n")
 	applyClosedReplacement(t, filepath.Join(root, "portfolio", "events.yaml"),
@@ -23,19 +23,14 @@ func CopyNotifyAllChildrenNestedServing(t testing.TB) string {
 	removeClosedVariantFiles(t, root, "account/agents.yaml")
 	writeClosedVariantFile(t, root, "account/entities.yaml", "account_state:\n  account_id: text\n")
 	writeClosedVariantFile(t, root, "account/schema.yaml", `name: account
-mode: template
 stages:
   active: {initial: true}
 instance: account_id
 pins:
   inputs:
     events:
-      - event: account.registered
-        resolution:
-          mode: select-or-create
-      - event: account.notify.requested
-        resolution:
-          mode: select
+      - account.registered
+      - account.notify.requested
   outputs:
     events:
       - account.task.requested
@@ -44,6 +39,7 @@ connect:
   - event: account.task.requested
     from: .
     to: task
+    resolution: select-or-create
 `)
 	writeClosedVariantFile(t, root, "account/events.yaml", `account.task.requested:
   key: task_key
@@ -99,7 +95,6 @@ account.tasks.completed:
               canceled: ${join.dispositions.canceled}
 `)
 	writeClosedVariantFile(t, root, "account/task/schema.yaml", `name: account-task
-mode: template
 instance: task_key
 stages:
   pending: {initial: true}
@@ -107,9 +102,7 @@ stages:
 pins:
   inputs:
     events:
-      - event: account.task.requested
-        resolution:
-          mode: select-or-create
+      - account.task.requested
   outputs:
     events:
       - account.task.completed

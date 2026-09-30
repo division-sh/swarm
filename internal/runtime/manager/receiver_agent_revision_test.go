@@ -8,7 +8,7 @@ import (
 )
 
 func TestReceiverAgentRevisionPreservesNamespaceAndNumberKinds(t *testing.T) {
-	blueprints, err := TemplateFlowAgentMaterializationBlueprints(semanticview.Wrap(testFlowBundle(t, "")), "review", "review/inst-1", "ent-1", map[string]any{})
+	blueprints, err := TemplateFlowAgentMaterializationBlueprints(semanticview.Wrap(testFlowBundle(t, "")), "review", "review/inst-1", "ent-1", map[string]any{"instance_key": "inst-1"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,5 +1,4 @@
 name: worker
-mode: template
 instance: worker_id
 stages:
   idle: {initial: true}
@@ -13,10 +12,7 @@ pins:
   inputs:
     events:
       - event: worker.requested
-        resolution: {mode: create}
         initialize:
           task_label: payload.task_label
       - work.setup
-      - event: work.assign
-        resolution:
-          mode: select
+      - work.assign

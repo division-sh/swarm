@@ -1,4 +1,3 @@
-mode: template
 instance: worker_id
 stages:
   idle:
@@ -11,9 +10,7 @@ stages:
 pins:
   inputs:
     events:
-      - event: worker.inspect.requested
-        resolution: {mode: select}
-      - event: worker.ready.requested
-        resolution: {mode: select}
+      - worker.inspect.requested
+      - worker.ready.requested
   outputs:
     events: [worker.observed]

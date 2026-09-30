@@ -9,4 +9,3 @@ pins:
     events:
       - event: check.passed
         sink: harness
-mode: static

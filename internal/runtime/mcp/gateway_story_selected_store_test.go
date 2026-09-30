@@ -260,7 +260,6 @@ func loadGatewayStorySource(t *testing.T, serverURL string) (semanticview.Source
 
 	writeGatewayStoryFixture(t, filepath.Join(root, "schema.yaml"), "name: mcp-gateway-story\n")
 	writeGatewayStoryFixture(t, filepath.Join(root, "story", "schema.yaml"), `name: story
-mode: static
 stages:
   queued: {initial: true}
   done: {terminal: true}

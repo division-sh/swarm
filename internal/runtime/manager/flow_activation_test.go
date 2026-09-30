@@ -1684,7 +1684,7 @@ func testFlowBundle(t *testing.T, autoEmit string) *runtimecontracts.WorkflowCon
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"task.started": {
 				Payload: runtimecontracts.EventPayloadSpec{
-					Properties: map[string]runtimecontracts.EventFieldSpec{},
+					Properties: map[string]runtimecontracts.EventFieldSpec{"instance_key": {Type: "text"}},
 				},
 			},
 		},
@@ -1716,7 +1716,7 @@ func testFlowBundle(t *testing.T, autoEmit string) *runtimecontracts.WorkflowCon
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
 			"review": {
-				Mode: "template",
+				Instance: mustManagerTemplateField(t, "instance_key"),
 				Pins: runtimecontracts.FlowPins{
 					Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "task.started"}}},
 				},
@@ -1776,6 +1776,10 @@ func testFlowBundleWithTypedAutoEmitEntry(t *testing.T, autoEmit string, entry r
 	if reviewFlow.Events == nil {
 		reviewFlow.Events = map[string]runtimecontracts.EventCatalogEntry{}
 	}
+	if entry.Payload.Properties == nil {
+		entry.Payload.Properties = map[string]runtimecontracts.EventFieldSpec{}
+	}
+	entry.Payload.Properties["instance_key"] = runtimecontracts.EventFieldSpec{Type: "text"}
 	reviewFlow.Events[strings.TrimSpace(autoEmit)] = entry
 	compileFlowActivationFixture(t, bundle)
 	return bundle
@@ -1824,7 +1828,7 @@ func testNestedFlowBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
 			"grandchild": {
-				Mode: "template",
+				Instance: mustManagerTemplateField(t, "instance_key"),
 				Pins: runtimecontracts.FlowPins{
 					Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "micro.started"}}},
 				},
@@ -1836,6 +1840,16 @@ func testNestedFlowBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle
 }
 
 func admitFlowActivationEntityContracts(
+	t *testing.T,
+	base *runtimecontracts.WorkflowContractBundle,
+	flowEntityTypes map[string]string,
+) *runtimecontracts.WorkflowContractBundle {
+	admitted := loadFlowActivationEntityContracts(t, base, flowEntityTypes)
+	compileFlowActivationFixture(t, admitted)
+	return admitted
+}
+
+func loadFlowActivationEntityContracts(
 	t *testing.T,
 	base *runtimecontracts.WorkflowContractBundle,
 	flowEntityTypes map[string]string,
@@ -1852,8 +1866,8 @@ func admitFlowActivationEntityContracts(
 		if flowID == "" || entityType == "" {
 			t.Fatalf("flow activation entity contract requires nonblank flow and entity type: flow=%q type=%q", flowID, entityType)
 		}
-		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), fmt.Sprintf("name: %s\nmode: template\nstages:\n  active: {initial: true}\n", flowID))
-		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "entities.yaml"), fmt.Sprintf("%s: {}\n", entityType))
+		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), fmt.Sprintf("name: %s\nstages:\n  active: {initial: true}\n", flowID))
+		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "entities.yaml"), fmt.Sprintf("%s:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n", entityType))
 	}
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: flow-activation-test\n")
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
@@ -1870,7 +1884,6 @@ func admitFlowActivationEntityContracts(
 	admitted.Agents = base.Agents
 	admitted.Tools = base.Tools
 	admitted.Policy = base.Policy
-	compileFlowActivationFixture(t, admitted)
 	return admitted
 }
 
@@ -1879,6 +1892,15 @@ func compileFlowActivationFixture(t *testing.T, bundle *runtimecontracts.Workflo
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 		t.Fatalf("compile final flow activation declarations: %v", err)
 	}
+}
+
+func mustManagerTemplateField(t testing.TB, field string) runtimecontracts.TemplateInstanceField {
+	t.Helper()
+	value, err := runtimecontracts.ParseTemplateInstanceField(field)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return value
 }
 
 func testStaticFlowBundle() *runtimecontracts.WorkflowContractBundle {
@@ -1949,6 +1971,7 @@ func testActivationRequest(bundle *runtimecontracts.WorkflowContractBundle, temp
 	return runtimepipeline.FlowInstanceActivationRequest{
 		ContractBundle: semanticview.Wrap(bundle),
 		Instance:       instance,
+		Config:         map[string]any{"instance_key": instanceID},
 		TriggerEvent: eventtest.RunCreatingRootIngress(
 			"77777777-7777-4777-8777-777777777777", events.EventType("spawn.requested"),
 			"spawner", "", json.RawMessage(`{}`), 0,
@@ -2095,7 +2118,10 @@ func TestActivateFlowInstanceRejectsMissingCanonicalEntityContract(t *testing.T)
 	instances := &flowActivationTestInstanceStore{}
 	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
-	bundle = admitFlowActivationEntityContracts(t, bundle, map[string]string{"unrelated": "other_entity"})
+	bundle = loadFlowActivationEntityContracts(t, bundle, map[string]string{"unrelated": "other_entity"})
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err == nil {
+		t.Fatal("missing canonical entity contract passed compiled admission")
+	}
 
 	err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
 	if err == nil || !strings.Contains(err.Error(), "requires one canonical entity contract") {
@@ -4255,9 +4281,7 @@ func TestActivateFlowInstancePassesActivationConfigToRouteMaterialization(t *tes
 	declareReceiverConfig(t, bundle, map[string]runtimecontracts.FlowVariable{"vertical_id": {Type: "string"}})
 
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	req.Config = map[string]any{
-		"vertical_id": "11111111-1111-4111-8111-111111111111",
-	}
+	req.Config = map[string]any{"instance_key": req.Instance.InstanceID, "vertical_id": "11111111-1111-4111-8111-111111111111"}
 	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
@@ -4290,11 +4314,10 @@ func TestActivateFlowInstanceRejectsAgentNameInterpolationBeforeMutation(t *test
 	}
 
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	req.Config = map[string]any{
-		"flow_instance_path": "wrong-config-path",
-		"flow_scope_key":     "wrong-config-scope",
-		"instance_id":        "wrong-config-instance",
-		"template_id":        "wrong-config-template",
+	req.Config = map[string]any{"instance_key": req.Instance.InstanceID, "flow_instance_path": "wrong-config-path",
+		"flow_scope_key": "wrong-config-scope",
+		"instance_id":    "wrong-config-instance",
+		"template_id":    "wrong-config-template",
 	}
 	err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req)
 	if err == nil || !strings.Contains(err.Error(), "contains interpolation") || !strings.Contains(err.Error(), "instance.by") {
@@ -4406,8 +4429,7 @@ func TestActivateFlowInstanceAutoEmitPublishesConfigPayloadWithoutActivationCont
 		"integer_score": {Type: "integer"}, "double_score": {Type: "number"},
 	})
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	req.Config = map[string]any{
-		"component_id":   "component-1",
+	req.Config = map[string]any{"instance_key": req.Instance.InstanceID, "component_id": "component-1",
 		"component_type": "api",
 		"integer_score":  int64(75),
 		"double_score":   float64(75),
@@ -4424,7 +4446,7 @@ func TestActivateFlowInstanceAutoEmitPublishesConfigPayloadWithoutActivationCont
 	if got := payload["component_type"]; got != "api" {
 		t.Fatalf("component_type payload = %#v, want api", got)
 	}
-	if got, want := string(event.Payload()), `{"component_id":"component-1","component_type":"api","double_score":75.0,"integer_score":75}`; got != want {
+	if got, want := string(event.Payload()), `{"component_id":"component-1","component_type":"api","double_score":75.0,"instance_key":"inst-1","integer_score":75}`; got != want {
 		t.Fatalf("auto-emit payload = %s, want %s", got, want)
 	}
 	for _, key := range []string{"instance_id", "template_id", "flow_path", "parent_entity_id"} {
@@ -4456,7 +4478,7 @@ func TestActivateFlowInstanceAutoEmitKeepsPayloadSourceEventIDNonAuthoritative(t
 	const payloadSourceEventID = "business-payload-source"
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.TriggerEvent = testFlowActivationTriggerEvent(triggerEventID)
-	req.Config = map[string]any{"source_event_id": payloadSourceEventID}
+	req.Config = map[string]any{"instance_key": req.Instance.InstanceID, "source_event_id": payloadSourceEventID}
 
 	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
@@ -4488,7 +4510,7 @@ func TestActivateFlowInstanceCommittedAutoEmitUsesProjectedConfigPayload(t *test
 	declareReceiverConfig(t, bundle, map[string]runtimecontracts.FlowVariable{"component_id": {Type: "string"}})
 	ctx := testAuthorActivityContext(context.Background())
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	req.Config = map[string]any{"component_id": "component-1"}
+	req.Config = map[string]any{"instance_key": req.Instance.InstanceID, "component_id": "component-1"}
 
 	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
@@ -4518,7 +4540,7 @@ func TestActivateFlowInstanceAutoEmitAllowsDeclaredTemplateIDBusinessField(t *te
 	})
 	declareReceiverConfig(t, bundle, map[string]runtimecontracts.FlowVariable{"template_id": {Type: "string"}})
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	req.Config = map[string]any{"template_id": "application-basic-v1"}
+	req.Config = map[string]any{"instance_key": req.Instance.InstanceID, "template_id": "application-basic-v1"}
 
 	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
@@ -4635,9 +4657,7 @@ func TestActivateFlowInstanceQueuedAutoEmitFailsClosedOnUndeclaredConfigField(t 
 	postCommit := make([]runtimepipelinefixture.OwnerAction, 0, 1)
 	ctx := withFlowActivationPostCommit(testAuthorActivityContext(context.Background()), &postCommit)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	req.Config = map[string]any{
-		"unexpected": "value",
-	}
+	req.Config = map[string]any{"instance_key": req.Instance.InstanceID, "unexpected": "value"}
 
 	err := activateFlowInstanceForTest(am, ctx, req)
 	if err == nil || !strings.Contains(err.Error(), "auto-emit task.started") || !strings.Contains(err.Error(), "unexpected is not allowed") {
@@ -4670,9 +4690,7 @@ func TestActivateFlowInstanceAutoEmitFailsClosedOnUndeclaredEnvelopeLikeConfigFi
 	bundle := testFlowBundle(t, "task.started")
 	declareReceiverConfig(t, bundle, map[string]runtimecontracts.FlowVariable{"entity_id": {Type: "string"}})
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	req.Config = map[string]any{
-		"entity_id": "business-value",
-	}
+	req.Config = map[string]any{"instance_key": req.Instance.InstanceID, "entity_id": "business-value"}
 
 	err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req)
 	if err == nil || !strings.Contains(err.Error(), "auto-emit task.started") || !strings.Contains(err.Error(), "entity_id is not allowed") {
@@ -4798,8 +4816,7 @@ func TestActivateFlowInstancePersistsFlowInstanceConfig(t *testing.T) {
 	})
 
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	req.Config = map[string]any{
-		"name":     "alpha",
+	req.Config = map[string]any{"instance_key": req.Instance.InstanceID, "name": "alpha",
 		"priority": 1,
 	}
 	err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req)
@@ -5129,7 +5146,7 @@ func TestStaticAndTemplateAgentMaterializationDefaultRoleToEffectiveName(t *test
 
 func TestTemplateFlowAgentMaterializationBlueprintStaysRunlessUntilAdmission(t *testing.T) {
 	source := semanticview.Wrap(testFlowBundle(t, ""))
-	blueprints, err := TemplateFlowAgentMaterializationBlueprints(source, "review", "review/inst-1", "ent-1", map[string]any{})
+	blueprints, err := TemplateFlowAgentMaterializationBlueprints(source, "review", "review/inst-1", "ent-1", map[string]any{"instance_key": "inst-1"})
 	if err != nil {
 		t.Fatalf("TemplateFlowAgentMaterializationBlueprints: %v", err)
 	}
@@ -5197,7 +5214,6 @@ func TestStaticFlowRequiredAgentMaterializationRegistersSubscriptions(t *testing
 func TestStandingActivatedFlowAgentsAreOwnedOnlyByFlowInstanceActivation(t *testing.T) {
 	bundle := testStaticFlowBundle()
 	schema := bundle.FlowSchemas["analyzer-flow"]
-	schema.Mode = runtimecontracts.FlowModeSingleton
 	schema.Activation = runtimecontracts.FlowActivationStanding
 	bundle.FlowSchemas["analyzer-flow"] = schema
 	bundle.FlowTree.ByID["analyzer-flow"].Schema = schema
@@ -5297,12 +5313,12 @@ func TestStaticAgentMaterializationKeepsDistinctSameIDPhysicalDeclarations(t *te
 	root := &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{
 		{
 			Paths: runtimecontracts.FlowContractPaths{FlowPath: "support-extension", AgentsFile: "packages/support-extension/agents.yaml"},
-			Path:  "support-extension", Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic},
+			Path:  "support-extension", Schema: runtimecontracts.FlowSchemaDocument{},
 			Agents: map[string]runtimecontracts.AgentRegistryEntry{"worker": projectEntry}, AgentURIs: map[string]string{"worker": projectOwner},
 		},
 		{
 			Paths: runtimecontracts.FlowContractPaths{FlowPath: "support", AgentsFile: "support/agents.yaml"},
-			Path:  "support", Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic},
+			Path:  "support", Schema: runtimecontracts.FlowSchemaDocument{},
 			Agents: map[string]runtimecontracts.AgentRegistryEntry{"worker": flowEntry}, AgentURIs: map[string]string{"worker": flowOwner},
 		},
 	}}
@@ -5470,7 +5486,7 @@ func TestFlowInstanceAgentRecordsMaterializeProjectDeclarationOwnedByFlow(t *tes
 		instancePath string
 	}{
 		{name: "template", mode: runtimecontracts.FlowModeTemplate, instanceID: "inst-1", instancePath: "support/inst-1"},
-		{name: "singleton", mode: runtimecontracts.FlowModeSingleton, instanceID: "support", instancePath: "support"},
+		{name: "singleton", mode: runtimecontracts.FlowModeStatic, instanceID: "support", instancePath: "support"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			source := loadNestedProjectAgentSource(t, tc.mode)
@@ -5491,8 +5507,9 @@ func TestFlowInstanceAgentRecordsMaterializeProjectDeclarationOwnedByFlow(t *tes
 				t.Fatal("support flow schema missing")
 			}
 			req := testActivationRequest(bundle, "support", tc.instanceID, "ent-1", tc.instancePath)
-			// This source declares no receiver variables or instance key.
-			req.Config = map[string]any{}
+			if schema.Instance.Empty() {
+				req.Config = map[string]any{}
+			}
 			am := newFlowActivationManager(t, &flowActivationTestBus{}, &flowActivationTestInstanceStore{})
 			records, err := am.flowInstanceAgentRecords(managerIdentityTestRunID, req, schema, scope)
 			if err != nil {
@@ -5619,12 +5636,16 @@ item:
 item.created:
   entity_id: string
 `)
+	shape := ""
+	if mode == runtimecontracts.FlowModeTemplate {
+		shape = "instance: instance_key\n"
+		writeFlowActivationFixtureFile(t, filepath.Join(root, "support", "entities.yaml"), "support:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n")
+	}
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), fmt.Sprintf(`name: support
-mode: %s
-stages:
+%sstages:
   waiting: {initial: true}
   done: {}
-`, mode))
+`, shape))
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "support", "events.yaml"), `
 item.created:
   entity_id: string

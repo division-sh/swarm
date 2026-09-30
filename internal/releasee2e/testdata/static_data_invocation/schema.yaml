@@ -12,5 +12,5 @@ pins:
   outputs:
     events: [child.requested]
 connect:
-  - {event: child.requested, from: ., to: registry}
+  - {event: child.requested, from: ., to: registry, resolution: select-or-create}
   - {event: child.completed, from: registry, to: .}

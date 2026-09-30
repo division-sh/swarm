@@ -207,7 +207,6 @@ func CopyRootIngressLegacyTemplateTargetRoute(t testing.TB) string {
 	root := CopyExample(t, RootIngress)
 	addLegacyTemplateRoot(t, root)
 	writeClosedVariantFile(t, root, "operating/schema.yaml", `name: operating
-mode: template
 instance: instance_id
 instance_variables:
   variables:
@@ -220,12 +219,10 @@ pins:
   inputs:
     events:
       - event: opco.create_requested
-        resolution: {mode: create}
         initialize:
           product_id: payload.product_id
       - opco.product_initialization_requested
-      - event: opco.product_review_requested
-        resolution: {mode: select}
+      - opco.product_review_requested
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `)
@@ -265,14 +262,14 @@ lifecycle-orchestrator:
   outputs:
     events: [opco.create_requested]
 connect:
-  - {event: opco.create_requested, from: ., to: operating}
+  - {event: opco.create_requested, from: ., to: operating, resolution: create}
 `, `      - opco.spinup_requested
       - opco.product_review_requested
   outputs:
     events: [opco.create_requested, opco.product_review_requested]
 connect:
-  - {event: opco.create_requested, from: ., to: operating}
-  - {event: opco.product_review_requested, from: ., to: operating}
+  - {event: opco.create_requested, from: ., to: operating, resolution: create}
+  - {event: opco.product_review_requested, from: ., to: operating, resolution: select}
 `)
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "opco.spinup_requested:\n", `opco.product_review_requested:
   instance_id: text
@@ -290,7 +287,6 @@ func CopyRootIngressLegacyTemplateAutoEmit(t testing.TB) string {
 	root := CopyExample(t, RootIngress)
 	addLegacyTemplateRoot(t, root)
 	writeClosedVariantFile(t, root, "operating/schema.yaml", `name: operating
-mode: template
 instance: instance_id
 instance_variables:
   variables:
@@ -303,7 +299,6 @@ pins:
   inputs:
     events:
       - event: opco.create_requested
-        resolution: {mode: create}
         initialize:
           product_id: payload.product_id
 auto_emit_on_create:
@@ -375,7 +370,7 @@ pins:
   outputs:
     events: [opco.create_requested]
 connect:
-  - {event: opco.create_requested, from: ., to: operating}
+  - {event: opco.create_requested, from: ., to: operating, resolution: create}
 `)
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "      advances_to: processed\n", "      advances_to: waiting\n")
 	applyClosedReplacement(t, filepath.Join(root, "entities.yaml"), `item:

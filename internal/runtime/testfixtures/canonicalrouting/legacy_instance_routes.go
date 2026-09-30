@@ -63,14 +63,14 @@ func CopyTemplateInstanceRoute(t testing.TB, opts TemplateInstanceRouteOptions) 
 	resolutionFrom := ""
 	if opts.RenamedSource {
 		producerField = "source_vertical_id"
-		resolutionFrom = "\n          from: payload.source_vertical_id"
+		resolutionFrom = "\n    key_from: payload.source_vertical_id"
 	}
 
 	secondConnect := ""
 	secondPin := ""
 	secondHandler := ""
 	if opts.SecondPin == TemplateInstanceSecondPinDuplicateEdge {
-		secondConnect = "  - event: deploy.done\n    from: producer\n    to: consumer\n"
+		secondConnect = "  - event: deploy.done\n    from: producer\n    to: consumer\n    resolution: " + mode + resolutionFrom + "\n"
 	} else if opts.SecondPin != TemplateInstanceNoSecondPin {
 		secondConnect = "  - event: deploy.done\n    from: producer\n    to: consumer\n"
 		secondEvent := "deploy.done"
@@ -81,7 +81,8 @@ func CopyTemplateInstanceRoute(t testing.TB, opts TemplateInstanceRouteOptions) 
 		} else if opts.SecondPin != TemplateInstanceSecondPinSameEvent {
 			t.Fatalf("unsupported template instance second pin %d", opts.SecondPin)
 		}
-		secondPin = "      - event: " + secondEvent + "\n        resolution:\n          mode: " + mode + resolutionFrom + "\n"
+		secondConnect += "    resolution: " + mode + resolutionFrom + "\n"
+		secondPin = "      - " + secondEvent + "\n"
 	}
 
 	writeClosedVariantFile(t, root, "schema.yaml", `name: template-instance-route
@@ -89,10 +90,9 @@ connect:
   - event: deploy.done
     from: producer
     to: consumer
-`+secondConnect)
+    resolution: `+mode+resolutionFrom+"\n"+secondConnect)
 	removeClosedVariantFiles(t, root, "producer/nodes.yaml", "producer/agents.yaml")
 	writeLegacyInstanceFlow(t, root, "producer", `name: producer
-mode: static
 pins:
   outputs:
     events:
@@ -118,14 +118,11 @@ pins:
 	}
 	removeClosedVariantFiles(t, root, "consumer/nodes.yaml", "consumer/agents.yaml")
 	writeLegacyInstanceFlow(t, root, "consumer", `name: consumer
-mode: template
 instance: vertical_id
 pins:
   inputs:
     events:
-      - event: deploy.done
-        resolution:
-          mode: `+mode+resolutionFrom+`
+      - deploy.done
 `+secondPin,
 		"",
 		"deployment:\n  vertical_id:\n    type: string\n",
@@ -144,7 +141,6 @@ func CopyStaticAndTemplateAgentRoute(t testing.TB) string {
 		Mode: TemplateInstanceRouteSelect, Consumer: TemplateInstanceAgentConsumer,
 	})
 	writeClosedVariantFile(t, root, "flows/producer/schema.yaml", `name: producer
-mode: static
 pins:
   inputs:
     events:

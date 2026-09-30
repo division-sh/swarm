@@ -147,7 +147,7 @@ func TestBuildRequirementIndex_IndexesDirectFilesystemFlowCredentialBindings(t *
 	writeCredentialsFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: credential-binding\n")
 	for _, flowID := range []string{"alpha", "beta"} {
 
-		writeCredentialsFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), "name: "+flowID+"\nmode: static\n")
+		writeCredentialsFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), "name: "+flowID+"\n")
 		writeCredentialsFixtureFile(t, filepath.Join(root, flowID, "tools.yaml"), `
 call_provider:
   handler_type: http
@@ -184,7 +184,7 @@ func TestMissingRequired_IndexesDirectFilesystemNativeWebSearchCredentialBinding
 
 	writeCredentialsFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: native-web-search-credential-binding\n")
 
-	writeCredentialsFixtureFile(t, filepath.Join(root, "worker", "schema.yaml"), "name: worker\nmode: static\n")
+	writeCredentialsFixtureFile(t, filepath.Join(root, "worker", "schema.yaml"), "name: worker\n")
 	writeCredentialsFixtureFile(t, filepath.Join(root, "worker", "policy.yaml"), `
 web_search_provider:
   provider: brave

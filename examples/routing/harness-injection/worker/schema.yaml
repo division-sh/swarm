@@ -1,5 +1,4 @@
 name: worker
-mode: static
 pins:
   inputs:
     events:

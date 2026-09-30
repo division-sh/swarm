@@ -3,4 +3,3 @@ pins:
   inputs:
     events:
       - task.assigned
-mode: static

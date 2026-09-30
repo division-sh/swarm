@@ -14,6 +14,7 @@ connect:
   - event: opco.spinup_created
     from: .
     to: operating
+    resolution: create
 `,
 		"events.yaml": `opco.spinup_requested:
   entity_id: string?
@@ -36,7 +37,6 @@ opco.spinup_created:
           product_id: ${payload.product_id}
 `,
 		"operating/schema.yaml": `name: operating
-mode: template
 instance: instance_id
 instance_variables:
   variables:
@@ -45,7 +45,6 @@ pins:
   inputs:
     events:
       - event: opco.spinup_created
-        resolution: {mode: create}
         initialize:
           product_id: payload.product_id
 stages:
@@ -91,6 +90,7 @@ connect:
   - event: opco.spinup_created
     from: .
     to: operating
+    resolution: create
 `,
 		"events.yaml": `opco.spinup_requested:
   entity_id: string?
@@ -113,7 +113,6 @@ opco.spinup_created:
           product_id: ${payload.product_id}
 `,
 		"operating/schema.yaml": `name: operating
-mode: template
 instance: instance_id
 instance_variables:
   variables:
@@ -122,7 +121,6 @@ pins:
   inputs:
     events:
       - event: opco.spinup_created
-        resolution: {mode: create}
         initialize:
           product_id: payload.product_id
 stages:

@@ -41,7 +41,6 @@ func CopyStaticMultiEntityRetirement(t testing.TB, handler StaticRetirementHandl
 
 	writeClosedVariantFile(t, root, "schema.yaml", "stages: []\n")
 	writeClosedVariantFile(t, root, "treasury/schema.yaml", `name: treasury
-mode: static
 stages:
   active: {initial: true}
   archived: {terminal: true}
@@ -260,7 +259,6 @@ stages:
 		"events.yaml": "scan.requested:\n  topic: text\n",
 		"nodes.yaml":  "scan-orchestrator:\n  execution_type: system_node\n  subscribes_to: [scan.requested]\n",
 		"operating/schema.yaml": `name: operating
-mode: static
 stages:
   initializing: {initial: true}
   waiting: {}
@@ -286,7 +284,7 @@ stages:
       sets_gate: review_ready
       advances_to: ready
 `,
-		"secondary/schema.yaml":   "name: secondary\nmode: static\nstages:\n  open: {initial: true}\n  closed: {terminal: true}\n",
+		"secondary/schema.yaml":   "name: secondary\nstages:\n  open: {initial: true}\n  closed: {terminal: true}\n",
 		"secondary/entities.yaml": "ticket:\n  ticket_id: text\n",
 	}
 	for name, source := range files {
@@ -303,9 +301,8 @@ func CopyTemplateConnectRollback(t testing.TB) string {
 	removeClosedVariantFiles(t, root, "account/nodes.yaml", "account/entities.yaml", "account/schema.yaml", "account")
 	files := map[string]string{
 
-		"schema.yaml": "name: test\nconnect:\n  - {event: deploy.done, from: producer, to: consumer}\n",
+		"schema.yaml": "name: test\nconnect:\n  - {event: deploy.done, from: producer, to: consumer, resolution: select-or-create}\n",
 		"producer/schema.yaml": `name: producer
-mode: static
 pins:
   outputs:
     events:
@@ -313,13 +310,11 @@ pins:
 `,
 		"producer/events.yaml": "deploy.done:\n  key: vertical_id\n  vertical_id: string\n",
 		"consumer/schema.yaml": `name: consumer
-mode: template
 instance: vertical_id
 pins:
   inputs:
     events:
-      - event: deploy.done
-        resolution: {mode: select-or-create}
+      - deploy.done
 `,
 		"consumer/entities.yaml": "deployment:\n  vertical_id:\n    type: string\n",
 		"consumer/nodes.yaml":    "consumer-node:\n  execution_type: system_node\n  event_handlers:\n    deploy.done: {}\n",
@@ -337,7 +332,7 @@ func CopyTemplateInstanceEmpireOutbox(t testing.TB) string {
 		"producer/events.yaml", "producer/nodes.yaml", "producer/schema.yaml", "producer",
 		"account/entities.yaml", "account/nodes.yaml", "account/schema.yaml", "account")
 	files := map[string]string{
-		"schema.yaml": "name: empire-outbox\npins:\n  outputs:\n    events: [opco.create_requested]\nconnect:\n  - {event: opco.create_requested, from: ., to: operating}\n",
+		"schema.yaml": "name: empire-outbox\npins:\n  outputs:\n    events: [opco.create_requested]\nconnect:\n  - {event: opco.create_requested, from: ., to: operating, resolution: create}\n",
 
 		"events.yaml": `approval.completed:
   entity_id: string?
@@ -375,7 +370,6 @@ portfolio-node:
           product_id: ${payload.product_id}
 `,
 		"operating/schema.yaml": `name: operating
-mode: template
 instance: instance_id
 instance_variables:
   variables:
@@ -387,7 +381,6 @@ pins:
   inputs:
     events:
       - event: opco.create_requested
-        resolution: {mode: create}
         initialize:
           product_id: payload.product_id
 auto_emit_on_create:
@@ -442,16 +435,15 @@ connect:
   - event: inbound.telegram.text_message
     from: .
     to: consumer
+    resolution: select-or-create
 `,
 		"events.yaml": "inbound.telegram:\n  raw: boolean\ninbound.telegram.text_message:\n  chat_id: text\n",
 		"consumer/schema.yaml": `name: consumer
-mode: template
 instance: chat_id
 pins:
   inputs:
     events:
-      - event: inbound.telegram.text_message
-        resolution: {mode: select-or-create}
+      - inbound.telegram.text_message
 `,
 		"consumer/entities.yaml": "chat:\n  chat_id:\n    type: text\n    indexed: true\n",
 		"consumer/nodes.yaml":    nodes,
@@ -468,9 +460,9 @@ pins:
 func CopyProviderRollbackRenamedSource(t testing.TB, withCarrier bool) string {
 	t.Helper()
 	root := CopyProviderRollback(t, withCarrier)
-	applyClosedReplacement(t, filepath.Join(root, "consumer", "schema.yaml"),
-		"        resolution: {mode: select-or-create}",
-		"        resolution: {mode: select-or-create, from: payload.external_chat_id}")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
+		"    resolution: select-or-create\n",
+		"    resolution: select-or-create\n    key_from: payload.external_chat_id\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
 		"inbound.telegram.text_message:\n  chat_id: text\n",
 		"inbound.telegram.text_message:\n  chat_id: text\n  external_chat_id: text\n")
@@ -498,9 +490,9 @@ func CopyProviderRollbackSyntheticCollision(t testing.TB, mint CreateMint) strin
 	default:
 		t.Fatalf("provider rollback synthetic collision requires UUID or event-ID source, got %d", mint)
 	}
-	applyClosedReplacement(t, filepath.Join(root, "consumer", "schema.yaml"),
-		"        resolution: {mode: select-or-create}",
-		"        resolution: {mode: create, from: "+source+"}")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
+		"    resolution: select-or-create\n",
+		"    resolution: create\n    key_from: "+source+"\n")
 	applyClosedReplacement(t, filepath.Join(root, "consumer", "entities.yaml"),
 		"    type: text", "    type: uuid")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
@@ -534,8 +526,10 @@ func CopyTelegramAgentImportedSyntheticProjection(t testing.TB, mint CreateMint,
 	}
 	applyClosedReplacement(t, filepath.Join(root, "telegram-chat", "schema.yaml"),
 		"instance: conversation_reference", "instance: "+field)
-	applyClosedReplacement(t, filepath.Join(root, "telegram-chat", "schema.yaml"),
-		"          mode: select-or-create", "          mode: create\n          from: "+source)
+	for range 2 {
+		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
+			"    resolution: select-or-create", "    resolution: create\n    key_from: "+source)
+	}
 	applyClosedReplacement(t, filepath.Join(root, "telegram-chat", "entities.yaml"),
 		"  conversation_reference:\n    type: text", "  "+field+":\n    type: uuid")
 	return root

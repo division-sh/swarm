@@ -1,5 +1,4 @@
 name: telegram-ingress
-mode: singleton
 stages:
   warming:
     initial: true

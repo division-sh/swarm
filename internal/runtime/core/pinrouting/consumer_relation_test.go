@@ -116,6 +116,7 @@ func TestConcreteInstanceConsumerUsesExactAdmittedIdentity(t *testing.T) {
 		source := testPinRoutingSource(runtimecontracts.FlowOutputSinkNone, nil)
 		bundle, _ := semanticview.Bundle(source)
 		child := &bundle.FlowTree.Root.Children[0]
+		child.Schema.Instance = mustTemplateInstanceField(t, "instance_id")
 		child.Events = map[string]runtimecontracts.EventCatalogEntry{"child.done": {}}
 		if declared {
 			child.Nodes = map[string]runtimecontracts.SystemNodeContract{"finish": {

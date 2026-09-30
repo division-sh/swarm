@@ -28,6 +28,7 @@ connect:
   - event: candidate.requested
     from: .
     to: candidate
+    resolution: select-or-create
   - event: candidate.completed
     from: candidate
     to: .

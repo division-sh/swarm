@@ -1059,8 +1059,10 @@ func TestBoardStep_FactoryCreatedDirectiveRemediationPreservesFlowScopedEmitTool
 			},
 		},
 		AgentURIs: map[string]string{"campaign-coordinator": owner},
-		Schema:    runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate},
-		Path:      "campaign-flow",
+		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
+			InstanceField("instance_key"),
+		},
+		Path: "campaign-flow",
 	}
 	root := &runtimecontracts.FlowContractView{
 		Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{*flow},

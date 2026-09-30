@@ -237,7 +237,10 @@ func TestIntrinsicProjectionKeepsProducerAndReceiverSchemasDistinct(t *testing.T
 		t.Fatal("validator input pin is unavailable")
 	}
 	producer, producerOK := pin.ProducerEventSchema()
-	receiver, receiverOK := pin.ReceiverEventSchema()
+	receiver, receiverOK, receiverErr := bundle.ConnectionInputs().ReceiverEventSchema("validator", pin.EventType())
+	if receiverErr != nil {
+		t.Fatal(receiverErr)
+	}
 	if !producerOK || !receiverOK || producer.AcceptanceSchemaDigest() == receiver.AcceptanceSchemaDigest() {
 		t.Fatalf("compiled schema roles = producer:(%#v,%t) receiver:(%#v,%t)", producer, producerOK, receiver, receiverOK)
 	}

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
 	"sort"
@@ -468,7 +469,6 @@ type connectEndpointKind uint8
 const (
 	connectEndpointRoot connectEndpointKind = iota + 1
 	connectEndpointStaticFlow
-	connectEndpointSingletonFlow
 	connectEndpointTemplateFlow
 	connectEndpointKindCount
 )
@@ -512,8 +512,6 @@ func newConnectRoutePlanEndpoint(direction ConnectEndpointRoleKind, root bool, f
 	switch {
 	case root:
 		kind = connectEndpointRoot
-	case strings.TrimSpace(mode) == runtimecontracts.FlowModeSingleton:
-		kind = connectEndpointSingletonFlow
 	case strings.TrimSpace(mode) == runtimecontracts.FlowModeTemplate:
 		kind = connectEndpointTemplateFlow
 	}
@@ -527,10 +525,9 @@ func newConnectRoutePlanEndpoint(direction ConnectEndpointRoleKind, root bool, f
 	}
 }
 
-func (e ConnectRoutePlanEndpoint) IsRoot() bool      { return e.kind == connectEndpointRoot }
-func (e ConnectRoutePlanEndpoint) IsStatic() bool    { return e.kind == connectEndpointStaticFlow }
-func (e ConnectRoutePlanEndpoint) IsSingleton() bool { return e.kind == connectEndpointSingletonFlow }
-func (e ConnectRoutePlanEndpoint) IsTemplate() bool  { return e.kind == connectEndpointTemplateFlow }
+func (e ConnectRoutePlanEndpoint) IsRoot() bool     { return e.kind == connectEndpointRoot }
+func (e ConnectRoutePlanEndpoint) IsStatic() bool   { return e.kind == connectEndpointStaticFlow }
+func (e ConnectRoutePlanEndpoint) IsTemplate() bool { return e.kind == connectEndpointTemplateFlow }
 
 // ConnectRoutePlanEndpointReadback is a one-way display projection. No graph
 // evaluator or application API accepts this type.
@@ -2161,7 +2158,7 @@ func compileConnectGraphWithCensus(source semanticview.Source) (CompiledConnectG
 		plans = append(plans, plan)
 	}
 	census := semanticview.BuildAuthoredEventEndpointCensus(source)
-	receiverPlans := lowerTemplateInputReceiverPlans(source, census)
+	receiverPlans := lowerTemplateInputReceiverPlans(plans)
 	sortConnectRoutePlans(plans)
 	sortConnectRoutePlans(receiverPlans)
 	return CompiledConnectGraph{
@@ -2175,16 +2172,11 @@ func compileConnectGraphWithCensus(source semanticview.Source) (CompiledConnectG
 // lowerTemplateInputReceiverPlans supplies receiver-pin registration evidence
 // for private template inputs. These plans are registration evidence only;
 // execution still requires an authored connection.
-func lowerTemplateInputReceiverPlans(source semanticview.Source, census semanticview.AuthoredEventEndpointCensus) []ConnectRoutePlan {
+func lowerTemplateInputReceiverPlans(connections []ConnectRoutePlan) []ConnectRoutePlan {
 	plans := make([]ConnectRoutePlan, 0)
 	seen := make(map[ConnectReceiverPinIdentity]struct{})
-	for _, endpoint := range census.InputPins() {
-		scope, ok := source.FlowScopeByID(strings.TrimSpace(endpoint.FlowID))
-		if !ok || !strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
-			continue
-		}
-		plan, issue := lowerTemplateInputReceiverPlanWithCensus(source, endpoint, &census)
-		if !issue.Failure.Empty() {
+	for _, plan := range connections {
+		if !plan.receiver.IsTemplate() {
 			continue
 		}
 		pin := plan.ReceiverPinIdentity()
@@ -2409,104 +2401,27 @@ func lowerTemplateInputReceiverPlan(source semanticview.Source, endpoint semanti
 }
 
 func lowerTemplateInputReceiverPlanWithCensus(source semanticview.Source, endpoint semanticview.AuthoredEventEndpoint, census *semanticview.AuthoredEventEndpointCensus) (ConnectRoutePlan, ConnectRoutePlanIssue) {
-	flowID := strings.TrimSpace(endpoint.FlowID)
-	pinName := strings.TrimSpace(endpoint.PinName)
 	if source == nil {
 		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Failure: ConnectFailureSourceMissing, Detail: "semantic source is required"}
 	}
-	if endpoint.Kind != semanticview.EventEndpointFlowInputPin || endpoint.Direction != semanticview.EventEndpointInputPin || flowID == "" || flowID == "." || pinName == "" {
-		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Failure: ConnectFailureReceiverInputPinMissing, Detail: "template receiver registration requires one exact private input endpoint"}
+	if endpoint.ID == "" || endpoint.FlowID == "" || endpoint.PinName == "" || !source.FlowHasInputEvent(endpoint.FlowID, endpoint.PinName) {
+		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Failure: ConnectFailureReceiverInputPinMissing, Detail: "receiver requires an admitted input endpoint"}
 	}
+	graph, fresh := compileConnectGraphWithCensus(source)
 	if census == nil {
-		fresh := semanticview.BuildAuthoredEventEndpointCensus(source)
 		census = &fresh
 	}
-	association := census.ResolveDeclaredInputEndpoint(flowID, pinName)
-	resolvedEndpoint, ok := association.Endpoint()
-	if !ok || resolvedEndpoint.ID != endpoint.ID {
-		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Failure: ConnectFailureReceiverInputPinMissing, Detail: "template receiver does not match its compiled endpoint census"}
+	association := census.ResolveDeclaredInputEndpoint(endpoint.FlowID, endpoint.PinName)
+	admitted, ok := association.Endpoint()
+	if !ok || admitted.ID != endpoint.ID {
+		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Failure: ConnectFailureReceiverInputPinMissing, Detail: "receiver does not match its admitted endpoint"}
 	}
-	scope, ok := source.FlowScopeByID(flowID)
-	if !ok || !strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
-		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Failure: ConnectFailureReceiverFlowMissing, Detail: flowID + " is not a template flow"}
-	}
-	inputPin, ok := source.FlowInputEventPin(flowID, pinName)
-	if !ok {
-		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Failure: ConnectFailureReceiverInputPinMissing, Detail: flowID + "." + pinName}
-	}
-	resolvedEvent := eventidentity.Normalize(source.ResolveFlowEventReference(flowID, inputPin.EventType()))
-	if resolvedEvent == "" || resolvedEvent != eventidentity.Normalize(endpoint.Event.Canonical) {
-		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Failure: ConnectFailureEndpointEventInvalid, Detail: flowID + "." + pinName}
-	}
-	return lowerTemplateInputRegistrationPlan(source, scope, inputPin)
-}
-
-func lowerTemplateInputRegistrationPlan(source semanticview.Source, scope semanticview.FlowScope, inputPin runtimecontracts.CompiledFlowInputPin) (ConnectRoutePlan, ConnectRoutePlanIssue) {
-	flowID := strings.TrimSpace(scope.ID)
-	resolved := eventidentity.Normalize(source.ResolveFlowEventReference(flowID, inputPin.EventType()))
-	connect := runtimecontracts.FlowConnect{Event: resolved, From: ".", To: flowID}
-	sourceEndpoint := newConnectRoutePlanEndpoint(ConnectEndpointRoleProducer, true, "", "", "external", inputPin.EventType(), resolved, resolved).
-		withCompiledPinDigest(inputPin.Digest())
-	receiverEndpoint := newConnectRoutePlanEndpoint(ConnectEndpointRoleConsumer, false, flowID, scope.Path, scope.Mode,
-		inputPin.EventType(), inputPin.EventType(), resolved).withCompiledPinDigest(inputPin.Digest())
-	producerEvent, producerEventErr := compileConnectInputProducerEventEvidence(source, inputPin)
-	if producerEventErr != nil {
-		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureProducerEventSchemaMissing, Detail: producerEventErr.Error()}
-	}
-	var instanceKey *ConnectRoutePlanInstanceKey
-	if receiverRequiresRuntimeResolution(scope) {
-		var issue ConnectRoutePlanIssue
-		instanceKey, issue = connectResolutionInstanceKey(source, connect, inputPin, inputPin.Resolution(), flowID)
-		if !issue.Failure.Empty() {
-			issue.AuthoredLocation = flowID + "." + inputPin.EventType()
-			issue.sourceEndpoint = sourceEndpoint
-			issue.receiverEndpoint = receiverEndpoint
-			return ConnectRoutePlan{}, issue
+	for _, plan := range graph.receiverPlans {
+		if plan.receiver.matchesFlowPin(endpoint.FlowID, endpoint.PinName, ConnectEndpointRoleConsumer) {
+			return plan, ConnectRoutePlanIssue{}
 		}
 	}
-	if instanceKey != nil && instanceKey.RequiresDeliveryProjection() {
-		if conflict := inputPin.ProducerProjectionConflict(); conflict != nil {
-			return ConnectRoutePlan{}, ConnectRoutePlanIssue{
-				Connect: connect, AuthoredLocation: flowID + "." + inputPin.EventType(),
-				Failure: ConnectFailureResolutionProjectionCollision, Detail: conflict.Error(),
-				sourceEndpoint: sourceEndpoint, receiverEndpoint: receiverEndpoint,
-			}
-		}
-	}
-	receiverEvent, receiverEventErr := compileConnectInputReceiverEventEvidence(source, inputPin)
-	if receiverEventErr != nil {
-		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReceiverEventSchemaMissing, Detail: receiverEventErr.Error()}
-	}
-	planSpec := connectRoutePlanSpec{
-		authoredLocation: flowID + "." + inputPin.EventType(),
-		source:           sourceEndpoint,
-		receiver:         receiverEndpoint,
-		producerEvent:    producerEvent,
-		receiverEvent:    receiverEvent,
-		targetKind:       ConnectTargetKindTarget,
-		resolutionKind:   connectResolutionKind(scope, instanceKey),
-		instanceKey:      instanceKey,
-	}
-	if receiverRequiresRuntimeResolution(scope) {
-		if instanceKey == nil {
-			return ConnectRoutePlan{}, ConnectRoutePlanIssue{
-				Connect: connect, AuthoredLocation: planSpec.authoredLocation,
-				Failure: ConnectFailureReceiverResolutionMissing, Detail: flowID,
-				sourceEndpoint: sourceEndpoint, receiverEndpoint: receiverEndpoint,
-			}
-		}
-	} else {
-		planSpec.target = staticConnectRoute(source, flowID)
-	}
-	plan, err := newConnectRoutePlan(planSpec)
-	if err != nil {
-		return ConnectRoutePlan{}, ConnectRoutePlanIssue{
-			Connect: connect, AuthoredLocation: planSpec.authoredLocation,
-			Failure: ConnectFailureDeliveryTopologyInvalid, Detail: err.Error(),
-			sourceEndpoint: sourceEndpoint, receiverEndpoint: receiverEndpoint,
-		}
-	}
-	return plan, ConnectRoutePlanIssue{}
+	return ConnectRoutePlan{}, ConnectRoutePlanIssue{Failure: ConnectFailureReceiverResolutionMissing, Detail: "receiver registration requires an actual compiled connection; it cannot invent creation authority"}
 }
 
 func cloneProviderOutputAuthorization(authorization *runtimeprovideroutput.Authorization) *runtimeprovideroutput.Authorization {
@@ -2739,10 +2654,10 @@ func lowerCompositionConnectRoutePlan(source semanticview.Source, connect runtim
 		if !ok {
 			return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReceiverInputPinMissing, Detail: connect.To}
 		}
-		if !inputPin.Resolution().Empty() {
+		if !inputPin.Resolution().Empty() || connect.Resolution != runtimecontracts.FlowInputResolutionModeNone || connect.KeyFrom != "" {
 			return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureRootReceiverResolution, Detail: to.Pin}
 		}
-		receiverEvent, receiverEventErr := compileConnectInputReceiverEventEvidence(source, inputPin)
+		receiverEvent, receiverEventErr := compileConnectInputReceiverEventEvidence(source, connect, inputPin)
 		if receiverEventErr != nil {
 			return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReceiverEventSchemaMissing, Detail: receiverEventErr.Error()}
 		}
@@ -2771,16 +2686,13 @@ func lowerCompositionConnectRoutePlan(source semanticview.Source, connect runtim
 	if !ok {
 		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReceiverInputPinMissing, Detail: connect.To}
 	}
-	receiverEvent, receiverEventErr := compileConnectInputReceiverEventEvidence(source, inputPin)
-	if receiverEventErr != nil {
-		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReceiverEventSchemaMissing, Detail: receiverEventErr.Error()}
-	}
 	instanceKey, instanceKeyIssue := connectInstanceKey(source, connect, inputPin, to.FlowID)
 	if !instanceKeyIssue.Failure.Empty() {
 		return ConnectRoutePlan{}, instanceKeyIssue
 	}
-	if detail := connectSyntheticResolutionCollision(source, from, sourceEndpoint, outputPin, instanceKey); detail != "" {
-		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureResolutionProjectionCollision, Detail: detail}
+	receiverEvent, receiverEventErr := compileConnectInputReceiverEventEvidence(source, connect, inputPin)
+	if receiverEventErr != nil {
+		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReceiverEventSchemaMissing, Detail: receiverEventErr.Error()}
 	}
 	fanIn, fanInIssue := connectFanIn(source, connect, inputPin, to.FlowID)
 	if !fanInIssue.Failure.Empty() {
@@ -2827,50 +2739,6 @@ func lowerCompositionConnectRoutePlan(source semanticview.Source, connect runtim
 	return plan, ConnectRoutePlanIssue{}
 }
 
-func connectSyntheticResolutionCollision(source semanticview.Source, from compositionConnectPinRef, sourceEndpoint ConnectRoutePlanEndpoint, outputPin runtimecontracts.CompiledFlowOutputPin, instanceKey *ConnectRoutePlanInstanceKey) string {
-	if schema, ok := outputPin.EventSchema(); ok {
-		if detail := connectSyntheticResolutionSchemaCollision(outputPin.EventType(), schema, instanceKey); detail != "" {
-			return detail
-		}
-	}
-	if instanceKey == nil || !instanceKey.RequiresDeliveryProjection() {
-		return ""
-	}
-	field := strings.TrimSpace(instanceKey.field.Path())
-	if field == "" {
-		return ""
-	}
-	if from.Root {
-		return ""
-	}
-	wantEvent := string(sourceEndpoint.resolvedEvent.value)
-	for _, site := range semanticview.AuthoredEmitSites(source) {
-		if site.FlowPathIdentity() != strings.TrimSpace(from.FlowID) || eventidentity.Normalize(source.ResolveExecutableNodeEventReference(site.Node, site.Spec.EventType())) != wantEvent {
-			continue
-		}
-		if _, authored := site.Spec.Fields[field]; authored {
-			return fmt.Sprintf("producer %s emit field %s conflicts with receiver-owned resolution projection %s", site.Node.Key(), field, instanceKey.source.path.value)
-		}
-	}
-	return ""
-}
-
-func connectSyntheticResolutionSchemaCollision(eventType string, schema runtimecontracts.CompiledEventSchema, instanceKey *ConnectRoutePlanInstanceKey) string {
-	if instanceKey == nil || !instanceKey.RequiresDeliveryProjection() {
-		return ""
-	}
-	field := strings.TrimSpace(instanceKey.field.Path())
-	if field == "" {
-		return ""
-	}
-	for _, declared := range schema.Fields() {
-		if declared.Name() == field {
-			return fmt.Sprintf("producer event %s field %s conflicts with receiver-owned resolution projection %s", eventType, field, instanceKey.source.path.value)
-		}
-	}
-	return ""
-}
-
 func connectRoutePlanSourceEndpoint(source semanticview.Source, from compositionConnectPinRef, connect runtimecontracts.FlowConnect) (ConnectRoutePlanEndpoint, runtimecontracts.CompiledFlowOutputPin, ConnectRoutePlanIssue) {
 	if from.Root {
 		outputPin, ok := source.FlowOutputEventPin(".", from.Pin)
@@ -2903,18 +2771,18 @@ func compileConnectOutputEventEvidence(source semanticview.Source, pin runtimeco
 	return compileConnectEventEvidence(schema), nil
 }
 
-func compileConnectInputProducerEventEvidence(source semanticview.Source, pin runtimecontracts.CompiledFlowInputPin) (*connectProducerEventEvidence, error) {
-	schema, found := pin.ProducerEventSchema()
-	if !found {
-		if bundle, production := semanticview.Bundle(source); production && bundle != nil {
-			return nil, fmt.Errorf("producer event %s has no immutable compiled schema", pin.EventType())
-		}
-		return nil, nil
+func compileConnectInputReceiverEventEvidence(source semanticview.Source, connect runtimecontracts.FlowConnect, pin runtimecontracts.CompiledFlowInputPin) (*connectProducerEventEvidence, error) {
+	input, compiled, err := source.ConnectionInputs().Input(connect)
+	if err != nil {
+		return nil, err
 	}
-	return compileConnectEventEvidence(schema), nil
-}
-
-func compileConnectInputReceiverEventEvidence(source semanticview.Source, pin runtimecontracts.CompiledFlowInputPin) (*connectProducerEventEvidence, error) {
+	if compiled {
+		schema, found := input.ReceiverEventSchema()
+		if !found {
+			return nil, fmt.Errorf("connection receiver event %s has no immutable compiled schema", pin.EventType())
+		}
+		return compileConnectEventEvidence(schema), nil
+	}
 	schema, found := pin.ReceiverEventSchema()
 	if !found {
 		if bundle, production := semanticview.Bundle(source); production && bundle != nil {
@@ -3111,30 +2979,28 @@ func connectInstanceKey(source semanticview.Source, connect runtimecontracts.Flo
 	if source == nil {
 		return nil, ConnectRoutePlanIssue{}
 	}
-	resolution := inputPin.Resolution()
-	if resolution.Empty() {
+	input, found, err := source.ConnectionInputs().Input(connect)
+	if err != nil {
+		failure := ConnectFailureInstanceResolutionInvalid
+		if errors.Is(err, runtimecontracts.ErrConnectionProjectionCollision) {
+			failure = ConnectFailureResolutionProjectionCollision
+		}
+		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: failure, Detail: err.Error()}
+	}
+	if !found {
 		return nil, ConnectRoutePlanIssue{}
 	}
-	return connectResolutionInstanceKey(source, connect, inputPin, resolution, receiverFlowID)
-}
-
-func connectResolutionInstanceKey(source semanticview.Source, connect runtimecontracts.FlowConnect, inputPin runtimecontracts.CompiledFlowInputPin, resolution runtimecontracts.FlowInputPinResolution, receiverFlowID string) (*ConnectRoutePlanInstanceKey, ConnectRoutePlanIssue) {
-	switch resolution.Mode {
-	case runtimecontracts.FlowInputResolutionModeCreate, runtimecontracts.FlowInputResolutionModeSelect, runtimecontracts.FlowInputResolutionModeSelectOrCreate:
-		return connectCanonicalResolutionInstanceKey(source, connect, inputPin, resolution, receiverFlowID)
-	case runtimecontracts.FlowInputResolutionModeFanIn:
-		return nil, ConnectRoutePlanIssue{}
-	case runtimecontracts.FlowInputResolutionModeReply:
-		return nil, ConnectRoutePlanIssue{}
-	default:
-		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("resolution mode %q is design-locked but not runnable in this slice", runtimecontracts.FlowInputResolutionModeCode(resolution.Mode))}
-	}
+	evidence := input.SourceEvidence()
+	return &ConnectRoutePlanInstanceKey{
+		mode: input.Mode(), field: evidence.Field, source: newConnectInstanceSource(evidence.Source),
+		sourceType: evidence.SourceType.Type, receiverType: evidence.ReceiverType.Type,
+	}, ConnectRoutePlanIssue{}
 }
 
 func connectReplyResolution(source semanticview.Source, connect runtimecontracts.FlowConnect, sourceEndpoint ConnectRoutePlanEndpoint, receiverRef compositionConnectPinRef, inputPin runtimecontracts.CompiledFlowInputPin) (*ConnectRoutePlanReplyResolution, ConnectRoutePlanIssue) {
 	if inputPin.Resolution().Mode == runtimecontracts.FlowInputResolutionModeReply {
 		resolution := inputPin.Resolution()
-		if resolution.From != "" || resolution.Aggregation != "" || resolution.Window != "" || len(resolution.DedupBy) > 0 || resolution.Singleton != "" {
+		if resolution.Aggregation != "" || resolution.Window != "" || len(resolution.DedupBy) > 0 || resolution.Singleton != "" {
 			return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: "resolution mode reply may only declare replies_to and correlation_key"}
 		}
 		requestOutputPin := strings.TrimSpace(resolution.RepliesTo)
@@ -3248,7 +3114,7 @@ func connectFanIn(source semanticview.Source, connect runtimecontracts.FlowConne
 		return nil, ConnectRoutePlanIssue{}
 	}
 	resolution := inputPin.Resolution()
-	if resolution.From != "" || resolution.RepliesTo != "" || resolution.CorrelationKey != "" {
+	if resolution.RepliesTo != "" || resolution.CorrelationKey != "" {
 		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: "resolution mode fan-in may only declare aggregation, window, dedup_by, and singleton"}
 	}
 	if resolution.Aggregation != "stream" && resolution.Aggregation != "barrier" {
@@ -3322,33 +3188,6 @@ func connectFanInPayloadFieldSupported(path string) bool {
 	return field != "" && !strings.Contains(field, ".")
 }
 
-func connectCanonicalResolutionInstanceKey(source semanticview.Source, connect runtimecontracts.FlowConnect, inputPin runtimecontracts.CompiledFlowInputPin, resolution runtimecontracts.FlowInputPinResolution, receiverFlowID string) (*ConnectRoutePlanInstanceKey, ConnectRoutePlanIssue) {
-	mode := resolution.Mode
-	modeText := runtimecontracts.FlowInputResolutionModeCode(mode)
-	if resolution.Aggregation != "" || resolution.Window != "" || len(resolution.DedupBy) > 0 || resolution.Singleton != "" || resolution.RepliesTo != "" || resolution.CorrelationKey != "" {
-		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("resolution mode %s may only declare mode and from", modeText)}
-	}
-	bundle, ok := semanticview.Bundle(source)
-	if !ok {
-		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureLifecycleUnavailable, Detail: "receiver instance contract owner is unavailable"}
-	}
-	instance, err := bundle.ResolveFlowTemplateInstance(receiverFlowID)
-	if err != nil {
-		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: err.Error()}
-	}
-	if instance.Field.Empty() {
-		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("resolution mode %s requires receiver `instance: <field>`", modeText)}
-	}
-	evidence, err := bundle.ResolveFlowInputInstanceSourceType(source, receiverFlowID, inputPin, instance)
-	if err != nil {
-		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: err.Error()}
-	}
-	return &ConnectRoutePlanInstanceKey{
-		mode: mode, field: instance.Field, source: newConnectInstanceSource(evidence.Source),
-		sourceType: strings.TrimSpace(evidence.SourceType.Type), receiverType: strings.TrimSpace(evidence.ReceiverType.Type),
-	}, ConnectRoutePlanIssue{}
-}
-
 func connectResolutionKind(scope semanticview.FlowScope, instanceKey *ConnectRoutePlanInstanceKey) ConnectRoutePlanResolutionKind {
 	if !receiverRequiresRuntimeResolution(scope) {
 		return ConnectResolutionStatic
@@ -3374,7 +3213,7 @@ func connectRoutePlanResolutionKind(plan ConnectRoutePlan) ConnectRoutePlanResol
 
 func receiverRequiresRuntimeResolution(scope semanticview.FlowScope) bool {
 	switch strings.TrimSpace(scope.Mode) {
-	case "template", "dynamic":
+	case runtimecontracts.FlowModeTemplate:
 		return true
 	default:
 		return false

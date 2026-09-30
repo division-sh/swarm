@@ -1,5 +1,4 @@
 name: golden-agent-candidate
-mode: template
 instance: candidate_id
 stages:
   pending: {initial: true}
@@ -8,9 +7,7 @@ stages:
 pins:
   inputs:
     events:
-      - event: candidate.requested
-        resolution:
-          mode: select-or-create
+      - candidate.requested
   outputs:
     events:
       - candidate.completed

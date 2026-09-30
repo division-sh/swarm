@@ -40,15 +40,11 @@ pins:
     bootstrap.requested: {}
 `,
 		"operating/schema.yaml": `name: operating
-mode: template
 instance: operating_id
 pins:
   inputs:
     events:
       - event: opco.product_initialization_requested
-        resolution:
-          mode: create
-          from: event.id
 `,
 		"operating/entities.yaml": `operating:
   operating_id:
@@ -101,7 +97,6 @@ platform_version: ">=0.7.0 <0.8.0"
 		writeClosedVariantFile(t, root, "nodes.yaml", rootNodes)
 	}
 	writeLegacyInstanceFlow(t, root, "consumer", `name: consumer
-mode: static
 pins:
   inputs:
     events: [root.ready]
@@ -143,7 +138,6 @@ connect:
     to: consumer
 `)
 	writeLegacyInstanceFlow(t, root, "consumer", `name: consumer
-mode: singleton
 pins:
   inputs:
     events: [root.ready]
@@ -182,8 +176,8 @@ func CopySingletonOutputRootConnect(t testing.TB) string {
 func CopyNestedSingletonOutputRootConnect(t testing.TB) string {
 	t.Helper()
 	root := copySingletonOutputRootConnect(t, "left/child/scout")
-	writeClosedVariantFile(t, root, "left/schema.yaml", "name: left\nmode: singleton\n")
-	writeClosedVariantFile(t, root, "left/child/schema.yaml", "name: child\nmode: singleton\n")
+	writeClosedVariantFile(t, root, "left/schema.yaml", "name: left\n")
+	writeClosedVariantFile(t, root, "left/child/schema.yaml", "name: child\n")
 	return root
 }
 
@@ -216,7 +210,6 @@ connect:
         check: '_entity.id != ""'
 `)
 	writeLegacyInstanceFlow(t, root, scoutPath, `name: scout
-mode: singleton
 pins:
   outputs:
     events: [scout.completed]
@@ -260,7 +253,6 @@ connect:
         check: '_entity.id != ""'
 `)
 	writeLegacyInstanceFlow(t, root, "boomerang", `name: boomerang
-mode: singleton
 pins:
   inputs:
     events: [work.ping]

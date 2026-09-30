@@ -158,7 +158,6 @@ func CopyInboundAdmissionPolicyMatrix(t testing.TB) string {
 
 		"schema.yaml": "name: inbound-admission-policy-matrix\n",
 		"matrix/schema.yaml": `name: matrix
-mode: singleton
 activation: standing
 stages: []
 ingress:
@@ -372,7 +371,7 @@ func CopyAgentSlugAdmission(t testing.TB, workflowName, agentKey, agentID string
 	root := CopyExample(t, RootIngress)
 	removeClosedVariantFiles(t, root, "nodes.yaml", "entities.yaml")
 
-	writeClosedVariantFile(t, root, "schema.yaml", "mode: static\nstages: []\npins:\n  inputs:\n    events: [agent.requested]\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "stages: []\npins:\n  inputs:\n    events: [agent.requested]\n")
 	writeClosedVariantFile(t, root, "events.yaml", "agent.requested:\n")
 	identity := ""
 	if agentID != agentKey {

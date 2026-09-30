@@ -14,4 +14,3 @@ connect:
   - event: task.done
     from: grandchild
     to: .
-mode: static

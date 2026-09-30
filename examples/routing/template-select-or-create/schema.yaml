@@ -11,3 +11,4 @@ connect:
   - event: account.ready
     from: producer
     to: account
+    resolution: select-or-create

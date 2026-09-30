@@ -154,7 +154,7 @@ func deliveryPlannerHandlerSource(requireEntity bool) semanticview.Source {
 		if flow == nil {
 			flow = &runtimecontracts.FlowContractView{
 				Path: fixture.path, Paths: runtimecontracts.FlowContractPaths{FlowPath: fixture.path},
-				Schema: runtimecontracts.FlowSchemaDocument{Mode: "static"},
+				Schema: runtimecontracts.FlowSchemaDocument{},
 				Nodes:  map[string]runtimecontracts.SystemNodeContract{}, Events: map[string]runtimecontracts.EventCatalogEntry{},
 			}
 			flows[fixture.flowID] = flow
@@ -1360,7 +1360,7 @@ func TestDeliveryPlanner_ExactSameInstanceTargetUsesCompiledReceiverMode(t *test
 		},
 		{
 			name:             "singleton_uses_declared_receiver_scope",
-			mode:             runtimecontracts.FlowModeSingleton,
+			mode:             runtimecontracts.FlowModeStatic,
 			routingSource:    eventtest.StaticFlowRoutingSource("validation", "validation", eventtest.UUID("singleton-source")),
 			wantFlowInstance: "validation",
 		},
@@ -1371,7 +1371,7 @@ func TestDeliveryPlanner_ExactSameInstanceTargetUsesCompiledReceiverMode(t *test
 			flow := runtimecontracts.FlowContractView{
 				Path:   "validation",
 				Paths:  runtimecontracts.FlowContractPaths{FlowPath: "validation"},
-				Schema: runtimecontracts.FlowSchemaDocument{Mode: tt.mode},
+				Schema: runtimecontracts.FlowSchemaDocument{},
 			}
 			root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Path: ".", Children: []runtimecontracts.FlowContractView{flow}}
 			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{

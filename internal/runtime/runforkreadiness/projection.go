@@ -290,7 +290,7 @@ func selectedContractPlatformActivityWorkflowState(
 	if !exists {
 		return runfork.RunForkSelectedContractWorkflowState{}, fmt.Errorf("selected-contract platform activity flow %s has no semantic owner", flowID)
 	}
-	template := strings.EqualFold(strings.TrimSpace(schema.Mode), "template")
+	template := strings.EqualFold(strings.TrimSpace(schema.EffectiveMode()), "template")
 	if template && routingSource.Kind() == events.RoutingSourceStaticFlow {
 		return runfork.RunForkSelectedContractWorkflowState{}, fmt.Errorf("selected-contract template flow %s rejects static routing source", flowID)
 	}
@@ -422,7 +422,7 @@ func selectedContractReadinessState(source semanticview.Source, eventID, flowID 
 		state.AddressKind = runfork.RunForkSelectedContractWorkflowStateRunScope
 		return state, nil
 	}
-	if schema, exists := source.FlowSchemaByID(flowID); exists && strings.EqualFold(strings.TrimSpace(schema.Mode), "template") {
+	if schema, exists := source.FlowSchemaByID(flowID); exists && strings.EqualFold(strings.TrimSpace(schema.EffectiveMode()), "template") {
 		state.Mode = "template"
 	}
 	state.AddressKind = runfork.RunForkSelectedContractWorkflowStateExact

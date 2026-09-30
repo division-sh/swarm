@@ -9,4 +9,3 @@ pins:
     events:
       - validation.done
 name: child
-mode: static

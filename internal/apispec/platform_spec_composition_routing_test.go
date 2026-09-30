@@ -18,13 +18,11 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarValue(t, mustMappingValue(t, composition, "parent_decision"), "#1466")
 	assertScalarValue(t, mustMappingValue(t, composition, "owner"), "platform-spec.yaml#flow_model.composition_routing")
 	wave2 := mustMappingValue(t, composition, "w2_compiled_pin_edge_ownership")
-	assertScalarContains(t, mustMappingValue(t, wave2, "rule"), "target-free public/provider input edges uniformly reject")
-	assertScalarContains(t, mustMappingValue(t, wave2, "rule"), "bound producer schema already declares the receiver instance field")
-	assertScalarContains(t, mustMappingValue(t, wave2, "rule"), "distinct immutable producer-declaration and receiver-acceptance schemas")
-	assertScalarContains(t, mustMappingValue(t, wave2, "rule"), "schema-only imported pin may stage typed intrinsic projection metadata")
-	assertScalarContains(t, mustMappingValue(t, wave2, "rule"), "reply and fan-in cannot declare resolution.from")
-	assertScalarContains(t, mustMappingValue(t, wave2, "rule"), "Every W2 mapping key is byte-exact")
-	assertScalarContains(t, mustMappingValue(t, composition, "rule"), "LCA-owned schema.yaml connect is the sole authored cross-flow edge owner")
+	assertScalarContains(t, mustMappingValue(t, wave2, "rule"), "Ordinary selection and exceptional key source belong to each connect row")
+	assertScalarContains(t, mustMappingValue(t, wave2, "rule"), "CompiledConnectionInput owns immutable typed source and receiver acceptance projection")
+	assertScalarContains(t, mustMappingValue(t, wave2, "rule"), "composition recompiles that connection evidence after exact schema binding")
+	assertScalarContains(t, mustMappingValue(t, wave2, "rule"), "no ordinary template registration authority")
+	assertScalarContains(t, mustMappingValue(t, composition, "rule"), "LCA-owned schema.yaml connect is the sole authored cross-flow edge and ordinary resolution/source owner")
 	assertScalarContains(t, mustMappingValue(t, composition, "rule"), "without producer routing")
 
 	authored := mustMappingValue(t, composition, "authored_shapes")
@@ -44,8 +42,8 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, initialization, "lifecycle"), "Initialization applies only when a receiver is created")
 	assertScalarContains(t, mustMappingValue(t, initialization, "lifecycle"), "never update it from another incoming request")
 	assertScalarContains(t, mustYAMLPath(t, resolved, "instance_fields", "identity"), "instance: <field>")
-	assertScalarContains(t, mustYAMLPath(t, resolved, "instance_fields", "source"), "resolution.from")
-	assertScalarContains(t, mustYAMLPath(t, resolved, "instance_fields", "mode"), "exhaustive typed value")
+	assertScalarContains(t, mustYAMLPath(t, resolved, "instance_fields", "source"), "connect.key_from")
+	assertScalarContains(t, mustYAMLPath(t, resolved, "instance_fields", "mode"), "exhaustive typed ordinary value")
 
 	connect := mustMappingValue(t, authored, "parent_connect")
 
@@ -65,9 +63,9 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 
 	ownership := mustMappingValue(t, composition, "ownership_split")
 	assertScalarContains(t, mustMappingValue(t, ownership, "parent_connect"), "owns the directed inter-flow event edge")
-	assertScalarContains(t, mustMappingValue(t, ownership, "receiver_input_resolution"), "cardinality")
+	assertScalarContains(t, mustMappingValue(t, ownership, "receiver_input_resolution"), "fan-in and reply")
 	assertScalarContains(t, mustMappingValue(t, ownership, "output_pins"), "never receiver identity")
-	assertScalarContains(t, mustMappingValue(t, ownership, "input_pins"), "typed identity source")
+	assertScalarContains(t, mustMappingValue(t, ownership, "input_pins"), "typed creating-input initialization")
 	assertScalarContains(t, mustMappingValue(t, ownership, "producer_emit"), "retired on presence")
 
 	verify := mustMappingValue(t, composition, "analyzer_verify_requirements")
@@ -96,7 +94,7 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 		"admitted LCA-owned schema.yaml connect entries",
 		"producer output pin exact event identity and immutable producer event schema resolved from event-centric flow endpoints",
 		"receiver scalar template instance identity from WorkflowContractBundle.ResolveFlowTemplateInstance",
-		"receiver input same-named required payload source or exact resolution.from override and resolution mode",
+		"connection-owned required payload source or exact key_from override and ordinary resolution",
 		"finite filesystem FlowNode ownership and exact child-flow endpoints",
 		"explicit receiver-event rename",
 	} {
@@ -105,7 +103,7 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"concrete target routes derived from receiver-owned scalar instance/source/mode facts",
+		"concrete target routes derived from receiver-owned scalar identity and connection-owned source/resolution facts",
 		"typed reply resolution derived from receiver input resolution and paired connect edges",
 	} {
 		if !sequenceContainsScalar(mustMappingValue(t, lowering, "produces"), want) {
@@ -140,14 +138,14 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarValue(t, mustMappingValue(t, retirement, "status"), "merge_bearing_aggressive_retirement")
 	assertScalarContains(t, mustMappingValue(t, retirement, "rule"), "ConnectRoutePlan expose no delivery or raw reply compatibility fields")
 	assertScalarContains(t, mustYAMLPath(t, retirement, "migration", "rule"), "no codemod or compatibility reader exists")
-	if !sequenceContainsScalar(mustMappingValue(t, retirement, "preserved"), "receiver resolution create, select, select-or-create, fan-in, and reply") {
+	if !sequenceContainsScalar(mustMappingValue(t, retirement, "preserved"), "connection resolution create, select and select-or-create; retained receiver fan-in, fan-out and reply") {
 		t.Fatal("connect retirement must preserve receiver-owned reply semantics")
 	}
 
 	slice1546 := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1546")
 	assertScalarValue(t, mustMappingValue(t, slice1546, "status"), "retired_by_2087")
 	assertScalarContains(t, mustMappingValue(t, slice1546, "canonical_code_owner"), "ConnectRoutePlan.InstanceKey.Source")
-	assertScalarContains(t, mustMappingValue(t, slice1546, "rule"), "resolution.from")
+	assertScalarContains(t, mustMappingValue(t, slice1546, "rule"), "key_from")
 	assertScalarContains(t, mustMappingValue(t, slice1546, "rule"), "ConnectRoutePlan.InstanceKey.Mappings are removed")
 
 	slice1475 := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1475")
@@ -209,8 +207,8 @@ func TestPlatformSpecInstanceIdentityAuthoringSourceAuthority(t *testing.T) {
 	owner := mustMappingValue(t, slice, "instance_identity_owner_2021")
 	assertScalarValue(t, mustMappingValue(t, owner, "status"), "scalar_typed_owner_finalized_by_2087")
 	assertScalarValue(t, mustMappingValue(t, owner, "authored_identity_owner"), "flow instance: <field>")
-	assertScalarValue(t, mustMappingValue(t, owner, "authored_source_owner"), "receiver input resolution.from, with omission deriving the same-named payload field")
-	assertScalarValue(t, mustMappingValue(t, owner, "authored_behavior_owner"), "receiver input resolution.mode")
+	assertScalarValue(t, mustMappingValue(t, owner, "authored_source_owner"), "connection key_from, with omission deriving the same-named required payload field")
+	assertScalarValue(t, mustMappingValue(t, owner, "authored_behavior_owner"), "connection resolution for ordinary variants; retained pin resolution for fan-in/reply")
 	assertScalarContains(t, mustMappingValue(t, owner, "effective_owner"), "opaque validated Field")
 	assertScalarContains(t, mustMappingValue(t, owner, "effective_owner"), "No second representation")
 	assertScalarContains(t, mustMappingValue(t, owner, "retirement"), "hard-invalid")
@@ -222,23 +220,23 @@ func TestPlatformSpecInstanceIdentityAuthoringSourceAuthority(t *testing.T) {
 	assertScalarContains(t, mustYAMLPath(t, create, "sources", "generated.uuid"), "fresh event identity")
 	assertScalarContains(t, mustYAMLPath(t, create, "sources", "payload.field"), "immutable journal payload")
 	assertScalarContains(t, mustMappingValue(t, create, "delivery_projection"), "persisted projection")
-	assertScalarContains(t, mustMappingValue(t, create, "contract"), "hard conflict")
+	assertScalarContains(t, mustMappingValue(t, create, "contract"), "pre-existing identity conflicts")
 
 	selectMode := mustYAMLPath(t, slice, "modes", "select")
 	selectOrCreate := mustYAMLPath(t, slice, "modes", "select-or-create")
-	assertScalarContains(t, mustMappingValue(t, selectMode, "contract"), "required producer payload field whose name equals")
-	assertScalarContains(t, mustMappingValue(t, selectMode, "contract"), "typed payload")
-	assertScalarContains(t, mustMappingValue(t, selectOrCreate, "contract"), "scalar `instance`")
+	assertScalarContains(t, mustMappingValue(t, selectMode, "contract"), "required same-named producer payload field")
+	assertScalarContains(t, mustMappingValue(t, selectMode, "contract"), "one top-level payload field with compatible producer and receiver types")
+	assertScalarContains(t, mustMappingValue(t, selectOrCreate, "contract"), "receiver scalar instance")
 	if strings.Contains(mustMappingValue(t, slice, "authoring_shape").Value, "instance_key") {
 		t.Fatal("canonical instance identity authoring shape retains retired resolution.instance_key")
 	}
 
 	proofs := mustMappingValue(t, slice, "proof_obligations")
 	for _, want := range []string{
-		"route-plan lowering records typed create mode, the scalar instance Field, and typed Source derived from the required same-named payload field or exact resolution.from, with no policy facts or producer output-key dependency",
+		"route-plan lowering consumes the immutable connection's typed create mode, scalar instance Field and Source derived from the required same-named payload field or exact key_from exception, with no shared-pin policy or producer output-key dependency",
 		"downstream receiver routes can render the receiver-targeted identity projection derived from typed Source as payload.<instance>",
-		"route-plan lowering records typed select mode, scalar instance Field, and typed payload Source derived from the required same-named payload field or exact resolution.from, with no policy facts",
-		"route-plan lowering records typed select-or-create mode, scalar instance Field, and typed payload Source derived from the required same-named payload field or exact resolution.from, with no policy facts",
+		"route-plan lowering consumes the immutable connection's typed select mode, scalar instance Field and payload Source derived from the required same-named payload field or exact key_from exception",
+		"route-plan lowering consumes the immutable connection's typed select-or-create mode, scalar instance Field and payload Source derived from the required same-named payload field or exact key_from exception",
 	} {
 		if !sequenceContainsScalar(proofs, want) {
 			t.Fatalf("instance identity proof obligations missing canonical typed-source proof %q", want)

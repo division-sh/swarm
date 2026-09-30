@@ -87,7 +87,7 @@ func writeFlowDataAccessFixture(t *testing.T, access []string, files map[string]
 	root := t.TempDir()
 
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: flow-data-access\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), "name: support\nmode: static\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), "name: support\n")
 	for name, content := range files {
 		writeBootverifyFixtureFile(t, filepath.Join(root, "support", "data", filepath.FromSlash(name)), content)
 	}
@@ -112,7 +112,7 @@ func writeNestedBootFlowDataAccessFixture(t *testing.T) string {
 
 	flowRoot := filepath.Join(root, "parent", "child", "support")
 
-	writeBootverifyFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), "name: support\nmode: static\nstages:\n  active: {initial: true}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), "name: support\nstages:\n  active: {initial: true}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(flowRoot, "agents.yaml"), `
 worker:
   role: worker

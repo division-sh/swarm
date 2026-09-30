@@ -93,7 +93,10 @@ func TestReceiverInstanceEventSchemaRetainsReceiverGeneratedKey(t *testing.T) {
 	if !ok {
 		t.Fatal("receiver pin missing")
 	}
-	receiver, receiverOK := pin.ReceiverEventSchema()
+	receiver, receiverOK, err := source.ConnectionInputs().ReceiverEventSchema("validator", "validation.requested")
+	if err != nil {
+		t.Fatal(err)
+	}
 	producer, producerOK := pin.ProducerEventSchema()
 	if !receiverOK || !producerOK || receiver.AcceptanceSchemaDigest() == producer.AcceptanceSchemaDigest() {
 		t.Fatal("fixture must have distinct producer and receiver acceptance")

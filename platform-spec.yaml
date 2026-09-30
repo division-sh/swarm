@@ -1615,7 +1615,7 @@ contract_formats:
       typed_pubsub: 'Typed pub/sub routing derives from subscriptions — agents.yaml subscriptions,
         nodes.yaml subscribes_to, and event_handlers keys. The platform matches canonical event identity
         only within one exact flow identity. Canonical name equality and filesystem ancestry never authorize cross-flow delivery.'
-      inter_flow_connect: Between flows, authored topology derives only from exact least-common-ancestor schema connect entries over output and input pins. Output pins declare event identity and producer interface evidence, template receivers declare one scalar instance identity field, receiver input pins declare an explicit resolution mode and derive the same-named typed payload source unless `resolution.from` selects one supported exceptional source, and the LCA connect lowers the edge into concrete route-plan facts. See flow_model.composition_routing and engine.cross_flow_routing for details. Qualified exact subscriptions and slash-qualified wildcard subscriptions cannot cross a flow boundary; authors must declare output/input pins and connect in the nearest common ancestor schema.yaml.
+      inter_flow_connect: Between flows, authored topology derives only from exact least-common-ancestor schema connect entries over output and input pins. Output pins declare event identity and producer interface evidence, keyed receivers declare one scalar instance identity field, and each LCA connect owns its explicit ordinary resolution mode and key_from exception. Omission derives the same-named typed payload source; explicitly spelling that source is redundant and refused. The immutable compiled connection lowers these facts into route plans. See flow_model.composition_routing and engine.cross_flow_routing. Qualified exact subscriptions and slash-qualified wildcard subscriptions cannot cross a flow boundary; authors must declare output/input pins and connect in the nearest common ancestor schema.yaml.
       input_source_resolution:
         canonical_owner: internal/runtime/core/pinrouting.ResolveFlowInputProducer
         rule: |
@@ -2156,7 +2156,7 @@ contract_formats:
             Static lowered ConnectRoutePlan matches MUST NOT require or be blocked by legacy active-agent descriptor lookup;
             descriptor loading is limited to lowered plans whose supported target form requires runtime resolution.
             Template receiver plans MUST materialize from the receiver input's same-named required producer payload field,
-            or its one admitted `resolution.from` override, plus scalar instance identity and typed resolution mode carried
+            or the connection's one admitted `key_from` exception, plus scalar instance identity and typed resolution mode carried
             on ConnectRoutePlan.InstanceKey. Producer output-pin key/carries are retired and MUST NOT own receiver identity.
             Input-pin address, connect.map, connect.using.instance,
             implicit output-key mappings, select_entity, direct delivery, raw subscribers,
@@ -2261,7 +2261,7 @@ contract_formats:
           route_topology:
             fields:
               - schema.yaml connect rows with admitted source provenance
-              - receiver input pin scalar instance source and typed resolution mode
+              - receiver scalar instance field and connection-owned source and ordinary resolution mode
               - lowered connect route-plan facts
               - RouteTable semantic subscribers
               - nodes.yaml subscribes_to entries
@@ -2269,7 +2269,7 @@ contract_formats:
               - event_handlers keys
               - pins.inputs.events and pins.outputs.events
             rule: Semantic route topology is the source for recipient
-              derivation. Parent connect topology and receiver input resolution are
+              derivation. Parent connect topology and its ordinary resolution, together with retained fan-in/reply input policies, are
               the authored cross-flow source authority; RouteTable and RoutePlan
               consume the lowered facts. Live subscription channels, active
               descriptors, and handler lookup are not topology authority.
@@ -3659,12 +3659,10 @@ handler_specification:
         with_rules: 'ALLOWED. rule conditions evaluate according to the handler dependency graph. They may rely on schema initial
           values and earlier step outputs, but not on same-handler top-level data_accumulation writes.'
         with_advances_to: ALLOWED. Advances the new entity from its compiled initial stage to the target stage.
-      note_on_static_flows: 'Retired for authored stateful static/default-static multi-row ownership. A static input-pin
-        handler MUST NOT use create_entity to materialize arbitrary receiving-flow rows over time. Authors must model the state
-        as one primary entity with contained state, a mode: template flow instance, a singleton flow whose authored usage
-        demands contained coordinator state, or a
-        child flow. Historical rows are not silently rewritten by this retirement; actual persisted-row migration is
-        separately gated.'
+      note_on_static_flows: 'A derived-static handler may use create_entity or ordinary writes for its canonical primary
+        entity. Arbitrary multi-row ownership and caller-selected entity_id remain invalid. Model keyed multiplicity with
+        scalar instance and connection-owned resolution; contained coordinator state requires actual operation demand.
+        Authored mode is retired on presence. Historical selected stores are unsupported; no migration machinery is provided.'
     guard:
       field: guard
       type: object — single check OR list of checks
@@ -5169,7 +5167,7 @@ engine:
         match is not a substitute for that connection.
       static_pairs: An explicit static-to-static connection may resolve to a single instance pair at boot.
       template_pairs: Template or dynamic-instance pairs require lowered parent connect route facts from the receiver's
-        scalar instance field, same-named required producer payload source or exact resolution.from override, and explicit
+        scalar instance field, same-named required producer payload source or exact connection key_from exception, and explicit
         resolution mode. ParentRoute does not replace a consuming relation.
     reply_resolution:
       status: runnable_v1
@@ -5271,7 +5269,7 @@ engine:
         RoutingSource but remains receiver-targetless until EventBus evaluates that compiled plan. Engine and tool callers
         MUST NOT stamp ParentRoute, current-delivery, source, inbound, or actor identity as the connect receiver target.
       parent_to_child: Parent-to-child routing is never inferred structurally in v1. The parent must use canonical parent
-        connect topology with receiver-owned scalar instance/source/resolution.
+        connect topology with receiver-owned scalar instance and connection-owned resolution/key_from.
       grandchildren: A grandchild output requires its own actual consuming relation; ancestry does not create one.
       multiple_parents: Parent-authored multi-consumer fan-out uses explicit connect topology and compiled recipient facts.
     parent_route:
@@ -5434,9 +5432,9 @@ engine:
     addressing: Parallel child/template work is addressed by normal typed flow-instance identity and routing. There is no
       ephemeral dynamic-agent shard address space.
   dynamic_instance_lifecycle:
-    description: 'Flow instances are created from schema.yaml mode: template declarations owned by a filesystem FlowNode.'
+    description: 'Keyed flow instances derive from scalar instance declarations owned by a filesystem FlowNode; each connection owns creation or selection policy.'
     creation:
-      trigger: A typed event reaches a receiver input with create or select-or-create resolution. The receiver owns its
+      trigger: A typed event reaches a receiver through a create or select-or-create connection. The receiver owns its
         identity and typed initialization; managed agents remain statically declared by that flow's agents.yaml.
       instance_id: Derived by the canonical receiver identity owner from the resolved instance key within the template scope.
         A conflicting creation fails before mutating flow_instances, entity_state, routes, agents,
@@ -5444,7 +5442,7 @@ engine:
         interrupted creation can converge without repeating the creation-only event.
       process:
         - 1. Resolve the receiving input and canonical instance key from the compiled route plan
-        - '2. Platform validates: template exists and is mode: template'
+        - '2. Platform validates: the receiver exists and declares a valid scalar instance field'
         - '3. Admit creating input bindings and typed receiver defaults before mutation; reuse consumes committed configuration'
         - Platform loads the exact template FlowNode from the admitted artifact.
         - '5. Platform constructs paths: {template_id}/{instance_id}/{local_name}'
@@ -5675,7 +5673,7 @@ engine:
         action: 'For each flow, construct hierarchical paths for its nodes, agents, and events. Local names become absolute paths using the semantic contract path (flow_scope_key): {flow_scope_key}/{local_name}. Concrete instance paths are materialized later through receiver-owned creation.'
       - step: 4
         name: register_templates
-        action: 'For flows declared as mode: template, register the template but create no instances. Creating inputs own event-driven instance creation.'
+        action: 'For flows with scalar instance identity, register the template but create no instances. Creating connections own event-driven instance creation.'
       - step: 5
         name: build_registries
         action: 'Build runtime registries keyed by path: nodes, agents, events, tools, policy. Tools are flat (shared). Policy is hierarchical (child overrides parent).'
@@ -11951,18 +11949,20 @@ flow_model:
       implementation_tracker: '#2087'
       canonical_code_owner: internal/runtime/contracts.WorkflowContractBundle.ResolveFlowTemplateInstance
       declaration_surface:
-      - 'mode: template'
       - 'instance: <field>'
-      - 'pins.inputs.events[].resolution.mode'
-      - 'pins.inputs.events[].resolution.from'
+      - 'connect[].resolution'
+      - 'connect[].key_from'
       rule: >
         Template flow instances are the common shape for process/case/job state
         that needs independent lifecycle, routing, timers, retries, agents, or
-        audit. A `mode: template` flow MUST declare exactly one non-empty
-        top-level scalar identity as `instance: <field>`. The compiled input pin
-        derives `payload.<field>` from the required producer schema by default;
-        one exact `resolution.from` owns a supported exceptional source.
-        `resolution.mode` is the sole create/select/select-or-create behavior owner.
+        audit. A template flow declares exactly one non-empty top-level scalar
+        identity as `instance: <field>`. Each ordinary incoming connection
+        explicitly declares create/select/select-or-create in `resolution`.
+        Its compiled connection input derives `payload.<field>` from the
+        required producer schema by default; exact `key_from` selects a
+        different top-level payload field or a create-only intrinsic source.
+        Explicit same-name `key_from` is redundant and rejected with teaching
+        text to omit it. Shared input pins do not own ordinary selection policy.
       primary_entity_dependency: >
         The scalar instance field is checked against the flow primary entity resolved by
         internal/runtime/contracts.WorkflowContractBundle.ResolveFlowPrimaryEntity.
@@ -12001,27 +12001,36 @@ flow_model:
         explicit lifecycle actions remain a separately owned operation after target selection.
     effective_flow_mode_model:
       status: merge_bearing_contract_behavior
-      implementation_tracker: '#2238'
-      canonical_code_owner: internal/runtime/contracts.ResolveEffectiveFlowMode during LoadWorkflowContractBundle
+      implementation_tracker: '#2438'
+      canonical_code_owner: internal/runtime/contracts.FlowSchemaDocument.EffectiveMode
       declaration_surface:
-        - schema.yaml mode in the owning FlowNode
-        - flow schema.yaml mode
+        - 'schema.yaml instance: <field>, when template identity is required'
       rule: >
-        Flow mode has one admitted effective value. Non-empty package and schema
-        declarations MUST agree for `static`, `template`, and `singleton`.
-        Equal declarations and one-side omission normalize to one effective
-        value before semantic source publication. A contradiction or unsupported
-        value fails contract loading; no downstream consumer may choose between
-        the authored files.
+        Authored `mode` is invalid on presence, including empty, null, alias,
+        mapping and sequence values. Presence of an admitted scalar `instance`
+        derives template shape; absence derives static shape. Singleton is not
+        a third authored or effective shape. Shape derivation creates no new
+        activation, initialization or lifecycle behavior.
       consumers:
-      - FlowScope and all template/static/singleton routing classification
+      - FlowScope and all template/static routing classification
       - ResolveFlowTemplateInstance and ResolveFlowSingleton
       - standing activation and target declaration resolution
       - boot verification and authoring/readback
       non_authoritative_paths:
-      - raw ProjectFlowRef.Mode after contract loading
-      - path-level fallback when the admitted flow schema mode is empty
+      - authored mode in any selected or retained source
+      - a separate singleton token as admission or target authority
       - environment-dependent or consumer-local mode selection
+      static_source_admission: >
+        Validate an incoming source instance coordinate before collapsing to the
+        declaration coordinate. Omitted, exact and slash-boundary descendants
+        of the owning flow path are admissible. Foreign paths and prefix
+        lookalikes are invalid; normalization never rescues them.
+      static_target_admission: >
+        An explicit static target must equal the exact declaration coordinate
+        or name an existing materialized route under the selected run and flow
+        scope. This applies with and without an explicit FlowID and to nested
+        flows. Descendant shape alone, another run and foreign flow evidence
+        never grant target authority.
     primary_entity_model:
       status: merge_bearing_contract_behavior
       implementation_tracker: '#1539'
@@ -12039,23 +12048,22 @@ flow_model:
         restated entity ownership fails closed. Verification and direct runtime
         consumers consume the same canonical resolver.
       stateful_presence_rule: >
-        A stateful normal child flow (stateful schema with no static/template
-        mode) must resolve exactly one entity type. Root schema entity
-        selectors and multi-root-entity declarations fail closed, but existing
-        package-level root workflow state without root entities remains outside
-        this required-child-flow entity presence rule. Stateless flows, static
-        package/service flows, and template-flow instance-key behavior remain
-        separate explicit classifications and are not silently rescued by
-        handler acquisition, route planning, entity-tool fallback, or a
-        schema-level entity selector.
+        Declared child entity state or an actual entity-demanding operation
+        requires exactly one primary entity through the canonical resolver.
+        Stages alone do not manufacture entity demand: a fieldless staged child
+        without such an operation is legal. Root entity selectors and multiple
+        entity types remain invalid. Keyless canonical-primary create_entity
+        and writes are legal without caller-selected entity_id; caller-selected
+        or multi-row acquisition remains invalid. No placeholder entity fields
+        or permissive resolver fallback may satisfy these obligations.
     composition_model:
       status: references_existing_owner
       canonical_routing_owner: platform-spec.yaml#flow_model.composition_routing
       route_plan_owner: platform-spec.yaml#contract_formats.event_schema.routing_derivation.route_plan_authority
       rule: >
-        Parent `connect` owns only the directed edge and optional event rename.
-        A template receiver owns its scalar identity, typed source, and
-        lifecycle mode. Composition routing lowers those facts into RoutePlan;
+        Parent `connect` owns the directed edge, optional event rename and
+        ordinary per-edge instance selection/source policy. A template receiver
+        owns its scalar identity declaration. Composition routing lowers those facts into RoutePlan;
         concrete DeliveryRoute rows own publish-time and replay authority.
       public_target_revision:
         keep:
@@ -12063,8 +12071,8 @@ flow_model:
         - import boundaries
         - resolver plumbing
         - fail-closed verification
-        revise: remove parent-owned receiver identity, cardinality, and lifecycle syntax
-        prefer: edge-only connect + receiver-owned scalar instance/resolution semantics
+        revise: retire shared-pin ordinary policy without changing deferred fan-in or reply syntax
+        prefer: receiver-owned scalar instance + connection-owned ordinary resolution/key_from
       split_children:
         output_pin_key_carries: '#1544'
         connect_to_instance_route_planning: '#1545'
@@ -12077,13 +12085,13 @@ flow_model:
         rule: >
           For normal composition into a template receiver, parent `connect`
           supplies the exact edge. The receiver scalar `instance`, same-named
-          typed producer payload source, and `resolution.mode` lower into one explicit instance-key
+          typed producer payload source, and connection `resolution` lower into one explicit instance-key
           ConnectRoutePlan. The normal path MUST NOT reconstruct identity from
           retired producer output-pin key/carries, receiver select_entity, producer
           target/broadcast, direct delivery, raw subscribers, RouteTable lookup,
           handler lookup, delivery rows, or replay/readback rows as the route
           selector. Exceptional payload or intrinsic sources are authored only
-          through the receiver pin's exact `resolution.from` value.
+          through the connection's exact `key_from` value.
       retired_connect_identity_aliases:
         status: hard_invalid_on_presence
         implementation_tracker: '#2087'
@@ -12105,8 +12113,8 @@ flow_model:
         canonical_code_owner: internal/runtime/contracts.CompiledEventSchema + internal/runtime/contracts.CompiledFlowInputPin + internal/runtime/core/pinrouting.ConnectRoutePlan
         rule: >
           Output-pin `key` and `carries` are invalid on presence. Producer event
-          schemas own payload fields and the event-level business key. Receiver
-          input resolution and the immutable compiled edge own delivery projection.
+          schemas own payload fields and the event-level business key. The
+          immutable compiled connection owns ordinary delivery projection.
           No compatibility decoder or reader-side reconstruction survives.
         non_authoritative_paths: >
           Retired output-pin key/carries never choose or restate a receiver
@@ -12149,18 +12157,17 @@ flow_model:
     singleton_cardinality_model:
       status: merge_bearing_contract_runtime_behavior
       implementation_tracker: '#2238'
-      declaration_surface: 'mode: singleton'
+      declaration_surface: 'static shape derived by absence of instance, with actual primary-state demand'
       canonical_code_owner: internal/runtime/contracts.WorkflowContractBundle.ResolveFlowSingleton
       rule: >
-        `mode: singleton` declares cardinality and lifecycle only: exactly one
-        durable child flow instance, exactly one primary entity, and no template
-        instance identity. The primary entity may be empty or scalar-only.
+        Keyless static flow state uses the existing singleton cardinality
+        resolver when an operation requires a primary entity. No mode token
+        grants that contract and fieldless stages alone do not require it.
+        The primary entity may be empty or scalar-only.
         Typed map/list presence is valid but does not by itself grant coordinator
         authority. Standing activation consumes this base singleton contract.
       fail_closed:
-      - 'root schema declares mode: singleton'
-      - 'mode: singleton declares template instance fields'
-      - singleton flow lacks exactly one primary entity
+      - static-state operation lacks exactly one primary entity
       - singleton flow uses schema.yaml entity restatement
       - singleton flow declares multiple entity contracts
       - singleton flow contained map/list value or item types do not resolve
@@ -12172,7 +12179,7 @@ flow_model:
       status: merge_bearing_contract_runtime_behavior
       implementation_tracker: '#1549'
       refinement_tracker: '#2238'
-      declaration_surface: 'exact typed map/list consumer usage inside a mode: singleton flow; no coordinator flag exists'
+      declaration_surface: 'exact typed map/list consumer usage inside a derived static flow; no coordinator flag exists'
       canonical_code_owner: internal/runtime/bootverify.BuildSingletonCoordinatorDemandProjection + internal/runtime/contracts.WorkflowContractBundle.ResolveFlowSingletonCoordinator + internal/runtime/engine.Executor.applyContainedDataOperation
       rule: >
         Coordinator semantics are a strict refinement of singleton cardinality,
@@ -12218,7 +12225,7 @@ flow_model:
         to a child/template flow instance instead of remaining singleton
         contained state.
       fail_closed:
-      - 'bare mode: static used as singleton/coordinator proof'
+      - static shape used as coordinator proof without an exact typed contained-state consumer
       - coordinator demand exists but the singleton primary entity lacks typed contained map/list state
       - singleton flow contained map/list value or item types do not resolve
       - agent conversation/session memory is used as coordinator state authority
@@ -12231,7 +12238,7 @@ flow_model:
         route identity. Promotion behavior and pilots remain tracked by #1553
         and do not widen #1549.
       non_authoritative_paths:
-      - 'mode: static as implicit coordinator declaration'
+      - static shape alone as implicit coordinator declaration
       - map/list declaration presence without an exact consuming row
       - schema.yaml entity as a singleton entity selector
       - template scalar instance/source/resolution for singleton ownership
@@ -12262,7 +12269,6 @@ flow_model:
           flows:
           - id: telegram-chat
             flow: telegram-chat
-            mode: singleton
             activation: standing
             ingress:
               alias: chat
@@ -12418,8 +12424,8 @@ flow_model:
           multiple runtime entity rows through `create_entity`. Handler receiver
           selection fields are retired in every flow mode. Static multi-row
           ownership is retired. Authors must model the state as one primary
-          entity with contained state, a `mode: template` flow instance, a
-          `mode: singleton` flow with exact contained-state demand, or a child flow. Existing historical
+          entity with contained state, a scalar-instance keyed flow, a
+          derived-static flow with exact contained-state demand, or a child flow. Existing historical
           rows are unsupported; this retirement provides no persisted-row migration.
       producer_emit_routing:
         status: retired_unsupported
@@ -12572,8 +12578,8 @@ flow_model:
             producer family. They must not maintain handler-only substitutes for all-producer questions.
             Output pins are interface exposures and become delivery only through a lowered connect edge.
           resolution_rule: >
-            Runnable connect edges are edge-only. Their resolution view projects supported receiver-owned input
-            declarations for address, create, select, select-or-create, fan-in, and reply, plus derived static,
+            Runnable connect edges preserve connection-owned create, select and select-or-create policies alongside
+            retained receiver-owned fan-in and reply declarations, plus derived static,
             target, target_set, instance-key, fan-in, and typed-reply facts, without claiming a concrete runtime
             recipient. Receiver resolution.mode fan-out remains non-runnable under #1934. Invalid or unlowerable
             declarations appear only as typed issues and never as executable edges.
@@ -12799,13 +12805,13 @@ flow_model:
       service_request_pattern:
       - '1. Source flow emits a typed request event containing declared business keys, not target entity_id,
         entity_type, or flow_instance.'
-      - '2. Destination declares a supported ownership model: mode: template with scalar instance/source/resolution, mode: singleton for one durable
+      - '2. Destination declares a supported ownership model: scalar template instance with connection-owned source/resolution, or static state for one durable
         instance and exact typed coordinator consumers when shared state is used, one primary entity with contained data, or a child flow.'
       - '3. Parent connect / route-plan authority supplies the target flow-instance context, not source-state ownership.
         Supported ordinary primary acquisition remains receiver-owned; retired static multi-row acquisition is not a repair path.'
       - '4. Handler writes and transitions remain same-flow owned under the supported receiver ownership model.'
-      enforcement: 'Input pin events into a stateful static flow (mode: static) MUST NOT use create_entity as
-        static multi-row ownership. Boot verification fails closed with canonical authoring diagnostics. Handler
+      enforcement: 'Keyless static input handlers may canonically create and write their one primary entity,
+        but MUST NOT elect caller-selected or multiple rows. Boot verification fails closed with canonical diagnostics. Handler
         receiver-selection fields are rejected during strict loading in every flow mode, including stateless and
         template flows. Composition selects the receiving instance; canonical activation or permitted handler
         initialization supplies that instance''s own state, never an independently elected entity.'
@@ -12870,13 +12876,16 @@ flow_model:
         - internal/runtime/contracts.CompiledFlowOutputPin
         - internal/runtime/contracts.CompiledFlowEntityPermissions
         - internal/runtime/contracts.CompiledEventSchema
+        - internal/runtime/contracts.CompiledConnectionInput
         - internal/runtime/core/pinrouting.ConnectRoutePlan
       rule: |
-        Each admitted flow pin has one exact local event identity. Scalar entries are the default; mappings may add only a closed non-default source, sink, resolution, or creating-input initialize choice. Missing event containers mean no pins. Null, explicit empty, duplicate, non-exact, qualified, wildcard, alias-bearing, carry-bearing, or output-key/carries entries fail at admission. Producer event declarations own payload schema and business key. Every W2 mapping key is byte-exact; trimmed, blank, or otherwise alternate spellings fail rather than normalize. Receiver input resolution owns instance source and mode, and every mode admits only its closed field set; reply and fan-in cannot declare resolution.from. The compiled input pin owns distinct immutable producer-declaration and receiver-acceptance schemas, together with typed creation-only initialization. A schema-only imported pin may stage typed intrinsic projection metadata before provider schema binding; binding occurs once, rejects producer-field collision, validates initialization bindings, derives the receiver schema, and recomputes pin identity. The compiler produces immutable defensive pin values and one closed immutable edge containing endpoint, schema, projection, resolution, initialization, reply/fan-in, provenance, and digest evidence. Verify, runtime, durable claims, restart, retry, replay, selected fork, graph, and readback consume those values without authored-map fallback or reconstruction. Compiled composed edges and target-free public/provider input edges uniformly reject a receiver-owned synthetic resolution projection when the bound producer schema already declares the receiver instance field.
+        Each admitted flow pin has one exact local event identity. Scalar entries are the default; mappings may add only a closed non-default source, sink, retained fan-in/reply/fan-out policy, or creation-only initialize choice. Missing event containers mean no pins. Null, explicit empty, duplicate, non-exact, qualified, wildcard, alias-bearing, carry-bearing, or output-key/carries entries fail at admission. Producer event declarations own payload schema and business key. Every mapping key is byte-exact; alternate spellings fail rather than normalize. Ordinary selection and exceptional key source belong to each connect row, never the shared pin. CompiledConnectionInput owns immutable typed source and receiver acceptance projection from the bound producer schema. Provider/activity composition recompiles that connection evidence after exact schema binding, rejects producer-field collision and validates initialization through the existing typed owners. No connection means no ordinary template registration authority. The immutable edge contains endpoint, schema, projection, resolution, initialization, retained reply/fan-in, provenance and digest evidence. Verify, runtime, durable claims, restart, retry, replay, selected fork, graph and readback consume that evidence without authored-map fallback or synthetic private input edges.
       retired_on_presence:
         - pins.inputs.events[].name
         - pins.outputs.events[].name
         - pins.inputs.events[].carries
+        - pins.inputs.events[].resolution.mode_create_select_select-or-create
+        - pins.inputs.events[].resolution.from
         - carry.type
         - carry.optional
         - carry.convert
@@ -12885,7 +12894,7 @@ flow_model:
         - qualified_or_wildcard_flow_pin_event
         - package.connect[].adapter
       compatibility: none; old stores, aliases, adapters, migrations, and dual digests are unsupported
-    rule: LCA-owned schema.yaml connect is the sole authored cross-flow edge owner. Output pins own producer event identity and schema; receiver pins own typed instance/source/resolution. Verify lowers admitted connect rows into immutable compiled pin/edge plans, and runtime consumes those plans without producer routing, package metadata, or fallback broadcast.
+    rule: LCA-owned schema.yaml connect is the sole authored cross-flow edge and ordinary resolution/source owner. Output pins own producer event identity and schema; receiver instance declarations own identity. Verify lowers admitted connect rows into immutable compiled pin/edge plans, and runtime consumes those plans without producer routing, package metadata, or fallback broadcast.
     authored_shapes:
       output_event_pin:
         location: schema.yaml pins.outputs.events
@@ -12903,7 +12912,7 @@ flow_model:
       resolved_input_pin:
         location: schema.yaml pins.inputs.events
         canonical_form: |
-          An input event pin MAY be authored as an object `{event, source, resolution, initialize}` only when non-default choices are required. Otherwise it is one scalar exact local event identity. `source` is optional and admits only validation-only `harness`; `external` is retired and rejected. For a template receiver, `resolution.mode` owns create/select/select-or-create behavior and `resolution.from` owns a supported exceptional typed identity source. `initialize` is allowed only with create or select-or-create and never supplies an alternate instance identity.
+          An input event pin MAY be authored as an object `{event, source, resolution, initialize}` only when non-default choices are required. Otherwise it is one scalar exact local event identity. `source` admits only validation-only `harness`; `external` is retired. Pin resolution retains fan-in, fan-out and reply with their existing passengers. Ordinary create/select/select-or-create and every pin resolution.from are invalid on presence and teach connection-owned resolution/key_from. `initialize` requires a creating connection and never supplies an alternate instance identity. A select edge cannot consume a pin with initialization bindings.
         scalar_form: |
           A scalar input event pin is valid when no source or resolution choice is needed. A scalar input pin on a template receiver is not a selector.
         receiver_initialization:
@@ -12924,16 +12933,14 @@ flow_model:
             Restart, readback and supported fork preparation consume exact committed or lawfully admitted configuration evidence. The shared receiver configuration owner validates recorded values against the selected receiver declaration without applying defaults, before installing agents, routes or readiness. Missing required values, invalid values and incompatible selected types fail closed even when the recorded runtime-control envelope is structurally valid. They do not derive business identity/configuration from path leaves, hashed instance IDs, current source defaults or first-match maps. Missing required historical evidence fails closed under the existing fork policy; this rule adds no fork capability.
         instance_fields:
           identity: 'The template flow''s scalar `instance: <field>` is the only receiver identity owner.'
-          source: Omitted resolution.from derives payload.<instance> from the required producer schema; an override may select generated.uuid, event.id, or one exact top-level payload.<field>.
-          mode: resolution.mode is an exhaustive typed value. No policy default or string fallback exists.
+          source: Omitted connect.key_from derives required payload.<instance>; a different top-level payload field is supported, while generated.uuid and event.id require create. Explicit same-name key_from is redundant and rejected.
+          mode: connect.resolution is an exhaustive typed ordinary value. No policy default or string fallback exists; retained fan-in/reply policy remains on the pin.
         example: |
           instance: vertical_id
           pins:
             inputs:
               events:
-                - event: deploy.completed
-                  resolution:
-                    mode: select
+                - deploy.completed
       parent_connect:
         location: schema.yaml connect at the exact least common ancestor FlowNode
         canonical_form: |
@@ -12945,12 +12952,14 @@ flow_model:
           to: Required exact receiver flow ID, or `.` for this row's authoring flow.
           rename: |
             Optional exact canonical receiver-visible event identity when it differs from `event`. It follows the same admission grammar as `event`; a value equal after canonical event normalization is hard-invalid redundancy rather than an accepted alternate spelling.
+          resolution: Exact scalar create, select or select-or-create for an ordinary template edge; explicit empty, null, mappings, lists and retained fan-in/reply values are invalid here.
+          key_from: Exact top-level payload.<different-field>, generated.uuid or event.id source; requires resolution, and intrinsic sources require create. Omit the same-name payload source rather than restating it.
         retired_fields:
           endpoint_centric_from_to: Retired on presence. `{flow}.{pin}` and `.{root_pin}` endpoints are invalid; author `event` plus flow-only `from` and `to`.
-          delivery: Retired on presence. Cardinality and instance selection belong to the receiver input; static fan-out is authored as multiple connect rows.
+          delivery: Retired on presence. Ordinary instance selection belongs to flat connect.resolution; static fan-out is authored as multiple connect rows.
           reply: |
             Retired on presence. Reply routing belongs to receiver input `resolution: {mode: reply, replies_to: ...}` and paired connect edges.
-          map: Retired on presence. Receiver source selection belongs only to `resolution.from`.
+          map: Retired on presence. Ordinary source selection belongs only to flat connect.key_from.
           using: Retired on presence. `using.instance` is not a receiver identity adapter.
           adapter: Retired on presence. No payload-transform registry or compatibility executor exists.
         example: |
@@ -12958,15 +12967,16 @@ flow_model:
             - event: deploy.completed
               from: holding_devops
               to: operating
+              resolution: select
             - event: work.ready
               from: producer
               to: consumer
               rename: work.accepted
     ownership_split:
       output_pins: Output pins own exact local producer event identity and optional harness sink, never receiver identity.
-      input_pins: Input pins own receiver interface, typed identity source, and resolution mode.
-      parent_connect: Parent connect owns the directed inter-flow event edge and optional receiver-event rename.
-      receiver_input_resolution: Receiver input pins own instance selection, lifecycle, cardinality, fan-in, and reply resolution.
+      input_pins: Input pins own receiver interface, retained fan-in/reply policy and typed creating-input initialization.
+      parent_connect: Parent connect owns the directed inter-flow event edge, optional rename and ordinary resolution/key_from.
+      receiver_input_resolution: Receiver input pins retain fan-in and reply resolution; ordinary instance selection is connection-owned.
       analyzer: Analyzer owns validation, bind-visible event projection, explicit rename, and lowering to concrete immutable route-plan facts.
       route_plan: Runtime RoutePlan owns publish-time concrete recipient authority after lowering; it consumes authored topology and MUST NOT reconstruct it from live subscribers.
       producer_emit: Producer emit owns event identity and payload construction only. emit.target and emit.broadcast are retired on presence.
@@ -12983,24 +12993,24 @@ flow_model:
         `rename` is the sole explicit receiver-event change. Bind projections may supply boundary-visible names without redundant rename authoring.
       adapter_retired: '`adapter` is invalid on presence; no transform owner is compiled.'
       output_metadata_retired: Producer output-pin key/carries declarations are invalid on presence.
-      receiver_route_key_present: Template receivers must resolve one valid scalar instance field, same-named required producer payload source or exact resolution.from override, and explicit resolution mode. Stateful/static receivers that need no runtime selection may lower to a statically unique receiver.
+      receiver_route_key_present: Ordinary template edges must resolve one valid receiver instance field, required default payload source or exact connect.key_from override, and explicit connect.resolution. Static receivers that need no runtime selection may lower to a statically unique receiver.
       key_types_compatible: |
         Source and target key types must be directionally compatible before route-plan lowering. Integer sources may widen to numeric receiver fields; numeric sources MUST NOT narrow to integer receiver fields.
-      receiver_resolution_valid: Receiver-owned typed resolution mode, scalar instance source, fan-in, and reply facts must be internally valid and unambiguous.
+      receiver_resolution_valid: Connection-owned ordinary resolution/source, receiver scalar identity, and retained receiver fan-in/reply facts must be internally valid and unambiguous.
       inference_unambiguous: |
         Compiler resolution is allowed only when exactly one producer output and receiver input match their authoring-flow-visible event identities. There is no first-match, pin-name fallback, suffix/leaf match, dot-to-underscore guess, or global resolved-event search.
       lowered_route_plan_concrete: Accepted connections must lower to concrete route-plan inputs; no runtime path may recover by broadcasting or reinterpreting authored aliases.
     route_plan_lowering:
       owner: platform-spec.yaml#flow_model.composition_routing.route_plan_lowering
-      syntax_owner: internal/runtime/contracts.FlowConnect.UnmarshalYAML
+      syntax_owner: internal/runtime/contracts.projectSchemaConnectValue
       compiler_owner: internal/runtime/core/pinrouting.CompileConnectGraph
       ownership_rule: |
-        Syntax admission accepts only exact `event`, `from`, `to`, and optional `rename`. A private helper called only by CompileConnectGraph resolves the authoring flow, exact visible event identities, and exact pins once. Downstream verification, topology, describe, EventBus, fork/replay, and execution consume compiled graph/evaluation projections and never reinterpret the authored fields or expose a second effective endpoint-string DTO.
+        Typed syntax admission accepts exact event/from/to, optional rename and flat ordinary resolution/key_from. The connection-input owner freezes ordinary source and schema evidence; CompileConnectGraph resolves the exact endpoints and consumes it. Downstream verification, topology, describe, EventBus, fork/replay and execution consume compiled graph/evaluation projections, never a second authored policy interpreter.
       consumes:
         - admitted LCA-owned schema.yaml connect entries
         - producer output pin exact event identity and immutable producer event schema resolved from event-centric flow endpoints
         - receiver scalar template instance identity from WorkflowContractBundle.ResolveFlowTemplateInstance
-        - receiver input same-named required payload source or exact resolution.from override and resolution mode
+        - connection-owned required payload source or exact key_from override and ordinary resolution
         - finite filesystem FlowNode ownership and exact child-flow endpoints
         - explicit receiver-event rename
       produces:
@@ -13010,11 +13020,11 @@ flow_model:
         - receiver instance-key evidence on same-name template receiver connect plans
         - external persisted event identity
         - receiver-local handler event identity
-        - concrete target routes derived from receiver-owned scalar instance/source/mode facts
+        - concrete target routes derived from receiver-owned scalar identity and connection-owned source/resolution facts
         - typed reply resolution derived from receiver input resolution and paired connect edges
         - typed failure reason when lowering cannot produce a concrete plan
       target_mapping:
-        singular: Receiver-owned singular resolution lowers to event.target and one delivery row.
+        singular: Connection-owned ordinary resolution or retained receiver pin resolution lowers to event.target and one delivery row.
         set: Receiver-owned set cardinality lowers to event.target_set and one delivery row per concrete recipient.
         reply: |
           Receiver `resolution.mode: reply` lowers through typed paired-edge request lineage; missing or ambiguous lineage fails closed.
@@ -13032,14 +13042,14 @@ flow_model:
         status: merge_bearing_aggressive_retirement
         canonical_code_owner: internal/runtime/contracts.FlowConnect + internal/runtime/core/pinrouting.ConnectRoutePlan
         rule: |
-          Authored `connect.delivery` and `connect.reply` are invalid on presence. FlowConnect and ConnectRoutePlan expose no delivery or raw reply compatibility fields. Connect lowering consumes only the directed edge and optional adaptation from connect; target cardinality and typed reply resolution derive from receiver input resolution. Runtime dispatch, persistence, replay, topology readback, and describe output consume only target/target_set and typed ReplyResolution facts.
+          Authored `connect.delivery` and `connect.reply` are invalid on presence. FlowConnect and ConnectRoutePlan expose no delivery or raw reply compatibility fields. Connect lowering consumes the directed edge, optional rename and connection-owned ordinary instance policy. Retained fan-in/fan-out cardinality and typed reply resolution derive from receiver input resolution. Runtime dispatch, persistence, replay, topology readback, and describe output consume only target/target_set and typed ReplyResolution facts.
         migration:
           rule: Retired delivery, reply-map, and compatibility fields fail strict admission; no codemod or compatibility reader exists.
         fail_closed:
           - delivery or reply present with any scalar, mapping, sequence, empty, or malformed value
           - runtime attempt to reconstruct retired delivery or raw reply authority
         preserved:
-          - receiver resolution create, select, select-or-create, fan-in, and reply
+          - connection resolution create, select and select-or-create; retained receiver fan-in, fan-out and reply
           - derived DeliveryRoute persistence, replay, and typed reply context
       implementation_slice_1472:
         status: merge_bearing_runtime_artifact
@@ -13060,7 +13070,7 @@ flow_model:
             static, instance_key, or reply; materialization MUST
             consume this discriminant and MUST NOT select route authority from
             nil-field ordering. Reply is derived only from receiver input resolution and paired edges.
-          instance_key_rule: Receiver-owned scalar template instance field, compiled required payload or resolution.from Source, and exhaustive Mode.
+          instance_key_rule: Receiver-owned scalar template instance field, connection-owned required payload or key_from Source, and exhaustive ordinary Mode.
           reply_resolution: The typed request/response role and correlation facts derived from receiver input resolution and paired edges.
           static_target_route: Static receiver flows may lower immediately to a concrete target or single target_set member using the receiver flow path and canonical flow-instance entity id.
           runtime_resolution_flag: Template or dynamic receivers keep an explicit runtime-resolution requirement instead of fabricating concrete delivery rows.
@@ -13080,12 +13090,12 @@ flow_model:
         rule: |
           Parent connect into a template receiver MUST lower to an explicit
           ConnectRoutePlan `ResolutionKind: instance_key` decision when the
-          receiver flow declares one scalar `instance: <field>` and the input
-          pin declares `resolution.mode`; omitted `resolution.from` derives
+          receiver flow declares one scalar `instance: <field>` and the connection
+          declares flat `resolution`; omitted `key_from` derives
           `payload.<instance-field>` and an authored override may select only
           one supported exact source. WorkflowContractBundle.ResolveFlowTemplateInstance admits the
-          opaque identity field. The compiled input pin owns the typed Source and the
-          resolution owns the exhaustive Mode. ConnectRoutePlan.InstanceKey
+          opaque identity field. CompiledConnectionInput owns the typed Source and
+          exhaustive Mode. ConnectRoutePlan.InstanceKey
           is the sole compiled owner and exposes no Address, Map, Mappings,
           policy, list, or composite representation.
 
@@ -13185,8 +13195,8 @@ flow_model:
         instance_identity_owner_2021:
           status: scalar_typed_owner_finalized_by_2087
           authored_identity_owner: 'flow instance: <field>'
-          authored_source_owner: receiver input resolution.from, with omission deriving the same-named payload field
-          authored_behavior_owner: receiver input resolution.mode
+          authored_source_owner: connection key_from, with omission deriving the same-named required payload field
+          authored_behavior_owner: connection resolution for ordinary variants; retained pin resolution for fan-in/reply
           effective_owner: |
             internal/runtime/core/pinrouting.ConnectRoutePlan.InstanceKey carries one opaque validated Field, one typed Source, and one exhaustive typed Mode. No second representation exists.
           readback: |
@@ -13194,19 +13204,19 @@ flow_model:
           retirement: |
             Mapping/list/composite instance declarations, lifecycle policy fields, resolution.instance_key, instance.key sources, input address, connect map, and connect using.instance are hard-invalid during strict load. No warning, codemod, alias, fallback reader, compatibility DTO, or dual semantic owner exists.
         rule: |
-          Receiver input pins may declare an explicit instance-resolution
-          contract under `resolution:{mode,...}`. This receiver-side contract
-          is the canonical authoring owner for new instance routing semantics;
-          route planning consumes it as typed contract data and lowers it into
+          Ordinary instance-resolution belongs to flat connection resolution
+          and optional key_from. Receiver pins retain fan-in/reply resolution
+          under their existing `resolution:{mode,...}` shape. Route planning
+          consumes these separate typed owners and lowers them into
           ConnectRoutePlan evidence before EventBus delivery. Runtime must not
           infer resolution authority from producer emit targets, live
           subscribers, delivery rows, replay rows, route-table lookup before a
           selected target, or handler lookup.
 
           PR1 spec-locks every approved mode and makes
-          `resolution.mode: create` runnable. PR2 makes
-          `resolution.mode: select` runnable for a single typed instance source
-          key. PR3 makes `resolution.mode: select-or-create` runnable for
+          connection `resolution: create` runnable. PR2 makes
+          connection `resolution: select` runnable for a single typed instance source
+          key. PR3 makes connection `resolution: select-or-create` runnable for
           the same single typed instance-source boundary, with lifecycle/store
           convergence on exactly one receiver instance for concurrent same-key
           missing deliveries. PR4 makes `resolution.mode: fan-in` runnable
@@ -13226,17 +13236,17 @@ flow_model:
           pins:
             inputs:
               events:
-                - event: validation.requested
-                  resolution:
-                    mode: create
-                    from: generated.uuid
+                - validation.requested
+          # In the parent's schema.yaml:
+          connect:
+            - {event: validation.requested, from: producer, to: validator, resolution: create, key_from: generated.uuid}
         source_type_authority: |
-          The canonical instance-source type resolver owns compatibility for every runnable create, select, and select-or-create path before route-plan lowering. For `payload.<field>`, the actual source type comes from that field in the receiver input event schema. For `generated.uuid` and `event.id`, the actual source type is the intrinsic UUID-compatible platform type. No authored type assertion or conversion seam exists. The actual source type MUST also be scalar-compatible with the receiver entity instance field after named catalog aliases are resolved.
+          The canonical instance-source type resolver owns compatibility for every runnable create, select, and select-or-create path before route-plan lowering. For `payload.<field>`, the actual source type comes from that field in the bound producer event schema. For `generated.uuid` and `event.id`, the actual source type is the intrinsic UUID-compatible platform type. No authored type assertion or conversion seam exists. The actual source type MUST also be scalar-compatible with the receiver entity instance field after named catalog aliases are resolved.
         modes:
           create:
             status: runnable_in_1835_pr1
             contract: |
-              `mode: create` obtains the receiver template identity from the same-named required producer payload field when `resolution.from` is omitted, or from its exact authored override, and creates the receiver instance only when that identity is absent. An exact pre-existing identity is a hard conflict. The source may be exact `generated.uuid`, `event.id`, or one admitted top-level `payload.<field>`. `generated.uuid` is valid only for create; no other `generated.*` member exists. `event.id` and generated sources require a non-empty admitted event id.
+              Connection `resolution: create` obtains receiver identity from the same-named required producer payload field when key_from is omitted, or from its exact exceptional source, and creates only when that identity is absent. An exact pre-existing identity conflicts. Supported sources are generated.uuid, event.id and one top-level payload field. Both intrinsic sources are create-only and require a non-empty admitted event id; no other generated.* member exists.
             sources:
               generated.uuid: |
                 Deterministically derives a UUID-shaped key at route admission from the admitted event id, receiver flow, receiver pin, and scalar instance field. Recovery and ordinary committed replay consume the persisted projection and never derive again. A genuine fork has a fresh event identity and therefore derives and stamps a fresh value.
@@ -13251,7 +13261,7 @@ flow_model:
             fail_closed:
               - missing, nested, mapping, list, or composite receiver instance
               - omitted source without a required same-named producer payload field
-              - empty or unsupported resolution.from, including unknown generated.*
+              - empty or unsupported connect.key_from, including unknown generated.* and redundant same-name payload spelling
               - generated.uuid on any non-create mode
               - empty event id for generated.uuid or event.id
               - type-incompatible instance source
@@ -13263,10 +13273,10 @@ flow_model:
           select:
             status: runnable_in_1835_pr2
             contract: |
-              Select routes to exactly one existing receiver template instance by the required producer payload field whose name equals the receiver's scalar instance field, or by one exact `resolution.from`. `instance` owns partition identity, the compiled input pin owns sourcing, and `resolution.mode` owns unmatched behavior; no pin-level identity field is authored. Select MUST use one top-level `payload.<field>`. Its actual type is resolved from the input event schema and must be compatible with the receiver `entity.<field>`. The lowered route plan records `Mode: select`, the scalar instance field and typed payload `Source` derived from the compiled input pin, runtime descriptor resolution, and no policy facts. Missing or ambiguous target is invalid; this mode never creates an instance. Target-failure diagnostics MUST name the receiver flow, key field, key value when available, and an imperative remediation.
+              Select routes to exactly one existing receiver by the required same-named producer payload field or one exceptional connect.key_from. Instance owns partition identity; CompiledConnectionInput owns sourcing and unmatched behavior. Select requires one top-level payload field with compatible producer and receiver types. The lowered plan records Mode: select, scalar Field and typed Source. Missing or ambiguous targets fail closed; select never creates. Diagnostics name receiver flow, key field, available key value and imperative remediation.
             fail_closed:
               - omitted source without a required same-named producer payload field
-              - receiver not mode: template
+              - receiver without a scalar instance field
               - receiver instance missing, mapping, list, nested, or composite
               - resolution source not one top-level payload.<field>
               - type-incompatible instance source
@@ -13277,10 +13287,10 @@ flow_model:
           select-or-create:
             status: runnable_in_1835_pr3
             contract: |
-              Select-or-create routes to exactly one existing receiver template instance by the compiled input source, or creates exactly one receiver instance when no exact match exists. The authoring contract is the same single-field source boundary as `select`: the receiver flow's scalar `instance` owns identity and the compiled input pin supplies one top-level payload source. The lowered route plan records `Mode: select-or-create`, the typed identity source, runtime descriptor resolution, and no policy facts. Missing targets create through the canonical template lifecycle owner; exact existing matches reuse; ambiguous matches fail closed. Concurrent deliveries for the same missing key MUST converge on one receiver instance or fail closed without duplicating the receiver key.
+              Select-or-create routes to exactly one existing receiver by the compiled connection source, or creates exactly one when no match exists. The receiver scalar instance owns identity and CompiledConnectionInput supplies one top-level payload source. The plan records Mode: select-or-create and typed source. Missing targets create through the canonical lifecycle owner; existing matches reuse; ambiguity fails closed. Concurrent deliveries for the same missing key converge on one instance or fail closed without duplicate keys.
             fail_closed:
               - omitted source without a required same-named producer payload field
-              - receiver not mode: template
+              - receiver without a scalar instance field
               - receiver instance missing, mapping, list, nested, or composite
               - resolution source not one top-level payload.<field>
               - type-incompatible instance source
@@ -13302,7 +13312,7 @@ flow_model:
               - missing or empty dedup_by
               - dedup_by list/tuple/composite beyond one field
               - barrier dedup_by event.id or any non-payload identity
-              - receiver not mode: singleton or unable to satisfy the fan-in row's coordinator demand
+              - receiver has keyed cardinality or cannot satisfy the fan-in row's actual coordinator demand
               - missing receiver handler for the input event
               - stream receiver missing accumulate or declaring join
               - barrier receiver missing exactly one matching join or declaring accumulate
@@ -13334,16 +13344,16 @@ flow_model:
         proof_obligations:
           - contracts decode every locked mode and reject unknown resolution fields fail-closed
           - bootverify accepts valid create/select/select-or-create/fan-in stream/barrier resolution and rejects other non-runnable modes as not runnable in this slice
-          - route-plan lowering records typed create mode, the scalar instance Field, and typed Source derived from the required same-named payload field or exact resolution.from, with no policy facts or producer output-key dependency
+          - route-plan lowering consumes the immutable connection's typed create mode, scalar instance Field and Source derived from the required same-named payload field or exact key_from exception, with no shared-pin policy or producer output-key dependency
           - EventBus publish/preflight creates a missing receiver instance through the canonical lifecycle path
           - downstream receiver routes can render the receiver-targeted identity projection derived from typed Source as payload.<instance>
           - same committed event replay reuses persisted delivery route/scope and does not create another receiver instance
-          - route-plan lowering records typed select mode, scalar instance Field, and typed payload Source derived from the required same-named payload field or exact resolution.from, with no policy facts
+          - route-plan lowering consumes the immutable connection's typed select mode, scalar instance Field and payload Source derived from the required same-named payload field or exact key_from exception
           - EventBus publish/preflight for select routes to exactly one existing receiver instance
           - missing/ambiguous select target failures fail closed with receiver/key/value/remediation detail and no activation
           - same committed select event replay reuses persisted delivery route/scope and does not reselect after descriptor drift
           - standalone #1828 `template-select-existing` conformance fixture verifies and materializes through the canonical select route plan
-          - route-plan lowering records typed select-or-create mode, scalar instance Field, and typed payload Source derived from the required same-named payload field or exact resolution.from, with no policy facts
+          - route-plan lowering consumes the immutable connection's typed select-or-create mode, scalar instance Field and payload Source derived from the required same-named payload field or exact key_from exception
           - create rejects an existing exact identity, select requires one exact identity, and select-or-create reuses or creates according to typed mode only
           - strict load rejects every retired instance policy, address, map, and using.instance form on presence
           - structural guards prove no declaration, plan, lifecycle decision, activation config, diagnostic, or readback policy fact survives
@@ -13370,7 +13380,7 @@ flow_model:
         canonical_code_owner: strict contract decoders plus ConnectRoutePlan.InstanceKey.Source
         rule: |
           Exceptional receiver identity sourcing is authored only as the exact
-          `resolution.from` value of the receiver input pin. Omission derives
+          `key_from` value of the connection. Omission derives
           the same-named required producer payload field. Connect using.instance, connect map, input address,
           and ConnectRoutePlan.InstanceKey.Mappings are removed. They fail
           strict load or the structural production guard and cannot be
@@ -13378,7 +13388,7 @@ flow_model:
           delivery/replay rows, readback, producer target, or broadcast.
         consumes:
           - receiver scalar template instance field
-          - compiled receiver input pin typed Source
+          - compiled connection input typed Source
           - matched inbound event payload source fields
           - receiver-scoped active flow-instance descriptors
         produces:
@@ -13429,7 +13439,7 @@ flow_model:
           connections must match this source in both new-run and existing-run execution, not fall through to export-only settlement.
 
           Real root-to-private connections remain executable. Shared private template receiver registration survives
-          public endpoint cleanup; the compiled connection and receiver pin own create, select, and select-or-create.
+          public endpoint cleanup; the compiled connection owns create, select, and select-or-create.
           This does not add selected-root template lifecycle support or repair selected-root static+standing and
           explicit-singleton startup exclusion; those pre-existing lifecycle defects are tracked by #2438.
           The boot-only split does not waive ordinary root-origin delivery, provider-to-existing-root connections,
@@ -21353,7 +21363,7 @@ static_analyzer:
           A compiled output pin of the selected root is a public persisted observation. It requires no internal
           consumer and creates no fabricated target or delivery. A matching failed connection still fails closed.
       lowered_parent_connect:
-        rule: Parent connect plus receiver-owned scalar instance/source/resolution lowering provides concrete route-plan facts before runtime dispatch.
+        rule: Parent connect plus receiver-owned scalar instance and connection-owned resolution/key_from lowering provides concrete route-plan facts before runtime dispatch.
       harness_sink:
         rule: A structured output pin may declare sink:harness only for explicit validation/catalog observation. Production
           admission rejects it, and it creates no runtime recipient or route fact.
@@ -21417,7 +21427,7 @@ static_analyzer:
       - contract_formats.event_schema
     rule: >
       Output-pin key/carries are invalid on presence. Event schema and event-level
-      business key own producer guarantees; receiver input resolution and the
+      business key own producer guarantees; connection-owned ordinary resolution and the
       immutable compiled edge own delivery projection. No compatibility verifier,
       DTO, migration, or readback reconstruction remains.
   slice_3a1_composition_connect_validation:
@@ -21431,7 +21441,7 @@ static_analyzer:
       - flow_model.composition_routing
       - engine.cross_flow_routing
     scope:
-      description: Validate immutable compiled pins/edges from LCA-owned schema.yaml connect rows and receiver scalar instance/source/resolution before runtime route-plan lowering.
+      description: Validate immutable compiled pins/edges from LCA-owned schema.yaml connect rows and receiver scalar instance plus connection source/resolution before runtime route-plan lowering.
       applies_to:
         - schema.yaml connect rows
         - compiled exact input pins
@@ -21451,7 +21461,7 @@ static_analyzer:
       event_rename_valid: Differing source and receiver event identities require connect.rename; equal rename is redundant and hard-invalid.
       payload_adapter_retired: connect.adapter is invalid on presence.
       output_interface_evidence_valid: Immutable producer event schema/business key owns producer evidence; output-pin key/carries are invalid on presence.
-      receiver_instance_resolution_present: Template receivers must declare one scalar instance field, a same-named required producer payload source or exact resolution.from override, and an explicit supported resolution mode.
+      receiver_instance_resolution_present: Keyed receivers declare one scalar instance field; every ordinary connection declares a supported flat resolution. The compiled connection derives its same-named required producer payload source or consumes an exceptional key_from. Explicit same-name key_from is redundant and refused.
       key_types_compatible: >
         Before lowering, the canonical instance-source type resolver must use
         the actual receiver input event-schema type for payload sources or the

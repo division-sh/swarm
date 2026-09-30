@@ -40,7 +40,6 @@ var outputEventPinFieldOptions = map[string]struct{}{
 
 var inputEventPinResolutionFieldOptions = map[string]struct{}{
 	"mode":            {},
-	"from":            {},
 	"aggregation":     {},
 	"window":          {},
 	"dedup_by":        {},

@@ -6,12 +6,9 @@ imports:
   provider_trigger_events:
     - provider: telegram
       event: inbound.telegram.text_message
-mode: template
 instance: conversation_reference
 stages: []
 pins:
   inputs:
     events:
-      - event: inbound.telegram.text_message
-        resolution:
-          mode: select-or-create
+      - inbound.telegram.text_message

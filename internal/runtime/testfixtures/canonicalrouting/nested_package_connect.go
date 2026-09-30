@@ -13,7 +13,6 @@ func CopyNestedFlowConnect(t testing.TB) string {
 		"schema.yaml": "name: nested-flow-connect\n",
 
 		"child/schema.yaml": `name: child
-mode: static
 pins:
   inputs:
     events: [micro.done]
@@ -30,7 +29,6 @@ connect:
 `,
 
 		"child/grandchild/schema.yaml": `name: grandchild
-mode: static
 pins:
   outputs:
     events: [micro.done]

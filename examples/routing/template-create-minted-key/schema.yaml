@@ -11,6 +11,8 @@ connect:
   - event: validation.requested
     from: producer
     to: validator
+    resolution: create
+    key_from: generated.uuid
   - event: validation.started
     from: validator
     to: producer

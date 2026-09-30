@@ -171,7 +171,7 @@ func boundedStandingConnectorBundle(t *testing.T, bundle *runtimecontracts.Workf
 	flow := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: boundedProviderFlowID},
 		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode: runtimecontracts.FlowModeStatic,
+
 			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: inputs}},
 		},
 		Nodes:  bundle.Nodes,
@@ -181,7 +181,7 @@ func boundedStandingConnectorBundle(t *testing.T, bundle *runtimecontracts.Workf
 	}
 	admitted := loadRuntimeTempBundle(t, map[string]string{
 		"schema.yaml":                   "name: bounded-standing-connector\n",
-		"bounded_inbound/schema.yaml":   "name: bounded_inbound\nmode: static\nstages:\n  active: {initial: true}\n",
+		"bounded_inbound/schema.yaml":   "name: bounded_inbound\nstages:\n  active: {initial: true}\n",
 		"bounded_inbound/entities.yaml": "bounded_entity: {}\n",
 	})
 	admitted.RootSchema = bundle.RootSchema

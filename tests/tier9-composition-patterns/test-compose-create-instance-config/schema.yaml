@@ -13,6 +13,8 @@ connect:
   - event: spawn.done
     from: .
     to: worker
+    resolution: create
   - event: task.assign
     from: .
     to: worker
+    resolution: select

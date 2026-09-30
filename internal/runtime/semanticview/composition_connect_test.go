@@ -31,12 +31,8 @@ func TestCompositionConnectFactsExposeCanonicalReceiverResolution(t *testing.T) 
 	if got, want := inputPin.EventType(), "account.ready"; got != want {
 		t.Fatalf("input pin event = %q, want %q", got, want)
 	}
-	resolution := inputPin.Resolution()
-	if resolution.Mode != runtimecontracts.FlowInputResolutionModeSelect {
-		t.Fatalf("input pin resolution = %#v, want select", resolution)
-	}
-	if resolution.From != "" {
-		t.Fatalf("input pin resolution.from = %q, want canonical same-name derivation", resolution.From)
+	if !inputPin.Resolution().Empty() {
+		t.Fatalf("ordinary policy leaked into input pin: %#v", inputPin.Resolution())
 	}
 
 	outputPins := source.FlowOutputEventPins("producer")
@@ -61,6 +57,10 @@ func TestCompositionConnectFactsExposeCanonicalReceiverResolution(t *testing.T) 
 		}
 	}
 	connect := connects[3]
+	input, found, err := source.ConnectionInputs().Input(connect)
+	if err != nil || !found || input.Mode() != runtimecontracts.FlowInputResolutionModeSelect || input.SourceEvidence().Source.Path != "payload.account_id" {
+		t.Fatalf("connection-owned resolution: %#v %t %v", input, found, err)
+	}
 	if got, want := connect.Event, "account.ready"; got != want {
 		t.Fatalf("connect event = %q, want %q", got, want)
 	}

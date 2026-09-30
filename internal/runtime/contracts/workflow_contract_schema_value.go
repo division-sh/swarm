@@ -9,6 +9,7 @@ import (
 )
 
 var retiredSchemaFields = map[string]string{
+	"mode":             "omit mode; instance: <field> declares a template, otherwise the flow is static",
 	"initial_state":    "declare stages with initial: true",
 	"states":           "declare stages; use stages: [] for stateless flows",
 	"terminal_states":  "declare stages with terminal: true",
@@ -30,11 +31,8 @@ func projectFlowSchemaValue(root yamlsource.Value) (FlowSchemaDocument, error) {
 	if err := schemaValueTexts(fields, map[string]*string{"name": &out.Name}, false); err != nil {
 		return out, err
 	}
-	if err := schemaValueTexts(fields, map[string]*string{"mode": &out.Mode, "activation": &out.Activation}, true); err != nil {
+	if err := schemaValueTexts(fields, map[string]*string{"activation": &out.Activation}, true); err != nil {
 		return out, err
-	}
-	if out.Mode != "" && out.Mode != FlowModeStatic && out.Mode != FlowModeTemplate && out.Mode != FlowModeSingleton {
-		return out, nodeValueError(fields["mode"], fmt.Errorf("mode must be static, template or singleton"))
 	}
 	if out.Activation != "" && out.Activation != FlowActivationStanding {
 		return out, nodeValueError(fields["activation"], fmt.Errorf("activation must be standing"))
@@ -42,7 +40,7 @@ func projectFlowSchemaValue(root yamlsource.Value) (FlowSchemaDocument, error) {
 	for _, name := range sortedContractKeys(fields) {
 		value := fields[name]
 		switch name {
-		case "name", "mode", "activation":
+		case "name", "activation":
 			continue
 		case "instance":
 			var text string
@@ -93,6 +91,12 @@ func projectFlowSchemaValue(root yamlsource.Value) (FlowSchemaDocument, error) {
 }
 
 func deriveSchemaProvenance(out *FlowSchemaDocument) {
+	out.admissionProvenance["mode"] = EffectiveValueProvenance{Origin: EffectiveValueOriginDerived, RuleID: "flow.shape_from_instance", InputPaths: []string{"instance"}}
+	if out.Instance.Empty() {
+		fact := out.admissionProvenance["mode"]
+		fact.SourcePresence = "missing"
+		out.admissionProvenance["mode"] = fact
+	}
 	for _, direction := range []string{"inputs", "outputs"} {
 		count := len(out.Pins.Inputs.EventPins)
 		if direction == "outputs" {

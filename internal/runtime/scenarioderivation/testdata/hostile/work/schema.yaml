@@ -1,5 +1,4 @@
 name: work
-mode: static
 stages:
   ready: {initial: true}
 pins:

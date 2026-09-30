@@ -1,5 +1,4 @@
 name: worker-flow
-mode: template
 instance: worker_id
 stages:
   idle: {initial: true}
@@ -16,7 +15,6 @@ pins:
   inputs:
     events:
       - event: flow.spawned
-        resolution: {mode: create}
         initialize:
           max_retries: payload.config.max_retries
           timeout_ms: payload.config.timeout_ms

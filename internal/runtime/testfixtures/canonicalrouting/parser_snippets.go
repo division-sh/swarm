@@ -2,6 +2,42 @@ package canonicalrouting
 
 import "testing"
 
+type ConnectionAdmissionCase struct {
+	Name      string
+	Source    string
+	Mode      string
+	WantError string
+}
+
+// ConnectionAdmissionCases bounds parser proof to one document, never a bundle.
+func ConnectionAdmissionCases() []ConnectionAdmissionCase {
+	var out []ConnectionAdmissionCase
+	for _, mode := range []string{"create", "select", "select-or-create"} {
+		out = append(out,
+			ConnectionAdmissionCase{Name: "edge/" + mode, Source: "connect: [{event: work.requested, from: ., to: worker, resolution: " + mode + "}]\n", Mode: mode},
+			ConnectionAdmissionCase{Name: "retired-pin/" + mode, Source: "pins: {inputs: {events: [{event: work.requested, resolution: {mode: " + mode + "}}]}}\n", WantError: "each connect row"},
+		)
+	}
+	for _, choice := range []string{
+		"resolution: null", "resolution: ''", "resolution: {}", "resolution: {mode: create}",
+		"resolution: fan-in", "resolution: reply", "resolution: fan-out", "resolution: unknown",
+		"key_from: payload.case_id", "resolution: select, key_from: generated.uuid",
+		"resolution: create, key_from: null", "resolution: create, key_from: ''",
+		"resolution: create, key_from: payload.case.id", "resolution: create, arbitrary: true",
+	} {
+		out = append(out, ConnectionAdmissionCase{Name: choice, Source: "connect: [{event: work.requested, from: ., to: worker, " + choice + "}]\n", WantError: "*"})
+	}
+	for name, source := range map[string]string{
+		"scalar":     "work.requested",
+		"fan-in":     "{event: work.requested, resolution: {mode: fan-in, aggregation: stream, singleton: portfolio}}",
+		"reply":      "{event: work.requested, resolution: {mode: reply, replies_to: work.sent}}",
+		"initialize": "{event: work.requested, initialize: {priority: payload.priority}}",
+	} {
+		out = append(out, ConnectionAdmissionCase{Name: "retained/" + name, Source: "pins: {inputs: {events: [" + source + "]}}\n"})
+	}
+	return out
+}
+
 // UnsupportedResolutionSnippet identifies one closed parser-only failure shape.
 type UnsupportedResolutionSnippet string
 
@@ -115,7 +151,7 @@ func W2EmptyResolutionParserSnippet(t testing.TB) ParserSnippet {
 
 func ReceiverInitializeParserSnippet(t testing.TB) ParserSnippet {
 	t.Helper()
-	return NewParserSnippet(t, "events:\n  - event: work.requested\n    resolution: {mode: create}\n    initialize: {count: payload.settings.count}\n")
+	return NewParserSnippet(t, "events:\n  - event: work.requested\n    initialize: {count: payload.settings.count}\n")
 }
 
 func W2MappingKeyParserSnippet(t testing.TB, id W2MappingKeySnippet) ParserSnippet {
@@ -156,20 +192,16 @@ func InputPinResolutionModesSnippet(t testing.TB) ParserSnippet {
 	t.Helper()
 	return NewParserSnippet(t, `
 name: resolution-pins
+connect:
+  - {event: validation.requested, from: ., to: worker, resolution: create, key_from: generated.uuid}
+  - {event: account.selected, from: ., to: worker, resolution: select}
+  - {event: account.requested, from: ., to: worker, resolution: select-or-create, key_from: payload.external_account_id}
 pins:
   inputs:
     events:
-      - event: validation.requested
-        resolution:
-          mode: create
-          from: generated.uuid
-      - event: account.selected
-        resolution:
-          mode: select
-      - event: account.requested
-        resolution:
-          mode: select-or-create
-          from: payload.external_account_id
+      - validation.requested
+      - account.selected
+      - account.requested
       - event: report.ready
         resolution:
           mode: fan-in
@@ -232,7 +264,6 @@ pins:
 	case RetiredInstanceKeyCarry:
 		source = `
 name: retired-instance-key-source
-mode: template
 instance: work_id
 pins:
   inputs:

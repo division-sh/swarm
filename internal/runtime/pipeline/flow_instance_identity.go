@@ -24,7 +24,7 @@ func workflowInstanceRouteForExecution(source semanticview.Source, flowID, expli
 	instancePath := strings.Trim(strings.TrimSpace(explicitPath), "/")
 	expectedScope := runtimeflowidentity.ScopeKey(source, flowID)
 	if instancePath == "" && source != nil {
-		if schema, ok := source.FlowSchemaByID(flowID); ok && !strings.EqualFold(strings.TrimSpace(schema.Mode), "template") && flowID != strings.TrimSpace(semanticview.RootExecutionFlowID(source)) {
+		if schema, ok := source.FlowSchemaByID(flowID); ok && !strings.EqualFold(strings.TrimSpace(schema.EffectiveMode()), "template") && flowID != strings.TrimSpace(semanticview.RootExecutionFlowID(source)) {
 			instancePath = expectedScope
 		}
 	}

@@ -8,4 +8,3 @@ pins:
   outputs:
     events:
       - work.completed
-mode: static

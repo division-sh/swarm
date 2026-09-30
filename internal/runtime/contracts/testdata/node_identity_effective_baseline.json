@@ -8,16 +8,20 @@
         "Event": "inbound.telegram.text_message",
         "From": ".",
         "To": "telegram-chat",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 3,
+        "KeyFrom": ""
       },
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 15,
+        "SourceLine": 16,
         "Event": "inbound.telegram.text_message",
         "From": "telegram-ingress",
         "To": "telegram-chat",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 3,
+        "KeyFrom": ""
       }
     ],
     "handlers": {
@@ -265,7 +269,9 @@
         "Event": "operating.report.triggered",
         "From": ".",
         "To": "ingress",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 0,
+        "KeyFrom": ""
       },
       {
         "OwnerFlowPath": ".",
@@ -274,7 +280,9 @@
         "Event": "portfolio.setup",
         "From": ".",
         "To": "portfolio",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 0,
+        "KeyFrom": ""
       },
       {
         "OwnerFlowPath": ".",
@@ -283,16 +291,20 @@
         "Event": "operating.report.requested",
         "From": "ingress",
         "To": "operating",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 1,
+        "KeyFrom": "event.id"
       },
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 17,
+        "SourceLine": 19,
         "Event": "operating.reported",
         "From": "operating",
         "To": "portfolio",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 0,
+        "KeyFrom": ""
       }
     ],
     "handlers": {
@@ -1928,7 +1940,9 @@
         "Event": "operating.report.triggered",
         "From": ".",
         "To": "ingress",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 0,
+        "KeyFrom": ""
       },
       {
         "OwnerFlowPath": ".",
@@ -1937,16 +1951,20 @@
         "Event": "operating.report.requested",
         "From": "ingress",
         "To": "operating",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 1,
+        "KeyFrom": "event.id"
       },
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 14,
+        "SourceLine": 16,
         "Event": "operating.reported",
         "From": "operating",
         "To": "portfolio",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 0,
+        "KeyFrom": ""
       }
     ],
     "handlers": {
@@ -3194,7 +3212,9 @@
         "Event": "portfolio.opened",
         "From": ".",
         "To": "portfolio",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 0,
+        "KeyFrom": ""
       },
       {
         "OwnerFlowPath": ".",
@@ -3203,7 +3223,9 @@
         "Event": "portfolio.account.register.requested",
         "From": ".",
         "To": "portfolio",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 0,
+        "KeyFrom": ""
       },
       {
         "OwnerFlowPath": ".",
@@ -3212,7 +3234,9 @@
         "Event": "portfolio.accounts.register.requested",
         "From": ".",
         "To": "portfolio",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 0,
+        "KeyFrom": ""
       },
       {
         "OwnerFlowPath": ".",
@@ -3221,7 +3245,9 @@
         "Event": "portfolio.membership.seeded",
         "From": ".",
         "To": "portfolio",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 0,
+        "KeyFrom": ""
       },
       {
         "OwnerFlowPath": ".",
@@ -3230,7 +3256,9 @@
         "Event": "portfolio.notify.requested",
         "From": ".",
         "To": "portfolio",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 0,
+        "KeyFrom": ""
       },
       {
         "OwnerFlowPath": ".",
@@ -3239,16 +3267,20 @@
         "Event": "account.registered",
         "From": "portfolio",
         "To": "account",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 3,
+        "KeyFrom": ""
       },
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 36,
+        "SourceLine": 37,
         "Event": "account.notify.requested",
         "From": "portfolio",
         "To": "account",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 2,
+        "KeyFrom": ""
       }
     ],
     "handlers": {
@@ -5317,7 +5349,9 @@
         "Event": "work.requested",
         "From": ".",
         "To": "producer",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 0,
+        "KeyFrom": ""
       },
       {
         "OwnerFlowPath": ".",
@@ -5326,7 +5360,9 @@
         "Event": "work.ready",
         "From": "producer",
         "To": "consumer",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 0,
+        "KeyFrom": ""
       }
     ],
     "handlers": {
@@ -6162,7 +6198,9 @@
         "Event": "validation.triggered",
         "From": ".",
         "To": "producer",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 0,
+        "KeyFrom": ""
       },
       {
         "OwnerFlowPath": ".",
@@ -6171,16 +6209,20 @@
         "Event": "validation.requested",
         "From": "producer",
         "To": "validator",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 1,
+        "KeyFrom": "generated.uuid"
       },
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 14,
+        "SourceLine": 16,
         "Event": "validation.started",
         "From": "validator",
         "To": "producer",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 0,
+        "KeyFrom": ""
       }
     ],
     "handlers": {
@@ -7081,7 +7123,9 @@
         "Event": "requester.setup.requested",
         "From": ".",
         "To": "initiator",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 0,
+        "KeyFrom": ""
       },
       {
         "OwnerFlowPath": ".",
@@ -7090,7 +7134,9 @@
         "Event": "request.submitted",
         "From": ".",
         "To": "initiator",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 0,
+        "KeyFrom": ""
       },
       {
         "OwnerFlowPath": ".",
@@ -7099,34 +7145,42 @@
         "Event": "requester.setup",
         "From": "initiator",
         "To": "requester",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 3,
+        "KeyFrom": ""
       },
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 17,
+        "SourceLine": 18,
         "Event": "requester.requested",
         "From": "initiator",
         "To": "requester",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 2,
+        "KeyFrom": ""
       },
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 20,
+        "SourceLine": 22,
         "Event": "provider.requested",
         "From": "requester",
         "To": "provider",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 0,
+        "KeyFrom": ""
       },
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 23,
+        "SourceLine": 25,
         "Event": "provider.replied",
         "From": "provider",
         "To": "requester",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 0,
+        "KeyFrom": ""
       }
     ],
     "handlers": {
@@ -8311,7 +8365,9 @@
         "Event": "account.setup.requested",
         "From": ".",
         "To": "producer",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 0,
+        "KeyFrom": ""
       },
       {
         "OwnerFlowPath": ".",
@@ -8320,7 +8376,9 @@
         "Event": "account.work.requested",
         "From": ".",
         "To": "producer",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 0,
+        "KeyFrom": ""
       },
       {
         "OwnerFlowPath": ".",
@@ -8329,16 +8387,20 @@
         "Event": "account.setup",
         "From": "producer",
         "To": "account",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 3,
+        "KeyFrom": ""
       },
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 17,
+        "SourceLine": 18,
         "Event": "account.ready",
         "From": "producer",
         "To": "account",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 2,
+        "KeyFrom": ""
       }
     ],
     "handlers": {
@@ -9087,7 +9149,9 @@
         "Event": "account.requested",
         "From": ".",
         "To": "producer",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 0,
+        "KeyFrom": ""
       },
       {
         "OwnerFlowPath": ".",
@@ -9096,7 +9160,9 @@
         "Event": "account.ready",
         "From": "producer",
         "To": "account",
-        "Rename": ""
+        "Rename": "",
+        "Resolution": 3,
+        "KeyFrom": ""
       }
     ],
     "handlers": {

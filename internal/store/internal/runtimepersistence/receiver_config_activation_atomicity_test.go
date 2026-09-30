@@ -51,7 +51,6 @@ func newReceiverConfigActivationFixtureWithOptions(t *testing.T, backend string,
 	files := map[string]string{
 		"schema.yaml": "name: receiver-config-atomicity\n",
 		"review/schema.yaml": `name: review
-mode: template
 instance: request_id
 instance_variables:
   variables:

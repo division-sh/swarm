@@ -426,7 +426,7 @@ func TestProviderTriggerInputWithoutConnectionDoesNotAcquireCrossFlowPlan(t *tes
 	if !ok {
 		t.Fatal("fixture coordinator flow is unavailable")
 	}
-	flow.Schema.Mode = runtimecontracts.FlowModeStatic
+	flow.Schema.Instance = runtimecontracts.TemplateInstanceField{}
 	wrapped, err := SourceWithProviderTriggerEvents(source, catalog)
 	if err != nil {
 		t.Fatalf("SourceWithProviderTriggerEvents: %v", err)
@@ -548,10 +548,6 @@ func TestW2ProviderTriggerImportBindsIntrinsicProjectionAfterProducerSchema(t *t
 			if _, present := basePin.ReceiverEventSchema(); present {
 				t.Fatal("schema-only provider pin derived receiver schema before producer binding")
 			}
-			projection, present := basePin.Projection()
-			if !present || projection.Field != "chat_id" {
-				t.Fatalf("staged intrinsic projection = (%#v, %t)", projection, present)
-			}
 
 			wrapped, err := SourceWithProviderTriggerEvents(source, catalog)
 			if err != nil {
@@ -562,7 +558,10 @@ func TestW2ProviderTriggerImportBindsIntrinsicProjectionAfterProducerSchema(t *t
 				t.Fatal("bound schema-only provider input pin is unavailable")
 			}
 			producer, producerOK := bound.ProducerEventSchema()
-			receiver, receiverOK := bound.ReceiverEventSchema()
+			receiver, receiverOK, receiverErr := wrapped.ConnectionInputs().ReceiverEventSchema(flowID, bound.EventType())
+			if receiverErr != nil {
+				t.Fatal(receiverErr)
+			}
 			if !producerOK || !receiverOK || producer.Classification() != runtimecontracts.CompiledEventSchemaImported {
 				t.Fatalf("bound schema roles = producer:(%#v,%t) receiver:(%#v,%t)", producer, producerOK, receiver, receiverOK)
 			}
@@ -743,14 +742,12 @@ func schemaOnlyTelegramDeclarationSource(t testing.TB) (semanticview.Source, *pr
 	}
 	flow.Schema.Ingress = nil
 	flow.Schema.Activation = ""
-	flow.Schema.Mode = runtimecontracts.FlowModeTemplate
 	schema, exists := bundle.FlowSchemas["coordinator"]
 	if !exists {
 		t.Fatal("fixture coordinator schema missing")
 	}
 	schema.Ingress = nil
 	schema.Activation = ""
-	schema.Mode = runtimecontracts.FlowModeTemplate
 	bundle.FlowSchemas["coordinator"] = schema
 	setProviderTriggerImports(t, bundle, "coordinator", []runtimecontracts.ProviderTriggerEventImport{
 		{Provider: "telegram", Event: "inbound.telegram.text_message"},

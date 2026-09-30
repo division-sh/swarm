@@ -720,7 +720,6 @@ func writeDescribeScalarTemplateInstanceContracts(t testing.TB) string {
 	writeDescribeTestFile(t, filepath.Join(root, "schema.yaml"), "name: defaulted-template-policy\n")
 	writeDescribeTestFile(t, filepath.Join(root, "scoring", "schema.yaml"), `
 name: scoring
-mode: template
 instance: account_id
 `)
 	writeDescribeTestFile(t, filepath.Join(root, "scoring", "entities.yaml"), `

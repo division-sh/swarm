@@ -35,6 +35,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
@@ -67,7 +68,9 @@ func TestHandleEmitToolPreservesImportedAgentSemanticSource(t *testing.T) {
 		Paths: runtimecontracts.FlowContractPaths{
 			FlowPath: flowPath, AgentsFile: "/contracts/telegram-ingress/telegram-chat/agents.yaml",
 		},
-		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate},
+		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
+			InstanceField("instance_key"),
+		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			eventType: eventEntry,
 		},
@@ -83,6 +86,7 @@ func TestHandleEmitToolPreservesImportedAgentSemanticSource(t *testing.T) {
 			ByID: map[string]*runtimecontracts.FlowContractView{flowID: &root.Children[0]},
 		},
 	}
+	bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, flowID)
 	source := toolTestSourceWithDeclaredAgent(t, bundle, agentID, flowID)
 	declaration := semanticview.AgentDeclarations(source)
 	if len(declaration) != 1 {
@@ -301,7 +305,7 @@ func TestHandleEmitTool_PreservesPayloadForFlowScopedEmit(t *testing.T) {
 						FlowPath: "discovery",
 					},
 					Schema: runtimecontracts.FlowSchemaDocument{
-						Mode: runtimecontracts.FlowModeStatic,
+
 						Pins: runtimecontracts.FlowPins{},
 					},
 					Events: map[string]runtimecontracts.EventCatalogEntry{
@@ -456,7 +460,7 @@ func criteriaCitationEmitTestExecutor(t testing.TB) (*Executor, *publishBusCaptu
 func criteriaCitationEmitTestExecutorWithAgent(t testing.TB, agent runtimecontracts.AgentRegistryEntry) (*Executor, *publishBusCapture, models.AgentConfig) {
 	flow := runtimecontracts.FlowContractView{
 		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "validation"},
-		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic},
+		Schema: runtimecontracts.FlowSchemaDocument{},
 		Path:   "validation",
 		Policy: runtimecontracts.PolicyDocument{
 			Criteria: map[string]runtimecontracts.PolicyCriteriaSet{
@@ -506,7 +510,7 @@ func criteriaCitationEmitTestExecutorWithAgent(t testing.TB, agent runtimecontra
 	}
 	otherFlow := runtimecontracts.FlowContractView{
 		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "other-validation"},
-		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic},
+		Schema: runtimecontracts.FlowSchemaDocument{},
 		Path:   "other-validation",
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"cto-agent": {Role: "other-cto", Criteria: []string{"other_criteria"}},
@@ -601,14 +605,16 @@ func TestHandleEmitTool_PreservesAdmittedChildFlowOwnerAndExecutionMode(t *testi
 					Events: map[string]runtimecontracts.EventCatalogEntry{
 						"research.completed": {},
 					},
-					Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate},
-					Path:   "validation",
+					Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
+						InstanceField("instance_key"),
+					},
+					Path: "validation",
 				},
 			},
 		},
 	}
 	bundle.FlowTree.ByID["validation"].Events["research.completed"] = bundle.Events["research.completed"]
-	source := toolTestSourceWithDeclaredAgent(t, bundle, "business-research-agent", "validation", "research.completed")
+	source := toolTestSourceWithDeclaredAgent(t, semanticviewtest.WithInstanceDeclarations(t, bundle, "validation"), "business-research-agent", "validation", "research.completed")
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
@@ -677,7 +683,7 @@ func TestHandleEmitTool_DoesNotAdoptForeignInboundFlowOwner(t *testing.T) {
 					Events: map[string]runtimecontracts.EventCatalogEntry{
 						"research.completed": {},
 					},
-					Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic},
+					Schema: runtimecontracts.FlowSchemaDocument{},
 					Path:   "validation",
 				},
 			},
@@ -737,7 +743,7 @@ func TestHandleEmitTool_RejectsNestedStaticOutputWithOnlyParentAddress(t *testin
 						FlowPath: "root/discovery",
 					},
 					Schema: runtimecontracts.FlowSchemaDocument{
-						Mode: runtimecontracts.FlowModeStatic,
+
 						Pins: runtimecontracts.FlowPins{
 							Outputs: runtimecontracts.FlowOutputPins{
 								EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "vertical.discovered"}},
@@ -799,13 +805,12 @@ func TestHandleEmitTool_RejectsCompleteParentWithoutConsumer(t *testing.T) {
 		Paths: runtimecontracts.FlowContractPaths{
 			FlowPath: "analyzer-flow",
 		},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode: runtimecontracts.FlowModeTemplate,
-			Pins: runtimecontracts.FlowPins{
-				Outputs: runtimecontracts.FlowOutputPins{
-					EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "analysis.done"}},
-				},
+		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
+			InstanceField("instance_key"), Pins: runtimecontracts.FlowPins{
+			Outputs: runtimecontracts.FlowOutputPins{
+				EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "analysis.done"}},
 			},
+		},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"analysis.done": {},
@@ -820,7 +825,7 @@ func TestHandleEmitTool_RejectsCompleteParentWithoutConsumer(t *testing.T) {
 			"analyzer-flow": &analyzerFlow,
 		},
 	}
-	source := toolTestSourceWithDeclaredAgent(t, bundle, "analyzer", "analyzer-flow", "analysis.done")
+	source := toolTestSourceWithDeclaredAgent(t, semanticviewtest.WithInstanceDeclarations(t, bundle, "analyzer-flow"), "analyzer", "analyzer-flow", "analysis.done")
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
@@ -890,13 +895,12 @@ func TestHandleEmitTool_FailsClosedOnIncompleteStoredParentRoute(t *testing.T) {
 		Paths: runtimecontracts.FlowContractPaths{
 			FlowPath: "analyzer-flow",
 		},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode: runtimecontracts.FlowModeTemplate,
-			Pins: runtimecontracts.FlowPins{
-				Outputs: runtimecontracts.FlowOutputPins{
-					EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "analysis.done"}},
-				},
+		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
+			InstanceField("instance_key"), Pins: runtimecontracts.FlowPins{
+			Outputs: runtimecontracts.FlowOutputPins{
+				EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "analysis.done"}},
 			},
+		},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"analysis.done": {},
@@ -911,7 +915,7 @@ func TestHandleEmitTool_FailsClosedOnIncompleteStoredParentRoute(t *testing.T) {
 			"analyzer-flow": &analyzerFlow,
 		},
 	}
-	source := toolTestSourceWithDeclaredAgent(t, bundle, "analyzer", "analyzer-flow", "analysis.done")
+	source := toolTestSourceWithDeclaredAgent(t, semanticviewtest.WithInstanceDeclarations(t, bundle, "analyzer-flow"), "analyzer", "analyzer-flow", "analysis.done")
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
@@ -1044,7 +1048,7 @@ func staticChildPinOutputTestSource(t testing.TB) semanticview.Source {
 	analyzerFlow := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "root/analyzer-flow"},
 		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode: runtimecontracts.FlowModeStatic,
+
 			Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "analysis.done"}}}},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"analysis.done": {}},
@@ -1077,7 +1081,7 @@ func TestHandleEmitTool_RootStaticPinOutputStillRequiresTarget(t *testing.T) {
 			FlowPath: "analyzer-flow",
 		},
 		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode: runtimecontracts.FlowModeStatic,
+
 			Pins: runtimecontracts.FlowPins{
 				Outputs: runtimecontracts.FlowOutputPins{
 					EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "analysis.done"}},
@@ -1208,7 +1212,7 @@ func TestHandleEmitTool_RoutesTypedRootOutputToRootNodeConsumer(t *testing.T) {
 }
 
 func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNode(t *testing.T) {
-	bundle := emitRoutePlanTestBundle([]emitRoutePlanTestFlow{{
+	bundle := emitRoutePlanTestBundle(t, []emitRoutePlanTestFlow{{
 		id:   "review",
 		mode: runtimecontracts.FlowModeTemplate,
 		inputs: []runtimecontracts.FlowInputEventPin{{
@@ -1647,7 +1651,7 @@ func TestHandleEmitTool_ResolvesDuplicateLeafScopedSchemasThroughActor(t *testin
 	reviewFlow := runtimecontracts.FlowContractView{
 		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "review"},
 		Path:   "review",
-		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic},
+		Schema: runtimecontracts.FlowSchemaDocument{},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"task.requested": {
 				Payload: runtimecontracts.EventPayloadSpec{
@@ -1662,7 +1666,7 @@ func TestHandleEmitTool_ResolvesDuplicateLeafScopedSchemasThroughActor(t *testin
 	validationFlow := runtimecontracts.FlowContractView{
 		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "validation"},
 		Path:   "validation",
-		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic},
+		Schema: runtimecontracts.FlowSchemaDocument{},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"task.requested": {
 				Payload: runtimecontracts.EventPayloadSpec{
@@ -1907,7 +1911,7 @@ func emitRoutePlanRootReceiverSource(t *testing.T) semanticview.Source {
 
 func emitRoutePlanSource(t testing.TB, connects []runtimecontracts.FlowConnect) semanticview.Source {
 	t.Helper()
-	bundle := emitRoutePlanTestBundle([]emitRoutePlanTestFlow{
+	bundle := emitRoutePlanTestBundle(t, []emitRoutePlanTestFlow{
 		{
 			id:   "producer",
 			mode: "static",
@@ -1931,7 +1935,8 @@ func emitRoutePlanSource(t testing.TB, connects []runtimecontracts.FlowConnect) 
 	return toolTestSourceWithDeclaredAgent(t, bundle, "producer-agent", "producer", "deploy.done")
 }
 
-func emitRoutePlanTestBundle(flows []emitRoutePlanTestFlow, connects []runtimecontracts.FlowConnect) *runtimecontracts.WorkflowContractBundle {
+func emitRoutePlanTestBundle(t testing.TB, flows []emitRoutePlanTestFlow, connects []runtimecontracts.FlowConnect) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
 	connects = append([]runtimecontracts.FlowConnect(nil), connects...)
 	for i := range connects {
 		connects[i].SourceFile = "schema.yaml"
@@ -1941,13 +1946,17 @@ func emitRoutePlanTestBundle(flows []emitRoutePlanTestFlow, connects []runtimeco
 	byID := make(map[string]*runtimecontracts.FlowContractView, len(flows))
 	flowSchemas := make(map[string]runtimecontracts.FlowSchemaDocument, len(flows))
 	eventCatalog := map[string]runtimecontracts.EventCatalogEntry{}
+	var templates []string
 	for _, flow := range flows {
 		schema := runtimecontracts.FlowSchemaDocument{
-			Mode: flow.mode,
 			Pins: runtimecontracts.FlowPins{
 				Inputs:  runtimecontracts.FlowInputPins{EventPins: flow.inputs},
 				Outputs: runtimecontracts.FlowOutputPins{EventPins: flow.outputs},
 			},
+		}
+		if flow.mode == runtimecontracts.FlowModeTemplate {
+			schema.Instance = semanticviewtest.InstanceField("instance_key")
+			templates = append(templates, flow.id)
 		}
 		flowEvents := map[string]runtimecontracts.EventCatalogEntry{}
 		for _, eventType := range append(emitRoutePlanInputEvents(flow.inputs), emitRoutePlanOutputEvents(flow.outputs)...) {
@@ -1974,7 +1983,7 @@ func emitRoutePlanTestBundle(flows []emitRoutePlanTestFlow, connects []runtimeco
 	for index := range root.Children {
 		byID[root.Children[index].Paths.FlowPath] = &root.Children[index]
 	}
-	return &runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		Events: eventCatalog,
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
@@ -1982,6 +1991,10 @@ func emitRoutePlanTestBundle(flows []emitRoutePlanTestFlow, connects []runtimeco
 		},
 		FlowSchemas: flowSchemas,
 	}
+	if len(templates) > 0 {
+		return semanticviewtest.WithInstanceDeclarations(t, bundle, templates...)
+	}
+	return bundle
 }
 
 func emitRoutePlanInputEvents(pins []runtimecontracts.FlowInputEventPin) []string {

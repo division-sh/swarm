@@ -1,5 +1,4 @@
 name: worker
-mode: template
 instance: worker_id
 stages:
   ready: {initial: true}
@@ -13,10 +12,8 @@ pins:
   inputs:
     events:
       - event: spawn.done
-        resolution: {mode: create}
         initialize:
           name: payload.name
           priority: payload.priority
           owner: payload.owner
-      - event: task.assign
-        resolution: {mode: select}
+      - task.assign

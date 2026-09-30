@@ -1427,7 +1427,7 @@ func (pc *PipelineCoordinator) prepareTerminalFlowInstanceDeactivation(ctx conte
 	source := pc.SemanticSource()
 	if source != nil {
 		schema, ok := source.FlowSchemaByID(templateID)
-		if !ok || !strings.EqualFold(strings.TrimSpace(schema.Mode), "template") {
+		if !ok || !strings.EqualFold(strings.TrimSpace(schema.EffectiveMode()), "template") {
 			return nil, nil
 		}
 	}

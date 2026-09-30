@@ -9,4 +9,3 @@ pins:
     events:
       - event: job.alpha_done
         sink: harness
-mode: static

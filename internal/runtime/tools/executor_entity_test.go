@@ -441,7 +441,6 @@ func TestRoleScopedEntityTools_EqualityUsesFinalCandidateValidation(t *testing.T
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"validation": {
 			SchemaYAML: `name: validation
-mode: static
 stages:
   queued: {initial: true}
   closed: {terminal: true}
@@ -1811,7 +1810,6 @@ root_subject:
 `)
 	writeEntityToolFixtureFile(t, filepath.Join(root, "agents.yaml"), entityToolAgentYAML(actor))
 	writeEntityToolFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `name: child
-mode: static
 stages:
   active: {initial: true}
   done: {terminal: true}
@@ -2880,7 +2878,6 @@ func loadWave1EntityToolBundle(t *testing.T, actor models.AgentConfig, flowID, e
 		writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "types.yaml"), typesYAML)
 	}
 	writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), fmt.Sprintf(`name: %s
-mode: static
 stages:
   queued: {initial: true}
   marginal_review: {}
@@ -2905,7 +2902,6 @@ func loadRoleScopedEntityToolBundle(t *testing.T, actor models.AgentConfig) *run
 		"validation": {
 			SchemaYAML: `
 name: validation
-mode: static
 stages:
   queued: {initial: true}
   ready: {}
@@ -3029,7 +3025,6 @@ func loadWave1EntityToolMultiFlowBundle(t *testing.T, flows map[string]entityToo
 		schemaYAML := strings.TrimSpace(fixture.SchemaYAML)
 		if schemaYAML == "" {
 			schemaYAML = fmt.Sprintf(`name: %s
-mode: static
 stages:
   queued: {initial: true}
   active: {}

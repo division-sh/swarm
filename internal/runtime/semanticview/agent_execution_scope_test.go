@@ -21,7 +21,7 @@ func TestResolveAgentExecutionSemanticScopeUsesFilesystemFlowOwnerForEveryMode(t
 	}{
 		{name: "root", flowPath: ".", mode: runtimecontracts.FlowModeStatic},
 		{name: "static", flowPath: "support", mode: runtimecontracts.FlowModeStatic, instanceID: "support", instancePath: "support"},
-		{name: "singleton", flowPath: "services/ingress", mode: runtimecontracts.FlowModeSingleton, instanceID: "ingress", instancePath: "services/ingress"},
+		{name: "singleton", flowPath: "services/ingress", mode: runtimecontracts.FlowModeStatic, instanceID: "ingress", instancePath: "services/ingress"},
 		{name: "template", flowPath: "telegram/telegram-chat", mode: runtimecontracts.FlowModeTemplate, instanceID: "chat-1", instancePath: "telegram/telegram-chat/chat-1"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -120,10 +120,17 @@ func executionScopeFixture(t *testing.T, flowPath, mode, instanceID, instancePat
 	entry := runtimecontracts.EffectiveAgentRegistryEntry("worker", runtimecontracts.AgentRegistryEntry{ID: "worker", Role: "worker"})
 	view := runtimecontracts.FlowContractView{
 		Path:      flowPath,
-		Schema:    runtimecontracts.FlowSchemaDocument{Mode: mode},
+		Schema:    runtimecontracts.FlowSchemaDocument{},
 		Paths:     runtimecontracts.FlowContractPaths{FlowPath: flowPath, AgentsFile: strings.TrimPrefix(flowPath+"/agents.yaml", "./")},
 		Agents:    map[string]runtimecontracts.AgentRegistryEntry{"worker": entry},
 		AgentURIs: map[string]string{"worker": ownerURI},
+	}
+	if mode == runtimecontracts.FlowModeTemplate {
+		field, err := runtimecontracts.ParseTemplateInstanceField("instance_id")
+		if err != nil {
+			t.Fatal(err)
+		}
+		view.Schema.Instance = field
 	}
 	root := &view
 	if flowPath != "." {

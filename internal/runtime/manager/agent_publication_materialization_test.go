@@ -19,12 +19,16 @@ func TestMaterializedAgentEmitPermissionRetainsDeclarationOnEveryScope(t *testin
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "events.yaml"), "result.done:\n  owned: text\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "agents.yaml"), "worker:\n  role: worker\n  intent: {inline: Emit the root result.}\n  emit_events: [result.done]\n")
 	for _, flow := range []struct{ id, mode string }{{"left", "singleton"}, {"right", "template"}, {"nested/deeper", "template"}} {
-		writeFlowActivationFixtureFile(t, filepath.Join(root, flow.id, "schema.yaml"), fmt.Sprintf("mode: %s\nstages:\n  active: {initial: true}\n", flow.mode))
-		writeFlowActivationFixtureFile(t, filepath.Join(root, flow.id, "entities.yaml"), "item: {}\n")
+		shape := ""
+		if flow.mode == "template" {
+			shape = "instance: instance_key\n"
+		}
+		writeFlowActivationFixtureFile(t, filepath.Join(root, flow.id, "schema.yaml"), fmt.Sprintf("%sstages:\n  active: {initial: true}\n", shape))
+		writeFlowActivationFixtureFile(t, filepath.Join(root, flow.id, "entities.yaml"), "item:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n")
 		writeFlowActivationFixtureFile(t, filepath.Join(root, flow.id, "events.yaml"), "result.done:\n  owned: text\n")
 		writeFlowActivationFixtureFile(t, filepath.Join(root, flow.id, "agents.yaml"), "worker:\n  role: worker\n  intent: {inline: Emit this flow's result.}\n  emit_events: [result.done]\n")
 	}
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "nested", "schema.yaml"), "mode: singleton\nstages: []\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "nested", "schema.yaml"), "stages: []\n")
 	repo := runtimepipeline.WorkflowRepoRoot()
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 	if err != nil {
@@ -37,7 +41,7 @@ func TestMaterializedAgentEmitPermissionRetainsDeclarationOnEveryScope(t *testin
 		t.Fatal(err)
 	}
 	for _, flow := range []string{"right", "nested/deeper"} {
-		materialized, err := TemplateFlowAgentMaterializationRecords(managerIdentityTestRunID, source, flow, flow+"/instance-1", uuid.NewString(), map[string]any{})
+		materialized, err := TemplateFlowAgentMaterializationRecords(managerIdentityTestRunID, source, flow, flow+"/instance-1", uuid.NewString(), map[string]any{"instance_key": "instance-1"})
 		if err != nil {
 			t.Fatal(err)
 		}

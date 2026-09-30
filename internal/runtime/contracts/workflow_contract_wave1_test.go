@@ -187,7 +187,6 @@ root.ready:
   entity_id: uuid
 `)
 	writeFixtureFile(t, root+"/scoring/schema.yaml", `name: scoring
-mode: static
 stages:
   discovered: {initial: true}
   shortlisted: {terminal: true}
@@ -292,8 +291,8 @@ func TestWorkflowContractBundleResolveFlowTemplateInstance_UsesScalarIdentity(t 
 	bundle := &WorkflowContractBundle{
 		FlowSchemas: map[string]FlowSchemaDocument{
 			"spec_repo": {
-				Name:     "spec_repo",
-				Mode:     "template",
+				Name: "spec_repo",
+
 				Instance: field,
 			},
 		},
@@ -331,7 +330,6 @@ func TestWorkflowContractBundleResolveFlowTemplateInstance_UsesScalarIdentity(t 
 func TestWorkflowContractBundleResolveFlowTemplateInstance_RejectsInvalidDeclarations(t *testing.T) {
 	missingField := mustTemplateInstanceField(t, "account_id")
 	nonScalarField := mustTemplateInstanceField(t, "tags")
-	staticField := mustTemplateInstanceField(t, "tenant_id")
 	tests := []struct {
 		name     string
 		schema   FlowSchemaDocument
@@ -341,7 +339,7 @@ func TestWorkflowContractBundleResolveFlowTemplateInstance_RejectsInvalidDeclara
 		{
 			name: "missing field",
 			schema: FlowSchemaDocument{
-				Mode:     "template",
+
 				Instance: missingField,
 			},
 			entities: EntityContractsDocument{"tenant": {Fields: map[string]EntityFieldDecl{"tenant_id": {Type: "text"}}}},
@@ -350,20 +348,17 @@ func TestWorkflowContractBundleResolveFlowTemplateInstance_RejectsInvalidDeclara
 		{
 			name: "non scalar key field",
 			schema: FlowSchemaDocument{
-				Mode:     "template",
+
 				Instance: nonScalarField,
 			},
 			entities: EntityContractsDocument{"tenant": {Fields: map[string]EntityFieldDecl{"tags": {Type: "[text]"}}}},
 			wantErr:  "scalar or enum",
 		},
 		{
-			name: "non template",
-			schema: FlowSchemaDocument{
-				Mode:     "static",
-				Instance: staticField,
-			},
+			name:     "static without instance key",
+			schema:   FlowSchemaDocument{},
 			entities: EntityContractsDocument{"tenant": {Fields: map[string]EntityFieldDecl{"tenant_id": {Type: "text"}}}},
-			wantErr:  "not mode: template",
+			wantErr:  "must declare instance: <field>",
 		},
 	}
 
@@ -394,7 +389,6 @@ func TestWorkflowContractBundleResolveFlowSingletonCoordinator_UsesPrimaryEntity
 		FlowSchemas: map[string]FlowSchemaDocument{
 			"coordinator": {
 				Name: "coordinator",
-				Mode: FlowModeSingleton,
 			},
 		},
 		flowEntities: map[string]EntityContractsDocument{
@@ -453,7 +447,7 @@ func TestWorkflowContractBundleResolveFlowSingleton_AllowsEmptyAndScalarOnlyPrim
 		{"unused": {Type: "map[text]text"}},
 	} {
 		bundle := &WorkflowContractBundle{
-			FlowSchemas: map[string]FlowSchemaDocument{"service": {Mode: FlowModeSingleton}},
+			FlowSchemas: map[string]FlowSchemaDocument{"service": {}},
 			flowEntities: map[string]EntityContractsDocument{
 				"service": {"service_state": {Fields: fields}},
 			},
@@ -483,51 +477,41 @@ func TestWorkflowContractBundleResolveFlowSingletonCoordinator_RejectsInvalidDec
 		wantErr  string
 	}{
 		{
-			name: "bare static is not singleton",
-			schema: FlowSchemaDocument{
-				Mode: FlowModeStatic,
-			},
+			name:     "static contained type must resolve",
+			schema:   FlowSchemaDocument{},
 			entities: EntityContractsDocument{"coordinator_state": {Fields: map[string]EntityFieldDecl{"verticals": {Type: "map[text]VerticalState"}}}},
-			wantErr:  "not mode: singleton",
+			wantErr:  "VerticalState",
 		},
 		{
 			name: "template instance mix",
 			schema: FlowSchemaDocument{
-				Mode:     FlowModeSingleton,
+
 				Instance: instanceField,
 			},
 			entities: EntityContractsDocument{"coordinator_state": {Fields: map[string]EntityFieldDecl{"verticals": {Type: "map[text]VerticalState"}}}},
-			wantErr:  "must not declare template instance",
+			wantErr:  "has a template instance key",
 		},
 		{
-			name: "agent memory only no contained state",
-			schema: FlowSchemaDocument{
-				Mode: FlowModeSingleton,
-			},
+			name:     "agent memory only no contained state",
+			schema:   FlowSchemaDocument{},
 			entities: EntityContractsDocument{"coordinator_state": {Fields: map[string]EntityFieldDecl{"status": {Type: "text"}}}},
 			wantErr:  "agent conversation memory is not coordinator state authority",
 		},
 		{
-			name: "unresolved map value type",
-			schema: FlowSchemaDocument{
-				Mode: FlowModeSingleton,
-			},
+			name:     "unresolved map value type",
+			schema:   FlowSchemaDocument{},
 			entities: EntityContractsDocument{"coordinator_state": {Fields: map[string]EntityFieldDecl{"verticals": {Type: "map[text]MissingType"}}}},
 			wantErr:  "MissingType",
 		},
 		{
-			name: "unresolved list item type",
-			schema: FlowSchemaDocument{
-				Mode: FlowModeSingleton,
-			},
+			name:     "unresolved list item type",
+			schema:   FlowSchemaDocument{},
 			entities: EntityContractsDocument{"coordinator_state": {Fields: map[string]EntityFieldDecl{"jobs": {Type: "[MissingType]"}}}},
 			wantErr:  "MissingType",
 		},
 		{
-			name: "multiple entity contracts",
-			schema: FlowSchemaDocument{
-				Mode: FlowModeSingleton,
-			},
+			name:   "multiple entity contracts",
+			schema: FlowSchemaDocument{},
 			entities: EntityContractsDocument{
 				"coordinator_state": {Fields: map[string]EntityFieldDecl{"verticals": {Type: "map[text]VerticalState"}}},
 				"legacy_state":      {Fields: map[string]EntityFieldDecl{"status": {Type: "text"}}},

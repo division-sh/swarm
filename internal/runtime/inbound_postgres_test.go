@@ -52,7 +52,7 @@ func newBoundedInboundTestEventBus(t *testing.T, selected runtimebus.EventStore,
 	t.Helper()
 	bundle := loadRuntimeTempBundle(t, map[string]string{
 		"schema.yaml":                   "name: bounded-standing-connector\n",
-		"bounded_inbound/schema.yaml":   "name: bounded_inbound\nmode: static\nstages:\n  active: {initial: true}\n",
+		"bounded_inbound/schema.yaml":   "name: bounded_inbound\nstages:\n  active: {initial: true}\n",
 		"bounded_inbound/entities.yaml": "bounded_entity: {}\n",
 	})
 	opts.ContractBundle = semanticview.Wrap(bundle)

@@ -22,6 +22,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
@@ -156,7 +157,6 @@ func loadNestedPhysicalAgentRouteSource(t *testing.T) semanticview.Source {
 	flowRoot := filepath.Join(root, "parent", "child", "support")
 
 	write(filepath.Join(flowRoot, "schema.yaml"), `name: support
-mode: static
 stages:
   active: {initial: true}
 pins:
@@ -937,11 +937,10 @@ func TestRouteTableConcreteTemplateInstanceNodeSubscriberResolvesBeforeDeliveryP
 	operating := runtimecontracts.FlowContractView{
 		Path:  "operating",
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "operating"},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode: "template",
-			AutoEmitOnCreate: runtimecontracts.AutoEmitOnCreateContract{
-				Event: "opco.product_initialization_requested",
-			},
+		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
+			InstanceField("instance_key"), AutoEmitOnCreate: runtimecontracts.AutoEmitOnCreateContract{
+			Event: "opco.product_initialization_requested",
+		},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"opco.product_initialization_requested": {},
@@ -966,7 +965,7 @@ func TestRouteTableConcreteTemplateInstanceNodeSubscriberResolvesBeforeDeliveryP
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
 			"operating": {
-				Mode: "template",
+
 				AutoEmitOnCreate: runtimecontracts.AutoEmitOnCreateContract{
 					Event: "opco.product_initialization_requested",
 				},
@@ -1097,9 +1096,11 @@ func routeMaterializationNodeSource(flowID string, node runtimecontracts.SystemN
 		}
 	}
 	flow := runtimecontracts.FlowContractView{
-		Path:   flowID,
-		Paths:  runtimecontracts.FlowContractPaths{FlowPath: flowID},
-		Schema: runtimecontracts.FlowSchemaDocument{Mode: "template"},
+		Path:  flowID,
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: flowID},
+		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
+			InstanceField("instance_key"),
+		},
 		Events: eventsByName,
 		Nodes:  map[string]runtimecontracts.SystemNodeContract{"materialized-node": node},
 	}
@@ -1110,7 +1111,7 @@ func routeMaterializationNodeSource(flowID string, node runtimecontracts.SystemN
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{flowID: &root.Children[0]},
 		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{flowID: {Mode: "template"}},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{flowID: {}},
 	}
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 		panic(err)
@@ -1126,11 +1127,10 @@ func routeMaterializationConfigVarBundle() *runtimecontracts.WorkflowContractBun
 	operating := runtimecontracts.FlowContractView{
 		Path:  "operating",
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "operating"},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode: "template",
-			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "opco.product_initialization_requested"}}},
-			},
+		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
+			InstanceField("instance_key"), Pins: runtimecontracts.FlowPins{
+			Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "opco.product_initialization_requested"}}},
+		},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"opco.product_initialization_requested": {},
@@ -1160,7 +1160,7 @@ func routeMaterializationConfigVarBundle() *runtimecontracts.WorkflowContractBun
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
 			"operating": {
-				Mode: "template",
+
 				Pins: runtimecontracts.FlowPins{
 					Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "opco.product_initialization_requested"}}},
 				},
@@ -1631,8 +1631,8 @@ func writeRoutingFixtureFile(t testing.TB, root, relative, body string) {
 func TestDeriveRouteTable_NestedTemplateInstancesPersistSemanticScopeKey(t *testing.T) {
 	grandchild := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "grandchild"},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode: "template",
+		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
+			InstanceField("instance_key"),
 		},
 		Path: "child/grandchild",
 		Nodes: map[string]runtimecontracts.SystemNodeContract{

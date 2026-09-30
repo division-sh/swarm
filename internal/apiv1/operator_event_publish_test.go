@@ -40,6 +40,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
@@ -1345,7 +1346,9 @@ func TestOperatorEventPublishMissingTemplateInputFailsClosedBeforeLowerPrecedenc
 				eventName := eventName
 				t.Run(strings.ReplaceAll(eventName, "/", "_"), func(t *testing.T) {
 					bundle := eventPublishTemplateInputTestBundle("review.requested", false)
-					bundle.FlowSchemas["operating"] = runtimecontracts.FlowSchemaDocument{Mode: "template"}
+					bundle.FlowSchemas["operating"] = runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
+						InstanceField("instance_key"),
+					}
 					bundle.FlowTree.Root.Children[0].Schema = bundle.FlowSchemas["operating"]
 					consumer := runtimecontracts.SystemNodeContract{
 						ExecutionType: "system_node",
@@ -2427,13 +2430,11 @@ item.processed:
   item_id: text?
 `,
 		"alpha-flow/schema.yaml": `name: alpha-flow
-mode: static
 `,
 		"alpha-flow/events.yaml": `item.received:
   item_id: text
 `,
 		"beta-flow/schema.yaml": `name: beta-flow
-mode: static
 `,
 		"beta-flow/events.yaml": `item.received:
   item_id: text
@@ -2572,7 +2573,6 @@ pins:
   emit_events: []
 `)
 	writeRunCompletionFixtureFile(t, root+"/operating/schema.yaml", `name: operating
-mode: template
 pins:
   inputs:
     events: [review.requested]
@@ -2597,11 +2597,10 @@ func eventPublishTemplateInputTestBundle(eventName string, authoredRoot bool) *r
 	operating := runtimecontracts.FlowContractView{
 		Path:  "operating",
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "operating"},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode: "template",
-			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: eventName}}},
-			},
+		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
+			InstanceField("instance_key"), Pins: runtimecontracts.FlowPins{
+			Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: eventName}}},
+		},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			eventName: topicAndEntityIDEventCatalogEntry(),

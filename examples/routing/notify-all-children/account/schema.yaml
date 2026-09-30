@@ -1,5 +1,4 @@
 name: account
-mode: template
 stages:
   active: {initial: true}
   completed: {terminal: true}
@@ -7,9 +6,5 @@ instance: account_id
 pins:
   inputs:
     events:
-      - event: account.registered
-        resolution:
-          mode: select-or-create
-      - event: account.notify.requested
-        resolution:
-          mode: select
+      - account.registered
+      - account.notify.requested

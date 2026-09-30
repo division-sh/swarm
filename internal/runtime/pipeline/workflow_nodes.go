@@ -434,7 +434,7 @@ func (pc *PipelineCoordinator) workflowNodeMatchesDeliveryTarget(node runtimeide
 		flowPath = flowID
 	}
 	targetPath := strings.Trim(strings.TrimSpace(target.FlowInstance), "/")
-	if workflowFlowMode(source, flowID) == runtimecontracts.FlowModeSingleton {
+	if workflowFlowMode(source, flowID) == runtimecontracts.FlowModeStatic {
 		return targetPath == flowPath || targetPath == flowID || pc.hasMaterializedFlowInstanceRoute(source, runID, flowID, targetPath)
 	}
 	return workflowNodeDeliveryTargetPathMatches(flowPath, targetPath)
@@ -453,7 +453,7 @@ func (pc *PipelineCoordinator) workflowNodeDeliveryTargetFlowInstanceMatches(sou
 	if flowPath == "" {
 		flowPath = strings.Trim(strings.TrimSpace(flowID), "/")
 	}
-	if workflowFlowMode(source, flowID) == runtimecontracts.FlowModeSingleton {
+	if workflowFlowMode(source, flowID) == runtimecontracts.FlowModeStatic {
 		return flowInstance == flowPath || flowInstance == strings.Trim(strings.TrimSpace(flowID), "/") || pc.hasMaterializedFlowInstanceRoute(source, runID, flowID, flowInstance)
 	}
 	return true
@@ -503,7 +503,7 @@ func workflowFlowMode(source semanticview.Source, flowID string) string {
 		return ""
 	}
 	if schema, ok := source.FlowSchemaByID(strings.TrimSpace(flowID)); ok {
-		return strings.TrimSpace(schema.Mode)
+		return strings.TrimSpace(schema.EffectiveMode())
 	}
 	return ""
 }
@@ -512,7 +512,7 @@ func workflowPersistedFlowMode(source semanticview.Source, flowID string) string
 	switch workflowFlowMode(source, flowID) {
 	case runtimecontracts.FlowModeTemplate:
 		return runtimecontracts.FlowModeTemplate
-	case "", runtimecontracts.FlowModeStatic, runtimecontracts.FlowModeSingleton:
+	case "", runtimecontracts.FlowModeStatic:
 		return runtimecontracts.FlowModeStatic
 	default:
 		// Contract admission owns the authored mode vocabulary. Persistence stays fail-closed

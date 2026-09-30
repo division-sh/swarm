@@ -206,7 +206,6 @@ stages:
   ready: {initial: true}
 `,
 		"child/schema.yaml": `name: child
-mode: static
 stages:
   queued: {initial: true}
 `,
@@ -489,8 +488,8 @@ func TestPrepareTerminalFlowInstanceDeactivationPassesTerminalState(t *testing.T
 
 	bundle := loadWorkflowTempBundle(t, map[string]string{
 		"schema.yaml":          "name: root\n",
-		"review/schema.yaml":   "name: review\nmode: template\nstages:\n  pending: {initial: true}\n  completed: {terminal: true}\n",
-		"review/entities.yaml": "test_entity: {}\n",
+		"review/schema.yaml":   "name: review\ninstance: instance_id\nstages:\n  pending: {initial: true}\n  completed: {terminal: true}\n",
+		"review/entities.yaml": "test_entity:\n  instance_id: text\n",
 	})
 	var got FlowInstanceDeactivationRequest
 	called := false
@@ -823,7 +822,6 @@ func TestPipelineEngineStateRepoLoadStateMissingEntityDoesNotMaterializeDefaults
 
 		"schema.yaml": "name: runtime-test\n",
 		"review/schema.yaml": `name: review
-mode: static
 stages:
   queued: {initial: true}
 `,
@@ -1242,8 +1240,9 @@ func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsForConcreteTemp
 		"schema.yaml": "stages:\n  idle: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    events: [parent.trigger]\n",
 		"events.yaml": "parent.trigger:\n  entity_id: string\n",
 
-		"child/schema.yaml": "name: child\nmode: template\nstages:\n  waiting: {initial: true}\n  processed: {terminal: true}\npins:\n  inputs:\n    events: [child.start]\n  outputs:\n    events: [child.done]\n",
-		"child/events.yaml": "child.start:\n  entity_id: string\nchild.done:\n  step: string\n",
+		"child/schema.yaml":   "name: child\ninstance: entity_id\nstages:\n  waiting: {initial: true}\n  processed: {terminal: true}\npins:\n  inputs:\n    events: [child.start]\n  outputs:\n    events: [child.done]\n",
+		"child/entities.yaml": "work:\n  entity_id: text\n",
+		"child/events.yaml":   "child.start:\n  entity_id: string\nchild.done:\n  step: string\n",
 	})
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {

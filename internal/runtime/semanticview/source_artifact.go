@@ -214,6 +214,10 @@ func (s bundleSource) FlowOutputEventPins(flowID string) []runtimecontracts.Comp
 func (s bundleSource) FlowInputEventPin(flowID, pinName string) (runtimecontracts.CompiledFlowInputPin, bool) {
 	return s.bundle.FlowInputEventPin(flowID, pinName)
 }
+
+func (s bundleSource) ConnectionInputs() runtimecontracts.CompiledConnectionInputs {
+	return s.bundle.ConnectionInputs()
+}
 func (s bundleSource) FlowOutputEventPin(flowID, pinName string) (runtimecontracts.CompiledFlowOutputPin, bool) {
 	return s.bundle.FlowOutputEventPin(flowID, pinName)
 }

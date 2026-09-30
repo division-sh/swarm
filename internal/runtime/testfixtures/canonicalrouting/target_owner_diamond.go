@@ -21,6 +21,7 @@ connect:
   - event: branch.start
     from: .
     to: branch
+    resolution: select
   - event: branch.done
     from: branch
     to: .
@@ -35,14 +36,11 @@ connect:
         check: '_entity.id != ""'
 `,
 		"branch/schema.yaml": `name: branch
-mode: template
 instance: branch_id
 pins:
   inputs:
     events:
-      - event: branch.start
-        resolution:
-          mode: select
+      - branch.start
   outputs:
     events:
       - work.ready
@@ -67,7 +65,6 @@ connect:
 `,
 
 		"branch/worker/result-static/schema.yaml": `name: static-result
-mode: static
 pins:
   inputs:
     events:
@@ -82,7 +79,6 @@ pins:
         check: '_entity.id != ""'
 `,
 		"branch/worker/result/schema.yaml": `name: singleton-result
-mode: singleton
 pins:
   inputs:
     events:
@@ -95,7 +91,6 @@ pins:
       create_entity: true
 `,
 		"decoy/schema.yaml": `name: decoy
-mode: static
 pins:
   outputs:
     events:
@@ -103,7 +98,6 @@ pins:
 `,
 		"decoy/events.yaml": "work.ready:\n  branch_id: string\n",
 		"unrelated/worker/result/schema.yaml": `name: hostile
-mode: static
 pins:
   inputs:
     events:

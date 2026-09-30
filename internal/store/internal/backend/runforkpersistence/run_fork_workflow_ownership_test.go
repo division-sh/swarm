@@ -236,7 +236,7 @@ func workflowOwnershipProjection(t *testing.T, source semanticview.Source, flow 
 		entityType = "root"
 	} else if flow == "branch/producer" {
 		entityType = "work"
-	} else if schema.Mode == "template" {
+	} else if schema.EffectiveMode() == "template" {
 		path, entityType, mode = flow+"/item", "deployment", "template"
 	}
 	plan := runfork.RunForkPlan{SourceRunID: runID, ForkPoint: runfork.RunForkPoint{Revision: 7}, Entities: []runfork.RunForkEntityState{{EntityID: entityID, MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{

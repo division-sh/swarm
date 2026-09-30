@@ -18,11 +18,11 @@ func TestExecutionFrameSchemaBindingUsesExactDeclarationScope(t *testing.T) {
 	for path, raw := range map[string]string{
 		"schema.yaml":         "name: schema-binding\nstages: []\n",
 		"entities.yaml":       "subject:\n  threshold: boolean\n",
-		"left/schema.yaml":    "name: left\nmode: static\nstages: []\n",
+		"left/schema.yaml":    "name: left\nstages: []\n",
 		"left/entities.yaml":  "subject:\n  threshold: integer\n",
-		"right/schema.yaml":   "name: right\nmode: static\nstages: []\n",
+		"right/schema.yaml":   "name: right\nstages: []\n",
 		"right/entities.yaml": "subject:\n  threshold: text\n",
-		"empty/schema.yaml":   "name: empty\nmode: static\nstages: []\n",
+		"empty/schema.yaml":   "name: empty\nstages: []\n",
 	} {
 		full := filepath.Join(root, path)
 		if err := os.MkdirAll(filepath.Dir(full), 0700); err != nil {

@@ -54,11 +54,11 @@ func CopyTemplateCreateThenSelectSameEvent(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, TemplateSelectExisting)
 	applyClosedReplacement(t, filepath.Join(root, "account/schema.yaml"),
-		"      - event: account.setup\n",
-		"      - event: account.create\n")
+		"      - account.setup\n",
+		"      - account.create\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
-		"  - event: account.setup\n    from: producer\n    to: account\n  - event: account.ready\n    from: producer\n    to: account\n",
-		"  - event: account.setup\n    from: producer\n    to: account\n    rename: account.create\n  - event: account.setup\n    from: producer\n    to: account\n    rename: account.ready\n")
+		"  - event: account.setup\n    from: producer\n    to: account\n    resolution: select-or-create\n  - event: account.ready\n    from: producer\n    to: account\n    resolution: select\n",
+		"  - event: account.setup\n    from: producer\n    to: account\n    rename: account.create\n    resolution: select-or-create\n  - event: account.setup\n    from: producer\n    to: account\n    rename: account.ready\n    resolution: select\n")
 	writeClosedVariantFile(t, root, "account/nodes.yaml", `account-setup-node:
   execution_type: system_node
   subscribes_to: [account.create]
@@ -142,23 +142,21 @@ func CopyTemplateSelectResolution(t testing.TB, opts TemplateSelectResolutionOpt
 	}
 	root := CopyExample(t, TemplateSelectExisting)
 	accountSchema := filepath.Join(root, "account", "schema.yaml")
-	selectedPin := "      - event: account.ready\n        resolution:\n          mode: " + mode + "\n"
-	applyClosedReplacement(t, accountSchema,
-		"      - event: account.ready\n        resolution:\n          mode: select\n",
-		selectedPin)
+	edgeSchema := filepath.Join(root, "schema.yaml")
+	selectedEdge := "  - event: account.ready\n    from: producer\n    to: account\n    resolution: " + mode + "\n"
+	applyClosedReplacement(t, edgeSchema,
+		"  - event: account.ready\n    from: producer\n    to: account\n    resolution: select\n", selectedEdge)
 
 	switch opts.Invalidity {
 	case SelectResolutionValid:
 	case SelectResolutionUndeclaredSource:
-		applyClosedReplacement(t, accountSchema, selectedPin,
-			"      - event: account.ready\n        resolution:\n          mode: "+mode+"\n          from: payload.missing_account_id\n")
+		applyClosedReplacement(t, edgeSchema, selectedEdge, selectedEdge+"    key_from: payload.missing_account_id\n")
 	case SelectResolutionSourceTypeMismatch:
 		applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"), "account.ready:\n  key: account_id\n  account_id: text\n", "account.ready:\n  key: account_id\n  account_id: integer\n")
 	case SelectResolutionStaticReceiver:
-		applyClosedReplacement(t, accountSchema, "mode: template\n", "mode: static\n")
+		applyClosedReplacement(t, accountSchema, "instance: account_id\n", "")
 	case SelectResolutionExtraAggregation:
-		applyClosedReplacement(t, accountSchema, selectedPin,
-			"      - event: account.ready\n        resolution:\n          mode: "+mode+"\n          aggregation: stream\n")
+		applyClosedReplacement(t, edgeSchema, selectedEdge, selectedEdge+"    aggregation: stream\n")
 	case SelectResolutionEntityTypeMismatch:
 		applyClosedReplacement(t, filepath.Join(root, "account", "entities.yaml"), "    type: text\n", "    type: integer\n")
 	case SelectResolutionSourceTypeMismatchWithoutCarryType:
@@ -205,9 +203,9 @@ func CopyTemplateSelectResolutionRenamedSource(t testing.TB, opts TemplateSelect
 	if opts.Mode == SelectResolutionSelectOrCreate {
 		mode = "select-or-create"
 	}
-	applyClosedReplacement(t, filepath.Join(root, "account", "schema.yaml"),
-		"event: account.ready\n        resolution:\n          mode: "+mode+"\n",
-		"event: account.ready\n        resolution:\n          mode: "+mode+"\n          from: payload.external_account_id\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
+		"  - event: account.ready\n    from: producer\n    to: account\n    resolution: "+mode+"\n",
+		"  - event: account.ready\n    from: producer\n    to: account\n    resolution: "+mode+"\n    key_from: payload.external_account_id\n")
 	applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"),
 		"account.ready:\n  key: account_id\n  account_id: text\n", "account.ready:\n  key: account_id\n  account_id: text\n  external_account_id: text\n")
 	return root
@@ -243,13 +241,13 @@ func CopyTemplateCreateResolution(t testing.TB, opts TemplateCreateResolutionOpt
 		opts.Mint = CreateMintUUID
 	}
 	root := CopyExample(t, TemplateCreateMintedKey)
-	validatorSchema := filepath.Join(root, "validator", "schema.yaml")
+	validatorSchema := filepath.Join(root, "schema.yaml")
 	switch opts.Mint {
 	case CreateMintUUID:
 	case CreateMintEventID:
-		applyClosedReplacement(t, validatorSchema, "          from: generated.uuid\n", "          from: event.id\n")
+		applyClosedReplacement(t, validatorSchema, "    key_from: generated.uuid\n", "    key_from: event.id\n")
 	case CreateMintPayload:
-		applyClosedReplacement(t, validatorSchema, "          from: generated.uuid\n", "          from: payload.candidate\n")
+		applyClosedReplacement(t, validatorSchema, "    key_from: generated.uuid\n", "    key_from: payload.candidate\n")
 		applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"),
 			"validation.requested:\n  candidate: text\n",
 			"validation.requested:\n  key: candidate\n  candidate: text\n")
@@ -259,9 +257,9 @@ func CopyTemplateCreateResolution(t testing.TB, opts TemplateCreateResolutionOpt
 	switch opts.Invalidity {
 	case CreateResolutionValid:
 	case CreateResolutionNonRunnableMode:
-		applyClosedReplacement(t, validatorSchema, "          mode: create\n", "          mode: fan-out\n")
+		applyClosedReplacement(t, validatorSchema, "    resolution: create\n", "    resolution: fan-out\n")
 	case CreateResolutionInvalidMint:
-		applyClosedReplacement(t, validatorSchema, "          from: generated.uuid\n", "          from: generated.random\n")
+		applyClosedReplacement(t, validatorSchema, "    key_from: generated.uuid\n", "    key_from: generated.random\n")
 	case CreateResolutionProducerCollision:
 		applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"), "validation.requested:\n  candidate: text\n", "validation.requested:\n  candidate: text\n  validation_case_id: uuid\n")
 		applyClosedReplacement(t, filepath.Join(root, "producer", "nodes.yaml"), "          candidate: ${payload.candidate}\n", "          candidate: ${payload.candidate}\n          validation_case_id: ${payload.candidate}\n")

@@ -1,4 +1,3 @@
-mode: singleton
 activation: standing
 ingress:
   alias: chat

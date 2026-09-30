@@ -1,5 +1,4 @@
 name: worker
-mode: template
 instance: work_id
 stages:
   pending: {initial: true}
@@ -7,5 +6,4 @@ stages:
 pins:
   inputs:
     events:
-      - event: task.submitted
-        resolution: {mode: select}
+      - task.submitted

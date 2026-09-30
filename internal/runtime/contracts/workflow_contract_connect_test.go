@@ -106,23 +106,15 @@ func TestW2CanonicalPinAndPermissionEvidenceIgnoresSetAuthorOrderAndIsImmutable(
 func TestW2CompiledResolutionRejectsFieldsOutsideClosedMode(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
-		resolution FlowInputPinResolution
+		resolution string
 	}{
-		{name: "fan-in from", resolution: FlowInputPinResolution{
-			Mode: FlowInputResolutionModeFanIn, From: "payload.ignored", Aggregation: "stream",
-			Window: "payload.batch_id", DedupBy: []string{"event.id"}, Singleton: "collector",
-		}},
-		{name: "reply from", resolution: FlowInputPinResolution{
-			Mode: FlowInputResolutionModeReply, From: "payload.ignored", RepliesTo: "work.requested",
-		}},
+		{name: "fan-in from", resolution: "mode: fan-in, from: payload.ignored, aggregation: stream, window: payload.batch_id, dedup_by: [event.id], singleton: collector"},
+		{name: "reply from", resolution: "mode: reply, from: payload.ignored, replies_to: work.requested"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := CompileFlowInputPin(
-				FlowPinCompilationContext{FlowID: "collector", FlowPath: "collector", SourceFile: "collector/schema.yaml"},
-				FlowInputEventPin{Event: "work.completed", Resolution: tc.resolution},
-			)
-			if err == nil || !strings.Contains(err.Error(), "may only declare") {
-				t.Fatalf("CompileFlowInputPin error = %v, want closed-mode rejection", err)
+			_, err := admitSchemaFragment("pins: {inputs: {events: [{event: work.completed, resolution: {" + tc.resolution + "}}]}}\n")
+			if err == nil || !strings.Contains(err.Error(), "key_from") {
+				t.Fatalf("admission error = %v, want retired-field rejection with teaching", err)
 			}
 		})
 	}

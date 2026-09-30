@@ -336,6 +336,7 @@ func agentNameGuardRawAgentScopeMapAllowed(path, enclosing string) bool {
 		"internal/runtime/contracts/workflow_contract_tree.go::populateMergedFlowViews":                     {},
 		"internal/runtime/semanticview/scopes.go::flowScopeFromView":                                        {},
 		"internal/runtime/semanticviewtest/source.go::WrapRootAgents":                                       {},
+		"internal/runtime/semanticviewtest/source.go::WithInstanceDeclarations":                             {}, // Test-only catalog admission preserves existing declarations without interpreting them.
 	}
 	_, ok := allowed[path+"::"+enclosing]
 	return ok

@@ -196,7 +196,6 @@ func TestRun_JoinValidationPreservesDuplicateScopedNodeIDs(t *testing.T) {
 	repoRoot := repoRootForBootverifyTest(t)
 	root := canonicalrouting.CopyDuplicateScopedSingletonDemand(t)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "a", "schema.yaml"), `name: a
-mode: singleton
 stages:
   active: {initial: true}
   done: {}

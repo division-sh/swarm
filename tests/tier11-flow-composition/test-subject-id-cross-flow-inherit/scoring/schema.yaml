@@ -9,4 +9,3 @@ pins:
     events:
       - event: score.done
         sink: harness
-mode: static

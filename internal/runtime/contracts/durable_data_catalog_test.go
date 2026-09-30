@@ -121,7 +121,7 @@ func writeStaticDataCatalogFixture(t *testing.T, alpha, beta []byte, alphaAccess
 func writeStaticDataCatalogFlow(t *testing.T, root, flowID string, content []byte, access bool) {
 	t.Helper()
 	flowRoot := filepath.Join(root, flowID)
-	writeFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), "name: "+flowID+"\nmode: static\n")
+	writeFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), "name: "+flowID+"\n")
 	agent := "worker:\n  role: worker\n  intent: {inline: \"Read admitted static data.\"}\n"
 	if access {
 		agent += "  flow_data_access:\n    - resume.md\n"

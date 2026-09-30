@@ -85,16 +85,16 @@ rows:
     corpus: {present_zero_before: 514, present_zero_after: 0}
 
   - id: schema.connect
-    ruled: mechanical-ratified
-    paths: "schema.connect[].event, schema.connect[].from, schema.connect[].to, schema.connect[].rename"
-    owners: [projectSchemaConnectValue, CompileConnectGraph]
+    ruled: issue-2438-slice-1
+    paths: "schema.connect[].event, schema.connect[].from, schema.connect[].to, schema.connect[].rename, schema.connect[].resolution, schema.connect[].key_from"
+    owners: [projectSchemaConnectValue, CompileConnectionInputs, CompileConnectGraph]
     information:
       fact: [event_and_endpoint_ownership]
-      choice: [rename_override]
+      choice: [rename_override, ordinary_instance_resolution, alternate_instance_key_source]
     spelling:
-      canonical_candidate: "{event, from, to} with endpoint flow IDs and optional one rename override"
+      canonical_candidate: "{event, from, to} with optional rename and flat ordinary resolution/key_from"
       retired_duplicates: ["{from: flow.pin, to: flow.pin} when both pins are derivable", adapter]
-      distinct_overrides: [rename]
+      distinct_overrides: [rename, alternate_top_level_payload_key, create_generated_uuid, create_event_id]
     corpus: {legacy_from_to_rows: 0, event_centric_rows: 34, adapters: 0}
 
   - id: schema.imports
@@ -118,16 +118,16 @@ rows:
     corpus: {ingress_blocks: 0, handoffs: 0}
 
   - id: flow.identity_mode
-    ruled: mechanical-ratified
-    paths: "schema.name, schema.mode, schema.entity, schema.instance"
-    owner: projectFlowSchemaValue
+    ruled: issue-2438-slice-1
+    paths: "schema.name, schema.instance; mode/entity are retired on presence"
+    owners: [projectFlowSchemaValue, FlowSchemaDocument.EffectiveMode]
     information:
-      choice: [mode, instance]
-      derived_projection: [entity]
+      choice: [instance]
+      derived_projection: [mode_from_instance_presence, entity]
       annotation: [name]
     spelling:
-      canonical_candidate: omit_entity_and_derive_single_primary_entity
-      retired_duplicates: [explicit_entity]
+      canonical_candidate: omit_mode_and_entity_derive_shape_and_single_primary_entity
+      retired_duplicates: [explicit_entity, mode_static, mode_template, mode_singleton]
       already_retired: [template_instance_mapping]
     corpus: {schemas: 34, entity_explicit: 0, instance_scalar: 7}
 
@@ -201,22 +201,21 @@ rows:
       output: {rows: 147, scalar: 16, mapping: 131, authored_names: 0, qualified_or_wildcard: 0}
 
   - id: flow.input_pin_resolution
-    ruled: issue-2352
-    paths: "schema.pins.inputs.events[].resolution.*"
+    ruled: issue-2438-slice-1
+    paths: "schema.pins.inputs.events[].resolution.* for retained fan-in/reply policies only"
     owners: [projectSchemaResolutionValue, CompileFlowInputPin, CompileConnectGraph]
     information:
-      derived_projection: [same_named_required_payload_instance_source, producer_schema_type]
-      choice: [from_override, resolution_mode, aggregation, window, dedup_by, singleton, replies_to, correlation_key]
+      choice: [fan_in_or_reply_mode, aggregation, window, dedup_by, singleton, replies_to, correlation_key]
     spelling:
-      canonical_candidate: omit_from_for_same_named_required_payload_else_one_exact_resolution_from
-      retired_duplicates: [carries, carry_type, carry_optional, carry_convert, explicit_from_equal_to_same_named_payload]
-      distinct_overrides: [generated.uuid, event.id, different_top_level_payload_field, multi_item_dedup_by]
+      canonical_candidate: retained_fan_in_and_reply_pin_policies_only
+      retired_duplicates: [carries, carry_type, carry_optional, carry_convert, ordinary_pin_resolution, resolution.from]
+      distinct_overrides: [multi_item_dedup_by]
     corpus: {carry_rows: 0, from_overrides: 4}
 
   - id: flow.output_pin_route_projection
     ruled: issue-2352
-    paths: "events.<event>.key plus receiver input resolution and immutable compiled edge evidence"
-    owners: [CompiledEventSchema, CompiledFlowInputPin, ConnectRoutePlan]
+    paths: "events.<event>.key plus connection-owned ordinary resolution and immutable compiled edge evidence"
+    owners: [CompiledEventSchema, CompiledConnectionInput, ConnectRoutePlan]
     information: {fact: [producer_event_business_key], derived_projection: [receiver_specific_delivery_projection]}
     spelling:
       canonical_candidate: omitted_and_compiled_on_route_edge

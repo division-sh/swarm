@@ -10,7 +10,7 @@ import (
 func CopyReceiverInitialization(t testing.TB) string {
 	t.Helper()
 	root := CopyTemplateSelectResolution(t, TemplateSelectResolutionOptions{Mode: SelectResolutionSelectOrCreate})
-	applyClosedReplacement(t, filepath.Join(root, "account/schema.yaml"), "mode: template\n", `mode: template
+	applyClosedReplacement(t, filepath.Join(root, "account/schema.yaml"), "name: account\n", `name: account
 instance_variables:
   variables:
     count: {type: integer, default: 3}
@@ -19,9 +19,7 @@ instance_variables:
     active: boolean
     attributes: json
 `)
-	applyClosedReplacement(t, filepath.Join(root, "account/schema.yaml"), "      - event: account.ready\n        resolution:\n          mode: select-or-create\n", `      - event: account.ready
-        resolution:
-          mode: select-or-create
+	applyClosedReplacement(t, filepath.Join(root, "account/schema.yaml"), "      - account.ready\n", `      - event: account.ready
         initialize:
           count: payload.count
           label: payload.label

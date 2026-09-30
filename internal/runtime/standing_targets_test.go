@@ -392,13 +392,13 @@ func standingProviderDeclarationSource(t testing.TB, provider, inputEvent string
 	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: standing-provider-declaration\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	standingYAML := fmt.Sprintf("mode: singleton\nactivation: standing\ningress:\n  alias: %s\n  providers:\n    - provider: %s\n      signing_secret: webhook_signing.%s", alias, provider, provider)
+	standingYAML := fmt.Sprintf("name: coordinator\nactivation: standing\ningress:\n  alias: %s\n  providers:\n    - provider: %s\n      signing_secret: webhook_signing.%s", alias, provider, provider)
 	schemaPath := filepath.Join(root, "coordinator", "schema.yaml")
 	schemaBytes, err := os.ReadFile(schemaPath)
 	if err != nil {
 		t.Fatalf("read schema: %v", err)
 	}
-	schemaText := strings.Replace(string(schemaBytes), "mode: singleton", strings.TrimSpace(standingYAML), 1)
+	schemaText := strings.Replace(string(schemaBytes), "name: coordinator", strings.TrimSpace(standingYAML), 1)
 	schemaText = strings.Replace(schemaText, "- lead.observed", "- "+inputEvent, 1)
 	if err := os.WriteFile(schemaPath, []byte(schemaText), 0o600); err != nil {
 		t.Fatalf("write schema: %v", err)

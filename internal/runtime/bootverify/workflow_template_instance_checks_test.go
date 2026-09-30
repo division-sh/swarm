@@ -12,7 +12,6 @@ import (
 func TestRunValidatesScalarTemplateInstanceIdentity(t *testing.T) {
 	bundle := loadPrimaryEntityFixtureBundle(t, `
 name: scoring
-mode: template
 instance: account_id
 `, `
 account:
@@ -53,22 +52,9 @@ func TestRun_RejectsInvalidTemplateInstanceDeclarations(t *testing.T) {
 		admissionError string
 	}{
 		{
-			name: "missing instance declaration",
-			flowSchema: `
-name: scoring
-mode: template
-`,
-			flowEntities: `
-account:
-  account_id: uuid
-`,
-			want: "instance: <field>",
-		},
-		{
 			name: "undeclared key field",
 			flowSchema: `
 name: scoring
-mode: template
 instance: missing_id
 `,
 			flowEntities: `
@@ -82,7 +68,6 @@ account:
 			name: "unsupported key field type",
 			flowSchema: `
 name: scoring
-mode: template
 instance: tags
 `,
 			flowEntities: `
@@ -90,19 +75,6 @@ account:
   tags: [text]
 `,
 			want: "scalar or enum",
-		},
-		{
-			name: "non template declares instance",
-			flowSchema: `
-name: scoring
-mode: static
-instance: account_id
-`,
-			flowEntities: `
-account:
-  account_id: uuid
-`,
-			want: "not mode: template",
 		},
 	}
 	for _, tc := range tests {

@@ -726,7 +726,7 @@ func TestCanonicalFormsRegistryPinsFilesystemTopologyRetirementAndEffectiveConne
 		t.Fatalf("schema.connect retirements = %q, want endpoint-centric form", connectRetirements)
 	}
 
-	assertExactYAMLFields(t, reflect.TypeOf(runtimecontracts.FlowConnect{}), []string{"event", "from", "rename", "to"})
+	assertExactYAMLFields(t, reflect.TypeOf(runtimecontracts.FlowConnect{}), []string{"event", "from", "key_from", "rename", "resolution", "to"})
 }
 
 func TestTypedFieldDecoderFamilyUsesYAMLSourceProjectionOnly(t *testing.T) {

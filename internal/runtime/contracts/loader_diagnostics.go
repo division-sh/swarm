@@ -146,7 +146,7 @@ func NewRetiredResolutionInstanceKeyDiagnostic() *LoaderDiagnostic {
 		"contract_loader.retired_resolution_instance_key",
 		"schema.yaml.pins.inputs.events.resolution.instance_key",
 		"resolution.instance_key is retired; scalar instance: <field> is the sole receiver identity owner.",
-		"Remove instance_key; the receiver instance field and resolution.from own identity and its source.",
+		"Remove instance_key; declare scalar instance on the receiver and resolution/key_from on the incoming connect row.",
 		nil,
 	)
 }
@@ -155,8 +155,8 @@ func NewRetiredInstanceKeyCarrySourceDiagnostic() *LoaderDiagnostic {
 	return NewExpectedShapeDiagnostic(
 		"contract_loader.retired_instance_key_carry_source",
 		"schema.yaml.pins.inputs.events.carries.*.from",
-		"Input pin carries and instance.key.* carry sources are retired; resolution.from is the sole exceptional instance source owner.",
-		"Remove carries; omit resolution.from for the same-named payload default, or use generated.uuid, event.id, or one payload.<field> where the selected mode permits it.",
+		"Input pin carries and instance.key.* carry sources are retired; connect.key_from owns exceptional instance sources.",
+		"Remove carries; omit connect.key_from for the same-named payload field, or use generated.uuid, event.id, or one alternate payload.<field> where connect.resolution permits it.",
 		nil,
 	)
 }
@@ -284,12 +284,12 @@ func diagnoseLegacyLoaderError(err error) (*LoaderDiagnostic, bool) {
 	if strings.Contains(raw, "flow schema document must be a mapping") {
 		return NewSchemaDocumentMappingDiagnostic(err), true
 	}
-	if strings.Contains(raw, "input event pin mapping requires a non-default source or resolution") {
+	if strings.Contains(raw, "input event pin mapping requires a non-default source, resolution or initialize") {
 		return NewExpectedShapeDiagnostic(
 			"contract_loader.input_event_pin_options_required",
 			"schema.yaml.pins.inputs.events",
-			"input event pin mappings require a non-default source or resolution.",
-			"Use `events: [item.received]` unless `source` or `resolution` is required.",
+			"input event pin mappings require a non-default source, resolution or initialize.",
+			"Use `events: [item.received]` unless `source`, retained `resolution` or `initialize` is required.",
 			err,
 		), true
 	}

@@ -1,15 +1,10 @@
 name: requester
-mode: template
 instance: account_id
 pins:
   inputs:
     events:
-      - event: requester.setup
-        resolution:
-          mode: select-or-create
-      - event: requester.requested
-        resolution:
-          mode: select
+      - requester.setup
+      - requester.requested
       - event: provider.replied
         resolution:
           mode: reply

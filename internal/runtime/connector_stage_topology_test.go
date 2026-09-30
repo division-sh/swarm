@@ -52,7 +52,7 @@ func TestBoundedConnectorSourceRetainsAdmittedStageDeclarations(t *testing.T) {
 func TestConnectorPackSourcePreservesCompiledStatelessTopology(t *testing.T) {
 	bundle := loadRuntimeTempBundle(t, map[string]string{
 		"schema.yaml":       "name: stateless-connector\nimports:\n  connector_packs:\n    - provider: telegram\n      tool: telegram.send_message\n",
-		"child/schema.yaml": "name: child\nmode: static\nstages: []\n",
+		"child/schema.yaml": "name: child\nstages: []\n",
 	})
 	base := semanticview.Wrap(bundle)
 	imported, err := providerconnectors.SourceWithConnectorPackImports(base, telegramConnectorSupportedSurfacePackRegistry(t, "http://127.0.0.1"))

@@ -438,7 +438,6 @@ func selectedContractActivityDeclaredSource(t *testing.T, serverURL string, effe
 		"schema.yaml":   "name: activity-fork-proof\nstages:\n  pending: {initial: true}\n",
 		"entities.yaml": "root: {}\n",
 		"flow_a/schema.yaml": `name: flow_a
-mode: static
 stages:
   pending: {initial: true}
   review: {}
@@ -507,7 +506,7 @@ func selectedContractActivitySourceWithMode(serverURL string, effectClass runtim
 	}
 	flow := runtimecontracts.FlowContractView{
 		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "flow_a"},
-		Schema: runtimecontracts.FlowSchemaDocument{Name: "flow_a", Mode: mode, StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "pending", Initial: true}}}},
+		Schema: runtimecontracts.FlowSchemaDocument{Name: "flow_a", StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "pending", Initial: true}}}},
 		Nodes:  map[string]runtimecontracts.SystemNodeContract{"test-node": node},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"review.requested": {}}, Path: "flow_a",
 	}

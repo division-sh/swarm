@@ -67,6 +67,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 	// operation/region pass below completes these plans after handler compilation.
 	bundle.Semantics = semantics
 	bundle.eventOwnership, bundle.eventOwnersByFlow = nil, nil
+	bundle.connectionInputs = CompiledConnectionInputs{}
 	if err := bundle.compileEventSchemaBindings(); err != nil {
 		return err
 	}
@@ -252,6 +253,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 	semantics.Loops = BindWorkflowLoopRegions(semantics.Loops, semantics.StageTopologies)
 	bundle.Semantics = semantics
 	populateEventSchemaOwnershipIndex(bundle)
+	bundle.connectionInputs = CompileConnectionInputs(bundle, bundle)
 	return nil
 }
 

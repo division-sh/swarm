@@ -31,6 +31,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
 	"github.com/google/uuid"
@@ -902,7 +903,8 @@ func TestEventBusCompositionReceiverSettlesBeforePersistence(t *testing.T) {
 	const eventType = "work.keyed"
 	newSource := func() semanticview.Source {
 		bundle := materializedTargetBundleWithHandler(t, "review", "target-node", eventType, runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}})
-		bundle.FlowTree.ByID["review"].Schema = runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate, StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "active", Initial: true}, {ID: "done", Terminal: true}}}}
+		bundle.FlowTree.ByID["review"].Schema = runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
+			InstanceField("instance_key"), StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "active", Initial: true}, {ID: "done", Terminal: true}}}}
 		bundle.FlowSchemas["review"] = bundle.FlowTree.ByID["review"].Schema
 		return semanticview.Wrap(bundle)
 	}
@@ -1024,7 +1026,8 @@ func TestEventBusInitializedReceiverIsImmutableAfterPrepublicationLinearization(
 	const eventType = "work.keyed"
 	newSource := func() semanticview.Source {
 		bundle := materializedTargetBundleWithHandler(t, "review", "target-node", eventType, runtimecontracts.SystemNodeEventHandler{CreateEntity: true})
-		bundle.FlowTree.ByID["review"].Schema = runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate, StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "active", Initial: true}, {ID: "done", Terminal: true}}}}
+		bundle.FlowTree.ByID["review"].Schema = runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
+			InstanceField("instance_key"), StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "active", Initial: true}, {ID: "done", Terminal: true}}}}
 		bundle.FlowSchemas["review"] = bundle.FlowTree.ByID["review"].Schema
 		return semanticview.Wrap(bundle)
 	}
@@ -1323,7 +1326,9 @@ func materializedTargetBundleWithHandler(t *testing.T, flowID, nodeID, eventType
 	t.Helper()
 	flow := runtimecontracts.FlowContractView{
 		Path: flowID, Paths: runtimecontracts.FlowContractPaths{FlowPath: flowID},
-		Schema: runtimecontracts.FlowSchemaDocument{Mode: "template"},
+		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
+			InstanceField("instance_key"),
+		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{eventType: {}, "item.ready": {
 			Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"item": {Type: "text"}}},
 		}},
@@ -1339,12 +1344,12 @@ func materializedTargetBundleWithHandler(t *testing.T, flowID, nodeID, eventType
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{flowID: &root.Children[0]},
 		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{flowID: {Mode: "template"}},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{flowID: {}},
 	}
 	admitted := loadTargetRouteTempBundle(t, map[string]string{
 		"manifest.yaml":                        "name: target-route-test\nversion: 1.0.0\n",
 		"schema.yaml":                          "name: target-route-test\n",
-		filepath.Join(flowID, "schema.yaml"):   fmt.Sprintf("name: %s\nmode: template\nstages:\n  active: {initial: true}\n", flowID),
+		filepath.Join(flowID, "schema.yaml"):   fmt.Sprintf("name: %s\nstages:\n  active: {initial: true}\n", flowID),
 		filepath.Join(flowID, "entities.yaml"): "test_entity:\n  items:\n    type: '[text]'\n",
 	})
 	admitted.FlowTree = base.FlowTree
@@ -2533,14 +2538,10 @@ func TestEventBusPublish_DescendantWithoutConnectFailsBeforePersistence(t *testi
 }
 
 func TestRouteTableRootInputDoesNotSubscribePrivateChildren(t *testing.T) {
-	for _, mode := range []string{"static", "singleton"} {
+	for _, mode := range []string{"static"} {
 		for _, rootInput := range []bool{true, false} {
 			t.Run(fmt.Sprintf("%s/root_input=%t", mode, rootInput), func(t *testing.T) {
 				bundle := routedRootInputFlowNodeBundle()
-				bundle.FlowTree.Root.Children[0].Schema.Mode = mode
-				schema := bundle.FlowSchemas["validation"]
-				schema.Mode = mode
-				bundle.FlowSchemas["validation"] = schema
 				if !rootInput {
 					bundle.RootSchema.Pins.Inputs.EventPins = nil
 				}
@@ -2852,7 +2853,7 @@ func addRoutedRootInputFlowNodeSibling(bundle *runtimecontracts.WorkflowContract
 		},
 		Path: "audit",
 		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode: "static",
+
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "thing.created"}}},
 			},
@@ -2889,7 +2890,7 @@ func duplicateIDScopedRootInputAuthorityFixture(t testing.TB) (semanticview.Sour
 				SchemaFile: id + "/schema.yaml", EventsFile: id + "/events.yaml",
 			},
 			Schema: runtimecontracts.FlowSchemaDocument{
-				Mode: "static",
+
 				Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "thing.created"}}}},
 			},
 			Events: map[string]runtimecontracts.EventCatalogEntry{"thing.created": {}},
@@ -3556,7 +3557,7 @@ func routedRootNodeFixtureFiles() map[string]string {
 		"manifest.yaml": `name: test
 version: 1.0.0
 `,
-		"schema.yaml": "name: test\nmode: static\n",
+		"schema.yaml": "name: test\n",
 		"events.yaml": `opco.spinup_requested:
   entity_id: string
 `,
@@ -3581,7 +3582,7 @@ func routedRootInputFlowNodeBundle() *runtimecontracts.WorkflowContractBundle {
 		},
 		Path: "validation",
 		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode: "static",
+
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "thing.created"}}},
 			},
@@ -3644,11 +3645,10 @@ func routedNodeTemplateBundle() *runtimecontracts.WorkflowContractBundle {
 	operating := runtimecontracts.FlowContractView{
 		Path:  "operating",
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "operating"},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode: "template",
-			AutoEmitOnCreate: runtimecontracts.AutoEmitOnCreateContract{
-				Event: "opco.product_initialization_requested",
-			},
+		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
+			InstanceField("instance_key"), AutoEmitOnCreate: runtimecontracts.AutoEmitOnCreateContract{
+			Event: "opco.product_initialization_requested",
+		},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"opco.product_initialization_requested": {},
@@ -3673,7 +3673,7 @@ func routedNodeTemplateBundle() *runtimecontracts.WorkflowContractBundle {
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
 			"operating": {
-				Mode: "template",
+
 				AutoEmitOnCreate: runtimecontracts.AutoEmitOnCreateContract{
 					Event: "opco.product_initialization_requested",
 				},
@@ -3686,8 +3686,8 @@ func routedCallbackTemplateBundle() *runtimecontracts.WorkflowContractBundle {
 	repoScaffold := runtimecontracts.FlowContractView{
 		Path:  "repo-scaffold",
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "repo-scaffold"},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode: "template",
+		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
+			InstanceField("instance_key"),
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"repo_scaffold.repo_commit_succeeded": {},
@@ -3716,7 +3716,7 @@ func routedCallbackTemplateBundle() *runtimecontracts.WorkflowContractBundle {
 			},
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
-			"repo-scaffold": {Mode: "template"},
+			"repo-scaffold": {},
 		},
 	})
 }
@@ -3747,7 +3747,7 @@ func routedNodeStaticValidationBundle() *runtimecontracts.WorkflowContractBundle
 			},
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
-			"validation": {Mode: runtimecontracts.FlowModeTemplate},
+			"validation": {},
 		},
 	})
 }
