@@ -52,8 +52,7 @@ effect-revision:
 `)
 	writeClosedVariantFile(t, root, "observers/schema.yaml", `name: observers
 mode: singleton
-stages:
-  active: {initial: true}
+stages: []
 pins:
   inputs:
     events: [observer.requested]
@@ -65,7 +64,6 @@ pins:
   event_handlers:
     observer.requested:
       create_entity: true
-      advances_to: active
 `)
 	writeClosedVariantFile(t, root, "observers/agents.yaml", `observer:
   role: observer
@@ -109,7 +107,7 @@ func CopyHumanTaskOwnership(t testing.TB, mode string) string {
 	case "singleton":
 	case "static":
 		applyClosedReplacement(t, filepath.Join(root, "observers/schema.yaml"), "mode: singleton", "mode: static")
-		applyClosedReplacement(t, filepath.Join(root, "observers/nodes.yaml"), "      create_entity: true\n      advances_to: active\n", "      emit:\n        event: observer.started\n        fields: {seed: \"${payload.seed}\", deadline_at: \"${payload.deadline_at}\"}\n")
+		applyClosedReplacement(t, filepath.Join(root, "observers/nodes.yaml"), "      create_entity: true\n", "      emit:\n        event: observer.started\n        fields: {seed: \"${payload.seed}\", deadline_at: \"${payload.deadline_at}\"}\n")
 		writeClosedVariantFile(t, root, "observers/events.yaml", "observer.started:\n  seed: boolean\n  deadline_at: text\n")
 		applyClosedReplacement(t, filepath.Join(root, "observers/agents.yaml"), "subscriptions: [observer.requested,", "subscriptions: [observer.started,")
 		applyClosedReplacement(t, filepath.Join(root, "observers/mocks/observer.py"), "endswith(\"observer.requested\")", "endswith(\"observer.started\")")

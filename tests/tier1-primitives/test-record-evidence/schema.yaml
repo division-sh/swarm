@@ -1,6 +1,4 @@
-stages:
-  collecting: {initial: true}
-  done: {terminal: true}
+stages: []
 pins:
   inputs:
     events: [evidence.submitted]

@@ -297,7 +297,7 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 	}
 	state := runtimeengine.StateSnapshot{
 		EntityID:     runtimeidentity.EntityID(portfolioEntityID),
-		CurrentState: "active",
+		CurrentState: "pending",
 		StateCarrier: runtimeengine.NewStateCarrier(fields, nil, nil),
 	}
 	stateStore := &fanOutPinRouteStateRepo{snapshot: state}

@@ -1,7 +1,6 @@
 stages:
   pending: {initial: true}
-  routing: {}
-  done: {terminal: true}
+  routing: {terminal: true}
 pins:
   inputs:
     events: [batch.submitted]

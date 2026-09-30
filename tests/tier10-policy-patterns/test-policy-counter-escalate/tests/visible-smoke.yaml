@@ -3,7 +3,7 @@ setup:
   entities:
   - as: entity
     type: core
-    current_state: retrying
+    current_state: pending
     fields:
       attempt_count: 3
 steps:
@@ -15,4 +15,4 @@ expect:
     - attempt.limit_hit
   entities:
   - ref: entity
-    current_state: retrying
+    current_state: pending

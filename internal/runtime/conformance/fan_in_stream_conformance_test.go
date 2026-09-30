@@ -132,7 +132,7 @@ func proveFanInStreamProducerPath(t *testing.T, source semanticview.Source) {
 		InstanceKind:    "singleton",
 		WorkflowName:    templatefanin.ReceiverFlowID,
 		WorkflowVersion: "1.0.0",
-		CurrentState:    "active",
+		CurrentState:    "pending",
 		EnteredStageAt:  enteredAt,
 		CreatedAt:       enteredAt,
 		Fields:          map[string]any{},
@@ -278,7 +278,7 @@ func initialFanInStreamState(t *testing.T, source semanticview.Source) runtimeen
 	}
 	return runtimeengine.StateSnapshot{
 		EntityID:     runtimeidentity.EntityID(fanInStreamSelectedOwner()),
-		CurrentState: "active",
+		CurrentState: "pending",
 		StateCarrier: runtimeengine.NewStateCarrier(fields, nil, nil),
 	}
 }

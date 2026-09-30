@@ -1,7 +1,5 @@
 name: test-selected-contract-fork-execution
-stages:
-  pending: {initial: true}
-  done: {terminal: true}
+stages: []
 pins:
   inputs:
     events: [task.ready]

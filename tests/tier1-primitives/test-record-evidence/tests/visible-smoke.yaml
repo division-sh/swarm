@@ -9,4 +9,4 @@ expect:
     include: [evidence.recorded]
   entities:
     - type: evidence_case
-      current_state: collecting
+      current_state: pending

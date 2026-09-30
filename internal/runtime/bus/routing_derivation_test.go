@@ -259,7 +259,8 @@ pins:
 
 	write(filepath.Join(root, "orders", "schema.yaml"), `
 name: orders
-mode: `+mode+`stages:
+mode: `+mode+`
+stages:
   active: {initial: true}
   done: {terminal: true}
 pins:
