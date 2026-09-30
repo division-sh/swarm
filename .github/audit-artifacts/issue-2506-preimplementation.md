@@ -3,8 +3,9 @@
 Agent-g. Child of #2447, Part of #2407. Analysis baseline:
 `swarm@efdd163513d6dd4e9e81441a422da0315eddc612`; docs baseline:
 `b2b59a1c81113212074131ff0a89e26c8054a4ee`.
-**Independent eligibility/pre-audit gate requested; implementation has not started.**
-This is an audit-only branch. The separate #2008 WIP and all agent worktrees are untouched.
+**Independent gate approved; implementation authorized, not closure.**
+The audit below records submission-time evidence. The separate #2008 WIP and
+all other agent worktrees remain untouched.
 
 ## 1. Binding Context, Class, And Closure
 
@@ -65,7 +66,7 @@ Pinned unmodified tools remain gocyclo v0.6.0 / gocognit v1.2.1.
 
 | Family member | Cyclo/cognit | Existing direct execution coverage | Proposed disposition |
 | --- | ---: | --- | --- |
-| executeDataShow | 20/25 | TestDurableDataHTTPPublicSurfaceAcrossSelectedStores; import-shape, declaration and permanent-operation HTTP probes | Keep one live dispatcher; extract declaration/shape steps only as needed for clarity. |
+| executeDataShow | 20/25 | TestDurableDataHTTPPublicSurfaceAcrossSelectedStores; import-shape, declaration and permanent-operation HTTP probes | Keep one live dispatcher; extract both declaration and import-shape paths explicitly, as required by the independent gate. |
 | executeDataShowResource | 69/112 | Expanded canonical-payload read, HTTP selected-store views, real pin/provenance concurrent pagination | Explicit bounded inventory, selected metadata, atomic payload, row and export paths; each factored function <25 cyclo. |
 | executeDataShowOperation | 48/76 | Permanent-operation HTTP probes, prune complete-pin readback, both-store run-creation and corruption tests | Explicit source/prune/run-creation branches with unchanged receipt validation and page/error ordering; each factored function <25 cyclo. |
 | pageDataProvenance | 10/13 | Only TestDataProvenanceCursorSurvivesConcurrentLineageInsertion | Delete; replace that test's helper calls with real data.show handler calls. |
@@ -362,7 +363,7 @@ and (3) the two-test exception with all unique assertions retained on real paths
 The gate must also confirm cap feasibility, exact error/call ordering, unchanged
 canonical owners and the complete both-store supported-surface matrix.
 
-**Gate outcome now: pending, not approved or self-ratified.** A lead recommendation
+**Gate outcome at original submission: pending, not approved or self-ratified.** A lead recommendation
 and the old complexity-baseline gate are not the recorded factoring gate.
 
 Stop conditions: missing owner/caller; newly live legacy pager or active-agent
@@ -372,3 +373,26 @@ required ownership/schema/recovery/exported-model framework or vendoring; proof
 replacement losing an original invariant. Repair issue/gate before proceeding.
 No Broad Refactor Escalation is presently required: the proposed wider child is a
 bounded local family, not a runtime ownership refactor. Stop here for review.
+
+## 8. Recorded Independent Gate And Implementation Boundary
+
+The [independent gate](https://github.com/division-sh/swarm/issues/2506#issuecomment-5921436396)
+records **approved**, ratifying the replacement keep-zone table, entire family
+and the exact two dead-helper test replacements. This is coding approval only.
+It tightens the dispatcher row above: declarations and import_shape must become
+explicit local read paths, not remain embedded under "only as needed".
+
+All six binding conditions are retained: complete eleven-view/three-receipt
+scope; exact nonuniform error/read/integrity/cursor order with unchanged owners;
+six-name dead-cluster deletion and only the two approved existing test edits;
+pre-refactor precedence/cursor characterization and all 37 final surface proofs;
+<=1500 gross production lines, net<=0, every factored function cyclo<25 and exact
+final integrated complexity baseline; focused, unchanged dual-store golden,
+default swarm-test, exact-head CI and final PR proof audit. No spec/OpenRPC
+semantic change, universal parser, model/port split, framework or vendoring.
+
+At implementation intake origin/master still equals efdd16351 and the open PR
+set remains #2505/#2504/#2482/#2372/#2325. No operator_data production-file overlap
+was introduced. Recheck integration before final qualification and baseline update.
+Both parents remain open. The original pending statements above describe audit
+submission history; this recorded gate supersedes them without claiming proof.
