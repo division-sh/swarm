@@ -1,0 +1,14 @@
+diff --git a/internal/runtime/bus/ordinary_source.go b/internal/runtime/bus/ordinary_source.go
+index 39f197b10..460f90c18 100644
+--- a/internal/runtime/bus/ordinary_source.go
++++ b/internal/runtime/bus/ordinary_source.go
+@@ -122,6 +122,9 @@ func (s ordinaryPublicationSource) includesCandidate(candidate deliveryRecipient
+ func (s ordinaryPublicationSource) localNodeIntents(source semanticview.Source, evt events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {
+ 	if s.route.Empty() {
+ 		out := routedRootNodeDeliveryIntentsForNoTargetEvent(source, evt, routed)
++		if strings.HasSuffix(string(evt.Type()), "/candidate.analyzed") {
++			return out
++		}
+ 		return append(out, routedExactSameInstanceNoTargetNodeDeliveryIntents(source, evt, routed)...)
+ 	}
+ 	if len(eventDeliveryTargetRoutes(evt)) > 0 {

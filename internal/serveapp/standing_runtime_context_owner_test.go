@@ -22,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -127,6 +128,7 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 			primary := newStandingRuntimeContextRuntime(t, process, primaryStores, primaryModule, primaryFact, runtimeInstanceID, catalog)
 			faults := &standingRuntimeContextFaultOwner{}
 			selected := newStandingRuntimeContextRuntime(t, process, selectedStores, selectedModule, selectedFact, runtimeInstanceID, catalog, faults)
+			selected.InboundGateway = runtimepkg.NewInboundGateway(nil, nil, nil, executionposture.Live)
 			capability, _, grant := installSelectedStoreTestProcessTopology(t, selectedStores, selected, selectedModule.SemanticSource(), selectedFact, runtimeInstanceID)
 			t.Cleanup(func() {
 				if err := selected.Shutdown(); err != nil {
@@ -183,12 +185,46 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 			t.Cleanup(selectedRegistration.Release)
 
 			controller := &serveStandingServiceController{manager: manager, supervisor: newProcessLifecycleSupervisor(nil, primary)}
+			assertGateway := func(open bool) {
+				t.Helper()
+				wasOpen, err := selected.InboundGateway.FenceStandingServiceAdmission(serviceID)
+				if err != nil || wasOpen != open {
+					t.Fatalf("selected gateway admission: was_open=%t want=%t err=%v", wasOpen, open, err)
+				}
+				if open {
+					if err := selected.InboundGateway.ReopenStandingServiceAdmission(serviceID); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			assertTransitionFences := func(_ context.Context, operation runtimepipeline.StandingServiceOperation) error {
+				if operation.Expected == nil {
+					return errors.New("writer did not retain exact predecessor authority")
+				}
+				blocked, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+				defer cancel()
+				probe, err := selected.Bus.BeginPipelineParentTransition(blocked)
+				if probe != nil {
+					probe.Done()
+					return errors.New("recovery entered during the standing writer transaction")
+				}
+				if !errors.Is(err, context.DeadlineExceeded) {
+					return fmt.Errorf("observe selected pipeline exclusion: %w", err)
+				}
+				open, err := selected.InboundGateway.FenceStandingServiceAdmission(serviceID)
+				if err != nil || open {
+					return fmt.Errorf("writer reached an open gateway: open=%t err=%v", open, err)
+				}
+				return nil
+			}
+			faults.beforeCall = assertTransitionFences
 			rollbackFault := errors.New("standing desired-state transaction refused")
 			faults.before = rollbackFault
 			if failed, err := controller.SuspendStandingService(selectedCtx, runtimepipeline.StandingServiceOperation{ServiceID: serviceID}); !errors.Is(err, rollbackFault) || failed.CommittedMutation != "" {
 				t.Fatalf("active rollback lost failure/outcome: result=%+v err=%v", failed, err)
 			}
 			faults.before = nil
+			assertGateway(true)
 			assertChild := func(present bool, runID string, generation int64) {
 				t.Helper()
 				origin, err := runtimerunlifecycle.StandingGenerationRunOrigin(serviceID, generation)
@@ -265,6 +301,7 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 				t.Fatal("cancelled standing command did not settle after child joined")
 			}
 			assertChild(true, targets[0].RunID, targets[0].Generation)
+			assertGateway(true)
 			handlers := apiv1.OperatorStandingServiceHandlers(apiv1.StandingServiceHandlerOptions{
 				Controller:  controller,
 				Idempotency: selectedStores.Idempotency(),
@@ -314,12 +351,14 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 				t.Fatalf("fresh repeat suspend changed N or emitted another continuation: %+v", repeated)
 			}
 			assertChild(false, suspended.RunID, suspended.Generation)
+			assertGateway(false)
 			faults.before = rollbackFault
 			if failed, err := controller.ResetStandingService(selectedCtx, runtimepipeline.StandingServiceOperation{ServiceID: serviceID}); !errors.Is(err, rollbackFault) || failed.CommittedMutation != "" {
 				t.Fatalf("no-child rollback lost failure/outcome: result=%+v err=%v", failed, err)
 			}
 			faults.before = nil
 			assertChild(false, suspended.RunID, suspended.Generation)
+			assertGateway(false)
 			resetWhileSuspended := invoke("reset")
 			if resetWhileSuspended.Generation != 2 || resetWhileSuspended.EffectiveState != "suspended" || selectedSignals.Load() != 2 {
 				t.Fatalf("reset did not preserve suspension without a child: %+v", resetWhileSuspended)
@@ -331,9 +370,44 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 			if repeated := invoke("resume"); repeated.RunID != resumed.RunID || selectedSignals.Load() != 2 {
 				t.Fatalf("fresh repeat resume changed N or emitted another continuation: %+v", repeated)
 			}
+			assertGateway(true)
 			reset := invoke("reset")
 			if reset.RunID == resumed.RunID || reset.Generation != 3 || reset.EffectiveState != "active" || selectedSignals.Load() != 3 {
 				t.Fatalf("selected reset = %#v signals=%d, want generation 3 active and third signal", reset, selectedSignals.Load())
+			}
+			assertChild(true, reset.RunID, reset.Generation)
+			faults.beforeCall = func(ctx context.Context, operation runtimepipeline.StandingServiceOperation) error {
+				if err := assertTransitionFences(ctx, operation); err != nil {
+					return err
+				}
+				if operation.Expected == nil || operation.Expected.RunID != reset.RunID {
+					return errors.New("terminal race did not capture the exact predecessor")
+				}
+				_, disposition, err := selectedStores.RuntimeDeps().EventBusDurable.RunLifecycle.MarkTerminalRun(ctx, runtimerunlifecycle.TerminalRequest{
+					RunID: reset.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: time.Now().UTC(),
+				})
+				if err == nil && disposition != runtimerunlifecycle.MutationApplied {
+					return fmt.Errorf("terminal race was not acknowledged: %s", disposition)
+				}
+				return err
+			}
+			refused, err := controller.SuspendStandingService(selectedCtx, runtimepipeline.StandingServiceOperation{ServiceID: serviceID})
+			faults.beforeCall = assertTransitionFences
+			if err == nil || refused.CommittedMutation != "" || !strings.Contains(err.Error(), "admission remains closed") {
+				t.Fatalf("terminal race revived the predecessor: result=%+v err=%v", refused, err)
+			}
+			assertChild(false, reset.RunID, reset.Generation)
+			assertGateway(false)
+			faults.before = rollbackFault
+			if failed, err := controller.ResetStandingService(selectedCtx, runtimepipeline.StandingServiceOperation{ServiceID: serviceID}); !errors.Is(err, rollbackFault) || failed.CommittedMutation != "" {
+				t.Fatalf("terminal no-child rollback lost failure/outcome: result=%+v err=%v", failed, err)
+			}
+			faults.before = nil
+			assertChild(false, reset.RunID, reset.Generation)
+			assertGateway(false)
+			reset = invoke("reset")
+			if reset.Generation != 4 || reset.EffectiveState != "active" || selectedSignals.Load() != 3 {
+				t.Fatalf("explicit reset did not replace the terminal predecessor: result=%+v signals=%d", reset, selectedSignals.Load())
 			}
 			assertChild(true, reset.RunID, reset.Generation)
 			cleanupFault := errors.New("acknowledged standing cleanup failure")
@@ -344,6 +418,7 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 			}
 			faults.after = nil
 			assertChild(false, reset.RunID, reset.Generation)
+			assertGateway(false)
 			publicationFault := errors.New("standing publication refused after acknowledged resume")
 			faults.publication = publicationFault
 			committed, err = controller.ResumeStandingService(selectedCtx, runtimepipeline.StandingServiceOperation{ServiceID: serviceID})
@@ -352,6 +427,7 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 			}
 			faults.publication = nil
 			assertChild(false, reset.RunID, reset.Generation)
+			assertGateway(false)
 			if retried, err := controller.ResumeStandingService(selectedCtx, runtimepipeline.StandingServiceOperation{ServiceID: serviceID}); err == nil || retried.CommittedMutation != "" {
 				t.Fatalf("fresh retry hid missing executable child: result=%+v err=%v", retried, err)
 			}
@@ -369,7 +445,7 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 			if err != nil {
 				t.Fatalf("list selected standing statuses: %v", err)
 			}
-			if len(selectedStatuses) != 1 || selectedStatuses[0].BundleHash != selectedHash || selectedStatuses[0].Generation != 3 {
+			if len(selectedStatuses) != 1 || selectedStatuses[0].BundleHash != selectedHash || selectedStatuses[0].Generation != 4 {
 				t.Fatalf("selected standing source/generation = %#v", selectedStatuses)
 			}
 		})
@@ -465,9 +541,15 @@ func newStandingRuntimeContextRuntime(
 type standingRuntimeContextFaultOwner struct {
 	runtimepipeline.WorkflowPersistenceOwner
 	before, after, publication error
+	beforeCall                 func(context.Context, runtimepipeline.StandingServiceOperation) error
 }
 
 func (o *standingRuntimeContextFaultOwner) SuspendStandingService(ctx context.Context, operation runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error) {
+	if o.beforeCall != nil {
+		if err := o.beforeCall(ctx, operation); err != nil {
+			return runtimepipeline.StandingServiceReconciliation{}, err
+		}
+	}
 	if o.before != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, o.before
 	}
@@ -476,6 +558,11 @@ func (o *standingRuntimeContextFaultOwner) SuspendStandingService(ctx context.Co
 }
 
 func (o *standingRuntimeContextFaultOwner) ResetStandingService(ctx context.Context, operation runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error) {
+	if o.beforeCall != nil {
+		if err := o.beforeCall(ctx, operation); err != nil {
+			return runtimepipeline.StandingServiceReconciliation{}, err
+		}
+	}
 	if o.before != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, o.before
 	}

@@ -2,7 +2,6 @@ package releasee2e
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"os"
 	"os/exec"
@@ -212,19 +211,12 @@ func TestStandingPauseAuthorityPublicBothStores(t *testing.T) {
 
 func withStandingOperatorWriteFault(t *testing.T, root string, store goldenStoreSelection, run func()) {
 	t.Helper()
-	db := store.diagnosticDB
-	if store.name == "sqlite" {
-		var err error
-		db, err = sql.Open("sqlite", filepath.Join(root, "runtime.db"))
-		if err != nil {
-			t.Fatal(err)
+	db := openStandingOfflineInspection(t, root, store)
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Error(err)
 		}
-		defer func() {
-			if err := db.Close(); err != nil {
-				t.Error(err)
-			}
-		}()
-	}
+	}()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if store.name == "sqlite" {
