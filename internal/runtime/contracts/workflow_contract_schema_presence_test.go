@@ -184,6 +184,13 @@ func TestSchemaAdmissionFieldPresenceMatrix(t *testing.T) {
 }
 
 func TestSchemaAdmissionBooleanKindsAndLiteralDefaultPresence(t *testing.T) {
+	for _, key := range []string{"subscribes_to", "emits"} {
+		for _, raw := range []string{"null", "''", "false", "0", "1.5", "' work.requested '", "{}", "[]"} {
+			if _, err := admitSchemaFragment("required_agents: [{role: worker, " + key + ": [" + raw + "]}]\n"); err == nil {
+				t.Fatalf("required agent %s admitted noncanonical event %s", key, raw)
+			}
+		}
+	}
 	for _, key := range []string{"initial", "terminal"} {
 		for _, raw := range []string{"'true'", "yes", "1", "null", "{}", "[]"} {
 			if _, err := admitSchemaFragment("stages: {waiting: {" + key + ": " + raw + "}}\n"); err == nil {
