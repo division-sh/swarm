@@ -12336,7 +12336,8 @@ flow_model:
         child, but retain the same recovery exclusion and ingress barrier. New requests fail with service-unavailable semantics
         while that barrier is closed. The writer revalidates the captured complete authority under parent-before-run locking
         before both writes and no-ops, and returns acknowledged applied/exact-noop evidence. Disposition-read errors refuse.
-        A pre-commit failure restores only an actually captured, still-authorized unretired child and its schedules, and reopens
+        A pre-commit failure joins the actual captured child, callbacks and admitted gateway requests before compensation,
+        retaining exclusion despite caller cancellation. It restores only a captured, still-authorized unretired child and its schedules, and reopens
         ingress only if this operation closed a previously open gate. No-child rollback preserves prior suppression. An
         acknowledged commit followed by cleanup/publication failure preserves its identity/outcome and never restores N.
         A fresh active resume is a true no-op: it preserves the exact existing child, schedules, publication and admission.
@@ -37505,6 +37506,7 @@ process_local_work_lifetime_authority:
       values are not transition authority. A validated non-executable no-child command retains explicit absence and prior
       suppression under that existing owner, plus pipeline exclusion and domain admission fencing; it never waits, retires
       or restores a nonexistent child. The child-only drain entrance still refuses absent occurrences. Pre-commit failure
+      joins every admitted gateway request whose admission it fenced even after caller cancellation,
       revalidates current durable authority, waits for every captured predecessor callback to settle, reopens the same
       unretired occurrence, restores each eligible projection under its exact original complete execution owner, and only then
       republishes ingress. Restore reserves every exact target key, retires and joins the exact armed or firing incumbent, and
