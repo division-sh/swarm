@@ -237,9 +237,6 @@ func (cfg *AgentConfig) NormalizeRuntimeDescriptor() {
 	cfg.Mock.Digest = strings.TrimSpace(cfg.Mock.Digest)
 	cfg.Mock.SourcePath = strings.TrimSpace(cfg.Mock.SourcePath)
 	cfg.Mock.Source = append([]byte(nil), cfg.Mock.Source...)
-	if plan, err := cfg.Memory.Normalize(); err == nil {
-		cfg.Memory = plan
-	}
 	cfg.WorkspaceClass = strings.TrimSpace(cfg.WorkspaceClass)
 	cfg.ManagerFallback = strings.TrimSpace(cfg.ManagerFallback)
 	cfg.FlowPath = cfg.CanonicalFlowPath()

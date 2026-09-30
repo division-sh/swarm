@@ -460,7 +460,7 @@ func agentFixtureStaticRecord(t *testing.T, identity runtimeagentidentity.Identi
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID: identity.AgentID(), Identity: identity, Role: "worker", Type: "sonnet", Model: "regular",
 			FlowID: "global", FlowPath: identity.FlowInstance(), ExecutionMode: runtimeeffects.ExecutionModeLive,
-			Memory: agentmemory.Authored(true), Config: []byte(`{}`),
+			Memory: agentmemory.Plan{Enabled: true}, Config: []byte(`{}`),
 		}),
 		Status: "active", HiredBy: "fixture-authority-proof", StartedAt: time.Now().UTC(),
 	}

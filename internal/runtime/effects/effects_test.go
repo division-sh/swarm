@@ -76,7 +76,7 @@ func TestCompletionAuthorityPreservesExecutionMode(t *testing.T) {
 	}
 	ctx = WithUsageTarget(ctx, UsageTarget{
 		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: uuid.NewString(), AgentID: "agent-1",
-		AgentIdentity: token.Identity, SessionID: uuid.NewString(), Memory: agentmemory.Authored(false),
+		AgentIdentity: token.Identity, SessionID: uuid.NewString(), Memory: agentmemory.Plan{Enabled: false},
 		FlowInstance: token.Identity.FlowInstance(),
 	})
 	authority, ok = CompletionAuthorityFromContext(ctx)
@@ -125,7 +125,7 @@ func TestAgentTurnUsageTargetRejectsIdentityFromDifferentRun(t *testing.T) {
 	token := effectLifecycleToken(t, 1, "agent-1", 2)
 	target := UsageTarget{
 		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: uuid.NewString(), AgentID: token.AgentID,
-		AgentIdentity: token.Identity, SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(),
+		AgentIdentity: token.Identity, SessionID: uuid.NewString(), Memory: agentmemory.Plan{},
 		FlowInstance: token.Identity.FlowInstance(),
 	}
 	if target.Valid() {
@@ -319,7 +319,7 @@ func TestBeginCompletionRejectsCapabilitySurfaceFromDifferentRun(t *testing.T) {
 	}
 	target := UsageTarget{
 		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: token.Identity.RunID, AgentID: token.AgentID,
-		AgentIdentity: token.Identity, SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(),
+		AgentIdentity: token.Identity, SessionID: uuid.NewString(), Memory: agentmemory.Plan{},
 		FlowInstance: token.Identity.FlowInstance(),
 	}
 	surfaceRunID := uuid.NewString()
@@ -417,7 +417,7 @@ func TestBeginNormalEffectRejectsCrossContextCapabilitySurfacesBeforeAuthorizati
 			}
 			authorityTarget := UsageTarget{
 				Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: token.Identity.RunID, AgentID: token.AgentID,
-				AgentIdentity: token.Identity, SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(),
+				AgentIdentity: token.Identity, SessionID: uuid.NewString(), Memory: agentmemory.Plan{},
 				FlowInstance: token.Identity.FlowInstance(),
 			}
 			surfaceTarget := authorityTarget
@@ -475,7 +475,7 @@ func TestManagedEffectRejectsSameSlugSiblingCapabilityPrincipalBeforeAuthorizati
 	}
 	target := UsageTarget{
 		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: token.Identity.RunID, AgentID: token.AgentID,
-		AgentIdentity: token.Identity, SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(),
+		AgentIdentity: token.Identity, SessionID: uuid.NewString(), Memory: agentmemory.Plan{},
 		FlowInstance: token.Identity.FlowInstance(),
 	}
 	siblingTarget := target
@@ -520,7 +520,7 @@ func TestBeginSelectedEffectRejectsMissingOrCrossActorTurnBeforeAuthorization(t 
 	target := UsageTarget{
 		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: forkRunID, AgentID: "agent-a",
 		AgentIdentity: effectLifecycleToken(t, 1, "agent-a", 1, forkRunID).Identity,
-		SessionID:     uuid.NewString(), Memory: agentmemory.PlatformDefault(), FlowInstance: "effects-test/instance",
+		SessionID:     uuid.NewString(), Memory: agentmemory.Plan{}, FlowInstance: "effects-test/instance",
 	}
 
 	for _, tc := range []struct {
@@ -587,7 +587,7 @@ func TestAgentExecutionFrameOwnershipFailsClosedBeforeAuthorization(t *testing.T
 	target := UsageTarget{
 		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: forkRunID, AgentID: "agent-a",
 		AgentIdentity: effectLifecycleToken(t, 1, "agent-a", 1, forkRunID).Identity,
-		SessionID:     uuid.NewString(), Memory: agentmemory.PlatformDefault(), FlowInstance: "effects-test/instance",
+		SessionID:     uuid.NewString(), Memory: agentmemory.Plan{}, FlowInstance: "effects-test/instance",
 	}
 	selectedAuthority.Target = target
 	surface := selectedManagedEffectSurface(t, admission, target, target.AgentID)
@@ -803,7 +803,7 @@ func managedFrameBindingContext(t testing.TB, origin, admissionHash, frameHash s
 	}
 	target := UsageTarget{
 		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: runID, AgentID: token.AgentID,
-		AgentIdentity: token.Identity, SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(),
+		AgentIdentity: token.Identity, SessionID: uuid.NewString(), Memory: agentmemory.Plan{},
 		FlowInstance: token.Identity.FlowInstance(),
 	}
 	authority.Target = target
@@ -894,7 +894,7 @@ func TestCompletionSettlementRejectsTurnCoordinateMismatch(t *testing.T) {
 	authority := testAuthority(token)
 	authority.Target = UsageTarget{
 		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: token.Identity.RunID, AgentID: token.AgentID,
-		AgentIdentity: token.Identity, SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(),
+		AgentIdentity: token.Identity, SessionID: uuid.NewString(), Memory: agentmemory.Plan{},
 		FlowInstance: token.Identity.FlowInstance(), EntityID: uuid.NewString(),
 	}
 	inputTokens, outputTokens := int64(1), int64(1)
@@ -1072,7 +1072,7 @@ func managedEffectTestContext(t testing.TB, ctx context.Context, agentID string)
 	target := UsageTarget{
 		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: token.Identity.RunID, AgentID: agentID,
 		AgentIdentity: agentidentitytest.RuntimeForRun(t, token.Identity.RunID, agentID, "effects-test", "effects-test", "instance", "effects-test/instance"),
-		SessionID:     uuid.NewString(), Memory: agentmemory.PlatformDefault(), FlowInstance: "effects-test/instance",
+		SessionID:     uuid.NewString(), Memory: agentmemory.Plan{}, FlowInstance: "effects-test/instance",
 	}
 	ctx = managedexecution.WithAdmission(ctx, admission)
 	ctx = WithUsageTarget(ctx, target)

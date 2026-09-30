@@ -104,7 +104,7 @@ func TestSessionWatchdogMonitorWriter_SkipsStatelessMemory(t *testing.T) {
 	writer, err := newSessionWatchdogMonitorWriter(context.Background(), base, &captureConversationStore{}, nil, MonitorTurnMeta{
 		AgentID:                  "agent-1",
 		SessionID:                "sess-1",
-		Memory:                   agentmemory.Authored(false),
+		Memory:                   agentmemory.Plan{Enabled: false},
 		WatchdogLongRunningAfter: 20 * time.Millisecond,
 		WatchdogNoOutputAfter:    20 * time.Millisecond,
 	})

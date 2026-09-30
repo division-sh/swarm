@@ -362,7 +362,6 @@ type OperatorAgentSummary struct {
 	Model         string `json:"model"`
 	ExecutionMode string `json:"execution_mode"`
 	Memory        bool   `json:"memory"`
-	MemorySource  string `json:"memory_source"`
 	Status        string `json:"status"`
 
 	Identity              agentidentity.Identity              `json:"-"`
@@ -522,7 +521,6 @@ type OperatorConversationSummary struct {
 	Kind         string                              `json:"-"`
 	FlowInstance string                              `json:"-"`
 	Memory       bool                                `json:"-"`
-	MemorySource string                              `json:"-"`
 	Summary      string                              `json:"-"`
 	UpdatedAt    time.Time                           `json:"-"`
 	Metadata     OperatorConversationSummaryMetadata `json:"-"`
@@ -563,7 +561,6 @@ type OperatorConversationTurn struct {
 	SessionID              string                           `json:"-"`
 	FlowInstance           string                           `json:"-"`
 	Memory                 bool                             `json:"-"`
-	MemorySource           string                           `json:"-"`
 	EntityID               string                           `json:"-"`
 	TaskID                 string                           `json:"-"`
 	EmittedEvents          []string                         `json:"-"`
@@ -971,7 +968,6 @@ type RunDebugTraceRow struct {
 	SessionID                 string                            `json:"session_id,omitempty"`
 	SessionKind               string                            `json:"session_kind,omitempty"`
 	SessionMemory             bool                              `json:"session_memory"`
-	SessionMemorySource       string                            `json:"session_memory_source,omitempty"`
 	SessionStatus             string                            `json:"session_status,omitempty"`
 	SessionUpdatedAt          *time.Time                        `json:"session_updated_at,omitempty"`
 	TurnID                    string                            `json:"turn_id,omitempty"`
@@ -979,7 +975,6 @@ type RunDebugTraceRow struct {
 	TurnTriggerEventType      string                            `json:"turn_trigger_event_type,omitempty"`
 	TurnFlowInstance          string                            `json:"turn_flow_instance,omitempty"`
 	TurnMemory                bool                              `json:"turn_memory"`
-	TurnMemorySource          string                            `json:"turn_memory_source,omitempty"`
 	TurnEntityID              string                            `json:"turn_entity_id,omitempty"`
 	TurnTaskID                string                            `json:"turn_task_id,omitempty"`
 	TurnParseOK               bool                              `json:"turn_parse_ok,omitempty"`

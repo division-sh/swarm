@@ -73,7 +73,10 @@ func nodeValueFields(value yamlsource.Value, owner string, allowed map[string]st
 			return nil, fmt.Errorf("RETIRED: %s field %q at %s: %s", owner, field.Name, field.IntroductionLocation(), reason)
 		}
 		if _, ok := allowed[field.Name]; !ok {
-			return nil, fmt.Errorf("%s at %s: %w", field.Value.SemanticPath(), field.IntroductionLocation(), NewUndefinedFieldDiagnostic(owner, field.Name, allowed))
+			diagnostic := NewUndefinedFieldDiagnostic(owner, field.Name, allowed)
+			location := field.IntroductionLocation()
+			diagnostic.Location = LoaderDiagnosticLocation{File: location.File, YAMLPath: field.Value.SemanticPath(), Line: location.Line, Column: location.Column}
+			return nil, fmt.Errorf("%s at %s: %w", field.Value.SemanticPath(), field.IntroductionLocation(), diagnostic)
 		}
 		out[field.Name] = field.Value
 	}

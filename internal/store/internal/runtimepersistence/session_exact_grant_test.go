@@ -42,7 +42,7 @@ func TestSelectedSameOwnerReplacementFencesEverySessionWriterBothStores(t *testi
 		}
 		requireRotationEffectsUnchanged(t, beforeConflict, snapshotRotationEffects(t, ctx, selected.db, fixture.runID))
 		conversation := runtimellm.ConversationRecord{
-			SessionID: first.SessionID, AgentID: identity.AgentID(), Identity: identity, Memory: agentmemory.Authored(true),
+			SessionID: first.SessionID, AgentID: identity.AgentID(), Identity: identity, Memory: agentmemory.Plan{Enabled: true},
 			Messages: []runtimellm.Message{{Role: "assistant", Content: "stale"}}, TurnCount: 99, Status: "active",
 		}
 		watchdog := runtimellm.ConversationWatchdogUpdate{

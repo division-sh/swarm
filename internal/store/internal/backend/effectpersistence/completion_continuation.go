@@ -51,7 +51,6 @@ type completionContinuationRow struct {
 	sessionGrantID     string
 	sessionLockOwner   string
 	memoryEnabled      bool
-	memorySource       string
 	entityID           string
 	surface            string
 }
@@ -160,16 +159,14 @@ func requireCompletionContinuationRequest(req runtimeeffects.CompletionContinuat
 		strings.TrimSpace(req.ExecutionAuthorityID) == "" || strings.TrimSpace(req.SessionID) == "" {
 		return errors.New("completion continuation requires current normal authority, delivery claim, and session")
 	}
-	_, err := req.Memory.Normalize()
-	return err
+	return nil
 }
 
 const postgresCompletionContinuationSelect = `
 	SELECT o.operation_id::text,o.effect_class,o.request_fingerprint,COALESCE(o.capability_plan_fingerprint,''),o.bundle_hash,
 	       a.attempt_id::text,a.attempt_ordinal,a.adapter,a.transport,a.authorized_at,a.evidence::text,COALESCE(a.completion_projection_phase,''),COALESCE(a.completion_successor_turn::text,''),
 	       t.turn_id::text,t.run_id::text,t.agent_id,t.agent_name_owner,t.agent_name_source,t.agent_route_presence,
-	       t.flow_scope_key,t.flow_instance_id,t.flow_instance,t.session_id::text,t.memory_enabled,t.memory_source,
-	       COALESCE(t.entity_id::text,''),surface.surface::text,COALESCE(a.session_grant_id,''),COALESCE(a.session_lock_owner,'')
+	       t.flow_scope_key,t.flow_instance_id,t.flow_instance,t.session_id::text,t.memory_enabled,COALESCE(t.entity_id::text,''),surface.surface::text,COALESCE(a.session_grant_id,''),COALESCE(a.session_lock_owner,'')
 	FROM runtime_external_effect_attempts a
 	JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id
 	JOIN agent_turns t ON t.completion_attempt_id=a.attempt_id
@@ -184,8 +181,7 @@ const sqliteCompletionContinuationSelect = `
 	SELECT o.operation_id,o.effect_class,o.request_fingerprint,COALESCE(o.capability_plan_fingerprint,''),o.bundle_hash,
 	       a.attempt_id,a.attempt_ordinal,a.adapter,a.transport,a.authorized_at,a.evidence,COALESCE(a.completion_projection_phase,''),COALESCE(a.completion_successor_turn,''),
 	       t.turn_id,t.run_id,t.agent_id,t.agent_name_owner,t.agent_name_source,t.agent_route_presence,
-	       t.flow_scope_key,t.flow_instance_id,t.flow_instance,t.session_id,t.memory_enabled,t.memory_source,
-	       COALESCE(t.entity_id,''),surface.surface,COALESCE(a.session_grant_id,''),COALESCE(a.session_lock_owner,'')
+	       t.flow_scope_key,t.flow_instance_id,t.flow_instance,t.session_id,t.memory_enabled,COALESCE(t.entity_id,''),surface.surface,COALESCE(a.session_grant_id,''),COALESCE(a.session_lock_owner,'')
 	FROM runtime_external_effect_attempts a
 	JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id
 	JOIN agent_turns t ON t.completion_attempt_id=a.attempt_id
@@ -225,8 +221,7 @@ func scanCompletionContinuationRows(rows *sql.Rows) ([]completionContinuationRow
 			&row.operationID, &row.effectClass, &row.requestFingerprint, &row.planFingerprint, &row.bundleHash,
 			&row.attemptID, &row.attemptOrdinal, &row.adapter, &row.transport, &authorizedAt, &row.evidence, &row.phase, &row.successor,
 			&row.turnID, &row.runID, &row.agentID, &row.nameOwner, &row.nameSource, &row.routePresence,
-			&row.flowScopeKey, &row.flowInstanceID, &row.flowInstance, &row.sessionID, &row.memoryEnabled, &row.memorySource,
-			&row.entityID, &row.surface, &row.sessionGrantID, &row.sessionLockOwner,
+			&row.flowScopeKey, &row.flowInstanceID, &row.flowInstance, &row.sessionID, &row.memoryEnabled, &row.entityID, &row.surface, &row.sessionGrantID, &row.sessionLockOwner,
 		); err != nil {
 			return nil, err
 		}
@@ -252,12 +247,8 @@ func admitCompletionContinuationRow(ctx context.Context, req runtimeeffects.Comp
 	if equal, equalErr := runtimeagentidentity.Equal(identity, currentIdentity); equalErr != nil || !equal {
 		return runtimeeffects.Attempt{}, errors.New("settled completion continuation actor identity is stale")
 	}
-	plan, err := agentmemory.NewPlan(row.memoryEnabled, agentmemory.Source(row.memorySource))
-	if err != nil {
-		return runtimeeffects.Attempt{}, err
-	}
-	requestedPlan, err := req.Memory.Normalize()
-	if err != nil || requestedPlan != plan || (plan.Enabled && strings.TrimSpace(req.SessionID) != strings.TrimSpace(row.sessionID)) || row.bundleHash != bundleHash {
+	plan := agentmemory.Plan{Enabled: row.memoryEnabled}
+	if req.Memory != plan || (plan.Enabled && strings.TrimSpace(req.SessionID) != strings.TrimSpace(row.sessionID)) || row.bundleHash != bundleHash {
 		return runtimeeffects.Attempt{}, errors.New("settled completion continuation session, memory, or bundle identity is stale")
 	}
 	surface, err := storemanagedcapability.Decode([]byte(row.surface))
@@ -456,8 +447,7 @@ func validateCompletionProjection(attempt runtimeeffects.Attempt, projection run
 		projection.Identity.Normalize() != attempt.Authority.Target.AgentIdentity.Normalize() {
 		return errors.New("completion projection session, identity, or turn transition is invalid")
 	}
-	plan, err := projection.Memory.Normalize()
-	if err != nil || plan != attempt.Authority.Target.Memory {
+	if projection.Memory != attempt.Authority.Target.Memory {
 		return errors.New("completion projection memory plan is invalid")
 	}
 	if len(bytes.TrimSpace(projection.Payload)) == 0 || !json.Valid(projection.Payload) || len(bytes.TrimSpace(projection.Messages)) == 0 || !json.Valid(projection.Messages) {

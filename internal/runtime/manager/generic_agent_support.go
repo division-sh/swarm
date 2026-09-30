@@ -47,10 +47,6 @@ func (a *genericAgent) OnEvent(context.Context, events.Event) ([]events.Event, e
 	return nil, nil
 }
 
-func mergeAgentConfig(base, patch runtimeactors.AgentConfig) runtimeactors.AgentConfig {
-	return runtimeactors.MergeAgentConfig(base, patch)
-}
-
 func (am *AgentManager) SetWorkspaceLifecycle(workspaces workspace.Lifecycle) {
 	am.mu.Lock()
 	defer am.mu.Unlock()

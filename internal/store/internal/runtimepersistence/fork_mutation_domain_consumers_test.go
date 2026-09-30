@@ -54,7 +54,7 @@ func TestMutationDomainsReachBothForkConsumersBothStores(t *testing.T) {
 			turnID, turnAt := uuid.NewString(), time.Now().UTC()
 			if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, ctx, f.store.(completionSettlementTestStore), runtimellm.AgentTurnRecord{
 				AgentID: f.source.agentID, Identity: testAgentMemoryIdentity(t, runID, f.source.agentID, conversationForkSourceFlowInstance),
-				Memory: agentmemory.Authored(true), SessionID: f.source.sessionID, RunID: runID,
+				Memory: agentmemory.Plan{Enabled: true}, SessionID: f.source.sessionID, RunID: runID,
 				FlowInstance: conversationForkSourceFlowInstance, TriggerEventID: uuid.NewString(), TriggerEventType: "domain.snapshot", ParseOK: true,
 			}, managedAgentTurnFixtureOptions{TurnID: turnID, Now: turnAt}); err != nil {
 				t.Fatal(err)

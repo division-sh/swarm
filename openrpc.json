@@ -14343,13 +14343,6 @@
         ],
         "type": "object"
       },
-      "AgentMemorySource": {
-        "enum": [
-          "authored",
-          "platform_default"
-        ],
-        "type": "string"
-      },
       "AgentPendingDelivery": {
         "additionalProperties": false,
         "properties": {
@@ -14455,9 +14448,6 @@
             "description": "Whether prior turns are loaded for this agent's exact run and flow instance. False does not imply that diagnostic turn evidence is absent.",
             "type": "boolean"
           },
-          "memory_source": {
-            "$ref": "#/components/schemas/AgentMemorySource"
-          },
           "model": {
             "type": "string"
           },
@@ -14477,7 +14467,6 @@
           "type",
           "model",
           "memory",
-          "memory_source",
           "execution_mode",
           "status"
         ],
@@ -21467,13 +21456,6 @@
           "session_memory": {
             "type": "boolean"
           },
-          "session_memory_source": {
-            "enum": [
-              "authored",
-              "platform_default"
-            ],
-            "type": "string"
-          },
           "session_status": {
             "type": "string"
           },
@@ -21506,13 +21488,6 @@
           },
           "turn_memory": {
             "type": "boolean"
-          },
-          "turn_memory_source": {
-            "enum": [
-              "authored",
-              "platform_default"
-            ],
-            "type": "string"
           },
           "turn_parse_ok": {
             "type": "boolean"

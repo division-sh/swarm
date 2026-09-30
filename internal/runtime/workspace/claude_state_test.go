@@ -21,7 +21,7 @@ import (
 func TestClaudeStateNamespace(t *testing.T) {
 	actor := agentidentitytest.DeclaredForRun(t, uuid.NewString(), "actor", "agents.yaml", "flow", "instance", "flow/instance")
 	session := uuid.NewString()
-	memory := agentmemory.Authored(true)
+	memory := agentmemory.Plan{Enabled: true}
 	request, err := ClaudeSessionState(memory, actor, session)
 	if err != nil {
 		t.Fatal(err)
@@ -110,7 +110,7 @@ func TestClaudeStateDockerRetentionAndRefusal(t *testing.T) {
 	bindTestDockerProjection(t, m2, second)
 	actor := actors.AgentConfig{ExecutionMode: "live", ID: "state-agent", FlowPath: "flow/instance", Identity: agentidentitytest.DeclaredForRun(t, uuid.NewString(), "state-agent", "agents.yaml", "flow", "instance", "flow/instance")}
 	ctx = correlation.WithRunID(ctx, actor.Identity.RunID)
-	request, err := ClaudeSessionState(agentmemory.Authored(true), actor.Identity, uuid.NewString())
+	request, err := ClaudeSessionState(agentmemory.Plan{Enabled: true}, actor.Identity, uuid.NewString())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestClaudeStateDockerRetentionAndRefusal(t *testing.T) {
 			if kind == "fork" {
 				ephemeral, err = ClaudeForkState(actor.Identity, uuid.NewString())
 			} else {
-				ephemeral, err = ClaudeSessionState(agentmemory.Authored(false), actor.Identity, uuid.NewString())
+				ephemeral, err = ClaudeSessionState(agentmemory.Plan{Enabled: false}, actor.Identity, uuid.NewString())
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -370,7 +370,7 @@ func TestClaudeStateDockerSharedWorkspaceIsolation(t *testing.T) {
 	})
 	for _, name := range []string{"first", "second"} {
 		actor := actors.AgentConfig{ExecutionMode: "live", ID: name, FlowPath: "flow/instance", WorkspaceClass: "shared", Identity: agentidentitytest.DeclaredForRun(t, run, name, "agents.yaml", "flow", "instance", "flow/instance")}
-		request, err := ClaudeSessionState(agentmemory.Authored(true), actor.Identity, session)
+		request, err := ClaudeSessionState(agentmemory.Plan{Enabled: true}, actor.Identity, session)
 		if err != nil {
 			t.Fatal(err)
 		}

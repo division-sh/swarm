@@ -156,9 +156,6 @@ func requireServeTestAgentFixtureForSource(t testing.TB, selected storetest.Agen
 	t.Helper()
 	cfg = serveTestAgentConfig(cfg)
 	cfg.FlowPath = cfg.Identity.FlowInstance()
-	if cfg.Memory.Source == "" {
-		cfg.Memory = runtimeagentmemory.PlatformDefault()
-	}
 	if cfg.ExecutionMode == "" {
 		cfg.ExecutionMode = runtimeeffects.ExecutionModeLive
 	}
@@ -2285,7 +2282,7 @@ func seedServedConversationForkSource(t *testing.T, rt servedConversationForkPro
 		storetest.PersistManagedAgentTurnFixture(t, ctx, storetest.ManagedAgentTurnFixture{
 			Store: selectedStore, Selected: selected, Identity: actorIdentity,
 			RunID: fixture.RunID, SessionID: fixture.SessionID, TurnID: turn.id,
-			Memory: runtimeagentmemory.Authored(true), Event: history[i], ParseOK: true, CreatedAt: turn.at,
+			Memory: runtimeagentmemory.Plan{Enabled: true}, Event: history[i], ParseOK: true, CreatedAt: turn.at,
 		})
 	}
 	return fixture
@@ -7427,7 +7424,7 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath string, bundle *
 	requireServeTestAgentFixtureForSource(t, sqliteStore, runtimeactors.AgentConfig{
 		ID: identity.AgentID, Identity: servedRuntimeFlowIdentityForRun(t, runID, "agent-a", "serve-abandon", "agent-a"),
 		Type: "default", Role: "operator", Model: "regular", LLMBackend: "anthropic",
-		Memory: runtimeagentmemory.Authored(true),
+		Memory: runtimeagentmemory.Plan{Enabled: true},
 	}, mustServeTestPersistedSourceArtifactFact(bundleHash))
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, storetest.DatabaseForTest(sqliteStore), authoractivityfixture.DialectSQLite,
 		eventID, runID, "serve.abandon.test", eventtest.Producer(events.EventProducerExternal, "test"),
@@ -7444,9 +7441,9 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath string, bundle *
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 			flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, memory_source, status
+			memory_enabled, status
 		)
-		VALUES (?,?,?,?,?,?,?,?,?,TRUE,'authored','active')
+		VALUES (?,?,?,?,?,?,?,?,?,TRUE,'active')
 	`, activeSessionID, runID, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath); err != nil {
 		_ = sqliteStore.Close()
 		t.Fatalf("seed sqlite delivery session: %v", err)
@@ -8594,7 +8591,7 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 	requireServeTestAgentFixtureForSource(t, runtimePG, runtimeactors.AgentConfig{
 		ID: identity.AgentID, Identity: servedRuntimeFlowIdentityForRun(t, runID, "agent-a", "serve-abandon", "agent-a"),
 		Type: "default", Role: "operator", Model: "regular", LLMBackend: "anthropic",
-		Memory: runtimeagentmemory.Authored(true),
+		Memory: runtimeagentmemory.Plan{Enabled: true},
 	}, mustServeTestPersistedSourceArtifactFact(bundleHash))
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,
 		eventID, runID, "serve.abandon.test", eventtest.Producer(events.EventProducerExternal, "test"),
@@ -8610,9 +8607,9 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 			flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, memory_source, status
+			memory_enabled, status
 		)
-		VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,'authored','active')
+		VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,'active')
 	`, activeSessionID, runID, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath); err != nil {
 		t.Fatalf("seed active delivery session: %v", err)
 	}

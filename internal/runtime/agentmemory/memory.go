@@ -8,53 +8,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 )
 
-func Authored(enabled bool) Plan {
-	return Plan{Enabled: enabled, Source: SourceAuthored}
-}
-
-func PlatformDefault() Plan {
-	return Plan{Enabled: false, Source: SourcePlatformDefault}
-}
-
-type Source string
-
-const (
-	SourceAuthored        Source = "authored"
-	SourcePlatformDefault Source = "platform_default"
-)
-
 type Plan struct {
-	Enabled bool   `json:"enabled"`
-	Source  Source `json:"source"`
-}
-
-func (p Plan) Normalize() (Plan, error) {
-	if strings.TrimSpace(string(p.Source)) == "" {
-		p.Source = SourcePlatformDefault
-	}
-	return NewPlan(p.Enabled, p.Source)
-}
-
-func NewPlan(enabled bool, source Source) (Plan, error) {
-	source = Source(strings.TrimSpace(string(source)))
-	switch source {
-	case SourceAuthored:
-		return Plan{Enabled: enabled, Source: source}, nil
-	case SourcePlatformDefault:
-		if enabled {
-			return Plan{}, fmt.Errorf("agent memory enabled requires source %q", SourceAuthored)
-		}
-		return Plan{Enabled: false, Source: source}, nil
-	default:
-		return Plan{}, fmt.Errorf("invalid agent memory source %q", source)
-	}
+	Enabled bool `json:"enabled"`
 }
 
 func ValidateFlowOwnership(plan Plan, flowInstance string) error {
-	plan, err := plan.Normalize()
-	if err != nil {
-		return err
-	}
 	if plan.Enabled && strings.Trim(strings.TrimSpace(flowInstance), "/") == "" {
 		return fmt.Errorf("memory true requires a flow-instance owner")
 	}

@@ -379,7 +379,7 @@ func budgetAccountingSettlement(target runtimeeffects.UsageTarget, exactness run
 		Now: time.Now().UTC(),
 	}
 	if settlement.AgentTurn.Memory == (agentmemory.Plan{}) {
-		settlement.AgentTurn.Memory = agentmemory.PlatformDefault()
+		settlement.AgentTurn.Memory = agentmemory.Plan{}
 	}
 	if state != runtimeeffects.StateSettled {
 		failure := runtimefailures.FromError(

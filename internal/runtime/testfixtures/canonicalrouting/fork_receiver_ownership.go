@@ -94,7 +94,6 @@ func CopyReceiverMaterializationGeometry(t testing.TB, nested bool) string {
 		path := prefix + receiver.Path
 		writeClosedVariantFile(t, root, path+"/prompts/observer.md", "Observe the admitted item.\n")
 		writeClosedVariantFile(t, root, path+"/agents.yaml", `collector:
-  id: collector
   role: observer
   model: regular
   intent: prompts/observer.md
@@ -110,7 +109,6 @@ func CopyReceiverMaterializationSourceLocalObserver(t testing.TB) string {
 	root := CopyForkReceiverBusinessMutationOwnership(t, false)
 	writeClosedVariantFile(t, root, "prompts/observer.md", "Observe the source input without acquiring a receiver entity.\n")
 	writeClosedVariantFile(t, root, "agents.yaml", `observer:
-  id: observer
   role: observer
   model: regular
   intent: prompts/observer.md
@@ -155,7 +153,6 @@ connect:
         writes: [{target_field: token, value: "${payload.token}"}]
 `)
 	writeClosedVariantFile(t, root, "agents.yaml", `collector:
-  id: collector
   role: observer
   model: regular
   intent: prompts/observer.md

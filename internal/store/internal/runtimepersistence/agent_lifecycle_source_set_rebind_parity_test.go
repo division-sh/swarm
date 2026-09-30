@@ -64,7 +64,7 @@ func TestAgentLifecycleRemovedSourceRetirementParity(t *testing.T) {
 			record := runtimemanager.PersistedAgent{
 				Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 					ID: identity.AgentID(), Identity: identity, Role: "worker", Type: "sonnet", Model: "regular",
-					ExecutionMode: "live", Memory: agentmemory.PlatformDefault(),
+					ExecutionMode: "live", Memory: agentmemory.Plan{},
 				}),
 				Status: "active", HiredBy: "retirement-proof", StartedAt: time.Now().UTC(),
 			}
@@ -252,7 +252,7 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ExecutionMode: "live", ID: "process-static-agent", Identity: staticIdentity,
-			Role: "worker", Type: "sonnet", Model: "regular", Memory: agentmemory.PlatformDefault(),
+			Role: "worker", Type: "sonnet", Model: "regular", Memory: agentmemory.Plan{},
 		}),
 		Status: "active", HiredBy: "process-binding-proof", StartedAt: time.Now().UTC(),
 	}); err != nil {
@@ -281,7 +281,7 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	readinessRecord := runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ExecutionMode: "live", ID: "process-readiness-agent", Identity: readinessIdentity,
-			Role: "worker", Type: "sonnet", Model: "regular", Memory: agentmemory.Authored(true),
+			Role: "worker", Type: "sonnet", Model: "regular", Memory: agentmemory.Plan{Enabled: true},
 			FlowPath: readinessIdentity.FlowInstance(),
 		}),
 		Status: "active", HiredBy: "process-binding-proof", StartedAt: time.Now().UTC(),
@@ -607,7 +607,7 @@ func proveAgentLifecycleSourceSetRebind(t *testing.T, store lifecycleSourceSetRe
 	record := runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID: agentID, Identity: identity, Role: "worker", Type: "sonnet", Model: "regular", FlowID: "global",
-			ExecutionMode: runtimeeffects.ExecutionModeLive, Memory: agentmemory.Authored(true), FlowPath: "global",
+			ExecutionMode: runtimeeffects.ExecutionModeLive, Memory: agentmemory.Plan{Enabled: true}, FlowPath: "global",
 			Config: []byte(`{}`),
 		}),
 		Status: "active", HiredBy: "source-set-rebind-test", StartedAt: now,

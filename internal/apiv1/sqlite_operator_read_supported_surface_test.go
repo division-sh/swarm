@@ -34,10 +34,10 @@ func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-			flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source,
+			flow_scope_key, flow_instance_id, flow_instance, memory_enabled,
 			conversation, turn_count, runtime_state, status, created_at, updated_at
 		) VALUES (
-			?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'authored',
+			?, ?, ?, ?, ?, ?, ?, ?, ?, 1,
 			'[{"role":"assistant","content":"ready"}]', 0, '{}', 'active', ?, ?
 		)
 	`, sessionID, runID, identityFields.AgentID, identityFields.NameOwner, identityFields.NameSource,
@@ -52,7 +52,7 @@ func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 	)
 	storetest.PersistManagedAgentTurnFixture(t, ctx, storetest.ManagedAgentTurnFixture{
 		Store: sqliteStore, Selected: sqliteStore, Identity: identity, RunID: runID, SessionID: sessionID, TurnID: turnID,
-		Memory: agentmemory.Authored(true), Event: storetest.LoadCanonicalEventRecord(t, ctx, sqliteStore, eventID),
+		Memory: agentmemory.Plan{Enabled: true}, Event: storetest.LoadCanonicalEventRecord(t, ctx, sqliteStore, eventID),
 		TaskID: "task-operator-read", ParseOK: true, Latency: 10 * time.Millisecond, CreatedAt: base,
 	})
 

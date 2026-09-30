@@ -55,7 +55,6 @@ func apiTestCatalogAgentDefinition(t testing.TB, agentID, content string) map[st
 		"type":                "managed",
 		"model":               "regular",
 		"memory":              false,
-		"memory_source":       "platform_default",
 		"intent_kind":         string(intent.Kind),
 		"intent_source":       intent.Coordinate,
 		"intent_provenance":   intent.Provenance,

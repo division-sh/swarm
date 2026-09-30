@@ -3,7 +3,7 @@ registry_version: 1
 matrix_version: 1
 status: checked_merge_bearing
 census_head: 25ad370da
-decoder_census_head: issue-2490-schema-root
+decoder_census_head: issue-2485-agents-root
 scope:
   loader_root: LoadWorkflowContractBundle
   included:
@@ -42,14 +42,14 @@ classification_tests:
   f2_bug: "An accepted spelling changes, disappears, or is independently reinterpreted after decode."
 
 inventory:
-  custom_unmarshal_total: 35
-  custom_unmarshal_reachable: 31
+  custom_unmarshal_total: 31
+  custom_unmarshal_reachable: 27
   custom_unmarshal_retired: 2
   custom_unmarshal_excluded: 2
   custom_unmarshal_breakdown:
-    contracts: 20
+    contracts: 17
     flowmodel_policy: 11
-    agentintent: 1
+    agentintent: 0
     channel_pack: 1
     deployment_config_excluded: 2
   yaml_node_functions_in_contracts: 215
@@ -508,26 +508,26 @@ rows:
   - id: agent.identity_defaults
     ruled: mechanical-ratified
     paths: "agents.<agent>.id, agents.<agent>.type, agents.<agent>.memory, agents.<agent>.max_turns_per_task, agents.<agent>.workspace_class"
-    owner: AgentRegistryEntry.UnmarshalYAML
+    owner: projectAgentDeclarationsValue
     information:
       fact: [agent map key]
       derived_projection: [id, type=generic, memory=false, max_turns_per_task=100, empty workspace_class]
     spelling:
-      canonical_candidate: omit_values_equal_to_platform_defaults
+      canonical: omit_values_equal_to_platform_defaults
       retired_duplicates: [explicit_id_equal_to_key, type_generic, memory_false, max_turns_per_task_100, empty_workspace_class]
       distinct_overrides: [non_default_values]
-    corpus: {agents: 2, id_explicit: 0, type_generic: 1, memory_false: 2, max_turns_explicit: 0}
+    corpus: {agents: 2, id_explicit: 0, type_generic: 0, memory_false: 0, max_turns_explicit: 0}
 
   - id: agent.behavior
     ruled: mechanical-ratified
     paths: "agents.<agent>.role, intent, entity_writes, permissions, permissions_bundle, manager_fallback, node_type, model, mock, subscriptions, tools, native_tools, flow_data_access, criteria, emit_events, implementation"
-    owners: [AgentRegistryEntry.UnmarshalYAML, agentintent.Source.UnmarshalYAML, AgentEntityWriteRule.UnmarshalYAML]
+    owners: [projectAgentDeclarationsValue, agentintent.AdmitSource, projectAgentWritesValue, projectAgentDataAccessValue]
     information:
       fact: [intent source/content, mock module, implementation]
       choice: [role, write grants, permissions, fallback, node/model, subscriptions, tools, access, criteria, emit grants]
       boundary_snapshot: [resolved local/import intent content and mock source bytes]
     spelling:
-      canonical_candidate: "intent scalar for local; typed mapping for inline/import; entity writes scalar all or explicit list"
+      canonical: "intent scalar for local; typed mapping for inline/import; entity writes scalar all or explicit list"
       distinct_overrides: [local_vs_inline_vs_import, all_vs_field_list]
       already_retired: [model_tier, mode, conversation_mode, session_scope, session_scope_authority, tools_tier2, subscriptions_bootstrap, subscribes_to, prompt_ref, prompt_inputs]
       retired_duplicates: []
@@ -686,22 +686,24 @@ decoder_coverage:
     tool.schema_value: [ToolInputSchema]
     platform.pack_interface: [PackInterfaceDefinition, PackInterfaceOperation, PackInterfaceEvent, PackInterfaceField]
     tool.schema_entry: [ToolSchemaEntry]
-  durable_data.go:
-    agent.behavior: [DurableDataAccessRef]
-  workflow_contract_agent_writes.go:
-    agent.behavior: [AgentEntityWriteRule]
-  workflow_contract_types.go:
-    agent.identity_defaults: [AgentRegistryEntry]
   enums.go:
     handler.collection_compute: [ComputeOperation]
   flowmodel/model.go:
     policy.value: [PolicyDocument, PolicyValue]
     policy.criteria_validation: [PolicyCriteriaParam, PolicyValidationSet, PolicyValidationClass, PolicyValidationRule, PolicyValidationCheck, PolicyValidationEqualCheck]
     policy.module: [PolicyModule, PolicyModuleRuntime, PolicyModuleLimits]
-  agentintent/model.go:
-    agent.behavior: [Source]
   internal/packs/channel.go:
     pack.channel: [ChannelMapping]
+
+decoder_deleted:
+  workflow_contract_types.go:
+    agent.identity_defaults: [AgentRegistryEntry]
+  workflow_contract_agent_writes.go:
+    agent.behavior: [AgentEntityWriteRule]
+  durable_data.go:
+    agent.behavior: [DurableDataAccessRef]
+  agentintent/model.go:
+    agent.behavior: [Source]
 
 decoder_retired:
   workflow_contract_yaml_schema.go:
@@ -716,7 +718,7 @@ decode_bypasses:
   # Direct roots count yaml.Unmarshal and yaml.NewDecoder calls repository-wide.
   # The canonical owner's root is classified but excluded from the off-owner ceiling.
   # CI compares each PR to the accepted base ledger, not just these initial ceilings.
-  node_site_ceiling: 121
+  node_site_ceiling: 115
   off_owner_direct_decode_ceiling: 29
   files:
     internal/cliapp/cli_output.go: {family: other_production_projection, node_sites: 0, direct_decode_roots: 1}
@@ -729,16 +731,12 @@ decode_bypasses:
     internal/packmodel/envelope.go: {family: closure_pack_platform, node_sites: 0, direct_decode_roots: 1}
     internal/providerconnectors/catalog_types.go: {family: closure_pack_platform, node_sites: 0, direct_decode_roots: 1}
     internal/providertriggers/providertriggers.go: {family: closure_pack_platform, node_sites: 0, direct_decode_roots: 1}
-    internal/runtime/agentintent/model.go: {family: wave_5_agent_tool_policy, node_sites: 1, direct_decode_roots: 0}
-    internal/runtime/contracts/durable_data.go: {family: wave_5_agent_tool_policy, node_sites: 1, direct_decode_roots: 0}
     internal/runtime/contracts/enums.go: {family: wave_4_node_handler, node_sites: 1, direct_decode_roots: 0}
     internal/runtime/contracts/platform_event_catalog.go: {family: closure_pack_platform, node_sites: 6, direct_decode_roots: 0}
     internal/runtime/contracts/tool_input_schema_value.go: {family: wave_5_agent_tool_policy, node_sites: 0, direct_decode_roots: 1}
     internal/runtime/contracts/workflow_contract_activity.go: {family: wave_4_node_handler, node_sites: 1, direct_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_agent_writes.go: {family: wave_5_agent_tool_policy, node_sites: 1, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_loops.go: {family: wave_4_node_handler, node_sites: 1, direct_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_policy_sheet.go: {family: wave_5_agent_tool_policy, node_sites: 1, direct_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_types.go: {family: wave_5_agent_tool_policy, node_sites: 6, direct_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_types.go: {family: wave_5_agent_tool_policy, node_sites: 4, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_yaml.go: {family: mixed_wave_4_wave_5, node_sites: 4, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_yaml_schema.go: {family: mixed_wave_4_wave_5, node_sites: 17, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_yaml_wave1.go: {family: mixed_existing_typed_admission, node_sites: 11, direct_decode_roots: 0}

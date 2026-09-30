@@ -25,7 +25,7 @@ func TestRunForkHistoricalContextOptionalReferencesBothStores(t *testing.T) {
 						case "cause_free_mutation":
 							mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE entity_mutations SET caused_by_event=NULL WHERE mutation_id=$1`, s.mutationID)
 						case "stateless_turn_without_session":
-							mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE agent_turns SET session_id=$1,memory_enabled=FALSE,memory_source='platform_default' WHERE turn_id=$2`, uuid.NewString(), s.turnID)
+							mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE agent_turns SET session_id=$1,memory_enabled=FALSE WHERE turn_id=$2`, uuid.NewString(), s.turnID)
 							var memory bool
 							if err := tx.QueryRowContext(ctx, `SELECT memory_enabled FROM agent_turns WHERE turn_id=$1`, s.turnID).Scan(&memory); err != nil || memory {
 								t.Fatalf("live turn must be stateless before canonical capture: memory=%v err=%v", memory, err)

@@ -130,6 +130,17 @@ func populateEffectiveProvenance(bundle *WorkflowContractBundle) {
 		}
 	}
 	populateEffectiveEventProjectionProvenance(bundle, builder)
+	for _, record := range bundle.AgentDeclarationRecords() {
+		prefix := "agents[" + strconv.Quote(record.Source.FlowPath+":"+record.LogicalID) + "]"
+		for path, provenance := range record.Entry.admissionProvenance {
+			builder.set(prefix+"."+path, provenance)
+		}
+		for field, source := range record.Entry.EffectiveFieldSources {
+			if source == AgentFieldSourcePlatformDefault {
+				builder.set(prefix+"."+field, EffectiveValueProvenance{Origin: EffectiveValueOriginDerived, RuleID: "agent.platform_default." + field})
+			}
+		}
+	}
 	bundle.effectiveProvenance = builder.ledger()
 }
 

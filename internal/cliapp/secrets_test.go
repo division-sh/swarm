@@ -319,7 +319,6 @@ func writeProviderSecretsCommandContractsFixture(t *testing.T) string {
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: provider-secrets-command-fixture\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `
 provider-agent:
-  id: provider-agent
   role: provider
   intent: prompts/provider-agent.md
   model: regular

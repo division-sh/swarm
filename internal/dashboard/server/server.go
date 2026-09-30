@@ -37,7 +37,6 @@ type ConversationSummary struct {
 	Kind         string                      `json:"kind,omitempty"`
 	FlowInstance string                      `json:"flow_instance,omitempty"`
 	Memory       bool                        `json:"memory"`
-	MemorySource string                      `json:"memory_source,omitempty"`
 	Status       string                      `json:"status,omitempty"`
 	TurnCount    int                         `json:"turn_count,omitempty"`
 	Summary      string                      `json:"summary,omitempty"`

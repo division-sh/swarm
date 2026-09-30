@@ -317,11 +317,11 @@ func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, memory_source, runtime_state,
+			memory_enabled, runtime_state,
 			lease_holder, lease_grant_id, lease_expires_at, status, created_at, updated_at
 		)
 		VALUES
-			(?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'authored', '{}', 'worker-1', lower(hex(randomblob(16))), ?, 'active', ?, ?),
+			(?, ?, ?, ?, ?, ?, ?, ?, ?, 1, '{}', 'worker-1', lower(hex(randomblob(16))), ?, 'active', ?, ?),
 			(?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'authored', '{}', 'worker-1', lower(hex(randomblob(16))), ?, 'active', ?, ?)
 		`, uuid.NewString(), blockedRunID,
 		blockedFields.AgentID, blockedFields.NameOwner, blockedFields.NameSource,

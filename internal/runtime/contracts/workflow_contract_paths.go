@@ -40,6 +40,11 @@ func cloneAgentRegistryEntry(in AgentRegistryEntry) AgentRegistryEntry {
 	out.Mock.Source = append([]byte(nil), in.Mock.Source...)
 	out.AuthoredFields = cloneBoolMap(in.AuthoredFields)
 	out.EffectiveFieldSources = cloneStringMap(in.EffectiveFieldSources)
+	out.admissionProvenance = make(map[string]EffectiveValueProvenance, len(in.admissionProvenance))
+	for path, provenance := range in.admissionProvenance {
+		out.admissionProvenance[path] = cloneEffectiveValueProvenance(provenance)
+	}
+	out.DataAccess = append([]DurableDataAccessRef(nil), in.DataAccess...)
 	if len(in.EntityWrites) > 0 {
 		out.EntityWrites = make(map[string]AgentEntityWriteDecl, len(in.EntityWrites))
 		for key, value := range in.EntityWrites {

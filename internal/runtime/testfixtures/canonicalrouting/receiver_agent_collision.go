@@ -39,12 +39,10 @@ func CopyReceiverAgentCollision(t testing.TB) string {
 	writeClosedVariantFile(t, root, "types.yaml", types.String())
 	writeClosedVariantFile(t, root, "account/schema.yaml", "name: account\nmode: template\ninstance: account_id\ninstance_variables:\n  variables:\n"+variables.String()+"pins:\n  inputs:\n    events:\n      - event: work.ready\n        resolution: {mode: select-or-create}\n        initialize:\n"+initialize.String())
 	writeClosedVariantFile(t, root, "account/agents.yaml", `observer:
-  id: observer
   role: observer
   model: regular
   intent: {inline: 'AUTHORED_COLLISION_OBSERVER: acknowledge the received account work.'}
   subscriptions: [work.ready]
-  memory: false
 `)
 	return root
 }

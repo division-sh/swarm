@@ -929,8 +929,7 @@ func agentViews(source semanticview.Source, ownerFlowID string) ([]AgentView, er
 		fields := map[string]AgentFieldView{}
 		addAgentField(fields, entry, "type", entry.Type)
 		addAgentField(fields, entry, "model", entry.Model)
-		addAgentField(fields, entry, "memory", entry.MemoryPlan.Enabled)
-		addAgentField(fields, entry, "memory_source", entry.MemoryPlan.Source)
+		fields["memory"] = AgentFieldView{Value: entry.MemoryPlan.Enabled}
 		addAgentField(fields, entry, "max_turns_per_task", entry.MaxTurnsPerTask)
 		addAgentField(fields, entry, "workspace_class", entry.WorkspaceClass)
 		addAgentField(fields, entry, "manager_fallback", entry.ManagerFallback)

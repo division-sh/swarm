@@ -89,7 +89,7 @@ func TestForkChatCommittedAssistantSurvivesCleanupErrorThroughAPI(t *testing.T) 
 
 	forkID, forkTurnID, sourceRunID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	bundleHash := "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	actor := runtimeactors.AgentConfig{ID: "fork-agent", ExecutionMode: runtimeeffects.ExecutionModeMock, Model: llmselection.ModelAliasRegular, Memory: agentmemory.PlatformDefault()}
+	actor := runtimeactors.AgentConfig{ID: "fork-agent", ExecutionMode: runtimeeffects.ExecutionModeMock, Model: llmselection.ModelAliasRegular, Memory: agentmemory.Plan{}}
 	actor.Mock = mockperformance.Performance{Kind: mockperformance.KindPython, SourcePath: "mocks/agent.py", Source: source, Digest: "sha256:" + runtimeeffects.Fingerprint(source)}
 	policy := runfork.CanonicalConversationForkSandboxPolicy()
 	prepared := runfork.ConversationForkChatPrepared{

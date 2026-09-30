@@ -25,10 +25,7 @@ var ValidateConversationRuntimeWatchdogDescriptor = sessionstore.ValidateConvers
 var DecodeConversationRuntimeStateDescriptor = sessionstore.DecodeConversationRuntimeStateDescriptor
 
 func validateTurnMemory(rec runtimellm.AgentTurnRecord) (agentmemory.Plan, agentmemory.Identity, error) {
-	plan, err := rec.Memory.Normalize()
-	if err != nil {
-		return agentmemory.Plan{}, agentmemory.Identity{}, err
-	}
+	plan := rec.Memory
 	identity := rec.Identity.Normalize()
 	if strings.TrimSpace(rec.SessionID) == "" {
 		return agentmemory.Plan{}, agentmemory.Identity{}, fmt.Errorf("session_id is required")
@@ -66,7 +63,7 @@ func ensurePostgresStatelessAuditTx(ctx context.Context, tx *sql.Tx, attempt *mu
 			agent_name_owner=EXCLUDED.agent_name_owner, agent_name_source=EXCLUDED.agent_name_source,
 			agent_route_presence=EXCLUDED.agent_route_presence, flow_scope_key=EXCLUDED.flow_scope_key,
 			flow_instance_id=EXCLUDED.flow_instance_id, flow_instance=EXCLUDED.flow_instance,
-			memory_enabled=FALSE, memory_source=EXCLUDED.memory_source, entity_id=EXCLUDED.entity_id,
+			memory_enabled=FALSE, entity_id=EXCLUDED.entity_id,
 			turn_count=agent_conversation_audits.turn_count + 1, status='active', updated_at=now()`
 		if errors.Is(err, sql.ErrNoRows) {
 			// A concurrent first insert must be locked/read before replacing its run.
@@ -76,12 +73,12 @@ func ensurePostgresStatelessAuditTx(ctx context.Context, tx *sql.Tx, attempt *mu
 		err = tx.QueryRowContext(ctx, `
 			INSERT INTO agent_conversation_audits (
 				session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-				flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source, entity_id,
+				flow_scope_key, flow_instance_id, flow_instance, memory_enabled, entity_id,
 				conversation, turn_count, runtime_state, status, created_at, updated_at
-			) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,FALSE,$10,NULLIF($11,'')::uuid,'[]'::jsonb,1,'{}'::jsonb,'active',now(),now())
+			) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,FALSE,NULLIF($10,'')::uuid,'[]'::jsonb,1,'{}'::jsonb,'active',now(),now())
 		`+conflict+` RETURNING session_id::text, run_id::text`, sessionID, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource,
 			fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-			string(plan.Source), strings.TrimSpace(rec.EntityID)).Scan(&storedSessionID, &storedRunID)
+			strings.TrimSpace(rec.EntityID)).Scan(&storedSessionID, &storedRunID)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
 		}
@@ -168,12 +165,12 @@ func (s *LLMPostgresOwner) UpsertConversation(ctx context.Context, lease *runtim
 			WHERE session_id=$4::uuid AND run_id=$5::uuid AND agent_id=$6
 			  AND agent_name_owner=$7 AND agent_name_source=$8 AND agent_route_presence=$9
 			  AND flow_scope_key=$10 AND flow_instance_id=$11 AND flow_instance=$12
-			  AND memory_enabled=$13 AND memory_source=$14 AND status='active'
-			  AND lease_holder=$15 AND lease_grant_id=$16
+			  AND memory_enabled=$13  AND status='active'
+			  AND lease_holder=$14 AND lease_grant_id=$15
 			RETURNING session_id::text, run_id::text
 		`, string(messages), rec.TurnCount, state, strings.TrimSpace(rec.SessionID), identity.RunID,
 				fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey,
-				fields.FlowInstanceID, fields.FlowInstancePath, plan.Enabled, string(plan.Source), lease.LockOwner, lease.GrantID).Scan(&storedSessionID, &storedRunID)
+				fields.FlowInstanceID, fields.FlowInstancePath, plan.Enabled, lease.LockOwner, lease.GrantID).Scan(&storedSessionID, &storedRunID)
 			if errors.Is(err, sql.ErrNoRows) {
 				return fmt.Errorf("no exact active memory row found for run=%s agent=%s flow_instance=%s session=%s", identity.RunID, identity.AgentID(), identity.FlowInstance(), rec.SessionID)
 			}
@@ -217,11 +214,11 @@ func (s *LLMPostgresOwner) ProjectCompletionConversationTx(ctx context.Context, 
 		WHERE session_id=$4::uuid AND run_id=$5::uuid AND agent_id=$6
 		  AND agent_name_owner=$7 AND agent_name_source=$8 AND agent_route_presence=$9
 		  AND flow_scope_key=$10 AND flow_instance_id=$11 AND flow_instance=$12
-		  AND memory_enabled=$13 AND memory_source=$14 AND status='active' AND turn_count=$15
+		  AND memory_enabled=$13  AND status='active' AND turn_count=$14
 		RETURNING session_id::text, run_id::text
 	`, string(messages), rec.TurnCount, state, strings.TrimSpace(rec.SessionID), identity.RunID,
 			fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey,
-			fields.FlowInstanceID, fields.FlowInstancePath, plan.Enabled, string(plan.Source), expectedTurnCount).Scan(&storedSessionID, &storedRunID)
+			fields.FlowInstanceID, fields.FlowInstancePath, plan.Enabled, expectedTurnCount).Scan(&storedSessionID, &storedRunID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("completion conversation projection turn conflict: run=%s agent=%s session=%s expected_turn=%d", identity.RunID, identity.AgentID(), rec.SessionID, expectedTurnCount)
 		}
@@ -233,10 +230,7 @@ func (s *LLMPostgresOwner) ProjectCompletionConversationTx(ctx context.Context, 
 }
 
 func validateConversationMemory(rec runtimellm.ConversationRecord) (agentmemory.Plan, agentmemory.Identity, error) {
-	plan, err := rec.Memory.Normalize()
-	if err != nil {
-		return agentmemory.Plan{}, agentmemory.Identity{}, err
-	}
+	plan := rec.Memory
 	if !plan.Enabled {
 		return agentmemory.Plan{}, agentmemory.Identity{}, fmt.Errorf("conversation persistence requires memory true")
 	}

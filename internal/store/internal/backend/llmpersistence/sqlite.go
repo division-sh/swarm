@@ -30,19 +30,19 @@ func ensureSQLiteStatelessAuditTx(ctx context.Context, tx *sql.Tx, attempt *muta
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-			flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source, entity_id,
+			flow_scope_key, flow_instance_id, flow_instance, memory_enabled, entity_id,
 			conversation, turn_count, runtime_state, status, created_at, updated_at
-		) VALUES (?,?,?,?,?,?,?,?,?,0,?,?, '[]',1,'{}','active',?,?)
+		) VALUES (?,?,?,?,?,?,?,?,?,0,?, '[]',1,'{}','active',?,?)
 		ON CONFLICT(session_id) DO UPDATE SET
 			run_id=excluded.run_id, agent_id=excluded.agent_id,
 			agent_name_owner=excluded.agent_name_owner, agent_name_source=excluded.agent_name_source,
 			agent_route_presence=excluded.agent_route_presence, flow_scope_key=excluded.flow_scope_key,
 			flow_instance_id=excluded.flow_instance_id, flow_instance=excluded.flow_instance,
-			memory_enabled=0, memory_source=excluded.memory_source, entity_id=excluded.entity_id,
+			memory_enabled=0, entity_id=excluded.entity_id,
 			turn_count=agent_conversation_audits.turn_count + 1, status='active', updated_at=excluded.updated_at
 	`, sessionID, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource,
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-		string(plan.Source), sqliteNullUUID(rec.EntityID), now, now)
+		sqliteNullUUID(rec.EntityID), now, now)
 	if err != nil {
 		return fmt.Errorf("ensure sqlite stateless conversation audit row: %w", err)
 	}
@@ -118,11 +118,11 @@ func (s *LLMSQLiteOwner) UpsertConversation(ctx context.Context, lease *runtimes
 			WHERE session_id=? AND run_id=? AND agent_id=? AND agent_name_owner=?
 			  AND agent_name_source=? AND agent_route_presence=? AND flow_scope_key=?
 			  AND flow_instance_id=? AND flow_instance=?
-			  AND memory_enabled=? AND memory_source=? AND status='active'
+			  AND memory_enabled=?  AND status='active'
 			  AND lease_holder=? AND lease_grant_id=? AND lease_expires_at>?
 		`, string(messages), rec.TurnCount, state, s.now(), strings.TrimSpace(rec.SessionID), identity.RunID,
 				fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey,
-				fields.FlowInstanceID, fields.FlowInstancePath, plan.Enabled, string(plan.Source), lease.LockOwner, lease.GrantID, s.now())
+				fields.FlowInstanceID, fields.FlowInstancePath, plan.Enabled, lease.LockOwner, lease.GrantID, s.now())
 			if err != nil {
 				return fmt.Errorf("update exact sqlite live conversation: %w", err)
 			}
@@ -164,10 +164,10 @@ func (s *LLMSQLiteOwner) ProjectCompletionConversationTx(ctx context.Context, at
 		WHERE session_id=? AND run_id=? AND agent_id=? AND agent_name_owner=?
 		  AND agent_name_source=? AND agent_route_presence=? AND flow_scope_key=?
 		  AND flow_instance_id=? AND flow_instance=?
-		  AND memory_enabled=? AND memory_source=? AND status='active' AND turn_count=?
+		  AND memory_enabled=?  AND status='active' AND turn_count=?
 	`, string(messages), rec.TurnCount, state, now.UTC(), strings.TrimSpace(rec.SessionID), identity.RunID,
 			fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey,
-			fields.FlowInstanceID, fields.FlowInstancePath, plan.Enabled, string(plan.Source), expectedTurnCount)
+			fields.FlowInstanceID, fields.FlowInstancePath, plan.Enabled, expectedTurnCount)
 		if err != nil {
 			return fmt.Errorf("project exact sqlite completion conversation: %w", err)
 		}

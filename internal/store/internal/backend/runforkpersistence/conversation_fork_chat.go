@@ -626,8 +626,7 @@ func loadConversationForkSourceAgent(ctx context.Context, owner conversationFork
 	row := owner.queryRow(ctx, q, `
 		SELECT CAST(run_id AS TEXT), agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 		       flow_scope_key, flow_instance_id, flow_instance,
-		       role, model, llm_backend, memory_enabled, memory_source,
-		       COALESCE(parent_agent_id,''), COALESCE(CAST(entity_id AS TEXT),''), config,
+		       role, model, llm_backend, memory_enabled, COALESCE(parent_agent_id,''), COALESCE(CAST(entity_id AS TEXT),''), config,
 		       runtime_descriptor, subscriptions, emit_events, tools, permissions
 		FROM agents
 		WHERE run_id = ? AND agent_id = ? AND agent_name_owner = ? AND agent_name_source = ?
@@ -641,7 +640,7 @@ func loadConversationForkSourceAgent(ctx context.Context, owner conversationFork
 		&persisted.Identity.RoutePresence, &persisted.Identity.FlowScopeKey,
 		&persisted.Identity.FlowInstanceID, &persisted.Identity.FlowInstancePath,
 		&persisted.Role, &persisted.Model, &persisted.LLMBackend,
-		&persisted.MemoryEnabled, &persisted.MemorySource, &persisted.ParentAgentID, &persisted.EntityID,
+		&persisted.MemoryEnabled, &persisted.ParentAgentID, &persisted.EntityID,
 		&persisted.ConfigJSON, &persisted.RuntimeDescriptor, &persisted.SubscriptionsJSON,
 		&persisted.EmitEventsJSON, &persisted.ToolsJSON, &persisted.PermissionsJSON,
 	); err != nil {

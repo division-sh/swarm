@@ -384,7 +384,10 @@ func agentNameGuardIsRawID(selector *ast.SelectorExpr, info *types.Info) bool {
 }
 
 func agentNameGuardRawIDAllowed(path, enclosing string) bool {
-	return path == "internal/runtime/contracts/workflow_contract_effective.go" && enclosing == "DeclaredAgentID"
+	// Source admission reads the authored id only to reject invalid/duplicate
+	// spellings; DeclaredAgentID remains the sole effective-name interpreter.
+	return path == "internal/runtime/contracts/workflow_contract_effective.go" && enclosing == "DeclaredAgentID" ||
+		path == "internal/runtime/contracts/workflow_contract_agents_value.go" && enclosing == "projectAgentValue"
 }
 
 func agentNameGuardAgentMapRangeAllowed(path, enclosing string) bool {

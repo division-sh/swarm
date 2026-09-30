@@ -46,10 +46,13 @@ func TestAgentsListUsesV1RPCWithFilters(t *testing.T) {
 	if !reflect.DeepEqual(captured.Params, wantParams) {
 		t.Fatalf("params = %#v, want %#v", captured.Params, wantParams)
 	}
-	for _, want := range []string{"AGENT_ID", "MEMORY", "MEMORY_SOURCE", "agent-1", "researcher", "worker", "running", "default", "false", "platform default", "agent-2", "idle"} {
+	for _, want := range []string{"AGENT_ID", "MEMORY", "agent-1", "researcher", "worker", "running", "default", "false", "agent-2", "idle"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
+	}
+	if strings.Contains(stdout.String(), "MEMORY_SOURCE") || strings.Contains(stdout.String(), "platform default") {
+		t.Fatal("retired memory source exposed by agent list")
 	}
 	if strings.TrimSpace(stderr.String()) != "" {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
@@ -120,7 +123,7 @@ func TestAgentViewUsesAgentGetAndRendersRefsOnly(t *testing.T) {
 		"Agent agent-1  running",
 		"identity   role reviewer, type worker",
 		"model      default",
-		"memory     false (platform default)",
+		"memory     false",
 		"session    session-1, started 2026-05-18T03:00:00Z",
 		"last turn  turn-1, completed 2026-05-18T03:05:00Z, parsed true",
 	} {
@@ -143,13 +146,12 @@ func TestAgentDetailHumanOutputPreservesCanonicalLastTurnFailure(t *testing.T) {
 	var out bytes.Buffer
 	writeAgentDetailResult(&out, agentDetailResult{
 		Agent: agentSummary{
-			AgentID:      "agent-1",
-			Role:         "reviewer",
-			Type:         "worker",
-			Model:        "default",
-			Memory:       false,
-			MemorySource: "platform_default",
-			Status:       "failed",
+			AgentID: "agent-1",
+			Role:    "reviewer",
+			Type:    "worker",
+			Model:   "default",
+			Memory:  false,
+			Status:  "failed",
 		},
 		LastTurnRef: &agentTurnRef{
 			TurnID:      "turn-1",
@@ -325,13 +327,12 @@ func TestAgentReadCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 
 func agentSummaryResult(agentID, role, status string) map[string]any {
 	return map[string]any{
-		"agent_id":      agentID,
-		"role":          role,
-		"type":          "worker",
-		"model":         "default",
-		"memory":        false,
-		"memory_source": "platform_default",
-		"status":        status,
+		"agent_id": agentID,
+		"role":     role,
+		"type":     "worker",
+		"model":    "default",
+		"memory":   false,
+		"status":   status,
 	}
 }
 

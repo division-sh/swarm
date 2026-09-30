@@ -78,7 +78,7 @@ func proveRegisteredManagedChannelTransport(t *testing.T, ctx context.Context, s
 			}
 			token := effects.LifecycleToken{RuntimeEpoch: state.RuntimeEpoch, Identity: actor.Identity, AgentID: actor.ID, Generation: state.Generation}
 			authority := effects.NormalAgentAuthority(token, "managed-channel-transport", time.Now().Add(time.Minute))
-			authority.Target = effects.UsageTarget{Kind: effects.UsageTargetAgentTurn, ID: uuid.NewString(), RunID: actor.Identity.RunID, AgentID: actor.ID, AgentIdentity: actor.Identity, SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(), FlowInstance: actor.CanonicalFlowPath(), EntityID: actor.EntityID}
+			authority.Target = effects.UsageTarget{Kind: effects.UsageTargetAgentTurn, ID: uuid.NewString(), RunID: actor.Identity.RunID, AgentID: actor.ID, AgentIdentity: actor.Identity, SessionID: uuid.NewString(), Memory: agentmemory.Plan{}, FlowInstance: actor.CanonicalFlowPath(), EntityID: actor.EntityID}
 			surface, err := managedcapabilities.New(managedcapabilities.Plan{
 				ActorIdentity: actor.Identity, RuntimeMode: "task", Provider: "claude", Transport: "cli", ProviderContract: "channel-transport-protocol-proof",
 				Authority: managedcapabilities.Authority{Kind: managedcapabilities.AuthorityProviderTurn, ID: authority.Target.ID, ExecutionKind: managedcapabilities.ExecutionNormalAgent, ExecutionAuthorityID: authority.ID, RunID: authority.Target.RunID, SessionID: authority.Target.SessionID, TurnOrdinal: 1},

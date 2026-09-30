@@ -89,7 +89,7 @@ func assertRuntimeStartCarriesMemoryIdentity(t *testing.T, source semanticview.S
 	if cfg.FlowID != flowPath {
 		t.Fatalf("FlowID = %q, want %s", cfg.FlowID, flowPath)
 	}
-	if cfg.Memory != agentmemory.Authored(true) {
+	if cfg.Memory != (agentmemory.Plan{Enabled: true}) {
 		t.Fatalf("Memory = %#v, want authored true", cfg.Memory)
 	}
 }

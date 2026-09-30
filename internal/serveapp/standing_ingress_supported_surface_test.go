@@ -54,7 +54,7 @@ func (telegramPhraseBotLLMRuntime) ProviderContract() runtimellm.ProviderContrac
 
 func (telegramPhraseBotLLMRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []runtimellm.ToolDefinition) (*runtimellm.Session, error) {
 	execution, ok := agentmemory.FromContext(ctx)
-	memory := agentmemory.PlatformDefault()
+	memory := agentmemory.Plan{}
 	if ok {
 		memory = execution.Plan
 	}

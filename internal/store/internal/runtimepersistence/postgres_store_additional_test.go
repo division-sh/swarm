@@ -443,11 +443,11 @@ func TestPostgresStore_AgentSessionsPartialUniquenessAllowsTerminatedHistoryButR
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, memory_source, status,
+			memory_enabled, status,
 			termination_reason, terminated_at, created_at, updated_at
 		) VALUES (
 			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9,
-			TRUE, 'authored', 'terminated', 'failed', now(), now(), now()
+			TRUE, 'terminated', 'failed', now(), now(), now()
 		)
 	`, sessionA, specEntityStateRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath); err != nil {
@@ -457,10 +457,10 @@ func TestPostgresStore_AgentSessionsPartialUniquenessAllowsTerminatedHistoryButR
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, memory_source, status, created_at, updated_at
+			memory_enabled, status, created_at, updated_at
 		) VALUES (
 			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9,
-			TRUE, 'authored', 'active', now(), now()
+			TRUE, 'active', now(), now()
 		)
 	`, sessionB, specEntityStateRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath); err != nil {
@@ -470,10 +470,10 @@ func TestPostgresStore_AgentSessionsPartialUniquenessAllowsTerminatedHistoryButR
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, memory_source, status, created_at, updated_at
+			memory_enabled, status, created_at, updated_at
 		) VALUES (
 			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9,
-			TRUE, 'authored', 'suspended', now(), now()
+			TRUE, 'suspended', now(), now()
 		)
 	`, uuid.NewString(), specEntityStateRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath); err == nil {
@@ -494,10 +494,10 @@ func TestPostgresRegistry_AcquireFailsClosedOnSuspendedResumableOwner(t *testing
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, memory_source, status, created_at, updated_at
+			memory_enabled, status, created_at, updated_at
 		) VALUES (
 			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9,
-			TRUE, 'authored', 'suspended', now(), now()
+			TRUE, 'suspended', now(), now()
 		)
 	`, uuid.NewString(), specEntityStateRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath); err != nil {
@@ -572,11 +572,11 @@ func TestPostgresStore_AgentSessionSuccessorInvariantsRejectInvalidCanonicalWrit
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, memory_source, status,
+			memory_enabled, status,
 			termination_reason, terminated_at, created_at, updated_at
 		) VALUES (
 			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9,
-			TRUE, 'authored', 'terminated', 'failed', now(), now(), now()
+			TRUE, 'terminated', 'failed', now(), now(), now()
 		)
 	`, oldID, specEntityStateRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath); err != nil {
@@ -586,10 +586,10 @@ func TestPostgresStore_AgentSessionSuccessorInvariantsRejectInvalidCanonicalWrit
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, memory_source, status, created_at, updated_at
+			memory_enabled, status, created_at, updated_at
 		) VALUES (
 			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9,
-			TRUE, 'authored', 'active', now(), now()
+			TRUE, 'active', now(), now()
 		)
 	`, goodSuccessorID, specEntityStateRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath); err != nil {
@@ -1431,7 +1431,7 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 		SessionID: sessionID,
 		AgentID:   "a1",
 		Identity:  identity,
-		Memory:    agentmemory.Authored(true),
+		Memory:    agentmemory.Plan{Enabled: true},
 		Messages: []llm.Message{
 			{Role: "user", Content: "reach me at a@example.com"},
 		},
@@ -1443,7 +1443,7 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("LoadActiveConversation ok=%v err=%v", ok, err)
 	}
-	if rec.AgentID != "a1" || rec.Identity != identity || rec.Memory != agentmemory.Authored(true) || rec.Status != "active" || rec.TurnCount != 2 {
+	if rec.AgentID != "a1" || rec.Identity != identity || rec.Memory != (agentmemory.Plan{Enabled: true}) || rec.Status != "active" || rec.TurnCount != 2 {
 		t.Fatalf("unexpected conversation: %+v", rec)
 	}
 	if len(rec.Messages) != 1 || strings.Contains(rec.Messages[0].Content, "a@example.com") || !strings.Contains(rec.Messages[0].Content, "[EMAIL]") {
@@ -1452,7 +1452,7 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 
 	if err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID: "a1", Identity: identity, RunID: identity.RunID, FlowInstance: identity.FlowInstance(),
-		Memory: agentmemory.Authored(true), SessionID: uuid.NewString(),
+		Memory: agentmemory.Plan{Enabled: true}, SessionID: uuid.NewString(),
 	}); err == nil {
 		t.Fatal("expected missing session row error")
 	}
@@ -1461,7 +1461,7 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 		RunID:          identity.RunID,
 		FlowInstance:   identity.FlowInstance(),
 		Identity:       identity,
-		Memory:         agentmemory.Authored(true),
+		Memory:         agentmemory.Plan{Enabled: true},
 		SessionID:      sessionID,
 		TaskID:         uuid.NewString(),
 		RequestPayload: []byte(`{"x":1}`),
@@ -1509,7 +1509,7 @@ func TestManagerStore_ConversationPersistenceUsesExactFlowInstanceIdentity(t *te
 		SessionID: sessionID,
 		AgentID:   "entity-agent",
 		Identity:  identity,
-		Memory:    agentmemory.Authored(true),
+		Memory:    agentmemory.Plan{Enabled: true},
 		Messages:  []llm.Message{{Role: "assistant", Content: "done"}},
 		TurnCount: 1,
 		Status:    "active",
@@ -1549,7 +1549,7 @@ func TestManagerStore_ManagedTurnReadbackFixture_PersistsObservedToolCalls(t *te
 
 	if err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID: "a1", Identity: identity, RunID: identity.RunID, FlowInstance: identity.FlowInstance(),
-		Memory: agentmemory.Authored(true), SessionID: sessionID,
+		Memory: agentmemory.Plan{Enabled: true}, SessionID: sessionID,
 		ToolCalls: []runtimellm.ToolCall{
 			{Name: "query_entities", Arguments: map[string]any{"entity_type": "company"}},
 			{Name: "web_search", Arguments: map[string]any{"query": "b2b payments"}},
@@ -1607,7 +1607,7 @@ func TestManagerStore_LiveConversationPersistenceRequiresCanonicalLiveSession(t 
 		SessionID: missingSessionID,
 		AgentID:   "a1",
 		Identity:  identity,
-		Memory:    agentmemory.Authored(true),
+		Memory:    agentmemory.Plan{Enabled: true},
 		Messages:  []llm.Message{{Role: "assistant", Content: "hello"}},
 		TurnCount: 1,
 		Status:    "active",
@@ -1868,7 +1868,7 @@ func TestManagerStore_UpdateLiveSessionWatchdog_PreservesCanonicalSummary(t *tes
 		SessionID: sessionID,
 		AgentID:   "a1",
 		Identity:  identity,
-		Memory:    agentmemory.Authored(true),
+		Memory:    agentmemory.Plan{Enabled: true},
 		Messages:  []runtimellm.Message{{Role: "assistant", Content: "still working"}},
 		Summary:   "still working",
 		TurnCount: 2,
@@ -1916,7 +1916,7 @@ func TestManagerStore_AppendStatelessAgentTurnPersistsTurnBlocks(t *testing.T) {
 
 	if err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID: "a1", RunID: runID, FlowInstance: "global",
-		Memory: agentmemory.PlatformDefault(), SessionID: sessionID,
+		Memory: agentmemory.Plan{}, SessionID: sessionID,
 		TurnBlocks: []runtimellm.TurnBlock{
 			{Kind: "dispatch", Title: "scoring/vertical.marginal", Data: json.RawMessage(`{"trigger_event_type":"scoring/vertical.marginal"}`)},
 			{Kind: "tool_use", ToolName: "schedule", Input: json.RawMessage(`{"delay_seconds":1209600}`)},
@@ -1951,7 +1951,7 @@ func TestManagerStore_AppendStatelessAgentTurnCanonicalizesTurnBlocksThroughSing
 
 	if err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID: "a1", RunID: runID, FlowInstance: "global",
-		Memory:           agentmemory.PlatformDefault(),
+		Memory:           agentmemory.Plan{},
 		SessionID:        sessionID,
 		TriggerEventType: "task.run",
 		ResponseRaw:      []byte(`{"result":"14-day review scheduled."}`),
@@ -1986,7 +1986,7 @@ func TestManagerStore_ManagedTurnReadbackFixture_LeavesLiveSessionRuntimeStateFo
 		SessionID: sessionID,
 		AgentID:   "a1",
 		Identity:  identity,
-		Memory:    agentmemory.Authored(true),
+		Memory:    agentmemory.Plan{Enabled: true},
 		Messages:  []llm.Message{{Role: "assistant", Content: "done"}},
 		TurnCount: 1,
 		Status:    "active",
@@ -1999,7 +1999,7 @@ func TestManagerStore_ManagedTurnReadbackFixture_LeavesLiveSessionRuntimeStateFo
 		RunID:          identity.RunID,
 		FlowInstance:   identity.FlowInstance(),
 		Identity:       identity,
-		Memory:         agentmemory.Authored(true),
+		Memory:         agentmemory.Plan{Enabled: true},
 		SessionID:      sessionID,
 		RequestPayload: []byte(`{"kind":"session"}`),
 		ResponseRaw:    []byte(`{"result":"done"}`),
@@ -2060,7 +2060,7 @@ func TestManagerStore_ManagedTurnReadbackFixture_PreservesLiveSessionRetryLineag
 		RunID:          identity.RunID,
 		FlowInstance:   identity.FlowInstance(),
 		Identity:       identity,
-		Memory:         agentmemory.Authored(true),
+		Memory:         agentmemory.Plan{Enabled: true},
 		SessionID:      sessionID,
 		RequestPayload: []byte(`{"kind":"session"}`),
 		ResponseRaw:    []byte(`{"result":"done"}`),
@@ -2101,7 +2101,7 @@ func TestManagerStore_ManagedTurnReadbackFixtureRollsBackStatelessAuditAndTurnWh
 		AgentID:        "a1",
 		RunID:          runID,
 		FlowInstance:   "global",
-		Memory:         agentmemory.PlatformDefault(),
+		Memory:         agentmemory.Plan{},
 		SessionID:      sessionID,
 		RequestPayload: []byte(`{"kind":"task"}`),
 		ResponseRaw:    []byte(`{"ok":true}`),
@@ -2141,7 +2141,7 @@ func TestManagerStore_StatelessTurnPersistsAuditEvidenceWithoutLiveMemory(t *tes
 		AgentID:        "a1",
 		RunID:          runID,
 		FlowInstance:   "global",
-		Memory:         agentmemory.Authored(false),
+		Memory:         agentmemory.Plan{Enabled: false},
 		SessionID:      sessionID,
 		RequestPayload: []byte(`{"kind":"task"}`),
 		ResponseRaw:    []byte(`{"ok":true}`),
@@ -2152,16 +2152,16 @@ func TestManagerStore_StatelessTurnPersistsAuditEvidenceWithoutLiveMemory(t *tes
 	}
 
 	var memoryEnabled bool
-	var memorySource, conversation string
+	var conversation string
 	if err := db.QueryRowContext(ctx, `
-		SELECT memory_enabled, memory_source, conversation::text
+		SELECT memory_enabled, conversation::text
 		FROM agent_conversation_audits
 		WHERE session_id = $1::uuid
-	`, sessionID).Scan(&memoryEnabled, &memorySource, &conversation); err != nil {
+	`, sessionID).Scan(&memoryEnabled, &conversation); err != nil {
 		t.Fatalf("load stateless audit: %v", err)
 	}
-	if memoryEnabled || memorySource != "authored" || conversation != "[]" {
-		t.Fatalf("stateless audit memory=%v source=%q conversation=%s", memoryEnabled, memorySource, conversation)
+	if memoryEnabled || conversation != "[]" {
+		t.Fatalf("stateless audit memory=%v conversation=%s", memoryEnabled, conversation)
 	}
 
 	var turnCount, liveCount int
@@ -2190,7 +2190,7 @@ func TestManagerStore_MemoryConversationDoesNotPersistStatelessAuditRow(t *testi
 		SessionID: sessionID,
 		AgentID:   "a1",
 		Identity:  identity,
-		Memory:    agentmemory.Authored(true),
+		Memory:    agentmemory.Plan{Enabled: true},
 		Messages: []llm.Message{
 			{Role: "user", Content: "hello"},
 		},
@@ -2205,7 +2205,7 @@ func TestManagerStore_MemoryConversationDoesNotPersistStatelessAuditRow(t *testi
 		RunID:          identity.RunID,
 		FlowInstance:   identity.FlowInstance(),
 		Identity:       identity,
-		Memory:         agentmemory.Authored(true),
+		Memory:         agentmemory.Plan{Enabled: true},
 		SessionID:      sessionID,
 		RequestPayload: []byte(`{"kind":"session"}`),
 		ResponseRaw:    []byte(`{"ok":true}`),
@@ -2242,23 +2242,23 @@ func TestManagerStore_AppendStatelessTurnCreatesCanonicalAuditRow(t *testing.T) 
 	seedManagedTurnFixtureAgent(t, ctx, pg, runID, "a1", "global")
 	if err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID: "a1", RunID: runID, FlowInstance: "global",
-		Memory: agentmemory.PlatformDefault(), SessionID: sessionID,
+		Memory: agentmemory.Plan{}, SessionID: sessionID,
 		RequestPayload: []byte(`{"kind":"stateless"}`), ResponseRaw: []byte(`{"ok":true}`),
 		ParseOK: true, Latency: 5 * time.Millisecond,
 	}); err != nil {
 		t.Fatalf("ManagedTurnReadbackFixture(stateless missing audit): %v", err)
 	}
 
-	var gotRunID, flowInstance, source, conversation string
+	var gotRunID, flowInstance, conversation string
 	var enabled bool
 	if err := db.QueryRowContext(ctx, `
-		SELECT run_id::text, COALESCE(flow_instance,''), memory_enabled, memory_source, conversation::text
+		SELECT run_id::text, COALESCE(flow_instance,''), memory_enabled, conversation::text
 		FROM agent_conversation_audits WHERE session_id = $1::uuid
-	`, sessionID).Scan(&gotRunID, &flowInstance, &enabled, &source, &conversation); err != nil {
+	`, sessionID).Scan(&gotRunID, &flowInstance, &enabled, &conversation); err != nil {
 		t.Fatalf("load canonical stateless audit row: %v", err)
 	}
-	if gotRunID != runID || flowInstance != "global" || enabled || source != "platform_default" || conversation != "[]" {
-		t.Fatalf("audit run=%q flow=%q enabled=%v source=%q conversation=%s", gotRunID, flowInstance, enabled, source, conversation)
+	if gotRunID != runID || flowInstance != "global" || enabled || conversation != "[]" {
+		t.Fatalf("audit run=%q flow=%q enabled=%v conversation=%s", gotRunID, flowInstance, enabled, conversation)
 	}
 	var turns int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_turns WHERE session_id=$1::uuid AND memory_enabled=FALSE`, sessionID).Scan(&turns); err != nil || turns != 1 {
@@ -2282,7 +2282,7 @@ func TestManagerStore_AppendStatelessTurnPersistsEntityAsAuditMetadata(t *testin
 		AgentID:        "a1",
 		SessionID:      sessionID,
 		RunID:          runID,
-		Memory:         agentmemory.Authored(false),
+		Memory:         agentmemory.Plan{Enabled: false},
 		EntityID:       entityID,
 		RequestPayload: []byte(`{"kind":"task"}`),
 		ResponseRaw:    []byte(`{"ok":true}`),
@@ -2293,7 +2293,7 @@ func TestManagerStore_AppendStatelessTurnPersistsEntityAsAuditMetadata(t *testin
 	}
 
 	var count, turns int
-	var gotEntityID, flowInstance, conversation, persistedRunID, memorySource string
+	var gotEntityID, flowInstance, conversation, persistedRunID string
 	var memoryEnabled bool
 	if err := db.QueryRowContext(ctx, `
 		SELECT
@@ -2303,18 +2303,17 @@ func TestManagerStore_AppendStatelessTurnPersistsEntityAsAuditMetadata(t *testin
 			COALESCE(MAX(conversation::text), ''),
 			COALESCE(MAX(run_id::text), ''),
 			BOOL_OR(memory_enabled),
-			COALESCE(MAX(memory_source), ''),
 			(SELECT COUNT(*) FROM agent_turns WHERE session_id = $1::uuid AND memory_enabled = FALSE AND entity_id = $2::uuid)
 		FROM agent_conversation_audits
 		WHERE session_id = $1::uuid
-	`, sessionID, entityID).Scan(&count, &gotEntityID, &flowInstance, &conversation, &persistedRunID, &memoryEnabled, &memorySource, &turns); err != nil {
+	`, sessionID, entityID).Scan(&count, &gotEntityID, &flowInstance, &conversation, &persistedRunID, &memoryEnabled, &turns); err != nil {
 		t.Fatalf("read stateless entity audit row: %v", err)
 	}
 	if count != 1 {
 		t.Fatalf("audit row count = %d, want 1", count)
 	}
-	if gotEntityID != entityID || flowInstance != "" || memoryEnabled || memorySource != "authored" {
-		t.Fatalf("audit entity=%q flow_instance=%q memory=%v source=%q", gotEntityID, flowInstance, memoryEnabled, memorySource)
+	if gotEntityID != entityID || flowInstance != "" || memoryEnabled {
+		t.Fatalf("audit entity=%q flow_instance=%q memory=%v ", gotEntityID, flowInstance, memoryEnabled)
 	}
 	if persistedRunID != runID {
 		t.Fatalf("audit run_id = %q, want %q", persistedRunID, runID)
@@ -2330,7 +2329,7 @@ func TestManagerStore_AppendStatelessTurnPersistsEntityAsAuditMetadata(t *testin
 	if err != nil {
 		t.Fatalf("ListOperatorConversationTurns: %v", err)
 	}
-	if detail.Conversation.Memory || detail.Conversation.MemorySource != "authored" || detail.Conversation.FlowInstance != "" || detail.Conversation.TurnCount != 1 {
+	if detail.Conversation.Memory || detail.Conversation.FlowInstance != "" || detail.Conversation.TurnCount != 1 {
 		t.Fatalf("operator conversation summary = %+v, want authored stateless audit with one turn", detail.Conversation)
 	}
 	if len(detail.Turns) != 1 {
@@ -2355,7 +2354,7 @@ func TestManagerStore_AppendStatelessTurnPersistsFlowInstanceAuditIdentity(t *te
 		SessionID:      sessionID,
 		RunID:          runID,
 		FlowInstance:   flowInstance,
-		Memory:         agentmemory.PlatformDefault(),
+		Memory:         agentmemory.Plan{},
 		RequestPayload: []byte(`{"kind":"task"}`),
 		ResponseRaw:    []byte(`{"ok":true}`),
 		ParseOK:        true,
@@ -2365,7 +2364,7 @@ func TestManagerStore_AppendStatelessTurnPersistsFlowInstanceAuditIdentity(t *te
 	}
 
 	var count, turns int
-	var entityID, gotFlowInstance, conversation, persistedRunID, memorySource string
+	var entityID, gotFlowInstance, conversation, persistedRunID string
 	var memoryEnabled bool
 	if err := db.QueryRowContext(ctx, `
 		SELECT
@@ -2375,18 +2374,17 @@ func TestManagerStore_AppendStatelessTurnPersistsFlowInstanceAuditIdentity(t *te
 			COALESCE(MAX(conversation::text), ''),
 			COALESCE(MAX(run_id::text), ''),
 			BOOL_OR(memory_enabled),
-			COALESCE(MAX(memory_source), ''),
 			(SELECT COUNT(*) FROM agent_turns WHERE session_id = $1::uuid AND memory_enabled = FALSE)
 		FROM agent_conversation_audits
 		WHERE session_id = $1::uuid
-	`, sessionID).Scan(&count, &entityID, &gotFlowInstance, &conversation, &persistedRunID, &memoryEnabled, &memorySource, &turns); err != nil {
+	`, sessionID).Scan(&count, &entityID, &gotFlowInstance, &conversation, &persistedRunID, &memoryEnabled, &turns); err != nil {
 		t.Fatalf("read stateless flow audit row: %v", err)
 	}
 	if count != 1 {
 		t.Fatalf("audit row count = %d, want 1", count)
 	}
-	if gotFlowInstance != flowInstance || entityID != "" || memoryEnabled || memorySource != "platform_default" {
-		t.Fatalf("audit entity=%q flow_instance=%q memory=%v source=%q", entityID, gotFlowInstance, memoryEnabled, memorySource)
+	if gotFlowInstance != flowInstance || entityID != "" || memoryEnabled {
+		t.Fatalf("audit entity=%q flow_instance=%q memory=%v ", entityID, gotFlowInstance, memoryEnabled)
 	}
 	if persistedRunID != runID {
 		t.Fatalf("audit run_id = %q, want %q", persistedRunID, runID)
@@ -2402,7 +2400,7 @@ func TestManagerStore_AppendStatelessTurnPersistsFlowInstanceAuditIdentity(t *te
 	if err != nil {
 		t.Fatalf("ListOperatorConversationTurns: %v", err)
 	}
-	if detail.Conversation.Memory || detail.Conversation.MemorySource != "platform_default" || detail.Conversation.FlowInstance != flowInstance || detail.Conversation.TurnCount != 1 {
+	if detail.Conversation.Memory || detail.Conversation.FlowInstance != flowInstance || detail.Conversation.TurnCount != 1 {
 		t.Fatalf("operator conversation summary = %+v, want platform-default stateless flow audit with one turn", detail.Conversation)
 	}
 	if len(detail.Turns) != 1 {
@@ -2421,7 +2419,7 @@ func TestManagerStore_ManagedTurnReadbackFixture_FailsOnMalformedCanonicalRuntim
 	sessionID := uuid.NewString()
 	err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID:      "a1",
-		Memory:       agentmemory.PlatformDefault(),
+		Memory:       agentmemory.Plan{},
 		SessionID:    sessionID,
 		RunID:        specEntityStateRunID,
 		FlowInstance: "global",
@@ -2451,7 +2449,7 @@ func TestManagerStore_ManagedTurnReadbackFixture_FailsOnNonStringCanonicalRuntim
 	sessionID := uuid.NewString()
 	err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID:      "a1",
-		Memory:       agentmemory.PlatformDefault(),
+		Memory:       agentmemory.Plan{},
 		SessionID:    sessionID,
 		RunID:        specEntityStateRunID,
 		FlowInstance: "global",
@@ -2527,7 +2525,7 @@ func TestManagerStore_UpsertAgent_PersistsCanonicalControlPlaneOwnership(t *test
 			FlowID:          "review",
 			Model:           "regular",
 			LLMBackend:      "claude_cli",
-			Memory:          agentmemory.Authored(true),
+			Memory:          agentmemory.Plan{Enabled: true},
 			MaxTurnsPerTask: 7,
 			Subscriptions:   []string{"review.ready"},
 			EmitEvents:      []string{"review.completed"},
@@ -2578,7 +2576,7 @@ func TestManagerStore_UpsertAgent_PersistsCanonicalControlPlaneOwnership(t *test
 	if got.FlowID != "review" {
 		t.Fatalf("flow_id = %q, want review", got.FlowID)
 	}
-	if got.Memory != agentmemory.Authored(true) {
+	if got.Memory != (agentmemory.Plan{Enabled: true}) {
 		t.Fatalf("memory = %+v, want authored true", got.Memory)
 	}
 	if got.MaxTurnsPerTask != 7 {
@@ -2650,7 +2648,7 @@ func TestProjectPersistedAgentConfig_UsesCanonicalLLMBackendProfiles(t *testing.
 		Role:          "reviewer",
 		Model:         "regular",
 		ExecutionMode: runtimeeffects.ExecutionModeLive,
-		Memory:        agentmemory.PlatformDefault(),
+		Memory:        agentmemory.Plan{},
 	}), "")
 	if err != nil {
 		t.Fatalf("projectPersistedAgentConfig: %v", err)
@@ -2666,7 +2664,7 @@ func TestProjectPersistedAgentConfig_UsesCanonicalLLMBackendProfiles(t *testing.
 		Model:         "regular",
 		LLMBackend:    "openai_compatible",
 		ExecutionMode: runtimeeffects.ExecutionModeLive,
-		Memory:        agentmemory.PlatformDefault(),
+		Memory:        agentmemory.Plan{},
 	}), "")
 	if err != nil {
 		t.Fatalf("projectPersistedAgentConfig openai_compatible: %v", err)
@@ -2682,7 +2680,7 @@ func TestProjectPersistedAgentConfig_UsesCanonicalLLMBackendProfiles(t *testing.
 		Model:         "regular",
 		LLMBackend:    "openai_responses",
 		ExecutionMode: runtimeeffects.ExecutionModeLive,
-		Memory:        agentmemory.PlatformDefault(),
+		Memory:        agentmemory.Plan{},
 	}), "")
 	if err != nil {
 		t.Fatalf("projectPersistedAgentConfig openai_responses: %v", err)
@@ -2699,7 +2697,7 @@ func TestProjectPersistedAgentConfig_UsesCanonicalLLMBackendProfiles(t *testing.
 		LLMBackend:         "openai",
 		ResolvedLLMBackend: "openai",
 		ExecutionMode:      runtimeeffects.ExecutionModeLive,
-		Memory:             agentmemory.PlatformDefault(),
+		Memory:             agentmemory.Plan{},
 	}, "")
 	if err == nil || !strings.Contains(err.Error(), "invalid llm_backend") {
 		t.Fatalf("projectPersistedAgentConfig error = %v, want invalid llm_backend", err)
@@ -2712,7 +2710,7 @@ func TestProjectPersistedAgentConfig_UsesCanonicalLLMBackendProfiles(t *testing.
 		Model:         "regular",
 		LLMBackend:    "openai_responses",
 		ExecutionMode: runtimeeffects.ExecutionModeLive,
-		Memory:        agentmemory.PlatformDefault(),
+		Memory:        agentmemory.Plan{},
 	}, "")
 	if err == nil || !strings.Contains(err.Error(), "resolved llm backend is required before persistence") {
 		t.Fatalf("projectPersistedAgentConfig unresolved error = %v, want fail-closed selection requirement", err)
@@ -2728,7 +2726,7 @@ func TestManagerStore_LoadAgentsSpec_FailsClosedWhenOpaqueConfigContainsRuntimeK
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ExecutionMode: "live", ID: identity.AgentID(), Identity: identity,
 			Role: "reviewer", Type: "review-worker", Model: "regular",
-			Memory: agentmemory.PlatformDefault(), Subscriptions: []string{"review.ready"},
+			Memory: agentmemory.Plan{}, Subscriptions: []string{"review.ready"},
 		}),
 		Status: "active", HiredBy: "test", StartedAt: time.Now().UTC(),
 	}); err != nil {
@@ -2753,7 +2751,7 @@ func TestManagerStore_LoadAgents_FailsClosedWhenCanonicalModelMissing(t *testing
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ExecutionMode: "live", ID: identity.AgentID(), Identity: identity,
 			Role: "reviewer", Type: "review-worker", Model: "regular",
-			Memory: agentmemory.PlatformDefault(), Subscriptions: []string{"review.ready"},
+			Memory: agentmemory.Plan{}, Subscriptions: []string{"review.ready"},
 		}),
 		Status: "active", HiredBy: "test", StartedAt: time.Now().UTC(),
 	}); err != nil {
@@ -2786,7 +2784,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 			FlowID:   "global",
 			Type:     "sonnet",
 			Model:    "regular",
-			Memory:   agentmemory.PlatformDefault(),
+			Memory:   agentmemory.Plan{},
 			EntityID: "",
 			Config:   json.RawMessage(`{}`),
 		}),
@@ -2817,7 +2815,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 			FlowID:   "operating",
 			Type:     "sonnet",
 			Model:    "regular",
-			Memory:   agentmemory.Authored(true),
+			Memory:   agentmemory.Plan{Enabled: true},
 			FlowPath: "operating/global",
 			EntityID: entityID,
 			Config:   json.RawMessage(`{}`),
@@ -2882,7 +2880,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	if err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID:        identity.AgentID(),
 		Identity:       identity,
-		Memory:         agentmemory.Authored(true),
+		Memory:         agentmemory.Plan{Enabled: true},
 		SessionID:      sessionID,
 		RunID:          identity.RunID,
 		FlowInstance:   identity.FlowInstance(),
@@ -2900,7 +2898,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 		SessionID: sessionID,
 		AgentID:   identity.AgentID(),
 		Identity:  identity,
-		Memory:    agentmemory.Authored(true),
+		Memory:    agentmemory.Plan{Enabled: true},
 		TaskID:    "",
 		Messages:  []llm.Message{{Role: "user", Content: "hi"}},
 		Summary:   "sum",
@@ -2924,7 +2922,7 @@ func TestPostgresStore_LoadAgents_FailsClosedOnLegacyRuntimeMetadataInConfig(t *
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ExecutionMode: "live", ID: identity.AgentID(), Identity: identity,
 			Role: "worker", Type: "review-worker", Model: "regular",
-			Memory: agentmemory.PlatformDefault(),
+			Memory: agentmemory.Plan{},
 		}),
 		Status: "active", HiredBy: "test", StartedAt: time.Now().UTC(),
 	}); err != nil {
@@ -2964,7 +2962,7 @@ func TestPostgresStore_LifecycleTerminationCleansMutableRuntimeState(t *testing.
 			FlowID:   "worker",
 			Type:     "sonnet",
 			Model:    "regular",
-			Memory:   agentmemory.Authored(true),
+			Memory:   agentmemory.Plan{Enabled: true},
 			FlowPath: "global",
 			Config:   json.RawMessage(`{}`),
 		}),
@@ -2981,7 +2979,7 @@ func TestPostgresStore_LifecycleTerminationCleansMutableRuntimeState(t *testing.
 		SessionID: sessionID,
 		AgentID:   identity.AgentID(),
 		Identity:  identity,
-		Memory:    agentmemory.Authored(true),
+		Memory:    agentmemory.Plan{Enabled: true},
 		Messages:  []llm.Message{{Role: "user", Content: "hello"}},
 		Summary:   "x",
 		TurnCount: 1,
@@ -2995,7 +2993,7 @@ func TestPostgresStore_LifecycleTerminationCleansMutableRuntimeState(t *testing.
 		Identity:       identity,
 		RunID:          identity.RunID,
 		FlowInstance:   identity.FlowInstance(),
-		Memory:         agentmemory.PlatformDefault(),
+		Memory:         agentmemory.Plan{},
 		ResponseRaw:    []byte(`{"ok":true}`),
 		RequestPayload: []byte(`{"kind":"stateless"}`),
 		ParseOK:        true,

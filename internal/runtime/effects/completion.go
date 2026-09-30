@@ -133,10 +133,7 @@ func (t CompletionAgentTurn) Validate() error {
 		identity.FlowInstance() != strings.Trim(strings.TrimSpace(t.FlowInstance), "/") {
 		return fmt.Errorf("completion agent turn display identity does not match concrete identity")
 	}
-	memory, err := t.Memory.Normalize()
-	if err != nil {
-		return fmt.Errorf("completion agent turn memory plan: %w", err)
-	}
+	memory := t.Memory
 	if memory.Enabled && strings.TrimSpace(t.FlowInstance) == "" {
 		return fmt.Errorf("memory-enabled completion agent turn requires flow instance identity")
 	}
@@ -337,15 +334,7 @@ func (s CompletionSettlement) Validate(attempt Attempt) error {
 		if !nonEmpty(target.AgentID, target.SessionID, target.RunID) {
 			return fmt.Errorf("agent-turn completion target requires exact run, actor, and session coordinates")
 		}
-		targetMemory, err := target.Memory.Normalize()
-		if err != nil {
-			return fmt.Errorf("completion target memory plan: %w", err)
-		}
-		turnMemory, err := s.AgentTurn.Memory.Normalize()
-		if err != nil {
-			return fmt.Errorf("completion agent turn memory plan: %w", err)
-		}
-		if targetMemory != turnMemory {
+		if target.Memory != s.AgentTurn.Memory {
 			return fmt.Errorf("completion target memory does not match agent turn evidence")
 		}
 		for _, coordinate := range []struct {

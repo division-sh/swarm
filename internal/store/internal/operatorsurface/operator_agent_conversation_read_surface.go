@@ -228,7 +228,6 @@ func (r *ConversationPostgres) ListOperatorConversations(ctx context.Context, op
 			conversations.kind,
 			COALESCE(conversations.flow_instance, ''),
 			conversations.memory_enabled,
-			conversations.memory_source,
 			COALESCE(conversations.status, ''),
 			COALESCE(conversations.turn_count, 0),
 				COALESCE(conversations.message_count, 0),
@@ -525,10 +524,7 @@ func operatorAgentDetailFromSnapshot(result operatorread.OperatorAgentListResult
 }
 
 func operatorAgentSummaryFromPersisted(row runtimemanager.PersistedAgent, projection operatorAgentProjection, turnLimit int) (operatorread.OperatorAgentSummary, error) {
-	memory, err := row.Config.Memory.Normalize()
-	if err != nil {
-		return operatorread.OperatorAgentSummary{}, fmt.Errorf("decode persisted agent memory: %w", err)
-	}
+	memory := row.Config.Memory
 	out := operatorread.OperatorAgentSummary{
 		AgentID:               strings.TrimSpace(row.Config.ID),
 		Identity:              row.Config.Identity.Normalize(),
@@ -537,7 +533,6 @@ func operatorAgentSummaryFromPersisted(row runtimemanager.PersistedAgent, projec
 		Model:                 strings.TrimSpace(row.Config.Model),
 		ExecutionMode:         string(row.Config.ExecutionMode),
 		Memory:                memory.Enabled,
-		MemorySource:          string(memory.Source),
 		Status:                projection.v1Status(),
 		RuntimeFlowID:         strings.TrimSpace(row.Config.FlowID),
 		FlowInstance:          strings.TrimSpace(row.Config.CanonicalFlowPath()),
@@ -903,7 +898,6 @@ func operatorConversationQuerySources() []string {
 				'live_session' AS kind,
 				flow_instance,
 				memory_enabled,
-				memory_source,
 				CASE WHEN status = 'terminated' THEN 'terminated' ELSE 'active' END AS status,
 				turn_count,
 				jsonb_array_length(COALESCE(conversation, '[]'::jsonb)) AS message_count,
@@ -928,7 +922,6 @@ func operatorConversationQuerySources() []string {
 				'turn_audit' AS kind,
 				COALESCE(flow_instance, '') AS flow_instance,
 				memory_enabled,
-				memory_source,
 				CASE WHEN status = 'terminated' THEN 'terminated' ELSE 'active' END AS status,
 				COALESCE(turn_count, 0) AS turn_count,
 				jsonb_array_length(COALESCE(conversation, '[]'::jsonb)) AS message_count,
@@ -969,7 +962,6 @@ func scanOperatorConversationSummary(scanner operatorRowScanner) (operatorread.O
 		&item.Kind,
 		&item.FlowInstance,
 		&item.Memory,
-		&item.MemorySource,
 		&item.Status,
 		&item.TurnCount,
 		&item.MessageCount,

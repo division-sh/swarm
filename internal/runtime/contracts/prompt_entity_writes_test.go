@@ -47,7 +47,6 @@ func TestDerivePromptEntityWriteEvidence(t *testing.T) {
 	}
 	agentsRaw = append(agentsRaw, []byte(`
 writer:
-  id: writer
   role: writer
   intent: prompts/writer.md
   workspace_class: factory

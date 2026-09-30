@@ -170,7 +170,6 @@ worker:
   role: worker
   intent: {inline: Register one nested physical subscriber.}
   model: regular
-  memory: false
   subscriptions: [work.requested]
 `)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))

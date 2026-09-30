@@ -5531,7 +5531,6 @@ func loadRootAndFlowStaticAgentSource(t *testing.T) semanticview.Source {
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "events.yaml"), "task.assigned:\ntask.completed:\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "agents.yaml"), `
 test-agent:
-  type: generic
   role: test-agent
   intent: {inline: "Handle root work."}
   model: regular
@@ -5544,7 +5543,6 @@ test-agent:
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "ops-flow", "events.yaml"), "work.requested:\nwork.completed:\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "ops-flow", "agents.yaml"), `
 operator:
-  type: generic
   role: operator
   intent: {inline: "Handle operations work."}
   model: regular
@@ -5587,7 +5585,6 @@ item.created:
 `)
 	writeFlowActivationFixtureFile(t, filepath.Join(flowRoot, "agents.yaml"), `
 backend:
-  type: generic
   role: backend
   intent: {inline: "Handle backend work for this flow instance."}
   model: regular
@@ -5634,7 +5631,6 @@ item.created:
 `)
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "support", "agents.yaml"), `
 backend:
-  type: generic
   role: backend
   intent: {inline: "Handle backend work for this flow instance."}
   model: regular
@@ -5884,7 +5880,7 @@ func assertMaterializedAgentPlatformDefaults(t *testing.T, cfg models.AgentConfi
 	if cfg.Type != runtimecontracts.DefaultAgentType {
 		t.Fatalf("Type = %q, want %q", cfg.Type, runtimecontracts.DefaultAgentType)
 	}
-	if cfg.Memory != agentmemory.PlatformDefault() {
+	if cfg.Memory != (agentmemory.Plan{}) {
 		t.Fatalf("Memory = %+v, want platform default false", cfg.Memory)
 	}
 	if cfg.MaxTurnsPerTask != runtimecontracts.DefaultAgentMaxTurnsPerTask {
@@ -5916,7 +5912,6 @@ worker:
 `)
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "template_support", "agents.yaml"), `
 worker:
-  id: worker
   intent: {inline: "Handle template support requests."}
   model: regular
   subscriptions:

@@ -3762,7 +3762,6 @@ case:
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "agents.yaml"), `
 writer:
-  id: writer
   type: factory
   role: writer
   intent: prompts/writer.md

@@ -127,10 +127,10 @@ func (s *LLMPostgresOwner) acquirePostgresLiveSession(ctx context.Context, ident
 				if err := tx.QueryRowContext(sqlCtx, `
 				INSERT INTO agent_sessions (
 					session_id, run_id, agent_id, agent_name_owner, agent_name_source,
-					agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source,
+					agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, memory_enabled,
 					conversation, turn_count, runtime_state, lease_holder, lease_grant_id, lease_expires_at,
 					status, created_at, updated_at
-				) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored', '[]'::jsonb, 0, '{}'::jsonb, $10, $11, $12, 'active', $13, $13)
+				) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, '[]'::jsonb, 0, '{}'::jsonb, $10, $11, $12, 'active', $13, $13)
 				RETURNING session_id::text, run_id::text
 			`, current.sessionID, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 					fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, lockOwner, newGrantID, current.leaseExpires.Time, now).Scan(&current.sessionID, &current.runID); err != nil {
@@ -405,10 +405,10 @@ func (s *LLMPostgresOwner) Rotate(ctx context.Context, leaseInput *runtimesessio
 			INSERT INTO agent_sessions (
 				session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 				agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-				memory_enabled, memory_source, conversation, turn_count, runtime_state,
+				memory_enabled, conversation, turn_count, runtime_state,
 				lease_holder, lease_grant_id, lease_expires_at, status, created_at, updated_at,
 				rotation_operation_id, rotation_request_digest, rotation_result
-			) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,'authored',$10::jsonb,0,$11::jsonb,$12,$13,$14,'active',$15,$15,$16,$17,$18::jsonb)
+			) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,$10::jsonb,0,$11::jsonb,$12,$13,$14,'active',$15,$15,$16,$17,$18::jsonb)
 			RETURNING session_id::text, run_id::text
 		`, newID, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 				fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, string(conversation), string(runtimeState), lockOwner, newGrantID, expires, now,
@@ -577,7 +577,7 @@ func (s *LLMPostgresOwner) postgresSessionLockTTL() time.Duration {
 
 func decodeLiveConversationRecord(identity agentmemory.Identity, sessionID, status string, rawMessages, runtimeStateRaw []byte, turnCount int) (runtimellm.ConversationRecord, error) {
 	record := runtimellm.ConversationRecord{
-		SessionID: sessionID, AgentID: identity.AgentID(), Identity: identity, Memory: agentmemory.Authored(true),
+		SessionID: sessionID, AgentID: identity.AgentID(), Identity: identity, Memory: agentmemory.Plan{Enabled: true},
 		TurnCount: turnCount, Status: status,
 	}
 	state, err := DecodeConversationRuntimeStateDescriptor(runtimeStateRaw)

@@ -38,7 +38,6 @@ pins:
 coordinator_state: {}
 `, `
 memory-agent:
-  id: memory-agent
   role: analyst
   intent: {inline: "Analyze coordinator jobs."}
   model: regular

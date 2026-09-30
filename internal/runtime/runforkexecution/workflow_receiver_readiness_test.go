@@ -3,6 +3,7 @@ package runforkexecution
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -17,7 +18,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"gopkg.in/yaml.v3"
 )
 
 func selectedContractReceiverReadinessSource(t *testing.T, policy canonicalrouting.ForkReceiverPolicy) LoadedSelectedContractSource {
@@ -328,8 +328,11 @@ func TestSelectedContractReceiverReadinessRejectsUnsupportedConfigDependencyAuth
 		})
 	}
 	for _, field := range []string{"config: {foo: required}", "prompt_inputs: [config.foo]"} {
-		var entry runtimecontracts.AgentRegistryEntry
-		if err := yaml.Unmarshal([]byte(field), &entry); err == nil {
+		root := t.TempDir()
+		writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: config-authority\n")
+		writeSelectedContractFixtureFile(t, filepath.Join(root, "agents.yaml"), "worker:\n  intent: {inline: Exercise receiver configuration.}\n  "+field+"\n")
+		repo := runForkExecutionRepoRoot(t)
+		if _, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo)); err == nil || !strings.Contains(err.Error(), strings.Split(field, ":")[0]) {
 			t.Fatalf("unsupported configuration authority accepted: %s", field)
 		}
 	}

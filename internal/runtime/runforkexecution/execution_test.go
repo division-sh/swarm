@@ -1852,7 +1852,6 @@ func selectedForkFrameContracts(t testing.TB, repoRoot, lookupURL string) string
 		t.Fatalf("copy selected-fork frame contracts: %v", err)
 	}
 	agents := `test-agent:
-  id: test-agent
   model: regular
   intent: prompts/test-agent.md
   subscriptions:
@@ -2930,7 +2929,7 @@ func TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostile
 	effectCtx = runtimeeffects.WithAuthority(effectCtx, container.authority)
 	effectCtx = runtimeeffects.WithUsageTarget(effectCtx, runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: turnID, RunID: proof.ForkRunID, AgentID: actor.ID,
-		AgentIdentity: actorIdentity, SessionID: sessionID, Memory: agentmemory.PlatformDefault(),
+		AgentIdentity: actorIdentity, SessionID: sessionID, Memory: agentmemory.Plan{},
 		FlowInstance: actorIdentity.FlowInstance(),
 	})
 	effectCtx = runtimeeffects.WithController(effectCtx, liveTestEffectController(storetest.AdmitPostgresRuntimeStore(t, db)))
@@ -3335,7 +3334,7 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		AgentID:       "selected-agent",
 		AgentIdentity: targetIdentity,
 		SessionID:     uuid.NewString(),
-		Memory:        agentmemory.PlatformDefault(),
+		Memory:        agentmemory.Plan{},
 		FlowInstance:  targetIdentity.FlowInstance(),
 	}
 	providerCtx := runtimeeffects.WithLogicalOperationIdentity(
@@ -3936,7 +3935,7 @@ func persistRunForkManagedTurn(t testing.TB, ctx context.Context, selected *stor
 	t.Helper()
 	storetest.PersistManagedAgentTurnFixture(t, ctx, storetest.ManagedAgentTurnFixture{
 		Store: selected, Selected: selected, Identity: identity,
-		RunID: runID, SessionID: sessionID, TurnID: turnID, Memory: agentmemory.Authored(true),
+		RunID: runID, SessionID: sessionID, TurnID: turnID, Memory: agentmemory.Plan{Enabled: true},
 		EntityID: entityID, TaskID: "task-a", Event: event, ParseOK: true, CreatedAt: at,
 	})
 }
@@ -3970,10 +3969,10 @@ func TestExecuteSelectedContractRunForkTreatsSourceConversationHistoryAsLineage(
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
-			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, memory_enabled,
 			status, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored',
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE,
 			'active', $10, $10)
 	`, sessionID, sourceRunID, agentFields.AgentID, agentFields.NameOwner, agentFields.NameSource,
 		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath, at); err != nil {
@@ -3982,10 +3981,10 @@ func TestExecuteSelectedContractRunForkTreatsSourceConversationHistoryAsLineage(
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
-			agent_route_presence, flow_scope_key, flow_instance_id, entity_id, flow_instance, memory_enabled, memory_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, entity_id, flow_instance, memory_enabled,
 			runtime_state, status, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9::uuid, $10, FALSE, 'authored',
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9::uuid, $10, FALSE,
 			'{}'::jsonb, 'active', $11, $11)
 	`, auditID, sourceRunID, agentFields.AgentID, agentFields.NameOwner, agentFields.NameSource,
 		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, entityID, agentFields.FlowInstancePath, at); err != nil {
@@ -4074,10 +4073,10 @@ func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEm
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
-			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, memory_enabled,
 			status, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored',
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE,
 			'active', $10, $10)
 	`, sessionID, sourceRunID, agentFields.AgentID, agentFields.NameOwner, agentFields.NameSource,
 		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath, at); err != nil {
@@ -4086,10 +4085,10 @@ func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEm
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
-			agent_route_presence, flow_scope_key, flow_instance_id, entity_id, flow_instance, memory_enabled, memory_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, entity_id, flow_instance, memory_enabled,
 			runtime_state, status, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9::uuid, $10, FALSE, 'authored',
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9::uuid, $10, FALSE,
 			'{}'::jsonb, 'active', $11, $11)
 	`, auditID, sourceRunID, agentFields.AgentID, agentFields.NameOwner, agentFields.NameSource,
 		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, entityID, agentFields.FlowInstancePath, at); err != nil {
@@ -4206,10 +4205,10 @@ func TestExecuteSelectedContractRunForkTreatsPostTSourceConversationHistoryAsBra
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
-			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, memory_enabled,
 			status, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored',
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE,
 			'active', $10, $10)
 	`, sessionID, sourceRunID, agentFields.AgentID, agentFields.NameOwner, agentFields.NameSource,
 		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath, after); err != nil {
@@ -4218,10 +4217,10 @@ func TestExecuteSelectedContractRunForkTreatsPostTSourceConversationHistoryAsBra
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
-			agent_route_presence, flow_scope_key, flow_instance_id, entity_id, flow_instance, memory_enabled, memory_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, entity_id, flow_instance, memory_enabled,
 			runtime_state, status, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9::uuid, $10, FALSE, 'authored',
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9::uuid, $10, FALSE,
 			'{}'::jsonb, 'active', $11, $11)
 	`, auditID, sourceRunID, agentFields.AgentID, agentFields.NameOwner, agentFields.NameSource,
 		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, entityID, agentFields.FlowInstancePath, after); err != nil {
@@ -5362,7 +5361,7 @@ func selectedExecutionFixtureAgentConfig(t testing.TB, identity agentidentity.Id
 		Type:               "test-agent",
 		Role:               "test-agent",
 		Model:              llmselection.ModelAliasRegular,
-		Memory:             agentmemory.Authored(true),
+		Memory:             agentmemory.Plan{Enabled: true},
 		FlowPath:           identity.FlowInstance(),
 		Config:             []byte(`{}`),
 	})

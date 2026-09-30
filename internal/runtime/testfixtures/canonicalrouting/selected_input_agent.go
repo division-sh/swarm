@@ -14,7 +14,7 @@ func CopySelectedInputAgentProbe(t testing.TB) string {
 		for file, body := range map[string]string{
 			"schema.yaml": "name: selected-input-agent\nmode: " + flow.mode + "\npins:\n  inputs:\n    events:\n      - work.ready\n",
 			"events.yaml": "work.ready:\n",
-			"agents.yaml": "worker:\n  id: worker\n  model: regular\n  intent:\n    inline: Complete the selected input.\n  subscriptions: [work.ready]\n",
+			"agents.yaml": "worker:\n  model: regular\n  intent:\n    inline: Complete the selected input.\n  subscriptions: [work.ready]\n",
 		} {
 			writeClosedVariantFile(t, root, filepath.Join(flow.path, file), body)
 		}
@@ -29,7 +29,7 @@ func CopySelectedRouteRecoveryInput(t testing.TB) string {
 	root := t.TempDir()
 	copyTree(t, filepath.Join(RepoRoot(t), "tests/tier11-flow-composition/test-sibling-both-instantiated-isolated"), root)
 	ApplyOverlay(t, root, "events.yaml", "fork.cli.activate:\n")
-	writeClosedVariantFile(t, root, "agents.yaml", "safe-agent:\n  id: safe-agent\n  model: regular\n  intent:\n    inline: Complete the selected input.\n  subscriptions: [fork.cli.activate]\n")
+	writeClosedVariantFile(t, root, "agents.yaml", "safe-agent:\n  model: regular\n  intent:\n    inline: Complete the selected input.\n  subscriptions: [fork.cli.activate]\n")
 	return root
 }
 

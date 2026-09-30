@@ -1,5 +1,4 @@
 prompt-ref-agent:
-  id: prompt-ref-agent
   role: prompt_ref_agent
   prompt_ref: shared-prompt
   model: regular

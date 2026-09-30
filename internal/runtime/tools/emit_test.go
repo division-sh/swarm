@@ -321,7 +321,6 @@ func TestGenerateEmitToolsForActor_DoesNotBorrowRootSchemaForChildEvent(t *testi
 	writeEmitFixtureFile(t, filepath.Join(root, "child", "events.yaml"), "local.done:\n  child_only: text\n")
 	writeEmitFixtureFile(t, filepath.Join(root, "child", "agents.yaml"), `
 child-agent:
-  id: child-agent
   role: child_agent
   intent: {inline: "Emit the child event."}
   emit_events: [local.done]
@@ -585,7 +584,6 @@ local.done:
 `)
 	writeEmitFixtureFile(t, filepath.Join(root, "support", "agents.yaml"), `
 flow-agent:
-  id: flow-agent
   role: flow_agent
   intent: {inline: "Emit the declared local event."}
   emit_events:

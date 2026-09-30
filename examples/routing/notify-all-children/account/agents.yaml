@@ -1,9 +1,7 @@
 account-worker:
-  type: generic
   role: account_worker
   intent: prompts/account-worker.md
   model: regular
-  memory: false
   subscriptions:
     - account.notify.requested
   emit_events:
