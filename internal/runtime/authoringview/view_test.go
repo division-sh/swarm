@@ -944,26 +944,61 @@ func TestBuildShowsStatelessSingletonWithoutCoordinatorError(t *testing.T) {
 	}
 }
 
-func TestBuildShowsIntrinsicJoinCoordinatorFailureWithExactProvenance(t *testing.T) {
+func TestBuildShowsStatelessCountJoinWithoutCoordinatorDemandWithExactProvenance(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
-	root := canonicalrouting.CopySingletonCoordinatorPilot(t, canonicalrouting.SingletonCoordinatorPilotStatelessPayloadJoin)
+	root := canonicalrouting.CopySingletonCoordinatorPilot(t, canonicalrouting.SingletonCoordinatorPilotStatelessCountJoin)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatalf("load stateless join singleton: %v", err)
 	}
 	source := semanticview.Wrap(bundle)
 	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
-	view := mustBuild(t, source, &report)
+	if findings := report.HardInvalidities(); len(findings) != 0 {
+		t.Fatalf("stateless count join has hard invalidities: %#v", findings)
+	}
+	if demands := runtimebootverify.BuildSingletonCoordinatorDemandProjection(source); len(demands) != 0 {
+		t.Fatalf("stateless count join created coordinator demand: %#v", demands)
+	}
+	view, err := Build(context.Background(), source, BuildOptions{BootReport: &report, IncludeStageGraph: true})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
 	flow := flowByID(t, view, "coordinator")
-	if flow.SingletonCoordinator != nil || flow.SingletonError == "" {
+	if flow.SingletonCoordinator != nil || flow.SingletonError != "" {
 		t.Fatalf("stateless join readback = coordinator:%#v error:%q", flow.SingletonCoordinator, flow.SingletonError)
 	}
-	for _, diagnostic := range view.Diagnostics {
-		if diagnostic.CheckID == "singleton_coordinator_validation" && diagnostic.Location == identitytest.FlowNode(t, "coordinator", "coordinator-node").Key() && strings.Contains(diagnostic.Message, "handler job.received workflow_join") {
-			return
+	if flow.PrimaryEntity == nil || flow.PrimaryEntity.Type != "coordinator_state" || len(flow.PrimaryEntity.Fields) != 0 || flow.PrimaryEntityError != "" {
+		t.Fatalf("count join changed the declared stateless primary: %#v", flow)
+	}
+	if flow.SourceFiles.Nodes != bundle.FlowTree.ByPath["coordinator"].Paths.NodesFile || flow.SourceFiles.Nodes == "" {
+		t.Fatalf("count join readback lost its exact authored source: %#v", flow.SourceFiles)
+	}
+	plans := source.WorkflowJoins()
+	if len(plans) != 1 || !plans[0].Node.Equal(identitytest.FlowNode(t, "coordinator", "coordinator-node")) || plans[0].HandlerEvent != "job.received" || plans[0].ResultType.Type != "Job" {
+		t.Fatalf("count join lost its exact typed declaration: %#v", plans)
+	}
+	var joins []StageGraphJoinView
+	for _, graph := range view.StageGraphs {
+		if graph.FlowPath == "coordinator" {
+			joins = append(joins, graph.Joins...)
+		} else if len(graph.Joins) != 0 {
+			t.Fatalf("count join borrowed a foreign graph owner: %#v", graph)
 		}
 	}
-	t.Fatalf("singleton join diagnostics = %#v, want exact node/handler workflow_join provenance", view.Diagnostics)
+	if len(joins) != 1 {
+		t.Fatalf("stateless count join readback = %#v, want one exact declaration", joins)
+	}
+	join := joins[0]
+	if join.FlowPath != "coordinator" || join.NodeID != "coordinator-node" || join.HandlerEvent != "job.received" || join.ID != "active" || join.Stage != "active" || join.MemberCount == nil || *join.MemberCount != 1 || join.MembersFrom != "" || join.MembersFromFanOut || join.MembersBy != "payload.vertical_id" || join.Output != "payload.job" || join.DeadlineAfter != "1h" || join.DeadlineFrom != runtimecontracts.JoinDeadlineFromStageEntry {
+		t.Fatalf("stateless count join lost canonical membership/closure/provenance: %#v", join)
+	}
+	// Intrinsic workflow_join demand is retired; keep the exact admitted join in
+	// readback, not its obsolete contained-coordinator error oracle.
+	for _, diagnostic := range view.Diagnostics {
+		if diagnostic.CheckID == "singleton_coordinator_validation" {
+			t.Fatalf("stateless count join retained coordinator diagnostics: %#v", diagnostic)
+		}
+	}
 }
 
 func TestBuildDoesNotInferCoordinatorFromUnusedContainedField(t *testing.T) {

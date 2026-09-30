@@ -110,8 +110,7 @@ controller:
       join:
         id: reviews
         stage: working
-        members: {from: entity.members, by: payload.token}
-        window: {from: entity.window, by: payload.revision_id}
+        members: {from: state.members, by: payload.token}
         output: payload.token
         on_complete:
           advances_to: reviewing
@@ -120,8 +119,8 @@ controller:
             fields:
               revision_id: "${loop.revision_id}"
               completed: "${join.completed}"
-        timeout:
-          after: 1h
+        deadline: {after: 1h, from: stage_entry}
+        on_deadline:
           advances_to: reviewing
     review.closed:
       loop: {close: revision, from: reviewing}

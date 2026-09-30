@@ -465,16 +465,21 @@ coordinator:
 }
 
 func TestSystemNodeHandlerDecodeJoinRejectsUnsupportedFields(t *testing.T) {
-	for _, input := range []string{
-		`join: {stage: waiting, members: {from: entity.ids, by: payload.id}, output: payload.result, interrupting: true}`,
-		`join: {stage: waiting, members: {from: entity.ids, by: payload.id, dedup_by: payload.id}, output: payload.result}`,
-		`join: {stage: waiting, members: {from: entity.ids, by: payload.id}, output: payload.result, on_complete: {action: {id: noop}}}`,
-		`join: {stage: waiting, members: {from: entity.ids, by: payload.id}, output: payload.result, timeout: {after: 1h, repeat: 2}}`,
+	const canonical = `join: {stage: waiting, members: {from: state.ids, by: payload.id}, output: payload.result, on_complete: {advances_to: done}}`
+	for _, tc := range []struct {
+		name, input, want string
+	}{
+		{"interrupting", strings.Replace(canonical, "stage: waiting", "stage: waiting, interrupting: true", 1), `join field "interrupting" is not supported`},
+		{"member dedup", strings.Replace(canonical, "by: payload.id", "by: payload.id, dedup_by: payload.id", 1), `join.members field "dedup_by" is not supported`},
+		{"outcome action", strings.Replace(canonical, "advances_to: done", "action: {id: noop}", 1), "RETIRED-HANDLER-ACTION"},
+		{"timeout", strings.Replace(canonical, "stage: waiting", "stage: waiting, timeout: {after: 1h, repeat: 2}", 1), `join field "timeout" is not supported`},
 	} {
-		var handler SystemNodeEventHandler
-		if err := decodeNodeTestYAML([]byte(input), &handler); err == nil {
-			t.Fatalf("decodeNodeTestYAML(%q) error = nil", input)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			var handler SystemNodeEventHandler
+			if err := decodeNodeTestYAML([]byte(tc.input), &handler); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("decodeNodeTestYAML(%q) error = %v, want %q", tc.input, err, tc.want)
+			}
+		})
 	}
 }
 
@@ -3325,6 +3330,9 @@ key: payload.dimension
 	}
 	if got := spec.Description; got != "all dimension receipts have arrived" {
 		t.Fatalf("Description = %q", got)
+	}
+	if spec.Key != "payload.dimension" || spec.KeyPath.Root != paths.RootPayload || len(spec.KeyPath.Segments) != 1 || spec.KeyPath.Segments[0] != "dimension" {
+		t.Fatalf("authored accumulator key = %q/%#v, want payload.dimension", spec.Key, spec.KeyPath)
 	}
 
 	err := decodeNodeTestYAML([]byte(`

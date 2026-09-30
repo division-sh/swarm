@@ -58,9 +58,33 @@ func TestA2JoinClosedGrammarM01M04(t *testing.T) {
 	}
 	for _, retired := range []string{"window", "complete_when", "remaining", "timeout"} {
 		t.Run("retired "+retired, func(t *testing.T) {
+			for _, shape := range nodePresenceShapes("join.completed >= 1", "[legacy]", "{from: entity.batch, by: payload.batch}") {
+				t.Run(shape.name, func(t *testing.T) {
+					source := explicit
+					if shape.name != "missing" {
+						source += retired + ": " + shape.value + "\n"
+					}
+					var spec JoinSpec
+					err := decodeNodeTestYAML([]byte(source), &spec)
+					if shape.name == "missing" {
+						if err != nil || spec.Members.From != "state.members" || spec.Members.By != "payload.member" || !spec.OnCompleteFound {
+							t.Fatalf("canonical join changed with absent %s: %#v, %v", retired, spec, err)
+						}
+					} else if err == nil || !strings.Contains(err.Error(), `join field "`+retired+`" is not supported`) {
+						t.Fatalf("retired field %s in %s state admitted or misdiagnosed: %v", retired, shape.name, err)
+					}
+				})
+			}
+		})
+	}
+	// Retire the former custom-completion positives; they do not acquire until
+	// semantics or permission to ignore missing members under the new grammar.
+	for _, source := range []string{"complete_when: join.completed >= 1\n", "remaining: ignore\n", "timeout: {after: 1h, advances_to: expired}\n", "window: {from: entity.batch, by: payload.batch}\n"} {
+		field, _, _ := strings.Cut(source, ":")
+		t.Run("legacy positive "+field, func(t *testing.T) {
 			var spec JoinSpec
-			if err := decodeNodeTestYAML([]byte(explicit+retired+": null\n"), &spec); err == nil || !strings.Contains(err.Error(), retired) {
-				t.Fatalf("retired field %s admitted or misdiagnosed: %v", retired, err)
+			if err := decodeNodeTestYAML([]byte(explicit+source), &spec); err == nil || !strings.Contains(err.Error(), `join field "`+field+`" is not supported`) {
+				t.Fatalf("former standalone positive %s admitted or misdiagnosed: %v", field, err)
 			}
 		})
 	}

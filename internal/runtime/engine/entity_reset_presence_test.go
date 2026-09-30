@@ -74,9 +74,9 @@ func TestEntityResetProjectionUsesWholeNodeOwnership(t *testing.T) {
       second_items: '[Item]'
   event_handlers:
     work.first:
-      accumulate: {into: first_items, dedup_by: payload.id}
+      accumulate: {into: first_items, key: payload.id}
     work.second:
-      accumulate: {into: second_items, dedup_by: payload.id}
+      accumulate: {into: second_items, key: payload.id}
 peer:
   execution_type: system_node
   state_schema:
@@ -84,7 +84,7 @@ peer:
       peer_items: '[Item]'
   event_handlers:
     work.peer:
-      accumulate: {into: peer_items, dedup_by: payload.id}
+      accumulate: {into: peer_items, key: payload.id}
 `)
 			repo := repoRootForEngineProjectionTest(t)
 			bundle, err := c.LoadWorkflowContractBundleWithOverrides(repo, root, c.DefaultPlatformSpecFile(repo))

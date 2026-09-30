@@ -128,13 +128,3 @@ func a2CopyArrivalBarrier(t *testing.T) string {
 		"        timeout:\n          after: 5m\n          advances_to: failed\n", "        deadline: {after: 5m, from: stage_entry}\n        on_deadline:\n          advances_to: failed\n")
 	return root
 }
-
-func a2CopyRetainedJoin(t *testing.T) string {
-	t.Helper()
-	root := canonicalrouting.CopyForkLoopRetainedJoin(t)
-	a2MigrateJoinFixtureFile(t, filepath.Join(root, "nodes.yaml"),
-		"members: {from: entity.members, by: payload.token}", "members: {from: state.members, by: payload.token}",
-		"        window: {from: entity.window, by: payload.revision_id}\n", "",
-		"        timeout:\n          after: 1h\n          advances_to: reviewing\n", "        deadline: {after: 1h, from: stage_entry}\n        on_deadline:\n          advances_to: reviewing\n")
-	return root
-}
