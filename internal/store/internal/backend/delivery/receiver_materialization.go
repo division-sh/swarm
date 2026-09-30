@@ -152,8 +152,8 @@ func (a *Adapter) receiverMaterialized(ctx context.Context, tx *sql.Tx, route ev
 func (a *Adapter) continuationWithMaterialization(ctx context.Context, q queryer, record deliveryRecord, now time.Time) (deliverylifecycle.ClaimDisposition, deliverylifecycle.ContinuationWake, error) {
 	disposition := continuationDisposition(record, now)
 	wake := continuationWake(record, disposition, now)
-	if record.Authority.Kind() == deliverylifecycle.ExecutionAuthorityNormalRuntime && disposition != deliverylifecycle.ClaimTerminal && disposition != deliverylifecycle.ClaimInvariantInvalid {
-		parked, err := runstate.DispatchParked(ctx, q, a.dialect == DialectPostgres, record.RunID)
+	if disposition != deliverylifecycle.ClaimTerminal && disposition != deliverylifecycle.ClaimInvariantInvalid {
+		parked, err := a.normalDispatchParked(ctx, q, record)
 		if err != nil {
 			return deliverylifecycle.ClaimInvariantInvalid, deliverylifecycle.ContinuationWake{}, err
 		}
@@ -174,6 +174,15 @@ func (a *Adapter) continuationWithMaterialization(ctx context.Context, q queryer
 		return deliverylifecycle.ClaimDeferred, deliverylifecycle.ContinuationWake{}, nil
 	}
 	return disposition, wake, nil
+}
+
+// Selected deliveries have already passed the exact selected-execution fence;
+// their materialized paused lifecycle is not an ordinary operator pause.
+func (a *Adapter) normalDispatchParked(ctx context.Context, q queryer, record deliveryRecord) (bool, error) {
+	if record.Authority.Kind() != deliverylifecycle.ExecutionAuthorityNormalRuntime {
+		return false, nil
+	}
+	return runstate.DispatchParked(ctx, q, a.dialect == DialectPostgres, record.RunID)
 }
 
 // TerminalizeMaterializationDependents is part of the materializer's terminal
