@@ -186,12 +186,11 @@ root.ready:
   # root event
   entity_id: uuid
 `)
-	writeFixtureFile(t, root+"/scoring/schema.yaml", `
-name: scoring
+	writeFixtureFile(t, root+"/scoring/schema.yaml", `name: scoring
 mode: static
-initial_state: discovered
-states: [discovered, shortlisted]
-terminal_states: [shortlisted]
+stages:
+  discovered: {initial: true}
+  shortlisted: {terminal: true}
 pins:
   inputs:
     events: [root.ready]
@@ -470,6 +469,12 @@ func TestWorkflowContractBundleResolveFlowSingleton_AllowsEmptyAndScalarOnlyPrim
 }
 
 func TestWorkflowContractBundleResolveFlowSingletonCoordinator_RejectsInvalidDeclarations(t *testing.T) {
+	t.Run("schema entity restatement rejected before projection", func(t *testing.T) {
+		_, err := admitSchemaFragment("mode: singleton\nentity: coordinator_state\n")
+		if err == nil || !strings.Contains(err.Error(), "RETIRED") {
+			t.Fatalf("schema entity restatement error = %v", err)
+		}
+	})
 	instanceField := mustTemplateInstanceField(t, "vertical_id")
 	tests := []struct {
 		name     string
@@ -517,15 +522,6 @@ func TestWorkflowContractBundleResolveFlowSingletonCoordinator_RejectsInvalidDec
 			},
 			entities: EntityContractsDocument{"coordinator_state": {Fields: map[string]EntityFieldDecl{"jobs": {Type: "[MissingType]"}}}},
 			wantErr:  "MissingType",
-		},
-		{
-			name: "schema entity restatement",
-			schema: FlowSchemaDocument{
-				Mode:   FlowModeSingleton,
-				Entity: "coordinator_state",
-			},
-			entities: EntityContractsDocument{"coordinator_state": {Fields: map[string]EntityFieldDecl{"verticals": {Type: "map[text]VerticalState"}}}},
-			wantErr:  "schema.yaml entity",
 		},
 		{
 			name: "multiple entity contracts",
@@ -599,11 +595,10 @@ func TestLoadWorkflowContractBundle_RejectsMultipleFlowEntityTypes(t *testing.T)
 	root := t.TempDir()
 
 	writeFixtureFile(t, root+"/schema.yaml", "name: invalid-flow-entities\n")
-	writeFixtureFile(t, root+"/scoring/schema.yaml", `
-name: scoring
-initial_state: pending
-states: [pending, done]
-terminal_states: [done]
+	writeFixtureFile(t, root+"/scoring/schema.yaml", `name: scoring
+stages:
+  pending: {initial: true}
+  done: {terminal: true}
 `)
 	writeFixtureFile(t, root+"/scoring/entities.yaml", `
 vertical:
@@ -622,11 +617,10 @@ func TestLoadWorkflowContractBundle_RejectsMultipleRootEntityTypes(t *testing.T)
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
-	writeFixtureFile(t, root+"/schema.yaml", `
-name: invalid-root-entities
-initial_state: pending
-states: [pending, done]
-terminal_states: [done]
+	writeFixtureFile(t, root+"/schema.yaml", `name: invalid-root-entities
+stages:
+  pending: {initial: true}
+  done: {terminal: true}
 `)
 	writeFixtureFile(t, root+"/entities.yaml", `
 vertical:
@@ -646,12 +640,11 @@ func TestLoadWorkflowContractBundle_RejectsSchemaEntitySelector(t *testing.T) {
 	root := t.TempDir()
 
 	writeFixtureFile(t, root+"/schema.yaml", "name: schema-entity-selector\n")
-	writeFixtureFile(t, root+"/scoring/schema.yaml", `
-name: scoring
+	writeFixtureFile(t, root+"/scoring/schema.yaml", `name: scoring
 entity: vertical
-initial_state: pending
-states: [pending, done]
-terminal_states: [done]
+stages:
+  pending: {initial: true}
+  done: {terminal: true}
 `)
 	writeFixtureFile(t, root+"/scoring/entities.yaml", `
 vertical:
@@ -668,12 +661,11 @@ func TestLoadWorkflowContractBundle_RejectsRootSchemaEntitySelector(t *testing.T
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
-	writeFixtureFile(t, root+"/schema.yaml", `
-name: root-schema-entity-selector
+	writeFixtureFile(t, root+"/schema.yaml", `name: root-schema-entity-selector
 entity: vertical
-initial_state: pending
-states: [pending, done]
-terminal_states: [done]
+stages:
+  pending: {initial: true}
+  done: {terminal: true}
 `)
 	writeFixtureFile(t, root+"/entities.yaml", `
 vertical:
@@ -691,12 +683,11 @@ func TestLoadWorkflowContractBundle_RejectsSchemaEntitySelectorForMissingEntity(
 	root := t.TempDir()
 
 	writeFixtureFile(t, root+"/schema.yaml", "name: schema-entity-selector-missing\n")
-	writeFixtureFile(t, root+"/scoring/schema.yaml", `
-name: scoring
+	writeFixtureFile(t, root+"/scoring/schema.yaml", `name: scoring
 entity: missing
-initial_state: pending
-states: [pending, done]
-terminal_states: [done]
+stages:
+  pending: {initial: true}
+  done: {terminal: true}
 `)
 	writeFixtureFile(t, root+"/scoring/entities.yaml", `
 vertical:

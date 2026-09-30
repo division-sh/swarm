@@ -1851,7 +1851,7 @@ func admitFlowActivationEntityContracts(
 		if flowID == "" || entityType == "" {
 			t.Fatalf("flow activation entity contract requires nonblank flow and entity type: flow=%q type=%q", flowID, entityType)
 		}
-		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), fmt.Sprintf("name: %s\nmode: template\ninitial_state: active\nstates: [active]\n", flowID))
+		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), fmt.Sprintf("name: %s\nmode: template\nstages:\n  active: {initial: true}\n", flowID))
 		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "entities.yaml"), fmt.Sprintf("%s: {}\n", entityType))
 	}
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: flow-activation-test\n")
@@ -5577,12 +5577,10 @@ item.created:
 
 	flowRoot := filepath.Join(root, "parent", "child", "support")
 
-	writeFlowActivationFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), `
-name: support
-initial_state: waiting
-states:
-  - waiting
-  - done
+	writeFlowActivationFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), `name: support
+stages:
+  waiting: {initial: true}
+  done: {}
 `)
 	writeFlowActivationFixtureFile(t, filepath.Join(flowRoot, "events.yaml"), `
 item.created:
@@ -5625,13 +5623,11 @@ item:
 item.created:
   entity_id: string
 `)
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), fmt.Sprintf(`
-name: support
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), fmt.Sprintf(`name: support
 mode: %s
-initial_state: waiting
-states:
-  - waiting
-  - done
+stages:
+  waiting: {initial: true}
+  done: {}
 `, mode))
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "support", "events.yaml"), `
 item.created:

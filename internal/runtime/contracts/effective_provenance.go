@@ -107,6 +107,7 @@ func populateEffectiveProvenance(bundle *WorkflowContractBundle) {
 		return
 	}
 	builder := newEffectiveProvenanceBuilder()
+	populateEffectiveSchemaProvenance(bundle, builder)
 	for _, record := range bundle.ScopedNodeRecords() {
 		prefix := effectiveNodeProvenancePrefix(record.Source.FlowPath, record.LogicalID)
 		for relativePath, provenance := range record.Entry.admissionProvenance {

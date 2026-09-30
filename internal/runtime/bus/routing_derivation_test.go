@@ -155,11 +155,10 @@ func loadNestedPhysicalAgentRouteSource(t *testing.T) semanticview.Source {
 
 	flowRoot := filepath.Join(root, "parent", "child", "support")
 
-	write(filepath.Join(flowRoot, "schema.yaml"), `
-name: support
+	write(filepath.Join(flowRoot, "schema.yaml"), `name: support
 mode: static
-initial_state: active
-states: [active]
+stages:
+  active: {initial: true}
 pins:
   inputs:
     events: [work.requested]
@@ -260,10 +259,9 @@ pins:
 
 	write(filepath.Join(root, "orders", "schema.yaml"), `
 name: orders
-mode: `+mode+`
-initial_state: active
-states: [active, done]
-terminal_states: [done]
+mode: `+mode+`stages:
+  active: {initial: true}
+  done: {terminal: true}
 pins:
   inputs:
     events: [root.start]

@@ -1,7 +1,8 @@
 name: test-timer-cancel
-initial_state: waiting
-terminal_states: [done]
-states: [waiting, cancelled, done]
+stages:
+  waiting: {initial: true}
+  cancelled: {}
+  done: {terminal: true}
 pins:
   inputs:
     events: [timer.scheduled, timer.cancel_requested, timer.check]

@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
 )
@@ -51,121 +50,6 @@ var projectFlowIngressAuthenticationFields = map[string]struct{}{
 
 var projectFlowIngressDeliveryIDFields = map[string]struct{}{
 	"source": {}, "header": {}, "json_path": {},
-}
-
-func (i *ProjectFlowIngress) UnmarshalYAML(node *yaml.Node) error {
-	if i == nil {
-		return nil
-	}
-	if err := validateKnownMappingFields(node, "package flow ingress", projectFlowIngressFields); err != nil {
-		return err
-	}
-	type rawProjectFlowIngress ProjectFlowIngress
-	var out rawProjectFlowIngress
-	if err := node.Decode(&out); err != nil {
-		return err
-	}
-	*i = ProjectFlowIngress(out)
-	return nil
-}
-
-func (p *ProjectFlowIngressProvider) UnmarshalYAML(node *yaml.Node) error {
-	if p == nil {
-		return nil
-	}
-	if err := validateKnownMappingFields(node, "package flow ingress provider", projectFlowIngressProviderFields); err != nil {
-		return err
-	}
-	type rawProjectFlowIngressProvider ProjectFlowIngressProvider
-	var out rawProjectFlowIngressProvider
-	if err := node.Decode(&out); err != nil {
-		return err
-	}
-	*p = ProjectFlowIngressProvider(out)
-	return nil
-}
-
-func (a *ProjectFlowIngressAdmission) UnmarshalYAML(node *yaml.Node) error {
-	if a == nil {
-		return nil
-	}
-	if err := validateKnownMappingFields(node, "package flow ingress admission", projectFlowIngressAdmissionFields); err != nil {
-		return err
-	}
-	type raw ProjectFlowIngressAdmission
-	var out raw
-	if err := node.Decode(&out); err != nil {
-		return err
-	}
-	*a = ProjectFlowIngressAdmission(out)
-	return nil
-}
-
-func (p *ProjectFlowIngressAdmissionPack) UnmarshalYAML(node *yaml.Node) error {
-	if p == nil {
-		return nil
-	}
-	if err := validateKnownMappingFields(node, "package flow ingress admission pack", projectFlowIngressAdmissionPackFields); err != nil {
-		return err
-	}
-	type raw ProjectFlowIngressAdmissionPack
-	var out raw
-	if err := node.Decode(&out); err != nil {
-		return err
-	}
-	*p = ProjectFlowIngressAdmissionPack(out)
-	return nil
-}
-
-func (a *ProjectFlowIngressAuthentication) UnmarshalYAML(node *yaml.Node) error {
-	if a == nil {
-		return nil
-	}
-	if err := validateKnownMappingFields(node, "package flow ingress admission authentication", projectFlowIngressAuthenticationFields); err != nil {
-		return err
-	}
-	type raw ProjectFlowIngressAuthentication
-	var out raw
-	if err := node.Decode(&out); err != nil {
-		return err
-	}
-	*a = ProjectFlowIngressAuthentication(out)
-	return nil
-}
-
-func (d *ProjectFlowIngressDeliveryID) UnmarshalYAML(node *yaml.Node) error {
-	if d == nil {
-		return nil
-	}
-	if err := validateKnownMappingFields(node, "package flow ingress admission delivery_id", projectFlowIngressDeliveryIDFields); err != nil {
-		return err
-	}
-	type raw ProjectFlowIngressDeliveryID
-	var out raw
-	if err := node.Decode(&out); err != nil {
-		return err
-	}
-	*d = ProjectFlowIngressDeliveryID(out)
-	return nil
-}
-
-func validateKnownMappingFields(node *yaml.Node, owner string, fields map[string]struct{}) error {
-	if node == nil || node.Kind == 0 {
-		return nil
-	}
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("%s must be a mapping", owner)
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		if key == "" {
-			continue
-		}
-		if _, ok := fields[key]; !ok {
-			return NewUndefinedFieldDiagnostic(owner, key, fields)
-		}
-	}
-	return nil
 }
 
 func yamlMappingValue(node *yaml.Node, key string) *yaml.Node {
@@ -230,74 +114,6 @@ var schemaRangeRefinementFieldOptions = map[string]struct{}{
 	"max": {},
 }
 
-func (c *ConnectorPackImports) UnmarshalYAML(node *yaml.Node) error {
-	if c == nil {
-		return nil
-	}
-	if node == nil || node.Kind == 0 {
-		*c = ConnectorPackImports{}
-		return nil
-	}
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("connector_packs must be a mapping")
-	}
-	var out ConnectorPackImports
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		value := node.Content[i+1]
-		switch key {
-		case "":
-			continue
-		case "imports":
-			if err := value.Decode(&out.Imports); err != nil {
-				return fmt.Errorf("connector_packs.imports: %w", err)
-			}
-		default:
-			return NewUndefinedFieldDiagnostic("connector_packs", key, connectorPackFieldOptions)
-		}
-	}
-	*c = out.normalized()
-	return nil
-}
-
-func (i *ConnectorPackImport) UnmarshalYAML(node *yaml.Node) error {
-	if i == nil {
-		return nil
-	}
-	if node == nil || node.Kind == 0 {
-		*i = ConnectorPackImport{}
-		return nil
-	}
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("connector_packs.imports entries must be mappings")
-	}
-	var out ConnectorPackImport
-	for j := 0; j+1 < len(node.Content); j += 2 {
-		key := strings.TrimSpace(node.Content[j].Value)
-		value := node.Content[j+1]
-		switch key {
-		case "":
-			continue
-		case "provider":
-			if err := value.Decode(&out.Provider); err != nil {
-				return fmt.Errorf("provider: %w", err)
-			}
-		case "tool":
-			if err := value.Decode(&out.Tool); err != nil {
-				return fmt.Errorf("tool: %w", err)
-			}
-		default:
-			return NewUndefinedFieldDiagnostic("connector_packs.imports", key, connectorPackImportFieldOptions)
-		}
-	}
-	normalized := out.normalized()
-	if out.Provider != normalized.Provider || out.Tool != normalized.Tool || normalized.Provider == "" || normalized.Tool == "" {
-		return fmt.Errorf("connector_packs import provider and tool must be exact non-empty canonical values")
-	}
-	*i = normalized
-	return nil
-}
-
 func (c ConnectorPackImports) normalized() ConnectorPackImports {
 	out := ConnectorPackImports{Imports: make([]ConnectorPackImport, 0, len(c.Imports))}
 	for _, item := range c.Imports {
@@ -315,80 +131,6 @@ func (i ConnectorPackImport) normalized() ConnectorPackImport {
 		Provider: normalizeConnectorPackToken(i.Provider),
 		Tool:     strings.TrimSpace(i.Tool),
 	}
-}
-
-func (p *ProviderTriggerEventImports) UnmarshalYAML(node *yaml.Node) error {
-	if p == nil {
-		return nil
-	}
-	if node == nil || node.Kind == 0 {
-		*p = ProviderTriggerEventImports{}
-		return nil
-	}
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("provider_trigger_events must be a mapping")
-	}
-	var out ProviderTriggerEventImports
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		value := node.Content[i+1]
-		switch key {
-		case "":
-			continue
-		case "imports":
-			if err := value.Decode(&out.Imports); err != nil {
-				return fmt.Errorf("provider_trigger_events.imports: %w", err)
-			}
-		default:
-			return NewUndefinedFieldDiagnostic("provider_trigger_events", key, providerTriggerEventFieldOptions)
-		}
-	}
-	*p = out.normalized()
-	return nil
-}
-
-func (i *ProviderTriggerEventImport) UnmarshalYAML(node *yaml.Node) error {
-	if i == nil {
-		return nil
-	}
-	if node == nil || node.Kind == 0 {
-		return fmt.Errorf("provider_trigger_events.imports entries must declare provider and event")
-	}
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("provider_trigger_events.imports entries must be mappings")
-	}
-	var out ProviderTriggerEventImport
-	for j := 0; j+1 < len(node.Content); j += 2 {
-		key := strings.TrimSpace(node.Content[j].Value)
-		value := node.Content[j+1]
-		switch key {
-		case "":
-			continue
-		case "provider":
-			if err := value.Decode(&out.Provider); err != nil {
-				return fmt.Errorf("provider: %w", err)
-			}
-		case "event":
-			if err := value.Decode(&out.Event); err != nil {
-				return fmt.Errorf("event: %w", err)
-			}
-		default:
-			return NewUndefinedFieldDiagnostic("provider_trigger_events.imports", key, providerTriggerEventImportFieldOptions)
-		}
-	}
-	raw := out
-	out = out.normalized()
-	if raw.Provider != out.Provider || raw.Event != out.Event || !eventidentity.IsValidName(out.Event) {
-		return fmt.Errorf("provider_trigger_events import provider and event must be exact canonical values")
-	}
-	if out.Provider == "" {
-		return fmt.Errorf("provider_trigger_events.imports provider is required")
-	}
-	if out.Event == "" {
-		return fmt.Errorf("provider_trigger_events.imports event is required")
-	}
-	*i = out
-	return nil
 }
 
 func (p ProviderTriggerEventImports) normalized() ProviderTriggerEventImports {
@@ -411,84 +153,6 @@ func normalizeConnectorPackToken(raw string) string {
 	raw = strings.ReplaceAll(raw, "-", "_")
 	raw = strings.ReplaceAll(raw, " ", "_")
 	return strings.Trim(raw, "_")
-}
-
-func (c *FlowConnect) UnmarshalYAML(node *yaml.Node) error {
-	if c == nil {
-		return nil
-	}
-	if node == nil || node.Kind == 0 {
-		*c = FlowConnect{}
-		return nil
-	}
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("connect entry must be a mapping")
-	}
-	if err := validateExactW2MappingKeys(node, "connect entry"); err != nil {
-		return err
-	}
-	out := FlowConnect{SourceLine: node.Line}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := node.Content[i].Value
-		value := node.Content[i+1]
-		switch key {
-		case "event":
-			decoded, err := decodeExactNonEmptyFlowPinScalar(value, "connect.event")
-			if err != nil {
-				return err
-			}
-			out.Event = decoded
-		case "from":
-			decoded, err := decodeExactNonEmptyFlowPinScalar(value, "connect.from")
-			if err != nil {
-				return err
-			}
-			out.From = decoded
-		case "to":
-			decoded, err := decodeExactNonEmptyFlowPinScalar(value, "connect.to")
-			if err != nil {
-				return err
-			}
-			out.To = decoded
-		case "rename":
-			decoded, err := decodeExactNonEmptyFlowPinScalar(value, "connect.rename")
-			if err != nil {
-				return err
-			}
-			out.Rename = decoded
-		case "adapter":
-			return fmt.Errorf("RETIRED: connect.adapter is unsupported; declare an exact event contract or a distinct event")
-		case "using":
-			return fmt.Errorf("retired connect.using.instance; declare receiver-owned `instance: <field>` and `resolution.mode`, with `resolution.from` only for an exceptional source")
-		case "map":
-			return fmt.Errorf("retired connect.map; declare receiver-owned `instance: <field>` and use `resolution.from` only for an exceptional source")
-		case "delivery":
-			return NewRetiredConnectDeliveryDiagnostic()
-		case "reply":
-			return NewRetiredConnectReplyDiagnostic()
-		default:
-			return NewUndefinedFieldDiagnostic("connect", key, flowConnectFieldOptions)
-		}
-	}
-	event := out.Event
-	rename := out.Rename
-	if event == "" {
-		return fmt.Errorf("RETIRED: endpoint-centric connect rows are no longer supported; declare event plus flow-only from and to endpoints")
-	}
-	if event != out.Event || !eventidentity.IsValidName(out.Event) {
-		return fmt.Errorf("connect.event %q must be an exact canonical event identity", out.Event)
-	}
-	if rename != "" && eventidentity.Normalize(rename) == eventidentity.Normalize(event) {
-		return fmt.Errorf("connect.rename %q is redundant with event; remove rename", out.Rename)
-	}
-	if rename != out.Rename || (rename != "" && !eventidentity.IsValidName(out.Rename)) {
-		return fmt.Errorf("connect.rename %q must be an exact canonical event identity", out.Rename)
-	}
-	if out.From == "" || out.To == "" {
-		return fmt.Errorf("connect entry requires non-empty event, from, and to")
-	}
-	*c = out
-	return nil
 }
 
 func normalizeStringMap(in map[string]string) map[string]string {
@@ -1027,7 +691,11 @@ func decodeWave1FieldValue(value yamlsource.Value, opts wave1FieldNodeOptions) (
 	}
 
 	if candidate, ok := byName["description"]; ok {
-		field.Description, err = optionalScalarString(candidate.Value, opts.Context+" description")
+		if opts.AllowDefault {
+			field.Description, err = schemaValueText(candidate.Value, false)
+		} else {
+			field.Description, err = optionalScalarString(candidate.Value, opts.Context+" description")
+		}
 	}
 	if err == nil {
 		if candidate, ok := byName["pattern"]; ok {
@@ -1071,6 +739,15 @@ func decodeWave1FieldValue(value yamlsource.Value, opts wave1FieldNodeOptions) (
 			return wave1ParsedFieldNode{}, fmt.Errorf("%s initial cannot be null; omit initial for an unassigned field", opts.Context)
 		}
 		if err := candidate.Value.Project(&field.Initial); err != nil {
+			return wave1ParsedFieldNode{}, err
+		}
+	}
+	if candidate, ok := byName["default"]; ok {
+		field.HasDefault = true
+		if err := candidate.Value.ValidateUniqueMappings(); err != nil {
+			return wave1ParsedFieldNode{}, err
+		}
+		if err := candidate.Value.Project(&field.Default); err != nil {
 			return wave1ParsedFieldNode{}, err
 		}
 	}
@@ -1122,6 +799,9 @@ func wave1FieldNodeAllowedKeys(opts wave1FieldNodeOptions) map[string]struct{} {
 	}
 	if opts.AllowInitial {
 		allowed["initial"] = struct{}{}
+	}
+	if opts.AllowDefault {
+		allowed["default"] = struct{}{}
 	}
 	if opts.AllowImmutable {
 		allowed["immutable"] = struct{}{}
@@ -1382,6 +1062,7 @@ func isBuiltinWave1Scalar(raw string) bool {
 
 type wave1FieldNodeOptions struct {
 	Context                 string
+	AllowDefault            bool
 	AllowInitial            bool
 	AllowImmutable          bool
 	AllowIndexed            bool
@@ -1394,6 +1075,8 @@ type wave1FieldNodeOptions struct {
 
 type wave1ParsedFieldNode struct {
 	Type               string
+	Default            any
+	HasDefault         bool
 	IsOptional         bool
 	Initial            any
 	Indexed            bool

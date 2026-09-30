@@ -349,7 +349,7 @@ func TestRoleScopedEntityTools_OptedInActorReceivesGeneratedSurfaceOnly(t *testi
 		"query_metrics",
 		"search_entities",
 	}}
-	bundle := loadRoleScopedEntityToolBundle(t, actor, true)
+	bundle := loadRoleScopedEntityToolBundle(t, actor)
 	ctx, exec, _ := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
 
 	defs := exec.ToolDefinitionsForActor(actor)
@@ -411,7 +411,7 @@ func TestRoleScopedEntityTools_OptedInActorReceivesGeneratedSurfaceOnly(t *testi
 
 func TestRoleScopedEntityToolsRejectUnknownDeclarationWithMatchingRole(t *testing.T) {
 	exact := models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator"}
-	bundle := loadRoleScopedEntityToolBundle(t, exact, true)
+	bundle := loadRoleScopedEntityToolBundle(t, exact)
 	source := semanticview.Wrap(bundle)
 	_, exec, _ := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, exact, bundle, false)
 	contract, ok := entityruntime.ResolveForActor(source, exact)
@@ -440,14 +440,11 @@ func TestRoleScopedEntityTools_EqualityUsesFinalCandidateValidation(t *testing.T
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{"save_entity_field"}}
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"validation": {
-			SchemaYAML: `
-name: validation
+			SchemaYAML: `name: validation
 mode: static
-initial_state: queued
-states: [queued, closed]
-terminal_states: [closed]
-tool_surface:
-  role_scoped_entity_tools: true
+stages:
+  queued: {initial: true}
+  closed: {terminal: true}
 `,
 			TypesYAML: `
 types:
@@ -516,7 +513,7 @@ func TestRoleScopedEntityTools_CurrentEntityEligibilityFiltersTurnSurface(t *tes
 		"save_entity_field",
 		"query_entities",
 	}}
-	bundle := loadRoleScopedEntityToolBundle(t, actor, true)
+	bundle := loadRoleScopedEntityToolBundle(t, actor)
 	ctx, exec, db := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
 	currentID := uuid.NewString()
 	foreignID := uuid.NewString()
@@ -581,7 +578,7 @@ func TestRoleScopedEntityTools_CurrentEntityEligibilityFiltersTurnSurface(t *tes
 
 func TestRoleScopedEntityTools_GeneratedSchemasAreClosedAndRuntimeRejectsExtras(t *testing.T) {
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{"save_entity_field"}}
-	bundle := loadRoleScopedEntityToolBundle(t, actor, true)
+	bundle := loadRoleScopedEntityToolBundle(t, actor)
 	source := semanticview.Wrap(bundle)
 	if errs := runtimetools.ValidateGeneratedToolSchemaClosureForSource(source); len(errs) > 0 {
 		t.Fatalf("ValidateGeneratedToolSchemaClosureForSource errors = %#v", errs)
@@ -632,7 +629,7 @@ func TestRoleScopedEntityTools_GeneratedSchemasAreClosedAndRuntimeRejectsExtras(
 
 func TestRoleScopedEntityTools_NonOptedActorReceivesGeneratedSurfaceByDefault(t *testing.T) {
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{"get_entity", "query_entities"}}
-	bundle := loadRoleScopedEntityToolBundle(t, actor, false)
+	bundle := loadRoleScopedEntityToolBundle(t, actor)
 	_, exec, _ := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
 
 	names := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActor(actor))
@@ -653,7 +650,7 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 		"save_entity_field",
 		"query_entities",
 	}}
-	bundle := loadRoleScopedEntityToolBundle(t, actor, true)
+	bundle := loadRoleScopedEntityToolBundle(t, actor)
 	ctx, exec, db := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
 	currentID := uuid.NewString()
 	siblingID := uuid.NewString()
@@ -739,7 +736,7 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 
 func TestRoleScopedEntityTools_ReadsLargeValidationCaseWithoutLoss(t *testing.T) {
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "validation-orchestrator", Role: "validation_orchestrator"}
-	bundle := loadRoleScopedEntityToolBundle(t, actor, true)
+	bundle := loadRoleScopedEntityToolBundle(t, actor)
 	ctx, exec, db := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
 	entityID := uuid.NewString()
 	brief := strings.Repeat("business brief ", 1800)
@@ -1814,12 +1811,11 @@ root_subject:
   score: integer
 `)
 	writeEntityToolFixtureFile(t, filepath.Join(root, "agents.yaml"), entityToolAgentYAML(actor))
-	writeEntityToolFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `
-name: child
+	writeEntityToolFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `name: child
 mode: static
-initial_state: active
-states: [active, done]
-terminal_states: [done]
+stages:
+  active: {initial: true}
+  done: {terminal: true}
 `)
 	writeEntityToolFixtureFile(t, filepath.Join(root, "child", "entities.yaml"), `
 child_subject:
@@ -2884,12 +2880,12 @@ func loadWave1EntityToolBundle(t *testing.T, actor models.AgentConfig, flowID, e
 	if strings.TrimSpace(typesYAML) != "" {
 		writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "types.yaml"), typesYAML)
 	}
-	writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), fmt.Sprintf(`
-name: %s
+	writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), fmt.Sprintf(`name: %s
 mode: static
-initial_state: queued
-states: [queued, marginal_review, closed]
-terminal_states: [closed]
+stages:
+  queued: {initial: true}
+  marginal_review: {}
+  closed: {terminal: true}
 `, flowID))
 	writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "entities.yaml"), entitiesYAML)
 	writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "agents.yaml"), entityToolAgentYAML(actor))
@@ -2904,24 +2900,18 @@ terminal_states: [closed]
 	return bundle
 }
 
-func loadRoleScopedEntityToolBundle(t *testing.T, actor models.AgentConfig, optIn bool) *runtimecontracts.WorkflowContractBundle {
+func loadRoleScopedEntityToolBundle(t *testing.T, actor models.AgentConfig) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	toolSurface := ""
-	if optIn {
-		toolSurface = `
-tool_surface:
-  role_scoped_entity_tools: true
-`
-	}
 	return loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"validation": {
-			SchemaYAML: fmt.Sprintf(`
+			SchemaYAML: `
 name: validation
 mode: static
-initial_state: queued
-states: [queued, ready, closed]
-terminal_states: [closed]
-%s`, toolSurface),
+stages:
+  queued: {initial: true}
+  ready: {}
+  closed: {terminal: true}
+`,
 			TypesYAML: `
 types:
   business_brief:
@@ -3043,12 +3033,18 @@ func loadWave1EntityToolMultiFlowBundle(t *testing.T, flows map[string]entityToo
 		fixture := flows[flowID]
 		schemaYAML := strings.TrimSpace(fixture.SchemaYAML)
 		if schemaYAML == "" {
-			schemaYAML = fmt.Sprintf(`
-name: %s
+			schemaYAML = fmt.Sprintf(`name: %s
 mode: static
-initial_state: queued
-states: [queued, active, researching, marginal_review, analyzed, ready, finished, closed, killed]
-terminal_states: [finished, closed, killed]
+stages:
+  queued: {initial: true}
+  active: {}
+  researching: {}
+  marginal_review: {}
+  analyzed: {}
+  ready: {}
+  finished: {terminal: true}
+  closed: {terminal: true}
+  killed: {terminal: true}
 `, flowID)
 		}
 		writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), schemaYAML)

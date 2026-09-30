@@ -3,7 +3,7 @@ registry_version: 1
 matrix_version: 1
 status: checked_merge_bearing
 census_head: 25ad370da
-decoder_census_head: issue-2489-nodes-root
+decoder_census_head: issue-2490-schema-root
 scope:
   loader_root: LoadWorkflowContractBundle
   included:
@@ -42,12 +42,12 @@ classification_tests:
   f2_bug: "An accepted spelling changes, disappears, or is independently reinterpreted after decode."
 
 inventory:
-  custom_unmarshal_total: 67
-  custom_unmarshal_reachable: 63
+  custom_unmarshal_total: 35
+  custom_unmarshal_reachable: 31
   custom_unmarshal_retired: 2
   custom_unmarshal_excluded: 2
   custom_unmarshal_breakdown:
-    contracts: 52
+    contracts: 20
     flowmodel_policy: 11
     agentintent: 1
     channel_pack: 1
@@ -87,7 +87,7 @@ rows:
   - id: schema.connect
     ruled: mechanical-ratified
     paths: "schema.connect[].event, schema.connect[].from, schema.connect[].to, schema.connect[].rename"
-    owners: [FlowConnect.UnmarshalYAML, CompileConnectGraph]
+    owners: [projectSchemaConnectValue, CompileConnectGraph]
     information:
       fact: [event_and_endpoint_ownership]
       choice: [rename_override]
@@ -100,7 +100,7 @@ rows:
   - id: schema.imports
     ruled: mechanical-ratified
     paths: "schema.imports.connector_packs[].provider, schema.imports.connector_packs[].tool, schema.imports.provider_trigger_events[].provider, schema.imports.provider_trigger_events[].event"
-    owners: [FlowSchemaImports.UnmarshalYAML, ConnectorPackImports.UnmarshalYAML, ConnectorPackImport.UnmarshalYAML, ProviderTriggerEventImports.UnmarshalYAML, ProviderTriggerEventImport.UnmarshalYAML]
+    owners: [projectSchemaImportsValue, providerconnectors.CatalogSnapshot, providertriggers.Registry]
     information: {choice: [selected provider/tool and provider/event capability imports]}
     spelling:
       canonical_candidate: normalized_underscore_token
@@ -110,7 +110,7 @@ rows:
   - id: schema.ingress
     ruled: mechanical-ratified
     paths: "schema.ingress.*"
-    owners: [ProjectFlowIngress.UnmarshalYAML, ProjectFlowIngressProvider.UnmarshalYAML, ProjectFlowIngressAdmission.UnmarshalYAML, ProjectFlowIngressAdmissionPack.UnmarshalYAML, ProjectFlowIngressAuthentication.UnmarshalYAML, ProjectFlowIngressDeliveryID.UnmarshalYAML]
+    owners: [projectSchemaIngressValue, projectSchemaIngressAdmissionValue, providertriggers.CatalogSnapshot.CompileAdmission]
     information:
       fact: [ingress alias/provider/pack/event/delivery extraction and handoff event/flow]
       choice: [acknowledge, authentication, payload, namespace]
@@ -120,11 +120,11 @@ rows:
   - id: flow.identity_mode
     ruled: mechanical-ratified
     paths: "schema.name, schema.mode, schema.entity, schema.instance"
-    owner: FlowSchemaDocument.UnmarshalYAML
+    owner: projectFlowSchemaValue
     information:
-      fact: [name]
       choice: [mode, instance]
       derived_projection: [entity]
+      annotation: [name]
     spelling:
       canonical_candidate: omit_entity_and_derive_single_primary_entity
       retired_duplicates: [explicit_entity]
@@ -134,7 +134,7 @@ rows:
   - id: flow.lifecycle
     ruled: R1
     paths: "schema.initial_state, schema.states, schema.terminal_states, schema.stages"
-    owners: [FlowSchemaDocument.UnmarshalYAML, FlowStageDeclarations.UnmarshalYAML, FlowStageDeclaration.UnmarshalYAML]
+    owners: [projectSchemaStagesValue, FlowStageDeclarations, CompileWorkflowTransitions]
     information:
       fact: [stage IDs]
       choice: [initial and terminal membership]
@@ -143,13 +143,13 @@ rows:
       canonical_candidate: stages_keyed_mapping
       retired_duplicates: [initial_state_plus_states_plus_terminal_states]
       distinct_overrides: []
-    presence: {stages_missing: legacy_lifecycle_path, stages_null: reject, stages_empty_sequence: explicit_stateless, stages_empty_mapping: currently_zero_collapsed}
+    presence: {stages_missing: markerless_stateless, stages_null: reject, stages_empty_sequence: explicit_stateless, stages_empty_mapping: reject, legacy_fields_any_presence: reject}
     corpus: {legacy_schemas: 7, stage_schemas: 1, stage_rows: 4}
 
   - id: flow.stage_timer
     ruled: mechanical-ratified
     paths: "schema.stages.<stage>.timers[].id, schema.stages.<stage>.timers[].after, schema.stages.<stage>.timers[].emit, schema.stages.<stage>.timers[].advances_to"
-    owner: FlowStageTimerDeclaration.UnmarshalYAML
+    owner: projectSchemaStagesValue
     information:
       derived_projection: [id]
       choice: [after, emit, advances_to]
@@ -162,7 +162,7 @@ rows:
   - id: flow.stage_gate
     ruled: mechanical-ratified
     paths: "schema.stages.<stage>.gate.decision, schema.stages.<stage>.gate.title, schema.stages.<stage>.gate.context, schema.stages.<stage>.gate.outcomes.<verdict>.label, schema.stages.<stage>.gate.outcomes.<verdict>.input, schema.stages.<stage>.gate.outcomes.<verdict>.advances_to, schema.stages.<stage>.gate.outcomes.<verdict>.emit"
-    owners: [FlowStageGateDeclaration.UnmarshalYAML, FlowStageGateOutcomeDeclaration.UnmarshalYAML, WorkflowGateInputField.UnmarshalYAML]
+    owners: [projectSchemaGateValue, projectSchemaGateInputValue, projectNodeEmitValue, FlowStageDeclarations.GatePlans]
     information:
       fact: [decision and verdict IDs]
       choice: [context, input type/required, advances_to, emit]
@@ -177,7 +177,7 @@ rows:
   - id: flow.loop
     ruled: mechanical-ratified
     paths: "schema.loops.<loop>.revision_field, schema.loops.<loop>.max_attempts, schema.loops.<loop>.escape, handler.loop.start, handler.loop.admit, handler.loop.repeat, handler.loop.close, handler.loop.from"
-    owners: [FlowLoopDeclarations.UnmarshalYAML, FlowLoopDeclaration.UnmarshalYAML, LoopAttemptLimit.UnmarshalYAML, LoopEscapeSpec.UnmarshalYAML, LoopOperationSpec.UnmarshalYAML]
+    owners: [projectSchemaLoopsValue, projectSchemaLoopLimitValue, projectNodeLoopValue]
     information:
       fact: [loop ID and revision field]
       choice: [literal or policy max attempts, escape outcome, operation and source]
@@ -187,7 +187,7 @@ rows:
   - id: flow.pin_event_entry
     ruled: issue-2352
     paths: "schema.pins.inputs.events[].event/source, schema.pins.outputs.events[].event/sink"
-    owners: [decodeFlowInputPinEventNode, decodeFlowOutputPinEventNode, CompileFlowInputPin, CompileFlowOutputPin]
+    owners: [projectSchemaPinValue, CompileFlowInputPin, CompileFlowOutputPin]
     information:
       fact: [exact_local_event_identity]
       choice: [source, sink]
@@ -203,7 +203,7 @@ rows:
   - id: flow.input_pin_resolution
     ruled: issue-2352
     paths: "schema.pins.inputs.events[].resolution.*"
-    owners: [FlowInputPinResolution.UnmarshalYAML, CompileFlowInputPin, CompileConnectGraph]
+    owners: [projectSchemaResolutionValue, CompileFlowInputPin, CompileConnectGraph]
     information:
       derived_projection: [same_named_required_payload_instance_source, producer_schema_type]
       choice: [from_override, resolution_mode, aggregation, window, dedup_by, singleton, replies_to, correlation_key]
@@ -226,7 +226,7 @@ rows:
   - id: flow.pin_entity_fields
     ruled: mechanical-ratified
     paths: "schema.pins.inputs.reads, schema.pins.outputs.writes"
-    owner: decodeFlowPinFieldNamesNode
+    owner: projectSchemaPinFieldsValue
     information: {choice: [declared readable and writable entity fields]}
     spelling:
       canonical_candidate: scalar_field_sequence
@@ -236,14 +236,14 @@ rows:
   - id: flow.other_surface
     ruled: mechanical-ratified
     paths: "schema.tool_surface.role_scoped_entity_tools, schema.required_agents, schema.instance_variables.description, schema.instance_variables.variables.<name>, schema.auto_emit_on_create.event, schema.auto_emit_on_create.description"
-    owners: [FlowInstanceVariables.UnmarshalYAML, FlowVariable.UnmarshalYAML, FlowSchemaDocument.UnmarshalYAML]
+    owners: [projectSchemaReceiverVariablesValue, decodeWave1FieldValue, projectSchemaRequiredAgentsValue, projectFlowSchemaValue]
     information:
-      choice: [tool_surface, variable declarations, auto_emit_on_create]
+      choice: [variable declarations, auto_emit_on_create, explicit_required_agent_boundary]
       derived_projection: [required_agents]
       annotation: [descriptions]
     spelling:
       canonical_candidate: omit_required_agents_when_equal_to_agents_catalog
-      retired_duplicates: [explicit_required_agents_equal_to_derived_catalog, scalar_variable_description]
+      retired_duplicates: [tool_surface_opt_in, scalar_variable_description]
       distinct_overrides: []
     corpus: {required_agents_explicit: 0, variables: 0, auto_emit: 0}
 
@@ -678,12 +678,7 @@ f2_priority_rows:
   - event.metadata_roles
 
 decoder_coverage:
-  receiver_initialization.go:
-    flow.other_surface: [FlowInstanceVariables]
   workflow_contract_yaml_wave1.go:
-    schema.ingress: [ProjectFlowIngress, ProjectFlowIngressProvider, ProjectFlowIngressAdmission, ProjectFlowIngressAdmissionPack, ProjectFlowIngressAuthentication, ProjectFlowIngressDeliveryID]
-    schema.imports: [ConnectorPackImports, ConnectorPackImport, ProviderTriggerEventImports, ProviderTriggerEventImport]
-    schema.connect: [FlowConnect]
     type.scalar_enum_named: [TypeCatalogDocument, ScalarTypeDecl, EnumTypeDecl, NamedTypeDecl]
     typed_field: [TypeFieldSpec, EntityFieldDecl]
     entity_document: [EntityContractsDocument, EntityContract]
@@ -691,26 +686,8 @@ decoder_coverage:
     tool.schema_value: [ToolInputSchema]
     platform.pack_interface: [PackInterfaceDefinition, PackInterfaceOperation, PackInterfaceEvent, PackInterfaceField]
     tool.schema_entry: [ToolSchemaEntry]
-  workflow_contract_yaml_flow.go:
-    flow.pin_event_entry: [FlowInputPins, FlowOutputPins]
-    flow.identity_mode: [TemplateInstanceField]
-    flow.input_pin_resolution: [FlowInputPinResolution]
-    flow.other_surface: [FlowVariable]
-  workflow_contract_yaml_handlers.go:
-    handler.emit_action_activity: [EmitSpec]
   durable_data.go:
     agent.behavior: [DurableDataAccessRef]
-  workflow_contract_yaml_rules.go:
-    handler.expression: [ExpressionValue]
-  workflow_contract_yaml.go:
-    flow.identity_mode: [FlowSchemaDocument]
-    schema.imports: [FlowSchemaImports]
-  workflow_contract_stages.go:
-    flow.lifecycle: [FlowStageDeclarations, FlowStageDeclaration]
-    flow.stage_timer: [FlowStageTimerDeclaration]
-    flow.stage_gate: [FlowStageGateDeclaration, FlowStageGateOutcomeDeclaration, WorkflowGateInputField]
-  workflow_contract_loops.go:
-    flow.loop: [FlowLoopDeclarations, FlowLoopDeclaration, LoopAttemptLimit, LoopEscapeSpec, LoopOperationSpec]
   workflow_contract_agent_writes.go:
     agent.behavior: [AgentEntityWriteRule]
   workflow_contract_types.go:
@@ -739,7 +716,7 @@ decode_bypasses:
   # Direct roots count yaml.Unmarshal and yaml.NewDecoder calls repository-wide.
   # The canonical owner's root is classified but excluded from the off-owner ceiling.
   # CI compares each PR to the accepted base ledger, not just these initial ceilings.
-  node_site_ceiling: 191
+  node_site_ceiling: 121
   off_owner_direct_decode_ceiling: 29
   files:
     internal/cliapp/cli_output.go: {family: other_production_projection, node_sites: 0, direct_decode_roots: 1}
@@ -756,20 +733,15 @@ decode_bypasses:
     internal/runtime/contracts/durable_data.go: {family: wave_5_agent_tool_policy, node_sites: 1, direct_decode_roots: 0}
     internal/runtime/contracts/enums.go: {family: wave_4_node_handler, node_sites: 1, direct_decode_roots: 0}
     internal/runtime/contracts/platform_event_catalog.go: {family: closure_pack_platform, node_sites: 6, direct_decode_roots: 0}
-    internal/runtime/contracts/receiver_initialization.go: {family: wave_4_node_handler, node_sites: 6, direct_decode_roots: 0}
     internal/runtime/contracts/tool_input_schema_value.go: {family: wave_5_agent_tool_policy, node_sites: 0, direct_decode_roots: 1}
     internal/runtime/contracts/workflow_contract_activity.go: {family: wave_4_node_handler, node_sites: 1, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_agent_writes.go: {family: wave_5_agent_tool_policy, node_sites: 1, direct_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_loops.go: {family: wave_4_node_handler, node_sites: 6, direct_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_loops.go: {family: wave_4_node_handler, node_sites: 1, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_policy_sheet.go: {family: wave_5_agent_tool_policy, node_sites: 1, direct_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_stages.go: {family: wave_4_node_handler, node_sites: 9, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_types.go: {family: wave_5_agent_tool_policy, node_sites: 6, direct_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_yaml.go: {family: mixed_wave_4_wave_5, node_sites: 7, direct_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_yaml_flow.go: {family: mixed_wave_4_wave_5, node_sites: 23, direct_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_yaml_handlers.go: {family: wave_4_node_handler, node_sites: 5, direct_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_yaml_rules.go: {family: wave_4_node_handler, node_sites: 2, direct_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_yaml.go: {family: mixed_wave_4_wave_5, node_sites: 4, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_yaml_schema.go: {family: mixed_wave_4_wave_5, node_sites: 17, direct_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_yaml_wave1.go: {family: mixed_existing_typed_admission, node_sites: 28, direct_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_yaml_wave1.go: {family: mixed_existing_typed_admission, node_sites: 11, direct_decode_roots: 0}
     internal/runtime/flowmodel/model.go: {family: wave_5_agent_tool_policy, node_sites: 12, direct_decode_roots: 0}
     internal/runtime/scenarioderivation/declaration.go: {family: excluded_scenario_tooling, node_sites: 0, direct_decode_roots: 1}
     internal/runtime/testfixtures/canonicalrouting/fixture.go: {family: excluded_test_fixture, node_sites: 13, direct_decode_roots: 4}
@@ -780,7 +752,7 @@ decode_bypasses:
     internal/yamlsource/source.go: {family: canonical_owner, node_sites: 0, direct_decode_roots: 1}
 
 registry_result:
-  completeness: "all 67 remaining production custom unmarshallers classified as 63 bundle-reachable row owners, 2 retired unreachable decoders, and 2 deployment swarm.yaml exclusions; off-owner yaml.Node sites and pack/config decode roots are separately ratcheted"
+  completeness: "all 35 remaining production custom unmarshallers classified as 31 bundle-reachable row owners, 2 retired unreachable decoders, and 2 deployment swarm.yaml exclusions; off-owner yaml.Node sites and pack/config decode roots are separately ratcheted"
   wave_1_status: closed
   wave_2_status: closed
   later_wave_gate: "presence-sensitive retirements remain blocked on the effective-model/presence-substrate design gate"
@@ -792,8 +764,23 @@ node_root_admission:
   nested_owner_family: workflow_contract_nodes_*_value.go
   provenance_owner: populateEffectiveProvenance
   retired_fields: [node.permissions, node.implementation, node.owned_transitions, node.idempotency_table, handler.from, handler.dedup_by, query.sequence, query.operation, compute.params, sets_gate.value, filter.predicate, reduce.params]
-  retained_raw_callers: [schema.emit, schema.expression_value, schema.loop_escape, W1.scalar_helpers, durable_data.mapping_helper]
-  remaining_parent: "#2490 schema root, then W5 and pack/platform roots under #2300"
+  retained_raw_callers: [W1.scalar_helpers, durable_data.mapping_helper]
+  remaining_parent: "W5 and pack/platform roots under #2300"
+
+schema_root_admission:
+  issue: 2490
+  owner: projectFlowSchemaValue
+  source_owner: yamlsource.Document.Root/Value
+  nested_owner_family: workflow_contract_schema_*_value.go
+  provenance_owner: populateEffectiveProvenance
+  presence_oracle: TestSchemaAdmissionFieldPresenceMatrix
+  retired_fields: [initial_state, states, terminal_states, tool_surface, entity, namespace_prefix, namespace_rule]
+  bound_owner: [decodeSchemaLengthRefinementValue, decodeSchemaRangeRefinementValue]
+  bound_consumers: [receiver_variables, named_types, entities, events]
+  retained_raw_schema_callers: []
+  decoder_deletions: 32
+  off_owner_node_site_deletions: 70
+  parent: "#2472/#2300; no W5, pack/platform or unsettled #1786 literal grammar closure claimed"
 
 action_retirement:
   issue: 2307

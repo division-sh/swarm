@@ -1168,24 +1168,15 @@ type FlowSchemaDocument struct {
 	Ingress                *ProjectFlowIngress      `yaml:"ingress"`
 	Connect                []FlowConnect            `yaml:"connect"`
 	Imports                FlowSchemaImports        `yaml:"imports"`
-	Entity                 string                   `yaml:"entity"`
 	Instance               TemplateInstanceField    `yaml:"instance"`
-	InitialState           string                   `yaml:"initial_state"`
-	InitialStateDeclared   bool                     `yaml:"-"`
-	NamespacePrefix        string                   `yaml:"-"`
-	NamespaceRule          string                   `yaml:"-"`
-	TerminalStates         []string                 `yaml:"terminal_states"`
-	TerminalStatesDeclared bool                     `yaml:"-"`
-	States                 []string                 `yaml:"states"`
-	StatesDeclared         bool                     `yaml:"-"`
 	StageDeclarations      FlowStageDeclarations    `yaml:"stages"`
 	LoopDeclarations       FlowLoopDeclarations     `yaml:"loops"`
 	Pins                   FlowPins                 `yaml:"pins"`
-	ToolSurface            FlowToolSurfaceContract  `yaml:"tool_surface"`
 	RequiredAgents         []FlowRequiredAgent      `yaml:"required_agents"`
 	RequiredAgentsDeclared bool                     `yaml:"-"`
 	InstanceVariables      FlowInstanceVariables    `yaml:"instance_variables"`
 	AutoEmitOnCreate       AutoEmitOnCreateContract `yaml:"auto_emit_on_create"`
+	admissionProvenance    map[string]EffectiveValueProvenance
 }
 
 const FlowActivationStanding = "standing"
@@ -1205,10 +1196,6 @@ const (
 	FlowInputInstanceSourceGeneratedUUIDPath = "generated.uuid"
 	FlowInputInstanceSourceEventIDPath       = "event.id"
 )
-
-type FlowToolSurfaceContract struct {
-	RoleScopedEntityTools bool `yaml:"role_scoped_entity_tools"`
-}
 
 type TemplateInstanceContract struct {
 	FlowID        string

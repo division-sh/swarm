@@ -1,6 +1,6 @@
-initial_state: collecting
-terminal_states: [done]
-states: [collecting, done]
+stages:
+  collecting: {initial: true}
+  done: {terminal: true}
 pins:
   inputs:
     events: [evidence.submitted]

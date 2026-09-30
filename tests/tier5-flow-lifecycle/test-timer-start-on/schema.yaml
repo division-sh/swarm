@@ -1,6 +1,7 @@
-initial_state: pending
-terminal_states: [timed_out]
-states: [pending, active, timed_out]
+stages:
+  pending: {initial: true}
+  active: {}
+  timed_out: {terminal: true}
 pins:
   inputs:
     events: [task.started, timer.task_timeout]

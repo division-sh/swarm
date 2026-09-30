@@ -1,7 +1,7 @@
 name: intake
-initial_state: new
-terminal_states: [processed]
-states: [new, processed]
+stages:
+  new: {initial: true}
+  processed: {terminal: true}
 pins:
   inputs:
     events: [work.assigned]

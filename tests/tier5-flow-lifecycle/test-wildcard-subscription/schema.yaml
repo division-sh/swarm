@@ -1,6 +1,7 @@
-initial_state: listening
-terminal_states: [done]
-states: [listening, matched, done]
+stages:
+  listening: {initial: true}
+  matched: {}
+  done: {terminal: true}
 pins:
   inputs:
     events: [task.completed]

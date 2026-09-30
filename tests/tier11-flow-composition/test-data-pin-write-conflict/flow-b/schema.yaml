@@ -1,7 +1,7 @@
 name: flow-b
-initial_state: idle
-terminal_states: [done]
-states: [idle, done]
+stages:
+  idle: {initial: true}
+  done: {terminal: true}
 pins:
   inputs:
     events: [b.start]

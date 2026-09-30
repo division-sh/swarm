@@ -1,6 +1,6 @@
-initial_state: ready
-terminal_states: [done]
-states: [ready, done]
+stages:
+  ready: {initial: true}
+  done: {terminal: true}
 pins:
   inputs:
     events:

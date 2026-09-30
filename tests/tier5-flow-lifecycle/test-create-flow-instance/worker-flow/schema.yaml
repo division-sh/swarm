@@ -1,9 +1,11 @@
 name: worker-flow
 mode: template
 instance: worker_id
-initial_state: idle
-terminal_states: [complete]
-states: [idle, awaiting_observed, awaiting_spawned, complete]
+stages:
+  idle: {initial: true}
+  awaiting_observed: {}
+  awaiting_spawned: {}
+  complete: {terminal: true}
 auto_emit_on_create:
   event: worker.ready
 pins:

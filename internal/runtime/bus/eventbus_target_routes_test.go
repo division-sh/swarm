@@ -902,7 +902,7 @@ func TestEventBusCompositionReceiverSettlesBeforePersistence(t *testing.T) {
 	const eventType = "work.keyed"
 	newSource := func() semanticview.Source {
 		bundle := materializedTargetBundleWithHandler(t, "review", "target-node", eventType, runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}})
-		bundle.FlowTree.ByID["review"].Schema = runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate, InitialState: "active", States: []string{"active", "done"}, TerminalStates: []string{"done"}}
+		bundle.FlowTree.ByID["review"].Schema = runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate, StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "active", Initial: true}, {ID: "done", Terminal: true}}}}
 		bundle.FlowSchemas["review"] = bundle.FlowTree.ByID["review"].Schema
 		return semanticview.Wrap(bundle)
 	}
@@ -1024,7 +1024,7 @@ func TestEventBusInitializedReceiverIsImmutableAfterPrepublicationLinearization(
 	const eventType = "work.keyed"
 	newSource := func() semanticview.Source {
 		bundle := materializedTargetBundleWithHandler(t, "review", "target-node", eventType, runtimecontracts.SystemNodeEventHandler{CreateEntity: true})
-		bundle.FlowTree.ByID["review"].Schema = runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate, InitialState: "active", States: []string{"active", "done"}, TerminalStates: []string{"done"}}
+		bundle.FlowTree.ByID["review"].Schema = runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate, StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "active", Initial: true}, {ID: "done", Terminal: true}}}}
 		bundle.FlowSchemas["review"] = bundle.FlowTree.ByID["review"].Schema
 		return semanticview.Wrap(bundle)
 	}
@@ -1344,7 +1344,7 @@ func materializedTargetBundleWithHandler(t *testing.T, flowID, nodeID, eventType
 	admitted := loadTargetRouteTempBundle(t, map[string]string{
 		"manifest.yaml":                        "name: target-route-test\nversion: 1.0.0\n",
 		"schema.yaml":                          "name: target-route-test\n",
-		filepath.Join(flowID, "schema.yaml"):   fmt.Sprintf("name: %s\nmode: template\ninitial_state: active\nstates: [active]\n", flowID),
+		filepath.Join(flowID, "schema.yaml"):   fmt.Sprintf("name: %s\nmode: template\nstages:\n  active: {initial: true}\n", flowID),
 		filepath.Join(flowID, "entities.yaml"): "test_entity:\n  items:\n    type: '[text]'\n",
 	})
 	admitted.FlowTree = base.FlowTree

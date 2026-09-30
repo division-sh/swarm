@@ -784,13 +784,9 @@ func writeDoctorAgentFreeContractsFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
-name: agent-free-doctor
-initial_state: idle
-states:
-  - idle
-terminal_states:
-  - idle
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: agent-free-doctor
+stages:
+  idle: {initial: true, terminal: true}
 `)
 	return root
 }

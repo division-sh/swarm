@@ -1,8 +1,9 @@
 name: golden-agent-scout
 mode: singleton
-initial_state: pending
-terminal_states: [complete]
-states: [pending, active, complete]
+stages:
+  pending: {initial: true}
+  active: {}
+  complete: {terminal: true}
 pins:
   inputs:
     events:

@@ -47,10 +47,10 @@ func TestFlowConnectDecodePinsCanonicalEventCentricShape(t *testing.T) {
 		{name: "redundant rename", yaml: "event: work.ready\nfrom: producer\nto: consumer\nrename: work.ready\n", want: "redundant with event"},
 		{name: "leading slash event", yaml: "event: /work.ready\nfrom: producer\nto: consumer\n", want: "exact canonical event identity"},
 		{name: "trailing slash event", yaml: "event: work.ready/\nfrom: producer\nto: consumer\n", want: "exact canonical event identity"},
-		{name: "normalized equal rename", yaml: "event: work.ready\nfrom: producer\nto: consumer\nrename: /work.ready/\n", want: "redundant with event"},
+		{name: "normalized equal rename", yaml: "event: work.ready\nfrom: producer\nto: consumer\nrename: /work.ready/\n", want: "exact canonical event identit"},
 		{name: "non-canonical rename", yaml: "event: work.ready\nfrom: producer\nto: consumer\nrename: work.accepted/\n", want: "exact canonical event identity"},
-		{name: "duplicate event equal", yaml: "event: work.ready\nevent: work.ready\nfrom: producer\nto: consumer\n", want: "repeats key"},
-		{name: "duplicate endpoint conflicting", yaml: "event: work.ready\nfrom: producer\nfrom: other\nto: consumer\n", want: "repeats key"},
+		{name: "duplicate event equal", yaml: "event: work.ready\nevent: work.ready\nfrom: producer\nto: consumer\n", want: "duplicate effective YAML key"},
+		{name: "duplicate endpoint conflicting", yaml: "event: work.ready\nfrom: producer\nfrom: other\nto: consumer\n", want: "duplicate effective YAML key"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -224,7 +224,7 @@ outcomes:
 		t.Run(tc.name, func(t *testing.T) {
 			var gate FlowStageGateDeclaration
 			err := decodeNodeTestYAML([]byte(tc.gate), &gate)
-			if err == nil || !strings.Contains(err.Error(), "duplicate normalized key") {
+			if err == nil || !(strings.Contains(err.Error(), "collide as") || strings.Contains(err.Error(), "not supported")) {
 				t.Fatalf("decode error = %v, want normalized collision", err)
 			}
 		})
@@ -244,7 +244,7 @@ stages:
         approve: {emit: opco.launched}
   operating: {terminal: true}
 `), &doc)
-	if err == nil || !strings.Contains(err.Error(), "requires advances_to") {
+	if err == nil || !strings.Contains(err.Error(), "advances_to is required") {
 		t.Fatalf("decode error = %v, want direct outcome closure", err)
 	}
 }
@@ -490,7 +490,7 @@ stages:
   - id: queued
     initial: true
 `), &doc)
-	if err == nil || !strings.Contains(err.Error(), "stages must be a keyed mapping") {
+	if err == nil || !strings.Contains(err.Error(), "want mapping") {
 		t.Fatalf("yaml.Unmarshal error = %v, want keyed mapping rejection", err)
 	}
 }
@@ -504,7 +504,7 @@ func TestFlowSchemaDocumentDecodeRejectsRetiredInputAddressOnPresence(t *testing
 	} {
 		t.Run(string(specimen), func(t *testing.T) {
 			var doc FlowSchemaDocument
-			err := canonicalrouting.RetiredReceiverRoutingParserSnippet(t, specimen).Decode(&doc)
+			err := decodeNodeTestSnippet(t, canonicalrouting.RetiredReceiverRoutingParserSnippet(t, specimen), &doc)
 			if err == nil || !strings.Contains(err.Error(), "input pin address is unsupported") {
 				t.Fatalf("yaml.Unmarshal error = %v, want retired input address rejection", err)
 			}
@@ -521,7 +521,7 @@ func TestFlowConnectDecodeRejectsRetiredMapOnPresence(t *testing.T) {
 	} {
 		t.Run(string(specimen), func(t *testing.T) {
 			var doc FlowSchemaDocument
-			err := canonicalrouting.RetiredReceiverRoutingParserSnippet(t, specimen).Decode(&doc)
+			err := decodeNodeTestSnippet(t, canonicalrouting.RetiredReceiverRoutingParserSnippet(t, specimen), &doc)
 			if err == nil || !strings.Contains(err.Error(), "retired connect.map") {
 				t.Fatalf("yaml.Unmarshal error = %v, want retired connect.map rejection", err)
 			}
@@ -539,7 +539,7 @@ func TestFlowConnectDecodeRejectsRetiredUsingInstanceOnPresence(t *testing.T) {
 	} {
 		t.Run(string(specimen), func(t *testing.T) {
 			var doc FlowSchemaDocument
-			err := canonicalrouting.RetiredReceiverRoutingParserSnippet(t, specimen).Decode(&doc)
+			err := decodeNodeTestSnippet(t, canonicalrouting.RetiredReceiverRoutingParserSnippet(t, specimen), &doc)
 			if err == nil || !strings.Contains(err.Error(), "retired connect.using.instance") {
 				t.Fatalf("yaml.Unmarshal error = %v, want retired connect.using.instance rejection", err)
 			}
@@ -558,7 +558,7 @@ func TestFlowSchemaDocumentDecode_PreservesClosedInputPinSourceEnum(t *testing.T
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var doc FlowSchemaDocument
-			if err := canonicalrouting.InputPinSourceParserSnippet(t, tc.specimen).Decode(&doc); err != nil {
+			if err := decodeNodeTestSnippet(t, canonicalrouting.InputPinSourceParserSnippet(t, tc.specimen), &doc); err != nil {
 				t.Fatalf("yaml.Unmarshal: %v", err)
 			}
 			if got := doc.Pins.Inputs.EventPins[0].Source; got != tc.want {
@@ -568,11 +568,11 @@ func TestFlowSchemaDocumentDecode_PreservesClosedInputPinSourceEnum(t *testing.T
 	}
 
 	var retired FlowSchemaDocument
-	if err := canonicalrouting.InputPinSourceParserSnippet(t, canonicalrouting.InputPinSourceExternal).Decode(&retired); err == nil || !strings.Contains(err.Error(), "RETIRED: input event pin source: external") {
+	if err := decodeNodeTestSnippet(t, canonicalrouting.InputPinSourceParserSnippet(t, canonicalrouting.InputPinSourceExternal), &retired); err == nil || !strings.Contains(err.Error(), "RETIRED: input event pin source: external") {
 		t.Fatalf("retired source accepted: %v", err)
 	}
 	var doc FlowSchemaDocument
-	err := canonicalrouting.InputPinSourceParserSnippet(t, canonicalrouting.InputPinSourceInvalid).Decode(&doc)
+	err := decodeNodeTestSnippet(t, canonicalrouting.InputPinSourceParserSnippet(t, canonicalrouting.InputPinSourceInvalid), &doc)
 	if err == nil || !strings.Contains(err.Error(), "input event pin source must be") {
 		t.Fatalf("yaml.Unmarshal error = %v, want closed source-enum rejection", err)
 	}
@@ -580,7 +580,7 @@ func TestFlowSchemaDocumentDecode_PreservesClosedInputPinSourceEnum(t *testing.T
 
 func TestFlowSchemaDocumentDecodeRejectsRetiredAddressBeforeNestedFields(t *testing.T) {
 	var doc FlowSchemaDocument
-	err := canonicalrouting.RetiredReceiverRoutingParserSnippet(t, canonicalrouting.RetiredInputAddressUnsupportedNested).Decode(&doc)
+	err := decodeNodeTestSnippet(t, canonicalrouting.RetiredReceiverRoutingParserSnippet(t, canonicalrouting.RetiredInputAddressUnsupportedNested), &doc)
 	if err == nil || !strings.Contains(err.Error(), "input pin address is unsupported") {
 		t.Fatalf("yaml.Unmarshal error = %v, want retired address rejection", err)
 	}
@@ -590,7 +590,7 @@ func TestFlowSchemaDocumentDecode_PreservesInputPinResolutionModes(t *testing.T)
 
 	var doc FlowSchemaDocument
 	snippet := canonicalrouting.InputPinResolutionModesSnippet(t)
-	if err := snippet.Decode(&doc); err != nil {
+	if err := decodeNodeTestSnippet(t, snippet, &doc); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
 	pins := doc.Pins.Inputs.EventPins
@@ -650,7 +650,7 @@ func TestFlowSchemaDocumentDecode_RejectsUnsupportedInputPinResolutionFields(t *
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var doc FlowSchemaDocument
-			err := tc.body.Decode(&doc)
+			err := decodeNodeTestSnippet(t, tc.body, &doc)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("yaml.Unmarshal error = %v, want typed field rejection", err)
 			}
@@ -660,7 +660,7 @@ func TestFlowSchemaDocumentDecode_RejectsUnsupportedInputPinResolutionFields(t *
 
 func TestFlowSchemaDocumentDecodeRejectsRetiredCarriesBeforeNestedSource(t *testing.T) {
 	var doc FlowSchemaDocument
-	err := canonicalrouting.UnsupportedInputPinResolutionSnippet(t, canonicalrouting.RetiredInstanceKeyCarry).Decode(&doc)
+	err := decodeNodeTestSnippet(t, canonicalrouting.UnsupportedInputPinResolutionSnippet(t, canonicalrouting.RetiredInstanceKeyCarry), &doc)
 	if err == nil || !strings.Contains(err.Error(), "input event pin carries are unsupported") {
 		t.Fatalf("yaml.Unmarshal error = %v, want whole carries grammar retired before nested interpretation", err)
 	}
@@ -712,7 +712,7 @@ pins:
 			var invalid FlowSchemaDocument
 			raw := "name: harness-output\npins:\n  outputs:\n    events:\n      - event: work.completed\n        sink: " + tc.sink + "\n"
 			err := decodeNodeTestYAML([]byte(raw), &invalid)
-			if err == nil || !strings.Contains(err.Error(), `output event pin sink must be "harness"`) {
+			if err == nil || !(strings.Contains(err.Error(), `output event pin sink must be "harness"`) || strings.Contains(err.Error(), `["sink"]`)) {
 				t.Fatalf("yaml.Unmarshal error = %v, want closed sink-enum rejection", err)
 			}
 		})
@@ -795,15 +795,18 @@ func TestFlowSchemaDocumentDecode_RejectsRetiredAndUnsupportedTopLevelFields(t *
 			if len(diagnostic.ValidOptions) == 0 {
 				t.Fatalf("diagnostic valid options empty: %#v", diagnostic)
 			}
-			foundTerminalStates := false
+			foundStages := false
 			for _, option := range diagnostic.ValidOptions {
 				if option == "terminal_states" {
-					foundTerminalStates = true
+					t.Fatal("diagnostic advertises retired lifecycle grammar")
+				}
+				if option == "stages" {
+					foundStages = true
 					break
 				}
 			}
-			if !foundTerminalStates {
-				t.Fatalf("diagnostic valid options = %#v, want terminal_states", diagnostic.ValidOptions)
+			if !foundStages {
+				t.Fatalf("diagnostic valid options = %#v, want stages", diagnostic.ValidOptions)
 			}
 		})
 	}
@@ -1850,7 +1853,7 @@ compute:
 
 func TestFlowPinsDecode_AcceptsOptionMappingsAndScalarPermissions(t *testing.T) {
 	var schema FlowSchemaDocument
-	if err := canonicalrouting.W2OptionPinsParserSnippet(t).Decode(&schema); err != nil {
+	if err := decodeNodeTestSnippet(t, canonicalrouting.W2OptionPinsParserSnippet(t), &schema); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
 	if got := len(schema.Pins.Inputs.EventPins); got != 1 {
@@ -1878,11 +1881,8 @@ func TestFlowPinsDecode_AcceptsOptionMappingsAndScalarPermissions(t *testing.T) 
 
 func TestFlowPinsDecode_PreservesCanonicalScalarEventEntries(t *testing.T) {
 	var schema FlowSchemaDocument
-	if err := decodeNodeTestYAML([]byte(`
-states:
-  - pending
-initial_state: pending
-terminal_states: []
+	if err := decodeNodeTestYAML([]byte(`stages:
+  pending: {initial: true}
 pins:
   inputs:
     events: [check.requested]
@@ -1946,17 +1946,17 @@ func TestW2RejectsNullEmptyAndRedundantPinForms(t *testing.T) {
 		raw  string
 		want string
 	}{
-		{name: "null pins", raw: "pins: null\n", want: "flow pins are explicitly null"},
-		{name: "empty pins", raw: "pins: {}\n", want: "flow pins are explicitly empty_mapping"},
-		{name: "null inputs", raw: "pins:\n  inputs: null\n", want: "flow input pins are explicitly null"},
-		{name: "empty outputs", raw: "pins:\n  outputs: {}\n", want: "flow output pins are explicitly empty_mapping"},
-		{name: "null input events", raw: "pins:\n  inputs:\n    events: null\n", want: "flow input pin events are explicitly null"},
-		{name: "empty output events", raw: "pins:\n  outputs:\n    events: []\n", want: "flow output pin events are explicitly empty_sequence"},
+		{name: "null pins", raw: "pins: null\n", want: "mapping, got null"},
+		{name: "empty pins", raw: "pins: {}\n", want: "pins must be a non-empty mapping"},
+		{name: "null inputs", raw: "pins:\n  inputs: null\n", want: "mapping, got null"},
+		{name: "empty outputs", raw: "pins:\n  outputs: {}\n", want: "pins.outputs must be a non-empty mapping"},
+		{name: "null input events", raw: "pins:\n  inputs:\n    events: null\n", want: "is null, want sequence"},
+		{name: "empty output events", raw: "pins:\n  outputs:\n    events: []\n", want: "non-empty sequence"},
 		{name: "optionless input mapping", raw: "pins:\n  inputs:\n    events:\n      - event: work.requested\n", want: "mapping requires a non-default source or resolution"},
 		{name: "optionless output mapping", raw: "pins:\n  outputs:\n    events:\n      - event: work.completed\n", want: "mapping requires a non-default sink"},
 		{name: "duplicate event", raw: "pins:\n  inputs:\n    events: [work.requested, work.requested]\n", want: "declared more than once"},
 		{name: "duplicate read", raw: "pins:\n  inputs:\n    reads: [entity.status, entity.status]\n", want: "declared more than once"},
-		{name: "structured write", raw: "pins:\n  outputs:\n    writes: [{field: entity.status}]\n", want: "entries must be exact non-empty scalars"},
+		{name: "structured write", raw: "pins:\n  outputs:\n    writes: [{field: entity.status}]\n", want: "scalar text, got mapping"},
 		{name: "unknown pin direction", raw: "pins:\n  ingress:\n    events: [work.requested]\n", want: "is not supported"},
 		{name: "unknown input field", raw: "pins:\n  inputs:\n    aliases: [work.requested]\n", want: "is not supported"},
 	} {
@@ -1969,7 +1969,7 @@ func TestW2RejectsNullEmptyAndRedundantPinForms(t *testing.T) {
 		})
 	}
 	var schema FlowSchemaDocument
-	if err := canonicalrouting.W2EmptyResolutionParserSnippet(t).Decode(&schema); err == nil || !strings.Contains(err.Error(), "input pin resolution is explicitly empty") {
+	if err := decodeNodeTestSnippet(t, canonicalrouting.W2EmptyResolutionParserSnippet(t), &schema); err == nil || !strings.Contains(err.Error(), "input pin resolution must be a non-empty mapping") {
 		t.Fatalf("empty resolution error = %v, want explicit-empty rejection", err)
 	}
 }
@@ -1994,8 +1994,8 @@ func TestW2RejectsNonExactAndBlankMappingKeysAtEveryLayer(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var schema FlowSchemaDocument
-			err := canonicalrouting.W2MappingKeyParserSnippet(t, tc.snippet).Decode(&schema)
-			if err == nil || !strings.Contains(err.Error(), "must be one exact non-empty canonical spelling") {
+			err := decodeNodeTestSnippet(t, canonicalrouting.W2MappingKeyParserSnippet(t, tc.snippet), &schema)
+			if err == nil || !strings.Contains(err.Error(), "not supported") || !strings.Contains(err.Error(), "nodes.yaml:") {
 				t.Fatalf("yaml.Unmarshal error = %v, want byte-exact W2 key rejection", err)
 			}
 		})
@@ -3372,7 +3372,7 @@ func TestEmitTargetDecode_RejectsEveryRetiredShapeOnPresence(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var emit EmitSpec
-			err := canonicalrouting.NewParserSnippet(t, tc.yaml).Decode(&emit)
+			err := decodeNodeTestSnippet(t, canonicalrouting.NewParserSnippet(t, tc.yaml), &emit)
 			if err == nil {
 				t.Fatal("yaml.Unmarshal succeeded, want retired allow_fanout rejection")
 			}
@@ -3400,7 +3400,7 @@ func TestEmitSpecDecode_RejectsEveryRetiredProducerRoutingFieldOnPresence(t *tes
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var emit EmitSpec
-			err := canonicalrouting.NewParserSnippet(t, tc.yaml).Decode(&emit)
+			err := decodeNodeTestSnippet(t, canonicalrouting.NewParserSnippet(t, tc.yaml), &emit)
 			if err == nil || !strings.Contains(err.Error(), "RETIRED-EMIT-ROUTING: "+tc.want) {
 				t.Fatalf("yaml.Unmarshal error = %v, want retired %s rejection", err, tc.want)
 			}
@@ -3410,7 +3410,7 @@ func TestEmitSpecDecode_RejectsEveryRetiredProducerRoutingFieldOnPresence(t *tes
 
 func TestFanOutDecode_RejectsRetiredAllowFanoutInNestedEmit(t *testing.T) {
 	var spec FanOutSpec
-	err := canonicalrouting.NewParserSnippet(t, `
+	err := decodeNodeTestSnippet(t, canonicalrouting.NewParserSnippet(t, `
 items_from: entity.account_ids
 as: account_id
 emit:
@@ -3420,7 +3420,7 @@ emit:
     match:
       account_id: account_id
     allow_fanout: false
-`).Decode(&spec)
+`), &spec)
 	if err == nil || !strings.Contains(err.Error(), "RETIRED-EMIT-ROUTING: emit.target") {
 		t.Fatalf("yaml.Unmarshal error = %v, want nested retired target diagnostic", err)
 	}

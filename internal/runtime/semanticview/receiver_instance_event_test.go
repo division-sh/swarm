@@ -40,7 +40,7 @@ func receiverInstanceSource(t *testing.T, mutation string) Source {
 				t.Fatal(err)
 			}
 			for name, content := range map[string]string{
-				"schema.yaml": "initial_state: idle\nstates: [idle, done]\nterminal_states: [done]\n",
+				"schema.yaml": "stages:\n  idle: {initial: true}\n  done: {terminal: true}\n",
 				"events.yaml": "worker.inspect.requested:\n  nested_marker: text\n",
 			} {
 				if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0600); err != nil {

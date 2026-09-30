@@ -367,11 +367,10 @@ item:
 `)
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: cross-flow-localization\n")
 
-	writeFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), `
-name: scoring
-initial_state: discovered
-terminal_states: [done]
-states: [discovered, done]
+	writeFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), `name: scoring
+stages:
+  discovered: {initial: true}
+  done: {terminal: true}
 pins:
   outputs:
     events:
@@ -393,11 +392,10 @@ scoring-node:
       emit: vertical.shortlisted
 `)
 
-	writeFixtureFile(t, filepath.Join(root, "validation", "schema.yaml"), `
-name: validation
-initial_state: researching
-terminal_states: [done]
-states: [researching, done]
+	writeFixtureFile(t, filepath.Join(root, "validation", "schema.yaml"), `name: validation
+stages:
+  researching: {initial: true}
+  done: {terminal: true}
 pins:
   inputs:
     events:
@@ -447,11 +445,10 @@ item:
 `)
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: cross-flow-on-success\n")
 
-	writeFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), `
-name: scoring
-initial_state: discovered
-terminal_states: [done]
-states: [discovered, done]
+	writeFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), `name: scoring
+stages:
+  discovered: {initial: true}
+  done: {terminal: true}
 pins:
   outputs:
     events:
@@ -473,11 +470,10 @@ scoring-node:
       emit: vertical.shortlisted
 `)
 
-	writeFixtureFile(t, filepath.Join(root, "validation", "schema.yaml"), `
-name: validation
-initial_state: researching
-terminal_states: [done]
-states: [researching, done]
+	writeFixtureFile(t, filepath.Join(root, "validation", "schema.yaml"), `name: validation
+stages:
+  researching: {initial: true}
+  done: {terminal: true}
 pins:
   inputs:
     events:
@@ -548,13 +544,9 @@ item:
   item_id: string
   status: string
 `)
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), `
-initial_state: idle
-terminal_states:
-  - done
-states:
-  - idle
-  - done
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), `stages:
+  idle: {initial: true}
+  done: {terminal: true}
 pins:
   inputs:
     events:

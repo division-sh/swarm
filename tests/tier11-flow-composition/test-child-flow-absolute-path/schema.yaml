@@ -1,6 +1,6 @@
-initial_state: waiting
-terminal_states: [done]
-states: [waiting, done]
+stages:
+  waiting: {initial: true}
+  done: {terminal: true}
 pins:
   inputs:
     events:

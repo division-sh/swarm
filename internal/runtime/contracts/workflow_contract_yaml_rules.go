@@ -5,28 +5,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
-	"gopkg.in/yaml.v3"
 )
-
-func (e *ExpressionValue) UnmarshalYAML(node *yaml.Node) error {
-	if e == nil {
-		return nil
-	}
-	value, err := decodeExpressionValueNode(node)
-	if err != nil {
-		return err
-	}
-	*e = value
-	return validateExpressionValue(*e)
-}
-
-func decodeLiteralExpressionNode(node *yaml.Node) (ExpressionValue, error) {
-	var literal any
-	if err := node.Decode(&literal); err != nil {
-		return ExpressionValue{}, err
-	}
-	return LiteralExpression(literal), nil
-}
 
 func validateExplicitScopedPath(raw, context string) error {
 	raw = strings.TrimSpace(raw)

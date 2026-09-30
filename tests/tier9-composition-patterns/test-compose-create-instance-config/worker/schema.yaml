@@ -1,9 +1,9 @@
 name: worker
 mode: template
 instance: worker_id
-initial_state: ready
-terminal_states: [done]
-states: [ready, done]
+stages:
+  ready: {initial: true}
+  done: {terminal: true}
 instance_variables:
   variables:
     name: text

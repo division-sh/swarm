@@ -1,8 +1,8 @@
 mode: template
 instance: worker_id
-initial_state: idle
-terminal_states: [complete]
-states: [idle, complete]
+stages:
+  idle: {initial: true}
+  complete: {terminal: true}
 pins:
   inputs:
     events:

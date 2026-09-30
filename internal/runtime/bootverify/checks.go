@@ -615,17 +615,6 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 	for _, record := range c.source.ExecutableNodeRecords() {
 		c.appendInvalidExecutableNodeFindings(record)
 	}
-	for flowID, schema := range c.source.FlowSchemaEntries() {
-		flowID = strings.TrimSpace(flowID)
-		if len(schema.States) == 0 && strings.TrimSpace(schema.InitialState) != "" {
-			c.invalidFindings = append(c.invalidFindings, Finding{
-				CheckID:  "invalid_field_detection",
-				Severity: "error",
-				Message:  fmt.Sprintf("flow schema %s missing required field states", flowID),
-				Location: flowID,
-			})
-		}
-	}
 	for _, declaration := range semanticview.AgentDeclarations(c.source) {
 		scopeLabel := agentDeclarationScopeLabel(c.source, declaration)
 		agentID := strings.TrimSpace(declaration.LocalID)
@@ -1330,14 +1319,6 @@ func stageDeclarationCoherenceFindings(flowID string, schema runtimecontracts.Fl
 		location = "root"
 	}
 	findings := make([]Finding, 0, 3)
-	if schema.HasLegacyLifecycleFields() {
-		findings = append(findings, Finding{
-			CheckID:  "state_machine_coherence",
-			Severity: "error",
-			Message:  fmt.Sprintf("flow %s declares stages and legacy lifecycle fields; stages is mutually exclusive with initial_state, states, and terminal_states", label),
-			Location: location,
-		})
-	}
 	if len(schema.StageDeclarations.Entries) == 0 {
 		return findings
 	}

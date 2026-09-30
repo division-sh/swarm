@@ -390,8 +390,7 @@ func deliveryTargetNestedOwnershipSource(t *testing.T) semanticview.Source {
 		Path:  "review/child",
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "review/child"},
 		Schema: runtimecontracts.FlowSchemaDocument{
-			Name: "child", Mode: runtimecontracts.FlowModeTemplate, InitialState: "active",
-			States: []string{"active", "done"}, TerminalStates: []string{"done"},
+			Name: "child", Mode: runtimecontracts.FlowModeTemplate, StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "active", Initial: true}, {ID: "done", Terminal: true}}},
 		},
 	}
 	parent.Children = append(parent.Children, child)

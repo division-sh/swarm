@@ -18,7 +18,7 @@ func TestCompositionReceiverInitializationAndRepeatedBusinessWritesBothStores(t 
 		t.Run(backend, func(t *testing.T) {
 			db, store := openHandlerEntityRequirementStore(t, backend)
 			source := loadWorkflowTempSource(t, map[string]string{
-				"schema.yaml":   "name: budget\ninitial_state: active\nstates: [active, done]\nterminal_states: [done]\n",
+				"schema.yaml":   "name: budget\nstages:\n  active: {initial: true}\n  done: {terminal: true}\n",
 				"entities.yaml": "budget:\n  spent_usd: {type: number, initial: 0}\n  status: {type: text, initial: pending}\n",
 				"events.yaml":   "spend.recorded:\n  amount_usd: number\n  business_key: text\n",
 				"nodes.yaml": `budget-writer:

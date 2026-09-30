@@ -1,12 +1,9 @@
 name: processing
 mode: static
-initial_state: ready
-states:
-  - ready
-  - approved
-  - rejected
-terminal_states:
-  - rejected
+stages:
+  ready: {initial: true}
+  approved: {}
+  rejected: {terminal: true}
 pins:
   inputs:
     events:

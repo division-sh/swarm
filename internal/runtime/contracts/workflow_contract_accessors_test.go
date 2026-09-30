@@ -10,14 +10,12 @@ import (
 func TestFlowStatesRootScopeExcludesChildFlowStates(t *testing.T) {
 	bundle := &WorkflowContractBundle{
 		RootSchema: &FlowSchemaDocument{
-			Name:         "root-workflow",
-			InitialState: "root-new",
-			States:       []string{"root-new", "root-done"},
+			Name:              "root-workflow",
+			StageDeclarations: FlowStageDeclarations{Declared: true, Entries: []FlowStageDeclaration{{ID: "root-new", Initial: true}, {ID: "root-done", Terminal: true}}},
 		},
 		FlowSchemas: map[string]FlowSchemaDocument{
 			"child": {
-				InitialState: "child-new",
-				States:       []string{"child-new", "child-done"},
+				StageDeclarations: FlowStageDeclarations{Declared: true, Entries: []FlowStageDeclaration{{ID: "child-new", Initial: true}, {ID: "child-done", Terminal: true}}},
 			},
 		},
 	}

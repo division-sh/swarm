@@ -287,8 +287,8 @@ func TestRunForkExactFactsGeneratedWriterIDsBothStores(t *testing.T) {
 func exactFactEntitySource(t *testing.T) semanticview.Source {
 	t.Helper()
 	root := t.TempDir()
-	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: exact-fact-source\ninitial_state: active\nstates: [active, done]\nterminal_states: [done]\n")
-	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "exact-fact/schema.yaml"), "name: exact-fact\nmode: template\ninitial_state: active\nstates: [active, done]\nterminal_states: [done]\n")
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: exact-fact-source\nstages:\n  active: {initial: true}\n  done: {terminal: true}\n")
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "exact-fact/schema.yaml"), "name: exact-fact\nmode: template\nstages:\n  active: {initial: true}\n  done: {terminal: true}\n")
 	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "exact-fact/entities.yaml"), "review_item:\n  account_id: {type: text, initial: preserved}\n  handled: {type: boolean, initial: false}\n")
 	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(pipeline.WorkflowRepoRoot(), root, contracts.DefaultPlatformSpecFile(pipeline.WorkflowRepoRoot()))
 	if err != nil {

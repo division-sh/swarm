@@ -214,11 +214,10 @@ func loadProjectionFlowBundle(t *testing.T) *runtimecontracts.WorkflowContractBu
 	root := t.TempDir()
 
 	writeProjectionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: projection-flow\n")
-	writeProjectionFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), `
-name: scoring
-initial_state: discovered
-states: [discovered, scored]
-terminal_states: [scored]
+	writeProjectionFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), `name: scoring
+stages:
+  discovered: {initial: true}
+  scored: {terminal: true}
 pins:
   outputs:
     events:

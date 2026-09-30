@@ -397,11 +397,7 @@ func validateRootPrimaryEntityLoadBoundary(bundle *WorkflowContractBundle) error
 	if bundle == nil {
 		return nil
 	}
-	declared := ""
-	if bundle.RootSchema != nil {
-		declared = bundle.RootSchema.Entity
-	}
-	if strings.TrimSpace(declared) == "" && len(bundle.RootEntities) <= 1 {
+	if len(bundle.RootEntities) <= 1 {
 		return nil
 	}
 	if _, err := bundle.ResolveRootPrimaryEntity(); err != nil {
@@ -415,12 +411,12 @@ func validatePrimaryEntityLoadBoundary(bundle *WorkflowContractBundle, flowID st
 	if bundle == nil || flowID == "" {
 		return nil
 	}
-	schema, ok := bundle.FlowSchemas[flowID]
+	_, ok := bundle.FlowSchemas[flowID]
 	if !ok {
 		return nil
 	}
 	entities := bundle.flowEntities[flowID]
-	if strings.TrimSpace(schema.Entity) == "" && len(entities) <= 1 {
+	if len(entities) <= 1 {
 		return nil
 	}
 	if _, err := bundle.ResolveFlowPrimaryEntity(flowID); err != nil {
@@ -516,22 +512,18 @@ func (b *WorkflowContractBundle) ResolveFlowPrimaryEntity(flowID string) (Primar
 	if flowID == "" || flowID == "." {
 		return b.ResolveRootPrimaryEntity()
 	}
-	schema, ok := b.FlowSchemas[flowID]
+	_, ok := b.FlowSchemas[flowID]
 	if !ok {
 		return PrimaryEntityContract{}, fmt.Errorf("INVALID-PRIMARY-ENTITY: flow %s primary entity is unavailable: schema not found", flowID)
 	}
-	return resolvePrimaryEntityContract(flowID, schema.Entity, b.flowEntities[flowID], b.ResolvedTypeCatalogForFlow(flowID))
+	return resolvePrimaryEntityContract(flowID, b.flowEntities[flowID], b.ResolvedTypeCatalogForFlow(flowID))
 }
 
 func (b *WorkflowContractBundle) ResolveRootPrimaryEntity() (PrimaryEntityContract, error) {
 	if b == nil {
 		return PrimaryEntityContract{}, fmt.Errorf("INVALID-PRIMARY-ENTITY: root primary entity is unavailable: bundle is nil")
 	}
-	entity := ""
-	if b.RootSchema != nil {
-		entity = b.RootSchema.Entity
-	}
-	return resolvePrimaryEntityContract(".", entity, b.RootEntities, b.RootTypeCatalog())
+	return resolvePrimaryEntityContract(".", b.RootEntities, b.RootTypeCatalog())
 }
 
 func (b *WorkflowContractBundle) ResolveTestSetupPrimaryEntity(flowID, entityType string) (PrimaryEntityContract, error) {
@@ -550,14 +542,10 @@ func (b *WorkflowContractBundle) ResolveTestSetupPrimaryEntity(flowID, entityTyp
 	return PrimaryEntityContract{}, err
 }
 
-func resolvePrimaryEntityContract(flowID, declared string, entities EntityContractsDocument, types TypeCatalogDocument) (PrimaryEntityContract, error) {
+func resolvePrimaryEntityContract(flowID string, entities EntityContractsDocument, types TypeCatalogDocument) (PrimaryEntityContract, error) {
 	flowID = strings.TrimSpace(flowID)
-	declared = strings.TrimSpace(declared)
 	label := defaultPrimaryEntityFlowLabel(flowID)
 	keys := sortedEntityContractKeys(entities)
-	if declared != "" {
-		return PrimaryEntityContract{}, fmt.Errorf("INVALID-PRIMARY-ENTITY: flow %s uses schema.yaml entity %q, but normal flow authoring has a single entity authority: declare exactly one flow entity type in entities.yaml and do not restate it in schema.yaml", label, declared)
-	}
 	switch len(keys) {
 	case 0:
 		return PrimaryEntityContract{}, fmt.Errorf("INVALID-PRIMARY-ENTITY: flow %s has no declared entity types; stateful normal flows must declare exactly one entity type or be explicitly stateless/template", label)

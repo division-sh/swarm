@@ -39,12 +39,12 @@ func CopyStaticMultiEntityRetirement(t testing.TB, handler StaticRetirementHandl
 	root := CopyExample(t, RootIngress)
 	removeClosedVariantFiles(t, root, "entities.yaml", "events.yaml", "nodes.yaml")
 
-	writeClosedVariantFile(t, root, "schema.yaml", "{}\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "stages: []\n")
 	writeClosedVariantFile(t, root, "treasury/schema.yaml", `name: treasury
 mode: static
-initial_state: active
-states: [active, archived]
-terminal_states: [archived]
+stages:
+  active: {initial: true}
+  archived: {terminal: true}
 pins:
   inputs:
     events: [opco.spend_requested]
@@ -97,8 +97,8 @@ func CopyRootDefaultStaticInput(t testing.TB, handler RootStaticHandler, entityI
 	root := CopyExample(t, RootIngress)
 
 	writeClosedVariantFile(t, root, "schema.yaml", `name: root-default-static-fixture
-initial_state: active
-states: [active]
+stages:
+  active: {initial: true}
 pins:
   inputs:
     events: [subject.created]
@@ -253,17 +253,18 @@ func CopyTestSetupValidation(t testing.TB) string {
 	files := map[string]string{
 
 		"schema.yaml": `name: review
-initial_state: new
-terminal_states: [done]
-states: [new, done]
+stages:
+  new: {initial: true}
+  done: {terminal: true}
 `,
 		"events.yaml": "scan.requested:\n  topic: text\n",
 		"nodes.yaml":  "scan-orchestrator:\n  execution_type: system_node\n  subscribes_to: [scan.requested]\n",
 		"operating/schema.yaml": `name: operating
 mode: static
-initial_state: initializing
-terminal_states: [ready]
-states: [initializing, waiting, ready]
+stages:
+  initializing: {initial: true}
+  waiting: {}
+  ready: {terminal: true}
 `,
 		"operating/entities.yaml": `product:
   product_id: text
@@ -285,7 +286,7 @@ states: [initializing, waiting, ready]
       sets_gate: review_ready
       advances_to: ready
 `,
-		"secondary/schema.yaml":   "name: secondary\nmode: static\ninitial_state: open\nterminal_states: [closed]\nstates: [open, closed]\n",
+		"secondary/schema.yaml":   "name: secondary\nmode: static\nstages:\n  open: {initial: true}\n  closed: {terminal: true}\n",
 		"secondary/entities.yaml": "ticket:\n  ticket_id: text\n",
 	}
 	for name, source := range files {
@@ -379,9 +380,9 @@ instance: instance_id
 instance_variables:
   variables:
     product_id: text
-initial_state: initializing
-terminal_states: [ready]
-states: [initializing, ready]
+stages:
+  initializing: {initial: true}
+  ready: {terminal: true}
 pins:
   inputs:
     events:

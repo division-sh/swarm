@@ -52,8 +52,8 @@ effect-revision:
 `)
 	writeClosedVariantFile(t, root, "observers/schema.yaml", `name: observers
 mode: singleton
-initial_state: active
-states: [active]
+stages:
+  active: {initial: true}
 pins:
   inputs:
     events: [observer.requested]

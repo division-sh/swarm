@@ -1,7 +1,7 @@
 name: tracker
-initial_state: idle
-terminal_states: [recorded]
-states: [idle, recorded]
+stages:
+  idle: {initial: true}
+  recorded: {terminal: true}
 pins:
   inputs:
     events: [task.record]

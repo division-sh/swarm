@@ -20,69 +20,6 @@ func hasAnyYAMLMappingKey(node *yaml.Node, keys ...string) bool {
 	return false
 }
 
-func (d *FlowSchemaDocument) UnmarshalYAML(node *yaml.Node) error {
-	if d == nil {
-		return nil
-	}
-	if node == nil || node.Kind == 0 {
-		*d = FlowSchemaDocument{}
-		return nil
-	}
-	if node.Kind != yaml.MappingNode {
-		return NewSchemaDocumentMappingDiagnostic(nil)
-	}
-	if err := validateFlowSchemaDocumentFields(node); err != nil {
-		return err
-	}
-	if pinsNode := yamlMappingValue(node, "pins"); pinsNode != nil {
-		if err := validateFlowPinsNode(pinsNode); err != nil {
-			return err
-		}
-	}
-	if instanceNode := yamlMappingValue(node, "instance"); instanceNode != nil && strings.EqualFold(strings.TrimSpace(instanceNode.Tag), "!!null") {
-		return fmt.Errorf("retired template instance form; use `instance: <field>` with one non-empty scalar identity field")
-	}
-	if activation := yamlMappingValue(node, "activation"); activation != nil {
-		if activation.Kind != yaml.ScalarNode || activation.Tag == "!!null" || activation.Value != FlowActivationStanding {
-			return fmt.Errorf("schema activation must be exactly %q", FlowActivationStanding)
-		}
-	}
-	type alias FlowSchemaDocument
-	var aux alias
-	if err := node.Decode(&aux); err != nil {
-		return err
-	}
-	*d = FlowSchemaDocument(aux)
-	d.InitialStateDeclared = hasYAMLMappingKey(node, "initial_state")
-	d.StatesDeclared = hasYAMLMappingKey(node, "states")
-	d.TerminalStatesDeclared = hasYAMLMappingKey(node, "terminal_states")
-	d.RequiredAgentsDeclared = hasYAMLMappingKey(node, "required_agents")
-	return nil
-}
-
-func (i *FlowSchemaImports) UnmarshalYAML(node *yaml.Node) error {
-	if i == nil {
-		return nil
-	}
-	if node == nil || node.Kind != yaml.MappingNode || len(node.Content) == 0 {
-		return fmt.Errorf("schema imports must be a non-empty mapping")
-	}
-	allowed := map[string]struct{}{"connector_packs": {}, "provider_trigger_events": {}}
-	if err := validateClosedMapping("schema imports", node, allowed); err != nil {
-		return err
-	}
-	type raw FlowSchemaImports
-	var out raw
-	if err := node.Decode(&out); err != nil {
-		return err
-	}
-	if len(out.ConnectorPacks) == 0 && len(out.ProviderTriggerEvents) == 0 {
-		return fmt.Errorf("schema imports must declare at least one connector_packs or provider_trigger_events row")
-	}
-	*i = FlowSchemaImports(out)
-	return nil
-}
-
 var flowSchemaDocumentFields = map[string]struct{}{
 	"name":                {},
 	"mode":                {},
@@ -90,38 +27,13 @@ var flowSchemaDocumentFields = map[string]struct{}{
 	"ingress":             {},
 	"connect":             {},
 	"imports":             {},
-	"entity":              {},
 	"instance":            {},
-	"initial_state":       {},
-	"terminal_states":     {},
-	"states":              {},
 	"stages":              {},
 	"loops":               {},
 	"pins":                {},
-	"tool_surface":        {},
 	"required_agents":     {},
 	"instance_variables":  {},
 	"auto_emit_on_create": {},
-}
-
-func validateFlowSchemaDocumentFields(node *yaml.Node) error {
-	retired := map[string]string{
-		"namespace_prefix": "schema namespace_prefix is retired; flow namespace is derived from the package tree",
-		"namespace_rule":   "schema namespace_rule is retired; namespace override semantics require a separate spec owner",
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		if key == "" {
-			continue
-		}
-		if reason, ok := retired[key]; ok {
-			return fmt.Errorf("RETIRED: schema field %q is retired; %s", key, reason)
-		}
-		if _, ok := flowSchemaDocumentFields[key]; !ok {
-			return NewUndefinedFieldDiagnostic("schema", key, flowSchemaDocumentFields)
-		}
-	}
-	return nil
 }
 
 var systemNodeContractFields = map[string]struct{}{

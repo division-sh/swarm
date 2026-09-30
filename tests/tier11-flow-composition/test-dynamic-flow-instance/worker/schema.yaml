@@ -1,9 +1,9 @@
 name: worker
 mode: template
 instance: worker_id
-initial_state: idle
-terminal_states: [complete]
-states: [idle, complete]
+stages:
+  idle: {initial: true}
+  complete: {terminal: true}
 instance_variables:
   variables:
     task_label: text

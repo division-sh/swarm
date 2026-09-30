@@ -88,11 +88,10 @@ func writeSingletonCoordinatorFlow(t testing.TB, root string, variant SingletonC
 		return
 	}
 	writeSingletonCoordinatorFile(t, root, "schema.yaml", "name: singleton-coordinator-pilot\npins:\n  inputs:\n    events: [lead.observed]\n  outputs:\n    events: [lead.observed]\nconnect:\n  - event: lead.observed\n    from: .\n    to: coordinator\n")
-	writeSingletonCoordinatorFile(t, root, "coordinator/schema.yaml", `
-name: coordinator
+	writeSingletonCoordinatorFile(t, root, "coordinator/schema.yaml", `name: coordinator
 mode: singleton
-initial_state: active
-states: [active]
+stages:
+  active: {initial: true}
 pins:
   inputs:
     events:
@@ -152,11 +151,12 @@ coordinator-indexer:
 
 func writeStatelessPayloadJoinSingletonCoordinatorFlow(t testing.TB, root string) {
 	t.Helper()
-	writeSingletonCoordinatorFile(t, root, "coordinator/schema.yaml", `
-name: coordinator
+	writeSingletonCoordinatorFile(t, root, "coordinator/schema.yaml", `name: coordinator
 mode: singleton
-initial_state: active
-states: [active, done, failed]
+stages:
+  active: {initial: true}
+  done: {}
+  failed: {}
 pins:
   inputs:
     events:

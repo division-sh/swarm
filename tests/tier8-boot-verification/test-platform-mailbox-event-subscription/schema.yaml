@@ -1,6 +1,7 @@
-initial_state: pending
-terminal_states: [done]
-states: [pending, awaiting_decision, done]
+stages:
+  pending: {initial: true}
+  awaiting_decision: {}
+  done: {terminal: true}
 pins:
   inputs:
     events: [review.requested]

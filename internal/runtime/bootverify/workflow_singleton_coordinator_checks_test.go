@@ -246,11 +246,12 @@ coordinator-node:
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			bundle := loadSingletonCoordinatorFixtureBundle(t, `
-name: coordinator
+			bundle := loadSingletonCoordinatorFixtureBundle(t, `name: coordinator
 mode: singleton
-initial_state: active
-states: [active, done, failed]
+stages:
+  active: {initial: true}
+  done: {}
+  failed: {}
 pins:
   inputs:
     events: [job.received]
@@ -482,11 +483,12 @@ coordinator-node:
 }
 
 func TestRun_IntrinsicJoinDemandRejectsStatelessAndAcceptsStatefulCoordinator(t *testing.T) {
-	const schema = `
-name: coordinator
+	const schema = `name: coordinator
 mode: singleton
-initial_state: active
-states: [active, done, failed]
+stages:
+  active: {initial: true}
+  done: {}
+  failed: {}
 pins:
   inputs:
     events: [job.received]

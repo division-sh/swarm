@@ -189,7 +189,7 @@ func NewSchemaDocumentMappingDiagnostic(cause error) *LoaderDiagnostic {
 		"contract_loader.schema_mapping",
 		"schema.yaml",
 		"schema.yaml must be a mapping.",
-		"Use a schema.yaml mapping with fields like name, states, pins, and entity.",
+		"Use a non-empty schema.yaml mapping with fields like name, stages, and pins; entity ownership is flow-local.",
 		cause,
 	)
 }

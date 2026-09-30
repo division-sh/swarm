@@ -1,8 +1,8 @@
 name: requester
 mode: template
 instance: account_id
-initial_state: active
-states: [active]
+stages:
+  active: {initial: true}
 pins:
   inputs:
     events:

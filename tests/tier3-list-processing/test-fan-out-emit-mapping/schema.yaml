@@ -1,6 +1,7 @@
-initial_state: pending
-terminal_states: [done]
-states: [pending, routing, done]
+stages:
+  pending: {initial: true}
+  routing: {}
+  done: {terminal: true}
 pins:
   inputs:
     events: [batch.submitted]

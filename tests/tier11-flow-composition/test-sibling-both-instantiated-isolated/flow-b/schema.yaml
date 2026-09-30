@@ -1,7 +1,8 @@
 name: flow-b
-initial_state: new
-terminal_states: [finished]
-states: [new, active, finished]
+stages:
+  new: {initial: true}
+  active: {}
+  finished: {terminal: true}
 pins:
   inputs:
     events: [work.begin]

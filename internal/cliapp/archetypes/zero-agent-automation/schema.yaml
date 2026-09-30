@@ -3,8 +3,8 @@ imports:
   connector_packs:
     - {provider: telegram, tool: telegram.send_message}
 mode: static
-initial_state: ready
-states: [ready]
+stages:
+  ready: {initial: true}
 pins:
   inputs:
     events:

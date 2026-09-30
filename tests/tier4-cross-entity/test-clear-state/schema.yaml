@@ -1,6 +1,7 @@
-initial_state: accumulating
-terminal_states: [done]
-states: [accumulating, cleared, done]
+stages:
+  accumulating: {initial: true}
+  cleared: {}
+  done: {terminal: true}
 pins:
   inputs:
     events: [state.clear_requested]

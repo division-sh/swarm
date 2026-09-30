@@ -1,11 +1,7 @@
-initial_state: pending
-terminal_states:
-  - done
-  - killed
-states:
-  - pending
-  - done
-  - killed
+stages:
+  pending: {initial: true}
+  done: {terminal: true}
+  killed: {terminal: true}
 pins:
   inputs:
     events:

@@ -38,9 +38,9 @@ func artifactActionResultDeliveryFixtureFiles() map[string]string {
 		"repo-scaffold/schema.yaml": `name: repo-scaffold
 mode: template
 instance: request_id
-initial_state: ready
-terminal_states: [done]
-states: [ready, done]
+stages:
+  ready: {initial: true}
+  done: {terminal: true}
 `,
 		"repo-scaffold/entities.yaml": "test_entity:\n  request_id: {type: text, _unused_reason: receiver instance identity}\n",
 		"repo-scaffold/events.yaml": `repo_scaffold.repo_commit_requested:

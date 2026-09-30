@@ -1,6 +1,7 @@
-initial_state: pending
-terminal_states: [approved, rejected]
-states: [pending, approved, rejected]
+stages:
+  pending: {initial: true}
+  approved: {terminal: true}
+  rejected: {terminal: true}
 pins:
   inputs:
     events: [item.reviewed]

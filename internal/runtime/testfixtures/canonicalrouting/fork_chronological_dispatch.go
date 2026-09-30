@@ -12,9 +12,10 @@ func CopyForkChronologicalDispatch(t testing.TB) string {
 	root := t.TempDir()
 	for path, body := range map[string]string{
 		"schema.yaml": `name: fork-chronological-dispatch
-initial_state: pending
-states: [pending, processed, done]
-terminal_states: [done]
+stages:
+  pending: {initial: true}
+  processed: {}
+  done: {terminal: true}
 pins:
   inputs:
     events: [item.received]

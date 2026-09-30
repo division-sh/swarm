@@ -3,11 +3,71 @@ package contracts
 import (
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
+	"strings"
 )
+
+func decodeNodeTestSnippet(t interface {
+	Helper()
+	Fatal(...any)
+}, snippet interface{ SourceBytes() ([]byte, error) }, target any) error {
+	t.Helper()
+	body, err := snippet.SourceBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return decodeNodeTestYAML(body, target)
+}
 
 // decodeNodeTestYAML keeps fragment fixtures on the supported nodes.yaml
 // projection. Other contract families still use their own YAML admission.
 func decodeNodeTestYAML(body []byte, target any) error {
+	// Schema fragments enter the same complete root as bundle loading; wrapping
+	// is test fixture construction, never a production admission fallback.
+	var envelope string
+	var project func(FlowSchemaDocument)
+	switch out := target.(type) {
+	case *FlowConnect:
+		envelope, project = "connect:\n  -", func(s FlowSchemaDocument) { *out = s.Connect[0] }
+	case *FlowPins:
+		envelope, project = "pins:", func(s FlowSchemaDocument) { *out = s.Pins }
+	case *FlowInputPins:
+		envelope, project = "pins:\n  inputs:", func(s FlowSchemaDocument) { *out = s.Pins.Inputs }
+	case *FlowOutputPins:
+		envelope, project = "pins:\n  outputs:", func(s FlowSchemaDocument) { *out = s.Pins.Outputs }
+	case *FlowInstanceVariables:
+		envelope, project = "instance_variables:", func(s FlowSchemaDocument) { *out = s.InstanceVariables }
+	case *FlowVariable:
+		envelope, project = "instance_variables:\n  variables:\n    value:", func(s FlowSchemaDocument) { *out = s.InstanceVariables.Variables["value"] }
+	case *FlowStageDeclarations:
+		envelope, project = "stages:", func(s FlowSchemaDocument) { *out = s.StageDeclarations }
+	case *FlowStageGateDeclaration:
+		envelope, project = "stages:\n  test:\n    gate:", func(s FlowSchemaDocument) { *out = *s.StageDeclarations.Entries[0].Gate }
+	case *WorkflowGateInputField:
+		envelope, project = "stages:\n  test:\n    gate:\n      decision: test\n      outcomes:\n        accept:\n          advances_to: done\n          input:\n            value:", func(s FlowSchemaDocument) {
+			*out = s.StageDeclarations.Entries[0].Gate.Outcomes["accept"].Input["value"]
+		}
+	case *FlowLoopDeclarations:
+		envelope, project = "loops:", func(s FlowSchemaDocument) { *out = s.LoopDeclarations }
+	case *LoopOperationSpec:
+		snapshot, err := yamlsource.Load(body)
+		if err != nil {
+			return err
+		}
+		value, err := projectNodeLoopValue(snapshot.Document("nodes.yaml").Root())
+		if err == nil && value != nil {
+			*out = *value
+		}
+		return err
+	}
+	if envelope != "" {
+		indent := strings.Repeat("  ", strings.Count(envelope, "\n")+1)
+		text := envelope + "\n" + indent + strings.ReplaceAll(strings.TrimSpace(string(body)), "\n", "\n"+indent) + "\n"
+		schema, err := admitSchemaFragment(text)
+		if err == nil {
+			project(schema)
+		}
+		return err
+	}
 	switch target.(type) {
 	case *SystemNodeContract, *map[string]SystemNodeContract,
 		*SystemNodeEventHandler, *HandlerRuleEntry, *[]HandlerRuleEntry,
@@ -15,7 +75,8 @@ func decodeNodeTestYAML(body []byte, target any) error {
 		*GuardSpec, *GateSpec, *AccumulateSpec, *FanOutSpec,
 		*GroupBySpec, *FilterSpec, *ReduceSpec, *CountSpec,
 		*QuerySpec, *ComputeSpec, *WorkflowDataWrite,
-		*WorkflowDataAccumulation, *ActivitySpec, *JoinSpec:
+		*WorkflowDataAccumulation, *ActivitySpec, *JoinSpec, *FlowSchemaDocument,
+		*ExpressionValue, *EmitSpec:
 	default:
 		return yaml.Unmarshal(body, target)
 	}
@@ -28,6 +89,12 @@ func decodeNodeTestYAML(body []byte, target any) error {
 		return err
 	}
 	switch out := target.(type) {
+	case *FlowSchemaDocument:
+		*out, err = projectFlowSchemaValue(root)
+	case *ExpressionValue:
+		*out, err = projectNodeExpressionValue(root)
+	case *EmitSpec:
+		*out, err = projectNodeEmitValue(root)
 	case *SystemNodeContract:
 		*out, err = projectSystemNodeValue(root)
 	case *map[string]SystemNodeContract:
@@ -134,6 +201,8 @@ func decodeNodeTestMember(body []byte, name string, target any) error {
 		return err
 	}
 	switch out := target.(type) {
+	case *ExpressionValue:
+		*out, err = projectNodeExpressionValue(member.Value)
 	case *SystemNodeContract:
 		*out, err = projectSystemNodeValue(member.Value)
 	case *SystemNodeEventHandler:

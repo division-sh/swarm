@@ -1,6 +1,7 @@
-initial_state: pending
-terminal_states: [done, failed]
-states: [pending, done, failed]
+stages:
+  pending: {initial: true}
+  done: {terminal: true}
+  failed: {terminal: true}
 pins:
   inputs:
     events: [task.requested]

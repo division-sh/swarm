@@ -1,6 +1,6 @@
-initial_state: waiting
-terminal_states: [admitted]
-states: [waiting, admitted]
+stages:
+  waiting: {initial: true}
+  admitted: {terminal: true}
 pins:
   inputs:
     events: [admission.requested]

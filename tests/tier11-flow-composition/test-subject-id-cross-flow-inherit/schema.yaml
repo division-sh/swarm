@@ -1,6 +1,6 @@
-initial_state: ready
-terminal_states: [dispatched]
-states: [ready, dispatched]
+stages:
+  ready: {initial: true}
+  dispatched: {terminal: true}
 pins:
   inputs:
     events: [item.discovered]

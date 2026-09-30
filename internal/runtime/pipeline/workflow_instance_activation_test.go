@@ -904,9 +904,9 @@ func TestTemplateInstanceSystemNodeDeliveryUsesExactLocalHandlerKey(t *testing.T
 
 		"operating/entities.yaml": "test_entity: {}\n",
 		"operating/schema.yaml": `name: operating
-initial_state: initializing
-terminal_states: [ready]
-states: [initializing, ready]
+stages:
+  initializing: {initial: true}
+  ready: {terminal: true}
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `,

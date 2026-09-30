@@ -36,7 +36,7 @@ func CopyStateOnlyAcquisition(t testing.TB, workflowName string, modes map[strin
 	sort.Strings(paths)
 	for _, path := range paths {
 		mode := modes[path]
-		schema := fmt.Sprintf("name: %s\ninitial_state: active\nstates: [active, done]\nterminal_states: [done]\n", filepath.Base(path))
+		schema := fmt.Sprintf("name: %s\nstages:\n  active: {initial: true}\n  done: {terminal: true}\n", filepath.Base(path))
 		if path == "." {
 			schema = strings.Replace(schema, "name: .", "name: "+workflowName, 1) + strings.TrimPrefix(rootSchema, "name: "+workflowName+"\n")
 		} else {

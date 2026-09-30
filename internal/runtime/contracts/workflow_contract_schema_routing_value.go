@@ -1,0 +1,325 @@
+package contracts
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	"github.com/division-sh/swarm/internal/yamlsource"
+)
+
+func projectSchemaConnectValue(value yamlsource.Value) ([]FlowConnect, error) {
+	items, err := schemaValueSequence(value, false)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]FlowConnect, 0, len(items))
+	for _, item := range items {
+		for _, retired := range []struct {
+			key        string
+			diagnostic *LoaderDiagnostic
+		}{
+			{"delivery", NewRetiredConnectDeliveryDiagnostic()}, {"reply", NewRetiredConnectReplyDiagnostic()},
+		} {
+			member, err := item.Lookup(retired.key)
+			if err != nil {
+				return nil, err
+			}
+			if member.Presence != yamlsource.PresenceMissing {
+				location := member.Value.Location()
+				return nil, nodeValueError(member.Value, retired.diagnostic.withLocation(LoaderDiagnosticLocation{File: location.File, Line: location.Line, Column: location.Column, YAMLPath: member.Value.SemanticPath()}))
+			}
+		}
+		fields, err := schemaValueFields(item, "connect", flowConnectFieldOptions, map[string]string{
+			"adapter": "connect.adapter is unsupported; declare an exact event contract or a distinct event", "using": "retired connect.using.instance; declare receiver-owned instance and resolution", "map": "retired connect.map; declare receiver-owned instance and resolution", "delivery": "delivery is compiled", "reply": "reply is receiver-owned",
+		}, true)
+		if err != nil {
+			return nil, err
+		}
+		row := FlowConnect{SourceLine: item.Location().Line}
+		if _, present := fields["event"]; !present {
+			return nil, nodeValueError(item, fmt.Errorf("endpoint-centric connect rows are unsupported; declare event, from and to"))
+		}
+		for _, key := range []string{"from", "to"} {
+			if _, present := fields[key]; !present {
+				return nil, nodeValueError(item, fmt.Errorf("connect requires non-empty event, from, and to"))
+			}
+		}
+		if err := schemaValueRequiredTexts(item, fields, map[string]*string{"event": &row.Event, "from": &row.From, "to": &row.To}); err != nil {
+			return nil, err
+		}
+		if err := schemaValueTexts(fields, map[string]*string{"rename": &row.Rename}, true); err != nil {
+			return nil, err
+		}
+		if !eventidentity.IsValidName(row.Event) || row.Rename != "" && !eventidentity.IsValidName(row.Rename) {
+			return nil, nodeValueError(item, fmt.Errorf("connect event/rename must be an exact canonical event identity"))
+		}
+		if row.Rename != "" && eventidentity.Normalize(row.Rename) == eventidentity.Normalize(row.Event) {
+			return nil, nodeValueError(item, fmt.Errorf("connect.rename is redundant with event"))
+		}
+		out = append(out, row)
+	}
+	return out, nil
+}
+
+func projectSchemaImportsValue(value yamlsource.Value) (FlowSchemaImports, error) {
+	fields, err := schemaValueFields(value, "imports", map[string]struct{}{"connector_packs": {}, "provider_trigger_events": {}}, nil, true)
+	var out FlowSchemaImports
+	if err != nil {
+		return out, err
+	}
+	for _, family := range sortedContractKeys(fields) {
+		items, err := schemaValueSequence(fields[family], true)
+		if err != nil {
+			return out, err
+		}
+		for _, item := range items {
+			key := "tool"
+			if family == "provider_trigger_events" {
+				key = "event"
+			}
+			row, err := schemaValueFields(item, family+" import", map[string]struct{}{"provider": {}, key: {}}, nil, true)
+			if err != nil {
+				return out, err
+			}
+			var provider, name string
+			if err := schemaValueRequiredTexts(item, row, map[string]*string{"provider": &provider, key: &name}); err != nil {
+				return out, err
+			}
+			if family == "connector_packs" {
+				entry := ConnectorPackImport{Provider: provider, Tool: name}
+				if normalized := entry.normalized(); normalized != entry {
+					return out, nodeValueError(item, fmt.Errorf("connector import must use exact canonical tokens"))
+				}
+				out.ConnectorPacks = append(out.ConnectorPacks, entry)
+			} else {
+				entry := ProviderTriggerEventImport{Provider: provider, Event: name}
+				if normalized := entry.normalized(); normalized != entry {
+					return out, nodeValueError(item, fmt.Errorf("provider trigger import must use exact canonical tokens"))
+				}
+				out.ProviderTriggerEvents = append(out.ProviderTriggerEvents, entry)
+			}
+		}
+	}
+	return out, nil
+}
+
+var retiredSchemaPinFields = map[string]string{
+	"name": "pin name is unsupported; use the exact local event identity", "address": "input pin address is unsupported; declare instance plus resolution",
+	"carries": "input event pin carries are unsupported; route evidence is compiled from event schema and receiver resolution",
+	"key":     "output event pin key is unsupported; use the producer event business key", "optional": "optional pin fields are unsupported", "convert": "conversion has no admitted runtime semantics",
+}
+
+func projectSchemaPinsValue(value yamlsource.Value) (FlowPins, error) {
+	fields, err := schemaValueFields(value, "pins", map[string]struct{}{"inputs": {}, "outputs": {}}, nil, true)
+	var out FlowPins
+	if err != nil {
+		return out, err
+	}
+	for _, direction := range sortedContractKeys(fields) {
+		key := "reads"
+		if direction == "outputs" {
+			key = "writes"
+		}
+		members, err := schemaValueFields(fields[direction], "pins."+direction, map[string]struct{}{"events": {}, key: {}}, nil, true)
+		if err != nil {
+			return out, err
+		}
+		if names, present := members[key]; present {
+			list, err := projectSchemaPinFieldsValue(names)
+			if err != nil {
+				return out, err
+			}
+			if direction == "inputs" {
+				out.Inputs.Reads = list
+			} else {
+				out.Outputs.Writes = list
+			}
+		}
+		if events, present := members["events"]; present {
+			items, err := schemaValueSequence(events, true)
+			if err != nil {
+				return out, err
+			}
+			seen := map[string]bool{}
+			for _, item := range items {
+				input, output, err := projectSchemaPinValue(item, direction)
+				if err != nil {
+					return out, err
+				}
+				event := input.Event
+				if direction == "outputs" {
+					event = output.Event
+				}
+				if seen[event] {
+					return out, nodeValueError(item, fmt.Errorf("pin event %q is declared more than once", event))
+				}
+				seen[event] = true
+				if direction == "inputs" {
+					out.Inputs.EventPins = append(out.Inputs.EventPins, input)
+				} else {
+					out.Outputs.EventPins = append(out.Outputs.EventPins, output)
+				}
+			}
+		}
+	}
+	return out, nil
+}
+
+func projectSchemaPinFieldsValue(value yamlsource.Value) ([]string, error) {
+	items, err := schemaValueSequence(value, true)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(items))
+	seen := map[string]bool{}
+	for _, item := range items {
+		text, err := schemaValueText(item, true)
+		if err != nil {
+			return nil, err
+		}
+		if seen[text] {
+			return nil, nodeValueError(item, fmt.Errorf("field %q is declared more than once", text))
+		}
+		seen[text] = true
+		out = append(out, text)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func projectSchemaPinValue(value yamlsource.Value, direction string) (FlowInputEventPin, FlowOutputEventPin, error) {
+	input := FlowInputEventPin{sourceLine: value.Location().Line, sourceCol: value.Location().Column}
+	output := FlowOutputEventPin{sourceLine: value.Location().Line, sourceCol: value.Location().Column}
+	var event string
+	var err error
+	if value.Presence() == yamlsource.PresenceScalar {
+		event, err = schemaValueText(value, true)
+	} else {
+		allowed := inputEventPinFieldOptions
+		if direction == "outputs" {
+			allowed = outputEventPinFieldOptions
+		}
+		retired := make(map[string]string, len(retiredSchemaPinFields))
+		for key, reason := range retiredSchemaPinFields {
+			retired[key] = reason
+		}
+		if direction == "outputs" {
+			retired["carries"] = "output event pin carries are unsupported; route evidence is compiled from event schema and receiver resolution"
+		}
+		fields, fieldErr := schemaValueFields(value, direction+" event pin", allowed, retired, true)
+		if fieldErr != nil {
+			return input, output, fieldErr
+		}
+		if err = schemaValueRequiredTexts(value, fields, map[string]*string{"event": &event}); err != nil {
+			return input, output, err
+		}
+		if source, present := fields["source"]; present {
+			var text string
+			text, err = schemaValueText(source, true)
+			if err == nil {
+				input.Source, err = ParseFlowInputPinSource(text)
+			}
+		}
+		if err == nil {
+			if sink, present := fields["sink"]; present {
+				var text string
+				text, err = schemaValueText(sink, true)
+				if err == nil {
+					output.Sink, err = ParseFlowOutputSink(text)
+				}
+			}
+		}
+		if err == nil {
+			if resolution, present := fields["resolution"]; present {
+				input.Resolution, err = projectSchemaResolutionValue(resolution)
+			}
+		}
+		if err == nil {
+			if initialize, present := fields["initialize"]; present {
+				input.Initialize, err = projectSchemaInitializeValue(initialize)
+			}
+		}
+		if err == nil && direction == "inputs" && input.Source.Empty() && input.Resolution.Empty() {
+			err = fmt.Errorf("input event pin mapping requires a non-default source or resolution; use a scalar event when no options are needed")
+		}
+		if err == nil && direction == "outputs" && output.Sink == FlowOutputSinkNone {
+			err = fmt.Errorf("output event pin mapping requires a non-default sink; use a scalar event when no options are needed")
+		}
+	}
+	if err != nil {
+		return input, output, nodeValueError(value, err)
+	}
+	if !eventidentity.IsValidName(event) || strings.ContainsAny(event, "/*") {
+		return input, output, nodeValueError(value, fmt.Errorf("pin event %q must be an exact local canonical event identity", event))
+	}
+	input.Event, output.Event = event, event
+	if direction == "inputs" {
+		err = validateAuthoredFlowInputPin(input)
+	} else {
+		err = validateAuthoredFlowOutputPin(output)
+	}
+	if err != nil {
+		return input, output, nodeValueError(value, err)
+	}
+	return input, output, nil
+}
+
+func projectSchemaResolutionValue(value yamlsource.Value) (FlowInputPinResolution, error) {
+	retired, err := value.Lookup("instance_key")
+	if err != nil {
+		return FlowInputPinResolution{}, err
+	}
+	if retired.Presence != yamlsource.PresenceMissing {
+		return FlowInputPinResolution{}, nodeValueError(retired.Value, NewRetiredResolutionInstanceKeyDiagnostic())
+	}
+	fields, err := schemaValueFields(value, "input pin resolution", inputEventPinResolutionFieldOptions, nil, true)
+	var out FlowInputPinResolution
+	if err != nil {
+		return out, err
+	}
+	var mode string
+	if err := schemaValueRequiredTexts(value, fields, map[string]*string{"mode": &mode}); err != nil {
+		return out, err
+	}
+	out.Mode, err = ParseFlowInputResolutionMode(mode)
+	if err != nil {
+		return out, nodeValueError(value, err)
+	}
+	if err := schemaValueTexts(fields, map[string]*string{
+		"from": &out.From, "aggregation": &out.Aggregation, "window": &out.Window,
+		"singleton": &out.Singleton, "replies_to": &out.RepliesTo, "correlation_key": &out.CorrelationKey,
+	}, true); err != nil {
+		return out, err
+	}
+	if dedup, present := fields["dedup_by"]; present {
+		out.DedupBy, err = projectSchemaPinFieldsValue(dedup)
+		if err != nil {
+			return out, err
+		}
+	}
+	if err := validateCompiledFlowInputResolution(out); err != nil {
+		return out, nodeValueError(value, err)
+	}
+	return out, nil
+}
+
+func projectSchemaInitializeValue(value yamlsource.Value) (map[string]string, error) {
+	fields, err := schemaValueDeclarations(value, true)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for _, field := range fields {
+		path, err := schemaValueText(field.Value, true)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := receiverPayloadPath(path); err != nil {
+			return nil, nodeValueError(field.Value, err)
+		}
+		out[field.Name] = path
+	}
+	return out, nil
+}

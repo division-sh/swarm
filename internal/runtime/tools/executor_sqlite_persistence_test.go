@@ -257,7 +257,7 @@ func TestSQLiteEntityPersistence_MarshalsStructuredFilterValues(t *testing.T) {
 
 func TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence(t *testing.T) {
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{"save_entity_field"}}
-	bundle := loadRoleScopedEntityToolBundle(t, actor, true)
+	bundle := loadRoleScopedEntityToolBundle(t, actor)
 	sqliteStore := newSQLiteRuntimeToolStoreForTest(t)
 	ctx := seedEntityToolSourceRun(t, sqliteStore, bundle)
 	entityID := uuid.NewString()

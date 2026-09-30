@@ -191,7 +191,7 @@ func TestReceiverInitializeGrammar(t *testing.T) {
 		}
 	}
 	var pins FlowInputPins
-	if err := snippet.Decode(&pins); err != nil {
+	if err := decodeNodeTestYAML(source, &pins); err != nil {
 		t.Fatal(err)
 	}
 	if got := pins.EventPins[0].Initialize["count"]; got != "payload.settings.count" {

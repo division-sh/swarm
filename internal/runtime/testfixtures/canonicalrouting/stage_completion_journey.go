@@ -7,9 +7,9 @@ func CopyStageCompletionJourney(t testing.TB) string {
 	root := t.TempDir()
 	for path, contents := range map[string]string{
 		"entities.yaml": "run:\n  topic: string\n",
-		"schema.yaml": `initial_state: active
-states: [active, done]
-terminal_states: [done]
+		"schema.yaml": `stages:
+  active: {initial: true}
+  done: {terminal: true}
 pins:
   inputs:
     events: [flow.started, flow.finish]

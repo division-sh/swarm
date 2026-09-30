@@ -1,7 +1,8 @@
 name: child
-initial_state: waiting
-terminal_states: [processed]
-states: [waiting, processing, processed]
+stages:
+  waiting: {initial: true}
+  processing: {}
+  processed: {terminal: true}
 pins:
   inputs:
     events: [child.start]

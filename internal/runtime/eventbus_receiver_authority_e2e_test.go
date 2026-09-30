@@ -537,9 +537,9 @@ func closedReceiverAuthorityFixtureFiles() map[string]string {
 	return map[string]string{
 
 		"schema.yaml": `name: closed-receiver-authority
-initial_state: pending
-terminal_states: [done]
-states: [pending, done]
+stages:
+  pending: {initial: true}
+  done: {terminal: true}
 pins:
   inputs:
     events: [task.assigned]
