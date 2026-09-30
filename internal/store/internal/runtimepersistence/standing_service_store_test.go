@@ -214,8 +214,8 @@ func TestSQLiteStandingServiceReconcileDoesNotRepairRestartAbandon(t *testing.T)
 		t.Fatalf("ReconcileStandingService(terminal): %v", err)
 	}
 	if stopped.Transition != "revised" || stopped.Generation != created.Generation || stopped.RunID != created.RunID || stopped.BundleHash != secondHash ||
-		stopped.RestartDisposition.Kind != runtimepipeline.StandingRestartTerminalDeclared ||
-		stopped.RestartDisposition.Remediation != runtimepipeline.StandingRestartReset {
+		stopped.RestartDisposition.Kind != runtimerunlifecycle.StandingRestartTerminalDeclared ||
+		stopped.RestartDisposition.Remediation != runtimerunlifecycle.StandingRestartReset {
 		t.Fatalf("terminal reconciliation = %#v", stopped)
 	}
 	var oldStatus, retiredReason string
@@ -256,7 +256,7 @@ func TestSQLiteStandingServiceReconcileProjectsTerminalityWithCommand(t *testing
 	if err != nil {
 		t.Fatalf("reconcile terminal standing service: %v", err)
 	}
-	if stopped.RestartDisposition.Kind != runtimepipeline.StandingRestartTerminalDeclared ||
+	if stopped.RestartDisposition.Kind != runtimerunlifecycle.StandingRestartTerminalDeclared ||
 		!strings.Contains(stopped.RestartDisposition.RunControlGuidance(), "swarm standing reset "+serviceID) {
 		t.Fatalf("terminal result = %#v, want teaching reset command", stopped)
 	}
@@ -1029,7 +1029,7 @@ func TestRunStopUsesDeclarationAwareStandingGuidanceParity(t *testing.T) {
 			}
 
 			orphaned, err := workflow.ReconcileStandingServiceSet(ctx, nil)
-			if err != nil || len(orphaned) != 1 || orphaned[0].RestartDisposition.Kind != runtimepipeline.StandingRestartOrphaned {
+			if err != nil || len(orphaned) != 1 || orphaned[0].RestartDisposition.Kind != runtimerunlifecycle.StandingRestartOrphaned {
 				t.Fatalf("orphan standing service = %#v err=%v", orphaned, err)
 			}
 			outcome, err = stopper.StopRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{RunID: created.RunID})

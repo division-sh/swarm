@@ -13,7 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
@@ -41,11 +40,11 @@ func (p *recoveryReadProbe) LoadRunOrigin(ctx context.Context, _ string) (runlif
 	return p.origin, p.read(ctx, "origin")
 }
 
-func (p *recoveryReadProbe) StandingRunRestartDisposition(ctx context.Context, _ string) (runtimepipeline.StandingRestartDisposition, error) {
+func (p *recoveryReadProbe) StandingRunRestartDisposition(ctx context.Context, _ string) (runlifecycle.StandingRestartDisposition, error) {
 	if err := p.read(ctx, "standing"); err != nil {
-		return runtimepipeline.StandingRestartDisposition{}, err
+		return runlifecycle.StandingRestartDisposition{}, err
 	}
-	return runtimepipeline.ClassifyStandingRestart(runtimepipeline.StandingRestartFact{})
+	return runlifecycle.ClassifyStandingRestart(runlifecycle.StandingRestartFact{})
 }
 
 type recoveryReadScan struct {

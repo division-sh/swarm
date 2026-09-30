@@ -625,6 +625,7 @@ type ClaimDisposition string
 const (
 	ClaimAcquired         ClaimDisposition = "acquired"
 	ClaimDeferred         ClaimDisposition = "deferred"
+	ClaimParked           ClaimDisposition = "parked"
 	ClaimBusy             ClaimDisposition = "busy"
 	ClaimReclaimable      ClaimDisposition = "reclaimable"
 	ClaimTerminal         ClaimDisposition = "terminal"

@@ -159,24 +159,24 @@ type pipelineTestStandingServices struct {
 	store *workflowInstanceStore
 }
 
-func (p pipelineTestStandingServices) StandingRunRestartDisposition(ctx context.Context, runID string) (StandingRestartDisposition, error) {
+func (p pipelineTestStandingServices) StandingRunRestartDisposition(ctx context.Context, runID string) (runtimerunlifecycle.StandingRestartDisposition, error) {
 	if p.store == nil || p.store.testDB() == nil {
-		return StandingRestartDisposition{}, errors.New("pipeline test standing-service reader requires selected store")
+		return runtimerunlifecycle.StandingRestartDisposition{}, errors.New("pipeline test standing-service reader requires selected store")
 	}
 	query := `SELECT service_id, current_run_id, current_generation, declaration_present, effective_state, operator_override, COALESCE(r.status, '') FROM standing_services LEFT JOIN runs r ON r.run_id = current_run_id WHERE current_run_id = ?`
 	if !p.store.isSQLite() {
 		query = `SELECT service_id::text, current_run_id::text, current_generation, declaration_present, effective_state, operator_override, COALESCE(r.status, '') FROM standing_services LEFT JOIN runs r ON r.run_id = current_run_id WHERE current_run_id = $1::uuid`
 	}
-	fact := StandingRestartFact{ExactCurrent: true}
+	fact := runtimerunlifecycle.StandingRestartFact{ExactCurrent: true}
 	if err := p.store.testDB().QueryRowContext(ctx, query, strings.TrimSpace(runID)).Scan(
 		&fact.ServiceID, &fact.RunID, &fact.Generation, &fact.DeclarationPresent,
 		&fact.EffectiveState, &fact.OperatorOverride, &fact.RunState,
 	); errors.Is(err, sql.ErrNoRows) {
-		return ClassifyStandingRestart(StandingRestartFact{})
+		return runtimerunlifecycle.ClassifyStandingRestart(runtimerunlifecycle.StandingRestartFact{})
 	} else if err != nil {
-		return StandingRestartDisposition{}, err
+		return runtimerunlifecycle.StandingRestartDisposition{}, err
 	}
-	return ClassifyStandingRestart(fact)
+	return runtimerunlifecycle.ClassifyStandingRestart(fact)
 }
 
 type pipelineTestDynamicFlowRuntimeReadinessPersistence struct {

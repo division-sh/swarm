@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	runtimestanding "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"reflect"
 	"sort"
 	"strings"
@@ -62,7 +63,7 @@ type StandingActivation struct {
 	FlowInstance        string
 	EntityID            string
 	EffectiveState      string
-	RestartDisposition  runtimepipeline.StandingRestartDisposition
+	RestartDisposition  runtimestanding.StandingRestartDisposition
 	Created             bool
 }
 

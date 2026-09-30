@@ -9,6 +9,7 @@ import (
 
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/backend/standingdisposition"
 )
 
 const ActiveStateSQLValues = "'" +
@@ -32,6 +33,50 @@ func RequirePostgresActiveSourceTx(ctx context.Context, tx *sql.Tx, runID string
 
 type RowQueryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+// DispatchParked consumes lifecycle/control and the exact-current standing owner.
+// The caller takes the existing run fence before using this to admit a new claim.
+// Active remains broader: paused topology and already-owned settlement survive.
+func DispatchParked(ctx context.Context, q RowQueryer, postgres bool, runID string) (bool, error) {
+	if strings.TrimSpace(runID) == "" {
+		return false, nil
+	}
+	if _, err := requireActiveSource(ctx, q.QueryRowContext, runID, postgres, false); err != nil {
+		return false, err
+	}
+	query := `SELECT r.status, COALESCE(c.control_status, '') FROM runs r LEFT JOIN run_control_state c ON c.run_id = r.run_id WHERE r.run_id = ?`
+	if postgres {
+		query = `SELECT r.status, COALESCE(c.control_status, '') FROM runs r LEFT JOIN run_control_state c ON c.run_id = r.run_id WHERE r.run_id = $1::uuid`
+	}
+	var status, control string
+	if err := q.QueryRowContext(ctx, query, runID).Scan(&status, &control); err != nil {
+		return false, err
+	}
+	standing, err := standingdisposition.ReadByRun(ctx, q, postgres, runID)
+	if err != nil {
+		return false, err
+	}
+	if standing.Kind == runtimerunlifecycle.StandingRestartInvalidCurrent {
+		return false, fmt.Errorf("run %s has invalid standing authority: %s", runID, standing.RunControlGuidance())
+	}
+	switch status {
+	case string(runtimerunlifecycle.StateRunning):
+		if control != "" && control != string(runtimerunlifecycle.StateRunning) {
+			return false, fmt.Errorf("run %s has contradictory running/control state %q", runID, control)
+		}
+		if standing.ExactCurrent() && !standing.Executable() {
+			return false, fmt.Errorf("run %s has non-executable standing authority: %s", runID, standing.RunControlGuidance())
+		}
+		return false, nil
+	case string(runtimerunlifecycle.StatePaused):
+		if control != string(runtimerunlifecycle.StatePaused) {
+			return false, fmt.Errorf("run %s has no admitted paused control", runID)
+		}
+		return true, nil
+	default:
+		return false, fmt.Errorf("run %s has invalid dispatch lifecycle %q", runID, status)
+	}
 }
 
 func RequirePostgresActiveQuery(ctx context.Context, queryer RowQueryer, runID string) error {

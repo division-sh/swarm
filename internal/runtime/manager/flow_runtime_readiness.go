@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	runtimestanding "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"sort"
 	"strings"
 	"time"
@@ -198,7 +199,7 @@ func (am *AgentManager) InspectDynamicFlowRuntimeReadinessForSource(ctx context.
 	if am.roles.StandingRestarts == nil {
 		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, errors.New("dynamic flow runtime readiness requires standing restart disposition reader")
 	}
-	cache := make(map[string]runtimepipeline.StandingRestartDisposition)
+	cache := make(map[string]runtimestanding.StandingRestartDisposition)
 	// This read-only inspection shares observations, never mutation authority.
 	ownershipCache := make(map[string]RunExecutionOwnership)
 	filter := func(items []runtimepipeline.DynamicFlowRuntimeReadiness) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error) {

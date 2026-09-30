@@ -903,6 +903,17 @@ func (eb *EventBus) DispatchDeliveryContinuation(ctx context.Context, evt events
 	if err != nil {
 		return runtimedeliverycontinuation.Fatal(fmt.Errorf("admit continuation source fact: %w", err))
 	}
+	if reason, err := eb.dispatchQueueReason(ctx, evt); err != nil {
+		return runtimedeliverycontinuation.Fatal(err)
+	} else if reason != "" {
+		if reason == "run_paused" {
+			return runtimedeliverycontinuation.Deferred(runtimedeliverycontinuation.DispatchWakeRunContinue)
+		}
+		if reason == dispatchQueueRuntimeIngress {
+			return runtimedeliverycontinuation.Deferred(runtimedeliverycontinuation.DispatchWakeIngressContinue)
+		}
+		return runtimedeliverycontinuation.Fatal(ErrRunDispatchBlocked)
+	}
 	var standingLease *worklifetime.Lease
 	ctx, standingLease, err = eb.bindClaimedRunWork(ctx, evt)
 	if err != nil {

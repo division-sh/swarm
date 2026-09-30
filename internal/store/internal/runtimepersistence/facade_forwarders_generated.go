@@ -1175,6 +1175,10 @@ func (s *PostgresStore) RunDispatchBlocked(ctx context.Context, runID string) (b
 	return s.runLifecyclePostgresOwner.RunDispatchBlocked(ctx, runID)
 }
 
+func (s *PostgresStore) RunDispatchParked(ctx context.Context, runID string) (bool, error) {
+	return s.runLifecyclePostgresOwner.RunDispatchParked(ctx, runID)
+}
+
 func (s *PostgresStore) RuntimeLogLineageParentEventID(ctx context.Context, runID string, explicitParentEventID string, subjectEventID string) (string, error) {
 	return s.eventPostgresOwner.RuntimeLogLineageParentEventID(ctx, runID, explicitParentEventID, subjectEventID)
 }
@@ -1223,7 +1227,7 @@ func (s *PostgresStore) Snapshot(ctx context.Context, deliveryID string) (delive
 	return s.deliveryPostgresOwner.Snapshot(ctx, deliveryID)
 }
 
-func (s *PostgresStore) StandingRunRestartDisposition(ctx context.Context, runID string) (pipeline.StandingRestartDisposition, error) {
+func (s *PostgresStore) StandingRunRestartDisposition(ctx context.Context, runID string) (runlifecycle.StandingRestartDisposition, error) {
 	return s.pipelinePostgresOwner.StandingRunRestartDisposition(ctx, runID)
 }
 
@@ -2391,6 +2395,10 @@ func (s *SQLiteRuntimeStore) RunDispatchBlocked(ctx context.Context, runID strin
 	return s.runLifecycleSQLiteOwner.RunDispatchBlocked(ctx, runID)
 }
 
+func (s *SQLiteRuntimeStore) RunDispatchParked(ctx context.Context, runID string) (bool, error) {
+	return s.runLifecycleSQLiteOwner.RunDispatchParked(ctx, runID)
+}
+
 func (s *SQLiteRuntimeStore) RuntimeLogLineageParentEventID(ctx context.Context, runID string, explicitParentEventID string, subjectEventID string) (string, error) {
 	return s.eventSQLiteOwner.RuntimeLogLineageParentEventID(ctx, runID, explicitParentEventID, subjectEventID)
 }
@@ -2443,7 +2451,7 @@ func (s *SQLiteRuntimeStore) Snapshot(ctx context.Context, deliveryID string) (d
 	return s.deliverySQLiteOwner.Snapshot(ctx, deliveryID)
 }
 
-func (s *SQLiteRuntimeStore) StandingRunRestartDisposition(ctx context.Context, runID string) (pipeline.StandingRestartDisposition, error) {
+func (s *SQLiteRuntimeStore) StandingRunRestartDisposition(ctx context.Context, runID string) (runlifecycle.StandingRestartDisposition, error) {
 	return s.pipelineSQLiteOwner.StandingRunRestartDisposition(ctx, runID)
 }
 

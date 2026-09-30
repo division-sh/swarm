@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	runtimestanding "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"sync/atomic"
 	"testing"
 
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 type drainReadContextKey struct{}
@@ -70,8 +70,8 @@ func (s *drainReadStore) ObserveDeliveryContinuations(ctx context.Context, _ run
 	return observations, nil
 }
 
-func (s *drainReadStore) StandingRunRestartDisposition(ctx context.Context, _ string) (runtimepipeline.StandingRestartDisposition, error) {
-	return runtimepipeline.StandingRestartDisposition{}, s.read(ctx, "standing")
+func (s *drainReadStore) StandingRunRestartDisposition(ctx context.Context, _ string) (runtimestanding.StandingRestartDisposition, error) {
+	return runtimestanding.StandingRestartDisposition{}, s.read(ctx, "standing")
 }
 
 func TestCoordinatorDrainsAdmittedReadsBeforeRetirement(t *testing.T) {

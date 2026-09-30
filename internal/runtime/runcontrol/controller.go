@@ -30,11 +30,15 @@ type StateError struct {
 	Err           error
 	RunID         string
 	CurrentStatus string
+	Detail        string
 }
 
 func (e *StateError) Error() string {
 	if e == nil {
 		return ""
+	}
+	if e.Detail != "" {
+		return fmt.Sprintf("%s: %s status=%s; %s", e.Err, strings.TrimSpace(e.RunID), strings.TrimSpace(e.CurrentStatus), e.Detail)
 	}
 	if strings.TrimSpace(e.CurrentStatus) == "" {
 		return fmt.Sprintf("%s: %s", e.Err, strings.TrimSpace(e.RunID))
@@ -101,6 +105,7 @@ type Store interface {
 	PauseRunControlOutcome(context.Context, TransitionRequest) (StoreTransition, error)
 	ContinueRunControlOutcome(context.Context, TransitionRequest) (StoreTransition, error)
 	RunDispatchBlocked(context.Context, string) (bool, error)
+	RunDispatchParked(context.Context, string) (bool, error)
 }
 
 type StoreTransition struct {
@@ -304,6 +309,13 @@ func (c *Controller) QueueableRunDispatchBlocked(ctx context.Context, runID stri
 		return false, nil
 	}
 	return c.store.RunDispatchBlocked(ctx, runID)
+}
+
+func (c *Controller) QueueableRunDispatchParked(ctx context.Context, runID string) (bool, error) {
+	if c == nil || c.store == nil {
+		return false, errors.New("run control owner is required")
+	}
+	return c.store.RunDispatchParked(ctx, runID)
 }
 
 func (c *Controller) normalize(req TransitionRequest) TransitionRequest {

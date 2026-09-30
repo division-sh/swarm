@@ -1896,7 +1896,7 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 								}
 							}
 							switch claimResult.Disposition {
-							case runtimedelivery.ClaimDeferred, runtimedelivery.ClaimBusy:
+							case runtimedelivery.ClaimDeferred, runtimedelivery.ClaimBusy, runtimedelivery.ClaimParked:
 								return false
 							case runtimedelivery.ClaimTerminal:
 								releaser := am.roles.DeliveryRuntime

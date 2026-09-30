@@ -179,8 +179,8 @@ func (managedNativeDurableRoles) RecordDeadLetterOutcome(context.Context, runtim
 func (managedNativeDurableRoles) LoadRunOrigin(context.Context, string) (runtimerunlifecycle.RunOrigin, error) {
 	return runtimerunlifecycle.ScenarioSetupRunOrigin(), nil
 }
-func (managedNativeDurableRoles) StandingRunRestartDisposition(context.Context, string) (runtimepipeline.StandingRestartDisposition, error) {
-	return runtimepipeline.ClassifyStandingRestart(runtimepipeline.StandingRestartFact{})
+func (managedNativeDurableRoles) StandingRunRestartDisposition(context.Context, string) (runtimerunlifecycle.StandingRestartDisposition, error) {
+	return runtimerunlifecycle.ClassifyStandingRestart(runtimerunlifecycle.StandingRestartFact{})
 }
 
 func runtimeTestSyntheticDurableDependencies(delivery runtimedelivery.Store) runtimebus.DurableDependencies {

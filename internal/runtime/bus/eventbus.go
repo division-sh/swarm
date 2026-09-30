@@ -117,7 +117,7 @@ type DurableDependencies struct {
 	PreparedEvents        PreparedPublishEventReader
 	TargetFailureRecorder TargetFailureDeadLetterRecorder
 	RunOrigins            RunOriginReader
-	StandingRestarts      runtimepipeline.StandingRestartDispositionReader
+	StandingRestarts      runtimerunlifecycle.StandingRestartDispositionReader
 }
 
 func (d DurableDependencies) validate() error {
@@ -279,6 +279,7 @@ type RuntimeIngressDispatchGate interface {
 
 type RunDispatchGate interface {
 	QueueableRunDispatchBlocked(context.Context, string) (bool, error)
+	QueueableRunDispatchParked(context.Context, string) (bool, error)
 }
 
 // RunOriginReader exposes only the typed construction authority needed to

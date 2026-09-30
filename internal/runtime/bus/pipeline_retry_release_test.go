@@ -87,6 +87,10 @@ type recordingPipelineRecoveryOwner struct {
 
 type blockedRunDispatchGate map[string]bool
 
+func (g blockedRunDispatchGate) QueueableRunDispatchParked(context.Context, string) (bool, error) {
+	return false, nil
+}
+
 func (g blockedRunDispatchGate) QueueableRunDispatchBlocked(_ context.Context, runID string) (bool, error) {
 	return g[runID], nil
 }
