@@ -1,7 +1,5 @@
 name: portfolio
 mode: singleton
-stages:
-  active: {initial: true}
 pins:
   inputs:
     events:

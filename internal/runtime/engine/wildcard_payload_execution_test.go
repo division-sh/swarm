@@ -71,7 +71,7 @@ func TestExecutorLocalWildcardPayloadReaderUsesConcreteProducerSchema(t *testing
 				Event: eventtest.ExistingRunRootIngress("wildcard-proof", events.EventType(tc.eventType), "", "", json.RawMessage(`{"work_id":"work-1"}`), 0,
 					eventtest.UUID("wildcard-proof-run"), events.EventEnvelope{}, time.Time{}),
 				Handler: runtimecontracts.SystemNodeEventHandler{Rules: []runtimecontracts.HandlerRuleEntry{{ID: "accept", Condition: `payload.work_id != ""`}}},
-				State:   testStateSnapshot("active", map[string]any{}, nil, map[string]map[string]any{}),
+				State:   testStateSnapshot(source.FlowInitialStage("worker"), map[string]any{}, nil, map[string]map[string]any{}),
 			})
 			if tc.wantError {
 				if err == nil || !strings.Contains(err.Error(), "without an exact structural schema") {

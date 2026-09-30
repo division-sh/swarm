@@ -1,8 +1,4 @@
 name: selected-fork-flow-scoped-mcp
-stages:
-  pending: {initial: true}
-  assigned: {}
-  done: {terminal: true}
 pins:
   inputs:
     events:
