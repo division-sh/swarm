@@ -227,9 +227,16 @@ func projectSchemaRequiredAgentsValue(value yamlsource.Value) ([]FlowRequiredAge
 			target *[]string
 		}{{"subscribes_to", &row.SubscribesTo}, {"emits", &row.Emits}} {
 			if field, present := fields[entry.key]; present {
-				*entry.target, err = nodeValueStringSequence(field, entry.key)
+				items, err := schemaValueSequence(field, false)
 				if err != nil {
 					return nil, err
+				}
+				for _, item := range items {
+					text, err := schemaValueText(item, true)
+					if err != nil {
+						return nil, err
+					}
+					*entry.target = append(*entry.target, text)
 				}
 			}
 		}
