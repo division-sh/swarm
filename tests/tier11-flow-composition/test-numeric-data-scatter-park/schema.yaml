@@ -7,3 +7,4 @@ connect:
   - event: item.registered
     from: .
     to: registry
+    resolution: select-or-create

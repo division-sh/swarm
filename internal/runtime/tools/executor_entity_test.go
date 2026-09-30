@@ -3003,21 +3003,6 @@ func loadWave1EntityToolMultiFlowBundle(t *testing.T, flows map[string]entityToo
 	}
 	sort.Strings(flowIDs)
 
-	var packageYAML strings.Builder
-	packageYAML.WriteString("name: entity-tool-bundle\n")
-	packageYAML.WriteString("version: \"1.0.0\"\n")
-	packageYAML.WriteString("platform_version: \">=0.7.0 <0.8.0\"\n")
-	packageYAML.WriteString("flows:\n")
-	for _, flowID := range flowIDs {
-		packageYAML.WriteString("  - id: ")
-		packageYAML.WriteString(flowID)
-		packageYAML.WriteString("\n")
-		packageYAML.WriteString("    flow: ")
-		packageYAML.WriteString(flowID)
-		packageYAML.WriteString("\n")
-		packageYAML.WriteString("    mode: static\n")
-	}
-
 	writeEntityToolFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: entity-tool-bundle\n")
 
 	for _, flowID := range flowIDs {
