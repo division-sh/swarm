@@ -348,7 +348,7 @@ func writeSelectedForkAgentProofFixture(t *testing.T, root, role, subscriptions,
 		}
 	}
 	for file, contents := range map[string]string{
-		"agents.yaml":         "same-name:\n  id: same-name\n  role: " + role + "\n  model: regular\n  intent: prompts/observer.md\n  subscriptions: " + subscriptions + "\n  emit_events: []\n  mock:\n    kind: python\n    module: mocks/observer.py\n",
+		"agents.yaml":         "same-name:\n  role: " + role + "\n  model: regular\n  intent: prompts/observer.md\n  subscriptions: " + subscriptions + "\n  emit_events: []\n  mock:\n    kind: python\n    module: mocks/observer.py\n",
 		"prompts/observer.md": prompt + "\n",
 		"mocks/observer.py":   "def handle(input):\n    " + body + "\n",
 	} {

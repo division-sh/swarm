@@ -57,13 +57,12 @@ func CopyReceiverMaterializationWithAgent(t testing.TB, agent string) string {
 	root := CopyForkReceiverBusinessMutationOwnership(t, false)
 	writeClosedVariantFile(t, root, "consumer/prompts/observer.md", "Observe the admitted item.\n")
 	writeClosedVariantFile(t, root, "consumer/agents.yaml", fmt.Sprintf(`%s:
-  id: %s
   role: observer
   model: regular
   intent: prompts/observer.md
   subscriptions: [receiver.seeded]
   emit_events: []
-`, agent, agent))
+`, agent))
 	return root
 }
 
