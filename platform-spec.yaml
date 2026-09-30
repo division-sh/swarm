@@ -927,12 +927,11 @@ contract_formats:
         Substitute the actual event name and rejected authored variant in this
         same message for each noncanonical no-fields spelling.
       cross_file_rule: |
-        Bare keys have file-specific meaning. In `events.yaml`, a bare key
-        declares an event with no fields. In `state.yaml`, a bare field is an
-        error: the field requires a type name or an initial literal (v3 §1.3).
-        In `types.yaml`, a bare named record and an empty mapping `{}` are both
-        errors: an empty named record has no use; declare an optional field as
-        `text?` instead. Do not share an empty-to-default coercion across files.
+        Bare-event admission is specific to `events.yaml`. State and
+        named-type declarations have their own admission owners; event
+        admission does not determine their valid forms. Do not infer those
+        forms from event grammar or introduce a shared empty-to-default
+        coercion across files.
       persistence: |
         Source-artifact persistence retains the exact authored member bytes
         and bundle hash. Admission does not rewrite bare keys to `null`, an
