@@ -2,7 +2,7 @@
 
 Issue: #2498, agent-g. Parent: #2407 R1.1.
 Baseline: `origin/master@21bff28c8f582b3d515c420ad299f963822504ec`.
-Phase: implementation approved, not runtime closure. Independent gate: [approved](https://github.com/division-sh/swarm/issues/2498#issuecomment-5901252923), with the following binding addendum recorded before implementation.
+Phase: corpus gate approved; implementation frozen at the runtime-defect stop below, not runtime closure. Independent gate: [approved](https://github.com/division-sh/swarm/issues/2498#issuecomment-5901252923), with the following binding addendum recorded before implementation.
 
 ## Approved gate addendum
 
@@ -23,6 +23,8 @@ Sibling inspection found two additional handler-only assumptions requiring class
 Canonical owners/consumers implicated: the shared typed fan-out readback/page/key policy; `PipelinePostgresOwner.ListFanOutIntents` and `PipelineSQLiteOwner.ListFanOutIntents`; runtime `ObserveFanOutRuntimePage`; apiv1 `runFanOutListHandler`; public OpenRPC `FanOutIntentKey`/`FanOutIntentReadback`/`run.fan_out.list`; and the CLI fan-out reader. No alternate queue, recovery interpreter, or new execution owner was discovered.
 
 Implementation is frozen under the recorded stop condition. Request lead disposition for the smallest existing-owner public deployment-readback correction (both origins, key ordering/pagination and authoritative API contract), or an explicitly tracked prerequisite. No runtime repair, compatibility, new endpoint, mutation qualification, full suite, PR, or closure claim is authorized/performed by this investigation. The numeric fixture and probe remain local WIP; the old #2008 worktree and external handover remain untouched. #2407 stays open. The independent corpus approval is preserved, but does not authorize this newly discovered runtime repair.
+
+Tracking: [implementation-stop ruling request](https://github.com/division-sh/swarm/issues/2498#issuecomment-5901504069); existing `invariant_suite_coverage` watchlist refined and merged on docs master at `70d6b39`. No new node or issue is created without lead disposition. This is an active blocker, not a completed manifestation or generic residual-risk waiver.
 
 Reproduction on the approved baseline plus audit-only commits:
 
