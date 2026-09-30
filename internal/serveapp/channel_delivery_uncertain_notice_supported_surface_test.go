@@ -221,3 +221,27 @@ func telegramHasActionPrefix(message map[string]any, label string) bool {
 	}
 	return false
 }
+
+func TestChannelDeliveryResendControlAssertions(t *testing.T) {
+	for _, tc := range []struct {
+		name, text string
+		want       bool
+	}{
+		{"exact", "Resend notice", true},
+		{"numbered", "Resend notice 01", true},
+		{"other_source", "Resend card 01", false},
+		{"unrelated", "Open inbox", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			message := map[string]any{"reply_markup": map[string]any{"inline_keyboard": []any{
+				[]any{map[string]any{"text": tc.text, "callback_data": "token"}},
+			}}}
+			if got := telegramHasActionPrefix(message, "Resend notice"); got != tc.want {
+				t.Fatalf("resend control %q matched=%t, want %t", tc.text, got, tc.want)
+			}
+		})
+	}
+	if telegramHasActionPrefix(nil, "Resend notice") {
+		t.Fatal("absent markup was mistaken for a resend control")
+	}
+}
