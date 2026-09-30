@@ -1,0 +1,17 @@
+diff --git a/internal/runtime/bus/delivery_planner.go b/internal/runtime/bus/delivery_planner.go
+index 06d722d11..46868117c 100644
+--- a/internal/runtime/bus/delivery_planner.go
++++ b/internal/runtime/bus/delivery_planner.go
+@@ -365,6 +365,12 @@ func (p deliveryPlanner) planAtGeneration(ctx context.Context, evt events.Event)
+ 		if err != nil {
+ 			return RoutePlan{}, err
+ 		}
++		if string(evt.Type()) == "scout/scout.completed" && len(routePlan.DeliveryIntents) > 0 {
++			for index := range localPlan.DeliveryIntents {
++				localPlan.DeliveryIntents[index].TargetBlueprint = routePlan.DeliveryIntents[0].TargetBlueprint
++				localPlan.DeliveryIntents[index].TargetOwnership = routePlan.DeliveryIntents[0].TargetOwnership
++			}
++		}
+ 		routePlan = composeIndependentPubsubBranch(routePlan, localPlan)
+ 		return projection.resolveRoutePlan(routePlan)
+ 	}

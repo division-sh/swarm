@@ -70,6 +70,57 @@ growth; the later test additions still require their own committed measurement.
 
 ## Remaining Mandatory Qualification
 
+### 2026-09-30 Final-Head Work In Progress
+
+The later default attempt at `cfb6b3b5f` passed the complete pipeline package
+(190.499s) and run-fork execution package (189.347s), then stopped in
+`local-runtime-bus-full`: the exact handoff test fixture omitted canonical
+`run_control_state`. Canonical admission DDL was added to that fixture, and the
+three affected cases pass three repetitions (0.375s). No permissive production
+schema detection or whole-suite credit follows.
+
+The expanded selected-context composition proof now passes race x3 (36.263s),
+including actual pipeline exclusion and gateway admission at the writer,
+active/no-child rollback, terminal race refusal without predecessor revival,
+postcommit cleanup/publication error with committed identity, and sibling-store
+isolation. Source, generation, suspension, generic-pause and terminal expectation
+races for all commands pass on both stores (race x3, 115.651s).
+
+`TestServedParityHarnessStandingServiceLifecycle` now includes concurrent public
+runtime.nuke behind a held standing operation, fresh child after reconstruction,
+and shutdown held until exact successor child work joins: PASS 9.274s on both
+stores. Its first new S16 run exposed retained predecessor suppression after a
+fresh reset. The existing staging owner now clears old-epoch suppression and
+publication preserves only freshly reconstructed durable suppression; direct
+controls pass race x3 (1.429s). The authoritative spec records this rule. The
+next failed shutdown observation used lookup after legitimate context withdrawal;
+the corrected oracle observes the exact retained child, not discoverability.
+
+Actual SQL rollback in all five public terminal/typed-invalid reset products
+passes both stores (101.925s), with unchanged exact predecessor public facts
+and the later lawful successor. Cancelled scheduler parking retains its exact
+transition and remains fenced until the callback joins (race x3, 1.073s).
+
+All nine bounded U1-U5 arms now have dual-store red execution and clean
+restoration receipts, recorded with exact patches, historical diffs, semantic
+attribution, raw hashes and rejected proof selections in
+`issue-2498-mutations/README.md`. Clean paired sequential/restart controls pass
+101.706s; nonzero readiness fields pass both stores x3 (3.631s). Mutation work
+never touched candidate production code.
+
+M20's preserved six-variant safety run FAILED its unchanged SQLite reverse-100
+deadline: one gather delivery was still in_progress after 20s; all 201 expected
+events existed. This concurrent run earns no safety closure. Isolated matched
+candidate/master reverse-100 controls pass (20.541s/24.517s total; reverse
+settlement 10.693s/14.433s). That comparison does not reconstruct the initial
+failure or establish a performance fix. The failure receipt is retained; no
+deadline, workload or runtime performance owner was changed. Complete isolated
+six-variant and final default qualification remain required.
+
+Master was re-fetched and remains `abdb07bfe`. API-spec passes (4.151s). None of
+these additional receipts is a final Post-Implementation Proof Audit or PR
+readiness claim.
+
 - Recheck current origin/master and measure the complete committed candidate
   complexity baseline without increasing either hotspot count.
 - Complete and explicitly map remaining S10-S17 barrier, cleanup,

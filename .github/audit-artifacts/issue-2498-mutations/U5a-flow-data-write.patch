@@ -1,0 +1,13 @@
+diff --git a/internal/store/internal/backend/agentpersistence/projection.go b/internal/store/internal/backend/agentpersistence/projection.go
+index d13a0aff6..ea8b6ae6e 100644
+--- a/internal/store/internal/backend/agentpersistence/projection.go
++++ b/internal/store/internal/backend/agentpersistence/projection.go
+@@ -293,7 +293,7 @@ func marshalPersistedAgentRuntimeDescriptor(cfg runtimeactors.AgentConfig, model
+ 		Mock:                 cfg.Mock,
+ 		Intent:               cfg.Intent,
+ 		Criteria:             append([]string(nil), cfg.Criteria...),
+-		FlowDataAccess:       append([]string(nil), cfg.FlowDataAccess...),
++		FlowDataAccess:       nil,
+ 		BudgetEnvelope:       cfg.BudgetEnvelope,
+ 	}
+ 	if !descExecutionModeMatchesBackend(llmBackend, desc.ExecutionMode) {

@@ -1,0 +1,15 @@
+diff --git a/internal/runtime/pipeline/delivery_target_ownership.go b/internal/runtime/pipeline/delivery_target_ownership.go
+index 5edca3228..c2c9e5527 100644
+--- a/internal/runtime/pipeline/delivery_target_ownership.go
++++ b/internal/runtime/pipeline/delivery_target_ownership.go
+@@ -289,6 +289,10 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
+ 	if blueprint.FlowInstance == "" {
+ 		return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver target blueprint requires an exact flow instance")
+ 	}
++	if flowID == "scout" && string(req.Event.Type()) == "scout.requested" {
++		blueprint.EntityID = req.Event.EntityID()
++		return events.NewMaterializingEntityTarget(blueprint)
++	}
+ 	existing, materializing, err := matchingDeliveryTargetOwnerCandidates(req.Source, blueprint, req.Candidates)
+ 	if err != nil {
+ 		return events.DeliveryTargetOwnership{}, err

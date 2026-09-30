@@ -131,6 +131,20 @@ func TestStandingResetNonExecutablePublicBothStores(t *testing.T) {
 					if !reflect.DeepEqual(before, captureFullLifecycleEvidence(t, p.rpc, standing.RunID)) {
 						t.Fatal("refused non-executable commands changed predecessor facts")
 					}
+					predecessorStatus := "completed"
+					if strings.HasPrefix(product, "validated-invalid") {
+						predecessorStatus = "running"
+					}
+					beforeRun := waitForFullLifecycleRunStatus(t, p.rpc, standing.RunID, predecessorStatus)
+					withStandingOperatorWriteFault(t, root, store, func() {
+						var refused standingRuntimePublicResult
+						if err := p.rpc.call(ctx, "standing.reset", map[string]any{"service_id": standing.Origin.ServiceID, "idempotency_key": "failed-no-child-reset"}, &refused); err == nil {
+							t.Fatalf("%s no-child reset ignored the actual SQL failure", product)
+						}
+					})
+					if !reflect.DeepEqual(beforeRun, waitForFullLifecycleRunStatus(t, p.rpc, standing.RunID, beforeRun.Status)) || !reflect.DeepEqual(before, captureFullLifecycleEvidence(t, p.rpc, standing.RunID)) {
+						t.Fatalf("%s no-child rollback changed exact predecessor facts", product)
+					}
 					var reset standingRuntimePublicResult
 					if err := p.rpc.call(ctx, "standing.reset", map[string]any{"service_id": standing.Origin.ServiceID, "idempotency_key": "reset-non-executable"}, &reset); err != nil {
 						t.Fatalf("%s public reset: %v\n%s", product, err, p.output.String())
