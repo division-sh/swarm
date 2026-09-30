@@ -3622,7 +3622,7 @@ handler_specification:
         the entity context for the entire handler.
       entity_creation:
         entity_id: Canonical receiving-flow primary entity identity derived from flow-instance/run context, not caller payload identity
-        initial_stage: From the schema.yaml stages entry with initial: true; markerless/stateless flows have no authored initial stage
+        initial_stage: 'From the schema.yaml stages entry with initial: true; markerless/stateless flows have no authored initial stage'
         flow_instance: Current flow instance path
         fields: Only explicit `initial:` values and admitted bindings materialize root fields at create_entity time.
           Other roots remain absent; declaration alone is not assignment evidence.
