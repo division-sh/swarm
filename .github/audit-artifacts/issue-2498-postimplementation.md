@@ -10,6 +10,24 @@ below supersedes the old final-head claim; exact repaired-head CI is required.
 
 ## CI Repair And Proof Supplement
 
+### Provisional PostgreSQL Throughput Acceptance
+
+The binding lead ruling on PR #2503, comment 5916830303, supersedes the earlier
+blanket no-relaxation advice only for PostgreSQL's exact 1,362-row settlement
+test. Its single non-resetting acceptance context is provisionally 240s; the
+performance objective and SQLite acceptance remain 180s. Actual exact-count and
+fully-settled times are logged against both ceilings. The workload, consumers,
+claims, exact counts, quiescence, clear summary, restart/readback/history and
+all other test/CI budgets remain unchanged.
+
+This is explicit performance-debt acceptance, not a performance repair or a
+product SLA change. #2394 remains open for activity-order serialization and
+guard overhead; #2353 LSF-057 retains both failed hosted receipts. Restoring
+180s requires matched hosted full-unit evidence with headroom. A 240s failure,
+non-progressing tail or other assertion failure requires diagnosis, not another
+extension or rerun-to-green. Required new-head hosted qualification and
+independent merge review remain outstanding at this amendment.
+
 CI run 36723873326 on `277641150` exposed the following concrete gaps. No test
 was skipped, made permissive, or assigned a longer deadline to hide a failure.
 
