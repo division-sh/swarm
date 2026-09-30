@@ -34,7 +34,6 @@ func WithInstanceDeclarations(t testing.TB, base *runtimecontracts.WorkflowContr
 	admitted.RootSchema = base.RootSchema
 	admitted.Nodes = base.Nodes
 	admitted.Events = base.Events
-	admitted.Agents = base.Agents
 	admitted.Tools = base.Tools
 	admitted.Policy = base.Policy
 	admitted.RootTypes = base.RootTypes

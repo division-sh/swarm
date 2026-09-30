@@ -226,9 +226,9 @@ func promoteDevScratchFixtureToStanding(t *testing.T, sourceRoot string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	updatedSchema := strings.Replace(string(schema), "mode: static", "mode: singleton\nactivation: standing", 1)
+	updatedSchema := strings.Replace(string(schema), "name: fulfillment", "name: fulfillment\nactivation: standing", 1)
 	if updatedSchema == string(schema) {
-		t.Fatalf("dev scratch fixture flow schema mode was not replaceable:\n%s", schema)
+		t.Fatalf("dev scratch fixture flow declaration was not replaceable:\n%s", schema)
 	}
 	if err := os.WriteFile(schemaPath, []byte(updatedSchema), 0o644); err != nil {
 		t.Fatal(err)

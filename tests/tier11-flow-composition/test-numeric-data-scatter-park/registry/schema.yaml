@@ -1,5 +1,4 @@
 name: registry
-mode: template
 stages:
   registered:
     initial: true
@@ -20,6 +19,4 @@ instance: item_id
 pins:
   inputs:
     events:
-      - event: item.registered
-        resolution:
-          mode: select-or-create
+      - item.registered

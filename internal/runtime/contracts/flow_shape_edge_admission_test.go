@@ -93,3 +93,44 @@ func TestConnectionResolutionClosedAdmission(t *testing.T) {
 		})
 	}
 }
+
+func TestEdgeResolutionPreservesPinInitialization(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	for _, mode := range []FlowInputResolutionMode{FlowInputResolutionModeCreate, FlowInputResolutionModeSelectOrCreate, FlowInputResolutionModeSelect} {
+		t.Run(FlowInputResolutionModeCode(mode), func(t *testing.T) {
+			bundle, err := LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyReceiverInitialization(t), DefaultPlatformSpecFile(repo))
+			if err != nil {
+				t.Fatal(err)
+			}
+			schema := *bundle.RootSchema
+			for i := range schema.Connect {
+				if schema.Connect[i].To == "account" && schema.Connect[i].Event == "account.ready" {
+					schema.Connect[i].Resolution = mode
+				}
+			}
+			bundle.RootSchema = &schema
+			bundle.FlowTree.Root.Schema = schema
+			if err := CompileWorkflowSemantics(bundle); err != nil {
+				t.Fatal(err)
+			}
+			err = bundle.ConnectionInputs().ValidateBindings()
+			if mode == FlowInputResolutionModeSelect {
+				if err == nil || !strings.Contains(err.Error(), "initialize requires a creating connection") {
+					t.Fatalf("select inherited initialization authority: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			pin, ok := bundle.FlowInputEventPin("account", "account.ready")
+			if !ok || !pin.Resolution().Empty() {
+				t.Fatal("initialization manufactured shared-pin selection policy")
+			}
+			values, err := pin.Initialization().Evaluate(map[string]any{"account_id": "one", "count": 0, "label": "kept", "active": false, "attributes": []any{}})
+			if err != nil || values["count"] != int64(0) || values["label"] != "kept" || values["active"] != false {
+				t.Fatalf("creating edge lost typed initialization: %#v %v", values, err)
+			}
+		})
+	}
+}

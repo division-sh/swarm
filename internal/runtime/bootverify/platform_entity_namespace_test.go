@@ -152,7 +152,7 @@ func TestRetiredReceiverSelectorsRejectEveryIngressShape(t *testing.T) {
 									text = strings.Replace(text, "    account.ready: {}", "    account.ready:\n      "+selector+":\n        by: {account_id: payload.account_id}", 1)
 								}
 								if !template && file == "account/schema.yaml" {
-									text = strings.Replace(text, "mode: template\ninstance: account_id\n", "mode: static\n", 1)
+									text = strings.Replace(text, "instance: account_id\n", "", 1)
 								}
 								if renamed {
 									text = strings.ReplaceAll(text, "account.ready", "account.renamed")
