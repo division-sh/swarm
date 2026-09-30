@@ -974,7 +974,7 @@ func seedDurableReplyConformanceTargetOwners(t *testing.T, ctx context.Context, 
 		if _, err := db.ExecContext(ctx, readinessQuery, readinessArgs...); err != nil {
 			t.Fatalf("seed reply conformance readiness %s: %v", owner.FlowInstance, err)
 		}
-		if _, err := db.ExecContext(ctx, query, runID, owner.EntityID, owner.FlowInstance, "active"); err != nil {
+		if _, err := db.ExecContext(ctx, query, runID, owner.EntityID, owner.FlowInstance, "pending"); err != nil {
 			t.Fatalf("seed reply conformance target owner %s: %v", owner.FlowInstance, err)
 		}
 	}

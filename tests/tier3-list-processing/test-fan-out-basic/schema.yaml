@@ -1,7 +1,6 @@
 stages:
   pending: {initial: true}
-  scanning: {}
-  done: {terminal: true}
+  scanning: {terminal: true}
 pins:
   inputs:
     events: [batch.submitted]
