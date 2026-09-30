@@ -3,6 +3,7 @@ package runtimepersistence_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecanonicaljson "github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -38,6 +40,10 @@ func TestDynamicFlowCreationSourceRevisionPublicationBothStores(t *testing.T) {
 					return item
 				}
 				original := load()
+				ownership, err := f.grant.InspectRunExecutionOwnership(f.ctx, f.runID)
+				if err != nil || ownership != runtimemanager.RunExecutionOwned {
+					t.Fatalf("pre-revision generation ownership: disposition=%v err=%v", ownership, err)
+				}
 				artifact := sourceartifactfixture.New("schema.yaml", []byte("name: revised-creation-proof\n"))
 				source := sourceartifactfixture.FactFor(artifact)
 				sourceartifactfixture.RequireArtifact(t, f.ctx, f.selected, artifact)
@@ -64,7 +70,11 @@ func TestDynamicFlowCreationSourceRevisionPublicationBothStores(t *testing.T) {
 				if revisionErr != nil {
 					t.Fatalf("source revision: %v", revisionErr)
 				}
+				// Revision may win after the early source check but before the
+				// transaction's exact generation fence. Both reject stale publication.
+				generationRefused := order == "concurrent" && errors.Is(publicationErr, runtimemanager.ErrRunExecutionNotOwned)
 				if publicationErr != nil &&
+					!generationRefused &&
 					!strings.Contains(publicationErr.Error(), "readiness source does not match persisted run") &&
 					!strings.Contains(publicationErr.Error(), "mutation log bundle source fact does not match active run") {
 					t.Fatalf("publication lost for an unrelated reason: %v", publicationErr)
@@ -85,6 +95,10 @@ func TestDynamicFlowCreationSourceRevisionPublicationBothStores(t *testing.T) {
 				}
 				wait(f.bus)
 				current := load()
+				ownership, err = f.grant.InspectRunExecutionOwnership(f.ctx, f.runID)
+				if err != nil || ownership != runtimemanager.RunExecutionOtherNormalSource {
+					t.Fatalf("revised run must be outside the still-current original grant: disposition=%v err=%v", ownership, err)
+				}
 				if !current.OwningRunSource.Matches(source) || !reflect.DeepEqual(current.Plan, original.Plan) {
 					t.Fatal("source revision implicitly rewrote the frozen creation plan")
 				}
