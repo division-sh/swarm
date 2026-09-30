@@ -1408,6 +1408,16 @@ seam_families:
       The retained served journey inspects the compiled connect plan while
       proving loop-cap and gate publication reaches its final consumer. Its
       diagnostics do not create routes or relax final-consumer assertions.
+  - id: connection_owned_policy_supported_surface_proof
+    layer: route_plan_authority
+    classification: valid_consumer
+    paths:
+      - internal/serveapp/connection_edge_policy_test.go
+    search_dimensions: [connect_route_plan]
+    notes: >
+      The real-binary two-store proof reads exact compiled edge plans, then
+      checks distinct receiver targets and claims through public readback
+      after restart. It does not create alternate route authority.
   - id: exact_fork_recipient_agreement_and_preservation
     layer: route_plan_authority
     classification: valid_consumer

@@ -597,7 +597,7 @@ func TestW2ProviderTriggerImportRejectsIntrinsicProjectionCollisionAtBinding(t *
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			source, catalog := importedSyntheticProjectionSource(t, tc.mint, true)
-			if _, err := SourceWithProviderTriggerEvents(source, catalog); err == nil || !strings.Contains(err.Error(), "field conversation_reference conflicts with receiver-owned resolution projection") {
+			if _, err := SourceWithProviderTriggerEvents(source, catalog); err == nil || !strings.Contains(err.Error(), "connection projection conflicts with producer") || !strings.Contains(err.Error(), "field conversation_reference") || !strings.Contains(err.Error(), strings.ReplaceAll(tc.name, "_", ".")) {
 				t.Fatalf("SourceWithProviderTriggerEvents error = %v, want imported projection collision", err)
 			}
 		})

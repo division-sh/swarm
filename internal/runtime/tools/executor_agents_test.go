@@ -16,6 +16,7 @@ import (
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 const toolTestRunID = "22222222-2222-4222-8222-222222222222"
@@ -120,7 +121,7 @@ func TestExecSchedulePreservesImportedTemplateAgentRoutingSource(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{FlowTree: runtimecontracts.FlowTree{
 		Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{flowID: &root.Children[0]},
 	}}
-	bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, flowID)
+	bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, canonicalrouting.CopyInstanceDeclarations(t, flowID))
 	source := toolTestSourceWithDeclaredAgent(t, bundle, agentID, flowID)
 	declarations := semanticview.AgentDeclarations(source)
 	if len(declarations) != 1 {

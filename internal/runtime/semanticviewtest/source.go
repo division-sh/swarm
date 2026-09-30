@@ -2,12 +2,13 @@ package semanticviewtest
 
 import (
 	"fmt"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 // InstanceField admits an explicit scalar identity for in-memory test sources.
@@ -21,10 +22,14 @@ func InstanceField(field string) runtimecontracts.TemplateInstanceField {
 
 // WithInstanceDeclarations loads the identity catalogs required by explicit
 // in-memory template fixtures. It does not infer or repair their flow shape.
-func WithInstanceDeclarations(t testing.TB, base *runtimecontracts.WorkflowContractBundle, flows ...string) *runtimecontracts.WorkflowContractBundle {
+func WithInstanceDeclarations(t testing.TB, base *runtimecontracts.WorkflowContractBundle, root string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	repo := canonicalrouting.RepoRoot(t)
-	admitted, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyInstanceDeclarations(t, flows...), runtimecontracts.DefaultPlatformSpecFile(repo))
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve semantic source fixture path")
+	}
+	repo := filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", ".."))
+	admitted, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 	if err != nil {
 		t.Fatal(err)
 	}

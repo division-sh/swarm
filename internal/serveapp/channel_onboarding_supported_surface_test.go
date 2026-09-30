@@ -1123,7 +1123,7 @@ func disableChannelOnboardingBusinessConsumers(t *testing.T, sourceRoot string) 
 	}
 	for i, from := range []string{".", "telegram-ingress"} {
 		connection, ok := connections[i].(map[string]any)
-		if !ok || len(connection) != 3 || connection["from"] != from || connection["to"] != "telegram-chat" || connection["event"] != "inbound.telegram.text_message" {
+		if !ok || len(connection) != 4 || connection["from"] != from || connection["to"] != "telegram-chat" || connection["event"] != "inbound.telegram.text_message" || connection["resolution"] != "select-or-create" {
 			t.Fatalf("unexpected onboarding business-consumer connection: %#v", connections[i])
 		}
 	}

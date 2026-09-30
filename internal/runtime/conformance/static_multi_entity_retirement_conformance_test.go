@@ -14,17 +14,16 @@ import (
 
 func TestStaticMultiEntityRetirementConformance(t *testing.T) {
 	tests := []struct {
-		name            string
-		handler         canonicalrouting.StaticRetirementHandler
-		declareEntityID bool
-		checkID         string
-		wantMessage     string
+		name        string
+		handler     canonicalrouting.StaticRetirementHandler
+		checkID     string
+		wantMessage string
 	}{
 		{
 			name:        "create_entity fails closed",
 			handler:     canonicalrouting.StaticRetirementCreate,
 			checkID:     "flow_boundary_create_entity_validation",
-			wantMessage: "static multi-row entity ownership is retired",
+			wantMessage: "caller-selected entity_id",
 		},
 		{
 			name:        "select_entity fails closed",
@@ -42,7 +41,7 @@ func TestStaticMultiEntityRetirementConformance(t *testing.T) {
 			name:        "missing acquisition materializing state fails closed",
 			handler:     canonicalrouting.StaticRetirementMaterialize,
 			checkID:     "flow_boundary_create_entity_validation",
-			wantMessage: "static multi-row entity ownership is retired",
+			wantMessage: "caller-selected entity_id",
 		},
 		{
 			name:    "missing acquisition non materializing handler is allowed",

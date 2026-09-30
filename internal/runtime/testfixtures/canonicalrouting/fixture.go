@@ -354,6 +354,18 @@ func AddRetiredStaticFlowForNegativeMutation(t testing.TB, root string, mutation
 	default:
 		t.Fatalf("unsupported retired static mutation %q", mutation)
 	}
+	writeClosedNegativeFile(t, root, "schema.yaml", `name: template-select-or-create
+pins:
+  inputs:
+    events: [account.requested, legacy.seen]
+  outputs:
+    events: [account.requested, legacy.seen]
+connect:
+  - {event: account.requested, from: ., to: producer}
+  - {event: account.ready, from: producer, to: account, resolution: select-or-create}
+  - {event: legacy.seen, from: ., to: legacy_static}
+`)
+	writeClosedNegativeFile(t, root, "events.yaml", "account.requested:\n  account_id: text\nlegacy.seen:\n  entity_id: uuid\n  legacy_id: text\n  amount: number\n")
 	writeClosedNegativeFile(t, root, "legacy_static/schema.yaml", `name: legacy_static
 stages:
   active: {initial: true}
@@ -362,10 +374,6 @@ pins:
   inputs:
     events:
       - legacy.seen
-`)
-	writeClosedNegativeFile(t, root, "legacy_static/events.yaml", `legacy.seen:
-  legacy_id: text
-  amount: number
 `)
 	writeClosedNegativeFile(t, root, "legacy_static/entities.yaml", `legacy_record:
   legacy_id:
@@ -382,6 +390,8 @@ pins:
     legacy.seen:
 `+handler+`      data_accumulation:
         writes:
+          - source_field: legacy_id
+            target_field: legacy_id
           - source_field: amount
             target_field: amount
 `)

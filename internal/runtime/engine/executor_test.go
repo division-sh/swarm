@@ -494,7 +494,7 @@ func sourceWithDeclarativeEmitExternalizationFlows(t testing.TB) semanticview.So
 			},
 		},
 	}
-	return mustCompileEngineSource(semanticviewtest.WithInstanceDeclarations(t, bundle, "component-scaffold"))
+	return mustCompileEngineSource(semanticviewtest.WithInstanceDeclarations(t, bundle, canonicalrouting.CopyInstanceDeclarations(t, "component-scaffold")))
 }
 
 func sourceWithPolicy(flowID string, values map[string]any) semanticview.Source {
@@ -6786,7 +6786,7 @@ func sourceWithChildOutputPin(t testing.TB) semanticview.Source {
 			},
 		},
 	}
-	return mustCompileEngineSource(semanticviewtest.WithInstanceDeclarations(t, bundle, "child"))
+	return mustCompileEngineSource(semanticviewtest.WithInstanceDeclarations(t, bundle, canonicalrouting.CopyInstanceDeclarations(t, "child")))
 }
 
 func sourceWithNestedStaticOutputPin() semanticview.Source {
@@ -6835,7 +6835,7 @@ func sourceWithChildOutputPinAndRootConnect(t testing.TB) semanticview.Source {
 			ByID: map[string]*runtimecontracts.FlowContractView{".": &root, "child": &root.Children[0]},
 		},
 	}
-	return mustCompileEngineSource(semanticviewtest.WithInstanceDeclarations(t, bundle, "child"))
+	return mustCompileEngineSource(semanticviewtest.WithInstanceDeclarations(t, bundle, canonicalrouting.CopyInstanceDeclarations(t, "child")))
 }
 
 func TestExecutor_DataAccumulationTargetPathWritesNestedEntityLeaf(t *testing.T) {

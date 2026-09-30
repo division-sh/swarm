@@ -246,7 +246,7 @@ func localReadinessFixture(t *testing.T, declarations int, frontier string) stri
 				inputs := doc["pins"].(map[string]any)["inputs"].(map[string]any)
 				var pins []any
 				for _, pin := range inputs["events"].([]any) {
-					if pin.(map[string]any)["event"] != "worker.inspect.requested" {
+					if pin != "worker.inspect.requested" {
 						pins = append(pins, pin)
 					}
 				}
