@@ -9,7 +9,7 @@ trigger:
 expected:
 
   handler_outcome: success
-  entity_state: spawned
+  entity_state: pending
   emitted_events:
     - flow.spawned
   flow_instance_created:

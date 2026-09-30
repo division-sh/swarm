@@ -1,7 +1,6 @@
 stages:
   active: {initial: true}
-  cleared: {}
-  done: {terminal: true}
+  cleared: {terminal: true}
 pins:
   inputs:
     events: [state.reset_requested]

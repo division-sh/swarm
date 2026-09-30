@@ -1,6 +1,4 @@
-stages:
-  pending: {initial: true}
-  done: {terminal: true}
+stages: []
 pins:
   inputs:
     events: [gates.clear_requested]

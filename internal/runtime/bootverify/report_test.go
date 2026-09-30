@@ -2016,7 +2016,7 @@ func TestRun_RejectsMigratedUnreachableStageWithReachabilityEvidence(t *testing.
 	if !report.HasErrors() {
 		t.Fatalf("expected invalid stage graph, got %#v", report.Findings)
 	}
-	if !reportContains(report.Errors(), "semantic_drift_unreachable_state", "declares stage review but no transition path from initial stage waiting reaches review") {
+	if !reportContains(report.Errors(), "semantic_drift_unreachable_state", "declares stage review but no lawful lifecycle path from initial stage waiting reaches review") {
 		t.Fatalf("expected semantic_drift_unreachable_state error, got %#v", report.Errors())
 	}
 	if !reportContains(report.Errors(), "semantic_drift_unreachable_state", "Reachable states: active, done, waiting") {
@@ -2033,7 +2033,7 @@ func TestRun_ErrorsWhenDeclaredStageIsUnreachable(t *testing.T) {
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "semantic_drift_unreachable_state", "declares stage review but no transition path from initial stage waiting reaches review") {
+	if !reportContains(report.Errors(), "semantic_drift_unreachable_state", "declares stage review but no lawful lifecycle path from initial stage waiting reaches review") {
 		t.Fatalf("expected hard semantic_drift_unreachable_state error for staged lifecycle, got errors=%#v warnings=%#v", report.Errors(), report.Warnings())
 	}
 	if reportContains(report.Warnings(), "semantic_drift_unreachable_state", "review") {

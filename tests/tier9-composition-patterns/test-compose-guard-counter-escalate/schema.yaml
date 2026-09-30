@@ -1,7 +1,4 @@
-stages:
-  active: {initial: true}
-  done: {terminal: true}
-  escalated: {terminal: true}
+stages: []
 pins:
   inputs:
     events:

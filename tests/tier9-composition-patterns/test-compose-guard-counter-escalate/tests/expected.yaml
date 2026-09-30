@@ -1,13 +1,13 @@
 trigger:
   event: retry.requested
   payload:
-  entity_state_before: active
+  entity_state_before: pending
   entity_fields_before:
     retry_count: 3
 expected:
 
   handler_outcome: escalate
-  entity_state: active
+  entity_state: pending
   emitted_events: [limit.reached]
 
 conformance:

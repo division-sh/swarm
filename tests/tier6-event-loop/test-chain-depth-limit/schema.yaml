@@ -1,8 +1,5 @@
 name: test-chain-depth-limit
-stages:
-  pending: {initial: true}
-  processing: {}
-  done: {terminal: true}
+stages: []
 pins:
   inputs:
     events: [chain.start]

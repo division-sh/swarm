@@ -4,7 +4,6 @@ node-1:
   produces: [chain.e1]
   event_handlers:
     chain.start:
-      advances_to: processing
       emit: chain.e1
 
 node-2:

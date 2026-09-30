@@ -24,7 +24,7 @@ func TestGuardTerminationVerifiedExecutionAndRestartBothStores(t *testing.T) {
 	} {
 		files := map[string]string{
 			"schema.yaml":   "stages:\n  ready: {initial: true}\n  killed: {terminal: true}\npins:\n  inputs:\n    events: [kill]\n",
-			"events.yaml":   "kill: {}\n",
+			"events.yaml":   "kill:\n",
 			"entities.yaml": "test_entity:\n  marker: text\n",
 			"nodes.yaml":    "router:\n  execution_type: system_node\n  subscribes_to: [kill]\n  event_handlers:\n    kill:\n" + tc.guard + "      data_accumulation:\n        writes:\n          - {target_field: marker, value: skipped}\n",
 		}
