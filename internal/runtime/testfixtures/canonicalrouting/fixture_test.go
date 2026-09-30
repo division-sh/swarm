@@ -53,6 +53,18 @@ func TestCanonicalPositiveFixtureOwnerSetIsClosed(t *testing.T) {
 	}
 }
 
+func TestNumericFeedFixtureLoadsAndVerifies(t *testing.T) {
+	const root = "tests/tier11-flow-composition/test-numeric-data-scatter-park"
+	Prove(t, ArtifactID("tests/tier11-flow-composition/test-numeric-data-scatter-park"))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(RepoRoot(t), filepath.Join(RepoRoot(t), root), runtimecontracts.DefaultPlatformSpecFile(RepoRoot(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findings := runtimebootverify.Run(context.Background(), semanticview.Wrap(bundle), runtimebootverify.Options{}).HardInvalidities(); len(findings) != 0 {
+		t.Fatalf("numeric fixture hard invalidities: %#v", findings)
+	}
+}
+
 func TestCanonicalRoutingExamplesLoadAndVerify(t *testing.T) {
 	Prove(t, RootIngress, ParentConnect, TemplateSelectExisting, TemplateSelectOrCreate, TemplateReply, TemplateCreateMintedKey, FanInStream, FanInBarrier, HarnessInjection)
 	for _, name := range canonicalExampleNames() {

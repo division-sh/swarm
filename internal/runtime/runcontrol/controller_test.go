@@ -264,6 +264,10 @@ func (s *fakeRunControlStore) RunDispatchBlocked(context.Context, string) (bool,
 	return false, nil
 }
 
+func (*fakeRunControlStore) RunDispatchParked(context.Context, string) (bool, error) {
+	return false, nil
+}
+
 type fakeRunControlQueue struct {
 	called            bool
 	calls             int

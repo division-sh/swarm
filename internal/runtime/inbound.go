@@ -154,18 +154,26 @@ func (g *InboundGateway) SetChannelPlans(plans []packs.SatisfactionPlan) {
 }
 
 func (g *InboundGateway) CloseStandingServiceAdmission(serviceID string) error {
+	_, err := g.FenceStandingServiceAdmission(serviceID)
+	return err
+}
+
+// FenceStandingServiceAdmission returns whether this operation withdrew an
+// open gate, so rollback cannot reopen a previously unavailable service.
+func (g *InboundGateway) FenceStandingServiceAdmission(serviceID string) (bool, error) {
 	if g == nil {
-		return nil
+		return false, nil
 	}
 	serviceID = strings.TrimSpace(serviceID)
 	if serviceID == "" {
-		return fmt.Errorf("standing service_id is required")
+		return false, fmt.Errorf("standing service_id is required")
 	}
 	g.standingAdmissionMu.Lock()
 	defer g.standingAdmissionMu.Unlock()
 	gate := g.standingAdmissionLocked(serviceID)
+	wasOpen := !gate.Closed()
 	gate.Close()
-	return nil
+	return wasOpen, nil
 }
 
 func (g *InboundGateway) ReopenStandingServiceAdmission(serviceID string) error {

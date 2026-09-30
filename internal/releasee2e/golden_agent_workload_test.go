@@ -464,10 +464,11 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 }
 
 type goldenStoreSelection struct {
-	name         string
-	configYAML   string
-	passwordEnv  string
-	diagnosticDB *sql.DB
+	name                string
+	configYAML          string
+	passwordEnv         string
+	diagnosticDB        *sql.DB
+	inspectionConnector *pq.Connector
 }
 
 func goldenReleaseRoot(t *testing.T) string {
@@ -547,7 +548,7 @@ database:
   sslmode: %s
   pool_size: 5
 `, strconv.Quote(config.Host), config.Port, strconv.Quote(databaseName), strconv.Quote(config.User), goldenPostgresPass, strconv.Quote(sslMode))
-	return goldenStoreSelection{name: "postgres", configYAML: configYAML, passwordEnv: config.Password, diagnosticDB: diagnosticDB}
+	return goldenStoreSelection{name: "postgres", configYAML: configYAML, passwordEnv: config.Password, diagnosticDB: diagnosticDB, inspectionConnector: connector}
 }
 
 func goldenDatabaseName(t *testing.T) string {

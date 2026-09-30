@@ -1,0 +1,13 @@
+diff --git a/internal/runtime/bus/routing_derivation.go b/internal/runtime/bus/routing_derivation.go
+index 9357c07ea..47b5c4c69 100644
+--- a/internal/runtime/bus/routing_derivation.go
++++ b/internal/runtime/bus/routing_derivation.go
+@@ -608,7 +608,7 @@ func (rt *RouteTable) addFlowInstanceRouteLocked(req FlowInstanceRouteMaterializ
+ 			if err != nil {
+ 				return false, nil, fmt.Errorf("materialize route subscriber agent name: %w", err)
+ 			}
+-			subscriberID = name.AgentID
++			subscriberID = ""
+ 		}
+ 		recipient, err := subscriberRecipient(subscriberTemplate.Kind, subscriberID, subscriberTemplate.HandlerNode)
+ 		if err != nil {

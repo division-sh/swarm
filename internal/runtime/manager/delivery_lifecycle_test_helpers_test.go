@@ -221,6 +221,9 @@ func newManagerDeliveryTestStore(t *testing.T) *managerDeliveryTestStore {
 	if err := deliveryfixture.CreateSQLiteDeadLetterSchema(context.Background(), db); err != nil {
 		t.Fatalf("create manager delivery-dependent schema: %v", err)
 	}
+	if err := deliveryfixture.CreateSQLiteRunAdmissionSchema(context.Background(), db); err != nil {
+		t.Fatalf("create manager delivery run admission schema: %v", err)
+	}
 	adapter, err := deliveryfixture.NewAdapter(deliveryfixture.DialectSQLite)
 	if err != nil {
 		t.Fatalf("create manager delivery adapter: %v", err)

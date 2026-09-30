@@ -320,8 +320,201 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 	}
 	requireServedParitySettlementPostconditionsWithDebug(t, secondEndpoint, db, string(backend), firstRunID, servedparity.MustScenario(servedparity.ScenarioStandingServiceResetLifecycle), debugRun(firstRunID))
 	requireServedParitySettlementPostconditionsWithDebug(t, secondEndpoint, db, string(backend), reset.RunID, servedparity.MustScenario(servedparity.ScenarioStandingServiceResetLifecycle), debugRun(reset.RunID))
-	if code := second.stop(); code != 0 {
-		t.Fatalf("%s second standing serve exit = %d", backend, code)
+	assertServedStandingResetAndShutdownJoin(t, backend, second, secondManager, secondEndpoint, db, reset, freshOwner)
+}
+
+func assertServedStandingResetAndShutdownJoin(t *testing.T, backend servedparity.Backend, process *serveRuntimeTestProcess, manager *runtimepkg.RuntimeContextManager, endpoint string, db *sql.DB, current servedStandingOperationResult, predecessor worklifetime.Occurrence) {
+	t.Helper()
+	origin, err := runtimerunlifecycle.StandingGenerationRunOrigin(current.ServiceID, current.Generation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	held, err := manager.BeginStandingRunRecovery(context.Background(), current.RunID, origin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = held.Done() })
+	suspend := startServedStandingOperation(endpoint, "standing.suspend", current.ServiceID, "suspend-before-process-reset-"+string(backend))
+	waitForServedStandingFence(t, predecessor)
+	resetDone := make(chan servedJSONRPCEnvelope, 1)
+	go func() {
+		resetDone <- requestServedJSONRPCWithTimeout(t, endpoint, "runtime.nuke", map[string]any{
+			"include_source_artifacts": false, "idempotency_key": "process-reset-after-standing-" + string(backend),
+		}, 15*time.Second)
+	}()
+	select {
+	case outcome := <-suspend:
+		t.Fatalf("standing mutation passed held child: %+v", outcome)
+	case outcome := <-resetDone:
+		t.Fatalf("process reset passed unsettled standing mutation: %+v", outcome)
+	default:
+	}
+	assertServedStandingState(t, db, string(backend), current.ServiceID, current.RunID, current.Generation, "active", "running")
+	if err := held.Done(); err != nil {
+		t.Fatal(err)
+	}
+	suspended := waitForServedStandingOperation(t, suspend, backend, "standing.suspend before process reset")
+	if suspended.RunID != current.RunID || suspended.Generation != current.Generation || suspended.EffectiveState != "suspended" {
+		t.Fatalf("standing mutation lost exact identity across process reset: %+v", suspended)
+	}
+	select {
+	case outcome := <-resetDone:
+		if outcome.Error != nil {
+			t.Fatalf("process reset after standing join: %+v", outcome.Error)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("process reset failed to settle after exact standing child joined")
+	}
+	serviceID, runID, generation := loadServedStandingOwner(t, db, string(backend))
+	if serviceID != current.ServiceID || generation != 1 {
+		t.Fatalf("fresh epoch did not reconstruct the declared generation: %s/%s/%d", serviceID, runID, generation)
+	}
+	assertServedStandingState(t, db, string(backend), serviceID, runID, generation, "active", "running")
+	use, lookup, err := manager.AcquireIngress(context.Background(), "chat", "telegram")
+	if err != nil || use == nil || !lookup.Found {
+		t.Fatalf("reconstructed standing ingress unavailable: lookup=%+v err=%v", lookup, err)
+	}
+	owner, found := worklifetime.OccurrenceFromContext(use.WorkContext())
+	if err := use.Done(); err != nil {
+		t.Fatal(err)
+	}
+	if !found || owner == nil || owner == predecessor {
+		t.Fatal("process reset reused the retired standing child")
+	}
+	assertServedStandingInvalidChildCommands(t, backend, manager, endpoint, db, serviceID)
+	resetAgain := requestServedJSONRPCWithTimeout(t, endpoint, "runtime.nuke", map[string]any{
+		"include_source_artifacts": false, "idempotency_key": "process-reset-after-invalid-compositions-" + string(backend),
+	}, 15*time.Second)
+	if resetAgain.Error != nil {
+		t.Fatalf("fresh reset after invalid composition proof: %+v", resetAgain.Error)
+	}
+	serviceID, runID, generation = loadServedStandingOwner(t, db, string(backend))
+	use, lookup, err = manager.AcquireIngress(context.Background(), "chat", "telegram")
+	if err != nil || use == nil || !lookup.Loaded() {
+		t.Fatalf("second fresh reconstruction unavailable: lookup=%+v err=%v", lookup, err)
+	}
+	previousOwner := owner
+	owner, found = worklifetime.OccurrenceFromContext(use.WorkContext())
+	if err := use.Done(); err != nil {
+		t.Fatal(err)
+	}
+	if !found || owner == nil || owner == previousOwner {
+		t.Fatal("invalid-composition cleanup reused the retired child")
+	}
+	origin, err = runtimerunlifecycle.StandingGenerationRunOrigin(serviceID, generation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shutdownWork, err := manager.BeginStandingRunRecovery(context.Background(), runID, origin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = shutdownWork.Done() })
+	stopped := make(chan int, 1)
+	go func() { stopped <- process.stop() }()
+	waitForServedStandingFence(t, owner)
+	select {
+	case code := <-stopped:
+		t.Fatalf("shutdown returned before exact standing work joined: exit=%d", code)
+	default:
+	}
+	if err := shutdownWork.Done(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case code := <-stopped:
+		if code != 0 {
+			t.Fatalf("%s standing shutdown exit = %d", backend, code)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("shutdown did not complete after standing work joined")
+	}
+}
+
+func assertServedStandingInvalidChildCommands(t *testing.T, backend servedparity.Backend, manager *runtimepkg.RuntimeContextManager, endpoint string, db *sql.DB, serviceID string) {
+	t.Helper()
+	use, target, err := manager.AcquireStandingService(context.Background(), serviceID)
+	if err != nil || use == nil {
+		t.Fatalf("select invalid-composition proof owner: %v", err)
+	}
+	defer func() {
+		if err := use.Done(); err != nil {
+			t.Error(err)
+		}
+	}()
+	ctx, rt := use.WorkContext(), use.Runtime()
+	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.RuntimeScope(rt.Options.RuntimeInstanceID))
+	expected, found, err := rt.Pipeline.LoadReconciledStandingService(ctx, runtimepipeline.StandingServiceCandidate{
+		ServiceID: serviceID, FlowPath: target.FlowPath, InstanceID: target.InstanceID, EntityID: target.EntityID,
+		Source: use.Context.SourceArtifactFact,
+	})
+	if err != nil || !found {
+		t.Fatalf("capture invalid-composition predecessor: found=%t err=%v", found, err)
+	}
+	refuse := func(product, effective, state string) {
+		t.Helper()
+		for _, command := range []string{"suspend", "resume", "reset"} {
+			result := requestServedJSONRPC(t, endpoint, "standing."+command, map[string]any{
+				"service_id": serviceID, "idempotency_key": "invalid-child-" + product + "-" + command,
+			})
+			if result.Error == nil {
+				t.Fatalf("public %s accepted %s child composition: %+v", command, product, result.Result)
+			}
+			assertServedStandingState(t, db, string(backend), serviceID, expected.RunID, expected.Generation, effective, state)
+		}
+	}
+	transition, err := manager.BeginStandingServiceOperation(ctx, expected, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := transition.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	refuse("fenced", "active", "running")
+	if err := transition.Restore(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.InboundGateway.ReopenStandingServiceAdmission(serviceID); err != nil {
+		t.Fatal(err)
+	}
+	suspended, err := rt.Pipeline.SuspendStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: serviceID, Expected: &expected})
+	if err != nil || suspended.CommittedMutation != runtimerunlifecycle.MutationApplied {
+		t.Fatalf("create explicit durable suspended/live-child counterexample: result=%+v err=%v", suspended, err)
+	}
+	refuse("non-executable-live", "suspended", "paused")
+	transition, err = manager.BeginStandingServiceTransition(ctx, serviceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := transition.Retire(ctx); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := rt.Pipeline.ResumeStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: serviceID, Expected: &suspended})
+	if err != nil || resumed.CommittedMutation != runtimerunlifecycle.MutationApplied {
+		t.Fatalf("create explicit durable active/missing-child counterexample: result=%+v err=%v", resumed, err)
+	}
+	refuse("active-missing", "active", "running")
+}
+
+func waitForServedStandingFence(t *testing.T, owner worklifetime.Occurrence) {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		lease, err := owner.Begin(context.Background())
+		if errors.Is(err, worklifetime.ErrAdmissionFenced) || errors.Is(err, worklifetime.ErrRetired) {
+			return
+		}
+		if err != nil {
+			t.Fatalf("observe exact standing fence: %v", err)
+		}
+		if err := lease.Done(); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-deadline:
+			t.Fatal("standing operation did not fence exact child")
+		case <-time.After(time.Millisecond):
+		}
 	}
 }
 

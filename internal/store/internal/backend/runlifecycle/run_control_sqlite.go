@@ -13,6 +13,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	storestandingdisposition "github.com/division-sh/swarm/internal/store/internal/backend/standingdisposition"
 	"github.com/google/uuid"
 )
@@ -47,6 +48,13 @@ func (s *RunLifecycleSQLiteOwner) RunDispatchBlocked(ctx context.Context, runID 
 		return false, fmt.Errorf("load sqlite run dispatch control state: %w", err)
 	}
 	return blocked, nil
+}
+
+func (s *RunLifecycleSQLiteOwner) RunDispatchParked(ctx context.Context, runID string) (bool, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return false, err
+	}
+	return runstate.DispatchParked(ctx, s.backend, false, runID)
 }
 
 func (s *RunLifecycleSQLiteOwner) runControlTransition(ctx context.Context, req runtimeruncontrol.TransitionRequest, action string) (runtimeruncontrol.StoreTransition, error) {
@@ -190,19 +198,20 @@ func (s *RunLifecycleSQLiteOwner) continueRunControlTx(ctx context.Context, tx *
 	if err != nil {
 		return runtimeruncontrol.State{}, err
 	}
-	if lifecycleState != runtimerunlifecycle.StatePaused {
+	if lifecycleState != runtimerunlifecycle.StatePaused || state.ControlStatus != "paused" {
 		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrNotPaused, RunID: state.RunID, CurrentStatus: state.Status}
+	}
+	if err := requireGenericContinueAuthority(ctx, tx, false, state); err != nil {
+		return runtimeruncontrol.State{}, err
 	}
 	if _, err := (sqliteRunLifecycleMutation{store: s, tx: tx, attempt: attempt}).TransitionActive(ctx, runtimerunlifecycle.ActiveTransitionRequest{RunID: state.RunID, State: runtimerunlifecycle.StateRunning}); err != nil {
 		return runtimeruncontrol.State{}, fmt.Errorf("continue sqlite run lifecycle: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO run_control_state (run_id, control_status, reason, controlled_by, updated_at, paused_at, stopped_at)
-		VALUES (?, 'running', ?, ?, ?, NULL, NULL)
-		ON CONFLICT(run_id) DO UPDATE SET
-			control_status = 'running', reason = excluded.reason, controlled_by = excluded.controlled_by,
-			updated_at = excluded.updated_at, stopped_at = NULL
-	`, state.RunID, sqliteNullableString(req.Reason), req.ControlledBy, req.Now.UTC()); err != nil {
+		UPDATE run_control_state SET control_status = 'running', reason = ?, controlled_by = ?,
+			updated_at = ?, paused_at = NULL, stopped_at = NULL
+		WHERE run_id = ? AND control_status = 'paused'
+	`, sqliteNullableString(req.Reason), req.ControlledBy, req.Now.UTC(), state.RunID); err != nil {
 		return runtimeruncontrol.State{}, fmt.Errorf("persist sqlite run continue control state: %w", err)
 	}
 	state.Status = string(runtimerunlifecycle.StateRunning)

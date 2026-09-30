@@ -1,4 +1,4 @@
-package pipeline
+package runlifecycle
 
 import "testing"
 
@@ -43,8 +43,12 @@ func TestClassifyStandingRestartTotalStateProduct(t *testing.T) {
 		{name: "terminal orphaned wins over orphaned desired state", mutate: func(f *StandingRestartFact) {
 			f.DeclarationPresent, f.EffectiveState, f.RunState = false, "orphaned", "cancelled"
 		}, wantKind: StandingRestartTerminalOrphaned, wantRepair: StandingRestartRestoreThenReset},
-		{name: "running suspended invalid", mutate: func(f *StandingRestartFact) { f.EffectiveState, f.OperatorOverride = "suspended", "suspended" }, wantKind: StandingRestartInvalidCurrent, wantRepair: StandingRestartReset},
-		{name: "running orphan invalid", mutate: func(f *StandingRestartFact) { f.DeclarationPresent, f.EffectiveState = false, "orphaned" }, wantKind: StandingRestartInvalidCurrent, wantRepair: StandingRestartRestoreThenReset},
+		{name: "running suspended invalid", mutate: func(f *StandingRestartFact) {
+			f.EffectiveState, f.OperatorOverride = "suspended", "suspended"
+		}, wantKind: StandingRestartInvalidCurrent, wantRepair: StandingRestartReset},
+		{name: "running orphan invalid", mutate: func(f *StandingRestartFact) {
+			f.DeclarationPresent, f.EffectiveState = false, "orphaned"
+		}, wantKind: StandingRestartInvalidCurrent, wantRepair: StandingRestartRestoreThenReset},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

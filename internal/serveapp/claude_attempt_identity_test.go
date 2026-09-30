@@ -93,7 +93,7 @@ type claudeAttemptProofStore interface {
 	runtimebus.ActiveFlowInstanceDescriptorLister
 	runtimebus.SelectedRunTargetOwnerLister
 	runtimepipeline.WorkflowInstancePersistenceReader
-	runtimepipeline.StandingRestartDispositionReader
+	runtimerunlifecycle.StandingRestartDispositionReader
 	runtimebus.PreparedPublishEventReader
 	runtimebus.TargetFailureDeadLetterRecorder
 	runtimebus.RunOriginReader

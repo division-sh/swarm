@@ -437,8 +437,8 @@ func TestServeRuntimeContextStandingTargetsPreservesNonExecutableDeclarations(t 
 		[]runtimepkg.StandingTarget{active},
 		[]runtimepkg.StandingTarget{{ServiceID: active.ServiceID, Provider: active.Provider}, stopped},
 		[]runtimepkg.StandingActivation{
-			{ServiceID: active.ServiceID, RestartDisposition: runtimepipeline.StandingRestartDisposition{Kind: runtimepipeline.StandingRestartActiveIntrinsic}},
-			{ServiceID: stopped.ServiceID, RestartDisposition: runtimepipeline.StandingRestartDisposition{Kind: runtimepipeline.StandingRestartTerminalDeclared}},
+			{ServiceID: active.ServiceID, RestartDisposition: storerunlifecycle.StandingRestartDisposition{Kind: storerunlifecycle.StandingRestartActiveIntrinsic}},
+			{ServiceID: stopped.ServiceID, RestartDisposition: storerunlifecycle.StandingRestartDisposition{Kind: storerunlifecycle.StandingRestartTerminalDeclared}},
 		},
 	)
 	if len(got) != 2 {
@@ -2539,6 +2539,39 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 		t.Fatalf("%s queued event.publish result = %#v, want existing paused run", rt.Backend, queued)
 	}
 	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, runID, queued.EventID, "node", identitytest.RootNode(t, "item-observer").Key(), "pending", 1)
+	waitCtx, cancelWait := context.WithTimeout(servedControlProofAuthorActivityContext(t, rt), 5*time.Second)
+	defer cancelWait()
+	requireNoServedDeliveryStatusDuring(t, rt.DB, rt.Backend, queued.EventID, "node", "item-observer", "delivered", 250*time.Millisecond)
+	var owner runtimepipelineobligation.Store
+	if rt.SQLite != nil {
+		owner = rt.SQLite.PipelineObligations()
+	} else {
+		owner = rt.Postgres.PipelineObligations()
+	}
+	// Use the canonical owner to establish handed-only debt explicitly; the
+	// public publication above remains unhanded while the run is paused.
+	work, err := owner.ClaimEvent(waitCtx, queued.EventID, runtimepipelineobligation.PurposePublication)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Settle(waitCtx, work.Claim, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
+		t.Fatal(err)
+	}
+	requireServedDirectivePipelineReceiptCount(t, rt, queued.EventID, 1)
+	summary, err := owner.SummarizeRun(waitCtx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.HasOpenWork() || summary.TerminalNonSuccess != 0 {
+		t.Fatalf("handed-only public continue has event-level work: %+v", summary)
+	}
+	synchronizer, ok := rt.Runtime.Bus.DeliveryContinuationOwner().(interface{ Synchronize(context.Context) error })
+	if !ok {
+		t.Fatal("public handed-only proof requires the real running continuation owner")
+	}
+	if err := synchronizer.Synchronize(waitCtx); err != nil {
+		t.Fatal(err)
+	}
 	requireNoServedDeliveryStatusDuring(t, rt.DB, rt.Backend, queued.EventID, "node", "item-observer", "delivered", 250*time.Millisecond)
 
 	continueKey := keyPrefix + "-run-continue"

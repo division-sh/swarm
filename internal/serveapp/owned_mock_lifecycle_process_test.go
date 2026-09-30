@@ -35,17 +35,18 @@ func TestOwnedMockLifecycleProcessEntry(t *testing.T) {
 		t.Skip("internal retained lifecycle child; launched by its parent proof")
 	}
 	var request struct {
-		ConfigPath string
-		Source     string
-		Store      string
-		Dev        bool
-		APIPort    int
-		Token      string
+		ConfigPath    string
+		Source        string
+		Store         string
+		Dev           bool
+		APIPort       int
+		Token         string
+		ShutdownGrace time.Duration
 	}
 	if err := json.Unmarshal([]byte(raw), &request); err != nil {
 		t.Fatal(err)
 	}
-	if request.Token == "" || request.APIPort < 0 || request.APIPort > 65535 {
+	if request.Token == "" || request.APIPort < 0 || request.APIPort > 65535 || request.ShutdownGrace <= 0 {
 		t.Fatal("internal lifecycle child requires a valid listener port and exact parent auth facts")
 	}
 	root, err := os.Getwd()
@@ -61,7 +62,7 @@ func TestOwnedMockLifecycleProcessEntry(t *testing.T) {
 	opts.APIListenAddr, opts.MCPListenAddr = fmt.Sprintf("127.0.0.1:%d", request.APIPort), "127.0.0.1:0"
 	opts.Output, opts.ErrorOutput = os.Stdout, os.Stderr
 	opts.NoColor, opts.SelfCheck = true, true
-	opts.ShutdownGrace = 2 * time.Second
+	opts.ShutdownGrace = request.ShutdownGrace
 	t.Log("proof_surface=H internal retained mock lifecycle; not public serve or private test")
 	code, err := runOwnedMockLifecycle(ctx, root, root, opts,
 		apiv1.AuthTokenResolution{Tokens: []string{request.Token}, Explicit: true, Source: "internal-lifecycle-parent"})

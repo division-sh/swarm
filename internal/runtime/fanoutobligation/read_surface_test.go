@@ -10,6 +10,33 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
+func TestDeploymentFanOutReadbackPreservesOriginBundle(t *testing.T) {
+	for _, status := range []Status{StatusOpen, StatusClosed} {
+		t.Run(string(status), func(t *testing.T) {
+			at := time.Now().UTC()
+			request := deploymentRequest()
+			intent := Intent{Request: request, Source: request.Source, Status: status, NextChunkSize: InitialChunkSize, CreatedAt: at, UpdatedAt: at}
+			if status == StatusClosed {
+				intent.Cursor = request.Cardinality
+			}
+			if err := intent.Validate(); err != nil {
+				t.Fatal(err)
+			}
+			row, err := intent.ReadbackAt(at)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if row.BundleHash != request.Deployment.BundleHash {
+				t.Errorf("deployment readback lost its origin bundle: got %q want %q (handler plan=%q)", row.BundleHash, request.Deployment.BundleHash, request.PlanRef.BundleHash)
+			}
+			page := ListPage{RunID: request.Key.RunID, RunStatus: "paused", ObservedAt: at, Order: ListIdentityOrder, Intents: []IntentReadback{row}}
+			if err := page.Validate(ListQuery{RunID: request.Key.RunID}); err != nil {
+				t.Errorf("valid deployment feed became an invalid public page: %v", err)
+			}
+		})
+	}
+}
+
 func TestFanOutReadbackStateAndUnavailableMetrics(t *testing.T) {
 	now := time.Now().UTC()
 	request := validIntentRequest(t)

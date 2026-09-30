@@ -67,6 +67,14 @@ func RequireSQLite(t testing.TB, ctx context.Context, db *sql.DB, fixture Fixtur
 // CreateSQLiteScenarioSchema supports focused fixtures that do not bootstrap
 // the full runtime schema but still seed runs through this lifecycle fixture.
 func CreateSQLiteScenarioSchema(ctx context.Context, db *sql.DB) error {
+	return createScenarioSchema(ctx, db, DialectSQLite)
+}
+
+func CreatePostgresScenarioSchema(ctx context.Context, db *sql.DB) error {
+	return createScenarioSchema(ctx, db, DialectPostgres)
+}
+
+func createScenarioSchema(ctx context.Context, db *sql.DB, dialect Dialect) error {
 	if db == nil {
 		return errors.New("scenario run fixture requires database")
 	}
@@ -85,6 +93,12 @@ func CreateSQLiteScenarioSchema(ctx context.Context, db *sql.DB) error {
 			member_count INTEGER NOT NULL, total_bytes INTEGER NOT NULL, created_at TIMESTAMP NOT NULL
 		)`,
 	} {
+		if dialect == DialectPostgres {
+			ddl = strings.ReplaceAll(ddl, " BLOB", " BYTEA")
+			for _, column := range []string{"run_id", "trigger_event_id", "origin_service_id", "forked_from_run_id", "forked_from_event_id", "continued_as_run_id"} {
+				ddl = strings.ReplaceAll(ddl, column+" TEXT", column+" UUID")
+			}
+		}
 		if _, err := db.ExecContext(ctx, ddl); err != nil {
 			return fmt.Errorf("create scenario run fixture schema: %w", err)
 		}
@@ -168,6 +182,13 @@ func PostgresTransitionActiveRunInMutation(
 	request runtimerunlifecycle.ActiveTransitionRequest,
 ) (runtimerunlifecycle.MutationDisposition, error) {
 	return (sqlMutation{tx: tx, dialect: DialectPostgres}).TransitionActive(ctx, request)
+}
+
+func TransitionActive(ctx context.Context, db *sql.DB, dialect Dialect, request runtimerunlifecycle.ActiveTransitionRequest) error {
+	return runMutation(ctx, db, dialect, func(ctx context.Context, tx *sql.Tx) error {
+		_, err := (sqlMutation{tx: tx, dialect: dialect}).TransitionActive(ctx, request)
+		return err
+	})
 }
 
 func PostgresMarkTerminalRunInMutation(

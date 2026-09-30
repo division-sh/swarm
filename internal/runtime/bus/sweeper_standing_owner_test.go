@@ -10,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
@@ -34,15 +33,15 @@ func newRecoveryControlOwner(t *testing.T) *worklifetime.RuntimeOccurrence {
 type recoveryOriginStore struct {
 	InMemoryEventStore
 	origin      runtimerunlifecycle.RunOrigin
-	disposition runtimepipeline.StandingRestartDisposition
+	disposition runtimerunlifecycle.StandingRestartDisposition
 	loads       int
 }
 
-func (s *recoveryOriginStore) StandingRunRestartDisposition(context.Context, string) (runtimepipeline.StandingRestartDisposition, error) {
+func (s *recoveryOriginStore) StandingRunRestartDisposition(context.Context, string) (runtimerunlifecycle.StandingRestartDisposition, error) {
 	if s.disposition.Kind != "" {
 		return s.disposition, nil
 	}
-	return runtimepipeline.ClassifyStandingRestart(runtimepipeline.StandingRestartFact{})
+	return runtimerunlifecycle.ClassifyStandingRestart(runtimerunlifecycle.StandingRestartFact{})
 }
 
 func (s *recoveryOriginStore) LoadRunOrigin(context.Context, string) (runtimerunlifecycle.RunOrigin, error) {
@@ -56,7 +55,7 @@ func TestStandingPipelineRecoveryBlocksUntilExactOwnerIsInstalled(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	disposition, err := runtimepipeline.ClassifyStandingRestart(runtimepipeline.StandingRestartFact{
+	disposition, err := runtimerunlifecycle.ClassifyStandingRestart(runtimerunlifecycle.StandingRestartFact{
 		ExactCurrent: true, ServiceID: standing.ServiceID(), RunID: runID, Generation: 1,
 		DeclarationPresent: true, EffectiveState: "active", OperatorOverride: "none", RunState: "running",
 	})
@@ -97,7 +96,7 @@ func TestStandingPipelineRecoveryParksNonExecutableDispositionBeforeLease(t *tes
 	}
 	store := &recoveryOriginStore{
 		origin:      standing,
-		disposition: runtimepipeline.StandingRestartDisposition{Kind: runtimepipeline.StandingRestartTerminalDeclared},
+		disposition: runtimerunlifecycle.StandingRestartDisposition{Kind: runtimerunlifecycle.StandingRestartTerminalDeclared},
 	}
 	bus := &EventBus{store: store, workOwner: newRecoveryControlOwner(t), durable: DurableDependencies{RunOrigins: store, StandingRestarts: store}}
 	event := eventtest.ExistingRunRootIngress(

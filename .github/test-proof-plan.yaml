@@ -375,12 +375,16 @@ units:
     budget_class: full
   local-serveapp-canaries:
     packages: [github.com/division-sh/swarm/internal/serveapp]
-    run: '^(TestMockAgentSupportedSurfaceSQLitePostgres|TestServedResetRetainClearAndHistoricalReplayBothStores|TestSelectedForkPublicChangedTargetExecutionBothStores|TestIssue2394ServedStopTwentyBothStores)$'
+    run: '^(TestMockAgentSupportedSurfaceSQLitePostgres|TestServedResetRetainClearAndHistoricalReplayBothStores|TestSelectedForkPublicChangedTargetExecutionBothStores|TestIssue2394ServedStopTwentyBothStores|TestServedParityHarnessRunControlLifecycle|TestServedParityHarnessStandingServiceLifecycle|TestPausedMixedRunsStartupBothStores|TestPausedAcceptedTimerAndDecisionPublicBothStores)$'
     required_children:
       TestMockAgentSupportedSurfaceSQLitePostgres: [sqlite, postgres]
       TestServedResetRetainClearAndHistoricalReplayBothStores: [default_sqlite/clear=false, default_sqlite/clear=true, explicit_postgres/clear=false, explicit_postgres/clear=true]
       TestSelectedForkPublicChangedTargetExecutionBothStores: [default_sqlite, explicit_postgres]
       TestIssue2394ServedStopTwentyBothStores: [default_sqlite, explicit_postgres]
+      TestServedParityHarnessRunControlLifecycle: [default_sqlite, explicit_postgres]
+      TestServedParityHarnessStandingServiceLifecycle: [default_sqlite, explicit_postgres]
+      TestPausedMixedRunsStartupBothStores: [sqlite, postgres]
+      TestPausedAcceptedTimerAndDecisionPublicBothStores: [default_sqlite/timer, default_sqlite/decision, explicit_postgres/timer, explicit_postgres/decision]
     count_mode: count-1
     environment_id: local-postgres-gateway-empty-v1
     budget_class: full
@@ -561,6 +565,8 @@ units:
     run: '^(Test($|[^CDG].*|GoldenI.*|Channel.*|Claude.*|Command.*|CompiledProcessLifecycle.*)|Example.*|Fuzz.*)$'
     required_children:
       TestPayloadlessEventPublicPersistenceJourneyBothStores: [sqlite, postgres]
+      TestStandingPauseAuthorityPublicBothStores: [sqlite, postgres]
+      TestStandingResetNonExecutablePublicBothStores: [sqlite, postgres]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
@@ -589,6 +595,8 @@ units:
     required_children:
       TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends: [sqlite, postgres]
       TestGoldenAgentWorkloadSequentialRunsBothStores: [sqlite, postgres]
+      TestGoldenNumericDataScatterParkRestartBothStores: [sqlite, postgres]
+      TestGoldenNumericDataScatterParkRefusalBothStores: [sqlite, postgres]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full

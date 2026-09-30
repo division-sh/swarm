@@ -67,7 +67,7 @@ func classifyPipelineDispatch(outcome runtimepipelineobligation.ExecutionOutcome
 		return pipelineDispatchDecision{action: pipelineDispatchSettle, disposition: disposition}
 	}
 	if dispatchErr != nil {
-		if errors.Is(dispatchErr, ErrRuntimeIngressPaused) || errors.Is(dispatchErr, ErrRunDispatchBlocked) || errors.Is(dispatchErr, errAuthoritativeDeliveryIncomplete) {
+		if errors.Is(dispatchErr, ErrRuntimeIngressPaused) || errors.Is(dispatchErr, ErrRunDispatchBlocked) || errors.Is(dispatchErr, errRunDispatchParked) || errors.Is(dispatchErr, errAuthoritativeDeliveryIncomplete) {
 			return pipelineDispatchDecision{action: pipelineDispatchPending}
 		}
 		operation, reason := "dispatch_outbox", "pipeline_outbox_dispatch_failed"

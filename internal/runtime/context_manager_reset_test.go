@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -212,5 +213,60 @@ func TestResetRuntimeContextsRequireRetirementAndPublishWholeIdenticalSet(t *tes
 		if boundOwner.IsNil() || boundOwner.Elem().Pointer() != reflect.ValueOf(manager).Pointer() {
 			t.Fatal("reset bound standing recovery to a detached preparation manager")
 		}
+	}
+}
+
+func TestResetStandingSuppressionComesFromReconstructedEpoch(t *testing.T) {
+	for _, suspended := range []bool{false, true} {
+		t.Run(fmt.Sprintf("successor_suspended_%t", suspended), func(t *testing.T) {
+			catalog := runtimeAdmissionTestCatalog(t, "a")
+			old := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "first", catalog)
+			manager, err := newTestRuntimeContextManager(t, nil, old)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := manager.SuppressStandingServiceTargets("service-first"); err != nil {
+				t.Fatal(err)
+			}
+			for _, result := range manager.DeactivateAll(RuntimeContextCauseUnloaded) {
+				if result.ShutdownErr != nil {
+					t.Fatal(result.ShutdownErr)
+				}
+			}
+			next := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "first", catalog)
+			if err := manager.StageResetRuntimeContexts(next); err != nil {
+				t.Fatal(err)
+			}
+			if manager.standingServiceSuppressedLocked("service-first") {
+				t.Fatal("fresh execution retained predecessor standing suppression")
+			}
+			if suspended {
+				if err := manager.SuppressStandingServiceTargets("service-first"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := manager.PublishResetRuntimeContexts(next); err != nil {
+				t.Fatal(err)
+			}
+			if err := manager.ReleaseResetExecution(next); err != nil {
+				t.Fatal(err)
+			}
+			use, lookup, err := manager.AcquireIngress(context.Background(), "first", "acme")
+			if use != nil {
+				if err := use.Done(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if suspended {
+				if use != nil || lookup.Cause != RuntimeContextCauseStandingSuppressed || manager.contexts[next.BundleHash()].standing["service-first"] != nil {
+					t.Fatalf("non-executable successor acquired standing authority: %+v", lookup)
+				}
+			} else if use == nil || !lookup.Loaded() || manager.contexts[next.BundleHash()].standing["service-first"] == nil {
+				t.Fatalf("active successor retained predecessor suppression: %+v", lookup)
+			}
+		})
 	}
 }

@@ -436,6 +436,14 @@ func (a *Adapter) claimExactResultTx(ctx context.Context, tx *sql.Tx, attempt *m
 		result.Invariant = fmt.Errorf("%w: unknown delivery status", ErrConflict)
 		return result, nil
 	}
+	parked, err := a.normalDispatchParked(ctx, tx, record)
+	if err != nil {
+		return ClaimResult{}, err
+	}
+	if parked {
+		result.Disposition = ClaimParked
+		return result, nil
+	}
 	ready, err := a.materializationReady(ctx, tx, record, tx)
 	if err != nil {
 		result.Disposition, result.Invariant = ClaimInvariantInvalid, err

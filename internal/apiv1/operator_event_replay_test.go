@@ -1522,6 +1522,10 @@ func (blockedRunDispatchGate) QueueableRunDispatchBlocked(context.Context, strin
 	return true, nil
 }
 
+func (blockedRunDispatchGate) QueueableRunDispatchParked(context.Context, string) (bool, error) {
+	return false, nil
+}
+
 func eventReplayTestBus(t *testing.T, pg *store.PostgresStore) *runtimebus.EventBus {
 	t.Helper()
 	bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{

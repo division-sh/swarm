@@ -62,6 +62,8 @@ func eventBusDependencyFailure(err error, detailCode, operation string) *runtime
 var ErrRuntimeIngressPaused = errors.New("runtime ingress is paused")
 var ErrRunDispatchBlocked = errors.New("run dispatch is blocked")
 
+var errRunDispatchParked = errors.New("run dispatch is parked by persisted pause authority")
+
 const (
 	dispatchQueueRuntimeIngress          = "runtime_ingress_queued"
 	dispatchQueueRunBlocked              = "run_dispatch_blocked"
@@ -115,6 +117,16 @@ func (eb *EventBus) dispatchQueueReason(ctx context.Context, evt events.Event) (
 	if blocked, err := eb.runDispatchBlocked(ctx, evt); err != nil {
 		return "", err
 	} else if blocked {
+		eb.mu.RLock()
+		gate := eb.runDispatchGate
+		eb.mu.RUnlock()
+		parked, err := gate.QueueableRunDispatchParked(ctx, evt.RunID())
+		if err != nil {
+			return "", err
+		}
+		if parked {
+			return "run_paused", nil
+		}
 		return dispatchQueueRunBlocked, nil
 	}
 	return "", nil
@@ -2609,6 +2621,9 @@ func (eb *EventBus) publishClaimedPipeline(ctx context.Context, evt events.Event
 		if reason == dispatchQueueRuntimeIngress {
 			return result, ErrRuntimeIngressPaused
 		}
+		if reason == "run_paused" {
+			return result, errRunDispatchParked
+		}
 		return result, ErrRunDispatchBlocked
 	}
 	return eb.publishPersistedRecipientsWithScope(ctx, evt, scope, recipients, true, dispatchRecipients)
@@ -2647,7 +2662,9 @@ func (eb *EventBus) publishPersistedRecipientsWithScope(ctx context.Context, evt
 	deferred := []events.Event(nil)
 	if replayInterceptors && scope == runtimepipelineobligation.ScopeSubscribed {
 		var outcome runtimepipelineobligation.ExecutionOutcome
-		if dispatchRecipients {
+		// Continuations own exact node deliveries, not event-wide coordination
+		// for accepted timer and decision events without node delivery routes.
+		if dispatchRecipients || len(nodeDeliveryRoutes(deliveryRoutes)) == 0 {
 			var interception deliveryRouteInterception
 			interception, err = eb.runInterceptorsForDeliveryRoutes(ctx, evt, deliveryRoutes)
 			eventPassthrough = interception.EventPassthrough

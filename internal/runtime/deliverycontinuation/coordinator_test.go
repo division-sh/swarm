@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	runtimestanding "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"reflect"
 	"strings"
 	"sync"
@@ -16,7 +17,6 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 const coordinatorTestBundleHash = "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
@@ -72,13 +72,13 @@ func TestCoordinatorUsesSelectedStoreWorkerLimit(t *testing.T) {
 	}
 }
 
-type coordinatorTestRestarts map[string]runtimepipeline.StandingRestartDispositionKind
+type coordinatorTestRestarts map[string]runtimestanding.StandingRestartDispositionKind
 
-func (s coordinatorTestRestarts) StandingRunRestartDisposition(_ context.Context, runID string) (runtimepipeline.StandingRestartDisposition, error) {
+func (s coordinatorTestRestarts) StandingRunRestartDisposition(_ context.Context, runID string) (runtimestanding.StandingRestartDisposition, error) {
 	if kind := s[strings.TrimSpace(runID)]; kind != "" {
-		return runtimepipeline.StandingRestartDisposition{Kind: kind}, nil
+		return runtimestanding.StandingRestartDisposition{Kind: kind}, nil
 	}
-	return runtimepipeline.ClassifyStandingRestart(runtimepipeline.StandingRestartFact{})
+	return runtimestanding.ClassifyStandingRestart(runtimestanding.StandingRestartFact{})
 }
 
 func (s *coordinatorTestStore) ScanDeliveryContinuations(
@@ -691,7 +691,7 @@ func TestCoordinatorParksNonExecutableStandingDelivery(t *testing.T) {
 	}}}
 	dispatcher := &coordinatorTestDispatcher{dispatched: make(chan struct{}, 1)}
 	coordinator, err := New(store, coordinatorTestRestarts{
-		event.RunID(): runtimepipeline.StandingRestartSuspended,
+		event.RunID(): runtimestanding.StandingRestartSuspended,
 	}, authority, owner, dispatcher, nil)
 	if err != nil {
 		t.Fatal(err)

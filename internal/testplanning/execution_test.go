@@ -115,6 +115,9 @@ func TestCurrentProofPlansBindActiveRequiredRoots(t *testing.T) {
 					t.Fatalf("%s golden workload classification: required=%v deferred=%v", profile, golden.RequiredTests, golden.DeferredTests)
 				}
 			}
+			if profile != ProfileLocal {
+				assertNumericTimerInspectionOwnership(t, plan)
+			}
 		})
 	}
 	// A CI-only special-unit repack must not silently remove the bus from local.
@@ -173,6 +176,31 @@ func TestCurrentProofPlansBindActiveRequiredRoots(t *testing.T) {
 				t.Errorf("%s has no required proof", id)
 			}
 		}
+	}
+}
+
+func assertNumericTimerInspectionOwnership(t *testing.T, plan RunPlan) {
+	t.Helper()
+	child, err := plan.Unit("serveapp-other-late")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const entry = "TestOwnedNumericTimerInspection"
+	if unitRequires(child, entry) || !unitDefers(child, entry) {
+		t.Fatal("parent-owned inspection entry was credited as a standalone proof")
+	}
+	parent, err := plan.Unit("hitl-releasee2e-golden")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"TestGoldenNumericDataScatterParkRestartBothStores", "TestGoldenNumericDataScatterParkRefusalBothStores"} {
+		if !unitRequires(parent, name) || unitDefers(parent, name) || !slices.Equal(parent.RequiredChildren[name], []string{"sqlite", "postgres"}) {
+			t.Fatalf("numeric lifecycle parent %s lost required execution", name)
+		}
+	}
+	unknown := TestRoot{Package: "github.com/division-sh/swarm/internal/serveapp", Name: entry + "Standalone"}
+	if reason, _ := deferredRootReason(child, unknown, plan.BuildContext); reason != "" {
+		t.Fatal("inspection entry classification became an open-ended exclusion")
 	}
 }
 
