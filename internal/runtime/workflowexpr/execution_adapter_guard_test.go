@@ -29,6 +29,8 @@ func TestExecutionAdapterGuardRejectsCompetingInterpretations(t *testing.T) {
 		"pipeline/activity_engine.go":        {{"raw, err := canonicaljson.MarshalPreservingNumberKinds(payload)", "_, _ = canonicaljson.FromGo(payload)\nraw, err := canonicaljson.MarshalPreservingNumberKinds(payload)"}},
 		"workflowexpr/numeric_expression.go": {},
 		"workflowexpr/data_expression.go": {
+			{"compiled, _, err := prepareCheckedValueExpression(expression, opts)", "compiled, err := compileValueExpression(nil, expression, opts)"},
+			{"program, err := workflowProgram(env, compiled)", "program, err := env.Program(compiled)"},
 			{"entityAccesses: entityExpressionAccesses(normalized)", "entityAccesses: nil"},
 			{"missingEntityReferencesForAccesses(p.entityAccesses, ctx.Entity)", "[]string(nil)"},
 		},
@@ -64,6 +66,9 @@ func TestExecutionAdapterGuardRejectsCompetingInterpretations(t *testing.T) {
 	}
 	findings := strings.Join(executionAdapterFindings(t, overlay), "\n")
 	for _, want := range []string{
+		"checkedValueExpression missing numeric/JSON owner github.com/division-sh/swarm/internal/runtime/workflowexpr.prepareCheckedValueExpression",
+		"prepareCheckedValueExpression missing numeric/JSON owner github.com/division-sh/swarm/internal/runtime/workflowexpr.workflowProgram",
+		"prepareCheckedValueExpression bypasses checked numeric planning",
 		"PrepareValueExpression missing numeric/JSON owner github.com/division-sh/swarm/internal/runtime/workflowexpr.entityExpressionAccesses",
 		"Eval missing numeric/JSON owner github.com/division-sh/swarm/internal/runtime/workflowexpr.missingEntityReferencesForAccesses",
 	} {
@@ -97,7 +102,9 @@ func executionAdapterFindings(t *testing.T, overlay map[string][]byte) []string 
 		"(" + mock + ".AdmittedMockResponse).Materialize":                                            {base + "workflowexpr.ProjectSemanticValue"},
 		base + "workflowexpr.compileValueExpression":                                                 {base + "workflowexpr.validateWorkflowNumericEvidence", base + "workflowexpr.validateWorkflowResultType"},
 		base + "workflowexpr.EvalValueResultWithOptions":                                             {base + "workflowexpr.PrepareValueExpression"},
-		base + "workflowexpr.PrepareValueExpression":                                                 {base + "workflowexpr.workflowProgram", base + "workflowexpr.compileValueExpression", base + "workflowexpr.entityExpressionAccesses"},
+		base + "workflowexpr.checkedValueExpression":                                                 {base + "workflowexpr.prepareCheckedValueExpression"},
+		base + "workflowexpr.prepareCheckedValueExpression":                                          {base + "workflowexpr.workflowProgram", base + "workflowexpr.compileValueExpression", base + "workflowexpr.validateCheckedPolicyReferences"},
+		base + "workflowexpr.PrepareValueExpression":                                                 {base + "workflowexpr.prepareCheckedValueExpression", base + "workflowexpr.entityExpressionAccesses"},
 		base + "workflowexpr.MissingEntityReferences":                                                {base + "workflowexpr.entityExpressionAccesses", base + "workflowexpr.missingEntityReferencesForAccesses"},
 		"(*" + base + "workflowexpr.PreparedValueExpression).Eval":                                   {base + "workflowexpr.ProjectCELValue", base + "workflowexpr.missingEntityReferencesForAccesses", base + "workflowexpr.normalizeCELResult"},
 		"(*" + base + "engine.Executor).PrepareFanOutEvaluation":                                     {"(*" + base + "engine.Executor).bindFrameExpressionSchemas", "(*" + base + "engine.Executor).resolveEmitRoute", base + "workflowexpr.PrepareValueExpression"},
