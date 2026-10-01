@@ -42,17 +42,17 @@ func TestR3ConditionPolicyQueryAndPlaceholderReferences(t *testing.T) {
 }
 
 func TestR3PolicyQueryOperandExecution(t *testing.T) {
-	policy := map[string]any{"a.b": 3, "obj": map[string]any{"key": 4}, "null": nil}
+	policy := map[string]any{"a.b": 3, "obj": map[string]any{"key": 4}, "null": nil, "list": []any{3}}
 	for _, tc := range []struct {
 		expression string
 		want       any
-	}{{`policy["a.b"]`, int64(3)}, {`policy.obj.key`, int64(4)}, {`policy["null"]`, nil}} {
+	}{{`policy["a.b"]`, int64(3)}, {`policy.obj.key`, int64(4)}, {`policy["null"]`, nil}, {`policy.list[0u]`, int64(3)}} {
 		value, err := workflowExpressionResolveQueryOperand(tc.expression, workflowExpressionContext{Policy: policy})
 		if err != nil || value != tc.want {
 			t.Fatalf("%s: value=%#v want=%#v err=%v", tc.expression, value, tc.want, err)
 		}
 	}
-	for _, expression := range []string{`policy["missing"]`, `policy.missing`, `policy["a.b"] + 1`, `policy[payload.key]`, `policy.?null`} {
+	for _, expression := range []string{`policy["missing"]`, `policy.missing`, `policy["a.b"] + 1`, `policy[payload.key]`, `policy.?null`, `policy[?"missing"]["child"]`, `policy[?"missing"].child`, `policy.list[9u]`, `policy[true]`} {
 		if _, err := workflowExpressionResolveQueryOperand(expression, workflowExpressionContext{Policy: policy}); err == nil {
 			t.Fatalf("hostile query operand accepted: %s", expression)
 		}
