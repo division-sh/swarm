@@ -1,5 +1,34 @@
 # Pre-Implementation Coverage Audit: #2508
 
+## Approved Implementation Boundary (2026-10-01)
+
+Independent gate `issuecomment-5927450842` approves all three complete A/D/C
+maintenance classes on `1c4cce209`, superseding the dependency hold below.
+Existing tests remain byte-unchanged; commit new characterization before
+production extraction. Every extracted callable must remain below cyclo 25,
+the pinned base/head ratchet must pass, and the separate 3000 production-line
+cap remains binding. No common facade, semantic owner, compatibility path,
+framework or vendoring is authorized. Permission to code is not merge approval.
+
+### D11 Owner-Map Addendum
+
+The `expand_minimize_tooling` paragraph incorrectly requires output-pin
+`key`/`carries`, contradicting the newer compiled-pin ownership contract.
+Current `OutputPinView` deliberately exposes neither retired field. Existing
+event-schema/business-key and compiled-connection owners remain authoritative;
+`authoringview.Build`, full describe and routes consume their projection.
+Correct only that obsolete spec phrase in this PR; do not restore declarations,
+JSON fields, pin-owned selection, or renderer-side interpretation. This feedback
+is attached to existing #2438 (`issuecomment-5927438523`) and mapped to existing
+maintenance/coverage watchlist nodes, not a new issue or framework.
+
+| Manifestation | Planned exact proof |
+| --- | --- |
+| D11: obsolete output-pin tooling wording | Pre-extraction exact describe transcript; public text/JSON/quiet/routes comparisons on current compiled sources; explicit absence of retired output-pin fields; unchanged authoring/topology/source guards. |
+
+The proof population is now 41 rows: A01-A14, D01-D11, C01-C12, Q01-Q04.
+All original owner-consumption and closure requirements below remain binding.
+
 ## Current Post-#2505 Delta Gate Submission (2026-10-01)
 
 **Agent-g; audit only; independent reviewer-g gate pending.** This section
