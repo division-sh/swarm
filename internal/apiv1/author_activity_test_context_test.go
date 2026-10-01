@@ -309,10 +309,6 @@ func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus
 	return bus, nil
 }
 
-func mustAPITestSourceArtifact() *sourceartifact.AdmittedSourceArtifact {
-	return sourceartifactfixture.Artifact()
-}
-
 func mustAPITestSourceArtifactNamed(name string) *sourceartifact.AdmittedSourceArtifact {
 	return sourceartifactfixture.New("schema.yaml", []byte("name: "+name+"\n"))
 }

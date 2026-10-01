@@ -304,12 +304,3 @@ func (e *Executor) execCreateEntity(ctx context.Context, actor models.AgentConfi
 	}
 	return response, nil
 }
-
-func valuesEqual(left, right any) bool {
-	leftJSON, leftErr := json.Marshal(left)
-	rightJSON, rightErr := json.Marshal(right)
-	if leftErr != nil || rightErr != nil {
-		return left == right
-	}
-	return string(leftJSON) == string(rightJSON)
-}

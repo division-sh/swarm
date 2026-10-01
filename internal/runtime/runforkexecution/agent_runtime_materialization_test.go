@@ -25,7 +25,6 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -89,20 +88,6 @@ func selectedContractAgentTestSourceFact(t *testing.T) runtimecorrelation.Source
 		t.Fatalf("construct selected-contract source fact: %v", err)
 	}
 	return fact
-}
-
-func selectedContractAgentTestSource(eventNames ...string) semanticview.Source {
-	events := make(map[string]runtimecontracts.EventCatalogEntry, len(eventNames))
-	for _, eventName := range eventNames {
-		events[eventName] = runtimecontracts.EventCatalogEntry{}
-	}
-	root := runtimecontracts.FlowContractView{Path: ".", Events: events}
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{".": &root},
-		},
-	})
 }
 
 func selectedContractTestDeclarationTopology(t testing.TB) runtimeagenttopology.Admission {

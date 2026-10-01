@@ -27,10 +27,6 @@ const authorActivityTestBundleHash = sourceartifactfixture.BundleHash
 
 var authorActivityTestSourceArtifactFact = sourceartifactfixture.Fact()
 
-func exactAuthorActivityFlowInstanceDescriptors(in []ActiveFlowInstanceDescriptor, workflowVersion, runID string) []ActiveFlowInstanceDescriptor {
-	return exactTestFlowInstanceDescriptors(in, workflowVersion, authorActivityTestSourceArtifactFact, runID)
-}
-
 func exactTestFlowInstanceDescriptors(in []ActiveFlowInstanceDescriptor, workflowVersion string, sourceFact runtimecorrelation.SourceArtifactFact, runID string) []ActiveFlowInstanceDescriptor {
 	if sourceFact.Validate() != nil {
 		sourceFact = authorActivityTestSourceArtifactFact

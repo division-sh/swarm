@@ -5,8 +5,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -772,23 +770,4 @@ func writeMCPResult(t *testing.T, w http.ResponseWriter, id any, result any) {
 		"id":      id,
 		"result":  result,
 	})
-}
-
-func toolsRepoRootForTest(t *testing.T) string {
-	t.Helper()
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	return filepath.Clean(filepath.Join(wd, "..", "..", ".."))
-}
-
-func writeToolFixtureFile(t *testing.T, path, contents string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("MkdirAll(%s): %v", filepath.Dir(path), err)
-	}
-	if err := os.WriteFile(path, []byte(strings.TrimLeft(contents, "\n")), 0o644); err != nil {
-		t.Fatalf("WriteFile(%s): %v", path, err)
-	}
 }

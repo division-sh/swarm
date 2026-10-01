@@ -1485,14 +1485,6 @@ func (c *agentLifecycleCoordinator) lockIdentityOperation(identity runtimeagenti
 	return c.lockIdentityOperationMode(identity, false, false, false)
 }
 
-// lockIdentityTopologyOperation admits failed durable cells because topology
-// rebinding does not make them executable. Ordinary lifecycle operations keep
-// treating failed cells as terminal until startup explicitly reintroduces a
-// still-declared identity as a fresh registered generation.
-func (c *agentLifecycleCoordinator) lockIdentityTopologyOperation(identity runtimeagentidentity.Identity) (*agentLifecycleCell, error) {
-	return c.lockIdentityOperationMode(identity, true, false, false)
-}
-
 func (c *agentLifecycleCoordinator) lockIdentitySourceSetOperation(identity runtimeagentidentity.Identity) (*agentLifecycleCell, error) {
 	return c.lockIdentityOperationMode(identity, true, true, true)
 }

@@ -3991,32 +3991,6 @@ func isOptionalWorkflowDeclarationFixture(path string) bool {
 	}
 }
 
-func writeServeRuntimeAgentSlugFixture(t *testing.T, workflowName, agentID string) string {
-	t.Helper()
-	return writeServeRuntimeAgentSlugFixtureWithKey(t, workflowName, agentID, agentID)
-}
-
-func writeServeRuntimeAgentSlugFixtureWithKey(t *testing.T, workflowName, agentKey, agentID string) string {
-	t.Helper()
-	return canonicalrouting.CopyAgentSlugAdmission(t, workflowName, agentKey, agentID)
-}
-
-func writeServeRuntimeNativeBashFixture(t *testing.T) string {
-	t.Helper()
-	const agentID = "native-bash-worker"
-	root := writeServeRuntimeAgentSlugFixture(t, "native-bash-docker-required", agentID)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), fmt.Sprintf(`
-%s:
-  role: %s
-  intent: prompts/%s.md
-  model: regular
-  native_tools:
-    bash: true
-  subscriptions: [agent.requested]
-`, agentID, agentID, agentID))
-	return root
-}
-
 func writeWorkflowValidationDeadEventSchemaFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -4347,37 +4321,6 @@ type cliAPIConnectionAuthConfigSpec struct {
 	ImplementationBoundaries []string `yaml:"implementation_boundaries"`
 }
 
-type cliSourcePlatformSpecPathResolutionSpec struct {
-	PromotedBy           string   `yaml:"promoted_by"`
-	ImplementationStatus string   `yaml:"implementation_status"`
-	CanonicalOwner       string   `yaml:"canonical_owner"`
-	Scope                string   `yaml:"scope"`
-	AppliesTo            []string `yaml:"applies_to"`
-	NotAppliesTo         []string `yaml:"not_applies_to"`
-	SourceRoot           struct {
-		AcceptedSources struct {
-			Flag              string `yaml:"flag"`
-			Environment       string `yaml:"environment"`
-			ConfigKey         string `yaml:"config_key"`
-			DiscoveredDefault string `yaml:"discovered_default"`
-		} `yaml:"accepted_sources"`
-		SourceOrder     []string          `yaml:"source_order"`
-		RejectedSources map[string]string `yaml:"rejected_sources"`
-		MissingSource   string            `yaml:"missing_source_rule"`
-	} `yaml:"contracts_path"`
-	PlatformSpecPath struct {
-		AcceptedSources struct {
-			Flag           string `yaml:"flag"`
-			ConfigKey      string `yaml:"config_key"`
-			BuiltInDefault string `yaml:"built_in_default"`
-		} `yaml:"accepted_sources"`
-		SourceOrder     []string          `yaml:"source_order"`
-		RejectedSources map[string]string `yaml:"rejected_sources"`
-		DefaultRule     string            `yaml:"default_rule"`
-	} `yaml:"platform_spec_path"`
-	ImplementationBoundaries []string `yaml:"implementation_boundaries"`
-}
-
 func loadServeDevModeSpec(t *testing.T) serveDevModeSpec {
 	t.Helper()
 	var spec struct {
@@ -4446,22 +4389,6 @@ func loadCLIAPIConnectionAuthConfigSpec(t *testing.T) cliAPIConnectionAuthConfig
 		t.Fatal("platform spec missing api_connection_auth_config_precedence")
 	}
 	return spec.CLISpecification.Foundations.APIConnectionAuthConfig
-}
-
-func loadCLISourcePlatformSpecPathResolutionSpec(t *testing.T) cliSourcePlatformSpecPathResolutionSpec {
-	t.Helper()
-	var spec struct {
-		CLISpecification struct {
-			Foundations struct {
-				SourcePlatformSpecPathResolution cliSourcePlatformSpecPathResolutionSpec `yaml:"source_platform_spec_path_resolution"`
-			} `yaml:"foundations"`
-		} `yaml:"cli_specification"`
-	}
-	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(RepoRoot(), defaultPlatformSpecPath), &spec)
-	if strings.TrimSpace(spec.CLISpecification.Foundations.SourcePlatformSpecPathResolution.CanonicalOwner) == "" {
-		t.Fatal("platform spec missing source_platform_spec_path_resolution")
-	}
-	return spec.CLISpecification.Foundations.SourcePlatformSpecPathResolution
 }
 
 func stringSliceContains(values []string, want string) bool {

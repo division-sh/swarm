@@ -1,7 +1,6 @@
 package contracts
 
 import (
-	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -76,12 +75,4 @@ func (b *WorkflowContractBundle) agentDeclarationOwnerURI(source ContractItemSou
 		owner = candidate
 	}
 	return owner
-}
-
-func agentDeclarationRecordKey(sourceFile, logicalID string) string {
-	sourceFile = strings.TrimSpace(sourceFile)
-	if sourceFile != "" {
-		sourceFile = filepath.Clean(sourceFile)
-	}
-	return sourceFile + "\x00" + strings.TrimSpace(logicalID)
 }

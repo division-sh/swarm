@@ -362,9 +362,3 @@ type replayLocker struct{}
 func (replayLocker) WithEntityLock(ctx context.Context, _ identity.EntityID, fn func(context.Context) error) error {
 	return fn(ctx)
 }
-
-type replayDispatcher struct{}
-
-func (replayDispatcher) DispatchPostCommit(context.Context, []runtimeengine.EmitIntent) error {
-	return nil
-}

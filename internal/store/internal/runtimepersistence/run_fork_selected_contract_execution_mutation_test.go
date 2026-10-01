@@ -1755,31 +1755,6 @@ func seedCanonicalSelectedContractExecutionStoreSourceRawWithPayload(t *testing.
 	}, entityID, eventID, at, routes, payload)
 }
 
-func seedSelectedContractExecutionStoreSource(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
-	t.Helper()
-	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
-	captureRunForkTestRevision(t, db, sourceRunID)
-}
-
-func seedSelectedContractExecutionStoreSourceUnpublished(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
-	t.Helper()
-	seedSelectedContractExecutionStoreSourceRaw(t, db, sourceRunID, entityID, eventID, at, []events.DeliveryRoute{testEntitylessNodeDeliveryRoute("test-node")})
-}
-
-func seedSelectedContractExecutionStoreSourceWithoutDelivery(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
-	t.Helper()
-	seedSelectedContractExecutionStoreSourceRaw(t, db, sourceRunID, entityID, eventID, at, nil)
-	captureRunForkTestRevision(t, db, sourceRunID)
-}
-
-func seedSelectedContractExecutionStoreSourceRaw(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time, routes []events.DeliveryRoute) {
-	seedSelectedContractExecutionStoreSourceRawWithPayload(t, db, sourceRunID, entityID, eventID, at, routes, []byte(`{}`))
-}
-
-func seedSelectedContractExecutionStoreSourceRawWithPayload(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time, routes []events.DeliveryRoute, payload []byte) {
-	seedSelectedContractExecutionSourceWithRun(t, db, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash}, entityID, eventID, at, routes, payload)
-}
-
 func seedSelectedContractExecutionSourceWithRun(t *testing.T, db *sql.DB, run semanticRunFixture, entityID, eventID string, at time.Time, routes []events.DeliveryRoute, payload []byte) {
 	t.Helper()
 	event := semanticEventRecordFixture(

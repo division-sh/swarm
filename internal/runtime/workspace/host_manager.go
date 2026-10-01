@@ -524,21 +524,6 @@ func cleanAbsPath(path string, label string) (string, error) {
 	return filepath.Clean(path), nil
 }
 
-func canonicalReadableDir(path, prefix string) (string, error) {
-	canonicalPath, err := canonicalPathForOverlap(path, prefix)
-	if err != nil {
-		return "", err
-	}
-	info, err := os.Stat(canonicalPath)
-	if err != nil {
-		return "", fmt.Errorf("%s %s: %w", prefix, canonicalPath, err)
-	}
-	if !info.IsDir() {
-		return "", fmt.Errorf("%s %s is not a directory", prefix, canonicalPath)
-	}
-	return canonicalPath, nil
-}
-
 func canonicalPathForOverlap(path, label string) (string, error) {
 	clean, err := cleanAbsPath(path, label)
 	if err != nil {

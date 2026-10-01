@@ -2,8 +2,6 @@ package runtime
 
 import (
 	"context"
-	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -11,11 +9,8 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
-	"github.com/division-sh/swarm/internal/packadmission"
-	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -24,10 +19,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
-	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
-	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/google/uuid"
-	"gopkg.in/yaml.v3"
 )
 
 type blockingCredentialSnapshotStore struct {
@@ -581,116 +573,5 @@ func applyRuntimeAdmissionCatalog(t testing.TB, contextDef *BundleContext, catal
 	contextDef.InstalledTriggerSubjects = installed
 	if bundle, ok := semanticview.Bundle(contextDef.Source); ok && bundle != nil && bundle.PackInventory != nil {
 		contextDef.PackInventoryDigest = bundle.PackInventory.Digest()
-	}
-}
-
-func projectTelegramAdmissionContext(t *testing.T, hash, alias, payloadObjectError string) BundleContext {
-	t.Helper()
-	project := t.TempDir()
-	if err := os.WriteFile(filepath.Join(project, "package.yaml"), []byte("name: same-id-pack-proof\nversion: 1.0.0\nplatform_version: '>=0.7.0 <0.8.0'\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	base := packfixture.EmbeddedBase(t)
-	if changed, err := packartifact.ImportEmbeddedPack(project, "provider.telegram", base); err != nil || !changed {
-		t.Fatalf("import Telegram pack changed=%t: %v", changed, err)
-	}
-	manifestPath := filepath.Join(project, packartifact.ProjectPackDirectory, "provider.telegram", packartifact.TriggerManifestFileName)
-	body, err := os.ReadFile(manifestPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	edited := strings.Replace(string(body), "telegram update object is required", payloadObjectError, 1)
-	if edited == string(body) {
-		t.Fatal("Telegram payload error edit found no canonical field")
-	}
-	if err := os.WriteFile(manifestPath, []byte(edited), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	projectPacks, err := packartifact.LoadProjectPackSet(project)
-	if err != nil {
-		t.Fatal(err)
-	}
-	inventory, err := packartifact.NewEffectivePackInventory(base, projectPacks.Sources)
-	if err != nil {
-		t.Fatal(err)
-	}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		Semantics:     runtimecontracts.WorkflowSemanticView{Name: "same_id_pack", Version: "1.0.0"},
-		Events:        map[string]runtimecontracts.EventCatalogEntry{"inbound.telegram": {}, "inbound.telegram.text_message": {}},
-		PackInventory: inventory,
-	}
-	platformBody, err := os.ReadFile(runtimecontracts.DefaultPlatformSpecFile(runtimepipeline.WorkflowRepoRoot()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := yaml.Unmarshal(platformBody, &bundle.Platform); err != nil {
-		t.Fatal(err)
-	}
-	admitRuntimeTestBundle(t, bundle)
-	projection, err := packadmission.FromBundle(bundle)
-	if err != nil {
-		t.Fatal(err)
-	}
-	catalog := projection.ProviderTriggers
-	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
-		Alias: alias, Provider: "telegram", SigningSecret: "webhook_signing.telegram",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	contextDef := testBundleContext(t, hash, "inbound.telegram")
-	contextDef.Source = semanticview.Wrap(bundle)
-	contextDef.StandingTargets = []StandingTarget{{
-		BundleHash: hash, ServiceID: "service-" + alias, FlowPath: "telegram-flow", Alias: alias, Provider: "telegram",
-		RunID: "run-" + alias, Generation: 1, FlowInstance: "telegram-flow/" + alias, EntityID: "entity-" + alias,
-		SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
-	}}
-	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
-	return contextDef
-}
-
-func assertProjectTelegramAdmissionMessage(t *testing.T, manager *RuntimeContextManager, alias, want string) {
-	t.Helper()
-	lookup := manager.LookupIngress(alias, "telegram")
-	if !lookup.Loaded() {
-		t.Fatalf("lookup %s = %#v", alias, lookup)
-	}
-	identity, ok := lookup.Target.AdmissionPlan.PackIdentity()
-	if !ok || identity.ID != "provider.telegram" || identity.Provenance != packartifact.ProvenanceProject {
-		t.Fatalf("%s admission identity = %#v, present=%t", alias, identity, ok)
-	}
-	subject, err := lookup.Target.CapabilitySubject()
-	if err != nil {
-		t.Fatalf("%s capability subject: %v", alias, err)
-	}
-	if subject.Provenance != packartifact.ProvenanceProject || subject.TriggerAdmission == nil || subject.TriggerAdmission.Pack == nil ||
-		subject.TriggerAdmission.Pack.ID != identity.ID || subject.TriggerAdmission.Pack.Version != identity.Version ||
-		subject.TriggerAdmission.Pack.ManifestHash != identity.ManifestHash || subject.TriggerAdmission.Pack.Provenance != identity.Provenance {
-		t.Fatalf("%s capability subject identity = %#v, want %#v", alias, subject, identity)
-	}
-	_, err = lookup.Target.AdmissionPlan.Accept(providertriggers.Request{
-		Provider: "telegram", Target: providertriggers.Target{EntityID: "entity-" + alias, WebhookSecret: "telegram-secret"},
-		Method: http.MethodPost, Headers: http.Header{"X-Telegram-Bot-Api-Secret-Token": []string{"telegram-secret"}},
-		Payload: []any{}, Body: []byte(`[]`), ContentType: "application/json",
-	})
-	if err == nil || !strings.Contains(err.Error(), want) {
-		t.Fatalf("%s project admission error = %v, want containing %q", alias, err, want)
-	}
-}
-
-func assertRuntimeAdmissionSubjectGeneration(t *testing.T, subjects []packs.Subject, generation triggergeneration.Generation, wantEffective int) {
-	t.Helper()
-	effective := 0
-	for _, subject := range subjects {
-		if subject.TriggerAdmission == nil {
-			continue
-		}
-		effective++
-		if subject.TriggerAdmission.CatalogGeneration != generation.Diagnostic() {
-			t.Fatalf("subject %q generation = %q, want %q", subject.ID, subject.TriggerAdmission.CatalogGeneration, generation.Diagnostic())
-		}
-	}
-	if effective != wantEffective {
-		t.Fatalf("effective trigger subjects = %d, want %d", effective, wantEffective)
 	}
 }

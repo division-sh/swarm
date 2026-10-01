@@ -7542,15 +7542,6 @@ func writeBundleHandler(t testing.TB, bundle *runtimecontracts.WorkflowContractB
 	})
 }
 
-func writeBundleEventEntry(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, owner runtimeidentity.ExecutableNode, eventType string, entry runtimecontracts.EventCatalogEntry) {
-	mutateBundleExecutableNode(t, bundle, owner, func(view *runtimecontracts.FlowContractView) {
-		if view.Events == nil {
-			view.Events = map[string]runtimecontracts.EventCatalogEntry{}
-		}
-		view.Events[eventType] = entry
-	})
-}
-
 func writeBundlePolicyValue(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, owner runtimeidentity.ExecutableNode, key string, value runtimecontracts.PolicyValue) {
 	if t != nil {
 		t.Helper()

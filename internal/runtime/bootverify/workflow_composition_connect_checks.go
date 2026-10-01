@@ -136,33 +136,3 @@ func inputPinResolutionFinding(flowID string, pin runtimecontracts.CompiledFlowI
 		Location: location,
 	}
 }
-
-func normalizeCompositionFields(in []string) []string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(in))
-	for _, field := range in {
-		field = strings.TrimSpace(field)
-		if field != "" {
-			out = append(out, field)
-		}
-	}
-	return out
-}
-
-// compositionConnectTypeFamily remains the output-pin compatibility owner.
-// Instance-key source compatibility is owned by contracts.
-func compositionConnectTypeFamily(raw string) string {
-	raw = strings.ToLower(strings.TrimSpace(raw))
-	switch raw {
-	case "string", "text", "uuid", "timestamp":
-		return "string"
-	case "integer", "number", "numeric", "float", "double", "real":
-		return "number"
-	case "boolean", "bool":
-		return "boolean"
-	default:
-		return raw
-	}
-}

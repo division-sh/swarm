@@ -838,11 +838,6 @@ func (workflowTimerStartupLLM) ProviderContract() llm.ProviderContract {
 	return llm.AnthropicAPIProviderContract()
 }
 
-func workflowTimerStartupRecoveryBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
-	t.Helper()
-	return workflowTimerStartupRecoveryBundleWithDelay(t, "25ms")
-}
-
 func workflowTimerStartupRecoveryBundleWithDelay(t *testing.T, delay string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	bundle := loadRuntimeTempBundle(t, map[string]string{

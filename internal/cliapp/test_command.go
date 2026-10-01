@@ -476,21 +476,6 @@ func resolveScenarioTestSources(RepoRoot, sourceArgument string, cfg cliCommandC
 	return sourceRoot, ResolvePath(RepoRoot, platformSpec), nil
 }
 
-func absFrom(base, path string) (string, error) {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return "", fmt.Errorf("path is required")
-	}
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(base, path)
-	}
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return "", err
-	}
-	return abs, nil
-}
-
 func discoverScenarioTestFiles(bundle *runtimecontracts.WorkflowContractBundle, args []string) ([]scenarioTestFile, error) {
 	if bundle == nil || bundle.SourceArtifact == nil {
 		return nil, fmt.Errorf("scenario discovery requires an admitted source artifact")
@@ -575,17 +560,6 @@ func autoDiscoveredScenarioCandidate(raw []byte) bool {
 	}
 	top := mappingNode(root.Content[0])
 	return top["version"] != nil || top["steps"] != nil || top["derive"] != nil || top["invalid"] != nil
-}
-
-func splitPath(path string) []string {
-	raw := strings.Split(filepath.ToSlash(path), "/")
-	out := raw[:0]
-	for _, part := range raw {
-		if part != "" && part != "." {
-			out = append(out, part)
-		}
-	}
-	return out
 }
 
 func (r scenarioRunner) prepareScenario(file scenarioTestFile) (preparedScenario, error) {

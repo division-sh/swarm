@@ -408,10 +408,6 @@ func requireB10NativeFault(t *testing.T, backend string, err error) {
 	}
 }
 
-func (f *b10GroupFaultFixture) installFault(t *testing.T, fault string) func() {
-	return f.installFaultAt(t, fault, 1)
-}
-
 func (f *b10GroupFaultFixture) installFaultAt(t *testing.T, fault string, member int) func() {
 	t.Helper()
 	if member < 0 || member >= len(f.members) {

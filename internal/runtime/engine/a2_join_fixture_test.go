@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -25,11 +24,6 @@ import (
 func a2EngineJoinEntry(runID, entityID, stage string, route flowidentity.Route) timeridentity.StageEntryRef {
 	return timeridentity.StageEntryRef{RunID: runID, FlowScope: route.ScopeKey, InstanceID: route.InstanceID,
 		InstancePath: route.InstancePath, EntityID: entityID, Stage: stage, Cause: "construction"}
-}
-
-func a2EngineJoinFixtureEntry(entityID, stage string) timeridentity.StageEntryRef {
-	return a2EngineJoinEntry(semanticExecutionFixtureRunID, entityID, stage,
-		flowidentity.StoredRoute(".", semanticExecutionFixtureRunID, semanticExecutionFixtureRunID))
 }
 
 func a2BoundJoinContext(t *testing.T, activation joinruntime.Activation) context.Context {
@@ -99,24 +93,6 @@ func a2TypedJoinFixtureSource(t *testing.T, node identity.ExecutableNode, eventT
 	}
 	handler.Join = &plan.Spec
 	return sourceWithFixtureStages(semanticview.Wrap(bundle), ".", "awaiting", "awaiting", "ready", "attention"), handler
-}
-
-func a2MigrateJoinFixtureFile(t *testing.T, path string, replacements ...string) {
-	t.Helper()
-	body, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(body)
-	for i := 0; i < len(replacements); i += 2 {
-		if !strings.Contains(text, replacements[i]) {
-			t.Fatalf("fixture no longer contains migration source %q", replacements[i])
-		}
-		text = strings.ReplaceAll(text, replacements[i], replacements[i+1])
-	}
-	if err := os.WriteFile(path, []byte(text), 0600); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func a2CopyArrivalBarrier(t *testing.T) string {

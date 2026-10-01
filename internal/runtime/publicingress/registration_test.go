@@ -568,41 +568,93 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 		t.Fatalf("same intent resent provider apply: count=%d", applied)
 	}
 
-	t.Run("mismatched post-launch readback terminalizes without same-base resend", func(t *testing.T) {
-		mismatchTransport := &telegramRegistrationTransport{t: t, loseAck: true, readbackURL: "https://hooks.example.test/stale"}
-		mismatchReadiness := NewReadinessOwner(true)
-		mismatchReadiness.SetRuntimeReady(true)
-		mismatchReadiness.SetExposure(ExposureEvidence{
-			GenerationID: exposure.ID, StartupAuthorityID: startup.GrantID,
-			ObservedAt: exposure.CreatedAt, ExpiresAt: exposure.CreatedAt.Add(EvidenceTTL),
+	for _, tc := range []struct {
+		name        string
+		readbackURL string
+		readbackErr error
+	}{
+		{name: "mismatched", readbackURL: "https://hooks.example.test/stale"},
+		{name: "unavailable", readbackErr: errors.New("injected readback unavailable")},
+	} {
+		t.Run(tc.name+" post-launch readback terminalizes without same-base resend", func(t *testing.T) {
+			faultTransport := &telegramRegistrationTransport{t: t, loseAck: true, readbackURL: tc.readbackURL, readbackErr: tc.readbackErr}
+			faultReadiness := NewReadinessOwner(true)
+			faultReadiness.SetRuntimeReady(true)
+			faultReadiness.SetExposure(ExposureEvidence{
+				GenerationID: exposure.ID, StartupAuthorityID: startup.GrantID,
+				ObservedAt: exposure.CreatedAt, ExpiresAt: exposure.CreatedAt.Add(EvidenceTTL),
+			})
+			faultStore := &registrationEffectStore{Harness: effecttest.New(), current: true}
+			settlementErr := errors.New("injected uncertain settlement failure")
+			faultStore.SettleErr = settlementErr
+			faultController, err := NewProviderRegistrationController(RegistrationControllerOptions{
+				CredentialOwner: snapshotOwner, EffectsStore: faultStore,
+				HTTP:    runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: faultTransport}},
+				Posture: executionposture.Live, RuntimeInstanceID: uuid.NewString(),
+				StartupAuthority: func() (startupownership.GrantEvidence, error) { return startup, nil },
+				Readiness:        faultReadiness,
+			})
+			if err != nil {
+				t.Fatalf("NewProviderRegistrationController readback fault: %v", err)
+			}
+			if err := faultController.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); !errors.Is(err, settlementErr) {
+				t.Fatalf("uncertain settlement error = %v, want %v", err, settlementErr)
+			}
+			pending := faultReadiness.Snapshot(time.Now().UTC())
+			if pending.PublicIngressReady || len(pending.Registrations) != 1 || pending.Registrations[0].Phase != string(registrationPhasePendingSettlement) {
+				t.Fatalf("failed uncertain settlement lost pending lifecycle: %#v", pending)
+			}
+			pendingRegistration := pending.Registrations[0]
+			if pendingRegistration.IntentID == "" || pendingRegistration.CallbackURL == "" || pendingRegistration.SlotID == "" || pendingRegistration.CallbackMatched {
+				t.Fatalf("failed uncertain settlement lost intent identity: %#v", pendingRegistration)
+			}
+			if len(faultStore.Attempts) != 1 || len(faultStore.Settlements) != 0 {
+				t.Fatalf("failed uncertain settlement attempts/settlements = %d/%d, want 1/0", len(faultStore.Attempts), len(faultStore.Settlements))
+			}
+			faultStore.SettleErr = nil
+			if err := faultController.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); err == nil {
+				t.Fatal("unconfirmed readback returned nil")
+			}
+			uncertain := faultReadiness.Snapshot(time.Now().UTC())
+			if uncertain.PublicIngressReady || len(uncertain.Registrations) != 1 || uncertain.Registrations[0].Phase != string(registrationPhaseOutcomeUncertain) || uncertain.Registrations[0].CallbackMatched {
+				t.Fatalf("unconfirmed readback state = %#v", uncertain)
+			}
+			if len(faultStore.Attempts) != 1 || len(faultStore.Settlements) != 1 {
+				t.Fatalf("uncertain attempts/settlements = %d/%d, want 1/1", len(faultStore.Attempts), len(faultStore.Settlements))
+			}
+			for id, attempt := range faultStore.Attempts {
+				settlement := faultStore.Settlements[id]
+				if attempt.Ordinal != 1 || faultStore.States[id] != runtimeeffects.StateOutcomeUncertain ||
+					settlement.OperationID != attempt.OperationID || settlement.AttemptID != id ||
+					settlement.State != runtimeeffects.StateOutcomeUncertain || settlement.Evidence["matched"] != false {
+					t.Fatalf("readback did not terminalize the original durable attempt: attempt=%#v settlement=%#v", attempt, settlement)
+				}
+			}
+			faultTransport.mu.Lock()
+			faultTransport.readbackURL = ""
+			faultTransport.readbackErr = nil
+			faultTransport.mu.Unlock()
+			if err := faultController.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); err != nil {
+				t.Fatalf("same-base uncertain reconcile: %v", err)
+			}
+			if _, applied := faultTransport.counts(); applied != 1 {
+				t.Fatalf("same-base uncertain registration resent apply: count=%d", applied)
+			}
+			after := faultReadiness.Snapshot(time.Now().UTC())
+			if after.PublicIngressReady || len(after.Registrations) != 1 || after.Registrations[0].Phase != string(registrationPhaseOutcomeUncertain) ||
+				after.Registrations[0].IntentID != pendingRegistration.IntentID || after.Registrations[0].CallbackURL != pendingRegistration.CallbackURL ||
+				after.Registrations[0].SlotID != pendingRegistration.SlotID || len(faultStore.Attempts) != 1 {
+				t.Fatalf("same-base recovery replaced or verified uncertain identity: %#v", after)
+			}
+			rejected := httptest.NewRecorder()
+			faultController.Handler(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				t.Fatal("uncertain registration reached callback handler")
+			})).ServeHTTP(rejected, httptest.NewRequest(http.MethodPost, after.Registrations[0].CallbackURL, nil))
+			if rejected.Code != http.StatusNotFound {
+				t.Fatalf("uncertain callback status=%d, want 404", rejected.Code)
+			}
 		})
-		mismatchController, err := NewProviderRegistrationController(RegistrationControllerOptions{
-			CredentialOwner: snapshotOwner, EffectsStore: &registrationEffectStore{Harness: effecttest.New(), current: true},
-			HTTP:    runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: mismatchTransport}},
-			Posture: executionposture.Live, RuntimeInstanceID: uuid.NewString(),
-			StartupAuthority: func() (startupownership.GrantEvidence, error) { return startup, nil },
-			Readiness:        mismatchReadiness,
-		})
-		if err != nil {
-			t.Fatalf("NewProviderRegistrationController mismatch: %v", err)
-		}
-		if err := mismatchController.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); err == nil {
-			t.Fatal("mismatched readback returned nil")
-		}
-		uncertain := mismatchReadiness.Snapshot(time.Now().UTC())
-		if uncertain.PublicIngressReady || len(uncertain.Registrations) != 1 || uncertain.Registrations[0].Phase != string(registrationPhaseOutcomeUncertain) {
-			t.Fatalf("mismatched readback state = %#v", uncertain)
-		}
-		mismatchTransport.mu.Lock()
-		mismatchTransport.readbackURL = ""
-		mismatchTransport.mu.Unlock()
-		if err := mismatchController.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); err != nil {
-			t.Fatalf("same-base uncertain reconcile: %v", err)
-		}
-		if _, applied := mismatchTransport.counts(); applied != 1 {
-			t.Fatalf("same-base uncertain registration resent apply: count=%d", applied)
-		}
-	})
+	}
 
 	transport.mu.Lock()
 	transport.identifyErr = errors.New("transient identify unavailable")
@@ -789,7 +841,8 @@ func TestProviderRegistrationRetainsSettlementIdentityAndSharesCallbackCurrentne
 		t.Fatalf("NewSnapshotOwner: %v", err)
 	}
 	effectsStore := &registrationEffectStore{Harness: effecttest.New(), current: true}
-	effectsStore.SettleErr = errors.New("injected settlement acknowledgment loss")
+	settlementErr := errors.New("injected settlement acknowledgment loss")
+	effectsStore.SettleErr = settlementErr
 	transport := &telegramRegistrationTransport{t: t}
 	readiness := NewReadinessOwner(true)
 	startup := testStartupAuthority(t, "runtime-a")
@@ -811,8 +864,8 @@ func TestProviderRegistrationRetainsSettlementIdentityAndSharesCallbackCurrentne
 		ObservedAt: now, ExpiresAt: now.Add(EvidenceTTL),
 	})
 	pair := testRegistrationPair(t, registration, "hitl", "ingress:support:telegram")
-	if err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); err == nil {
-		t.Fatal("settlement acknowledgment loss returned nil")
+	if err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); !errors.Is(err, settlementErr) {
+		t.Fatalf("settlement acknowledgment loss = %v, want %v", err, settlementErr)
 	}
 	pending := readiness.Snapshot(now)
 	if pending.PublicIngressReady || len(pending.Registrations) != 1 || pending.Registrations[0].Phase != string(registrationPhasePendingSettlement) {
@@ -822,13 +875,54 @@ func TestProviderRegistrationRetainsSettlementIdentityAndSharesCallbackCurrentne
 	if applied != 1 {
 		t.Fatalf("pending settlement apply count=%d, want 1", applied)
 	}
+	pendingRegistration := pending.Registrations[0]
+	if pendingRegistration.IntentID == "" || pendingRegistration.SlotID == "" || pendingRegistration.CallbackURL == "" ||
+		pendingRegistration.CallbackMatched || len(effectsStore.Attempts) != 1 || len(effectsStore.Settlements) != 0 {
+		t.Fatalf("pending settlement identity/durable lifecycle = %#v, attempts/settlements=%d/%d", pendingRegistration, len(effectsStore.Attempts), len(effectsStore.Settlements))
+	}
+	for id, attempt := range effectsStore.Attempts {
+		if attempt.Ordinal != 1 || effectsStore.States[id] != runtimeeffects.StateResponseObserved {
+			t.Fatalf("failed settlement did not retain observed attempt: %#v state=%s", attempt, effectsStore.States[id])
+		}
+	}
+	if err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); !errors.Is(err, settlementErr) {
+		t.Fatalf("repeated settlement failure = %v, want %v", err, settlementErr)
+	}
+	retried := readiness.Snapshot(now)
+	if retried.PublicIngressReady || len(retried.Registrations) != 1 || retried.Registrations[0].Phase != string(registrationPhasePendingSettlement) ||
+		retried.Registrations[0].IntentID != pendingRegistration.IntentID || retried.Registrations[0].CallbackURL != pendingRegistration.CallbackURL ||
+		retried.Registrations[0].SlotID != pendingRegistration.SlotID || len(effectsStore.Attempts) != 1 || len(effectsStore.Settlements) != 0 {
+		t.Fatalf("settlement retry replaced or verified pending identity: %#v", retried)
+	}
+	if _, applied := transport.counts(); applied != 1 {
+		t.Fatalf("failed settlement retry resent provider apply: count=%d", applied)
+	}
+	rejected := httptest.NewRecorder()
+	controller.Handler(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("pending settlement reached callback handler")
+	})).ServeHTTP(rejected, httptest.NewRequest(http.MethodPost, pendingRegistration.CallbackURL, nil))
+	if rejected.Code != http.StatusNotFound {
+		t.Fatalf("pending callback status=%d, want 404", rejected.Code)
+	}
 	effectsStore.SettleErr = nil
 	if err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); err != nil {
 		t.Fatalf("settle original attempt by exact readback: %v", err)
 	}
 	settled := readiness.Snapshot(now)
-	if !settled.PublicIngressReady || settled.Registrations[0].Phase != string(registrationPhaseVerified) {
+	if !settled.PublicIngressReady || len(settled.Registrations) != 1 || settled.Registrations[0].Phase != string(registrationPhaseVerified) {
 		t.Fatalf("settled registration readiness = %#v", settled)
+	}
+	if settled.Registrations[0].IntentID != pendingRegistration.IntentID || settled.Registrations[0].CallbackURL != pendingRegistration.CallbackURL ||
+		settled.Registrations[0].SlotID != pendingRegistration.SlotID || len(effectsStore.Attempts) != 1 || len(effectsStore.Settlements) != 1 {
+		t.Fatalf("settlement recovery replaced original identity: %#v", settled)
+	}
+	for id, attempt := range effectsStore.Attempts {
+		settlement := effectsStore.Settlements[id]
+		if attempt.Ordinal != 1 || effectsStore.States[id] != runtimeeffects.StateSettled ||
+			settlement.OperationID != attempt.OperationID || settlement.AttemptID != id ||
+			settlement.State != runtimeeffects.StateSettled || settlement.Evidence["matched"] != true {
+			t.Fatalf("exact readback did not settle original durable attempt: attempt=%#v settlement=%#v", attempt, settlement)
+		}
 	}
 	_, applied = transport.counts()
 	if applied != 1 {

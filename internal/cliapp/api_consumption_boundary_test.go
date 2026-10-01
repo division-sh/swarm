@@ -45,7 +45,7 @@ func TestCLIRuntimeStateAPIConsumersAreExplicitlyAccounted(t *testing.T) {
 		if name == "cli_api.go" {
 			continue
 		}
-		if strings.Contains(source, "newCLIAPIClient(") || strings.Contains(source, "newCLIAPIClientFromConfig(") {
+		if strings.Contains(source, "newCLIAPIClient(") {
 			gotAPIConsumers[name] = struct{}{}
 		}
 	}

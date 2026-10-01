@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -1196,21 +1195,6 @@ func normalizePolicyMap(value any) (map[string]any, bool) {
 	default:
 		return nil, false
 	}
-}
-
-func validateReadableDir(path, prefix string) error {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return fmt.Errorf("%s is not configured", prefix)
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return fmt.Errorf("%s %s: %w", prefix, path, err)
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("%s %s is not a directory", prefix, path)
-	}
-	return nil
 }
 
 func asString(v any) string {

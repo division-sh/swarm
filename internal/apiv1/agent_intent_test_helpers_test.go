@@ -45,25 +45,6 @@ func withAPITestIntent(t testing.TB, cfg runtimeactors.AgentConfig) runtimeactor
 	return cfg
 }
 
-func apiTestCatalogAgentDefinition(t testing.TB, agentID, content string) map[string]any {
-	t.Helper()
-	intent := apiTestResolvedIntent(t, agentID, content)
-	return map[string]any{
-		"agent_id":            agentID,
-		"agent_name_owner":    "swarm://agent/" + agentID,
-		"role":                "worker",
-		"type":                "managed",
-		"model":               "regular",
-		"memory":              false,
-		"intent_kind":         string(intent.Kind),
-		"intent_source":       intent.Coordinate,
-		"intent_provenance":   intent.Provenance,
-		"intent_content_hash": intent.ContentHash,
-		"intent_identity":     intent.Identity,
-		"intent_content":      intent.Content,
-	}
-}
-
 func apiTestResolvedIntent(t testing.TB, agentID, content string) runtimeagentintent.Resolved {
 	t.Helper()
 	intent, err := runtimeagentintent.Resolve(

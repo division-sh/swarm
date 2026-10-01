@@ -900,13 +900,6 @@ func authoringFanOutSiteSource(site runtimecontracts.FanOutSiteRef) string {
 		return "handler.fan_out"
 	}
 }
-func indexedHandlerGraphSource(prefix string, idx int, id string) string {
-	id = strings.TrimSpace(id)
-	if id != "" {
-		return fmt.Sprintf("%s[%d:%s]", strings.TrimSpace(prefix), idx, id)
-	}
-	return fmt.Sprintf("%s[%d]", strings.TrimSpace(prefix), idx)
-}
 
 func authoringStringSet(values []string) map[string]struct{} {
 	out := make(map[string]struct{}, len(values))

@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -87,25 +86,6 @@ func applyMaterializedEngineStateMutationForTest(
 	}
 	if err := applyEngineStateMutation(instance, mutation, source, flowID); err != nil {
 		t.Fatalf("apply materialized engine state mutation: %v", err)
-	}
-}
-
-func assertEntityStateField(t *testing.T, db *sql.DB, entityID, field string, want any) {
-	t.Helper()
-	var gotRaw []byte
-	if err := db.QueryRowContext(testAuthorActivityContext(t, context.Background()), `
-		SELECT fields -> $3
-		FROM entity_state
-		WHERE run_id = $1::uuid AND entity_id = $2::uuid
-	`, testPipelineRunID, entityID, field).Scan(&gotRaw); err != nil {
-		t.Fatalf("load entity_state fields for %s: %v", entityID, err)
-	}
-	wantRaw, err := json.Marshal(want)
-	if err != nil {
-		t.Fatalf("marshal wanted entity_state field %s: %v", field, err)
-	}
-	if string(gotRaw) != string(wantRaw) {
-		t.Fatalf("entity_state.fields[%q] = %s, want %s", field, gotRaw, wantRaw)
 	}
 }
 
@@ -401,35 +381,6 @@ func TestApplyEngineStateMutationKeepsTypedParentRouteIndependent(t *testing.T) 
 	if instance.ParentFlowID != "typed-root" || instance.ParentFlowInstance != "typed-root/inst-1" || instance.ParentEntityID != "typed-parent" {
 		t.Fatalf("typed parent route = %q/%q/%q, want original", instance.ParentFlowID, instance.ParentFlowInstance, instance.ParentEntityID)
 	}
-}
-
-func mutationParentRoutePinOutputSource() semanticview.Source {
-	child := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{
-			FlowPath: "child",
-		},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{
-				Outputs: runtimecontracts.FlowOutputPins{
-					EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "child.done"}},
-				},
-			},
-		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"child.done": {},
-		},
-		Path: "child",
-	}
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &runtimecontracts.FlowContractView{
-				Children: []runtimecontracts.FlowContractView{child},
-			},
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				"child": &child,
-			},
-		},
-	})
 }
 
 type preparedFlowDeactivationTest struct{}
@@ -955,22 +906,6 @@ func TestAccumulatorAppend_ReturnsWorkflowStoreMutationError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected accumulator append to fail when workflow store mutate fails")
 	}
-}
-
-func mustStaticExecutionRoutingSource(route events.RouteIdentity) events.RoutingSource {
-	source, err := events.NewStaticFlowRoutingSource(route)
-	if err != nil {
-		panic(err)
-	}
-	return source
-}
-
-func mustRootExecutionRoutingSource(entityID string) events.RoutingSource {
-	source, err := events.NewRootRoutingSource(entityID)
-	if err != nil {
-		panic(err)
-	}
-	return source
 }
 
 func TestPipelineEngineEvaluator_ExposesAccumulatedScopeForCEL(t *testing.T) {

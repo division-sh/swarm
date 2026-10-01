@@ -296,12 +296,3 @@ func TestHostManagerContainerSurfacesAreNoop(t *testing.T) {
 		t.Fatalf("inventory = %#v, want empty host container inventory", inventory)
 	}
 }
-
-func canonicalTestPath(t *testing.T, path string) string {
-	t.Helper()
-	canonical, err := canonicalPathForOverlap(path, "test path")
-	if err != nil {
-		t.Fatalf("canonical test path %s: %v", path, err)
-	}
-	return canonical
-}

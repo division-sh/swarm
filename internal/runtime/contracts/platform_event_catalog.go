@@ -197,36 +197,6 @@ func platformEventMappingValue(node yaml.Node, key string) *yaml.Node {
 	return nil
 }
 
-func platformEventStringList(node yaml.Node, key string) []string {
-	value := platformEventMappingValue(node, key)
-	if value == nil {
-		return nil
-	}
-	switch value.Kind {
-	case yaml.SequenceNode:
-		out := make([]string, 0, len(value.Content))
-		for _, item := range value.Content {
-			if item == nil {
-				continue
-			}
-			text := strings.TrimSpace(item.Value)
-			if text != "" {
-				out = append(out, text)
-			}
-		}
-		sort.Strings(out)
-		return out
-	case yaml.ScalarNode:
-		text := strings.TrimSpace(value.Value)
-		if text == "" {
-			return nil
-		}
-		return []string{text}
-	default:
-		return nil
-	}
-}
-
 func sortedEventFieldNames(fields map[string]EventFieldSpec) []string {
 	names := make([]string, 0, len(fields))
 	for name := range fields {

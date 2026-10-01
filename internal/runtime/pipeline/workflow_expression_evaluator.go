@@ -7,8 +7,6 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
-	"github.com/google/cel-go/common/types"
-	"github.com/google/cel-go/common/types/ref"
 )
 
 var workflowExpressionKeywordReplacer = regexp.MustCompile(`\b(AND|OR|NOT|TRUE|FALSE)\b`)
@@ -400,91 +398,6 @@ func normalizeWorkflowExpressionStringLiterals(expression string) string {
 		out.WriteByte(ch)
 	}
 	return out.String()
-}
-
-func workflowExpressionCountGE(args ...ref.Val) ref.Val {
-	if len(args) != 2 {
-		return types.Int(0)
-	}
-	threshold, ok := workflowExpressionNumber(args[1])
-	if !ok {
-		return types.Int(0)
-	}
-	count := 0
-	for _, item := range workflowExpressionListValues(args[0]) {
-		if value, ok := workflowExpressionAnyNumber(item); ok && value >= threshold {
-			count++
-		}
-	}
-	return types.Int(count)
-}
-
-func workflowExpressionNumber(value ref.Val) (float64, bool) {
-	if value == nil {
-		return 0, false
-	}
-	return workflowExpressionAnyNumber(value.Value())
-}
-
-func workflowExpressionAnyNumber(value any) (float64, bool) {
-	switch typed := value.(type) {
-	case int:
-		return float64(typed), true
-	case int8:
-		return float64(typed), true
-	case int16:
-		return float64(typed), true
-	case int32:
-		return float64(typed), true
-	case int64:
-		return float64(typed), true
-	case uint:
-		return float64(typed), true
-	case uint8:
-		return float64(typed), true
-	case uint16:
-		return float64(typed), true
-	case uint32:
-		return float64(typed), true
-	case uint64:
-		return float64(typed), true
-	case float32:
-		return float64(typed), true
-	case float64:
-		return typed, true
-	case types.Int:
-		return float64(typed), true
-	case types.Uint:
-		return float64(typed), true
-	case types.Double:
-		return float64(typed), true
-	default:
-		return 0, false
-	}
-}
-
-func workflowExpressionListValues(value ref.Val) []any {
-	if value == nil {
-		return nil
-	}
-	switch typed := value.Value().(type) {
-	case []any:
-		return typed
-	case []int:
-		out := make([]any, 0, len(typed))
-		for _, item := range typed {
-			out = append(out, item)
-		}
-		return out
-	case []float64:
-		out := make([]any, 0, len(typed))
-		for _, item := range typed {
-			out = append(out, item)
-		}
-		return out
-	default:
-		return nil
-	}
 }
 
 func workflowExpressionPolicyValue(policy map[string]any, key string) (any, bool) {

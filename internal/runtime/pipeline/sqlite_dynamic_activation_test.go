@@ -800,14 +800,3 @@ nested-fanout-node:
 `,
 	})
 }
-
-func assertSQLiteWorkflowInstancePersisted(t *testing.T, store *workflowInstanceStore, ctx context.Context, storageRef string) {
-	t.Helper()
-	instance, ok, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, storageRef))
-	if err != nil {
-		t.Fatalf("load workflow instance %s: %v", storageRef, err)
-	}
-	if !ok || strings.TrimSpace(instance.StorageRef) != storageRef {
-		t.Fatalf("workflow instance %s loaded=%v value=%+v", storageRef, ok, instance)
-	}
-}

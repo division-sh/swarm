@@ -497,29 +497,3 @@ func sourceFlowPath(source Source, flowID string) string {
 	}
 	return source.FlowPath(flowID)
 }
-
-func sortedSubscriptionEventSet(events map[string]struct{}) []string {
-	out := make([]string, 0, len(events))
-	for eventType := range events {
-		if eventType = eventidentity.Normalize(eventType); eventType != "" {
-			out = append(out, eventType)
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
-func normalizedSubscriptionValues(values []string) []string {
-	seen := map[string]struct{}{}
-	for _, value := range values {
-		if value = eventidentity.Normalize(value); value != "" {
-			seen[value] = struct{}{}
-		}
-	}
-	out := make([]string, 0, len(seen))
-	for value := range seen {
-		out = append(out, value)
-	}
-	sort.Strings(out)
-	return out
-}

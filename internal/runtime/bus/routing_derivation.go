@@ -904,10 +904,6 @@ func (rt *RouteTable) snapshotGenerationCurrent(snapshot routeTableSnapshotGener
 	return snapshot.value != 0 && rt.generation == snapshot.value
 }
 
-func (rt *RouteTable) addFlowInstanceRouteForContext(ctx context.Context, req FlowInstanceRouteMaterializationRequest) error {
-	return rt.addFlowInstanceRouteForContextWithInputProducers(ctx, req, nil)
-}
-
 // A supplied resolver belongs only to the current unchanged-source topology
 // operation; the table retains its graph but never retains this resolver.
 func (rt *RouteTable) addFlowInstanceRouteForContextWithInputProducers(ctx context.Context, req FlowInstanceRouteMaterializationRequest, inputProducers *runtimepinrouting.FlowInputProducerResolver) error {
@@ -1580,44 +1576,6 @@ func routeExecutableNodeDeclarations(source semanticview.Source, flowPath string
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Node.Key() < out[j].Node.Key() })
 	return out, nil
-}
-
-func routeFlowPath(source semanticview.Source, flowID string) string {
-	flowID = strings.TrimSpace(flowID)
-	if flowID == "" {
-		return ""
-	}
-	if flowID == "." {
-		return "."
-	}
-	if source != nil {
-		if path := source.FlowPath(flowID); path != "" {
-			return path
-		}
-	}
-	return flowID
-}
-
-func routeFlowIDForPath(source semanticview.Source, flowPath string) string {
-	flowPath = strings.Trim(strings.TrimSpace(flowPath), "/")
-	if source == nil || flowPath == "" {
-		return ""
-	}
-	for _, scope := range source.FlowScopes() {
-		if strings.Trim(strings.TrimSpace(scope.Path), "/") == flowPath {
-			return strings.TrimSpace(scope.ID)
-		}
-	}
-	scopePath := strings.TrimSpace(runtimeflowidentity.SemanticScopeFromInstancePath(flowPath))
-	if scopePath == "" {
-		return ""
-	}
-	for _, scope := range source.FlowScopes() {
-		if strings.Trim(strings.TrimSpace(scope.Path), "/") == scopePath {
-			return strings.TrimSpace(scope.ID)
-		}
-	}
-	return ""
 }
 
 func routeResolveSubscriberPatterns(source semanticview.Source, kind subscriberKind, flowID string, inputEvents []string, authorityPath, routePath string, localEvents map[string]struct{}, raw string) ([]routeResolvedPattern, error) {

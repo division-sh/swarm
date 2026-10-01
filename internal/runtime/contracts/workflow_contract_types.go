@@ -1655,11 +1655,6 @@ var agentRegistryEntryFieldOptions = map[string]struct{}{
 	"implementation":     {},
 }
 
-func supportedAgentRegistryEntryField(field string) bool {
-	_, ok := agentRegistryEntryFieldOptions[strings.TrimSpace(field)]
-	return ok
-}
-
 func (e AgentRegistryEntry) ConfiguredTools() []string {
 	if len(e.Tools) > 0 {
 		return append([]string{}, e.Tools...)

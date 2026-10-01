@@ -183,10 +183,6 @@ func bindCLIOutputFlags(cmd *cobra.Command, opts *cliOutputOptions) {
 	cmd.Flags().BoolVar(&opts.noColor, cliOutputNoColorFlag, false, cliOutputNoColorFlagHelp)
 }
 
-func bindCLIYAMLOutputFlag(cmd *cobra.Command, opts *cliOutputOptions) {
-	cmd.Flags().BoolVar(&opts.asYAML, cliOutputYAMLFlag, false, cliOutputYAMLFlagHelp)
-}
-
 // bindCLIOutputVerboseFlag binds the shared --verbose flag without sweeping it
 // onto every bindCLIOutputFlags consumer; commands opt into the full record
 // projection explicitly.

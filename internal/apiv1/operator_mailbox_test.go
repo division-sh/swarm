@@ -271,10 +271,6 @@ type activeAPIV1RuntimeBusAgentStore interface {
 	storetest.AgentFixtureStore
 }
 
-func seedActiveAPIV1RuntimeBusAgent(t *testing.T, ctx context.Context, owner activeAPIV1RuntimeBusAgentStore, agentID string) {
-	seedActiveAPIV1RuntimeBusAgentAt(t, ctx, owner, agentID, "")
-}
-
 func seedActiveAPIV1RuntimeBusAgentNewRun(t *testing.T, ctx context.Context, owner activeAPIV1RuntimeBusAgentStore, agentID string) (context.Context, string) {
 	t.Helper()
 	if _, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx); !ok {
@@ -284,15 +280,6 @@ func seedActiveAPIV1RuntimeBusAgentNewRun(t *testing.T, ctx context.Context, own
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	seedActiveAPIV1RuntimeBusAgentForRun(t, ctx, owner, runID, agentID, "")
 	return ctx, runID
-}
-
-func seedActiveAPIV1RuntimeBusAgentAt(t *testing.T, ctx context.Context, owner activeAPIV1RuntimeBusAgentStore, agentID, flowPath string) {
-	t.Helper()
-	runID := runtimecorrelation.RunIDFromContext(ctx)
-	if runID == "" {
-		runID = runtimebustest.DefaultRunID
-	}
-	seedActiveAPIV1RuntimeBusAgentForRun(t, ctx, owner, runID, agentID, flowPath)
 }
 
 func seedActiveAPIV1RuntimeBusAgentForRun(t *testing.T, ctx context.Context, owner activeAPIV1RuntimeBusAgentStore, runID, agentID, flowPath string) {

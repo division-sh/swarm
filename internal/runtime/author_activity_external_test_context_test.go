@@ -18,7 +18,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -169,76 +168,6 @@ func closeExternalManagerTestGeneration(manager *runtimemanager.AgentManager, bu
 		}
 	}
 	return nil
-}
-
-type externalTestFlowInstanceActivationOwner struct {
-	mu       sync.Mutex
-	activate runtimepipeline.FlowInstanceActivator
-	pending  map[runtimeflowidentity.Route]runtimepipeline.FlowInstanceActivationRequest
-}
-
-func newExternalTestFlowInstanceActivationOwner(activate runtimepipeline.FlowInstanceActivator) *externalTestFlowInstanceActivationOwner {
-	return &externalTestFlowInstanceActivationOwner{
-		activate: activate,
-		pending:  make(map[runtimeflowidentity.Route]runtimepipeline.FlowInstanceActivationRequest),
-	}
-}
-
-func (o *externalTestFlowInstanceActivationOwner) PrepareFlowInstanceActivation(_ context.Context, req runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
-	if req.OccurredAt.IsZero() {
-		req.OccurredAt = req.TriggerEvent.CreatedAt()
-	}
-	if strings.TrimSpace(req.InitialState) == "" {
-		if schema, ok := req.ContractBundle.FlowSchemaByID(req.Instance.TemplateID); ok {
-			req.InitialState = schema.LoweredInitialState()
-		}
-	}
-	if strings.TrimSpace(req.InitialState) == "" {
-		req.InitialState = "pending"
-	}
-	fields := make(map[string]any, len(req.Fields))
-	for key, value := range req.Fields {
-		fields[key] = value
-	}
-	parentRoute := req.Instance.ParentRoute.Normalized()
-	bundleHash := authorActivityTestSourceArtifactFact.BundleHash()
-	readiness := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
-		Identity: req.Instance, RunID: req.TriggerEvent.RunID(),
-		BundleHash:      bundleHash,
-		WorkflowVersion: req.ContractBundle.WorkflowVersion(), ExecutionMode: "live",
-	}
-	instance := runtimepipeline.WorkflowInstance{
-		InstanceID: req.Instance.InstanceID, StorageRef: req.Instance.InstancePath, EntityID: req.Instance.EntityID,
-		ParentFlowID: parentRoute.FlowID, ParentFlowInstance: parentRoute.FlowInstance, ParentEntityID: req.Instance.ParentEntityID,
-		WorkflowName: req.Instance.TemplateID, WorkflowVersion: req.ContractBundle.WorkflowVersion(),
-		CurrentState: req.InitialState, Config: req.Config, Fields: fields, Bookkeeping: req.Bookkeeping,
-		EnteredStageAt: req.OccurredAt, CreatedAt: req.OccurredAt, RuntimeReadiness: &readiness,
-		EntityType: "test_entity",
-	}
-	plan := runtimepipeline.FlowInstanceActivationPlan{
-		Instance: instance, Identity: req.Instance, Readiness: readiness, OccurredAt: req.OccurredAt,
-	}
-	if err := plan.Validate(); err != nil {
-		return runtimepipeline.FlowInstanceActivationPlan{}, err
-	}
-	o.mu.Lock()
-	o.pending[req.Instance.Route()] = req
-	o.mu.Unlock()
-	return plan, nil
-}
-
-func (o *externalTestFlowInstanceActivationOwner) FinalizeCommittedFlowInstanceActivation(ctx context.Context, committed runtimepipeline.CommittedFlowInstanceActivation) error {
-	plan := committed.Plan
-	o.mu.Lock()
-	req, ok := o.pending[plan.Identity.Route()]
-	if ok {
-		delete(o.pending, plan.Identity.Route())
-	}
-	o.mu.Unlock()
-	if !ok || o.activate == nil {
-		return nil
-	}
-	return o.activate(ctx, req)
 }
 
 type testAuthorActivityCatalogRegistrar interface {
@@ -669,23 +598,6 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 		}
 	})
 	return bus, nil
-}
-
-func testSourceArtifactFact(t testing.TB, bundleHash string) runtimecorrelation.SourceArtifactFact {
-	t.Helper()
-	fact, err := runtimecorrelation.NewSourceArtifactFact(strings.TrimSpace(bundleHash))
-	if err != nil {
-		t.Fatalf("construct external test bundle source fact: %v", err)
-	}
-	return fact
-}
-
-func mustExternalTestSourceArtifactFact(bundleHash string) runtimecorrelation.SourceArtifactFact {
-	fact, err := runtimecorrelation.NewSourceArtifactFact(strings.TrimSpace(bundleHash))
-	if err != nil {
-		panic(err)
-	}
-	return fact
 }
 
 func runtimeTestEventBusWorkOwner(t testing.TB, bus *runtimebus.EventBus) worklifetime.Occurrence {

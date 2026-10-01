@@ -6,7 +6,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
-	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -78,15 +77,6 @@ func TestW5FreshMemorySchemaHasNoSourceBothStores(t *testing.T) {
 			}
 		})
 	}
-}
-
-func mustStorageFields(t testing.TB, identity agentidentity.Identity) agentidentity.StorageFields {
-	t.Helper()
-	fields, err := identity.StorageFields()
-	if err != nil {
-		t.Fatalf("agent identity storage fields: %v", err)
-	}
-	return fields
 }
 
 func TestManagerStore_LoadAgents_FailsClosedOnMalformedRuntimeDescriptor(t *testing.T) {

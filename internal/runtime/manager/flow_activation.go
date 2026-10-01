@@ -1021,22 +1021,6 @@ func staticAgentFlowGroupKey(flowID, flowPath string) string {
 	return strings.TrimSpace(flowID) + "\x00" + strings.Trim(strings.TrimSpace(flowPath), "/")
 }
 
-func staticAgentsForDeclarations(runID string, source semanticview.Source, group staticAgentFlowGroup) ([]PersistedAgent, error) {
-	blueprints, err := staticAgentBlueprintsForDeclarations(source, group)
-	if err != nil {
-		return nil, err
-	}
-	records := make([]PersistedAgent, 0, len(blueprints))
-	for _, blueprint := range blueprints {
-		record, err := blueprint.Materialize(runID)
-		if err != nil {
-			return nil, err
-		}
-		records = append(records, record)
-	}
-	return records, nil
-}
-
 func staticAgentBlueprintsForDeclarations(source semanticview.Source, group staticAgentFlowGroup) ([]staticAgentBlueprint, error) {
 	declarations := append([]semanticview.AgentDeclaration(nil), group.Declarations...)
 	sort.Slice(declarations, func(i, j int) bool {
@@ -1365,20 +1349,6 @@ func buildFlowAgentConfig(
 	cfg.Identity = identity
 	cfg.NormalizeRuntimeDescriptor()
 	return cfg, nil
-}
-
-func staticRequiredAgentsForDeclarations(
-	runID string,
-	source semanticview.Source,
-	flowID string,
-	flowPath string,
-	required []runtimecontracts.FlowRequiredAgent,
-) ([]PersistedAgent, error) {
-	blueprints, err := staticRequiredAgentBlueprintsForDeclarations(source, flowID, flowPath, required)
-	if err != nil {
-		return nil, err
-	}
-	return materializeStaticAgentBlueprints(runID, blueprints)
 }
 
 func staticRequiredAgentBlueprintsForDeclarations(

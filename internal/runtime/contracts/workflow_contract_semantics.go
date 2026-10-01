@@ -349,18 +349,6 @@ func deriveWorkflowStageTopologies(root *FlowSchemaDocument, semantics WorkflowS
 	return out
 }
 
-func joinOutputField(path string) string {
-	path = strings.TrimSpace(path)
-	if !strings.HasPrefix(path, "payload.") {
-		return ""
-	}
-	field := strings.TrimPrefix(path, "payload.")
-	if field == "" || strings.Contains(field, ".") {
-		return ""
-	}
-	return field
-}
-
 func legacyWorkflowEntitySchema(bundle *WorkflowContractBundle) EntitySchema {
 	if bundle == nil {
 		return EntitySchema{}

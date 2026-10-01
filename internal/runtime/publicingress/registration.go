@@ -336,18 +336,6 @@ func (c *ProviderRegistrationController) admitCredentials(ctx context.Context, p
 	return provider, signing, nil
 }
 
-func (c *ProviderRegistrationController) admitReadbackCandidate(ctx context.Context, state registrationState) (admittedPair, error) {
-	active := state.activeIntent()
-	if active == nil || active.BaseFingerprint == "" || active.SlotID == "" {
-		return admittedPair{}, fmt.Errorf("provider registration pending readback identity is incomplete")
-	}
-	provider, signing, err := c.admitCredentials(ctx, state.Pair)
-	if err != nil {
-		return admittedPair{}, err
-	}
-	return admittedPair{pair: state.Pair, provider: provider, signing: signing, slotID: active.SlotID, base: active.BaseFingerprint}, nil
-}
-
 func (c *ProviderRegistrationController) reconcilePair(ctx context.Context, exposure Generation, startup runtimestartupownership.GrantEvidence, candidate admittedPair) error {
 	key := admittedPairKey(candidate)
 	state, _ := c.snapshot.state(key)
@@ -545,28 +533,6 @@ func (c *ProviderRegistrationController) refreshReadback(ctx context.Context, ca
 	state.Terminal = nil
 	state.Phase = registrationPhaseVerified
 	state.Failure = ""
-	c.publishState(key, state)
-	return nil
-}
-
-func (c *ProviderRegistrationController) terminalizePendingReadback(ctx context.Context, key string, state registrationState, cause error) error {
-	if state.Attempt == nil || !state.Attempt.Intent.HasPending {
-		return fmt.Errorf("provider registration pending settlement has no live durable attempt")
-	}
-	intent := cloneRegistrationIntent(state.Attempt.Intent)
-	pending := intent.Pending
-	if err := pending.SettleReadback(ctx, false, cause); err != nil {
-		state.Failure = err.Error()
-		c.publishState(key, state)
-		return err
-	}
-	intent.HasPending = false
-	intent.Pending = runtimeregistration.PendingApply{}
-	intent.Matched = false
-	state.Terminal = &intent
-	state.Attempt = nil
-	state.Phase = registrationPhaseOutcomeUncertain
-	state.Failure = cause.Error()
 	c.publishState(key, state)
 	return nil
 }

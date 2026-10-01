@@ -195,17 +195,6 @@ func appendExpressionValueExecutableReaders(out *[]expressionReference, kind str
 	appendExecutableReader(out, kind+".cel", value.CEL, phase)
 }
 
-func appendExpressionValueMapExecutableReaders(out *[]expressionReference, kind string, values map[string]runtimecontracts.ExpressionValue, phase runtimepipeline.WorkflowEntityFieldLifecyclePhase) {
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		appendExpressionValueExecutableReaders(out, kind+"."+strings.TrimSpace(key), values[key], phase)
-	}
-}
-
 func appendActivityExecutableReaders(out *[]expressionReference, ctx executableReaderContext, kind string, activity runtimecontracts.ActivitySpec) {
 	phase := runtimepipeline.WorkflowEntityFieldLifecycleRule
 	keys := make([]string, 0, len(activity.Input))

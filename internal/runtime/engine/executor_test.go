@@ -637,7 +637,6 @@ type recordingPublicationCommitter struct {
 	intents []EmitIntent
 	err     error
 }
-type stubDispatcher struct{}
 type lockOrderStateRepo struct {
 	order *[]string
 }
@@ -750,7 +749,6 @@ func (o *recordingPublicationCommitter) CommitPublications(_ context.Context, in
 	o.intents = append(o.intents, intents...)
 	return nil
 }
-func (stubDispatcher) DispatchPostCommit(context.Context, []EmitIntent) error { return nil }
 func (s stubEvaluator) EvalBool(expression string, _ BaseContext, _ workflowexpr.ValueExpressionOptions) (bool, error) {
 	if err := s.errs[expression]; err != nil {
 		return false, err

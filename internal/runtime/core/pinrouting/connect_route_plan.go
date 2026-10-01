@@ -709,16 +709,6 @@ func (e ConnectRoutePlanEndpoint) acceptsReceiverTarget(target events.RouteIdent
 		runtimeflowidentity.SemanticScopeFromInstancePath(target.FlowInstance) == e.flowPath.value
 }
 
-func (e ConnectRoutePlanEndpoint) subscriberPathMatchesReceiver(subscriberPath string, target events.RouteIdentity) bool {
-	receiverPath := e.flowPath.value
-	if receiverPath == "" {
-		receiverPath = e.flowID.value
-	}
-	target = target.Normalized()
-	return subscriberPath != "" && receiverPath != "" && target.FlowInstance != "" && subscriberPath == receiverPath &&
-		(target.FlowInstance == receiverPath || runtimeflowidentity.SemanticScopeFromInstancePath(target.FlowInstance) == receiverPath)
-}
-
 func (p ConnectRoutePlan) ReceiverLocalEvent() events.EventType { return p.receiver.event.value }
 
 func (p ConnectRoutePlan) ReceiverRoute(flowInstance, entityID string) events.RouteIdentity {
@@ -3101,97 +3091,4 @@ func descriptorBelongsToReceiver(plan ConnectRoutePlan, descriptor Descriptor) b
 		receiverPath = plan.receiver.flowID.value
 	}
 	return receiverPath != "" && (flowInstance == receiverPath || runtimeflowidentity.SemanticScopeFromInstancePath(flowInstance) == receiverPath)
-}
-
-func normalizedStringList(in []string) []string {
-	if len(in) == 0 {
-		return nil
-	}
-	seen := map[string]struct{}{}
-	out := make([]string, 0, len(in))
-	for _, value := range in {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		out = append(out, value)
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-func stringListContains(values []string, needle string) bool {
-	needle = strings.TrimSpace(needle)
-	if needle == "" {
-		return false
-	}
-	for _, value := range values {
-		if strings.TrimSpace(value) == needle {
-			return true
-		}
-	}
-	return false
-}
-
-func duplicateString(values []string) string {
-	seen := map[string]struct{}{}
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			return value
-		}
-		seen[value] = struct{}{}
-	}
-	return ""
-}
-
-func sameStringSet(left, right []string) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	seen := map[string]struct{}{}
-	for _, value := range left {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			return false
-		}
-		seen[value] = struct{}{}
-	}
-	for _, value := range right {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			return false
-		}
-		if _, ok := seen[value]; !ok {
-			return false
-		}
-	}
-	return true
-}
-
-func cloneStringMap(in map[string]string) map[string]string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(in))
-	for key, value := range in {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		out[key] = strings.TrimSpace(value)
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
 }

@@ -552,8 +552,3 @@ func newSQLiteRuntimeToolStoreForTest(t *testing.T) *store.SQLiteRuntimeStore {
 	}
 	return sqliteStore
 }
-
-func ensureSQLiteEntityToolTestRun(t *testing.T, sqliteStore *store.SQLiteRuntimeStore) {
-	t.Helper()
-	runlifecyclefixture.RequireSQLite(t, unmanagedToolTestContext(), storetest.DatabaseForTest(sqliteStore), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: entityToolTestRunID, StartedAt: time.Now().UTC(), BundleHash: authorActivityTestBundleHash})
-}

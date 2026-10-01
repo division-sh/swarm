@@ -13,7 +13,6 @@ import (
 	"testing"
 
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
-	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 )
 
@@ -55,21 +54,6 @@ func setDoctorProviderSecrets(t *testing.T, values map[string]string) {
 	for key, value := range values {
 		if err := store.Set(context.Background(), key, value); err != nil {
 			t.Fatalf("Set provider credential: %v", err)
-		}
-	}
-}
-
-func setDoctorManagedCredentials(t *testing.T, records ...runtimemanagedcredentials.Record) {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "managed-credentials.json")
-	t.Setenv("SWARM_MANAGED_CREDENTIALS_FILE", path)
-	store, err := runtimemanagedcredentials.NewFileStore(path)
-	if err != nil {
-		t.Fatalf("NewFileStore managed credentials: %v", err)
-	}
-	for _, record := range records {
-		if err := store.Put(context.Background(), record); err != nil {
-			t.Fatalf("Put managed credential: %v", err)
 		}
 	}
 }
@@ -738,17 +722,6 @@ func writeDoctorClaudeConfig(t *testing.T, dockerBin string) string {
 	return path
 }
 
-func writeDoctorClaudeHostConfig(t *testing.T, dockerBin string) string {
-	t.Helper()
-	configPath := writeDoctorClaudeConfig(t, dockerBin)
-	raw, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatalf("read doctor config: %v", err)
-	}
-	writeRuntimeConfigText(t, configPath, strings.Replace(string(raw), "workspace:\n", "workspace:\n  backend: host\n", 1))
-	return configPath
-}
-
 func writeDoctorTargetRepo(t *testing.T) string {
 	t.Helper()
 	repo := t.TempDir()
@@ -778,17 +751,6 @@ func writeDoctorTargetRuntimeConfig(t *testing.T, body string) string {
 		"    output_format: json",
 	}, "\n")+"\n")
 	return path
-}
-
-func writeDoctorAgentFreeContractsFixture(t *testing.T) string {
-	t.Helper()
-	root := t.TempDir()
-
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: agent-free-doctor
-stages:
-  idle: {initial: true, terminal: true}
-`)
-	return root
 }
 
 type doctorMockExecutionFixtureOptions struct {
@@ -845,65 +807,6 @@ shell:
 	return root
 }
 
-func runDoctorPreflightJSON(t *testing.T, configPath, sourceRoot, backend string) (LocalPreflightReport, int, string) {
-	t.Helper()
-	args := doctorClaudeArgs(t, configPath, true)
-	for index := 0; index+1 < len(args); index++ {
-		switch args[index] {
-		case "--backend":
-			args[index+1] = backend
-		}
-	}
-	var stdout, stderr bytes.Buffer
-	if !filepath.IsAbs(sourceRoot) {
-		sourceRoot = filepath.Join(RepoRoot(), sourceRoot)
-	}
-	code := executeRootCommandWithOptions(context.Background(), sourceRoot, args, &stdout, &stderr, defaultRootCommandOptions())
-	var report LocalPreflightReport
-	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
-		t.Fatalf("parse doctor preflight JSON: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
-	}
-	return report, code, stderr.String()
-}
-
-func writeDoctorTelegramConnectorContractsFixture(t *testing.T) string {
-	t.Helper()
-	root := writeDoctorAgentFreeContractsFixture(t)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `
-telegram.send_message:
-  category: provider_connector
-  description: send Telegram messages
-  handler_type: http
-  effect_class: non_idempotent_write
-  credentials:
-    - telegram_bot_token
-  input_schema:
-    type: object
-    required: [chat_id, text]
-    properties:
-      chat_id:
-        type: string
-      text:
-        type: string
-  response_success:
-    kind: http_status_2xx
-  http:
-    method: POST
-    url: https://api.telegram.org/bot{{credentials.telegram_bot_token}}/sendMessage
-    body:
-      chat_id: "{{input.chat_id}}"
-      text: "{{input.text}}"
-`)
-	return root
-}
-
-func writeDoctorSlackConnectorPackContractsFixture(t *testing.T) string {
-	t.Helper()
-	root := writeDoctorAgentFreeContractsFixture(t)
-
-	return root
-}
-
 func configureDoctorDockerStub(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "docker")
@@ -952,36 +855,6 @@ esac
 	return path
 }
 
-func assertLocalPreflightFindingState(t *testing.T, report LocalPreflightReport, code string, status LocalPreflightFindingStatus, severity LocalPreflightSeverity) {
-	t.Helper()
-	finding, ok := localPreflightReportFinding(report, code)
-	if !ok {
-		t.Fatalf("report missing finding %q: %#v", code, report.Findings)
-	}
-	if finding.Status != status || finding.Severity != severity {
-		t.Fatalf("finding %q = %#v, want status=%s severity=%s", code, finding, status, severity)
-	}
-}
-
-func assertDoctorDockerCalls(t *testing.T, path string, required, forbidden []string) {
-	t.Helper()
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read Docker call log: %v", err)
-	}
-	calls := string(raw)
-	for _, want := range required {
-		if !strings.Contains(calls, want) {
-			t.Fatalf("Docker calls missing %q:\n%s", want, calls)
-		}
-	}
-	for _, forbiddenCall := range forbidden {
-		if strings.Contains(calls, forbiddenCall) {
-			t.Fatalf("Docker calls include dependent probe %q after upstream failure:\n%s", forbiddenCall, calls)
-		}
-	}
-}
-
 func freeDoctorTCPPort(t *testing.T) string {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -1003,24 +876,6 @@ func localPreflightReportHasCode(report LocalPreflightReport, code string) bool 
 		}
 	}
 	return false
-}
-
-func localPreflightReportFindingContains(report LocalPreflightReport, code, want string) bool {
-	for _, finding := range report.Findings {
-		if finding.Code == code && strings.Contains(finding.Message, want) {
-			return true
-		}
-	}
-	return false
-}
-
-func localPreflightReportFinding(report LocalPreflightReport, code string) (localPreflightFinding, bool) {
-	for _, finding := range report.Findings {
-		if finding.Code == code {
-			return finding, true
-		}
-	}
-	return localPreflightFinding{}, false
 }
 
 func stringSliceContainsPrefix(values []string, prefix string) bool {

@@ -28,7 +28,6 @@ import (
 
 const readOnlyRuntimeProbeTestName = "TestOpenRPCReadOnlyHTTPRuntimeProbes"
 const readOnlyProbeBundleHash = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-const readOnlyProbeMissingBundleHash = "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 const readOnlyProbeTurnID = "00000000-0000-4000-8000-000000000401"
 const readOnlyProbeRunID = "11111111-1111-4111-8111-111111111111"
 

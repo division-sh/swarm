@@ -656,28 +656,6 @@ func originalCarriageForRun(t testing.TB, selected any, runID string) semanticvi
 	return owner
 }
 
-// Only these activity fixtures replace the legacy platform-control seed. The
-// producer route comes from its declared node, never from an activity payload.
-func stampSelectedActivityProducerFixture(t *testing.T, db *sql.DB, runID, entityID, eventID, parentEventID, node string) {
-	t.Helper()
-	source, err := pinrouting.AdmitNodeExecutionRoutingSource(selectedActivityProducerSource(t), mustPersistenceNode("flow-a", node), "flow-a", events.RouteIdentity{
-		FlowID: "flow-a", FlowInstance: "flow-a", EntityID: entityID,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	route, err := json.Marshal(source.Route())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`UPDATE events SET event_class='child', source_event_id=$6::uuid, routing_source_kind=$3, routing_source_authority=$4, source_route=$5::jsonb WHERE run_id=$1::uuid AND event_id=$2::uuid`, runID, eventID, source.Kind().StorageCode(), source.Authority().StorageCode(), string(route), parentEventID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`UPDATE entity_state SET flow_instance='flow-a' WHERE run_id=$1::uuid AND entity_id=$2::uuid`, runID, entityID); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func materializeSelectedActivityFixture(t *testing.T, ctx context.Context, store selectedActivityProjectionStore, sourceRunID, eventID string) runfork.RunForkMaterialization {
 	t.Helper()
 	source := selectedActivityProducerSource(t)

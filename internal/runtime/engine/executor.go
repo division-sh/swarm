@@ -265,14 +265,6 @@ func validateHandlerActivityRuntime(handler runtimecontracts.SystemNodeEventHand
 	return nil
 }
 
-func handlerRuleContext(prefix string, idx int, id string) string {
-	id = strings.TrimSpace(id)
-	if id != "" {
-		return fmt.Sprintf("%s[%s]", prefix, id)
-	}
-	return fmt.Sprintf("%s[%d]", prefix, idx)
-}
-
 func validateHandlerEntityWriteTargets(source semanticview.Source, flowID string, handler runtimecontracts.SystemNodeEventHandler) error {
 	validateTarget := func(kind, target string) error {
 		target = strings.TrimSpace(target)
@@ -3263,13 +3255,6 @@ func (e *Executor) applyDataAccumulation(frame *executionFrame, spec runtimecont
 	frame.result.StateMutation.StateCarrier.Bookkeeping = cloneStringAnyMap(frame.state.State.StateCarrier.Bookkeeping)
 	frame.result.StateMutation.DataAccumulation = spec
 	return nil
-}
-
-func (e *Executor) selectedCompute(frame *executionFrame) *runtimecontracts.ComputeSpec {
-	if frame.rule != nil && frame.rule.Compute != nil {
-		return frame.rule.Compute
-	}
-	return frame.req.Handler.Compute
 }
 
 type activeFanOutPlan struct {

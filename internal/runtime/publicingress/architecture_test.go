@@ -1,6 +1,11 @@
 package publicingress
 
 import (
+	"bytes"
+	"go/ast"
+	"go/format"
+	"go/parser"
+	"go/token"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -29,12 +34,44 @@ func TestPublicIngressArchitectureRatchets(t *testing.T) {
 			t.Fatalf("provider registration controller revived split snapshot owner %q", forbidden)
 		}
 	}
-	for _, required := range []string{
-		"registrationPhaseOutcomeUncertain",
-		"terminalizePendingReadback",
+	// Require the live lifecycle bodies, not names in disconnected helpers or comments.
+	for method, required := range map[string][]string{
+		"reconcilePair": {
+			`if state.Phase == registrationPhaseOutcomeUncertain && state.Terminal != nil && state.Terminal.BaseFingerprint == candidate.base {
+		c.publishState(key, state)
+		return nil
+	}`,
+			`if state.Phase == registrationPhasePendingSettlement {
+			c.publishState(key, state)
+			return c.refreshReadback(ctx, candidate, state, true)
+		}`,
+		},
+		"launchAttempt": {"return c.refreshReadback(effectCtx, candidate, state, true)"},
+		"refreshReadback": {
+			"candidate.pair.Registration.Operation(packs.RegistrationOperationReadback)",
+			`if settleErr := pending.SettleReadback(ctx, exact, readErr); settleErr != nil {
+			intent.Pending = pending
+			state.setActiveIntent(intent, fromAttempt)
+			state.Failure = settleErr.Error()
+			c.publishState(key, state)
+			return settleErr
+		}`,
+			`if !exact {
+			intent.Matched = false
+			state.Terminal = &intent
+			state.Attempt = nil
+			state.Phase = registrationPhaseOutcomeUncertain
+			state.Failure = readErr.Error()
+			c.publishState(key, state)
+			return readErr
+		}`,
+		},
 	} {
-		if !strings.Contains(string(registrationSource), required) {
-			t.Fatalf("provider registration lifecycle owner is missing %q", required)
+		body := providerRegistrationMethodBody(t, registrationSource, method)
+		for _, required := range required {
+			if !strings.Contains(body, required) {
+				t.Fatalf("provider registration lifecycle method %s is missing %q", method, required)
+			}
 		}
 	}
 	readinessSource, err := os.ReadFile(filepath.Join(repo, "internal", "runtime", "publicingress", "readiness.go"))
@@ -68,6 +105,36 @@ func TestPublicIngressArchitectureRatchets(t *testing.T) {
 			t.Fatalf("authoritative provider-registration contract is missing %q", required)
 		}
 	}
+}
+
+func providerRegistrationMethodBody(t *testing.T, source []byte, name string) string {
+	t.Helper()
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "registration.go", source, 0)
+	if err != nil {
+		t.Fatalf("parse registration owner: %v", err)
+	}
+	for _, declaration := range file.Decls {
+		method, ok := declaration.(*ast.FuncDecl)
+		if !ok || method.Name.Name != name || method.Recv == nil || len(method.Recv.List) != 1 || method.Body == nil {
+			continue
+		}
+		receiver, ok := method.Recv.List[0].Type.(*ast.StarExpr)
+		if !ok {
+			continue
+		}
+		owner, ok := receiver.X.(*ast.Ident)
+		if !ok || owner.Name != "ProviderRegistrationController" {
+			continue
+		}
+		var body bytes.Buffer
+		if err := format.Node(&body, fset, method.Body); err != nil {
+			t.Fatalf("format registration lifecycle method %s: %v", name, err)
+		}
+		return body.String()
+	}
+	t.Fatalf("provider registration controller is missing lifecycle method %s", name)
+	return ""
 }
 
 func TestPublicIngressSQLCensusExcludesNestedCheckout(t *testing.T) {

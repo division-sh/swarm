@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
@@ -93,22 +92,6 @@ func writeDoctorClaudeHostConfig(t *testing.T, dockerBin string) string {
 	return path
 }
 
-func emptyProviderTriggerCatalog(t *testing.T) *providertriggers.CatalogSnapshot {
-	t.Helper()
-	catalog, err := providertriggers.NewCatalogSnapshot()
-	if err != nil {
-		t.Fatalf("create empty provider trigger catalog: %v", err)
-	}
-	return catalog
-}
-
-func testWorkspaceBackendConfig(backend string) *config.Config {
-	return &config.Config{
-		Runtime: config.RuntimeConfig{},
-		LLM:     config.LLMConfig{Backend: backend},
-	}
-}
-
 func writeCLIAPIConfigFile(t *testing.T, values map[string]string) string {
 	t.Helper()
 	var body strings.Builder
@@ -146,17 +129,6 @@ func decodeAuthoritativeYAMLFileForTest(t testing.TB, path string, target any) {
 	}
 	if err := source.Decode(target); err != nil {
 		t.Fatalf("decode authoritative YAML %s: %v", path, err)
-	}
-}
-
-func decodeAuthoritativeYAMLBytesForTest(t testing.TB, raw []byte, target any) {
-	t.Helper()
-	source, err := yamlsource.Load(raw)
-	if err != nil {
-		t.Fatalf("parse authoritative YAML: %v", err)
-	}
-	if err := source.Decode(target); err != nil {
-		t.Fatalf("decode authoritative YAML: %v", err)
 	}
 }
 

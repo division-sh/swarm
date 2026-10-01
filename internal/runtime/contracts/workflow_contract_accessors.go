@@ -1,7 +1,6 @@
 package contracts
 
 import (
-	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -460,18 +459,6 @@ func scopedNodeRecordsFromExportedTree(root *FlowContractView, selectedNodeID st
 	}
 	walk(root)
 	return out
-}
-
-func scopedNodeDeclarationKey(record ScopedNodeRecord) string {
-	sourceFile := strings.TrimSpace(record.Source.File)
-	if sourceFile == "" {
-		return ""
-	}
-	return strings.Join([]string{
-		filepath.Clean(sourceFile),
-		strings.TrimSpace(record.Source.FlowPath),
-		strings.TrimSpace(record.LogicalID),
-	}, "\x00")
 }
 
 func exportedFlowTreeViewOrderKey(view *FlowContractView) string {

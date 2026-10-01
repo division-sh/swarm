@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
@@ -16,7 +15,6 @@ import (
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	storedecision "github.com/division-sh/swarm/internal/store/internal/backend/decisionpersistence"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	storeeffect "github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
@@ -30,11 +28,6 @@ import (
 	storeoperatorsurface "github.com/division-sh/swarm/internal/store/internal/operatorsurface"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 )
-
-type execQueryer interface {
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
-	QueryRowContext(context.Context, string, ...any) *sql.Row
-}
 
 type rowQueryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
@@ -62,7 +55,6 @@ var insertRunForkReplayDelivery = storerunfork.InsertRunForkReplayDelivery
 var deterministicRunForkMaterializationID = storerunfork.DeterministicRunForkMaterializationID
 var deterministicRunForkReplayEventID = storerunfork.DeterministicRunForkReplayEventID
 var decisionCardAuthorActivityIdentity = storedecision.DecisionCardAuthorActivityIdentity
-var runPostgresDecisionCardMutation = storedecision.RunPostgresDecisionCardMutation
 var recordExternalEffectStory = storeeffect.RecordExternalEffectStory
 var externalEffectStoryDispositions = storeeffect.ExternalEffectStoryDispositionKeys()
 var jsonSemanticallyEqual = storeevent.JSONSemanticallyEqual
@@ -83,7 +75,6 @@ var forkGateActivationState = storerunfork.ForkGateActivationState
 var projectRunForkEntityOwnership = storerunfork.ProjectRunForkEntityOwnership
 var validateRunForkDeliveryEventReplayWorkAgainstPlan = storerunfork.ValidateRunForkDeliveryEventReplayWorkAgainstPlan
 
-var stringSliceSet = storerunfork.StringSliceSet
 var normalizeRunForkSelectedContractBinding = storerunfork.NormalizeRunForkSelectedContractBinding
 var normalizeRunForkSelectedContractRouteRecovery = storerunfork.NormalizeRunForkSelectedContractRouteRecovery
 var runForkReplayResumeBlockerFromError = storerunfork.RunForkReplayResumeBlockerFromError
@@ -94,7 +85,6 @@ var marshalAgentReceiptSideEffects = storeevent.MarshalAgentReceiptSideEffects
 var decodeAgentReceiptSideEffects = storeevent.DecodeAgentReceiptSideEffects
 var insertCommittedPipelineScopeTx = storepipeline.InsertCommittedPipelineScopeTx
 var replayClaimLockKey = storepipeline.ReplayClaimLockKey
-var expireHumanTaskCards = storedecision.ExpireHumanTaskCards
 var completionRecoverySettlement = storeeffect.CompletionRecoverySettlement
 var operatorConversationTurnListItemFromPublic = storeoperatorsurface.OperatorConversationTurnListItemFromPublic
 var corruptPipelineScopeDisposition = storepipeline.CorruptPipelineScopeDisposition
@@ -148,13 +138,6 @@ type eventCommitTxStore interface {
 	RecordDeadLetterTx(context.Context, *mutationprotocol.Attempt, runtimedeadletters.Record, bool) error
 	CreateWithinTransaction(context.Context, *mutationprotocol.Attempt, runtimereplycontext.Record) error
 	ClaimWithinTransaction(context.Context, *mutationprotocol.Attempt, runtimereplycontext.ClaimCommand) error
-}
-
-func runtimeAuthorActivityMutation(story *privateauthoractivity.Mutation) runtimeauthoractivity.Mutation {
-	if story == nil {
-		return nil
-	}
-	return story
 }
 
 type sqlPublishCommitter struct {

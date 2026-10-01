@@ -26,12 +26,25 @@ command it reports:
 
 ```bash
 go build ./cmd/swarm
+go run ./cmd/swarm-unused
 go run ./cmd/swarm-test-changed
 go run ./cmd/swarm-test-changed -dry-run
 go run ./cmd/swarm-test
 go run ./cmd/swarm-test --full
 go run ./cmd/swarm-openrpc-gen --check
 ```
+
+`go run ./cmd/swarm-unused` defaults to native-only analysis on the current
+host, not the complete CI platform union. The guard internally pins its analysis
+toolchain to Go 1.26.8 and Staticcheck v0.8.1; product Go setup and `go.mod` are
+unchanged. Required CI collects native Linux and Darwin results with tests
+enabled for default, race, and `issue2413` configurations, then uses upstream
+binary merge semantics: a declaration reachable in any admitted variant is
+live. Collection does not fail on U1000; the source-bound merged check does.
+Missing, skipped, or failed native collection cannot satisfy required CI.
+The noncompiling [#2438](https://github.com/division-sh/swarm/issues/2438)
+configuration remains explicitly parked under E's
+[#2496](https://github.com/division-sh/swarm/issues/2496) until compile repair.
 
 Routine PRs can cite scoped local proof from `swarm-test-changed` plus any
 named package families required by the touched surface; CI remains responsible
