@@ -362,7 +362,7 @@ func nativeInboxOperation(scopeKind, action string) (string, error) {
 	return action + "_inbox_entry", nil
 }
 
-func nativeInboxInput(setting channelnative.Setting, includeCommands bool) (map[string]any, error) {
+func nativeInboxInput(plan packs.OutboundBindingPlan, setting channelnative.Setting, includeCommands bool) (map[string]any, error) {
 	input := map[string]any{}
 	if !includeCommands {
 		input["language_code"] = ""
@@ -371,7 +371,11 @@ func nativeInboxInput(setting channelnative.Setting, includeCommands bool) (map[
 		if setting.MemberReference == "" {
 			return nil, fmt.Errorf("shared native inbox scope lacks member reference")
 		}
-		input["member_reference"] = setting.MemberReference
+		member, err := plan.RestoreOpaqueReference("external_account_reference", setting.MemberReference)
+		if err != nil {
+			return nil, err
+		}
+		input["member_reference"] = member
 	} else if setting.ScopeKind != "chat" || setting.MemberReference != "" {
 		return nil, fmt.Errorf("native inbox setting scope contradicts member reference")
 	}
@@ -398,7 +402,7 @@ func (d *serveChannelDeliveryDispatcher) readNativeInboxLanguageCommands(ctx con
 	if err != nil {
 		return nil, err
 	}
-	semanticInput, err := nativeInboxInput(setting, false)
+	semanticInput, err := nativeInboxInput(plan, setting, false)
 	if err != nil {
 		return nil, err
 	}
@@ -439,7 +443,7 @@ func (d *serveChannelDeliveryDispatcher) installNativeInboxCommands(ctx context.
 	if err != nil {
 		return err
 	}
-	semanticInput, err := nativeInboxInput(setting, true)
+	semanticInput, err := nativeInboxInput(plan, setting, true)
 	if err != nil {
 		return err
 	}
