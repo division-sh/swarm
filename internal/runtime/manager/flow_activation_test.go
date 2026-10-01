@@ -2918,11 +2918,47 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 	)
 	successorCtx, cancelSuccessor := context.WithCancel(successorCtx)
 	defer cancelSuccessor()
+	barrierCtx, cancelBarrier := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelBarrier()
+	activationErr := make(chan error, 1)
+	activationDone := make(chan struct{})
+	successorStarted := make(chan struct{})
+	successorDone := make(chan struct{})
+	revisionReady := make(chan struct{})
+	releaseAttempt := make(chan struct{})
+	var revisionReadyOnce, releaseAttemptOnce sync.Once
+	markRevisionReady := func() { revisionReadyOnce.Do(func() { close(revisionReady) }) }
+	releaseCompletion := func() { releaseAttemptOnce.Do(func() { close(releaseAttempt) }) }
+	t.Cleanup(func() {
+		cancelActivation()
+		cancelSuccessor()
+		releaseCompletion()
+		joinCtx, cancelJoin := context.WithTimeout(testAuthorActivityContext(context.Background()), 5*time.Second)
+		defer cancelJoin()
+		if err := am.lifecycle.waitForWork(joinCtx); err != nil {
+			t.Errorf("join post-CAS readiness test cleanup: %v", err)
+		}
+		select {
+		case <-activationDone:
+		case <-joinCtx.Done():
+			t.Errorf("join activation caller cleanup: %v", joinCtx.Err())
+		}
+		select {
+		case <-successorStarted:
+			select {
+			case <-successorDone:
+			case <-joinCtx.Done():
+				t.Errorf("join successor caller cleanup: %v", joinCtx.Err())
+			}
+		default:
+		}
+	})
 
 	var revisionErr error
 	var staleErr error
 	var staleSourceErr error
 	instances.afterTopologyMark = func(completed runtimepipeline.DynamicFlowRuntimeReadinessPlan) {
+		defer markRevisionReady()
 		observed, found, err := instances.LoadDynamicFlowRuntimeReadiness(intermediateCtx, completed.RunID, completed.Identity.Route())
 		if err != nil || !found {
 			revisionErr = errors.Join(err, errors.New("intermediate readiness observation not found"))
@@ -2968,7 +3004,9 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 		intermediateRevision := observed.PlanRevision
 		revisedRevision := intermediateRevision + 1
 		setFlowActivationManagerSemanticSource(am, revisedSource, revisedFact)
+		close(successorStarted)
 		go func() {
+			defer close(successorDone)
 			successorErr <- am.reconcileDynamicFlowRuntimeReadinessPlan(
 				successorCtx,
 				revised,
@@ -3008,9 +3046,24 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 		)
 		cancelActivation()
 		cancelSuccessor()
+		markRevisionReady()
+		// Keep this attempt pending until both callers observe cancellation.
+		// Otherwise completed evidence can legitimately win before either waits.
+		select {
+		case <-releaseAttempt:
+		case <-barrierCtx.Done():
+		}
 	}
 
-	err = activateFlowInstanceForTest(am, activationCtx, req)
+	go func() {
+		defer close(activationDone)
+		activationErr <- activateFlowInstanceForTest(am, activationCtx, req)
+	}()
+	select {
+	case <-revisionReady:
+	case <-barrierCtx.Done():
+		t.Fatalf("wait for post-CAS cancellation barrier: %v", barrierCtx.Err())
+	}
 	if revisionErr != nil {
 		t.Fatalf("inject post-CAS readiness revision: %v", revisionErr)
 	}
@@ -3020,13 +3073,24 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 	if !errors.Is(staleSourceErr, errDynamicFlowRuntimeReadinessSourceStale) {
 		t.Fatalf("previous-source callback error = %v, want stale-source rejection", staleSourceErr)
 	}
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("canceled readiness caller returned %v, want context cancellation without canceling the retained successor", err)
+	select {
+	case err := <-activationErr:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("canceled readiness caller returned %v, want context cancellation without canceling the retained successor", err)
+		}
+	case <-barrierCtx.Done():
+		t.Fatalf("join canceled activation caller: %v", barrierCtx.Err())
 	}
-	if err := <-successorErr; !errors.Is(err, context.Canceled) {
-		t.Fatalf("canceled post-CAS successor caller: %v", err)
+	select {
+	case err := <-successorErr:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("canceled post-CAS successor caller: %v", err)
+		}
+	case <-barrierCtx.Done():
+		t.Fatalf("join canceled post-CAS successor caller: %v", barrierCtx.Err())
 	}
-	if err := am.lifecycle.waitForWork(testAuthorActivityContext(context.Background())); err != nil {
+	releaseCompletion()
+	if err := am.lifecycle.waitForWork(testAuthorActivityContext(barrierCtx)); err != nil {
 		t.Fatalf("join owned post-CAS successor: %v", err)
 	}
 	readiness, found, loadErr := instances.LoadDynamicFlowRuntimeReadiness(
@@ -3049,6 +3113,32 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 	}
 	if _, ok := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1"); !ok {
 		t.Fatal("post-CAS revised topology agent was not published")
+	}
+}
+
+func TestDynamicFlowRuntimeReadinessWaitOutcomeOrdering(t *testing.T) {
+	for _, completed := range []bool{false, true} {
+		name := "cancellation_before_completion"
+		if completed {
+			name = "completion_before_cancellation"
+		}
+		t.Run(name, func(t *testing.T) {
+			attempt := &dynamicFlowRuntimeReadinessAttempt{done: make(chan struct{}), retiring: make(chan struct{})}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if completed {
+				close(attempt.done)
+			}
+			cancel()
+			err := attempt.wait(ctx)
+			if completed {
+				if err != nil {
+					t.Fatalf("completed evidence lost to later cancellation: %v", err)
+				}
+			} else if !errors.Is(err, context.Canceled) {
+				t.Fatalf("pending attempt returned %v, want caller cancellation", err)
+			}
+		})
 	}
 }
 
