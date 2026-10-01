@@ -1118,12 +1118,12 @@ func TestChannelOnboardingProfileAxesAreProviderNeutral(t *testing.T) {
 	}{
 		{
 			name:    "discord webhook text",
-			profile: packs.ChannelOnboardingProfile{Activation: "webhook_registration", Ceremony: "authenticated_text_challenge", ProviderCredentialRole: "discord_app_token", SigningCredentialRole: "discord_signature_key", Confirmation: "deliver"},
+			profile: packs.ChannelOnboardingProfile{Activation: "webhook_registration", Ceremony: "authenticated_text_challenge", ProviderCredentialRole: "discord_app_token", SigningCredentialRole: "discord_signature_key", Confirmation: "deliver", LearnedDestination: map[string]packs.ChannelMapping{"destination": {From: "conversation_reference"}}},
 			posture: packs.ChannelActivationWebhookRegistration, ceremony: packs.ChannelCeremonyAuthenticatedTextChallenge,
 		},
 		{
 			name:    "whatsapp session pairing",
-			profile: packs.ChannelOnboardingProfile{Activation: "session_connection", Ceremony: "provider_pairing", ProviderCredentialRole: "whatsapp_session", Confirmation: "deliver", ConnectionHealth: "bridge_connection"},
+			profile: packs.ChannelOnboardingProfile{Activation: "session_connection", Ceremony: "provider_pairing", ProviderCredentialRole: "whatsapp_session", Confirmation: "deliver", ConnectionHealth: "bridge_connection", LearnedDestination: map[string]packs.ChannelMapping{"destination": {From: "conversation_reference"}}},
 			posture: packs.ChannelActivationSessionConnection, ceremony: packs.ChannelCeremonyProviderPairing,
 		},
 	} {

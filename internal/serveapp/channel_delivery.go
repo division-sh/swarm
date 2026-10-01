@@ -335,8 +335,12 @@ func (d *serveChannelDeliveryDispatcher) acknowledgeChannelAction(ctx context.Co
 	if compiled.OnboardingOperationID == "" {
 		return fmt.Errorf("channel callback compiled activation is absent")
 	}
+	interaction, err := compiled.Plan.RestoreOpaqueReference("interaction_reference", pending.Fact.InteractionRef)
+	if err != nil {
+		return err
+	}
 	_, input, err := compiled.Plan.PrepareOperation("acknowledge_interaction", map[string]any{
-		"interaction_reference": pending.Fact.InteractionRef,
+		"interaction_reference": interaction,
 	})
 	if err != nil {
 		return err
