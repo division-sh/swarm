@@ -317,7 +317,7 @@ func TestW5AgentProvenanceComposesWithoutMemorySource(t *testing.T) {
 	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "task.ready:\ntask.done:\n")
 	writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), "worker:\n  event_handlers:\n    task.ready:\n      emit: task.done\n")
 	writeFixtureFile(t, filepath.Join(root, "agents.yaml"), "worker:\n  intent: {inline: business intent}\n  model: regular\n")
-	writeFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "name: child\nmode: static\n")
+	writeFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "name: child\n")
 	writeFixtureFile(t, filepath.Join(root, "child", "agents.yaml"), "worker:\n  intent: {inline: child intent}\n  model: regular\n  memory: true\n")
 	artifact, err := sourceartifact.AdmitDirectory(root)
 	if err != nil {
