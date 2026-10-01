@@ -890,48 +890,10 @@ func normalizeRoutePlanDeliveryIntents(in []RoutePlanDeliveryIntent) []RoutePlan
 		intent.Context = intent.Context.Normalized()
 		intent.PayloadProjection = intent.PayloadProjection.Normalized()
 		intent.Producer = intent.Producer.Normalized()
-		if intent.Recipient.Empty() {
+		key, valid := deliveryIntentDeduplicationKey(intent)
+		if !valid {
 			out = append(out, intent)
 			continue
-		}
-		if intent.Recipient.IsAgent() {
-			if err := intent.AgentIdentity.Validate(); err != nil || intent.AgentIdentity.AgentID() != intent.Recipient.ID() {
-				out = append(out, intent)
-				continue
-			}
-		} else if !intent.Recipient.IsNode() || !intent.AgentIdentity.IsZero() {
-			out = append(out, intent)
-			continue
-		}
-		if err := validateRecipientIntentProducer(intent); err != nil {
-			out = append(out, intent)
-			continue
-		}
-		contextIdentity, err := intent.Context.Identity()
-		if err != nil {
-			out = append(out, intent)
-			continue
-		}
-		key := deliveryIntentKey{
-			recipient:       intent.Recipient,
-			agentIdentity:   intent.AgentIdentity,
-			target:          intent.TargetBlueprint,
-			targetOwner:     intent.TargetOwnership,
-			handler:         intent.Handler,
-			contextIdentity: contextIdentity,
-			projection:      intent.PayloadProjection.Fingerprint(),
-			connectClaim:    intent.ConnectClaim,
-			agentLifecycle:  intent.AgentLifecycle,
-			connectPlan:     intent.ConnectPlan,
-			initialization:  intent.Initialization,
-		}
-		if !intent.Materialization.Empty() {
-			var err error
-			key.materialization, err = intent.deliveryRoute().Identity()
-			if err != nil {
-				out = append(out, intent)
-				continue
-			}
 		}
 		if idx, ok := indexByKey[key]; ok {
 			out[idx].Persist = out[idx].Persist || intent.Persist
@@ -947,6 +909,47 @@ func normalizeRoutePlanDeliveryIntents(in []RoutePlanDeliveryIntent) []RoutePlan
 		out = append(out, intent)
 	}
 	return out
+}
+
+// Invalid intents remain separate so ordinary admission can report them.
+func deliveryIntentDeduplicationKey(intent RoutePlanDeliveryIntent) (deliveryIntentKey, bool) {
+	if intent.Recipient.Empty() {
+		return deliveryIntentKey{}, false
+	}
+	if intent.Recipient.IsAgent() {
+		if err := intent.AgentIdentity.Validate(); err != nil || intent.AgentIdentity.AgentID() != intent.Recipient.ID() {
+			return deliveryIntentKey{}, false
+		}
+	} else if !intent.Recipient.IsNode() || !intent.AgentIdentity.IsZero() {
+		return deliveryIntentKey{}, false
+	}
+	if err := validateRecipientIntentProducer(intent); err != nil {
+		return deliveryIntentKey{}, false
+	}
+	contextIdentity, err := intent.Context.Identity()
+	if err != nil {
+		return deliveryIntentKey{}, false
+	}
+	key := deliveryIntentKey{
+		recipient:       intent.Recipient,
+		agentIdentity:   intent.AgentIdentity,
+		target:          intent.TargetBlueprint,
+		targetOwner:     intent.TargetOwnership,
+		handler:         intent.Handler,
+		contextIdentity: contextIdentity,
+		projection:      intent.PayloadProjection.Fingerprint(),
+		connectClaim:    intent.ConnectClaim,
+		agentLifecycle:  intent.AgentLifecycle,
+		connectPlan:     intent.ConnectPlan,
+		initialization:  intent.Initialization,
+	}
+	if !intent.Materialization.Empty() {
+		key.materialization, err = intent.deliveryRoute().Identity()
+		if err != nil {
+			return deliveryIntentKey{}, false
+		}
+	}
+	return key, true
 }
 
 func cloneStringAnyMap(in map[string]any) map[string]any {
