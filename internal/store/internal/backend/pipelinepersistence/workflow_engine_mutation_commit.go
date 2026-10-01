@@ -11,6 +11,7 @@ import (
 	"time"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecanonicaljson "github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -324,7 +325,10 @@ func nullableWorkflowTerminationTime(value time.Time) any {
 func workflowEngineStateProjection(record runtimepipeline.WorkflowEngineStateRecord) (runtimemutationlog.EntityStateProjection, error) {
 	decode := func(name string, raw json.RawMessage) (map[string]any, error) {
 		var value map[string]any
-		if err := json.Unmarshal(raw, &value); err != nil {
+		if _, err := runtimecanonicaljson.Decode(raw); err != nil {
+			return nil, fmt.Errorf("validate workflow engine %s projection: %w", name, err)
+		}
+		if err := runtimecanonicaljson.DecodePreservingNumberLexemes(raw, &value); err != nil {
 			return nil, fmt.Errorf("decode workflow engine %s projection: %w", name, err)
 		}
 		if value == nil {
@@ -462,7 +466,10 @@ func commitWorkflowEngineInitialValues(
 		return runtimemutationlog.EntityStateProjection{}, err
 	}
 	var initial map[string]any
-	if err := json.Unmarshal(record.InitialFields, &initial); err != nil {
+	if _, err := runtimecanonicaljson.Decode(record.InitialFields); err != nil {
+		return runtimemutationlog.EntityStateProjection{}, fmt.Errorf("validate workflow engine initial fields: %w", err)
+	}
+	if err := runtimecanonicaljson.DecodePreservingNumberLexemes(record.InitialFields, &initial); err != nil {
 		return runtimemutationlog.EntityStateProjection{}, fmt.Errorf("decode workflow engine initial fields: %w", err)
 	}
 	if !decision.createState || len(initial) == 0 {
