@@ -221,7 +221,16 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 		"TestFileRow2456FreshProcessBindingAndExactWireBothStores",
 		"TestFileRow2456DefaultBundleAndHeadPinReplayBothStores",
 	}
-	want := []int{159, 14, 5, 1}
+	// A2 replaces the stream/window and singleton lifecycle roots with ordinary
+	// keyed stream/lifecycle proofs, and adds repeated fan-out isolation. The
+	// event-ID carry assertion now lives in the keyed stream journey; event-ID
+	// pin dedup is retired. All surviving roots still have exactly one owner.
+	a2Roots := []string{
+		"TestA2RepeatedFanOutTriggerIsolationOnBothStores",
+		"TestKeyedPortfolioStreamRoutesAndRetainsIndependentPeriodsOnBothStores",
+		"TestKeyedStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBackends",
+	}
+	want := []int{160, 14, 5, 1}
 	for i, group := range groups {
 		if len(group) != want[i] {
 			t.Fatalf("%s census=%d, want reviewed %d; account new roots explicitly", conformance2394Units[i], len(group), want[i])
@@ -253,6 +262,21 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 	for _, name := range actionRetirementRoots {
 		if i := sort.SearchStrings(groups[0], name); i == len(groups[0]) || groups[0][i] != name {
 			t.Fatalf("general conformance partition omitted reviewed #2307 root %s", name)
+		}
+	}
+	for _, name := range a2Roots {
+		if i := sort.SearchStrings(groups[0], name); i == len(groups[0]) || groups[0][i] != name {
+			t.Fatalf("general conformance partition omitted A2 replacement root %s", name)
+		}
+	}
+	for _, name := range []string{
+		"TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup",
+		"TestFanInStreamConformance_EventIDDedupUsesEventIdentity",
+		"TestCreateEventIDCarryProjectionReachesHandler",
+		"TestSingletonStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBackends",
+	} {
+		if i := sort.SearchStrings(names, name); i < len(names) && names[i] == name {
+			t.Fatalf("retired A2 proof root survived its replacement: %s", name)
 		}
 	}
 	for _, name := range deploymentFeedRoots {
@@ -293,7 +317,7 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 	if i := sort.SearchStrings(groups[3], reporterProof); i == len(groups[3]) || groups[3][i] != reporterProof {
 		t.Fatalf("reporter conformance partition omitted %s", reporterProof)
 	}
-	t.Log("complete disjoint census:180 =157 general +14 core +5 pressure +1 reporter +3 long file-row roots in conformance-1")
+	t.Log("complete disjoint census:183 =160 general +14 core +5 pressure +1 reporter +3 long file-row roots in conformance-1")
 	for _, profile := range []string{ProfilePRCommon, ProfilePREscalated, ProfileFull, ProfileNightly} {
 		var units []ProofUnit
 		for _, id := range policy.Profiles[profile].Units {

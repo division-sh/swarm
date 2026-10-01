@@ -64,11 +64,14 @@ func TestFanOutTimestampReaderPresenceBothStores(t *testing.T) {
 				Request: fanoutobligation.IntentRequest{
 					Key:     fanoutobligation.IntentKey{RunID: sourceRun, TriggeringDeliveryID: triggerID, ElementRef: ref.ElementRef},
 					PlanRef: ref, Source: source, Cardinality: 2,
-					Capsule: fanoutobligation.Capsule{NodeKey: node.Key(), ExecutionFlowID: ".", HandlerEventKey: "items.ready",
+					Capsule: fanoutobligation.Capsule{SourceProjection: plans[0].SemanticEvidence(), NodeKey: node.Key(), ExecutionFlowID: ".", HandlerEventKey: "items.ready",
 						Route: flowidentity.StoredRoute(".", sourceRun, sourceRun), ProducerSource: producer,
 						Lineage: events.EventLineage{RunID: sourceRun, ParentEventID: eventID, ExecutionMode: executionmode.Live}},
 				},
 				Source: source, Cursor: 1, Status: fanoutobligation.StatusOpen,
+			}
+			if err := intent.Request.ValidateCompiledPlan(plans[0]); err != nil {
+				t.Fatalf("timestamp fixture must admit exact compiled source evidence: %v", err)
 			}
 			outcome := fanoutobligation.Outcome{Ordinal: 0, Kind: fanoutobligation.OutcomeCommitted, SourceEventID: uuid.NewString(), InheritedDisposition: "no_route"}
 			plan := runfork.RunForkPlan{SourceRunID: sourceRun, FanOutObligations: []runfork.RunForkFanOutObligation{{Intent: intent, Outcomes: []fanoutobligation.Outcome{outcome}}}}
@@ -90,6 +93,17 @@ func TestFanOutTimestampReaderPresenceBothStores(t *testing.T) {
 			}
 			if _, err := db.Exec(`INSERT INTO fan_out_outcomes (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,ordinal,outcome_kind,source_event_id,inherited_disposition,created_at) VALUES ($1,$2,'.','fan_out',$3,0,'committed',$4,'no_route',$5)`, childID, triggerID, ref.ElementRef.SemanticPath, outcome.SourceEventID, at); err != nil {
 				t.Fatal(err)
+			}
+			tx, err := db.BeginTx(context.Background(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			readErr := requireExactMaterializedRunForkFanOut(context.Background(), tx, backend == "postgres", childID, plan, refs, original, "", nil, nil)
+			if err := tx.Rollback(); err != nil {
+				t.Fatal(err)
+			}
+			if readErr != nil {
+				t.Fatalf("timestamp fixture baseline must pass before hostile injection: %v", readErr)
 			}
 			for _, column := range []string{"created_at", "lease_expires_at", "last_served_at"} {
 				t.Run(column, func(t *testing.T) {

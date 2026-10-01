@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/google/uuid"
 )
@@ -132,6 +133,7 @@ func TestOrdinalEmissionValidatorRejectsEveryOriginCoordinate(t *testing.T) {
 	for _, variant := range []string{"run", "delivery", "declaration", "bundle", "digest", "ordinal", "ordinary_parent"} {
 		t.Run(variant, func(t *testing.T) {
 			other := intent
+			other.Request.Capsule.SourceProjection = intent.Request.Capsule.SourceProjection.Clone()
 			ordinal := 1
 			switch variant {
 			case "run":
@@ -141,14 +143,23 @@ func TestOrdinalEmissionValidatorRejectsEveryOriginCoordinate(t *testing.T) {
 			case "declaration":
 				other.Request.Key.ElementRef.SemanticPath += "/sibling"
 				other.Request.PlanRef.ElementRef = other.Request.Key.ElementRef
+				other.Request.Capsule.SourceProjection.ElementRef = other.Request.Key.ElementRef
 			case "bundle":
 				other.Request.PlanRef.BundleHash += "-other"
 			case "digest":
-				other.Request.PlanRef.SemanticDigest += "-other"
+				other.Request.Capsule.SourceProjection.MaxItems--
 			case "ordinal":
 				ordinal = 2
 			case "ordinary_parent":
 				other.Request.Key.RunID = trigger.RunID()
+			}
+			if variant == "declaration" || variant == "digest" {
+				// Test origin agreement with valid, distinct retained plan evidence,
+				// not rejection by the earlier source-projection admission boundary.
+				other.Request.PlanRef.SemanticDigest, err = canonicaljson.Hash(other.Request.Capsule.SourceProjection)
+				if err != nil {
+					t.Fatal(err)
+				}
 			}
 			projection, err := PrepareOrdinalEmission(other, trigger, ordinal)
 			if err != nil {
