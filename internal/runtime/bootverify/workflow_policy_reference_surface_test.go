@@ -8,6 +8,7 @@ import (
 	c "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
@@ -106,8 +107,6 @@ func TestR3PolicyReferenceSurfaceMatrix(t *testing.T) {
 		{"accumulate key", c.SystemNodeEventHandler{Accumulate: &c.AccumulateSpec{Key: "policy.missing"}}},
 		{"join members", c.SystemNodeEventHandler{Join: &c.JoinSpec{Members: c.JoinMembersSpec{By: "policy.missing"}}}},
 		{"join source", c.SystemNodeEventHandler{Join: &c.JoinSpec{Members: c.JoinMembersSpec{From: "policy.missing"}}}},
-		{"join complete", c.SystemNodeEventHandler{Join: &c.JoinSpec{OnComplete: c.HandlerRuleEntry{Emit: c.EmitSpec{Event: "event", Fields: map[string]c.ExpressionValue{"value": cel}}}}}},
-		{"join deadline", c.SystemNodeEventHandler{Join: &c.JoinSpec{Deadline: &c.JoinDeadlineSpec{After: "1s", From: c.JoinDeadlineFromStageEntry}, OnDeadline: c.HandlerRuleEntry{Emit: c.EmitSpec{Event: "event", Fields: map[string]c.ExpressionValue{"value": cel}}}}}},
 		{"lookup", c.SystemNodeEventHandler{Compute: &c.ComputeSpec{Lookup: &c.ComputeLookupSpec{On: []string{"policy.missing"}}}}},
 		{"validation", c.SystemNodeEventHandler{Compute: &c.ComputeSpec{Validation: &c.ComputeValidationSpec{Input: map[string]string{"value": "policy.missing"}}}}},
 		{"module", c.SystemNodeEventHandler{Compute: &c.ComputeSpec{Module: &c.ComputeModuleSpec{Input: map[string]string{"value": "policy.missing"}}}}},
@@ -130,6 +129,36 @@ func TestR3PolicyReferenceSurfaceMatrix(t *testing.T) {
 				t.Fatalf("reader escaped policy checker: %#v", findings)
 			}
 		})
+	}
+}
+
+func TestR3PolicyClosedJoinOutcomeReferenceMatrix(t *testing.T) {
+	for _, outcome := range []string{"on_complete", "on_deadline"} {
+		for _, key := range []string{"known", "missing"} {
+			t.Run(outcome+"/"+key, func(t *testing.T) {
+				bundle := semanticview.CloneBundleForPreview(joinValidationBundle(), map[string]any{"known": []any{"ok"}})
+				node := bundle.Nodes["join-node"]
+				handler := node.EventHandlers["item.completed"]
+				rule := &handler.Join.OnComplete
+				if outcome == "on_deadline" {
+					rule = &handler.Join.OnDeadline
+				}
+				for field := range rule.Emit.Fields {
+					rule.Emit.Fields[field] = c.CELExpression("policy." + key)
+				}
+				node.EventHandlers["item.completed"] = handler
+				bundle.Nodes["join-node"] = node
+				rebuildJoinValidationTopology(bundle)
+				findings := newCheckerContext(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{}).conditionPolicyAlignment()
+				if key == "known" {
+					if len(findings) != 0 {
+						t.Fatalf("declared closed-outcome policy rejected: %#v", findings)
+					}
+				} else if !findingContainsAll(findings, "condition_policy_alignment", `policy["missing"]`, "join."+outcome) {
+					t.Fatalf("closed outcome escaped policy checker: %#v", findings)
+				}
+			})
+		}
 	}
 }
 
