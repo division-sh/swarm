@@ -2897,23 +2897,6 @@ func assertNotifyAllChildrenMetadata(t *testing.T, ctx context.Context, backend 
 	t.Fatalf("%s.%s = %s, want %s (all fields %#v, last error %v)", flowInstance, field, gotJSON, wantJSON, fields, lastErr)
 }
 
-func loadNotifyAllChildrenMetadata(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, db *sql.DB, flowInstance string) map[string]any {
-	t.Helper()
-	query := `SELECT fields FROM entity_state WHERE flow_instance = $1 ORDER BY updated_at DESC LIMIT 1`
-	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		query = `SELECT fields FROM entity_state WHERE flow_instance = ? ORDER BY updated_at DESC LIMIT 1`
-	}
-	var raw any
-	if err := db.QueryRowContext(ctx, query, flowInstance).Scan(&raw); err != nil {
-		t.Fatalf("load %s metadata: %v", flowInstance, err)
-	}
-	fields := map[string]any{}
-	if err := json.Unmarshal(notifyAllChildrenJSONBytes(raw), &fields); err != nil {
-		t.Fatalf("decode %s metadata: %v", flowInstance, err)
-	}
-	return fields
-}
-
 func loadNotifyAllChildrenFailure(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, db *sql.DB, eventID string) runtimefailures.Envelope {
 	t.Helper()
 	query := `SELECT failure::text FROM dead_letters WHERE original_event_id = $1::uuid ORDER BY created_at DESC LIMIT 1`

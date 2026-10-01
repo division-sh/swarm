@@ -7,8 +7,6 @@ import (
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 )
 
-type persistedAgentProjection = storeagent.PersistedAgentProjection
-
 var projectPersistedAgentConfig = storeagent.ProjectAgentConfig
 var hydratePersistedAgentConfig = storeagent.HydrateAgentConfig
 var decodePersistedAgentRuntimeDescriptor = storeagent.DecodePersistedAgentRuntimeDescriptor

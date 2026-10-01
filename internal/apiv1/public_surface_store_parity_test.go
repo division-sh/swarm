@@ -507,17 +507,6 @@ func storeParityEvidenceByRole(t *testing.T, claim *publicSurfaceStoreParityClai
 	return nil
 }
 
-func storeParityEvidenceByRisk(t *testing.T, claim *publicSurfaceStoreParityClaim, risk string) *publicSurfaceStoreParityEvidence {
-	t.Helper()
-	for index := range claim.Evidence {
-		if publicSurfaceHasValue(claim.Evidence[index].RiskDimensions, risk) {
-			return &claim.Evidence[index]
-		}
-	}
-	t.Fatalf("store parity claim %s risk evidence %s not found", claim.ID, risk)
-	return nil
-}
-
 func storeParityEvidenceExceptRole(values []publicSurfaceStoreParityEvidence, role string) []publicSurfaceStoreParityEvidence {
 	out := make([]publicSurfaceStoreParityEvidence, 0, len(values))
 	for _, value := range values {

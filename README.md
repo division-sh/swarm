@@ -276,9 +276,16 @@ currently available; there is no replacement action or compatibility alias.
 ```bash
 go build ./cmd/swarm
 golangci-lint run
+go run ./cmd/swarm-unused
 go run ./cmd/swarm-test
 go run ./cmd/swarm-test --full # exhaustive non-soak proof
 ```
+
+`swarm-unused` defaults to native-only analysis on the current host. Required
+CI merges native Linux and Darwin reachability with tests enabled across
+default, race, and `issue2413` configurations before enforcing U1000. The
+noncompiling `issue2438` configuration remains parked under E's
+[#2496](https://github.com/division-sh/swarm/issues/2496) until compile repair.
 
 For faster scoped validation while developing, use the changed-package local
 loop documented in [`CONTRIBUTING.md`](CONTRIBUTING.md).

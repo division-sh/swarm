@@ -70,10 +70,6 @@ func handlerTestWorkflowEnvelope(flowID, flowInstance, entityID string) events.E
 	})
 }
 
-func handlerTestWorkflowModule(flowID string, nodeIDs ...string) WorkflowModule {
-	return handlerTestWorkflowModuleWithBundle(nil, flowID, nodeIDs...)
-}
-
 func handlerTestWorkflowModuleWithBundle(bundle *runtimecontracts.WorkflowContractBundle, flowID string, nodeIDs ...string) WorkflowModule {
 	if bundle != nil && bundle.FlowTree.Root != nil {
 		cloned := *bundle

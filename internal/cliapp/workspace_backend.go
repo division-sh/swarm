@@ -117,14 +117,6 @@ func ResolveWorkspaceBackend(flagBackend string, flagSet bool, cfg *config.Confi
 	})
 }
 
-func resolveWorkspaceBackendDecision(flagBackend string, flagSet bool, cfg *config.Config, source semanticview.Source) (WorkspaceBackendSelection, error) {
-	preference, err := ResolveWorkspaceBackend(flagBackend, flagSet, cfg)
-	if err != nil {
-		return preference, err
-	}
-	return DecideWorkspaceBackend(executionposture.Live, preference, cfg, source)
-}
-
 func resolveWorkspaceBackendFromInput(in workspaceBackendInput) (WorkspaceBackendSelection, error) {
 	switch {
 	case in.FlagSet:

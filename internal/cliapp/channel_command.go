@@ -15,7 +15,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-type channelInterfaceResult = operatorchannel.InterfaceIdentity
 type channelOperationResult = operatorchannel.Operation
 type channelReadbackResult = channelonboarding.ConnectedChannelReadback
 
@@ -528,41 +527,6 @@ func channelOperationRenderers(result channelOperationEnvelope, packID string) (
 		return []string{result.Operation.OperationID}, nil
 	}
 	return human, quiet
-}
-
-func waitForChannelClaim(ctx context.Context, client *cliAPIClient, begun channelOperationResult, opts rootCommandOptions) (channelOperationResult, error) {
-	wait := opts.channelConnectWait
-	if wait <= 0 {
-		wait = 2 * time.Minute
-	}
-	poll := opts.channelConnectPoll
-	if poll <= 0 {
-		poll = 500 * time.Millisecond
-	}
-	deadline := time.NewTimer(wait)
-	defer deadline.Stop()
-	ticker := time.NewTicker(poll)
-	defer ticker.Stop()
-	for {
-		list, err := fetchChannelList(ctx, client)
-		if err != nil {
-			return channelOperationResult{}, err
-		}
-		for _, row := range list.Channels {
-			if row.Identity.PendingOperation != nil && row.Identity.PendingOperation.OperationID == begun.OperationID {
-				if row.Identity.PendingOperation.State != "awaiting_claim" {
-					return *row.Identity.PendingOperation, nil
-				}
-			}
-		}
-		select {
-		case <-ctx.Done():
-			return channelOperationResult{}, ctx.Err()
-		case <-deadline.C:
-			return channelOperationResult{}, fmt.Errorf("timed out waiting for channel claim; the operation remains visible in `swarm channel list` until %s", begun.ExpiresAt.Local().Format(time.RFC3339))
-		case <-ticker.C:
-		}
-	}
 }
 
 func confirmChannelClaimant(input io.Reader, out io.Writer) (bool, error) {

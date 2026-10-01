@@ -972,45 +972,6 @@ func mustBundleFromSource(t *testing.T, source semanticview.Source) *runtimecont
 	return bundle
 }
 
-func startServedEventPublishFollowUpRuntimeAtRepo(t *testing.T, repoRoot string, opts cliapp.ServeOptions) (string, *runtimepkg.Runtime) {
-	t.Helper()
-	serveCtx, cancelServe := context.WithCancel(context.Background())
-	var out lockedBuffer
-	done := make(chan int, 1)
-	runtimeReady := make(chan *runtimepkg.Runtime, 1)
-	priorRuntimeReadyHook := opts.TestRuntimeReadyHook
-	opts.TestRuntimeReadyHook = func(rt *runtimepkg.Runtime) {
-		if priorRuntimeReadyHook != nil {
-			priorRuntimeReadyHook(rt)
-		}
-		select {
-		case runtimeReady <- rt:
-		default:
-		}
-	}
-	opts.Output = &out
-	go func() { done <- runFrom(serveCtx, repoRoot, opts) }()
-	waitForServeReadyLine(t, &out, done)
-	var rt *runtimepkg.Runtime
-	select {
-	case rt = <-runtimeReady:
-	case <-time.After(2 * time.Second):
-		t.Fatalf("timed out waiting for generated serve runtime\noutput:\n%s", out.String())
-	}
-	t.Cleanup(func() {
-		cancelServe()
-		select {
-		case code := <-done:
-			if code != 0 {
-				t.Errorf("generated Run exit code = %d\noutput:\n%s", code, out.String())
-			}
-		case <-time.After(servedProofPollDeadline):
-			t.Errorf("timed out stopping generated Run\noutput:\n%s", out.String())
-		}
-	})
-	return "http://" + serveRuntimeAPIListenerFromOutput(t, out.String()) + "/v1/rpc", rt
-}
-
 func runServedGeneratedInputFixtureBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
 	isolateCLIAPIConfigEnv(t)

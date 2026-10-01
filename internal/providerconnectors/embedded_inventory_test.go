@@ -21,15 +21,6 @@ var embeddedTestInventory = sync.OnceValues(func() (*packartifact.EffectivePackI
 	return packartifact.NewEffectivePackInventory(base, nil)
 })
 
-func testEmbeddedPackInventory(t testing.TB) *packartifact.EffectivePackInventory {
-	t.Helper()
-	inventory, err := embeddedTestInventory()
-	if err != nil {
-		t.Fatalf("build effective embedded pack inventory: %v", err)
-	}
-	return inventory
-}
-
 var embeddedTestRegistry = sync.OnceValues(func() (*PackRegistry, error) {
 	inventory, err := embeddedTestInventory()
 	if err != nil {

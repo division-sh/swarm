@@ -23,10 +23,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const (
-	runForkDeliveryEventReplayTable = "run_fork_delivery_event_replays"
-)
-
 type runForkDeliveryEventReplayAdapter struct {
 	postgres       bool
 	requireCurrent func() error

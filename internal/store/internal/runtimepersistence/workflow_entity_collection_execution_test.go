@@ -68,12 +68,6 @@ func (selectedEntityCollectionExecutionLocker) WithEntityLock(ctx context.Contex
 	return fn(ctx)
 }
 
-type selectedEntityCollectionExecutionDispatcher struct{}
-
-func (selectedEntityCollectionExecutionDispatcher) DispatchPostCommit(context.Context, []runtimeengine.EmitIntent) error {
-	return nil
-}
-
 func TestExecutorQueryEntitiesResultIncludesStateOnlyRowOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {

@@ -32,7 +32,6 @@ import (
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
-	"gopkg.in/yaml.v3"
 )
 
 const standingMemoryAsyncProofTimeout = 30 * time.Second
@@ -284,45 +283,6 @@ func requireStandingLiveTelegramCalls(t testing.TB, calls <-chan map[string]any,
 			t.Fatalf("timed out waiting for live Telegram call with text %q", wantText)
 		}
 	}
-}
-
-func countCanonicalTelegramAgentMocks(t testing.TB, path string) int {
-	t.Helper()
-	body, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read Telegram agents %s: %v", path, err)
-	}
-	var document yaml.Node
-	if err := yaml.Unmarshal(body, &document); err != nil {
-		t.Fatalf("parse Telegram agents %s: %v", path, err)
-	}
-	if len(document.Content) != 1 || document.Content[0].Kind != yaml.MappingNode {
-		return 0
-	}
-	count := 0
-	for i := 0; i+1 < len(document.Content[0].Content); i += 2 {
-		if document.Content[0].Content[i].Value != "phrase-bot" || document.Content[0].Content[i+1].Kind != yaml.MappingNode {
-			continue
-		}
-		for j := 0; j+1 < len(document.Content[0].Content[i+1].Content); j += 2 {
-			if document.Content[0].Content[i+1].Content[j].Value == "mock" {
-				count++
-			}
-		}
-	}
-	return count
-}
-
-func equalStringValues(left, right map[string]string) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for key, value := range left {
-		if right[key] != value {
-			return false
-		}
-	}
-	return true
 }
 
 func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string, recoveryOnRestart bool) {

@@ -207,19 +207,6 @@ func closeSelectedStoreTestProcess(process *worklifetime.Process, capability run
 	return nil
 }
 
-func registerServeTestEphemeralAgent(t testing.TB, manager *runtimemanager.AgentManager, cfg runtimeactors.AgentConfig) {
-	t.Helper()
-	admission, err := runtimeagenttopology.NewEphemeralAdmission(uuid.NewString(), "runtime_shard")
-	if err != nil {
-		t.Fatalf("construct serve test ephemeral topology: %v", err)
-	}
-	if err := manager.MaterializeAdmittedAgentForExecution(context.Background(), runtimemanager.PersistedAgent{
-		Config: cfg, Status: "ephemeral", HiredBy: "serve-test", Topology: admission,
-	}); err != nil {
-		t.Fatalf("register serve test ephemeral agent: %v", err)
-	}
-}
-
 func registerServeTestDurableAgent(
 	t testing.TB,
 	callerCtx context.Context,

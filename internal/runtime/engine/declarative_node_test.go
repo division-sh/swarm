@@ -2,10 +2,7 @@ package engine
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"reflect"
-	stdruntime "runtime"
 	"testing"
 	"time"
 
@@ -151,24 +148,5 @@ func TestResolvedExecutionHandlerRejectsQualifiedExactRawBundleFallback(t *testi
 	}
 	if resolved := resolvedExecutionHandler(semanticview.Wrap(bundle), testRootExecutableNode(t, "listener"), "child/task.done"); resolved.matched {
 		t.Fatalf("qualified exact handler reached engine fallback: %#v", resolved)
-	}
-}
-
-func engineRepoRoot(t *testing.T) string {
-	t.Helper()
-	_, file, _, ok := stdruntime.Caller(0)
-	if !ok {
-		t.Fatal("resolve runtime caller")
-	}
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", ".."))
-}
-
-func writeEngineFixtureFile(t *testing.T, path string, contents string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
-	}
-	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
-		t.Fatalf("write %s: %v", path, err)
 	}
 }

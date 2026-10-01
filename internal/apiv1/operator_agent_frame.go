@@ -81,17 +81,6 @@ func inspectEffectiveAgentFrame(resolver AgentFrameEffectiveResolver, params map
 	return effectiveFrameInspection(resolved, agentID, flowInstance, root)
 }
 
-func requiredExactAgentFramePathParam(params map[string]any, name string) (string, error) {
-	value, present, err := optionalExactAgentFramePathParam(params, name)
-	if err != nil {
-		return "", err
-	}
-	if !present || value == "" {
-		return "", NewInvalidParamsError(map[string]any{"field": name, "reason": "is required"})
-	}
-	return value, nil
-}
-
 func requiredExactAgentFrameScalarParam(params map[string]any, name string) (string, error) {
 	value, present, err := optionalExactAgentFrameScalarParam(params, name)
 	if err != nil {

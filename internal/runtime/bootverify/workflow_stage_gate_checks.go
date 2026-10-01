@@ -216,14 +216,6 @@ func stageGateExpressionText(expression runtimecontracts.ExpressionValue) string
 	return ""
 }
 
-func workflowStageIDs(stages []runtimecontracts.WorkflowStageContract) []string {
-	out := make([]string, 0, len(stages))
-	for _, stage := range stages {
-		out = append(out, stage.ID)
-	}
-	return out
-}
-
 func stageGateLocation(flowID, stage, decision string) string {
 	if strings.TrimSpace(flowID) == "." {
 		flowID = "root"

@@ -1364,18 +1364,6 @@ func mapKeyDifference(left, right map[string]string) []string {
 	return out
 }
 
-func assertNoYAMLFields(t testing.TB, typ reflect.Type, forbidden ...string) {
-	t.Helper()
-	for _, field := range reflect.VisibleFields(typ) {
-		tag := strings.Split(field.Tag.Get("yaml"), ",")[0]
-		for _, name := range forbidden {
-			if tag == name {
-				t.Fatalf("%s retains retired yaml field %q", typ.Name(), name)
-			}
-		}
-	}
-}
-
 func assertExactYAMLFields(t testing.TB, typ reflect.Type, want []string) {
 	t.Helper()
 	var got []string

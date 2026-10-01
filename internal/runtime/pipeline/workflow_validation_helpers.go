@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -192,23 +191,4 @@ func cloneWorkflowSchemaValue(value any) any {
 	default:
 		return typed
 	}
-}
-
-func runtimecontractsHandlerPatternMatches(pattern, eventType string) bool {
-	pattern = strings.TrimSpace(pattern)
-	eventType = strings.TrimSpace(eventType)
-	if pattern == "" || eventType == "" {
-		return false
-	}
-	if pattern == eventType {
-		return true
-	}
-	if !strings.Contains(pattern, "*") {
-		return false
-	}
-	return workflowRouteMatches(pattern, eventType)
-}
-
-func workflowRouteMatches(pattern, eventType string) bool {
-	return eventidentity.MatchPattern(pattern, eventType)
 }

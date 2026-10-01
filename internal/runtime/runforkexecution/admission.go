@@ -368,15 +368,6 @@ func BuildSelectedContractExecutionAdmission(ctx context.Context, req SelectedCo
 	}, nil
 }
 
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
-}
-
 func validateSelectedContractExecutionBinding(forkRunID string, binding runfork.RunForkSelectedContractBinding) error {
 	if strings.TrimSpace(binding.Owner) != runfork.RunForkSelectedContractBindingOwner {
 		return fmt.Errorf("selected-contract execution admission requires %s binding; got %q", runfork.RunForkSelectedContractBindingOwner, binding.Owner)

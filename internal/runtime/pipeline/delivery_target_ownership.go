@@ -481,22 +481,6 @@ func decodeDeliveryTargetWorkflowEntityState(source semanticview.Source, flowID,
 	return instance, nil
 }
 
-func deliveryTargetRouteForWorkflowInstance(source semanticview.Source, flowID string, instance WorkflowInstance) (events.RouteIdentity, error) {
-	storedRoute, err := workflowInstanceRouteForPersisted(source, instance)
-	if err != nil {
-		return events.RouteIdentity{}, err
-	}
-	entityID, err := workflowInstancePersistedEntityID(instance)
-	if err != nil {
-		return events.RouteIdentity{}, err
-	}
-	route := events.RouteIdentity{FlowID: strings.TrimSpace(flowID), FlowInstance: storedRoute.InstancePath, EntityID: entityID.String()}.Normalized()
-	if route.FlowInstance == "" || route.EntityID == "" {
-		return events.RouteIdentity{}, fmt.Errorf("persisted workflow instance is missing exact delivery target identity")
-	}
-	return route, nil
-}
-
 func deliveryTargetWorkflowInstanceUnavailable(source semanticview.Source, flowID string, instance WorkflowInstance) bool {
 	return NewDeliveryTargetAvailability(instance.CurrentState, instance.Status, !instance.TerminatedAt.IsZero()).Validate(source, flowID) != nil
 }

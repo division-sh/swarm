@@ -6,12 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
-	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
+	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
@@ -1057,10 +1058,6 @@ func seedDurableReplyConformanceRun(t *testing.T, ctx context.Context, backend d
 	default:
 		t.Fatalf("unsupported reply conformance backend %T", backend)
 	}
-}
-
-func replyConformanceEvent(eventType, id, flowID, flowInstance string, payload map[string]any) events.Event {
-	return replyConformanceEventForRun(eventType, id, uuid.NewString(), flowID, flowInstance, payload)
 }
 
 func replyConformanceEventForRun(eventType, id, runID, flowID, flowInstance string, payload map[string]any) events.Event {

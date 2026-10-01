@@ -108,8 +108,3 @@ func loadUnifiedConfigForTest(t testing.TB, opts unifiedConfigLoadOptions) (unif
 	t.Helper()
 	return loadUnifiedConfig(unifiedConfigOptionsForTest(t, opts))
 }
-
-func loadUnifiedConfigAllowDiagnosticsForTest(t testing.TB, opts unifiedConfigLoadOptions) (unifiedConfigLoadResult, error) {
-	t.Helper()
-	return loadUnifiedConfigAllowDiagnostics(unifiedConfigOptionsForTest(t, opts))
-}

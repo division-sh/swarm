@@ -3,7 +3,6 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
-	"fmt"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
@@ -26,12 +25,4 @@ func (s *PostgresStore) runEventTransaction(ctx context.Context, fn func(context
 		eventCtx := context.WithValue(txctx, eventFixtureStoryKey{}, runtimeauthoractivity.Mutation(story))
 		return fn(eventCtx, tx)
 	})
-}
-
-func eventFixtureStory(ctx context.Context) (runtimeauthoractivity.Mutation, error) {
-	story, ok := ctx.Value(eventFixtureStoryKey{}).(runtimeauthoractivity.Mutation)
-	if !ok || story == nil {
-		return nil, fmt.Errorf("semantic event fixture transaction owner is required")
-	}
-	return story, nil
 }

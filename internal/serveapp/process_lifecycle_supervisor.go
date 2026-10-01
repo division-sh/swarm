@@ -197,15 +197,6 @@ func (s *processLifecycleSupervisor) retireSelectedContextsLocked(ctx context.Co
 	return s.selected.RetireSelectedContexts(ctx)
 }
 
-func (s *processLifecycleSupervisor) settlePendingSourceSetTransition(ctx context.Context) error {
-	if s == nil {
-		return nil
-	}
-	s.operationMu.Lock()
-	defer s.operationMu.Unlock()
-	return s.settlePendingSourceSetTransitionLocked(ctx)
-}
-
 func (s *processLifecycleSupervisor) settlePendingSourceSetTransitionLocked(ctx context.Context) error {
 	if s.processCapability == nil {
 		return nil

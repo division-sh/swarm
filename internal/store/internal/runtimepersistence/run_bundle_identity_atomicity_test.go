@@ -47,23 +47,3 @@ func countRunAuthorActivity(t *testing.T, db *sql.DB, runID string) int {
 	}
 	return count
 }
-
-func assertNoForkEntityState(t *testing.T, db *sql.DB, runID string) {
-	t.Helper()
-	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE run_id = $1::uuid`, runID).Scan(&count); err != nil {
-		t.Fatalf("count fork entity state for run %s: %v", runID, err)
-	}
-	if count != 0 {
-		t.Fatalf("fork entity state rows for run %s = %d, want 0", runID, count)
-	}
-}
-
-func countStandingJournalRows(t *testing.T, db *sql.DB, serviceID string) int {
-	t.Helper()
-	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM standing_service_journal WHERE service_id = $1::uuid`, serviceID).Scan(&count); err != nil {
-		t.Fatalf("count standing journal rows for %s: %v", serviceID, err)
-	}
-	return count
-}

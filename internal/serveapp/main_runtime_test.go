@@ -133,23 +133,9 @@ func TestLoadServeRuntimeBundleRejectsMalformedPackBodiesBeforePublication(t *te
 	}
 }
 
-func servedRuntimeRootIdentity(t testing.TB, agentID string) runtimeagentidentity.Identity {
-	t.Helper()
-	return agentidentitytest.RootRuntime(t, agentID, "serveapp-test")
-}
-
 func servedRuntimeRootIdentityForRun(t testing.TB, runID, agentID string) runtimeagentidentity.Identity {
 	t.Helper()
 	return agentidentitytest.RootRuntimeForRun(t, runID, agentID, "serveapp-test")
-}
-
-func requireServeTestAgentFixture(t testing.TB, selected storetest.AgentFixtureStore, cfg runtimeactors.AgentConfig) {
-	t.Helper()
-	source, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
-	if err != nil {
-		t.Fatalf("construct serve test agent source: %v", err)
-	}
-	requireServeTestAgentFixtureForSource(t, selected, cfg, source)
 }
 
 func requireServeTestAgentFixtureForSource(t testing.TB, selected storetest.AgentFixtureStore, cfg runtimeactors.AgentConfig, source runtimecorrelation.SourceArtifactFact) {
@@ -184,18 +170,6 @@ func releaseServeTestAgentFixtureCapability(t testing.TB, selected storetest.Age
 	}
 }
 
-func servedRuntimeFlowIdentity(t testing.TB, agentID, scopeKey, instanceID string) runtimeagentidentity.Identity {
-	t.Helper()
-	return agentidentitytest.Runtime(
-		t,
-		agentID,
-		"serveapp-test",
-		scopeKey,
-		instanceID,
-		scopeKey+"/"+instanceID,
-	)
-}
-
 func servedRuntimeFlowIdentityForRun(t testing.TB, runID, agentID, scopeKey, instanceID string) runtimeagentidentity.Identity {
 	t.Helper()
 	return agentidentitytest.RuntimeForRun(
@@ -207,15 +181,6 @@ func servedRuntimeFlowIdentityForRun(t testing.TB, runID, agentID, scopeKey, ins
 		instanceID,
 		scopeKey+"/"+instanceID,
 	)
-}
-
-func servedRuntimeFlowIdentityFields(t testing.TB, agentID, scopeKey, instanceID string) runtimeagentidentity.StorageFields {
-	t.Helper()
-	fields, err := servedRuntimeFlowIdentity(t, agentID, scopeKey, instanceID).StorageFields()
-	if err != nil {
-		t.Fatalf("project served runtime flow agent identity: %v", err)
-	}
-	return fields
 }
 
 func servedRuntimeFlowIdentityFieldsForRun(t testing.TB, runID, agentID, scopeKey, instanceID string) runtimeagentidentity.StorageFields {
@@ -664,17 +629,6 @@ func seedServeBundleAdmissionCurrentStandingRun(t *testing.T, ctx context.Contex
 	}
 }
 
-func bundleCatalogContentWithPresentZeroAgents(t *testing.T, contentYAML string) string {
-	t.Helper()
-	const marker = "canonical_inputs:\n"
-	const file = "  - label: \"bundle/agents.yaml\"\n    content_base64: \"e30K\"\n    size_bytes: 3\n"
-	if !strings.Contains(contentYAML, marker) {
-		t.Fatal("source artifacts content is missing canonical_inputs")
-	}
-	return strings.Replace(contentYAML, marker, file+marker, 1) +
-		"  - label: \"bundle/agents.yaml\"\n    policy: yaml\n    size_bytes: 3\n"
-}
-
 func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
 	endpoint, db, bundleHash, _, _ := startServedJoinProofRuntime(t)
 	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
@@ -924,34 +878,6 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite(t *test
 		t.Fatal("served sqlite SQLDB is required for event.publish proof")
 	}
 	runServedEventPublishFollowUpProof(t, endpoint, servedDB, "sqlite", bundleHash, probe)
-}
-
-func requirePersistedRunForkBranchAuthority(t *testing.T, db *sql.DB, runID, eventID string) {
-	t.Helper()
-	deadline := time.Now().Add(servedProofPollDeadline)
-	var status string
-	var eventRevision, headRevision int64
-	var lastErr error
-	for time.Now().Before(deadline) {
-		lastErr = db.QueryRowContext(context.Background(), `
-			SELECT r.status, f.revision, h.last_revision
-			FROM runs r
-			JOIN run_fork_fact_revisions f
-			  ON f.run_id = r.run_id
-			 AND f.family = 'events'
-			 AND f.fact_key = $2
-			 AND f.present
-			JOIN run_fork_revision_heads h ON h.run_id = r.run_id
-			WHERE r.run_id = $1::uuid
-			ORDER BY f.revision
-			LIMIT 1
-		`, runID, eventID).Scan(&status, &eventRevision, &headRevision)
-		if lastErr == nil && status == "completed" && eventRevision > 0 && headRevision >= eventRevision {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("persisted restart fork authority for run=%s event=%s = status:%q event_revision:%d head_revision:%d err:%v", runID, eventID, status, eventRevision, headRevision, lastErr)
 }
 
 func requireServedRunForkStoppedReplay(t *testing.T, db *sql.DB, forkRunID string) {
@@ -4703,11 +4629,6 @@ func servedJoinProofOutboxSweeperConfig() runtimebus.OutboxSweeperConfig {
 	return cfg
 }
 
-func writeServedJoinProofFixture(t *testing.T) string {
-	t.Helper()
-	return canonicalrouting.CopyServedJoinProof(t)
-}
-
 func servedJoinTarget(t *testing.T, db *sql.DB, runID string) string {
 	t.Helper()
 	deadline := time.Now().Add(servedProofPollDeadline)
@@ -5642,43 +5563,6 @@ func requireServedEventPublishEntityFlowInstance(t *testing.T, db *sql.DB, backe
 		t.Fatalf("%s entity flow_instance for run=%s entity=%s is empty", backend, runID, entityID)
 	}
 	return flowInstance
-}
-
-func requireServedEventPublishTargetRouteRow(t *testing.T, db *sql.DB, backend, eventID, eventName, flowInstance, entityID string) {
-	t.Helper()
-	var (
-		query           string
-		gotEventName    string
-		gotEntityID     string
-		gotFlowInstance string
-		targetRoute     string
-		args            []any
-	)
-	switch backend {
-	case "postgres":
-		query = `
-			SELECT event_name, COALESCE(entity_id::text, ''), COALESCE(flow_instance, ''), COALESCE(target_route::text, '{}')
-			FROM events
-			WHERE event_id = $1::uuid
-		`
-		args = []any{eventID}
-	case "sqlite":
-		query = `
-			SELECT event_name, COALESCE(entity_id, ''), COALESCE(flow_instance, ''), COALESCE(target_route, '{}')
-			FROM events
-			WHERE event_id = ?
-		`
-		args = []any{eventID}
-	default:
-		t.Fatalf("unknown proof backend %q", backend)
-	}
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&gotEventName, &gotEntityID, &gotFlowInstance, &targetRoute); err != nil {
-		t.Fatalf("%s load target-route event row: %v", backend, err)
-	}
-	if gotEventName != eventName || gotEntityID != entityID || gotFlowInstance != flowInstance {
-		t.Fatalf("%s target event row = event:%q entity:%q flow:%q, want %q/%q/%q", backend, gotEventName, gotEntityID, gotFlowInstance, eventName, entityID, flowInstance)
-	}
-	requireServedEventPublishRouteJSON(t, backend, "event.target_route", targetRoute, flowInstance, entityID)
 }
 
 func requireServedEventPublishDeliveryTargetRoute(t *testing.T, db *sql.DB, backend, eventID, subscriberType, subscriberID, flowInstance, entityID string) {
@@ -7529,25 +7413,6 @@ func assertPostgresTableExists(t *testing.T, db *sql.DB, tableName string) {
 	}
 }
 
-func reviseServeTestRunSource(
-	t *testing.T,
-	ctx context.Context,
-	pg *store.PostgresStore,
-	runID string,
-	bundleHash string,
-) {
-	t.Helper()
-	source, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := storetest.ReviseRunSource(ctx, pg, storerunlifecycle.SourceRevisionRequest{
-		RunID: runID, Source: source,
-	}); err != nil {
-		t.Fatalf("revise source run bundle identity: %v", err)
-	}
-}
-
 func assertServeRuntimeRunStillActive(t *testing.T, ctx context.Context, pg *store.PostgresStore, runID string) {
 	t.Helper()
 	var status string
@@ -8867,27 +8732,6 @@ func startRuntimeTestProcessWithRunner(t *testing.T, repo string, opts cliapp.Se
 		done <- run(ctx, repo, opts)
 	}()
 	return process
-}
-
-func (p *serveRuntimeTestProcess) runtimeWorkContext(ctx context.Context) context.Context {
-	p.t.Helper()
-	p.mu.Lock()
-	rt := p.runtime
-	p.mu.Unlock()
-	if rt == nil || rt.WorkOccurrence() == nil {
-		p.t.Fatal("serve runtime work occurrence is not ready")
-	}
-	fact := rt.Options.SourceArtifactFact
-	if err := fact.Validate(); err != nil {
-		p.t.Fatalf("serve runtime bundle source fact: %v", err)
-	}
-	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, rt.Options.RuntimeInstanceID)
-	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
-	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
-		rt.Options.RuntimeInstanceID,
-		fact.BundleHash(),
-	))
-	return worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
 }
 
 func (p *serveRuntimeTestProcess) waitForReadyLine() {

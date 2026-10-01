@@ -11,7 +11,6 @@ import (
 
 const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
 const authorActivityTestBundleHash = sourceartifactfixture.BundleHash
-const authorActivityTestSourceArtifact = "ephemeral"
 
 var authorActivityTestSourceArtifactFact = mustAuthorActivityTestSourceArtifactFact()
 

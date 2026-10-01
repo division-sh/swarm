@@ -1163,16 +1163,6 @@ func intentHasOpenTODO(text string) bool {
 	return strings.Contains(text, "<!-- TODO") && !strings.Contains(text, "<!-- DEFERRED")
 }
 
-func projectScopeLabel(key, manifestName string) string {
-	if key = strings.TrimSpace(key); key != "" {
-		return key
-	}
-	if manifestName = strings.TrimSpace(manifestName); manifestName != "" {
-		return manifestName
-	}
-	return "root"
-}
-
 func flowScopeLabel(id, path string) string {
 	if id = strings.TrimSpace(id); id != "" {
 		return id
@@ -1216,17 +1206,6 @@ func sortedSetKeys(items map[string]struct{}) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-func flowSchemaIsTemplate(source semanticview.Source, flowID string) bool {
-	if source == nil {
-		return false
-	}
-	schema, ok := source.FlowSchemaByID(strings.TrimSpace(flowID))
-	if !ok {
-		return false
-	}
-	return strings.EqualFold(strings.TrimSpace(schema.EffectiveMode()), "template")
 }
 
 func flowIsStateless(source semanticview.Source, flowID string) bool {

@@ -3,7 +3,6 @@ package pipelinepersistence
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -133,10 +132,6 @@ func loadFanOutSourceEvent(ctx context.Context, q eventReadQueryer, eventID stri
 		return empty, events.RouteSettlement{}, fmt.Errorf("event %s not found", strings.TrimSpace(eventID))
 	}
 	return admitted.Event(), settlement, nil
-}
-
-func marshalPipelineReceiptSideEffects(value pipelineReceiptSideEffects) ([]byte, error) {
-	return json.Marshal(value)
 }
 
 func mustDeliveryAdapter(dialect deliverystore.Dialect) *deliverystore.Adapter {

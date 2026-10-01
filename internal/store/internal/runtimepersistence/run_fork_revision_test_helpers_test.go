@@ -51,18 +51,6 @@ func finalizePostgresRunForkTestRevision(ctx context.Context, tx *sql.Tx, runID 
 	return results[runID].Revision, nil
 }
 
-func finalizeSQLiteRunForkTestRevision(ctx context.Context, tx *sql.Tx, runID string, families ...runforkrevision.Family) (int64, error) {
-	effects := runforkrevision.NewEffects()
-	if err := effects.Add(runID, families...); err != nil {
-		return 0, err
-	}
-	results, err := runforkrevision.FinalizeSQLite(ctx, tx, effects)
-	if err != nil {
-		return 0, err
-	}
-	return results[runID].Revision, nil
-}
-
 func seedRunForkSessionProjection(t *testing.T, db *sql.DB, runID, agentID, sessionID, status string, at time.Time) {
 	t.Helper()
 	ctx := testAuthorActivityContext()

@@ -180,10 +180,22 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
+      # U1000 fails only after merging native reachability, not during collection.
+      - name: Collect native Linux unused analysis
+        run: go run ./cmd/swarm-unused -collect -out test-results/unused/linux
+      - name: Upload native Linux unused analysis
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unused-linux
+          path: test-results/unused/linux
+          if-no-files-found: error
       - name: Check formatting
         run: |
           unformatted=$(gofmt -l .)
@@ -231,10 +243,21 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
+      - name: Collect native Darwin unused analysis
+        run: go run ./cmd/swarm-unused -collect -out test-results/unused/darwin
+      - name: Upload native Darwin unused analysis
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unused-darwin
+          path: test-results/unused/darwin
+          if-no-files-found: error
       - name: Prove store ownership and engine-disjoint crash reclaim
         run: go test ./internal/store/internal/startupownership -count=1
       - name: Prove selected SQLite construction consumes the owner
@@ -247,6 +270,32 @@ jobs:
         run: go test ./internal/cliapp ./internal/sourceartifact -run '^(TestSourceRootSelectionAliasMatrix|TestStaticDataCatalogInvocationInvariance|TestResolveCLISourcePlatformSpecPaths.*|TestCLIContractPathResolutionIgnoresLegacyContractsDir|TestRunCommandLocalForegroundConsumesServeOwnerAndV1API|TestStartLocalRunServeConsumesPositionalSourceOwner|TestAdmissionLinksDoNotChangeWithSelectedRootSpelling|TestAdmitDirectoryRejectsIncludedSymlinkBeforeClassification|TestExcludedNameIsNeverOpened)$' -count=1
       - name: Prove shipped dev and non-dev SQLite serve
         run: go test ./internal/releasee2e -run '^TestGoldenSQLitePossessionServeJourney$' -count=1 -v
+
+  unused-checks:
+    name: Native union unused checks
+    needs: [static-checks, macos-sqlite-possession]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Download native Linux unused analysis from this run
+        uses: actions/download-artifact@v4
+        with:
+          name: unused-linux
+          path: test-results/unused/linux
+      - name: Download native Darwin unused analysis from this run
+        uses: actions/download-artifact@v4
+        with:
+          name: unused-darwin
+          path: test-results/unused/darwin
+      - name: Check source-bound native union
+        run: go run ./cmd/swarm-unused -merge -in test-results/unused
 
   proof-unit:
     name: Go proof ${{ matrix.unit }}
@@ -538,7 +587,7 @@ jobs:
   required-tests:
     name: ${{ github.event_name == 'workflow_dispatch' && 'Full dispatch summary' || 'Required test summary' }}
     if: always()
-    needs: [complexity, ci-plan, static-checks, sqlite-local-dev, macos-sqlite-possession, proof-unit, mandatory-soak, semantic-smoke, timing-budget]
+    needs: [complexity, ci-plan, static-checks, sqlite-local-dev, macos-sqlite-possession, unused-checks, proof-unit, mandatory-soak, semantic-smoke, timing-budget]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -548,14 +597,19 @@ jobs:
           set -euo pipefail
           failed=0
           if [ '${{ needs.ci-plan.outputs.soak_matrix }}' != '{"include":[]}' ] && [ "${{ needs.mandatory-soak.result }}" != success ]; then failed=1; fi
-          complexity_result="${{ needs.complexity.result }}"
-          echo "- complexity: \`${complexity_result}\`" >> "$GITHUB_STEP_SUMMARY"
-          if [ "$complexity_result" != success ]; then failed=1; fi
+          for item in \
+            "complexity:${{ needs.complexity.result }}" \
+            "static-checks:${{ needs.static-checks.result }}" \
+            "macos-sqlite-possession:${{ needs.macos-sqlite-possession.result }}" \
+            "unused-checks:${{ needs.unused-checks.result }}"
+          do
+            name="${item%%:*}"; result="${item#*:}"
+            echo "- ${name}: \`${result}\`" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$result" != success ]; then failed=1; fi
+          done
           for item in \
             "ci-plan:${{ needs.ci-plan.result }}" \
-            "static-checks:${{ needs.static-checks.result }}" \
             "sqlite-local-dev:${{ needs.sqlite-local-dev.result }}" \
-            "macos-sqlite-possession:${{ needs.macos-sqlite-possession.result }}" \
             "proof-unit:${{ needs.proof-unit.result }}" \
             "semantic-smoke:${{ needs.semantic-smoke.result }}" \
             "timing-budget:${{ needs.timing-budget.result }}"

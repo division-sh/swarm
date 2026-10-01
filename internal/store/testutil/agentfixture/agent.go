@@ -289,10 +289,6 @@ func (s *fixtureSession) grantForExactPlan(ctx context.Context, plan runtimeagen
 	return grant, nil
 }
 
-func (s *fixtureSession) issueGrant(ctx context.Context, plan runtimeagenttopology.SourceSetPlan) (runtimestartupownership.LiveGenerationGrant, error) {
-	return s.issueGrantForSource(ctx, plan, runtimeagenttopology.SourceCoordinate{BundleHash: agentFixtureBundleHash})
-}
-
 func (s *fixtureSession) issueGrantForSource(ctx context.Context, plan runtimeagenttopology.SourceSetPlan, coordinate runtimeagenttopology.SourceCoordinate) (runtimestartupownership.LiveGenerationGrant, error) {
 	return s.capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
 		BundleHash: coordinate.BundleHash, RuntimeInstanceID: s.runtimeInstanceID,

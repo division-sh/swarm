@@ -25,16 +25,6 @@ func (s *recordingGenericScheduleWakeupOwner) ReconcileWakeupWithRecovery(_ cont
 	return false, nil
 }
 
-func stageTimerTemplateLifecycleBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
-	t.Helper()
-	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":          "name: stage-timer-test\n",
-		"review/schema.yaml":   "name: review\nstages:\n  awaiting_review:\n    initial: true\n    timers:\n      - {id: awaiting_review.expired, after: '{{sla_hours}}h', advances_to: expired}\n  expired: {terminal: true}\n",
-		"review/entities.yaml": "test_entity: {}\n",
-		"review/policy.yaml":   "sla_hours: 2\n",
-	})
-}
-
 func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 	const entityID = "11111111-1111-1111-1111-111111111111"
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))

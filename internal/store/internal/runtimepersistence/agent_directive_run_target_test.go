@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
-	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 )
@@ -60,22 +59,4 @@ func insertDirectiveRun(t *testing.T, ctx context.Context, pg *PostgresStore, ru
 		t.Fatalf("parse run state %q: %v", status, err)
 	}
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, State: state})
-}
-
-func insertDirectiveSession(t *testing.T, ctx context.Context, pg *PostgresStore, sessionID string, identity runtimeagentidentity.Identity, runID string) {
-	t.Helper()
-	fields, err := agentIdentityFields(identity)
-	if err != nil {
-		t.Fatalf("directive session identity: %v", err)
-	}
-	if _, err := pg.backend.ExecContext(ctx, `
-		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
-			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, status
-		)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'active')
-	`, sessionID, runID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath); err != nil {
-		t.Fatalf("insert session %s: %v", sessionID, err)
-	}
 }

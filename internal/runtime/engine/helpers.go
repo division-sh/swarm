@@ -356,17 +356,6 @@ func executionProjectedMap(value any) map[string]any {
 	return map[string]any{}
 }
 
-func (s executionScope) activation() map[string]any {
-	return map[string]any{
-		"item":    s.Item,
-		"payload": s.Payload,
-		"event":   s.Event,
-		"entity":  s.Entity,
-		"_entity": s.PlatformEntity,
-		"policy":  s.Policy,
-	}
-}
-
 func compileExecutionCondition(expr string, options workflowexpr.ValueExpressionOptions) (*compiledExecutionCondition, error) {
 	expr = strings.TrimSpace(expr)
 	if expr == "" {
@@ -601,21 +590,6 @@ func executionNormalizeNumber(value float64) any {
 		return int(value)
 	}
 	return value
-}
-
-func executionDeletePath(root map[string]any, segments []string) {
-	if len(root) == 0 || len(segments) == 0 {
-		return
-	}
-	current := root
-	for _, segment := range segments[:len(segments)-1] {
-		next, ok := current[strings.TrimSpace(segment)].(map[string]any)
-		if !ok {
-			return
-		}
-		current = next
-	}
-	delete(current, strings.TrimSpace(segments[len(segments)-1]))
 }
 
 func computeValue(acc *Accumulator, payload map[string]any, spec *runtimecontracts.ComputeSpec) (any, error) {
@@ -914,28 +888,6 @@ func sliceFromAny(value any) []any {
 		out := make([]any, 0, len(typed))
 		for _, item := range typed {
 			out = append(out, item)
-		}
-		return out
-	default:
-		return nil
-	}
-}
-
-func sliceOfMapsFromAny(raw any) []map[string]any {
-	switch typed := raw.(type) {
-	case []map[string]any:
-		out := make([]map[string]any, 0, len(typed))
-		for _, item := range typed {
-			out = append(out, cloneStringAnyMap(item))
-		}
-		return out
-	case []any:
-		out := make([]map[string]any, 0, len(typed))
-		for _, item := range typed {
-			m, ok := asObject(item)
-			if ok {
-				out = append(out, cloneStringAnyMap(m))
-			}
 		}
 		return out
 	default:

@@ -19,13 +19,6 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
-// Keep the real parent-to-template connect route. The imported document is an
-// optional event field so ordinary authored account.registered producers remain
-// valid, while deployment feeds can carry the full nested source document.
-func deploymentResourceSource(t *testing.T) semanticview.Source {
-	return deploymentResourceSourceWithAgent(t, true)
-}
-
 func deploymentResourceSourceWithAgent(t *testing.T, includeAgent bool) semanticview.Source {
 	t.Helper()
 	root := notifyallchildren.WriteVariant(t, notifyallchildren.Options{})

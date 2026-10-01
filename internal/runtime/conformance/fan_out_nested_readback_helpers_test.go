@@ -143,29 +143,3 @@ func assertNestedExactBarrier(t *testing.T, ctx context.Context, db *sql.DB, key
 		t.Fatalf("nested exact-intent barrier %+v = %s/%+v, want %s/%+v", key, gotStatus, got, status, want)
 	}
 }
-
-func assertNestedPublicCompletion(t *testing.T, ctx context.Context, selected notifyAllChildrenStore, db *sql.DB, runID, eventName, parentID, accountID string, want fanoutbarrier.Summary) {
-	t.Helper()
-	ids := nestedEventIDs(t, ctx, db, runID, eventName, parentID)
-	if len(ids) != 1 {
-		t.Fatalf("nested completion %s for parent %s count=%d, want exactly 1", eventName, parentID, len(ids))
-	}
-	view, err := nestedPublicReader(t, selected).LoadOperatorEvent(ctx, ids[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if accountID != "" && view.Payload["account_id"] != accountID {
-		t.Fatalf("nested completion sibling identity=%+v, want account_id=%s", view.Payload, accountID)
-	}
-	for field, value := range map[string]int{
-		"total": want.Total, "succeeded": want.Succeeded, "dead_lettered": want.DeadLettered,
-		"no_route": want.NoRoute, "semantic_rejected": want.SemanticRejected, "canceled": want.Canceled,
-	} {
-		if got, ok := view.Payload[field].(float64); !ok || got != float64(value) {
-			t.Fatalf("nested public completion %s=%#v, want %d; payload=%+v", field, view.Payload[field], value, view.Payload)
-		}
-	}
-	if view.NoDelivery == nil || len(view.Deliveries) != 0 {
-		t.Fatalf("nested public completion disposition=%+v/%+v", view.NoDelivery, view.Deliveries)
-	}
-}

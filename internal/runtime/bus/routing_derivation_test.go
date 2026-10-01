@@ -1619,17 +1619,6 @@ func TestDeriveRouteTable_NestedPackageConnectLocalizesWithinParentFlow(t *testi
 	}
 }
 
-func writeRoutingFixtureFile(t testing.TB, root, relative, body string) {
-	t.Helper()
-	path := filepath.Join(root, filepath.FromSlash(relative))
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("create routing fixture directory: %v", err)
-	}
-	if err := os.WriteFile(path, []byte(strings.TrimPrefix(body, "\n")), 0o600); err != nil {
-		t.Fatalf("write routing fixture %s: %v", relative, err)
-	}
-}
-
 func TestDeriveRouteTable_NestedTemplateInstancesPersistSemanticScopeKey(t *testing.T) {
 	grandchild := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "grandchild"},

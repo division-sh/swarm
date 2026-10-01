@@ -7,32 +7,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/packs"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	"github.com/division-sh/swarm/internal/runtime/plangeneration"
-	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
-	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/packfixture"
-	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
 )
 
@@ -113,82 +102,6 @@ func rotateRegistrationTestGeneration(
 		t.Fatalf("admit successor registration generation: %v", err)
 	}
 	return grant, evidence
-}
-
-type selectedRegistrationSettlementStore struct {
-	startupAuthorityParityStore
-	mu       sync.Mutex
-	failNext bool
-}
-
-func (s *selectedRegistrationSettlementStore) SettleExternalAttempt(ctx context.Context, settlement runtimeeffects.Settlement) error {
-	s.mu.Lock()
-	if s.failNext {
-		s.failNext = false
-		s.mu.Unlock()
-		return fmt.Errorf("injected provider-registration settlement persistence failure")
-	}
-	s.mu.Unlock()
-	return s.startupAuthorityParityStore.SettleExternalAttempt(ctx, settlement)
-}
-
-func (s *selectedRegistrationSettlementStore) failNextSettlement() {
-	s.mu.Lock()
-	s.failNext = true
-	s.mu.Unlock()
-}
-
-type selectedTelegramRegistrationTransport struct {
-	mu          sync.Mutex
-	applyCount  int
-	currentURL  string
-	readbackURL string
-	readbackErr error
-}
-
-func (t *selectedTelegramRegistrationTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	switch {
-	case strings.HasSuffix(request.URL.Path, "/getMe"):
-		return selectedRegistrationResponse(http.StatusOK, `{"ok":true,"result":{"id":42}}`), nil
-	case strings.HasSuffix(request.URL.Path, "/setWebhook"):
-		var body map[string]any
-		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
-			return nil, err
-		}
-		t.currentURL = strings.TrimSpace(fmt.Sprint(body["url"]))
-		t.applyCount++
-		return selectedRegistrationResponse(http.StatusOK, `{"ok":true,"result":true}`), nil
-	case strings.HasSuffix(request.URL.Path, "/getWebhookInfo"):
-		if t.readbackErr != nil {
-			return nil, t.readbackErr
-		}
-		callback := t.currentURL
-		if t.readbackURL != "" {
-			callback = t.readbackURL
-		}
-		raw, err := json.Marshal(map[string]any{"ok": true, "result": map[string]any{"url": callback}})
-		if err != nil {
-			return nil, err
-		}
-		return selectedRegistrationResponse(http.StatusOK, string(raw)), nil
-	default:
-		return nil, fmt.Errorf("unexpected Telegram registration request %s", request.URL)
-	}
-}
-
-func (t *selectedTelegramRegistrationTransport) setReadback(url string, err error) {
-	t.mu.Lock()
-	t.readbackURL = strings.TrimSpace(url)
-	t.readbackErr = err
-	t.mu.Unlock()
-}
-
-func (t *selectedTelegramRegistrationTransport) applies() int {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.applyCount
 }
 
 func TestProviderRegistrationAuthorityAndApplyJournalParity(t *testing.T) {
@@ -466,101 +379,6 @@ func TestProviderRegistrationAuthorityAndApplyJournalParity(t *testing.T) {
 			}
 		})
 	}
-}
-
-func selectedStoreTelegramRegistrationPlan(t *testing.T) packs.CompiledChannelRegistration {
-	t.Helper()
-	repo := filepath.Clean(filepath.Join("..", "..", "..", ".."))
-	snapshot, err := yamlsource.LoadFile(filepath.Join(repo, "platform-spec.yaml"))
-	if err != nil {
-		t.Fatalf("load platform spec: %v", err)
-	}
-	var spec runtimecontracts.PlatformSpecDocument
-	if err := snapshot.Decode(&spec); err != nil {
-		t.Fatalf("decode platform spec: %v", err)
-	}
-	registry, err := packs.NewInterfaceRegistry(spec)
-	if err != nil {
-		t.Fatalf("NewInterfaceRegistry: %v", err)
-	}
-	channels := packfixture.ChannelPacks(t)
-	triggers := packfixture.TriggerCatalog(t)
-	var connector packs.ConnectorPackDescriptor
-	for _, candidate := range packfixture.ConnectorRegistry(t).PackDescriptors() {
-		if candidate.Identity.ID() == "provider.telegram.connector" {
-			connector = candidate
-			break
-		}
-	}
-	plan, err := packs.CompileChannel(registry, channels[0], triggers.PackDescriptors(), []packs.ConnectorPackDescriptor{connector})
-	if err != nil {
-		t.Fatalf("CompileChannel: %v", err)
-	}
-	registration, ok := plan.Registration()
-	if !ok {
-		t.Fatal("Telegram registration plan is missing")
-	}
-	return registration
-}
-
-func selectedStoreRegistrationPair(t *testing.T, registration packs.CompiledChannelRegistration) runtimepublicingress.RegistrationPair {
-	t.Helper()
-	planGeneration, err := plangeneration.FromCanonicalValue(map[string]any{"binding": "selected-store-telegram"})
-	if err != nil {
-		t.Fatalf("plan generation: %v", err)
-	}
-	onboardingID := uuid.NewString()
-	coordinate := channelonboarding.ChannelRuntimeContextCoordinate{
-		BundleHash:     testCanonicalBundleHash,
-		BundleIdentity: "bundle:test@sha256:selected-store-registration", PackInventoryGeneration: "sha256:selected-store-registration-inventory",
-		RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 1,
-		PlanGeneration: planGeneration, TargetGeneration: 1,
-	}
-	return runtimepublicingress.RegistrationPair{
-		BindingID: "selected-store-telegram", PlanGeneration: planGeneration, OnboardingOperationID: onboardingID, OnboardingRevision: 1,
-		OnboardingCoordinate: coordinate, PrebindingOperationID: onboardingID, Registration: registration,
-		CredentialKeys: map[string]string{"telegram_bot_token": "bot"},
-		Target: runtimepublicingress.RegistrationTarget{
-			Selector: "ingress:support/telegram:telegram", BundleHash: testCanonicalBundleHash,
-			ServiceID: "selected-store-service", FlowPath: "support/telegram", Alias: "support", Provider: "telegram",
-			Generation: 1, PublicationSequence: 1,
-			AdmissionPlanGeneration: triggergeneration.FromCanonicalBytes([]byte("selected-store-registration-admission")),
-			SigningCredentialKey:    "signing",
-		},
-	}
-}
-
-func setSelectedStoreExposure(readiness *runtimepublicingress.ReadinessOwner, exposure runtimepublicingress.Generation, startup runtimestartupownership.GrantEvidence, now time.Time) {
-	readiness.SetExposure(runtimepublicingress.ExposureEvidence{
-		GenerationID: exposure.ID, Mode: exposure.Mode, PublicOrigin: exposure.PublicOrigin, ListenAddress: exposure.ListenAddress,
-		StartupAuthorityID: startup.GrantID, ObservedAt: now, ExpiresAt: now.Add(runtimepublicingress.EvidenceTTL),
-	})
-}
-
-func selectedStoreLatestProviderRegistrationAttempt(t *testing.T, ctx context.Context, db *sql.DB) (string, string, int) {
-	t.Helper()
-	var operationID, attemptID string
-	var ordinal int
-	query := `SELECT operation_id::text, attempt_id::text, attempt_ordinal FROM runtime_external_effect_attempts WHERE adapter='provider_registration' ORDER BY authorized_at DESC, attempt_ordinal DESC LIMIT 1`
-	if err := db.QueryRowContext(ctx, query).Scan(&operationID, &attemptID, &ordinal); err != nil {
-		query = `SELECT operation_id, attempt_id, attempt_ordinal FROM runtime_external_effect_attempts WHERE adapter='provider_registration' ORDER BY authorized_at DESC, attempt_ordinal DESC LIMIT 1`
-		if err := db.QueryRowContext(ctx, query).Scan(&operationID, &attemptID, &ordinal); err != nil {
-			t.Fatalf("query latest provider registration attempt: %v", err)
-		}
-	}
-	return operationID, attemptID, ordinal
-}
-
-func selectedStoreCallbackToken(callbackURL string) string {
-	request, err := http.NewRequest(http.MethodPost, callbackURL, nil)
-	if err != nil {
-		return ""
-	}
-	return request.URL.Query().Get("swarm_callback_generation")
-}
-
-func selectedRegistrationResponse(status int, body string) *http.Response {
-	return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}
 }
 
 func installExternalEffectAttemptFault(t *testing.T, db *sql.DB, postgres bool, operation, attemptID, state string) func() {

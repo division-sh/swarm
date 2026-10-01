@@ -2,7 +2,6 @@ package contracts
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 )
 
@@ -25,13 +24,4 @@ func BootBundleIdentity(bundle *WorkflowContractBundle) (BundleIdentity, error) 
 		WorkflowVersion: strings.TrimSpace(bundle.WorkflowVersion()),
 		BundleHash:      bundleHash,
 	}, nil
-}
-
-func sameFilePath(left, right string) bool {
-	leftAbs, leftErr := filepath.Abs(left)
-	rightAbs, rightErr := filepath.Abs(right)
-	if leftErr == nil && rightErr == nil {
-		return filepath.Clean(leftAbs) == filepath.Clean(rightAbs)
-	}
-	return filepath.Clean(left) == filepath.Clean(right)
 }

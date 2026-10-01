@@ -360,15 +360,6 @@ func selectedContractGateOwnerForTest(t *testing.T) SelectedContractExecutionOwn
 	return selectedContractExecutionOwnerForTest(t, storetest.AdmitPostgresRuntimeStore(t, db))
 }
 
-func historicalReplayFactHas(items []runfork.RunForkHistoricalReplayFactAdmission, fact, admission string) bool {
-	for _, item := range items {
-		if item.Fact == fact && item.Admission == admission {
-			return true
-		}
-	}
-	return false
-}
-
 type fakeSelectedContractActivationStore struct {
 	originalRunID         string
 	binding               runfork.RunForkSelectedContractBinding

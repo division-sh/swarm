@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,6 +16,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/durabledata"
@@ -2839,51 +2840,6 @@ func assertEventPublishEventRow(t *testing.T, db *sql.DB, runID, eventID, eventN
 	}
 }
 
-func assertEventPublishTargetRouteRow(t *testing.T, db *sql.DB, runID, eventID, eventName, flowInstance, entityID string) {
-	t.Helper()
-	var gotRunID, gotEventName, gotEntityID, gotFlowInstance, targetRoute string
-	if err := db.QueryRow(`
-		SELECT run_id::text, event_name, COALESCE(entity_id::text, ''), COALESCE(flow_instance, ''), COALESCE(target_route::text, '{}')
-		FROM events
-		WHERE event_id = $1::uuid
-	`, eventID).Scan(&gotRunID, &gotEventName, &gotEntityID, &gotFlowInstance, &targetRoute); err != nil {
-		t.Fatalf("load target event row: %v", err)
-	}
-	if gotRunID != runID || gotEventName != eventName || gotEntityID != entityID || gotFlowInstance != flowInstance {
-		t.Fatalf("target event row = run:%q event:%q entity:%q flow:%q, want %q/%q/%q/%q", gotRunID, gotEventName, gotEntityID, gotFlowInstance, runID, eventName, entityID, flowInstance)
-	}
-	var decoded map[string]any
-	if err := json.Unmarshal([]byte(targetRoute), &decoded); err != nil {
-		t.Fatalf("decode event target_route: %v", err)
-	}
-	if decoded["flow_instance"] != flowInstance || decoded["entity_id"] != entityID {
-		t.Fatalf("event target_route = %#v, want flow/entity %s/%s", decoded, flowInstance, entityID)
-	}
-}
-
-func assertEventPublishDeliveryTargetRoute(t *testing.T, db *sql.DB, eventID, subscriberType, subscriberID, flowInstance, entityID string) {
-	t.Helper()
-	var targetRoute string
-	if err := db.QueryRow(`
-		SELECT COALESCE(delivery_target_route::text, '{}')
-		FROM event_deliveries
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = $2
-		  AND subscriber_id = $3
-		LIMIT 1
-	`, eventID, subscriberType, subscriberID).Scan(&targetRoute); err != nil {
-		t.Fatalf("load delivery target route: %v", err)
-	}
-	var decoded map[string]any
-	if err := json.Unmarshal([]byte(targetRoute), &decoded); err != nil {
-		t.Fatalf("decode delivery target_route: %v", err)
-	}
-	route := asMap(t, decoded["route"])
-	if decoded["kind"] != "existing_entity" || route["flow_instance"] != flowInstance || route["entity_id"] != entityID {
-		t.Fatalf("delivery target_route = %#v, want flow/entity %s/%s", decoded, flowInstance, entityID)
-	}
-}
-
 func assertEventPublishPersistence(t *testing.T, db *sql.DB, runID, eventID, eventName, producedBy, expectedBundleHash string) {
 	t.Helper()
 	var runStatus, triggerType, triggerID, bundleHash string
@@ -3282,11 +3238,6 @@ func eventPublishScanNodeID(t testing.TB) string {
 	return identitytest.FlowNode(t, "discovery", "scan-orchestrator").Key()
 }
 
-func eventPublishRepoObserverNodeID(t testing.TB) string {
-	t.Helper()
-	return identitytest.FlowNode(t, "repo-scaffold", "repo-observer").Key()
-}
-
 func assertEventPublishDeliveriesContain(t *testing.T, deliveries []any, wantSubscriberType, wantSubscriberID, wantStatus string, wantAttempt int) {
 	t.Helper()
 	for _, raw := range deliveries {
@@ -3300,15 +3251,6 @@ func assertEventPublishDeliveriesContain(t *testing.T, deliveries []any, wantSub
 		}
 	}
 	t.Fatalf("deliveries = %#v, want %s/%s %s attempt %d", deliveries, wantSubscriberType, wantSubscriberID, wantStatus, wantAttempt)
-}
-
-func validEventPublishSubscriberType(value string) bool {
-	switch strings.TrimSpace(value) {
-	case "agent", "node":
-		return true
-	default:
-		return false
-	}
 }
 
 func asSlice(t *testing.T, value any) []any {

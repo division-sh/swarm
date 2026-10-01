@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
 type FlowLoopDeclarations struct {
@@ -134,16 +132,6 @@ func ValidateLoopHandlerCombination(handler SystemNodeEventHandler) error {
 	}
 	if strings.TrimSpace(handler.AdvancesTo) == "" {
 		return fmt.Errorf("loop %s operation requires advances_to", kind)
-	}
-	return nil
-}
-
-func validateClosedMapping(context string, node *yaml.Node, allowed map[string]struct{}) error {
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		if _, ok := allowed[key]; !ok {
-			return NewUndefinedFieldDiagnostic(context, key, allowed)
-		}
 	}
 	return nil
 }

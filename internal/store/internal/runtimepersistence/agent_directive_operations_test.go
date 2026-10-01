@@ -640,11 +640,6 @@ func directiveOperationReservationForPostureTest(t *testing.T, operationID, even
 	return directiveOperationReservationForIdentityAndPostureTest(t, "agent-1", "directive/instance-1", operationID, eventID, key, hash, now, posture)
 }
 
-func directiveOperationReservationForIdentityTest(t *testing.T, agentID, flowInstance, operationID, eventID, key, hash string, now time.Time) runtimeagentcontrol.ReserveDirectiveOperationRequest {
-	t.Helper()
-	return directiveOperationReservationForRunIdentityAndPostureTest(t, directiveOperationTestRunID, agentID, flowInstance, operationID, eventID, key, hash, now, executionposture.Live)
-}
-
 func directiveOperationReservationForIdentityAndPostureTest(t *testing.T, agentID, flowInstance, operationID, eventID, key, hash string, now time.Time, posture executionposture.Posture) runtimeagentcontrol.ReserveDirectiveOperationRequest {
 	t.Helper()
 	return directiveOperationReservationForRunIdentityAndPostureTest(t, directiveOperationTestRunID, agentID, flowInstance, operationID, eventID, key, hash, now, posture)

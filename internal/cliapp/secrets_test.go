@@ -291,42 +291,6 @@ func executeRootCommandWithInput(ctx context.Context, repo string, args []string
 	return 0, stdout.String(), stderr.String()
 }
 
-func writeSecretsCommandContractsFixture(t *testing.T) string {
-	t.Helper()
-	root := t.TempDir()
-
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: secrets-command-fixture\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `
-email_api:
-  description: Send email through a provider.
-  handler_type: http
-  input_schema:
-    type: object
-    properties: {}
-  http:
-    method: POST
-    url: https://email.example.test/send
-  credentials:
-    - sendgrid_api_key
-`)
-	return root
-}
-
-func writeProviderSecretsCommandContractsFixture(t *testing.T) string {
-	t.Helper()
-	root := t.TempDir()
-
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: provider-secrets-command-fixture\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `
-provider-agent:
-  role: provider
-  intent: prompts/provider-agent.md
-  model: regular
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "prompts", "provider-agent.md"), "Handle provider-backed work.\n")
-	return root
-}
-
 func withUnifiedRuntimeConfig(t *testing.T, configText string) {
 	t.Helper()
 	configPath := filepath.Join(t.TempDir(), "swarm.yaml")

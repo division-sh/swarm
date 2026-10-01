@@ -629,18 +629,3 @@ func topologyIdentityDigest(parts ...string) string {
 	}
 	return hex.EncodeToString(digest.Sum(nil)[:8])
 }
-
-func normalizedStrings(values []string) []string {
-	seen := map[string]struct{}{}
-	for _, value := range values {
-		if value = strings.TrimSpace(value); value != "" {
-			seen[value] = struct{}{}
-		}
-	}
-	out := make([]string, 0, len(seen))
-	for value := range seen {
-		out = append(out, value)
-	}
-	sort.Strings(out)
-	return out
-}

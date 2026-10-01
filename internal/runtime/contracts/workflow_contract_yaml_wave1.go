@@ -116,31 +116,11 @@ var schemaRangeRefinementFieldOptions = map[string]struct{}{
 	"max": {},
 }
 
-func (c ConnectorPackImports) normalized() ConnectorPackImports {
-	out := ConnectorPackImports{Imports: make([]ConnectorPackImport, 0, len(c.Imports))}
-	for _, item := range c.Imports {
-		item = item.normalized()
-		if item.Provider == "" && item.Tool == "" {
-			continue
-		}
-		out.Imports = append(out.Imports, item)
-	}
-	return out
-}
-
 func (i ConnectorPackImport) normalized() ConnectorPackImport {
 	return ConnectorPackImport{
 		Provider: normalizeConnectorPackToken(i.Provider),
 		Tool:     strings.TrimSpace(i.Tool),
 	}
-}
-
-func (p ProviderTriggerEventImports) normalized() ProviderTriggerEventImports {
-	out := ProviderTriggerEventImports{Imports: make([]ProviderTriggerEventImport, len(p.Imports))}
-	for index, item := range p.Imports {
-		out.Imports[index] = item.normalized()
-	}
-	return out
 }
 
 func (i ProviderTriggerEventImport) normalized() ProviderTriggerEventImport {
@@ -155,25 +135,6 @@ func normalizeConnectorPackToken(raw string) string {
 	raw = strings.ReplaceAll(raw, "-", "_")
 	raw = strings.ReplaceAll(raw, " ", "_")
 	return strings.Trim(raw, "_")
-}
-
-func normalizeStringMap(in map[string]string) map[string]string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(in))
-	for key, value := range in {
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-		if key == "" || value == "" {
-			continue
-		}
-		out[key] = value
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
 }
 
 func (d *TypeCatalogDocument) UnmarshalYAML(node *yaml.Node) error {
@@ -959,44 +920,6 @@ func decodeProjectionMapValue(value yamlsource.Value) (map[string]any, error) {
 	var out map[string]any
 	if err := value.Project(&out); err != nil {
 		return nil, err
-	}
-	return out, nil
-}
-
-func decodeProjectionMapNode(node *yaml.Node) (map[string]any, error) {
-	if node == nil || node.Kind == 0 {
-		return nil, nil
-	}
-	if node.Kind != yaml.MappingNode {
-		return nil, fmt.Errorf("entity field project must be a mapping")
-	}
-	out := make(map[string]any, len(node.Content)/2)
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		if key == "" {
-			continue
-		}
-		var value any
-		switch node.Content[i+1].Kind {
-		case yaml.ScalarNode:
-			switch strings.TrimSpace(node.Content[i+1].Tag) {
-			case "!!int", "!!float", "!!bool":
-				if err := node.Content[i+1].Decode(&value); err != nil {
-					return nil, err
-				}
-			default:
-				text, err := decodeScalarStringNode(node.Content[i+1])
-				if err != nil {
-					return nil, err
-				}
-				value = text
-			}
-		default:
-			if err := node.Content[i+1].Decode(&value); err != nil {
-				return nil, err
-			}
-		}
-		out[key] = value
 	}
 	return out, nil
 }

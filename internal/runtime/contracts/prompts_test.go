@@ -8,7 +8,6 @@ import (
 
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	flowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
-	"gopkg.in/yaml.v3"
 )
 
 func TestResolvedAgentIntent_LocalScopedDeclarationOwner(t *testing.T) {
@@ -105,14 +104,6 @@ func resolvedInlineIntentForTest(t testing.TB, provenance, content string) runti
 		t.Fatalf("resolve test intent: %v", err)
 	}
 	return resolved
-}
-
-// yamlScalarNodeForTest keeps this test focused on the public YAML source
-// decoder without building another contract fixture.
-type yamlScalarNodeForTest struct{ value string }
-
-func (n yamlScalarNodeForTest) node() *yaml.Node {
-	return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: n.value}
 }
 
 func TestAgentIntentSourceUnion_FailsClosed(t *testing.T) {

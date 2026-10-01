@@ -302,10 +302,6 @@ func inspectRunExecutionOwnershipModeTx(ctx context.Context, tx *sql.Tx, evidenc
 	return manager.RunExecutionOwned, nil
 }
 
-func loadRunExecutionBindingTx(ctx context.Context, tx *sql.Tx, runID string, sqlite bool) (string, sql.NullString, error) {
-	return loadRunExecutionBindingModeTx(ctx, tx, runID, sqlite, true)
-}
-
 func loadRunExecutionBindingModeTx(ctx context.Context, tx *sql.Tx, runID string, sqlite, lock bool) (string, sql.NullString, error) {
 	id, err := uuid.Parse(runID)
 	if err != nil || id == uuid.Nil || id.String() != runID {

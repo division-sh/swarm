@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -15,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
-	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -425,74 +423,6 @@ func seedStandingRepairEntityState(t *testing.T, ctx context.Context, db *sql.DB
 	if _, err := db.ExecContext(ctx, query, args...); err != nil {
 		t.Fatalf("seed standing repair entity state: %v", err)
 	}
-}
-
-func requireStandingRepairMutationProjection(t *testing.T, ctx context.Context, db *sql.DB, backend, runID, entityID string) {
-	t.Helper()
-	postgres := backend == "postgres"
-	stateQuery := `SELECT entity_type, current_state, gates, fields, bookkeeping, accumulator FROM entity_state WHERE run_id = ? AND entity_id = ?`
-	mutationQuery := `SELECT domain, path, new_value, writer_type, writer_id, COALESCE(handler_step, '') FROM entity_mutations WHERE run_id = ? AND entity_id = ? ORDER BY created_at, mutation_id`
-	if postgres {
-		stateQuery = `SELECT entity_type, current_state, gates, fields, bookkeeping, accumulator FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`
-		mutationQuery = `SELECT domain, path, new_value, writer_type, writer_id, COALESCE(handler_step, '') FROM entity_mutations WHERE run_id = $1::uuid AND entity_id = $2::uuid ORDER BY created_at, mutation_id`
-	}
-	var entityType, currentState string
-	var gatesRaw, fieldsRaw, bookkeepingRaw, accumulatorRaw any
-	if err := db.QueryRowContext(ctx, stateQuery, runID, entityID).Scan(&entityType, &currentState, &gatesRaw, &fieldsRaw, &bookkeepingRaw, &accumulatorRaw); err != nil {
-		t.Fatalf("load repaired standing entity state: %v", err)
-	}
-	if entityType != "standing_service" {
-		t.Fatalf("repaired standing entity type = %q, want standing_service", entityType)
-	}
-	live := runtimemutationlog.EntityStateProjection{
-		CurrentState: strings.TrimSpace(currentState),
-		Gates:        decodeMutationProjectionMap(t, gatesRaw),
-		Fields:       decodeMutationProjectionMap(t, fieldsRaw),
-		Bookkeeping:  decodeMutationProjectionMap(t, bookkeepingRaw),
-		Accumulator:  decodeMutationProjectionMap(t, accumulatorRaw),
-	}
-	rows, err := db.QueryContext(ctx, mutationQuery, runID, entityID)
-	if err != nil {
-		t.Fatalf("load repaired standing entity mutations: %v", err)
-	}
-	defer rows.Close()
-	mutations := []runtimemutationlog.ProjectionMutation{}
-	for rows.Next() {
-		var domain, path, writerType, writerID, handlerStep string
-		var raw any
-		if err := rows.Scan(&domain, &path, &raw, &writerType, &writerID, &handlerStep); err != nil {
-			t.Fatal(err)
-		}
-		if writerType != "platform" || writerID != "standing_service" || handlerStep != "repair_generation" {
-			t.Fatalf("standing repair mutation owner = %s/%s/%s", writerType, writerID, handlerStep)
-		}
-		mutations = append(mutations, runtimemutationlog.ProjectionMutation{
-			Domain: runtimemutationlog.Domain(domain), Path: path, NewValue: decodeMutationProjectionValue(t, raw),
-		})
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	if len(mutations) == 0 {
-		t.Fatal("standing repair recorded no entity mutations")
-	}
-	reconstructed, err := runtimemutationlog.ReconstructEntityStateProjection(mutations)
-	if err != nil {
-		t.Fatalf("reconstruct standing repair mutations: %v", err)
-	}
-	if !reflect.DeepEqual(reconstructed, live) {
-		t.Fatalf("standing repair history = %#v, live state = %#v", reconstructed, live)
-	}
-}
-
-func decodeMutationProjectionMap(t *testing.T, raw any) map[string]any {
-	t.Helper()
-	value := decodeMutationProjectionValue(t, raw)
-	result, ok := value.(map[string]any)
-	if !ok {
-		t.Fatalf("mutation projection map = %#v", value)
-	}
-	return result
 }
 
 func decodeMutationProjectionValue(t *testing.T, raw any) any {

@@ -2103,10 +2103,6 @@ func testRootConnectRoutePlanSource(rootOutputs []runtimecontracts.FlowOutputEve
 	return testRootInputOutputConnectRoutePlanSource(nil, rootOutputs, flows, connects)
 }
 
-func testRootReceiverConnectRoutePlanSource(rootInputs []runtimecontracts.FlowInputEventPin, flows []connectRoutePlanFlow, connects []runtimecontracts.FlowConnect) semanticview.Source {
-	return testRootInputOutputConnectRoutePlanSource(rootInputs, nil, flows, connects)
-}
-
 func testRootInputOutputConnectRoutePlanSource(rootInputs []runtimecontracts.FlowInputEventPin, rootOutputs []runtimecontracts.FlowOutputEventPin, flows []connectRoutePlanFlow, connects []runtimecontracts.FlowConnect) semanticview.Source {
 	connects = append([]runtimecontracts.FlowConnect(nil), connects...)
 	for i := range connects {
