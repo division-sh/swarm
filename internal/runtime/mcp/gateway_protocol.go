@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolresultpolicy"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -57,7 +58,7 @@ type RPCError struct {
 	Data    any    `json:"data,omitempty"`
 }
 
-func DecodeRPCResponse(raw []byte, expectedID any) (RPCResponse, error) {
+func DecodeRPCResponse(raw []byte, request RPCRequest) (RPCResponse, error) {
 	var wire struct {
 		JSONRPC string          `json:"jsonrpc"`
 		ID      json.RawMessage `json:"id"`
@@ -70,16 +71,21 @@ func DecodeRPCResponse(raw []byte, expectedID any) (RPCResponse, error) {
 	if wire.JSONRPC != "2.0" {
 		return RPCResponse{}, fmt.Errorf("JSON-RPC response version must be 2.0")
 	}
-	if len(wire.ID) == 0 || !rpcResponseIDEqual(wire.ID, expectedID) {
+	if len(wire.ID) == 0 || !rpcResponseIDEqual(wire.ID, request.ID) {
 		return RPCResponse{}, fmt.Errorf("JSON-RPC response id does not match request")
 	}
 	if (len(wire.Result) == 0) == (len(wire.Error) == 0) {
 		return RPCResponse{}, fmt.Errorf("JSON-RPC response must contain exactly one of result or error")
 	}
-	response := RPCResponse{JSONRPC: wire.JSONRPC, ID: expectedID}
+	response := RPCResponse{JSONRPC: wire.JSONRPC, ID: request.ID}
 	if len(wire.Result) != 0 {
 		if err := json.Unmarshal(wire.Result, &response.Result); err != nil {
 			return RPCResponse{}, fmt.Errorf("decode JSON-RPC result: %w", err)
+		}
+		if request.Method == "tools/list" {
+			if err := preserveCatalogSchemaNumbers(wire.Result, response.Result); err != nil {
+				return RPCResponse{}, fmt.Errorf("decode JSON-RPC catalog schema: %w", err)
+			}
 		}
 		return response, nil
 	}
@@ -97,6 +103,46 @@ func DecodeRPCResponse(raw []byte, expectedID any) (RPCResponse, error) {
 	rpcErr := RPCError{Code: *errorWire.Code, Message: *errorWire.Message, Data: errorWire.Data}
 	response.Error = &rpcErr
 	return response, nil
+}
+
+// Only schema ingress preserves number tokens. Catalog metadata, tool results
+// and protocol errors keep their ordinary JSON projections.
+func preserveCatalogSchemaNumbers(raw json.RawMessage, result any) error {
+	catalog, ok := result.(map[string]any)
+	if !ok {
+		return nil
+	}
+	tools, ok := catalog["tools"].([]any)
+	if !ok {
+		return nil
+	}
+	var wire map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		return err
+	}
+	var entries []json.RawMessage
+	if err := json.Unmarshal(wire["tools"], &entries); err != nil {
+		return err
+	}
+	for index, rawTool := range entries {
+		tool, ok := tools[index].(map[string]any)
+		if !ok {
+			continue
+		}
+		var entry map[string]json.RawMessage
+		if err := json.Unmarshal(rawTool, &entry); err != nil {
+			return err
+		}
+		if len(entry["inputSchema"]) == 0 {
+			continue
+		}
+		var schema any
+		if err := canonicaljson.DecodePreservingNumberLexemes(entry["inputSchema"], &schema); err != nil {
+			return err
+		}
+		tool["inputSchema"] = schema
+	}
+	return nil
 }
 
 func rpcResponseIDEqual(raw json.RawMessage, expected any) bool {

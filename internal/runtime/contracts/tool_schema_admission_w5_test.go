@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"encoding/json"
 	"math"
 	"testing"
 
@@ -13,7 +14,7 @@ func TestW5ToolSchemaSharedBounds(t *testing.T) {
 		if field == "minItems" || field == "maxItems" {
 			kind = "array"
 		}
-		for _, value := range []any{-0.5, 1.0, 1.5, 2.5, -1, "1", nil, math.Inf(1)} {
+		for _, value := range []any{-0.5, 1.0, 1.5, 2.5, -1, "1", nil, math.Inf(1), json.Number("1.0"), json.Number("1e0"), json.Number("1.5"), json.Number("-1"), json.Number("9223372036854775808"), json.Number("+1"), json.Number("01")} {
 			raw := map[string]any{"type": kind, field: value}
 			if kind == "array" {
 				raw["items"] = map[string]any{"type": "string"}
@@ -32,7 +33,7 @@ func TestW5ToolSchemaSharedBounds(t *testing.T) {
 			t.Fatalf("authored minLength=%s admitted", source)
 		}
 	}
-	for _, value := range []any{0, uint32(1), int64(2)} {
+	for _, value := range []any{0, uint32(1), int64(2), json.Number("0"), json.Number("1")} {
 		if _, err := AdmitToolInputSchemaMap(map[string]any{"type": "string", "minLength": value}); err != nil {
 			t.Fatal(err)
 		}
