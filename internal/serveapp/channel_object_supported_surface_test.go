@@ -712,6 +712,11 @@ func objectChannelPresentationValid(input map[string]any) bool {
 func writeObjectChannelSource(t *testing.T, configPath string) string {
 	t.Helper()
 	root := canonicalrouting.CopyChannelLearnedObjectJourney(t)
+	return writeObjectChannelPacks(t, configPath, root)
+}
+
+func writeObjectChannelPacks(t *testing.T, configPath, root string) string {
+	t.Helper()
 	_, dirs := packfixture.DevelopmentBase(t, nil)
 	// Development overrides replace the finite base inventory. Pack IDs remain
 	// exact dependency coordinates; the authored provider and protocol are mock.
