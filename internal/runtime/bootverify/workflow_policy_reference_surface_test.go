@@ -132,9 +132,9 @@ func TestR3PolicyReferenceSurfaceMatrix(t *testing.T) {
 	}
 }
 
-func TestR3PolicyClosedJoinOutcomeReferenceMatrix(t *testing.T) {
+func TestR3PolicyClosedJoinOutcomeScope(t *testing.T) {
 	for _, outcome := range []string{"on_complete", "on_deadline"} {
-		for _, key := range []string{"known", "missing"} {
+		for _, key := range []string{"supported", "known", "missing"} {
 			t.Run(outcome+"/"+key, func(t *testing.T) {
 				bundle := semanticview.CloneBundleForPreview(joinValidationBundle(), map[string]any{"known": []any{"ok"}})
 				node := bundle.Nodes["join-node"]
@@ -143,19 +143,21 @@ func TestR3PolicyClosedJoinOutcomeReferenceMatrix(t *testing.T) {
 				if outcome == "on_deadline" {
 					rule = &handler.Join.OnDeadline
 				}
-				for field := range rule.Emit.Fields {
-					rule.Emit.Fields[field] = c.CELExpression("policy." + key)
+				if key != "supported" {
+					for field := range rule.Emit.Fields {
+						rule.Emit.Fields[field] = c.CELExpression("policy." + key)
+					}
 				}
 				node.EventHandlers["item.completed"] = handler
 				bundle.Nodes["join-node"] = node
-				rebuildJoinValidationTopology(bundle)
-				findings := newCheckerContext(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{}).conditionPolicyAlignment()
-				if key == "known" {
-					if len(findings) != 0 {
-						t.Fatalf("declared closed-outcome policy rejected: %#v", findings)
+				semanticviewtest.WrapRootAgents(bundle)
+				err := c.CompileWorkflowSemantics(bundle)
+				if key == "supported" {
+					if err != nil {
+						t.Fatalf("supported closed outcome rejected: %v", err)
 					}
-				} else if !findingContainsAll(findings, "condition_policy_alignment", `policy["missing"]`, "join."+outcome) {
-					t.Fatalf("closed outcome escaped policy checker: %#v", findings)
+				} else if err == nil || !strings.Contains(err.Error(), "join."+outcome) || !strings.Contains(err.Error(), "closed join outcome may not reference policy") {
+					t.Fatalf("policy escaped closed-outcome scope: %v", err)
 				}
 			})
 		}
