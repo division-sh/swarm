@@ -7838,7 +7838,7 @@ engine:
         type: array of strings
         location: Flow-local agent declaration in agents.yaml, including the selected root FlowNode `.`. Root data is
           owned by that flow's data/ branch; there is no separate project data scope or cross-flow data grant.
-        default: omitted or empty means no flow-data read surface and no read_flow_data tool.
+        default: Omitted or empty means no static-file grant. An exact data_access grant can independently generate read_flow_data resource arms.
         example: "flow_data_access:\n  - exclusions.yaml\n  - templates/review.md"
       data_root:
         convention: <flow-path>/data/
@@ -7848,15 +7848,17 @@ engine:
           identity. Runtime hot reload is out of scope.
       generated_tool:
         name: read_flow_data
-        generated_for: Only agents with at least one valid flow_data_access declaration.
+        generated_for: Agents with admitted static flow_data_access or exact resource data_access declarations. The delivered closed input schema includes only the granted arms and identities.
         input:
-          filename: One of the exact normalized filenames declared for that agent.
+          static_file: Closed object with kind static_file, one delivered static_id, and optional static cursor.
+          resource_row: Closed object with kind resource_row, one structured declaration, and exactly its business key or 1-based keyless position.
+          resource_rows: Closed object with kind resource_rows, one structured declaration, and a bounded page request.
         output:
-          content: string
-          content_type: yaml | json | markdown | text
-          size_bytes: integer
-        authorization: flow_data_access is the authorization. The tool is not universal, does not require permissions, is
-          not granted by tools:, and is independent of native_tools.file_io.
+          static_file: Static identity, owning flow/relative path, content digest/type, total_bytes, UTF-8 content chunk, chunk_bytes, and static continuation.
+          resource_row: Declaration, run-pinned version_id, and one row with ordinal, value, and business key only when keyed.
+          resource_rows: Declaration, run-pinned version_id, and rows with exact item count, encoded-items bytes, and continuation.
+          cursors: Static v1 and resource v2 are distinct closed contracts. Resource cursors bind the run, canonical actor, declaration, version, and offset; both item and whole-result byte ceilings apply.
+        authorization: Static arms consume flow_data_access; resource arms consume exact compiled data_access grants and immutable run pins. The tool is not universal, does not require permissions, is not granted by tools:, and is independent of native_tools.file_io. Filename input, ambient paths, latest-head selection, and compatibility aliases are invalid.
       fail_closed_rules:
         - Empty filenames are invalid.
         - Absolute paths are invalid.
@@ -9437,8 +9439,7 @@ tool_model:
         grant: Auto-granted to every managed agent.
         input: Closed object with required non-empty summary and optional context only.
         semantics: Persists an operator_notice with fixed normal priority, no timeout, and runtime-stamped actor, run, flow, entity, event, and reply provenance; returns exact status queued and mailbox_id without waiting.
-      read_flow_data: Read a declared immutable reference-data file from the current agent's owning flow data root. Generated
-        only from flow_data_access declarations; not universal, not tools:-granted, and not native file I/O.
+      read_flow_data: Read actor-admitted immutable static data or run-pinned resources through the closed static_file, resource_row, and resource_rows arms. Generated from flow_data_access or exact data_access declarations; not universal, not tools:-granted, and not native file I/O. Inputs use static_id or structured declaration, never a filename or host path. Provider usage guidance consumes this contract through the existing tool description owner; changed description bytes receive the normal derived definition identity and capability fingerprint without compatibility behavior.
       query_entities: Query entities by state, fields, or aggregation. Legacy trusted runtime-internal compatibility surface;
         not provider-visible or callable for normal agents.
       query_metrics: Read aggregated metrics (counts, sums, averages) across entities. Legacy trusted runtime-internal
