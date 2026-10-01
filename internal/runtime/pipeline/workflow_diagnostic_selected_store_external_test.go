@@ -13,6 +13,7 @@ import (
 	runtimeruntime "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
@@ -45,11 +46,13 @@ func (l workflowDiagnosticRuntimeLogger) Log(ctx context.Context, level diaglog.
 
 func newWorkflowDiagnosticNativeFixture(t *testing.T, backend string, bundle *runtimecontracts.WorkflowContractBundle) runtimepipeline.WorkflowDiagnosticFixtureForTest {
 	t.Helper()
-	var selected gateRecoveryStoreCase
+	var selected scopedTestDurableStore
+	var cards gateRecoveryDecisionStore
+	var persistence runtimepipeline.WorkflowPersistence
 	switch backend {
 	case "sqlite":
 		s := storetest.StartSQLiteRuntimeStore(t)
-		selected = gateRecoveryStoreCase{name: backend, events: s, cards: s, lifecycle: s, persistence: runtimepipeline.NewWorkflowPersistence(s), trace: s}
+		selected, cards, persistence = s, s, runtimepipeline.NewWorkflowPersistence(s)
 	case "postgres":
 		dsn, _, _ := testutil.StartPostgres(t)
 		s, err := store.NewPostgresStore(dsn)
@@ -65,24 +68,24 @@ func newWorkflowDiagnosticNativeFixture(t *testing.T, backend string, bundle *ru
 		s.SetEventPayloadAdmitter(func(_ context.Context, event events.Event, flow string) (events.PayloadAdmission, error) {
 			return eventtest.PayloadAdmission(event, flow, string(event.Type()))
 		})
-		selected = gateRecoveryStoreCase{name: backend, postgres: true, events: s, cards: s, lifecycle: s, persistence: runtimepipeline.NewWorkflowPersistence(s), trace: s}
+		selected, cards, persistence = s, s, runtimepipeline.NewWorkflowPersistence(s)
 	default:
 		t.Fatalf("unknown diagnostic backend %q", backend)
 	}
 	ctx := testAuthorActivityContext(t, context.Background())
 	runID := uuid.NewString()
-	runOwner := selected.events.(interface {
+	runOwner := selected.(interface {
 		runtimerunlifecycle.OperationOwner
 		runtimerunlifecycle.CandidateStore
 	})
 	storetest.RequireRunningRun(t, ctx, runOwner, runID, time.Now().UTC())
 	ctx = withLiveGateExecution(runtimecorrelation.WithRunID(ctx, runID))
 	source := semanticview.Wrap(bundle)
-	bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source}, "platform.stage_timer", "platform.join_timeout", "platform.join_complete")
+	bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source}, "platform.stage_timer", "platform.join_timeout", "platform.join_complete")
 	if err != nil {
 		t.Fatal(err)
 	}
-	logPersistence := selected.events.(runtimeruntime.RuntimeLogPersistence)
+	logPersistence := selected.(runtimeruntime.RuntimeLogPersistence)
 	bus.SetLoggerHook(workflowDiagnosticRuntimeLogger{logger: runtimeruntime.NewRuntimeLogger(logPersistence, executionposture.Live,
 		func(_ context.Context, event events.Event, flow string) (events.PayloadAdmission, error) {
 			return eventtest.PayloadAdmission(event, flow, string(event.Type()))
@@ -91,9 +94,14 @@ func newWorkflowDiagnosticNativeFixture(t *testing.T, backend string, bundle *ru
 	if err != nil {
 		t.Fatal(err)
 	}
-	pc := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
+	pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, runtimepipeline.PipelineCoordinatorOptions{
+		ExecutionPosture: executionposture.Live, ReceiverExecution: eventreceiver.NormalExecution(),
 		Module: proposedEffectProofModule{source: source, nodes: nodes}, WorkOwner: pipelineExternalTestWorkOwner(t),
 		SourceArtifactFact: authorActivityTestSourceArtifactFact,
+		Persistence:        persistence, DeliveryStore: selected, DeadLetters: selected,
+		DecisionCards: cards, ProposedEffects: cards, HumanTasks: cards,
+		DecisionCardDraftExpiry: cards, HumanTaskExpiry: cards,
+		DeliveryRuntime: bus, RunLifecycle: selected, PipelineObligations: selected.PipelineObligations(),
 	})
 	if pc == nil {
 		t.Fatal("native diagnostic coordinator rejected complete selected ports")
@@ -105,7 +113,7 @@ func newWorkflowDiagnosticNativeFixture(t *testing.T, backend string, bundle *ru
 			t.Errorf("join diagnostic publications: %v", err)
 		}
 	})
-	reader := selected.events.(interface {
+	reader := selected.(interface {
 		ListOperatorRuntimeLogs(context.Context, operatorread.OperatorRuntimeLogListOptions) (operatorread.OperatorRuntimeLogListResult, error)
 		ListOperatorEvents(context.Context, operatorread.OperatorEventListOptions) (operatorread.OperatorEventListResult, error)
 	})
@@ -144,7 +152,7 @@ func newWorkflowDiagnosticNativeFixture(t *testing.T, backend string, bundle *ru
 			if err != nil {
 				return err
 			}
-			snapshot, err := selected.events.Snapshot(ctx, id)
+			snapshot, err := selected.Snapshot(ctx, id)
 			if err != nil {
 				return err
 			}
@@ -183,7 +191,7 @@ func newWorkflowDiagnosticNativeFixture(t *testing.T, backend string, bundle *ru
 			}
 			result := make([]events.Event, 0, len(rows.Events))
 			for _, row := range rows.Events {
-				prepared, found, err := selected.events.LoadPreparedPublishEvent(ctx, row.EventID)
+				prepared, found, err := selected.LoadPreparedPublishEvent(ctx, row.EventID)
 				if err != nil || !found {
 					t.Fatalf("load persisted diagnostic sibling event: found=%t err=%v", found, err)
 				}
