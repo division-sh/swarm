@@ -30,6 +30,10 @@ func TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney(t *testing.T
 				if !ok {
 					t.Fatal("real gate has no callback control")
 				}
+				intentQuery := `SELECT state,COALESCE(disposition,'') FROM operator_channel_action_intents WHERE json_extract(fact,'$.token')=$1`
+				if backend == servedparity.BackendExplicitPostgres {
+					intentQuery = `SELECT state,COALESCE(disposition,'') FROM operator_channel_action_intents WHERE fact->>'token'=$1`
+				}
 				var arrived <-chan struct{}
 				var release func()
 				if cut == "launched" {
@@ -41,6 +45,17 @@ func TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney(t *testing.T
 				if arrived != nil {
 					select {
 					case <-arrived:
+						var status, state, disposition string
+						var decisions int
+						if err := db.QueryRow(`SELECT status FROM decision_cards WHERE card_id=$1`, card).Scan(&status); err != nil || status != "pending" {
+							t.Fatalf("ACK barrier is not before business mutation: %s %v", status, err)
+						}
+						if err := db.QueryRow(intentQuery, token).Scan(&state, &disposition); err != nil || state != "pending" || disposition != "" {
+							t.Fatalf("verified action missing at pre-mutation barrier: %s %v", state, err)
+						}
+						if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, seed.RunID).Scan(&decisions); err != nil || decisions != 0 {
+							t.Fatalf("pre-mutation cut already emitted a decision: %d %v", decisions, err)
+						}
 					case <-time.After(20 * time.Second):
 						t.Fatal("callback did not reach actual provider response barrier")
 					}
@@ -68,6 +83,10 @@ func TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney(t *testing.T
 					t.Fatal("restart replaced original acknowledgment operation")
 				}
 				waitChannelAnchorDecision(t, db, card)
+				var state, disposition string
+				if err := db.QueryRow(intentQuery, token).Scan(&state, &disposition); err != nil || state != "settled" || disposition != "applied" {
+					t.Fatalf("restart did not atomically complete the exact action: %s/%s %v", state, disposition, err)
+				}
 				if len(h.provider.Acknowledgments()) != before {
 					t.Fatal("restart replayed uncertain or settled acknowledgment")
 				}
