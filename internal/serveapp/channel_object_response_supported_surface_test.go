@@ -16,7 +16,7 @@ func TestChannelLearnedObjectRecoveryPagingPublicJourney(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		for _, schedule := range []string{"current", "restart", "edit_ack_loss"} {
 			t.Run(string(backend)+"/"+schedule, func(t *testing.T) {
-				h, db, p, command, hash := startObjectChannelInputJourney(t, backend)
+				h, db, p, command, hash := startObjectChannelInputJourney(t, backend, false)
 				cards := createObjectUncertainCards(t, h, db, p, hash)
 				receipt, deliveryID := requestObjectRecoveryInbox(t, h, db, p, command, "recovery-entry")
 				if schedule == "restart" {
@@ -62,11 +62,19 @@ func requestObjectRecoveryInbox(t *testing.T, h *channelOnboardingE2EHarness, db
 
 func waitObjectRequestedResponse(t *testing.T, db *sql.DB, eventID string) (string, string) {
 	t.Helper()
+	return waitObjectIntentResponse(t, db, "operator_channel_text_intents", eventID)
+}
+
+func waitObjectIntentResponse(t *testing.T, db *sql.DB, table, eventID string) (string, string) {
+	t.Helper()
+	if table != "operator_channel_text_intents" && table != "operator_channel_action_intents" {
+		t.Fatalf("unsupported response intent table %q", table)
+	}
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		var deliveryID, raw string
 		err := db.QueryRow(`SELECT p.delivery_id, CAST(r.provider_reference AS TEXT)
-			FROM channel_delivery_plans p JOIN operator_channel_text_intents i ON i.publication_id=p.source_id
+			FROM channel_delivery_plans p JOIN `+table+` i ON i.publication_id=p.source_id
 			JOIN channel_delivery_receipts r ON r.effect_operation_id=p.current_receipt_operation_id AND r.delivery_id=p.delivery_id
 			WHERE p.source_kind='response' AND i.provider_event_id=$1 AND p.state='sent' AND r.state='sent'`, eventID).Scan(&deliveryID, &raw)
 		if err == nil {

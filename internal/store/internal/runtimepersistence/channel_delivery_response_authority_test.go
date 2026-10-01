@@ -71,6 +71,37 @@ func proveChannelResponseReceiptMatrix(t *testing.T, selected selectedChannelDel
 			if !current(authority) {
 				t.Fatal("exact first-send response authority rejected")
 			}
+			t.Run("contradictory_source_intents", func(t *testing.T) {
+				rollback := errors.New("rollback contradictory response intents")
+				err := runTx(func(ctx context.Context, tx *sql.Tx) error {
+					if intentTable == "operator_channel_action_intents" {
+						if err := channeldelivery.InsertTextIntentTx(ctx, tx, text, time.Now(), postgres); err != nil {
+							return err
+						}
+					} else {
+						action := operatorchannel.InboundAction{
+							ActionFact: operatorchannel.ActionFact{Interface: text.Interface, ExternalAccountRef: text.ExternalAccountRef,
+								ConversationRef: text.ConversationRef, ConversationScope: text.ConversationScope,
+								Token: uuid.NewString(), InteractionRef: "contradictory-source", MessageReference: text.MessageReference},
+							Provider: text.Provider, ProviderEventID: text.ProviderEventID, PublicationID: text.PublicationID,
+							ProviderAuthorization: text.ProviderAuthorization,
+						}
+						if err := channeldelivery.InsertActionIntentTx(ctx, tx, action, time.Now(), postgres); err != nil {
+							return err
+						}
+					}
+					if currentTxResponseTest(t, ctx, tx, authority, postgres) {
+						return fmt.Errorf("two source intents acquired response authority")
+					}
+					if err := requireResponseAuthorityTx(selected, ctx, tx, authority); err == nil {
+						return fmt.Errorf("two source intents acquired locked effect authority")
+					}
+					return rollback
+				})
+				if !errors.Is(err, rollback) {
+					t.Fatal(err)
+				}
+			})
 			foreign := authority
 			foreign.ChannelDelivery.PreviousReceiptOperationID = uuid.NewString()
 			if current(foreign) {
