@@ -51,16 +51,19 @@ func TestActivityPublicationProjectsBeforeIdentityAndPreservesJournal(t *testing
 			}
 			// No semantic source is installed: journal recovery must copy the
 			// final result, not consult or specialize current declarations.
+			completed := first.CreatedAt()
 			record := ActivityAttemptRecord{
 				Status: ActivityAttemptStatusSucceeded, Attempt: intent.Attempt,
 				ResultEventID: first.ID(), ResultEventType: string(first.Type()), ResultPayload: payload,
+				CompletedAt: &completed,
 			}
 			if err := dispatcher.publishJournaledActivityResult(context.Background(), intent, record); err != nil {
 				t.Fatal(err)
 			}
 			published = emissions.immutableEvents()
 			if len(published) != 2 || published[1].ID() != first.ID() || published[1].Type() != first.Type() ||
-				published[1].RoutingSource() != first.RoutingSource() || string(published[1].Payload()) != string(first.Payload()) {
+				published[1].RoutingSource() != first.RoutingSource() || string(published[1].Payload()) != string(first.Payload()) ||
+				!published[1].CreatedAt().Equal(first.CreatedAt()) {
 				t.Fatal("journal replay changed final publication facts")
 			}
 		})
