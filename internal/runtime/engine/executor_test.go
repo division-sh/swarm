@@ -852,15 +852,22 @@ func TestExecutorTimerReconciliationCarriesOnlyActualTransitionTarget(t *testing
 		}}},
 	}), WorkflowLifecycle: owner}}
 	createdAt := time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)
-	frame, err := executor.newExecutionFrame(context.Background(), ExecutionRequest{
+	node := testFlowExecutableNode(t, "flow-1", "node-1")
+	req := ExecutionRequest{
+		Node:            node,
 		ExecutionFlowID: identity.NormalizeFlowID("flow-1"),
 		EntityID:        "entity-1",
 		Route:           runtimeflowidentity.RouteForInstancePath("flow-1"),
 		Event: eventtest.RunCreatingRootIngress(
-			"event-1", "work.noted", "", "", json.RawMessage(`{}`), 0, "", "", events.EnvelopeForFlowInstance(events.EventEnvelope{}, "flow-1"), createdAt,
+			"event-1", "work.noted", "", "", json.RawMessage(`{}`), 0, semanticExecutionFixtureRunID, "", events.EnvelopeForFlowInstance(events.EventEnvelope{}, "flow-1"), createdAt,
 		),
 		State: StateSnapshot{CurrentState: "waiting"},
-	})
+	}
+	ctx, err := semanticFixtureDeliveryContext(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame, err := executor.newExecutionFrame(ctx, req)
 	if err != nil {
 		t.Fatalf("newExecutionFrame: %v", err)
 	}
@@ -878,7 +885,6 @@ func TestExecutorTimerReconciliationCarriesOnlyActualTransitionTarget(t *testing
 
 	frame.result.NextState = "done"
 	frame.result.StateMutation.NextState = "done"
-	node := testFlowExecutableNode(t, "flow-1", "node-1")
 	graph := runtimecontracts.BuildWorkflowStageTopology("flow-1", "waiting", []string{"waiting", "done"}, nil, []runtimecontracts.HandlerTransitionSemantic{{Node: node, EventType: "work.noted", AdvancesTo: "done"}}, nil, nil)
 	compiled, err := graph.AdmitTransition(runtimecontracts.WorkflowTransitionSite{Node: node, HandlerEvent: "work.noted", AdvanceCarrier: runtimecontracts.HandlerAdvanceCarrierHandler}, "waiting", "done")
 	if err != nil {
