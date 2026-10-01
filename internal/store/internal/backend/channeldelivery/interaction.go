@@ -333,6 +333,43 @@ func SettleTextIntentTx(ctx context.Context, tx *sql.Tx, text operatorchannel.In
 	return nil
 }
 
+// Only the verified occurrence is settled; no card, response or execution
+// authority is created. A retained chooser answer requires its exact callback.
+func SettleUnsupportedTextIntentTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, postgres bool) error {
+	return settleUnsupportedTextIntentTx(ctx, tx, text, false, postgres)
+}
+
+func settleUnsupportedTextIntentTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, chooser, postgres bool) error {
+	state, disposition, err := requireExactTextIntentTx(ctx, tx, text, postgres, true)
+	if err != nil {
+		return err
+	}
+	if state == "settled" && disposition == "unsupported" {
+		return nil
+	}
+	if state != "pending" && !(chooser && state == "settled" && disposition == "chooser") {
+		return fmt.Errorf("channel input already has another disposition")
+	}
+	query := `UPDATE operator_channel_text_intents SET state='settled', disposition='unsupported', settled_at=?
+		WHERE publication_id=? AND state=? AND COALESCE(disposition,'')=?`
+	if postgres {
+		query = `UPDATE operator_channel_text_intents SET state='settled', disposition='unsupported', settled_at=$1
+			WHERE publication_id=$2::uuid AND state=$3 AND COALESCE(disposition,'')=$4`
+	}
+	result, err := tx.ExecContext(ctx, query, time.Now().UTC(), text.PublicationID, state, disposition)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return fmt.Errorf("unsupported channel input lost its exact occurrence")
+	}
+	return nil
+}
+
 func decodeActionTime(value any) (time.Time, error) {
 	switch value := value.(type) {
 	case time.Time:
@@ -440,6 +477,17 @@ func SettleUnappliedActionIntentTx(ctx context.Context, tx *sql.Tx, action opera
 			return fmt.Errorf("channel action already settled with a different disposition")
 		}
 		return nil
+	}
+	if disposition == render.ActionUnsupported {
+		text, found, err := loadUnsupportedChooserTextTx(ctx, tx, action.ActionFact, postgres)
+		if err != nil {
+			return err
+		}
+		if found {
+			if err := settleUnsupportedTextIntentTx(ctx, tx, text.Fact, true, postgres); err != nil {
+				return err
+			}
+		}
 	}
 	query := `UPDATE operator_channel_action_intents SET state='settled', disposition=?, settled_at=?
 		WHERE publication_id=? AND state='pending'`

@@ -178,6 +178,18 @@ func (s *PostgresStore) SettleUnappliedChannelAction(ctx context.Context, action
 	})
 }
 
+func (s *PostgresStore) SettleUnsupportedChannelText(ctx context.Context, text operatorchannel.InboundText) error {
+	if s == nil || s.backend == nil {
+		return fmt.Errorf("postgres channel text store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
+	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		return channeldelivery.SettleUnsupportedTextIntentTx(txctx, tx, text, true)
+	})
+}
+
 func (s *PostgresStore) ListPendingChannelTexts(ctx context.Context, cursor string, limit int) ([]render.PendingText, error) {
 	if s == nil || s.backend == nil {
 		return nil, fmt.Errorf("postgres channel text store is unavailable")
@@ -599,6 +611,18 @@ func (s *SQLiteRuntimeStore) SettleUnappliedChannelAction(ctx context.Context, a
 	}
 	return s.backend.RunTransaction(ctx, "settle channel action without mutation", func(txctx context.Context, tx *sql.Tx) error {
 		return channeldelivery.SettleUnappliedActionIntentTx(txctx, tx, action, disposition, false)
+	})
+}
+
+func (s *SQLiteRuntimeStore) SettleUnsupportedChannelText(ctx context.Context, text operatorchannel.InboundText) error {
+	if s == nil || s.backend == nil {
+		return fmt.Errorf("sqlite channel text store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
+	return s.backend.RunTransaction(ctx, "settle unsupported channel text", func(txctx context.Context, tx *sql.Tx) error {
+		return channeldelivery.SettleUnsupportedTextIntentTx(txctx, tx, text, false)
 	})
 }
 

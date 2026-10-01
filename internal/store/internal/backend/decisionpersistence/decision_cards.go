@@ -18,6 +18,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	storeentity "github.com/division-sh/swarm/internal/store/internal/backend/entityruntime"
@@ -520,6 +521,9 @@ func decideDecisionCardWithStory(ctx context.Context, story runtimeauthoractivit
 	if err := requireActiveDecisionCardRun(ctx, tx, req.CardID, postgres); err != nil {
 		return decisioncard.DecisionOutcome{}, err
 	}
+	if err := RequireNormalCardControlTx(ctx, tx, req.CardID, runfork.ControlMailboxDecide, postgres); err != nil {
+		return decisioncard.DecisionOutcome{}, err
+	}
 	card, err := loadPendingDecisionCardMutation(ctx, tx, req.CardID, postgres)
 	if err != nil {
 		return decisioncard.DecisionOutcome{}, err
@@ -672,6 +676,9 @@ func deferDecisionCardWithStory(ctx context.Context, story runtimeauthoractivity
 	if err := requireActiveDecisionCardRun(ctx, tx, req.CardID, postgres); err != nil {
 		return decisioncard.DecisionOutcome{}, err
 	}
+	if err := RequireNormalCardControlTx(ctx, tx, req.CardID, runfork.ControlMailboxDefer, postgres); err != nil {
+		return decisioncard.DecisionOutcome{}, err
+	}
 	card, err := loadPendingDecisionCardMutation(ctx, tx, req.CardID, postgres)
 	if err != nil {
 		return decisioncard.DecisionOutcome{}, err
@@ -735,6 +742,9 @@ func beginDecisionCardInput(ctx context.Context, tx *sql.Tx, req decisioncard.Be
 		req.TTL = 15 * time.Minute
 	}
 	if err := requireActiveDecisionCardRun(ctx, tx, req.CardID, postgres); err != nil {
+		return decisioncard.InputDraft{}, err
+	}
+	if err := RequireNormalCardControlTx(ctx, tx, req.CardID, runfork.ControlMailboxBeginInput, postgres); err != nil {
 		return decisioncard.InputDraft{}, err
 	}
 	card, err := loadPendingDecisionCardMutation(ctx, tx, req.CardID, postgres)
@@ -820,6 +830,9 @@ func cancelDecisionCardInput(ctx context.Context, tx *sql.Tx, req decisioncard.C
 	}
 	if draft.CardID != strings.TrimSpace(req.CardID) || draft.PrincipalID != strings.TrimSpace(req.PrincipalID) || draft.Status != decisioncard.DraftStatusActive || !draft.ExpiresAt.After(now) {
 		return decisioncard.InputDraft{}, decisioncard.ErrDraftNotAuthority
+	}
+	if err := storerunstate.RequireNormalControlTx(ctx, tx, draft.RunID, runfork.ControlMailboxCancelInput); err != nil {
+		return decisioncard.InputDraft{}, err
 	}
 	if err := updateDecisionCardDraftStatus(ctx, tx, draft.InputDraftID, decisioncard.DraftStatusCancelled, now, postgres); err != nil {
 		return decisioncard.InputDraft{}, err
