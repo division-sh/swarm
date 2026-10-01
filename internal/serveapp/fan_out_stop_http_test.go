@@ -20,6 +20,8 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -229,13 +231,22 @@ func seedIssue2394StopIntents(t *testing.T, rt servedControlProofRuntime, runID,
 	if err != nil {
 		t.Fatal(err)
 	}
-	capsule, err := fanoutobligation.MarshalCapsule(fanoutobligation.Capsule{
+	capsule := fanoutobligation.Capsule{
 		NodeKey: "root.item-handler", ExecutionFlowID: "root", Route: runtimeflowidentity.StoredRoute("root", "root", "root"),
 		HandlerEventKey: "item.received", ProducerSource: producer,
 		Lineage: events.EventLineage{RunID: runID, ParentEventID: eventID, ExecutionMode: executionmode.Live},
-	})
+	}
+	collection := contracts.CatalogTypeReference{Type: "list<text>"}
+	projection, err := contracts.AdmitCollectionProjection(collection)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// Cancellation reads the exact retained witness but does not enumerate
+	// these reduced fixture sources or claim authored creation coverage.
+	capsule.SourceProjection = contracts.FanOutPlanSemantics{
+		ItemsFrom: "payload.items", CollectionType: collection, CollectionProjection: projection,
+		ItemType: projection.ItemType(), ItemAlias: "entry", Identity: "entry", IdentityDerived: true,
+		MaxItems: contracts.DefaultFanOutMaxItems, Emit: contracts.EmitSpec{Event: "item.processed"},
 	}
 	blocked, err := runtimefailures.MarshalEnvelope(runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassTargetUnreachable, "not_found", "runtime.fan_out", "serve", nil), "runtime.fan_out", "serve"))
 	if err != nil {
@@ -253,6 +264,20 @@ func seedIssue2394StopIntents(t *testing.T, rt servedControlProofRuntime, runID,
 	at := time.Now().UTC()
 	for i := 0; i < 20; i++ {
 		path := fmt.Sprintf("stop-fixture-%02d", i)
+		element := contracts.FanOutElementRef{FlowPath: "root", Family: "fan_out", SemanticPath: path}
+		capsule.SourceProjection.ElementRef = element
+		digest, err := canonicaljson.Hash(capsule.SourceProjection)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ref := contracts.FanOutPlanRef{BundleHash: rt.BundleHash, ElementRef: element, SemanticDigest: digest}
+		if err := capsule.SourceProjection.Validate(ref); err != nil {
+			t.Fatalf("admit exact cancellation fixture source: %v", err)
+		}
+		capsuleJSON, err := fanoutobligation.MarshalCapsule(capsule)
+		if err != nil {
+			t.Fatal(err)
+		}
 		status, cursor, generation := "open", 0, 0
 		var claim, lease, reason, retryAt, retryFailure any
 		switch i % 5 {
@@ -265,10 +290,10 @@ func seedIssue2394StopIntents(t *testing.T, rt servedControlProofRuntime, runID,
 		case 4:
 			retryAt, retryFailure = at.Add(time.Hour), string(retry)
 		}
-		_, err := tx.Exec(`INSERT INTO fan_out_intents
+		_, err = tx.Exec(`INSERT INTO fan_out_intents
 		(run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,bundle_hash,semantic_digest,source_kind,source_event_id,source_field,cardinality,cursor,status,next_chunk_size,capsule,created_at,updated_at,claim_owner,claim_generation,lease_expires_at,blocked_reason,retry_ready_at,retry_failure)
 		VALUES ($1,$2,'root','fan_out',$3,$4,$5,'event_payload_field',$6,'items',25,$7,$8,32,$9,$10,$10,$11,$12,$13,$14,$15,$16)`,
-			runID, deliveryID, path, rt.BundleHash, "sha256:"+strings.Repeat("2", 64), eventID, cursor, status, string(capsule), at, claim, generation, lease, reason, retryAt, retryFailure)
+			runID, deliveryID, path, rt.BundleHash, digest, eventID, cursor, status, string(capsuleJSON), at, claim, generation, lease, reason, retryAt, retryFailure)
 		if err != nil {
 			t.Fatal(err)
 		}
