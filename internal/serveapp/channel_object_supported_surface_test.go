@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"gopkg.in/yaml.v3"
@@ -697,62 +698,7 @@ func objectChannelPresentationValid(input map[string]any) bool {
 
 func writeObjectChannelSource(t *testing.T, configPath string) string {
 	t.Helper()
-	root := t.TempDir()
-	if err := os.Mkdir(filepath.Join(root, "ingress"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	writeStandingCandidateFile(t, filepath.Join(root, "schema.yaml"), `name: object-channel
-pins:
-  inputs: {events: [work.requested]}
-  outputs: {events: [work.requested]}
-connect:
-  - {event: work.requested, from: ., to: reviews}
-`)
-	if err := os.Mkdir(filepath.Join(root, "reviews"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	writeStandingCandidateFile(t, filepath.Join(root, "events.yaml"), "work.requested:\n  detail: text\n")
-	writeStandingCandidateFile(t, filepath.Join(root, "reviews", "schema.yaml"), `name: reviews
-stages:
-  waiting: {initial: true}
-  review:
-    gate:
-      decision: review_decision
-      context: {detail: '${entity.detail}'}
-      outcomes:
-        approve: {advances_to: done}
-        reject:
-          input: {reason: {type: text, required: true}}
-          advances_to: done
-  done: {terminal: true}
-pins:
-  inputs: {events: [work.requested]}
-`)
-	writeStandingCandidateFile(t, filepath.Join(root, "reviews", "entities.yaml"), "work:\n  detail: text\n")
-	writeStandingCandidateFile(t, filepath.Join(root, "reviews", "nodes.yaml"), `requester:
-  execution_type: system_node
-  subscribes_to: [work.requested]
-  event_handlers:
-    work.requested:
-      create_entity: true
-      data_accumulation:
-        writes:
-          - {target_field: detail, value: '${payload.detail}'}
-      advances_to: review
-`)
-	writeStandingCandidateFile(t, filepath.Join(root, "ingress", "schema.yaml"), `name: ingress
-mode: singleton
-activation: standing
-stages:
-  active: {initial: true, gate: {decision: retire_service, outcomes: {retire: {advances_to: done}}}}
-  done: {terminal: true}
-pins:
-  inputs: {events: [inbound.mock]}
-ingress:
-  alias: objects
-  providers: [{provider: mock, signing_secret: webhook_signing.mock}]
-`)
-	writeStandingCandidateFile(t, filepath.Join(root, "ingress", "entities.yaml"), "object_service: {}\n")
+	root := canonicalrouting.CopyChannelLearnedObjectJourney(t)
 	_, dirs := packfixture.DevelopmentBase(t, nil)
 	// Development overrides replace the finite base inventory. Pack IDs remain
 	// exact dependency coordinates; the authored provider and protocol are mock.
