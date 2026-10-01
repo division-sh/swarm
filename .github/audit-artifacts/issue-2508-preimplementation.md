@@ -1,5 +1,34 @@
 # Pre-Implementation Coverage Audit: #2508
 
+## C11 Supported-Mode Correction And Focused Re-Gate Request
+
+Implementation and closure work is paused under the approved gate's unprovable-row
+stop condition. `newTestCommand` binds no shared output flags: public `swarm test`
+has text output, but neither `--json` nor `--quiet` is supported. C11's original
+wording must not be interpreted as authorizing either new feature. The requested
+bounded correction is successful compiled MockOnly text execution for all three
+anchors, plus exact nonzero exit/diagnostic and no-session-acquisition proof for
+both unsupported flags. Describe and operator JSON/quiet proofs remain required
+where supported. No owner, production behavior, class boundary or proof waiver
+is proposed; request reviewer-g's explicit ruling before resuming.
+
+Characterization was committed before production extraction at `8d2ad0f2f`,
+against unchanged merged production. New A capability/order/independent-capability,
+D full/sparse transcript/current-field, and C all-anchor field/admission/cancel
+tests pass, as do unchanged operator/describe/complete-match-set controls.
+Local extraction head `7c2dfec74` also passes those controls and unchanged
+userfacing, API-spec, authoringview and routingtopology suites. It is an incomplete
+implementation head, not review-ready or a closure claim. In particular, the
+flow-detail extraction still needs its original inline body removed in favor of
+the new helper; do not credit unused extraction as complete factoring.
+
+Exact measurements currently show cyclo >=30 279 -> 276 and cognit >=30
+589 -> 588; all new extracted callables have cyclo <=22. The checked-in
+complexity snapshot still requires regeneration after completing extraction;
+the exact-head admission command therefore does not yet pass. Supported
+compiled/both-store additions, golden, full managed suite, PR and proof audit
+remain outstanding. Existing tests are unchanged; no vendoring occurred.
+
 ## Approved Implementation Boundary (2026-10-01)
 
 Independent gate `issuecomment-5927450842` approves all three complete A/D/C
@@ -513,7 +542,7 @@ Each failure proof checks zero later reads/get/mutations, not only an error stri
 | C08 detail and stale-content fence | Same tests: exactly one get only after final valid page, detail validator malformed/hash/anchor refusal and RPC failure; decide forwards immutable hash, stale response error preserved; defer params unchanged. |
 | C09 mutation response/errors | Existing decide/defer tests plus characterization of ok/card_id/change_id checks and no local mutation retry. |
 | C10 real page-owner proof | Retain TestScenarioMailboxActualServerContinuationBothStores; add proposed-effect/human-task continuation cases using canonical writers and real mailbox handler, >200 rows and later ambiguity/foreign cursor on both stores. These are store-seeded API proof, not authored creation E2E. |
-| C11 actual public mock command | TestReadProofFactoringCompiledScenario: compile swarm, run existing authored MockOnly stage-gate/human-task/proposed-effect scenarios through shared fresh session/RPC; assert text/JSON/quiet/exit and settled expected decision state. No external API target, retained restart, signed ingress or live-provider credit. |
+| C11 actual public mock command (correction awaiting focused gate) | TestReadProofFactoringCompiledScenario: compile swarm, run existing authored MockOnly stage-gate/human-task/proposed-effect scenarios through shared fresh session/RPC; assert text/exit and settled expected decision state. JSON/quiet are unsupported: prove their unchanged refusal before session acquisition, not successful execution or a new output feature. No external API target, retained restart, signed ingress or live-provider credit. |
 | C12 cancellation/failure before completion | Characterization blocks a later page/get, cancels context and proves error/no mutation; existing session cleanup/quiescence controls must pass. No retries, timeout changes or cancellation suppression. |
 
 ### Qualification / Sibling Proof (Q01-Q04)
