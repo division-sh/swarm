@@ -121,8 +121,8 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 			runtime := newFanInBarrierRuntime(t, backend, db, source)
 			const periodID = "2026-Q3"
 			const portfolioID = "portfolio-one"
-			memberA := uuid.NewString()
-			memberB := uuid.NewString()
+			const memberA = "op-a"
+			const memberB = "op-b"
 
 			setupID := uuid.NewString()
 			publishFanInBarrierEvent(t, ctx, runtime.bus, source, setupID, ".", "portfolio.setup", map[string]any{
@@ -147,7 +147,8 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 				t.Fatalf("activation after setup = %#v, want open 0/2", activation)
 			}
 
-			publishFanInBarrierEvent(t, ctx, runtime.bus, source, memberB, "ingress", "operating.report.requested", map[string]any{
+			publishFanInBarrierEvent(t, ctx, runtime.bus, source, uuid.NewString(), "ingress", "operating.report.requested", map[string]any{
+				"operating_id": memberB,
 				"portfolio_id": portfolioID,
 				"period_id":    periodID,
 				"revenue":      22,
@@ -177,7 +178,8 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 				t.Fatalf("retire predecessor fan-in grant: %v", err)
 			}
 			runtime = newFanInBarrierRuntime(t, backend, db, source, 2)
-			publishFanInBarrierEvent(t, ctx, runtime.bus, source, memberA, "ingress", "operating.report.requested", map[string]any{
+			publishFanInBarrierEvent(t, ctx, runtime.bus, source, uuid.NewString(), "ingress", "operating.report.requested", map[string]any{
+				"operating_id": memberA,
 				"portfolio_id": portfolioID,
 				"period_id":    periodID,
 				"revenue":      11,

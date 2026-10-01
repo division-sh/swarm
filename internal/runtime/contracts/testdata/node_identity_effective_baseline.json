@@ -344,6 +344,17 @@
             "Event": "operating.report.requested",
             "From": "",
             "Fields": {
+              "operating_id": {
+                "Kind": "cel",
+                "Literal": null,
+                "Ref": "",
+                "RefPath": {
+                  "Root": 0,
+                  "Segments": null,
+                  "Raw": ""
+                },
+                "CEL": "payload.operating_id"
+              },
               "period_id": {
                 "Kind": "cel",
                 "Literal": null,
@@ -435,6 +446,17 @@
                   "Raw": ""
                 },
                 "CEL": "payload.operating_id"
+              },
+              "operating_instance_id": {
+                "Kind": "cel",
+                "Literal": null,
+                "Ref": "",
+                "RefPath": {
+                  "Root": 0,
+                  "Segments": null,
+                  "Raw": ""
+                },
+                "CEL": "payload.operating_instance_id"
               },
               "period_id": {
                 "Kind": "cel",
@@ -1069,6 +1091,17 @@
               "Emit": {
                 "Event": "operating.report.requested",
                 "Fields": {
+                  "operating_id": {
+                    "CEL": "payload.operating_id",
+                    "Kind": "cel",
+                    "Literal": null,
+                    "Ref": "",
+                    "RefPath": {
+                      "Raw": "",
+                      "Root": 0,
+                      "Segments": null
+                    }
+                  },
                   "period_id": {
                     "CEL": "payload.period_id",
                     "Kind": "cel",
@@ -1191,6 +1224,17 @@
                 "Fields": {
                   "operating_id": {
                     "CEL": "payload.operating_id",
+                    "Kind": "cel",
+                    "Literal": null,
+                    "Ref": "",
+                    "RefPath": {
+                      "Raw": "",
+                      "Root": 0,
+                      "Segments": null
+                    }
+                  },
+                  "operating_instance_id": {
+                    "CEL": "payload.operating_instance_id",
                     "Kind": "cel",
                     "Literal": null,
                     "Ref": "",
@@ -1960,6 +2004,17 @@
           "Event": "operating.report.requested",
           "From": "",
           "Fields": {
+            "operating_id": {
+              "Kind": "cel",
+              "Literal": null,
+              "Ref": "",
+              "RefPath": {
+                "Root": 0,
+                "Segments": null,
+                "Raw": ""
+              },
+              "CEL": "payload.operating_id"
+            },
             "period_id": {
               "Kind": "cel",
               "Literal": null,
@@ -2053,6 +2108,17 @@
                 "Raw": ""
               },
               "CEL": "payload.operating_id"
+            },
+            "operating_instance_id": {
+              "Kind": "cel",
+              "Literal": null,
+              "Ref": "",
+              "RefPath": {
+                "Root": 0,
+                "Segments": null,
+                "Raw": ""
+              },
+              "CEL": "payload.operating_instance_id"
             },
             "period_id": {
               "Kind": "cel",
