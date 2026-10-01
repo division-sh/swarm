@@ -347,8 +347,8 @@ func TestChannelOnboardingE2E20FailedReplacementPreservesPredecessor(t *testing.
 					t.Fatalf("%s E2E-20 terminal replacement replaced current readback: %#v", backend, row)
 				}
 			}
-			if registrations, deliveries := harness.provider.Counts(); registrations != 1 || deliveries != 1 {
-				t.Fatalf("%s E2E-20 provider effects = %d/%d, want retained predecessor registration and confirmation only", backend, registrations, deliveries)
+			if registrations, confirmations := harness.provider.OnboardingCounts(); registrations != 1 || confirmations != 1 {
+				t.Fatalf("%s E2E-20 onboarding effects = %d/%d, want retained predecessor registration and confirmation only", backend, registrations, confirmations)
 			}
 			harness.stop(t)
 		})
