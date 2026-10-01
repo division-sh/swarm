@@ -278,6 +278,10 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 	}, entityID); err != nil {
 		return nil, fmt.Errorf("mark inbound delivery active for reused cli session: %w", err)
 	}
+	return r.continueClaudeTurn(ctx, s, message, managed, actor, entityID, resolved, &lease)
+}
+
+func (r *ClaudeCLIRuntime) continueClaudeTurn(ctx context.Context, s *Session, message Message, managed *managedProviderCall, actor runtimeactors.AgentConfig, entityID string, resolved resolvedMemoryExecution, lease **sessions.Lease) (result *Response, retErr error) {
 	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendClaudeCLI)
 	providerModel, err := resolveProviderModelForCall(ctx, r.cfg, profile, managed)
 	if err != nil {
@@ -305,8 +309,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 	if s.TurnCount > 0 && confirmedHead == "" {
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "claude_provider_head_missing", "claude-cli-adapter", "continue_session", map[string]any{"session_id": s.ID})
 	}
-	transportFallback := promptTransportFallback{}
-	ctx, completionTargetID, err := prepareCompletionContext(ctx, r.completionController, r.cfg, s, lease, entityID)
+	ctx, completionTargetID, err := prepareCompletionContext(ctx, r.completionController, r.cfg, s, *lease, entityID)
 	if err != nil {
 		return nil, err
 	}
@@ -349,6 +352,23 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 	if childSessionID == "" {
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "claude_attempt_identity_missing", "claude-cli-adapter", "prepare_turn", nil)
 	}
+	args := r.claudeContinuationArgs(s, childSessionID, confirmedHead, completionModel, toolProjection, mcpEnabled, mcpConfig)
+	prepared := claudePreparedContinuation{profile: profile, model: providerModel, tools: toolProjection, target: target, prompt: prompt, confirmedHead: confirmedHead, childSessionID: childSessionID, usageModel: usageModel}
+	return r.executeClaudeContinuation(ctx, s, message, managed, actor, resolved, lease, prepared, args, mcpContextToken, dispatch, completionTargetID)
+}
+
+type claudePreparedContinuation struct {
+	profile        llmselection.Profile
+	model          llmselection.ResolvedModel
+	tools          claudeInvocationToolProjection
+	target         *workspace.Target
+	prompt         string
+	confirmedHead  string
+	childSessionID string
+	usageModel     string
+}
+
+func (r *ClaudeCLIRuntime) claudeContinuationArgs(s *Session, childSessionID, confirmedHead, completionModel string, toolProjection claudeInvocationToolProjection, mcpEnabled bool, mcpConfig string) []string {
 	var args []string
 	if s.TurnCount == 0 {
 		args = []string{
@@ -385,80 +405,116 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 	if completionModel != "" {
 		args = append(args, "--model", completionModel)
 	}
+	return args
+}
 
+func (r *ClaudeCLIRuntime) executeClaudeContinuation(ctx context.Context, s *Session, message Message, managed *managedProviderCall, actor runtimeactors.AgentConfig, resolved resolvedMemoryExecution, lease **sessions.Lease, prepared claudePreparedContinuation, args []string, mcpContextToken string, dispatch *completionDispatch, completionTargetID string) (*Response, error) {
 	start := time.Now()
 	longRunningAfter, noOutputAfter := conversationWatchdogThresholds(r.effectiveCLITimeout(ctx))
 	monitorMeta := MonitorTurnMeta{
-		Lease:                    lease,
+		Lease:                    *lease,
 		AgentID:                  s.AgentID,
 		Runtime:                  "cli_test",
 		SessionID:                s.ID,
 		Memory:                   resolved.Plan,
 		MemoryIdentity:           resolved.Identity,
 		InputRole:                message.Role,
-		InputText:                prompt,
+		InputText:                prepared.prompt,
 		WatchdogLongRunningAfter: longRunningAfter,
 		WatchdogNoOutputAfter:    noOutputAfter,
 		TargetName: func() string {
-			if target == nil {
+			if prepared.target == nil {
 				return ""
 			}
-			return target.Container
+			return prepared.target.Container
 		}(),
 	}
 	var resp *Response
 	var fallback promptTransportFallback
-	resp, fallback, err = r.runWithPreparedPrompt(ctx, args, target, prompt, monitorMeta, dispatch, profile, providerModel)
+	resp, fallback, err := r.runWithPreparedPrompt(ctx, args, prepared.target, prepared.prompt, monitorMeta, dispatch, prepared.profile, prepared.model)
 	if mcpContextToken != "" {
 		if listedSurface, ok := r.mcpTurns.ResolveManagedCapabilitySurface(mcpContextToken); ok {
 			ctx = managedcapabilities.WithContext(ctx, listedSurface)
 		}
 	}
-	transportFallback.Attempted = transportFallback.Attempted || fallback.Attempted
-	transportFallback.Used = transportFallback.Used || fallback.Used
 	latency := time.Since(start)
 	requestPayload := jsonBytes(map[string]any{
 		"args":                          args,
 		"message":                       message,
 		"provider_session_id":           strings.TrimSpace(s.ProviderSessionID),
-		"prompt_arg_fallback_attempted": transportFallback.Attempted,
-		"prompt_arg_fallback_used":      transportFallback.Used,
+		"prompt_arg_fallback_attempted": fallback.Attempted,
+		"prompt_arg_fallback_used":      fallback.Used,
 	})
 	if err != nil {
-		turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, nil, false, latency, agentTurnFailure(err, "claude_cli_turn")), nil)
-		state := claudeCompletionFailureState(err)
-		evidence := map[string]any{"stage": "provider_call"}
-		if attemptFailure := claudeAttemptFailure(err); attemptFailure != nil {
-			evidence["operation"] = attemptFailure.operation
-			for key, value := range attemptFailure.evidence {
-				evidence[key] = value
-			}
+		return nil, r.failClaudeContinuation(ctx, s, resolved, lease, dispatch, completionTargetID, prepared.profile, prepared.usageModel, requestPayload, latency, err)
+	}
+	reply := claudeContinuationReply{response: resp, requestPayload: requestPayload, latency: latency, dispatch: dispatch, targetID: completionTargetID, profile: prepared.profile}
+	return r.acceptClaudeContinuation(ctx, s, message, managed, actor, resolved, *lease, prepared, reply)
+}
+
+func (r *ClaudeCLIRuntime) failClaudeContinuation(ctx context.Context, s *Session, resolved resolvedMemoryExecution, lease **sessions.Lease, dispatch *completionDispatch, completionTargetID string, profile llmselection.Profile, usageModel string, requestPayload []byte, latency time.Duration, err error) error {
+	turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, nil, false, latency, agentTurnFailure(err, "claude_cli_turn")), nil)
+	state := claudeCompletionFailureState(err)
+	evidence := map[string]any{"stage": "provider_call"}
+	if attemptFailure := claudeAttemptFailure(err); attemptFailure != nil {
+		evidence["operation"] = attemptFailure.operation
+		for key, value := range attemptFailure.evidence {
+			evidence[key] = value
 		}
-		if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, unavailableCompletionUsage(usageModel), state, turn.Failure, evidence); settleErr != nil {
-			return nil, errors.Join(err, settleErr)
+	}
+	if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, unavailableCompletionUsage(usageModel), state, turn.Failure, evidence); settleErr != nil {
+		return errors.Join(err, settleErr)
+	}
+	projectionErr := requireCurrentProviderProjection(ctx, s.AgentID)
+	if projectionErr == nil {
+		s.ParseFailures++
+	}
+	if projectionErr == nil && resolved.Enabled() {
+		rotated, rotateErr := MaybeRotateAfterParseFailures(ctx, s, r.sessions, *lease, r.cfg.LLM.Session.RotateOnParseFailures, r.events)
+		if rotated != nil {
+			*lease = rotated
 		}
-		projectionErr := requireCurrentProviderProjection(ctx, s.AgentID)
-		if projectionErr == nil {
-			s.ParseFailures++
-		}
-		if projectionErr == nil && resolved.Enabled() {
-			rotated, rotateErr := MaybeRotateAfterParseFailures(ctx, s, r.sessions, lease, r.cfg.LLM.Session.RotateOnParseFailures, r.events)
-			if rotated != nil {
-				lease = rotated
-			}
-			err = errors.Join(err, rotateErr)
-		}
-		if projectionErr != nil {
-			return nil, errors.Join(err, projectionErr)
-		}
+		err = errors.Join(err, rotateErr)
+	}
+	if projectionErr != nil {
+		return errors.Join(err, projectionErr)
+	}
+	return err
+}
+
+type claudeContinuationReply struct {
+	response       *Response
+	requestPayload []byte
+	latency        time.Duration
+	dispatch       *completionDispatch
+	targetID       string
+	profile        llmselection.Profile
+	usage          runtimeeffects.CompletionUsage
+}
+
+func (r *ClaudeCLIRuntime) acceptClaudeContinuation(ctx context.Context, s *Session, message Message, managed *managedProviderCall, actor runtimeactors.AgentConfig, resolved resolvedMemoryExecution, lease *sessions.Lease, prepared claudePreparedContinuation, reply claudeContinuationReply) (*Response, error) {
+	resp := reply.response
+	usage, usageErr := claudeCompletionUsageFromRaw(resp.Raw, prepared.usageModel)
+	if usageErr != nil {
+		usage = unavailableCompletionUsage(prepared.usageModel)
+	} else {
+		usage.ResolvedModel = prepared.usageModel
+	}
+	reply.usage = usage
+	var err error
+	ctx, err = validateClaudeContinuationCapabilities(ctx, s, prepared.tools, reply)
+	if err != nil {
 		return nil, err
 	}
-	usage, usageErr := claudeCompletionUsageFromRaw(resp.Raw, usageModel)
-	if usageErr != nil {
-		usage = unavailableCompletionUsage(usageModel)
-	} else {
-		usage.ResolvedModel = usageModel
+	if err := validateClaudeContinuationResponse(ctx, s, actor, prepared.target, prepared.childSessionID, reply); err != nil {
+		return nil, err
 	}
+	return r.settleClaudeContinuation(ctx, s, message, managed, resolved, lease, prepared.confirmedHead, prepared.childSessionID, usageErr, reply)
+}
+
+func validateClaudeContinuationCapabilities(ctx context.Context, s *Session, toolProjection claudeInvocationToolProjection, reply claudeContinuationReply) (context.Context, error) {
+	resp, requestPayload, latency := reply.response, reply.requestPayload, reply.latency
+	dispatch, completionTargetID, profile, usage := reply.dispatch, reply.targetID, reply.profile, reply.usage
 	if surface, ok := managedcapabilities.FromContext(ctx); ok {
 		observed, observeErr := observeCLIResponse(surface, resp)
 		if observeErr != nil {
@@ -471,9 +527,9 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 			validateErr = claudeFailureForState(runtimeeffects.StateOutcomeUncertain, validateErr, "validate_capability_surface", nil)
 			turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, resp.Raw, false, latency, agentTurnFailure(validateErr, "claude_cli_capability_validation")), resp)
 			if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "validate_capability_surface"}); settleErr != nil {
-				return nil, errors.Join(validateErr, settleErr)
+				return ctx, errors.Join(validateErr, settleErr)
 			}
-			return nil, validateErr
+			return ctx, validateErr
 		}
 	}
 	if _, ok := managedcapabilities.FromContext(ctx); !ok {
@@ -481,45 +537,57 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 			validateErr = claudeFailureForState(runtimeeffects.StateOutcomeUncertain, validateErr, "validate_capability_surface", nil)
 			turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, resp.Raw, false, latency, agentTurnFailure(validateErr, "claude_cli_capability_validation")), resp)
 			if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "validate_capability_surface"}); settleErr != nil {
-				return nil, errors.Join(validateErr, settleErr)
+				return ctx, errors.Join(validateErr, settleErr)
 			}
-			return nil, validateErr
+			return ctx, validateErr
 		}
 	}
+	return ctx, nil
+}
+
+func validateClaudeContinuationResponse(ctx context.Context, s *Session, actor runtimeactors.AgentConfig, target *workspace.Target, childSessionID string, reply claudeContinuationReply) error {
+	resp, requestPayload, latency := reply.response, reply.requestPayload, reply.latency
+	dispatch, completionTargetID, profile, usage := reply.dispatch, reply.targetID, reply.profile, reply.usage
 	if err := validateCLIResponseToolCallsForTurn(ctx, actor, s.Tools, resp); err != nil {
 		err = claudeFailureForState(runtimeeffects.StateOutcomeUncertain, err, "validate_tool_calls", nil)
 		turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, resp.Raw, true, latency, agentTurnFailure(err, "claude_cli_tool_validation")), resp)
 		if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "validate_tool_calls", "provider_session_id": strings.TrimSpace(resp.SessionID)}); settleErr != nil {
-			return nil, errors.Join(err, settleErr)
+			return errors.Join(err, settleErr)
 		}
 		if projectionErr := requireCurrentProviderProjection(ctx, s.AgentID); projectionErr != nil {
-			return nil, errors.Join(err, projectionErr)
+			return errors.Join(err, projectionErr)
 		}
-		return nil, err
+		return err
 	}
 	if returnedSessionID := strings.TrimSpace(resp.SessionID); returnedSessionID != childSessionID {
 		err := runtimefailures.New(runtimefailures.ClassOutcomeUncertain, "claude_provider_child_identity_mismatch", "claude-cli-adapter", "validate_response", map[string]any{"expected_provider_session_id": childSessionID, "returned_provider_session_id": returnedSessionID})
 		turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, resp.Raw, false, latency, agentTurnFailure(err, "claude_cli_identity_validation")), resp)
 		if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "validate_response", "expected_provider_session_id": childSessionID, "returned_provider_session_id": returnedSessionID}); settleErr != nil {
-			return nil, errors.Join(err, settleErr)
+			return errors.Join(err, settleErr)
 		}
-		return nil, err
+		return err
 	}
 	if backingErr := target.ClaudeState.CheckHead(ctx, childSessionID); backingErr != nil {
 		err := claudeFailureForState(runtimeeffects.StateOutcomeUncertain, backingErr, "validate_provider_backing", nil)
 		turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, resp.Raw, false, latency, agentTurnFailure(err, "claude_cli_backing_validation")), resp)
 		_, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "validate_provider_backing"})
-		return nil, errors.Join(err, settleErr)
+		return errors.Join(err, settleErr)
 	}
 
 	if err := requireCurrentProviderProjection(ctx, s.AgentID); err != nil {
 		err = claudeFailureForState(runtimeeffects.StateOutcomeUncertain, err, "project_provider_turn", nil)
 		turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, resp.Raw, true, latency, agentTurnFailure(err, "claude_cli_projection")), resp)
 		if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "project_provider_turn", "provider_session_id": childSessionID}); settleErr != nil {
-			return nil, errors.Join(err, settleErr)
+			return errors.Join(err, settleErr)
 		}
-		return nil, err
+		return err
 	}
+	return nil
+}
+
+func (r *ClaudeCLIRuntime) settleClaudeContinuation(ctx context.Context, s *Session, message Message, managed *managedProviderCall, resolved resolvedMemoryExecution, lease *sessions.Lease, confirmedHead, childSessionID string, usageErr error, reply claudeContinuationReply) (*Response, error) {
+	resp, requestPayload, latency := reply.response, reply.requestPayload, reply.latency
+	dispatch, completionTargetID, profile, usage := reply.dispatch, reply.targetID, reply.profile, reply.usage
 	settlementEvidence := map[string]any{"response_fingerprint": runtimeeffects.Fingerprint(resp.Raw), "provider_session_id": childSessionID}
 	if usageErr != nil {
 		settlementEvidence["usage_exactness"] = string(runtimeeffects.CompletionUsageUnavailable)
@@ -529,6 +597,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 		return nil, err
 	}
 	var settled runtimeeffects.CompletionSettlementResult
+	var err error
 	if !resolved.Enabled() {
 		settled, err = settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateSettled, nil, settlementEvidence)
 	} else {

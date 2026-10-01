@@ -22,7 +22,7 @@ var builtinToolUsageHints = map[string]string{
 	"query_entities":    "Read/query entity_state rows. entity_type, select, group_by, and filter paths must use delivered enum/declared scalar or enum leaf names. filter is CEL, so equality is ==, strings are quoted, and assignment = is invalid.",
 	"search_entities":   "Search entity_state rows with object field filters. entity_type and filter keys must use delivered declared field names for the target entity contract. Use query_entities when you need CEL, select, or group_by.",
 	"query_metrics":     "Aggregate entity_state rows. metric must be one of the delivered enum values. field and group_by must use delivered scalar or enum selector names. filter is CEL, so equality is == and strings are quoted.",
-	"read_flow_data":    "Read only declared deploy-time reference files from your owning flow data root. Provide one filename from the delivered enum; do not use host paths or this tool for mutable artifacts.",
+	"read_flow_data":    "Read only data admitted for this actor and run. Use static_file with a delivered static_id, resource_row with one structured declaration and its key or position, or resource_rows with one structured declaration and a bounded page. Resource reads use the run-pinned version; continue only with the returned cursor. Do not provide filenames or host paths, select latest versions, or use this tool for mutable artifacts.",
 }
 
 var nativeFallbackUsageHints = map[string]string{
