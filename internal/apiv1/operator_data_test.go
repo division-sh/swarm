@@ -708,20 +708,25 @@ func TestDataPinCursorRemainsBoundedForLongDeclaration(t *testing.T) {
 	if len(defects) != 0 {
 		t.Fatalf("compile long declaration: %#v", defects)
 	}
-	version := durabledata.Version{VersionID: compiled.VersionID, Manifest: compiled.Manifest}
+	store := newDataRuntimeProbeStore(t)
+	store.version = durabledata.Version{VersionID: compiled.VersionID, SequenceAlias: 1, Manifest: compiled.Manifest, CanonicalSchema: compiled.CanonicalSchema, CanonicalJSONL: compiled.CanonicalJSONL}
+	store.declaration.Ref, store.declaration.SchemaDigest = ref, compiled.Manifest.SchemaDigest
 	pin := func(suffix int) durabledata.Pin {
 		return durabledata.Pin{
 			RunID: fmt.Sprintf("00000000-0000-4000-8000-%012d", suffix), RunState: "running",
 			Declaration: ref, SchemaDigest: compiled.Manifest.SchemaDigest, VersionID: compiled.VersionID, Selection: "explicit",
 		}
 	}
-	pins := []durabledata.Pin{pin(1), pin(2)}
-	fingerprint := dataCursorFingerprint("pins", string(version.VersionID))
+	store.pins = []durabledata.Pin{pin(1), pin(2)}
+	handler := OperatorDataHandlers(DataHandlerOptions{Store: store})["data.show"]
+	params := map[string]any{"view": "pins", "declaration": dataRunDeclaration(ref), "selector": map[string]any{"kind": "head"}}
 	firstRequest, err := (durabledata.PageRequest{Limit: 1}).WithDefaults()
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := pageDataPins(pins, firstRequest, fingerprint, version)
+	params["page"] = map[string]any{"limit": firstRequest.Limit, "byte_limit": firstRequest.ByteLimit}
+	result, err := handler(context.Background(), Request{Method: "data.show", Params: params})
+	first, _ := result.(durabledata.PageResult[durabledata.Pin])
 	if err != nil || first.Continuation.State != "more" {
 		t.Fatalf("first long-declaration pin page = %#v, %v", first, err)
 	}
@@ -732,14 +737,17 @@ func TestDataPinCursorRemainsBoundedForLongDeclaration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generated cursor rejected by public request owner: %v", err)
 	}
-	second, err := pageDataPins(pins, secondRequest, fingerprint, version)
+	params["page"] = map[string]any{"limit": secondRequest.Limit, "byte_limit": secondRequest.ByteLimit, "cursor": secondRequest.Cursor}
+	result, err = handler(context.Background(), Request{Method: "data.show", Params: params})
+	second, _ := result.(durabledata.PageResult[durabledata.Pin])
 	if err != nil || len(second.Items) != 1 || second.Items[0].RunID != pin(2).RunID || second.Continuation.State != "end" {
 		t.Fatalf("second long-declaration pin page = %#v, %v", second, err)
 	}
 }
 
 func TestDataProvenanceCursorSurvivesConcurrentLineageInsertion(t *testing.T) {
-	versionID := durabledata.VersionID("resource-version-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	store := newDataRuntimeProbeStore(t)
+	versionID := store.version.VersionID
 	now := time.Date(2026, time.August, 26, 12, 0, 0, 0, time.UTC)
 	item := func(sequence uint64, kind string, producerSuffix int) durabledata.Provenance {
 		ref, err := durabledata.NewProvenanceRef(kind, fmt.Sprintf("00000000-0000-4000-8000-%012d", producerSuffix))
@@ -748,9 +756,13 @@ func TestDataProvenanceCursorSurvivesConcurrentLineageInsertion(t *testing.T) {
 		}
 		return durabledata.Provenance{Sequence: sequence, VersionID: versionID, ProducerRef: ref, Actor: "operator", CommittedAt: now}
 	}
-	fingerprint := dataCursorFingerprint("provenance", string(versionID))
+	handler := OperatorDataHandlers(DataHandlerOptions{Store: store})["data.show"]
+	params := dataShowResourceParams("provenance")
 	firstRequest, _ := (durabledata.PageRequest{Limit: 1}).WithDefaults()
-	first, err := pageDataProvenance([]durabledata.Provenance{item(1, "import", 10), item(2, "normal_run", 30)}, firstRequest, fingerprint, versionID)
+	store.version.Provenance = []durabledata.Provenance{item(1, "import", 10), item(2, "normal_run", 30)}
+	params["page"] = map[string]any{"limit": firstRequest.Limit, "byte_limit": firstRequest.ByteLimit}
+	result, err := handler(context.Background(), Request{Method: "data.show", Params: params})
+	first, _ := result.(durabledata.PageResult[durabledata.Provenance])
 	if err != nil || len(first.Items) != 1 || first.Items[0].Sequence != 1 || first.Continuation.State != "more" {
 		t.Fatalf("first provenance page = %#v, %v", first, err)
 	}
@@ -761,13 +773,21 @@ func TestDataProvenanceCursorSurvivesConcurrentLineageInsertion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := pageDataProvenance([]durabledata.Provenance{
+	store.version.Provenance = []durabledata.Provenance{
 		item(1, "import", 10), item(2, "normal_run", 30), item(3, "fork_candidate_promotion", 5), item(4, "import", 40),
-	}, secondRequest, fingerprint, versionID)
+	}
+	params["page"] = map[string]any{"limit": secondRequest.Limit, "byte_limit": secondRequest.ByteLimit, "cursor": secondRequest.Cursor}
+	result, err = handler(context.Background(), Request{Method: "data.show", Params: params})
+	second, _ := result.(durabledata.PageResult[durabledata.Provenance])
 	if err != nil || len(second.Items) != 3 || second.Items[0].Sequence != 2 || second.Items[1].Sequence != 3 || second.Items[2].Sequence != 4 || second.Continuation.State != "end" {
 		t.Fatalf("continued provenance page = %#v, %v", second, err)
 	}
-	if _, err := pageDataProvenance(second.Items, secondRequest, dataCursorFingerprint("provenance", "other"), versionID); err == nil {
+	other, defects := durabledata.CompileJSONL(store.declaration.Ref, mustDataSchema(store.version.CanonicalSchema), "slug", []byte("{\"slug\":\"beta\"}\n"))
+	if len(defects) != 0 {
+		t.Fatal(defects)
+	}
+	store.version = durabledata.Version{VersionID: other.VersionID, SequenceAlias: 2, Manifest: other.Manifest, BusinessKey: "slug", CanonicalSchema: other.CanonicalSchema, CanonicalJSONL: other.CanonicalJSONL}
+	if _, err := handler(context.Background(), Request{Method: "data.show", Params: params}); err == nil {
 		t.Fatal("provenance cursor was accepted for another query")
 	}
 	raw, err := json.Marshal(second.Items)
