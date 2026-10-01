@@ -28,7 +28,7 @@ func TestAgentViewJSONPreservesAPIResultShape(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "view", "agent-1", "--json"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "view", "agent-1", "--run-id", "run-1", "--json"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -78,9 +78,9 @@ func TestAgentDetailCommandsShareOutputModes(t *testing.T) {
 		args      []string
 		quietWant string
 	}{
-		{name: "view", args: []string{"agent", "view", "agent-1"}, quietWant: "agent-1\n"},
-		{name: "diagnose", args: []string{"agent", "diagnose", "agent-1"}, quietWant: "agent-1\nrunning\n"},
-		{name: "deliveries", args: []string{"agent", "deliveries", "agent-1"}, quietWant: "delivery-1\ndelivery-2\n"},
+		{name: "view", args: []string{"agent", "view", "agent-1", "--run-id", "run-1"}, quietWant: "agent-1\n"},
+		{name: "diagnose", args: []string{"agent", "diagnose", "agent-1", "--run-id", "run-1"}, quietWant: "agent-1\nrunning\n"},
+		{name: "deliveries", args: []string{"agent", "deliveries", "agent-1", "--run-id", "run-1"}, quietWant: "delivery-1\ndelivery-2\n"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

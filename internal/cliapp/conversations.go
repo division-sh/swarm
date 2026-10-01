@@ -379,6 +379,9 @@ func (opts conversationListCommandOptions) params() (map[string]any, error) {
 		}
 		params["flow_instance"] = strings.Trim(flowInstance, "/")
 	}
+	if opts.agentIDSet && !opts.runIDSet {
+		return nil, fmt.Errorf("--agent-id requires --run-id")
+	}
 	if opts.runIDSet {
 		runID, err := conversationNonEmptyFlag("--run-id", opts.runID)
 		if err != nil {

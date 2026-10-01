@@ -4263,7 +4263,7 @@
     },
     {
       "name": "conversation.list",
-      "description": "List conversation summaries (one per session).",
+      "description": "List conversation summaries (one per session). Supplying agent_id requires explicit exact run_id for canonical operational identity resolution; flow_instance additionally requires agent_id. Unfiltered and run-only enumeration remain supported, without inference from agent declarations or latest sessions.",
       "params": [
         {
           "name": "agent_id",

@@ -109,15 +109,15 @@ func TestAgentViewUsesAgentGetAndRendersRefsOnly(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "view", "agent-1"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "view", "agent-1", "--run-id", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
 	if captured.JSONRPC != "2.0" || captured.Method != "agent.get" {
 		t.Fatalf("request jsonrpc/method = %s/%s, want 2.0/agent.get", captured.JSONRPC, captured.Method)
 	}
-	if !reflect.DeepEqual(captured.Params, map[string]any{"agent_id": "agent-1"}) {
-		t.Fatalf("params = %#v, want agent id", captured.Params)
+	if !reflect.DeepEqual(captured.Params, map[string]any{"agent_id": "agent-1", "run_id": "run-1"}) {
+		t.Fatalf("params = %#v, want exact agent and run", captured.Params)
 	}
 	for _, want := range []string{
 		"Agent agent-1  running",
@@ -273,7 +273,7 @@ func TestAgentReadCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 		},
 		{
 			name: "view missing agent",
-			args: []string{"agent", "view", "agent-1"},
+			args: []string{"agent", "view", "agent-1", "--run-id", "run-1"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
@@ -284,7 +284,7 @@ func TestAgentReadCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 		},
 		{
 			name: "view agent not found",
-			args: []string{"agent", "view", "missing"},
+			args: []string{"agent", "view", "missing", "--run-id", "run-1"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
@@ -295,7 +295,7 @@ func TestAgentReadCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 		},
 		{
 			name: "view malformed ref",
-			args: []string{"agent", "view", "agent-1"},
+			args: []string{"agent", "view", "agent-1", "--run-id", "run-1"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)

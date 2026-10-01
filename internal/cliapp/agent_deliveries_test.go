@@ -85,14 +85,14 @@ func TestAgentDeliveriesEmptyResult(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "deliveries", "agent-1"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "deliveries", "agent-1", "--run-id", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
 	if captured.Method != "agent.delivery_lifecycle" {
 		t.Fatalf("method = %q, want agent.delivery_lifecycle", captured.Method)
 	}
-	assertAgentDeliveriesParams(t, captured.Params, map[string]any{"agent_id": "agent-1"})
+	assertAgentDeliveriesParams(t, captured.Params, map[string]any{"agent_id": "agent-1", "run_id": "run-1"})
 	if !strings.Contains(stdout.String(), "No deliveries match the current filters.") {
 		t.Fatalf("stdout = %q, want empty result message", stdout.String())
 	}
@@ -118,7 +118,7 @@ func TestAgentDeliveriesJSONPreservesAPIResultShape(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "deliveries", "agent-1", "--json"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "deliveries", "agent-1", "--run-id", "run-1", "--json"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -171,13 +171,13 @@ func TestAgentDeliveriesRejectsInvalidInputBeforeRequest(t *testing.T) {
 		{name: "invalid id", args: []string{"agent", "deliveries", "bad id!"}, wantStderr: "agent id must match OpaqueId pattern"},
 		{name: "extra arg", args: []string{"agent", "deliveries", "agent-1", "extra"}, wantStderr: "accepts one argument"},
 		{name: "unsupported flag", args: []string{"agent", "deliveries", "agent-1", "--unknown"}, wantStderr: "unknown flag"},
-		{name: "limit too small", args: []string{"agent", "deliveries", "agent-1", "--limit", "0"}, wantStderr: "--limit must be between 1 and 200"},
-		{name: "limit too large", args: []string{"agent", "deliveries", "agent-1", "--limit", "201"}, wantStderr: "--limit must be between 1 and 200"},
-		{name: "blank cursor", args: []string{"agent", "deliveries", "agent-1", "--cursor", ""}, wantStderr: "--cursor is required when provided"},
-		{name: "blank run id", args: []string{"agent", "deliveries", "agent-1", "--run-id", ""}, wantStderr: "--run-id is required when provided"},
+		{name: "limit too small", args: []string{"agent", "deliveries", "agent-1", "--run-id", "run-1", "--limit", "0"}, wantStderr: "--limit must be between 1 and 200"},
+		{name: "limit too large", args: []string{"agent", "deliveries", "agent-1", "--run-id", "run-1", "--limit", "201"}, wantStderr: "--limit must be between 1 and 200"},
+		{name: "blank cursor", args: []string{"agent", "deliveries", "agent-1", "--run-id", "run-1", "--cursor", ""}, wantStderr: "--cursor is required when provided"},
+		{name: "blank run id", args: []string{"agent", "deliveries", "agent-1", "--run-id", ""}, wantStderr: "--run-id is required"},
 		{name: "invalid run id", args: []string{"agent", "deliveries", "agent-1", "--run-id", "bad id!"}, wantStderr: "--run-id must match OpaqueId pattern"},
-		{name: "blank status", args: []string{"agent", "deliveries", "agent-1", "--delivery-status", ""}, wantStderr: "--delivery-status must not be empty"},
-		{name: "invalid status", args: []string{"agent", "deliveries", "agent-1", "--delivery-status", "done"}, wantStderr: "--delivery-status must be one of"},
+		{name: "blank status", args: []string{"agent", "deliveries", "agent-1", "--run-id", "run-1", "--delivery-status", ""}, wantStderr: "--delivery-status must not be empty"},
+		{name: "invalid status", args: []string{"agent", "deliveries", "agent-1", "--run-id", "run-1", "--delivery-status", "done"}, wantStderr: "--delivery-status must be one of"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls.Store(0)
@@ -206,7 +206,7 @@ func TestAgentDeliveriesFailClosedWithoutToken(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "deliveries", "agent-1"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "deliveries", "agent-1", "--run-id", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != cliExitAuth {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitAuth, stdout.String(), stderr.String())
 	}
@@ -334,7 +334,7 @@ func TestAgentDeliveriesFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 			defer server.Close()
 
 			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "deliveries", "agent-1"}, &stdout, &stderr, testRootCommandOptions(server))
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "deliveries", "agent-1", "--run-id", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
 			if code != tc.wantCode {
 				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, tc.wantCode, stdout.String(), stderr.String())
 			}
