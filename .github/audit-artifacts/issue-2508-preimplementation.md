@@ -1,5 +1,148 @@
 # Pre-Implementation Coverage Audit: #2508
 
+## Current Post-#2505 Delta Gate Submission (2026-10-01)
+
+**Agent-g; audit only; independent reviewer-g gate pending.** This section
+supersedes the intake dependency/baseline statements below, not the three
+distinct complete classes or their 40 planned A/D/C/Q proof rows.
+
+PR #2505 merged on 2026-10-01 at 07:50:50 UTC as
+`1c4cce2094bdaf48dd4d5faf6dbfe33da662bc0f`, now the exact fetched
+`origin/master` analysis baseline. Its accepted review head was `ab707f89b`.
+The audit branch was clean before rebasing; the old head is preserved as
+`backup/agent-g-2508-preaudit-dced47dd2`. Rebase completed without conflict;
+`git range-diff cf3e85023..dced47dd2 1c4cce209..5762d8bb5` proves the sole
+original audit commit unchanged. No #2008 WIP or other agent worktree was changed.
+
+This fulfills the dependency-integration portion of the independent delta ruling
+`issuecomment-5923949475`. **It does not grant coding permission.** Request one
+reviewer-g delta ruling, not a new concept-wide audit cycle or first-slice scope.
+
+### Current Eligibility And A/C Drift Check
+
+Exact canonical measurement at `1c4cce209` passes using the unchanged pinned
+analyzers. Both populations now have **19026** callable rows: cyclo >=30 **279**,
+>=50 **57**, maximum **184**; cognit >=30 **589**, >=50 **198**, maximum **302**.
+The three candidates still exist at the same lines with unchanged values:
+
+| Family / candidate | Cyclo / cognit | Delta disposition |
+| --- | ---: | --- |
+| A / OperatorAgentConversationHandlers | 82 / 212 | Same nine methods, separate typed read capabilities, identity resolution, result admission and error/store-call ordering. |
+| D / writeDescribeText | 65 / 256 | Same renderer branches; current input projection differs as enumerated below. |
+| C / scenarioRunner.findDecisionCard | 56 / 84 | Same two-action caller, eleven selector fields, registered anchor admission, complete validated cursor traversal, exact-one detail/hash and downstream mutation. |
+
+`git diff --quiet cf3e85023 1c4cce209 --` the three candidate files, operatorread,
+selected-store operatorsurface, control_mailbox.go and the human-code projection
+guard returns zero. Production caller search still identifies serve's API mount,
+one describe text callback and one mailbox-action selector caller. No new A/C
+consumer, alternate interpreter or same-concept bypass appeared. API entity and
+event-publication tests changed in #2505 for the separate grammar/ingress
+contract, not A's read methods or C's match policy. Those retained semantic
+owners remain different concepts, not shared factoring logic.
+
+All original family-specific ownership, unchanged-test, under25 and exact-ratchet
+conditions remain binding. The new callable count / three-count cognitive drop
+belong to merged #2505, not claimed #2508 factoring credit. Parent-tail grouping
+is unchanged; this delta does not independently qualify the other children.
+
+### Refreshed D Owner / Consumer And Branch Inventory
+
+Binding current spec sections were re-read, including:
+`flow_model.flow_instance_authoring.effective_flow_mode_model` (line 12002),
+`.analyzer_obligations.expand_minimize_tooling` (12490),
+`flow_model.compiled_event_schema_projection` (12709),
+`flow_model.composition_routing.w2_compiled_pin_edge_ownership` (12884),
+`.authored_shapes.resolved_input_pin` (12926), and output registry
+`cli_specification.foundations.output_contract.command_support.output_conformance_registry.rows.{describe,describe_routes}`
+(24709/24719). API and scenario binding paths remain unchanged; their line numbers
+shift to agent.list 35952, conversation.list 36541 and scenario selected surface
+22320 / source authority 22357 / mailbox actions 22623 and 22635.
+
+| Current owner | Complete relevant consumption / delta |
+| --- | --- |
+| FlowSchemaDocument.EffectiveMode | authoringview.buildFlows now consumes this owner: scalar instance derives template, omission derives static; authored mode is invalid on presence. describe consumes FlowView.Mode as projection only. The exact writeDescribeText flow-Mode guard exception remains untouched. |
+| Primary-entity, template-instance and singleton-coordinator resolvers plus BuildSingletonCoordinatorDemandProjection | authoringview projects scalar identity and evaluates a coordinator only for static shape with actual contained-state demand. Stateless/unused-field cases do not invent coordinator errors. The text renderer consumes the optional projection; it must not restore a singleton shape or recompute demand. |
+| CompiledFlowInputPin / CompiledConnectionInput / ConnectRoutePlan and effective compiled event-schema owner | inputPinViews retains pin, schema, initialization and retained fan-in/reply evidence; ResolutionFrom is removed. Ordinary create/select/select-or-create and exceptional key_from belong to the connection. authoringview/routingtopology/full describe/routes consume bound evidence, never a pin-owned fallback. |
+| authoringview.Build and BuildRoutingTopologyWithReport | All full-text/JSON/quiet/graph and routes-only consumers still use the admitted structural source and these existing projections. No new semantic owner or source/readiness classifier was added. |
+| Existing diagnostic and shared CLI-output owners | Admission/diagnostic text, source locations, structural/not-evaluated metadata and output modes remain unchanged by this factoring boundary. #2505's new source validity and JSON projection are the baseline, not behavior for G to preserve from the retired grammar. |
+
+| Planned D row | Current shape / branch obligation after integration |
+| --- | --- |
+| D01 | Nil/empty/root transcript and root primary-entity/event fields unchanged. |
+| D02 | Exact flow labels now reflect effective static/template only; preserve template identity, optional ingress, demanded coordinator positive/error and stateless/unused-map negative branches. Existing owner tests execute all coordinator distinctions; compiled stateless/template readback is captured below. |
+| D03 | Graph nodes/edges still consume lowered owners; exact event/rename projection and bound receiver membership are #2505's current inputs, not re-derived in the renderer. |
+| D04 | Timer/join/fan-in branches remain; pin-level resolution is only retained fan-in/reply policy, never ordinary instance selection or ResolutionFrom. |
+| D05 | Fan-out/gate branch ordering, multiplicity metadata and outcomes unchanged. |
+| D06 | Existing typed diagnostic formatting/indentation remains; characterize current retirement teaching errors, not accepted authored mode or pin-owned selectors. |
+| D07 | Full describe/routes must expose the same current immutable connection/topology projection, including derived or exceptional key source and actual retained fan-in evidence. |
+| D08 | Text/JSON/quiet/no-color baseline is refreshed. InputPinView JSON no longer has resolution_from; flow mode is derived. Do not reintroduce removed fields or compare to pre-#2505 JSON as authoritative. |
+| D09 | Structural/source admission now rejects authored mode and retired ordinary pin selection. Preserve validation-before-presentation, findings and exit behavior; no readiness, credential or runtime reinterpretation. |
+| D10 | Current compiled source cells cover static/template, payload versus intrinsic key, standing stateless ingress, retained fan-in and the golden source, with exact repeated transcripts and full/routes JSON equality. Exhaustive new characterization tests and post-refactor compiled proof are still required, not declared complete by this delta. |
+
+No candidate disappeared, new required consumer appeared or semantic scope
+changed. Existing A/D/C owners and the original chosen-class closure commitments
+remain correct on this merged baseline. No spec change by G is proposed here.
+
+### Post-Merge Pre-Extraction Evidence Actually Executed
+
+All following runs use unmodified merged production and existing tests; no
+existing test edit, extraction, behavior repair, workload relaxation or full-suite
+claim follows.
+
+| Execution | Actual result / evidence |
+| --- | --- |
+| Original focused A/C/describe controls, same selection as intake, count1 | PASS apiv1 4.083s / cliapp 15.947s; `/tmp/agent-g-2508-post2505-targeted.log`. |
+| Verbose real SQLite/PostgreSQL operator and complete-match/201-card public-owner controls, count1 | PASS apiv1 2.781s / cliapp 5.219s; both backend leaves execute, no skips; `/tmp/agent-g-2508-post2505-public-owners.log`. |
+| Existing authoringview projection/shape/coordinator, API-spec and human-code source guards, count1 | PASS authoringview 2.402s / apispec 0.531s / userfacing 11.362s; `/tmp/agent-g-2508-post2505-projections.log`. |
+| Existing routingtopology TestBuild family, count1 | PASS 0.245s; `/tmp/agent-g-2508-post2505-topology.log`. |
+| Exact canonical complexity snapshot / baseline check | PASS; `/tmp/agent-g-2508-post2505-complexity/{head.json,delta.json}`. |
+| Compiled public describe/routes pre-extraction characterization | PASS **45 cells / 90 invocations**, five existing sources x nine output surfaces x two identical repeats. Each exits0 with empty stderr. `/tmp/agent-g-2508-post2505-describe/manifest.json` preserves actual commands, per-cell exit and stdout/stderr SHA256; raw transcripts are adjacent. |
+
+Characterization sources are current existing template-select-or-create,
+template-create-minted-key, telegram-agent, fan-in/barrier and the golden workload.
+Surfaces are describe text/JSON/quiet/graph-text/graph-JSON/no-color and routes
+text/JSON/quiet. The compiled binary was built from this integrated tree with
+`go build -o /tmp/agent-g-2508-post2505-swarm ./cmd/swarm`; a scratch audit script
+`/tmp/agent-g-2508-post2505-describe.rb` invokes only the public command, compares
+both actual transcripts/exit codes and asserts full/graph/routes topology equality,
+structural/not-evaluated metadata, exact effective-mode text, template identity,
+retired pin field/policy absence and stateless coordinator absence. It never
+calls runtime/private read helpers or starts provider execution.
+
+An initial public invocation was correctly refused because the inherited test
+DSN is quarantined production environment. That observation is not credited as
+a pass or a separately archived failure receipt; the initial scratch output
+paths were reused by a successful invocation before the retained matrix capture.
+Actual public calls explicitly unset SWARM_TEST_POSTGRES_DSN; targeted Go
+selected-store proofs retain the canonical test DSN. No admission bypass or
+global environment mutation was used. No Telegram/Claude call or live execution.
+
+These captures are baseline proof, not committed exhaustive characterization
+tests, post-extraction D10 closure, provider/restart proof or whole qualification.
+The promised new regression tests still must precede production extraction after
+the independent gate. No goldens or full swarm-test were rerun in this audit pass.
+
+SHA256 receipts: targeted log
+`63413ad76882f1428ea6effb158ebafc39b4fe74e1e83a8b999195ae611ab3e3`;
+public-owner log `f1d191847b509792a932e12c91fdf0a46a5dd4a0c584187ccd4b6551cd814cfa`;
+projection/guard log `5f643b4711fcf683be55947ba52bcb3e7aabf9f6ebe455c7d6b1f51e1a130f61`;
+topology log `d5c75d8faaba927b6773d49183d214d56095f970961e70a2d76a90bc3b2e34e3`;
+head metrics `a936bc79df6952518c879a72a00fd897512829c721ced060c352306a63606221`;
+delta `2476a310d9e4477ba974102e8f7266da29713199337f44d850bef97b2e3da347`;
+compiled binary `b848e860f04e3aef93e68b783801e513e93e667d02a6249bdf291977c5746268`;
+scratch script `6d093b17b9919bfee67699a55ebb048ada21058169ae9e4c156fc88b4fc7eef5`;
+compiled manifest `e8eb3cda6bd4aba01b78826bfd9eb3a6fd802a637baf767f527902ae05f7d0ee`;
+compiled log `d1096f9fdc6b38ac5a82bf4a2f0931a06ebd28fb645a3573ef5a7205ea6cd0fc`.
+
+Tracker decision: update #2508 and existing watchlist nodes with dependency
+consumed and this exact current projection/proof boundary. Keep #2447/#2407 and
+#2250 open. No new issue or architecture disposition; the original watchlist-only
+maintenance feedback remains. Request reviewer-g's final **independent delta gate**
+on this integrated artifact. Coding stays frozen pending an explicitly recorded
+outcome. The old external dependency refusal below is historical, not current.
+
+## Historical Intake Audit (Superseded Baseline/Dependency Only)
+
 Agent-g. Analysis baseline: `cf3e8502379c7ac3affeac782a4084f45a4bf9ff`
 (merged #2507); docs baseline: `4c7452b`.
 **Audit only. Independent gate requested, not granted. No production or test edits.**
