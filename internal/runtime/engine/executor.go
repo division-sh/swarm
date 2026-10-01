@@ -924,7 +924,7 @@ func (e *Executor) stepJoin(frame *executionFrame) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	activation, err = activation.WithTimerHandle(handle, time.Now().UTC())
+	activation, err = activation.WithTimerHandle(handle, e.emitNow())
 	if err != nil {
 		return false, err
 	}
