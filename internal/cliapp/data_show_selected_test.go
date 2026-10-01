@@ -46,7 +46,19 @@ func TestDataShowCLIReadFamilyAcrossSelectedStores(t *testing.T) {
 				t.Fatal(defects)
 			}
 			shape := durabledata.ImportShape{BundleHash: artifact.BundleHash(), Declaration: ref, SchemaDigest: compiled.Manifest.SchemaDigest, BusinessKey: "slug", Fields: []durabledata.ImportShapeField{{Name: "body", Required: true, Text: true}, {Name: "slug", Required: true, Text: true}}}
-			catalog := durabledata.Catalog{BundleHash: artifact.BundleHash(), Declarations: []durabledata.Declaration{{Name: ref.EventName, Ref: ref, BusinessKey: "slug", SchemaDigest: compiled.Manifest.SchemaDigest, CanonicalSchema: compiled.CanonicalSchema}}, ImportShapes: []durabledata.ImportShape{shape}}
+			positionRef, _ := durabledata.ParseDeclarationRef(".", "positions.loaded")
+			positionSchema := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"body"}, "properties": map[string]any{"body": map[string]any{"type": "string"}}}
+			positionCompiled, defects := durabledata.CompileJSONL(positionRef, positionSchema, "", nil)
+			if len(defects) != 0 {
+				t.Fatal(defects)
+			}
+			catalog := durabledata.Catalog{BundleHash: artifact.BundleHash(), Declarations: []durabledata.Declaration{
+				{Name: positionRef.EventName, Ref: positionRef, SchemaDigest: positionCompiled.Manifest.SchemaDigest, CanonicalSchema: positionCompiled.CanonicalSchema},
+				{Name: ref.EventName, Ref: ref, BusinessKey: "slug", SchemaDigest: compiled.Manifest.SchemaDigest, CanonicalSchema: compiled.CanonicalSchema},
+			}, ImportShapes: []durabledata.ImportShape{
+				{BundleHash: artifact.BundleHash(), Declaration: positionRef, SchemaDigest: positionCompiled.Manifest.SchemaDigest, Fields: []durabledata.ImportShapeField{{Name: "body", Required: true, Text: true}}},
+				shape,
+			}}
 			if _, err := selected.EnsureSourceArtifactWithData(ctx, artifact, catalog); err != nil {
 				t.Fatal(err)
 			}
@@ -59,6 +71,10 @@ func TestDataShowCLIReadFamilyAcrossSelectedStores(t *testing.T) {
 			result, err := selected.ExecuteDataSourceOperation(ctx, durabledata.SourceCommand{Operation: "import", SourceInvocationID: uuid.NewString(), Actor: "operator", BundleHash: artifact.BundleHash(), Declaration: ref, ExpectedHead: durabledata.AbsentHead(), InputFormat: "jsonl", Input: []byte(input.String())})
 			if err != nil || result.Outcome != "accepted" {
 				t.Fatalf("import=%#v/%v", result, err)
+			}
+			positionResult, err := selected.ExecuteDataSourceOperation(ctx, durabledata.SourceCommand{Operation: "import", SourceInvocationID: uuid.NewString(), Actor: "operator", BundleHash: artifact.BundleHash(), Declaration: positionRef, ExpectedHead: durabledata.AbsentHead(), InputFormat: "jsonl", Input: []byte("{\"body\":\"first\"}\n{\"body\":\"position-two\"}\n")})
+			if err != nil || positionResult.Outcome != "accepted" {
+				t.Fatalf("keyless import=%#v/%v", positionResult, err)
 			}
 			work := worklifetime.NewProcess()
 			handler, err := apiv1.NewHandler(apiv1.Options{PlatformSpecPath: ResolvePath(RepoRoot(), defaultPlatformSpecPath), AuthTokens: []string{"test-token"}, ProcessWorkOwner: work, Handlers: apiv1.OperatorDataHandlers(apiv1.DataHandlerOptions{Store: selected})})
@@ -78,7 +94,7 @@ func TestDataShowCLIReadFamilyAcrossSelectedStores(t *testing.T) {
 			root := testRootCommandOptions(server)
 			root.invocationRoot = mustInvocationRootForTest(t.TempDir())
 			for _, mode := range []string{"text", "json", "quiet"} {
-				for _, operand := range []string{"inventory", "./records.loaded@head", "./records.loaded@v1", "./records.loaded@" + string(result.Candidate.VersionID), "row"} {
+				for _, operand := range []string{"inventory", "./records.loaded@head", "./records.loaded@v1", "./records.loaded@" + string(result.Candidate.VersionID), "row", "position"} {
 					t.Run(mode+"/"+operand, func(t *testing.T) {
 						args := []string{"--bundle-hash", artifact.BundleHash()}
 						if mode != "text" {
@@ -86,6 +102,8 @@ func TestDataShowCLIReadFamilyAcrossSelectedStores(t *testing.T) {
 						}
 						if operand == "row" {
 							args = append(args, "./records.loaded@v1", "--key", `"row-0001"`)
+						} else if operand == "position" {
+							args = append(args, "./positions.loaded@head", "--position", "2")
 						} else if operand != "inventory" {
 							args = append(args, operand)
 						}
@@ -100,11 +118,14 @@ func TestDataShowCLIReadFamilyAcrossSelectedStores(t *testing.T) {
 						if out.Len() == 0 || errOut.Len() != 0 {
 							t.Fatalf("CLI output=%s/%s", out.String(), errOut.String())
 						}
-						if operand != "inventory" && operand != "row" && !strings.Contains(out.String(), string(result.Candidate.VersionID)) {
+						if operand != "inventory" && operand != "row" && operand != "position" && !strings.Contains(out.String(), string(result.Candidate.VersionID)) {
 							t.Fatalf("version selection lost: %s", out.String())
 						}
 						if operand == "row" && !strings.Contains(out.String(), "row-0001") {
 							t.Fatalf("row selection lost: %s", out.String())
+						}
+						if operand == "position" && (mode == "quiet" && strings.TrimSpace(out.String()) != "2" || mode != "quiet" && !strings.Contains(out.String(), "position-two")) {
+							t.Fatalf("position selection lost: %s", out.String())
 						}
 					})
 				}
