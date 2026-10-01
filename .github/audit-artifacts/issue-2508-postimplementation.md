@@ -147,7 +147,8 @@ git diff --check origin/master...HEAD
 Supported combined process proof passed in 207.663s; exact compiled scope proof
 in 10.750s; selected snapshots in 19.700s; pagination/keyset/lifecycle store
 proof in 6.612s; focused API/CLI race in 4.596s/56.551s. Final all-anchor detail
-failure/cancellation race passed in 1.284s. New keyset insertion proof is
+failure/cancellation race passed in 1.284s; the final combined named API/CLI
+race command also passed in 38.858s/77.866s. New keyset insertion proof is
 separately selected, not assumed to be in the default broad unit. During the
 default run, the only additional committed source was two test-only files;
 the default log explicitly includes the new detail failure matrix. Production
@@ -166,6 +167,8 @@ Production Go diff: 596 additions, 490 deletions, gross1086, net+106 across six
 files. Spec/generated OpenRPC adds 56 gross lines; conservative combined1142
 is below #2407's 3000 cap. Waived historical 1500/net-neutral rules are not
 represented as still binding. No schema, ledger or persistence inventory change.
+The exact final baseline refresh adds two explicit test-file classifications
+for the new keyset and detail-failure proofs; production scores are unchanged.
 
 Authorized existing-test edit inventory: agents_test.go, agent_diagnose_test.go,
 agent_deliveries_test.go, agent_output_modes_test.go,
