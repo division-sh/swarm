@@ -6059,7 +6059,8 @@ engine:
       restoration and occurrence preparation without mutating the row or retiring its mandatory wakeup. Only a proven
       non-join malformed generic schedule follows generic fail-loud terminalization. Malformed same-leaf siblings leave the
       complete registration set unchanged. Forking remints the complete typed handle for the destination route and rejects
-      partial identity.
+      partial identity. Historical join projection interprets only the join-owned state namespace; unrelated accumulator
+      evidence is retained unchanged and detached from the source. A corrupt join-owned bucket still fails closed.
   runtime_store_backend_selection:
     promoted_by: '#1084'
     parent_tracker: '#1066'
