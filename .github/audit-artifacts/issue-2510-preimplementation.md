@@ -5,6 +5,22 @@ Source baseline: merged `origin/master@e110bfb368369d701d3e7784f418addf02d2f4ec`
 Branch: `agent-g/2510-preaudit`. This artifact changes no production, tests,
 authoritative spec, runtime ownership, or selected-store schema.
 
+## Recorded Gate Addendum
+
+The [independent ruling](https://github.com/division-sh/swarm/issues/2510#issuecomment-5933895918)
+approves coding as a first slice of #2447 after this classification correction.
+Peer provider continuations share the broader provider-turn lifecycle, but use
+separate provider-specific orchestration and already consume the common owners.
+Their surviving seams are tracked in #2447 comment5933882419, not falsely
+classified as a different lifecycle concept or closed by this Claude slice.
+G1 spec and G2 live usage corrections are approved, including normally derived
+description/definition/capability identity changes with no access/compatibility
+change. Q02 is optional without explicit provisioning and authorization: record
+not-run/residual risk, never a pass. All mandatory C/R/Q01/Q03-Q08 proof, unchanged
+tests, outer lifetimes, characterization-first, complexity and qualification
+conditions remain binding. The original pending statements below are historical
+submission context, superseded only by this explicit ruling.
+
 ## Binding Context, Category And Class Chain
 
 Read the full #2510 issue (no prior comments), #2447's lead-ratified current
@@ -131,7 +147,7 @@ with proof**; **still bypasses and explicitly split/escalated**.
 | CLI process and prompt transport | Nonstream/stream launch, watchdog monitor, MCP HTTP bridge and tool-result continuation | Already consumes; C10/C11 and existing transport/started-failure tests. No move of durable-launch-before-exec or heartbeat ownership |
 | Workspace ClaudeState resolver and inspected container cleanup | Reusable memory, stateless delivery, non-delivery invocation, startup tmpfs and fork-chat tmpfs | Already consumes; exact state tuple, `CheckHead`, outer Conversation release; C07/C15/C23 and Q02. State lifetime is not provider resume-ID authority |
 | Shared provider response/tool-output/usage records | Claude parser/capability observation, shared settlement and transcript; Anthropic/OpenAI/Mock response adapters | Already consumes shared records; native inventory/transport details are different concepts proven by C12-C14/Q03; no cross-provider response parser consolidation |
-| Anthropic/OpenAI compatible/OpenAI responses/Mock/Noop provider orchestrators | Their own Continue implementations | Different semantic concept, with proof; HTTP/Mock/Noop primitives are not Claude process orchestration. Shared session/settlement owners are already consumed. Sibling committed-phase tests Q03; their existing scores 37/42/42/29 are not claimed eliminated |
+| Anthropic/OpenAI compatible/OpenAI responses/Mock/Noop provider orchestrators | Their own Continue implementations | Same broader provider-turn lifecycle, separate provider-specific orchestration, explicitly retained/tracked in #2447 comment5933882419; shared session/settlement owners already consumed. HTTP/Mock/Noop primitives are not a second Claude continuation. Sibling committed-phase tests Q03; existing scores 37/42/42/29 are not claimed eliminated |
 | Selected-contract fork materialization and startup admission | Upstream preparation, actor census, lifecycle and session setup | Different semantic concept, with proof; same managed continuation after admission, `TestCompletionAuthorityReviewFindingParity`; no fork/runtime reconstruction rewrite |
 
 No row is marked moved-to-owner: this is existing-owner maintenance, not an
@@ -276,7 +292,7 @@ with real SQLite/PostgreSQL run/pin/version storage and the Executor, not mocks.
 | R19 | Advancing global head does not change existing run pin across restart | RStore/pinned_restart/sqlite,postgres plus Q04; same version/row output and cursor target after reopen |
 | R20 | Pruned/missing/corrupt selected payload and failed store read | RStore/payload_refusal/sqlite,postgres and RChar/store_error; no mutable projection/head fallback |
 | Q01 | Compiled public run/serve -> Claude native/MCP resource tool -> emitted event -> settled delivery | Planned `TestClaudeResourceReadSupportedServeRestart`, fake-provider transport mode on both stores; public process and HTTP/MCP evidence, exact typed tool result/event/receipt; not real-provider credit |
-| Q02 | Same-store public serve restart with real Claude/private backing | Existing opt-in `TestCommandLiveServeAndRestartParity` on both stores, after prerequisites and dedicated-chat authorization. Real provider/Telegram proof distinct from Q01; do not replay sent deliveries. If unavailable, report pending and request explicit gate disposition, never count a skip as pass |
+| Q02 | Same-store public serve restart with real Claude/private backing | Existing opt-in `TestCommandLiveServeAndRestartParity` on both stores, after prerequisites and dedicated-chat authorization. Optional per recorded gate when unavailable/not authorized: not run and residual risk, never a pass. Real provider/Telegram proof distinct from mandatory Q01; do not replay sent deliveries |
 | Q03 | HTTP/Mock sibling completion, startup/prepared fork probes, provider/generated schema boundaries | Existing committed-phase tests, selected-fork prepared-probe, provider schema and generated-schema closure controls; no Claude-only shared-owner claim |
 | Q04 | Actual selected-store Executor and dataaccess projection consumers | RStore all backend leaves plus materializer integrity controls; retained compiled mock lifecycle gives internal-harness credit only, not public live serve |
 | Q05 | Settlement/current/drained/fork authority and cancellation/commit evidence parity | `TestCompletionAuthorityReviewFindingParity`, `TestCompletionTransactionAcknowledgementBoundaryBothStores`; backend leaves must execute, not skip |
@@ -376,7 +392,8 @@ feedback in #2510/#2447 and existing nodes; #2250 remains broader debt. Estimate
 2-4 engineering days for this complete batch after the gate, medium confidence;
 high regression/review ROI, with provisioning time separately uncertain.
 
-Intended closure: **the two chosen working maintenance classes eliminated**
+Intended closure: **the two chosen working maintenance classes eliminated within
+the approved first-slice boundaries**, not the broader provider-turn lifecycle,
 after all rows and final-head audit/qualification, while shared owners and
 parent architecture classes remain unchanged/open. This PR commits to complete
 C and R closure. It is feasible in one bounded PR; fixing only a wrapper or
