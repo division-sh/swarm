@@ -142,7 +142,11 @@ func (h *compiledLoopEvidenceHarness) execute(nodeID, eventType, revision string
 	if !ok {
 		h.t.Fatalf("source lacks %s/%s", node.Key(), eventType)
 	}
-	result, err := h.pc.executeNodeContractHandler(h.ctx, node, handler, workflowTriggerContext{
+	ctx := withClaimedWorkflowNodePublicationForTest(h.t, h.pc, h.ctx, event, events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient(node),
+		Target:    events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: h.entityID}),
+	})
+	result, err := h.pc.executeNodeContractHandler(ctx, node, handler, workflowTriggerContext{
 		Event: event, HandlerEventKey: eventType, State: mustCurrentWorkflowState(h.t, h.pc, h.ctx, h.route, h.entityID),
 	}, false)
 	return result, event, err

@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -98,6 +99,10 @@ func (pc *PipelineCoordinator) persistWorkflowStateForTest(ctx context.Context, 
 		})
 	}
 	effect, err := (pipelineWorkflowLifecycleOwner{coordinator: pc}).AcceptedEventEffect(route, identity.NormalizeEntityID(entityID), inbound, currentState, nextState, transition)
+	if err != nil {
+		return err
+	}
+	effect, err = admitTestLifecycleDeliveryOccurrence(ctx, pc, effect)
 	if err != nil {
 		return err
 	}
@@ -204,6 +209,10 @@ func applyTestAcceptedLifecycleEffect(ctx context.Context, pc *PipelineCoordinat
 	if err != nil {
 		return err
 	}
+	effect, err = admitTestLifecycleDeliveryOccurrence(ctx, pc, effect)
+	if err != nil {
+		return err
+	}
 	expectedState := instance.CurrentState
 	instance.CurrentState = nextStage
 	instance.EnteredStageAt = occurredAt.UTC()
@@ -255,11 +264,80 @@ func reconcileWorkflowTimerForTest(ctx context.Context, pc *PipelineCoordinator,
 	if err != nil {
 		return err
 	}
+	effect, err = admitTestLifecycleDeliveryOccurrence(ctx, pc, effect)
+	if err != nil {
+		return err
+	}
 	expectedState := instance.CurrentState
 	if strings.TrimSpace(nextStage) != "" {
 		instance.CurrentState = strings.TrimSpace(nextStage)
 	}
 	return commitTestWorkflowLifecycleMutation(ctx, pc, route, instance, expectedState, []runtimeworkflowlifecycle.Effect{effect})
+}
+
+// Direct lifecycle components use a real publication occurrence. Full execution
+// proofs additionally acquire and settle that row through the delivery owner.
+func admitTestLifecycleDeliveryOccurrence(ctx context.Context, pc *PipelineCoordinator, effect runtimeworkflowlifecycle.Effect) (runtimeworkflowlifecycle.Effect, error) {
+	transition, found := effect.Transition()
+	if !found {
+		return effect, nil
+	}
+	node, _, found := transition.HandlerOrigin()
+	if !found {
+		if compiled, ok := transition.Compiled(); ok && compiled.Edge().Source == "timer" {
+			owner := testRunScopedWorkflowRoute(ctx, effect.Route())
+			instance, exists, err := pc.workflowStore.Load(ctx, owner)
+			if err != nil || !exists {
+				return effect, fmt.Errorf("timer component owner: found=%v err=%v", exists, err)
+			}
+			activations, err := pc.workflowStore.listTestActiveWorkflowTimerActivationsForRoute(ctx, owner)
+			if err != nil {
+				return effect, err
+			}
+			var occurrence string
+			for _, activation := range activations {
+				declaration, found := workflowTimerDeclarationForInstance(pc.SemanticSource(), instance, activation.Ref.DeclarationKey)
+				if found && declaration.ID == compiled.Edge().TimerID && activation.EntityID == effect.EntityID().String() {
+					if occurrence != "" {
+						return effect, fmt.Errorf("timer component requires one exact activation")
+					}
+					occurrence = activation.Ref.ActivationID
+				}
+			}
+			return effect.WithExecutionOccurrence("timer", occurrence)
+		}
+		// A gate component supplies its authoritative card itself, never a fake
+		// handler delivery. Admission retains the missing-card refusal control.
+		return effect, nil
+	}
+	inbound, found := runtimecorrelation.InboundEventFromContext(ctx)
+	if !found || inbound.ID() != effect.EventID() {
+		return effect, fmt.Errorf("direct lifecycle component requires its persisted inbound event")
+	}
+	owner, ok := pc.deliveryStore.(*pipelineTestDeliveryOwner)
+	if !ok {
+		var err error
+		owner, err = openPipelineTestDeliveryOwner(pc.workflowStore.testDB(), pc.workflowStore.isSQLite())
+		if err != nil {
+			return effect, err
+		}
+		pc.deliveryStore, pc.workflowStore.deliveryStore = owner, owner
+	}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(events.RouteIdentity{
+		FlowID: node.FlowPath(), FlowInstance: effect.Route().InstancePath, EntityID: effect.EntityID().String(),
+	})}
+	if err := owner.commitInitial(ctx, inbound, route); err != nil {
+		return effect, err
+	}
+	id, err := runtimedelivery.DeliveryID(inbound.ID(), route)
+	if err != nil {
+		return effect, err
+	}
+	snapshot, err := owner.Snapshot(ctx, id)
+	if err != nil || snapshot.Route.Target != route.Target || snapshot.Route.Recipient != route.Recipient || !snapshot.Route.Context.Empty() {
+		return effect, fmt.Errorf("direct lifecycle publication disagrees with occurrence: %w", err)
+	}
+	return effect.WithExecutionOccurrence("delivery", snapshot.DeliveryID)
 }
 
 // Direct lifecycle tests must name a unique authored carrier in the selected flow.

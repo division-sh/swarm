@@ -177,6 +177,18 @@ func TestPipelineCompiledTransitionRejectsContradictoryEvidenceOnBothStores(t *t
 				testPipelineRunID, "", handlerTestWorkflowEnvelope(".", testPipelineRunID, entityID), time.Now().UTC())
 			seedExactOnceEvent(t, store, ctx, accepted)
 			ctx = correlation.WithInboundEvent(ctx, accepted)
+			publicationEffect, err := workflowlifecycle.NewAcceptedEvent(address.FlowInstance.Route, identity.NormalizeEntityID(entityID), accepted.ID(), string(accepted.Type()), executionmode.Live, accepted.CreatedAt(), &cause)
+			if err != nil {
+				t.Fatal(err)
+			}
+			publicationEffect, err = admitTestLifecycleDeliveryOccurrence(ctx, pc, publicationEffect)
+			if err != nil {
+				t.Fatal(err)
+			}
+			entry, hasEntry, err := publicationEffect.StageEntry(address.FlowInstance)
+			if err != nil || !hasEntry {
+				t.Fatalf("component publication occurrence: found=%v err=%v", hasEntry, err)
+			}
 			before, found, err := store.Load(ctx, address.FlowInstance)
 			if err != nil || !found {
 				t.Fatalf("initial read: found=%v err=%v", found, err)
@@ -205,6 +217,10 @@ func TestPipelineCompiledTransitionRejectsContradictoryEvidenceOnBothStores(t *t
 				if state.Transition != nil {
 					result.HandlerRuleSelection = state.Transition.RuleSelection()
 					effect, err := workflowlifecycle.NewAcceptedEvent(address.FlowInstance.Route, identity.NormalizeEntityID(entityID), state.TriggerEventID, state.TriggerEventType, executionmode.Live, state.TriggeredAt, state.Transition)
+					if err != nil {
+						t.Fatal(err)
+					}
+					effect, err = effect.WithExecutionOccurrence("delivery", entry.OccurrenceID)
 					if err != nil {
 						t.Fatal(err)
 					}

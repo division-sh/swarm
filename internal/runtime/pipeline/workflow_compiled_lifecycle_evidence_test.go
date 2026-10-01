@@ -250,6 +250,12 @@ func TestAcceptedLifecycleConsumerRejectsUnownedTransitionOnBothStores(t *testin
 					if err != nil {
 						t.Fatal(err)
 					}
+					if tc.name == "selected cause" {
+						effect, err = admitTestLifecycleDeliveryOccurrence(runtimecorrelation.WithInboundEvent(ctx, inbound), pc, effect)
+						if err != nil {
+							t.Fatal(err)
+						}
+					}
 					candidate := instance
 					plan, err := pc.prepareWorkflowLifecycleMutation(runtimecorrelation.WithInboundEvent(ctx, inbound), testRunScopedWorkflowInstanceFromContext(ctx, route.InstancePath), &candidate, []runtimeworkflowlifecycle.Effect{effect}, true)
 					if (err != nil) != tc.wantError {

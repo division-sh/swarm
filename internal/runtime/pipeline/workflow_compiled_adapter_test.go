@@ -233,6 +233,9 @@ func (f *compiledAdapterFixture) previewState() engine.StateSnapshot {
 
 func (f *compiledAdapterFixture) execute(event string, evt events.Event) (contractHandlerExecutionResult, error) {
 	f.t.Helper()
+	if _, found := f.load(); found {
+		return f.executeExistingRecipient(event, evt)
+	}
 	handler, ok := f.pc.SemanticSource().ExecutableNodeEventHandlers(f.node)[event]
 	if !ok {
 		f.t.Fatalf("missing authored handler %s", event)
@@ -489,7 +492,19 @@ func TestPipelineCompiledTransitionStageGuardsOnBothStores(t *testing.T) {
 			t.Run(backend+"/"+tc.stage, func(t *testing.T) {
 				f := newCompiledAdapterFixture(t, backend, bundle, ".", tc.stage, true)
 				before, _ := f.load()
-				result, err := f.execute("direct", f.event("direct"))
+				evt := f.event("direct")
+				var result contractHandlerExecutionResult
+				var err error
+				if tc.reject {
+					handler := f.pc.SemanticSource().ExecutableNodeEventHandlers(f.node)["direct"]
+					_, admissionErr := f.pc.prepareDeliveryTargetApplication(f.ctx, f.node.Key(), MustDeliveryTargetHandler(f.node).ForEvent("direct"), handler, evt, events.MustExistingEntityTarget(events.RouteIdentity{FlowID: f.flow, FlowInstance: f.path, EntityID: f.entityID}))
+					if admissionErr == nil || !strings.Contains(admissionErr.Error(), `terminal state "Ready"`) {
+						t.Fatalf("terminal receiver admission = %v, want exact terminal refusal", admissionErr)
+					}
+					result, err = executeNodeContractHandlerWithHandoff(t, f.pc, f.ctx, f.node, handler, workflowTriggerContext{Event: evt, HandlerEventKey: "direct", State: f.state()}, false)
+				} else {
+					result, err = f.execute("direct", evt)
+				}
 				if tc.failure {
 					if err == nil {
 						t.Fatal("foreign/unknown source stage admitted")

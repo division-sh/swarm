@@ -33,6 +33,46 @@ func installedWorkflowJoinDeliveryOwnerForTest(t *testing.T, pc *PipelineCoordin
 	return owner
 }
 
+func withClaimedWorkflowNodePublicationForTest(t *testing.T, pc *PipelineCoordinator, ctx context.Context, evt events.Event, route events.DeliveryRoute) context.Context {
+	t.Helper()
+	configurePipelineTestDeliveryOwner(t, pc)
+	ctx, err := persistWorkflowJoinPublicationForTest(t, pc, ctx, evt, route, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := installedWorkflowJoinDeliveryOwnerForTest(t, pc)
+	id, err := runtimedelivery.DeliveryID(evt.ID(), route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := owner.Snapshot(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := owner.ClaimDelivery(ctx, snapshot.Authority, evt, snapshot.Route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	acquired, ok := claimed.Acquired()
+	if !ok {
+		t.Fatalf("component execution claim = %s, want acquired", claimed.Disposition)
+	}
+	if pc.workOwner == nil {
+		pc.workOwner = pipelineTestWorkOwner(t)
+	}
+	ctx = runtimedelivery.WithClaim(ctx, acquired.Claim)
+	heartbeat, err := runtimedelivery.StartClaimHeartbeatFromClaim(ctx, pc.workOwner, owner, acquired.Claim, claimed.Renewal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := heartbeat.Stop(); err != nil {
+			t.Errorf("component claim heartbeat cleanup: %v", err)
+		}
+	})
+	return heartbeat.Context()
+}
+
 // Resolve the compiled join occurrence, then execute through the retained handler.
 func executeResolvedJoinForTest(t *testing.T, pc *PipelineCoordinator, ctx context.Context, evt events.Event, trigger workflowTriggerContext) (contractHandlerExecutionResult, error) {
 	t.Helper()

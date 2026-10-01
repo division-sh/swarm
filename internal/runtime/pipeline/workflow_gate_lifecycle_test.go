@@ -605,7 +605,7 @@ func TestWorkflowGateCommittedDecisionWinsOrdinaryAndTimerExitRacesOnBothStores(
 				if _, err := compiledLifecycleTransitionForTest(pc, ".", "awaiting_review", "operating", sourceEvent); err != nil {
 					t.Fatalf("competing exit lacks compiled evidence: %v", err)
 				}
-				transitionCtx := testWorkflowStateTransitionContext(ctx, route, entityID, sourceEvent)
+				transitionCtx := testPersistedWorkflowStateTransitionContext(t, workflowStore, ctx, route, entityID, sourceEvent)
 				err := pc.persistWorkflowStateForTest(transitionCtx, route, entityID, "operating", sourceEvent)
 				if err == nil || !strings.Contains(err.Error(), "has a committed verdict awaiting its frozen route") {
 					t.Fatalf("competing exit rejection = %v, want committed-verdict fence", err)
