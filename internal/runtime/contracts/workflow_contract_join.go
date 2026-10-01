@@ -111,47 +111,59 @@ func (s JoinSpec) ValidateAuthoredShape() error {
 		return fmt.Errorf("join.id must be a simple stable identifier (defaults to stage for arrival joins)")
 	}
 	if s.Mode() != WorkflowJoinModeFanOutDelivery {
-		if strings.TrimSpace(s.Stage) == "" || strings.TrimSpace(s.Output) == "" {
-			return fmt.Errorf("arrival join requires stage and output")
-		}
-		if !s.OnCompleteFound || joinOutcomeEmpty(s.OnComplete) {
-			return fmt.Errorf("arrival join requires non-empty on_complete")
-		}
-		if (strings.TrimSpace(s.Members.From) != "") == (s.Members.Count != nil) {
-			return fmt.Errorf("arrival join requires exactly one of members.from or members.count")
-		}
-		if s.Members.Count != nil && s.Members.fromFound {
-			return fmt.Errorf("members.count forbids members.from, including empty values")
-		}
-		if strings.TrimSpace(s.Members.By) == "" {
-			return fmt.Errorf("arrival join requires members.by")
-		}
-		if s.Members.Count != nil {
-			if *s.Members.Count < 0 || *s.Members.Count > DefaultFanOutMaxItems {
-				return fmt.Errorf("join.members.count must be a nonnegative integer literal at most %d", DefaultFanOutMaxItems)
-			}
-			if s.Deadline == nil && strings.TrimSpace(s.Until) == "" {
-				return fmt.Errorf("count join requires deadline or until, including count zero")
-			}
-		}
-		if s.Deadline != nil {
-			if strings.TrimSpace(s.Deadline.After) == "" || s.Deadline.From != JoinDeadlineFromStageEntry {
-				return fmt.Errorf("join.deadline requires after and from: stage_entry")
-			}
-			if !s.OnDeadlineFound || joinOutcomeEmpty(s.OnDeadline) {
-				return fmt.Errorf("join.deadline requires non-empty on_deadline")
-			}
-		} else if s.deadlineFound || s.onDeadlineFound || s.OnDeadlineFound || !joinOutcomeEmpty(s.OnDeadline) {
-			return fmt.Errorf("on_deadline is required if and only if deadline is declared")
-		}
-		if s.untilFound && strings.TrimSpace(s.Until) == "" {
-			return fmt.Errorf("join.until requires a non-empty event")
-		}
-		if strings.ContainsAny(s.Until, "*?") {
-			return fmt.Errorf("join.until requires one exact event, not a pattern")
-		}
-		return nil
+		return s.validateArrivalShape()
 	}
+	return s.validateFanOutShape()
+}
+
+func (s JoinSpec) validateArrivalShape() error {
+	if strings.TrimSpace(s.Stage) == "" || strings.TrimSpace(s.Output) == "" {
+		return fmt.Errorf("arrival join requires stage and output")
+	}
+	if !s.OnCompleteFound || joinOutcomeEmpty(s.OnComplete) {
+		return fmt.Errorf("arrival join requires non-empty on_complete")
+	}
+	if (strings.TrimSpace(s.Members.From) != "") == (s.Members.Count != nil) {
+		return fmt.Errorf("arrival join requires exactly one of members.from or members.count")
+	}
+	if s.Members.Count != nil && s.Members.fromFound {
+		return fmt.Errorf("members.count forbids members.from, including empty values")
+	}
+	if strings.TrimSpace(s.Members.By) == "" {
+		return fmt.Errorf("arrival join requires members.by")
+	}
+	if s.Members.Count != nil {
+		if *s.Members.Count < 0 || *s.Members.Count > DefaultFanOutMaxItems {
+			return fmt.Errorf("join.members.count must be a nonnegative integer literal at most %d", DefaultFanOutMaxItems)
+		}
+		if s.Deadline == nil && strings.TrimSpace(s.Until) == "" {
+			return fmt.Errorf("count join requires deadline or until, including count zero")
+		}
+	}
+	return s.validateArrivalClosure()
+}
+
+func (s JoinSpec) validateArrivalClosure() error {
+	if s.Deadline != nil {
+		if strings.TrimSpace(s.Deadline.After) == "" || s.Deadline.From != JoinDeadlineFromStageEntry {
+			return fmt.Errorf("join.deadline requires after and from: stage_entry")
+		}
+		if !s.OnDeadlineFound || joinOutcomeEmpty(s.OnDeadline) {
+			return fmt.Errorf("join.deadline requires non-empty on_deadline")
+		}
+	} else if s.deadlineFound || s.onDeadlineFound || s.OnDeadlineFound || !joinOutcomeEmpty(s.OnDeadline) {
+		return fmt.Errorf("on_deadline is required if and only if deadline is declared")
+	}
+	if s.untilFound && strings.TrimSpace(s.Until) == "" {
+		return fmt.Errorf("join.until requires a non-empty event")
+	}
+	if strings.ContainsAny(s.Until, "*?") {
+		return fmt.Errorf("join.until requires one exact event, not a pattern")
+	}
+	return nil
+}
+
+func (s JoinSpec) validateFanOutShape() error {
 	if !s.Members.FromFanOut {
 		return fmt.Errorf("fan-out delivery join requires join.members.from_fan_out: true")
 	}

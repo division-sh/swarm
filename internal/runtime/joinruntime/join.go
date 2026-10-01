@@ -125,6 +125,13 @@ func (a Activation) Validate() error {
 	if !a.DeadlineAt.IsZero() && !a.DeadlineAt.After(a.ArmedAt) {
 		return fmt.Errorf("join deadline must follow its retained stage entry")
 	}
+	if err := a.validateOutputEvidence(); err != nil {
+		return err
+	}
+	return a.validateClosureEvidence()
+}
+
+func (a Activation) validateOutputEvidence() error {
 	if a.MemberCount != nil && (*a.MemberCount < 0 || len(a.Members) != 0 || len(a.Outputs) > *a.MemberCount) {
 		return fmt.Errorf("count join has contradictory member evidence")
 	}
@@ -144,6 +151,10 @@ func (a Activation) Validate() error {
 			return fmt.Errorf("join output member %q contradicts its canonical value", member)
 		}
 	}
+	return nil
+}
+
+func (a Activation) validateClosureEvidence() error {
 	if a.Status == StatusOpen && a.CloseReason != "" {
 		return fmt.Errorf("open join activation has close reason %q", a.CloseReason)
 	}

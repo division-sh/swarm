@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
@@ -36,38 +37,7 @@ func (e *Executor) stepJoinUntil(frame *executionFrame) error {
 				continue
 			}
 			matched = true
-			if receipt.Disposition == events.JoinAdmissionEarly {
-				return e.joinArrivalFailure(frame, failures.ClassEarlyArrival, "join_not_armed", &plan.Spec, "", "")
-			}
-			address := frame.req.StateAddress()
-			entry := receipt.Ref.StageEntry()
-			if err := entry.RequireOwner(address.FlowInstance.RunID, address.FlowInstance.Route.ScopeKey, address.FlowInstance.Route.InstanceID, address.FlowInstance.Route.InstancePath, address.EntityID.String(), plan.Spec.Stage); err != nil {
-				return err
-			}
-			activation, found, err := joinruntime.Load(frame.state.State.StateCarrier.StateBuckets, plan.Node, joinruntime.ActivationKey(receipt.Ref))
-			if err != nil {
-				return err
-			}
-			if !found || !activation.JoinRef().Equal(receipt.Ref) {
-				return fmt.Errorf("until receipt has no exact retained join arm")
-			}
-			current, err := currentJoinEntry(frame, receipt.Ref)
-			if err != nil {
-				return err
-			}
-			if activation.Status != joinruntime.StatusOpen || !current {
-				return e.joinArrivalFailure(frame, failures.ClassStaleArrival, "join_stage_closed", &plan.Spec, entry.Key(), "")
-			}
-			activation.Close(joinruntime.CloseReasonUntil, true, false)
-			handle, err := timeridentity.JoinCompleteHandle(receipt.Ref)
-			if err != nil {
-				return err
-			}
-			activation, err = activation.WithTimerHandle(handle, e.emitNow())
-			if err != nil {
-				return err
-			}
-			if err := e.storeJoinActivation(frame, activation); err != nil {
+			if err := e.closeJoinUntil(frame, plan, receipt); err != nil {
 				return err
 			}
 		}
@@ -77,4 +47,39 @@ func (e *Executor) stepJoinUntil(frame *executionFrame) error {
 	}
 	frame.result.Status = OutcomeWaiting
 	return nil
+}
+
+func (e *Executor) closeJoinUntil(frame *executionFrame, plan runtimecontracts.WorkflowJoinPlan, receipt events.JoinAdmissionReceipt) error {
+	if receipt.Disposition == events.JoinAdmissionEarly {
+		return e.joinArrivalFailure(frame, failures.ClassEarlyArrival, "join_not_armed", &plan.Spec, "", "")
+	}
+	address := frame.req.StateAddress()
+	entry := receipt.Ref.StageEntry()
+	if err := entry.RequireOwner(address.FlowInstance.RunID, address.FlowInstance.Route.ScopeKey, address.FlowInstance.Route.InstanceID, address.FlowInstance.Route.InstancePath, address.EntityID.String(), plan.Spec.Stage); err != nil {
+		return err
+	}
+	activation, found, err := joinruntime.Load(frame.state.State.StateCarrier.StateBuckets, plan.Node, joinruntime.ActivationKey(receipt.Ref))
+	if err != nil {
+		return err
+	}
+	if !found || !activation.JoinRef().Equal(receipt.Ref) {
+		return fmt.Errorf("until receipt has no exact retained join arm")
+	}
+	current, err := currentJoinEntry(frame, receipt.Ref)
+	if err != nil {
+		return err
+	}
+	if activation.Status != joinruntime.StatusOpen || !current {
+		return e.joinArrivalFailure(frame, failures.ClassStaleArrival, "join_stage_closed", &plan.Spec, entry.Key(), "")
+	}
+	activation.Close(joinruntime.CloseReasonUntil, true, false)
+	handle, err := timeridentity.JoinCompleteHandle(receipt.Ref)
+	if err != nil {
+		return err
+	}
+	activation, err = activation.WithTimerHandle(handle, e.emitNow())
+	if err != nil {
+		return err
+	}
+	return e.storeJoinActivation(frame, activation)
 }

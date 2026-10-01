@@ -223,7 +223,6 @@ func PrepareWorkflowJoinAdmission(source semanticview.Source, runID, event strin
 	if err != nil {
 		return nil, nil, err
 	}
-	ownerRoute := owner.Route
 	declarations := make([]timeridentity.JoinRef, len(plans))
 	for index, plan := range plans {
 		ref, err := timeridentity.NewJoinRef(plan.Node, plan.HandlerEvent, plan.Spec.Stage, plan.Spec.EffectiveID())
@@ -233,51 +232,41 @@ func PrepareWorkflowJoinAdmission(source semanticview.Source, runID, event strin
 		declarations[index] = ref
 	}
 	if len(route.Context.Joins) > 0 {
-		if len(route.Context.Joins) != len(declarations) {
-			return nil, nil, fmt.Errorf("retained message is missing required join admission evidence")
-		}
-		for _, receipt := range route.Context.Joins {
-			known := false
-			for _, ref := range declarations {
-				known = known || receipt.Ref.Declaration().Equal(ref)
-			}
-			if !known || receipt.Disposition == events.JoinAdmissionBound && receipt.Ref.StageEntry().RunID != runID {
-				return nil, nil, fmt.Errorf("retained join receipt contradicts its exact message or run")
-			}
-			if receipt.Disposition == events.JoinAdmissionBound {
-				if err := receipt.Ref.StageEntry().RequireOwner(runID, ownerRoute.ScopeKey, ownerRoute.InstanceID, ownerRoute.InstancePath, target.EntityID, receipt.Ref.Stage()); err != nil {
-					return nil, nil, err
-				}
-			}
+		if err := validateRetainedJoinAdmission(route.Context.Joins, declarations, owner, runID, target.EntityID); err != nil {
+			return nil, nil, err
 		}
 		return append([]events.JoinAdmissionReceipt(nil), route.Context.Joins...), nil, nil
 	}
+	return prepareNewJoinAdmission(owner, runID, target, declarations, instance)
+}
+
+func validateRetainedJoinAdmission(receipts []events.JoinAdmissionReceipt, declarations []timeridentity.JoinRef, owner flowidentity.RunScopedFlowInstance, runID, entityID string) error {
+	if len(receipts) != len(declarations) {
+		return fmt.Errorf("retained message is missing required join admission evidence")
+	}
+	for _, receipt := range receipts {
+		known := false
+		for _, ref := range declarations {
+			known = known || receipt.Ref.Declaration().Equal(ref)
+		}
+		if !known || receipt.Disposition == events.JoinAdmissionBound && receipt.Ref.StageEntry().RunID != runID {
+			return fmt.Errorf("retained join receipt contradicts its exact message or run")
+		}
+		if receipt.Disposition == events.JoinAdmissionBound {
+			route := owner.Route
+			if err := receipt.Ref.StageEntry().RequireOwner(runID, route.ScopeKey, route.InstanceID, route.InstancePath, entityID, receipt.Ref.Stage()); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func prepareNewJoinAdmission(owner flowidentity.RunScopedFlowInstance, runID string, target events.RouteIdentity, declarations []timeridentity.JoinRef, instance *WorkflowInstance) ([]events.JoinAdmissionReceipt, *WorkflowJoinAdmissionFence, error) {
 	fence := &WorkflowJoinAdmissionFence{Owner: owner, EntityID: target.EntityID}
-	var entry timeridentity.StageEntryRef
-	var activations []joinruntime.Activation
-	if instance != nil {
-		if _, err := requireWorkflowInstanceIdentity(ownerRoute, identity.EntityID(target.EntityID), *instance); err != nil {
-			return nil, nil, err
-		}
-		var found bool
-		entry, found, err = workflowlifecycle.LoadStageEntry(instance.Bookkeeping)
-		if err != nil {
-			return nil, nil, err
-		}
-		if !found {
-			return nil, nil, fmt.Errorf("existing join receiver is missing lifecycle entry evidence")
-		}
-		if err := entry.RequireOwner(runID, ownerRoute.ScopeKey, ownerRoute.InstanceID, ownerRoute.InstancePath, target.EntityID, instance.CurrentState); err != nil {
-			return nil, nil, err
-		}
-		carrier, err := workflowInstanceStateCarrier(*instance)
-		if err != nil {
-			return nil, nil, err
-		}
-		activations, err = joinruntime.List(carrier.StateBuckets)
-		if err != nil {
-			return nil, nil, err
-		}
+	entry, activations, err := joinAdmissionEntry(owner, runID, target.EntityID, instance)
+	if err != nil {
+		return nil, nil, err
 	}
 	receipts := make([]events.JoinAdmissionReceipt, len(declarations))
 	fence.Arms = make([]WorkflowJoinAdmissionArm, len(declarations))
@@ -304,4 +293,30 @@ func PrepareWorkflowJoinAdmission(source semanticview.Source, runID, event strin
 		return nil, nil, err
 	}
 	return receipts, fence, nil
+}
+
+func joinAdmissionEntry(owner flowidentity.RunScopedFlowInstance, runID, entityID string, instance *WorkflowInstance) (timeridentity.StageEntryRef, []joinruntime.Activation, error) {
+	if instance == nil {
+		return timeridentity.StageEntryRef{}, nil, nil
+	}
+	ownerRoute := owner.Route
+	if _, err := requireWorkflowInstanceIdentity(ownerRoute, identity.EntityID(entityID), *instance); err != nil {
+		return timeridentity.StageEntryRef{}, nil, err
+	}
+	entry, found, err := workflowlifecycle.LoadStageEntry(instance.Bookkeeping)
+	if err != nil {
+		return timeridentity.StageEntryRef{}, nil, err
+	}
+	if !found {
+		return timeridentity.StageEntryRef{}, nil, fmt.Errorf("existing join receiver is missing lifecycle entry evidence")
+	}
+	if err := entry.RequireOwner(runID, ownerRoute.ScopeKey, ownerRoute.InstanceID, ownerRoute.InstancePath, entityID, instance.CurrentState); err != nil {
+		return timeridentity.StageEntryRef{}, nil, err
+	}
+	carrier, err := workflowInstanceStateCarrier(*instance)
+	if err != nil {
+		return timeridentity.StageEntryRef{}, nil, err
+	}
+	activations, err := joinruntime.List(carrier.StateBuckets)
+	return entry, activations, err
 }

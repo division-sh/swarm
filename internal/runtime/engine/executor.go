@@ -1899,28 +1899,8 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 		}
 		frame.result.FanOutIntent = &intent
 		if frame.req.JoinDeclaration.Mode() == timeridentity.JoinRefModeFanOutDelivery {
-			generation := attemptgeneration.Generation{}
-			if frame.loopActivation != nil {
-				generation = frame.loopActivation.Generation()
-			}
-			ref, err := frame.req.JoinDeclaration.BindFanOutIntent(intent.Key.TriggeringDeliveryID, generation)
+			registration, err := e.buildFanOutBarrierRegistration(frame, intent)
 			if err != nil {
-				return false, err
-			}
-			handle, err := timeridentity.JoinCompleteHandle(ref)
-			if err != nil {
-				return false, err
-			}
-			routingSource, err := fanOutBarrierRoutingSource(ref, frame.req.Route, frame.req.EntityID.String())
-			if err != nil {
-				return false, err
-			}
-			registration := fanoutbarrier.Registration{
-				IntentKey: intent.Key, PlanRef: intent.PlanRef, Handle: handle, Route: frame.req.Route,
-				EntityID: frame.req.EntityID.String(), RoutingSource: routingSource,
-				ExecutionMode: frame.req.Event.ExecutionMode(), CreatedAt: frame.req.Event.CreatedAt(),
-			}
-			if err := registration.Validate(); err != nil {
 				return false, err
 			}
 			frame.result.FanOutBarrier = &registration
@@ -1934,6 +1914,31 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 	}
 	frame.result.Status = OutcomeFannedOut
 	return true, nil
+}
+
+func (e *Executor) buildFanOutBarrierRegistration(frame *executionFrame, intent fanoutobligation.IntentRequest) (fanoutbarrier.Registration, error) {
+	generation := attemptgeneration.Generation{}
+	if frame.loopActivation != nil {
+		generation = frame.loopActivation.Generation()
+	}
+	ref, err := frame.req.JoinDeclaration.BindFanOutIntent(intent.Key.TriggeringDeliveryID, generation)
+	if err != nil {
+		return fanoutbarrier.Registration{}, err
+	}
+	handle, err := timeridentity.JoinCompleteHandle(ref)
+	if err != nil {
+		return fanoutbarrier.Registration{}, err
+	}
+	routingSource, err := fanOutBarrierRoutingSource(ref, frame.req.Route, frame.req.EntityID.String())
+	if err != nil {
+		return fanoutbarrier.Registration{}, err
+	}
+	registration := fanoutbarrier.Registration{
+		IntentKey: intent.Key, PlanRef: intent.PlanRef, Handle: handle, Route: frame.req.Route,
+		EntityID: frame.req.EntityID.String(), RoutingSource: routingSource,
+		ExecutionMode: frame.req.Event.ExecutionMode(), CreatedAt: frame.req.Event.CreatedAt(),
+	}
+	return registration, registration.Validate()
 }
 
 func fanOutBarrierRoutingSource(ref timeridentity.JoinRef, route runtimeflowidentity.Route, entityID string) (events.RoutingSource, error) {

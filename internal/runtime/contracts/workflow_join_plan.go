@@ -45,24 +45,33 @@ func (b *WorkflowContractBundle) CompileWorkflowJoinPlan(node runtimeidentity.Ex
 	spec.OutputPath = paths.Parse(spec.Output)
 	plan := WorkflowJoinPlan{Node: node, HandlerEvent: strings.TrimSpace(eventType), Mode: spec.Mode(), Spec: spec}
 	if spec.IsFanOutDeliveryBarrier() {
-		qualified, err := QualifySystemNodeHandlerRuleRefsForEvent(node, eventType, handler)
-		if err != nil {
-			return WorkflowJoinPlan{}, err
-		}
-		actual, actualFound := handler.FanOut.DeclarationIdentity()
-		expected, _ := qualified.FanOut.DeclarationIdentity()
-		if !actualFound || !actual.Equal(expected) {
-			return WorkflowJoinPlan{}, fmt.Errorf("fan-out delivery join requires the exact same-handler top-level compiled fan_out site")
-		}
-		fanOut, err := b.CompileFanOutPlan(node, eventType, handler, WorkflowFanOutSite{
-			Source: "handler.fan_out", Kind: FanOutSiteHandler, Index: -1, Spec: handler.FanOut, Writes: handler.DataAccumulation.Writes,
-		})
-		if err != nil {
-			return WorkflowJoinPlan{}, err
-		}
-		plan.FanOut = WorkflowFanOutDeliveryJoinPlan{FanOut: fanOut.Ref}
-		return plan.Clone(), nil
+		return b.compileFanOutJoinPlan(plan, eventType, handler)
 	}
+	return b.compileArrivalJoinPlan(plan, eventType)
+}
+
+func (b *WorkflowContractBundle) compileFanOutJoinPlan(plan WorkflowJoinPlan, eventType string, handler SystemNodeEventHandler) (WorkflowJoinPlan, error) {
+	qualified, err := QualifySystemNodeHandlerRuleRefsForEvent(plan.Node, eventType, handler)
+	if err != nil {
+		return WorkflowJoinPlan{}, err
+	}
+	actual, actualFound := handler.FanOut.DeclarationIdentity()
+	expected, _ := qualified.FanOut.DeclarationIdentity()
+	if !actualFound || !actual.Equal(expected) {
+		return WorkflowJoinPlan{}, fmt.Errorf("fan-out delivery join requires the exact same-handler top-level compiled fan_out site")
+	}
+	fanOut, err := b.CompileFanOutPlan(plan.Node, eventType, handler, WorkflowFanOutSite{
+		Source: "handler.fan_out", Kind: FanOutSiteHandler, Index: -1, Spec: handler.FanOut, Writes: handler.DataAccumulation.Writes,
+	})
+	if err != nil {
+		return WorkflowJoinPlan{}, err
+	}
+	plan.FanOut = WorkflowFanOutDeliveryJoinPlan{FanOut: fanOut.Ref}
+	return plan.Clone(), nil
+}
+
+func (b *WorkflowContractBundle) compileArrivalJoinPlan(plan WorkflowJoinPlan, eventType string) (WorkflowJoinPlan, error) {
+	node, spec := plan.Node, plan.Spec
 	if spec.Members.Count == nil {
 		field := joinTopLevelField(spec.Members.From, "state")
 		primary, err := b.ResolveFlowPrimaryEntity(node.FlowPath())
