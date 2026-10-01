@@ -558,6 +558,7 @@ func ParseChannelManifest(body []byte) (ChannelManifest, error) {
 	}
 	var wire struct {
 		Provider     string                             `yaml:"provider"`
+		NativeInbox  *NativeInboxProfile                `yaml:"native_inbox"`
 		OpaqueTypes  map[string]map[string]any          `yaml:"opaque_types"`
 		Operations   map[string]ChannelOperationBinding `yaml:"operations"`
 		Events       map[string]ChannelEventBinding     `yaml:"events"`
@@ -569,7 +570,7 @@ func ParseChannelManifest(body []byte) (ChannelManifest, error) {
 	if err := decoder.Decode(&wire); err != nil {
 		return ChannelManifest{}, err
 	}
-	manifest := ChannelManifest{Provider: wire.Provider, Operations: wire.Operations, Events: wire.Events, Registration: wire.Registration, Onboarding: wire.Onboarding}
+	manifest := ChannelManifest{Provider: wire.Provider, NativeInbox: wire.NativeInbox, Operations: wire.Operations, Events: wire.Events, Registration: wire.Registration, Onboarding: wire.Onboarding}
 	manifest.OpaqueTypes = opaque
 	return manifest, nil
 }
