@@ -13,8 +13,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 const releaseResourceReadEnv = "RELEASE_E2E_RESOURCE_READ"
@@ -34,7 +32,7 @@ func TestClaudeResourceReadSupportedServeRestart(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			root := filepath.Join(base, backend)
 			contracts := filepath.Join(root, "contracts")
-			copyReleaseTree(t, canonicalrouting.CopyClaudeResourceRead(t), contracts)
+			copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal/releasee2e/testdata/claude_resource_read"), contracts)
 			rows := "{\"id\":\"a\",\"reference_text\":\"alpha\"}\n{\"id\":\"b\",\"reference_text\":\"beta\"}\n"
 			writeReleaseFile(t, filepath.Join(root, "rows.jsonl"), rows)
 			writeReleaseFile(t, filepath.Join(root, "payload.json"), "{\"request\":[\"read pinned references\"]}\n")
@@ -70,7 +68,7 @@ func TestClaudeResourceReadSupportedServeRestart(t *testing.T) {
 			}
 			start := func(hash string) *releaseServeProcess {
 				requireDefaultMCPPortAvailable(t)
-				options := releaseProcessSpec{BinaryPath: binary, WorkingDir: root, ConfigPath: configPath, Store: backend, WorkspaceBackend: "docker", APIPort: freeReleaseTCPPort(t), MCPListenPort: 8082, TokenFile: filepath.Join(root, "api-token"), Token: goldenAPIToken, Env: env, ShutdownGrace: goldenShutdownGrace}
+				options := releaseProcessSpec{BinaryPath: binary, WorkingDir: root, ConfigPath: configPath, Store: backend, WorkspaceBackend: "docker", MCPListenPort: 8082, TokenFile: filepath.Join(root, "api-token"), Token: goldenAPIToken, Env: env, ShutdownGrace: goldenShutdownGrace}
 				if hash == "" {
 					options.Source = contracts
 				} else {

@@ -1,0 +1,9 @@
+agent.requested:
+  request: "[text]?"
+agent.completed:
+  flow_result: text?
+
+records.loaded:
+  key: id
+  id: text
+  reference_text: text

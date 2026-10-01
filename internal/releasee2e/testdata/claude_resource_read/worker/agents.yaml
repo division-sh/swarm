@@ -1,0 +1,9 @@
+release-worker:
+  role: release-worker
+  intent: prompts/release-worker.md
+  model: regular
+  memory: true
+  native_tools: {web_search: true}
+  data_access: [{data: worker/records.loaded}]
+  subscriptions: [agent.requested]
+  emit_events: [agent.completed]
