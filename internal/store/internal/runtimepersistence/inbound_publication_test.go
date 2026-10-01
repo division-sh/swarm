@@ -386,6 +386,7 @@ func runInboundPublicationOperatorChannelTextProof(t *testing.T, ctx context.Con
 	assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM inbound_publication_events WHERE publication_id = `, request.PublicationID, 0)
 	texts, ok := any(store).(interface {
 		ListPendingChannelTexts(context.Context, string, int) ([]runtimechanneldelivery.PendingText, error)
+		SettleUnsupportedChannelText(context.Context, operatorchannel.InboundText) error
 	})
 	if !ok {
 		t.Fatalf("selected store %T lacks pending channel text readback", store)
@@ -411,6 +412,24 @@ func runInboundPublicationOperatorChannelTextProof(t *testing.T, ctx context.Con
 	changed.Request.RequestFingerprint = strings.Repeat("e", 64)
 	if _, err := store.CommitInboundPublication(ctx, changed); !errors.Is(err, runtimeinbound.ErrRequestIdentityConflict) {
 		t.Fatalf("changed text intent replay error = %v", err)
+	}
+	foreign := *command.OperatorChannelText
+	foreign.Text = "unrelated answer"
+	if err := texts.SettleUnsupportedChannelText(ctx, foreign); err == nil {
+		t.Fatal("foreign text fact settled verified input")
+	}
+	for i := 0; i < 2; i++ {
+		if err := texts.SettleUnsupportedChannelText(ctx, *command.OperatorChannelText); err != nil {
+			t.Fatalf("unsupported exact text settlement/replay %d: %v", i, err)
+		}
+	}
+	pending, err = texts.ListPendingChannelTexts(ctx, "", 500)
+	if err != nil || len(pending) != 0 {
+		t.Fatalf("unsupported text remains pending: %#v, %v", pending, err)
+	}
+	var disposition string
+	if err := db.QueryRowContext(ctx, `SELECT disposition FROM operator_channel_text_intents WHERE publication_id=$1`, request.PublicationID).Scan(&disposition); err != nil || disposition != "unsupported" {
+		t.Fatalf("unsupported text terminal disposition = %q, %v", disposition, err)
 	}
 }
 

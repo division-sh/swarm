@@ -852,6 +852,9 @@ func runChannelOnboardingCLIJourney(t *testing.T, configPath, endpoint string, p
 	stdout, stderr := &lockedBuffer{}, &lockedBuffer{}
 	done := make(chan int, 1)
 	args := []string{"--config", configPath, "channel", verb, "telegram", "--yes", "--client-language", "en", "--api-server", endpoint}
+	if verb == "reconnect" {
+		args = append(args, "--credential-stdin")
+	}
 
 	priorStdin := os.Stdin
 	input, err := os.CreateTemp(t.TempDir(), "channel-onboarding-input-*")
@@ -875,11 +878,15 @@ func runChannelOnboardingCLIJourney(t *testing.T, configPath, endpoint string, p
 
 	challenge := waitChannelOnboardingChallenge(t, stdout, stderr, done)
 	callbackURL, signingSecret := waitChannelOnboardingRegistration(t, provider, stdout, stderr, done)
+	accountID := 7000 + deliveryIndex
+	if verb == "reconnect" {
+		accountID = 7000
+	}
 	requestBody, err := json.Marshal(map[string]any{
 		"update_id": time.Now().UnixNano(),
 		"message": map[string]any{
 			"message_id": deliveryIndex + 1,
-			"from":       map[string]any{"id": 7000 + deliveryIndex, "username": fmt.Sprintf("operator_%d", deliveryIndex)},
+			"from":       map[string]any{"id": accountID, "username": fmt.Sprintf("operator_%d", deliveryIndex)},
 			"chat":       map[string]any{"id": chatID, "type": chatType},
 			"text":       challenge,
 		},

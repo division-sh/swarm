@@ -40,9 +40,9 @@ type selectedChannelDeliveryTestStore interface {
 
 func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, mode := range append([]string{"current", "late", "shared_current", "shared_late", "edit_uncertain", "response_matrix"}, channelRecoveryProofModes()...) {
+		for _, mode := range append([]string{"current", "late", "shared_current", "shared_late", "edit_uncertain", "response_matrix", "native_reset_healthy", "native_reset_uncertain"}, channelRecoveryProofModes()...) {
 			t.Run(backend+"/"+mode, func(t *testing.T) {
-				late := strings.HasSuffix(mode, "late")
+				late := strings.HasSuffix(mode, "late") || mode == "native_reset_uncertain"
 				conversationScope := operatorchannel.ConversationScopeDirect
 				if strings.HasPrefix(mode, "shared") {
 					conversationScope = operatorchannel.ConversationScopeShared
@@ -430,6 +430,10 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 						t.Fatalf("installed native entry = %#v, found=%t err=%v", entry, found, err)
 					}
 					proveNativeQualificationFences(t, selected, native, admission, setting, onboarding.OperationID, now)
+				}
+				if strings.HasPrefix(mode, "native_reset_") {
+					proveNativeResetTransaction(t, selected, runTx, admission, setting, late, postgres, now)
+					return
 				}
 				if !current(authority) {
 					t.Fatal("succeeded channel activation rejected exact delivery")
