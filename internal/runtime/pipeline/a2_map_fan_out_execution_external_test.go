@@ -18,6 +18,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
@@ -31,6 +32,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
@@ -146,7 +148,12 @@ item.ready:
 
 func newA2MapFanOutExecution(t *testing.T, selected gateRecoveryStoreCase, gather bool) *a2MapFanOutExecution {
 	t.Helper()
-	bundle := loadPipelineLifecycleFixtureBundle(t, a2MapFanOutFiles(gather))
+	return newA2MapFanOutExecutionFromFiles(t, selected, gather, a2MapFanOutFiles(gather))
+}
+
+func newA2MapFanOutExecutionFromFiles(t *testing.T, selected gateRecoveryStoreCase, gather bool, files map[string]string) *a2MapFanOutExecution {
+	t.Helper()
+	bundle := loadPipelineLifecycleFixtureBundle(t, files)
 	source := semanticview.Wrap(bundle)
 	fact := mustAuthorActivityTestSourceArtifactFactForHash(bundle.SourceArtifact.BundleHash())
 	runID, runtimeID := uuid.NewString(), uuid.NewString()
@@ -406,6 +413,529 @@ func (p *a2MapFanOutExecution) assertProgress(t *testing.T, cursor, cardinality 
 	if intents != 1 || outcomes != cursor || eventsCount != cursor || gotCursor != cursor || gotCardinality != cardinality || gotStatus != status || mutation != sourceMutation {
 		t.Fatalf("durable progress: intents=%d outcomes=%d events=%d cursor=%d cardinality=%d status=%s mutation=%s; want %d/%d/%s/%s",
 			intents, outcomes, eventsCount, gotCursor, gotCardinality, gotStatus, mutation, cursor, cardinality, status, sourceMutation)
+	}
+}
+
+// These are compiled pipeline component receipts, not served/boot/CLI proofs.
+// All successful source revisions, publications, settlements and continuations
+// are produced by the existing execution lifecycle; SQL below is read-only.
+func TestA2MapFanOutCompositeLifecycleOnBothStores(t *testing.T) {
+	for _, backend := range []struct {
+		name string
+		open func(*testing.T) gateRecoveryStoreCase
+	}{{"sqlite", openSQLiteGateRecoveryStore}, {"postgres", openPostgresGateRecoveryStore}} {
+		for _, proof := range []struct {
+			name string
+			run  func(*testing.T, gateRecoveryStoreCase)
+		}{
+			{"map_to_list_duplicate_ordinals", runA2MapToListDuplicateOrdinals},
+			{"zero_map_exact_continuation", runA2ZeroMapExactContinuation},
+			{"later_entries_same_keys_new_values", runA2MapLaterEntries},
+		} {
+			t.Run(backend.name+"/"+proof.name, func(t *testing.T) { proof.run(t, backend.open(t)) })
+		}
+	}
+}
+
+type a2CompositeMapReceipt struct {
+	key         fanoutobligation.IntentKey
+	plan        contracts.FanOutCompiledPlan
+	source      fanoutobligation.SourceRef
+	capsule     fanoutobligation.Capsule
+	cardinality int
+	cursor      int
+	status      string
+}
+
+func (p *a2MapFanOutExecution) compositeReceipt(t *testing.T, trigger events.Event, nodeName string, wantSource any) a2CompositeMapReceipt {
+	t.Helper()
+	node := externalPipelineSourceNode(t, p.source, ".", nodeName)
+	plans := p.source.FanOutPlansForHandler(node, string(trigger.Type()))
+	if len(plans) != 1 {
+		t.Fatalf("compiled %s source plans = %#v", nodeName, plans)
+	}
+	r := a2CompositeMapReceipt{plan: plans[0]}
+	r.key.RunID, r.key.ElementRef = p.runID, r.plan.Ref.ElementRef
+	var capsule []byte
+	var digest string
+	if err := p.selected.db.QueryRowContext(p.ctx, `SELECT i.triggering_delivery_id, i.semantic_digest, i.capsule,
+		i.source_kind, COALESCE(CAST(i.source_event_id AS TEXT),''), COALESCE(CAST(i.source_run_id AS TEXT),''), COALESCE(CAST(i.source_entity_id AS TEXT),''),
+		i.source_field, COALESCE(CAST(i.source_mutation_id AS TEXT),''), i.cardinality, i.cursor, i.status
+		FROM fan_out_intents i JOIN event_deliveries d ON d.delivery_id=i.triggering_delivery_id
+		WHERE i.run_id=$1 AND d.event_id=$2 AND d.subscriber_type='node' AND d.subscriber_id=$3
+		AND i.flow_path=$4 AND i.declaration_family=$5 AND i.semantic_path=$6`,
+		p.runID, trigger.ID(), node.Key(), r.key.ElementRef.FlowPath, r.key.ElementRef.Family, r.key.ElementRef.SemanticPath).
+		Scan(&r.key.TriggeringDeliveryID, &digest, &capsule, &r.source.Kind, &r.source.EventID, &r.source.RunID,
+			&r.source.EntityID, &r.source.Field, &r.source.MutationID, &r.cardinality, &r.cursor, &r.status); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(capsule, &r.capsule); err != nil {
+		t.Fatal(err)
+	}
+	if digest != r.plan.Ref.SemanticDigest || !reflect.DeepEqual(r.capsule.SourceProjection, r.plan.SemanticEvidence()) ||
+		r.capsule.Lineage.ParentEventID != trigger.ID() {
+		t.Fatalf("retained source disagrees with actual compiled declaration/trigger: %#v", r)
+	}
+	if err := r.capsule.SourceProjection.Validate(r.plan.Ref); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.source.Validate(true); err != nil {
+		t.Fatal(err)
+	}
+	var frozen []byte
+	switch r.source.Kind {
+	case fanoutobligation.SourceEntityField:
+		if r.source.RunID != p.runID || r.source.EntityID != p.runID || r.source.Field != "items" || !r.plan.SourceAfterWrites {
+			t.Fatalf("writer did not retain its exact post-write field: %#v", r.source)
+		}
+		if err := p.selected.db.QueryRowContext(p.ctx, `SELECT new_value FROM entity_mutations
+			WHERE mutation_id=$1 AND run_id=$2 AND entity_id=$3 AND domain='authored_field' AND path=$4`,
+			r.source.MutationID, r.source.RunID, r.source.EntityID, r.source.Field).Scan(&frozen); err != nil {
+			t.Fatal(err)
+		}
+	case fanoutobligation.SourceEventPayloadField:
+		if r.source.EventID != trigger.ID() || r.source.Field != "result" {
+			t.Fatalf("nested list did not retain its exact parent publication: %#v", r.source)
+		}
+		prepared, found, err := p.selected.events.LoadPreparedPublishEvent(p.ctx, r.source.EventID)
+		if err != nil || !found {
+			t.Fatalf("retained list source publication: found=%v err=%v", found, err)
+		}
+		var payload map[string]json.RawMessage
+		if err := json.Unmarshal(prepared.Event.Event().Payload(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		frozen = payload[r.source.Field]
+	default:
+		t.Fatalf("unexpected authored source: %#v", r.source)
+	}
+	want, err := json.Marshal(wantSource)
+	if err != nil || a2AccumulatorJSONHash(t, frozen) != a2AccumulatorJSONHash(t, want) {
+		t.Fatalf("retained source changed: got=%s want=%s err=%v", frozen, want, err)
+	}
+	return r
+}
+
+func (p *a2MapFanOutExecution) pumpCompositeReceipt(t *testing.T, owner pipeline.FanOutObligationOwner, r a2CompositeMapReceipt, wantItems []any) {
+	t.Helper()
+	intent, claim, found, err := owner.ClaimFanOutIntent(p.ctx, pipeline.FanOutClaimRequest{
+		Owner: "a2-composite-map-readback", BundleHash: p.fact.BundleHash(), Candidate: &r.key, Now: time.Now().UTC(), Lease: time.Minute,
+	})
+	if err != nil || !found || intent.Request.PlanRef != r.plan.Ref || intent.Source != r.source ||
+		intent.Request.Cardinality != len(wantItems) || !reflect.DeepEqual(intent.Request.Capsule.SourceProjection, r.plan.SemanticEvidence()) {
+		t.Fatalf("claim actual compiled source: key=%#v ref=%#v source=%#v found=%v err=%v", r.key, intent.Request.PlanRef, intent.Source, found, err)
+	}
+	input, err := owner.LoadFanOutEvaluation(p.ctx, claim)
+	actual, _ := json.Marshal(input.Items)
+	want, _ := json.Marshal(wantItems)
+	if err != nil || input.StartOrdinal != 0 || a2AccumulatorJSONHash(t, actual) != a2AccumulatorJSONHash(t, want) {
+		t.Fatalf("real immutable source reader: %#v want=%s err=%v", input, want, err)
+	}
+	if settlement, err := owner.ReleaseFanOutClaim(p.ctx, claim); err != nil || !settlement.Acknowledged {
+		t.Fatalf("release source readback claim: %#v err=%v", settlement, err)
+	}
+	if _, err := p.pc.ServeFanOutCandidate(p.ctx, owner, r.key); err != nil {
+		failure, _ := failures.EnvelopeFromError(err)
+		t.Fatalf("actual composite fan-out pump: %v failure=%+v", err, failure)
+	}
+	waitForGateRecoveryQuiescence(t, p.bus, p.ctx)
+}
+
+func (p *a2MapFanOutExecution) compositePublication(t *testing.T, eventID, eventName string, wantPayload map[string]any, nodeName string, arm *joinruntime.Activation) events.Event {
+	t.Helper()
+	prepared, found, err := p.selected.events.LoadPreparedPublishEvent(p.ctx, eventID)
+	if err != nil || !found {
+		t.Fatalf("durable publication: found=%v err=%v", found, err)
+	}
+	event := prepared.Event.Event()
+	want, _ := json.Marshal(wantPayload)
+	if string(event.Type()) != eventName || a2AccumulatorJSONHash(t, event.Payload()) != a2AccumulatorJSONHash(t, want) {
+		t.Fatalf("publication: got=%s/%s want=%s/%s", event.Type(), event.Payload(), eventName, want)
+	}
+	node := externalPipelineSourceNode(t, p.source, ".", nodeName)
+	bound := 0
+	for _, route := range prepared.DeliveryRoutes {
+		if route.Recipient.ID() != node.Key() {
+			continue
+		}
+		if arm == nil && len(route.Context.Joins) == 0 {
+			bound++
+		} else if arm != nil && len(route.Context.Joins) == 1 &&
+			route.Context.Joins[0].Disposition == events.JoinAdmissionBound && route.Context.Joins[0].Ref.Equal(arm.JoinRef()) {
+			bound++
+		}
+	}
+	if bound != 1 {
+		t.Fatalf("publication lacks exact recipient/stage-entry binding: %#v", prepared.DeliveryRoutes)
+	}
+	assertExactJoinDeliveryStatus(t, p.selected, p.ctx, eventID, node.Key(), "delivered")
+	assertExactJoinDeliveryCount(t, p.selected, p.ctx, eventID, node.Key(), 1)
+	return event
+}
+
+func (p *a2MapFanOutExecution) compositeOutputs(t *testing.T, r a2CompositeMapReceipt, eventName string, wantPayloads []map[string]any, nodeName string, arm *joinruntime.Activation) []events.Event {
+	t.Helper()
+	rows, err := p.selected.db.QueryContext(p.ctx, `SELECT o.ordinal, o.event_id, o.outcome_kind FROM fan_out_outcomes o
+		WHERE o.run_id=$1 AND o.triggering_delivery_id=$2 AND o.flow_path=$3 AND o.declaration_family=$4 AND o.semantic_path=$5
+		ORDER BY o.ordinal`, p.runID, r.key.TriggeringDeliveryID, r.key.ElementRef.FlowPath, r.key.ElementRef.Family, r.key.ElementRef.SemanticPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var outputs []events.Event
+	seen := map[string]bool{}
+	for rows.Next() {
+		var ordinal int
+		var eventID, kind string
+		if err := rows.Scan(&ordinal, &eventID, &kind); err != nil {
+			t.Fatal(err)
+		}
+		if ordinal != len(outputs) || ordinal >= len(wantPayloads) || kind != "committed" || seen[eventID] {
+			t.Fatalf("lost independent ordinal publication: ordinal=%d kind=%s event=%s", ordinal, kind, eventID)
+		}
+		seen[eventID] = true
+		event := p.compositePublication(t, eventID, eventName, wantPayloads[ordinal], nodeName, arm)
+		if event.ParentEventID() != r.capsule.Lineage.ParentEventID {
+			t.Fatalf("ordinal %d lost its exact parent lineage: %s", ordinal, event.ParentEventID())
+		}
+		outputs = append(outputs, event)
+	}
+	if err := rows.Err(); err != nil || len(outputs) != len(wantPayloads) {
+		t.Fatalf("committed ordinal count=%d want=%d err=%v", len(outputs), len(wantPayloads), err)
+	}
+	var cursor, cardinality int
+	var status string
+	if err := p.selected.db.QueryRowContext(p.ctx, `SELECT cursor,cardinality,status FROM fan_out_intents
+		WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5`,
+		p.runID, r.key.TriggeringDeliveryID, r.key.ElementRef.FlowPath, r.key.ElementRef.Family, r.key.ElementRef.SemanticPath).
+		Scan(&cursor, &cardinality, &status); err != nil || cursor != len(outputs) || cardinality != len(outputs) || status != "closed" {
+		t.Fatalf("durable intent progress=%d/%d/%s err=%v", cursor, cardinality, status, err)
+	}
+	return outputs
+}
+
+func (p *a2MapFanOutExecution) compositeArm(t *testing.T, entry timeridentity.StageEntryRef, nodeName string) joinruntime.Activation {
+	t.Helper()
+	node := externalPipelineSourceNode(t, p.source, ".", nodeName)
+	var matches []joinruntime.Activation
+	for _, arm := range a2KnownTargetArms(t, p.instance(t)) {
+		if arm.JoinRef().Node().Equal(node) && arm.JoinRef().StageEntry() == entry {
+			matches = append(matches, arm)
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("exact %s stage-entry arms=%#v entry=%#v", nodeName, matches, entry)
+	}
+	return matches[0]
+}
+
+func (p *a2MapFanOutExecution) compositeEntry(t *testing.T, trigger events.Event) timeridentity.StageEntryRef {
+	t.Helper()
+	instance := p.instance(t)
+	entry, found, err := workflowlifecycle.LoadStageEntry(instance.Bookkeeping)
+	if err != nil || !found || entry.EventID != trigger.ID() || entry.Stage != "awaiting" || entry.Cause != "delivery" ||
+		entry.OccurrenceID == "" || entry.TransitionID == "" || instance.CurrentState != "awaiting" {
+		t.Fatalf("actual delivered stage entry=%#v found=%v err=%v state=%s", entry, found, err, instance.CurrentState)
+	}
+	if err := entry.RequireOwner(p.runID, flowidentity.RouteForInstancePath(p.runID).ScopeKey,
+		instance.InstanceID, instance.StorageRef, instance.EntityID, "awaiting"); err != nil {
+		t.Fatal(err)
+	}
+	return entry
+}
+
+func assertA2CompositeResults(t *testing.T, arm joinruntime.Activation, want any, count int) {
+	t.Helper()
+	results, err := arm.Results()
+	actual, _ := json.Marshal(results)
+	expected, _ := json.Marshal(want)
+	if err != nil || arm.Status != joinruntime.StatusClosed || arm.CloseReason != joinruntime.CloseReasonComplete ||
+		arm.Completed() != count || arm.Expected() != count || a2AccumulatorJSONHash(t, actual) != a2AccumulatorJSONHash(t, expected) {
+		t.Fatalf("exact ordered results=%s want=%s arm=%#v err=%v", actual, expected, arm, err)
+	}
+}
+
+func (p *a2MapFanOutExecution) compositeContinuation(t *testing.T, pending genericschedule.Activation, initial joinruntime.Activation) string {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var eventID string
+	for time.Now().Before(deadline) {
+		activation, found, err := p.selected.events.(genericschedule.Store).LoadGenericScheduleActivation(p.ctx, pending.ID)
+		if err != nil || !found {
+			t.Fatalf("read exact continuation schedule: found=%v err=%v", found, err)
+		}
+		if activation.CurrentEventID != "" && activation.Status == genericschedule.StatusFired {
+			eventID = activation.CurrentEventID
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if eventID == "" {
+		t.Fatal("exact continuation schedule did not fire")
+	}
+	waitCtx, cancel := context.WithTimeout(p.ctx, 10*time.Second)
+	defer cancel()
+	completed, err := p.probe.WaitForHandlerCompleted(waitCtx, eventID, initial.JoinRef().Node().Key())
+	if err != nil || completed.Status != "completed" {
+		t.Fatalf("actual exact join continuation: status=%s err=%v", completed.Status, err)
+	}
+	if err := p.bus.WaitForQuiescence(waitCtx); err != nil {
+		t.Fatal(err)
+	}
+	assertExactJoinDeliveryStatus(t, p.selected, p.ctx, eventID, initial.JoinRef().Node().Key(), "delivered")
+	assertExactJoinDeliveryCount(t, p.selected, p.ctx, eventID, initial.JoinRef().Node().Key(), 1)
+	assertExactJoinFiredSchedule(t, p.selected, p.ctx, pending, eventID)
+	for _, arm := range a2KnownTargetArms(t, p.instance(t)) {
+		if arm.JoinRef().Equal(initial.JoinRef()) {
+			if !arm.OutcomeFired || arm.OutcomePending || arm.CloseReason != joinruntime.CloseReasonComplete {
+				t.Fatalf("continuation did not fire exact retained join: %#v", arm)
+			}
+			return eventID
+		}
+	}
+	t.Fatal("continuation lost original exact arm")
+	return ""
+}
+
+func runA2MapToListDuplicateOrdinals(t *testing.T, selected gateRecoveryStoreCase) {
+	files := a2MapFanOutFiles(false)
+	files["schema.yaml"] = strings.Replace(files["schema.yaml"], "events: [item.ready]", "events: [item.ready, leaf.ready]", 1)
+	files["entities.yaml"] += `  leaf_results:
+    type: "[integer]"
+    initial: []
+`
+	files["events.yaml"] += `leaf.ready:
+  member_id: text
+  parent_key: text
+  parent_index: integer
+  index: integer
+  count: integer
+  value: integer
+`
+	files["nodes.yaml"] = strings.Replace(files["nodes.yaml"], "    batch.ready:\n", "    batch.ready:\n      advances_to: awaiting\n", 1)
+	files["nodes.yaml"] += `expander:
+  execution_type: system_node
+  event_handlers:
+    item.ready:
+      fan_out:
+        items_from: payload.result
+        as: entry
+        emit:
+          event: leaf.ready
+          fields:
+            member_id: "${payload.member_id + ':' + string(fan_out.index)}"
+            parent_key: "${payload.member_id}"
+            parent_index: "${payload.index}"
+            index: "${fan_out.index}"
+            count: "${fan_out.count}"
+            value: "${entry}"
+leaf-collector:
+  execution_type: system_node
+  event_handlers:
+    leaf.ready:
+      join:
+        stage: awaiting
+        members: {count: 6, by: payload.member_id}
+        output: payload.value
+        deadline: {after: 1h, from: stage_entry}
+        on_complete:
+          advances_to: ready
+          data_accumulation:
+            writes: [{target_field: leaf_results, value: "${join.results}"}]
+        on_deadline: {advances_to: attention}
+`
+	p := newA2MapFanOutExecutionFromFiles(t, selected, true, files)
+	original := map[string]any{"A": []int64{11, 11, 12}, "a": []int64{21, 21, 22}}
+	trigger := p.publish(t, "batch.ready", original)
+	entry := p.compositeEntry(t, trigger)
+	leafArm := p.compositeArm(t, entry, "leaf-collector")
+	if len(a2KnownTargetArms(t, p.instance(t))) != 1 || leafArm.Completed() != 0 || leafArm.Expected() != 6 {
+		t.Fatal("nested execution did not arm its exact stage-entry gather")
+	}
+	p.publish(t, "batch.replace", map[string]any{"replacement": []int64{999}})
+	p.restart(t)
+	r := p.compositeReceipt(t, trigger, "writer", original)
+	handoff := p.handoff(t)
+	if handoff.key != r.key {
+		t.Fatalf("actual selector picked foreign map intent: %#v want=%#v", handoff.key, r.key)
+	}
+	p.pumpCompositeReceipt(t, handoff.owner, r, []any{"A", "a"})
+	parents := p.compositeOutputs(t, r, "item.ready", []map[string]any{
+		{"member_id": "A", "index": 0, "count": 2, "result": original["A"]},
+		{"member_id": "a", "index": 1, "count": 2, "result": original["a"]},
+	}, "expander", nil)
+	children := make([]a2CompositeMapReceipt, len(parents))
+	for index, parent := range parents {
+		children[index] = p.compositeReceipt(t, parent, "expander", original[[]string{"A", "a"}[index]])
+	}
+	seenLeaves := map[string]bool{}
+	seenChildren := map[fanoutobligation.IntentKey]bool{}
+	for turn := range children {
+		childHandoff := p.handoff(t)
+		parentIndex := -1
+		for index, child := range children {
+			if child.key == childHandoff.key {
+				parentIndex = index
+			}
+		}
+		if parentIndex < 0 || seenChildren[childHandoff.key] {
+			t.Fatalf("nested selector returned a foreign/repeated child: %#v", childHandoff.key)
+		}
+		seenChildren[childHandoff.key] = true
+		key := []string{"A", "a"}[parentIndex]
+		values := original[key].([]int64)
+		child := children[parentIndex]
+		p.pumpCompositeReceipt(t, childHandoff.owner, child, []any{values[0], values[1], values[2]})
+		want := make([]map[string]any, len(values))
+		for ordinal, value := range values {
+			want[ordinal] = map[string]any{"member_id": fmt.Sprintf("%s:%d", key, ordinal), "parent_key": key, "parent_index": parentIndex, "index": ordinal, "count": 3, "value": value}
+		}
+		for _, leaf := range p.compositeOutputs(t, child, "leaf.ready", want, "leaf-collector", &leafArm) {
+			if seenLeaves[leaf.ID()] {
+				t.Fatal("nested duplicate values reused a publication identity across parents")
+			}
+			seenLeaves[leaf.ID()] = true
+		}
+		partial := p.compositeArm(t, entry, "leaf-collector")
+		if partial.Completed() != (turn+1)*3 || !partial.JoinRef().Equal(leafArm.JoinRef()) ||
+			(turn == 0 && partial.Status != joinruntime.StatusOpen) {
+			t.Fatalf("nested list ordinals did not independently settle into the exact gather: %#v", partial)
+		}
+	}
+	leafCompleted := p.compositeArm(t, entry, "leaf-collector")
+	assertA2CompositeResults(t, leafCompleted, []int64{11, 11, 12, 21, 21, 22}, 6)
+	leafPending := exactJoinPendingSchedule(t, selected, p.ctx, leafCompleted)
+	if err := p.driver.Resume(p.ctx); err != nil {
+		t.Fatal(err)
+	}
+	p.compositeContinuation(t, leafPending, leafCompleted)
+	terminal := waitForExactJoinState(t, p.ctx, p.pc, flowidentity.RouteForInstancePath(p.runID), "ready")
+	actual, _ := json.Marshal(terminal.Fields["leaf_results"])
+	expected, _ := json.Marshal([]int64{11, 11, 12, 21, 21, 22})
+	if a2AccumulatorJSONHash(t, actual) != a2AccumulatorJSONHash(t, expected) {
+		t.Fatalf("actual nested continuation lost list multiplicity/order: %s", actual)
+	}
+}
+
+func runA2ZeroMapExactContinuation(t *testing.T, selected gateRecoveryStoreCase) {
+	p := newA2MapFanOutExecution(t, selected, true)
+	empty := map[string]any{}
+	trigger := p.publish(t, "batch.ready", empty)
+	entry := p.compositeEntry(t, trigger)
+	r := p.compositeReceipt(t, trigger, "writer", empty)
+	arm := p.compositeArm(t, entry, "collector")
+	assertA2CompositeResults(t, arm, []any{}, 0)
+	if len(arm.Members) != 0 || r.cardinality != 0 || r.cursor != 0 || r.status != "closed" || !arm.OutcomePending || arm.OutcomeFired {
+		t.Fatalf("actual zero-map did not close exactly without outputs: receipt=%#v arm=%#v", r, arm)
+	}
+	p.publish(t, "batch.replace", map[string]any{"later": []int64{99}})
+	p.restart(t)
+	p.compositeReceipt(t, trigger, "writer", empty)
+	selector := &a2MapFanOutSelector{selected: make(chan a2MapFanOutHandoff, 1), errors: make(chan error, 1), done: make(chan struct{})}
+	workers := 1
+	registration, err := startupownership.StartFanOutServing(p.ctx, p.grant, p.work, &workers, selector)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(registration.Close)
+	scanned := make(chan bool, 1)
+	registration.SetTestScanObserver(func(_ startupownership.FanOutCandidate, found bool, err error) {
+		if err != nil {
+			selector.ReportFanOutServingError(p.ctx, err)
+			return
+		}
+		select {
+		case scanned <- found:
+		default:
+		}
+	})
+	registration.Wake()
+	select {
+	case found := <-scanned:
+		if found {
+			t.Fatal("zero-map serving scan found publication work")
+		}
+	case err := <-selector.errors:
+		t.Fatal(err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("actual zero-map serving scan did not complete")
+	}
+	registration.Close()
+	select {
+	case <-selector.selected:
+		t.Fatal("zero-map incorrectly handed off a pump candidate")
+	default:
+	}
+	p.assertProgress(t, 0, 0, "closed", r.source.MutationID)
+	pending := exactJoinPendingSchedule(t, selected, p.ctx, arm)
+	if err := p.driver.Resume(p.ctx); err != nil {
+		t.Fatal(err)
+	}
+	p.compositeContinuation(t, pending, arm)
+	terminal := waitForExactJoinState(t, p.ctx, p.pc, flowidentity.RouteForInstancePath(p.runID), "ready")
+	assertA2CompositeResults(t, exactJoinPersistedArm(t, terminal), []any{}, 0)
+	p.assertProgress(t, 0, 0, "closed", r.source.MutationID)
+}
+
+func runA2MapLaterEntries(t *testing.T, selected gateRecoveryStoreCase) {
+	files := a2MapFanOutFiles(true)
+	// Completing this stage is intentionally nonterminal: re-entry is legal
+	// workflow execution, not new ingress into a completed run.
+	files["schema.yaml"] = strings.Replace(files["schema.yaml"], "ready: {terminal: true}", "ready: {}", 1)
+	p := newA2MapFanOutExecutionFromFiles(t, selected, true, files)
+	var previous joinruntime.Activation
+	var previousReceipt a2CompositeMapReceipt
+	var previousContinuation string
+	for index, original := range []map[string]any{
+		{"A": []int64{11, 11, 12}, "a": []int64{21, 21, 22}},
+		{"A": []int64{31, 31, 32}, "a": []int64{41, 41, 42}},
+	} {
+		p.driver.mu.Lock()
+		p.driver.started = false
+		p.driver.mu.Unlock()
+		trigger := p.publish(t, "batch.ready", original)
+		entry := p.compositeEntry(t, trigger)
+		arm := p.compositeArm(t, entry, "collector")
+		if !reflect.DeepEqual(arm.Members, []string{"A", "a"}) || arm.Completed() != 0 || arm.Status != joinruntime.StatusOpen ||
+			len(a2KnownTargetArms(t, p.instance(t))) != index+1 {
+			t.Fatalf("later entry did not independently snapshot reused keys: %#v", arm)
+		}
+		p.publish(t, "batch.replace", map[string]any{"A": []int64{991}, "a": []int64{992}})
+		p.restart(t)
+		r := p.compositeReceipt(t, trigger, "writer", original)
+		if index > 0 && (entry == previous.JoinRef().StageEntry() || entry.EventID == previous.JoinRef().StageEntry().EventID ||
+			entry.OccurrenceID == previous.JoinRef().StageEntry().OccurrenceID || entry.TransitionID == previous.JoinRef().StageEntry().TransitionID ||
+			r.source.MutationID == previousReceipt.source.MutationID || r.key.TriggeringDeliveryID == previousReceipt.key.TriggeringDeliveryID) {
+			t.Fatal("later stage entry reused prior lifecycle/source identity")
+		}
+		handoff := p.handoff(t)
+		if handoff.key != r.key {
+			t.Fatalf("later entry selector picked wrong intent: %#v want=%#v", handoff.key, r.key)
+		}
+		p.pumpCompositeReceipt(t, handoff.owner, r, []any{"A", "a"})
+		p.compositeOutputs(t, r, "item.ready", []map[string]any{
+			{"member_id": "A", "index": 0, "count": 2, "result": original["A"]},
+			{"member_id": "a", "index": 1, "count": 2, "result": original["a"]},
+		}, "collector", &arm)
+		completed := p.compositeArm(t, entry, "collector")
+		assertA2CompositeResults(t, completed, []any{original["A"], original["a"]}, 2)
+		if index > 0 {
+			retained := p.compositeArm(t, previous.JoinRef().StageEntry(), "collector")
+			if !reflect.DeepEqual(retained, previous) {
+				t.Fatal("later same-key contributions changed the earlier exact snapshot/results")
+			}
+		}
+		pending := exactJoinPendingSchedule(t, selected, p.ctx, completed)
+		if err := p.driver.Resume(p.ctx); err != nil {
+			t.Fatal(err)
+		}
+		continuation := p.compositeContinuation(t, pending, completed)
+		waitForExactJoinState(t, p.ctx, p.pc, flowidentity.RouteForInstancePath(p.runID), "ready")
+		if continuation == previousContinuation {
+			t.Fatal("later entry reused the prior exact continuation publication")
+		}
+		previous, previousReceipt, previousContinuation = p.compositeArm(t, entry, "collector"), r, continuation
+		assertA2CompositeResults(t, previous, []any{original["A"], original["a"]}, 2)
 	}
 }
 
