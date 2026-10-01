@@ -303,6 +303,7 @@
     {"path":"internal/cliapp/provider_trigger_packs_test.go","class":"test"},
     {"path":"internal/cliapp/provider_trigger_test_registry_test.go","class":"test"},
     {"path":"internal/cliapp/raw_sql_boundary_test.go","class":"test"},
+    {"path":"internal/cliapp/read_proof_describe_test.go","class":"test"},
     {"path":"internal/cliapp/read_proof_scenario_test.go","class":"test"},
     {"path":"internal/cliapp/run_command.go","class":"authored"},
     {"path":"internal/cliapp/run_command_observer_test.go","class":"test"},
