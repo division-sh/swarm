@@ -339,6 +339,19 @@ search_dimensions:
       - internal/runtime/bus/outbox.go
     canonical_layer: route_plan_consumers
 seam_families:
+  - id: read_family_audit_owner_census
+    layer: conformance_guardrails
+    classification: separate_semantic_concept
+    paths:
+      - .github/audit-artifacts/issue-2508-preimplementation.md
+      - .github/audit-artifacts/issue-2508-postimplementation.md
+    search_dimensions: [connect_route_plan]
+    notes: >
+      The read-family audits cite ConnectRoutePlan while mapping compiled
+      pin evidence into describe consumers. This is documentation of the
+      existing owner, not an executable route producer, reader or replacement.
+      Only these exact metadata paths are classified; unclassified runtime paths
+      remain rejected by the unchanged inventory and negative controls.
   - id: spec_route_authority_contract
     layer: spec_authority
     classification: canonical_owner
