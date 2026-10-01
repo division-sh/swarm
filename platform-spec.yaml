@@ -15181,6 +15181,13 @@ platform_tables:
         Successfully recording an uncertain setting outcome is not successful installation:
         delivery readiness requires the exact acknowledged write and successful readback,
         and readback failure or mismatch remains non-usable.
+        Foreground and startup settlement use the same typed generation/install owner in
+        the journal transaction. Recovery of a launched or response-observed install records
+        uncertainty without a fabricated readback or another provider write. An authorized,
+        proven-unlaunched install is abandoned without projecting installation or uncertainty;
+        settled evidence remains unchanged. Original committed authority is not replaced by
+        a current consumer, binding, or activation. A generation/install or projection conflict
+        rolls back both journal and setting state rather than advancing a successor.
         A text invocation is entry evidence only when its exact verified pending inbound intent
         resolves through the current binding, succeeded activation, current compatible consumer,
         and installed setting generation with the same opaque command reference. A shared
@@ -15369,6 +15376,13 @@ platform_tables:
         predecessor remains current. Uncertainty carries no invented reference and blocks automatic resend or re-edit.
         The effect journal remains the launch/attempt authority. Receipt and plan state commit atomically with that
         journal's terminal settlement, so restart never infers success from a missing receipt or resends uncertain work.
+        Ordinary startup recovery consumes this same projection for both ordinary-source and
+        requested-response sends and edits. Launched or response-observed recovery creates
+        the exact original-render uncertainty receipt without inventing provider acceptance;
+        an edit retains its predecessor's sent reference and cannot move a successor pointer.
+        Proven-unlaunched abandonment creates no receipt, and already terminal rows are
+        unchanged, not backfilled. Original evidence/render or predecessor-CAS conflicts
+        roll back the journal and domain projection together.
         Historical receipts survive rebind and retirement but confer no current destination authority.
         Healthy current copies update from canonical state. An unresolved provider write may leave
         an older physical copy visually stale, including a delayed apply after a fresh copy progresses;
@@ -39441,7 +39455,22 @@ managed_external_effect_authority:
       response-observed, and uncertain attempts never redispatch automatically. Confirmation authority cannot
       authorize notice or card delivery. A manual resend is a distinct linked delivery and effect operation
       admitted only by a current, single-use recovery action; it never reuses or settles the uncertain attempt.
+      Foreground and ordinary startup settlement consume the same typed original-authority
+      and frozen-render owners atomically with the journal. Historical settlement may survive
+      retirement or a newer render, but cannot borrow current activation authority, move a
+      successor receipt pointer, or authorize another send/edit. A conflict rolls back all
+      settlement writes; selected-fork recovery does not admit this authority.
       No agent, run, entity, or synthetic token is required.
+    channel_native_setting: >
+      A native-entry install requires the exact physical setting, generation, install operation,
+      compiled contract and current connection authority at authorization and launch.
+      Foreground and ordinary startup settlement validate the original committed journal
+      authority and consume the same typed generation/install projection in that transaction.
+      Launched or response-observed recovery records uncertainty without readback success or
+      redispatch; proven-unlaunched abandonment projects neither installation nor uncertainty.
+      A retired consumer does not erase historical outcome evidence, and a changed generation
+      or install operation cannot consume predecessor settlement. Selected-fork recovery
+      excludes this authority; settlement grants no new provider-write or entry capability.
     channel_action_ack: >
       A callback acknowledgment is a separate runless managed provider effect keyed by the verified inbound action
       publication. Before launch, the selected store requires the exact pending fact, current receipt/render,
@@ -39498,6 +39527,23 @@ managed_external_effect_authority:
     authorized: An authorized attempt has proven no primitive launch because the exact primitive contract requires durable launched state before every dispatch/start/write/mutation; startup settles it as effect_recovery_prelaunch_abandoned without dispatch. Exact authorized/prelaunch attempts remain eligible for this no-dispatch resolution when their run has become terminal, including non-provider effects. Recovery must preserve selected-process possession and live-owner fences, must not resurrect the run, must not reacquire a session grant for abandoned work, and must not request new external work or completion from a terminal run.
     launched_or_response_observed: Startup first reconciles exact provider-attempt drains and then remaining ordinary effect attempts. It settles the existing attempt and operation as platform.outcome_uncertain/effect_recovery_outcome_unconfirmed without dispatch, atomically settles the exact delivery or directive-operation origin and pending drain when present, releases reservation authority, and finalizes the terminal lifecycle cell when the last drain closes. The original attempt's session grant is historical evidence, not authority to touch a replacement session. Recovery with an expired or replaced grant commits only permitted immutable evidence and exact-origin effects, never an agent_sessions timestamp, revision fact, conversation or provider head. Recovery may restore a bounded delivery or directive lease only for the exact still-open origin token/version while holding that origin's lifecycle row; any newer origin, foreign execution owner or identity mismatch fails closed. It does not reacquire a session grant to settle abandoned work. If the exact origin already has its terminal attempt/outcome, recovery verifies and preserves that settlement. A terminal run does not hide its pending normal-provider attempts; exact-origin recovery remains mandatory and may settle only through the stored closed origin. Delivery recovery starts only after this phase reaches explicit completion.
     terminal: Existing settled, terminal_failure, and outcome_uncertain attempts are unchanged.
+    channel_source_projection: >
+      Ordinary startup channel_delivery and channel_native_setting recovery loads exact original
+      committed operation/attempt authority, execution coordinates and available observed evidence
+      inside the journal transaction, then consumes the same typed settlement owners as foreground
+      execution. Attempt/operation terminalization and required receipt/plan or native-setting
+      projection commit together or all roll back. Projection is invoked only for a successful
+      attempt transition. Authorized/proven-unlaunched abandonment creates no acknowledgment,
+      uncertainty receipt or installed setting. Launched/response-observed recovery persists
+      uncertainty while retaining original render, audience, edit predecessor and observed facts;
+      observed facts alone are not provider acceptance or native readback success. Retirement,
+      successor activation and newer render do not authorize new work; predecessor-pointer and
+      native generation/install conflicts fail closed with a typed lifecycle conflict. Already
+      terminal attempts are unchanged, with no migration/backfill. Selected-execution recovery
+      admits only its exact selected_contract_fork authority, and ordinary recovery excludes it;
+      sharing recovery code adds no channel capability to forks. Callback ACK is not card/intent
+      completion authority, text completion keeps its canonical transaction, and specialized
+      provider-turn accounting/recovery remains distinct. No automatic-redispatch permission changes.
   invariant_ids:
     runtime.provider_attempt.origin_exact:
       owner_ref: platform-spec.yaml#managed_external_effect_authority

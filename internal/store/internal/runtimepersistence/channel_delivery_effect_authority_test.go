@@ -40,7 +40,7 @@ type selectedChannelDeliveryTestStore interface {
 
 func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, mode := range []string{"current", "late", "shared_current", "shared_late", "edit_uncertain", "response_matrix"} {
+		for _, mode := range append([]string{"current", "late", "shared_current", "shared_late", "edit_uncertain", "response_matrix"}, channelRecoveryProofModes()...) {
 			t.Run(backend+"/"+mode, func(t *testing.T) {
 				late := strings.HasSuffix(mode, "late")
 				conversationScope := operatorchannel.ConversationScopeDirect
@@ -362,6 +362,10 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 				}
 				if !nativeAuthority.Valid() || !current(nativeAuthority) {
 					t.Fatal("exact physical native setting authority is not current")
+				}
+				if strings.HasPrefix(mode, "recovery_") {
+					proveChannelRecoveryProjection(t, mode, selected, db, runTx, authority, nativeAuthority, textFact, postgres)
+					return
 				}
 				foreignNative := nativeAuthority
 				foreignNative.ChannelNativeSetting.ResourceSlotID += "-foreign"
