@@ -153,6 +153,13 @@ func TestR3PolicyStaticLiteralSelectorParity(t *testing.T) {
 			}
 			err := ValidatePolicyReferences(tc.expression, policy, ValueExpressionOptions{})
 			var missing *PolicyReferenceError
+			switch tc.expression {
+			case `policy.list[null] == "yes"`, `policy[b"0"] == "yes"`, `policy[null] == "yes"`:
+				if err == nil || errors.As(err, &missing) || !strings.Contains(err.Error(), "invalid qualifier type") {
+					t.Fatalf("program-construction refusal = %v", err)
+				}
+				return
+			}
 			if errors.As(err, &missing) != tc.invalid || (!tc.invalid && err != nil) {
 				t.Fatalf("declaration check = %v; want invalid %t", err, tc.invalid)
 			}
