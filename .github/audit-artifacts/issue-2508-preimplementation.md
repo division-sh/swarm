@@ -1,5 +1,14 @@
 # Pre-Implementation Coverage Audit: #2508
 
+## Implementation Status
+
+The approved A/D/C extraction and A14 repair are implemented. The separate
+`issue-2508-postimplementation.md` maps all 45 original/additive rows to named
+execution proof, including compiled public consumers on both stores. Default
+managed qualification passed all 14 required units on 2026-10-01; exact-head CI
+and independent merge review remain required. Historical stops below are
+retained as audit history, not the current implementation disposition.
+
 ## A14 Bounded Absorption Approved / Pre-Code Amendment
 
 Binding independent re-gate `issuecomment-5928433996` approves absorption in
