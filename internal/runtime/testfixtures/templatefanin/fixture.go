@@ -9,13 +9,13 @@ import (
 )
 
 const (
-	ProducerFlowID = "operating"
+	ProducerFlowID    = "operating"
 	ProducerOutputPin = "operating.reported"
-	ProducerEvent = "operating.reported"
-	ReceiverFlowID = "portfolio"
-	ReceiverInputPin = "operating.reported"
-	ReceiverEvent = "operating.reported"
-	ReceiverNodeID = "portfolio-collector"
+	ProducerEvent     = "operating.reported"
+	ReceiverFlowID    = "portfolio"
+	ReceiverInputPin  = "operating.reported"
+	ReceiverEvent     = "operating.reported"
+	ReceiverNodeID    = "portfolio-collector"
 )
 
 func LoadBundle(t testing.TB) *runtimecontracts.WorkflowContractBundle {

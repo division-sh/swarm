@@ -1092,7 +1092,7 @@ func inputPinViews(source semanticview.Source, flowID string, pins []runtimecont
 			Initialize: pin.Initialization().Bindings(),
 			Event:      pin.EventType(), ResolvedEvent: source.ResolveFlowEventReference(flowID, pin.EventType()),
 			FlowPath: pin.FlowPath(), Source: runtimecontracts.FlowInputPinSourceCode(pin.Source()),
-			ResolutionMode:        runtimecontracts.FlowInputResolutionModeCode(resolution.Mode),
+			ResolutionMode:      runtimecontracts.FlowInputResolutionModeCode(resolution.Mode),
 			ResolutionRepliesTo: resolution.RepliesTo, ResolutionCorrelationKey: resolution.CorrelationKey,
 			ProducerSchemaDigest: producerSchema.AcceptanceSchemaDigest(), ReceiverSchemaDigest: receiverSchema.AcceptanceSchemaDigest(),
 			BusinessKey: businessKey.Field, PinDigest: pin.Digest(),

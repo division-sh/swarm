@@ -1106,7 +1106,7 @@ func newConnectRoutePlan(spec connectRoutePlanSpec) (ConnectRoutePlan, error) {
 		source: spec.source, receiver: spec.receiver,
 		producerEvent: cloneConnectEventEvidence(spec.producerEvent), receiverEvent: cloneConnectEventEvidence(spec.receiverEvent),
 		targetKind: spec.targetKind, resolutionKind: spec.resolutionKind,
-		instanceKey: cloneConnectRoutePlanInstanceKey(spec.instanceKey),
+		instanceKey:     cloneConnectRoutePlanInstanceKey(spec.instanceKey),
 		replyResolution: cloneConnectRoutePlanReplyResolution(spec.replyResolution),
 		target:          target, targetSet: append([]events.RouteIdentity(nil), targetSet...),
 		providerOutputAuthorization: cloneProviderOutputAuthorization(spec.providerOutputAuthorization),
