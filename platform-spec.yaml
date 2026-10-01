@@ -15030,6 +15030,9 @@ platform_tables:
         previously used destination. The first verified connection also freezes one bounded
         count-only summary of older pending notices; those notices are never planned individually.
         A response plan is a separate, inbound-publication-owned readback responsibility.
+        Its original verified, settled request intent, requested audience and request activation
+        remain authoritative through every action-page visit and provider edit; a later navigation
+        tap does not replace that source with a new request or the default destination.
         Every plan pins the compiled channel's finite action, text and label bounds before
         provider presentation. All families use the same immutable, monotonic action-page
         visits, including recovery, draft chooser, notices, summary and response navigation.
@@ -15163,6 +15166,8 @@ platform_tables:
         re-rendered without its mutation control and every current receipt is edited from
         that canonical state. Historical tokens remain evidence but cannot mutate a
         successor render or destination.
+        A chooser whose selected input draft is no longer authoritative settles the verified tap
+        as stale without completion or a new response; a storage failure is not a stale disposition.
         The canonical database decision remains authoritative even when an uncertain old physical
         copy looks actionable. Callbacks and quoted-input selection require exact healthy current
         receipt/render authority; retained sent evidence from an uncertain plan cannot select a draft.
@@ -39155,8 +39160,14 @@ managed_external_effect_authority:
       A runless channel-delivery send or edit has one typed authority over an exact selected-store delivery plan and immutable
       render, current explicit default and verified binding, succeeded connected activation, principal, destination,
       delivery epoch, bundle, and compiled plan generation. Its stable effect operation identity derives from the
-      delivery and render IDs. An initial send requires a pending source and no predecessor receipt. An edit requires
-      the exact current sent predecessor receipt, retains its provider message reference separately from the edit
+      delivery and render IDs. Ordinary first-send source admission requires a pending notice/card or an admitted
+      summary. A requested response instead requires exactly one original verified, settled text or navigation
+      intent backing its immutable readback, exact requested audience and request activation. Both source variants
+      use one receipt-admission rule: an initial send requires no predecessor and no current receipt; an edit
+      requires the exact current sent predecessor for that delivery and the exact new frozen render. The predecessor
+      normally belongs to the previous render, not the new render. Response edits retain their original settled
+      request and request activation rather than replacing them with the latest navigation tap or default audience.
+      An edit retains its provider message reference separately from the edit
       acknowledgment, and admits a terminal card only when the new render matches that exact current canonical source.
       The selected store rechecks and locks that authority at authorization and prelaunch;
       a stale source, retired or replaced default/binding/activation, or changed render fails before dispatch.
