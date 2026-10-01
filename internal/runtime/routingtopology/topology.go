@@ -118,7 +118,6 @@ type Resolution struct {
 	Mode        string       `json:"mode"`
 	TargetKind  string       `json:"target_kind"`
 	InstanceKey *InstanceKey `json:"instance_key,omitempty"`
-	FanIn       *FanIn       `json:"fan_in,omitempty"`
 	Reply       *Reply       `json:"reply,omitempty"`
 }
 
@@ -128,13 +127,6 @@ type InstanceKey struct {
 	SourceKind  string `json:"source_kind,omitempty"`
 	SourcePath  string `json:"source_path,omitempty"`
 	DerivedFrom string `json:"derived_from,omitempty"`
-}
-
-type FanIn struct {
-	Aggregation string   `json:"aggregation"`
-	Window      string   `json:"window"`
-	DedupBy     []string `json:"dedup_by"`
-	Singleton   string   `json:"singleton"`
 }
 
 type Reply struct {
@@ -514,16 +506,6 @@ func resolutionView(plan pinrouting.ConnectRoutePlan) *Resolution {
 			instance.DerivedFrom = fmt.Sprintf("instance.%s + carries.%s.from", instance.Field, instance.Field)
 		}
 		resolution.InstanceKey = instance
-	}
-	if plan.FanIn() != nil {
-		fanIn := plan.FanIn().Readback()
-		resolution.Mode = runtimecontracts.FlowInputResolutionModeCode(runtimecontracts.FlowInputResolutionModeFanIn)
-		resolution.FanIn = &FanIn{
-			Aggregation: fanIn.Aggregation,
-			Window:      fanIn.Window,
-			DedupBy:     normalizedStrings(fanIn.DedupBy),
-			Singleton:   fanIn.Singleton,
-		}
 	}
 	if plan.ReplyResolution() != nil {
 		reply := plan.ReplyResolution().Readback()

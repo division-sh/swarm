@@ -1,4 +1,5 @@
 name: scout
+instance: batch_id
 stages:
   collecting:
     initial: true
@@ -23,11 +24,4 @@ pins:
   inputs:
     events:
       - scout.setup
-      - event: scout.member.done
-        resolution:
-          mode: fan-in
-          aggregation: barrier
-          window: payload.batch_id
-          dedup_by: [payload.member_id]
-          singleton: scout
-activation: standing
+      - scout.member.done

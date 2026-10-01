@@ -19,7 +19,7 @@ const (
 	SingletonCoordinatorPilotUnsupportedOperation
 	SingletonCoordinatorPilotBadListIndex
 	SingletonCoordinatorPilotDemandProjection
-	SingletonCoordinatorPilotStatelessFanIn
+	SingletonCoordinatorPilotRetiredFanIn
 	SingletonCoordinatorPilotStatelessCountJoin
 )
 
@@ -78,8 +78,8 @@ shared-node:
 
 func writeSingletonCoordinatorFlow(t testing.TB, root string, variant SingletonCoordinatorPilotVariant) {
 	t.Helper()
-	if variant == SingletonCoordinatorPilotStatelessFanIn {
-		writeStatelessFanInSingletonCoordinatorFlow(t, root)
+	if variant == SingletonCoordinatorPilotRetiredFanIn {
+		writeRetiredFanInSingletonCoordinatorFlow(t, root)
 		return
 	}
 	if variant == SingletonCoordinatorPilotStatelessCountJoin {
@@ -190,7 +190,9 @@ types:
 `
 }
 
-func writeStatelessFanInSingletonCoordinatorFlow(t testing.TB, root string) {
+// This source is a retired-grammar rejection specimen. It does not establish
+// contained-state demand or a supported singleton coordinator variant.
+func writeRetiredFanInSingletonCoordinatorFlow(t testing.TB, root string) {
 	t.Helper()
 	writeSingletonCoordinatorFile(t, root, "coordinator/schema.yaml", `name: coordinator
 pins:

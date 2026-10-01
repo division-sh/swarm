@@ -134,7 +134,7 @@ func TestPlatformSpecFlowInstanceAuthoringSourceAuthority(t *testing.T) {
 	assertScalarValue(t, mustMappingValue(t, composition, "canonical_routing_owner"), "platform-spec.yaml#flow_model.composition_routing")
 	assertScalarValue(t, mustMappingValue(t, composition, "route_plan_owner"), "platform-spec.yaml#contract_formats.event_schema.routing_derivation.route_plan_authority")
 	assertScalarContains(t, mustMappingValue(t, composition, "rule"), "ordinary per-edge instance selection/source policy")
-	assertScalarValue(t, mustYAMLPath(t, composition, "public_target_revision", "revise"), "retire shared-pin ordinary policy without changing deferred fan-in or reply syntax")
+	assertScalarValue(t, mustYAMLPath(t, composition, "public_target_revision", "revise"), "retire shared-pin ordinary policy and fan-in semantics without changing retained reply/fan-out syntax")
 	assertScalarValue(t, mustYAMLPath(t, composition, "public_target_revision", "prefer"), "receiver-owned scalar instance + connection-owned ordinary resolution/key_from")
 	assertScalarValue(t, mustYAMLPath(t, composition, "split_children", "output_pin_key_carries"), "#1544")
 	assertScalarValue(t, mustYAMLPath(t, composition, "split_children", "connect_to_instance_route_planning"), "#1545")

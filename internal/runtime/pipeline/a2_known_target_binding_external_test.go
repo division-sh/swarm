@@ -466,7 +466,6 @@ func a2KnownTargetBindingFiles() map[string]string {
 		"schema.yaml": "name: a2-known-target-binding\nstages:\n  active: {initial: true}\n",
 		"types.yaml":  "types:\n  JoinResult:\n    value: text\n",
 		"orders/schema.yaml": `name: orders
-mode: template
 instance: order_id
 stages:
   dispatching: {initial: true}

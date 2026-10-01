@@ -1,3 +1,4 @@
 operating.report.requested:
+  portfolio_id: text
   period_id: text
   revenue: integer

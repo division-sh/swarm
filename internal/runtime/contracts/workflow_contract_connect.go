@@ -69,7 +69,6 @@ func CompileFlowInputPin(context FlowPinCompilationContext, pin FlowInputEventPi
 		return CompiledFlowInputPin{}, err
 	}
 	resolution := pin.Resolution.clone()
-	sort.Strings(resolution.DedupBy)
 	if err := validateCompiledFlowInputResolution(resolution); err != nil {
 		return CompiledFlowInputPin{}, fmt.Errorf("input pin %s resolution: %w", pin.Event, err)
 	}
@@ -93,7 +92,7 @@ func CompileFlowInputPin(context FlowPinCompilationContext, pin FlowInputEventPi
 
 func validateAuthoredFlowInputPin(pin FlowInputEventPin) error {
 	if len(pin.Initialize) > 0 && !pin.Resolution.Empty() {
-		return fmt.Errorf("input initialize requires an ordinary creating connection, not a fan-in or reply pin policy")
+		return fmt.Errorf("input initialize requires an ordinary creating connection, not a reply or fan-out pin policy")
 	}
 	event := pin.Event
 	if event == "" || event != strings.TrimSpace(event) || !eventidentity.IsValidName(event) || strings.ContainsAny(event, "/*") {
@@ -113,23 +112,11 @@ func validateCompiledFlowInputResolution(resolution FlowInputPinResolution) erro
 		return fmt.Errorf("mode is required")
 	}
 	for label, value := range map[string]string{
-		"aggregation": resolution.Aggregation, "window": resolution.Window,
-		"singleton": resolution.Singleton, "replies_to": resolution.RepliesTo, "correlation_key": resolution.CorrelationKey,
+		"replies_to": resolution.RepliesTo, "correlation_key": resolution.CorrelationKey,
 	} {
 		if value != "" && value != strings.TrimSpace(value) {
 			return fmt.Errorf("%s must be an exact value", label)
 		}
-	}
-	for index, field := range resolution.DedupBy {
-		if field == "" || field != strings.TrimSpace(field) {
-			return fmt.Errorf("dedup_by field %q must be an exact non-empty scalar", field)
-		}
-		if index > 0 && resolution.DedupBy[index-1] == field {
-			return fmt.Errorf("dedup_by field %q is declared more than once", field)
-		}
-	}
-	if resolution.Aggregation != "" && resolution.Aggregation != "stream" && resolution.Aggregation != "barrier" {
-		return fmt.Errorf("aggregation must be stream or barrier")
 	}
 	if resolution.RepliesTo != "" && (!eventidentity.IsValidName(resolution.RepliesTo) || strings.ContainsAny(resolution.RepliesTo, "/*")) {
 		return fmt.Errorf("replies_to %q must be an exact local event identity", resolution.RepliesTo)
@@ -137,17 +124,9 @@ func validateCompiledFlowInputResolution(resolution FlowInputPinResolution) erro
 	switch resolution.Mode {
 	case FlowInputResolutionModeCreate, FlowInputResolutionModeSelect, FlowInputResolutionModeSelectOrCreate:
 		return fmt.Errorf("ordinary input-pin resolution is retired; move resolution: %s and optional key_from to each connect row", FlowInputResolutionModeCode(resolution.Mode))
-	case FlowInputResolutionModeFanIn:
-		if resolution.RepliesTo != "" || resolution.CorrelationKey != "" {
-			return fmt.Errorf("mode fan-in may only declare mode, aggregation, window, dedup_by, and singleton")
-		}
 	case FlowInputResolutionModeFanOut:
-		if resolution.Aggregation != "" || resolution.Window != "" || len(resolution.DedupBy) > 0 || resolution.Singleton != "" || resolution.RepliesTo != "" || resolution.CorrelationKey != "" {
+		if resolution.RepliesTo != "" || resolution.CorrelationKey != "" {
 			return fmt.Errorf("mode fan-out may only declare mode")
-		}
-	case FlowInputResolutionModeReply:
-		if resolution.Aggregation != "" || resolution.Window != "" || len(resolution.DedupBy) > 0 || resolution.Singleton != "" {
-			return fmt.Errorf("mode reply may only declare mode, replies_to, and correlation_key")
 		}
 	}
 	return nil
@@ -457,10 +436,6 @@ func (p FlowInputEventPin) EventType() string {
 func (r FlowInputPinResolution) Empty() bool {
 	r = r.normalized()
 	return r.Mode == FlowInputResolutionModeNone &&
-		r.Aggregation == "" &&
-		r.Window == "" &&
-		len(r.DedupBy) == 0 &&
-		r.Singleton == "" &&
 		r.RepliesTo == "" &&
 		r.CorrelationKey == ""
 }
@@ -468,19 +443,13 @@ func (r FlowInputPinResolution) Empty() bool {
 func (r FlowInputPinResolution) normalized() FlowInputPinResolution {
 	return FlowInputPinResolution{
 		Mode:           r.Mode,
-		Aggregation:    r.Aggregation,
-		Window:         r.Window,
-		DedupBy:        append([]string(nil), r.DedupBy...),
-		Singleton:      r.Singleton,
 		RepliesTo:      r.RepliesTo,
 		CorrelationKey: r.CorrelationKey,
 	}
 }
 
 func (r FlowInputPinResolution) clone() FlowInputPinResolution {
-	out := r
-	out.DedupBy = append([]string(nil), r.DedupBy...)
-	return out
+	return r
 }
 
 func (p FlowOutputEventPin) EventType() string {

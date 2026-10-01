@@ -2227,12 +2227,12 @@ func TestFanInBarrierExecutorConsumesEffectiveJoinPlan(t *testing.T) {
 		t.Fatalf("load canonical fan-in barrier: %v", err)
 	}
 	source := semanticview.Wrap(bundle)
-	portfolioNode := testFlowExecutableNode(t, "portfolio", "portfolio-collector")
-	plan, ok := semanticview.WorkflowJoinPlanForHandler(source, portfolioNode, "operating.reported")
+	portfolioNode := testFlowExecutableNode(t, "portfolio/period", "portfolio-collector")
+	plan, ok := semanticview.WorkflowJoinPlanForHandler(source, portfolioNode, "period.reported")
 	if !ok || plan.Spec.Members.From != "state.expected_operating_ids" || plan.Spec.Members.By != "payload.operating_id" || plan.Spec.Deadline == nil || plan.Spec.Deadline.From != runtimecontracts.JoinDeadlineFromStageEntry {
 		t.Fatalf("effective barrier plan = %#v", plan)
 	}
-	rawHandler, ok := source.ExecutableNodeEventHandler(portfolioNode, "operating.reported")
+	rawHandler, ok := source.ExecutableNodeEventHandler(portfolioNode, "period.reported")
 	if !ok || rawHandler.Join == nil {
 		t.Fatal("authored barrier handler is unavailable")
 	}
@@ -2246,8 +2246,8 @@ func TestFanInBarrierExecutorConsumesEffectiveJoinPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
-	route := runtimeflowidentity.DeriveRoute("portfolio", semanticExecutionFixtureRunID)
-	entry := a2EngineJoinEntry(semanticExecutionFixtureRunID, "portfolio/portfolio", "awaiting", route)
+	route := runtimeflowidentity.DeriveRoute("portfolio/period", semanticExecutionFixtureRunID)
+	entry := a2EngineJoinEntry(semanticExecutionFixtureRunID, "portfolio/period/semantic-receiver", "awaiting", route)
 	activation, err := newEngineTestJoinActivation(plan.Node, plan.HandlerEvent, plan.Spec, entry, []string{"operating-a"}, now, now.Add(5*time.Minute))
 	if err != nil {
 		t.Fatal(err)
@@ -2257,9 +2257,9 @@ func TestFanInBarrierExecutorConsumesEffectiveJoinPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := ExecutionRequest{
-		EntityID: "portfolio/portfolio", Node: portfolioNode, HandlerEventKey: "operating.reported", Handler: rawHandler, Route: route,
+		EntityID: "portfolio/period/semantic-receiver", Node: portfolioNode, HandlerEventKey: "period.reported", Handler: rawHandler, Route: route,
 		JoinDeclaration: activation.JoinRef().Declaration(),
-		Event:           eventtest.RunCreatingRootIngress("evt-operating-a", "operating.reported", "", "", json.RawMessage(`{"operating_id":"operating-a","period_id":"2026-Q3","revenue":42}`), 0, semanticExecutionFixtureRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, "portfolio/portfolio"), now),
+		Event:           eventtest.RunCreatingRootIngress("evt-operating-a", "period.reported", "", "", json.RawMessage(`{"operating_id":"operating-a","period_id":"2026-Q3","revenue":42}`), 0, semanticExecutionFixtureRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, "portfolio/period/semantic-receiver"), now),
 		State:           a2JoinFixtureSnapshot(t, activation, map[string]any{"expected_operating_ids": []any{"operating-a"}, "period_id": "2026-Q3"}, buckets),
 	}
 	arrival, err := exec.ExecuteSemanticFixture(a2BoundJoinContext(t, activation), req)
@@ -2284,7 +2284,7 @@ func TestFanInBarrierExecutorConsumesEffectiveJoinPlan(t *testing.T) {
 	if requireResolvedSelection(t, result.HandlerRuleSelection).Context() != handlerselection.ContextJoinComplete || requireResolvedSelection(t, result.HandlerRuleSelection).Disposition() != handlerselection.DispositionSelected || !requireResolvedSelection(t, result.HandlerRuleSelection).Ref().Valid() {
 		t.Fatalf("join completion selection = %#v", result.HandlerRuleSelection)
 	}
-	if got := requireResolvedSelection(t, result.HandlerRuleSelection).Ref().SemanticPath(); got != `nodes["portfolio-collector"].handlers["operating.reported"].join.on_complete[0]` {
+	if got := requireResolvedSelection(t, result.HandlerRuleSelection).Ref().SemanticPath(); got != `nodes["portfolio-collector"].handlers["period.reported"].join.on_complete[0]` {
 		t.Fatalf("join completion declaration path = %q", got)
 	}
 }
@@ -2300,12 +2300,12 @@ func TestFanInBarrierExecutorRecordsAuthoredJoinDeadlineSelection(t *testing.T) 
 		t.Fatal(err)
 	}
 	source := semanticview.Wrap(bundle)
-	node := testFlowExecutableNode(t, "portfolio", "portfolio-collector")
-	plan, ok := semanticview.WorkflowJoinPlanForHandler(source, node, "operating.reported")
+	node := testFlowExecutableNode(t, "portfolio/period", "portfolio-collector")
+	plan, ok := semanticview.WorkflowJoinPlanForHandler(source, node, "period.reported")
 	if !ok {
 		t.Fatal("effective join plan is unavailable")
 	}
-	handler, ok := source.ExecutableNodeEventHandler(node, "operating.reported")
+	handler, ok := source.ExecutableNodeEventHandler(node, "period.reported")
 	if !ok {
 		t.Fatal("authored join handler is unavailable")
 	}
@@ -2315,9 +2315,9 @@ func TestFanInBarrierExecutorRecordsAuthoredJoinDeadlineSelection(t *testing.T) 
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 8, 23, 15, 30, 0, 0, time.UTC)
-	route := runtimeflowidentity.DeriveRoute("portfolio", semanticExecutionFixtureRunID)
-	entry := a2EngineJoinEntry(semanticExecutionFixtureRunID, "portfolio/portfolio", "awaiting", route)
-	activation, err := newEngineTestJoinActivation(node, "operating.reported", plan.Spec, entry, []string{"operating-a"}, now, now.Add(5*time.Minute))
+	route := runtimeflowidentity.DeriveRoute("portfolio/period", semanticExecutionFixtureRunID)
+	entry := a2EngineJoinEntry(semanticExecutionFixtureRunID, "portfolio/period/semantic-receiver", "awaiting", route)
+	activation, err := newEngineTestJoinActivation(node, "period.reported", plan.Spec, entry, []string{"operating-a"}, now, now.Add(5*time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2330,11 +2330,11 @@ func TestFanInBarrierExecutorRecordsAuthoredJoinDeadlineSelection(t *testing.T) 
 		t.Fatal(err)
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID: "portfolio/portfolio", Node: node, HandlerEventKey: "operating.reported", Handler: handler, Route: route,
+		EntityID: "portfolio/period/semantic-receiver", Node: node, HandlerEventKey: "period.reported", Handler: handler, Route: route,
 		JoinDeclaration: activation.JoinRef().Declaration(),
 		Event: eventtest.RunCreatingRootIngress(
 			"evt-join-timeout", events.EventType(activation.TimerEventType()), "runtime", activation.TimerTaskID(), payload, 0,
-			semanticExecutionFixtureRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, "portfolio/portfolio"), now.Add(5*time.Minute),
+			semanticExecutionFixtureRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, "portfolio/period/semantic-receiver"), now.Add(5*time.Minute),
 		),
 		State: a2JoinFixtureSnapshot(t, activation, map[string]any{"expected_operating_ids": []any{"operating-a"}, "period_id": "2026-Q3"}, buckets),
 	})
@@ -2347,7 +2347,7 @@ func TestFanInBarrierExecutorRecordsAuthoredJoinDeadlineSelection(t *testing.T) 
 	if requireResolvedSelection(t, result.HandlerRuleSelection).Context() != handlerselection.ContextJoinTimeout || requireResolvedSelection(t, result.HandlerRuleSelection).Disposition() != handlerselection.DispositionSelected || !requireResolvedSelection(t, result.HandlerRuleSelection).Ref().Valid() {
 		t.Fatalf("join timeout selection = %#v", result.HandlerRuleSelection)
 	}
-	if got := requireResolvedSelection(t, result.HandlerRuleSelection).Ref().SemanticPath(); got != `nodes["portfolio-collector"].handlers["operating.reported"].join.on_deadline[0]` {
+	if got := requireResolvedSelection(t, result.HandlerRuleSelection).Ref().SemanticPath(); got != `nodes["portfolio-collector"].handlers["period.reported"].join.on_deadline[0]` {
 		t.Fatalf("join deadline declaration path = %q", got)
 	}
 }

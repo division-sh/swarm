@@ -127,7 +127,7 @@ var retiredNodeHandlerFields = map[string]string{
 	"condition":               "handler condition is retired; use rules.when or on_complete.condition",
 	"logic":                   "DEPRECATED: handler logic is retired",
 	"from":                    "handler.from is accepted but never executed; use the owning primitive's source",
-	"dedup_by":                "handler.dedup_by is accepted but never executed; use accumulate or the input pin",
+	"dedup_by":                "handler.dedup_by is retired; use accumulate.key or explicit join members",
 	"action":                  "authored action is retired",
 	"select_entity":           "receiver selection belongs to the input/composition boundary",
 	"select_or_create_entity": "receiver selection belongs to the input/composition boundary",

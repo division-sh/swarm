@@ -61,7 +61,7 @@ func (p *a2HeldWorkerProbe) NotifyLifecycle(ctx context.Context, signal lifecycl
 func (p *a2HeldWorkerProbe) resume() { p.once.Do(func() { close(p.release) }) }
 
 // Hold only the first prepared business commit. The selected store still
-// performs the actual revision fence and rollback; no synthetic CAS error.
+// performs the actual lifecycle-entry fence and rollback; no synthetic CAS error.
 type a2HeldPublicationCommit struct {
 	runtimepipeline.WorkflowPersistenceOwner
 	nodeID   string
@@ -133,7 +133,7 @@ func testA2StageEntryPublicationBinding(t *testing.T, scenarios []int) {
 				flows := []string{"orders", "orders"}
 				if multipleRecipients {
 					flows[1] = "mirror"
-					files["schema.yaml"] += "  - {event: item.completed, from: ., to: mirror}\n"
+					files["schema.yaml"] += "  - {event: item.completed, from: ., to: mirror, resolution: select}\n"
 					for _, name := range []string{"schema.yaml", "entities.yaml", "events.yaml", "nodes.yaml"} {
 						files["mirror/"+name] = strings.Replace(files["orders/"+name], "name: orders", "name: mirror", 1)
 					}
@@ -560,7 +560,7 @@ func testA2StageEntryPublicationBinding(t *testing.T, scenarios []int) {
 
 func a2PayloadDirectedJoinFiles() map[string]string {
 	return map[string]string{
-		"schema.yaml":   "name: a2-publication-binding\nstages:\n  active: {initial: true}\npins:\n  inputs:\n    events: [work.requested]\n  outputs:\n    events: [item.completed]\nconnect:\n  - {event: item.completed, from: ., to: orders}\n",
+		"schema.yaml":   "name: a2-publication-binding\nstages:\n  active: {initial: true}\npins:\n  inputs:\n    events: [work.requested]\n  outputs:\n    events: [item.completed]\nconnect:\n  - {event: item.completed, from: ., to: orders, resolution: select}\n",
 		"entities.yaml": "root_state:\n  work_count: {type: integer, initial: 0}\n",
 		"events.yaml":   "work.requested:\n  prefix: text\n  suffix: text\nitem.completed:\n  order_id: text\n  member_id: text\n  result: JoinResult\n",
 		"types.yaml":    "types:\n  JoinResult:\n    value: text\n",
@@ -579,7 +579,6 @@ func a2PayloadDirectedJoinFiles() map[string]string {
           result: {value: computed-by-worker}
 `,
 		"orders/schema.yaml": `name: orders
-mode: template
 instance: order_id
 stages:
   awaiting: {initial: true}
@@ -589,7 +588,7 @@ stages:
 pins:
   inputs:
     events:
-      - {event: item.completed, resolution: {mode: select}}
+      - item.completed
 `,
 		"orders/entities.yaml": "order_state:\n  order_id: {type: text, indexed: true}\n  expected: \"[text]\"\n",
 		"orders/events.yaml":   "manual.abort:\ndispatch.completed:\n",

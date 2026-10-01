@@ -525,15 +525,6 @@ coordinator-node:
 	}
 }
 
-func TestRun_FanInDemandRejectsStatelessSingletonAtInputRow(t *testing.T) {
-	bundle := loadCanonicalSingletonCoordinatorFixtureBundle(t, canonicalrouting.SingletonCoordinatorPilotStatelessFanIn)
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-	if !reportContains(report.Errors(), "composition_connect_validation", "coordinator demand requires at least one typed contained map/list field") {
-		t.Fatalf("fan-in stateless singleton errors = %#v, want exact input-row coordinator demand failure", report.Errors())
-	}
-}
-
 func loadCanonicalSingletonCoordinatorFixtureBundle(t *testing.T, variant canonicalrouting.SingletonCoordinatorPilotVariant) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	repoRoot := repoRootForBootverifyTest(t)

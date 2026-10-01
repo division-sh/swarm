@@ -397,24 +397,6 @@ func (c AuthoredEventEndpointCensus) ResolveDeclaredInputEndpoint(flowID, identi
 	return endpointAssociationResult(flowID, identity, "", candidates)
 }
 
-func (c AuthoredEventEndpointCensus) ResolveFanInInputForHandler(node runtimeidentity.ExecutableNode, handlerEvent string) EndpointAssociationResult {
-	if !node.Valid() {
-		return EndpointAssociationResult{Status: EndpointAssociationNotFound, Identity: eventidentity.Normalize(handlerEvent)}
-	}
-	flowID := node.FlowPath()
-	handlerEvent = eventidentity.Normalize(handlerEvent)
-	candidates := make([]AuthoredEventEndpoint, 0)
-	for _, endpoint := range c.inputPins {
-		if strings.TrimSpace(endpoint.FlowID) != flowID || endpoint.ResolutionMode != runtimecontracts.FlowInputResolutionModeFanIn {
-			continue
-		}
-		if fanInInputMatchesHandler(c.source, endpoint, handlerEvent) {
-			candidates = append(candidates, endpoint)
-		}
-	}
-	return endpointAssociationResult(flowID, handlerEvent, node.NodeID(), candidates)
-}
-
 func endpointAssociationResult(flowID, identity, nodeID string, candidates []AuthoredEventEndpoint) EndpointAssociationResult {
 	sort.SliceStable(candidates, func(i, j int) bool {
 		left := strings.Join([]string{strings.TrimSpace(candidates[i].FlowID), strings.TrimSpace(candidates[i].PinName), candidates[i].Event.EventKey(), candidates[i].ID}, "\x00")
@@ -942,17 +924,6 @@ func flowEventMatchesWithoutTopology(source Source, flowID, subscription, eventT
 		return bundle.FlowEventMatches(flowID, subscription, eventType)
 	}
 	return source.FlowEventMatches(flowID, subscription, eventType)
-}
-
-func fanInInputMatchesHandler(source Source, endpoint AuthoredEventEndpoint, handlerEvent string) bool {
-	handlerEvent = eventidentity.Normalize(handlerEvent)
-	if handlerEvent == "" {
-		return false
-	}
-	if eventidentity.Normalize(endpoint.PinName) == handlerEvent {
-		return true
-	}
-	return declaredInputIdentityMatches(source, endpoint, handlerEvent)
 }
 
 func resolveNodeHandlerProof(source Source, node runtimeidentity.ExecutableNode, eventType string, handlers map[string]runtimecontracts.SystemNodeEventHandler) (string, bool) {

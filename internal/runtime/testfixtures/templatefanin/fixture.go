@@ -9,81 +9,27 @@ import (
 )
 
 const (
-	ProducerFlowID       = "operating"
-	ProducerOutputPin    = "operating.reported"
-	ProducerEvent        = "operating.reported"
-	ReceiverFlowID       = "portfolio"
-	ReceiverInputPin     = "operating.reported"
-	ReceiverEvent        = "operating.reported"
-	ReceiverNodeID       = "portfolio-collector"
-	ReceiverFlowInstance = "portfolio"
+	ProducerFlowID = "operating"
+	ProducerOutputPin = "operating.reported"
+	ProducerEvent = "operating.reported"
+	ReceiverFlowID = "portfolio"
+	ReceiverInputPin = "operating.reported"
+	ReceiverEvent = "operating.reported"
+	ReceiverNodeID = "portfolio-collector"
 )
 
-type Options struct {
-	MissingDedup             bool
-	DedupTuple               bool
-	MissingWindow            bool
-	BarrierAggregation       bool
-	MissingSingleton         bool
-	WrongSingleton           bool
-	AccumulateDedupMismatch  bool
-	AccumulateWindowMismatch bool
-	EventIDDedup             bool
-	NonSingletonReceiver     bool
-	MissingReceiverHandler   bool
-	MissingAccumulate        bool
-	AmbiguousReceiverInput   bool
-}
-
-func LoadBundle(t testing.TB, opts Options) *runtimecontracts.WorkflowContractBundle {
+func LoadBundle(t testing.TB) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	bundle, err := LoadBundleResult(t, opts)
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo,
+		canonicalrouting.ExampleRoot(t, canonicalrouting.FanInStream), runtimecontracts.DefaultPlatformSpecFile(repo))
 	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+		t.Fatal(err)
 	}
 	return bundle
 }
 
-func LoadBundleResult(t testing.TB, opts Options) (*runtimecontracts.WorkflowContractBundle, error) {
+func LoadSource(t testing.TB) semanticview.Source {
 	t.Helper()
-	root := Write(t, opts)
-	repoRoot := canonicalrouting.RepoRoot(t)
-	return runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-}
-
-func LoadSource(t testing.TB, opts Options) semanticview.Source {
-	t.Helper()
-	return semanticview.Wrap(LoadBundle(t, opts))
-}
-
-func Write(t testing.TB, opts Options) string {
-	t.Helper()
-	id := canonicalrouting.FanInStream
-	if opts.BarrierAggregation {
-		id = canonicalrouting.FanInBarrier
-	}
-	root := canonicalrouting.CopyExample(t, id)
-	mutations := []struct {
-		set      bool
-		mutation canonicalrouting.FanInNegativeMutation
-	}{
-		{opts.MissingDedup, canonicalrouting.FanInMissingDedup},
-		{opts.DedupTuple, canonicalrouting.FanInDedupTuple},
-		{opts.MissingWindow, canonicalrouting.FanInMissingWindow},
-		{opts.MissingSingleton, canonicalrouting.FanInMissingSingleton},
-		{opts.WrongSingleton, canonicalrouting.FanInWrongSingleton},
-		{opts.AccumulateDedupMismatch, canonicalrouting.FanInAccumulateDedupRedeclaration},
-		{opts.AccumulateWindowMismatch, canonicalrouting.FanInAccumulateWindowRedeclaration},
-		{opts.EventIDDedup, canonicalrouting.FanInEventIDDedup},
-		{opts.NonSingletonReceiver, canonicalrouting.FanInNonSingletonReceiver},
-		{opts.MissingReceiverHandler, canonicalrouting.FanInMissingReceiverHandler},
-		{opts.MissingAccumulate, canonicalrouting.FanInMissingRuntimeOwner},
-		{opts.AmbiguousReceiverInput, canonicalrouting.FanInAmbiguousReceiverInput},
-	}
-	for _, item := range mutations {
-		if item.set {
-			canonicalrouting.ApplyFanInNegativeMutation(t, root, item.mutation)
-		}
-	}
-	return root
+	return semanticview.Wrap(LoadBundle(t))
 }

@@ -48,7 +48,7 @@ func TestTemplateInstanceSemanticOwnersRemainTypedAndOpaque(t *testing.T) {
 	}
 
 	seen := map[runtimecontracts.FlowInputResolutionMode]struct{}{}
-	for _, authored := range []string{"create", "select", "select-or-create", "fan-in", "fan-out", "reply"} {
+	for _, authored := range []string{"create", "select", "select-or-create", "fan-out", "reply"} {
 		mode, err := runtimecontracts.ParseFlowInputResolutionMode(authored)
 		if err != nil || !mode.Valid() || runtimecontracts.FlowInputResolutionModeCode(mode) != authored {
 			t.Fatalf("resolution mode %q parse/round trip = %v/%v/%q", authored, mode, err, runtimecontracts.FlowInputResolutionModeCode(mode))
@@ -82,7 +82,6 @@ func TestCompiledRoutingTypesDoNotImplementStringer(t *testing.T) {
 		runtimepinrouting.ConnectRoutePlanEndpoint{},
 		runtimepinrouting.ConnectRoutePlan{},
 		runtimepinrouting.ConnectRoutePlanInstanceKey{},
-		runtimepinrouting.ConnectRoutePlanFanIn{},
 		runtimepinrouting.ConnectRoutePlanReplyResolution{},
 		runtimepinrouting.ConnectReceiverPinIdentity{},
 		runtimepinrouting.ConnectRoutePlanResolutionKind(0),
@@ -150,7 +149,6 @@ func TestCompiledRoutingBoundaryRejectsSemanticStringOperations(t *testing.T) {
 		"connect target kind": reflect.TypeOf(runtimepinrouting.ConnectRoutePlanTargetKind(0)),
 		"connect resolution":  reflect.TypeOf(runtimepinrouting.ConnectRoutePlanResolutionKind(0)),
 		"connect failure":     reflect.TypeOf(runtimepinrouting.ConnectRoutePlanFailure(0)),
-		"connect fan-in":      reflect.TypeOf(runtimepinrouting.ConnectFanInAggregation(0)),
 		"connect reply role":  reflect.TypeOf(runtimepinrouting.ConnectReplyRole(0)),
 	} {
 		if semanticTypeContainsString(owner, map[reflect.Type]struct{}{}) {
@@ -191,7 +189,7 @@ func TestCompiledRoutingFiniteVariantsAreConstantsNotMutableBindings(t *testing.
 	finiteTypes := map[string]struct{}{
 		"RoutingSourceKind": {}, "RoutingSourceAuthority": {}, "deliveryRecipientKind": {},
 		"ConnectRoutePlanTargetKind": {}, "ConnectRoutePlanResolutionKind": {}, "ConnectRoutePlanFailure": {},
-		"ConnectFanInAggregation": {}, "ConnectReplyRole": {},
+		"ConnectReplyRole": {},
 	}
 	repoRoot := canonicalrouting.RepoRoot(t)
 	for _, relative := range []string{"internal/events/types.go", "internal/runtime/core/pinrouting/connect_route_plan.go"} {
@@ -264,7 +262,6 @@ func TestCompiledConnectValuesExposeNoMutableSemanticFields(t *testing.T) {
 		reflect.TypeOf(runtimepinrouting.ConnectRoutePlan{}),
 		reflect.TypeOf(runtimepinrouting.ConnectRoutePlanEndpoint{}),
 		reflect.TypeOf(runtimepinrouting.ConnectRoutePlanInstanceKey{}),
-		reflect.TypeOf(runtimepinrouting.ConnectRoutePlanFanIn{}),
 		reflect.TypeOf(runtimepinrouting.ConnectRoutePlanReplyResolution{}),
 		reflect.TypeOf(runtimepinrouting.ConnectReceiverPinIdentity{}),
 		reflect.TypeOf(runtimepinrouting.ConnectReceiverPinAdmission{}),
@@ -432,7 +429,6 @@ func TestCompiledConnectDiagnosticProjectionCannotReenterEvaluator(t *testing.T)
 		reflect.TypeOf(runtimepinrouting.ConnectRoutePlanReadback{}):            {},
 		reflect.TypeOf(runtimepinrouting.ConnectRoutePlanEndpointReadback{}):    {},
 		reflect.TypeOf(runtimepinrouting.ConnectRoutePlanInstanceKeyReadback{}): {},
-		reflect.TypeOf(runtimepinrouting.ConnectRoutePlanFanInReadback{}):       {},
 		reflect.TypeOf(runtimepinrouting.ConnectRoutePlanReplyReadback{}):       {},
 		reflect.TypeOf(runtimepinrouting.ConnectReceiverPinCollision{}):         {},
 	}

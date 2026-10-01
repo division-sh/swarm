@@ -275,10 +275,6 @@ type InputPinView struct {
 	FlowPath                 string            `json:"flow_path,omitempty"`
 	Source                   string            `json:"source,omitempty"`
 	ResolutionMode           string            `json:"resolution_mode,omitempty"`
-	ResolutionAggregation    string            `json:"resolution_aggregation,omitempty"`
-	ResolutionWindow         string            `json:"resolution_window,omitempty"`
-	ResolutionDedupBy        []string          `json:"resolution_dedup_by,omitempty"`
-	ResolutionSingleton      string            `json:"resolution_singleton,omitempty"`
 	ResolutionRepliesTo      string            `json:"resolution_replies_to,omitempty"`
 	ResolutionCorrelationKey string            `json:"resolution_correlation_key,omitempty"`
 	ProducerSchemaDigest     string            `json:"producer_schema_digest,omitempty"`
@@ -1097,8 +1093,6 @@ func inputPinViews(source semanticview.Source, flowID string, pins []runtimecont
 			Event:      pin.EventType(), ResolvedEvent: source.ResolveFlowEventReference(flowID, pin.EventType()),
 			FlowPath: pin.FlowPath(), Source: runtimecontracts.FlowInputPinSourceCode(pin.Source()),
 			ResolutionMode:        runtimecontracts.FlowInputResolutionModeCode(resolution.Mode),
-			ResolutionAggregation: resolution.Aggregation, ResolutionWindow: resolution.Window,
-			ResolutionDedupBy: resolution.DedupBy, ResolutionSingleton: resolution.Singleton,
 			ResolutionRepliesTo: resolution.RepliesTo, ResolutionCorrelationKey: resolution.CorrelationKey,
 			ProducerSchemaDigest: producerSchema.AcceptanceSchemaDigest(), ReceiverSchemaDigest: receiverSchema.AcceptanceSchemaDigest(),
 			BusinessKey: businessKey.Field, PinDigest: pin.Digest(),

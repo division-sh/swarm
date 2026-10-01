@@ -408,8 +408,10 @@ contract_formats:
       explicit no-role boundary. Receiver defaults remain literal data with
       separate presence and are checked by the existing receiver type owner.
       Imports use direct nonempty connector_packs/provider_trigger_events
-      sequences, not a nested imports envelope. Pin events/reads/writes and
-      resolution.dedup_by are nonempty sequences when supplied. Empty stages
+      sequences, not a nested imports envelope. Pin events/reads/writes are
+      nonempty sequences when supplied. Retired pin resolution fields
+      aggregation, window, dedup_by and singleton reject on presence, including
+      null or empty values; they cannot supply join or stream semantics. Empty stages
       mappings and null stage rows are invalid; {} remains a valid stage row.
       Empty loops, gate context/input and receiver variables mappings remain
       legal zero-member declarations. Raw ingress and resolution branches
@@ -1253,7 +1255,7 @@ contract_formats:
         owner: internal/events.PayloadAdmission
         chronology: |
           Every persistable event payload is admitted against exactly one pinned
-          effective event schema before route planning, instance-key/window/dedup
+          effective event schema before route planning, instance-key, stream-key or join-member
           extraction, event identity, delivery planning, or selected-store
           mutation. Admission returns one immutable value containing the exact
           normalized payload bytes and schema binding: immutable source-artifact hash, flow
@@ -1779,7 +1781,7 @@ contract_formats:
             source endpoint, receiver endpoint, edge, target, and recipient.
           finite_variant_boundary: |
             Routing-source kind and authority, delivery-recipient kind, compiled target and resolution kind, failure,
-            fan-in aggregation, and reply role are immutable integer-backed named constants. They MUST NOT store their
+            and reply role are immutable integer-backed named constants. They MUST NOT store their
             semantic value as a string, expose mutable package variables as variants, or permit an enclosing compiled value
             to recover semantic authority from a recursively nested string field. Explicit exhaustive persistence and
             diagnostic codecs are boundary projections only; they cannot become behavioral equality or dispatch authority.
@@ -1988,7 +1990,7 @@ contract_formats:
             fail decoding, and diagnostic route_source text cannot grant connect or delivery authority.
           compiled_value_boundary: |
             ConnectRoutePlan, its producer and receiver endpoints, target and resolution discriminants, instance-key,
-            fan-in, reply, and failure values are opaque compiled values with no exported semantic fields. Runtime consumers
+            reply, and failure values are opaque compiled values with no exported semantic fields. Runtime consumers
             use typed behavior queries; describe and topology surfaces use explicit one-way readback projections. Readback
             values and authored FlowConnect rows cannot be accepted by matching, materialization, claim, recovery,
             replay, fork, or handler APIs. Dynamic payload/event match values cross into compiled materialization through one
@@ -2269,7 +2271,7 @@ contract_formats:
               - event_handlers keys
               - pins.inputs.events and pins.outputs.events
             rule: Semantic route topology is the source for recipient
-              derivation. Parent connect topology and its ordinary resolution, together with retained fan-in/reply input policies, are
+              derivation. Parent connect topology and its ordinary resolution, together with retained reply/fan-out input policies, are
               the authored cross-flow source authority; RouteTable and RoutePlan
               consume the lowered facts. Live subscription channels, active
               descriptors, and handler lookup are not topology authority.
@@ -2609,7 +2611,7 @@ rule:
       entries. Runtime expression admission observes only keys in the current
       typed draft and recomputes presence after each operation; it never
       replays static assignment facts over a cleared or absent value.
-      Join membership/window source snapshots and stage-gate context readers
+      Join membership source snapshots and stage-gate context readers
       consume the committed entry fact for their declared stage. They do not
       borrow the arrival handler's program point or future outcome writes.
 type_system:
@@ -4190,7 +4192,8 @@ handler_specification:
       purpose: For each item in a bounded declared collection, emit one ordinary event through the normal emit pipeline.
       sub_fields:
         items_from: >-
-          Source at exactly one declared top-level payload.* or entity.* collection field. Nested collection paths
+          Source at exactly one declared top-level payload.* or entity.* collection field, catalog-typed as a list
+          or map with TEXT keys. A map's items are its exact keys, not its values. Nested collection paths
           are unsupported and fail closed. A missing event catalog entry, primary entity contract, or declared
           source field is a hard load error. Durable-data versions are not authored fan_out sources.
         as: string — required simple identifier that binds the current item for this row's emit.fields expressions.
@@ -4238,11 +4241,19 @@ handler_specification:
         `advances_to` runs once after that constant-size intent commit, and `fan_out.count` is 0 for same-handler
         data_accumulation.
       collection_iteration: >
-        Runtime persists one constant-size obligation for the complete ordered collection. Zero-based ordinal is the
-        stable per-entry activation identity. Duplicate values and duplicate business identities remain distinct
-        ordinals; fan_out never sorts or deduplicates the source collection. The pump later publishes each ordinal in
-        declared list order through ordinary EventBus publication. Chunk boundaries, retries, bisection, process identity,
-        and event_id never own or change iteration order.
+        One catalog-admitted CollectionProjection owns list-items versus map-TEXT-keys interpretation for compiler,
+        engine, source persistence, deferred chunk reads, replay and supported fork. Runtime persists one constant-size
+        obligation for the complete ordered collection. Zero-based ordinal is the stable per-entry activation identity.
+        Lists retain declared order and multiplicity; duplicate values and business identities remain distinct ordinals.
+        Maps yield exact keys in lexical order, without trimming, coercion, value-based deduplication or dependence on JSON
+        member order. The item alias binds a map key; map values remain typed source data, not routing identity.
+        Bounds and source types are validated before intent commit. Writer and pump consume the same pinned projection,
+        cardinality and immutable payload or exact retained state revision, including post-handler writes. Missing, null,
+        wrong-kind or contradictory retained source evidence fails closed; readers never substitute live state or infer
+        list/map semantics from JSON delimiters. Empty lists/maps are lawful zero-item sources. Nonzero chunk cursors,
+        restart and supported inherited-source projection retain the same ordinal order and numeric source kinds.
+        The pump publishes every ordinal through ordinary EventBus publication. Chunk boundaries, retries, bisection,
+        process identity and event_id never own or change iteration order.
       transition_order: Handler `advances_to` fires once after the durable intent is committed, not once per item and not
         after asynchronous issuance or downstream delivery settlement.
       graph_surface: describe --graph renders multiplicity-bearing fan-out edges such as `waiting ->xN line_item.requested`.
@@ -4501,7 +4512,8 @@ handler_specification:
         members: >-
           Exactly one of `{from: state.<field>, by: payload.<field>}`, `{count: N, by: payload.<field>}` or
           `{from_fan_out: true}`. Explicit membership snapshots a catalog-typed TEXT list or map with TEXT keys;
-          duplicate list members reject, list order is retained, and map keys sort lexically. Count is a literal
+          duplicate list members reject, list order is retained, and exact map keys sort lexically without trimming
+          or coercion. Map values are typed data, not member identity. Count is a literal
           nonnegative bounded integer; its contributors are exact nonempty TEXT identities, never invented names.
           Count, including zero, requires deadline or until. Fan-out membership uses the separate variant below.
         output: Required catalog-typed declared payload value captured with its canonical value/hash per admitted member.
@@ -4556,10 +4568,15 @@ handler_specification:
         A genuinely new business output binds the actual resolved receiver entry at its first canonical publication.
         Work starting earlier or a known endpoint does not predict its future payload-selected destination. The existing
         publication transaction fences that admission against entry/close/transition, including same-commit activation.
+        Under the receiver lock, the fence compares the exact retained entry, immutable arm identities and open/closed
+        dispositions. Business-field revisions and sibling member contributions do not change that admission; they must
+        not force another worker attempt or exhaust its retry policy. Missing or contradictory entry/arm evidence fails
+        closed. The ordinary business mutation still retains its independent revision/CAS fence.
         An unarmed publication retains its typed early refusal; no waiting queue or invented arm is added. Existing exact
         delivery/reply/continuation obligations instead retain their own original receipts. Missing required evidence
         rejects; duplicate/restart reuse the committed aggregate manifest and never bind a newer entry. Receipts are
-        per recipient/declaration, not ambient producer/parent authority. Source-generation fencing remains separate.
+        per recipient/declaration, not ambient producer/parent authority. Root-owned deliveries obey the same binding
+        rule as flow-owned deliveries. Source-generation fencing remains separate.
         An exact paired reply resumes only its retained return topology and origin; ordinary matching connects or pub/sub
         subscriptions cannot add a recipient. Independently authorized ordinary outputs remain separate publications.
         A committed early refusal remains early after a later arm or terminal receiver; a bound late arrival retains
@@ -4567,7 +4584,8 @@ handler_specification:
         new publications targeting terminal receivers still use the ordinary strict receiver-availability contract.
       canonical_plan: >-
         WorkflowJoinPlan owns exact declared membership, selected output type and closure. Pins cannot supply or override
-        those facts. Ordinary compiled connect routing selects the instance; no singleton-coordinator or fan-in interpreter remains.
+        those facts. Ordinary compiled connect routing selects the instance. Fan-in interpretation and coordinator demand
+        solely from a join are absent; genuine typed contained-state consumers keep their separate coordinator contract.
       finite_accumulate_retirement: >-
         Every bundle, staged or non-staged, rejects finite-barrier accumulate fields such as expected_from,
         threshold/completion, timeout_ms, nested on_complete, and nested on_timeout. Accumulate owns only open
@@ -4593,7 +4611,9 @@ handler_specification:
           Descendant fan-outs and unrelated intents never contribute.
         completion: >-
           The terminal fold atomically stores its typed summary and admits one declaration-bound generic schedule.
-          Duplicate candidates and occurrences are idempotent. The completion evaluates `on_complete` with
+          Duplicate candidates and occurrences are idempotent. The continuation resumes only its exact original
+          obligation; ordinary matching connections or subscriptions cannot expand its execution recipients.
+          The completion evaluates `on_complete` with
           `join.total` plus `join.dispositions.{succeeded,dead_lettered,no_route,semantic_rejected,canceled}` and publishes
           through the ordinary EventBus. Successful delivery marks fired; no-route or terminal delivery failure marks
           outcome_dead_lettered. Run terminality and stale loop generation suppress owed outcomes explicitly. A
@@ -5936,6 +5956,10 @@ engine:
       state. Cross-node state reads are not supported — use events to pass data between nodes.
   accumulation_engine:
     description: The accumulation engine owns instance-scoped stream admission, not finite membership or closure.
+    canonical_contract: handler_specification.handler_fields.accumulate
+    retired_interpretations: >-
+      No effective pin-derived partition/dedup spec, business-window suffix, sender/event fallback key or required
+      singleton coordinator exists. Stream admission consumes the selected instance and its typed handler plan.
     tracking:
       setup: A stream bucket stores canonical business payload evidence and admitted durable delivery identities.
       bucket_identity: |
@@ -5958,9 +5982,14 @@ engine:
     cleanup: Stream buckets are not implicitly archived or deleted by arrival processing.
   join_engine:
     description: >-
-      The join engine is the canonical durable owner for staged finite-membership barrier activation, arrivals, deterministic
+      The arrival join engine is the canonical durable owner for staged finite-membership activation, arrivals, deterministic
       output assembly, deadline, until, and close. It consumes the typed lowered handler.join plan; route, timer, store, and test
       surfaces do not reconstruct join semantics independently.
+    canonical_owner: internal/runtime/joinruntime
+    variant_boundary: >-
+      Explicit-members and count variants use this arrival owner. Exact fan-out all-settled obligations use the separate
+      internal/runtime/fanoutbarrier owner and handler_specification.handler_fields.join.delivery_barrier_variant.
+      Stream accumulation has no finite closure obligation and uses neither runtime join variant.
     persisted_activation:
       identity: >-
         One immutable typed declaration handle: explicit flow presence (present with the exact authored flow ID, or explicitly
@@ -5975,7 +6004,7 @@ engine:
       - per-member canonical output value and hash
       - open/closed status and close reason
       - armed_at, optional immutable deadline_at and exact continuation fire_at
-      - exact timer task/event identity
+      - exact continuation and optional deadline task/event identity
       - expected-zero pending/fired completion disposition
     arm: >-
       Stage entry snapshots membership after initialized/transition state is authoritative. Empty membership or count zero
@@ -5985,6 +6014,7 @@ engine:
       Runtime consumes the route's exact bound entry, loads its retained arm inside the entity lock and selected-store
       transaction, checks member/source-generation ownership, stores canonical output and closes when all members arrive.
     ordering: Explicit list order, lexical map keys or lexical count-contributor identities, never map iteration or arrival order.
+    publication_binding: handler_specification.handler_fields.join.publication_binding
     close: >-
       Completion, until, deadline and stage exit persist one closed reason. Outcome admission and timer cancellation share
       the selected-store transaction; in-memory scheduler registration/cancellation happens only after commit.
@@ -12159,7 +12189,7 @@ flow_model:
         - import boundaries
         - resolver plumbing
         - fail-closed verification
-        revise: retire shared-pin ordinary policy without changing deferred fan-in or reply syntax
+        revise: retire shared-pin ordinary policy and fan-in semantics without changing retained reply/fan-out syntax
         prefer: receiver-owned scalar instance + connection-owned ordinary resolution/key_from
       split_children:
         output_pin_key_carries: '#1544'
@@ -12271,11 +12301,11 @@ flow_model:
       canonical_code_owner: internal/runtime/bootverify.BuildSingletonCoordinatorDemandProjection + internal/runtime/contracts.WorkflowContractBundle.ResolveFlowSingletonCoordinator + internal/runtime/engine.Executor.applyContainedDataOperation
       rule: >
         Coordinator semantics are a strict refinement of singleton cardinality,
-        derived from exact authored consumers of typed map/list state. Fan-in
-        input rows, contained operations, direct entity writers, agent write
-        authorization, recognized entity expressions, joins, and structured
+        derived from exact authored consumers of typed map/list state. Contained
+        operations, direct entity writers, agent write authorization,
+        recognized entity expressions, and structured
         readers, including accumulate.from and fan_out.items_from, create demand.
-        Join declarations alone create no singleton or coordinator demand; their
+        Join declarations and routed arrival multiplicity create no singleton or coordinator demand; their
         exact contained-state readers participate in the same reader census.
         Executable readers are projected by one explicit closed
         handler/rule field census shared by demand, entity-reader coverage, and
@@ -12667,13 +12697,14 @@ flow_model:
             Output pins are interface exposures and become delivery only through a lowered connect edge.
           resolution_rule: >
             Runnable connect edges preserve connection-owned create, select and select-or-create policies alongside
-            retained receiver-owned fan-in and reply declarations, plus derived static,
-            target, target_set, instance-key, fan-in, and typed-reply facts, without claiming a concrete runtime
+            retained receiver-owned reply/fan-out declarations, plus derived static,
+            target, target_set, instance-key, and typed-reply facts, without claiming a concrete runtime
             recipient. Receiver resolution.mode fan-out remains non-runnable under #1934. Invalid or unlowerable
             declarations appear only as typed issues and never as executable edges.
           identity_rule: >
             Every endpoint and edge carries authored, local, and canonical event identity plus stable filesystem-flow
-            scope. Declared-input and fan-in associations fail closed on zero or multiple matches.
+            scope. Declared-input associations fail closed on zero or multiple matches. Stream accumulation and
+            finite joins are handler obligations, not connection modes or additional topology metadata.
           qualified_cross_flow_subscription_retirement: >
             A concrete qualified subscription that crosses a flow boundary is a hard invalidity and never creates a
             route, recipient, or topology edge. The authored endpoint census may retain exact file:line evidence only
@@ -12776,7 +12807,7 @@ flow_model:
       owner. Distinct producer declaration identities connected to the same
       canonical receiver event are a hard load error independent of connect row
       order, even when their schemas are byte-equivalent. Multiple deliveries or
-      runtime instances from that one producer owner remain valid fan-in and do
+      runtime instances from that one producer owner remain valid repeated publications and do
       not create additional schema owners. An ambiguous connected lookup fails
       closed and cannot fall through to a generic same-name declaration.
     declaration_identity_admission: >-
@@ -12976,13 +13007,18 @@ flow_model:
         - internal/runtime/contracts.CompiledConnectionInput
         - internal/runtime/core/pinrouting.ConnectRoutePlan
       rule: |
-        Each admitted flow pin has one exact local event identity. Scalar entries are the default; mappings may add only a closed non-default source, sink, retained fan-in/reply/fan-out policy, or creation-only initialize choice. Missing event containers mean no pins. Null, explicit empty, duplicate, non-exact, qualified, wildcard, alias-bearing, carry-bearing, or output-key/carries entries fail at admission. Producer event declarations own payload schema and business key. Every mapping key is byte-exact; alternate spellings fail rather than normalize. Ordinary selection and exceptional key source belong to each connect row, never the shared pin. CompiledConnectionInput owns immutable typed source and receiver acceptance projection from the bound producer schema. Provider/activity composition recompiles that connection evidence after exact schema binding, rejects producer-field collision and validates initialization through the existing typed owners. No connection means no ordinary template registration authority. The immutable edge contains endpoint, schema, projection, resolution, initialization, retained reply/fan-in, provenance and digest evidence. Verify, runtime, durable claims, restart, retry, replay, selected fork, graph and readback consume that evidence without authored-map fallback or synthetic private input edges.
+        Each admitted flow pin has one exact local event identity. Scalar entries are the default; mappings may add only a closed non-default source, sink, retained reply/fan-out policy, or creation-only initialize choice. Missing event containers mean no pins. Null, explicit empty, duplicate, non-exact, qualified, wildcard, alias-bearing, carry-bearing, or output-key/carries entries fail at admission. Producer event declarations own payload schema and business key. Every mapping key is byte-exact; alternate spellings fail rather than normalize. Ordinary selection and exceptional key source belong to each connect row, never the shared pin. CompiledConnectionInput owns immutable typed source and receiver acceptance projection from the bound producer schema. Provider/activity composition recompiles that connection evidence after exact schema binding, rejects producer-field collision and validates initialization through the existing typed owners. No connection means no ordinary template registration authority. The immutable edge contains endpoint, schema, projection, resolution, initialization, retained reply/fan-out, provenance and digest evidence. Verify, runtime, durable claims, restart, retry, replay, selected fork, graph and readback consume that evidence without authored-map fallback or synthetic private input edges. Stream partitioning, accumulation keys and finite join membership or closure are never pin or edge passengers.
       retired_on_presence:
         - pins.inputs.events[].name
         - pins.outputs.events[].name
         - pins.inputs.events[].carries
         - pins.inputs.events[].resolution.mode_create_select_select-or-create
         - pins.inputs.events[].resolution.from
+        - pins.inputs.events[].resolution.mode_fan-in
+        - pins.inputs.events[].resolution.aggregation
+        - pins.inputs.events[].resolution.window
+        - pins.inputs.events[].resolution.dedup_by
+        - pins.inputs.events[].resolution.singleton
         - carry.type
         - carry.optional
         - carry.convert
@@ -12992,6 +13028,61 @@ flow_model:
         - package.connect[].adapter
       compatibility: none; old stores, aliases, adapters, migrations, and dual digests are unsupported
     rule: LCA-owned schema.yaml connect is the sole authored cross-flow edge and ordinary resolution/source owner. Output pins own producer event identity and schema; receiver instance declarations own identity. Verify lowers admitted connect rows into immutable compiled pin/edge plans, and runtime consumes those plans without producer routing, package metadata, or fallback broadcast.
+    a2_join_retirement:
+      implementation_trackers: ['#1994', '#1949']
+      governing_context:
+        frozen_model: https://github.com/division-sh/swarm/issues/1786#issuecomment-5903652180
+        gate_and_binding_decision: https://github.com/division-sh/swarm/issues/1994#issuecomment-5905291257
+      canonical_owners:
+        routing: internal/runtime/contracts.CompiledConnectionInput and internal/runtime/core/pinrouting.ConnectRoutePlan
+        stream: internal/runtime/engine.AccumulateSpec and internal/runtime/accumulator
+        arrival_join: internal/runtime/contracts.WorkflowJoinPlan and internal/runtime/joinruntime
+        fan_out_settlement: internal/runtime/contracts.WorkflowJoinPlan delivery variant and internal/runtime/fanoutbarrier
+        lifecycle_entry: internal/runtime/workflowlifecycle.Effect.StageEntry and internal/runtime/core/timeridentity.StageEntryRef
+      rule: |
+        Multiple source instances and repeated deliveries reach an instance through ordinary compiled connect addressing.
+        A scalar instance declaration determines keyed shape; omission determines keyless shape. Authored mode is
+        not a shape declaration. No resolution.mode: fan-in, pin aggregation, business window, dedup_by or singleton
+        selector participates in addressing, stream acceptance, join planning or closure.
+
+        A stream is an ordinary instance-scoped object using accumulate, not a finite obligation. The selected
+        instance owns its partition; the next business period is another instance key, not an accumulator suffix.
+        An authored accumulate.key owns exact business-payload duplicate/conflict admission. Keyless accumulation
+        preserves distinct durable deliveries without inventing correlation identity or mandatory closure.
+
+        Explicit-members and count joins consume handler_specification.handler_fields.join and
+        engine.join_engine. Exact fan-out all-settled joins consume
+        handler_specification.handler_fields.join.delivery_barrier_variant through their separate fanoutbarrier
+        owner. Sharing catalog collection projection does not merge the two runtime obligation variants.
+        Pins, connect plans and singleton-coordinator validation cannot derive membership, partition, duplicate
+        policy, stage-entry identity, deadline, until or an outcome for either variant.
+      retirement: |
+        Strict admission rejects fan-in resolution and aggregation/window/dedup_by/singleton resolution passengers
+        on authored presence, including null or empty values. Retired accumulation/join fields remain rejected by
+        their handler grammar. Compiler, boot verification, routing, execution, source persistence, deferred reads,
+        replay/fork codecs, topology and describe have no surviving fan-in branch, effective partition/dedup adapter,
+        coordinator demand solely from joins, or fan-in diagnostic/readback fields. No old-store, compatibility,
+        fallback or dual-interpretation path exists.
+        Retirement is scoped to those semantic grammar positions. Business payload/state fields named window,
+        numeric aggregation, and genuine typed contained-state readers keep their own existing contracts.
+      publication_binding: handler_specification.handler_fields.join.publication_binding
+      collection_projection: handler_specification.handler_fields.fan_out.collection_iteration
+      proof_obligations:
+        - both-store ordinary connect-to-stream execution proves exact keyed duplicates are idempotent, changed payloads conflict atomically, and unkeyed distinct deliveries preserve multiplicity
+        - list/map source iteration and explicit-member snapshots preserve declared ordering and typed identity through persistence, restart and supported fork; deferred iteration also proves nonzero chunk cursors, while explicit lists prove member uniqueness
+        - count requires deadline or until even at zero, retains exact TEXT contributor identities and lexical result ordering, and invents no missing-member names
+        - completion, deadline, until and exit races select one durable close winner and exact continuation without inline last-arrival outcome execution
+        - same-instance non-loop stage re-entry at equal timestamps creates a distinct entry, while field-only revisions and committed retries create no arm
+        - delayed bound arrivals and exact replies retain their old entry; genuinely new payload-directed publications bind actual recipients at first admission, independently for each recipient or join
+        - zero, repeated and nested fan-out executions fold only the exact intent's direct ordinal dispositions; unrelated descendants and intents cannot satisfy it
+        - rejection and corruption cause no partial state, route or schedule mutation; lost acknowledgement, restart and supported historical readback preserve exact committed evidence and separate unsupported #642 refusals
+        - canonical portfolio stream and finite-join examples plus the original scatter-gather fixture execute through normal verify, boot, publication and settlement on SQLite and PostgreSQL
+      preserved_boundaries: |
+        Reply and fan-out pin policies retain their own capability contracts. Exact reply/continuation obligations
+        do not expand into ordinary sibling subscriptions. Ordinary construction/readiness consumes the existing
+        activation owner; this change adds no join-owned constructor or new #2496 capability. Broader routing and
+        addressing taxonomy remains the separately tracked #2413 R7 work. Selected deferred execution remains
+        fail-closed under #642; retained history and a join declaration never grant unsupported execution.
     authored_shapes:
       output_event_pin:
         location: schema.yaml pins.outputs.events
@@ -13009,7 +13100,7 @@ flow_model:
       resolved_input_pin:
         location: schema.yaml pins.inputs.events
         canonical_form: |
-          An input event pin MAY be authored as an object `{event, source, resolution, initialize}` only when non-default choices are required. Otherwise it is one scalar exact local event identity. `source` admits only validation-only `harness`; `external` is retired. Pin resolution retains fan-in, fan-out and reply with their existing passengers. Ordinary create/select/select-or-create and every pin resolution.from are invalid on presence and teach connection-owned resolution/key_from. `initialize` requires a creating connection and never supplies an alternate instance identity. A select edge cannot consume a pin with initialization bindings.
+          An input event pin MAY be authored as an object `{event, source, resolution, initialize}` only when non-default choices are required. Otherwise it is one scalar exact local event identity. `source` admits only validation-only `harness`; `external` is retired. Pin resolution retains fan-out and reply with their existing passengers and capability limits. Fan-in mode and aggregation/window/dedup_by/singleton passengers are invalid on presence. Ordinary create/select/select-or-create and every pin resolution.from are invalid on presence and teach connection-owned resolution/key_from. `initialize` requires a creating connection and never supplies an alternate instance identity. A select edge cannot consume a pin with initialization bindings.
         scalar_form: |
           A scalar input event pin is valid when no source or resolution choice is needed. A scalar input pin on a template receiver is not a selector.
         receiver_initialization:
@@ -13032,7 +13123,7 @@ flow_model:
         instance_fields:
           identity: 'The template flow''s scalar `instance: <field>` is the only receiver identity owner.'
           source: Omitted connect.key_from derives required payload.<instance>; a different top-level payload field is supported, while generated.uuid and event.id require create. Explicit same-name key_from is redundant and rejected.
-          mode: connect.resolution is an exhaustive typed ordinary value. No policy default or string fallback exists; retained fan-in/reply policy remains on the pin.
+          mode: connect.resolution is an exhaustive typed ordinary value. No policy default or string fallback exists; retained reply/fan-out policy remains on the pin, never stream or join policy.
         example: |
           instance: vertical_id
           pins:
@@ -13050,7 +13141,7 @@ flow_model:
           to: Required exact receiver flow ID, or `.` for this row's authoring flow.
           rename: |
             Optional exact canonical receiver-visible event identity when it differs from `event`. It follows the same admission grammar as `event`; a value equal after canonical event normalization is hard-invalid redundancy rather than an accepted alternate spelling.
-          resolution: Exact scalar create, select or select-or-create for an ordinary template edge; explicit empty, null, mappings, lists and retained fan-in/reply values are invalid here.
+          resolution: Exact scalar create, select or select-or-create for an ordinary template edge; explicit empty, null, mappings, lists, retired fan-in and retained reply/fan-out values are invalid here.
           key_from: Exact top-level payload.<different-field>, generated.uuid or event.id source; requires resolution, and intrinsic sources require create. Omit the same-name payload source rather than restating it.
         retired_fields:
           endpoint_centric_from_to: Retired on presence. `{flow}.{pin}` and `.{root_pin}` endpoints are invalid; author `event` plus flow-only `from` and `to`.
@@ -13072,9 +13163,9 @@ flow_model:
               rename: work.accepted
     ownership_split:
       output_pins: Output pins own exact local producer event identity and optional harness sink, never receiver identity.
-      input_pins: Input pins own receiver interface, retained fan-in/reply policy and typed creating-input initialization.
+      input_pins: Input pins own receiver interface, retained reply/fan-out policy and typed creating-input initialization.
       parent_connect: Parent connect owns the directed inter-flow event edge, optional rename and ordinary resolution/key_from.
-      receiver_input_resolution: Receiver input pins retain fan-in and reply resolution; ordinary instance selection is connection-owned.
+      receiver_input_resolution: Receiver input pins retain reply/fan-out resolution; ordinary instance selection is connection-owned. Accumulation and finite joins remain handler-owned and do not select recipients.
       analyzer: Analyzer owns validation, bind-visible event projection, explicit rename, and lowering to concrete immutable route-plan facts.
       route_plan: Runtime RoutePlan owns publish-time concrete recipient authority after lowering; it consumes authored topology and MUST NOT reconstruct it from live subscribers.
       producer_emit: Producer emit owns event identity and payload construction only. emit.target and emit.broadcast are retired on presence.
@@ -13094,7 +13185,7 @@ flow_model:
       receiver_route_key_present: Ordinary template edges must resolve one valid receiver instance field, required default payload source or exact connect.key_from override, and explicit connect.resolution. Static receivers that need no runtime selection may lower to a statically unique receiver.
       key_types_compatible: |
         Source and target key types must be directionally compatible before route-plan lowering. Integer sources may widen to numeric receiver fields; numeric sources MUST NOT narrow to integer receiver fields.
-      receiver_resolution_valid: Connection-owned ordinary resolution/source, receiver scalar identity, and retained receiver fan-in/reply facts must be internally valid and unambiguous.
+      receiver_resolution_valid: Connection-owned ordinary resolution/source, receiver scalar identity, and retained receiver reply/fan-out facts must be internally valid and unambiguous. Retired fan-in policy cannot repair missing or ambiguous receiver authority.
       inference_unambiguous: |
         Compiler resolution is allowed only when exactly one producer output and receiver input match their authoring-flow-visible event identities. There is no first-match, pin-name fallback, suffix/leaf match, dot-to-underscore guess, or global resolved-event search.
       lowered_route_plan_concrete: Accepted connections must lower to concrete route-plan inputs; no runtime path may recover by broadcasting or reinterpreting authored aliases.
@@ -13140,14 +13231,14 @@ flow_model:
         status: merge_bearing_aggressive_retirement
         canonical_code_owner: internal/runtime/contracts.FlowConnect + internal/runtime/core/pinrouting.ConnectRoutePlan
         rule: |
-          Authored `connect.delivery` and `connect.reply` are invalid on presence. FlowConnect and ConnectRoutePlan expose no delivery or raw reply compatibility fields. Connect lowering consumes the directed edge, optional rename and connection-owned ordinary instance policy. Retained fan-in/fan-out cardinality and typed reply resolution derive from receiver input resolution. Runtime dispatch, persistence, replay, topology readback, and describe output consume only target/target_set and typed ReplyResolution facts.
+          Authored `connect.delivery` and `connect.reply` are invalid on presence. FlowConnect and ConnectRoutePlan expose no delivery or raw reply compatibility fields. Connect lowering consumes the directed edge, optional rename and connection-owned ordinary instance policy. Retained fan-out cardinality and typed reply resolution derive from receiver input resolution. Runtime dispatch, persistence, replay, topology readback, and describe output consume only target/target_set and typed ReplyResolution facts. No fan-in route-plan metadata or resolution branch remains.
         migration:
           rule: Retired delivery, reply-map, and compatibility fields fail strict admission; no codemod or compatibility reader exists.
         fail_closed:
           - delivery or reply present with any scalar, mapping, sequence, empty, or malformed value
           - runtime attempt to reconstruct retired delivery or raw reply authority
         preserved:
-          - connection resolution create, select and select-or-create; retained receiver fan-in, fan-out and reply
+          - connection resolution create, select and select-or-create; retained receiver fan-out and reply
           - derived DeliveryRoute persistence, replay, and typed reply context
       implementation_slice_1472:
         status: merge_bearing_runtime_artifact
@@ -13287,14 +13378,14 @@ flow_model:
           broadcast:true, receiver select_entity/select_or_create_entity, and
           explicit create_flow_instance are not lifecycle authority.
       implementation_slice_1835:
-        status: create_select_select_or_create_fan_in_stream_barrier_and_reply_modes_runnable_fan_out_fail_closed
+        status: create_select_select_or_create_and_reply_runnable_fan_out_fail_closed_fan_in_retired
         canonical_spec_owner: platform-spec.yaml#flow_model.composition_routing.route_plan_lowering.implementation_slice_1835
-        canonical_code_owner: internal/runtime/contracts.FlowInputPinResolution/WorkflowJoinPlan + internal/runtime/core/pinrouting.ConnectRoutePlan.InstanceKey/FanIn/ReplyResolution + internal/runtime/bus.templateInstanceLifecycleOwner/connectRoutePlanResolver + internal/runtime/engine.AccumulateSpec/joinruntime.Activation + internal/store.ReplyContextStore + internal/runtime/bootverify.composition_connect_validation
+        canonical_code_owner: internal/runtime/contracts.CompiledConnectionInput/FlowInputPinResolution + internal/runtime/core/pinrouting.ConnectRoutePlan.InstanceKey/ReplyResolution + internal/runtime/bus.templateInstanceLifecycleOwner/connectRoutePlanResolver + internal/store.ReplyContextStore + internal/runtime/bootverify.composition_connect_validation
         instance_identity_owner_2021:
           status: scalar_typed_owner_finalized_by_2087
           authored_identity_owner: 'flow instance: <field>'
           authored_source_owner: connection key_from, with omission deriving the same-named required payload field
-          authored_behavior_owner: connection resolution for ordinary variants; retained pin resolution for fan-in/reply
+          authored_behavior_owner: connection resolution for ordinary variants; retained pin resolution for reply/fan-out
           effective_owner: |
             internal/runtime/core/pinrouting.ConnectRoutePlan.InstanceKey carries one opaque validated Field, one typed Source, and one exhaustive typed Mode. No second representation exists.
           readback: |
@@ -13303,8 +13394,8 @@ flow_model:
             Mapping/list/composite instance declarations, lifecycle policy fields, resolution.instance_key, instance.key sources, input address, connect map, and connect using.instance are hard-invalid during strict load. No warning, codemod, alias, fallback reader, compatibility DTO, or dual semantic owner exists.
         rule: |
           Ordinary instance-resolution belongs to flat connection resolution
-          and optional key_from. Receiver pins retain fan-in/reply resolution
-          under their existing `resolution:{mode,...}` shape. Route planning
+          and optional key_from. Receiver pins retain reply/fan-out resolution
+          under their existing `resolution:{mode,...}` shape and capability limits. Route planning
           consumes these separate typed owners and lowers them into
           ConnectRoutePlan evidence before EventBus delivery. Runtime must not
           infer resolution authority from producer emit targets, live
@@ -13317,12 +13408,11 @@ flow_model:
           key. PR3 makes connection `resolution: select-or-create` runnable for
           the same single typed instance-source boundary, with lifecycle/store
           convergence on exactly one receiver instance for concurrent same-key
-          missing deliveries. PR4 makes `resolution.mode: fan-in` runnable
-          for `aggregation: stream` / bounded windowed delivery into an
-          explicit singleton receiver whose fan-in row demands coordinator semantics. The finite barrier slice
-          makes `aggregation: barrier` runnable by lowering pin identity into
-          one effective WorkflowJoinPlan and executing through joinruntime,
-          never through accumulate. Reply resolution is also
+          missing deliveries. Fan-in resolution, aggregation/window/dedup_by/singleton
+          passengers and derived route metadata are retired by
+          flow_model.composition_routing.a2_join_retirement. Stream accumulation
+          and finite join obligations are handler semantics at the ordinarily selected
+          instance, never additional resolution modes. Reply resolution is also
           runnable through the route-scoped reply-context contract under
           `engine.cross_flow_routing.reply_resolution`. Fan-out remains
           design-locked and fail-closed until its implementation slice lands.
@@ -13396,29 +13486,6 @@ flow_model:
               - ambiguous target instance
               - unavailable template lifecycle activator
               - activation/create race that cannot reload exactly one matching instance
-          fan-in:
-            status: stream_windowed_and_finite_barrier_runnable
-            contract: |
-              Fan-in routes many source deliveries into one receiver instance or aggregation context. `aggregation: stream|barrier` is the locked sub-semantics selector. Stream delivers each accepted event into an open/windowed accumulator context; barrier admits arrivals into a declared-membership join activation and closes through joinruntime. The receiver input pin MUST declare `dedup_by` and `singleton`; stream MUST declare `window`, while barrier may omit window only when stage topology proves the join stage non-reentrant. `singleton` is the explicit receiver route path for the singleton instance and creates exact coordinator demand; it MUST be the receiver route or a child of the receiver route; it is never inferred from the sender/source instance. `dedup_by` is required and is exactly one top-level `payload.<field>` for barrier; stream also permits `event.id`. Tuple/composite dedup remains fail-closed. Any window must be one top-level payload field. The route plan reuses singular target delivery and carries fan-in metadata for proof; it MUST NOT introduce a new fan-in target kind. The receiver input pin is the only authoring owner for fan-in `dedup_by` and `window` semantics. A stream receiver declares only the accumulator target/source and consumes an effective stream spec. A barrier receiver declares one join row; members.by and window.by are forbidden there and derive into the effective WorkflowJoinPlan from the pin. EventBus/delivery owns only singular route delivery and MUST NOT add aggregation, dedup/window, membership, completion, or timeout authority.
-            fail_closed:
-              - aggregation other than stream or barrier
-              - missing or empty singleton
-              - singleton outside the receiver route path
-              - missing or empty stream window
-              - missing barrier window when the join stage is re-entrant
-              - window not naming one top-level payload field
-              - missing or empty dedup_by
-              - dedup_by list/tuple/composite beyond one field
-              - barrier dedup_by event.id or any non-payload identity
-              - receiver has keyed cardinality or cannot satisfy the fan-in row's actual coordinator demand
-              - missing receiver handler for the input event
-              - stream receiver missing accumulate or declaring join
-              - barrier receiver missing exactly one matching join or declaring accumulate
-              - receiver handler redeclares accumulate.dedup_by for fan-in
-              - receiver handler redeclares accumulate.window for fan-in
-              - barrier join authors members.by or window.by instead of consuming derived pin identity
-              - any retired input address, connect map, or connect using.instance field
-              - producer target.flow / target.match / broadcast rescue
           fan-out:
             status: spec_locked_not_runnable_in_1835_pr1
             contract: |
@@ -13430,6 +13497,8 @@ flow_model:
         authority_boundaries:
           retired_and_absent:
             - mapping/list/composite instance grammar and lifecycle policies
+            - fan-in resolution and aggregation/window/dedup_by/singleton resolution passengers
+            - fan-in route-plan, execution-claim and topology/readback metadata
             - input address, connect map, and connect using.instance
             - implicit identity reconstruction from retired output-pin key/carries
             - ConnectRoutePlan Address, Map, or InstanceKey.Mappings
@@ -13441,7 +13510,7 @@ flow_model:
           rule: No retired seam may survive as a DTO, decoder, fallback, diagnostic fact, readback projection, or runtime interpreter.
         proof_obligations:
           - contracts decode every locked mode and reject unknown resolution fields fail-closed
-          - bootverify accepts valid create/select/select-or-create/fan-in stream/barrier resolution and rejects other non-runnable modes as not runnable in this slice
+          - bootverify accepts valid create/select/select-or-create and reply resolution, rejects retired fan-in policy on presence, and keeps fan-out capability admission fail-closed
           - route-plan lowering consumes the immutable connection's typed create mode, scalar instance Field and Source derived from the required same-named payload field or exact key_from exception, with no shared-pin policy or producer output-key dependency
           - EventBus publish/preflight creates a missing receiver instance through the canonical lifecycle path
           - downstream receiver routes can render the receiver-targeted identity projection derived from typed Source as payload.<instance>
@@ -13463,16 +13532,10 @@ flow_model:
           - same committed select-or-create event replay reuses persisted delivery route/scope and does not reselect or recreate after descriptor drift
           - standalone #1828 `template-select-or-create` conformance fixture verifies and materializes through the canonical select-or-create route plan
           - an agent-only connect route with an unrelated receiver-flow node delivers to the selected agent without synthesizing node authority or a connected-input handler failure
-          - route-plan lowering records fan-in stream metadata, required singleton/window/dedup_by, singular target delivery, and no new target kind
-          - bootverify rejects fan-in receiver handler redeclaration of accumulate.dedup_by or accumulate.window
-          - EventBus publish/preflight for fan-in stream routes multiple source contributions to the same explicit singleton receiver route after coordinator demand is satisfied
-          - executor derives effective fan-in accumulator dedup/window from the matched receiver input pin, with no handler-local redeclaration
-          - receiver accumulator kernel enforces pin-declared dedup_by idempotency and partitions arrivals by pin-declared window
-          - same committed fan-in stream event replay reuses persisted delivery route/scope and does not re-infer receiver identity from sender/source state
-          - standalone #1828 `template-fan-in` conformance fixture verifies and materializes through the canonical fan-in stream route plan
-          - canonical fan-in barrier lowers pin-owned member/window identity into exactly one effective WorkflowJoinPlan with provenance
-          - EventBus/Pipeline execution proves partial arrival, exact duplicate, conflicting duplicate, completion, timeout, restart, and committed replay without an accumulator
-          - canonical fan-in barrier execution has SQLite/PostgreSQL parity and membership-ordered results independent of arrival order
+          - ordinary compiled connections preserve same-instance contributions, keyed period isolation, explicit-members/count joins and distinct exact fan-out settlement without a fan-in mode or plan passenger
+          - strict grammar and structural guards reject retired resolution passengers while preserving unrelated business fields and numeric aggregation
+          - canonical stream/arrival/fan-out owners consume their declared typed plans, never derive semantics from pins, coordinator shape or diagnostics
+          - both-store public execution, restart and supported historical-fork proof preserves exact routes, stage-entry bindings, canonical duplicate/conflict behavior and closure outcomes
       implementation_slice_1546:
         status: retired_by_2087
         canonical_code_owner: strict contract decoders plus ConnectRoutePlan.InstanceKey.Source
@@ -18764,8 +18827,8 @@ run_model:
         independently approved.'
       3d_selected_contract_timer_route_policy: 'For selected-contract mutating fork execution,
         runtime.run_fork.selected_contract_deferred_work_admission classifies source timer history, workflow-timer
-        declarations, timed-join and fan-out delivery-barrier declarations, connect-time resolution through the exhaustive six-mode matrix
-        (`create` and `select-or-create` can create; `select`, `fan-in`, `fan-out`, and `reply` cannot) as
+        declarations, timed-join and fan-out delivery-barrier declarations, connect-time resolution through the exhaustive current matrix
+        (`create` and `select-or-create` can create; `select`, `fan-out`, and `reply` cannot) as
         unsupported while the ephemeral selected-fork container has no
         long-lived deferred-work owner. Direct execution rejects before materialization; staged activation rejects before
         delivery replay, state-only activation, publication, workflow mutation, or container issuance. The admission is
@@ -19992,7 +20055,7 @@ observation_model:
         join activation records the admitted arrival; later handler steps do not execute until the join selects an outcome.
       fanned_out: Fan-out obligation committed. The handler transaction did not emit the per-item events; the durable pump
         owes their ordered ordinary publication. Downstream result coordination, when needed, is authored independently
-        through fan-in stream or finite join semantics rather than implied by fan-out issuance.
+        through ordinary instance-scoped accumulation or finite joins rather than implied by fan-out issuance.
   agent_vs_node_observability: System node handler emissions are recorded in the entity emission chain and appear in emitted_events.
     Agent emissions are NOT part of the entity emission chain — they are independent events that enter the event loop separately.
     An agent emitting ticket.classified creates a new event in the events table that is then delivered to subscribers. The
@@ -21574,7 +21637,7 @@ static_analyzer:
         field. Integer sources may widen to numeric receiver fields; numeric
         sources MUST NOT narrow to integer receiver fields because their event
         schema admits fractional values.
-      receiver_resolution_valid: Receiver typed mode, lifecycle action, fan-in, and typed reply lineage must be valid and unambiguous.
+      receiver_resolution_valid: Connection-owned typed ordinary mode, lifecycle action, retained fan-out policy and typed reply lineage must be valid and unambiguous. Accumulation and finite joins cannot supply missing routing authority.
       event_topology_roles_consume_connect: Verify-time producer/consumer and dead-event schema checks must treat valid
         connect output/input facts as authored event roles so parent topology does not require runtime reconstruction to
         silence missing producer, missing consumer, or dead-schema diagnostics.

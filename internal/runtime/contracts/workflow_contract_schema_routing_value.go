@@ -74,7 +74,7 @@ func projectSchemaConnectResolutionValue(fields map[string]yamlsource.Value, row
 		}
 		row.Resolution, err = ParseFlowInputResolutionMode(text)
 		if err != nil || !ordinaryInstanceResolution(row.Resolution) {
-			return nodeValueError(resolution, fmt.Errorf("connect.resolution must be create, select or select-or-create; fan-in and reply remain input-pin policies"))
+			return nodeValueError(resolution, fmt.Errorf("connect.resolution must be create, select or select-or-create; reply and fan-out remain input-pin policies"))
 		}
 	}
 	key, present := fields["key_from"]
@@ -324,16 +324,9 @@ func projectSchemaResolutionValue(value yamlsource.Value) (FlowInputPinResolutio
 		return out, nodeValueError(value, err)
 	}
 	if err := schemaValueTexts(fields, map[string]*string{
-		"aggregation": &out.Aggregation, "window": &out.Window,
-		"singleton": &out.Singleton, "replies_to": &out.RepliesTo, "correlation_key": &out.CorrelationKey,
+		"replies_to": &out.RepliesTo, "correlation_key": &out.CorrelationKey,
 	}, true); err != nil {
 		return out, err
-	}
-	if dedup, present := fields["dedup_by"]; present {
-		out.DedupBy, err = projectSchemaPinFieldsValue(dedup)
-		if err != nil {
-			return out, err
-		}
 	}
 	if err := validateCompiledFlowInputResolution(out); err != nil {
 		return out, nodeValueError(value, err)

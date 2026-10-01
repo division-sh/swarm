@@ -6,8 +6,11 @@ portfolio-collector:
       accumulate:
         into: operating_reports
         from: payload
+        key: payload.operating_id
       data_accumulation:
         writes:
+          - source_field: period_id
+            target_field: period_id
           - op: set
             target: entity.reports
             key: ${payload.operating_id}

@@ -63,7 +63,7 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 
 	ownership := mustMappingValue(t, composition, "ownership_split")
 	assertScalarContains(t, mustMappingValue(t, ownership, "parent_connect"), "owns the directed inter-flow event edge")
-	assertScalarContains(t, mustMappingValue(t, ownership, "receiver_input_resolution"), "fan-in and reply")
+	assertScalarContains(t, mustMappingValue(t, ownership, "receiver_input_resolution"), "reply/fan-out")
 	assertScalarContains(t, mustMappingValue(t, ownership, "output_pins"), "never receiver identity")
 	assertScalarContains(t, mustMappingValue(t, ownership, "input_pins"), "typed creating-input initialization")
 	assertScalarContains(t, mustMappingValue(t, ownership, "producer_emit"), "retired on presence")
@@ -138,7 +138,7 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarValue(t, mustMappingValue(t, retirement, "status"), "merge_bearing_aggressive_retirement")
 	assertScalarContains(t, mustMappingValue(t, retirement, "rule"), "ConnectRoutePlan expose no delivery or raw reply compatibility fields")
 	assertScalarContains(t, mustYAMLPath(t, retirement, "migration", "rule"), "no codemod or compatibility reader exists")
-	if !sequenceContainsScalar(mustMappingValue(t, retirement, "preserved"), "connection resolution create, select and select-or-create; retained receiver fan-in, fan-out and reply") {
+	if !sequenceContainsScalar(mustMappingValue(t, retirement, "preserved"), "connection resolution create, select and select-or-create; retained receiver fan-out and reply") {
 		t.Fatal("connect retirement must preserve receiver-owned reply semantics")
 	}
 
@@ -194,9 +194,9 @@ func TestPlatformSpecReplyRuntimeStatusDoesNotContradictHistoricalSlice(t *testi
 
 	assertScalarValue(t, mustMappingValue(t, reply, "status"), "runnable_v1")
 	assertScalarValue(t, mustMappingValue(t, sliceReply, "status"), "runnable_v1")
-	assertScalarContains(t, mustMappingValue(t, slice, "status"), "reply_modes_runnable")
+	assertScalarContains(t, mustMappingValue(t, slice, "status"), "reply_runnable")
 	assertScalarContains(t, mustMappingValue(t, slice, "rule"), "Reply resolution is also")
-	assertScalarContains(t, mustMappingValue(t, slice, "canonical_code_owner"), "ConnectRoutePlan.InstanceKey/FanIn/ReplyResolution")
+	assertScalarContains(t, mustMappingValue(t, slice, "canonical_code_owner"), "ConnectRoutePlan.InstanceKey/ReplyResolution")
 	assertScalarContains(t, mustMappingValue(t, slice, "canonical_code_owner"), "internal/store.ReplyContextStore")
 	assertScalarContains(t, mustMappingValue(t, sliceReply, "contract"), "engine.cross_flow_routing.reply_resolution")
 }
@@ -208,7 +208,7 @@ func TestPlatformSpecInstanceIdentityAuthoringSourceAuthority(t *testing.T) {
 	assertScalarValue(t, mustMappingValue(t, owner, "status"), "scalar_typed_owner_finalized_by_2087")
 	assertScalarValue(t, mustMappingValue(t, owner, "authored_identity_owner"), "flow instance: <field>")
 	assertScalarValue(t, mustMappingValue(t, owner, "authored_source_owner"), "connection key_from, with omission deriving the same-named required payload field")
-	assertScalarValue(t, mustMappingValue(t, owner, "authored_behavior_owner"), "connection resolution for ordinary variants; retained pin resolution for fan-in/reply")
+	assertScalarValue(t, mustMappingValue(t, owner, "authored_behavior_owner"), "connection resolution for ordinary variants; retained pin resolution for reply/fan-out")
 	assertScalarContains(t, mustMappingValue(t, owner, "effective_owner"), "opaque validated Field")
 	assertScalarContains(t, mustMappingValue(t, owner, "effective_owner"), "No second representation")
 	assertScalarContains(t, mustMappingValue(t, owner, "retirement"), "hard-invalid")
@@ -322,8 +322,9 @@ func TestPlatformSpecCompositionRoutingRetiresProducerTargetAuthority(t *testing
 	assertScalarContains(t, mustYAMLPath(t, fanOut, "sub_fields", "identity"), "require an explicit identity")
 	assertScalarValue(t, mustYAMLPath(t, fanOut, "effective_semantics", "canonical_owner"), "contracts.WorkflowContractBundle.CompileFanOutPlan")
 	assertScalarContains(t, mustYAMLPath(t, fanOut, "collection_iteration"), "constant-size obligation")
-	assertScalarContains(t, mustYAMLPath(t, fanOut, "collection_iteration"), "declared list order")
-	assertScalarContains(t, mustYAMLPath(t, fanOut, "collection_iteration"), "never sorts or deduplicates")
+	assertScalarContains(t, mustYAMLPath(t, fanOut, "collection_iteration"), "Lists retain declared order and multiplicity")
+	assertScalarContains(t, mustYAMLPath(t, fanOut, "collection_iteration"), "Maps yield exact keys in lexical order")
+	assertScalarContains(t, mustYAMLPath(t, fanOut, "collection_iteration"), "without trimming, coercion, value-based deduplication")
 	assertScalarContains(t, mustYAMLPath(t, fanOut, "collection_iteration"), "stable per-entry activation identity")
 	assertScalarContains(t, mustYAMLPath(t, fanOut, "collection_iteration"), "event_id never own")
 	assertScalarContains(t, mustYAMLPath(t, fanOut, "retired_target_field"), "retired on presence")

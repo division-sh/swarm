@@ -328,9 +328,10 @@ rows:
       - {kind: go_test, name: TestCompileConnectPlansUsesSelectOrCreateInputResolution}
       - {kind: go_test, name: TestLowerCompositionConnectRoutePlanWithLocationDerivesRenamedPayloadSourceFromCarry}
       - {kind: go_test, name: TestConnectRoutePlanProductionAPIHasNoRetiredIdentityOrPolicyFacts}
-      - {kind: go_test, name: TestCompileConnectPlansUsesFanInStreamSingularTarget}
-      - {kind: go_test, name: TestCompileConnectPlansAllowsFanInStreamEventIDDedup}
-      - {kind: go_test, name: TestCompileConnectPlansFailsClosedForInvalidFanInStream}
+      - {kind: go_test, name: TestCompileConnectPlansUsesOrdinaryKeyedReportRouting}
+      - {kind: go_test, name: TestRun_KeyedPortfolioStreamUsesOrdinaryConnectAndAccumulator}
+      - {kind: go_test, name: TestRun_NestedPortfolioJoinUsesOrdinaryConnectAndAuthoredMembership}
+      - {kind: go_test, name: TestCompositionSourceRejectsRetiredFanInGrammarBeforeBoot}
       - {kind: go_test, name: TestLowerCompositionConnectRoutePlanUsesExactEventPinIdentity}
       - {kind: go_test, name: TestEventBusPublish_RootConnectRoutePlanPersistsSingularTarget}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget}
@@ -339,8 +340,8 @@ rows:
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailsClosedForRenamedTemplateInstanceKeySourceGap}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceAndReplaysCommittedRoute}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAndReplaysCommittedRoute}
-      - {kind: go_test, name: TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup}
-      - {kind: go_test, name: TestFanInStreamConformance_EventIDDedupUsesEventIdentity}
+      - {kind: go_test, name: TestKeyedPortfolioStreamRoutesAndRetainsIndependentPeriodsOnBothStores}
+      - {kind: go_test, name: TestA2M14UnkeyedPreservesDeliveryMultiplicityAndOrder}
     notes: >
       ConnectRoutePlan is a typed route-intent input, not an untracked string
       fallback. Receiver-owned scalar instance identity, the same-named typed
@@ -348,6 +349,9 @@ rows:
       authority. Address, map, using, implicit mappings, and instance policies
       are retired and cannot shadow or repair that plan. #1495 owns additional
       typed producer migration after this guardrail is in place.
+      #1994/#1949 retire fan-in input policy: keyed portfolio streams and finite
+      joins use ordinary connections, with accumulation and lifecycle membership
+      owned by their explicit handler declarations rather than receiver pins.
 
   - id: route_table_resolve_role_separation
     concept: RouteTable Resolve APIs remain direct pub/sub topology only; Resolve is authored/runless and ResolveForRun preserves admitted runtime ownership, and neither participates in compiled-connect recipient admission.

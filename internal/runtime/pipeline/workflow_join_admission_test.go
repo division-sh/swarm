@@ -66,8 +66,12 @@ func TestA2JoinAdmissionFirstPublicationAndRetainedEvidence(t *testing.T) {
 	}
 	arm(entry)
 	first, fence, err := PrepareWorkflowJoinAdmission(source, run, plan.HandlerEvent, route, &instance)
-	if err != nil || len(first) != 1 || first[0].Ref.StageEntry() != entry || fence == nil || fence.Revision != 1 {
+	if err != nil || len(first) != 1 || first[0].Ref.StageEntry() != entry || fence == nil || fence.Entry != entry || len(fence.Arms) != 1 || fence.Arms[0].Receipt != first[0] || fence.Arms[0].Status != joinruntime.StatusOpen {
 		t.Fatalf("first admission = %#v fence=%#v err=%v", first, fence, err)
+	}
+	instance.Revision++
+	if matched, err := fence.MatchesCurrent(instance.CurrentState, instance.Bookkeeping, instance.StateBuckets); err != nil || !matched {
+		t.Fatalf("field-only revision changed admission: matched=%v err=%v", matched, err)
 	}
 	concrete, _, err := PrepareWorkflowJoinAdmission(source, run, target.FlowInstance+"/"+plan.HandlerEvent, route, &instance)
 	if err != nil || !reflect.DeepEqual(concrete, first) {
@@ -103,7 +107,7 @@ func TestA2JoinAdmissionFirstPublicationAndRetainedEvidence(t *testing.T) {
 	}
 	route.Context.Joins = nil
 	early, fence, err := PrepareWorkflowJoinAdmission(source, run, plan.HandlerEvent, route, nil)
-	if err != nil || len(early) != 1 || early[0].Disposition != events.JoinAdmissionEarly || fence == nil || fence.Revision != 0 {
+	if err != nil || len(early) != 1 || early[0].Disposition != events.JoinAdmissionEarly || fence == nil || !fence.Entry.Empty() || len(fence.Arms) != 1 || fence.Arms[0].Receipt != early[0] || fence.Arms[0].Status != "" {
 		t.Fatalf("unarmed publication = %#v fence=%#v err=%v", early, fence, err)
 	}
 	route.Context.Joins = early

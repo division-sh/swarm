@@ -251,8 +251,8 @@ func TestNodeIDRetirementCorpusEffectiveEquivalence(t *testing.T) {
 		sort.Slice(transitions, func(i, j int) bool { return transitions[i].ID < transitions[j].ID })
 		got[path] = map[string]any{"nodes": nodes, "handlers": bundle.Semantics.NodeHandlers, "owners": bundle.Semantics.EventOwners, "transitions": transitions, "connects": bundle.Semantics.CompositionConnects}
 	}
-	if nodeCount != 24 {
-		t.Fatalf("public node census = %d, want 24", nodeCount)
+	if nodeCount != 25 {
+		t.Fatalf("public node census = %d, want 25 (including the nested period receiver)", nodeCount)
 	}
 	raw, err := json.MarshalIndent(got, "", "  ")
 	if err != nil {

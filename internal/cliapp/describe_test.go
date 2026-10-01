@@ -560,26 +560,18 @@ func TestDescribeFanInBarrierShowsEffectiveJoinProvenance(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("describe barrier json code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 		}
-		// Preserve the legacy wire proof until the C fixture cutover, without
-		// restoring removed provenance fields on the authored join view.
-		type legacyJoinView struct {
-			authoringview.StageGraphJoinView
-			MembersBySource string `json:"members_by_source"`
-			WindowBy        string `json:"window_by"`
-			WindowBySource  string `json:"window_by_source"`
-		}
 		var output struct {
 			StageGraphs []struct {
-				FlowID string           `json:"flow_id"`
-				Joins  []legacyJoinView `json:"joins"`
+				FlowID string                             `json:"flow_id"`
+				Joins  []authoringview.StageGraphJoinView `json:"joins"`
 			} `json:"stage_graphs"`
 		}
 		if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
 			t.Fatalf("decode describe barrier json: %v\n%s", err, stdout.String())
 		}
-		var joins []legacyJoinView
+		var joins []authoringview.StageGraphJoinView
 		for _, graph := range output.StageGraphs {
-			if graph.FlowID == "portfolio" {
+			if graph.FlowID == "portfolio/period" {
 				joins = graph.Joins
 				break
 			}
@@ -588,9 +580,14 @@ func TestDescribeFanInBarrierShowsEffectiveJoinProvenance(t *testing.T) {
 			t.Fatalf("portfolio joins = %#v, want one", joins)
 		}
 		join := joins[0]
-		if join.MembersBy != "payload.operating_id" || join.MembersBySource != "resolution.dedup_by" ||
-			join.WindowBy != "payload.period_id" || join.WindowBySource != "resolution.window" {
+		if join.MembersBy != "payload.operating_id" || join.MembersFrom != "state.expected_operating_ids" ||
+			join.DeadlineAfter != "5m" || join.DeadlineFrom != "stage_entry" {
 			t.Fatalf("barrier json provenance = %#v", join)
+		}
+		for _, retired := range []string{"members_by_source", "window_by", "fan_in_pin", "resolution_aggregation"} {
+			if strings.Contains(stdout.String(), `"`+retired+`"`) {
+				t.Fatalf("retired semantic readback %s survives: %s", retired, stdout.String())
+			}
 		}
 	})
 
@@ -603,9 +600,8 @@ func TestDescribeFanInBarrierShowsEffectiveJoinProvenance(t *testing.T) {
 			t.Fatalf("describe barrier code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 		}
 		for _, want := range []string{
-			"members entity.expected_operating_ids by payload.operating_id <- resolution.dedup_by",
-			"window entity.period_id by payload.period_id <- resolution.window",
-			"fan_in_pin operating.reported",
+			"members state.expected_operating_ids by payload.operating_id",
+			"deadline 5m from stage_entry",
 		} {
 			if !strings.Contains(stdout.String(), want) {
 				t.Fatalf("describe barrier output missing %q:\n%s", want, stdout.String())
@@ -735,6 +731,30 @@ func TestVerifyCommandRejectsRetiredJoinGrammar(t *testing.T) {
 			code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", root, "--config", writeTestVerifyRuntimeConfig(t), "--json"}, &stdout, &stderr, defaultRootCommandOptions())
 			if code == 0 || !strings.Contains(stdout.String()+stderr.String(), "join field \""+field+"\" is not supported") {
 				t.Fatalf("retired field %s accepted or misdiagnosed: code=%d stdout=%s stderr=%s", field, code, stdout.String(), stderr.String())
+			}
+		})
+	}
+}
+
+func TestVerifyCommandRejectsCountJoinWithoutBoundedClosure(t *testing.T) {
+	for _, count := range []int{0, 2} {
+		t.Run(fmt.Sprintf("count_%d", count), func(t *testing.T) {
+			root := writeDescribeStageGraphContracts(t)
+			path := filepath.Join(root, "support", "nodes.yaml")
+			contents, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			updated := strings.Replace(string(contents), "          from: state.expected_line_item_ids", fmt.Sprintf("          count: %d", count), 1)
+			updated = strings.Replace(updated, "        deadline:\n          after: 1h\n          from: stage_entry\n        on_deadline:\n          advances_to: timed_out\n", "", 1)
+			if strings.Contains(updated, "deadline:") || !strings.Contains(updated, fmt.Sprintf("count: %d", count)) {
+				t.Fatal("unbounded count mutation did not match the admitted fixture")
+			}
+			writeDescribeTestFile(t, path, updated)
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(t.Context(), RepoRoot(), []string{"verify", root, "--config", writeTestVerifyRuntimeConfig(t), "--json"}, &stdout, &stderr, defaultRootCommandOptions())
+			if code == 0 || !strings.Contains(stdout.String()+stderr.String(), "count join requires deadline or until") {
+				t.Fatalf("unbounded count admitted or misdiagnosed: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 			}
 		})
 	}

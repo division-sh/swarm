@@ -201,15 +201,15 @@ rows:
       output: {rows: 147, scalar: 16, mapping: 131, authored_names: 0, qualified_or_wildcard: 0}
 
   - id: flow.input_pin_resolution
-    ruled: issue-2438-slice-1
-    paths: "schema.pins.inputs.events[].resolution.* for retained fan-in/reply policies only"
+    ruled: issue-1994-1949-a2
+    paths: "schema.pins.inputs.events[].resolution.mode/replies_to/correlation_key for retained fan-out/reply policies only"
     owners: [projectSchemaResolutionValue, CompileFlowInputPin, CompileConnectGraph]
     information:
-      choice: [fan_in_or_reply_mode, aggregation, window, dedup_by, singleton, replies_to, correlation_key]
+      choice: [fan_out_or_reply_mode, replies_to, correlation_key]
     spelling:
-      canonical_candidate: retained_fan_in_and_reply_pin_policies_only
-      retired_duplicates: [carries, carry_type, carry_optional, carry_convert, ordinary_pin_resolution, resolution.from]
-      distinct_overrides: [multi_item_dedup_by]
+      canonical_candidate: retained_fan_out_and_reply_pin_policies_only
+      retired_duplicates: [carries, carry_type, carry_optional, carry_convert, ordinary_pin_resolution, resolution.from, fan_in_mode, resolution.aggregation, resolution.window, resolution.dedup_by, resolution.singleton]
+      distinct_overrides: []
     corpus: {carry_rows: 0, from_overrides: 0}
 
   - id: flow.output_pin_route_projection
@@ -298,7 +298,7 @@ rows:
       retired_duplicates: [connected_consumer_restatement, nested_payload_block, raw_schema_resolver_consumer, non_field_level_optional_marker]
       distinct_overrides: []
     f2_bug: "connected receivers could lose producer ownership to unrelated same-name declarations or connect order, while authoring-flow and owning-flow endpoint aliases could split one producer identity; nested aliases and merge sequences could rewrite authored introduction provenance to anchor coordinates; invalid declaration identities could normalize, disappear, overwrite, or defer failure"
-    corpus: {event_declarations: 38, migrated_consumer_restatements: 16, connected_duplicate_declarations: 0, exact_projection_proofs: 13, named_delivery_projection_deltas: 3, adversarial_owner_collisions: 1, multi_producer_order_proofs: 2, ambiguous_owner_fallback_proofs: 1, supported_single_owner_fan_in_proofs: 2, canonical_producer_endpoint_alias_proofs: 1, closed_optional_type_forms: 6, rejected_optional_marker_positions: 6, alias_location_shapes: 9, rejected_declaration_identities: 7, accepted_declaration_patterns: 4}
+    corpus: {event_declarations: 38, migrated_consumer_restatements: 16, connected_duplicate_declarations: 0, exact_projection_proofs: 13, named_delivery_projection_deltas: 3, adversarial_owner_collisions: 1, multi_producer_order_proofs: 2, ambiguous_owner_fallback_proofs: 1, supported_single_owner_connected_projection_proofs: 2, canonical_producer_endpoint_alias_proofs: 1, closed_optional_type_forms: 6, rejected_optional_marker_positions: 6, alias_location_shapes: 9, rejected_declaration_identities: 7, accepted_declaration_patterns: 4}
     effective_consumers: [schema_registry, semantic_flow_proof, semantic_executable_node_proof, emit_lowering, pin_routing, bootverify, instance_source_typing, provider_overlays, operator_publication]
     provenance: [authored_nested_values, authored_alias_and_merge_introduction_locations, authored_alias_use_and_resolved_target_locations, derived_consumer_projection, payload_alias_carries, intrinsic_generated_carries, source_artifact_identified_boundary_snapshots]
     divergent_manifestations:
@@ -465,7 +465,7 @@ rows:
 
   - id: handler.collection_compute
     ruled: mechanical-ratified
-    paths: "accumulate.*, compute.*, fan_out.*, group_by.*, filter.*, reduce.*, count.*, query.*, clear.targets"
+    paths: "accumulate.into/from/key/description, compute.*, fan_out.*, group_by.*, filter.*, reduce.*, count.*, query.*, clear.targets"
     owners: [projectNodeAccumulateValue, projectNodeComputeValue, projectNodeFanOutValue, projectNodeGroupByValue, projectNodeFilterValue, projectNodeReduceValue, projectNodeCountValue, projectNodeQueryValue]
     information:
       fact: [source/target paths, fan-out identity expression, compute module/set IDs]
@@ -475,8 +475,8 @@ rows:
     spelling:
       canonical_candidate: strict_typed_mapping
       retired_duplicates: [query_mapping_equals_one_item_sequence, query_sequence_inert_nested_rows]
-      already_retired: [fan_out.target, fan_out.emit_per_item, fan_out.emit_mapping, clear.target]
-    execution_note: "#2489 rejects query sequences, query.operation, compute.params, filter.predicate and reduce.params on presence. Exactly one of query.source/query.entities is admitted by the collection semantic owner; store_as defaults, dataflow and exclusive output ownership are unchanged. fan_out.identity is conditional on typed item kind. reduce/count.items_from supersedes source when present."
+      already_retired: [fan_out.target, fan_out.emit_per_item, fan_out.emit_mapping, clear.target, accumulate.window, accumulate.dedup_by]
+    execution_note: "#1994 retires pin-derived accumulator partition/dedup: instance identity supplies the partition, authored accumulate.key supplies business dedup, and omitted key preserves distinct delivery multiplicity. #2489 rejects query sequences, query.operation, compute.params, filter.predicate and reduce.params on presence. Exactly one of query.source/query.entities is admitted by the collection semantic owner; store_as defaults, dataflow and exclusive output ownership are unchanged. fan_out.identity is conditional on typed item kind. reduce/count.items_from supersedes source when present."
     corpus: {fan_out: 0, compute: 0, query: 0}
 
   - id: handler.join

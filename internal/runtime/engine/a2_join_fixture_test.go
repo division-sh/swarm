@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -122,9 +121,5 @@ func a2MigrateJoinFixtureFile(t *testing.T, path string, replacements ...string)
 
 func a2CopyArrivalBarrier(t *testing.T) string {
 	t.Helper()
-	root := canonicalrouting.CopyExample(t, canonicalrouting.FanInBarrier)
-	a2MigrateJoinFixtureFile(t, filepath.Join(root, "portfolio", "nodes.yaml"),
-		"          from: entity.expected_operating_ids\n        window:\n          from: entity.period_id\n", "          from: state.expected_operating_ids\n          by: payload.operating_id\n",
-		"        timeout:\n          after: 5m\n          advances_to: failed\n", "        deadline: {after: 5m, from: stage_entry}\n        on_deadline:\n          advances_to: failed\n")
-	return root
+	return canonicalrouting.CopyExample(t, canonicalrouting.FanInBarrier)
 }

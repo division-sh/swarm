@@ -1,20 +1,13 @@
 name: portfolio
-stages:
-  collecting:
-    initial: true
-  awaiting: {}
-  complete:
-    terminal: true
-  failed:
-    terminal: true
+instance: portfolio_id
+stages: []
 pins:
   inputs:
     events:
       - portfolio.setup
-      - event: operating.reported
-        resolution:
-          mode: fan-in
-          aggregation: barrier
-          window: payload.period_id
-          dedup_by: [payload.operating_id]
-          singleton: portfolio
+      - operating.reported
+  outputs:
+    events: [period.setup, period.reported]
+connect:
+  - {event: period.setup, from: ., to: period, resolution: create}
+  - {event: period.reported, from: ., to: period, resolution: select}

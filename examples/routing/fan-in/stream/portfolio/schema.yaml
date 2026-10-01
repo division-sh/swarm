@@ -1,11 +1,6 @@
 name: portfolio
+instance: period_id
 pins:
   inputs:
     events:
-      - event: operating.reported
-        resolution:
-          mode: fan-in
-          aggregation: stream
-          window: payload.period_id
-          dedup_by: [payload.operating_id]
-          singleton: portfolio
+      - operating.reported

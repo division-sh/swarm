@@ -29,11 +29,18 @@ func ConnectionAdmissionCases() []ConnectionAdmissionCase {
 	}
 	for name, source := range map[string]string{
 		"scalar":     "work.requested",
-		"fan-in":     "{event: work.requested, resolution: {mode: fan-in, aggregation: stream, singleton: portfolio}}",
 		"reply":      "{event: work.requested, resolution: {mode: reply, replies_to: work.sent}}",
 		"initialize": "{event: work.requested, initialize: {priority: payload.priority}}",
 	} {
 		out = append(out, ConnectionAdmissionCase{Name: "retained/" + name, Source: "pins: {inputs: {events: [" + source + "]}}\n"})
+	}
+	// These are parser-only rejection specimens, never positive fixtures.
+	for _, retired := range []string{
+		"{mode: fan-in}",
+		"{mode: fan-in, aggregation: stream, window: payload.period_id, dedup_by: [payload.operating_id], singleton: portfolio}",
+		"{mode: fan-in, aggregation: barrier, window: payload.period_id, dedup_by: [payload.operating_id], singleton: portfolio}",
+	} {
+		out = append(out, ConnectionAdmissionCase{Name: "retired-pin/" + retired, Source: "pins: {inputs: {events: [{event: work.requested, resolution: " + retired + "}]}}\n", WantError: "*"})
 	}
 	return out
 }
@@ -202,13 +209,6 @@ pins:
       - validation.requested
       - account.selected
       - account.requested
-      - event: report.ready
-        resolution:
-          mode: fan-in
-          aggregation: stream
-          window: report_period
-          dedup_by: [event.id, payload.operating_id]
-          singleton: portfolio/default
       - event: operating.requested
         resolution:
           mode: fan-out

@@ -1,5 +1,5 @@
-name: collector
-instance: batch_id
+name: period
+instance: period_id
 stages:
   collecting: {initial: true}
   awaiting: {}
@@ -7,6 +7,4 @@ stages:
   failed: {terminal: true}
 pins:
   inputs:
-    events:
-      - batch.opened
-      - item.reported
+    events: [period.setup, period.reported]
