@@ -319,6 +319,8 @@ func (p *releaseServeProcess) collectStartupEvidence() {
 		fmt.Fprintf(p.output, "lifecycle evidence unavailable before handler installation pid=%d\n", p.cmd.Process.Pid)
 		return
 	}
+	marker := fmt.Sprintf("lifecycle evidence end pid=%d", p.cmd.Process.Pid)
+	previous := strings.Count(p.output.String(), marker)
 	if err := p.cmd.Process.Signal(syscall.SIGUSR1); err != nil {
 		fmt.Fprintf(p.output, "lifecycle evidence signal pid=%d: %v\n", p.cmd.Process.Pid, err)
 		return
@@ -327,8 +329,7 @@ func (p *releaseServeProcess) collectStartupEvidence() {
 	defer cancel()
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
-	marker := fmt.Sprintf("lifecycle evidence end pid=%d", p.cmd.Process.Pid)
-	for !strings.Contains(p.output.String(), marker) {
+	for strings.Count(p.output.String(), marker) <= previous {
 		select {
 		case <-p.exited:
 			return
@@ -414,9 +415,15 @@ type releaseRPCClient struct {
 	client       *http.Client
 	processID    int
 	redactValues []string
+	onFailure    func(string, map[string]any)
 }
 
-func (c *releaseRPCClient) call(ctx context.Context, method string, params map[string]any, result any) error {
+func (c *releaseRPCClient) call(ctx context.Context, method string, params map[string]any, result any) (err error) {
+	defer func() {
+		if err != nil && c.onFailure != nil {
+			c.onFailure(method, params)
+		}
+	}()
 	requestBody, err := json.Marshal(map[string]any{
 		"jsonrpc": "2.0",
 		"id":      method,

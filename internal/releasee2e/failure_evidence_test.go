@@ -75,6 +75,59 @@ func TestReleaseRPCFailureEvidence(t *testing.T) {
 	}
 }
 
+func TestReleaseRPCObserverRunsOnlyAfterFailureWithoutRetry(t *testing.T) {
+	for _, failed := range []bool{false, true} {
+		t.Run(fmt.Sprint(failed), func(t *testing.T) {
+			var calls, observations atomic.Int32
+			started := make(chan struct{})
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				if failed {
+					close(started)
+					<-r.Context().Done()
+					return
+				}
+				_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":"mailbox.decide","result":{"status":"decided"}}`))
+			}))
+			defer server.Close()
+			rpc := &releaseRPCClient{endpoint: server.URL, client: server.Client()}
+			rpc.onFailure = func(method string, params map[string]any) {
+				observations.Add(1)
+				if method != "mailbox.decide" || params["card_id"] != "exact-card" {
+					t.Errorf("failure observation lost request identity: %s %#v", method, params)
+				}
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			joined := make(chan struct{})
+			if failed {
+				go func() {
+					defer close(joined)
+					select {
+					case <-started:
+						cancel()
+					case <-ctx.Done():
+					}
+				}()
+			} else {
+				close(joined)
+			}
+			defer func() { cancel(); <-joined }()
+			var result any
+			err := rpc.call(ctx, "mailbox.decide", map[string]any{"card_id": "exact-card"}, &result)
+			if failed && !errors.Is(err, context.Canceled) || !failed && err != nil {
+				t.Fatalf("request outcome changed: %v", err)
+			}
+			want := int32(0)
+			if failed {
+				want = 1
+			}
+			if observations.Load() != want || calls.Load() != 1 {
+				t.Fatalf("observer=%d requests=%d, want observer=%d requests=1", observations.Load(), calls.Load(), want)
+			}
+		})
+	}
+}
+
 func TestGoldenFailureEvidenceSurvivesCollectorFailure(t *testing.T) {
 	for _, scenario := range []string{"entity_error", "entity_timeout", "partial_events", "partial_entities", "budget_cancelled"} {
 		t.Run(scenario, func(t *testing.T) {

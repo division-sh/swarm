@@ -465,11 +465,12 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 }
 
 type goldenStoreSelection struct {
-	name                string
-	configYAML          string
-	passwordEnv         string
-	diagnosticDB        *sql.DB
-	inspectionConnector *pq.Connector
+	name                 string
+	configYAML           string
+	passwordEnv          string
+	diagnosticDB         *sql.DB
+	inspectionConnector  *pq.Connector
+	inspectionSQLitePath string
 }
 
 func goldenReleaseRoot(t *testing.T) string {
@@ -484,7 +485,8 @@ func goldenReleaseRoot(t *testing.T) string {
 func goldenSQLiteStore(root string) goldenStoreSelection {
 	path := filepath.Join(root, "runtime.db")
 	return goldenStoreSelection{
-		name: "sqlite",
+		name:                 "sqlite",
+		inspectionSQLitePath: path,
 		configYAML: "store:\n" +
 			"  backend: sqlite\n" +
 			"  sqlite:\n" +

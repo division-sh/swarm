@@ -78,6 +78,41 @@ func TestCompiledProcessLifecycleStartupEvidence(t *testing.T) {
 		}
 	}
 	assertFullLifecycleReadySurface(t, process)
+	bundle := requireFullLifecycleHealth(t, process.rpc)
+	standing := waitForFullLifecycleStandingRun(t, process.rpc, bundle, "", 0, "")
+	card := waitForFullLifecycleCard(t, process.rpc, standing.RunID, "lifecycle_ready")
+	parts := map[string]any{}
+	partErrors := map[string]error{}
+	selected := goldenSQLiteStore(filepath.Join(root, "store"))
+	// This fixture is dev-owned, so inspection must name its actual scratch store.
+	selected.inspectionSQLitePath = filepath.Join(spec.WorkingDir, "contracts", ".swarm", "stores", "dev-scratch.db")
+	process.rpc.onFailure = func(_ string, params map[string]any) {
+		collectLifecycleRPCFailure(process, selected, params, func(part string, value any, err error) {
+			parts[part], partErrors[part] = value, err
+		})
+	}
+	var refused any
+	if err := process.rpc.call(ctx, "mailbox.decide", map[string]any{"card_id": card.CardID, "verdict": "approve", "fields": map[string]any{}, "observed_content_hash": "wrong-hash", "idempotency_key": "failure-evidence-control"}, &refused); err == nil {
+		t.Fatal("controlled invalid decision did not fail")
+	}
+	for part, err := range partErrors {
+		if err != nil {
+			t.Fatalf("failure capture part=%s: %v", part, err)
+		}
+	}
+	if parts["process"] != "not_joined" || len(parts["decision"].([][]string)) != 1 || parts["decision"].([][]string)[0][2] != "pending" {
+		t.Fatalf("failure capture lost live child or pending card: %#v", parts)
+	}
+	before, after := parts["child_output_before_signal"].(string), parts["child_output_after_signal"].(string)
+	marker := fmt.Sprintf("lifecycle evidence end pid=%d", process.cmd.Process.Pid)
+	if strings.Count(after, marker) != strings.Count(before, marker)+1 || !strings.Contains(after, "writeOwnedLifecycleEvidence") {
+		t.Fatal("failure capture reused an old stack instead of observing a fresh signal")
+	}
+	for _, secret := range []string{fullLifecycleAPIToken, fullLifecycleSigningSecret, fullLifecycleBotToken} {
+		if strings.Contains(after, secret) {
+			t.Fatal("RPC failure evidence disclosed a configured secret")
+		}
+	}
 	if err := process.stopAndWait(15 * time.Second); err != nil {
 		t.Fatal(err)
 	}
@@ -236,11 +271,19 @@ func runFullLifecycleJourney(t *testing.T, binary, lifecycleBinary, root string,
 	started := time.Now()
 	processSpec := prepareFullLifecycleProject(t, binary, root, store, journey.kind == fullLifecycleDevFresh)
 	processSpec.InternalMockLifecycleBinary = lifecycleBinary
+	if processSpec.Dev {
+		store.inspectionSQLitePath = filepath.Join(processSpec.WorkingDir, "contracts", ".swarm", "stores", "dev-scratch.db")
+	}
 	t.Log("proof_surface=H; retained lifecycle assertions use internal compiled composition, not public serve/test")
 	childNumber := 0
 	startReady := func() *releaseServeProcess {
 		childNumber++
 		process := startReleaseServe(t, processSpec)
+		process.rpc.onFailure = func(method string, params map[string]any) {
+			collectLifecycleRPCFailure(process, store, params, func(part string, value any, err error) {
+				t.Logf("lifecycle RPC failure method=%s part=%s error=%v: %v", method, part, err, value)
+			})
+		}
 		t.Logf("lifecycle child=%d pid=%d journey=%s backend=%s phase=waiting_for_readiness", childNumber, process.cmd.Process.Pid, journey.name, journey.backend)
 		ctx, cancel := context.WithTimeout(context.Background(), fullLifecycleStartupLimit)
 		err := process.waitReady(ctx)
