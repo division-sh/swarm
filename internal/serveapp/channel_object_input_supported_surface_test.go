@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 )
 
@@ -18,7 +19,7 @@ func TestChannelLearnedObjectInputPublicJourney(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		for _, schedule := range []string{"chooser_current", "chooser_restart", "chooser_edit_ack_loss", "lost_prompt_edit"} {
 			t.Run(string(backend)+"/"+schedule, func(t *testing.T) {
-				h, db, provider, command, hash := startObjectChannelInputJourney(t, backend)
+				h, db, provider, command, hash := startObjectChannelInputJourney(t, backend, false)
 				if schedule != "lost_prompt_edit" {
 					proveObjectChannelChooserRestart(t, h, db, provider, hash, schedule)
 				} else {
@@ -38,14 +39,76 @@ func TestChannelLearnedObjectInputPublicJourney(t *testing.T) {
 	}
 }
 
-func startObjectChannelInputJourney(t *testing.T, backend servedparity.Backend) (*channelOnboardingE2EHarness, *sql.DB, *objectChannelProvider, string, string) {
+func TestChannelLearnedObjectInvalidChosenAnswerPublicJourney(t *testing.T) {
+	for _, backend := range servedparity.RequiredBackends {
+		t.Run(string(backend), func(t *testing.T) {
+			h, db, p, _, hash := startObjectChannelInputJourney(t, backend, true)
+			for index := 0; index < 2; index++ {
+				card, receipt, reject := beginObjectInputCard(t, h, db, p, hash, index)
+				postObjectInputAction(t, p, fmt.Sprintf("typed-reject-%d", index), receipt, reject)
+				waitChannelDraftPromptSettlement(t, db, card)
+			}
+			postObjectChannelFact(t, p, "typed-invalid-answer", map[string]any{"text": "not-an-integer"})
+			waitObjectChannelDisposition(t, db, "operator_channel_text_intents", "typed-invalid-answer", "chooser")
+			_, chooser := waitObjectRequestedResponse(t, db, "typed-invalid-answer")
+			choice := firstObjectDraftChoice(t, p, chooser)
+			postObjectInputAction(t, p, "typed-invalid-select", chooser, choice)
+			waitObjectChannelDisposition(t, db, "operator_channel_action_intents", "typed-invalid-select", "navigation")
+			_, teaching := waitObjectIntentResponse(t, db, "operator_channel_action_intents", "typed-invalid-select")
+			waitObjectMessageText(t, p, teaching, "That answer does not match the requested field.")
+			p.mu.Lock()
+			input := p.message(teaching)
+			valid := objectChannelPresentationValid(input)
+			p.mu.Unlock()
+			if !valid {
+				t.Fatalf("chosen-answer teaching exceeded the compiled provider bounds: %#v", input)
+			}
+			var decided int
+			if err := db.QueryRow(`SELECT COUNT(*) FROM decision_cards WHERE status='decided'`).Scan(&decided); err != nil || decided != 0 {
+				t.Fatalf("invalid chosen answer completed a card: %d %v", decided, err)
+			}
+			postObjectChannelFact(t, p, "typed-valid-answer", map[string]any{"text": "27"})
+			waitObjectChannelDisposition(t, db, "operator_channel_text_intents", "typed-valid-answer", "chooser")
+			_, nextChooser := waitObjectRequestedResponse(t, db, "typed-valid-answer")
+			postObjectInputAction(t, p, "typed-valid-select", nextChooser, firstObjectDraftChoice(t, p, nextChooser))
+			waitObjectChannelDisposition(t, db, "operator_channel_action_intents", "typed-valid-select", "applied")
+			if err := db.QueryRow(`SELECT COUNT(*) FROM decision_cards WHERE status='decided'`).Scan(&decided); err != nil || decided != 1 {
+				t.Fatalf("valid retry did not complete exactly one card: %d %v", decided, err)
+			}
+		})
+	}
+}
+
+func firstObjectDraftChoice(t *testing.T, p *objectChannelProvider, receipt string) string {
+	t.Helper()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	input := p.message(receipt)
+	controls, _ := input["controls"].([]any)
+	for _, control := range controls {
+		row, _ := control.(map[string]any)
+		if row["name"] != "More choices" {
+			if token, ok := row["value"].(string); ok && token != "" {
+				return token
+			}
+		}
+	}
+	t.Fatalf("delivered chooser has no draft choice: %#v", input)
+	return ""
+}
+
+func startObjectChannelInputJourney(t *testing.T, backend servedparity.Backend, integerInput bool) (*channelOnboardingE2EHarness, *sql.DB, *objectChannelProvider, string, string) {
 	t.Helper()
 	h := newChannelOnboardingE2EHarness(t, backend, true)
 	p := &objectChannelProvider{commands: map[string][]any{}, calls: map[string][]map[string]any{}}
 	server := httptest.NewServer(p)
 	t.Cleanup(server.Close)
 	redirectExternalHosts(t, map[string]string{"mock.example.test": server.URL})
-	h.opts.SourceRoot = writeObjectChannelSource(t, h.opts.ConfigPath)
+	if integerInput {
+		h.opts.SourceRoot = writeObjectChannelPacks(t, h.opts.ConfigPath, canonicalrouting.CopyChannelLearnedObjectIntegerInputJourney(t))
+	} else {
+		h.opts.SourceRoot = writeObjectChannelSource(t, h.opts.ConfigPath)
+	}
 	h.opts.AbandonActiveRuns = false
 	h.start(t)
 	t.Cleanup(func() { h.stop(t) })
