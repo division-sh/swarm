@@ -375,9 +375,9 @@ func writeDescribeStageJoins(out io.Writer, joins []authoringview.StageGraphJoin
 			} else {
 				parts = append(parts, "stage "+join.Stage)
 				if join.MemberCount != nil {
-					parts = append(parts, fmt.Sprintf("members count %d by %s", *join.MemberCount, join.MembersBy))
+					parts = append(parts, fmt.Sprintf("members count %d by %s", *join.MemberCount, strings.TrimSpace(join.MembersBy)))
 				} else {
-					parts = append(parts, "members "+join.MembersFrom+" by "+join.MembersBy)
+					parts = append(parts, "members "+join.MembersFrom+" by "+strings.TrimSpace(join.MembersBy))
 				}
 				parts = append(parts, "output "+join.Output)
 			}
