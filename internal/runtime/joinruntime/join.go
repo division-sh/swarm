@@ -515,6 +515,34 @@ func List(stateBuckets map[string]map[string]any) ([]Activation, error) {
 	return out, nil
 }
 
+// PersistedBuckets selects only join-owned state. Other accumulator evidence is
+// not an engine bucket; historical adapters retain it without reinterpretation.
+// The returned maps belong to raw, which must be privately owned before writes.
+func PersistedBuckets(raw map[string]any) (map[string]map[string]any, error) {
+	buckets := map[string]map[string]any{}
+	for key, value := range raw {
+		if !strings.HasPrefix(key, bucketKey+":") {
+			continue
+		}
+		node, err := runtimeidentity.ParseExecutableNodeKey(strings.TrimPrefix(key, bucketKey+":"))
+		if err != nil || joinNodeBucketKey(node) != key {
+			return nil, fmt.Errorf("join state bucket %q has an invalid node identity", key)
+		}
+		bucket, ok := value.(map[string]any)
+		if !ok || bucket == nil {
+			return nil, fmt.Errorf("join state bucket %q requires an object", key)
+		}
+		if _, exists := bucket[bucketKey]; !exists {
+			return nil, fmt.Errorf("join state bucket %q is missing its activation map", key)
+		}
+		buckets[key] = bucket
+	}
+	if _, err := List(buckets); err != nil {
+		return nil, err
+	}
+	return buckets, nil
+}
+
 func readJoinBucket(node map[string]any) (map[string]any, error) {
 	raw, exists := node[bucketKey]
 	if !exists {

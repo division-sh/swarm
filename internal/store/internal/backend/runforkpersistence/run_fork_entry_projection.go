@@ -6,7 +6,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
-	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -101,11 +100,11 @@ func projectRunForkEntityExecutionState(entity runfork.RunForkEntityState, sourc
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, nil, accumulator)
+	buckets, err := joinruntime.PersistedBuckets(accumulator)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	joins, err := joinruntime.List(carrier.StateBuckets)
+	joins, err := joinruntime.List(buckets)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -121,15 +120,15 @@ func projectRunForkEntityExecutionState(entity runfork.RunForkEntityState, sourc
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		nodeBucket := carrier.StateBuckets["handler_joins:"+source.JoinRef().Node().Key()]
+		nodeBucket := buckets["handler_joins:"+source.JoinRef().Node().Key()]
 		stored := nodeBucket["handler_joins"].(map[string]any)
 		if _, occupied := stored[child.Key()]; occupied {
 			return nil, nil, nil, fmt.Errorf("fork join destination is already occupied")
 		}
-		if err := joinruntime.Store(carrier.StateBuckets, child); err != nil {
+		if err := joinruntime.Store(buckets, child); err != nil {
 			return nil, nil, nil, err
 		}
 		delete(stored, source.Key())
 	}
-	return bookkeeping, carrier.PersistedStateBuckets(), correspondence, nil
+	return bookkeeping, accumulator, correspondence, nil
 }

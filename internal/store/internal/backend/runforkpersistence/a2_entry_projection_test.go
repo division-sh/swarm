@@ -2,6 +2,7 @@ package runforkpersistence
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -299,6 +300,52 @@ func TestA2ForkEntryProjectionPreservesExactOldClosedArm(t *testing.T) {
 			bookkeeping["business"].(map[string]any)["nested"].([]any)[0] = "child-only"
 			if projectionJSON(t, entity) != before {
 				t.Fatal("child aliases source bookkeeping/output storage")
+			}
+		})
+	}
+}
+
+func TestA2ForkEntryProjectionPreservesUnrelatedAccumulatorEvidence(t *testing.T) {
+	for _, withJoin := range []bool{false, true} {
+		t.Run(fmt.Sprintf("join_%t", withJoin), func(t *testing.T) {
+			entry := a2ForkEntry(t, "source", "source", "source", "draft", "original")
+			raw := map[string]any{
+				"total": float64(7), "sequence": []any{float64(2), map[string]any{"nested": "business"}},
+				"opaque_bucket":           map[string]any{"handler_joins": "authored-value", "nested": []any{"unchanged"}},
+				"handler_joins_not_owned": "business", "nullable": nil,
+			}
+			if withJoin {
+				arm, err := joinruntime.NewActivation(a2ForkJoinRef(t, entry, attemptgeneration.Generation{}), []string{"a"}, nil, time.Unix(100, 0), time.Time{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				buckets := map[string]map[string]any{}
+				if err := joinruntime.Store(buckets, arm); err != nil {
+					t.Fatal(err)
+				}
+				for key, value := range buckets {
+					raw[key] = value
+				}
+			}
+			entity := a2ForkEntity(t, entry, raw)
+			before := projectionJSON(t, entity)
+			projection, err := runfork.ProjectEntityOwnership("source", "child", "source", "source")
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, child, _, err := projectRunForkEntityExecutionState(entity, "source", "child", projection)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, key := range []string{"total", "sequence", "opaque_bucket", "handler_joins_not_owned", "nullable"} {
+				if !reflect.DeepEqual(child[key], raw[key]) {
+					t.Fatalf("unrelated evidence %q changed: %#v", key, child[key])
+				}
+			}
+			child["sequence"].([]any)[1].(map[string]any)["nested"] = "child-only"
+			child["opaque_bucket"].(map[string]any)["nested"].([]any)[0] = "child-only"
+			if projectionJSON(t, entity) != before {
+				t.Fatal("fork projection aliases source evidence")
 			}
 		})
 	}
