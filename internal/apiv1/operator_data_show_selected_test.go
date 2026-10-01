@@ -61,6 +61,28 @@ func assertDataShowEvidence(t *testing.T, handler *Handler, params map[string]an
 			t.Fatalf("invalid continuation=%#v", continuation)
 		}
 		seen[cursor] = true
+		if params["view"] == "operation" && params["operation_ref"].(map[string]any)["kind"] != "prune" {
+			foreign := make(map[string]any, len(params))
+			for key, value := range params {
+				foreign[key] = value
+			}
+			if foreign["operation_ref"].(map[string]any)["kind"] == "source" {
+				foreign["detail"] = "defects"
+				if params["detail"] == "defects" {
+					foreign["detail"] = "delta_added"
+				}
+			} else {
+				foreign["detail"] = "child_evaluations"
+				if params["detail"] == "child_evaluations" {
+					foreign["detail"] = "child_defects"
+				}
+			}
+			foreign["page"] = map[string]any{"limit": 1, "cursor": cursor}
+			_, response, _ := callReadOnlyProbeRPC(t, handler, "data.show", foreign, "Bearer "+testToken)
+			if response.Error == nil || asMap(t, response.Error.Data)["code"] != "DATA_CURSOR_INVALID" {
+				t.Fatalf("receipt cursor was accepted by another valid detail: %#v", response)
+			}
+		}
 		params["page"] = map[string]any{"limit": 1, "cursor": cursor}
 	}
 	raw, err := json.Marshal(expected)
@@ -298,6 +320,11 @@ func TestDataShowReadFamilyAcrossSelectedStores(t *testing.T) {
 		t.Run("keyless_and_empty", func(t *testing.T) {
 			keylessRef, _ := durabledata.ParseDeclarationRef(".", "score.observed")
 			result := dataShowSource(t, fixture.primary, dataProbeBundleHash, keylessRef, durabledata.AbsentHead(), "import", "{\"label\":\"same\"}\n{\"label\":\"other\"}\n{\"label\":\"same\"}\n")
+			sourceRecord, err := fixture.primary.LoadDataSourceOperation(ctx, result.SourceInvocationID)
+			if err != nil || sourceRecord.Result.Delta.RowIdentity != durabledata.DeltaRowIdentityPosition || sourceRecord.Result.Delta.Summary == nil || sourceRecord.Result.Delta.Summary.Added != 3 || len(sourceRecord.Evidence.DeltaAdded) != 0 {
+				t.Fatalf("positional delta=%#v/%v", sourceRecord, err)
+			}
+			assertDataShowEvidence(t, handler, dataShowOperationParams("source", result.SourceInvocationID, "delta_added"), sourceRecord.Evidence.DeltaAdded)
 			params := map[string]any{"view": "row", "declaration": dataRunDeclaration(keylessRef), "selector": map[string]any{"kind": "head"}, "row_selector": map[string]any{"position": 3}}
 			wire := dataShowWire(t, handler, params)
 			if wire["ordinal"] != float64(3) || wire["key"] != nil || asMap(t, wire["value"])["label"] != "same" {
@@ -403,15 +430,19 @@ func TestDataShowOperationReadFamilyAcrossSelectedStores(t *testing.T) {
 			t.Fatal(err)
 		}
 		handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: dataShowReadOnlyHandlers(t, fixture)})
-		first := dataShowSource(t, fixture.primary, dataProbeBundleHash, ref, durabledata.AbsentHead(), "import", "{\"slug\":\"alpha\",\"payload\":\"before\"}\n{\"slug\":\"beta\"}\n")
-		second := dataShowSource(t, fixture.primary, dataProbeBundleHash, ref, first.Head.After, "import", "{\"slug\":\"alpha\",\"payload\":\"after\"}\n{\"slug\":\"gamma\"}\n")
+		first := dataShowSource(t, fixture.primary, dataProbeBundleHash, ref, durabledata.AbsentHead(), "import", "{\"slug\":\"alpha\",\"payload\":\"before\"}\n{\"slug\":\"beta\",\"payload\":\"before\"}\n{\"slug\":\"epsilon\"}\n{\"slug\":\"zeta\"}\n")
+		second := dataShowSource(t, fixture.primary, dataProbeBundleHash, ref, first.Head.After, "import", "{\"slug\":\"alpha\",\"payload\":\"after\"}\n{\"slug\":\"beta\",\"payload\":\"after\"}\n{\"slug\":\"gamma\"}\n{\"slug\":\"theta\"}\n")
 		check := dataShowSource(t, fixture.primary, dataProbeBundleHash, ref, second.Head.After, "check", "{\"slug\":\"delta\"}\n")
 		rejected := dataShowSource(t, fixture.primary, dataProbeBundleHash, ref, second.Head.After, "check", "{\"unknown\":true}\n")
+		rejectedImport := dataShowSource(t, fixture.primary, dataProbeBundleHash, ref, second.Head.After, "import", "{\"unknown\":true}\n{\"unknown\":false}\n")
 		conflict := dataShowSource(t, fixture.primary, dataProbeBundleHash, ref, durabledata.AbsentHead(), "import", "{\"slug\":\"stale\"}\n")
-		for _, result := range []durabledata.SourceOperationResult{first, second, check, rejected, conflict} {
+		for _, result := range []durabledata.SourceOperationResult{first, second, check, rejected, rejectedImport, conflict} {
 			record, err := fixture.primary.LoadDataSourceOperation(ctx, result.SourceInvocationID)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if result.SourceInvocationID == second.SourceInvocationID && (len(record.Evidence.DeltaAdded) != 2 || len(record.Evidence.DeltaRemoved) != 2 || len(record.Evidence.DeltaChanged) != 2) {
+				t.Fatalf("delta fixtures do not force pagination: %#v", record.Evidence)
 			}
 			for _, detail := range []string{"summary", "defects", "delta_added", "delta_removed", "delta_changed"} {
 				t.Run("source/"+result.Operation+"/"+result.Outcome+"/"+detail, func(t *testing.T) {
@@ -461,7 +492,7 @@ func TestDataShowOperationReadFamilyAcrossSelectedStores(t *testing.T) {
 			}
 		}
 		// Use the actual run-creation owner to populate receipts and pins, not a DTO mock.
-		runCatalog, scanRef, _ := dataRunLifecycleCatalog(t, runStartTestBundleHash, false)
+		runCatalog, scanRef, scoreRef := dataRunLifecycleCatalog(t, runStartTestBundleHash, false)
 		if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, runCatalog); err != nil {
 			t.Fatal(err)
 		}
@@ -477,7 +508,9 @@ func TestDataShowOperationReadFamilyAcrossSelectedStores(t *testing.T) {
 		for _, accepted := range []bool{true, false} {
 			runID := uuid.NewString()
 			expected := durabledata.AbsentHead()
+			scoreExpected := durabledata.AbsentHead()
 			input := "{\"topic\":\"private-payload\"}\n"
+			scoreInput := "{\"label\":\"private-score\"}\n"
 			if !accepted {
 				input = "{\"unknown\":true}\n"
 				summary, err := fixture.primary.ResolveDataVersionSummary(ctx, scanRef, durabledata.VersionSelector{Kind: "head"})
@@ -485,8 +518,13 @@ func TestDataShowOperationReadFamilyAcrossSelectedStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				expected = durabledata.VersionHead(summary.VersionID)
+				scoreSummary, err := fixture.primary.ResolveDataVersionSummary(ctx, scoreRef, durabledata.VersionSelector{Kind: "head"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				scoreExpected, scoreInput = durabledata.VersionHead(scoreSummary.VersionID), "{\"unknown\":true}\n"
 			}
-			data := map[string]any{"imports": []any{dataRunFusedImport(uuid.NewString(), scanRef, expected, []byte(input))}, "pins": []any{}}
+			data := map[string]any{"imports": []any{dataRunFusedImport(uuid.NewString(), scanRef, expected, []byte(input)), dataRunFusedImport(uuid.NewString(), scoreRef, scoreExpected, []byte(scoreInput))}, "pins": []any{}}
 			response := rpcCall(t, publisher, dataRunEventPublishBody(runID, uuid.NewString(), data))
 			if (response.Error == nil) != accepted {
 				t.Fatalf("create accepted=%v: %#v", accepted, response)
@@ -494,6 +532,9 @@ func TestDataShowOperationReadFamilyAcrossSelectedStores(t *testing.T) {
 			record, err := fixture.primary.LoadDataRunCreationOperation(ctx, runID)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if accepted && (len(record.Evidence.ChildEvaluations) != 0 || len(record.Evidence.ChildDefects) != 0 || len(record.Evidence.RunBinding) != 4) || !accepted && (len(record.Evidence.ChildEvaluations) != 2 || len(record.Evidence.ChildDefects) < 2) {
+				t.Fatalf("child fixtures do not force pagination: %#v", record.Evidence)
 			}
 			for _, detail := range []string{"summary", "request_binding", "child_evaluations", "child_defects", "run_binding"} {
 				t.Run(fmt.Sprintf("run_creation/%v/%s", accepted, detail), func(t *testing.T) {
@@ -515,13 +556,18 @@ func TestDataShowOperationReadFamilyAcrossSelectedStores(t *testing.T) {
 			if accepted {
 				var pin *durabledata.Pin
 				for _, item := range record.Evidence.RunBinding {
-					if item.Pin != nil {
+					if item.Pin != nil && item.Pin.Declaration == scanRef {
 						pin = item.Pin
 						break
 					}
 				}
 				if pin == nil {
 					t.Fatal("accepted receipt has no pin")
+				}
+				secondRunID := uuid.NewString()
+				pinData := map[string]any{"imports": []any{}, "pins": []any{map[string]any{"declaration": dataRunDeclaration(scanRef), "version_id": pin.VersionID}}}
+				if response := rpcCall(t, publisher, dataRunEventPublishBody(secondRunID, uuid.NewString(), pinData)); response.Error != nil {
+					t.Fatalf("second real pin=%#v", response)
 				}
 				// Move the current head so the separate pinned refusal is reachable.
 				newHead := dataShowSource(t, fixture.primary, runStartTestBundleHash, scanRef, durabledata.VersionHead(pin.VersionID), "import", "{\"topic\":\"next\"}\n")
@@ -533,12 +579,12 @@ func TestDataShowOperationReadFamilyAcrossSelectedStores(t *testing.T) {
 					assertDataShowWire(t, dataShowWire(t, handler, dataShowOperationParams("prune", prune.PruneInvocationID, "summary")), durabledata.OperationSummary{Kind: "prune", Prune: &prune})
 					wire := dataShowWire(t, handler, dataShowOperationParams("prune", prune.PruneInvocationID, "pins"))
 					items := asSlice(t, wire["items"])
-					if len(items) != 1 || asMap(t, items[0])["run_id"] != runID {
+					if len(items) != 1 || asMap(t, items[0])["version_id"] != string(pin.VersionID) || asMap(t, wire["continuation"])["state"] != "more" {
 						t.Fatalf("pin evidence=%#v", wire)
 					}
 					pins, err := fixture.primary.LoadDataPruneOperationPins(ctx, prune.PruneInvocationID)
-					if err != nil {
-						t.Fatal(err)
+					if err != nil || len(pins) != 2 || !dataRunHasPin(pins, runID, "running") || !dataRunHasPin(pins, secondRunID, "running") {
+						t.Fatalf("complete durable pins=%#v/%v", pins, err)
 					}
 					assertDataShowEvidence(t, handler, dataShowOperationParams("prune", prune.PruneInvocationID, "pins"), pins)
 				})
