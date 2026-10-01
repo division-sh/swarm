@@ -115,10 +115,7 @@ func TestFanOutGrantedClockTiesUseStructuredIdentityBothStores(t *testing.T) {
 			// Insert the bytewise-later key first, with a locale-sensitive tie.
 			for index, fixture := range []*fanOutOwnerFixture{&first, &second} {
 				semanticPath := []string{"root.a", "root.Z"}[index]
-				if _, err := db.ExecContext(ctx, `UPDATE fan_out_intents SET semantic_path=$1 WHERE run_id=$2 AND triggering_delivery_id=$3 AND flow_path=$4 AND declaration_family='fan_out' AND semantic_path=$5`, semanticPath, fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath); err != nil {
-					t.Fatal(err)
-				}
-				fixture.semanticPath = semanticPath
+				*fixture = rekeyFanOutOwnerFixture(t, ctx, db, *fixture, fixture.flowPath, semanticPath)
 			}
 			_, grants, occurrences, _ := newGrantedFanOutProcessForTest(t, ctx, selected, []fanOutOwnerFixture{first})
 			executor := &fanOutSelectionExecutor{bundle: first.bundleHash, started: make(chan capturedFanOutTurn, 4), completed: make(chan fanoutobligation.Intent, 4), errors: make(chan error, 4)}

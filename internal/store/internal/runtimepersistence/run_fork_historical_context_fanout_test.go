@@ -107,6 +107,7 @@ func seedHistoricalContextFanOutKinds(t *testing.T, tx *sql.Tx, f historicalCont
 		runID: s.runID, eventID: s.eventID, deliveryID: s.deliveryID, flowPath: ".",
 		semanticPath: `nodes["fan-out-source"].handlers["items.ready"].fan_out`,
 		bundleHash:   "bundle-v2:sha256:" + strings.Repeat("1", 64), createdAt: s.at,
+		plan: fanOutOwnerTypedPlanFixture(t),
 	}
 	mustExecRunForkRevisionMatrix(t, ctx, tx, `DELETE FROM fan_out_intents WHERE run_id=$1`, s.runID)
 	insertFanOutOwnerIntent(t, ctx, tx, fixture, 1, s.at)
@@ -120,7 +121,7 @@ func seedHistoricalContextFanOutKinds(t *testing.T, tx *sql.Tx, f historicalCont
 	}
 	mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO fan_out_outcomes (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,ordinal,outcome_kind,failure,created_at) VALUES ($1,$2,'.','fan_out',$3,0,'semantic_rejected',$4,$5)`, s.runID, s.deliveryID, fixture.semanticPath, string(failureJSON), s.at)
 	mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE fan_out_intents SET cursor=1,status='closed' WHERE run_id=$1`, s.runID)
-	digest := "sha256:" + strings.Repeat("2", 64)
+	digest := fanOutOwnerFixtureEvidence(t, fixture).Ref.SemanticDigest
 	ref, err := timeridentity.NewFanOutDeliveryJoinRef(mustPersistenceRootNode("fan-out-source"), "items.ready", "all-items-delivered", mustFanOutBarrierDeclaration(t, fixture), fixture.bundleHash, digest)
 	if err != nil {
 		t.Fatal(err)

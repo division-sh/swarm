@@ -150,7 +150,7 @@ func seedCompletionShortCircuitFanOut(t *testing.T, fixture runLifecycleCandidat
 	t.Helper()
 	runID := seedCompletionBlockerRun(t, fixture, ctx)
 	at := time.Date(2026, 7, 29, 11, 0, 0, 0, time.UTC)
-	fan := seedFanOutOwnerChildFixture(t, ctx, fixture.db, fixture.store, fixture.postgres, fanOutOwnerFixture{runID: runID, flowPath: ".", bundleHash: runLifecycleCandidateParityBundleHash}, 1, at)
+	fan := seedFanOutOwnerChildFixture(t, ctx, fixture.db, fixture.store, fixture.postgres, fanOutOwnerFixture{runID: runID, flowPath: ".", bundleHash: runLifecycleCandidateParityBundleHash, plan: fanOutOwnerTypedPlanFixture(t)}, 1, at)
 	// The existing fan-out source fixture already supplies a delivered trigger.
 	// Seed its terminal pipeline receipt, leaving only the child publication
 	// pending. The child is committed and later settled through real owners.

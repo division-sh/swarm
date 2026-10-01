@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/packadmission"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -88,6 +89,7 @@ type fanOutOwnerFixture struct {
 	createdAt    time.Time
 	bundleHash   string
 	artifact     *sourceartifact.AdmittedSourceArtifact
+	plan         runtimecontracts.FanOutCompiledPlan
 }
 
 func TestFanOutSelectedStoreOwnerParity(t *testing.T) {
@@ -1495,7 +1497,7 @@ func TestRunForkFanOutMaterializationRetainsExactEntityRevisionSource(t *testing
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
 	createdAt := time.Now().UTC().Truncate(time.Microsecond)
-	ctx, fixture := seedDeclaredForkFanOutFixture(t, "postgres", authorActivityReceiptFixture{db: db, store: pg}, 3, createdAt)
+	ctx, fixture := seedDeclaredEntityForkFanOutFixture(t, "postgres", authorActivityReceiptFixture{db: db, store: pg}, 3, createdAt)
 	entityID := fixture.runID
 	mutationID := uuid.NewString()
 	itemsJSON := `["entity-000","entity-001","entity-002"]`
@@ -1656,6 +1658,19 @@ func TestFanOutEntityRevisionRejectsUnrelatedRunWithoutProgressOnBothStores(t *t
 
 			createdAt := time.Now().UTC().Truncate(time.Microsecond)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 3, createdAt)
+			fixture.plan.CollectionType = runtimecontracts.CatalogTypeReference{Type: "[EntityItem]", Catalog: runtimecontracts.TypeCatalogDocument{
+				Types: map[string]runtimecontracts.NamedTypeDecl{"EntityItem": {Fields: map[string]runtimecontracts.TypeFieldSpec{
+					"name": {Type: "text"}, "score": {Type: "numeric"},
+				}}},
+			}}
+			var err error
+			fixture.plan.CollectionProjection, err = runtimecontracts.AdmitCollectionProjection(fixture.plan.CollectionType)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fixture.plan.ItemType = fixture.plan.CollectionProjection.ItemType()
+			fixture.plan.Identity = "entry.name"
+			fixture.plan.Emit.Fields = map[string]runtimecontracts.ExpressionValue{"value": runtimecontracts.CELExpression("entry.name")}
 			entityID, mutationID := seedFanOutEntityRevision(t, ctx, db, postgres, fixture.runID, `[{"name":"own-000","score":7.25},{"name":"own-001","score":-2},{"name":"own-002","score":1e3}]`, createdAt)
 			bindFanOutEntityRevision(t, ctx, db, postgres, fixture, fixture.runID, entityID, mutationID, createdAt)
 
@@ -2013,6 +2028,7 @@ func seedFanOutOwnerFixtureWithArtifact(t *testing.T, ctx context.Context, db *s
 		t.Fatalf("persist fan-out fixture source: %v", err)
 	}
 	fixture := fanOutOwnerFixture{runID: uuid.NewString(), eventID: uuid.NewString(), deliveryID: uuid.NewString(), flowPath: ".", semanticPath: `nodes["fan-out-source"].handlers["items.ready"].fan_out`, createdAt: createdAt, artifact: artifact}
+	fixture.plan = fanOutOwnerTypedPlanFixture(t)
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: fixture.runID, BundleHash: artifact.BundleHash(), StartedAt: createdAt})
 	if err := db.QueryRowContext(ctx, `SELECT bundle_hash FROM runs WHERE run_id=$1`, fixture.runID).Scan(&fixture.bundleHash); err != nil {
 		t.Fatalf("load fan-out fixture bundle hash: %v", err)
@@ -2061,6 +2077,7 @@ func seedFanOutOwnerChildFixture(t *testing.T, ctx context.Context, db *sql.DB, 
 	fixture := fanOutOwnerFixture{
 		runID: parent.runID, eventID: uuid.NewString(), deliveryID: uuid.NewString(), flowPath: parent.flowPath,
 		semanticPath: uuid.NewString(), createdAt: createdAt, bundleHash: parent.bundleHash,
+		plan: parent.plan,
 	}
 	items := make([]string, cardinality)
 	for index := range items {
@@ -2103,6 +2120,9 @@ func seedFanOutOwnerChildFixture(t *testing.T, ctx context.Context, db *sql.DB, 
 		HandlerEventKey: "nested.items.ready", ProducerSource: producer,
 		Lineage: events.EventLineage{RunID: fixture.runID, ParentEventID: fixture.eventID, ExecutionMode: executionmode.Live},
 	}
+	plan := fanOutOwnerFixtureEvidence(t, fixture)
+	capsule.SourceProjection = plan.SemanticEvidence()
+	digest := plan.Ref.SemanticDigest
 	capsuleJSON, err := json.Marshal(capsule)
 	if err != nil {
 		t.Fatal(err)
@@ -2111,7 +2131,7 @@ func seedFanOutOwnerChildFixture(t *testing.T, ctx context.Context, db *sql.DB, 
 	if cardinality == 0 {
 		status = fanoutobligation.StatusClosed
 	}
-	mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO fan_out_intents (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,bundle_hash,semantic_digest,source_kind,source_event_id,source_field,cardinality,cursor,status,next_chunk_size,capsule,created_at,updated_at) VALUES ($1,$2,$3,'fan_out',$4,$5,$6,'event_payload_field',$7,'items',$8,0,$9,$12,$10,$11,$11)`, fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath, fixture.bundleHash, "sha256:"+strings.Repeat("3", 64), fixture.eventID, cardinality, string(status), string(capsuleJSON), createdAt, fanoutobligation.InitialChunkSize)
+	mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO fan_out_intents (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,bundle_hash,semantic_digest,source_kind,source_event_id,source_field,cardinality,cursor,status,next_chunk_size,capsule,created_at,updated_at) VALUES ($1,$2,$3,'fan_out',$4,$5,$6,'event_payload_field',$7,'items',$8,0,$9,$12,$10,$11,$11)`, fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath, fixture.bundleHash, digest, fixture.eventID, cardinality, string(status), string(capsuleJSON), createdAt, fanoutobligation.InitialChunkSize)
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit nested fan-out fixture: %v", err)
 	}
@@ -2170,15 +2190,18 @@ func bindFanOutEntityRevision(t *testing.T, ctx context.Context, db *sql.DB, pos
 		t.Fatal(err)
 	}
 	capsule.EntityID = entityID
+	fixture.plan.ItemsFrom = "entity.items"
+	plan := fanOutOwnerFixtureEvidence(t, fixture)
+	capsule.SourceProjection = plan.SemanticEvidence()
 	capsuleRaw, err := json.Marshal(capsule)
 	if err != nil {
 		t.Fatal(err)
 	}
-	query := `UPDATE fan_out_intents SET source_kind='entity_field_revision',source_event_id=NULL,source_run_id=?,source_entity_id=?,source_field='items',source_mutation_id=?,capsule=?,updated_at=? WHERE run_id=? AND triggering_delivery_id=? AND flow_path=? AND declaration_family='fan_out' AND semantic_path=?`
+	query := `UPDATE fan_out_intents SET source_kind='entity_field_revision',source_event_id=NULL,source_run_id=?,source_entity_id=?,source_field='items',source_mutation_id=?,capsule=?,updated_at=?,semantic_digest=? WHERE run_id=? AND triggering_delivery_id=? AND flow_path=? AND declaration_family='fan_out' AND semantic_path=?`
 	if postgres {
-		query = `UPDATE fan_out_intents SET source_kind='entity_field_revision',source_event_id=NULL,source_run_id=$1::uuid,source_entity_id=$2::uuid,source_field='items',source_mutation_id=$3::uuid,capsule=$4::jsonb,updated_at=$5 WHERE run_id=$6::uuid AND triggering_delivery_id=$7::uuid AND flow_path=$8 AND declaration_family='fan_out' AND semantic_path=$9`
+		query = `UPDATE fan_out_intents SET source_kind='entity_field_revision',source_event_id=NULL,source_run_id=$1::uuid,source_entity_id=$2::uuid,source_field='items',source_mutation_id=$3::uuid,capsule=$4::jsonb,updated_at=$5,semantic_digest=$6 WHERE run_id=$7::uuid AND triggering_delivery_id=$8::uuid AND flow_path=$9 AND declaration_family='fan_out' AND semantic_path=$10`
 	}
-	if _, err := db.ExecContext(ctx, query, sourceRunID, entityID, mutationID, capsuleRaw, updatedAt, fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath); err != nil {
+	if _, err := db.ExecContext(ctx, query, sourceRunID, entityID, mutationID, capsuleRaw, updatedAt, plan.Ref.SemanticDigest, fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath); err != nil {
 		t.Fatalf("bind fan-out entity revision: %v", err)
 	}
 }
@@ -2200,6 +2223,34 @@ func seedFanOutOwnerIntent(t *testing.T, ctx context.Context, db *sql.DB, parent
 	return fixture
 }
 
+func rekeyFanOutOwnerFixture(t *testing.T, ctx context.Context, db *sql.DB, fixture fanOutOwnerFixture, flowPath, semanticPath string) fanOutOwnerFixture {
+	t.Helper()
+	var raw []byte
+	if err := db.QueryRowContext(ctx, `SELECT capsule FROM fan_out_intents WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family='fan_out' AND semantic_path=$4`, fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var capsule fanoutobligation.Capsule
+	if err := json.Unmarshal(raw, &capsule); err != nil {
+		t.Fatal(err)
+	}
+	rekeyed := fixture
+	rekeyed.flowPath, rekeyed.semanticPath = flowPath, semanticPath
+	plan := fanOutOwnerFixtureEvidence(t, rekeyed)
+	capsule.SourceProjection = plan.SemanticEvidence()
+	raw, err := fanoutobligation.MarshalCapsule(capsule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := db.ExecContext(ctx, `UPDATE fan_out_intents SET flow_path=$1,semantic_path=$2,semantic_digest=$3,capsule=$4 WHERE run_id=$5 AND triggering_delivery_id=$6 AND flow_path=$7 AND declaration_family='fan_out' AND semantic_path=$8`, flowPath, semanticPath, plan.Ref.SemanticDigest, string(raw), fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count, err := result.RowsAffected(); err != nil || count != 1 {
+		t.Fatalf("rekey source fixture: rows=%d err=%v", count, err)
+	}
+	return rekeyed
+}
+
 func insertFanOutOwnerIntent(t *testing.T, ctx context.Context, tx *sql.Tx, fixture fanOutOwnerFixture, cardinality int, createdAt time.Time) {
 	t.Helper()
 	producer, err := events.NewRootRoutingSource(uuid.NewString())
@@ -2212,6 +2263,8 @@ func insertFanOutOwnerIntent(t *testing.T, ctx context.Context, tx *sql.Tx, fixt
 		Lineage:     events.EventLineage{RunID: fixture.runID, ParentEventID: fixture.eventID, ExecutionMode: executionmode.Live},
 		StateFields: map[string]any{"integer": int64(75), "decimal": float64(75)},
 	}
+	plan := fanOutOwnerFixtureEvidence(t, fixture)
+	capsule.SourceProjection = plan.SemanticEvidence()
 	capsuleJSON, err := fanoutobligation.MarshalCapsule(capsule)
 	if err != nil {
 		t.Fatalf("encode fan-out capsule: %v", err)
@@ -2220,7 +2273,39 @@ func insertFanOutOwnerIntent(t *testing.T, ctx context.Context, tx *sql.Tx, fixt
 	if cardinality == 0 {
 		status = fanoutobligation.StatusClosed
 	}
-	mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO fan_out_intents (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,bundle_hash,semantic_digest,source_kind,source_event_id,source_field,cardinality,cursor,status,next_chunk_size,capsule,created_at,updated_at) VALUES ($1,$2,$3,'fan_out',$4,$5,$6,'event_payload_field',$7,'items',$8,0,$9,$12,$10,$11,$11)`, fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath, fixture.bundleHash, "sha256:"+strings.Repeat("2", 64), fixture.eventID, cardinality, string(status), string(capsuleJSON), createdAt, fanoutobligation.InitialChunkSize)
+	mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO fan_out_intents (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,bundle_hash,semantic_digest,source_kind,source_event_id,source_field,cardinality,cursor,status,next_chunk_size,capsule,created_at,updated_at) VALUES ($1,$2,$3,'fan_out',$4,$5,$6,'event_payload_field',$7,'items',$8,0,$9,$12,$10,$11,$11)`, fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath, fixture.bundleHash, plan.Ref.SemanticDigest, fixture.eventID, cardinality, string(status), string(capsuleJSON), createdAt, fanoutobligation.InitialChunkSize)
+}
+
+func fanOutOwnerTypedPlanFixture(t *testing.T) runtimecontracts.FanOutCompiledPlan {
+	t.Helper()
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(repo, canonicalrouting.CopyForkFanOutCarrier(t, false, false), runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plans := bundle.FanOutPlansForHandler(mustPersistenceRootNode("fan-out-source"), "items.ready")
+	if len(plans) != 1 {
+		t.Fatal("SQL owner fixture requires one typed source plan")
+	}
+	return plans[0]
+}
+
+// SQL-owner fixtures retain arbitrary unit-test declaration keys. Rebind the
+// typed carrier's witness to that exact key, without claiming live execution.
+func fanOutOwnerFixtureEvidence(t *testing.T, fixture fanOutOwnerFixture) runtimecontracts.FanOutCompiledPlan {
+	t.Helper()
+	plan := fixture.plan
+	plan.Ref.BundleHash = fixture.bundleHash
+	plan.Ref.ElementRef = runtimecontracts.FanOutElementRef{FlowPath: fixture.flowPath, Family: "fan_out", SemanticPath: fixture.semanticPath}
+	var err error
+	plan.Ref.SemanticDigest, err = canonicaljson.Hash(plan.SemanticEvidence())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := plan.SemanticEvidence().Validate(plan.Ref); err != nil {
+		t.Fatal(err)
+	}
+	return plan
 }
 
 func rejectedFanOutChunk(claim fanoutobligation.Claim, start, count int, at time.Time) pipeline.FanOutChunkCommand {
