@@ -50,15 +50,20 @@ func (s *State) admit(spec *runtimecontracts.AccumulateSpec, payload map[string]
 		if len(s.Deliveries) != 0 {
 			return false, invalidState("keyed receipt mode")
 		}
+		storedKeys := make(map[string]bool, len(s.Items))
 		for _, item := range s.Items {
 			storedKey, ok := payloadKey(item, path.Segments)
-			if !ok || s.Received[storedKey] == "" {
+			if !ok || storedKeys[storedKey] || s.Received[storedKey] == "" {
 				return false, invalidState("business key receipt")
 			}
 			canonical, err := canonicaljson.Bytes(item)
 			if err != nil || s.Received[storedKey] != canonicaljson.HashBytes(canonical) {
 				return false, invalidState("business key payload hash")
 			}
+			storedKeys[storedKey] = true
+		}
+		if len(storedKeys) != len(s.Received) {
+			return false, invalidState("business key receipt count")
 		}
 		var ok bool
 		key, ok = payloadKey(payload, path.Segments)
