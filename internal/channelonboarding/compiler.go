@@ -105,8 +105,12 @@ func CompileLearnedActivation(candidate Candidate, activation ConnectedChannelAc
 			return CompiledActivation{}, fmt.Errorf("learned activation is missing credential role %q", required)
 		}
 	}
+	destination, err := candidate.Plan.LearnedDestination(activation.ConversationRef)
+	if err != nil {
+		return CompiledActivation{}, err
+	}
 	plan, err := packs.NewOutboundBindingPlanWithRegistration(
-		LearnedBindingID(activation.SlotKey), candidate.Plan, activation.ConversationRef, nil, credentialKeys, candidate.Target.Selector,
+		LearnedBindingID(activation.SlotKey), candidate.Plan, destination, nil, credentialKeys, candidate.Target.Selector,
 	)
 	if err != nil {
 		return CompiledActivation{}, err

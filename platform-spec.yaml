@@ -10567,6 +10567,15 @@ tool_model:
           authenticated_text_challenge. Discord paper conformance is the second webhook/text shape. WhatsApp paper
           conformance is session_connection plus provider_pairing and grants no executable session authority before
           #2338/#2341 provide the service and health owners.
+      learned_destination_declaration: >
+        Every channel onboarding profile requires an explicit learned_destination map using ChannelMapping syntax.
+        Sources are scalar leaves rooted at conversation_reference; targets are scalar leaves rooted at destination.
+        Each required source and target leaf is covered exactly once, with no duplicate or overlapping paths, and the
+        existing directional compiler must prove assignability over the complete admitted source domain. Literals,
+        conversions, ambient values, each/fanout, functions and provider branches are unsupported. Telegram declares
+        destination <- conversation_reference explicitly; distinct object slots may declare
+        destination.queue <- conversation_reference.room. The immutable compiled relation and its complete semantic
+        projection participate in SatisfactionPlan generation. Declared-only bindings without onboarding need no relation.
       operation_rule: >
         connect, reconnect, and rebind are distinct whole-journey verbs. One selected-store operation reserves exact
         semantic input and target-slot responsibility before credential writes or provider effects. Same-key/same-input
@@ -10656,10 +10665,13 @@ tool_model:
         readiness, and runtime-context readback consume that owner; no config-only map or independent current-state copy
         survives. The selected-store ConnectedChannelActivation remains the durable learned source; the process
         publication is its exact-current compiled projection, not a second durable owner. Each learned activation retains
-        the exact conversation destination and binding revision admitted at publication. Compilation consumes those durable
-        activation facts rather than rereading mutable current identity, so an activation remains reconstructable while a
+        the exact conversation reference and binding revision admitted at publication. The exact generation-pinned
+        SatisfactionPlan restores that reference under its declared conversation_reference schema and consumes its
+        compiled learned_destination relation to derive the typed destination. Conversation and destination are independent
+        opaque slots, never implicitly interchangeable. No additional mutable destination row or durable owner exists.
+        Compilation consumes those durable activation facts rather than rereading mutable current identity, so an activation remains reconstructable while a
         rebind advances identity and until the successor process publication is exact-current. Missing or contradictory
-        activation-owned destination, coordinate, credential, or revision facts fail closed.
+        activation-owned conversation, exact plan/relation generation, coordinate, credential, or revision facts fail closed.
         Serve prepares the exact runtime-context occurrence and required standing/topology facts before reconstructing
         connected state and publishing the complete executable activation catalog. Destructive-effect reconciliation and
         publication must succeed before recovered or new business work, delivery continuations, autonomous producers,
@@ -10785,8 +10797,15 @@ tool_model:
         leaves are all required. Generic channel code validates and carries these semantic values but must not inspect their
         provider-owned fields or assume scalar, decimal, message-id, account-id, conversation-id, or callback-token shapes.
         When an opaque account or conversation reference enters the selected-store operator-channel text projection, an
-        admitted string remains exact and an admitted closed object is encoded as canonical JSON; no consumer parses its
-        provider-owned members or reconstructs identity from presentation text.
+        admitted string remains exact and an admitted closed object is encoded as canonical JSON; no consumer independently
+        interprets its provider-owned members or reconstructs identity from presentation text. The same carrier rule applies
+        to retained interaction and message references. At executable boundaries, one SatisfactionPlan restoration operation
+        selects the exact declared slot schema from the admitted generation-pinned plan. String slots remain exact strings,
+        including JSON-looking strings; object slots restore canonical semantic JSON and validate the complete declared schema.
+        Malformed, empty, duplicate-key, noncanonical, wrong-slot or schema-contradictory values fail closed, with no
+        string/object fallback. Restoration confers no identity, principal, audience, credential or effect authority.
+        Callback ACK consumes the interaction_reference slot; both shared native read and install consume
+        external_account_reference for member_reference. PrepareOperation remains strict for typed semantic input.
         Provider-native conversation-kind vocabulary does not cross the v2 interface. The required provider-neutral
         conversation_scope is exactly direct or shared and is projected once by the accepted provider trigger.
     operation_model:
@@ -10828,6 +10847,7 @@ tool_model:
       - prove recursively that every admitted source value is assignable to its target, including object requiredness and additional-properties policy, array items and bounds, enums, patterns, and scalar bounds
       - reject any directional relation the finite compiler cannot prove; constraint intersection is not assignability
       - permit only scalar identity and one ordered each-item object projection; channel-operation conversions are not supported
+      - compile learned_destination through the same mapping topology and directional schema owner, permitting scalar-leaf projection only with complete required source/target coverage and no overlap or implicit identity
       - reject caller-supplied provider context, ambient values, defaults, functions, concatenation, conditions, or partial mappings
       - validate connector output first, then apply the compiled channel output projection, then validate the satisfier-bound opaque result
       - require every normalized trigger field to declare one post-conversion schema; normalization admits against that schema and the accepted trigger owner exports the same schema to the recursive event-mapping relation
@@ -15260,7 +15280,10 @@ platform_tables:
         Current or historical learned channel activation for one exact bundle/runtime-context,
         interface, and target slot. It links rather than duplicates operator account identity and
         stores no secret values. A current row is executable only through the canonical compiled
-        activation and exact-current readiness owners.
+        activation and exact-current readiness owners. Its exact retained conversation_reference,
+        interface and plan-generation provenance determine destination through the immutable
+        compiled onboarding.learned_destination relation; destination is not a separate mutable
+        durable owner and must not be recovered from the current identity binding.
       ddl: |
         CREATE TABLE connected_channel_activations (
             activation_id UUID PRIMARY KEY,
