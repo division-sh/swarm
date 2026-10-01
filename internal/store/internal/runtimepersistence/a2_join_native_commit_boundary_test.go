@@ -34,6 +34,7 @@ type a2NativeJoinStore interface {
 	pipeline.WorkflowEngineMutationOwner
 	pipeline.WorkflowInstancePersistenceReader
 	LoadGenericScheduleActivation(context.Context, string) (genericschedule.Activation, bool, error)
+	ListActiveGenericScheduleActivations(context.Context) ([]genericschedule.Activation, error)
 	Snapshot(context.Context, string) (deliverylifecycle.Snapshot, error)
 	Outcomes(context.Context, string) ([]deliverylifecycle.Outcome, error)
 }
@@ -45,22 +46,25 @@ type a2NativeJoinFixture struct {
 }
 
 type a2NativeJoinEvidence struct {
-	Instance  pipeline.WorkflowInstance
-	Schedule  genericschedule.Activation
-	Delivery  deliverylifecycle.Snapshot
-	Outcomes  []deliverylifecycle.Outcome
-	Mutations int
-	Revisions int
-	Timers    int
-	Attempts  int
-	Events    int
+	Instance        pipeline.WorkflowInstance
+	Schedule        genericschedule.Activation
+	Completion      *genericschedule.Activation
+	ActiveSchedules []genericschedule.Activation
+	Delivery        deliverylifecycle.Snapshot
+	Outcomes        []deliverylifecycle.Outcome
+	Mutations       int
+	Revisions       int
+	Timers          int
+	Attempts        int
+	Events          int
 }
 
 // M32 exercises the physical driver Commit, not loss of an already-acknowledged
 // owner result. All mutation SQL, evidence finalization and claims are real.
 // Reopening the pool/selected adapter proves durable reload and exact retry,
-// including the pending join outcome. It does not claim process-kill recovery,
-// outcome publication, scheduler dispatch or public API proof.
+// including the exact active completion continuation for the pending join
+// outcome. This is a direct store-command fixture, not compiler or engine
+// execution, process-kill recovery, outcome publication or public API dispatch.
 func TestA2JoinNativeCommitBoundaryOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, cell := range []string{"acknowledged", "commit_before_lost_ack", "rollback_before_lost_ack", "native_deferred_rejection"} {
@@ -100,7 +104,6 @@ func TestA2JoinNativeCommitBoundaryOnBothStores(t *testing.T) {
 					if nativeErr != nil || err != nil {
 						t.Fatalf("native acknowledged commit: physical=%v owner=%v", nativeErr, err)
 					}
-					assertA2NativeJoinAcknowledgement(t, result, fixture)
 				} else {
 					if err == nil || !reflect.DeepEqual(result, pipeline.CommittedWorkflowEngineMutation{}) {
 						t.Fatalf("unacknowledged commit fabricated result: result=%#v err=%v", result, err)
@@ -116,6 +119,9 @@ func TestA2JoinNativeCommitBoundaryOnBothStores(t *testing.T) {
 				after := readA2NativeJoinEvidence(t, ctx, db, owner, fixture)
 				if committed {
 					assertA2NativeJoinCommitDelta(t, before, after, fixture)
+					if cell == "acknowledged" {
+						assertA2NativeJoinAcknowledgement(t, result, fixture, after)
+					}
 				} else if !reflect.DeepEqual(before, after) {
 					t.Fatalf("native rollback/rejection changed durable evidence:\nbefore=%#v\nafter=%#v", before, after)
 				}
@@ -146,9 +152,9 @@ func TestA2JoinNativeCommitBoundaryOnBothStores(t *testing.T) {
 					if err != nil {
 						t.Fatalf("retry real rolled-back command: %v", err)
 					}
-					assertA2NativeJoinAcknowledgement(t, retried, fixture)
 					reloaded = readA2NativeJoinEvidence(t, ctx, restartedDB, restarted, fixture)
 					assertA2NativeJoinCommitDelta(t, before, reloaded, fixture)
+					assertA2NativeJoinAcknowledgement(t, retried, fixture, reloaded)
 				}
 				// Exact old command/claim may not apply a second closure after either
 				// durable lost-ack recovery or a successfully retried rollback.
@@ -258,15 +264,33 @@ func seedA2NativeJoinFixture(t *testing.T, ctx context.Context, backend string, 
 	if !arm.Close(joinruntime.CloseReasonComplete, true, false) {
 		t.Fatal("fresh arm did not close")
 	}
-	arm.TimerCancelled = true
 	record.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
 	record.ExpectedState, record.ExpectedRevision = "awaiting", 2
 	record.UpdatedAt = record.UpdatedAt.Add(time.Second)
 	record.Fields = json.RawMessage(`{"account_id":"preserved","handled":true,"closed":true}`)
+	completionHandle, err := timeridentity.JoinCompleteHandle(arm.JoinRef())
+	if err != nil {
+		t.Fatal(err)
+	}
+	arm, err = arm.WithTimerHandle(completionHandle, record.UpdatedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completion := schedule
+	completion.ScheduleKey, completion.TaskID = arm.TimerHandle().TaskID(), arm.TimerHandle().TaskID()
+	completion.EventType = arm.TimerHandle().EventType()
+	completion.Payload, err = canonicaljson.FromGo(arm.TimerHandle().PayloadMetadata())
+	if err != nil {
+		t.Fatal(err)
+	}
+	completion.Due = genericschedule.AbsoluteDue(arm.FireAt)
 	record.Accumulator = encodeArm(arm)
 	return a2NativeJoinFixture{arm: arm, scheduleID: seeded.Lifecycle.GenericScheduleActivations[0].ID,
 		command: pipeline.WorkflowEngineMutationCommand{State: record,
-			Lifecycle:       pipeline.WorkflowLifecycleMutationPlan{StageEntry: &entry, Schedules: []pipeline.WorkflowScheduleMutation{{Kind: pipeline.WorkflowScheduleMutationCancel, Command: schedule, CancelCause: "join_complete", CancelledAt: record.UpdatedAt}}},
+			Lifecycle: pipeline.WorkflowLifecycleMutationPlan{StageEntry: &entry, Schedules: []pipeline.WorkflowScheduleMutation{
+				{Kind: pipeline.WorkflowScheduleMutationCancel, Command: schedule, CancelCause: "join_complete", CancelledAt: record.UpdatedAt},
+				{Kind: pipeline.WorkflowScheduleMutationUpsert, Command: completion},
+			}},
 			DeliverySuccess: &pipeline.WorkflowEngineDeliverySuccess{Claim: claimed.Claim, SideEffects: []string{"handler_completed"}, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleSelection()},
 		},
 	}
@@ -284,6 +308,25 @@ func readA2NativeJoinEvidence(t *testing.T, ctx context.Context, db *sql.DB, own
 	evidence.Schedule, found, err = owner.LoadGenericScheduleActivation(ctx, fixture.scheduleID)
 	if err != nil || !found {
 		t.Fatalf("reload canonical join deadline: found=%v err=%v", found, err)
+	}
+	// Only find the server-minted ID by the exact durable key; decoding and
+	// recovery eligibility remain the selected schedule owner's responsibility.
+	var completionID string
+	err = db.QueryRowContext(ctx, `SELECT CAST(timer_id AS TEXT) FROM timers WHERE run_id=$1 AND schedule_key=$2`,
+		fixture.command.State.Identity.RunID, fixture.command.Lifecycle.Schedules[1].Command.ScheduleKey).Scan(&completionID)
+	if err != nil && err != sql.ErrNoRows {
+		t.Fatal(err)
+	}
+	if err == nil {
+		completion, present, err := owner.LoadGenericScheduleActivation(ctx, completionID)
+		if err != nil || !present {
+			t.Fatalf("reload canonical completion continuation: found=%v err=%v", present, err)
+		}
+		evidence.Completion = &completion
+	}
+	evidence.ActiveSchedules, err = owner.ListActiveGenericScheduleActivations(ctx)
+	if err != nil {
+		t.Fatalf("load recoverable schedule continuations: %v", err)
 	}
 	evidence.Delivery, err = owner.Snapshot(ctx, fixture.command.DeliverySuccess.Claim.DeliveryID())
 	if err != nil {
@@ -325,11 +368,11 @@ func assertA2NativeJoinState(t *testing.T, evidence a2NativeJoinEvidence, fixtur
 	if err != nil || len(arms) != 1 || arms[0].JoinRef() != fixture.arm.JoinRef() {
 		t.Fatalf("wrong retained join arm: arms=%#v err=%v", arms, err)
 	}
-	if evidence.Schedule.Command.ScheduleKey != fixture.command.Lifecycle.Schedules[0].Command.ScheduleKey || evidence.Schedule.Command.EntityID != fixture.command.State.EntityID || evidence.Schedule.Command.RunID != fixture.command.State.Identity.RunID || evidence.Schedule.Command.FlowInstance != fixture.command.State.Identity.Route.InstancePath || evidence.Attempts != 1 || evidence.Timers != 1 {
+	if !reflect.DeepEqual(evidence.Schedule.Command, fixture.command.Lifecycle.Schedules[0].Command.Canonical()) || evidence.Attempts != 1 || len(evidence.ActiveSchedules) != 1 {
 		t.Fatalf("wrong exact deadline/claim evidence: %#v", evidence)
 	}
 	if !closed {
-		if evidence.Instance.Revision != 2 || arms[0].Status != joinruntime.StatusOpen || len(arms[0].Outputs) != 1 || evidence.Schedule.Status != genericschedule.StatusActive || evidence.Delivery.Status != deliverylifecycle.StatusInProgress || len(evidence.Outcomes) != 0 {
+		if evidence.Instance.Revision != 2 || arms[0].Status != joinruntime.StatusOpen || len(arms[0].Outputs) != 1 || evidence.Schedule.Status != genericschedule.StatusActive || evidence.Delivery.Status != deliverylifecycle.StatusInProgress || len(evidence.Outcomes) != 0 || evidence.Completion != nil || evidence.Timers != 1 || !reflect.DeepEqual(evidence.ActiveSchedules[0], evidence.Schedule) {
 			t.Fatalf("initial join is not open with active deadline and exact claim: %#v", evidence)
 		}
 		return
@@ -345,6 +388,13 @@ func assertA2NativeJoinState(t *testing.T, evidence a2NativeJoinEvidence, fixtur
 	if evidence.Instance.Revision != 3 || !bytes.Equal(gotArm, wantArm) || evidence.Instance.Fields["closed"] != true || evidence.Schedule.Status != genericschedule.StatusCancelled || evidence.Schedule.CancelCause != "join_complete" || !evidence.Schedule.CancelledAt.Equal(fixture.command.State.UpdatedAt) || evidence.Delivery.Status != deliverylifecycle.StatusDelivered || len(evidence.Outcomes) != 1 {
 		t.Fatalf("atomic closure is incomplete: arms=%#v evidence=%#v", arms, evidence)
 	}
+	if evidence.Completion == nil || evidence.Completion.ID == fixture.scheduleID || evidence.Completion.Status != genericschedule.StatusActive ||
+		!reflect.DeepEqual(evidence.Completion.Command, fixture.command.Lifecycle.Schedules[1].Command.Canonical()) ||
+		!evidence.Completion.InitialDueAt.Equal(fixture.arm.FireAt) || !evidence.Completion.CurrentDueAt.Equal(fixture.arm.FireAt) ||
+		!evidence.Completion.CancelledAt.IsZero() || evidence.Completion.CancelCause != "" || evidence.Completion.CurrentEventID != "" ||
+		evidence.Timers != 2 || !reflect.DeepEqual(evidence.ActiveSchedules[0], *evidence.Completion) {
+		t.Fatalf("closed pending outcome lacks its exact recoverable completion schedule: %#v", evidence)
+	}
 	claim, outcome := fixture.command.DeliverySuccess.Claim, evidence.Outcomes[0]
 	if outcome.ClaimVersion != claim.Version() || outcome.DeliveryID != claim.DeliveryID() || !reflect.DeepEqual(outcome.SideEffects, []string{"handler_completed"}) || !evidence.Delivery.MatchesSettlementClaim(claim) {
 		t.Fatalf("closure has wrong settled claim/outcome: %#v", evidence)
@@ -354,15 +404,26 @@ func assertA2NativeJoinState(t *testing.T, evidence a2NativeJoinEvidence, fixtur
 func assertA2NativeJoinCommitDelta(t *testing.T, before, after a2NativeJoinEvidence, fixture a2NativeJoinFixture) {
 	t.Helper()
 	assertA2NativeJoinState(t, after, fixture, true)
-	if after.Revisions != before.Revisions+1 || after.Mutations != before.Mutations+2 || after.Events != before.Events || after.Timers != before.Timers || after.Attempts != before.Attempts {
+	if after.Revisions != before.Revisions+1 || after.Mutations != before.Mutations+2 || after.Events != before.Events || after.Timers != before.Timers+1 || after.Attempts != before.Attempts {
 		t.Fatalf("closure duplicated/lost exact history: before=%#v after=%#v", before, after)
 	}
 }
 
-func assertA2NativeJoinAcknowledgement(t *testing.T, result pipeline.CommittedWorkflowEngineMutation, fixture a2NativeJoinFixture) {
+func assertA2NativeJoinAcknowledgement(t *testing.T, result pipeline.CommittedWorkflowEngineMutation, fixture a2NativeJoinFixture, persisted a2NativeJoinEvidence) {
 	t.Helper()
-	if !result.Committed || !result.Lifecycle.Committed || result.DeliverySuccess == nil || !result.DeliverySuccess.Same(fixture.command.DeliverySuccess.Claim) || len(result.Lifecycle.GenericScheduleCancellations) != 1 || result.Lifecycle.GenericScheduleCancellations[0].ID != fixture.scheduleID || len(result.Publications) != 0 || result.Validate() != nil {
+	if !result.Committed || !result.Lifecycle.Committed || result.DeliverySuccess == nil || !result.DeliverySuccess.Same(fixture.command.DeliverySuccess.Claim) || len(result.Lifecycle.GenericScheduleCancellations) != 1 || result.Lifecycle.GenericScheduleCancellations[0].ID != fixture.scheduleID ||
+		len(result.Lifecycle.GenericScheduleActivations) != 1 || result.Lifecycle.GenericScheduleActivations[0].ID == fixture.scheduleID ||
+		result.Lifecycle.GenericScheduleActivations[0].Status != genericschedule.StatusActive ||
+		!reflect.DeepEqual(result.Lifecycle.GenericScheduleActivations[0].Command, fixture.command.Lifecycle.Schedules[1].Command.Canonical()) ||
+		len(result.Publications) != 0 || result.Validate() != nil {
 		t.Fatalf("acknowledgement lost exact closure/claim evidence: %#v", result)
+	}
+	if persisted.Completion == nil || result.Lifecycle.GenericScheduleActivations[0].ID != persisted.Completion.ID ||
+		result.Lifecycle.GenericScheduleCancellations[0].Status != genericschedule.StatusCancelled ||
+		!reflect.DeepEqual(result.Lifecycle.GenericScheduleCancellations[0].Command, persisted.Schedule.Command) ||
+		result.Lifecycle.GenericScheduleCancellations[0].CancelCause != persisted.Schedule.CancelCause ||
+		!result.Lifecycle.GenericScheduleCancellations[0].CancelledAt.Equal(persisted.Schedule.CancelledAt) {
+		t.Fatalf("acknowledged schedule evidence disagrees with durable rows: result=%#v persisted=%#v", result, persisted)
 	}
 }
 
