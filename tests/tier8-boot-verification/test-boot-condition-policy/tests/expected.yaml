@@ -1,6 +1,6 @@
 conformance:
   disposition: verify-only
-  verify: warning
+  verify: reject
   proves:
     - catalog.verify.boot_diagnostics
   diagnostic:

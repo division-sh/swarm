@@ -2950,6 +2950,7 @@ literal_policy_contracts:
   - Every value interior is user data. value, description, override, criteria, validation and modules have no reserved meaning at any depth.
   - There is no metadata wrapper, authored override flag, interpolation or fallback interpretation. Use YAML comments for documentation.
   - Null, false, zero, empty text and empty containers retain their distinct literal meanings. Absence means no declaration.
+  - Literal values must pass the existing canonical JSON admission boundary; non-text object keys and invalid numeric values are rejected at source admission rather than failing later during describe or execution. Validation does not change admitted scalar kinds or interpret object fields as grammar.
   - A nearer root declaration replaces the whole inherited value. Both ordinary and owner-bearing lookup select that root once, then descend only within it; missing, null or incompatible child interiors cannot resurrect parent fields.
   - Effective resolution, cloning and preview overrides deep-copy literal containers, including caller-owned override inputs.
   - Admitted rule declarations and executable module definitions are separate authorities in rules.yaml and tools.yaml. Literal policy keys with those names grant no authority.

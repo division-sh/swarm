@@ -5,6 +5,7 @@ These directories are the positive authoring owners for supported routing patter
 | Need | Example | Decision |
 |---|---|---|
 | Deliver an external event to a root handler | `root-ingress` | Declare one external root input and a same-flow subscriber. |
+| Route a machine validation result using scoped rules | `policy-rules` | Keep business values in policy.yaml, scoped criteria/equality sets in rules.yaml, and select accepted/rejected output through declared handler rules. |
 | Deliver between static child flows | `parent-connect` | Declare output/input pins and one parent `connect`. |
 | Require an existing keyed child | `template-select-existing` | Use receiver `resolution.mode: select`; a miss never creates. |
 | Reuse or create one keyed child | `template-select-or-create` | Use receiver `resolution.mode: select-or-create`. |
