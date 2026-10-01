@@ -136,6 +136,9 @@ func TestSingletonCardinalityAndCoordinatorConsumersStayOnCanonicalOwners(t *tes
 		"internal/runtime/core/pinrouting/connect_route_plan.go":                   {},
 	}
 	inspectProductionGo(t, func(path string, file *ast.File) {
+		for range rawProjectFlowModeReads(file) {
+			t.Errorf("%s reads raw ProjectFlowRef.Mode as behavioral authority; consume the admitted effective mode", path)
+		}
 		scopedDemandFunctions := map[string]struct{}{
 			"BuildSingletonCoordinatorDemandProjection": {},
 			"checkJoinValidation":                       {},
@@ -149,10 +152,6 @@ func TestSingletonCardinalityAndCoordinatorConsumersStayOnCanonicalOwners(t *tes
 		}
 		ast.Inspect(file, func(node ast.Node) bool {
 			switch typed := node.(type) {
-			case *ast.SelectorExpr:
-				if ident, ok := typed.X.(*ast.Ident); ok && ident.Name == "ref" && typed.Sel.Name == "Mode" {
-					t.Errorf("%s reads raw ProjectFlowRef.Mode as behavioral authority; consume the admitted effective mode", path)
-				}
 			case *ast.CallExpr:
 				if calledFunctionName(typed.Fun) == "ResolveFlowSingletonCoordinator" {
 					if _, ok := strictAllowed[path]; !ok {
@@ -187,6 +186,68 @@ func TestSingletonCardinalityAndCoordinatorConsumersStayOnCanonicalOwners(t *tes
 			})
 		}
 	})
+}
+
+func rawProjectFlowModeReads(file *ast.File) []*ast.SelectorExpr {
+	methods := make(map[*ast.SelectorExpr]bool)
+	ast.Inspect(file, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok || len(call.Args) != 0 || call.Ellipsis.IsValid() {
+			return true
+		}
+		callee := call.Fun
+		for {
+			paren, ok := callee.(*ast.ParenExpr)
+			if !ok {
+				break
+			}
+			callee = paren.X
+		}
+		if selector, ok := callee.(*ast.SelectorExpr); ok {
+			methods[selector] = true
+		}
+		return true
+	})
+	var reads []*ast.SelectorExpr
+	ast.Inspect(file, func(node ast.Node) bool {
+		selector, ok := node.(*ast.SelectorExpr)
+		if !ok || methods[selector] {
+			return true
+		}
+		if ident, ok := selector.X.(*ast.Ident); ok && ident.Name == "ref" && selector.Sel.Name == "Mode" {
+			reads = append(reads, selector)
+		}
+		return true
+	})
+	return reads
+}
+
+func TestRawProjectFlowModeGuardDistinguishesMethodsFromFields(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		reads      int
+	}{
+		{"raw_field", "_ = ref.Mode", 1},
+		{"raw_condition", "if ref.Mode == template { use(ref) }", 1},
+		{"raw_argument", "consume(ref.Mode)", 1},
+		{"raw_nested_argument", "consume(ref.Mode, other.Mode())", 1},
+		{"raw_inside_method_receiver", "makeRef(ref.Mode).Mode()", 1},
+		{"raw_alongside_method", "consume(ref.Mode(), ref.Mode)", 1},
+		{"raw_twice", "consume(ref.Mode, ref.Mode)", 2},
+		{"join_method", "_ = ref.Mode()", 0},
+		{"join_method_condition", "if ref.Mode() == arrival { use(ref) }", 0},
+		{"parenthesized_join_method", "_ = (ref.Mode)()", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file, err := parser.ParseFile(token.NewFileSet(), "guard.go", "package fixture\nfunc probe() { "+tc.body+" }", 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if reads := len(rawProjectFlowModeReads(file)); reads != tc.reads {
+				t.Fatalf("raw mode reads=%d, want %d", reads, tc.reads)
+			}
+		})
+	}
 }
 
 func TestRetiredFlattenedExecutableNodeReadersStayAbsent(t *testing.T) {

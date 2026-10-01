@@ -31,9 +31,7 @@ func TestA2RetainedPayloadMapSourceLineageOnBothStores(t *testing.T) {
 			a2CollectionTrigger(t, db, child, []byte(`{"items":{"child-z":[19],"child-a":[12],"child-mid":[13]}}`))
 			a2PersistCollection(t, db, backend, child, nil)
 			foreign := uuid.NewString()
-			if _, err := db.Exec(`INSERT INTO runs (run_id,forked_from_run_id) VALUES ($1,NULL),($2,$1),($3,NULL)`, ancestor.Key.RunID, child.Key.RunID, foreign); err != nil {
-				t.Fatal(err)
-			}
+			a2CollectionSeedLineage(t, db, ancestor, child.Key.RunID, foreign)
 			if _, err := db.Exec(`INSERT INTO entity_state (run_id,entity_id,fields) VALUES ($1,$1,$2)`, child.Key.RunID, `{"items":{"live-z":[99],"live-a":[98],"live-mid":[97]}}`); err != nil {
 				t.Fatal(err)
 			}
