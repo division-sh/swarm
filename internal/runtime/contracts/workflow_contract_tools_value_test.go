@@ -120,6 +120,12 @@ func TestW5ToolLiteralHTTPPresenceAndSerialization(t *testing.T) {
 		if !syntax.BodyPresent {
 			t.Fatalf("%s body lost", literal)
 		}
+		execution, _ := entry.HTTPExecution()
+		request, err := execution.Prepare(nil, nil)
+		wantBody := map[string]string{"null": "null", "false": "false", "0": "0", "''": `""`, "[]": "[]", "{}": "{}"}[literal]
+		if err != nil || string(request.Body()) != wantBody {
+			t.Fatalf("literal %s runtime request body=%q, want %q: %v", literal, request.Body(), wantBody, err)
+		}
 		body, err := yaml.Marshal(entries)
 		if err != nil {
 			t.Fatal(err)
@@ -140,6 +146,11 @@ func TestW5ToolLiteralHTTPPresenceAndSerialization(t *testing.T) {
 		absent, _ := missing["worker"].CanonicalHash()
 		if absent == left {
 			t.Fatal("literal body equals absent body")
+		}
+		absentExecution, _ := missing["worker"].HTTPExecution()
+		absentRequest, err := absentExecution.Prepare(nil, nil)
+		if err != nil || len(absentRequest.Body()) != 0 {
+			t.Fatalf("omission acquired runtime body=%q: %v", absentRequest.Body(), err)
 		}
 	}
 }
