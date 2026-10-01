@@ -158,15 +158,18 @@ func TestRouteTopologyPublicationSharesOneCensusAcrossNewActivations(t *testing.
 	if want := flowInstanceRouteTopologyRecordSets(independent, identities); !reflect.DeepEqual(got, want) {
 		t.Fatalf("publication changed route evidence: got=%+v want=%+v", got, want)
 	}
-	// Unrelated descriptors, even hostile ones, are outside this activation's
-	// compiled dependency scope and must not be loaded or affect its routes.
-	lister.rows = []ActiveFlowInstanceDescriptor{{RunID: "foreign-run", FlowInstance: "collector/outsider", FlowTemplate: "collector"}}
+	// The ordinary workers-to-collector connection makes collector relevant.
+	// A disconnected descriptor must still stay outside the compiled scope.
+	lister.rows = []ActiveFlowInstanceDescriptor{{RunID: "foreign-run", FlowInstance: "unrelated/outsider", FlowTemplate: "unrelated"}}
 	source.censuses.Store(0)
 	if _, err := eb.prepareFlowInstanceActivationRouteTopology(context.Background(), plans); err != nil {
 		t.Fatalf("unrelated descriptor affected independent activation: %v", err)
 	}
 	if source.censuses.Load() != 0 || lister.calls != 0 || lister.scopedCalls != 2 {
 		t.Fatalf("independent activation read unrelated descriptors: censuses=%d full_reads=%d scoped_reads=%d", source.censuses.Load(), lister.calls, lister.scopedCalls)
+	}
+	if !slices.Equal(lister.templateScope[1], []string{"collector", "workers"}) {
+		t.Fatalf("ordinary collector dependency omitted: templates=%#v", lister.templateScope)
 	}
 }
 
@@ -306,8 +309,9 @@ func TestRouteTopologyPublicationReadsOnlyCompiledObserverDependency(t *testing.
 		FlowInstance: old.Route.InstancePath, FlowTemplate: "workers",
 		BundleHash: eb.sourceArtifactFact.BundleHash(), WorkflowVersion: source.WorkflowVersion(),
 	}
-	// This row would fail validation if a full-run read leaked into this operation.
-	unrelated := ActiveFlowInstanceDescriptor{RunID: "foreign-run", FlowInstance: "collector", FlowTemplate: "collector"}
+	// This disconnected row would fail validation if a full-run read leaked into
+	// this operation. Collector is a relevant ordinary receiver, not unrelated.
+	unrelated := ActiveFlowInstanceDescriptor{RunID: "foreign-run", FlowInstance: "unrelated/hostile", FlowTemplate: "unrelated"}
 	lister := &topologyOperationDescriptors{rows: []ActiveFlowInstanceDescriptor{unrelated, selected}}
 	eb.durable.ActiveFlows = lister
 	source.censuses.Store(0)
@@ -315,7 +319,7 @@ func TestRouteTopologyPublicationReadsOnlyCompiledObserverDependency(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source.censuses.Load() != 0 || lister.calls != 0 || lister.scopedCalls != 1 || !reflect.DeepEqual(lister.templateScope[0], []string{"workers"}) || len(lister.instanceScope[0]) != 0 {
+	if source.censuses.Load() != 0 || lister.calls != 0 || lister.scopedCalls != 1 || !slices.Equal(lister.templateScope[0], []string{"collector", "workers"}) || len(lister.instanceScope[0]) != 0 {
 		t.Fatalf("dependency reads: censuses=%d full=%d scoped=%d templates=%#v paths=%#v", source.censuses.Load(), lister.calls, lister.scopedCalls, lister.templateScope, lister.instanceScope)
 	}
 	newOwner, err := runtimeflowidentity.NewRunScopedFlowInstance(busInternalTestRunID, newPlan.Identity.Route())
@@ -347,6 +351,13 @@ func TestRouteTopologyPublicationReadsOnlyCompiledObserverDependency(t *testing.
 	}
 	if lister.calls != 0 || lister.scopedCalls != 2 {
 		t.Fatalf("selected foreign descriptor bypassed scoped read: full=%d scoped=%d", lister.calls, lister.scopedCalls)
+	}
+	lister.rows = []ActiveFlowInstanceDescriptor{{RunID: "foreign-run", FlowInstance: "collector/hostile", FlowTemplate: "collector"}}
+	if _, err := eb.prepareFlowInstanceActivationRouteTopology(context.Background(), []runtimepipeline.FlowInstanceActivationPlan{newPlan}); err == nil || !strings.Contains(err.Error(), "escaped selected run") {
+		t.Fatalf("connected foreign collector admission = %v, want refusal", err)
+	}
+	if lister.calls != 0 || lister.scopedCalls != 3 {
+		t.Fatalf("connected collector bypassed scoped read: full=%d scoped=%d", lister.calls, lister.scopedCalls)
 	}
 }
 
