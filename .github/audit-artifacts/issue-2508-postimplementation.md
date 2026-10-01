@@ -1,9 +1,10 @@
 # Post-Implementation Proof Audit: #2508
 
-Agent-g. Local implementation proof is complete. The first submitted head passed
-the default qualification but failed hosted release-package boundary admission.
-The test-only relocation below repairs that failure; repeat qualification and
-exact-head CI receipts are bound in the PR comment before review is requested.
+Agent-g. Local implementation proof is complete. Submitted heads passed default
+qualification but exposed hosted test-boundary, metadata-vocabulary and package
+budget defects. The test-only placement and documentation repairs below preserve
+the full assertions; repeat qualification and exact-head CI receipts are bound
+in the PR comment before review is requested.
 Independent merge review remains external, not self-granted approval.
 
 ## Boundary And Governing Context
@@ -200,8 +201,9 @@ Production Go diff: 596 additions, 490 deletions, gross1086, net+106 across six
 files. Spec/generated OpenRPC adds 56 gross lines; conservative combined1142
 is below #2407's 3000 cap. Waived historical 1500/net-neutral rules are not
 represented as still binding. No schema, ledger or persistence inventory change.
-The exact final baseline refresh adds two explicit test-file classifications
-for the new keyset and detail-failure proofs; production scores are unchanged.
+The canonical baseline includes all new and relocated test-file classifications,
+including keyset, detail-failure and compiled CLI proofs; production scores are
+unchanged.
 
 Authorized existing-test edit inventory: agents_test.go, agent_diagnose_test.go,
 agent_deliveries_test.go, agent_output_modes_test.go,
