@@ -2,17 +2,24 @@
 
 ## Implementation Status Addendum
 
+The [independent absorption gate](https://github.com/division-sh/swarm/issues/2510#issuecomment-5935888150)
+approves adding the complete origin-aware normal-provider session-to-work
+binding class after this record repair. The prior frozen escalation below is
+historical. This amendment is recorded before runtime origin edits. The
+original52 C/R/Q obligations remain planned/incomplete, with O01-O12 added
+below; no public restart, full qualification or closure is earned by approval.
+
 Reviewer-g approved the bounded first slice in5933895918; classification
 correction1d58069d3 preceded characterization8e2fe986b and extractionbc8516dc7.
 The original intake below remains historical, not the current coding status.
-**Implementation is now frozen on a newly reproduced shared-origin contract
-gap**, recorded in [the origin escalation](issue-2510-origin-escalation.md).
+**The shared-origin contract gap was frozen and independently approved for
+bounded absorption**, recorded in [the origin escalation](issue-2510-origin-escalation.md).
 Candidate and untouched master both refuse the memory-enabled public directive
 after successful initial HTTP MCP reads, settlement and hash restart on both
 stores. BoardStep/directive must be added to the consumer classification; all
 five provider continuations share the session binding helper. Neither a
 delivery-claim bypass nor a Claude-only fix is authorized by the maintenance
-gate. Reviewer-g's bounded split-or-absorb disposition is requested. Q01 and
+gate; the absorption gate5935888150 authorizes this added class only. Q01 and
 final qualification remain incomplete; no closure or merge readiness claim.
 
 R05 census precision: no supported source/store setter was found. These ports
@@ -296,7 +303,7 @@ with real SQLite/PostgreSQL run/pin/version storage and the Executor, not mocks.
 | R02 | Missing run, missing/malformed declaration precedence | RChar/request_precedence, exact error and zero read |
 | R03 | Source-owned resource grant, exact pair versus independently allowed flow/event | RChar/grant_pair; generated schema cannot authorize crossed pair; zero read on denial |
 | R04 | Mutable actor grants, sibling owning flow/run, source absence | RChar/actor_source; existing actor/flow tests and RStore/foreign_actor |
-| R05 | Missing selected store and consistent source/store capture | RChar/store_capture, injected port error and exact call cardinality; race with supported setter, no source inference |
+| R05 | Missing selected store, constructor-captured source/store consistency and exact read failure | `TestResourceReadAdmissionPrecedence`/missing_store and `TestResourceReadCharacterization` injected read-error/cardinality plus `TestResourceReadSelectedStore` actual constructor-captured store/source path. No supported setter exists; no setter-race proof or inferred source is credited |
 | R06 | Missing run/pin, foreign declaration, pin schema mismatch | RStore/pin_admission/sqlite,postgres; RChar/read_errors; typed selected-store reasons preserved |
 | R07 | Empty/multiple returned records and wrong returned declaration | RChar/returned_identity, typed integrity failure before row presentation |
 | R08 | Malformed schema/rows, wrong VersionID, noncanonical-but-equivalent payload | RChar/canonical_integrity plus `TestExpandedCanonicalPayloadIsReadableAndIntegrityCheckedBothStores`; no row leaked |
@@ -342,6 +349,87 @@ ordered authority calls and resource lifetimes. Disposable negative mutations
 drop actor/version cursor binding, omit envelope budget) must make the relevant
 rows fail; mutation candidates never ship. A nondiscriminating or unreachable
 checkpoint stops coding for gate repair rather than receiving same-seam credit.
+
+## Absorbed Origin Class: O01-O12
+
+Category: semantic-drift/cross-provider supported-path defect, separately
+proof-accounted from maintenance C/R. Symptom: memory-enabled post-restart
+public agent.directive refuses before a provider invocation on candidate and
+untouched master, both stores. Chosen complete class: origin-aware normal
+provider session-to-work binding at fresh start and acquired/adopted continuation
+across Claude CLI, Anthropic API, OpenAI-compatible, OpenAI Responses and Mock.
+Immediate parent is shared provider-turn lifecycle/authority composition;
+broader #2250 and maintenance #2447 remain open. The repair is absorbed, not
+a Claude-only bypass or a new framework. This supersedes the no-admission-change
+rule only for this exact class. No other retry, settlement, pin, cursor or
+execution-authority semantics may change.
+
+Full ordered directive path: compiled authenticated agent.directive -> exact
+run/agent/route resolution -> reserve/prepare permanent directive operation ->
+lifecycle execution lease -> acknowledged AdmitDirectiveExecution -> typed
+NewDirectiveExecutionOrigin/WithDirectiveCompletionOrigin and joined heartbeat ->
+BoardStep/managed Conversation -> exact session acquire/hydrate -> shared
+session binding -> canonical completion origin/admission -> provider invocation ->
+immutable response/session settlement -> directive terminal result/receipt.
+All upstream gates are already existing owners, execution-proven by public
+counterexample and dual-store directive controls. Session binding and shared
+origin selection are the chosen class; provider transport and terminal
+operation/heartbeat ownership are unchanged consumers, separately proved.
+The normal delivery path instead carries an exact claimed agent obligation,
+which must still bind the precise active session through EventBus.
+
+| Canonical owner / consumer | Systematic consumption classification |
+| --- | --- |
+| effects closed CompletionOrigin and beginCompletion normal decision | Extract the existing decision into one effects function, consumed by completion and session binding; no second origin predicate |
+| Manager SendDirective/executePreparedDirectiveOperation, BoardStep and Conversation | Already carry exact executing directive authority; no synthetic delivery or event-tag inference. Add explicit consumer proof, not same-helper credit |
+| session_events publishAgentStarted and requireInboundDeliveryActiveForSession | Move both start/continue consumers to the effects origin decision for normal authority; preserve acknowledged cleanup and joined lease lifetimes |
+| Claude CLI, Anthropic API, OpenAI-compatible, Responses and Mock StartSession/ContinueManagedSession | All five consume those same shared entrances; each receives named fresh/acquired execution proof |
+| EventBus MarkDeliveryInProgress and selected-store BindAgentSession | Already canonical delivery-only owner, unchanged. Only exact delivery-origin memory sessions call it |
+| Stateless normal provider | Same closed origin requirement before dispatch, but no live session delivery binding; durable completion authorization still checks exact origin |
+| Selected-contract provider and startup preparation | Different typed execution authority, proved by selected-fork/admission controls. No normal-origin inference or changes to its existing claim binding |
+| Fork-chat sandbox | Different explicit authority, no normal directive permission. Existing policy/committed-cleanup proofs remain mandatory |
+| Noop | Different non-dispatch implementation; no shared binding/provider attempt call, not a sixth executable consumer |
+| Low-level infrastructure/session diagnostic tests | Explicit non-provider proof only; cannot authorize a managed provider turn or earn public/adapter credit |
+
+Invalid old interpretation: memory enabled implies inbound-delivery authority.
+Remove that interpretation from the shared helper, not EventBus's strict claim.
+Normal missing/malformed/dual origins must refuse, including stateless execution;
+foreign/stale origin fencing remains enforced by the existing selected-store
+completion authorization before launch. No latest-row lookup, fabricated
+claim, synthetic delivery, caller tag, compatibility identity or retry is added.
+
+| Row | Manifestation | Exact planned proof |
+| --- | --- | --- |
+| O01 | Fresh session start, memory delivery/directive, all five providers | `TestProviderSessionOriginStartAndContinuation` per provider/start and memory/origin leaves; exact binder call count, lifecycle publication and no directive binding |
+| O02 | Acquired/adopted continuation, memory delivery/directive, all five | Same named provider matrix through actual ContinueManagedSession/Conversation, exact session, launch/settlement counts |
+| O03 | Stateless normal delivery/directive | Provider matrix/stateless plus public/store authority proof; no session binder, exact completion origin retained |
+| O04 | Missing normal origin, memory and stateless | `TestNormalCompletionOriginAdmission`/missing plus provider negative matrix; zero provider invocation |
+| O05 | Malformed directive origin | Owner/provider negative matrix malformed leaves; typed presence is not silently discarded |
+| O06 | Dual origin, including valid delivery plus malformed directive | Owner/provider negative matrix dual leaves, zero binder/provider invocation |
+| O07 | Wrong delivery subscriber/run | Owner/provider negative matrix foreign_delivery leaves; strict current-claim controls unchanged |
+| O08 | Foreign/stale directive execution authority | Both-store `TestProviderDirectiveOriginRejectsMissingAmbiguousAndForeignParity` expanded stale controls, real pre-launch authorization, no dispatch |
+| O09 | Exact delivery binding and acknowledged postcommit cleanup | Existing EventBus/bind controls and `TestInboundDeliveryBindingAcknowledgedCleanupDoesNotRetry`; exact single acknowledged call, diagnostic preserved |
+| O10 | Directive terminal settlement/idempotent replay and retained public restart | Q01 `TestClaudeResourceReadSupportedServeRestart` both stores, exact resumed head/read results/definition bytes/terminal operation, repeat same keyed directive produces no new invocation or emit |
+| O11 | Selected-contract, startup and fork-chat non-interference | Existing authority-review, prepared-probe, fork-chat policy and committed-cleanup tests, with no normal-origin substitution |
+| O12 | Shared predicate consumption, authoritative spec and integrated qualification | Direct owner test plus all-five adapter matrix, spec assertion, exact complexity/line ratchet, focused race, default swarm-test, exact-head CI and final audit |
+
+Closure feasibility: one bounded PR through existing owners; all five consumers
+are migrated together, so no live same-concept interpreter is intentionally
+left behind. Existing watchlist mapping is sufficient; refine current status,
+no new issue/node/POTENTIAL_ISSUES entry. Parent promotion absorbs this newly
+proven shared class now, not unrelated provider orchestration. The original
+two-container/three-family maintenance tail is unchanged; broader #2250 remains
+open, with no additional origin child expected after complete O closure.
+Effort estimate1-2 engineering days plus review, medium scope/low effort
+confidence, high supported-path and regression ROI. Deeper debt is shared
+authority lost between session and completion layers, already tracked here and
+in effective_agent_execution_contract_identity; no separate architecture issue.
+
+Stop conditions: another binding interpreter, incompatible authority model,
+required retry/settlement/framework change or new contract contradiction. The
+current approved correction needs no repeat prose gate after this amendment.
+Q01 remains failed baseline until the real public second turn and exact replay
+are executed on both stores. This record is not self-approved runtime closure.
 
 ## Baseline Execution Actually Run
 
