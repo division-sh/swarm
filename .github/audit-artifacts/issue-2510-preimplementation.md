@@ -1,5 +1,26 @@
 # Pre-Implementation Coverage Audit: #2510
 
+## Implementation Status Addendum
+
+Reviewer-g approved the bounded first slice in5933895918; classification
+correction1d58069d3 preceded characterization8e2fe986b and extractionbc8516dc7.
+The original intake below remains historical, not the current coding status.
+**Implementation is now frozen on a newly reproduced shared-origin contract
+gap**, recorded in [the origin escalation](issue-2510-origin-escalation.md).
+Candidate and untouched master both refuse the memory-enabled public directive
+after successful initial HTTP MCP reads, settlement and hash restart on both
+stores. BoardStep/directive must be added to the consumer classification; all
+five provider continuations share the session binding helper. Neither a
+delivery-claim bypass nor a Claude-only fix is authorized by the maintenance
+gate. Reviewer-g's bounded split-or-absorb disposition is requested. Q01 and
+final qualification remain incomplete; no closure or merge readiness claim.
+
+R05 census precision: no supported source/store setter was found. These ports
+are constructor-captured under the existing lock; the originally proposed
+setter-race probe has no production entrance and earns no credit. Real
+Executor/store execution and race controls qualify the actual capture/read
+path, not an invented setter. This does not create a new writer or owner.
+
 Agent-g, 2026-10-01. **Independent reviewer-g gate requested; no coding approval.**
 Source baseline: merged `origin/master@e110bfb368369d701d3e7784f418addf02d2f4ec`.
 Branch: `agent-g/2510-preaudit`. This artifact changes no production, tests,
