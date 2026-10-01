@@ -81,20 +81,9 @@ func projectRuleSetValue(value yamlsource.Value) (RuleSet, error) {
 	}
 	var inputs map[string]string
 	if machine {
-		inputFields, err := uniqueYAMLMappingFields(fields["inputs"], "machine rule inputs")
-		if err != nil || len(inputFields) == 0 {
-			return RuleSet{}, fmt.Errorf("machine inputs must be a nonempty mapping at %s", value.Location())
-		}
-		if err := validateExactDeclarationNames(inputFields, "rule input"); err != nil {
+		inputs, err = projectRuleInputsValue(fields["inputs"])
+		if err != nil {
 			return RuleSet{}, err
-		}
-		inputs = make(map[string]string, len(inputFields))
-		for _, input := range inputFields {
-			text, err := requiredRuleText(input.Value)
-			if err != nil {
-				return RuleSet{}, err
-			}
-			inputs[input.Name] = text
 		}
 	}
 	var agentRows []PolicyCriteriaRule
@@ -118,6 +107,25 @@ func projectRuleSetValue(value yamlsource.Value) (RuleSet, error) {
 		machineClasses[name] = PolicyValidationClass{Disposition: class.Disposition}
 	}
 	return RuleSet{Validation: &PolicyValidationSet{Classes: machineClasses, Inputs: inputs, Rules: machineRows}}, nil
+}
+
+func projectRuleInputsValue(value yamlsource.Value) (map[string]string, error) {
+	fields, err := uniqueYAMLMappingFields(value, "machine rule inputs")
+	if err != nil || len(fields) == 0 {
+		return nil, fmt.Errorf("machine inputs must be a nonempty mapping at %s", value.Location())
+	}
+	if err := validateExactDeclarationNames(fields, "rule input"); err != nil {
+		return nil, err
+	}
+	inputs := make(map[string]string, len(fields))
+	for _, input := range fields {
+		text, err := requiredRuleText(input.Value)
+		if err != nil {
+			return nil, err
+		}
+		inputs[input.Name] = text
+	}
+	return inputs, nil
 }
 
 func projectRuleClassesValue(value yamlsource.Value) (map[string]PolicyCriteriaClass, error) {
