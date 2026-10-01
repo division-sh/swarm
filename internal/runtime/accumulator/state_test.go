@@ -194,6 +194,35 @@ func TestA2AccumulatorRefusesReboundBusinessKeyReceipt(t *testing.T) {
 	}
 }
 
+func TestA2AccumulatorRefusesDuplicatedBusinessKeyEvidence(t *testing.T) {
+	spec := &runtimecontracts.AccumulateSpec{Key: "payload.id"}
+	state := &State{}
+	item := map[string]any{"id": "original", "value": int64(7)}
+	if _, err := state.Admit(spec, item, ""); err != nil {
+		t.Fatal(err)
+	}
+	loaded := Load(map[string]any{
+		"received": map[string]any{
+			"original": state.Received["original"],
+			"orphan":   state.Received["original"],
+		},
+		"items": []map[string]any{item, item},
+	})
+	if err := loaded.Err(); err != nil {
+		t.Fatalf("probe must reach declaration-aware key validation: %v", err)
+	}
+	before, err := canonicaljson.MarshalPreservingNumberKinds(loaded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = loaded.Admit(spec, map[string]any{"id": "new", "value": int64(8)}, "new-delivery")
+	requireClass(t, err, failures.ClassSchemaInvalid)
+	after, err := canonicaljson.MarshalPreservingNumberKinds(loaded)
+	if err != nil || !reflect.DeepEqual(after, before) {
+		t.Fatalf("invalid keyed evidence mutated state: before=%s after=%s err=%v", before, after, err)
+	}
+}
+
 func TestA2UnkeyedEmptyBusinessPayloadIsAnItem(t *testing.T) {
 	state := &State{}
 	if _, err := state.Admit(nil, map[string]any{}, "delivery"); err != nil {
