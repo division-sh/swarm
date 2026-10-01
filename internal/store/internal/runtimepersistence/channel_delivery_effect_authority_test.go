@@ -40,7 +40,7 @@ type selectedChannelDeliveryTestStore interface {
 
 func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, mode := range []string{"current", "late", "shared_current", "shared_late", "edit_uncertain"} {
+		for _, mode := range []string{"current", "late", "shared_current", "shared_late", "edit_uncertain", "response_matrix"} {
 			t.Run(backend+"/"+mode, func(t *testing.T) {
 				late := strings.HasSuffix(mode, "late")
 				conversationScope := operatorchannel.ConversationScopeDirect
@@ -429,6 +429,10 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 				}
 				if !current(authority) {
 					t.Fatal("succeeded channel activation rejected exact delivery")
+				}
+				if mode == "response_matrix" {
+					proveChannelResponseReceiptMatrix(t, selected, runTx, current, authority, textFact, postgres)
+					return
 				}
 				foreignRender := authority
 				foreignRender.ChannelDelivery.RenderHash = "sha256:foreign"
