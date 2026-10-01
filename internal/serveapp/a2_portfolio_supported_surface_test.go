@@ -135,7 +135,7 @@ func TestA2PortfolioSupportedFiniteJoinSurfaceBothStores(t *testing.T) {
 				reported := requireA2PortfolioEmission(t, rt, setup.RunID, operating.Entity.FlowInstance+"/operating.reported", requested.EventID, reportPayload)
 				requireA2PortfolioDelivery(t, reported, "portfolio", "portfolio-router", parent, "existing_entity")
 				forwarded := requireA2PortfolioEmission(t, rt, setup.RunID, parent.Entity.FlowInstance+"/period.reported", reported.EventID, payload)
-				child = requireA2PortfolioEntity(t, rt, setup.RunID, child.Entity.FlowInstance)
+				// The receipt owns this immutable target; its continuation may already be changing state.
 				requireA2PortfolioDelivery(t, forwarded, "portfolio/period", "portfolio-collector", child, "existing_entity")
 			}
 			publish("2026-Q1", "op-b", 22)
@@ -461,7 +461,11 @@ func waitA2PortfolioComplete(t *testing.T, rt servedControlProofRuntime, runID, 
 	deadline := time.Now().Add(servedProofPollDeadline)
 	var period operatorread.OperatorEntityFull
 	for time.Now().Before(deadline) {
-		period = requireA2PortfolioEntity(t, rt, runID, path)
+		// Two independent list/get snapshots cannot require revision equality while completion is running.
+		requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": flowidentity.EntityID(path)}, &period)
+		if period.Entity.RunID != runID || period.Entity.FlowInstance != path || period.Entity.EntityID != flowidentity.EntityID(path) {
+			t.Fatalf("completion poll lost the exact receiver: %+v, want %s/%s", period.Entity, runID, path)
+		}
 		if period.Entity.CurrentState == "complete" {
 			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, runID)
 			return requireA2PortfolioEntity(t, rt, runID, path)
