@@ -270,9 +270,221 @@ func writeDescribeText(out io.Writer, view authoringview.View) {
 		}
 	}
 	writeRoutingTopologyText(out, view.RoutingTopology)
-	if len(view.StageGraphs) > 0 {
+	writeDescribeStageGraphs(out, view.StageGraphs)
+	writeDescribeDiagnostics(out, view.Diagnostics)
+}
+
+func writeDescribeFlowDetails(out io.Writer, flow authoringview.FlowView) {
+	writeDescribeEvents(out, flow.Events, "    ")
+	if flow.Activation != "" {
+		fmt.Fprintf(out, "    activation: %s\n", flow.Activation)
+	}
+	writeDescribeIngress(out, flow.Ingress)
+	if flow.PrimaryEntity != nil {
+		fmt.Fprintf(out, "    primary entity: %s\n", flow.PrimaryEntity.Type)
+	}
+	if flow.TemplateInstance != nil {
+		fmt.Fprintf(out, "    instance: field=%s identity=%s\n", flow.TemplateInstance.Field, flow.TemplateInstance.Identity)
+	}
+	if flow.SingletonCoordinator != nil {
+		fmt.Fprintf(out, "    singleton coordinator: primary_entity=%s contained_fields=%d\n", flow.SingletonCoordinator.PrimaryEntity, len(flow.SingletonCoordinator.ContainedState))
+	}
+	if len(flow.ContainedOperations) > 0 {
+		fmt.Fprintf(out, "    contained operations: %d\n", len(flow.ContainedOperations))
+	}
+}
+
+func writeDescribeIngress(out io.Writer, ingress *authoringview.StandingIngressView) {
+	if ingress != nil {
+		fmt.Fprintf(out, "    ingress: alias=%s\n", ingress.Alias)
+		for _, provider := range ingress.Providers {
+			fmt.Fprintf(out, "      - provider=%s admission=%s", provider.Provider, provider.AdmissionKind)
+			if provider.PackID != "" {
+				fmt.Fprintf(out, " pack_id=%s", provider.PackID)
+			}
+			if provider.RequestAuthentication != "" {
+				fmt.Fprintf(out, " authentication=%s", provider.RequestAuthentication)
+			}
+			if provider.Event != "" {
+				fmt.Fprintf(out, " event=%s", provider.Event)
+			}
+			if provider.SigningSecret != "" {
+				fmt.Fprintf(out, " signing_secret=%s", provider.SigningSecret)
+			}
+			fmt.Fprintln(out)
+		}
+	}
+}
+
+func writeDescribeStageNodes(out io.Writer, nodes []authoringview.StageGraphNodeView) {
+	if len(nodes) > 0 {
+		fmt.Fprintln(out, "    nodes:")
+		for _, node := range nodes {
+			markers := make([]string, 0, 2)
+			if node.Initial {
+				markers = append(markers, "initial")
+			}
+			if node.Terminal {
+				markers = append(markers, "terminal")
+			}
+			suffix := ""
+			if len(markers) > 0 {
+				suffix = " [" + strings.Join(markers, ",") + "]"
+			}
+			if strings.TrimSpace(node.Description) != "" {
+				suffix += " - " + strings.TrimSpace(node.Description)
+			}
+			fmt.Fprintf(out, "      - %s%s\n", node.ID, suffix)
+		}
+	}
+}
+
+func writeDescribeStageEdges(out io.Writer, edges []authoringview.StageGraphEdgeView) {
+	if len(edges) > 0 {
+		fmt.Fprintln(out, "    edges:")
+		for _, edge := range edges {
+			from := strings.Join(edge.From, ",")
+			if from == "" {
+				from = "<none>"
+			}
+			detail := strings.TrimSpace(edge.Source)
+			if strings.TrimSpace(edge.NodeID) != "" {
+				detail += " " + strings.TrimSpace(edge.NodeID)
+			}
+			if strings.TrimSpace(edge.EventType) != "" {
+				detail += " on " + strings.TrimSpace(edge.EventType)
+			}
+			if strings.TrimSpace(edge.After) != "" {
+				detail += " after " + strings.TrimSpace(edge.After)
+			}
+			if strings.TrimSpace(edge.TimerID) != "" {
+				detail += " timer " + strings.TrimSpace(edge.TimerID)
+			}
+			if strings.TrimSpace(edge.LoopID) != "" {
+				detail += " loop " + edge.LoopID + " " + edge.LoopOperation
+				if edge.MaxAttempts != "" {
+					detail += " max_attempts=" + edge.MaxAttempts
+				}
+				if edge.LoopEscape {
+					detail += " escape"
+				}
+			}
+			if strings.TrimSpace(edge.DecisionID) != "" {
+				detail += " decision " + edge.DecisionID + " verdict " + edge.Verdict
+			}
+			fmt.Fprintf(out, "      - %s -> %s (%s)\n", from, edge.To, strings.TrimSpace(detail))
+		}
+	}
+}
+
+func writeDescribeStageTimers(out io.Writer, timers []authoringview.StageGraphTimerView) {
+	if len(timers) > 0 {
+		fmt.Fprintln(out, "    timers:")
+		for _, timer := range timers {
+			parts := []string{
+				strings.TrimSpace(timer.Stage),
+				"after " + strings.TrimSpace(timer.After),
+			}
+			if strings.TrimSpace(timer.Emit) != "" {
+				parts = append(parts, "emit "+strings.TrimSpace(timer.Emit))
+			}
+			if strings.TrimSpace(timer.AdvancesTo) != "" {
+				parts = append(parts, "advances_to "+strings.TrimSpace(timer.AdvancesTo))
+			}
+			if strings.TrimSpace(timer.TimerID) != "" {
+				parts = append(parts, "(timer "+strings.TrimSpace(timer.TimerID)+")")
+			}
+			fmt.Fprintf(out, "      - %s\n", strings.Join(parts, " "))
+		}
+	}
+}
+
+func writeDescribeStageJoins(out io.Writer, joins []authoringview.StageGraphJoinView) {
+	if len(joins) > 0 {
+		fmt.Fprintln(out, "    joins:")
+		for _, join := range joins {
+			member := strings.TrimSpace(join.MembersBy)
+			if source := strings.TrimSpace(join.MembersBySource); source != "" {
+				member += " <- " + source
+			}
+			parts := []string{
+				join.ID + " stage " + join.Stage,
+				"members " + join.MembersFrom + " by " + member,
+				"output " + join.Output,
+				"timeout " + join.TimeoutAfter,
+			}
+			if join.WindowFrom != "" {
+				window := join.WindowBy
+				if source := strings.TrimSpace(join.WindowBySource); source != "" {
+					window += " <- " + source
+				}
+				parts = append(parts, "window "+join.WindowFrom+" by "+window)
+			}
+			if join.FanInPin != "" {
+				parts = append(parts, "fan_in_pin "+join.FanInPin)
+			}
+			parts = append(parts, "("+join.NodeID+" on "+join.HandlerEvent+")")
+			fmt.Fprintf(out, "      - %s\n", strings.Join(parts, " "))
+		}
+	}
+}
+
+func writeDescribeStageFanOuts(out io.Writer, fanOuts []authoringview.StageGraphFanOutView) {
+	if len(fanOuts) > 0 {
+		fmt.Fprintln(out, "    fan_out:")
+		for _, fanOut := range fanOuts {
+			from := strings.Join(fanOut.From, ",")
+			if from == "" {
+				from = "<none>"
+			}
+			parts := []string{
+				fmt.Sprintf("%s ->xN %s", from, strings.TrimSpace(fanOut.Emit)),
+				"items_from " + strings.TrimSpace(fanOut.ItemsFrom),
+			}
+			if strings.TrimSpace(fanOut.ItemAlias) != "" {
+				parts = append(parts, "as "+strings.TrimSpace(fanOut.ItemAlias))
+			}
+			if strings.TrimSpace(fanOut.Identity) != "" {
+				parts = append(parts, "identity "+strings.TrimSpace(fanOut.Identity))
+			}
+			if fanOut.MaxItems > 0 {
+				parts = append(parts, fmt.Sprintf("max_items %d", fanOut.MaxItems))
+			}
+			detail := strings.TrimSpace(fanOut.Source)
+			if strings.TrimSpace(fanOut.NodeID) != "" {
+				detail += " " + strings.TrimSpace(fanOut.NodeID)
+			}
+			if strings.TrimSpace(fanOut.EventType) != "" {
+				detail += " on " + strings.TrimSpace(fanOut.EventType)
+			}
+			if detail != "" {
+				parts = append(parts, "("+strings.TrimSpace(detail)+")")
+			}
+			fmt.Fprintf(out, "      - %s\n", strings.Join(parts, " "))
+		}
+	}
+}
+
+func writeDescribeStageGates(out io.Writer, gates []authoringview.StageGraphGateView) {
+	if len(gates) > 0 {
+		fmt.Fprintln(out, "    gates:")
+		for _, gate := range gates {
+			fmt.Fprintf(out, "      - %s decision %s authority=%s reminder=%s draft_ttl=%s\n", gate.Stage, gate.Decision, gate.Authority, gate.ReminderInterval, gate.InputDraftTTL)
+			for _, outcome := range gate.Outcomes {
+				detail := outcome.Verdict + " -> " + outcome.AdvancesTo
+				if outcome.Emit != "" {
+					detail += " emit " + outcome.Emit
+				}
+				fmt.Fprintf(out, "        - %s\n", detail)
+			}
+		}
+	}
+}
+
+func writeDescribeStageGraphs(out io.Writer, graphs []authoringview.StageGraphView) {
+	if len(graphs) > 0 {
 		fmt.Fprintln(out, "stage graph:")
-		for _, graph := range view.StageGraphs {
+		for _, graph := range graphs {
 			label := strings.TrimSpace(graph.FlowID)
 			if label == "" {
 				label = "root"
@@ -281,158 +493,20 @@ func writeDescribeText(out io.Writer, view authoringview.View) {
 				label += " (" + strings.TrimSpace(graph.FlowPath) + ")"
 			}
 			fmt.Fprintf(out, "  flow %s:\n", label)
-			if len(graph.Nodes) > 0 {
-				fmt.Fprintln(out, "    nodes:")
-				for _, node := range graph.Nodes {
-					markers := make([]string, 0, 2)
-					if node.Initial {
-						markers = append(markers, "initial")
-					}
-					if node.Terminal {
-						markers = append(markers, "terminal")
-					}
-					suffix := ""
-					if len(markers) > 0 {
-						suffix = " [" + strings.Join(markers, ",") + "]"
-					}
-					if strings.TrimSpace(node.Description) != "" {
-						suffix += " - " + strings.TrimSpace(node.Description)
-					}
-					fmt.Fprintf(out, "      - %s%s\n", node.ID, suffix)
-				}
-			}
-			if len(graph.Edges) > 0 {
-				fmt.Fprintln(out, "    edges:")
-				for _, edge := range graph.Edges {
-					from := strings.Join(edge.From, ",")
-					if from == "" {
-						from = "<none>"
-					}
-					detail := strings.TrimSpace(edge.Source)
-					if strings.TrimSpace(edge.NodeID) != "" {
-						detail += " " + strings.TrimSpace(edge.NodeID)
-					}
-					if strings.TrimSpace(edge.EventType) != "" {
-						detail += " on " + strings.TrimSpace(edge.EventType)
-					}
-					if strings.TrimSpace(edge.After) != "" {
-						detail += " after " + strings.TrimSpace(edge.After)
-					}
-					if strings.TrimSpace(edge.TimerID) != "" {
-						detail += " timer " + strings.TrimSpace(edge.TimerID)
-					}
-					if strings.TrimSpace(edge.LoopID) != "" {
-						detail += " loop " + edge.LoopID + " " + edge.LoopOperation
-						if edge.MaxAttempts != "" {
-							detail += " max_attempts=" + edge.MaxAttempts
-						}
-						if edge.LoopEscape {
-							detail += " escape"
-						}
-					}
-					if strings.TrimSpace(edge.DecisionID) != "" {
-						detail += " decision " + edge.DecisionID + " verdict " + edge.Verdict
-					}
-					fmt.Fprintf(out, "      - %s -> %s (%s)\n", from, edge.To, strings.TrimSpace(detail))
-				}
-			}
-			if len(graph.Timers) > 0 {
-				fmt.Fprintln(out, "    timers:")
-				for _, timer := range graph.Timers {
-					parts := []string{
-						strings.TrimSpace(timer.Stage),
-						"after " + strings.TrimSpace(timer.After),
-					}
-					if strings.TrimSpace(timer.Emit) != "" {
-						parts = append(parts, "emit "+strings.TrimSpace(timer.Emit))
-					}
-					if strings.TrimSpace(timer.AdvancesTo) != "" {
-						parts = append(parts, "advances_to "+strings.TrimSpace(timer.AdvancesTo))
-					}
-					if strings.TrimSpace(timer.TimerID) != "" {
-						parts = append(parts, "(timer "+strings.TrimSpace(timer.TimerID)+")")
-					}
-					fmt.Fprintf(out, "      - %s\n", strings.Join(parts, " "))
-				}
-			}
-			if len(graph.Joins) > 0 {
-				fmt.Fprintln(out, "    joins:")
-				for _, join := range graph.Joins {
-					member := strings.TrimSpace(join.MembersBy)
-					if source := strings.TrimSpace(join.MembersBySource); source != "" {
-						member += " <- " + source
-					}
-					parts := []string{
-						join.ID + " stage " + join.Stage,
-						"members " + join.MembersFrom + " by " + member,
-						"output " + join.Output,
-						"timeout " + join.TimeoutAfter,
-					}
-					if join.WindowFrom != "" {
-						window := join.WindowBy
-						if source := strings.TrimSpace(join.WindowBySource); source != "" {
-							window += " <- " + source
-						}
-						parts = append(parts, "window "+join.WindowFrom+" by "+window)
-					}
-					if join.FanInPin != "" {
-						parts = append(parts, "fan_in_pin "+join.FanInPin)
-					}
-					parts = append(parts, "("+join.NodeID+" on "+join.HandlerEvent+")")
-					fmt.Fprintf(out, "      - %s\n", strings.Join(parts, " "))
-				}
-			}
-			if len(graph.FanOuts) > 0 {
-				fmt.Fprintln(out, "    fan_out:")
-				for _, fanOut := range graph.FanOuts {
-					from := strings.Join(fanOut.From, ",")
-					if from == "" {
-						from = "<none>"
-					}
-					parts := []string{
-						fmt.Sprintf("%s ->xN %s", from, strings.TrimSpace(fanOut.Emit)),
-						"items_from " + strings.TrimSpace(fanOut.ItemsFrom),
-					}
-					if strings.TrimSpace(fanOut.ItemAlias) != "" {
-						parts = append(parts, "as "+strings.TrimSpace(fanOut.ItemAlias))
-					}
-					if strings.TrimSpace(fanOut.Identity) != "" {
-						parts = append(parts, "identity "+strings.TrimSpace(fanOut.Identity))
-					}
-					if fanOut.MaxItems > 0 {
-						parts = append(parts, fmt.Sprintf("max_items %d", fanOut.MaxItems))
-					}
-					detail := strings.TrimSpace(fanOut.Source)
-					if strings.TrimSpace(fanOut.NodeID) != "" {
-						detail += " " + strings.TrimSpace(fanOut.NodeID)
-					}
-					if strings.TrimSpace(fanOut.EventType) != "" {
-						detail += " on " + strings.TrimSpace(fanOut.EventType)
-					}
-					if detail != "" {
-						parts = append(parts, "("+strings.TrimSpace(detail)+")")
-					}
-					fmt.Fprintf(out, "      - %s\n", strings.Join(parts, " "))
-				}
-			}
-			if len(graph.Gates) > 0 {
-				fmt.Fprintln(out, "    gates:")
-				for _, gate := range graph.Gates {
-					fmt.Fprintf(out, "      - %s decision %s authority=%s reminder=%s draft_ttl=%s\n", gate.Stage, gate.Decision, gate.Authority, gate.ReminderInterval, gate.InputDraftTTL)
-					for _, outcome := range gate.Outcomes {
-						detail := outcome.Verdict + " -> " + outcome.AdvancesTo
-						if outcome.Emit != "" {
-							detail += " emit " + outcome.Emit
-						}
-						fmt.Fprintf(out, "        - %s\n", detail)
-					}
-				}
-			}
+			writeDescribeStageNodes(out, graph.Nodes)
+			writeDescribeStageEdges(out, graph.Edges)
+			writeDescribeStageTimers(out, graph.Timers)
+			writeDescribeStageJoins(out, graph.Joins)
+			writeDescribeStageFanOuts(out, graph.FanOuts)
+			writeDescribeStageGates(out, graph.Gates)
 		}
 	}
-	if len(view.Diagnostics) > 0 {
+}
+
+func writeDescribeDiagnostics(out io.Writer, diagnostics []authoringview.DiagnosticView) {
+	if len(diagnostics) > 0 {
 		fmt.Fprintln(out, "diagnostics:")
-		for _, diagnostic := range view.Diagnostics {
+		for _, diagnostic := range diagnostics {
 			location := strings.TrimSpace(diagnostic.AuthoredLocation)
 			if location == "" {
 				location = strings.TrimSpace(diagnostic.Location)

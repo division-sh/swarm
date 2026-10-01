@@ -2274,6 +2274,28 @@ func (r scenarioRunner) runMailboxStep(ctx context.Context, evaluator *scenarioE
 }
 
 func (r scenarioRunner) findDecisionCard(ctx context.Context, evaluator *scenarioExpressionEvaluator, runID string, match map[string]any) (string, string, error) {
+	params, evaluatedMatch, err := evaluateScenarioCardMatch(evaluator, runID, match)
+	if err != nil {
+		return "", "", err
+	}
+	matches, err := r.collectScenarioCardMatches(ctx, params, evaluatedMatch)
+	if err != nil {
+		return "", "", err
+	}
+	if len(matches) != 1 {
+		return "", "", fmt.Errorf("decision-card match for run %s returned %d items, want exactly one", runID, len(matches))
+	}
+	var detail mailboxDetailProjection
+	if err := r.client.call(ctx, "mailbox.get", map[string]any{"mailbox_id": matches[0].CardID}, &detail); err != nil {
+		return "", "", err
+	}
+	if err := validateMailboxDetailResult(detail); err != nil {
+		return "", "", err
+	}
+	return matches[0].CardID, detail.DecisionCard.CardContentHash, nil
+}
+
+func evaluateScenarioCardMatch(evaluator *scenarioExpressionEvaluator, runID string, match map[string]any) (map[string]any, map[string]string, error) {
 	params := map[string]any{
 		"status": "pending",
 		"run_id": runID,
@@ -2283,7 +2305,7 @@ func (r scenarioRunner) findDecisionCard(ctx context.Context, evaluator *scenari
 	for key, value := range match {
 		evaluated, err := evaluator.evalValue(value)
 		if err != nil {
-			return "", "", fmt.Errorf("match.%s: %w", key, err)
+			return nil, nil, fmt.Errorf("match.%s: %w", key, err)
 		}
 		text := strings.TrimSpace(fmt.Sprint(evaluated))
 		if text == "" {
@@ -2297,76 +2319,58 @@ func (r scenarioRunner) findDecisionCard(ctx context.Context, evaluator *scenari
 			params["anchor_kind"] = text
 		case "card_id", "decision", "stage", "flow_instance", "requester_agent_id", "category", "scope", "request_event_id", "activity_id":
 		default:
-			return "", "", scenarioTestValidationError{err: fmt.Errorf("unsupported decision-card match field %q", key)}
+			return nil, nil, scenarioTestValidationError{err: fmt.Errorf("unsupported decision-card match field %q", key)}
 		}
 	}
+	if _, err := admitScenarioCardMatch(evaluatedMatch); err != nil {
+		return nil, nil, err
+	}
+	return params, evaluatedMatch, nil
+}
+
+func admitScenarioCardMatch(evaluatedMatch map[string]string) (string, error) {
 	anchorKind := evaluatedMatch["anchor_kind"]
 	if !decisioncard.IsRegisteredAnchorKind(anchorKind) {
-		return "", "", scenarioTestValidationError{err: fmt.Errorf("decision-card match.anchor_kind is required and must be one of: %s", decisioncard.RegisteredAnchorKindDescription())}
+		return "", scenarioTestValidationError{err: fmt.Errorf("decision-card match.anchor_kind is required and must be one of: %s", decisioncard.RegisteredAnchorKindDescription())}
 	}
 	for key := range evaluatedMatch {
 		switch anchorKind {
 		case string(decisioncard.AnchorKindStageGate):
 			if key == "requester_agent_id" || key == "category" || key == "scope" || key == "request_event_id" || key == "activity_id" {
-				return "", "", scenarioTestValidationError{err: fmt.Errorf("decision-card match.%s is not valid for anchor_kind stage_gate", key)}
+				return "", scenarioTestValidationError{err: fmt.Errorf("decision-card match.%s is not valid for anchor_kind stage_gate", key)}
 			}
 		case string(decisioncard.AnchorKindHumanTask):
 			if key == "decision" || key == "stage" || key == "request_event_id" || key == "activity_id" {
-				return "", "", scenarioTestValidationError{err: fmt.Errorf("decision-card match.%s is not valid for anchor_kind human_task", key)}
+				return "", scenarioTestValidationError{err: fmt.Errorf("decision-card match.%s is not valid for anchor_kind human_task", key)}
 			}
 		case string(decisioncard.AnchorKindProposedEffect):
 			if key == "stage" || key == "requester_agent_id" || key == "category" {
-				return "", "", scenarioTestValidationError{err: fmt.Errorf("decision-card match.%s is not valid for anchor_kind proposed_effect", key)}
+				return "", scenarioTestValidationError{err: fmt.Errorf("decision-card match.%s is not valid for anchor_kind proposed_effect", key)}
 			}
 		}
 	}
+	return anchorKind, nil
+}
+
+func (r scenarioRunner) collectScenarioCardMatches(ctx context.Context, params map[string]any, evaluatedMatch map[string]string) ([]mailboxDecisionCardSummary, error) {
+	anchorKind := evaluatedMatch["anchor_kind"]
 	matches := make([]mailboxDecisionCardSummary, 0)
 	seen := make(map[string]struct{})
 	// Uniqueness is a property of the complete public match set, not a page.
 	for {
 		var result mailboxListResult
 		if err := r.client.call(ctx, "mailbox.list", params, &result); err != nil {
-			return "", "", err
+			return nil, err
 		}
 		if err := validateMailboxListResult(result); err != nil {
-			return "", "", err
+			return nil, err
 		}
 		for _, item := range result.Items {
 			if item.Kind != "decision_card" || item.DecisionCard == nil {
 				continue
 			}
 			card := *item.DecisionCard
-			if card.AnchorKind != anchorKind {
-				continue
-			}
-			if expected := evaluatedMatch["card_id"]; expected != "" && card.CardID != expected {
-				continue
-			}
-			if expected := evaluatedMatch["entity_id"]; expected != "" && card.Scope.EntityID != expected {
-				continue
-			}
-			if expected := evaluatedMatch["flow_instance"]; expected != "" && card.Scope.FlowInstance != expected {
-				continue
-			}
-			if expected := evaluatedMatch["decision"]; expected != "" && card.Decision != expected {
-				continue
-			}
-			if expected := evaluatedMatch["stage"]; expected != "" && card.Anchor.Stage != expected {
-				continue
-			}
-			if expected := evaluatedMatch["requester_agent_id"]; expected != "" && card.Anchor.RequesterAgentID != expected {
-				continue
-			}
-			if expected := evaluatedMatch["category"]; expected != "" && card.Category != expected {
-				continue
-			}
-			if expected := evaluatedMatch["request_event_id"]; expected != "" && card.Anchor.RequestEventID != expected {
-				continue
-			}
-			if expected := evaluatedMatch["activity_id"]; expected != "" && card.Anchor.ActivityID != expected {
-				continue
-			}
-			if expected := evaluatedMatch["scope"]; expected != "" && card.Scope.Kind != expected {
+			if !scenarioCardMatches(card, anchorKind, evaluatedMatch) {
 				continue
 			}
 			matches = append(matches, card)
@@ -2375,22 +2379,49 @@ func (r scenarioRunner) findDecisionCard(ctx context.Context, evaluator *scenari
 			break
 		}
 		if _, exists := seen[result.NextCursor]; exists {
-			return "", "", fmt.Errorf("malformed mailbox.list result: repeated next_cursor %q", result.NextCursor)
+			return nil, fmt.Errorf("malformed mailbox.list result: repeated next_cursor %q", result.NextCursor)
 		}
 		seen[result.NextCursor] = struct{}{}
 		params["cursor"] = result.NextCursor
 	}
-	if len(matches) != 1 {
-		return "", "", fmt.Errorf("decision-card match for run %s returned %d items, want exactly one", runID, len(matches))
+	return matches, nil
+}
+
+func scenarioCardMatches(card mailboxDecisionCardSummary, anchorKind string, evaluatedMatch map[string]string) bool {
+	if card.AnchorKind != anchorKind {
+		return false
 	}
-	var detail mailboxDetailProjection
-	if err := r.client.call(ctx, "mailbox.get", map[string]any{"mailbox_id": matches[0].CardID}, &detail); err != nil {
-		return "", "", err
+	if expected := evaluatedMatch["card_id"]; expected != "" && card.CardID != expected {
+		return false
 	}
-	if err := validateMailboxDetailResult(detail); err != nil {
-		return "", "", err
+	if expected := evaluatedMatch["entity_id"]; expected != "" && card.Scope.EntityID != expected {
+		return false
 	}
-	return matches[0].CardID, detail.DecisionCard.CardContentHash, nil
+	if expected := evaluatedMatch["flow_instance"]; expected != "" && card.Scope.FlowInstance != expected {
+		return false
+	}
+	if expected := evaluatedMatch["decision"]; expected != "" && card.Decision != expected {
+		return false
+	}
+	if expected := evaluatedMatch["stage"]; expected != "" && card.Anchor.Stage != expected {
+		return false
+	}
+	if expected := evaluatedMatch["requester_agent_id"]; expected != "" && card.Anchor.RequesterAgentID != expected {
+		return false
+	}
+	if expected := evaluatedMatch["category"]; expected != "" && card.Category != expected {
+		return false
+	}
+	if expected := evaluatedMatch["request_event_id"]; expected != "" && card.Anchor.RequestEventID != expected {
+		return false
+	}
+	if expected := evaluatedMatch["activity_id"]; expected != "" && card.Anchor.ActivityID != expected {
+		return false
+	}
+	if expected := evaluatedMatch["scope"]; expected != "" && card.Scope.Kind != expected {
+		return false
+	}
+	return true
 }
 
 func (r scenarioRunner) waitForQuiescence(ctx context.Context, runID string) error {

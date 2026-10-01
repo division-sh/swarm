@@ -12520,8 +12520,8 @@ flow_model:
           The supported expanded authoring view is a projection over existing
           semantic owners. It must expose inferred primary entity, template
           instance declaration/policy and its concrete identity formula
-          `run + flow + instance_key` in both text and JSON output, output pin
-          `key`/`carries`, versioned
+          `run + flow + instance_key` in both text and JSON output, producer
+          event-schema/business-key and compiled-connection evidence, versioned
           routing topology, explicit and implicit key mappings,
           singleton cardinality and coordinator-demand boundaries, typed contained-state operations,
           lifecycle stage graphs requested with `--graph`, and retired static
