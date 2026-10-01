@@ -611,6 +611,7 @@ type objectChannelProvider struct {
 	loseNextCard      bool
 	lostReference     string
 	loseNextPrompt    bool
+	loseResponseEdit  string
 }
 
 func (p *objectChannelProvider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -656,8 +657,11 @@ func (p *objectChannelProvider) ServeHTTP(w http.ResponseWriter, r *http.Request
 			return
 		}
 		output["receipt"] = input["reference"]
-		if p.loseNextPrompt && strings.Contains(fmt.Sprint(input["body"]), "Input: reason (text) required") {
+		reference, _ := input["reference"].(map[string]any)
+		loseResponse := p.loseResponseEdit != "" && reference["id"] == p.loseResponseEdit
+		if loseResponse || p.loseNextPrompt && strings.Contains(fmt.Sprint(input["body"]), "Input: reason (text) required") {
 			p.loseNextPrompt = false
+			p.loseResponseEdit = ""
 			connection, _, err := w.(http.Hijacker).Hijack()
 			if err == nil {
 				_ = connection.Close()
