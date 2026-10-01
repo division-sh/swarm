@@ -1,5 +1,5 @@
 name: operating
-instance: operating_id
+instance: operating_instance_id
 pins:
   inputs:
     events:
