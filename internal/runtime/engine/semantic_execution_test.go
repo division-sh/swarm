@@ -6,6 +6,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
@@ -107,23 +108,10 @@ func (e *Executor) ExecuteSemanticFixture(ctx context.Context, req ExecutionRequ
 			req.Route = runtimeflowidentity.DeriveRoute(scope, req.Event.RunID())
 		}
 	}
-	if hasFanOut {
-		if _, claimed := runtimedelivery.ClaimFromContext(ctx); !claimed {
-			deliveryID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("engine-fan-out-delivery\x00"+req.Event.ID()+"\x00"+req.Node.Key())).String()
-			token := uuid.NewSHA1(uuid.NameSpaceOID, []byte("engine-fan-out-claim\x00"+deliveryID)).String()
-			claim, claimErr := runtimedelivery.AdmitPersistedClaim(
-				deliveryID,
-				req.Event.RunID(),
-				"engine-semantic-fixture:"+req.Node.Key(),
-				token,
-				1,
-				runtimedelivery.SubscriberNode,
-				req.Node.Key(),
-			)
-			if claimErr != nil {
-				return ExecutionResult{}, claimErr
-			}
-			ctx = runtimedelivery.WithClaim(ctx, claim)
+	if !req.Preview && (hasFanOut || e.deps.WorkflowLifecycle != nil) {
+		ctx, err = semanticFixtureDeliveryContext(ctx, req)
+		if err != nil {
+			return ExecutionResult{}, err
 		}
 	}
 	// Isolated handler fixtures may omit the rest of the authored node document,
@@ -152,6 +140,41 @@ func (e *Executor) ExecuteSemanticFixture(ctx context.Context, req ExecutionRequ
 		return copyExecutor.Execute(ctx, req)
 	}
 	return e.Execute(ctx, req)
+}
+
+// Component fixtures use stub claims constructed through the admission API, not
+// proof of a persisted-store occurrence. Preview and hostile contexts stay intact.
+func semanticFixtureDeliveryContext(ctx context.Context, req ExecutionRequest) (context.Context, error) {
+	if req.Preview {
+		return ctx, nil
+	}
+	if _, claimed := runtimedelivery.ClaimFromContext(ctx); claimed {
+		return ctx, nil
+	}
+	deliveryID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("engine-fan-out-delivery\x00"+req.Event.ID()+"\x00"+req.Node.Key())).String()
+	token := uuid.NewSHA1(uuid.NameSpaceOID, []byte("engine-fan-out-claim\x00"+deliveryID)).String()
+	claim, err := runtimedelivery.AdmitPersistedClaim(
+		deliveryID, req.Event.RunID(), "engine-semantic-fixture:"+req.Node.Key(), token, 1,
+		runtimedelivery.SubscriberNode, req.Node.Key(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return runtimedelivery.WithClaim(ctx, claim), nil
+}
+
+func TestSemanticFixtureDeliveryContextDoesNotInventPreviewClaim(t *testing.T) {
+	ctx := context.Background()
+	previewCtx, err := semanticFixtureDeliveryContext(ctx, ExecutionRequest{Preview: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if previewCtx != ctx {
+		t.Fatal("preview must preserve its original context")
+	}
+	if _, claimed := runtimedelivery.ClaimFromContext(previewCtx); claimed {
+		t.Fatal("preview must remain claimless")
+	}
 }
 
 // sourceWithFixtureStages declares membership for an isolated handler fixture.

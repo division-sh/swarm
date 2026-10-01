@@ -457,8 +457,8 @@ func TestNextChainDepth_EnforcesLimit(t *testing.T) {
 func TestComputeValue(t *testing.T) {
 	acc := &Accumulator{
 		Items: []map[string]any{
-			{"payload": map[string]any{"axis": "quality", "score_value": 10}},
-			{"payload": map[string]any{"axis": "speed", "score_value": 4}},
+			{"axis": "quality", "score_value": 10},
+			{"axis": "speed", "score_value": 4},
 		},
 	}
 	value, err := computeValue(acc, nil, &runtimecontracts.ComputeSpec{
@@ -476,7 +476,7 @@ func TestComputeValue(t *testing.T) {
 		t.Fatalf("computeValue weighted_average = %#v, %v", value, err)
 	}
 
-	acc.Items = append(acc.Items, map[string]any{"payload": map[string]any{"count_value": 9}})
+	acc.Items = append(acc.Items, map[string]any{"count_value": 9})
 	value, err = computeValue(acc, nil, &runtimecontracts.ComputeSpec{
 		Operation: runtimecontracts.ComputeOpCount,
 		Keys: runtimecontracts.ComputeKeyConfig{
@@ -489,9 +489,9 @@ func TestComputeValue(t *testing.T) {
 
 	acc = &Accumulator{
 		Items: []map[string]any{
-			{"payload": map[string]any{"score": 55.0}},
-			{"payload": map[string]any{"score": 81.0}},
-			{"payload": map[string]any{"score": 74.0}},
+			{"score": 55.0},
+			{"score": 81.0},
+			{"score": 74.0},
 		},
 	}
 	value, err = computeValue(acc, nil, &runtimecontracts.ComputeSpec{
@@ -506,9 +506,9 @@ func TestComputeValue(t *testing.T) {
 
 	acc = &Accumulator{
 		Items: []map[string]any{
-			{"payload": map[string]any{"score": 80.0, "weight": 0.5}},
-			{"payload": map[string]any{"score": 90.0, "weight": 0.3}},
-			{"payload": map[string]any{"score": 70.0, "weight": 0.2}},
+			{"score": 80.0, "weight": 0.5},
+			{"score": 90.0, "weight": 0.3},
+			{"score": 70.0, "weight": 0.2},
 		},
 	}
 	value, err = computeValue(acc, nil, &runtimecontracts.ComputeSpec{
