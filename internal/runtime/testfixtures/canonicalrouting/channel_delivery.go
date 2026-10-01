@@ -5,6 +5,14 @@ import "testing"
 // CopyChannelLearnedObjectJourney owns the finite routing source for the
 // learned-provider delivery proof; provider pack declarations remain separate.
 func CopyChannelLearnedObjectJourney(t testing.TB) string {
+	return copyChannelLearnedObjectInputJourney(t, "text")
+}
+
+func CopyChannelLearnedObjectIntegerInputJourney(t testing.TB) string {
+	return copyChannelLearnedObjectInputJourney(t, "integer")
+}
+
+func copyChannelLearnedObjectInputJourney(t testing.TB, inputType string) string {
 	t.Helper()
 	root := t.TempDir()
 	writeClosedVariantFile(t, root, "schema.yaml", `name: object-channel
@@ -25,7 +33,7 @@ stages:
       outcomes:
         approve: {advances_to: done}
         reject:
-          input: {reason: {type: text, required: true}}
+          input: {reason: {type: `+inputType+`, required: true}}
           advances_to: done
   done: {terminal: true}
 pins:
