@@ -2162,8 +2162,10 @@ func TestExecutor_JoinUsesPersistedActivationAndMembershipOrder(t *testing.T) {
 	joinNode := testRootExecutableNode(t, "join-node")
 	source, handler := a2TypedJoinFixtureSource(t, joinNode, "item.completed", spec, resultType, map[string]runtimecontracts.EntityFieldDecl{"expected": {Type: "[text]"}})
 	spec = *handler.Join
+	completionTime := time.Date(2031, time.March, 2, 9, 30, 0, 0, time.FixedZone("executor", 2*60*60))
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source: source, StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}}, nil)
+		Source: source, StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{},
+		EmitNow: func() time.Time { return completionTime }}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2209,6 +2211,9 @@ func TestExecutor_JoinUsesPersistedActivationAndMembershipOrder(t *testing.T) {
 	}
 	if closed.Status != joinruntime.StatusClosed || closed.CloseReason != joinruntime.CloseReasonComplete || !closed.OutcomePending || closed.OutcomeFired {
 		t.Fatalf("closed activation = %#v", closed)
+	}
+	if !closed.FireAt.Equal(completionTime) || closed.FireAt.Location() != time.UTC {
+		t.Fatalf("completion fire_at = %s, want executor clock %s in UTC", closed.FireAt, completionTime)
 	}
 	results, err := closed.Results()
 	encoded, marshalErr := json.Marshal(results)
