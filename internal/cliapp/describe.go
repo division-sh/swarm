@@ -232,41 +232,7 @@ func writeDescribeText(out io.Writer, view authoringview.View) {
 				label += " (" + flow.Mode + ")"
 			}
 			fmt.Fprintf(out, "  - %s\n", label)
-			writeDescribeEvents(out, flow.Events, "    ")
-			if flow.Activation != "" {
-				fmt.Fprintf(out, "    activation: %s\n", flow.Activation)
-			}
-			if flow.Ingress != nil {
-				fmt.Fprintf(out, "    ingress: alias=%s\n", flow.Ingress.Alias)
-				for _, provider := range flow.Ingress.Providers {
-					fmt.Fprintf(out, "      - provider=%s admission=%s", provider.Provider, provider.AdmissionKind)
-					if provider.PackID != "" {
-						fmt.Fprintf(out, " pack_id=%s", provider.PackID)
-					}
-					if provider.RequestAuthentication != "" {
-						fmt.Fprintf(out, " authentication=%s", provider.RequestAuthentication)
-					}
-					if provider.Event != "" {
-						fmt.Fprintf(out, " event=%s", provider.Event)
-					}
-					if provider.SigningSecret != "" {
-						fmt.Fprintf(out, " signing_secret=%s", provider.SigningSecret)
-					}
-					fmt.Fprintln(out)
-				}
-			}
-			if flow.PrimaryEntity != nil {
-				fmt.Fprintf(out, "    primary entity: %s\n", flow.PrimaryEntity.Type)
-			}
-			if flow.TemplateInstance != nil {
-				fmt.Fprintf(out, "    instance: field=%s identity=%s\n", flow.TemplateInstance.Field, flow.TemplateInstance.Identity)
-			}
-			if flow.SingletonCoordinator != nil {
-				fmt.Fprintf(out, "    singleton coordinator: primary_entity=%s contained_fields=%d\n", flow.SingletonCoordinator.PrimaryEntity, len(flow.SingletonCoordinator.ContainedState))
-			}
-			if len(flow.ContainedOperations) > 0 {
-				fmt.Fprintf(out, "    contained operations: %d\n", len(flow.ContainedOperations))
-			}
+			writeDescribeFlowDetails(out, flow)
 		}
 	}
 	writeRoutingTopologyText(out, view.RoutingTopology)
