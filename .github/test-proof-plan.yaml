@@ -73,6 +73,7 @@ profiles:
       - runtime-full
       - delivery-continuation-full
       - serveapp-channel
+      - serveapp-channel-learned
       - serveapp-channel-delivery
       - serveapp-channel-native
       - serveapp-runtime
@@ -136,6 +137,7 @@ profiles:
       - runtime-full
       - delivery-continuation-full
       - serveapp-channel
+      - serveapp-channel-learned
       - serveapp-channel-delivery
       - serveapp-channel-native
       - serveapp-runtime
@@ -199,6 +201,7 @@ profiles:
       - runtime-full
       - delivery-continuation-full
       - serveapp-channel
+      - serveapp-channel-learned
       - serveapp-channel-delivery
       - serveapp-channel-native
       - serveapp-runtime
@@ -262,6 +265,7 @@ profiles:
       - runtime-full
       - delivery-continuation-full
       - serveapp-channel
+      - serveapp-channel-learned
       - serveapp-channel-delivery
       - serveapp-channel-native
       - serveapp-runtime
@@ -679,7 +683,16 @@ units:
       - github.com/division-sh/swarm/internal/serveapp
     # 36644617733 exhausted the unchanged 600s budget after passing whole
     # delivery families. Keep complete journeys together in distinct units.
-    run: '^Test(Canonical.*|Channel(Connect.*|Draft.*|Duplicate.*|Effect.*|Learned.*|Listener.*|OneBot.*|Onboarding(Admitted.*|Early.*|E2E.*|Crash.*))|Claude.*|CLI_.*|Composed.*|Configure.*|Connected.*|Create.*|Receiver.*)$'
+    run: '^Test(Canonical.*|Channel(Connect.*|Draft.*|Duplicate.*|Effect.*|Listener.*|OneBot.*|Onboarding(Admitted.*|Early.*|E2E.*|Crash.*))|Claude.*|CLI_.*|Composed.*|Configure.*|Connected.*|Create.*|Receiver.*)$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  serveapp-channel-learned:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    # The channel unit took 350s before the new serial learned journeys.
+    # Preserve their complete family under the same environment and budget.
+    run: '^TestChannelLearned.*$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
