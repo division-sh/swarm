@@ -35,7 +35,7 @@ must retain the already supplied run and optional concrete flow instance.
 | Separate manifestation | Consumer / change | Exact planned proof |
 | --- | --- | --- |
 | A14-V agent view | `newAgentViewCommand` / `runAgentViewCommand` adds required explicit --run-id; validates before client construction and forwards run_id with agent_id/optional flow_instance. Old no-run producer is invalid. | Compiled real SQLite/Postgres text/JSON/quiet success; missing/blank/malformed scope exit2 and zero RPC/client-side token read; foreign run and ambiguous-target refusal; exact same-run prefix retry; refs-only output controls retained. |
-| A14-D agent diagnose | Existing params builder adds required explicit --run-id before API construction; queue validation/order and output/error taxonomy retained for valid scope. Old no-run diagnosis request is invalid. | Both-store compiled text/JSON/quiet success/refusal; local zero-RPC scope tests, queue bounds/cursor precedence, wrong-run/ambiguous refusal and same-run prefix retry; diagnosis privacy controls retained. |
+| A14-D agent diagnose | Existing `agentDiagnoseCommandOptions.params` adds required explicit --run-id before API construction; queue validation/order and output/error taxonomy retained for valid scope. Old no-run diagnosis request is invalid. | Both-store compiled text/JSON/quiet success/refusal; local zero-RPC scope tests, queue bounds/cursor precedence, wrong-run/ambiguous refusal and same-run prefix retry; diagnosis privacy controls retained. |
 | A14-L agent deliveries | Existing --run-id becomes required exact operational authority, not optional history filter; retain status/limit/cursor/flow-instance behavior. Old unscoped request is invalid. | Both-store compiled success; missing/blank/malformed/wrong run, same-run prefix retry and ambiguous-target refusal; existing lifecycle output/pagination/cursor tests with explicit valid scope. |
 | A14-C conversation list --agent-id | Existing run option becomes conditionally required for agent_id (flow_instance already requires agent_id); retain unfiltered and run-only enumeration. Unscoped agent-filtered request is invalid. | Both-store filtered compiled text/JSON/quiet success; missing/invalid/wrong-run/ambiguous refusal; unfiltered/run-only positive controls and session-ID readers stay executable; exact option forwarding. |
 
@@ -586,7 +586,7 @@ refactoring them. No live same-concept owner bypass found in the nine-method fam
 | userfacing human-code AST census | existing flow Mode exception **already consumes** the precise renderer site; retain it and all existing guard tests unchanged. |
 
 Single production caller of writeDescribeText: runDescribeCommandWithOutput.
-Authoring-view builders/tests and routing/verify/CLI source/output registries were
+The `authoringview.Build` implementation/tests and routing/verify/CLI source/output registries were
 checked; they stay projections/consumers, not replaced owners. No dead text path
 or alternate live renderer for this same full describe transcript was found.
 
