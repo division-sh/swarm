@@ -279,14 +279,17 @@ func policyPresenceTruth(expr celast.Expr, policy map[string]any) (truth, known 
 			return !absorbing, leftKnown && rightKnown
 		}
 	case "_?_:_":
-		if len(args) == 3 {
-			if test, known := policyPresenceTruth(args[0], policy); known {
-				if test {
-					return policyPresenceTruth(args[1], policy)
-				}
-				return policyPresenceTruth(args[2], policy)
-			}
+		if len(args) != 3 {
+			return false, false
 		}
+		test, known := policyPresenceTruth(args[0], policy)
+		if !known {
+			return false, false
+		}
+		if test {
+			return policyPresenceTruth(args[1], policy)
+		}
+		return policyPresenceTruth(args[2], policy)
 	}
 	return false, false
 }
