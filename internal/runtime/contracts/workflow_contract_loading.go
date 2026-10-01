@@ -183,19 +183,26 @@ func LoadWorkflowContractBundleFromArtifact(repoRoot string, artifact *sourceart
 	}
 	bundle.ProjectPacks = projectPacks
 	bundle.PackInventory = effective
-	if err := populateWorkflowSemantics(bundle); err != nil {
-		return nil, fmt.Errorf("compile workflow semantics: %w", err)
-	}
-	if err := validateWorkflowContractBundleLoadConstraints(bundle); err != nil {
+	if err := finalizeWorkflowContractBundle(bundle); err != nil {
 		return nil, err
-	}
-	if err := populateEffectiveProvenance(bundle); err != nil {
-		return nil, err
-	}
-	if _, err := BuildDurableDataCatalog(bundle); err != nil {
-		return nil, fmt.Errorf("compile durable data catalog: %w", err)
 	}
 	return bundle, nil
+}
+
+func finalizeWorkflowContractBundle(bundle *WorkflowContractBundle) error {
+	if err := populateWorkflowSemantics(bundle); err != nil {
+		return fmt.Errorf("compile workflow semantics: %w", err)
+	}
+	if err := validateWorkflowContractBundleLoadConstraints(bundle); err != nil {
+		return err
+	}
+	if err := populateEffectiveProvenance(bundle); err != nil {
+		return err
+	}
+	if _, err := BuildDurableDataCatalog(bundle); err != nil {
+		return fmt.Errorf("compile durable data catalog: %w", err)
+	}
+	return nil
 }
 func resolveWorkflowPlatformPackBase(options WorkflowContractLoadOptions, runningVersion string) (*packartifact.PlatformPackInventory, error) {
 	if options.PlatformPackBase != nil && options.PlatformPackBases != nil {

@@ -55,40 +55,7 @@ func (c *checkerContext) conditionPolicyAlignment() []Finding {
 		}
 		// Expression admission failures belong to the existing typed/context checks.
 	}
-	for _, record := range c.source.ExecutableNodeRecords() {
-		node, err := record.Identity()
-		if err != nil {
-			continue
-		}
-		policy := c.source.ResolvedPolicyForExecutableNode(node)
-		for event, handler := range c.source.ExecutableNodeEventHandlers(node) {
-			if handler.Guard != nil && strings.TrimSpace(handler.Guard.PolicyRef) != "" {
-				for _, guard := range handler.Guard.EffectiveChecks() {
-					if guard.EffectiveIdentity() == "state_in_phase" {
-						if _, ok := semanticview.PolicyValueForFlow(c.source, node.FlowPath(), handler.Guard.PolicyRef); !ok {
-							c.conditionPolicyFindings = append(c.conditionPolicyFindings, Finding{
-								CheckID: "condition_policy_alignment", Severity: SeverityHardInvalidity,
-								Message: "state_in_phase guard references undeclared policy selector " + handler.Guard.PolicyRef, Location: node.Key(),
-								Remediation: "Declare the selected policy value in this flow or an ancestor, or correct guard.policy_ref.",
-							})
-						}
-					}
-				}
-			}
-			payload, _ := executablePayloadStructuralType(c.source, node, event)
-			entity, _ := semanticview.ResolveEntityStructuralType(c.source, node.FlowPath())
-			for _, reader := range c.entityAssignmentReaders(node, event, handler) {
-				if len(reader.RequiredEntityPaths) != 0 {
-					continue
-				}
-				options := executableReaderExpressionOptions(reader, payload, entity)
-				if from := reader.ConditionCollectionSource; from != "" {
-					options.ItemType, _ = executableCollectionItemStructuralType(c.source, node, event, handler, from)
-				}
-				check(reader.Expression, node.Key()+" handler "+event+" "+reader.Kind, policy, options, &reader)
-			}
-		}
-	}
+	c.checkHandlerPolicyExpressions(check)
 	for _, timer := range c.source.WorkflowTimers() {
 		policy := c.source.ResolvedPolicyForFlow(timer.OwningFlowID())
 		for _, key := range pipeline.WorkflowTimerPolicyReferences(timer.Delay) {
@@ -114,6 +81,50 @@ func (c *checkerContext) conditionPolicyAlignment() []Finding {
 		}
 	}
 	return c.conditionPolicyFindings
+}
+
+func (c *checkerContext) checkHandlerPolicyExpressions(check func(string, string, runtimecontracts.PolicyDocument, workflowexpr.ValueExpressionOptions, *expressionReference)) {
+	for _, record := range c.source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
+			continue
+		}
+		policy := c.source.ResolvedPolicyForExecutableNode(node)
+		for event, handler := range c.source.ExecutableNodeEventHandlers(node) {
+			c.checkGuardPolicySelector(node, handler.Guard)
+			payload, _ := executablePayloadStructuralType(c.source, node, event)
+			entity, _ := semanticview.ResolveEntityStructuralType(c.source, node.FlowPath())
+			for _, reader := range c.entityAssignmentReaders(node, event, handler) {
+				if len(reader.RequiredEntityPaths) != 0 {
+					continue
+				}
+				options := executableReaderExpressionOptions(reader, payload, entity)
+				if from := reader.ConditionCollectionSource; from != "" {
+					options.ItemType, _ = executableCollectionItemStructuralType(c.source, node, event, handler, from)
+				}
+				check(reader.Expression, node.Key()+" handler "+event+" "+reader.Kind, policy, options, &reader)
+			}
+		}
+	}
+}
+
+func (c *checkerContext) checkGuardPolicySelector(node runtimeidentity.ExecutableNode, guard *runtimecontracts.GuardSpec) {
+	if guard == nil || strings.TrimSpace(guard.PolicyRef) == "" {
+		return
+	}
+	for _, entry := range guard.EffectiveChecks() {
+		if entry.EffectiveIdentity() != "state_in_phase" {
+			continue
+		}
+		if _, ok := semanticview.PolicyValueForFlow(c.source, node.FlowPath(), guard.PolicyRef); ok {
+			continue
+		}
+		c.conditionPolicyFindings = append(c.conditionPolicyFindings, Finding{
+			CheckID: "condition_policy_alignment", Severity: SeverityHardInvalidity,
+			Message: "state_in_phase guard references undeclared policy selector " + guard.PolicyRef, Location: node.Key(),
+			Remediation: "Declare the selected policy value in this flow or an ancestor, or correct guard.policy_ref.",
+		})
+	}
 }
 
 func (c *checkerContext) conditionPayloadAlignment() []Finding {
