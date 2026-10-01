@@ -233,6 +233,9 @@ func a2NegativeGeneratorSpecimen(path, scope, source string) bool {
 
 func a2RetiredIdentifier(path, name string) bool {
 	lower := strings.ToLower(name)
+	if strings.Contains(path, "/bootverify/") && (name == "wave1ResolveNamedType" || name == "wave1BuiltinScalar" || name == "wave1ListElementType") {
+		return true
+	}
 	for _, prefix := range []string{"flowinputresolutionmodefanin", "connectrouteplanfanin", "connectfanin", "connectexecutionclaimfanincodec", "cloneconnectrouteplanfanin", "resolvefanin", "validatefanin", "fanininput"} {
 		if strings.HasPrefix(lower, prefix) {
 			return true
@@ -496,6 +499,9 @@ func TestA2JoinRetirementGuardRejectsHostileAST(t *testing.T) {
 		{"inline accepted grammar", "internal/runtime/contracts/hostile.go", `package contracts; func decode(v any) { nodeValueFields(v, "accumulate", map[string]struct{}{"dedup_by": {}}, nil) }`, "accepts retired field dedup_by"},
 		{"positive mode branch", "internal/runtime/contracts/hostile.go", `package contracts; func ParseFlowInputResolutionMode(v string) (int, error) { switch v { case "fan-in": return 4, nil }; return 0, nil }`, "parser admits retired fan-in"},
 		{"singleton demand branch", "internal/runtime/bootverify/hostile.go", `package bootverify; func demand(kind string) bool { return kind == "fan_in_input" }`, "singleton fan-in demand"},
+		{"local type parser", "internal/runtime/bootverify/hostile.go", `package bootverify; func wave1ResolveNamedType() {}`, "wave1ResolveNamedType"},
+		{"local scalar parser", "internal/runtime/bootverify/hostile.go", `package bootverify; func wave1BuiltinScalar() {}`, "wave1BuiltinScalar"},
+		{"local list parser", "internal/runtime/bootverify/hostile.go", `package bootverify; func wave1ListElementType() {}`, "wave1ListElementType"},
 		{"generated positive", "internal/runtime/testfixtures/canonicalrouting/hostile.go", "package canonicalrouting; const source = `pins:\n  inputs:\n    events:\n      - event: result\n        resolution: {mode: fan-in}\n`", "generated contract"},
 	}
 	for _, test := range cases {
