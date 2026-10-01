@@ -12,6 +12,9 @@ hard:
     limit_seconds: 540
     justification: Existing ceiling for the required 20-journey served lifecycle matrix; the 492s primary baseline remains measured without an automatic confirmation pass.
   unit_command_seconds:
+    catalog-required-verify:
+      limit_seconds: 360
+      justification: Reviewed #2353 disposition 5939565179 retains all 90 serial compiled describe calls and exact hashes after hosted 274s/372s measurements; this unit-only target preserves the normal 30% buffer and sibling budgets.
     conformance-2394-core:
       limit_seconds: 300
       justification: Exact core conformance command measured 241s against the prior 240s ceiling in CI 36515817055; all 64 entries passed without skips and sibling budgets remain unchanged.

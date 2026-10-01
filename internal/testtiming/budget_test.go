@@ -81,7 +81,7 @@ func TestCommittedUnitCommandBudgetsAreExactAndDeclared(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]float64{"conformance-2394-core": 300, "conformance-2394-reporter": 480, "serveapp-i-reporter": 780}
+	want := map[string]float64{"catalog-required-verify": 360, "conformance-2394-core": 300, "conformance-2394-reporter": 480, "serveapp-i-reporter": 780}
 	if len(budget.Hard.UnitCommandSeconds) != len(want) {
 		t.Fatalf("unit command budgets = %v, want only named units", budget.Hard.UnitCommandSeconds)
 	}
