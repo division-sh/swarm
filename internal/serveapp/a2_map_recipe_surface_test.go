@@ -19,7 +19,7 @@ import (
 // The existing H harness boots the normal serve owner and reconstructs the same
 // selected store in-process. It is not a standalone process-kill or E proof.
 func TestA2MapRecipeSupportedSurfaceBothStores(t *testing.T) {
-	canonicalrouting.Prove(t, canonicalrouting.ArtifactID("examples/routing/map-scatter-gather"))
+	canonicalrouting.Prove(t, canonicalrouting.MapScatterGather)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			root := canonicalrouting.CopyExample(t, canonicalrouting.MapScatterGather)
