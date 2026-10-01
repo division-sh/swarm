@@ -45,9 +45,15 @@ func TestReadProofFactoringCompiledDescribe(t *testing.T) {
 		"routes-text": {"describe", "routes"}, "routes-json": {"describe", "routes", "--json"},
 		"routes-quiet": {"describe", "routes", "--quiet"},
 	}
-	env := readProofCompiledScopeEnv(filepath.Join(root, "home"))
+	// Independent read-only CLI cells share only the built binary and source.
+	// Bound process concurrency without sharing configuration or cache state.
+	processes := make(chan struct{}, 2)
 	for _, row := range baseline.Results {
 		t.Run(row.Fixture+"/"+row.Surface, func(t *testing.T) {
+			t.Parallel()
+			processes <- struct{}{}
+			defer func() { <-processes }()
+			env := readProofCompiledScopeEnv(t.TempDir())
 			args, ok := surfaces[row.Surface]
 			if !ok {
 				t.Fatal(row.Surface)
