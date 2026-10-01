@@ -59,36 +59,15 @@ hard:
 }
 
 func TestCommittedUnitCommandBudgetsAreExactAndDeclared(t *testing.T) {
-	root, err := filepath.Abs("../..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	budgetFile, err := os.Open(filepath.Join(root, ".github/test-timing-budgets.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer budgetFile.Close()
-	budget, err := LoadBudgetPolicy(budgetFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	proofFile, err := os.Open(filepath.Join(root, ".github/test-proof-plan.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer proofFile.Close()
-	proof, err := testplanning.LoadPolicy(proofFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := map[string]float64{"conformance-2394-core": 300, "conformance-2394-reporter": 480, "serveapp-i-reporter": 780}
+	budget, proof := committedTimingPolicies(t)
+	want := map[string]float64{"catalog-required-verify": 360, "conformance-2394-core": 300, "conformance-2394-reporter": 480, "serveapp-i-reporter": 780}
 	if len(budget.Hard.UnitCommandSeconds) != len(want) {
 		t.Fatalf("unit command budgets = %v, want only named units", budget.Hard.UnitCommandSeconds)
 	}
 	if budget.Hard.MaxShardCommandSeconds.LimitSeconds != 240 {
 		t.Fatalf("shared broad command budget = %+v, want unchanged 240s", budget.Hard.MaxShardCommandSeconds)
 	}
-	for _, id := range []string{"conformance-2394-core", "conformance-2394-pressure"} {
+	for _, id := range []string{"catalog-required-verify", "conformance-2394-core", "conformance-2394-pressure"} {
 		if proof.Units[id].BudgetClass != "broad" {
 			t.Fatalf("%s budget class = %q, want broad", id, proof.Units[id].BudgetClass)
 		}
@@ -101,6 +80,81 @@ func TestCommittedUnitCommandBudgetsAreExactAndDeclared(t *testing.T) {
 		if _, ok := proof.Units[id]; !ok {
 			t.Fatalf("%s has no declared proof unit", id)
 		}
+	}
+}
+
+func TestCommittedCLICommandBudgetBoundariesAndIsolation(t *testing.T) {
+	budget, proof := committedTimingPolicies(t)
+	packages := append([]string{"github.com/division-sh/swarm/internal/events"}, proof.SpecialPackages...)
+	plan, err := testplanning.BuildPlan(proof, testplanning.WeightModel{
+		Version: testplanning.WeightModelVersion, SourceRunID: "CLI budget isolation", Packages: map[string]float64{},
+	}, packages, testplanning.ProfilePREscalated, "CLI budget isolation", "head")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name                       string
+		cliSeconds, siblingSeconds float64
+		cliStatus, siblingStatus   BudgetStatus
+		cliWarning                 bool
+	}{
+		{"below baseline", 359, 312, BudgetPass, BudgetPass, false},
+		{"at baseline", 360, 312, BudgetPass, BudgetPass, false},
+		{"above baseline", 360.001, 312, BudgetPass, BudgetPass, true},
+		{"retained master duration", 374, 312, BudgetPass, BudgetPass, true},
+		{"at ceiling", 468, 312, BudgetPass, BudgetPass, true},
+		{"above ceiling", 468.001, 312, BudgetFail, BudgetPass, false},
+		{"sibling above unchanged ceiling", 359, 312.001, BudgetPass, BudgetFail, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var evidence []CommandEvidence
+			for _, unit := range plan.Units {
+				seconds := 10.0
+				if unit.ID == "catalog-required-verify" {
+					seconds = tc.cliSeconds
+				} else if unit.ID == "broad-01" {
+					seconds = tc.siblingSeconds
+				}
+				evidence = append(evidence, timingTestEvidence(plan, unit.ID, AttemptPrimary, seconds))
+			}
+			result := EvaluateBudget(budget, EvaluationOptions{Plan: plan, WorkflowRunID: 1, WorkflowAttempt: 1}, evidence)
+			wantStatus := BudgetPass
+			if tc.cliStatus == BudgetFail || tc.siblingStatus == BudgetFail {
+				wantStatus = BudgetFail
+			}
+			if result.Status != wantStatus || len(result.Surfaces) != len(plan.Units) {
+				t.Fatalf("result = %+v, want %s and every planned surface", result, wantStatus)
+			}
+			cliFound, siblingFound := false, false
+			for _, surface := range result.Surfaces {
+				switch surface.Surface {
+				case "catalog-required-verify":
+					cliFound = true
+					if surface.Status != tc.cliStatus || surface.LimitSeconds != 360 || surface.BufferedCeilingSeconds != 468 || surface.PrimarySeconds == nil || *surface.PrimarySeconds != tc.cliSeconds || (len(surface.Warnings) > 0) != tc.cliWarning {
+						t.Fatalf("CLI surface = %+v, want 360s/468s, %s, warning %t", surface, tc.cliStatus, tc.cliWarning)
+					}
+				case "broad-01":
+					siblingFound = true
+					if surface.Status != tc.siblingStatus || surface.LimitSeconds != 240 || surface.BufferedCeilingSeconds != 312 || surface.PrimarySeconds == nil || *surface.PrimarySeconds != tc.siblingSeconds {
+						t.Fatalf("broad sibling = %+v, want unchanged 240s/312s and %s", surface, tc.siblingStatus)
+					}
+				default:
+					if surface.Status != BudgetPass {
+						t.Fatalf("unrelated surface failed: %+v", surface)
+					}
+				}
+				unit, err := plan.Unit(surface.Surface)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, named := budget.Hard.UnitCommandSeconds[unit.ID]; unit.BudgetClass == "broad" && !named && (surface.LimitSeconds != 240 || surface.BufferedCeilingSeconds != 312) {
+					t.Fatalf("unnamed broad surface changed budget: %+v", surface)
+				}
+			}
+			if !cliFound || !siblingFound {
+				t.Fatal("CLI or ordinary broad sibling missing from evaluation")
+			}
+		})
 	}
 }
 
@@ -510,6 +564,33 @@ func TestBudgetMarkdownDoesNotAskImplementersToRebalance(t *testing.T) {
 	if !strings.Contains(out.String(), "planner-owned") {
 		t.Fatalf("planner remediation missing:\n%s", out.String())
 	}
+}
+
+func committedTimingPolicies(t *testing.T) (BudgetPolicy, testplanning.Policy) {
+	t.Helper()
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	budgetFile, err := os.Open(filepath.Join(root, ".github/test-timing-budgets.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer budgetFile.Close()
+	budget, err := LoadBudgetPolicy(budgetFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proofFile, err := os.Open(filepath.Join(root, ".github/test-proof-plan.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer proofFile.Close()
+	proof, err := testplanning.LoadPolicy(proofFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return budget, proof
 }
 
 func timingTestPlan(t *testing.T) testplanning.RunPlan {

@@ -12,6 +12,9 @@ hard:
     limit_seconds: 540
     justification: Existing ceiling for the required 20-journey served lifecycle matrix; the 492s primary baseline remains measured without an automatic confirmation pass.
   unit_command_seconds:
+    catalog-required-verify:
+      limit_seconds: 360
+      justification: Provisional CLI-only baseline for the expanded compiled CLI workload measured at 359s in PR CI 36868835790 and 374s in master CI 36867590432; original 240s target remains tracked by issue 2394.
     conformance-2394-core:
       limit_seconds: 300
       justification: Exact core conformance command measured 241s against the prior 240s ceiling in CI 36515817055; all 64 entries passed without skips and sibling budgets remain unchanged.
