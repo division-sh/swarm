@@ -57,7 +57,11 @@ func TestChannelNormativeOperationInventoryMatchesCompiledEffects(t *testing.T) 
 			} `yaml:"hitl_channel_pack_interface"`
 		} `yaml:"tool_model"`
 	}
-	if err := yaml.Unmarshal(body, &document); err != nil {
+	snapshot, err := yamlsource.Load(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := snapshot.Decode(&document); err != nil {
 		t.Fatal(err)
 	}
 	registry, channel, trigger, connector := loadTelegramChannelCompilerInputs(t)
