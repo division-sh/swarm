@@ -90,11 +90,23 @@ rejected implementation imports in the newly added release-package tests. The
 168-cell store-seeded compiled read proof and three fresh compiled public
 scenarios now live in CLI integration tests, where their canonical fixture
 construction belongs. Both still execute the real compiled CLI, not in-process
-Execute or fake successful RPC; the retained process journey and describe
-baseline stay in releasee2e with standard-library imports only. The unchanged
+Execute or fake successful RPC; the retained process journey stays in
+releasee2e with standard-library imports only. The unchanged
 boundary guard passes. No existing test or production behavior was changed to
 silence this failure, and no new fixture/runtime/registry owner was added.
 The relocated compiled proofs pass together in 102.269s.
+
+The final hosted release group exhausted its cumulative ten-minute package
+deadline after the complete new describe matrix had passed in 156.34s. The
+interrupted standing subcase had run only nine seconds, with no failing runtime
+assertion. The pure compiled describe matrix now also lives in CLI integration,
+retaining all 45 baseline cells, both invocations per cell, exact hashes and the
+one-minute command deadline. The retained lifecycle reader stays in releasee2e;
+no existing test, timeout, fixture hash, process owner or assertion is weakened.
+The audit also replaces two ambiguous generic construction nouns with the exact
+`agentDiagnoseCommandOptions.params` and `authoringview.Build` callable names;
+the unchanged retired-product reference guard remains strict. These are own
+test-placement/documentation defects, not a runtime repair or a flaky dismissal.
 
 The subsequent conformance CI failure was an unclassified reference to
 ConnectRoutePlan in the pre-audit, not a runtime route interpreter. The existing
@@ -154,8 +166,8 @@ and stale-classification controls remain mandatory.
 Required supported-surface proof actually run:
 
 ```sh
-go run ./cmd/swarm-test -- ./internal/releasee2e -run '^(TestReadProofFactoringCompiled(Describe|Surfaces)|TestGoldenAgentWorkload(SQLiteSmoke|RestartAndForcedKillOnBothBackends|BurstConcurrencyOnBothBackendsIteration[12]))$' -count=1 -timeout=15m
-go test ./internal/cliapp -run '^TestReadProofFactoringCompiled(AgentScopeBothStores|Scenario)$' -count=1 -timeout=3m
+go run ./cmd/swarm-test -- ./internal/releasee2e -run '^(TestReadProofFactoringCompiledSurfaces|TestGoldenAgentWorkload(SQLiteSmoke|RestartAndForcedKillOnBothBackends|BurstConcurrencyOnBothBackendsIteration[12]))$' -count=1 -timeout=15m
+go run ./cmd/swarm-test -- ./internal/cliapp -run '^TestReadProofFactoringCompiled(AgentScopeBothStores|Scenario|Describe)$' -count=1 -timeout=5m
 go test ./internal/releasee2e -run '^TestReleaseE2EPackageStaysAtPublicProcessBoundary$' -count=1 -timeout=1m
 go test ./internal/apiv1 -run '^(TestAgentOperator.*Snapshot.*|TestSelectedStoreAgentSnapshotHandlers.*|TestAgentDiagnoseExactDeliveryPaginationParity)$' -count=1 -timeout=3m
 go test ./internal/store/internal/runtimepersistence -run '^(TestOperatorConversation(KeysetInsertionParity|ProjectionBackendParity|ReadSurfaceListUsesCanonicalProjection)|TestOperatorAgentDeliveryPagesBoundHydrationParity|TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres|TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle)$' -count=1 -timeout=3m

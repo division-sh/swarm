@@ -3,7 +3,6 @@ package releasee2e
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,49 +11,6 @@ import (
 	"strings"
 	"testing"
 )
-
-func TestReadProofFactoringCompiledDescribe(t *testing.T) {
-	root := goldenReleaseRoot(t)
-	binary := buildReleaseBinary(t, root)
-	repo := releaseE2ERepoRoot(t)
-	raw, err := os.ReadFile(filepath.Join(repo, "internal/releasee2e/testdata/read_proof_describe_baseline.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var baseline struct {
-		Baseline string `json:"baseline"`
-		Results  []struct {
-			Fixture      string `json:"fixture"`
-			Surface      string `json:"surface"`
-			StdoutSHA256 string `json:"stdout_sha256"`
-		} `json:"results"`
-	}
-	if err := json.Unmarshal(raw, &baseline); err != nil || len(baseline.Results) != 45 {
-		t.Fatalf("pre-extraction baseline: %v, rows=%d", err, len(baseline.Results))
-	}
-	surfaces := map[string][]string{
-		"describe-text": {"describe"}, "describe-json": {"describe", "--json"},
-		"describe-quiet": {"describe", "--quiet"}, "describe-no-color": {"describe", "--no-color"},
-		"describe-graph-text": {"describe", "--graph"}, "describe-graph-json": {"describe", "--graph", "--json"},
-		"routes-text": {"describe", "routes"}, "routes-json": {"describe", "routes", "--json"},
-		"routes-quiet": {"describe", "routes", "--quiet"},
-	}
-	for _, row := range baseline.Results {
-		t.Run(row.Fixture+"/"+row.Surface, func(t *testing.T) {
-			args, ok := surfaces[row.Surface]
-			if !ok {
-				t.Fatal(row.Surface)
-			}
-			for repetition := 0; repetition < 2; repetition++ {
-				out := readProofCompiledCommand(t, binary, repo, goldenProcessEnv(t, root, "", 0), append(append([]string{}, args...), filepath.Join(repo, row.Fixture))...)
-				got := fmt.Sprintf("%x", sha256.Sum256([]byte(strings.ReplaceAll(out, repo, "<repo>"))))
-				if got != row.StdoutSHA256 {
-					t.Fatalf("%s pre-extraction %s output changed: sha=%s want=%s\n%s", baseline.Baseline, row.Surface, got, row.StdoutSHA256, out)
-				}
-			}
-		})
-	}
-}
 
 func TestReadProofFactoringCompiledSurfaces(t *testing.T) {
 	root := goldenReleaseRoot(t)
