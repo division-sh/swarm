@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 )
 
 func requireChannelDeliverySettlementAuthorityTx(ctx context.Context, tx *sql.Tx, settlement runtimeeffects.Settlement, postgres bool) error {
@@ -54,6 +55,9 @@ func requireChannelDeliverySettlementAuthorityTx(ctx context.Context, tx *sql.Tx
 	if err != nil || !bytes.Equal(want, got) {
 		return fmt.Errorf("channel delivery settlement evidence contradicts original authority")
 	}
+	if err := requireChannelSettlementRenderTx(ctx, tx, authority.ChannelDelivery, postgres); err != nil {
+		return err
+	}
 	switch settlement.State {
 	case runtimeeffects.StateSettled, runtimeeffects.StateOutcomeUncertain:
 		if state != string(runtimeeffects.StateLaunched) && state != string(runtimeeffects.StateResponseObserved) && state != string(settlement.State) {
@@ -65,6 +69,21 @@ func requireChannelDeliverySettlementAuthorityTx(ctx context.Context, tx *sql.Tx
 		}
 	default:
 		return fmt.Errorf("unsupported channel delivery settlement %s", settlement.State)
+	}
+	return nil
+}
+
+func requireChannelSettlementRenderTx(ctx context.Context, tx *sql.Tx, authority runtimeeffects.ChannelDeliveryAuthority, postgres bool) error {
+	stored, found, err := channeldelivery.LoadRender(ctx, tx, authority.RenderID, postgres)
+	if err != nil {
+		return err
+	}
+	audience := stored.Frozen.Audience
+	if !found || stored.DeliveryID != authority.DeliveryID || stored.Frozen.Hash != authority.RenderHash ||
+		audience.PrincipalID != authority.PrincipalID || audience.InterfaceKey != authority.InterfaceKey ||
+		audience.DeliveryEpoch != authority.DeliveryEpoch || audience.ExternalAccountRef != authority.ExternalAccountRef ||
+		audience.ConversationRef != authority.ConversationRef {
+		return fmt.Errorf("channel settlement contradicts the original frozen render")
 	}
 	return nil
 }

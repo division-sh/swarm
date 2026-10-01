@@ -35,6 +35,7 @@ type Double struct {
 	registrationResponseBarrier   *responseBarrier
 	deliveryResponseBarrier       *responseBarrier
 	editResponseBarrier           *responseBarrier
+	ackResponseBarrier            *responseBarrier
 	delayedLostEdit               *responseBarrier
 	commandApplyBarrier           *responseBarrier
 }
@@ -335,7 +336,13 @@ func (p *Double) serveAcknowledgment(w http.ResponseWriter, request *http.Reques
 	p.acknowledgments = append(p.acknowledgments, clonePayload(payload))
 	loseResponse := p.loseNextAckResponse
 	p.loseNextAckResponse = false
+	barrier := p.ackResponseBarrier
+	p.ackResponseBarrier = nil
 	p.mu.Unlock()
+	if barrier != nil {
+		close(barrier.arrived)
+		<-barrier.release
+	}
 	if loseResponse {
 		loseProviderResponse(w)
 		return
@@ -510,6 +517,14 @@ func (p *Double) LoseNextCallbackAcknowledgment() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.loseNextAckResponse = true
+}
+
+func (p *Double) PauseNextCallbackResponse() (<-chan struct{}, func()) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	barrier := newResponseBarrier()
+	p.ackResponseBarrier = barrier
+	return barrier.arrived, barrier.releaseResponse
 }
 
 func (p *Double) PauseNextEditResponse() (<-chan struct{}, func()) {
