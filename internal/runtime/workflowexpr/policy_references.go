@@ -35,40 +35,13 @@ func validateCheckedPolicyReferences(compiled *cel.Ast, policy map[string]any) e
 			return
 		}
 		if !shadowed {
-			if path, ok := policyStaticPath(expr); ok && len(path) != 0 && !policyPresenceRead(expr) {
-				name := policyPathName(path)
-				if _, proven := facts[name]; !proven && !policyPathExists(policy, path) {
-					missing[name] = struct{}{}
-				}
-			}
+			collectPolicyRead(expr, facts, policy, missing)
 		}
 		switch expr.Kind() {
 		case celast.SelectKind:
 			visit(expr.AsSelect().Operand(), facts, shadowed)
 		case celast.CallKind:
-			call := expr.AsCall()
-			args := call.Args()
-			switch call.FunctionName() {
-			case "_&&_", "_||_":
-				if len(args) == 2 {
-					visit(args[0], facts, shadowed)
-					visit(args[1], mergeWorkflowPresenceFacts(facts, policyFactsWhen(args[0], call.FunctionName() == "_&&_")), shadowed)
-					return
-				}
-			case "_?_:_":
-				if len(args) == 3 {
-					visit(args[0], facts, shadowed)
-					visit(args[1], mergeWorkflowPresenceFacts(facts, policyFactsWhen(args[0], true)), shadowed)
-					visit(args[2], mergeWorkflowPresenceFacts(facts, policyFactsWhen(args[0], false)), shadowed)
-					return
-				}
-			}
-			if call.IsMemberFunction() {
-				visit(call.Target(), facts, shadowed)
-			}
-			for _, arg := range args {
-				visit(arg, facts, shadowed)
-			}
+			visitPolicyCall(expr.AsCall(), facts, shadowed, visit)
 		case celast.ComprehensionKind:
 			c := expr.AsComprehension()
 			visit(c.IterRange(), facts, shadowed)
@@ -110,6 +83,42 @@ func validateCheckedPolicyReferences(compiled *cel.Ast, policy map[string]any) e
 	sort.Strings(failure.Paths)
 	sort.Strings(failure.Keys)
 	return failure
+}
+
+func collectPolicyRead(expr celast.Expr, facts workflowPresenceFacts, policy map[string]any, missing map[string]struct{}) {
+	path, ok := policyStaticPath(expr)
+	if !ok || len(path) == 0 || policyPresenceRead(expr) {
+		return
+	}
+	name := policyPathName(path)
+	if _, proven := facts[name]; !proven && !policyPathExists(policy, path) {
+		missing[name] = struct{}{}
+	}
+}
+
+func visitPolicyCall(call celast.CallExpr, facts workflowPresenceFacts, shadowed bool, visit func(celast.Expr, workflowPresenceFacts, bool)) {
+	args := call.Args()
+	switch call.FunctionName() {
+	case "_&&_", "_||_":
+		if len(args) == 2 {
+			visit(args[0], facts, shadowed)
+			visit(args[1], mergeWorkflowPresenceFacts(facts, policyFactsWhen(args[0], call.FunctionName() == "_&&_")), shadowed)
+			return
+		}
+	case "_?_:_":
+		if len(args) == 3 {
+			visit(args[0], facts, shadowed)
+			visit(args[1], mergeWorkflowPresenceFacts(facts, policyFactsWhen(args[0], true)), shadowed)
+			visit(args[2], mergeWorkflowPresenceFacts(facts, policyFactsWhen(args[0], false)), shadowed)
+			return
+		}
+	}
+	if call.IsMemberFunction() {
+		visit(call.Target(), facts, shadowed)
+	}
+	for _, arg := range args {
+		visit(arg, facts, shadowed)
+	}
 }
 
 func policyPresenceRead(expr celast.Expr) bool {
