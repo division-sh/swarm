@@ -162,18 +162,36 @@ func TestWorkflowEngineMutationCommitsPayloadFanOutIntentAndDeliveryAtomicallyOn
 			if err != nil || eagerScore != float64(75) {
 				t.Fatalf("eager computed score = %#v err=%v, want native double 75", eagerScore, err)
 			}
+			// This reduced writer proof admits an exact text-list source witness;
+			// it does not stand in for the authored compiler or public pump proof.
+			collection := runtimecontracts.CatalogTypeReference{Type: "list<text>"}
+			projection, err := runtimecontracts.AdmitCollectionProjection(collection)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sourceEvidence := runtimecontracts.FanOutPlanSemantics{
+				ElementRef: element, ItemsFrom: "payload.candidate_ids", CollectionType: collection,
+				CollectionProjection: projection, ItemType: projection.ItemType(), ItemAlias: "candidate",
+				Identity: "candidate", IdentityDerived: true, MaxItems: runtimecontracts.DefaultFanOutMaxItems,
+				Emit: runtimecontracts.EmitSpec{Event: "engine.item.requested"},
+			}
+			sourceDigest, err := canonicaljson.Hash(sourceEvidence)
+			if err != nil {
+				t.Fatal(err)
+			}
 			intent := fanoutobligation.IntentRequest{
 				Key: fanoutobligation.IntentKey{
 					RunID: runID, TriggeringDeliveryID: claimed.Claim.DeliveryID(), ElementRef: element,
 				},
 				PlanRef: runtimecontracts.FanOutPlanRef{
 					BundleHash: "bundle-v2:sha256:" + strings.Repeat("1", 64), ElementRef: element,
-					SemanticDigest: "sha256:" + strings.Repeat("2", 64),
+					SemanticDigest: sourceDigest,
 				},
 				Source:      fanoutobligation.SourceRef{Kind: fanoutobligation.SourceEventPayloadField, EventID: event.ID(), Field: "candidate_ids"},
 				Cardinality: 3,
 				Capsule: fanoutobligation.Capsule{
-					NodeKey: node.Key(), ExecutionFlowID: flowID,
+					SourceProjection: sourceEvidence,
+					NodeKey:          node.Key(), ExecutionFlowID: flowID,
 					Route:    runtimeflowidentity.StoredRoute(flowID, runtimeflowidentity.LogicalInstanceID(instancePath), instancePath),
 					EntityID: entityID, HandlerEventKey: string(event.Type()), ProducerSource: event.RoutingSource(),
 					Receiver: &fanoutobligation.ExecutionReceiver{Node: node, Target: route.Target}, Lineage: events.LineageFromEvent(event), CurrentState: "active",
@@ -182,6 +200,9 @@ func TestWorkflowEngineMutationCommitsPayloadFanOutIntentAndDeliveryAtomicallyOn
 						"nested": []any{json.Number("75.0"), json.Number("75e0")},
 					},
 				},
+			}
+			if err := intent.Validate(); err != nil {
+				t.Fatalf("admit writer source witness before hostile cases: %v", err)
 			}
 			joinRef, err := timeridentity.NewFanOutDeliveryJoinRef(
 				mustPersistenceNode(flowID, "engine-fan-out"), string(event.Type()), "fan-out-complete",
