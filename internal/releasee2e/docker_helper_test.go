@@ -1160,6 +1160,10 @@ func validateReleaseClaudeArgs(args []string, startup bool) error {
 		"--verbose":                  true,
 		"--strict-mcp-config":        true,
 	}
+	if os.Getenv(releaseResourceReadEnv) == "1" && !startup {
+		valueNames["--resume"] = true
+		boolNames["--fork-session"] = true
+	}
 	for index := 0; index < len(args); {
 		name := args[index]
 		if valueNames[name] {
@@ -1191,7 +1195,11 @@ func validateReleaseClaudeArgs(args []string, startup bool) error {
 	if valueFlags["--output-format"] != "stream-json" {
 		return fmt.Errorf("Claude --output-format = %q, want stream-json", valueFlags["--output-format"])
 	}
-	if strings.TrimSpace(valueFlags["--system-prompt"]) == "" {
+	resumed := os.Getenv(releaseResourceReadEnv) == "1" && valueFlags["--resume"] != ""
+	if resumed && (!validReleaseUUID(valueFlags["--resume"]) || !boolFlags["--fork-session"] || valueFlags["--system-prompt"] != "") {
+		return fmt.Errorf("resumed resource turn has invalid predecessor or prompt")
+	}
+	if !resumed && strings.TrimSpace(valueFlags["--system-prompt"]) == "" {
 		return fmt.Errorf("Claude invocation omitted --system-prompt")
 	}
 	if tools := splitAllowedTools(valueFlags["--tools"]); !equalStrings(tools, releaseE2EBuiltinTools()) {
@@ -1200,6 +1208,10 @@ func validateReleaseClaudeArgs(args []string, startup bool) error {
 	wantTools := releaseE2ELiveAllowedTools()
 	if startup {
 		wantTools = releaseE2EStartupAllowedTools()
+	}
+	if os.Getenv(releaseResourceReadEnv) == "1" {
+		wantTools = append(append([]string(nil), wantTools...), "mcp__runtime-tools__read_flow_data")
+		sort.Strings(wantTools)
 	}
 	if tools := splitAllowedTools(valueFlags["--allowedTools"]); !equalStrings(tools, wantTools) {
 		return fmt.Errorf("Claude --allowedTools = %q, want fixture tool surface", valueFlags["--allowedTools"])
@@ -1294,6 +1306,9 @@ func fakeDockerExec(root string, args []string) int {
 }
 
 func runFakeClaudeTurn(root string, invocation fakeClaudeInvocation) int {
+	if os.Getenv(releaseResourceReadEnv) == "1" {
+		return runResourceReadClaudeTurn(root, invocation)
+	}
 	client := &http.Client{Timeout: 15 * time.Second}
 	if _, err := fakeMCPCall(client, invocation.hostMCPURL, invocation.headers, "initialize", map[string]any{
 		"protocolVersion": "2025-03-26",
@@ -1642,6 +1657,10 @@ func recordFakeDocker(root string, record fakeDockerRecord) {
 }
 
 func recordUniqueFakeDocker(root string, record fakeDockerRecord) bool {
+	if os.Getenv(releaseResourceReadEnv) == "1" {
+		recordFakeDocker(root, record)
+		return true
+	}
 	unique := true
 	withFakeDockerLock(root, func() {
 		path := filepath.Join(root, "calls.jsonl")
