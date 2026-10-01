@@ -42,13 +42,13 @@ classification_tests:
   f2_bug: "An accepted spelling changes, disappears, or is independently reinterpreted after decode."
 
 inventory:
-  custom_unmarshal_total: 26
-  custom_unmarshal_reachable: 22
+  custom_unmarshal_total: 18
+  custom_unmarshal_reachable: 14
   custom_unmarshal_retired: 2
   custom_unmarshal_excluded: 2
   custom_unmarshal_breakdown:
     contracts: 15
-    flowmodel_policy: 8
+    flowmodel_policy: 0
     agentintent: 0
     channel_pack: 1
     deployment_config_excluded: 2
@@ -72,7 +72,7 @@ corpus:
 rows:
   - id: workflow.optional_declaration_file_liveness
     ruled: issue-2318
-    paths: "each admitted filesystem FlowNode: agents.yaml, entities.yaml, events.yaml, nodes.yaml, policy.yaml, tools.yaml, types.yaml; declaration files outside a FlowNode are resources and never semantic declarations"
+    paths: "each admitted filesystem FlowNode: agents.yaml, entities.yaml, events.yaml, nodes.yaml, policy.yaml, rules.yaml, tools.yaml, types.yaml; declaration files outside a FlowNode are resources and never semantic declarations"
     owners: [admitOptionalDeclarationFile, optionalDeclarationAdmission.RequireLive, admitEventCatalogDocument]
     information:
       fact: [file presence and admitted typed declarations]
@@ -570,27 +570,28 @@ rows:
   - id: policy.value
     ruled: R3
     paths: "policy.<key>"
-    owners: [PolicyDocument.UnmarshalYAML, PolicyValue.UnmarshalYAML]
+    owners: [projectPolicyDeclarationsValue, PolicyDocument, ResolvePolicyByID, PolicyValueForFlowWithOwner, ValidatePolicyReferences]
     information:
-      fact: [value]
-      choice: [override]
-      annotation: [description]
+      fact: [exact literal key and recursively preserved value]
+      derived_projection: [nearest whole-value scoped resolution, detached copies]
     spelling:
-      canonical_candidate: bare_value_when_no_metadata_else_wrapper
-      retired_duplicates: ["bare scalar/sequence/object versus {value: ...} when metadata absent"]
-      distinct_overrides: [wrapper_with_description_or_override]
-    f2_bug: "a literal object containing value, description, or override is reinterpreted as wrapper metadata"
+      canonical: literal_value
+      retired_duplicates: [metadata_wrapper, authored_override_flag, reserved_sections]
+      distinct_overrides: []
+    presence: {missing: undeclared, null: literal_null, empty_scalar: literal_text, empty_sequence: literal_list, empty_mapping: literal_object}
+    f2_bug_closed: "value, description, override, criteria, validation and modules are data, never wrapper or executable authority"
     corpus: {nonempty_policy_documents: 0}
 
   - id: policy.criteria_validation
     ruled: R3
-    paths: "policy.criteria.*, policy.validation.*"
-    owners: [PolicyCriteriaParam.UnmarshalYAML, PolicyValidationSet.UnmarshalYAML, PolicyValidationClass.UnmarshalYAML, PolicyValidationRule.UnmarshalYAML, PolicyValidationCheck.UnmarshalYAML, PolicyValidationEqualCheck.UnmarshalYAML]
+    paths: "rules.<set>.classes, rules, inputs; rule.id, class, text, params, check.equal, pin_candidate"
+    owners: [projectRulesDeclarationsValue, RuleSet, RulesDocument, ResolveRulesByID]
     information:
       fact: [set/class/rule IDs, classes, params, inputs, check operands]
       choice: [disposition, pin_candidate]
       annotation: [text]
-    spelling: {canonical: strict_mapping, distinct_overrides: [], retired_duplicates: []}
+    spelling: {canonical: flat_scoped_rule_set_mapping, distinct_overrides: [agent_or_complete_machine_variant], retired_duplicates: [policy.criteria, policy.validation, dual_variant_namespaces]}
+    presence: {required_text: nonempty_text_only, classes: nonempty_mapping, rules: nonempty_sequence, params: omitted_or_mapping, parameter: inert_finite_scalar, machine_inputs: nonempty_mapping, pin_candidate: explicit_boolean, check: equal_only_closed_mapping}
     corpus: {rows: 0}
 
   - id: policy.module
@@ -661,7 +662,7 @@ rows:
 presence_findings:
   preserve_until_admission:
     - all optional mapping/sequence/scalar fields currently decoded through Go zero values
-    - policy values where null and omitted are currently both PolicyValue zero-ish states
+    - policy values preserve declared null distinctly from an omitted key (#2303)
     - expression values where null and empty scalar become zero expression
     - retired event metadata is rejected on presence before boolean/null coercion (#2304)
     - stages, loops, rules, carries, schemas, and input/output maps where missing and explicit empty currently often collapse
@@ -685,9 +686,6 @@ decoder_coverage:
     platform.pack_interface: [PackInterfaceDefinition, PackInterfaceOperation, PackInterfaceEvent, PackInterfaceField]
   enums.go:
     handler.collection_compute: [ComputeOperation]
-  flowmodel/model.go:
-    policy.value: [PolicyDocument, PolicyValue]
-    policy.criteria_validation: [PolicyCriteriaParam, PolicyValidationSet, PolicyValidationClass, PolicyValidationRule, PolicyValidationCheck, PolicyValidationEqualCheck]
   internal/packs/channel.go:
     pack.channel: [ChannelMapping]
 
@@ -697,6 +695,8 @@ decoder_deleted:
     tool.schema_entry: [ToolSchemaEntry]
   flowmodel/model.go:
     policy.module: [PolicyModule, PolicyModuleRuntime, PolicyModuleLimits]
+    policy.value: [PolicyDocument, PolicyValue]
+    policy.criteria_validation: [PolicyCriteriaParam, PolicyValidationSet, PolicyValidationClass, PolicyValidationRule, PolicyValidationCheck, PolicyValidationEqualCheck]
   workflow_contract_types.go:
     agent.identity_defaults: [AgentRegistryEntry]
   workflow_contract_agent_writes.go:
@@ -719,7 +719,7 @@ decode_bypasses:
   # Direct roots count yaml.Unmarshal and yaml.NewDecoder calls repository-wide.
   # The canonical owner's root is classified but excluded from the off-owner ceiling.
   # CI compares each PR to the accepted base ledger, not just these initial ceilings.
-  node_site_ceiling: 104
+  node_site_ceiling: 95
   off_owner_direct_decode_ceiling: 28
   files:
     internal/cliapp/cli_output.go: {family: other_production_projection, node_sites: 0, direct_decode_roots: 1}
@@ -739,7 +739,7 @@ decode_bypasses:
     internal/runtime/contracts/workflow_contract_yaml.go: {family: mixed_wave_4_wave_5, node_sites: 4, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_yaml_schema.go: {family: mixed_wave_4_wave_5, node_sites: 10, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_yaml_wave1.go: {family: mixed_existing_typed_admission, node_sites: 11, direct_decode_roots: 0}
-    internal/runtime/flowmodel/model.go: {family: wave_5_agent_tool_policy, node_sites: 9, direct_decode_roots: 0}
+    internal/runtime/flowmodel/model.go: {family: wave_5_agent_tool_policy, node_sites: 0, direct_decode_roots: 0}
     internal/runtime/scenarioderivation/declaration.go: {family: excluded_scenario_tooling, node_sites: 0, direct_decode_roots: 1}
     internal/runtime/testfixtures/canonicalrouting/fixture.go: {family: excluded_test_fixture, node_sites: 13, direct_decode_roots: 4}
     internal/testcatalog/inventory.go: {family: excluded_test_tooling, node_sites: 6, direct_decode_roots: 5}

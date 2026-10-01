@@ -26,7 +26,7 @@ func (e *Executor) validateEmitCriteriaCitations(actor models.AgentConfig, event
 	}
 	flowID, refs := criteriaRefsForActor(e.workflowSource, actor)
 	declared := criteriaStringSet(refs)
-	policy := e.workflowSource.ResolvedPolicyForFlow(flowID)
+	ruleSets := e.workflowSource.ResolvedRulesForFlow(flowID)
 	for _, fieldName := range sortedCriteriaCitationFields(schema.CitationFields) {
 		citation := schema.CitationFields[fieldName]
 		value, exists := payload[fieldName]
@@ -40,7 +40,7 @@ func (e *Executor) validateEmitCriteriaCitations(actor models.AgentConfig, event
 		if _, ok := declared[setName]; !ok {
 			return criteriaCitationFailure(eventType, fieldName, "criteria_set_not_allowed", map[string]any{"actor": actorLabel(actor), "criteria_set": setName})
 		}
-		set, ok := policy.Criteria[setName]
+		set, ok := ruleSets.Criteria(setName)
 		if !ok {
 			return criteriaCitationFailure(eventType, fieldName, "criteria_set_unresolved", map[string]any{"criteria_set": setName, "flow": flowID})
 		}

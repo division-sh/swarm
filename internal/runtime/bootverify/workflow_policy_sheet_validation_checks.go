@@ -91,10 +91,10 @@ func validatePolicySheetValidationValueRow(source semanticview.Source, ref polic
 	} else if !policySheetLookupPathIsSimple(storePath) {
 		findings = append(findings, policySheetValidationFinding(ref, fmt.Sprintf("validate.into %q must be a simple computed.validation.* path", storeAs)))
 	}
-	policy := source.ResolvedPolicyForExecutableNode(ref.Node)
-	set, ok := policy.Validation[strings.TrimSpace(spec.Set)]
+	rules := source.ResolvedRulesForExecutableNode(ref.Node)
+	set, ok := rules.Validation(strings.TrimSpace(spec.Set))
 	if !ok {
-		findings = append(findings, policySheetValidationFinding(ref, fmt.Sprintf("validate.set %q does not resolve in policy.validation", strings.TrimSpace(spec.Set))))
+		findings = append(findings, policySheetValidationFinding(ref, fmt.Sprintf("validate.set %q does not resolve in rules.yaml", strings.TrimSpace(spec.Set))))
 	} else {
 		findings = append(findings, validatePolicySheetValidationDispositionConsumer(ref, handler, storeAs, set)...)
 	}
@@ -127,13 +127,13 @@ func validatePolicySheetValidationDispositionConsumer(ref policySheetValidationR
 		}
 		eventType := strings.TrimSpace(rule.Emit.EventType())
 		if _, ok := dispositions[eventType]; !ok {
-			findings = append(findings, policySheetValidationFinding(ref, fmt.Sprintf("invalid-result consumer row %q emits %q, which is not declared as a policy.validation class disposition", strings.TrimSpace(rule.ID), eventType)))
+			findings = append(findings, policySheetValidationFinding(ref, fmt.Sprintf("invalid-result consumer row %q emits %q, which is not declared as a rules.yaml class disposition", strings.TrimSpace(rule.ID), eventType)))
 			continue
 		}
 		matched = true
 	}
 	if !matched {
-		findings = append(findings, policySheetValidationFinding(ref, fmt.Sprintf("validate result %q has no invalid-result selection row emitting a declared policy.validation disposition", target)))
+		findings = append(findings, policySheetValidationFinding(ref, fmt.Sprintf("validate result %q has no invalid-result selection row emitting a declared rules.yaml disposition", target)))
 	}
 	return findings
 }

@@ -589,52 +589,40 @@ func (b *WorkflowContractBundle) ResolvedPolicyForExecutableNode(node runtimeide
 	if b == nil || !node.Valid() {
 		return PolicyDocument{Values: map[string]PolicyValue{}}
 	}
-	doc := clonePolicyDocument(b.Policy)
 	scope, err := b.ExecutableNodeSemanticScope(node)
 	if err != nil {
 		return PolicyDocument{Values: map[string]PolicyValue{}}
 	}
 	if view, ok := scope.OwningFlow(); ok {
-		chain := make([]*FlowContractView, 0)
-		for current := view; current != nil; current = current.Parent {
-			if strings.TrimSpace(current.Paths.FlowPath) != "" {
-				chain = append(chain, current)
-			}
-		}
-		for index := len(chain) - 1; index >= 0; index-- {
-			mergeContractPolicyDocument(&doc, chain[index].Policy)
-		}
+		return b.ResolvedPolicyForFlow(view.Paths.FlowPath)
 	}
-	return doc
+	return PolicyDocument{Values: map[string]PolicyValue{}}
 }
 
-func mergeContractPolicyDocument(target *PolicyDocument, overlay PolicyDocument) {
-	if target == nil {
-		return
+func (b *WorkflowContractBundle) ResolvedRulesForFlow(flowID string) RulesDocument {
+	if b == nil {
+		return RulesDocument{}
 	}
-	if target.Values == nil {
-		target.Values = map[string]PolicyValue{}
+	return flowmodel.ResolveRulesByID(b.Rules, b.FlowTree, flowID,
+		func(view *FlowContractView) string { return strings.TrimSpace(view.Paths.FlowPath) },
+		func(view *FlowContractView) RulesDocument { return view.Rules }, flowViewChildren)
+}
+func (b *WorkflowContractBundle) ResolvedRulesForExecutableNode(node runtimeidentity.ExecutableNode) RulesDocument {
+	if b == nil || !node.Valid() {
+		return RulesDocument{}
 	}
-	if target.Criteria == nil {
-		target.Criteria = map[string]PolicyCriteriaSet{}
+	scope, err := b.ExecutableNodeSemanticScope(node)
+	if err != nil {
+		return RulesDocument{}
 	}
-	if target.Validation == nil {
-		target.Validation = map[string]PolicyValidationSet{}
+	if view, ok := scope.OwningFlow(); ok {
+		return b.ResolvedRulesForFlow(view.Paths.FlowPath)
 	}
-	cloned := clonePolicyDocument(overlay)
-	for key, value := range cloned.Values {
-		target.Values[key] = value
-	}
-	for key, value := range cloned.Criteria {
-		target.Criteria[key] = value
-	}
-	for key, value := range cloned.Validation {
-		target.Validation[key] = value
-	}
+	return RulesDocument{}
 }
 func (b *WorkflowContractBundle) PolicyValueForFlow(flowID, key string) (PolicyValue, bool) {
 	doc := b.ResolvedPolicyForFlow(flowID)
-	value, ok := doc.Values[strings.TrimSpace(key)]
+	value, ok := doc.Values[key]
 	return value, ok
 }
 func (b *WorkflowContractBundle) FlowPath(flowID string) string {

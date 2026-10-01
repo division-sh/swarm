@@ -1244,16 +1244,13 @@ func TestRun_MapsPolicyConflictToNamedWarning(t *testing.T) {
 	}
 }
 
-func TestRun_MapsConditionPolicyToNamedWarning(t *testing.T) {
+func TestRun_MapsConditionPolicyToHardError(t *testing.T) {
 	source := loadTier8Fixture(t, "test-boot-condition-policy")
 
 	report := Run(context.Background(), source, Options{})
 
-	if report.HasErrors() {
-		t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
-	}
-	if !reportContains(report.Warnings(), "condition_policy_alignment", "policy.nonexistent_key") {
-		t.Fatalf("expected condition_policy_alignment warning, got %#v", report.Warnings())
+	if !reportContains(report.Errors(), "condition_policy_alignment", `policy["nonexistent_key"]`) {
+		t.Fatalf("expected undeclared policy read hard error, got %#v", report.Errors())
 	}
 }
 

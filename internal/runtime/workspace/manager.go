@@ -13,7 +13,6 @@ import (
 	"time"
 
 	runtimecontaineridentity "github.com/division-sh/swarm/internal/runtime/containeridentity"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	runtimedataaccess "github.com/division-sh/swarm/internal/runtime/dataaccess"
@@ -1186,8 +1185,6 @@ func isSupportedWorkspaceScope(scope string) bool {
 
 func normalizePolicyMap(value any) (map[string]any, bool) {
 	switch typed := value.(type) {
-	case runtimecontracts.PolicyValue:
-		return normalizePolicyMap(typed.Value)
 	case map[string]any:
 		return typed, true
 	case map[any]any:

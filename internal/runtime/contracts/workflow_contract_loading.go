@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
@@ -150,6 +151,9 @@ func LoadWorkflowContractBundleFromArtifact(repoRoot string, artifact *sourceart
 		return nil, err
 	}
 	bundle.Policy = rootWorkflowPolicy(bundle)
+	if bundle.FlowTree.Root != nil {
+		bundle.Rules = flowmodel.CloneRulesDocument(bundle.FlowTree.Root.Rules)
+	}
 	if err := loadYAMLFile(platformSpecFile, &bundle.Platform); err != nil {
 		return nil, err
 	}
@@ -185,7 +189,9 @@ func LoadWorkflowContractBundleFromArtifact(repoRoot string, artifact *sourceart
 	if err := validateWorkflowContractBundleLoadConstraints(bundle); err != nil {
 		return nil, err
 	}
-	populateEffectiveProvenance(bundle)
+	if err := populateEffectiveProvenance(bundle); err != nil {
+		return nil, err
+	}
 	if _, err := BuildDurableDataCatalog(bundle); err != nil {
 		return nil, fmt.Errorf("compile durable data catalog: %w", err)
 	}
