@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -151,13 +152,40 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					if oldRun != 0 || activations != 0 || (artifacts == 0) != clear {
 						t.Fatalf("reset authority/source mismatch: run=%d activation=%d artifact=%d", oldRun, activations, artifacts)
 					}
+					successorPlan := ""
+					if !clear {
+						var successorRun string
+						if err := db.QueryRow(`SELECT current_run_id FROM standing_services WHERE current_run_id IS NOT NULL`).Scan(&successorRun); err != nil {
+							t.Fatal(err)
+						}
+						freshCard := waitChannelAnchorCard(t, db, successorRun, decisioncard.AnchorKindStageGate)
+						if freshCard == standingCard {
+							t.Fatal("retained reset reused predecessor standing card")
+						}
+						deadline := time.Now().Add(15 * time.Second)
+						for {
+							var state, render, receipt string
+							err := db.QueryRow(`SELECT delivery_id,state,COALESCE(CAST(current_render_id AS TEXT),''),COALESCE(CAST(current_receipt_operation_id AS TEXT),'') FROM channel_delivery_plans WHERE source_kind='card' AND source_id=$1 AND resend_generation=0`, freshCard).
+								Scan(&successorPlan, &state, &render, &receipt)
+							if err == nil {
+								if state != "planned" || render != "" || receipt != "" {
+									t.Fatal("successor card dispatched without a current activation")
+								}
+								break
+							}
+							if err != sql.ErrNoRows || time.Now().After(deadline) {
+								t.Fatalf("successor standing card plan: %v", err)
+							}
+							time.Sleep(20 * time.Millisecond)
+						}
+					}
 					afterNative := readChannelNativeHistory(t, db)
 					wantNative := beforeNative
 					wantNative[3], wantNative[7] = "retired", "retired"
 					if afterNative != wantNative {
 						t.Fatalf("reset altered native identity: before=%v after=%v", beforeNative, afterNative)
 					}
-					requireChannelPreservedHistory(t, db, beforeHistory)
+					requireChannelPreservedHistory(t, db, beforeHistory, successorPlan)
 					if got := len(h.provider.CommandWrites()); got != writes {
 						t.Fatalf("reset wrote native settings: count %d -> %d", writes, got)
 					}
@@ -323,9 +351,13 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 	}
 }
 
-func requireChannelPreservedHistory(t *testing.T, db *sql.DB, beforeHistory string) {
+func requireChannelPreservedHistory(t *testing.T, db *sql.DB, beforeHistory, successorPlan string) {
 	t.Helper()
 	afterHistory := readChannelPreservedHistory(t, db)
+	afterHistory, err := channelHistoryWithoutSuccessorPlan(afterHistory, successorPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if afterHistory == beforeHistory {
 		return
 	}
@@ -342,6 +374,87 @@ func requireChannelPreservedHistory(t *testing.T, db *sql.DB, beforeHistory stri
 		}
 	}
 	t.FailNow()
+}
+
+// Retained reset boots the identical source and its new standing gate. Only
+// that independently observed plan is new work, not pre-reset history.
+func channelHistoryWithoutSuccessorPlan(history, successorPlan string) (string, error) {
+	if successorPlan == "" {
+		return history, nil
+	}
+	var tables []json.RawMessage
+	if err := json.Unmarshal([]byte(history), &tables); err != nil {
+		return "", err
+	}
+	var plans []json.RawMessage
+	if err := json.Unmarshal(tables[6], &plans); err != nil {
+		return "", err
+	}
+	removed := false
+	for index, plan := range plans {
+		var fields []json.RawMessage
+		if err := json.Unmarshal(plan, &fields); err != nil {
+			return "", err
+		}
+		var id string
+		if err := json.Unmarshal(fields[0], &id); err != nil {
+			return "", err
+		}
+		if id == successorPlan {
+			plans = append(plans[:index], plans[index+1:]...)
+			removed = true
+			break
+		}
+	}
+	if !removed {
+		return "", errors.New("exact successor plan is absent from history")
+	}
+	body, err := json.Marshal(plans)
+	if err != nil {
+		return "", err
+	}
+	tables[6] = body
+	body, err = json.Marshal(tables)
+	return string(body), err
+}
+
+func TestChannelSourceLifecycleHistoryPreservation(t *testing.T) {
+	before := make([]any, 15)
+	before[6] = [][]string{{"old-plan", "card", "old-card", "frozen"}}
+	want, err := json.Marshal(before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mutation := range []string{"none", "changed", "deleted", "unrelated", "duplicate", "missing_successor", "other_table"} {
+		t.Run(mutation, func(t *testing.T) {
+			after := append([]any(nil), before...)
+			plans := [][]string{{"old-plan", "card", "old-card", "frozen"}, {"successor", "card", "fresh-card", "new"}}
+			switch mutation {
+			case "changed":
+				plans[0][3] = "altered"
+			case "deleted":
+				plans = plans[1:]
+			case "unrelated":
+				plans = append(plans, []string{"other", "card", "other-card"})
+			case "duplicate":
+				plans = append(plans, plans[1])
+			case "missing_successor":
+				plans = plans[:1]
+			case "other_table":
+				after[8] = [][]string{{"altered-receipt"}}
+			}
+			after[6] = plans
+			body, err := json.Marshal(after)
+			if err != nil {
+				t.Fatal(err)
+			}
+			retained, err := channelHistoryWithoutSuccessorPlan(string(body), "successor")
+			matches := err == nil && retained == string(want)
+			if matches != (mutation == "none") {
+				t.Fatalf("history exception accepted %s=%t: %v", mutation, matches, err)
+			}
+		})
+	}
 }
 
 func readChannelNativeHistory(t *testing.T, db *sql.DB) [8]string {
@@ -367,7 +480,7 @@ func readChannelPreservedHistory(t *testing.T, db *sql.DB) string {
 		`SELECT principal_id,interface_key,binding_revision,delivery_epoch,external_account_reference,conversation_reference,conversation_scope,state,first_operation_id FROM channel_delivery_defaults`,
 		`SELECT setting_id,provider,resource_slot_id,conversation_reference,scope_kind,member_reference,language_code,pack_id,pack_version,pack_manifest_hash,entry_contract_hash,entry_command,desired_commands,principal_id,generation,install_operation_id,readback_hash,created_at FROM channel_native_settings ORDER BY setting_id`,
 		`SELECT setting_id,activation_id,activation_revision,interface_key,binding_revision,context_publication_generation FROM channel_native_setting_consumers ORDER BY activation_id`,
-		`SELECT delivery_id,source_kind,source_id,request_activation_id,summary_count,principal_id,interface_key,binding_revision,delivery_epoch,external_account_reference,conversation_reference,conversation_scope,action_capacity,text_capacity,label_capacity,resend_generation,resend_of_delivery_id,resend_action_publication_id,created_at FROM channel_delivery_plans ORDER BY delivery_id`,
+		`SELECT CAST(delivery_id AS TEXT),source_kind,CAST(source_id AS TEXT),request_activation_id,summary_count,principal_id,interface_key,binding_revision,delivery_epoch,external_account_reference,conversation_reference,conversation_scope,action_capacity,text_capacity,label_capacity,resend_generation,resend_of_delivery_id,resend_action_publication_id,created_at FROM channel_delivery_plans ORDER BY delivery_id`,
 		`SELECT * FROM channel_delivery_renders ORDER BY render_id`,
 		`SELECT * FROM channel_delivery_receipts ORDER BY effect_operation_id`,
 		`SELECT * FROM channel_delivery_actions ORDER BY action_token`,
