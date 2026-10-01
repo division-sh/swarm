@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/division-sh/swarm/internal/packs"
 	"reflect"
@@ -14,6 +15,55 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/google/uuid"
 )
+
+type channelDraftChoiceDispositionStore struct {
+	runtimechanneldelivery.Store
+	previewError error
+	disposition  runtimechanneldelivery.ActionDisposition
+	teaching     bool
+}
+
+func (s *channelDraftChoiceDispositionStore) PreviewChosenChannelInputDraftText(context.Context, operatorchannel.InboundAction, time.Time) (runtimechanneldelivery.InputDraftCandidate, runtimechanneldelivery.PendingText, decisioncard.InputFieldProgress, string, error) {
+	return runtimechanneldelivery.InputDraftCandidate{}, runtimechanneldelivery.PendingText{}, decisioncard.InputFieldProgress{}, "", s.previewError
+}
+
+func (s *channelDraftChoiceDispositionStore) SettleUnappliedChannelAction(_ context.Context, _ operatorchannel.InboundAction, disposition runtimechanneldelivery.ActionDisposition) error {
+	s.disposition = disposition
+	return nil
+}
+
+func (s *channelDraftChoiceDispositionStore) PlanChannelActionResponse(context.Context, operatorchannel.InboundAction, runtimechanneldelivery.ResolvedAction, string) (string, error) {
+	s.teaching = true
+	return "teaching", nil
+}
+
+func TestChannelDraftChoiceDispositionPreservesOwnerErrors(t *testing.T) {
+	storageFailure := errors.New("selected-store unavailable")
+	for _, test := range []struct {
+		name            string
+		err             error
+		stale, teaching bool
+	}{
+		{"completed_or_expired", fmt.Errorf("chosen draft unavailable: %w", decisioncard.ErrDraftNotAuthority), true, false},
+		{"invalid_answer", decisioncard.ErrInvalidInput, false, true},
+		{"storage_failure", storageFailure, false, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := &channelDraftChoiceDispositionStore{previewError: test.err}
+			d := &serveChannelDeliveryDispatcher{store: store}
+			err := d.processDraftChoice(context.Background(), runtimechanneldelivery.PendingAction{}, runtimechanneldelivery.ResolvedAction{})
+			if test.stale && (err != nil || store.disposition != runtimechanneldelivery.ActionStale) {
+				t.Fatalf("obsolete choice not settled stale: %v/%s", err, store.disposition)
+			}
+			if store.teaching != test.teaching || !test.stale && store.disposition != "" {
+				t.Fatal("choice classification changed its owner disposition")
+			}
+			if test.name == "storage_failure" && !errors.Is(err, storageFailure) {
+				t.Fatal("storage failure was swallowed as staleness")
+			}
+		})
+	}
+}
 
 type channelDeliveryWorkerCards struct {
 	decisioncard.Store

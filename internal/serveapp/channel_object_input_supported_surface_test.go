@@ -16,11 +16,11 @@ import (
 
 func TestChannelLearnedObjectInputPublicJourney(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
-		for _, schedule := range []string{"chooser_current", "chooser_restart", "lost_prompt_edit"} {
+		for _, schedule := range []string{"chooser_current", "chooser_restart", "chooser_edit_ack_loss", "lost_prompt_edit"} {
 			t.Run(string(backend)+"/"+schedule, func(t *testing.T) {
 				h, db, provider, command, hash := startObjectChannelInputJourney(t, backend)
 				if schedule != "lost_prompt_edit" {
-					proveObjectChannelChooserRestart(t, h, db, provider, hash, schedule == "chooser_restart")
+					proveObjectChannelChooserRestart(t, h, db, provider, hash, schedule)
 				} else {
 					proveObjectChannelLostPrompt(t, h, db, provider, hash, command)
 				}
@@ -141,7 +141,7 @@ func beginObjectInputCard(t *testing.T, h *channelOnboardingE2EHarness, db *sql.
 	return card, receipt, waitObjectMessageControl(t, p, receipt, "reject")
 }
 
-func proveObjectChannelChooserRestart(t *testing.T, h *channelOnboardingE2EHarness, db *sql.DB, p *objectChannelProvider, hash string, restart bool) {
+func proveObjectChannelChooserRestart(t *testing.T, h *channelOnboardingE2EHarness, db *sql.DB, p *objectChannelProvider, hash, schedule string) {
 	t.Helper()
 	cards := make([]string, 3)
 	for index := range cards {
@@ -152,10 +152,20 @@ func proveObjectChannelChooserRestart(t *testing.T, h *channelOnboardingE2EHarne
 	}
 	postObjectChannelFact(t, p, "ambiguous-answer", map[string]any{"text": "object-private-ambiguous-answer"})
 	waitObjectChannelDisposition(t, db, "operator_channel_text_intents", "ambiguous-answer", "chooser")
-	receipt := waitObjectDeliveryContaining(t, p, "Choose the card for your reply:")
-	if restart {
+	deliveryID, receipt := waitObjectRequestedResponse(t, db, "ambiguous-answer")
+	if schedule == "chooser_restart" {
 		h.stop(t)
 		h.start(t)
+	}
+	if schedule == "chooser_edit_ack_loss" {
+		proveObjectResponseEditLoss(t, h, db, p, deliveryID, receipt)
+		postObjectChannelFact(t, p, "fresh-chooser-answer", map[string]any{"text": "object-private-new-answer"})
+		waitObjectChannelDisposition(t, db, "operator_channel_text_intents", "fresh-chooser-answer", "chooser")
+		_, fresh := waitObjectRequestedResponse(t, db, "fresh-chooser-answer")
+		if fresh == receipt {
+			t.Fatal("new explicit answer reused uncertain chooser")
+		}
+		receipt = fresh
 	}
 	seen := map[string]bool{}
 	var selected string
