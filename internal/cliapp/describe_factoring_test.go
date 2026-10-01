@@ -53,8 +53,10 @@ stage graph:
       - open after 1s emit expired advances_to done (timer deadline)
       - bare after 2s
     joins:
-      - all stage open members tasks by id <- event.id output joined timeout 3s window windows by batch <- event.batch fan_in_pin results (receiver on result)
-      - plain stage bare members tasks by id output joined timeout 4s (receiver on result)
+      - all stage open members tasks by id output joined deadline 3s from entry until stopped (receiver on result)
+      - count stage open members count 2 by id output joined deadline 4s from entry (receiver on result)
+      - barrier members from_fan_out deadline 5s from start (scatter on requested)
+      - plain stage bare members tasks by id output joined (receiver on result)
     fan_out:
       - open ->xN item items_from event.items as item identity id max_items 5 (handler receiver on ready)
       - <none> ->xN item items_from event.items
@@ -110,7 +112,37 @@ func TestDescribeFactoringRetiredOutputPinFieldsRemainAbsent(t *testing.T) {
 	}
 }
 
+func TestDescribeFactoringRetiredJoinFieldsRemainAbsent(t *testing.T) {
+	data, err := json.Marshal(describeFactoringView())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output map[string]any
+	if err := json.Unmarshal(data, &output); err != nil {
+		t.Fatal(err)
+	}
+	joins := output["stage_graphs"].([]any)[0].(map[string]any)["joins"].([]any)
+	for _, entry := range joins {
+		join := entry.(map[string]any)
+		for _, retired := range []string{"members_by_source", "timeout_after", "window_from", "window_by", "window_by_source", "fan_in_pin"} {
+			if _, exists := join[retired]; exists {
+				t.Fatalf("retired join field %s reappeared: %s", retired, data)
+			}
+		}
+	}
+	if explicit := joins[0].(map[string]any); explicit["members_from"] != "tasks" || explicit["deadline_after"] != "3s" || explicit["deadline_from"] != "entry" || explicit["until"] != "stopped" {
+		t.Fatalf("explicit membership projection changed: %s", data)
+	}
+	if count := joins[1].(map[string]any); count["member_count"] != float64(2) || count["deadline_from"] != "entry" {
+		t.Fatalf("count membership projection changed: %s", data)
+	}
+	if barrier := joins[2].(map[string]any); barrier["members_from_fan_out"] != true || barrier["deadline_from"] != "start" {
+		t.Fatalf("barrier projection changed: %s", data)
+	}
+}
+
 func describeFactoringView() authoringview.View {
+	count := 2
 	return authoringview.View{
 		SourceHash: "source-hash", SourceAuthority: "projection_only_existing_contract_owners",
 		Root: authoringview.RootView{Events: []authoringview.EventView{{Name: "root.empty"}, {Name: "root.ready", Fields: []string{"id", "text"}}}, PrimaryEntity: &authoringview.PrimaryEntityView{Type: "Root"}},
@@ -124,10 +156,15 @@ func describeFactoringView() authoringview.View {
 		RoutingTopology: routingtopology.Topology{SchemaVersion: "routing-topology/v1", SourceAuthority: "projection_only_existing_contract_owners"},
 		StageGraphs: []authoringview.StageGraphView{
 			{FlowID: " review ", FlowPath: " flows/review ",
-				Nodes:   []authoringview.StageGraphNodeView{{ID: "open", Initial: true, Description: " Begin "}, {ID: "done", Terminal: true}, {ID: "both", Initial: true, Terminal: true}, {ID: "bare"}},
-				Edges:   []authoringview.StageGraphEdgeView{{From: []string{"open", "review"}, To: "done", Source: " handler ", NodeID: " receiver ", EventType: " ready ", After: " 1s ", TimerID: " deadline ", LoopID: "retry", LoopOperation: "advance", MaxAttempts: "3", LoopEscape: true, DecisionID: "approve", Verdict: "yes"}, {To: "open"}},
-				Timers:  []authoringview.StageGraphTimerView{{Stage: " open ", After: " 1s ", Emit: " expired ", AdvancesTo: " done ", TimerID: " deadline "}, {Stage: "bare", After: "2s"}},
-				Joins:   []authoringview.StageGraphJoinView{{ID: "all", Stage: "open", MembersFrom: "tasks", MembersBy: " id ", MembersBySource: " event.id ", Output: "joined", TimeoutAfter: "3s", WindowFrom: "windows", WindowBy: "batch", WindowBySource: " event.batch ", FanInPin: "results", NodeID: "receiver", HandlerEvent: "result"}, {ID: "plain", Stage: "bare", MembersFrom: "tasks", MembersBy: "id", Output: "joined", TimeoutAfter: "4s", NodeID: "receiver", HandlerEvent: "result"}},
+				Nodes:  []authoringview.StageGraphNodeView{{ID: "open", Initial: true, Description: " Begin "}, {ID: "done", Terminal: true}, {ID: "both", Initial: true, Terminal: true}, {ID: "bare"}},
+				Edges:  []authoringview.StageGraphEdgeView{{From: []string{"open", "review"}, To: "done", Source: " handler ", NodeID: " receiver ", EventType: " ready ", After: " 1s ", TimerID: " deadline ", LoopID: "retry", LoopOperation: "advance", MaxAttempts: "3", LoopEscape: true, DecisionID: "approve", Verdict: "yes"}, {To: "open"}},
+				Timers: []authoringview.StageGraphTimerView{{Stage: " open ", After: " 1s ", Emit: " expired ", AdvancesTo: " done ", TimerID: " deadline "}, {Stage: "bare", After: "2s"}},
+				Joins: []authoringview.StageGraphJoinView{
+					{ID: "all", Stage: "open", MembersFrom: "tasks", MembersBy: " id ", Output: "joined", DeadlineAfter: "3s", DeadlineFrom: "entry", Until: "stopped", NodeID: "receiver", HandlerEvent: "result"},
+					{ID: "count", Stage: "open", MemberCount: &count, MembersBy: " id ", Output: "joined", DeadlineAfter: "4s", DeadlineFrom: "entry", NodeID: "receiver", HandlerEvent: "result"},
+					{ID: "barrier", MembersFromFanOut: true, DeadlineAfter: "5s", DeadlineFrom: "start", NodeID: "scatter", HandlerEvent: "requested"},
+					{ID: "plain", Stage: "bare", MembersFrom: "tasks", MembersBy: "id", Output: "joined", NodeID: "receiver", HandlerEvent: "result"},
+				},
 				FanOuts: []authoringview.StageGraphFanOutView{{From: []string{"open"}, Emit: " item ", ItemsFrom: " event.items ", ItemAlias: " item ", Identity: " id ", MaxItems: 5, Source: " handler ", NodeID: " receiver ", EventType: " ready "}, {Emit: "item", ItemsFrom: "event.items"}},
 				Gates:   []authoringview.StageGraphGateView{{Stage: "review", Decision: "approve", Authority: "operator", ReminderInterval: "1h", InputDraftTTL: "2h", Outcomes: []authoringview.StageGraphGateOutcomeView{{Verdict: "yes", AdvancesTo: "done", Emit: "approved"}, {Verdict: "no", AdvancesTo: "open"}}}}},
 			{},
