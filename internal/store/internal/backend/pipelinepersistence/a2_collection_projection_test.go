@@ -31,6 +31,10 @@ func a2CollectionDatabase(t *testing.T, backend string) *sql.DB {
 	if backend == "postgres" {
 		idType, jsonType, bytesType, timeType = "UUID", "JSONB", "BYTEA", "TIMESTAMPTZ"
 	}
+	runsDDL := "CREATE TABLE runs (run_id TEXT PRIMARY KEY, bundle_hash TEXT NOT NULL, forked_from_run_id TEXT)"
+	if backend == "postgres" {
+		runsDDL = "CREATE TABLE runs (run_id UUID PRIMARY KEY, bundle_hash TEXT NOT NULL, forked_from_run_id UUID)"
+	}
 	columns := []string{}
 	for _, name := range strings.Fields("event_class event_name task_id flow_instance scope payload_schema_bundle_hash payload_schema_flow_id payload_schema_event_key payload_schema_digest payload_schema_class execution_mode produced_by produced_by_type routing_source_kind routing_source_authority") {
 		columns = append(columns, name+" TEXT")
@@ -44,7 +48,7 @@ func a2CollectionDatabase(t *testing.T, backend string) *sql.DB {
 	columns = append(columns, "payload_bytes "+bytesType, "chain_depth INTEGER", "created_at "+timeType, "UNIQUE(event_id)")
 	for _, ddl := range []string{
 		"CREATE TABLE events (" + strings.Join(columns, ",") + ")",
-		"CREATE TABLE runs (run_id " + idType + " PRIMARY KEY, forked_from_run_id " + idType + ")",
+		runsDDL,
 		"CREATE TABLE run_fork_selected_contract_executions (fork_event_id " + idType + ", source_run_id " + idType + ", source_event_id " + idType + ", selection_authority TEXT)",
 		"CREATE TABLE run_fork_delivery_event_replays (fork_event_id " + idType + ", source_run_id " + idType + ", source_event_id " + idType + ", selection_authority TEXT)",
 		"CREATE TABLE entity_mutations (mutation_id TEXT,run_id TEXT,entity_id TEXT,domain TEXT,path TEXT,old_value " + jsonType + ",new_value " + jsonType + ",caused_by_event TEXT,writer_type TEXT,writer_id TEXT,handler_step TEXT,created_at TIMESTAMP)",
@@ -55,6 +59,20 @@ func a2CollectionDatabase(t *testing.T, backend string) *sql.DB {
 		}
 	}
 	return db
+}
+
+func a2CollectionSeedRun(t *testing.T, db *sql.DB, request fanoutobligation.IntentRequest) {
+	t.Helper()
+	if _, err := db.Exec(`INSERT INTO runs (run_id,bundle_hash) VALUES ($1,$2)`, request.Key.RunID, request.PlanRef.BundleHash); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func a2CollectionSeedLineage(t *testing.T, db *sql.DB, source fanoutobligation.IntentRequest, child, foreign string) {
+	t.Helper()
+	if _, err := db.Exec(`INSERT INTO runs (run_id,bundle_hash,forked_from_run_id) VALUES ($1,$4,NULL),($2,$4,$1),($3,$4,NULL)`, source.Key.RunID, child, foreign, source.PlanRef.BundleHash); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func a2CollectionRequest(t *testing.T, kind fanoutobligation.SourceKind, ref rc.CatalogTypeReference, cardinality int) fanoutobligation.IntentRequest {
@@ -240,9 +258,7 @@ func TestA2DeferredCollectionRangeOnBothStores(t *testing.T) {
 			}
 			a2CollectionTrigger(t, db, r, []byte(`{"items":{}}`))
 			intent := a2PersistCollection(t, db, backend, r, raw)
-			if _, err := db.Exec(`INSERT INTO runs (run_id) VALUES ($1)`, r.Key.RunID); err != nil {
-				t.Fatal(err)
-			}
+			a2CollectionSeedRun(t, db, r)
 			live := map[string]any{}
 			for i := 0; i < 40; i++ {
 				live[fmt.Sprintf("live%02d", i)] = i + 100
@@ -414,9 +430,7 @@ func TestA2RetainedMapSourceLineageOnBothStores(t *testing.T) {
 			a2CollectionTrigger(t, db, r, []byte(`{"items":{}}`))
 			intent := a2PersistCollection(t, db, backend, r, []byte(`{"items":{"z":1," a ":2,"a":3}}`))
 			child, foreign := uuid.NewString(), uuid.NewString()
-			if _, err := db.Exec(`INSERT INTO runs (run_id,forked_from_run_id) VALUES ($1,NULL),($2,$1),($3,NULL)`, r.Key.RunID, child, foreign); err != nil {
-				t.Fatal(err)
-			}
+			a2CollectionSeedLineage(t, db, r, child, foreign)
 			intent.Request.Key.RunID = child
 			intent.Request.Capsule.EntityID = child
 			intent.Cursor = 1

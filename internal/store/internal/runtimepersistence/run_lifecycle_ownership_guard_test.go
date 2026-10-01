@@ -186,6 +186,9 @@ func TestSemanticRunFixturesUseLifecycleOwner(t *testing.T) {
 }
 
 func classifyBackendMinimalRunLiterals(path string, file *ast.File) (map[token.Pos]bool, error) {
+	if path == "internal/store/internal/backend/pipelinepersistence/a2_collection_projection_test.go" {
+		return classifyA2CollectionMinimalRunLiterals(file)
+	}
 	type fixtureShape struct {
 		schema string
 		writes []string
@@ -240,6 +243,86 @@ func classifyBackendMinimalRunLiterals(path string, file *ast.File) (map[token.P
 		return nil, fmt.Errorf("minimal backend runs schema is missing")
 	}
 	return approved, nil
+}
+
+func classifyA2CollectionMinimalRunLiterals(file *ast.File) (map[token.Pos]bool, error) {
+	schemas := map[string]int{
+		"CREATE TABLE runs (run_id TEXT PRIMARY KEY, bundle_hash TEXT NOT NULL, forked_from_run_id TEXT)": 0,
+		"CREATE TABLE runs (run_id UUID PRIMARY KEY, bundle_hash TEXT NOT NULL, forked_from_run_id UUID)": 0,
+	}
+	approved := map[token.Pos]bool{}
+	ast.Inspect(file, func(node ast.Node) bool {
+		literal, ok := node.(*ast.BasicLit)
+		if !ok || literal.Kind != token.STRING {
+			return true
+		}
+		value, err := strconv.Unquote(literal.Value)
+		if err != nil {
+			return true
+		}
+		value = compactSQLForLifecycleGuard(value)
+		if _, known := schemas[value]; known {
+			schemas[value]++
+		}
+		switch value {
+		case "INSERT INTO runs (run_id,bundle_hash) VALUES ($1,$2)",
+			"INSERT INTO runs (run_id,bundle_hash,forked_from_run_id) VALUES ($1,$4,NULL),($2,$4,$1),($3,$4,NULL)":
+			approved[literal.Pos()] = true
+		}
+		return true
+	})
+	for schema, count := range schemas {
+		if count != 1 {
+			return nil, fmt.Errorf("collection fixture requires exactly one %q, got %d", schema, count)
+		}
+	}
+	return approved, nil
+}
+
+func TestA2CollectionMinimalRunFixtureClassificationIsExact(t *testing.T) {
+	const path = "internal/store/internal/backend/pipelinepersistence/a2_collection_projection_test.go"
+	const schema = "CREATE TABLE runs (run_id TEXT PRIMARY KEY, bundle_hash TEXT NOT NULL, forked_from_run_id TEXT)"
+	const postgresSchema = "CREATE TABLE runs (run_id UUID PRIMARY KEY, bundle_hash TEXT NOT NULL, forked_from_run_id UUID)"
+	const insert = "INSERT INTO runs (run_id,bundle_hash) VALUES ($1,$2)"
+	const lineage = "INSERT INTO runs (run_id,bundle_hash,forked_from_run_id) VALUES ($1,$4,NULL),($2,$4,$1),($3,$4,NULL)"
+	const extra = "UPDATE runs SET status='running' WHERE run_id=$1"
+	source := "package fixture\nfunc fixture() { use(" + strconv.Quote(schema) + "); use(" + strconv.Quote(postgresSchema) + "); use(" + strconv.Quote(insert) + "); use(" + strconv.Quote(lineage) + ") }"
+	runWrite := regexp.MustCompile(`(?is)\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+runs\b`)
+	for _, tc := range []struct {
+		name, path, source string
+		want               bool
+	}{
+		{"exact", path, source, true},
+		{"wrong-path", "internal/runtime/other_test.go", source, false},
+		{"missing-schema", path, strings.Replace(source, strconv.Quote(schema), `"SELECT 1"`, 1), false},
+		{"semantic-schema", path, strings.Replace(source, "forked_from_run_id TEXT)", "forked_from_run_id TEXT, status TEXT)", 1), false},
+		{"semantic-postgres-schema", path, strings.Replace(source, "forked_from_run_id UUID)", "forked_from_run_id UUID, status TEXT)", 1), false},
+		{"missing-bundle", path, strings.Replace(source, insert, "INSERT "+"INTO runs (run_id) VALUES ($1)", 1), false},
+		{"additional-lifecycle-write", path, strings.Replace(source, "use(", "use("+strconv.Quote(extra)+"); use(", 1), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file, err := parser.ParseFile(token.NewFileSet(), "fixture_test.go", tc.source, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			approved, err := classifyBackendMinimalRunLiterals(tc.path, file)
+			allowed := err == nil
+			ast.Inspect(file, func(node ast.Node) bool {
+				literal, ok := node.(*ast.BasicLit)
+				if !ok || literal.Kind != token.STRING {
+					return true
+				}
+				value, err := strconv.Unquote(literal.Value)
+				if err == nil && runWrite.MatchString(value) && !approved[literal.Pos()] {
+					allowed = false
+				}
+				return true
+			})
+			if allowed != tc.want {
+				t.Fatalf("allowed=%v want=%v err=%v", allowed, tc.want, err)
+			}
+		})
+	}
 }
 
 func classifyReceiverHistoryMinimalRunLiterals(path string, file *ast.File) (map[token.Pos]bool, error) {

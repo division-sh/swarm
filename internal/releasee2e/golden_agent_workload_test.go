@@ -16,14 +16,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/events"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
-	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
-	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
-	"github.com/division-sh/swarm/internal/runtime/genericschedule"
-	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 	"gopkg.in/yaml.v3"
@@ -1214,7 +1206,7 @@ func assertGoldenPublicProof(t *testing.T, rpc *releaseRPCClient, runID string, 
 	}
 	assertGoldenAgentStartEvents(t, events, entitySet, restarted)
 	assertGoldenRoutePayloads(t, events, entitySet, candidateIDs)
-	assertGoldenJoinContinuation(t, events, entitySet)
+	assertGoldenJoinContinuation(t, ctx, rpc, events, entitySet)
 	for _, event := range events {
 		if len(event.DeadLetters) != 0 {
 			t.Errorf("event %s (%s) dead letters = %s", event.EventName, event.EventID, event.DeadLetters)
@@ -1667,72 +1659,53 @@ func assertGoldenRoutePayloads(t *testing.T, events []goldenEvent, entities gold
 	}
 }
 
-func assertGoldenJoinContinuation(t *testing.T, observed []goldenEvent, entities goldenEntitySet) {
+func assertGoldenJoinContinuation(t *testing.T, ctx context.Context, rpc *releaseRPCClient, observed []goldenEvent, entities goldenEntitySet) {
 	t.Helper()
 	completion := goldenSingleNamedEvent(t, observed, "platform.join_complete")
 	scout := goldenSingleNamedEvent(t, observed, "scout/scout.completed")
 	entryDelivery := goldenNodeDeliveryForTarget(t, scout, "scout-collector", "existing_entity", ".", entities.root)
-	scoutNode, err := identity.ParseExecutableNodeKey(entryDelivery.SubscriberID)
-	if err != nil || scoutNode.FlowPath() != "." {
-		t.Fatalf("join entry delivery has foreign root owner: node=%v err=%v", scoutNode, err)
+	const scoutNodeKey = "Lg.c2NvdXQtY29sbGVjdG9y"
+	const collectorNodeKey = "Lg.Y2FuZGlkYXRlLWNvbGxlY3Rvcg"
+	if entryDelivery.SubscriberID != scoutNodeKey {
+		t.Fatalf("join entry delivery has foreign root owner: %q", entryDelivery.SubscriberID)
 	}
-	repoRoot := releaseE2ERepoRoot(t)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot,
-		filepath.Join(repoRoot, "internal", "releasee2e", "testdata", "golden_agent_workload"), runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("compile exact golden transition oracle: %v", err)
+	// Characterized identity of this fixture's scouting -> collecting transition.
+	// The process test checks wire evidence; it does not compile an in-process oracle.
+	const collectingTransition = "transition:1c1b19802675aed7db4fab06bcffbf688ca5ed66eeea050adffca0c8b03ede28"
+	entry := map[string]any{
+		"run_id": completion.RunID, "flow_scope": completion.RunID, "instance_id": completion.RunID,
+		"instance_path": entities.root.FlowInstance, "entity_id": entities.root.EntityID, "stage": "collecting",
+		"cause": "delivery", "event_id": scout.EventID, "occurrence_id": entryDelivery.DeliveryID, "transition_id": collectingTransition,
 	}
-	graph, found := bundle.WorkflowStageTopology(".")
-	if !found {
-		t.Fatal("golden root transition topology is missing")
-	}
-	compiled, err := graph.AdmitTransition(runtimecontracts.WorkflowTransitionSite{
-		Node: scoutNode, HandlerEvent: "scout.completed", AdvanceCarrier: runtimecontracts.HandlerAdvanceCarrierHandler,
-	}, "scouting", "collecting")
-	if err != nil {
-		t.Fatalf("admit actual scout collection transition: %v", err)
-	}
-	transition, err := workflowlifecycle.NewCompiledTransition(compiled, handlerselection.NotApplicable(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	entry := timeridentity.StageEntryRef{
-		RunID: completion.RunID, FlowScope: completion.RunID, InstanceID: completion.RunID,
-		InstancePath: entities.root.FlowInstance, EntityID: entities.root.EntityID, Stage: "collecting",
-		Cause: "delivery", EventID: scout.EventID, OccurrenceID: entryDelivery.DeliveryID, TransitionID: transition.ID(),
-	}
-	node, err := identity.ParseExecutableNode(".", "candidate-collector")
-	if err != nil {
-		t.Fatal(err)
-	}
-	declaration, err := timeridentity.NewJoinRef(node, "candidate.completed", "collecting", "collecting")
-	if err != nil {
-		t.Fatal(err)
-	}
-	ref, err := declaration.BindStageEntry(entry, attemptgeneration.Generation{})
-	if err != nil {
-		t.Fatalf("bind actual golden stage entry: %v", err)
-	}
-	want, err := timeridentity.JoinCompleteHandle(ref)
-	if err != nil {
-		t.Fatal(err)
-	}
-	handle, actualRef, ok := timeridentity.ParseJoinHandle(completion.Payload)
-	if !ok || handle.Kind() != timeridentity.TimerHandleJoinComplete || !actualRef.Equal(ref) ||
-		handle.EventType() != completion.EventName || handle.TaskID() != want.TaskID() {
-		t.Fatalf("join continuation handle = %#v, ref=%s, want exact entry/task %s/%s", completion.Payload, actualRef.Key(), entry.Key(), want.TaskID())
-	}
-	// Public event readback exposes the typed handle, not the envelope TaskID.
-	raw, err := json.Marshal(want.PayloadMetadata())
-	if err != nil {
-		t.Fatal(err)
-	}
-	var wantPayload map[string]any
-	if err := json.Unmarshal(raw, &wantPayload); err != nil {
-		t.Fatal(err)
-	}
+	wantHandle := map[string]any{"kind": "join_complete", "join": map[string]any{
+		"mode": "arrival", "node": map[string]any{"flow_path": ".", "node_id": "candidate-collector"},
+		"handler_event": "candidate.completed", "join_id": "collecting", "stage": "collecting", "stage_entry": entry,
+	}}
+	wantPayload := map[string]any{"timer_handle": wantHandle}
 	assertGoldenExactPayload(t, completion, wantPayload)
-	if completion.Source != genericschedule.OccurrenceProducerID() || completion.ProducerType != string(events.EventProducerPlatform) ||
+	var detail struct {
+		Entity      goldenEntitySummary `json:"entity"`
+		Accumulated map[string]any      `json:"accumulated"`
+	}
+	if err := rpc.call(ctx, "entity.get", map[string]any{"run_id": completion.RunID, "entity_id": entities.root.EntityID}, &detail); err != nil {
+		t.Fatal(err)
+	}
+	bucket, ok := detail.Accumulated["handler_joins:"+collectorNodeKey].(map[string]any)
+	if !ok || detail.Entity.EntityID != entities.root.EntityID || detail.Entity.RunID != completion.RunID {
+		t.Fatalf("root join readback has missing/foreign ownership: %#v", detail)
+	}
+	activations, ok := bucket["handler_joins"].(map[string]any)
+	if !ok || len(activations) != 1 {
+		t.Fatalf("root join activation count = %#v, want one retained exact entry", bucket)
+	}
+	for key, value := range activations {
+		arm, ok := value.(map[string]any)
+		if !ok || key == "" || !reflect.DeepEqual(arm["timer_handle"], wantHandle) || arm["status"] != "closed" ||
+			arm["close_reason"] != "complete" || arm["outcome_fired"] != true || arm["outcome_pending"] == true {
+			t.Fatalf("durable join handle/entry/closure = %#v, want exact published handle and once-fired completion", value)
+		}
+	}
+	if completion.Source != "runtime.generic_schedule" || completion.ProducerType != "platform" ||
 		completion.ExecutionMode != "mock" || completion.SourceEventID != "" {
 		t.Errorf("join continuation producer/lineage = %#v, want canonical mock generic-schedule occurrence", completion)
 	}
@@ -1743,8 +1716,8 @@ func assertGoldenJoinContinuation(t *testing.T, observed []goldenEvent, entities
 	}
 	assertGoldenSingleDelivery(t, completion, "node", "candidate-collector", "existing_entity", ".", entities.root)
 	delivery := goldenNodeDeliveryForTarget(t, completion, "candidate-collector", "existing_entity", ".", entities.root)
-	if delivery.SubscriberID != node.Key() {
-		t.Errorf("join continuation subscriber = %q, want exact root node %q", delivery.SubscriberID, node.Key())
+	if delivery.SubscriberID != collectorNodeKey {
+		t.Errorf("join continuation subscriber = %q, want exact root node %q", delivery.SubscriberID, collectorNodeKey)
 	}
 }
 

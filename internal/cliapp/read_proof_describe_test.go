@@ -36,7 +36,7 @@ func TestReadProofFactoringCompiledDescribe(t *testing.T) {
 		} `json:"results"`
 	}
 	if err := json.Unmarshal(raw, &baseline); err != nil || len(baseline.Results) != 45 {
-		t.Fatalf("pre-extraction baseline: %v, rows=%d", err, len(baseline.Results))
+		t.Fatalf("compiled describe characterization: %v, rows=%d", err, len(baseline.Results))
 	}
 	surfaces := map[string][]string{
 		"describe-text": {"describe"}, "describe-json": {"describe", "--json"},
@@ -66,7 +66,7 @@ func TestReadProofFactoringCompiledDescribe(t *testing.T) {
 				out := stdout.String()
 				got := fmt.Sprintf("%x", sha256.Sum256([]byte(strings.ReplaceAll(out, repo, "<repo>"))))
 				if got != row.StdoutSHA256 {
-					t.Fatalf("%s pre-extraction %s output changed: sha=%s want=%s\n%s", baseline.Baseline, row.Surface, got, row.StdoutSHA256, out)
+					t.Fatalf("%s characterized %s output changed: sha=%s want=%s\n%s", baseline.Baseline, row.Surface, got, row.StdoutSHA256, out)
 				}
 			}
 		})

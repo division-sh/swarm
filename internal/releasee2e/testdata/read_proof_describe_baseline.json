@@ -1,5 +1,7 @@
 {
-  "baseline": "1c4cce2094bdaf48dd4d5faf6dbfe33da662bc0f",
+  "baseline": "eff1fc8f459524069e6a82231b3753a4e243a601",
+  "previous_baseline": "1c4cce2094bdaf48dd4d5faf6dbfe33da662bc0f",
+  "contract_change": "A2 retires pin fan-in fields from semantic digests and migrates barrier/golden joins to lifecycle-owned membership and deadlines; 24 unaffected surface hashes remain unchanged.",
   "normalization": "repository absolute path only",
   "results": [
     {
@@ -10,7 +12,7 @@
     {
       "fixture": "examples/routing/template-select-or-create",
       "surface": "describe-json",
-      "stdout_sha256": "0d5815fb3ff5c5fdd92ee8e3ed0394830bc7553c73d435e5c3ddd1caa7edd7e8"
+      "stdout_sha256": "d9c0f06cbcfd7af0b04e3f4d665d796333f63bfce187f3e969ea58fea18bb4f7"
     },
     {
       "fixture": "examples/routing/template-select-or-create",
@@ -25,7 +27,7 @@
     {
       "fixture": "examples/routing/template-select-or-create",
       "surface": "describe-graph-json",
-      "stdout_sha256": "0d5815fb3ff5c5fdd92ee8e3ed0394830bc7553c73d435e5c3ddd1caa7edd7e8"
+      "stdout_sha256": "d9c0f06cbcfd7af0b04e3f4d665d796333f63bfce187f3e969ea58fea18bb4f7"
     },
     {
       "fixture": "examples/routing/template-select-or-create",
@@ -55,7 +57,7 @@
     {
       "fixture": "examples/routing/template-create-minted-key",
       "surface": "describe-json",
-      "stdout_sha256": "24bb93541cce788fc67f56d859ef80bc2afb72af0d59dcbf646719962a7dba3a"
+      "stdout_sha256": "3d3793489dfc881270c6702adb656b26e4ccef1dfcabd3dfdd0d53ed8a4630cb"
     },
     {
       "fixture": "examples/routing/template-create-minted-key",
@@ -70,7 +72,7 @@
     {
       "fixture": "examples/routing/template-create-minted-key",
       "surface": "describe-graph-json",
-      "stdout_sha256": "24bb93541cce788fc67f56d859ef80bc2afb72af0d59dcbf646719962a7dba3a"
+      "stdout_sha256": "3d3793489dfc881270c6702adb656b26e4ccef1dfcabd3dfdd0d53ed8a4630cb"
     },
     {
       "fixture": "examples/routing/template-create-minted-key",
@@ -100,7 +102,7 @@
     {
       "fixture": "examples/integrations/telegram-agent",
       "surface": "describe-json",
-      "stdout_sha256": "376aaf60263019e6c89f51350a8a24efcaaab1c1687b3d3caab70606c10e616f"
+      "stdout_sha256": "1f0d538c74d6a7499b0449d5839e7cb027b17b024226774a86c822db9e401969"
     },
     {
       "fixture": "examples/integrations/telegram-agent",
@@ -115,7 +117,7 @@
     {
       "fixture": "examples/integrations/telegram-agent",
       "surface": "describe-graph-json",
-      "stdout_sha256": "d0c52b906df9b001d6fa47ba6e72cd1195f99e2660f365cc7a13a45e48c2a801"
+      "stdout_sha256": "563f7da6f810899295a79ce3a9e09dfac994dfbce8a2d771c59e5c65dbb20454"
     },
     {
       "fixture": "examples/integrations/telegram-agent",
@@ -140,77 +142,77 @@
     {
       "fixture": "examples/routing/fan-in/barrier",
       "surface": "describe-text",
-      "stdout_sha256": "22b42b2f522c2d49499cb3141e2a58b811c7037b492ab70c5ef51b91c563ad25"
+      "stdout_sha256": "140ea6ff54f66e3d689e0c8a257b3350bafe54317cde49c1466b058cb1c20a2c"
     },
     {
       "fixture": "examples/routing/fan-in/barrier",
       "surface": "describe-json",
-      "stdout_sha256": "dd2fb2131bed4567be43f9be405db9ed9df9156808670391a56e9029b3af006f"
+      "stdout_sha256": "7e8963f35f77094f98f1bad43e8c0b0b80ff2d6c2cfa2bf2b4e33df060a65f57"
     },
     {
       "fixture": "examples/routing/fan-in/barrier",
       "surface": "describe-quiet",
-      "stdout_sha256": "8b4e9a65689032ab226954778ac6d7b2bbcfbb90d4b84358f56d1cb634c49f4b"
+      "stdout_sha256": "ec7cb0781f201870ae6f6b76e14a9936c687b8fbe6e8f0d9d327dc918cc2bb31"
     },
     {
       "fixture": "examples/routing/fan-in/barrier",
       "surface": "describe-graph-text",
-      "stdout_sha256": "494d25613ae1ffc476417b4af83eda1c6809bb7cc2222199c6b886a2f21117ab"
+      "stdout_sha256": "142633aade4057426de921466fbf864e7596c55ed8097754c0875d6174c2c9d7"
     },
     {
       "fixture": "examples/routing/fan-in/barrier",
       "surface": "describe-graph-json",
-      "stdout_sha256": "52b5f998f4687bbab72f275a2e7d03a632fd31690eaa186b7ec1cd8c0e75e89f"
+      "stdout_sha256": "0463716cee4bcf19e9f93d92d28dd824790378b3f248200ac15c2b4f841ac518"
     },
     {
       "fixture": "examples/routing/fan-in/barrier",
       "surface": "describe-no-color",
-      "stdout_sha256": "22b42b2f522c2d49499cb3141e2a58b811c7037b492ab70c5ef51b91c563ad25"
+      "stdout_sha256": "140ea6ff54f66e3d689e0c8a257b3350bafe54317cde49c1466b058cb1c20a2c"
     },
     {
       "fixture": "examples/routing/fan-in/barrier",
       "surface": "routes-text",
-      "stdout_sha256": "d3e250d2a3b8952ae087ead88f777251eb3bf4383e3752183d7bb78f3c38ce7f"
+      "stdout_sha256": "bfead8a7c6742f825ae536c1ee1089df440966f920efed6a344c60da7e96ac0a"
     },
     {
       "fixture": "examples/routing/fan-in/barrier",
       "surface": "routes-json",
-      "stdout_sha256": "2cba1e986e79a4714ec647d8810709df9d876dae3e9ea34b9ebfab90dd72297b"
+      "stdout_sha256": "6993774157618225d8ada629158d8d5501e0f6cf4bba8c2d8876441b3b9ae6ac"
     },
     {
       "fixture": "examples/routing/fan-in/barrier",
       "surface": "routes-quiet",
-      "stdout_sha256": "a1b8ef669368cd7502ff5c2d8a42e709550067814a48f39fcc946c5e70d48360"
+      "stdout_sha256": "995e660da9c0a68dead683d6cb3319333555e168e31d416e22bb9a0d3200b2ee"
     },
     {
       "fixture": "internal/releasee2e/testdata/golden_agent_workload",
       "surface": "describe-text",
-      "stdout_sha256": "3eb7558d11fa879dd47caaae09c783499b5269bd4fe9ec5d44b3de55fbd9e0ec"
+      "stdout_sha256": "419793e627902051750733cc5485961fa55e8d99f8f19b8765bf2ba2fab12186"
     },
     {
       "fixture": "internal/releasee2e/testdata/golden_agent_workload",
       "surface": "describe-json",
-      "stdout_sha256": "de4a3a76d5e07259c5a0b2d1583c35d96c9fb7b761b2ca4fccfea732eae9b806"
+      "stdout_sha256": "43b06352fe34a4fb4b195719b4ae6b4523e43cb5fcaa5c9175a237a4f65072f8"
     },
     {
       "fixture": "internal/releasee2e/testdata/golden_agent_workload",
       "surface": "describe-quiet",
-      "stdout_sha256": "8dc818075f836ded1472564b2ab95cd567779164778ef3d10a1eb84573aad47a"
+      "stdout_sha256": "35f244e264187b08c0967dd01b6a38c4fe6716b560a7b3b3650fa61f1ca17bde"
     },
     {
       "fixture": "internal/releasee2e/testdata/golden_agent_workload",
       "surface": "describe-graph-text",
-      "stdout_sha256": "1074146407b78d32036cfb9ee17d4530e2817049c5fd4e559f2fdd6c1f385cb7"
+      "stdout_sha256": "5a8f79a1f8dcae57981ebc6a8fb0d4d414f62ea0a2715b03e62749d249ef7859"
     },
     {
       "fixture": "internal/releasee2e/testdata/golden_agent_workload",
       "surface": "describe-graph-json",
-      "stdout_sha256": "578d5c0cf69cacb345d3c5fd10a7e266b660cba273699c619b2dae10feb20eb1"
+      "stdout_sha256": "a86c70317700839801047ffc0dff87f682fba44ebe970132a5486157c1ec107e"
     },
     {
       "fixture": "internal/releasee2e/testdata/golden_agent_workload",
       "surface": "describe-no-color",
-      "stdout_sha256": "3eb7558d11fa879dd47caaae09c783499b5269bd4fe9ec5d44b3de55fbd9e0ec"
+      "stdout_sha256": "419793e627902051750733cc5485961fa55e8d99f8f19b8765bf2ba2fab12186"
     },
     {
       "fixture": "internal/releasee2e/testdata/golden_agent_workload",
