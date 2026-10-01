@@ -305,15 +305,17 @@ const (
 )
 
 type ChannelOnboardingProfile struct {
-	Activation             string `yaml:"activation"`
-	Ceremony               string `yaml:"ceremony"`
-	ProviderCredentialRole string `yaml:"provider_credential"`
-	SigningCredentialRole  string `yaml:"signing_credential,omitempty"`
-	Confirmation           string `yaml:"confirmation"`
-	ConnectionHealth       string `yaml:"connection_health,omitempty"`
+	Activation             string                    `yaml:"activation"`
+	Ceremony               string                    `yaml:"ceremony"`
+	ProviderCredentialRole string                    `yaml:"provider_credential"`
+	SigningCredentialRole  string                    `yaml:"signing_credential,omitempty"`
+	Confirmation           string                    `yaml:"confirmation"`
+	ConnectionHealth       string                    `yaml:"connection_health,omitempty"`
+	LearnedDestination     map[string]ChannelMapping `yaml:"learned_destination"`
 }
 
 type CompiledChannelOnboardingProfile struct {
+	learnedDestination []compiledChannelMapping
 	provider           channelPlanIdentity
 	activation         ChannelActivationPosture
 	ceremony           ChannelIdentityCeremony
@@ -344,6 +346,9 @@ func (p CompiledChannelOnboardingProfile) ConnectionHealth() string {
 }
 
 func CompileChannelOnboardingProfile(provider string, profile ChannelOnboardingProfile, operations []string) (CompiledChannelOnboardingProfile, error) {
+	if len(profile.LearnedDestination) == 0 {
+		return CompiledChannelOnboardingProfile{}, fmt.Errorf("channel onboarding requires an explicit learned_destination relation")
+	}
 	providerID, err := admitChannelPlanIdentity("channel onboarding provider", provider)
 	if err != nil {
 		return CompiledChannelOnboardingProfile{}, err
@@ -1559,6 +1564,10 @@ func CompileChannel(registry *InterfaceRegistry, channel LoadedChannelPack, trig
 		}
 		if compiled.ActivationPosture() == ChannelActivationWebhookRegistration && plan.registration == nil {
 			return SatisfactionPlan{}, fmt.Errorf("channel pack %q webhook onboarding requires registration", channel.Envelope.ID)
+		}
+		compiled.learnedDestination, err = compileLearnedDestination(channel.Manifest.Onboarding.LearnedDestination, plan.opaqueTypes)
+		if err != nil {
+			return SatisfactionPlan{}, fmt.Errorf("channel pack %q onboarding learned_destination: %w", channel.Envelope.ID, err)
 		}
 		plan.onboarding = &compiled
 	}

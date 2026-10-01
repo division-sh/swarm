@@ -148,6 +148,7 @@ func compileSatisfactionPlanGeneration(p SatisfactionPlan) (plangeneration.Gener
 			"signing_credential":  p.onboarding.SigningCredential(),
 			"confirmation":        p.onboarding.ConfirmationOperation(),
 			"connection_health":   p.onboarding.ConnectionHealth(),
+			"learned_destination": compiledChannelMappingGenerationValue(p.onboarding.learnedDestination),
 		}
 	}
 	return plangeneration.FromCanonicalValue(map[string]any{
