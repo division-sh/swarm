@@ -1,0 +1,15 @@
+work.requested:
+  left: {type: integer}
+  right: {type: integer}
+review.reported:
+  left: {type: integer}
+  right: {type: integer}
+  cite:
+    type: text
+    citation: {criteria: review, allowed_classes: [hard]}
+work.accepted:
+  proof: {type: text}
+  limit: {type: integer}
+work.rejected:
+  proof: {type: text}
+  limit: {type: integer}

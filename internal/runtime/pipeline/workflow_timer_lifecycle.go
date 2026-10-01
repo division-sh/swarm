@@ -237,6 +237,21 @@ func workflowTimerRenderedDelay(delay string, policy map[string]any) string {
 	})
 }
 
+// WorkflowTimerPolicyReferences reports selectors recognized by the timer's
+// existing placeholder dialect, not CEL or a new duration grammar.
+func WorkflowTimerPolicyReferences(delay string) []string {
+	var keys []string
+	seen := map[string]bool{}
+	for _, match := range workflowExpressionPolicyPlaceholder.FindAllStringSubmatch(delay, -1) {
+		key := strings.TrimSpace(match[1])
+		if !seen[key] {
+			keys = append(keys, key)
+			seen[key] = true
+		}
+	}
+	return keys
+}
+
 func workflowTimerPolicy(source semanticview.Source, flowID string) map[string]any {
 	if source == nil {
 		return nil

@@ -1,6 +1,7 @@
 package flowmodel
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -21,6 +22,14 @@ func (r RuleSet) MarshalYAML() (any, error) {
 		return r.Validation, nil
 	}
 	return nil, fmt.Errorf("rule set must have exactly one variant")
+}
+
+func (r RuleSet) MarshalJSON() ([]byte, error) {
+	value, err := r.MarshalYAML()
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(value)
 }
 
 func (d RulesDocument) Criteria(name string) (PolicyCriteriaSet, bool) {

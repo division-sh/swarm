@@ -739,7 +739,6 @@ decode_bypasses:
     internal/runtime/contracts/workflow_contract_yaml.go: {family: mixed_wave_4_wave_5, node_sites: 4, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_yaml_schema.go: {family: mixed_wave_4_wave_5, node_sites: 10, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_yaml_wave1.go: {family: mixed_existing_typed_admission, node_sites: 11, direct_decode_roots: 0}
-    internal/runtime/flowmodel/model.go: {family: wave_5_agent_tool_policy, node_sites: 0, direct_decode_roots: 0}
     internal/runtime/scenarioderivation/declaration.go: {family: excluded_scenario_tooling, node_sites: 0, direct_decode_roots: 1}
     internal/runtime/testfixtures/canonicalrouting/fixture.go: {family: excluded_test_fixture, node_sites: 13, direct_decode_roots: 4}
     internal/testcatalog/inventory.go: {family: excluded_test_tooling, node_sites: 6, direct_decode_roots: 5}
@@ -749,7 +748,7 @@ decode_bypasses:
     internal/yamlsource/source.go: {family: canonical_owner, node_sites: 0, direct_decode_roots: 1}
 
 registry_result:
-  completeness: "all 26 remaining production custom unmarshallers classified as 22 bundle-reachable row owners, 2 retired unreachable decoders, and 2 deployment swarm.yaml exclusions; off-owner yaml.Node sites and pack/config decode roots are separately ratcheted"
+  completeness: "all 18 remaining production custom unmarshallers classified as 14 bundle-reachable row owners, 2 retired unreachable decoders, and 2 deployment swarm.yaml exclusions; eight policy/rule readers deleted, off-owner yaml.Node sites and pack/config decode roots are separately ratcheted"
   wave_1_status: closed
   wave_2_status: closed
   later_wave_gate: "#2485 agents family complete; tools/shared schemas/module placement migrated under the approved family gate; #2303 semantic prerequisite and genuine policy/rules admission tail remain open, as do separately classified roots"

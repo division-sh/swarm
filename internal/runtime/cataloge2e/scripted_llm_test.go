@@ -22,6 +22,7 @@ type scriptedLLMRuntime struct {
 	agentEventFlow map[string][]scriptedAgentFixtureStep
 	runBarriers    map[string]*scriptedManagedRunBarrier
 	deliveryCalls  []scriptedDeliveryCall
+	systemPrompts  []string
 }
 
 type scriptedDeliveryCall struct {
@@ -92,6 +93,9 @@ func (r *scriptedLLMRuntime) StartSession(ctx context.Context, agentID, systemPr
 	if r == nil {
 		return nil, fmt.Errorf("scripted llm runtime is nil")
 	}
+	r.mu.Lock()
+	r.systemPrompts = append(r.systemPrompts, systemPrompt)
+	r.mu.Unlock()
 	session := &llm.Session{
 		ID:           uuid.NewString(),
 		AgentID:      strings.TrimSpace(agentID),
