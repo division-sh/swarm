@@ -42,6 +42,8 @@ func WithToolModule(module PolicyModule) ToolSchemaEntryOption {
 			return err
 		}
 		copyValue := cloneToolModule(module)
+		copyValue.InputSchema = input.Projection()
+		copyValue.OutputSchema = output.Projection()
 		draft.value.module = &copyValue
 		draft.value.inputSchema = input
 		draft.value.outputSchema = output

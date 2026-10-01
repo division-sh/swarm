@@ -279,3 +279,46 @@ func TestW5ToolsGoverningSpecParses(t *testing.T) {
 		t.Fatalf("spec parse: %v; cause: %v", err, cause)
 	}
 }
+
+func TestW5ModuleProgrammaticAdmissionRetainsCanonicalSchema(t *testing.T) {
+	for _, additional := range []bool{true, false} {
+		t.Run(fmt.Sprint(additional), func(t *testing.T) {
+			schema := map[string]any{"type": "object", "properties": map[string]any{"value": map[string]any{"type": "integer"}}}
+			if !additional {
+				schema["additionalProperties"] = false
+			}
+			module := PolicyModule{Kind: "wasm", Path: "modules/pinned.wasm", ABI: "core-json-v1", Entry: "compute", Digest: "sha256:" + strings.Repeat("0", 64), InputSchema: schema, OutputSchema: schema, Limits: PolicyModuleLimits{Gas: 100, MemoryPages: 1, OutputBytes: 1024}}
+			entry, err := NewToolSchemaEntry(WithToolHandler(ToolHandlerWasm), WithToolModule(module))
+			if err != nil {
+				t.Fatal(err)
+			}
+			admitted, _ := entry.Module()
+			if !reflect.DeepEqual(admitted.InputSchema, entry.InputSchema().Projection()) || !reflect.DeepEqual(admitted.OutputSchema, entry.OutputSchema().Projection()) {
+				t.Fatal("module retained raw maps instead of admitted schema meaning")
+			}
+			body, err := yaml.Marshal(map[string]ToolSchemaEntry{"module": entry})
+			if err != nil {
+				t.Fatal(err)
+			}
+			loaded, err := admitW5Tools(t, string(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, err := entry.CanonicalHash()
+			if err != nil {
+				t.Fatal(err)
+			}
+			after, err := loaded["module"].CanonicalHash()
+			if err != nil || before != after {
+				t.Fatalf("programmatic schema roundtrip changed identity: %s / %s: %v", before, after, err)
+			}
+			module.InputSchema["additionalProperties"] = !additional
+			cloned, _ := entry.Module()
+			cloned.InputSchema["additionalProperties"] = !additional
+			unchanged, err := entry.CanonicalHash()
+			if err != nil || unchanged != before {
+				t.Fatal("caller or readback mutation changed admitted identity")
+			}
+		})
+	}
+}
