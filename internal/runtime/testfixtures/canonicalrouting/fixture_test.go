@@ -178,6 +178,24 @@ func TestReleaseE2EClaudeLifecycleFixtureLoadsAndVerifies(t *testing.T) {
 	}
 }
 
+func TestReleaseE2EClaudeResourceReadFixtureLoadsAndVerifies(t *testing.T) {
+	const fixture = ArtifactID("internal/releasee2e/testdata/claude_resource_read")
+	Prove(t, ArtifactID("internal/releasee2e/testdata/claude_resource_read"))
+	repo := RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repo,
+		filepath.Join(repo, filepath.FromSlash(string(fixture))),
+		runtimecontracts.DefaultPlatformSpecFile(repo),
+	)
+	if err != nil {
+		t.Fatalf("load release E2E Claude resource fixture: %v", err)
+	}
+	report := runtimebootverify.Run(context.Background(), semanticview.Wrap(bundle), runtimebootverify.Options{})
+	if findings := report.HardInvalidities(); len(findings) != 0 {
+		t.Fatalf("release E2E Claude resource fixture hard invalidities: %#v", findings)
+	}
+}
+
 func TestReleaseE2EChannelOnboardingFixtureIsRegistered(t *testing.T) {
 	Prove(t, ArtifactID("internal/releasee2e/testdata/channel_onboarding_release"))
 }

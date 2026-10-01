@@ -1,0 +1,3 @@
+task.assigned:
+  request: "[text]"
+task.finished:

@@ -1,0 +1,8 @@
+name: worker
+stages:
+  pending: {initial: true}
+  active: {}
+  done: {terminal: true}
+pins:
+  inputs: {events: [task.assigned, task.finished]}
+  outputs: {events: [records.loaded]}
