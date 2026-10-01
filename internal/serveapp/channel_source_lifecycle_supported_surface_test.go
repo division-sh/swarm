@@ -85,14 +85,39 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					}
 				case "retained_reset", "source_reset":
 					clear := operation == "source_reset"
+					command := waitNativeInboxCommand(t, h.provider, "chat", "1001", "")
+					postChannelTelegramUpdate(t, callback, signing, map[string]any{
+						"update_id": 978001, "message": map[string]any{
+							"message_id": 978001, "from": map[string]any{"id": 7000},
+							"chat": map[string]any{"id": 1001, "type": "private"}, "text": "/" + command,
+						},
+					})
+					waitNativeIntentCount(t, db, "entry", 1)
+					waitNativeInboxDeliveries(t, h, "1001", 1)
+					rejectedToken := uuid.NewString()
+					postChannelTelegramUpdate(t, callback, signing, map[string]any{
+						"update_id": 978002, "callback_query": map[string]any{
+							"id": "reset-history-refusal", "from": map[string]any{"id": 7000},
+							"message": map[string]any{"message_id": messageID, "chat": map[string]any{"id": 1001, "type": "private"}},
+							"data":    rejectedToken,
+						},
+					})
+					waitChannelRejectedCallback(t, db, rejectedToken)
+					waitChannelDeliverySendsSettled(t, db)
+					for _, table := range []string{"operator_channel_action_intents", "operator_channel_text_intents"} {
+						var count int
+						if err := db.QueryRow(`SELECT COUNT(*) FROM ` + table + ` WHERE state='settled'`).Scan(&count); err != nil || count == 0 {
+							t.Fatalf("reset history proof has no settled %s: count=%d err=%v", table, count, err)
+						}
+					}
 					beforeNative := readChannelNativeHistory(t, db)
 					beforeHistory := readChannelPreservedHistory(t, db)
 					writes := len(h.provider.CommandWrites())
 					dry := requestServedJSONRPC(t, h.rpcEndpoint(), "runtime.nuke", map[string]any{
 						"dry_run": true, "include_source_artifacts": clear, "idempotency_key": uuid.NewString(),
 					})
-					if dry.Error != nil || readChannelNativeHistory(t, db) != beforeNative {
-						t.Fatalf("dry-run changed native identity/state: %+v", dry.Error)
+					if dry.Error != nil || readChannelNativeHistory(t, db) != beforeNative || readChannelPreservedHistory(t, db) != beforeHistory {
+						t.Fatalf("dry-run changed native identity or populated history: %+v", dry.Error)
 					}
 					params := map[string]any{
 						"include_source_artifacts": clear, "idempotency_key": uuid.NewString(),
@@ -130,6 +155,18 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						t.Fatalf("reset replay changed native history: %+v", replay.Error)
 					}
 					postChannelSourceControl(t, callback, signing, card, token, messageID)
+					for index, text := range []string{"obsolete answer", "/" + command} {
+						status := postChannelSourceUpdate(t, callback, signing, map[string]any{
+							"update_id": 978003 + index, "message": map[string]any{
+								"message_id": 978003 + index, "from": map[string]any{"id": 7000},
+								"chat": map[string]any{"id": 1001, "type": "private"}, "text": text,
+								"reply_to_message": map[string]any{"message_id": messageID},
+							},
+						})
+						if status != http.StatusNotFound {
+							t.Fatalf("reset retained obsolete text/native ingress: status=%d text=%q", status, text)
+						}
+					}
 					if response := requestServedJSONRPC(t, h.rpcEndpoint(), "mailbox.get", map[string]any{"mailbox_id": card}); response.Error == nil {
 						t.Fatal("reset retained deleted card execution authority")
 					}
@@ -306,8 +343,8 @@ func readChannelPreservedHistory(t *testing.T, db *sql.DB) string {
 		`SELECT * FROM operator_channel_claim_receipts ORDER BY publication_id`,
 		`SELECT * FROM operator_channel_action_intents ORDER BY publication_id`,
 		`SELECT * FROM operator_channel_text_intents ORDER BY publication_id`,
-		`SELECT * FROM runtime_external_effect_operations WHERE effect_kind IN ('channel_delivery','channel_native_setting') ORDER BY operation_id`,
-		`SELECT a.* FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE o.effect_kind IN ('channel_delivery','channel_native_setting') ORDER BY a.attempt_id`,
+		`SELECT * FROM runtime_external_effect_operations WHERE effect_kind IN ('channel_delivery','channel_native_setting','channel_action_ack') ORDER BY operation_id`,
+		`SELECT a.* FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE o.effect_kind IN ('channel_delivery','channel_native_setting','channel_action_ack') ORDER BY a.attempt_id`,
 	}
 	var snapshots [][][]any
 	for _, query := range queries {
@@ -359,10 +396,15 @@ func readChannelSourceHistory(t *testing.T, db *sql.DB, card string) string {
 
 func postChannelSourceControl(t *testing.T, callback, signing, card, token string, messageID int) int {
 	t.Helper()
-	body, err := json.Marshal(map[string]any{"update_id": 976000 + messageID, "callback_query": map[string]any{
+	return postChannelSourceUpdate(t, callback, signing, map[string]any{"update_id": 976000 + messageID, "callback_query": map[string]any{
 		"id": "source-" + card, "from": map[string]any{"id": 7000},
 		"message": map[string]any{"message_id": messageID, "chat": map[string]any{"id": 1001, "type": "private"}}, "data": token,
 	}})
+}
+
+func postChannelSourceUpdate(t *testing.T, callback, signing string, update map[string]any) int {
+	t.Helper()
+	body, err := json.Marshal(update)
 	if err != nil {
 		t.Fatal(err)
 	}

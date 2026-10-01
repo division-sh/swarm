@@ -75,6 +75,8 @@ profiles:
       - serveapp-channel
       - serveapp-channel-learned
       - serveapp-channel-delivery
+      - serveapp-channel-process-temporal
+      - serveapp-channel-lifecycle
       - serveapp-channel-native
       - serveapp-runtime
       - contracts-first
@@ -139,6 +141,8 @@ profiles:
       - serveapp-channel
       - serveapp-channel-learned
       - serveapp-channel-delivery
+      - serveapp-channel-process-temporal
+      - serveapp-channel-lifecycle
       - serveapp-channel-native
       - serveapp-runtime
       - contracts-first
@@ -203,6 +207,8 @@ profiles:
       - serveapp-channel
       - serveapp-channel-learned
       - serveapp-channel-delivery
+      - serveapp-channel-process-temporal
+      - serveapp-channel-lifecycle
       - serveapp-channel-native
       - serveapp-runtime
       - contracts-first
@@ -267,6 +273,8 @@ profiles:
       - serveapp-channel
       - serveapp-channel-learned
       - serveapp-channel-delivery
+      - serveapp-channel-process-temporal
+      - serveapp-channel-lifecycle
       - serveapp-channel-native
       - serveapp-runtime
       - contracts-first
@@ -699,7 +707,21 @@ units:
   serveapp-channel-delivery:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    run: '^TestChannel(Action.*|Delivery.*|Notice.*|SelectedFork.*|Source.*)$'
+    run: '^TestChannel(ActionWorker.*|Delivery(Backlog.*|Bare.*|Budget.*|Cancel.*|Change.*|Chooser.*|Compiled.*|Inbound.*|Invalid.*|Manual.*|Native.*|Notice.*|Ordered.*|Paged.*|Quoted.*|Real.*|Reconciliation.*|Recovery.*|Required.*|Resend.*|Shared.*|Skip.*|UncertainNotice.*|Verdict.*|View.*)|Notice.*)$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  serveapp-channel-process-temporal:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^TestChannel(ActionAcknowledgmentAbruptProcessDeathPublicJourney|Delivery(AbruptProcessDeathPublicJourney|HumanTemporalReceiptPublicJourney|UncertainCopyAuthorityPublicJourney))$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  serveapp-channel-lifecycle:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^TestChannel(SelectedFork.*|Source.*)$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
