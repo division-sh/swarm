@@ -1,6 +1,9 @@
 package canonicalrouting
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 // CopyChannelLearnedObjectJourney owns the finite routing source for the
 // learned-provider delivery proof; provider pack declarations remain separate.
@@ -10,6 +13,33 @@ func CopyChannelLearnedObjectJourney(t testing.TB) string {
 
 func CopyChannelLearnedObjectIntegerInputJourney(t testing.TB) string {
 	return copyChannelLearnedObjectInputJourney(t, "integer")
+}
+
+// CopyChannelLearnedObjectAnchorJourney retains the real gate, ask_human and
+// approved connector producers, using the independently declared mock protocol.
+func CopyChannelLearnedObjectAnchorJourney(t testing.TB) string {
+	t.Helper()
+	root := CopyChannelLearnedObjectJourney(t)
+	mailbox := CopyMailboxCompletionMatrix(t)
+	copyTree(t, mailbox, filepath.Join(root, "reviews"))
+	copyTree(t, filepath.Join(mailbox, "observers"), filepath.Join(root, "observers"))
+	removeClosedVariantFiles(t, root, "reviews/observers/mocks/observer.py", "reviews/observers/mocks", "reviews/observers/agents.yaml", "reviews/observers/entities.yaml", "reviews/observers/nodes.yaml", "reviews/observers/schema.yaml", "reviews/observers")
+	applyClosedReplacement(t, filepath.Join(root, "reviews/schema.yaml"), "provider: telegram\n      tool: telegram.send_message", "provider: mock\n      tool: mock.deliver")
+	applyClosedReplacement(t, filepath.Join(root, "reviews/schema.yaml"), "      - observer.requested\n  outputs:\n    events: [observer.requested]\nconnect:\n  - {event: observer.requested, from: ., to: observers}\n", "")
+	applyClosedReplacement(t, filepath.Join(root, "reviews/nodes.yaml"), "tool: telegram.send_message", "tool: mock.deliver")
+	applyClosedReplacement(t, filepath.Join(root, "reviews/nodes.yaml"), "          chat_id: {literal: \"42\"}\n          text: {literal: review}", "          queue: {literal: queue-b}\n          body: {literal: approved-effect}\n          controls: {literal: []}")
+	writeClosedVariantFile(t, root, "reviews/events.yaml", "work.completed:\n  result: text\n")
+	writeClosedVariantFile(t, root, "schema.yaml", `name: object-channel
+pins:
+  inputs: {events: [work.requested, observer.requested, effect.requested]}
+  outputs: {events: [work.requested, observer.requested, effect.requested]}
+connect:
+  - {event: work.requested, from: ., to: reviews}
+  - {event: effect.requested, from: ., to: reviews}
+  - {event: observer.requested, from: ., to: observers}
+`)
+	writeClosedVariantFile(t, root, "events.yaml", "work.requested:\n  seed: boolean\nobserver.requested:\n  seed: boolean\n  deadline_at: text?\neffect.requested:\n  seed: boolean\n")
+	return root
 }
 
 func copyChannelLearnedObjectInputJourney(t testing.TB, inputType string) string {

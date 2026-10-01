@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net/http/httptest"
@@ -10,7 +11,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 )
@@ -99,17 +102,32 @@ func firstObjectDraftChoice(t *testing.T, p *objectChannelProvider, receipt stri
 
 func startObjectChannelInputJourney(t *testing.T, backend servedparity.Backend, integerInput bool) (*channelOnboardingE2EHarness, *sql.DB, *objectChannelProvider, string, string) {
 	t.Helper()
+	root := canonicalrouting.CopyChannelLearnedObjectJourney(t)
+	if integerInput {
+		root = canonicalrouting.CopyChannelLearnedObjectIntegerInputJourney(t)
+	}
+	return startObjectChannelJourney(t, backend, root, telegramPhraseBotLLMRuntime{}, "")
+}
+
+func startObjectChannelJourney(t *testing.T, backend servedparity.Backend, root string, llm runtimellm.Runtime, activityCredential string) (*channelOnboardingE2EHarness, *sql.DB, *objectChannelProvider, string, string) {
+	t.Helper()
 	h := newChannelOnboardingE2EHarness(t, backend, true)
 	p := &objectChannelProvider{commands: map[string][]any{}, calls: map[string][]map[string]any{}}
 	server := httptest.NewServer(p)
 	t.Cleanup(server.Close)
 	redirectExternalHosts(t, map[string]string{"mock.example.test": server.URL})
-	if integerInput {
-		h.opts.SourceRoot = writeObjectChannelPacks(t, h.opts.ConfigPath, canonicalrouting.CopyChannelLearnedObjectIntegerInputJourney(t))
-	} else {
-		h.opts.SourceRoot = writeObjectChannelSource(t, h.opts.ConfigPath)
-	}
+	h.opts.SourceRoot = writeObjectChannelPacks(t, h.opts.ConfigPath, root)
+	h.opts.TestLLMRuntime = llm
 	h.opts.AbandonActiveRuns = false
+	if activityCredential != "" {
+		credentials, err := runtimecredentials.NewFileStore(h.credentialPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := credentials.Set(context.Background(), "mock_api_key", activityCredential); err != nil {
+			t.Fatal(err)
+		}
+	}
 	h.start(t)
 	t.Cleanup(func() { h.stop(t) })
 	driver := "sqlite"
