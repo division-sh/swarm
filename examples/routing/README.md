@@ -14,6 +14,7 @@ These directories are the positive authoring owners for supported routing patter
 | Create a child with a platform-owned key | `template-create-minted-key` | Use receiver `resolution.mode: create` and source the carry named by `instance.by` from `generated.uuid` or `event.id`. |
 | Validate an intentionally harness-produced input | `harness-injection` | Declare `source: harness`; verify labels it non-production-valid and serve rejects it. |
 | Notify every known child independently | `notify-all-children` | Expand the owner's persisted child-key collection, then route each item through receiver `resolution.mode: select`. |
+| Scatter meaningful map values and gather ordered results | [`map-scatter-gather`](map-scatter-gather) | Use one `map[text][integer]` state field for lexical key fan-out and finite arrival membership; ordinary connects create keyed workers and return reports. |
 
 Verify any example with:
 

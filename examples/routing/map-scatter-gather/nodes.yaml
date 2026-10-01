@@ -1,0 +1,37 @@
+scatter:
+  execution_type: system_node
+  subscribes_to: [batch.ready]
+  produces: [item.requested]
+  event_handlers:
+    batch.ready:
+      create_entity: true
+      data_accumulation:
+        writes:
+          - {source_field: items, target_field: items}
+      advances_to: collecting
+      fan_out:
+        items_from: entity.items
+        as: member
+        emit:
+          event: item.requested
+          fields:
+            member_id: ${member}
+            values: ${payload.items[?member].orValue([])}
+            index: ${fan_out.index}
+            count: ${fan_out.count}
+collector:
+  execution_type: system_node
+  subscribes_to: [item.reported]
+  event_handlers:
+    item.reported:
+      join:
+        stage: collecting
+        members: {from: state.items, by: payload.member_id}
+        output: payload.result
+        deadline: {after: 5m, from: stage_entry}
+        on_complete:
+          data_accumulation:
+            writes:
+              - {target_field: ordered_results, value: "${join.results}"}
+          advances_to: complete
+        on_deadline: {advances_to: failed}

@@ -1,0 +1,7 @@
+batch.ready:
+  items: "map[text][integer]"
+item.requested:
+  member_id: text
+  values: "[integer]"
+  index: integer
+  count: integer
