@@ -12,6 +12,8 @@ onboarding:
   provider_credential: telegram_bot_token
   signing_credential: webhook_signing_secret
   confirmation: deliver
+  learned_destination:
+    destination: conversation_reference
 registration:
   slot:
     namespace: bot_webhook
