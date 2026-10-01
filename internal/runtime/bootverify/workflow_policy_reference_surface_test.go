@@ -8,7 +8,82 @@ import (
 	c "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
+
+func TestR3PolicyGuardVerificationExecutionParity(t *testing.T) {
+	policy := map[string]any{"config": map[string]any{}, "null_value": nil, "wrong": true, "list": []any{"yes"}}
+	for _, tc := range []struct {
+		expression string
+		want       bool
+		invalid    bool
+	}{
+		{`policy.?missing.child.orValue(false)`, false, false},
+		{`policy[?"missing"]["child"].orValue(false)`, false, false},
+		{`policy.?config.child.orValue(false)`, false, false},
+		{`policy.?null_value.child.orValue(false)`, false, false},
+		{`policy.?wrong.child.orValue(false)`, false, false},
+		{`has(policy.missing) && policy.missing.child == true`, false, false},
+		{`!has(policy.missing) || policy.missing.child == true`, true, false},
+		{`has(policy.missing) ? policy.missing.child == true : false`, false, false},
+		{`has(policy.config) && policy.config.child == true`, false, true},
+		{`has(policy.null_value) && policy.null_value.child == true`, false, true},
+		{`policy.missing.?child.orValue(false)`, false, true},
+		{`policy.missing.child == true`, false, true},
+		{`policy.list[0u] == "yes"`, true, false},
+		{`policy.list[0.0] == "yes"`, true, false},
+		{`policy.list[9u] == "yes"`, false, true},
+		{`policy.list[9] == "yes"`, false, true},
+		{`policy.list[18446744073709551615u] == "yes"`, false, true},
+		{`policy[true] == "yes"`, false, true},
+		{`policy.list[0.5] == "yes"`, false, true},
+		{`policy.list[?9u].orValue("no") == "no"`, true, false},
+	} {
+		t.Run(tc.expression, func(t *testing.T) {
+			value, runtimeErr := workflowexpr.EvalValueExpression(tc.expression, workflowexpr.ValueContext{Policy: policy})
+			if tc.invalid {
+				if runtimeErr == nil {
+					t.Fatalf("negative runtime control succeeded: %#v", value)
+				}
+			} else if runtimeErr != nil || value != tc.want {
+				t.Fatalf("runtime = %#v, %v; want %t", value, runtimeErr, tc.want)
+			}
+			bundle := semanticview.CloneBundleForPreview(loadTier8FixtureBundle(t, "test-boot-success"), policy)
+			node, event, handler, ok := firstBundleHandler(bundle)
+			if !ok {
+				t.Fatal("missing handler")
+			}
+			handler.Guard = &c.GuardSpec{Check: tc.expression}
+			writeBundleHandler(t, bundle, node, event, handler)
+			failures := Run(context.Background(), semanticview.Wrap(bundle), Options{}).Errors()
+			if !tc.invalid && len(failures) != 0 {
+				t.Fatalf("safe supported guard rejected: %#v", failures)
+			}
+			if tc.invalid && len(failures) == 0 {
+				t.Fatal("invalid supported guard passed verification")
+			}
+			for _, failure := range failures {
+				if failure.CheckID != "condition_policy_alignment" || !strings.Contains(failure.Location, "guard") || !strings.Contains(failure.Location, event) {
+					t.Fatalf("unexpected failing gate or missing field location: %#v", failure)
+				}
+			}
+		})
+	}
+}
+
+func TestR3PolicyGuardNearestKeyTeachingError(t *testing.T) {
+	bundle := semanticview.CloneBundleForPreview(loadTier8FixtureBundle(t, "test-boot-success"), map[string]any{"investigate": true})
+	node, event, handler, ok := firstBundleHandler(bundle)
+	if !ok {
+		t.Fatal("missing handler")
+	}
+	handler.Guard = &c.GuardSpec{Check: "policy.investigat == true"}
+	writeBundleHandler(t, bundle, node, event, handler)
+	failures := Run(context.Background(), semanticview.Wrap(bundle), Options{}).Errors()
+	if len(failures) != 1 || failures[0].CheckID != "condition_policy_alignment" || !strings.Contains(failures[0].Location, "guard") || !strings.Contains(failures[0].Location, event) || !strings.Contains(failures[0].Message, `did you mean policy["investigate"]?`) || !strings.Contains(failures[0].Message, "declared root keys:") || !strings.Contains(failures[0].Message, `"investigate"`) {
+		t.Fatalf("incomplete supported teaching error: %#v", failures)
+	}
+}
 
 func TestR3PolicyReferenceSurfaceMatrix(t *testing.T) {
 	ref := c.RefExpression("policy.missing")
