@@ -40,12 +40,17 @@ func TestA2RetainedPayloadMapSourceLineageOnBothStores(t *testing.T) {
 			if _, err := db.Exec(`UPDATE fan_out_intents SET cursor=1,next_chunk_size=2 WHERE triggering_delivery_id=$1`, ancestor.Key.TriggeringDeliveryID); err != nil {
 				t.Fatal(err)
 			}
-			loadInherited := func() fanoutobligation.Intent {
+			loadIntent := func(deliveryID string) fanoutobligation.Intent {
 				t.Helper()
-				intent, err := scanFanOutIntent(db.QueryRow(`SELECT `+fanOutIntentColumns+` FROM fan_out_intents WHERE triggering_delivery_id=$1`, ancestor.Key.TriggeringDeliveryID))
+				intent, err := scanFanOutIntent(db.QueryRow(`SELECT `+fanOutIntentColumns+` FROM fan_out_intents WHERE triggering_delivery_id=$1`, deliveryID))
 				if err != nil {
 					t.Fatal(err)
 				}
+				return intent
+			}
+			loadInherited := func() fanoutobligation.Intent {
+				t.Helper()
+				intent := loadIntent(ancestor.Key.TriggeringDeliveryID)
 				// As in the state-map control, supply the inherited reader context;
 				// this is not an admitted/materialized executable fork intent.
 				intent.Request.Key.RunID = child.Key.RunID
@@ -105,11 +110,15 @@ func TestA2RetainedPayloadMapSourceLineageOnBothStores(t *testing.T) {
 				return evidence
 			}
 			before := snapshot()
-			requireUnchanged := func() {
+			ancestorCursorBefore := loadIntent(ancestor.Key.TriggeringDeliveryID).Cursor
+			childCursorBefore := loadIntent(child.Key.TriggeringDeliveryID).Cursor
+			requireUnchanged := func() [][][]string {
 				t.Helper()
-				if after := snapshot(); !reflect.DeepEqual(after, before) {
+				after := snapshot()
+				if !reflect.DeepEqual(after, before) {
 					t.Fatalf("retained reader changed cursor/source/effects: before=%#v after=%#v", before, after)
 				}
+				return after
 			}
 			read := func() {
 				t.Helper()
@@ -174,7 +183,12 @@ func TestA2RetainedPayloadMapSourceLineageOnBothStores(t *testing.T) {
 							t.Fatalf("missing event lost exact owner/identity: %v", err)
 						}
 					}
-					requireUnchanged()
+					after := requireUnchanged()
+					t.Logf("refusal=%v; ancestor_cursor=%d->%d child_cursor=%d->%d events=%d->%d intents=%d->%d outcomes=%d->%d mutations=%d->%d state_rows=%d->%d fork_selected=%d->%d fork_replays=%d->%d", err,
+						ancestorCursorBefore, loadIntent(ancestor.Key.TriggeringDeliveryID).Cursor,
+						childCursorBefore, loadIntent(child.Key.TriggeringDeliveryID).Cursor,
+						len(before[2]), len(after[2]), len(before[0]), len(after[0]), len(before[1]), len(after[1]),
+						len(before[3]), len(after[3]), len(before[4]), len(after[4]), len(before[6]), len(after[6]), len(before[7]), len(after[7]))
 				})
 				read()
 			}
