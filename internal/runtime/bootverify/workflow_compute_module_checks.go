@@ -98,11 +98,15 @@ func validateComputeModuleValueRow(ctx context.Context, source semanticview.Sour
 	} else if !policySheetLookupPathIsSimple(storePath) {
 		findings = append(findings, computeModuleFinding(ref, fmt.Sprintf("compute_module.into %q must be a simple computed.* path", storeAs)))
 	}
-	policy := source.ResolvedPolicyForExecutableNode(ref.Node)
 	moduleID := strings.TrimSpace(spec.Module)
-	module, ok := policy.Modules[moduleID]
+	bundle, hasBundle := semanticview.Bundle(source)
+	if !hasBundle || bundle == nil {
+		return append(findings, computeModuleFinding(ref, "compute_module boot verification requires a workflow contract bundle source"))
+	}
+	tool, _ := bundle.ToolEntryForExecutableNode(ref.Node, moduleID)
+	module, ok := tool.Module()
 	if !ok {
-		findings = append(findings, computeModuleFinding(ref, fmt.Sprintf("compute_module.module %q does not resolve in policy.modules", moduleID)))
+		findings = append(findings, computeModuleFinding(ref, fmt.Sprintf("compute_module.module %q does not resolve to a scoped module tool", moduleID)))
 	} else {
 		bundle, hasBundle := semanticview.Bundle(source)
 		if !hasBundle || bundle == nil {
@@ -143,9 +147,5 @@ func validateComputeModuleArtifact(ctx context.Context, ref computeModuleRef, mo
 }
 
 func computeModuleKind(module runtimecontracts.PolicyModule) string {
-	kind := strings.TrimSpace(module.Kind)
-	if kind == "" {
-		return "wasm"
-	}
-	return kind
+	return strings.TrimSpace(module.Kind)
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
 )
 
@@ -499,10 +500,8 @@ func LoadChannelPackFS(fsys fs.FS, dir, runningPlatformVersion string) (LoadedCh
 	if len(loaded.Envelope.Requires.Packs) != 2 || strings.TrimSpace(loaded.Envelope.Requires.Packs[TypeTrigger]) == "" || strings.TrimSpace(loaded.Envelope.Requires.Packs[TypeConnector]) == "" {
 		return LoadedChannelPack{}, fmt.Errorf("channel pack %q requires exactly trigger and connector pack roles", loaded.Envelope.ID)
 	}
-	var manifest ChannelManifest
-	decoder := yaml.NewDecoder(bytes.NewReader(loaded.ManifestBody))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&manifest); err != nil {
+	manifest, err := ParseChannelManifest(loaded.ManifestBody)
+	if err != nil {
 		return LoadedChannelPack{}, fmt.Errorf("parse channel manifest for pack %q: %w", loaded.Envelope.ID, err)
 	}
 	if err := validateChannelManifest(loaded.Envelope.ID, manifest); err != nil {
@@ -512,6 +511,49 @@ func LoadChannelPackFS(fsys fs.FS, dir, runningPlatformVersion string) (LoadedCh
 		Envelope: loaded.Envelope, Manifest: manifest, ManifestBody: append([]byte(nil), loaded.ManifestBody...),
 		Directory: loaded.Directory, Source: MustPackSource(loaded.Envelope.Provenance.Source, loaded.Envelope.ID),
 	}, nil
+}
+
+func ParseChannelManifest(body []byte) (ChannelManifest, error) {
+	snapshot, err := yamlsource.Load(body)
+	if err != nil {
+		return ChannelManifest{}, err
+	}
+	root := snapshot.Document("channel.yaml").Root()
+	if err := root.ValidateExpansion(); err != nil {
+		return ChannelManifest{}, err
+	}
+	lookup, err := root.Lookup("opaque_types")
+	if err != nil {
+		return ChannelManifest{}, err
+	}
+	fields, err := lookup.Value.Mapping()
+	if err != nil {
+		return ChannelManifest{}, err
+	}
+	opaque := make(map[string]runtimecontracts.ToolInputSchema, len(fields))
+	for _, field := range fields {
+		schema, err := runtimecontracts.AdmitToolInputSchemaValue(field.Value)
+		if err != nil {
+			return ChannelManifest{}, err
+		}
+		opaque[field.Name] = schema
+	}
+	var wire struct {
+		Provider     string                             `yaml:"provider"`
+		OpaqueTypes  map[string]map[string]any          `yaml:"opaque_types"`
+		Operations   map[string]ChannelOperationBinding `yaml:"operations"`
+		Events       map[string]ChannelEventBinding     `yaml:"events"`
+		Registration *ChannelRegistrationProfile        `yaml:"registration,omitempty"`
+		Onboarding   *ChannelOnboardingProfile          `yaml:"onboarding,omitempty"`
+	}
+	decoder := yaml.NewDecoder(bytes.NewReader(body))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&wire); err != nil {
+		return ChannelManifest{}, err
+	}
+	manifest := ChannelManifest{Provider: wire.Provider, Operations: wire.Operations, Events: wire.Events, Registration: wire.Registration, Onboarding: wire.Onboarding}
+	manifest.OpaqueTypes = opaque
+	return manifest, nil
 }
 
 func CompileChannelInventory(registry *InterfaceRegistry, channels []LoadedChannelPack, triggers []TriggerPackDescriptor, connectors []ConnectorPackDescriptor) ([]SatisfactionPlan, error) {

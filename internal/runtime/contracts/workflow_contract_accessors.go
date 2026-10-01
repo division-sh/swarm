@@ -511,6 +511,39 @@ func (b *WorkflowContractBundle) ToolEntries() map[string]ToolSchemaEntry {
 	}
 	return cloneToolSchemaEntryMap(b.Tools)
 }
+
+// ToolEntryForFlow resolves a declaration before callers inspect its handler
+// kind. A nearer declaration shadows its ancestors, including a wrong kind.
+func (b *WorkflowContractBundle) ToolEntryForFlow(flowID, toolID string) (ToolSchemaEntry, bool) {
+	if b == nil || b.FlowTree.Root == nil || strings.TrimSpace(toolID) == "" {
+		return ToolSchemaEntry{}, false
+	}
+	views := []*FlowContractView{b.FlowTree.Root}
+	if strings.TrimSpace(flowID) != "" {
+		views = flowmodel.CollectPathByID(b.FlowTree.Root, flowID,
+			func(view *FlowContractView) string { return strings.TrimSpace(view.Paths.FlowPath) }, flowViewChildren)
+	}
+	for index := len(views) - 1; index >= 0; index-- {
+		if entry, ok := views[index].Tools[strings.TrimSpace(toolID)]; ok {
+			return entry, true
+		}
+	}
+	return ToolSchemaEntry{}, false
+}
+
+func (b *WorkflowContractBundle) ToolEntryForExecutableNode(node runtimeidentity.ExecutableNode, toolID string) (ToolSchemaEntry, bool) {
+	if b == nil || !node.Valid() {
+		return ToolSchemaEntry{}, false
+	}
+	scope, err := b.ExecutableNodeSemanticScope(node)
+	if err != nil {
+		return ToolSchemaEntry{}, false
+	}
+	if view, ok := scope.OwningFlow(); ok {
+		return b.ToolEntryForFlow(view.Paths.FlowPath, toolID)
+	}
+	return ToolSchemaEntry{}, false
+}
 func (b *WorkflowContractBundle) AuthoredEventEntries() map[string]EventCatalogEntry {
 	if b == nil {
 		return nil
@@ -588,9 +621,6 @@ func mergeContractPolicyDocument(target *PolicyDocument, overlay PolicyDocument)
 	if target.Validation == nil {
 		target.Validation = map[string]PolicyValidationSet{}
 	}
-	if target.Modules == nil {
-		target.Modules = map[string]PolicyModule{}
-	}
 	cloned := clonePolicyDocument(overlay)
 	for key, value := range cloned.Values {
 		target.Values[key] = value
@@ -600,9 +630,6 @@ func mergeContractPolicyDocument(target *PolicyDocument, overlay PolicyDocument)
 	}
 	for key, value := range cloned.Validation {
 		target.Validation[key] = value
-	}
-	for key, value := range cloned.Modules {
-		target.Modules[key] = value
 	}
 }
 func (b *WorkflowContractBundle) PolicyValueForFlow(flowID, key string) (PolicyValue, bool) {

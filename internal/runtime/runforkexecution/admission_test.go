@@ -733,7 +733,6 @@ func copySelectedForkConnectorFixture(t *testing.T, repoRoot string) string {
       chat_id: {type: string}
       text: {type: string}
     required: [chat_id, text]
-  output_schema: {type: object}
   response_success: {kind: http_status_2xx}
   http:
     method: POST

@@ -24,6 +24,40 @@ func decodeNodeTestSnippet(t interface {
 // projection. Other contract families still use their own YAML admission.
 func decodeNodeTestYAML(body []byte, target any) error {
 	switch out := target.(type) {
+	case *ToolInputSchema:
+		snapshot, err := yamlsource.Load(body)
+		if err != nil {
+			return err
+		}
+		*out, err = AdmitToolInputSchemaValue(snapshot.Document("tools.yaml").Root())
+		return err
+	case *ToolSchemaEntry:
+		snapshot, err := yamlsource.Load(body)
+		if err != nil {
+			return err
+		}
+		*out, err = projectToolValue(snapshot.Document("tools.yaml").Root())
+		return err
+	case *map[string]ToolSchemaEntry:
+		snapshot, err := yamlsource.Load(body)
+		if err != nil {
+			return err
+		}
+		*out, err = projectToolDeclarationsValue(snapshot.Document("tools.yaml").Root())
+		return err
+	case *struct {
+		Schema ToolInputSchema `yaml:"schema"`
+	}:
+		snapshot, err := yamlsource.Load(body)
+		if err != nil {
+			return err
+		}
+		lookup, err := snapshot.Document("tools.yaml").Root().Lookup("schema")
+		if err != nil {
+			return err
+		}
+		out.Schema, err = AdmitToolInputSchemaValue(lookup.Value)
+		return err
 	case *AgentRegistryEntry:
 		snapshot, err := yamlsource.Load(body)
 		if err != nil {

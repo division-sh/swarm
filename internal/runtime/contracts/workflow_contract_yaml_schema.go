@@ -104,214 +104,6 @@ func (p *EventPayloadSpec) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-func (s *ToolInputSchema) UnmarshalYAML(node *yaml.Node) error {
-	if s == nil {
-		return nil
-	}
-	if node == nil || node.Kind != yaml.MappingNode {
-		return fmt.Errorf("tool schema must be a mapping")
-	}
-	allowed := map[string]struct{}{
-		"type": {}, "description": {}, "properties": {}, "required": {}, "items": {}, "enum": {},
-		"additionalProperties": {}, "minimum": {}, "maximum": {}, "pattern": {},
-		"format": {}, "x-swarm-equalTo": {}, "minLength": {}, "maxLength": {}, "minItems": {}, "maxItems": {},
-	}
-	for index := 0; index < len(node.Content); index += 2 {
-		key := strings.TrimSpace(node.Content[index].Value)
-		if _, ok := allowed[key]; !ok {
-			return fmt.Errorf("tool schema field %q is unsupported", key)
-		}
-		value, err := resolveToolSchemaYAMLValue(node.Content[index+1])
-		if err != nil {
-			return fmt.Errorf("tool schema field %q: %w", key, err)
-		}
-		if value.Kind == yaml.ScalarNode && strings.EqualFold(strings.TrimSpace(value.Tag), "!!null") {
-			return fmt.Errorf("tool schema field %q must not be null", key)
-		}
-	}
-	type wire struct {
-		Type        string               `yaml:"type"`
-		Description string               `yaml:"description"`
-		Properties  map[string]yaml.Node `yaml:"properties"`
-		Required    []string             `yaml:"required"`
-		Items       *ToolInputSchema     `yaml:"items"`
-		Minimum     *float64             `yaml:"minimum"`
-		Maximum     *float64             `yaml:"maximum"`
-		Pattern     string               `yaml:"pattern"`
-		Format      string               `yaml:"format"`
-		EqualTo     string               `yaml:"x-swarm-equalTo"`
-		MinLength   *int                 `yaml:"minLength"`
-		MaxLength   *int                 `yaml:"maxLength"`
-		MinItems    *int                 `yaml:"minItems"`
-		MaxItems    *int                 `yaml:"maxItems"`
-	}
-	var decoded wire
-	if err := node.Decode(&decoded); err != nil {
-		return err
-	}
-	options := []ToolInputSchemaOption{ToolSchemaDescription(decoded.Description)}
-	if decoded.Properties != nil {
-		properties := make(map[string]ToolInputSchema, len(decoded.Properties))
-		equalities := make(map[string]string)
-		for name, propertyNode := range decoded.Properties {
-			property, equalTo, err := decodeToolSchemaProperty(propertyNode)
-			if err != nil {
-				return fmt.Errorf("tool schema property %q: %w", name, err)
-			}
-			properties[name] = property
-			if equalTo != "" {
-				equalities[name] = equalTo
-			}
-		}
-		options = append(options, ToolSchemaProperties(properties))
-		if len(equalities) > 0 {
-			options = append(options, toolSchemaPropertyEqualities(equalities))
-		}
-	}
-	if decoded.Required != nil {
-		options = append(options, ToolSchemaRequired(decoded.Required...))
-	}
-	if decoded.Items != nil {
-		options = append(options, ToolSchemaItems(*decoded.Items))
-	}
-	if decoded.Minimum != nil {
-		options = append(options, ToolSchemaMinimum(*decoded.Minimum))
-	}
-	if decoded.Maximum != nil {
-		options = append(options, ToolSchemaMaximum(*decoded.Maximum))
-	}
-	if decoded.Pattern != "" {
-		options = append(options, ToolSchemaPattern(decoded.Pattern))
-	}
-	if decoded.Format != "" {
-		options = append(options, ToolSchemaFormat(decoded.Format))
-	}
-	if decoded.EqualTo != "" {
-		options = append(options, ToolSchemaEqualTo(decoded.EqualTo))
-	}
-	if decoded.MinLength != nil {
-		options = append(options, ToolSchemaMinLength(*decoded.MinLength))
-	}
-	if decoded.MaxLength != nil {
-		options = append(options, ToolSchemaMaxLength(*decoded.MaxLength))
-	}
-	if decoded.MinItems != nil {
-		options = append(options, ToolSchemaMinItems(*decoded.MinItems))
-	}
-	if decoded.MaxItems != nil {
-		options = append(options, ToolSchemaMaxItems(*decoded.MaxItems))
-	}
-	for index := 0; index < len(node.Content); index += 2 {
-		switch strings.TrimSpace(node.Content[index].Value) {
-		case "enum":
-			enumNode, err := resolveToolSchemaYAMLValue(node.Content[index+1])
-			if err != nil {
-				return fmt.Errorf("tool schema enum: %w", err)
-			}
-			if enumNode.Kind != yaml.SequenceNode {
-				return fmt.Errorf("tool schema enum must be a sequence")
-			}
-			values := make([]any, 0, len(enumNode.Content))
-			for itemIndex, item := range enumNode.Content {
-				value, err := toolInputSchemaEnumLiteralValue(item)
-				if err != nil {
-					return fmt.Errorf("tool schema enum[%d]: %w", itemIndex, err)
-				}
-				values = append(values, value)
-			}
-			options = append(options, ToolSchemaEnum(values...))
-		case "additionalProperties":
-			additionalNode, err := resolveToolSchemaYAMLValue(node.Content[index+1])
-			if err != nil {
-				return fmt.Errorf("tool schema additionalProperties: %w", err)
-			}
-			switch additionalNode.Kind {
-			case yaml.ScalarNode:
-				var allowed bool
-				if err := additionalNode.Decode(&allowed); err != nil {
-					return fmt.Errorf("tool schema additionalProperties: %w", err)
-				}
-				options = append(options, ToolSchemaAdditionalPropertiesAllowed(allowed))
-			case yaml.MappingNode:
-				var additional ToolInputSchema
-				if err := additionalNode.Decode(&additional); err != nil {
-					return fmt.Errorf("tool schema additionalProperties: %w", err)
-				}
-				options = append(options, ToolSchemaAdditionalPropertiesSchema(additional))
-			default:
-				return fmt.Errorf("unsupported additionalProperties yaml node kind %d", additionalNode.Kind)
-			}
-		}
-	}
-	kind := ToolSchemaKind(decoded.Type)
-	if kind == "" && len(node.Content) == 0 {
-		kind = ToolSchemaAny
-	}
-	admitted, err := NewToolInputSchema(kind, options...)
-	if err != nil {
-		return fmt.Errorf("tool schema: %w", err)
-	}
-	*s = admitted
-	return nil
-}
-
-func decodeToolSchemaProperty(node yaml.Node) (ToolInputSchema, string, error) {
-	resolved, err := resolveToolSchemaYAMLValue(&node)
-	if err != nil {
-		return ToolInputSchema{}, "", err
-	}
-	if resolved.Kind != yaml.MappingNode {
-		return ToolInputSchema{}, "", fmt.Errorf("must be a mapping")
-	}
-	copyNode := *resolved
-	copyNode.Content = make([]*yaml.Node, 0, len(resolved.Content))
-	equalTo := ""
-	for index := 0; index < len(resolved.Content); index += 2 {
-		key := strings.TrimSpace(resolved.Content[index].Value)
-		if key != "x-swarm-equalTo" {
-			copyNode.Content = append(copyNode.Content, resolved.Content[index], resolved.Content[index+1])
-			continue
-		}
-		value, err := resolveToolSchemaYAMLValue(resolved.Content[index+1])
-		if err != nil {
-			return ToolInputSchema{}, "", err
-		}
-		if err := value.Decode(&equalTo); err != nil {
-			return ToolInputSchema{}, "", err
-		}
-		equalTo = strings.TrimSpace(equalTo)
-		if equalTo == "" {
-			return ToolInputSchema{}, "", fmt.Errorf("x-swarm-equalTo requires a valid field name")
-		}
-	}
-	var property ToolInputSchema
-	if err := copyNode.Decode(&property); err != nil {
-		return ToolInputSchema{}, "", err
-	}
-	return property, equalTo, nil
-}
-
-func resolveToolSchemaYAMLValue(node *yaml.Node) (*yaml.Node, error) {
-	seen := make(map[*yaml.Node]struct{})
-	for depth := 0; node != nil && node.Kind == yaml.AliasNode; depth++ {
-		if depth >= MaxToolInputSchemaDepth {
-			return nil, fmt.Errorf("YAML alias chain exceeds maximum depth %d", MaxToolInputSchemaDepth)
-		}
-		if _, exists := seen[node]; exists {
-			return nil, fmt.Errorf("YAML alias cycle")
-		}
-		seen[node] = struct{}{}
-		if node.Alias == nil {
-			return nil, fmt.Errorf("YAML alias has no target")
-		}
-		node = node.Alias
-	}
-	if node == nil {
-		return nil, fmt.Errorf("YAML value is missing")
-	}
-	return node, nil
-}
-
 func (d *PackInterfaceDefinition) UnmarshalYAML(node *yaml.Node) error {
 	if d == nil {
 		return nil
@@ -319,12 +111,26 @@ func (d *PackInterfaceDefinition) UnmarshalYAML(node *yaml.Node) error {
 	if err := rejectUnknownYAMLFields(node, "pack interface", "kind", "schemas", "operations", "events"); err != nil {
 		return err
 	}
-	type alias PackInterfaceDefinition
-	var decoded alias
+	var decoded struct {
+		Kind       string                            `yaml:"kind"`
+		Schemas    map[string]map[string]any         `yaml:"schemas"`
+		Operations map[string]PackInterfaceOperation `yaml:"operations"`
+		Events     map[string]PackInterfaceEvent     `yaml:"events"`
+	}
 	if err := node.Decode(&decoded); err != nil {
 		return err
 	}
-	*d = PackInterfaceDefinition(decoded)
+	*d = PackInterfaceDefinition{Kind: decoded.Kind, Operations: decoded.Operations, Events: decoded.Events}
+	if decoded.Schemas != nil {
+		d.Schemas = make(map[string]ToolInputSchema, len(decoded.Schemas))
+		for _, name := range sortedContractKeys(decoded.Schemas) {
+			schema, err := AdmitToolInputSchemaMap(decoded.Schemas[name])
+			if err != nil {
+				return fmt.Errorf("pack interface schemas.%s: %w", name, err)
+			}
+			d.Schemas[name] = schema
+		}
+	}
 	return nil
 }
 
@@ -390,86 +196,6 @@ func rejectUnknownYAMLFields(node *yaml.Node, subject string, allowed ...string)
 			return fmt.Errorf("%s field %q is unsupported", subject, field)
 		}
 	}
-	return nil
-}
-
-func (t *ToolSchemaEntry) UnmarshalYAML(node *yaml.Node) error {
-	if t == nil {
-		return nil
-	}
-	if hasYAMLMappingKey(node, "parameters") {
-		return fmt.Errorf("RETIRED: tool field %q is retired; use input_schema", "parameters")
-	}
-	if hasYAMLMappingKey(node, "returns") {
-		return fmt.Errorf("RETIRED: tool field %q is retired; use output_schema", "returns")
-	}
-	if hasYAMLMappingKey(node, "endpoint") {
-		return fmt.Errorf("RETIRED: tool field %q is not accepted; use http.url", "endpoint")
-	}
-	if hasYAMLMappingKey(node, "type") {
-		return fmt.Errorf("RETIRED: tool field %q is not accepted; use handler_type", "type")
-	}
-	if hasYAMLMappingKey(node, "required_permission") {
-		return fmt.Errorf("RETIRED: tool field %q is not accepted; use permission", "required_permission")
-	}
-	var aux struct {
-		Category          string                `yaml:"category,omitempty"`
-		Description       string                `yaml:"description,omitempty"`
-		HandlerType       string                `yaml:"handler_type,omitempty"`
-		EffectClass       string                `yaml:"effect_class,omitempty"`
-		Permission        string                `yaml:"permission,omitempty"`
-		RateLimit         string                `yaml:"rate_limit,omitempty"`
-		RateLimitMaxWait  string                `yaml:"rate_limit_max_wait,omitempty"`
-		InputSchema       ToolInputSchema       `yaml:"input_schema,omitempty"`
-		OutputSchema      ToolInputSchema       `yaml:"output_schema,omitempty"`
-		HTTP              *HTTPToolSpec         `yaml:"http,omitempty"`
-		ResponseMapping   map[string]any        `yaml:"response_mapping,omitempty"`
-		ResponseSuccess   *HTTPResponseSuccess  `yaml:"response_success,omitempty"`
-		Credentials       []string              `yaml:"credentials,omitempty"`
-		ManagedCredential *ManagedCredentialRef `yaml:"managed_credential,omitempty"`
-	}
-	if err := node.Decode(&aux); err != nil {
-		return err
-	}
-	handler, err := ParseToolHandlerKind(aux.HandlerType)
-	if err != nil {
-		return err
-	}
-	if aux.InputSchema.IsZero() {
-		aux.InputSchema = MustToolInputSchema(ToolSchemaObject)
-	}
-	if aux.OutputSchema.IsZero() {
-		aux.OutputSchema = MustToolInputSchema(ToolSchemaObject)
-	}
-	options := []ToolSchemaEntryOption{
-		WithToolCategory(aux.Category),
-		WithToolDescription(aux.Description),
-		WithToolHandler(handler),
-		WithToolEffect(ActivityEffectClass(aux.EffectClass)),
-		WithToolPermission(aux.Permission),
-		WithToolRateLimit(aux.RateLimit, aux.RateLimitMaxWait),
-		WithToolSchemas(aux.InputSchema, aux.OutputSchema),
-	}
-	if aux.HTTP != nil {
-		options = append(options, WithToolHTTP(*aux.HTTP))
-	}
-	if aux.ResponseMapping != nil {
-		options = append(options, WithToolResponseMapping(aux.ResponseMapping))
-	}
-	if aux.ResponseSuccess != nil {
-		options = append(options, WithToolResponseSuccess(*aux.ResponseSuccess))
-	}
-	if len(aux.Credentials) > 0 {
-		options = append(options, WithToolCredentials(aux.Credentials...))
-	}
-	if aux.ManagedCredential != nil {
-		options = append(options, WithToolManagedCredential(*aux.ManagedCredential))
-	}
-	admitted, err := NewToolSchemaEntry(options...)
-	if err != nil {
-		return err
-	}
-	*t = admitted
 	return nil
 }
 

@@ -19,8 +19,6 @@ tools:
       required:
         - channel
         - text
-    output_schema:
-      type: object
     response_success:
       kind: json_field_equals
       path: response.body.ok

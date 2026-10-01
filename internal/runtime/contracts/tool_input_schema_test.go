@@ -1,7 +1,7 @@
 package contracts
 
 import (
-	"fmt"
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"math"
 	"reflect"
 	"strings"
@@ -233,7 +233,7 @@ func TestToolInputSchemaRejectsExplicitNullForEveryKeyword(t *testing.T) {
 					err = decodeNodeTestYAML([]byte(body), &document)
 					schema = document.Schema
 				}
-				want := fmt.Sprintf("tool schema field %q must not be null", tc.keyword)
+				want := tc.keyword
 				if err == nil || !strings.Contains(err.Error(), want) {
 					t.Fatalf("yaml.Unmarshal error = %v, want %q; schema = %#v", err, want, schema)
 				}
@@ -270,8 +270,7 @@ schema:
 	cycleSchema := &yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{
 		{Kind: yaml.ScalarNode, Tag: "!!str", Value: "enum"}, cycleA,
 	}}
-	var schema ToolInputSchema
-	if err := schema.UnmarshalYAML(cycleSchema); err == nil || !strings.Contains(err.Error(), "YAML alias cycle") {
+	if _, err := AdmitToolInputSchemaValue(yamlsource.ValueFromNode(cycleSchema)); err == nil || !strings.Contains(err.Error(), "YAML-ALIAS-CYCLE") {
 		t.Fatalf("alias-cycle error = %v", err)
 	}
 }

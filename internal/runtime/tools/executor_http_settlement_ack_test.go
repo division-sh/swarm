@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
 )
 
@@ -103,7 +104,7 @@ func settledHTTPToolSource(url string) semanticview.Source {
 		runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
 			"receipt": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaString),
 		}), runtimecontracts.ToolSchemaRequired("receipt"))
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
+	entries := map[string]runtimecontracts.ToolSchemaEntry{
 		"settlement-proof": runtimecontracts.MustToolSchemaEntry(
 			runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
 			runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), output),
@@ -111,7 +112,17 @@ func settledHTTPToolSource(url string) semanticview.Source {
 			runtimecontracts.WithToolResponseSuccess(runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.ok", Equals: true}),
 			runtimecontracts.WithToolResponseMapping(map[string]any{"receipt": "{{response.body.receipt}}"}),
 		),
-	}})
+	}
+	moduleSource, err := yamlsource.Load([]byte("compute_only:\n  handler_type: wasm\n  path: modules/pinned.wasm\n  abi: core-json-v1\n  entry: compute\n  digest: sha256:" + strings.Repeat("0", 64) + "\n  input_schema: {type: object, properties: {value: {type: integer}}}\n  output_schema: {type: object, properties: {value: {type: integer}}}\n  limits: {gas: 100, memory_pages: 16, output_bytes: 1024}\n"))
+	if err != nil {
+		panic(err)
+	}
+	modules, err := runtimecontracts.AdmitToolDeclarationsValue(moduleSource.Document("tools.yaml").Root())
+	if err != nil {
+		panic(err)
+	}
+	entries["compute_only"] = modules["compute_only"]
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: entries})
 }
 
 func requireHTTPSettlementOutcome(t *testing.T, selected httpSettlementSelectedStore, operationID string, state runtimeeffects.State, count int) {
@@ -138,7 +149,7 @@ func TestHTTPToolAcknowledgedSettlementCleanupPreservesResponseBothStores(t *tes
 				t.Cleanup(cleanup)
 				selected = storetest.AdmitPostgresRuntimeStore(t, db)
 			}
-			ctx, _ := selectedHTTPSettlementContext(t, selected, "http-tool-settlement-ack")
+			ctx, actor := selectedHTTPSettlementContext(t, selected, "http-tool-settlement-ack")
 			fault := errors.New("injected post-commit completion handoff failure")
 			sink := &failingHTTPCompletionSink{err: fault}
 			registration, err := selected.RegisterCompletionCandidateSink(ctx, runtimerunlifecycle.CandidateScope{BundleHash: sourceartifactfixture.BundleHash}, sink)
@@ -165,6 +176,19 @@ func TestHTTPToolAcknowledgedSettlementCleanupPreservesResponseBothStores(t *tes
 				t.Fatal(err)
 			}
 			requireHTTPSettlementOutcome(t, selected, operationID, runtimeeffects.StateSettled, 1)
+			for _, definition := range executor.ToolDefinitionsForActorInContext(ctx, actor) {
+				if definition.Name == "compute_only" {
+					t.Fatal("module entered normal agent tools/list")
+				}
+			}
+			actor.Tools = append(actor.Tools, "compute_only")
+			if _, err := executor.Execute(runtimetools.WithActor(ctx, actor), "compute_only", map[string]any{"value": 1}); err == nil {
+				t.Fatal("forged module call reached normal agent executor")
+			}
+			requireHTTPSettlementOutcome(t, selected, operationID, runtimeeffects.StateSettled, 1)
+			if calls.Load() != 1 {
+				t.Fatal("module refusal changed external effect count")
+			}
 			var diagnosticFound bool
 			for _, entry := range bus.logs {
 				if entry.Action != "http_tool_settlement_post_commit_failure" {

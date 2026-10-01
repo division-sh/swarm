@@ -10,8 +10,18 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
 )
+
+func admitToolSchemaFixture(raw []byte, target *runtimecontracts.ToolInputSchema) error {
+	snapshot, err := yamlsource.Load(raw)
+	if err != nil {
+		return err
+	}
+	*target, err = runtimecontracts.AdmitToolInputSchemaValue(snapshot.Document("tools.yaml").Root())
+	return err
+}
 
 func TestContractDefinitionsForSource_UsesProvidedSource(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
@@ -92,7 +102,7 @@ func TestContractDefinitionsForSource_DoesNotExposeInternalRoutingStub(t *testin
 
 func TestContractDefinitionsForSource_EmitsCanonicalJSONSchema(t *testing.T) {
 	var schema runtimecontracts.ToolInputSchema
-	if err := yaml.Unmarshal([]byte(`
+	if err := admitToolSchemaFixture([]byte(`
 type: object
 properties:
   mode:
@@ -158,7 +168,7 @@ required: [mode]
 
 func TestProviderVisibleAndRuntimeToolSchemaPreserveNestedTypedEnumParity(t *testing.T) {
 	var schema runtimecontracts.ToolInputSchema
-	if err := yaml.Unmarshal([]byte(`
+	if err := admitToolSchemaFixture([]byte(`
 type: object
 properties:
   result:
@@ -211,7 +221,7 @@ required: [result]
 
 func TestExecutionToolProjectionConsumesExactCanonicalSchemaOwner(t *testing.T) {
 	var schema runtimecontracts.ToolInputSchema
-	if err := yaml.Unmarshal([]byte(`
+	if err := admitToolSchemaFixture([]byte(`
 type: object
 properties:
   state:

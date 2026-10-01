@@ -25,8 +25,6 @@ tools:
       required:
         - block_id
         - children
-    output_schema:
-      type: object
     response_success:
       kind: http_status_2xx
     http:

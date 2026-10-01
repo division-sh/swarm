@@ -71,6 +71,7 @@ import (
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *testing.T) {
@@ -2887,9 +2888,19 @@ func TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostile
 	}))
 	defer target.Close()
 
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
+	toolEntries := map[string]runtimecontracts.ToolSchemaEntry{
 		"selected_http": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass("write_or_unknown")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: http.MethodPost, URL: target.URL, TimeoutSeconds: 5})),
-	}})
+	}
+	moduleSource, err := yamlsource.Load([]byte("compute_only:\n  handler_type: wasm\n  path: modules/pinned.wasm\n  abi: core-json-v1\n  entry: compute\n  digest: sha256:" + strings.Repeat("0", 64) + "\n  input_schema: {type: object, properties: {value: {type: integer}}}\n  output_schema: {type: object, properties: {value: {type: integer}}}\n  limits: {gas: 100, memory_pages: 16, output_bytes: 1024}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	modules, err := runtimecontracts.AdmitToolDeclarationsValue(moduleSource.Document("tools.yaml").Root())
+	if err != nil {
+		t.Fatal(err)
+	}
+	toolEntries["compute_only"] = modules["compute_only"]
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: toolEntries})
 	executor := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{WorkflowSource: source})
 	actorIdentity := selectedContractTestAgentIdentityForRun(t, proof.ForkRunID, "selected-tool-agent", "global")
 	actor := runtimeactors.AgentConfig{
@@ -2935,6 +2946,11 @@ func TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostile
 	effectCtx = runtimeeffects.WithController(effectCtx, liveTestEffectController(storetest.AdmitPostgresRuntimeStore(t, db)))
 	effectCtx = managedexecution.WithAdmission(effectCtx, container.admission)
 	effectCtx = managedcapabilities.WithContext(effectCtx, surface)
+	for _, definition := range executor.ToolDefinitionsForActorInContext(effectCtx, actor) {
+		if definition.Name == "compute_only" {
+			t.Fatal("module entered selected-fork tools/list")
+		}
+	}
 	if _, err := executor.Execute(effectCtx, "selected_http", map[string]any{}); err != nil {
 		t.Fatalf("execute selected-fork authored HTTP tool: %v", err)
 	}
@@ -2958,6 +2974,15 @@ func TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostile
 	}
 	if persisted != 1 {
 		t.Fatalf("selected-fork HTTP effect evidence = %d, want 1", persisted)
+	}
+	forgedActor := actor
+	forgedActor.Tools = append(append([]string(nil), actor.Tools...), "compute_only")
+	if _, err := executor.Execute(runtimeactors.WithActor(effectCtx, forgedActor), "compute_only", map[string]any{"value": 1}); err == nil {
+		t.Fatal("forged module call acquired selected-fork authority")
+	}
+	var effectCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id WHERE o.selected_execution_id = $1::uuid`, proof.RuntimeExecutionID).Scan(&effectCount); err != nil || effectCount != 1 {
+		t.Fatalf("module refusal created an effect: count=%d err=%v", effectCount, err)
 	}
 
 	hostileAdmission, err := managedexecution.New(

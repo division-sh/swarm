@@ -702,11 +702,92 @@ func parseManifestStrict(body []byte) (Manifest, error) {
 			}
 		}
 	}
-	var manifest Manifest
+	schemas := []map[string]runtimecontracts.ToolInputSchema{}
+	if outputs.Presence != yamlsource.PresenceMissing {
+		if err := outputs.Value.ValidateExpansion(); err != nil {
+			return Manifest{}, err
+		}
+		items, err := outputs.Value.Sequence()
+		if err != nil {
+			return Manifest{}, err
+		}
+		for _, item := range items {
+			fields, err := item.Lookup("fields")
+			if err != nil {
+				return Manifest{}, err
+			}
+			members, err := fields.Value.Mapping()
+			if err != nil {
+				return Manifest{}, err
+			}
+			admitted := map[string]runtimecontracts.ToolInputSchema{}
+			for _, member := range members {
+				retired, err := member.Value.Lookup("type")
+				if err != nil {
+					return Manifest{}, err
+				}
+				if retired.Presence != yamlsource.PresenceMissing {
+					return Manifest{}, fmt.Errorf("RETIRED: normalized field type is unsupported; use schema at %s", retired.Value.Location())
+				}
+				child, err := member.Value.Lookup("schema")
+				if err != nil {
+					return Manifest{}, err
+				}
+				schema, err := runtimecontracts.AdmitToolInputSchemaValue(child.Value)
+				if err != nil {
+					return Manifest{}, err
+				}
+				admitted[member.Name] = schema
+			}
+			schemas = append(schemas, admitted)
+		}
+	}
+	var wire struct {
+		Provider              string             `yaml:"provider"`
+		PayloadObjectRequired bool               `yaml:"payload_object_required"`
+		PayloadObjectError    string             `yaml:"payload_object_error"`
+		PayloadSource         string             `yaml:"payload_source"`
+		Secret                SecretManifest     `yaml:"secret"`
+		Signature             SignatureManifest  `yaml:"signature"`
+		Challenge             *ChallengeManifest `yaml:"challenge"`
+		DeliveryCondition     *ConditionManifest `yaml:"delivery_condition"`
+		DeliveryID            ValueSource        `yaml:"delivery_id"`
+		EventType             ValueSource        `yaml:"event_type"`
+		EventName             EventNameManifest  `yaml:"event_name"`
+		NormalizedEvents      []struct {
+			Event  string `yaml:"event"`
+			Fields map[string]struct {
+				From     string            `yaml:"from"`
+				Schema   map[string]any    `yaml:"schema"`
+				Optional bool              `yaml:"optional,omitempty"`
+				Convert  string            `yaml:"convert,omitempty"`
+				Values   map[string]string `yaml:"values,omitempty"`
+			} `yaml:"fields"`
+			When          NormalizedEventWhen   `yaml:"when,omitempty"`
+			AuthorSubject AuthorSubjectManifest `yaml:"author_subject,omitempty"`
+		} `yaml:"normalized_events,omitempty"`
+		Ack        AckManifest       `yaml:"ack"`
+		RedactKeys []string          `yaml:"redact_keys"`
+		Metadata   map[string]string `yaml:"metadata"`
+	}
 	decoder := yaml.NewDecoder(bytes.NewReader(body))
 	decoder.KnownFields(true)
-	if err := decoder.Decode(&manifest); err != nil {
+	if err := decoder.Decode(&wire); err != nil {
 		return Manifest{}, err
+	}
+	manifest := Manifest{
+		Provider: wire.Provider, PayloadObjectRequired: wire.PayloadObjectRequired, PayloadObjectError: wire.PayloadObjectError,
+		PayloadSource: wire.PayloadSource, Secret: wire.Secret, Signature: wire.Signature, Challenge: wire.Challenge,
+		DeliveryCondition: wire.DeliveryCondition, DeliveryID: wire.DeliveryID, EventType: wire.EventType, EventName: wire.EventName,
+		Ack: wire.Ack, RedactKeys: wire.RedactKeys, Metadata: wire.Metadata,
+	}
+	for index, row := range wire.NormalizedEvents {
+		entry := NormalizedEventManifest{Event: row.Event, Fields: map[string]NormalizedEventFieldProjection{}, When: row.When, AuthorSubject: row.AuthorSubject}
+		for name, field := range row.Fields {
+			schema := schemas[index][name]
+			entry.Fields[name] = NormalizedEventFieldProjection{From: field.From, Schema: schema, Optional: field.Optional, Convert: field.Convert, Values: field.Values}
+		}
+		manifest.NormalizedEvents = append(manifest.NormalizedEvents, entry)
 	}
 	return manifest, nil
 }

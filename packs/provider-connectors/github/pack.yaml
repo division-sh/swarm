@@ -2,7 +2,7 @@ id: provider.github.connector
 version: 0.1.0
 platform_version: '>=0.7.0 <0.8.0'
 type: connector
-manifest_hash: sha256:0b98833e215f2801b51de6c7ca8828ed1d410dec6b6785f5618363e64a7c73ad
+manifest_hash: sha256:95cf8119c6f2efdb6916298dc9162d117f60a4333120b5f4c7edbb951c512118
 provenance:
     source: platform
 capabilities:

@@ -27,8 +27,6 @@ tools:
         - to_recipients
         - subject
         - content
-    output_schema:
-      type: object
     response_success:
       kind: http_status_2xx
     http:

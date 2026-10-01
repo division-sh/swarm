@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -17,6 +18,8 @@ const (
 	ToolHandlerHTTP
 	ToolHandlerMCP
 	ToolHandlerChannel
+	ToolHandlerWasm
+	ToolHandlerPython
 )
 
 func (k ToolHandlerKind) String() string {
@@ -31,6 +34,10 @@ func (k ToolHandlerKind) String() string {
 		return "mcp"
 	case ToolHandlerChannel:
 		return "channel"
+	case ToolHandlerWasm:
+		return "wasm"
+	case ToolHandlerPython:
+		return "python"
 	default:
 		return ""
 	}
@@ -48,6 +55,10 @@ func ParseToolHandlerKind(raw string) (ToolHandlerKind, error) {
 		return ToolHandlerMCP, nil
 	case "channel":
 		return ToolHandlerChannel, nil
+	case "wasm":
+		return ToolHandlerWasm, nil
+	case "python":
+		return ToolHandlerPython, nil
 	default:
 		return ToolHandlerUnspecified, fmt.Errorf("unsupported handler_type %q", raw)
 	}
@@ -84,12 +95,14 @@ type toolSchemaEntryValue struct {
 	hasManagedCredential bool
 	compiledResult       ToolCompiledResultProjection
 	hasCompiledResult    bool
+	module               *PolicyModule
 }
 
 // ToolSchemaEntry is the immutable admitted tool execution contract. Authored
 // syntax and caller-owned maps terminate at its constructors.
 type ToolSchemaEntry struct {
-	value *toolSchemaEntryValue
+	value               *toolSchemaEntryValue
+	admissionProvenance map[string]EffectiveValueProvenance
 }
 
 type toolSchemaEntryDraft struct {
@@ -349,7 +362,7 @@ func (e ToolSchemaEntry) validate() error {
 	if (e.value.hasResponseMapping || e.value.hasResponseSuccess) && e.value.handler != ToolHandlerHTTP {
 		return fmt.Errorf("HTTP response execution semantics require handler_type http")
 	}
-	return nil
+	return e.validateModule()
 }
 
 func (e ToolSchemaEntry) IsZero() bool { return e.value == nil }
@@ -653,7 +666,7 @@ func (e ToolSchemaEntry) CanonicalValue() (map[string]any, error) {
 		"generated_schema": e.value.generatedSchema,
 	}
 	if e.value.hasHTTP {
-		out["http"] = e.value.http.syntax()
+		out["http"] = e.value.http.syntax().declarationValue()
 	}
 	if e.value.hasMCP {
 		out["mcp"] = map[string]any{"server": e.value.mcp.Server(), "remote": e.value.mcp.Remote()}
@@ -662,13 +675,25 @@ func (e ToolSchemaEntry) CanonicalValue() (map[string]any, error) {
 		out["response_mapping"] = e.value.responseMapping.syntax()
 	}
 	if e.value.hasResponseSuccess {
-		out["response_success"] = e.value.responseSuccess.syntax()
+		out["response_success"] = e.value.responseSuccess.syntax().declarationValue()
 	}
 	if e.value.hasManagedCredential {
 		out["managed_credential"] = e.value.managedCredential.syntax()
 	}
 	if e.value.hasCompiledResult {
 		out["compiled_result"] = e.value.compiledResult.syntax()
+	}
+	if module, present := e.Module(); present {
+		for name, value := range module.declarationValue() {
+			out[name] = value
+		}
+		// Configuration integers are not semantic JSON payload numbers. Preserve
+		// their full ABI range in identity evidence without rounding or narrowing.
+		out["limits"] = map[string]string{
+			"gas":          strconv.FormatUint(module.Limits.Gas, 10),
+			"memory_pages": strconv.FormatUint(uint64(module.Limits.MemoryPages), 10),
+			"output_bytes": strconv.Itoa(module.Limits.OutputBytes),
+		}
 	}
 	return out, nil
 }
@@ -685,47 +710,49 @@ func (e ToolSchemaEntry) MarshalYAML() (any, error) {
 	if err := e.validate(); err != nil {
 		return nil, err
 	}
-	type authoredToolYAML struct {
-		Category          string                `yaml:"category,omitempty"`
-		Description       string                `yaml:"description,omitempty"`
-		HandlerType       string                `yaml:"handler_type,omitempty"`
-		EffectClass       string                `yaml:"effect_class,omitempty"`
-		Permission        string                `yaml:"permission,omitempty"`
-		RateLimit         string                `yaml:"rate_limit,omitempty"`
-		RateLimitMaxWait  string                `yaml:"rate_limit_max_wait,omitempty"`
-		InputSchema       ToolInputSchema       `yaml:"input_schema"`
-		OutputSchema      ToolInputSchema       `yaml:"output_schema"`
-		HTTP              *HTTPToolSpec         `yaml:"http,omitempty"`
-		ResponseMapping   map[string]any        `yaml:"response_mapping,omitempty"`
-		ResponseSuccess   *HTTPResponseSuccess  `yaml:"response_success,omitempty"`
-		Credentials       []string              `yaml:"credentials,omitempty"`
-		ManagedCredential *ManagedCredentialRef `yaml:"managed_credential,omitempty"`
+	if module, present := e.Module(); present {
+		out := module.declarationValue()
+		if e.Description() != "" {
+			out["description"] = e.Description()
+		}
+		return out, nil
 	}
-	out := authoredToolYAML{
-		Category:     e.Category().String(),
-		Description:  e.Description(),
-		HandlerType:  e.Handler().String(),
-		EffectClass:  string(e.Effect()),
-		Permission:   e.Permission().String(),
-		InputSchema:  e.InputSchema(),
-		OutputSchema: e.OutputSchema(),
-		Credentials:  e.Credentials(),
+	out := map[string]any{}
+	for key, value := range map[string]string{"category": e.Category().String(), "description": e.Description(), "handler_type": e.Handler().String(), "effect_class": string(e.Effect()), "permission": e.Permission().String()} {
+		if value != "" {
+			out[key] = value
+		}
 	}
-	out.RateLimit, out.RateLimitMaxWait = e.RatePolicy().Syntax()
+	rate, wait := e.RatePolicy().Syntax()
+	if rate != "" {
+		out["rate_limit"] = rate
+	}
+	if wait != "" {
+		out["rate_limit_max_wait"] = wait
+	}
+	defaultSchema := MustToolInputSchema(ToolSchemaObject)
+	for key, schema := range map[string]ToolInputSchema{"input_schema": e.InputSchema(), "output_schema": e.OutputSchema()} {
+		if !schema.Equal(defaultSchema) {
+			out[key] = schema
+		}
+	}
+	if len(e.Credentials()) > 0 {
+		out["credentials"] = e.Credentials()
+	}
 	if value, ok := e.HTTP(); ok {
-		out.HTTP = &value
+		out["http"] = value.declarationValue()
 	}
 	if value, ok := e.ResponseMapping(); ok {
-		out.ResponseMapping = value
+		out["response_mapping"] = value
 	}
 	if value, ok := e.ResponseSuccess(); ok {
-		out.ResponseSuccess = &value
+		out["response_success"] = value.declarationValue()
 	}
 	if value, ok := e.ManagedCredential(); ok {
 		if managedcredentialmodel.TokenRequestProfileEqual(value.TokenRequest, managedcredentialmodel.DefaultTokenRequestProfile()) {
 			value.TokenRequest = managedcredentialmodel.TokenRequestProfile{}
 		}
-		out.ManagedCredential = &value
+		out["managed_credential"] = value
 	}
 	return out, nil
 }

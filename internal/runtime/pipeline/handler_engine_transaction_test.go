@@ -499,6 +499,7 @@ func pipelineSourceWithStructuredRendererModule(t *testing.T, outputSchema map[s
 	}
 	sum := sha256.Sum256(raw)
 	module := runtimecontracts.PolicyModule{
+		Kind:   "wasm",
 		Path:   "modules/structured_renderer.wasm",
 		ABI:    computemodule.ABI,
 		Entry:  computemodule.DefaultEntry,
@@ -528,7 +529,7 @@ func pipelineSourceWithStructuredRendererModule(t *testing.T, outputSchema map[s
 	if err != nil {
 		t.Fatal(err)
 	}
-	bundle.FlowTree.Root.Policy.Modules = map[string]runtimecontracts.PolicyModule{"structured_renderer": module}
+	bundle.FlowTree.Root.Tools = map[string]runtimecontracts.ToolSchemaEntry{"structured_renderer": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind(module.Kind)), runtimecontracts.WithToolModule(module))}
 	return semanticview.Wrap(bundle)
 }
 

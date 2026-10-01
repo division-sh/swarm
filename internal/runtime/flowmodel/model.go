@@ -12,7 +12,6 @@ type PolicyDocument struct {
 	Values     map[string]PolicyValue         `yaml:",inline"`
 	Criteria   map[string]PolicyCriteriaSet   `yaml:"criteria,omitempty"`
 	Validation map[string]PolicyValidationSet `yaml:"validation,omitempty"`
-	Modules    map[string]PolicyModule        `yaml:"modules,omitempty"`
 }
 
 type PolicyValue struct {
@@ -69,33 +68,6 @@ type PolicyValidationEqualCheck struct {
 	Right string `yaml:"right"`
 }
 
-type PolicyModule struct {
-	Path         string              `yaml:"path"`
-	Kind         string              `yaml:"kind"`
-	ABI          string              `yaml:"abi"`
-	Entry        string              `yaml:"entry"`
-	Digest       string              `yaml:"digest"`
-	SourcePath   string              `yaml:"source_path"`
-	SourceHash   string              `yaml:"source_hash"`
-	Runtime      PolicyModuleRuntime `yaml:"runtime"`
-	InputSchema  map[string]any      `yaml:"input_schema"`
-	OutputSchema map[string]any      `yaml:"output_schema"`
-	Limits       PolicyModuleLimits  `yaml:"limits"`
-}
-
-type PolicyModuleRuntime struct {
-	Interpreter       string `yaml:"interpreter"`
-	InterpreterDigest string `yaml:"interpreter_digest"`
-	SnapshotDigest    string `yaml:"snapshot_digest"`
-	HarnessABI        string `yaml:"harness_abi"`
-}
-
-type PolicyModuleLimits struct {
-	Gas         uint64 `yaml:"gas"`
-	MemoryPages uint32 `yaml:"memory_pages"`
-	OutputBytes int    `yaml:"output_bytes"`
-}
-
 type Tree[T any] struct {
 	Root   *T
 	ByPath map[string]*T
@@ -148,7 +120,6 @@ func ProjectPolicyDocument(root yamlsource.Value) (PolicyDocument, error) {
 	values := map[string]PolicyValue{}
 	criteria := map[string]PolicyCriteriaSet{}
 	validation := map[string]PolicyValidationSet{}
-	modules := map[string]PolicyModule{}
 	for _, field := range fields {
 		key := strings.TrimSpace(field.Name)
 		if key == "" {
@@ -167,10 +138,7 @@ func ProjectPolicyDocument(root yamlsource.Value) (PolicyDocument, error) {
 			continue
 		}
 		if key == "modules" {
-			if err := field.Value.Project(&modules); err != nil {
-				return PolicyDocument{}, fmt.Errorf("policy modules: %w", err)
-			}
-			continue
+			return PolicyDocument{}, fmt.Errorf("policy.modules is retired; declare flat tools.yaml entries with handler_type: wasm or python")
 		}
 		var value PolicyValue
 		if err := field.Value.Project(&value); err != nil {
@@ -178,76 +146,7 @@ func ProjectPolicyDocument(root yamlsource.Value) (PolicyDocument, error) {
 		}
 		values[key] = value
 	}
-	return PolicyDocument{Values: values, Criteria: criteria, Validation: validation, Modules: modules}, nil
-}
-
-func (m *PolicyModule) UnmarshalYAML(node *yaml.Node) error {
-	if m == nil {
-		return nil
-	}
-	if err := validateYAMLMappingKeys(node, "policy module", map[string]struct{}{
-		"path":          {},
-		"kind":          {},
-		"abi":           {},
-		"entry":         {},
-		"digest":        {},
-		"source_path":   {},
-		"source_hash":   {},
-		"runtime":       {},
-		"input_schema":  {},
-		"output_schema": {},
-		"limits":        {},
-	}); err != nil {
-		return err
-	}
-	type alias PolicyModule
-	var aux alias
-	if err := node.Decode(&aux); err != nil {
-		return err
-	}
-	*m = PolicyModule(aux)
-	return nil
-}
-
-func (r *PolicyModuleRuntime) UnmarshalYAML(node *yaml.Node) error {
-	if r == nil {
-		return nil
-	}
-	if err := validateYAMLMappingKeys(node, "policy module runtime", map[string]struct{}{
-		"interpreter":        {},
-		"interpreter_digest": {},
-		"snapshot_digest":    {},
-		"harness_abi":        {},
-	}); err != nil {
-		return err
-	}
-	type alias PolicyModuleRuntime
-	var aux alias
-	if err := node.Decode(&aux); err != nil {
-		return err
-	}
-	*r = PolicyModuleRuntime(aux)
-	return nil
-}
-
-func (l *PolicyModuleLimits) UnmarshalYAML(node *yaml.Node) error {
-	if l == nil {
-		return nil
-	}
-	if err := validateYAMLMappingKeys(node, "policy module limits", map[string]struct{}{
-		"gas":          {},
-		"memory_pages": {},
-		"output_bytes": {},
-	}); err != nil {
-		return err
-	}
-	type alias PolicyModuleLimits
-	var aux alias
-	if err := node.Decode(&aux); err != nil {
-		return err
-	}
-	*l = PolicyModuleLimits(aux)
-	return nil
+	return PolicyDocument{Values: values, Criteria: criteria, Validation: validation}, nil
 }
 
 func (v *PolicyValue) UnmarshalYAML(node *yaml.Node) error {

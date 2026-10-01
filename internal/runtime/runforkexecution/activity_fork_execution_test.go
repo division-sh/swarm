@@ -472,8 +472,6 @@ loops:
 		"tools.yaml": fmt.Sprintf(`provider.connector:
   handler_type: http
   effect_class: %s
-  input_schema: {type: object}
-  output_schema: {type: object}
   http: {method: POST, url: %q}
 `, effectClass, serverURL),
 	} {

@@ -146,7 +146,6 @@ source_scrape:
     type: object
     required: [url]
     properties: {url: {type: string}}
-  output_schema: {type: object}
 `)
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 	if err != nil {

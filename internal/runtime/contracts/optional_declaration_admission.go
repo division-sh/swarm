@@ -112,7 +112,7 @@ func loadOptionalPolicyDeclarationsFromSource(artifact *sourceartifact.AdmittedS
 	if err != nil {
 		return PolicyDocument{}, wrapLoaderDiagnosticFile(err, label)
 	}
-	count := len(document.Values) + len(document.Criteria) + len(document.Validation) + len(document.Modules)
+	count := len(document.Values) + len(document.Criteria) + len(document.Validation)
 	return document, admission.RequireLive(count)
 }
 
@@ -121,8 +121,8 @@ func loadOptionalToolDeclarationsFromSource(artifact *sourceartifact.AdmittedSou
 	if err != nil || !present {
 		return map[string]ToolSchemaEntry{}, err
 	}
-	entries := map[string]ToolSchemaEntry{}
-	if err := artifact.DecodeYAML(label, &entries); err != nil {
+	entries, err := projectToolDeclarationsValue(admission.document.Root())
+	if err != nil {
 		return nil, wrapLoaderDiagnosticFile(err, label)
 	}
 	return entries, admission.RequireLive(len(entries))
@@ -214,7 +214,7 @@ func loadOptionalPolicyDeclarations(path string) (PolicyDocument, error) {
 	if err != nil {
 		return PolicyDocument{}, wrapLoaderDiagnosticFile(err, path)
 	}
-	count := len(document.Values) + len(document.Criteria) + len(document.Validation) + len(document.Modules)
+	count := len(document.Values) + len(document.Criteria) + len(document.Validation)
 	return document, admission.RequireLive(count)
 }
 
@@ -223,8 +223,8 @@ func loadOptionalToolDeclarations(path string) (map[string]ToolSchemaEntry, erro
 	if err != nil || !present {
 		return map[string]ToolSchemaEntry{}, err
 	}
-	entries := map[string]ToolSchemaEntry{}
-	if err := admission.source.Decode(&entries); err != nil {
+	entries, err := projectToolDeclarationsValue(admission.document.Root())
+	if err != nil {
 		return nil, wrapLoaderDiagnosticFile(err, path)
 	}
 	return entries, admission.RequireLive(len(entries))

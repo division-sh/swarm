@@ -824,8 +824,6 @@ func writeDoctorMockExecutionFixture(t *testing.T, options doctorMockExecutionFi
 		writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `
 shell:
   description: execute a shell command
-  input_schema:
-    type: object
   output_schema:
     type: object
 `)
@@ -887,8 +885,6 @@ telegram.send_message:
         type: string
       text:
         type: string
-  output_schema:
-    type: object
   response_success:
     kind: http_status_2xx
   http:
