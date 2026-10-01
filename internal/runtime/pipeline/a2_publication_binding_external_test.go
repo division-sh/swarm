@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -26,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"github.com/google/uuid"
@@ -129,15 +129,13 @@ func testA2StageEntryPublicationBinding(t *testing.T, scenarios []int) {
 				runID := uuid.NewString()
 				insertGateRecoveryRun(t, selected, runID)
 				ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
-				files := a2PayloadDirectedJoinFiles()
+				variant := canonicalrouting.ArrivalJoinPayloadDirected
 				flows := []string{"orders", "orders"}
 				if multipleRecipients {
 					flows[1] = "mirror"
-					files["schema.yaml"] += "  - {event: item.completed, from: ., to: mirror, resolution: select}\n"
-					for _, name := range []string{"schema.yaml", "entities.yaml", "events.yaml", "nodes.yaml"} {
-						files["mirror/"+name] = strings.Replace(files["orders/"+name], "name: orders", "name: mirror", 1)
-					}
+					variant = canonicalrouting.ArrivalJoinPayloadDirectedMultipleRecipients
 				}
+				files := canonicalrouting.ArrivalJoinRoutingFiles(t, variant)
 				source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, files))
 				worker := externalPipelineSourceNode(t, source, ".", "worker")
 				collectors := []identity.ExecutableNode{externalPipelineSourceNode(t, source, flows[0], "collector"), externalPipelineSourceNode(t, source, flows[1], "collector")}
@@ -555,59 +553,5 @@ func testA2StageEntryPublicationBinding(t *testing.T, scenarios []int) {
 				}
 			})
 		}
-	}
-}
-
-func a2PayloadDirectedJoinFiles() map[string]string {
-	return map[string]string{
-		"schema.yaml":   "name: a2-publication-binding\nstages:\n  active: {initial: true}\npins:\n  inputs:\n    events: [work.requested]\n  outputs:\n    events: [item.completed]\nconnect:\n  - {event: item.completed, from: ., to: orders, resolution: select}\n",
-		"entities.yaml": "root_state:\n  work_count: {type: integer, initial: 0}\n",
-		"events.yaml":   "work.requested:\n  prefix: text\n  suffix: text\nitem.completed:\n  order_id: text\n  member_id: text\n  result: JoinResult\n",
-		"types.yaml":    "types:\n  JoinResult:\n    value: text\n",
-		"nodes.yaml": `worker:
-  execution_type: system_node
-  event_handlers:
-    work.requested:
-      data_accumulation:
-        writes:
-          - {target_field: work_count, value: "${entity.work_count + 1}"}
-      emit:
-        event: item.completed
-        fields:
-          order_id: "${payload.prefix + payload.suffix}"
-          member_id: a
-          result: {value: computed-by-worker}
-`,
-		"orders/schema.yaml": `name: orders
-instance: order_id
-stages:
-  awaiting: {initial: true}
-  dispatching: {}
-  ready: {terminal: true}
-  attention: {terminal: true}
-pins:
-  inputs:
-    events:
-      - item.completed
-`,
-		"orders/entities.yaml": "order_state:\n  order_id: {type: text, indexed: true}\n  expected: \"[text]\"\n",
-		"orders/events.yaml":   "manual.abort:\ndispatch.completed:\n",
-		"orders/nodes.yaml": `collector:
-  execution_type: system_node
-  event_handlers:
-    item.completed:
-      join:
-        stage: awaiting
-        members: {from: state.expected, by: payload.member_id}
-        output: payload.result
-        deadline: {after: 1h, from: stage_entry}
-        on_complete: {advances_to: ready}
-        on_deadline: {advances_to: attention}
-dispatcher:
-  execution_type: system_node
-  event_handlers:
-    manual.abort: {advances_to: dispatching}
-    dispatch.completed: {advances_to: awaiting}
-`,
 	}
 }

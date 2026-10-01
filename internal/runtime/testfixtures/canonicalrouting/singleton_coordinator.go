@@ -194,7 +194,15 @@ types:
 // contained-state demand or a supported singleton coordinator variant.
 func writeRetiredFanInSingletonCoordinatorFlow(t testing.TB, root string) {
 	t.Helper()
-	writeSingletonCoordinatorFile(t, root, "coordinator/schema.yaml", `name: coordinator
+	writeSingletonCoordinatorFile(t, root, "coordinator/schema.yaml", RetiredFanInCoordinatorSchema())
+	writeSingletonCoordinatorFile(t, root, "coordinator/entities.yaml", "coordinator_state: {}\n")
+	writeSingletonCoordinatorFile(t, root, "coordinator/events.yaml", "job.received:\n  vertical_id: text\n")
+}
+
+// RetiredFanInCoordinatorSchema exposes the exact rejection specimen for
+// admission and syntax-guard proof; it is not a supported coordinator shape.
+func RetiredFanInCoordinatorSchema() string {
+	return `name: coordinator
 pins:
   inputs:
     events:
@@ -206,9 +214,7 @@ pins:
           window: payload.vertical_id
           dedup_by: [event.id]
           singleton: coordinator
-`)
-	writeSingletonCoordinatorFile(t, root, "coordinator/entities.yaml", "coordinator_state: {}\n")
-	writeSingletonCoordinatorFile(t, root, "coordinator/events.yaml", "job.received:\n  vertical_id: text\n")
+`
 }
 
 func singletonCoordinatorWritesYAML(t testing.TB, variant SingletonCoordinatorPilotVariant) string {

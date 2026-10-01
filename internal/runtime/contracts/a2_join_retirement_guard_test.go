@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -17,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"gopkg.in/yaml.v3"
 )
 
@@ -214,25 +216,19 @@ func a2RetiredGoViolations(path string, raw []byte) ([]string, error) {
 	return violations, nil
 }
 
-// Only this exact rejection specimen is exempt, not its file or function. The
-// companion test checks both the generator and the actual admission owner.
-const a2RetiredCoordinatorSchema = `name: coordinator
-pins:
-  inputs:
-    events:
-      - event: job.received
-        source: harness
-        resolution:
-          mode: fan-in
-          aggregation: stream
-          window: payload.vertical_id
-          dedup_by: [event.id]
-          singleton: coordinator
-`
-
+// These exact byte-pinned syntax/rejection specimens are not executable
+// positive sources. Companion controls reject changed bytes, scope and path.
 func a2NegativeGeneratorSpecimen(path, scope, source string) bool {
-	return path == "internal/runtime/testfixtures/canonicalrouting/singleton_coordinator.go" &&
-		scope == "writeRetiredFanInSingletonCoordinatorFlow" && source == a2RetiredCoordinatorSchema
+	var digest string
+	switch {
+	case path == "internal/runtime/testfixtures/canonicalrouting/singleton_coordinator.go" && scope == "RetiredFanInCoordinatorSchema":
+		digest = "e5ddef48d633a35f84af0ef9dccaa077b81d528b7cfc1953efd6aa4267a94747"
+	case path == "internal/runtime/testfixtures/canonicalrouting/arrival_join_guard_sources.go" && scope == "ArrivalJoinRetirementGuardCases":
+		digest = "08e97be9242a1251a056a50fe4e4c166519f0705bb2a87cbe620a373ce2cb8bf"
+	default:
+		return false
+	}
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(source))) == digest
 }
 
 func a2RetiredIdentifier(path, name string) bool {
@@ -533,34 +529,34 @@ func decode(v any) {
 	if err != nil || len(found) != 0 {
 		t.Fatalf("business homonyms, rejection diagnostics or reply/fan-out overblocked: %v, %v", found, err)
 	}
-	const yamlSource = `pins:
-  inputs:
-    events:
-      - {event: requested, resolution: {mode: fan-out}}
-      - {event: replied, resolution: {mode: reply, replies_to: requested, correlation_key: task_id}}
-worker:
-  event_handlers:
-    arrived:
-      accumulate: {into: reports, from: payload, key: payload.id}
-      data_accumulation:
-        writes: [{op: set, target: entity.window, value: '${payload.aggregation}'}]
-      emit: {event: forwarded, fields: {window: '${payload.window}', dedup_by: '${payload.dedup_by}', aggregation: '${payload.aggregation}'}}
-    batch:
-      join: {id: children, members: {from_fan_out: true}, on_complete: {emit: done}}
-business_event:
-  window: text
-  aggregation: text
-  dedup_by: text
-`
-	found, err = a2RetiredYAMLViolations("homonyms.yaml", yamlSource)
-	if err != nil || len(found) != 0 {
-		t.Fatalf("business YAML or retained variants overblocked: %v, %v", found, err)
+	for _, specimen := range canonicalrouting.ArrivalJoinRetirementGuardCases() {
+		if specimen.Name == "homonyms" {
+			found, err = a2RetiredYAMLViolations("homonyms.yaml", specimen.Source)
+			if err != nil || len(found) != 0 {
+				t.Fatalf("business YAML or retained variants overblocked: %v, %v", found, err)
+			}
+			return
+		}
 	}
+	t.Fatal("homonym guard specimen is missing")
 }
 
 func TestA2JoinRetirementGuardNegativeSpecimenIsExactAndRejected(t *testing.T) {
 	const path = "internal/runtime/testfixtures/canonicalrouting/singleton_coordinator.go"
-	const scope = "writeRetiredFanInSingletonCoordinatorFlow"
+	const scope = "RetiredFanInCoordinatorSchema"
+	source := canonicalrouting.RetiredFanInCoordinatorSchema()
+	a2AssertExactNegativeGeneratorSpecimen(t, path, scope, source)
+	var schema FlowSchemaDocument
+	if err := decodeNodeTestYAML([]byte(source), &schema); err == nil || !strings.Contains(err.Error(), "resolution") {
+		t.Fatalf("whitelisted negative schema is no longer rejected at resolution admission: %v", err)
+	}
+	if mode, err := ParseFlowInputResolutionMode("fan-in"); err == nil || mode.Valid() {
+		t.Fatalf("retired mode admitted independently of other retired fields: %v, %v", mode, err)
+	}
+}
+
+func a2AssertExactNegativeGeneratorSpecimen(t *testing.T, path, scope, source string) {
+	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(a2GuardRepoRoot(t), filepath.FromSlash(path)))
 	if err != nil {
 		t.Fatal(err)
@@ -584,29 +580,31 @@ func TestA2JoinRetirementGuardNegativeSpecimenIsExactAndRejected(t *testing.T) {
 		t.Fatalf("negative-generator exception is stale: matched %d exact specimens; update or remove it", count)
 	}
 	for _, test := range []struct{ path, scope, source string }{
-		{path, scope, a2RetiredCoordinatorSchema + "description: new\n"},
-		{path, "positiveFixture", a2RetiredCoordinatorSchema},
-		{"internal/runtime/testfixtures/canonicalrouting/another.go", scope, a2RetiredCoordinatorSchema},
+		{path, scope, source + "description: new\n"},
+		{path, "positiveFixture", source},
+		{"internal/runtime/testfixtures/canonicalrouting/another.go", scope, source},
 	} {
 		if a2NegativeGeneratorSpecimen(test.path, test.scope, test.source) {
 			t.Fatalf("negative whitelist widened beyond exact specimen: %#v", test)
 		}
 	}
-	var schema FlowSchemaDocument
-	if err := decodeNodeTestYAML([]byte(a2RetiredCoordinatorSchema), &schema); err == nil || !strings.Contains(err.Error(), "resolution") {
-		t.Fatalf("whitelisted negative schema is no longer rejected at resolution admission: %v", err)
-	}
-	if mode, err := ParseFlowInputResolutionMode("fan-in"); err == nil || mode.Valid() {
-		t.Fatalf("retired mode admitted independently of other retired fields: %v, %v", mode, err)
-	}
 }
 
 func TestA2JoinRetirementGuardRejectsSchemaContexts(t *testing.T) {
-	for _, retired := range []string{"aggregation", "window", "dedup_by", "singleton"} {
-		raw := "pins:\n  inputs:\n    events:\n      - event: arrived\n        resolution: {mode: reply, " + retired + ": null}\n"
-		found, err := a2RetiredYAMLViolations("schema.yaml", raw)
-		if err != nil || len(found) != 1 || !strings.Contains(found[0], retired) {
-			t.Fatalf("retired pin field %s escaped context guard: %v, %v", retired, found, err)
+	pinFields := map[string]bool{}
+	for _, specimen := range canonicalrouting.ArrivalJoinRetirementGuardCases() {
+		if !strings.HasPrefix(specimen.Name, "pin/") {
+			continue
+		}
+		found, err := a2RetiredYAMLViolations("schema.yaml", specimen.Source)
+		if err != nil || len(found) != 1 || !strings.Contains(found[0], specimen.WantError) {
+			t.Fatalf("retired pin field %s escaped context guard: %v, %v", specimen.WantError, found, err)
+		}
+		pinFields[specimen.WantError] = true
+	}
+	for _, field := range []string{"aggregation", "window", "dedup_by", "singleton"} {
+		if !pinFields[field] {
+			t.Fatalf("retired pin field %s lost its guard specimen", field)
 		}
 	}
 	for _, test := range []struct{ field, context string }{
@@ -622,18 +620,17 @@ func TestA2JoinRetirementGuardRejectsSchemaContexts(t *testing.T) {
 			}
 		}
 	}
-	const aliased = `policy: &policy {mode: reply, aggregation: null}
-arrival: &arrival {accumulate: {window: null}}
-entries: &entries [{event: arrived, resolution: {<<: *policy}}]
-pins:
-  inputs:
-    events: *entries
-worker:
-  event_handlers:
-    arrived: *arrival
-`
-	found, err := a2RetiredYAMLViolations("aliases.yaml", aliased)
-	if err != nil || len(found) != 2 {
-		t.Fatalf("aliases or merges hid retired schema contexts: %v, %v", found, err)
+	for _, specimen := range canonicalrouting.ArrivalJoinRetirementGuardCases() {
+		if specimen.Name == "aliases" {
+			a2AssertExactNegativeGeneratorSpecimen(t,
+				"internal/runtime/testfixtures/canonicalrouting/arrival_join_guard_sources.go",
+				"ArrivalJoinRetirementGuardCases", specimen.Source)
+			found, err := a2RetiredYAMLViolations("aliases.yaml", specimen.Source)
+			if err != nil || len(found) != 2 {
+				t.Fatalf("aliases or merges hid retired schema contexts: %v, %v", found, err)
+			}
+			return
+		}
 	}
+	t.Fatal("alias guard specimen is missing")
 }

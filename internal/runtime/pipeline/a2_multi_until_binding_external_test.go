@@ -3,7 +3,6 @@ package pipeline_test
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"reflect"
 	"sort"
 	"testing"
@@ -22,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"github.com/google/uuid"
@@ -39,7 +39,7 @@ func TestA2MultiUntilIndependentRecipientEntriesAndRestartOnBothStores(t *testin
 			runID, key := uuid.NewString(), uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
 			ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
-			source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, a2MultiUntilBindingFiles()))
+			source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, canonicalrouting.ArrivalJoinRoutingFiles(t, canonicalrouting.ArrivalJoinMultiUntil)))
 			worker := externalPipelineSourceNode(t, source, ".", "worker")
 			flows := []string{"orders", "mirror"}
 			paths := []string{"orders/" + key, "mirror/" + key}
@@ -448,101 +448,4 @@ func a2MultiUntilChildren(t *testing.T, selected gateRecoveryStoreCase, ctx cont
 		children = append(children, prepared.Event.Event())
 	}
 	return children
-}
-
-func a2MultiUntilBindingFiles() map[string]string {
-	files := a2PayloadDirectedJoinFiles()
-	files["schema.yaml"] = `name: a2-multi-until-binding
-stages:
-  active: {initial: true}
-pins:
-  inputs: {events: [stop.requested]}
-  outputs: {events: [halt.requested]}
-connect:
-  - {event: halt.requested, from: ., to: orders, resolution: select}
-  - {event: halt.requested, from: ., to: mirror, resolution: select}
-`
-	files["events.yaml"] = "stop.requested:\n  order_id: text\nhalt.requested:\n  order_id: text\n"
-	files["nodes.yaml"] = `worker:
-  execution_type: system_node
-  event_handlers:
-    stop.requested:
-      emit:
-        event: halt.requested
-        fields: {order_id: "${payload.order_id}"}
-`
-	for _, flow := range []string{"orders", "mirror"} {
-		files[flow+"/schema.yaml"] = fmt.Sprintf(`name: %s
-instance: order_id
-stages:
-  awaiting: {initial: true}
-  dispatching: {}
-  ready: {terminal: true}
-  attention: {terminal: true}
-pins:
-  inputs:
-    events:
-      - halt.requested
-`, flow)
-		files[flow+"/entities.yaml"] = "order_state:\n  order_id: {type: text, indexed: true}\n  expected: \"[text]\"\n  halt_count: {type: integer, initial: 0}\n"
-		files[flow+"/events.yaml"] = "manual.abort:\ndispatch.completed:\nitem.completed:\n  member_id: text\n  result: JoinResult\nalternate.completed:\n  member_id: text\n  result: JoinResult\nhalt.observed:\n  order_id: text\n  count: integer\n"
-		for _, name := range []string{"first.closed", "second.closed"} {
-			files[flow+"/events.yaml"] += name + ":\n  expected: integer\n  completed: integer\n  missing: \"[text]\"\n  results: \"[JoinResult]\"\n  timed_out: boolean\n  close_reason: text\n"
-		}
-		files[flow+"/nodes.yaml"] = `collector:
-  execution_type: system_node
-  event_handlers:
-    item.completed:
-      join:
-        id: primary
-        stage: awaiting
-        members: {from: state.expected, by: payload.member_id}
-        output: payload.result
-        deadline: {after: 1h, from: stage_entry}
-        until: halt.requested
-        on_deadline: {advances_to: attention}
-        on_complete:
-          emit:
-            event: first.closed
-            fields:
-              expected: "${join.expected}"
-              completed: "${join.completed}"
-              missing: "${join.missing}"
-              results: "${join.results}"
-              timed_out: "${join.timed_out}"
-              close_reason: "${join.close_reason}"
-    alternate.completed:
-      join:
-        id: alternate
-        stage: awaiting
-        members: {count: 3, by: payload.member_id}
-        output: payload.result
-        deadline: {after: 1h, from: stage_entry}
-        until: halt.requested
-        on_deadline: {advances_to: attention}
-        on_complete:
-          emit:
-            event: second.closed
-            fields:
-              expected: "${join.expected}"
-              completed: "${join.completed}"
-              missing: "${join.missing}"
-              results: "${join.results}"
-              timed_out: "${join.timed_out}"
-              close_reason: "${join.close_reason}"
-    halt.requested:
-      data_accumulation:
-        writes:
-          - {target_field: halt_count, value: "${entity.halt_count + 1}"}
-      emit:
-        event: halt.observed
-        fields: {order_id: "${entity.order_id}", count: "${entity.halt_count}"}
-dispatcher:
-  execution_type: system_node
-  event_handlers:
-    manual.abort: {advances_to: dispatching}
-    dispatch.completed: {advances_to: awaiting}
-`
-	}
-	return files
 }

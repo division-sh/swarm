@@ -49,3 +49,36 @@ func CopyRetiredFanInPin(t testing.TB) string {
 		"      - event: operating.reported\n        resolution: {mode: fan-in, from: payload.ignored, aggregation: stream, window: payload.period_id, dedup_by: [payload.operating_id], singleton: portfolio}\n")
 	return root
 }
+
+type RetiredFanInGrammar uint8
+
+const (
+	RetiredFanInPinMode RetiredFanInGrammar = iota + 1
+	RetiredFanInAggregate
+	RetiredFanInConnectMode
+)
+
+// CopyRetiredFanInGrammar materializes only a closed loader-refusal specimen.
+func CopyRetiredFanInGrammar(t testing.TB, variant RetiredFanInGrammar) string {
+	t.Helper()
+	var name string
+	switch variant {
+	case RetiredFanInPinMode:
+		name = "retired-pin/{mode: fan-in}"
+	case RetiredFanInAggregate:
+		name = "retired-pin/{mode: fan-in, aggregation: stream, window: payload.period_id, dedup_by: [payload.operating_id], singleton: portfolio}"
+	case RetiredFanInConnectMode:
+		name = "resolution: fan-in"
+	default:
+		t.Fatalf("unsupported retired fan-in grammar %d", variant)
+	}
+	for _, specimen := range ConnectionAdmissionCases() {
+		if specimen.Name == name {
+			root := t.TempDir()
+			writeClosedNegativeFile(t, root, "schema.yaml", "name: retired-fan-in\n"+specimen.Source)
+			return root
+		}
+	}
+	t.Fatalf("retired fan-in grammar specimen %q is missing", name)
+	return ""
+}
