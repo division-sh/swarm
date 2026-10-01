@@ -2,7 +2,6 @@ package bootverify
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -411,16 +410,16 @@ func TestCompositionSourceRejectsRetiredFanInGrammarBeforeBoot(t *testing.T) {
 		}
 	})
 	for _, tc := range []struct {
-		name, schema, diagnostic string
+		name, diagnostic string
+		variant          canonicalrouting.RetiredFanInGrammar
 	}{
-		{"pin mode", "pins:\n  inputs:\n    events:\n      - event: report.received\n        resolution: {mode: fan-in}\n", "mode"},
-		{"legacy aggregate", "pins:\n  inputs:\n    events:\n      - event: report.received\n        resolution:\n          mode: fan-in\n          aggregation: stream\n          window: payload.period_id\n          dedup_by: [payload.member_id]\n          singleton: collector\n", "resolution"},
-		{"connect mode", "connect:\n  - {event: report.received, from: producer, to: collector, resolution: fan-in}\n", "connect.resolution"},
+		{"pin mode", "mode", canonicalrouting.RetiredFanInPinMode},
+		{"legacy aggregate", "resolution", canonicalrouting.RetiredFanInAggregate},
+		{"connect mode", "connect.resolution", canonicalrouting.RetiredFanInConnectMode},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repoRoot := repoRootForBootverifyTest(t)
-			root := t.TempDir()
-			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: retired-fan-in\n"+tc.schema)
+			root := canonicalrouting.CopyRetiredFanInGrammar(t, tc.variant)
 			_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 			if err == nil || !strings.Contains(err.Error(), "schema.yaml") || !strings.Contains(err.Error(), tc.diagnostic) {
 				t.Fatalf("retired fan-in grammar reached boot verification: err=%v, want source-local %q rejection", err, tc.diagnostic)

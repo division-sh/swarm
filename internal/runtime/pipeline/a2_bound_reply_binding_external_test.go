@@ -25,6 +25,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
@@ -67,35 +68,11 @@ func testA2BoundReplyJourney(t *testing.T, corruptEntryField, siblingFlow string
 			runID, key := uuid.NewString(), uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
 			ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
-			files := a2BoundReplyFiles()
+			variant := canonicalrouting.ArrivalJoinBoundReply
 			if siblingFlow == "observer" {
-				files["schema.yaml"] += "  - {event: provider.replied, from: provider, to: observer, resolution: select}\n"
-				files["schema.yaml"] += "  - {event: provider.notified, from: provider, to: observer, resolution: select}\n"
-				files["provider/schema.yaml"] = strings.Replace(files["provider/schema.yaml"], "events: [provider.replied]", "events: [provider.replied, provider.notified]", 1)
-				files["provider/events.yaml"] += "ordinary.requested:\n  order_id: text\n  member_id: text\n  result: JoinResult\nprovider.notified:\n  order_id: text\n  member_id: text\n  result: JoinResult\n"
-				files["provider/nodes.yaml"] += `    ordinary.requested:
-      emit:
-        event: provider.notified
-        fields:
-          order_id: "${payload.order_id}"
-          member_id: "${payload.member_id}"
-          result: "${payload.result}"
-`
-				files["observer/schema.yaml"] = strings.Replace(files["requester/schema.yaml"], "name: requester", "name: observer", 1)
-				files["observer/schema.yaml"] = strings.Replace(files["observer/schema.yaml"], "{event: provider.replied, resolution: {mode: reply, replies_to: provider.requested}}", "provider.replied", 1)
-				files["observer/schema.yaml"] = strings.Replace(files["observer/schema.yaml"], "  outputs:\n    events: [provider.requested]\n", "", 1)
-				files["observer/schema.yaml"] += "      - provider.notified\n"
-				files["observer/entities.yaml"] = files["requester/entities.yaml"]
-				files["observer/entities.yaml"] += "  ordinary_result: JoinResult\n"
-				start := strings.Index(files["requester/nodes.yaml"], "collector:\n")
-				end := strings.Index(files["requester/nodes.yaml"], "dispatcher:\n")
-				files["observer/nodes.yaml"] = files["requester/nodes.yaml"][start:end]
-				files["observer/nodes.yaml"] += `    provider.notified:
-      data_accumulation:
-        writes:
-          - {target_field: ordinary_result, value: "${payload.result}"}
-`
+				variant = canonicalrouting.ArrivalJoinBoundReplyObserver
 			}
+			files := canonicalrouting.ArrivalJoinRoutingFiles(t, variant)
 			source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, files))
 			if siblingFlow == "observer" {
 				if issues := pinrouting.CompileConnectGraph(source).Issues(); len(issues) != 0 {
@@ -584,64 +561,4 @@ func a2CorruptBoundReplyEntry(t *testing.T, ctx context.Context, selected gateRe
 		t.Fatal("hostility changed reply authority beyond the one retained join entry field")
 	}
 	return corrupted
-}
-
-func a2BoundReplyFiles() map[string]string {
-	return map[string]string{
-		"schema.yaml": "name: a2-bound-reply\nconnect:\n  - {event: provider.requested, from: requester, to: provider}\n  - {event: provider.replied, from: provider, to: requester}\n",
-		"types.yaml":  "types:\n  JoinResult:\n    value: text\n",
-		"requester/schema.yaml": `name: requester
-instance: order_id
-stages:
-  awaiting: {initial: true}
-  dispatching: {}
-  ready: {terminal: true}
-  attention: {terminal: true}
-pins:
-  inputs:
-    events:
-      - {event: provider.replied, resolution: {mode: reply, replies_to: provider.requested}}
-  outputs:
-    events: [provider.requested]
-`,
-		"requester/entities.yaml": "request_state:\n  order_id: {type: text, indexed: true}\n  expected: \"[text]\"\n",
-		"requester/events.yaml":   "request.send:\nmanual.abort:\ndispatch.completed:\nprovider.requested:\n  order_id: text\n",
-		"requester/nodes.yaml": `requester:
-  execution_type: system_node
-  event_handlers:
-    request.send:
-      emit:
-        event: provider.requested
-        fields: {order_id: "${entity.order_id}"}
-collector:
-  execution_type: system_node
-  event_handlers:
-    provider.replied:
-      join:
-        stage: awaiting
-        members: {from: state.expected, by: payload.member_id}
-        output: payload.result
-        deadline: {after: 1h, from: stage_entry}
-        on_complete: {advances_to: ready}
-        on_deadline: {advances_to: attention}
-dispatcher:
-  execution_type: system_node
-  event_handlers:
-    manual.abort: {advances_to: dispatching}
-    dispatch.completed: {advances_to: awaiting}
-`,
-		"provider/schema.yaml": "name: provider\npins:\n  inputs:\n    events: [provider.requested]\n  outputs:\n    events: [provider.replied]\n",
-		"provider/events.yaml": "provider.replied:\n  order_id: text\n  member_id: text\n  result: JoinResult\n",
-		"provider/nodes.yaml": `provider:
-  execution_type: system_node
-  event_handlers:
-    provider.requested:
-      emit:
-        event: provider.replied
-        fields:
-          order_id: "${payload.order_id}"
-          member_id: a
-          result: {value: provider-result}
-`,
-	}
 }

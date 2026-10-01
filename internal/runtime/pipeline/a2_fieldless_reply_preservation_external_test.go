@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
 
@@ -35,7 +36,7 @@ func TestA2FieldlessPairedReplyPreservesEntitylessExecutionOnBothStores(t *testi
 			runID, token := uuid.NewString(), uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
 			ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
-			source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, a2FieldlessReplyFiles()))
+			source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, canonicalrouting.ArrivalJoinRoutingFiles(t, canonicalrouting.ArrivalJoinFieldlessReply)))
 			if issues := pinrouting.CompileConnectGraph(source).Issues(); len(issues) != 0 || len(source.WorkflowJoins()) != 0 {
 				t.Fatalf("fieldless reply requires admitted paired Connect and no joins: issues=%#v joins=%#v", issues, source.WorkflowJoins())
 			}
@@ -213,46 +214,5 @@ func TestA2FieldlessPairedReplyPreservesEntitylessExecutionOnBothStores(t *testi
 			}
 			assertNoState()
 		})
-	}
-}
-
-func a2FieldlessReplyFiles() map[string]string {
-	return map[string]string{
-		"schema.yaml": "name: a2-fieldless-reply\nconnect:\n  - {event: provider.requested, from: requester, to: provider}\n  - {event: provider.replied, from: provider, to: requester}\n",
-		"requester/schema.yaml": `name: requester
-pins:
-  inputs:
-    events:
-      - request.send
-      - {event: provider.replied, resolution: {mode: reply, replies_to: provider.requested}}
-  outputs:
-    events: [provider.requested]
-`,
-		"requester/events.yaml": "request.send:\n  token: text\nprovider.requested:\n  token: text\nreply.observed:\n  token: text\n  value: text\n",
-		"requester/nodes.yaml": `sender:
-  execution_type: system_node
-  event_handlers:
-    request.send:
-      emit:
-        event: provider.requested
-        fields: {token: "${payload.token}"}
-receiver:
-  execution_type: system_node
-  event_handlers:
-    provider.replied:
-      emit:
-        event: reply.observed
-        fields: {token: "${payload.token}", value: "${payload.value}"}
-`,
-		"provider/schema.yaml": "name: provider\npins:\n  inputs:\n    events: [provider.requested]\n  outputs:\n    events: [provider.replied]\n",
-		"provider/events.yaml": "provider.replied:\n  token: text\n  value: text\n",
-		"provider/nodes.yaml": `provider:
-  execution_type: system_node
-  event_handlers:
-    provider.requested:
-      emit:
-        event: provider.replied
-        fields: {token: "${payload.token}", value: provider-result}
-`,
 	}
 }

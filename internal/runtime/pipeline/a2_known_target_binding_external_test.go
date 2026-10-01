@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -21,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"github.com/google/uuid"
@@ -240,11 +240,7 @@ func TestA2KnownTargetWorkIssuedBeforeArmPublishesOutputBoundToActualArmOnBothSt
 			owner := testRunScopedWorkflowInstanceForRun(runID, path)
 			insertGateRecoveryRun(t, selected, runID)
 			ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
-			files := a2PayloadDirectedJoinFiles()
-			files["orders/schema.yaml"] = strings.NewReplacer(
-				"awaiting: {initial: true}", "awaiting: {}",
-				"dispatching: {}", "dispatching: {initial: true}",
-			).Replace(files["orders/schema.yaml"])
+			files := canonicalrouting.ArrivalJoinRoutingFiles(t, canonicalrouting.ArrivalJoinPayloadDirectedBeforeArm)
 			source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, files))
 			worker := externalPipelineSourceNode(t, source, ".", "worker")
 			collector := externalPipelineSourceNode(t, source, "orders", "collector")

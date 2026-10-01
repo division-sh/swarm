@@ -14,6 +14,7 @@ func TestArrivalJoinRoutingFixturesRetainExactReceiverPolicyAndLifecycle(t *test
 	for _, variant := range []ArrivalJoinRoutingFixture{
 		ArrivalJoinBoundReply, ArrivalJoinBoundReplyObserver, ArrivalJoinFieldlessReply,
 		ArrivalJoinPayloadDirected, ArrivalJoinPayloadDirectedMultipleRecipients, ArrivalJoinMultiUntil,
+		ArrivalJoinPayloadDirectedBeforeArm,
 	} {
 		t.Run(fmt.Sprint(variant), func(t *testing.T) {
 			files := ArrivalJoinRoutingFiles(t, variant)
@@ -52,6 +53,13 @@ func TestArrivalJoinRoutingFixturesRetainExactReceiverPolicyAndLifecycle(t *test
 			}
 			if bundle.FlowTree.ByPath[flow].Schema.Instance.Path() != "order_id" {
 				t.Fatal("closed fixture lost exact authored receiving key")
+			}
+			wantInitial := "awaiting"
+			if variant == ArrivalJoinPayloadDirectedBeforeArm {
+				wantInitial = "dispatching"
+			}
+			if initial := bundle.FlowInitialStage(flow); initial != wantInitial {
+				t.Fatalf("closed fixture initial stage=%s, want %s", initial, wantInitial)
 			}
 			plan, found := semanticview.WorkflowJoinPlanForHandler(source, identitytest.FlowNode(t, flow, "collector"), event)
 			if !found || plan.Spec.Stage != "awaiting" || plan.Spec.Members.From != "state.expected" || plan.Spec.Members.By != "payload.member_id" || plan.Spec.Output != "payload.result" || plan.ResultType.Type != "JoinResult" {

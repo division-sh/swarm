@@ -15,6 +15,7 @@ const (
 	ArrivalJoinPayloadDirected
 	ArrivalJoinPayloadDirectedMultipleRecipients
 	ArrivalJoinMultiUntil
+	ArrivalJoinPayloadDirectedBeforeArm
 )
 
 // ArrivalJoinRoutingFiles supplies closed, ordinary-connect source fixtures.
@@ -53,8 +54,14 @@ func ArrivalJoinRoutingFiles(t testing.TB, variant ArrivalJoinRoutingFixture) ma
 		return files
 	case ArrivalJoinFieldlessReply:
 		return arrivalJoinFieldlessReplyFiles()
-	case ArrivalJoinPayloadDirected, ArrivalJoinPayloadDirectedMultipleRecipients:
+	case ArrivalJoinPayloadDirected, ArrivalJoinPayloadDirectedMultipleRecipients, ArrivalJoinPayloadDirectedBeforeArm:
 		files := arrivalJoinPayloadDirectedFiles()
+		if variant == ArrivalJoinPayloadDirectedBeforeArm {
+			files["orders/schema.yaml"] = strings.NewReplacer(
+				"awaiting: {initial: true}", "awaiting: {}",
+				"dispatching: {}", "dispatching: {initial: true}",
+			).Replace(files["orders/schema.yaml"])
+		}
 		if variant == ArrivalJoinPayloadDirectedMultipleRecipients {
 			files["schema.yaml"] += "  - {event: item.completed, from: ., to: mirror, resolution: select}\n"
 			for _, name := range []string{"schema.yaml", "entities.yaml", "events.yaml", "nodes.yaml"} {
