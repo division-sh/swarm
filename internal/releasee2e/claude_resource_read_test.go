@@ -147,6 +147,18 @@ connect:
 				if completed != turn {
 					t.Fatalf("emitted event cardinality %d, want %d", completed, turn)
 				}
+				if turn == 2 {
+					// The identical public keyed directive must return its receipt,
+					// not invoke a third provider or create new event/delivery facts.
+					replayed := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, args...)
+					if replayed.err != nil {
+						t.Fatalf("directive replay: %v\n%s", replayed.err, replayed.output)
+					}
+					afterReplay := captureFullLifecycleEvidence(t, process.rpc, runID)
+					if !reflect.DeepEqual(evidence.EventFacts, afterReplay.EventFacts) {
+						t.Fatal("keyed directive replay changed event/delivery facts")
+					}
+				}
 				if turn == 1 {
 					firstEvidence = evidence
 					if err := process.stopAndWait(goldenShutdownGrace); err != nil {
@@ -194,6 +206,11 @@ connect:
 }
 
 func runResourceReadClaudeTurn(root string, invocation fakeClaudeInvocation) int {
+	if resumed := dockerOptionValue(invocation.commandArgs, "--resume"); resumed != "" {
+		if err := fakeResourceProviderHead(root, invocation.container, resumed, false); err != nil {
+			return fakeDockerUnexpected(root, invocation.commandArgs, err.Error())
+		}
+	}
 	client := &http.Client{Timeout: 15 * time.Second}
 	listed, err := fakeMCPCall(client, invocation.hostMCPURL, invocation.headers, "tools/list", map[string]any{}, "resource-list", true)
 	if err != nil {
@@ -250,6 +267,9 @@ func runResourceReadClaudeTurn(root string, invocation fakeClaudeInvocation) int
 	result, err := fakeMCPCall(client, invocation.hostMCPURL, invocation.headers, "tools/call", map[string]any{"name": "emit_agent_completed", "arguments": map[string]any{"flow_result": "resource read complete"}, "_meta": map[string]any{"claudecode/toolUseId": "toolu-resource-emit"}}, "resource-emit", true)
 	if err != nil || result["isError"] == true {
 		return fakeDockerUnexpected(root, invocation.commandArgs, fmt.Sprintf("resource emit %v %+v", err, result))
+	}
+	if err := fakeResourceProviderHead(root, invocation.container, invocation.sessionID, true); err != nil {
+		return fakeDockerUnexpected(root, invocation.commandArgs, err.Error())
 	}
 	_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"type": "result", "subtype": "success", "session_id": invocation.sessionID, "result": "resource read complete"})
 	return 0

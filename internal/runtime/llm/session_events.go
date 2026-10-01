@@ -120,10 +120,19 @@ func newAgentStartedRuntimeDiagnostic(ctx context.Context, eventID string, facts
 }
 
 func markInboundDeliveryActiveForSession(ctx context.Context, publisher EventPublisher, session *Session) (bool, error) {
-	if publisher == nil || session == nil {
+	if session == nil {
 		return false, nil
 	}
-	if !session.Memory.Enabled {
+	if authority, normal := runtimeeffects.CompletionAuthorityFromContext(ctx); normal && authority.Kind == runtimeeffects.AuthorityNormalAgent {
+		origin, err := runtimeeffects.NormalCompletionOriginFromContext(ctx, authority.Normal.AgentID, authority.Normal.Identity.RunID, "agent_session_binding")
+		if err != nil {
+			return false, err
+		}
+		if origin.Kind == runtimeeffects.CompletionOriginDirective {
+			return false, nil
+		}
+	}
+	if publisher == nil || !session.Memory.Enabled {
 		return false, nil
 	}
 	agentID := strings.TrimSpace(session.AgentID)

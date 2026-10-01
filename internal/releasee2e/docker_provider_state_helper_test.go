@@ -3,8 +3,49 @@ package releasee2e
 import (
 	"encoding/hex"
 	"fmt"
+	"os"
 	"strings"
 )
+
+// The resource journey models exact backing and transcript presence; it is not
+// credit for real Docker filesystem integrity or genuine provider retention.
+type fakeProviderVolume struct {
+	Marker string          `json:"marker"`
+	Heads  map[string]bool `json:"heads"`
+}
+
+func fakeResourceProviderVolumeInspect(root string, args []string) int {
+	var exists bool
+	withFakeDockerState(root, func(state *fakeDockerState) { _, exists = state.ProviderVolumes[args[2]] })
+	recordFakeDocker(root, fakeDockerRecord{Class: "provider_volume_inspect", Args: args})
+	if !exists {
+		fmt.Fprintln(os.Stderr, "provider volume missing")
+		return 1
+	}
+	fmt.Fprintln(os.Stdout, "[]")
+	return 0
+}
+
+func fakeResourceProviderHead(root, container, head string, write bool) error {
+	var failure error
+	withFakeDockerState(root, func(state *fakeDockerState) {
+		bound := state.Containers[container]
+		volume, exists := state.ProviderVolumes[bound.ProviderKey]
+		if !bound.Running || !exists || volume.Marker != bound.ProviderKey || !validReleaseUUID(head) {
+			failure = fmt.Errorf("provider head lacks exact running backing")
+			return
+		}
+		if !write && !volume.Heads[head] {
+			failure = fmt.Errorf("provider transcript missing")
+			return
+		}
+		if write {
+			volume.Heads[head] = true
+			state.ProviderVolumes[bound.ProviderKey] = volume
+		}
+	})
+	return failure
+}
 
 // These fixtures check process protocol and ownership, not transcript retention.
 // Provider filesystem lifetime is proven by the real Docker and live restart tests.
@@ -99,5 +140,33 @@ func fakeReleaseProviderStateExec(root string, args []string, input []byte) (boo
 		return refuse("invalid provider head check")
 	}
 	recordFakeDocker(root, fakeDockerRecord{Class: "provider_state_check", Args: redactDockerArgs(args)})
+	if os.Getenv(releaseResourceReadEnv) == "1" {
+		if !prepare {
+			if err := fakeResourceProviderHead(root, args[index], args[index+7], false); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return true, 1
+			}
+		} else {
+			var invalid bool
+			withFakeDockerState(root, func(state *fakeDockerState) {
+				container := state.Containers[args[index]]
+				// Capability probes use disposable tmpfs, not retained backing.
+				if container.ProviderKey == "" {
+					return
+				}
+				volume, exists := state.ProviderVolumes[container.ProviderKey]
+				key := args[index+5]
+				invalid = !exists || container.ProviderKey != key || (volume.Marker == "" && args[index+6] == "true") || (volume.Marker != "" && volume.Marker != key)
+				if !invalid {
+					volume.Marker = key
+					state.ProviderVolumes[key] = volume
+				}
+			})
+			if invalid {
+				fmt.Fprintln(os.Stderr, "provider backing authority missing or mismatched")
+				return true, 1
+			}
+		}
+	}
 	return true, 0
 }
