@@ -371,7 +371,7 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		t.Fatalf("runtime-full unit = %#v, want one complete uncached internal/runtime proof", runtimeUnit)
 	}
 	serveappUnits := []string{
-		"serveapp-channel", "serveapp-channel-learned", "serveapp-channel-delivery", "serveapp-channel-native", "serveapp-runtime", "serveapp-surfaces", "serveapp-publication-text",
+		"serveapp-channel", "serveapp-channel-learned", "serveapp-channel-delivery", "serveapp-channel-process-temporal", "serveapp-channel-lifecycle", "serveapp-channel-native", "serveapp-runtime", "serveapp-surfaces", "serveapp-publication-text",
 		"serveapp-journeys-first", "serveapp-journeys-a-c", "serveapp-journeys-d-l", "serveapp-journeys-m-z",
 		"serveapp-mailbox", "serveapp-mailbox-p-q",
 		"serveapp-selected", "serveapp-selected-rest", "serveapp-other", "serveapp-i-reporter", "serveapp-other-late", "serveapp-standing",
