@@ -6011,6 +6011,8 @@ engine:
       Stage entry snapshots membership after initialized/transition state is authoritative. Empty membership or count zero
       closes pending and schedules exactly one continuation. Same-entry retries compare the retained snapshot. Non-loop
       re-entry creates a distinct arm even at equal timestamps and retains old closed entries for exact late/replay decisions.
+      A source that is not an admitted unique TEXT collection fails with platform.schema_invalid,
+      detail join_members_invalid naming row_id and source, before committing entry, arm, schedule or business effects.
     arrival: >-
       Runtime consumes the route's exact bound entry, loads its retained arm inside the entity lock and selected-store
       transaction, checks member/source-generation ownership, stores canonical output and closes when all members arrive.

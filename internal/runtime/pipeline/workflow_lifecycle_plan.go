@@ -17,6 +17,7 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
@@ -580,7 +581,9 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, runID
 			var ok bool
 			members, ok = joinMemberSnapshot(instance.Fields, joinPlan)
 			if !ok {
-				return fmt.Errorf("join %s members source %s is not an admitted unique text collection", joinPlan.Spec.EffectiveID(), joinPlan.Spec.Members.From)
+				return failures.New(failures.ClassSchemaInvalid, "join_members_invalid", "join-lifecycle", "arm", map[string]any{
+					"row_id": joinPlan.Spec.EffectiveID(), "source": joinPlan.Spec.Members.From,
+				})
 			}
 		}
 		generation, _, err := workflowLoopGenerationForStage(pc.SemanticSource(), instance, nextStage)
