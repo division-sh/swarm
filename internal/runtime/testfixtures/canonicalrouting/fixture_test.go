@@ -309,6 +309,10 @@ func retiredRoutingDocumentation(repo string) ([]string, error) {
 }
 
 func TestTemplateInstanceCheckedSchemasUseScalarPolicyFreeGrammar(t *testing.T) {
+	wantPortfolioInstances := map[string]string{
+		"examples/routing/fan-in/barrier/operating/schema.yaml": "operating_instance_id",
+		"examples/routing/fan-in/stream/operating/schema.yaml":  "operating_id",
+	}
 	paths := []string{
 		"examples/routing/fan-in/barrier/operating/schema.yaml",
 		"examples/routing/fan-in/stream/operating/schema.yaml",
@@ -340,6 +344,9 @@ func TestTemplateInstanceCheckedSchemasUseScalarPolicyFreeGrammar(t *testing.T) 
 					instances++
 					if value.Kind != yaml.ScalarNode || strings.TrimSpace(value.Value) == "" {
 						t.Fatalf("instance must be one non-empty scalar, got kind=%d value=%q", value.Kind, value.Value)
+					}
+					if want := wantPortfolioInstances[rel]; want != "" && value.Value != want {
+						t.Fatalf("portfolio generated instance field = %q, want %q", value.Value, want)
 					}
 				case "on_missing", "on_conflict", "address":
 					t.Fatalf("checked schema retains retired routing key %q", key)

@@ -23,7 +23,7 @@ func TestCompiledConnectEventConsumerProjectionCensus(t *testing.T) {
 		projectionField string
 	}
 	manifestations := []manifestation{
-		{bundle: "fan-in/barrier", from: "ingress", to: "operating", event: "operating.report.requested", projectionField: "operating_id"},
+		{bundle: "fan-in/barrier", from: "ingress", to: "operating", event: "operating.report.requested", projectionField: "operating_instance_id"},
 		{bundle: "fan-in/barrier", from: "operating", to: "portfolio", event: "operating.reported"},
 		{bundle: "fan-in/stream", from: "ingress", to: "operating", event: "operating.report.requested", projectionField: "operating_id"},
 		{bundle: "fan-in/stream", from: "operating", to: "portfolio", event: "operating.reported"},
@@ -82,6 +82,15 @@ func TestCompiledConnectEventConsumerProjectionCensus(t *testing.T) {
 			}
 			if !stringSliceContains(eventSchemaRequired(consumer.Schema), item.projectionField) {
 				t.Fatalf("compiled receiver projection %s is not required in %#v", item.projectionField, consumer.Schema)
+			}
+			if item.bundle == "fan-in/barrier" {
+				for _, schema := range []map[string]any{producer.Schema, consumer.Schema} {
+					properties, _ := schema["properties"].(map[string]any)
+					business, _ := properties["operating_id"].(map[string]any)
+					if business["type"] != "string" || business["format"] != nil || !stringSliceContains(eventSchemaRequired(schema), "operating_id") {
+						t.Fatalf("finite business contributor must remain required authored text, not an intrinsic projection: %#v", schema)
+					}
+				}
 			}
 		})
 	}
