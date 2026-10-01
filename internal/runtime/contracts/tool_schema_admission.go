@@ -55,6 +55,9 @@ func admitPlatformInterfaceSchemaValues(root yamlsource.Value) (map[string]map[s
 				continue
 			}
 			children, err := uniqueYAMLMappingFields(lookup.Value, "interface schemas")
+			if err != nil {
+				return nil, err
+			}
 			admitted := make(map[string]ToolInputSchema, len(children))
 			for _, child := range children {
 				schema, err := AdmitToolInputSchemaValue(child.Value)
@@ -115,19 +118,7 @@ func projectToolSchemaValue(value yamlsource.Value, path string, depth int, loca
 		var raw any
 		switch field.Name {
 		case "properties":
-			members, err := field.Value.Mapping()
-			if err != nil {
-				return nil, err
-			}
-			properties := map[string]any{}
-			for _, member := range members {
-				child, err := projectToolSchemaValue(member.Value, fieldPath+"["+strconv.Quote(member.Name)+"]", depth+1, locations)
-				if err != nil {
-					return nil, err
-				}
-				properties[member.Name] = child
-			}
-			raw = properties
+			raw, err = projectToolSchemaPropertiesValue(field.Value, fieldPath, depth, locations)
 		case "items", "additionalProperties":
 			if field.Value.Presence() == yamlsource.PresenceMapping || field.Value.Presence() == yamlsource.PresenceEmptyMapping {
 				raw, err = projectToolSchemaValue(field.Value, fieldPath, depth+1, locations)
@@ -135,16 +126,7 @@ func projectToolSchemaValue(value yamlsource.Value, path string, depth int, loca
 				err = field.Value.Project(&raw)
 			}
 		case "enum":
-			var items []yamlsource.Value
-			items, err = field.Value.Sequence()
-			values := make([]any, len(items))
-			for i, item := range items {
-				if err != nil {
-					break
-				}
-				values[i], err = toolInputSchemaEnumLiteralValue(item)
-			}
-			raw = values
+			raw, err = projectToolSchemaEnumValue(field.Value)
 		default:
 			err = field.Value.Project(&raw)
 		}
@@ -156,46 +138,41 @@ func projectToolSchemaValue(value yamlsource.Value, path string, depth int, loca
 	return out, nil
 }
 
-func toolInputSchemaEnumLiteralValue(value yamlsource.Value) (any, error) {
-	switch value.Presence() {
-	case yamlsource.PresenceNull, yamlsource.PresenceEmptyScalar, yamlsource.PresenceScalar:
-		scalar, err := value.Scalar()
+func projectToolSchemaPropertiesValue(value yamlsource.Value, path string, depth int, locations map[string]yamlsource.Value) (map[string]any, error) {
+	members, err := value.Mapping()
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]any{}
+	for _, member := range members {
+		child, err := projectToolSchemaValue(member.Value, path+"["+strconv.Quote(member.Name)+"]", depth+1, locations)
 		if err != nil {
 			return nil, err
 		}
-		if scalar.Tag == "!!str" {
-			if !utf8.ValidString(scalar.Value) {
-				return nil, fmt.Errorf("enum string is not valid UTF-8")
-			}
-			return scalar.Value, nil
+		out[member.Name] = child
+	}
+	return out, nil
+}
+
+func projectToolSchemaEnumValue(value yamlsource.Value) ([]any, error) {
+	items, err := value.Sequence()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]any, len(items))
+	for i, item := range items {
+		out[i], err = toolInputSchemaEnumLiteralValue(item)
+		if err != nil {
+			return nil, err
 		}
-		if scalar.Tag != "!!bool" && scalar.Tag != "!!int" && scalar.Tag != "!!float" && scalar.Tag != "!!null" {
-			return nil, fmt.Errorf("enum scalar tag %q is not JSON", scalar.Tag)
-		}
-		var literal any
-		if err := canonicaljson.DecodeInto([]byte(scalar.Value), &literal); err != nil {
-			return nil, fmt.Errorf("enum literal %q is not JSON: %w", scalar.Value, err)
-		}
-		switch scalar.Tag {
-		case "!!bool":
-			if _, ok := literal.(bool); !ok {
-				return nil, fmt.Errorf("enum boolean tag does not match value")
-			}
-		case "!!int":
-			number, ok := literal.(float64)
-			if !ok || math.Trunc(number) != number {
-				return nil, fmt.Errorf("enum integer tag does not match value")
-			}
-		case "!!float":
-			if _, ok := literal.(float64); !ok {
-				return nil, fmt.Errorf("enum numeric tag does not match value")
-			}
-		case "!!null":
-			if literal != nil {
-				return nil, fmt.Errorf("enum null tag does not match value")
-			}
-		}
-		return literal, nil
+	}
+	return out, nil
+}
+
+func toolInputSchemaEnumLiteralValue(value yamlsource.Value) (any, error) {
+	switch value.Presence() {
+	case yamlsource.PresenceNull, yamlsource.PresenceEmptyScalar, yamlsource.PresenceScalar:
+		return toolInputSchemaEnumScalarValue(value)
 	case yamlsource.PresenceSequence, yamlsource.PresenceEmptySequence:
 		items, err := value.Sequence()
 		if err != nil {
@@ -225,6 +202,53 @@ func toolInputSchemaEnumLiteralValue(value yamlsource.Value) (any, error) {
 	default:
 		return nil, fmt.Errorf("enum literal is missing")
 	}
+}
+
+func toolInputSchemaEnumScalarValue(value yamlsource.Value) (any, error) {
+	scalar, err := value.Scalar()
+	if err != nil {
+		return nil, err
+	}
+	if scalar.Tag == "!!str" {
+		if !utf8.ValidString(scalar.Value) {
+			return nil, fmt.Errorf("enum string is not valid UTF-8")
+		}
+		return scalar.Value, nil
+	}
+	if scalar.Tag != "!!bool" && scalar.Tag != "!!int" && scalar.Tag != "!!float" && scalar.Tag != "!!null" {
+		return nil, fmt.Errorf("enum scalar tag %q is not JSON", scalar.Tag)
+	}
+	var literal any
+	if err := canonicaljson.DecodeInto([]byte(scalar.Value), &literal); err != nil {
+		return nil, fmt.Errorf("enum literal %q is not JSON: %w", scalar.Value, err)
+	}
+	if err := validateToolEnumScalarTag(scalar.Tag, literal); err != nil {
+		return nil, err
+	}
+	return literal, nil
+}
+
+func validateToolEnumScalarTag(tag string, literal any) error {
+	switch tag {
+	case "!!bool":
+		if _, ok := literal.(bool); !ok {
+			return fmt.Errorf("enum boolean tag does not match value")
+		}
+	case "!!int":
+		number, ok := literal.(float64)
+		if !ok || math.Trunc(number) != number {
+			return fmt.Errorf("enum integer tag does not match value")
+		}
+	case "!!float":
+		if _, ok := literal.(float64); !ok {
+			return fmt.Errorf("enum numeric tag does not match value")
+		}
+	case "!!null":
+		if literal != nil {
+			return fmt.Errorf("enum null tag does not match value")
+		}
+	}
+	return nil
 }
 
 func AdmitToolInputSchemaMap(raw map[string]any) (ToolInputSchema, error) {
@@ -263,138 +287,173 @@ func admitToolSchemaMap(raw map[string]any, path string, depth int, property boo
 		if value == nil {
 			return ToolInputSchema{}, toolSchemaFieldError("%s must not be null", fieldPath)
 		}
-		switch name {
-		case "type":
-		case "description", "pattern", "format", "x-swarm-equalTo":
-			text, ok := value.(string)
-			if !ok || (name != "description" && strings.TrimSpace(text) == "") {
-				return ToolInputSchema{}, toolSchemaFieldError("%s must be %stext", fieldPath, map[bool]string{true: "non-empty "}[name != "description"])
-			}
-			switch name {
-			case "description":
-				options = append(options, ToolSchemaDescription(text))
-			case "pattern":
-				options = append(options, ToolSchemaPattern(text))
-			case "format":
-				options = append(options, ToolSchemaFormat(text))
-			case "x-swarm-equalTo":
-				if !property {
-					options = append(options, ToolSchemaEqualTo(text))
-				}
-			}
-		case "properties":
-			members, ok := value.(map[string]any)
-			if !ok || members == nil {
-				return ToolInputSchema{}, toolSchemaFieldError("%s must be a mapping", fieldPath)
-			}
-			properties := map[string]ToolInputSchema{}
-			equalities := map[string]string{}
-			for _, key := range sortedContractKeys(members) {
-				childPath := fieldPath + "[" + strconv.Quote(key) + "]"
-				child, ok := members[key].(map[string]any)
-				if !ok {
-					return ToolInputSchema{}, toolSchemaFieldError("%s must be a mapping", childPath)
-				}
-				admitted, err := admitToolSchemaMap(child, childPath, depth+1, true)
-				if err != nil {
-					return ToolInputSchema{}, err
-				}
-				properties[key] = admitted
-				if equal, exists := child["x-swarm-equalTo"]; exists {
-					equalities[key] = equal.(string)
-				}
-			}
-			options = append(options, ToolSchemaProperties(properties))
-			if len(equalities) > 0 {
-				options = append(options, toolSchemaPropertyEqualities(equalities))
-			}
-		case "required", "enum":
-			sequence := reflect.ValueOf(value)
-			if !sequence.IsValid() || (sequence.Kind() != reflect.Slice && sequence.Kind() != reflect.Array) || (sequence.Kind() == reflect.Slice && sequence.IsNil()) {
-				return ToolInputSchema{}, toolSchemaFieldError("%s must be a sequence", fieldPath)
-			}
-			values := make([]any, sequence.Len())
-			for i := range values {
-				values[i] = sequence.Index(i).Interface()
-			}
-			if name == "enum" {
-				options = append(options, ToolSchemaEnum(values...))
-				continue
-			}
-			names := make([]string, len(values))
-			for i, item := range values {
-				text, ok := item.(string)
-				if !ok {
-					return ToolInputSchema{}, toolSchemaFieldError("%s[%d] must be text", fieldPath, i)
-				}
-				names[i] = text
-			}
-			options = append(options, ToolSchemaRequired(names...))
-		case "items", "additionalProperties":
-			if allowed, ok := value.(bool); name == "additionalProperties" && ok {
-				options = append(options, ToolSchemaAdditionalPropertiesAllowed(allowed))
-				continue
-			}
-			child, ok := value.(map[string]any)
-			if !ok {
-				return ToolInputSchema{}, toolSchemaFieldError("%s must be a mapping%s", fieldPath, map[bool]string{true: " or boolean"}[name == "additionalProperties"])
-			}
-			admitted, err := admitToolSchemaMap(child, fieldPath, depth+1, false)
-			if err != nil {
-				return ToolInputSchema{}, err
-			}
-			if name == "items" {
-				options = append(options, ToolSchemaItems(admitted))
-			} else {
-				options = append(options, ToolSchemaAdditionalPropertiesSchema(admitted))
-			}
-		case "minimum", "maximum":
-			literal, err := canonicaljson.FromGo(value)
-			if err != nil {
-				return ToolInputSchema{}, toolSchemaFieldError("%s: %w", fieldPath, err)
-			}
-			number, ok := literal.Number()
-			if !ok {
-				return ToolInputSchema{}, toolSchemaFieldError("%s must be a finite number", fieldPath)
-			}
-			if name == "minimum" {
-				options = append(options, ToolSchemaMinimum(number))
-			} else {
-				options = append(options, ToolSchemaMaximum(number))
-			}
-		case "minLength", "maxLength", "minItems", "maxItems":
-			number := reflect.ValueOf(value)
-			var integer int64
-			switch number.Kind() {
-			case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-				integer = number.Int()
-			case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-				if number.Uint() > uint64(^uint(0)>>1) {
-					return ToolInputSchema{}, toolSchemaFieldError("%s integer overflows", fieldPath)
-				}
-				integer = int64(number.Uint())
-			default:
-				return ToolInputSchema{}, toolSchemaFieldError("%s must be a nonnegative integer, not a floating or quoted number", fieldPath)
-			}
-			if integer < 0 || int64(int(integer)) != integer {
-				return ToolInputSchema{}, toolSchemaFieldError("%s must be a nonnegative integer within native bounds", fieldPath)
-			}
-			n := int(integer)
-			switch name {
-			case "minLength":
-				options = append(options, ToolSchemaMinLength(n))
-			case "maxLength":
-				options = append(options, ToolSchemaMaxLength(n))
-			case "minItems":
-				options = append(options, ToolSchemaMinItems(n))
-			case "maxItems":
-				options = append(options, ToolSchemaMaxItems(n))
-			}
+		fieldOptions, err := admitToolSchemaOptions(name, value, fieldPath, depth, property)
+		if err != nil {
+			return ToolInputSchema{}, err
 		}
+		options = append(options, fieldOptions...)
 	}
 	schema, err := NewToolInputSchema(ToolSchemaKind(kind), options...)
 	if err != nil {
 		return ToolInputSchema{}, toolSchemaFieldError("%s: %w", path, err)
 	}
 	return schema, nil
+}
+
+func admitToolSchemaOptions(name string, value any, path string, depth int, property bool) ([]ToolInputSchemaOption, error) {
+	switch name {
+	case "type":
+		return nil, nil
+	case "description", "pattern", "format", "x-swarm-equalTo":
+		return admitToolSchemaTextOption(name, value, path, property)
+	case "properties":
+		return admitToolSchemaPropertyOptions(value, path, depth)
+	case "required", "enum":
+		option, err := admitToolSchemaSequenceOption(name, value, path)
+		return []ToolInputSchemaOption{option}, err
+	case "items", "additionalProperties":
+		option, err := admitToolSchemaNestedOption(name, value, path, depth)
+		return []ToolInputSchemaOption{option}, err
+	case "minimum", "maximum":
+		option, err := admitToolSchemaNumberOption(name, value, path)
+		return []ToolInputSchemaOption{option}, err
+	default:
+		option, err := admitToolSchemaLengthOption(name, value, path)
+		return []ToolInputSchemaOption{option}, err
+	}
+}
+
+func admitToolSchemaTextOption(name string, value any, path string, property bool) ([]ToolInputSchemaOption, error) {
+	text, ok := value.(string)
+	if !ok || (name != "description" && strings.TrimSpace(text) == "") {
+		return nil, toolSchemaFieldError("%s must be %stext", path, map[bool]string{true: "non-empty "}[name != "description"])
+	}
+	switch name {
+	case "description":
+		return []ToolInputSchemaOption{ToolSchemaDescription(text)}, nil
+	case "pattern":
+		return []ToolInputSchemaOption{ToolSchemaPattern(text)}, nil
+	case "format":
+		return []ToolInputSchemaOption{ToolSchemaFormat(text)}, nil
+	default:
+		if property {
+			return nil, nil
+		}
+		return []ToolInputSchemaOption{ToolSchemaEqualTo(text)}, nil
+	}
+}
+
+func admitToolSchemaPropertyOptions(value any, path string, depth int) ([]ToolInputSchemaOption, error) {
+	members, ok := value.(map[string]any)
+	if !ok || members == nil {
+		return nil, toolSchemaFieldError("%s must be a mapping", path)
+	}
+	properties := map[string]ToolInputSchema{}
+	equalities := map[string]string{}
+	for _, key := range sortedContractKeys(members) {
+		childPath := path + "[" + strconv.Quote(key) + "]"
+		child, ok := members[key].(map[string]any)
+		if !ok {
+			return nil, toolSchemaFieldError("%s must be a mapping", childPath)
+		}
+		admitted, err := admitToolSchemaMap(child, childPath, depth+1, true)
+		if err != nil {
+			return nil, err
+		}
+		properties[key] = admitted
+		if equal, exists := child["x-swarm-equalTo"]; exists {
+			equalities[key] = equal.(string)
+		}
+	}
+	options := []ToolInputSchemaOption{ToolSchemaProperties(properties)}
+	if len(equalities) > 0 {
+		options = append(options, toolSchemaPropertyEqualities(equalities))
+	}
+	return options, nil
+}
+
+func admitToolSchemaSequenceOption(name string, value any, path string) (ToolInputSchemaOption, error) {
+	sequence := reflect.ValueOf(value)
+	if !sequence.IsValid() || (sequence.Kind() != reflect.Slice && sequence.Kind() != reflect.Array) || (sequence.Kind() == reflect.Slice && sequence.IsNil()) {
+		return nil, toolSchemaFieldError("%s must be a sequence", path)
+	}
+	values := make([]any, sequence.Len())
+	for i := range values {
+		values[i] = sequence.Index(i).Interface()
+	}
+	if name == "enum" {
+		return ToolSchemaEnum(values...), nil
+	}
+	names := make([]string, len(values))
+	for i, item := range values {
+		text, ok := item.(string)
+		if !ok {
+			return nil, toolSchemaFieldError("%s[%d] must be text", path, i)
+		}
+		names[i] = text
+	}
+	return ToolSchemaRequired(names...), nil
+}
+
+func admitToolSchemaNestedOption(name string, value any, path string, depth int) (ToolInputSchemaOption, error) {
+	if allowed, ok := value.(bool); name == "additionalProperties" && ok {
+		return ToolSchemaAdditionalPropertiesAllowed(allowed), nil
+	}
+	child, ok := value.(map[string]any)
+	if !ok {
+		return nil, toolSchemaFieldError("%s must be a mapping%s", path, map[bool]string{true: " or boolean"}[name == "additionalProperties"])
+	}
+	admitted, err := admitToolSchemaMap(child, path, depth+1, false)
+	if err != nil {
+		return nil, err
+	}
+	if name == "items" {
+		return ToolSchemaItems(admitted), nil
+	}
+	return ToolSchemaAdditionalPropertiesSchema(admitted), nil
+}
+
+func admitToolSchemaNumberOption(name string, value any, path string) (ToolInputSchemaOption, error) {
+	literal, err := canonicaljson.FromGo(value)
+	if err != nil {
+		return nil, toolSchemaFieldError("%s: %w", path, err)
+	}
+	number, ok := literal.Number()
+	if !ok {
+		return nil, toolSchemaFieldError("%s must be a finite number", path)
+	}
+	if name == "minimum" {
+		return ToolSchemaMinimum(number), nil
+	}
+	return ToolSchemaMaximum(number), nil
+}
+
+func admitToolSchemaLengthOption(name string, value any, path string) (ToolInputSchemaOption, error) {
+	number := reflect.ValueOf(value)
+	var integer int64
+	switch number.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		integer = number.Int()
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		if number.Uint() > uint64(^uint(0)>>1) {
+			return nil, toolSchemaFieldError("%s integer overflows", path)
+		}
+		integer = int64(number.Uint())
+	default:
+		return nil, toolSchemaFieldError("%s must be a nonnegative integer, not a floating or quoted number", path)
+	}
+	if integer < 0 || int64(int(integer)) != integer {
+		return nil, toolSchemaFieldError("%s must be a nonnegative integer within native bounds", path)
+	}
+	n := int(integer)
+	switch name {
+	case "minLength":
+		return ToolSchemaMinLength(n), nil
+	case "maxLength":
+		return ToolSchemaMaxLength(n), nil
+	case "minItems":
+		return ToolSchemaMinItems(n), nil
+	default:
+		return ToolSchemaMaxItems(n), nil
+	}
 }

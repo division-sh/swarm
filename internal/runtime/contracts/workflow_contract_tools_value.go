@@ -100,75 +100,93 @@ func projectToolValue(value yamlsource.Value) (ToolSchemaEntry, error) {
 		}
 		options = append(options, WithToolModule(module))
 	} else {
-		for _, name := range []string{"path", "abi", "entry", "digest", "source_path", "source_hash", "runtime", "limits"} {
-			if field, present := fields[name]; present {
-				return ToolSchemaEntry{}, nodeValueError(field, fmt.Errorf("%s requires handler_type wasm or python", name))
-			}
+		transport, err := projectToolTransportOptions(fields)
+		if err != nil {
+			return ToolSchemaEntry{}, err
 		}
-		if field, present := fields["http"]; present {
-			spec, err := projectToolHTTPValue(field)
-			if err != nil {
-				return ToolSchemaEntry{}, err
-			}
-			options = append(options, WithToolHTTP(spec))
-		}
-		if field, present := fields["response_mapping"]; present {
-			if _, err := uniqueYAMLMappingFields(field, "response_mapping"); err != nil {
-				return ToolSchemaEntry{}, err
-			}
-			var mapping map[string]any
-			if err := field.Project(&mapping); err != nil {
-				return ToolSchemaEntry{}, nodeValueError(field, err)
-			}
-			options = append(options, WithToolResponseMapping(mapping))
-		}
-		if field, present := fields["response_success"]; present {
-			members, err := schemaValueFields(field, "response_success", map[string]struct{}{"kind": {}, "path": {}, "equals": {}}, nil, true)
-			if err != nil {
-				return ToolSchemaEntry{}, err
-			}
-			var success HTTPResponseSuccess
-			if err := schemaValueRequiredTexts(field, members, map[string]*string{"kind": &success.Kind}); err != nil {
-				return ToolSchemaEntry{}, err
-			}
-			if success.Kind == "http_status_2xx" {
-				for _, name := range []string{"path", "equals"} {
-					if forbidden, present := members[name]; present {
-						return ToolSchemaEntry{}, nodeValueError(forbidden, fmt.Errorf("response_success.%s is forbidden for kind http_status_2xx", name))
-					}
-				}
-			}
-			if err := schemaValueTexts(members, map[string]*string{"path": &success.Path}, false); err != nil {
-				return ToolSchemaEntry{}, err
-			}
-			if equals, present := members["equals"]; present {
-				success.EqualsPresent = true
-				if err := equals.Project(&success.Equals); err != nil {
-					return ToolSchemaEntry{}, nodeValueError(equals, err)
-				}
-			}
-			options = append(options, WithToolResponseSuccess(success))
-		}
-		if field, present := fields["credentials"]; present {
-			credentials, err := agentValueTextList(field)
-			if err != nil {
-				return ToolSchemaEntry{}, err
-			}
-			options = append(options, WithToolCredentials(credentials...))
-		}
-		if field, present := fields["managed_credential"]; present {
-			ref, err := projectToolManagedCredentialValue(field)
-			if err != nil {
-				return ToolSchemaEntry{}, err
-			}
-			options = append(options, WithToolManagedCredential(ref))
-		}
+		options = append(options, transport...)
 	}
 	entry, err := NewToolSchemaEntry(options...)
 	if err != nil {
 		return ToolSchemaEntry{}, nodeValueError(value, err)
 	}
 	return entry, nil
+}
+
+func projectToolTransportOptions(fields map[string]yamlsource.Value) ([]ToolSchemaEntryOption, error) {
+	options := []ToolSchemaEntryOption{}
+	for _, name := range []string{"path", "abi", "entry", "digest", "source_path", "source_hash", "runtime", "limits"} {
+		if field, present := fields[name]; present {
+			return nil, nodeValueError(field, fmt.Errorf("%s requires handler_type wasm or python", name))
+		}
+	}
+	if field, present := fields["http"]; present {
+		spec, err := projectToolHTTPValue(field)
+		if err != nil {
+			return nil, err
+		}
+		options = append(options, WithToolHTTP(spec))
+	}
+	if field, present := fields["response_mapping"]; present {
+		if _, err := uniqueYAMLMappingFields(field, "response_mapping"); err != nil {
+			return nil, err
+		}
+		var mapping map[string]any
+		if err := field.Project(&mapping); err != nil {
+			return nil, nodeValueError(field, err)
+		}
+		options = append(options, WithToolResponseMapping(mapping))
+	}
+	if field, present := fields["response_success"]; present {
+		success, err := projectToolResponseSuccessValue(field)
+		if err != nil {
+			return nil, err
+		}
+		options = append(options, WithToolResponseSuccess(success))
+	}
+	if field, present := fields["credentials"]; present {
+		credentials, err := agentValueTextList(field)
+		if err != nil {
+			return nil, err
+		}
+		options = append(options, WithToolCredentials(credentials...))
+	}
+	if field, present := fields["managed_credential"]; present {
+		ref, err := projectToolManagedCredentialValue(field)
+		if err != nil {
+			return nil, err
+		}
+		options = append(options, WithToolManagedCredential(ref))
+	}
+	return options, nil
+}
+
+func projectToolResponseSuccessValue(field yamlsource.Value) (HTTPResponseSuccess, error) {
+	members, err := schemaValueFields(field, "response_success", map[string]struct{}{"kind": {}, "path": {}, "equals": {}}, nil, true)
+	if err != nil {
+		return HTTPResponseSuccess{}, err
+	}
+	var success HTTPResponseSuccess
+	if err := schemaValueRequiredTexts(field, members, map[string]*string{"kind": &success.Kind}); err != nil {
+		return success, err
+	}
+	if success.Kind == "http_status_2xx" {
+		for _, name := range []string{"path", "equals"} {
+			if forbidden, present := members[name]; present {
+				return success, nodeValueError(forbidden, fmt.Errorf("response_success.%s is forbidden for kind http_status_2xx", name))
+			}
+		}
+	}
+	if err := schemaValueTexts(members, map[string]*string{"path": &success.Path}, false); err != nil {
+		return success, err
+	}
+	if equals, present := members["equals"]; present {
+		success.EqualsPresent = true
+		if err := equals.Project(&success.Equals); err != nil {
+			return success, nodeValueError(equals, err)
+		}
+	}
+	return success, nil
 }
 
 func projectToolHTTPValue(value yamlsource.Value) (HTTPToolSpec, error) {

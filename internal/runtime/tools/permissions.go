@@ -79,11 +79,9 @@ func ValidateAgentPermissions(source semanticview.Source) (int, []error) {
 		}
 		for _, toolName := range agent.entry.ConfiguredTools() {
 			toolName = strings.TrimSpace(toolName)
-			if bundle, ok := semanticview.Bundle(source); ok {
-				if tool, found := bundle.ToolEntryForFlow(agent.flowID, toolName); found && !tool.AgentExposable() {
-					errs = append(errs, fmt.Errorf("agent %s declares module tool %s; modules are compute_module-only", agent.id, toolName))
-					continue
-				}
+			if err := agentModuleGrantError(source, agent.flowID, toolName); err != nil {
+				errs = append(errs, fmt.Errorf("agent %s: %w", agent.id, err))
+				continue
 			}
 			if IsRetiredDynamicAgentToolName(toolName) {
 				continue
@@ -99,6 +97,17 @@ func ValidateAgentPermissions(source semanticview.Source) (int, []error) {
 		}
 	}
 	return len(agents), errs
+}
+
+func agentModuleGrantError(source semanticview.Source, flowID, name string) error {
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		return nil
+	}
+	if tool, found := bundle.ToolEntryForFlow(flowID, name); found && !tool.AgentExposable() {
+		return fmt.Errorf("declares module tool %s; modules are compute_module-only", name)
+	}
+	return nil
 }
 
 type scopedAgentEntry struct {
