@@ -1986,15 +1986,10 @@ func (s *EffectPostgresOwner) SettleExternalAttempt(ctx context.Context, settlem
 	}
 	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates, func(txctx context.Context, mutation *mutationprotocol.Attempt) (struct{}, error) {
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-			if settlement.Authority.Kind == runtimeeffects.AuthorityChannelDelivery {
-				if err := requireChannelDeliverySettlementAuthorityTx(txctx, tx, settlement, true); err != nil {
-					return err
-				}
-			} else if settlement.Authority.Kind == runtimeeffects.AuthorityChannelNativeSetting {
-				if err := requireChannelNativeSettingSettlementAuthorityTx(txctx, tx, settlement, true); err != nil {
-					return err
-				}
-			} else if settlement.Authority.Valid() {
+			if err := requireChannelSourceSettlementTx(txctx, tx, settlement, true); err != nil {
+				return err
+			}
+			if settlement.Authority.Kind != runtimeeffects.AuthorityChannelDelivery && settlement.Authority.Kind != runtimeeffects.AuthorityChannelNativeSetting && settlement.Authority.Valid() {
 				if err := requireExternalEffectAuthorityPostgres(txctx, tx, settlement.Authority, false); err != nil {
 					return err
 				}
@@ -2003,10 +1998,7 @@ func (s *EffectPostgresOwner) SettleExternalAttempt(ctx context.Context, settlem
 			if err != nil {
 				return err
 			}
-			if err := projectChannelDeliverySettlementTx(txctx, tx, settlement, true); err != nil {
-				return err
-			}
-			if err := projectChannelNativeSettingSettlementTx(txctx, tx, settlement, true); err != nil {
+			if err := projectChannelSourceSettlementTx(txctx, tx, settlement, true); err != nil {
 				return err
 			}
 			if _, err := tx.ExecContext(txctx, `DELETE FROM runtime_effect_budget_reservations WHERE attempt_id=$1::uuid`, settlement.AttemptID); err != nil {
@@ -2045,15 +2037,10 @@ func (s *EffectSQLiteOwner) SettleExternalAttempt(ctx context.Context, settlemen
 	}
 	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite settle external attempt", mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates, func(txctx context.Context, mutation *mutationprotocol.Attempt) (struct{}, error) {
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-			if settlement.Authority.Kind == runtimeeffects.AuthorityChannelDelivery {
-				if err := requireChannelDeliverySettlementAuthorityTx(txctx, tx, settlement, false); err != nil {
-					return err
-				}
-			} else if settlement.Authority.Kind == runtimeeffects.AuthorityChannelNativeSetting {
-				if err := requireChannelNativeSettingSettlementAuthorityTx(txctx, tx, settlement, false); err != nil {
-					return err
-				}
-			} else if settlement.Authority.Valid() {
+			if err := requireChannelSourceSettlementTx(txctx, tx, settlement, false); err != nil {
+				return err
+			}
+			if settlement.Authority.Kind != runtimeeffects.AuthorityChannelDelivery && settlement.Authority.Kind != runtimeeffects.AuthorityChannelNativeSetting && settlement.Authority.Valid() {
 				if err := requireExternalEffectAuthoritySQLite(txctx, tx, settlement.Authority, false); err != nil {
 					return err
 				}
@@ -2062,10 +2049,7 @@ func (s *EffectSQLiteOwner) SettleExternalAttempt(ctx context.Context, settlemen
 			if err != nil {
 				return err
 			}
-			if err := projectChannelDeliverySettlementTx(txctx, tx, settlement, false); err != nil {
-				return err
-			}
-			if err := projectChannelNativeSettingSettlementTx(txctx, tx, settlement, false); err != nil {
+			if err := projectChannelSourceSettlementTx(txctx, tx, settlement, false); err != nil {
 				return err
 			}
 			if _, err := tx.ExecContext(txctx, `DELETE FROM runtime_effect_budget_reservations WHERE attempt_id=?`, settlement.AttemptID); err != nil {
@@ -2485,22 +2469,43 @@ func reconcileGenericExternalEffectCandidates(ctx context.Context, tx *sql.Tx, p
 			targetState = string(runtimeeffects.StateOutcomeUncertain)
 			failure = uncertainFailure
 		}
+		if candidate.AuthorityKind == string(runtimeeffects.AuthorityChannelDelivery) || candidate.AuthorityKind == string(runtimeeffects.AuthorityChannelNativeSetting) {
+			changed, err := recoverChannelSourceSettlementTx(ctx, tx, candidate, runtimeeffects.State(targetState), failure, now, postgres)
+			if err != nil {
+				return runtimeeffects.RecoverySummary{}, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict,
+					"channel_source_recovery_settlement_conflict", "external-effects", "startup_reconcile",
+					map[string]any{"attempt_id": candidate.AttemptID}, err)
+			}
+			if changed {
+				if targetState == string(runtimeeffects.StateTerminalFailure) {
+					summary.PrelaunchTerminal++
+				} else {
+					summary.OutcomeUncertain++
+				}
+			}
+			continue
+		}
 		var result sql.Result
 		if postgres {
 			result, err = tx.ExecContext(ctx, `UPDATE runtime_external_effect_attempts SET state=$1,failure=$2::jsonb,completed_at=$3,updated_at=$3 WHERE attempt_id=$4::uuid AND state=$5`, targetState, string(failure), now, candidate.AttemptID, candidate.State)
-			if err == nil {
-				_, err = tx.ExecContext(ctx, `UPDATE runtime_external_effect_operations SET state=$1,completed_at=$2,updated_at=$2 WHERE operation_id=$3::uuid`, targetState, now, candidate.OperationID)
-			}
 		} else {
 			result, err = tx.ExecContext(ctx, `UPDATE runtime_external_effect_attempts SET state=?,failure=?,completed_at=?,updated_at=? WHERE attempt_id=? AND state=?`, targetState, string(failure), now, now, candidate.AttemptID, candidate.State)
-			if err == nil {
-				_, err = tx.ExecContext(ctx, `UPDATE runtime_external_effect_operations SET state=?,completed_at=?,updated_at=? WHERE operation_id=?`, targetState, now, now, candidate.OperationID)
-			}
 		}
 		if err != nil {
 			return runtimeeffects.RecoverySummary{}, err
 		}
 		changed, err := result.RowsAffected()
+		if err != nil {
+			return runtimeeffects.RecoverySummary{}, err
+		}
+		if changed == 0 {
+			continue
+		}
+		if postgres {
+			_, err = tx.ExecContext(ctx, `UPDATE runtime_external_effect_operations SET state=$1,completed_at=$2,updated_at=$2 WHERE operation_id=$3::uuid`, targetState, now, candidate.OperationID)
+		} else {
+			_, err = tx.ExecContext(ctx, `UPDATE runtime_external_effect_operations SET state=?,completed_at=?,updated_at=? WHERE operation_id=?`, targetState, now, now, candidate.OperationID)
+		}
 		if err != nil {
 			return runtimeeffects.RecoverySummary{}, err
 		}
