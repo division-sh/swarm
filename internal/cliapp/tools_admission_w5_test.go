@@ -58,7 +58,9 @@ func TestW5ToolsVerifyAndDescribeSupportedSurface(t *testing.T) {
 	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", root, "--config", config, "--json"}, &stdout, &stderr, defaultRootCommandOptions()); code == 0 || !strings.Contains(stdout.String()+stderr.String(), "module") {
 		t.Fatalf("module grant accepted: code=%d stdout=%s stderr=%s", code, &stdout, &stderr)
 	}
-	writeDescribeTestFile(t, filepath.Join(root, "agents.yaml"), "worker:\n  intent: {inline: business intent}\n")
+	if err := os.Remove(filepath.Join(root, "agents.yaml")); err != nil {
+		t.Fatal(err)
+	}
 	writeDescribeTestFile(t, filepath.Join(root, "policy.yaml"), "modules: {}\n")
 	stdout.Reset()
 	stderr.Reset()
