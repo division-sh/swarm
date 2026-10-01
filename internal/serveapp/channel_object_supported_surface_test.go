@@ -580,6 +580,14 @@ func waitObjectChannelEffect(t *testing.T, provider *objectChannelProvider, oper
 
 func objectChannelIngress(t *testing.T, callback, signing, id string, data map[string]any) {
 	t.Helper()
+	status := objectChannelIngressStatus(t, callback, signing, id, data)
+	if status != http.StatusOK && status != http.StatusAccepted {
+		t.Fatalf("signed object ingress status=%d", status)
+	}
+}
+
+func objectChannelIngressStatus(t *testing.T, callback, signing, id string, data map[string]any) int {
+	t.Helper()
 	body, err := json.Marshal(map[string]any{"delivery": id, "data": data})
 	if err != nil {
 		t.Fatal(err)
@@ -595,9 +603,7 @@ func objectChannelIngress(t *testing.T, callback, signing, id string, data map[s
 		t.Fatal(err)
 	}
 	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusAccepted {
-		t.Fatalf("signed object ingress status=%d", response.StatusCode)
-	}
+	return response.StatusCode
 }
 
 // The provider uses workspace/queue/principal objects and its own HTTP protocol,
@@ -605,6 +611,7 @@ func objectChannelIngress(t *testing.T, callback, signing, id string, data map[s
 type objectChannelProvider struct {
 	mu                sync.Mutex
 	callback, signing string
+	baseURL           string
 	deliveries        []map[string]any
 	commands          map[string][]any
 	calls             map[string][]map[string]any
@@ -613,6 +620,8 @@ type objectChannelProvider struct {
 	loseNextPrompt    bool
 	loseResponseEdit  string
 	businessResponse  *objectChannelResponsePause
+	editResponse      *objectChannelResponsePause
+	editReference     string
 }
 
 func (p *objectChannelProvider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -691,8 +700,19 @@ func (p *objectChannelProvider) ServeHTTP(w http.ResponseWriter, r *http.Request
 		http.Error(w, "unknown mock operation", 404)
 		return
 	}
-	if pause := p.businessResponse; pause != nil && r.URL.Path == "/v2/deliver" && input["queue"] == "queue-b" {
+	pause := p.businessResponse
+	if pause != nil && r.URL.Path == "/v2/deliver" && input["queue"] == "queue-b" {
 		p.businessResponse = nil
+	} else {
+		pause = nil
+	}
+	if r.URL.Path == "/v2/edit" && p.editResponse != nil {
+		reference, _ := input["reference"].(map[string]any)
+		if reference["id"] == p.editReference {
+			pause, p.editResponse = p.editResponse, nil
+		}
+	}
+	if pause != nil {
 		close(pause.arrived)
 		p.mu.Unlock()
 		select {
