@@ -1,0 +1,24 @@
+name: compiled human task selection
+steps:
+  - publish: work.requested
+    payload: {seed: true}
+  - publish: observer.requested
+    payload: {seed: true}
+  - mailbox.decide:
+      match: {anchor_kind: human_task, category: review}
+      verdict: approve
+      fields: {}
+  - mailbox.decide:
+      match: {anchor_kind: stage_gate, decision: review_decision}
+      verdict: approve
+      fields: {}
+expect:
+  events:
+    include: [observer.requested, human_task.approved, work.completed]
+  no_dead_letters: true
+  entities:
+    - type: work
+      count: 1
+    - type: work
+      current_state: done
+      fields: {result: approved}
