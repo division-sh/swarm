@@ -82,6 +82,11 @@ func TestReleaseRPCObserverRunsOnlyAfterFailureWithoutRetry(t *testing.T) {
 			started := make(chan struct{})
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls.Add(1)
+				var request map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Error(err)
+					return
+				}
 				if failed {
 					close(started)
 					<-r.Context().Done()
