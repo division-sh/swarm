@@ -192,16 +192,17 @@ func prepareFullLifecycleProject(t *testing.T, binary, root string, store golden
 		}
 	}
 	return releaseProcessSpec{
-		BinaryPath: binary,
-		WorkingDir: projectRoot,
-		ConfigPath: "swarm.yaml",
-		Source:     "contracts",
-		Store:      store.name,
-		Dev:        dev,
-		APIPort:    0,
-		TokenFile:  "api-token",
-		Token:      fullLifecycleAPIToken,
-		Env:        env,
+		BinaryPath:   binary,
+		WorkingDir:   projectRoot,
+		ConfigPath:   "swarm.yaml",
+		Source:       "contracts",
+		Store:        store.name,
+		Dev:          dev,
+		APIPort:      0,
+		TokenFile:    "api-token",
+		Token:        fullLifecycleAPIToken,
+		RedactValues: []string{fullLifecycleSigningSecret, fullLifecycleBotToken},
+		Env:          env,
 	}
 }
 

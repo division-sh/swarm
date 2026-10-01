@@ -526,6 +526,7 @@
     {"path":"internal/releasee2e/full_lifecycle_fixture_test.go","class":"test"},
     {"path":"internal/releasee2e/full_lifecycle_test.go","class":"test"},
     {"path":"internal/releasee2e/golden_agent_workload_test.go","class":"test"},
+    {"path":"internal/releasee2e/lifecycle_failure_evidence_test.go","class":"test"},
     {"path":"internal/releasee2e/lifecycle_test.go","class":"test"},
     {"path":"internal/releasee2e/mcp_listener_allocation_test.go","class":"test"},
     {"path":"internal/releasee2e/node_identity_test.go","class":"test"},
