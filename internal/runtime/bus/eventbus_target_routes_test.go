@@ -717,6 +717,7 @@ func TestEventBusRejectsEntitylessOwnershipForCompleteHandlerShapeBeforePersiste
 		}}},
 		{name: "join membership", handler: runtimecontracts.SystemNodeEventHandler{Join: &runtimecontracts.JoinSpec{
 			ID: "all", Stage: "waiting", Members: runtimecontracts.JoinMembersSpec{From: "state.expected", By: "payload.member_id"}, Output: "payload.result",
+			OnCompleteFound: true, OnComplete: runtimecontracts.HandlerRuleEntry{AdvancesTo: "done"},
 		}}},
 		{name: "loop lifecycle", handler: runtimecontracts.SystemNodeEventHandler{Loop: &runtimecontracts.LoopOperationSpec{Admit: "revision", From: "waiting"}}},
 		{name: "payload accumulator", handler: runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}},
@@ -1329,7 +1330,11 @@ func materializedTargetBundleWithHandler(t *testing.T, flowID, nodeID, eventType
 		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
 			InstanceField("instance_key"),
 		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{eventType: {}, "item.ready": {
+		Events: map[string]runtimecontracts.EventCatalogEntry{eventType: {
+			Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
+				"member_id": {Type: "text"}, "result": {Type: "text"},
+			}},
+		}, "item.ready": {
 			Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"item": {Type: "text"}}},
 		}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
@@ -1350,7 +1355,7 @@ func materializedTargetBundleWithHandler(t *testing.T, flowID, nodeID, eventType
 		"manifest.yaml":                        "name: target-route-test\nversion: 1.0.0\n",
 		"schema.yaml":                          "name: target-route-test\n",
 		filepath.Join(flowID, "schema.yaml"):   fmt.Sprintf("name: %s\nstages:\n  active: {initial: true}\n", flowID),
-		filepath.Join(flowID, "entities.yaml"): "test_entity:\n  items:\n    type: '[text]'\n",
+		filepath.Join(flowID, "entities.yaml"): "test_entity:\n  items:\n    type: '[text]'\n  expected:\n    type: '[text]'\n",
 	})
 	admitted.FlowTree = base.FlowTree
 	admitted.FlowSchemas = base.FlowSchemas
