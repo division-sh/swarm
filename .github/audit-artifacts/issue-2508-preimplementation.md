@@ -1,16 +1,69 @@
 # Pre-Implementation Coverage Audit: #2508
 
-## C11 Supported-Mode Correction And Focused Re-Gate Request
+## A14 Spec Contradiction / Implementation Stop
 
-Implementation and closure work is paused under the approved gate's unprovable-row
-stop condition. `newTestCommand` binds no shared output flags: public `swarm test`
+The C11 correction below is approved and its required public proof now passes.
+The subsequent compiled A14 proof hit a different, explicit original-gate stop
+condition. Implementation and closure qualification are paused pending a bounded
+lead/reviewer ruling; the maintenance scope has not silently absorbed CLI semantics.
+
+`TestReadProofFactoringCompiledSurfaces` runs real public RPC and compiled CLI
+reads over the existing retained MockOnly lifecycle harness on both stores.
+All nine RPC reads with exact run/session authority succeed. Agent view and
+diagnose fail in text, JSON and quiet because their CLI requests carry no run_id.
+Both commands also expose no run-id flag. The same probe on disposable untouched
+master `1c4cce2094bdaf48dd4d5faf6dbfe33da662bc0f` reproduces the failures.
+Explicit-run agent deliveries, unfiltered/run-filtered conversation list,
+conversation view/turn and declared-agent list succeed on both stores.
+The follow-on probe confirms the same refusal for default agent deliveries and
+agent-filtered conversation list without run authority on both stores. Each
+fails in all three supported output modes. Both candidate and untouched-master
+complete probes report the same 24 failed / 26 successful compiled cells,
+plus 18 successful explicit-authority RPC reads. Probe times are
+24.967s / 24.334s. Authority must not be inferred from declaration names,
+sessions or ambient CLI state.
+
+Binding contradiction: `cli.commands.agent_view` and `agent_diagnose` describe
+agent-id-only requests (platform-spec.yaml near 27167/27222), while OpenRPC
+`agent.get`/`agent.diagnose` require run_id (near 35981/36066), enforced by
+`resolveOperatorAgentIdentityParam`. The API's fail-closed exact-run owner is
+not a defect. Existing fake-RPC CLI fixtures cannot prove the integrated success
+originally promised by A14. #1562 is a different declared-agent inventory
+decision, not authority to fix operational detail selection here.
+
+Requested disposition: independently classify and track the operational CLI
+run-authority contract before authorizing a bounded repair or corrected
+behavior-preservation proof. Do not weaken API admission, add ambient selection,
+use dashboard/store fallbacks, or silently add a feature to this maintenance PR.
+No new tracker or semantic fix is claimed approved. The four read entrances,
+explicit-run controls, session-scoped readers, effective frame and mutating
+agent consumers are part of the focused sibling census.
+
+Earned local proof, not full closure: compiled C11 three authored fresh public
+MockOnly scenarios and both unsupported flags pass (14.796s). C10 human/proposed
+real 201-card/ambiguity/foreign-codec reads pass on both stores (8.154s). D10
+matches the committed pre-extraction normalized output hashes for all 45 cells
+and 90 public invocations (81.88s); repository path is the only normalization.
+Focused API/CLI controls pass (7.567s/20.465s). Existing tests stay unchanged.
+Golden/default-suite, final complexity snapshot and normal review PR remain
+outstanding. The red A14 counterexample is not a passing coverage row or a
+full-suite failure caused by extraction. Preserve it until the ruling resolves
+the actual contract; no review-ready or parent closure claim is made.
+
+## C11 Supported-Mode Correction Approved
+
+Independent ruling `issuecomment-5927851651` approves the bounded correction
+and resumes implementation; no other proof or scope condition is waived.
+`newTestCommand` binds no shared output flags: public `swarm test`
 has text output, but neither `--json` nor `--quiet` is supported. C11's original
 wording must not be interpreted as authorizing either new feature. The requested
 bounded correction is successful compiled MockOnly text execution for all three
 anchors, plus exact nonzero exit/diagnostic and no-session-acquisition proof for
 both unsupported flags. Describe and operator JSON/quiet proofs remain required
 where supported. No owner, production behavior, class boundary or proof waiver
-is proposed; request reviewer-g's explicit ruling before resuming.
+is proposed. Future JSON/quiet support remains separately tracked in #1712.
+Real authored scenarios must exercise the compiled fresh-session command for
+all three anchors; fake RPC or a retained served harness earns no C11 credit.
 
 Characterization was committed before production extraction at `8d2ad0f2f`,
 against unchanged merged production. New A capability/order/independent-capability,
@@ -541,8 +594,8 @@ Each failure proof checks zero later reads/get/mutations, not only an error stri
 | C07 malformed cursor/page or later error | New characteristic subtests: non-string cursor decode failure, existing-owner refusal of corrupted cursor bytes, missing/invalid items, malformed tagged anchor/effect, later RPC failure; no get/mutation after any invalid page. CLI does not parse opaque owner tokens. |
 | C08 detail and stale-content fence | Same tests: exactly one get only after final valid page, detail validator malformed/hash/anchor refusal and RPC failure; decide forwards immutable hash, stale response error preserved; defer params unchanged. |
 | C09 mutation response/errors | Existing decide/defer tests plus characterization of ok/card_id/change_id checks and no local mutation retry. |
-| C10 real page-owner proof | Retain TestScenarioMailboxActualServerContinuationBothStores; add proposed-effect/human-task continuation cases using canonical writers and real mailbox handler, >200 rows and later ambiguity/foreign cursor on both stores. These are store-seeded API proof, not authored creation E2E. |
-| C11 actual public mock command (correction awaiting focused gate) | TestReadProofFactoringCompiledScenario: compile swarm, run existing authored MockOnly stage-gate/human-task/proposed-effect scenarios through shared fresh session/RPC; assert text/exit and settled expected decision state. JSON/quiet are unsupported: prove their unchanged refusal before session acquisition, not successful execution or a new output feature. No external API target, retained restart, signed ingress or live-provider credit. |
+| C10 real page-owner proof | Retain TestScenarioMailboxActualServerContinuationBothStores; TestScenarioCardFactoringActualContinuationBothStores adds proposed-effect/human-task cases using canonical writers and real mailbox handler, >200 rows, later ambiguity and foreign decision-card cursor codec refusal on both stores. Mailbox positions are creation-order cursors, not anchor-bound tokens; never invent a query-binding guarantee or change their schema. These are store-seeded API proof, not authored creation E2E. |
+| C11 actual public mock command (approved correction) | TestReadProofFactoringCompiledScenario: compile swarm, run authored MockOnly stage-gate/human-task/proposed-effect scenarios through shared fresh session/RPC; assert text/exit and settled expected decision state. JSON/quiet are unsupported: prove their unchanged exit-2 refusal before source loading/session acquisition, not successful execution or a new output feature. No external API target, retained restart, signed ingress or live-provider credit. |
 | C12 cancellation/failure before completion | Characterization blocks a later page/get, cancels context and proves error/no mutation; existing session cleanup/quiescence controls must pass. No retries, timeout changes or cancellation suppression. |
 
 ### Qualification / Sibling Proof (Q01-Q04)

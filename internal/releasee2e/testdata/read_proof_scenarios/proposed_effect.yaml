@@ -1,0 +1,24 @@
+name: compiled proposed effect selection
+steps:
+  - publish: work.requested
+    payload: {seed: true}
+  - publish: effect.requested
+    payload: {seed: true}
+  - mailbox.decide:
+      match: {anchor_kind: proposed_effect, decision: send_telegram_message}
+      verdict: approve
+      fields: {}
+  - mailbox.decide:
+      match: {anchor_kind: stage_gate, decision: review_decision}
+      verdict: approve
+      fields: {}
+expect:
+  events:
+    include: [effect.requested, platform.activity_requested, telegram_send_message.succeeded, work.completed]
+  no_dead_letters: true
+  entities:
+    - type: work
+      count: 1
+    - type: work
+      current_state: done
+      fields: {result: approved}

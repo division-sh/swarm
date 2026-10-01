@@ -1,0 +1,18 @@
+name: compiled stage gate selection
+steps:
+  - publish: work.requested
+    payload: {seed: true}
+  - mailbox.decide:
+      match: {anchor_kind: stage_gate, decision: review_decision}
+      verdict: approve
+      fields: {}
+expect:
+  events:
+    include: [work.requested, work.completed]
+  no_dead_letters: true
+  entities:
+    - type: work
+      count: 1
+    - type: work
+      current_state: done
+      fields: {result: approved}
