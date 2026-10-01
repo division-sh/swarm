@@ -353,7 +353,8 @@ func effectiveSourceTestChannelPlans(t *testing.T, repoRoot string) (packs.Satis
 		return plan
 	}
 	first := compile(channels[0], trigger)
-	changedSchema := runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaString, runtimecontracts.ToolSchemaMinLength(1), runtimecontracts.ToolSchemaMaxLength(18), runtimecontracts.ToolSchemaPattern(`^-?[0-9]+$`))
+	// Change generation without widening learned values beyond the destination.
+	changedSchema := runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaString, runtimecontracts.ToolSchemaMinLength(1), runtimecontracts.ToolSchemaMaxLength(16), runtimecontracts.ToolSchemaPattern(`^-?[0-9]+$`))
 	changedChannel := channels[0]
 	changedChannel.Manifest.OpaqueTypes["conversation_reference"] = changedSchema
 	for _, eventName := range []string{"inbound.telegram.text_message", "inbound.telegram.callback_action"} {
