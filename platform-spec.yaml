@@ -23805,11 +23805,13 @@ cli_specification:
           control_continue_run: {command: swarm control continue, selector: 'arg:run-id', family: run, mode: full_only, safety: mutating}
           control_stop_run: {command: swarm control stop, selector: 'arg:run-id', family: run, mode: full_only, safety: mutating}
           agent_frame_run: {command: swarm agent frame, selector: 'flag:run-id', family: run, mode: full_only}
-          agent_deliveries_run: {command: swarm agent deliveries, selector: 'flag:run-id', family: run, mode: full_only}
+          agent_view_run: {command: swarm agent view, selector: 'flag:run-id', family: run, mode: full_only, scope_rule: required exact operational run; agent prefix resolution cannot select or replace it}
+          agent_diagnose_run: {command: swarm agent diagnose, selector: 'flag:run-id', family: run, mode: full_only, scope_rule: required exact operational run; queue and prefix retries retain the same scope}
+          agent_deliveries_run: {command: swarm agent deliveries, selector: 'flag:run-id', family: run, mode: full_only, scope_rule: required exact operational run; pagination and prefix retries retain the same scope}
           agent_restart_run: {command: swarm agent restart, selector: 'flag:run-id', family: run, mode: full_only, safety: mutating}
           agent_replay_run: {command: swarm agent replay, selector: 'flag:run-id', family: run, mode: full_only, safety: mutating}
           agent_directive_run: {command: swarm agent directive, selector: 'flag:run-id', family: run, mode: full_only, safety: mutating}
-          conversation_list_run: {command: swarm conversation list, selector: 'flag:run-id', family: run, mode: full_only}
+          conversation_list_run: {command: swarm conversation list, selector: 'flag:run-id', family: run, mode: full_only, scope_rule: required with agent-id; otherwise optional exact run filter}
           entity_list_run: {command: swarm entity list, selector: 'flag:run-id', family: run, mode: full_only}
           entity_view_run: {command: swarm entity view, selector: 'flag:run-id', family: run, mode: full_only}
           entity_aggregate_run: {command: swarm entity aggregate, selector: 'flag:run-id', family: run, mode: full_only}
@@ -27188,12 +27190,12 @@ cli_specification:
       - malformed agent.list responses fail closed
       - no direct DB/store/runtime/EventBus/agentcontrol reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, or token fallback
     agent_view:
-      command: swarm agent view <agent-id> [--json|--quiet] [--no-color]
+      command: swarm agent view <agent-id> --run-id <run-id> [--flow-instance <flow-instance>] [--json|--quiet] [--no-color]
       group: run_operate
       tier: should_have
       implementation_status: implemented
       owner: /v1/rpc agent.get
-      behavior: Read-only single-agent detail CLI consumer. The CLI renders only AgentDetail and refs returned by /v1/rpc agent.get; it MUST NOT expand transcripts, call conversation.current_for_agent, call conversation.get, or reconstruct agent/session/turn state locally.
+      behavior: Read-only exact-run single-agent detail CLI consumer. Required explicit --run-id supplies exact operational authority before API client construction; optional --flow-instance selects the concrete target in that run. The CLI renders only AgentDetail and refs returned by /v1/rpc agent.get; it MUST NOT expand transcripts, infer a run from declared agent inventory or sessions, call conversation.current_for_agent, call conversation.get, or reconstruct agent/session/turn state locally. Agent prefix retry changes only agent_id and retains run_id and flow_instance.
       output:
         human: Labeled detail headed `Agent <agent-id>  <human status>` with identity, model, mode, optional scope, session, and last-turn rows.
         json: --json emits the AgentDetail result shape exactly, with no CLI wrapper.
@@ -27208,7 +27210,8 @@ cli_specification:
         not_found_errors:
         - AGENT_NOT_FOUND
       proof_expectations:
-      - exact /v1/rpc agent.get call with agent_id
+      - exact /v1/rpc agent.get call with agent_id, required explicit run_id and optional flow_instance; missing/blank/malformed run scope fails with exit 2 before client construction or any RPC
+      - wrong-run and ambiguous concrete targets fail closed; agent prefix retries retain the exact supplied run and flow instance without ambient or latest-run selection
       - AGENT_NOT_FOUND and malformed AgentDetail responses fail closed
       - invalid args/flags make zero API calls
       - --json, --quiet, --no-color, and --json/--quiet collision consume the shared output owner
@@ -27243,12 +27246,12 @@ cli_specification:
       - all occurrence fields remain explicit unresolved values in static and effective inspection
       - no local frame reconstruction or alternate prompt/event/capability owner
     agent_diagnose:
-      command: swarm agent diagnose <agent-id> [--queue-limit <n>] [--queue-cursor <cursor>] [--json|--quiet] [--no-color]
+      command: swarm agent diagnose <agent-id> --run-id <run-id> [--flow-instance <flow-instance>] [--queue-limit <n>] [--queue-cursor <cursor>] [--json|--quiet] [--no-color]
       group: run_operate
       tier: should_have
       implementation_status: implemented
       owner: /v1/rpc agent.diagnose
-      behavior: Read-only single-agent diagnosis CLI consumer. The CLI sends only agent_id and explicitly provided queue_limit/queue_cursor to /v1/rpc agent.diagnose, renders only owner-backed AgentDiagnosis fields, and MUST NOT synthesize diagnosis from agent.get/list, conversation, run, trace, token, dashboard/Builder REST, DB/store, runtime, EventBus, or agentcontrol owners.
+      behavior: Read-only exact-run single-agent diagnosis CLI consumer. The CLI validates required explicit --run-id before API client construction and sends agent_id, exact run_id, optional flow_instance and explicitly provided queue_limit/queue_cursor to /v1/rpc agent.diagnose. It renders only owner-backed AgentDiagnosis fields and MUST NOT synthesize diagnosis or run authority from agent.get/list, conversation, run, trace, token, dashboard/Builder REST, DB/store, runtime, EventBus, or agentcontrol owners. Agent prefix retry retains the same run and concrete flow instance.
       output:
         human: >
           Labeled detail headed `Agent <agent-id>  <human status>` with optional session/turn rows, author-facing
@@ -27266,7 +27269,8 @@ cli_specification:
         not_found_errors:
         - AGENT_NOT_FOUND
       proof_expectations:
-      - exact /v1/rpc agent.diagnose call with agent_id plus queue_limit/queue_cursor only when explicitly provided
+      - exact /v1/rpc agent.diagnose call with agent_id, required run_id, optional flow_instance and queue_limit/queue_cursor only when explicitly provided
+      - missing/blank/malformed run scope fails with exit 2 before client construction or RPC; wrong-run and ambiguous-target refusal and exact same-run agent prefix retry are proven on both stores
       - --queue-limit fails before API request unless it is in the API-owned 1..200 range
       - --queue-cursor fails before API request when explicitly blank
       - --json preserves the AgentDiagnosis result shape without adding token usage, failures, dead letters, full runtime_state enum, top-level watchdog, run_id, bundle_version, dashboard state, or richer per-tool diagnostics
@@ -27274,15 +27278,19 @@ cli_specification:
       - AGENT_NOT_FOUND, invalid params, HTTP failures, and malformed AgentDiagnosis responses fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/agentcontrol/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, conversation, run, trace, agent.get, or agent.list method usage
     agent_deliveries:
-      command: swarm agent deliveries <agent-id> [--run-id <run-id>] [--delivery-status <pending|in_progress|delivered|failed|dead_letter> ...] [--limit <n>] [--cursor <cursor>] [--json|--quiet] [--no-color]
+      command: swarm agent deliveries <agent-id> --run-id <run-id> [--flow-instance <flow-instance>] [--delivery-status <pending|in_progress|delivered|failed|dead_letter> ...] [--limit <n>] [--cursor <cursor>] [--json|--quiet] [--no-color]
       group: run_operate
       tier: should_have
       implementation_status: implemented
       owner: /v1/rpc agent.delivery_lifecycle
       behavior: >
         Read-only single-agent delivery lifecycle CLI consumer. The CLI sends only
-        agent_id, optional run_id, optional repeated delivery_status, optional
-        limit, and optional cursor to /v1/rpc agent.delivery_lifecycle. Pagination
+        agent_id, required exact run_id, optional flow_instance, optional repeated
+        delivery_status, optional limit, and optional cursor to /v1/rpc
+        agent.delivery_lifecycle. Missing, blank, or malformed run scope fails
+        before client construction or RPC. No ambient, latest-run, declaration,
+        or session inference may supply it; agent prefix retries preserve it.
+        Pagination
         is caller-driven one-page list semantics: the CLI renders the returned
         next_cursor when present but does not exhaust pages or aggregate rows.
         Human output renders only AgentDeliveryLifecycleList / AgentDeliveryLifecycleRow
@@ -27309,7 +27317,8 @@ cli_specification:
         not_found_errors:
         - AGENT_NOT_FOUND
       proof_expectations:
-      - exact /v1/rpc agent.delivery_lifecycle call with agent_id plus run_id, delivery_status, limit, and cursor only when explicitly provided
+      - exact /v1/rpc agent.delivery_lifecycle call with agent_id and required run_id, plus flow_instance, delivery_status, limit, and cursor only when explicitly provided
+      - missing/blank/malformed run scope fails with exit 2 before client construction or RPC; wrong-run and ambiguous-target refusal and exact same-run agent prefix retry are proven on both stores
       - repeated --delivery-status serializes as the canonical delivery_status array and rejects values outside pending, in_progress, delivered, failed, and dead_letter before any API request
       - --run-id, --limit, and --cursor validate before any API request; --limit must be in the API-owned 1..200 range and an explicitly blank cursor or run id is invalid
       - human output renders only API-owned AgentDeliveryLifecycleRow facts, including optional fields as dash placeholders and next_cursor when present
@@ -27647,19 +27656,22 @@ cli_specification:
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads or writes and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.start, event.replay, or agent.replay usage
       relation_to_run_start: '`run.start` owns explicit run initiation, including eventless deployment feeds; `event.publish` owns ordinary event publication and may create an event-origin run. Neither method is a wrapper for the other.'
     conversations_list:
-      command: swarm conversation list [--agent-id <agent-id>] [--run-id <run-id>] [--limit <n>] [--cursor <cursor>]
+      command: swarm conversation list [--agent-id <agent-id>] [--run-id <run-id>] [--flow-instance <flow-instance>] [--limit <n>] [--cursor <cursor>]
       group: observe_debug
       tier: should_have
       implementation_status: implemented
       owner: /v1/rpc conversation.list
-      behavior: Read-only conversation summary CLI consumer. The CLI validates optional filters locally, sends exactly the corresponding params to /v1/rpc conversation.list through the shared v1 API client, and renders only server-owned ConversationSummary rows plus next_cursor.
+      behavior: Read-only conversation summary CLI consumer. The CLI validates optional filters locally and requires explicit exact run_id whenever agent_id is supplied. flow_instance requires agent_id and therefore run_id. Missing, blank, or malformed required scope fails before client construction or RPC; no ambient, latest-run, declaration, or session inference may supply it. Unfiltered and run-only listing remain supported. The CLI sends exactly the corresponding params to /v1/rpc conversation.list through the shared v1 API client and renders only server-owned ConversationSummary rows plus next_cursor.
       flags:
       - name: --agent-id <agent-id>
         maps_to: agent_id
-        behavior: Optional OpaqueId filter for one agent.
+        behavior: Optional OpaqueId agent selector requiring explicit exact --run-id.
       - name: --run-id <run-id>
         maps_to: run_id
-        behavior: Optional OpaqueId filter for one run.
+        behavior: Exact OpaqueId run selector, required with --agent-id and otherwise an optional run filter.
+      - name: --flow-instance <flow-instance>
+        maps_to: flow_instance
+        behavior: Optional exact flow instance requiring --agent-id and --run-id.
       - name: --limit <n>
         maps_to: limit
         behavior: Optional page size from 1 through 500.
@@ -27675,7 +27687,9 @@ cli_specification:
         transport_or_malformed_response: 3
         auth_or_missing_token: 4
       proof_expectations:
-      - exact /v1/rpc conversation.list call with agent_id, run_id, limit, and cursor params only when corresponding CLI flags are provided
+      - exact /v1/rpc conversation.list call with agent_id, run_id, flow_instance, limit, and cursor params only when corresponding CLI flags are provided
+      - agent-filtered listing requires explicit full --run-id before client construction or RPC; unfiltered/run-only listing and session-based reads retain their contracts
+      - both stores prove exact scoped agent listing, wrong-run/ambiguous-target refusal, and optional exact flow-instance disambiguation
       - invalid flags, blank OpaqueId flags, out-of-range --limit, and missing explicit token for non-loopback API targets make zero API calls
       - success output renders only ConversationSummary fields and next_cursor returned by the server
       - empty conversations array, malformed results, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
@@ -36564,7 +36578,7 @@ api_specification:
       - IDEMPOTENCY_CONFLICT
     conversation.list:
       tier: should_have
-      description: List conversation summaries (one per session).
+      description: List conversation summaries (one per session). Supplying agent_id requires explicit exact run_id for canonical operational identity resolution; flow_instance additionally requires agent_id. Unfiltered and run-only enumeration remain supported, without inference from agent declarations or latest sessions.
       scope:
         required:
         - read:conversations

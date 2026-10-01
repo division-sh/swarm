@@ -511,7 +511,7 @@ func TestCLIIdentifierAgentPrefixResolvesAfterExactMiss(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "view", "agent-al"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "view", "agent-al", "--run-id", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -530,8 +530,8 @@ func TestCLIIdentifierAdditionalAgentReadConsumersResolvePrefix(t *testing.T) {
 		targetMethod string
 		result       func() map[string]any
 	}{
-		{name: "diagnose", args: []string{"agent", "diagnose", "agent-o"}, targetMethod: "agent.diagnose", result: validAgentDiagnosisResult},
-		{name: "deliveries", args: []string{"agent", "deliveries", "agent-o"}, targetMethod: "agent.delivery_lifecycle", result: validAgentDeliveryLifecycleResult},
+		{name: "diagnose", args: []string{"agent", "diagnose", "agent-o", "--run-id", "run-1"}, targetMethod: "agent.diagnose", result: validAgentDiagnosisResult},
+		{name: "deliveries", args: []string{"agent", "deliveries", "agent-o", "--run-id", "run-1"}, targetMethod: "agent.delivery_lifecycle", result: validAgentDeliveryLifecycleResult},
 	}
 
 	for _, test := range tests {
@@ -594,7 +594,7 @@ func TestCLIIdentifierNoMatchTeachesDiscoveryAndStops(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "view", "missing"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "view", "missing", "--run-id", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != CLIExitValidation {
 		t.Fatalf("code=%d stderr=%s", code, stderr.String())
 	}
@@ -627,7 +627,7 @@ func TestCLIIdentifierCandidateListFailureStopsBeforeRetry(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "view", "agent-o"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "view", "agent-o", "--run-id", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != CLIExitRuntime {
 		t.Fatalf("code=%d stderr=%s", code, stderr.String())
 	}
@@ -657,7 +657,7 @@ func TestCLIIdentifierAmbiguityListsCandidatesAndStops(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "view", "agent-al"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "view", "agent-al", "--run-id", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != CLIExitValidation {
 		t.Fatalf("code=%d stderr=%s", code, stderr.String())
 	}

@@ -132,13 +132,16 @@ func TestReadProofFactoringCompiledSurfaces(t *testing.T) {
 				}
 			}
 			commands := [][]string{
-				{"agent", "list"}, {"agent", "view", conversation.AgentID}, {"agent", "diagnose", conversation.AgentID},
-				{"agent", "deliveries", conversation.AgentID},
+				{"agent", "list"}, {"agent", "view", conversation.AgentID, "--run-id", runID}, {"agent", "diagnose", conversation.AgentID, "--run-id", runID},
+				{"agent", "view", "scout-w", "--run-id", runID},
+				{"agent", "diagnose", "scout-w", "--run-id", runID},
+				{"agent", "deliveries", "scout-w", "--run-id", runID},
 				{"agent", "deliveries", conversation.AgentID, "--run-id", runID},
-				{"conversation", "list", "--agent-id", conversation.AgentID},
+				{"conversation", "list", "--agent-id", conversation.AgentID, "--run-id", runID},
+				{"conversation", "list"},
 				{"conversation", "list", "--run-id", runID}, {"conversation", "view", conversation.SessionID}, {"conversation", "turn", conversation.SessionID, turns[0].TurnID},
 			}
-			for _, command := range commands {
+			for i, command := range commands {
 				modes := []string{""}
 				if command[0] != "agent" || command[1] != "list" {
 					modes = append(modes, "--json", "--quiet")
@@ -148,7 +151,7 @@ func TestReadProofFactoringCompiledSurfaces(t *testing.T) {
 					if mode != "" {
 						args = append(args, mode)
 					}
-					t.Run(strings.Join(command[:2], "-")+fmt.Sprintf("-%d", len(command))+mode, func(t *testing.T) {
+					t.Run(strings.Join(command[:2], "-")+fmt.Sprintf("-%d", i)+mode, func(t *testing.T) {
 						out := readProofCompiledCommand(t, binary, cwd, env, args...)
 						if strings.TrimSpace(out) == "" {
 							t.Fatalf("empty public read %v", args)

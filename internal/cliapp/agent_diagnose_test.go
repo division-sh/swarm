@@ -30,14 +30,14 @@ func TestAgentDiagnoseUsesAgentDiagnoseAndRendersOwnedFields(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "diagnose", " agent-1 ", "--queue-limit", "2", "--queue-cursor", "cursor-1"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "diagnose", " agent-1 ", "--run-id", "run-1", "--queue-limit", "2", "--queue-cursor", "cursor-1"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
 	if captured.JSONRPC != "2.0" || captured.Method != "agent.diagnose" {
 		t.Fatalf("request jsonrpc/method = %s/%s, want 2.0/agent.diagnose", captured.JSONRPC, captured.Method)
 	}
-	wantParams := map[string]any{"agent_id": "agent-1", "queue_limit": float64(2), "queue_cursor": "cursor-1"}
+	wantParams := map[string]any{"agent_id": "agent-1", "run_id": "run-1", "queue_limit": float64(2), "queue_cursor": "cursor-1"}
 	if !reflect.DeepEqual(captured.Params, wantParams) {
 		t.Fatalf("params = %#v, want %#v", captured.Params, wantParams)
 	}
@@ -80,15 +80,15 @@ func TestAgentDiagnoseJSONPreservesAPIResultShape(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "diagnose", "agent-1", "--json"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "diagnose", "agent-1", "--run-id", "run-1", "--json"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
 	if captured.Method != "agent.diagnose" {
 		t.Fatalf("method = %q, want agent.diagnose", captured.Method)
 	}
-	if !reflect.DeepEqual(captured.Params, map[string]any{"agent_id": "agent-1"}) {
-		t.Fatalf("params = %#v, want agent_id only", captured.Params)
+	if !reflect.DeepEqual(captured.Params, map[string]any{"agent_id": "agent-1", "run_id": "run-1"}) {
+		t.Fatalf("params = %#v, want exact agent and run", captured.Params)
 	}
 	var decoded map[string]any
 	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
@@ -138,13 +138,13 @@ func TestAgentDiagnoseProjectsEveryCurrentLifecyclePairAndPreservesMachineValues
 			defer server.Close()
 
 			var humanOut, humanErr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "diagnose", "agent-1"}, &humanOut, &humanErr, testRootCommandOptions(server))
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "diagnose", "agent-1", "--run-id", "run-1"}, &humanOut, &humanErr, testRootCommandOptions(server))
 			if code != 0 || !strings.Contains(humanOut.String(), "lifecycle    "+tc.humanPhrase) {
 				t.Fatalf("human lifecycle code=%d stdout=%s stderr=%s", code, humanOut.String(), humanErr.String())
 			}
 
 			var jsonOut, jsonErr bytes.Buffer
-			code = executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "diagnose", "agent-1", "--json"}, &jsonOut, &jsonErr, testRootCommandOptions(server))
+			code = executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "diagnose", "agent-1", "--run-id", "run-1", "--json"}, &jsonOut, &jsonErr, testRootCommandOptions(server))
 			if code != 0 {
 				t.Fatalf("json lifecycle code=%d stdout=%s stderr=%s", code, jsonOut.String(), jsonErr.String())
 			}
@@ -197,7 +197,7 @@ func TestAgentDiagnoseProjectsEveryCurrentWatchdogTuple(t *testing.T) {
 			defer server.Close()
 
 			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "diagnose", "agent-1"}, &stdout, &stderr, testRootCommandOptions(server))
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "diagnose", "agent-1", "--run-id", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
 			if code != 0 || !strings.Contains(stdout.String(), "watchdog     "+tc.humanPhrase) {
 				t.Fatalf("watchdog code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 			}
@@ -223,9 +223,9 @@ func TestAgentDiagnoseRejectsInvalidInputBeforeRequest(t *testing.T) {
 		{name: "blank id", args: []string{"agent", "diagnose", "  "}, wantStderr: "agent id is required"},
 		{name: "extra arg", args: []string{"agent", "diagnose", "agent-1", "extra"}, wantStderr: "accepts one argument"},
 		{name: "unsupported flag", args: []string{"agent", "diagnose", "agent-1", "--unknown"}, wantStderr: "unknown flag"},
-		{name: "queue limit too small", args: []string{"agent", "diagnose", "agent-1", "--queue-limit", "0"}, wantStderr: "--queue-limit must be between 1 and 200"},
-		{name: "queue limit too large", args: []string{"agent", "diagnose", "agent-1", "--queue-limit", "201"}, wantStderr: "--queue-limit must be between 1 and 200"},
-		{name: "blank queue cursor", args: []string{"agent", "diagnose", "agent-1", "--queue-cursor", ""}, wantStderr: "--queue-cursor is required when provided"},
+		{name: "queue limit too small", args: []string{"agent", "diagnose", "agent-1", "--run-id", "run-1", "--queue-limit", "0"}, wantStderr: "--queue-limit must be between 1 and 200"},
+		{name: "queue limit too large", args: []string{"agent", "diagnose", "agent-1", "--run-id", "run-1", "--queue-limit", "201"}, wantStderr: "--queue-limit must be between 1 and 200"},
+		{name: "blank queue cursor", args: []string{"agent", "diagnose", "agent-1", "--run-id", "run-1", "--queue-cursor", ""}, wantStderr: "--queue-cursor is required when provided"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls.Store(0)
@@ -342,7 +342,7 @@ func TestAgentDiagnoseFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 			defer server.Close()
 
 			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "diagnose", "agent-1"}, &stdout, &stderr, testRootCommandOptions(server))
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "diagnose", "agent-1", "--run-id", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
 			if code != tc.wantCode {
 				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, tc.wantCode, stdout.String(), stderr.String())
 			}

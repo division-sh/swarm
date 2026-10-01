@@ -21,12 +21,14 @@ type agentListCommandOptions struct {
 type agentViewCommandOptions struct {
 	apiOptions   rootCommandOptions
 	output       cliOutputOptions
+	runID        string
 	flowInstance string
 }
 
 type agentDiagnoseCommandOptions struct {
 	apiOptions   rootCommandOptions
 	output       cliOutputOptions
+	runID        string
 	queueLimit   int
 	queueCursor  string
 	flowInstance string
@@ -44,7 +46,6 @@ type agentDeliveriesCommandOptions struct {
 	cursor           string
 	flowInstance     string
 
-	runIDSet  bool
 	limitSet  bool
 	cursorSet bool
 }
@@ -197,7 +198,6 @@ func newAgentDeliveriesCommand(opts rootCommandOptions) *cobra.Command {
 		Short: "List one agent's event delivery history.",
 		Args:  argcount.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			deliveryOpts.runIDSet = cmd.Flags().Changed("run-id")
 			deliveryOpts.limitSet = cmd.Flags().Changed("limit")
 			deliveryOpts.cursorSet = cmd.Flags().Changed("cursor")
 			if err := deliveryOpts.output.validate(); err != nil {
@@ -207,7 +207,7 @@ func newAgentDeliveriesCommand(opts rootCommandOptions) *cobra.Command {
 		},
 	}
 	argcount.SetDiscoveryHint(cmd, "List agent ids with `swarm agent list`.")
-	cmd.Flags().StringVar(&deliveryOpts.runID, "run-id", "", "Filter by run id")
+	cmd.Flags().StringVar(&deliveryOpts.runID, "run-id", "", "Required exact run owning the agent")
 	cmd.Flags().StringVar(&deliveryOpts.flowInstance, "flow-instance", "", "Select the exact concrete agent flow instance")
 	cmd.Flags().StringArrayVar(&deliveryOpts.deliveryStatuses, "delivery-status", nil, "Delivery status filter; repeat to match any")
 	cmd.Flags().IntVar(&deliveryOpts.limit, "limit", 0, "Max lifecycle rows to return (1-200)")
@@ -233,6 +233,7 @@ func newAgentDiagnoseCommand(opts rootCommandOptions) *cobra.Command {
 		},
 	}
 	argcount.SetDiscoveryHint(cmd, "List agent ids with `swarm agent list`.")
+	cmd.Flags().StringVar(&diagnoseOpts.runID, "run-id", "", "Required exact run owning the agent")
 	cmd.Flags().IntVar(&diagnoseOpts.queueLimit, "queue-limit", 0, "Max pending-delivery detail rows to return (1-200)")
 	cmd.Flags().StringVar(&diagnoseOpts.queueCursor, "queue-cursor", "", "Opaque queue cursor returned by the previous diagnosis result")
 	cmd.Flags().StringVar(&diagnoseOpts.flowInstance, "flow-instance", "", "Select the exact concrete agent flow instance")
@@ -271,6 +272,7 @@ func newAgentViewCommand(opts rootCommandOptions) *cobra.Command {
 		},
 	}
 	argcount.SetDiscoveryHint(cmd, "List agent ids with `swarm agent list`.")
+	cmd.Flags().StringVar(&viewOpts.runID, "run-id", "", "Required exact run owning the agent")
 	cmd.Flags().StringVar(&viewOpts.flowInstance, "flow-instance", "", "Select the exact concrete agent flow instance")
 	bindCLIOutputFlags(cmd, &viewOpts.output)
 	bindCLIAPIConnectionFlags(cmd, &viewOpts.apiOptions)
@@ -299,11 +301,15 @@ func runAgentViewCommand(ctx context.Context, out, errOut io.Writer, opts agentV
 	if agentID == "" {
 		return returnCLIValidationError(errOut, fmt.Errorf("agent id is required"))
 	}
+	runID := strings.TrimSpace(opts.runID)
+	if err := validateEntityOpaqueIDArg("--run-id", runID); err != nil {
+		return returnCLIValidationError(errOut, err)
+	}
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
 		return returnCLIAPIError(errOut, err, agentViewAPIErrorClassifier())
 	}
-	params := map[string]any{"agent_id": agentID}
+	params := map[string]any{"agent_id": agentID, "run_id": runID}
 	if flowInstance := strings.Trim(strings.TrimSpace(opts.flowInstance), "/"); flowInstance != "" {
 		params["flow_instance"] = flowInstance
 	}
@@ -430,7 +436,11 @@ func (opts agentDiagnoseCommandOptions) params(agentID string) (map[string]any, 
 	if agentID == "" {
 		return nil, fmt.Errorf("agent id is required")
 	}
-	params := map[string]any{"agent_id": agentID}
+	runID := strings.TrimSpace(opts.runID)
+	if err := validateEntityOpaqueIDArg("--run-id", runID); err != nil {
+		return nil, err
+	}
+	params := map[string]any{"agent_id": agentID, "run_id": runID}
 	if flowInstance := strings.Trim(strings.TrimSpace(opts.flowInstance), "/"); flowInstance != "" {
 		params["flow_instance"] = flowInstance
 	}
@@ -458,19 +468,13 @@ func (opts agentDeliveriesCommandOptions) params(agentID string) (map[string]any
 	if err := validateEntityOpaqueIDArg("agent id", agentID); err != nil {
 		return nil, err
 	}
-	params := map[string]any{"agent_id": agentID}
+	runID := strings.TrimSpace(opts.runID)
+	if err := validateEntityOpaqueIDArg("--run-id", runID); err != nil {
+		return nil, err
+	}
+	params := map[string]any{"agent_id": agentID, "run_id": runID}
 	if flowInstance := strings.Trim(strings.TrimSpace(opts.flowInstance), "/"); flowInstance != "" {
 		params["flow_instance"] = flowInstance
-	}
-	if opts.runIDSet {
-		runID := strings.TrimSpace(opts.runID)
-		if runID == "" {
-			return nil, fmt.Errorf("--run-id is required when provided")
-		}
-		if err := validateEntityOpaqueIDArg("--run-id", runID); err != nil {
-			return nil, err
-		}
-		params["run_id"] = runID
 	}
 	statuses, err := traceEnumList("--delivery-status", opts.deliveryStatuses, eventObservationValidDeliveryStatuses, "pending, in_progress, delivered, failed, dead_letter")
 	if err != nil {
