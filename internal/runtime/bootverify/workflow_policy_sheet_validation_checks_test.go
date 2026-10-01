@@ -40,46 +40,40 @@ func TestPolicySheetValidationValueRowsRejectsDeadResult(t *testing.T) {
 func TestPolicySheetValidationValueRowsRejectsUndeclaredInvalidDisposition(t *testing.T) {
 	handler := bootverifyValidationHandler(true, "deploy.other_invalid")
 	findings := bootverifyValidationFindings(handler)
-	if !bootverifyValidationFindingContains(findings, "is not declared as a policy.validation class disposition") {
+	if !bootverifyValidationFindingContains(findings, "is not declared as a rules.yaml class disposition") {
 		t.Fatalf("validation findings = %#v, want disposition mismatch failure", findings)
 	}
 }
 
 func bootverifyValidationFindings(handler runtimecontracts.SystemNodeEventHandler) []Finding {
 	pinCandidate := true
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		Policy: runtimecontracts.PolicyDocument{
-			Validation: map[string]runtimecontracts.PolicyValidationSet{
-				"deploy_manifest": {
-					Classes: map[string]runtimecontracts.PolicyValidationClass{
-						"invalid": {Disposition: "deploy.manifest_invalid"},
-					},
-					Inputs: map[string]string{
-						"source_ref":          "string",
-						"manifest_source_ref": "string",
-					},
-					Rules: []runtimecontracts.PolicyValidationRule{{
-						ID:           "VR-001",
-						Class:        "invalid",
-						Text:         "Manifest source ref must match request source ref.",
-						PinCandidate: &pinCandidate,
-						Check: runtimecontracts.PolicyValidationCheck{
-							Equal: &runtimecontracts.PolicyValidationEqualCheck{
-								Left:  "input.source_ref",
-								Right: "input.manifest_source_ref",
-							},
-						},
-					}},
+	bundle := &runtimecontracts.WorkflowContractBundle{Rules: runtimecontracts.RulesDocument{"deploy_manifest": {Validation: &runtimecontracts.PolicyValidationSet{
+		Classes: map[string]runtimecontracts.PolicyValidationClass{
+			"invalid": {Disposition: "deploy.manifest_invalid"},
+		},
+		Inputs: map[string]string{
+			"source_ref":          "string",
+			"manifest_source_ref": "string",
+		},
+		Rules: []runtimecontracts.PolicyValidationRule{{
+			ID:           "VR-001",
+			Class:        "invalid",
+			Text:         "Manifest source ref must match request source ref.",
+			PinCandidate: &pinCandidate,
+			Check: runtimecontracts.PolicyValidationCheck{
+				Equal: &runtimecontracts.PolicyValidationEqualCheck{
+					Left:  "input.source_ref",
+					Right: "input.manifest_source_ref",
 				},
 			},
-		},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"deploy_node": {
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"deploy.requested": handler,
-				},
+		}},
+	}}}, Nodes: map[string]runtimecontracts.SystemNodeContract{
+		"deploy_node": {
+			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+				"deploy.requested": handler,
 			},
 		},
+	},
 	}
 	source := semanticview.Wrap(bundle)
 	return checkPolicySheetValidationValueRows(newCheckerContext(context.Background(), source, Options{}))

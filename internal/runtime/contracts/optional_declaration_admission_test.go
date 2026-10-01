@@ -51,10 +51,10 @@ func optionalDeclarationRoleTestCases() []optionalDeclarationRoleTestCase {
 			},
 		},
 		{
-			name: "policy", fileName: "policy.yaml", valid: "limit: {}\n", merged: "<<: &declarations\n  limit:\n    value: 7\n", blank: "\"\": {}\n", collide: "limit: {}\n\" limit \": {}\n",
+			name: "policy", fileName: "policy.yaml", valid: "limit: 7\n", merged: "<<: &declarations\n  limit: 7\n",
 			load: func(path string) (int, error) {
 				value, err := loadOptionalPolicyDeclarations(path)
-				return len(value.Values) + len(value.Criteria) + len(value.Validation), err
+				return len(value.Values), err
 			},
 		},
 		{
@@ -243,6 +243,9 @@ func assertMergedDeclarationIdentity(t *testing.T, role, path string) {
 func TestOptionalDeclarationAdmissionRejectsBlankAndNormalizedCollidingNames(t *testing.T) {
 	for _, role := range optionalDeclarationRoleTestCases() {
 		role := role
+		if role.blank == "" {
+			continue
+		}
 		t.Run(role.name+"/blank", func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), role.fileName)
 			writeFixtureFile(t, path, role.blank)
@@ -287,14 +290,6 @@ func TestOptionalDeclarationAdmissionRejectsEmptyTypedContainers(t *testing.T) {
 			name: "types null containers", fileName: "types.yaml", body: "scalars: null\nenums: null\ntypes: null\n",
 			load: func(path string) error { _, err := loadOptionalTypeDeclarations(path); return err },
 		},
-		{
-			name: "policy empty maps", fileName: "policy.yaml", body: "criteria: {}\nvalidation: {}\n",
-			load: func(path string) error { _, err := loadOptionalPolicyDeclarations(path); return err },
-		},
-		{
-			name: "policy null containers", fileName: "policy.yaml", body: "criteria: null\nvalidation: null\n",
-			load: func(path string) error { _, err := loadOptionalPolicyDeclarations(path); return err },
-		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -309,15 +304,19 @@ func TestOptionalDeclarationAdmissionRejectsEmptyTypedContainers(t *testing.T) {
 	}
 }
 
-func TestOptionalPolicyAdmissionRetiresModulePlacementOnPresence(t *testing.T) {
-	for _, body := range []string{"modules: {}\n", "modules: null\n", "modules: ''\n", "modules: []\n", "modules: {worker: {kind: wasm}}\n", "<<: {modules: {}}\n", "<<: {modules: null}\n"} {
-		t.Run(body, func(t *testing.T) {
+func TestR3PolicyReservedLookingNamesAreLiteralData(t *testing.T) {
+	for _, name := range []string{"modules", "criteria", "validation", "value", "description", "override"} {
+		for _, value := range []string{"null", "''", "[]", "{}", "{value: 1, description: info, override: true}"} {
 			path := filepath.Join(t.TempDir(), "policy.yaml")
-			writeFixtureFile(t, path, body)
-			if _, err := loadOptionalPolicyDeclarations(path); err == nil || !strings.Contains(err.Error(), "policy.modules is retired") || !strings.Contains(err.Error(), "tools.yaml") {
-				t.Fatalf("retired module placement diagnostic: %v", err)
+			writeFixtureFile(t, path, name+": "+value+"\n")
+			policy, err := loadOptionalPolicyDeclarations(path)
+			if err != nil || len(policy.Values) != 1 {
+				t.Fatalf("%s=%s: %#v, %v", name, value, policy, err)
 			}
-		})
+			if _, ok := policy.Values[name]; !ok {
+				t.Fatal("literal key lost")
+			}
+		}
 	}
 }
 

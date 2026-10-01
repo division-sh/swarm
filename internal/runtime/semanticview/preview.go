@@ -13,6 +13,7 @@ func CloneBundleForPreview(bundle *runtimecontracts.WorkflowContractBundle, poli
 	}
 	clone := *bundle
 	clone.Policy = flowmodel.ClonePolicyDocument(bundle.Policy)
+	clone.Rules = flowmodel.CloneRulesDocument(bundle.Rules)
 	if len(policyOverrides) > 0 {
 		flowmodel.ApplyPolicyOverrides(&clone.Policy, policyOverrides)
 	}

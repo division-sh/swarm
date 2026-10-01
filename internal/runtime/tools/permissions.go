@@ -202,16 +202,8 @@ func permissionBundlePermissionsFromPolicy(policy runtimecontracts.PolicyDocumen
 
 func normalizePolicyMap(value any) (map[string]any, bool) {
 	switch typed := value.(type) {
-	case runtimecontracts.PolicyValue:
-		return normalizePolicyMap(typed.Value)
 	case map[string]any:
 		return typed, true
-	case map[string]runtimecontracts.PolicyValue:
-		out := make(map[string]any, len(typed))
-		for key, item := range typed {
-			out[key] = item.Value
-		}
-		return out, true
 	default:
 		return nil, false
 	}
@@ -219,8 +211,6 @@ func normalizePolicyMap(value any) (map[string]any, bool) {
 
 func stringsFromPolicyValue(value any) ([]string, error) {
 	switch typed := value.(type) {
-	case runtimecontracts.PolicyValue:
-		return stringsFromPolicyValue(typed.Value)
 	case []string:
 		return dedupePermissionList(typed), nil
 	case []any:

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
@@ -17,6 +16,7 @@ const (
 	optionalDeclarationEvents
 	optionalDeclarationNodes
 	optionalDeclarationPolicy
+	optionalDeclarationRules
 	optionalDeclarationTools
 	optionalDeclarationTypes
 )
@@ -33,6 +33,8 @@ func (r optionalDeclarationRole) fileName() string {
 		return "nodes.yaml"
 	case optionalDeclarationPolicy:
 		return "policy.yaml"
+	case optionalDeclarationRules:
+		return "rules.yaml"
 	case optionalDeclarationTools:
 		return "tools.yaml"
 	case optionalDeclarationTypes:
@@ -108,11 +110,11 @@ func loadOptionalPolicyDeclarationsFromSource(artifact *sourceartifact.AdmittedS
 	if err != nil || !present {
 		return PolicyDocument{Values: map[string]PolicyValue{}}, err
 	}
-	document, err := flowmodel.ProjectPolicyDocument(admission.document.Root())
+	document, err := projectPolicyDeclarationsValue(admission.document.Root())
 	if err != nil {
 		return PolicyDocument{}, wrapLoaderDiagnosticFile(err, label)
 	}
-	count := len(document.Values) + len(document.Criteria) + len(document.Validation)
+	count := len(document.Values)
 	return document, admission.RequireLive(count)
 }
 
@@ -210,11 +212,11 @@ func loadOptionalPolicyDeclarations(path string) (PolicyDocument, error) {
 	if err != nil || !present {
 		return PolicyDocument{Values: map[string]PolicyValue{}}, err
 	}
-	document, err := flowmodel.ProjectPolicyDocument(admission.document.Root())
+	document, err := projectPolicyDeclarationsValue(admission.document.Root())
 	if err != nil {
 		return PolicyDocument{}, wrapLoaderDiagnosticFile(err, path)
 	}
-	count := len(document.Values) + len(document.Criteria) + len(document.Validation)
+	count := len(document.Values)
 	return document, admission.RequireLive(count)
 }
 
@@ -263,11 +265,8 @@ func validateOptionalDeclarationDocument(document yamlsource.Document, role opti
 			"types":   {},
 		})
 	case optionalDeclarationPolicy:
-		return validateContainerDeclarationNames(root, role.fileName(), map[string]struct{}{
-			"criteria":   {},
-			"validation": {},
-			"modules":    {},
-		})
+		_, err := uniqueYAMLMappingFields(root, "policy.yaml values")
+		return err
 	default:
 		fields, err := uniqueYAMLMappingFields(root, role.fileName()+" declarations")
 		if err != nil {

@@ -596,10 +596,8 @@ required_agents:
   - role: root-agent
 `)
 	writeFixtureFile(t, filepath.Join(root, "policy.yaml"), `
-root_policy:
-  value: root
-shared:
-  value: root
+root_policy: root
+shared: root
 `)
 	writeFixtureFile(t, filepath.Join(root, "parent", "schema.yaml"), `
 name: parent
@@ -618,10 +616,8 @@ parent-agent:
   intent: {inline: "Coordinate the parent flow."}
 `)
 	writeFixtureFile(t, filepath.Join(root, "parent", "policy.yaml"), `
-parent_policy:
-  value: nested
-shared:
-  value: package
+parent_policy: nested
+shared: package
 `)
 	writeFixtureFile(t, filepath.Join(root, "parent", "child", "schema.yaml"), `
 name: child
@@ -640,8 +636,7 @@ child-agent:
   intent: {inline: "Execute the child flow."}
 `)
 	writeFixtureFile(t, filepath.Join(root, "parent", "child", "policy.yaml"), `
-shared:
-  value: child
+shared: child
 `)
 
 	return root

@@ -18,6 +18,7 @@ type FlowSource struct {
 	Agents    string
 	Tools     string
 	Policy    string
+	Rules     string
 	Manifest  string
 	Resources map[string][]string
 	Documents []string
@@ -51,6 +52,8 @@ func (s FlowSource) DeclarationLabel(fileName string) string {
 		return s.Tools
 	case "policy.yaml":
 		return s.Policy
+	case "rules.yaml":
+		return s.Rules
 	case "manifest.yaml":
 		return s.Manifest
 	default:
@@ -69,7 +72,7 @@ func indexFlowSources(artifact *sourceartifact.AdmittedSourceArtifact) (map[stri
 			return
 		}
 		source := FlowSource{FlowPath: node.Path(), Resources: map[string][]string{}}
-		for _, fileName := range []string{"schema.yaml", "types.yaml", "entities.yaml", "nodes.yaml", "events.yaml", "agents.yaml", "tools.yaml", "policy.yaml"} {
+		for _, fileName := range []string{"schema.yaml", "types.yaml", "entities.yaml", "nodes.yaml", "events.yaml", "agents.yaml", "tools.yaml", "policy.yaml", "rules.yaml"} {
 			label, ok := node.Declaration(fileName)
 			if !ok {
 				continue
@@ -91,6 +94,8 @@ func indexFlowSources(artifact *sourceartifact.AdmittedSourceArtifact) (map[stri
 				source.Tools = label
 			case "policy.yaml":
 				source.Policy = label
+			case "rules.yaml":
+				source.Rules = label
 			}
 		}
 		if label, ok := node.Manifest(); ok {

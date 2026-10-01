@@ -8,6 +8,7 @@ type View[P, S, N, E, A, T any] struct {
 	Agents    map[string]A
 	Tools     map[string]T
 	Policy    PolicyDocument
+	Rules     RulesDocument
 	Path      string
 	URI       string
 	NodeURIs  map[string]string

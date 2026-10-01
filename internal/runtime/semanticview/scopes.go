@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 )
 
 type FlowScope struct {
@@ -21,6 +22,7 @@ type FlowScope struct {
 	AgentURIs     map[string]string
 	Tools         map[string]runtimecontracts.ToolSchemaEntry
 	Policy        runtimecontracts.PolicyDocument
+	Rules         runtimecontracts.RulesDocument
 }
 
 func FlowScopes(source Source) []FlowScope {
@@ -125,7 +127,8 @@ func flowScopeFromView(view runtimecontracts.FlowContractView, inputEvents, outp
 		Agents:        runtimecontracts.EffectiveAgentRegistryEntries(view.Agents),
 		AgentURIs:     cloneStringMap(view.AgentURIs),
 		Tools:         toolEntryMapSnapshot(view.Tools),
-		Policy:        view.Policy,
+		Policy:        flowmodel.ClonePolicyDocument(view.Policy),
+		Rules:         flowmodel.CloneRulesDocument(view.Rules),
 	}
 }
 

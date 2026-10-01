@@ -461,27 +461,21 @@ func criteriaCitationEmitTestExecutorWithAgent(t testing.TB, agent runtimecontra
 	flow := runtimecontracts.FlowContractView{
 		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "validation"},
 		Schema: runtimecontracts.FlowSchemaDocument{},
-		Path:   "validation",
-		Policy: runtimecontracts.PolicyDocument{
-			Criteria: map[string]runtimecontracts.PolicyCriteriaSet{
-				"feasibility_exclusions": {
-					Classes: map[string]runtimecontracts.PolicyCriteriaClass{
-						"hard": {Disposition: "cto.spec_vetoed"},
-						"soft": {Disposition: "cto.spec_revision_needed"},
-					},
-					Rules: []runtimecontracts.PolicyCriteriaRule{{
-						ID:    "FX-HARD-01",
-						Class: "hard",
-						Text:  "Requires regulated real-time integration.",
-					}, {
-						ID:    "FX-SOFT-04",
-						Class: "soft",
-						Text:  "Missing MVP spec.",
-					}},
-				},
+		Path:   "validation", Rules: runtimecontracts.RulesDocument{"feasibility_exclusions": {Criteria: &runtimecontracts.PolicyCriteriaSet{
+			Classes: map[string]runtimecontracts.PolicyCriteriaClass{
+				"hard": {Disposition: "cto.spec_vetoed"},
+				"soft": {Disposition: "cto.spec_revision_needed"},
 			},
-		},
-		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			Rules: []runtimecontracts.PolicyCriteriaRule{{
+				ID:    "FX-HARD-01",
+				Class: "hard",
+				Text:  "Requires regulated real-time integration.",
+			}, {
+				ID:    "FX-SOFT-04",
+				Class: "soft",
+				Text:  "Missing MVP spec.",
+			}},
+		}}}, Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"cto-agent": agent,
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{

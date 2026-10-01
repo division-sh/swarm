@@ -1,6 +1,7 @@
 package bootverify
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -8,7 +9,9 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
 func checkConditionPolicyAlignment(c *checkerContext) []Finding { return c.conditionPolicyAlignment() }
@@ -33,27 +36,54 @@ func (c *checkerContext) conditionPolicyAlignment() []Finding {
 		return c.conditionPolicyFindings
 	}
 	c.conditionPolicyLoaded = true
+	check := func(expression, location string, policy runtimecontracts.PolicyDocument, options workflowexpr.ValueExpressionOptions, reader *expressionReference) {
+		options.DeclaredPolicy = policyValueMap(policy)
+		var err error
+		if reader != nil && reader.HasConditionContext {
+			err = validateConditionCELLocal(expression, reader.ConditionContext, options)
+		} else {
+			err = workflowexpr.ValidateValueExpressionWithOptions(expression, options)
+		}
+		var missing *workflowexpr.PolicyReferenceError
+		if errors.As(err, &missing) {
+			c.conditionPolicyFindings = append(c.conditionPolicyFindings, Finding{
+				CheckID: "condition_policy_alignment", Severity: SeverityHardInvalidity,
+				Message: location + ": " + missing.Error(), Location: location,
+				Remediation: "Declare the exact policy key in this flow or an ancestor, correct the reference, or explicitly handle absence with has/optional selection.",
+			})
+		}
+		// Expression admission failures belong to the existing typed/context checks.
+	}
 	for _, record := range c.source.ExecutableNodeRecords() {
 		node, err := record.Identity()
 		if err != nil {
 			continue
 		}
-		nodeID := node.Key()
-		resolvedPolicy := policyValueMap(c.source.ResolvedPolicyForExecutableNode(node))
-		for eventType, handler := range c.source.ExecutableNodeEventHandlers(node) {
-			eventType = strings.TrimSpace(eventType)
-			for _, cond := range handlerConditionExpressionsForSource(c.source, node, eventType, handler) {
-				for _, ref := range policyReferences(cond.Expression) {
-					if policyFieldExists(resolvedPolicy, ref) {
-						continue
-					}
-					c.conditionPolicyFindings = append(c.conditionPolicyFindings, Finding{
-						CheckID:  "condition_policy_alignment",
-						Severity: "warning",
-						Message:  fmt.Sprintf("node %s handler %s references policy.%s but policy does not define it", strings.TrimSpace(nodeID), eventType, ref),
-						Location: strings.TrimSpace(nodeID),
-					})
+		policy := c.source.ResolvedPolicyForExecutableNode(node)
+		for event, handler := range c.source.ExecutableNodeEventHandlers(node) {
+			payload, _ := executablePayloadStructuralType(c.source, node, event)
+			entity, _ := semanticview.ResolveEntityStructuralType(c.source, node.FlowPath())
+			for _, reader := range c.entityAssignmentReaders(node, event, handler) {
+				if len(reader.RequiredEntityPaths) != 0 {
+					continue
 				}
+				options := executableReaderExpressionOptions(reader, payload, entity)
+				if from := reader.ConditionCollectionSource; from != "" {
+					options.ItemType, _ = executableCollectionItemStructuralType(c.source, node, event, handler, from)
+				}
+				check(reader.Expression, node.Key()+" handler "+event+" "+reader.Kind, policy, options, &reader)
+			}
+		}
+	}
+	for _, gate := range c.source.WorkflowGates() {
+		entity, _ := semanticview.ResolveEntityStructuralType(c.source, gate.FlowID)
+		options := workflowexpr.ValueExpressionOptions{EntityType: entity}
+		if analysis := c.entityAssignmentAnalysis(gate.FlowID); analysis != nil {
+			options.KnownPresence = engine.EntityAssignmentPresencePaths(analysis.StageFacts(gate.Stage))
+		}
+		for field, value := range gate.Context {
+			if value.HasCELValue() {
+				check(value.CEL, stageGateLocation(gate.FlowID, gate.Stage, gate.Decision)+" context "+field, c.source.ResolvedPolicyForFlow(gate.FlowID), options, nil)
 			}
 		}
 	}
@@ -278,39 +308,12 @@ func expressionPayloadSourceRefs(expr runtimecontracts.ExpressionValue, label st
 func policyValueMap(policy runtimecontracts.PolicyDocument) map[string]any {
 	out := make(map[string]any, len(policy.Values))
 	for key, value := range policy.Values {
-		out[strings.TrimSpace(key)] = value.Value
+		out[key] = value.Value
 	}
 	return out
 }
 
-var bootverifyPolicyReferencePattern = regexp.MustCompile(`policy\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
 var bootverifyPayloadReferencePattern = regexp.MustCompile(`payload\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
-
-func policyReferences(expression string) []string {
-	expression = strings.TrimSpace(expression)
-	if expression == "" {
-		return nil
-	}
-	matches := bootverifyPolicyReferencePattern.FindAllStringSubmatch(expression, -1)
-	out := make([]string, 0, len(matches))
-	seen := map[string]struct{}{}
-	for _, match := range matches {
-		if len(match) < 2 {
-			continue
-		}
-		ref := strings.TrimSpace(match[1])
-		if ref == "" {
-			continue
-		}
-		if _, ok := seen[ref]; ok {
-			continue
-		}
-		seen[ref] = struct{}{}
-		out = append(out, ref)
-	}
-	sort.Strings(out)
-	return out
-}
 
 func payloadReferences(expression string) []string {
 	expression = strings.TrimSpace(expression)
@@ -336,34 +339,6 @@ func payloadReferences(expression string) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-func policyFieldExists(policy map[string]any, ref string) bool {
-	if len(policy) == 0 {
-		return false
-	}
-	_, ok := lookupPolicyValue(policy, ref)
-	return ok
-}
-
-func lookupPolicyValue(policy map[string]any, ref string) (any, bool) {
-	current := any(policy)
-	for _, part := range strings.Split(strings.TrimSpace(ref), ".") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			return nil, false
-		}
-		next, ok := current.(map[string]any)
-		if !ok {
-			return nil, false
-		}
-		value, ok := next[part]
-		if !ok {
-			return nil, false
-		}
-		current = value
-	}
-	return current, true
 }
 
 func executableNodeEventPayloadFields(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string) (map[string]struct{}, bool) {

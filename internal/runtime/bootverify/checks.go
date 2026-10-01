@@ -208,7 +208,7 @@ var bootCheckRegistry = []Check{
 	{ID: "contained_state_operation_compliance", Severity: SeverityHardInvalidity, Run: checkContainedStateOperationCompliance},
 	{ID: "semantic_drift_payload_completeness", Severity: "error", Run: checkSemanticDriftPayloadCompleteness},
 	{ID: "condition_payload_alignment", Severity: "error", Run: checkConditionPayloadAlignment},
-	{ID: "condition_policy_alignment", Severity: "warning", Run: checkConditionPolicyAlignment},
+	{ID: "condition_policy_alignment", Severity: "error", Run: checkConditionPolicyAlignment},
 	{ID: "state_machine_coherence", Severity: "error", Run: checkStateMachineCoherence},
 	{ID: "semantic_drift_unreachable_state", Severity: "warning", Run: checkSemanticDriftUnreachableState},
 	{ID: "node_state_schema_typed_counterpart", Severity: SeverityHardInvalidity, Run: checkNodeStateSchemaTypedCounterpart},
@@ -1473,16 +1473,8 @@ func permissionBundlePermissionsLocal(policy runtimecontracts.PolicyDocument, bu
 
 func normalizePolicyMapLocal(value any) (map[string]any, bool) {
 	switch typed := value.(type) {
-	case runtimecontracts.PolicyValue:
-		return normalizePolicyMapLocal(typed.Value)
 	case map[string]any:
 		return typed, true
-	case map[string]runtimecontracts.PolicyValue:
-		out := make(map[string]any, len(typed))
-		for key, item := range typed {
-			out[key] = item.Value
-		}
-		return out, true
 	default:
 		return nil, false
 	}
@@ -1490,8 +1482,6 @@ func normalizePolicyMapLocal(value any) (map[string]any, bool) {
 
 func stringsFromPolicyValueLocal(value any) ([]string, error) {
 	switch typed := value.(type) {
-	case runtimecontracts.PolicyValue:
-		return stringsFromPolicyValueLocal(typed.Value)
 	case []string:
 		return normalizeStringSliceLocal(typed), nil
 	case []any:
