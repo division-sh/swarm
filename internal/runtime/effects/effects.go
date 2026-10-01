@@ -1013,22 +1013,9 @@ func beginCompletion(ctx context.Context, adapter string, request []byte, frame 
 		}
 		capabilitySurface = &surface
 		if authority.Kind == AuthorityNormalAgent {
-			claim, hasDelivery := runtimedelivery.ClaimFromContext(ctx)
-			directive, hasDirective := directiveCompletionOriginFromContext(ctx)
-			if hasDelivery == hasDirective {
-				return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_origin_missing_or_ambiguous", "external-effects", "authorize_attempt", map[string]any{"adapter": strings.TrimSpace(adapter)})
-			}
-			if hasDelivery {
-				if claim.SubscriberClass() != runtimedelivery.SubscriberAgent ||
-					claim.SubscriberID() != authority.Normal.AgentID || claim.RunID() != authority.Target.RunID {
-					return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_origin_delivery_claim_mismatch", "external-effects", "authorize_attempt", map[string]any{"adapter": strings.TrimSpace(adapter), "delivery_id": claim.DeliveryID()})
-				}
-				origin, err = DeliveryCompletionOrigin(claim)
-			} else {
-				origin, err = DirectiveCompletionOrigin(directive)
-			}
+			origin, err = NormalCompletionOriginFromContext(ctx, authority.Normal.AgentID, authority.Target.RunID, strings.TrimSpace(adapter))
 			if err != nil {
-				return nil, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_origin_invalid", "external-effects", "authorize_attempt", map[string]any{"adapter": strings.TrimSpace(adapter)}, err)
+				return nil, err
 			}
 		}
 	}

@@ -66,14 +66,16 @@ func mustReleaseE2EDurableBackingKey(kind, semanticIdentity string) string {
 }
 
 type fakeDockerContainer struct {
-	ID      string            `json:"id"`
-	Running bool              `json:"running"`
-	Labels  map[string]string `json:"labels,omitempty"`
+	ID          string            `json:"id"`
+	Running     bool              `json:"running"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	ProviderKey string            `json:"provider_key,omitempty"`
 }
 
 type fakeDockerState struct {
-	Containers   map[string]fakeDockerContainer `json:"containers"`
-	ContainerIDs map[string]string              `json:"container_ids"`
+	Containers      map[string]fakeDockerContainer `json:"containers"`
+	ContainerIDs    map[string]string              `json:"container_ids"`
+	ProviderVolumes map[string]fakeProviderVolume  `json:"provider_volumes,omitempty"`
 }
 
 type fakeDockerRecord struct {
@@ -91,6 +93,7 @@ type fakeDockerRecord struct {
 
 type fakeClaudeInvocation struct {
 	commandArgs []string
+	container   string
 	sessionID   string
 	startup     bool
 	rawMCPURL   string
@@ -248,6 +251,8 @@ func runFakeDocker(args []string) int {
 		recordFakeDocker(root, fakeDockerRecord{Class: "image_inspect", Args: redactDockerArgs(args)})
 		fmt.Fprintln(os.Stdout, "[]")
 		return 0
+	case "volume":
+		return fakeResourceProviderVolumeInspect(root, args)
 	case "run":
 		recordFakeDocker(root, fakeDockerRecord{Class: "cli_preflight", Args: redactDockerArgs(args)})
 		return 0
@@ -289,6 +294,10 @@ func validateReleaseDockerCommand(root string, args []string) error {
 	case "image":
 		if !equalStrings(args, []string{"image", "inspect", releaseE2EWorkspaceImage}) {
 			return fmt.Errorf("unsupported Docker image shape")
+		}
+	case "volume":
+		if os.Getenv(releaseResourceReadEnv) != "1" || len(args) != 3 || args[1] != "inspect" || !releaseProviderKey(args[2]) {
+			return fmt.Errorf("unsupported provider volume inspection")
 		}
 	case "run":
 		want := []string{
@@ -952,7 +961,17 @@ func fakeDockerCreate(root string, args []string) int {
 			state.ContainerIDs = map[string]string{}
 		}
 		state.ContainerIDs[id] = name
-		state.Containers[name] = fakeDockerContainer{ID: id, Labels: labels}
+		container := fakeDockerContainer{ID: id, Labels: labels}
+		if mount := dockerOptionValue(args, "--mount"); os.Getenv(releaseResourceReadEnv) == "1" && mount != "" {
+			container.ProviderKey = strings.TrimSuffix(strings.TrimPrefix(mount, "type=volume,source="), ",target=/opt/swarm/provider/claude")
+			if state.ProviderVolumes == nil {
+				state.ProviderVolumes = map[string]fakeProviderVolume{}
+			}
+			if _, exists := state.ProviderVolumes[container.ProviderKey]; !exists {
+				state.ProviderVolumes[container.ProviderKey] = fakeProviderVolume{Heads: map[string]bool{}}
+			}
+		}
+		state.Containers[name] = container
 	})
 	recordFakeDocker(root, fakeDockerRecord{Class: "container_create", ContainerID: id, Args: redactDockerArgs(args)})
 	fmt.Fprintln(os.Stdout, id)
@@ -1088,6 +1107,7 @@ target:
 		return invocation, fmt.Errorf("Claude Docker exec is incomplete")
 	}
 	container := args[index]
+	invocation.container = container
 	invocation.commandArgs = append([]string(nil), args[index+1:]...)
 	_, providerContainer := releaseProviderContainerBase(container)
 	wantEnv := 2
@@ -1210,6 +1230,11 @@ func validateReleaseClaudeArgs(args []string, startup bool) error {
 		wantTools = releaseE2EStartupAllowedTools()
 	}
 	if os.Getenv(releaseResourceReadEnv) == "1" {
+		if resumed {
+			// A directive has no triggering state-read bindings. Resource and
+			// explicitly granted emit/notification tools remain admitted.
+			wantTools = []string{"ExitPlanMode", "WebFetch", "WebSearch", "mcp__runtime-tools__emit_agent_completed", "mcp__runtime-tools__notify_human"}
+		}
 		wantTools = append(append([]string(nil), wantTools...), "mcp__runtime-tools__read_flow_data")
 		sort.Strings(wantTools)
 	}
