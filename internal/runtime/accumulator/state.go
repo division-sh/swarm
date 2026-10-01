@@ -43,32 +43,10 @@ func (s *State) admit(spec *runtimecontracts.AccumulateSpec, payload map[string]
 	var key string
 	keyed := spec != nil && spec.Key != ""
 	if keyed {
-		path, err := keyPath(spec.Key)
+		var err error
+		key, err = s.admitBusinessKey(spec.Key, payload)
 		if err != nil {
 			return false, err
-		}
-		if len(s.Deliveries) != 0 {
-			return false, invalidState("keyed receipt mode")
-		}
-		storedKeys := make(map[string]bool, len(s.Items))
-		for _, item := range s.Items {
-			storedKey, ok := payloadKey(item, path.Segments)
-			if !ok || storedKeys[storedKey] || s.Received[storedKey] == "" {
-				return false, invalidState("business key receipt")
-			}
-			canonical, err := canonicaljson.Bytes(item)
-			if err != nil || s.Received[storedKey] != canonicaljson.HashBytes(canonical) {
-				return false, invalidState("business key payload hash")
-			}
-			storedKeys[storedKey] = true
-		}
-		if len(storedKeys) != len(s.Received) {
-			return false, invalidState("business key receipt count")
-		}
-		var ok bool
-		key, ok = payloadKey(payload, path.Segments)
-		if !ok {
-			return false, failures.New(failures.ClassSchemaInvalid, "accumulator_key_invalid", "accumulator", "admit", map[string]any{"key": spec.Key})
 		}
 	} else {
 		if len(s.Received) != 0 {
@@ -111,6 +89,36 @@ func (s *State) admit(spec *runtimecontracts.AccumulateSpec, payload map[string]
 	receipts[identity] = hash
 	s.Items = append(s.Items, cloneObject(payload))
 	return false, nil
+}
+
+func (s *State) admitBusinessKey(selector string, payload map[string]any) (string, error) {
+	path, err := keyPath(selector)
+	if err != nil {
+		return "", err
+	}
+	if len(s.Deliveries) != 0 {
+		return "", invalidState("keyed receipt mode")
+	}
+	storedKeys := make(map[string]bool, len(s.Items))
+	for _, item := range s.Items {
+		storedKey, ok := payloadKey(item, path.Segments)
+		if !ok || storedKeys[storedKey] || s.Received[storedKey] == "" {
+			return "", invalidState("business key receipt")
+		}
+		canonical, err := canonicaljson.Bytes(item)
+		if err != nil || s.Received[storedKey] != canonicaljson.HashBytes(canonical) {
+			return "", invalidState("business key payload hash")
+		}
+		storedKeys[storedKey] = true
+	}
+	if len(storedKeys) != len(s.Received) {
+		return "", invalidState("business key receipt count")
+	}
+	key, ok := payloadKey(payload, path.Segments)
+	if !ok {
+		return "", failures.New(failures.ClassSchemaInvalid, "accumulator_key_invalid", "accumulator", "admit", map[string]any{"key": selector})
+	}
+	return key, nil
 }
 
 func payloadKey(payload map[string]any, segments []string) (string, bool) {

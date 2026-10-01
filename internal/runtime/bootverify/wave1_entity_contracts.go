@@ -189,6 +189,10 @@ func wave1ResolveEntityPathWithOwner(source semanticview.Source, flowID, ref str
 			return wave1ResolvedType{}, "", fmt.Errorf("entity path %q nested field %q has empty type", ref, segment)
 		}
 	}
+	return wave1ProjectDeclaredEntityLeaf(view, current, ref, optional)
+}
+
+func wave1ProjectDeclaredEntityLeaf(view wave1EntityContractView, current, ref string, optional bool) (wave1ResolvedType, string, error) {
 	resolved, err := wave1ResolveDeclaredEntityType(view.Types, current)
 	if err != nil {
 		return wave1ResolvedType{}, "", fmt.Errorf("entity path %q: %w", ref, err)
