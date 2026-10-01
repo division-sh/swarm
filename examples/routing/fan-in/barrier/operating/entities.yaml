@@ -1,4 +1,4 @@
 operating_state:
-  operating_id:
+  operating_instance_id:
     type: text
     _unused_reason: template instance identity
