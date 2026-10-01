@@ -714,7 +714,7 @@ units:
   serveapp-channel-process-temporal:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    run: '^TestChannel(ActionAcknowledgmentAbruptProcessDeathPublicJourney|Input(AbruptProcessDeathPublicJourney|AuthorityRestartPublicJourney)|Delivery(AbruptProcessDeathPublicJourney|HumanTemporalReceiptPublicJourney|UncertainCopyAuthorityPublicJourney))$'
+    run: '^TestChannel(ActionAcknowledgmentAbruptProcessDeathPublicJourney|Input(AbruptProcessDeathPublicJourney|AuthorityRestartPublicJourney)|Delivery(AbruptProcessDeathPublicJourney|HumanTemporalReceiptPublicJourney|UncertainCopyAuthorityPublicJourney|SettlementWaitIncludesPlannedWork))$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full

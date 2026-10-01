@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"database/sql"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -157,12 +158,51 @@ func waitChannelDeliveryProcessAttempt(t *testing.T, db *sql.DB, backend servedp
 	}
 }
 
+func TestChannelDeliverySettlementWaitIncludesPlannedWork(t *testing.T) {
+	for _, state := range []string{"planned", "rendered"} {
+		t.Run(state, func(t *testing.T) {
+			db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "wait.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			db.SetMaxOpenConns(1)
+			defer db.Close()
+			if _, err := db.Exec(`CREATE TABLE channel_delivery_plans (state TEXT NOT NULL)`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec(`INSERT INTO channel_delivery_plans (state) VALUES (?)`, state); err != nil {
+				t.Fatal(err)
+			}
+			started, done := make(chan struct{}), make(chan struct{})
+			go func() {
+				close(started)
+				defer close(done)
+				waitChannelDeliverySendsSettled(t, db)
+			}()
+			<-started
+			select {
+			case <-done:
+				t.Fatalf("settlement wait returned while a %s delivery still exists", state)
+			case <-time.After(200 * time.Millisecond):
+			}
+			if _, err := db.Exec(`UPDATE channel_delivery_plans SET state='sent'`); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Fatal("settlement wait did not release after the delivery settled")
+			}
+		})
+	}
+}
+
 func waitChannelDeliverySendsSettled(t *testing.T, db *sql.DB) {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	for {
 		var count int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM channel_delivery_plans WHERE state IN ('pending','rendered')`).Scan(&count); err != nil {
+		if err := db.QueryRow(`SELECT COUNT(*) FROM channel_delivery_plans WHERE state IN ('planned','rendered')`).Scan(&count); err != nil {
 			t.Fatal(err)
 		}
 		if count == 0 {

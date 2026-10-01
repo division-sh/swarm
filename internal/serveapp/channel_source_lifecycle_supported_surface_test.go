@@ -22,6 +22,12 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 		for _, operation := range []string{"disk", "new_process", "retained_reset", "source_reset", "fork"} {
 			t.Run(string(backend)+"/"+operation, func(t *testing.T) {
 				h, db, hash := startChannelAnchorJourney(t, backend, "source-lifecycle-token", false)
+				var standingRun string
+				if err := db.QueryRow(`SELECT current_run_id FROM standing_services WHERE current_run_id IS NOT NULL`).Scan(&standingRun); err != nil {
+					t.Fatal(err)
+				}
+				standingCard := waitChannelAnchorCard(t, db, standingRun, decisioncard.AnchorKindStageGate)
+				waitChannelAnchorReceipt(t, db, standingCard)
 				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 					"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true},
 					"idempotency_key": "source-lifecycle-seed",
@@ -148,8 +154,12 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					afterNative := readChannelNativeHistory(t, db)
 					wantNative := beforeNative
 					wantNative[3], wantNative[7] = "retired", "retired"
-					if afterNative != wantNative || readChannelPreservedHistory(t, db) != beforeHistory || len(h.provider.CommandWrites()) != writes {
-						t.Fatalf("reset altered native/history evidence or provider writes: before=%v after=%v", beforeNative, afterNative)
+					if afterNative != wantNative {
+						t.Fatalf("reset altered native identity: before=%v after=%v", beforeNative, afterNative)
+					}
+					requireChannelPreservedHistory(t, db, beforeHistory)
+					if got := len(h.provider.CommandWrites()); got != writes {
+						t.Fatalf("reset wrote native settings: count %d -> %d", writes, got)
 					}
 					if replay := requestServedJSONRPC(t, h.rpcEndpoint(), "runtime.nuke", params); replay.Error != nil || readChannelNativeHistory(t, db) != afterNative {
 						t.Fatalf("reset replay changed native history: %+v", replay.Error)
@@ -311,6 +321,27 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 			})
 		}
 	}
+}
+
+func requireChannelPreservedHistory(t *testing.T, db *sql.DB, beforeHistory string) {
+	t.Helper()
+	afterHistory := readChannelPreservedHistory(t, db)
+	if afterHistory == beforeHistory {
+		return
+	}
+	var before, after []json.RawMessage
+	if err := json.Unmarshal([]byte(beforeHistory), &before); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(afterHistory), &after); err != nil {
+		t.Fatal(err)
+	}
+	for index, row := range before {
+		if !bytes.Equal(row, after[index]) {
+			t.Errorf("reset altered preserved history table index %d: byte length %d -> %d", index, len(row), len(after[index]))
+		}
+	}
+	t.FailNow()
 }
 
 func readChannelNativeHistory(t *testing.T, db *sql.DB) [8]string {
