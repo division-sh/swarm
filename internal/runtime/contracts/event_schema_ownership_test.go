@@ -455,22 +455,27 @@ func TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConne
 	}
 }
 
-func TestConnectedEventSchemaOwnershipPreservesSingleProducerFanIn(t *testing.T) {
+func TestConnectedEventSchemaOwnershipPreservesPortfolioInputs(t *testing.T) {
 	repo := repoRootForContractsTest(t)
-	for _, fixture := range []string{"barrier", "stream"} {
-		t.Run(fixture, func(t *testing.T) {
-			root := filepath.Join(repo, "examples", "routing", "fan-in", fixture)
+	for _, tc := range []struct {
+		fixture, operatingIDType, instanceField string
+	}{
+		{"barrier", "text", "operating_instance_id"},
+		{"stream", "uuid", "operating_id"},
+	} {
+		t.Run(tc.fixture, func(t *testing.T) {
+			root := filepath.Join(repo, "examples", "routing", "fan-in", tc.fixture)
 			bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 			if err != nil {
 				t.Fatal(err)
 			}
 			row, ok, ambiguous := connectedEventSchemaOwnershipRow(bundle, "operating", "operating.report.requested")
 			if !ok || ambiguous || row.producerFlowID != "ingress" || row.receiverFlowID != "operating" {
-				t.Fatalf("fan-in owner = %#v, found=%t ambiguous=%t", row, ok, ambiguous)
+				t.Fatalf("portfolio input owner = %#v, found=%t ambiguous=%t", row, ok, ambiguous)
 			}
 			entry, _, ok := bundle.ResolveFlowEventCatalogEntry("operating", "operating.report.requested")
-			if !ok || entry.Payload.Properties["operating_id"].Type != "uuid" {
-				t.Fatalf("fan-in effective schema = %#v, found=%t", entry.Payload.Properties, ok)
+			if !ok || entry.Payload.Properties["operating_id"].Type != tc.operatingIDType || entry.Payload.Properties[tc.instanceField].Type != "uuid" {
+				t.Fatalf("portfolio effective schema = %#v, found=%t", entry.Payload.Properties, ok)
 			}
 		})
 	}

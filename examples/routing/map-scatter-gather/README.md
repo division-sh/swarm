@@ -6,6 +6,7 @@ There is no separately maintained key list or dummy membership map.
 ```sh
 swarm verify examples/routing/map-scatter-gather
 swarm serve examples/routing/map-scatter-gather
+swarm event publish batch.ready --payload-json '{"items":{"z":[9],"A":[1,1]}}'
 ```
 
 Publish the root `batch.ready` input through authenticated `event.publish`, with
@@ -28,8 +29,14 @@ The root collector joins from the same `state.items`, keyed by the explicit
 `member_id`, with `[integer]` output. Its exact deferred continuation writes
 `ordered_results` as `[[integer]]` and enters terminal `complete`. The example
 above produces `[[1,1],[9]]`, in `A`, `z` order, preserving the repeated value.
+Expected: one root, two distinct keyed workers, one ordered completion, and no
+failed business delivery. For an empty map, expect one root, no workers and `[]`.
 The deadline is five minutes from stage entry; an incomplete batch enters
 terminal `failed`. An empty map completes with `[]` without creating workers.
+
+If serving is stopped and restarted on the same store, the retained map, worker
+entities, exact entry and settled results remain unchanged. Replaying the same
+authenticated idempotent publication must not create another worker or completion.
 
 `TestA2MapRecipeSupportedSurfaceBothStores` asserts load/verify, normal served
 boot, root-only authenticated publication, actual worker creation and settlement,
@@ -40,22 +47,15 @@ composites remain separately qualified by the pipeline proofs.
 
 ## Qualification Status
 
-At base `910c26d67`, the count-one load/verify and both-store served selectors
-fail before boot. `expression_field_reference_validation` rejects both
-`fan_out.items_from` and `join.members.from` with:
+At `178d7c1d3`, the public meaningful-map and empty-map journeys pass on SQLite
+and PostgreSQL at `-race -count=3` (71.966s), including normal same-store restart
+and idempotent replay. This is independent proof before E's constructor merge,
+not final composed qualification or a whole-process crash guarantee.
 
-```text
-entity path "items": type "map[text][integer]" is not declared in the resolved type catalog
-```
-
-The existing owner is `wave1ResolveNamedType` in
-`internal/runtime/bootverify/wave1_entity_contracts.go`; its legacy field reader
-handles lists but not maps. Bundle loading admits the declared map. The proof
-preserves the full verification assertion without a reader bypass, alternate
-membership list or production change. Runtime, restart and idempotency assertions
-are not yet qualified; race-count-three is deferred until count-one is green.
-The closed canonical owner, checked-YAML registry and construction API guards
-pass at this base.
+The earlier pre-boot verifier failure is retained in #1994's proof ledger.
+Generic entity paths now consume the canonical catalog owner, without a local
+map parser, reader bypass or alternate membership list. Malformed empty aliases
+also fail closed through that catalog. The original business assertions remain.
 
 ```sh
 go test ./internal/runtime/testfixtures/canonicalrouting -run '^TestCanonicalRoutingExamplesLoadAndVerify/map-scatter-gather$' -count=1 -v -timeout=2m
