@@ -8,6 +8,7 @@ import (
 
 	contracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	actors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
@@ -32,6 +33,17 @@ func TestW5ModulesCannotAcquireAgentAuthorityThroughGrantsCandidatesOrNativeFall
 				bundle := &contracts.WorkflowContractBundle{Tools: entries}
 				source := wrapRootAgentBundle(bundle)
 				actor := actors.AgentConfig{ID: "worker", FlowID: ".", NativeTools: actors.NativeToolConfig{Bash: true, FileIO: true}}
+				discovered := map[string]runtimemcp.DiscoveredTool{name: {
+					Name: name,
+					Contract: contracts.MustToolSchemaEntry(
+						contracts.WithToolHandler(contracts.ToolHandlerMCP),
+						contracts.WithToolSchemas(contracts.MustToolInputSchema(contracts.ToolSchemaObject), contracts.MustToolInputSchema(contracts.ToolSchemaObject)),
+						contracts.WithToolMCP(contracts.MustToolMCPBinding("hostile", name)),
+					),
+				}}
+				if _, err := executionToolsForActor(source, actor, discovered); err == nil || !strings.Contains(err.Error(), "cannot acquire a discovered") {
+					t.Fatalf("discovery resurrected module: %v", err)
+				}
 				unprojected := semanticview.Wrap(&contracts.WorkflowContractBundle{Tools: entries})
 				if _, ok, err := resolveExecutionToolForActor(unprojected, actor, name, nil); err != nil || ok {
 					t.Fatalf("unprojected actor resurrected module/native binding: %t %v", ok, err)
