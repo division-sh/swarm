@@ -48,12 +48,10 @@ func TestImportedOutputPinSchemaBindingIsImmutableAndSingleOwner(t *testing.T) {
 
 func TestW2CanonicalPinAndPermissionEvidenceIgnoresSetAuthorOrderAndIsImmutable(t *testing.T) {
 	context := FlowPinCompilationContext{FlowID: "collector", FlowPath: "collector", SourceFile: "collector/schema.yaml"}
-	firstDedup := []string{"payload.worker_id", "event.id"}
 	first, err := CompileFlowInputPin(context, FlowInputEventPin{
 		Event: "work.reported",
 		Resolution: FlowInputPinResolution{
-			Mode: FlowInputResolutionModeFanIn, Aggregation: "barrier", Window: "payload.batch_id",
-			DedupBy: firstDedup, Singleton: "collector",
+			Mode: FlowInputResolutionModeReply, RepliesTo: "work.requested", CorrelationKey: "worker_id",
 		},
 	})
 	if err != nil {
@@ -62,8 +60,7 @@ func TestW2CanonicalPinAndPermissionEvidenceIgnoresSetAuthorOrderAndIsImmutable(
 	second, err := CompileFlowInputPin(context, FlowInputEventPin{
 		Event: "work.reported",
 		Resolution: FlowInputPinResolution{
-			Mode: FlowInputResolutionModeFanIn, Aggregation: "barrier", Window: "payload.batch_id",
-			DedupBy: []string{"event.id", "payload.worker_id"}, Singleton: "collector",
+			Mode: FlowInputResolutionModeReply, RepliesTo: "work.requested", CorrelationKey: "worker_id",
 		},
 	})
 	if err != nil {
@@ -73,13 +70,9 @@ func TestW2CanonicalPinAndPermissionEvidenceIgnoresSetAuthorOrderAndIsImmutable(
 		t.Fatalf("equivalent input pin digests = %q/%q, want one canonical identity", first.Digest(), second.Digest())
 	}
 
-	firstDedup[0] = "payload.changed"
 	readback := first.Resolution()
-	if got, want := readback.DedupBy, []string{"event.id", "payload.worker_id"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("compiled dedup evidence = %#v, want %#v", got, want)
-	}
-	readback.DedupBy[0] = "payload.changed_again"
-	if got := first.Resolution().DedupBy; !reflect.DeepEqual(got, []string{"event.id", "payload.worker_id"}) {
+	readback.CorrelationKey = "changed"
+	if got := first.Resolution().CorrelationKey; got != "worker_id" {
 		t.Fatalf("resolution readback mutation escaped into compiled owner: %#v", got)
 	}
 

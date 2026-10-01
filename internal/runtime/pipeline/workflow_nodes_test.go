@@ -997,21 +997,21 @@ func TestWorkflowNodeHandlerResolution_PreservesAuthoredKeyForCanonicalCrossFlow
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 	source := semanticview.Wrap(bundle)
-	evt := eventtest.RunCreatingRootIngress("", "operating/operating.reported", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
+	evt := eventtest.RunCreatingRootIngress("", "portfolio/period.reported", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
 	evt = eventtest.TargetRouted(evt, events.RouteIdentity{
-		FlowID:       "portfolio",
-		FlowInstance: "portfolio",
-		EntityID:     FlowInstanceEntityID("portfolio"),
+		FlowID:       "portfolio/period",
+		FlowInstance: "portfolio/one/period/two",
+		EntityID:     FlowInstanceEntityID("portfolio/one/period/two"),
 	})
 
-	route := workflowNodeStampedConnectRouteForHandlerEvent(t, source, "operating.reported", "portfolio-collector")
+	route := workflowNodeStampedConnectRouteForHandlerEvent(t, source, "period.reported", "portfolio-collector")
 	route.Target = events.MustExistingEntityTarget(evt.TargetRoute())
-	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, pipelineSourceNode(t, source, "portfolio", "portfolio-collector"), evt)
+	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, pipelineSourceNode(t, source, "portfolio/period", "portfolio-collector"), evt)
 	if !resolved.Matched {
 		t.Fatal("expected portfolio handler to resolve through the canonical cross-flow event")
 	}
-	if got := resolved.HandlerEventKey; got != "operating.reported" {
-		t.Fatalf("handler event key = %q, want authored operating.reported", got)
+	if got := resolved.HandlerEventKey; got != "period.reported" {
+		t.Fatalf("handler event key = %q, want authored period.reported", got)
 	}
 }
 

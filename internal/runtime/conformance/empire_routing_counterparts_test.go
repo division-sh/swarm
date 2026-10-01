@@ -32,18 +32,18 @@ func TestEmpireValidationCreateMintedKeyCounterpart(t *testing.T) {
 	}
 }
 
-func TestEmpireTreasuryPortfolioFanInCounterpart(t *testing.T) {
+func TestEmpireTreasuryPortfolioKeyedJoinCounterpart(t *testing.T) {
 	canonicalrouting.Prove(t, canonicalrouting.FanInStream, canonicalrouting.FanInBarrier)
 	_, streamPlans := canonicalCounterpartPlans(t, canonicalrouting.FanInStream)
 	stream := requireCounterpartPlan(t, streamPlans, func(plan runtimepinrouting.ConnectRoutePlan) bool {
-		return plan.FanIn() != nil && plan.FanIn().Aggregation() == runtimepinrouting.ConnectFanInStream
+		return plan.ReceiverEndpoint().Readback().FlowID == "portfolio" && plan.InstanceKey() != nil
 	})
 	_, barrierPlans := canonicalCounterpartPlans(t, canonicalrouting.FanInBarrier)
 	barrier := requireCounterpartPlan(t, barrierPlans, func(plan runtimepinrouting.ConnectRoutePlan) bool {
-		return plan.FanIn() != nil && plan.FanIn().Aggregation() == runtimepinrouting.ConnectFanInBarrier
+		return plan.ReceiverEndpoint().Readback().FlowID == "portfolio/period" && plan.InstanceKey() != nil
 	})
-	if stream.FanIn().Readback().Singleton != "portfolio" || barrier.FanIn().Readback().Singleton != "portfolio" {
-		t.Fatalf("%s/%s counterparts do not resolve to the portfolio singleton: stream=%#v barrier=%#v", empireTreasuryNodes, empireOperatingNodes, stream.FanIn(), barrier.FanIn())
+	if stream.InstanceKey().Field().Path() != "period_id" || barrier.InstanceKey().Field().Path() != "period_id" {
+		t.Fatalf("%s/%s counterparts must select the declared period instance: stream=%#v barrier=%#v", empireTreasuryNodes, empireOperatingNodes, stream.InstanceKey(), barrier.InstanceKey())
 	}
 }
 
@@ -96,8 +96,8 @@ func TestEmpireResolutionCounterpartsRequireNoSeventhModeOrMultiPrimaryInstance(
 		{empireTreasuryNodes, canonicalrouting.TemplateSelectExisting, runtimecontracts.FlowInputResolutionModeSelect, "vertical_id"},
 		{empireSpecRepoNodes, canonicalrouting.TemplateSelectOrCreate, runtimecontracts.FlowInputResolutionModeSelectOrCreate, "component_id"},
 		{empireComponentScaffoldNodes, canonicalrouting.TemplateReply, runtimecontracts.FlowInputResolutionModeReply, "component_id"},
-		{empireOperatingNodes, canonicalrouting.FanInStream, runtimecontracts.FlowInputResolutionModeFanIn, "operating_id"},
-		{empireOperatingNodes, canonicalrouting.FanInBarrier, runtimecontracts.FlowInputResolutionModeFanIn, "operating_id"},
+		{empireOperatingNodes, canonicalrouting.FanInStream, runtimecontracts.FlowInputResolutionModeSelectOrCreate, "period_id"},
+		{empireOperatingNodes, canonicalrouting.FanInBarrier, runtimecontracts.FlowInputResolutionModeSelect, "period_id"},
 	}
 	for _, item := range evidence {
 		bundle, plans := canonicalCounterpartPlans(t, item.artifact)
@@ -109,8 +109,6 @@ func TestEmpireResolutionCounterpartsRequireNoSeventhModeOrMultiPrimaryInstance(
 			switch item.mode {
 			case runtimecontracts.FlowInputResolutionModeReply:
 				matched = matched || plan.ReplyResolution() != nil
-			case runtimecontracts.FlowInputResolutionModeFanIn:
-				matched = matched || plan.FanIn() != nil
 			default:
 				matched = matched || (plan.InstanceKey() != nil && plan.InstanceKey().Mode() == item.mode)
 			}
@@ -120,7 +118,7 @@ func TestEmpireResolutionCounterpartsRequireNoSeventhModeOrMultiPrimaryInstance(
 		}
 		// Strict bundle loading resolves one primary entity contract per flow.
 		// The named key remains routing identity inside that single-entity model.
-		if item.mode != runtimecontracts.FlowInputResolutionModeReply && item.mode != runtimecontracts.FlowInputResolutionModeFanIn {
+		if item.mode != runtimecontracts.FlowInputResolutionModeReply {
 			for _, plan := range plans {
 				if plan.InstanceKey() == nil || plan.InstanceKey().Mode() != item.mode {
 					continue

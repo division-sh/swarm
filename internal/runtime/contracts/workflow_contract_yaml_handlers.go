@@ -70,7 +70,6 @@ var handlerFieldOptions = map[string]struct{}{
 	"count":             {},
 	"clear":             {},
 	"from":              {},
-	"dedup_by":          {},
 }
 
 type handlerRuleDecodeContext string

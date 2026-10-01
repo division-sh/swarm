@@ -19,7 +19,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatefanin"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 )
 
@@ -890,105 +889,127 @@ func TestLowerCompositionConnectRoutePlanWithLocationRejectsOtherwiseValidConnec
 	}
 }
 
-func TestCompileConnectPlansUsesFanInStreamSingularTarget(t *testing.T) {
-	source := templatefanin.LoadSource(t, templatefanin.Options{})
-
-	plans, issues := compileConnectPlans(source)
-
-	if len(issues) != 0 {
-		t.Fatalf("compileConnectPlans issues = %#v, want none", issues)
-	}
-	plan := requireFanInRoutePlan(t, plans)
-	if plan.fanIn == nil {
-		t.Fatalf("fan-in metadata = nil in %#v", plan)
-	}
-	if fanIn := plan.fanIn.Readback(); plan.fanIn.Aggregation() != ConnectFanInStream || fanIn.Window != "payload.period_id" || len(fanIn.DedupBy) != 1 || fanIn.DedupBy[0] != "payload.operating_id" {
-		t.Fatalf("fan-in metadata = %#v, want stream/window/dedup", plan.fanIn)
-	}
-	if plan.targetKind != ConnectTargetKindTarget || plan.resolutionKind != ConnectResolutionStatic {
-		t.Fatalf("fan-in routing shape = target_kind:%s resolution:%s, want target/static", plan.targetKind.Code(), plan.resolutionKind.Code())
-	}
-	if plan.target.FlowID != templatefanin.ReceiverFlowID || plan.target.FlowInstance != templatefanin.ReceiverFlowInstance || plan.target.EntityID != "" {
-		t.Fatalf("fan-in target = %#v, want receiver singleton %s route blueprint without run-specific entity", plan.target, templatefanin.ReceiverFlowInstance)
-	}
-}
-
-func TestCompileConnectPlansAllowsFanInStreamEventIDDedup(t *testing.T) {
-	source := templatefanin.LoadSource(t, templatefanin.Options{EventIDDedup: true})
-
-	plans, issues := compileConnectPlans(source)
-
-	if len(issues) != 0 {
-		t.Fatalf("compileConnectPlans issues = %#v, want none", issues)
-	}
-	plan := requireFanInRoutePlan(t, plans)
-	if plan.fanIn == nil || len(plan.fanIn.Readback().DedupBy) != 1 || plan.fanIn.Readback().DedupBy[0] != "event.id" {
-		t.Fatalf("fan-in metadata = %#v, want event.id dedup", plan.fanIn)
-	}
-}
-
-func TestCompileConnectPlansFailsClosedForInvalidFanInStream(t *testing.T) {
-	tests := []struct {
-		name    string
-		opts    templatefanin.Options
-		failure ConnectRoutePlanFailure
-		detail  string
+func TestCompileConnectPlansUsesOrdinaryKeyedReportRouting(t *testing.T) {
+	repoRoot := canonicalrouting.RepoRoot(t)
+	for _, tc := range []struct {
+		fixture  canonicalrouting.ArtifactID
+		source   string
+		receiver string
+		mode     string
 	}{
-		{name: "missing dedup", opts: templatefanin.Options{MissingDedup: true}, failure: ConnectFailureInstanceResolutionInvalid, detail: "requires dedup_by"},
-		{name: "dedup tuple", opts: templatefanin.Options{DedupTuple: true}, failure: ConnectFailureInstanceResolutionInvalid, detail: "exactly one dedup_by"},
-		{name: "missing window", opts: templatefanin.Options{MissingWindow: true}, failure: ConnectFailureInstanceResolutionInvalid, detail: "requires window"},
-		{name: "wrong singleton", opts: templatefanin.Options{WrongSingleton: true}, failure: ConnectFailureInstanceResolutionInvalid, detail: "must be the receiver singleton route or a child"},
-		{name: "keyed receiver", opts: templatefanin.Options{NonSingletonReceiver: true}, failure: ConnectFailureInstanceResolutionInvalid, detail: "has a template instance key"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			source := templatefanin.LoadSource(t, tc.opts)
-
-			_, issues := compileConnectPlans(source)
-
-			if len(issues) != 1 {
-				t.Fatalf("issues = %#v, want one", issues)
+		{fixture: canonicalrouting.FanInStream, source: "operating", receiver: "portfolio", mode: "select-or-create"},
+		{fixture: canonicalrouting.FanInBarrier, source: "portfolio", receiver: "portfolio/period", mode: "select"},
+	} {
+		t.Run(string(tc.fixture), func(t *testing.T) {
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, canonicalrouting.ExampleRoot(t, tc.fixture), runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+			if err != nil {
+				t.Fatalf("load keyed report example: %v", err)
 			}
-			if issues[0].Failure != tc.failure || !strings.Contains(issues[0].Detail, tc.detail) {
-				t.Fatalf("issue = %#v, want failure %s containing %q", issues[0], tc.failure.Code(), tc.detail)
+			plans, issues := compileConnectPlans(semanticview.Wrap(bundle))
+			if len(issues) != 0 {
+				t.Fatalf("compileConnectPlans issues = %#v, want none", issues)
 			}
-			if issues[0].AuthoredLocation == "" || !strings.Contains(issues[0].AuthoredLocation, "schema.yaml:") {
-				t.Fatalf("issue location = %q, want exact schema.yaml:line", issues[0].AuthoredLocation)
+			plan := requirePeriodReportRoutePlan(t, plans)
+			if plan.source.flowPath.value != tc.source || plan.receiver.flowPath.value != tc.receiver {
+				t.Fatalf("report endpoints = %#v -> %#v, want exact %q -> %q scope", plan.source.Readback(), plan.receiver.Readback(), tc.source, tc.receiver)
+			}
+			if plan.targetKind != ConnectTargetKindTarget || plan.resolutionKind != ConnectResolutionInstanceKey || !plan.RequiresRuntimeResolution() || !plan.target.Empty() {
+				t.Fatalf("report route = %#v, want ordinary singular keyed resolution without a guessed target", plan.Readback())
+			}
+			if plan.instanceKey == nil {
+				t.Fatal("ordinary report route has no instance-key evidence")
+			}
+			key := plan.instanceKey.Readback()
+			if key.Mode != tc.mode || key.Field != "period_id" || key.SourceKind != "payload" || key.SourcePath != "payload.period_id" {
+				t.Fatalf("report key = %#v, want exact period selection from the connection", key)
+			}
+			source := semanticview.Wrap(bundle)
+			first := events.RouteIdentity{FlowID: plan.receiver.flowID.value, FlowInstance: flowidentity.InstancePath(source, plan.receiver.flowID.value, "period-1"), EntityID: "period-1-entity"}
+			second := events.RouteIdentity{FlowID: plan.receiver.flowID.value, FlowInstance: flowidentity.InstancePath(source, plan.receiver.flowID.value, "period-2"), EntityID: "period-2-entity"}
+			descriptors := []Descriptor{
+				{FlowInstance: first.FlowInstance, EntityID: first.EntityID, AddressFields: map[string]string{"entity.period_id": "period-1"}},
+				{FlowInstance: second.FlowInstance, EntityID: second.EntityID, AddressFields: map[string]string{"entity.period_id": "period-2"}},
+			}
+			for _, target := range []events.RouteIdentity{first, second} {
+				period := "period-1"
+				if target == second {
+					period = "period-2"
+				}
+				result := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{MatchValues: AdmitConnectRouteMatchValues(map[string]string{"payload.period_id": period}), Descriptors: descriptors})
+				if !result.Failure.Empty() || result.Target != target || len(result.TargetSet) != 0 {
+					t.Fatalf("period %q materialization = %#v, want only exact receiver %#v", period, result, target)
+				}
+			}
+			for _, refusal := range []struct {
+				name        string
+				period      string
+				descriptors []Descriptor
+				failure     ConnectRoutePlanFailure
+			}{
+				{name: "missing period", descriptors: descriptors, failure: ConnectFailureInstanceSourceValueMissing},
+				{name: "unknown period", period: "period-3", descriptors: descriptors, failure: ConnectFailureTargetUnresolved},
+				{name: "ambiguous period", period: "period-1", descriptors: []Descriptor{
+					descriptors[0],
+					{FlowInstance: second.FlowInstance, EntityID: second.EntityID, AddressFields: map[string]string{"entity.period_id": "period-1"}},
+				}, failure: ConnectFailureTargetAmbiguous},
+			} {
+				t.Run(refusal.name, func(t *testing.T) {
+					result := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{MatchValues: AdmitConnectRouteMatchValues(map[string]string{"payload.period_id": refusal.period}), Descriptors: refusal.descriptors})
+					if result.Failure != refusal.failure || !result.Target.Empty() || len(result.TargetSet) != 0 {
+						t.Fatalf("materialization = %#v, want exact refusal %s without a guessed recipient", result, refusal.failure.Code())
+					}
+				})
 			}
 		})
 	}
 }
 
-func TestCompileConnectPlansUsesFanInBarrierSingularTarget(t *testing.T) {
+func TestBundleAdmissionRejectsRetiredJoinRoutingPolicies(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, canonicalrouting.ExampleRoot(t, canonicalrouting.FanInBarrier), runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("load canonical barrier: %v", err)
-	}
-	source := semanticview.Wrap(bundle)
-	plans, issues := compileConnectPlans(source)
-	if len(issues) != 0 {
-		t.Fatalf("compileConnectPlans issues = %#v, want none", issues)
-	}
-	plan := requireFanInRoutePlan(t, plans)
-	if fanIn := plan.fanIn.Readback(); plan.fanIn.Aggregation() != ConnectFanInBarrier || fanIn.Window != "payload.period_id" || len(fanIn.DedupBy) != 1 || fanIn.DedupBy[0] != "payload.operating_id" {
-		t.Fatalf("fan-in metadata = %#v, want barrier/window/member identity", plan.fanIn)
-	}
-	if plan.targetKind != ConnectTargetKindTarget || plan.resolutionKind != ConnectResolutionStatic {
-		t.Fatalf("barrier routing shape = %#v, want singular static target", plan)
+	for _, tc := range []struct {
+		name       string
+		resolution string
+		field      string
+	}{
+		{name: "fan-in", resolution: "          mode: fan-in\n", field: "fan-in"},
+		{name: "aggregation", resolution: "          mode: reply\n          aggregation: stream\n", field: "aggregation"},
+		{name: "window", resolution: "          mode: reply\n          window: payload.period_id\n", field: "window"},
+		{name: "dedup_by", resolution: "          mode: reply\n          dedup_by: [payload.operating_id]\n", field: "dedup_by"},
+		{name: "singleton", resolution: "          mode: reply\n          singleton: portfolio\n", field: "singleton"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := canonicalrouting.CopyExample(t, canonicalrouting.TemplateSelectExisting)
+			path := filepath.Join(root, "account", "schema.yaml")
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before := "      - account.ready\n"
+			if strings.Count(string(raw), before) != 1 {
+				t.Fatal("exact account.ready input unavailable for retirement specimen")
+			}
+			after := "      - event: account.ready\n        resolution:\n" + tc.resolution
+			if err := os.WriteFile(path, []byte(strings.Replace(string(raw), before, after, 1)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err = runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+			if err == nil || !strings.Contains(err.Error(), tc.field) || !strings.Contains(err.Error(), "schema.yaml:") {
+				t.Fatalf("load error = %v, want exact source-located refusal of retired %q", err, tc.field)
+			}
+		})
 	}
 }
 
-func requireFanInRoutePlan(t *testing.T, plans []ConnectRoutePlan) ConnectRoutePlan {
+func requirePeriodReportRoutePlan(t *testing.T, plans []ConnectRoutePlan) ConnectRoutePlan {
 	t.Helper()
 	var matches []ConnectRoutePlan
 	for _, plan := range plans {
-		if plan.fanIn != nil {
+		if plan.instanceKey != nil && plan.instanceKey.Field().Path() == "period_id" && (plan.receiver.event.value == "operating.reported" || plan.receiver.event.value == "period.reported") {
 			matches = append(matches, plan)
 		}
 	}
 	if len(matches) != 1 {
-		t.Fatalf("fan-in route plans = %#v in all plans %#v, want exactly one", matches, plans)
+		t.Fatalf("period report route plans = %#v in all plans %#v, want exactly one", matches, plans)
 	}
 	return matches[0]
 }
@@ -1646,7 +1667,6 @@ func TestCanonicalResolutionAdmissionBlocksOutOfModeFromBeforeRouteLowering(t *t
 		name string
 		root func(testing.TB) string
 	}{
-		{name: "fan-in", root: canonicalrouting.CopyFanInWithInertFrom},
 		{name: "reply", root: canonicalrouting.CopyTemplateReplyWithInertFrom},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

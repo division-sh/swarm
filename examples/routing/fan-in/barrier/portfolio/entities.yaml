@@ -1,7 +1,3 @@
-portfolio_state:
+portfolio_context:
   portfolio_id:
-    type: text
-  expected_operating_ids:
-    type: "[text]"
-  period_id:
     type: text

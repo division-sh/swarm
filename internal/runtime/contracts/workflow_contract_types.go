@@ -1351,10 +1351,6 @@ func (s FlowOutputSink) Valid() bool {
 
 type FlowInputPinResolution struct {
 	Mode           FlowInputResolutionMode `yaml:"mode"`
-	Aggregation    string                  `yaml:"aggregation"`
-	Window         string                  `yaml:"window"`
-	DedupBy        []string                `yaml:"dedup_by"`
-	Singleton      string                  `yaml:"singleton"`
 	RepliesTo      string                  `yaml:"replies_to"`
 	CorrelationKey string                  `yaml:"correlation_key"`
 }

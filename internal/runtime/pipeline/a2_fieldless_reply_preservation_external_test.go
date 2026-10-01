@@ -220,7 +220,6 @@ func a2FieldlessReplyFiles() map[string]string {
 	return map[string]string{
 		"schema.yaml": "name: a2-fieldless-reply\nconnect:\n  - {event: provider.requested, from: requester, to: provider}\n  - {event: provider.replied, from: provider, to: requester}\n",
 		"requester/schema.yaml": `name: requester
-mode: static
 pins:
   inputs:
     events:
@@ -245,7 +244,7 @@ receiver:
         event: reply.observed
         fields: {token: "${payload.token}", value: "${payload.value}"}
 `,
-		"provider/schema.yaml": "name: provider\nmode: static\npins:\n  inputs:\n    events: [provider.requested]\n  outputs:\n    events: [provider.replied]\n",
+		"provider/schema.yaml": "name: provider\npins:\n  inputs:\n    events: [provider.requested]\n  outputs:\n    events: [provider.replied]\n",
 		"provider/events.yaml": "provider.replied:\n  token: text\n  value: text\n",
 		"provider/nodes.yaml": `provider:
   execution_type: system_node

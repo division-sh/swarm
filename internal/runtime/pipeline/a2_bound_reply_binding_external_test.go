@@ -69,8 +69,8 @@ func testA2BoundReplyJourney(t *testing.T, corruptEntryField, siblingFlow string
 			ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			files := a2BoundReplyFiles()
 			if siblingFlow == "observer" {
-				files["schema.yaml"] += "  - {event: provider.replied, from: provider, to: observer}\n"
-				files["schema.yaml"] += "  - {event: provider.notified, from: provider, to: observer}\n"
+				files["schema.yaml"] += "  - {event: provider.replied, from: provider, to: observer, resolution: select}\n"
+				files["schema.yaml"] += "  - {event: provider.notified, from: provider, to: observer, resolution: select}\n"
 				files["provider/schema.yaml"] = strings.Replace(files["provider/schema.yaml"], "events: [provider.replied]", "events: [provider.replied, provider.notified]", 1)
 				files["provider/events.yaml"] += "ordinary.requested:\n  order_id: text\n  member_id: text\n  result: JoinResult\nprovider.notified:\n  order_id: text\n  member_id: text\n  result: JoinResult\n"
 				files["provider/nodes.yaml"] += `    ordinary.requested:
@@ -82,9 +82,9 @@ func testA2BoundReplyJourney(t *testing.T, corruptEntryField, siblingFlow string
           result: "${payload.result}"
 `
 				files["observer/schema.yaml"] = strings.Replace(files["requester/schema.yaml"], "name: requester", "name: observer", 1)
-				files["observer/schema.yaml"] = strings.Replace(files["observer/schema.yaml"], "{mode: reply, replies_to: provider.requested}", "{mode: select}", 1)
+				files["observer/schema.yaml"] = strings.Replace(files["observer/schema.yaml"], "{event: provider.replied, resolution: {mode: reply, replies_to: provider.requested}}", "provider.replied", 1)
 				files["observer/schema.yaml"] = strings.Replace(files["observer/schema.yaml"], "  outputs:\n    events: [provider.requested]\n", "", 1)
-				files["observer/schema.yaml"] += "      - {event: provider.notified, resolution: {mode: select}}\n"
+				files["observer/schema.yaml"] += "      - provider.notified\n"
 				files["observer/entities.yaml"] = files["requester/entities.yaml"]
 				files["observer/entities.yaml"] += "  ordinary_result: JoinResult\n"
 				start := strings.Index(files["requester/nodes.yaml"], "collector:\n")
@@ -591,7 +591,6 @@ func a2BoundReplyFiles() map[string]string {
 		"schema.yaml": "name: a2-bound-reply\nconnect:\n  - {event: provider.requested, from: requester, to: provider}\n  - {event: provider.replied, from: provider, to: requester}\n",
 		"types.yaml":  "types:\n  JoinResult:\n    value: text\n",
 		"requester/schema.yaml": `name: requester
-mode: template
 instance: order_id
 stages:
   awaiting: {initial: true}
@@ -631,7 +630,7 @@ dispatcher:
     manual.abort: {advances_to: dispatching}
     dispatch.completed: {advances_to: awaiting}
 `,
-		"provider/schema.yaml": "name: provider\nmode: static\npins:\n  inputs:\n    events: [provider.requested]\n  outputs:\n    events: [provider.replied]\n",
+		"provider/schema.yaml": "name: provider\npins:\n  inputs:\n    events: [provider.requested]\n  outputs:\n    events: [provider.replied]\n",
 		"provider/events.yaml": "provider.replied:\n  order_id: text\n  member_id: text\n  result: JoinResult\n",
 		"provider/nodes.yaml": `provider:
   execution_type: system_node

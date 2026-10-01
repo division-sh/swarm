@@ -200,7 +200,7 @@ func TestBuildShowsApprovedOutwardEffectAsCanonicalApprovalPoint(t *testing.T) {
 	}
 }
 
-func TestBuildStageGraphShowsFanInBarrierEffectiveJoinProvenance(t *testing.T) {
+func TestBuildStageGraphShowsInstanceScopedArrivalJoin(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
 		repoRoot,
@@ -217,7 +217,7 @@ func TestBuildStageGraphShowsFanInBarrierEffectiveJoinProvenance(t *testing.T) {
 	}
 	var joins []StageGraphJoinView
 	for _, graph := range view.StageGraphs {
-		if graph.FlowID == "portfolio" {
+		if graph.FlowID == "portfolio/period" {
 			joins = graph.Joins
 			break
 		}

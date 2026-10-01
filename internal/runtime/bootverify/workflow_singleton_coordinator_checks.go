@@ -17,7 +17,7 @@ func checkSingletonCoordinatorValidation(c *checkerContext) []Finding {
 	}
 	findings := []Finding{}
 	for _, demand := range BuildSingletonCoordinatorDemandProjection(c.source) {
-		if demand.Kind == "fan_in_input" || strings.HasPrefix(demand.Kind, "contained_operation.") {
+		if strings.HasPrefix(demand.Kind, "contained_operation.") {
 			continue
 		}
 		if _, err := bundle.ResolveFlowSingletonCoordinator(demand.FlowID); err != nil {

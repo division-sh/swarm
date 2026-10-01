@@ -251,7 +251,7 @@ func TestSchemaAdmissionIngressBranchPresenceMatrix(t *testing.T) {
 func TestSchemaAdmissionResolutionPresenceDoesNotBypassMode(t *testing.T) {
 	for _, mode := range []string{"create", "select", "select-or-create", "fan-in", "fan-out", "reply"} {
 		for _, key := range []string{"from", "aggregation", "window", "dedup_by", "singleton", "replies_to", "correlation_key"} {
-			allowed := mode == "fan-in" && (key == "aggregation" || key == "window" || key == "dedup_by" || key == "singleton") || mode == "reply" && (key == "replies_to" || key == "correlation_key")
+			allowed := mode == "reply" && (key == "replies_to" || key == "correlation_key")
 			t.Run(mode+"/"+key, func(t *testing.T) {
 				for _, raw := range []string{"null", "''", "{}", "[]"} {
 					source := "pins: {inputs: {events: [{event: work.requested, resolution: {mode: " + mode + ", " + key + ": " + raw + "}}]}}\n"

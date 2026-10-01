@@ -183,21 +183,6 @@ func BuildSingletonCoordinatorDemandProjection(source semanticview.Source) []Sin
 		}
 	}
 
-	for flowID := range source.FlowSchemaEntries() {
-		if _, singleton := flows[flowID]; !singleton {
-			continue
-		}
-		for _, pin := range source.FlowInputEventPins(flowID) {
-			if pin.Resolution().Mode != runtimecontracts.FlowInputResolutionModeFanIn {
-				continue
-			}
-			add(SingletonCoordinatorDemand{
-				FlowID: flowID, SourceFile: singletonFlowSchemaFile(bundle, flowID), Location: flowID,
-				Kind: "fan_in_input", Target: pin.EventType() + " (" + pin.EventType() + ")",
-			}, false)
-		}
-	}
-
 	sort.Slice(demands, func(i, j int) bool {
 		left, right := demands[i], demands[j]
 		return fmt.Sprintf("%s|%s|%s|%s|%s|%s|%06d", left.FlowID, left.SourceFile, left.Node.Key(), left.EventType, left.Kind, left.Target, left.WriteIndex) <

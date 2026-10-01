@@ -8,5 +8,6 @@ operating-node:
         event: operating.reported
         fields:
           operating_id: ${payload.operating_id}
+          portfolio_id: ${payload.portfolio_id}
           period_id: ${payload.period_id}
           revenue: ${payload.revenue}

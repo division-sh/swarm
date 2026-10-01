@@ -456,7 +456,7 @@ func (rt *RouteTable) connectRecipientAdmissionsForRun(runID string) []runtimepi
 }
 
 func (rt *RouteTable) connectRecipientAdmissionsForTargets(runID string, plan runtimepinrouting.ConnectRoutePlan, targets []events.RouteIdentity) []runtimepinrouting.ConnectRecipientRegistration {
-	if rt == nil || plan.FanIn() != nil || len(targets) == 0 {
+	if rt == nil || len(targets) == 0 {
 		return rt.connectRecipientAdmissionsForRun(runID)
 	}
 	paths := make(map[string]struct{}, len(targets))

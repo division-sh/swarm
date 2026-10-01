@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -36,11 +38,64 @@ import (
 type stageLifecycleIdentityStore interface {
 	decisioncard.Store
 	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
+	ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error)
 	ListWorkflowTimerActivations(context.Context, string, string, bool) ([]runtimepipeline.WorkflowTimerActivation, error)
 	Snapshot(context.Context, string) (runtimedelivery.Snapshot, error)
 }
 
-func TestSingletonStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBackends(t *testing.T) {
+type stageLifecycleIdentityActivation struct {
+	RunID        string
+	FlowInstance string
+	InstanceID   string
+	EntityID     string
+}
+
+type stageLifecycleIdentityPublicationStore struct {
+	runtimebus.EventStore
+	runtimepipeline.WorkflowInstancePersistenceReader
+	owner runtimebus.CommitPublicationOwner
+	mu    sync.Mutex
+	items map[string]stageLifecycleIdentityPublication
+}
+
+type stageLifecycleIdentityPublication struct {
+	committed runtimebus.CommittedPublication
+	initial   []runtimepipeline.WorkflowInstance
+	err       error
+}
+
+func (s *stageLifecycleIdentityPublicationStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	committed, err := s.owner.CommitPublication(ctx, command)
+	if err == nil && committed.Acknowledged {
+		observed := stageLifecycleIdentityPublication{committed: committed}
+		// Read the committed initial entry before EventBus dispatches its setup handler.
+		for _, activation := range committed.Activations {
+			identity, readErr := activation.Plan.Readiness.FlowIdentity()
+			if readErr != nil {
+				observed.err = readErr
+				break
+			}
+			instance, found, readErr := s.LoadWorkflowInstance(ctx, identity)
+			if readErr != nil || !found {
+				observed.err = readErr
+				break
+			}
+			observed.initial = append(observed.initial, instance)
+		}
+		s.mu.Lock()
+		s.items[command.Commit.Event.ID()] = observed
+		s.mu.Unlock()
+	}
+	return committed, err
+}
+
+func (s *stageLifecycleIdentityPublicationStore) publication(eventID string) stageLifecycleIdentityPublication {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.items[eventID]
+}
+
+func TestKeyedStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBackends(t *testing.T) {
 	canonicalrouting.Prove(t, canonicalrouting.ArtifactID("internal/runtime/conformance/testdata/stage-lifecycle-identity"))
 	module := loadConformanceWorkflowFixtureModule(t, filepath.Join("testdata", "stage-lifecycle-identity"))
 
@@ -67,63 +122,55 @@ func TestSingletonStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBacken
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			selected, lifecycleStore, db := tc.setup(t)
-			runtime, processCapability := newStageLifecycleIdentityRuntime(t, selected, module)
+			runtime, processCapability, publications := newStageLifecycleIdentityRuntime(t, selected, module)
 			startStageLifecycleIdentityRuntime(t, runtime)
 			runtimeCtx := testAuthorActivityContextForBundle(context.Background(), runtime.Options.SourceArtifactFact)
-			_, activations, err := runtime.EnsureStandingTargets(runtimeCtx)
-			if err != nil {
-				t.Fatalf("materialize authored standing singleton: %v", err)
-			}
-			if len(activations) != 1 || !activations[0].Created {
-				t.Fatalf("standing activations = %#v, want one newly created singleton", activations)
-			}
-			activation := activations[0]
-			if activation.FlowInstance != "scout" || activation.InstanceID != "scout" {
-				t.Fatalf("singleton route = %q/%q, want scout/scout identity fields", activation.FlowInstance, activation.InstanceID)
-			}
-			if activation.EntityID == "" || activation.EntityID == activation.FlowInstance {
-				t.Fatalf("standing route/entity are not distinguishable: route=%q entity=%q", activation.FlowInstance, activation.EntityID)
-			}
-			if _, err := uuid.Parse(activation.EntityID); err != nil {
-				t.Fatalf("standing entity_id %q is not canonical: %v", activation.EntityID, err)
-			}
-
-			runCtx := runtimecorrelation.WithRunID(runtimeCtx, activation.RunID)
-			flowIdentity := runtimeflowidentity.RunScopedFlowInstance{
-				RunID: activation.RunID,
-				Route: runtimeflowidentity.RouteForInstancePath(activation.FlowInstance),
-			}
-			instance := assertStageLifecycleInstanceIdentity(t, runCtx, runtime.Pipeline, flowIdentity, activation.EntityID, "collecting", "active")
-			assertStageLifecycleEntryIdentity(t, instance, flowIdentity, "construction", "", "")
-
+			runID := uuid.NewString()
+			runCtx := runtimecorrelation.WithRunID(runtimeCtx, runID)
 			memberA := uuid.NewString()
 			memberB := uuid.NewString()
 			const batchID = "batch-distinct-from-scout"
-			setupEventID := publishStageLifecycleIdentityEvent(t, runCtx, runtime.Bus, module.source, activation, "scout.setup", map[string]any{
-				"member_ids": []string{memberA, memberB},
-				"batch_id":   batchID,
-			})
+			setupPayload, err := json.Marshal(map[string]any{"member_ids": []string{memberA, memberB}, "batch_id": batchID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			setupEventID := uuid.NewString()
+			setupEvent := eventtest.RunCreatingRootIngress(setupEventID,
+				events.EventType(module.source.ResolveFlowEventReference(".", "scout.setup")), "operator", "", setupPayload, 0,
+				runID, "", events.EventEnvelope{}, time.Now().UTC())
+			if err := runtime.Bus.PublishAcknowledged(runCtx, setupEvent); err != nil {
+				t.Fatalf("publish keyed scout setup: %v", err)
+			}
+			activation, initial, flowIdentity := discoverStageLifecycleIdentityActivation(t, runCtx, lifecycleStore, publications.publication(setupEventID), runID, batchID)
+			assertStageLifecycleEntryIdentity(t, initial, flowIdentity, "construction", "", "")
+			if initial.CurrentState != "collecting" || initial.Status != "active" {
+				t.Fatalf("committed construction = %#v, want initial collecting/active", initial)
+			}
 			setupDeliveryID := assertStageLifecycleDeliveryRoute(t, runCtx, lifecycleStore, db, setupEventID, activation)
-			instance = assertStageLifecycleInstanceIdentity(t, runCtx, runtime.Pipeline, flowIdentity, activation.EntityID, "review", "active")
+			instance := assertStageLifecycleInstanceIdentity(t, runCtx, runtime.Pipeline, flowIdentity, activation.EntityID, "review", "active")
 			reviewEntry := assertStageLifecycleEntryIdentity(t, instance, flowIdentity, "delivery", setupEventID, setupDeliveryID)
 
 			card := loadStageLifecycleIdentityCard(t, runCtx, lifecycleStore, activation)
 			assertStageLifecycleGateIdentity(t, card, activation)
-			assertStageLifecycleTimerIdentity(t, runCtx, lifecycleStore, activation, true)
+			originalCardID := card.CardID
+			originalCardHash := card.CardContentHash
+			originalGateAnchor, err := card.Anchor.StageGate()
+			if err != nil {
+				t.Fatal(err)
+			}
+			originalTimer := assertStageLifecycleTimerIdentity(t, runCtx, lifecycleStore, activation, true)
 
 			requireStageLifecyclePipelineSettlement(t, runtime, selected, activation.RunID)
 			if err := closeConformanceRuntimeGeneration(runtime, processCapability); err != nil {
 				t.Fatalf("close generation before lifecycle restart: %v", err)
 			}
-			runtime, processCapability = newStageLifecycleIdentityRuntime(t, selected, module)
+			runtime, processCapability, _ = newStageLifecycleIdentityRuntime(t, selected, module)
 			startStageLifecycleIdentityRuntime(t, runtime)
 			runtimeCtx = testAuthorActivityContextForBundle(context.Background(), runtime.Options.SourceArtifactFact)
-			_, restored, err := runtime.EnsureStandingTargets(runtimeCtx)
-			if err != nil {
-				t.Fatalf("restore authored standing singleton: %v", err)
-			}
-			if len(restored) != 1 || restored[0].Created || restored[0].RunID != activation.RunID || restored[0].EntityID != activation.EntityID {
-				t.Fatalf("restored standing activation = %#v, want same persisted route/entity/run", restored)
+			runCtx = runtimecorrelation.WithRunID(runtimeCtx, runID)
+			assertStageLifecyclePersistedRoute(t, runCtx, lifecycleStore, flowIdentity)
+			if deliveryID := assertStageLifecycleDeliveryRoute(t, runCtx, lifecycleStore, db, setupEventID, activation); deliveryID != setupDeliveryID {
+				t.Fatal("restart replaced the admitted setup delivery")
 			}
 			instance = assertStageLifecycleInstanceIdentity(t, runCtx, runtime.Pipeline, flowIdentity, activation.EntityID, "review", "active")
 			if entry := assertStageLifecycleEntryIdentity(t, instance, flowIdentity, "delivery", setupEventID, setupDeliveryID); entry != reviewEntry {
@@ -131,7 +178,14 @@ func TestSingletonStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBacken
 			}
 			card = loadStageLifecycleIdentityCard(t, runCtx, lifecycleStore, activation)
 			assertStageLifecycleGateIdentity(t, card, activation)
-			assertStageLifecycleTimerIdentity(t, runCtx, lifecycleStore, activation, true)
+			restoredGateAnchor, err := card.Anchor.StageGate()
+			if err != nil || card.CardID != originalCardID || card.CardContentHash != originalCardHash || restoredGateAnchor.StageActivationID != originalGateAnchor.StageActivationID {
+				t.Fatalf("restart replaced the admitted review gate: card=%#v anchor=%#v err=%v", card, restoredGateAnchor, err)
+			}
+			restoredTimer := assertStageLifecycleTimerIdentity(t, runCtx, lifecycleStore, activation, true)
+			if restoredTimer.Ref.TaskID() != originalTimer.Ref.TaskID() || !restoredTimer.FireAt.Equal(originalTimer.FireAt) || string(restoredTimer.Payload) != string(originalTimer.Payload) {
+				t.Fatalf("restart replaced the admitted review timer: original=%#v restored=%#v", originalTimer, restoredTimer)
+			}
 
 			decisionEventID := uuid.NewString()
 			decidedAt := time.Now().UTC()
@@ -173,38 +227,41 @@ func TestSingletonStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBacken
 			awaitingEntry := assertStageLifecycleEntryIdentity(t, instance, flowIdentity, "gate", decisionEventID, card.CardID)
 			assertStageLifecycleTimerIdentity(t, runCtx, lifecycleStore, activation, false)
 
-			publishStageLifecycleIdentityEvent(t, runCtx, runtime.Bus, module.source, activation, "scout.member.done", map[string]any{
+			memberBEventID := publishStageLifecycleIdentityEvent(t, runCtx, runtime.Bus, module.source, activation, "scout.member.done", map[string]any{
 				"member_id": memberB, "batch_id": batchID, "value": 22,
 			})
+			assertStageLifecycleDeliveryRoute(t, runCtx, lifecycleStore, db, memberBEventID, activation)
 			instance, join := waitStageLifecycleJoin(t, runCtx, runtime.Pipeline, flowIdentity, activation.EntityID, batchID, 1, "awaiting", "active")
 			if join.Status != joinruntime.StatusOpen || join.Completed() != 1 || join.Expected() != 2 {
-				t.Fatalf("partial singleton join = %#v, want open 1/2", join)
+				t.Fatalf("partial keyed join = %#v, want open 1/2", join)
 			}
 			retainedJoinRef := join.JoinRef()
 			if retainedJoinRef.StageEntry() != awaitingEntry {
 				t.Fatal("join arm is not bound to the admitted gate stage entry")
 			}
 
-			publishStageLifecycleIdentityEvent(t, runCtx, runtime.Bus, module.source, activation, "scout.member.done", map[string]any{
+			memberAEventID := publishStageLifecycleIdentityEvent(t, runCtx, runtime.Bus, module.source, activation, "scout.member.done", map[string]any{
 				"member_id": memberA, "batch_id": batchID, "value": 11,
 			})
-			// Standing singletons remain active service instances at terminal stages;
-			// template-flow deactivation is proved separately at the typed terminal owner.
-			instance = assertStageLifecycleInstanceIdentity(t, runCtx, runtime.Pipeline, flowIdentity, activation.EntityID, "complete", "active")
+			assertStageLifecycleDeliveryRoute(t, runCtx, lifecycleStore, db, memberAEventID, activation)
+			instance = assertStageLifecycleInstanceIdentity(t, runCtx, runtime.Pipeline, flowIdentity, activation.EntityID, "complete", "terminated")
+			if instance.TerminatedAt.IsZero() {
+				t.Fatal("terminal keyed scout has no durable termination occurrence")
+			}
 			join = loadStageLifecycleJoin(t, runCtx, instance, batchID)
 			if !join.JoinRef().Equal(retainedJoinRef) {
-				t.Fatal("completion replaced the retained singleton arm")
+				t.Fatal("completion replaced the retained keyed arm")
 			}
 			if join.Status != joinruntime.StatusClosed || join.CloseReason != joinruntime.CloseReasonComplete {
-				t.Fatalf("completed singleton join = %#v, want closed/complete", join)
+				t.Fatalf("completed keyed join = %#v, want closed/complete", join)
 			}
 			results, err := join.Results()
 			if err != nil {
-				t.Fatalf("read singleton join results: %v", err)
+				t.Fatalf("read keyed join results: %v", err)
 			}
 			resultJSON, err := json.Marshal(results)
 			if err != nil || string(resultJSON) != "[11,22]" {
-				t.Fatalf("singleton join results = %#v err=%v, want authored membership order [11 22]", results, err)
+				t.Fatalf("keyed join results = %#v err=%v, want authored membership order [11 22]", results, err)
 			}
 			requireStageLifecyclePipelineSettlement(t, runtime, selected, activation.RunID)
 			if err := closeConformanceRuntimeGeneration(runtime, processCapability); err != nil {
@@ -236,7 +293,7 @@ func requireStageLifecyclePipelineSettlement(t *testing.T, rt *runtimepkg.Runtim
 	t.Fatalf("lifecycle pipeline publications remain unsettled: %#v", summary)
 }
 
-func newStageLifecycleIdentityRuntime(t *testing.T, selected any, module conformanceLoadedWorkflowModule) (*runtimepkg.Runtime, runtimestartupownership.ProcessCapability) {
+func newStageLifecycleIdentityRuntime(t *testing.T, selected any, module conformanceLoadedWorkflowModule) (*runtimepkg.Runtime, runtimestartupownership.ProcessCapability, *stageLifecycleIdentityPublicationStore) {
 	t.Helper()
 	bundle, ok := semanticview.Bundle(module.source)
 	if !ok || bundle == nil {
@@ -251,7 +308,7 @@ func newStageLifecycleIdentityRuntime(t *testing.T, selected any, module conform
 	storetest.RequireBundleDataCatalog(t, runtimeCtx, catalogStore, bundle)
 	cfg := &config.Config{
 		LLM:     config.LLMConfig{Backend: "anthropic"},
-		Runtime: config.RuntimeConfig{},
+		Runtime: config.RuntimeConfig{RecoveryOnStartup: true},
 	}
 	base := runtimepkg.RuntimeDeps{
 		Config: cfg,
@@ -269,6 +326,12 @@ func newStageLifecycleIdentityRuntime(t *testing.T, selected any, module conform
 	default:
 		t.Fatalf("unsupported lifecycle identity store %T", selected)
 	}
+	publications := &stageLifecycleIdentityPublicationStore{
+		EventStore: base.EventStore, owner: selected.(runtimebus.CommitPublicationOwner),
+		WorkflowInstancePersistenceReader: selected.(runtimepipeline.WorkflowInstancePersistenceReader),
+		items:                             make(map[string]stageLifecycleIdentityPublication),
+	}
+	base.EventStore = publications
 	runtime, err := runtimepkg.NewRuntime(runtimeCtx, base)
 	if err != nil {
 		t.Fatalf("build stage lifecycle runtime: %v", err)
@@ -277,7 +340,12 @@ func newStageLifecycleIdentityRuntime(t *testing.T, selected any, module conform
 		t.Fatalf("prepare stage lifecycle author activity catalog: %v", err)
 	}
 	processCapability := installConformanceRuntimeStartupGrant(t, runtimeCtx, selected, runtime)
-	return runtime, processCapability
+	t.Cleanup(func() {
+		if err := closeConformanceRuntimeGeneration(runtime, processCapability); err != nil {
+			t.Errorf("close lifecycle runtime generation: %v", err)
+		}
+	})
+	return runtime, processCapability, publications
 }
 
 func startStageLifecycleIdentityRuntime(t *testing.T, runtime *runtimepkg.Runtime) {
@@ -374,7 +442,62 @@ func stageLifecycleIdentitySQLiteDeps(deps runtimepkg.RuntimeDeps, selected *sto
 	return deps
 }
 
-func publishStageLifecycleIdentityEvent(t *testing.T, ctx context.Context, bus *runtimebus.EventBus, source semanticview.Source, activation runtimepkg.StandingActivation, localEvent string, payload map[string]any) string {
+func discoverStageLifecycleIdentityActivation(t *testing.T, ctx context.Context, selected stageLifecycleIdentityStore, observed stageLifecycleIdentityPublication, runID, batchID string) (stageLifecycleIdentityActivation, runtimepipeline.WorkflowInstance, runtimeflowidentity.RunScopedFlowInstance) {
+	t.Helper()
+	publication := observed.committed
+	if observed.err != nil || len(observed.initial) != 1 {
+		t.Fatalf("committed initial scout = %#v err=%v, want one persisted initial state", observed.initial, observed.err)
+	}
+	if err := publication.Validate(); err != nil || !publication.Acknowledged || len(publication.Activations) != 1 {
+		t.Fatalf("setup publication = %#v err=%v, want one acknowledged creation", publication, err)
+	}
+	construction := publication.Activations[0]
+	if !construction.Created || construction.Plan.Instance.WorkflowName != "scout" {
+		t.Fatalf("setup activation = %#v, want one newly committed scout", construction)
+	}
+	owner, err := construction.Plan.Readiness.FlowIdentity()
+	if err != nil || owner.RunID != runID || owner.Route.ScopeKey != "scout" || !strings.HasPrefix(owner.Route.InstanceID, "ti-") || owner.Route.InstanceID == batchID {
+		t.Fatalf("keyed scout owner = %#v err=%v, want canonical instance of scout in run %s", owner, err, runID)
+	}
+	if construction.Plan.Instance.Fields["batch_id"] != batchID {
+		t.Fatalf("constructed scout key evidence = %#v, want batch_id %q", construction.Plan.Instance.Fields, batchID)
+	}
+	activation := stageLifecycleIdentityActivation{
+		RunID: runID, FlowInstance: owner.Route.InstancePath,
+		InstanceID: owner.Route.InstanceID, EntityID: construction.Plan.Instance.EntityID,
+	}
+	if activation.EntityID == "" || activation.EntityID == activation.FlowInstance || activation.EntityID == batchID || activation.InstanceID == activation.FlowInstance {
+		t.Fatalf("keyed route, instance, entity and business key are not distinguishable: %#v", activation)
+	}
+	if _, err := uuid.Parse(activation.EntityID); err != nil {
+		t.Fatalf("keyed entity_id %q is not canonical: %v", activation.EntityID, err)
+	}
+	assertStageLifecyclePersistedRoute(t, ctx, selected, owner)
+	initial := observed.initial[0]
+	if initial.StorageRef != activation.FlowInstance || initial.InstanceID != activation.InstanceID || initial.EntityID != activation.EntityID || initial.Fields["batch_id"] != batchID {
+		t.Fatalf("committed initial scout disagrees with its activation and key: %#v, want %#v batch %q", initial, activation, batchID)
+	}
+	return activation, initial, owner
+}
+
+func assertStageLifecyclePersistedRoute(t *testing.T, ctx context.Context, selected stageLifecycleIdentityStore, want runtimeflowidentity.RunScopedFlowInstance) {
+	t.Helper()
+	routes, err := selected.ListFlowInstanceRoutes(ctx)
+	if err != nil {
+		t.Fatalf("discover persisted lifecycle routes: %v", err)
+	}
+	var scouts []runtimeflowidentity.RunScopedFlowInstance
+	for _, route := range routes {
+		if route.RunID == want.RunID && route.Route.ScopeKey == "scout" {
+			scouts = append(scouts, route)
+		}
+	}
+	if len(scouts) != 1 || scouts[0] != want {
+		t.Fatalf("persisted scout routes = %#v, want exact %v", scouts, want)
+	}
+}
+
+func publishStageLifecycleIdentityEvent(t *testing.T, ctx context.Context, bus *runtimebus.EventBus, source semanticview.Source, activation stageLifecycleIdentityActivation, localEvent string, payload map[string]any) string {
 	t.Helper()
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -383,8 +506,8 @@ func publishStageLifecycleIdentityEvent(t *testing.T, ctx context.Context, bus *
 	eventID := uuid.NewString()
 	evt := eventtest.ExistingRunRootIngressWithRoutingSource(
 		eventID,
-		events.EventType(localEvent),
-		"scout",
+		events.EventType(source.ResolveFlowEventReference(".", localEvent)),
+		"operator",
 		"",
 		raw,
 		0,
@@ -399,7 +522,7 @@ func publishStageLifecycleIdentityEvent(t *testing.T, ctx context.Context, bus *
 	return eventID
 }
 
-func assertStageLifecycleDeliveryRoute(t *testing.T, ctx context.Context, selected stageLifecycleIdentityStore, db *sql.DB, eventID string, activation runtimepkg.StandingActivation) string {
+func assertStageLifecycleDeliveryRoute(t *testing.T, ctx context.Context, selected stageLifecycleIdentityStore, db *sql.DB, eventID string, activation stageLifecycleIdentityActivation) string {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	var (
@@ -418,11 +541,11 @@ func assertStageLifecycleDeliveryRoute(t *testing.T, ctx context.Context, select
 		targetRoute = routes[0].Target.Route()
 	}
 	if len(routes) != 1 || targetRoute.FlowInstance != activation.FlowInstance || targetRoute.EntityID != activation.EntityID {
-		t.Fatalf("authored singleton delivery routes = %#v, want one route to %q/%q", routes, activation.FlowInstance, activation.EntityID)
+		t.Fatalf("authored keyed delivery routes = %#v, want one route to %q/%q", routes, activation.FlowInstance, activation.EntityID)
 	}
 	deliveryID, err := runtimedelivery.DeliveryID(eventID, routes[0])
 	if err != nil {
-		t.Fatalf("derive authored singleton delivery id: %v", err)
+		t.Fatalf("derive authored keyed delivery id: %v", err)
 	}
 	deadline = time.Now().Add(10 * time.Second)
 	var snapshot runtimedelivery.Snapshot
@@ -443,7 +566,7 @@ func assertStageLifecycleDeliveryRoute(t *testing.T, ctx context.Context, select
 				failure += ": " + cause
 			}
 		}
-		t.Fatalf("authored singleton delivery status=%s reason=%s failure=%q attributes=%#v logs=%s err=%v, want delivered", snapshot.Status, snapshot.ReasonCode, failure, failureAttributes, stageLifecycleRuntimeLogs(db), err)
+		t.Fatalf("authored keyed delivery status=%s reason=%s failure=%q attributes=%#v logs=%s err=%v, want delivered", snapshot.Status, snapshot.ReasonCode, failure, failureAttributes, stageLifecycleRuntimeLogs(db), err)
 	}
 	return deliveryID
 }
@@ -536,11 +659,11 @@ func waitStageLifecycleJoin(t *testing.T, ctx context.Context, pipeline *runtime
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("singleton join did not reach completed=%d state=%s status=%s; last instance=%#v", completed, state, status, last)
+	t.Fatalf("keyed join did not reach completed=%d state=%s status=%s; last instance=%#v", completed, state, status, last)
 	return runtimepipeline.WorkflowInstance{}, joinruntime.Activation{}
 }
 
-func loadStageLifecycleIdentityCard(t *testing.T, ctx context.Context, selected stageLifecycleIdentityStore, activation runtimepkg.StandingActivation) decisioncard.Card {
+func loadStageLifecycleIdentityCard(t *testing.T, ctx context.Context, selected stageLifecycleIdentityStore, activation stageLifecycleIdentityActivation) decisioncard.Card {
 	t.Helper()
 	items, _, err := selected.ListDecisionCards(ctx, decisioncard.ListOptions{
 		RunID: activation.RunID, Limit: 10,
@@ -555,13 +678,13 @@ func loadStageLifecycleIdentityCard(t *testing.T, ctx context.Context, selected 
 	return card
 }
 
-func assertStageLifecycleGateIdentity(t *testing.T, card decisioncard.Card, activation runtimepkg.StandingActivation) {
+func assertStageLifecycleGateIdentity(t *testing.T, card decisioncard.Card, activation stageLifecycleIdentityActivation) {
 	t.Helper()
 	anchor, err := card.Anchor.StageGate()
 	if err != nil {
 		t.Fatalf("decode stage gate anchor: %v", err)
 	}
-	if anchor.Route.InstancePath != activation.FlowInstance || anchor.EntityID != activation.EntityID {
+	if anchor.Route.ScopeKey != "scout" || anchor.Route.InstanceID != activation.InstanceID || anchor.Route.InstancePath != activation.FlowInstance || anchor.EntityID != activation.EntityID {
 		t.Fatalf("gate anchor identity = route:%q entity:%q, want %q/%q", anchor.Route.InstancePath, anchor.EntityID, activation.FlowInstance, activation.EntityID)
 	}
 	scope, err := card.Anchor.Scope()
@@ -573,28 +696,32 @@ func assertStageLifecycleGateIdentity(t *testing.T, card decisioncard.Card, acti
 	}
 }
 
-func assertStageLifecycleTimerIdentity(t *testing.T, ctx context.Context, selected stageLifecycleIdentityStore, activation runtimepkg.StandingActivation, wantActive bool) {
+func assertStageLifecycleTimerIdentity(t *testing.T, ctx context.Context, selected stageLifecycleIdentityStore, activation stageLifecycleIdentityActivation, wantActive bool) runtimepipeline.WorkflowTimerActivation {
 	t.Helper()
 	timers, err := selected.ListWorkflowTimerActivations(ctx, activation.RunID, activation.EntityID, true)
 	if err != nil {
 		t.Fatalf("list workflow timer activations: %v", err)
 	}
 	if wantActive {
-		if len(timers) != 1 || timers[0].Route.InstancePath != activation.FlowInstance || timers[0].EntityID != activation.EntityID {
+		if len(timers) != 1 || timers[0].RunID != activation.RunID || timers[0].Route.ScopeKey != "scout" || timers[0].Route.InstanceID != activation.InstanceID || timers[0].Route.InstancePath != activation.FlowInstance || timers[0].EntityID != activation.EntityID {
 			t.Fatalf("active timer identity = %#v, want one exact route/entity timer", timers)
 		}
-		return
+		if err := timers[0].Validate(); err != nil {
+			t.Fatalf("active review timer is not a valid canonical activation: %v", err)
+		}
+		return timers[0]
 	}
 	if len(timers) != 0 {
 		t.Fatalf("active timers after gate stage exit = %#v, want none", timers)
 	}
+	return runtimepipeline.WorkflowTimerActivation{}
 }
 
 func loadStageLifecycleJoin(t *testing.T, ctx context.Context, instance runtimepipeline.WorkflowInstance, batchID string) joinruntime.Activation {
 	t.Helper()
 	activation, ok := findStageLifecycleJoin(t, ctx, instance, batchID)
 	if !ok {
-		t.Fatalf("load singleton join %q: activation is missing", batchID)
+		t.Fatalf("load keyed join %q: activation is missing", batchID)
 	}
 	return activation
 }
@@ -602,7 +729,7 @@ func loadStageLifecycleJoin(t *testing.T, ctx context.Context, instance runtimep
 func findStageLifecycleJoin(t *testing.T, ctx context.Context, instance runtimepipeline.WorkflowInstance, batchID string) (joinruntime.Activation, bool) {
 	t.Helper()
 	if instance.Fields["batch_id"] != batchID {
-		t.Fatalf("singleton business batch = %#v, want %q", instance.Fields["batch_id"], batchID)
+		t.Fatalf("keyed business batch = %#v, want %q", instance.Fields["batch_id"], batchID)
 	}
 	return findConformanceJoinActivation(t, ctx, instance, conformanceFlowPathNode(t, "scout", "scout-coordinator"), "scout.member.done", "awaiting", "awaiting")
 }

@@ -1,27 +1,24 @@
-portfolio-collector:
+portfolio-router:
   execution_type: system_node
   subscribes_to: [portfolio.setup, operating.reported]
+  produces: [period.setup, period.reported]
   event_handlers:
     portfolio.setup:
       data_accumulation:
         writes:
           - source_field: portfolio_id
             target_field: portfolio_id
-          - source_field: expected_operating_ids
-            target_field: expected_operating_ids
-          - source_field: period_id
-            target_field: period_id
-      advances_to: awaiting
+      emit:
+        event: period.setup
+        fields:
+          portfolio_id: ${payload.portfolio_id}
+          period_id: ${payload.period_id}
+          expected_operating_ids: ${payload.expected_operating_ids}
     operating.reported:
-      join:
-        stage: awaiting
-        members:
-          from: entity.expected_operating_ids
-        window:
-          from: entity.period_id
-        output: payload.revenue
-        on_complete:
-          advances_to: complete
-        timeout:
-          after: 5m
-          advances_to: failed
+      emit:
+        event: period.reported
+        fields:
+          portfolio_id: ${payload.portfolio_id}
+          period_id: ${payload.period_id}
+          operating_id: ${payload.operating_id}
+          revenue: ${payload.revenue}

@@ -26,6 +26,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -50,12 +51,6 @@ type fanInBarrierConformanceStore interface {
 	LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)
 }
 
-type fanInBarrierGenericScheduleWakeups struct{}
-
-func (fanInBarrierGenericScheduleWakeups) ReconcileWakeupWithRecovery(context.Context, string) (bool, error) {
-	return false, nil
-}
-
 type fanInBarrierRuntime struct {
 	bus         *runtimebus.EventBus
 	diagnostics *fanInBarrierDiagnosticBus
@@ -63,6 +58,7 @@ type fanInBarrierRuntime struct {
 	manager     *runtimemanager.AgentManager
 	workOwner   *worklifetime.RuntimeOccurrence
 	grant       runtimestartupownership.LiveGenerationGrant
+	schedules   *runtimegenericschedule.Lifecycle
 }
 
 type fanInBarrierDiagnosticBus struct {
@@ -123,17 +119,23 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 			seedFanInBarrierRun(t, ctx, backend, db, runID)
 			runtime := newFanInBarrierRuntime(t, backend, db, source)
-			seedFanInBarrierPortfolioShell(t, ctx, runtime.pipeline, bundle, runtimeflowidentity.EntityID("portfolio"))
 			const periodID = "2026-Q3"
+			const portfolioID = "portfolio-one"
 			memberA := uuid.NewString()
 			memberB := uuid.NewString()
 
-			publishFanInBarrierEvent(t, ctx, runtime.bus, source, uuid.NewString(), "portfolio", "portfolio.setup", map[string]any{
-				"portfolio_id":           "portfolio",
+			setupID := uuid.NewString()
+			publishFanInBarrierEvent(t, ctx, runtime.bus, source, setupID, ".", "portfolio.setup", map[string]any{
+				"portfolio_id":           portfolioID,
 				"expected_operating_ids": []string{memberA, memberB},
 				"period_id":              periodID,
 			})
-			portfolio := loadFanInBarrierPortfolio(t, ctx, runtime.pipeline)
+			portfolio := loadFanInBarrierPortfolio(t, ctx, runtime.pipeline, periodID)
+			setupRoutes, err := backend.ListEventDeliveryRoutes(ctx, setupID)
+			if err != nil || len(setupRoutes) != 1 || setupRoutes[0].Target.Route().FlowID != "portfolio" {
+				t.Fatalf("root-to-portfolio setup ownership: routes=%#v err=%v", setupRoutes, err)
+			}
+			parentTarget := setupRoutes[0].Target.Route()
 			if portfolio.CurrentState != "awaiting" {
 				dumpFanInBarrierEvents(t, ctx, backend, db)
 				t.Logf("fan-in runtime diagnostics: %#v", runtime.diagnostics.snapshot())
@@ -146,10 +148,11 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 			}
 
 			publishFanInBarrierEvent(t, ctx, runtime.bus, source, memberB, "ingress", "operating.report.requested", map[string]any{
-				"period_id": periodID,
-				"revenue":   22,
+				"portfolio_id": portfolioID,
+				"period_id":    periodID,
+				"revenue":      22,
 			})
-			portfolio = loadFanInBarrierPortfolio(t, ctx, runtime.pipeline)
+			portfolio = loadFanInBarrierPortfolio(t, ctx, runtime.pipeline, periodID)
 			activation = loadFanInBarrierActivation(t, ctx, portfolio, periodID)
 			if !activation.JoinRef().Equal(retainedJoinRef) {
 				t.Fatal("partial arrival changed the retained barrier arm")
@@ -164,6 +167,9 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 			if err := runtime.manager.Shutdown(); err != nil {
 				t.Fatalf("retire predecessor fan-in manager: %v", err)
 			}
+			if err := runtime.schedules.Stop(ctx); err != nil {
+				t.Fatalf("retire predecessor join scheduling: %v", err)
+			}
 			if _, err := runtime.workOwner.RetireAndWait(ctx); err != nil {
 				t.Fatalf("join predecessor fan-in work: %v", err)
 			}
@@ -172,25 +178,72 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 			}
 			runtime = newFanInBarrierRuntime(t, backend, db, source, 2)
 			publishFanInBarrierEvent(t, ctx, runtime.bus, source, memberA, "ingress", "operating.report.requested", map[string]any{
-				"period_id": periodID,
-				"revenue":   11,
+				"portfolio_id": portfolioID,
+				"period_id":    periodID,
+				"revenue":      11,
 			})
-			portfolio = loadFanInBarrierPortfolio(t, ctx, runtime.pipeline)
-			activation = loadFanInBarrierActivation(t, ctx, portfolio, periodID)
+			deadline := time.Now().Add(10 * time.Second)
+			for {
+				portfolio = loadFanInBarrierPortfolio(t, ctx, runtime.pipeline, periodID)
+				activation = loadFanInBarrierActivation(t, ctx, portfolio, periodID)
+				if portfolio.CurrentState == "complete" || !time.Now().Before(deadline) {
+					break
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
 			if !activation.JoinRef().Equal(retainedJoinRef) {
 				t.Fatal("restart changed the retained barrier arm")
 			}
-			requireFanInBarrierReportTargets(t, ctx, backend, db, 2, events.RouteIdentity{
-				FlowID: "portfolio", FlowInstance: "portfolio", EntityID: runtimeflowidentity.EntityID("portfolio"),
-			})
+			requireFanInBarrierReportTargets(t, ctx, backend, db, 2, parentTarget, conformanceNode(t, "portfolio", "portfolio-router").Key())
+			requireA2NestedPeriodReadback(t, ctx, backend, db, parentTarget, portfolio)
 			if portfolio.CurrentState != "complete" || activation.Status != joinruntime.StatusClosed || activation.CloseReason != joinruntime.CloseReasonComplete {
 				t.Fatalf("completed barrier = state:%s activation:%#v", portfolio.CurrentState, activation)
 			}
 			results, err := activation.Results()
-			if err != nil || len(results) != 2 || results[0] != float64(11) || results[1] != float64(22) {
+			if err != nil || len(results) != 2 || results[0] != int64(11) || results[1] != int64(22) {
 				t.Fatalf("barrier results = %#v err=%v, want declared membership order [11 22]", results, err)
 			}
 		})
+	}
+}
+
+func requireA2NestedPeriodReadback(t *testing.T, ctx context.Context, backend fanInBarrierConformanceStore, db *sql.DB, parent events.RouteIdentity, period runtimepipeline.WorkflowInstance) {
+	t.Helper()
+	query := `SELECT event_id::text FROM events WHERE event_name LIKE $1 ORDER BY created_at, event_id`
+	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
+		query = `SELECT event_id FROM events WHERE event_name LIKE ? ORDER BY created_at, event_id`
+	}
+	rows, err := db.QueryContext(ctx, query, "%period.reported")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil || len(ids) != 2 {
+		t.Fatalf("forwarded period arrivals: ids=%#v err=%v", ids, err)
+	}
+	want := (events.RouteIdentity{FlowID: "portfolio/period", FlowInstance: period.StorageRef, EntityID: period.EntityID}).Normalized()
+	for _, id := range ids {
+		view, err := backend.LoadOperatorEvent(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		event, err := view.EventSnapshot()
+		if err != nil || event.SourceRoute().Normalized() != parent.Normalized() || event.TargetRoute().Normalized() != want || len(view.Deliveries) != 1 || len(view.DeadLetters) != 0 {
+			t.Fatalf("nested parent-to-period readback: event=%#v view=%#v err=%v", event, view, err)
+		}
+		if delivery := view.Deliveries[0]; delivery.SubscriberID != conformanceNode(t, "portfolio/period", "portfolio-collector").Key() || delivery.Target.EntityID != period.EntityID || delivery.Target.FlowInstance != period.StorageRef || delivery.Target.FlowID != "portfolio/period" {
+			t.Fatalf("nested selected receiver drifted: %#v", delivery)
+		}
 	}
 }
 
@@ -328,7 +381,7 @@ func testFanInSingletonRoutePersistsExactSelectedOwnerOnBothBackends(t *testing.
 	repoRoot := canonicalrouting.RepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
 		repoRoot,
-		canonicalrouting.ExampleRoot(t, canonicalrouting.FanInBarrier),
+		canonicalrouting.ExampleRoot(t, canonicalrouting.FanInStream),
 		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
 	)
 	if err != nil {
@@ -363,13 +416,13 @@ func testFanInSingletonRoutePersistsExactSelectedOwnerOnBothBackends(t *testing.
 			seedFanInBarrierRun(t, ctx, backend, db, runID)
 			selectedOwner := eventtest.UUID("fan-in-selected-owner-" + tc.name)
 			selectedTarget := events.RouteIdentity{
-				FlowID: "portfolio", FlowInstance: "portfolio", EntityID: selectedOwner,
+				FlowID: "portfolio", FlowInstance: "portfolio/selected-period", EntityID: selectedOwner,
 			}.Normalized()
 			seedRuntime := newFanInBarrierRuntime(t, backend, db, source)
-			seedFanInBarrierPortfolioShell(t, ctx, seedRuntime.pipeline, bundle, selectedOwner)
-			requireSelectedRunTargetOwner(t, ctx, backend, runID, "portfolio", selectedOwner)
+			seedFanInBarrierPortfolioShell(t, ctx, seedRuntime.bus, seedRuntime.manager, source, selectedOwner)
+			requireSelectedRunTargetOwner(t, ctx, backend, runID, "portfolio/selected-period", selectedOwner)
 
-			proofBus := newFanInBarrierRouteProofBus(t, backend, source)
+			proofBus := newFanInBarrierRouteProofBus(t, backend, source, seedRuntime.manager)
 			eventID := uuid.NewString()
 			sourceRoute := events.RouteIdentity{
 				FlowID: "operating", FlowInstance: "operating/proof-instance",
@@ -406,7 +459,7 @@ func testFanInSingletonRoutePersistsExactSelectedOwnerOnBothBackends(t *testing.
 			}
 
 			removeFanInBarrierSelectedOwner(t, ctx, backend, db, runID, selectedOwner)
-			restartedBus := newFanInBarrierRouteProofBus(t, backend, source)
+			restartedBus := newFanInBarrierRouteProofBus(t, backend, source, seedRuntime.manager)
 			restartedSink := newFanInBarrierRouteProofSink(t, ctx, restartedBus, eventType)
 			if inserted := commitFanInBarrierEnginePublication(t, ctx, backend, restartedBus, event); inserted {
 				t.Fatal("exact duplicate fan-in proof publication was inserted again")
@@ -484,12 +537,14 @@ func (s *fanInBarrierRouteProofSink) close(restart bool) error {
 	return err
 }
 
-func newFanInBarrierRouteProofBus(t *testing.T, backend fanInBarrierConformanceStore, source semanticview.Source) *runtimebus.EventBus {
+func newFanInBarrierRouteProofBus(t *testing.T, backend fanInBarrierConformanceStore, source semanticview.Source, manager *runtimemanager.AgentManager) *runtimebus.EventBus {
 	t.Helper()
 	eventBus, err := newScopedTestEventBus(t, backend, durableConformanceEventBusOptions(backend, runtimebus.EventBusOptions{
-		ContractBundle: source,
-		WorkOwner:      conformanceTestRuntimeOccurrence(t, authorActivityTestSourceArtifactFact.BundleHash()),
-	}))
+		ContractBundle:          source,
+		WorkOwner:               conformanceTestRuntimeOccurrence(t, authorActivityTestSourceArtifactFact.BundleHash()),
+		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(manager.PrepareFlowInstanceActivation),
+		FlowActivationFinalizer: runtimepipeline.CommittedFlowInstanceActivationFinalizerFunc(manager.FinalizeCommittedFlowInstanceActivation),
+	}), "platform.join_complete", "platform.join_timeout")
 	if err != nil {
 		t.Fatalf("create fan-in route proof EventBus: %v", err)
 	}
@@ -645,9 +700,9 @@ func requireFanInBarrierPublicRouteProof(
 
 func removeFanInBarrierSelectedOwner(t *testing.T, ctx context.Context, backend fanInBarrierConformanceStore, db *sql.DB, runID, entityID string) {
 	t.Helper()
-	query := `DELETE FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid AND flow_instance = 'portfolio'`
+	query := `DELETE FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid AND flow_instance = 'portfolio/selected-period'`
 	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		query = `DELETE FROM entity_state WHERE run_id = ? AND entity_id = ? AND flow_instance = 'portfolio'`
+		query = `DELETE FROM entity_state WHERE run_id = ? AND entity_id = ? AND flow_instance = 'portfolio/selected-period'`
 	}
 	result, err := db.ExecContext(ctx, query, runID, entityID)
 	if err != nil {
@@ -716,10 +771,25 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 			}
 			return manager.FinalizeCommittedFlowInstanceActivation(ctx, committed)
 		}),
-	}))
+	}), "platform.join_complete", "platform.join_timeout")
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	scheduleStore, ok := backend.(runtimegenericschedule.Store)
+	if !ok {
+		t.Fatalf("store %T lacks canonical join schedule persistence", backend)
+	}
+	schedules, err := runtimegenericschedule.NewLifecycle(scheduleStore,
+		runtimepipeline.NewSchedulerWithWorkOwner(workOwner), eventBus, eventBus.EngineDispatcher(),
+		notifyAllChildrenGenericScheduleLogger{t: t}, executionposture.Live)
+	if err != nil {
+		t.Fatalf("construct exact join scheduling: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := schedules.Stop(context.Background()); err != nil {
+			t.Errorf("stop exact join scheduling: %v", err)
+		}
+	})
 	for _, route := range mustFanInBarrierRoutes(t, backend) {
 		if err := flowroutefixture.Publish(eventBus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: route.Identity}); err != nil {
 			t.Fatalf("restore fan-in route %s: %v", route.Identity.Route.InstancePath, err)
@@ -749,7 +819,7 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 		HumanTaskExpiry:         backend,
 		DeliveryRuntime:         eventBus,
 		FlowRoutes:              eventBus,
-		GenericSchedules:        fanInBarrierGenericScheduleWakeups{}, ReceiverExecution: eventreceiver.NormalExecution(),
+		GenericSchedules:        schedules, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 
 	lifecycle := &notifyAllChildrenLifecycleOwner{}
@@ -821,7 +891,10 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 	if _, err := grant.AdmitExecution(ctx); err != nil {
 		t.Fatalf("admit fan-in conformance execution: %v", err)
 	}
-	return fanInBarrierRuntime{bus: eventBus, diagnostics: diagnosticBus, pipeline: coordinator, manager: manager, workOwner: workOwner, grant: grant}
+	if _, err := schedules.Restore(ctx); err != nil {
+		t.Fatalf("restore exact retained join scheduling: %v", err)
+	}
+	return fanInBarrierRuntime{bus: eventBus, diagnostics: diagnosticBus, pipeline: coordinator, manager: manager, workOwner: workOwner, grant: grant, schedules: schedules}
 }
 
 func seedFanInBarrierRun(t *testing.T, ctx context.Context, backend fanInBarrierConformanceStore, db *sql.DB, runID string) {
@@ -833,23 +906,31 @@ func seedFanInBarrierRun(t *testing.T, ctx context.Context, backend fanInBarrier
 	}
 }
 
-func seedFanInBarrierPortfolioShell(t *testing.T, ctx context.Context, pipeline *runtimepipeline.PipelineCoordinator, bundle *runtimecontracts.WorkflowContractBundle, entityID string) {
+func seedFanInBarrierPortfolioShell(t *testing.T, ctx context.Context, eventBus *runtimebus.EventBus, manager *runtimemanager.AgentManager, source semanticview.Source, entityID string) {
 	t.Helper()
 	enteredAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	if _, err := pipeline.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimeflowidentity.RunScopedFlowInstance{RunID: runtimecorrelation.RunIDFromContext(ctx), Route: runtimeflowidentity.RouteForInstancePath("portfolio")}, runtimepipeline.WorkflowInstance{
-		InstanceID:      "portfolio",
-		StorageRef:      "portfolio",
-		EntityID:        entityID,
-		InstanceKind:    "singleton",
-		WorkflowName:    "portfolio",
-		WorkflowVersion: bundle.WorkflowVersion(),
-		CurrentState:    "collecting",
-		EnteredStageAt:  enteredAt,
-		CreatedAt:       enteredAt,
-		Fields:          map[string]any{"portfolio_id": "portfolio"},
-		EntityType:      "portfolio_state",
-	}, enteredAt); err != nil {
-		t.Fatalf("seed portfolio singleton identity shell: %v", err)
+	trigger := eventtest.ExistingRunRootIngress(uuid.NewString(), "portfolio.setup", "operator", "", []byte(`{}`), 0,
+		runtimecorrelation.RunIDFromContext(ctx), events.EventEnvelope{}, enteredAt)
+	plan, err := manager.PrepareFlowInstanceActivation(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimepipeline.FlowInstanceActivationRequest{
+		ContractBundle: source,
+		Instance: runtimeflowidentity.Instance{
+			TemplateID: "portfolio", ScopeKey: "portfolio", InstanceID: "selected-period",
+			InstancePath: "portfolio/selected-period", EntityID: entityID,
+			HasStoredPath: true,
+		},
+		Fields:       map[string]any{"period_id": "2026-Q3"},
+		Config:       map[string]any{"period_id": "2026-Q3"},
+		TriggerEvent: trigger, OccurredAt: enteredAt,
+	})
+	if err != nil {
+		t.Fatalf("construct selected keyed portfolio through activation owner: %v", err)
+	}
+	committed, err := eventBus.CommitFlowInstanceActivation(ctx, plan)
+	if err != nil || !committed.Acknowledged {
+		t.Fatalf("commit selected keyed portfolio: acknowledged=%v err=%v", committed.Acknowledged, err)
+	}
+	if err := manager.FinalizeCommittedFlowInstanceActivation(ctx, committed); err != nil {
+		t.Fatalf("finalize selected keyed portfolio readiness: %v", err)
 	}
 }
 
@@ -860,6 +941,7 @@ func requireFanInBarrierReportTargets(
 	db *sql.DB,
 	wantCount int,
 	wantTarget events.RouteIdentity,
+	wantRecipient string,
 ) {
 	t.Helper()
 	query := `SELECT event_id::text FROM events WHERE event_name LIKE $1 ORDER BY created_at, event_id`
@@ -893,7 +975,7 @@ func requireFanInBarrierReportTargets(
 		}
 		matched := false
 		for _, route := range routes {
-			if route.Recipient.ID() == conformanceNode(t, "portfolio", "portfolio-collector").Key() && route.Target.Route().Normalized() == wantTarget.Normalized() {
+			if route.Recipient.ID() == wantRecipient && route.Target.Route().Normalized() == wantTarget.Normalized() {
 				matched = true
 			}
 		}
@@ -954,26 +1036,30 @@ func publishFanInBarrierEvent(t *testing.T, ctx context.Context, eventBus *runti
 		}),
 		eventtest.StaticFlowRoutingSource(flowID, flowID, runtimeflowidentity.EntityID(flowID)), time.Now().UTC(),
 	)
-	if err := eventBus.PublishAcknowledged(ctx, evt); err != nil {
-		t.Fatalf("PublishAcknowledged(%s): %v", localEvent, err)
+	if flowID == "." {
+		evt = eventtest.ExistingRunRootIngress(eventID, events.EventType(localEvent), "operator", "", raw, 0,
+			runtimecorrelation.RunIDFromContext(ctx), events.EventEnvelope{}, time.Now().UTC())
 	}
-	waitCtx, cancel := context.WithTimeout(testAuthorActivityContext(context.Background()), 10*time.Second)
+	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if err := eventBus.WaitForQuiescence(waitCtx); err != nil {
-		t.Fatalf("WaitForQuiescence(%s): %v", localEvent, err)
+	if err := eventBus.PublishAndWait(waitCtx, evt); err != nil {
+		t.Fatalf("PublishAndWait(%s): %v", localEvent, err)
 	}
 }
 
-func loadFanInBarrierPortfolio(t *testing.T, ctx context.Context, pipeline *runtimepipeline.PipelineCoordinator) runtimepipeline.WorkflowInstance {
+func loadFanInBarrierPortfolio(t *testing.T, ctx context.Context, pipeline *runtimepipeline.PipelineCoordinator, periodID string) runtimepipeline.WorkflowInstance {
 	t.Helper()
-	instance, ok, err := pipeline.Load(ctx, runtimeflowidentity.RunScopedFlowInstance{
-		RunID: runtimecorrelation.RunIDFromContext(ctx),
-		Route: runtimeflowidentity.RouteForInstancePath("portfolio"),
-	})
-	if err != nil || !ok {
-		t.Fatalf("load portfolio = found:%v err:%v", ok, err)
+	instances, err := pipeline.ListWorkflowInstances(ctx, runtimecorrelation.RunIDFromContext(ctx))
+	var matches []runtimepipeline.WorkflowInstance
+	for _, instance := range instances {
+		if instance.WorkflowName == "portfolio/period" && instance.Fields["period_id"] == periodID {
+			matches = append(matches, instance)
+		}
 	}
-	return instance
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("load exact portfolio period %s: matches=%#v all=%#v err=%v", periodID, matches, instances, err)
+	}
+	return matches[0]
 }
 
 func loadFanInBarrierActivation(t *testing.T, ctx context.Context, instance runtimepipeline.WorkflowInstance, periodID string) joinruntime.Activation {
@@ -981,7 +1067,7 @@ func loadFanInBarrierActivation(t *testing.T, ctx context.Context, instance runt
 	if instance.Fields["period_id"] != periodID {
 		t.Fatalf("portfolio business period = %#v, want %q", instance.Fields["period_id"], periodID)
 	}
-	activation, ok := findConformanceJoinActivation(t, ctx, instance, conformanceNode(t, "portfolio", "portfolio-collector"), "operating.reported", "awaiting", "awaiting")
+	activation, ok := findConformanceJoinActivation(t, ctx, instance, conformanceNode(t, "portfolio/period", "portfolio-collector"), "period.reported", "awaiting", "awaiting")
 	if !ok {
 		t.Fatalf("load portfolio barrier activation for %q: arm missing", periodID)
 	}

@@ -2,14 +2,15 @@ package bootverify
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatefanin"
 )
 
 func TestRun_AllowsParentCompositionConnectAsVerifyRouteProof(t *testing.T) {
@@ -236,7 +237,6 @@ func TestCanonicalResolutionAdmissionBlocksOutOfModeFromBeforeBootVerification(t
 		name string
 		root func(testing.TB) string
 	}{
-		{name: "fan-in", root: canonicalrouting.CopyFanInWithInertFrom},
 		{name: "reply", root: canonicalrouting.CopyTemplateReplyWithInertFrom},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -328,193 +328,105 @@ func TestRun_ValidatesAuthoritativeInstanceSourceTypeMatrix(t *testing.T) {
 	}
 }
 
-func TestRun_AllowsFanInStreamInputResolution(t *testing.T) {
-	tests := []struct {
-		name string
-		opts templatefanin.Options
-	}{
-		{name: "payload field dedup", opts: templatefanin.Options{}},
-		{name: "event id dedup", opts: templatefanin.Options{EventIDDedup: true}},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			source := templatefanin.LoadSource(t, tc.opts)
-
-			report := Run(context.Background(), source, Options{})
-
-			if got := reportContains(report.Errors(), "composition_connect_validation", "fan-in"); got {
-				t.Fatalf("fan-in stream fixture composition_connect_validation errors = %#v, want none", report.Errors())
-			}
-		})
-	}
-}
-
-func TestRun_FailsClosedForInvalidFanInStreamInputResolution(t *testing.T) {
-	tests := []struct {
-		name string
-		opts templatefanin.Options
-		want string
-	}{
-		{name: "missing dedup", opts: templatefanin.Options{MissingDedup: true}, want: "requires dedup_by"},
-		{name: "dedup tuple", opts: templatefanin.Options{DedupTuple: true}, want: "supports exactly one dedup_by field"},
-		{name: "missing window", opts: templatefanin.Options{MissingWindow: true}, want: "requires window"},
-		{name: "missing singleton", opts: templatefanin.Options{MissingSingleton: true}, want: "requires explicit singleton"},
-		{name: "wrong singleton", opts: templatefanin.Options{WrongSingleton: true}, want: "must be the receiver singleton route or a child"},
-		{name: "non-singleton receiver", opts: templatefanin.Options{NonSingletonReceiver: true}, want: "has a template instance key"},
-		{name: "missing receiver handler", opts: templatefanin.Options{MissingReceiverHandler: true}, want: "has no handler for fan-in input event operating.reported"},
-		{name: "missing accumulate", opts: templatefanin.Options{MissingAccumulate: true}, want: "for fan-in input must declare accumulate"},
-		{name: "accumulator dedup redeclaration", opts: templatefanin.Options{AccumulateDedupMismatch: true}, want: "accumulate.dedup_by \"payload.period_id\" must not redeclare fan-in dedup_by"},
-		{name: "accumulator window redeclaration", opts: templatefanin.Options{AccumulateWindowMismatch: true}, want: "accumulate.window \"payload.operating_id\" must not redeclare fan-in window"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			source := templatefanin.LoadSource(t, tc.opts)
-
-			report := Run(context.Background(), source, Options{})
-
-			if !reportContains(report.Errors(), "composition_connect_validation", tc.want) {
-				t.Fatalf("expected fan-in composition_connect_validation %q, got %#v", tc.want, report.Errors())
-			}
-		})
-	}
-}
-
-func TestFanInBarrierCanonicalBundlePassesStrictVerify(t *testing.T) {
-	bundle := loadFanInBarrierBundle(t)
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-	if findings := report.HardInvalidities(); len(findings) != 0 {
-		t.Fatalf("canonical fan-in barrier hard invalidities: %#v", findings)
-	}
-}
-
-func TestFanInBarrierRejectsAuthoredDerivedJoinFields(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		mutation canonicalrouting.FanInNegativeMutation
-		want     string
-	}{
-		{name: "members by", mutation: canonicalrouting.FanInAuthoredMembersBy, want: "join.members.by derives from resolution.dedup_by (payload.operating_id); remove authored by"},
-		{name: "window by", mutation: canonicalrouting.FanInAuthoredWindowBy, want: "join.window.by derives from resolution.window (payload.period_id); remove authored by"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			report := runFanInBarrierMutation(t, tc.mutation)
-			if !reportContains(report.Errors(), "composition_connect_validation", tc.want) {
-				t.Fatalf("expected teaching diagnostic %q, got %#v", tc.want, report.Errors())
-			}
-		})
-	}
-}
-
-func TestFanInBarrierRequiresExactlyOneJoinRow(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		mutation canonicalrouting.FanInNegativeMutation
-		want     []string
-	}{
-		{
-			name:     "zero matches",
-			mutation: canonicalrouting.FanInMissingJoinRow,
-			want:     []string{"requires exactly one handler.join row", "members.from, output, on_complete, and timeout"},
-		},
-		{
-			name:     "multiple matches",
-			mutation: canonicalrouting.FanInMultipleJoinRows,
-			want:     []string{"matches multiple join rows", "portfolio-collector-duplicate.operating.reported", "use distinct events or distinct stages per join"},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			report := runFanInBarrierMutation(t, tc.mutation)
-			for _, want := range tc.want {
-				if !reportContains(report.Errors(), "composition_connect_validation", want) {
-					t.Fatalf("expected exact-association diagnostic %q, got %#v", want, report.Errors())
-				}
-			}
-		})
-	}
-}
-
-func TestFanInBarrierRequiresSinglePayloadMemberIdentity(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		mutation canonicalrouting.FanInNegativeMutation
-		want     string
-	}{
-		{name: "event identity", mutation: canonicalrouting.FanInEventIDDedup, want: "event.id cannot appear in expected members"},
-		{name: "composite identity", mutation: canonicalrouting.FanInDedupTuple, want: "supports exactly one dedup_by field"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			report := runFanInBarrierMutation(t, tc.mutation)
-			if !reportContains(report.Errors(), "composition_connect_validation", tc.want) {
-				t.Fatalf("expected member-identity diagnostic %q, got %#v", tc.want, report.Errors())
-			}
-		})
-	}
-}
-
-func TestFanInBarrierWindowRequirementUsesStageReentrancy(t *testing.T) {
-	t.Run("non reentrant stage may omit window", func(t *testing.T) {
-		report := runFanInBarrierMutation(t, canonicalrouting.FanInBarrierNoWindow)
-		if findings := report.HardInvalidities(); len(findings) != 0 {
-			t.Fatalf("non-reentrant barrier without window hard invalidities: %#v", findings)
-		}
-	})
-	t.Run("reentrant stage requires window", func(t *testing.T) {
-		report := runFanInBarrierMutation(t, canonicalrouting.FanInBarrierReentrantNoWindow)
-		for _, want := range []string{"add resolution.window", "make the stage provably non-reentrant"} {
-			if !reportContains(report.Errors(), "join_validation", want) {
-				t.Fatalf("expected reentrancy remediation %q, got %#v", want, report.Errors())
-			}
-		}
-	})
-}
-
-func TestFanInAggregationSelectsExactlyOneRuntimeOwner(t *testing.T) {
-	t.Run("stream requires accumulator", func(t *testing.T) {
-		source := templatefanin.LoadSource(t, templatefanin.Options{MissingAccumulate: true})
-		report := Run(context.Background(), source, Options{})
-		if !reportContains(report.Errors(), "composition_connect_validation", "must declare accumulate") {
-			t.Fatalf("stream fan-in accepted without accumulator: %#v", report.Errors())
-		}
-	})
-	t.Run("barrier rejects accumulator", func(t *testing.T) {
-		report := runFanInBarrierMutation(t, canonicalrouting.FanInBarrierWithAccumulate)
-		if !reportContains(report.Errors(), "composition_connect_validation", "use handler.join as the sole finite-barrier owner") {
-			t.Fatalf("barrier fan-in accepted accumulator: %#v", report.Errors())
-		}
-	})
-}
-
-func loadFanInBarrierBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
-	t.Helper()
+func TestRun_KeyedPortfolioStreamUsesOrdinaryConnectAndAccumulator(t *testing.T) {
 	repoRoot := repoRootForBootverifyTest(t)
-	return loadFixtureBundleAt(t, repoRoot, canonicalrouting.ExampleRoot(t, canonicalrouting.FanInBarrier), runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-}
-
-func runFanInBarrierMutation(t *testing.T, mutation canonicalrouting.FanInNegativeMutation) Report {
-	t.Helper()
-	repoRoot := repoRootForBootverifyTest(t)
-	root := canonicalrouting.CopyExample(t, canonicalrouting.FanInBarrier)
-	if mutation == canonicalrouting.FanInMultipleJoinRows {
-		bundle := loadFixtureBundleAt(t, repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-		applyFanInMultipleJoinPlan(t, bundle)
-		return Run(context.Background(), semanticview.Wrap(bundle), Options{})
-	}
-	canonicalrouting.ApplyFanInNegativeMutation(t, root, mutation)
+	root := canonicalrouting.ExampleRoot(t, canonicalrouting.FanInStream)
 	bundle := loadFixtureBundleAt(t, repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	return Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	source := semanticview.Wrap(bundle)
+	if findings := Run(context.Background(), source, Options{}).HardInvalidities(); len(findings) != 0 {
+		t.Fatalf("keyed portfolio stream hard invalidities: %#v", findings)
+	}
+	assertOrdinaryPortfolioInput(t, source, "portfolio", "operating.reported", "period_id", runtimecontracts.FlowInputResolutionModeSelectOrCreate)
+	handler, ok := source.ExecutableNodeEventHandler(identitytest.FlowNode(t, "portfolio", "portfolio-collector"), "operating.reported")
+	if !ok || handler.Accumulate == nil || handler.Accumulate.Into != "operating_reports" || handler.Accumulate.From != "payload" || handler.Accumulate.Key != "payload.operating_id" || handler.Join != nil {
+		t.Fatalf("stream must retain its own keyed accumulator, not a pin aggregation variant: %#v", handler)
+	}
+	if plans := source.WorkflowJoins(); len(plans) != 0 {
+		t.Fatalf("ordinary stream connection invented a finite join: %#v", plans)
+	}
 }
 
-func applyFanInMultipleJoinPlan(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) {
-	t.Helper()
-	for _, plan := range bundle.Semantics.Joins {
-		if plan.Node.FlowPath() == "portfolio" && plan.Node.NodeID() == "portfolio-collector" && plan.HandlerEvent == "operating.reported" {
-			plan.Node = identitytest.FlowNode(t, "portfolio", "portfolio-collector-duplicate")
-			bundle.Semantics.Joins = append(bundle.Semantics.Joins, plan)
-			return
-		}
+func TestRun_NestedPortfolioJoinUsesOrdinaryConnectAndAuthoredMembership(t *testing.T) {
+	repoRoot := repoRootForBootverifyTest(t)
+	root := canonicalrouting.ExampleRoot(t, canonicalrouting.FanInBarrier)
+	bundle := loadFixtureBundleAt(t, repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	source := semanticview.Wrap(bundle)
+	if findings := Run(context.Background(), source, Options{}).HardInvalidities(); len(findings) != 0 {
+		t.Fatalf("nested portfolio join hard invalidities: %#v", findings)
 	}
-	t.Fatal("canonical portfolio join plan is unavailable")
+	assertOrdinaryPortfolioInput(t, source, "portfolio", "operating.reported", "portfolio_id", runtimecontracts.FlowInputResolutionModeSelect)
+	assertOrdinaryPortfolioInput(t, source, "portfolio/period", "period.setup", "period_id", runtimecontracts.FlowInputResolutionModeCreate)
+	assertOrdinaryPortfolioInput(t, source, "portfolio/period", "period.reported", "period_id", runtimecontracts.FlowInputResolutionModeSelect)
+	plans := source.WorkflowJoins()
+	if len(plans) != 1 {
+		t.Fatalf("expected one intrinsic arrival join, got %#v", plans)
+	}
+	plan := plans[0]
+	if plan.Node.FlowPath() != "portfolio/period" || plan.Node.NodeID() != "portfolio-collector" || plan.HandlerEvent != "period.reported" || plan.Mode != runtimecontracts.WorkflowJoinModeArrival {
+		t.Fatalf("join ownership must stay on the nested period handler: %#v", plan)
+	}
+	if plan.Spec.Members.From != "state.expected_operating_ids" || plan.Spec.Members.By != "payload.operating_id" || plan.Spec.Members.Count != nil || plan.Spec.Output != "payload.revenue" {
+		t.Fatalf("join membership and output must come from the handler: %#v", plan.Spec)
+	}
+	if plan.Spec.Stage != "awaiting" || plan.Spec.OnComplete.AdvancesTo != "complete" || plan.Spec.Deadline == nil || plan.Spec.Deadline.After != "5m" || plan.Spec.Deadline.From != runtimecontracts.JoinDeadlineFromStageEntry || plan.Spec.OnDeadline.AdvancesTo != "failed" {
+		t.Fatalf("join must retain its lifecycle-owned closure and deadline: %#v", plan.Spec)
+	}
+	resultType, err := plan.ResultType.Resolve()
+	if err != nil || resultType.Kind != runtimecontracts.CatalogTypeInteger {
+		t.Fatalf("join must retain the event's integer result type: %#v, err=%v", resultType, err)
+	}
+}
+
+func assertOrdinaryPortfolioInput(t *testing.T, source semanticview.Source, flowID, eventType, key string, mode runtimecontracts.FlowInputResolutionMode) {
+	t.Helper()
+	pin, ok := source.FlowInputEventPin(flowID, eventType)
+	if !ok || !pin.Resolution().Empty() {
+		t.Fatalf("input %s/%s must be an ordinary boundary without pin resolution: %#v", flowID, eventType, pin)
+	}
+	graph := runtimepinrouting.CompileConnectGraph(source)
+	if issues := graph.Issues(); len(issues) != 0 {
+		t.Fatalf("ordinary composition failed to compile: %#v", issues)
+	}
+	plans := graph.PlansToInputPin(flowID, pin)
+	if len(plans) != 1 || plans[0].ResolutionKind() != runtimepinrouting.ConnectResolutionInstanceKey || plans[0].InstanceKey() == nil {
+		t.Fatalf("input %s/%s must have exactly one keyed ordinary connect: %#v", flowID, eventType, plans)
+	}
+	instance := plans[0].InstanceKey().Readback()
+	if plans[0].InstanceKey().Mode() != mode || instance.Field != key || instance.SourcePath != "payload."+key {
+		t.Fatalf("input %s/%s instance policy = %#v, want %s by payload.%s", flowID, eventType, instance, runtimecontracts.FlowInputResolutionModeCode(mode), key)
+	}
+	receiver := plans[0].ReceiverEndpoint().Readback()
+	if receiver.FlowPath != flowID || receiver.LocalEvent != eventType {
+		t.Fatalf("ordinary connection lost its exact receiver scope: %#v", receiver)
+	}
+}
+
+func TestCompositionSourceRejectsRetiredFanInGrammarBeforeBoot(t *testing.T) {
+	t.Run("canonical retired specimen", func(t *testing.T) {
+		repoRoot := repoRootForBootverifyTest(t)
+		root := canonicalrouting.CopyRetiredFanInPin(t)
+		_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+		if err == nil || !strings.Contains(err.Error(), "portfolio/schema.yaml") || !strings.Contains(err.Error(), "resolution") {
+			t.Fatalf("retired canonical pin reached boot verification: %v", err)
+		}
+	})
+	for _, tc := range []struct {
+		name, schema, diagnostic string
+	}{
+		{"pin mode", "pins:\n  inputs:\n    events:\n      - event: report.received\n        resolution: {mode: fan-in}\n", "mode"},
+		{"legacy aggregate", "pins:\n  inputs:\n    events:\n      - event: report.received\n        resolution:\n          mode: fan-in\n          aggregation: stream\n          window: payload.period_id\n          dedup_by: [payload.member_id]\n          singleton: collector\n", "resolution"},
+		{"connect mode", "connect:\n  - {event: report.received, from: producer, to: collector, resolution: fan-in}\n", "connect.resolution"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repoRoot := repoRootForBootverifyTest(t)
+			root := t.TempDir()
+			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: retired-fan-in\n"+tc.schema)
+			_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+			if err == nil || !strings.Contains(err.Error(), "schema.yaml") || !strings.Contains(err.Error(), tc.diagnostic) {
+				t.Fatalf("retired fan-in grammar reached boot verification: err=%v, want source-local %q rejection", err, tc.diagnostic)
+			}
+		})
+	}
 }
 
 func TestRun_FailsClosedForInvalidParentCompositionConnect(t *testing.T) {

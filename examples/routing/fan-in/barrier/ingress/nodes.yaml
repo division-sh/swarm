@@ -7,5 +7,6 @@ ingress-node:
       emit:
         event: operating.report.requested
         fields:
+          portfolio_id: ${payload.portfolio_id}
           period_id: ${payload.period_id}
           revenue: ${payload.revenue}

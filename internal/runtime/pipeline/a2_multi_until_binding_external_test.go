@@ -459,8 +459,8 @@ pins:
   inputs: {events: [stop.requested]}
   outputs: {events: [halt.requested]}
 connect:
-  - {event: halt.requested, from: ., to: orders}
-  - {event: halt.requested, from: ., to: mirror}
+  - {event: halt.requested, from: ., to: orders, resolution: select}
+  - {event: halt.requested, from: ., to: mirror, resolution: select}
 `
 	files["events.yaml"] = "stop.requested:\n  order_id: text\nhalt.requested:\n  order_id: text\n"
 	files["nodes.yaml"] = `worker:
@@ -473,7 +473,6 @@ connect:
 `
 	for _, flow := range []string{"orders", "mirror"} {
 		files[flow+"/schema.yaml"] = fmt.Sprintf(`name: %s
-mode: template
 instance: order_id
 stages:
   awaiting: {initial: true}
@@ -483,7 +482,7 @@ stages:
 pins:
   inputs:
     events:
-      - {event: halt.requested, resolution: {mode: select}}
+      - halt.requested
 `, flow)
 		files[flow+"/entities.yaml"] = "order_state:\n  order_id: {type: text, indexed: true}\n  expected: \"[text]\"\n  halt_count: {type: integer, initial: 0}\n"
 		files[flow+"/events.yaml"] = "manual.abort:\ndispatch.completed:\nitem.completed:\n  member_id: text\n  result: JoinResult\nalternate.completed:\n  member_id: text\n  result: JoinResult\nhalt.observed:\n  order_id: text\n  count: integer\n"

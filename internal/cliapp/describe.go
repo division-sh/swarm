@@ -590,9 +590,6 @@ func routingResolutionDetail(resolution *routingtopology.Resolution) string {
 	if resolution.InstanceKey != nil {
 		return fmt.Sprintf(" field=%s source_kind=%s source=%s derived_from=%q", resolution.InstanceKey.Field, resolution.InstanceKey.SourceKind, resolution.InstanceKey.SourcePath, resolution.InstanceKey.DerivedFrom)
 	}
-	if resolution.FanIn != nil {
-		return fmt.Sprintf(" singleton=%s aggregation=%s window=%s dedup_by=%s", resolution.FanIn.Singleton, resolution.FanIn.Aggregation, resolution.FanIn.Window, strings.Join(resolution.FanIn.DedupBy, ","))
-	}
 	if resolution.Reply != nil {
 		return fmt.Sprintf(" reply=%s correlation=%s", resolution.Reply.Role, resolution.Reply.CorrelationKey)
 	}

@@ -443,8 +443,10 @@ seam_families:
       EventBus planning. #1494 classifies it as route authority input and guard
       surface; #1495 owns broader producer migration. #1545 adds an explicit
       ResolutionKind discriminant so static, scalar instance-key, reply, and
-      separately owned fan-in route authority are not selected by nil-field
-      ordering. Dynamic instance intent consists only of opaque
+      template-observer route authority are not selected by nil-field ordering.
+      #1994/#1949 retire the fan-in branch; portfolio streams and finite arrival
+      joins consume ordinary instance selection, not pin-owned join semantics.
+      Dynamic instance intent consists only of opaque
       TemplateInstanceField, typed FlowInputInstanceSource, and exhaustive
       FlowInputResolutionMode. The source-type owner resolves actual payload
       event-schema or intrinsic UUID evidence and validates any optional carry
@@ -492,7 +494,7 @@ seam_families:
       producer route when constructing output events. EventBus plans and issues,
       workflow-node connect localization, selected-contract frontier admission,
       route-history admission, agent-tool output construction, and supported
-      fan-in/reply/fan-out runtime proofs consume the same owner. RunForkPoint
+      keyed-stream/reply/fan-out runtime proofs consume the same owner. RunForkPoint
       carries the exact normalized source_route from the fixed revision so
       no-delivery selected history and dynamic instance evidence do not depend
       on PendingWork or event-name reconstruction. The event-aware wrapper also

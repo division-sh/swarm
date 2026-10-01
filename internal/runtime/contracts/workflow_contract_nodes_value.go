@@ -14,7 +14,7 @@ var guardOnFailEscalateFieldOptions = map[string]struct{}{
 }
 
 var accumulateFieldOptions = map[string]struct{}{
-	"into": {}, "from": {}, "description": {}, "window": {}, "dedup_by": {},
+	"into": {}, "from": {}, "description": {}, "key": {},
 }
 
 var fanOutFieldOptions = map[string]struct{}{

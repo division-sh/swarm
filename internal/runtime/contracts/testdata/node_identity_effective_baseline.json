@@ -281,13 +281,13 @@
         "From": ".",
         "To": "portfolio",
         "Rename": "",
-        "Resolution": 0,
+        "Resolution": 3,
         "KeyFrom": ""
       },
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 14,
+        "SourceLine": 15,
         "Event": "operating.report.requested",
         "From": "ingress",
         "To": "operating",
@@ -298,12 +298,34 @@
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 19,
+        "SourceLine": 20,
         "Event": "operating.reported",
         "From": "operating",
         "To": "portfolio",
         "Rename": "",
-        "Resolution": 0,
+        "Resolution": 2,
+        "KeyFrom": ""
+      },
+      {
+        "OwnerFlowPath": "portfolio",
+        "SourceFile": "portfolio/schema.yaml",
+        "SourceLine": 12,
+        "Event": "period.setup",
+        "From": ".",
+        "To": "period",
+        "Rename": "",
+        "Resolution": 1,
+        "KeyFrom": ""
+      },
+      {
+        "OwnerFlowPath": "portfolio",
+        "SourceFile": "portfolio/schema.yaml",
+        "SourceLine": 13,
+        "Event": "period.reported",
+        "From": ".",
+        "To": "period",
+        "Rename": "",
+        "Resolution": 2,
         "KeyFrom": ""
       }
     ],
@@ -332,6 +354,17 @@
                   "Raw": ""
                 },
                 "CEL": "payload.period_id"
+              },
+              "portfolio_id": {
+                "Kind": "cel",
+                "Literal": null,
+                "Ref": "",
+                "RefPath": {
+                  "Root": 0,
+                  "Segments": null,
+                  "Raw": ""
+                },
+                "CEL": "payload.portfolio_id"
               },
               "revenue": {
                 "Kind": "cel",
@@ -414,6 +447,17 @@
                 },
                 "CEL": "payload.period_id"
               },
+              "portfolio_id": {
+                "Kind": "cel",
+                "Literal": null,
+                "Ref": "",
+                "RefPath": {
+                  "Root": 0,
+                  "Segments": null,
+                  "Raw": ""
+                },
+                "CEL": "payload.portfolio_id"
+              },
               "revenue": {
                 "Kind": "cel",
                 "Literal": null,
@@ -459,8 +503,217 @@
           "Clear": null
         }
       },
-      "cG9ydGZvbGlv.cG9ydGZvbGlvLWNvbGxlY3Rvcg": {
+      "cG9ydGZvbGlv.cG9ydGZvbGlvLXJvdXRlcg": {
         "operating.reported": {
+          "Activity": {
+            "ID": "",
+            "Tool": "",
+            "Input": null,
+            "Approval": null
+          },
+          "CreateEntity": false,
+          "Description": "",
+          "Emit": {
+            "Event": "period.reported",
+            "From": "",
+            "Fields": {
+              "operating_id": {
+                "Kind": "cel",
+                "Literal": null,
+                "Ref": "",
+                "RefPath": {
+                  "Root": 0,
+                  "Segments": null,
+                  "Raw": ""
+                },
+                "CEL": "payload.operating_id"
+              },
+              "period_id": {
+                "Kind": "cel",
+                "Literal": null,
+                "Ref": "",
+                "RefPath": {
+                  "Root": 0,
+                  "Segments": null,
+                  "Raw": ""
+                },
+                "CEL": "payload.period_id"
+              },
+              "portfolio_id": {
+                "Kind": "cel",
+                "Literal": null,
+                "Ref": "",
+                "RefPath": {
+                  "Root": 0,
+                  "Segments": null,
+                  "Raw": ""
+                },
+                "CEL": "payload.portfolio_id"
+              },
+              "revenue": {
+                "Kind": "cel",
+                "Literal": null,
+                "Ref": "",
+                "RefPath": {
+                  "Root": 0,
+                  "Segments": null,
+                  "Raw": ""
+                },
+                "CEL": "payload.revenue"
+              }
+            }
+          },
+          "OnSuccess": {
+            "Emit": {
+              "Event": "",
+              "From": "",
+              "Fields": null
+            }
+          },
+          "Guard": null,
+          "AdvancesTo": "",
+          "SetsGate": null,
+          "ClearGates": null,
+          "DataAccumulation": {
+            "Writes": null,
+            "SourceEvent": ""
+          },
+          "Condition": "",
+          "Logic": "",
+          "Loop": null,
+          "OnComplete": null,
+          "Rules": null,
+          "Accumulate": null,
+          "Join": null,
+          "Compute": null,
+          "Query": null,
+          "FanOut": null,
+          "GroupBy": null,
+          "Filter": null,
+          "Reduce": null,
+          "Count": null,
+          "Clear": null
+        },
+        "portfolio.setup": {
+          "Activity": {
+            "ID": "",
+            "Tool": "",
+            "Input": null,
+            "Approval": null
+          },
+          "CreateEntity": false,
+          "Description": "",
+          "Emit": {
+            "Event": "period.setup",
+            "From": "",
+            "Fields": {
+              "expected_operating_ids": {
+                "Kind": "cel",
+                "Literal": null,
+                "Ref": "",
+                "RefPath": {
+                  "Root": 0,
+                  "Segments": null,
+                  "Raw": ""
+                },
+                "CEL": "payload.expected_operating_ids"
+              },
+              "period_id": {
+                "Kind": "cel",
+                "Literal": null,
+                "Ref": "",
+                "RefPath": {
+                  "Root": 0,
+                  "Segments": null,
+                  "Raw": ""
+                },
+                "CEL": "payload.period_id"
+              },
+              "portfolio_id": {
+                "Kind": "cel",
+                "Literal": null,
+                "Ref": "",
+                "RefPath": {
+                  "Root": 0,
+                  "Segments": null,
+                  "Raw": ""
+                },
+                "CEL": "payload.portfolio_id"
+              }
+            }
+          },
+          "OnSuccess": {
+            "Emit": {
+              "Event": "",
+              "From": "",
+              "Fields": null
+            }
+          },
+          "Guard": null,
+          "AdvancesTo": "",
+          "SetsGate": null,
+          "ClearGates": null,
+          "DataAccumulation": {
+            "Writes": [
+              {
+                "source_field": "portfolio_id",
+                "target_field": "portfolio_id",
+                "value": {
+                  "Kind": "",
+                  "Literal": null,
+                  "Ref": "",
+                  "RefPath": {
+                    "Root": 0,
+                    "Segments": null,
+                    "Raw": ""
+                  },
+                  "CEL": ""
+                },
+                "key": {
+                  "Kind": "",
+                  "Literal": null,
+                  "Ref": "",
+                  "RefPath": {
+                    "Root": 0,
+                    "Segments": null,
+                    "Raw": ""
+                  },
+                  "CEL": ""
+                },
+                "index": {
+                  "Kind": "",
+                  "Literal": null,
+                  "Ref": "",
+                  "RefPath": {
+                    "Root": 0,
+                    "Segments": null,
+                    "Raw": ""
+                  },
+                  "CEL": ""
+                }
+              }
+            ],
+            "SourceEvent": "portfolio.setup"
+          },
+          "Condition": "",
+          "Logic": "",
+          "Loop": null,
+          "OnComplete": null,
+          "Rules": null,
+          "Accumulate": null,
+          "Join": null,
+          "Compute": null,
+          "Query": null,
+          "FanOut": null,
+          "GroupBy": null,
+          "Filter": null,
+          "Reduce": null,
+          "Count": null,
+          "Clear": null
+        }
+      },
+      "cG9ydGZvbGlvL3BlcmlvZA.cG9ydGZvbGlvLWNvbGxlY3Rvcg": {
+        "period.reported": {
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -499,7 +752,7 @@
             "ID": "awaiting",
             "Stage": "awaiting",
             "Members": {
-              "From": "entity.expected_operating_ids",
+              "From": "state.expected_operating_ids",
               "FromPath": {
                 "Root": 3,
                 "Segments": [
@@ -507,29 +760,16 @@
                 ],
                 "Raw": "entity.expected_operating_ids"
               },
-              "By": "",
+              "Count": null,
+              "By": "payload.operating_id",
               "ByPath": {
-                "Root": 0,
-                "Segments": null,
-                "Raw": ""
+                "Root": 1,
+                "Segments": [
+                  "operating_id"
+                ],
+                "Raw": "payload.operating_id"
               },
               "FromFanOut": false
-            },
-            "Window": {
-              "From": "entity.period_id",
-              "FromPath": {
-                "Root": 3,
-                "Segments": [
-                  "period_id"
-                ],
-                "Raw": "entity.period_id"
-              },
-              "By": "",
-              "ByPath": {
-                "Root": 0,
-                "Segments": null,
-                "Raw": ""
-              }
             },
             "Output": "payload.revenue",
             "OutputPath": {
@@ -539,8 +779,6 @@
               ],
               "Raw": "payload.revenue"
             },
-            "CompleteWhen": "",
-            "Remaining": "",
             "OnComplete": {
               "ID": "",
               "Description": "",
@@ -584,54 +822,56 @@
               "Compute": null,
               "FanOut": null
             },
-            "Timeout": {
+            "Deadline": {
               "After": "5m",
-              "Outcome": {
-                "ID": "",
-                "Description": "",
-                "Condition": "",
-                "PolicyRow": {
-                  "Kind": "",
-                  "Selectors": null,
-                  "CaseValues": null,
-                  "RangeValue": "",
-                  "RangeLower": {
-                    "Operator": "",
-                    "Value": "",
-                    "Kind": ""
-                  },
-                  "RangeUpper": {
-                    "Operator": "",
-                    "Value": "",
-                    "Kind": ""
-                  },
-                  "Monotonicity": null,
-                  "Lookup": null,
-                  "Validation": null,
-                  "Module": null
-                },
-                "AdvancesTo": "failed",
-                "Emit": {
-                  "Event": "",
-                  "From": "",
-                  "Fields": null
-                },
-                "Activity": {
-                  "ID": "",
-                  "Tool": "",
-                  "Input": null,
-                  "Approval": null
-                },
-                "DataAccumulation": {
-                  "Writes": null,
-                  "SourceEvent": ""
-                },
-                "Compute": null,
-                "FanOut": null
-              }
+              "From": "stage_entry"
             },
+            "OnDeadline": {
+              "ID": "",
+              "Description": "",
+              "Condition": "",
+              "PolicyRow": {
+                "Kind": "",
+                "Selectors": null,
+                "CaseValues": null,
+                "RangeValue": "",
+                "RangeLower": {
+                  "Operator": "",
+                  "Value": "",
+                  "Kind": ""
+                },
+                "RangeUpper": {
+                  "Operator": "",
+                  "Value": "",
+                  "Kind": ""
+                },
+                "Monotonicity": null,
+                "Lookup": null,
+                "Validation": null,
+                "Module": null
+              },
+              "AdvancesTo": "failed",
+              "Emit": {
+                "Event": "",
+                "From": "",
+                "Fields": null
+              },
+              "Activity": {
+                "ID": "",
+                "Tool": "",
+                "Input": null,
+                "Approval": null
+              },
+              "DataAccumulation": {
+                "Writes": null,
+                "SourceEvent": ""
+              },
+              "Compute": null,
+              "FanOut": null
+            },
+            "Until": "",
             "OnCompleteFound": true,
-            "TimeoutFound": true
+            "OnDeadlineFound": true
           },
           "Compute": null,
           "Query": null,
@@ -642,7 +882,7 @@
           "Count": null,
           "Clear": null
         },
-        "portfolio.setup": {
+        "period.setup": {
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -672,43 +912,6 @@
               {
                 "source_field": "portfolio_id",
                 "target_field": "portfolio_id",
-                "value": {
-                  "Kind": "",
-                  "Literal": null,
-                  "Ref": "",
-                  "RefPath": {
-                    "Root": 0,
-                    "Segments": null,
-                    "Raw": ""
-                  },
-                  "CEL": ""
-                },
-                "key": {
-                  "Kind": "",
-                  "Literal": null,
-                  "Ref": "",
-                  "RefPath": {
-                    "Root": 0,
-                    "Segments": null,
-                    "Raw": ""
-                  },
-                  "CEL": ""
-                },
-                "index": {
-                  "Kind": "",
-                  "Literal": null,
-                  "Ref": "",
-                  "RefPath": {
-                    "Root": 0,
-                    "Segments": null,
-                    "Raw": ""
-                  },
-                  "CEL": ""
-                }
-              },
-              {
-                "source_field": "expected_operating_ids",
-                "target_field": "expected_operating_ids",
                 "value": {
                   "Kind": "",
                   "Literal": null,
@@ -779,9 +982,46 @@
                   },
                   "CEL": ""
                 }
+              },
+              {
+                "source_field": "expected_operating_ids",
+                "target_field": "expected_operating_ids",
+                "value": {
+                  "Kind": "",
+                  "Literal": null,
+                  "Ref": "",
+                  "RefPath": {
+                    "Root": 0,
+                    "Segments": null,
+                    "Raw": ""
+                  },
+                  "CEL": ""
+                },
+                "key": {
+                  "Kind": "",
+                  "Literal": null,
+                  "Ref": "",
+                  "RefPath": {
+                    "Root": 0,
+                    "Segments": null,
+                    "Raw": ""
+                  },
+                  "CEL": ""
+                },
+                "index": {
+                  "Kind": "",
+                  "Literal": null,
+                  "Ref": "",
+                  "RefPath": {
+                    "Root": 0,
+                    "Segments": null,
+                    "Raw": ""
+                  },
+                  "CEL": ""
+                }
               }
             ],
-            "SourceEvent": "portfolio.setup"
+            "SourceEvent": "period.setup"
           },
           "Condition": "",
           "Logic": "",
@@ -831,6 +1071,17 @@
                 "Fields": {
                   "period_id": {
                     "CEL": "payload.period_id",
+                    "Kind": "cel",
+                    "Literal": null,
+                    "Ref": "",
+                    "RefPath": {
+                      "Raw": "",
+                      "Root": 0,
+                      "Segments": null
+                    }
+                  },
+                  "portfolio_id": {
+                    "CEL": "payload.portfolio_id",
                     "Kind": "cel",
                     "Literal": null,
                     "Ref": "",
@@ -960,6 +1211,17 @@
                       "Segments": null
                     }
                   },
+                  "portfolio_id": {
+                    "CEL": "payload.portfolio_id",
+                    "Kind": "cel",
+                    "Literal": null,
+                    "Ref": "",
+                    "RefPath": {
+                      "Raw": "",
+                      "Root": 0,
+                      "Segments": null
+                    }
+                  },
                   "revenue": {
                     "CEL": "payload.revenue",
                     "Kind": "cel",
@@ -1031,11 +1293,263 @@
           "node_id": "operating-node"
         }
       },
-      "cG9ydGZvbGlv.cG9ydGZvbGlvLWNvbGxlY3Rvcg": {
+      "cG9ydGZvbGlv.cG9ydGZvbGlvLXJvdXRlcg": {
         "behavior": {
           "Description": "",
           "EventHandlers": {
             "operating.reported": {
+              "Accumulate": null,
+              "Activity": {
+                "Approval": null,
+                "ID": "",
+                "Input": null,
+                "Tool": ""
+              },
+              "AdvancesTo": "",
+              "Clear": null,
+              "ClearGates": null,
+              "Compute": null,
+              "Condition": "",
+              "Count": null,
+              "CreateEntity": false,
+              "DataAccumulation": {
+                "SourceEvent": "",
+                "Writes": null
+              },
+              "Description": "",
+              "Emit": {
+                "Event": "period.reported",
+                "Fields": {
+                  "operating_id": {
+                    "CEL": "payload.operating_id",
+                    "Kind": "cel",
+                    "Literal": null,
+                    "Ref": "",
+                    "RefPath": {
+                      "Raw": "",
+                      "Root": 0,
+                      "Segments": null
+                    }
+                  },
+                  "period_id": {
+                    "CEL": "payload.period_id",
+                    "Kind": "cel",
+                    "Literal": null,
+                    "Ref": "",
+                    "RefPath": {
+                      "Raw": "",
+                      "Root": 0,
+                      "Segments": null
+                    }
+                  },
+                  "portfolio_id": {
+                    "CEL": "payload.portfolio_id",
+                    "Kind": "cel",
+                    "Literal": null,
+                    "Ref": "",
+                    "RefPath": {
+                      "Raw": "",
+                      "Root": 0,
+                      "Segments": null
+                    }
+                  },
+                  "revenue": {
+                    "CEL": "payload.revenue",
+                    "Kind": "cel",
+                    "Literal": null,
+                    "Ref": "",
+                    "RefPath": {
+                      "Raw": "",
+                      "Root": 0,
+                      "Segments": null
+                    }
+                  }
+                },
+                "From": ""
+              },
+              "FanOut": null,
+              "Filter": null,
+              "GroupBy": null,
+              "Guard": null,
+              "Join": null,
+              "Logic": "",
+              "Loop": null,
+              "OnComplete": null,
+              "OnSuccess": {
+                "Emit": {
+                  "Event": "",
+                  "Fields": null,
+                  "From": ""
+                }
+              },
+              "Query": null,
+              "Reduce": null,
+              "Rules": null,
+              "SetsGate": null
+            },
+            "portfolio.setup": {
+              "Accumulate": null,
+              "Activity": {
+                "Approval": null,
+                "ID": "",
+                "Input": null,
+                "Tool": ""
+              },
+              "AdvancesTo": "",
+              "Clear": null,
+              "ClearGates": null,
+              "Compute": null,
+              "Condition": "",
+              "Count": null,
+              "CreateEntity": false,
+              "DataAccumulation": {
+                "SourceEvent": "",
+                "Writes": [
+                  {
+                    "index": {
+                      "CEL": "",
+                      "Kind": "",
+                      "Literal": null,
+                      "Ref": "",
+                      "RefPath": {
+                        "Raw": "",
+                        "Root": 0,
+                        "Segments": null
+                      }
+                    },
+                    "key": {
+                      "CEL": "",
+                      "Kind": "",
+                      "Literal": null,
+                      "Ref": "",
+                      "RefPath": {
+                        "Raw": "",
+                        "Root": 0,
+                        "Segments": null
+                      }
+                    },
+                    "source_field": "portfolio_id",
+                    "target_field": "portfolio_id",
+                    "value": {
+                      "CEL": "",
+                      "Kind": "",
+                      "Literal": null,
+                      "Ref": "",
+                      "RefPath": {
+                        "Raw": "",
+                        "Root": 0,
+                        "Segments": null
+                      }
+                    }
+                  }
+                ]
+              },
+              "Description": "",
+              "Emit": {
+                "Event": "period.setup",
+                "Fields": {
+                  "expected_operating_ids": {
+                    "CEL": "payload.expected_operating_ids",
+                    "Kind": "cel",
+                    "Literal": null,
+                    "Ref": "",
+                    "RefPath": {
+                      "Raw": "",
+                      "Root": 0,
+                      "Segments": null
+                    }
+                  },
+                  "period_id": {
+                    "CEL": "payload.period_id",
+                    "Kind": "cel",
+                    "Literal": null,
+                    "Ref": "",
+                    "RefPath": {
+                      "Raw": "",
+                      "Root": 0,
+                      "Segments": null
+                    }
+                  },
+                  "portfolio_id": {
+                    "CEL": "payload.portfolio_id",
+                    "Kind": "cel",
+                    "Literal": null,
+                    "Ref": "",
+                    "RefPath": {
+                      "Raw": "",
+                      "Root": 0,
+                      "Segments": null
+                    }
+                  }
+                },
+                "From": ""
+              },
+              "FanOut": null,
+              "Filter": null,
+              "GroupBy": null,
+              "Guard": null,
+              "Join": null,
+              "Logic": "",
+              "Loop": null,
+              "OnComplete": null,
+              "OnSuccess": {
+                "Emit": {
+                  "Event": "",
+                  "Fields": null,
+                  "From": ""
+                }
+              },
+              "Query": null,
+              "Reduce": null,
+              "Rules": null,
+              "SetsGate": null
+            }
+          },
+          "ExecutionType": "system_node",
+          "GateState": {
+            "Description": "",
+            "Gates": null,
+            "Storage": ""
+          },
+          "IdempotencyTable": "",
+          "Implementation": "",
+          "Produces": [
+            "period.setup",
+            "period.reported"
+          ],
+          "StateSchema": {
+            "Description": "",
+            "Fields": null
+          },
+          "StateTable": "",
+          "SubscribesTo": [
+            "portfolio.setup",
+            "operating.reported"
+          ],
+          "Timers": null
+        },
+        "effective": {
+          "ID": "portfolio-router",
+          "ExecutionType": "system_node",
+          "RuntimeSubscriptions": [
+            "operating.reported",
+            "portfolio.setup"
+          ],
+          "Produces": [
+            "period.reported",
+            "period.setup"
+          ]
+        },
+        "identity": {
+          "flow_path": "portfolio",
+          "node_id": "portfolio-router"
+        }
+      },
+      "cG9ydGZvbGlvL3BlcmlvZA.cG9ydGZvbGlvLWNvbGxlY3Rvcg": {
+        "behavior": {
+          "Description": "",
+          "EventHandlers": {
+            "period.reported": {
               "Accumulate": null,
               "Activity": {
                 "Approval": null,
@@ -1065,16 +1579,22 @@
               "GroupBy": null,
               "Guard": null,
               "Join": {
-                "CompleteWhen": "",
+                "Deadline": {
+                  "After": "5m",
+                  "From": "stage_entry"
+                },
                 "ID": "awaiting",
                 "Members": {
-                  "By": "",
+                  "By": "payload.operating_id",
                   "ByPath": {
-                    "Raw": "",
-                    "Root": 0,
-                    "Segments": null
+                    "Raw": "payload.operating_id",
+                    "Root": 1,
+                    "Segments": [
+                      "operating_id"
+                    ]
                   },
-                  "From": "entity.expected_operating_ids",
+                  "Count": null,
+                  "From": "state.expected_operating_ids",
                   "FromFanOut": false,
                   "FromPath": {
                     "Raw": "entity.expected_operating_ids",
@@ -1128,6 +1648,50 @@
                   }
                 },
                 "OnCompleteFound": true,
+                "OnDeadline": {
+                  "Activity": {
+                    "Approval": null,
+                    "ID": "",
+                    "Input": null,
+                    "Tool": ""
+                  },
+                  "AdvancesTo": "failed",
+                  "Compute": null,
+                  "Condition": "",
+                  "DataAccumulation": {
+                    "SourceEvent": "",
+                    "Writes": null
+                  },
+                  "Description": "",
+                  "Emit": {
+                    "Event": "",
+                    "Fields": null,
+                    "From": ""
+                  },
+                  "FanOut": null,
+                  "ID": "",
+                  "PolicyRow": {
+                    "CaseValues": null,
+                    "Kind": "",
+                    "Lookup": null,
+                    "Module": null,
+                    "Monotonicity": null,
+                    "RangeLower": {
+                      "Kind": "",
+                      "Operator": "",
+                      "Value": ""
+                    },
+                    "RangeUpper": {
+                      "Kind": "",
+                      "Operator": "",
+                      "Value": ""
+                    },
+                    "RangeValue": "",
+                    "Selectors": null,
+                    "Validation": null
+                  }
+                },
+                "OnDeadlineFound": true,
                 "Output": "payload.revenue",
                 "OutputPath": {
                   "Raw": "payload.revenue",
@@ -1136,71 +1700,8 @@
                     "revenue"
                   ]
                 },
-                "Remaining": "",
                 "Stage": "awaiting",
-                "Timeout": {
-                  "After": "5m",
-                  "Outcome": {
-                    "Activity": {
-                      "Approval": null,
-                      "ID": "",
-                      "Input": null,
-                      "Tool": ""
-                    },
-                    "AdvancesTo": "failed",
-                    "Compute": null,
-                    "Condition": "",
-                    "DataAccumulation": {
-                      "SourceEvent": "",
-                      "Writes": null
-                    },
-                    "Description": "",
-                    "Emit": {
-                      "Event": "",
-                      "Fields": null,
-                      "From": ""
-                    },
-                    "FanOut": null,
-                    "ID": "",
-                    "PolicyRow": {
-                      "CaseValues": null,
-                      "Kind": "",
-                      "Lookup": null,
-                      "Module": null,
-                      "Monotonicity": null,
-                      "RangeLower": {
-                        "Kind": "",
-                        "Operator": "",
-                        "Value": ""
-                      },
-                      "RangeUpper": {
-                        "Kind": "",
-                        "Operator": "",
-                        "Value": ""
-                      },
-                      "RangeValue": "",
-                      "Selectors": null,
-                      "Validation": null
-                    }
-                  }
-                },
-                "TimeoutFound": true,
-                "Window": {
-                  "By": "",
-                  "ByPath": {
-                    "Raw": "",
-                    "Root": 0,
-                    "Segments": null
-                  },
-                  "From": "entity.period_id",
-                  "FromPath": {
-                    "Raw": "entity.period_id",
-                    "Root": 3,
-                    "Segments": [
-                      "period_id"
-                    ]
-                  }
-                }
+                "Until": ""
               },
               "Logic": "",
               "Loop": null,
@@ -1217,7 +1718,7 @@
               "Rules": null,
               "SetsGate": null
             },
-            "portfolio.setup": {
+            "period.setup": {
               "Accumulate": null,
               "Activity": {
                 "Approval": null,
@@ -1295,8 +1796,8 @@
                         "Segments": null
                       }
                     },
-                    "source_field": "expected_operating_ids",
-                    "target_field": "expected_operating_ids",
+                    "source_field": "period_id",
+                    "target_field": "period_id",
                     "value": {
                       "CEL": "",
                       "Kind": "",
@@ -1332,8 +1833,8 @@
                         "Segments": null
                       }
                     },
-                    "source_field": "period_id",
-                    "target_field": "period_id",
+                    "source_field": "expected_operating_ids",
+                    "target_field": "expected_operating_ids",
                     "value": {
                       "CEL": "",
                       "Kind": "",
@@ -1390,8 +1891,8 @@
           },
           "StateTable": "",
           "SubscribesTo": [
-            "portfolio.setup",
-            "operating.reported"
+            "period.setup",
+            "period.reported"
           ],
           "Timers": null
         },
@@ -1399,15 +1900,15 @@
           "ID": "portfolio-collector",
           "ExecutionType": "system_node",
           "RuntimeSubscriptions": [
-            "operating.reported",
+            "period.reported",
+            "period.setup",
             "platform.join_complete",
-            "platform.join_timeout",
-            "portfolio.setup"
+            "platform.join_timeout"
           ],
           "Produces": []
         },
         "identity": {
-          "flow_path": "portfolio",
+          "flow_path": "portfolio/period",
           "node_id": "portfolio-collector"
         }
       }
@@ -1420,10 +1921,16 @@
         "b3BlcmF0aW5n.b3BlcmF0aW5nLW5vZGU"
       ],
       "portfolio/operating.reported": [
-        "cG9ydGZvbGlv.cG9ydGZvbGlvLWNvbGxlY3Rvcg"
+        "cG9ydGZvbGlv.cG9ydGZvbGlvLXJvdXRlcg"
+      ],
+      "portfolio/period/period.reported": [
+        "cG9ydGZvbGlvL3BlcmlvZA.cG9ydGZvbGlvLWNvbGxlY3Rvcg"
+      ],
+      "portfolio/period/period.setup": [
+        "cG9ydGZvbGlvL3BlcmlvZA.cG9ydGZvbGlvLWNvbGxlY3Rvcg"
       ],
       "portfolio/portfolio.setup": [
-        "cG9ydGZvbGlv.cG9ydGZvbGlvLWNvbGxlY3Rvcg"
+        "cG9ydGZvbGlv.cG9ydGZvbGlvLXJvdXRlcg"
       ]
     },
     "transitions": [
@@ -1463,6 +1970,17 @@
                 "Raw": ""
               },
               "CEL": "payload.period_id"
+            },
+            "portfolio_id": {
+              "Kind": "cel",
+              "Literal": null,
+              "Ref": "",
+              "RefPath": {
+                "Root": 0,
+                "Segments": null,
+                "Raw": ""
+              },
+              "CEL": "payload.portfolio_id"
             },
             "revenue": {
               "Kind": "cel",
@@ -1547,6 +2065,17 @@
               },
               "CEL": "payload.period_id"
             },
+            "portfolio_id": {
+              "Kind": "cel",
+              "Literal": null,
+              "Ref": "",
+              "RefPath": {
+                "Root": 0,
+                "Segments": null,
+                "Raw": ""
+              },
+              "CEL": "payload.portfolio_id"
+            },
             "revenue": {
               "Kind": "cel",
               "Literal": null,
@@ -1583,12 +2112,227 @@
         "Clear": null
       },
       {
-        "ID": "cG9ydGZvbGlv.cG9ydGZvbGlvLWNvbGxlY3Rvcg:operating.reported",
+        "ID": "cG9ydGZvbGlv.cG9ydGZvbGlvLXJvdXRlcg:operating.reported",
         "Node": {
           "flow_path": "portfolio",
-          "node_id": "portfolio-collector"
+          "node_id": "portfolio-router"
         },
         "EventType": "operating.reported",
+        "CreateEntity": false,
+        "Activity": {
+          "ID": "",
+          "Tool": "",
+          "Input": null,
+          "Approval": null
+        },
+        "Guard": null,
+        "AdvancesTo": "",
+        "SetsGate": null,
+        "ClearGates": null,
+        "DataAccumulation": {
+          "Writes": null,
+          "SourceEvent": ""
+        },
+        "Emit": {
+          "Event": "period.reported",
+          "From": "",
+          "Fields": {
+            "operating_id": {
+              "Kind": "cel",
+              "Literal": null,
+              "Ref": "",
+              "RefPath": {
+                "Root": 0,
+                "Segments": null,
+                "Raw": ""
+              },
+              "CEL": "payload.operating_id"
+            },
+            "period_id": {
+              "Kind": "cel",
+              "Literal": null,
+              "Ref": "",
+              "RefPath": {
+                "Root": 0,
+                "Segments": null,
+                "Raw": ""
+              },
+              "CEL": "payload.period_id"
+            },
+            "portfolio_id": {
+              "Kind": "cel",
+              "Literal": null,
+              "Ref": "",
+              "RefPath": {
+                "Root": 0,
+                "Segments": null,
+                "Raw": ""
+              },
+              "CEL": "payload.portfolio_id"
+            },
+            "revenue": {
+              "Kind": "cel",
+              "Literal": null,
+              "Ref": "",
+              "RefPath": {
+                "Root": 0,
+                "Segments": null,
+                "Raw": ""
+              },
+              "CEL": "payload.revenue"
+            }
+          }
+        },
+        "OnSuccess": {
+          "Emit": {
+            "Event": "",
+            "From": "",
+            "Fields": null
+          }
+        },
+        "Condition": "",
+        "Loop": null,
+        "OnComplete": null,
+        "Rules": null,
+        "Accumulate": null,
+        "Join": null,
+        "Compute": null,
+        "Query": null,
+        "FanOut": null,
+        "GroupBy": null,
+        "Filter": null,
+        "Reduce": null,
+        "Count": null,
+        "Clear": null
+      },
+      {
+        "ID": "cG9ydGZvbGlv.cG9ydGZvbGlvLXJvdXRlcg:portfolio.setup",
+        "Node": {
+          "flow_path": "portfolio",
+          "node_id": "portfolio-router"
+        },
+        "EventType": "portfolio.setup",
+        "CreateEntity": false,
+        "Activity": {
+          "ID": "",
+          "Tool": "",
+          "Input": null,
+          "Approval": null
+        },
+        "Guard": null,
+        "AdvancesTo": "",
+        "SetsGate": null,
+        "ClearGates": null,
+        "DataAccumulation": {
+          "Writes": [
+            {
+              "source_field": "portfolio_id",
+              "target_field": "portfolio_id",
+              "value": {
+                "Kind": "",
+                "Literal": null,
+                "Ref": "",
+                "RefPath": {
+                  "Root": 0,
+                  "Segments": null,
+                  "Raw": ""
+                },
+                "CEL": ""
+              },
+              "key": {
+                "Kind": "",
+                "Literal": null,
+                "Ref": "",
+                "RefPath": {
+                  "Root": 0,
+                  "Segments": null,
+                  "Raw": ""
+                },
+                "CEL": ""
+              },
+              "index": {
+                "Kind": "",
+                "Literal": null,
+                "Ref": "",
+                "RefPath": {
+                  "Root": 0,
+                  "Segments": null,
+                  "Raw": ""
+                },
+                "CEL": ""
+              }
+            }
+          ],
+          "SourceEvent": "portfolio.setup"
+        },
+        "Emit": {
+          "Event": "period.setup",
+          "From": "",
+          "Fields": {
+            "expected_operating_ids": {
+              "Kind": "cel",
+              "Literal": null,
+              "Ref": "",
+              "RefPath": {
+                "Root": 0,
+                "Segments": null,
+                "Raw": ""
+              },
+              "CEL": "payload.expected_operating_ids"
+            },
+            "period_id": {
+              "Kind": "cel",
+              "Literal": null,
+              "Ref": "",
+              "RefPath": {
+                "Root": 0,
+                "Segments": null,
+                "Raw": ""
+              },
+              "CEL": "payload.period_id"
+            },
+            "portfolio_id": {
+              "Kind": "cel",
+              "Literal": null,
+              "Ref": "",
+              "RefPath": {
+                "Root": 0,
+                "Segments": null,
+                "Raw": ""
+              },
+              "CEL": "payload.portfolio_id"
+            }
+          }
+        },
+        "OnSuccess": {
+          "Emit": {
+            "Event": "",
+            "From": "",
+            "Fields": null
+          }
+        },
+        "Condition": "",
+        "Loop": null,
+        "OnComplete": null,
+        "Rules": null,
+        "Accumulate": null,
+        "Join": null,
+        "Compute": null,
+        "Query": null,
+        "FanOut": null,
+        "GroupBy": null,
+        "Filter": null,
+        "Reduce": null,
+        "Count": null,
+        "Clear": null
+      },
+      {
+        "ID": "cG9ydGZvbGlvL3BlcmlvZA.cG9ydGZvbGlvLWNvbGxlY3Rvcg:period.reported",
+        "Node": {
+          "flow_path": "portfolio/period",
+          "node_id": "portfolio-collector"
+        },
+        "EventType": "period.reported",
         "CreateEntity": false,
         "Activity": {
           "ID": "",
@@ -1625,7 +2369,7 @@
           "ID": "awaiting",
           "Stage": "awaiting",
           "Members": {
-            "From": "entity.expected_operating_ids",
+            "From": "state.expected_operating_ids",
             "FromPath": {
               "Root": 3,
               "Segments": [
@@ -1633,29 +2377,16 @@
               ],
               "Raw": "entity.expected_operating_ids"
             },
-            "By": "",
+            "Count": null,
+            "By": "payload.operating_id",
             "ByPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
+              "Root": 1,
+              "Segments": [
+                "operating_id"
+              ],
+              "Raw": "payload.operating_id"
             },
             "FromFanOut": false
-          },
-          "Window": {
-            "From": "entity.period_id",
-            "FromPath": {
-              "Root": 3,
-              "Segments": [
-                "period_id"
-              ],
-              "Raw": "entity.period_id"
-            },
-            "By": "",
-            "ByPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            }
           },
           "Output": "payload.revenue",
           "OutputPath": {
@@ -1665,8 +2396,6 @@
             ],
             "Raw": "payload.revenue"
           },
-          "CompleteWhen": "",
-          "Remaining": "",
           "OnComplete": {
             "ID": "",
             "Description": "",
@@ -1710,54 +2439,56 @@
             "Compute": null,
             "FanOut": null
           },
-          "Timeout": {
+          "Deadline": {
             "After": "5m",
-            "Outcome": {
-              "ID": "",
-              "Description": "",
-              "Condition": "",
-              "PolicyRow": {
-                "Kind": "",
-                "Selectors": null,
-                "CaseValues": null,
-                "RangeValue": "",
-                "RangeLower": {
-                  "Operator": "",
-                  "Value": "",
-                  "Kind": ""
-                },
-                "RangeUpper": {
-                  "Operator": "",
-                  "Value": "",
-                  "Kind": ""
-                },
-                "Monotonicity": null,
-                "Lookup": null,
-                "Validation": null,
-                "Module": null
-              },
-              "AdvancesTo": "failed",
-              "Emit": {
-                "Event": "",
-                "From": "",
-                "Fields": null
-              },
-              "Activity": {
-                "ID": "",
-                "Tool": "",
-                "Input": null,
-                "Approval": null
-              },
-              "DataAccumulation": {
-                "Writes": null,
-                "SourceEvent": ""
-              },
-              "Compute": null,
-              "FanOut": null
-            }
+            "From": "stage_entry"
           },
+          "OnDeadline": {
+            "ID": "",
+            "Description": "",
+            "Condition": "",
+            "PolicyRow": {
+              "Kind": "",
+              "Selectors": null,
+              "CaseValues": null,
+              "RangeValue": "",
+              "RangeLower": {
+                "Operator": "",
+                "Value": "",
+                "Kind": ""
+              },
+              "RangeUpper": {
+                "Operator": "",
+                "Value": "",
+                "Kind": ""
+              },
+              "Monotonicity": null,
+              "Lookup": null,
+              "Validation": null,
+              "Module": null
+            },
+            "AdvancesTo": "failed",
+            "Emit": {
+              "Event": "",
+              "From": "",
+              "Fields": null
+            },
+            "Activity": {
+              "ID": "",
+              "Tool": "",
+              "Input": null,
+              "Approval": null
+            },
+            "DataAccumulation": {
+              "Writes": null,
+              "SourceEvent": ""
+            },
+            "Compute": null,
+            "FanOut": null
+          },
+          "Until": "",
           "OnCompleteFound": true,
-          "TimeoutFound": true
+          "OnDeadlineFound": true
         },
         "Compute": null,
         "Query": null,
@@ -1769,12 +2500,12 @@
         "Clear": null
       },
       {
-        "ID": "cG9ydGZvbGlv.cG9ydGZvbGlvLWNvbGxlY3Rvcg:portfolio.setup",
+        "ID": "cG9ydGZvbGlvL3BlcmlvZA.cG9ydGZvbGlvLWNvbGxlY3Rvcg:period.setup",
         "Node": {
-          "flow_path": "portfolio",
+          "flow_path": "portfolio/period",
           "node_id": "portfolio-collector"
         },
-        "EventType": "portfolio.setup",
+        "EventType": "period.setup",
         "CreateEntity": false,
         "Activity": {
           "ID": "",
@@ -1791,43 +2522,6 @@
             {
               "source_field": "portfolio_id",
               "target_field": "portfolio_id",
-              "value": {
-                "Kind": "",
-                "Literal": null,
-                "Ref": "",
-                "RefPath": {
-                  "Root": 0,
-                  "Segments": null,
-                  "Raw": ""
-                },
-                "CEL": ""
-              },
-              "key": {
-                "Kind": "",
-                "Literal": null,
-                "Ref": "",
-                "RefPath": {
-                  "Root": 0,
-                  "Segments": null,
-                  "Raw": ""
-                },
-                "CEL": ""
-              },
-              "index": {
-                "Kind": "",
-                "Literal": null,
-                "Ref": "",
-                "RefPath": {
-                  "Root": 0,
-                  "Segments": null,
-                  "Raw": ""
-                },
-                "CEL": ""
-              }
-            },
-            {
-              "source_field": "expected_operating_ids",
-              "target_field": "expected_operating_ids",
               "value": {
                 "Kind": "",
                 "Literal": null,
@@ -1898,9 +2592,46 @@
                 },
                 "CEL": ""
               }
+            },
+            {
+              "source_field": "expected_operating_ids",
+              "target_field": "expected_operating_ids",
+              "value": {
+                "Kind": "",
+                "Literal": null,
+                "Ref": "",
+                "RefPath": {
+                  "Root": 0,
+                  "Segments": null,
+                  "Raw": ""
+                },
+                "CEL": ""
+              },
+              "key": {
+                "Kind": "",
+                "Literal": null,
+                "Ref": "",
+                "RefPath": {
+                  "Root": 0,
+                  "Segments": null,
+                  "Raw": ""
+                },
+                "CEL": ""
+              },
+              "index": {
+                "Kind": "",
+                "Literal": null,
+                "Ref": "",
+                "RefPath": {
+                  "Root": 0,
+                  "Segments": null,
+                  "Raw": ""
+                },
+                "CEL": ""
+              }
             }
           ],
-          "SourceEvent": "portfolio.setup"
+          "SourceEvent": "period.setup"
         },
         "Emit": {
           "Event": "",
@@ -1963,7 +2694,7 @@
         "From": "operating",
         "To": "portfolio",
         "Rename": "",
-        "Resolution": 0,
+        "Resolution": 3,
         "KeyFrom": ""
       }
     ],
@@ -2148,6 +2879,43 @@
           "DataAccumulation": {
             "Writes": [
               {
+                "source_field": "period_id",
+                "target_field": "period_id",
+                "value": {
+                  "Kind": "",
+                  "Literal": null,
+                  "Ref": "",
+                  "RefPath": {
+                    "Root": 0,
+                    "Segments": null,
+                    "Raw": ""
+                  },
+                  "CEL": ""
+                },
+                "key": {
+                  "Kind": "",
+                  "Literal": null,
+                  "Ref": "",
+                  "RefPath": {
+                    "Root": 0,
+                    "Segments": null,
+                    "Raw": ""
+                  },
+                  "CEL": ""
+                },
+                "index": {
+                  "Kind": "",
+                  "Literal": null,
+                  "Ref": "",
+                  "RefPath": {
+                    "Root": 0,
+                    "Segments": null,
+                    "Raw": ""
+                  },
+                  "CEL": ""
+                }
+              },
+              {
                 "op": "set",
                 "target": "entity.reports",
                 "value": {
@@ -2233,17 +3001,13 @@
             "Into": "operating_reports",
             "From": "payload",
             "Description": "",
-            "Window": "",
-            "WindowPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "DedupBy": "",
-            "DedupPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
+            "Key": "payload.operating_id",
+            "KeyPath": {
+              "Root": 1,
+              "Segments": [
+                "operating_id"
+              ],
+              "Raw": "payload.operating_id"
             }
           },
           "Join": null,
@@ -2494,20 +3258,16 @@
           "EventHandlers": {
             "operating.reported": {
               "Accumulate": {
-                "DedupBy": "",
-                "DedupPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
                 "Description": "",
                 "From": "payload",
                 "Into": "operating_reports",
-                "Window": "",
-                "WindowPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
+                "Key": "payload.operating_id",
+                "KeyPath": {
+                  "Raw": "payload.operating_id",
+                  "Root": 1,
+                  "Segments": [
+                    "operating_id"
+                  ]
                 }
               },
               "Activity": {
@@ -2526,6 +3286,43 @@
               "DataAccumulation": {
                 "SourceEvent": "",
                 "Writes": [
+                  {
+                    "index": {
+                      "CEL": "",
+                      "Kind": "",
+                      "Literal": null,
+                      "Ref": "",
+                      "RefPath": {
+                        "Raw": "",
+                        "Root": 0,
+                        "Segments": null
+                      }
+                    },
+                    "key": {
+                      "CEL": "",
+                      "Kind": "",
+                      "Literal": null,
+                      "Ref": "",
+                      "RefPath": {
+                        "Raw": "",
+                        "Root": 0,
+                        "Segments": null
+                      }
+                    },
+                    "source_field": "period_id",
+                    "target_field": "period_id",
+                    "value": {
+                      "CEL": "",
+                      "Kind": "",
+                      "Literal": null,
+                      "Ref": "",
+                      "RefPath": {
+                        "Raw": "",
+                        "Root": 0,
+                        "Segments": null
+                      }
+                    }
+                  },
                   {
                     "index": {
                       "CEL": "",
@@ -2850,6 +3647,43 @@
         "DataAccumulation": {
           "Writes": [
             {
+              "source_field": "period_id",
+              "target_field": "period_id",
+              "value": {
+                "Kind": "",
+                "Literal": null,
+                "Ref": "",
+                "RefPath": {
+                  "Root": 0,
+                  "Segments": null,
+                  "Raw": ""
+                },
+                "CEL": ""
+              },
+              "key": {
+                "Kind": "",
+                "Literal": null,
+                "Ref": "",
+                "RefPath": {
+                  "Root": 0,
+                  "Segments": null,
+                  "Raw": ""
+                },
+                "CEL": ""
+              },
+              "index": {
+                "Kind": "",
+                "Literal": null,
+                "Ref": "",
+                "RefPath": {
+                  "Root": 0,
+                  "Segments": null,
+                  "Raw": ""
+                },
+                "CEL": ""
+              }
+            },
+            {
               "op": "set",
               "target": "entity.reports",
               "value": {
@@ -2946,17 +3780,13 @@
           "Into": "operating_reports",
           "From": "payload",
           "Description": "",
-          "Window": "",
-          "WindowPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "DedupBy": "",
-          "DedupPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
+          "Key": "payload.operating_id",
+          "KeyPath": {
+            "Root": 1,
+            "Segments": [
+              "operating_id"
+            ],
+            "Raw": "payload.operating_id"
           }
         },
         "Join": null,

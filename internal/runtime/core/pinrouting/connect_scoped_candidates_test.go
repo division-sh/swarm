@@ -6,9 +6,11 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatefanin"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func scopedCandidateGraph(t *testing.T) (CompiledConnectGraph, ConnectRoutePlan, ConnectRoutePlan) {
@@ -90,31 +92,52 @@ func TestCompiledGraphScopesRecipientCandidatesWithoutChangingAcceptance(t *test
 	}
 }
 
-func TestCompiledGraphScopePreservesCrossInstanceFanInObserver(t *testing.T) {
-	graph := CompileConnectGraph(templatefanin.LoadSource(t, templatefanin.Options{}))
-	if issues := graph.Issues(); len(issues) != 0 {
-		t.Fatalf("compiled graph issues = %#v", issues)
-	}
-	plan := requireFanInRoutePlan(t, graph.Plans())
-	receiver := plan.receiver.Readback()
-	observer, err := NewConnectNodeRecipient(identitytest.FlowNode(t, templatefanin.ReceiverFlowID, "observer"), templatefanin.ReceiverFlowInstance)
+func TestCompiledGraphScopePreservesCrossInstanceObserver(t *testing.T) {
+	repoRoot := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, canonicalrouting.ExampleRoot(t, canonicalrouting.FanInStream), runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatal(err)
 	}
-	unrelated, err := NewConnectNodeRecipient(identitytest.FlowNode(t, templatefanin.ReceiverFlowID, "other"), "elsewhere/child")
+	graph := CompileConnectGraph(semanticview.Wrap(bundle))
+	if issues := graph.Issues(); len(issues) != 0 {
+		t.Fatalf("compiled graph issues = %#v", issues)
+	}
+	plan := requirePeriodReportRoutePlan(t, graph.Plans())
+	receiver := plan.receiver.Readback()
+	observer, err := NewConnectNodeRecipient(identitytest.FlowNode(t, receiver.FlowPath, "observer"), "portfolio/period-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unrelated, err := NewConnectNodeRecipient(identitytest.FlowNode(t, receiver.FlowPath, "observer"), "portfolio/period-2")
 	if err != nil {
 		t.Fatal(err)
 	}
 	registrations := append(graph.AdmitReceiverRecipient(receiver.FlowID, events.EventType(receiver.ResolvedEvent), observer),
 		graph.AdmitReceiverRecipient(receiver.FlowID, events.EventType(receiver.ResolvedEvent), unrelated)...)
-	target := events.RouteIdentity{FlowID: templatefanin.ReceiverFlowID, FlowInstance: templatefanin.ReceiverFlowInstance + "/child"}
-	scoped := graph.ScopeRecipientRegistrations(plan, []events.RouteIdentity{target}, registrations)
-	if len(scoped) != 1 || scoped[0].recipient != observer {
-		t.Fatalf("fan-in observer scope = %#v, want declaration-scoped observer", scoped)
-	}
-	got := graph.EvaluateMaterializedRecipients(plan, []events.RouteIdentity{target}, registrations)
-	if recipients := got.Recipients(); len(recipients) != 1 || recipients[0].ID() != observer.ID() {
-		t.Fatalf("fan-in observer recipients = %#v", recipients)
+	target := events.RouteIdentity{FlowID: receiver.FlowID, FlowInstance: observer.Path()}
+	for _, instance := range []string{"operating/source-1", "operating/source-2"} {
+		t.Run(instance, func(t *testing.T) {
+			sourceEvent, err := AdmitSourceEvent(events.EventType(instance+"/operating.reported"), eventtest.ConcreteTemplateRoutingSource("operating", instance, ""))
+			if err != nil {
+				t.Fatal(err)
+			}
+			matching := graph.MatchingSourceEvent(sourceEvent)
+			if len(matching) != 1 || matching[0].ReceiverPinIdentity() != plan.ReceiverPinIdentity() {
+				t.Fatalf("source %q matching routes = %#v, want the exact shared period observer edge", instance, matching)
+			}
+			fullRecipients, _, err := evaluateConnectPlanRecipients(plan, []events.RouteIdentity{target}, registrations)
+			if err != nil {
+				t.Fatal(err)
+			}
+			scoped := graph.ScopeRecipientRegistrations(plan, []events.RouteIdentity{target}, registrations)
+			if len(scoped) != 1 || scoped[0].recipient != observer {
+				t.Fatalf("observer scope = %#v, want exact period observer without sibling leakage", scoped)
+			}
+			got := graph.EvaluateMaterializedRecipients(plan, []events.RouteIdentity{target}, registrations)
+			if recipients := got.Recipients(); !reflect.DeepEqual(recipients, fullRecipients) || len(recipients) != 1 || recipients[0].Path() != observer.Path() {
+				t.Fatalf("observer recipients = %#v, full scan = %#v", recipients, fullRecipients)
+			}
+		})
 	}
 }
 

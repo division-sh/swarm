@@ -287,7 +287,7 @@ func TestCompiledInputInitializeIsImmutableAndDigestSensitive(t *testing.T) {
 	if err != nil || got["count"] != int64(7) {
 		t.Fatalf("mutated binding: %#v %v", got, err)
 	}
-	for _, mode := range []FlowInputResolutionMode{FlowInputResolutionModeSelect, FlowInputResolutionModeFanIn, FlowInputResolutionModeReply} {
+	for _, mode := range []FlowInputResolutionMode{FlowInputResolutionModeSelect, FlowInputResolutionModeFanOut, FlowInputResolutionModeReply} {
 		authored.Resolution.Mode = mode
 		if _, err := CompileFlowInputPin(context, authored); err == nil {
 			t.Fatalf("initialize accepted for mode %v", mode)

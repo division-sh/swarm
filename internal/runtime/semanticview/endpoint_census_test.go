@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
@@ -16,12 +15,6 @@ import (
 func TestAuthoredEventEndpointCensusEnumeratesExecutableFactsAndAssertions(t *testing.T) {
 	source := endpointCensusFixture(t, []runtimecontracts.FlowInputEventPin{{
 		Event: "work.requested",
-		Resolution: runtimecontracts.FlowInputPinResolution{
-			Mode:        runtimecontracts.FlowInputResolutionModeFanIn,
-			Aggregation: "stream",
-			Window:      "5m",
-			DedupBy:     []string{"work_id"},
-		},
 	}})
 
 	census := BuildAuthoredEventEndpointCensus(source)
@@ -235,24 +228,31 @@ func TestResolveDeclaredInputEndpointDoesNotUseProducerSchemaKeyAsReceiverIdenti
 	}
 }
 
-func TestResolveFanInInputForHandlerUsesExactEventIdentity(t *testing.T) {
+func TestResolveDeclaredInputEndpointUsesExactFlowAndEventIdentity(t *testing.T) {
 	source := endpointCensusFixture(t, []runtimecontracts.FlowInputEventPin{{
-		Event:      "work.requested",
-		Resolution: runtimecontracts.FlowInputPinResolution{Mode: runtimecontracts.FlowInputResolutionModeFanIn},
+		Event: "work.requested",
 	}})
 	census := BuildAuthoredEventEndpointCensus(source)
-	node, err := runtimeidentity.AdmitExecutableNodeDeclaration("worker", "worker-node")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, identity := range []string{"work.requested"} {
-		result := census.ResolveFanInInputForHandler(node, identity)
+	for _, identity := range []string{"work.requested", "worker/work.requested"} {
+		result := census.ResolveDeclaredInputEndpoint("worker", identity)
 		endpoint, ok := result.Endpoint()
-		if !ok || endpoint.PinName != "work.requested" {
+		if !ok || endpoint.FlowID != "worker" || endpoint.PinName != "work.requested" {
 			t.Fatalf("handler identity %q result = %#v, want exact work.requested input", identity, result)
 		}
 	}
-
+	for _, tc := range []struct {
+		flowID   string
+		identity string
+	}{
+		{flowID: "other", identity: "work.requested"},
+		{flowID: "worker", identity: "other/work.requested"},
+		{flowID: "worker", identity: "work.completed"},
+	} {
+		result := census.ResolveDeclaredInputEndpoint(tc.flowID, tc.identity)
+		if result.Status != EndpointAssociationNotFound || result.Err() == nil {
+			t.Fatalf("flow=%q identity=%q result=%#v, want typed exact-identity refusal", tc.flowID, tc.identity, result)
+		}
+	}
 }
 
 func TestAuthoredEventEndpointCensusMatchesScopedWildcardConsumers(t *testing.T) {

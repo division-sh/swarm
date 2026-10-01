@@ -1,4 +1,6 @@
 portfolio_state:
+  period_id:
+    type: text
   reports:
     type: map[text]json
     initial: {}

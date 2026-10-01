@@ -6,12 +6,16 @@ and exact assertions, without an LLM, external service, or private credentials.
 
 ## Execution
 
-1. Open the collector with ordered membership `[alpha, beta, gamma]`.
+1. Create the collector keyed by `batch_id` with ordered membership
+   `[alpha, beta, gamma]`. A different batch selects a different collector.
 2. Submit three distinct text-valued items through root ingress and durable fanout.
 3. Verify three separate worker entities, their admitted receiver routes, fields,
    and active stage timers. The collector must remain open at zero of three.
 4. Finish workers through a second durable fanout. Each worker emits its own
    stored value, reaches its terminal stage, and cancels its own timer.
+   Ordinary `select` routing sends that report to the exact batch collector;
+   `join.members.by: payload.item_id` identifies the contributor. The join's
+   five-minute deadline is anchored to its durable stage entry.
 5. Verify each intermediate gather frontier and the final membership-ordered
    result `[red, green, blue]` through persisted join state and public delivery
    readback.
@@ -26,6 +30,7 @@ PostgreSQL using the existing real-runtime catalog harness:
 | `duplicate_publication` | Republish each exact completion input: no extra intent, event, state mutation, receiver claim, or gather contribution |
 | `partial_restart` | Stop and reconstruct the runtime after one completion; preserve the partial barrier, worker IDs, and remaining timer IDs before finishing |
 | `rejected_input` | A boolean in a text field is refused; all workflow states and domain row counts remain unchanged, then valid completion still succeeds |
+| `hundred_reverse_completion` | All 100 separate workers finish in reverse order without changing membership order or retained entity/timer identities |
 
 The completion oracle follows the exact publication ID and its causal
 descendants, requires every expected delivery to settle, and checks closed

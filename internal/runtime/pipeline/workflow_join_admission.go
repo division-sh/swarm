@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -56,17 +57,100 @@ func validateAdmittedReceiverAvailability(ctx context.Context, source semanticvi
 type WorkflowJoinAdmissionFence struct {
 	Owner    flowidentity.RunScopedFlowInstance
 	EntityID string
-	Revision int64
+	Entry    timeridentity.StageEntryRef
+	Arms     []WorkflowJoinAdmissionArm
+}
+
+type WorkflowJoinAdmissionArm struct {
+	Receipt events.JoinAdmissionReceipt
+	Status  joinruntime.Status
 }
 
 func (f WorkflowJoinAdmissionFence) Validate() error {
 	if err := f.Owner.Validate(); err != nil {
 		return err
 	}
-	if f.EntityID == "" || f.Revision < 0 {
-		return fmt.Errorf("join admission requires exact entity and nonnegative observed revision")
+	if f.EntityID == "" || len(f.Arms) == 0 {
+		return fmt.Errorf("join admission requires exact entity and observed declarations")
 	}
-	return nil
+	if !f.Entry.Empty() {
+		if err := f.Entry.RequireOwner(f.Owner.RunID, f.Owner.Route.ScopeKey, f.Owner.Route.InstanceID, f.Owner.Route.InstancePath, f.EntityID, f.Entry.Stage); err != nil {
+			return err
+		}
+	}
+	receipts := make([]events.JoinAdmissionReceipt, len(f.Arms))
+	for index, arm := range f.Arms {
+		receipt := arm.Receipt
+		receipts[index] = receipt
+		if err := receipt.Validate(); err != nil {
+			return err
+		}
+		if receipt.Disposition == events.JoinAdmissionBound && receipt.Ref.StageEntry() != f.Entry {
+			return fmt.Errorf("join admission fence contradicts its observed entry")
+		}
+		if receipt.Disposition == events.JoinAdmissionBound {
+			if arm.Status != joinruntime.StatusOpen && arm.Status != joinruntime.StatusClosed {
+				return fmt.Errorf("join admission fence requires its observed arm status")
+			}
+		} else if arm.Status != "" || !f.Entry.Empty() && f.Entry.Stage == receipt.Ref.Stage() {
+			return fmt.Errorf("early join admission contradicts its observed entry")
+		}
+	}
+	return (events.DeliveryContext{Joins: receipts}).Validate()
+}
+
+// Unrelated writes and sibling arrivals do not change an immutable arm. Compare
+// the actual entry and bindings under the publication lock, never a row revision.
+func (f WorkflowJoinAdmissionFence) MatchesCurrent(stage string, bookkeeping, stateBuckets map[string]any) (bool, error) {
+	if err := f.Validate(); err != nil {
+		return false, err
+	}
+	entry, found, err := workflowlifecycle.LoadStageEntry(bookkeeping)
+	if err != nil {
+		return false, err
+	}
+	if !found {
+		return false, fmt.Errorf("existing join receiver is missing lifecycle entry evidence")
+	}
+	if err := entry.RequireOwner(f.Owner.RunID, f.Owner.Route.ScopeKey, f.Owner.Route.InstanceID, f.Owner.Route.InstancePath, f.EntityID, stage); err != nil {
+		return false, err
+	}
+	if entry != f.Entry {
+		return false, nil
+	}
+	carrier, err := engine.StateCarrierFromPersisted(nil, bookkeeping, nil, stateBuckets)
+	if err != nil {
+		return false, err
+	}
+	activations, err := joinruntime.List(carrier.StateBuckets)
+	if err != nil {
+		return false, err
+	}
+	for _, arm := range f.Arms {
+		receipt := arm.Receipt
+		var actual *joinruntime.Activation
+		for index := range activations {
+			activation := &activations[index]
+			if activation.JoinRef().StageEntry() != entry || !activation.JoinRef().Declaration().Equal(receipt.Ref.Declaration()) {
+				continue
+			}
+			if actual != nil {
+				return false, fmt.Errorf("join entry has competing immutable arms")
+			}
+			actual = activation
+		}
+		if receipt.Disposition == events.JoinAdmissionBound {
+			if actual == nil || !actual.JoinRef().Equal(receipt.Ref) {
+				return false, fmt.Errorf("join admission lost its immutable arm")
+			}
+			if actual.Status != arm.Status {
+				return false, nil
+			}
+		} else if actual != nil {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func WorkflowJoinAdmissionPlans(source semanticview.Source, node identity.ExecutableNode, event string) []runtimecontracts.WorkflowJoinPlan {
@@ -175,7 +259,6 @@ func PrepareWorkflowJoinAdmission(source semanticview.Source, runID, event strin
 		if _, err := requireWorkflowInstanceIdentity(ownerRoute, identity.EntityID(target.EntityID), *instance); err != nil {
 			return nil, nil, err
 		}
-		fence.Revision = instance.Revision
 		var found bool
 		entry, found, err = workflowlifecycle.LoadStageEntry(instance.Bookkeeping)
 		if err != nil {
@@ -196,24 +279,29 @@ func PrepareWorkflowJoinAdmission(source semanticview.Source, runID, event strin
 			return nil, nil, err
 		}
 	}
-	if err := fence.Validate(); err != nil {
-		return nil, nil, err
-	}
 	receipts := make([]events.JoinAdmissionReceipt, len(declarations))
+	fence.Arms = make([]WorkflowJoinAdmissionArm, len(declarations))
 	for index, declaration := range declarations {
 		receipt := events.JoinAdmissionReceipt{Ref: declaration, Disposition: events.JoinAdmissionEarly}
+		var status joinruntime.Status
 		for _, activation := range activations {
 			if activation.JoinRef().Declaration().Equal(declaration) && activation.JoinRef().StageEntry() == entry {
 				if receipt.Disposition == events.JoinAdmissionBound {
 					return nil, nil, fmt.Errorf("join entry has competing immutable arms")
 				}
 				receipt = events.JoinAdmissionReceipt{Ref: activation.JoinRef(), Disposition: events.JoinAdmissionBound}
+				status = activation.Status
 			}
 		}
 		if !entry.Empty() && entry.Stage == declaration.Stage() && receipt.Disposition != events.JoinAdmissionBound {
 			return nil, nil, fmt.Errorf("committed join stage entry is missing its arm")
 		}
 		receipts[index] = receipt
+		fence.Arms[index] = WorkflowJoinAdmissionArm{Receipt: receipt, Status: status}
+	}
+	fence.Entry = entry
+	if err := fence.Validate(); err != nil {
+		return nil, nil, err
 	}
 	return receipts, fence, nil
 }

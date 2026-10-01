@@ -11,7 +11,7 @@ import (
 )
 
 func TestRunRejectsAccumulatorHandlerOnCompleteThroughSharedAdmission(t *testing.T) {
-	bundle := templatefanin.LoadBundle(t, templatefanin.Options{})
+	bundle := templatefanin.LoadBundle(t)
 	node := bundle.Nodes[templatefanin.ReceiverNodeID]
 	handler := node.EventHandlers[templatefanin.ReceiverEvent]
 	handler.OnComplete = []runtimecontracts.HandlerRuleEntry{{ID: "finite-close", Condition: "accumulated.count >= 2"}}
@@ -24,7 +24,7 @@ func TestRunRejectsAccumulatorHandlerOnCompleteThroughSharedAdmission(t *testing
 }
 
 func TestRunAcceptsCanonicalStreamAccumulatorProducerPath(t *testing.T) {
-	bundle := templatefanin.LoadBundle(t, templatefanin.Options{})
+	bundle := templatefanin.LoadBundle(t)
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 	for _, finding := range report.HardInvalidities() {
 		if finding.CheckID == checkIDAccumulatorInputProducer || strings.Contains(finding.Message, "no accepted producer/source path") {

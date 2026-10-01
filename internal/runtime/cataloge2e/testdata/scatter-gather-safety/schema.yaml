@@ -14,7 +14,7 @@ pins:
   outputs:
     events: [item.registered, item.finished, batch.opened]
 connect:
-  - {event: batch.opened, from: ., to: collector}
+  - {event: batch.opened, from: ., to: collector, resolution: create}
   - {event: item.registered, from: ., to: workers, resolution: select-or-create}
   - {event: item.finished, from: ., to: workers, resolution: select}
-  - {event: item.reported, from: workers, to: collector}
+  - {event: item.reported, from: workers, to: collector, resolution: select}

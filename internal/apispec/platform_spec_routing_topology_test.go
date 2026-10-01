@@ -21,7 +21,7 @@ func TestPlatformSpecPromotesVersionedRoutingTopologyArtifact(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, routing, "endpoint_rule"), "interface exposures")
 	resolutionRule := mustMappingValue(t, routing, "resolution_rule")
 	assertScalarContains(t, resolutionRule, "connection-owned create, select and select-or-create")
-	assertScalarContains(t, resolutionRule, "retained receiver-owned fan-in and reply")
+	assertScalarContains(t, resolutionRule, "retained receiver-owned reply/fan-out")
 	assertScalarContains(t, resolutionRule, "target_set")
 	assertScalarContains(t, resolutionRule, "typed-reply facts")
 	assertScalarContains(t, resolutionRule, "fan-out remains non-runnable under #1934")

@@ -16,3 +16,4 @@ connect:
   - event: operating.reported
     from: operating
     to: portfolio
+    resolution: select-or-create

@@ -11,8 +11,8 @@ gather:
     item.reported:
       join:
         stage: awaiting
-        members: {from: entity.expected_item_ids}
-        window: {from: entity.batch_id}
+        members: {from: state.expected_item_ids, by: payload.item_id}
         output: payload.value
         on_complete: {advances_to: complete}
-        timeout: {after: 5m, advances_to: failed}
+        deadline: {after: 5m, from: stage_entry}
+        on_deadline: {advances_to: failed}

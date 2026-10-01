@@ -11,6 +11,7 @@ connect:
   - event: portfolio.setup
     from: .
     to: portfolio
+    resolution: select-or-create
   - event: operating.report.requested
     from: ingress
     to: operating
@@ -19,3 +20,4 @@ connect:
   - event: operating.reported
     from: operating
     to: portfolio
+    resolution: select

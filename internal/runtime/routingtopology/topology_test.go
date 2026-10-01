@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatefanin"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatereply"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateselectexisting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateselectorcreate"
@@ -85,41 +84,54 @@ func loadHarnessTopologySource(t *testing.T, root string) semanticview.Source {
 	return semanticview.Wrap(bundle)
 }
 
-func TestBuildProjectsFanInConnectWithCompleteResolution(t *testing.T) {
-	topology := Build(templatefanin.LoadSource(t, templatefanin.Options{}))
+func TestBuildProjectsOrdinaryKeyedReportConnectWithCompleteResolution(t *testing.T) {
+	topology := Build(loadHarnessTopologySource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.FanInStream)))
 	if topology.SchemaVersion != SchemaVersion || topology.SourceAuthority != SourceAuthority || !topology.ProjectionOnly {
 		t.Fatalf("identity = %q/%q, want canonical artifact identity", topology.SchemaVersion, topology.SourceAuthority)
+	}
+	if len(topology.Issues) != 0 {
+		t.Fatalf("ordinary keyed topology issues = %#v, want none", topology.Issues)
 	}
 	var edge *Edge
 	for i := range topology.Edges {
 		candidate := &topology.Edges[i]
-		if candidate.Scope == DeliveryScopeInterFlowConnect && candidate.Boundary != nil && candidate.Boundary.OutputPin == templatefanin.ProducerOutputPin {
+		if candidate.Scope == DeliveryScopeInterFlowConnect && candidate.Boundary != nil && candidate.Boundary.From == "operating.operating.reported" {
 			edge = candidate
 			break
 		}
 	}
 	if edge == nil {
-		t.Fatalf("edges = %#v, want inter-flow fan-in edge", topology.Edges)
+		t.Fatalf("edges = %#v, want exact operating-to-period connect edge", topology.Edges)
 	}
 	if edge.Boundary.From != "operating.operating.reported" || edge.Boundary.To != "portfolio.operating.reported" {
 		t.Fatalf("boundary = %#v, want authored endpoints", edge.Boundary)
 	}
 	if !strings.Contains(edge.Boundary.AuthoredLocation, "schema.yaml:") {
-
+		t.Fatalf("authored location = %q, want the connection's source location", edge.Boundary.AuthoredLocation)
 	}
-	if edge.Resolution == nil || edge.Resolution.Mode != "fan-in" || edge.Resolution.FanIn == nil {
-		t.Fatalf("resolution = %#v, want fan-in", edge.Resolution)
+	if edge.Resolution == nil || edge.Resolution.Mode != "select-or-create" || edge.Resolution.InstanceKey == nil {
+		t.Fatalf("resolution = %#v, want ordinary exact-key selection", edge.Resolution)
 	}
-	if edge.Resolution.FanIn.Window != "payload.period_id" || !reflect.DeepEqual(edge.Resolution.FanIn.DedupBy, []string{"payload.operating_id"}) || edge.Resolution.FanIn.Singleton != "portfolio" {
-		t.Fatalf("fan-in = %#v, want window/dedup", edge.Resolution.FanIn)
+	key := edge.Resolution.InstanceKey
+	if key.Field != "period_id" || key.SourceKind != "payload" || key.SourcePath != "payload.period_id" {
+		t.Fatalf("instance key = %#v, want exact period addressing", key)
 	}
-	if edge.RequiresRuntimeResolution {
-		t.Fatal("singleton fan-in edge unexpectedly claims runtime recipient resolution")
+	if !edge.RequiresRuntimeResolution {
+		t.Fatal("keyed connection concealed runtime receiver selection")
+	}
+	raw, err := json.Marshal(edge.Resolution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, retired := range []string{"fan_in", "aggregation", "window", "dedup_by", "singleton"} {
+		if strings.Contains(string(raw), "\""+retired+"\"") {
+			t.Fatalf("ordinary resolution readback contains retired %q metadata: %s", retired, raw)
+		}
 	}
 }
 
 func TestBuildKeepsTypedPubSubAndConnectProofShapesMutuallyExclusive(t *testing.T) {
-	topology := Build(templatefanin.LoadSource(t, templatefanin.Options{}))
+	topology := Build(loadHarnessTopologySource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.FanInStream)))
 	seen := map[DeliveryScope]bool{}
 	for _, edge := range topology.Edges {
 		seen[edge.Scope] = true
@@ -267,25 +279,41 @@ func TestResolutionViewPreservesCreateAndStaticDeclarations(t *testing.T) {
 }
 
 func TestBuildKeepsInvalidConnectAsIssueOnly(t *testing.T) {
-	topology := Build(templatefanin.LoadSource(t, templatefanin.Options{MissingWindow: true}))
-	if len(topology.Issues) != 1 || topology.Issues[0].Failure != "route_plan_instance_resolution_invalid" {
-		t.Fatalf("issues = %#v, want invalid fan-in route-plan issue", topology.Issues)
+	source := loadHarnessTopologySource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.FanInStream))
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("canonical source bundle unavailable")
+	}
+	found := false
+	for idx := range bundle.Semantics.CompositionConnects {
+		connect := &bundle.Semantics.CompositionConnects[idx]
+		if connect.Event == "operating.reported" && connect.From == "operating" && connect.To == "portfolio" {
+			connect.Rename = "operating.missing"
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("canonical operating report connection unavailable")
+	}
+	topology := Build(source)
+	if len(topology.Issues) != 1 || topology.Issues[0].Failure != pinrouting.ConnectFailureReceiverInputPinMissing.Code() {
+		t.Fatalf("issues = %#v, want exact missing-receiver-pin issue", topology.Issues)
 	}
 	if len(topology.Issues[0].ID) != len("issue-")+16 {
 		t.Fatalf("issue id = %q, want stable public issue digest", topology.Issues[0].ID)
 	}
 	if !strings.Contains(topology.Issues[0].AuthoredLocation, "schema.yaml:") {
-
+		t.Fatalf("issue location = %q, want exact authored connection source", topology.Issues[0].AuthoredLocation)
 	}
 	for _, edge := range topology.Edges {
-		if edge.Scope == DeliveryScopeInterFlowConnect && edge.Boundary != nil && edge.Boundary.From == "operating.operating_reported" {
+		if edge.Scope == DeliveryScopeInterFlowConnect && edge.Boundary != nil && edge.Boundary.From == "operating.operating.reported" {
 			t.Fatalf("invalid connect survived as executable edge: %#v", edge)
 		}
 	}
 }
 
 func TestBuildDoesNotReconstructMissingConnectSourceFromBundlePaths(t *testing.T) {
-	source := templatefanin.LoadSource(t, templatefanin.Options{})
+	source := loadHarnessTopologySource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.FanInStream))
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || len(bundle.Semantics.CompositionConnects) == 0 {
 		t.Fatalf("source bundle/connects unavailable")
@@ -293,7 +321,7 @@ func TestBuildDoesNotReconstructMissingConnectSourceFromBundlePaths(t *testing.T
 	found := false
 	for idx := range bundle.Semantics.CompositionConnects {
 		connect := &bundle.Semantics.CompositionConnects[idx]
-		if connect.Event != "operating.reported" || connect.From != "operating" || connect.To != "portfolio" {
+		if connect.Event != "operating.report.triggered" || connect.From != "." || connect.To != "ingress" {
 			continue
 		}
 		connect.SourceFile = ""
@@ -301,7 +329,7 @@ func TestBuildDoesNotReconstructMissingConnectSourceFromBundlePaths(t *testing.T
 		found = true
 	}
 	if !found {
-		t.Fatal("canonical fan-in connect unavailable")
+		t.Fatal("canonical static ingress connection unavailable")
 	}
 
 	topology := Build(source)
@@ -309,7 +337,7 @@ func TestBuildDoesNotReconstructMissingConnectSourceFromBundlePaths(t *testing.T
 		t.Fatalf("issues = %#v, want source-location issue without renderer fallback", topology.Issues)
 	}
 	for _, edge := range topology.Edges {
-		if edge.Scope == DeliveryScopeInterFlowConnect && edge.Boundary != nil && edge.Boundary.From == "operating.operating_reported" {
+		if edge.Scope == DeliveryScopeInterFlowConnect && edge.Boundary != nil && edge.Boundary.From == "operating.report.triggered" && edge.Boundary.To == "ingress.operating.report.triggered" {
 			t.Fatalf("connect without source proof survived as edge: %#v", edge)
 		}
 	}
@@ -441,7 +469,7 @@ func TestBuildRejectsImportedWildcardAsTypedPubSub(t *testing.T) {
 }
 
 func TestBuildIsDeterministic(t *testing.T) {
-	source := templatefanin.LoadSource(t, templatefanin.Options{})
+	source := loadHarnessTopologySource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.FanInStream))
 	first, err := json.Marshal(Build(source))
 	if err != nil {
 		t.Fatalf("marshal first topology: %v", err)

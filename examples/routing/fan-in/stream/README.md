@@ -1,13 +1,13 @@
-# Fan-in stream
+# Period-scoped report stream
 
-This recipe routes reports from independently created `operating` instances to the one `portfolio/default` coordinator. The input pin owns the stream window and deduplication key; `accumulate` only collects each accepted arrival and never waits for finite membership.
+This recipe routes reports from independently created `operating` instances to a `portfolio` instance keyed by `period_id`. Ordinary `select-or-create` routing owns instance selection; `accumulate.key: payload.operating_id` owns business deduplication within that instance. The stream has no finite membership or completion condition.
 
 ```sh
 swarm verify examples/routing/fan-in/stream
 swarm serve examples/routing/fan-in/stream
-swarm event publish operating.report.requested --payload-json '{"period_id":"2026-Q1","revenue":120}'
+swarm event publish operating.report.triggered --payload-json '{"period_id":"2026-Q1","revenue":120}'
 ```
 
-Expected: every distinct `operating_id` in a period is processed immediately and stored in that period's accumulator bucket. A duplicate identity in the same window is ignored. If finite completion is required, use the `fan-in/barrier` recipe instead of adding completion fields to `accumulate`.
+Expected: every distinct `operating_id` is processed immediately in its period's instance. An identical contribution under the same key is idempotent; changed content under that key is a conflict, not a silently discarded update. A different period selects a different instance with independent reports, accumulator state, and `last_revenue`. If finite completion is required, use the barrier recipe instead of adding completion fields to `accumulate`.
 
-Proof boundary: strict load, verify, and readback consume this checked artifact. The runtime proof is producer-driven: it enters at `operating.report.requested`, creates the operating instance, projects the event-ID-minted `operating_id` into its handler, emits `operating.reported`, and executes EventBus stream routing and windowed deduplication before downstream state writes.
+Proof boundary: strict load, verify, and readback consume this checked artifact. The runtime proof must enter through `operating.report.triggered`, create the operating instance, project the event-ID-minted `operating_id` into its handler, emit `operating.reported`, and prove ordinary period-keyed EventBus routing followed by keyed accumulation and isolated downstream state writes. There is no pin-owned partition or deduplication policy.

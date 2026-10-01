@@ -1,8 +1,9 @@
-operating.report.triggered:
+period.setup:
   portfolio_id: text
   period_id: text
-  revenue: integer
-portfolio.setup:
-  portfolio_id: text
   expected_operating_ids: "[text]"
+period.reported:
+  portfolio_id: text
   period_id: text
+  operating_id: text
+  revenue: integer

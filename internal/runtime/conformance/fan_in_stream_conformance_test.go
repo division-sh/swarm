@@ -1,600 +1,144 @@
 package conformance
 
 import (
-	"context"
+	"database/sql"
 	"encoding/json"
-	"fmt"
 	"reflect"
-	"strings"
 	"testing"
-	"time"
 
-	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
-	"github.com/division-sh/swarm/internal/runtime/bus"
-	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
-	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
-	runtimeentity "github.com/division-sh/swarm/internal/runtime/entityruntime"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatefanin"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
-func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(t *testing.T) {
+func TestKeyedPortfolioStreamRoutesAndRetainsIndependentPeriodsOnBothStores(t *testing.T) {
 	canonicalrouting.Prove(t, canonicalrouting.FanInStream)
-	ctx := testAuthorActivityContext(context.Background())
-	source := templatefanin.LoadSource(t, templatefanin.Options{})
-	report := runtimebootverify.Run(ctx, source, runtimebootverify.Options{})
-	if got := report.HardInvalidities(); len(got) != 0 {
-		t.Fatalf("fan-in stream hard invalidities = %#v, want none", got)
-	}
-	proveFanInStreamProducerPath(t, source)
-
-	store := &fanInStreamMemoryStore{}
-	eb, err := newScopedTestEventBus(t, store, bus.EventBusOptions{
-		ContractBundle: source,
-		Durable: bus.DurableDependencies{
-			TargetOwners: store, PreparedEvents: store,
-		},
-		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(context.Context, runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
-			t.Fatal("fan-in stream routes to an explicit singleton; template activation is not authoritative")
-			return runtimepipeline.FlowInstanceActivationPlan{}, nil
-		}),
-	})
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo,
+		canonicalrouting.ExampleRoot(t, canonicalrouting.FanInStream), runtimecontracts.DefaultPlatformSpecFile(repo))
 	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
+		t.Fatal(err)
 	}
-	state := initialFanInStreamState(t, source)
-	stateStore := &fanInStreamStateStore{snapshot: state}
-	exec, err := runtimeengine.NewExecutor(runtimeengine.RuntimeDependencies{
-		Source:        source,
-		StateRepo:     stateStore,
-		MutationOwner: stateStore,
-		Locker:        fanOutPinRouteLocker{},
-	}, nil)
-	if err != nil {
-		t.Fatalf("NewExecutor: %v", err)
-	}
-	receiverNode := conformanceNode(t, templatefanin.ReceiverFlowID, templatefanin.ReceiverNodeID)
-	handler, ok := source.ExecutableNodeEventHandler(receiverNode, templatefanin.ReceiverEvent)
-	if !ok {
-		t.Fatalf("receiver handler %s/%s missing", templatefanin.ReceiverNodeID, templatefanin.ReceiverEvent)
-	}
-
-	target := events.RouteIdentity{
-		FlowID:       templatefanin.ReceiverFlowID,
-		FlowInstance: templatefanin.ReceiverFlowInstance,
-		EntityID:     fanInStreamSelectedOwner(),
-	}.Normalized()
-	first := fanInStreamEvent(source.ResolveFlowEventReference(templatefanin.ProducerFlowID, templatefanin.ProducerEvent), "evt-fanin-a", "operating/a", "2026-Q1", 100)
-	state = fanInStreamPublishAndExecute(t, ctx, eb, store, exec, handler, state, first, target)
-	if got := fanInStreamAccumulatorItemCount(t, state.StateCarrier.StateBuckets, "2026-Q1"); got != 1 {
-		t.Fatalf("Q1 accumulator items after first = %d, want 1", got)
-	}
-	if got := state.StateCarrier.Fields["last_revenue"]; got != int64(100) {
-		t.Fatalf("last revenue after first = %#v, want 100", got)
-	}
-	assertFanInStreamReport(t, state.StateCarrier.Fields, "operating/a", 100)
-
-	duplicate := fanInStreamEvent(source.ResolveFlowEventReference(templatefanin.ProducerFlowID, templatefanin.ProducerEvent), "evt-fanin-b", "operating/a", "2026-Q1", 200)
-	state = fanInStreamPublishAndExecute(t, ctx, eb, store, exec, handler, state, duplicate, target)
-	if got := fanInStreamAccumulatorItemCount(t, state.StateCarrier.StateBuckets, "2026-Q1"); got != 1 {
-		t.Fatalf("Q1 accumulator items after duplicate = %d, want 1", got)
-	}
-	if got := state.StateCarrier.Fields["last_revenue"]; got != int64(100) {
-		t.Fatalf("last revenue after duplicate = %#v, want unchanged first arrival value", got)
-	}
-	assertFanInStreamReport(t, state.StateCarrier.Fields, "operating/a", 100)
-
-	nextWindow := fanInStreamEvent(source.ResolveFlowEventReference(templatefanin.ProducerFlowID, templatefanin.ProducerEvent), "evt-fanin-c", "operating/a", "2026-Q2", 300)
-	state = fanInStreamPublishAndExecute(t, ctx, eb, store, exec, handler, state, nextWindow, target)
-	if got := fanInStreamAccumulatorItemCount(t, state.StateCarrier.StateBuckets, "2026-Q1"); got != 1 {
-		t.Fatalf("Q1 accumulator items after Q2 = %d, want 1", got)
-	}
-	if got := fanInStreamAccumulatorItemCount(t, state.StateCarrier.StateBuckets, "2026-Q2"); got != 1 {
-		t.Fatalf("Q2 accumulator items = %d, want 1", got)
-	}
-	if got := state.StateCarrier.Fields["last_revenue"]; got != int64(300) {
-		t.Fatalf("last revenue after next window = %#v, want 300", got)
-	}
-	assertFanInStreamReport(t, state.StateCarrier.Fields, "operating/a", 300)
-}
-
-func TestCreateEventIDCarryProjectionReachesHandler(t *testing.T) {
-	canonicalrouting.Prove(t, canonicalrouting.FanInStream)
-	proveFanInStreamProducerPath(t, templatefanin.LoadSource(t, templatefanin.Options{}))
-}
-
-func proveFanInStreamProducerPath(t *testing.T, source semanticview.Source) {
-	t.Helper()
-	backend := storetest.StartSQLiteRuntimeStore(t)
-	runID := uuid.NewString()
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-	seedFanInBarrierRun(t, ctx, backend, storetest.Database(backend), runID)
-	runtime := newFanInBarrierRuntime(t, backend, storetest.Database(backend), source)
-	enteredAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	if _, err := runtime.pipeline.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath(templatefanin.ReceiverFlowInstance)}, runtimepipeline.WorkflowInstance{
-		InstanceID:      templatefanin.ReceiverFlowInstance,
-		StorageRef:      templatefanin.ReceiverFlowInstance,
-		EntityID:        runtimeflowidentity.EntityID(templatefanin.ReceiverFlowInstance),
-		InstanceKind:    "singleton",
-		WorkflowName:    templatefanin.ReceiverFlowID,
-		WorkflowVersion: "1.0.0",
-		CurrentState:    "pending",
-		EnteredStageAt:  enteredAt,
-		CreatedAt:       enteredAt,
-		Fields:          map[string]any{},
-		EntityType:      "portfolio_state",
-	}, enteredAt); err != nil {
-		t.Fatalf("seed fan-in stream singleton: %v", err)
-	}
-
-	requestEventID := uuid.NewString()
-	publishFanInBarrierEvent(t, ctx, runtime.bus, source, requestEventID, "ingress", "operating.report.requested", map[string]any{
-		"period_id": "2026-Q1",
-		"revenue":   100,
-	})
-
-	var requestPayloadRaw, reportPayloadRaw string
-	if err := storetest.Database(backend).QueryRowContext(ctx, `SELECT payload FROM events WHERE event_id = ?`, requestEventID).Scan(&requestPayloadRaw); err != nil {
-		t.Fatalf("load producer request payload: %v", err)
-	}
-	if err := storetest.Database(backend).QueryRowContext(ctx, `SELECT payload FROM events WHERE event_name LIKE 'operating/%/operating.reported'`).Scan(&reportPayloadRaw); err != nil {
-		t.Fatalf("load producer-driven report payload: %v", err)
-	}
-	var requestPayload, reportPayload map[string]any
-	if err := json.Unmarshal([]byte(requestPayloadRaw), &requestPayload); err != nil {
-		t.Fatalf("decode producer request payload: %v", err)
-	}
-	if err := json.Unmarshal([]byte(reportPayloadRaw), &reportPayload); err != nil {
-		t.Fatalf("decode producer-driven report payload: %v", err)
-	}
-	if _, exists := requestPayload["operating_id"]; exists {
-		t.Fatalf("producer request payload was mutated with receiver carry: %#v", requestPayload)
-	}
-	if reportPayload["operating_id"] != requestEventID || reportPayload["period_id"] != "2026-Q1" || reportPayload["revenue"] != float64(100) {
-		t.Fatalf("producer-driven report payload = %#v, want minted carry %s", reportPayload, requestEventID)
-	}
-	routes, err := backend.ListEventDeliveryRoutes(ctx, requestEventID)
-	if err != nil {
-		t.Fatalf("load producer request delivery routes: %v", err)
-	}
-	if len(routes) != 1 || routes[0].PayloadProjection.Fields()["operating_id"] != requestEventID {
-		t.Fatalf("producer request delivery routes = %#v, want stamped operating_id %s", routes, requestEventID)
-	}
-	portfolio := loadFanInBarrierPortfolio(t, ctx, runtime.pipeline)
-	carrier, err := runtimeengine.StateCarrierFromPersisted(portfolio.Fields, portfolio.Bookkeeping, portfolio.Gates, portfolio.StateBuckets)
-	if err != nil {
-		t.Fatalf("load producer-driven stream state: %v", err)
-	}
-	if got := fanInStreamAccumulatorItemCount(t, carrier.StateBuckets, "2026-Q1"); got != 1 {
-		t.Fatalf("producer-driven stream accumulator items = %d, want 1", got)
-	}
-	if got := carrier.Fields["last_revenue"]; got != int64(100) {
-		t.Fatalf("producer-driven stream last revenue = %#v, want 100", got)
-	}
-	assertFanInStreamReport(t, carrier.Fields, requestEventID, 100)
-}
-
-func assertFanInStreamReport(t *testing.T, fields map[string]any, operatingID string, revenue int64) {
-	t.Helper()
-	reports, ok := fields["reports"].(map[string]any)
-	if !ok {
-		t.Fatalf("reports = %#v, want map", fields["reports"])
-	}
-	report, ok := reports[operatingID].(map[string]any)
-	if !ok {
-		t.Fatalf("reports[%q] = %#v, want report payload", operatingID, reports[operatingID])
-	}
-	if report["revenue"] != revenue {
-		t.Fatalf("reports[%q].revenue = %#v, want %v", operatingID, report["revenue"], revenue)
-	}
-}
-
-func TestFanInStreamConformance_EventIDDedupUsesEventIdentity(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
-	source := templatefanin.LoadSource(t, templatefanin.Options{EventIDDedup: true})
-	report := runtimebootverify.Run(ctx, source, runtimebootverify.Options{})
-	if got := report.HardInvalidities(); len(got) != 0 {
-		t.Fatalf("fan-in stream event.id hard invalidities = %#v, want none", got)
-	}
-
-	store := &fanInStreamMemoryStore{}
-	eb, err := newScopedTestEventBus(t, store, bus.EventBusOptions{
-		ContractBundle: source,
-		Durable: bus.DurableDependencies{
-			TargetOwners: store, PreparedEvents: store,
-		},
-		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(context.Context, runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
-			t.Fatal("fan-in stream routes to an explicit singleton; template activation is not authoritative")
-			return runtimepipeline.FlowInstanceActivationPlan{}, nil
-		}),
-	})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	state := initialFanInStreamState(t, source)
-	stateStore := &fanInStreamStateStore{snapshot: state}
-	exec, err := runtimeengine.NewExecutor(runtimeengine.RuntimeDependencies{
-		Source:        source,
-		StateRepo:     stateStore,
-		MutationOwner: stateStore,
-		Locker:        fanOutPinRouteLocker{},
-	}, nil)
-	if err != nil {
-		t.Fatalf("NewExecutor: %v", err)
-	}
-	receiverNode := conformanceNode(t, templatefanin.ReceiverFlowID, templatefanin.ReceiverNodeID)
-	handler, ok := source.ExecutableNodeEventHandler(receiverNode, templatefanin.ReceiverEvent)
-	if !ok {
-		t.Fatalf("receiver handler %s/%s missing", templatefanin.ReceiverNodeID, templatefanin.ReceiverEvent)
-	}
-
-	target := events.RouteIdentity{
-		FlowID:       templatefanin.ReceiverFlowID,
-		FlowInstance: templatefanin.ReceiverFlowInstance,
-		EntityID:     fanInStreamSelectedOwner(),
-	}.Normalized()
-
-	first := fanInStreamEvent(source.ResolveFlowEventReference(templatefanin.ProducerFlowID, templatefanin.ProducerEvent), "evt-fanin-event-id", "operating/a", "2026-Q1", 100)
-	state = fanInStreamPublishAndExecute(t, ctx, eb, store, exec, handler, state, first, target)
-	if got := fanInStreamAccumulatorItemCount(t, state.StateCarrier.StateBuckets, "2026-Q1"); got != 1 {
-		t.Fatalf("Q1 accumulator items after first = %d, want 1", got)
-	}
-
-	state = fanInStreamPublishAndExecute(t, ctx, eb, store, exec, handler, state, first, target)
-	if got := fanInStreamAccumulatorItemCount(t, state.StateCarrier.StateBuckets, "2026-Q1"); got != 1 {
-		t.Fatalf("Q1 accumulator items after same event id = %d, want 1", got)
-	}
-
-	nextEvent := fanInStreamEvent(source.ResolveFlowEventReference(templatefanin.ProducerFlowID, templatefanin.ProducerEvent), "evt-fanin-event-id-2", "operating/c", "2026-Q1", 300)
-	state = fanInStreamPublishAndExecute(t, ctx, eb, store, exec, handler, state, nextEvent, target)
-	if got := fanInStreamAccumulatorItemCount(t, state.StateCarrier.StateBuckets, "2026-Q1"); got != 2 {
-		t.Fatalf("Q1 accumulator items after distinct event id = %d, want 2", got)
-	}
-}
-
-func initialFanInStreamState(t *testing.T, source semanticview.Source) runtimeengine.StateSnapshot {
-	t.Helper()
-	contract, ok := runtimeentity.ResolveForFlow(source, templatefanin.ReceiverFlowID)
-	if !ok {
-		t.Fatal("fan-in stream receiver entity contract missing")
-	}
-	fields, err := runtimeentity.Initialize(contract, nil)
-	if err != nil {
-		t.Fatalf("initialize fan-in stream receiver: %v", err)
-	}
-	return runtimeengine.StateSnapshot{
-		EntityID:     runtimeidentity.EntityID(fanInStreamSelectedOwner()),
-		CurrentState: "pending",
-		StateCarrier: runtimeengine.NewStateCarrier(fields, nil, nil),
-	}
-}
-
-type fanInStreamStateStore struct {
-	snapshot runtimeengine.StateSnapshot
-}
-
-func (s *fanInStreamStateStore) LoadState(_ context.Context, address runtimeengine.StateAddress) (runtimeengine.StateSnapshot, bool, error) {
-	if address.EntityID != s.snapshot.EntityID {
-		return runtimeengine.StateSnapshot{}, false, fmt.Errorf("fan-in stream state owner %s does not match %s", address.EntityID, s.snapshot.EntityID)
-	}
-	return s.snapshot, true, nil
-}
-
-func (s *fanInStreamStateStore) SaveState(context.Context, runtimeengine.StateAddress, runtimeengine.StateMutation) error {
-	return fmt.Errorf("fan-in stream state must commit through the mutation owner")
-}
-
-func (s *fanInStreamStateStore) CommitEngineMutation(_ context.Context, mutation runtimeengine.EngineMutation) (runtimeengine.CommittedEngineMutation, error) {
-	if mutation.Address.EntityID != s.snapshot.EntityID {
-		return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("fan-in stream mutation owner %s does not match %s", mutation.Address.EntityID, s.snapshot.EntityID)
-	}
-	s.snapshot.StateCarrier = mutation.State.StateCarrier
-	if mutation.State.NextState != "" {
-		s.snapshot.CurrentState = mutation.State.NextState
-	}
-	return runtimeengine.CommittedEngineMutation{
-		Committed:       true,
-		EmitIntents:     mutation.EmitIntents,
-		ActivityIntents: mutation.ActivityIntents,
-	}, nil
-}
-
-type fanInStreamMemoryStore struct {
-	bus.InMemoryEventStore
-	events         map[string]events.Event
-	settlements    map[string]events.RouteSettlement
-	deliveryRoutes map[string][]events.DeliveryRoute
-	scopes         map[string]runtimepipelineobligation.CommittedScope
-}
-
-func fanInStreamSelectedOwner() string {
-	return eventtest.UUID("fan-in-stream-selected-owner")
-}
-
-func (s *fanInStreamMemoryStore) ListSelectedRunTargetOwners(context.Context, string) ([]bus.ActiveTargetDescriptor, error) {
-	return []bus.ActiveTargetDescriptor{{
-		ID: "portfolio", FlowInstance: templatefanin.ReceiverFlowInstance, EntityID: fanInStreamSelectedOwner(),
-	}}, nil
-}
-
-func (s *fanInStreamMemoryStore) ListSelectedRunTargetOwnersForScope(ctx context.Context, runID string, instancePaths []string, sourceEntityID string) ([]bus.ActiveTargetDescriptor, error) {
-	for _, path := range instancePaths {
-		if path == templatefanin.ReceiverFlowInstance {
-			return s.ListSelectedRunTargetOwners(ctx, runID)
-		}
-	}
-	if sourceEntityID == fanInStreamSelectedOwner() {
-		return s.ListSelectedRunTargetOwners(ctx, runID)
-	}
-	return nil, nil
-}
-
-func (s *fanInStreamMemoryStore) CommitPublication(ctx context.Context, command bus.PublicationCommand) (bus.CommittedPublication, error) {
-	return runtimebustest.CommitPublish(ctx, command, func(_ context.Context, admitted events.AdmittedEvent) (bus.EventAppendOutcome, error) {
-		if original, exists := s.events[admitted.ID()]; exists {
-			if !reflect.DeepEqual(admitted.Event(), original) {
-				return bus.EventAppendOutcomeUnknown, events.ErrEventIdentityConflict
+	source := semanticview.Wrap(bundle)
+	for _, setup := range []struct {
+		name string
+		open func(*testing.T) (fanInBarrierConformanceStore, *sql.DB)
+	}{
+		{"sqlite", func(t *testing.T) (fanInBarrierConformanceStore, *sql.DB) {
+			s := storetest.StartSQLiteRuntimeStore(t)
+			return s, storetest.Database(s)
+		}},
+		{"postgres", func(t *testing.T) (fanInBarrierConformanceStore, *sql.DB) {
+			_, db, cleanup := testutil.StartPostgres(t)
+			t.Cleanup(cleanup)
+			return storetest.AdmitPostgresRuntimeStore(t, db), db
+		}},
+	} {
+		t.Run(setup.name, func(t *testing.T) {
+			backend, db := setup.open(t)
+			runID := uuid.NewString()
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t.Context()), runID)
+			seedFanInBarrierRun(t, ctx, backend, db, runID)
+			runtime := newFanInBarrierRuntime(t, backend, db, source)
+			load := func(period string) runtimepipeline.WorkflowInstance {
+				instances, err := runtime.pipeline.ListWorkflowInstances(ctx, runID)
+				var matches []runtimepipeline.WorkflowInstance
+				for _, instance := range instances {
+					if instance.WorkflowName == "portfolio" && instance.Fields["period_id"] == period {
+						matches = append(matches, instance)
+					}
+				}
+				if err != nil || len(matches) != 1 {
+					dumpFanInBarrierEvents(t, ctx, backend, db)
+					t.Logf("stream runtime diagnostics: %#v", runtime.diagnostics.snapshot())
+					t.Fatalf("period %s: matches=%#v err=%v", period, matches, err)
+				}
+				return matches[0]
 			}
-			return bus.EventAppendExactDuplicate, nil
-		}
-		return bus.EventAppendInserted, nil
-	}, func(_ context.Context, req bus.CommitPublishRequest) error {
-		event := req.Event.Event()
-		if s.events == nil {
-			s.events = map[string]events.Event{}
-		}
-		if s.deliveryRoutes == nil {
-			s.deliveryRoutes = map[string][]events.DeliveryRoute{}
-		}
-		if s.settlements == nil {
-			s.settlements = map[string]events.RouteSettlement{}
-		}
-		if s.scopes == nil {
-			s.scopes = map[string]runtimepipelineobligation.CommittedScope{}
-		}
-		s.events[event.ID()] = event
-		s.settlements[event.ID()] = req.RouteSettlement
-		s.deliveryRoutes[event.ID()] = events.NormalizeDeliveryRoutes(req.DeliveryRoutes)
-		s.scopes[event.ID()] = req.ReplayScope
-		return nil
-	})
+			request := func(period string, revenue int) string {
+				id := uuid.NewString()
+				publishFanInBarrierEvent(t, ctx, runtime.bus, source, id, "ingress", "operating.report.requested",
+					map[string]any{"period_id": period, "revenue": revenue})
+				return id
+			}
+			first := request("2026-Q1", 100)
+			q1 := load("2026-Q1")
+			if q1.Fields["last_revenue"] != int64(100) || q1.Fields["period_id"] != "2026-Q1" {
+				t.Fatalf("first period fields: %#v", q1.Fields)
+			}
+			assertKeyedPortfolioReport(t, q1, first, 100)
+			routes, err := backend.ListEventDeliveryRoutes(ctx, first)
+			if err != nil || len(routes) != 1 || routes[0].PayloadProjection.Fields()["operating_id"] != first {
+				t.Fatalf("create event.id projection: routes=%#v err=%v", routes, err)
+			}
+			prepared, found, err := backend.LoadPreparedPublishEvent(ctx, first)
+			if err != nil || !found {
+				t.Fatalf("source event: found=%v err=%v", found, err)
+			}
+			original := prepared.Event.Event()
+			var raw map[string]any
+			if err := json.Unmarshal(original.Payload(), &raw); err != nil {
+				t.Fatal(err)
+			}
+			if _, invented := raw["operating_id"]; invented {
+				t.Fatalf("connection projection mutated source business payload: %#v", raw)
+			}
+			second := request("2026-Q2", 300)
+			q2 := load("2026-Q2")
+			assertKeyedPortfolioReport(t, q2, second, 300)
+			if q2.Fields["last_revenue"] != int64(300) || q2.Fields["period_id"] != "2026-Q2" || q1.EntityID == q2.EntityID || q1.InstanceID == q2.InstanceID {
+				t.Fatalf("period ownership collapsed: q1=%#v q2=%#v", q1, q2)
+			}
+			if after := load("2026-Q1"); !reflect.DeepEqual(after, q1) {
+				t.Fatal("second period mutated the first period")
+			}
+			if err := runtime.manager.Shutdown(); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := runtime.workOwner.RetireAndWait(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if err := runtime.grant.Retire(ctx); err != nil {
+				t.Fatal(err)
+			}
+			runtime = newFanInBarrierRuntime(t, backend, db, source, 2)
+			if err := runtime.bus.PublishAcknowledged(ctx, original); err != nil {
+				t.Fatalf("reconstructed exact publication: %v", err)
+			}
+			if after := load("2026-Q1"); !reflect.DeepEqual(after, q1) {
+				t.Fatal("restart duplicate changed the original stream period")
+			}
+			if after := load("2026-Q2"); !reflect.DeepEqual(after, q2) {
+				t.Fatal("restart duplicate changed the sibling stream period")
+			}
+			for _, id := range []string{first, second} {
+				view, err := backend.LoadOperatorEvent(ctx, id)
+				if err != nil || len(view.Deliveries) != 1 || len(view.DeadLetters) != 0 || view.NoDelivery != nil {
+					t.Fatalf("public source projection %s: view=%#v err=%v", id, view, err)
+				}
+			}
+		})
+	}
 }
 
-func (s *fanInStreamMemoryStore) LoadPreparedPublishEvent(_ context.Context, eventID string) (bus.PreparedPublishEvent, bool, error) {
-	event, ok := s.events[strings.TrimSpace(eventID)]
-	if !ok {
-		return bus.PreparedPublishEvent{}, false, nil
-	}
-	admitted, err := events.RevalidatePersistedEvent(event)
-	if err != nil {
-		return bus.PreparedPublishEvent{}, false, err
-	}
-	routes := append([]events.DeliveryRoute(nil), s.deliveryRoutes[event.ID()]...)
-	settlement := s.settlements[event.ID()]
-	if err := settlement.Validate(routes); err != nil {
-		return bus.PreparedPublishEvent{}, false, err
-	}
-	return bus.PreparedPublishEvent{Event: admitted, Settlement: settlement, DeliveryRoutes: routes}, true, nil
-}
-
-func (s *fanInStreamMemoryStore) VerifyPreparedPublishEventIdentity(candidate events.AdmittedEvent, durable bus.PreparedPublishEvent) error {
-	if err := durable.Validate(); err != nil {
-		return err
-	}
-	if !reflect.DeepEqual(candidate.Event(), durable.Event.Event()) {
-		return events.ErrEventIdentityConflict
-	}
-	return nil
-}
-
-func (s *fanInStreamMemoryStore) InsertEventDeliveryRoutes(_ context.Context, eventID string, routes []events.DeliveryRoute) error {
-	if s.deliveryRoutes == nil {
-		s.deliveryRoutes = map[string][]events.DeliveryRoute{}
-	}
-	s.deliveryRoutes[eventID] = events.NormalizeDeliveryRoutes(routes)
-	return nil
-}
-
-func (s *fanInStreamMemoryStore) ListEventDeliveryRoutes(_ context.Context, eventID string) ([]events.DeliveryRoute, error) {
-	return append([]events.DeliveryRoute(nil), s.deliveryRoutes[eventID]...), nil
-}
-
-func (s *fanInStreamMemoryStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
-	return nil, nil
-}
-
-func fanInStreamPublishAndExecute(
-	t *testing.T,
-	ctx context.Context,
-	eb *bus.EventBus,
-	store *fanInStreamMemoryStore,
-	exec *runtimeengine.Executor,
-	handler runtimecontracts.SystemNodeEventHandler,
-	state runtimeengine.StateSnapshot,
-	evt events.Event,
-	target events.RouteIdentity,
-) runtimeengine.StateSnapshot {
+func assertKeyedPortfolioReport(t *testing.T, instance runtimepipeline.WorkflowInstance, operatingID string, revenue int64) {
 	t.Helper()
-	preflight, err := eb.CheckPublishRecipientPlan(ctx, evt)
+	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.Gates, instance.StateBuckets)
 	if err != nil {
-		t.Fatalf("CheckPublishRecipientPlan(%s): %v", evt.ID(), err)
+		t.Fatal(err)
 	}
-	if preflight.TargetFailure != "" || !fanInStreamRoutesContain(preflight.DeliveryRoutes, target) {
-		t.Fatalf("preflight for %s = failure:%q routes:%#v, want singleton target %#v", evt.ID(), preflight.TargetFailure, preflight.DeliveryRoutes, target)
+	reports, ok := carrier.Fields["reports"].(map[string]any)
+	if !ok || len(reports) != 1 {
+		t.Fatalf("period reports: %#v", carrier.Fields["reports"])
 	}
-	if err := eb.Publish(ctx, evt); err != nil {
-		t.Fatalf("Publish(%s): %v", evt.ID(), err)
-	}
-	deliveryTarget, ok := fanInStreamTargetRoute(store.deliveryRoutes[evt.ID()], target)
-	if !ok {
-		t.Fatalf("persisted routes for %s = %#v, want singleton target %#v", evt.ID(), store.deliveryRoutes[evt.ID()], target)
-	}
-	if deliveryTarget.EntityID == "" {
-		t.Fatalf("persisted route for %s has empty entity_id: %#v", evt.ID(), deliveryTarget)
-	}
-	if got := store.scopes[evt.ID()]; got != runtimepipelineobligation.ScopeSubscribed {
-		t.Fatalf("committed replay scope for %s = %q, want subscribed", evt.ID(), got)
-	}
-	subscription, err := eb.SubscribeInternal(
-		ctx,
-		conformanceNode(t, templatefanin.ReceiverFlowID, templatefanin.ReceiverNodeID).Key(),
-		evt.Type(),
-	)
-	if err != nil {
-		t.Fatalf("SubscribeInternal(%s): %v", evt.ID(), err)
-	}
-	subscription.MarkReady()
-	if _, err := eb.RecoverPersistedPipeline(ctx, runtimepipelineobligation.ClaimedWork{
-		Event: evt, Scope: runtimepipelineobligation.ScopeSubscribed,
-	}, nil); err != nil {
-		t.Fatalf("RecoverPersistedPipeline(%s): %v", evt.ID(), err)
-	}
-	select {
-	case delivery := <-subscription.Deliveries():
-		if delivery == nil {
-			t.Fatalf("RecoverPersistedPipeline(%s) delivered nil work", evt.ID())
-		}
-		if got := delivery.Event().ID(); got != evt.ID() {
-			t.Fatalf("RecoverPersistedPipeline(%s) delivered event %s", evt.ID(), got)
-		}
-		if got := delivery.HandoffRoute().Target.Route().Normalized(); got != deliveryTarget.Normalized() {
-			t.Fatalf("RecoverPersistedPipeline(%s) target = %#v, want %#v", evt.ID(), got, deliveryTarget.Normalized())
-		}
-		if err := delivery.Complete(); err != nil {
-			t.Fatalf("complete recovered delivery %s: %v", evt.ID(), err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatalf("timed out waiting for recovered delivery %s", evt.ID())
-	}
-	if err := subscription.Complete(false); err != nil {
-		t.Fatalf("retire recovered delivery subscription %s: %v", evt.ID(), err)
-	}
-	delivered := eventtest.TargetRouted(evt, deliveryTarget)
-	if got := delivered.EntityID(); got != deliveryTarget.EntityID {
-		t.Fatalf("delivered event %s entity_id = %q, want delivery target entity %q", evt.ID(), got, deliveryTarget.EntityID)
-	}
-	executionState := state
-	executionState.EntityID = ""
-	result, err := exec.Execute(ctx, runtimeengine.ExecutionRequest{
-		Node:            conformanceNode(t, templatefanin.ReceiverFlowID, templatefanin.ReceiverNodeID),
-		ExecutionFlowID: runtimeidentity.NormalizeFlowID(templatefanin.ReceiverFlowID),
-		Event:           delivered,
-		HandlerEventKey: templatefanin.ReceiverEvent,
-		Handler:         handler,
-		ProducerSource:  evt.RoutingSource(),
-		State:           executionState,
-		MaxDepth:        10,
-		ChainDepth:      0,
-		ExecutionID:     evt.ID(),
-	})
-	if err != nil {
-		t.Fatalf("Execute(%s): %v", evt.ID(), err)
-	}
-	metadata := state.StateCarrier.Fields
-	if result.StateMutation.StateCarrier.Fields != nil {
-		metadata = result.StateMutation.StateCarrier.Fields
-	}
-	gates := state.StateCarrier.Gates
-	if result.StateMutation.StateCarrier.Gates != nil {
-		gates = result.StateMutation.StateCarrier.Gates
-	}
-	buckets := state.StateCarrier.StateBuckets
-	if result.StateMutation.StateCarrier.StateBuckets != nil {
-		buckets = result.StateMutation.StateCarrier.StateBuckets
-	}
-	return runtimeengine.StateSnapshot{
-		EntityID:     runtimeidentity.EntityID(deliveryTarget.EntityID),
-		CurrentState: state.CurrentState,
-		StateCarrier: runtimeengine.NewStateCarrier(metadata, gates, buckets),
-	}
-}
-
-func fanInStreamEvent(eventType, id, flowInstance, periodID string, revenue int) events.Event {
-	if prefix := templatefanin.ProducerFlowID + "/"; strings.HasPrefix(eventType, prefix) {
-		eventType = strings.Trim(strings.TrimSpace(flowInstance), "/") + "/" + strings.TrimPrefix(eventType, prefix)
-	}
-	payload, _ := json.Marshal(map[string]any{
-		"period_id":    periodID,
-		"operating_id": flowInstance,
-		"revenue":      revenue,
-	})
-	return eventtest.ExistingRunRootIngressWithRoutingSource(
-		eventtest.UUID(id),
-		events.EventType(eventType),
-		"",
-		"",
-		payload,
-		0,
-		eventtest.UUID("run-fanin-stream"),
-		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
-			FlowID:       templatefanin.ProducerFlowID,
-			FlowInstance: flowInstance,
-			EntityID:     runtimeflowidentity.EntityID(flowInstance + "-entity"),
-		}),
-		eventtest.ConcreteTemplateRoutingSource(templatefanin.ProducerFlowID, flowInstance, runtimeflowidentity.EntityID(flowInstance+"-entity")),
-		time.Now().UTC(),
-	)
-}
-
-func fanInStreamRoutesContain(routes []events.DeliveryRoute, target events.RouteIdentity) bool {
-	_, ok := fanInStreamTargetRoute(routes, target)
-	return ok
-}
-
-func fanInStreamTargetRoute(routes []events.DeliveryRoute, target events.RouteIdentity) (events.RouteIdentity, bool) {
-	target = target.Normalized()
-	receiver, err := runtimeidentity.AdmitExecutableNodeDeclaration(templatefanin.ReceiverFlowID, templatefanin.ReceiverNodeID)
-	if err != nil {
-		return events.RouteIdentity{}, false
-	}
-	for _, route := range events.NormalizeDeliveryRoutes(routes) {
-		owner := route.Target.Route()
-		if route.Recipient.IsNode() && route.Recipient.ID() == receiver.Key() &&
-			owner.FlowID == target.FlowID && owner.FlowInstance == target.FlowInstance &&
-			owner.EntityID == target.EntityID {
-			return owner, true
-		}
-	}
-	return events.RouteIdentity{}, false
-}
-
-func fanInStreamAccumulatorItemCount(t *testing.T, buckets map[string]map[string]any, window string) int {
-	t.Helper()
-	node := conformanceNode(t, templatefanin.ReceiverFlowID, templatefanin.ReceiverNodeID)
-	key := timeridentity.NewAccumulatorBucketRef(node, templatefanin.ReceiverEvent).Key()
-	nodeBucket, ok := buckets[node.Key()]
-	if !ok {
-		t.Fatalf("receiver node bucket missing from %#v", buckets)
-	}
-	accumulators, ok := nodeBucket["handler_accumulators"].(map[string]any)
-	if !ok {
-		t.Fatalf("handler accumulator map missing from %#v", nodeBucket)
-	}
-	raw, ok := accumulators[key].(map[string]any)
-	if !ok {
-		t.Fatalf("instance accumulator %q for business partition %q missing from %#v", key, window, accumulators)
-	}
-	switch items := raw["items"].(type) {
-	case []map[string]any:
-		return len(items)
-	case []any:
-		return len(items)
-	default:
-		t.Fatalf("accumulator items have unexpected shape: %#v", raw["items"])
-		return 0
+	row, ok := reports[operatingID].(map[string]any)
+	if !ok || row["revenue"] != revenue {
+		t.Fatalf("reports[%s]=%#v, want revenue=%d", operatingID, reports[operatingID], revenue)
 	}
 }

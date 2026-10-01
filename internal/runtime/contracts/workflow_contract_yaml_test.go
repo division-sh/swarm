@@ -595,8 +595,8 @@ func TestFlowSchemaDocumentDecode_PreservesInputPinResolutionModes(t *testing.T)
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
 	pins := doc.Pins.Inputs.EventPins
-	if len(pins) != 6 {
-		t.Fatalf("input EventPins len = %d, want 6", len(pins))
+	if len(pins) != 5 {
+		t.Fatalf("input EventPins len = %d, want 5", len(pins))
 	}
 	create := doc.Connect[0]
 	if got, want := create.Resolution, FlowInputResolutionModeCreate; got != want {
@@ -611,16 +611,10 @@ func TestFlowSchemaDocumentDecode_PreservesInputPinResolutionModes(t *testing.T)
 	if got, want := doc.Connect[2].KeyFrom, "payload.external_account_id"; got != want {
 		t.Fatalf("select-or-create KeyFrom = %q, want %q", got, want)
 	}
-	if got, want := pins[3].Resolution.Aggregation, "stream"; got != want {
-		t.Fatalf("fan-in aggregation = %q, want %q", got, want)
-	}
-	if got, want := strings.Join(pins[3].Resolution.DedupBy, ","), "event.id,payload.operating_id"; got != want {
-		t.Fatalf("fan-in dedup_by = %q, want %q", got, want)
-	}
-	if got, want := pins[4].Resolution.Mode, FlowInputResolutionModeFanOut; got != want {
+	if got, want := pins[3].Resolution.Mode, FlowInputResolutionModeFanOut; got != want {
 		t.Fatalf("fan-out mode = %q, want %q", got, want)
 	}
-	if got, want := pins[5].Resolution.RepliesTo, "provider.requested"; got != want {
+	if got, want := pins[4].Resolution.RepliesTo, "provider.requested"; got != want {
 		t.Fatalf("reply replies_to = %q, want %q", got, want)
 	}
 }
@@ -2007,7 +2001,7 @@ func TestW2LoaderRejectsResolutionFromOutsideInstanceSelectionModes(t *testing.T
 		name string
 		root func(testing.TB) string
 	}{
-		{name: "fan-in", root: canonicalrouting.CopyFanInWithInertFrom},
+		{name: "fan-in", root: canonicalrouting.CopyRetiredFanInPin},
 		{name: "reply", root: canonicalrouting.CopyTemplateReplyWithInertFrom},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

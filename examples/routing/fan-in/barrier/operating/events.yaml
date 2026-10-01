@@ -1,4 +1,5 @@
 operating.reported:
   operating_id: text
+  portfolio_id: text
   period_id: text
   revenue: integer
