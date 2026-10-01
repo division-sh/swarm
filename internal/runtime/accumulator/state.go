@@ -27,6 +27,16 @@ func (s *State) Err() error {
 // Admit checks every refusal before changing either receipts or business items.
 // Delivery receipts are transport idempotency, not implicit business dedup keys.
 func (s *State) Admit(spec *runtimecontracts.AccumulateSpec, payload map[string]any, deliveryID string) (duplicate bool, err error) {
+	return s.admit(spec, payload, deliveryID, false)
+}
+
+// Preview evaluates a hypothetical arrival without minting transport evidence.
+// The caller owns a private snapshot; this state must never be persisted.
+func (s *State) Preview(spec *runtimecontracts.AccumulateSpec, payload map[string]any) (duplicate bool, err error) {
+	return s.admit(spec, payload, "", true)
+}
+
+func (s *State) admit(spec *runtimecontracts.AccumulateSpec, payload map[string]any, deliveryID string, preview bool) (duplicate bool, err error) {
 	if s.loadError != nil {
 		return false, s.loadError
 	}
@@ -59,7 +69,7 @@ func (s *State) Admit(spec *runtimecontracts.AccumulateSpec, payload map[string]
 		if len(s.Received) != 0 {
 			return false, invalidState("unkeyed receipt mode")
 		}
-		if deliveryID == "" {
+		if deliveryID == "" && !preview {
 			return false, failures.New(failures.ClassLifecycleConflict, "accumulator_delivery_required", "accumulator", "admit", nil)
 		}
 	}
@@ -69,6 +79,10 @@ func (s *State) Admit(spec *runtimecontracts.AccumulateSpec, payload map[string]
 	canonical, err := canonicaljson.Bytes(payload)
 	if err != nil {
 		return false, failures.Wrap(failures.ClassSchemaInvalid, "accumulator_payload_invalid", "accumulator", "admit", nil, err)
+	}
+	if preview && !keyed {
+		s.Items = append(s.Items, cloneObject(payload))
+		return false, nil
 	}
 	hash := canonicaljson.HashBytes(canonical)
 	identity, receipts := key, s.Received

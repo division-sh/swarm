@@ -35,7 +35,7 @@ func TestNodeContractFirstEventTransitionsFromCanonicalInitialStateOnBothStores(
 			}
 			configureWorkflowLifecycleForTest(t, pc)
 
-			entityID := uuid.NewString()
+			entityID := FlowInstanceEntityID(runID)
 			eventID := uuid.NewString()
 			occurredAt := time.Now().UTC()
 			evt := eventtest.RunCreatingRootIngress(
@@ -55,7 +55,11 @@ func TestNodeContractFirstEventTransitionsFromCanonicalInitialStateOnBothStores(
 				dialect = authoractivityfixture.DialectSQLite
 			}
 			seedPipelineEventRecordForDialect(t, ctx, store.testDB(), dialect, evt)
-			outcome, err := pc.executeNodeContractHandler(ctx, pipelineSourceNode(t, pc.SemanticSource(), ".", "acceptor"), runtimecontracts.SystemNodeEventHandler{
+			node := pipelineSourceNode(t, pc.SemanticSource(), ".", "acceptor")
+			ctx = withClaimedWorkflowNodePublicationForTest(t, pc, ctx, evt, events.DeliveryRoute{
+				Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID}),
+			})
+			outcome, err := pc.executeNodeContractHandler(ctx, node, runtimecontracts.SystemNodeEventHandler{
 				AdvancesTo: "done",
 			}, workflowTriggerContext{Event: evt, HandlerEventKey: "request.accepted"}, false)
 			if err != nil {

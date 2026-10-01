@@ -199,7 +199,7 @@ func executeExistingOwnerBehavior(
 	target := events.RouteIdentity{FlowID: ".", FlowInstance: flowInstance, EntityID: entityID}
 	seedExactOnceEvent(t, pc.workflowStore, ctx, sourceEvent)
 	evt := eventtest.TargetRouted(sourceEvent, target)
-	deliveryCtx := withWorkflowNodeDeliveryRoute(ctx, events.DeliveryRoute{
+	deliveryCtx := withClaimedWorkflowNodePublicationForTest(t, pc, ctx, evt, events.DeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient(node),
 		Target:    events.MustExistingEntityTarget(target),
 	})

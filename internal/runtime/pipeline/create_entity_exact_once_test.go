@@ -52,6 +52,8 @@ func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T
 			seedExactOnceEvent(t, pc.workflowStore, ctx, evt)
 
 			node := pipelineSourceNode(t, pc.SemanticSource(), "validation", "w-node")
+			route := seedExactOnceEventDelivery(t, pc, ctx, evt, node)
+			ctx = withClaimedWorkflowNodePublicationForTest(t, pc, ctx, evt, route)
 			result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, node, exactOnceCreateEntityHandler(), workflowTriggerContext{
 				Event:           evt,
 				HandlerEventKey: "thing.created",

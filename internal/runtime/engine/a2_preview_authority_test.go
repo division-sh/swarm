@@ -5,7 +5,9 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -42,5 +44,30 @@ func TestA2PreviewEvaluatesTransitionWithoutDurableOccurrence(t *testing.T) {
 		if !reflect.DeepEqual(request.State, before) {
 			t.Fatal("preview mutated its input snapshot")
 		}
+	}
+}
+
+func TestA2PreviewEvaluatesUnkeyedArrivalWithoutDeliveryEvidence(t *testing.T) {
+	executor, repo := a2AccumulatorExecutor(t)
+	request := a2AccumulatorRequest(t, "", `{"id":"item","marker":"hypothetical"}`, "preview-only")
+	request.Preview = true
+	before := repo.snapshot
+	result, err := executor.ExecuteSemanticFixture(context.Background(), request)
+	if err != nil || result.Committed || result.Status == OutcomeDiscarded {
+		t.Fatalf("preview=%#v err=%v", result, err)
+	}
+	preview := StateSnapshot{StateCarrier: result.StateMutation.StateCarrier}
+	acc, found := loadAccumulator(preview, request.Node, events.EventType(request.HandlerEventKey))
+	if !found || len(acc.Items) != 1 || len(acc.Deliveries) != 0 || len(acc.Received) != 0 || acc.Items[0]["marker"] != "hypothetical" {
+		t.Fatalf("preview invented or omitted arrival evidence: %#v", acc)
+	}
+	if !reflect.DeepEqual(repo.snapshot, before) {
+		t.Fatal("preview changed the persisted snapshot")
+	}
+	request.Preview = false
+	_, err = executor.ExecuteSemanticFixture(context.Background(), request)
+	requireAccumulatorFailure(t, err, failures.ClassLifecycleConflict)
+	if !reflect.DeepEqual(repo.snapshot, before) {
+		t.Fatal("unclaimed execution changed the persisted snapshot")
 	}
 }

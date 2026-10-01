@@ -5979,6 +5979,7 @@ engine:
         steps. An exact duplicate updates no item and does not invent a completion signal.'
     finite_boundary: Declared membership and closure belong only to WorkflowJoinPlan and the appropriate arrival/fanout barrier owner.
     idempotency: Durable delivery replay has no downstream effects; distinct unkeyed deliveries preserve multiplicity and commit order.
+    preview: Read-only evaluation appends a hypothetical unkeyed arrival to a private snapshot without inventing delivery receipts; real execution still requires its admitted durable delivery.
     cleanup: Stream buckets are not implicitly archived or deleted by arrival processing.
   join_engine:
     description: >-

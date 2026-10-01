@@ -1162,7 +1162,12 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 	if claim, ok := runtimedelivery.ClaimFromContext(frame.ctx); ok {
 		deliveryID = claim.DeliveryID()
 	}
-	duplicate, err := acc.Admit(spec, frame.payload, deliveryID)
+	var duplicate bool
+	if frame.req.Preview {
+		duplicate, err = acc.Preview(spec, frame.payload)
+	} else {
+		duplicate, err = acc.Admit(spec, frame.payload, deliveryID)
+	}
 	if err != nil {
 		return false, err
 	}

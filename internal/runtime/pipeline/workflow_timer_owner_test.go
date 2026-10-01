@@ -531,6 +531,10 @@ func TestWorkflowTimerLifecycleReconcilesProgressedInitialDeclarationsProspectiv
 			if err != nil {
 				t.Fatalf("build progressed lifecycle effect: %v", err)
 			}
+			effect, err = admitTestLifecycleDeliveryOccurrence(runtimecorrelation.WithInboundEvent(ctx, inbound), pcA, effect)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if err := commitTestWorkflowLifecycleMutation(runtimecorrelation.WithInboundEvent(ctx, inbound), pcA, route, progressed, "waiting", []runtimeworkflowlifecycle.Effect{effect}); err != nil {
 				t.Fatalf("commit progressed workflow instance: %v", err)
 			}

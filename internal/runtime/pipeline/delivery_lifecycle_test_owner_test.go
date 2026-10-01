@@ -115,18 +115,26 @@ func newPipelineTestDeliveryOwner(t interface {
 	Fatalf(string, ...any)
 }, db *sql.DB, sqlite bool) *pipelineTestDeliveryOwner {
 	t.Helper()
+	owner, err := openPipelineTestDeliveryOwner(db, sqlite)
+	if err != nil {
+		t.Fatalf("create pipeline test delivery owner: %v", err)
+	}
+	return owner
+}
+
+func openPipelineTestDeliveryOwner(db *sql.DB, sqlite bool) (*pipelineTestDeliveryOwner, error) {
 	dialect := deliveryfixture.DialectPostgres
 	if sqlite {
 		dialect = deliveryfixture.DialectSQLite
 		if err := deliveryfixture.CreateSQLiteRunAdmissionSchema(context.Background(), db); err != nil {
-			t.Fatalf("create pipeline delivery run admission schema: %v", err)
+			return nil, err
 		}
 	}
 	adapter, err := deliveryfixture.NewAdapter(dialect)
 	if err != nil {
-		t.Fatalf("create pipeline test delivery owner: %v", err)
+		return nil, err
 	}
-	return &pipelineTestDeliveryOwner{db: db, dialect: dialect, adapter: adapter}
+	return &pipelineTestDeliveryOwner{db: db, dialect: dialect, adapter: adapter}, nil
 }
 
 func (s *pipelineTestDeliveryOwner) mutate(ctx context.Context, fn func(context.Context, *eventfixture.Attempt, *sql.Tx) error) error {

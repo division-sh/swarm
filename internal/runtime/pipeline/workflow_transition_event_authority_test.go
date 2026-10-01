@@ -95,6 +95,18 @@ func TestPipelineTransitionRejectsCoherentEventSubstitutionOnBothStores(t *testi
 				if err != nil {
 					t.Fatalf("prepare actual delivery application: %v", err)
 				}
+				publicationEffect, err := workflowlifecycle.NewAcceptedEvent(address.FlowInstance.Route, identity.NormalizeEntityID(entityID), accepted.ID(), string(accepted.Type()), accepted.ExecutionMode(), accepted.CreatedAt(), &cause)
+				if err != nil {
+					t.Fatal(err)
+				}
+				publicationEffect, err = admitTestLifecycleDeliveryOccurrence(runtimecorrelation.WithInboundEvent(ctx, accepted), pc, publicationEffect)
+				if err != nil {
+					t.Fatal(err)
+				}
+				entry, hasEntry, err := publicationEffect.StageEntry(address.FlowInstance)
+				if err != nil || !hasEntry {
+					t.Fatalf("actual publication occurrence: found=%v err=%v", hasEntry, err)
+				}
 				if variant != "direct_execution_control" && variant != "missing_execution_event" {
 					ctx = withDeliveryTargetApplication(ctx, application)
 				}
@@ -123,6 +135,10 @@ func TestPipelineTransitionRejectsCoherentEventSubstitutionOnBothStores(t *testi
 				// agreement must not substitute for the accepted execution event.
 				effect, err := workflowlifecycle.NewAcceptedEvent(address.FlowInstance.Route, identity.NormalizeEntityID(entityID),
 					state.TriggerEventID, state.TriggerEventType, accepted.ExecutionMode(), state.TriggeredAt, &cause)
+				if err != nil {
+					t.Fatal(err)
+				}
+				effect, err = effect.WithExecutionOccurrence("delivery", entry.OccurrenceID)
 				if err != nil {
 					t.Fatal(err)
 				}

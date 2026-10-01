@@ -712,7 +712,11 @@ func TestExecuteNodeContractHandlerPublishesAfterPersistencePrerequisiteFieldSuc
 		runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC(),
 	)
 	seedExactOnceEvent(t, pc.workflowStore, ctx, evt)
-	result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
+	node := pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a")
+	ctx = withClaimedWorkflowNodePublicationForTest(t, pc, ctx, evt, events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID}),
+	})
+	result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, node, runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
 				{TargetField: "business_brief"},

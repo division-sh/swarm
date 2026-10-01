@@ -62,7 +62,7 @@ func TestJoinCapturedLoopOutcomeAfterRestartBothStores(t *testing.T) {
 						t.Helper()
 						event := eventtest.RunCreatingRootIngressWithRoutingSource(uuid.NewString(), events.EventType(eventType), "operator", "", mustJSON(payload), 0, runtimecorrelation.RunIDFromContext(h.ctx), "", h.envelope(), exactJoinRoutingSource(flowID, h.path, h.entityID), time.Now().UTC())
 						persistExactJoinEvent(t, h.store, h.ctx, event)
-						if _, err := h.pc.executeNodeContractHandler(h.ctx, pipelineNode(t, flowID, "observer"), handler, workflowTriggerContext{Event: event, State: mustCurrentWorkflowState(t, h.pc, h.ctx, h.route, h.entityID), HandlerEventKey: eventType}, false); err != nil {
+						if _, err := executePublishedWorkflowJoinForTest(t, h.pc, h.ctx, pipelineNode(t, flowID, "observer"), handler, workflowTriggerContext{Event: event, State: mustCurrentWorkflowState(t, h.pc, h.ctx, h.route, h.entityID), HandlerEventKey: eventType}); err != nil {
 							t.Fatal(err)
 						}
 					}

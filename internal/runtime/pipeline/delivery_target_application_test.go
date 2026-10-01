@@ -425,7 +425,7 @@ func TestDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycleW
 				},
 			},
 			{
-				name: "wrong-descriptor", wantError: "descriptor or status conflicts",
+				name: "wrong-descriptor", wantError: "lifecycle descriptor conflicts with compiled receiver",
 				seed: func(t *testing.T, ctx context.Context, instancePath, entityID string, store *workflowInstanceStore, _ *sql.DB) {
 					t.Helper()
 					if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
@@ -439,7 +439,7 @@ func TestDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycleW
 				},
 			},
 			{
-				name: "terminated-status", wantError: "descriptor or status conflicts",
+				name: "terminated-status", wantError: "lifecycle is not active",
 				seed: func(t *testing.T, ctx context.Context, instancePath, entityID string, store *workflowInstanceStore, db *sql.DB) {
 					t.Helper()
 					instance := materializedWorkflowInstanceForTest(WorkflowInstance{
@@ -462,7 +462,7 @@ func TestDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycleW
 				},
 			},
 			{
-				name: "draining-status", wantError: "descriptor or status conflicts",
+				name: "draining-status", wantError: "lifecycle is not active",
 				seed: func(t *testing.T, ctx context.Context, instancePath, entityID string, store *workflowInstanceStore, db *sql.DB) {
 					t.Helper()
 					instance := materializedWorkflowInstanceForTest(WorkflowInstance{
@@ -586,7 +586,7 @@ func TestNonActiveDeliveryTargetRejectsDelayedAndReplayedExecutionBeforeMutation
 				t.Helper()
 				deliveryCtx := withWorkflowNodeDeliveryRoute(ctx, route)
 				_, err := coordinator.executeNodeContractHandler(deliveryCtx, node, handler, workflowTriggerContext{Event: evt, HandlerEventKey: "work.ready"}, false)
-				if err == nil || !strings.Contains(err.Error(), "descriptor or status conflicts") {
+				if err == nil || !strings.Contains(err.Error(), "lifecycle is not active") {
 					t.Fatalf("%s non-active target error = %v, want fail-closed status conflict", label, err)
 				}
 				if bus.outboxCount() != 0 || bus.publishedCount() != 0 {
@@ -663,7 +663,7 @@ func TestDeliveryTargetApplicationCarriesScenarioPreStateThroughFirstMutationOnS
 			seedExactOnceEvent(t, store, ctx, evt)
 			node := pipelineNode(t, ".", "node-a")
 			target := events.RouteIdentity{FlowID: ".", FlowInstance: instancePath, EntityID: entityID}
-			deliveryCtx := withWorkflowNodeDeliveryRoute(ctx, events.DeliveryRoute{
+			deliveryCtx := withClaimedWorkflowNodePublicationForTest(t, pc, ctx, evt, events.DeliveryRoute{
 				Recipient: events.MustNodeDeliveryRecipient(node),
 				Target:    events.MustExistingEntityTarget(target),
 			})
