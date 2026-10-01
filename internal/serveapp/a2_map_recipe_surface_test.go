@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
@@ -223,14 +224,30 @@ func requireA2MapRecipeHealthyEvents(t *testing.T, rt servedControlProofRuntime,
 	if result.NextCursor != "" || len(result.Events) == 0 {
 		t.Fatalf("bounded public map event readback: %+v", result)
 	}
+	var business []operatorread.OperatorEventFull
 	for _, event := range result.Events {
-		if event.RunID != runID || len(event.DeadLetters) != 0 || event.NoDelivery != nil || len(event.Deliveries) != 1 {
+		if event.RunID != runID || len(event.DeadLetters) != 0 {
+			t.Fatalf("map event lost its run or has a deadletter: %+v", event)
+		}
+		// Diagnostic-direct logs have no recipient; they are not business replay evidence.
+		if event.EventName == "platform.runtime_log" {
+			if event.ProducerType != "platform" || event.Source != "runtime" || event.EntityID != "" || len(event.Deliveries) != 0 ||
+				event.NoDelivery == nil || event.NoDelivery.Reason != events.NoDeliveryNoSubscriberByDesign.Code() {
+				t.Fatalf("runtime diagnostic lost its explicit no-subscriber disposition: %+v", event)
+			}
+			continue
+		}
+		if event.NoDelivery != nil || len(event.Deliveries) != 1 {
 			t.Fatalf("map route/settlement has a deadletter, no-route or unexpected recipient: %+v", event)
 		}
 		delivery := event.Deliveries[0]
 		if delivery.Status != "delivered" || !delivery.Terminal || delivery.Failure != nil || len(delivery.DeadLetters) != 0 || delivery.RetryCount != 0 {
 			t.Fatalf("map delivery did not settle successfully: %+v", delivery)
 		}
+		business = append(business, event)
 	}
-	return result.Events
+	if len(business) == 0 {
+		t.Fatal("map recipe has no actual business or lifecycle publications")
+	}
+	return business
 }

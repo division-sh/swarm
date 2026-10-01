@@ -157,7 +157,7 @@ func wave1ResolveEntityPathWithOwner(source semanticview.Source, flowID, ref str
 		return wave1ResolvedType{}, "", fmt.Errorf("flow %s entity_type %s does not declare field %q", defaultFlowLabel(flowID), view.EntityType, head)
 	}
 	current := strings.TrimSpace(field.Type)
-	optional := false
+	optional := field.IsOptional
 	if current == "" {
 		return wave1ResolvedType{}, "", fmt.Errorf("flow %s entity_type %s field %q has empty type", defaultFlowLabel(flowID), view.EntityType, head)
 	}
@@ -166,15 +166,15 @@ func wave1ResolveEntityPathWithOwner(source semanticview.Source, flowID, ref str
 		if segment == "" {
 			return wave1ResolvedType{}, "", fmt.Errorf("entity path %q contains empty segment", ref)
 		}
-		if _, ok := wave1ListElementType(current); ok {
-			if segment == "size" && idx == len(segments)-1 {
-				return wave1ResolvedType{Kind: "scalar", Type: "integer"}, view.FlowID, nil
-			}
-			return wave1ResolvedType{}, "", fmt.Errorf("entity path %q traverses list type %q through unsupported segment %q", ref, current, segment)
-		}
-		resolved, err := (runtimecontracts.CatalogTypeReference{Type: current, Catalog: view.Types}).Resolve()
+		resolved, err := wave1ResolveDeclaredEntityType(view.Types, current)
 		if err != nil {
 			return wave1ResolvedType{}, "", fmt.Errorf("entity path %q: %w", ref, err)
+		}
+		if resolved.Kind == runtimecontracts.CatalogTypeList {
+			if segment == "size" && idx == len(segments)-1 {
+				return wave1ResolvedType{Kind: "scalar", Type: "integer", IsOptional: optional}, view.FlowID, nil
+			}
+			return wave1ResolvedType{}, "", fmt.Errorf("entity path %q traverses list type %q through unsupported segment %q", ref, current, segment)
 		}
 		if resolved.Kind != runtimecontracts.CatalogTypeObject {
 			return wave1ResolvedType{}, "", fmt.Errorf("entity path %q cannot traverse non-composite type %q through segment %q", ref, current, segment)
@@ -189,9 +189,25 @@ func wave1ResolveEntityPathWithOwner(source semanticview.Source, flowID, ref str
 			return wave1ResolvedType{}, "", fmt.Errorf("entity path %q nested field %q has empty type", ref, segment)
 		}
 	}
-	kind, _, err := wave1ResolveNamedType(view.Types, current)
+	resolved, err := wave1ResolveDeclaredEntityType(view.Types, current)
 	if err != nil {
 		return wave1ResolvedType{}, "", fmt.Errorf("entity path %q: %w", ref, err)
+	}
+	var kind string
+	switch resolved.Kind {
+	case runtimecontracts.CatalogTypeText:
+		kind = "scalar"
+		if resolved.Name != "" {
+			kind = "enum"
+		}
+	case runtimecontracts.CatalogTypeInteger, runtimecontracts.CatalogTypeNumber, runtimecontracts.CatalogTypeBoolean:
+		kind = "scalar"
+	case runtimecontracts.CatalogTypeObject:
+		kind = "named"
+	case runtimecontracts.CatalogTypeList, runtimecontracts.CatalogTypeMap:
+		kind = string(resolved.Kind)
+	default:
+		return wave1ResolvedType{}, "", fmt.Errorf("entity path %q has no declared typed leaf for %q", ref, current)
 	}
 	return wave1ResolvedType{Kind: kind, Type: current, IsOptional: optional}, view.FlowID, nil
 }
@@ -236,60 +252,11 @@ func legacyEntityMetadataDiagnostic(field string) string {
 	}
 }
 
-func wave1ResolveNamedType(types runtimecontracts.TypeCatalogDocument, typeRef string) (string, runtimecontracts.NamedTypeDecl, error) {
-	typeRef = strings.TrimSpace(typeRef)
-	if typeRef == "" {
-		return "", runtimecontracts.NamedTypeDecl{}, fmt.Errorf("type reference is required")
+func wave1ResolveDeclaredEntityType(types runtimecontracts.TypeCatalogDocument, typeRef string) (runtimecontracts.ResolvedCatalogType, error) {
+	if err := runtimecontracts.ValidateWave1TypeReference(typeRef, "entity field"); err != nil {
+		return runtimecontracts.ResolvedCatalogType{}, err
 	}
-	if elemType, ok := wave1ListElementType(typeRef); ok {
-		if _, _, err := wave1ResolveNamedType(types, elemType); err != nil {
-			return "", runtimecontracts.NamedTypeDecl{}, err
-		}
-		return "list", runtimecontracts.NamedTypeDecl{}, nil
-	}
-	if wave1BuiltinScalar(typeRef) {
-		return "scalar", runtimecontracts.NamedTypeDecl{}, nil
-	}
-	if _, ok := types.Enums[typeRef]; ok {
-		return "enum", runtimecontracts.NamedTypeDecl{}, nil
-	}
-	if named, ok := types.Types[typeRef]; ok {
-		return "named", named, nil
-	}
-	if scalar, ok := types.Scalars[typeRef]; ok {
-		base := strings.TrimSpace(scalar.Base)
-		if base == "" {
-			return "", runtimecontracts.NamedTypeDecl{}, fmt.Errorf("scalar %q has empty base", typeRef)
-		}
-		return wave1ResolveNamedType(types, base)
-	}
-	return "", runtimecontracts.NamedTypeDecl{}, fmt.Errorf("type %q is not declared in the resolved type catalog", typeRef)
-}
-
-func wave1BuiltinScalar(typeRef string) bool {
-	typeRef = strings.TrimSpace(strings.ToLower(typeRef))
-	switch {
-	case typeRef == "text",
-		typeRef == "string",
-		typeRef == "integer",
-		typeRef == "boolean",
-		typeRef == "timestamp",
-		typeRef == "uuid",
-		typeRef == "numeric",
-		strings.HasPrefix(typeRef, "numeric("):
-		return true
-	default:
-		return false
-	}
-}
-
-func wave1ListElementType(typeRef string) (string, bool) {
-	typeRef = strings.TrimSpace(typeRef)
-	if len(typeRef) >= 2 && strings.HasPrefix(typeRef, "[") && strings.HasSuffix(typeRef, "]") {
-		elem := strings.TrimSpace(typeRef[1 : len(typeRef)-1])
-		return elem, elem != ""
-	}
-	return "", false
+	return (runtimecontracts.CatalogTypeReference{Type: typeRef, Catalog: types}).Resolve()
 }
 
 func defaultFlowLabel(flowID string) string {

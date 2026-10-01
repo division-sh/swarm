@@ -30,9 +30,12 @@ func TestA2CatalogEntityPathPreservesAdmittedLeafShapes(t *testing.T) {
 		{name: "optional record field", path: "entity.profile.note", kind: "scalar", typeRef: "text", optional: true},
 		{name: "record list", path: "entity.profile.ids", kind: "list", typeRef: "[integer]"},
 		{name: "record list size", path: "entity.profile.ids.size", kind: "scalar", typeRef: "integer"},
+		{name: "optional root map", path: "entity.optional_items", kind: "map", typeRef: "map[text][integer]", optional: true},
+		{name: "optional root list size", path: "entity.optional_ids.size", kind: "scalar", typeRef: "integer", optional: true},
 		{name: "record map", path: "entity.profile.items", kind: "map", typeRef: "map[text][integer]"},
 		{name: "optional ancestor scalar", path: "entity.profile.maybe.label", kind: "scalar", typeRef: "text", optional: true},
 		{name: "optional ancestor map", path: "entity.profile.maybe.items", kind: "map", typeRef: "map[text]Score", optional: true},
+		{name: "optional ancestor list size", path: "entity.profile.maybe.ids.size", kind: "scalar", typeRef: "integer", optional: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bundle := a2CatalogPathBundle()
@@ -49,6 +52,40 @@ func TestA2CatalogEntityPathPreservesAdmittedLeafShapes(t *testing.T) {
 			}
 			if after := a2CatalogPathSnapshot(t, bundle); after != before {
 				t.Fatalf("resolving %s changed the source declaration", tc.path)
+			}
+		})
+	}
+}
+
+func TestA2CatalogEntityPathRejectsMissingDeclaredTypes(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, typeRef string
+	}{
+		{name: "empty root type", path: "entity.name", typeRef: ""},
+		{name: "unknown root type", path: "entity.name", typeRef: "Missing"},
+		{name: "empty scalar alias", path: "entity.name", typeRef: "Empty"},
+		{name: "cyclic scalar alias", path: "entity.name", typeRef: "Cycle"},
+		{name: "empty list element", path: "entity.name", typeRef: "[]"},
+		{name: "unknown list element", path: "entity.name.size", typeRef: "[Missing]"},
+		{name: "missing map value", path: "entity.name", typeRef: "map[text]"},
+		{name: "unknown map value", path: "entity.name", typeRef: "map[text]Missing"},
+		{name: "empty nested field", path: "entity.profile.blank", typeRef: "text"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle := a2CatalogPathBundle()
+			contract := bundle.RootEntities["work"]
+			contract.Fields["name"] = runtimecontracts.EntityFieldDecl{Type: tc.typeRef}
+			bundle.RootTypes.Scalars["Empty"] = runtimecontracts.ScalarTypeDecl{}
+			bundle.RootTypes.Scalars["Cycle"] = runtimecontracts.ScalarTypeDecl{Base: "Cycle"}
+			profile := bundle.RootTypes.Types["Profile"]
+			profile.Fields["blank"] = runtimecontracts.TypeFieldSpec{}
+			before := a2CatalogPathSnapshot(t, bundle)
+			got, owner, err := wave1ResolveEntityPathWithOwner(semanticview.Wrap(bundle), ".", tc.path)
+			if err == nil || got != (wave1ResolvedType{}) || owner != "" {
+				t.Fatalf("missing type admitted %s as %#v owner=%q err=%v", tc.path, got, owner, err)
+			}
+			if after := a2CatalogPathSnapshot(t, bundle); after != before {
+				t.Fatal("missing type refusal changed the source declaration")
 			}
 		})
 	}
@@ -128,16 +165,18 @@ func a2CatalogPathBundle() *runtimecontracts.WorkflowContractBundle {
 	return &runtimecontracts.WorkflowContractBundle{
 		RootEntities: runtimecontracts.EntityContractsDocument{
 			"work": {Fields: map[string]runtimecontracts.EntityFieldDecl{
-				"name":      {Type: "text"},
-				"total":     {Type: "integer"},
-				"score":     {Type: "Score"},
-				"decision":  {Type: "Decision"},
-				"profile":   {Type: "Profile"},
-				"ids":       {Type: "[text]"},
-				"groups":    {Type: "[[text]]"},
-				"items":     {Type: "map[text][integer]"},
-				"records":   {Type: "map[text]Record"},
-				"by_region": {Type: "map[text]map[text]Decision"},
+				"name":           {Type: "text"},
+				"total":          {Type: "integer"},
+				"score":          {Type: "Score"},
+				"decision":       {Type: "Decision"},
+				"profile":        {Type: "Profile"},
+				"ids":            {Type: "[text]"},
+				"groups":         {Type: "[[text]]"},
+				"items":          {Type: "map[text][integer]"},
+				"records":        {Type: "map[text]Record"},
+				"by_region":      {Type: "map[text]map[text]Decision"},
+				"optional_items": {Type: "map[text][integer]", IsOptional: true},
+				"optional_ids":   {Type: "[integer]", IsOptional: true},
 			}},
 		},
 		RootTypes: runtimecontracts.TypeCatalogDocument{
@@ -157,6 +196,7 @@ func a2CatalogPathBundle() *runtimecontracts.WorkflowContractBundle {
 				"Nested": {Fields: map[string]runtimecontracts.TypeFieldSpec{
 					"label": {Type: "text"},
 					"items": {Type: "map[text]Score"},
+					"ids":   {Type: "[integer]"},
 				}},
 			},
 		},
