@@ -588,7 +588,7 @@ func TestChannelOnboardingCrashServeProcessHelper(t *testing.T) {
 	opts.WorkspaceBackend = "host"
 	opts.WorkspaceBackendSet = true
 	opts.SelfCheck = true
-	opts.AbandonActiveRuns = true
+	opts.AbandonActiveRuns = os.Getenv("TEST_CHANNEL_ONBOARDING_RETAIN_RUNS") != "1"
 	opts.Verbose = true
 	opts.Output = os.Stdout
 	opts.ErrorOutput = os.Stderr
