@@ -167,4 +167,24 @@ func TestDoubleRetainsDeliveryAfterResponseLoss(t *testing.T) {
 	if got := provider.Delivery(0); got == nil || got["text"] != "first" || provider.Delivery(1) != nil {
 		t.Fatalf("accepted delivery effects = %#v", got)
 	}
+	if registrations, confirmations := provider.OnboardingCounts(); registrations != 0 || confirmations != 0 {
+		t.Fatalf("unrelated delivery counted as onboarding: %d/%d", registrations, confirmations)
+	}
+	for _, text := range []string{"Swarm channel connected.", "Swarm channel connected. Future notices are visible to this group."} {
+		body, err := json.Marshal(map[string]any{"chat_id": "42", "text": text})
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, err := http.Post(server.URL+"/botcredential/sendMessage", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = response.Body.Close()
+	}
+	if registrations, deliveries := provider.Counts(); registrations != 0 || deliveries != 3 {
+		t.Fatalf("all deliveries not retained: %d/%d", registrations, deliveries)
+	}
+	if registrations, confirmations := provider.OnboardingCounts(); registrations != 0 || confirmations != 2 {
+		t.Fatalf("duplicate confirmations not counted: %d/%d", registrations, confirmations)
+	}
 }
