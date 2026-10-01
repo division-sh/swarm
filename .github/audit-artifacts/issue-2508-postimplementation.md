@@ -1,8 +1,10 @@
 # Post-Implementation Proof Audit: #2508
 
-Agent-g. Local implementation and required qualification are complete. The PR
-comment binds the final submitted Git head; exact-head CI and independent merge
-review remain external gates, not self-granted approval.
+Agent-g. Local implementation proof is complete. The first submitted head passed
+the default qualification but failed hosted release-package boundary admission.
+The test-only relocation below repairs that failure; repeat qualification and
+exact-head CI receipts are bound in the PR comment before review is requested.
+Independent merge review remains external, not self-granted approval.
 
 ## Boundary And Governing Context
 
@@ -83,6 +85,17 @@ by the named real HTTP/store/cursor/snapshot proofs, not an invented aggregate
 test called SelectedStoreMatrix. Store-seeded read proof is not credited as
 authored source creation or live lifecycle execution.
 
+Hosted-boundary correction: `TestReleaseE2EPackageStaysAtPublicProcessBoundary`
+rejected implementation imports in the newly added release-package tests. The
+168-cell store-seeded compiled read proof and three fresh compiled public
+scenarios now live in CLI integration tests, where their canonical fixture
+construction belongs. Both still execute the real compiled CLI, not in-process
+Execute or fake successful RPC; the retained process journey and describe
+baseline stay in releasee2e with standard-library imports only. The unchanged
+boundary guard passes. No existing test or production behavior was changed to
+silence this failure, and no new fixture/runtime/registry owner was added.
+The relocated compiled proofs pass together in 102.269s.
+
 | Manifestation | Classification | Exact execution proof |
 | --- | --- | --- |
 | A01 capability Cartesian product | execution-proven through the same corrected path | TestOperatorReadFactoringCapabilityMatrix: all 16 combinations; independent conversation capability test. |
@@ -126,7 +139,7 @@ authored source creation or live lifecycle execution.
 | C10 real mailbox pagination | execution-proven through the same corrected path | TestScenarioMailboxActualServerContinuationBothStores and TestScenarioCardFactoringActualContinuationBothStores, all anchors, >200, exact late match/ambiguity/foreign codec. |
 | C11 compiled fresh public test | execution-proven through the same corrected path | TestReadProofFactoringCompiledScenario: three authored MockOnly text scenarios; JSON/quiet exit2 before nonexistent source/config/session, zero RPC and unchanged file census. |
 | C12 cancellation and failure | execution-proven through the same corrected path | TestScenarioCardFactoringCancelledContinuationNeverReadsDetailOrMutates and TestScenarioCardFactoringDetailAndMutationFailures/cancel_get, joined HTTP cancellation, no action. |
-| Q01 structural integrity | execution-proven through the same corrected path | API-spec/OpenRPC generation and admission tests, source/capability/identifier/userfacing guards; authoritative generated artifact match. |
+| Q01 structural integrity | execution-proven through the same corrected path | API-spec/OpenRPC generation and admission tests, source/capability/identifier/userfacing guards; TestReleaseE2EPackageStaysAtPublicProcessBoundary; authoritative generated artifact match. |
 | Q02 stores and siblings | execution-proven through the same corrected path | Real selected-store projection/pagination/snapshot proof; focused API/CLI race, authoring/topology/dashboard and CLI readers in default suite. |
 | Q03 process/golden | execution-proven through the same corrected path | Unchanged SQLiteSmoke, RestartAndForcedKillOnBothBackends, both BurstConcurrency iterations; exact hosted heavy-test unit retained, no deadline/workload change. Managed combined supported run passed in 207.663s. |
 | Q04 final qualification | execution-proven through the same corrected path | Default go run ./cmd/swarm-test passed all 14 planned required units, without --full, at 2026-10-01 10:02:29 UTC. Canonical independent base/head complexity and diff census pass. Exact-head hosted CI is a separate merge gate whose receipt is appended to the PR comment, never inferred from local success. |
@@ -134,8 +147,9 @@ authored source creation or live lifecycle execution.
 Required supported-surface proof actually run:
 
 ```sh
-go run ./cmd/swarm-test -- ./internal/releasee2e -run '^(TestReadProofFactoringCompiled(Describe|Surfaces|Scenario)|TestGoldenAgentWorkload(SQLiteSmoke|RestartAndForcedKillOnBothBackends|BurstConcurrencyOnBothBackendsIteration[12]))$' -count=1 -timeout=15m
-go test ./internal/releasee2e -run '^TestReadProofFactoringCompiledAgentScopeBothStores$' -count=1 -timeout=3m
+go run ./cmd/swarm-test -- ./internal/releasee2e -run '^(TestReadProofFactoringCompiled(Describe|Surfaces)|TestGoldenAgentWorkload(SQLiteSmoke|RestartAndForcedKillOnBothBackends|BurstConcurrencyOnBothBackendsIteration[12]))$' -count=1 -timeout=15m
+go test ./internal/cliapp -run '^TestReadProofFactoringCompiled(AgentScopeBothStores|Scenario)$' -count=1 -timeout=3m
+go test ./internal/releasee2e -run '^TestReleaseE2EPackageStaysAtPublicProcessBoundary$' -count=1 -timeout=1m
 go test ./internal/apiv1 -run '^(TestAgentOperator.*Snapshot.*|TestSelectedStoreAgentSnapshotHandlers.*|TestAgentDiagnoseExactDeliveryPaginationParity)$' -count=1 -timeout=3m
 go test ./internal/store/internal/runtimepersistence -run '^(TestOperatorConversation(KeysetInsertionParity|ProjectionBackendParity|ReadSurfaceListUsesCanonicalProjection)|TestOperatorAgentDeliveryPagesBoundHydrationParity|TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres|TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle)$' -count=1 -timeout=3m
 go test -race ./internal/cliapp ./internal/apiv1 -run 'Test(OperatorReadFactoring|OperatorAgentConversation|AgentReadScope|Agent(View|Diagnose|Deliveries|ReadCommands|Output)|Conversation|Conversations|Describe|Scenario(CardFactoring|Mailbox))' -count=1 -timeout=5m

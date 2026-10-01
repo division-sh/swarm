@@ -1,4 +1,4 @@
-package releasee2e
+package cliapp
 
 import (
 	"bytes"
@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http/httptest"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -38,8 +39,13 @@ type readProofAgentStore interface {
 // Canonical lifecycle fixtures provide two real exact identities, not mocked
 // resolver answers. This earns compiled reader proof, not serve lifecycle credit.
 func TestReadProofFactoringCompiledAgentScopeBothStores(t *testing.T) {
-	root := goldenReleaseRoot(t)
-	binary := buildReleaseBinary(t, root)
+	root := t.TempDir()
+	binary := filepath.Join(root, "swarm")
+	build := exec.Command("go", "build", "-o", binary, "./cmd/swarm")
+	build.Dir = RepoRoot()
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build compiled scope reader: %v\n%s", err, output)
+	}
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			var selected readProofAgentStore
@@ -78,19 +84,22 @@ func TestReadProofFactoringCompiledAgentScopeBothStores(t *testing.T) {
 				}
 				storetest.RequireStaticAgentFixture(t, ctx, selected, manager.PersistedAgent{Config: execution.Actor, Status: "active", StartedAt: time.Now().UTC()})
 			}
-			registry, err := apiv1.LoadRegistry(filepath.Join(releaseE2ERepoRoot(t), "platform-spec.yaml"))
+			registry, err := apiv1.LoadRegistry(filepath.Join(RepoRoot(), "platform-spec.yaml"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			handler, err := apiv1.NewHandler(apiv1.Options{Registry: registry, AuthTokens: []string{goldenAPIToken}, Handlers: apiv1.OperatorAgentConversationHandlers(apiv1.AgentConversationHandlerOptions{Agents: selected, Conversations: selected, DeliveryLifecycle: selected})})
+			const token = "read-proof-token"
+			handler, err := apiv1.NewHandler(apiv1.Options{Registry: registry, AuthTokens: []string{token}, Handlers: apiv1.OperatorAgentConversationHandlers(apiv1.AgentConversationHandlerOptions{Agents: selected, Conversations: selected, DeliveryLifecycle: selected})})
 			if err != nil {
 				t.Fatal(err)
 			}
 			server := httptest.NewServer(handler)
 			defer server.Close()
 			cwd := t.TempDir()
-			writeReleaseFile(t, filepath.Join(cwd, "api-token"), goldenAPIToken+"\n")
-			env := goldenProcessEnv(t, cwd, "", 0)
+			if err := os.WriteFile(filepath.Join(cwd, "api-token"), []byte(token+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			env := readProofCompiledScopeEnv(cwd)
 			for _, command := range [][]string{{"agent", "view", "reader"}, {"agent", "diagnose", "reader"}, {"agent", "deliveries", "reader"}, {"conversation", "list", "--agent-id", "reader"}} {
 				for _, mode := range []string{"", "--json", "--quiet"} {
 					base := append(append([]string{}, command...), "--api-server", server.URL, "--api-token-file", "api-token")
@@ -121,7 +130,7 @@ func TestReadProofFactoringCompiledAgentScopeBothStores(t *testing.T) {
 						// Both exact routes disambiguate through the same strict owner.
 						for _, instance := range []string{"flow/one", "flow/two"} {
 							args := append(append([]string{}, base...), "--run-id", runID, "--flow-instance", instance)
-							out := readProofCompiledCommand(t, binary, cwd, env, args...)
+							out := readProofCompiledScopeSuccess(t, binary, cwd, env, args...)
 							if mode == "--json" && !json.Valid([]byte(out)) {
 								t.Fatalf("invalid public JSON: %s", out)
 							}
@@ -131,6 +140,35 @@ func TestReadProofFactoringCompiledAgentScopeBothStores(t *testing.T) {
 			}
 		})
 	}
+}
+
+func readProofCompiledScopeEnv(cwd string) []string {
+	var env []string
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if key == "HOME" || key == "PATH" || key == "GOMAXPROCS" ||
+			strings.HasPrefix(key, "SWARM_") || strings.HasPrefix(key, "ANTHROPIC_") ||
+			strings.HasPrefix(key, "CLAUDE_") || strings.HasPrefix(key, "OPENAI_") || strings.HasPrefix(key, "PG") {
+			continue
+		}
+		env = append(env, entry)
+	}
+	return append(env, "HOME="+cwd, "PATH=", "XDG_CONFIG_HOME="+filepath.Join(cwd, ".config"),
+		"XDG_CACHE_HOME="+filepath.Join(cwd, ".cache"), "XDG_DATA_HOME="+filepath.Join(cwd, ".local/share"), "NO_COLOR=1")
+}
+
+func readProofCompiledScopeSuccess(t *testing.T, binary, cwd string, env []string, args ...string) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, binary, args...)
+	cmd.Dir, cmd.Env = cwd, env
+	var out, errOut bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errOut
+	if err := cmd.Run(); err != nil || errOut.Len() != 0 {
+		t.Fatalf("compiled scope read %v: err=%v stdout=%s stderr=%s", args, err, &out, &errOut)
+	}
+	return out.String()
 }
 
 func readProofCompiledRefusal(t *testing.T, binary, cwd string, env []string, code int, why string, args ...string) {
