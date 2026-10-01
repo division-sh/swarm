@@ -288,11 +288,11 @@ func TestOptionalDeclarationAdmissionRejectsEmptyTypedContainers(t *testing.T) {
 			load: func(path string) error { _, err := loadOptionalTypeDeclarations(path); return err },
 		},
 		{
-			name: "policy empty maps", fileName: "policy.yaml", body: "criteria: {}\nvalidation: {}\nmodules: {}\n",
+			name: "policy empty maps", fileName: "policy.yaml", body: "criteria: {}\nvalidation: {}\n",
 			load: func(path string) error { _, err := loadOptionalPolicyDeclarations(path); return err },
 		},
 		{
-			name: "policy null containers", fileName: "policy.yaml", body: "criteria: null\nvalidation: null\nmodules: null\n",
+			name: "policy null containers", fileName: "policy.yaml", body: "criteria: null\nvalidation: null\n",
 			load: func(path string) error { _, err := loadOptionalPolicyDeclarations(path); return err },
 		},
 	}
@@ -304,6 +304,18 @@ func TestOptionalDeclarationAdmissionRejectsEmptyTypedContainers(t *testing.T) {
 			diagnostic, ok := AsLoaderDiagnostic(err)
 			if !ok || diagnostic.Code != "contract_loader.optional_declaration_file_empty" {
 				t.Fatalf("diagnostic = %#v, %v", diagnostic, err)
+			}
+		})
+	}
+}
+
+func TestOptionalPolicyAdmissionRetiresModulePlacementOnPresence(t *testing.T) {
+	for _, body := range []string{"modules: {}\n", "modules: null\n", "modules: ''\n", "modules: []\n", "modules: {worker: {kind: wasm}}\n", "<<: {modules: {}}\n", "<<: {modules: null}\n"} {
+		t.Run(body, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "policy.yaml")
+			writeFixtureFile(t, path, body)
+			if _, err := loadOptionalPolicyDeclarations(path); err == nil || !strings.Contains(err.Error(), "policy.modules is retired") || !strings.Contains(err.Error(), "tools.yaml") {
+				t.Fatalf("retired module placement diagnostic: %v", err)
 			}
 		})
 	}
