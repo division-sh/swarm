@@ -190,12 +190,36 @@ func (e *Executor) execReadStaticFlowData(ctx context.Context, actor models.Agen
 }
 
 func (e *Executor) execReadResourceData(ctx context.Context, actor models.AgentConfig, in flowDataReadInput) (any, error) {
+	item, runID, err := e.loadAuthorizedResourceData(ctx, actor, in)
+	if err != nil {
+		return nil, err
+	}
+	compiled, rows, err := projectResourceDataRows(item)
+	if err != nil {
+		return nil, err
+	}
+	if in.Kind == "resource_row" {
+		return selectResourceDataRow(item, compiled, rows, in)
+	}
+	page, cursor, err := prepareResourceDataPage(actor, runID, item, in, len(rows))
+	if err != nil {
+		return nil, err
+	}
+	selected, err := selectResourceDataPage(item, rows, page, cursor)
+	if err != nil {
+		return nil, err
+	}
+	return finishResourceDataPage(item, rows, selected, page, cursor)
+}
+
+func (e *Executor) loadAuthorizedResourceData(ctx context.Context, actor models.AgentConfig, in flowDataReadInput) (durabledata.ResourceAccessItem, string, error) {
+	var empty durabledata.ResourceAccessItem
 	runID := runtimecorrelation.RunIDFromContext(ctx)
 	if runID == "" {
-		return nil, fmt.Errorf("read_flow_data requires run context")
+		return empty, "", fmt.Errorf("read_flow_data requires run context")
 	}
 	if in.Declaration == nil || in.Declaration.Validate() != nil {
-		return nil, fmt.Errorf("read_flow_data resource arm requires one structured declaration")
+		return empty, "", fmt.Errorf("read_flow_data resource arm requires one structured declaration")
 	}
 	e.mu.RLock()
 	source := e.workflowSource
@@ -210,32 +234,36 @@ func (e *Executor) execReadResourceData(ctx context.Context, actor models.AgentC
 		}
 	}
 	if !authorized {
-		return nil, durabledata.NewDomainError(durabledata.CodeAccessDenied, "resource declaration %s is not admitted for actor %s", in.Declaration.Key(), actor.ID)
+		return empty, "", durabledata.NewDomainError(durabledata.CodeAccessDenied, "resource declaration %s is not admitted for actor %s", in.Declaration.Key(), actor.ID)
 	}
 	if store == nil {
-		return nil, fmt.Errorf("read_flow_data durable selected-store reader is required")
+		return empty, "", fmt.Errorf("read_flow_data durable selected-store reader is required")
 	}
 	items, err := store.LoadRunResourceAccess(ctx, runID, []durabledata.DeclarationRef{*in.Declaration})
 	if err != nil {
-		return nil, err
+		return empty, "", err
 	}
 	if len(items) != 1 || items[0].Declaration != *in.Declaration {
-		return nil, durabledata.NewDomainError(durabledata.CodeIntegrity, "resource access projection is incomplete")
+		return empty, "", durabledata.NewDomainError(durabledata.CodeIntegrity, "resource access projection is incomplete")
 	}
-	item := items[0]
+	return items[0], runID, nil
+}
+
+func projectResourceDataRows(item durabledata.ResourceAccessItem) (durabledata.CompiledVersion, []map[string]any, error) {
+	var empty durabledata.CompiledVersion
 	var schema map[string]any
 	if err := json.Unmarshal(item.Schema, &schema); err != nil {
-		return nil, durabledata.NewDomainError(durabledata.CodeIntegrity, "resource %s persisted schema is invalid", item.Declaration.Key())
+		return empty, nil, durabledata.NewDomainError(durabledata.CodeIntegrity, "resource %s persisted schema is invalid", item.Declaration.Key())
 	}
 	compiled, defects := durabledata.CompileStoredJSONL(item.Declaration, schema, item.BusinessKey, item.Content)
 	if len(defects) != 0 || compiled.VersionID != item.VersionID || !bytes.Equal(compiled.CanonicalJSONL, item.Content) {
-		return nil, durabledata.NewDomainError(durabledata.CodeIntegrity, "resource %s persisted payload is contradictory", item.Declaration.Key())
+		return empty, nil, durabledata.NewDomainError(durabledata.CodeIntegrity, "resource %s persisted payload is contradictory", item.Declaration.Key())
 	}
 	rows := make([]map[string]any, len(compiled.Rows))
 	for index, row := range compiled.Rows {
 		var value any
 		if err := json.Unmarshal(row.Canonical, &value); err != nil {
-			return nil, durabledata.NewDomainError(durabledata.CodeIntegrity, "resource %s row %d is invalid", item.Declaration.Key(), row.Ordinal)
+			return empty, nil, durabledata.NewDomainError(durabledata.CodeIntegrity, "resource %s row %d is invalid", item.Declaration.Key(), row.Ordinal)
 		}
 		projected := map[string]any{
 			"declaration": item.Declaration, "version_id": item.VersionID,
@@ -244,93 +272,102 @@ func (e *Executor) execReadResourceData(ctx context.Context, actor models.AgentC
 		if row.BusinessKey != "" {
 			key, err := row.BusinessKey.Value()
 			if err != nil {
-				return nil, durabledata.NewDomainError(durabledata.CodeIntegrity, "resource %s row %d has invalid business key", item.Declaration.Key(), row.Ordinal)
+				return empty, nil, durabledata.NewDomainError(durabledata.CodeIntegrity, "resource %s row %d has invalid business key", item.Declaration.Key(), row.Ordinal)
 			}
 			projected["key"] = key
 		}
 		rows[index] = projected
 	}
-	if in.Kind == "resource_row" {
-		if item.BusinessKey == "" {
-			if in.Position == 0 || in.Key != nil {
-				return nil, fmt.Errorf("read_flow_data keyless resource_row requires position only")
-			}
-			for index, row := range compiled.Rows {
-				if row.Ordinal == in.Position {
-					return inlineResourceRowResult(item, rows[index])
-				}
-			}
-			return nil, durabledata.NewDomainError(durabledata.CodeVersionMissing, "resource row position %d does not exist in version %s", in.Position, item.VersionID)
-		}
-		if in.Position != 0 || in.Key == nil {
-			return nil, fmt.Errorf("read_flow_data keyed resource_row requires key only")
-		}
-		key, err := durabledata.BusinessKeyFromValue(in.Key)
-		if err != nil {
-			return nil, fmt.Errorf("read_flow_data resource_row key: %w", err)
+	return compiled, rows, nil
+}
+
+func selectResourceDataRow(item durabledata.ResourceAccessItem, compiled durabledata.CompiledVersion, rows []map[string]any, in flowDataReadInput) (any, error) {
+	if item.BusinessKey == "" {
+		if in.Position == 0 || in.Key != nil {
+			return nil, fmt.Errorf("read_flow_data keyless resource_row requires position only")
 		}
 		for index, row := range compiled.Rows {
-			if row.BusinessKey == key {
+			if row.Ordinal == in.Position {
 				return inlineResourceRowResult(item, rows[index])
 			}
 		}
-		return nil, durabledata.NewDomainError(durabledata.CodeVersionMissing, "resource key %s does not exist in version %s", key, item.VersionID)
+		return nil, durabledata.NewDomainError(durabledata.CodeVersionMissing, "resource row position %d does not exist in version %s", in.Position, item.VersionID)
 	}
+	if in.Position != 0 || in.Key == nil {
+		return nil, fmt.Errorf("read_flow_data keyed resource_row requires key only")
+	}
+	key, err := durabledata.BusinessKeyFromValue(in.Key)
+	if err != nil {
+		return nil, fmt.Errorf("read_flow_data resource_row key: %w", err)
+	}
+	for index, row := range compiled.Rows {
+		if row.BusinessKey == key {
+			return inlineResourceRowResult(item, rows[index])
+		}
+	}
+	return nil, durabledata.NewDomainError(durabledata.CodeVersionMissing, "resource key %s does not exist in version %s", key, item.VersionID)
+}
+
+func prepareResourceDataPage(actor models.AgentConfig, runID string, item durabledata.ResourceAccessItem, in flowDataReadInput, rowCount int) (durabledata.PageRequest, resourceDataCursor, error) {
+	var empty durabledata.PageRequest
+	var cursor resourceDataCursor
 	if in.Page == nil {
-		return nil, fmt.Errorf("read_flow_data resource_rows requires page")
+		return empty, cursor, fmt.Errorf("read_flow_data resource_rows requires page")
 	}
 	page, err := in.Page.WithDefaults()
 	if err != nil {
-		return nil, err
+		return empty, cursor, err
 	}
 	if page.ByteLimit > durabledata.MaxToolPageBytes {
-		return nil, fmt.Errorf("read_flow_data resource_rows page byte_limit exceeds %d", durabledata.MaxToolPageBytes)
+		return empty, cursor, fmt.Errorf("read_flow_data resource_rows page byte_limit exceeds %d", durabledata.MaxToolPageBytes)
 	}
 	fingerprint, err := actor.Identity.Fingerprint()
 	if err != nil {
-		return nil, fmt.Errorf("read_flow_data resource cursor requires canonical actor identity: %w", err)
+		return empty, cursor, fmt.Errorf("read_flow_data resource cursor requires canonical actor identity: %w", err)
 	}
 	targetFingerprint, err := resourceDataTargetFingerprint(item.Declaration, item.VersionID)
 	if err != nil {
-		return nil, fmt.Errorf("read_flow_data resource cursor requires canonical target identity: %w", err)
+		return empty, cursor, fmt.Errorf("read_flow_data resource cursor requires canonical target identity: %w", err)
 	}
-	offset := 0
+	cursor = resourceDataCursor{Version: "swarm.flow-data.resource-cursor.v2", RunID: runID, ActorFingerprint: fingerprint, TargetFingerprint: targetFingerprint}
 	if page.Cursor != "" {
-		cursor, err := decodeResourceDataCursor(page.Cursor)
+		decoded, err := decodeResourceDataCursor(page.Cursor)
 		if err != nil {
-			return nil, err
+			return empty, cursor, err
 		}
-		if cursor.Version != "swarm.flow-data.resource-cursor.v2" || cursor.RunID != runID || cursor.ActorFingerprint != fingerprint ||
-			cursor.TargetFingerprint != targetFingerprint || cursor.Offset < 1 || cursor.Offset >= len(rows) {
-			return nil, fmt.Errorf("read_flow_data cursor does not match the selected run, actor, declaration, version, or offset")
+		if decoded.Version != cursor.Version || decoded.RunID != runID || decoded.ActorFingerprint != fingerprint ||
+			decoded.TargetFingerprint != targetFingerprint || decoded.Offset < 1 || decoded.Offset >= rowCount {
+			return empty, cursor, fmt.Errorf("read_flow_data cursor does not match the selected run, actor, declaration, version, or offset")
 		}
-		offset = cursor.Offset
+		cursor.Offset = decoded.Offset
 	}
-	buildResult := func(selected []map[string]any, next int) (map[string]any, error) {
-		encodedItems, marshalErr := json.Marshal(selected)
-		if marshalErr != nil {
-			return nil, marshalErr
-		}
-		continuation := durabledata.EndContinuation()
-		if next < len(rows) {
-			cursor, encodeErr := encodeResourceDataCursor(resourceDataCursor{
-				Version: "swarm.flow-data.resource-cursor.v2", RunID: runID, ActorFingerprint: fingerprint,
-				TargetFingerprint: targetFingerprint, Offset: next,
-			})
-			if encodeErr != nil {
-				return nil, encodeErr
-			}
-			continuation = durabledata.PageContinuation{State: "more", Cursor: cursor}
-		}
-		return map[string]any{
-			"kind": "resource_rows", "declaration": item.Declaration, "version_id": item.VersionID,
-			"rows": durabledata.PageResult[map[string]any]{
-				Items: selected, ItemCount: len(selected), EncodedItemsBytes: len(encodedItems), Continuation: continuation,
-			},
-		}, nil
+	return page, cursor, nil
+}
+
+func buildResourceDataPage(item durabledata.ResourceAccessItem, rowCount int, selected []map[string]any, cursor resourceDataCursor) (map[string]any, error) {
+	encodedItems, marshalErr := json.Marshal(selected)
+	if marshalErr != nil {
+		return nil, marshalErr
 	}
+	continuation := durabledata.EndContinuation()
+	if cursor.Offset < rowCount {
+		encodedCursor, encodeErr := encodeResourceDataCursor(cursor)
+		if encodeErr != nil {
+			return nil, encodeErr
+		}
+		continuation = durabledata.PageContinuation{State: "more", Cursor: encodedCursor}
+	}
+	return map[string]any{
+		"kind": "resource_rows", "declaration": item.Declaration, "version_id": item.VersionID,
+		"rows": durabledata.PageResult[map[string]any]{
+			Items: selected, ItemCount: len(selected), EncodedItemsBytes: len(encodedItems), Continuation: continuation,
+		},
+	}, nil
+}
+
+func selectResourceDataPage(item durabledata.ResourceAccessItem, rows []map[string]any, page durabledata.PageRequest, cursor resourceDataCursor) ([]map[string]any, error) {
 	selected := make([]map[string]any, 0, page.Limit)
-	for index := offset; index < len(rows) && len(selected) < page.Limit; index++ {
+	for index := cursor.Offset; index < len(rows) && len(selected) < page.Limit; index++ {
 		candidate := append(append([]map[string]any(nil), selected...), rows[index])
 		encodedItems, marshalErr := json.Marshal(candidate)
 		if marshalErr != nil {
@@ -342,7 +379,8 @@ func (e *Executor) execReadResourceData(ctx context.Context, actor models.AgentC
 			}
 			break
 		}
-		candidateResult, buildErr := buildResult(candidate, index+1)
+		cursor.Offset = index + 1
+		candidateResult, buildErr := buildResourceDataPage(item, len(rows), candidate, cursor)
 		if buildErr != nil {
 			return nil, buildErr
 		}
@@ -358,8 +396,12 @@ func (e *Executor) execReadResourceData(ctx context.Context, actor models.AgentC
 		}
 		selected = candidate
 	}
-	next := offset + len(selected)
-	result, err := buildResult(selected, next)
+	return selected, nil
+}
+
+func finishResourceDataPage(item durabledata.ResourceAccessItem, rows, selected []map[string]any, page durabledata.PageRequest, cursor resourceDataCursor) (any, error) {
+	cursor.Offset += len(selected)
+	result, err := buildResourceDataPage(item, len(rows), selected, cursor)
 	if err != nil {
 		return nil, err
 	}
