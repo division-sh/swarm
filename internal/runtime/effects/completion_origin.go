@@ -6,6 +6,7 @@ import (
 
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 type CompletionOriginKind string
@@ -67,6 +68,31 @@ func (o CompletionOrigin) Same(other CompletionOrigin) bool {
 	}
 }
 
+// NormalCompletionOriginFromContext selects the same closed work authority for
+// session binding and completion admission. Durable authorization still fences
+// the exact claim or executing directive before provider launch.
+func NormalCompletionOriginFromContext(ctx context.Context, agentID, runID, adapter string) (CompletionOrigin, error) {
+	claim, hasDelivery := runtimedelivery.ClaimFromContext(ctx)
+	directive, hasDirective := directiveCompletionOriginFromContext(ctx)
+	if hasDelivery == hasDirective {
+		return CompletionOrigin{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_origin_missing_or_ambiguous", "external-effects", "authorize_attempt", map[string]any{"adapter": adapter})
+	}
+	var origin CompletionOrigin
+	var err error
+	if hasDelivery {
+		if claim.SubscriberClass() != runtimedelivery.SubscriberAgent || claim.SubscriberID() != agentID || claim.RunID() != runID {
+			return CompletionOrigin{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_origin_delivery_claim_mismatch", "external-effects", "authorize_attempt", map[string]any{"adapter": adapter, "delivery_id": claim.DeliveryID()})
+		}
+		origin, err = DeliveryCompletionOrigin(claim)
+	} else {
+		origin, err = DirectiveCompletionOrigin(directive)
+	}
+	if err != nil {
+		return CompletionOrigin{}, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_origin_invalid", "external-effects", "authorize_attempt", map[string]any{"adapter": adapter}, err)
+	}
+	return origin, nil
+}
+
 type directiveCompletionOriginKey struct{}
 
 func WithDirectiveCompletionOrigin(ctx context.Context, origin runtimeagentcontrol.DirectiveExecutionOrigin) context.Context {
@@ -81,5 +107,5 @@ func directiveCompletionOriginFromContext(ctx context.Context) (runtimeagentcont
 		return runtimeagentcontrol.DirectiveExecutionOrigin{}, false
 	}
 	origin, ok := ctx.Value(directiveCompletionOriginKey{}).(runtimeagentcontrol.DirectiveExecutionOrigin)
-	return origin, ok && origin.Validate() == nil
+	return origin, ok
 }
