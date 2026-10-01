@@ -116,10 +116,49 @@ func TestA2CountJoinRealExecutionAndRestartOnBothStores(t *testing.T) {
 					}
 					return instance
 				}
+				// Reconstruct runtime owners at exact durable checkpoints. This
+				// is component recovery, not a claim of a process/driver crash.
+				recoverCheckpoint := func(name string, wantPending int) {
+					t.Helper()
+					quiet, cancel := context.WithTimeout(ctx, 5*time.Second)
+					if err := bus.WaitForQuiescence(quiet); err != nil {
+						cancel()
+						t.Fatalf("%s quiescence: %v", name, err)
+					}
+					cancel()
+					before := load()
+					var eventsBefore int
+					if err := selected.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM events WHERE run_id=$1", runID).Scan(&eventsBefore); err != nil {
+						t.Fatal(err)
+					}
+					if err := schedules.Stop(ctx); err != nil {
+						t.Fatal(err)
+					}
+					probe = lifecycleprobe.New()
+					bus = newBus()
+					schedules, _ = newExactJoinScheduleLifecycleForTest(t, ctx, selected, bus)
+					pc = newGateRecoveryCoordinator(bus, selected, pipeline.PipelineCoordinatorOptions{Module: module, GenericSchedules: schedules, TestLifecycleProbe: probe})
+					bus.SetInterceptors(pc)
+					if restored, err := schedules.Restore(ctx); err != nil || restored != wantPending {
+						t.Fatalf("%s restore: count=%d want=%d err=%v", name, restored, wantPending, err)
+					}
+					var eventsAfter int
+					if err := selected.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM events WHERE run_id=$1", runID).Scan(&eventsAfter); err != nil {
+						t.Fatal(err)
+					}
+					if !reflect.DeepEqual(load(), before) || eventsAfter != eventsBefore {
+						t.Fatalf("%s reconstruction changed retained state or published work", name)
+					}
+				}
 				initial := exactJoinPersistedArm(t, load())
 				if initial.MemberCount == nil || *initial.MemberCount != scenario.count || len(initial.Members) != 0 || !initial.DeadlineAt.IsZero() {
 					t.Fatalf("count invented members/deadline: %#v", initial)
 				}
+				initialPending := 0
+				if scenario.count == 0 {
+					initialPending = 1
+				}
+				recoverCheckpoint("after_arm", initialPending)
 				publish := func(name, member, result string, want failures.Class) events.Event {
 					t.Helper()
 					payload := []byte(`{}`)
@@ -159,6 +198,7 @@ func TestA2CountJoinRealExecutionAndRestartOnBothStores(t *testing.T) {
 						first = arrival
 					}
 					if index == 0 && scenario.name == "reverse_and_duplicates" {
+						recoverCheckpoint("after_partial_member", 0)
 						publish("item.completed", member, member, "")
 						if arm := exactJoinPersistedArm(t, load()); arm.Completed() != 1 {
 							t.Fatal("distinct duplicate delivery counted twice")
@@ -238,6 +278,7 @@ func TestA2CountJoinRealExecutionAndRestartOnBothStores(t *testing.T) {
 					t.Fatal("restart did not settle the original count continuation")
 				}
 				assertExactJoinFiredSchedule(t, selected, ctx, pending, completionID)
+				recoverCheckpoint("after_outcome_acknowledgement", 0)
 				if first.ID() != "" {
 					if err := bus.PublishAcknowledged(ctx, first); err != nil {
 						t.Fatal(err)
