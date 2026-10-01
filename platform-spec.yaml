@@ -9567,6 +9567,12 @@ tool_model:
     - 5. If connection fails, log warning with server name and error for optional or unreferenced inventory. Skip this
       server for optional inventory, but abort boot/startup through required_mcp_tool_availability when any agent-required
       MCP tool depends on exact catalog proof from that server.
+    schema_ingress: >
+      HTTP and stdio tools/list inputSchema values preserve JSON number-token evidence until the shared tool-schema
+      admission owner. Length/item bounds accept nonnegative native-range integer tokens, not floating tokens (including
+      1.0 or 1e0), quoted numbers or null. Nested schemas follow the same rule. Numeric ranges and enums retain their
+      existing semantic JSON admission. This schema-only transport projection MUST NOT change ordinary catalog metadata,
+      tools/call results, initialize results or protocol-error numbers, and MUST NOT reconstruct schemas through YAML.
     lifecycle:
       http: Connection maintained for platform lifetime. Reconnect on failure with exponential backoff (1s, 2s, 4s, max 30s).
       stdio: Process spawned at boot, killed on platform shutdown. If process exits unexpectedly, respawn with backoff.

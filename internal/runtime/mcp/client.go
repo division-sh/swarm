@@ -376,7 +376,7 @@ func (c *Client) callHTTPServerWithCredentialKeyResolver(ctx context.Context, cf
 		cause := externalMCPWireLimitFailure(actual, cfg, req)
 		return RPCResponse{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "mcp_http_attempt_outcome_unconfirmed", "mcp-client", req.Method, map[string]any{"server": cfg.Name, "method": req.Method, "stage": "wire_limit"}, cause)
 	}
-	decoded, err := DecodeRPCResponse(raw, req.ID)
+	decoded, err := DecodeRPCResponse(raw, req)
 	if err != nil {
 		cause := externalMCPRPCInvalidFailure(err, cfg, req)
 		return RPCResponse{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "mcp_http_attempt_outcome_unconfirmed", "mcp-client", req.Method, map[string]any{"server": cfg.Name, "method": req.Method, "stage": "decode"}, cause)
@@ -519,7 +519,7 @@ func (c *stdioRPCClient) Call(ctx context.Context, cfg ServerConfig, req RPCRequ
 		if len(line) == 0 {
 			continue
 		}
-		resp, err := DecodeRPCResponse(line, req.ID)
+		resp, err := DecodeRPCResponse(line, req)
 		if err != nil {
 			cause := externalMCPRPCInvalidFailure(err, cfg, req)
 			return RPCResponse{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "mcp_stdio_attempt_outcome_unconfirmed", "mcp-client", req.Method, map[string]any{"server": cfg.Name, "method": req.Method, "stage": "decode"}, cause)

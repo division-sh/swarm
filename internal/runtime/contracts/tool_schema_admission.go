@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -429,6 +430,13 @@ func admitToolSchemaNumberOption(name string, value any, path string) (ToolInput
 }
 
 func admitToolSchemaLengthOption(name string, value any, path string) (ToolInputSchemaOption, error) {
+	if token, ok := value.(json.Number); ok {
+		integer, err := token.Int64()
+		if err != nil || !json.Valid([]byte(token)) {
+			return nil, toolSchemaFieldError("%s must be a nonnegative integer, not a floating or quoted number", path)
+		}
+		value = integer
+	}
 	number := reflect.ValueOf(value)
 	var integer int64
 	switch number.Kind() {

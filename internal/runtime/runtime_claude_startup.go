@@ -1039,7 +1039,7 @@ func startupCallMCP(ctx context.Context, client *http.Client, binding llm.MCPHTT
 	if len(raw) > runtimemcp.MaxWireResponseBytes {
 		return runtimemcp.RPCResponse{}, fmt.Errorf("mcp startup response exceeds %d bytes", runtimemcp.MaxWireResponseBytes)
 	}
-	decoded, err = runtimemcp.DecodeRPCResponse(raw, req.ID)
+	decoded, err = runtimemcp.DecodeRPCResponse(raw, req)
 	if err != nil {
 		return runtimemcp.RPCResponse{}, err
 	}
