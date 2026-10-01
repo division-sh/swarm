@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
@@ -386,6 +387,17 @@ type providerTriggerEventSource struct {
 
 func (s providerTriggerEventSource) ConnectionInputs() runtimecontracts.CompiledConnectionInputs {
 	return s.connectionInputs
+}
+
+func (s providerTriggerEventSource) ResolveExecutableNodeEventCatalogEntry(node runtimeidentity.ExecutableNode, eventType string) (runtimecontracts.EventCatalogEntry, string, bool) {
+	if !node.Valid() {
+		return runtimecontracts.EventCatalogEntry{}, "", false
+	}
+	eventType = s.ResolveExecutableNodeEventReference(node, eventType)
+	if local, owned := s.connectionInputs.ReceiverEvent(node.FlowPath(), eventType); owned {
+		return s.ResolveFlowEventCatalogEntry(node.FlowPath(), local)
+	}
+	return s.Source.ResolveExecutableNodeEventCatalogEntry(node, eventType)
 }
 
 func (s providerTriggerEventSource) ResolveEffectiveCompiledFlowEventSchema(flowID, eventType string) (runtimecontracts.CompiledEventSchema, bool, error) {

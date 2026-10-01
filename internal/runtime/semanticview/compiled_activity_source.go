@@ -101,7 +101,14 @@ func (s compiledActivitySource) ResolveFlowEventCatalogEntry(flowID, event strin
 	return s.Source.ResolveFlowEventCatalogEntry(flowID, event)
 }
 func (s compiledActivitySource) ResolveExecutableNodeEventCatalogEntry(node identity.ExecutableNode, event string) (contracts.EventCatalogEntry, string, bool) {
-	return s.ResolveFlowEventCatalogEntry(node.FlowPath(), s.ResolveExecutableNodeEventReference(node, event))
+	if !node.Valid() {
+		return contracts.EventCatalogEntry{}, "", false
+	}
+	event = s.ResolveExecutableNodeEventReference(node, event)
+	if local, owned := s.connectionInputs.ReceiverEvent(node.FlowPath(), event); owned {
+		event = local
+	}
+	return s.ResolveFlowEventCatalogEntry(node.FlowPath(), event)
 }
 func (s compiledActivitySource) ResolveEffectiveCompiledFlowEventSchema(flowID, event string) (contracts.CompiledEventSchema, bool, error) {
 	if schema, owned, err := s.connectionInputs.ReceiverCommonEventSchema(flowID, event); err != nil || owned {

@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -659,6 +660,17 @@ func TestProviderMixedConnectionProjectionAndConcreteProof(t *testing.T) {
 				proof := semanticview.ResolveFlowEventProof(source, flowID, concrete)
 				if !proof.HasSchema || proof.Local != local {
 					t.Fatalf("provider receiver proof=%+v", proof)
+				}
+				node := identitytest.FlowNode(t, flowID, "telegram-responder")
+				if proof := semanticview.ResolveExecutableNodeEventProof(source, node, concrete); !proof.HasSchema || proof.Local != local || proof.Canonical != concrete {
+					t.Fatalf("provider node receiver proof through %T=%+v", source, proof)
+				}
+				route, err := events.NewConcreteTemplateInstanceRoutingSource(events.RouteIdentity{FlowID: flowID, FlowInstance: flowID + "/inst-1", EntityID: "entity"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !runtimepinrouting.NewOutputConsumerResolver(source).Classify(concrete, route).Has(runtimepinrouting.OutputConsumerSameFlow) {
+					t.Fatal("actual provider subscriber missing")
 				}
 				if _, owned := source.ConnectionInputs().ReceiverEvent("foreign", concrete); owned {
 					t.Fatal("foreign provider scope borrowed receiver")
