@@ -2469,51 +2469,51 @@ func reconcileGenericExternalEffectCandidates(ctx context.Context, tx *sql.Tx, p
 			targetState = string(runtimeeffects.StateOutcomeUncertain)
 			failure = uncertainFailure
 		}
-		if candidate.AuthorityKind == string(runtimeeffects.AuthorityChannelDelivery) || candidate.AuthorityKind == string(runtimeeffects.AuthorityChannelNativeSetting) {
-			changed, err := recoverChannelSourceSettlementTx(ctx, tx, candidate, runtimeeffects.State(targetState), failure, now, postgres)
-			if err != nil {
-				return runtimeeffects.RecoverySummary{}, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict,
-					"channel_source_recovery_settlement_conflict", "external-effects", "startup_reconcile",
-					map[string]any{"attempt_id": candidate.AttemptID}, err)
-			}
-			if changed {
-				if targetState == string(runtimeeffects.StateTerminalFailure) {
-					summary.PrelaunchTerminal++
-				} else {
-					summary.OutcomeUncertain++
-				}
-			}
+		changed, err := recoverGenericExternalEffectCandidateTx(ctx, tx, candidate, targetState, failure, now, postgres)
+		if err != nil {
+			return runtimeeffects.RecoverySummary{}, err
+		}
+		if !changed {
 			continue
-		}
-		var result sql.Result
-		if postgres {
-			result, err = tx.ExecContext(ctx, `UPDATE runtime_external_effect_attempts SET state=$1,failure=$2::jsonb,completed_at=$3,updated_at=$3 WHERE attempt_id=$4::uuid AND state=$5`, targetState, string(failure), now, candidate.AttemptID, candidate.State)
-		} else {
-			result, err = tx.ExecContext(ctx, `UPDATE runtime_external_effect_attempts SET state=?,failure=?,completed_at=?,updated_at=? WHERE attempt_id=? AND state=?`, targetState, string(failure), now, now, candidate.AttemptID, candidate.State)
-		}
-		if err != nil {
-			return runtimeeffects.RecoverySummary{}, err
-		}
-		changed, err := result.RowsAffected()
-		if err != nil {
-			return runtimeeffects.RecoverySummary{}, err
-		}
-		if changed == 0 {
-			continue
-		}
-		if postgres {
-			_, err = tx.ExecContext(ctx, `UPDATE runtime_external_effect_operations SET state=$1,completed_at=$2,updated_at=$2 WHERE operation_id=$3::uuid`, targetState, now, candidate.OperationID)
-		} else {
-			_, err = tx.ExecContext(ctx, `UPDATE runtime_external_effect_operations SET state=?,completed_at=?,updated_at=? WHERE operation_id=?`, targetState, now, now, candidate.OperationID)
-		}
-		if err != nil {
-			return runtimeeffects.RecoverySummary{}, err
 		}
 		if targetState == string(runtimeeffects.StateTerminalFailure) {
-			summary.PrelaunchTerminal += int(changed)
+			summary.PrelaunchTerminal++
 		} else {
-			summary.OutcomeUncertain += int(changed)
+			summary.OutcomeUncertain++
 		}
 	}
 	return summary, nil
+}
+
+func recoverGenericExternalEffectCandidateTx(ctx context.Context, tx *sql.Tx, candidate externalEffectRecoveryCandidate,
+	targetState string, failure []byte, now time.Time, postgres bool) (bool, error) {
+	if candidate.AuthorityKind == string(runtimeeffects.AuthorityChannelDelivery) || candidate.AuthorityKind == string(runtimeeffects.AuthorityChannelNativeSetting) {
+		changed, err := recoverChannelSourceSettlementTx(ctx, tx, candidate, runtimeeffects.State(targetState), failure, now, postgres)
+		if err != nil {
+			return false, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict,
+				"channel_source_recovery_settlement_conflict", "external-effects", "startup_reconcile",
+				map[string]any{"attempt_id": candidate.AttemptID}, err)
+		}
+		return changed, nil
+	}
+	var result sql.Result
+	var err error
+	if postgres {
+		result, err = tx.ExecContext(ctx, `UPDATE runtime_external_effect_attempts SET state=$1,failure=$2::jsonb,completed_at=$3,updated_at=$3 WHERE attempt_id=$4::uuid AND state=$5`, targetState, string(failure), now, candidate.AttemptID, candidate.State)
+	} else {
+		result, err = tx.ExecContext(ctx, `UPDATE runtime_external_effect_attempts SET state=?,failure=?,completed_at=?,updated_at=? WHERE attempt_id=? AND state=?`, targetState, string(failure), now, now, candidate.AttemptID, candidate.State)
+	}
+	if err != nil {
+		return false, err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil || changed == 0 {
+		return false, err
+	}
+	if postgres {
+		_, err = tx.ExecContext(ctx, `UPDATE runtime_external_effect_operations SET state=$1,completed_at=$2,updated_at=$2 WHERE operation_id=$3::uuid`, targetState, now, candidate.OperationID)
+	} else {
+		_, err = tx.ExecContext(ctx, `UPDATE runtime_external_effect_operations SET state=?,completed_at=?,updated_at=? WHERE operation_id=?`, targetState, now, now, candidate.OperationID)
+	}
+	return true, err
 }
