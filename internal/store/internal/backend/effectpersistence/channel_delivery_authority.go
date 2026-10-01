@@ -135,22 +135,14 @@ func channelDeliveryAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 			         AND other.state IN ('authorized','launched','response_observed'))
 			  AND p.source_kind IN ('summary','notice','card')`
 	}
+	receiptClause, receiptArgs := channelDeliveryReceiptClause(d, postgres)
+	query += receiptClause
+	args = append(args, receiptArgs...)
 	if d.PreviousReceiptOperationID == "" {
-		query += ` AND p.current_receipt_operation_id IS NULL
-			AND (p.source_kind='summary' OR (p.source_kind='notice' AND EXISTS
+		query += ` AND (p.source_kind='summary' OR (p.source_kind='notice' AND EXISTS
 			(SELECT 1 FROM mailbox notice WHERE notice.item_id=p.source_id AND notice.status='pending'))
 			OR (p.source_kind='card' AND EXISTS
 			(SELECT 1 FROM decision_cards card WHERE card.card_id=p.source_id AND card.status='pending')))`
-	} else if postgres {
-		query += ` AND p.current_receipt_operation_id=$20::uuid
-			AND EXISTS (SELECT 1 FROM channel_delivery_receipts previous
-			WHERE previous.effect_operation_id=$20::uuid AND previous.delivery_id=p.delivery_id AND previous.state='sent')`
-		args = append(args, d.PreviousReceiptOperationID)
-	} else {
-		query += ` AND p.current_receipt_operation_id=?
-			AND EXISTS (SELECT 1 FROM channel_delivery_receipts previous
-			WHERE previous.effect_operation_id=? AND previous.delivery_id=p.delivery_id AND previous.state='sent')`
-		args = append(args, d.PreviousReceiptOperationID, d.PreviousReceiptOperationID)
 	}
 	if postgres {
 		if lock {
@@ -170,9 +162,6 @@ func channelDeliveryAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 
 func channelResponseAuthorityCurrent(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority, postgres, lock bool) (bool, error) {
 	d := authority.ChannelDelivery
-	if d.PreviousReceiptOperationID != "" {
-		return false, nil
-	}
 	query := `SELECT p.delivery_id FROM channel_delivery_plans p
 		JOIN channel_delivery_renders r ON r.delivery_id=p.delivery_id
 		LEFT JOIN operator_channel_text_intents intent ON intent.publication_id=p.source_id
@@ -183,7 +172,6 @@ func channelResponseAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 		JOIN channel_onboarding_operations onboarding ON onboarding.operation_id=activation.operation_id
 		WHERE p.delivery_id=? AND p.source_kind='response' AND p.state='rendered'
 		AND p.current_render_id=r.render_id AND r.render_id=? AND r.render_hash=?
-		AND p.current_receipt_operation_id IS NULL
 		AND ((intent.state='settled' AND intent.disposition IN ('entry','teaching','chooser') AND action.publication_id IS NULL)
 		  OR (action.state='settled' AND action.disposition='navigation' AND intent.publication_id IS NULL))
 		AND p.principal_id=? AND p.interface_key=? AND p.delivery_epoch=?
@@ -226,7 +214,6 @@ func channelResponseAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 			JOIN channel_onboarding_operations onboarding ON onboarding.operation_id=activation.operation_id
 			WHERE p.delivery_id=$2::uuid AND p.source_kind='response' AND p.state='rendered'
 			AND p.current_render_id=r.render_id AND r.render_id=$3::uuid AND r.render_hash=$4
-			AND p.current_receipt_operation_id IS NULL
 			AND ((intent.state='settled' AND intent.disposition IN ('entry','teaching','chooser') AND action.publication_id IS NULL)
 			  OR (action.state='settled' AND action.disposition='navigation' AND intent.publication_id IS NULL))
 			AND p.principal_id=$5::uuid AND p.interface_key=$6 AND p.delivery_epoch=$7
@@ -253,9 +240,12 @@ func channelResponseAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 				WHERE other.authority_kind='channel_delivery'
 				AND other.authority_evidence->>'delivery_id'=p.delivery_id::text
 				AND other.operation_id<>$19::uuid AND other.state IN ('authorized','launched','response_observed'))`
-		if lock {
-			query += ` FOR UPDATE OF p, selected, binding, activation`
-		}
+	}
+	receiptClause, receiptArgs := channelDeliveryReceiptClause(d, postgres)
+	query += receiptClause
+	args = append(args, receiptArgs...)
+	if postgres && lock {
+		query += ` FOR UPDATE OF p, selected, binding, activation`
 	}
 	var id string
 	err := q.QueryRowContext(ctx, query, args...).Scan(&id)
@@ -266,4 +256,22 @@ func channelResponseAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 		return false, fmt.Errorf("check exact channel response authority: %w", err)
 	}
 	return id == d.DeliveryID, nil
+}
+
+// Both source queries bind the same nineteen authority coordinates. Receipt
+// currentness is source-neutral; first-send source eligibility remains local.
+func channelDeliveryReceiptClause(d runtimeeffects.ChannelDeliveryAuthority, postgres bool) (string, []any) {
+	if d.PreviousReceiptOperationID == "" {
+		return ` AND p.current_receipt_operation_id IS NULL`, nil
+	}
+	if postgres {
+		return ` AND p.current_receipt_operation_id=$20::uuid
+			AND EXISTS (SELECT 1 FROM channel_delivery_receipts previous
+			WHERE previous.effect_operation_id=$20::uuid AND previous.delivery_id=p.delivery_id AND previous.state='sent')`,
+			[]any{d.PreviousReceiptOperationID}
+	}
+	return ` AND p.current_receipt_operation_id=?
+		AND EXISTS (SELECT 1 FROM channel_delivery_receipts previous
+		WHERE previous.effect_operation_id=? AND previous.delivery_id=p.delivery_id AND previous.state='sent')`,
+		[]any{d.PreviousReceiptOperationID, d.PreviousReceiptOperationID}
 }

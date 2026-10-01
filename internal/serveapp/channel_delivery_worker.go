@@ -267,6 +267,9 @@ func (d *serveChannelDeliveryDispatcher) processDraftChoice(ctx context.Context,
 	resolved runtimechanneldelivery.ResolvedAction) error {
 	candidate, text, progress, principalID, err := d.store.PreviewChosenChannelInputDraftText(ctx, intent.Fact, intent.ReceivedAt)
 	if err != nil {
+		if errors.Is(err, decisioncard.ErrDraftNotAuthority) {
+			return d.store.SettleUnappliedChannelAction(ctx, intent.Fact, runtimechanneldelivery.ActionStale)
+		}
 		if errors.Is(err, decisioncard.ErrInvalidInput) {
 			_, err = d.store.PlanChannelActionResponse(ctx, intent.Fact, resolved, "")
 		}
