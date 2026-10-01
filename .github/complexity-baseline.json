@@ -1637,6 +1637,7 @@
     {"path":"internal/runtime/llm/capability_surface_test_support_test.go","class":"test"},
     {"path":"internal/runtime/llm/claude_continuation_admission_test.go","class":"test"},
     {"path":"internal/runtime/llm/claude_continuation_characterization_test.go","class":"test"},
+    {"path":"internal/runtime/llm/claude_continuation_projection_test.go","class":"test"},
     {"path":"internal/runtime/llm/claude_invocation_tools.go","class":"authored"},
     {"path":"internal/runtime/llm/cli_failure_handoff_test.go","class":"test"},
     {"path":"internal/runtime/llm/cli_inventory_test.go","class":"test"},
