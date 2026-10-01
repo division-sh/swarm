@@ -170,7 +170,11 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 							break
 						}
 						if time.Now().After(deadline) {
-							t.Fatalf("selected-fork callback lacks terminal unsupported disposition: state=%s disposition=%s err=%v", intentState, disposition, err)
+							var status, verdict string
+							cardErr := db.QueryRow(`SELECT status,COALESCE(verdict,'') FROM decision_cards WHERE card_id=$1`, child).Scan(&status, &verdict)
+							var decisions int
+							eventErr := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, fork.ForkRunID).Scan(&decisions)
+							t.Fatalf("selected-fork callback lacks terminal unsupported disposition: state=%s disposition=%s err=%v card_status=%s verdict=%s card_err=%v decisions=%d event_err=%v", intentState, disposition, err, status, verdict, cardErr, decisions, eventErr)
 						}
 						time.Sleep(20 * time.Millisecond)
 					}
