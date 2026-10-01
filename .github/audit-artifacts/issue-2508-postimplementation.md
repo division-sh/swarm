@@ -96,6 +96,13 @@ boundary guard passes. No existing test or production behavior was changed to
 silence this failure, and no new fixture/runtime/registry owner was added.
 The relocated compiled proofs pass together in 102.269s.
 
+The subsequent conformance CI failure was an unclassified reference to
+ConnectRoutePlan in the pre-audit, not a runtime route interpreter. The existing
+route-authority inventory now classifies the two exact audit paths as a
+separate concept. No glob, excluded search dimension, removed owner citation,
+modified guard or runtime path exemption is used; its existing hostile-runtime
+and stale-classification controls remain mandatory.
+
 | Manifestation | Classification | Exact execution proof |
 | --- | --- | --- |
 | A01 capability Cartesian product | execution-proven through the same corrected path | TestOperatorReadFactoringCapabilityMatrix: all 16 combinations; independent conversation capability test. |
