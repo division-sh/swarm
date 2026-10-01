@@ -571,6 +571,7 @@ func TestChannelOnboardingCrashServeProcessHelper(t *testing.T) {
 	}
 	redirectExternalHosts(t, map[string]string{
 		"api.telegram.org":              os.Getenv("TEST_CHANNEL_ONBOARDING_TELEGRAM_BASE"),
+		"mock.example.test":             os.Getenv("TEST_CHANNEL_ONBOARDING_TELEGRAM_BASE"),
 		"hooks.channel-onboarding.test": "http://" + os.Getenv("TEST_CHANNEL_ONBOARDING_PUBLIC_LISTEN"),
 	})
 	opts := cliapp.DefaultServeOptions()
