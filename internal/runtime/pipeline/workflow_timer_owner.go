@@ -23,6 +23,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -1242,8 +1243,10 @@ func (l *WorkflowTimerLifecycle) logFailure(ctx context.Context, action string, 
 	if l == nil || l.logger == nil || err == nil {
 		return
 	}
+	failure := runtimefailures.FromError(err, runtimeWorkflowID, action)
 	_ = l.logger.LogRuntime(ctx, RuntimeLogEntry{
 		Level: "error", Message: "Workflow timer lifecycle operation failed", Component: runtimeWorkflowID,
-		Action: action, Detail: map[string]any{"activation_id": ref.ActivationID, "declaration_key": ref.DeclarationKey, "error": err.Error()},
+		Action: action, Detail: map[string]any{"activation_id": ref.ActivationID, "declaration_key": ref.DeclarationKey},
+		Failure: &failure.Failure,
 	})
 }

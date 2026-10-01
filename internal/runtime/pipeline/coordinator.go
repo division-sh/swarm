@@ -1107,7 +1107,6 @@ func (pc *PipelineCoordinator) recordWorkflowHandlerFailure(ctx context.Context,
 			EntityID:  workflowEventEntityID(evt),
 			Detail: map[string]any{
 				"node_id": nodeID,
-				"error":   err.Error(),
 			},
 			Failure: &failure.Failure,
 		})

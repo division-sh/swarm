@@ -17728,6 +17728,12 @@ platform_tables:
       - message is for humans; details is the machine-readable source of truth
       - component and action live in details, not as top-level runtime_log fields
       - failure-bearing entries carry details.failure as a platform.failure/v1 envelope; details.error is forbidden and message is not a semantic classifier
+      - >-
+        Pipeline handler and workflow timer lifecycle failure producers consume the shared FromError
+        normalization owner and pass its typed envelope to the canonical logger. Existing typed failures
+        and causal error chains are preserved; untyped errors use the owner's internal/unclassified
+        result. Node/event/run and timer activation/declaration/action facts remain structured details.
+        This producer contract does not change diagnostic criticality, cancellation or persistence policy.
       - readers and debug UIs should filter and render structured runtime diagnostics from details
       - >-
         Durable lifecycle projection consumes the same explicit-facts runtime-log encoder and
@@ -17741,7 +17747,9 @@ platform_tables:
         Tool-execution entries that consume external tool-provider dispatch admission include machine-readable
         details fields `rate_limit_scope`, `rate_limit_bucket_hash`, `rate_limit_limit`, `rate_limit_period_ms`,
         `rate_limit_max_wait_ms`, `rate_limit_wait_ms`, `rate_limit_outcome`, and `rate_limit_attempts`. If admission
-        times out, details also include `error_code: rate_limited` and `retryable: true`.
+        times out, details.failure carries the existing canonical failure with
+        detail.code `external_dispatch_rate_limited`; retryability is owned by the failure registry.
+        No independent details.error_code or retryable flag is emitted.
       note: 'Queryable via: SELECT * FROM events WHERE event_name = "platform.runtime_log" AND payload->>log_level = "error"'
     pipeline_transition_encoding:
       table: event_receipts
