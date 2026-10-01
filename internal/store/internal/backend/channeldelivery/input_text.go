@@ -38,7 +38,7 @@ func selectChosenDraftTx(ctx context.Context, tx *sql.Tx, text render.PendingTex
 		cursor = next
 	}
 	if selected.DraftID == "" {
-		return render.InputDraftCandidate{}, fmt.Errorf("draft choice no longer names a current draft")
+		return render.InputDraftCandidate{}, fmt.Errorf("draft choice no longer names a current draft: %w", decisioncard.ErrDraftNotAuthority)
 	}
 	return selected, nil
 }
