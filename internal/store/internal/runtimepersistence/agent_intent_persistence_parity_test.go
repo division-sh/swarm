@@ -180,18 +180,18 @@ func selectedIntentRecoverySource(t testing.TB) semanticview.Source {
 		ID: "worker", Type: "managed", Role: "worker", Model: "regular",
 		ResolvedIntent: selectedStoreIntent(t), Criteria: []string{"quality"},
 	}
-	policy := runtimecontracts.PolicyDocument{Criteria: map[string]runtimecontracts.PolicyCriteriaSet{
-		"quality": {
+	rules := runtimecontracts.RulesDocument{
+		"quality": {Criteria: &runtimecontracts.PolicyCriteriaSet{
 			Classes: map[string]runtimecontracts.PolicyCriteriaClass{"hard": {Disposition: "reject"}},
 			Rules:   []runtimecontracts.PolicyCriteriaRule{{ID: "QUALITY-01", Class: "hard", Text: "Require declared quality."}},
-		},
-	}}
+		}},
+	}
 	flow := runtimecontracts.FlowContractView{
 		Path:      "review",
 		Paths:     runtimecontracts.FlowContractPaths{FlowPath: "review"},
 		Agents:    map[string]runtimecontracts.AgentRegistryEntry{"worker": entry},
 		AgentURIs: map[string]string{"worker": owner},
-		Policy:    policy,
+		Rules:     rules,
 	}
 	root := &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
@@ -212,7 +212,7 @@ func selectedIntentRecoverySource(t testing.TB) semanticview.Source {
 		ID: "review", Path: "review", Mode: "static",
 		Agents:    map[string]runtimecontracts.AgentRegistryEntry{"worker": entry},
 		AgentURIs: map[string]string{"worker": owner},
-		Policy:    policy,
+		Rules:     rules,
 	}}
 }
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -26,6 +27,9 @@ func projectPolicyDeclarationsValue(root yamlsource.Value) (PolicyDocument, erro
 		var literal any
 		if err := field.Value.Project(&literal); err != nil {
 			return PolicyDocument{}, nodeValueError(field.Value, err)
+		}
+		if _, err := canonicaljson.FromGo(literal); err != nil {
+			return PolicyDocument{}, nodeValueError(field.Value, fmt.Errorf("policy literal must be JSON-compatible: %w", err))
 		}
 		out.Values[field.Name] = PolicyValue{Value: literal}
 	}

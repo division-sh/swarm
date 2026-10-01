@@ -59,6 +59,26 @@ func TestR3PolicyLiteralPresenceAndInteriorMatrix(t *testing.T) {
 	}
 }
 
+func TestR3PolicyLiteralJSONAdmission(t *testing.T) {
+	for _, body := range []string{"user: {1: value}\n", "user: [{false: value}]\n", "user: .inf\n", "user: -.inf\n", "user: .nan\n", "user: 9007199254740992\n"} {
+		path := filepath.Join(t.TempDir(), "policy.yaml")
+		writeFixtureFile(t, path, body)
+		if _, err := loadOptionalPolicyDeclarations(path); err == nil || !strings.Contains(err.Error(), "policy literal must be JSON-compatible") {
+			t.Fatalf("non-JSON policy accepted: %s error=%v", body, err)
+		}
+	}
+	path := filepath.Join(t.TempDir(), "policy.yaml")
+	writeFixtureFile(t, path, "user: {\"1\": value, nested: [null, 1, 1.0, false, \"\", {}, []]}\n")
+	policy, err := loadOptionalPolicyDeclarations(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := policy.Values["user"].Value.(map[string]any)["nested"].([]any)
+	if reflect.TypeOf(items[1]).Kind() != reflect.Int || reflect.TypeOf(items[2]).Kind() != reflect.Float64 {
+		t.Fatalf("JSON validation changed number kinds: %#v", items)
+	}
+}
+
 func TestR3RuleFieldPresenceMatrix(t *testing.T) {
 	states := []string{"missing", "null", "empty", "scalar", "empty_sequence", "sequence", "empty_mapping", "mapping"}
 	for _, tc := range []struct{ name, base, needle, line, scalar, sequence, mapping, admit string }{

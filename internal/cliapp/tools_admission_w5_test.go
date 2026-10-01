@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -61,7 +62,23 @@ func TestW5ToolsVerifyAndDescribeSupportedSurface(t *testing.T) {
 	writeDescribeTestFile(t, filepath.Join(root, "policy.yaml"), "modules: {}\n")
 	stdout.Reset()
 	stderr.Reset()
-	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", root, "--config", config, "--json"}, &stdout, &stderr, defaultRootCommandOptions()); code == 0 || !strings.Contains(stdout.String()+stderr.String(), "policy.modules is retired") {
-		t.Fatalf("old module placement accepted: code=%d stdout=%s stderr=%s", code, &stdout, &stderr)
+	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", root, "--config", config, "--json"}, &stdout, &stderr, defaultRootCommandOptions()); code != 0 {
+		t.Fatalf("literal modules key rejected: code=%d stdout=%s stderr=%s", code, &stdout, &stderr)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", root, "--json"}, &stdout, &stderr, defaultRootCommandOptions()); code != 0 {
+		t.Fatalf("literal modules readback=%d: %s", code, &stderr)
+	}
+	var view struct {
+		Root struct {
+			Policy map[string]any `json:"policy"`
+		} `json:"root"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &view); err != nil {
+		t.Fatal(err)
+	}
+	if literal, ok := view.Root.Policy["modules"].(map[string]any); !ok || len(literal) != 0 {
+		t.Fatalf("module-looking policy did not remain an empty literal object: %#v", view.Root.Policy)
 	}
 }
