@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -152,6 +153,27 @@ func TestActivityTerminalResultUsesDurableTimestampBothStores(t *testing.T) {
 					after := loadActivityResultForProof(t, ctx, selected, journal.ResultEventID)
 					if !reflect.DeepEqual(result, after) || !reflect.DeepEqual(before, storetest.ObserveActivityResultPublicationStorage(t, ctx, selected.events)) {
 						t.Fatal("exact replay changed immutable result facts or durable side effects")
+					}
+					ready := make(chan struct{}, 2)
+					start := make(chan struct{})
+					replayErrors := make(chan error, 2)
+					for range 2 {
+						go func() {
+							ready <- struct{}{}
+							<-start
+							replayErrors <- runtimepipeline.ExecuteActivityIntentForTest(ctx, pc, nil, intent)
+						}()
+					}
+					<-ready
+					<-ready
+					close(start)
+					for range 2 {
+						if err := <-replayErrors; err != nil {
+							t.Errorf("concurrent terminal replay: %v", err)
+						}
+					}
+					if !reflect.DeepEqual(result, loadActivityResultForProof(t, ctx, selected, journal.ResultEventID)) || !reflect.DeepEqual(before, storetest.ObserveActivityResultPublicationStorage(t, ctx, selected.events)) {
+						t.Fatal("concurrent replay changed result facts or durable side effects")
 					}
 					stored, found, err := activityReplayJournal(selected).LoadActivityAttempt(ctx, journal.RequestEventID)
 					if err != nil || !found || !reflect.DeepEqual(journal, stored) || calls.Load() != 1 {
@@ -316,16 +338,21 @@ func activityTerminalReplayStoreCases() []struct {
 // Observe the real bus and persistence without replacing either semantic owner.
 type activityJournalProofBus struct {
 	*runtimebus.EventBus
+	mu        sync.Mutex
 	publishes []events.Event
 	attempts  []events.Event
 }
 
 func (b *activityJournalProofBus) Publish(ctx context.Context, event events.Event) error {
+	b.mu.Lock()
 	b.attempts = append(b.attempts, event)
+	b.mu.Unlock()
 	if err := b.EventBus.Publish(ctx, event); err != nil {
 		return err
 	}
+	b.mu.Lock()
 	b.publishes = append(b.publishes, event)
+	b.mu.Unlock()
 	return nil
 }
 
