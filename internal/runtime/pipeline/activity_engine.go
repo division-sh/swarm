@@ -1521,10 +1521,10 @@ func (d pipelineActivityDispatcher) publishActivityResult(ctx context.Context, i
 	if err != nil {
 		return err
 	}
-	return d.publishActivityResultWithID(ctx, intent, publication.eventID, string(publication.eventType), payload)
+	return d.publishActivityResultWithID(ctx, intent, publication.eventID, string(publication.eventType), payload, time.Now().UTC())
 }
 
-func (d pipelineActivityDispatcher) publishActivityResultWithID(ctx context.Context, intent runtimeengine.ActivityIntent, eventID, eventType string, payload map[string]any) error {
+func (d pipelineActivityDispatcher) publishActivityResultWithID(ctx context.Context, intent runtimeengine.ActivityIntent, eventID, eventType string, payload map[string]any, createdAt time.Time) error {
 	ctx = events.WithDeliveryContext(ctx, intent.Context)
 	raw, err := canonicaljson.MarshalPreservingNumberKinds(payload)
 	if err != nil {
@@ -1542,7 +1542,7 @@ func (d pipelineActivityDispatcher) publishActivityResultWithID(ctx context.Cont
 			Envelope: events.EventEnvelope{
 				EntityID: intent.EntityID.String(), FlowInstance: intent.FlowInstance, Source: routingSource.Route(),
 			},
-			RoutingSource: routingSource, CreatedAt: time.Now().UTC(),
+			RoutingSource: routingSource, CreatedAt: createdAt,
 		},
 		Lineage: events.EventLineage{
 			RunID:         intent.SourceRunID,
@@ -1593,12 +1593,15 @@ func (d pipelineActivityDispatcher) publishJournaledActivityResult(ctx context.C
 	if rec.ResultEventID == "" || rec.ResultEventType == "" || rec.ResultPayload == nil {
 		return fmt.Errorf("activity attempt %s has no terminal journal result", rec.RequestEventID)
 	}
+	if rec.CompletedAt == nil || rec.CompletedAt.IsZero() {
+		return fmt.Errorf("activity attempt %s has no valid terminal completion timestamp", rec.RequestEventID)
+	}
 	intent.Attempt = rec.Attempt
 	intent.Generation = rec.Generation
 	if id := strings.TrimSpace(rec.ReplyContextID); id != "" {
 		intent.Context = events.DeliveryContext{Reply: &events.ReplyContextRef{ID: id}}
 	}
-	return d.publishActivityResultWithID(ctx, intent, rec.ResultEventID, rec.ResultEventType, rec.ResultPayload)
+	return d.publishActivityResultWithID(ctx, intent, rec.ResultEventID, rec.ResultEventType, rec.ResultPayload, *rec.CompletedAt)
 }
 
 func activityAttemptStartRecord(intent runtimeengine.ActivityIntent, inputHash string) ActivityAttemptRecord {

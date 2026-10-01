@@ -4856,6 +4856,10 @@ handler_specification:
             update the row with succeeded, failed, or uncertain terminal state after the outcome, and consume the row on
             duplicate/redelivered request events before deciding whether dispatch is allowed. Any existing started,
             uncertain, succeeded, or failed row blocks automatic provider re-dispatch and managed credential refresh.
+            Every journal-backed terminal result publication, including first publication, redelivery and reconstruction
+            after journal commit before result persistence, uses the acknowledged or loaded receipt's durable completed_at
+            as CreatedAt through canonical event timestamp normalization. Missing or zero terminal completion time fails
+            before publication; a fresh clock, precommit candidate or existing-event timestamp patch-up is not authoritative.
           retry_default: max_attempts 1, no retry
           fork_default: explicit proposed-effect/evidence disposition under runtime.run_fork.selected_contract_execution; never infer fork authorization from source approval
         long_running: Split to a later resume/cancel/journal slice; fail closed in Stage 1.
@@ -15659,7 +15663,10 @@ platform_tables:
         result after the dispatch outcome, and consume the row on request redelivery/replay/restart before deciding whether
         a provider call may occur. For non_idempotent_write activities, any existing started, uncertain, succeeded, or
         failed row blocks automatic provider re-dispatch. Generated result events are published from this journaled terminal
-        state. In live mode, static credentials and admitted managed credentials for provider_connector tools are resolved through
+        state, with CreatedAt taken from the store-returned or loaded completed_at and normalized by the canonical event
+        constructor. First publication and replay consume the same durable timestamp, including recovery when no result event
+        has yet been persisted. A loaded terminal receipt without a valid completion time fails closed before publication;
+        no fresh-clock fallback or compatibility repair is permitted. In live mode, static credentials and admitted managed credentials for provider_connector tools are resolved through
         their respective credential-store/import-boundary owners before the started row is inserted; missing, unbound, unusable, or
         mismatched credentials therefore fail before provider dispatch and do not create an attempt row. In mock mode, exact
         provider-connector response admission occurs before the row is inserted and no credential owner or transport is consulted.
