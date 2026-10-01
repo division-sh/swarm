@@ -3733,6 +3733,8 @@ handler_specification:
           Without key, distinct durable deliveries append once each, preserving multiplicity and commit order.
           Persisted accumulator and history projections preserve retained numeric evidence during restart and
           duplicate settlement; hydration alone must not draft a business mutation or replace accepted items.
+          Declared-key admission requires one receipt for each distinct stored item key and no orphan receipts;
+          balanced receipt/item counts or matching payload hashes alone cannot establish this correspondence.
       partition: >-
         The selected instance owns the partition. Authored window and dedup_by are retired, including explicit null.
         Declaration and captured loop generation remain independent exact bucket identity, not business partitions.
