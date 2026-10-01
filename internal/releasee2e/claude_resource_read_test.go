@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 const releaseResourceReadEnv = "RELEASE_E2E_RESOURCE_READ"
@@ -32,35 +34,7 @@ func TestClaudeResourceReadSupportedServeRestart(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			root := filepath.Join(base, backend)
 			contracts := filepath.Join(root, "contracts")
-			copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal/releasee2e/testdata/claude_cli_managed_lifecycle"), contracts)
-			writeReleaseFile(t, filepath.Join(contracts, "schema.yaml"), `name: claude-resource-read
-stages:
-  pending: {initial: true}
-  done: {terminal: true}
-pins:
-  inputs: {events: [task.assigned, task.finished, records.loaded]}
-  outputs: {events: [task.assigned, task.finished]}
-connect:
-  - {event: task.assigned, from: ., to: worker}
-  - {event: task.finished, from: ., to: worker}
-  - {event: records.loaded, from: worker, to: .}
-`)
-			writeReleaseFile(t, filepath.Join(contracts, "entities.yaml"), "reference_state: {}\n")
-			writeReleaseFile(t, filepath.Join(contracts, "nodes.yaml"), "reference:\n  execution_type: system_node\n  subscribes_to: [records.loaded, task.finished]\n  event_handlers:\n    records.loaded:\n      create_entity: true\n    task.finished:\n      advances_to: done\n")
-			writeReleaseFile(t, filepath.Join(contracts, "events.yaml"), "task.assigned:\n  request: \"[text]\"\ntask.finished:\n")
-			writeReleaseFile(t, filepath.Join(contracts, "worker/schema.yaml"), "name: worker\nstages:\n  pending: {initial: true}\n  active: {}\n  done: {terminal: true}\npins:\n  inputs: {events: [task.assigned, task.finished]}\n  outputs: {events: [records.loaded]}\n")
-			writeReleaseFile(t, filepath.Join(contracts, "worker/agents.yaml"), "release-worker:\n  role: release-worker\n  intent: prompts/release-worker.md\n  model: regular\n  memory: true\n  native_tools: {web_search: true}\n  data_access: [{data: worker/records.loaded}]\n  subscriptions: [agent.requested]\n  emit_events: [agent.completed]\n")
-			nodesPath := filepath.Join(contracts, "worker/nodes.yaml")
-			nodesRaw, err := os.ReadFile(nodesPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			writeReleaseFile(t, nodesPath, strings.Replace(string(nodesRaw), "advances_to: done", "advances_to: active", 1)+"\nfinish:\n  execution_type: system_node\n  subscribes_to: [task.finished]\n  event_handlers:\n    task.finished:\n      advances_to: done\n")
-			eventsRaw, err := os.ReadFile(filepath.Join(contracts, "worker/events.yaml"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			writeReleaseFile(t, filepath.Join(contracts, "worker/events.yaml"), string(eventsRaw)+"\nrecords.loaded:\n  key: id\n  id: text\n  reference_text: text\n")
+			copyReleaseTree(t, canonicalrouting.CopyClaudeResourceRead(t), contracts)
 			rows := "{\"id\":\"a\",\"reference_text\":\"alpha\"}\n{\"id\":\"b\",\"reference_text\":\"beta\"}\n"
 			writeReleaseFile(t, filepath.Join(root, "rows.jsonl"), rows)
 			writeReleaseFile(t, filepath.Join(root, "payload.json"), "{\"request\":[\"read pinned references\"]}\n")
