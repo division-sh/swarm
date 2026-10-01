@@ -1,0 +1,27 @@
+validator:
+  execution_type: system_node
+  event_handlers:
+    review.reported:
+      rules:
+        - validate:
+            set: matches
+            input: {left: payload.left, right: payload.right}
+            into: computed.validation.matches
+        - when: computed.validation.matches.valid == true
+          emit:
+            event: work.accepted
+            fields:
+              proof: ${policy.business.description}
+              limit: ${policy.business.value}
+        - when: computed.validation.matches.valid == false
+          emit:
+            event: work.rejected
+            fields:
+              proof: ${policy.business.description}
+              limit: ${policy.business.value}
+        - default: true
+          emit:
+            event: work.rejected
+            fields:
+              proof: invalid validation result
+              limit: 0

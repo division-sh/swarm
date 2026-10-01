@@ -31,6 +31,7 @@ type workflowExpressionContext struct {
 	WorkflowName                 string
 	QueryEntityCount             func(string) (int, error)
 	AllowUnresolvedQueryOperands bool
+	DeclaredPolicy               map[string]any
 }
 
 type workflowExpressionEvaluator struct {
@@ -183,6 +184,7 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 		QueryEntityCount:             ctx.QueryEntityCount,
 		AllowUnresolvedQueryOperands: ctx.AllowUnresolvedQueryOperands,
 	}
+	normalizedCtx.DeclaredPolicy = ctx.DeclaredPolicy
 	normalized = workflowExpressionPolicyPlaceholder.ReplaceAllStringFunc(normalized, func(token string) string {
 		match := workflowExpressionPolicyPlaceholder.FindStringSubmatch(token)
 		if len(match) != 2 {
@@ -193,7 +195,7 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 			return workflowExpressionLiteral(value)
 		}
 		if key != "" {
-			return "policy." + key
+			return "policy[" + strconv.Quote(key) + "]"
 		}
 		return token
 	})
@@ -221,6 +223,16 @@ func rewriteWorkflowExpressionQueryEntityCounts(expression string, ctx workflowE
 		predicate := strings.TrimSpace(expression[match[2]:match[3]])
 		if _, err := parseWorkflowEntityQueryPredicate(predicate, ctx); err != nil {
 			return "", err
+		}
+		// Verification replaces counts, so check their operands before lowering.
+		if ctx.DeclaredPolicy != nil {
+			parts := workflowExpressionQueryPredicatePattern.FindStringSubmatch(predicate)
+			operand := strings.TrimSpace(parts[3])
+			if root, _ := workflowExpressionQueryOperandScope(operand); root == "policy" {
+				if err := workflowexpr.ValidatePolicyReferences(operand, ctx.DeclaredPolicy, workflowexpr.ValueExpressionOptions{}); err != nil {
+					return "", err
+				}
+			}
 		}
 		count := 0
 		if ctx.QueryEntityCount != nil {

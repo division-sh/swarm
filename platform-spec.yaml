@@ -2954,6 +2954,8 @@ literal_policy_contracts:
   - Effective resolution, cloning and preview overrides deep-copy literal containers, including caller-owned override inputs.
   - Admitted rule declarations and executable module definitions are separate authorities in rules.yaml and tools.yaml. Literal policy keys with those names grant no authority.
   - Policy and rule source admission uses the existing document-wide expansion bound, finite artifact classification and composed provenance ledger. Source bytes, catalog and retained identity remain authoritative for reconstruction.
+  - Static executable policy reads are checked against scoped declarations through the canonical checked CEL reader census. Query-count operands are checked before count lowering; timer placeholders use their existing exact-key dialect and active builtin guard selectors retain their existing path dialect. Missing declarations are hard teaching errors, not warnings.
+  - Stock has/optional selection, short-circuit presence and lexical shadowing retain their existing semantics. Direct dynamic subscripts remain subject to existing structural admission; optional dynamic lookups are not guessed into static keys.
 rule_set_contracts:
   status: merge_bearing_runtime_behavior
   implementation_slice: '#2303'
@@ -24763,6 +24765,9 @@ cli_specification:
                 describe authoring view result object with validation_scope: structural and live_readiness: not_evaluated.
                 workspace_backend is retired. Preserve source identity/authority, graph, routing topology, diagnostics,
                 root, flows and approvals. Diagnostic views retain invalid-source findings instead of asserting live readiness.
+                Root and flow policy fields expose cloned effective literal values; rules fields expose the nearest
+                scoped agent or machine declarations in their flat authored shape, not wrapper metadata or two namespaces.
+                Source files and the composed effective provenance ledger include policy.yaml and rules.yaml.
               quiet_values:
               - flow ids and summary values declared by the command implementation
             describe_routes:

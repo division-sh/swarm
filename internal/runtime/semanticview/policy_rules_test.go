@@ -96,3 +96,15 @@ func TestR3RuleLocalDuplicateAndWrongKindShadow(t *testing.T) {
 		t.Fatal("resolved rules alias declaration")
 	}
 }
+
+func TestR3LiteralTypedContainerCloneIsolation(t *testing.T) {
+	bundle := r3PolicyRulesBundle()
+	value := map[any]any{"strings": []string{"kept"}, "map": map[string]string{"key": "kept"}, "empty": []string{}}
+	preview := CloneBundleForPreview(bundle, map[string]any{"literal": value})
+	value["strings"].([]string)[0] = "changed"
+	value["map"].(map[string]string)["key"] = "changed"
+	got := Wrap(preview).ResolvedPolicyForFlow("child").Values["literal"].Value.(map[any]any)
+	if got["strings"].([]string)[0] != "kept" || got["map"].(map[string]string)["key"] != "kept" || got["empty"].([]string) == nil {
+		t.Fatal("literal clone aliases caller or erases empty sequence")
+	}
+}

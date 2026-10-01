@@ -1,5 +1,7 @@
 package flowmodel
 
+import "encoding/json"
+
 type PolicyDocument struct {
 	Values map[string]PolicyValue `yaml:",inline"`
 }
@@ -8,23 +10,24 @@ type PolicyValue struct {
 	Value any
 }
 
-func (v PolicyValue) MarshalYAML() (any, error)         { return v.Value, nil }
-func (p PolicyCriteriaParam) MarshalYAML() (any, error) { return p.Value, nil }
+func (v PolicyValue) MarshalYAML() (any, error)            { return v.Value, nil }
+func (p PolicyCriteriaParam) MarshalYAML() (any, error)    { return p.Value, nil }
+func (p PolicyCriteriaParam) MarshalJSON() ([]byte, error) { return json.Marshal(p.Value) }
 
 type PolicyCriteriaSet struct {
-	Classes map[string]PolicyCriteriaClass `yaml:"classes"`
-	Rules   []PolicyCriteriaRule           `yaml:"rules"`
+	Classes map[string]PolicyCriteriaClass `yaml:"classes" json:"classes"`
+	Rules   []PolicyCriteriaRule           `yaml:"rules" json:"rules"`
 }
 
 type PolicyCriteriaClass struct {
-	Disposition string `yaml:"disposition"`
+	Disposition string `yaml:"disposition" json:"disposition"`
 }
 
 type PolicyCriteriaRule struct {
-	ID     string                         `yaml:"id"`
-	Class  string                         `yaml:"class"`
-	Text   string                         `yaml:"text"`
-	Params map[string]PolicyCriteriaParam `yaml:"params"`
+	ID     string                         `yaml:"id" json:"id"`
+	Class  string                         `yaml:"class" json:"class"`
+	Text   string                         `yaml:"text" json:"text"`
+	Params map[string]PolicyCriteriaParam `yaml:"params" json:"params,omitempty"`
 }
 
 type PolicyCriteriaParam struct {
@@ -32,31 +35,31 @@ type PolicyCriteriaParam struct {
 }
 
 type PolicyValidationSet struct {
-	Classes map[string]PolicyValidationClass `yaml:"classes"`
-	Inputs  map[string]string                `yaml:"inputs"`
-	Rules   []PolicyValidationRule           `yaml:"rules"`
+	Classes map[string]PolicyValidationClass `yaml:"classes" json:"classes"`
+	Inputs  map[string]string                `yaml:"inputs" json:"inputs"`
+	Rules   []PolicyValidationRule           `yaml:"rules" json:"rules"`
 }
 
 type PolicyValidationClass struct {
-	Disposition string `yaml:"disposition"`
+	Disposition string `yaml:"disposition" json:"disposition"`
 }
 
 type PolicyValidationRule struct {
-	ID           string                         `yaml:"id"`
-	Class        string                         `yaml:"class"`
-	Text         string                         `yaml:"text"`
-	Params       map[string]PolicyCriteriaParam `yaml:"params"`
-	PinCandidate *bool                          `yaml:"pin_candidate"`
-	Check        PolicyValidationCheck          `yaml:"check"`
+	ID           string                         `yaml:"id" json:"id"`
+	Class        string                         `yaml:"class" json:"class"`
+	Text         string                         `yaml:"text" json:"text"`
+	Params       map[string]PolicyCriteriaParam `yaml:"params" json:"params,omitempty"`
+	PinCandidate *bool                          `yaml:"pin_candidate" json:"pin_candidate"`
+	Check        PolicyValidationCheck          `yaml:"check" json:"check"`
 }
 
 type PolicyValidationCheck struct {
-	Equal *PolicyValidationEqualCheck `yaml:"equal"`
+	Equal *PolicyValidationEqualCheck `yaml:"equal" json:"equal"`
 }
 
 type PolicyValidationEqualCheck struct {
-	Left  string `yaml:"left"`
-	Right string `yaml:"right"`
+	Left  string `yaml:"left" json:"left"`
+	Right string `yaml:"right" json:"right"`
 }
 
 type Tree[T any] struct {

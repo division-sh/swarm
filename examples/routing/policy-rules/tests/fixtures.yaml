@@ -1,0 +1,6 @@
+agent_fixtures:
+  review-agent:
+    - on: work.requested
+      emits:
+        - event: review.reported
+          payload: {left: 1, right: 1, cite: R1}
