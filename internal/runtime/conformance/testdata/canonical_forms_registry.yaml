@@ -719,7 +719,7 @@ decode_bypasses:
   # Direct roots count yaml.Unmarshal and yaml.NewDecoder calls repository-wide.
   # The canonical owner's root is classified but excluded from the off-owner ceiling.
   # CI compares each PR to the accepted base ledger, not just these initial ceilings.
-  node_site_ceiling: 95
+  node_site_ceiling: 92
   off_owner_direct_decode_ceiling: 28
   files:
     internal/cliapp/cli_output.go: {family: other_production_projection, node_sites: 0, direct_decode_roots: 1}
@@ -733,12 +733,11 @@ decode_bypasses:
     internal/providerconnectors/catalog_types.go: {family: closure_pack_platform, node_sites: 0, direct_decode_roots: 1}
     internal/providertriggers/providertriggers.go: {family: closure_pack_platform, node_sites: 0, direct_decode_roots: 1}
     internal/runtime/contracts/enums.go: {family: wave_4_node_handler, node_sites: 1, direct_decode_roots: 0}
-    internal/runtime/contracts/platform_event_catalog.go: {family: closure_pack_platform, node_sites: 6, direct_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_loops.go: {family: wave_4_node_handler, node_sites: 1, direct_decode_roots: 0}
+    internal/runtime/contracts/platform_event_catalog.go: {family: closure_pack_platform, node_sites: 5, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_types.go: {family: wave_5_agent_tool_policy, node_sites: 4, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_yaml.go: {family: mixed_wave_4_wave_5, node_sites: 4, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_yaml_schema.go: {family: mixed_wave_4_wave_5, node_sites: 10, direct_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_yaml_wave1.go: {family: mixed_existing_typed_admission, node_sites: 11, direct_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_yaml_wave1.go: {family: mixed_existing_typed_admission, node_sites: 10, direct_decode_roots: 0}
     internal/runtime/scenarioderivation/declaration.go: {family: excluded_scenario_tooling, node_sites: 0, direct_decode_roots: 1}
     internal/runtime/testfixtures/canonicalrouting/fixture.go: {family: excluded_test_fixture, node_sites: 13, direct_decode_roots: 4}
     internal/testcatalog/inventory.go: {family: excluded_test_tooling, node_sites: 6, direct_decode_roots: 5}
