@@ -114,6 +114,7 @@ func startObjectChannelJourney(t *testing.T, backend servedparity.Backend, root 
 	h := newChannelOnboardingE2EHarness(t, backend, true)
 	p := &objectChannelProvider{commands: map[string][]any{}, calls: map[string][]map[string]any{}}
 	server := httptest.NewServer(p)
+	p.baseURL = server.URL
 	t.Cleanup(server.Close)
 	redirectExternalHosts(t, map[string]string{"mock.example.test": server.URL})
 	h.opts.SourceRoot = writeObjectChannelPacks(t, h.opts.ConfigPath, root)
