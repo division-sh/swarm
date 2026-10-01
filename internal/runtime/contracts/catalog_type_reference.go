@@ -290,12 +290,16 @@ func resolveCatalogTypeReference(typeRef string, catalog TypeCatalogDocument, re
 		return ResolvedCatalogType{Kind: CatalogTypeMap, Key: &key, Value: &value}, nil
 	}
 	if scalar, ok := catalog.Scalars[typeRef]; ok {
+		base := strings.TrimSpace(scalar.Base)
+		if base == "" {
+			return ResolvedCatalogType{}, fmt.Errorf("catalog scalar %q has empty base", typeRef)
+		}
 		if _, cycle := resolving[typeRef]; cycle {
 			return ResolvedCatalogType{}, fmt.Errorf("catalog scalar alias cycle at %s", typeRef)
 		}
 		resolving[typeRef] = struct{}{}
 		defer delete(resolving, typeRef)
-		return resolveCatalogTypeReference(strings.TrimSpace(scalar.Base), catalog, resolving)
+		return resolveCatalogTypeReference(base, catalog, resolving)
 	}
 	if _, ok := catalog.Enums[typeRef]; ok {
 		return ResolvedCatalogType{Kind: CatalogTypeText, Name: typeRef}, nil
