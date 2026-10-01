@@ -100,7 +100,7 @@
     {
       "fixture": "examples/integrations/telegram-agent",
       "surface": "describe-json",
-      "stdout_sha256": "376aaf60263019e6c89f51350a8a24efcaaab1c1687b3d3caab70606c10e616f"
+      "stdout_sha256": "f179968f8c757eaf7515b51ed886c1617ad74c9671dc0088c16493cbac472749"
     },
     {
       "fixture": "examples/integrations/telegram-agent",
@@ -115,7 +115,7 @@
     {
       "fixture": "examples/integrations/telegram-agent",
       "surface": "describe-graph-json",
-      "stdout_sha256": "d0c52b906df9b001d6fa47ba6e72cd1195f99e2660f365cc7a13a45e48c2a801"
+      "stdout_sha256": "b13a6418aa724526b0366ea52688f68cabc19ab8611cf8e93f94b99e7d162d14"
     },
     {
       "fixture": "examples/integrations/telegram-agent",
