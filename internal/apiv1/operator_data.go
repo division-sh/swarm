@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -138,49 +137,9 @@ func executeDataShow(ctx context.Context, req Request, store DurableDataStore) (
 	}
 	switch view {
 	case "declarations":
-		if err := exactDataParams(req.Params, "view", "bundle_hash", "page"); err != nil {
-			return nil, err
-		}
-		bundleHash, err := dataString(req.Params["bundle_hash"], "bundle_hash")
-		if err != nil {
-			return nil, err
-		}
-		page, err := dataPage(req.Params["page"])
-		if err != nil {
-			return nil, err
-		}
-		items, err := store.ListDataDeclarationSummaries(ctx, bundleHash)
-		if err != nil {
-			return nil, dataApplicationError(err)
-		}
-		return pageDataItems(items, page, dataCursorFingerprint(view, bundleHash))
+		return executeDataShowDeclarations(ctx, req.Params, store)
 	case "import_shape":
-		if err := exactDataParams(req.Params, "view", "bundle_hash", "declaration", "schema_digest"); err != nil {
-			return nil, err
-		}
-		bundleHash, err := dataString(req.Params["bundle_hash"], "bundle_hash")
-		if err != nil {
-			return nil, err
-		}
-		ref, err := dataDeclarationRef(req.Params["declaration"])
-		if err != nil {
-			return nil, err
-		}
-		digest, err := dataString(req.Params["schema_digest"], "schema_digest")
-		if err != nil {
-			return nil, err
-		}
-		if err := durabledata.SchemaDigest(digest).Validate(); err != nil {
-			return nil, NewInvalidParamsError(map[string]any{"field": "schema_digest", "reason": err.Error()})
-		}
-		shape, err := store.GetDeclarationImportShape(ctx, bundleHash, ref)
-		if err != nil {
-			return nil, dataApplicationError(err)
-		}
-		if err := shape.Validate(); err != nil || shape.BundleHash != bundleHash || shape.Declaration != ref || shape.SchemaDigest != durabledata.SchemaDigest(digest) {
-			return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"reason": "compiled import shape contradicts selected declaration"})
-		}
-		return shape, nil
+		return executeDataShowImportShape(ctx, req.Params, store)
 	case "versions", "version", "rows", "row", "export_chunk", "provenance", "pins", "head_history":
 		return executeDataShowResource(ctx, req.Params, store, view)
 	case "operation":
@@ -188,6 +147,54 @@ func executeDataShow(ctx context.Context, req Request, store DurableDataStore) (
 	default:
 		return nil, NewInvalidParamsError(map[string]any{"field": "view", "reason": "unsupported data.show view"})
 	}
+}
+
+func executeDataShowDeclarations(ctx context.Context, params map[string]any, store DurableDataStore) (any, error) {
+	if err := exactDataParams(params, "view", "bundle_hash", "page"); err != nil {
+		return nil, err
+	}
+	bundleHash, err := dataString(params["bundle_hash"], "bundle_hash")
+	if err != nil {
+		return nil, err
+	}
+	page, err := dataPage(params["page"])
+	if err != nil {
+		return nil, err
+	}
+	items, err := store.ListDataDeclarationSummaries(ctx, bundleHash)
+	if err != nil {
+		return nil, dataApplicationError(err)
+	}
+	return pageDataItems(items, page, dataCursorFingerprint("declarations", bundleHash))
+}
+
+func executeDataShowImportShape(ctx context.Context, params map[string]any, store DurableDataStore) (any, error) {
+	if err := exactDataParams(params, "view", "bundle_hash", "declaration", "schema_digest"); err != nil {
+		return nil, err
+	}
+	bundleHash, err := dataString(params["bundle_hash"], "bundle_hash")
+	if err != nil {
+		return nil, err
+	}
+	ref, err := dataDeclarationRef(params["declaration"])
+	if err != nil {
+		return nil, err
+	}
+	digest, err := dataString(params["schema_digest"], "schema_digest")
+	if err != nil {
+		return nil, err
+	}
+	if err := durabledata.SchemaDigest(digest).Validate(); err != nil {
+		return nil, NewInvalidParamsError(map[string]any{"field": "schema_digest", "reason": err.Error()})
+	}
+	shape, err := store.GetDeclarationImportShape(ctx, bundleHash, ref)
+	if err != nil {
+		return nil, dataApplicationError(err)
+	}
+	if err := shape.Validate(); err != nil || shape.BundleHash != bundleHash || shape.Declaration != ref || shape.SchemaDigest != durabledata.SchemaDigest(digest) {
+		return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"reason": "compiled import shape contradicts selected declaration"})
+	}
+	return shape, nil
 }
 
 func executeDataShowResource(ctx context.Context, params map[string]any, store DurableDataStore, view string) (any, error) {
@@ -209,57 +216,10 @@ func executeDataShowResource(ctx context.Context, params map[string]any, store D
 		return nil, err
 	}
 	if view == "head_history" {
-		page, err := dataPage(params["page"])
-		if err != nil {
-			return nil, err
-		}
-		fingerprint := dataCursorFingerprint(view, ref.Key())
-		after, err := dataSequenceCursorValue(page.Cursor, fingerprint, "swarm.data.head-history.cursor.v1")
-		if err != nil {
-			return nil, err
-		}
-		history, err := store.ListDataHeadHistory(ctx, ref, after, page.Limit+1)
-		if err != nil {
-			return nil, dataApplicationError(err)
-		}
-		items := make([]durabledata.HeadHistoryDTO, len(history))
-		for index, item := range history {
-			items[index] = durabledata.HeadHistoryDTO{
-				Revision: item.Revision, Before: item.Before, After: item.After,
-				OperationRef: durabledata.SourceOperationRef{Kind: "source", SourceInvocationID: item.OperationID},
-				CommittedAt:  item.CommittedAt,
-			}
-		}
-		return pageDataItemsFrom(items, page, 0, func(_ int, last durabledata.HeadHistoryDTO) string {
-			return dataSequenceCursor(last.Revision, fingerprint, "swarm.data.head-history.cursor.v1")
-		})
+		return executeDataShowHeadHistory(ctx, params, store, ref)
 	}
 	if view == "versions" {
-		page, err := dataPage(params["page"])
-		if err != nil {
-			return nil, err
-		}
-		fingerprint := dataCursorFingerprint(view, ref.Key())
-		after, err := dataSequenceCursorValue(page.Cursor, fingerprint, "swarm.data.version.cursor.v1")
-		if err != nil {
-			return nil, err
-		}
-		items, err := store.ListDataVersionSummaries(ctx, ref, after, page.Limit+1)
-		if err != nil {
-			return nil, dataApplicationError(err)
-		}
-		last := after
-		for _, item := range items {
-			sequence, parseErr := durabledata.ParseVersionAlias(item.Alias)
-			if err := item.Validate(); err != nil || parseErr != nil || item.Declaration != ref || sequence <= last {
-				return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"reason": "version inventory is contradictory"})
-			}
-			last = sequence
-		}
-		return pageDataItemsFrom(items, page, 0, func(_ int, last durabledata.VersionSummary) string {
-			sequence, _ := durabledata.ParseVersionAlias(last.Alias)
-			return dataSequenceCursor(sequence, fingerprint, "swarm.data.version.cursor.v1")
-		})
+		return executeDataShowVersions(ctx, params, store, ref)
 	}
 	selector, err := dataVersionSelector(params["selector"])
 	if err != nil {
@@ -277,50 +237,111 @@ func executeDataShowResource(ctx context.Context, params map[string]any, store D
 			return summary, nil
 		}
 		if view == "provenance" {
-			page, err := dataPage(params["page"])
-			if err != nil {
-				return nil, err
-			}
-			fingerprint := dataCursorFingerprint(view, string(summary.VersionID))
-			after, err := dataSequenceCursorValue(page.Cursor, fingerprint, "swarm.data.provenance.cursor.v1")
-			if err != nil {
-				return nil, err
-			}
-			items, err := store.ListDataVersionProvenance(ctx, summary.VersionID, after, page.Limit+1)
-			if err != nil {
-				return nil, dataApplicationError(err)
-			}
-			for _, item := range items {
-				if err := item.Validate(); err != nil || item.VersionID != summary.VersionID {
-					return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"reason": "provenance contradicts selected version"})
-				}
-			}
-			return pageDataItemsFrom(items, page, 0, func(_ int, last durabledata.Provenance) string {
-				return dataSequenceCursor(last.Sequence, fingerprint, "swarm.data.provenance.cursor.v1")
-			})
+			return executeDataShowProvenance(ctx, params, store, summary)
 		}
-		page, err := dataPage(params["page"])
-		if err != nil {
-			return nil, err
-		}
-		fingerprint := dataCursorFingerprint(view, string(summary.VersionID))
-		after, err := dataPinCursorRunID(page.Cursor, fingerprint)
-		if err != nil {
-			return nil, err
-		}
-		pins, err := store.ListDataPins(ctx, summary.VersionID, after, page.Limit+1)
-		if err != nil {
-			return nil, dataApplicationError(err)
-		}
-		for _, pin := range pins {
-			if err := pin.Validate(); err != nil || pin.Declaration != summary.Declaration || pin.SchemaDigest != summary.Manifest.SchemaDigest || pin.VersionID != summary.VersionID {
-				return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"reason": "pin contradicts selected version"})
-			}
-		}
-		return pageDataItemsFrom(pins, page, 0, func(_ int, last durabledata.Pin) string {
-			return dataPinCursorForRun(last.RunID, fingerprint)
-		})
+		return executeDataShowPins(ctx, params, store, summary)
 	}
+	return executeDataShowPayload(ctx, params, store, view, ref, selector)
+}
+
+func executeDataShowHeadHistory(ctx context.Context, params map[string]any, store DurableDataStore, ref durabledata.DeclarationRef) (any, error) {
+	page, err := dataPage(params["page"])
+	if err != nil {
+		return nil, err
+	}
+	fingerprint := dataCursorFingerprint("head_history", ref.Key())
+	after, err := dataSequenceCursorValue(page.Cursor, fingerprint, "swarm.data.head-history.cursor.v1")
+	if err != nil {
+		return nil, err
+	}
+	history, err := store.ListDataHeadHistory(ctx, ref, after, page.Limit+1)
+	if err != nil {
+		return nil, dataApplicationError(err)
+	}
+	items := make([]durabledata.HeadHistoryDTO, len(history))
+	for index, item := range history {
+		items[index] = durabledata.HeadHistoryDTO{Revision: item.Revision, Before: item.Before, After: item.After, OperationRef: durabledata.SourceOperationRef{Kind: "source", SourceInvocationID: item.OperationID}, CommittedAt: item.CommittedAt}
+	}
+	return pageDataItemsFrom(items, page, 0, func(_ int, last durabledata.HeadHistoryDTO) string {
+		return dataSequenceCursor(last.Revision, fingerprint, "swarm.data.head-history.cursor.v1")
+	})
+}
+
+func executeDataShowVersions(ctx context.Context, params map[string]any, store DurableDataStore, ref durabledata.DeclarationRef) (any, error) {
+	page, err := dataPage(params["page"])
+	if err != nil {
+		return nil, err
+	}
+	fingerprint := dataCursorFingerprint("versions", ref.Key())
+	after, err := dataSequenceCursorValue(page.Cursor, fingerprint, "swarm.data.version.cursor.v1")
+	if err != nil {
+		return nil, err
+	}
+	items, err := store.ListDataVersionSummaries(ctx, ref, after, page.Limit+1)
+	if err != nil {
+		return nil, dataApplicationError(err)
+	}
+	last := after
+	for _, item := range items {
+		sequence, parseErr := durabledata.ParseVersionAlias(item.Alias)
+		if err := item.Validate(); err != nil || parseErr != nil || item.Declaration != ref || sequence <= last {
+			return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"reason": "version inventory is contradictory"})
+		}
+		last = sequence
+	}
+	return pageDataItemsFrom(items, page, 0, func(_ int, last durabledata.VersionSummary) string {
+		sequence, _ := durabledata.ParseVersionAlias(last.Alias)
+		return dataSequenceCursor(sequence, fingerprint, "swarm.data.version.cursor.v1")
+	})
+}
+
+func executeDataShowProvenance(ctx context.Context, params map[string]any, store DurableDataStore, summary durabledata.VersionSummary) (any, error) {
+	page, err := dataPage(params["page"])
+	if err != nil {
+		return nil, err
+	}
+	fingerprint := dataCursorFingerprint("provenance", string(summary.VersionID))
+	after, err := dataSequenceCursorValue(page.Cursor, fingerprint, "swarm.data.provenance.cursor.v1")
+	if err != nil {
+		return nil, err
+	}
+	items, err := store.ListDataVersionProvenance(ctx, summary.VersionID, after, page.Limit+1)
+	if err != nil {
+		return nil, dataApplicationError(err)
+	}
+	for _, item := range items {
+		if err := item.Validate(); err != nil || item.VersionID != summary.VersionID {
+			return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"reason": "provenance contradicts selected version"})
+		}
+	}
+	return pageDataItemsFrom(items, page, 0, func(_ int, last durabledata.Provenance) string {
+		return dataSequenceCursor(last.Sequence, fingerprint, "swarm.data.provenance.cursor.v1")
+	})
+}
+
+func executeDataShowPins(ctx context.Context, params map[string]any, store DurableDataStore, summary durabledata.VersionSummary) (any, error) {
+	page, err := dataPage(params["page"])
+	if err != nil {
+		return nil, err
+	}
+	fingerprint := dataCursorFingerprint("pins", string(summary.VersionID))
+	after, err := dataPinCursorRunID(page.Cursor, fingerprint)
+	if err != nil {
+		return nil, err
+	}
+	pins, err := store.ListDataPins(ctx, summary.VersionID, after, page.Limit+1)
+	if err != nil {
+		return nil, dataApplicationError(err)
+	}
+	for _, pin := range pins {
+		if err := pin.Validate(); err != nil || pin.Declaration != summary.Declaration || pin.SchemaDigest != summary.Manifest.SchemaDigest || pin.VersionID != summary.VersionID {
+			return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"reason": "pin contradicts selected version"})
+		}
+	}
+	return pageDataItemsFrom(pins, page, 0, func(_ int, last durabledata.Pin) string { return dataPinCursorForRun(last.RunID, fingerprint) })
+}
+
+func executeDataShowPayload(ctx context.Context, params map[string]any, store DurableDataStore, view string, ref durabledata.DeclarationRef, selector durabledata.VersionSelector) (any, error) {
 	summary, version, err := store.ResolveDataVersionPayload(ctx, ref, selector)
 	if err != nil {
 		return nil, dataApplicationError(err)
@@ -359,44 +380,48 @@ func executeDataShowResource(ctx context.Context, params map[string]any, store D
 		rowDTOs[index] = dto
 	}
 	if view == "row" {
-		selector, ok := params["row_selector"].(map[string]any)
-		if !ok {
-			return nil, NewInvalidParamsError(map[string]any{"field": "row_selector", "reason": "must be an object"})
-		}
-		if version.BusinessKey == "" {
-			if err := exactDataParams(selector, "position"); err != nil {
-				return nil, err
-			}
-			position, err := dataInteger(selector["position"], "row_selector.position")
-			if err != nil || position == 0 {
-				return nil, NewInvalidParamsError(map[string]any{"field": "row_selector.position", "reason": "must be a positive integer for a keyless version"})
-			}
-			for index, row := range rows.Rows {
-				if row.Ordinal == uint64(position) {
-					return rowDTOs[index], nil
-				}
-			}
-			return nil, NewApplicationError(string(durabledata.CodeVersionMissing), false, map[string]any{"position": position, "version_id": version.VersionID})
-		}
-		if err := exactDataParams(selector, "key"); err != nil {
-			return nil, err
-		}
-		key, err := durabledata.BusinessKeyFromValue(selector["key"])
-		if err != nil {
-			return nil, NewInvalidParamsError(map[string]any{"field": "row_selector.key", "reason": err.Error()})
-		}
-		for index, row := range rows.Rows {
-			if row.BusinessKey == key {
-				return rowDTOs[index], nil
-			}
-		}
-		return nil, NewApplicationError(string(durabledata.CodeVersionMissing), false, map[string]any{"key": key, "version_id": version.VersionID})
+		return selectDataShowRow(params["row_selector"], version, rows.Rows, rowDTOs)
 	}
 	page, err := dataPage(params["page"])
 	if err != nil {
 		return nil, err
 	}
 	return pageDataItems(rowDTOs, page, dataCursorFingerprint(view, string(version.VersionID)))
+}
+
+func selectDataShowRow(raw any, version durabledata.Version, rows []durabledata.Row, rowDTOs []durabledata.RowDTO) (any, error) {
+	selector, ok := raw.(map[string]any)
+	if !ok {
+		return nil, NewInvalidParamsError(map[string]any{"field": "row_selector", "reason": "must be an object"})
+	}
+	if version.BusinessKey == "" {
+		if err := exactDataParams(selector, "position"); err != nil {
+			return nil, err
+		}
+		position, err := dataInteger(selector["position"], "row_selector.position")
+		if err != nil || position == 0 {
+			return nil, NewInvalidParamsError(map[string]any{"field": "row_selector.position", "reason": "must be a positive integer for a keyless version"})
+		}
+		for index, row := range rows {
+			if row.Ordinal == uint64(position) {
+				return rowDTOs[index], nil
+			}
+		}
+		return nil, NewApplicationError(string(durabledata.CodeVersionMissing), false, map[string]any{"position": position, "version_id": version.VersionID})
+	}
+	if err := exactDataParams(selector, "key"); err != nil {
+		return nil, err
+	}
+	key, err := durabledata.BusinessKeyFromValue(selector["key"])
+	if err != nil {
+		return nil, NewInvalidParamsError(map[string]any{"field": "row_selector.key", "reason": err.Error()})
+	}
+	for index, row := range rows {
+		if row.BusinessKey == key {
+			return rowDTOs[index], nil
+		}
+	}
+	return nil, NewApplicationError(string(durabledata.CodeVersionMissing), false, map[string]any{"key": key, "version_id": version.VersionID})
 }
 
 func executeDataShowOperation(ctx context.Context, params map[string]any, store DurableDataStore) (any, error) {
@@ -424,132 +449,144 @@ func executeDataShowOperation(ctx context.Context, params map[string]any, store 
 	}
 	switch kind {
 	case "source":
-		if err := exactDataParams(ref, "kind", "source_invocation_id"); err != nil {
-			return nil, err
-		}
-		id, err := canonicalDataUUID(ref["source_invocation_id"], "operation_ref.source_invocation_id")
-		if err != nil {
-			return nil, err
-		}
-		record, err := store.LoadDataSourceOperation(ctx, id)
-		if err != nil {
-			return nil, dataApplicationError(err)
-		}
-		if err := record.Validate(); err != nil {
-			return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"operation": id, "reason": err.Error()})
-		}
-		if detail == "summary" {
-			summary := durabledata.SummarizeSource(record)
-			return durabledata.OperationSummary{Kind: "source", Source: &summary}, nil
-		}
-		page, err := dataPage(params["page"])
-		if err != nil {
-			return nil, err
-		}
-		var items any
-		switch detail {
-		case "defects":
-			items = record.Evidence.Defects
-		case "delta_added":
-			items = record.Evidence.DeltaAdded
-		case "delta_removed":
-			items = record.Evidence.DeltaRemoved
-		case "delta_changed":
-			items = record.Evidence.DeltaChanged
-		default:
-			return nil, NewInvalidParamsError(map[string]any{"field": "detail", "reason": "incompatible source operation detail"})
-		}
-		return pageDataDynamic(items, page, dataCursorFingerprint(kind, id, detail))
+		return executeDataShowSourceOperation(ctx, params, store, ref, detail)
 	case "prune":
-		if err := exactDataParams(ref, "kind", "prune_invocation_id"); err != nil {
-			return nil, err
+		return executeDataShowPruneOperation(ctx, params, store, ref, detail)
+	case "run_creation":
+		return executeDataShowRunCreationOperation(ctx, params, store, ref, detail)
+	default:
+		return nil, NewInvalidParamsError(map[string]any{"field": "operation_ref.kind", "reason": "must be source, prune, or run_creation"})
+	}
+}
+
+func executeDataShowSourceOperation(ctx context.Context, params map[string]any, store DurableDataStore, ref map[string]any, detail string) (any, error) {
+	if err := exactDataParams(ref, "kind", "source_invocation_id"); err != nil {
+		return nil, err
+	}
+	id, err := canonicalDataUUID(ref["source_invocation_id"], "operation_ref.source_invocation_id")
+	if err != nil {
+		return nil, err
+	}
+	record, err := store.LoadDataSourceOperation(ctx, id)
+	if err != nil {
+		return nil, dataApplicationError(err)
+	}
+	if err := record.Validate(); err != nil {
+		return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"operation": id, "reason": err.Error()})
+	}
+	if detail == "summary" {
+		summary := durabledata.SummarizeSource(record)
+		return durabledata.OperationSummary{Kind: "source", Source: &summary}, nil
+	}
+	page, err := dataPage(params["page"])
+	if err != nil {
+		return nil, err
+	}
+	var items any
+	switch detail {
+	case "defects":
+		items = record.Evidence.Defects
+	case "delta_added":
+		items = record.Evidence.DeltaAdded
+	case "delta_removed":
+		items = record.Evidence.DeltaRemoved
+	case "delta_changed":
+		items = record.Evidence.DeltaChanged
+	default:
+		return nil, NewInvalidParamsError(map[string]any{"field": "detail", "reason": "incompatible source operation detail"})
+	}
+	return pageDataDynamic(items, page, dataCursorFingerprint("source", id, detail))
+}
+
+func executeDataShowPruneOperation(ctx context.Context, params map[string]any, store DurableDataStore, ref map[string]any, detail string) (any, error) {
+	if err := exactDataParams(ref, "kind", "prune_invocation_id"); err != nil {
+		return nil, err
+	}
+	id, err := canonicalDataUUID(ref["prune_invocation_id"], "operation_ref.prune_invocation_id")
+	if err != nil {
+		return nil, err
+	}
+	result, err := store.LoadDataPruneOperation(ctx, id)
+	if err != nil {
+		return nil, dataApplicationError(err)
+	}
+	if err := result.Validate(); err != nil {
+		return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"operation": id, "reason": err.Error()})
+	}
+	if detail == "summary" {
+		return durabledata.OperationSummary{Kind: "prune", Prune: &result}, nil
+	}
+	page, err := dataPage(params["page"])
+	if err != nil {
+		return nil, err
+	}
+	switch detail {
+	case "defects":
+		if result.Defects == nil {
+			return nil, NewInvalidParamsError(map[string]any{"field": "detail", "reason": "prune operation has no defects"})
 		}
-		id, err := canonicalDataUUID(ref["prune_invocation_id"], "operation_ref.prune_invocation_id")
-		if err != nil {
-			return nil, err
+		return pageDataItems(result.Defects.Items, page, dataCursorFingerprint("prune", id, detail))
+	case "pins":
+		if result.Pins == nil {
+			return nil, NewInvalidParamsError(map[string]any{"field": "detail", "reason": "prune operation has no pins"})
 		}
-		result, err := store.LoadDataPruneOperation(ctx, id)
+		pins, err := store.LoadDataPruneOperationPins(ctx, id)
 		if err != nil {
 			return nil, dataApplicationError(err)
 		}
-		if err := result.Validate(); err != nil {
+		if err := result.ValidateWithPins(pins); err != nil {
 			return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"operation": id, "reason": err.Error()})
 		}
-		if detail == "summary" {
-			return durabledata.OperationSummary{Kind: "prune", Prune: &result}, nil
-		}
-		page, err := dataPage(params["page"])
-		if err != nil {
-			return nil, err
-		}
-		switch detail {
-		case "defects":
-			if result.Defects == nil {
-				return nil, NewInvalidParamsError(map[string]any{"field": "detail", "reason": "prune operation has no defects"})
-			}
-			return pageDataItems(result.Defects.Items, page, dataCursorFingerprint(kind, id, detail))
-		case "pins":
-			if result.Pins == nil {
-				return nil, NewInvalidParamsError(map[string]any{"field": "detail", "reason": "prune operation has no pins"})
-			}
-			pins, err := store.LoadDataPruneOperationPins(ctx, id)
-			if err != nil {
-				return nil, dataApplicationError(err)
-			}
-			if err := result.ValidateWithPins(pins); err != nil {
-				return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"operation": id, "reason": err.Error()})
-			}
-			return pageDataItems(pins, page, dataCursorFingerprint(kind, id, detail))
-		default:
-			return nil, NewInvalidParamsError(map[string]any{"field": "detail", "reason": "incompatible prune operation detail"})
-		}
-	case "run_creation":
-		if err := exactDataParams(ref, "kind", "run_id"); err != nil {
-			return nil, err
-		}
-		runID, err := canonicalDataUUID(ref["run_id"], "operation_ref.run_id")
-		if err != nil {
-			return nil, err
-		}
-		if detail == "request_binding" {
-			record, err := store.LoadDataRunCreationOperation(ctx, runID)
-			if err != nil {
-				return nil, dataApplicationError(err)
-			}
-			if record.RequestBinding == nil {
-				return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"operation": runID, "reason": "request binding is absent"})
-			}
-			if err := record.RequestBinding.ValidateForRecord(record); err != nil {
-				return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"operation": runID, "reason": err.Error()})
-			}
-			return *record.RequestBinding, nil
-		}
+		return pageDataItems(pins, page, dataCursorFingerprint("prune", id, detail))
+	default:
+		return nil, NewInvalidParamsError(map[string]any{"field": "detail", "reason": "incompatible prune operation detail"})
+	}
+}
+
+func executeDataShowRunCreationOperation(ctx context.Context, params map[string]any, store DurableDataStore, ref map[string]any, detail string) (any, error) {
+	if err := exactDataParams(ref, "kind", "run_id"); err != nil {
+		return nil, err
+	}
+	runID, err := canonicalDataUUID(ref["run_id"], "operation_ref.run_id")
+	if err != nil {
+		return nil, err
+	}
+	if detail == "request_binding" {
 		record, err := store.LoadDataRunCreationOperation(ctx, runID)
 		if err != nil {
 			return nil, dataApplicationError(err)
 		}
-		if err := record.Validate(); err != nil {
+		if record.RequestBinding == nil {
+			return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"operation": runID, "reason": "request binding is absent"})
+		}
+		if err := record.RequestBinding.ValidateForRecord(record); err != nil {
 			return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"operation": runID, "reason": err.Error()})
 		}
-		if detail == "summary" {
-			return durabledata.OperationSummary{Kind: "run_creation", RunCreation: &record.Summary}, nil
-		}
-		page, err := dataPage(params["page"])
-		if err != nil {
-			return nil, err
-		}
-		switch detail {
-		case "child_evaluations":
-			return pageDataItems(record.Evidence.ChildEvaluations, page, dataCursorFingerprint(kind, runID, detail))
-		case "child_defects":
-			return pageDataItems(record.Evidence.ChildDefects, page, dataCursorFingerprint(kind, runID, detail))
-		case "run_binding":
-			return pageDataItems(record.Evidence.RunBinding, page, dataCursorFingerprint(kind, runID, detail))
-		default:
-			return nil, NewInvalidParamsError(map[string]any{"field": "detail", "reason": "incompatible run-creation operation detail"})
-		}
+		return *record.RequestBinding, nil
+	}
+	record, err := store.LoadDataRunCreationOperation(ctx, runID)
+	if err != nil {
+		return nil, dataApplicationError(err)
+	}
+	if err := record.Validate(); err != nil {
+		return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"operation": runID, "reason": err.Error()})
+	}
+	if detail == "summary" {
+		return durabledata.OperationSummary{Kind: "run_creation", RunCreation: &record.Summary}, nil
+	}
+	page, err := dataPage(params["page"])
+	if err != nil {
+		return nil, err
+	}
+	switch detail {
+	case "child_evaluations":
+		return pageDataItems(record.Evidence.ChildEvaluations, page, dataCursorFingerprint("run_creation", runID, detail))
+	case "child_defects":
+		return pageDataItems(record.Evidence.ChildDefects, page, dataCursorFingerprint("run_creation", runID, detail))
+	case "run_binding":
+		return pageDataItems(record.Evidence.RunBinding, page, dataCursorFingerprint("run_creation", runID, detail))
 	default:
-		return nil, NewInvalidParamsError(map[string]any{"field": "operation_ref.kind", "reason": "must be source, prune, or run_creation"})
+		return nil, NewInvalidParamsError(map[string]any{"field": "detail", "reason": "incompatible run-creation operation detail"})
 	}
 }
 
@@ -894,46 +931,12 @@ type dataSequenceCursorEnvelope struct {
 	Checksum string                    `json:"checksum"`
 }
 
-func pageDataProvenance(items []durabledata.Provenance, page durabledata.PageRequest, fingerprint string, versionID durabledata.VersionID) (durabledata.PageResult[durabledata.Provenance], error) {
-	for index, item := range items {
-		if err := item.Validate(); err != nil || item.VersionID != versionID {
-			return durabledata.PageResult[durabledata.Provenance]{}, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"reason": "provenance contradicts selected version"})
-		}
-		if index > 0 && items[index-1].Sequence >= item.Sequence {
-			return durabledata.PageResult[durabledata.Provenance]{}, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"reason": "provenance is not strictly sequence ordered"})
-		}
-	}
-	offset := 0
-	if page.Cursor != "" {
-		key, err := dataProvenanceCursorKey(page.Cursor, fingerprint)
-		if err != nil {
-			return durabledata.PageResult[durabledata.Provenance]{}, err
-		}
-		anchor := sort.Search(len(items), func(index int) bool { return items[index].Sequence >= key.Sequence })
-		if anchor == len(items) || items[anchor].Sequence != key.Sequence {
-			return durabledata.PageResult[durabledata.Provenance]{}, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"reason": "provenance cursor anchor is absent"})
-		}
-		offset = anchor + 1
-	}
-	return pageDataItemsFrom(items, page, offset, func(_ int, last durabledata.Provenance) string {
-		return dataProvenanceCursor(last.Sequence, fingerprint)
-	})
-}
-
-func dataProvenanceCursor(sequence uint64, fingerprint string) string {
-	return dataSequenceCursor(sequence, fingerprint, "swarm.data.provenance.cursor.v1")
-}
-
 func dataSequenceCursor(sequence uint64, fingerprint, format string) string {
 	payload := dataSequenceCursorPayload{Format: format, Fingerprint: fingerprint, Sequence: sequence}
 	payloadBytes, _ := canonicaljson.Bytes(payload)
 	hash := sha256.Sum256(append([]byte(format+"\x00"), payloadBytes...))
 	raw, _ := canonicaljson.Bytes(dataSequenceCursorEnvelope{Payload: payload, Checksum: hex.EncodeToString(hash[:])})
 	return base64.RawURLEncoding.EncodeToString(raw)
-}
-
-func dataProvenanceCursorKey(cursor, fingerprint string) (dataSequenceCursorPayload, error) {
-	return dataSequenceCursorKey(cursor, fingerprint, "swarm.data.provenance.cursor.v1")
 }
 
 func dataSequenceCursorValue(cursor, fingerprint, format string) (uint64, error) {
@@ -970,44 +973,6 @@ func dataSequenceCursorKey(cursor, fingerprint, format string) (dataSequenceCurs
 		return invalid("cursor checksum is invalid")
 	}
 	return payload, nil
-}
-
-func pageDataPins(pins []durabledata.Pin, page durabledata.PageRequest, fingerprint string, version durabledata.Version) (durabledata.PageResult[durabledata.Pin], error) {
-	for index, pin := range pins {
-		if err := pin.Validate(); err != nil {
-			return durabledata.PageResult[durabledata.Pin]{}, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"reason": err.Error()})
-		}
-		if pin.Declaration != version.Manifest.Declaration || pin.SchemaDigest != version.Manifest.SchemaDigest || pin.VersionID != version.VersionID {
-			return durabledata.PageResult[durabledata.Pin]{}, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"reason": "pin contradicts selected version"})
-		}
-		if index > 0 && compareDataPinKey(pins[index-1], pin) >= 0 {
-			return durabledata.PageResult[durabledata.Pin]{}, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"reason": "pins are not strictly ordered by declaration and run_id"})
-		}
-	}
-	offset := 0
-	if page.Cursor != "" {
-		key, err := dataPinCursorKey(page.Cursor, fingerprint)
-		if err != nil {
-			return durabledata.PageResult[durabledata.Pin]{}, err
-		}
-		offset = sort.Search(len(pins), func(index int) bool {
-			return strings.Compare(pins[index].RunID, key.RunID) > 0
-		})
-	}
-	return pageDataItemsFrom(pins, page, offset, func(_ int, last durabledata.Pin) string {
-		return dataPinCursor(last, fingerprint)
-	})
-}
-
-func compareDataPinKey(left, right durabledata.Pin) int {
-	if cmp := durabledata.CompareDeclarationRef(left.Declaration, right.Declaration); cmp != 0 {
-		return cmp
-	}
-	return strings.Compare(left.RunID, right.RunID)
-}
-
-func dataPinCursor(pin durabledata.Pin, fingerprint string) string {
-	return dataPinCursorForRun(pin.RunID, fingerprint)
 }
 
 func dataPinCursorForRun(runID, fingerprint string) string {
