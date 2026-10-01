@@ -43,8 +43,8 @@ func waitOriginSQLLock(t *testing.T, db *sql.DB) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		var blocked int
-		if err := db.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND wait_event_type='Lock' AND query ILIKE '%runs%'`).Scan(&blocked); err != nil {
+		blocked, err := originSQLLockCount(db)
+		if err != nil {
 			t.Fatal(err)
 		}
 		if blocked == 1 {
@@ -53,6 +53,103 @@ func waitOriginSQLLock(t *testing.T, db *sql.DB) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatal("origin query did not reach the PostgreSQL lock barrier")
+}
+
+func originSQLLockCount(db *sql.DB) (int, error) {
+	var blocked int
+	// The run-header projection prefix remains visible if pg_stat_activity truncates the query.
+	err := db.QueryRow(`
+SELECT count(*) FROM pg_stat_activity
+WHERE datname=current_database() AND pid<>pg_backend_pid() AND wait_event_type='Lock'
+  AND btrim(regexp_replace(query, '[[:space:]]+', ' ', 'g'))
+      LIKE 'SELECT r.run_id::text, lower(r.status), r.bundle_hash, r.origin_kind,%'
+`).Scan(&blocked)
+	return blocked, err
+}
+
+func waitPostgresReadLockCount(t *testing.T, db *sql.DB, want int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		var blocked int
+		if err := db.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND wait_event_type='Lock'`).Scan(&blocked); err != nil {
+			t.Fatal(err)
+		}
+		if blocked == want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("PostgreSQL read lock count did not reach %d", want)
+}
+
+func TestOriginSQLLockObserverPostgres(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		origin    bool
+		unrelated bool
+	}{
+		{name: "unrelated_only", unrelated: true},
+		{name: "origin_only", origin: true},
+		{name: "origin_and_unrelated", origin: true, unrelated: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newCompleteEventDispatchFixtureWithOrigin(t, "postgres", false, runlifecycle.ScenarioSetupRunOrigin())
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			lock, err := f.db.BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			completed := make(chan error, 2)
+			readers := 0
+			defer func() {
+				if err := lock.Rollback(); err != nil {
+					t.Error(err)
+				}
+				for range readers {
+					select {
+					case err := <-completed:
+						if err != nil {
+							t.Errorf("released read failed: %v", err)
+						}
+					case <-time.After(5 * time.Second):
+						t.Error("released read did not drain")
+					}
+				}
+			}()
+			if _, err := lock.Exec(`LOCK TABLE runs IN ACCESS EXCLUSIVE MODE`); err != nil {
+				t.Fatal(err)
+			}
+			if tc.unrelated {
+				readers++
+				go func() {
+					_, err := f.store.(runlifecycle.StandingRestartDispositionReader).StandingRunRestartDisposition(ctx, f.event.RunID())
+					completed <- err
+				}()
+			}
+			want := 0
+			if tc.origin {
+				readers++
+				want = 1
+				go func() {
+					_, err := f.store.(runtimebus.RunOriginReader).LoadRunOrigin(ctx, f.event.RunID())
+					completed <- err
+				}()
+			}
+			waitPostgresReadLockCount(t, f.db, readers)
+			blocked, err := originSQLLockCount(f.db)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if blocked != want {
+				t.Fatalf("origin lock count = %d, want %d with %d actual blocked readers", blocked, want, readers)
+			}
+			if tc.origin {
+				waitOriginSQLLock(t, f.db)
+			}
+		})
+	}
 }
 
 func TestContinuationOriginReadPostgresCancellationCausality(t *testing.T) {
