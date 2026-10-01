@@ -63,6 +63,10 @@ func receiverOwnershipAllowances() map[string]recipientBoundaryAllowance {
 	const model = "write:runtime/runfork."
 	const backend = "store/internal/backend/runforkpersistence::"
 	return map[string]recipientBoundaryAllowance{
+		backend + "projectRunForkStageEntry/" + model + "EntityIdentity.EntityID":                                                     {1, "compare validated ProjectEntityOwnership source with the canonical root before remapping retained stage-entry evidence"},
+		backend + "projectRunForkStageEntry/" + model + "EntityIdentity.FlowInstance":                                                 {1, "compare validated ProjectEntityOwnership source with the canonical root before remapping retained stage-entry evidence"},
+		backend + "projectRunForkJoinReference/" + model + "EntityIdentity.EntityID":                                                  {1, "compare canonical source ownership after stage-entry admission to select only the root declaration scope"},
+		backend + "projectRunForkJoinReference/" + model + "EntityIdentity.FlowInstance":                                              {1, "compare canonical source ownership after stage-entry admission to select only the root declaration scope"},
 		backend + "projectRunForkReplayInitializedReceiver/" + model + "RunForkEntityState.EntityID":                                  {1, "lookup exact fixed-revision receiver metadata before canonical entity projection; never infer from producer"},
 		backend + "runForkSourceStateAdmission.project/" + model + "RunForkEntityState.EntityID":                                      {1, "lookup fixed-revision source metadata through its canonical owner; not receiver assignment"},
 		"runtime/runfork::ProjectEntityOwnership/" + model + "EntityIdentity.EntityID":                                                {2, "validate source coordinate, then remap only the canonical root"},

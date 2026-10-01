@@ -315,7 +315,10 @@ func TestTemplateInstanceCheckedSchemasUseScalarPolicyFreeGrammar(t *testing.T) 
 	}
 	paths := []string{
 		"examples/routing/fan-in/barrier/operating/schema.yaml",
+		"examples/routing/fan-in/barrier/portfolio/schema.yaml",
+		"examples/routing/fan-in/barrier/portfolio/period/schema.yaml",
 		"examples/routing/fan-in/stream/operating/schema.yaml",
+		"examples/routing/fan-in/stream/portfolio/schema.yaml",
 		"examples/routing/notify-all-children/account/schema.yaml",
 		"examples/routing/template-create-minted-key/validator/schema.yaml",
 		"examples/routing/template-reply/requester/schema.yaml",
@@ -428,9 +431,15 @@ func canonicalRoutingTeachingContractSource(t *testing.T) SourceToken {
 					}
 					validateCanonicalPublishCommands(t, text)
 					if id == FanInStream || id == FanInBarrier {
-						for _, required := range []string{"Proof boundary:", "producer", "project"} {
+						required := []string{"Proof boundary:", "operating.report.triggered", "event-ID", "ordinary", "routing"}
+						if id == FanInStream {
+							required = append(required, "select-or-create", "period_id", "accumulate.key", "keyed accumulation")
+						} else {
+							required = append(required, "portfolio.setup", "period_id", "join.members.by", "restart", "ordered barrier completion", "SQLite", "PostgreSQL")
+						}
+						for _, required := range required {
 							if !strings.Contains(text, required) {
-								t.Fatalf("fan-in README missing producer-driven supported-path accounting %q", required)
+								t.Fatalf("keyed routing README missing supported-path accounting %q", required)
 							}
 						}
 						if strings.Contains(text, "full producer-driven execution is not claimed here") {
