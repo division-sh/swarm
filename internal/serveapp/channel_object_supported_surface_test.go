@@ -612,6 +612,7 @@ type objectChannelProvider struct {
 	lostReference     string
 	loseNextPrompt    bool
 	loseResponseEdit  string
+	businessResponse  *objectChannelResponsePause
 }
 
 func (p *objectChannelProvider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -689,6 +690,16 @@ func (p *objectChannelProvider) ServeHTTP(w http.ResponseWriter, r *http.Request
 	default:
 		http.Error(w, "unknown mock operation", 404)
 		return
+	}
+	if pause := p.businessResponse; pause != nil && r.URL.Path == "/v2/deliver" && input["queue"] == "queue-b" {
+		p.businessResponse = nil
+		close(pause.arrived)
+		p.mu.Unlock()
+		select {
+		case <-pause.release:
+		case <-r.Context().Done():
+		}
+		p.mu.Lock()
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(output)
