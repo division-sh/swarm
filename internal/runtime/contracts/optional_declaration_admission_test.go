@@ -54,7 +54,7 @@ func optionalDeclarationRoleTestCases() []optionalDeclarationRoleTestCase {
 			name: "policy", fileName: "policy.yaml", valid: "limit: {}\n", merged: "<<: &declarations\n  limit:\n    value: 7\n", blank: "\"\": {}\n", collide: "limit: {}\n\" limit \": {}\n",
 			load: func(path string) (int, error) {
 				value, err := loadOptionalPolicyDeclarations(path)
-				return len(value.Values) + len(value.Criteria) + len(value.Validation) + len(value.Modules), err
+				return len(value.Values) + len(value.Criteria) + len(value.Validation), err
 			},
 		},
 		{

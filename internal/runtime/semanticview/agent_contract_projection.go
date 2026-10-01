@@ -15,6 +15,7 @@ type AgentContractProjection struct {
 	OwnerFlowID    string
 	scopedTools    map[string]runtimecontracts.ToolSchemaEntry
 	globalTools    map[string]runtimecontracts.ToolSchemaEntry
+	bundle         *runtimecontracts.WorkflowContractBundle
 }
 
 func ResolveAgentContractProjection(source Source, actor models.AgentConfig) (AgentContractProjection, bool) {
@@ -35,6 +36,7 @@ func ScopedAgentContractProjection(source Source, declaration AgentDeclaration) 
 		OwnerFlowID:    strings.TrimSpace(declaration.OwnerFlowID),
 		globalTools:    source.ToolEntries(),
 	}
+	projection.bundle, _ = Bundle(source)
 	switch strings.TrimSpace(declaration.ScopeKind) {
 	case "flow":
 		for _, scope := range source.FlowScopes() {
@@ -54,6 +56,11 @@ func (p AgentContractProjection) ToolEntry(toolID string) (runtimecontracts.Tool
 	toolID = strings.TrimSpace(toolID)
 	if toolID == "" {
 		return runtimecontracts.ToolSchemaEntry{}, false
+	}
+	if p.bundle != nil {
+		if entry, ok := p.bundle.ToolEntryForFlow(p.OwnerFlowID, toolID); ok {
+			return entry, true
+		}
 	}
 	if entry, ok := p.scopedTools[toolID]; ok {
 		return entry, true

@@ -97,7 +97,7 @@ func WrapRootAgents(bundle *runtimecontracts.WorkflowContractBundle) semanticvie
 	if root.Tools == nil {
 		root.Tools = bundle.Tools
 	}
-	if len(root.Policy.Values) == 0 && len(root.Policy.Criteria) == 0 && len(root.Policy.Validation) == 0 && len(root.Policy.Modules) == 0 {
+	if len(root.Policy.Values) == 0 && len(root.Policy.Criteria) == 0 && len(root.Policy.Validation) == 0 {
 		root.Policy = bundle.Policy
 	}
 	if bundle.RootSchema != nil {

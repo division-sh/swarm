@@ -282,10 +282,16 @@ func executionToolsForRuntime(source semanticview.Source, discovered map[string]
 			return nil, err
 		}
 	}
+	var declarations map[string]runtimecontracts.ToolSchemaEntry
 	if source != nil {
-		for name, entry := range source.ToolEntries() {
+		declarations = source.ToolEntries()
+		for name, entry := range declarations {
 			name = strings.TrimSpace(name)
 			if name == "" {
+				continue
+			}
+			if !entry.AgentExposable() {
+				delete(entries, name)
 				continue
 			}
 			execution, include := executionToolFromAdmitted(name, entry)
@@ -304,6 +310,9 @@ func executionToolsForRuntime(source semanticview.Source, discovered map[string]
 		name = strings.TrimSpace(name)
 		if name == "" {
 			continue
+		}
+		if declaration, ok := declarations[name]; ok && !declaration.AgentExposable() {
+			return nil, fmt.Errorf("module tool %s cannot acquire a discovered agent binding", name)
 		}
 		execution, include := executionToolFromAdmitted(name, tool.Contract)
 		if err := mergeExecutionTool(entries, name, execution, include, executionToolOwnerDiscovered); err != nil {
@@ -335,19 +344,36 @@ func executionToolsForActor(source semanticview.Source, actor models.AgentConfig
 	for name := range entries {
 		candidates[strings.TrimSpace(name)] = struct{}{}
 	}
-	if allowed, _ := extractAllowedTools(actor); len(allowed) > 0 {
+	allowed, _ := extractAllowedTools(actor)
+	if len(allowed) > 0 {
 		for name := range allowed {
 			candidates[strings.TrimSpace(name)] = struct{}{}
 		}
 	}
-	if source != nil && strings.TrimSpace(actor.ID) != "" {
+	for _, name := range []string{"bash", "web_search", "read_file", "write_file"} {
+		candidates[name] = struct{}{}
+	}
+	blocked := map[string]struct{}{}
+	if source != nil {
 		projection, projected := semanticview.ResolveAgentContractProjection(source, actor)
+		declarations := source.ToolEntries()
 		for name := range candidates {
-			if !projected {
+			entry, ok := declarations[name]
+			if projected {
+				entry, ok = projection.ToolEntry(name)
+			}
+			if !ok {
 				continue
 			}
-			entry, ok := projection.ToolEntry(name)
-			if !ok {
+			if !entry.AgentExposable() {
+				delete(entries, name)
+				blocked[name] = struct{}{}
+				if _, granted := allowed[name]; granted {
+					return nil, fmt.Errorf("module tool %s cannot be granted to an agent", name)
+				}
+				continue
+			}
+			if !projected {
 				continue
 			}
 			execution, include := executionToolFromAdmitted(strings.TrimSpace(name), entry)
@@ -357,6 +383,9 @@ func executionToolsForActor(source semanticview.Source, actor models.AgentConfig
 		}
 	}
 	for _, name := range []string{"bash", "web_search", "read_file", "write_file"} {
+		if _, forbidden := blocked[name]; forbidden {
+			continue
+		}
 		tool, ok, err := nativeFallbackExecutionTool(actor, name)
 		if err != nil {
 			return nil, err
@@ -390,7 +419,7 @@ func resolveExecutionToolForActor(source semanticview.Source, actor models.Agent
 
 func executionToolFromAdmitted(name string, entry runtimecontracts.ToolSchemaEntry) (ExecutionTool, bool) {
 	handlerType := entry.Handler()
-	if handlerType == runtimecontracts.ToolHandlerUnspecified {
+	if handlerType == runtimecontracts.ToolHandlerUnspecified || !entry.AgentExposable() {
 		return ExecutionTool{}, false
 	}
 	mcpBinding, hasMCPBinding := entry.MCP()

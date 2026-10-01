@@ -334,7 +334,9 @@ func TestMigratedToolFixturesPreserveQueryInputSchema(t *testing.T) {
 	for _, rel := range paths {
 		t.Run(rel, func(t *testing.T) {
 			var tools map[string]ToolSchemaEntry
-			if err := loadYAMLFile(filepath.Join(repoRoot, rel), &tools); err != nil {
+			var err error
+			tools, err = loadOptionalToolDeclarations(filepath.Join(repoRoot, rel))
+			if err != nil {
 				t.Fatalf("load %s: %v", rel, err)
 			}
 			entry, ok := tools["lookup_data"]
@@ -744,8 +746,6 @@ lookup:
 			body: `
 lookup:
   description: Lookup data.
-  input_schema:
-    type: object
   parameters:
     type: object
 `,

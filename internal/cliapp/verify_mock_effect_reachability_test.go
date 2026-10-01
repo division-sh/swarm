@@ -72,10 +72,6 @@ provider.send:
   effect_class: non_idempotent_write
   credentials:
     - provider_credential
-  input_schema:
-    type: object
-  output_schema:
-    type: object
   response_success:
     kind: http_status_2xx
   http:

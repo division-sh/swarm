@@ -79,6 +79,12 @@ func ValidateAgentPermissions(source semanticview.Source) (int, []error) {
 		}
 		for _, toolName := range agent.entry.ConfiguredTools() {
 			toolName = strings.TrimSpace(toolName)
+			if bundle, ok := semanticview.Bundle(source); ok {
+				if tool, found := bundle.ToolEntryForFlow(agent.flowID, toolName); found && !tool.AgentExposable() {
+					errs = append(errs, fmt.Errorf("agent %s declares module tool %s; modules are compute_module-only", agent.id, toolName))
+					continue
+				}
+			}
 			if IsRetiredDynamicAgentToolName(toolName) {
 				continue
 			}

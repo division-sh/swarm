@@ -298,8 +298,6 @@ func TestToolSchemaEntryDecodeRejectsRetiredHandlerTypesAtLexicalAdmission(t *te
 			var tool ToolSchemaEntry
 			err := decodeNodeTestYAML([]byte(`
 handler_type: `+handler+`
-input_schema: {type: object}
-output_schema: {type: object}
 `), &tool)
 			if err == nil || !strings.Contains(err.Error(), "unsupported handler_type") {
 				t.Fatalf("decode retired handler_type %q error = %v", handler, err)

@@ -10,7 +10,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
-	"gopkg.in/yaml.v3"
 )
 
 // ToolSchemaKind is the closed JSON type vocabulary admitted by tool schemas.
@@ -140,6 +139,9 @@ func ToolSchemaDescription(description string) ToolInputSchemaOption {
 
 func ToolSchemaProperties(properties map[string]ToolInputSchema) ToolInputSchemaOption {
 	return toolInputSchemaOption(func(draft *toolInputSchemaDraft) error {
+		if draft.value.kind != ToolSchemaObject {
+			return fmt.Errorf("type %s cannot declare object properties", draft.value.kind)
+		}
 		draft.value.properties = make(map[string]ToolInputSchema, len(properties))
 		for name, schema := range properties {
 			draft.value.properties[name] = schema
@@ -165,6 +167,9 @@ func toolSchemaPropertyEqualities(equalities map[string]string) ToolInputSchemaO
 
 func ToolSchemaRequired(names ...string) ToolInputSchemaOption {
 	return toolInputSchemaOption(func(draft *toolInputSchemaDraft) error {
+		if draft.value.kind != ToolSchemaObject {
+			return fmt.Errorf("type %s cannot declare required object properties", draft.value.kind)
+		}
 		draft.value.required = append([]string(nil), names...)
 		return nil
 	})
@@ -312,23 +317,6 @@ func MustToolInputSchema(kind ToolSchemaKind, options ...ToolInputSchemaOption) 
 		panic(err)
 	}
 	return schema
-}
-
-// AdmitToolInputSchemaMap admits programmatic JSON Schema through the same
-// bounded lexical decoder used by authored schemas.
-func AdmitToolInputSchemaMap(raw map[string]any) (ToolInputSchema, error) {
-	if raw == nil {
-		return ToolInputSchema{}, fmt.Errorf("tool schema is missing")
-	}
-	data, err := yaml.Marshal(raw)
-	if err != nil {
-		return ToolInputSchema{}, err
-	}
-	var schema ToolInputSchema
-	if err := yaml.Unmarshal(data, &schema); err != nil {
-		return ToolInputSchema{}, err
-	}
-	return schema, nil
 }
 
 func validateAdmittedToolInputSchema(path string, schema ToolInputSchema, depth int) error {

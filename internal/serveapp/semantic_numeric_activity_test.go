@@ -99,7 +99,6 @@ func proveActivitySemanticResultExecutionParity(t *testing.T, mock, fork bool) {
   handler_type: http
   effect_class: non_idempotent_write
   http: {method: POST, url: %q}
-  input_schema: {type: object}
   output_schema:
     type: object
     required: [value, nested]

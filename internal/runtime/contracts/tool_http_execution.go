@@ -507,7 +507,7 @@ func compileHTTPToolSpec(spec HTTPToolSpec) (compiledHTTPToolSpec, error) {
 	if spec.TimeoutSeconds < 0 {
 		return compiledHTTPToolSpec{}, fmt.Errorf("http.timeout_seconds must be non-negative")
 	}
-	if spec.Body != nil {
+	if spec.BodyPresent || spec.Body != nil {
 		compiled.body, err = compileToolTemplateValue(spec.Body, "input", "credentials")
 		if err != nil {
 			return compiledHTTPToolSpec{}, fmt.Errorf("http.body: %w", err)
@@ -625,8 +625,33 @@ func (e ToolHTTPExecution) syntax() HTTPToolSpec {
 	}
 	return HTTPToolSpec{
 		Method: e.value.method, URL: e.value.url.syntax, Headers: headers,
-		Body: body, TimeoutSeconds: e.value.timeoutSeconds,
+		Body: body, BodyPresent: e.value.hasBody, TimeoutSeconds: e.value.timeoutSeconds,
 	}
+}
+
+func (s HTTPToolSpec) declarationValue() map[string]any {
+	out := map[string]any{"method": s.Method, "url": s.URL}
+	if len(s.Headers) > 0 {
+		out["headers"] = s.Headers
+	}
+	if s.BodyPresent || s.Body != nil {
+		out["body"] = s.Body
+	}
+	if s.TimeoutSeconds != 0 {
+		out["timeout_seconds"] = s.TimeoutSeconds
+	}
+	return out
+}
+
+func (s HTTPResponseSuccess) declarationValue() map[string]any {
+	out := map[string]any{"kind": s.Kind}
+	if s.Path != "" {
+		out["path"] = s.Path
+	}
+	if s.EqualsPresent || s.Equals != nil {
+		out["equals"] = s.Equals
+	}
+	return out
 }
 
 func (e ToolHTTPExecution) Readback() HTTPToolSpec {
@@ -793,7 +818,7 @@ func compileToolResponseSuccess(success HTTPResponseSuccess) (ToolResponseSucces
 		if strings.TrimSpace(success.Path) != "" {
 			return ToolResponseSuccessPolicy{}, fmt.Errorf("response_success.path is forbidden for kind %s", kind)
 		}
-		if success.Equals != nil {
+		if success.EqualsPresent || success.Equals != nil {
 			return ToolResponseSuccessPolicy{}, fmt.Errorf("response_success.equals is forbidden for kind %s", kind)
 		}
 		path, _ := compileToolValuePath("response.status", "response")
@@ -803,7 +828,7 @@ func compileToolResponseSuccess(success HTTPResponseSuccess) (ToolResponseSucces
 		if err != nil {
 			return ToolResponseSuccessPolicy{}, fmt.Errorf("response_success.path: %w", err)
 		}
-		if success.Equals == nil {
+		if !success.EqualsPresent && success.Equals == nil {
 			return ToolResponseSuccessPolicy{}, fmt.Errorf("response_success.equals is required for kind %s", kind)
 		}
 		equals, err := canonicaljson.FromGo(success.Equals)
@@ -860,7 +885,7 @@ func (p ToolResponseSuccessPolicy) syntax() HTTPResponseSuccess {
 		return HTTPResponseSuccess{Kind: "http_status_2xx"}
 	case toolResponseSuccessJSONFieldEquals:
 		return HTTPResponseSuccess{
-			Kind: "json_field_equals", Path: p.value.path.syntax, Equals: p.value.equals.Interface(),
+			Kind: "json_field_equals", Path: p.value.path.syntax, Equals: p.value.equals.Interface(), EqualsPresent: true,
 		}
 	default:
 		panic("admitted response-success policy contains unsupported kind")

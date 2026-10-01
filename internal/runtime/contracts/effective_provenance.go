@@ -130,6 +130,12 @@ func populateEffectiveProvenance(bundle *WorkflowContractBundle) {
 		}
 	}
 	populateEffectiveEventProjectionProvenance(bundle, builder)
+	for key, entry := range bundle.scopedTools {
+		prefix := "tools[" + strconv.Quote(key) + "]"
+		for path, provenance := range entry.admissionProvenance {
+			builder.set(prefix+"."+path, provenance)
+		}
+	}
 	for _, record := range bundle.AgentDeclarationRecords() {
 		prefix := "agents[" + strconv.Quote(record.Source.FlowPath+":"+record.LogicalID) + "]"
 		for path, provenance := range record.Entry.admissionProvenance {

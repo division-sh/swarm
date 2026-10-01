@@ -29,8 +29,10 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 )
 
 func computeReplayRuntimeLogPayloadAdmitter(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
@@ -38,16 +40,38 @@ func computeReplayRuntimeLogPayloadAdmitter(_ context.Context, event events.Even
 }
 
 func TestExecuteWithPersistedComputeModuleReplayEvidenceLoadsAndFailsClosedOnStoredDivergence(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
-	sqliteStore := newComputeModuleReplaySQLiteStore(t)
-	runID := uuid.NewString()
-	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	bundleHash := authorActivityTestSourceArtifactFact.BundleHash()
-	runlifecyclefixture.RequireSQLite(t, ctx, storetest.DatabaseForTest(sqliteStore), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC(), BundleHash: bundleHash})
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := testAuthorActivityContext(context.Background())
+			runID := uuid.NewString()
+			ctx = runtimecorrelation.WithRunID(ctx, runID)
+			fixture := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC(), BundleHash: authorActivityTestSourceArtifactFact.BundleHash()}
+			var persistence computeReplayPersistence
+			if backend == "sqlite" {
+				owner := newComputeModuleReplaySQLiteStore(t)
+				runlifecyclefixture.RequireSQLite(t, ctx, storetest.DatabaseForTest(owner), fixture)
+				persistence = owner
+			} else {
+				_, db, _ := testutil.StartPostgres(t)
+				persistence = storetest.AdmitPostgresRuntimeStore(t, db)
+				runlifecyclefixture.RequirePostgres(t, ctx, db, fixture)
+			}
+			provePersistedComputeModuleReplay(t, ctx, persistence, runID)
+		})
+	}
+}
+
+type computeReplayPersistence interface {
+	runtimepkg.RuntimeLogPersistence
+	runtimeengine.ComputeModuleReplayEvidenceLoader
+}
+
+func provePersistedComputeModuleReplay(t *testing.T, ctx context.Context, persistence computeReplayPersistence, runID string) {
+	t.Helper()
 
 	source := computeModuleReplaySource(t)
 	exec := newComputeModuleReplayExecutor(t, source)
-	req := computeModuleReplayExecutionRequest(t)
+	req := computeModuleReplayExecutionRequest(t, "evt-success")
 	first, err := exec.ExecuteSemanticFixture(ctx, req)
 	if err != nil {
 		t.Fatalf("initial Execute: %v", err)
@@ -55,16 +79,24 @@ func TestExecuteWithPersistedComputeModuleReplayEvidenceLoadsAndFailsClosedOnSto
 	if len(first.ComputeModuleTraces) != 1 {
 		t.Fatalf("initial traces = %#v, want one", first.ComputeModuleTraces)
 	}
+	persistComputeModuleReplayEvidenceForExecution(t, ctx, persistence, req.Event.ID(), req.Node.Key(), first.ComputeModuleTraces[0])
+	// Reconstruct the executor from retained source; replay must still consume
+	// the persisted envelope, not a policy section or an in-memory module map.
+	restarted := newComputeModuleReplayExecutor(t, source)
+	if _, err := restarted.ExecuteWithPersistedComputeModuleReplayEvidence(ctx, persistence, runID, req); err != nil {
+		t.Fatalf("unchanged persisted replay after executor restart: %v", err)
+	}
+	req = computeModuleReplayExecutionRequest(t, "evt-divergence")
 
 	unrelated := first.ComputeModuleTraces[0]
 	unrelated.ModuleID = "unrelated_renderer"
-	persistComputeModuleReplayEvidenceForExecution(t, ctx, sqliteStore, "evt-unrelated", "other-node", unrelated)
+	persistComputeModuleReplayEvidenceForExecution(t, ctx, persistence, "evt-unrelated", "other-node", unrelated)
 
 	persisted := first.ComputeModuleTraces[0]
 	persisted.OutputHash = "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-	persistComputeModuleReplayEvidenceForExecution(t, ctx, sqliteStore, req.Event.ID(), req.Node.Key(), persisted)
+	persistComputeModuleReplayEvidenceForExecution(t, ctx, persistence, req.Event.ID(), req.Node.Key(), persisted)
 
-	loaded, err := sqliteStore.LoadComputeModuleReplayEvidenceForExecution(ctx, runID, req.Event.ID(), req.Node.Key())
+	loaded, err := persistence.LoadComputeModuleReplayEvidenceForExecution(ctx, runID, req.Event.ID(), req.Node.Key())
 	if err != nil {
 		t.Fatalf("LoadComputeModuleReplayEvidenceForExecution: %v", err)
 	}
@@ -72,7 +104,7 @@ func TestExecuteWithPersistedComputeModuleReplayEvidenceLoadsAndFailsClosedOnSto
 		t.Fatalf("scoped replay evidence = %#v, want only matching envelope %#v", loaded, persisted.Normalized())
 	}
 
-	failed, err := exec.ExecuteWithPersistedComputeModuleReplayEvidence(ctx, sqliteStore, runID, req)
+	failed, err := restarted.ExecuteWithPersistedComputeModuleReplayEvidence(ctx, persistence, runID, req)
 	if err == nil {
 		t.Fatal("persisted replay Execute error = nil, want result divergence")
 	}
@@ -90,11 +122,11 @@ func TestExecuteWithPersistedComputeModuleReplayEvidenceLoadsAndFailsClosedOnSto
 	}
 }
 
-func persistComputeModuleReplayEvidenceForExecution(t *testing.T, ctx context.Context, sqliteStore *store.SQLiteRuntimeStore, eventID, nodeID string, envelope computemodule.ReplayEnvelope) {
+func persistComputeModuleReplayEvidenceForExecution(t *testing.T, ctx context.Context, persistence runtimepkg.RuntimeLogPersistence, eventID, nodeID string, envelope computemodule.ReplayEnvelope) {
 	t.Helper()
 	detail := computemodule.NewReplayEvidenceDetail([]computemodule.ReplayEnvelope{envelope})
 	detail["node_id"] = nodeID
-	logger := runtimepkg.NewRuntimeLogger(sqliteStore, executionposture.Live, computeReplayRuntimeLogPayloadAdmitter)
+	logger := runtimepkg.NewRuntimeLogger(persistence, executionposture.Live, computeReplayRuntimeLogPayloadAdmitter)
 	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
 		Level:     "info",
 		Message:   "Compute module replay evidence recorded",
@@ -159,6 +191,7 @@ func computeModuleReplaySource(t *testing.T) semanticview.Source {
 	}
 	sum := sha256.Sum256(raw)
 	module := runtimecontracts.PolicyModule{
+		Kind:   "wasm",
 		Path:   "modules/structured_renderer.wasm",
 		ABI:    computemodule.ABI,
 		Entry:  computemodule.DefaultEntry,
@@ -195,14 +228,31 @@ func computeModuleReplaySource(t *testing.T) semanticview.Source {
 	}
 	flow := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "render"},
-		Policy: runtimecontracts.PolicyDocument{Modules: map[string]runtimecontracts.PolicyModule{
-			"structured_renderer": module,
-		}},
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{"structured_renderer": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind(module.Kind)), runtimecontracts.WithToolModule(module))},
+	}
+	toolBytes, err := yaml.Marshal(flow.Tools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "tools.yaml"), toolBytes, 0o644); err != nil {
+		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: compute-module-replay\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	artifact, err := sourceartifact.AdmitDirectory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err = sourceartifact.DecodeLogical(artifact.LogicalBlob())
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, ok := artifact.YAML("tools.yaml")
+	if !ok {
+		t.Fatal("retained tools declaration missing")
+	}
+	flow.Tools, err = runtimecontracts.AdmitToolDeclarationsValue(document.Root())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,14 +285,14 @@ func newComputeModuleReplayExecutor(t *testing.T, source semanticview.Source) *r
 	return exec
 }
 
-func computeModuleReplayExecutionRequest(t *testing.T) runtimeengine.ExecutionRequest {
+func computeModuleReplayExecutionRequest(t *testing.T, eventID string) runtimeengine.ExecutionRequest {
 	t.Helper()
 	return runtimeengine.ExecutionRequest{
 		ExecutionFlowID: identity.NormalizeFlowID("render"),
 		EntityID:        identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
 		Node:            identitytest.FlowNode(t, "render", "render-node"),
 		Event: eventtest.RunCreatingRootIngress(
-			"evt-1",
+			eventID,
 			events.EventType("render.requested"),
 			"",
 			"",

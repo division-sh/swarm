@@ -29,13 +29,14 @@ func TestValidateWorkflowComputeModuleContractsRejectsDigestMismatchAndFloats(t 
 		},
 	}
 	flow := bundle.FlowTree.Root
-	flow.Policy.Modules["structured_renderer"] = module
+	if _, err := NewToolSchemaEntry(WithToolHandler(ToolHandlerWasm), WithToolModule(module)); err == nil || !strings.Contains(err.Error(), "float/number") {
+		t.Fatalf("module tool admission error = %v, want float schema rejection", err)
+	}
+	module.OutputSchema = flow.Tools["structured_renderer"].OutputSchema().Projection()
+	flow.Tools["structured_renderer"] = MustToolSchemaEntry(WithToolHandler(ToolHandlerWasm), WithToolModule(module))
 	errs := validateWorkflowComputeModuleContracts(bundle)
 	if !errorsContain(errs, "does not match module bytes") {
 		t.Fatalf("errors = %v, want digest mismatch", errs)
-	}
-	if !errorsContain(errs, "float/number") {
-		t.Fatalf("errors = %v, want float schema rejection", errs)
 	}
 }
 
@@ -64,7 +65,7 @@ func TestPolicyModuleBytesRemainBoundToAdmittedArtifact(t *testing.T) {
 
 func TestValidatePolicySheetComputeModuleRowRequiresDeclaredInputs(t *testing.T) {
 	_, module, _ := computeModuleValidationBundle(t)
-	policy := PolicyDocument{Modules: map[string]PolicyModule{"structured_renderer": module}}
+	tool := MustToolSchemaEntry(WithToolHandler(ToolHandlerWasm), WithToolModule(module))
 	spec := &ComputeModuleSpec{
 		RowID:  "render_bundle",
 		Module: "structured_renderer",
@@ -82,7 +83,7 @@ func TestValidatePolicySheetComputeModuleRowRequiresDeclaredInputs(t *testing.T)
 			Module:    spec,
 		},
 	}
-	errs := validatePolicySheetComputeModuleRow("test row", rule, policy)
+	errs := validatePolicySheetComputeModuleRow("test row", rule, tool)
 	if !errorsContain(errs, `missing required module input "files"`) {
 		t.Fatalf("errors = %v, want missing required input", errs)
 	}
@@ -111,6 +112,7 @@ func computeModuleValidationBundle(t *testing.T) (*WorkflowContractBundle, Polic
 	}
 	sum := sha256.Sum256(raw)
 	module := PolicyModule{
+		Kind:   "wasm",
 		Path:   "modules/structured_renderer.wasm",
 		ABI:    "core-json-v1",
 		Entry:  "compute",
@@ -147,9 +149,7 @@ func computeModuleValidationBundle(t *testing.T) (*WorkflowContractBundle, Polic
 	}
 	flow := FlowContractView{
 		Paths: FlowContractPaths{FlowPath: "."},
-		Policy: PolicyDocument{
-			Modules: map[string]PolicyModule{"structured_renderer": module},
-		},
+		Tools: map[string]ToolSchemaEntry{"structured_renderer": MustToolSchemaEntry(WithToolHandler(ToolHandlerWasm), WithToolModule(module))},
 	}
 	bundle := &WorkflowContractBundle{
 		SourceArtifact: artifact,

@@ -36,9 +36,13 @@ func validateFlowPolicyModules(bundle *WorkflowContractBundle) []error {
 	for _, value := range bundle.FlowViews() {
 		view := value
 		flowID := strings.TrimSpace(view.Paths.FlowPath)
-		for _, moduleID := range sortedPolicyModuleNames(view.Policy.Modules) {
-			context := "flow " + flowID + " policy.modules." + moduleID
-			errs = append(errs, validatePolicyModuleDeclaration(bundle, context, moduleID, view.Policy.Modules[moduleID])...)
+		for _, moduleID := range sortedToolNames(view.Tools) {
+			module, ok := view.Tools[moduleID].Module()
+			if !ok {
+				continue
+			}
+			context := "flow " + flowID + " tools." + moduleID
+			errs = append(errs, validatePolicyModuleDeclaration(bundle, context, moduleID, module)...)
 		}
 	}
 	return errs
@@ -149,7 +153,7 @@ func validatePythonPolicyModuleDeclaration(context, moduleID string, module Poli
 	}
 	if err := pythonmodule.ValidateSource(stdcontext.Background(), pythonmodule.Request{
 		ModuleID:    moduleID,
-		RowID:       "policy.modules." + moduleID,
+		RowID:       "tools." + moduleID,
 		Digest:      strings.TrimSpace(module.Digest),
 		Entry:       strings.TrimSpace(module.Entry),
 		Source:      raw,
@@ -163,11 +167,7 @@ func validatePythonPolicyModuleDeclaration(context, moduleID string, module Poli
 }
 
 func policyModuleKind(module PolicyModule) string {
-	kind := strings.TrimSpace(module.Kind)
-	if kind == "" {
-		return policyModuleKindWasm
-	}
-	return kind
+	return strings.TrimSpace(module.Kind)
 }
 
 func validateComputeModuleSchema(context string, schema map[string]any) []error {
@@ -216,14 +216,17 @@ func validatePolicySheetComputeModuleRows(bundle *WorkflowContractBundle) []erro
 			errs = append(errs, err)
 			continue
 		}
-		policy := bundle.ResolvedPolicyForExecutableNode(node)
 		for eventType, handler := range record.Entry.EventHandlers {
 			for idx, rule := range handler.Rules {
 				if !policySheetRuleIsComputeModuleValueRow(rule) {
 					continue
 				}
 				context := fmt.Sprintf("node %s handler %s rules[%d] compute_module row %s", node.Key(), strings.TrimSpace(eventType), idx, strings.TrimSpace(rule.ID))
-				errs = append(errs, validatePolicySheetComputeModuleRow(context, rule, policy)...)
+				var tool ToolSchemaEntry
+				if rule.Compute != nil && rule.Compute.Module != nil {
+					tool, _ = bundle.ToolEntryForExecutableNode(node, rule.Compute.Module.Module)
+				}
+				errs = append(errs, validatePolicySheetComputeModuleRow(context, rule, tool)...)
 			}
 		}
 	}
@@ -237,7 +240,7 @@ func policySheetRuleIsComputeModuleValueRow(rule HandlerRuleEntry) bool {
 	return rule.Compute != nil && rule.Compute.Operation == ComputeOpModule
 }
 
-func validatePolicySheetComputeModuleRow(context string, rule HandlerRuleEntry, policy PolicyDocument) []error {
+func validatePolicySheetComputeModuleRow(context string, rule HandlerRuleEntry, tool ToolSchemaEntry) []error {
 	errs := []error{}
 	if rule.PolicyRow.Kind != PolicySheetRowKindModule {
 		errs = append(errs, fmt.Errorf("%w: %s compute_module compute must originate from a policy-sheet compute_module row", ErrInvalidField, context))
@@ -256,11 +259,11 @@ func validatePolicySheetComputeModuleRow(context string, rule HandlerRuleEntry, 
 		errs = append(errs, fmt.Errorf("%w: %s compute_module.into %q must match compute.store_as %q", ErrInvalidField, context, target, computeTarget))
 	}
 	moduleID := strings.TrimSpace(spec.Module)
-	module, ok := policy.Modules[moduleID]
+	module, ok := tool.Module()
 	if moduleID == "" {
 		errs = append(errs, fmt.Errorf("%w: %s compute_module.module is required", ErrInvalidField, context))
 	} else if !ok {
-		errs = append(errs, fmt.Errorf("%w: %s compute_module.module %q does not resolve in flow policy.modules", ErrInvalidField, context, moduleID))
+		errs = append(errs, fmt.Errorf("%w: %s compute_module.module %q does not resolve to a scoped module tool", ErrInvalidField, context, moduleID))
 	}
 	if !ok {
 		return errs
@@ -301,7 +304,7 @@ func (s ComputeModuleSpec) StoreTarget() string {
 	return ""
 }
 
-func sortedPolicyModuleNames(in map[string]PolicyModule) []string {
+func sortedToolNames(in map[string]ToolSchemaEntry) []string {
 	names := make([]string, 0, len(in))
 	for name := range in {
 		name = strings.TrimSpace(name)

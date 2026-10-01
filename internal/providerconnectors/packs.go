@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 //go:embed catalog/generated-packs.yaml catalog/generator-profiles/*.yaml
@@ -242,7 +243,7 @@ func LoadPackFS(fsys fs.FS, dir, runningPlatformVersion string) (LoadedPack, err
 	if strings.TrimSpace(loaded.Envelope.Type) != packs.TypeConnector {
 		return LoadedPack{}, fmt.Errorf("provider connector pack %q has unsupported type %q", loaded.Envelope.ID, loaded.Envelope.Type)
 	}
-	manifest, err := parseConnectorManifestStrict(loaded.ManifestBody)
+	manifest, err := ParseConnectorManifest(loaded.ManifestBody)
 	if err != nil {
 		return LoadedPack{}, fmt.Errorf("parse connector manifest for pack %q: %w", loaded.Envelope.ID, err)
 	}
@@ -271,11 +272,28 @@ func LoadPackFS(fsys fs.FS, dir, runningPlatformVersion string) (LoadedPack, err
 	}, nil
 }
 
-func parseConnectorManifestStrict(body []byte) (ConnectorManifest, error) {
-	var manifest ConnectorManifest
-	if err := decodeYAMLStrict(body, &manifest); err != nil {
+func ParseConnectorManifest(body []byte) (ConnectorManifest, error) {
+	var wire struct {
+		Provider   string              `yaml:"provider"`
+		Generation *GenerationEvidence `yaml:"generation,omitempty"`
+		Tools      map[string]any      `yaml:"tools"`
+	}
+	snapshot, err := yamlsource.Load(body)
+	if err != nil {
 		return ConnectorManifest{}, err
 	}
+	lookup, err := snapshot.Document("connector.yaml").Root().Lookup("tools")
+	if err != nil {
+		return ConnectorManifest{}, err
+	}
+	tools, err := runtimecontracts.AdmitToolDeclarationsValue(lookup.Value)
+	if err != nil {
+		return ConnectorManifest{}, err
+	}
+	if err := decodeYAMLStrict(body, &wire); err != nil {
+		return ConnectorManifest{}, err
+	}
+	manifest := ConnectorManifest{Provider: wire.Provider, Generation: wire.Generation, Tools: tools}
 	return manifest, nil
 }
 

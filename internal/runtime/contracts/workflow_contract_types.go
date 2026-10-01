@@ -895,9 +895,6 @@ type PolicyValidationClass = flowmodel.PolicyValidationClass
 type PolicyValidationRule = flowmodel.PolicyValidationRule
 type PolicyValidationCheck = flowmodel.PolicyValidationCheck
 type PolicyValidationEqualCheck = flowmodel.PolicyValidationEqualCheck
-type PolicyModule = flowmodel.PolicyModule
-type PolicyModuleRuntime = flowmodel.PolicyModuleRuntime
-type PolicyModuleLimits = flowmodel.PolicyModuleLimits
 type ContractURIRegistry = flowmodel.URIRegistry
 type ContractURIRef = flowmodel.URIRef
 type ExpressionKind string
@@ -1009,6 +1006,7 @@ type HTTPToolSpec struct {
 	URL            string            `yaml:"url"`
 	Headers        map[string]string `yaml:"headers,omitempty"`
 	Body           any               `yaml:"body,omitempty"`
+	BodyPresent    bool              `yaml:"-" json:"-"`
 	TimeoutSeconds int               `yaml:"timeout_seconds,omitempty"`
 }
 type ManagedCredentialRef struct {
@@ -1706,9 +1704,10 @@ type CompiledResultField struct {
 }
 
 type HTTPResponseSuccess struct {
-	Kind   string `yaml:"kind"`
-	Path   string `yaml:"path,omitempty"`
-	Equals any    `yaml:"equals,omitempty"`
+	Kind          string `yaml:"kind"`
+	Path          string `yaml:"path,omitempty"`
+	Equals        any    `yaml:"equals,omitempty"`
+	EqualsPresent bool   `yaml:"-" json:"-"`
 }
 type PlatformSpecDocument struct {
 	Platform struct {

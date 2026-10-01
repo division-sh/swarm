@@ -45,8 +45,16 @@ tools:
     github.add_labels_to_issue:
         category: provider_connector
         description: add labels to GitHub issues
-        handler_type: http
         effect_class: non_idempotent_write
+        handler_type: http
+        http:
+            body:
+                labels: '{{input.labels}}'
+            headers:
+                Accept: application/vnd.github+json
+                X-Github-Api-Version: "2022-11-28"
+            method: POST
+            url: https://api.github.com/repos/{{input.owner}}/{{input.repo}}/issues/{{input.issue_number}}/labels
         input_schema:
             type: object
             properties:
@@ -68,30 +76,31 @@ tools:
                 - repo
                 - issue_number
                 - labels
-        output_schema:
-            type: array
-            items:
-                type: object
-        http:
-            method: POST
-            url: https://api.github.com/repos/{{input.owner}}/{{input.repo}}/issues/{{input.issue_number}}/labels
-            headers:
-                Accept: application/vnd.github+json
-                X-Github-Api-Version: "2022-11-28"
-            body:
-                labels: '{{input.labels}}'
-        response_success:
-            kind: http_status_2xx
         managed_credential:
             key: github_app
             grant_type: github_app_installation
             grant_model: installation_grant
             installation_id_input: installation_id
+        output_schema:
+            type: array
+            items:
+                type: object
+        response_success:
+            kind: http_status_2xx
     github.create_issue:
         category: provider_connector
         description: create GitHub issues
-        handler_type: http
         effect_class: non_idempotent_write
+        handler_type: http
+        http:
+            body:
+                body: '{{input.body}}'
+                title: '{{input.title}}'
+            headers:
+                Accept: application/vnd.github+json
+                X-Github-Api-Version: "2022-11-28"
+            method: POST
+            url: https://api.github.com/repos/{{input.owner}}/{{input.repo}}/issues
         input_schema:
             type: object
             properties:
@@ -111,29 +120,26 @@ tools:
                 - repo
                 - title
                 - body
-        output_schema:
-            type: object
-        http:
-            method: POST
-            url: https://api.github.com/repos/{{input.owner}}/{{input.repo}}/issues
-            headers:
-                Accept: application/vnd.github+json
-                X-Github-Api-Version: "2022-11-28"
-            body:
-                body: '{{input.body}}'
-                title: '{{input.title}}'
-        response_success:
-            kind: http_status_2xx
         managed_credential:
             key: github_app
             grant_type: github_app_installation
             grant_model: installation_grant
             installation_id_input: installation_id
+        response_success:
+            kind: http_status_2xx
     github.create_issue_comment:
         category: provider_connector
         description: create GitHub issue comments
-        handler_type: http
         effect_class: non_idempotent_write
+        handler_type: http
+        http:
+            body:
+                body: '{{input.body}}'
+            headers:
+                Accept: application/vnd.github+json
+                X-Github-Api-Version: "2022-11-28"
+            method: POST
+            url: https://api.github.com/repos/{{input.owner}}/{{input.repo}}/issues/{{input.issue_number}}/comments
         input_schema:
             type: object
             properties:
@@ -153,20 +159,10 @@ tools:
                 - repo
                 - issue_number
                 - body
-        output_schema:
-            type: object
-        http:
-            method: POST
-            url: https://api.github.com/repos/{{input.owner}}/{{input.repo}}/issues/{{input.issue_number}}/comments
-            headers:
-                Accept: application/vnd.github+json
-                X-Github-Api-Version: "2022-11-28"
-            body:
-                body: '{{input.body}}'
-        response_success:
-            kind: http_status_2xx
         managed_credential:
             key: github_app
             grant_type: github_app_installation
             grant_model: installation_grant
             installation_id_input: installation_id
+        response_success:
+            kind: http_status_2xx

@@ -633,7 +633,7 @@ func mutateGeneratedGitHubManifest(t *testing.T, files fstest.MapFS, mutate func
 
 func mustYAMLUnmarshal(t *testing.T, body []byte, target any) {
 	t.Helper()
-	if err := yaml.Unmarshal(body, target); err != nil {
+	if err := unmarshalToolTestYAML(body, target); err != nil {
 		t.Fatal(err)
 	}
 }

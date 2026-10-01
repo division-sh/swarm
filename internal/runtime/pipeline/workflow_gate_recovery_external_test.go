@@ -1482,7 +1482,6 @@ func proposedEffectProofBundle(t *testing.T, serverURL string, queueAfterProposa
     properties:
       chat_id: {type: string}
       text: {type: string}
-  output_schema: {type: object}
   http:
     method: POST
     url: %q

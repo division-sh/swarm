@@ -3135,7 +3135,7 @@ compute_module_contracts:
   status: merge_bearing_runtime_behavior
   implementation_slice: '#1669 + #1670 Slice B'
   description: |
-    Flow-local `modules:` declarations inside policy.yaml define deterministic
+    Flow-local tools.yaml declarations with handler_type wasm or python define deterministic
     compute modules. Policy-sheet `compute_module` value rows instantiate those
     declarations, map explicit handler context inputs into the module, and bind
     the validated JSON object result under computed.*. Supported kinds are
@@ -3143,65 +3143,65 @@ compute_module_contracts:
     modules. This is the supported surface for pure algorithmic deterministic
     work that cannot be represented by lookup, validation, selection, or simple
     arithmetic/derive rows.
-  policy_section:
-    location: flow policy.yaml only
-    field: modules
-    owner: flow-owned PolicyDocument.Modules
+  tool_declarations:
+    location: flow tools.yaml only
+    owner: scoped ToolSchemaEntry with handler_type wasm or python
     shape: |
-      modules:
-        <module_id>:
-          kind: wasm              # optional default for existing declarations
-          path: modules/<name>.wasm
-          abi: core-json-v1
-          entry: compute
-          digest: sha256:<64 lowercase hex>
-          source_path: optional/source/path
-          source_hash: optional-source-hash
-          input_schema:
-            type: object
-            properties: {...}
-          output_schema:
-            type: object
-            properties: {...}
-          limits:
-            gas: <positive integer>
-            memory_pages: <positive integer>
-            output_bytes: <positive integer>
-      modules:
-        <module_id>:
-          kind: python
-          path: modules/<name>.py
-          abi: python-json-v1
-          entry: handle
-          digest: sha256:<64 lowercase hex> # source bytes
-          input_schema:
-            type: object
-            properties: {...}
-          output_schema:
-            type: object
-            properties: {...}
-          limits:
-            gas: <positive integer>         # Python-specific fuel profile
-            memory_pages: <positive integer>
-            output_bytes: <positive integer>
+      <module_id>:
+        handler_type: wasm
+        path: modules/<name>.wasm
+        abi: core-json-v1
+        entry: compute
+        digest: sha256:<64 lowercase hex>
+        source_path: optional/source/path
+        source_hash: optional-source-hash
+        input_schema:
+          type: object
+          properties: {...}
+        output_schema:
+          type: object
+          properties: {...}
+        limits:
+          gas: <positive integer>
+          memory_pages: <positive integer>
+          output_bytes: <positive integer>
+      <python_module_id>:
+        handler_type: python
+        path: modules/<name>.py
+        abi: python-json-v1
+        entry: handle
+        digest: sha256:<64 lowercase hex>
+        input_schema:
+          type: object
+          properties: {...}
+        output_schema:
+          type: object
+          properties: {...}
+        limits:
+          gas: <positive integer>
+          memory_pages: <positive integer>
+          output_bytes: <positive integer>
     rules:
-    - '`modules:` is a closed typed policy section. It is decoded separately from generic PolicyDocument.Values and MUST NOT
-      appear as a generic policy expression object or agent-intent interpolation.'
-    - Module declarations are flow-local, including the selected root FlowNode `.`. There is no separate project module
-      scope. Shared module packs, source compilation, public build tooling, artifact repositories, and remote module loading
-      remain separate gates.
+    - Tools are one flat map. Module declarations share the same local IDs and scoped declaration owner as other tools;
+      duplicate local IDs fail closed. Resolve the nearest declaration before checking handler kind; a nearer
+      incompatible kind shadows ancestors, and sibling declarations cannot satisfy a reference.
+    - Module handler types MUST NOT appear in agent grants, candidates, tools/list, tools/call or direct agent execution.
+      Only compute_module rows can consume them. HTTP/MCP, credentials, permission, effect and rate-limit branches
+      are forbidden even when authored null or empty. No alternate dispatch or module namespace exists.
+    - policy.modules and module kind spelling are retired on presence; teach flat tools.yaml and handler_type.
+      No omitted-kind default, compatibility adapter, migration or old-store fallback is supported.
+    - Module declarations are flow-local, including the selected root FlowNode `.`. Shared module packs, source
+      compilation, public build tooling, artifact repositories and remote module loading remain separate gates.
     - Module IDs are short stable identifiers. A row references a module by short ID, not by filesystem path.
     - Module bytes MUST live inside the owning contracts root and MUST be regular files. Ambient filesystem lookup,
-      symlinks, out-of-tree paths, network fetches, and runtime-generated module bytes fail closed.
-    - >
-      The declared digest MUST be `sha256:<64 lowercase hex>` and MUST match the bundle-pinned module bytes before
-      execution. For `kind: wasm`, the bytes are the `.wasm` module. For `kind: python`, the bytes are the Python source.
-    - >
-      `kind` defaults to `wasm` only for existing declarations that omit it. Unknown kinds fail closed. Compatibility
-      fallback beyond that default is forbidden.
-    - >
-      Optional `source_path`/`source_hash` provenance is valid for Wasm only in this slice. Python source authority is
-      `path` plus `digest`; separate source_path/source_hash would create a second source owner and fails closed.
+      symlinks, out-of-tree paths, network fetches and runtime-generated module bytes fail closed.
+    - The digest MUST be sha256:<64 lowercase hex> and match bundle-pinned Wasm module or Python source bytes before execution.
+    - Schemas are required nonempty object declarations admitted by the shared tool schema owner; the existing
+      no-float module ABI, digest, runtime snapshot, bounded limits and replay fingerprint contracts are unchanged.
+    - Optional source_path/source_hash provenance is valid for Wasm only. Python source authority is path plus digest.
+    - Module limits remain their exact ABI integer types in execution and authored/readback YAML. Canonical tool
+      identity encodes these configuration integers as lossless base-10 text before using the existing canonical hash
+      owner; this does not round them into semantic JSON payload numbers or narrow the uint64 gas range.
   abi:
     wasm:
       name: core-json-v1
@@ -3336,7 +3336,7 @@ compute_module_contracts:
     owner: internal/runtime/computemodule and internal/runtime/pythonmodule adapters behind the compute runtime owner
     engine_boundary: |
       The Wasm engine is an implementation detail behind an internal adapter.
-      The semantic owners are policy.modules, compute_module rows, the ABI
+      The semantic owners are scoped module tools, compute_module rows, the ABI
       contract, and bundle identity. Engine version is recorded in traces and
       replay evidence but does not define authoring semantics. PR1 may use a
       native/cgo engine only as an explicitly recorded implementation decision;
@@ -3398,12 +3398,12 @@ compute_module_contracts:
       identity/profile mismatch is fail-closed unsupported/incompatible replay.
   bundle_identity:
     rule: |
-      Module bytes referenced by policy.modules are part of the bundle contract
+      Module bytes referenced by module tools are part of the bundle contract
       preimage. A bundle hash that omits module bytes is not a
       valid v1 identity for a bundle containing compute modules.
   static_verification:
     checks:
-    - typed policy.modules shape and flow-local placement
+    - typed tools.yaml module shape and flow-local placement
     - module path containment, regular-file loading, kind-specific byte/source digest match
     - supported Wasm ABI exports and zero author imports
     - supported Python ABI, source syntax/callable validation, embedded runtime identity, direct denied-capability lint, and deterministic WASI boundary checks
@@ -3761,7 +3761,7 @@ handler_specification:
             policy-sheet compute_module value rows. It is not a public
             `compute.operation` authoring value. Public YAML must author
             deterministic Wasm value derivation as a `rules[*].compute_module`
-            policy-sheet row referencing a flow policy.modules declaration. The
+            policy-sheet row referencing a scoped tools.yaml module declaration. The
             lowered compute plan reads explicit context roots, executes the
             declared precompiled core-json-v1 module with deterministic limits,
             validates the JSON object result, and writes the result to a
@@ -4054,7 +4054,7 @@ handler_specification:
           execute action/activity, fan_out, data_accumulation, or public compute.
         compute_module: >-
           object — first-class policy-sheet value row for deterministic precompiled Wasm modules declared in flow
-          policy.modules. Public shape is `{module: <module_id>, input: {<input_name>: <payload|entity|event|computed path>},
+          tools.yaml module declarations. Public shape is `{module: <module_id>, input: {<input_name>: <payload|entity|event|computed path>},
           into: computed.<name>}`. The row maps execution context roots into the module's declared input schema, lowers to
           the compute-owned internal compute_module operation, validates the module output object against the declared output
           schema, binds the object under computed.*, and runs before selection rows consume the result. It cannot emit,
@@ -4117,7 +4117,7 @@ handler_specification:
           equal checks, and bind `{valid, violations}`. Invalid-result routing is expressed by ordinary selection rows that
           consume computed.validation.* and emit events declared by the validation set class dispositions.
         compute_module_rows: >-
-          compute_module rows reference flow policy.modules declarations, map exactly the declared object input fields, execute
+          compute_module rows reference scoped tools.yaml module declarations, map exactly the declared object input fields, execute
           only precompiled core-json-v1 Wasm with zero author imports and deterministic limits, validate object output, and bind
           computed.*. Module bytes are bundle-pinned and included in bundle identity.
         dead_binding: lookup.into, validate.into, and compute_module.into bindings must be consumed by a supported downstream
@@ -4909,8 +4909,8 @@ handler_specification:
       policy:
         resolves_to: 'The merged policy context. policy.X reads the X key from the flow''s policy.yaml
           (or root policy.yaml if not overridden at flow level), excluding typed policy sections such
-          as criteria:, validation:, and modules:. policy.criteria, policy.validation, and policy.modules are not generic
-          expression roots.'
+          as criteria: and validation:. policy.criteria and policy.validation are not generic expression roots;
+          module declarations are tools.yaml entries, not policy data.'
     boot_validation:
       description: 'The platform MUST validate entity field references at boot against the declared entity contract.
         The check includes exact declaration/type resolution and definite assignment at the current program point.
@@ -9269,6 +9269,23 @@ permissions_model:
         a root-level coordinator), escalation produces an event (platform.dead_letter or equivalent), not a direct message.
         The platform routes the escalation event through the normal event loop.
 tool_model:
+  authored_admission:
+    owner: scoped yamlsource.Value to ToolSchemaEntry and shared ToolInputSchema constructors
+    rules:
+    - tools.yaml is a closed keyed map. Unknown or retired fields fail on authored presence, including aliases and merges.
+    - Every recursive schema consumer uses the same typed owner, including programmatic maps, pack interfaces,
+      channel opaque types, provider-trigger fields and imported connector tools. No schema map-to-YAML round trip exists.
+    - Missing ordinary input_schema/output_schema derives an empty object schema. Explicit empty mapping is Any,
+      not the object default. An explicit empty object schema equal to the default is retired; omit that field.
+    - Schema keywords are closed. Null keyword values, coerced text/bools and wrong container kinds fail closed.
+      Empty schema mappings remain Any, including recursive items/additionalProperties positions.
+    - minLength/maxLength/minItems/maxItems require actual nonnegative integers. Zero is legal; quoted numbers,
+      floats including integral floats, negative fractions, non-finite values and overflow fail closed.
+      minimum/maximum require finite numeric values and preserve fractional ranges.
+    - Recursive admission and provenance are bounded across the entire declaration document. Source locations and
+      alias/merge introductions survive typed admission and compose into the existing effective-provenance ledger.
+    - Module entries use the same flat declaration identity but are never agent-exposable; compute_module_contracts
+      owns their unchanged ABI, pinned bytes, limits and execution behavior.
   description: The platform owns all tool schema serving, call validation, and execution routing. Every tool has an implementation
     class that determines how the platform executes it. Three classes exist. The generic runtime ships executors for all three.
     No product-specific tool handler code is compiled into the generic runtime.
@@ -9581,7 +9598,6 @@ tool_model:
       required_fields:
         description: string — what the tool does
         handler_type: http
-        input_schema: object — JSON Schema for tool arguments (same format as platform tools)
         http: object — HTTP request template (see http_block below)
       http_block:
         required:
@@ -9595,9 +9611,11 @@ tool_model:
             treated as a complete URL and is not component-encoded.
         optional:
           headers: object — header name to value template. Supports {{credentials.key}} and {{input.field_name}} substitution.
-          body: object — request body template. Same substitution. Sent as JSON.
+          body: JSON value — request body template. Same substitution. Sent as JSON. Omission sends no body;
+            explicit null, zero, false, empty text/list/map remain literal bodies and are not absence.
           timeout_seconds: integer — request timeout. Default 30.
       optional_fields:
+        input_schema: object — JSON Schema for tool arguments; omission derives the object default, explicit {} is Any.
         output_schema: object — field names and types the tool returns (for documentation and LLM context)
         response_mapping: object — maps response body fields to tool output fields. If omitted, the entire response body is
           returned as the tool result.

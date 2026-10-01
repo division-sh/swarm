@@ -36,6 +36,10 @@ func ValidateToolImplementations(source semanticview.Source) ([]error, error) {
 		_, hasManagedCredential := entry.ManagedCredentialExecution()
 		_, hasHTTP := entry.HTTPExecution()
 		switch entry.Handler() {
+		case runtimecontracts.ToolHandlerWasm, runtimecontracts.ToolHandlerPython:
+			if err := entry.Validate(); err != nil {
+				return warnings, fmt.Errorf("module tool %s: %w", name, err)
+			}
 		case runtimecontracts.ToolHandlerPlatformBuiltin:
 			if hasManagedCredential {
 				return warnings, fmt.Errorf("tool %s managed_credential is only supported for handler_type http", name)

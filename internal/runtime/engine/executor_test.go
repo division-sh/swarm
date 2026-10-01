@@ -183,6 +183,7 @@ func sourceWithStructuredRendererModule(t *testing.T) (semanticview.Source, runt
 	}
 	sum := sha256.Sum256(raw)
 	module := runtimecontracts.PolicyModule{
+		Kind:   "wasm",
 		Path:   "modules/structured_renderer.wasm",
 		ABI:    "core-json-v1",
 		Entry:  "compute",
@@ -219,9 +220,7 @@ func sourceWithStructuredRendererModule(t *testing.T) (semanticview.Source, runt
 	}
 	flow := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "render"},
-		Policy: runtimecontracts.PolicyDocument{Modules: map[string]runtimecontracts.PolicyModule{
-			"structured_renderer": module,
-		}},
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{"structured_renderer": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind(module.Kind)), runtimecontracts.WithToolModule(module))},
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		SourceArtifact: mustEngineSourceArtifact(t, root),
@@ -304,9 +303,7 @@ func sourceWithPythonRendererSource(t *testing.T, source []byte) (semanticview.S
 	}
 	flow := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "render"},
-		Policy: runtimecontracts.PolicyDocument{Modules: map[string]runtimecontracts.PolicyModule{
-			"python_renderer": module,
-		}},
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{"python_renderer": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerPython), runtimecontracts.WithToolModule(module))},
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		SourceArtifact: mustEngineSourceArtifact(t, root),

@@ -12,6 +12,7 @@ import (
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/pythonmodule"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
@@ -56,10 +57,13 @@ func computeModuleCheckSource(t *testing.T, consumed bool) semanticview.Source {
 	writeComputeModuleSchema(t, root)
 	sum := sha256.Sum256(raw)
 	module := runtimecontracts.PolicyModule{
-		Path:   "modules/structured_renderer.wasm",
-		ABI:    "core-json-v1",
-		Entry:  "compute",
-		Digest: "sha256:" + hex.EncodeToString(sum[:]),
+		Kind:         "wasm",
+		InputSchema:  map[string]any{"type": "object", "properties": map[string]any{"component": map[string]any{"type": "string"}}},
+		OutputSchema: map[string]any{"type": "object", "properties": map[string]any{"format": map[string]any{"type": "string"}}},
+		Path:         "modules/structured_renderer.wasm",
+		ABI:          "core-json-v1",
+		Entry:        "compute",
+		Digest:       "sha256:" + hex.EncodeToString(sum[:]),
 		Limits: runtimecontracts.PolicyModuleLimits{
 			Gas:         5_000_000,
 			MemoryPages: 17,
@@ -93,11 +97,9 @@ func computeModuleCheckSource(t *testing.T, consumed bool) semanticview.Source {
 			Emit:      runtimecontracts.EmitSpec{Event: "bundle.rendered"},
 		})
 	}
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	return semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{
 		SourceArtifact: mustAdmitComputeModuleSource(t, root),
-		Policy: runtimecontracts.PolicyDocument{Modules: map[string]runtimecontracts.PolicyModule{
-			"structured_renderer": module,
-		}},
+		Tools:          map[string]runtimecontracts.ToolSchemaEntry{"structured_renderer": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind(module.Kind)), runtimecontracts.WithToolModule(module))},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"render-node": {
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
@@ -122,11 +124,13 @@ func pythonComputeModuleCheckSource(t *testing.T) semanticview.Source {
 	writeComputeModuleSchema(t, root)
 	sum := sha256.Sum256(raw)
 	module := runtimecontracts.PolicyModule{
-		Path:   "modules/structured_renderer.py",
-		Kind:   pythonmodule.Kind,
-		ABI:    pythonmodule.ABI,
-		Entry:  pythonmodule.DefaultEntry,
-		Digest: "sha256:" + hex.EncodeToString(sum[:]),
+		Path:         "modules/structured_renderer.py",
+		InputSchema:  map[string]any{"type": "object", "properties": map[string]any{"component": map[string]any{"type": "string"}}},
+		OutputSchema: map[string]any{"type": "object", "properties": map[string]any{"format": map[string]any{"type": "string"}}},
+		Kind:         pythonmodule.Kind,
+		ABI:          pythonmodule.ABI,
+		Entry:        pythonmodule.DefaultEntry,
+		Digest:       "sha256:" + hex.EncodeToString(sum[:]),
 		Limits: runtimecontracts.PolicyModuleLimits{
 			Gas:         2_000_000_000,
 			MemoryPages: 8192,
@@ -160,11 +164,9 @@ func pythonComputeModuleCheckSource(t *testing.T) semanticview.Source {
 			Emit:      runtimecontracts.EmitSpec{Event: "bundle.rendered"},
 		},
 	}
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	return semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{
 		SourceArtifact: mustAdmitComputeModuleSource(t, root),
-		Policy: runtimecontracts.PolicyDocument{Modules: map[string]runtimecontracts.PolicyModule{
-			"structured_renderer": module,
-		}},
+		Tools:          map[string]runtimecontracts.ToolSchemaEntry{"structured_renderer": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind(module.Kind)), runtimecontracts.WithToolModule(module))},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"render-node": {
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{

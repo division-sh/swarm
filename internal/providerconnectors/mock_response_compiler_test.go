@@ -9,7 +9,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"gopkg.in/yaml.v3"
 )
 
 func TestCompileMockResponsePlanGeneratesEveryEffectiveConnectorDeterministically(t *testing.T) {
@@ -123,7 +122,7 @@ func TestCompileMockResponsePlanGeneratesEveryEffectiveConnectorDeterministicall
 
 func TestCompileMockResponsePlanPreservesStructuredEnumKinds(t *testing.T) {
 	var outputSchema runtimecontracts.ToolInputSchema
-	if err := yaml.Unmarshal([]byte(`
+	if err := unmarshalToolTestYAML([]byte(`
 type: object
 properties:
   value:

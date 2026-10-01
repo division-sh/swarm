@@ -2,7 +2,7 @@ id: provider.notion.connector
 version: 0.1.0
 platform_version: ">=0.7.0 <0.8.0"
 type: connector
-manifest_hash: sha256:13eac03cffe51fd399ef7f53dd8b0c2039ec36eca58fcb2f144f54fe87bdf50b
+manifest_hash: sha256:328de3f664f038520499ef2296c0d80d694a597c16af03996b5e42e4bd5b6bab
 provenance:
   source: platform
 capabilities:

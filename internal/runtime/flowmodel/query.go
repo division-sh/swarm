@@ -7,7 +7,6 @@ func ClonePolicyDocument(in PolicyDocument) PolicyDocument {
 		Values:     map[string]PolicyValue{},
 		Criteria:   map[string]PolicyCriteriaSet{},
 		Validation: map[string]PolicyValidationSet{},
-		Modules:    map[string]PolicyModule{},
 	}
 	for key, value := range in.Values {
 		key = strings.TrimSpace(key)
@@ -29,49 +28,6 @@ func ClonePolicyDocument(in PolicyDocument) PolicyDocument {
 			continue
 		}
 		out.Validation[key] = clonePolicyValidationSet(value)
-	}
-	for key, value := range in.Modules {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		out.Modules[key] = clonePolicyModule(value)
-	}
-	return out
-}
-
-func clonePolicyModule(in PolicyModule) PolicyModule {
-	return PolicyModule{
-		Path:       strings.TrimSpace(in.Path),
-		Kind:       strings.TrimSpace(in.Kind),
-		ABI:        strings.TrimSpace(in.ABI),
-		Entry:      strings.TrimSpace(in.Entry),
-		Digest:     strings.TrimSpace(in.Digest),
-		SourcePath: strings.TrimSpace(in.SourcePath),
-		SourceHash: strings.TrimSpace(in.SourceHash),
-		Runtime: PolicyModuleRuntime{
-			Interpreter:       strings.TrimSpace(in.Runtime.Interpreter),
-			InterpreterDigest: strings.TrimSpace(in.Runtime.InterpreterDigest),
-			SnapshotDigest:    strings.TrimSpace(in.Runtime.SnapshotDigest),
-			HarnessABI:        strings.TrimSpace(in.Runtime.HarnessABI),
-		},
-		InputSchema:  clonePolicyModuleSchema(in.InputSchema),
-		OutputSchema: clonePolicyModuleSchema(in.OutputSchema),
-		Limits: PolicyModuleLimits{
-			Gas:         in.Limits.Gas,
-			MemoryPages: in.Limits.MemoryPages,
-			OutputBytes: in.Limits.OutputBytes,
-		},
-	}
-}
-
-func clonePolicyModuleSchema(in map[string]any) map[string]any {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]any, len(in))
-	for key, value := range in {
-		out[key] = cloneCriteriaParamValue(value)
 	}
 	return out
 }

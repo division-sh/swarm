@@ -541,20 +541,14 @@ reader:
 		"tools.yaml": `provider.read:
   handler_type: http
   effect_class: read_only
-  input_schema: {type: object}
-  output_schema: {type: object}
   http: {method: GET, url: "http://127.0.0.1:1/read"}
 provider.write:
   handler_type: http
   effect_class: non_idempotent_write
-  input_schema: {type: object}
-  output_schema: {type: object}
   http: {method: POST, url: "http://127.0.0.1:1/write"}
 telegram.send_message:
   handler_type: http
   effect_class: non_idempotent_write
-  input_schema: {type: object}
-  output_schema: {type: object}
   http: {method: POST, url: "http://127.0.0.1:1/send"}
 `,
 	}

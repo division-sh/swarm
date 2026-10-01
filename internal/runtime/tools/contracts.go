@@ -47,7 +47,7 @@ func RuntimeAvailableToolNamesForSource(source semanticview.Source) []string {
 	if source != nil {
 		for name, entry := range source.ToolEntries() {
 			name = strings.TrimSpace(name)
-			if name == "" || runtimeToolHiddenFromAgents(name) {
+			if name == "" || runtimeToolHiddenFromAgents(name) || !entry.AgentExposable() {
 				continue
 			}
 			handlerType := entry.Handler()

@@ -9,7 +9,6 @@ import (
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
-	"gopkg.in/yaml.v3"
 )
 
 func TestNormalizedEventManifestPublishesRawAndTypedFlatEvent(t *testing.T) {
@@ -249,7 +248,7 @@ normalized_events:
         from: message.text
         type: text
 `))
-	if err == nil || !strings.Contains(err.Error(), "field type not found") {
+	if err == nil || !strings.Contains(err.Error(), "RETIRED: normalized field type") {
 		t.Fatalf("parseManifestStrict error = %v, want retired type spelling rejection", err)
 	}
 }
@@ -554,7 +553,7 @@ func TestNormalizedEventCatalogDerivesSchemaAndCapabilities(t *testing.T) {
 
 func TestNormalizedEventSchemaRemainsExactThroughAdmissionCatalogAndRuntime(t *testing.T) {
 	var exact runtimecontracts.ToolInputSchema
-	if err := yaml.Unmarshal([]byte(`
+	if err := unmarshalToolTestYAML([]byte(`
 type: object
 required: [status, attempts]
 properties:

@@ -1361,8 +1361,8 @@ func (e *Executor) computeModuleValue(frame *executionFrame, spec *runtimecontra
 	if !ok || bundle == nil {
 		return nil, &computemodule.Error{Code: computemodule.CodeCompile, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("semantic source is not a workflow contract bundle")}
 	}
-	policy := bundle.ResolvedPolicyForFlow(frame.req.ExecutionFlowID.String())
-	module, ok := policy.Modules[moduleID]
+	tool, _ := bundle.ToolEntryForFlow(frame.req.ExecutionFlowID.String(), moduleID)
+	module, ok := tool.Module()
 	if !ok {
 		return nil, &computemodule.Error{Code: computemodule.CodeCompile, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("unknown module %q", moduleID)}
 	}
@@ -1398,9 +1398,6 @@ func (e *Executor) computeModuleValue(frame *executionFrame, spec *runtimecontra
 		return nil, &computemodule.Error{Code: computemodule.CodeCompile, ModuleID: moduleID, RowID: rowID, Err: err}
 	}
 	kind := strings.TrimSpace(module.Kind)
-	if kind == "" {
-		kind = "wasm"
-	}
 	abi := strings.TrimSpace(module.ABI)
 	entry := strings.TrimSpace(module.Entry)
 	switch kind {

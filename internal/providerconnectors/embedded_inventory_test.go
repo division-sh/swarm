@@ -84,7 +84,7 @@ func TestEffectiveConnectorAdmissionValidatesGeneratedIndexEvidence(t *testing.T
 	t.Run("unindexed evidence", func(t *testing.T) {
 		files := mutablePlatformPackFS(t)
 		var generated ConnectorManifest
-		if err := yaml.Unmarshal(files["provider-connectors/github/"+packartifact.ConnectorManifestFileName].Data, &generated); err != nil {
+		if err := unmarshalToolTestYAML(files["provider-connectors/github/"+packartifact.ConnectorManifestFileName].Data, &generated); err != nil {
 			t.Fatal(err)
 		}
 		rewriteConnectorManifest(t, files, "provider-connectors/notion", func(manifest *ConnectorManifest) {
@@ -101,11 +101,11 @@ func TestEffectiveConnectorAdmissionValidatesGeneratedIndexEvidence(t *testing.T
 func copyConnectorEnvelopeContract(t testing.TB, files fstest.MapFS, sourceDirectory, targetDirectory string) {
 	t.Helper()
 	var source, target packartifact.Envelope
-	if err := yaml.Unmarshal(files[sourceDirectory+"/"+packartifact.EnvelopeFileName].Data, &source); err != nil {
+	if err := unmarshalToolTestYAML(files[sourceDirectory+"/"+packartifact.EnvelopeFileName].Data, &source); err != nil {
 		t.Fatal(err)
 	}
 	targetPath := targetDirectory + "/" + packartifact.EnvelopeFileName
-	if err := yaml.Unmarshal(files[targetPath].Data, &target); err != nil {
+	if err := unmarshalToolTestYAML(files[targetPath].Data, &target); err != nil {
 		t.Fatal(err)
 	}
 	target.Implements = source.Implements
@@ -147,7 +147,7 @@ func rewriteConnectorManifest(t testing.TB, files fstest.MapFS, directory string
 	t.Helper()
 	manifestPath := directory + "/" + packartifact.ConnectorManifestFileName
 	var manifest ConnectorManifest
-	if err := yaml.Unmarshal(files[manifestPath].Data, &manifest); err != nil {
+	if err := unmarshalToolTestYAML(files[manifestPath].Data, &manifest); err != nil {
 		t.Fatal(err)
 	}
 	mutate(&manifest)
@@ -159,7 +159,7 @@ func rewriteConnectorManifest(t testing.TB, files fstest.MapFS, directory string
 
 	envelopePath := directory + "/" + packartifact.EnvelopeFileName
 	var envelope packartifact.Envelope
-	if err := yaml.Unmarshal(files[envelopePath].Data, &envelope); err != nil {
+	if err := unmarshalToolTestYAML(files[envelopePath].Data, &envelope); err != nil {
 		t.Fatal(err)
 	}
 	envelope, _, err = packartifact.StampEnvelope(envelope, manifestBody)

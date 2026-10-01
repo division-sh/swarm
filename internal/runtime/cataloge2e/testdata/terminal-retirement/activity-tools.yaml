@@ -5,5 +5,3 @@ terminal_probe:
   http:
     method: GET
     url: http://terminal-proof.invalid
-  input_schema: {type: object}
-  output_schema: {type: object}

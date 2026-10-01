@@ -24,9 +24,19 @@ generation:
 tools:
     acme.create_widget:
         category: provider_connector
+        credentials:
+            - acme_api_key
         description: create Acme widgets
-        handler_type: http
         effect_class: non_idempotent_write
+        handler_type: http
+        http:
+            body:
+                name: '{{input.name}}'
+            headers:
+                Authorization: Bearer {{credentials.acme_api_key}}
+                X-Acme-Version: "2026-07-09"
+            method: POST
+            url: https://api.acme.test/accounts/{{input.account_id}}/widgets
         input_schema:
             type: object
             properties:
@@ -37,17 +47,5 @@ tools:
             required:
                 - account_id
                 - name
-        output_schema:
-            type: object
-        http:
-            method: POST
-            url: https://api.acme.test/accounts/{{input.account_id}}/widgets
-            headers:
-                Authorization: Bearer {{credentials.acme_api_key}}
-                X-Acme-Version: "2026-07-09"
-            body:
-                name: '{{input.name}}'
         response_success:
             kind: http_status_2xx
-        credentials:
-            - acme_api_key
