@@ -19,6 +19,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -167,10 +168,18 @@ func TestActivityTerminalResultUsesDurableTimestampBothStores(t *testing.T) {
 					<-ready
 					<-ready
 					close(start)
+					succeeded := 0
 					for range 2 {
-						if err := <-replayErrors; err != nil {
+						if err := <-replayErrors; err == nil {
+							succeeded++
+						} else if !errors.Is(err, pipelineobligation.ErrBusy) {
 							t.Errorf("concurrent terminal replay: %v", err)
 						}
+					}
+					// The existing exact publication claim may refuse the competing
+					// writer; neither refusal nor success may mint new result facts.
+					if succeeded == 0 {
+						t.Fatal("neither concurrent terminal replay acquired publication authority")
 					}
 					if !reflect.DeepEqual(result, loadActivityResultForProof(t, ctx, selected, journal.ResultEventID)) || !reflect.DeepEqual(before, storetest.ObserveActivityResultPublicationStorage(t, ctx, selected.events)) {
 						t.Fatal("concurrent replay changed result facts or durable side effects")
