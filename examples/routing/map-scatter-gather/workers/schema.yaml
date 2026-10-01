@@ -1,0 +1,10 @@
+name: map-worker
+instance: member_id
+stages:
+  waiting: {initial: true}
+  complete: {terminal: true}
+pins:
+  inputs:
+    events: [item.requested]
+  outputs:
+    events: [item.reported]

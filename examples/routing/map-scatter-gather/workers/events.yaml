@@ -1,0 +1,3 @@
+item.reported:
+  member_id: text
+  result: "[integer]"

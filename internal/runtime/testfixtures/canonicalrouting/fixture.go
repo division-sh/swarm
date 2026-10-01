@@ -25,6 +25,7 @@ const (
 	TemplateCreateMintedKey ArtifactID = "template-create-minted-key"
 	FanInStream             ArtifactID = "fan-in/stream"
 	FanInBarrier            ArtifactID = "fan-in/barrier"
+	MapScatterGather        ArtifactID = "map-scatter-gather"
 	HarnessInjection        ArtifactID = "harness-injection"
 	PolicyRules             ArtifactID = "policy-rules"
 	TelegramAgent           ArtifactID = "telegram-agent"
@@ -212,6 +213,7 @@ func canonicalExamplePath(id ArtifactID) (string, bool) {
 		TemplateCreateMintedKey: "examples/routing/template-create-minted-key",
 		FanInStream:             "examples/routing/fan-in/stream",
 		FanInBarrier:            "examples/routing/fan-in/barrier",
+		MapScatterGather:        "examples/routing/map-scatter-gather",
 		HarnessInjection:        "examples/routing/harness-injection",
 		PolicyRules:             "examples/routing/policy-rules",
 		TelegramAgent:           telegramAgentExamplePath,

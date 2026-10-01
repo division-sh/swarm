@@ -1,0 +1,7 @@
+batch_state:
+  items:
+    type: "map[text][integer]"
+    initial: {}
+  ordered_results:
+    type: "[[integer]]"
+    initial: []
