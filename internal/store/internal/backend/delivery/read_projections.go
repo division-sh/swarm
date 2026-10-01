@@ -715,3 +715,16 @@ func UnfinishedRunDeliveryCountTx(ctx context.Context, tx *sql.Tx, runID string)
 	}
 	return count, nil
 }
+
+// FixtureDeliveryCardinalityTx is a fixed physical witness, not an executable
+// work selector. The caller's selected read transaction owns its snapshot.
+func FixtureDeliveryCardinalityTx(ctx context.Context, tx *sql.Tx) (int, error) {
+	if tx == nil {
+		return 0, fmt.Errorf("delivery cardinality evidence requires a read transaction")
+	}
+	var count int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries`).Scan(&count); err != nil {
+		return 0, fmt.Errorf("read delivery cardinality evidence: %w", err)
+	}
+	return count, nil
+}

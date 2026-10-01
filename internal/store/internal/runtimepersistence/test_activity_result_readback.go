@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+
+	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 )
 
 // ActivityResultPublicationStorage retains the original fixture-wide
@@ -16,18 +18,22 @@ type ActivityResultPublicationStorage struct {
 func ObserveActivityResultPublicationStorageForTest(ctx context.Context, selected any) (ActivityResultPublicationStorage, error) {
 	var observed ActivityResultPublicationStorage
 	read := func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT
+		if err := tx.QueryRowContext(ctx, `SELECT
 			(SELECT COUNT(*) FROM runs),
 			(SELECT COUNT(*) FROM events),
-			(SELECT COUNT(*) FROM event_deliveries),
 			(SELECT COUNT(*) FROM entity_state),
 			(SELECT COUNT(*) FROM api_idempotency),
 			(SELECT COUNT(*) FROM conversation_forks),
 			(SELECT COUNT(*) FROM runtime_reset_operations),
 			(SELECT COUNT(*) FROM activity_attempts),
 			(SELECT COUNT(*) FROM activity_attempts WHERE status='succeeded')`).
-			Scan(&observed.Runs, &observed.Events, &observed.Deliveries, &observed.Entities, &observed.Receipts,
-				&observed.ConversationForks, &observed.ResetOperations, &observed.ActivityAttempts, &observed.SuccessfulActivityAttempts)
+			Scan(&observed.Runs, &observed.Events, &observed.Entities, &observed.Receipts,
+				&observed.ConversationForks, &observed.ResetOperations, &observed.ActivityAttempts, &observed.SuccessfulActivityAttempts); err != nil {
+			return err
+		}
+		var err error
+		observed.Deliveries, err = storedelivery.FixtureDeliveryCardinalityTx(ctx, tx)
+		return err
 	}
 	var err error
 	switch owner := selected.(type) {

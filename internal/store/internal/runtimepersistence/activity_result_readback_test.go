@@ -7,8 +7,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/google/uuid"
 )
 
@@ -16,6 +20,7 @@ func TestActivityResultPublicationEvidenceBothStores(t *testing.T) {
 	for _, backend := range selectedScheduleStoreCases() {
 		t.Run(backend.name, func(t *testing.T) {
 			selected, db, ctx := backend.open(t)
+			primaryRunID := runtimecorrelation.RunIDFromContext(ctx)
 			ctx = testAuthorActivityContext()
 			sibling := uuid.NewString()
 			requireRunningRunForTest(t, ctx, selected, sibling, time.Now().UTC())
@@ -63,9 +68,21 @@ func TestActivityResultPublicationEvidenceBothStores(t *testing.T) {
 			if err != nil || !found || !reflect.DeepEqual(receipt, stored) {
 				t.Fatal("cleanup lost the real durable receipt")
 			}
+			// The delivery witness remains fixture-wide, including pending work
+			// in both runs. It cannot be replaced with an eligibility projection.
+			for _, runID := range []string{primaryRunID, sibling} {
+				event := eventtest.ExistingRunRootIngress(uuid.NewString(), "activity.evidence", "fixture", "", []byte(`{}`), 0,
+					runID, events.EventEnvelope{}, time.Now().UTC())
+				if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, []events.DeliveryRoute{testEntitylessNodeDeliveryRoute("activity-evidence")}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := storedelivery.FixtureDeliveryCardinalityTx(ctx, nil); err == nil {
+				t.Fatal("delivery evidence accepted absent transaction authority")
+			}
 			connections := db.Stats().InUse
 			got, err := ObserveActivityResultPublicationStorageForTest(ctx, selected)
-			if err != nil || got.Runs != 2 || got.ActivityAttempts != 1 || got.SuccessfulActivityAttempts != 1 {
+			if err != nil || got.Runs != 2 || got.Deliveries != 2 || got.ActivityAttempts != 1 || got.SuccessfulActivityAttempts != 1 {
 				t.Fatalf("evidence omitted sibling run or attempt: %+v err=%v", got, err)
 			}
 			var physical ActivityResultPublicationStorage
