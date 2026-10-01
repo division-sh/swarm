@@ -89,6 +89,7 @@ type releaseProcessSpec struct {
 	Store                       string
 	Dev                         bool
 	APIPort                     int
+	MCPListenPort               int
 	MCPListenHost               string
 	PublicWebhookBaseURL        string
 	PublicWebhookListen         string
@@ -137,6 +138,13 @@ func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServePr
 		"--shutdown-grace", shutdownGrace.String(),
 		"--no-color",
 	)
+	if options.MCPListenPort != 0 {
+		for i := range args {
+			if args[i] == "--mcp-listen-addr" {
+				args[i+1] = net.JoinHostPort("127.0.0.1", fmt.Sprint(options.MCPListenPort))
+			}
+		}
+	}
 	if options.MCPListenHost != "" {
 		for i := range args {
 			if args[i] == "--mcp-listen-addr" {
