@@ -445,7 +445,7 @@ func waitObjectCardReceipt(t *testing.T, db *sql.DB, card string) string {
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		var raw string
-		err := db.QueryRow(`SELECT CAST(r.provider_reference AS TEXT) FROM channel_delivery_receipts r JOIN channel_delivery_plans p ON p.delivery_id=r.delivery_id WHERE p.source_id=$1 AND r.state='sent' ORDER BY r.settled_at LIMIT 1`, card).Scan(&raw)
+		err := db.QueryRow(`SELECT CAST(r.provider_reference AS TEXT) FROM channel_delivery_receipts r JOIN channel_delivery_plans p ON p.delivery_id=r.delivery_id AND p.current_receipt_operation_id=r.effect_operation_id WHERE p.source_kind='card' AND p.source_id=$1 AND p.state='sent' AND r.state='sent' ORDER BY r.settled_at DESC LIMIT 1`, card).Scan(&raw)
 		if err == nil {
 			var value struct {
 				Reference struct {
@@ -609,6 +609,7 @@ type objectChannelProvider struct {
 	calls             map[string][]map[string]any
 	loseNextCard      bool
 	lostReference     string
+	loseNextPrompt    bool
 }
 
 func (p *objectChannelProvider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -654,6 +655,14 @@ func (p *objectChannelProvider) ServeHTTP(w http.ResponseWriter, r *http.Request
 			return
 		}
 		output["receipt"] = input["reference"]
+		if p.loseNextPrompt && strings.Contains(fmt.Sprint(input["body"]), "Input: reason (text) required") {
+			p.loseNextPrompt = false
+			connection, _, err := w.(http.Hijacker).Hijack()
+			if err == nil {
+				_ = connection.Close()
+			}
+			return
+		}
 	case "/v2/ack":
 	case "/v2/install", "/v2/install_shared":
 		key := fmt.Sprint(input["queue"]) + ":" + fmt.Sprint(input["member"])
