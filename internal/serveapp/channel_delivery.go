@@ -335,13 +335,7 @@ func (d *serveChannelDeliveryDispatcher) acknowledgeChannelAction(ctx context.Co
 	if compiled.OnboardingOperationID == "" {
 		return fmt.Errorf("channel callback compiled activation is absent")
 	}
-	interaction, err := compiled.Plan.RestoreOpaqueReference("interaction_reference", pending.Fact.InteractionRef)
-	if err != nil {
-		return err
-	}
-	_, input, err := compiled.Plan.PrepareOperation("acknowledge_interaction", map[string]any{
-		"interaction_reference": interaction,
-	})
+	input, err := channelAcknowledgmentInput(compiled.Plan, pending.Fact.InteractionRef)
 	if err != nil {
 		return err
 	}
@@ -386,6 +380,17 @@ func (d *serveChannelDeliveryDispatcher) acknowledgeChannelAction(ctx context.Co
 		effectCtx, toolID, tool, input, credentials, map[string]string{"publication_id": pending.PublicationID},
 	)
 	return err
+}
+
+func channelAcknowledgmentInput(plan packs.OutboundBindingPlan, storedInteraction string) (map[string]any, error) {
+	interaction, err := plan.RestoreOpaqueReference("interaction_reference", storedInteraction)
+	if err != nil {
+		return nil, err
+	}
+	_, input, err := plan.PrepareOperation("acknowledge_interaction", map[string]any{
+		"interaction_reference": interaction,
+	})
+	return input, err
 }
 
 func (d *serveChannelDeliveryDispatcher) dispatchInitial(ctx context.Context, candidate runtimechanneldelivery.Candidate, prepared runtimechanneldelivery.PreparedRender) error {
