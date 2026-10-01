@@ -298,7 +298,272 @@ func requireAgentUsageReadStore(reads AgentUsageReadStore) (AgentUsageReadStore,
 
 func OperatorAgentConversationHandlers(opts AgentConversationHandlerOptions) map[string]MethodHandler {
 	handlers := map[string]MethodHandler{}
-	usageHandler := func(ctx context.Context, req Request) (any, error) {
+	if opts.Agents != nil {
+		handlers["agent.list"] = operatorAgentListHandler(opts)
+		handlers["agent.get"] = operatorAgentGetHandler(opts)
+		handlers["agent.diagnose"] = operatorAgentDiagnoseHandler(opts)
+		handlers["agent.delivery_diagnostics"] = operatorAgentDeliveryDiagnosticsHandler(opts)
+	}
+	if opts.Conversations != nil {
+		handlers["conversation.list"] = operatorConversationListHandler(opts)
+		handlers["conversation.list_turns"] = operatorConversationListTurnsHandler(opts)
+		handlers["conversation.get_turn"] = operatorConversationGetTurnHandler(opts)
+	}
+	if opts.DeliveryLifecycle != nil {
+		handlers["agent.delivery_lifecycle"] = operatorAgentDeliveryLifecycleHandler(opts)
+	}
+	if opts.Usage != nil {
+		handlers["agent.usage"] = operatorAgentUsageHandler(opts)
+	}
+	if len(handlers) == 0 {
+		return nil
+	}
+	return handlers
+}
+
+func operatorAgentListHandler(opts AgentConversationHandlerOptions) MethodHandler {
+	return func(ctx context.Context, req Request) (any, error) {
+		reads, err := requireAgentReadStore(opts.Agents)
+		if err != nil {
+			return nil, err
+		}
+		listOpts, err := operatorAgentListOptionsFromParams(req.Params)
+		if err != nil {
+			return nil, err
+		}
+		result, err := reads.ListOperatorAgents(ctx, listOpts)
+		if err != nil {
+			return nil, err
+		}
+		return result, nil
+	}
+}
+
+func operatorAgentGetHandler(opts AgentConversationHandlerOptions) MethodHandler {
+	return func(ctx context.Context, req Request) (any, error) {
+		reads, err := requireAgentReadStore(opts.Agents)
+		if err != nil {
+			return nil, err
+		}
+		agentID, err := requiredStringParam(req.Params, "agent_id")
+		if err != nil {
+			return nil, err
+		}
+		identity, err := resolveOperatorAgentIdentityParam(ctx, reads, req.Params, agentID)
+		if err != nil {
+			return nil, err
+		}
+		result, err := reads.LoadOperatorAgent(ctx, identity)
+		if errors.Is(err, operatorread.ErrAgentNotFound) {
+			return nil, NewApplicationError(AgentNotFoundCode, false, map[string]any{"agent_id": agentID})
+		}
+		if err != nil {
+			return nil, err
+		}
+		return result, nil
+	}
+}
+
+func operatorAgentDiagnoseHandler(opts AgentConversationHandlerOptions) MethodHandler {
+	return func(ctx context.Context, req Request) (any, error) {
+		reads, err := requireAgentReadStore(opts.Agents)
+		if err != nil {
+			return nil, err
+		}
+		agentID, err := requiredStringParam(req.Params, "agent_id")
+		if err != nil {
+			return nil, err
+		}
+		identity, err := resolveOperatorAgentIdentityParam(ctx, reads, req.Params, agentID)
+		if err != nil {
+			return nil, err
+		}
+		queueLimit, err := boundedIntegerParam(req.Params, "queue_limit", 1, operatorread.MaxAgentDiagnosisQueueLimit)
+		if err != nil {
+			return nil, err
+		}
+		queueCursor, _, err := optionalStringParam(req.Params, "queue_cursor")
+		if err != nil {
+			return nil, err
+		}
+		result, err := reads.LoadOperatorAgentDiagnosis(ctx, identity, operatorread.OperatorAgentDiagnosisOptions{
+			QueueLimit:  queueLimit,
+			QueueCursor: queueCursor,
+		})
+		if errors.Is(err, operatorread.ErrAgentNotFound) {
+			return nil, NewApplicationError(AgentNotFoundCode, false, map[string]any{"agent_id": agentID})
+		}
+		if errors.Is(err, operatorread.ErrInvalidPendingAgentDeliveryCursor) {
+			return nil, NewInvalidParamsError(map[string]any{"field": "queue_cursor", "reason": "invalid agent.diagnose queue cursor"})
+		}
+		if err != nil {
+			return nil, err
+		}
+		if err := validateAgentDiagnosisResult(result); err != nil {
+			return nil, err
+		}
+		return result, nil
+	}
+}
+
+func operatorAgentDeliveryDiagnosticsHandler(opts AgentConversationHandlerOptions) MethodHandler {
+	return func(ctx context.Context, req Request) (any, error) {
+		reads, err := requireAgentReadStore(opts.Agents)
+		if err != nil {
+			return nil, err
+		}
+		agentID, err := requiredStringParam(req.Params, "agent_id")
+		if err != nil {
+			return nil, err
+		}
+		identity, err := resolveOperatorAgentIdentityParam(ctx, reads, req.Params, agentID)
+		if err != nil {
+			return nil, err
+		}
+		failureLimit, err := boundedIntegerParam(req.Params, "failure_limit", 1, operatorread.MaxAgentDeliveryDiagnosticsLimit)
+		if err != nil {
+			return nil, err
+		}
+		deadLetterLimit, err := boundedIntegerParam(req.Params, "dead_letter_limit", 1, operatorread.MaxAgentDeliveryDiagnosticsLimit)
+		if err != nil {
+			return nil, err
+		}
+		failureCursor, _, err := optionalStringParam(req.Params, "failure_cursor")
+		if err != nil {
+			return nil, err
+		}
+		deadLetterCursor, _, err := optionalStringParam(req.Params, "dead_letter_cursor")
+		if err != nil {
+			return nil, err
+		}
+		result, err := reads.LoadOperatorAgentDeliveryDiagnostics(ctx, identity, operatorread.OperatorAgentDeliveryDiagnosticsOptions{
+			FailureLimit:     failureLimit,
+			FailureCursor:    failureCursor,
+			DeadLetterLimit:  deadLetterLimit,
+			DeadLetterCursor: deadLetterCursor,
+		})
+		if errors.Is(err, operatorread.ErrAgentNotFound) {
+			return nil, NewApplicationError(AgentNotFoundCode, false, map[string]any{"agent_id": agentID})
+		}
+		var cursorErr operatorread.AgentDeliveryDiagnosticsCursorError
+		if errors.As(err, &cursorErr) {
+			field := strings.TrimSpace(cursorErr.Field)
+			if field == "" {
+				field = "cursor"
+			}
+			return nil, NewInvalidParamsError(map[string]any{"field": field, "reason": "invalid agent.delivery_diagnostics cursor"})
+		}
+		if err != nil {
+			return nil, err
+		}
+		if err := validateAgentDeliveryDiagnosticsResult(result); err != nil {
+			return nil, err
+		}
+		return result, nil
+	}
+}
+
+func operatorConversationListHandler(opts AgentConversationHandlerOptions) MethodHandler {
+	return func(ctx context.Context, req Request) (any, error) {
+		reads, err := requireConversationReadStore(opts.Conversations)
+		if err != nil {
+			return nil, err
+		}
+		listOpts, err := operatorConversationListOptionsFromParams(req.Params)
+		if err != nil {
+			return nil, err
+		}
+		if listOpts.AgentID != "" {
+			agents, err := requireAgentReadStore(opts.Agents)
+			if err != nil {
+				return nil, err
+			}
+			identity, err := resolveOperatorAgentIdentityParam(ctx, agents, req.Params, listOpts.AgentID)
+			if err != nil {
+				return nil, err
+			}
+			listOpts.AgentID = identity.AgentID()
+			listOpts.FlowInstance = identity.FlowInstance()
+		}
+		result, err := reads.ListOperatorConversations(ctx, listOpts)
+		if errors.Is(err, operatorread.ErrInvalidConversationCursor) {
+			return nil, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "invalid conversation list cursor"})
+		}
+		if paramErr := entityReadParamError(err); paramErr != nil {
+			return nil, NewInvalidParamsError(map[string]any{"field": paramErr.Field, "reason": paramErr.Reason})
+		}
+		if err != nil {
+			return nil, err
+		}
+		return result, nil
+	}
+}
+
+func operatorConversationListTurnsHandler(opts AgentConversationHandlerOptions) MethodHandler {
+	return func(ctx context.Context, req Request) (any, error) {
+		reads, err := requireConversationReadStore(opts.Conversations)
+		if err != nil {
+			return nil, err
+		}
+		sessionID, err := requiredStringParam(req.Params, "session_id")
+		if err != nil {
+			return nil, err
+		}
+		limit, err := boundedIntegerParam(req.Params, "limit", 1, 500)
+		if err != nil {
+			return nil, err
+		}
+		cursor, _, err := optionalStringParam(req.Params, "cursor")
+		if err != nil {
+			return nil, err
+		}
+		result, err := reads.ListOperatorConversationTurns(ctx, operatorread.OperatorConversationTurnListOptions{SessionID: sessionID, Limit: limit, Cursor: cursor})
+		if errors.Is(err, operatorread.ErrSessionNotFound) {
+			return nil, NewApplicationError(SessionNotFoundCode, false, map[string]any{"session_id": sessionID})
+		}
+		if errors.Is(err, operatorread.ErrInvalidConversationCursor) {
+			return nil, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "invalid conversation turn cursor"})
+		}
+		if paramErr := entityReadParamError(err); paramErr != nil {
+			return nil, NewInvalidParamsError(map[string]any{"field": paramErr.Field, "reason": paramErr.Reason})
+		}
+		if err != nil {
+			return nil, err
+		}
+		return result, nil
+	}
+}
+
+func operatorConversationGetTurnHandler(opts AgentConversationHandlerOptions) MethodHandler {
+	return func(ctx context.Context, req Request) (any, error) {
+		reads, err := requireConversationReadStore(opts.Conversations)
+		if err != nil {
+			return nil, err
+		}
+		sessionID, err := requiredStringParam(req.Params, "session_id")
+		if err != nil {
+			return nil, err
+		}
+		turnID, err := requiredStringParam(req.Params, "turn_id")
+		if err != nil {
+			return nil, err
+		}
+		result, err := reads.LoadOperatorPublicConversationTurn(ctx, sessionID, turnID)
+		if errors.Is(err, operatorread.ErrSessionNotFound) {
+			return nil, NewApplicationError(SessionNotFoundCode, false, map[string]any{"session_id": sessionID})
+		}
+		if errors.Is(err, operatorread.ErrTurnNotFound) {
+			return nil, NewApplicationError(TurnNotFoundCode, false, map[string]any{"session_id": sessionID, "turn_id": turnID})
+		}
+		if err != nil {
+			return nil, err
+		}
+		return result, nil
+	}
+}
+
+func operatorAgentUsageHandler(opts AgentConversationHandlerOptions) MethodHandler {
+	return func(ctx context.Context, req Request) (any, error) {
 		reads, err := requireAgentUsageReadStore(opts.Usage)
 		if err != nil {
 			return nil, err
@@ -327,7 +592,10 @@ func OperatorAgentConversationHandlers(opts AgentConversationHandlerOptions) map
 		}
 		return result, nil
 	}
-	lifecycleHandler := func(ctx context.Context, req Request) (any, error) {
+}
+
+func operatorAgentDeliveryLifecycleHandler(opts AgentConversationHandlerOptions) MethodHandler {
+	return func(ctx context.Context, req Request) (any, error) {
 		reads, err := requireAgentDeliveryLifecycleReadStore(opts.DeliveryLifecycle)
 		if err != nil {
 			return nil, err
@@ -381,248 +649,6 @@ func OperatorAgentConversationHandlers(opts AgentConversationHandlerOptions) map
 		}
 		return result, nil
 	}
-	if opts.DeliveryLifecycle != nil {
-		handlers["agent.delivery_lifecycle"] = lifecycleHandler
-	}
-	if opts.Agents != nil || opts.Conversations != nil {
-		for name, handler := range map[string]MethodHandler{
-			"agent.list": func(ctx context.Context, req Request) (any, error) {
-				reads, err := requireAgentReadStore(opts.Agents)
-				if err != nil {
-					return nil, err
-				}
-				listOpts, err := operatorAgentListOptionsFromParams(req.Params)
-				if err != nil {
-					return nil, err
-				}
-				result, err := reads.ListOperatorAgents(ctx, listOpts)
-				if err != nil {
-					return nil, err
-				}
-				return result, nil
-			},
-			"agent.get": func(ctx context.Context, req Request) (any, error) {
-				reads, err := requireAgentReadStore(opts.Agents)
-				if err != nil {
-					return nil, err
-				}
-				agentID, err := requiredStringParam(req.Params, "agent_id")
-				if err != nil {
-					return nil, err
-				}
-				identity, err := resolveOperatorAgentIdentityParam(ctx, reads, req.Params, agentID)
-				if err != nil {
-					return nil, err
-				}
-				result, err := reads.LoadOperatorAgent(ctx, identity)
-				if errors.Is(err, operatorread.ErrAgentNotFound) {
-					return nil, NewApplicationError(AgentNotFoundCode, false, map[string]any{"agent_id": agentID})
-				}
-				if err != nil {
-					return nil, err
-				}
-				return result, nil
-			},
-			"agent.diagnose": func(ctx context.Context, req Request) (any, error) {
-				reads, err := requireAgentReadStore(opts.Agents)
-				if err != nil {
-					return nil, err
-				}
-				agentID, err := requiredStringParam(req.Params, "agent_id")
-				if err != nil {
-					return nil, err
-				}
-				identity, err := resolveOperatorAgentIdentityParam(ctx, reads, req.Params, agentID)
-				if err != nil {
-					return nil, err
-				}
-				queueLimit, err := boundedIntegerParam(req.Params, "queue_limit", 1, operatorread.MaxAgentDiagnosisQueueLimit)
-				if err != nil {
-					return nil, err
-				}
-				queueCursor, _, err := optionalStringParam(req.Params, "queue_cursor")
-				if err != nil {
-					return nil, err
-				}
-				result, err := reads.LoadOperatorAgentDiagnosis(ctx, identity, operatorread.OperatorAgentDiagnosisOptions{
-					QueueLimit:  queueLimit,
-					QueueCursor: queueCursor,
-				})
-				if errors.Is(err, operatorread.ErrAgentNotFound) {
-					return nil, NewApplicationError(AgentNotFoundCode, false, map[string]any{"agent_id": agentID})
-				}
-				if errors.Is(err, operatorread.ErrInvalidPendingAgentDeliveryCursor) {
-					return nil, NewInvalidParamsError(map[string]any{"field": "queue_cursor", "reason": "invalid agent.diagnose queue cursor"})
-				}
-				if err != nil {
-					return nil, err
-				}
-				if err := validateAgentDiagnosisResult(result); err != nil {
-					return nil, err
-				}
-				return result, nil
-			},
-			"agent.delivery_diagnostics": func(ctx context.Context, req Request) (any, error) {
-				reads, err := requireAgentReadStore(opts.Agents)
-				if err != nil {
-					return nil, err
-				}
-				agentID, err := requiredStringParam(req.Params, "agent_id")
-				if err != nil {
-					return nil, err
-				}
-				identity, err := resolveOperatorAgentIdentityParam(ctx, reads, req.Params, agentID)
-				if err != nil {
-					return nil, err
-				}
-				failureLimit, err := boundedIntegerParam(req.Params, "failure_limit", 1, operatorread.MaxAgentDeliveryDiagnosticsLimit)
-				if err != nil {
-					return nil, err
-				}
-				deadLetterLimit, err := boundedIntegerParam(req.Params, "dead_letter_limit", 1, operatorread.MaxAgentDeliveryDiagnosticsLimit)
-				if err != nil {
-					return nil, err
-				}
-				failureCursor, _, err := optionalStringParam(req.Params, "failure_cursor")
-				if err != nil {
-					return nil, err
-				}
-				deadLetterCursor, _, err := optionalStringParam(req.Params, "dead_letter_cursor")
-				if err != nil {
-					return nil, err
-				}
-				result, err := reads.LoadOperatorAgentDeliveryDiagnostics(ctx, identity, operatorread.OperatorAgentDeliveryDiagnosticsOptions{
-					FailureLimit:     failureLimit,
-					FailureCursor:    failureCursor,
-					DeadLetterLimit:  deadLetterLimit,
-					DeadLetterCursor: deadLetterCursor,
-				})
-				if errors.Is(err, operatorread.ErrAgentNotFound) {
-					return nil, NewApplicationError(AgentNotFoundCode, false, map[string]any{"agent_id": agentID})
-				}
-				var cursorErr operatorread.AgentDeliveryDiagnosticsCursorError
-				if errors.As(err, &cursorErr) {
-					field := strings.TrimSpace(cursorErr.Field)
-					if field == "" {
-						field = "cursor"
-					}
-					return nil, NewInvalidParamsError(map[string]any{"field": field, "reason": "invalid agent.delivery_diagnostics cursor"})
-				}
-				if err != nil {
-					return nil, err
-				}
-				if err := validateAgentDeliveryDiagnosticsResult(result); err != nil {
-					return nil, err
-				}
-				return result, nil
-			},
-			"conversation.list": func(ctx context.Context, req Request) (any, error) {
-				reads, err := requireConversationReadStore(opts.Conversations)
-				if err != nil {
-					return nil, err
-				}
-				listOpts, err := operatorConversationListOptionsFromParams(req.Params)
-				if err != nil {
-					return nil, err
-				}
-				if listOpts.AgentID != "" {
-					agents, err := requireAgentReadStore(opts.Agents)
-					if err != nil {
-						return nil, err
-					}
-					identity, err := resolveOperatorAgentIdentityParam(ctx, agents, req.Params, listOpts.AgentID)
-					if err != nil {
-						return nil, err
-					}
-					listOpts.AgentID = identity.AgentID()
-					listOpts.FlowInstance = identity.FlowInstance()
-				}
-				result, err := reads.ListOperatorConversations(ctx, listOpts)
-				if errors.Is(err, operatorread.ErrInvalidConversationCursor) {
-					return nil, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "invalid conversation list cursor"})
-				}
-				if paramErr := entityReadParamError(err); paramErr != nil {
-					return nil, NewInvalidParamsError(map[string]any{"field": paramErr.Field, "reason": paramErr.Reason})
-				}
-				if err != nil {
-					return nil, err
-				}
-				return result, nil
-			},
-			"conversation.list_turns": func(ctx context.Context, req Request) (any, error) {
-				reads, err := requireConversationReadStore(opts.Conversations)
-				if err != nil {
-					return nil, err
-				}
-				sessionID, err := requiredStringParam(req.Params, "session_id")
-				if err != nil {
-					return nil, err
-				}
-				limit, err := boundedIntegerParam(req.Params, "limit", 1, 500)
-				if err != nil {
-					return nil, err
-				}
-				cursor, _, err := optionalStringParam(req.Params, "cursor")
-				if err != nil {
-					return nil, err
-				}
-				result, err := reads.ListOperatorConversationTurns(ctx, operatorread.OperatorConversationTurnListOptions{SessionID: sessionID, Limit: limit, Cursor: cursor})
-				if errors.Is(err, operatorread.ErrSessionNotFound) {
-					return nil, NewApplicationError(SessionNotFoundCode, false, map[string]any{"session_id": sessionID})
-				}
-				if errors.Is(err, operatorread.ErrInvalidConversationCursor) {
-					return nil, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "invalid conversation turn cursor"})
-				}
-				if paramErr := entityReadParamError(err); paramErr != nil {
-					return nil, NewInvalidParamsError(map[string]any{"field": paramErr.Field, "reason": paramErr.Reason})
-				}
-				if err != nil {
-					return nil, err
-				}
-				return result, nil
-			},
-			"conversation.get_turn": func(ctx context.Context, req Request) (any, error) {
-				reads, err := requireConversationReadStore(opts.Conversations)
-				if err != nil {
-					return nil, err
-				}
-				sessionID, err := requiredStringParam(req.Params, "session_id")
-				if err != nil {
-					return nil, err
-				}
-				turnID, err := requiredStringParam(req.Params, "turn_id")
-				if err != nil {
-					return nil, err
-				}
-				result, err := reads.LoadOperatorPublicConversationTurn(ctx, sessionID, turnID)
-				if errors.Is(err, operatorread.ErrSessionNotFound) {
-					return nil, NewApplicationError(SessionNotFoundCode, false, map[string]any{"session_id": sessionID})
-				}
-				if errors.Is(err, operatorread.ErrTurnNotFound) {
-					return nil, NewApplicationError(TurnNotFoundCode, false, map[string]any{"session_id": sessionID, "turn_id": turnID})
-				}
-				if err != nil {
-					return nil, err
-				}
-				return result, nil
-			},
-		} {
-			if strings.HasPrefix(name, "agent.") && opts.Agents == nil {
-				continue
-			}
-			if strings.HasPrefix(name, "conversation.") && opts.Conversations == nil {
-				continue
-			}
-			handlers[name] = handler
-		}
-	}
-	if opts.Usage != nil {
-		handlers["agent.usage"] = usageHandler
-	}
-	if len(handlers) == 0 {
-		return nil
-	}
-	return handlers
 }
 
 func resolveOperatorAgentIdentityParam(ctx context.Context, resolver AgentIdentityResolver, params map[string]any, agentID string) (agentidentity.Identity, error) {
