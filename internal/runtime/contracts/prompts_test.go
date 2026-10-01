@@ -364,10 +364,7 @@ func TestResolvedAgentIntent_DoesNotGuessSources(t *testing.T) {
 
 func TestAssembleAgentPrompt_DeliversCriteriaWithoutChangingIntentIdentity(t *testing.T) {
 	flow := FlowContractView{
-		Paths: FlowContractPaths{FlowPath: "validation"},
-		Policy: PolicyDocument{Criteria: map[string]PolicyCriteriaSet{
-			"feasibility_exclusions": criteriaValidationTestSet(),
-		}},
+		Paths: FlowContractPaths{FlowPath: "validation"}, Rules: RulesDocument{"feasibility_exclusions": {Criteria: criteriaValidationTestSet()}},
 	}
 	root := &FlowContractView{Children: []FlowContractView{flow}}
 	bundle := &WorkflowContractBundle{FlowTree: flowmodel.Tree[FlowContractView]{Root: root, ByID: map[string]*FlowContractView{"validation": &root.Children[0]}}}

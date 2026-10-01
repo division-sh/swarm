@@ -167,20 +167,17 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsInvalidSchemaRefine
 func TestValidateWorkflowContractBundleLoadConstraintsRejectsMalformedPolicyValidationSet(t *testing.T) {
 	pinCandidate := true
 	flow := &FlowContractView{
-		Paths: FlowContractPaths{FlowPath: "deploy"},
-		Policy: PolicyDocument{Validation: map[string]PolicyValidationSet{
-			"deploy_manifest": {
-				Classes: map[string]PolicyValidationClass{"invalid": {Disposition: "deploy.manifest_invalid"}},
-				Inputs:  map[string]string{"source_ref": "string", "manifest_source_ref": "number"},
-				Rules: []PolicyValidationRule{{
-					ID:           "VR-001",
-					Class:        "invalid",
-					Text:         "Manifest source ref must match request source ref.",
-					PinCandidate: &pinCandidate,
-					Check:        PolicyValidationCheck{Equal: &PolicyValidationEqualCheck{Left: "input.source_ref", Right: "input.manifest_source_ref"}},
-				}},
-			},
-		}},
+		Paths: FlowContractPaths{FlowPath: "deploy"}, Rules: RulesDocument{"deploy_manifest": {Validation: &PolicyValidationSet{
+			Classes: map[string]PolicyValidationClass{"invalid": {Disposition: "deploy.manifest_invalid"}},
+			Inputs:  map[string]string{"source_ref": "string", "manifest_source_ref": "number"},
+			Rules: []PolicyValidationRule{{
+				ID:           "VR-001",
+				Class:        "invalid",
+				Text:         "Manifest source ref must match request source ref.",
+				PinCandidate: &pinCandidate,
+				Check:        PolicyValidationCheck{Equal: &PolicyValidationEqualCheck{Left: "input.source_ref", Right: "input.manifest_source_ref"}},
+			}},
+		}}},
 	}
 	bundle := &WorkflowContractBundle{
 		FlowSchemas: map[string]FlowSchemaDocument{"deploy": {}},
@@ -200,19 +197,16 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsMalformedPolicyVali
 
 func TestValidateWorkflowContractBundleLoadConstraintsRequiresPolicyValidationPinCandidate(t *testing.T) {
 	flow := &FlowContractView{
-		Paths: FlowContractPaths{FlowPath: "deploy"},
-		Policy: PolicyDocument{Validation: map[string]PolicyValidationSet{
-			"deploy_manifest": {
-				Classes: map[string]PolicyValidationClass{"invalid": {Disposition: "deploy.manifest_invalid"}},
-				Inputs:  map[string]string{"source_ref": "string", "manifest_source_ref": "string"},
-				Rules: []PolicyValidationRule{{
-					ID:    "VR-001",
-					Class: "invalid",
-					Text:  "Manifest source ref must match request source ref.",
-					Check: PolicyValidationCheck{Equal: &PolicyValidationEqualCheck{Left: "input.source_ref", Right: "input.manifest_source_ref"}},
-				}},
-			},
-		}},
+		Paths: FlowContractPaths{FlowPath: "deploy"}, Rules: RulesDocument{"deploy_manifest": {Validation: &PolicyValidationSet{
+			Classes: map[string]PolicyValidationClass{"invalid": {Disposition: "deploy.manifest_invalid"}},
+			Inputs:  map[string]string{"source_ref": "string", "manifest_source_ref": "string"},
+			Rules: []PolicyValidationRule{{
+				ID:    "VR-001",
+				Class: "invalid",
+				Text:  "Manifest source ref must match request source ref.",
+				Check: PolicyValidationCheck{Equal: &PolicyValidationEqualCheck{Left: "input.source_ref", Right: "input.manifest_source_ref"}},
+			}},
+		}}},
 	}
 	bundle := &WorkflowContractBundle{
 		FlowSchemas: map[string]FlowSchemaDocument{"deploy": {}},
@@ -258,20 +252,17 @@ func TestValidateWorkflowContractBundleLoadConstraintsRequiresValidateRowsToMapD
 					},
 				},
 			},
-		},
-		Policy: PolicyDocument{Validation: map[string]PolicyValidationSet{
-			"deploy_manifest": {
-				Classes: map[string]PolicyValidationClass{"invalid": {Disposition: "deploy.manifest_invalid"}},
-				Inputs:  map[string]string{"source_ref": "string", "manifest_source_ref": "string"},
-				Rules: []PolicyValidationRule{{
-					ID:           "VR-001",
-					Class:        "invalid",
-					Text:         "Manifest source ref must match request source ref.",
-					PinCandidate: &pinCandidate,
-					Check:        PolicyValidationCheck{Equal: &PolicyValidationEqualCheck{Left: "input.source_ref", Right: "input.manifest_source_ref"}},
-				}},
-			},
-		}},
+		}, Rules: RulesDocument{"deploy_manifest": {Validation: &PolicyValidationSet{
+			Classes: map[string]PolicyValidationClass{"invalid": {Disposition: "deploy.manifest_invalid"}},
+			Inputs:  map[string]string{"source_ref": "string", "manifest_source_ref": "string"},
+			Rules: []PolicyValidationRule{{
+				ID:           "VR-001",
+				Class:        "invalid",
+				Text:         "Manifest source ref must match request source ref.",
+				PinCandidate: &pinCandidate,
+				Check:        PolicyValidationCheck{Equal: &PolicyValidationEqualCheck{Left: "input.source_ref", Right: "input.manifest_source_ref"}},
+			}},
+		}}},
 	}
 	bundle := &WorkflowContractBundle{
 		FlowSchemas: map[string]FlowSchemaDocument{"deploy": {}},
@@ -565,22 +556,21 @@ func TestValidateWorkflowCriteriaContractsAllowsSelectedRootCriteriaAndCitation(
 
 func TestValidateWorkflowPolicyValidationContractsAllowsSelectedRoot(t *testing.T) {
 	pinCandidate := false
-	root := &FlowContractView{Paths: FlowContractPaths{FlowPath: "."}, Policy: PolicyDocument{
-		Validation: map[string]PolicyValidationSet{"equal_values": {
-			Classes: map[string]PolicyValidationClass{"invalid": {Disposition: "invalid"}},
-			Inputs:  map[string]string{"left": "string", "right": "string"},
-			Rules: []PolicyValidationRule{{ID: "equal", Class: "invalid", Text: "Values must match.", PinCandidate: &pinCandidate,
-				Check: PolicyValidationCheck{Equal: &PolicyValidationEqualCheck{Left: "input.left", Right: "input.right"}},
-			}},
+	root := &FlowContractView{Paths: FlowContractPaths{FlowPath: "."}, Rules: RulesDocument{"equal_values": {Validation: &PolicyValidationSet{
+		Classes: map[string]PolicyValidationClass{"invalid": {Disposition: "invalid"}},
+		Inputs:  map[string]string{"left": "string", "right": "string"},
+		Rules: []PolicyValidationRule{{ID: "equal", Class: "invalid", Text: "Values must match.", PinCandidate: &pinCandidate,
+			Check: PolicyValidationCheck{Equal: &PolicyValidationEqualCheck{Left: "input.left", Right: "input.right"}},
 		}},
-	}}
+	}}},
+	}
 	bundle := &WorkflowContractBundle{FlowTree: FlowTree{Root: root, ByID: map[string]*FlowContractView{".": root}, ByPath: map[string]*FlowContractView{".": root}}}
 	if errs := validateWorkflowPolicyValidationContracts(bundle); len(errs) != 0 {
 		t.Fatalf("root validation errors: %v", errs)
 	}
-	set := root.Policy.Validation["equal_values"]
+	set := *root.Rules["equal_values"].Validation
 	set.Rules[0].Check.Equal.Right = "input.missing"
-	root.Policy.Validation["equal_values"] = set
+	*root.Rules["equal_values"].Validation = set
 	if errs := validateWorkflowPolicyValidationContracts(bundle); len(errs) == 0 {
 		t.Fatal("root validation skipped an invalid input reference")
 	}
@@ -596,9 +586,9 @@ func TestValidateWorkflowCriteriaContractsRejectsInvalidCriteriaShapes(t *testin
 			name: "duplicate rule id",
 			mutate: func(bundle *WorkflowContractBundle) {
 				flow := bundle.FlowTree.ByID["validation"]
-				set := flow.Policy.Criteria["feasibility_exclusions"]
+				set := *flow.Rules["feasibility_exclusions"].Criteria
 				set.Rules = append(set.Rules, PolicyCriteriaRule{ID: "FX-HARD-01", Class: "soft", Text: "Duplicate."})
-				flow.Policy.Criteria["feasibility_exclusions"] = set
+				*flow.Rules["feasibility_exclusions"].Criteria = set
 			},
 			wantError: "duplicate stable criteria id",
 		},
@@ -606,9 +596,9 @@ func TestValidateWorkflowCriteriaContractsRejectsInvalidCriteriaShapes(t *testin
 			name: "bad policy param ref",
 			mutate: func(bundle *WorkflowContractBundle) {
 				flow := bundle.FlowTree.ByID["validation"]
-				set := flow.Policy.Criteria["feasibility_exclusions"]
+				set := *flow.Rules["feasibility_exclusions"].Criteria
 				set.Rules[0].Params = map[string]PolicyCriteriaParam{"max": {Value: "policy.missing"}}
-				flow.Policy.Criteria["feasibility_exclusions"] = set
+				*flow.Rules["feasibility_exclusions"].Criteria = set
 			},
 			wantError: "references unknown policy scalar",
 		},
@@ -654,7 +644,7 @@ func TestValidateWorkflowCriteriaContractsRejectsInvalidCriteriaShapes(t *testin
 				bundle.scopedAgents = map[string]AgentRegistryEntry{}
 				bundle.scopedAgentSources = map[string]ContractItemSource{}
 			},
-			wantError: "criteria set \"missing\" does not resolve in flow validation policy.criteria",
+			wantError: "criteria set \"missing\" does not resolve in flow validation rules.yaml",
 		},
 		{
 			name: "agent emits criteria event without declaring set",
@@ -725,11 +715,7 @@ func criteriaValidationTestBundle(t testing.TB) *WorkflowContractBundle {
 			Values: map[string]PolicyValue{
 				"max_features": {Value: 5},
 			},
-			Criteria: map[string]PolicyCriteriaSet{
-				"feasibility_exclusions": criteriaValidationTestSet(),
-			},
-		},
-		Events: map[string]EventCatalogEntry{
+		}, Rules: RulesDocument{"feasibility_exclusions": {Criteria: criteriaValidationTestSet()}}, Events: map[string]EventCatalogEntry{
 			"cto.spec_vetoed": {
 				Payload: EventPayloadSpec{
 					Type: "object",
@@ -782,8 +768,8 @@ func criteriaValidationTestBundle(t testing.TB) *WorkflowContractBundle {
 	}
 }
 
-func criteriaValidationTestSet() PolicyCriteriaSet {
-	return PolicyCriteriaSet{
+func criteriaValidationTestSet() *PolicyCriteriaSet {
+	return &PolicyCriteriaSet{
 		Classes: map[string]PolicyCriteriaClass{
 			"hard": {Disposition: "cto.spec_vetoed"},
 			"soft": {Disposition: "cto.spec_revision_needed"},

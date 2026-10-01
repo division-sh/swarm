@@ -1,0 +1,19 @@
+review:
+  classes:
+    hard: {disposition: review.reported}
+  rules:
+    - id: R1
+      class: hard
+      text: Compare the supplied numbers.
+      params: {limit: 3}
+matches:
+  classes:
+    invalid: {disposition: work.rejected}
+  inputs: {left: integer, right: integer}
+  rules:
+    - id: M1
+      class: invalid
+      text: Both numbers must match.
+      pin_candidate: false
+      check:
+        equal: {left: input.left, right: input.right}

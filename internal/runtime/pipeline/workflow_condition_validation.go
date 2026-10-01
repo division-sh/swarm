@@ -27,7 +27,7 @@ func ValidateConditionCELWithOptions(expression string, context WorkflowConditio
 	if expression == "" || strings.EqualFold(expression, "else") {
 		return nil
 	}
-	normalized, _, err := normalizeWorkflowExpression(expression, workflowExpressionContext{AllowUnresolvedQueryOperands: true})
+	normalized, _, err := normalizeWorkflowExpression(expression, workflowExpressionContext{AllowUnresolvedQueryOperands: true, DeclaredPolicy: opts.DeclaredPolicy})
 	if err != nil {
 		return err
 	}

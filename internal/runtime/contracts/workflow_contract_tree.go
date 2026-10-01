@@ -23,7 +23,7 @@ func loadFlowContractViewFromSource(artifact *sourceartifact.AdmittedSourceArtif
 	paths := FlowContractPaths{
 		FlowPath: source.FlowPath, SchemaFile: source.Schema, TypesFile: source.Types,
 		EntitiesFile: source.Entities, NodesFile: source.Nodes, EventsFile: source.Events,
-		AgentsFile: source.Agents, ToolsFile: source.Tools, PolicyFile: source.Policy,
+		AgentsFile: source.Agents, ToolsFile: source.Tools, PolicyFile: source.Policy, RulesFile: source.Rules,
 	}
 	view := FlowContractView{
 		Paths: paths, Schema: schema,
@@ -59,6 +59,9 @@ func loadFlowContractViewFromSource(artifact *sourceartifact.AdmittedSourceArtif
 		return view, err
 	}
 	if view.Policy, err = loadOptionalPolicyDeclarationsFromSource(artifact, source.Policy); err != nil {
+		return view, err
+	}
+	if view.Rules, err = loadOptionalRulesDeclarationsFromSource(artifact, source.Rules); err != nil {
 		return view, err
 	}
 	return view, nil

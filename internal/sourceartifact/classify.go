@@ -9,7 +9,7 @@ import (
 
 var declarationFiles = map[string]struct{}{
 	"schema.yaml": {}, "types.yaml": {}, "entities.yaml": {}, "nodes.yaml": {},
-	"events.yaml": {}, "agents.yaml": {}, "tools.yaml": {}, "policy.yaml": {},
+	"events.yaml": {}, "agents.yaml": {}, "tools.yaml": {}, "policy.yaml": {}, "rules.yaml": {},
 }
 
 var resourceBranches = map[string]struct{}{

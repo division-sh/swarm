@@ -1,10 +1,7 @@
 package flowmodel
 
 import (
-	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 )
 
 type testNode struct {
@@ -12,6 +9,7 @@ type testNode struct {
 	Path     string
 	URI      string
 	Policy   PolicyDocument
+	Rules    RulesDocument
 	Parent   *testNode
 	Children []testNode
 }
@@ -76,266 +74,24 @@ func TestResolvePolicyByID_WalksAncestorChain(t *testing.T) {
 	}
 }
 
-func TestPolicyDocumentCriteriaIsTypedSectionNotGenericValue(t *testing.T) {
-	var doc PolicyDocument
-	if err := yaml.Unmarshal([]byte(`
-threshold: 12
-criteria:
-  feasibility_exclusions:
-    classes:
-      hard: {disposition: cto.spec_vetoed}
-    rules:
-      - id: FX-HARD-01
-        class: hard
-        text: Requires regulated real-time integration.
-        params:
-          max_features: policy.max_features
-`), &doc); err != nil {
-		t.Fatalf("yaml.Unmarshal PolicyDocument: %v", err)
-	}
-
-	if _, ok := doc.Values["criteria"]; ok {
-		t.Fatalf("criteria leaked into generic policy values: %#v", doc.Values["criteria"])
-	}
-	if got := doc.Values["threshold"].Value; got != 12 {
-		t.Fatalf("threshold value = %#v, want 12", got)
-	}
-	set, ok := doc.Criteria["feasibility_exclusions"]
-	if !ok {
-		t.Fatalf("criteria set missing: %#v", doc.Criteria)
-	}
-	if got := set.Classes["hard"].Disposition; got != "cto.spec_vetoed" {
-		t.Fatalf("hard disposition = %q, want cto.spec_vetoed", got)
-	}
-	if len(set.Rules) != 1 || set.Rules[0].ID != "FX-HARD-01" {
-		t.Fatalf("rules = %#v, want FX-HARD-01", set.Rules)
-	}
-	if got := set.Rules[0].Params["max_features"].Value; got != "policy.max_features" {
-		t.Fatalf("param value = %#v, want policy.max_features", got)
-	}
-}
-
-func TestPolicyDocumentDecodesMergeExpandedMapping(t *testing.T) {
-	var doc PolicyDocument
-	if err := yaml.Unmarshal([]byte("<<: &policy\n  limit:\n    value: 7\n"), &doc); err != nil {
-		t.Fatalf("yaml.Unmarshal PolicyDocument: %v", err)
-	}
-	if got := doc.Values["limit"].Value; got != 7 {
-		t.Fatalf("merged policy limit = %#v, want 7", got)
-	}
-	if _, ok := doc.Values["<<"]; ok {
-		t.Fatalf("merged policy published pseudo-key: %#v", doc.Values)
-	}
-}
-
-func TestPolicyDocumentDecodesSiblingAnchorInsideDeclaration(t *testing.T) {
-	var doc PolicyDocument
-	if err := yaml.Unmarshal([]byte("base: &base\n  value: 7\nlimit:\n  <<: *base\n"), &doc); err != nil {
-		t.Fatalf("yaml.Unmarshal PolicyDocument: %v", err)
-	}
-	if got := doc.Values["limit"].Value; got != 7 {
-		t.Fatalf("sibling-anchored policy limit = %#v, want 7", got)
-	}
-}
-
-func TestPolicyDocumentValidationIsTypedSectionNotGenericValue(t *testing.T) {
-	var doc PolicyDocument
-	if err := yaml.Unmarshal([]byte(`
-threshold: 12
-validation:
-  deploy_manifest:
-    classes:
-      invalid: {disposition: deploy.manifest_invalid}
-    inputs:
-      source_ref: string
-      manifest_source_ref: string
-    rules:
-      - id: VR-001
-        class: invalid
-        text: Manifest source ref must match request source ref.
-        pin_candidate: true
-        check:
-          equal: {left: input.source_ref, right: input.manifest_source_ref}
-`), &doc); err != nil {
-		t.Fatalf("yaml.Unmarshal PolicyDocument: %v", err)
-	}
-
-	if _, ok := doc.Values["validation"]; ok {
-		t.Fatalf("validation leaked into generic policy values: %#v", doc.Values["validation"])
-	}
-	set, ok := doc.Validation["deploy_manifest"]
-	if !ok {
-		t.Fatalf("validation set missing: %#v", doc.Validation)
-	}
-	if got := set.Classes["invalid"].Disposition; got != "deploy.manifest_invalid" {
-		t.Fatalf("invalid disposition = %q, want deploy.manifest_invalid", got)
-	}
-	if got := set.Inputs["source_ref"]; got != "string" {
-		t.Fatalf("input source_ref type = %q, want string", got)
-	}
-	if len(set.Rules) != 1 || set.Rules[0].ID != "VR-001" {
-		t.Fatalf("rules = %#v, want VR-001", set.Rules)
-	}
-	if set.Rules[0].PinCandidate == nil || !*set.Rules[0].PinCandidate {
-		t.Fatalf("pin_candidate = %#v, want true", set.Rules[0].PinCandidate)
-	}
-}
-
-func TestPolicyDocumentValidationRejectsUnknownFields(t *testing.T) {
-	tests := []struct {
-		name     string
-		body     string
-		contains string
-	}{
-		{
-			name: "set unknown field",
-			body: `
-validation:
-  deploy_manifest:
-    schema: {}
-    classes:
-      invalid: {disposition: deploy.manifest_invalid}
-    inputs:
-      source_ref: string
-      manifest_source_ref: string
-    rules:
-      - id: VR-001
-        class: invalid
-        text: Manifest source ref must match request source ref.
-        pin_candidate: true
-        check:
-          equal: {left: input.source_ref, right: input.manifest_source_ref}
-`,
-			contains: `unsupported field "schema"`,
-		},
-		{
-			name: "class unknown field",
-			body: `
-validation:
-  deploy_manifest:
-    classes:
-      invalid:
-        disposition: deploy.manifest_invalid
-        retry: never
-    inputs:
-      source_ref: string
-      manifest_source_ref: string
-    rules:
-      - id: VR-001
-        class: invalid
-        text: Manifest source ref must match request source ref.
-        pin_candidate: true
-        check:
-          equal: {left: input.source_ref, right: input.manifest_source_ref}
-`,
-			contains: `unsupported field "retry"`,
-		},
-		{
-			name: "rule unknown field",
-			body: `
-validation:
-  deploy_manifest:
-    classes:
-      invalid: {disposition: deploy.manifest_invalid}
-    inputs:
-      source_ref: string
-      manifest_source_ref: string
-    rules:
-      - id: VR-001
-        class: invalid
-        text: Manifest source ref must match request source ref.
-        pin_candidate: true
-        emit: deploy.manifest_invalid
-        check:
-          equal: {left: input.source_ref, right: input.manifest_source_ref}
-`,
-			contains: `unsupported field "emit"`,
-		},
-		{
-			name: "check extra predicate",
-			body: `
-validation:
-  deploy_manifest:
-    classes:
-      invalid: {disposition: deploy.manifest_invalid}
-    inputs:
-      source_ref: string
-      manifest_source_ref: string
-    rules:
-      - id: VR-001
-        class: invalid
-        text: Manifest source ref must match request source ref.
-        pin_candidate: true
-        check:
-          equal: {left: input.source_ref, right: input.manifest_source_ref}
-          regex: {input: input.source_ref, pattern: "^[a-f0-9]+$"}
-`,
-			contains: `unsupported field "regex"`,
-		},
-		{
-			name: "equal unknown field",
-			body: `
-validation:
-  deploy_manifest:
-    classes:
-      invalid: {disposition: deploy.manifest_invalid}
-    inputs:
-      source_ref: string
-      manifest_source_ref: string
-    rules:
-      - id: VR-001
-        class: invalid
-        text: Manifest source ref must match request source ref.
-        pin_candidate: true
-        check:
-          equal:
-            left: input.source_ref
-            right: input.manifest_source_ref
-            normalize: true
-`,
-			contains: `unsupported field "normalize"`,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var doc PolicyDocument
-			err := yaml.Unmarshal([]byte(tt.body), &doc)
-			if err == nil || !strings.Contains(err.Error(), tt.contains) {
-				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tt.contains)
-			}
-		})
-	}
-}
-
-func TestResolvePolicyByID_MergesCriteriaAlongAncestorChain(t *testing.T) {
+func TestResolveRulesByID_MergesCriteriaAlongAncestorChain(t *testing.T) {
 	root := &testNode{
-		ID: "root",
-		Policy: PolicyDocument{
-			Criteria: map[string]PolicyCriteriaSet{
-				"root_set": {
-					Classes: map[string]PolicyCriteriaClass{"hard": {Disposition: "root.blocked"}},
-					Rules:   []PolicyCriteriaRule{{ID: "ROOT-1", Class: "hard", Text: "Root rule."}},
-				},
-				"shared": {
-					Classes: map[string]PolicyCriteriaClass{"soft": {Disposition: "root.revise"}},
-					Rules:   []PolicyCriteriaRule{{ID: "ROOT-SHARED", Class: "soft", Text: "Root shared."}},
-				},
-			},
-		},
-		Children: []testNode{{
-			ID: "child",
-			Policy: PolicyDocument{
-				Criteria: map[string]PolicyCriteriaSet{
-					"child_set": {
-						Classes: map[string]PolicyCriteriaClass{"allow": {Disposition: "none"}},
-						Rules:   []PolicyCriteriaRule{{ID: "CHILD-1", Class: "allow", Text: "Child rule."}},
-					},
-					"shared": {
-						Classes: map[string]PolicyCriteriaClass{"hard": {Disposition: "child.blocked"}},
-						Rules:   []PolicyCriteriaRule{{ID: "CHILD-SHARED", Class: "hard", Text: "Child shared."}},
-					},
-				},
-			},
+		ID: "root", Rules: RulesDocument{"root_set": {Criteria: &PolicyCriteriaSet{
+			Classes: map[string]PolicyCriteriaClass{"hard": {Disposition: "root.blocked"}},
+			Rules:   []PolicyCriteriaRule{{ID: "ROOT-1", Class: "hard", Text: "Root rule."}},
+		}},
+			"shared": {Criteria: &PolicyCriteriaSet{
+				Classes: map[string]PolicyCriteriaClass{"soft": {Disposition: "root.revise"}},
+				Rules:   []PolicyCriteriaRule{{ID: "ROOT-SHARED", Class: "soft", Text: "Root shared."}},
+			}}}, Children: []testNode{{
+			ID: "child", Rules: RulesDocument{"child_set": {Criteria: &PolicyCriteriaSet{
+				Classes: map[string]PolicyCriteriaClass{"allow": {Disposition: "none"}},
+				Rules:   []PolicyCriteriaRule{{ID: "CHILD-1", Class: "allow", Text: "Child rule."}},
+			}},
+				"shared": {Criteria: &PolicyCriteriaSet{
+					Classes: map[string]PolicyCriteriaClass{"hard": {Disposition: "child.blocked"}},
+					Rules:   []PolicyCriteriaRule{{ID: "CHILD-SHARED", Class: "hard", Text: "Child shared."}},
+				}}},
 		}},
 	}
 	tree := Tree[testNode]{
@@ -345,91 +101,78 @@ func TestResolvePolicyByID_MergesCriteriaAlongAncestorChain(t *testing.T) {
 			"child": &root.Children[0],
 		},
 	}
-	base := PolicyDocument{Criteria: map[string]PolicyCriteriaSet{
-		"base_set": {
-			Classes: map[string]PolicyCriteriaClass{"soft": {Disposition: "base.revise"}},
-			Rules:   []PolicyCriteriaRule{{ID: "BASE-1", Class: "soft", Text: "Base rule."}},
-		},
-	}}
+	base := RulesDocument{"base_set": {Criteria: &PolicyCriteriaSet{
+		Classes: map[string]PolicyCriteriaClass{"soft": {Disposition: "base.revise"}},
+		Rules:   []PolicyCriteriaRule{{ID: "BASE-1", Class: "soft", Text: "Base rule."}},
+	}}}
 
-	got := ResolvePolicyByID(
+	got := ResolveRulesByID(
 		base,
 		tree,
 		"child",
 		func(node *testNode) string { return node.ID },
-		func(node *testNode) PolicyDocument { return node.Policy },
+		func(node *testNode) RulesDocument { return node.Rules },
 		testChildren,
 	)
 
 	for _, name := range []string{"base_set", "root_set", "child_set", "shared"} {
-		if _, ok := got.Criteria[name]; !ok {
-			t.Fatalf("merged criteria missing %q: %#v", name, got.Criteria)
+		if _, ok := got.Criteria(name); !ok {
+			t.Fatalf("merged criteria missing %q: %#v", name, got.CriteriaSets())
 		}
 	}
-	if gotID := got.Criteria["shared"].Rules[0].ID; gotID != "CHILD-SHARED" {
+	if gotID := got["shared"].Criteria.Rules[0].ID; gotID != "CHILD-SHARED" {
 		t.Fatalf("shared criteria rule = %q, want child override", gotID)
 	}
 }
 
-func TestResolvePolicyByID_MergesValidationAlongAncestorChain(t *testing.T) {
+func TestResolveRulesByID_MergesValidationAlongAncestorChain(t *testing.T) {
 	falseValue := false
 	trueValue := true
 	root := &testNode{
-		ID: "root",
-		Policy: PolicyDocument{
-			Validation: map[string]PolicyValidationSet{
-				"root_set": {
-					Classes: map[string]PolicyValidationClass{"invalid": {Disposition: "root.invalid"}},
+		ID: "root", Rules: RulesDocument{"root_set": {Validation: &PolicyValidationSet{
+			Classes: map[string]PolicyValidationClass{"invalid": {Disposition: "root.invalid"}},
+			Inputs:  map[string]string{"left": "string", "right": "string"},
+			Rules: []PolicyValidationRule{{
+				ID:           "ROOT-1",
+				Class:        "invalid",
+				Text:         "Root validation.",
+				PinCandidate: &falseValue,
+				Check:        PolicyValidationCheck{Equal: &PolicyValidationEqualCheck{Left: "input.left", Right: "input.right"}},
+			}},
+		}},
+			"shared": {Validation: &PolicyValidationSet{
+				Classes: map[string]PolicyValidationClass{"invalid": {Disposition: "root.shared_invalid"}},
+				Inputs:  map[string]string{"left": "string", "right": "string"},
+				Rules: []PolicyValidationRule{{
+					ID:           "ROOT-SHARED",
+					Class:        "invalid",
+					Text:         "Root shared.",
+					PinCandidate: &falseValue,
+					Check:        PolicyValidationCheck{Equal: &PolicyValidationEqualCheck{Left: "input.left", Right: "input.right"}},
+				}},
+			}}}, Children: []testNode{{
+			ID: "child", Rules: RulesDocument{"child_set": {Validation: &PolicyValidationSet{
+				Classes: map[string]PolicyValidationClass{"invalid": {Disposition: "child.invalid"}},
+				Inputs:  map[string]string{"left": "string", "right": "string"},
+				Rules: []PolicyValidationRule{{
+					ID:           "CHILD-1",
+					Class:        "invalid",
+					Text:         "Child validation.",
+					PinCandidate: &trueValue,
+					Check:        PolicyValidationCheck{Equal: &PolicyValidationEqualCheck{Left: "input.left", Right: "input.right"}},
+				}},
+			}},
+				"shared": {Validation: &PolicyValidationSet{
+					Classes: map[string]PolicyValidationClass{"invalid": {Disposition: "child.shared_invalid"}},
 					Inputs:  map[string]string{"left": "string", "right": "string"},
 					Rules: []PolicyValidationRule{{
-						ID:           "ROOT-1",
+						ID:           "CHILD-SHARED",
 						Class:        "invalid",
-						Text:         "Root validation.",
-						PinCandidate: &falseValue,
+						Text:         "Child shared.",
+						PinCandidate: &trueValue,
 						Check:        PolicyValidationCheck{Equal: &PolicyValidationEqualCheck{Left: "input.left", Right: "input.right"}},
 					}},
-				},
-				"shared": {
-					Classes: map[string]PolicyValidationClass{"invalid": {Disposition: "root.shared_invalid"}},
-					Inputs:  map[string]string{"left": "string", "right": "string"},
-					Rules: []PolicyValidationRule{{
-						ID:           "ROOT-SHARED",
-						Class:        "invalid",
-						Text:         "Root shared.",
-						PinCandidate: &falseValue,
-						Check:        PolicyValidationCheck{Equal: &PolicyValidationEqualCheck{Left: "input.left", Right: "input.right"}},
-					}},
-				},
-			},
-		},
-		Children: []testNode{{
-			ID: "child",
-			Policy: PolicyDocument{
-				Validation: map[string]PolicyValidationSet{
-					"child_set": {
-						Classes: map[string]PolicyValidationClass{"invalid": {Disposition: "child.invalid"}},
-						Inputs:  map[string]string{"left": "string", "right": "string"},
-						Rules: []PolicyValidationRule{{
-							ID:           "CHILD-1",
-							Class:        "invalid",
-							Text:         "Child validation.",
-							PinCandidate: &trueValue,
-							Check:        PolicyValidationCheck{Equal: &PolicyValidationEqualCheck{Left: "input.left", Right: "input.right"}},
-						}},
-					},
-					"shared": {
-						Classes: map[string]PolicyValidationClass{"invalid": {Disposition: "child.shared_invalid"}},
-						Inputs:  map[string]string{"left": "string", "right": "string"},
-						Rules: []PolicyValidationRule{{
-							ID:           "CHILD-SHARED",
-							Class:        "invalid",
-							Text:         "Child shared.",
-							PinCandidate: &trueValue,
-							Check:        PolicyValidationCheck{Equal: &PolicyValidationEqualCheck{Left: "input.left", Right: "input.right"}},
-						}},
-					},
-				},
-			},
+				}}},
 		}},
 	}
 	tree := Tree[testNode]{
@@ -439,35 +182,33 @@ func TestResolvePolicyByID_MergesValidationAlongAncestorChain(t *testing.T) {
 			"child": &root.Children[0],
 		},
 	}
-	base := PolicyDocument{Validation: map[string]PolicyValidationSet{
-		"base_set": {
-			Classes: map[string]PolicyValidationClass{"invalid": {Disposition: "base.invalid"}},
-			Inputs:  map[string]string{"left": "string", "right": "string"},
-			Rules: []PolicyValidationRule{{
-				ID:           "BASE-1",
-				Class:        "invalid",
-				Text:         "Base validation.",
-				PinCandidate: &falseValue,
-				Check:        PolicyValidationCheck{Equal: &PolicyValidationEqualCheck{Left: "input.left", Right: "input.right"}},
-			}},
-		},
-	}}
+	base := RulesDocument{"base_set": {Validation: &PolicyValidationSet{
+		Classes: map[string]PolicyValidationClass{"invalid": {Disposition: "base.invalid"}},
+		Inputs:  map[string]string{"left": "string", "right": "string"},
+		Rules: []PolicyValidationRule{{
+			ID:           "BASE-1",
+			Class:        "invalid",
+			Text:         "Base validation.",
+			PinCandidate: &falseValue,
+			Check:        PolicyValidationCheck{Equal: &PolicyValidationEqualCheck{Left: "input.left", Right: "input.right"}},
+		}},
+	}}}
 
-	got := ResolvePolicyByID(
+	got := ResolveRulesByID(
 		base,
 		tree,
 		"child",
 		func(node *testNode) string { return node.ID },
-		func(node *testNode) PolicyDocument { return node.Policy },
+		func(node *testNode) RulesDocument { return node.Rules },
 		testChildren,
 	)
 
 	for _, name := range []string{"base_set", "root_set", "child_set", "shared"} {
-		if _, ok := got.Validation[name]; !ok {
-			t.Fatalf("merged validation missing %q: %#v", name, got.Validation)
+		if _, ok := got.Validation(name); !ok {
+			t.Fatalf("merged validation missing %q: %#v", name, got.ValidationSets())
 		}
 	}
-	if gotID := got.Validation["shared"].Rules[0].ID; gotID != "CHILD-SHARED" {
+	if gotID := got["shared"].Validation.Rules[0].ID; gotID != "CHILD-SHARED" {
 		t.Fatalf("shared validation rule = %q, want child override", gotID)
 	}
 }

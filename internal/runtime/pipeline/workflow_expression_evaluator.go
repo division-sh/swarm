@@ -31,6 +31,7 @@ type workflowExpressionContext struct {
 	WorkflowName                 string
 	QueryEntityCount             func(string) (int, error)
 	AllowUnresolvedQueryOperands bool
+	DeclaredPolicy               map[string]any
 }
 
 type workflowExpressionEvaluator struct {
@@ -112,6 +113,7 @@ func projectWorkflowExpressionContext(ctx workflowExpressionContext) (workflowEx
 		WorkflowName:                 ctx.WorkflowName,
 		QueryEntityCount:             ctx.QueryEntityCount,
 		AllowUnresolvedQueryOperands: ctx.AllowUnresolvedQueryOperands,
+		DeclaredPolicy:               ctx.DeclaredPolicy,
 	}, nil
 }
 
@@ -183,6 +185,7 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 		QueryEntityCount:             ctx.QueryEntityCount,
 		AllowUnresolvedQueryOperands: ctx.AllowUnresolvedQueryOperands,
 	}
+	normalizedCtx.DeclaredPolicy = ctx.DeclaredPolicy
 	normalized = workflowExpressionPolicyPlaceholder.ReplaceAllStringFunc(normalized, func(token string) string {
 		match := workflowExpressionPolicyPlaceholder.FindStringSubmatch(token)
 		if len(match) != 2 {
@@ -193,7 +196,7 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 			return workflowExpressionLiteral(value)
 		}
 		if key != "" {
-			return "policy." + key
+			return "policy[" + strconv.Quote(key) + "]"
 		}
 		return token
 	})
@@ -276,6 +279,21 @@ func workflowExpressionResolveQueryOperand(raw string, ctx workflowExpressionCon
 	case "null":
 		return nil, nil
 	}
+	if root, _ := workflowExpressionQueryOperandScope(raw); root == "policy" {
+		static, err := workflowexpr.IsStaticPolicyReference(raw)
+		if err != nil || !static {
+			return nil, fmt.Errorf("query_entities policy operand %q must be a static selector: %v", raw, err)
+		}
+		if ctx.DeclaredPolicy != nil {
+			if err := workflowexpr.ValidatePolicyReferences(raw, ctx.DeclaredPolicy, workflowexpr.ValueExpressionOptions{}); err != nil {
+				return nil, err
+			}
+		}
+		if ctx.AllowUnresolvedQueryOperands {
+			return raw, nil
+		}
+		return workflowexpr.EvalValueExpression(raw, workflowexpr.ValueContext{Policy: ctx.Policy})
+	}
 	if value, ok := workflowExpressionLookupContextValue(raw, ctx); ok {
 		return value, nil
 	}
@@ -297,11 +315,12 @@ func workflowExpressionResolveQueryOperand(raw string, ctx workflowExpressionCon
 }
 
 func workflowExpressionQueryOperandScope(raw string) (string, bool) {
-	root, _, ok := strings.Cut(strings.TrimSpace(raw), ".")
-	if !ok {
+	raw = strings.TrimSpace(raw)
+	separator := strings.IndexAny(raw, ".[")
+	if separator < 0 {
 		return "", false
 	}
-	root = strings.TrimSpace(root)
+	root := strings.TrimSpace(raw[:separator])
 	if root == "" {
 		return "", false
 	}
@@ -325,8 +344,6 @@ func workflowExpressionLookupContextValue(ref string, ctx workflowExpressionCont
 		return workflowExpressionLookupPath(ctx.Event, strings.TrimPrefix(ref, "event."))
 	case strings.HasPrefix(ref, "payload."):
 		return workflowExpressionLookupPath(ctx.Payload, strings.TrimPrefix(ref, "payload."))
-	case strings.HasPrefix(ref, "policy."):
-		return workflowExpressionLookupPath(ctx.Policy, strings.TrimPrefix(ref, "policy."))
 	case strings.HasPrefix(ref, "computed."):
 		return workflowExpressionLookupPath(ctx.Computed, strings.TrimPrefix(ref, "computed."))
 	case strings.HasPrefix(ref, "fan_out."):

@@ -102,9 +102,9 @@ func (b *effectiveProvenanceBuilder) ledger() EffectiveProvenanceLedger {
 	return cloneEffectiveProvenanceLedger(EffectiveProvenanceLedger{entries: b.entries})
 }
 
-func populateEffectiveProvenance(bundle *WorkflowContractBundle) {
+func populateEffectiveProvenance(bundle *WorkflowContractBundle) error {
 	if bundle == nil {
-		return
+		return nil
 	}
 	builder := newEffectiveProvenanceBuilder()
 	populateEffectiveSchemaProvenance(bundle, builder)
@@ -147,7 +147,11 @@ func populateEffectiveProvenance(bundle *WorkflowContractBundle) {
 			}
 		}
 	}
+	if err := populatePolicyRulesProvenance(bundle, builder); err != nil {
+		return err
+	}
 	bundle.effectiveProvenance = builder.ledger()
+	return nil
 }
 
 func effectiveNodeProvenancePrefix(flowPath, nodeID string) string {

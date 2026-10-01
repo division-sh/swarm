@@ -132,6 +132,7 @@ func snapshotEvaluationValue(value any, seen map[evaluationSnapshotVisit]bool) (
 }
 
 type ValueExpressionOptions struct {
+	DeclaredPolicy   map[string]any
 	KnownPresence    []string
 	AllowBareItem    bool
 	ItemAlias        string
@@ -171,40 +172,64 @@ func ValidateValueExpression(expression string) error {
 }
 
 func ValidateValueExpressionWithOptions(expression string, opts ValueExpressionOptions) error {
+	_, err := checkedValueExpression(expression, opts)
+	return err
+}
+
+func checkedValueExpression(expression string, opts ValueExpressionOptions) (*cel.Ast, error) {
+	compiled, _, err := prepareCheckedValueExpression(expression, opts)
+	return compiled, err
+}
+
+func prepareCheckedValueExpression(expression string, opts ValueExpressionOptions) (*cel.Ast, cel.Program, error) {
 	expression = strings.TrimSpace(expression)
 	if expression == "" {
-		return fmt.Errorf("workflow data expression is empty")
+		return nil, nil, fmt.Errorf("workflow data expression is empty")
 	}
 	if err := validateAuthoredContextRoots(expression, opts); err != nil {
-		return err
+		return nil, nil, err
 	}
 	if expressionReferencesFanOutField(expression, "target") {
-		return fmt.Errorf("fan_out.target is retired; use the current fan_out emit item alias for per-item values or fan_out.count for fan-out count")
+		return nil, nil, fmt.Errorf("fan_out.target is retired; use the current fan_out emit item alias for per-item values or fan_out.count for fan-out count")
 	}
 	if expressionReferencesFanOutField(expression, "identity") {
-		return fmt.Errorf("fan_out.identity is not supported; use the declared fan_out identity expression directly through the item alias")
+		return nil, nil, fmt.Errorf("fan_out.identity is not supported; use the declared fan_out identity expression directly through the item alias")
 	}
 	if expressionReferencesFanOutField(expression, "item") {
-		return fmt.Errorf("fan_out.item is retired from authored fan_out expressions; use the required fan_out item alias")
+		return nil, nil, fmt.Errorf("fan_out.item is retired from authored fan_out expressions; use the required fan_out item alias")
 	}
 	if strings.TrimSpace(opts.ItemAlias) == "" && expressionReferencesFanOutField(expression, "index") {
-		return fmt.Errorf("fan_out.index is only available inside fan_out.emit fields")
+		return nil, nil, fmt.Errorf("fan_out.index is only available inside fan_out.emit fields")
 	}
 	if !opts.AllowJoin && ExpressionReferencesRoot(expression, "join") {
-		return fmt.Errorf("join.* is only available inside join completion and timeout outcomes")
+		return nil, nil, fmt.Errorf("join.* is only available inside join completion and timeout outcomes")
 	}
 	if err := ValidateEventReferences(expression); err != nil {
-		return err
+		return nil, nil, err
 	}
 	if err := requireStructuralExpressionRoots(expression, opts); err != nil {
-		return err
+		return nil, nil, err
 	}
 	env, err := dataExpressionEnvForContext(opts)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	_, err = compileValueExpression(env, RewriteLoopRoot(expression), opts)
-	return err
+	compiled, err := compileValueExpression(env, RewriteLoopRoot(expression), opts)
+	if err != nil {
+		return nil, nil, err
+	}
+	// Optional absence and unreachable branches cannot exempt a program that CEL
+	// cannot construct. Validation and execution share the exact numeric bindings.
+	program, err := workflowProgram(env, compiled)
+	if err != nil {
+		return nil, nil, err
+	}
+	if opts.DeclaredPolicy != nil {
+		if err := validateCheckedPolicyReferences(compiled, opts.DeclaredPolicy); err != nil {
+			return nil, nil, err
+		}
+	}
+	return compiled, program, nil
 }
 
 func compileValueExpression(env *cel.Env, expression string, opts ValueExpressionOptions) (*cel.Ast, error) {
@@ -367,42 +392,7 @@ type PreparedValueExpression struct {
 
 func PrepareValueExpression(expression string, opts ValueExpressionOptions) (*PreparedValueExpression, error) {
 	normalized := strings.TrimSpace(expression)
-	if normalized == "" {
-		return nil, fmt.Errorf("workflow data expression is empty")
-	}
-	if err := validateAuthoredContextRoots(normalized, opts); err != nil {
-		return nil, err
-	}
-	if expressionReferencesFanOutField(normalized, "target") {
-		return nil, fmt.Errorf("fan_out.target is retired; use the current fan_out emit item alias for per-item values or fan_out.count for fan-out count")
-	}
-	if expressionReferencesFanOutField(normalized, "identity") {
-		return nil, fmt.Errorf("fan_out.identity is not supported; use the declared fan_out identity expression directly through the item alias")
-	}
-	if expressionReferencesFanOutField(normalized, "item") {
-		return nil, fmt.Errorf("fan_out.item is retired from authored fan_out expressions; use the required fan_out item alias")
-	}
-	if strings.TrimSpace(opts.ItemAlias) == "" && expressionReferencesFanOutField(normalized, "index") {
-		return nil, fmt.Errorf("fan_out.index is only available inside fan_out.emit fields")
-	}
-	if !opts.AllowJoin && ExpressionReferencesRoot(normalized, "join") {
-		return nil, fmt.Errorf("join.* is only available inside join completion and timeout outcomes")
-	}
-	if err := ValidateEventReferences(normalized); err != nil {
-		return nil, err
-	}
-	if err := requireStructuralExpressionRoots(normalized, opts); err != nil {
-		return nil, err
-	}
-	env, err := dataExpressionEnvForContext(opts)
-	if err != nil {
-		return nil, err
-	}
-	ast, err := compileValueExpression(env, RewriteLoopRoot(normalized), opts)
-	if err != nil {
-		return nil, err
-	}
-	program, err := workflowProgram(env, ast)
+	_, program, err := prepareCheckedValueExpression(normalized, opts)
 	if err != nil {
 		return nil, err
 	}

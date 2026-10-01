@@ -3,31 +3,9 @@ package flowmodel
 import "strings"
 
 func ClonePolicyDocument(in PolicyDocument) PolicyDocument {
-	out := PolicyDocument{
-		Values:     map[string]PolicyValue{},
-		Criteria:   map[string]PolicyCriteriaSet{},
-		Validation: map[string]PolicyValidationSet{},
-	}
+	out := PolicyDocument{Values: make(map[string]PolicyValue, len(in.Values))}
 	for key, value := range in.Values {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		out.Values[key] = value
-	}
-	for key, value := range in.Criteria {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		out.Criteria[key] = clonePolicyCriteriaSet(value)
-	}
-	for key, value := range in.Validation {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		out.Validation[key] = clonePolicyValidationSet(value)
+		out.Values[key] = PolicyValue{Value: cloneCriteriaParamValue(value.Value)}
 	}
 	return out
 }
@@ -81,6 +59,22 @@ func cloneCriteriaParamValue(value any) any {
 		for i, value := range typed {
 			out[i] = cloneCriteriaParamValue(value)
 		}
+		return out
+	case map[any]any:
+		out := make(map[any]any, len(typed))
+		for key, value := range typed {
+			out[key] = cloneCriteriaParamValue(value)
+		}
+		return out
+	case map[string]string:
+		out := make(map[string]string, len(typed))
+		for key, value := range typed {
+			out[key] = value
+		}
+		return out
+	case []string:
+		out := make([]string, len(typed))
+		copy(out, typed)
 		return out
 	default:
 		return value

@@ -1,39 +1,33 @@
 package flowmodel
 
-import (
-	"fmt"
-	"strings"
-
-	"github.com/division-sh/swarm/internal/yamlsource"
-	"gopkg.in/yaml.v3"
-)
+import "encoding/json"
 
 type PolicyDocument struct {
-	Values     map[string]PolicyValue         `yaml:",inline"`
-	Criteria   map[string]PolicyCriteriaSet   `yaml:"criteria,omitempty"`
-	Validation map[string]PolicyValidationSet `yaml:"validation,omitempty"`
+	Values map[string]PolicyValue `yaml:",inline"`
 }
 
 type PolicyValue struct {
-	Value       any    `yaml:"value"`
-	Description string `yaml:"description"`
-	Override    bool   `yaml:"override"`
+	Value any
 }
 
+func (v PolicyValue) MarshalYAML() (any, error)            { return v.Value, nil }
+func (p PolicyCriteriaParam) MarshalYAML() (any, error)    { return p.Value, nil }
+func (p PolicyCriteriaParam) MarshalJSON() ([]byte, error) { return json.Marshal(p.Value) }
+
 type PolicyCriteriaSet struct {
-	Classes map[string]PolicyCriteriaClass `yaml:"classes"`
-	Rules   []PolicyCriteriaRule           `yaml:"rules"`
+	Classes map[string]PolicyCriteriaClass `yaml:"classes" json:"classes"`
+	Rules   []PolicyCriteriaRule           `yaml:"rules" json:"rules"`
 }
 
 type PolicyCriteriaClass struct {
-	Disposition string `yaml:"disposition"`
+	Disposition string `yaml:"disposition" json:"disposition"`
 }
 
 type PolicyCriteriaRule struct {
-	ID     string                         `yaml:"id"`
-	Class  string                         `yaml:"class"`
-	Text   string                         `yaml:"text"`
-	Params map[string]PolicyCriteriaParam `yaml:"params"`
+	ID     string                         `yaml:"id" json:"id"`
+	Class  string                         `yaml:"class" json:"class"`
+	Text   string                         `yaml:"text" json:"text"`
+	Params map[string]PolicyCriteriaParam `yaml:"params" json:"params,omitempty"`
 }
 
 type PolicyCriteriaParam struct {
@@ -41,31 +35,31 @@ type PolicyCriteriaParam struct {
 }
 
 type PolicyValidationSet struct {
-	Classes map[string]PolicyValidationClass `yaml:"classes"`
-	Inputs  map[string]string                `yaml:"inputs"`
-	Rules   []PolicyValidationRule           `yaml:"rules"`
+	Classes map[string]PolicyValidationClass `yaml:"classes" json:"classes"`
+	Inputs  map[string]string                `yaml:"inputs" json:"inputs"`
+	Rules   []PolicyValidationRule           `yaml:"rules" json:"rules"`
 }
 
 type PolicyValidationClass struct {
-	Disposition string `yaml:"disposition"`
+	Disposition string `yaml:"disposition" json:"disposition"`
 }
 
 type PolicyValidationRule struct {
-	ID           string                         `yaml:"id"`
-	Class        string                         `yaml:"class"`
-	Text         string                         `yaml:"text"`
-	Params       map[string]PolicyCriteriaParam `yaml:"params"`
-	PinCandidate *bool                          `yaml:"pin_candidate"`
-	Check        PolicyValidationCheck          `yaml:"check"`
+	ID           string                         `yaml:"id" json:"id"`
+	Class        string                         `yaml:"class" json:"class"`
+	Text         string                         `yaml:"text" json:"text"`
+	Params       map[string]PolicyCriteriaParam `yaml:"params" json:"params,omitempty"`
+	PinCandidate *bool                          `yaml:"pin_candidate" json:"pin_candidate"`
+	Check        PolicyValidationCheck          `yaml:"check" json:"check"`
 }
 
 type PolicyValidationCheck struct {
-	Equal *PolicyValidationEqualCheck `yaml:"equal"`
+	Equal *PolicyValidationEqualCheck `yaml:"equal" json:"equal"`
 }
 
 type PolicyValidationEqualCheck struct {
-	Left  string `yaml:"left"`
-	Right string `yaml:"right"`
+	Left  string `yaml:"left" json:"left"`
+	Right string `yaml:"right" json:"right"`
 }
 
 type Tree[T any] struct {
@@ -89,227 +83,4 @@ type URIRef struct {
 	Path     string
 	Absolute string
 	Full     string
-}
-
-func (d *PolicyDocument) UnmarshalYAML(node *yaml.Node) error {
-	if d == nil {
-		return nil
-	}
-	if node == nil || node.Kind == 0 {
-		d.Values = map[string]PolicyValue{}
-		return nil
-	}
-	document, err := ProjectPolicyDocument(yamlsource.ValueFromNode(node))
-	if err != nil {
-		return err
-	}
-	*d = document
-	return nil
-}
-
-// ProjectPolicyDocument builds the typed policy value from the canonical
-// effective mapping inspected during YAML admission.
-func ProjectPolicyDocument(root yamlsource.Value) (PolicyDocument, error) {
-	if root.Presence() != yamlsource.PresenceMapping && root.Presence() != yamlsource.PresenceEmptyMapping {
-		return PolicyDocument{}, fmt.Errorf("policy document must be a mapping")
-	}
-	fields, err := root.Mapping()
-	if err != nil {
-		return PolicyDocument{}, err
-	}
-	values := map[string]PolicyValue{}
-	criteria := map[string]PolicyCriteriaSet{}
-	validation := map[string]PolicyValidationSet{}
-	for _, field := range fields {
-		key := strings.TrimSpace(field.Name)
-		if key == "" {
-			continue
-		}
-		if key == "criteria" {
-			if err := field.Value.Project(&criteria); err != nil {
-				return PolicyDocument{}, fmt.Errorf("policy criteria: %w", err)
-			}
-			continue
-		}
-		if key == "validation" {
-			if err := field.Value.Project(&validation); err != nil {
-				return PolicyDocument{}, fmt.Errorf("policy validation: %w", err)
-			}
-			continue
-		}
-		if key == "modules" {
-			return PolicyDocument{}, fmt.Errorf("policy.modules is retired; declare flat tools.yaml entries with handler_type: wasm or python")
-		}
-		var value PolicyValue
-		if err := field.Value.Project(&value); err != nil {
-			return PolicyDocument{}, err
-		}
-		values[key] = value
-	}
-	return PolicyDocument{Values: values, Criteria: criteria, Validation: validation}, nil
-}
-
-func (v *PolicyValue) UnmarshalYAML(node *yaml.Node) error {
-	if v == nil {
-		return nil
-	}
-	if node == nil {
-		*v = PolicyValue{}
-		return nil
-	}
-	root := yamlsource.ValueFromNode(node)
-	structured := false
-	if root.Presence() == yamlsource.PresenceMapping || root.Presence() == yamlsource.PresenceEmptyMapping {
-		fields, err := root.Mapping()
-		if err != nil {
-			return err
-		}
-		for _, field := range fields {
-			switch strings.TrimSpace(field.Name) {
-			case "value", "description", "override":
-				structured = true
-			}
-		}
-	}
-	if structured {
-		type alias PolicyValue
-		var aux alias
-		if err := root.Project(&aux); err != nil {
-			return err
-		}
-		*v = PolicyValue(aux)
-		return nil
-	}
-	var raw any
-	if err := root.Project(&raw); err != nil {
-		return err
-	}
-	*v = PolicyValue{Value: raw}
-	return nil
-}
-
-func (p *PolicyCriteriaParam) UnmarshalYAML(node *yaml.Node) error {
-	if p == nil {
-		return nil
-	}
-	var raw any
-	if err := node.Decode(&raw); err != nil {
-		return err
-	}
-	p.Value = raw
-	return nil
-}
-
-func (s *PolicyValidationSet) UnmarshalYAML(node *yaml.Node) error {
-	if s == nil {
-		return nil
-	}
-	if err := validateYAMLMappingKeys(node, "policy validation set", map[string]struct{}{
-		"classes": {},
-		"inputs":  {},
-		"rules":   {},
-	}); err != nil {
-		return err
-	}
-	type alias PolicyValidationSet
-	var aux alias
-	if err := node.Decode(&aux); err != nil {
-		return err
-	}
-	*s = PolicyValidationSet(aux)
-	return nil
-}
-
-func (c *PolicyValidationClass) UnmarshalYAML(node *yaml.Node) error {
-	if c == nil {
-		return nil
-	}
-	if err := validateYAMLMappingKeys(node, "policy validation class", map[string]struct{}{
-		"disposition": {},
-	}); err != nil {
-		return err
-	}
-	type alias PolicyValidationClass
-	var aux alias
-	if err := node.Decode(&aux); err != nil {
-		return err
-	}
-	*c = PolicyValidationClass(aux)
-	return nil
-}
-
-func (r *PolicyValidationRule) UnmarshalYAML(node *yaml.Node) error {
-	if r == nil {
-		return nil
-	}
-	if err := validateYAMLMappingKeys(node, "policy validation rule", map[string]struct{}{
-		"id":            {},
-		"class":         {},
-		"text":          {},
-		"params":        {},
-		"pin_candidate": {},
-		"check":         {},
-	}); err != nil {
-		return err
-	}
-	type alias PolicyValidationRule
-	var aux alias
-	if err := node.Decode(&aux); err != nil {
-		return err
-	}
-	*r = PolicyValidationRule(aux)
-	return nil
-}
-
-func (c *PolicyValidationCheck) UnmarshalYAML(node *yaml.Node) error {
-	if c == nil {
-		return nil
-	}
-	if err := validateYAMLMappingKeys(node, "policy validation check", map[string]struct{}{
-		"equal": {},
-	}); err != nil {
-		return err
-	}
-	type alias PolicyValidationCheck
-	var aux alias
-	if err := node.Decode(&aux); err != nil {
-		return err
-	}
-	*c = PolicyValidationCheck(aux)
-	return nil
-}
-
-func (c *PolicyValidationEqualCheck) UnmarshalYAML(node *yaml.Node) error {
-	if c == nil {
-		return nil
-	}
-	if err := validateYAMLMappingKeys(node, "policy validation equal check", map[string]struct{}{
-		"left":  {},
-		"right": {},
-	}); err != nil {
-		return err
-	}
-	type alias PolicyValidationEqualCheck
-	var aux alias
-	if err := node.Decode(&aux); err != nil {
-		return err
-	}
-	*c = PolicyValidationEqualCheck(aux)
-	return nil
-}
-
-func validateYAMLMappingKeys(node *yaml.Node, context string, allowed map[string]struct{}) error {
-	if node == nil || node.Kind == 0 {
-		return fmt.Errorf("%s must be a mapping", context)
-	}
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("%s must be a mapping", context)
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		if _, ok := allowed[key]; !ok {
-			return fmt.Errorf("%s unsupported field %q", context, key)
-		}
-	}
-	return nil
 }

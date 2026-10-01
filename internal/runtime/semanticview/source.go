@@ -57,6 +57,8 @@ type Source interface {
 	FlowEventMatches(flowID, subscription, eventType string) bool
 	RequiredAgents() []runtimecontracts.FlowRequiredAgent
 	FlowRequiredAgents(flowID string) []runtimecontracts.FlowRequiredAgent
+	ResolvedRulesForFlow(flowID string) runtimecontracts.RulesDocument
+	ResolvedRulesForExecutableNode(node runtimeidentity.ExecutableNode) runtimecontracts.RulesDocument
 	ResolvedPolicyForFlow(flowID string) runtimecontracts.PolicyDocument
 	ResolvedPolicyForExecutableNode(node runtimeidentity.ExecutableNode) runtimecontracts.PolicyDocument
 	ResolvedEventCatalog() map[string]runtimecontracts.EventCatalogEntry

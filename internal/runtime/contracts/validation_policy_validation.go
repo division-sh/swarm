@@ -24,10 +24,10 @@ func validateFlowPolicyValidationSets(bundle *WorkflowContractBundle) []error {
 		view := value
 		flowID := strings.TrimSpace(view.Paths.FlowPath)
 		policy := bundle.ResolvedPolicyForFlow(flowID)
-		setNames := sortedValidationSetNames(view.Policy.Validation)
+		setNames := sortedValidationSetNames(view.Rules.ValidationSets())
 		for _, setName := range setNames {
-			set := view.Policy.Validation[setName]
-			errs = append(errs, validatePolicyValidationSet("flow "+flowID+" policy.validation."+setName, set, policy)...)
+			set, _ := view.Rules.Validation(setName)
+			errs = append(errs, validatePolicyValidationSet("flow "+flowID+" rules."+setName, set, policy)...)
 		}
 	}
 	return errs
@@ -141,14 +141,14 @@ func validatePolicySheetValidationRows(bundle *WorkflowContractBundle) []error {
 			errs = append(errs, err)
 			continue
 		}
-		policy := bundle.ResolvedPolicyForExecutableNode(node)
+		rules := bundle.ResolvedRulesForExecutableNode(node)
 		for eventType, handler := range record.Entry.EventHandlers {
 			for idx, rule := range handler.Rules {
 				if !policySheetRuleIsValidationValueRow(rule) {
 					continue
 				}
 				context := fmt.Sprintf("node %s handler %s rules[%d] validate row %s", node.Key(), strings.TrimSpace(eventType), idx, strings.TrimSpace(rule.ID))
-				errs = append(errs, validatePolicySheetValidationRow(context, rule, policy)...)
+				errs = append(errs, validatePolicySheetValidationRow(context, rule, rules)...)
 			}
 		}
 	}
@@ -162,7 +162,7 @@ func policySheetRuleIsValidationValueRow(rule HandlerRuleEntry) bool {
 	return rule.Compute != nil && rule.Compute.Operation == ComputeOpValidate
 }
 
-func validatePolicySheetValidationRow(context string, rule HandlerRuleEntry, policy PolicyDocument) []error {
+func validatePolicySheetValidationRow(context string, rule HandlerRuleEntry, rules RulesDocument) []error {
 	errs := []error{}
 	if rule.PolicyRow.Kind != PolicySheetRowKindValidate {
 		errs = append(errs, fmt.Errorf("%w: %s validate compute must originate from a policy-sheet validate row", ErrInvalidField, context))
@@ -181,11 +181,11 @@ func validatePolicySheetValidationRow(context string, rule HandlerRuleEntry, pol
 		errs = append(errs, fmt.Errorf("%w: %s validate.into %q must match compute.store_as %q", ErrInvalidField, context, target, computeTarget))
 	}
 	setName := strings.TrimSpace(spec.Set)
-	set, ok := policy.Validation[setName]
+	set, ok := rules.Validation(setName)
 	if setName == "" {
 		errs = append(errs, fmt.Errorf("%w: %s validate.set is required", ErrInvalidField, context))
 	} else if !ok {
-		errs = append(errs, fmt.Errorf("%w: %s validate.set %q does not resolve in flow policy.validation", ErrInvalidField, context, setName))
+		errs = append(errs, fmt.Errorf("%w: %s validate.set %q does not resolve in flow rules.yaml", ErrInvalidField, context, setName))
 	}
 	if !ok {
 		return errs

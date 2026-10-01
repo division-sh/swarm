@@ -1,0 +1,6 @@
+review-agent:
+  model: regular
+  intent: {inline: 'Compare the requested numbers and report left, right and cite for the comparison.'}
+  subscriptions: [work.requested]
+  emit_events: [review.reported]
+  criteria: [review]

@@ -244,6 +244,12 @@ func (s bundleSource) RequiredAgents() []runtimecontracts.FlowRequiredAgent {
 func (s bundleSource) FlowRequiredAgents(flowID string) []runtimecontracts.FlowRequiredAgent {
 	return s.bundle.FlowRequiredAgents(flowID)
 }
+func (s bundleSource) ResolvedRulesForFlow(flowID string) runtimecontracts.RulesDocument {
+	return s.bundle.ResolvedRulesForFlow(flowID)
+}
+func (s bundleSource) ResolvedRulesForExecutableNode(node runtimeidentity.ExecutableNode) runtimecontracts.RulesDocument {
+	return s.bundle.ResolvedRulesForExecutableNode(node)
+}
 func (s bundleSource) ResolvedPolicyForFlow(flowID string) runtimecontracts.PolicyDocument {
 	return s.bundle.ResolvedPolicyForFlow(flowID)
 }
