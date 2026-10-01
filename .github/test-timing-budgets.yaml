@@ -14,7 +14,7 @@ hard:
   unit_command_seconds:
     catalog-required-verify:
       limit_seconds: 360
-      justification: Provisional CLI-only baseline for the expanded compiled CLI workload measured at 359s in PR CI 36868835790 and 374s in master CI 36867590432; original 240s target remains tracked by issue 2394.
+      justification: 'Reviewed #2353 disposition 5939565179 retains all 90 serial compiled describe calls and exact hashes after hosted 274s/372s measurements; this unit-only target preserves the normal 30% buffer and sibling budgets. Master independently measured 359s/374s in CI 36868835790/36867590432; the original 240s performance target remains tracked by issue 2394.'
     conformance-2394-core:
       limit_seconds: 300
       justification: Exact core conformance command measured 241s against the prior 240s ceiling in CI 36515817055; all 64 entries passed without skips and sibling budgets remain unchanged.
