@@ -1,6 +1,65 @@
 # Pre-Implementation Coverage Audit: #2508
 
-## A14 Spec Contradiction / Implementation Stop
+## A14 Bounded Absorption Approved / Pre-Code Amendment
+
+Binding independent re-gate `issuecomment-5928433996` approves absorption in
+#2508. This section supersedes the historical stop below. Category is now
+high-risk semantic maintenance for A14, in addition to the separately governed
+behavior-preserving A/D/C extractions. No new issue/PR, owner, framework,
+compatibility path or vendoring. This permission is not merge approval.
+
+Chosen added working class: all four operational CLI read entrances fail to
+carry exact run authority required by the canonical API. Immediate parent:
+CLI/API exact operational identity authority; broader lifecycle/model debt stays
+in #2250. #2447/#2407 stay open for their other maintenance/proof families.
+The endpoint failures were entry points, not the class boundary. This complete
+four-entrance class is feasible in one bounded repair with existing owners.
+
+The semantic owner remains `resolveOperatorAgentIdentityParam` and the typed
+selected-store `ResolveOperatorAgentIdentity`; CLI input validation/forwarding
+only supplies explicit authority. Each entrance below moves to correct
+consumption of that existing owner, without changing API/store interpretation.
+Full means exact supplied opaque run ID, never prefix-resolved/latest/ambient.
+Agent prefix resolution remains declaration-backed presentation only; retries
+must retain the already supplied run and optional concrete flow instance.
+
+| Separate manifestation | Consumer / change | Exact planned proof |
+| --- | --- | --- |
+| A14-V agent view | `newAgentViewCommand` / `runAgentViewCommand` adds required explicit --run-id; validates before client construction and forwards run_id with agent_id/optional flow_instance. Old no-run producer is invalid. | Compiled real SQLite/Postgres text/JSON/quiet success; missing/blank/malformed scope exit2 and zero RPC/client-side token read; foreign run and ambiguous-target refusal; exact same-run prefix retry; refs-only output controls retained. |
+| A14-D agent diagnose | Existing params builder adds required explicit --run-id before API construction; queue validation/order and output/error taxonomy retained for valid scope. Old no-run diagnosis request is invalid. | Both-store compiled text/JSON/quiet success/refusal; local zero-RPC scope tests, queue bounds/cursor precedence, wrong-run/ambiguous refusal and same-run prefix retry; diagnosis privacy controls retained. |
+| A14-L agent deliveries | Existing --run-id becomes required exact operational authority, not optional history filter; retain status/limit/cursor/flow-instance behavior. Old unscoped request is invalid. | Both-store compiled success; missing/blank/malformed/wrong run, same-run prefix retry and ambiguous-target refusal; existing lifecycle output/pagination/cursor tests with explicit valid scope. |
+| A14-C conversation list --agent-id | Existing run option becomes conditionally required for agent_id (flow_instance already requires agent_id); retain unfiltered and run-only enumeration. Unscoped agent-filtered request is invalid. | Both-store filtered compiled text/JSON/quiet success; missing/invalid/wrong-run/ambiguous refusal; unfiltered/run-only positive controls and session-ID readers stay executable; exact option forwarding. |
+
+Exhaustive relevant siblings: effective `agent.frame` and mutating
+restart/replay/directive already consume explicit run selectors; their owner is
+unchanged. Conversation view/turn consume exact session/turn identity, a different
+concept with passing real compiled controls. `agent.list` is declared inventory
+(#1562), not operational run selection; no run filter is added. API usage/richer
+delivery reads already require exact authority and have no additional CLI
+entrance in this class. Repo-wide method call sweep found only the four producers
+above; no surviving same-concept producer is intentionally retained.
+
+Authoritative spec plan in this PR: update `cli_specification.commands`
+agent_view, agent_diagnose, agent_deliveries and conversations_list syntax,
+behavior and proof expectations; add view/diagnose run input rows to the existing
+identifier registry with `full_only`, annotate required/conditional authority;
+clarify `conversation.list`'s conditional run_id rule in OpenRPC description.
+API parameter requiredness and strict store resolver remain unchanged. Correct
+only directly contradictory existing CLI test scope expectations, the sole
+waiver to the prior existing-test immutability rule; preserve their prior valid
+output/error assertions. Test-edit inventory must be explicit at final review.
+
+Tracker decision: absorb all four rows into existing #2508; no prerequisite or
+new tracker. Watchlist: refine existing boundary/coverage mapping to approved
+absorption, retaining baseline counterexample and C11 evidence. Architecture
+feedback is explicit authority carriage through existing owners, not a new
+selection abstraction; no broader parent closure is claimed. Stop only if a
+new same-concept production consumer or API/store semantic change is needed.
+All original A01-A13/D01-D11/C01-C12/Q01-Q04 proofs, final ratchet/line cap,
+managed suite, exact-head CI and PR proof audit remain binding. A14 has four
+named child proof rows rather than one undifferentiated success claim.
+
+## Historical A14 Spec Contradiction / Implementation Stop
 
 The C11 correction below is approved and its required public proof now passes.
 The subsequent compiled A14 proof hit a different, explicit original-gate stop
