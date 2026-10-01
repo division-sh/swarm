@@ -353,34 +353,9 @@ func executionToolsForActor(source semanticview.Source, actor models.AgentConfig
 	for _, name := range []string{"bash", "web_search", "read_file", "write_file"} {
 		candidates[name] = struct{}{}
 	}
-	blocked := map[string]struct{}{}
-	if source != nil {
-		projection, projected := semanticview.ResolveAgentContractProjection(source, actor)
-		declarations := source.ToolEntries()
-		for name := range candidates {
-			entry, ok := declarations[name]
-			if projected {
-				entry, ok = projection.ToolEntry(name)
-			}
-			if !ok {
-				continue
-			}
-			if !entry.AgentExposable() {
-				delete(entries, name)
-				blocked[name] = struct{}{}
-				if _, granted := allowed[name]; granted {
-					return nil, fmt.Errorf("module tool %s cannot be granted to an agent", name)
-				}
-				continue
-			}
-			if !projected {
-				continue
-			}
-			execution, include := executionToolFromAdmitted(strings.TrimSpace(name), entry)
-			if err := mergeExecutionTool(entries, name, execution, include, executionToolOwnerScoped); err != nil {
-				return nil, err
-			}
-		}
+	blocked, err := mergeScopedActorTools(source, actor, entries, candidates, allowed)
+	if err != nil {
+		return nil, err
 	}
 	for _, name := range []string{"bash", "web_search", "read_file", "write_file"} {
 		if _, forbidden := blocked[name]; forbidden {
@@ -399,6 +374,40 @@ func executionToolsForActor(source semanticview.Source, actor models.AgentConfig
 	}
 	removeLegacyEntityToolSurface(entries)
 	return entries, nil
+}
+
+func mergeScopedActorTools(source semanticview.Source, actor models.AgentConfig, entries map[string]ExecutionTool, candidates, allowed map[string]struct{}) (map[string]struct{}, error) {
+	blocked := map[string]struct{}{}
+	if source == nil {
+		return blocked, nil
+	}
+	projection, projected := semanticview.ResolveAgentContractProjection(source, actor)
+	declarations := source.ToolEntries()
+	for name := range candidates {
+		entry, ok := declarations[name]
+		if projected {
+			entry, ok = projection.ToolEntry(name)
+		}
+		if !ok {
+			continue
+		}
+		if !entry.AgentExposable() {
+			delete(entries, name)
+			blocked[name] = struct{}{}
+			if _, granted := allowed[name]; granted {
+				return nil, fmt.Errorf("module tool %s cannot be granted to an agent", name)
+			}
+			continue
+		}
+		if !projected {
+			continue
+		}
+		execution, include := executionToolFromAdmitted(strings.TrimSpace(name), entry)
+		if err := mergeExecutionTool(entries, name, execution, include, executionToolOwnerScoped); err != nil {
+			return nil, err
+		}
+	}
+	return blocked, nil
 }
 
 func resolveExecutionToolForActor(source semanticview.Source, actor models.AgentConfig, toolName string, discovered map[string]runtimemcp.DiscoveredTool) (ExecutionTool, bool, error) {

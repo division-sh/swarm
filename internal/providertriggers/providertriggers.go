@@ -702,44 +702,11 @@ func parseManifestStrict(body []byte) (Manifest, error) {
 			}
 		}
 	}
-	schemas := []map[string]runtimecontracts.ToolInputSchema{}
+	var schemas []map[string]runtimecontracts.ToolInputSchema
 	if outputs.Presence != yamlsource.PresenceMissing {
-		if err := outputs.Value.ValidateExpansion(); err != nil {
-			return Manifest{}, err
-		}
-		items, err := outputs.Value.Sequence()
+		schemas, err = admitNormalizedEventSchemas(outputs.Value)
 		if err != nil {
 			return Manifest{}, err
-		}
-		for _, item := range items {
-			fields, err := item.Lookup("fields")
-			if err != nil {
-				return Manifest{}, err
-			}
-			members, err := fields.Value.Mapping()
-			if err != nil {
-				return Manifest{}, err
-			}
-			admitted := map[string]runtimecontracts.ToolInputSchema{}
-			for _, member := range members {
-				retired, err := member.Value.Lookup("type")
-				if err != nil {
-					return Manifest{}, err
-				}
-				if retired.Presence != yamlsource.PresenceMissing {
-					return Manifest{}, fmt.Errorf("RETIRED: normalized field type is unsupported; use schema at %s", retired.Value.Location())
-				}
-				child, err := member.Value.Lookup("schema")
-				if err != nil {
-					return Manifest{}, err
-				}
-				schema, err := runtimecontracts.AdmitToolInputSchemaValue(child.Value)
-				if err != nil {
-					return Manifest{}, err
-				}
-				admitted[member.Name] = schema
-			}
-			schemas = append(schemas, admitted)
 		}
 	}
 	var wire struct {
@@ -790,6 +757,55 @@ func parseManifestStrict(body []byte) (Manifest, error) {
 		manifest.NormalizedEvents = append(manifest.NormalizedEvents, entry)
 	}
 	return manifest, nil
+}
+
+func admitNormalizedEventSchemas(value yamlsource.Value) ([]map[string]runtimecontracts.ToolInputSchema, error) {
+	if err := value.ValidateExpansion(); err != nil {
+		return nil, err
+	}
+	items, err := value.Sequence()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]map[string]runtimecontracts.ToolInputSchema, len(items))
+	for i, item := range items {
+		out[i], err = admitNormalizedEventFieldSchemas(item)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func admitNormalizedEventFieldSchemas(item yamlsource.Value) (map[string]runtimecontracts.ToolInputSchema, error) {
+	fields, err := item.Lookup("fields")
+	if err != nil {
+		return nil, err
+	}
+	members, err := fields.Value.Mapping()
+	if err != nil {
+		return nil, err
+	}
+	admitted := map[string]runtimecontracts.ToolInputSchema{}
+	for _, member := range members {
+		retired, err := member.Value.Lookup("type")
+		if err != nil {
+			return nil, err
+		}
+		if retired.Presence != yamlsource.PresenceMissing {
+			return nil, fmt.Errorf("RETIRED: normalized field type is unsupported; use schema at %s", retired.Value.Location())
+		}
+		child, err := member.Value.Lookup("schema")
+		if err != nil {
+			return nil, err
+		}
+		schema, err := runtimecontracts.AdmitToolInputSchemaValue(child.Value)
+		if err != nil {
+			return nil, err
+		}
+		admitted[member.Name] = schema
+	}
+	return admitted, nil
 }
 
 func (m Manifest) Validate() error {

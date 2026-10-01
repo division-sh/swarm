@@ -118,6 +118,19 @@ func TestW5PlatformInterfaceAuthoredSchemaRetainsLexicalEvidence(t *testing.T) {
 			}
 		})
 	}
+	for _, authored := range []string{"null", "[]", "7", "{number: {type: number}, number: {type: string}}"} {
+		t.Run("invalid_schemas_"+authored, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "platform-spec.yaml")
+			body := "interfaces:\n  sample:\n    v1:\n      kind: channel\n      schemas: " + authored + "\n"
+			if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			var spec PlatformSpecDocument
+			if err := loadYAMLFile(path, &spec); err == nil {
+				t.Fatal("invalid schema-child mapping admitted")
+			}
+		})
+	}
 }
 
 func TestW5ToolSchemaNestedDiagnosticsAndAliasCoordinates(t *testing.T) {
