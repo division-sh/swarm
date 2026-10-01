@@ -37,39 +37,45 @@ type EquivalenceView struct {
 type RoutingTopologyView = routingtopology.Topology
 
 type RootView struct {
-	SourceFiles        RootSourceFiles    `json:"source_files"`
-	Events             []EventView        `json:"events,omitempty"`
-	Agents             []AgentView        `json:"agents,omitempty"`
-	RequiredAgents     RequiredAgentsView `json:"required_agents"`
-	PrimaryEntity      *PrimaryEntityView `json:"primary_entity,omitempty"`
-	PrimaryEntityError string             `json:"primary_entity_error,omitempty"`
+	Policy             map[string]any                 `json:"policy,omitempty"`
+	Rules              runtimecontracts.RulesDocument `json:"rules,omitempty"`
+	SourceFiles        RootSourceFiles                `json:"source_files"`
+	Events             []EventView                    `json:"events,omitempty"`
+	Agents             []AgentView                    `json:"agents,omitempty"`
+	RequiredAgents     RequiredAgentsView             `json:"required_agents"`
+	PrimaryEntity      *PrimaryEntityView             `json:"primary_entity,omitempty"`
+	PrimaryEntityError string                         `json:"primary_entity_error,omitempty"`
 }
 
 type RootSourceFiles struct {
+	Policy   string `json:"policy,omitempty"`
+	Rules    string `json:"rules,omitempty"`
 	Schema   string `json:"schema,omitempty"`
 	Entities string `json:"entities,omitempty"`
 	Agents   string `json:"agents,omitempty"`
 }
 
 type FlowView struct {
-	ID                   string                    `json:"id"`
-	Path                 string                    `json:"path,omitempty"`
-	Mode                 string                    `json:"mode,omitempty"`
-	Activation           string                    `json:"activation,omitempty"`
-	Ingress              *StandingIngressView      `json:"ingress,omitempty"`
-	SourceFiles          FlowSourceFiles           `json:"source_files"`
-	Events               []EventView               `json:"events,omitempty"`
-	Agents               []AgentView               `json:"agents,omitempty"`
-	RequiredAgents       RequiredAgentsView        `json:"required_agents"`
-	PrimaryEntity        *PrimaryEntityView        `json:"primary_entity,omitempty"`
-	PrimaryEntityError   string                    `json:"primary_entity_error,omitempty"`
-	TemplateInstance     *TemplateInstanceView     `json:"template_instance,omitempty"`
-	TemplateError        string                    `json:"template_instance_error,omitempty"`
-	SingletonCoordinator *SingletonCoordinatorView `json:"singleton_coordinator,omitempty"`
-	SingletonError       string                    `json:"singleton_coordinator_error,omitempty"`
-	InputPins            []InputPinView            `json:"input_pins,omitempty"`
-	OutputPins           []OutputPinView           `json:"output_pins,omitempty"`
-	ContainedOperations  []ContainedOperationView  `json:"contained_operations,omitempty"`
+	Policy               map[string]any                 `json:"policy,omitempty"`
+	Rules                runtimecontracts.RulesDocument `json:"rules,omitempty"`
+	ID                   string                         `json:"id"`
+	Path                 string                         `json:"path,omitempty"`
+	Mode                 string                         `json:"mode,omitempty"`
+	Activation           string                         `json:"activation,omitempty"`
+	Ingress              *StandingIngressView           `json:"ingress,omitempty"`
+	SourceFiles          FlowSourceFiles                `json:"source_files"`
+	Events               []EventView                    `json:"events,omitempty"`
+	Agents               []AgentView                    `json:"agents,omitempty"`
+	RequiredAgents       RequiredAgentsView             `json:"required_agents"`
+	PrimaryEntity        *PrimaryEntityView             `json:"primary_entity,omitempty"`
+	PrimaryEntityError   string                         `json:"primary_entity_error,omitempty"`
+	TemplateInstance     *TemplateInstanceView          `json:"template_instance,omitempty"`
+	TemplateError        string                         `json:"template_instance_error,omitempty"`
+	SingletonCoordinator *SingletonCoordinatorView      `json:"singleton_coordinator,omitempty"`
+	SingletonError       string                         `json:"singleton_coordinator_error,omitempty"`
+	InputPins            []InputPinView                 `json:"input_pins,omitempty"`
+	OutputPins           []OutputPinView                `json:"output_pins,omitempty"`
+	ContainedOperations  []ContainedOperationView       `json:"contained_operations,omitempty"`
 }
 
 type EventView struct {
@@ -93,6 +99,8 @@ type StandingIngressProviderView struct {
 }
 
 type FlowSourceFiles struct {
+	Policy   string `json:"policy,omitempty"`
+	Rules    string `json:"rules,omitempty"`
 	Schema   string `json:"schema,omitempty"`
 	Entities string `json:"entities,omitempty"`
 	Nodes    string `json:"nodes,omitempty"`
@@ -436,8 +444,12 @@ func buildRoot(source semanticview.Source, bundle *runtimecontracts.WorkflowCont
 		return RootView{}, err
 	}
 	out := RootView{
+		Policy: policyValues(source.ResolvedPolicyForFlow(".")),
+		Rules:  source.ResolvedRulesForFlow("."),
 		Events: eventViews(rootFlow.Events),
 		SourceFiles: RootSourceFiles{
+			Policy:   strings.TrimSpace(rootFlow.Paths.PolicyFile),
+			Rules:    strings.TrimSpace(rootFlow.Paths.RulesFile),
 			Schema:   strings.TrimSpace(rootFlow.Paths.SchemaFile),
 			Entities: strings.TrimSpace(rootFlow.Paths.EntitiesFile),
 			Agents:   strings.TrimSpace(rootFlow.Paths.AgentsFile),
@@ -478,6 +490,8 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 			return nil, err
 		}
 		item := FlowView{
+			Policy:      policyValues(source.ResolvedPolicyForFlow(flowID)),
+			Rules:       source.ResolvedRulesForFlow(flowID),
 			ID:          flowID,
 			Path:        flowID,
 			Mode:        strings.TrimSpace(schema.EffectiveMode()),
@@ -990,12 +1004,22 @@ func eventViews(entries map[string]runtimecontracts.EventCatalogEntry) []EventVi
 
 func flowSourceFiles(flow runtimecontracts.FlowContractView) FlowSourceFiles {
 	return FlowSourceFiles{
+		Policy:   strings.TrimSpace(flow.Paths.PolicyFile),
+		Rules:    strings.TrimSpace(flow.Paths.RulesFile),
 		Schema:   strings.TrimSpace(flow.Paths.SchemaFile),
 		Entities: strings.TrimSpace(flow.Paths.EntitiesFile),
 		Nodes:    strings.TrimSpace(flow.Paths.NodesFile),
 		Events:   strings.TrimSpace(flow.Paths.EventsFile),
 		Agents:   strings.TrimSpace(flow.Paths.AgentsFile),
 	}
+}
+
+func policyValues(policy runtimecontracts.PolicyDocument) map[string]any {
+	values := make(map[string]any, len(policy.Values))
+	for key, value := range policy.Values {
+		values[key] = value.Value
+	}
+	return values
 }
 
 func requiredAgentsView(schema runtimecontracts.FlowSchemaDocument, facts []runtimecontracts.RequiredAgentFact, schemaFile, agentsFile string) RequiredAgentsView {

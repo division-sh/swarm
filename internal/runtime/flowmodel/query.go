@@ -60,6 +60,22 @@ func cloneCriteriaParamValue(value any) any {
 			out[i] = cloneCriteriaParamValue(value)
 		}
 		return out
+	case map[any]any:
+		out := make(map[any]any, len(typed))
+		for key, value := range typed {
+			out[key] = cloneCriteriaParamValue(value)
+		}
+		return out
+	case map[string]string:
+		out := make(map[string]string, len(typed))
+		for key, value := range typed {
+			out[key] = value
+		}
+		return out
+	case []string:
+		out := make([]string, len(typed))
+		copy(out, typed)
+		return out
 	default:
 		return value
 	}

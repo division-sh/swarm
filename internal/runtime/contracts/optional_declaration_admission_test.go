@@ -58,6 +58,13 @@ func optionalDeclarationRoleTestCases() []optionalDeclarationRoleTestCase {
 			},
 		},
 		{
+			name: "rules", fileName: "rules.yaml", valid: r3AgentRules, merged: "<<: &declarations\n  review:\n    classes: {hard: {disposition: none}}\n    rules: [{id: R1, class: hard, text: Review}]\n", blank: "\"\": {}\n", collide: r3AgentRules + "\" review \": {}\n",
+			load: func(path string) (int, error) {
+				value, err := loadOptionalRulesDeclarations(path)
+				return len(value), err
+			},
+		},
+		{
 			name: "tools", fileName: "tools.yaml", valid: "lookup: {}\n", merged: "<<: &declarations\n  lookup: {}\n", blank: "\"\": {}\n", collide: "lookup: {}\n\" lookup \": {}\n",
 			load: func(path string) (int, error) {
 				value, err := loadOptionalToolDeclarations(path)

@@ -110,6 +110,58 @@ func TestR3RuleFieldPresenceMatrix(t *testing.T) {
 	}
 }
 
+func TestR3RuleNestedFieldPresenceMatrix(t *testing.T) {
+	states := []string{"missing", "null", "''", "scalar", "[]", "[value]", "{}", "mapping"}
+	for _, field := range []struct {
+		name, base, needle, scalar, mapping string
+		build                               func(string) string
+		admit                               string
+	}{
+		{"set", r3AgentRules, r3AgentRules, "review: wrong", "review: {classes: {hard: {disposition: none}}, rules: [{id: R1, class: hard, text: Review}]}", func(v string) string { return "review: " + v + "\n" }, "mapping"},
+		{"class entry", r3AgentRules, "{hard: {disposition: none}}", "hard", "{disposition: none}", func(v string) string { return "{hard: " + v + "}" }, "mapping"},
+		{"rule entry", r3AgentRules, "    - id: R1\n      class: hard\n      text: Review the input\n", "R1", "{id: R1, class: hard, text: Review}", func(v string) string { return "    - " + v + "\n" }, "mapping"},
+		{"input type", r3MachineRules, "left: string", "string", "{type: string}", func(v string) string { return "left: " + v }, "scalar"},
+		{"equal", r3MachineRules, "equal: {left: input.left, right: input.right}", "equal", "{left: input.left, right: input.right}", func(v string) string { return "equal: " + v }, "mapping"},
+		{"left operand", r3MachineRules, "left: input.left", "input.left", "{source: input.left}", func(v string) string { return "left: " + v }, "scalar"},
+		{"right operand", r3MachineRules, "right: input.right", "input.right", "{source: input.right}", func(v string) string { return "right: " + v }, "scalar"},
+		{"param scalar", r3AgentRules + "      params: {limit: 3}\n", "limit: 3", "false", "{value: 3}", func(v string) string { return "limit: " + v }, "missing,scalar,''"},
+	} {
+		for _, state := range states {
+			t.Run(field.name+"/"+state, func(t *testing.T) {
+				v := state
+				if state == "scalar" {
+					v = field.scalar
+				}
+				if state == "mapping" {
+					v = field.mapping
+				}
+				replacement := field.build(v)
+				if state == "missing" {
+					replacement = ""
+					if field.name == "class entry" {
+						replacement = "{}"
+					}
+					if field.name == "rule entry" {
+						replacement = "    - {}\n"
+					}
+				}
+				body := strings.Replace(field.base, field.needle, replacement, 1)
+				if field.name == "set" && state != "mapping" {
+					body = "review: " + v + "\n"
+				}
+				if field.name == "set" && state == "mapping" {
+					body = field.mapping + "\n"
+				}
+				_, err := admitR3Rules(t, body)
+				want := strings.Contains(","+field.admit+",", ","+state+",")
+				if (err == nil) != want {
+					t.Fatalf("admit=%t want=%t: %v\n%s", err == nil, want, err, body)
+				}
+			})
+		}
+	}
+}
+
 func TestR3RuleClosedVariantsAndFiniteParams(t *testing.T) {
 	for _, body := range []string{
 		strings.Replace(r3AgentRules, "review:\n", "review:\n  unknown: null\n", 1),
@@ -121,6 +173,11 @@ func TestR3RuleClosedVariantsAndFiniteParams(t *testing.T) {
 		strings.Replace(r3MachineRules, "      pin_candidate: false\n", "", 1),
 		strings.Replace(r3MachineRules, "left: input.left", "left: ''", 1),
 		strings.Replace(r3MachineRules, "{equal: {left: input.left, right: input.right}}", "{unknown: {}}", 1),
+		strings.Replace(r3MachineRules, "review:\n", "review:\n  schema: {}\n", 1),
+		strings.Replace(r3MachineRules, "disposition: none", "disposition: none, retry: never", 1),
+		strings.Replace(r3MachineRules, "      text: Compare the input\n", "      text: Compare the input\n      emit: forbidden\n", 1),
+		strings.Replace(r3MachineRules, "{equal: {left: input.left, right: input.right}}", "{equal: {left: input.left, right: input.right}, regex: {}}", 1),
+		strings.Replace(r3MachineRules, "right: input.right", "right: input.right, normalize: true", 1),
 	} {
 		if _, err := admitR3Rules(t, body); err == nil {
 			t.Fatalf("malformed variant admitted:\n%s", body)
@@ -135,6 +192,21 @@ func TestR3RuleClosedVariantsAndFiniteParams(t *testing.T) {
 		if _, err := admitR3Rules(t, r3AgentRules+"      params: {p: "+value+"}\n"); err != nil {
 			t.Fatalf("inert param rejected %s: %v", value, err)
 		}
+	}
+}
+
+func TestR3PolicyReservedLookingLiteralAndSiblingAnchor(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "policy.yaml")
+	writeFixtureFile(t, path, "base: &base {value: 7, description: business, override: false}\nlimit: {<<: *base}\ncriteria: {review: user}\nvalidation: false\nmodules: [ordinary, data]\n")
+	policy, err := loadOptionalPolicyDeclarations(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(policy.Values["base"].Value, policy.Values["limit"].Value) {
+		t.Fatal("sibling anchor changed literal object")
+	}
+	if policy.Values["limit"].Value.(map[string]any)["value"] != 7 || policy.Values["criteria"].Value.(map[string]any)["review"] != "user" || policy.Values["validation"].Value != false || len(policy.Values["modules"].Value.([]any)) != 2 {
+		t.Fatal("reserved vocabulary interpreted as authority")
 	}
 }
 

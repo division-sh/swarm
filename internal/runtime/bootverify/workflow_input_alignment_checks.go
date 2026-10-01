@@ -10,6 +10,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
@@ -61,6 +62,19 @@ func (c *checkerContext) conditionPolicyAlignment() []Finding {
 		}
 		policy := c.source.ResolvedPolicyForExecutableNode(node)
 		for event, handler := range c.source.ExecutableNodeEventHandlers(node) {
+			if handler.Guard != nil && strings.TrimSpace(handler.Guard.PolicyRef) != "" {
+				for _, guard := range handler.Guard.EffectiveChecks() {
+					if guard.EffectiveIdentity() == "state_in_phase" {
+						if _, ok := semanticview.PolicyValueForFlow(c.source, node.FlowPath(), handler.Guard.PolicyRef); !ok {
+							c.conditionPolicyFindings = append(c.conditionPolicyFindings, Finding{
+								CheckID: "condition_policy_alignment", Severity: SeverityHardInvalidity,
+								Message: "state_in_phase guard references undeclared policy selector " + handler.Guard.PolicyRef, Location: node.Key(),
+								Remediation: "Declare the selected policy value in this flow or an ancestor, or correct guard.policy_ref.",
+							})
+						}
+					}
+				}
+			}
 			payload, _ := executablePayloadStructuralType(c.source, node, event)
 			entity, _ := semanticview.ResolveEntityStructuralType(c.source, node.FlowPath())
 			for _, reader := range c.entityAssignmentReaders(node, event, handler) {
@@ -72,6 +86,18 @@ func (c *checkerContext) conditionPolicyAlignment() []Finding {
 					options.ItemType, _ = executableCollectionItemStructuralType(c.source, node, event, handler, from)
 				}
 				check(reader.Expression, node.Key()+" handler "+event+" "+reader.Kind, policy, options, &reader)
+			}
+		}
+	}
+	for _, timer := range c.source.WorkflowTimers() {
+		policy := c.source.ResolvedPolicyForFlow(timer.OwningFlowID())
+		for _, key := range pipeline.WorkflowTimerPolicyReferences(timer.Delay) {
+			if _, ok := policy.Values[key]; !ok {
+				c.conditionPolicyFindings = append(c.conditionPolicyFindings, Finding{
+					CheckID: "condition_policy_alignment", Severity: SeverityHardInvalidity,
+					Message: "timer " + timer.ID + " references undeclared exact policy key " + fmt.Sprintf("%q", key), Location: timer.ID,
+					Remediation: "Declare the exact duration policy key in the timer's flow or an ancestor, or correct the existing timer placeholder.",
+				})
 			}
 		}
 	}

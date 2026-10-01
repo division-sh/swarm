@@ -1,0 +1,5 @@
+trigger:
+  event: work.requested
+  payload: {left: 1, right: 1}
+expected:
+  handler_outcome: success
