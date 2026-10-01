@@ -253,20 +253,28 @@ func resolveActionFactTx(ctx context.Context, tx interface {
 		resolved.ActivationID == "" || resolved.BindingRevision < 1 || resolved.ActivationRevision < 1 {
 		return render.ResolvedAction{}, false, fmt.Errorf("stored channel action identity is contradictory")
 	}
-	var receipt map[string]any
-	if err := json.Unmarshal(referenceRaw, &receipt); err != nil {
-		return render.ResolvedAction{}, false, fmt.Errorf("decode exact channel receipt: %w", err)
-	}
-	value, ok := receipt["delivery_reference"]
-	if !ok {
-		return render.ResolvedAction{}, false, errors.New("channel receipt lacks delivery reference")
-	}
-	messageRef, valid, err := operatorchannel.OpaqueReference(value)
-	if err != nil || !valid {
-		return render.ResolvedAction{}, false, fmt.Errorf("channel receipt has invalid delivery reference: %w", err)
+	messageRef, err := receiptMessageReference(referenceRaw)
+	if err != nil {
+		return render.ResolvedAction{}, false, err
 	}
 	if messageRef != fact.MessageReference {
 		return render.ResolvedAction{}, false, nil
 	}
 	return resolved, true, nil
+}
+
+func receiptMessageReference(raw []byte) (string, error) {
+	var receipt map[string]any
+	if err := json.Unmarshal(raw, &receipt); err != nil {
+		return "", fmt.Errorf("decode exact channel receipt: %w", err)
+	}
+	value, ok := receipt["delivery_reference"]
+	if !ok {
+		return "", errors.New("channel receipt lacks delivery reference")
+	}
+	messageRef, valid, err := operatorchannel.OpaqueReference(value)
+	if err != nil || !valid {
+		return "", fmt.Errorf("channel receipt has invalid delivery reference: %w", err)
+	}
+	return messageRef, nil
 }

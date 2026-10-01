@@ -645,6 +645,9 @@ func TestChannelDeliveryCardActionAdmissionSelectedStoreParity(t *testing.T) {
 			if err := require(fact, demand); err == nil || !strings.Contains(err.Error(), "not current card authority") {
 				t.Fatalf("predecessor render admission = %v", err)
 			}
+			t.Run("unsupported_chooser_retirement", func(t *testing.T) {
+				proveUnsupportedChooserRetirement(t, cards, selected, runTx, authority, card, text, now, postgres)
+			})
 		})
 	}
 }

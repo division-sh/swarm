@@ -150,6 +150,7 @@ type Store interface {
 	ResolveChannelActionFact(context.Context, operatorchannel.ActionFact) (ResolvedAction, bool, error)
 	ListPendingChannelActions(context.Context, string, int) ([]PendingAction, error)
 	SettleUnappliedChannelAction(context.Context, operatorchannel.InboundAction, ActionDisposition) error
+	SettleUnsupportedChannelText(context.Context, operatorchannel.InboundText) error
 	ListPendingChannelTexts(context.Context, string, int) ([]PendingText, error)
 	ResolveCurrentChannelText(context.Context, operatorchannel.InboundText) (ResolvedText, bool, error)
 	ListCurrentChannelInputDrafts(context.Context, operatorchannel.InboundText, time.Time, string, int) ([]InputDraftCandidate, string, error)

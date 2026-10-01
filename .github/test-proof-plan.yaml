@@ -699,7 +699,7 @@ units:
   serveapp-channel-delivery:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    run: '^TestChannel(Action.*|Delivery.*|Notice.*|Source.*)$'
+    run: '^TestChannel(Action.*|Delivery.*|Notice.*|SelectedFork.*|Source.*)$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full

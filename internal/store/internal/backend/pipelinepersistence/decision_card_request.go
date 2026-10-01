@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
 	storechanneldelivery "github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	storedecision "github.com/division-sh/swarm/internal/store/internal/backend/decisionpersistence"
@@ -61,6 +62,9 @@ func admitDecisionCardRequest(ctx context.Context, owner decisionCardRequestSour
 }
 
 func requireChannelCardMutationTx(ctx context.Context, tx *sql.Tx, req apiidempotency.Request, mutation pipeline.DecisionCardMutation, postgres, lock bool) error {
+	if err := storedecision.RequireNormalCardControlTx(ctx, tx, req.ResourceID, runfork.SelectedControl(req.Method), postgres); err != nil {
+		return err
+	}
 	if err := requireChannelCardActionTx(ctx, tx, req, mutation, postgres, lock); err != nil {
 		return err
 	}

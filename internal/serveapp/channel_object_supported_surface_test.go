@@ -742,16 +742,16 @@ func writeObjectChannelPacks(t *testing.T, configPath, root string) string {
 			envelope.Requires.Packs = map[string]string{"trigger": "provider.telegram", "connector": "provider.telegram.connector"}
 		}
 		if kind == packmodel.TypeTrigger {
-			var manifest providertriggers.Manifest
-			if err := yaml.Unmarshal(body, &manifest); err != nil {
+			manifest, err := providertriggers.ParseManifest(body)
+			if err != nil {
 				t.Fatal(err)
 			}
 			envelope.Capabilities = providertriggers.DerivedCapabilities(manifest)
 			envelope.Requires = providertriggers.DerivedRequires(manifest)
 		}
 		if kind == packmodel.TypeConnector {
-			var connector providerconnectors.ConnectorManifest
-			if err := yaml.Unmarshal(body, &connector); err != nil {
+			connector, err := providerconnectors.ParseConnectorManifest(body)
+			if err != nil {
 				t.Fatal(err)
 			}
 			envelope.Capabilities = providerconnectors.DerivedCapabilities(connector)

@@ -15225,6 +15225,14 @@ platform_tables:
         setting. Sequential handoff preserves generation/effect evidence; contradictory
         simultaneous current authority is invalid. Stale predecessor retirement cannot fence
         the successor. Last-current retirement fences local entry without a provider delete.
+        activation_id is an immutable historical coordinate, not a foreign key to a live
+        activation row. Consumer creation and every usable current read still require the
+        exact current activation, binding and context. Destructive reset preserves that
+        coordinate and all historical setting/install evidence while atomically retiring
+        consumers whose executable activations are removed. A healthy last-consumer setting
+        becomes locally retired; an unresolved launched install remains uncertain, never
+        acknowledged or replayed by reset. Dry-run does not retire, and failed cleanup
+        rolls back both deletion and retirement.
         Client qualification is independent of acknowledged installation. It pins the explicitly
         declared language/revision, compiled profile, physical setting generation and exact
         activation/context. Missing, invalid or stale qualification withholds native usability.
@@ -15238,7 +15246,7 @@ platform_tables:
       ddl: |
         CREATE TABLE channel_native_setting_consumers (
             setting_id UUID NOT NULL REFERENCES channel_native_settings(setting_id),
-            activation_id UUID NOT NULL REFERENCES connected_channel_activations(activation_id),
+            activation_id UUID NOT NULL,
             activation_revision BIGINT NOT NULL CHECK (activation_revision > 0),
             interface_key TEXT NOT NULL REFERENCES operator_channel_bindings(interface_key),
             binding_revision BIGINT NOT NULL CHECK (binding_revision > 0),
@@ -15698,6 +15706,15 @@ platform_tables:
         response, principal mutation or later revival. Temporary owner, publication or
         provider readback unavailability remains pending for retry. Delivery reconciliation
         continues across other valid intents; rejection grants no private-response authority.
+        Selected-fork card input is a deferred execution control, not business ingress:
+        an exact refused verified occurrence settles once as unsupported without draft,
+        verdict, event or response mutation. A refused chooser selection atomically settles
+        its exact retained answer as unsupported too; it cannot consume unrelated text or
+        report that answer applied. Duplicate publication, reconciliation and restart retain
+        the terminal refusal and cannot revive executable authority.
+        Terminal refusal pairs use the immutable frozen chooser and exact historical sent
+        reference if activation or draft authority retires after refusal; this evidence
+        never authorizes a business mutation, response, or provider write.
       ddl: |
         CREATE TABLE operator_channel_text_intents (
             publication_id UUID PRIMARY KEY,
@@ -29578,6 +29595,16 @@ api_specification:
         notification state.'
       input_draft_admission: 'Any verdict with a declared input field, including an optional-only field set, may start a durable
         principal-owned input draft. A verdict with no declared input fields cannot start a draft.'
+      selected_fork_control_admission: >
+        Decide, defer, begin_input and cancel_input, and all partial or final ordered-field
+        text, chosen-answer and skip writes, consume the same exact durable selected-fork
+        classification before mutation at their shared selected-store owners. These controls
+        remain unsupported for selected forks; ordinary bundle execution or channel principal
+        authority cannot bypass that restriction. API admission may refuse earlier but is not
+        the mutation authority. Classification read failure or missing owner fails closed.
+        Readback, navigation, delivery and notice acknowledgment are distinct concepts and
+        remain admitted by their existing owners. Callback acknowledgment may settle
+        independently; it is never a successful business decision.
       decision_input_types: >
         Stage-gate verdict inputs use one closed scalar vocabulary: text,
         integer, numeric, boolean, timestamp, and uuid. Gate authoring rejects
@@ -34949,6 +34976,7 @@ api_specification:
             description: Canonical standing-control guidance when suspension or orphaning owns the paused generation; generic run.continue cannot clear that authority.
       SELECTED_FORK_CONTROL_UNSUPPORTED:
         type: object
+        description: Exact selected-run refusal shared by transport admission and canonical card/input mutation owners; channel authority cannot substitute ordinary execution.
         additionalProperties: false
         required: [operation, run_id, binding_id, required_capability]
         properties:
@@ -36587,6 +36615,8 @@ api_specification:
         preserves anchor-before-card lock ordering and CAS; API projection must not
         infer refusal from diagnostic strings or an unfenced reread. Cancel-input
         and notice acknowledgment retain their separate draft/notice authority.
+        Canonical card/input mutation also consumes the shared selected-fork control
+        admission before mutation; an earlier API check is not its sole enforcement.
       scope:
         required:
         - decide:mailbox
@@ -36642,6 +36672,8 @@ api_specification:
         use the decision-card UTC-microsecond timestamp contract.
         Principal-scoped replay completion, card change and deferral publication
         commit together before outcome dispatch.
+        The canonical deferral transaction consumes shared selected-fork control
+        admission independently of the calling transport.
       scope:
         required:
         - decide:mailbox
@@ -36676,6 +36708,8 @@ api_specification:
         Start a durable operator-principal/card/verdict-scoped input draft.
         Replacement, draft change cursor and principal-scoped completion commit
         together. This operation never creates a verdict or publication.
+        Shared selected-fork control admission runs before draft creation; channel
+        text, chooser and skip progress cannot bypass it at later mutation owners.
       scope: {required: ['decide:mailbox']}
       idempotency: per the convention.
       params:
@@ -36693,6 +36727,8 @@ api_specification:
         Foreign, stale, expired, replaced, or consumed drafts fail closed on
         fresh execution. Cancellation, its change cursor and exact completion
         commit together; matching replay does not re-plan the cancelled draft.
+        The canonical cancellation owner consumes shared selected-fork control
+        admission for the exact draft run before writing cancellation.
       scope: {required: ['decide:mailbox']}
       idempotency: per the convention.
       params:
@@ -37962,6 +37998,8 @@ api_specification:
         Public destructive runtime reset wrapper. The API layer owns only the v1 request/response/auth/idempotency contract and MUST consume the destructive-reset owner chain for execution: plan/result/lock, active-run and delivery quiescence, run-scoped cleanup/preservation, and managed workspace-container selection/stop. It MUST NOT directly truncate tables, call raw Docker stop/list helpers, call AgentManager.ResetRuntimeStateWithSource, or migrate dashboard/Builder/CLI reset seams in this method implementation.
 
         `dry_run=true` returns the same top-level shape with side-effect-free previews from each owner. Apply mode sequences durable operation admission/replay -> complete-context admission withdrawal and join -> persisted plan -> persisted-work quiescence -> cleanup -> managed-container settlement -> context convergence. Managed-container stop failures are represented as `status=partial_failure`, `ok=false`, and explicit `errors`; they must not masquerade as complete success. `include_source_artifacts` defaults true and is the only runtime.nuke control for whether server-wide admitted source artifacts are deleted with the cleanup owner. True atomically commits empty source topology with cleanup and leaves contexts unavailable, including on partial container failure. False preserves the identical admitted artifact set and source topology, temporarily withdraws execution for cleanup, then reconstructs fresh runtime generations and workspace projections before republishing the complete set. It must not leave successfully reconstructed retained contexts terminally unloaded. No original source directory is reread and no changed source is admitted. Public final-response idempotency follows the v1 API convention; it is only a response cache, not authority to repeat domain cleanup or to skip process-local reconstruction after a crash.
+
+        Both source modes preserve historical channel bindings, native install/consumer coordinates, managed effects, delivery plans/renders/receipts/actions and verified claim/action/text evidence while withdrawing executable activation and run authority. Cleanup atomically retires absent native consumers through the existing native retirement owner; historical activation coordinates do not require live activation rows. Healthy acknowledged settings become locally retired; unresolved launched installs remain uncertain without provider deletion, acknowledgment or replay. Dry-run does not retire, failed cleanup rolls back deletion and retirement together, and restart/reconnect cannot borrow historical executable authority.
       scope:
         required:
         - control:runtime

@@ -15,6 +15,18 @@ func CopyChannelLearnedObjectIntegerInputJourney(t testing.TB) string {
 	return copyChannelLearnedObjectInputJourney(t, "integer")
 }
 
+func CopyChannelLearnedObjectOptionalInputJourney(t testing.TB, partial bool) string {
+	t.Helper()
+	root := CopyChannelLearnedObjectJourney(t)
+	input := "input: {reason: {type: text, required: false}}"
+	if partial {
+		input = "input:\n            reason: {type: text, required: false}\n            later: {type: text, required: true}"
+	}
+	applyClosedReplacement(t, filepath.Join(root, "reviews/schema.yaml"),
+		"input: {reason: {type: text, required: true}}", input)
+	return root
+}
+
 // CopyChannelLearnedObjectAnchorJourney retains the real gate, ask_human and
 // approved connector producers, using the independently declared mock protocol.
 func CopyChannelLearnedObjectAnchorJourney(t testing.TB) string {
@@ -82,7 +94,6 @@ pins:
       advances_to: review
 `)
 	writeClosedVariantFile(t, root, "ingress/schema.yaml", `name: ingress
-mode: singleton
 activation: standing
 stages:
   active: {initial: true, gate: {decision: retire_service, outcomes: {retire: {advances_to: done}}}}

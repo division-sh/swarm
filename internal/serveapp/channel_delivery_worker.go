@@ -12,6 +12,7 @@ import (
 	runtimechanneldelivery "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
 func (d *serveChannelDeliveryDispatcher) planOpenChannelCards(ctx context.Context) error {
@@ -192,7 +193,12 @@ func (d *serveChannelDeliveryDispatcher) processPendingChannelAction(ctx context
 		return d.store.SettleUnappliedChannelAction(ctx, intent.Fact, runtimechanneldelivery.ActionRejected)
 	}
 	ackErr := d.acknowledgeChannelAction(ctx, intent, resolved)
-	return errors.Join(ackErr, d.processResolvedChannelAction(ctx, intent, resolved))
+	actionErr := d.processResolvedChannelAction(ctx, intent, resolved)
+	var unsupported *runfork.SelectedForkControlUnsupported
+	if errors.As(actionErr, &unsupported) {
+		actionErr = d.store.SettleUnappliedChannelAction(ctx, intent.Fact, runtimechanneldelivery.ActionUnsupported)
+	}
+	return errors.Join(ackErr, actionErr)
 }
 
 func (d *serveChannelDeliveryDispatcher) processResolvedChannelAction(ctx context.Context, intent runtimechanneldelivery.PendingAction, resolved runtimechanneldelivery.ResolvedAction) error {
@@ -315,7 +321,12 @@ func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxEntries(ctx context
 
 func (d *serveChannelDeliveryDispatcher) processPendingChannelText(ctx context.Context, intent runtimechanneldelivery.PendingText) error {
 	if intent.Fact.EntryReference == "" {
-		return d.processPendingInputText(ctx, intent)
+		err := d.processPendingInputText(ctx, intent)
+		var unsupported *runfork.SelectedForkControlUnsupported
+		if errors.As(err, &unsupported) {
+			return d.store.SettleUnsupportedChannelText(ctx, intent.Fact)
+		}
+		return err
 	}
 	entry, disposition, err := d.resolveNativeInboxEntry(ctx, intent.Fact)
 	if err != nil {
