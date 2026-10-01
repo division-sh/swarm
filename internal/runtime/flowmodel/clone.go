@@ -10,12 +10,8 @@ func ApplyPolicyOverrides(doc *PolicyDocument, overrides map[string]any) {
 		doc.Values = map[string]PolicyValue{}
 	}
 	for key, value := range overrides {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
 		item := doc.Values[key]
-		item.Value = value
+		item.Value = cloneCriteriaParamValue(value)
 		doc.Values[key] = item
 	}
 }
@@ -44,6 +40,7 @@ func cloneViewTree[P, S, N, E, A, T any](
 	cloned.Agents = cloneMap(view.Agents)
 	cloned.Tools = cloneMap(view.Tools)
 	cloned.Policy = ClonePolicyDocument(view.Policy)
+	cloned.Rules = CloneRulesDocument(view.Rules)
 	cloned.NodeURIs = cloneMap(view.NodeURIs)
 	cloned.AgentURIs = cloneMap(view.AgentURIs)
 	cloned.EventURIs = cloneMap(view.EventURIs)

@@ -3,31 +3,9 @@ package flowmodel
 import "strings"
 
 func ClonePolicyDocument(in PolicyDocument) PolicyDocument {
-	out := PolicyDocument{
-		Values:     map[string]PolicyValue{},
-		Criteria:   map[string]PolicyCriteriaSet{},
-		Validation: map[string]PolicyValidationSet{},
-	}
+	out := PolicyDocument{Values: make(map[string]PolicyValue, len(in.Values))}
 	for key, value := range in.Values {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		out.Values[key] = value
-	}
-	for key, value := range in.Criteria {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		out.Criteria[key] = clonePolicyCriteriaSet(value)
-	}
-	for key, value := range in.Validation {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		out.Validation[key] = clonePolicyValidationSet(value)
+		out.Values[key] = PolicyValue{Value: cloneCriteriaParamValue(value.Value)}
 	}
 	return out
 }

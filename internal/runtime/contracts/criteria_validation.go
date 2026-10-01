@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 )
@@ -24,10 +25,15 @@ func validateFlowPolicyCriteriaSets(bundle *WorkflowContractBundle) []error {
 		view := value
 		flowID := strings.TrimSpace(view.Paths.FlowPath)
 		policy := bundle.ResolvedPolicyForFlow(flowID)
-		setNames := sortedCriteriaSetNames(view.Policy.Criteria)
+		for name, set := range view.Rules {
+			if (set.Criteria == nil) == (set.Validation == nil) {
+				errs = append(errs, fmt.Errorf("%w: flow %s rules.%s requires exactly one rule variant", ErrInvalidField, flowID, name))
+			}
+		}
+		setNames := sortedCriteriaSetNames(view.Rules.CriteriaSets())
 		for _, setName := range setNames {
-			set := view.Policy.Criteria[setName]
-			errs = append(errs, validateCriteriaSet("flow "+flowID+" policy.criteria."+setName, set, policy)...)
+			set, _ := view.Rules.Criteria(setName)
+			errs = append(errs, validateCriteriaSet("flow "+flowID+" rules."+setName, set, policy)...)
 		}
 	}
 	return errs
@@ -104,6 +110,9 @@ func validateCriteriaParam(context string, value any, policy PolicyDocument) err
 		}
 		return nil
 	case bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		if !criteriaParamScalar(typed) {
+			return fmt.Errorf("%w: %s must be finite", ErrInvalidField, context)
+		}
 		return nil
 	default:
 		return fmt.Errorf("%w: %s must be a typed scalar or policy scalar reference, got %T", ErrInvalidField, context, value)
@@ -111,10 +120,14 @@ func validateCriteriaParam(context string, value any, policy PolicyDocument) err
 }
 
 func criteriaParamScalar(value any) bool {
-	switch value.(type) {
+	switch typed := value.(type) {
 	case nil:
 		return false
-	case string, bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+	case float32:
+		return !math.IsNaN(float64(typed)) && !math.IsInf(float64(typed), 0)
+	case float64:
+		return !math.IsNaN(typed) && !math.IsInf(typed, 0)
+	case string, bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
 		return true
 	default:
 		return false
@@ -139,7 +152,7 @@ func validateAgentCriteriaReferences(bundle *WorkflowContractBundle) []error {
 			errs = append(errs, fmt.Errorf("%w: agent %s criteria refs require a flow-scoped agent", ErrInvalidField, scopedKey))
 			continue
 		}
-		policy := bundle.ResolvedPolicyForFlow(flowID)
+		rules := bundle.ResolvedRulesForFlow(flowID)
 		seen := map[string]struct{}{}
 		for _, ref := range agent.Criteria {
 			ref = strings.TrimSpace(ref)
@@ -154,8 +167,8 @@ func validateAgentCriteriaReferences(bundle *WorkflowContractBundle) []error {
 				errs = append(errs, fmt.Errorf("%w: agent %s criteria ref %q is duplicated", ErrInvalidField, scopedKey, ref))
 			}
 			seen[ref] = struct{}{}
-			if _, ok := policy.Criteria[ref]; !ok {
-				errs = append(errs, fmt.Errorf("%w: agent %s criteria ref %q does not resolve in flow %s policy.criteria", ErrInvalidField, scopedKey, ref, flowID))
+			if _, ok := rules.Criteria(ref); !ok {
+				errs = append(errs, fmt.Errorf("%w: agent %s criteria ref %q does not resolve in flow %s rules.yaml", ErrInvalidField, scopedKey, ref, flowID))
 			}
 		}
 	}
@@ -197,10 +210,10 @@ func validateEventCriteriaCitationFields(bundle *WorkflowContractBundle) []error
 				errs = append(errs, fmt.Errorf("%w: %s requires a flow-scoped event", ErrInvalidField, fieldContext))
 				continue
 			}
-			policy := bundle.ResolvedPolicyForFlow(flowID)
-			set, ok := policy.Criteria[criteriaName]
+			rules := bundle.ResolvedRulesForFlow(flowID)
+			set, ok := rules.Criteria(criteriaName)
 			if !ok {
-				errs = append(errs, fmt.Errorf("%w: %s criteria set %q does not resolve in flow %s policy.criteria", ErrInvalidField, fieldContext, criteriaName, flowID))
+				errs = append(errs, fmt.Errorf("%w: %s criteria set %q does not resolve in flow %s rules.yaml", ErrInvalidField, fieldContext, criteriaName, flowID))
 				continue
 			}
 			errs = append(errs, validateCriteriaCitationAllowedClasses(fieldContext, field.Citation, set)...)
@@ -227,7 +240,7 @@ func validateAgentCriteriaCitationConsumption(bundle *WorkflowContractBundle) []
 			continue
 		}
 		declared := stringSet(agent.Criteria)
-		policy := bundle.ResolvedPolicyForFlow(flowID)
+		rules := bundle.ResolvedRulesForFlow(flowID)
 		for _, eventType := range agent.EmitEvents {
 			eventType = strings.TrimSpace(eventType)
 			if eventType == "" {
@@ -246,7 +259,7 @@ func validateAgentCriteriaCitationConsumption(bundle *WorkflowContractBundle) []
 					errs = append(errs, fmt.Errorf("%w: %s references criteria set %q but the agent does not declare it", ErrInvalidField, context, setName))
 					continue
 				}
-				set, ok := policy.Criteria[setName]
+				set, ok := rules.Criteria(setName)
 				if !ok {
 					errs = append(errs, fmt.Errorf("%w: %s criteria set %q does not resolve in flow %s", ErrInvalidField, context, setName, flowID))
 					continue

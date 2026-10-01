@@ -41,6 +41,7 @@ func WithInstanceDeclarations(t testing.TB, base *runtimecontracts.WorkflowContr
 	admitted.Events = base.Events
 	admitted.Tools = base.Tools
 	admitted.Policy = base.Policy
+	admitted.Rules = base.Rules
 	admitted.RootTypes = base.RootTypes
 	admitted.RootEntities = base.RootEntities
 	admitted.URIRegistry = base.URIRegistry
@@ -97,8 +98,11 @@ func WrapRootAgents(bundle *runtimecontracts.WorkflowContractBundle) semanticvie
 	if root.Tools == nil {
 		root.Tools = bundle.Tools
 	}
-	if len(root.Policy.Values) == 0 && len(root.Policy.Criteria) == 0 && len(root.Policy.Validation) == 0 {
+	if len(root.Policy.Values) == 0 {
 		root.Policy = bundle.Policy
+	}
+	if len(root.Rules) == 0 {
+		root.Rules = bundle.Rules
 	}
 	if bundle.RootSchema != nil {
 		root.Schema = *bundle.RootSchema

@@ -2927,30 +2927,27 @@ func TestDecodeComputeModuleOutputRejectsTrailingJSON(t *testing.T) {
 
 func TestExecutor_PolicySheetValidateRowFeedsSelectionRow(t *testing.T) {
 	pinCandidate := true
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Policy: runtimecontracts.PolicyDocument{Validation: map[string]runtimecontracts.PolicyValidationSet{
-			"deploy_manifest": {
-				Classes: map[string]runtimecontracts.PolicyValidationClass{
-					"invalid": {Disposition: "deploy.manifest_invalid"},
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Rules: runtimecontracts.RulesDocument{"deploy_manifest": {Validation: &runtimecontracts.PolicyValidationSet{
+		Classes: map[string]runtimecontracts.PolicyValidationClass{
+			"invalid": {Disposition: "deploy.manifest_invalid"},
+		},
+		Inputs: map[string]string{
+			"source_ref":          "string",
+			"manifest_source_ref": "string",
+		},
+		Rules: []runtimecontracts.PolicyValidationRule{{
+			ID:           "VR-001",
+			Class:        "invalid",
+			Text:         "Manifest source ref must match request source ref.",
+			PinCandidate: &pinCandidate,
+			Check: runtimecontracts.PolicyValidationCheck{
+				Equal: &runtimecontracts.PolicyValidationEqualCheck{
+					Left:  "input.source_ref",
+					Right: "input.manifest_source_ref",
 				},
-				Inputs: map[string]string{
-					"source_ref":          "string",
-					"manifest_source_ref": "string",
-				},
-				Rules: []runtimecontracts.PolicyValidationRule{{
-					ID:           "VR-001",
-					Class:        "invalid",
-					Text:         "Manifest source ref must match request source ref.",
-					PinCandidate: &pinCandidate,
-					Check: runtimecontracts.PolicyValidationCheck{
-						Equal: &runtimecontracts.PolicyValidationEqualCheck{
-							Left:  "input.source_ref",
-							Right: "input.manifest_source_ref",
-						},
-					},
-				}},
 			},
 		}},
+	}}},
 	})
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        sourceWithFixtureStages(source, ".", "pending", "pending"),
@@ -3049,30 +3046,27 @@ func TestExecutor_PolicySheetValidateRowFeedsSelectionRow(t *testing.T) {
 
 func TestExecutor_PolicySheetValidateNumericEqualityCanonicalizesRuntimeValues(t *testing.T) {
 	pinCandidate := true
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Policy: runtimecontracts.PolicyDocument{Validation: map[string]runtimecontracts.PolicyValidationSet{
-			"count_match": {
-				Classes: map[string]runtimecontracts.PolicyValidationClass{
-					"invalid": {Disposition: "deploy.count_mismatch"},
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Rules: runtimecontracts.RulesDocument{"count_match": {Validation: &runtimecontracts.PolicyValidationSet{
+		Classes: map[string]runtimecontracts.PolicyValidationClass{
+			"invalid": {Disposition: "deploy.count_mismatch"},
+		},
+		Inputs: map[string]string{
+			"payload_count": "number",
+			"entity_count":  "number",
+		},
+		Rules: []runtimecontracts.PolicyValidationRule{{
+			ID:           "VR-COUNT-001",
+			Class:        "invalid",
+			Text:         "Payload count must match entity count.",
+			PinCandidate: &pinCandidate,
+			Check: runtimecontracts.PolicyValidationCheck{
+				Equal: &runtimecontracts.PolicyValidationEqualCheck{
+					Left:  "input.payload_count",
+					Right: "input.entity_count",
 				},
-				Inputs: map[string]string{
-					"payload_count": "number",
-					"entity_count":  "number",
-				},
-				Rules: []runtimecontracts.PolicyValidationRule{{
-					ID:           "VR-COUNT-001",
-					Class:        "invalid",
-					Text:         "Payload count must match entity count.",
-					PinCandidate: &pinCandidate,
-					Check: runtimecontracts.PolicyValidationCheck{
-						Equal: &runtimecontracts.PolicyValidationEqualCheck{
-							Left:  "input.payload_count",
-							Right: "input.entity_count",
-						},
-					},
-				}},
 			},
 		}},
+	}}},
 	})
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        sourceWithFixtureStages(source, ".", "pending", "pending"),

@@ -2940,33 +2940,59 @@ event_payload_migration:
     - jsonb payload fields
     - inline type: object without declared shape
     - author-declared envelope fields
+literal_policy_contracts:
+  status: merge_bearing_runtime_behavior
+  implementation_slice: '#2303'
+  location: flow policy.yaml
+  owner: admitted literal values resolved by flowmodel
+  rules:
+  - policy.yaml is a flat map of exact string keys to literal values. Empty, spaced and dotted keys are legal.
+  - Every value interior is user data. value, description, override, criteria, validation and modules have no reserved meaning at any depth.
+  - There is no metadata wrapper, authored override flag, interpolation or fallback interpretation. Use YAML comments for documentation.
+  - Null, false, zero, empty text and empty containers retain their distinct literal meanings. Absence means no declaration.
+  - A nearer root declaration replaces the whole inherited value. Both ordinary and owner-bearing lookup select that root once, then descend only within it; missing, null or incompatible child interiors cannot resurrect parent fields.
+  - Effective resolution, cloning and preview overrides deep-copy literal containers, including caller-owned override inputs.
+  - Admitted rule declarations and executable module definitions are separate authorities in rules.yaml and tools.yaml. Literal policy keys with those names grant no authority.
+  - Policy and rule source admission uses the existing document-wide expansion bound, finite artifact classification and composed provenance ledger. Source bytes, catalog and retained identity remain authoritative for reconstruction.
+rule_set_contracts:
+  status: merge_bearing_runtime_behavior
+  implementation_slice: '#2303'
+  location: flow rules.yaml
+  owner: admitted RulesDocument single scoped namespace
+  resolution: Walk ancestors and replace each complete same-name declaration with the nearest one, then check agent or machine variant. A nearer wrong-kind declaration rejects the reference; it never falls back to an ancestor of the requested kind.
+  variants:
+    agent: classes and ordered rules containing id, class, text and optional params
+    machine: classes, nonempty typed inputs and ordered rules additionally requiring explicit boolean pin_candidate and equal-only check
+  admission:
+  - Rule-set, class and input names retain the existing exact declaration-name grammar; unrestricted policy keys do not change that grammar.
+  - Every nested mapping is closed. Required text is nonempty text, not coercible numeric data. classes and rules are nonempty.
+  - Presence of inputs, check or pin_candidate selects the machine obligations. Partial or null machine fields are invalid, never downgraded to the agent variant.
+  - Parameters are omitted or a mapping of inert text, boolean, integer or finite numeric scalars. Empty text is valid; null and containers are invalid. Existing policy scalar reference semantics are unchanged.
+  - Alias and merge expansion consumes the same admission and document-wide bounds. Duplicate local declarations, duplicate rule IDs and undeclared classes fail closed.
 criteria_contracts:
   status: merge_bearing_runtime_behavior
   implementation_slice: '#1717'
   description: |
     Flow-local agent-judged criteria are stable-ID rule sets declared as a
-    typed `criteria:` section inside the owning flow's `policy.yaml`. Criteria
+    agent variant in the owning flow's flat `rules.yaml`. Criteria
     are contract artifacts, not prompt prose, generic policy scalar values,
     flow `data/` files, or `read_flow_data` conventions.
-  policy_section:
-    location: flow policy.yaml only
-    field: criteria
-    owner: flow-owned PolicyDocument.Criteria
+  rule_declaration:
+    location: flow rules.yaml
+    owner: nearest scoped RuleSet agent variant
     shape: |
-      criteria:
-        <set_name>:
-          classes:
-            <class_name>:
-              disposition: <event_name-or-none>
-          rules:
-            - id: <stable-never-reused-id>
-              class: <declared-class>
-              text: <human-readable rule>
-              params:
-                <name>: <typed-scalar-or-policy-scalar-ref>
+      <set_name>:
+        classes:
+          <class_name>:
+            disposition: <event_name-or-none>
+        rules:
+          - id: <stable-never-reused-id>
+            class: <declared-class>
+            text: <human-readable rule>
+            params:
+              <name>: <typed-scalar-or-policy-scalar-ref>
     rules:
-    - '`criteria:` is a closed typed policy section. It is decoded separately from generic `PolicyDocument.Values` and MUST
-      NOT appear as `policy.criteria`, agent-intent interpolation, or arbitrary policy object data.'
+    - Agent rule sets are closed declarations in rules.yaml, never extracted from policy values or agent intent.
     - Criteria sets are flow-local, including the selected root FlowNode `.`. Project-shared packs, team packs, and
       marketplace distribution are not implemented; there is no separate project criteria scope.
     - Rule IDs are stable and never reused within a set. Historical events cite the bundle/contract version active when
@@ -2980,9 +3006,9 @@ criteria_contracts:
     location: flow-scoped agents.yaml entries
     syntax: 'criteria: [feasibility_exclusions]'
     rules:
-    - Agent criteria refs are short set names resolved against the agent's owning flow policy.criteria section. Dotted paths,
+    - Agent criteria refs are short set names resolved against the agent's owning scoped rules.yaml namespace. Dotted paths,
       path separators, duplicates, empty refs, and unresolved refs fail static validation.
-    - Selected-root agents resolve criteria against the root FlowNode's policy.criteria, under the same local rules as child agents.
+    - Selected-root agents resolve criteria against the root FlowNode's rules.yaml, under the same resolution rules as child agents.
   delivery:
     generated_context: |
       Agents that declare criteria receive a deterministic generated "Contract Criteria" prompt/context section rendered from
@@ -2990,7 +3016,7 @@ criteria_contracts:
       generation (#1718) can absorb it without changing behavior.
     forbidden_bypasses:
     - generic policy or agent-intent interpolation
-    - '`policy.criteria` expression reads'
+    - extraction of rule authority from literal policy values
     - flow `data/` files
     - '`read_flow_data`'
     - intent-local hardcoded criteria IDs as authority
@@ -3015,7 +3041,7 @@ criteria_contracts:
     multi_citation: Both single `text` citation fields and list citation fields are supported in this slice.
   static_verification:
     checks:
-    - typed policy criteria shape
+    - typed agent rule-set shape
     - flow-local placement
     - unique stable IDs within a set
     - class declaration and disposition completeness
@@ -3024,7 +3050,7 @@ criteria_contracts:
     - event citation field type and allowed class metadata
     - emitted-event citation fields consumed only by agents that declare the referenced criteria set
   split_boundaries:
-  - '#1714 machine-evaluated validation rows consume this stable-ID rule grammar as a sibling policy section with a different
+  - '#1714 machine-evaluated validation rows consume this stable-ID rule grammar as the machine variant with a different
     evaluator.'
   - '#1718 prompt-frame generation may absorb the deterministic criteria section later; #1717 does not ship the full frame
     generator.'
@@ -3034,35 +3060,32 @@ policy_validation_contracts:
   implementation_slice: '#1714'
   description: |
     Flow-local machine-evaluated validation sets are stable-ID rule sets
-    declared as a typed `validation:` section inside the owning flow's
-    `policy.yaml`. They share the criteria artifact family but use the
+    declared as the machine variant in the owning flow's flat
+    `rules.yaml`. They share the criteria artifact family but use the
     platform machine evaluator, not agent judgment. Validation rows bind
     turn-scoped computed facts only; they do not route, emit, advance state,
     persist data, call tools, read files, run CEL, or execute code.
-  policy_section:
-    location: flow policy.yaml only
-    field: validation
-    owner: flow-owned PolicyDocument.Validation
+  rule_declaration:
+    location: flow rules.yaml
+    owner: nearest scoped RuleSet machine variant
     shape: |
-      validation:
-        <set_name>:
-          classes:
-            <class_name>:
-              disposition: <event_name-or-none>
-          inputs:
-            <input_name>: <scalar_type>
-          rules:
-            - id: <stable-never-reused-id>
-              class: <declared-class>
-              text: <human-readable rule>
-              pin_candidate: true|false
-              check:
-                equal:
-                  left: input.<input_name>
-                  right: input.<input_name>
+      <set_name>:
+        classes:
+          <class_name>:
+            disposition: <event_name-or-none>
+        inputs:
+          <input_name>: <scalar_type>
+        rules:
+          - id: <stable-never-reused-id>
+            class: <declared-class>
+            text: <human-readable rule>
+            pin_candidate: true|false
+            check:
+              equal:
+                left: input.<input_name>
+                right: input.<input_name>
     rules:
-    - '`validation:` is a closed typed policy section. It is decoded separately from generic `PolicyDocument.Values` and
-      MUST NOT appear as `policy.validation`, agent-intent interpolation, or arbitrary policy object data.'
+    - Machine rule sets are closed declarations in rules.yaml, never extracted from policy values or agent intent.
     - Validation sets are flow-local, including the selected root FlowNode `.`. Shared validation packs, team packs,
       marketplace distribution, file-backed rule sets, and external data reads are not implemented.
     - Rule IDs are stable and never reused within a set. Every set MUST declare at least one class, at least one typed input,
@@ -3115,7 +3138,7 @@ policy_validation_contracts:
       fan_out, or expression in the same handler; unconsumed bindings fail boot verification.'
   static_verification:
     checks:
-    - typed policy.validation shape and flow-local placement
+    - typed machine rule-set shape and scoped rules.yaml resolution
     - class declaration and disposition completeness
     - typed input declaration and rule input compatibility
     - explicit pin_candidate on every rule
@@ -3745,7 +3768,7 @@ handler_specification:
             `compute.operation` authoring value. Public YAML must author
             machine validation as a `rules[*].validate` policy-sheet row. The
             lowered compute plan reads explicit context roots, evaluates the
-            referenced policy.validation set with the Slice B equal-only
+            referenced rules.yaml machine set with the Slice B equal-only
             machine evaluator, and writes the result to a turn-scoped
             computed.validation.* binding.
           public_authoring: 'forbidden; `compute.operation: validate` fails closed.'
@@ -4046,7 +4069,7 @@ handler_specification:
           fan_out, data_accumulation, or public compute. The row lowers to the compute-owned internal lookup operation
           and runs before selection rows consume computed.*.
         validate: >-
-          object — first-class policy-sheet value row for machine-evaluated validation against a flow policy.validation
+          object — first-class policy-sheet value row for machine-evaluated validation against a scoped rules.yaml machine
           set. Public shape is `{set: <validation_set>, input: {<input_name>: <payload|entity|event|computed path>},
           into: computed.validation.<name>}`. The row maps execution context roots into the validation set's typed input
           signature, lowers to the compute-owned internal validate operation, binds `{valid, violations}` under
@@ -4089,7 +4112,7 @@ handler_specification:
           - runtime-only table, switch, lookup, threshold, or range interpreters
       policy_sheet_value_rows:
         scope: Value rows in this slice support `lookup`, a finite inline exact-match table whose right-hand side is
-          a scalar value; `validate`, a machine-evaluated policy.validation row that binds a typed validation result; and
+          a scalar value; `validate`, a machine-evaluated rules.yaml row that binds a typed validation result; and
           `compute_module`, a deterministic precompiled Wasm module row that binds a validated JSON object result.
           Arithmetic/expression derivation, file-backed tables, temporal rows, join rows, loop rows, collection rows, and
           schedule rows are separate gates.
@@ -4113,7 +4136,7 @@ handler_specification:
           A `default: fail` miss is deterministic no-retry failure with row ID and unmatched tuple in diagnostics, distinct from
           validation failures.
         validation_rows: >-
-          validate rows reference flow policy.validation sets, map exactly the declared typed inputs, evaluate only Slice B
+          validate rows reference scoped rules.yaml machine sets, map exactly the declared typed inputs, evaluate only Slice B
           equal checks, and bind `{valid, violations}`. Invalid-result routing is expressed by ordinary selection rows that
           consume computed.validation.* and emit events declared by the validation set class dispositions.
         compute_module_rows: >-
@@ -4907,10 +4930,9 @@ handler_specification:
           unsupported_fields: 'Top-level event.entity_id and event.flow_instance are unsupported legacy receiver-context projection shorthands. Use _entity.id / _entity.flow_instance for current receiver context, event.source.* for emitter route identity, event.target.* for singular receiver route identity, and event.target_set for fan-out recipient route identities.'
           source_authority: Event, _entity, and payload fields cannot override admitted receiving-instance ownership.
       policy:
-        resolves_to: 'The merged policy context. policy.X reads the X key from the flow''s policy.yaml
-          (or root policy.yaml if not overridden at flow level), excluding typed policy sections such
-          as criteria: and validation:. policy.criteria and policy.validation are not generic expression roots;
-          module declarations are tools.yaml entries, not policy data.'
+        resolves_to: 'The scoped literal policy context. policy.X selects X and policy["exact key"] selects an arbitrary exact string key. The nearest root declaration replaces its whole parent value. No keys or interiors are metadata or rule/module authority.'
+        declared_reads: 'Checked CEL AST reads consume the exact scoped policy declaration. Static missing required reads are hard boot errors across the closed executable-reader census and gate context. Quoted strings and lexically shadowed policy bindings are not references; null is present.'
+        presence: 'Stock optional selection/lookup, has and short-circuit presence decisions retain their current semantics. A handled absence is not a missing-read error. Runtime-selected optional keys remain runtime decisions, not guessed declarations. Structural payload provenance continues to reject direct policy[payload.key]; use supported policy[?payload.key].orValue(false) with the exact payload type.'
     boot_validation:
       description: 'The platform MUST validate entity field references at boot against the declared entity contract.
         The check includes exact declaration/type resolution and definite assignment at the current program point.
@@ -5413,9 +5435,10 @@ engine:
     tools: Tools are NOT URI-scoped. They are shared resources. Root flow tools are available to all child flows. Child flow
       tools are available only within that flow. If a child declares a tool with the same ID as a root tool, the child's version
       takes precedence within that flow.
-    policy: 'Policy keys are scoped by flow. Root flow policy is inherited by all children. Child flow policy overrides root
-      for the same key within that child. Guards resolve policy keys by walking up the flow tree: child → parent → root.
+    policy: 'Policy keys are scoped by flow. Root flow policy is inherited by all children. Child flow policy replaces the whole root value
+      for the same exact key within that child. Owner-bearing lookup selects the nearest root once and cannot resume ancestors after descent.
       Resolved agent intent is exact content and never reads generic policy keys.'
+    rules: 'Rule-set names form one scoped rules.yaml namespace. The nearest complete declaration replaces the ancestor before an agent or machine consumer checks its required variant.'
     output: 'A runtime registry containing: URI → Node map, URI → Agent map, URI → Event schema map, tool registry (flat,
       with flow-level overrides), policy tree (hierarchical, child overrides parent).'
   agent_sharding:
@@ -7774,7 +7797,7 @@ engine:
           consume the same flow-data path/scoping resolver.
         boot_check: flow_data_access_validation
     criteria:
-      description: Optional flow-scoped agent contract field. Declares the flow-local policy.criteria sets that are
+      description: Optional flow-scoped agent contract field. Declares the scoped rules.yaml agent sets that are
         delivered to the agent as deterministic generated context and that the agent may cite in generated emit tools.
       contract_field:
         field: criteria
@@ -7784,7 +7807,7 @@ engine:
         example: "criteria:\n  - feasibility_exclusions"
       validation:
         boot_check: criteria_contract_validation
-        refs: Each item must be a short non-empty set name resolving to the declaring flow's policy.criteria section.
+        refs: Each item must be a short non-empty set name resolving to an agent variant in the declaring flow's scoped rules.yaml namespace.
           Dotted paths and filesystem-like paths are invalid.
         generated_delivery: Referenced sets are rendered through criteria_contracts.delivery; criteria are not granted by
           tools, flow_data_access, agent-intent interpolation, or generic policy reads.
@@ -8805,9 +8828,9 @@ engine:
       trigger: A CEL condition references payload.X where X is not a declared field in the triggering event's schema.
       when: boot-only
     - id: condition_policy_alignment
-      severity: warning
+      severity: error
       scope: per-flow
-      trigger: A CEL condition references policy.X where X is not a key in any reachable policy.yaml (flow-level or root).
+      trigger: A checked executable policy read or gate-context read requires a static path missing from the exact resolved literal declaration. Optional/has/short-circuit handled absence is valid; quoted or shadowed identifiers are not references.
       when: boot-only
     - id: state_machine_coherence
       severity: error
@@ -8934,7 +8957,7 @@ engine:
     - id: criteria_contract_validation
       severity: error
       scope: per-flow/per-agent/per-event
-      trigger: A policy.criteria set has invalid shape, duplicate stable IDs, undeclared classes, missing dispositions, bad
+      trigger: A rules.yaml agent set has invalid shape, duplicate stable IDs, undeclared classes, missing dispositions, bad
         inert params, or non-flow-local placement; an agent criteria ref is malformed or unresolved; an event citation field
         has an unsupported type or missing/invalid allowed_classes; or an agent emits a citation-bearing event without
         declaring the referenced criteria set.
@@ -8943,7 +8966,7 @@ engine:
       severity: hard_invalidity
       scope: per-handler
       trigger: A policy-sheet validate value row fails to lower through the compute-owned validate operation, writes outside
-        computed.validation.*, references an unresolved policy.validation set, leaves its result unconsumed, or routes an
+        computed.validation.*, references an unresolved or wrong-kind rules.yaml set, leaves its result unconsumed, or routes an
         invalid-result branch to an event not declared by the validation set dispositions.
       when: boot-only
     - id: mcp_server_reachable
@@ -38968,6 +38991,7 @@ filesystem_source_model:
         - agents.yaml
         - tools.yaml
         - policy.yaml
+        - rules.yaml
       source_semantic_inert:
         - manifest.yaml
         - README

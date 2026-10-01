@@ -1622,9 +1622,9 @@ func (e *Executor) computeValidationValue(frame *executionFrame, spec *runtimeco
 	if rowID == "" {
 		rowID = strings.TrimSpace(spec.StoreAs)
 	}
-	policy := e.deps.Source.ResolvedPolicyForFlow(frame.req.ExecutionFlowID.String())
+	rules := e.deps.Source.ResolvedRulesForFlow(frame.req.ExecutionFlowID.String())
 	setName := strings.TrimSpace(plan.Set)
-	set, ok := policy.Validation[setName]
+	set, ok := rules.Validation(setName)
 	if !ok {
 		return nil, fmt.Errorf("validation_config_no_retry: row %s references unknown validation set %q", rowID, setName)
 	}

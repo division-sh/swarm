@@ -34,12 +34,6 @@ func ResolvePolicyByID[T any](
 	if out.Values == nil {
 		out.Values = map[string]PolicyValue{}
 	}
-	if out.Criteria == nil {
-		out.Criteria = map[string]PolicyCriteriaSet{}
-	}
-	if out.Validation == nil {
-		out.Validation = map[string]PolicyValidationSet{}
-	}
 	if tree.Root == nil {
 		return out
 	}
@@ -57,21 +51,7 @@ func ResolvePolicyByID[T any](
 			continue
 		}
 		for key, value := range policy(view).Values {
-			out.Values[key] = value
-		}
-		for key, value := range policy(view).Criteria {
-			key = strings.TrimSpace(key)
-			if key == "" {
-				continue
-			}
-			out.Criteria[key] = clonePolicyCriteriaSet(value)
-		}
-		for key, value := range policy(view).Validation {
-			key = strings.TrimSpace(key)
-			if key == "" {
-				continue
-			}
-			out.Validation[key] = clonePolicyValidationSet(value)
+			out.Values[key] = PolicyValue{Value: cloneCriteriaParamValue(value.Value)}
 		}
 	}
 	return out

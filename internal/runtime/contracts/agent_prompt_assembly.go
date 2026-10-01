@@ -33,10 +33,10 @@ func AssembleAgentPrompt(bundle *WorkflowContractBundle, flowID string, entry Ag
 	if bundle == nil {
 		return runtimeagentintent.DerivedPrompt{}, fmt.Errorf("criteria delivery requires a workflow bundle")
 	}
-	policy := bundle.ResolvedPolicyForFlow(flowID)
+	rules := bundle.ResolvedRulesForFlow(flowID)
 	selected := make(map[string]PolicyCriteriaSet, len(refs))
 	for _, ref := range refs {
-		set, ok := policy.Criteria[ref]
+		set, ok := rules.Criteria(ref)
 		if !ok {
 			return runtimeagentintent.DerivedPrompt{}, fmt.Errorf("criteria set %q does not resolve in flow %s", ref, flowID)
 		}

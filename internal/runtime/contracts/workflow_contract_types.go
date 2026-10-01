@@ -60,6 +60,7 @@ type WorkflowContractBundle struct {
 	Agents                map[string]AgentRegistryEntry
 	Tools                 map[string]ToolSchemaEntry
 	Policy                PolicyDocument
+	Rules                 RulesDocument
 	Platform              PlatformSpecDocument
 	RootSchema            *FlowSchemaDocument
 	RootTypes             TypeCatalogDocument
@@ -884,6 +885,8 @@ type NodeGateField struct {
 	Name        string `yaml:"name"`
 	Description string `yaml:"description"`
 }
+type RulesDocument = flowmodel.RulesDocument
+type RuleSet = flowmodel.RuleSet
 type PolicyDocument = flowmodel.PolicyDocument
 type PolicyValue = flowmodel.PolicyValue
 type PolicyCriteriaSet = flowmodel.PolicyCriteriaSet
@@ -1029,6 +1032,7 @@ type FlowContractPaths struct {
 	AgentsFile   string
 	ToolsFile    string
 	PolicyFile   string
+	RulesFile    string
 }
 type ConnectorPackImports struct {
 	Imports []ConnectorPackImport `yaml:"imports"`

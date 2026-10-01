@@ -80,34 +80,33 @@ func PolicyValueForFlowWithOwner(source Source, flowID, key string) (PolicyValue
 }
 
 func rawPolicyValueForFlowWithOwner(source Source, flowID, key string) (PolicyValueResolution, bool) {
-	flowID = strings.TrimSpace(flowID)
+	root, rest := splitPolicyKey(key)
 	for _, scope := range policyScopesForFlow(source, flowID) {
-		if value, ok := policyValueAtPath(scope.Policy, key); ok {
+		if value, ok := scope.Policy.Values[root]; ok {
+			if rest != "" {
+				leaf, present := descendPolicyValue(value.Value, rest)
+				if !present {
+					return PolicyValueResolution{}, false
+				}
+				value = runtimecontracts.PolicyValue{Value: leaf}
+			}
 			return PolicyValueResolution{Value: value, OwnerKey: policyOwnerFlowKey(scope.ID)}, true
 		}
 	}
-	if value, ok := policyValueAtPath(source.ResolvedPolicyForFlow(flowID), key); ok {
-		return PolicyValueResolution{Value: value, OwnerKey: policyOwnerRootKey()}, true
-	}
-	return PolicyValueResolution{}, false
-}
-
-func policyValueAtPath(doc runtimecontracts.PolicyDocument, key string) (runtimecontracts.PolicyValue, bool) {
-	root, rest := splitPolicyKey(strings.TrimSpace(key))
-	if root == "" {
-		return runtimecontracts.PolicyValue{}, false
-	}
+	doc := source.ResolvedPolicyForFlow(flowID)
 	value, ok := doc.Values[root]
-	if !ok || rest == "" {
-		return value, ok
-	}
-	descended, ok := descendPolicyValue(value.Value, rest)
 	if !ok {
-		return runtimecontracts.PolicyValue{}, false
+		return PolicyValueResolution{}, false
 	}
-	return runtimecontracts.PolicyValue{Value: descended}, true
+	if rest != "" {
+		leaf, present := descendPolicyValue(value.Value, rest)
+		if !present {
+			return PolicyValueResolution{}, false
+		}
+		value = runtimecontracts.PolicyValue{Value: leaf}
+	}
+	return PolicyValueResolution{Value: value, OwnerKey: policyOwnerRootKey()}, true
 }
-
 func policyScopesForFlow(source Source, flowID string) []FlowScope {
 	if source == nil {
 		return nil
@@ -184,12 +183,6 @@ func descendPolicyValue(value any, remainder string) (any, bool) {
 				return nil, false
 			}
 			value = next
-		case map[string]runtimecontracts.PolicyValue:
-			next, ok := current[part]
-			if !ok {
-				return nil, false
-			}
-			value = next.Value
 		default:
 			return nil, false
 		}
