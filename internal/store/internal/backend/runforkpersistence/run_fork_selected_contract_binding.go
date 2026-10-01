@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	"github.com/google/uuid"
 )
 
@@ -123,56 +124,8 @@ func insertRunForkSelectedContractBinding(ctx context.Context, tx *sql.Tx, req r
 	return binding, nil
 }
 
-func loadRunForkSelectedContractBinding(ctx context.Context, querier interface {
-	QueryRowContext(context.Context, string, ...any) *sql.Row
-}, forkRunID string) (runfork.RunForkSelectedContractBinding, error) {
-	var binding runfork.RunForkSelectedContractBinding
-	var selection runfork.RunForkContractSelection
-	var pointKind string
-	var forkRevision int64
-	var createdAt any
-	err := querier.QueryRowContext(ctx, `
-		SELECT
-			CAST(binding_id AS TEXT),
-			CAST(fork_run_id AS TEXT),
-			CAST(source_run_id AS TEXT),
-			fork_point_kind,
-			fork_revision,
-			COALESCE(CAST(fork_event_id AS TEXT), ''),
-			mode,
-			COALESCE(bundle_hash, ''),
-			created_at
-		FROM run_fork_selected_contract_bindings
-		WHERE fork_run_id = $1
-	`, forkRunID).Scan(
-		&binding.BindingID,
-		&binding.ForkRunID,
-		&binding.SourceRunID,
-		&pointKind,
-		&forkRevision,
-		&binding.ForkEventID,
-		&selection.Mode,
-		&selection.BundleHash,
-		&createdAt,
-	)
-	if err != nil {
-		return runfork.RunForkSelectedContractBinding{}, err
-	}
-	parsedCreatedAt, ok, err := sqliteTimeValue(createdAt)
-	if err != nil {
-		return runfork.RunForkSelectedContractBinding{}, fmt.Errorf("decode selected contract binding created_at: %w", err)
-	}
-	if !ok {
-		return runfork.RunForkSelectedContractBinding{}, fmt.Errorf("selected contract binding created_at is required")
-	}
-	binding.Owner = runfork.RunForkSelectedContractBindingOwner
-	binding.ForkPoint = runfork.RunForkPoint{Kind: runfork.RunForkPointKind(pointKind), Revision: forkRevision, EventID: binding.ForkEventID}
-	if err := binding.ForkPoint.Validate(); err != nil {
-		return runfork.RunForkSelectedContractBinding{}, fmt.Errorf("decode selected contract binding point: %w", err)
-	}
-	binding.ContractSelection = selection
-	binding.CreatedAt = parsedCreatedAt
-	return binding, nil
+func loadRunForkSelectedContractBinding(ctx context.Context, querier runstate.RowQueryer, forkRunID string) (runfork.RunForkSelectedContractBinding, error) {
+	return runstate.LoadSelectedContractBinding(ctx, querier, forkRunID)
 }
 
 func normalizeRunForkSelectedContractBinding(req runfork.RunForkSelectedContractBindingRequest, createdAt time.Time) (runfork.RunForkSelectedContractBinding, error) {
