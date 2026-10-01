@@ -2815,6 +2815,7 @@
     {"path":"internal/serveapp/channel_delivery_worker.go","class":"authored"},
     {"path":"internal/serveapp/channel_delivery_worker_test.go","class":"test"},
     {"path":"internal/serveapp/channel_duplicate_bot_supported_surface_test.go","class":"test"},
+    {"path":"internal/serveapp/channel_input_process_supported_surface_test.go","class":"test"},
     {"path":"internal/serveapp/channel_listener_ownership_test.go","class":"test"},
     {"path":"internal/serveapp/channel_native.go","class":"authored"},
     {"path":"internal/serveapp/channel_native_entry_disposition_supported_surface_test.go","class":"test"},
