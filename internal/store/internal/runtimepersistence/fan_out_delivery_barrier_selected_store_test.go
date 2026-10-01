@@ -813,7 +813,10 @@ func seedFanOutDeliveryBarrierForLoop(t *testing.T, ctx context.Context, db *sql
 
 func seedFanOutDeliveryBarrierRecord(t *testing.T, ctx context.Context, db *sql.DB, fixture fanOutOwnerFixture, entityID string, generation attemptgeneration.Generation, at time.Time) timeridentity.TimerHandle {
 	t.Helper()
-	digest := "sha256:" + strings.Repeat("2", 64)
+	var digest string
+	if err := db.QueryRowContext(ctx, `SELECT semantic_digest FROM fan_out_intents WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family='fan_out' AND semantic_path=$4`, fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath).Scan(&digest); err != nil {
+		t.Fatal(err)
+	}
 	ref, err := timeridentity.NewFanOutDeliveryJoinRef(
 		mustPersistenceRootNode("fan-out-source"), "items.ready", "all-items-delivered",
 		mustFanOutBarrierDeclaration(t, fixture), fixture.bundleHash, digest,

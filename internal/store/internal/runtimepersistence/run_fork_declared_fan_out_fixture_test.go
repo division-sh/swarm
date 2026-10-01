@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -58,6 +61,31 @@ func seedDeclaredNumericForkFanOutFixture(t *testing.T, backend string, fixture 
 	return ctx, source
 }
 
+func seedDeclaredEntityForkFanOutFixture(t *testing.T, backend string, fixture authorActivityReceiptFixture, cardinality int, at time.Time) (context.Context, fanOutOwnerFixture) {
+	t.Helper()
+	root := canonicalrouting.CopyForkFanOutCarrier(t, false, false)
+	if err := os.WriteFile(filepath.Join(root, "entities.yaml"), []byte("root:\n  items: '[text]'\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	nodesPath := filepath.Join(root, "nodes.yaml")
+	nodes, err := os.ReadFile(nodesPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(nodes), "items_from: payload.items") != 1 {
+		t.Fatal("entity source fixture requires exactly one payload source site")
+	}
+	if err := os.WriteFile(nodesPath, []byte(strings.Replace(string(nodes), "items_from: payload.items", "items_from: entity.items", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	items := make([]string, cardinality)
+	for i := range items {
+		items[i] = fmt.Sprintf("item-%03d", i)
+	}
+	ctx, source, _, _ := seedDeclaredForkFanOutGenerationFromSource(t, backend, fixture, cardinality, at, false, false, root, map[string]any{"items": items}, nil)
+	return ctx, source
+}
+
 func seedDeclaredForkFanOutGenerationFromSource(t *testing.T, backend string, fixture authorActivityReceiptFixture, cardinality int, at time.Time, withBarrier, withGeneration bool, root string, captured map[string]any, rows any) (context.Context, fanOutOwnerFixture, timeridentity.TimerHandle, func(bool)) {
 	t.Helper()
 	repo := canonicalrouting.RepoRoot(t)
@@ -109,7 +137,11 @@ func seedDeclaredForkFanOutGenerationFromSource(t *testing.T, backend string, fi
 		Key: fanoutobligation.IntentKey{RunID: runID, TriggeringDeliveryID: claim.Claim.DeliveryID(), ElementRef: plans[0].Ref.ElementRef}, PlanRef: plans[0].Ref,
 		Source: fanoutobligation.SourceRef{Kind: fanoutobligation.SourceEventPayloadField, EventID: trigger.ID(), Field: "items"}, Cardinality: cardinality,
 		Capsule: fanoutobligation.Capsule{NodeKey: node.Key(), ExecutionFlowID: ".", Route: flowidentity.StoredRoute(".", runID, runID), EntityID: runID,
-			HandlerEventKey: "items.ready", CurrentState: "review", ProducerSource: trigger.RoutingSource(), Receiver: &fanoutobligation.ExecutionReceiver{Node: node, Target: route.Target}, Lineage: events.LineageFromEvent(trigger)},
+			SourceProjection: plans[0].SemanticEvidence(),
+			HandlerEventKey:  "items.ready", CurrentState: "review", ProducerSource: trigger.RoutingSource(), Receiver: &fanoutobligation.ExecutionReceiver{Node: node, Target: route.Target}, Lineage: events.LineageFromEvent(trigger)},
+	}
+	if plans[0].ItemsFrom == "entity.items" {
+		request.Source = fanoutobligation.SourceRef{Kind: fanoutobligation.SourceEntityField, RunID: runID, EntityID: runID, Field: "items"}
 	}
 	record := stateOnlyWorkflowEngineMutationRecord(t, runID, ".", runID, runID, "pending", 1, at)
 	record.CurrentState, record.EntityType, record.Mode = "review", "root", "static"
@@ -192,5 +224,5 @@ func seedDeclaredForkFanOutGenerationFromSource(t *testing.T, backend string, fi
 		}
 	}
 	return ctx, fanOutOwnerFixture{runID: runID, eventID: trigger.ID(), deliveryID: claim.Claim.DeliveryID(), flowPath: plans[0].Ref.ElementRef.FlowPath,
-		semanticPath: plans[0].Ref.ElementRef.SemanticPath, createdAt: at, bundleHash: bundle.SourceArtifact.BundleHash(), artifact: bundle.SourceArtifact}, handle, advance
+		semanticPath: plans[0].Ref.ElementRef.SemanticPath, createdAt: at, bundleHash: bundle.SourceArtifact.BundleHash(), artifact: bundle.SourceArtifact, plan: plans[0]}, handle, advance
 }

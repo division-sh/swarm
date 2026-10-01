@@ -142,9 +142,7 @@ func TestFanOutReadDefaultLimitAndCurrentPagesBothStores(t *testing.T) {
 			// A newly inserted row after the cursor is visible. A page is not a
 			// retained cross-request snapshot; changing page size is allowed.
 			newcomer := seedFanOutOwnerIntent(t, ctx, db, base, 1, time.Now().UTC())
-			if _, err := db.ExecContext(ctx, `UPDATE fan_out_intents SET semantic_path=$1 WHERE run_id=$2 AND semantic_path=$3`, `zz.last`, base.runID, newcomer.semanticPath); err != nil {
-				t.Fatal(err)
-			}
+			rekeyFanOutOwnerFixture(t, ctx, db, newcomer, newcomer.flowPath, "zz.last")
 			if _, err := transitionRunForTest(ctx, owner, runlifecycle.ActiveTransitionRequest{RunID: base.runID, State: runlifecycle.StatePaused}); err != nil {
 				t.Fatal(err)
 			}
@@ -237,9 +235,7 @@ func TestFanOutReadIdentityByteOrderBothStores(t *testing.T) {
 				if index != 0 {
 					fixture = seedFanOutOwnerIntent(t, ctx, db, base, 1, time.Now().UTC())
 				}
-				if _, err := db.ExecContext(ctx, `UPDATE fan_out_intents SET semantic_path=$1 WHERE run_id=$2 AND semantic_path=$3`, path, base.runID, fixture.semanticPath); err != nil {
-					t.Fatal(err)
-				}
+				rekeyFanOutOwnerFixture(t, ctx, db, fixture, fixture.flowPath, path)
 			}
 			query := fanoutobligation.ListQuery{RunID: base.runID, Limit: 1}
 			var got []string
@@ -278,9 +274,7 @@ func TestFanOutReadExactRootFilterBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			descendant := seedFanOutOwnerIntent(t, ctx, db, base, 1, time.Now().UTC())
-			if _, err := db.ExecContext(ctx, `UPDATE fan_out_intents SET flow_path='child' WHERE run_id=$1 AND semantic_path=$2`, base.runID, descendant.semanticPath); err != nil {
-				t.Fatal(err)
-			}
+			rekeyFanOutOwnerFixture(t, ctx, db, descendant, "child", descendant.semanticPath)
 			query := fanoutobligation.ListQuery{RunID: base.runID, Limit: 1, Filter: fanoutobligation.ListFilter{FlowPath: "."}}
 			reader := owner.(operatorread.FanOutReader)
 			page, err := reader.ListFanOutIntents(ctx, query)

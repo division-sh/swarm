@@ -34,7 +34,11 @@ func historicalFanOutAncestorLineage(t *testing.T, proveRetry bool) {
 					owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
 					store := owner.(runForkSelectedLifecycleStore)
 					at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-					ctx, source := seedDeclaredForkFanOutFixture(t, backend, authorActivityReceiptFixture{db: db, store: owner.(authorActivityReceiptStore)}, 1, at)
+					seed := seedDeclaredForkFanOutFixture
+					if sourceKind == "entity_field_revision" {
+						seed = seedDeclaredEntityForkFanOutFixture
+					}
+					ctx, source := seed(t, backend, authorActivityReceiptFixture{db: db, store: owner.(authorActivityReceiptStore)}, 1, at)
 					if sourceKind == "entity_field_revision" {
 						// The declared carrier executes at the root. Retain its real root
 						// owner rather than substituting the unrelated root/one fixture.
@@ -100,7 +104,9 @@ func historicalFanOutAncestorLineage(t *testing.T, proveRetry bool) {
 							t.Fatalf("generation %d remapped ancestor provenance into owning child: %#v; original=%#v", generation, got.Intent, original.Intent)
 						}
 						wantCapsule := original.Intent.Request.Capsule
-						if reflect.TypeOf(wantCapsule).NumField() != 19 || wantCapsule.Receiver == nil || !wantCapsule.Receiver.Target.ExistingEntity() {
+						// SourceProjection is frozen evidence, included in the full
+						// equality check after remapping only child execution owners.
+						if reflect.TypeOf(wantCapsule).NumField() != 20 || wantCapsule.Receiver == nil || !wantCapsule.Receiver.Target.ExistingEntity() {
 							t.Fatal("capsule census or declared root receiver changed; reclassify every field")
 						}
 						wantCapsule.Route = flowidentity.StoredRoute(".", child.ForkRunID, child.ForkRunID)
