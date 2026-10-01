@@ -2649,6 +2649,7 @@
     {"path":"internal/runtime/tools/resource_read_admission_test.go","class":"test"},
     {"path":"internal/runtime/tools/resource_read_characterization_test.go","class":"test"},
     {"path":"internal/runtime/tools/resource_read_selected_store_test.go","class":"test"},
+    {"path":"internal/runtime/tools/resource_read_wire_characterization_test.go","class":"test"},
     {"path":"internal/runtime/tools/retired_dynamic_agent_tools.go","class":"authored"},
     {"path":"internal/runtime/tools/retired_dynamic_agent_tools_test.go","class":"test"},
     {"path":"internal/runtime/tools/role_scoped_entity_tools.go","class":"authored"},
