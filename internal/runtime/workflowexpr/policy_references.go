@@ -27,6 +27,20 @@ func ValidatePolicyReferences(expression string, policy map[string]any, opts Val
 	return ValidateValueExpressionWithOptions(expression, opts)
 }
 
+// IsStaticPolicyReference shares checked CEL path identity with declaration
+// checking. Query operands remain static selectors, not a second expression language.
+func IsStaticPolicyReference(expression string) (bool, error) {
+	compiled, err := checkedValueExpression(expression, ValueExpressionOptions{})
+	if err != nil {
+		return false, err
+	}
+	if compiled.OutputType().TypeName() == "optional_type" {
+		return false, nil
+	}
+	_, ok := policyStaticPath(compiled.NativeRep().Expr())
+	return ok, nil
+}
+
 func validateCheckedPolicyReferences(compiled *cel.Ast, policy map[string]any) error {
 	missing := map[string]struct{}{}
 	var visit func(celast.Expr, workflowPresenceFacts, bool)

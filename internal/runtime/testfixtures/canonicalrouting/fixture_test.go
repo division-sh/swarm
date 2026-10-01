@@ -33,6 +33,7 @@ func canonicalExampleNames() []ArtifactID {
 		FanInStream,
 		FanInBarrier,
 		HarnessInjection,
+		PolicyRules,
 	}
 }
 
@@ -66,7 +67,7 @@ func TestNumericFeedFixtureLoadsAndVerifies(t *testing.T) {
 }
 
 func TestCanonicalRoutingExamplesLoadAndVerify(t *testing.T) {
-	Prove(t, RootIngress, ParentConnect, TemplateSelectExisting, TemplateSelectOrCreate, TemplateReply, TemplateCreateMintedKey, FanInStream, FanInBarrier, HarnessInjection)
+	Prove(t, RootIngress, ParentConnect, TemplateSelectExisting, TemplateSelectOrCreate, TemplateReply, TemplateCreateMintedKey, FanInStream, FanInBarrier, HarnessInjection, PolicyRules)
 	for _, name := range canonicalExampleNames() {
 		t.Run(string(name), func(t *testing.T) {
 			root := ExampleRoot(t, name)
