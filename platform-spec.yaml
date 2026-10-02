@@ -6695,6 +6695,7 @@ engine:
             : its typed selected-store operation performs the same short keyed lookup/serialization, then commits the already prepared publication facts and deterministic completion in the publication owner's private transaction.
           - The named conversation.fork creation operation likewise commits fork creation and its existing API completion atomically on both stores. It is not a transaction around a generic API callback, and unkeyed creation remains intentionally distinct.
           - A runtime operation never asks whether an ambient transaction exists. Cross-domain atomic work is one named selected-store operation; invoking another named mutation cannot implicitly join or reuse its transaction.
+          - Semantic fixture run-source revision consumes ReviseRunSource on the original selected lifecycle owner, including its active-run admission, atomic completion-candidate rearm, and exact replay. The shared run fixture must not expose a separate source-revision SQL interpreter or public generic transaction callbacks. Named hostile storage-corruption proofs remain distinct from valid semantic source revision; they do not grant runtime or fixture revision authority.
           - Schema/bootstrap, bundle catalog, destructive reset, fork-specific mutation/recovery, and read-only projections remain separate concepts unless independently gated.
         consumers:
           - runtimebus transactional publish through sealed CommitPublish plans

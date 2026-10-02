@@ -1292,7 +1292,7 @@ func TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIden
 	if err != nil {
 		t.Fatalf("construct persisted source run bundle identity: %v", err)
 	}
-	if err := runlifecyclefixture.RevisePostgresSource(ctx, db, sourceRunID, persistedSource); err != nil {
+	if _, err := pg.ReviseRunSource(ctx, storerunlifecycle.SourceRevisionRequest{RunID: sourceRunID, Source: persistedSource}); err != nil {
 		t.Fatalf("stamp source run bundle identity: %v", err)
 	}
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
