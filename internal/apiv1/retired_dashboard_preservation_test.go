@@ -48,11 +48,7 @@ func TestCanonicalEventReadbackOverridesConflictingReceiptsBothStores(t *testing
 	withNativeObservabilityStores(t, func(t *testing.T, ctx context.Context, selected observabilityFixtureStore, db *sql.DB, dialect authoractivityfixture.Dialect) {
 		runID, eventID, entityID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 		fixture := storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID}
-		if dialect == authoractivityfixture.DialectPostgres {
-			storetest.RequirePostgresRun(t, ctx, db, fixture)
-		} else {
-			storetest.RequireSQLiteRun(t, ctx, db, fixture)
-		}
+		storetest.RequireRun(t, ctx, selected, fixture)
 		event := eventtest.ExistingRunRootIngress(eventID, "task.completed", "runtime", "", []byte(`{"entity_id":"business-only"}`), 0, runID,
 			events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity}, time.Now().UTC())
 		statuses := []string{"pending", "in_progress", "delivered", "failed", "dead_letter"}
