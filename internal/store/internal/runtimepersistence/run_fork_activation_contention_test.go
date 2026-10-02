@@ -329,6 +329,7 @@ type forkContentionFixture struct {
 	snapshotOwnershipFixture
 	write  func(context.Context, snapshotOwnershipStore) error
 	cardID string
+	source semanticview.Source
 }
 
 func newForkContentionFixture(t *testing.T, backend eventRecordContractBackend) forkContentionFixture {
@@ -348,18 +349,15 @@ func newConstructedGateFixtureForFields(t *testing.T, backend eventRecordContrac
 	if store, ok := opened.store.(*SQLiteRuntimeStore); ok {
 		store.nowFn = func() time.Time { return time.Now().UTC() }
 	}
-	files := map[string]string{
-		"schema.yaml":   "name: contention-gate\nstages:\n  pending:\n    initial: true\n    gate:\n      decision: review\n      outcomes:\n        approve: {advances_to: done}\n  done: {terminal: true}\n",
-		"entities.yaml": "default:\n  name: text\n",
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo,
+		canonicalrouting.CopyConstructedGateForkControl(t, fields), runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !fields {
-		delete(files, "entities.yaml")
-	}
-	bundle := loadLifecyclePersistenceFixtureForTest(t, files)
 	runID := uuid.NewString()
-	f := forkContentionFixture{snapshotOwnershipFixture: snapshotOwnershipFixture{store: opened.store.(snapshotOwnershipStore), db: opened.db, runID: runID, entityID: runID, eventID: uuid.NewString()}}
+	f := forkContentionFixture{snapshotOwnershipFixture: snapshotOwnershipFixture{store: opened.store.(snapshotOwnershipStore), db: opened.db, runID: runID, entityID: runID, eventID: uuid.NewString()}, source: semanticview.Wrap(bundle)}
 	f.ctx = runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash()), f.runID)
-	var err error
 	f.ctx, err = eventreceiver.NormalExecution().Bind(f.ctx, executionmode.Live)
 	if err != nil {
 		t.Fatal(err)

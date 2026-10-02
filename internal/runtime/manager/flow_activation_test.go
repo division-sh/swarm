@@ -2165,8 +2165,8 @@ func TestFlowActivationCommitErrorFinalizesOnlyAcknowledgedReadiness(t *testing.
 				if !errors.Is(err, commitErr) {
 					t.Fatalf("commit error lost: %v", err)
 				}
-				if errors.Is(err, readinessErr) != acknowledged {
-					t.Fatalf("readiness finalization mismatch: acknowledged=%t err=%v", acknowledged, err)
+				if errors.Is(err, readinessErr) != (acknowledged && !standing) {
+					t.Fatalf("readiness finalization mismatch: standing=%t acknowledged=%t err=%v", standing, acknowledged, err)
 				}
 				if (len(instances.creates) == 1) != acknowledged {
 					t.Fatalf("durable activation mismatch: acknowledged=%t creates=%d", acknowledged, len(instances.creates))

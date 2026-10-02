@@ -19,6 +19,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
@@ -1458,6 +1459,23 @@ accounts:
 		)
 	`, sourceRunID, entityID, at, at); err != nil {
 		t.Fatalf("seed source entity_state: %v", err)
+	}
+	configPayload, err := runtimepipeline.WorkflowInstanceConfigPayloadForRoute(
+		flowidentity.StoredRoute("review", "inst-1", "review/inst-1"), bundle.Semantics.Version, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	headerConfig, err := json.Marshal(configPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO flow_instances
+		(run_id, instance_path, entity_id, entity_type, flow_template, mode, stage_defined,
+		 current_state, config, status, gates, bookkeeping, accumulator, revision,
+		 entered_state_at, created_at, updated_at)
+		VALUES ($1::uuid, 'review/inst-1', $2::uuid, 'accounts', 'review', 'template', TRUE,
+		 'queued', $4::jsonb, 'active', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, $3, $3, $3)`, sourceRunID, entityID, at, string(headerConfig)); err != nil {
+		t.Fatalf("seed exact native fork source header: %v", err)
 	}
 	captureEntityToolRunForkRevision(t, db, sourceRunID)
 	storetest.InsertCanonicalEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventtest.PersistedProjectionForProducer(

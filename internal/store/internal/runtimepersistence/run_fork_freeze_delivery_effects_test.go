@@ -18,7 +18,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -171,7 +170,7 @@ func TestForkFreezeActivationDeliveryHistoryBothStores(t *testing.T) {
 				for _, deliveryState := range []deliverylifecycle.State{deliverylifecycle.StateQueued, deliverylifecycle.StateDelivered} {
 					t.Run(fmt.Sprintf("%s/selected=%t/rollback=%t/%s", backend.name, selected, rollback, deliveryState), func(t *testing.T) {
 						f := newForkContentionFixture(t, backend)
-						descriptors, err := runtimepkg.AuthorActivityEventDescriptors(semanticview.Wrap(loadCanonicalSelectedContractStoreSource(t)))
+						descriptors, err := runtimepkg.AuthorActivityEventDescriptors(f.source)
 						if err != nil {
 							t.Fatal(err)
 						}

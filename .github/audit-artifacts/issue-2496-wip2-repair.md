@@ -121,3 +121,32 @@ A's production collection/join files and lifecycle signature are unchanged.
 
 Managed public standing restart/reset, complete connected/crash matrices,
 default suite and exact-head CI are still outstanding; no final closure claim.
+
+## Broad Qualification Fixture Repairs
+
+The bbdd8a9a0 connected/crash/A2/freeze aggregate is RED54.486s: connected
+receivers, all four real mock-agent SIGKILL cells and the A2 native cells pass;
+selected freeze used an unrelated catalog under the actual gate bundle hash.
+The gate fixture now declares its own bare root input and subscriber, and both
+generic/selected freeze controls consume that exact source catalog. All sixteen
+freeze/history/rollback cells pass6.423s with unchanged history/frontier oracles.
+
+The first default run on the reconciled source is RED/incomplete, deliberately
+terminated in broad-01 after five affected roots failed. No later unit is
+credited as executed. Repairs retain the boundaries rather than grant exceptions:
+
+- Standing commit-error preparation does not execute readiness early, even
+  when durable construction was acknowledged; normal activation retains its
+  acknowledged-error finalization.
+- The compiled standing fixture moves unchanged behind a closed canonical
+  fixture API, rather than weakening the repository routing guard.
+- The ordinary native fork-tool fixture has an explicit complete constructed
+  header and canonical config before revision capture; field-only imports do
+  not acquire executable fork authority. The focused control passes1.277s.
+- Root historical replay carries explicit template `.`. The focused control
+  passes0.007s with exact child identity projection.
+- The deleted metadata write allowance is removed. Shared snapshot attachment
+  remains its sole producer; the hostile ownership guard passes1.030s.
+
+Manager commit-error controls pass0.255s. These are targeted development
+receipts, not a complete repaired-head default or public qualification result.

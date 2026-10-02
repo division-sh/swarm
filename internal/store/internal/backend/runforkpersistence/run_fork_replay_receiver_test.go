@@ -149,7 +149,7 @@ func TestReplayExistingRootReceiverProjectsCanonicalChildOwnership(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	delivery.Route.Target = events.MustExistingEntityTarget(events.RouteIdentity{FlowInstance: snapshot.RunID, EntityID: snapshot.RunID})
+	delivery.Route.Target = events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: snapshot.RunID, EntityID: snapshot.RunID})
 	delivery.Route.Initialization = events.ReceiverInitialization{}
 	delivery.Route.ConnectClaim = events.ConnectExecutionClaim{}
 	delivery.DeliveryID, err = deliverylifecycle.DeliveryID(event.ID(), delivery.Route)

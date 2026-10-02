@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestStandingRootTreePublicRestartAndResetBothStores(t *testing.T) {
@@ -27,8 +28,7 @@ func TestStandingRootTreePublicRestartAndResetBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			root := filepath.Join(base, backend)
-			contracts := filepath.Join(root, "contracts")
-			writeStandingRootTreePublicFixture(t, contracts)
+			contracts := canonicalrouting.CopyStandingRootTreePublic(t)
 			store := goldenSQLiteStore(root)
 			if backend == "postgres" {
 				store = goldenPostgresStore(t, dsn)
@@ -103,28 +103,6 @@ func TestStandingRootTreePublicRestartAndResetBothStores(t *testing.T) {
 			}
 			t.Log("proof_surface=compiled public verify/serve, real signed provider ingress, source deletion/hash restart, authenticated reset; no private construction or mock lifecycle launcher")
 		})
-	}
-}
-
-func writeStandingRootTreePublicFixture(t *testing.T, root string) {
-	t.Helper()
-	const imports = "imports:\n  provider_trigger_events:\n    - {provider: telegram, event: inbound.telegram.text_message}\n    - {provider: telegram, event: inbound.telegram.callback_action}\n"
-	const pins = "pins:\n  inputs:\n    events: [inbound.telegram, inbound.telegram.text_message, inbound.telegram.callback_action]\n"
-	const outputs = "  outputs:\n    events: [inbound.telegram.text_message, inbound.telegram.callback_action]\n"
-	const nodes = "observer:\n  execution_type: system_node\n  subscribes_to: [inbound.telegram, inbound.telegram.text_message, inbound.telegram.callback_action]\n  event_handlers:\n    inbound.telegram:\n      guard: {id: admit, check: 'true'}\n    inbound.telegram.text_message:\n      guard: {id: admit, check: 'true'}\n    inbound.telegram.callback_action:\n      guard: {id: admit, check: 'true'}\n"
-	files := map[string]string{
-		"schema.yaml":                       "name: standing-root-tree\nactivation: standing\nstages: []\n" + imports + pins + outputs + "ingress:\n  alias: alpha\n  providers:\n    - {provider: telegram, signing_secret: webhook_signing.alpha}\nconnect:\n    - {event: inbound.telegram.text_message, from: ., to: alpha-receiver}\n    - {event: inbound.telegram.callback_action, from: ., to: alpha-receiver}\n    - {event: inbound.telegram.text_message, from: beta, to: beta-receiver}\n    - {event: inbound.telegram.callback_action, from: beta, to: beta-receiver}\n",
-		"nodes.yaml":                        nodes,
-		"beta/schema.yaml":                  "name: beta\nactivation: standing\nstages: []\n" + imports + pins + outputs + "ingress:\n  alias: beta\n  providers:\n    - {provider: telegram, signing_secret: webhook_signing.beta}\n",
-		"beta/nodes.yaml":                   nodes,
-		"alpha-receiver/detail/schema.yaml": "name: detail\n",
-	}
-	for _, alias := range []string{"alpha", "beta"} {
-		files[alias+"-receiver/schema.yaml"] = "name: " + alias + "-receiver\n" + imports + "pins:\n  inputs:\n    events: [inbound.telegram.text_message, inbound.telegram.callback_action]\n"
-		files[alias+"-receiver/nodes.yaml"] = strings.Replace(strings.Replace(nodes, "subscribes_to: [inbound.telegram, ", "subscribes_to: [", 1), "    inbound.telegram:\n      guard: {id: admit, check: 'true'}\n", "", 1)
-	}
-	for name, body := range files {
-		writeReleaseFile(t, filepath.Join(root, name), body)
 	}
 }
 
