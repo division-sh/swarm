@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
@@ -60,18 +61,10 @@ func TestWorkflowTimerCauseReplayFlowActivationGateBothStores(t *testing.T) {
 					}
 					occurrence := initial.Occurrence()
 					firedAt := time.Now().UTC().Truncate(time.Microsecond)
-					event, err := events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{
-						Facts: events.EventFacts{
-							ID: timeridentity.WorkflowTimerOccurrenceEventID(occurrence), Type: events.EventType(initial.EventType),
-							Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime.workflow_timer"},
-							TaskID:   occurrence.TaskID(), Payload: initial.Payload, RoutingSource: initial.RoutingSource,
-							Envelope:  events.EventEnvelope{EntityID: initial.EntityID, FlowInstance: initial.Route.InstancePath},
-							CreatedAt: firedAt, ExecutionMode: initial.ExecutionMode,
-						}, RunID: initial.RunID,
-					})
-					if err != nil {
-						t.Fatal(err)
-					}
+					event := eventtest.InExecutionMode(eventtest.RuntimeControlWithRoutingSource(
+						timeridentity.WorkflowTimerOccurrenceEventID(occurrence), events.EventType(initial.EventType),
+						"runtime.workflow_timer", occurrence.TaskID(), initial.Payload, 0, initial.RunID, "",
+						events.EventEnvelope{EntityID: initial.EntityID, FlowInstance: initial.Route.InstancePath}, initial.RoutingSource, firedAt), initial.ExecutionMode)
 					publications, err := publisher.PrepareEnginePublications(f.ctx, []engine.EmitIntent{{Event: event}})
 					if err != nil || len(publications) != 1 {
 						t.Fatalf("real occurrence publication preparation: %d, %v", len(publications), err)

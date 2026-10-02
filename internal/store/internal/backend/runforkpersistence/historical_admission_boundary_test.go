@@ -65,6 +65,8 @@ func historicalBoundaryAllowances() map[string]historicalBoundaryAllowance {
 		historicalBoundaryOwner + "resolveRunForkRevisionPoint/reference:" + historicalBoundaryOwner + "appendRunForkHistoricalFact":                     {1, "event cursor uses the same contextual relation"},
 		historicalBoundaryOwner + "loadRunForkRevisionSnapshot/reference:" + historicalBoundaryOwner + "appendRunForkHistoricalFact":                     {1, "all present snapshot families use contextual admission"},
 	}
+	allowed[historicalBoundaryWriter+"CountWorkflowTimerRevisionFactsForTest/ledger_sql"] = historicalBoundaryAllowance{1, "fixed physical timer-revision witness stays with the canonical ledger owner; no payload decoding or caller selector"}
+	allowed["store/internal/runtimepersistence::ObserveWorkflowTimerReplayStorageForTest/reference:"+historicalBoundaryWriter+"CountWorkflowTimerRevisionFactsForTest"] = historicalBoundaryAllowance{1, "exact selected read transaction delegates physical ledger observation to its canonical owner"}
 	for _, caller := range []string{
 		"resolveSQLiteRunForkRevisionPoint", "lockRunForkSourceRevisionFrontier",
 		"RunForkPostgresOwner.EnsureRunForkNoPostForkCommittedReplayScopeMarkers", "RunForkSQLiteOwner.EnsureRunForkNoPostForkCommittedReplayScopeMarkers",
@@ -267,7 +269,8 @@ func historicalBoundaryCollect(pkg *types.Package, info *types.Info, fset *token
 				switch callee {
 				case historicalBoundaryWriter + "FactKey", historicalBoundaryWriter + "projectionFactKey", historicalBoundaryWriter + "admitFactKeyCoordinates", historicalBoundaryOwner + "appendRunForkHistoricalFact", "runtime/deliverylifecycle::DecodeHistoricalSnapshot",
 					"runtime/runfork::NewTerminalBarrierHistory", historicalBoundaryOwner + "admitRunForkTerminalBarrierHistory",
-					historicalBoundaryOwner + "resolveRunForkRevisionPoint", historicalBoundaryOwner + "resolveSQLiteRunForkRevisionPoint":
+					historicalBoundaryOwner + "resolveRunForkRevisionPoint", historicalBoundaryOwner + "resolveSQLiteRunForkRevisionPoint",
+					historicalBoundaryWriter + "CountWorkflowTimerRevisionFactsForTest":
 					add(n, "reference:"+callee)
 				case historicalBoundaryOwner + "AppendRunForkRevisionFact", historicalBoundaryOwner + "appendRunForkRevisionFact":
 					add(n, "contextless_append_reference")
@@ -508,11 +511,17 @@ import (
     events "github.com/division-sh/swarm/internal/events"
     fanout "github.com/division-sh/swarm/internal/runtime/fanoutobligation"
     bus "github.com/division-sh/swarm/internal/runtime/bus"
+    revision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 type unexpectedReader struct{}
 // Private package-local stand-in: no exported historical compatibility seam.
 type runForkRevisionEvent struct { EventID string }
 type eventAlias = runForkRevisionEvent
+func (arbitrary *unexpectedReader) stealTimerRevisionObservation() {
+    observe := revision.CountWorkflowTimerRevisionFactsForTest
+    alias := observe
+    _ = alias
+}
 func (arbitrary *unexpectedReader) mintTerminalHistory() {
     alias := history.NewTerminalBarrierHistory
     _ = alias
@@ -600,6 +609,7 @@ func ordinaryBusiness(raw []byte) error {
 	findings := historicalBoundaryCollect(pkg, info, fset, file)
 	got := historicalBoundaryProblems(findings, historicalBoundaryAllowances(), false)
 	want := []string{
+		historicalBoundaryOwner + "unexpectedReader.stealTimerRevisionObservation/reference:" + historicalBoundaryWriter + "CountWorkflowTimerRevisionFactsForTest",
 		historicalBoundaryOwner + "unexpectedReader.mintReceiverPlan/reference:events::AdmitReceiverMaterializationPlan",
 		historicalBoundaryOwner + "unexpectedReader.restoreReceiverPlan/reference:events::RestoreDeliveryMaterialization",
 		historicalBoundaryOwner + "unexpectedReader.mintInitializer/reference:events::AdmitNodeReceiverInitialization",
