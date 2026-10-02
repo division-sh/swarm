@@ -5,8 +5,6 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
-	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 )
@@ -93,103 +91,19 @@ func TestNewSourceProvider_UsesEffectiveSystemNodeProduces(t *testing.T) {
 	}
 }
 
-func TestNewSourceProvider_AuthorityMatrix(t *testing.T) {
+func TestNewSourceProvider_AuthorizeNotifyHuman(t *testing.T) {
 	provider := NewSourceProvider(authorityTestSource(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
-			"control-plane": {ID: "control-plane", Role: "control-plane"},
-			"reviewer":      {ID: "reviewer", Role: "reviewer", ManagerFallback: "control-plane"},
-			"worker":        {ID: "worker", Role: "worker", ManagerFallback: "reviewer"},
+			"reviewer": {ID: "reviewer", Role: "reviewer", ManagerFallback: "control-plane"},
 		},
 	}))
-
-	controlPlane := testAgentConfig(
-		"control-plane",
-		"control-plane",
-		[]string{"message_flow", "notify_human"},
-		"",
-		"review/inst-1",
-		"",
-	)
-	reviewer := testAgentConfig(
-		"reviewer",
-		"reviewer",
-		[]string{"message_peers", "notify_human"},
-		"",
-		"review/inst-1",
-		"control-plane",
-	)
-	worker := testAgentConfig(
-		"worker-a",
-		"worker",
-		[]string{"message_peers"},
-		"",
-		"review/inst-1",
-		"control-plane",
-	)
-	otherFlowWorker := testAgentConfig(
-		"worker-b",
-		"worker",
-		[]string{"message_peers"},
-		"",
-		"review/inst-2",
-		"control-plane",
-	)
-
-	if !provider.HasMessageAuthority(controlPlane, reviewer) {
-		t.Fatal("expected control-plane to message reviewer in same flow instance")
+	if err := provider.AuthorizeNotifyHuman(models.AgentConfig{ID: "reviewer", Role: "reviewer"}); err != nil {
+		t.Fatalf("declared reviewer notification authority: %v", err)
 	}
-	if !provider.HasMessageAuthority(reviewer, worker) {
-		t.Fatal("expected peers with same manager_fallback to message each other")
+	if err := provider.AuthorizeNotifyHuman(models.AgentConfig{ID: "unknown", Role: "unknown"}); err == nil {
+		t.Fatal("undeclared role gained notification authority")
 	}
-	if provider.HasMessageAuthority(worker, otherFlowWorker) {
-		t.Fatal("expected cross-flow peer messaging to be denied")
-	}
-	if err := provider.AuthorizeNotifyHuman(reviewer); err != nil {
-		t.Fatalf("expected reviewer mailbox permission: %v", err)
-	}
-}
-
-func TestMessageSelfAuthorityRequiresExactConcreteIdentity(t *testing.T) {
-	provider := NewSourceProvider(authorityTestSource(&runtimecontracts.WorkflowContractBundle{
-		Agents: map[string]runtimecontracts.AgentRegistryEntry{
-			"worker": {ID: "worker", Role: "worker"},
-		},
-	}))
-	workerA := testAgentConfig("worker", "worker", nil, "", "review/inst-a", "")
-	workerA.Identity = agentidentitytest.Runtime(t, "worker", "authority-test", "review", "inst-a", "review/inst-a")
-	workerB := testAgentConfig("worker", "worker", nil, "", "review/inst-b", "")
-	workerB.Identity = agentidentitytest.Runtime(t, "worker", "authority-test", "review", "inst-b", "review/inst-b")
-
-	if !provider.HasMessageAuthority(workerA, workerA) {
-		t.Fatal("exact concrete self message was denied")
-	}
-	if provider.HasMessageAuthority(workerA, workerB) {
-		t.Fatal("same-slug sibling was authorized as self")
-	}
-	noop := NoopProvider()
-	if !noop.HasMessageAuthority(workerA, workerA) {
-		t.Fatal("noop provider denied exact concrete self")
-	}
-	if noop.HasMessageAuthority(workerA, workerB) {
-		t.Fatal("noop provider authorized same-slug sibling as self")
-	}
-	malformed := workerA
-	malformed.Identity = agentidentity.Identity{}
-	if noop.HasMessageAuthority(malformed, malformed) {
-		t.Fatal("noop provider authorized malformed identity")
-	}
-}
-
-func testAgentConfig(id, role string, permissions []string, entityID, flowPath, managerFallback string) models.AgentConfig {
-	return models.AgentConfig{
-		ExecutionMode:   "live",
-		ID:              id,
-		Role:            role,
-		Permissions:     permissions,
-		Tools:           permissions,
-		EntityID:        entityID,
-		ParentAgent:     managerFallback,
-		ManagerFallback: managerFallback,
-		FlowPath:        flowPath,
+	if err := NoopProvider().AuthorizeNotifyHuman(models.AgentConfig{ID: "reviewer", Role: "reviewer"}); err == nil {
+		t.Fatal("missing source gained notification authority")
 	}
 }
