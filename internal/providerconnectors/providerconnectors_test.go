@@ -478,6 +478,8 @@ func TestCapabilitySubjectsEnumerateExactInstalledInventoryWithoutMakingToolsEff
 		"slack.post_message",
 		"telegram.answer_callback",
 		"telegram.edit_message",
+		"telegram.install_inbox_commands",
+		"telegram.install_shared_inbox_commands",
 		"telegram.send_interactive",
 		"telegram.send_message",
 	}
@@ -505,7 +507,7 @@ func TestCapabilitySubjectsEffectiveFlowLocalIdentityReplacesAvailableTeachingRo
 	if err != nil {
 		t.Fatalf("CapabilitySubjects: %v", err)
 	}
-	if len(subjects) != 10 {
+	if len(subjects) != 12 {
 		t.Fatalf("subjects = %#v, want one effective identity replacing its installed row", subjects)
 	}
 	for _, subject := range subjects {
@@ -932,7 +934,7 @@ func TestProviderConnectorPackVerificationFailsClosed(t *testing.T) {
 		{
 			name: "retired scalar action capability",
 			mutate: func(t *testing.T, files fstest.MapFS) {
-				replaceConnectorPackFile(t, files, "pack.yaml", "call_provider_actions:\n      - telegram.answer_callback\n      - telegram.apply_webhook\n      - telegram.edit_message\n      - telegram.identify_bot\n      - telegram.read_webhook\n      - telegram.send_interactive\n      - telegram.send_message", "call_provider_action: telegram.send_message")
+				replaceConnectorPackFile(t, files, "pack.yaml", "call_provider_actions:\n      - telegram.answer_callback\n      - telegram.apply_webhook\n      - telegram.edit_message\n      - telegram.identify_bot\n      - telegram.install_inbox_commands\n      - telegram.install_shared_inbox_commands\n      - telegram.read_bot_address\n      - telegram.read_chat_menu_button\n      - telegram.read_default_menu_button\n      - telegram.read_inbox_commands\n      - telegram.read_shared_inbox_commands\n      - telegram.read_webhook\n      - telegram.send_interactive\n      - telegram.send_message", "call_provider_action: telegram.send_message")
 			},
 			want: "field call_provider_action not found",
 		},

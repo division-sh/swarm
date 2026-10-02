@@ -224,8 +224,8 @@ func validateInterfaceDefinition(identity string, definition runtimecontracts.Pa
 		}
 	}
 	for name, operation := range definition.Operations {
-		if runtimecontracts.NormalizeActivityEffectClass(operation.EffectClass) != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
-			return fmt.Errorf("platform interface %q operation %q must use non_idempotent_write", identity, name)
+		if runtimecontracts.NormalizeActivityEffectClass(operation.EffectClass) == "" {
+			return fmt.Errorf("platform interface %q operation %q has unsupported effect class %q", identity, name, operation.EffectClass)
 		}
 		for group, fields := range map[string]map[string]runtimecontracts.PackInterfaceField{
 			"input": operation.Input, "context": operation.Context, "output": operation.Output,
@@ -237,12 +237,24 @@ func validateInterfaceDefinition(identity string, definition runtimecontracts.Pa
 			}
 		}
 	}
-	for name, event := range definition.Events {
+	return validateInterfaceEvents(identity, definition.Events, definition.Schemas)
+}
+
+func validateInterfaceEvents(identity string, eventDefinitions map[string]runtimecontracts.PackInterfaceEvent, schemas map[string]runtimecontracts.ToolInputSchema) error {
+	for name, event := range eventDefinitions {
 		if len(event.RequiredFields) == 0 {
 			return fmt.Errorf("platform interface %q event %q requires required_fields", identity, name)
 		}
 		for fieldName, field := range event.RequiredFields {
-			if err := validateInterfaceField(identity+" event "+name+" required_fields."+fieldName, field, definition.Schemas); err != nil {
+			if err := validateInterfaceField(identity+" event "+name+" required_fields."+fieldName, field, schemas); err != nil {
+				return err
+			}
+		}
+		for fieldName, field := range event.OptionalFields {
+			if _, exists := event.RequiredFields[fieldName]; exists {
+				return fmt.Errorf("platform interface %q event %q field %q is both required and optional", identity, name, fieldName)
+			}
+			if err := validateInterfaceField(identity+" event "+name+" optional_fields."+fieldName, field, schemas); err != nil {
 				return err
 			}
 		}
@@ -269,6 +281,7 @@ func validateInterfaceField(subject string, field runtimecontracts.PackInterface
 
 type ChannelManifest struct {
 	source       yamlsource.Value
+	NativeInbox  *NativeInboxProfile                         `yaml:"native_inbox"`
 	Provider     string                                      `yaml:"provider"`
 	OpaqueTypes  map[string]runtimecontracts.ToolInputSchema `yaml:"opaque_types"`
 	Operations   map[string]ChannelOperationBinding          `yaml:"operations"`
@@ -292,15 +305,17 @@ const (
 )
 
 type ChannelOnboardingProfile struct {
-	Activation             string `yaml:"activation"`
-	Ceremony               string `yaml:"ceremony"`
-	ProviderCredentialRole string `yaml:"provider_credential"`
-	SigningCredentialRole  string `yaml:"signing_credential,omitempty"`
-	Confirmation           string `yaml:"confirmation"`
-	ConnectionHealth       string `yaml:"connection_health,omitempty"`
+	Activation             string                    `yaml:"activation"`
+	Ceremony               string                    `yaml:"ceremony"`
+	ProviderCredentialRole string                    `yaml:"provider_credential"`
+	SigningCredentialRole  string                    `yaml:"signing_credential,omitempty"`
+	Confirmation           string                    `yaml:"confirmation"`
+	ConnectionHealth       string                    `yaml:"connection_health,omitempty"`
+	LearnedDestination     map[string]ChannelMapping `yaml:"learned_destination"`
 }
 
 type CompiledChannelOnboardingProfile struct {
+	learnedDestination []compiledChannelMapping
 	provider           channelPlanIdentity
 	activation         ChannelActivationPosture
 	ceremony           ChannelIdentityCeremony
@@ -331,6 +346,9 @@ func (p CompiledChannelOnboardingProfile) ConnectionHealth() string {
 }
 
 func CompileChannelOnboardingProfile(provider string, profile ChannelOnboardingProfile, operations []string) (CompiledChannelOnboardingProfile, error) {
+	if len(profile.LearnedDestination) == 0 {
+		return CompiledChannelOnboardingProfile{}, fmt.Errorf("channel onboarding requires an explicit learned_destination relation")
+	}
 	providerID, err := admitChannelPlanIdentity("channel onboarding provider", provider)
 	if err != nil {
 		return CompiledChannelOnboardingProfile{}, err
@@ -598,6 +616,7 @@ func validateChannelPath(raw string) error {
 }
 
 type SatisfactionPlan struct {
+	nativeInbox       *CompiledNativeInboxProfile
 	interfaceRef      channelPlanIdentity
 	channel           PackIdentity
 	trigger           PackIdentity
@@ -758,57 +777,49 @@ func (p SatisfactionPlan) InterfaceIdentity() (operatorchannel.InterfaceIdentity
 // ProjectTextFact is the sole provider-neutral projection from one current,
 // satisfier-authenticated normalized event into operator-channel identity.
 func (p SatisfactionPlan) ProjectTextFact(eventName string, authorization runtimeprovideroutput.Authorization, payload any) (operatorchannel.TextFact, bool, error) {
-	if p.interfaceRef.String() != operatorchannel.InterfaceHITLChannelV2 {
-		return operatorchannel.TextFact{}, false, nil
-	}
-	event, ok := p.events["text"]
-	if !ok || event.event.String() != strings.TrimSpace(eventName) {
-		return operatorchannel.TextFact{}, false, nil
-	}
-	if !authorization.Valid() || authorization.Provider() != p.provider.String() || authorization.Event() != event.event.String() ||
-		authorization.PackID() != p.trigger.ID() || authorization.PackVersion() != p.trigger.Version() ||
-		authorization.ManifestHash() != p.trigger.ManifestHash() || !authorization.Generation().Equal(p.triggerGeneration) {
-		return operatorchannel.TextFact{}, false, nil
-	}
-	object, ok := payload.(map[string]any)
-	if !ok {
-		return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event %q payload must be an object", eventName)
-	}
-	projected := make(map[string]any, len(event.fields))
-	for target, source := range event.fields {
-		fieldName := strings.TrimPrefix(source.String(), "event.")
-		if fieldName == source.String() || strings.Contains(fieldName, ".") {
-			return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event source %q is not a normalized field", source.String())
-		}
-		value, exists := object[fieldName]
-		if !exists {
-			return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event %q is missing required field %q", eventName, fieldName)
-		}
-		if schema, exists := event.fieldSchema[fieldName]; exists {
-			if err := schema.Validate(value); err != nil {
-				return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event field %q: %w", fieldName, err)
-			}
-		}
-		targetPath, err := compileChannelPath(target)
-		if err != nil {
-			return operatorchannel.TextFact{}, false, err
-		}
-		if err := targetPath.set(projected, value); err != nil {
-			return operatorchannel.TextFact{}, false, err
-		}
+	projected, matched, err := p.projectOperatorEvent("text", eventName, authorization, payload)
+	if err != nil || !matched {
+		return operatorchannel.TextFact{}, matched, err
 	}
 	text, textOK := projected["text"].(string)
-	account, accountOK, err := operatorChannelOpaqueReference(projected["external_account_reference"])
+	account, accountOK, err := operatorchannel.OpaqueReference(projected["external_account_reference"])
 	if err != nil {
 		return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event %q external_account_reference: %w", eventName, err)
 	}
-	conversation, conversationOK, err := operatorChannelOpaqueReference(projected["conversation_reference"])
+	conversation, conversationOK, err := operatorchannel.OpaqueReference(projected["conversation_reference"])
 	if err != nil {
 		return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event %q conversation_reference: %w", eventName, err)
 	}
 	scope, scopeOK := projected["conversation_scope"].(string)
 	if !textOK || !accountOK || !conversationOK || !scopeOK {
 		return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event %q does not project admitted identity fields", eventName)
+	}
+	message, messageOK, err := operatorchannel.OpaqueReference(projected["provider_message_reference"])
+	if err != nil {
+		return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event %q provider_message_reference: %w", eventName, err)
+	}
+	if !messageOK {
+		return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event %q does not project a message reference", eventName)
+	}
+	var replyTo string
+	if value, exists := projected["reply_to_message_reference"]; exists {
+		var ok bool
+		replyTo, ok, err = operatorchannel.OpaqueReference(value)
+		if err != nil || !ok {
+			return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event %q has invalid reply_to_message_reference: %v", eventName, err)
+		}
+	}
+	var entryReference, entryAddress string
+	if value, exists := projected["entry_invocation"]; exists {
+		invocation, ok := value.(map[string]any)
+		if !ok {
+			return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event %q has invalid entry_invocation", eventName)
+		}
+		entryReference, _ = invocation["reference"].(string)
+		entryAddress, _ = invocation["address"].(string)
+		if entryReference == "" {
+			return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event %q has incomplete entry_invocation", eventName)
+		}
 	}
 	identity, err := p.InterfaceIdentity()
 	if err != nil {
@@ -817,6 +828,8 @@ func (p SatisfactionPlan) ProjectTextFact(eventName string, authorization runtim
 	fact := operatorchannel.TextFact{
 		Interface: identity, ExternalAccountRef: account, ConversationRef: conversation,
 		ConversationScope: operatorchannel.ConversationScope(scope), Text: text,
+		MessageReference: message, ReplyToReference: replyTo,
+		EntryReference: entryReference, EntryAddress: entryAddress,
 	}
 	if err := fact.Validate(); err != nil {
 		return operatorchannel.TextFact{}, false, err
@@ -824,22 +837,93 @@ func (p SatisfactionPlan) ProjectTextFact(eventName string, authorization runtim
 	return fact, true, nil
 }
 
-func operatorChannelOpaqueReference(value any) (string, bool, error) {
-	switch value := value.(type) {
-	case string:
-		if strings.TrimSpace(value) == "" {
-			return "", false, nil
-		}
-		return value, true, nil
-	case map[string]any:
-		encoded, err := canonicaljson.Bytes(value)
-		if err != nil {
-			return "", false, err
-		}
-		return string(encoded), true, nil
-	default:
-		return "", false, nil
+// ProjectActionFact uses the same admitted mapping and authorization boundary
+// as text, without assigning provider callback data any verdict authority.
+func (p SatisfactionPlan) ProjectActionFact(eventName string, authorization runtimeprovideroutput.Authorization, payload any) (operatorchannel.ActionFact, bool, error) {
+	projected, matched, err := p.projectOperatorEvent("action", eventName, authorization, payload)
+	if err != nil || !matched {
+		return operatorchannel.ActionFact{}, matched, err
 	}
+	account, accountOK, err := operatorchannel.OpaqueReference(projected["external_account_reference"])
+	if err != nil {
+		return operatorchannel.ActionFact{}, false, fmt.Errorf("channel action event %q external_account_reference: %w", eventName, err)
+	}
+	conversation, conversationOK, err := operatorchannel.OpaqueReference(projected["conversation_reference"])
+	if err != nil {
+		return operatorchannel.ActionFact{}, false, fmt.Errorf("channel action event %q conversation_reference: %w", eventName, err)
+	}
+	message, messageOK, err := operatorchannel.OpaqueReference(projected["provider_message_reference"])
+	if err != nil {
+		return operatorchannel.ActionFact{}, false, fmt.Errorf("channel action event %q provider_message_reference: %w", eventName, err)
+	}
+	interaction, interactionOK, err := operatorchannel.OpaqueReference(projected["interaction_reference"])
+	if err != nil {
+		return operatorchannel.ActionFact{}, false, fmt.Errorf("channel action event %q interaction_reference: %w", eventName, err)
+	}
+	scope, scopeOK := projected["conversation_scope"].(string)
+	token, tokenOK := projected["token"].(string)
+	if !accountOK || !conversationOK || !messageOK || !interactionOK || !scopeOK || !tokenOK {
+		return operatorchannel.ActionFact{}, false, fmt.Errorf("channel action event %q does not project admitted action fields", eventName)
+	}
+	identity, err := p.InterfaceIdentity()
+	if err != nil {
+		return operatorchannel.ActionFact{}, false, err
+	}
+	fact := operatorchannel.ActionFact{
+		Interface: identity, ExternalAccountRef: account, ConversationRef: conversation,
+		ConversationScope: operatorchannel.ConversationScope(scope), MessageReference: message,
+		InteractionRef: interaction, Token: token,
+	}
+	if err := fact.Validate(); err != nil {
+		return operatorchannel.ActionFact{}, false, err
+	}
+	return fact, true, nil
+}
+
+func (p SatisfactionPlan) projectOperatorEvent(kind, eventName string, authorization runtimeprovideroutput.Authorization, payload any) (map[string]any, bool, error) {
+	if p.interfaceRef.String() != operatorchannel.InterfaceHITLChannelV2 {
+		return nil, false, nil
+	}
+	event, ok := p.events[kind]
+	if !ok || event.event.String() != strings.TrimSpace(eventName) {
+		return nil, false, nil
+	}
+	if !authorization.Valid() || authorization.Provider() != p.provider.String() || authorization.Event() != event.event.String() ||
+		authorization.PackID() != p.trigger.ID() || authorization.PackVersion() != p.trigger.Version() ||
+		authorization.ManifestHash() != p.trigger.ManifestHash() || !authorization.Generation().Equal(p.triggerGeneration) {
+		return nil, false, nil
+	}
+	object, ok := payload.(map[string]any)
+	if !ok {
+		return nil, false, fmt.Errorf("channel %s event %q payload must be an object", kind, eventName)
+	}
+	projected := make(map[string]any, len(event.fields))
+	for target, source := range event.fields {
+		fieldName := strings.TrimPrefix(source.String(), "event.")
+		if fieldName == source.String() || strings.Contains(fieldName, ".") {
+			return nil, false, fmt.Errorf("channel %s event source %q is not a normalized field", kind, source.String())
+		}
+		value, exists := object[fieldName]
+		if !exists {
+			if event.required[fieldName] {
+				return nil, false, fmt.Errorf("channel %s event %q is missing required field %q", kind, eventName, fieldName)
+			}
+			continue
+		}
+		if schema, exists := event.fieldSchema[fieldName]; exists {
+			if err := schema.Validate(value); err != nil {
+				return nil, false, fmt.Errorf("channel %s event field %q: %w", kind, fieldName, err)
+			}
+		}
+		targetPath, err := compileChannelPath(target)
+		if err != nil {
+			return nil, false, err
+		}
+		if err := targetPath.set(projected, value); err != nil {
+			return nil, false, err
+		}
+	}
+	return projected, true, nil
 }
 
 func (p SatisfactionPlan) OperationNames() []string {
@@ -997,6 +1081,12 @@ func (p OutboundBindingPlan) RuntimeTools() (map[string]runtimecontracts.ToolSch
 	return out, nil
 }
 
+// ConnectorOperation returns the exact admitted connector operation for a
+// bound channel write. Runtime execution does not reconstruct this from YAML.
+func (p OutboundBindingPlan) ConnectorOperation(operation string) (string, runtimecontracts.ToolSchemaEntry, error) {
+	return p.structural.ConnectorOperation(operation)
+}
+
 func (p OutboundBindingPlan) PrepareOperation(operation string, input any) (string, map[string]any, error) {
 	compiled, ok := p.structural.operations[strings.TrimSpace(operation)]
 	if !ok {
@@ -1011,6 +1101,10 @@ func (p OutboundBindingPlan) PrepareOperation(operation string, input any) (stri
 		return "", nil, err
 	}
 	return p.RuntimeToolID(operation), prepared, nil
+}
+
+func (p OutboundBindingPlan) ProjectOperationOutput(operation string, result any) (map[string]any, error) {
+	return p.structural.ProjectOperationOutput(operation, result)
 }
 
 func (p SatisfactionPlan) CapabilitySubject() (Subject, error) {
@@ -1157,34 +1251,41 @@ func (p SatisfactionPlan) PrepareOperationInput(name string, input, context any)
 		return nil, fmt.Errorf("channel operation %q context: %w", name, err)
 	}
 	environment := map[string]any{"input": input, "context": context}
+	out, err := projectChannelOperationMappings(name, operation.input, environment)
+	if err != nil {
+		return nil, err
+	}
+	if err := operation.toolSchema.InputSchema().Validate(out); err != nil {
+		return nil, fmt.Errorf("channel operation %q projected connector input: %w", name, err)
+	}
+	return out, nil
+}
+
+func (p SatisfactionPlan) ProjectOperationOutput(name string, result any) (map[string]any, error) {
+	operation, ok := p.operations[strings.TrimSpace(name)]
+	if !ok {
+		return nil, fmt.Errorf("channel operation %q is not compiled", name)
+	}
+	if err := operation.toolSchema.OutputSchema().Validate(result); err != nil {
+		return nil, fmt.Errorf("channel operation %q connector output: %w", name, err)
+	}
+	out, err := projectChannelOperationMappings(name, operation.output, map[string]any{"result": result})
+	if err != nil {
+		return nil, err
+	}
+	if err := operation.outputSchema.Validate(out); err != nil {
+		return nil, fmt.Errorf("channel operation %q projected output: %w", name, err)
+	}
+	return out, nil
+}
+
+func projectChannelOperationMappings(name string, mappings []compiledChannelMapping, environment map[string]any) (map[string]any, error) {
 	out := map[string]any{}
-	for _, mapping := range operation.input {
+	for _, mapping := range mappings {
 		if mapping.usesEach {
-			itemsValue, ok := mapping.each.lookup(environment)
-			if !ok {
-				return nil, fmt.Errorf("channel operation %q source %q is missing", name, mapping.each.syntax)
-			}
-			items, ok := itemsValue.([]any)
-			if !ok {
-				return nil, fmt.Errorf("channel operation %q source %q is not an array", name, mapping.each.syntax)
-			}
-			projected := make([]any, 0, len(items))
-			for _, item := range items {
-				object := map[string]any{}
-				for _, itemMapping := range mapping.item {
-					value, ok := itemMapping.source.lookup(map[string]any{"item": item})
-					if !ok {
-						return nil, fmt.Errorf("channel operation %q item source %q is missing", name, itemMapping.source.syntax)
-					}
-					if err := itemMapping.target.set(object, value); err != nil {
-						return nil, err
-					}
-				}
-				if mapping.wrapItemAsList {
-					projected = append(projected, []any{object})
-				} else {
-					projected = append(projected, object)
-				}
+			projected, err := projectChannelOperationItems(name, mapping, environment)
+			if err != nil {
+				return nil, err
 			}
 			if err := mapping.target.set(out, projected); err != nil {
 				return nil, err
@@ -1199,10 +1300,37 @@ func (p SatisfactionPlan) PrepareOperationInput(name string, input, context any)
 			return nil, err
 		}
 	}
-	if err := operation.toolSchema.InputSchema().Validate(out); err != nil {
-		return nil, fmt.Errorf("channel operation %q projected connector input: %w", name, err)
-	}
 	return out, nil
+}
+
+func projectChannelOperationItems(name string, mapping compiledChannelMapping, environment map[string]any) ([]any, error) {
+	itemsValue, ok := mapping.each.lookup(environment)
+	if !ok {
+		return nil, fmt.Errorf("channel operation %q source %q is missing", name, mapping.each.syntax)
+	}
+	items, ok := itemsValue.([]any)
+	if !ok {
+		return nil, fmt.Errorf("channel operation %q source %q is not an array", name, mapping.each.syntax)
+	}
+	projected := make([]any, 0, len(items))
+	for _, item := range items {
+		object := map[string]any{}
+		for _, itemMapping := range mapping.item {
+			value, ok := itemMapping.source.lookup(map[string]any{"item": item})
+			if !ok {
+				return nil, fmt.Errorf("channel operation %q item source %q is missing", name, itemMapping.source.syntax)
+			}
+			if err := itemMapping.target.set(object, value); err != nil {
+				return nil, err
+			}
+		}
+		if mapping.wrapItemAsList {
+			projected = append(projected, []any{object})
+		} else {
+			projected = append(projected, object)
+		}
+	}
+	return projected, nil
 }
 
 func interfaceOperationSchema(fields map[string]runtimecontracts.PackInterfaceField, schemas, opaque map[string]runtimecontracts.ToolInputSchema) (runtimecontracts.ToolInputSchema, error) {
@@ -1387,7 +1515,18 @@ func CompileChannel(registry *InterfaceRegistry, channel LoadedChannelPack, trig
 		if compiled.ActivationPosture() == ChannelActivationWebhookRegistration && plan.registration == nil {
 			return SatisfactionPlan{}, fmt.Errorf("channel pack %q webhook onboarding requires registration", channel.Envelope.ID)
 		}
+		compiled.learnedDestination, err = compileLearnedDestination(channel.Manifest.Onboarding.LearnedDestination, plan.opaqueTypes)
+		if err != nil {
+			return SatisfactionPlan{}, fmt.Errorf("channel pack %q onboarding learned_destination: %w", channel.Envelope.ID, err)
+		}
 		plan.onboarding = &compiled
+	}
+	if _, err := plan.PresentationBounds(); err != nil {
+		return SatisfactionPlan{}, fmt.Errorf("channel pack %q presentation bounds: %w", channel.Envelope.ID, err)
+	}
+	plan.nativeInbox, err = compileNativeInboxProfile(channel.Manifest.NativeInbox, plan)
+	if err != nil {
+		return SatisfactionPlan{}, fmt.Errorf("channel pack %q native inbox: %w", channel.Envelope.ID, err)
 	}
 	plan.generation, err = compileSatisfactionPlanGeneration(plan)
 	if err != nil {
@@ -1820,7 +1959,14 @@ func validateEachItem(name string, mapping ChannelMapping, itemTargets []string,
 }
 
 func validateEventBinding(name string, event runtimecontracts.PackInterfaceEvent, binding ChannelEventBinding, schemas, opaque map[string]runtimecontracts.ToolInputSchema, descriptor TriggerEvent) error {
-	if err := exactKeySet("channel event "+name+" fields", binding.Fields, requiredInterfaceFieldPaths(event.RequiredFields, opaque)); err != nil {
+	fields := make(map[string]runtimecontracts.PackInterfaceField, len(event.RequiredFields)+len(event.OptionalFields))
+	for fieldName, field := range event.RequiredFields {
+		fields[fieldName] = field
+	}
+	for fieldName, field := range event.OptionalFields {
+		fields[fieldName] = field
+	}
+	if err := exactKeySet("channel event "+name+" fields", binding.Fields, interfaceFieldPaths(fields, opaque)); err != nil {
 		return err
 	}
 	targets := newChannelPathCardinality("channel event " + name + " target")
@@ -1833,7 +1979,7 @@ func validateEventBinding(name string, event runtimecontracts.PackInterfaceEvent
 		if err := sources.add(source); err != nil {
 			return err
 		}
-		targetSchema, err := interfaceFieldPathSchema(event.RequiredFields, target, schemas, opaque)
+		targetSchema, err := interfaceFieldPathSchema(fields, target, schemas, opaque)
 		if err != nil {
 			return fmt.Errorf("channel event %q: %w", name, err)
 		}
@@ -1842,7 +1988,10 @@ func validateEventBinding(name string, event runtimecontracts.PackInterfaceEvent
 			return fmt.Errorf("channel event %q source %q must name one normalized event field", name, source)
 		}
 		field, ok := descriptor.Fields[fieldName]
-		if !ok || !field.Required {
+		if !ok {
+			return fmt.Errorf("channel event %q source %q is not an accepted trigger field", name, source)
+		}
+		if _, required := event.RequiredFields[strings.Split(target, ".")[0]]; required && !field.Required {
 			return fmt.Errorf("channel event %q source %q is not a required accepted trigger field", name, source)
 		}
 		if err := validateDirectionalRelation(name+" event "+source+" -> "+target, &field.Schema, targetSchema); err != nil {
@@ -2058,7 +2207,7 @@ func requiredSchemaPathsMapped(subject string, schema runtimecontracts.ToolInput
 	return validateRequiredPathCardinality(subject, required, mapped)
 }
 
-func requiredInterfaceFieldPaths(fields map[string]runtimecontracts.PackInterfaceField, opaque map[string]runtimecontracts.ToolInputSchema) []string {
+func interfaceFieldPaths(fields map[string]runtimecontracts.PackInterfaceField, opaque map[string]runtimecontracts.ToolInputSchema) []string {
 	var out []string
 	for name, field := range fields {
 		if field.Opaque == "" {
@@ -2114,6 +2263,7 @@ func interfaceOpaqueSlots(definition runtimecontracts.PackInterfaceDefinition) [
 	}
 	for _, event := range definition.Events {
 		add(event.RequiredFields)
+		add(event.OptionalFields)
 	}
 	out := make([]string, 0, len(set))
 	for name := range set {
@@ -2180,6 +2330,7 @@ func cloneInterfaceDefinition(in runtimecontracts.PackInterfaceDefinition) runti
 	out.Events = make(map[string]runtimecontracts.PackInterfaceEvent, len(in.Events))
 	for name, event := range in.Events {
 		event.RequiredFields = cloneInterfaceFields(event.RequiredFields)
+		event.OptionalFields = cloneInterfaceFields(event.OptionalFields)
 		out.Events[name] = event
 	}
 	return out

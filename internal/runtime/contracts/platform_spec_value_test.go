@@ -18,7 +18,7 @@ interfaces:
       kind: pack_channel
       schemas: {text: {type: string}}
       operations: {deliver: {effect_class: non_idempotent_write, input: {text: {schema: text}}, context: {destination: {opaque: destination}}, output: {receipt: {opaque: receipt}}}}
-      events: {received: {required_fields: {text: {schema: text}}}}
+      events: {received: {required_fields: {text: {schema: text}}, optional_fields: {reply: {opaque: receipt}}}}
 permissions_model: {permissions: [read]}
 vocabulary: {participant: {types: {agent: {execution: llm}}}}
 workflow_state: {ddl: "CREATE TABLE work (id TEXT);\n", fields: {id: {type: uuid}}}
@@ -49,6 +49,8 @@ func TestPlatformConsumedLawAdmissionPresenceMatrix(t *testing.T) {
 		{[]string{"interfaces", "sample", "v1", "operations", "deliver", "context"}, true, true, false, false},
 		{[]string{"interfaces", "sample", "v1", "operations", "deliver", "output"}, true, true, false, false},
 		{[]string{"interfaces", "sample", "v1", "events", "received", "required_fields"}, false, false, false, false},
+		{[]string{"interfaces", "sample", "v1", "events", "received", "optional_fields"}, true, true, false, false},
+		{[]string{"interfaces", "sample", "v1", "events", "received", "optional_fields", "reply", "opaque"}, false, false, false, false},
 		{[]string{"interfaces", "sample", "v1", "operations", "deliver", "input", "text", "schema"}, false, false, false, false},
 		{[]string{"interfaces", "sample", "v1", "operations", "deliver", "context", "destination", "opaque"}, false, false, false, false},
 		{[]string{"permissions_model", "permissions"}, false, false, true, false},

@@ -55,6 +55,7 @@ type nestedServingProbe struct {
 	accountTurns      int
 	pauseAccountTurn  int
 	accountTurnPaused chan struct{}
+	beforeReturn      func(fanoutobligation.IntentKey)
 }
 
 func newNestedServingProbe(t *testing.T) *nestedServingProbe {
@@ -138,6 +139,9 @@ func (p *nestedServingProbe) ServeFanOutCandidate(ctx context.Context, owner pip
 	p.holdNext = false
 	p.mu.Unlock()
 	result, err := p.PipelineCoordinator.ServeFanOutCandidate(context.WithValue(ctx, nestedTurnContextKey{}, turn), turn, key)
+	if p.beforeReturn != nil {
+		p.beforeReturn(key)
+	}
 	p.publications.finish(turn)
 	turn.receipt.Result, turn.receipt.Err, turn.receipt.ReturnedAt = result, err, time.Now()
 	p.mu.Lock()

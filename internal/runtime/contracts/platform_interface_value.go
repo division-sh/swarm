@@ -35,7 +35,7 @@ func admitPackInterfaceValue(value yamlsource.Value) (PackInterfaceDefinition, e
 		case "events":
 			out.Events, err = platformValueMap(v, func(v yamlsource.Value) (PackInterfaceEvent, error) {
 				var event PackInterfaceEvent
-				f, e := platformValueFields(v, "required_fields")
+				f, e := platformValueFields(v, "required_fields", "optional_fields")
 				if e != nil {
 					return event, e
 				}
@@ -46,6 +46,11 @@ func admitPackInterfaceValue(value yamlsource.Value) (PackInterfaceDefinition, e
 				event.RequiredFields, e = platformValueMap(fields, admitPackInterfaceField)
 				if e == nil && len(event.RequiredFields) == 0 {
 					e = nodeValueError(fields, fmt.Errorf("required_fields must be nonempty"))
+				}
+				if e == nil {
+					if optional, ok := f["optional_fields"]; ok {
+						event.OptionalFields, e = platformValueMap(optional, admitPackInterfaceField)
+					}
 				}
 				return event, e
 			})

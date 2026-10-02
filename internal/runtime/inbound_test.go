@@ -716,7 +716,7 @@ func TestInboundGateway_GitHubAdapterOwnsSignatureDeliveryIDAndEventMapping(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	projected, _, _, _, err := projectInboundPublication(target, admitted, store.record.Request, time.Now(), executionposture.Live, nil)
+	projected, _, _, _, err := projectInboundPublication(target, admitted, store.record.Request, time.Now(), executionposture.Live, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2462,7 +2462,7 @@ func TestInboundGateway_TelegramRejectsInvalidInputsBeforeMarkerAndPublish(t *te
 			wantBodyParts: []string{
 				"provider.telegram", "version=0.1.0", "manifest_hash=sha256:",
 				`normalized event "inbound.telegram.text_message"`, `path "message.text"`,
-				"projected value violates its declared output schema", "$ must be string",
+				"telegram_command requires text, got json.Number",
 			},
 		},
 		{

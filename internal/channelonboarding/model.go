@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
@@ -348,6 +349,7 @@ type ConnectedChannelReadiness struct {
 	BindingRevision      int64                           `json:"binding_revision"`
 	ActivationGeneration string                          `json:"activation_generation,omitempty"`
 	ObservedAt           time.Time                       `json:"observed_at"`
+	NativeInbox          *channelnative.Qualification    `json:"native_inbox,omitempty"`
 }
 
 // ConnectedChannelReadback is the canonical presentation projection for one
@@ -473,6 +475,7 @@ type StartRequest struct {
 	Posture                ActivationPosture                 `json:"activation_posture"`
 	Ceremony               IdentityCeremony                  `json:"identity_ceremony"`
 	SaveProof              bool                              `json:"save_proof"`
+	ClientLanguage         string                            `json:"client_language"`
 	CredentialReservations []CredentialReservation           `json:"credential_reservations"`
 	RequestedAt            time.Time                         `json:"requested_at"`
 }
@@ -526,6 +529,8 @@ type Operation struct {
 	Phase                   Phase                             `json:"phase"`
 	Revision                int64                             `json:"revision"`
 	SaveProof               bool                              `json:"save_proof"`
+	ClientLanguage          string                            `json:"client_language"`
+	ClientLocaleRevision    int64                             `json:"client_locale_revision"`
 	CredentialReservations  []CredentialReservation           `json:"credential_reservations"`
 	CredentialAdmissions    []CredentialAdmission             `json:"credential_admissions,omitempty"`
 	IdentityOperationID     string                            `json:"identity_operation_id,omitempty"`
@@ -553,6 +558,16 @@ type AdvanceRequest struct {
 	FailureCode                  string
 	FailureMessage               string
 	Now                          time.Time
+}
+
+// Locale declarations have their own fence: changing client language must not
+// rewrite a connection's revision or invalidate acknowledged installation work.
+type SetClientLocaleRequest struct {
+	OperationID      string
+	PrincipalID      string
+	ExpectedRevision int64
+	Language         string
+	Now              time.Time
 }
 
 // ReconcileBindingRequest fences the committed identity handoff before either
@@ -627,6 +642,7 @@ type Store interface {
 	TeardownStore
 	ReserveChannelOnboarding(context.Context, StartRequest) (Operation, error)
 	GetChannelOnboarding(context.Context, string) (Operation, error)
+	SetChannelClientLocale(context.Context, SetClientLocaleRequest) (Operation, error)
 	ListChannelOnboardingOperations(context.Context) ([]Operation, error)
 	AdvanceChannelOnboarding(context.Context, AdvanceRequest) (Operation, error)
 	ReconcileChannelOnboardingBinding(context.Context, ReconcileBindingRequest) (Operation, error)

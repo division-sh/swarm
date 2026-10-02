@@ -279,7 +279,8 @@ jobs:
   unused-darwin:
     name: Native Darwin unused analysis
     runs-on: macos-latest
-    timeout-minutes: 15
+    # Lead-authorized <=30% allowance; integer minutes round 19.5 down to 19.
+    timeout-minutes: 19
     steps:
       - uses: actions/checkout@v4
         with:

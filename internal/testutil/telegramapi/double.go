@@ -11,22 +11,48 @@ import (
 // Double implements the Telegram API operations used by connected-channel
 // onboarding and records every externally visible effect.
 type Double struct {
-	mu                           sync.Mutex
-	callbackURL                  string
-	signingSecret                string
-	registrations                map[string]registration
-	resourceIDs                  map[string]int64
-	registrationRequests         []map[string]any
-	deliveries                   []map[string]any
-	rejectNextCredential         bool
-	loseNextRegistrationResponse bool
-	registrationResponseBarrier  *responseBarrier
-	deliveryResponseBarrier      *responseBarrier
+	mu                            sync.Mutex
+	callbackURL                   string
+	signingSecret                 string
+	registrations                 map[string]registration
+	resourceIDs                   map[string]int64
+	commands                      map[string][]map[string]any
+	launchers                     map[string]string
+	commandWrites                 []map[string]any
+	commandReadbacks              int
+	commandReadbackFailures       int
+	registrationRequests          []map[string]any
+	deliveries                    []map[string]any
+	edits                         []map[string]any
+	acknowledgments               []map[string]any
+	rejectNextCredential          bool
+	loseNextRegistrationResponse  bool
+	loseNextDeliveryResponse      bool
+	loseNextEditResponse          bool
+	loseNextAckResponse           bool
+	loseNextCommandWriteResponse  bool
+	failCommandReadbackAfterWrite bool
+	registrationResponseBarrier   *responseBarrier
+	deliveryResponseBarrier       *responseBarrier
+	editResponseBarrier           *responseBarrier
+	ackResponseBarrier            *responseBarrier
+	delayedLostEdit               *responseBarrier
+	commandApplyBarrier           *responseBarrier
 }
 
 type registration struct {
 	callbackURL   string
 	signingSecret string
+}
+
+// Caller holds mu. Rotated/aliased credentials address the same bot's settings;
+// SetResourceID is the explicit way to model a genuinely different physical bot.
+func (p *Double) physicalResourceKey(credential string) string {
+	id := p.resourceIDs[strings.TrimSpace(credential)]
+	if id == 0 {
+		id = 420079
+	}
+	return fmt.Sprint(id)
 }
 
 type responseBarrier struct {
@@ -38,83 +64,387 @@ type responseBarrier struct {
 func (p *Double) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	credential := credentialFromPath(request.URL.Path)
+	p.mu.Lock()
+	physical := p.physicalResourceKey(credential)
+	p.mu.Unlock()
 	switch {
 	case strings.HasSuffix(request.URL.Path, "/getMe"):
-		p.mu.Lock()
-		reject := p.rejectNextCredential
-		p.rejectNextCredential = false
-		resourceID := p.resourceIDs[credential]
-		p.mu.Unlock()
-		if reject {
-			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write([]byte(`{"ok":false,"error_code":401,"description":"Unauthorized"}`))
-			return
-		}
-		if resourceID == 0 {
-			resourceID = 420079
-		}
-		_, _ = fmt.Fprintf(w, `{"ok":true,"result":{"id":%d}}`, resourceID)
+		p.serveIdentity(w, request, credential)
+	case strings.HasSuffix(request.URL.Path, "/setMyCommands"):
+		p.serveCommandWrite(w, request, physical)
+	case strings.HasSuffix(request.URL.Path, "/getMyCommands"):
+		p.serveCommandRead(w, request, physical)
+	case strings.HasSuffix(request.URL.Path, "/getChatMenuButton"):
+		p.serveLauncherRead(w, request, physical)
 	case strings.HasSuffix(request.URL.Path, "/setWebhook"):
-		var payload map[string]any
-		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		p.mu.Lock()
-		p.callbackURL = strings.TrimSpace(fmt.Sprint(payload["url"]))
-		p.signingSecret = strings.TrimSpace(fmt.Sprint(payload["secret_token"]))
-		if p.registrations == nil {
-			p.registrations = map[string]registration{}
-		}
-		p.registrations[credential] = registration{callbackURL: p.callbackURL, signingSecret: p.signingSecret}
-		p.registrationRequests = append(p.registrationRequests, clonePayload(payload))
-		loseResponse := p.loseNextRegistrationResponse
-		p.loseNextRegistrationResponse = false
-		barrier := p.registrationResponseBarrier
-		p.registrationResponseBarrier = nil
-		p.mu.Unlock()
-		if barrier != nil {
-			close(barrier.arrived)
-			<-barrier.release
-		}
-		if loseResponse {
-			hijacker, ok := w.(http.Hijacker)
-			if !ok {
-				http.Error(w, "provider response-loss injection requires HTTP hijacking", http.StatusInternalServerError)
-				return
-			}
-			connection, _, err := hijacker.Hijack()
-			if err == nil {
-				_ = connection.Close()
-			}
-			return
-		}
-		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+		p.serveRegistrationWrite(w, request, physical)
 	case strings.HasSuffix(request.URL.Path, "/getWebhookInfo"):
-		p.mu.Lock()
-		callbackURL := p.registrations[credential].callbackURL
-		p.mu.Unlock()
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"url": callbackURL}})
+		p.serveRegistrationRead(w, request, physical)
 	case strings.HasSuffix(request.URL.Path, "/sendMessage"):
-		var payload map[string]any
-		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		p.mu.Lock()
-		p.deliveries = append(p.deliveries, clonePayload(payload))
-		messageID := len(p.deliveries)
-		barrier := p.deliveryResponseBarrier
-		p.deliveryResponseBarrier = nil
-		p.mu.Unlock()
-		if barrier != nil {
-			close(barrier.arrived)
-			<-barrier.release
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"message_id": messageID}})
+		p.serveDelivery(w, request)
+	case strings.HasSuffix(request.URL.Path, "/editMessageText"):
+		p.serveEdit(w, request)
+	case strings.HasSuffix(request.URL.Path, "/answerCallbackQuery"):
+		p.serveAcknowledgment(w, request)
 	default:
 		http.Error(w, `{"ok":false}`, http.StatusNotFound)
 	}
+}
+
+func (p *Double) serveIdentity(w http.ResponseWriter, request *http.Request, credential string) {
+	p.mu.Lock()
+	reject := p.rejectNextCredential
+	p.rejectNextCredential = false
+	resourceID := p.resourceIDs[credential]
+	p.mu.Unlock()
+	if reject {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"ok":false,"error_code":401,"description":"Unauthorized"}`))
+		return
+	}
+	if resourceID == 0 {
+		resourceID = 420079
+	}
+	_, _ = fmt.Fprintf(w, `{"ok":true,"result":{"id":%d,"username":"SwarmTestBot"}}`, resourceID)
+}
+
+func (p *Double) serveCommandWrite(w http.ResponseWriter, request *http.Request, physical string) {
+	var payload struct {
+		Scope        map[string]any   `json:"scope"`
+		LanguageCode string           `json:"language_code"`
+		Commands     []map[string]any `json:"commands"`
+	}
+	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	key, err := commandScopeKey(physical, payload.Scope, payload.LanguageCode)
+	if err != nil || len(payload.Commands) > 100 {
+		http.Error(w, "invalid command scope", http.StatusBadRequest)
+		return
+	}
+	p.mu.Lock()
+	barrier := p.commandApplyBarrier
+	p.commandApplyBarrier = nil
+	p.mu.Unlock()
+	if barrier != nil {
+		close(barrier.arrived)
+		<-barrier.release
+	}
+	p.mu.Lock()
+	if p.commands == nil {
+		p.commands = map[string][]map[string]any{}
+	}
+	p.commands[key] = payload.Commands
+	p.commandWrites = append(p.commandWrites, map[string]any{"scope": payload.Scope, "commands": payload.Commands, "language_code": payload.LanguageCode})
+	loseResponse := p.loseNextCommandWriteResponse
+	p.loseNextCommandWriteResponse = false
+	p.mu.Unlock()
+	if loseResponse {
+		hijacker, ok := w.(http.Hijacker)
+		if !ok {
+			http.Error(w, "provider response-loss injection requires HTTP hijacking", http.StatusInternalServerError)
+			return
+		}
+		connection, _, err := hijacker.Hijack()
+		if err == nil {
+			_ = connection.Close()
+		}
+		return
+	}
+	_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+}
+
+func (p *Double) serveCommandRead(w http.ResponseWriter, request *http.Request, physical string) {
+	var payload struct {
+		Scope        map[string]any `json:"scope"`
+		LanguageCode string         `json:"language_code"`
+	}
+	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	key, err := commandScopeKey(physical, payload.Scope, payload.LanguageCode)
+	if err != nil {
+		http.Error(w, "invalid command scope", http.StatusBadRequest)
+		return
+	}
+	p.mu.Lock()
+	commands := append([]map[string]any(nil), p.commands[key]...)
+	p.commandReadbacks++
+	failReadback := p.failCommandReadbackAfterWrite && len(p.commandWrites) > 0
+	if failReadback {
+		p.commandReadbackFailures++
+	}
+	p.mu.Unlock()
+	if failReadback {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"ok":false,"description":"readback unavailable"}`))
+		return
+	}
+	if commands == nil {
+		commands = []map[string]any{}
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": commands})
+}
+
+func (p *Double) serveLauncherRead(w http.ResponseWriter, request *http.Request, physical string) {
+	var payload map[string]any
+	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	chat := ""
+	if raw, supplied := payload["chat_id"]; supplied {
+		chat = fmt.Sprint(raw)
+	}
+	p.mu.Lock()
+	launcher := p.launchers[physical+":"+chat]
+	p.mu.Unlock()
+	if launcher == "" {
+		launcher = "default"
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"type": launcher}})
+}
+
+func (p *Double) serveRegistrationWrite(w http.ResponseWriter, request *http.Request, physical string) {
+	var payload map[string]any
+	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	p.mu.Lock()
+	p.callbackURL = strings.TrimSpace(fmt.Sprint(payload["url"]))
+	p.signingSecret = strings.TrimSpace(fmt.Sprint(payload["secret_token"]))
+	if p.registrations == nil {
+		p.registrations = map[string]registration{}
+	}
+	p.registrations[physical] = registration{callbackURL: p.callbackURL, signingSecret: p.signingSecret}
+	p.registrationRequests = append(p.registrationRequests, clonePayload(payload))
+	loseResponse := p.loseNextRegistrationResponse
+	p.loseNextRegistrationResponse = false
+	barrier := p.registrationResponseBarrier
+	p.registrationResponseBarrier = nil
+	p.mu.Unlock()
+	if barrier != nil {
+		close(barrier.arrived)
+		<-barrier.release
+	}
+	if loseResponse {
+		hijacker, ok := w.(http.Hijacker)
+		if !ok {
+			http.Error(w, "provider response-loss injection requires HTTP hijacking", http.StatusInternalServerError)
+			return
+		}
+		connection, _, err := hijacker.Hijack()
+		if err == nil {
+			_ = connection.Close()
+		}
+		return
+	}
+	_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+}
+
+func (p *Double) serveRegistrationRead(w http.ResponseWriter, request *http.Request, physical string) {
+	p.mu.Lock()
+	callbackURL := p.registrations[physical].callbackURL
+	p.mu.Unlock()
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"url": callbackURL}})
+}
+
+func (p *Double) serveDelivery(w http.ResponseWriter, request *http.Request) {
+	var payload map[string]any
+	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	p.mu.Lock()
+	p.deliveries = append(p.deliveries, clonePayload(payload))
+	messageID := len(p.deliveries)
+	loseResponse := p.loseNextDeliveryResponse
+	p.loseNextDeliveryResponse = false
+	barrier := p.deliveryResponseBarrier
+	p.deliveryResponseBarrier = nil
+	p.mu.Unlock()
+	if barrier != nil {
+		close(barrier.arrived)
+		<-barrier.release
+	}
+	if loseResponse {
+		loseProviderResponse(w)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"message_id": messageID}})
+}
+
+func (p *Double) serveEdit(w http.ResponseWriter, request *http.Request) {
+	var payload map[string]any
+	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	messageID, ok := payload["message_id"].(float64)
+	p.mu.Lock()
+	if !ok || messageID < 1 || int(messageID) > len(p.deliveries) ||
+		payload["chat_id"] != p.deliveries[int(messageID)-1]["chat_id"] {
+		p.mu.Unlock()
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"ok":false,"description":"message not found"}`))
+		return
+	}
+	delayed := p.delayedLostEdit
+	p.delayedLostEdit = nil
+	if delayed != nil {
+		p.mu.Unlock()
+		loseProviderResponse(w)
+		close(delayed.arrived)
+		<-delayed.release
+		p.mu.Lock()
+		p.edits = append(p.edits, clonePayload(payload))
+		p.mu.Unlock()
+		return
+	}
+	p.edits = append(p.edits, clonePayload(payload))
+	loseResponse := p.loseNextEditResponse
+	p.loseNextEditResponse = false
+	barrier := p.editResponseBarrier
+	p.editResponseBarrier = nil
+	p.mu.Unlock()
+	if barrier != nil {
+		close(barrier.arrived)
+		<-barrier.release
+	}
+	if loseResponse {
+		loseProviderResponse(w)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"message_id": int(messageID)}})
+}
+
+func (p *Double) serveAcknowledgment(w http.ResponseWriter, request *http.Request) {
+	var payload map[string]any
+	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if payload["callback_query_id"] == nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"ok":false,"description":"callback query required"}`))
+		return
+	}
+	p.mu.Lock()
+	p.acknowledgments = append(p.acknowledgments, clonePayload(payload))
+	loseResponse := p.loseNextAckResponse
+	p.loseNextAckResponse = false
+	barrier := p.ackResponseBarrier
+	p.ackResponseBarrier = nil
+	p.mu.Unlock()
+	if barrier != nil {
+		close(barrier.arrived)
+		<-barrier.release
+	}
+	if loseResponse {
+		loseProviderResponse(w)
+		return
+	}
+	_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+}
+
+func loseProviderResponse(w http.ResponseWriter) {
+	hijacker, ok := w.(http.Hijacker)
+	if !ok {
+		http.Error(w, "provider response-loss injection requires HTTP hijacking", http.StatusInternalServerError)
+		return
+	}
+	connection, _, err := hijacker.Hijack()
+	if err == nil {
+		_ = connection.Close()
+	}
+}
+
+func commandScopeKey(credential string, scope map[string]any, language string) (string, error) {
+	if scope == nil {
+		return "", fmt.Errorf("command scope is required")
+	}
+	typeName, ok := scope["type"].(string)
+	if !ok || (typeName != "chat" && typeName != "chat_member") {
+		return "", fmt.Errorf("unsupported command scope")
+	}
+	chat, ok := scope["chat_id"].(string)
+	if !ok || chat == "" {
+		return "", fmt.Errorf("command chat is required")
+	}
+	member := ""
+	if typeName == "chat_member" {
+		member, ok = scope["user_id"].(string)
+		if !ok || member == "" {
+			return "", fmt.Errorf("command member is required")
+		}
+	}
+	return credential + "\x00" + typeName + "\x00" + chat + "\x00" + member + "\x00" + language, nil
+}
+
+func (p *Double) CommandWrites() []map[string]any {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]map[string]any, len(p.commandWrites))
+	for index, write := range p.commandWrites {
+		out[index] = clonePayload(write)
+	}
+	return out
+}
+
+func (p *Double) CommandReadbackCounts() (int, int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.commandReadbacks, p.commandReadbackFailures
+}
+
+func (p *Double) LoseNextCommandWriteAcknowledgment() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.loseNextCommandWriteResponse = true
+}
+
+func (p *Double) FailCommandReadbackAfterWrite() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.failCommandReadbackAfterWrite = true
+}
+
+func (p *Double) PauseNextCommandApply() (<-chan struct{}, func()) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	barrier := newResponseBarrier()
+	p.commandApplyBarrier = barrier
+	return barrier.arrived, barrier.releaseResponse
+}
+
+func (p *Double) SeedCommands(credential string, scope map[string]any, language string, commands []map[string]any) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	key, err := commandScopeKey(p.physicalResourceKey(credential), scope, language)
+	if err != nil {
+		return err
+	}
+	if p.commands == nil {
+		p.commands = map[string][]map[string]any{}
+	}
+	p.commands[key] = append([]map[string]any(nil), commands...)
+	return nil
+}
+
+func (p *Double) SeedLauncher(credential, chat, launcher string) error {
+	if credential == "" || (launcher != "commands" && launcher != "default" && launcher != "web_app") {
+		return fmt.Errorf("invalid launcher fixture")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.launchers == nil {
+		p.launchers = map[string]string{}
+	}
+	p.launchers[p.physicalResourceKey(credential)+":"+chat] = launcher
+	return nil
 }
 
 // SetResourceID makes one credential represent a distinct provider resource.
@@ -132,7 +462,7 @@ func (p *Double) SetResourceID(credential string, resourceID int64) {
 func (p *Double) RegistrationForCredential(credential string) (string, string, int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	current := p.registrations[strings.TrimSpace(credential)]
+	current := p.registrations[p.physicalResourceKey(credential)]
 	return current.callbackURL, current.signingSecret, len(p.registrationRequests)
 }
 
@@ -149,6 +479,99 @@ func (p *Double) Delivery(index int) map[string]any {
 		return nil
 	}
 	return clonePayload(p.deliveries[index])
+}
+
+func (p *Double) Edits() []map[string]any {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]map[string]any, len(p.edits))
+	for index, edit := range p.edits {
+		out[index] = clonePayload(edit)
+	}
+	return out
+}
+
+func (p *Double) Acknowledgments() []map[string]any {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]map[string]any, len(p.acknowledgments))
+	for index, ack := range p.acknowledgments {
+		out[index] = clonePayload(ack)
+	}
+	return out
+}
+
+func (p *Double) LoseNextEditAcknowledgment() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.loseNextEditResponse = true
+}
+
+func (p *Double) LoseNextDeliveryAcknowledgment() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.loseNextDeliveryResponse = true
+}
+
+func (p *Double) LoseNextCallbackAcknowledgment() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.loseNextAckResponse = true
+}
+
+func (p *Double) PauseNextCallbackResponse() (<-chan struct{}, func()) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	barrier := newResponseBarrier()
+	p.ackResponseBarrier = barrier
+	return barrier.arrived, barrier.releaseResponse
+}
+
+func (p *Double) PauseNextEditResponse() (<-chan struct{}, func()) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	barrier := newResponseBarrier()
+	p.editResponseBarrier = barrier
+	return barrier.arrived, barrier.releaseResponse
+}
+
+// LoseNextEditAcknowledgmentBeforeApply models a lost connection with the
+// provider still owning a write that may apply after a successor has progressed.
+func (p *Double) LoseNextEditAcknowledgmentBeforeApply() (<-chan struct{}, func()) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	barrier := newResponseBarrier()
+	p.delayedLostEdit = barrier
+	return barrier.arrived, barrier.releaseResponse
+}
+
+func (p *Double) Confirmation(index int) map[string]any {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, delivery := range p.deliveries {
+		text, _ := delivery["text"].(string)
+		if !strings.HasPrefix(text, "Swarm channel connected.") {
+			continue
+		}
+		if index == 0 {
+			return clonePayload(delivery)
+		}
+		index--
+	}
+	return nil
+}
+
+func (p *Double) OnboardingCounts() (int, int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	confirmations := 0
+	for _, delivery := range p.deliveries {
+		text, _ := delivery["text"].(string)
+		if strings.HasPrefix(text, "Swarm channel connected.") {
+			confirmations++
+		}
+	}
+	return len(p.registrationRequests), confirmations
 }
 
 func (p *Double) Counts() (int, int) {

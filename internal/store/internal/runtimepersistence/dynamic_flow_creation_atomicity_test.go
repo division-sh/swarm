@@ -58,6 +58,7 @@ type dynamicFlowCreationAtomicityStore interface {
 type dynamicFlowCreationAtomicityFixture struct {
 	selected dynamicFlowCreationAtomicityStore
 	process  runtimestartupownership.ProcessCapability
+	grant    runtimestartupownership.LiveGenerationGrant
 	db       *sql.DB
 	workflow *runtimepipeline.PipelineCoordinator
 	bus      *runtimebus.EventBus
@@ -318,8 +319,8 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	}
 	return dynamicFlowCreationAtomicityFixture{
 		selected: selected,
-		process:  process,
-		db:       db, workflow: workflow, bus: eventBus, ctx: ctx,
+		process:  process, grant: grant,
+		db: db, workflow: workflow, bus: eventBus, ctx: ctx,
 		runID: runID, plan: plan, event: event, attempt: admitted.Attempt, sqlite: sqlite,
 	}
 }

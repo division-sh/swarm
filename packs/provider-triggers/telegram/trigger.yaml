@@ -73,6 +73,21 @@ normalized_events:
       provider_message_reference:
         from: message.message_id
         schema: {type: integer, minimum: 1, maximum: 2147483647}
+      reply_to_message_reference:
+        from: message.reply_to_message.message_id
+        schema: {type: integer, minimum: 1, maximum: 2147483647}
+        optional: true
+      command_invocation:
+        from: message.text
+        schema:
+          type: object
+          additionalProperties: false
+          required: [reference]
+          properties:
+            reference: {type: string, pattern: '^[A-Za-z0-9_]{1,32}$', minLength: 1, maxLength: 32}
+            address: {type: string, pattern: '^[A-Za-z0-9_]{5,32}$', minLength: 5, maxLength: 32}
+        convert: telegram_command
+        optional: true
     when:
       absent: [callback_query, message.sender_chat]
       one_of:

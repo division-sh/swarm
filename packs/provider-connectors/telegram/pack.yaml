@@ -2,7 +2,7 @@ id: provider.telegram.connector
 version: 0.1.0
 platform_version: ">=0.7.0 <0.8.0"
 type: connector
-manifest_hash: sha256:aaaa01c40039fa7280990732bc733421a02403db2df349326d2e865bb565ecd9
+manifest_hash: sha256:c33fa6494ffaffc74e69885d26b97c90d5c13d7df0e8f1159ad4f8fbbd06d221
 provenance:
   source: platform
 capabilities:
@@ -12,6 +12,13 @@ capabilities:
       - telegram.apply_webhook
       - telegram.edit_message
       - telegram.identify_bot
+      - telegram.install_inbox_commands
+      - telegram.install_shared_inbox_commands
+      - telegram.read_bot_address
+      - telegram.read_chat_menu_button
+      - telegram.read_default_menu_button
+      - telegram.read_inbox_commands
+      - telegram.read_shared_inbox_commands
       - telegram.read_webhook
       - telegram.send_interactive
       - telegram.send_message

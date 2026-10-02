@@ -15,6 +15,7 @@ import (
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	storeactivityjournal "github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
+	storechanneldelivery "github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	storestandingdisposition "github.com/division-sh/swarm/internal/store/internal/backend/standingdisposition"
 )
@@ -24,6 +25,41 @@ var errInboundPublicationNotFound = errors.New("inbound publication not found")
 type inboundPublicationTransactionStore interface {
 	linkInboundPublicationEventTx(context.Context, *sql.Tx, runtimeinbound.Request, runtimeinbound.EventRecord) error
 	finalizeInboundPublicationTx(context.Context, *sql.Tx, *mutationprotocol.Attempt, runtimeinbound.Request, int) (runtimeinbound.Record, error)
+}
+
+func commitOperatorChannelIntentsTx(ctx context.Context, tx *sql.Tx, eventStore eventCommitTxStore, command runtimeinbound.CommitCommand, request runtimeinbound.Request) error {
+	if command.OperatorChannelAction != nil {
+		_, postgres := any(eventStore).(*EventPostgresOwner)
+		if err := storechanneldelivery.InsertActionIntentTx(ctx, tx, *command.OperatorChannelAction, request.OriginalReceivedAt, postgres); err != nil {
+			return err
+		}
+	}
+	if command.OperatorChannelText != nil {
+		_, postgres := any(eventStore).(*EventPostgresOwner)
+		if command.OperatorChannelText.EntryReference == "" && command.OperatorChannelText.ReplyToReference == "" {
+			current, err := storechanneldelivery.HasCurrentBareInputDraftTx(ctx, tx, *command.OperatorChannelText, request.OriginalReceivedAt, postgres)
+			if err != nil {
+				return err
+			}
+			if !current {
+				return fmt.Errorf("bare channel input draft changed before publication")
+			}
+		}
+		if err := storechanneldelivery.InsertTextIntentTx(ctx, tx, *command.OperatorChannelText, request.OriginalReceivedAt, postgres); err != nil {
+			return err
+		}
+	}
+	if command.PotentialBareText != nil {
+		_, postgres := any(eventStore).(*EventPostgresOwner)
+		current, err := storechanneldelivery.HasCurrentBareInputDraftTx(ctx, tx, *command.PotentialBareText, request.OriginalReceivedAt, postgres)
+		if err != nil {
+			return err
+		}
+		if current {
+			return fmt.Errorf("bare channel text became operator input before publication")
+		}
+	}
+	return nil
 }
 
 func commitInboundPublicationTx(
@@ -78,6 +114,9 @@ func commitInboundPublicationSQL(
 			return runtimeinbound.CommitResult{}, fmt.Errorf("operator channel claim settlement did not consume claim")
 		}
 		settledClaim = &settlement
+	}
+	if err := commitOperatorChannelIntentsTx(ctx, tx, eventStore, command, request); err != nil {
+		return runtimeinbound.CommitResult{}, err
 	}
 	committed := make([]runtimebus.CommittedPublication, len(command.Publications))
 	children := make([]runtimeinbound.EventRecord, len(command.Finalization.Events))

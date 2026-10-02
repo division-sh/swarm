@@ -651,10 +651,6 @@ func (s *PostgresStore) ListStandingServiceStatuses(ctx context.Context) ([]pipe
 	return s.pipelinePostgresOwner.ListStandingServiceStatuses(ctx)
 }
 
-func (s *PostgresStore) ListUnnotifiedCriticalMailboxItems(ctx context.Context, limit int) ([]tools.MailboxItem, error) {
-	return s.mailboxPostgresOwner.ListUnnotifiedCriticalMailboxItems(ctx, limit)
-}
-
 func (s *PostgresStore) ListV1MailboxItems(ctx context.Context, opts mailbox.V1ListOptions) ([]mailbox.V1Item, string, error) {
 	return s.mailboxPostgresOwner.ListV1MailboxItems(ctx, opts)
 }
@@ -1193,6 +1189,10 @@ func (s *PostgresStore) SaveManagedCapabilitySurface(ctx context.Context, surfac
 
 func (s *PostgresStore) ScanDeliveryContinuations(ctx context.Context, authority deliverylifecycle.ExecutionAuthority, cursor deliverylifecycle.ContinuationCursor, limit int) (deliverylifecycle.ContinuationPage, error) {
 	return s.deliveryPostgresOwner.ScanDeliveryContinuations(ctx, authority, cursor, limit)
+}
+
+func (s *PostgresStore) SetChannelClientLocale(ctx context.Context, req channelonboarding.SetClientLocaleRequest) (channelonboarding.Operation, error) {
+	return s.channelOnboardingPostgresOwner.SetChannelClientLocale(ctx, req)
 }
 
 func (s *PostgresStore) SetEventPayloadAdmitter(admitter bus.PayloadAdmitter) {
@@ -1883,10 +1883,6 @@ func (s *SQLiteRuntimeStore) ListStandingServiceStatuses(ctx context.Context) ([
 	return s.pipelineSQLiteOwner.ListStandingServiceStatuses(ctx)
 }
 
-func (s *SQLiteRuntimeStore) ListUnnotifiedCriticalMailboxItems(ctx context.Context, limit int) ([]tools.MailboxItem, error) {
-	return s.mailboxSQLiteOwner.ListUnnotifiedCriticalMailboxItems(ctx, limit)
-}
-
 func (s *SQLiteRuntimeStore) ListV1MailboxItems(ctx context.Context, opts mailbox.V1ListOptions) ([]mailbox.V1Item, string, error) {
 	return s.mailboxSQLiteOwner.ListV1MailboxItems(ctx, opts)
 }
@@ -2417,6 +2413,10 @@ func (s *SQLiteRuntimeStore) ScanDeliveryContinuations(ctx context.Context, auth
 
 func (s *SQLiteRuntimeStore) ServeAbandonDeliveryQuiesced(ctx context.Context, eventID string, subscriberType string, subscriberID string) (bool, error) {
 	return s.runLifecycleSQLiteOwner.ServeAbandonDeliveryQuiesced(ctx, eventID, subscriberType, subscriberID)
+}
+
+func (s *SQLiteRuntimeStore) SetChannelClientLocale(ctx context.Context, req channelonboarding.SetClientLocaleRequest) (channelonboarding.Operation, error) {
+	return s.channelOnboardingSQLiteOwner.SetChannelClientLocale(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) SetEventPayloadAdmitter(admitter bus.PayloadAdmitter) {

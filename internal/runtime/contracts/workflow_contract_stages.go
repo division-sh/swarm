@@ -29,6 +29,7 @@ type FlowStageGateDeclaration struct {
 type FlowStageGateOutcomeDeclaration struct {
 	Label      string                            `yaml:"label"`
 	Input      map[string]WorkflowGateInputField `yaml:"input"`
+	InputOrder []string                          `yaml:"-"`
 	AdvancesTo string                            `yaml:"advances_to"`
 	Emit       EmitSpec                          `yaml:"emit"`
 }
@@ -96,6 +97,7 @@ func (d FlowStageDeclarations) GatePlans(flowID string) []WorkflowGatePlan {
 			}
 			plan.Outcomes[strings.TrimSpace(verdict)] = WorkflowGateOutcomePlan{
 				Verdict: strings.TrimSpace(verdict), Label: strings.TrimSpace(outcome.Label), Input: input,
+				InputOrder: append([]string(nil), outcome.InputOrder...),
 				AdvancesTo: strings.TrimSpace(outcome.AdvancesTo), Emit: cloneEmitSpec(outcome.Emit),
 			}
 		}

@@ -495,7 +495,9 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 	t.Run("duplicate slot rejects whole set before writes", func(t *testing.T) {
 		other := testRegistrationPair(t, registration, "alerts", "ingress:alerts:telegram")
 		other.CredentialKeys = map[string]string{"telegram_bot_token": "bot-other"}
-		if err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair, other}); err == nil || !strings.Contains(err.Error(), "selected by both") {
+		err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair, other})
+		var collision *SlotCollisionError
+		if !errors.As(err, &collision) || collision.SlotID != "telegram:bot_webhook:42" || len(collision.Selections) != 2 {
 			t.Fatalf("collision error = %v", err)
 		}
 		identified, applied := transport.counts()

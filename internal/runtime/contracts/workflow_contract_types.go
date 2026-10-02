@@ -331,6 +331,7 @@ type WorkflowGateOutcomePlan struct {
 	Verdict    string
 	Label      string
 	Input      map[string]WorkflowGateInputField
+	InputOrder []string
 	AdvancesTo string
 	Emit       EmitSpec
 	// EmitSchema is the resolved event payload schema frozen into a decision
@@ -1732,6 +1733,7 @@ type PackInterfaceOperation struct {
 
 type PackInterfaceEvent struct {
 	RequiredFields map[string]PackInterfaceField `yaml:"required_fields"`
+	OptionalFields map[string]PackInterfaceField `yaml:"optional_fields,omitempty"`
 }
 
 type PackInterfaceField struct {

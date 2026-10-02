@@ -104,8 +104,9 @@ func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest
 			mergeCeiling := issuanceBudget
 			validDrainCeiling := 5 * time.Minute
 			if backend == "postgres" && transactionOptions.Delay == 0 {
-				// #2394 retains the 10s objective and prior 15s ceiling for reassessment.
-				mergeCeiling = 20 * time.Second
+				// #2394 retains the 10s objective and prior 15s/20s ceilings.
+				// The lead authorized a 30% served-only allowance on 2026-10-02.
+				mergeCeiling = 26 * time.Second
 			}
 			if transactionOptions.Delay == 300*time.Millisecond && transactionOptions.DelayScope == storetest.DelayAllCommits {
 				// #2394 retains 120s issuance / 5m drain as performance objectives.
@@ -196,7 +197,7 @@ func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest
 			}
 			elapsed := chunks.LastCommitAt.Sub(issuanceStarted)
 			if backend == "postgres" && transactionOptions.Delay == 0 {
-				t.Logf("normal PostgreSQL served reporter: measured=%s original_objective=%s previous_ceiling=%s current_ceiling=%s", elapsed, issuanceBudget, 15*time.Second, mergeCeiling)
+				t.Logf("normal PostgreSQL served reporter: measured=%s original_objective=%s prior_ceiling=%s previous_ceiling=%s current_ceiling=%s", elapsed, issuanceBudget, 15*time.Second, 20*time.Second, mergeCeiling)
 			}
 			t.Logf("HTTP original500 first batch submission -> final durable chunk acknowledgement: %s (original_target=%s merge_ceiling=%s); cursor observed at %s; delay=%s scope=%s; transaction receipt=%+v",
 				elapsed, issuanceBudget, mergeCeiling, observed.Sub(issuanceStarted), transactionOptions.Delay, transactionOptions.DelayScope, receipt)

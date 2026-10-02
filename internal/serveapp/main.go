@@ -1545,6 +1545,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	}
 	connectedChannelReadiness := &serveConnectedChannelReadiness{
 		manager: runtimeContextManager, store: channelOnboardingStore, identities: operatorChannels,
+		native:      stores.ChannelNative(),
 		credentials: providerCredentialOwner, effects: confirmationEffects, ingress: ready,
 	}
 	channelOnboarding, err := channelonboarding.NewService(channelonboarding.ServiceOptions{
@@ -1904,6 +1905,17 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 				return 1
 			}
 		}
+	}
+	if err := startServeChannelDelivery(ctx, processWorkOwner, &serveChannelDeliveryDispatcher{
+		store: stores.ChannelDelivery(), native: stores.ChannelNative(), cards: storeDeps.DecisionCards,
+		mailbox: stores.MailboxAPI(), proposedEffects: storeDeps.ProposedEffects,
+		activations: channelOnboardingStore, manager: runtimeContextManager,
+		ingress: ready,
+		effects: stores.Effects(), credentials: providerCredentialOwner,
+		posture: posture, runtimeInstanceID: runtimeInstanceID, now: time.Now,
+	}); err != nil {
+		presenter.runtimeFailure("channel_delivery", err)
+		return 1
 	}
 
 	if req.OnReady != nil {

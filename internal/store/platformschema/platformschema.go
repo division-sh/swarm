@@ -209,6 +209,8 @@ func platformTableOrder(name string) int {
 		return 2
 	case "operator_channel_bindings":
 		return 3
+	case "channel_delivery_defaults":
+		return 4
 	case "operator_channel_claim_receipts":
 		return 4
 	case "channel_onboarding_operations":
@@ -217,6 +219,10 @@ func platformTableOrder(name string) int {
 		return 6
 	case "connected_channel_activations":
 		return 7
+	case "channel_native_settings":
+		return 8
+	case "channel_native_setting_consumers":
+		return 9
 	case "agent_topology_source_set_head":
 		return 13
 	case "agent_topology_source_set_operations":
@@ -244,6 +250,10 @@ func platformTableOrder(name string) int {
 	case "inbound_publications":
 		return 22
 	case "inbound_publication_events":
+		return 23
+	case "operator_channel_action_intents":
+		return 23
+	case "operator_channel_text_intents":
 		return 23
 	case "dead_letters":
 		return 24
@@ -297,6 +307,12 @@ func platformTableOrder(name string) int {
 		return 95
 	case "mailbox":
 		return 100
+	case "channel_delivery_plans":
+		return 101
+	case "channel_delivery_renders":
+		return 102
+	case "channel_delivery_receipts":
+		return 104
 	case "decision_cards":
 		return 101
 	case "proposed_effect_continuations", "human_task_continuations":
