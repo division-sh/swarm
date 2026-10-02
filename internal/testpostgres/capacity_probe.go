@@ -86,7 +86,9 @@ func (p *CapacityProbe) run(t *testing.T, name string, args ...string) {
 
 func (p *CapacityProbe) start(t *testing.T, capacity int) {
 	t.Helper()
-	options := fmt.Sprintf("-h '' -k %s -p 5432 -c max_connections=%d -c log_statement=all", p.socket, capacity)
+	// pg_ctl interprets -o through a shell, unlike the surrounding exec arguments.
+	socket := "'" + strings.ReplaceAll(p.socket, "'", "'\\''") + "'"
+	options := fmt.Sprintf("-h '' -k %s -p 5432 -c max_connections=%d -c log_statement=all", socket, capacity)
 	// A failed readiness wait may still have started PostgreSQL. Cleanup must
 	// attempt shutdown before removing the owned data, even on that failure.
 	p.running = true
