@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestClockScheduleBareEventAndConsumerLaw(t *testing.T) {
@@ -44,6 +45,9 @@ func TestClockScheduleBareEventAndConsumerLaw(t *testing.T) {
 				if len(findings) != 0 {
 					t.Fatalf("lawful clock refused: %#v", findings)
 				}
+				if report := Run(t.Context(), semanticview.Wrap(bundle), Options{Purpose: StructuralValidation}); len(report.Errors()) != 0 {
+					t.Fatalf("lawful clock failed full structural verification: %#v", report.Errors())
+				}
 			} else if len(findings) != 1 || !strings.Contains(findings[0].Message, tc.want) {
 				t.Fatalf("missing exact clock refusal %q: %#v", tc.want, findings)
 			}
@@ -54,35 +58,17 @@ func TestClockScheduleBareEventAndConsumerLaw(t *testing.T) {
 func TestClockScheduleRequiresActualConnectionToPrivateConsumer(t *testing.T) {
 	for _, connected := range []bool{false, true} {
 		t.Run(map[bool]string{false: "unconnected same name", true: "compiled connection"}[connected], func(t *testing.T) {
-			root := t.TempDir()
-			rootSchema := "stages: []\n"
-			if connected {
-				rootSchema += "connect:\n  - {event: poll.tick, from: producer, to: receiver}\n"
-			}
-			files := map[string]string{
-				"schema.yaml":          rootSchema,
-				"producer/schema.yaml": "stages: []\nschedules:\n  poll: {every: 5m, emit: poll.tick}\npins:\n  outputs:\n    events: [poll.tick]\n",
-				"producer/events.yaml": "poll.tick:\n",
-				"receiver/schema.yaml": "stages: []\npins:\n  inputs:\n    events: [poll.tick]\n",
-				"receiver/nodes.yaml":  "observer:\n  event_handlers:\n    poll.tick: {}\n",
-			}
-			if !connected {
-				files["receiver/events.yaml"] = "poll.tick:\n"
-			}
-			for name, content := range files {
-				path := filepath.Join(root, name)
-				if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(path, []byte(content), 0600); err != nil {
-					t.Fatal(err)
-				}
-			}
+			root := canonicalrouting.CopyParentConnectClock(t, connected)
 			repo := repoRootForBootverifyTest(t)
 			bundle := loadFixtureBundleAt(t, repo, root, contracts.DefaultPlatformSpecFile(repo))
 			findings := checkClockScheduleValidation(newCheckerContext(t.Context(), semanticview.Wrap(bundle), Options{}))
 			if connected && len(findings) != 0 {
 				t.Fatalf("real compiled consumer refused: %#v", findings)
+			}
+			if connected {
+				if report := Run(t.Context(), semanticview.Wrap(bundle), Options{Purpose: StructuralValidation}); len(report.Errors()) != 0 {
+					t.Fatalf("connected clock failed full structural verification: %#v", report.Errors())
+				}
 			}
 			if !connected && (len(findings) != 1 || !strings.Contains(findings[0].Message, "actual consumer")) {
 				t.Fatalf("same-name child manufactured consumer: %#v", findings)
