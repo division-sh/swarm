@@ -39,6 +39,8 @@ func TestScenarioInvalidVariantsRequireValidBaseAndTypedRejection(t *testing.T) 
 		{"base CEL failure", "shared.received", map[string]any{"alpha": "${unknown()}", "id": valid["id"]}, nil, false},
 		{"override CEL failure", "shared.received", valid, map[string]any{"alpha": "${unknown()}"}, false},
 		{"unsafe materialization", "shared.received", valid, map[string]any{"alpha": "${9007199254740993}"}, false},
+		{"unsupported CEL result", "shared.received", valid, map[string]any{"alpha": "${b'abc'}"}, false},
+		{"colliding CEL keys", "shared.received", valid, map[string]any{"alpha": "${{1:'number','1':'text'}}"}, false},
 	} {
 		t.Run(row.name, func(t *testing.T) {
 			doc := scenarioDocument{Invalid: &scenarioInvalid{Base: map[string]any{"publish": row.event, "payload": row.payload}, Cases: []scenarioInvalidCase{{Name: row.name, Set: row.set}}}}
@@ -120,10 +122,15 @@ func TestScenarioAdmissionRefusesBeforeSessionAcquisition(t *testing.T) {
 		"steps: [{publish: item.received, payload: {item_id: x}}, {mailbox.decide: {match: {anchor_kind: stage_gate}, verdict: '${unknown()}'}}]\n",
 		"steps: [{publish: item.received, payload: {item_id: x}}]\nexpect: {entities: [{type: default, fields: '${unknown()}'}]}\n",
 		"steps: [{publish: item.received, payload: {item_id: x}}]\ninvalid: {base: {publish: unknown, payload: {}}, cases: [{set: {item_id: null}}]}\n",
+		"vars: {choice: \"${{1:'number','1':'text'}}\"}\nsteps: [{publish: item.received, payload: {item_id: \"${vars.choice['1']}\"}}]\n",
+		"steps: [{publish: item.received, payload: {item_id: \"${b'abc'}\"}}]\n",
+		"steps: [{publish: item.received, payload: {set: {item_id: \"${b'abc'}\"}}}]\n",
+		"steps: [{publish: item.received, payload: {from: bad-result.yaml}}]\n",
 	} {
 		t.Run(raw, func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
 			sourceRoot := writeScenarioRunnerFixture(t)
+			writeWorkflowValidationFixtureFile(t, filepath.Join(sourceRoot, "tests", "bad-result.yaml"), "item_id: \"${b'abc'}\"\n")
 			writeWorkflowValidationFixtureFile(t, filepath.Join(sourceRoot, "tests", "negative.yaml"), raw)
 			acquired := false
 			opts := defaultRootCommandOptions()
@@ -137,6 +144,30 @@ func TestScenarioAdmissionRefusesBeforeSessionAcquisition(t *testing.T) {
 				t.Fatalf("code=%d acquired=%v stderr=%s", code, acquired, stderr.String())
 			}
 		})
+	}
+}
+
+func TestScenarioPreparationRetainsExactKeysAndRejectsCollisions(t *testing.T) {
+	bundle := generatedInputFixtureBundle(t)
+	runner := scenarioRunner{bundle: bundle, source: semanticview.Wrap(bundle)}
+	file := scenarioTestFile{Path: "alpha/tests/values.yaml", FlowID: "alpha"}
+	for _, expression := range []string{"${{1:'000000000000','1':'111111111111'}}", "${{true:'000000000000','true':'111111111111'}}"} {
+		file.Raw = []byte("name: fixed\nseed: fixed\nvars: {choice: \"" + expression + "\"}\nsteps: [{publish: shared.received, payload: {alpha: \"${vars.choice['1']}\", id: 00000000-0000-0000-0000-000000000000}}]\n")
+		if _, err := runner.prepareScenario(file); err == nil || !strings.Contains(err.Error(), "object keys must be text") {
+			t.Fatalf("collision silently projected: %v", err)
+		}
+	}
+	file.Raw = []byte("name: fixed\nseed: fixed\nvars: {choice: \"${{'1':'000000000000','true':'111111111111',' spaced ':'${1+1}'}}\"}\nsteps: [{publish: shared.received, payload: {alpha: \"${vars.choice['1']}\", id: 00000000-0000-0000-0000-000000000000}}]\n")
+	want := map[string]any{"alpha": "000000000000", "id": "00000000-0000-0000-0000-000000000000"}
+	for i := 0; i < 100; i++ {
+		prepared, err := runner.prepareScenario(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload, _, err := runner.buildPublishPayload(file, prepared.evaluator, prepared.document.Steps[0])
+		if err != nil || !reflect.DeepEqual(payload, want) {
+			t.Fatalf("schema-valid preparation %d: %#v, %v", i, payload, err)
+		}
 	}
 }
 

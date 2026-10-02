@@ -392,6 +392,14 @@ contract_formats:
       reconstructing wire spelling after admission is forbidden.
       `internal/runtime/workflowexpr.ProjectCELValue` delegates semantic Values
       to that owner, while preserving genuinely kind-bearing workflow carriers.
+      CEL object keys must already be text; non-text keys are rejected before
+      projection can collapse distinct identities. Text keys remain exact.
+      Authored scenario results, including vars and connector witnesses, must
+      cross `canonicaljson.CloneRuntimeValue` before their execution handoff.
+      DTO serializability is not runtime-value admission: bytes, typed collections
+      and other unsupported carriers reject rather than being encoded or retained.
+      Materialized values retain an isolated kind-preserving runtime value and
+      return defensive copies; expression-looking result strings remain data.
       Both projections consume canonical numeric admission, not a separate parser,
       safe-range constant or fallback policy. Explicit native/CEL doubles remain
       doubles, including integral doubles. Kind-bearing transport integers use integer

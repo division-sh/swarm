@@ -41,6 +41,8 @@ expect: {events: [work.requested], no_dead_letters: true}
 		{"invalid-expect", "steps: [{publish: work.requested, payload: {work_id: valid}}]\ninvalid: {base: {publish: work.requested, payload: {work_id: valid}}, cases: [{expect: reject}]}\n", "remove `expect`"},
 		{"invalid-base", "steps: [{publish: work.requested, payload: {work_id: valid}}]\ninvalid: {base: {publish: missing, payload: {}}, cases: [{set: {work_id: 7}}]}\n", "invalid.base must be valid"},
 		{"empty-exact", "steps: [{publish: work.requested, payload: {work_id: valid}}]\nexpect: {events: {exact: []}}\n", "event exact expectation mismatch"},
+		{"non-text-keys", "vars: {choice: \"${{1:'number','1':'text'}}\"}\nsteps: [{publish: work.requested, payload: {work_id: \"${vars.choice['1']}\"}}]\n", "object keys must be text"},
+		{"unsupported-bytes", "steps: [{publish: work.requested, payload: {work_id: \"${b'abc'}\"}}]\n", "is not a semantic number"},
 	} {
 		label := filepath.Join("tests", row.name+".yaml")
 		writeReleaseFile(t, filepath.Join(source, label), row.body)
