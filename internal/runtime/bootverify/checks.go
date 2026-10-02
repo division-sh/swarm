@@ -264,6 +264,7 @@ var bootCheckRegistry = []Check{
 	{ID: "transition_ownership_validation", Mode: CheckSource, Severity: "error", Run: checkTransitionOwnershipValidation},
 	{ID: "event_runtime_wiring_validation", Mode: CheckSource, Severity: "error", Run: checkEventRuntimeWiringValidation},
 	{ID: "timer_validation", Mode: CheckSource, Severity: "error", Run: checkTimerValidation},
+	{ID: "clock_schedule_validation", Mode: CheckSource, Severity: "error", Run: checkClockScheduleValidation},
 	{ID: "gate_schema_validation", Mode: CheckSource, Severity: "error", Run: checkGateSchemaValidation},
 	{ID: "composition_connect_validation", Mode: CheckSource, Severity: "error", Run: checkCompositionConnectValidation},
 	{ID: "input_pin_wiring", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkInputPinWiring},

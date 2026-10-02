@@ -1297,6 +1297,14 @@ contract_formats:
         label, admission class, payload, database default, or missing-field
         fallback.
 
+        A parentless ordinary instance publication uses the instance_publication
+        constructor class and producer_type instance. Its producer_id is the exact
+        declaration flow; its run and typed static-instance source carry the remaining
+        identity coordinates. It requires an already-active run, zero causal depth,
+        no parent event, and the exact business publication spelling derived by the
+        existing publication-identity owner. It cannot create a run, impersonate
+        platform-control authority, or acquire a causal parent during readback.
+
         Persisted event admission is the canonical boundary between constructed
         event shells, context/correlation candidates, and storage. The admission
         owner MUST classify or consume the constructor class and validate the
@@ -1334,7 +1342,7 @@ contract_formats:
         event until persistence. `create_authorized` belongs only to freshly admitted
         run-creating root ingress and explicitly standalone runtime-control/runtime-diagnostic events;
         it permits creation of the event's exact run.
-        `require_active` belongs to existing-run root ingress, operator, child, replay,
+        `require_active` belongs to existing-run root ingress, operator, child, instance publication, replay,
         selected-fork, causal runtime, and run-scoped runtime events; their run MUST
         already exist in running or paused status. The durable `root_ingress` class,
         a non-empty run_id, standing-service context, labels, and payload never infer
@@ -1465,7 +1473,7 @@ contract_formats:
             - {path: internal/events/construction_test.go, test: TestProductionEventConstructionUsesPublicAPI}
         runtime.event.routing_source_typed_at_construction:
           owner_ref: platform-spec.yaml#contract_formats.event_schema.runtime_event_construction
-          rule: Routing source is an opaque typed construction fact; target, receiver, payload, top-level projections, and empty strings never become source evidence. Static-flow and concrete-template source variants always carry exact flow and instance identity and carry entity identity exactly when the producing execution has one; an entityless receiver therefore remains an exact flow source without inventing an entity. Constructed root node, agent and flow executions retain the static-flow coordinate (authored flow '.', selected run instance, optional exact entity), including when producing a reply request; entity presence never erases that coordinate into an entity-only root ingress source. A contract-backed agent source is admitted only from agent_identity_model.declaration_execution_scope and keeps the declaration owning flow distinct from the concrete runtime instance path. Runtime-control publication preserves a root schedule's root source and converts declared-flow execution sources to flow-owned control with the same exact flow, instance, and optional entity. Human-task outcomes may retain an entityless admitted flow requester; schedule and stage-gate owners continue to require their exact entity. Missing flow or instance is not platform-control authority. Platform control is reserved for closed global system work and the specified root decision-card projection.
+          rule: Routing source is an opaque typed construction fact; target, receiver, payload, top-level projections, and empty strings never become source evidence. Static-flow and concrete-template source variants always carry exact flow and instance identity and carry entity identity exactly when the producing execution has one; an entityless receiver therefore remains an exact flow source without inventing an entity. Constructed root node, agent and flow executions retain the static-flow coordinate (authored flow '.', selected run instance, optional exact entity), including when producing a reply request; entity presence never erases that coordinate into an entity-only root ingress source. A contract-backed agent source is admitted only from agent_identity_model.declaration_execution_scope and keeps the declaration owning flow distinct from the concrete runtime instance path. Runtime-control publication preserves a root control schedule's root source and converts declared-flow execution sources to flow-owned control with the same exact flow, instance, and optional entity. Human-task outcomes and flow clocks may retain an entityless admitted flow requester; entity-scoped control schedules and stage-gate owners continue to require their exact entity. Missing flow or instance is not platform-control authority. Platform control is reserved for closed global system work and the specified root decision-card projection.
           executable_proofs:
             - path: internal/events/admission_test.go
               test: TestRunScopedRuntimeControlPreservesExactRootRoutingSource
@@ -8403,19 +8411,22 @@ engine:
         immutable command under `{scope, schedule_key}` before reading a clock. A missing key creates one activation and
         stamps admitted_at, initial due, and current due once in the same transaction; identical content returns the same
         current or terminal activation as exact replay; changed content is a conflict. Absolute agent and join coordinates,
-        rendered boot delay, canonical UTC cron, and exact @every duration remain distinct due-basis kinds. Replay returns
+        rendered boot delay, canonical UTC cron, and exact every duration remain distinct due-basis kinds. Replay returns
         persisted coordinates and never re-resolves relative time. Replacement, reschedule, generation, and destructive
         upsert semantics do not exist. Persisted activation identity is not task_id, payload content, or a process key. The
         supported schedule builtin has one closed grammar: mode absolute requires only RFC3339 at; mode delay requires only
         a duration-valued delay; mode cron requires only a UTC cron expression; and mode every requires only a duration-valued
-        every. Mode, schedule_key, and event_type are required. action, context, delay_seconds, once, @every-in-cron, omitted
+        every. Cron requires exactly five UTC fields, no descriptor or timezone prefix, and an executable future
+        occurrence. Every requires a positive integral number of persisted microseconds; sub-microsecond or fractional-
+        microsecond intervals are rejected rather than rounded. Recurring coordinates must advance strictly, including
+        admission and restoration. Mode, schedule_key, and event_type are required. action, context, delay_seconds, once, @every-in-cron, omitted
         mode, and cross-mode timing fields are rejected rather than normalized. Relative delay remains a typed DelayDue until
         selected-store admission stamps its first due coordinate after exact-replay lookup.
       wakeup: >
         Persistence commits before registration. A wakeup contains only activation identity and current due coordinate,
         reloads durable facts before execution, and is fenced by lifecycle-owned bounded/coalesced recovery. Process-local
         recurrence is forbidden: each recurring occurrence advances the durable coordinate and registers a new inert
-        one-shot wakeup only after commit. Cron is UTC; @every advances from the prior persisted coordinate. Downtime catch-up
+        one-shot wakeup only after commit. Cron is UTC; every advances from the prior persisted coordinate. Downtime catch-up
         processes every persisted coordinate in order and emits a typed depth warning rather than skipping work. Every
         terminal preparation, including a concurrently missing row or proven non-join fail-loud malformed row with no
         reloadable activation, retires and releases the original exact wakeup. A malformed row retaining mandatory join-family
@@ -8451,6 +8462,25 @@ engine:
         reply_context_id is immutable one-shot routing authority; recurrence with reply context is rejected before mutation.
         Run-scoped admission requires a running or paused run. Missing or terminal linkage fails closed. start_on boot is a
         global platform-control schedule with empty run, entity, and flow scope; no entity-scoped boot interpretation exists.
+      flow_clock_declarations:
+        implementation_tracker: '#1850'
+        governing_freeze: '#1786 comment 5903652180: A6, A9, section 3 consumer law, section 5.4 binding facts'
+        declaration_surface: schema.yaml schedules
+        example:
+          schedules:
+            morning_report: {cron: '0 9 * * *', emit: report.requested}
+            poll: {every: 5m, emit: poll.tick}
+        rules:
+          - Each named row contains exactly one of cron or every, plus emit; no payload, timezone, descriptor, alias or alternate wrapper.
+          - The declaring flow and every ancestor to the selected root must be keyless. A keyless child under keyed ancestry is potentially per-instance and is rejected with schedules fire per run; per-instance cadence is not supported. Selecting that same child standalone is valid.
+          - The emitted event is an authored bare business event with an actual local consumer, an explicit compiled connection consumer, or a selected-root export. Root export with zero deliveries is valid. Input declaration, same name or a complete address is not a consumer.
+          - Compilation and offline describe project declaration facts only. Describe renders declared; arms on deployment. No input pin, active binding, next-due coordinate or retention is inferred from a clock declaration.
+          - Only deployment through serve enables clock bindings. Offline verify, describe, test and finite run start do not arm clocks. A timer-only deployment requires neither ingress nor authored activation standing.
+          - Arming consumes the genuine construction and attachment owner and the standing transaction's actual selected generation run. No synthetic instance, root entity, lazy constructor, generation prediction or ready-success substitute is permitted. Startup callback release ordering is unchanged.
+          - Instance-owned admission carries exact run, declaration owner, typed static-instance source, bare payload and recurrence in the immutable hash and persisted activation. It has no agent identity, task or reply context. Other control-schedule families do not acquire business emission authority.
+          - A wake directly creates its instance_publication business event. Event acceptance and recurrence advancement commit atomically through CommitGenericScheduleOccurrence. No intermediate platform event, second dispatcher, process-local recurrence or acknowledgment-loss resend.
+          - Retention derives from an enabled binding or an actually active durable schedule in the current generation, never from declaration presence. Stop, removal, suspension, restart and reset consume the existing desired-state and exact cancellation owners.
+          - Offline publication eligibility and describe share one transient compiled projection. Live inspection supplements it with exact durable binding, activation, due and retention evidence; no persisted publication artifact or independent next-fire interpreter.
     declaration:
       description: >
         Public staged lifecycle timers are declared as stage-resident rows in schema.yaml. Legacy/kernel timers are
@@ -15411,7 +15441,7 @@ platform_tables:
       ddl: |
         CREATE TABLE events (
             insertion_sequence          BIGSERIAL PRIMARY KEY,
-            event_class                 TEXT NOT NULL CHECK (event_class IN ('root_ingress', 'operator_injected', 'child', 'replay', 'selected_fork_replay', 'inherited_fan_out', 'runtime_control', 'runtime_diagnostic', 'diagnostic_direct')),
+            event_class                 TEXT NOT NULL CHECK (event_class IN ('root_ingress', 'operator_injected', 'child', 'instance_publication', 'replay', 'selected_fork_replay', 'inherited_fan_out', 'runtime_control', 'runtime_diagnostic', 'diagnostic_direct')),
             event_id                    UUID NOT NULL UNIQUE,
             run_id                      UUID REFERENCES runs(run_id),
             event_name                  TEXT NOT NULL CHECK (event_name = TRIM(event_name) AND NULLIF(event_name, '') IS NOT NULL),
@@ -15429,7 +15459,7 @@ platform_tables:
             execution_mode              TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
             chain_depth                 INTEGER NOT NULL CHECK (chain_depth >= 0),
             produced_by                 TEXT NOT NULL CHECK (produced_by = TRIM(produced_by) AND NULLIF(produced_by, '') IS NOT NULL),
-            produced_by_type            TEXT NOT NULL CHECK (produced_by_type IN ('node', 'agent', 'platform', 'external')),
+            produced_by_type            TEXT NOT NULL CHECK (produced_by_type IN ('node', 'agent', 'platform', 'external', 'instance')),
             source_event_id             UUID,
             created_at                  TIMESTAMPTZ NOT NULL,
             routing_source_kind         TEXT NOT NULL CHECK (routing_source_kind IN ('absent', 'external_ingress', 'root', 'static_flow', 'concrete_template_instance', 'flow_owned_control', 'platform_control', 'deployment_feed')),
@@ -15443,11 +15473,12 @@ platform_tables:
             handler_node                TEXT,
             idempotency_key             TEXT,
             CHECK ((scope = 'entity' AND entity_id IS NOT NULL) OR (scope = 'flow' AND entity_id IS NULL AND NULLIF(TRIM(COALESCE(flow_instance, '')), '') IS NOT NULL) OR (scope = 'global' AND entity_id IS NULL AND NULLIF(TRIM(COALESCE(flow_instance, '')), '') IS NULL)),
-            CHECK ((event_class IN ('child', 'replay') AND source_event_id IS NOT NULL AND run_id IS NOT NULL) OR (event_class IN ('root_ingress', 'operator_injected', 'selected_fork_replay', 'inherited_fan_out') AND source_event_id IS NULL) OR (event_class IN ('runtime_control', 'runtime_diagnostic', 'diagnostic_direct') AND (source_event_id IS NULL OR run_id IS NOT NULL))),
-            CHECK (event_class NOT IN ('root_ingress', 'operator_injected', 'selected_fork_replay', 'inherited_fan_out') OR run_id IS NOT NULL),
+            CHECK ((event_class IN ('child', 'replay') AND source_event_id IS NOT NULL AND run_id IS NOT NULL) OR (event_class IN ('root_ingress', 'operator_injected', 'selected_fork_replay', 'inherited_fan_out', 'instance_publication') AND source_event_id IS NULL) OR (event_class IN ('runtime_control', 'runtime_diagnostic', 'diagnostic_direct') AND (source_event_id IS NULL OR run_id IS NOT NULL))),
+            CHECK (event_class NOT IN ('root_ingress', 'operator_injected', 'selected_fork_replay', 'inherited_fan_out', 'instance_publication') OR run_id IS NOT NULL),
             CHECK ((event_class = 'inherited_fan_out' AND inherited_fan_out_origin IS NOT NULL AND produced_by_type = 'node') OR (event_class <> 'inherited_fan_out' AND inherited_fan_out_origin IS NULL)),
             CHECK ((event_class = 'operator_injected') OR operator_reference_event_id IS NULL),
-            CHECK ((event_class IN ('root_ingress', 'operator_injected') AND produced_by_type = 'external') OR (event_class = 'child' AND produced_by_type IN ('node', 'agent', 'platform')) OR (event_class IN ('runtime_control', 'runtime_diagnostic', 'diagnostic_direct') AND produced_by_type = 'platform') OR event_class IN ('replay', 'selected_fork_replay', 'inherited_fan_out')),
+            CHECK ((event_class IN ('root_ingress', 'operator_injected') AND produced_by_type = 'external') OR (event_class = 'child' AND produced_by_type IN ('node', 'agent', 'platform')) OR (event_class = 'instance_publication' AND produced_by_type = 'instance') OR (event_class IN ('runtime_control', 'runtime_diagnostic', 'diagnostic_direct') AND produced_by_type = 'platform') OR event_class IN ('replay', 'selected_fork_replay', 'inherited_fan_out')),
+            CHECK (event_class <> 'instance_publication' OR (chain_depth = 0 AND routing_source_kind = 'static_flow')),
             CHECK ((event_name IN ('platform.runtime_log', 'platform.inbound_recorded', 'platform.agent_directive') AND event_class = 'diagnostic_direct') OR (event_name NOT IN ('platform.runtime_log', 'platform.inbound_recorded', 'platform.agent_directive') AND event_class <> 'diagnostic_direct')),
             CHECK (event_name <> 'platform.runtime_log' OR produced_by = 'runtime'),
             CHECK (event_name NOT IN ('platform.inbound_recorded', 'platform.agent_directive') OR run_id IS NOT NULL),
@@ -18393,7 +18424,7 @@ platform_tables:
             recurrence_interval   TEXT,
             owner_node            TEXT,
             owner_agent           TEXT,
-            owner_kind            TEXT NOT NULL CHECK (owner_kind IN ('agent', 'system')),
+            owner_kind            TEXT NOT NULL CHECK (owner_kind IN ('agent', 'system', 'instance')),
             agent_name_owner      TEXT,
             agent_name_source     TEXT,
             agent_route_presence  TEXT,
@@ -18428,9 +18459,10 @@ platform_tables:
             CHECK (task_type <> 'workflow_timer' OR (run_id IS NOT NULL AND entity_id IS NOT NULL AND flow_scope_key = TRIM(flow_scope_key) AND NULLIF(flow_scope_key, '') IS NOT NULL AND flow_instance_id = TRIM(flow_instance_id) AND NULLIF(flow_instance_id, '') IS NOT NULL AND flow_instance = TRIM(flow_instance) AND NULLIF(flow_instance, '') IS NOT NULL)),
             CHECK (task_type <> 'workflow_timer' OR (timer_name = TRIM(timer_name) AND NULLIF(timer_name, '') IS NOT NULL AND fire_event = TRIM(fire_event) AND NULLIF(fire_event, '') IS NOT NULL)),
             CHECK (task_type <> 'workflow_timer' OR (owner_node IS NULL AND owner_agent = TRIM(owner_agent) AND NULLIF(owner_agent, '') IS NOT NULL)),
-            CHECK ((owner_kind = 'system' AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND agent_flow_scope_key IS NULL AND agent_flow_instance_id IS NULL) OR (owner_kind = 'agent' AND owner_node IS NULL AND owner_agent = TRIM(owner_agent) AND NULLIF(owner_agent, '') IS NOT NULL AND agent_name_owner = TRIM(agent_name_owner) AND NULLIF(agent_name_owner, '') IS NOT NULL AND agent_name_source IN ('declared', 'runtime_created') AND agent_route_presence IN ('present', 'root') AND ((agent_route_presence = 'root' AND agent_flow_scope_key IS NULL AND agent_flow_instance_id IS NULL AND flow_instance IS NULL) OR (agent_route_presence = 'present' AND agent_flow_scope_key = TRIM(agent_flow_scope_key) AND NULLIF(agent_flow_scope_key, '') IS NOT NULL AND agent_flow_instance_id = TRIM(agent_flow_instance_id) AND NULLIF(agent_flow_instance_id, '') IS NOT NULL AND flow_instance = TRIM(flow_instance) AND NULLIF(flow_instance, '') IS NOT NULL)))),
+            CHECK ((owner_kind IN ('system', 'instance') AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND agent_flow_scope_key IS NULL AND agent_flow_instance_id IS NULL) OR (owner_kind = 'agent' AND owner_node IS NULL AND owner_agent = TRIM(owner_agent) AND NULLIF(owner_agent, '') IS NOT NULL AND agent_name_owner = TRIM(agent_name_owner) AND NULLIF(agent_name_owner, '') IS NOT NULL AND agent_name_source IN ('declared', 'runtime_created') AND agent_route_presence IN ('present', 'root') AND ((agent_route_presence = 'root' AND agent_flow_scope_key IS NULL AND agent_flow_instance_id IS NULL AND flow_instance IS NULL) OR (agent_route_presence = 'present' AND agent_flow_scope_key = TRIM(agent_flow_scope_key) AND NULLIF(agent_flow_scope_key, '') IS NOT NULL AND agent_flow_instance_id = TRIM(agent_flow_instance_id) AND NULLIF(agent_flow_instance_id, '') IS NOT NULL AND flow_instance = TRIM(flow_instance) AND NULLIF(flow_instance, '') IS NOT NULL)))),
+            CHECK (owner_kind <> 'instance' OR (run_id IS NOT NULL AND flow_instance = TRIM(flow_instance) AND NULLIF(flow_instance, '') IS NOT NULL AND owner_agent = TRIM(owner_agent) AND NULLIF(owner_agent, '') IS NOT NULL AND owner_node IS NULL AND reply_context_id IS NULL AND task_id IS NULL AND recurring = TRUE AND due_basis_kind IN ('cron', 'every') AND fire_payload = '{}')),
             CHECK (task_type <> 'workflow_timer' OR reply_context_id IS NULL),
-            CHECK ((routing_source->>'kind') IN ('root', 'flow_owned_control', 'platform_control')),
+            CHECK ((owner_kind = 'instance' AND (routing_source->>'kind') = 'static_flow') OR (owner_kind <> 'instance' AND (routing_source->>'kind') IN ('root', 'flow_owned_control', 'platform_control'))),
             CHECK (task_type <> 'workflow_timer' OR (SUBSTR(CAST(fire_payload AS TEXT), 1, 1) = '{' AND SUBSTR(CAST(fire_payload AS TEXT), LENGTH(CAST(fire_payload AS TEXT)), 1) = '}')),
             CHECK (task_type <> 'workflow_timer' OR fire_at >= created_at),
             CHECK (task_type <> 'workflow_timer' OR ((source_timer_id IS NULL AND forked_from_run_id IS NULL AND forked_from_event_id IS NULL AND reconstruction_owner IS NULL) OR (source_timer_id IS NOT NULL AND forked_from_run_id IS NOT NULL AND forked_from_event_id IS NOT NULL AND reconstruction_owner = TRIM(reconstruction_owner) AND NULLIF(reconstruction_owner, '') IS NOT NULL))),

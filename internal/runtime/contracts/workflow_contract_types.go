@@ -1142,6 +1142,7 @@ type FlowSchemaDocument struct {
 	Instance               TemplateInstanceField    `yaml:"instance"`
 	StageDeclarations      FlowStageDeclarations    `yaml:"stages"`
 	LoopDeclarations       FlowLoopDeclarations     `yaml:"loops"`
+	Schedules              map[string]FlowSchedule  `yaml:"schedules"`
 	Pins                   FlowPins                 `yaml:"pins"`
 	RequiredAgents         []FlowRequiredAgent      `yaml:"required_agents"`
 	RequiredAgentsDeclared bool                     `yaml:"-"`
