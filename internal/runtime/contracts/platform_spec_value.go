@@ -36,14 +36,7 @@ func AdmitPlatformSpecValue(root yamlsource.Value) (PlatformSpecDocument, error)
 	}
 	out := PlatformSpecDocument{source: root, eventCatalog: map[string]EventCatalogEntry{}}
 	if v, ok := f["platform"]; ok {
-		if out.Platform.Version, err = platform.PlatformVersionFromValue(root); err != nil {
-			return out, err
-		}
-		members, e := platformValueFields(v)
-		if e != nil {
-			return out, e
-		}
-		if err = schemaValueTexts(members, map[string]*string{"name": &out.Platform.Name}, false); err != nil {
+		if err := admitPlatformHeader(root, v, &out); err != nil {
 			return out, err
 		}
 	}
@@ -67,134 +60,28 @@ func AdmitPlatformSpecValue(root yamlsource.Value) (PlatformSpecDocument, error)
 		}
 	}
 	if v, ok := f["permissions_model"]; ok {
-		members, e := platformValueFields(v)
-		if e != nil {
-			return out, e
-		}
-		list, e := platformRequired(v, members, "permissions")
-		if e != nil {
-			return out, e
-		}
-		if out.PermissionsModel.Permissions, err = platformTextList(list); err != nil {
+		if err := admitPlatformPermissions(v, &out); err != nil {
 			return out, err
 		}
 	}
 	if v, ok := f["vocabulary"]; ok {
-		members, e := platformValueFields(v)
-		if e != nil {
-			return out, e
-		}
-		if p, ok := members["participant"]; ok {
-			members, e = platformValueFields(p)
-			if e != nil {
-				return out, e
-			}
-			if types, ok := members["types"]; ok {
-				out.Vocabulary.Participant.Types, err = platformValueMap(types, func(v yamlsource.Value) (struct {
-					Execution string `yaml:"execution"`
-				}, error) {
-					var kind struct {
-						Execution string `yaml:"execution"`
-					}
-					m, e := platformValueFields(v)
-					if e != nil {
-						return kind, e
-					}
-					e = schemaValueRequiredTexts(v, m, map[string]*string{"execution": &kind.Execution})
-					if e == nil && kind.Execution != "deterministic" && kind.Execution != "llm" && kind.Execution != "implicit" {
-						e = nodeValueError(v, fmt.Errorf("execution must be deterministic, llm, or implicit"))
-					}
-					return kind, e
-				})
-				if err != nil {
-					return out, err
-				}
-			}
+		if err := admitPlatformVocabulary(v, &out); err != nil {
+			return out, err
 		}
 	}
 	if v, ok := f["workflow_state"]; ok {
-		members, e := platformValueFields(v)
-		if e != nil {
-			return out, e
-		}
-		if ddl, ok := members["ddl"]; ok {
-			if out.WorkflowState.DDL, err = platformText(ddl, true); err != nil {
-				return out, err
-			}
-		}
-		if fields, ok := members["fields"]; ok {
-			out.WorkflowState.Fields, err = platformValueMap(fields, func(v yamlsource.Value) (struct {
-				Type string `yaml:"type"`
-			}, error) {
-				var field struct {
-					Type string `yaml:"type"`
-				}
-				m, e := platformValueFields(v)
-				if e == nil {
-					e = schemaValueRequiredTexts(v, m, map[string]*string{"type": &field.Type})
-				}
-				return field, e
-			})
-			if err != nil {
-				return out, err
-			}
+		if err := admitPlatformWorkflowState(v, &out); err != nil {
+			return out, err
 		}
 	}
 	if v, ok := f["platform_tables"]; ok {
-		members, e := platformValueFields(v)
-		if e != nil {
-			return out, e
-		}
-		if tables, ok := members["tables"]; ok {
-			out.PlatformTables.Tables, err = platformValueMap(tables, func(v yamlsource.Value) (struct {
-				Description string `yaml:"description"`
-				DDL         string `yaml:"ddl"`
-			}, error) {
-				var table struct {
-					Description string `yaml:"description"`
-					DDL         string `yaml:"ddl"`
-				}
-				m, e := platformValueFields(v)
-				if e == nil {
-					var ddl yamlsource.Value
-					ddl, e = platformRequired(v, m, "ddl")
-					if e == nil {
-						table.DDL, e = platformText(ddl, true)
-					}
-				}
-				if e == nil {
-					e = schemaValueTexts(m, map[string]*string{"description": &table.Description}, false)
-				}
-				return table, e
-			})
-			if err != nil {
-				return out, err
-			}
+		if err := admitPlatformTables(v, &out); err != nil {
+			return out, err
 		}
 	}
 	if v, ok := f["builtin_hooks"]; ok {
-		members, e := platformValueFields(v)
-		if e != nil {
-			return out, e
-		}
-		if guards, ok := members["guards"]; ok {
-			rows, e := guards.Sequence()
-			if e != nil {
-				return out, e
-			}
-			for _, row := range rows {
-				m, e := platformValueFields(row)
-				if e != nil {
-					return out, e
-				}
-				var guard struct {
-					ID string `yaml:"id"`
-				}
-				if e = schemaValueRequiredTexts(row, m, map[string]*string{"id": &guard.ID}); e != nil {
-					return out, e
-				}
-				out.BuiltinHooks.Guards = append(out.BuiltinHooks.Guards, guard)
-			}
+		if err := admitPlatformGuards(v, &out); err != nil {
+			return out, err
 		}
 	}
 	return out, nil
@@ -272,4 +159,170 @@ func platformTextList(value yamlsource.Value) ([]string, error) {
 		}
 	}
 	return out, nil
+}
+
+func admitPlatformHeader(root yamlsource.Value, v yamlsource.Value, out *PlatformSpecDocument) error {
+	var err error
+	if out.Platform.Version, err = platform.PlatformVersionFromValue(root); err != nil {
+		return err
+	}
+	members, e := platformValueFields(v)
+	if e != nil {
+		return e
+	}
+	if err = schemaValueTexts(members, map[string]*string{"name": &out.Platform.Name}, false); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func admitPlatformPermissions(v yamlsource.Value, out *PlatformSpecDocument) error {
+	var err error
+	members, e := platformValueFields(v)
+	if e != nil {
+		return e
+	}
+	list, e := platformRequired(v, members, "permissions")
+	if e != nil {
+		return e
+	}
+	if out.PermissionsModel.Permissions, err = platformTextList(list); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func admitPlatformVocabulary(v yamlsource.Value, out *PlatformSpecDocument) error {
+	var err error
+	members, e := platformValueFields(v)
+	if e != nil {
+		return e
+	}
+	if p, ok := members["participant"]; ok {
+		members, e = platformValueFields(p)
+		if e != nil {
+			return e
+		}
+		if types, ok := members["types"]; ok {
+			out.Vocabulary.Participant.Types, err = platformValueMap(types, func(v yamlsource.Value) (struct {
+				Execution string `yaml:"execution"`
+			}, error) {
+				var kind struct {
+					Execution string `yaml:"execution"`
+				}
+				m, e := platformValueFields(v)
+				if e != nil {
+					return kind, e
+				}
+				e = schemaValueRequiredTexts(v, m, map[string]*string{"execution": &kind.Execution})
+				if e == nil && kind.Execution != "deterministic" && kind.Execution != "llm" && kind.Execution != "implicit" {
+					e = nodeValueError(v, fmt.Errorf("execution must be deterministic, llm, or implicit"))
+				}
+				return kind, e
+			})
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func admitPlatformWorkflowState(v yamlsource.Value, out *PlatformSpecDocument) error {
+	var err error
+	members, e := platformValueFields(v)
+	if e != nil {
+		return e
+	}
+	if ddl, ok := members["ddl"]; ok {
+		if out.WorkflowState.DDL, err = platformText(ddl, true); err != nil {
+			return err
+		}
+	}
+	if fields, ok := members["fields"]; ok {
+		out.WorkflowState.Fields, err = platformValueMap(fields, func(v yamlsource.Value) (struct {
+			Type string `yaml:"type"`
+		}, error) {
+			var field struct {
+				Type string `yaml:"type"`
+			}
+			m, e := platformValueFields(v)
+			if e == nil {
+				e = schemaValueRequiredTexts(v, m, map[string]*string{"type": &field.Type})
+			}
+			return field, e
+		})
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func admitPlatformTables(v yamlsource.Value, out *PlatformSpecDocument) error {
+	var err error
+	members, e := platformValueFields(v)
+	if e != nil {
+		return e
+	}
+	if tables, ok := members["tables"]; ok {
+		out.PlatformTables.Tables, err = platformValueMap(tables, func(v yamlsource.Value) (struct {
+			Description string `yaml:"description"`
+			DDL         string `yaml:"ddl"`
+		}, error) {
+			var table struct {
+				Description string `yaml:"description"`
+				DDL         string `yaml:"ddl"`
+			}
+			m, e := platformValueFields(v)
+			if e == nil {
+				var ddl yamlsource.Value
+				ddl, e = platformRequired(v, m, "ddl")
+				if e == nil {
+					table.DDL, e = platformText(ddl, true)
+				}
+			}
+			if e == nil {
+				e = schemaValueTexts(m, map[string]*string{"description": &table.Description}, false)
+			}
+			return table, e
+		})
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func admitPlatformGuards(v yamlsource.Value, out *PlatformSpecDocument) error {
+	members, e := platformValueFields(v)
+	if e != nil {
+		return e
+	}
+	if guards, ok := members["guards"]; ok {
+		rows, e := guards.Sequence()
+		if e != nil {
+			return e
+		}
+		for _, row := range rows {
+			m, e := platformValueFields(row)
+			if e != nil {
+				return e
+			}
+			var guard struct {
+				ID string `yaml:"id"`
+			}
+			if e = schemaValueRequiredTexts(row, m, map[string]*string{"id": &guard.ID}); e != nil {
+				return e
+			}
+			out.BuiltinHooks.Guards = append(out.BuiltinHooks.Guards, guard)
+		}
+	}
+
+	return nil
 }

@@ -28,47 +28,8 @@ func parseChannelManifestAt(body []byte, file string) (ChannelManifest, error) {
 	if out.Provider, err = channelRequiredText(root, f, "provider"); err != nil {
 		return out, err
 	}
-	for _, group := range []string{"opaque_types", "operations", "events"} {
-		v, e := channelRequired(root, f, group)
-		if e != nil {
-			return out, e
-		}
-		members, e := channelFields(v)
-		if e != nil {
-			return out, e
-		}
-		if len(members) == 0 {
-			return out, channelError(v, "requires a nonempty mapping")
-		}
-		for _, id := range sortedChannelNames(members) {
-			value := members[id]
-			switch group {
-			case "opaque_types":
-				out.OpaqueTypes[id], err = runtimecontracts.AdmitToolInputSchemaValue(value)
-			case "operations":
-				var op ChannelRegistrationOperation
-				op, err = admitChannelOperation(value)
-				out.Operations[id] = ChannelOperationBinding{Tool: op.Tool, Input: op.Input, Output: op.Output}
-			case "events":
-				var fields map[string]yamlsource.Value
-				fields, err = channelFields(value, "event", "fields")
-				var event ChannelEventBinding
-				if err == nil {
-					event.Event, err = channelRequiredText(value, fields, "event")
-				}
-				var fieldsValue yamlsource.Value
-				if err == nil {
-					fieldsValue, err = channelRequired(value, fields, "fields")
-				}
-				if err == nil {
-					event.Fields, err = channelTextMap(fieldsValue)
-				}
-				out.Events[id] = event
-			}
-			if err != nil {
-				return out, err
-			}
-		}
+	if err := admitChannelBindings(root, f, &out); err != nil {
+		return out, err
 	}
 	if v, ok := f["registration"]; ok {
 		profile, e := admitChannelRegistration(v)
@@ -355,4 +316,51 @@ func sortedChannelNames(fields map[string]yamlsource.Value) []string {
 
 func channelError(value yamlsource.Value, message string) error {
 	return fmt.Errorf("%s at %s: %s", value.SemanticPath(), value.Location(), message)
+}
+
+func admitChannelBindings(root yamlsource.Value, f map[string]yamlsource.Value, out *ChannelManifest) error {
+	var err error
+	for _, group := range []string{"opaque_types", "operations", "events"} {
+		v, e := channelRequired(root, f, group)
+		if e != nil {
+			return e
+		}
+		members, e := channelFields(v)
+		if e != nil {
+			return e
+		}
+		if len(members) == 0 {
+			return channelError(v, "requires a nonempty mapping")
+		}
+		for _, id := range sortedChannelNames(members) {
+			value := members[id]
+			switch group {
+			case "opaque_types":
+				out.OpaqueTypes[id], err = runtimecontracts.AdmitToolInputSchemaValue(value)
+			case "operations":
+				var op ChannelRegistrationOperation
+				op, err = admitChannelOperation(value)
+				out.Operations[id] = ChannelOperationBinding{Tool: op.Tool, Input: op.Input, Output: op.Output}
+			case "events":
+				var fields map[string]yamlsource.Value
+				fields, err = channelFields(value, "event", "fields")
+				var event ChannelEventBinding
+				if err == nil {
+					event.Event, err = channelRequiredText(value, fields, "event")
+				}
+				var fieldsValue yamlsource.Value
+				if err == nil {
+					fieldsValue, err = channelRequired(value, fields, "fields")
+				}
+				if err == nil {
+					event.Fields, err = channelTextMap(fieldsValue)
+				}
+				out.Events[id] = event
+			}
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

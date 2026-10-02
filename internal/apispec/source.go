@@ -31,19 +31,8 @@ func AdmitPlatformAPIValue(root yamlsource.Value) (*APISpecification, error) {
 		return nil, err
 	}
 	if v, ok := f["components"]; ok {
-		m, e := apiFields(v)
-		if e != nil {
-			return nil, e
-		}
-		for _, entry := range []struct {
-			name   string
-			target *map[string]any
-		}{{"schemas", &out.Components.Schemas}, {"errors", &out.Components.Errors}, {"error_catalog_metadata", &out.Components.ErrorCatalogMetadata}} {
-			if child, ok := m[entry.name]; ok {
-				if *entry.target, err = apiLiteralMap(child); err != nil {
-					return nil, err
-				}
-			}
+		if err := admitAPIComponents(v, out); err != nil {
+			return nil, err
 		}
 	}
 	if v, ok := f["method_catalog_metadata"]; ok {
@@ -52,44 +41,13 @@ func AdmitPlatformAPIValue(root yamlsource.Value) (*APISpecification, error) {
 		}
 	}
 	if v, ok := f["examples_policy"]; ok {
-		m, e := apiFields(v)
-		if e != nil {
-			return nil, e
-		}
-		p := &out.ExamplesPolicy
-		if e = apiTexts(m, map[string]*string{"status": &p.Status, "owner": &p.Owner, "applies_to": &p.AppliesTo, "openrpc_method_examples": &p.OpenRPCMethodExamples, "runtime_probe_fixtures": &p.RuntimeProbeFixtures}, true); e != nil {
-			return nil, e
-		}
-		if e = apiTexts(m, map[string]*string{"reason": &p.Reason}, false); e != nil {
-			return nil, e
-		}
-		if child, ok := m["requirements"]; ok {
-			if p.Requirements, err = apiTextList(child); err != nil {
-				return nil, err
-			}
-		}
-		if child, ok := m["future_source_model_required"]; ok {
-			if p.FutureSourceModelRequired, err = apiBool(child); err != nil {
-				return nil, err
-			}
+		if err := admitAPIExamplesPolicy(v, out); err != nil {
+			return nil, err
 		}
 	}
 	if v, ok := f["service_discovery_policy"]; ok {
-		m, e := apiFields(v)
-		if e != nil {
-			return nil, e
-		}
-		p := &out.ServiceDiscoveryPolicy
-		if e = apiTexts(m, map[string]*string{"status": &p.Status, "owner": &p.Owner, "applies_to": &p.AppliesTo, "rpc_discover": &p.RPCDiscover, "publication_artifact": &p.PublicationArtifact, "runtime_behavior": &p.RuntimeBehavior}, true); e != nil {
-			return nil, e
-		}
-		if e = apiTexts(m, map[string]*string{"reason": &p.Reason}, false); e != nil {
-			return nil, e
-		}
-		if child, ok := m["requirements"]; ok {
-			if p.Requirements, err = apiTextList(child); err != nil {
-				return nil, err
-			}
+		if err := admitAPIServiceDiscoveryPolicy(v, out); err != nil {
+			return nil, err
 		}
 	}
 	methods, err := apiRequired(value, f, "method_catalog")
@@ -135,26 +93,13 @@ func admitAPIMethod(value yamlsource.Value) (Method, error) {
 		}
 	}
 	if v, ok := f["scope"]; ok {
-		m, e := apiFields(v)
-		if e != nil {
-			return out, e
-		}
-		if child, ok := m["required"]; ok {
-			if out.Scope.Required, err = apiTextList(child); err != nil {
-				return out, err
-			}
+		if err := admitAPIMethodScope(v, &out); err != nil {
+			return out, err
 		}
 	}
 	if v, ok := f["params"]; ok {
-		rows, e := v.Sequence()
-		if e != nil {
-			return out, e
-		}
-		out.Params = make([]ContentDescriptor, len(rows))
-		for i, row := range rows {
-			if out.Params[i], err = admitAPIDescriptor(row); err != nil {
-				return out, err
-			}
+		if err := admitAPIMethodParams(v, &out); err != nil {
+			return out, err
 		}
 	}
 	if v, ok := f["result"]; ok {
@@ -247,38 +192,8 @@ func admitAPIConventions(value yamlsource.Value) (Conventions, error) {
 		}
 	}
 	if v, ok := f["mailbox"]; ok {
-		m, e := apiFields(v)
-		if e != nil {
-			return out, e
-		}
-		if e = apiTexts(m, map[string]*string{"status_storage_model": &out.Mailbox.StatusStorageModel}, true); e != nil {
-			return out, e
-		}
-		if child, ok := m["decision_event_routes"]; ok {
-			rows, e := child.Sequence()
-			if e != nil {
-				return out, e
-			}
-			for _, row := range rows {
-				fields, e := apiFields(row)
-				if e != nil {
-					return out, e
-				}
-				var route MailboxDecisionEventRoute
-				for _, entry := range []struct {
-					name   string
-					target *string
-				}{{"item_type", &route.ItemType}, {"terminal_event_name", &route.TerminalEventName}, {"deferred_event_name", &route.DeferredEventName}} {
-					v, e := apiRequired(row, fields, entry.name)
-					if e != nil {
-						return out, e
-					}
-					if *entry.target, e = apiText(v, true); e != nil {
-						return out, e
-					}
-				}
-				out.Mailbox.DecisionEventRoutes = append(out.Mailbox.DecisionEventRoutes, route)
-			}
+		if err := admitAPIMailboxConventions(v, &out); err != nil {
+			return out, err
 		}
 	}
 	return out, nil
@@ -381,4 +296,149 @@ func apiNames(fields map[string]yamlsource.Value) []string {
 
 func apiError(value yamlsource.Value, message string) error {
 	return fmt.Errorf("%s at %s: %s", value.SemanticPath(), value.Location(), message)
+}
+
+func admitAPIComponents(v yamlsource.Value, out *APISpecification) error {
+	var err error
+	m, e := apiFields(v)
+	if e != nil {
+		return e
+	}
+	for _, entry := range []struct {
+		name   string
+		target *map[string]any
+	}{{"schemas", &out.Components.Schemas}, {"errors", &out.Components.Errors}, {"error_catalog_metadata", &out.Components.ErrorCatalogMetadata}} {
+		if child, ok := m[entry.name]; ok {
+			if *entry.target, err = apiLiteralMap(child); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func admitAPIExamplesPolicy(v yamlsource.Value, out *APISpecification) error {
+	var err error
+	m, e := apiFields(v)
+	if e != nil {
+		return e
+	}
+	p := &out.ExamplesPolicy
+	if e = apiTexts(m, map[string]*string{"status": &p.Status, "owner": &p.Owner, "applies_to": &p.AppliesTo, "openrpc_method_examples": &p.OpenRPCMethodExamples, "runtime_probe_fixtures": &p.RuntimeProbeFixtures}, true); e != nil {
+		return e
+	}
+	if e = apiTexts(m, map[string]*string{"reason": &p.Reason}, false); e != nil {
+		return e
+	}
+	if child, ok := m["requirements"]; ok {
+		if p.Requirements, err = apiTextList(child); err != nil {
+			return err
+		}
+	}
+	if child, ok := m["future_source_model_required"]; ok {
+		if p.FutureSourceModelRequired, err = apiBool(child); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func admitAPIServiceDiscoveryPolicy(v yamlsource.Value, out *APISpecification) error {
+	var err error
+	m, e := apiFields(v)
+	if e != nil {
+		return e
+	}
+	p := &out.ServiceDiscoveryPolicy
+	if e = apiTexts(m, map[string]*string{"status": &p.Status, "owner": &p.Owner, "applies_to": &p.AppliesTo, "rpc_discover": &p.RPCDiscover, "publication_artifact": &p.PublicationArtifact, "runtime_behavior": &p.RuntimeBehavior}, true); e != nil {
+		return e
+	}
+	if e = apiTexts(m, map[string]*string{"reason": &p.Reason}, false); e != nil {
+		return e
+	}
+	if child, ok := m["requirements"]; ok {
+		if p.Requirements, err = apiTextList(child); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func admitAPIMethodScope(v yamlsource.Value, out *Method) error {
+	var err error
+	m, e := apiFields(v)
+	if e != nil {
+		return e
+	}
+	if child, ok := m["required"]; ok {
+		if out.Scope.Required, err = apiTextList(child); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func admitAPIMethodParams(v yamlsource.Value, out *Method) error {
+	var err error
+	rows, e := v.Sequence()
+	if e != nil {
+		return e
+	}
+	out.Params = make([]ContentDescriptor, len(rows))
+	for i, row := range rows {
+		if out.Params[i], err = admitAPIDescriptor(row); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func admitAPIMailboxConventions(v yamlsource.Value, out *Conventions) error {
+	m, e := apiFields(v)
+	if e != nil {
+		return e
+	}
+	if e = apiTexts(m, map[string]*string{"status_storage_model": &out.Mailbox.StatusStorageModel}, true); e != nil {
+		return e
+	}
+	if child, ok := m["decision_event_routes"]; ok {
+		rows, e := child.Sequence()
+		if e != nil {
+			return e
+		}
+		for _, row := range rows {
+			var route MailboxDecisionEventRoute
+			if e := admitAPIMailboxRoute(row, &route); e != nil {
+				return e
+			}
+			out.Mailbox.DecisionEventRoutes = append(out.Mailbox.DecisionEventRoutes, route)
+		}
+	}
+
+	return nil
+}
+
+func admitAPIMailboxRoute(row yamlsource.Value, route *MailboxDecisionEventRoute) error {
+	fields, e := apiFields(row)
+	if e != nil {
+		return e
+	}
+	for _, entry := range []struct {
+		name   string
+		target *string
+	}{{"item_type", &route.ItemType}, {"terminal_event_name", &route.TerminalEventName}, {"deferred_event_name", &route.DeferredEventName}} {
+		v, e := apiRequired(row, fields, entry.name)
+		if e != nil {
+			return e
+		}
+		if *entry.target, e = apiText(v, true); e != nil {
+			return e
+		}
+	}
+	return nil
 }
