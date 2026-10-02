@@ -21,6 +21,12 @@ type Backend struct {
 		closed bool
 		owned  []*sql.Stmt
 	}
+	ownershipProofs struct {
+		sync.Mutex
+		closed   bool
+		capacity int
+		retained map[*OwnershipProof]struct{}
+	}
 
 	mutationToken chan struct{}
 	mutationState struct {
@@ -66,12 +72,12 @@ func (b *Backend) Close() error {
 	if !b.Valid() {
 		return nil
 	}
+	closeErr := b.closeOwnershipProofs()
 	b.readStatements.Lock()
 	b.readStatements.closed = true
 	owned := b.readStatements.owned
 	b.readStatements.owned = nil
 	b.readStatements.Unlock()
-	var closeErr error
 	for _, stmt := range owned {
 		closeErr = errors.Join(closeErr, stmt.Close())
 	}
