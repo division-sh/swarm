@@ -38,7 +38,7 @@ const (
 )
 
 var stableHardInvalidityRemediation = map[string]string{
-	"agent_permission_validation":             "Grant the required agent permission or remove the unauthorized tool/action from the contract.",
+	"agent_permission_validation":             "Remove retired or unsupported permission/tool references; they cannot be enabled by a grant. For supported tools, grant the required permission or remove the unauthorized reference.",
 	"agent_prompt_lint_structural":            "Fix the agent prompt lint declaration so it uses supported structural fields, or remove the unsupported prompt lint entry.",
 	"accumulator_entity_projection":           "Fix the accumulator projection so it writes declared entity fields through the supported accumulator projection shape.",
 	"accumulator_input_producer_path":         "Add an accepted producer/source path for the accumulated input event or change the accumulator to consume an event that has one.",
@@ -72,7 +72,7 @@ var stableHardInvalidityRemediation = map[string]string{
 	"native_tools_valid":                      "Fix the native tool declaration so it references a supported runtime tool surface.",
 	"node_state_schema_typed_counterpart":     "Add the typed node-state counterpart required by the schema or remove the unsupported jsonb-only state field.",
 	"payload_field_coverage":                  "Populate every required emitted payload field or make the target event schema optional where appropriate.",
-	"platform_tool_usage_hints":               "Fix platform tool usage hints so every referenced tool exists and every required usage hint is declared.",
+	"platform_tool_usage_hints":               "Remove retired or unsupported tool references; they cannot be enabled by usage hints. For supported tools, fix the required platform usage hints.",
 	"platform_namespace_violation":            "Rename authored business fields away from platform-reserved namespace roots.",
 	"policy_conflict_detection":               "Resolve the conflicting policy declarations so only one authoritative value remains.",
 	"policy_sheet_lookup_value_rows":          "Fix the policy sheet lookup value rows so each lookup key and target value is declared consistently.",
