@@ -150,3 +150,14 @@ credited as executed. Repairs retain the boundaries rather than grant exceptions
 
 Manager commit-error controls pass0.255s. These are targeted development
 receipts, not a complete repaired-head default or public qualification result.
+
+The closed-fixture compiled standing journey passes both stores13.192s. Its
+selector also named a nonexistent progressive-presence root; that name receives
+no proof credit. The actual progressive-presence selector remains required.
+
+The census update classifies all71 changed records:11 typed process-local,
+four typed public-facade,32 private backend and24 private header projection
+findings. Stale signatures/removed calls are deleted. Exact registry plus raw
+effective-method and hostile resolved-type controls pass8.690s. No raw authority
+exception or guard threshold changes. The closed routing guard passes12.869s;
+proof partition controls pass1.515s.
