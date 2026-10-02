@@ -30,6 +30,7 @@ const (
 	EventEndpointAgent             EventEndpointKind = "agent"
 	EventEndpointRequiredAgentRole EventEndpointKind = "required_agent_role"
 	EventEndpointTimer             EventEndpointKind = "timer"
+	EventEndpointClockSchedule     EventEndpointKind = "clock_schedule"
 	EventEndpointAutoEmit          EventEndpointKind = "auto_emit_on_create"
 	EventEndpointGateOutcome       EventEndpointKind = "gate_outcome"
 	EventEndpointLoopEscape        EventEndpointKind = "loop_escape"
@@ -54,6 +55,7 @@ type AuthoredEventEndpoint struct {
 	AgentID        string                         `json:"agent_id,omitempty"`
 	Role           string                         `json:"role,omitempty"`
 	TimerID        string                         `json:"timer_id,omitempty"`
+	ScheduleID     string                         `json:"schedule_id,omitempty"`
 	StageID        string                         `json:"stage_id,omitempty"`
 	DecisionID     string                         `json:"decision_id,omitempty"`
 	Verdict        string                         `json:"verdict,omitempty"`
@@ -122,6 +124,7 @@ func BuildAuthoredEventEndpointCensus(source Source) AuthoredEventEndpointCensus
 		builder.addAgentEndpoints()
 		builder.addRequiredAgentEndpoints()
 		builder.addTimerEndpoints()
+		builder.addClockScheduleEndpoints()
 		builder.addAutoEmitEndpoints()
 		builder.addLifecycleEndpoints()
 		builder.addPinEndpoints()
@@ -617,6 +620,16 @@ func (b *endpointCensusBuilder) addTimerEndpoints() {
 	}
 }
 
+func (b *endpointCensusBuilder) addClockScheduleEndpoints() {
+	for _, schedule := range ClockSchedules(b.source) {
+		endpoint := b.endpoint(EventEndpointProducer, EventEndpointClockSchedule, schedule.FlowID, schedule.Declaration.Emit)
+		endpoint.ScheduleID = schedule.Name
+		endpoint.SourceFile = schedule.SourceFile
+		endpoint.SourceLocation = "schedules." + schedule.Name + ".emit"
+		b.add(endpoint)
+	}
+}
+
 func (b *endpointCensusBuilder) addAutoEmitEndpoints() {
 	if bundle, ok := Bundle(b.source); ok && bundle != nil && bundle.RootSchema != nil {
 		if eventType := strings.TrimSpace(bundle.RootSchema.AutoEmitOnCreate.Event); eventType != "" {
@@ -957,6 +970,9 @@ func eventEndpointID(endpoint AuthoredEventEndpoint) string {
 	}
 	if endpoint.Kind == EventEndpointGateOutcome || endpoint.Kind == EventEndpointLoopEscape {
 		parts = append(parts, endpoint.StageID, endpoint.DecisionID, endpoint.Verdict, endpoint.LoopID)
+	}
+	if endpoint.Kind == EventEndpointClockSchedule {
+		parts = append(parts, endpoint.ScheduleID)
 	}
 	for i := range parts {
 		parts[i] = strings.TrimSpace(parts[i])
