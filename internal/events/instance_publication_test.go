@@ -82,3 +82,37 @@ func TestInstancePublicationRejectsAuthorityDrift(t *testing.T) {
 		t.Fatal("business instance acquired platform-control authority")
 	}
 }
+
+func TestInstancePublicationRootRequiresExactRun(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		instance string
+	}{
+		{"foreign run", uuid.NewString()},
+		{"previous generation", uuid.NewSHA1(uuid.NameSpaceURL, []byte("clock-service/generation/1")).String()},
+		{"service identity", "clock-service"},
+		{"missing instance", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := instancePublicationInput(t, ".")
+			input.Facts.RoutingSource = RoutingSource{kind: RoutingSourceStaticFlow, route: RouteIdentity{FlowID: ".", FlowInstance: tc.instance}}
+			input.Facts.Envelope.FlowInstance = tc.instance
+			if _, err := NewInstancePublicationEvent(input); err == nil {
+				t.Error("root publication admitted an instance outside its run")
+			}
+			if _, err := RestoreAdmittedEvent(RestoredEventInput{Class: EventAdmissionInstancePublication, Facts: input.Facts, RunID: input.RunID, Payload: testPayloadAdmission(t, input.Facts.Payload)}); err == nil {
+				t.Error("restored root publication admitted an instance outside its run")
+			}
+		})
+	}
+	t.Run("changed run only", func(t *testing.T) {
+		input := instancePublicationInput(t, ".")
+		input.RunID = uuid.NewString()
+		if _, err := NewInstancePublicationEvent(input); err == nil {
+			t.Error("root source authorized a different run")
+		}
+		if _, err := RestoreAdmittedEvent(RestoredEventInput{Class: EventAdmissionInstancePublication, Facts: input.Facts, RunID: input.RunID, Payload: testPayloadAdmission(t, input.Facts.Payload)}); err == nil {
+			t.Error("restored root source authorized a different run")
+		}
+	})
+}
