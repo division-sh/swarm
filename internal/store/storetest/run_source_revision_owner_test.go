@@ -46,6 +46,10 @@ func TestSourceRevisionFixtureUsesExactSelectedOwner(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			predecessor, err := selected.ListCompletionCandidates(ctx, runtimerunlifecycle.CandidateScope{BundleHash: original.BundleHash()}, runtimerunlifecycle.CandidateCursor{}, 128)
+			if err != nil || len(predecessor.Candidates) != 1 {
+				t.Fatalf("initial candidate=%+v err=%v", predecessor, err)
+			}
 			collector := CollectTransactions(t, selected, TransactionProbeOptions{})
 			request := runtimerunlifecycle.SourceRevisionRequest{RunID: runID, Source: changed}
 			disposition, err := selected.ReviseRunSource(ctx, request)
@@ -64,7 +68,7 @@ func TestSourceRevisionFixtureUsesExactSelectedOwner(t *testing.T) {
 				t.Fatalf("source revision readback=%v err=%v", actual, err)
 			}
 			candidate, err := selected.ListCompletionCandidates(ctx, runtimerunlifecycle.CandidateScope{BundleHash: changed.BundleHash()}, runtimerunlifecycle.CandidateCursor{}, 128)
-			if err != nil || len(candidate.Candidates) != 1 || candidate.Candidates[0].RunID != runID {
+			if err != nil || len(candidate.Candidates) != 1 || candidate.Candidates[0].RunID != runID || candidate.Candidates[0].Revision <= predecessor.Candidates[0].Revision {
 				t.Fatalf("revision did not atomically rearm the new source candidate: %+v err=%v", candidate, err)
 			}
 			old, err := selected.ListCompletionCandidates(ctx, runtimerunlifecycle.CandidateScope{BundleHash: original.BundleHash()}, runtimerunlifecycle.CandidateCursor{}, 128)
@@ -101,8 +105,14 @@ func TestSourceRevisionFixtureUsesExactSelectedOwner(t *testing.T) {
 			}
 			canceled, cancel := context.WithCancel(ctx)
 			cancel()
+			priorCancellation := collector.Snapshot()
 			if _, err := selected.ReviseRunSource(canceled, request); !errors.Is(err, context.Canceled) {
 				t.Fatalf("canceled revision lost its cause: %v", err)
+			}
+			unchangedCandidate, err := selected.ListCompletionCandidates(ctx, runtimerunlifecycle.CandidateScope{BundleHash: changed.BundleHash()}, runtimerunlifecycle.CandidateCursor{}, 128)
+			proofAfterCancellation := collector.Snapshot()
+			if err != nil || !reflect.DeepEqual(candidate, unchangedCandidate) || proofAfterCancellation.Total.WriteCommits != priorCancellation.Total.WriteCommits || proofAfterCancellation.Active != 0 {
+				t.Fatalf("refusal/cancellation changed candidate facts or committed: candidates=%+v err=%v proof=%+v", unchangedCandidate, err, proofAfterCancellation)
 			}
 			if _, _, err := selected.MarkTerminalRun(ctx, runtimerunlifecycle.TerminalRequest{RunID: runID, State: runtimerunlifecycle.StateCancelled, EndedAt: time.Now().UTC()}); err != nil {
 				t.Fatal(err)
