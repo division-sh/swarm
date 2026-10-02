@@ -73,7 +73,7 @@ func TestWorkflowUnconditionalGateAndExecutableAggregate(t *testing.T) {
 			script = strings.ReplaceAll(script, "${{ needs."+need+".result }}", value)
 		}
 		c := exec.Command("bash", "-c", script)
-		c.Env = append(os.Environ(), "GITHUB_STEP_SUMMARY="+filepath.Join(t.TempDir(), "summary"))
+		c.Env = append(os.Environ(), "IS_DRAFT=false", "GITHUB_STEP_SUMMARY="+filepath.Join(t.TempDir(), "summary"))
 		out, err := c.CombinedOutput()
 		if (err == nil) != (status == "success") {
 			t.Fatalf("aggregate status %q: %v %s", status, err, out)

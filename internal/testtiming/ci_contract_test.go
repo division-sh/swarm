@@ -168,8 +168,9 @@ type ciWorkflowJob struct {
 	TimeoutMinutes int              `yaml:"timeout-minutes"`
 	RunsOn         string           `yaml:"runs-on"`
 	Strategy       struct {
-		FailFast *bool  `yaml:"fail-fast"`
-		Matrix   string `yaml:"matrix"`
+		FailFast    *bool  `yaml:"fail-fast"`
+		Matrix      string `yaml:"matrix"`
+		MaxParallel any    `yaml:"max-parallel"`
 	} `yaml:"strategy"`
 }
 
@@ -275,7 +276,6 @@ func TestPublisherIsMasterRestrictedGeneratedOnlyAndReviewRequired(t *testing.T)
 		"repos/division-sh/swarm/contents/.github/test-timing-weights.json",
 		`-f branch="$staging_branch"`,
 		`-f sha="$generated_sha"`,
-		"gh workflow run ci.yml",
 		"human review and normal protection required",
 		`gh pr list --head "$branch"`,
 	} {
@@ -283,7 +283,7 @@ func TestPublisherIsMasterRestrictedGeneratedOnlyAndReviewRequired(t *testing.T)
 			t.Fatalf("publisher contract missing %q", want)
 		}
 	}
-	for _, forbidden := range []string{"gh pr merge", "git push origin master", "git commit", "GH_PAT", "PERSONAL_ACCESS_TOKEN"} {
+	for _, forbidden := range []string{"gh workflow run", "gh pr merge", "git push origin master", "git commit", "GH_PAT", "PERSONAL_ACCESS_TOKEN"} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("publisher retains forbidden authority %q", forbidden)
 		}
