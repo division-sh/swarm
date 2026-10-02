@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
 )
 
@@ -22,12 +23,16 @@ func ObserveWorkflowTimerReplayStorageForTest(ctx context.Context, selected any,
 	}
 	var observed WorkflowTimerReplayStorageObservation
 	read := func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT
+		if err := tx.QueryRowContext(ctx, `SELECT
 			(SELECT COUNT(*) FROM timers WHERE run_id=$1 AND entity_id=$2 AND task_type='workflow_timer'),
 			(SELECT COUNT(*) FROM timers WHERE run_id=$1 AND entity_id=$2 AND task_type='workflow_timer' AND status='active'),
-			(SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1 AND family='timers'),
 			(SELECT COUNT(*) FROM events WHERE run_id=$1)`, runID, entityID).
-			Scan(&observed.Timers, &observed.ActiveTimers, &observed.TimerRevisionFacts, &observed.Events)
+			Scan(&observed.Timers, &observed.ActiveTimers, &observed.Events); err != nil {
+			return err
+		}
+		var err error
+		observed.TimerRevisionFacts, err = runforkrevision.CountWorkflowTimerRevisionFactsForTest(ctx, tx, runID)
+		return err
 	}
 	var err error
 	switch owner := selected.(type) {
