@@ -338,6 +338,53 @@ func TestMalformedPackBodiesFailBeforeEveryCLIPublishingSurface(t *testing.T) {
 				t.Fatalf("bundle hash admission error = %v, want %q", err, tc.wantErr)
 			}
 			assertRejected("verify", "verify", project, "--config", configPath, "--json")
+			assertRejected("describe", "describe", project, "--config", configPath, "--json")
+		})
+	}
+}
+
+func TestPackAdmissionCLIRejectsTypedCorruption(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	base, err := packartifact.LoadEmbeddedPlatformPackInventory("0.7.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	configPath := writeTestVerifyRuntimeConfig(t)
+	for _, row := range []struct{ name, id, file, old, replacement, want string }{
+		{"boolean provider", "provider.telegram.hitl_channel", packartifact.ChannelManifestFileName, "provider: telegram", "provider: true", "want nonempty text"},
+		{"null generation", "provider.telegram.connector", packartifact.ConnectorManifestFileName, "provider: telegram", "provider: telegram\ngeneration: null", "generation"},
+		{"numeric envelope version", "provider.telegram.connector", packartifact.EnvelopeFileName, "version: 0.1.0", "version: 1.5", "want nonempty text"},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			project := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
+			if changed, err := packartifact.ImportEmbeddedPack(project, row.id, base); err != nil || !changed {
+				t.Fatalf("import: %t %v", changed, err)
+			}
+			path := filepath.Join(project, "packs", row.id, row.file)
+			body, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			changed := strings.Replace(string(body), row.old, row.replacement, 1)
+			if changed == string(body) {
+				t.Fatal("counterexample did not modify canonical fixture")
+			}
+			if err := os.WriteFile(path, []byte(changed), 0600); err != nil {
+				t.Fatal(err)
+			}
+			for _, args := range [][]string{
+				{"packs", "show", row.id, project, "--json"},
+				{"packs", "list", project, "--json"},
+				{"verify", project, "--config", configPath, "--json"},
+				{"describe", project, "--config", configPath, "--json"},
+			} {
+				var stdout, stderr bytes.Buffer
+				code := executeRootCommandWithOptions(context.Background(), RepoRoot(), args, &stdout, &stderr, defaultRootCommandOptions())
+				combined := stdout.String() + stderr.String()
+				if code == 0 || !strings.Contains(combined, row.want) || !strings.Contains(combined, row.file+":") {
+					t.Fatalf("%s accepted/lost teaching source: code=%d %s", args[0], code, combined)
+				}
+			}
 		})
 	}
 }
