@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"context"
 	"encoding/json"
 	"reflect"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
+	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 )
@@ -98,6 +100,24 @@ func requireServedForkPlanDeliveryEvidence(t *testing.T, plan runfork.RunForkPla
 func TestServedForkConnectedDeliveryRouteEvidenceOnBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
+			priorCapabilities := buildSelectedAPICapabilities
+			buildSelectedAPICapabilities = func(owner *selectedStoreOwner, req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
+				caps, err := priorCapabilities(owner, req)
+				if executor, ok := caps.RunFork.(apiv1.SelectedContractRunForkExecutor); err == nil && ok {
+					execute := executor.ExecuteSelectedContractRunFork
+					// Keep the owner error visible before JSON-RPC normalizes it.
+					executor.ExecuteSelectedContractRunFork = func(ctx context.Context, req runforkexecution.SelectedContractExecutionRequest) (runforkexecution.SelectedContractExecutionResult, error) {
+						result, err := execute(ctx, req)
+						if err != nil {
+							t.Logf("original connected fork execution error: %v", err)
+						}
+						return result, err
+					}
+					caps.RunFork = executor
+				}
+				return caps, err
+			}
+			t.Cleanup(func() { buildSelectedAPICapabilities = priorCapabilities })
 			var selected *selectedStoreOwner
 			previous := projectRuntimePersistenceForServe
 			projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence {
