@@ -238,6 +238,24 @@ func (a *Adapter) activateNormalAuthorityTx(ctx context.Context, tx *sql.Tx, att
 }
 
 func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, obligation Obligation) (DurableHandoffProof, error) {
+	proof, err := a.persistExactObligation(ctx, tx, obligation)
+	if err != nil {
+		return DurableHandoffProof{}, err
+	}
+	if err := attempt.AddFact(obligation.RunID(), privaterunforkrevision.FamilyEventDeliveries, obligation.DeliveryID()); err != nil {
+		return DurableHandoffProof{}, err
+	}
+	return proof, nil
+}
+
+// InsertUnrevisionedFixtureObligationTx preserves a fixture's existing history
+// frontier while using the canonical route encoder, storage and exact readback.
+// Only the named selected-store fixture operation may supply its transaction.
+func (a *Adapter) InsertUnrevisionedFixtureObligationTx(ctx context.Context, tx *sql.Tx, obligation Obligation) (DurableHandoffProof, error) {
+	return a.persistExactObligation(ctx, tx, obligation)
+}
+
+func (a *Adapter) persistExactObligation(ctx context.Context, tx *sql.Tx, obligation Obligation) (DurableHandoffProof, error) {
 	target, deliveryContext, projection, connectClaim, materialization, err := encodeRoute(obligation.Route())
 	if err != nil {
 		return DurableHandoffProof{}, err
@@ -337,9 +355,6 @@ func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, attempt
 	}
 	if inserted == 0 && (record.Status != StatusPending || record.RetryCount != 0 || record.ClaimVersion != 0) {
 		return DurableHandoffProof{}, fmt.Errorf("%w: delivery obligation replay conflicts with existing lifecycle", ErrConflict)
-	}
-	if err := attempt.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID); err != nil {
-		return DurableHandoffProof{}, err
 	}
 	return AdmitDurableHandoffProof(obligation.DeliveryID(), obligation.EventID(), events.EncodeDeliveryRouteIdentity(obligation.RouteIdentity()), obligation.Authority())
 }
@@ -806,12 +821,34 @@ func (a *Adapter) CommitPipelineHandoff(ctx context.Context, attempt *mutationpr
 }
 
 func (a *Adapter) commitPipelineHandoffTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, eventID string) error {
+	facts, err := a.persistPipelineHandoffTx(ctx, tx, eventID)
+	if err != nil {
+		return err
+	}
+	for _, fact := range facts {
+		if err := attempt.AddFact(fact.runID, privaterunforkrevision.FamilyEventDeliveries, fact.deliveryID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// CommitUnrevisionedFixturePipelineHandoffTx transfers the same durable
+// continuations without moving the fixture's retained fork-history frontier.
+func (a *Adapter) CommitUnrevisionedFixturePipelineHandoffTx(ctx context.Context, tx *sql.Tx, eventID string) error {
+	_, err := a.persistPipelineHandoffTx(ctx, tx, eventID)
+	return err
+}
+
+type pipelineHandoffFact struct{ runID, deliveryID string }
+
+func (a *Adapter) persistPipelineHandoffTx(ctx context.Context, tx *sql.Tx, eventID string) ([]pipelineHandoffFact, error) {
 	if tx == nil {
-		return errors.New("delivery continuation handoff transaction is required")
+		return nil, errors.New("delivery continuation handoff transaction is required")
 	}
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {
-		return errors.New("delivery continuation handoff event identity is required")
+		return nil, errors.New("delivery continuation handoff event identity is required")
 	}
 	query := `
 		UPDATE event_deliveries
@@ -828,19 +865,18 @@ func (a *Adapter) commitPipelineHandoffTx(ctx context.Context, tx *sql.Tx, attem
 	}
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
-		return fmt.Errorf("transfer delivery continuations after pipeline acknowledgement: %w", err)
+		return nil, fmt.Errorf("transfer delivery continuations after pipeline acknowledgement: %w", err)
 	}
 	defer rows.Close()
+	var facts []pipelineHandoffFact
 	for rows.Next() {
 		var runID, deliveryID string
 		if err := rows.Scan(&runID, &deliveryID); err != nil {
-			return err
+			return nil, err
 		}
-		if err := attempt.AddFact(runID, privaterunforkrevision.FamilyEventDeliveries, deliveryID); err != nil {
-			return err
-		}
+		facts = append(facts, pipelineHandoffFact{runID: runID, deliveryID: deliveryID})
 	}
-	return rows.Err()
+	return facts, rows.Err()
 }
 
 func executionAuthorityCursorID(authority ExecutionAuthority) string {

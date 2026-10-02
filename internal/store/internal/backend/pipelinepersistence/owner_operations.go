@@ -1383,10 +1383,16 @@ func (s *PipelineSQLiteOwner) CommitInitialPipelineScopeTx(ctx context.Context, 
 	})
 }
 
-func insertCommittedPipelineScopeTx(
+func insertCommittedPipelineScopeTx(ctx context.Context, tx pipelineExecer, attempt *mutationprotocol.Attempt, eventID string, scope runtimepipelineobligation.CommittedScope, postgres bool, now time.Time) error {
+	if err := persistCommittedPipelineScopeTx(ctx, tx, eventID, scope, postgres, now); err != nil {
+		return err
+	}
+	return declareEventRevisionFact(ctx, tx, attempt, eventID, privaterunforkrevision.FamilyCommittedReplayScopes, eventID)
+}
+
+func persistCommittedPipelineScopeTx(
 	ctx context.Context,
 	tx pipelineExecer,
-	attempt *mutationprotocol.Attempt,
 	eventID string,
 	scope runtimepipelineobligation.CommittedScope,
 	postgres bool,
@@ -1427,7 +1433,7 @@ func insertCommittedPipelineScopeTx(
 		return fmt.Errorf("read committed pipeline scope insertion: %w", err)
 	}
 	if rows == 1 {
-		return declareEventRevisionFact(ctx, tx, attempt, eventID, privaterunforkrevision.FamilyCommittedReplayScopes, eventID)
+		return nil
 	}
 	persisted, err := loadCommittedPipelineScope(ctx, tx, eventID, postgres)
 	if err != nil {
@@ -1436,7 +1442,7 @@ func insertCommittedPipelineScopeTx(
 	if persisted != scope {
 		return errors.New("committed pipeline scope conflicts with persisted scope")
 	}
-	return declareEventRevisionFact(ctx, tx, attempt, eventID, privaterunforkrevision.FamilyCommittedReplayScopes, eventID)
+	return nil
 }
 
 func InsertCommittedPipelineScopeTx(ctx context.Context, attempt *mutationprotocol.Attempt, eventID string, scope runtimepipelineobligation.CommittedScope, postgres bool, now time.Time) error {
@@ -2462,6 +2468,17 @@ func pipelineDispositionState(ctx context.Context, tx pipelineExecer, eventID st
 }
 
 func writeExactPlatformPipelineReceipt(ctx context.Context, tx pipelineExecer, attempt *mutationprotocol.Attempt, eventID string, disposition runtimepipelineobligation.Disposition, postgres bool, now time.Time) (string, error) {
+	receiptID, err := persistExactPlatformPipelineReceipt(ctx, tx, eventID, disposition, postgres, now)
+	if err != nil {
+		return "", err
+	}
+	if err := declareEventRevisionFact(ctx, tx, attempt, eventID, privaterunforkrevision.FamilyEventReceipts, receiptID); err != nil {
+		return "", err
+	}
+	return receiptID, nil
+}
+
+func persistExactPlatformPipelineReceipt(ctx context.Context, tx pipelineExecer, eventID string, disposition runtimepipelineobligation.Disposition, postgres bool, now time.Time) (string, error) {
 	stored, err := storedPipelineDispositionFor(disposition)
 	if err != nil {
 		return "", err
@@ -2496,9 +2513,6 @@ func writeExactPlatformPipelineReceipt(ctx context.Context, tx pipelineExecer, a
 	}
 	result, err := tx.ExecContext(ctx, query, args...)
 	if err := requireOnePipelineMutation(result, err, "write platform pipeline acknowledgement"); err != nil {
-		return "", err
-	}
-	if err := declareEventRevisionFact(ctx, tx, attempt, eventID, privaterunforkrevision.FamilyEventReceipts, receiptID); err != nil {
 		return "", err
 	}
 	return receiptID, nil

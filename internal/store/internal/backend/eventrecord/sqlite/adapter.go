@@ -110,12 +110,28 @@ func LoadMany(ctx context.Context, q Queryer, eventIDs []string) ([]eventrecord.
 }
 
 func Insert(ctx context.Context, attempt *mutationprotocol.Attempt, record eventrecord.Record) (bool, error) {
+	var inserted bool
+	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		inserted, err = insertRecord(ctx, tx, record)
+		return err
+	})
+	if err != nil {
+		return false, err
+	}
+	if inserted && record.RunID != "" {
+		if err := attempt.AddFact(record.RunID, runforkrevision.FamilyEvents, record.EventID); err != nil {
+			return false, err
+		}
+	}
+	return inserted, nil
+}
+
+func insertRecord(ctx context.Context, tx *sql.Tx, record eventrecord.Record) (bool, error) {
 	if err := record.Validate(); err != nil {
 		return false, fmt.Errorf("append sqlite event record: %w", err)
 	}
-	var result sql.Result
-	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
-		result, err = tx.ExecContext(ctx, `
+	result, err := tx.ExecContext(ctx, `
 		INSERT INTO events (
 			event_class, event_id, run_id, event_name, task_id, entity_id, flow_instance, scope, payload, payload_bytes,
 			payload_schema_bundle_hash, payload_schema_flow_id, payload_schema_event_key,
@@ -126,14 +142,12 @@ func Insert(ctx context.Context, attempt *mutationprotocol.Attempt, record event
 		) VALUES (?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''))
 		ON CONFLICT(event_id) DO NOTHING
 	`, record.Class, record.EventID, record.RunID, record.EventName, record.TaskID,
-			record.EntityID, record.FlowInstance, record.Scope, string(record.Payload), record.Payload,
-			record.PayloadSchemaBundleHash, record.PayloadSchemaFlowID,
-			record.PayloadSchemaEventKey, record.PayloadSchemaDigest, record.PayloadSchemaClass, record.ExecutionMode,
-			record.ChainDepth, record.ProducedBy, record.ProducedByType, record.SourceEventID, record.CreatedAt.UTC(),
-			record.RoutingSourceKind, record.RoutingSourceAuthority, string(record.SourceRoute),
-			string(record.TargetRoute), string(record.TargetSet), string(record.RouteSettlement), record.OperatorReferencedEventID, string(record.InheritedFanOutOrigin))
-		return err
-	})
+		record.EntityID, record.FlowInstance, record.Scope, string(record.Payload), record.Payload,
+		record.PayloadSchemaBundleHash, record.PayloadSchemaFlowID,
+		record.PayloadSchemaEventKey, record.PayloadSchemaDigest, record.PayloadSchemaClass, record.ExecutionMode,
+		record.ChainDepth, record.ProducedBy, record.ProducedByType, record.SourceEventID, record.CreatedAt.UTC(),
+		record.RoutingSourceKind, record.RoutingSourceAuthority, string(record.SourceRoute),
+		string(record.TargetRoute), string(record.TargetSet), string(record.RouteSettlement), record.OperatorReferencedEventID, string(record.InheritedFanOutOrigin))
 	if err != nil {
 		return false, fmt.Errorf("append sqlite event record: %w", err)
 	}
@@ -141,12 +155,27 @@ func Insert(ctx context.Context, attempt *mutationprotocol.Attempt, record event
 	if err != nil {
 		return false, fmt.Errorf("append sqlite event record: read affected rows: %w", err)
 	}
-	if rows == 1 && record.RunID != "" {
-		if err := attempt.AddFact(record.RunID, runforkrevision.FamilyEvents, record.EventID); err != nil {
-			return false, err
-		}
-	}
 	return rows == 1, nil
+}
+
+// InsertUnrevisionedFixtureRecord reuses canonical encoding and exact readback
+// without declaring a history revision. The selected coordinator owns tx.
+func InsertUnrevisionedFixtureRecord(ctx context.Context, tx *sql.Tx, record eventrecord.Record) (bool, error) {
+	if tx == nil {
+		return false, fmt.Errorf("unrevisioned event fixture requires a transaction")
+	}
+	inserted, err := insertRecord(ctx, tx, record)
+	if err != nil {
+		return false, err
+	}
+	existing, found, err := Load(ctx, tx, record.EventID)
+	if err != nil {
+		return false, err
+	}
+	if !found || !record.Equal(existing) {
+		return false, fmt.Errorf("unrevisioned event fixture %s conflicts with canonical readback", record.EventID)
+	}
+	return inserted, nil
 }
 
 // DeleteSelectedForkRunEvents is the event-record portion of the closed

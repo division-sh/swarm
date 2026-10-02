@@ -83,6 +83,8 @@ var eventRecordImportFiles = map[string]struct{}{
 	"internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_discard_owner.go":         {},
 	"internal/store/internal/backend/runlifecycle/standalone_runtime.go":                                     {},
 	"internal/store/storetest/event.go": {},
+	// Named fixture orchestration consumes canonical record encoding only.
+	"internal/store/internal/runtimepersistence/test_event_support.go": {},
 }
 
 var eventRecordSQLFiles = map[string]struct{}{
@@ -173,7 +175,6 @@ type unrevisionedEventFixtureCounts struct {
 }
 
 var unrevisionedEventFixtureConsumers = map[eventBoundaryCallsite]int{
-	{path: "internal/store/storetest/event.go", scope: "commitUnrevisionedSemanticEventFixture", name: "InsertUnrevisioned"}:  1,
 	{path: "internal/store/storetest/event.go", scope: "InsertUnrevisionedChildEventRecord", name: "InsertUnrevisionedChild"}: 1,
 }
 

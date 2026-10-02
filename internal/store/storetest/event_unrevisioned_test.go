@@ -15,11 +15,10 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
-	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
-	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
@@ -90,41 +89,14 @@ func TestUnrevisionedSemanticEventFixtureMatchesCanonicalMutationProjection(t *t
 			if err != nil {
 				t.Fatal(err)
 			}
-			record, err := eventrecord.FromAdmitted(admitted, canonicalFixtureSettlement(t, admitted.Event(), routes))
-			if err != nil {
-				t.Fatal(err)
-			}
-			adapter, err := deliveryadapter.NewAdapter(deliveryadapter.Dialect(backend.dialect))
-			if err != nil {
-				t.Fatal(err)
-			}
 			canonicalRevision := fixtureRevisionCount(t, canonicalDB, runID)
-			err = runCanonicalEventMutation(ctx, canonicalDB, backend.dialect, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
-				var inserted bool
-				var err error
-				if backend.dialect == authoractivityfixture.DialectPostgres {
-					inserted, err = eventrecordpostgres.Insert(txctx, attempt, record)
-				} else {
-					inserted, err = eventrecordsqlite.Insert(txctx, attempt, record)
-				}
-				if err != nil || !inserted {
-					return err
-				}
-				var authority runtimedelivery.ExecutionAuthority
-				if err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-					var err error
-					authority, err = deliveryFixtureAuthority(txctx, tx, runID, adapter)
-					return err
-				}); err != nil {
-					return err
-				}
-				if _, err := adapter.CommitInitial(txctx, attempt, eventID, runID, routes, authority); err != nil {
-					return err
-				}
-				return attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-					return insertPipelineScopeFixture(txctx, tx, eventID, runtimepipelineobligation.ScopeSubscribed, backend.dialect == authoractivityfixture.DialectPostgres, at)
-				})
-			})
+			inserted, err := private.CommitRevisionedSemanticEventFixtureForTest(
+				ctx, canonicalStore, admitted, canonicalFixtureSettlement(t, admitted.Event(), routes),
+				routes, runtimepipelineobligation.ScopeSubscribed, nil,
+			)
+			if err == nil && !inserted {
+				t.Fatal("canonical mutation did not insert the fixture")
+			}
 			if err != nil {
 				t.Fatalf("canonical mutation fixture: %v", err)
 			}

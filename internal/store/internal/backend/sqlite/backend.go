@@ -48,6 +48,13 @@ func (b *Backend) Valid() bool {
 	return b != nil && b.db != nil && b.mutationToken != nil
 }
 
+// QueuedWritersForTest observes this exact coordinator, without granting admission.
+func (b *Backend) QueuedWritersForTest() int {
+	b.mutationState.Lock()
+	defer b.mutationState.Unlock()
+	return b.mutationState.waiting
+}
+
 func (b *Backend) Ping(ctx context.Context) error {
 	if !b.Valid() {
 		return fmt.Errorf("sqlite backend is required")
