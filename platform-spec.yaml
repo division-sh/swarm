@@ -93,6 +93,28 @@ spec_authority:
       a review artifact without promoting the matching semantics here.
     - Leaving active tracker prose that names a private review artifact as the
       binding source after a tracked owner or superseding tracker note exists.
+  pack_platform_source_admission:
+    lexical_owner: internal/yamlsource.Document and Value
+    effective_owners: >
+      packartifact membership, packmodel universal envelopes, packs channel bodies, providerconnectors manifests and generated
+      identity evidence, contracts.AdmitPlatformSpecValue, and apispec.AdmitPlatformAPIValue own their complete typed families.
+    rule: >
+      Consumed declarations preserve source tags, exact owned bytes, semantic paths, alias/merge origins and a document-wide
+      expansion bound. Structural null is never omission. Wrong scalar kinds, duplicate effective keys and inactive members
+      fail before projection, even when false or empty. Literal schema/data interiors retain their distinct supported dialects.
+      Retired channel from-only mappings are invalid; direct sources use text scalars, recursive input mappings use each/item.
+    handoff: >
+      Admitted inventory entries hand their typed envelope and exact body to each existing body owner. Serialization back to
+      YAML and reflected re-decoding are not admission. Project manifest_hash remains authored derived while its effective
+      digest is computed from exact body bytes; provenance records those as distinct facts.
+    platform_catalog: >
+      Platform event payloads are materialized once during admission. Malformed present payloads and retired required lists
+      reject then, not through empty fallback or lookup panic. Lookup returns defensive typed copies and cannot mutate authority.
+    consumed_law: >
+      Platform DDL, interface, catalog, permission and participant consumers all use the same admitted platform projection.
+      The platform spec is an open normative document: inert prose is retained in its immutable source, not reinterpreted as
+      executable fields. API schemas preserve their own extended dialect. Effective describe provenance composes these sources
+      with existing schema, event, node, agent, tool and policy evidence without replacing their ledger entries.
   tracker_repairs:
     explicit_superseding_comments:
     - '#852'
@@ -10130,6 +10152,10 @@ tool_model:
         pack manifest hash does not downgrade the pack to handwritten status. Effective admission parses the exact indexed
         profile and requires the body evidence source path, OpenAPI version, and source hash to equal that profile; repairing
         only connector bytes and the envelope hash cannot substitute another source identity.
+      runtime_profile_boundary: >
+        Runtime admission consumes the index and exact indexed profile as typed identity evidence. It does not generate packs,
+        discover membership, read live OpenAPI documents, or obtain publication authority. Transform execution belongs only
+        to GenerateCatalog; source publication and transport remain separate owners.
       evidence_chain: >
         Generated connector bodies carry schema/generator versions, exact source path/version/hash, exact profile path/
         schema/hash, and one operation record per generated tool. Each operation binds operation id, tool id, reviewed
@@ -39171,7 +39197,7 @@ filesystem_source_model:
     derivation: |
       Every non-reserved directory segment above a classified declaration, typed resource, or live descendant is a FlowNode. Child identity is its exact slash-relative path from the selected root. The selected root is spelled exactly `.`; an empty path, backslash spelling, or any other normalized-equivalent spelling is invalid rather than repaired. A non-root node must have local semantic/resource content or a live descendant; dead directories fail. The selected root must contain at least one semantic declaration, typed resource, or live descendant.
     schema_owner: |
-      schema.yaml owns mode, activation, ingress, imports, event pins, and the exact least-common-ancestor connect declarations lowered into the compiled pin/edge owner. There is no connect.yaml or manifest-owned routing surface.
+      schema.yaml owns instance shape, activation, ingress, imports, event pins, and the exact least-common-ancestor connect declarations lowered into the compiled pin/edge owner. Mode is derived from the instance declaration, never authored. There is no connect.yaml or manifest-owned routing surface.
     discovery_output: |
       One immutable trie rooted at `.`. Consumers may derive sorted registries from the trie but may not reconstruct topology from package inventories, directory names outside the artifact, or declaration contents.
   authored_identity:

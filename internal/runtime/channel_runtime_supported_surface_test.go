@@ -714,7 +714,8 @@ func configuredTelegramChannelBindingWithTextLimit(t *testing.T, serverURL strin
 		t.Fatalf("load platform spec: %v", err)
 	}
 	var spec runtimecontracts.PlatformSpecDocument
-	if err := snapshot.Decode(&spec); err != nil {
+	spec, err = runtimecontracts.AdmitPlatformSpecValue(snapshot.Document(filepath.Join(repo, "platform-spec.yaml")).Root())
+	if err != nil {
 		t.Fatalf("decode platform spec: %v", err)
 	}
 	registry, err := packs.NewInterfaceRegistry(spec)

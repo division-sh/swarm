@@ -34,7 +34,7 @@ func loadPlatformSpec() (runtimecontracts.PlatformSpecDocument, error) {
 		return runtimecontracts.PlatformSpecDocument{}, err
 	}
 	var spec runtimecontracts.PlatformSpecDocument
-	err = source.Decode(&spec)
+	spec, err = runtimecontracts.AdmitPlatformSpecValue(source.Document(path).Root())
 	return spec, err
 }
 

@@ -337,11 +337,19 @@ func LoadPlatformPackInventoryFS(fsys fs.FS, manifestPath, runningPlatformVersio
 }
 
 type EffectivePackInventory struct {
+	source          yamlsource.Value
 	baseDigest      string
 	digest          string
 	baseMode        SelectionMode
 	baseDirectories []string
 	entries         map[string]Entry
+}
+
+func (i *EffectivePackInventory) SourceValue() yamlsource.Value {
+	if i == nil {
+		return yamlsource.Value{}
+	}
+	return i.source
 }
 
 func NewEffectivePackInventory(base *PlatformPackInventory, projects []ProjectPackSource) (*EffectivePackInventory, error) {
@@ -398,6 +406,7 @@ func NewEffectivePackInventory(base *PlatformPackInventory, projects []ProjectPa
 	}
 	digest := digestEffectiveInventory(base.Digest(), entries)
 	return &EffectivePackInventory{
+		source:          base.SourceValue(),
 		baseDigest:      base.Digest(),
 		digest:          digest,
 		baseMode:        base.SelectionMode(),

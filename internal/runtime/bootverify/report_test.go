@@ -1126,9 +1126,9 @@ payload:
 			}
 			bundle.Platform.Platform.Name = "test"
 			bundle.Platform.Platform.Version = "1.0.0"
-			bundle.Platform.PlatformEvents.Catalog = map[string]yaml.Node{
+			bundle.Platform = admittedCatalogTestSpec(t, map[string]yaml.Node{
 				tc.eventType: tc.catalog,
-			}
+			})
 			source := semanticview.Wrap(bundle)
 
 			report := Run(context.Background(), source, Options{})
@@ -1148,12 +1148,12 @@ func TestRun_RejectsProductRedeclarationOfPlatformEmittedEvent(t *testing.T) {
 	}
 	bundle.Platform.Platform.Name = "test"
 	bundle.Platform.Platform.Version = "1.0.0"
-	bundle.Platform.PlatformEvents.Catalog = map[string]yaml.Node{
+	bundle.Platform = admittedCatalogTestSpec(t, map[string]yaml.Node{
 		"mailbox.card_decided": platformEventCatalogTestNode(t, `
 payload:
   mailbox_id: uuid
 `),
-	}
+	})
 	recompileBootverifySemantics(t, bundle)
 
 	report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
@@ -1176,12 +1176,12 @@ func TestRun_RejectsFlowOutputPinClaimOfPlatformEmittedEvent(t *testing.T) {
 	}
 	bundle.Platform.Platform.Name = "test"
 	bundle.Platform.Platform.Version = "1.0.0"
-	bundle.Platform.PlatformEvents.Catalog = map[string]yaml.Node{
+	bundle.Platform = admittedCatalogTestSpec(t, map[string]yaml.Node{
 		"mailbox.card_decided": platformEventCatalogTestNode(t, `
 payload:
   mailbox_id: uuid
 `),
-	}
+	})
 	recompileBootverifySemantics(t, bundle)
 
 	report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
@@ -3972,7 +3972,7 @@ func TestRun_RejectsHarnessInputWithInternalOrPlatformProducer(t *testing.T) {
 
 	t.Run("platform", func(t *testing.T) {
 		bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
-		bundle.Platform.PlatformEvents.Catalog = map[string]yaml.Node{"platform.runtime_log": {}}
+		bundle.Platform = admittedCatalogTestSpec(t, map[string]yaml.Node{"platform.runtime_log": {}})
 		renameFlowHandlerEvent(t, bundle, "child", "worker", "task.feedback", "platform.runtime_log", runtimecontracts.SystemNodeEventHandler{AdvancesTo: "done"})
 		markFlowInputPinSource(t, bundle, "child", "platform.runtime_log", "harness")
 		report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -4079,9 +4079,9 @@ func TestRun_RootInputDoesNotImplicitlySubscribeSameNamedChild(t *testing.T) {
 
 func TestRun_DoesNotErrorForPlatformEventCatalogInputProducerPath(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
-	bundle.Platform.PlatformEvents.Catalog = map[string]yaml.Node{
+	bundle.Platform = admittedCatalogTestSpec(t, map[string]yaml.Node{
 		"platform.runtime_log": {},
-	}
+	})
 	renameFlowHandlerEvent(t, bundle, "child", "worker", "task.feedback", "platform.runtime_log", runtimecontracts.SystemNodeEventHandler{
 		CreateEntity: true,
 		AdvancesTo:   "done",

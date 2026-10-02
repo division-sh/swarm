@@ -100,7 +100,7 @@ func TestW5PlatformInterfaceAuthoredSchemaRetainsLexicalEvidence(t *testing.T) {
 	}{{"16", true}, {"0x10", false}, {"01", false}, {".nan", false}, {"16.0", true}} {
 		t.Run(row.literal, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "platform-spec.yaml")
-			body := "interfaces:\n  sample:\n    v1:\n      kind: channel\n      schemas:\n        number: {type: number, enum: [" + row.literal + "]}\n"
+			body := "interfaces:\n  sample:\n    v1:\n      kind: channel\n      schemas:\n        number: {type: number, enum: [" + row.literal + "]}\n      operations: {check: {effect_class: non_idempotent_write}}\n      events: {checked: {required_fields: {value: {schema: number}}}}\n"
 			if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 				t.Fatal(err)
 			}

@@ -53,7 +53,8 @@ func loadChannelPlatformSpecDocument(platformSpecPath string) (runtimecontracts.
 		return runtimecontracts.PlatformSpecDocument{}, fmt.Errorf("read platform spec: %w", err)
 	}
 	var spec runtimecontracts.PlatformSpecDocument
-	if err := source.Decode(&spec); err != nil {
+	spec, err = runtimecontracts.AdmitPlatformSpecValue(source.Document(platformSpecPath).Root())
+	if err != nil {
 		return runtimecontracts.PlatformSpecDocument{}, fmt.Errorf("unmarshal platform spec: %w", err)
 	}
 	return spec, nil

@@ -209,7 +209,8 @@ func sourceFreeAuthoritySchemaBootstrapRequest() (store.SchemaBootstrapRequest, 
 	if err != nil {
 		return store.SchemaBootstrapRequest{}, fmt.Errorf("load embedded platform schema: %w", err)
 	}
-	if err := source.Decode(&spec); err != nil {
+	spec, err = runtimecontracts.AdmitPlatformSpecValue(source.Document("platform-spec.yaml").Root())
+	if err != nil {
 		return store.SchemaBootstrapRequest{}, fmt.Errorf("decode embedded platform schema: %w", err)
 	}
 	plans, err := store.GeneratePlatformTableDDLs(spec)

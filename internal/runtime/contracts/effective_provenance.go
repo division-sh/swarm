@@ -107,6 +107,9 @@ func populateEffectiveProvenance(bundle *WorkflowContractBundle) error {
 		return nil
 	}
 	builder := newEffectiveProvenanceBuilder()
+	if err := populatePackPlatformProvenance(bundle, builder); err != nil {
+		return err
+	}
 	populateEffectiveSchemaProvenance(bundle, builder)
 	for _, record := range bundle.ScopedNodeRecords() {
 		prefix := effectiveNodeProvenancePrefix(record.Source.FlowPath, record.LogicalID)

@@ -16,7 +16,7 @@ import (
 	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	"github.com/division-sh/swarm/internal/sourceartifact"
-	"gopkg.in/yaml.v3"
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 type ContractPaths struct {
@@ -1680,13 +1680,12 @@ type HTTPResponseSuccess struct {
 	EqualsPresent bool   `yaml:"-" json:"-"`
 }
 type PlatformSpecDocument struct {
-	Platform struct {
+	source       yamlsource.Value
+	eventCatalog map[string]EventCatalogEntry
+	Platform     struct {
 		Name    string `yaml:"name"`
 		Version string `yaml:"version"`
 	} `yaml:"platform"`
-	PlatformEvents struct {
-		Catalog map[string]yaml.Node `yaml:"catalog"`
-	} `yaml:"platform_events"`
 	PermissionsModel struct {
 		Permissions []string `yaml:"permissions"`
 	} `yaml:"permissions_model"`
@@ -1698,8 +1697,7 @@ type PlatformSpecDocument struct {
 			} `yaml:"types"`
 		} `yaml:"participant"`
 	} `yaml:"vocabulary"`
-	ContractFormats yaml.Node `yaml:"contract_formats"`
-	WorkflowState   struct {
+	WorkflowState struct {
 		DDL    string `yaml:"ddl"`
 		Fields map[string]struct {
 			Type string `yaml:"type"`
@@ -1716,11 +1714,6 @@ type PlatformSpecDocument struct {
 			ID string `yaml:"id"`
 		} `yaml:"guards"`
 	} `yaml:"builtin_hooks"`
-	APISpecification yaml.Node `yaml:"api_specification"`
-	ComplianceRules  yaml.Node `yaml:"compliance_rules"`
-	FileLayout       struct {
-		MigrationNote string `yaml:"migration_note"`
-	} `yaml:"file_layout"`
 }
 
 type PackInterfaceDefinition struct {

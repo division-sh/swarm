@@ -61,8 +61,8 @@ type GeneratorPack struct {
 
 type GeneratorAuth struct {
 	Mode              string                                 `yaml:"mode"`
-	Credentials       []string                               `yaml:"credentials"`
-	ManagedCredential *runtimecontracts.ManagedCredentialRef `yaml:"managed_credential"`
+	Credentials       []string                               `yaml:"credentials,omitempty"`
+	ManagedCredential *runtimecontracts.ManagedCredentialRef `yaml:"managed_credential,omitempty"`
 }
 
 type GeneratorOperation struct {
@@ -86,7 +86,7 @@ type GeneratorField struct {
 	Source    string `yaml:"source"`
 	Input     string `yaml:"input"`
 	Type      string `yaml:"type"`
-	ItemsType string `yaml:"items_type"`
+	ItemsType string `yaml:"items_type,omitempty"`
 	Required  bool   `yaml:"required"`
 }
 
@@ -444,7 +444,7 @@ func validateCheckedInGeneratedIdentity(catalogFS, packFS fs.FS) error {
 		if strings.Trim(strings.TrimSpace(indexed.Output), "/") != entry.Path {
 			return fmt.Errorf("generated connector pack %q output %q contradicts explicit inventory path %q", entry.ID, indexed.Output, entry.Path)
 		}
-		if err := validateGeneratedPackIdentity(catalogFS, pack, indexed); err != nil {
+		if err := validateGeneratedPackIdentity(catalogFS, &pack, indexed); err != nil {
 			return err
 		}
 		seen[entry.ID] = struct{}{}
