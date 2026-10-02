@@ -8182,7 +8182,14 @@ engine:
       versioned typed activation serialization; `fire_payload` carries
       business input only and is never interpreted as lifecycle identity. Replaying that exact cause compares immutable
       activation facts against the existing row and converges on its current active, fired, or cancelled state without
-      reinsertion, resurrection, or conflict on mutable completion fields. A transition cause derives loop generation from
+      reinsertion, resurrection, or conflict on mutable completion fields. The selected insertion writer and declaration
+      reconciler both consume the WorkflowTimerActivation domain-owned cause-replay policy, validating persisted and
+      requested records before comparing their immutable facts. Recurring replay accepts only a current coordinate at
+      or ahead of the requested coordinate on the same persisted occurrence lattice, including cancellation after an
+      advance. Exact insertion replay leaves the row unchanged and contributes no timer revision fact. This policy
+      does not authorize execution. Occurrence commit separately requires the exact current active record and due
+      coordinate, while cancellation separately verifies its immutable target and remains monotonic. Post-commit
+      wakeup references reload that current authority and cannot resurrect terminal rows. A transition cause derives loop generation from
       its persisted target stage; an event-only cause derives it from the persisted current stage without treating that stage
       as a new state entry, stage exit, or state-trigger match. Existing stage-owned timers remain active across event-only
       handling unless an exact event cancellation trigger applies. Exact replay within one generation keeps the activation
