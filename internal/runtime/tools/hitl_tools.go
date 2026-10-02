@@ -143,7 +143,11 @@ func ValidateHITLIdentityLifecycleReferences(source semanticview.Source) []error
 			add(hitlIdentityDefinitionError(name, scope.label+" tool entry"))
 			add(permissionReferenceError(entry.Permission().String(), scope.label+" tool "+name+" permission"))
 		}
-		for bundle, names := range permissionBundles(scope.policy) {
+		bundles, err := permissionBundles(scope.policy)
+		if err != nil {
+			add(fmt.Errorf("%s %w", scope.label, err))
+		}
+		for bundle, names := range bundles {
 			for _, name := range names {
 				add(permissionReferenceError(name, fmt.Sprintf("%s permission_bundles.%s.permissions", scope.label, bundle)))
 			}

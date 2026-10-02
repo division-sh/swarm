@@ -3,10 +3,15 @@ package bootverify
 import (
 	"context"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -168,5 +173,176 @@ func TestAgentMessageRetirementShadowedAncestorDeclarationsStillReject(t *testin
 			}
 			requireMessageRetirement(t, semanticview.Wrap(bundle), "message_peers")
 		})
+	}
+}
+
+func TestPermissionBundleMalformedLoadedScopes(t *testing.T) {
+	for _, scope := range []string{"root", "project", "flow"} {
+		for _, tc := range []struct{ name, policy string }{
+			{"null_root", "permission_bundles: null\n"},
+			{"scalar_root", "permission_bundles: message_flow\n"},
+			{"list_root", "permission_bundles: [message_flow]\n"},
+			{"null_bundle", "permission_bundles: {operators: null}\n"},
+			{"scalar_bundle", "permission_bundles: {operators: message_flow}\n"},
+			{"list_bundle", "permission_bundles: {operators: [message_flow]}\n"},
+			{"missing_permissions", "permission_bundles: {operators: {}}\n"},
+			{"null_permissions", "permission_bundles: {operators: {permissions: null}}\n"},
+			{"scalar_permissions", "permission_bundles: {operators: {permissions: message_flow}}\n"},
+			{"mixed_integer", "permission_bundles: {operators: {permissions: [message_flow, 7]}}\n"},
+			{"mixed_null", "permission_bundles: {operators: {permissions: [message_peers, null]}}\n"},
+		} {
+			for _, site := range []string{"zero_agent", "unselected", "selected", "combined"} {
+				t.Run(scope+"/"+tc.name+"/"+site, func(t *testing.T) {
+					agents := ""
+					if site != "zero_agent" {
+						agents = "worker:\n  model: regular\n  intent: {inline: Coordinate declared events.}\n"
+					}
+					if site == "selected" || site == "combined" {
+						agents += "  permissions_bundle: operators\n"
+					}
+					if site == "combined" {
+						agents += "  permissions: [ask_human]\n"
+					}
+					source := loadMessageRetirementScope(t, scope, agents, tc.policy, "")
+					if errs := tools.ValidateHITLIdentityLifecycleReferences(source); len(errs) == 0 || !strings.Contains(fmt.Sprint(errs), "permission_bundles") {
+						t.Fatalf("malformed source declaration omitted: %v", errs)
+					}
+					if report := Run(context.Background(), source, Options{}); !reportContains(report.HardInvalidities(), "agent_permission_validation", "permission_bundles") {
+						t.Fatalf("shape error was not a hard failure: %+v", report)
+					}
+				})
+			}
+		}
+		for _, name := range []string{"message_flow", "message_peers", "agent_message", "mailbox_send", "human_task_request", "agent_hire", "ask_human"} {
+			for _, shape := range []string{"[%s, 7]", "[%s, null]", "%s"} {
+				t.Run(scope+"/unused/"+name+"/"+shape, func(t *testing.T) {
+					policy := "permission_bundles:\n  operators:\n    permissions: " + fmt.Sprintf(shape, name) + "\n"
+					source := loadMessageRetirementScope(t, scope, "", policy, "")
+					if errs := tools.ValidateHITLIdentityLifecycleReferences(source); len(errs) == 0 {
+						t.Fatal("malformed unused sibling declaration accepted")
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestPermissionWarningsConsumeCanonicalScopedResolver(t *testing.T) {
+	for _, scope := range []string{"root", "project", "flow"} {
+		for _, site := range []string{"direct", "selected", "combined", "malformed_unused", "valid", "missing_required"} {
+			t.Run(scope+"/"+site, func(t *testing.T) {
+				agents := "worker:\n  model: regular\n  intent: {inline: Coordinate declared events.}\n  tools: [lookup]\n"
+				policy := "permission_bundles:\n  operators:\n    permissions: [message_flow]\n"
+				switch site {
+				case "direct":
+					agents += "  permissions: [message_peers]\n"
+				case "selected", "combined":
+					agents += "  permissions_bundle: operators\n"
+					if site == "combined" {
+						agents += "  permissions: [message_peers]\n"
+					}
+				case "malformed_unused":
+					policy = "permission_bundles: {operators: {permissions: [ask_human, null]}}\n"
+					agents += "  permissions: [ask_human]\n"
+				case "valid", "missing_required":
+					policy = "permission_bundles: {operators: {permissions: [ask_human]}}\n"
+					agents += "  permissions_bundle: operators\n"
+					if site == "valid" {
+						agents += "  permissions: [custom_access, ask_human, custom_access]\n"
+					}
+				}
+				source := loadMessageRetirementScope(t, scope, agents, policy,
+					"lookup:\n  description: Scoped permission control.\n  handler_type: platform_builtin\n  permission: custom_access\n")
+				declarations := semanticview.AgentDeclarations(source)
+				if len(declarations) != 1 {
+					t.Fatalf("declarations = %d", len(declarations))
+				}
+				declaration := declarations[0]
+				plan, err := semanticview.ScopedAgentNamePlan(source, declaration)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, canonicalErr := tools.ResolveAgentPermissions(source, plan.OwnerFlowID, declaration.Entry)
+				warnings := mergedAgentPermissionWarnings(source)
+				if site == "valid" {
+					if canonicalErr != nil || len(warnings) != 0 {
+						t.Fatalf("valid scoped grants disagree: %v, %+v", canonicalErr, warnings)
+					}
+				} else if site == "missing_required" {
+					if canonicalErr != nil || len(warnings) != 1 || !strings.Contains(warnings[0].Message, `missing permission "custom_access"`) {
+						t.Fatalf("derived missing-permission warning lost: %v, %+v", canonicalErr, warnings)
+					}
+				} else if canonicalErr == nil || len(warnings) != 1 || !strings.Contains(warnings[0].Message, canonicalErr.Error()) {
+					t.Fatalf("diagnostic bypasses canonical error: %v, %+v", canonicalErr, warnings)
+				}
+			})
+		}
+	}
+}
+
+func TestPermissionBundleMalformedShadowedAncestors(t *testing.T) {
+	for _, malformedOwner := range []string{"root", "child"} {
+		t.Run(malformedOwner, func(t *testing.T) {
+			root := t.TempDir()
+			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: project\nstages: []\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "name: child\nstages: []\n")
+			valid := "permission_bundles: {operators: {permissions: [ask_human]}}\n"
+			malformed := "permission_bundles: {operators: {permissions: [message_flow, 7]}}\n"
+			rootPolicy, childPolicy := valid, malformed
+			if malformedOwner == "root" {
+				rootPolicy, childPolicy = malformed, valid
+			}
+			writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), rootPolicy)
+			writeBootverifyFixtureFile(t, filepath.Join(root, "child", "policy.yaml"), childPolicy)
+			repo := repoRootForBootverifyTest(t)
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if errs := tools.ValidateHITLIdentityLifecycleReferences(semanticview.Wrap(bundle)); len(errs) == 0 || !strings.Contains(fmt.Sprint(errs), "permission_bundles.operators.permissions") {
+				t.Fatalf("malformed %s disappeared behind a scoped override: %v", malformedOwner, errs)
+			}
+		})
+	}
+}
+
+func TestPermissionWarningResolverOwnership(t *testing.T) {
+	repo := repoRootForBootverifyTest(t)
+	canonicalCall := false
+	err := checkoutsource.WalkDir(repo, filepath.Join(repo, "internal", "runtime", "bootverify"), func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
+			return err
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+		if err != nil {
+			return err
+		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			if literal, ok := node.(*ast.BasicLit); ok && (literal.Value == `"permission_bundles"` || literal.Value == "`permission_bundles`") {
+				t.Errorf("%s reparses permission bundles outside the canonical owner", path)
+			}
+			function, ok := node.(*ast.FuncDecl)
+			if !ok || function.Name.Name != "agentPermissionWarnings" {
+				return true
+			}
+			ast.Inspect(function.Body, func(node ast.Node) bool {
+				if call, ok := node.(*ast.CallExpr); ok {
+					if selector, ok := call.Fun.(*ast.SelectorExpr); ok && selector.Sel.Name == "ResolveAgentPermissions" {
+						if owner, ok := selector.X.(*ast.Ident); ok && owner.Name == "runtimetools" {
+							canonicalCall = true
+						}
+					}
+				}
+				return true
+			})
+			return true
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !canonicalCall {
+		t.Fatal("permission warnings do not consume tools.ResolveAgentPermissions")
 	}
 }

@@ -91,7 +91,9 @@ func TestAgentMessageRetirementManagedSurfaceMatrix(t *testing.T) {
 func TestAgentMessageReservedAuthoritySymbolsAreAbsent(t *testing.T) {
 	repo := canonicalrouting.RepoRoot(t)
 	retired := map[string]bool{"HasMessageAuthority": true, "SameAgent": true, "SameFlowInstance": true,
-		"PeerManagerFallback": true, "strongestMessagePermission": true, "permissionSet": true, "hasToolGrant": true, "execAgentMessage": true}
+		"PeerManagerFallback": true, "strongestMessagePermission": true, "permissionSet": true, "hasToolGrant": true, "execAgentMessage": true,
+		"resolvedAgentPermissionsLocal": true, "permissionBundlePermissionsLocal": true, "normalizePolicyMapLocal": true,
+		"stringsFromPolicyValueLocal": true, "normalizeStringSliceLocal": true, "agentPermissionWarningsLocal": true}
 	err := checkoutsource.WalkDir(repo, filepath.Join(repo, "internal", "runtime"), func(path string, entry os.DirEntry, err error) error {
 		if err != nil || entry.IsDir() || filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
 			return err
@@ -119,7 +121,9 @@ func TestAgentMessageRetirementPermissionVocabularyCannotBeResurrected(t *testin
 			t.Run(name+"/"+extension, func(t *testing.T) {
 				known := map[string]struct{}{}
 				if extension == "bundle" {
-					collectPermissionBundleExtensions(known, hitlLifecyclePermissionBundle(name))
+					if err := collectPermissionBundleExtensions(known, hitlLifecyclePermissionBundle(name)); err != nil {
+						t.Fatal(err)
+					}
 				} else {
 					entry := retiredToolEntry(runtimecontracts.WithToolPermission(name))
 					collectToolPermissionExtensions(known, retiredToolSourceForScope("root", nil, map[string]runtimecontracts.ToolSchemaEntry{"lookup": entry}, runtimecontracts.PolicyDocument{}))

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -84,6 +85,63 @@ func TestVerifyAgentMessageRetirementSupportedCLI(t *testing.T) {
 					if !found {
 						t.Fatalf("missing %s diagnostic: %+v", check, findings)
 					}
+				}
+			})
+		}
+	}
+}
+
+func TestVerifyPermissionBundleShapeAdmission(t *testing.T) {
+	config := writeTestVerifyRuntimeConfig(t)
+	for _, scope := range []string{"root", "project", "flow"} {
+		for _, tc := range []struct {
+			name, declaration string
+			valid             bool
+		}{
+			{"null_root", "permission_bundles: null\n", false},
+			{"scalar_root", "permission_bundles: message_flow\n", false},
+			{"list_root", "permission_bundles: [message_flow]\n", false},
+			{"null_bundle", "permission_bundles: {unused: null}\n", false},
+			{"scalar_bundle", "permission_bundles: {unused: message_flow}\n", false},
+			{"missing_permissions", "permission_bundles: {unused: {}}\n", false},
+			{"null_permissions", "permission_bundles: {unused: {permissions: null}}\n", false},
+			{"scalar_permissions", "permission_bundles: {unused: {permissions: message_flow}}\n", false},
+			{"mixed_integer", "permission_bundles: {unused: {permissions: [message_flow, 7]}}\n", false},
+			{"mixed_null", "permission_bundles: {unused: {permissions: [message_peers, null]}}\n", false},
+			{"malformed_merge", "permission_bundles: {unused: {<<: {permissions: [message_flow, 7]}}}\n", false},
+			{"malformed_alias", "permission_bundles: {unused: {permissions: [&bad 7, *bad]}}\n", false},
+			{"empty", "permission_bundles: {}\n", true},
+			{"empty_list", "permission_bundles: {unused: {permissions: []}}\n", true},
+			{"valid_alias_merge", "permission_bundles:\n  unused:\n    <<: {permissions: [&human ask_human, *human, custom_access]}\n", true},
+		} {
+			t.Run(scope+"/"+tc.name, func(t *testing.T) {
+				root := canonicalrouting.CopyExample(t, canonicalrouting.PolicyRules)
+				dir := root
+				if scope != "root" {
+					root = templateflowpilot.Write(t, templateflowpilot.Options{})
+					dir = root
+					if scope == "flow" {
+						dir = filepath.Join(root, "account")
+					}
+				}
+				path := filepath.Join(dir, "policy.yaml")
+				original, err := os.ReadFile(path)
+				if err != nil && !os.IsNotExist(err) {
+					t.Fatal(err)
+				}
+				writeDescribeTestFile(t, path, string(original)+"\n"+tc.declaration)
+				var stdout, stderr bytes.Buffer
+				code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", root, "--config", config, "--json"}, &stdout, &stderr, defaultRootCommandOptions())
+				var result verifyCommandResult
+				if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+					t.Fatalf("verify JSON: %v, code=%d stdout=%s stderr=%s", err, code, &stdout, &stderr)
+				}
+				if tc.valid {
+					if code != 0 || !result.OK || !result.ProductionValid {
+						t.Fatalf("valid declaration rejected: code=%d, %+v, stderr=%s", code, result.Errors, &stderr)
+					}
+				} else if code == 0 || result.OK || len(result.Errors) == 0 || !strings.Contains(fmt.Sprint(result.Errors), "permission_bundles") {
+					t.Fatalf("malformed unused declaration accepted: code=%d, %+v, stderr=%s", code, result, &stderr)
 				}
 			})
 		}
