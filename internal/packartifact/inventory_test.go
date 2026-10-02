@@ -45,10 +45,7 @@ func TestPlatformPackInventoryDefensivelyCopiesEnvelopeCollections(t *testing.T)
 			directory: "provider-triggers/demo", selection: ProvenanceEmbedded,
 		}},
 	}
-	baselineFS, err := fs.ReadFile(mustLookupEntry(t, inventory, "provider.demo").FileSystem(), EnvelopeFileName)
-	if err != nil {
-		t.Fatal(err)
-	}
+	baselineBody := mustLookupEntry(t, inventory, "provider.demo").EnvelopeBody()
 
 	accessorEntry := mustLookupEntry(t, inventory, "provider.demo")
 	accessorEnvelope := accessorEntry.Envelope()
@@ -72,11 +69,7 @@ func TestPlatformPackInventoryDefensivelyCopiesEnvelopeCollections(t *testing.T)
 	if inventory.Digest() != "sha256:immutable" {
 		t.Fatalf("inventory digest changed: %q", inventory.Digest())
 	}
-	afterFS, err := fs.ReadFile(fresh.FileSystem(), EnvelopeFileName)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(afterFS, baselineFS) || !bytes.Equal(fresh.EnvelopeBody(), envelopeBody) || !bytes.Equal(fresh.ManifestBody(), manifestBody) {
+	if !bytes.Equal(fresh.EnvelopeBody(), baselineBody) || !bytes.Equal(fresh.EnvelopeBody(), envelopeBody) || !bytes.Equal(fresh.ManifestBody(), manifestBody) {
 		t.Fatal("inventory bytes changed through returned envelope aliases")
 	}
 }

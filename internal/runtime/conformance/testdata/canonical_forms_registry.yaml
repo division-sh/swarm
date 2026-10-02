@@ -608,7 +608,7 @@ rows:
   - id: pack.inventory_envelope
     ruled: mechanical-ratified
     paths: "packs/inventory.yaml.*, packs/manifest.yaml.*, packs/*/pack.yaml.*"
-    owners: [packartifact.LoadInventoryManifest, packartifact.ParseProjectPackManifest, packmodel.ParseEnvelope]
+    owners: [packartifact.admitInventoryManifest, packartifact.admitProjectManifest, packmodel.ParseEnvelopeAt, yamlsource.Document.Root/Value]
     information:
       fact: [pack IDs/types/versions/platform ranges/capabilities/requirements]
       boundary_snapshot: [manifest hash, import origin hashes, effective/base selection digests]
@@ -632,7 +632,7 @@ rows:
   - id: pack.connector
     ruled: mechanical-ratified
     paths: "connector.provider, connector.generation, connector.tools"
-    owner: providerconnectors.NewPackRegistryFromInventory
+    owners: [providerconnectors.parseConnectorManifestAt, providerconnectors.admitGeneratedPackIndex, providerconnectors.admitGeneratorProfile, providerconnectors.NewPackRegistryFromInventory]
     information:
       boundary_snapshot: [provider and generated tool schemas/evidence]
       fact: [tool IDs and operation bindings]
@@ -720,17 +720,16 @@ decode_bypasses:
   # The canonical owner's root is classified but excluded from the off-owner ceiling.
   # CI compares each PR to the accepted base ledger, not just these initial ceilings.
   node_site_ceiling: 92
-  off_owner_direct_decode_ceiling: 28
+  off_owner_direct_decode_ceiling: 25
   files:
     internal/cliapp/cli_output.go: {family: other_production_projection, node_sites: 0, direct_decode_roots: 1}
     internal/cliapp/test_command.go: {family: excluded_scenario_tooling, node_sites: 11, direct_decode_roots: 3}
     internal/cliapp/unified_config.go: {family: excluded_deployment_config, node_sites: 18, direct_decode_roots: 2}
     internal/config/config.go: {family: excluded_deployment_config, node_sites: 3, direct_decode_roots: 2}
     internal/packs/channel.go: {family: closure_pack_platform, node_sites: 3, direct_decode_roots: 1}
-    internal/packartifact/inventory.go: {family: closure_pack_platform, node_sites: 0, direct_decode_roots: 1}
-    internal/packartifact/project.go: {family: closure_pack_platform, node_sites: 0, direct_decode_roots: 1}
-    internal/packmodel/envelope.go: {family: closure_pack_platform, node_sites: 0, direct_decode_roots: 1}
-    internal/providerconnectors/catalog_types.go: {family: closure_pack_platform, node_sites: 0, direct_decode_roots: 1}
+    # #2486 removes the three runtime callers of the shared decoder. Its sole
+    # surviving conformance-fixture root is explicitly #2487, not a new exemption.
+    internal/providerconnectors/catalog_conformance.go: {family: excluded_test_tooling, node_sites: 0, direct_decode_roots: 1}
     internal/providertriggers/providertriggers.go: {family: closure_pack_platform, node_sites: 0, direct_decode_roots: 1}
     internal/runtime/contracts/enums.go: {family: wave_4_node_handler, node_sites: 1, direct_decode_roots: 0}
     internal/runtime/contracts/platform_event_catalog.go: {family: closure_pack_platform, node_sites: 5, direct_decode_roots: 0}

@@ -1015,15 +1015,19 @@ func validateDecodeBypassMonotone(base, current canonicalDecodeBypassInventory) 
 			continue
 		}
 		prior := base.Files[path]
+		fixtureRelocated := approvedCatalogFixtureDecodeRelocation(base, current, path)
+		if fixtureRelocated {
+			prior = base.Files["internal/providerconnectors/catalog_types.go"]
+		}
 		if entry.NodeSites > prior.NodeSites || entry.DirectDecodeRoots > prior.DirectDecodeRoots {
 			return fmt.Errorf("decode site %s rose from node/root %d/%d to %d/%d", path, prior.NodeSites, prior.DirectDecodeRoots, entry.NodeSites, entry.DirectDecodeRoots)
 		}
 		budgetFamily := entry.Family
 		if prior.Family != entry.Family && (entry.NodeSites != 0 || entry.DirectDecodeRoots != 0) {
 			// Gate D reclassified agent writes into W5 without moving or adding a decoder.
-			if path != "internal/runtime/contracts/workflow_contract_agent_writes.go" ||
+			if !fixtureRelocated && (path != "internal/runtime/contracts/workflow_contract_agent_writes.go" ||
 				prior.Family != "wave_4_node_handler" || entry.Family != "wave_5_agent_tool_policy" ||
-				entry.NodeSites != prior.NodeSites || entry.DirectDecodeRoots != prior.DirectDecodeRoots {
+				entry.NodeSites != prior.NodeSites || entry.DirectDecodeRoots != prior.DirectDecodeRoots) {
 				return fmt.Errorf("decode site %s moved from family %q to %q", path, prior.Family, entry.Family)
 			}
 			budgetFamily = prior.Family
@@ -1040,6 +1044,53 @@ func validateDecodeBypassMonotone(base, current canonicalDecodeBypassInventory) 
 		}
 	}
 	return nil
+}
+
+func approvedCatalogFixtureDecodeRelocation(base, current canonicalDecodeBypassInventory, path string) bool {
+	// Gate D #2486: the generic reader loses every runtime caller; the existing
+	// fixture reader moves intact and remains charged to its accepted-base budget.
+	const old = "internal/providerconnectors/catalog_types.go"
+	const moved = "internal/providerconnectors/catalog_conformance.go"
+	return path == moved && base.Files[moved].NodeSites == 0 && base.Files[moved].DirectDecodeRoots == 0 &&
+		base.Files[old] == (canonicalDecodeBypassFile{Family: "closure_pack_platform", DirectDecodeRoots: 1}) &&
+		current.Files[old].NodeSites == 0 && current.Files[old].DirectDecodeRoots == 0 &&
+		current.Files[moved] == (canonicalDecodeBypassFile{Family: "excluded_test_tooling", DirectDecodeRoots: 1})
+}
+
+func TestCatalogFixtureDecodeRelocationPreservesAcceptedBaseBudget(t *testing.T) {
+	const old = "internal/providerconnectors/catalog_types.go"
+	const moved = "internal/providerconnectors/catalog_conformance.go"
+	base := canonicalDecodeBypassInventory{DirectDecodeCeiling: 1, Files: map[string]canonicalDecodeBypassFile{
+		old: {Family: "closure_pack_platform", DirectDecodeRoots: 1},
+	}}
+	current := canonicalDecodeBypassInventory{DirectDecodeCeiling: 1, Files: map[string]canonicalDecodeBypassFile{
+		moved: {Family: "excluded_test_tooling", DirectDecodeRoots: 1},
+	}}
+	if err := validateDecodeBypassMonotone(base, current); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateDecodeBypassMonotone(current, current); err != nil {
+		t.Fatal(err)
+	}
+	for _, hostile := range []map[string]canonicalDecodeBypassFile{
+		{old: {Family: "closure_pack_platform", DirectDecodeRoots: 1}, moved: {Family: "excluded_test_tooling", DirectDecodeRoots: 1}},
+		{moved: {Family: "excluded_test_tooling", DirectDecodeRoots: 2}},
+		{moved: {Family: "excluded_test_tooling", NodeSites: 1, DirectDecodeRoots: 1}},
+		{"internal/providerconnectors/new_fixture.go": {Family: "excluded_test_tooling", DirectDecodeRoots: 1}},
+		{moved: {Family: "canonical_owner", DirectDecodeRoots: 1}},
+	} {
+		current.Files = hostile
+		if approvedCatalogFixtureDecodeRelocation(base, current, moved) {
+			t.Fatalf("hostile relocation admitted: %#v", hostile)
+		}
+		if hostile[moved].Family != "canonical_owner" {
+			if err := validateDecodeBypassMonotone(base, current); err == nil {
+				t.Fatalf("hostile relocation admitted: %#v", hostile)
+			}
+		} else if err := validateYAMLDecodeSites(current, hostile); err == nil {
+			t.Fatal("fixture reader was relabeled as the canonical YAML substrate")
+		}
+	}
 }
 
 func collectCustomYAMLDecoders(root string) (map[string]string, error) {

@@ -133,7 +133,7 @@ func TestGeneratorProfileAndSelectedOpenAPISubsetFailClosed(t *testing.T) {
 	if _, err := ParseGeneratorProfile(append(profileBody, []byte("unknown_field: true\n")...)); err == nil || !strings.Contains(err.Error(), "field unknown_field not found") {
 		t.Fatalf("unknown profile field error = %v", err)
 	}
-	if _, err := ParseGeneratorProfile(append(profileBody, []byte("---\nschema_version: \"1\"\n")...)); err == nil || !strings.Contains(err.Error(), "multiple YAML documents are forbidden") {
+	if _, err := ParseGeneratorProfile(append(profileBody, []byte("---\nschema_version: \"1\"\n")...)); err == nil || !strings.Contains(err.Error(), "multiple documents") {
 		t.Fatalf("multiple profile documents error = %v", err)
 	}
 	outsideSource := bytes.Replace(profileBody, []byte("catalog/sources/acme-openapi.json"), []byte("../acme-openapi.json"), 1)
@@ -173,7 +173,7 @@ func TestGeneratorProfileAndSelectedOpenAPISubsetFailClosed(t *testing.T) {
 	}
 
 	files := catalogWorkingTreeFS(t)
-	replaceMapFile(t, files, "catalog/generator-profiles/acme.yaml", "182ed500197c682bca81a5a72cb1399e53e18dd87e9cc890fd89df1987b6a38d", strings.Repeat("0", 64))
+	replaceMapFile(t, files, "catalog/generator-profiles/acme.yaml", "182ed500197c682bca81a5a72cb1399e53e18dd87e9cc890fd89df1987b6a38d", "\""+strings.Repeat("0", 64)+"\"")
 	if _, err := GenerateCatalog(files); err == nil || !strings.Contains(err.Error(), "hash mismatch") {
 		t.Fatalf("source hash mismatch error = %v", err)
 	}

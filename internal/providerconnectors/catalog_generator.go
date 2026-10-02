@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/platform"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
 )
 
@@ -32,6 +33,7 @@ var (
 )
 
 type GeneratorProfile struct {
+	source        yamlsource.Value
 	SchemaVersion string               `yaml:"schema_version"`
 	Provider      string               `yaml:"provider"`
 	Source        GeneratorSource      `yaml:"source"`
@@ -128,8 +130,12 @@ type GeneratedCatalogArtifact struct {
 }
 
 func ParseGeneratorProfile(body []byte) (GeneratorProfile, error) {
-	var profile GeneratorProfile
-	if err := decodeYAMLStrict(body, &profile); err != nil {
+	return parseGeneratorProfileAt(body, "generator-profile.yaml")
+}
+
+func parseGeneratorProfileAt(body []byte, file string) (GeneratorProfile, error) {
+	profile, err := admitGeneratorProfile(body, file)
+	if err != nil {
 		return GeneratorProfile{}, err
 	}
 	if err := profile.Validate(); err != nil {
@@ -137,6 +143,8 @@ func ParseGeneratorProfile(body []byte) (GeneratorProfile, error) {
 	}
 	return profile, nil
 }
+
+func (p GeneratorProfile) SourceValue() yamlsource.Value { return p.source }
 
 func (p GeneratorProfile) Validate() error {
 	if strings.TrimSpace(p.SchemaVersion) != CatalogSchemaVersion {
@@ -490,7 +498,7 @@ func generateCatalogPack(fsys fs.FS, entry GeneratedPackIndexEntry) (GeneratedCa
 	if err != nil {
 		return GeneratedCatalogArtifact{}, err
 	}
-	profile, err := ParseGeneratorProfile(profileBody)
+	profile, err := parseGeneratorProfileAt(profileBody, entry.Profile)
 	if err != nil {
 		return GeneratedCatalogArtifact{}, fmt.Errorf("parse profile %q: %w", entry.Profile, err)
 	}

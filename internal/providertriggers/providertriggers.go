@@ -233,7 +233,11 @@ func NewCatalogSnapshotFromInventory(inventory *packartifact.EffectivePackInvent
 	entries := inventory.EntriesByType(packartifact.TypeTrigger)
 	loaded := make([]LoadedPack, 0, len(entries))
 	for _, entry := range entries {
-		pack, err := LoadPackFS(entry.FileSystem(), ".", runningPlatformVersion)
+		admitted, err := entry.Loaded(runningPlatformVersion)
+		if err != nil {
+			return nil, nil, err
+		}
+		pack, err := loadPackBody(admitted)
 		if err != nil {
 			return nil, nil, fmt.Errorf("load effective provider trigger pack %q: %w", entry.ID(), err)
 		}
@@ -302,6 +306,10 @@ func LoadPackFS(fsys fs.FS, dir, runningPlatformVersion string) (LoadedPack, err
 	if err != nil {
 		return LoadedPack{}, err
 	}
+	return loadPackBody(loaded)
+}
+
+func loadPackBody(loaded packs.Loaded) (LoadedPack, error) {
 	manifest, err := parseManifestStrict(loaded.ManifestBody)
 	if err != nil {
 		return LoadedPack{}, fmt.Errorf("parse trigger manifest for pack %q: %w", loaded.Envelope.ID, err)
