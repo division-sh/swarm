@@ -564,8 +564,9 @@ units:
   hitl-releasee2e-rest:
     packages:
       - github.com/division-sh/swarm/internal/releasee2e
-    run: '^(Test($|[^CDG].*|GoldenI.*|Channel.*|Claude.*|Command.*|CompiledProcessLifecycle.*)|Example.*|Fuzz.*)$'
+    run: '^(Test($|[^CDG].*|DurableDataOperationAggregatePublicRestartBothStores|GoldenI.*|Channel.*|Claude.*|Command.*|CompiledProcessLifecycle.*)|Example.*|Fuzz.*)$'
     required_children:
+      TestDurableDataOperationAggregatePublicRestartBothStores: [sqlite, postgres]
       TestPayloadlessEventPublicPersistenceJourneyBothStores: [sqlite, postgres]
       TestStandingPauseAuthorityPublicBothStores: [sqlite, postgres]
       TestStandingResetNonExecutablePublicBothStores: [sqlite, postgres]

@@ -120,7 +120,10 @@ func validateSourceOperationResult(r SourceOperationResult) error {
 	if err := validateCompletedAt(r.CompletedAt); err != nil {
 		return err
 	}
+	return validateSourceOutcome(r)
+}
 
+func validateSourceOutcome(r SourceOperationResult) error {
 	switch r.Outcome {
 	case "validation_rejected":
 		if r.Defects.ItemCount == 0 || r.Delta.State != "not_computed" || r.Delta.Reason != "validation_rejected" ||
@@ -302,6 +305,10 @@ func (e FusedChildEvaluation) Validate() error {
 	if e.DefectCount < 0 {
 		return fmt.Errorf("fused child defect_count must not be negative")
 	}
+	return validateFusedChildOutcome(e)
+}
+
+func validateFusedChildOutcome(e FusedChildEvaluation) error {
 	switch e.Outcome {
 	case "ready":
 		if e.DefectCount != 0 || !e.ExpectedHead.Equal(e.ObservedHead) || e.Delta.State == "not_computed" || e.Delta.Against == nil || !e.Delta.Against.Equal(e.ObservedHead) {
@@ -445,9 +452,21 @@ func (r RunCreationOperationRecord) Validate() error {
 	if err := r.Binding.Validate(); err != nil {
 		return err
 	}
-	children := make(map[string]FusedChildEvaluation, len(r.Evidence.ChildEvaluations))
-	declarations := make(map[string]struct{}, len(r.Evidence.ChildEvaluations))
-	for index, child := range r.Evidence.ChildEvaluations {
+	if err := validateRunCreationChildEvidence(r.Evidence); err != nil {
+		return err
+	}
+	for _, item := range r.Evidence.RunBinding {
+		if err := item.Validate(); err != nil {
+			return err
+		}
+	}
+	return validateRunCreationOutcome(r)
+}
+
+func validateRunCreationChildEvidence(e RunCreationEvidence) error {
+	children := make(map[string]FusedChildEvaluation, len(e.ChildEvaluations))
+	declarations := make(map[string]struct{}, len(e.ChildEvaluations))
+	for index, child := range e.ChildEvaluations {
 		if err := child.Validate(); err != nil {
 			return fmt.Errorf("fused child %s: %w", child.SourceInvocationID, err)
 		}
@@ -457,14 +476,14 @@ func (r RunCreationOperationRecord) Validate() error {
 		if _, duplicate := declarations[child.Declaration.Key()]; duplicate {
 			return fmt.Errorf("run creation repeats fused child declaration %s", child.Declaration.Key())
 		}
-		if index > 0 && CompareDeclarationRef(r.Evidence.ChildEvaluations[index-1].Declaration, child.Declaration) >= 0 {
+		if index > 0 && CompareDeclarationRef(e.ChildEvaluations[index-1].Declaration, child.Declaration) >= 0 {
 			return fmt.Errorf("fused child evaluations must be strictly declaration-sorted")
 		}
 		children[child.SourceInvocationID] = child
 		declarations[child.Declaration.Key()] = struct{}{}
 	}
 	defectCounts := make(map[string]int, len(children))
-	for _, defect := range r.Evidence.ChildDefects {
+	for _, defect := range e.ChildDefects {
 		if err := defect.Validate(); err != nil {
 			return err
 		}
@@ -478,12 +497,10 @@ func (r RunCreationOperationRecord) Validate() error {
 			return fmt.Errorf("fused child %s defect_count contradicts evidence", id)
 		}
 	}
-	for _, item := range r.Evidence.RunBinding {
-		if err := item.Validate(); err != nil {
-			return err
-		}
-	}
+	return nil
+}
 
+func validateRunCreationOutcome(r RunCreationOperationRecord) error {
 	if r.Summary.Outcome != "created" {
 		if r.Binding.State != "none" || len(r.Evidence.RunBinding) != 0 || len(r.Evidence.ChildEvaluations) != r.Summary.ImportCount {
 			return fmt.Errorf("rejected run creation has contradictory binding or child count")
@@ -556,10 +573,8 @@ func validateCreatedRunBinding(r RunCreationOperationRecord) error {
 		index++
 		if index < len(r.Evidence.RunBinding) && r.Evidence.RunBinding[index].Kind == "import" {
 			item := r.Evidence.RunBinding[index]
-			if item.Import == nil || item.Import.Operation != "import" || item.Import.Outcome != "accepted" ||
-				item.Import.BundleHash != r.Summary.BundleHash || item.Import.Declaration != pin.Declaration || pin.Selection != "fused_import" ||
-				item.Import.Candidate.VersionID != pin.VersionID || item.Import.SchemaDigest != pin.SchemaDigest {
-				return fmt.Errorf("bound import contradicts its fused-import pin")
+			if err := validateBoundImport(r.Summary, pin, item.Import); err != nil {
+				return err
 			}
 			if _, duplicate := imports[item.Import.SourceInvocationID]; duplicate {
 				return fmt.Errorf("run binding repeats import source_invocation_id %s", item.Import.SourceInvocationID)
@@ -572,6 +587,15 @@ func validateCreatedRunBinding(r RunCreationOperationRecord) error {
 	}
 	if len(pins) != r.Summary.PinCount || len(imports) != r.Summary.ImportCount {
 		return fmt.Errorf("run-binding item counts contradict summary")
+	}
+	return nil
+}
+
+func validateBoundImport(summary RunCreationOperationSummary, pin Pin, imported *SourceOperationSummary) error {
+	if imported == nil || imported.Operation != "import" || imported.Outcome != "accepted" ||
+		imported.BundleHash != summary.BundleHash || imported.Declaration != pin.Declaration || pin.Selection != "fused_import" ||
+		imported.Candidate.VersionID != pin.VersionID || imported.SchemaDigest != pin.SchemaDigest {
+		return fmt.Errorf("bound import contradicts its fused-import pin")
 	}
 	return nil
 }
@@ -674,6 +698,13 @@ func (r PruneOperationResult) Validate() error {
 	if r.PinCount < 0 {
 		return fmt.Errorf("prune pin_count must not be negative")
 	}
+	if err := validatePruneEvidence(r); err != nil {
+		return err
+	}
+	return validatePruneOutcome(r)
+}
+
+func validatePruneEvidence(r PruneOperationResult) error {
 	if r.Pins != nil {
 		if err := r.Pins.Validate(); err != nil {
 			return err
@@ -700,38 +731,59 @@ func (r PruneOperationResult) Validate() error {
 			return fmt.Errorf("prune defect page is not complete canonical evidence")
 		}
 	}
+	return nil
+}
 
-	noPins := r.PinCount == 0 && r.Pins == nil
-	noDefects := r.Defects == nil
-	noPayload := r.PayloadBefore == "" && r.PayloadAfter == ""
-	notCurrent := r.CurrentVersionID == ""
+func validatePruneOutcome(r PruneOperationResult) error {
 	switch r.Outcome {
 	case "rejected":
-		if !noPins || !noPayload || !notCurrent || r.Defects == nil || r.Defects.ItemCount != 1 {
-			return fmt.Errorf("rejected prune has contradictory decision facts")
-		}
+		return validateRejectedPrune(r)
 	case "head_conflict":
-		if !noPins || !noDefects || !noPayload || !notCurrent || r.ExpectedHead.Equal(r.ObservedHead) {
-			return fmt.Errorf("head-conflict prune has contradictory decision facts")
-		}
+		return validateHeadConflictPrune(r)
 	case "refused_current":
-		if !noPins || !noDefects || !noPayload || !r.ExpectedHead.Equal(r.ObservedHead) || r.ObservedHead != VersionHead(r.VersionID) || r.CurrentVersionID != r.VersionID {
-			return fmt.Errorf("current-version prune refusal has contradictory decision facts")
-		}
+		return validateCurrentPrune(r)
 	case "refused_pinned":
-		if r.PinCount < 1 || r.Pins == nil || !noDefects || !noPayload || !notCurrent || !r.ExpectedHead.Equal(r.ObservedHead) || r.ObservedHead == VersionHead(r.VersionID) {
-			return fmt.Errorf("pinned prune refusal has contradictory decision facts")
-		}
+		return validatePinnedPrune(r)
 	case "already_pruned":
-		if !noPins || !noDefects || !notCurrent || !r.ExpectedHead.Equal(r.ObservedHead) || r.ObservedHead == VersionHead(r.VersionID) || r.PayloadBefore != "pruned" || r.PayloadAfter != "pruned" {
-			return fmt.Errorf("already-pruned result has contradictory decision facts")
-		}
+		return validatePrunePayloadTransition(r, "pruned", "already-pruned result has contradictory decision facts")
 	case "pruned":
-		if !noPins || !noDefects || !notCurrent || !r.ExpectedHead.Equal(r.ObservedHead) || r.ObservedHead == VersionHead(r.VersionID) || r.PayloadBefore != "materialized" || r.PayloadAfter != "pruned" {
-			return fmt.Errorf("pruned result has contradictory decision facts")
-		}
+		return validatePrunePayloadTransition(r, "materialized", "pruned result has contradictory decision facts")
 	default:
 		return fmt.Errorf("prune outcome is unsupported")
+	}
+}
+
+func validateRejectedPrune(r PruneOperationResult) error {
+	if r.PinCount != 0 || r.Pins != nil || r.PayloadBefore != "" || r.PayloadAfter != "" || r.CurrentVersionID != "" || r.Defects == nil || r.Defects.ItemCount != 1 {
+		return fmt.Errorf("rejected prune has contradictory decision facts")
+	}
+	return nil
+}
+
+func validateHeadConflictPrune(r PruneOperationResult) error {
+	if r.PinCount != 0 || r.Pins != nil || r.Defects != nil || r.PayloadBefore != "" || r.PayloadAfter != "" || r.CurrentVersionID != "" || r.ExpectedHead.Equal(r.ObservedHead) {
+		return fmt.Errorf("head-conflict prune has contradictory decision facts")
+	}
+	return nil
+}
+
+func validateCurrentPrune(r PruneOperationResult) error {
+	if r.PinCount != 0 || r.Pins != nil || r.Defects != nil || r.PayloadBefore != "" || r.PayloadAfter != "" || !r.ExpectedHead.Equal(r.ObservedHead) || r.ObservedHead != VersionHead(r.VersionID) || r.CurrentVersionID != r.VersionID {
+		return fmt.Errorf("current-version prune refusal has contradictory decision facts")
+	}
+	return nil
+}
+
+func validatePinnedPrune(r PruneOperationResult) error {
+	if r.PinCount < 1 || r.Pins == nil || r.Defects != nil || r.PayloadBefore != "" || r.PayloadAfter != "" || r.CurrentVersionID != "" || !r.ExpectedHead.Equal(r.ObservedHead) || r.ObservedHead == VersionHead(r.VersionID) {
+		return fmt.Errorf("pinned prune refusal has contradictory decision facts")
+	}
+	return nil
+}
+
+func validatePrunePayloadTransition(r PruneOperationResult, before, message string) error {
+	if r.PinCount != 0 || r.Pins != nil || r.Defects != nil || r.CurrentVersionID != "" || !r.ExpectedHead.Equal(r.ObservedHead) || r.ObservedHead == VersionHead(r.VersionID) || r.PayloadBefore != before || r.PayloadAfter != "pruned" {
+		return fmt.Errorf("%s", message)
 	}
 	return nil
 }

@@ -357,6 +357,28 @@ func characterizePruneAggregate(t *testing.T, source SourceOperationResult, crea
 		if err := pruned.ValidateWithPins(nil); err != nil {
 			t.Fatalf("canonical nil evidence: %v", err)
 		}
+		if err := pruned.ValidateWithPins(pins); err == nil || err.Error() != "prune outcome forbids complete pin evidence" {
+			t.Fatalf("non-pinned complete evidence: %v", err)
+		}
+	})
+	t.Run("complete_pins_beyond_first_page", func(t *testing.T) {
+		pins := make([]Pin, MaxPublicPageItems+1)
+		for i := range pins {
+			pins[i] = *created.Evidence.RunBinding[0].Pin
+			pins[i].RunID = fmt.Sprintf("00000000-0000-4000-8000-%012d", i+1)
+		}
+		page := FirstEvidencePage(pins)
+		if page.ItemCount >= len(pins) || page.Continuation.State != "more" {
+			t.Fatal("fixture must extend beyond the bounded summary")
+		}
+		pinned.PinCount, pinned.Pins = len(pins), &page
+		if err := pinned.ValidateWithPins(pins); err != nil {
+			t.Fatal(err)
+		}
+		pinned.PinCount++
+		if err := pinned.ValidateWithPins(pins); err == nil || err.Error() != "prune pin evidence is incomplete" {
+			t.Fatalf("full count mismatch hidden beyond the first page: %v", err)
+		}
 	})
 }
 
