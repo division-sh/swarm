@@ -12,7 +12,7 @@ func TestEventSchemaRequiredProjectionHasNoBehavioralConsumers(t *testing.T) {
 		"internal/providertriggers/normalized_events.go",
 		"internal/runtime/contracts/compiled_event_schema.go",
 		"internal/runtime/contracts/event_catalog_admission.go",
-		"internal/runtime/contracts/platform_event_catalog.go",
+		"internal/runtime/contracts/platform_event_value.go",
 		"internal/runtime/contracts/schema_registry.go",
 		"internal/runtime/contracts/tool_input_schema.go",
 		"internal/runtime/provider_trigger_source.go",
