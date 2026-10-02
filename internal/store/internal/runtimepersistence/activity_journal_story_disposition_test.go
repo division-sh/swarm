@@ -7,6 +7,7 @@ import (
 	"errors"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,12 +19,125 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
 	authoractivityadapter "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity/readadapter"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	"github.com/google/uuid"
 )
 
 type activityStoryJournal interface {
 	activityTimestampJournal
 	ClaimActivityAttemptForLoopGeneration(context.Context, runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, bool, error)
+}
+
+func TestActivityJournalTerminalTimestampAfterAdmissionBothStores(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := backend.open(t)
+			for _, status := range []string{"succeeded", "failed", "uncertain"} {
+				t.Run(status, func(t *testing.T) {
+					started := seedActivityStoryAttempt(t, fixture, executionmode.Live, "started", false)
+					candidate := activityStoryTerminal(t, started, status)
+					// A submitted candidate cannot choose the durable completion clock.
+					forged := time.Date(2000, 1, 2, 3, 4, 5, 123456789, time.FixedZone("candidate", 3600))
+					candidate.CompletedAt, candidate.UpdatedAt = &forged, forged
+					ctx, cancel := context.WithCancel(testAuthorActivityContext())
+					defer cancel()
+					tx, err := fixture.db.BeginTx(ctx, nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer tx.Rollback()
+					// Pin PostgreSQL transaction time before the controlled admission cut.
+					var transactionTime any
+					if err := tx.QueryRowContext(ctx, `SELECT CURRENT_TIMESTAMP`).Scan(&transactionTime); err != nil {
+						t.Fatal(err)
+					}
+					entered, release, joined := make(chan struct{}), make(chan struct{}), make(chan struct{})
+					var once sync.Once
+					unblock := func() { once.Do(func() { close(release) }) }
+					active := func(ctx context.Context, runID string) error {
+						var err error
+						if backend.name == "postgres" {
+							err = runstate.RequirePostgresActiveTx(ctx, tx, runID)
+						} else {
+							err = runstate.RequireSQLiteActiveTx(ctx, tx, runID)
+						}
+						if err != nil {
+							return err
+						}
+						close(entered)
+						select {
+						case <-release:
+							return nil
+						case <-ctx.Done():
+							return ctx.Err()
+						}
+					}
+					dialect := activityjournal.DialectSQLite
+					if backend.name == "postgres" {
+						dialect = activityjournal.DialectPostgres
+					}
+					spy := &activityStorySpy{}
+					var receipt runtimepipeline.ActivityAttemptRecord
+					var completeErr error
+					go func() {
+						defer close(joined)
+						if status == "uncertain" {
+							receipt, completeErr = activityjournal.MarkUncertain(ctx, tx, dialect, active, spy, candidate)
+						} else {
+							receipt, completeErr = activityjournal.Complete(ctx, tx, dialect, active, spy, candidate)
+						}
+					}()
+					defer func() { cancel(); unblock(); <-joined }()
+					select {
+					case <-entered:
+					case <-joined:
+						t.Fatalf("terminal write did not reach admission: %v", completeErr)
+					}
+					before := time.Now().UTC().Truncate(time.Microsecond)
+					unblock()
+					<-joined
+					after := time.Now().UTC().Truncate(time.Microsecond)
+					if completeErr != nil {
+						t.Fatal(completeErr)
+					}
+					assertActivityTerminalWriteTime(t, receipt, before, after)
+					if len(spy.drafts) != 1 {
+						t.Fatalf("terminal story drafts = %d, want one", len(spy.drafts))
+					}
+					if err := tx.Rollback(); err != nil {
+						t.Fatal(err)
+					}
+					loaded, found, err := fixture.store.(activityStoryJournal).LoadActivityAttempt(testAuthorActivityContext(), started.RequestEventID)
+					if err != nil || !found || !reflect.DeepEqual(started, loaded) {
+						t.Fatal("rolled-back terminal clock escaped into the started receipt")
+					}
+					before = time.Now().UTC().Truncate(time.Microsecond)
+					op := "complete"
+					if status == "uncertain" {
+						op = "uncertain"
+					}
+					receipt, _, err = activityStoryOuter(fixture, op, candidate)
+					after = time.Now().UTC().Truncate(time.Microsecond)
+					if err != nil {
+						t.Fatal(err)
+					}
+					assertActivityTerminalWriteTime(t, receipt, before, after)
+					candidate.CompletedAt, candidate.UpdatedAt = &after, after
+					replayed, _, err := activityStoryOuter(fixture, op, candidate)
+					if err != nil || !reflect.DeepEqual(receipt, replayed) {
+						t.Fatalf("duplicate completion reminted durable time: %v", err)
+					}
+				})
+			}
+		})
+	}
+}
+
+func assertActivityTerminalWriteTime(t *testing.T, receipt runtimepipeline.ActivityAttemptRecord, before, after time.Time) {
+	t.Helper()
+	if receipt.CompletedAt == nil || receipt.CompletedAt.Before(before) || receipt.CompletedAt.After(after) || !receipt.CompletedAt.Equal(receipt.CompletedAt.UTC().Truncate(time.Microsecond)) || !receipt.UpdatedAt.Equal(*receipt.CompletedAt) {
+		t.Fatalf("completion=%v updated=%s, want one UTC/microsecond terminal fact within [%s, %s]", receipt.CompletedAt, receipt.UpdatedAt, before, after)
+	}
 }
 
 func TestActivityJournalPreservesExecutionNumberKindsBothStores(t *testing.T) {

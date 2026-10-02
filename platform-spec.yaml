@@ -4860,6 +4860,12 @@ handler_specification:
             after journal commit before result persistence, uses the acknowledged or loaded receipt's durable completed_at
             as CreatedAt through canonical event timestamp normalization. Missing or zero terminal completion time fails
             before publication; a fresh clock, precommit candidate or existing-event timestamp patch-up is not authoritative.
+            The shared journal owner captures one process-clock UTC/microsecond terminal fact after run admission at
+            the actual terminal write, persisting completed_at and updated_at from that same fact atomically with
+            succeeded, failed, or uncertain result evidence on both stores. SQLite whole-second defaults and PostgreSQL
+            transaction-start time do not produce this immutable fact. Submitted candidate timestamps are ignored.
+            Duplicate terminal operations and reopened receipt reads preserve the original fact exactly, even when
+            a later caller submits a different clock value; rollback persists neither the result nor its terminal time.
           retry_default: max_attempts 1, no retry
           fork_default: explicit proposed-effect/evidence disposition under runtime.run_fork.selected_contract_execution; never infer fork authorization from source approval
         long_running: Split to a later resume/cancel/journal slice; fail closed in Stage 1.

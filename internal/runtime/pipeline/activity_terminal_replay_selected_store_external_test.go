@@ -102,7 +102,9 @@ func TestActivityTerminalResultUsesDurableTimestampBothStores(t *testing.T) {
 					pc := newGateRecoveryCoordinator(publication, selected, runtimepipeline.PipelineCoordinatorOptions{Module: gateRecoveryModule{source: source}})
 					intent := runtimepipeline.NonIdempotentActivityIntentForTest(runID, uuid.NewString(), uuid.NewString())
 					seedSelectedActivitySource(t, ctx, selected, intent)
+					beforeExecution := time.Now().UTC().Truncate(time.Microsecond)
 					err := runtimepipeline.ExecuteActivityIntentForTest(ctx, pc, nil, intent)
+					afterExecution := time.Now().UTC().Truncate(time.Microsecond)
 					if cut == "journal_committed_result_absent" {
 						if !errors.Is(err, fault) {
 							t.Fatalf("terminal commit cut: %v", err)
@@ -113,6 +115,9 @@ func TestActivityTerminalResultUsesDurableTimestampBothStores(t *testing.T) {
 					journal, found, err := activityReplayJournal(selected).LoadActivityAttempt(ctx, runtimepipeline.ActivityAttemptStartForTest(intent).RequestEventID)
 					if err != nil || !found || journal.Status != status || journal.CompletedAt == nil || journal.CompletedAt.IsZero() || calls.Load() != 1 {
 						t.Fatalf("terminal receipt: found=%t status=%s completed=%v provider_calls=%d err=%v", found, journal.Status, journal.CompletedAt, calls.Load(), err)
+					}
+					if journal.CompletedAt.Before(beforeExecution) || journal.CompletedAt.After(afterExecution) || !journal.CompletedAt.Equal(journal.CompletedAt.UTC().Truncate(time.Microsecond)) || !journal.UpdatedAt.Equal(*journal.CompletedAt) {
+						t.Fatalf("terminal timestamp %s is not one canonical completion fact within [%s, %s]; updated=%s", journal.CompletedAt, beforeExecution, afterExecution, journal.UpdatedAt)
 					}
 					prepared, found, err := selected.events.LoadPreparedPublishEvent(ctx, journal.ResultEventID)
 					if err != nil || found != (cut == "result_persisted") {
