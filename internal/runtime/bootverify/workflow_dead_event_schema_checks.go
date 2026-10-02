@@ -134,7 +134,7 @@ func (c *checkerContext) deadEventSchemaUsageFor(decl deadEventDeclaration) dead
 			}
 		case semanticview.EventEndpointAgent, semanticview.EventEndpointRequiredAgentRole:
 			usage.agentEmitEvents++
-		case semanticview.EventEndpointTimer:
+		case semanticview.EventEndpointTimer, semanticview.EventEndpointClockSchedule:
 			usage.timerReferences++
 		case semanticview.EventEndpointGateOutcome, semanticview.EventEndpointLoopEscape:
 			usage.lifecycleEmits++

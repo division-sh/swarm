@@ -16,6 +16,7 @@ var flowSchemaDocumentFields = map[string]struct{}{
 	"instance":            {},
 	"stages":              {},
 	"loops":               {},
+	"schedules":           {},
 	"pins":                {},
 	"required_agents":     {},
 	"instance_variables":  {},

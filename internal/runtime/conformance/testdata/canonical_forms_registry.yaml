@@ -234,10 +234,10 @@ rows:
 
   - id: flow.other_surface
     ruled: mechanical-ratified
-    paths: "schema.tool_surface.role_scoped_entity_tools, schema.required_agents, schema.instance_variables.description, schema.instance_variables.variables.<name>, schema.auto_emit_on_create.event, schema.auto_emit_on_create.description"
-    owners: [projectSchemaReceiverVariablesValue, decodeWave1FieldValue, projectSchemaRequiredAgentsValue, projectFlowSchemaValue]
+    paths: "schema.tool_surface.role_scoped_entity_tools, schema.required_agents, schema.instance_variables.description, schema.instance_variables.variables.<name>, schema.auto_emit_on_create.event, schema.auto_emit_on_create.description, schema.schedules.<name>.cron, schema.schedules.<name>.every, schema.schedules.<name>.emit"
+    owners: [projectSchemaReceiverVariablesValue, decodeWave1FieldValue, projectSchemaRequiredAgentsValue, projectFlowSchemaValue, projectSchemaSchedulesValue]
     information:
-      choice: [variable declarations, auto_emit_on_create, explicit_required_agent_boundary]
+      choice: [variable declarations, auto_emit_on_create, explicit_required_agent_boundary, named_flow_clock]
       derived_projection: [required_agents]
       annotation: [descriptions]
     spelling:

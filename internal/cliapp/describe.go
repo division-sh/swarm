@@ -236,8 +236,23 @@ func writeDescribeText(out io.Writer, view authoringview.View) {
 		}
 	}
 	writeRoutingTopologyText(out, view.RoutingTopology)
+	writeDescribeClockSchedules(out, view.ClockSchedules)
 	writeDescribeStageGraphs(out, view.StageGraphs)
 	writeDescribeDiagnostics(out, view.Diagnostics)
+}
+
+func writeDescribeClockSchedules(out io.Writer, schedules []semanticview.ClockSchedule) {
+	if len(schedules) == 0 {
+		return
+	}
+	fmt.Fprintln(out, "schedules (declared; arms on deployment):")
+	for _, schedule := range schedules {
+		cadence := "every=" + schedule.Declaration.Every
+		if schedule.Declaration.Cron != "" {
+			cadence = "cron=" + schedule.Declaration.Cron + " UTC"
+		}
+		fmt.Fprintf(out, "  - %s:%s %s emit=%s\n", schedule.FlowID, schedule.Name, cadence, schedule.Declaration.Emit)
+	}
 }
 
 func writeDescribeFlowDetails(out io.Writer, flow authoringview.FlowView) {
