@@ -438,6 +438,10 @@ typed-process-local	callback-type	typed	internal/runtime/runtime.go	RuntimeOptio
 typed-process-local	callback-type	typed	internal/runtime/runtime.go	bindRuntimeStorePayloadAdmitter	param:payloadAdmitter	github.com/division-sh/swarm/internal/runtime/bus.PayloadAdmitter
 typed-process-local	callback-type	typed	internal/runtime/runtime_claude_startup.go	ManagedProviderPreflightAuthority	field:EffectAuthority	func(probeID string, actorID string) (github.com/division-sh/swarm/internal/runtime/effects.Authority, error)
 typed-process-local	callback-type	typed	internal/runtime/runtime_claude_startup.go	startupToolPlan	result:#4	func()
+typed-process-local	callback-type	typed	internal/runtime/scenariodocument/payload.go	PreparePayload	param:fixture	func(string) (github.com/division-sh/swarm/internal/runtime/semanticvalue.Value, error)
+typed-process-local	callback-type	typed	internal/runtime/scenariodocument/payload.go	prepareFixturePayload	param:fixture	func(string) (github.com/division-sh/swarm/internal/runtime/semanticvalue.Value, error)
+typed-process-local	callback-type	typed	internal/runtime/scenariodocument/preparation.go	PrepareCLI	param:fixture	func(string) (github.com/division-sh/swarm/internal/runtime/semanticvalue.Value, error)
+typed-process-local	callback-type	typed	internal/runtime/scenariodocument/preparation.go	prepareStep	param:fixture	func(string) (github.com/division-sh/swarm/internal/runtime/semanticvalue.Value, error)
 typed-process-local	callback-type	typed	internal/runtime/semanticview/flow_input_producer.go	appendBoundaryIngressEvidence	param:appendEvidence	func(github.com/division-sh/swarm/internal/runtime/contracts.FlowInputProducerEvidence)
 typed-process-local	callback-type	typed	internal/runtime/semanticview/flow_input_producer.go	appendHarnessInputEvidence	param:appendEvidence	func(github.com/division-sh/swarm/internal/runtime/contracts.FlowInputProducerEvidence)
 typed-process-local	callback-type	typed	internal/runtime/semanticview/flow_input_producer.go	appendInternalTopologyEvidence	param:appendEvidence	func(github.com/division-sh/swarm/internal/runtime/contracts.FlowInputProducerEvidence)
