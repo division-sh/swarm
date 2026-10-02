@@ -222,7 +222,7 @@ func ApplyFixture(fn func()) {}
 func runFixtureAuthorityLeaks(findings []authorityFinding) []authorityFinding {
 	return slices.DeleteFunc(slices.Clone(findings), func(finding authorityFinding) bool {
 		return finding.File != "internal/store/storetest/run_lifecycle.go" ||
-			(!finding.RawSQL && !strings.HasPrefix(finding.Kind, "context-"))
+			(!finding.RawSQL && !strings.HasPrefix(finding.Kind, "context-") && finding.Kind != "selected-store-construction")
 	})
 }
 
@@ -269,6 +269,20 @@ import (
  "database/sql"
 )
 func RequireRun(ctx context.Context) *sql.Tx { return ctx.Value("transaction").(*sql.Tx) }
+`,
+		"opaque-replacement-store": `package storetest
+type SQLiteRuntimeStore struct{}
+func StartSQLiteRuntimeStore() *SQLiteRuntimeStore { return nil }
+func RequireRun() { _ = StartSQLiteRuntimeStore() }
+`,
+		"aliased-replacement-factory": `package storetest
+type PostgresStore struct{}
+func replacement() (*PostgresStore, error) { return nil, nil }
+func RequireRun() { factory := replacement; _, _ = factory() }
+`,
+		"replacement-literal": `package storetest
+type SQLiteRuntimeStore struct{}
+func RequireRun() { _ = &SQLiteRuntimeStore{} }
 `,
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -732,6 +746,9 @@ func containsRawAuthorityType(valueType types.Type, seen map[types.Type]struct{}
 
 func collectAuthorityFindings(path string, file *ast.File, info *types.Info) []authorityFinding {
 	var findings []authorityFinding
+	if path == "internal/store/storetest/run_lifecycle.go" {
+		findings = append(findings, collectRunFixtureStoreConstruction(path, file, info)...)
+	}
 	for _, decl := range file.Decls {
 		switch node := decl.(type) {
 		case *ast.GenDecl:
@@ -760,6 +777,48 @@ func collectAuthorityFindings(path string, file *ast.File, info *types.Info) []a
 		}
 	}
 	return findings
+}
+
+func collectRunFixtureStoreConstruction(path string, file *ast.File, info *types.Info) []authorityFinding {
+	var findings []authorityFinding
+	ast.Inspect(file, func(node ast.Node) bool {
+		var result types.Type
+		switch node := node.(type) {
+		case *ast.CallExpr:
+			result = info.TypeOf(node)
+		case *ast.CompositeLit:
+			result = info.TypeOf(node)
+		default:
+			return true
+		}
+		if runFixtureConstructsSelectedStore(result) {
+			findings = append(findings, authorityFinding{
+				Kind: "selected-store-construction", File: path,
+				Member: fmt.Sprintf("construction:%d", node.Pos()), Resolved: resolvedTypeString(result),
+			})
+		}
+		return true
+	})
+	return findings
+}
+
+func runFixtureConstructsSelectedStore(result types.Type) bool {
+	if result == nil {
+		return false
+	}
+	switch result := types.Unalias(result).(type) {
+	case *types.Pointer:
+		return runFixtureConstructsSelectedStore(result.Elem())
+	case *types.Tuple:
+		for i := 0; i < result.Len(); i++ {
+			if runFixtureConstructsSelectedStore(result.At(i).Type()) {
+				return true
+			}
+		}
+	case *types.Named:
+		return result.Obj().Name() == "PostgresStore" || result.Obj().Name() == "SQLiteRuntimeStore"
+	}
+	return false
 }
 
 func collectOperationAuthorityFindings(path, enclosing string, body *ast.BlockStmt, info *types.Info) []authorityFinding {
