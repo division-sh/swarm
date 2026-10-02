@@ -139,7 +139,9 @@ func VerifyWorkflowTimerCauseReplayEngineConsumersOnBothStoresForTest(t *testing
 							t.Fatalf("old occurrence gained authority after cause replay: %s, %v", outcome, err)
 						}
 					}
-					if kind == workflowTimerCauseEvent {
+					// A distinct start cause is eligible only after the old activation
+					// is terminal; a different cause cannot replace an active timer.
+					if kind == workflowTimerCauseEvent && (state == "fired" || state == "cancelled" || state == "advanced_cancelled") {
 						t.Run("later_cause", func(t *testing.T) {
 							later := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "timer.arm", "operator", "", []byte(`{}`), 0, runID,
 								events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), eventtest.RootRoutingSource(entityID), at.Add(2*time.Minute))
@@ -149,15 +151,11 @@ func VerifyWorkflowTimerCauseReplayEngineConsumersOnBothStoresForTest(t *testing
 							rows := listTimerCauseReplayActivationsForTest(t, f.Coordinator.workflowStore.timerActivations, ctx, entityID)
 							want := storage
 							want.Events++
-							wantRows := 1
-							if state != "active" && state != "advanced" {
-								wantRows++
-								want.Timers++
-								want.ActiveTimers++
-								want.TimerRevisionFacts++
-							}
-							if len(rows) != wantRows {
-								t.Fatalf("later cause produced %d activations, want %d", len(rows), wantRows)
+							want.Timers++
+							want.ActiveTimers++
+							want.TimerRevisionFacts++
+							if len(rows) != 2 {
+								t.Fatalf("later cause produced %d activations, want exactly two", len(rows))
 							}
 							var old, successor WorkflowTimerActivation
 							for _, row := range rows {
@@ -170,9 +168,9 @@ func VerifyWorkflowTimerCauseReplayEngineConsumersOnBothStoresForTest(t *testing
 							if !reflect.DeepEqual(old, before) {
 								t.Fatalf("later cause changed old activation authority: %+v", old)
 							}
-							if wantRows == 2 && (successor.Ref.ActivationID == initial.Ref.ActivationID ||
+							if successor.Ref.ActivationID == initial.Ref.ActivationID ||
 								successor.Ref.DeclarationKey != initial.Ref.DeclarationKey || successor.Ref.DeclarationRevision != initial.Ref.DeclarationRevision ||
-								successor.Ref.Cause != timeridentity.WorkflowTimerActivationCauseEvent || successor.Status != workflowTimerStatusActive) {
+								successor.Ref.Cause != timeridentity.WorkflowTimerActivationCauseEvent || successor.Status != workflowTimerStatusActive {
 								t.Fatalf("later cause failed to create one active successor of the same declaration: %+v", successor)
 							}
 							if got := f.Observe(); got != want {
