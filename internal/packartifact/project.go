@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -15,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/packmodel"
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
 )
 
@@ -27,6 +27,7 @@ const (
 )
 
 type ProjectPackManifest struct {
+	source  yamlsource.Value
 	Version int                         `yaml:"version"`
 	Imports []ProjectPackManifestImport `yaml:"imports"`
 }
@@ -39,11 +40,14 @@ type ProjectPackManifestImport struct {
 }
 
 type ProjectPackSet struct {
+	source       yamlsource.Value
 	ManifestPath string
 	ManifestBody []byte
 	Sources      []ProjectPackSource
 	Files        []ProjectPackFile
 }
+
+func (s ProjectPackSet) SourceValue() yamlsource.Value { return s.source }
 
 type ProjectPackFile struct {
 	RelativePath string
@@ -97,6 +101,7 @@ func LoadProjectPackSetFS(source fs.FS) (ProjectPackSet, error) {
 		return ProjectPackSet{}, err
 	}
 	set := ProjectPackSet{
+		source:       manifest.source,
 		ManifestBody: append([]byte(nil), manifestBody...),
 		Files:        []ProjectPackFile{{RelativePath: ProjectPackManifestLabel, Body: append([]byte(nil), manifestBody...)}},
 	}
@@ -132,7 +137,7 @@ func LoadProjectPackSetFS(source fs.FS) (ProjectPackSet, error) {
 		if err != nil {
 			return ProjectPackSet{}, fmt.Errorf("read project pack %q body: %w", declared.ID, err)
 		}
-		envelope, err := packmodel.ParseEnvelope(envelopeBody)
+		envelope, err := packmodel.ParseEnvelopeAt(envelopeBody, envelopeLabel)
 		if err != nil {
 			return ProjectPackSet{}, fmt.Errorf("parse project pack %q envelope: %w", declared.ID, err)
 		}
@@ -198,6 +203,7 @@ func loadProjectPackSetLocked(transaction *projectPackTransaction) (ProjectPackS
 	}
 
 	set := ProjectPackSet{
+		source:       manifest.source,
 		ManifestPath: manifestPath,
 		ManifestBody: append([]byte(nil), manifestBody...),
 		Files: []ProjectPackFile{{
@@ -239,7 +245,7 @@ func loadProjectPackSetLocked(transaction *projectPackTransaction) (ProjectPackS
 		if err != nil {
 			return ProjectPackSet{}, err
 		}
-		envelope, err := packmodel.ParseEnvelope(envelopeBody)
+		envelope, err := packmodel.ParseEnvelopeAt(envelopeBody, envelopePath)
 		if err != nil {
 			return ProjectPackSet{}, fmt.Errorf("parse project pack %q envelope: %w", declared.ID, err)
 		}
@@ -287,18 +293,9 @@ func resolveProjectPackRoot(projectRoot string) (string, bool, error) {
 }
 
 func ParseProjectPackManifest(body []byte) (ProjectPackManifest, error) {
-	var manifest ProjectPackManifest
-	decoder := yaml.NewDecoder(bytes.NewReader(body))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&manifest); err != nil {
+	manifest, err := admitProjectManifest(body, ProjectPackManifestLabel)
+	if err != nil {
 		return ProjectPackManifest{}, fmt.Errorf("parse project pack manifest: %w", err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		if err == nil {
-			return ProjectPackManifest{}, fmt.Errorf("project pack manifest contains multiple YAML documents")
-		}
-		return ProjectPackManifest{}, fmt.Errorf("parse project pack manifest trailing document: %w", err)
 	}
 	if manifest.Version != ProjectPackManifestVersion {
 		return ProjectPackManifest{}, fmt.Errorf("project pack manifest version %d is unsupported", manifest.Version)

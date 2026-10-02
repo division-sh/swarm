@@ -1,10 +1,8 @@
 package packmodel
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/fs"
 	"path"
 	"strings"
@@ -12,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/platform"
 	"github.com/division-sh/swarm/internal/runtime/core/manifesthash"
 	"github.com/division-sh/swarm/internal/runtime/core/packidentity"
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
 )
 
@@ -31,6 +30,7 @@ const (
 )
 
 type Envelope struct {
+	source          yamlsource.Value
 	ID              string       `yaml:"id"`
 	Version         string       `yaml:"version"`
 	PlatformVersion string       `yaml:"platform_version"`
@@ -80,7 +80,7 @@ func Load(fsys fs.FS, dir, runningPlatformVersion string) (Loaded, error) {
 	if err != nil {
 		return Loaded{}, fmt.Errorf("read pack envelope %q: %w", path.Join(dir, EnvelopeFileName), err)
 	}
-	envelope, err := ParseEnvelope(envelopeBody)
+	envelope, err := ParseEnvelopeAt(envelopeBody, path.Join(dir, EnvelopeFileName))
 	if err != nil {
 		return Loaded{}, fmt.Errorf("parse pack envelope %q: %w", path.Join(dir, EnvelopeFileName), err)
 	}
@@ -115,20 +115,7 @@ func ManifestFileNameForType(packType string) string {
 }
 
 func ParseEnvelope(body []byte) (Envelope, error) {
-	var envelope Envelope
-	decoder := yaml.NewDecoder(bytes.NewReader(body))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&envelope); err != nil {
-		return Envelope{}, err
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		if err == nil {
-			return Envelope{}, fmt.Errorf("pack envelope contains multiple YAML documents")
-		}
-		return Envelope{}, fmt.Errorf("parse pack envelope trailing document: %w", err)
-	}
-	return envelope, nil
+	return ParseEnvelopeAt(body, EnvelopeFileName)
 }
 
 func (e Envelope) ValidateCommon(runningPlatformVersion string) error {

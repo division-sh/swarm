@@ -1,8 +1,10 @@
 package providerconnectors
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"net/url"
@@ -14,6 +16,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
+	"gopkg.in/yaml.v3"
 )
 
 const catalogConformanceRoot = "catalog/conformance"
@@ -44,8 +47,17 @@ type CatalogConformanceExpectedRequest struct {
 
 func ParseCatalogConformanceFixture(body []byte) (CatalogConformanceFixture, error) {
 	var fixture CatalogConformanceFixture
-	if err := decodeYAMLStrict(body, &fixture); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(body))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&fixture); err != nil {
 		return CatalogConformanceFixture{}, err
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return CatalogConformanceFixture{}, fmt.Errorf("multiple YAML documents are forbidden")
+		}
+		return CatalogConformanceFixture{}, fmt.Errorf("decode trailing YAML document: %w", err)
 	}
 	if err := fixture.Validate(); err != nil {
 		return CatalogConformanceFixture{}, err

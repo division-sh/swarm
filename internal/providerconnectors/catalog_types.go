@@ -1,18 +1,16 @@
 package providerconnectors
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"io/fs"
 	"path"
 	"sort"
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"gopkg.in/yaml.v3"
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 const (
@@ -161,6 +159,7 @@ func (g GenerationEvidence) OperationForTool(toolID string) (GenerationOperation
 }
 
 type GeneratedPackIndex struct {
+	source        yamlsource.Value
 	SchemaVersion string                    `yaml:"schema_version"`
 	Packs         []GeneratedPackIndexEntry `yaml:"packs"`
 }
@@ -178,30 +177,14 @@ func loadGeneratedPackIndex(fsys fs.FS) (GeneratedPackIndex, error) {
 	if err != nil {
 		return GeneratedPackIndex{}, fmt.Errorf("read generated connector pack index: %w", err)
 	}
-	var index GeneratedPackIndex
-	if err := decodeYAMLStrict(body, &index); err != nil {
+	index, err := admitGeneratedPackIndex(body, generatedPackIndexFile)
+	if err != nil {
 		return GeneratedPackIndex{}, fmt.Errorf("parse generated connector pack index: %w", err)
 	}
 	if err := index.Validate(fsys); err != nil {
 		return GeneratedPackIndex{}, err
 	}
 	return index, nil
-}
-
-func decodeYAMLStrict(body []byte, target any) error {
-	decoder := yaml.NewDecoder(bytes.NewReader(body))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(target); err != nil {
-		return err
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		if err == nil {
-			return fmt.Errorf("multiple YAML documents are forbidden")
-		}
-		return fmt.Errorf("decode trailing YAML document: %w", err)
-	}
-	return nil
 }
 
 func (i GeneratedPackIndex) Validate(fsys fs.FS) error {
@@ -301,7 +284,7 @@ func validateGeneratedPackIdentity(fsys fs.FS, pack LoadedPack, expected Generat
 	if got, want := sha256String(profileBody), "sha256:"+normalizeSHA(pack.Manifest.Generation.Profile.SHA256); got != want {
 		return fmt.Errorf("generated connector pack %q profile hash mismatch: got %s want %s", pack.Envelope.ID, got, want)
 	}
-	profile, err := ParseGeneratorProfile(profileBody)
+	profile, err := parseGeneratorProfileAt(profileBody, expected.Profile)
 	if err != nil {
 		return fmt.Errorf("generated connector pack %q parse indexed profile: %w", pack.Envelope.ID, err)
 	}

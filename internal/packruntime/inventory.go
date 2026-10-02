@@ -14,7 +14,11 @@ func LoadChannelPacks(inventory *packartifact.EffectivePackInventory, runningPla
 	entries := inventory.EntriesByType(packartifact.TypeChannel)
 	loaded := make([]packs.LoadedChannelPack, 0, len(entries))
 	for _, entry := range entries {
-		pack, err := packs.LoadChannelPackFS(entry.FileSystem(), ".", runningPlatformVersion)
+		admitted, err := entry.Loaded(runningPlatformVersion)
+		if err != nil {
+			return nil, err
+		}
+		pack, err := packs.LoadChannelPack(admitted)
 		if err != nil {
 			return nil, fmt.Errorf("load effective channel pack %q: %w", entry.ID(), err)
 		}
