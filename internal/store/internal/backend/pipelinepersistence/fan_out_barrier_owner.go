@@ -426,7 +426,7 @@ func fanOutBarrierGenerationCurrent(ctx context.Context, tx *sql.Tx, postgres bo
 	if !found {
 		return false, fmt.Errorf("fan-out barrier generation owner entity is missing")
 	}
-	if header.FlowTemplate != generation.FlowID {
+	if header.FlowTemplate != generation.FlowID || header.FlowTemplate != registration.Route.ScopeKey {
 		return false, fmt.Errorf("fan-out generation disagrees with its constructed flow owner")
 	}
 	fields := map[string]any{}

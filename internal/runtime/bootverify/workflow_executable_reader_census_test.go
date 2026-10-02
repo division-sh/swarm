@@ -79,6 +79,10 @@ func TestExecutableReaderCensusExcludesUnevaluatedFields(t *testing.T) {
 		handler runtimecontracts.SystemNodeEventHandler
 	}{
 		{
+			name:    "retired handler constructor",
+			handler: runtimecontracts.SystemNodeEventHandler{CreateEntity: true},
+		},
+		{
 			name: "activity approval decision",
 			handler: runtimecontracts.SystemNodeEventHandler{Activity: runtimecontracts.ActivitySpec{
 				Approval: &runtimecontracts.ActivityApprovalSpec{Decision: "entity.release"},

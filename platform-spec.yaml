@@ -17065,6 +17065,8 @@ platform_tables:
         eligibility/result admission, join entry/arm admission, fan-out generation settlement,
         completion summaries and terminal decision-card supersession consume header lifecycle
         evidence in their owning transaction. Only declared business fields come from entity_state.
+        Fan-out generation settlement binds both the registered route scope and the loop's
+        declared flow to the same constructed header template; a crossed scope is not current work.
         Terminal supersession conditionally writes the same header identity and revision from
         which it read the gate, retaining the existing journal and exact decision serialization.
         These consumers preserve their gate, loop, join and correspondence decoders; they must
@@ -20066,7 +20068,9 @@ platform_events:
         Platform evidence event emitted when an active anchor-owned lifecycle boundary supersedes a pending typed decision
         card. Run-level terminal supersession atomically commits decision-card domain state, its append-only
         decision_card_changes row, and the constructed header's gate disposition with its existing revision/mutation
-        journal. It creates no mailbox.card_superseded event, route, delivery, replay scope, receipt, or dispatch work.
+        journal. The same transaction records the entity_metadata revision fact for that header's updated timestamp;
+        terminal progress must not leave unrevisioned metadata. It creates no mailbox.card_superseded event, route,
+        delivery, replay scope, receipt, or dispatch work.
       schema_authority: platform-spec.yaml#api_specification.conventions.mailbox.decision_event_payload_contract
       producer_evidence:
         produced_by_type: platform

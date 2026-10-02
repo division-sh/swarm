@@ -420,3 +420,81 @@ merge base. R2's generic activation/replay readers and R3's full standing-tree
 consumer still await the two recorded exact dispositions. Complete consumer
 supplements, default managed qualification, final proof audit and exact-head CI
 remain outstanding. No final review or merge readiness is requested.
+
+### Post-Rebase Consumer Qualification Repair
+
+The default managed run on1695ad45a finished RED in broad-01. Its two failing
+required roots were TestExecutableReaderCensusClassifiesEveryHandlerAndRuleField
+and TestReleaseE2EClaudeResourceReadFixtureLoadsAndVerifies; the later13 planned
+units did not execute. The census now explicitly classifies the retained
+CreateEntity rejection-only field as having no executable readers. The Claude
+resource fixture no longer uses the retired handler flag. Both roots and the
+unevaluated-field census control pass focused tests (bootverify0.008s,
+canonicalrouting0.180s). This is credential-free fixture verification, not a
+paid Claude execution receipt. No grammar or compatibility reader was restored.
+
+The merged timer/join/served supplement completed: pipeline PASS24.344s and
+serveapp PASS10.735s. Its store package remained RED3.769s in six timer-activation
+publication cells because the fixture publisher used a different runtime ID
+from its native admitted owner. The publisher now uses that exact owner's ID;
+the complete five-root consumer command below includes both-store timer
+activation under race3. The earlier RED is retained, not recast as a pass.
+
+The selected-header/terminal/run-control supplement completed aggregate RED:
+runtimepersistence19.306s, serveapp PASS8.565s. Its failed roots were terminal
+producer parity, two fan-out supersession/winner controls and proposed-effect
+reminting. Root/selected preparation and lineage controls passed; this is not
+all-green package or whole-class qualification.
+
+The terminal control now actually constructs the native undecided gate in both
+fieldless and field-bearing shapes, rather than injecting a header. This exposed
+an actual omitted writer effect: header supersession changes updated_at without
+declaring FamilyEntityMetadata. The terminal writer now adds that exact entity
+fact in its existing transaction, alongside the conditional header update and
+mutation journal. The control retains ValidateComplete, exact journal writer,
+card/change count and no-event/no-route/no-receipt assertions before and after
+retry. platform-spec.yaml records the same-commit obligation.
+
+Proposed-effect reminting now constructs source and child roots canonically,
+on both stores in both field shapes. It retains fresh card/request/effect
+identity, exact input, provenance and source-only reply authority assertions.
+The loop arbitration controls bind their decoder input to its actual `.` flow,
+not an empty FlowID. These are native component proofs, not public fork or
+compiler-production qualification.
+
+Completed managed five-root command, race count3, runtimepersistence
+PASS160.481s: TestTerminalDecisionCardSupersessionStateChangeOnlyProducerParity,
+TestFanOutDeliveryBarrierGenerationSupersessionOnBothStores,
+TestFanOutDeliveryBarrierCompletionAndSupersessionWinnerMatrixOnBothStores,
+TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority and
+TestWorkflowTimerCauseReplayFlowActivationGateBothStores. It precedes the
+subsequent barrier route-scope hardening and must not be called final-head proof.
+
+The new30-leaf native barrier-consumer matrix constructs each receiver, then
+uses explicitly controlled loop/intent decoder inputs. A crossed-scope SQLite
+negative genuinely reproduced admission of invalid work (RED0.663s); the first
+probe's build error is not that reproduction. Admission now requires both the
+registered scope and generation FlowID to match the constructed template.
+Fieldless/fields current, stale, wrong-path, crossed-scope, wrong-template,
+missing-header, malformed-bucket and missing-required-fields rows preserve the
+unchanged-table refusal oracle, exact timer/barrier disposition and field-row
+presence. The complete managed race3 command passed186.270s, including the
+30-leaf native consumer matrix, both arbitration matrices, concurrent exact
+supersession and the strict generation-consumer guard. Log:
+/tmp/agent-e-2496-native-barrier-final-matrix.log. All
+backend/shape and terminal-producer families are registered in the proof plan.
+Partition controls pass1.666s and1.162s.
+
+CI36973380834 at1695ad45a is not green. Formatting failed on
+receiver_materialization_boundary_test.go and complexity admission failed on
+the stale checked-in snapshot, with hotspot_count_increased=false. Formatting
+is corrected; the baseline must be regenerated from the committed repaired
+tree without changing its policy or thresholds. Other CI jobs remain pending.
+
+Measured against origin/master5b3fbd5fb before the new barrier test is committed:
+all175 non-test Go files, including generated and production-fixture code,
+6338 additions/7092 deletions, net-negative754. Readiness core386 lines. This is
+an explicit size measurement, not semantic closure. Generic activation/replay
+readers and full standing-tree preparation still await recorded dispositions
+5946306433 and5945687624. No chosen-class elimination, final proof audit,
+managed-suite GREEN, exact-head CI GREEN or final review request is made.

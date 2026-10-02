@@ -32,6 +32,8 @@ var systemNodeEventHandlerExecutableReaderCensus = map[string]handlerExecutableR
 		appendActivityExecutableReaders(out, ctx, "activity", handler.Activity)
 	},
 	"Description": noHandlerExecutableReaders,
+	// Kept in the decoded shape solely for explicit retirement rejection.
+	"CreateEntity": noHandlerExecutableReaders,
 	// Emit readers are lowered once by HandlerDeclarativeEmitSites below so
 	// namespace sugar, fan-out aliases, and join-result visibility stay exact.
 	"Emit":      noHandlerExecutableReaders,

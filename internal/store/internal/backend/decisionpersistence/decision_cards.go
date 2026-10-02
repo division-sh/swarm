@@ -23,6 +23,7 @@ import (
 	storeentity "github.com/division-sh/swarm/internal/store/internal/backend/entityruntime"
 	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	"github.com/division-sh/swarm/internal/store/internal/workflowheader"
 	"github.com/google/uuid"
@@ -1298,6 +1299,9 @@ func supersedeRunGateActivations(ctx context.Context, attempt *mutationprotocol.
 		}
 		if affected, err := result.RowsAffected(); err != nil || affected != 1 {
 			return fmt.Errorf("persist run gate activation supersession for entity %s affected %d rows: %w", item.entityID, affected, err)
+		}
+		if err := attempt.AddFact(runID, privaterunforkrevision.FamilyEntityMetadata, item.entityID); err != nil {
+			return fmt.Errorf("record superseded gate header metadata: %w", err)
 		}
 		writer := runtimemutationlog.Writer{Type: "platform", ID: "decision_card", HandlerStep: "run_supersession"}
 		before := runtimemutationlog.EntityStateProjection{Accumulator: item.before}

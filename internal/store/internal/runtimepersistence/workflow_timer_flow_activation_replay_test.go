@@ -55,7 +55,9 @@ func TestWorkflowTimerCauseReplayFlowActivationGateBothStores(t *testing.T) {
 					}
 					t.Cleanup(lease.Release)
 					fact, _ := correlation.SourceArtifactFactFromContext(f.ctx)
-					publisher, err := newStoreTestEventBus(t, f.store.(storeTestDurableEventBusStore), bus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact})
+					publisher, err := newStoreTestEventBus(t, f.store.(storeTestDurableEventBusStore), bus.EventBusOptions{
+						ContractBundle: source, SourceArtifactFact: fact, RuntimeInstanceID: scope.RuntimeInstanceID,
+					})
 					if err != nil {
 						t.Fatal(err)
 					}

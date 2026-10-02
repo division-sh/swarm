@@ -337,6 +337,11 @@ func newForkContentionFixture(t *testing.T, backend eventRecordContractBackend) 
 
 func newForkContentionFixtureForFields(t *testing.T, backend eventRecordContractBackend, fields bool) forkContentionFixture {
 	t.Helper()
+	return newConstructedGateFixtureForFields(t, backend, fields, true)
+}
+
+func newConstructedGateFixtureForFields(t *testing.T, backend eventRecordContractBackend, fields, decided bool) forkContentionFixture {
+	t.Helper()
 	opened := backend.open(t)
 	// The receipt fixture freezes its SQLite clock in July. This activation
 	// fixture uses current real writer timestamps, including run start time.
@@ -408,6 +413,9 @@ func newForkContentionFixtureForFields(t *testing.T, backend eventRecordContract
 		t.Fatal(err)
 	}
 	f.cardID = card.CardID
+	if !decided {
+		return f
+	}
 	decidedAt := at.Add(time.Second)
 	if err := coordinator.CommitDecision(f.ctx, card, f.eventID, decidedAt); err != nil {
 		t.Fatal(err)

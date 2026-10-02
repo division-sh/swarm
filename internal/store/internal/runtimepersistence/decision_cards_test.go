@@ -858,42 +858,24 @@ func TestTerminalDecisionCardSupersessionStateChangeOnlyProducerParity(t *testin
 		}},
 		{name: "active_run_quiescence", invoke: quiesceDecisionCardRun, retry: quiesceDecisionCardRun},
 	}
-	for _, backend := range []string{"sqlite", "postgres"} {
+	for _, backend := range eventRecordContractBackends() {
 		for _, producer := range producers {
 			backend, producer := backend, producer
-			t.Run(backend+"/"+producer.name, func(t *testing.T) {
-				ctx := testAuthorActivityContext()
-				cardStore, runID := decisionCardTestStore(t, backend)
-				db, postgres := decisionCardStoreDB(t, cardStore)
-				now := time.Date(2026, 7, 14, 4, 0, 0, 0, time.UTC)
-				entityID := uuid.NewString()
-				activation, err := gateruntime.New(runID, "launch/review", entityID, "launch", "awaiting_review", "launch_review", authorActivityTestBundleHash, testGateRoutes(t), "state:awaiting_review", now)
-				if err != nil {
-					t.Fatal(err)
-				}
-				card := newDecisionCardTestCard(t, runID, now)
-				card.CardID = activation.CardID
-				card.Anchor = newDecisionCardTestStageAnchor("launch/review", "launch", entityID, activation.Stage, activation.ActivationID)
-				card.Snapshot.Decision, card.BundleHash = activation.DecisionID, activation.BundleHash
-				card, err = decisioncard.New(card)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := cardStore.CreateDecisionCard(ctx, card); err != nil {
-					t.Fatal(err)
-				}
-				seedDecisionCardGateEntity(t, db, postgres, runID, entityID, activation, now)
-				publishCompleteRunForkRevisionBaseline(t, ctx, db, postgres, runID)
-
-				if err := producer.invoke(ctx, cardStore, runID, now.Add(time.Minute)); err != nil {
-					t.Fatalf("first terminal producer: %v", err)
-				}
-				assertTerminalDecisionCardStateChangeOnly(t, ctx, cardStore, db, postgres, runID, entityID, card.CardID)
-				if err := producer.retry(ctx, cardStore, runID, now.Add(2*time.Minute)); err != nil {
-					t.Fatalf("terminal producer retry: %v", err)
-				}
-				assertTerminalDecisionCardStateChangeOnly(t, ctx, cardStore, db, postgres, runID, entityID, card.CardID)
-			})
+			for _, fields := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/fields=%t", backend.name, producer.name, fields), func(t *testing.T) {
+					f := newConstructedGateFixtureForFields(t, backend, fields, false)
+					cardStore := f.store.(decisioncard.Store)
+					now := f.state.UpdatedAt
+					if err := producer.invoke(f.ctx, cardStore, f.runID, now.Add(time.Minute)); err != nil {
+						t.Fatalf("first terminal producer: %v", err)
+					}
+					assertTerminalDecisionCardStateChangeOnly(t, f.ctx, cardStore, f.db, backend.name == "postgres", f.runID, f.entityID, f.cardID)
+					if err := producer.retry(f.ctx, cardStore, f.runID, now.Add(2*time.Minute)); err != nil {
+						t.Fatalf("terminal producer retry: %v", err)
+					}
+					assertTerminalDecisionCardStateChangeOnly(t, f.ctx, cardStore, f.db, backend.name == "postgres", f.runID, f.entityID, f.cardID)
+				})
+			}
 		}
 	}
 }
@@ -1258,9 +1240,9 @@ func assertTerminalDecisionCardStateChangeOnly(t *testing.T, ctx context.Context
 	if eventCount != 0 {
 		t.Fatalf("terminal mailbox.card_superseded events = %d, want 0", eventCount)
 	}
-	mutationQuery := `SELECT path, new_value, writer_type, writer_id, COALESCE(handler_step, '') FROM entity_mutations WHERE run_id = ? AND entity_id = ? AND domain = 'accumulator' ORDER BY created_at, mutation_id`
+	mutationQuery := `SELECT path, new_value, writer_type, writer_id, COALESCE(handler_step, '') FROM entity_mutations WHERE run_id = ? AND entity_id = ? AND domain = 'accumulator' AND handler_step = 'run_supersession' ORDER BY created_at, mutation_id`
 	if postgres {
-		mutationQuery = `SELECT path, new_value, writer_type, writer_id, COALESCE(handler_step, '') FROM entity_mutations WHERE run_id = $1::uuid AND entity_id = $2::uuid AND domain = 'accumulator' ORDER BY created_at, mutation_id`
+		mutationQuery = `SELECT path, new_value, writer_type, writer_id, COALESCE(handler_step, '') FROM entity_mutations WHERE run_id = $1::uuid AND entity_id = $2::uuid AND domain = 'accumulator' AND handler_step = 'run_supersession' ORDER BY created_at, mutation_id`
 	}
 	rows, err := db.QueryContext(ctx, mutationQuery, runID, entityID)
 	if err != nil {

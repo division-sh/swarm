@@ -10,7 +10,7 @@ func receiverMaterializationBoundaryAllowances() map[string]historicalBoundaryAl
 		},
 		"events::RestoreReceiverMaterializationRecord/reference:events::decodeReceiverInitialization": {1, "the strict durable record consumes the same construction receipt decoder"},
 		"events::ReceiverInitialization.UnmarshalJSON/reference:events::decodeReceiverInitialization": {1, "the standalone wire consumes the same construction receipt decoder"},
-		"runtime/bus::flowReceiverInitialization/reference:events::AdmitFlowReceiverInitialization":                                    {1, "canonical activation plan supplies exact flow initialization"},
+		"runtime/bus::flowReceiverInitialization/reference:events::AdmitFlowReceiverInitialization":   {1, "canonical activation plan supplies exact flow initialization"},
 	}
 }
 

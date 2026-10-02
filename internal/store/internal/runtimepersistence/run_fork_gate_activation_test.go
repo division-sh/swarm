@@ -662,63 +662,99 @@ func TestMaterializeRunForkDecisionCardsPreservesCommittedSemanticFields(t *test
 }
 
 func TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	ctx := testAuthorActivityContext()
-	sourceRunID, forkRunID := uuid.NewString(), uuid.NewString()
-	now := time.Date(2026, 7, 14, 18, 0, 0, 0, time.UTC)
-	requireRunningPostgresRunForTest(t, ctx, db, sourceRunID, now)
-	requireRunningPostgresRunForTest(t, ctx, db, forkRunID, now)
-	cards := admitTestPostgresStore(t, db)
-	sourceCard, sourceContinuation := newProposedEffectTestCard(t, sourceRunID, now, attemptgeneration.Generation{})
-	if err := cards.CreateProposedEffectCard(ctx, sourceCard, sourceContinuation); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, current_state,
-			gates, fields, accumulator, entered_state_at, created_at, updated_at
-		) VALUES ($1::uuid, $2::uuid, 'root', 'default', 'operating', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, $3, $3, $3)
-	`, forkRunID, sourceContinuation.EntityID, now); err != nil {
-		t.Fatal(err)
-	}
-	point := runfork.RunForkPoint{EventID: uuid.NewString(), Timestamp: now.Add(time.Minute)}
-	projection, err := projectRunForkEntityOwnership(sourceRunID, forkRunID, sourceContinuation.EntityID, sourceContinuation.FlowInstance)
-	if err != nil {
-		t.Fatal(err)
-	}
-	correspondence, err := loopruntime.NewForkCorrespondence(nil, forkRunID, projection.Fork.EntityID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := runSelectedFixtureMutation(ctx, cards, "materialize proposed effect cards", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
-		return cards.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRunID, forkRunID, projection, point, correspondence, now.Add(2*time.Minute))
-	}); err != nil {
-		t.Fatal(err)
-	}
-	items, _, err := cards.ListDecisionCards(ctx, decisioncard.ListOptions{RunID: forkRunID, Limit: 10})
-	if err != nil || len(items) != 1 {
-		t.Fatalf("fork proposed cards = %#v, %v", items, err)
-	}
-	forkCard, err := cards.GetDecisionCard(ctx, items[0].CardID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	forkContinuation, err := cards.LoadProposedEffectContinuation(ctx, forkCard.CardID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if sourceContinuation.ReplyContextID == "" || forkContinuation.ReplyContextID != "" {
-		t.Fatalf("fork reply authority = source:%q fork:%q, want source-only", sourceContinuation.ReplyContextID, forkContinuation.ReplyContextID)
-	}
-	if forkCard.Status != decisioncard.StatusPending || forkCard.CardID == sourceCard.CardID || forkContinuation.RequestEventID == sourceContinuation.RequestEventID || forkContinuation.SourceRunID != forkRunID {
-		t.Fatalf("fork authority retained source identity: source=%#v/%#v fork=%#v/%#v", sourceCard, sourceContinuation, forkCard, forkContinuation)
-	}
-	if forkContinuation.Input.Equal(sourceContinuation.Input) == false || forkContinuation.EffectContentHash == sourceContinuation.EffectContentHash {
-		t.Fatalf("fork effect content = source:%#v fork:%#v", sourceContinuation, forkContinuation)
-	}
-	forkedFrom, ok := forkCard.Provenance.Lookup("forked_from_card_id")
-	if value, stringOK := forkedFrom.String(); !ok || !stringOK || value != sourceCard.CardID {
-		t.Fatalf("fork provenance = %#v", forkCard.Provenance)
+	for _, backend := range eventRecordContractBackends() {
+		for _, fields := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/fields_%t", backend.name, fields), func(t *testing.T) {
+				opened := backend.open(t)
+				files := map[string]string{"schema.yaml": "name: proposed-effect-remint\nstages:\n  operating: {initial: true}\n"}
+				if fields {
+					files["entities.yaml"] = "item:\n  label: text?\n"
+				}
+				f := newReceiverConfigActivationFixtureForStore(t, opened.store.(agentFixtureFlowStore), false, files, nil, ownStoreTestAgentManager, nil)
+				ctx := f.ctx
+				sourceRunID, forkRunID := runtimecorrelation.RunIDFromContext(ctx), uuid.NewString()
+				cards := opened.store.(interface {
+					decisioncard.Store
+					decisioncard.ProposedEffectStore
+				})
+				now := time.Date(2026, 7, 14, 18, 0, 0, 0, time.UTC)
+				requireRunFixtureForTest(t, ctx, f.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: forkRunID, Artifact: f.bundle.SourceArtifact, BundleHash: f.bundle.SourceArtifact.BundleHash()})
+				for _, runID := range []string{sourceRunID, forkRunID} {
+					constructHistoricalSourceFixture(t, runtimecorrelation.WithRunID(ctx, runID), f.store, sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID))
+				}
+				sourceCard, sourceContinuation := newProposedEffectTestCard(t, sourceRunID, now, attemptgeneration.Generation{})
+				sourceContinuation.EntityID, sourceContinuation.FlowInstance = sourceRunID, sourceRunID
+				sourceContinuation.BundleHash = f.bundle.SourceArtifact.BundleHash()
+				sourceContinuation.WorkflowVersion = f.bundle.WorkflowVersion()
+				sourceContinuation = sourceContinuation.Canonical()
+				effect, err := sourceContinuation.EffectValue()
+				if err != nil {
+					t.Fatal(err)
+				}
+				sourceContinuation.EffectContentHash, err = canonicaljson.HashValue(effect)
+				if err != nil {
+					t.Fatal(err)
+				}
+				sourceCard.Anchor, err = decisioncard.NewProposedEffectAnchor(decisioncard.ProposedEffectAnchor{
+					RequestEventID: sourceContinuation.RequestEventID, ActivityID: sourceContinuation.ActivityID, Decision: "support_reply",
+					Scope: decisioncard.Scope{Kind: decisioncard.ScopeEntity, FlowInstance: sourceRunID, EntityID: sourceRunID}, Source: eventtest.RootRoutingSource(sourceRunID),
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				sourceCard.BundleHash, sourceCard.WorkflowVersion = sourceContinuation.BundleHash, sourceContinuation.WorkflowVersion
+				sourceCard.EffectContentHash = sourceContinuation.EffectContentHash
+				sourceCard, err = decisioncard.New(sourceCard)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := cards.CreateProposedEffectCard(ctx, sourceCard, sourceContinuation); err != nil {
+					t.Fatal(err)
+				}
+				point := runfork.RunForkPoint{EventID: uuid.NewString(), Timestamp: now.Add(time.Minute)}
+				projection, err := projectRunForkEntityOwnership(sourceRunID, forkRunID, sourceContinuation.EntityID, sourceContinuation.FlowInstance)
+				if err != nil {
+					t.Fatal(err)
+				}
+				correspondence, err := loopruntime.NewForkCorrespondence(nil, forkRunID, projection.Fork.EntityID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := runSelectedFixtureMutation(ctx, opened.store, "materialize proposed effect cards", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+					if store, ok := opened.store.(*PostgresStore); ok {
+						return store.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRunID, forkRunID, projection, point, correspondence, now.Add(2*time.Minute))
+					}
+					return opened.store.(*SQLiteRuntimeStore).runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRunID, forkRunID, projection, point, correspondence, now.Add(2*time.Minute))
+				}); err != nil {
+					t.Fatal(err)
+				}
+				items, _, err := cards.ListDecisionCards(ctx, decisioncard.ListOptions{RunID: forkRunID, Limit: 10})
+				if err != nil || len(items) != 1 {
+					t.Fatalf("fork proposed cards = %#v, %v", items, err)
+				}
+				forkCard, err := cards.GetDecisionCard(ctx, items[0].CardID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				forkContinuation, err := cards.LoadProposedEffectContinuation(ctx, forkCard.CardID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if sourceContinuation.ReplyContextID == "" || forkContinuation.ReplyContextID != "" {
+					t.Fatalf("fork reply authority = source:%q fork:%q, want source-only", sourceContinuation.ReplyContextID, forkContinuation.ReplyContextID)
+				}
+				if forkCard.Status != decisioncard.StatusPending || forkCard.CardID == sourceCard.CardID || forkContinuation.RequestEventID == sourceContinuation.RequestEventID || forkContinuation.SourceRunID != forkRunID {
+					t.Fatalf("fork authority retained source identity: source=%#v/%#v fork=%#v/%#v", sourceCard, sourceContinuation, forkCard, forkContinuation)
+				}
+				if forkContinuation.Input.Equal(sourceContinuation.Input) == false || forkContinuation.EffectContentHash == sourceContinuation.EffectContentHash {
+					t.Fatalf("fork effect content = source:%#v fork:%#v", sourceContinuation, forkContinuation)
+				}
+				forkedFrom, ok := forkCard.Provenance.Lookup("forked_from_card_id")
+				if value, stringOK := forkedFrom.String(); !ok || !stringOK || value != sourceCard.CardID {
+					t.Fatalf("fork provenance = %#v", forkCard.Provenance)
+				}
+			})
+		}
 	}
 }
 

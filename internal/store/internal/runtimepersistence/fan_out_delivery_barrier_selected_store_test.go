@@ -806,7 +806,7 @@ func seedFanOutDeliveryBarrier(t *testing.T, ctx context.Context, db *sql.DB, fi
 func seedFanOutDeliveryBarrierForLoop(t *testing.T, ctx context.Context, db *sql.DB, fixture fanOutOwnerFixture, at time.Time) (timeridentity.TimerHandle, string, loopruntime.Activation) {
 	t.Helper()
 	entityID := uuid.NewString()
-	activation, err := loopruntime.New(fixture.runID, entityID, "", "retry", "revision_id", fixture.eventID, "work", 3, at)
+	activation, err := loopruntime.New(fixture.runID, entityID, ".", "retry", "revision_id", fixture.eventID, "work", 3, at)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -852,7 +852,7 @@ func seedFanOutDeliveryBarrierRecord(t *testing.T, ctx context.Context, db *sql.
 			target_flow_path,target_node_id,handler_event,join_id,
 			route_scope_key,route_instance_id,route_instance_path,entity_id,routing_source,
 			execution_mode,timer_handle,status,created_at,updated_at
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'root','root','root',$12,$13,$14,$15,'armed',$16,$16)
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'.','root','root',$12,$13,$14,$15,'armed',$16,$16)
 	`, fixture.runID, fixture.deliveryID, fixture.flowPath, "fan_out", fixture.semanticPath, fixture.bundleHash, digest,
 		ref.FlowPath(), ref.NodeID(), ref.HandlerEvent(), ref.JoinID(), entityID,
 		string(routingRaw), string(executionmode.Live), string(handleRaw), at)
