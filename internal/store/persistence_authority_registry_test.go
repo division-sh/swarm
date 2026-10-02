@@ -290,6 +290,71 @@ func (*Record) HiddenQueryer(context.Context, interface { QueryRowContext(contex
 	}
 }
 
+func durableDataFixtureAuthorityLeaks(findings []authorityFinding) []authorityFinding {
+	return slices.DeleteFunc(slices.Clone(findings), func(finding authorityFinding) bool {
+		return finding.File != "internal/store/storetest/durable_data.go" ||
+			(!finding.RawSQL && !strings.HasPrefix(finding.Kind, "context-"))
+	})
+}
+
+func TestDurableDataFixtureAuthorityStaysClosed(t *testing.T) {
+	findings := loadPersistenceAuthorityFindings(t, persistenceAuthorityRepoRoot(t))
+	if leaked := durableDataFixtureAuthorityLeaks(findings); len(leaked) != 0 {
+		t.Fatalf("completed durable-data fixture family exposes raw/context authority: %+v", leaked)
+	}
+}
+
+func TestDurableDataFixtureGuardRejectsHostileAuthority(t *testing.T) {
+	for name, source := range map[string]string{
+		"aliased-getter": `package storetest
+import "database/sql"
+type Alias = sql.DB
+func Database(any) *Alias { return nil }
+`,
+		"structural-queryer": `package storetest
+import (
+ "context"
+ "database/sql"
+)
+type Queryer interface { QueryRowContext(context.Context, string, ...any) *sql.Row }
+func Borrow(Queryer) {}
+`,
+		"transaction-callback": `package storetest
+import (
+ "context"
+ "database/sql"
+)
+func Mutate(func(context.Context, *sql.Tx) error) {}
+`,
+		"independent-transaction": `package storetest
+import (
+ "context"
+ "database/sql"
+)
+func Register(ctx context.Context, db *sql.DB) error {
+ tx, err := db.BeginTx(ctx, nil)
+ if err != nil { return err }
+ defer tx.Rollback()
+ return tx.Commit()
+}
+`,
+		"ambient-transaction": `package storetest
+import (
+ "context"
+ "database/sql"
+)
+func Join(ctx context.Context) *sql.Tx { return ctx.Value("transaction").(*sql.Tx) }
+`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			findings := authorityFindingsFromSource(t, "internal/store/storetest/durable_data.go", source)
+			if len(durableDataFixtureAuthorityLeaks(findings)) == 0 {
+				t.Fatal("hostile durable-data fixture escaped the completed-family guard")
+			}
+		})
+	}
+}
+
 func TestPersistenceAuthorityRegistryRejectsUnknownLocalOperationInAuthorizedFile(t *testing.T) {
 	const source = `package postgres
 import (

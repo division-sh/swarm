@@ -2,18 +2,12 @@ package storetest
 
 import (
 	"context"
-	"database/sql"
-	"fmt"
 	"testing"
-	"time"
 
 	runtimedata "github.com/division-sh/swarm/internal/durabledata"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/sourceartifact"
-	"github.com/division-sh/swarm/internal/store"
-	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
-	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
-	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
+	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
 )
 
 type DurableDataCatalogStore interface {
@@ -43,23 +37,7 @@ func RequireBundleDataCatalog(t testing.TB, ctx context.Context, selected Durabl
 }
 
 func registerDurableDataCatalogForTest(ctx context.Context, selected any, catalog runtimedata.Catalog) error {
-	db := Database(selected)
-	if db == nil {
-		return fmt.Errorf("selected store database is required")
-	}
-	owner, err := durableDataOwnerForSelected(db, selected)
-	if err != nil {
-		return err
-	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := storedurabledata.RegisterCatalogTx(owner, ctx, tx, catalog, time.Now().UTC()); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return private.RegisterDurableDataCatalogForTest(ctx, selected, catalog)
 }
 
 // MaterializeDataForkPins executes the production fork-pin owner against a
@@ -73,46 +51,5 @@ func MaterializeDataForkPins(
 	overrides []runtimedata.ExplicitPin,
 	replay bool,
 ) ([]runtimedata.Pin, error) {
-	db := Database(selected)
-	if db == nil {
-		return nil, fmt.Errorf("selected store database is required")
-	}
-	owner, err := durableDataOwnerForSelected(db, selected)
-	if err != nil {
-		return nil, err
-	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
-	pins, err := storedurabledata.MaterializeForkPinsTx(
-		owner, ctx, tx, sourceRunID, forkRunID, targetBundleHash, overrides, replay, time.Now().UTC(),
-	)
-	if err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return pins, nil
-}
-
-func durableDataOwnerForSelected(db *sql.DB, selected any) (*storedurabledata.Owner, error) {
-	switch selected.(type) {
-	case *store.PostgresStore:
-		backend, err := postgresbackend.New(db)
-		if err != nil {
-			return nil, err
-		}
-		return storedurabledata.NewPostgres(backend, func() error { return nil })
-	case *store.SQLiteRuntimeStore:
-		backend, err := sqlitebackend.New(db)
-		if err != nil {
-			return nil, err
-		}
-		return storedurabledata.NewSQLite(backend, func() error { return nil }, time.Now)
-	default:
-		return nil, fmt.Errorf("unsupported selected store %T", selected)
-	}
+	return private.MaterializeDataForkPinsForTest(ctx, selected, sourceRunID, forkRunID, targetBundleHash, overrides, replay)
 }
