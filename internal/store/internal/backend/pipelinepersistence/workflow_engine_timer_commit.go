@@ -116,8 +116,8 @@ func insertWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgr
 	if !found {
 		return false, fmt.Errorf("workflow timer activation %s disappeared after insert", activation.Ref.ActivationID)
 	}
-	if err := persisted.ValidateCauseReplay(activation); err != nil {
-		return false, err
+	if !sameWorkflowEngineTimerActivation(persisted, activation) {
+		return false, fmt.Errorf("workflow timer activation %s conflicts with persisted facts", activation.Ref.ActivationID)
 	}
 	if rows == 1 {
 		if err := facts.AddFact(storedRunID, privaterunforkrevision.FamilyTimers, storedTimerID); err != nil {
