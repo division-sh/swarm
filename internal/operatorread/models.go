@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
@@ -754,16 +755,17 @@ type PendingAgentDeliveryDetail struct {
 }
 
 type RunHeader struct {
-	RunID            string                        `json:"run_id"`
-	Status           string                        `json:"status"`
-	Origin           runtimerunlifecycle.RunOrigin `json:"origin"`
-	EntityCount      int                           `json:"entity_count"`
-	EventCount       int                           `json:"event_count"`
-	StartedAt        time.Time                     `json:"started_at"`
-	EndedAt          *time.Time                    `json:"ended_at,omitempty"`
-	ContinuedAsRunID string                        `json:"continued_as_run_id,omitempty"`
-	Failure          *runtimefailures.Envelope     `json:"failure,omitempty"`
-	ControlReason    string                        `json:"control_reason,omitempty"`
+	RunID            string                          `json:"run_id"`
+	Status           string                          `json:"status"`
+	Origin           runtimerunlifecycle.RunOrigin   `json:"origin"`
+	EntityCount      int                             `json:"entity_count"`
+	EventCount       int                             `json:"event_count"`
+	StartedAt        time.Time                       `json:"started_at"`
+	EndedAt          *time.Time                      `json:"ended_at,omitempty"`
+	ContinuedAsRunID string                          `json:"continued_as_run_id,omitempty"`
+	Failure          *runtimefailures.Envelope       `json:"failure,omitempty"`
+	ControlReason    string                          `json:"control_reason,omitempty"`
+	ClockSchedules   []genericschedule.ClockReadback `json:"clock_schedules,omitempty"`
 }
 
 type RunHeaderListOptions struct {
