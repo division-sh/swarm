@@ -37,7 +37,7 @@ func Load(ctx context.Context, q RowQueryer, eventID string) (eventrecord.Record
 	if err := record.Validate(); err != nil {
 		return eventrecord.Record{}, false, fmt.Errorf("load event record: %w", eventrecord.Corrupt(record.EventID, err))
 	}
-	if err := record.ValidateInheritedFanOutOwner(ctx, q, true); err != nil {
+	if err := eventrecord.ValidateInheritedFanOutOwner(ctx, q, true, record); err != nil {
 		return eventrecord.Record{}, false, err
 	}
 	return record.Clone(), true, nil
@@ -53,7 +53,7 @@ func LoadAdmitted(ctx context.Context, q RowQueryer, eventID string) (events.Adm
 	if err != nil {
 		return events.AdmittedEvent{}, events.RouteSettlement{}, false, err
 	}
-	if err := record.ValidateInheritedFanOutOwner(ctx, q, true); err != nil {
+	if err := eventrecord.ValidateInheritedFanOutOwner(ctx, q, true, record); err != nil {
 		return events.AdmittedEvent{}, events.RouteSettlement{}, false, err
 	}
 	return admitted, settlement, true, nil
@@ -95,7 +95,7 @@ func LoadMany(ctx context.Context, q Queryer, eventIDs []string) ([]eventrecord.
 		}
 	}
 	for _, record := range loaded {
-		if err := record.ValidateInheritedFanOutOwner(ctx, q, true); err != nil {
+		if err := eventrecord.ValidateInheritedFanOutOwner(ctx, q, true, record); err != nil {
 			return nil, err
 		}
 	}

@@ -39,10 +39,10 @@ func inheritedFanOutBoundaryAllowances() map[string]historicalBoundaryAllowance 
 		edge("store/internal/backend/pipelinepersistence::Pipeline"+backend+"Owner.commitFanOutPublicationTx", "store/internal/backend/pipelinepersistence::EventCommitOwner.CommitFanOutPublicationTx", "thin selected-store handoff")
 		edge("store/internal/backend/eventpersistence::Event"+backend+"Owner.CommitFanOutPublicationTx", "store/internal/backend/eventpersistence::commitFanOutPublicationTx", "thin selected-store handoff")
 	}
-	edge("store/internal/backend/eventrecord::Record.ValidateInheritedFanOutOwner", "store/internal/backend/fanoutorigin::ValidateCommitted", "durable readback consumes exact committed origin relation")
+	edge("store/internal/backend/eventrecord::ValidateInheritedFanOutOwner", "store/internal/backend/fanoutorigin::ValidateCommitted", "durable readback consumes exact committed origin relation")
 	for _, backend := range []string{"postgres", "sqlite"} {
 		for _, caller := range []string{"Load", "LoadMany", "LoadAdmitted", "LoadAdmittedMany"} {
-			edge("store/internal/backend/eventrecord/"+backend+"::"+caller, "store/internal/backend/eventrecord::Record.ValidateInheritedFanOutOwner", "all canonical hydration validates origin ownership after closing rows")
+			edge("store/internal/backend/eventrecord/"+backend+"::"+caller, "store/internal/backend/eventrecord::ValidateInheritedFanOutOwner", "all canonical hydration validates origin ownership after closing rows")
 		}
 	}
 	return allowed
@@ -60,7 +60,7 @@ func inheritedFanOutBoundaryReference(callee string) bool {
 		"store/internal/backend/eventpersistence::commitFanOutPublicationTx",
 		"store/internal/backend/pipelinepersistence::eventCommitTxStore.commitFanOutPublicationTx",
 		"store/internal/backend/pipelinepersistence::EventCommitOwner.CommitFanOutPublicationTx",
-		"store/internal/backend/eventrecord::Record.ValidateInheritedFanOutOwner",
+		"store/internal/backend/eventrecord::ValidateInheritedFanOutOwner",
 		"store/internal/backend/fanoutorigin::ValidateCommitted",
 	} {
 		if callee == guarded {
