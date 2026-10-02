@@ -139,6 +139,39 @@ func VerifyWorkflowTimerCauseReplayEngineConsumersOnBothStoresForTest(t *testing
 							t.Fatalf("old occurrence gained authority after cause replay: %s, %v", outcome, err)
 						}
 					}
+					if kind == workflowTimerCauseEvent {
+						t.Run("later_cause", func(t *testing.T) {
+							later := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "timer.arm", "operator", "", []byte(`{}`), 0, runID,
+								events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), eventtest.RootRoutingSource(entityID), at.Add(2*time.Minute))
+							if err := f.Publish(runtimecorrelation.WithInboundEvent(f.Context, later), later); err != nil {
+								t.Fatalf("ordinary later-cause publication: %v", err)
+							}
+							rows := listTimerCauseReplayActivationsForTest(t, f.Coordinator.workflowStore.timerActivations, ctx, entityID)
+							if len(rows) != 2 {
+								t.Fatalf("later cause produced %d activations, want exactly two", len(rows))
+							}
+							var old, successor WorkflowTimerActivation
+							for _, row := range rows {
+								if row.Ref == initial.Ref {
+									old = row
+								} else {
+									successor = row
+								}
+							}
+							if !reflect.DeepEqual(old, before) || successor.Ref.ActivationID == initial.Ref.ActivationID ||
+								successor.Ref.Cause != timeridentity.WorkflowTimerActivationCauseEvent || successor.Status != workflowTimerStatusActive {
+								t.Fatalf("later cause changed old authority or failed to create one active successor: old=%+v successor=%+v", old, successor)
+							}
+							want := storage
+							want.Timers++
+							want.ActiveTimers++
+							want.TimerRevisionFacts++
+							want.Events++
+							if got := f.Observe(); got != want {
+								t.Fatalf("later cause effects: got=%+v want=%+v", got, want)
+							}
+						})
+					}
 				})
 			}
 		}
