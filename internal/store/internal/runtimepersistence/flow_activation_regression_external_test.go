@@ -110,6 +110,13 @@ func TestFlowAttachmentPlanABARetainsPredecessorUntilSettlementBothStores(t *tes
 			if err := f.selected.AbandonDynamicFlowRuntimeActivationAttempt(f.ctx, f.attempt); err != nil {
 				t.Fatal(err)
 			}
+			if _, err := f.selected.BeginDynamicFlowRuntimeActivation(f.ctx, runtimepipeline.NewDynamicFlowRuntimeActivationRequest(current.Plan, current.AttemptOrdinal, current.AttemptState, f.attempt.ProcessBinding())); !errors.Is(err, runtimepipeline.ErrDynamicFlowRuntimeReadinessObservationStale) {
+				t.Fatalf("pre-abandonment observation admitted a successor: %v", err)
+			}
+			current, found, err = f.selected.LoadDynamicFlowRuntimeReadiness(f.ctx, f.runID, f.plan.Identity.Route())
+			if err != nil || !found || current.AttemptState != "aborted" || current.AttemptOrdinal != original.AttemptOrdinal || current.PlanHash != original.PlanHash {
+				t.Fatalf("load settled ABA predecessor: found=%v row=%+v err=%v", found, current, err)
+			}
 			successor, err := f.selected.BeginDynamicFlowRuntimeActivation(f.ctx, runtimepipeline.NewDynamicFlowRuntimeActivationRequest(current.Plan, current.AttemptOrdinal, current.AttemptState, f.attempt.ProcessBinding()))
 			if err != nil || !successor.Acknowledged || successor.Reused || successor.Attempt.Ordinal() != original.AttemptOrdinal+1 {
 				t.Fatalf("settled ABA successor: %+v %v", successor, err)

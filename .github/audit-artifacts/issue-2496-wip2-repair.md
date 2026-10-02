@@ -214,3 +214,13 @@ limit during repetition3. It is not a completed volume count3 receipt. Separate
 SQLite and PostgreSQL count3 managed jobs retain the original test/deadlines and
 assertions; their results, the repaired default suite and exact-head CI remain
 pending. No deadline inflation, capacity bypass or partial GREEN claim.
+
+The thirteen-root attachment race/count3 aggregate is RED600.054s: its ABA root
+passed a pre-Abandon superseded observation to Begin after durable state became
+aborted, and both backends correctly rejected it as stale. The test now asserts
+that refusal, then validates/reloads the exact settled predecessor before its
+successor request. All ABA/hash/ordinal/late-callback assertions remain; no
+production admission change. The aggregate later reached Go's unchanged
+ten-minute limit in a timer leaf that had run less than a second, not a ten-minute
+case deadlock. Smaller managed root groups retain race/count3 and every original
+case deadline; this aggregate receives no completed matrix credit.
