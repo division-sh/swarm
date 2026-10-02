@@ -104,7 +104,7 @@ func TestCatalogRequiredVerifyGateMutationDiscoversAndNamesBrokenBundles(t *test
 		if err := os.MkdirAll(root, 0o755); err != nil {
 			t.Fatalf("create broken bundle %s: %v", mutation.identity, err)
 		}
-		if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("name: broken-example\n"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("name: broken-example\nversion: 1.0.0\nplatform_version: '*'\n"), 0o600); err != nil {
 			t.Fatalf("write broken example manifest %s: %v", mutation.identity, err)
 		}
 		body := fmt.Sprintf("name: broken-example\n%s: true\n", mutation.field)
@@ -138,7 +138,7 @@ func TestCatalogRequiredVerifyGateRejectsDiscoveredPresentZeroOptionalFile(t *te
 		t.Fatalf("create mutated bundle: %v", err)
 	}
 	files := map[string]string{
-		"manifest.yaml": "name: present-zero\n",
+		"manifest.yaml": "name: present-zero\nversion: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":   "name: present-zero\n",
 		"agents.yaml":   "{}\n",
 	}

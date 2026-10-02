@@ -164,7 +164,8 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 
 	t.Run("status selects one exact activation coordinate", func(t *testing.T) {
 		firstBundle := "bundle-v2:sha256:" + strings.Repeat("b", 64)
-		secondBundle := "bundle-v2:sha256:" + strings.Repeat("c", 64)
+		sourceDir, artifact := identitySource2376(t)
+		secondBundle := artifact.BundleHash()
 		firstTarget, secondTarget := "ingress:workflow/support-a:telegram", "ingress:workflow/support-b:telegram"
 		server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, _ int) map[string]any {
 			if request.Method != "channel.list" {
@@ -175,7 +176,7 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 				operatorChannelCLIActivationReadback("activation-b", secondBundle, secondTarget),
 			}}
 		})
-		stdout, stderr, code := runOperatorChannelCLI(t, server, "channel", "status", operatorChannelCLISelector, "--bundle", secondBundle, "--target", secondTarget, "--quiet")
+		stdout, stderr, code := runOperatorChannelCLI(t, server, "channel", "status", operatorChannelCLISelector, "--source", sourceDir, "--target", secondTarget, "--quiet")
 		if code != 0 || stderr != "" || stdout != "activation-b\n" {
 			t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 		}
@@ -347,23 +348,26 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 		}
 	})
 
-	t.Run("exact selectors are forwarded without lower identity lookup", func(t *testing.T) {
-		var methods []string
-		server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, _ int) map[string]any {
-			methods = append(methods, request.Method)
-			if request.Params["bundle"] != "bundle-v2:sha256:"+strings.Repeat("b", 64) || request.Params["interface"] != operatorChannelCLISelector || request.Params["target"] != "ingress:support:telegram" {
-				t.Fatalf("exact selectors = %#v", request.Params)
+	for _, verb := range []string{"connect", "reconnect", "rebind"} {
+		t.Run("exact selectors/"+verb, func(t *testing.T) {
+			sourceDir, artifact := identitySource2376(t)
+			var methods []string
+			server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, _ int) map[string]any {
+				methods = append(methods, request.Method)
+				if request.Params["bundle"] != artifact.BundleHash() || request.Params["verb"] != verb || request.Params["interface"] != operatorChannelCLISelector || request.Params["target"] != "ingress:support:telegram" {
+					t.Fatalf("exact selectors = %#v", request.Params)
+				}
+				return channelOnboardingCLIResult("succeeded", "bound", true)
+			})
+			_, stderr, code := runOperatorChannelCLIWithInput(t, server, "bot-token\n", "channel", verb, "telegram", "--source", sourceDir, "--interface", operatorChannelCLISelector, "--target", "ingress:support:telegram", "--yes")
+			if code != 0 || stderr != "" {
+				t.Fatalf("code=%d stderr=%q", code, stderr)
 			}
-			return channelOnboardingCLIResult("succeeded", "bound", true)
+			if strings.Join(methods, ",") != "channel.onboarding_start" {
+				t.Fatalf("methods = %v", methods)
+			}
 		})
-		_, stderr, code := runOperatorChannelCLI(t, server, "channel", "reconnect", "telegram", "--bundle", "bundle-v2:sha256:"+strings.Repeat("b", 64), "--interface", operatorChannelCLISelector, "--target", "ingress:support:telegram")
-		if code != 0 || stderr != "" {
-			t.Fatalf("code=%d stderr=%q", code, stderr)
-		}
-		if strings.Join(methods, ",") != "channel.onboarding_start" {
-			t.Fatalf("methods = %v", methods)
-		}
-	})
+	}
 
 	t.Run("replacement verbs admit an explicit credential", func(t *testing.T) {
 		for _, verb := range []string{"reconnect", "rebind"} {

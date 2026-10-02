@@ -364,8 +364,7 @@ func TestEventPublishBundleScopeRequiredTeachingDiagnostic(t *testing.T) {
 	for _, want := range []string{
 		"creating new work requires a bundle scope",
 		"--run-id",
-		"admitted source artifact",
-		"--bundle-hash",
+		"serve the intended source directory",
 		"BUNDLE_SCOPE_REQUIRED",
 	} {
 		if !strings.Contains(stderr.String(), want) {

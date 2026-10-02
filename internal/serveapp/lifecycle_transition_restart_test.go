@@ -127,10 +127,9 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 			if code := second.stop(); code != 0 {
 				t.Fatalf("unpinned stop=%d", code)
 			}
-			// Both artifacts were persisted by real source-backed serve boots.
-			// Use the supported pin loader, with incompatible B first, not a
-			// synthetic runtime registration or source replacement.
-			opts.BundleHashes = []string{rt.BundleHash, seedParams["bundle_hash"].(string)}
+			// Returning to the exact source tree restores executable authority;
+			// the intervening B boot must not rewrite A's frozen decision.
+			opts.SourceRoot = sourceA
 			second, rt = start()
 			if got := lifecycleGateDecisionParams(t, rt, seed.RunID, "approve"); got["card_id"] != params["card_id"] || got["observed_content_hash"] != params["observed_content_hash"] {
 				t.Fatalf("restart reminted frozen card: %#v / %#v", params, got)

@@ -246,7 +246,7 @@ func TestCLI_ServeOwnsRuntimeStartupFlags(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("serve help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"Start the Swarm runtime", "[directory]", "--config", "--backend", "openai_responses", "--workspace-backend", "--bundle-hash", "--api-listen-addr", "API, WebSocket, health, and readiness routes", "--mcp-listen-addr", "MCP and tools routes", "--platform-spec", "--store", "--self-check", "--dev", "--abandon-active-runs", "--shutdown-grace", "--verbose"} {
+	for _, want := range []string{"Start the Swarm runtime", "[directory]", "--config", "--backend", "openai_responses", "--workspace-backend", "--api-listen-addr", "API, WebSocket, health, and readiness routes", "--mcp-listen-addr", "MCP and tools routes", "--platform-spec", "--store", "--self-check", "--dev", "--abandon-active-runs", "--shutdown-grace", "--verbose"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("serve help missing %q:\n%s", want, stdout.String())
 		}
@@ -255,105 +255,6 @@ func TestCLI_ServeOwnsRuntimeStartupFlags(t *testing.T) {
 		if strings.Contains(stdout.String(), notWant) {
 			t.Fatalf("serve help exposed unpromoted listener/topology flag %q:\n%s", notWant, stdout.String())
 		}
-	}
-}
-
-func TestCLI_ServeBundleHashValidationAndSerialScope(t *testing.T) {
-	tests := []struct {
-		name       string
-		args       []string
-		wantCode   int
-		wantStderr string
-		wantHash   string
-	}{
-		{
-			name:       "blank bundle hash rejected",
-			args:       []string{"serve", "--bundle-hash", "  "},
-			wantCode:   2,
-			wantStderr: "--bundle-hash must be non-empty",
-		},
-		{
-			name:       "legacy fingerprint shape rejected",
-			args:       []string{"serve", "--bundle-hash", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
-			wantCode:   2,
-			wantStderr: "--bundle-hash must be bundle-v2:sha256:<64 lowercase hex>",
-		},
-		{
-			name:       "source directory conflict rejected",
-			args:       []string{"serve", "contracts", "--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
-			wantCode:   2,
-			wantStderr: "--bundle-hash is mutually exclusive with a local source directory",
-		},
-		{
-			name:       "dev conflict rejected",
-			args:       []string{"serve", "--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--dev"},
-			wantCode:   2,
-			wantStderr: "--bundle-hash is mutually exclusive with --dev",
-		},
-		{
-			name:     "canonical bundle hash accepted with sqlite",
-			args:     []string{"serve", "--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--store", "sqlite"},
-			wantCode: 0,
-			wantHash: "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		},
-		{
-			name:     "canonical bundle hash accepted",
-			args:     []string{"serve", "--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--api-listen-addr", "127.0.0.1:0", "--mcp-listen-addr", "127.0.0.1:0"},
-			wantCode: 0,
-			wantHash: "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		},
-		{
-			name:       "duplicate pinned bundle hash rejected",
-			args:       []string{"serve", "--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
-			wantCode:   2,
-			wantStderr: "--bundle-hash values must be unique",
-		},
-		{
-			name:     "repeated canonical bundle hashes accepted",
-			args:     []string{"serve", "--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--bundle-hash", "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "--api-listen-addr", "127.0.0.1:0", "--mcp-listen-addr", "127.0.0.1:0"},
-			wantCode: 0,
-			wantHash: "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			var captured ServeOptions
-			called := false
-			opts := defaultRootCommandOptions()
-			opts.runServe = func(_ context.Context, _ InvocationRoot, serveOpts ServeOptions) int {
-				called = true
-				captured = serveOpts
-				return 0
-			}
-
-			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), tc.args, &stdout, &stderr, opts)
-			if code != tc.wantCode {
-				t.Fatalf("serve code = %d, want %d\nstdout=%s\nstderr=%s", code, tc.wantCode, stdout.String(), stderr.String())
-			}
-			if tc.wantStderr != "" {
-				if !strings.Contains(stderr.String(), tc.wantStderr) {
-					t.Fatalf("serve stderr missing %q:\n%s", tc.wantStderr, stderr.String())
-				}
-				if called {
-					t.Fatal("serve runtime started despite invalid bundle hash configuration")
-				}
-				return
-			}
-			if !called {
-				t.Fatal("serve runtime was not called for valid bundle hash")
-			}
-			if captured.BundleHash != tc.wantHash {
-				t.Fatalf("BundleHash = %q, want %q", captured.BundleHash, tc.wantHash)
-			}
-			if tc.name == "repeated canonical bundle hashes accepted" {
-				wantExtra := []string{"bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
-				if !reflect.DeepEqual(captured.BundleHashes, wantExtra) {
-					t.Fatalf("BundleHashes = %#v, want %#v", captured.BundleHashes, wantExtra)
-				}
-			}
-		})
 	}
 }
 
@@ -1350,7 +1251,7 @@ func TestVerifyCommandIgnoresInvocationRootDotEnv(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("verify with explicit contracts code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "verify ok: source="+sourceRoot) {
+	if !strings.Contains(stdout.String(), "verify ok: source="+filepath.Base(sourceRoot)+"@") {
 		t.Fatalf("verify explicit contracts output missing success marker:\n%s", stdout.String())
 	}
 }

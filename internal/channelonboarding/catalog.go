@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 type CandidateTarget struct {
@@ -34,6 +35,7 @@ func (t CandidateTarget) Validate() error {
 }
 
 type Candidate struct {
+	SourceLabel            string                            `json:"source_label,omitempty"`
 	Provider               string                            `json:"provider"`
 	Interface              operatorchannel.InterfaceIdentity `json:"interface"`
 	Coordinate             ChannelRuntimeContextCoordinate   `json:"coordinate"`
@@ -100,7 +102,9 @@ func NewCandidateCatalog(candidates []Candidate) (*CandidateCatalog, error) {
 		}
 		seen[key] = struct{}{}
 	}
-	sort.Slice(projected, func(i, j int) bool { return candidateDiagnostic(projected[i]) < candidateDiagnostic(projected[j]) })
+	sort.Slice(projected, func(i, j int) bool {
+		return candidateCoordinateKey(projected[i]) < candidateCoordinateKey(projected[j])
+	})
 	return &CandidateCatalog{candidates: projected}, nil
 }
 
@@ -144,7 +148,7 @@ func (c *CandidateCatalog) Resolve(selection CandidateSelection) (Candidate, err
 	for _, candidate := range matches {
 		options = append(options, candidateDiagnostic(candidate))
 	}
-	return Candidate{}, fmt.Errorf("%w: provider %q is ambiguous; select exactly one with --bundle, --interface, and --target: %s", ErrConflict, selection.Provider, strings.Join(options, "; "))
+	return Candidate{}, fmt.Errorf("%w: provider %q is ambiguous; select exactly one with --source matching its source directory, --interface, and --target: %s", ErrConflict, selection.Provider, strings.Join(options, "; "))
 }
 
 // FindExact returns only a candidate owned by the same current runtime
@@ -185,5 +189,13 @@ func (c *CandidateCatalog) FindDurableSuccessor(provider string, identity operat
 }
 
 func candidateDiagnostic(candidate Candidate) string {
-	return fmt.Sprintf("--bundle %s --interface %s --target %s", candidate.Coordinate.BundleHash, candidate.Interface.Selector, candidate.Target.Selector)
+	label := candidate.SourceLabel
+	if label == "" {
+		label = sourceartifact.ShortHashLabel(candidate.Coordinate.BundleHash)
+	}
+	return fmt.Sprintf("source=%s --interface %s --target %s", label, candidate.Interface.Selector, candidate.Target.Selector)
+}
+
+func candidateCoordinateKey(candidate Candidate) string {
+	return candidate.Coordinate.BundleHash + "\x00" + candidate.Interface.Selector + "\x00" + candidate.Target.Selector
 }

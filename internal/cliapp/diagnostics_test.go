@@ -1344,7 +1344,7 @@ func TestHealthUsesHealthCheck(t *testing.T) {
 	if len(*requests) != 1 {
 		t.Fatalf("requests = %d, want 1", len(*requests))
 	}
-	for _, want := range []string{"alive=true", "ready=true", "db_ok=true", "runtime_ok=true", "bundle_hash=bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "workflow_name=workflow"} {
+	for _, want := range []string{"alive=true", "ready=true", "db_ok=true", "runtime_ok=true", "source=aaaaaaa"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}

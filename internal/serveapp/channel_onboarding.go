@@ -78,7 +78,8 @@ func serveChannelOnboardingCatalog(manager *runtime.RuntimeContextManager) (*cha
 					PlanGeneration:               generation, TargetGeneration: uint64(target.Generation),
 				}
 				candidates = append(candidates, channelonboarding.Candidate{
-					Provider: profile.Provider(), Interface: identity, Coordinate: coordinate,
+					SourceLabel: contextDef.BundleIdentity.SourceLabel,
+					Provider:    profile.Provider(), Interface: identity, Coordinate: coordinate,
 					Target: channelonboarding.CandidateTarget{
 						Selector: selector, ServiceID: target.ServiceID, FlowPath: target.FlowPath,
 						Alias: target.Alias, Provider: target.Provider, Generation: uint64(target.Generation), PublicationSequence: target.PublicationSequence,

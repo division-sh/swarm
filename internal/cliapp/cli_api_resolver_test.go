@@ -434,7 +434,7 @@ func TestCLIAPIConnectionFlagsSurfaceAndIsolation(t *testing.T) {
 	withFlags := []string{
 		"run list", "run status", "run trace", "health", "logs", "incidents",
 		"event list", "event follow", "event view", "event publish", "event replay",
-		"agent list", "agent deliveries", "agent view", "agent diagnose", "agent restart", "agent replay", "agent directive",
+		"agent list", "agent deliveries", "agent view", "agent frame", "agent diagnose", "agent restart", "agent replay", "agent directive",
 		"conversation list", "conversation view", "conversation turn",
 		"entity list", "entity view", "entity aggregate",
 		"mailbox list", "mailbox view", "mailbox defer",
@@ -452,6 +452,9 @@ func TestCLIAPIConnectionFlagsSurfaceAndIsolation(t *testing.T) {
 		}
 		if cmd.Flags().Lookup("context") == nil {
 			t.Fatalf("%s missing --context", path)
+		}
+		if err := validateCLIAPIConnectionFlagPlacement(append(strings.Fields(path), "--api-server", "http://127.0.0.1:1234")); err != nil {
+			t.Fatalf("%s rejects its declared API connection flag: %v", path, err)
 		}
 	}
 

@@ -88,7 +88,7 @@ func TestGoldenNumericDataScatterParkRefusalBothStores(t *testing.T) {
 					writeReleaseFile(t, filepath.Join(project, "bad.jsonl"), string(candidate)+"\n")
 					runID := uuid.NewString()
 					result := runReleaseCommand(t, goldenStartupTimeout, project, env, "", binary,
-						"run", "start", "--connect", p.apiBase, "--bundle-hash", hash,
+						"run", "start", "--connect", p.apiBase,
 						"--run-id", runID, "--idempotency-key", "numeric-refusal-"+runID,
 						"--data", "item.registered=bad.jsonl", "--no-follow")
 					if result.err == nil || !strings.Contains(result.output, "RUN_DATA_REJECTED") {

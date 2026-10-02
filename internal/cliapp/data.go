@@ -28,7 +28,6 @@ const (
 type dataCommandOptions struct {
 	apiOptions rootCommandOptions
 	output     cliOutputOptions
-	bundleHash string
 }
 
 type dataImportOptions struct {
@@ -85,7 +84,6 @@ func newDataImportCommand(root rootCommandOptions) *cobra.Command {
 	cmd.Flags().BoolVar(&opts.checkOnly, "check", false, "Validate and record the durable outcome without importing")
 	cmd.Flags().StringVar(&opts.sourceInvocationID, "source-invocation-id", "", "Required permanent source operation UUID")
 	cmd.Flags().StringVar(&opts.expectedHead, "expected-head", "", "Required expected head: absent or an exact ResourceVersionID")
-	cmd.Flags().StringVar(&opts.bundleHash, "bundle-hash", "", "Exact selected bundle hash; defaults to the serving runtime's exact bundle")
 	bindCLIOutputFlags(cmd, &opts.output)
 	bindCLIAPIConnectionFlagsWithClass(cmd, &opts.apiOptions, cliAPICommandClassMutating, "swarm data import")
 	return cmd
@@ -107,7 +105,7 @@ func runDataImportCommand(ctx context.Context, out, errOut io.Writer, opts dataI
 	if err != nil {
 		return returnCLIAPIError(errOut, err, dataAPIErrorClassifier())
 	}
-	bundleHash, err := selectedDataBundleIdentity(ctx, client, opts.bundleHash)
+	bundleHash, err := selectedDataBundleIdentity(ctx, client)
 	if err != nil {
 		return returnCLIAPIError(errOut, err, dataAPIErrorClassifier())
 	}
@@ -189,7 +187,6 @@ func newDataShowCommand(root rootCommandOptions) *cobra.Command {
 			return runDataShowCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), opts, args)
 		},
 	}
-	cmd.Flags().StringVar(&opts.bundleHash, "bundle-hash", "", "Exact selected bundle hash; defaults to the serving runtime's exact bundle")
 	cmd.Flags().Uint64Var(&opts.position, "position", 0, "Read one exact 1-based row position from a keyless version")
 	cmd.Flags().StringVar(&opts.keyJSON, "key", "", "Read one exact keyed row using a canonical JSON scalar")
 	cmd.Flags().StringVar(&opts.format, "format", "summary", "Output format: summary or jsonl")
@@ -203,7 +200,7 @@ func runDataShowCommand(ctx context.Context, out, errOut io.Writer, opts dataSho
 	if err != nil {
 		return returnCLIAPIError(errOut, err, dataAPIErrorClassifier())
 	}
-	bundleHash, err := selectedDataBundleIdentity(ctx, client, opts.bundleHash)
+	bundleHash, err := selectedDataBundleIdentity(ctx, client)
 	if err != nil {
 		return returnCLIAPIError(errOut, err, dataAPIErrorClassifier())
 	}
@@ -308,7 +305,6 @@ func newDataPruneCommand(root rootCommandOptions) *cobra.Command {
 			return runDataPruneCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), opts, args[0])
 		},
 	}
-	cmd.Flags().StringVar(&opts.bundleHash, "bundle-hash", "", "Exact selected bundle hash; defaults to the serving runtime's exact bundle")
 	cmd.Flags().StringVar(&opts.pruneInvocationID, "prune-invocation-id", "", "Required permanent prune operation UUID")
 	cmd.Flags().StringVar(&opts.expectedHead, "expected-head", "", "Required expected head: absent or an exact ResourceVersionID")
 	bindCLIOutputFlags(cmd, &opts.output)
@@ -333,7 +329,7 @@ func runDataPruneCommand(ctx context.Context, out, errOut io.Writer, opts dataPr
 	if err != nil {
 		return returnCLIAPIError(errOut, err, dataAPIErrorClassifier())
 	}
-	bundleHash, err := selectedDataBundleIdentity(ctx, client, opts.bundleHash)
+	bundleHash, err := selectedDataBundleIdentity(ctx, client)
 	if err != nil {
 		return returnCLIAPIError(errOut, err, dataAPIErrorClassifier())
 	}
@@ -355,13 +351,7 @@ func runDataPruneCommand(ctx context.Context, out, errOut io.Writer, opts dataPr
 	}, func() ([]string, error) { return []string{result.Outcome}, nil })
 }
 
-func selectedDataBundleIdentity(ctx context.Context, client *cliAPIClient, raw string) (string, error) {
-	if value := strings.TrimSpace(raw); value != "" {
-		if !cliBundleHashPattern.MatchString(value) {
-			return "", fmt.Errorf("--bundle-hash must be bundle-v2:sha256:<64 lowercase hex>")
-		}
-		return value, nil
-	}
+func selectedDataBundleIdentity(ctx context.Context, client *cliAPIClient) (string, error) {
 	health, err := runCommandHealth(ctx, client)
 	if err != nil {
 		return "", err

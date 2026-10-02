@@ -54,10 +54,10 @@ func TestPayloadlessEventPublicPersistenceJourneyBothStores(t *testing.T) {
 				t.Fatalf("public describe: command=%v decode=%v\n%s", describe.err, err, describe.output)
 			}
 			bundleHash := described.SourceHash
-			start := func(source, hash string) *releaseServeProcess {
+			start := func(source string) *releaseServeProcess {
 				t.Helper()
 				process := startReleaseServe(t, releaseProcessSpec{
-					BinaryPath: binary, WorkingDir: root, Source: source, BundleHash: hash, ConfigPath: config,
+					BinaryPath: binary, WorkingDir: root, Source: source, ConfigPath: config,
 					Store: backend, TokenFile: token, Token: goldenAPIToken, Env: env,
 				})
 				ctx, cancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
@@ -70,7 +70,7 @@ func TestPayloadlessEventPublicPersistenceJourneyBothStores(t *testing.T) {
 				}
 				return process
 			}
-			process := start(contracts, "")
+			process := start(contracts)
 			initialBlob := assertPayloadlessPersistedSource(t, root, store, bundleHash, []byte(eventSource))
 			publish := func(key string) string {
 				t.Helper()
@@ -97,12 +97,13 @@ func TestPayloadlessEventPublicPersistenceJourneyBothStores(t *testing.T) {
 			if err := process.stopAndWait(10 * time.Second); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.RemoveAll(contracts); err != nil {
+			relocated := filepath.Join(root, "relocated-contracts")
+			if err := os.Rename(contracts, relocated); err != nil {
 				t.Fatal(err)
 			}
-			process = start("", bundleHash)
+			process = start(relocated)
 			if restartedBlob := assertPayloadlessPersistedSource(t, root, store, bundleHash, []byte(eventSource)); !bytes.Equal(restartedBlob, initialBlob) {
-				t.Fatal("hash-only restart changed the persisted logical source blob")
+				t.Fatal("same-tree directory restart changed the persisted logical source blob")
 			}
 			waitForGoldenTerminalRun(t, process, store, initialRun, 30*time.Second)
 			if restartedRun := publish("payloadless-restarted"); restartedRun == initialRun {
@@ -111,7 +112,7 @@ func TestPayloadlessEventPublicPersistenceJourneyBothStores(t *testing.T) {
 			if err := process.stopAndWait(10 * time.Second); err != nil {
 				t.Fatal(err)
 			}
-			t.Log("proof_surface=public verify/local serve/hash restart; exact source bytes/hash and terminal RPC readback")
+			t.Log("proof_surface=public verify/local serve/relocated exact-tree restart; exact source bytes/hash and terminal RPC readback")
 		})
 	}
 }

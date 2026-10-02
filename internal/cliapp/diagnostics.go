@@ -145,6 +145,7 @@ type diagnosticHealthCheckResult struct {
 }
 
 type diagnosticBundleIdentity struct {
+	SourceLabel     string  `json:"source_label"`
 	WorkflowName    *string `json:"workflow_name"`
 	WorkflowVersion *string `json:"workflow_version"`
 	BundleHash      string  `json:"bundle_hash"`
@@ -152,6 +153,7 @@ type diagnosticBundleIdentity struct {
 
 type diagnosticRunHeader struct {
 	RunID            string                        `json:"run_id"`
+	BundleHash       string                        `json:"bundle_hash"`
 	Status           string                        `json:"status"`
 	Origin           runtimerunlifecycle.RunOrigin `json:"origin"`
 	EntityCount      *int                          `json:"entity_count"`
@@ -1863,11 +1865,7 @@ func writeDiagnosticHealth(out io.Writer, result diagnosticHealthCheckResult) {
 		return
 	}
 	fmt.Fprintf(out, "alive=%t ready=%t db_ok=%t runtime_ok=%t\n", BoolPointerValue(result.Alive), BoolPointerValue(result.Ready), BoolPointerValue(result.DBOK), BoolPointerValue(result.RuntimeOK))
-	fmt.Fprintf(out, "bundle_hash=%s workflow_name=%s workflow_version=%s\n",
-		result.Bundle.BundleHash,
-		emptyDash(stringPointerValue(result.Bundle.WorkflowName)),
-		emptyDash(stringPointerValue(result.Bundle.WorkflowVersion)),
-	)
+	fmt.Fprintf(out, "source=%s\n", humanSourceIdentity(result.Bundle.BundleHash, result.Bundle.SourceLabel))
 }
 
 func IntPointerValue(value *int) int {

@@ -78,6 +78,32 @@ func TestAdmissionSealsCompleteProjectionAndResolvedAgentAuthority(t *testing.T)
 	}
 }
 
+func Test2376AdmissionSealsCompiledExecutionIdentity(t *testing.T) {
+	req := templateAdmissionRequest(t)
+	bundle, _ := semanticview.Bundle(req.Source)
+	want, err := contracts.BootBundleIdentity(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admitted, err := Admit(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle.Semantics.Version = "parent-or-distribution-version"
+	identity, err := admitted.ExecutionIdentity()
+	if err != nil || identity != want {
+		t.Fatalf("admitted execution pins changed through source mutation: %+v %v", identity, err)
+	}
+	identity.WorkflowVersion = "caller-selected"
+	again, err := admitted.ExecutionIdentity()
+	if err != nil || again != want {
+		t.Fatal("returned identity mutated the sealed owner")
+	}
+	if _, err := (Admission{}).ExecutionIdentity(); err == nil {
+		t.Fatal("zero admission elected execution pins")
+	}
+}
+
 func TestAdmissionRejectsIncompleteOrForeignBindings(t *testing.T) {
 	for _, change := range []string{"zero", "foreign_run", "foreign_revision", "foreign_entity", "foreign_artifact", "foreign_effective_source", "missing_event", "missing_recipient", "duplicate_event", "changed_mode"} {
 		t.Run(change, func(t *testing.T) {

@@ -72,10 +72,10 @@ func TestGoldenNumericDataScatterParkRestartBothStores(t *testing.T) {
 			creationEndpoint := p.apiBase
 			runID := uuid.NewString()
 			issued := time.Now()
-			bundleHash := goldenServedBundleHash(t, p.rpc, "mock_only")
+			goldenServedBundleHash(t, p.rpc, "mock_only")
 			create := func() releaseCommandResult {
 				return runReleaseCommand(t, goldenStartupTimeout, project, cliEnv, "", binary,
-					"run", "start", "--connect", p.apiBase, "--bundle-hash", bundleHash,
+					"run", "start", "--connect", p.apiBase,
 					"--run-id", runID, "--idempotency-key", "numeric-"+runID,
 					"--data", "item.registered=contracts/data/items.jsonl", "--no-follow")
 			}

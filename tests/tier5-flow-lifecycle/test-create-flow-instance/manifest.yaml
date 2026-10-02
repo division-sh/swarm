@@ -1,4 +1,3 @@
 name: test-create-flow-instance
 version: 1.0.0
-description: A connected creating input admits a new template receiver.
 platform_version: ">=0.7.0 <0.8.0"

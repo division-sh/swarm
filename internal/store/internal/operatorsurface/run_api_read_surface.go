@@ -245,6 +245,7 @@ func scanRunHeader(row runHeaderScanner) (operatorread.RunHeader, error) {
 	if err := validateRunHeaderLifecycle(header, bundleHash); err != nil {
 		return operatorread.RunHeader{}, err
 	}
+	header.BundleHash = bundleHash
 	return header, nil
 }
 

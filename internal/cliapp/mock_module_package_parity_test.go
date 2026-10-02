@@ -38,7 +38,7 @@ func TestVerifyCommandLoadsFlowRelativeMockModuleStandaloneAndNested(t *testing.
 			if code != 0 {
 				t.Fatalf("verify %s code=%d stdout=%s stderr=%s", sourceRoot, code, stdout.String(), stderr.String())
 			}
-			if !strings.Contains(stdout.String(), "verify ok: source="+sourceRoot) {
+			if !strings.Contains(stdout.String(), "verify ok: source="+filepath.Base(sourceRoot)+"@") {
 				t.Fatalf("verify %s output missing success marker: %s", sourceRoot, stdout.String())
 			}
 		})
