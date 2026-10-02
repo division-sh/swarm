@@ -18,7 +18,6 @@ import (
 	operatorread "github.com/division-sh/swarm/internal/operatorread"
 
 	"github.com/division-sh/swarm/internal/config"
-	dashboardserver "github.com/division-sh/swarm/internal/dashboard/server"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/packadmission"
@@ -732,17 +731,15 @@ func TestCanonicalRuntimeLogSurface_RoundTripsThroughObservabilityReader(t *test
 		t.Fatalf("logger.Log() error = %v", err)
 	}
 
-	reader := dashboardserver.NewObservabilityProjection(pg)
-	if reader == nil {
-		t.Fatal("NewObservabilityProjection returned nil")
-	}
-	logs, err := reader.ListRuntimeLogs(ctx, dashboardserver.RuntimeLogFilter{
+	result, err := pg.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{
 		Component: "tool-executor",
 		Level:     "warn",
-	}, 10)
+		Limit:     10,
+	})
 	if err != nil {
-		t.Fatalf("ListRuntimeLogs: %v", err)
+		t.Fatalf("ListOperatorRuntimeLogs: %v", err)
 	}
+	logs := result.Logs
 	if len(logs) != 1 {
 		t.Fatalf("runtime log rows = %d, want 1: %#v", len(logs), logs)
 	}
@@ -771,7 +768,7 @@ func TestCanonicalRuntimeLogSurface_RoundTripsThroughObservabilityReader(t *test
 	if log.Message != "Tool execution was denied for save_entity_field" {
 		t.Fatalf("log message = %q", log.Message)
 	}
-	detail, _ := log.Detail.(map[string]any)
+	detail := log.CanonicalDetail
 	if strings.TrimSpace(readString(detail["tool_name"])) != "save_entity_field" {
 		t.Fatalf("log detail.tool_name = %#v, want save_entity_field", detail["tool_name"])
 	}
@@ -1046,17 +1043,15 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 		t.Fatalf("Start error = %v, want explicit recovery denial", startErr)
 	}
 
-	reader := dashboardserver.NewObservabilityProjection(pg)
-	if reader == nil {
-		t.Fatal("NewObservabilityProjection returned nil")
-	}
-	logs, err := reader.ListRuntimeLogs(ctx, dashboardserver.RuntimeLogFilter{
-		Component: "runtime",
-		Type:      "startup_recovery_decision",
-	}, 10)
+	result, err := pg.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{
+		Component:         "runtime",
+		ActionOrEventType: "startup_recovery_decision",
+		Limit:             10,
+	})
 	if err != nil {
-		t.Fatalf("ListRuntimeLogs: %v", err)
+		t.Fatalf("ListOperatorRuntimeLogs: %v", err)
 	}
+	logs := result.Logs
 	if len(logs) != 1 {
 		t.Fatalf("runtime log rows = %d, want 1: %#v", len(logs), logs)
 	}
@@ -1070,7 +1065,7 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 	if log.ErrorCode != "startup_recovery_disabled_with_work" {
 		t.Fatalf("log error_code = %q, want canonical failure detail", log.ErrorCode)
 	}
-	detail, _ := log.Detail.(map[string]any)
+	detail := log.CanonicalDetail
 	if got := readString(detail["decision_outcome"]); got != "denied" {
 		t.Fatalf("detail.decision_outcome = %q, want denied", got)
 	}
@@ -1245,17 +1240,15 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 		t.Fatalf("ResetRuntimeStateWithSource: %v", err)
 	}
 
-	reader := dashboardserver.NewObservabilityProjection(pg)
-	if reader == nil {
-		t.Fatal("NewObservabilityProjection returned nil")
-	}
-	logs, err := reader.ListRuntimeLogs(ctx, dashboardserver.RuntimeLogFilter{
-		Component: "runtime",
-		Type:      "reset_orphaned_sessions",
-	}, 10)
+	result, err := pg.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{
+		Component:         "runtime",
+		ActionOrEventType: "reset_orphaned_sessions",
+		Limit:             10,
+	})
 	if err != nil {
-		t.Fatalf("ListRuntimeLogs: %v", err)
+		t.Fatalf("ListOperatorRuntimeLogs: %v", err)
 	}
+	logs := result.Logs
 	if len(logs) != 1 {
 		t.Fatalf("runtime log rows = %d, want 1: %#v", len(logs), logs)
 	}
@@ -1266,7 +1259,7 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 	if log.Action != "reset_orphaned_sessions" {
 		t.Fatalf("log action = %q, want reset_orphaned_sessions", log.Action)
 	}
-	detail, _ := log.Detail.(map[string]any)
+	detail := log.CanonicalDetail
 	if got := readString(detail["source"]); got != "admin_cli" {
 		t.Fatalf("detail.source = %q, want admin_cli", got)
 	}
@@ -1442,17 +1435,15 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 		t.Fatalf("Start: %v", err)
 	}
 
-	reader := dashboardserver.NewObservabilityProjection(pg)
-	if reader == nil {
-		t.Fatal("NewObservabilityProjection returned nil")
-	}
-	logs, err := reader.ListRuntimeLogs(ctx, dashboardserver.RuntimeLogFilter{
-		Component: "agent-manager",
-		Type:      "startup_recovery_manager_replay_aftermath",
-	}, 10)
+	result, err := pg.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{
+		Component:         "agent-manager",
+		ActionOrEventType: "startup_recovery_manager_replay_aftermath",
+		Limit:             10,
+	})
 	if err != nil {
-		t.Fatalf("ListRuntimeLogs: %v", err)
+		t.Fatalf("ListOperatorRuntimeLogs: %v", err)
 	}
+	logs := result.Logs
 	if len(logs) != 0 {
 		t.Fatalf("retired manager replay aftermath rows = %d, want 0: %#v", len(logs), logs)
 	}
@@ -1597,17 +1588,15 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	default:
 	}
 
-	reader := dashboardserver.NewObservabilityProjection(pg)
-	if reader == nil {
-		t.Fatal("NewObservabilityProjection returned nil")
-	}
-	logs, err := reader.ListRuntimeLogs(ctx, dashboardserver.RuntimeLogFilter{
-		Component: "pipeline-recovery",
-		Type:      "startup_recovery_pipeline_replay_aftermath",
-	}, 10)
+	result, err := pg.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{
+		Component:         "pipeline-recovery",
+		ActionOrEventType: "startup_recovery_pipeline_replay_aftermath",
+		Limit:             10,
+	})
 	if err != nil {
-		t.Fatalf("ListRuntimeLogs: %v", err)
+		t.Fatalf("ListOperatorRuntimeLogs: %v", err)
 	}
+	logs := result.Logs
 	if len(logs) != 3 {
 		t.Fatalf("runtime log rows = %d, want 3: %#v", len(logs), logs)
 	}
@@ -1626,7 +1615,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	if replayed.Action != "startup_recovery_pipeline_replay_aftermath" {
 		t.Fatalf("replayed action = %q, want startup_recovery_pipeline_replay_aftermath", replayed.Action)
 	}
-	replayedDetail, _ := replayed.Detail.(map[string]any)
+	replayedDetail := replayed.CanonicalDetail
 	if got := readString(replayedDetail["decision_outcome"]); got != "replayed" {
 		t.Fatalf("replayed detail.decision_outcome = %q, want replayed: %#v", got, replayed)
 	}
@@ -1635,7 +1624,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	}
 
 	skipped := logs[findLogIndex(skipChildID)]
-	skippedDetail, _ := skipped.Detail.(map[string]any)
+	skippedDetail := skipped.CanonicalDetail
 	if got := readString(skippedDetail["decision_outcome"]); got != "skipped" {
 		t.Fatalf("skipped detail.decision_outcome = %q, want skipped", got)
 	}
@@ -1644,7 +1633,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	}
 
 	dropped := logs[findLogIndex(droppedEventID)]
-	droppedDetail, _ := dropped.Detail.(map[string]any)
+	droppedDetail := dropped.CanonicalDetail
 	if got := readString(droppedDetail["decision_outcome"]); got != "dropped" {
 		t.Fatalf("dropped detail.decision_outcome = %q, want dropped", got)
 	}

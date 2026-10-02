@@ -1754,6 +1754,7 @@ func runServedRuntimeIngressControlBackendProof(t *testing.T, backend servedpari
 	t.Helper()
 	t.Cleanup(runtimebus.ResumeRuntimeIngress)
 	rt := startServedControlProofRuntimeWithFixture(t, backend, writeServedExternalEventFixture)
+	assertServedRetiredDashboardRefusal(t, rt)
 	runServedRuntimeIngressControlLifecycleProof(t, rt)
 }
 

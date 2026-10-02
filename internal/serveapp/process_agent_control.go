@@ -7,11 +7,11 @@ import (
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 )
 
-type dashboardDynamicAgentControl struct {
+type processDynamicAgentControl struct {
 	supervisor *processLifecycleSupervisor
 }
 
-func (c dashboardDynamicAgentControl) Restart(ctx context.Context, req runtimeagentcontrol.RestartRequest) (runtimeagentcontrol.RestartResult, error) {
+func (c processDynamicAgentControl) Restart(ctx context.Context, req runtimeagentcontrol.RestartRequest) (runtimeagentcontrol.RestartResult, error) {
 	use, err := c.supervisor.acquireCurrentRuntime(ctx)
 	if err != nil {
 		return runtimeagentcontrol.RestartResult{}, err
@@ -24,7 +24,7 @@ func (c dashboardDynamicAgentControl) Restart(ctx context.Context, req runtimeag
 	return rt.Manager.Restart(use.WorkContext(), req)
 }
 
-func (c dashboardDynamicAgentControl) SendDirective(ctx context.Context, req runtimeagentcontrol.SendDirectiveRequest) (runtimeagentcontrol.SendDirectiveResult, error) {
+func (c processDynamicAgentControl) SendDirective(ctx context.Context, req runtimeagentcontrol.SendDirectiveRequest) (runtimeagentcontrol.SendDirectiveResult, error) {
 	use, err := c.supervisor.acquireCurrentRuntime(ctx)
 	if err != nil {
 		return runtimeagentcontrol.SendDirectiveResult{}, err

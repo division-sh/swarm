@@ -18146,7 +18146,7 @@
       },
       "EntityFull": {
         "additionalProperties": false,
-        "description": "Entity-native shape: typed fields, gates, accumulator state. This\nis the destination shape entity.get returns. v1 implementation\nmay need to translate from the existing instance-shaped readers\nin internal/dashboard/server/server.go (which return flat\nWorkflowInstance structs without the typed-fields/gates/\naccumulated decomposition). The spec commits to the entity-native\nshape; implementations are responsible for providing it. A real\nentity-read owner may need to land before entity.* methods can\nhonor this shape, which is why the entity.* methods are\nshould_have rather than must_have for v1.\n",
+        "description": "Entity-native operator shape from the canonical typed entity-read owner: entity identity, authored fields, platform bookkeeping, gates and accumulator state. The v1 entity.get reader returns this decomposition directly; retired dashboard instance projections are not an alternate owner.",
         "properties": {
           "accumulated": {
             "additionalProperties": true,

@@ -19,9 +19,6 @@ empire
 empire.exe
 *.test
 
-# Dashboard frontend build artifacts.
-internal/dashboard/ui/node_modules
-internal/dashboard/ui/dist
 
 # Local env files.
 .env
