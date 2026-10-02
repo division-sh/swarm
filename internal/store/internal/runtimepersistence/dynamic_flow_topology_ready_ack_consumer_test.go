@@ -53,7 +53,7 @@ func TestDynamicFlowTopologyReadyAcknowledgedFaultCompletesCreationBothStores(t 
 				t.Fatal(err)
 			}
 			t.Cleanup(lease.Release)
-			publisher, err := newStoreTestEventBus(t, f.store.(storeTestDurableEventBusStore), bus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact})
+			publisher, err := newStoreTestEventBus(t, f.store.(storeTestDurableEventBusStore), bus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact, RuntimeInstanceID: scope.RuntimeInstanceID})
 			if err != nil {
 				t.Fatal(err)
 			}

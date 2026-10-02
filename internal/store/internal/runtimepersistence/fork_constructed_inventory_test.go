@@ -34,6 +34,13 @@ func TestForkActivationInventoriesConstructedHeadersBothStores(t *testing.T) {
 					if err == nil || result.Activated {
 						t.Fatalf("inventory proof unexpectedly crossed source-freeze admission: result=%+v err=%v", result, err)
 					}
+					selected := fixture.store.(interface {
+						ActivateRunForkForSelectedContractExecution(context.Context, runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error)
+					})
+					selectedResult, selectedErr := selected.ActivateRunForkForSelectedContractExecution(testAuthorActivityContext(), runfork.RunForkSelectedContractExecutionActivateRequest{ForkRunID: child.ForkRunID})
+					if selectedResult.MaterializedEntityCount != headers || selectedErr == nil || selectedResult.Activated {
+						t.Fatalf("selected constructed inventory=%d headers=%d fields=%d later admission=%v", selectedResult.MaterializedEntityCount, headers, fields, selectedErr)
+					}
 				})
 			}
 		})

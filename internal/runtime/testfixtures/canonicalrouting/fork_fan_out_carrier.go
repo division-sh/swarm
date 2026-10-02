@@ -140,7 +140,7 @@ pins:
 func CopyNumericForkFanOutCarrier(t testing.TB, resourceRows bool) string {
 	t.Helper()
 	root := CopyForkFanOutCarrier(t, false, false)
-	writeClosedVariantFile(t, root, "entities.yaml", "root:\n  integer: integer\n  decimal: numeric\n")
+	writeClosedVariantFile(t, root, "entities.yaml", "root:\n  integer: {type: integer, initial: 0}\n  decimal: {type: numeric, initial: 0.0}\n")
 	if resourceRows {
 		writeClosedVariantFile(t, root, "types.yaml", "types:\n  ResourceRow:\n    slug: text\n    score: integer\n")
 		writeClosedVariantFile(t, root, "events.yaml", "items.ready:\n  items: '[ResourceRow]'\nitems.child:\n  value: text\n  integer_result: integer\n  double_result: numeric\n")

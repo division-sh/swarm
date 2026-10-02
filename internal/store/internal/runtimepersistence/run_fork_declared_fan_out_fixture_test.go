@@ -67,7 +67,7 @@ func seedDeclaredNumericForkFanOutFixture(t *testing.T, backend string, fixture 
 func seedDeclaredEntityForkFanOutFixture(t *testing.T, backend string, fixture authorActivityReceiptFixture, cardinality int, at time.Time) (context.Context, fanOutOwnerFixture) {
 	t.Helper()
 	root := canonicalrouting.CopyForkFanOutCarrier(t, false, false)
-	if err := os.WriteFile(filepath.Join(root, "entities.yaml"), []byte("root:\n  items: '[text]'\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "entities.yaml"), []byte("root:\n  items: {type: '[text]', initial: []}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	nodesPath := filepath.Join(root, "nodes.yaml")

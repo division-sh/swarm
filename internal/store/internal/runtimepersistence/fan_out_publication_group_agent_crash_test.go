@@ -22,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -197,10 +198,25 @@ func runPublicationGroupAgentCrashChild(t *testing.T, mode string) {
 	}
 	gate := &publicationGroupAgentGate{hold: mode == "predecessor", started: make(chan struct{})}
 	factory := publicationGroupRealAgentFactory(t, fixture.store, eventBus, source, gate)
+	workflow := fixture.store.(workflowTestSelectedStore)
+	nodes, err := pipeline.LoadWorkflowNodes(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinator := pipeline.NewPipelineCoordinatorWithOptions(eventBus, pipeline.PipelineCoordinatorOptions{
+		Module: forkFanOutConsumerModule{runForkGateWorkflowModule{source: source}, nodes}, Persistence: pipeline.NewWorkflowPersistence(workflow), DeliveryStore: workflow,
+		DeadLetters: workflow, PipelineObligations: workflow.PipelineObligations(), DecisionCards: workflow, ProposedEffects: workflow, HumanTasks: workflow,
+		DecisionCardDraftExpiry: workflow, HumanTaskExpiry: workflow, DeliveryRuntime: eventBus, RunLifecycle: workflow,
+		SourceArtifactFact: fact, ExecutionPosture: executionposture.MockOnly, ReceiverExecution: eventreceiver.NormalExecution(), WorkOwner: work,
+	})
+	if coordinator == nil {
+		t.Fatal("real agent crash pipeline dependencies incomplete")
+	}
 	am := manager.NewAgentManagerWithOptions(eventBus, factory, manager.AgentManagerOptions{
 		SourceArtifactFact: fact, SemanticSource: source, DeliveryStore: selected, ExecutionPosture: executionposture.MockOnly, LLMBackend: llmselection.BackendAnthropic,
-		PersistenceRoles: manager.PersistenceRoles{AgentRoutes: eventBus, RouteInstaller: eventBus, RouteVerifier: eventBus, RouteRestorer: eventBus, CreationPublisher: eventBus, DeliveryRuntime: eventBus, LifecycleState: fixture.store.(manager.AgentLifecycleStateReader)},
-		WorkOwner:        work, ReceiverExecution: eventreceiver.NormalExecution(),
+		WorkflowInstances: coordinator,
+		PersistenceRoles:  manager.PersistenceRoles{AgentRoutes: eventBus, RouteInstaller: eventBus, RouteVerifier: eventBus, RouteRestorer: eventBus, CreationPublisher: eventBus, DeliveryRuntime: eventBus, LifecycleState: fixture.store.(manager.AgentLifecycleStateReader)},
+		WorkOwner:         work, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, fixture.store.(manager.ManagerPersistence))
 	t.Cleanup(func() {
 		if err := am.Shutdown(); err != nil {
@@ -257,19 +273,10 @@ func runPublicationGroupAgentCrashChild(t *testing.T, mode string) {
 	if err := am.Run(ctx); err != nil {
 		t.Fatal(err)
 	}
-	workflow := fixture.store.(workflowTestSelectedStore)
-	nodes, err := pipeline.LoadWorkflowNodes(source)
-	if err != nil {
-		t.Fatal(err)
-	}
-	coordinator := pipeline.NewPipelineCoordinatorWithOptions(eventBus, pipeline.PipelineCoordinatorOptions{
-		Module: forkFanOutConsumerModule{runForkGateWorkflowModule{source: source}, nodes}, Persistence: pipeline.NewWorkflowPersistence(workflow), DeliveryStore: workflow,
-		DeadLetters: workflow, PipelineObligations: workflow.PipelineObligations(), DecisionCards: workflow, ProposedEffects: workflow, HumanTasks: workflow,
-		DecisionCardDraftExpiry: workflow, HumanTaskExpiry: workflow, DeliveryRuntime: eventBus, RunLifecycle: workflow,
-		SourceArtifactFact: fact, ExecutionPosture: executionposture.MockOnly, ReceiverExecution: eventreceiver.NormalExecution(), WorkOwner: work,
-	})
-	if coordinator == nil {
-		t.Fatal("real agent crash pipeline dependencies incomplete")
+	construction := sqliteFlowActivationRequest(bundle, ".", runID, "", runID)
+	construction.Instance = flowidentity.Stored(source, ".", runID, runID, runID, "")
+	if _, err := am.EnsureFlowInstance(ctx, construction); err != nil {
+		t.Fatalf("attach original constructed crash receiver: %v", err)
 	}
 	eventBus.SetInterceptors(coordinator)
 	continuations, err := deliverycontinuation.New(selected, selected, deliveryAuthority, work, eventBus, func(_ context.Context, err error) { t.Errorf("agent continuation recovery: %v", err) })

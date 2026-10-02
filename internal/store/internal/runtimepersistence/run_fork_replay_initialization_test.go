@@ -187,6 +187,7 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, corrupt := range []struct{ name, column, value, refusal string }{
+				{"wrong_path", "instance_path", "foreign", "constructed header projection disagrees with its declared field row"},
 				{"foreign_template", "flow_template", "unrelated", "reconstructed replay receiver contradicts fixed-revision ownership"},
 				{"wrong_stage", "current_state", "done", "historical workflow state"},
 				{"malformed_bookkeeping", "bookkeeping", "[]", "requires persisted JSON object"},
@@ -211,6 +212,23 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 					}
 				})
 			}
+			t.Run("wrong_run", func(t *testing.T) {
+				foreignRun := uuid.NewString()
+				seedSelectedActivitySourceRun(t, fixture, foreignRun, source)
+				if _, err := fixture.db.ExecContext(ctx, `UPDATE flow_instances SET run_id=$1 WHERE run_id=$2 AND entity_id=$3`, foreignRun, child.ForkRunID, receiver.EntityID); err != nil {
+					t.Fatal(err)
+				}
+				before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
+				if _, err := owner.ActivateRunFork(ctx, request); err == nil || !strings.Contains(err.Error(), "complete workflow target persistence is required") {
+					t.Fatalf("foreign-run header must refuse: %v", err)
+				}
+				if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
+					t.Fatal("foreign-run header refusal changed durable history")
+				}
+				if _, err := fixture.db.ExecContext(ctx, `UPDATE flow_instances SET run_id=$1 WHERE run_id=$2 AND entity_id=$3`, child.ForkRunID, foreignRun, receiver.EntityID); err != nil {
+					t.Fatal(err)
+				}
+			})
 			for _, missing := range []struct{ name, table, refusal string }{
 				{"state_only_receiver", "flow_instances", "complete workflow target persistence is required"},
 				{"missing_declared_fields", "entity_state", "constructed header projection disagrees with its declared field row"},

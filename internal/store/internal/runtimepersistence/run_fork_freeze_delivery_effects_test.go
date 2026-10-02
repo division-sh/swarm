@@ -249,6 +249,10 @@ func TestForkFreezeActivationDeliveryHistoryBothStores(t *testing.T) {
 						if err != nil || !result.Activated || !result.SourceFrozen || result.SourceAdvancedAfterFork {
 							t.Fatalf("activation did not freeze unadvanced source: %+v %v", result, err)
 						}
+						var headers int
+						if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM flow_instances WHERE run_id=$1`, staged.ForkRunID).Scan(&headers); err != nil || headers == 0 || result.MaterializedEntityCount != headers {
+							t.Fatalf("activated constructed inventory: result=%d headers=%d err=%v", result.MaterializedEntityCount, headers, err)
+						}
 						got, err := store.Snapshot(f.ctx, snapshot.DeliveryID)
 						if err != nil || !reflect.DeepEqual(snapshot, got) {
 							t.Fatalf("activation rewrote retained source history: %+v %v", got, err)

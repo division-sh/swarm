@@ -577,6 +577,7 @@ units:
       TestPayloadlessEventPublicPersistenceJourneyBothStores: [sqlite, postgres]
       TestStandingPauseAuthorityPublicBothStores: [sqlite, postgres]
       TestStandingResetNonExecutablePublicBothStores: [sqlite, postgres]
+      TestStandingRootTreePublicRestartAndResetBothStores: [sqlite, postgres]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
@@ -912,7 +913,7 @@ units:
     run: ^Test[I-O].*$
     required_children:
       TestOrdinaryHandlerRequiresCanonicalConstructionBothStores: [sqlite, postgres]
-      TestOrdinaryReplayInitializedReceiversBothStores: [sqlite/foreign_template, sqlite/wrong_stage, sqlite/malformed_bookkeeping, sqlite/state_only_receiver, sqlite/missing_declared_fields, postgres/foreign_template, postgres/wrong_stage, postgres/malformed_bookkeeping, postgres/state_only_receiver, postgres/missing_declared_fields]
+      TestOrdinaryReplayInitializedReceiversBothStores: [sqlite/wrong_path, sqlite/wrong_run, sqlite/foreign_template, sqlite/wrong_stage, sqlite/malformed_bookkeeping, sqlite/state_only_receiver, sqlite/missing_declared_fields, postgres/wrong_path, postgres/wrong_run, postgres/foreign_template, postgres/wrong_stage, postgres/malformed_bookkeeping, postgres/state_only_receiver, postgres/missing_declared_fields]
       TestOrdinaryWorkflowMutationCannotConstructOrRepairBothStores: [sqlite, postgres]
       TestManagerNativeLostAdmissionCleanupBothStores: [sqlite/commit, sqlite/rollback, sqlite/unresolved, sqlite/panic, postgres/commit, postgres/rollback, postgres/unresolved, postgres/panic]
       TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority: [sqlite/fields_false, sqlite/fields_true, postgres/fields_false, postgres/fields_true]
@@ -948,6 +949,7 @@ units:
     required_children:
       TestStandingPreparationVerifiesCompleteRootTreeBothStores: [sqlite/intact, sqlite/missing_sibling, sqlite/missing_fields, sqlite/foreign_parent, postgres/intact, postgres/missing_sibling, postgres/missing_fields, postgres/foreign_parent]
       TestStandingTreeConstructionFailureDoesNotPublishPartialSetBothStores: [sqlite, postgres]
+      TestStandingKeyedAncestryRefusesBeforeMutationBothStores: [sqlite/., sqlite/parent, postgres/., postgres/parent]
       TestSelectedContractOrdinarySourceStatePresenceBothStores:
         - sqlite/absent
         - sqlite/zero

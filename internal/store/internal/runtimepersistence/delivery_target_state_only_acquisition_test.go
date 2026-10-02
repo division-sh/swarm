@@ -37,6 +37,7 @@ func TestForkedSourceCanonicalTargetOwnersExcludeAndPreserveReadbackBothStores(t
 			instance := "freeze/instance"
 			entityID := runtimepipeline.FlowInstanceEntityID(instance)
 			seedStateOnlyAcquisitionEntity(t, backend, db, runID, entityID, instance, "active", "source")
+			seedWorkflowHeaderProjectionFixture(t, ctx, db, runID, entityID, instance, "freeze", "review_item", "active", "{}", time.Now().UTC())
 			before, err := selected.ListSelectedRunTargetOwners(ctx, runID)
 			if err != nil || len(before) != 1 || before[0].EntityID != entityID || before[0].FlowInstance != instance {
 				t.Fatalf("canonical owners before freeze = %#v, %v", before, err)
@@ -101,11 +102,11 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 	}{
 		{name: "existing", node: "selector", state: "active"},
 		{name: "missing-with-business-key-sibling", node: "selector", failure: "owner is missing"},
-		{name: "initialize-with-business-key-sibling", node: "upserter", initialize: true},
+		{name: "initialize-with-business-key-sibling", node: "upserter", initialize: true, failure: "owner is missing"},
 		{name: "initializer-reuses-state", node: "upserter", state: "active"},
-		{name: "exact-state-appears-before-commit", node: "upserter", initialize: true, appearance: true},
-		{name: "wrong-canonical-owner", node: "upserter", state: "active", wrongOwner: true, failure: "disagrees with canonical handler identity"},
-		{name: "duplicate-exact-owners", node: "selector", state: "active", duplicateOwner: true, failure: "ambiguous"},
+		{name: "exact-state-appears-before-commit", node: "upserter", initialize: true, appearance: true, failure: "owner is missing"},
+		{name: "wrong-canonical-owner", node: "upserter", state: "active", wrongOwner: true, failure: "owner is missing"},
+		{name: "duplicate-exact-owners", node: "selector", state: "active", duplicateOwner: true},
 		{name: "terminal-state", node: "selector", state: "done", failure: "owner is unavailable"},
 		{name: "draining-companion", node: "selector", state: "active", lifecycle: "draining", failure: "owner is unavailable"},
 		{name: "terminated-companion", node: "selector", state: "active", lifecycle: "terminated", failure: "owner is unavailable"},
@@ -144,24 +145,52 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 						instance = runID
 						entityID = runID
 					}
+					rootConstruction := sqliteFlowActivationRequest(bundle, ".", runID, "", runID)
+					rootConstruction.Instance = runtimeflowidentity.Stored(source, ".", runID, runID, runID, "")
+					rootConstruction.OccurredAt = time.Now().UTC()
+					constructHistoricalSourceFixture(t, ctx, selected.(agentFixtureFlowStore), rootConstruction)
+					if scope.template {
+						construction := sqliteFlowActivationRequest(bundle, scope.flow, "instance", "", instance)
+						construction.ConstructorInput = "test.node_emitted.selector"
+						construction.ResolvedKey = "instance"
+						construction.Config = map[string]any{"instance_key": "instance"}
+						construction.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "test.node_emitted.selector", "", "", []byte(`{"account_id":"different-business-key","instance_key":"instance"}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
+						constructHistoricalSourceFixture(t, ctx, selected.(agentFixtureFlowStore), construction)
+					}
 					otherEntity := uuid.NewString()
 					seedStateOnlyAcquisitionEntity(t, backend, db, runID, otherEntity, scope.other, "active", "same-business-key")
-					if tc.state != "" {
-						id := entityID
-						if tc.wrongOwner {
-							id = uuid.NewString()
+					if tc.state == "" {
+						for _, table := range []string{"flow_instances", "entity_state"} {
+							column := "instance_path"
+							if table == "entity_state" {
+								column = "flow_instance"
+							}
+							if _, err := db.ExecContext(ctx, "DELETE FROM "+table+" WHERE run_id=$1 AND "+column+"=$2", runID, instance); err != nil {
+								t.Fatal(err)
+							}
 						}
-						seedStateOnlyAcquisitionEntity(t, backend, db, runID, id, instance, tc.state, "different-business-key")
+					} else {
+						for _, table := range []string{"flow_instances", "entity_state"} {
+							if _, err := db.ExecContext(ctx, "UPDATE "+table+" SET current_state=$1 WHERE run_id=$2 AND entity_id=$3", tc.state, runID, entityID); err != nil {
+								t.Fatal(err)
+							}
+						}
+					}
+					if tc.wrongOwner {
+						wrongID := uuid.NewString()
+						seedStateOnlyAcquisitionEntity(t, backend, db, runID, wrongID, instance, "active", "different-business-key")
+						if _, err := db.ExecContext(ctx, `DELETE FROM flow_instances WHERE run_id=$1 AND entity_id=$2`, runID, entityID); err != nil {
+							t.Fatal(err)
+						}
+						seedWorkflowHeaderProjectionFixture(t, ctx, db, runID, wrongID, instance, scope.flow, "review_item", "active", "{}", time.Now().UTC())
 					}
 					if tc.duplicateOwner {
 						seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), instance, "active", "same-business-key")
 					}
-					if tc.lifecycle != "" || scope.template {
-						status := tc.lifecycle
-						if status == "" {
-							status = "active"
+					if tc.lifecycle != "" {
+						if _, err := db.ExecContext(ctx, `UPDATE flow_instances SET status=$1 WHERE run_id=$2 AND instance_path=$3`, tc.lifecycle, runID, instance); err != nil {
+							t.Fatal(err)
 						}
-						seedStateOnlyAcquisitionLifecycleForFlow(t, backend, db, runID, scope.flow, instance, status, scope.template, source)
 					}
 					node, err := runtimeidentity.AdmitExecutableNodeDeclaration(scope.flow, tc.node)
 					if err != nil {
@@ -176,7 +205,11 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 						bus, err := newStoreTestEventBus(t, selected, runtimebus.EventBusOptions{
 							ContractBundle: source, SourceArtifactFact: sourceartifactfixture.FactFor(bundle.SourceArtifact),
 							RecipientPlanMaterializer: func(context.Context, events.Event, runtimebus.PublishRecipientPlan) ([]runtimebus.DeliveryRouteBlueprint, error) {
-								return []runtimebus.DeliveryRouteBlueprint{{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.RouteIdentity{FlowID: scope.flow, FlowInstance: instance}, Handler: handler.ForEvent(eventType)}}, nil
+								target := events.RouteIdentity{FlowID: scope.flow, FlowInstance: instance}
+								if tc.wrongOwner {
+									target.EntityID = entityID
+								}
+								return []runtimebus.DeliveryRouteBlueprint{{Recipient: events.MustNodeDeliveryRecipient(node), Target: target, Handler: handler.ForEvent(eventType)}}, nil
 							},
 						})
 						if err != nil {
@@ -198,9 +231,22 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 					bus := newBus()
 					evt := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType(eventType), "", "", []byte(`{"account_id":"same-business-key","instance_key":"instance"}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
 					if tc.failure != "" {
+						failure := tc.failure
+						if scope.flow == "." && tc.state == "" {
+							failure = "canonical activation planner"
+						}
+						if scope.flow == "." && tc.wrongOwner {
+							failure = "root construction identity contradicts"
+						}
 						err := bus.Publish(ctx, evt)
-						if err == nil || !strings.Contains(err.Error(), tc.failure) {
-							t.Fatalf("Publish=%v, want %q", err, tc.failure)
+						if err == nil || !strings.Contains(err.Error(), failure) {
+							t.Fatalf("Publish=%v, want %q", err, failure)
+						}
+						if tc.appearance {
+							seedStateOnlyAcquisitionEntity(t, backend, db, runID, entityID, instance, "active", "different-business-key")
+							if err := bus.Publish(ctx, evt); err == nil || !strings.Contains(err.Error(), failure) {
+								t.Fatalf("field-row appearance became construction authority: %v", err)
+							}
 						}
 						assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 0, 0)
 						return
@@ -210,11 +256,8 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 						t.Fatalf("plan=%#v err=%v", plan, err)
 					}
 					wantRoute := events.RouteIdentity{FlowID: scope.flow, FlowInstance: instance, EntityID: entityID}.Normalized()
-					if plan.DeliveryRoutes[0].Target.Route() != wantRoute || plan.DeliveryRoutes[0].Target.MaterializingEntity() != tc.initialize {
-						t.Fatalf("wrong owner: %#v want %#v initialize=%t", plan.DeliveryRoutes, wantRoute, tc.initialize)
-					}
-					if tc.appearance {
-						seedStateOnlyAcquisitionEntity(t, backend, db, runID, entityID, instance, "active", "different-business-key")
+					if plan.DeliveryRoutes[0].Target.Route() != wantRoute || plan.DeliveryRoutes[0].Target.MaterializingEntity() {
+						t.Fatalf("wrong constructed owner: %#v want %#v", plan.DeliveryRoutes, wantRoute)
 					}
 					if err := bus.Publish(ctx, evt); err != nil {
 						t.Fatal(err)
@@ -224,7 +267,7 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 						t.Fatalf("load=%t %v %#v", found, err, prepared)
 					}
 					target := prepared.DeliveryRoutes[0].Target
-					if target.Route() != wantRoute || target.MaterializingEntity() != (tc.initialize && !tc.appearance) {
+					if target.Route() != wantRoute || target.MaterializingEntity() {
 						t.Fatalf("persisted target=%#v", target)
 					}
 					// Late rows and a reconstructed publisher cannot re-elect an accepted receiver.
@@ -237,11 +280,7 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 						t.Fatalf("duplicate rewrote receiver: %#v %t %v", again, found, err)
 					}
 					assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 1, 1)
-					wantLifecycle := 0
-					if scope.template {
-						wantLifecycle = 1
-					}
-					assertStateOnlyAcquisitionLifecycleCount(t, backend, db, runID, instance, wantLifecycle)
+					assertStateOnlyAcquisitionLifecycleCount(t, backend, db, runID, instance, 1)
 					var siblingFields string
 					if err := db.QueryRowContext(ctx, `SELECT fields FROM entity_state WHERE run_id=$1 AND entity_id=$2`, runID, otherEntity).Scan(&siblingFields); err != nil {
 						t.Fatal(err)

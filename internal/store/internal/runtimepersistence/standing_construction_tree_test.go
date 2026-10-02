@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -14,6 +15,42 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
+
+func TestStandingKeyedAncestryRefusesBeforeMutationBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, keyed := range []string{".", "parent"} {
+			t.Run(backend+"/"+keyed, func(t *testing.T) {
+				documents := map[string]string{
+					"schema.yaml":                "name: root\n",
+					"parent/schema.yaml":         "name: parent\n",
+					"parent/service/schema.yaml": "name: service\nactivation: standing\n",
+				}
+				documents[filepath.Join(keyed, "schema.yaml")] += "instance: tenant\n"
+				documents[filepath.Join(keyed, "entities.yaml")] = "owner:\n  tenant: text\n"
+				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, documents, nil)
+				source := semanticview.Wrap(f.bundle)
+				fact, found := correlation.SourceArtifactFactFromContext(f.ctx)
+				if !found {
+					t.Fatal("source authority is missing")
+				}
+				serviceID := flowidentity.StandingServiceID("parent/service")
+				instance := flowidentity.StandingForService(source, "parent/service", serviceID)
+				req := pipeline.StandingTargetMutationRequest{ObservedAt: f.request("unused", "unused", "unused").OccurredAt, Targets: []pipeline.StandingTargetMutation{{
+					Candidate:  pipeline.StandingServiceCandidate{ServiceID: serviceID, FlowPath: "parent/service", InstanceID: instance.InstanceID, EntityID: instance.EntityID, Source: fact},
+					Activation: pipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: instance},
+				}}}
+				before := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
+				results, finish, err := f.workflows.PrepareStandingTargets(f.ctx, req, f.manager)
+				if err == nil || !strings.Contains(err.Error(), "keyless no-argument signature") || results != nil || finish != nil {
+					t.Fatalf("keyed ancestry accepted: results=%+v completion=%t err=%v", results, finish != nil, err)
+				}
+				if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")) {
+					t.Fatal("keyed ancestry refusal mutated the selected store")
+				}
+			})
+		}
+	}
+}
 
 type failSecondStandingTreeOwner struct {
 	*manager.AgentManager

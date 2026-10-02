@@ -58,3 +58,40 @@ Authoritative `platform-spec.yaml` states these tree, eligibility, restart,
 pre-start, inventory and receiver rules in this same repair. Managed race,
 public restart/reset/default qualification, complexity measurement, exact-head
 CI and the final proof audit remain required before final review.
+
+## Qualification Cutover Checkpoint
+
+The complete native-package diagnostic at698b5e1ea is RED600.049s and timed
+out before all roots ran. Sampled unchanged-master controls at9a1f27fbd pass
+8.053s, establishing cutover obligations rather than a blanket flakiness waiver.
+Native header fixtures now declare complete identity, progress, clocks and
+JSON objects. Execution fixtures use the canonical constructor before handlers,
+and real Manager attachment follows execution admission. Ordinary Initialize
+and node-first construction are not restored. The retired receiver SQL allowance
+is deleted; its guard requires zero SQL in that consumer.
+
+The connected-receiver matrix keeps exact scoped targets, sibling isolation,
+terminal/draining refusal, persisted publication replay and late-row isolation.
+Missing-target upserters now refuse, including after a field-only row appears.
+Duplicate field rows cannot elect a second owner. Wrong-owner controls declare
+the original exact constructed target instead of deriving an entity from the
+retired handler-initialization interpreter. This is native routing evidence,
+not public constructor qualification.
+
+| Additional executed development proof | Result |
+| --- | --- |
+| Keyed ancestry native refusal | Both stores/root/intermediate PASS2.109s; complete snapshots unchanged. |
+| Expanded historical receiver coordinates | Both stores PASS3.083s, including wrong path and foreign-run header refusal. |
+| Generic/selected inventory | Both stores/fieldless/fielded PASS3.211s. Selected inventory precedes its named binding refusal; not selected execution success. |
+| WIP2 deterministic race/count3 matrix | Native package PASS161.188s; Manager PASS9.823s. Standing tree/partial set/ancestry, replay/inventory, lost response/cancellation/native cleanup, pre-start handoff and actual load-budget roots all executed. |
+| Existing public standing component/lifecycle controls | Managed PASS39.319s at698b5e1ea; not the new compiled launcher journey. |
+| Mixed fan-out, B07/B08/B18 recovery/control | Constructor and actual attachment migrated; focused diagnostic PASS28.607s. No prefix/disposition assertions removed. |
+| Terminal admission/log and mixed execution | Five focused roots PASS4.583s, preserving lifecycle/accounting and immutable replay assertions. |
+| Header history/reset | Two focused roots PASS1.815s after correcting incomplete native clocks and historical state evidence. |
+| New public standing journey | RED27.071s on test setup; next RED10.893s reached hash-only restart on both stores but rejected its declared standing_reconcile reason. Corrected assertion preserves exact run, generation, status and start time; reset proof still pending. |
+
+No development receipt is relabeled final-head qualification. The old A native
+join fixture's ordinary Initialize seed was cross-recorded on #1994 in
+5948846117; A's production collection/join files and lifecycle signature remain
+unchanged. Managed default/public/recovery qualification, exact complexity and
+exact-head CI remain outstanding. This is not a final audit or merge claim.
