@@ -1,0 +1,102 @@
+{
+  "date": "2026-10-02",
+  "source_base": "ae80bac4fe61c15d60c96189544707d4c1d89d8e",
+  "sep30": {
+    "rows": [
+      {
+        "id": 36789880085,
+        "wall_min": 21.833333333333332,
+        "jobs": 79,
+        "runner_min": 263.9333333333332
+      },
+      {
+        "id": 36781580516,
+        "wall_min": 21.45,
+        "jobs": 79,
+        "runner_min": 265.1333333333333
+      },
+      {
+        "id": 36767846403,
+        "wall_min": 29.183333333333334,
+        "jobs": 82,
+        "runner_min": 288.5666666666667
+      },
+      {
+        "id": 36759529305,
+        "wall_min": 22.266666666666666,
+        "jobs": 79,
+        "runner_min": 268.3666666666666
+      },
+      {
+        "id": 36738931409,
+        "wall_min": 26.85,
+        "jobs": 82,
+        "runner_min": 282.6999999999999
+      },
+      {
+        "id": 36709549796,
+        "wall_min": 20.416666666666668,
+        "jobs": 82,
+        "runner_min": 278.4499999999999
+      }
+    ],
+    "median_wall": 22.049999999999997,
+    "mean_wait": 4.359765355417527,
+    "mean_exec": 3.41024844720497,
+    "mean_runner": 274.5249999999999,
+    "assigned": 483
+  },
+  "oct2": {
+    "rows": [
+      {
+        "id": 37008266512,
+        "wall_min": 153.31666666666666,
+        "jobs": 83,
+        "runner_min": 295.1333333333333
+      },
+      {
+        "id": 37005125912,
+        "wall_min": 122.8,
+        "jobs": 83,
+        "runner_min": 304.3666666666666
+      },
+      {
+        "id": 37004389466,
+        "wall_min": 162.4,
+        "jobs": 83,
+        "runner_min": 309.0833333333334
+      },
+      {
+        "id": 37002156237,
+        "wall_min": 123.45,
+        "jobs": 88,
+        "runner_min": 354.63333333333316
+      },
+      {
+        "id": 36990937482,
+        "wall_min": 88.65,
+        "jobs": 83,
+        "runner_min": 305.90000000000015
+      },
+      {
+        "id": 36987479407,
+        "wall_min": 99.85,
+        "jobs": 83,
+        "runner_min": 291.3166666666668
+      }
+    ],
+    "median_wall": 123.125,
+    "mean_wait": 35.25974155069582,
+    "mean_exec": 3.698674618952948,
+    "mean_runner": 310.07222222222225,
+    "assigned": 503
+  },
+  "method": {
+    "workflow_wall": "updated_at - created_at; terminal-update approximation, not exact summary time",
+    "job_filter": "nonempty runner_name plus started_at and completed_at from retrieved jobs snapshots",
+    "start_lag": "started_at - created_at; includes dependencies/admission, not isolated queueing",
+    "execution": "completed_at - started_at",
+    "sampling": "six successful PR runs per day; not full orchestrator population",
+    "raw_jobs_api": "https://api.github.com/repos/division-sh/swarm/actions/runs/{id}/jobs?per_page=100; paginate and scope attempt when replaying"
+  }
+}
