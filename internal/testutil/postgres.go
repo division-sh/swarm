@@ -40,26 +40,14 @@ func startPostgresDatabase(t *testing.T, useTemplate bool) (string, *sql.DB, fun
 	if err != nil {
 		t.Fatal(err)
 	}
-	cacheKey, err := connection.String()
-	if err != nil {
-		t.Fatalf("serialize canonical Postgres test connection: %v", err)
-	}
-
-	postgresManagers.Lock()
-	manager := postgresManagers.bySource[cacheKey]
-	if manager == nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		manager, err = testpostgres.NewManager(ctx, connection)
-		cancel()
-		if err != nil {
-			postgresManagers.Unlock()
-			t.Fatalf("initialize Postgres test manager: %v", err)
-		}
-		postgresManagers.bySource[cacheKey] = manager
-	}
-	postgresManagers.Unlock()
-
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	manager, err := postgresManagerForConnection(ctx, connection)
+	cancel()
+	if err != nil {
+		t.Fatalf("initialize Postgres test manager: %v", err)
+	}
+
+	ctx, cancel = context.WithTimeout(context.Background(), 60*time.Second)
 	sandbox, err := manager.Acquire(ctx, useTemplate)
 	cancel()
 	if err != nil {
@@ -79,6 +67,24 @@ func startPostgresDatabase(t *testing.T, useTemplate bool) (string, *sql.DB, fun
 	}
 	t.Cleanup(release)
 	return dsn, sandbox.DB, release
+}
+
+func postgresManagerForConnection(ctx context.Context, connection testpostgres.Connection) (*testpostgres.Manager, error) {
+	cacheKey, err := connection.String()
+	if err != nil {
+		return nil, fmt.Errorf("serialize canonical Postgres test connection: %w", err)
+	}
+	postgresManagers.Lock()
+	defer postgresManagers.Unlock()
+	if manager := postgresManagers.bySource[cacheKey]; manager != nil {
+		return manager, nil
+	}
+	manager, err := testpostgres.NewManager(ctx, connection)
+	if err != nil {
+		return nil, err
+	}
+	postgresManagers.bySource[cacheKey] = manager
+	return manager, nil
 }
 
 func platformSpecPath() (string, error) {

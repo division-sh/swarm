@@ -37,13 +37,29 @@ $$;
 SQL
 ```
 
-Verify the client connection. `PGPASSWORD` is used only by this manual
-`pg_isready` command; the Go harness receives its password in the explicit DSN.
+Verify the client connection. `PGPASSWORD` is used only by these manual client
+commands; the Go harness receives its password in the explicit DSN.
 
 ```bash
 PGPASSWORD='swarm-test' pg_isready \
   -h 127.0.0.1 -p 5432 -U swarm_test -d postgres
 ```
+
+Shared hosts must report `max_connections >= 300` for parallel test packages.
+The canonical minimum is `testpostgres.RequiredMaxConnections`; this is server
+capacity, not a client connection-pool setting. Check the selected host:
+
+```bash
+PGPASSWORD='swarm-test' psql \
+  -h 127.0.0.1 -p 5432 -U swarm_test -d postgres \
+  -c 'SHOW max_connections;'
+```
+
+If the value is lower, ask the administrator to set `max_connections` to at
+least 300 and restart the dedicated test server, or select an adequate host.
+Any configuration change and restart must be manual and administrator-approved;
+the harness never changes host configuration automatically. Insufficient
+capacity or a failed capacity check fails closed with no Docker fallback.
 
 Run tests with an invocation-scoped DSN instead of a persistent shell export:
 

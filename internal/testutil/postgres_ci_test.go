@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
+	"github.com/division-sh/swarm/internal/testpostgres"
 
 	"gopkg.in/yaml.v3"
 )
@@ -228,24 +229,12 @@ func postgresSourceExpression(expression ast.Expr) bool {
 func TestPostgresContributorGuideIsCanonicalAndQuarantined(t *testing.T) {
 	root := testRepoRoot(t)
 	guidePath := filepath.Join(root, "internal", "testutil", "POSTGRES.md")
-	guide, err := os.ReadFile(guidePath)
+	violations, err := postgresContributorGuideViolations(guidePath)
 	if err != nil {
 		t.Fatalf("read POSTGRES.md: %v", err)
 	}
-	guideText := string(guide)
-	for _, want := range []string{
-		"SWARM_TEST_POSTGRES_DSN",
-		"PostgreSQL 16",
-		"CREATEDB",
-		"PGPASSWORD",
-		"fsync=off",
-		"synchronous_commit=off",
-		"full_page_writes=off",
-		"Runner-Owned Docker",
-	} {
-		if !strings.Contains(guideText, want) {
-			t.Fatalf("POSTGRES.md missing %q", want)
-		}
+	for _, violation := range violations {
+		t.Error(violation)
 	}
 	contributing, err := os.ReadFile(filepath.Join(root, "CONTRIBUTING.md"))
 	if err != nil {
@@ -277,6 +266,97 @@ func TestPostgresContributorGuideIsCanonicalAndQuarantined(t *testing.T) {
 		if strings.Contains(string(data), "SWARM_TEST_POSTGRES_DSN") {
 			t.Fatalf("public onboarding surface %s advertises quarantined test env", rel)
 		}
+	}
+}
+
+func postgresContributorGuideViolations(path string) ([]string, error) {
+	guide, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	// Ignore Markdown line wrapping without interpreting or owning capacity policy.
+	guideText := strings.Join(strings.Fields(string(guide)), " ")
+	var violations []string
+	for _, want := range []string{
+		"SWARM_TEST_POSTGRES_DSN",
+		"PostgreSQL 16",
+		"CREATEDB",
+		"PGPASSWORD",
+		"fsync=off",
+		"synchronous_commit=off",
+		"full_page_writes=off",
+		"Runner-Owned Docker",
+		"`testpostgres.RequiredMaxConnections`",
+		fmt.Sprintf("`max_connections >= %d`", testpostgres.RequiredMaxConnections),
+		"-c 'SHOW max_connections;'",
+		fmt.Sprintf("-c max_connections=%d -c fsync=off", testpostgres.RequiredMaxConnections),
+		fmt.Sprintf("ask the administrator to set `max_connections` to at least %d and restart the dedicated test server", testpostgres.RequiredMaxConnections),
+		"Any configuration change and restart must be manual and administrator-approved",
+		"the harness never changes host configuration automatically",
+		"fails closed with no Docker fallback",
+	} {
+		if !strings.Contains(guideText, want) {
+			violations = append(violations, fmt.Sprintf("POSTGRES.md missing %q", want))
+		}
+	}
+	return violations, nil
+}
+
+func TestPostgresContributorGuideGuardRejectsCapacityDrift(t *testing.T) {
+	guide, err := os.ReadFile(filepath.Join(testRepoRoot(t), "internal", "testutil", "POSTGRES.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	threshold := fmt.Sprintf("`max_connections >= %d`", testpostgres.RequiredMaxConnections)
+	setupArg := fmt.Sprintf("-c max_connections=%d", testpostgres.RequiredMaxConnections)
+	remediation := fmt.Sprintf("least %d and restart the dedicated test server", testpostgres.RequiredMaxConnections)
+	for _, tc := range []struct {
+		name        string
+		old         string
+		replacement string
+		want        string
+	}{
+		{name: "canonical copy"},
+		{name: "missing threshold", old: threshold, want: threshold},
+		{name: "lower threshold", old: threshold, replacement: fmt.Sprintf("`max_connections >= %d`", testpostgres.RequiredMaxConnections-1), want: threshold},
+		{name: "higher threshold", old: threshold, replacement: fmt.Sprintf("`max_connections >= %d`", testpostgres.RequiredMaxConnections+1), want: threshold},
+		{name: "missing observation", old: "-c 'SHOW max_connections;'", want: "SHOW max_connections"},
+		{name: "wrong observation", old: "SHOW max_connections;", replacement: "SHOW shared_buffers;", want: "SHOW max_connections"},
+		{name: "missing setup argument", old: setupArg, want: setupArg},
+		{name: "lower setup argument", old: setupArg, replacement: fmt.Sprintf("-c max_connections=%d", testpostgres.RequiredMaxConnections-1), want: setupArg},
+		{name: "setup argument prefix mismatch", old: setupArg, replacement: setupArg + "0", want: setupArg},
+		{name: "missing remediation", old: remediation, want: "ask the administrator"},
+		{name: "wrong remediation threshold", old: remediation, replacement: fmt.Sprintf("least %d and restart the dedicated test server", testpostgres.RequiredMaxConnections-1), want: "ask the administrator"},
+		{name: "missing administrator", old: "ask the administrator", replacement: "ask the harness", want: "ask the administrator"},
+		{name: "missing restart", old: "and restart the dedicated test server", replacement: "without restarting the dedicated test server", want: "ask the administrator"},
+		{name: "automatic remediation", old: "manual and administrator-approved", replacement: "automatic", want: "manual and administrator-approved"},
+		{name: "host mutation", old: "never changes host configuration automatically", replacement: "changes host configuration automatically", want: "never changes host configuration automatically"},
+		{name: "Docker fallback", old: "fails closed with no Docker fallback", replacement: "falls back to Docker", want: "fails closed with no Docker fallback"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := string(guide)
+			if tc.old != "" {
+				if strings.Count(fixture, tc.old) != 1 {
+					t.Fatalf("guide must contain exactly one mutation target %q", tc.old)
+				}
+				fixture = strings.Replace(fixture, tc.old, tc.replacement, 1)
+			}
+			path := filepath.Join(t.TempDir(), "POSTGRES.md")
+			if err := os.WriteFile(path, []byte(fixture), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			violations, err := postgresContributorGuideViolations(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.want == "" {
+				if len(violations) != 0 {
+					t.Fatalf("canonical guide rejected: %v", violations)
+				}
+			} else if len(violations) != 1 || !strings.Contains(violations[0], tc.want) {
+				t.Fatalf("guide guard violations = %v; want one containing %q", violations, tc.want)
+			}
+		})
 	}
 }
 
