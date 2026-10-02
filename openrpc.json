@@ -10391,7 +10391,7 @@
     },
     {
       "name": "run.start",
-      "description": "Starts a run with exactly one event, one or more selected data feeds, or both. Event-backed initiation requires event_name and payload together. Feed-only initiation requires data and a canonical run_id; it creates a deployment-origin run without a synthetic event. Every selected pin creates one feed obligation atomically with the run, imports, pins and permanent receipt. The selected bundle_hash must identify the exact admitted bundle source and, in RuntimeContextManager mode, a loaded BundleContext; an existing run cannot acquire new run-creation data.\n",
+      "description": "Starts a run with exactly one event, one or more selected data feeds, or both. Event-backed initiation requires event_name and payload together. Feed-only initiation requires data and a canonical run_id; it creates a deployment-origin run without a synthetic event. Every selected pin creates one feed obligation atomically with the run, imports, pins, canonical no-argument root tree and permanent receipt. Feed-only initiation refuses a root without an eligible no-argument constructor before mutation. The selected bundle_hash must identify the exact admitted bundle source and, in RuntimeContextManager mode, a loaded BundleContext; an existing run cannot acquire new run-creation data.\n",
       "params": [
         {
           "name": "bundle_hash",
@@ -12706,7 +12706,7 @@
     },
     {
       "name": "test.setup_entities",
-      "description": "Public deterministic scenario-runner setup/pre-state mutation helper. This method seeds scenario-owned initial entity rows for exactly one scenario run after the runner has validated the authored setup against the loaded contract bundle. It is not a general product/runtime entity.create or entity.update surface, does not publish events, does not create delivery rows, does not infer handler outcomes, and does not accept private cataloge2e setup syntax. The server persists the run row under canonical bundle context and writes the requested initial entity state through the store owner. Scenario-visible verification remains through event.publish, run.diagnose/run.trace, entity.get/list, and other public read owners.\n",
+      "description": "Public deterministic scenario-runner setup/pre-state mutation helper. This method seeds scenario-owned initial entity rows for exactly one scenario run after the runner has validated the authored setup against the loaded contract bundle. It is not a general product/runtime entity.create or entity.update surface, does not publish events, does not create delivery rows, does not infer handler outcomes, and does not accept private cataloge2e setup syntax. The server persists the run row under canonical bundle context and writes the requested initial entity state through the selected runtime's named setup commit owner. Supported root setup independently admits canonical no-argument construction and commits the complete eligible root tree and routes with imported pre-state, preserving authored stage/fields/gates before initial-entry lifecycle planning. Acknowledged post-commit lifecycle and attachment work remains owned; field-only imports are not executable construction evidence. Scenario-visible verification remains through event.publish, run.diagnose/run.trace, entity.get/list, and other public read owners.\n",
       "params": [
         {
           "name": "bundle_hash",

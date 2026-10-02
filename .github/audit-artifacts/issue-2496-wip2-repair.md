@@ -2,6 +2,18 @@
 
 ## Master f805cdb7f Reconciliation
 
+The default14-unit run at frozen9f131450c is RED/incomplete in broad-01. All
+other executed packages pass, including pipeline292.014s; later thirteen units
+did not run. OpenRPC still carried the old run.start/test.setup descriptions,
+and master's new retained-pack test called the retired arbitrary-entity fixture
+signature. The generated artifact changes only those two descriptions, keeping
+71 methods/243 schemas; its focused exact-equality control passes. The retained
+source test now uses the same canonical root-construction helper as its sibling
+fixtures, without changing any retained-byte/provenance/selected-output oracle.
+Queued supplements were explicitly cancelled before either repair, received no
+execution credit, and must restart on the new committed head. Production source,
+spec, describe outputs and all timing/capacity limits remain unchanged.
+
 Rebased all repair commits onto master f805cdb7f. The only conflict was the
 compiled describe characterization: master adds pack/platform source provenance
 and R5.1 adds the constructor projection. Both implementations remain intact.
