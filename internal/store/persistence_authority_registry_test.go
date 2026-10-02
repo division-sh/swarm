@@ -139,10 +139,10 @@ import ("context"; "database/sql")
 func commitSemanticEventWithInitialFacts(ctx context.Context, db *sql.DB) { _, _ = db.BeginTx(ctx, nil) }
 `,
 		`package fixture
-import "database/sql"
+import ("context"; "database/sql")
 type Alias = sql.DB
 type Carrier struct { *Alias }
-func CommitSemanticEventWithInitialFacts(selected Carrier) { _ = selected.Alias }
+func CommitSemanticEventWithInitialFacts(selected Carrier) { _, _ = selected.BeginTx(context.Background(), nil) }
 `,
 	} {
 		findings := authorityFindingsFromSource(t, "internal/store/storetest/event.go", source)

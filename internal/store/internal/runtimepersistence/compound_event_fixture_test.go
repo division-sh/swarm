@@ -101,8 +101,13 @@ func TestCompoundEventFixturesAtomicReplayAndRevisionBothStores(t *testing.T) {
 				snapshot, err := selected.(interface {
 					Snapshot(context.Context, string) (runtimedelivery.Snapshot, error)
 				}).Snapshot(ctx, deliveryID)
-				if err != nil || snapshot.ContinuationHandoffAt.IsZero() || snapshot.Status != runtimedelivery.StatusPending {
+				if err != nil || snapshot.Status != runtimedelivery.StatusPending {
 					t.Fatalf("canonical continuation handoff: %+v err=%v", snapshot, err)
+				}
+				// Snapshot is not the continuation scanner's marker projection.
+				var handedOff bool
+				if err := db.QueryRow("SELECT continuation_handoff_at IS NOT NULL FROM event_deliveries WHERE delivery_id=$1", deliveryID).Scan(&handedOff); err != nil || !handedOff {
+					t.Fatalf("durable continuation handoff: present=%v err=%v", handedOff, err)
 				}
 				if inserted, err := commit(admitted, settlement, routes, runtimepipelineobligation.ScopeSubscribed, &ack); err != nil || inserted {
 					t.Fatalf("exact replay: inserted=%v err=%v", inserted, err)
@@ -215,5 +220,43 @@ func TestCompoundEventFixturesRejectMissingSelectedOwner(t *testing.T) {
 				t.Fatalf("missing owner %T admitted: inserted=%v err=%v", selected, inserted, err)
 			}
 		}
+	}
+}
+
+func TestCompoundEventFixtureForkFrontierRetainsPostgresScope(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			selected, runID := decisionCardTestStore(t, backend)
+			db, _ := decisionCardStoreDB(t, selected)
+			ctx := testAuthorActivityContext()
+			eventID := uuid.NewString()
+			admitted, settlement, routes := compoundFixtureEvent(t, runID, eventID, `{}`, time.Now().UTC())
+			before := compoundFixtureCounts(t, db, runID, eventID)
+			ack := runtimepipelineobligation.Acknowledged("pipeline_persisted")
+			inserted, err := CommitSemanticForkFrontierForTest(ctx, selected, admitted, settlement, routes, runtimepipelineobligation.ScopeSubscribed, &ack)
+			if backend == "sqlite" {
+				if inserted || err == nil || compoundFixtureCounts(t, db, runID, eventID) != before {
+					t.Fatalf("SQLite frontier must refuse without writing: inserted=%v err=%v", inserted, err)
+				}
+				return
+			}
+			if !inserted || err != nil {
+				t.Fatalf("PostgreSQL frontier: inserted=%v err=%v", inserted, err)
+			}
+			var revision int64
+			if err := db.QueryRow("SELECT MAX(revision) FROM run_fork_revisions WHERE run_id=$1", runID).Scan(&revision); err != nil {
+				t.Fatal(err)
+			}
+			for _, family := range []string{"events", "event_deliveries", "committed_replay_scopes", "event_receipts"} {
+				var count int
+				if err := db.QueryRow("SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1 AND family=$2 AND revision=$3 AND present", runID, family, revision).Scan(&count); err != nil || count != 1 {
+					t.Fatalf("frontier family %s: count=%d err=%v", family, count, err)
+				}
+			}
+			after := compoundFixtureCounts(t, db, runID, eventID)
+			if inserted, err := CommitSemanticForkFrontierForTest(ctx, selected, admitted, settlement, routes, runtimepipelineobligation.ScopeSubscribed, &ack); inserted || err != nil || compoundFixtureCounts(t, db, runID, eventID) != after {
+				t.Fatalf("frontier replay must not recapture history: inserted=%v err=%v", inserted, err)
+			}
+		})
 	}
 }
