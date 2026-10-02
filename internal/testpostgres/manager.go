@@ -106,6 +106,9 @@ func NewManager(ctx context.Context, admin Connection) (*Manager, error) {
 	if err := waitForDatabase(ctx, db, 30*time.Second); err != nil {
 		return nil, fmt.Errorf("postgres test admin connection is not ready: %w", err)
 	}
+	if err := ValidateServerCapacity(ctx, db); err != nil {
+		return nil, err
+	}
 	role, serverID, err := inspectSession(ctx, db)
 	if err != nil {
 		return nil, err

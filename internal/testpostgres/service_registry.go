@@ -386,7 +386,7 @@ func (r *ServiceRegistry) RunCreator(ctx context.Context, leaseID string, creato
 	for _, key := range keys {
 		args = append(args, "--label", key+"="+record.Labels[key])
 	}
-	args = append(args, record.ImageID, "-c", "max_connections=300", "-c", "fsync=off", "-c", "synchronous_commit=off", "-c", "full_page_writes=off")
+	args = append(args, record.ImageID, "-c", fmt.Sprintf("max_connections=%d", RequiredMaxConnections), "-c", "fsync=off", "-c", "synchronous_commit=off", "-c", "full_page_writes=off")
 	out, createErr := r.runDocker(ctx, args...)
 	if createErr != nil {
 		record.State = ServiceCreateFailed
@@ -1099,7 +1099,7 @@ func serviceLabels(owner, daemon, runnerID, leaseID, specHash string) map[string
 }
 
 func serviceSpecHash(imageID string) string {
-	hash := sha256.Sum256([]byte(strings.Join([]string{imageID, "postgres:16", "tmpfs-pgdata", "random-loopback-port", "max_connections=300", "fsync=off", "synchronous_commit=off", "full_page_writes=off"}, "\x00")))
+	hash := sha256.Sum256([]byte(strings.Join([]string{imageID, "postgres:16", "tmpfs-pgdata", "random-loopback-port", fmt.Sprintf("max_connections=%d", RequiredMaxConnections), "fsync=off", "synchronous_commit=off", "full_page_writes=off"}, "\x00")))
 	return hex.EncodeToString(hash[:])
 }
 
@@ -1123,7 +1123,7 @@ func verifyOwnedPostgresSettings(ctx context.Context, db interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }) error {
 	for setting, want := range map[string]string{
-		"max_connections":    "300",
+		"max_connections":    strconv.Itoa(RequiredMaxConnections),
 		"fsync":              "off",
 		"synchronous_commit": "off",
 		"full_page_writes":   "off",

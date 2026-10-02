@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 	"gopkg.in/yaml.v3"
@@ -518,6 +519,10 @@ func goldenPostgresStore(t *testing.T, dsn string) goldenStoreSelection {
 	if err := admin.PingContext(ctx); err != nil {
 		_ = admin.Close()
 		t.Fatalf("connect to host PostgreSQL: %v", err)
+	}
+	if err := testpostgres.ValidateServerCapacity(ctx, admin); err != nil {
+		_ = admin.Close()
+		t.Fatalf("admit host PostgreSQL: %v", err)
 	}
 	if _, err := admin.ExecContext(ctx, "CREATE DATABASE "+pq.QuoteIdentifier(databaseName)); err != nil {
 		_ = admin.Close()
