@@ -189,3 +189,28 @@ the committed repair; earlier green matrices are not relabeled this head.
 The fourteen-root managed WIP2 race/count3 supplement on02b776816 passed:
 runtimepersistence291.210s and Manager9.608s. This precedes the discard edit.
 The public/volume count3 command remains running, also preceding that edit.
+
+## Qualification Receipts After Discard Repair
+
+The real-schema cleanup and selected-receiver race/count3 matrix passes:
+pipeline71.171s and runtimepersistence40.251s. Retained/unretained completion,
+cancellation and rollback include headers and cascading attachment/construction
+evidence. This source is c76849f82; the later writer census correction is test
+metadata only. Authority registry/hostile guards pass4.344s and complexity
+policy passes without changing thresholds or regenerated head scores.
+
+The cffa774ea default managed suite is RED in broad-01. Its only failed root is
+TestDeleteSelectedContractForkStatePreservesCompletionTombstones: its hand-built
+backend schema omitted flow_instances, so both retain modes failed with no such
+table. The fixture now includes that table and explicitly asserts its removal
+in both modes. The focused root passes count3,11.383s. No production change or
+guard exception is needed; no later default unit receives proof credit.
+
+Public standing/progressive-presence/sequential-run count3 passes259.878s at
+02b776816. Sequential runs use compiled internal mock-lifecycle processes with
+public RPC readback, not real-provider/public-launcher qualification. The same
+aggregate's volume package is RED600.031s at the unchanged package-wide ten-minute
+limit during repetition3. It is not a completed volume count3 receipt. Separate
+SQLite and PostgreSQL count3 managed jobs retain the original test/deadlines and
+assertions; their results, the repaired default suite and exact-head CI remain
+pending. No deadline inflation, capacity bypass or partial GREEN claim.

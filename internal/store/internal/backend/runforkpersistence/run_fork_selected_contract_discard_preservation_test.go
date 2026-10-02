@@ -32,7 +32,7 @@ func TestDeleteSelectedContractForkStatePreservesCompletionTombstones(t *testing
 				"run_fork_selected_contract_branch_divergences", "run_fork_selected_contract_route_recoveries",
 				"run_fork_selected_contract_executions", "event_receipts", "committed_replay_scopes", "timers",
 				"activity_attempts", "entity_mutations", "agent_turns", "agent_conversation_audits",
-				"author_activity_occurrences", "agents", "events",
+				"author_activity_occurrences", "agents", "events", "flow_instances",
 			} {
 				if _, err := db.Exec("CREATE TABLE " + table + " (run_id TEXT, fork_run_id TEXT, original_event_id TEXT, event_id TEXT, delivery_id TEXT)"); err != nil {
 					t.Fatal(err)
@@ -52,13 +52,13 @@ func TestDeleteSelectedContractForkStatePreservesCompletionTombstones(t *testing
 			if err := tx.Commit(); err != nil {
 				t.Fatal(err)
 			}
-			for _, table := range []string{"agent_turns", "agent_conversation_audits", "author_activity_occurrences", "agents", "activity_attempts", "entity_mutations"} {
+			for _, table := range []string{"agent_turns", "agent_conversation_audits", "author_activity_occurrences", "agents", "activity_attempts", "entity_mutations", "flow_instances"} {
 				var count int
 				if err := db.QueryRow("SELECT COUNT(*) FROM "+table+" WHERE run_id=$1", runID).Scan(&count); err != nil {
 					t.Fatal(err)
 				}
 				want := 0
-				if tc.preserve && table != "activity_attempts" && table != "entity_mutations" {
+				if tc.preserve && table != "activity_attempts" && table != "entity_mutations" && table != "flow_instances" {
 					want = 1
 				}
 				if count != want {
