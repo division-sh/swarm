@@ -146,7 +146,8 @@ func newComputeModuleReplaySQLiteStore(t *testing.T) *store.SQLiteRuntimeStore {
 	if err != nil {
 		t.Fatalf("load platform spec: %v", err)
 	}
-	if err := source.Decode(&spec); err != nil {
+	spec, err = runtimecontracts.AdmitPlatformSpecValue(source.Document("platform-spec.yaml").Root())
+	if err != nil {
 		t.Fatalf("decode platform spec: %v", err)
 	}
 	plans, err := store.GeneratePlatformTableDDLs(spec)

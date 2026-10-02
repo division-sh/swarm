@@ -45,7 +45,8 @@ var sqliteFixtureStatements = sync.OnceValues(func() (map[string][]string, error
 		return nil, err
 	}
 	var spec runtimecontracts.PlatformSpecDocument
-	if err := source.Decode(&spec); err != nil {
+	spec, err = runtimecontracts.AdmitPlatformSpecValue(source.Document("platform-spec.yaml").Root())
+	if err != nil {
 		return nil, err
 	}
 	plans, err := schemastore.GeneratePlatformTableDDLs(spec)

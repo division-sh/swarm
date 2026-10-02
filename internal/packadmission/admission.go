@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 // Projection is the canonical, config-independent admission result for every
@@ -29,6 +30,14 @@ func (p Projection) EffectivePackInventoryDigest() string {
 		return ""
 	}
 	return p.Inventory.Digest()
+}
+
+func (p Projection) PackSourceValues() map[string]yamlsource.Value {
+	out := p.ProviderConnectors.SourceValues()
+	for _, pack := range p.LoadedChannelPacks {
+		out[pack.Envelope.ID+".channel"] = pack.Manifest.SourceValue()
+	}
+	return out
 }
 
 func Admit(inventory *packartifact.EffectivePackInventory, platform runtimecontracts.PlatformSpecDocument) (Projection, error) {

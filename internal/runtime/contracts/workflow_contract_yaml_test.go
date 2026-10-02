@@ -2214,8 +2214,8 @@ func TestSystemNodeContractDecode_RejectsRetiredAndUnsupportedTopLevelFields(t *
 	}
 }
 
-func TestEntitySchemaDecode_AcceptsMappingInitialValue(t *testing.T) {
-	var schema EntitySchema
+func TestEntityContractsAdmission_PreservesZeroAndFalseInitialValue(t *testing.T) {
+	var schema EntityContractsDocument
 	if err := decodeNodeTestYAML([]byte(`
 scoring_phase:
   revision_count:
@@ -2227,34 +2227,41 @@ scoring_phase:
 `), &schema); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
-	if got := len(schema.Groups); got != 1 {
-		t.Fatalf("len(Groups) = %d", got)
+	if len(schema) != 1 {
+		t.Fatalf("entity count = %d", len(schema))
 	}
-	fields := schema.Groups[0].Fields
-	if got := fields[0].Name; got != "revision_count" {
-		t.Fatalf("Fields[0].Name = %q", got)
+	fields := schema["scoring_phase"].Fields
+	if got := fields["revision_count"].Initial; got != 0 {
+		t.Fatalf("revision_count initial = %#v", got)
 	}
-	if got := fields[0].Initial; got != 0 {
-		t.Fatalf("Fields[0].Initial = %#v", got)
-	}
-	if got := fields[1].Initial; got != false {
-		t.Fatalf("Fields[1].Initial = %#v", got)
+	if got := fields["is_duplicate"].Initial; got != false {
+		t.Fatalf("is_duplicate initial = %#v", got)
 	}
 }
 
-func TestEntitySchemaDecode_RejectsScalarInitialSuffix(t *testing.T) {
-	var schema EntitySchema
+func TestRetiredEntitySchemaAdmissionRejectsScalarInitialSuffix(t *testing.T) {
+	_, err := loadSchemaFragment(t, "name: retired\nentity:\n  state_field: scoring_phase\n  fields:\n    revision_count: integer initial 0\n")
+	if err == nil || !strings.Contains(err.Error(), "RETIRED") {
+		t.Fatalf("retired entity-schema grammar admitted: %v", err)
+	}
+}
+
+func TestEntityContractsAdmissionScalarTypeCannotInventInitial(t *testing.T) {
+	var schema EntityContractsDocument
 	err := decodeNodeTestYAML([]byte(`
 scoring_phase:
   revision_count: integer initial 0
 `), &schema)
-	if err == nil || !strings.Contains(err.Error(), "scalar form cannot declare initial values") {
-		t.Fatalf("yaml.Unmarshal error = %v, want scalar initial rejection", err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if field := schema["scoring_phase"].Fields["revision_count"]; field.Initial != nil {
+		t.Fatalf("scalar type text invented an initial value: %#v", field)
 	}
 }
 
-func TestEntitySchemaDecode_RejectsMappingWithoutType(t *testing.T) {
-	var schema EntitySchema
+func TestEntityContractsAdmission_RejectsMappingWithoutType(t *testing.T) {
+	var schema EntityContractsDocument
 	err := decodeNodeTestYAML([]byte(`
 scoring_phase:
   revision_count:

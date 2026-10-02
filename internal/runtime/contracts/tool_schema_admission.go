@@ -20,59 +20,6 @@ var toolSchemaFields = map[string]struct{}{
 	"x-swarm-equalTo": {}, "minLength": {}, "maxLength": {}, "minItems": {}, "maxItems": {},
 }
 
-// The platform envelope remains a separate grammar. Its authored schema
-// children nevertheless retain their original tags and source coordinates.
-func admitPlatformInterfaceSchemaValues(root yamlsource.Value) (map[string]map[string]map[string]ToolInputSchema, error) {
-	out := map[string]map[string]map[string]ToolInputSchema{}
-	interfaces, err := root.Lookup("interfaces")
-	if err != nil || interfaces.Presence == yamlsource.PresenceMissing || interfaces.Presence == yamlsource.PresenceNull {
-		return out, err
-	}
-	if err := interfaces.Value.ValidateExpansion(); err != nil {
-		return nil, err
-	}
-	families, err := uniqueYAMLMappingFields(interfaces.Value, "interfaces")
-	if err != nil {
-		return nil, err
-	}
-	for _, family := range families {
-		if family.Value.Presence() == yamlsource.PresenceNull {
-			continue
-		}
-		versions, err := uniqueYAMLMappingFields(family.Value, "interface versions")
-		if err != nil {
-			return nil, err
-		}
-		out[family.Name] = map[string]map[string]ToolInputSchema{}
-		for _, version := range versions {
-			if version.Value.Presence() == yamlsource.PresenceNull {
-				continue
-			}
-			lookup, err := version.Value.Lookup("schemas")
-			if err != nil {
-				return nil, err
-			}
-			if lookup.Presence == yamlsource.PresenceMissing {
-				continue
-			}
-			children, err := uniqueYAMLMappingFields(lookup.Value, "interface schemas")
-			if err != nil {
-				return nil, err
-			}
-			admitted := make(map[string]ToolInputSchema, len(children))
-			for _, child := range children {
-				schema, err := AdmitToolInputSchemaValue(child.Value)
-				if err != nil {
-					return nil, err
-				}
-				admitted[child.Name] = schema
-			}
-			out[family.Name][version.Name] = admitted
-		}
-	}
-	return out, nil
-}
-
 // Authored and programmatic declarations terminate at the same semantic
 // constructor. Source locations explain refusal; they never change admission.
 func AdmitToolInputSchemaValue(value yamlsource.Value) (ToolInputSchema, error) {

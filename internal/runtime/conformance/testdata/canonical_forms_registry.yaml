@@ -3,7 +3,7 @@ registry_version: 1
 matrix_version: 1
 status: checked_merge_bearing
 census_head: 25ad370da
-decoder_census_head: issue-2485-tools-root
+decoder_census_head: issue-2486-pack-platform
 scope:
   loader_root: LoadWorkflowContractBundle
   included:
@@ -42,15 +42,15 @@ classification_tests:
   f2_bug: "An accepted spelling changes, disappears, or is independently reinterpreted after decode."
 
 inventory:
-  custom_unmarshal_total: 18
-  custom_unmarshal_reachable: 14
-  custom_unmarshal_retired: 2
+  custom_unmarshal_total: 11
+  custom_unmarshal_reachable: 9
+  custom_unmarshal_retired: 0
   custom_unmarshal_excluded: 2
   custom_unmarshal_breakdown:
-    contracts: 15
+    contracts: 9
     flowmodel_policy: 0
     agentintent: 0
-    channel_pack: 1
+    channel_pack: 0
     deployment_config_excluded: 2
   yaml_node_functions_in_contracts: 215
   yaml_tagged_fields_in_contracts_flowmodel_agentintent: 926
@@ -561,7 +561,7 @@ rows:
   - id: platform.pack_interface
     ruled: mechanical-ratified
     paths: "platform-spec.interfaces.<kind>.<id>.kind, schemas, operations, events, operation.effect_class, operation.input, operation.context, operation.output, event.required_fields, field.schema, field.opaque"
-    owners: [PackInterfaceDefinition.UnmarshalYAML, PackInterfaceOperation.UnmarshalYAML, PackInterfaceEvent.UnmarshalYAML, PackInterfaceField.UnmarshalYAML]
+    owners: [AdmitPlatformSpecValue, admitPackInterfaceValue, admitPackInterfaceOperation, admitPackInterfaceField]
     information:
       fact: [interface identity and exact operation/event schemas]
       annotation: [schema descriptions]
@@ -618,13 +618,13 @@ rows:
   - id: pack.channel
     ruled: mechanical-ratified
     paths: "channel.provider, channel.opaque_types, channel.operations, channel.events, channel.registration"
-    owners: [packs.LoadChannelPackFS, ChannelMapping.UnmarshalYAML]
+    owners: [packs.parseChannelManifestAt, packs.admitChannelMappings, packs.LoadChannelPack]
     information:
       boundary_snapshot: [provider operation/event schemas and opaque types]
       fact: [tool, source path, event, field mapping, registration slot]
       choice: [registration credential bindings]
     spelling:
-      canonical_candidate: scalar_source_path_for_direct_mapping
+      canonical: scalar_source_path_for_direct_mapping
       retired_duplicates: ["{from: path} when no recursive mapping"]
       distinct_overrides: ["{each, item} recursive mapping"]
     corpus: {direct_scalar_mappings: 6, from_only_mappings: 0, recursive_each_mappings: 2}
@@ -640,8 +640,8 @@ rows:
 
   - id: platform.spec_consumed_law
     ruled: mechanical-ratified
-    paths: "platform-spec.platform, platform_events, permissions_model, interfaces, vocabulary, contract_formats, workflow_state, platform_tables, builtin_hooks, api_specification, compliance_rules, file_layout"
-    owner: PlatformSpecDocument
+    paths: "platform-spec.platform, platform_events.catalog.payload, permissions_model.permissions, interfaces, vocabulary.participant.types, workflow_state, platform_tables.tables, builtin_hooks.guards, api_specification"
+    owners: [AdmitPlatformSpecValue, PlatformEventCatalogEntry, platform.PlatformVersionFromValue, apispec.AdmitPlatformAPIValue]
     information:
       fact: [authoritative platform law and registries]
       annotation: [descriptions and migration notes]
@@ -651,7 +651,7 @@ rows:
   - id: unreachable_retired_decoders
     ruled: mechanical-ratified
     paths: "package.entity_schema, events.<event>.payload_object, EventEmission, scalar_guard"
-    owners: [EntitySchema.UnmarshalYAML, EventPayloadSpec.UnmarshalYAML, EventEmission.UnmarshalYAML, GuardSpec.UnmarshalYAML]
+    owners: []
     information: {derived_projection: [legacy internal entity-schema projection], fact: [none on live authored surface]}
     spelling:
       canonical_candidate: no_live_authored_form
@@ -682,17 +682,17 @@ decoder_coverage:
     type.scalar_enum_named: [TypeCatalogDocument, ScalarTypeDecl, EnumTypeDecl, NamedTypeDecl]
     typed_field: [TypeFieldSpec, EntityFieldDecl]
     entity_document: [EntityContractsDocument, EntityContract]
-  workflow_contract_yaml_schema.go:
-    platform.pack_interface: [PackInterfaceDefinition, PackInterfaceOperation, PackInterfaceEvent, PackInterfaceField]
   enums.go:
     handler.collection_compute: [ComputeOperation]
-  internal/packs/channel.go:
-    pack.channel: [ChannelMapping]
 
 decoder_deleted:
   workflow_contract_yaml_schema.go:
     tool.schema_value: [ToolInputSchema]
     tool.schema_entry: [ToolSchemaEntry]
+    platform.pack_interface: [PackInterfaceDefinition, PackInterfaceOperation, PackInterfaceEvent, PackInterfaceField]
+    unreachable_retired_decoders: [EntitySchema, EventPayloadSpec]
+  internal/packs/channel.go:
+    pack.channel: [ChannelMapping]
   flowmodel/model.go:
     policy.module: [PolicyModule, PolicyModuleRuntime, PolicyModuleLimits]
     policy.value: [PolicyDocument, PolicyValue]
@@ -706,9 +706,7 @@ decoder_deleted:
   agentintent/model.go:
     agent.behavior: [Source]
 
-decoder_retired:
-  workflow_contract_yaml_schema.go:
-    unreachable_retired_decoders: [EntitySchema, EventPayloadSpec]
+decoder_retired: {}
 
 decoder_exclusions:
   internal/config/config.go:
@@ -719,23 +717,21 @@ decode_bypasses:
   # Direct roots count yaml.Unmarshal and yaml.NewDecoder calls repository-wide.
   # The canonical owner's root is classified but excluded from the off-owner ceiling.
   # CI compares each PR to the accepted base ledger, not just these initial ceilings.
-  node_site_ceiling: 92
-  off_owner_direct_decode_ceiling: 25
+  node_site_ceiling: 70
+  off_owner_direct_decode_ceiling: 24
   files:
     internal/cliapp/cli_output.go: {family: other_production_projection, node_sites: 0, direct_decode_roots: 1}
     internal/cliapp/test_command.go: {family: excluded_scenario_tooling, node_sites: 11, direct_decode_roots: 3}
     internal/cliapp/unified_config.go: {family: excluded_deployment_config, node_sites: 18, direct_decode_roots: 2}
     internal/config/config.go: {family: excluded_deployment_config, node_sites: 3, direct_decode_roots: 2}
-    internal/packs/channel.go: {family: closure_pack_platform, node_sites: 3, direct_decode_roots: 1}
     # #2486 removes the three runtime callers of the shared decoder. Its sole
     # surviving conformance-fixture root is explicitly #2487, not a new exemption.
     internal/providerconnectors/catalog_conformance.go: {family: excluded_test_tooling, node_sites: 0, direct_decode_roots: 1}
+    # Trigger BODY grammar remains #2487. Retain its original budget-family charge;
+    # #2486 changes only its admitted envelope handoff, not this excluded reader.
     internal/providertriggers/providertriggers.go: {family: closure_pack_platform, node_sites: 0, direct_decode_roots: 1}
     internal/runtime/contracts/enums.go: {family: wave_4_node_handler, node_sites: 1, direct_decode_roots: 0}
-    internal/runtime/contracts/platform_event_catalog.go: {family: closure_pack_platform, node_sites: 5, direct_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_types.go: {family: wave_5_agent_tool_policy, node_sites: 4, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_yaml.go: {family: mixed_wave_4_wave_5, node_sites: 4, direct_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_yaml_schema.go: {family: mixed_wave_4_wave_5, node_sites: 10, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_yaml_wave1.go: {family: mixed_existing_typed_admission, node_sites: 10, direct_decode_roots: 0}
     internal/runtime/scenarioderivation/declaration.go: {family: excluded_scenario_tooling, node_sites: 0, direct_decode_roots: 1}
     internal/runtime/testfixtures/canonicalrouting/fixture.go: {family: excluded_test_fixture, node_sites: 13, direct_decode_roots: 4}
@@ -746,10 +742,10 @@ decode_bypasses:
     internal/yamlsource/source.go: {family: canonical_owner, node_sites: 0, direct_decode_roots: 1}
 
 registry_result:
-  completeness: "all 18 remaining production custom unmarshallers classified as 14 bundle-reachable row owners, 2 retired unreachable decoders, and 2 deployment swarm.yaml exclusions; eight policy/rule readers deleted, off-owner yaml.Node sites and pack/config decode roots are separately ratcheted"
+  completeness: "all 11 remaining production custom unmarshallers classified as 9 bundle-reachable row owners and 2 deployment swarm.yaml exclusions; audited pack/platform roots and both retired decoders removed; trigger-body and conformance-fixture roots stay explicitly outside #2486 under #2487 without resetting their accepted-base charges"
   wave_1_status: closed
   wave_2_status: closed
-  later_wave_gate: "#2485 agents family complete; tools/shared schemas/module placement migrated under the approved family gate; #2303 semantic prerequisite and genuine policy/rules admission tail remain open, as do separately classified roots"
+  later_wave_gate: "W4/W5 and #2486 pack/platform typed-admission cuts implemented; execution proof and independent gate are required for closure. Trigger/scenario tooling remains #2487; publication #2322/#2376 and parent all-row proof #2287 remain separate."
 
 node_root_admission:
   issue: 2489

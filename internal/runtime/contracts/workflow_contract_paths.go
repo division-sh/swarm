@@ -136,7 +136,7 @@ func sortedContractKeys[T any](m map[string]T) []string {
 
 // loadYAMLFile is reserved for the platform-owned specification. Authored
 // source is decoded exclusively from AdmittedSourceArtifact snapshots.
-func loadYAMLFile(path string, target any) error {
+func loadYAMLFile(path string, target *PlatformSpecDocument) error {
 	source, err := yamlsource.LoadFile(path)
 	if err != nil {
 		if cause, ok := yamlsource.ParseCause(err); ok {
@@ -144,24 +144,9 @@ func loadYAMLFile(path string, target any) error {
 		}
 		return fmt.Errorf("read %s: %w", path, err)
 	}
-	var schemaChildren map[string]map[string]map[string]ToolInputSchema
-	if _, ok := target.(*PlatformSpecDocument); ok {
-		schemaChildren, err = admitPlatformInterfaceSchemaValues(source.Document(path).Root())
-		if err != nil {
-			return wrapLoaderDiagnosticFile(err, path)
-		}
-	}
-	if err := source.Decode(target); err != nil {
+	*target, err = AdmitPlatformSpecValue(source.Document(path).Root())
+	if err != nil {
 		return wrapLoaderDiagnosticFile(err, path)
-	}
-	if spec, ok := target.(*PlatformSpecDocument); ok {
-		for family, versions := range schemaChildren {
-			for version, schemas := range versions {
-				definition := spec.Interfaces[family][version]
-				definition.Schemas = schemas
-				spec.Interfaces[family][version] = definition
-			}
-		}
 	}
 	return nil
 }

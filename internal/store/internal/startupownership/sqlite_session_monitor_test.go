@@ -106,7 +106,8 @@ func proveSQLiteSessionCancellationPreservesPossessionUntilDurableRelease(t *tes
 		t.Fatal(err)
 	}
 	var spec runtimecontracts.PlatformSpecDocument
-	if err := source.Decode(&spec); err != nil {
+	spec, err = runtimecontracts.AdmitPlatformSpecValue(source.Document("platform-spec.yaml").Root())
+	if err != nil {
 		t.Fatal(err)
 	}
 	plans, err := platformschema.GeneratePlatformTableDDLs(spec)

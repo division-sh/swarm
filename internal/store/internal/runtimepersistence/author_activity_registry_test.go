@@ -25,7 +25,6 @@ import (
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
-	"gopkg.in/yaml.v3"
 	_ "modernc.org/sqlite"
 )
 
@@ -77,18 +76,14 @@ func TestAuthorActivityPlatformEventDispositionCoversSpecCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load platform spec: %v", err)
 	}
-	var document struct {
-		PlatformEvents struct {
-			Catalog map[string]yaml.Node `yaml:"catalog"`
-		} `yaml:"platform_events"`
-	}
-	if err := source.Decode(&document); err != nil {
+	document, err := runtimecontracts.AdmitPlatformSpecValue(source.Document("platform-spec.yaml").Root())
+	if err != nil {
 		t.Fatalf("decode platform event catalog: %v", err)
 	}
-	if len(document.PlatformEvents.Catalog) == 0 {
+	if len(runtimecontracts.PlatformEventCatalogNames(document)) == 0 {
 		t.Fatal("platform event catalog is empty")
 	}
-	for name := range document.PlatformEvents.Catalog {
+	for _, name := range runtimecontracts.PlatformEventCatalogNames(document) {
 		disposition, ok := storeactivityjournal.PlatformEventDisposition[name]
 		if !ok {
 			t.Errorf("platform event %q has no author activity disposition", name)
@@ -101,7 +96,7 @@ func TestAuthorActivityPlatformEventDispositionCoversSpecCatalog(t *testing.T) {
 		}
 	}
 	for name := range storeactivityjournal.PlatformEventDisposition {
-		if _, ok := document.PlatformEvents.Catalog[name]; !ok {
+		if !runtimecontracts.PlatformEventCatalogContains(document, name) {
 			t.Errorf("author activity disposition names non-catalog platform event %q", name)
 		}
 	}

@@ -1,7 +1,6 @@
 package contracts
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,7 +9,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	"gopkg.in/yaml.v3"
 )
 
 func TestEventSchemaRegistryFromCatalog_NormalizesAnnotatedFieldTypesWithoutInferringPresence(t *testing.T) {
@@ -116,19 +114,23 @@ func TestEventSchemaRegistryFromCatalog_ProjectsSchemaRefinements(t *testing.T) 
 }
 
 func TestPlatformEventCatalogUsesRequiredByDefaultTypedOmission(t *testing.T) {
-	var node yaml.Node
-	if err := decodeNodeTestYAML([]byte(`
-payload:
-  required_value: string
-  optional_value: string?
-  described_optional_value:
-    type: string?
-    description: Producer may omit it.
-`), &node); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
+	spec, err := ParsePlatformSpecDocument([]byte(`platform_events:
+  catalog:
+    sample:
+      payload:
+        required_value: string
+        optional_value: string?
+        described_optional_value:
+          type: string?
+          description: Producer may omit it.
+`), "platform-spec.yaml")
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	entry := platformEventEntryFromYAMLNode(*node.Content[0])
+	entry, _, ok := PlatformEventCatalogEntry(spec, "sample")
+	if !ok {
+		t.Fatal("missing admitted catalog entry")
+	}
 
 	if len(entry.Payload.Required) != 1 || entry.Payload.Required[0] != "required_value" {
 		t.Fatalf("Required = %#v, want only required_value", entry.Payload.Required)
@@ -136,20 +138,10 @@ payload:
 }
 
 func TestPlatformEventCatalogRejectsRetiredRequiredList(t *testing.T) {
-	var node yaml.Node
-	if err := decodeNodeTestYAML([]byte(`
-payload:
-  value: string
-required: [value]
-`), &node); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
+	_, err := ParsePlatformSpecDocument([]byte("platform_events:\n  catalog:\n    sample:\n      payload: {value: string}\n      required: [value]\n"), "platform-spec.yaml")
+	if err == nil || !strings.Contains(err.Error(), "required lists are retired") {
+		t.Fatalf("admission error = %v", err)
 	}
-	defer func() {
-		if recovered := recover(); recovered == nil || !strings.Contains(fmt.Sprint(recovered), "required lists are retired") {
-			t.Fatalf("panic = %v, want retired required-list diagnostic", recovered)
-		}
-	}()
-	_ = platformEventEntryFromYAMLNode(*node.Content[0])
 }
 
 func TestPlatformEventCatalogPreservesNestedFieldPresence(t *testing.T) {

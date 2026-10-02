@@ -268,9 +268,9 @@ func flowInputProducerFixture(t testing.TB, inputPin runtimecontracts.FlowInputE
 			CompositionConnects: connects,
 		},
 	}
-	bundle.Platform.PlatformEvents.Catalog = map[string]yaml.Node{
+	bundle.Platform = admittedCatalogTestSpec(t, map[string]yaml.Node{
 		"platform.runtime_log": {},
-	}
+	})
 	return withCompiledTestPins(t, Wrap(bundle), map[string][]runtimecontracts.FlowInputEventPin{"worker": {inputPin}}, map[string][]runtimecontracts.FlowOutputEventPin{"producer": {{Event: "work.requested"}}})
 }
 

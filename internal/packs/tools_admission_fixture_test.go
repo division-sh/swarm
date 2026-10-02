@@ -10,6 +10,10 @@ import (
 
 func unmarshalToolTestYAML(body []byte, target any) error {
 	switch out := target.(type) {
+	case *runtimecontracts.PlatformSpecDocument:
+		value, err := runtimecontracts.ParsePlatformSpecDocument(body, "platform-spec.yaml")
+		*out = value
+		return err
 	case *packs.ChannelManifest:
 		value, err := packs.ParseChannelManifest(body)
 		*out = value

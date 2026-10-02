@@ -148,7 +148,7 @@ func TestChannelSchemaYAMLAdmissionRejectsExplicitNullAtEveryBoundary(t *testing
 			t.Run(tc.name+"/"+form, func(t *testing.T) {
 				body := tc.body
 				if form == "alias" {
-					body = "null_anchor: &nil null\n" + strings.Replace(body, "enum: null", "enum: *nil", 1)
+					body = strings.Replace(body, "enum: null", "<<: &nil {enum: null}", 1)
 				}
 				err := tc.admit(t, []byte(body))
 				if err == nil || !strings.Contains(err.Error(), "enum") {
@@ -1561,7 +1561,8 @@ func loadChannelPlatformSpec(t *testing.T) runtimecontracts.PlatformSpecDocument
 		t.Fatalf("load platform spec: %v", err)
 	}
 	var spec runtimecontracts.PlatformSpecDocument
-	if err := snapshot.Decode(&spec); err != nil {
+	spec, err = runtimecontracts.AdmitPlatformSpecValue(snapshot.Document(filepath.Join(repo, "platform-spec.yaml")).Root())
+	if err != nil {
 		t.Fatalf("decode platform spec: %v", err)
 	}
 	return spec
