@@ -187,6 +187,25 @@ func TestCanonicalEventReadbackOverridesConflictingReceiptsBothStores(t *testing
 		if row["status"] != "failed" || row["retry_count"] != float64(1) {
 			t.Fatalf("detail receipt won through API: %#v", row)
 		}
+		payloadID := uuid.NewString()
+		payloadEvent := eventtest.ExistingRunRootIngress(payloadID, "payload.only", "runtime", "", []byte(fmt.Sprintf(`{"entity_id":%q}`, entityID)), 0, runID, events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
+		storetest.CommitSemanticEventWithRoutes(t, ctx, selected, payloadEvent, routes[:1], runtimepipelineobligation.ScopeSubscribed)
+		payloadOnly, err := selected.LoadOperatorEvent(ctx, payloadID)
+		if err != nil || payloadOnly.EntityID != "" || payloadOnly.Payload["entity_id"] != entityID {
+			t.Fatalf("payload promoted to authority: %#v, %v", payloadOnly, err)
+		}
+		byEntity, err := selected.ListOperatorEvents(ctx, operatorread.OperatorEventListOptions{Filter: operatorread.OperatorEventListFilter{EntityID: entityID}, Limit: 10})
+		if err != nil || len(byEntity.Events) != 1 || byEntity.Events[0].EventID != eventID {
+			t.Fatalf("payload invented entity filter match: %#v, %v", byEntity, err)
+		}
+		response = rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"payload","method":"event.get","params":{"event_id":%q}}`, payloadID))
+		if response.Error != nil {
+			t.Fatalf("payload API: %#v", response.Error)
+		}
+		payloadRead := asMap(t, response.Result)
+		if _, present := payloadRead["entity_id"]; present || asMap(t, payloadRead["payload"])["entity_id"] != entityID {
+			t.Fatalf("API payload promoted: %#v", payloadRead)
+		}
 		// A pair filter must match one delivery, not the cross product of rows.
 		for i, recipients := range [][]string{{"agent"}, {"node"}, {"node", "other-agent"}} {
 			id := uuid.NewString()
@@ -299,6 +318,23 @@ func TestRetiredDashboardObservabilityAssertionsThroughV1BothStores(t *testing.T
 		for i, log := range logs.Logs {
 			if log.DeliveryState != wantStates[i] || log.PreviousState != wantPrevious[i] || log.Reason != wantReasons[i] || log.Terminal != wantTerminal[i] || log.RetryCount != wantRetries[i] || log.EventID != fmt.Sprintf("evt-%d", 2-i) || log.AgentID != "agent-1" {
 				t.Fatalf("lifecycle %d: %#v", i, log)
+			}
+		}
+		response := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"lifecycle","method":"runtime.logs","params":{"component":"agent-manager","limit":10}}`)
+		if response.Error != nil {
+			t.Fatalf("lifecycle API: %#v", response.Error)
+		}
+		raw, err := json.Marshal(response.Result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var apiLogs operatorread.OperatorRuntimeLogListResult
+		if err := json.Unmarshal(raw, &apiLogs); err != nil || len(apiLogs.Logs) != 3 {
+			t.Fatalf("lifecycle API rows: %s, %v", raw, err)
+		}
+		for i, log := range apiLogs.Logs {
+			if log.DeliveryState != wantStates[i] || log.PreviousState != wantPrevious[i] || log.Reason != wantReasons[i] || log.Terminal != wantTerminal[i] || log.RetryCount != wantRetries[i] || log.EventID != fmt.Sprintf("evt-%d", 2-i) || log.AgentID != "agent-1" {
+				t.Fatalf("lifecycle API %d: %#v", i, log)
 			}
 		}
 	})
