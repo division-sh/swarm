@@ -62,6 +62,10 @@ func TestServedParityHarnessDerivedScenarioLifecycle(t *testing.T) {
 	servedparity.Run(t, servedparity.MustScenario(servedparity.ScenarioDerivedScenarioLifecycle), runServedDerivedScenarioBackendProof)
 }
 
+func TestServedParityHarnessAuthoredScenarioMaterializationLifecycle(t *testing.T) {
+	servedparity.Run(t, servedparity.MustScenario(servedparity.ScenarioDerivedScenarioLifecycle), func(t *testing.T, backend servedparity.Backend) { runServedDerivedScenarioProof(t, backend, true) })
+}
+
 func TestInternalLifecycleScenarioConsumesAdmittedSourceAcrossSupportedBackendsAndModes(t *testing.T) {
 	for _, backend := range []storebackend.Backend{storebackend.BackendSQLite, storebackend.BackendPostgres} {
 		for _, dev := range []bool{false, true} {
@@ -643,6 +647,10 @@ func requireSchemaOnlyProviderTriggerHasNoWebhookRoute(t *testing.T, serverURL s
 }
 
 func runServedDerivedScenarioBackendProof(t *testing.T, backend servedparity.Backend) {
+	runServedDerivedScenarioProof(t, backend, false)
+}
+
+func runServedDerivedScenarioProof(t *testing.T, backend servedparity.Backend, authored bool) {
 	t.Helper()
 	isolateCLIAPIConfigEnv(t)
 	unsetStoreSelectorEnv(t)
@@ -652,6 +660,63 @@ func runServedDerivedScenarioBackendProof(t *testing.T, backend servedparity.Bac
 	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
 	sourceRoot := canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput(t)
+	if authored {
+		writeWorkflowValidationFixtureFile(t, filepath.Join(sourceRoot, "tools.yaml"), `
+scenario.send:
+  description: Authored response materialization proof.
+  category: provider_connector
+  credentials: [scenario_mock_secret]
+  handler_type: http
+  effect_class: non_idempotent_write
+  http: {method: POST, url: https://example.invalid/send}
+  output_schema:
+    type: object
+    required: [marker]
+    properties: {marker: {type: string}}
+  response_success: {kind: http_status_2xx}
+`)
+		writeWorkflowValidationFixtureFile(t, filepath.Join(sourceRoot, "fulfillment", "nodes.yaml"), `
+complete-request:
+  execution_type: system_node
+  subscribes_to: [fulfillment.requested]
+  event_handlers:
+    fulfillment.requested:
+      activity: {id: send, tool: scenario.send, input: {}}
+response:
+  execution_type: system_node
+  subscribes_to: [send.succeeded]
+  event_handlers:
+    send.succeeded: {}
+`)
+		writeWorkflowValidationFixtureFile(t, filepath.Join(sourceRoot, "tests", "authored.yaml"), `
+name: authored-stage-profile
+seed: recorded
+vars: {marker: "${'${1 + 1}'}"}
+derive:
+  flow: .
+  input: fulfillment.requested
+  payload:
+    generate: true
+    set: {order_id: "${vars.marker}"}
+connector_responses: {scenario.send: "${{'marker': vars.marker}}"}
+expect: {events: [fulfillment.requested], no_dead_letters: true}
+`)
+		writeWorkflowValidationFixtureFile(t, filepath.Join(sourceRoot, "tests", "fixture.yaml"), "order_id: &marker \"${vars.marker}\"\n")
+		writeWorkflowValidationFixtureFile(t, filepath.Join(sourceRoot, "tests", "fixture.json"), `{"order_id":"${vars.marker}"}`)
+		writeWorkflowValidationFixtureFile(t, filepath.Join(sourceRoot, "tests", "fixtures-scenario.yaml"), `
+name: fixture materialization
+seed: recorded
+vars: {marker: "${'${1 + 1}'}"}
+steps:
+  - publish: fulfillment.requested
+    payload: {from: fixture.yaml}
+  - publish: fulfillment.requested
+    payload: {from: fixture.json}
+  - publish: fulfillment.requested
+    payload: "${{'order_id': vars.marker}}"
+expect: {events: [fulfillment.requested], no_dead_letters: true}
+`)
+	}
 
 	var db *sql.DB
 	var configPath string
@@ -746,22 +811,94 @@ func runServedDerivedScenarioBackendProof(t *testing.T, backend servedparity.Bac
 
 	var stdout, stderr bytes.Buffer
 	started := time.Now()
-	code := executeScenarioInOwnedLifecycle(t, repoRootForTest(), []string{
+	args := []string{
 		"test", sourceRoot, "--derive", ".", "--input", "fulfillment.requested",
 		"--config", configPath,
 		"--timeout", "20s", "--poll-interval", "25ms",
-	}, endpoint, &stdout, &stderr)
+	}
+	if authored {
+		args = []string{"test", sourceRoot, "tests/authored.yaml", "--config", configPath, "--timeout", "20s", "--poll-interval", "25ms"}
+	}
+	code := executeScenarioInOwnedLifecycle(t, repoRootForTest(), args, endpoint, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("%s derived scenario code=%d stdout=%s stderr=%s", backend, code, stdout.String(), stderr.String())
 	}
 	if elapsed := time.Since(started); elapsed >= 60*time.Second {
 		t.Fatalf("%s derived scenario took %s, want under 60s", backend, elapsed)
 	}
-	if !strings.Contains(stdout.String(), "scenario ok: derived:./fulfillment.requested") || strings.TrimSpace(stderr.String()) != "" {
+	wantOutput := "scenario ok: derived:./fulfillment.requested"
+	if authored {
+		wantOutput = "scenario ok: tests/authored.yaml"
+	}
+	if !strings.Contains(stdout.String(), wantOutput) || strings.TrimSpace(stderr.String()) != "" {
 		t.Fatalf("%s derived output stdout=%q stderr=%q", backend, stdout.String(), stderr.String())
 	}
 	requireExactScenarioExecutionProfile(t, db, backend, rt.EffectiveSourceIdentity)
 	beforeRestart := loadExactScenarioExecutionProfileRecord(t, db, backend)
+	if authored {
+		if beforeRestart.profileID != "authored-stage-profile" {
+			t.Fatalf("%s lost authored identity: %s", backend, beforeRestart.profileID)
+		}
+		profile, err := scenarioexecution.DecodeProfile(beforeRestart.raw, beforeRestart.profileDigest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		responses := profile.ConnectorResponses()
+		if len(responses) != 1 || responses[0].ToolID != "scenario.send" || string(responses[0].Response) != `{"marker":"${1 + 1}"}` {
+			t.Fatalf("%s persisted witness=%#v, want exact materialized response", backend, responses)
+		}
+		var trace map[string]any
+		requireServedJSONRPCResult(t, endpoint, "run.trace", map[string]any{"run_id": beforeRestart.runID}, &trace)
+		rows, _ := trace["trace"].([]any)
+		found := false
+		responseFound := false
+		for _, raw := range rows {
+			row, _ := raw.(map[string]any)
+			if row["event_name"] != "fulfillment.requested" && row["event_name"] != "fulfillment/send.succeeded" {
+				continue
+			}
+			var public operatorread.OperatorEventFull
+			requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": row["event_id"]}, &public)
+			payload := public.Payload
+			if row["event_name"] == "fulfillment.requested" {
+				if payload["order_id"] != "${1 + 1}" {
+					t.Fatalf("%s publication rescanned materialized data: %#v", backend, payload)
+				}
+				found = true
+			} else {
+				result, _ := payload["result"].(map[string]any)
+				if result["marker"] != "${1 + 1}" {
+					t.Fatalf("%s dispatch lost authored witness: %#v", backend, payload)
+				}
+				responseFound = true
+			}
+		}
+		if !found || !responseFound {
+			t.Fatalf("%s authored payload/response absent from public trace: %#v", backend, trace)
+		}
+		stdout.Reset()
+		stderr.Reset()
+		if code := executeScenarioInOwnedLifecycle(t, repoRootForTest(), []string{
+			"test", sourceRoot, "tests/fixtures-scenario.yaml", "--config", configPath, "--timeout", "20s", "--poll-interval", "25ms",
+		}, endpoint, &stdout, &stderr); code != 0 {
+			t.Fatalf("%s fixture command code=%d stdout=%s stderr=%s", backend, code, stdout.String(), stderr.String())
+		}
+		var listed struct {
+			Runs []operatorread.RunHeader `json:"runs"`
+		}
+		requireServedJSONRPCResult(t, endpoint, "run.list", map[string]any{"bundle_hash": bundleHash}, &listed)
+		fixtureRuns := 0
+		for _, run := range listed.Runs {
+			if run.RunID == beforeRestart.runID || run.Origin.EventType() != "fulfillment.requested" {
+				continue
+			}
+			requireServedScenarioFixtureReadback(t, endpoint, run.RunID)
+			fixtureRuns++
+		}
+		if fixtureRuns != 1 {
+			t.Fatalf("%s fixture runs=%d, want one", backend, fixtureRuns)
+		}
+	}
 	if _, err := os.Stat(credentialPath); !os.IsNotExist(err) {
 		t.Fatalf("%s zero-credential journey created credential store %s: %v", backend, credentialPath, err)
 	}
@@ -802,6 +939,33 @@ func runServedDerivedScenarioBackendProof(t *testing.T, backend servedparity.Bac
 	finalRecord := loadExactScenarioExecutionProfileRecord(t, db, backend)
 	if !bytes.Equal(beforeRestart.raw, finalRecord.raw) || beforeRestart.profileDigest != finalRecord.profileDigest || scenarioExecutionProfileCount(t, db, backend) != 1 {
 		t.Fatalf("%s restarted execution changed or duplicated durable scenario profile", backend)
+	}
+}
+
+func requireServedScenarioFixtureReadback(t *testing.T, endpoint, runID string) {
+	t.Helper()
+	var trace map[string]any
+	requireServedJSONRPCResult(t, endpoint, "run.trace", map[string]any{"run_id": runID}, &trace)
+	rows, _ := trace["trace"].([]any)
+	seen := map[string]bool{}
+	for _, raw := range rows {
+		row, _ := raw.(map[string]any)
+		if row["event_name"] != "fulfillment.requested" {
+			continue
+		}
+		eventID, _ := row["event_id"].(string)
+		if seen[eventID] {
+			continue
+		}
+		var event operatorread.OperatorEventFull
+		requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": eventID}, &event)
+		if event.Payload["order_id"] != "${1 + 1}" {
+			t.Fatalf("fixture/compound payload rescanned or not evaluated: %#v", event.Payload)
+		}
+		seen[eventID] = true
+	}
+	if len(seen) != 3 {
+		t.Fatalf("public readback has %d unique fixture/compound publications, want three: %#v", len(seen), trace)
 	}
 }
 
@@ -1455,7 +1619,6 @@ invalid:
     - name: invalid-item-id
       set:
         payload.item_id: [not, text]
-      expect: reject
 expect:
   events:
     include: [item.received, item.processed]

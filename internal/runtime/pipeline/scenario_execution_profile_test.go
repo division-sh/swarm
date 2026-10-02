@@ -12,6 +12,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/scenarioderivation"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
@@ -30,6 +31,67 @@ type scenarioProfileMapReader map[string]scenarioexecution.Profile
 func (r scenarioProfileMapReader) LoadScenarioExecutionProfile(_ context.Context, runID string) (scenarioexecution.Profile, bool, error) {
 	profile, ok := r[runID]
 	return profile, ok, nil
+}
+
+func TestAuthoredScenarioWitnessResponsePlanNeverRescansMaterializedData(t *testing.T) {
+	output, err := runtimecontracts.NewToolInputSchema(runtimecontracts.ToolSchemaObject,
+		runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+			"marker": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaString),
+		}), runtimecontracts.ToolSchemaRequired("marker"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool, err := runtimecontracts.NewToolSchemaEntry(
+		runtimecontracts.WithToolCategory("provider_connector"), runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
+		runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
+		runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.invalid/send"}),
+		runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), output),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"provider.send": tool}})
+	declaration, found, err := scenarioderivation.ParseDeclaration([]byte(`
+name: response-stage
+vars: {marker: "${'${1 + 1}'}"}
+derive: {flow: '.', input: request, payload: {generate: true}}
+connector_responses: {provider.send: "${{'marker': vars.marker}}"}
+`), "tests/response.yaml")
+	if err != nil || !found {
+		t.Fatalf("authored witness admission: %v %v", found, err)
+	}
+	fact, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("a", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := scenarioexecution.NewEffectiveSourceIdentity(fact, "sha256:"+strings.Repeat("b", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest, err := output.CanonicalHash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, err := scenarioexecution.NewProfile(identity, declaration.Name, []scenarioexecution.ConnectorResponse{{
+		ToolID: "provider.send", OutputSchemaDigest: digest, Response: declaration.ConnectorResponses["provider.send"],
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinator := &PipelineCoordinator{scenarioProfiles: scenarioProfileReaderStub{profile: profile}, effectiveSource: identity, executionPosture: executionposture.MockOnly}
+	plan, err := coordinator.mockResponsePlanForRun(context.Background(), "run-response", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := plan.Admit("provider.send", tool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := response.Materialize()
+	if err != nil || value.(map[string]any)["marker"] != "${1 + 1}" {
+		t.Fatalf("response plan rescanned authored result: %#v %v", value, err)
+	}
 }
 
 func TestScenarioExecutionProfileResolvesExactPlanAfterCoordinatorRestart(t *testing.T) {

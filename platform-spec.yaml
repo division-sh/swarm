@@ -23129,6 +23129,10 @@ test_specification:
         design notes, README text, and manual event-publish workflows are
         evidence only unless their exact semantics are promoted here.
       consumed_owners:
+        document_admission_and_preparation: internal/runtime/scenariodocument
+        lexical_source: internal/yamlsource
+        literal_values: internal/runtime/semanticvalue and internal/runtime/canonicaljson
+        execution_projection: internal/runtime/workflowexpr.ProjectSemanticValue and ProjectCELValue
         expressions: platform-spec.yaml#handler_specification.expression_context
         setup_pre_state: platform-spec.yaml#api_specification.method_catalog.test.setup_entities
         event_injection: platform-spec.yaml#cli_specification.command_catalog.event_publish and /v1/rpc event.publish
@@ -23238,12 +23242,25 @@ test_specification:
     scenario_document:
       format: YAML
       versioning: >
-        The v1 scenario format is the public initial format. A scenario file may
-        omit an explicit version while the runner is v1-only; once a future
-        incompatible format exists, a version field is required for that new
-        format and omitted version continues to mean v1.
+        The scenario format has one version and no authored version field. Every
+        `version` key rejects, regardless of its value, with teaching text:
+        "remove `version`; the scenario format has one version". A future format
+        change requires a separate semantic ruling, not a compatibility decoder.
+      admission_owner: >-
+        internal/runtime/scenariodocument admits one immutable source-aware document.
+        Discovery, explicit CLI selection and derived declaration loading consume
+        that owner; no second YAML grammar decoder exists. Recognized derived
+        documents must validate CLI-only fields structurally before profile selection.
+        Their assertions and setup fields never become profile identity or response data.
+      lexical_and_value_rules: >-
+        Consume yamlsource's one-document EOF, bounded alias/merge expansion and
+        effective duplicate refusal before projecting values. Object keys must be
+        exact text; grammar keys are the finite vocabulary, while literal keys retain
+        whitespace and exact identity. Retain source/introduction/resolved coordinates.
+        Semantic numeric tokens use canonicaljson admission before lexical evidence is
+        lost; do not round, remarshal, infer or independently decode them.
       top_level_fields:
-        name: Optional human-readable scenario name.
+        name: Optional text prose for ordinary scenarios; required nonempty text for authored derive profile identity.
         seed: Optional recorded deterministic seed string for generated helper values. When omitted, the empty seed is
           recorded by implication for v1.
         vars: Optional map of literal values or CEL expressions evaluated once before the first step.
@@ -23252,8 +23269,7 @@ test_specification:
         connector_responses: Optional exact mock connector response witnesses admitted only with derive under mock_only posture.
         steps: Required non-empty list of scenario actions unless derive is present; derive and steps are mutually exclusive.
         expect: Optional final assertion block evaluated after the final step reaches test quiescence.
-        invalid: Optional table of invalid fixture variants. Each case derives from a base fixture/action and expects a
-          specific reject/fail-closed outcome.
+        invalid: Optional table of invalid fixture variants proving typed pre-mutation payload-schema rejection from a valid base.
       literal_model: >
         Plain YAML scalars, arrays, and objects are literal data by default.
         A string of the exact form `${...}` is a CEL expression. No other
@@ -23261,6 +23277,18 @@ test_specification:
         authoritative.
       expression_model:
         evaluator: Existing CEL expression authority.
+        preparation_stages: >-
+          Evaluate each authored exact `${...}` node once per preparation, including
+          vars, inline values, admitted YAML/JSON fixture contents, ordinary set
+          overrides, authored derive overlays and connector witnesses. CLI and serve
+          use the same selected-root-relative scenario coordinate, name, seed and vars.
+          Existing workflowexpr.ProjectCELValue projects scalar, object, list and nested
+          CEL results with its numeric-kind rules. Results are materialized execution
+          data and never re-enter expression scanning or payload-control interpretation.
+          Repeating deterministic preparation from authored source is allowed; rescanning
+          its result is not. Direct/raw/compiled profile response producers already
+          provide data and are never globally treated as authored expressions.
+          Prepare all action/setup/assertion expression sites before acquiring a session.
         scenario_namespaces:
           vars: Scenario-local variables evaluated from the `vars` block.
           scenario: Deterministic helper namespace owned by this runner.
@@ -23288,6 +23316,14 @@ test_specification:
           set_overrides: >
             Payload may specify `set: {path: value}` to override fields after
             fixture load.
+        control_boundary: >-
+          A fixture plan contains only from and optional set. Set paths preserve the
+          existing payload-prefix/dotted-path rule but reject empty or overlapping
+          effective paths. Controls belong only to authored mappings; whole-object CEL
+          results and compiled payloads containing from or set keys are ordinary data.
+          Admit fixtures through the same lexical/value owner and evaluate their contents
+          in the scenario context before schema validation. Read only the admitted artifact,
+          including after source deletion; never reread host files.
         validation_rule: >
           The effective payload after `from` loading, `set` overrides, and CEL
           interpolation MUST be validated against the target event/action schema
@@ -23449,7 +23485,8 @@ test_specification:
       events:
         shorthand: A YAML list under `expect.events` means unordered subset/include matching within the current run.
         include: Unordered subset match. Every listed event must appear at least once.
-        exact: Unordered exact set of event names for the assertion window. Multiplicity must be specified explicitly if
+        exact: Unordered exact set of event names for the assertion window. An explicitly empty list asserts no events;
+          omission alone disables this assertion. Multiplicity must be specified explicitly if
           future runner syntax supports event counts.
         ordered: Ordered subsequence match by canonical event ordering; unrelated events may appear between matched events.
         window: Current scenario run from the first scenario-created event through final quiescence unless a future spec
@@ -23511,10 +23548,13 @@ test_specification:
           not infer absence from missing stderr text or delivery counts alone.
       invalid_variants:
         rule: >
-          Invalid variant cases execute from a base fixture/action plus
-          declared `set` overrides and assert fail-closed rejection categories.
-          A rejection that occurs after mutating state is not equivalent to a
-          pre-mutation validation rejection unless the expected category says so.
+          Prepare and validate a concrete base payload first. Each case applies its
+          materialized set overrides to that valid data and passes only when the
+          existing eventschema.Violation is produced before mutation. Unknown schema,
+          source/fixture failure, CEL failure, cancellation and infrastructure errors
+          fail the scenario; they never prove negative admission. Every authored
+          invalid.cases[].expect key rejects with teaching text to remove it, because
+          there is one typed outcome. No rejection categories or negative-action executor.
     catalog_convergence:
       decision: split_follow_up
       rule: >
@@ -23538,7 +23578,8 @@ test_specification:
       - Runs scenarios through public API/runtime owners, with no direct DB/EventBus/mailbox table mutation.
       - Adds setup/pre-state only through /v1/rpc test.setup_entities when a scenario needs deterministic seeded entities.
       - Proves at least one catalog-derived fixture and one Empire-style deterministic scenario with no live LLM credentials.
-      - Runs `go test ./...`.
+      - Runs default managed `go run ./cmd/swarm-test`, supported public SQLite/session and both-store profile lifecycle proofs,
+        focused repeated race controls, and required exact-head CI. Local --full is not required for the #2532 bounded repair.
       split_siblings:
       - '#1252 faithful scripted LLM backend / ProviderContract-backed fixture replay'
       - static verify/lint residue checks

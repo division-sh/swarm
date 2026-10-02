@@ -515,7 +515,7 @@ func TestSwarmTestCatalogCompanionsAreProtocolOnly(t *testing.T) {
 			if len(doc.Expect.Entities) > 1 {
 				t.Fatalf("scenario entity expectations = %#v, want at most one entity assertion", doc.Expect.Entities)
 			}
-			if len(doc.Expect.Entities) == 1 && !doc.Expect.Entities[0].hasDetailAssertion() {
+			if len(doc.Expect.Entities) == 1 && !doc.Expect.Entities[0].HasDetailAssertion() {
 				t.Fatalf("scenario entity expectations = %#v, want detail assertion", doc.Expect.Entities)
 			}
 			if fixture.RelativePath == "tests/tier4-cross-entity/test-create-entity" {
@@ -559,10 +559,10 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, sourceRoot string, do
 			currentState = strings.TrimSpace(state)
 		}
 		if entityExpect.FieldsSet {
-			fields = entityExpect.Fields
+			fields = entityExpect.Fields.(map[string]any)
 		}
 		if entityExpect.GatesSet {
-			gates = entityExpect.Gates
+			gates = entityExpect.Gates.(map[string]any)
 		}
 	}
 
@@ -1293,6 +1293,7 @@ steps:
     payload: {item_id: review}
   - mailbox.decide:
       match:
+        anchor_kind: stage_gate
         decision: launch_review
 `)
 	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
@@ -1325,8 +1326,8 @@ steps:
 	if code != scenarioTestExitValidation {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, scenarioTestExitValidation, stdout.String(), stderr.String())
 	}
-	assertScenarioTestMethods(t, calls, []string{"runtime.identity", eventPublishMethod, "run.diagnose"})
-	if !strings.Contains(stderr.String(), "mailbox.decide verdict is required") {
+	assertScenarioTestMethods(t, calls, nil)
+	if !strings.Contains(stderr.String(), "mailbox.decide.verdict is required") {
 		t.Fatalf("stderr = %q, want decide verdict validation failure", stderr.String())
 	}
 }
@@ -1374,11 +1375,11 @@ func TestScenarioEvaluatorSeedIsContractRelativeAndRecorded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("evaluator B: %v", err)
 	}
-	idA, err := evalA.evalExpression(`scenario.uuid("publish")`)
+	idA, err := evalA.EvaluateExpression(`scenario.uuid("publish")`)
 	if err != nil {
 		t.Fatalf("uuid A: %v", err)
 	}
-	idB, err := evalB.evalExpression(`scenario.uuid("publish")`)
+	idB, err := evalB.EvaluateExpression(`scenario.uuid("publish")`)
 	if err != nil {
 		t.Fatalf("uuid B: %v", err)
 	}
@@ -1571,7 +1572,6 @@ invalid:
     - name: invalid-item-id
       set:
         payload.item_id: [not, text]
-      expect: reject
 expect:
   events:
     include: [item.received, item.processed]

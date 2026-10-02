@@ -717,11 +717,10 @@ decode_bypasses:
   # Direct roots count yaml.Unmarshal and yaml.NewDecoder calls repository-wide.
   # The canonical owner's root is classified but excluded from the off-owner ceiling.
   # CI compares each PR to the accepted base ledger, not just these initial ceilings.
-  node_site_ceiling: 67
-  off_owner_direct_decode_ceiling: 24
+  node_site_ceiling: 56
+  off_owner_direct_decode_ceiling: 20
   files:
     internal/cliapp/cli_output.go: {family: other_production_projection, node_sites: 0, direct_decode_roots: 1}
-    internal/cliapp/test_command.go: {family: excluded_scenario_tooling, node_sites: 11, direct_decode_roots: 3}
     internal/cliapp/unified_config.go: {family: excluded_deployment_config, node_sites: 18, direct_decode_roots: 2}
     internal/config/config.go: {family: excluded_deployment_config, node_sites: 3, direct_decode_roots: 2}
     # #2486 removes the three runtime callers of the shared decoder. Its sole
@@ -733,7 +732,6 @@ decode_bypasses:
     internal/runtime/contracts/enums.go: {family: wave_4_node_handler, node_sites: 1, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_yaml.go: {family: mixed_wave_4_wave_5, node_sites: 2, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_yaml_wave1.go: {family: mixed_existing_typed_admission, node_sites: 9, direct_decode_roots: 0}
-    internal/runtime/scenarioderivation/declaration.go: {family: excluded_scenario_tooling, node_sites: 0, direct_decode_roots: 1}
     internal/runtime/testfixtures/canonicalrouting/fixture.go: {family: excluded_test_fixture, node_sites: 13, direct_decode_roots: 4}
     internal/testcatalog/inventory.go: {family: excluded_test_tooling, node_sites: 6, direct_decode_roots: 5}
     internal/testplanning/execution.go: {family: excluded_test_tooling, node_sites: 0, direct_decode_roots: 1}
@@ -745,7 +743,7 @@ registry_result:
   completeness: "all 11 remaining production custom unmarshallers classified as 9 bundle-reachable row owners and 2 deployment swarm.yaml exclusions; audited pack/platform roots and both retired decoders removed; trigger-body and conformance-fixture roots stay explicitly outside #2486 under #2487 without resetting their accepted-base charges"
   wave_1_status: closed
   wave_2_status: closed
-  later_wave_gate: "W4/W5 and #2486 pack/platform typed-admission cuts implemented; execution proof and independent gate are required for closure. Trigger/scenario tooling remains #2487; publication #2322/#2376 and parent all-row proof #2287 remain separate."
+  later_wave_gate: "W4/W5 and #2486 pack/platform typed-admission cuts implemented; execution proof and independent gate are required for closure. Public scenario admission consumes scenariodocument (#2532); trigger bodies remain #2533 and private execution remains #2143. Accepted #2487 census is historical; publication #2322/#2376 and parent all-row proof #2287 remain separate."
 
 node_root_admission:
   issue: 2489
