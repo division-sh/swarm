@@ -48,6 +48,7 @@ func admitPersistableEvent(event Event, options AdmissionOptions) (AdmittedEvent
 	case EventAdmissionRootIngress,
 		EventAdmissionOperatorInjected,
 		EventAdmissionChild,
+		EventAdmissionInstancePublication,
 		EventAdmissionReplay,
 		EventAdmissionSelectedForkReplay,
 		EventAdmissionInheritedFanOut,
@@ -147,7 +148,7 @@ func freshRunDisposition(event Event) (AdmittedRunDisposition, error) {
 		case rootIngressExistingRun:
 			return AdmittedRunRequireActive, nil
 		}
-	case EventAdmissionOperatorInjected, EventAdmissionChild, EventAdmissionReplay, EventAdmissionSelectedForkReplay, EventAdmissionInheritedFanOut:
+	case EventAdmissionOperatorInjected, EventAdmissionChild, EventAdmissionInstancePublication, EventAdmissionReplay, EventAdmissionSelectedForkReplay, EventAdmissionInheritedFanOut:
 		return AdmittedRunRequireActive, nil
 	case EventAdmissionRuntimeControl, EventAdmissionRuntimeDiagnostic:
 		switch event.runtimeIntent {
