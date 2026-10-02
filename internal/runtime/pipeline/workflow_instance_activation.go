@@ -47,6 +47,7 @@ type FlowInstanceActivationRequest struct {
 	TriggerEvent                  events.Event
 	OccurredAt                    time.Time
 	StandingGenerationReplacement bool
+	ScenarioSeed                  *ScenarioSetupEntityRequest
 }
 
 func (r FlowInstanceActivationRequest) ConstructorPayload() (map[string]any, error) {

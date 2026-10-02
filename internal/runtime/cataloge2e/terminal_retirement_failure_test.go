@@ -28,7 +28,7 @@ func TestTerminalMiddleMemberFailureRetainsSuffixBothStores(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			h := newRuntimeHarnessForBackend(t, selectedForkReadinessCatalogFixture(t, 3, "agent"), backend, true)
 			path := "worker-flow/worker-001"
-			entity := materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path)
+			entity := materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path, "worker.ready.requested")
 			unrelatedPath := "worker-flow/worker-002"
 			ctx := catalogRunContext(h, catalogRuntimeRunID)
 			unrelatedEntity := uuid.NewString()
@@ -157,7 +157,7 @@ func proveDirectTerminalCommitUnwind(t *testing.T, mode string) {
 		t.Run(string(backend), func(t *testing.T) {
 			h := newRuntimeHarnessForBackend(t, selectedForkReadinessCatalogFixture(t, 2, "agent"), backend, true)
 			path := "worker-flow/worker-001"
-			entity := materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path)
+			entity := materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path, "worker.ready.requested")
 			ctx := catalogRunContext(h, catalogRuntimeRunID)
 			configs := h.rt.Manager.ListAgentConfigs()
 			callerCtx, cancel := context.WithCancel(ctx)

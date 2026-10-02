@@ -68,7 +68,12 @@ func TestFlowConstructorProofPartitionRequiresBothStores(t *testing.T) {
 		}
 	}
 	for id, proofs := range map[string]map[string][]string{
+		"store-runtime-full-02": {
+			"TestDeploymentConstructionNativeCommitBothStores": {"sqlite/rollback_before_ack", "sqlite/commit_before_lost_ack", "postgres/rollback_before_ack", "postgres/commit_before_lost_ack"},
+		},
 		"store-runtime-full-06": {
+			"TestScenarioConstructionNativeCommitBothStores":   {"sqlite/rollback_before_ack", "sqlite/commit_before_lost_ack", "postgres/rollback_before_ack", "postgres/commit_before_lost_ack"},
+			"TestScenarioConstructionFieldlessStateBothStores": {"sqlite", "postgres"},
 			"TestSelectedContractOrdinarySourceStatePresenceBothStores": {
 				"sqlite/absent", "sqlite/zero", "sqlite/fieldless", "sqlite/missing", "sqlite/corrupt", "sqlite/wrong-header-flow", "sqlite/wrong-header-type", "sqlite/loop",
 				"postgres/absent", "postgres/zero", "postgres/fieldless", "postgres/missing", "postgres/corrupt", "postgres/wrong-header-flow", "postgres/wrong-header-type", "postgres/loop",

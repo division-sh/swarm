@@ -14,8 +14,10 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -47,22 +49,100 @@ func (s *publicationAcknowledgementProbeStore) ListSelectedRunTargetOwnersForSco
 
 type deploymentRunStartProbeStore struct {
 	InMemoryEventStore
-	calls int
-	got   durabledata.RunCreationCommand
+	calls        int
+	got          durabledata.RunCreationCommand
+	root         runtimepipeline.FlowInstanceActivationPlan
+	acknowledged bool
+	replay       bool
+	fault        error
+	cancel       context.CancelFunc
 }
 
-func (s *deploymentRunStartProbeStore) CommitDeploymentRunCreation(_ context.Context, command durabledata.RunCreationCommand, _ apiidempotency.Request) (durabledata.RunCreationOperationRecord, error) {
+func (s *deploymentRunStartProbeStore) CommitDeploymentRunCreation(_ context.Context, command DeploymentRunCreationCommand) (CommittedDeploymentRunCreation, error) {
 	s.calls++
-	s.got = command
-	return durabledata.RunCreationOperationRecord{Summary: durabledata.RunCreationOperationSummary{RunID: command.RunID}}, nil
+	s.got, s.root = command.RunCreation, command.Root.Plan
+	result := CommittedDeploymentRunCreation{Record: durabledata.RunCreationOperationRecord{Summary: durabledata.RunCreationOperationSummary{RunID: command.RunCreation.RunID}}, Acknowledged: s.acknowledged, Replay: s.replay}
+	if !s.replay {
+		result.Activations = []runtimepipeline.CommittedFlowInstanceActivation{{Plan: command.Root.Plan, Created: true, ReadinessAttemptOrdinal: 1, Acknowledged: s.acknowledged}}
+	}
+	if s.cancel != nil {
+		s.cancel()
+	}
+	return result, s.fault
+}
+
+func TestDeploymentRunStartDispatchesOnlyAcknowledgedConstruction(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		acknowledged bool
+		replay       bool
+		cancel       bool
+		wantCalls    int
+	}{
+		{"unknown-commit", false, false, false, 0},
+		{"acknowledged-cleanup-error", true, false, false, 1},
+		{"acknowledged-cancellation", true, false, true, 1},
+		{"permanent-receipt-replay", true, true, false, 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fault := errors.New("deployment post-commit diagnostic")
+			store := &deploymentRunStartProbeStore{acknowledged: test.acknowledged, replay: test.replay, fault: fault}
+			source, _ := acknowledgedRootInputEndpoint(t)
+			bundle, _ := semanticview.Bundle(source)
+			bundle.Semantics.Version = "1"
+			var calls int
+			finalizer := runtimepipeline.CommittedFlowInstanceActivationFinalizerFunc(func(ctx context.Context, activation runtimepipeline.CommittedFlowInstanceActivation) error {
+				calls++
+				if !activation.Acknowledged || correlation.RunIDFromContext(ctx) != activation.Plan.Readiness.RunID {
+					t.Fatalf("finalizer lost exact acknowledged run authority: %+v", activation)
+				}
+				if test.cancel && ctx.Err() == nil {
+					t.Fatal("finalizer concealed cancellation")
+				}
+				return ctx.Err()
+			})
+			bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, TemplateInstancePlanner: newTestFlowInstanceActivationOwner(nil), FlowActivationFinalizer: finalizer})
+			if err != nil {
+				t.Fatal(err)
+			}
+			bus.routeTable, err = DeriveRouteTable(source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			bus.durable.ActiveFlows = &topologyOperationDescriptors{}
+			ref, err := durabledata.ParseDeclarationRef(".", "records.loaded")
+			if err != nil {
+				t.Fatal(err)
+			}
+			command := durabledata.RunCreationCommand{RunID: uuid.NewString(), Actor: "operator", BundleHash: authorActivityTestSourceArtifactFact.BundleHash(), Data: durabledata.RunCreationDataEnvelope{Pins: []durabledata.ExplicitPin{{Declaration: ref, VersionID: "resource-version-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}}}
+			ctx, cancel := context.WithCancel(testAuthorActivityContext(context.Background()))
+			defer cancel()
+			if test.cancel {
+				store.cancel = cancel
+			}
+			got, err := bus.StartDeploymentRunAcknowledged(ctx, command, apiidempotency.Request{Method: "run.start"})
+			if !errors.Is(err, fault) || got.Summary.RunID != command.RunID || calls != test.wantCalls || store.calls != 1 {
+				t.Fatalf("commit evidence: result=%+v err=%v finalizations=%d commits=%d", got, err, calls, store.calls)
+			}
+		})
+	}
 }
 
 func TestDeploymentRunStartForwardsOnlyExactEventlessFeed(t *testing.T) {
-	store := &deploymentRunStartProbeStore{}
-	bus, err := newScopedTestEventBus(store)
+	store := &deploymentRunStartProbeStore{acknowledged: true}
+	source, _ := acknowledgedRootInputEndpoint(t)
+	bundle, _ := semanticview.Bundle(source)
+	bundle.Semantics.Version = "1"
+	planner := newTestFlowInstanceActivationOwner(nil)
+	bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, TemplateInstancePlanner: planner})
 	if err != nil {
 		t.Fatal(err)
 	}
+	bus.routeTable, err = DeriveRouteTable(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bus.durable.ActiveFlows = &topologyOperationDescriptors{}
 	ref, err := durabledata.ParseDeclarationRef(".", "records.loaded")
 	if err != nil {
 		t.Fatal(err)
@@ -78,6 +158,9 @@ func TestDeploymentRunStartForwardsOnlyExactEventlessFeed(t *testing.T) {
 	got, err := bus.StartDeploymentRunAcknowledged(ctx, command, request)
 	if err != nil || got.Summary.RunID != command.RunID || store.calls != 1 || store.got.EventID != "" || len(store.got.InitialEvent) != 0 {
 		t.Fatalf("deployment forward = %#v, %v; calls=%d command=%#v", got, err, store.calls, store.got)
+	}
+	if store.root.Readiness.RunID != command.RunID || store.root.Identity.InstancePath != command.RunID || store.root.CreatingInput != (runtimepipeline.FlowConstructionInput{}) {
+		t.Fatalf("feed-only root was not prepared under its exact no-argument owner: %+v", store.root)
 	}
 	hostile := command
 	hostile.BundleHash = "bundle-v2:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"

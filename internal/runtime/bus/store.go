@@ -48,9 +48,22 @@ type APIEventPublicationCommitOwner interface {
 }
 
 // DeploymentRunCreationCommitOwner commits an eventless run and its selected
-// feeds without passing a transaction or synthetic publication through runtime.
+// feeds and constructed root tree without a synthetic publication.
 type DeploymentRunCreationCommitOwner interface {
-	CommitDeploymentRunCreation(context.Context, durabledata.RunCreationCommand, apiidempotency.Request) (durabledata.RunCreationOperationRecord, error)
+	CommitDeploymentRunCreation(context.Context, DeploymentRunCreationCommand) (CommittedDeploymentRunCreation, error)
+}
+
+type DeploymentRunCreationCommand struct {
+	RunCreation durabledata.RunCreationCommand
+	Idempotency apiidempotency.Request
+	Root        FlowInstanceActivationCommand
+}
+
+type CommittedDeploymentRunCreation struct {
+	Record       durabledata.RunCreationOperationRecord
+	Activations  []runtimepipeline.CommittedFlowInstanceActivation
+	Acknowledged bool
+	Replay       bool
 }
 
 type APIEventPublicationCommand struct {

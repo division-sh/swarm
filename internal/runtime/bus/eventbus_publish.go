@@ -23,6 +23,7 @@ import (
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -276,7 +277,35 @@ func (eb *EventBus) StartDeploymentRunAcknowledged(
 	if !ok || owner == nil {
 		return durabledata.RunCreationOperationRecord{}, errors.New("selected store does not support atomic deployment run creation")
 	}
-	return owner.CommitDeploymentRunCreation(ctx, canonical, request)
+	if eb.templateInstancePlanner == nil || eb.flowActivationFinalizer == nil {
+		return durabledata.RunCreationOperationRecord{}, errors.New("deployment run start requires canonical root construction and attachment owners")
+	}
+	mode := eb.executionPosture.RootMode()
+	if err := eb.executionPosture.Admit(mode, "deployment root construction"); err != nil {
+		return durabledata.RunCreationOperationRecord{}, err
+	}
+	if existing, found := runtimeeffects.ExecutionModeFromContext(ctx); found && existing != mode {
+		return durabledata.RunCreationOperationRecord{}, errors.New("deployment root construction execution mode contradicts its runtime owner")
+	}
+	ctx = runtimeeffects.WithExecutionMode(ctx, mode)
+	ctx = runtimecorrelation.WithRunID(ctx, canonical.RunID)
+	root, err := eb.templateInstancePlanner.PrepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{
+		Context: events.DeliveryContextFromContext(ctx), ContractBundle: eb.semanticSource,
+		Instance:   runtimeflowidentity.Stored(eb.semanticSource, semanticview.RootExecutionFlowID(eb.semanticSource), canonical.RunID, canonical.RunID, "", ""),
+		OccurredAt: time.Now().UTC(),
+	})
+	if err != nil {
+		return durabledata.RunCreationOperationRecord{}, fmt.Errorf("prepare deployment root construction: %w", err)
+	}
+	topology, err := eb.prepareFlowInstanceActivationRouteTopology(ctx, []runtimepipeline.FlowInstanceActivationPlan{root})
+	if err != nil {
+		return durabledata.RunCreationOperationRecord{}, err
+	}
+	committed, commitErr := owner.CommitDeploymentRunCreation(ctx, DeploymentRunCreationCommand{RunCreation: canonical, Idempotency: request, Root: FlowInstanceActivationCommand{Plan: root, RouteTopology: topology}})
+	if !committed.Acknowledged {
+		return committed.Record, errors.Join(commitErr, errors.New("deployment run creation commit was not acknowledged"))
+	}
+	return committed.Record, errors.Join(commitErr, eb.finalizeCommittedFlowInstanceActivations(ctx, committed.Activations))
 }
 
 // PublishAPIEventWithRunCreationAcknowledged adds the method-neutral durable

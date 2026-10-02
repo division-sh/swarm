@@ -237,9 +237,12 @@ func testSetupHandler(t *testing.T, pg *store.PostgresStore, source semanticview
 		Entities:    pg,
 		TestSetup:   pg,
 		Idempotency: pg,
-		Events: bundleScopedFailingEventPublisher{
-			failingRunStartPublisher: failingRunStartPublisher{err: errors.New("unexpected test setup event publish")},
-			fact:                     fact,
+		Events: scenarioSetupImportPublisher{
+			bundleScopedFailingEventPublisher: bundleScopedFailingEventPublisher{
+				failingRunStartPublisher: failingRunStartPublisher{err: errors.New("unexpected test setup event publish")},
+				fact:                     fact,
+			},
+			TestSetupStore: pg,
 		},
 		Source:           source,
 		RunBundleContext: pg,

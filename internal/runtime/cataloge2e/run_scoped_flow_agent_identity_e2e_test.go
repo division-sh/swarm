@@ -417,14 +417,14 @@ func seedCatalogRootStateForRun(t testing.TB, h *runtimeHarness, runID string) {
 	}
 }
 
-func materializeCatalogSelectedForkSourceFlow(t testing.TB, h *runtimeHarness, runID, flowPath string) string {
+func materializeCatalogSelectedForkSourceFlow(t testing.TB, h *runtimeHarness, runID, flowPath, constructorInput string) string {
 	t.Helper()
 	entityID := eventtest.UUID("run-scoped-selected-fork-worker")
 	at := time.Now().UTC()
 	ctx := worklifetime.WithOccurrence(catalogRunContext(h, runID), h.rt.WorkOccurrence())
 	ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
 	trigger := eventtest.ExistingRunRootIngress(
-		uuid.NewString(), "worker.ready", "cataloge2e", "", []byte(`{"worker_id":"worker-001"}`), 0, runID,
+		uuid.NewString(), events.EventType(constructorInput), "cataloge2e", "", []byte(`{"worker_id":"worker-001"}`), 0, runID,
 		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), at,
 	)
 	if err := h.rt.Manager.ActivateFlowInstance(ctx, runtimepipeline.FlowInstanceActivationRequest{
@@ -433,7 +433,7 @@ func materializeCatalogSelectedForkSourceFlow(t testing.TB, h *runtimeHarness, r
 			semanticview.Wrap(h.bundle), "worker-flow", flowPath, "worker-001", entityID, "",
 		),
 		Config:           map[string]any{"worker_id": "worker-001"},
-		ConstructorInput: "worker.ready", ResolvedKey: "worker-001",
+		ConstructorInput: constructorInput, ResolvedKey: "worker-001",
 		TriggerEvent: trigger,
 		OccurredAt:   at,
 	}); err != nil {

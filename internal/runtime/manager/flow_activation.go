@@ -332,6 +332,36 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 		OccurredAt:                    occurredAt,
 		StandingGenerationReplacement: req.StandingGenerationReplacement,
 	}
+	if seed := req.ScenarioSeed; seed != nil {
+		primary, err := bundle.ResolveTestSetupPrimaryEntity(templateID, seed.EntityType)
+		if err != nil {
+			return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
+		}
+		if req.ConstructorInput != "" || req.TriggerEvent.ID() != "" || !schema.Instance.Empty() ||
+			seed.EntityID != plan.Instance.EntityID || seed.EntityType != primary.EntityType ||
+			(seed.FlowInstance != "" && seed.FlowInstance != plan.Instance.StorageRef) {
+			return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("scenario construction requires exact no-argument target and field contract")
+		}
+		if _, err := graph.ResolveStage(seed.CurrentState); err != nil {
+			return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
+		}
+		fields := make(map[string]any, len(seed.Fields))
+		for field, value := range seed.Fields {
+			normalized, err := entityruntime.NormalizeFieldValue(entityContract, field, value)
+			if err != nil {
+				return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
+			}
+			fields[field] = normalized
+		}
+		// Explicit scenario import is applied before A's entry planning. It does
+		// not supply constructor eligibility or create a business occurrence.
+		plan.Instance.Fields = fields
+		plan.Instance.CurrentState = seed.CurrentState
+		plan.Instance.Gates = make(map[string]bool, len(seed.Gates))
+		for gate, value := range seed.Gates {
+			plan.Instance.Gates[gate] = value
+		}
+	}
 	ctx = runtimeeffects.WithExecutionMode(ctx, mode)
 	flowOwner, err := runtimeflowidentity.NewRunScopedFlowInstance(autoEmitRunID, instance.Route())
 	if err != nil {

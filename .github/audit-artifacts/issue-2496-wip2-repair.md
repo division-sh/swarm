@@ -224,3 +224,53 @@ production admission change. The aggregate later reached Go's unchanged
 ten-minute limit in a timer leaf that had run less than a second, not a ten-minute
 case deadlock. Smaller managed root groups retain race/count3 and every original
 case deadline; this aggregate receives no completed matrix credit.
+
+## Eventless Producer Handoff And Qualification Fixtures
+
+The Gate E producer accounting (5916752092, C07/C09/C20 and P19/P55/P59)
+also covers feed-only run.start and public scenario import-to-execution.
+Both now prepare the no-argument root under its exact selected run, commit
+the complete eligible tree and route topology in the creating transaction,
+and dispatch every acknowledged lifecycle/attachment result. No creating
+business event, ordinary-handler construction, or implicit import permission.
+Scenario setup applies explicit validated stage/fields/gates only after
+independent constructor admission, before A's entry planning. The constructor
+persists that root; a second field-only insert no longer rejects its canonical
+bookkeeping. Other imported rows remain non-executable. The public API resolves
+the exact selected runtime owner; the old raw Setup option is retired.
+The new role is injected by selected-store composition, not discovered by the bus.
+
+Development receipts (dirty source; not final-head qualification):
+- Root scenario CLI, eight semantic numeric modes, API setup controls and native
+  scenario import/transaction matrix: managed PASS, apiv1 4.863s, serveapp
+  10.349s, runtimepersistence 3.857s. Both stores; no skips. The served scenario
+  controls use a retained internal MockOnly lifecycle with public RPC, not a
+  public private-launcher or paid-provider qualification.
+- Native deployment creation COMMIT-loss/rollback, exact receipt reconciliation
+  and no synthetic event: managed PASS 2.450s, both stores. Native scenario matrix
+  includes cancellation, seed disagreement before mutation and exact replay.
+- Bus acknowledged/unknown/cancelled/field-only controls: race/count3 PASS 1.062s.
+- Corrected catalog concurrent root, query group-by, immutable duplicate outcome
+  and static invocation checks: managed PASS 60.309s. Concurrent positive setup
+  constructs the root before racing input; query declares a presence filter for
+  the sparse root field. The duplicate oracle waits for its existing terminal
+  boundary, keeping its full immutable snapshot assertion and original deadline.
+
+Earlier reds remain: native scenario compilation refusal, followed by both-store
+  duplicate-root bookkeeping refusal; public root setup RED on the same source.
+  The corrected transaction owns the root once rather than weakening validation.
+Native physical faults supplement, not replace, public constructor qualification.
+
+The static invocation golden now consumes the canonically admitted artifact hash
+and its two bundle-scoped static IDs; content bytes are unchanged. The node-ID
+golden change is not merely formatting: the barrier's obsolete duplicated derived
+transitions are removed and its canonical collector transition now contains the
+declared join rather than a copied emit. All 25 node identities, raw handlers,
+connects, event owners and other corpus projections are unchanged; ordered barrier
+execution remains a separate mandatory proof. No arbitrary golden acceptance.
+
+The exact persistence-authority census adds the named setup command/typed facade
+and migrated native transaction operations (26 changed findings, five existing
+bounded owners). Proof-plan backend/cut requirements cover both native producers.
+Full frozen-head managed qualification, affected race supplements and CI remain
+pending. No failure-class closure or final review request is made here.

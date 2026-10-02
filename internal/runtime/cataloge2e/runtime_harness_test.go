@@ -23,6 +23,8 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/core/paths"
+	"github.com/division-sh/swarm/internal/runtime/core/values"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -876,6 +878,14 @@ func (h *runtimeHarness) publishConcurrentAndWait(steps []catalogTriggerStep, ti
 	}
 	ctx, cancel := context.WithTimeout(h.ctx, timeout)
 	defer cancel()
+	constructionCtx := runtimeeffects.WithExecutionMode(worklifetime.WithOccurrence(ctx, h.rt.WorkOccurrence()), executionmode.Live)
+	if _, err := h.rt.Manager.EnsureFlowInstance(constructionCtx, runtimepipeline.FlowInstanceActivationRequest{
+		ContractBundle: semanticview.Wrap(h.bundle),
+		Instance:       runtimeflowidentity.Stored(semanticview.Wrap(h.bundle), ".", catalogRuntimeRunID, catalogRuntimeRunID, "", ""),
+		OccurredAt:     h.startedAt,
+	}); err != nil {
+		h.t.Fatalf("construct catalog root before concurrent input: %v", err)
+	}
 
 	type publishItem struct {
 		step catalogTriggerStep
@@ -923,7 +933,7 @@ func (h *runtimeHarness) publishConcurrentAndWait(steps []catalogTriggerStep, ti
 			events.EventType(strings.TrimSpace(step.Event)),
 			sourceAgent, "", raw, 0, catalogRuntimeRunID, eventEnvelope, createdAt)
 		if hasTarget {
-			h.ensureTargetFlowInstance(targetRoute, evt)
+			h.ensureTargetFlowInstance(targetRoute, evt, payload)
 		}
 		if preview, ok := h.previewHandlerOutcome(evt); ok {
 			h.mu.Lock()
@@ -1387,7 +1397,7 @@ func (h *runtimeHarness) seedInitialState(entityID string) {
 	}
 }
 
-func (h *runtimeHarness) ensureTargetFlowInstance(target events.RouteIdentity, trigger events.Event) {
+func (h *runtimeHarness) ensureTargetFlowInstance(target events.RouteIdentity, trigger events.Event, payload map[string]any) {
 	h.t.Helper()
 	if h == nil || h.rt == nil || h.rt.Manager == nil || h.bundle == nil {
 		h.t.Fatal("catalog target activation requires the runtime manager and contract bundle")
@@ -1398,8 +1408,19 @@ func (h *runtimeHarness) ensureTargetFlowInstance(target events.RouteIdentity, t
 	}
 	route := runtimeflowidentity.RouteForInstancePath(target.FlowInstance)
 	config := map[string]any{}
+	constructorInput := ""
+	var resolvedKey any
 	if schema, ok := h.bundle.FlowSchemaByID(target.FlowID); ok && !schema.Instance.Empty() {
-		config[schema.Instance.Path()] = route.InstanceID
+		pin, found := h.bundle.FlowInputEventPin(target.FlowID, string(trigger.Type()))
+		if !found {
+			h.t.Fatalf("catalog target %s has no constructor input %s", target.FlowID, trigger.Type())
+		}
+		constructorInput = pin.EventType()
+		resolvedKey, found = values.Wrap(payload).Lookup(paths.Parse(schema.Instance.Path()))
+		if !found {
+			h.t.Fatalf("catalog constructor input %s has no resolved key %s", constructorInput, schema.Instance.Path())
+		}
+		config[schema.Instance.Path()] = resolvedKey
 	}
 	ctx := worklifetime.WithOccurrence(h.ctx, h.rt.WorkOccurrence())
 	ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
@@ -1413,9 +1434,11 @@ func (h *runtimeHarness) ensureTargetFlowInstance(target events.RouteIdentity, t
 			target.EntityID,
 			"",
 		),
-		Config:       config,
-		TriggerEvent: trigger,
-		OccurredAt:   trigger.CreatedAt(),
+		Config:           config,
+		ConstructorInput: constructorInput,
+		ResolvedKey:      resolvedKey,
+		TriggerEvent:     trigger,
+		OccurredAt:       trigger.CreatedAt(),
 	})
 	if err != nil {
 		h.t.Fatalf("activate catalog target owner %s/%s: %v", target.FlowInstance, target.EntityID, err)

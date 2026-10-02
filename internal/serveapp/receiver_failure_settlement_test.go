@@ -69,9 +69,9 @@ func TestReceiverCompositionFailureSettlementBothStores(t *testing.T) {
 			if err := rt.DB.QueryRow(`SELECT CAST(fields AS TEXT) FROM entity_state WHERE run_id=$1 AND entity_id=$2`, seed.RunID, owner.Route().EntityID).Scan(&beforeFields); err != nil {
 				t.Fatal(err)
 			}
-			// Fault injection, not a producer fixture: invalidate an already-admitted
-			// receiving state after publication, without altering its ownership stamp.
-			result, err := rt.DB.Exec(`UPDATE entity_state SET current_state='done' WHERE run_id=$1 AND entity_id=$2`, seed.RunID, owner.Route().EntityID)
+			// Progress belongs to the constructed header, not its field companion.
+			// Fault injection preserves the already-admitted ownership stamp.
+			result, err := rt.DB.Exec(`UPDATE flow_instances SET current_state='done' WHERE run_id=$1 AND entity_id=$2`, seed.RunID, owner.Route().EntityID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -99,6 +99,10 @@ func TestReceiverCompositionFailureSettlementBothStores(t *testing.T) {
 			}
 			if beforeFields != afterFields {
 				t.Fatalf("rejected receiver mutated business fields: %s -> %s", beforeFields, afterFields)
+			}
+			var afterState string
+			if err := rt.DB.QueryRow(`SELECT current_state FROM flow_instances WHERE run_id=$1 AND entity_id=$2`, seed.RunID, owner.Route().EntityID).Scan(&afterState); err != nil || afterState != "done" {
+				t.Fatalf("rejected receiver changed canonical progress: state=%q err=%v", afterState, err)
 			}
 			if err := rt.DB.QueryRow(`SELECT CAST(delivery_target_route AS TEXT) FROM event_deliveries WHERE delivery_id=$1`, claim.DeliveryID()).Scan(&afterTarget); err != nil {
 				t.Fatal(err)

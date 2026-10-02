@@ -865,6 +865,7 @@ units:
       TestFlowAttachmentAgentAcquisitionCutsBothStores: [sqlite, postgres]
       TestFlowAttachmentRouteAcquisitionCutsBothStores: [sqlite, postgres]
       TestFlowAttachmentNativeCommitAcknowledgmentBothStores: [sqlite, postgres]
+      TestDeploymentConstructionNativeCommitBothStores: [sqlite/rollback_before_ack, sqlite/commit_before_lost_ack, postgres/rollback_before_ack, postgres/commit_before_lost_ack]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
@@ -947,6 +948,8 @@ units:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
     run: ^Test[S-Z].*$
     required_children:
+      TestScenarioConstructionNativeCommitBothStores: [sqlite/rollback_before_ack, sqlite/commit_before_lost_ack, postgres/rollback_before_ack, postgres/commit_before_lost_ack]
+      TestScenarioConstructionFieldlessStateBothStores: [sqlite, postgres]
       TestStandingPreparationVerifiesCompleteRootTreeBothStores: [sqlite/intact, sqlite/missing_sibling, sqlite/missing_fields, sqlite/foreign_parent, postgres/intact, postgres/missing_sibling, postgres/missing_fields, postgres/foreign_parent]
       TestStandingTreeConstructionFailureDoesNotPublishPartialSetBothStores: [sqlite, postgres]
       TestStandingKeyedAncestryRefusesBeforeMutationBothStores: [sqlite/., sqlite/parent, postgres/., postgres/parent]

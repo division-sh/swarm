@@ -11,14 +11,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -41,6 +45,7 @@ func TestWorkflowEngineConstructedTransitionAtomicOnBothStores(t *testing.T) {
 				record.CurrentState = "done"
 				record.Fields = json.RawMessage(`{"account_id":"preserved","handled":true}`)
 				record.EnteredStageAt, record.UpdatedAt = record.CreatedAt.Add(time.Minute), record.CreatedAt.Add(time.Minute)
+				record = workflowTargetMutationEntry(t, f, record, "finish.requested")
 				owner := f.store.(runtimepipeline.WorkflowEngineMutationOwner)
 				historyCount := func(step string) int {
 					var count int
@@ -136,6 +141,7 @@ func TestWorkflowEngineConstructedTransitionAtomicOnBothStores(t *testing.T) {
 					record.ExpectedState, record.ExpectedRevision = target.State.CurrentState, target.State.Revision
 					record.CurrentState = "settled"
 					record.EnteredStageAt, record.UpdatedAt = record.UpdatedAt.Add(time.Minute), record.UpdatedAt.Add(time.Minute)
+					record = workflowTargetMutationEntry(t, f, record, "settle.requested")
 					if _, err := owner.CommitWorkflowEngineMutation(f.ctx, runtimepipeline.WorkflowEngineMutationCommand{State: record}); err != nil {
 						t.Fatal(err)
 					}
@@ -155,6 +161,16 @@ func newWorkflowTargetConstructionFixture(t *testing.T, backend string) (receive
 		"schema.yaml":          "name: constructed-target-transition\n",
 		"review/schema.yaml":   "name: review\nstages:\n  active: {initial: true}\n  done: {}\n  settled: {}\n",
 		"review/entities.yaml": "review_item:\n  account_id: {type: text, initial: preserved}\n  handled: {type: boolean, initial: false}\n",
+		"review/events.yaml":   "finish.requested:\nsettle.requested:\n",
+		"review/nodes.yaml": `progress:
+  execution_type: system_node
+  subscribes_to: [finish.requested, settle.requested]
+  event_handlers:
+    finish.requested:
+      advances_to: done
+    settle.requested:
+      advances_to: settled
+`,
 	}, nil)
 	req := sqliteFlowActivationRequest(f.bundle, "review", "review", "", "review")
 	plan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, req)
@@ -162,6 +178,59 @@ func newWorkflowTargetConstructionFixture(t *testing.T, backend string) (receive
 		t.Fatal(err)
 	}
 	return f, plan
+}
+
+func workflowTargetMutationEntry(t *testing.T, f receiverConfigActivationFixture, record runtimepipeline.WorkflowEngineStateRecord, localEvent string) runtimepipeline.WorkflowEngineStateRecord {
+	t.Helper()
+	// This is the native writer/contender proof, not handler execution: retain
+	// stage-entry authority from an actual declared and claimed occurrence.
+	node := mustPersistenceNode("review", "progress")
+	event := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType("review/"+localEvent), "fixture", "", []byte(`{}`), 0, record.Identity.RunID, events.EventEnvelope{}, record.UpdatedAt)
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node),
+		Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "review", FlowInstance: record.Identity.Route.InstancePath, EntityID: record.EntityID})}
+	if err := commitSemanticEventFixtureWithRoutes(f.ctx, f.store, event, []events.DeliveryRoute{route}); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := claimDeliveryFixture(f.ctx, f.store, event, route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	graph, found := f.bundle.WorkflowStageTopology("review")
+	if !found {
+		t.Fatal("transition fixture lost its declared lifecycle")
+	}
+	compiled, err := graph.AdmitTransition(runtimecontracts.WorkflowTransitionSite{Node: node, HandlerEvent: localEvent, AdvanceCarrier: runtimecontracts.HandlerAdvanceCarrierHandler}, record.ExpectedState, record.CurrentState)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transition, err := workflowlifecycle.NewCompiledTransition(compiled, handlerselection.NotApplicable(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	effect, err := workflowlifecycle.NewAcceptedEvent(record.Identity.Route, runtimeidentity.NormalizeEntityID(record.EntityID), event.ID(), string(event.Type()), event.ExecutionMode(), event.CreatedAt(), &transition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	effect, err = effect.WithExecutionOccurrence("delivery", claimed.Claim.DeliveryID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, found, err := effect.StageEntry(record.Identity)
+	if err != nil || !found {
+		t.Fatalf("prepare claimed transition entry: found=%t err=%v", found, err)
+	}
+	var bookkeeping map[string]any
+	if err := json.Unmarshal(record.Bookkeeping, &bookkeeping); err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowlifecycle.StoreStageEntry(bookkeeping, entry); err != nil {
+		t.Fatal(err)
+	}
+	record.Bookkeeping, err = json.Marshal(bookkeeping)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return record
 }
 
 func TestWorkflowTargetPersistenceReadNeverFabricatesMixedSnapshotOnBothStores(t *testing.T) {

@@ -78,7 +78,7 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 					ctx = correlation.WithSourceArtifactFact(ctx, fact)
 					ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
 				}
-				runID, entityID := uuid.NewString(), uuid.NewString()
+				runID := uuid.NewString()
 				ctx = correlation.WithRunID(ctx, runID)
 				identity := mustTestAgentIdentityForRun(runID, "grant-receiver", "global")
 				var grant startupownership.GenerationGrant
@@ -117,17 +117,8 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 				if err != nil || !found || state.ProcessBinding.GenerationGrantID != evidence.GrantID || (evidence.SelectedFork != nil) != selectedFork {
 					t.Fatalf("exact lifecycle/grant: state=%+v grant=%+v found=%v err=%v", state, evidence, found, err)
 				}
-				writer := selected.(interface {
-					SetupScenarioEntities(context.Context, pipeline.ScenarioSetupRequest) (pipeline.ScenarioSetupResult, error)
-				})
-				if _, err := writer.SetupScenarioEntities(ctx, pipeline.ScenarioSetupRequest{
-					RunID: runID, CreatedAt: time.Now().UTC(),
-					Entities: []pipeline.ScenarioSetupEntityRequest{{
-						Alias: "receiver", EntityID: entityID, FlowInstance: identity.FlowInstance(), EntityType: "receiver", CurrentState: "active",
-					}},
-				}); err != nil {
-					t.Fatal(err)
-				}
+				req := sqliteFlowActivationRequest(bundle, "global", "global", "", identity.FlowInstance())
+				entityID := req.Instance.EntityID
 				route := events.DeliveryRoute{
 					Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity,
 					Target: events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: "global", FlowInstance: identity.FlowInstance(), EntityID: entityID}),
@@ -136,9 +127,20 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 				if selectedFork {
 					event = eventtest.TargetRouted(event, route.Target.Route())
 				}
+				req.TriggerEvent, req.OccurredAt = event, event.CreatedAt()
+				if !selectedFork {
+					requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
+						Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID,
+						Artifact: bundle.SourceArtifact, BundleHash: bundle.SourceArtifact.BundleHash(),
+					})
+				}
+				constructed := constructHistoricalSourceFixture(t, ctx, selected, req)
+				if constructed.Identity != req.Instance || constructed.CreatingInput.EventID != event.ID() {
+					t.Fatal("grant fixture lost exact receiver construction and creating occurrence")
+				}
 				// This grant-boundary fixture starts after initialization. Preserve
-				// the future-target/readiness path under test with explicit supplier
-				// evidence; real activation admission has its own both-store journey.
+				// the future-target path using the real constructor's exact receipt;
+				// attachment admission has its own both-store journey.
 				route.Initialization, err = events.AdmitFlowReceiverInitialization(event, route.Target)
 				if err != nil {
 					t.Fatal(err)

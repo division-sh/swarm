@@ -88,7 +88,7 @@ func newTestFlowInstanceActivationOwner(activate runtimepipeline.FlowInstanceAct
 	}
 }
 
-func (o *testFlowInstanceActivationOwner) PrepareFlowInstanceActivation(_ context.Context, req runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
+func (o *testFlowInstanceActivationOwner) PrepareFlowInstanceActivation(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
 	fields, err := testFlowActivationConstructorFields(req)
 	if err != nil {
 		return runtimepipeline.FlowInstanceActivationPlan{}, err
@@ -107,6 +107,9 @@ func (o *testFlowInstanceActivationOwner) PrepareFlowInstanceActivation(_ contex
 		BundleHash:      authorActivityTestBundleHash,
 		WorkflowVersion: req.ContractBundle.WorkflowVersion(),
 		ExecutionMode:   "live",
+	}
+	if readiness.RunID == "" {
+		readiness.RunID = runtimecorrelation.RunIDFromContext(ctx)
 	}
 	instance := runtimepipeline.WorkflowInstance{
 		InstanceID:       req.Instance.InstanceID,

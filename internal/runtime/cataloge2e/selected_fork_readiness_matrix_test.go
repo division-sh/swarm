@@ -65,7 +65,7 @@ func TestTerminalCommittedUnwindBothStores(t *testing.T) {
 			t.Run(string(backend)+"/"+mode, func(t *testing.T) {
 				h := newRuntimeHarnessForBackend(t, selectedForkReadinessCatalogFixture(t, 0, "node"), backend, true)
 				path := "worker-flow/worker-001"
-				materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path)
+				materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path, "worker.inspect.requested")
 				ctx, cancel := context.WithCancel(catalogRunContext(h, catalogRuntimeRunID))
 				defer cancel()
 				probe := &terminalUnwindProbe{mode: mode, cancel: cancel}
@@ -173,7 +173,7 @@ func TestRunScopedConcurrentAgentsTerminalRetirementBothStores(t *testing.T) {
 				root := selectedForkReadinessCatalogFixture(t, 2, "agent")
 				h := newRuntimeHarnessForBackend(t, root, backend, true)
 				path := "worker-flow/worker-001"
-				entity := materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path)
+				entity := materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path, "worker.ready.requested")
 				probe := newConcurrentTerminalProbe()
 				probe.firstAuthor = firstAuthor
 				h.rt.Pipeline.SetTestLifecycleProbe(probe)
@@ -312,7 +312,7 @@ func TestStageTimerTerminalJoinsAgentsWithoutJoiningItsCallbackBothStores(t *tes
 				}
 			})
 			path := "worker-flow/worker-001"
-			materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path)
+			materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path, "worker.ready")
 			select {
 			case err := <-completed:
 				if err != nil {
