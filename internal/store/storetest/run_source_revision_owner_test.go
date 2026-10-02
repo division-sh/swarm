@@ -72,7 +72,7 @@ func TestSourceRevisionFixtureUsesExactSelectedOwner(t *testing.T) {
 				t.Fatalf("source revision readback=%v err=%v", actual, err)
 			}
 			candidate, err := selected.ListCompletionCandidates(ctx, runtimerunlifecycle.CandidateScope{BundleHash: changed.BundleHash()}, runtimerunlifecycle.CandidateCursor{}, 128)
-			if err != nil || len(candidate.Candidates) != 1 || candidate.Candidates[0].RunID != runID || candidate.Candidates[0].Revision <= predecessor.Candidates[0].Revision || !candidate.Candidates[0].DueAt.Before(future) {
+			if err != nil || len(candidate.Candidates) != 1 || candidate.Candidates[0].RunID != runID || candidate.Candidates[0].Revision <= predecessor.Candidates[0].Revision || !candidate.Candidates[0].DueAt.Before(future) || candidate.Candidates[0].DueAt.After(runtimerunlifecycle.CanonicalTimestamp(time.Now().UTC())) {
 				t.Fatalf("revision did not atomically rearm the new source candidate: %+v err=%v", candidate, err)
 			}
 			old, err := selected.ListCompletionCandidates(ctx, runtimerunlifecycle.CandidateScope{BundleHash: original.BundleHash()}, runtimerunlifecycle.CandidateCursor{}, 128)
