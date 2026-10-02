@@ -41,6 +41,19 @@ classification_tests:
   retired_duplicate_spelling: "The alternate carries no information not present in the canonical spelling."
   f2_bug: "An accepted spelling changes, disappears, or is independently reinterpreted after decode."
 
+additive_document_families:
+  - id: source.flow_manifest
+    ruled: issue-2376-issue-2322-gate-F
+    paths: "flow-disposition manifest.yaml.name, .version, .platform_version"
+    owner: internal/sourceartifact.projectManifest
+    substrate: admitted yamlsource.Value
+    consumers: [sourceartifact construction, sourceartifact stored decode, contracts root compatibility, CLI identity-only source selection, artifact human presentation, verify JSON metadata]
+    grammar: "optional document; if present, exactly three required nonempty text fields; strict SemVer and existing platform-range grammar; no unknown/duplicate fields or alternate reader"
+    scope: "root compatibility only; nested grammar admission; resource/document basename lookalikes retain disposition"
+    accounting: "one new typed document family; zero custom UnmarshalYAML decoders, zero raw node sites, zero direct YAML roots added; replaces opaque-positive manifest admission, not a historical custom decoder"
+    retired_public_readers: [serve persisted-hash selection, event publish authored-hash guard, data import authored-hash guard, data show authored-hash guard, data prune authored-hash guard, run start authored-hash guard, run fork authored-hash selection, static agent frame branch, channel connect authored-hash alias, channel reconnect authored-hash alias, channel rebind authored-hash alias, channel status authored-hash alias]
+    denominator_rule: "additive to the historical 45-row/11-decoder/67-site/24-root receipt; no reset or closure claim for #2300/#2287/#2293, #2486 or #2487"
+
 inventory:
   custom_unmarshal_total: 11
   custom_unmarshal_reachable: 9

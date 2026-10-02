@@ -63,8 +63,12 @@ func TestRunForkResultHasClosedTypedPoint(t *testing.T) {
 		default:
 			t.Errorf("unexpected fork point arm: %#v", armKind)
 		}
-		if len(properties) != len(required) {
-			t.Errorf("%s fork arm properties=%d required=%d; unexpected optional field", kind, len(properties), len(required))
+		label, ok := properties["source_label"].(map[string]any)
+		if !ok || label["type"] != "string" || required["source_label"] {
+			t.Errorf("%s source_label must be optional display text: %#v", kind, properties["source_label"])
+		}
+		if len(properties) != len(required)+1 {
+			t.Errorf("%s fork arm properties=%d required=%d; only source_label may be optional", kind, len(properties), len(required))
 		}
 	}
 	if !seenKinds["event"] || !seenKinds["deployment_revision"] {

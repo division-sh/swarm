@@ -56,14 +56,14 @@ func buildServeRuntimeExecution(stores *storeselected.Owner, req selectedAPICapa
 	}
 	handlers := apiv1.MergeOperatorHandlers(
 		apiv1.OperatorAgentControlHandlers(apiv1.AgentControlHandlerOptions{Controller: processDynamicAgentControl{supervisor: req.RuntimeSupervisor}, Idempotency: idempotency, RuntimeContexts: caps.RuntimeContexts, SelectedForkControls: caps.SelectedForkControls}),
-		apiv1.OperatorAgentFrameHandlers(apiv1.AgentFrameHandlerOptions{Effective: rt.Manager}),
+		apiv1.OperatorAgentFrameHandlers(apiv1.AgentFrameHandlerOptions{Effective: rt.Manager, SourceArtifacts: stores.SourceArtifactStore(), Source: primary.loaded.bundle.SourceArtifact}),
 		apiv1.OperatorConversationForkHandlers(apiv1.ConversationForkHandlerOptions{Reads: caps.ConversationForks, Lifecycle: caps.ConversationForkLifecycle, Chat: cliapp.NewWorkspaceAdmittedForkChatExecutor(apiv1.NewLLMForkChatExecutor(forkChatLLM), forkChatLLM, primary.workspaceBackend), Idempotency: idempotency, ExecutionPosture: rt.ExecutionPosture}),
 		apiv1.OperatorDecisionCardHandlers(apiv1.DecisionCardHandlerOptions{Cards: deps.DecisionCards, ProposedEffects: deps.ProposedEffects, Mailbox: stores.MailboxAPI(), NoticeAcknowledgment: stores.MailboxNoticeAcknowledgment(), Authority: rt.Pipeline, SourceArtifact: rt.Bus, RuntimeContexts: caps.RuntimeContexts, SelectedForkControls: caps.SelectedForkControls}),
 		apiv1.OperatorRunStartHandlers(apiv1.RunStartHandlerOptions{Publication: publication}),
 		apiv1.OperatorEventPublishHandlers(apiv1.EventPublishHandlerOptions{Publication: publication}),
 		apiv1.OperatorEventReplayHandlers(apiv1.EventReplayHandlerOptions{ExecutionPosture: rt.ExecutionPosture, Idempotency: idempotency, Events: rt.Bus, Observability: caps.Observability, AgentIdentities: caps.Agents, RuntimeContexts: caps.RuntimeContexts, SelectedForkControls: caps.SelectedForkControls}),
 		apiv1.OperatorTestSetupHandlers(apiv1.TestSetupHandlerOptions{Setup: caps.TestSetup, Idempotency: idempotency, RunBundleContext: caps.RunBundleContext, RuntimeContexts: caps.RuntimeContexts, SourceArtifact: rt.Bus, Source: req.Source, ScenarioExecutionProfiles: stores.ScenarioExecutionProfiles()}),
-		apiv1.OperatorRunForkHandlers(apiv1.RunForkHandlerOptions{Availability: caps.RunForkAvailability, Operations: caps.RunForkOperations, Executor: caps.RunFork, Idempotency: idempotency}),
+		apiv1.OperatorRunForkHandlers(apiv1.RunForkHandlerOptions{Availability: caps.RunForkAvailability, Operations: caps.RunForkOperations, Executor: caps.RunFork, Idempotency: idempotency, SourceArtifacts: stores.SourceArtifactStore()}),
 		apiv1.OperatorRunControlHandlers(apiv1.RunControlHandlerOptions{Controller: rt.RunControl, Idempotency: idempotency, RuntimeContexts: caps.RuntimeContexts, SelectedForkControls: caps.SelectedForkControls, SelectedForkStop: caps.SelectedForkProcess}),
 		apiv1.OperatorRuntimeControlHandlers(apiv1.RuntimeControlHandlerOptions{Ingress: rt.RuntimeIngress, Idempotency: idempotency, RuntimeContexts: caps.RuntimeContexts}),
 	)

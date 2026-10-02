@@ -285,29 +285,15 @@ func effectiveCommandConfigPath(cmd *cobra.Command, localPath string, localSet b
 func newServeCommand(ctx context.Context, root InvocationRoot, runServe ServeRunner) *cobra.Command {
 	opts := DefaultServeOptions()
 	cmd := &cobra.Command{
-		Use:   "serve [directory]",
-		Short: "Start the Swarm runtime (server): engine, API, health, and MCP.",
-		Example: `  swarm serve . --dev
-  swarm serve --bundle-hash bundle-v2:sha256:<hash>`,
-		Args: argcount.MaximumNArgs(1),
+		Use:     "serve [directory]",
+		Short:   "Start the Swarm runtime (server): engine, API, health, and MCP.",
+		Example: `  swarm serve . --dev`,
+		Args:    argcount.MaximumNArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if err := rejectRetiredPlatformSpecFlag(cmd); err != nil {
 				return err
 			}
-			if cmd.Flags().Changed("bundle-hash") {
-				if len(args) != 0 {
-					return fmt.Errorf("--bundle-hash is mutually exclusive with a local source directory")
-				}
-				hashes, err := ServeBundleHashes(opts)
-				if err != nil {
-					return err
-				}
-				opts.BundleHash = hashes[0]
-				opts.BundleHashes = append([]string(nil), hashes[1:]...)
-				if opts.Dev {
-					return fmt.Errorf("--bundle-hash is mutually exclusive with --dev")
-				}
-			} else if len(args) == 1 {
+			if len(args) == 1 {
 				opts.SourceRoot = args[0]
 			}
 			if cmd.Flags().Changed("workspace-backend") {
@@ -373,7 +359,6 @@ func newServeCommand(ctx context.Context, root InvocationRoot, runServe ServeRun
 	cmd.Flags().StringVar(&opts.ConfigPath, "config", opts.ConfigPath, "Path to swarm.yaml config")
 	cmd.Flags().StringVar(&opts.Backend, "backend", opts.Backend, "LLM backend profile for local runtime startup: anthropic, claude_cli, openai_compatible, or openai_responses")
 	cmd.Flags().StringVar(&opts.WorkspaceBackend, "workspace-backend", opts.WorkspaceBackend, "Workspace backend preference for local serve: docker, or host for explicit trusted/unsafe local-dev opt-in")
-	cmd.Flags().StringArrayVar(&opts.BundleHashes, "bundle-hash", opts.BundleHashes, "Load a persisted admitted source artifact by canonical bundle_hash; repeat to boot multiple pinned contexts")
 	cmd.Flags().StringVar(&opts.PlatformSpecPath, "platform-spec", opts.PlatformSpecPath, retiredPlatformSpecFlagHelp)
 	cmd.Flags().StringVar(&opts.StoreMode, "store", opts.StoreMode, RuntimeStoreBackendHelp)
 	cmd.Flags().StringVar(&opts.ContextName, "context", opts.ContextName, "Local Swarm context name to register for --dev")
@@ -513,7 +498,7 @@ func runVersionCommand(ctx context.Context, out, errOut io.Writer, opts versionC
 		writeLocalVersion(w, metadata, embeddedPacks.Digest())
 		writeVersionServerIdentity(w, health)
 	}, func() ([]string, error) {
-		return []string{metadata.BinaryVersion, health.Bundle.BundleHash}, nil
+		return []string{metadata.BinaryVersion, humanSourceIdentity(health.Bundle.BundleHash, health.Bundle.SourceLabel)}, nil
 	})
 }
 

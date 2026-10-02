@@ -29,7 +29,6 @@ type eventPublishCommandOptions struct {
 	sourceEventID         string
 	targetFlowInstance    string
 	targetEntityID        string
-	bundleHash            string
 	emitter               string
 	idempotencyKey        string
 	payloadJSONSet        bool
@@ -37,7 +36,6 @@ type eventPublishCommandOptions struct {
 	sourceEventIDSet      bool
 	targetFlowInstanceSet bool
 	targetEntityIDSet     bool
-	bundleHashSet         bool
 	emitterSet            bool
 	idempotencyKeySet     bool
 }
@@ -81,7 +79,6 @@ func newEventPublishCommand(opts rootCommandOptions) *cobra.Command {
 			publishOpts.sourceEventIDSet = cmd.Flags().Changed("source-event-id")
 			publishOpts.targetFlowInstanceSet = cmd.Flags().Changed("target-flow-instance")
 			publishOpts.targetEntityIDSet = cmd.Flags().Changed("target-entity-id")
-			publishOpts.bundleHashSet = cmd.Flags().Changed("bundle-hash")
 			publishOpts.emitterSet = cmd.Flags().Changed("emitter")
 			publishOpts.idempotencyKeySet = cmd.Flags().Changed("idempotency-key")
 			return runEventPublishCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args, publishOpts)
@@ -92,7 +89,6 @@ func newEventPublishCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&publishOpts.sourceEventID, "source-event-id", "", "Optional same-run parent event id for checkpoint lineage")
 	cmd.Flags().StringVar(&publishOpts.targetFlowInstance, "target-flow-instance", "", "Optional existing-run receiver target flow instance")
 	cmd.Flags().StringVar(&publishOpts.targetEntityID, "target-entity-id", "", "Optional existing-run receiver target entity id")
-	cmd.Flags().StringVar(&publishOpts.bundleHash, "bundle-hash", "", "Optional expected server canonical bundle hash")
 	cmd.Flags().StringVar(&publishOpts.emitter, "emitter", "", "Optional producer identifier")
 	cmd.Flags().StringVar(&publishOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
 	_ = cmd.Flags().MarkHidden("idempotency-key")
@@ -111,6 +107,14 @@ func runEventPublishCommand(ctx context.Context, out, errOut io.Writer, args []s
 	if err != nil {
 		writeCLIAPIError(errOut, err)
 		return commandExitError{code: eventPublishErrorExitCode(err)}
+	}
+	if _, existingRun := params["run_id"]; !existingRun {
+		health, err := runCommandHealth(ctx, client)
+		if err != nil {
+			writeCLIAPIError(errOut, err)
+			return commandExitError{code: eventPublishErrorExitCode(err)}
+		}
+		params["bundle_hash"] = health.Bundle.BundleHash
 	}
 
 	var result eventPublishResult
@@ -181,16 +185,6 @@ func (opts eventPublishCommandOptions) params(args []string) (string, map[string
 			"flow_instance": strings.Trim(strings.TrimSpace(targetFlowInstance), "/"),
 			"entity_id":     targetEntityID,
 		}
-	}
-	bundleHash, err := optionalNonEmptyFlag("--bundle-hash", opts.bundleHash, opts.bundleHashSet)
-	if err != nil {
-		return "", nil, err
-	}
-	if bundleHash != "" {
-		if !cliBundleHashPattern.MatchString(bundleHash) {
-			return "", nil, fmt.Errorf("--bundle-hash must be bundle-v2:sha256:<64 lowercase hex>")
-		}
-		params["bundle_hash"] = bundleHash
 	}
 	if emitter, err := optionalNonEmptyFlag("--emitter", opts.emitter, opts.emitterSet); err != nil {
 		return "", nil, err

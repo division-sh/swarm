@@ -13,7 +13,11 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 	name := "."
 	version := ""
 	if bundle.SourceArtifact != nil {
-		version = bundle.SourceArtifact.BundleHash()
+		identity, err := SourceExecutionIdentity(bundle.SourceArtifact.BundleHash())
+		if err != nil {
+			return err
+		}
+		name, version = identity.WorkflowName, identity.WorkflowVersion
 	}
 	entitySchema := legacyWorkflowEntitySchema(bundle)
 	compositionConnects := make([]FlowConnect, 0)

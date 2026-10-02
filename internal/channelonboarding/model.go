@@ -355,11 +355,12 @@ type ConnectedChannelReadiness struct {
 // ConnectedChannelReadback is the canonical presentation projection for one
 // retained identity and, when present, its exact onboarding activation.
 type ConnectedChannelReadback struct {
-	Identity   operatorchannel.Readback    `json:"identity"`
-	Operation  *Operation                  `json:"operation,omitempty"`
-	Activation *ConnectedChannelActivation `json:"activation,omitempty"`
-	Readiness  *ConnectedChannelReadiness  `json:"readiness,omitempty"`
-	Recovery   *ConnectedChannelRecovery   `json:"recovery,omitempty"`
+	SourceLabel string                      `json:"source_label,omitempty"`
+	Identity    operatorchannel.Readback    `json:"identity"`
+	Operation   *Operation                  `json:"operation,omitempty"`
+	Activation  *ConnectedChannelActivation `json:"activation,omitempty"`
+	Readiness   *ConnectedChannelReadiness  `json:"readiness,omitempty"`
+	Recovery    *ConnectedChannelRecovery   `json:"recovery,omitempty"`
 }
 
 type ConnectedChannelRecovery struct {

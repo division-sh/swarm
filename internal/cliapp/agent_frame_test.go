@@ -23,7 +23,6 @@ func TestAgentFrameCLIUsesExactAPISelectorsOnly(t *testing.T) {
 		wantParams map[string]any
 		scope      agentframe.InspectionScope
 	}{
-		{name: "static", args: []string{"agent", "frame", "reviewer", "--scope", "static", "--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--flow", "review", "--json"}, wantParams: map[string]any{"scope": "static", "agent_id": "reviewer", "bundle_hash": "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "flow": "review"}, scope: agentframe.InspectionStatic},
 		{name: "effective", args: []string{"agent", "frame", "reviewer", "--scope", "effective", "--run-id", "run-1", "--flow-instance", "review/one", "--json"}, wantParams: map[string]any{"scope": "effective", "agent_id": "reviewer", "run_id": "run-1", "flow_instance": "review/one"}, scope: agentframe.InspectionEffective},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -60,6 +59,7 @@ func TestAgentFrameCLIRejectsSelectorConflictsBeforeAPIRequest(t *testing.T) {
 	}))
 	defer server.Close()
 	for _, args := range [][]string{
+		{"agent", "frame", "reviewer", "--scope", "static"},
 		{"agent", "frame", "reviewer", "--scope", "static", "--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--flow", "review", "--root"},
 		{"agent", "frame", "reviewer", "--scope", "effective", "--run-id", "run-1", "--root", "--flow-instance", "review/one"},
 		{"agent", "frame", "reviewer", "--scope", "effective", "--run-id", "run-1", "--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--root"},

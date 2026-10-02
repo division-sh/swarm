@@ -698,13 +698,6 @@ func localPreflightCommandSeverityForContractSecrets(mode string) LocalPreflight
 	return LocalPreflightSeverityWarning
 }
 
-func ShouldRunServeLocalClaudeCLIPreflight(opts ServeOptions) bool {
-	if strings.TrimSpace(opts.BundleHash) != "" || len(opts.BundleHashes) > 0 {
-		return false
-	}
-	return true
-}
-
 func serveLocalPreflightMode(opts ServeOptions) string {
 	if opts.LocalRun {
 		return "run_local"

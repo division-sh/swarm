@@ -694,7 +694,7 @@ units:
   serveapp-other:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    run: '^Test[ABD-H].*$'
+    run: '^Test([ABD-H].*|2376.*)$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
@@ -730,7 +730,7 @@ units:
   store-runtime-full-01:
     packages:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
-    run: '^(Test($|[AB].*|Ru($|[^n].*|n($|[^F].*)))|Example.*|Fuzz.*)$'
+    run: '^(Test($|2376.*|[AB].*|Ru($|[^n].*|n($|[^F].*)))|Example.*|Fuzz.*)$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad

@@ -101,7 +101,7 @@ func projectRunForkAttemptGenerationState(raw map[string]any, forkRunID, entityI
 	return out, correspondence, nil
 }
 
-func forkGateActivationState(raw map[string]any, forkRunID, flowInstance, entityID string) (map[string]any, []runForkGateActivationBinding, error) {
+func forkGateActivationState(raw map[string]any, forkRunID, flowInstance, entityID, targetBundleHash string) (map[string]any, []runForkGateActivationBinding, error) {
 	out, err := cloneForkLoopState(raw)
 	if err != nil {
 		return nil, nil, err
@@ -125,7 +125,7 @@ func forkGateActivationState(raw map[string]any, forkRunID, flowInstance, entity
 	}
 	bindings := make([]runForkGateActivationBinding, 0, len(activations))
 	for _, source := range activations {
-		forked, err := gateruntime.New(forkRunID, flowInstance, entityID, source.FlowID, source.Stage, source.DecisionID, source.BundleHash, source.RoutesJSON, source.StartedByEvent, source.OpenedAt)
+		forked, err := gateruntime.New(forkRunID, flowInstance, entityID, source.FlowID, source.Stage, source.DecisionID, targetBundleHash, source.RoutesJSON, source.StartedByEvent, source.OpenedAt)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -160,8 +160,8 @@ func forkGateActivationState(raw map[string]any, forkRunID, flowInstance, entity
 	return out, bindings, nil
 }
 
-func ForkGateActivationState(raw map[string]any, forkRunID, flowInstance, entityID string) (map[string]any, []RunForkGateActivationBinding, error) {
-	return forkGateActivationState(raw, forkRunID, flowInstance, entityID)
+func ForkGateActivationState(raw map[string]any, forkRunID, flowInstance, entityID, targetBundleHash string) (map[string]any, []RunForkGateActivationBinding, error) {
+	return forkGateActivationState(raw, forkRunID, flowInstance, entityID, targetBundleHash)
 }
 
 func cloneForkLoopState(raw map[string]any) (map[string]any, error) {

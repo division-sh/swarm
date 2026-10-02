@@ -363,7 +363,7 @@ func scenarioTestSourceArtifactFact(ctx context.Context, client *cliAPIClient, b
 		}
 		canonicalHash := fact.BundleHash()
 		if _, duplicate := seen[canonicalHash]; duplicate {
-			return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("runtime identity returned duplicate source facts for bundle_hash %s", canonicalHash)
+			return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("runtime identity returned duplicate source facts for source %s", humanSourceIdentity(canonicalHash, ""))
 		}
 		seen[canonicalHash] = struct{}{}
 		available = append(available, canonicalHash)
@@ -375,7 +375,11 @@ func scenarioTestSourceArtifactFact(ctx context.Context, client *cliAPIClient, b
 	}
 	if !matchedSet {
 		sort.Strings(available)
-		return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("target runtime does not serve bundle_hash %s (available: %s)", bundleHash, strings.Join(available, ", "))
+		labels := make([]string, len(available))
+		for i, hash := range available {
+			labels[i] = humanSourceIdentity(hash, "")
+		}
+		return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("target runtime does not serve source %s (available: %s); serve its matching source directory first", humanSourceIdentity(bundleHash, ""), strings.Join(labels, ", "))
 	}
 	return matched, nil
 }

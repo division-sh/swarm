@@ -62,15 +62,16 @@ type Admission struct {
 }
 
 type admittedProjection struct {
-	prompts         map[agentidentity.Plan]agentintent.DerivedPrompt
-	planBinding     string
-	frontierBinding string
-	selection       runfork.RunForkContractSelection
-	sourceFact      correlation.SourceArtifactFact
-	effectiveSource scenarioexecution.EffectiveSourceIdentity
-	planning        []byte
-	modes           []byte
-	projection      []byte
+	executionIdentity contracts.BundleIdentity
+	prompts           map[agentidentity.Plan]agentintent.DerivedPrompt
+	planBinding       string
+	frontierBinding   string
+	selection         runfork.RunForkContractSelection
+	sourceFact        correlation.SourceArtifactFact
+	effectiveSource   scenarioexecution.EffectiveSourceIdentity
+	planning          []byte
+	modes             []byte
+	projection        []byte
 }
 
 func Admit(req AdmissionRequest) (Admission, error) {
@@ -81,8 +82,8 @@ func Admit(req AdmissionRequest) (Admission, error) {
 	if !ok {
 		return Admission{}, fmt.Errorf("selected-contract readiness requires compiled artifact source")
 	}
-	hash, err := contracts.BundleHash(bundle)
-	if err != nil || hash != req.SourceArtifactFact.BundleHash() {
+	identity, err := contracts.BootBundleIdentity(bundle)
+	if err != nil || identity.BundleHash != req.SourceArtifactFact.BundleHash() {
 		return Admission{}, fmt.Errorf("selected-contract readiness source disagrees with admitted source artifact: %v", err)
 	}
 	planBinding, frontierBinding, err := validateBinding(req.Binding)
@@ -133,11 +134,19 @@ func Admit(req AdmissionRequest) (Admission, error) {
 		return Admission{}, err
 	}
 	return Admission{sealed: &admittedProjection{
-		prompts:     prompts,
-		planBinding: planBinding, frontierBinding: frontierBinding,
+		executionIdentity: identity,
+		prompts:           prompts,
+		planBinding:       planBinding, frontierBinding: frontierBinding,
 		selection: req.ContractSelection, sourceFact: req.SourceArtifactFact,
 		planning: planning, modes: modes, effectiveSource: req.EffectiveSourceIdentity, projection: projection,
 	}}, nil
+}
+
+func (a Admission) ExecutionIdentity() (contracts.BundleIdentity, error) {
+	if a.sealed == nil {
+		return contracts.BundleIdentity{}, fmt.Errorf("selected-contract readiness admission is required")
+	}
+	return a.sealed.executionIdentity, nil
 }
 
 func (a Admission) Projection() (Projection, error) {
