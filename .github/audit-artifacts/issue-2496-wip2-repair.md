@@ -161,3 +161,30 @@ findings. Stale signatures/removed calls are deleted. Exact registry plus raw
 effective-method and hostile resolved-type controls pass8.690s. No raw authority
 exception or guard threshold changes. The closed routing guard passes12.869s;
 proof partition controls pass1.515s.
+
+## Discard Consumer And Settlement Proof
+
+The second default run, source0ff2b6cb9 followed by metadata-only02b776816,
+completed RED in broad-01 at the required-missing selected receiver on both
+stores. No later unit ran. Removing its declared fields correctly causes the
+new inventory to refuse activation. The old negative expected successful
+activation, and post-return readback lost the rows removed by joined discard.
+
+A held existing post-settlement probe now verifies the exact terminal claim,
+absent required row, unchanged source and sibling state before release, then
+checks the named activation refusal and discard. It exposed a real omitted
+retirement consumer: retained-completion discard removed fields but left three
+constructed headers on both stores. The same named atomic discard now removes
+those headers and cascaded readiness/construction rows. Retention, story order,+completion tombstones, dependency refusal and rollback remain unchanged.
+The before-edit class/census repair is recorded on2496 at5950195540, under the
+existing O2/C11/P35-P36 retirement boundary; no additional semantic owner.
+
+The supported receiver/control matrix passes6.392s after the repair. Native
+unretained, retained-completion, cancellation and rollback controls now include
+explicit physical header/attachment/construction fixtures; these are cleanup
+proofs, not public constructor admission. Final managed qualification follows
+the committed repair; earlier green matrices are not relabeled this head.
+
+The fourteen-root managed WIP2 race/count3 supplement on02b776816 passed:
+runtimepersistence291.210s and Manager9.608s. This precedes the discard edit.
+The public/volume count3 command remains running, also preceding that edit.

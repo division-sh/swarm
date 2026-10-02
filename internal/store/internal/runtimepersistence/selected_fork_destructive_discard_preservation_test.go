@@ -26,9 +26,10 @@ func TestSelectedForkDestructiveDiscardPendingDeliveryBothStores(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			runID := uuid.NewString()
 			requirePausedRunForTest(t, ctx, store, runID, time.Now().UTC())
+			seedSelectedForkDiscardConstructionRows(t, ctx, db, runID)
 			eventID, deliveryID := seedSelectedForkDiscardPendingDelivery(t, ctx, store, db, runID)
 			before := selectedForkDiscardDurableCounts(t, ctx, db, runID, eventID, deliveryID)
-			if before.Runs != 1 || before.Events != 1 || before.Deliveries != 1 || before.Revisions == 0 || before.Facts == 0 || before.Occurrences == 0 {
+			if before.Runs != 1 || before.Events != 1 || before.Deliveries != 1 || before.Headers != 1 || before.Readiness != 1 || before.Construction != 1 || before.Revisions == 0 || before.Facts == 0 || before.Occurrences == 0 {
 				t.Fatalf("unretained pending-delivery fixture incomplete: %#v", before)
 			}
 			beforeHead := selectedForkDiscardAuthorOrderHead(t, ctx, db)
@@ -91,6 +92,7 @@ func TestSelectedForkRetainedDiscardPendingDeliveryTombstonesBothStores(t *testi
 			store, db, sqlite := selectedForkDiscardTestStore(t, backend)
 			fixture := newSelectedCompletionFixture(t, store, db, sqlite)
 			ctx := testAuthorActivityContext()
+			seedSelectedForkDiscardConstructionRows(t, ctx, db, fixture.forkRun)
 			issued, err := store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
 			if err != nil {
 				t.Fatalf("issue retained execution: %v", err)
@@ -126,7 +128,7 @@ func TestSelectedForkRetainedDiscardPendingDeliveryTombstonesBothStores(t *testi
 
 			eventID, deliveryID := seedSelectedForkDiscardPendingDelivery(t, ctx, store, db, fixture.forkRun)
 			before := selectedForkDiscardDurableCounts(t, ctx, db, fixture.forkRun, eventID, deliveryID)
-			if before.Runs != 1 || before.Events != 1 || before.Deliveries != 1 || before.Executions != 1 || before.Bindings != 1 || before.Attempts != 1 {
+			if before.Runs != 1 || before.Events != 1 || before.Deliveries != 1 || before.Headers != 1 || before.Readiness != 1 || before.Construction != 1 || before.Executions != 1 || before.Bindings != 1 || before.Attempts != 1 {
 				t.Fatalf("retained pending-delivery fixture incomplete: %#v", before)
 			}
 			var beforeRevision int64
@@ -137,7 +139,7 @@ func TestSelectedForkRetainedDiscardPendingDeliveryTombstonesBothStores(t *testi
 				t.Fatalf("discard retained run: %v", err)
 			}
 			after := selectedForkDiscardDurableCounts(t, ctx, db, fixture.forkRun, eventID, deliveryID)
-			if after.Runs != 1 || after.Events != 0 || after.Deliveries != 0 || after.Executions != 1 || after.Bindings != 1 || after.Attempts != 1 {
+			if after.Runs != 1 || after.Events != 0 || after.Deliveries != 0 || after.Headers != 0 || after.Readiness != 0 || after.Construction != 0 || after.Executions != 1 || after.Bindings != 1 || after.Attempts != 1 {
 				t.Fatalf("retained discard lost evidence or kept mutable rows: %#v", after)
 			}
 			var status, executionState string
@@ -190,6 +192,7 @@ func TestSelectedForkDestructiveDiscardRollbackPendingDeliveryBothStores(t *test
 			ctx := testAuthorActivityContext()
 			runID := uuid.NewString()
 			requirePausedRunForTest(t, ctx, store, runID, time.Now().UTC())
+			seedSelectedForkDiscardConstructionRows(t, ctx, db, runID)
 			eventID, deliveryID := seedSelectedForkDiscardPendingDelivery(t, ctx, store, db, runID)
 			before := selectedForkDiscardDurableCounts(t, ctx, db, runID, eventID, deliveryID)
 			installSelectedForkDiscardFailure(t, ctx, db, sqlite)
@@ -262,6 +265,7 @@ func TestSelectedForkDestructiveDiscardRefusesDependentForkBothStores(t *testing
 
 type selectedForkDiscardCounts struct {
 	Runs, Events, Deliveries, Executions, Bindings, Attempts, Revisions, Facts, Heads, Occurrences int
+	Headers, Readiness, Construction                                                               int
 }
 
 func selectedForkDiscardDurableCounts(t *testing.T, ctx context.Context, db *sql.DB, runID, eventID, deliveryID string) selectedForkDiscardCounts {
@@ -282,12 +286,41 @@ func selectedForkDiscardDurableCounts(t *testing.T, ctx context.Context, db *sql
 		{`SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1`, []any{runID}, &counts.Facts},
 		{`SELECT COUNT(*) FROM run_fork_revision_heads WHERE run_id=$1`, []any{runID}, &counts.Heads},
 		{`SELECT COUNT(*) FROM author_activity_occurrences WHERE run_id=$1`, []any{runID}, &counts.Occurrences},
+		{`SELECT COUNT(*) FROM flow_instances WHERE run_id=$1`, []any{runID}, &counts.Headers},
+		{`SELECT COUNT(*) FROM flow_instance_runtime_readiness WHERE run_id=$1`, []any{runID}, &counts.Readiness},
+		{`SELECT COUNT(*) FROM workflow_instance_initial_materializations WHERE run_id=$1`, []any{runID}, &counts.Construction},
 	} {
 		if err := db.QueryRowContext(ctx, item.query, item.args...).Scan(item.dest); err != nil {
 			t.Fatalf("count discard state with %q: %v", item.query, err)
 		}
 	}
 	return counts
+}
+
+// Native cleanup fixtures exercise physical deletion/cascades, not constructor admission.
+func seedSelectedForkDiscardConstructionRows(t *testing.T, ctx context.Context, db *sql.DB, runID string) {
+	t.Helper()
+	at := time.Now().UTC()
+	for _, statement := range []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO flow_instances
+			(run_id, instance_path, entity_id, flow_template, mode, config, status,
+			 stage_defined, current_state, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
+			VALUES ($1, 'discard-native', $1, 'discard-native', 'static', '{}', 'active',
+			 FALSE, 'operating', '{}', '{}', '{}', 1, $2, $2, $2)`, []any{runID, at}},
+		{`INSERT INTO flow_instance_runtime_readiness
+			(run_id, instance_path, plan, plan_hash, created_at, updated_at)
+			VALUES ($1, 'discard-native', '{}', $2, $3, $3)`, []any{runID, "sha256:" + strings.Repeat("a", 64), at}},
+		{`INSERT INTO workflow_instance_initial_materializations
+			(run_id, entity_id, instance_path, projection_version, projection, occurred_at, created_at)
+			VALUES ($1, $1, 'discard-native', 2, '{}', $2, $2)`, []any{runID, at}},
+	} {
+		if _, err := db.ExecContext(ctx, statement.query, statement.args...); err != nil {
+			t.Fatalf("seed native discard construction rows: %v", err)
+		}
+	}
 }
 
 func seedSelectedForkDiscardPendingDelivery(t *testing.T, ctx context.Context, store selectedForkDiscardStore, db *sql.DB, runID string) (string, string) {
