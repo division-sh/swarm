@@ -550,3 +550,28 @@ regeneration; cognitive>=30 hotspots581->577 and cyclomatic266->262. CI
 Earlier failed CI36973380834 remains recorded. Qualification and final review
 must follow completion/disposition of the remaining consumers; no waiver or
 final review request is made.
+
+### Subsequent Event-Hydration Master Reconciliation
+
+Master advanced from5b3fbd5fb to2d6b5e9f3 during qualification. Rebase of the
+ten repair commits completed without conflicts. `git range-diff` reports every
+repair patch unchanged; the old/new head tree difference is precisely master's
+three event-hydration commits. The original checkpoint is retained at
+agent-e/2496-before-event-hydration-rebase-7ec06dd48. New code head47c598009 was
+pushed using an exact-old-head force-with-lease, not an unconditional force.
+
+Managed post-rebase both-store controls pass5.278s:
+TestFanOutBatchPhysicalReadCountAndScalarParityBothStores,
+TestFanOutBatchEventAdmissionHostileBothStores and
+TestFanOutBatchDeliveryMembershipHostileBothStores. Corrected alpha provider
+text/callback leaves pass3.808s on both stores. The small leaf authority control
+TestPersistenceEventRecordMethodSetScopeStaysClosed passes0.072s. Exact
+complexity verification passes without a snapshot/policy override. This is
+affected-surface verification, not a rerun or waiver of the default suite.
+Logs: /tmp/agent-e-2496-hydration-rebase-proof.log and
+/tmp/agent-e-2496-alpha-hydration-rebase.log.
+
+Fresh no-rename accounting against2d6b5e9f3 includes every non-test Go file:
+176 files, +6767/-7521, net-negative754. Readiness core386 lines. CI has no
+completed checks at the last query; no repaired-head GREEN claim. Both pending
+consumer dispositions and the default suite's standing-tree failure remain.
