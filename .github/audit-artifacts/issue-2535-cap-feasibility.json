@@ -1,0 +1,54 @@
+{
+  "measured_on": "2026-10-02",
+  "gate_ruling": "https://github.com/division-sh/swarm/issues/2535#issuecomment-5957050174",
+  "method": {
+    "ordinary": "assigned successful Go proof jobs excluding conformance-soak-*; completed_at - started_at",
+    "floor": "sum(ordinary job duration) / simultaneous matrix slots; necessary optimistic floor, not a makespan prediction",
+    "first_slice": "No matrix cap change; recommendation 3 / C01-C06 split under open issue 2535",
+    "candidate": "Literal four-slot proposal withdrawn; no future candidate is coding-approved"
+  },
+  "runs": [
+    {
+      "run_id": 37008266512,
+      "jobs_api": "https://api.github.com/repos/division-sh/swarm/actions/runs/37008266512/jobs?per_page=100",
+      "api_jobs": 84,
+      "four_slot_floor_minutes": 54.329166666666666,
+      "ordinary_jobs": 70,
+      "ordinary_runner_minutes": 217.31666666666666,
+      "soak_jobs": [
+        {
+          "id": 110862107592,
+          "name": "Go proof conformance-soak-postgres",
+          "seconds": 1028
+        },
+        {
+          "id": 110862107594,
+          "name": "Go proof conformance-soak-sqlite",
+          "seconds": 1019
+        }
+      ],
+      "ten_slot_floor_minutes": 21.731666666666666
+    },
+    {
+      "run_id": 36759529305,
+      "jobs_api": "https://api.github.com/repos/division-sh/swarm/actions/runs/36759529305/jobs?per_page=100",
+      "api_jobs": 80,
+      "four_slot_floor_minutes": 53.920833333333334,
+      "ordinary_jobs": 69,
+      "ordinary_runner_minutes": 215.68333333333334,
+      "soak_jobs": [
+        {
+          "id": 110039665779,
+          "name": "Go proof conformance-soak-postgres",
+          "seconds": 1019
+        },
+        {
+          "id": 110039666179,
+          "name": "Go proof conformance-soak-sqlite",
+          "seconds": 1012
+        }
+      ],
+      "ten_slot_floor_minutes": 21.56833333333333
+    }
+  ]
+}
