@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/gorilla/websocket"
 )
@@ -963,6 +964,11 @@ func (s *fakeRunReadStore) LoadRunHeader(_ context.Context, runID string) (opera
 		return operatorread.RunHeader{}, operatorread.ErrRunNotFound
 	}
 	return header, nil
+}
+
+func (s *fakeRunReadStore) LoadRunClockSchedules(ctx context.Context, runID string) ([]genericschedule.ClockReadback, error) {
+	header, err := s.LoadRunHeader(ctx, runID)
+	return header.ClockSchedules, err
 }
 
 func (s *fakeRunReadStore) ListRunHeaders(_ context.Context, opts operatorread.RunHeaderListOptions) ([]operatorread.RunHeader, string, error) {
