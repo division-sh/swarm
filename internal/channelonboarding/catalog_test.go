@@ -16,7 +16,7 @@ func TestChannelOnboardingCandidateCatalogRequiresOneExactCandidate(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := catalog.Resolve(CandidateSelection{Provider: "telegram"}); !errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), "--bundle "+left.Coordinate.BundleHash) || !strings.Contains(err.Error(), "--target "+right.Target.Selector) {
+	if _, err := catalog.Resolve(CandidateSelection{Provider: "telegram"}); !errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), "--source") || !strings.Contains(err.Error(), "--target "+right.Target.Selector) {
 		t.Fatalf("ambiguous shorthand error = %v", err)
 	}
 	resolved, err := catalog.Resolve(CandidateSelection{Provider: "telegram", BundleHash: right.Coordinate.BundleHash, InterfaceSelector: right.Interface.Selector, TargetSelector: right.Target.Selector})

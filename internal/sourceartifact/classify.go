@@ -206,7 +206,7 @@ func flowNodeLive(node *FlowNode) bool {
 }
 
 func isAdmittedYAML(label string, disposition Disposition) bool {
-	if disposition == DispositionDeclaration {
+	if disposition == DispositionDeclaration || disposition == DispositionManifest {
 		return true
 	}
 	return disposition == DispositionResource && strings.HasSuffix(strings.ToLower(path.Base(label)), ".yaml")

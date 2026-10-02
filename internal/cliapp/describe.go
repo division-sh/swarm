@@ -217,7 +217,7 @@ func writeDescribeText(out io.Writer, view authoringview.View) {
 	if out == nil {
 		return
 	}
-	fmt.Fprintf(out, "describe: source=%s\n", view.SourceHash)
+	fmt.Fprintf(out, "describe: source=%s\n", humanSourceIdentity(view.SourceHash, view.SourceLabel))
 	fmt.Fprintf(out, "source authority: %s\n", view.SourceAuthority)
 	fmt.Fprintln(out, "validation: structural; live readiness: not evaluated")
 	writeDescribeEvents(out, view.Root.Events, "")
@@ -613,7 +613,7 @@ func writeDescribeEvents(out io.Writer, events []authoringview.EventView, indent
 func describeQuietValues(view authoringview.View) []string {
 	values := make([]string, 0, len(view.Flows)+1)
 	if strings.TrimSpace(view.SourceHash) != "" {
-		values = append(values, strings.TrimSpace(view.SourceHash))
+		values = append(values, humanSourceIdentity(view.SourceHash, view.SourceLabel))
 	}
 	for _, flow := range view.Flows {
 		if id := strings.TrimSpace(flow.ID); id != "" {

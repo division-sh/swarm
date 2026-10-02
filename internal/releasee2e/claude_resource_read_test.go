@@ -66,14 +66,10 @@ func TestClaudeResourceReadSupportedServeRestart(t *testing.T) {
 					t.Fatalf("public prerequisite %v: %v\n%s", args, result.err, result.output)
 				}
 			}
-			start := func(hash string) *releaseServeProcess {
+			start := func() *releaseServeProcess {
 				requireDefaultMCPPortAvailable(t)
 				options := releaseProcessSpec{BinaryPath: binary, WorkingDir: root, ConfigPath: configPath, Store: backend, WorkspaceBackend: "docker", MCPListenPort: 8082, TokenFile: filepath.Join(root, "api-token"), Token: goldenAPIToken, Env: env, ShutdownGrace: goldenShutdownGrace}
-				if hash == "" {
-					options.Source = contracts
-				} else {
-					options.BundleHash = hash
-				}
+				options.Source = contracts
 				process := startReleaseServe(t, options)
 				ctx, cancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
 				defer cancel()
@@ -82,12 +78,11 @@ func TestClaudeResourceReadSupportedServeRestart(t *testing.T) {
 				}
 				return process
 			}
-			process := start("")
-			hash := goldenServedBundleHash(t, process.rpc, "live")
+			process := start()
 			runID := uuid.NewString()
 			var firstEvidence fullLifecycleEvidenceSnapshot
 			for turn := 1; turn <= 2; turn++ {
-				args := []string{"run", "start", "--connect", process.apiBase, "--bundle-hash", hash, "--run-id", runID, "--idempotency-key", runID, "--event", "task.assigned", "--payload", "payload.json", "--data", "worker/records.loaded=rows.jsonl", "--no-follow"}
+				args := []string{"run", "start", "--connect", process.apiBase, "--run-id", runID, "--idempotency-key", runID, "--event", "task.assigned", "--payload", "payload.json", "--data", "worker/records.loaded=rows.jsonl", "--no-follow"}
 				if turn == 2 {
 					args = []string{"agent", "directive", "release-worker", "read the same pinned references again", "--api-server", process.apiBase, "--run-id", runID, "--flow-instance", "worker", "--idempotency-key", uuid.NewString()}
 				}
@@ -136,7 +131,7 @@ func TestClaudeResourceReadSupportedServeRestart(t *testing.T) {
 					if err := process.stopAndWait(goldenShutdownGrace); err != nil {
 						t.Fatal(err)
 					}
-					process = start(hash)
+					process = start()
 					restored := captureFullLifecycleEvidence(t, process.rpc, runID)
 					for eventID, want := range firstEvidence.EventFacts {
 						if got := restored.EventFacts[eventID]; got != want {
@@ -172,7 +167,7 @@ func TestClaudeResourceReadSupportedServeRestart(t *testing.T) {
 			if len(receipts) != 2 || receipts[0].Resume != "" || receipts[1].Resume != receipts[0].Session || receipts[1].Session == receipts[0].Session || receipts[0].Definition != receipts[1].Definition || !reflect.DeepEqual(receipts[0].Row, receipts[1].Row) || !reflect.DeepEqual(receipts[0].Page, receipts[1].Page) {
 				t.Fatalf("public MCP identities/pinned rows across restart %+v", receipts)
 			}
-			t.Log("proof_surface=public compiled serve/hash restart/run start + turn-authorized HTTP MCP; deterministic provider, not genuine Claude/Telegram")
+			t.Log("proof_surface=public compiled serve/exact-tree restart/run start + turn-authorized HTTP MCP; deterministic provider, not genuine Claude/Telegram")
 		})
 	}
 }

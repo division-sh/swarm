@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -184,6 +186,38 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	approveMockDecisionCard(t, secondURL+"/v1/rpc", secondCardID)
 	waitForMockConnectorAttempts(t, backend, location, 2)
 	assertMockUsageReadback(t, secondURL+"/v1/rpc", mockSessionRunID(t, before), "phrase-bot")
+	t.Run("effective_frame_exact_source", func(t *testing.T) {
+		artifact, err := sourceartifact.AdmitDirectory(sourceRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, session := range before {
+			if session.AgentID != "phrase-bot" {
+				continue
+			}
+			args := []string{"agent", "frame", session.AgentID, "--run-id", session.RunID, "--flow-instance", session.FlowInstance, "--api-server", secondURL}
+			for _, machine := range []bool{false, true} {
+				var out, errOut bytes.Buffer
+				command := append([]string(nil), args...)
+				if machine {
+					command = append(command, "--json")
+				}
+				if code := executeCLIFrom(context.Background(), t.TempDir(), command, &out, &errOut, nil); code != 0 {
+					t.Fatalf("effective frame=%d %s / %s", code, &out, &errOut)
+				}
+				if machine {
+					var frame agentframe.Inspection
+					if err := json.Unmarshal(out.Bytes(), &frame); err != nil || frame.Session.BundleHash != artifact.BundleHash() || frame.SourceLabel != artifact.HumanLabel() || frame.Scope != agentframe.InspectionEffective {
+						t.Fatalf("effective frame lost exact source: %s / %v", &out, err)
+					}
+				} else if !strings.Contains(out.String(), artifact.HumanLabel()) || strings.Contains(out.String(), artifact.BundleHash()) {
+					t.Fatalf("human frame confused presentation with machine authority: %s", &out)
+				}
+			}
+			return
+		}
+		t.Fatal("real mock session has no phrase-bot frame")
+	})
 	if code := second.stop(); code != 0 {
 		t.Fatalf("second serve exit = %d\n%s", code, second.outputString())
 	}

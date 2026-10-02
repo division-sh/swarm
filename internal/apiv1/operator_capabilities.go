@@ -14,6 +14,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 type TestSetupStore interface {
@@ -160,11 +161,12 @@ type RunControlHandlerOptions struct {
 }
 
 type RunForkHandlerOptions struct {
-	Now          func() time.Time
-	Availability RunForkAvailabilityStore
-	Operations   RunForkOperationReader
-	Executor     RunForkExecutor
-	Idempotency  APIIdempotencyStore
+	SourceArtifacts sourceartifact.Reader
+	Now             func() time.Time
+	Availability    RunForkAvailabilityStore
+	Operations      RunForkOperationReader
+	Executor        RunForkExecutor
+	Idempotency     APIIdempotencyStore
 }
 
 type RuntimeControlHandlerOptions struct {

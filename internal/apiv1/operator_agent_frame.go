@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 type AgentFrameEffectiveResolver interface {
@@ -17,7 +18,9 @@ type AgentFrameEffectiveResolver interface {
 }
 
 type AgentFrameHandlerOptions struct {
-	Effective AgentFrameEffectiveResolver
+	Effective       AgentFrameEffectiveResolver
+	SourceArtifacts sourceartifact.Reader
+	Source          *sourceartifact.AdmittedSourceArtifact
 }
 
 func OperatorAgentFrameHandlers(opts AgentFrameHandlerOptions) map[string]MethodHandler {
@@ -25,14 +28,27 @@ func OperatorAgentFrameHandlers(opts AgentFrameHandlerOptions) map[string]Method
 		return nil
 	}
 	return map[string]MethodHandler{
-		"agent.frame": func(_ context.Context, req Request) (any, error) {
+		"agent.frame": func(ctx context.Context, req Request) (any, error) {
 			scope, err := requiredExactAgentFrameScalarParam(req.Params, "scope")
 			if err != nil {
 				return nil, err
 			}
 			switch agentframe.InspectionScope(scope) {
 			case agentframe.InspectionEffective:
-				return inspectEffectiveAgentFrame(opts.Effective, req.Params)
+				inspection, err := inspectEffectiveAgentFrame(opts.Effective, req.Params)
+				if err != nil {
+					return nil, err
+				}
+				if opts.Source != nil && opts.Source.BundleHash() == inspection.Session.BundleHash {
+					inspection.SourceLabel = opts.Source.HumanLabel()
+				} else if opts.SourceArtifacts != nil {
+					label, err := sourceartifact.LoadHumanLabel(ctx, opts.SourceArtifacts, inspection.Session.BundleHash)
+					if err != nil {
+						return nil, err
+					}
+					inspection.SourceLabel = label
+				}
+				return inspection, nil
 			default:
 				return nil, NewInvalidParamsError(map[string]any{"field": "scope", "reason": "must be effective; static catalog inspection is retired"})
 			}

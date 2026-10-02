@@ -22,7 +22,8 @@ func TestForkCommandUsesRunForkRPCAndRenders(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	sourceRunID := "11111111-1111-1111-1111-111111111111"
 	forkEventID := "22222222-2222-2222-2222-222222222222"
-	bundleHash := validBundleHash("d")
+	sourceDir, artifact := identitySource2376(t)
+	bundleHash := artifact.BundleHash()
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/rpc" {
@@ -42,7 +43,7 @@ func TestForkCommandUsesRunForkRPCAndRenders(t *testing.T) {
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
 		"run", "fork", sourceRunID,
 		"--allow-source-freeze",
-		"--bundle-hash", bundleHash,
+		"--source", sourceDir,
 		"--at-event", forkEventID,
 		"--idempotency-key", "idem-fork-1",
 	}, &stdout, &stderr, testRootCommandOptions(server))
@@ -56,7 +57,7 @@ func TestForkCommandUsesRunForkRPCAndRenders(t *testing.T) {
 		"fork_event_id":       forkEventID,
 		"idempotency_key":     "idem-fork-1",
 	})
-	for _, want := range []string{"Fork created", "source_run_id=" + sourceRunID, "source_status=forked source_frozen=true", "fork_run_id=33333333-3333-3333-3333-333333333333", "bundle_hash=" + bundleHash, "owner=run.fork.selected_contracts.v1"} {
+	for _, want := range []string{"Fork created", "source_run_id=" + sourceRunID, "source_status=forked source_frozen=true", "fork_run_id=33333333-3333-3333-3333-333333333333", "source=" + artifact.BundleHash()[len("bundle-v2:sha256:"):len("bundle-v2:sha256:")+7], "owner=run.fork.selected_contracts.v1"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
@@ -120,8 +121,8 @@ func TestForkCommandRejectsInvalidInputBeforeRequest(t *testing.T) {
 		{name: "blank source", args: []string{"run", "fork", " "}, wantStderr: "source run id is required"},
 		{name: "invalid source", args: []string{"run", "fork", "bad id!"}, wantStderr: "source run id must be a UUID"},
 		{name: "opaque non uuid source", args: []string{"run", "fork", "run_opaque-1"}, wantStderr: "source run id must be a UUID"},
-		{name: "invalid bundle hash", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--bundle-hash", "sha256:abc"}, wantStderr: "--bundle-hash must match bundle-v2:sha256:<64 lowercase hex>"},
-		{name: "blank bundle hash", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--bundle-hash", ""}, wantStderr: "--bundle-hash must be non-empty"},
+		{name: "retired bundle hash", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--bundle-hash", "sha256:abc"}, wantStderr: "unknown flag"},
+		{name: "blank source directory", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--source", ""}, wantStderr: "--source must be a nonempty directory"},
 		{name: "invalid at event", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--at-event", "bad id!"}, wantStderr: "--at-event must be a UUID"},
 		{name: "opaque non uuid at event", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--at-event", "event_opaque-1"}, wantStderr: "--at-event must be a UUID"},
 		{name: "blank at event", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--at-event", ""}, wantStderr: "--at-event must be non-empty"},

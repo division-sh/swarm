@@ -1352,7 +1352,7 @@ func materializedTargetBundleWithHandler(t *testing.T, flowID, nodeID, eventType
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{flowID: {}},
 	}
 	admitted := loadTargetRouteTempBundle(t, map[string]string{
-		"manifest.yaml":                        "name: target-route-test\nversion: 1.0.0\n",
+		"manifest.yaml":                        "name: target-route-test\nversion: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":                          "name: target-route-test\n",
 		filepath.Join(flowID, "schema.yaml"):   fmt.Sprintf("name: %s\nstages:\n  active: {initial: true}\n", flowID),
 		filepath.Join(flowID, "entities.yaml"): "test_entity:\n  items:\n    type: '[text]'\n  expected:\n    type: '[text]'\n",
@@ -3561,6 +3561,7 @@ func routedRootNodeFixtureFiles() map[string]string {
 	return map[string]string{
 		"manifest.yaml": `name: test
 version: 1.0.0
+platform_version: '*'
 `,
 		"schema.yaml": "name: test\n",
 		"events.yaml": `opco.spinup_requested:
@@ -3631,7 +3632,7 @@ func routedRootInputFlowNodeBundle() *runtimecontracts.WorkflowContractBundle {
 func routedTopLevelProjectNodeBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadTargetRouteTempBundle(t, map[string]string{
-		"manifest.yaml": "name: top-level-project-node\nversion: 1.0.0\n",
+		"manifest.yaml": "name: top-level-project-node\nversion: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":   "name: top-level-project-node\npins:\n  inputs:\n    events: [thing.created]\n",
 		"events.yaml":   "thing.created:\n  entity_id: string\n",
 		"nodes.yaml": `reviewer:

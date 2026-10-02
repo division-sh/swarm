@@ -21,8 +21,6 @@ type ServeOptions struct {
 	DataSource                       string
 	WorkspaceBackend                 string
 	WorkspaceBackendSet              bool
-	BundleHash                       string
-	BundleHashes                     []string
 	PlatformSpecPath                 string
 	StoreMode                        string
 	StoreModeSet                     bool

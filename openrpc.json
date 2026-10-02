@@ -13748,6 +13748,10 @@
             ],
             "type": "object"
           },
+          "source_label": {
+            "description": "Display-only exact admitted or stored source label.",
+            "type": "string"
+          },
           "turn_context": {
             "additionalProperties": false,
             "properties": {
@@ -14716,10 +14720,14 @@
       },
       "BundleIdentity": {
         "additionalProperties": false,
-        "description": "Server bundle identity returned by health.check. bundle_hash is the active canonical v1 bundle identity and the value clients use for create-new-work bundle scope; workflow_name and workflow_version are human-friendly labels. Server-local filesystem paths are intentionally not exposed.\n",
+        "description": "Exact server source identity returned by health.check. bundle_hash owns new-work scope; source_label is display only. Existing workflow fields remain exact readback, never source selection. Server-local paths are not exposed.",
         "properties": {
           "bundle_hash": {
             "$ref": "#/components/schemas/BundleHash"
+          },
+          "source_label": {
+            "description": "Admitted metadata name@version, matching directory@hash7, or stored hash7 alone; never an authority key.",
+            "type": "string"
           },
           "workflow_name": {
             "type": "string"
@@ -15281,6 +15289,10 @@
           },
           "recovery": {
             "$ref": "#/components/schemas/ConnectedChannelRecovery"
+          },
+          "source_label": {
+            "description": "Display-only artifact label; exact activation and operation coordinates remain unchanged.",
+            "type": "string"
           }
         },
         "required": [
@@ -21038,6 +21050,10 @@
                 "description": "True only when activation permanently froze the source; false when source advancement selected branch divergence and preserved the source.",
                 "type": "boolean"
               },
+              "source_label": {
+                "description": "Display-only label derived from exact stored artifact bytes.",
+                "type": "string"
+              },
               "source_run_id": {
                 "$ref": "#/components/schemas/OpaqueId"
               },
@@ -21099,6 +21115,10 @@
                 "description": "True only when activation permanently froze the source; false when source advancement selected branch divergence and preserved the source.",
                 "type": "boolean"
               },
+              "source_label": {
+                "description": "Display-only label derived from exact stored artifact bytes.",
+                "type": "string"
+              },
               "source_run_id": {
                 "$ref": "#/components/schemas/OpaqueId"
               },
@@ -21126,6 +21146,10 @@
       "RunHeader": {
         "additionalProperties": false,
         "properties": {
+          "bundle_hash": {
+            "$ref": "#/components/schemas/BundleHash",
+            "description": "Exact durable run source; default fork pin resolution consumes this, not the health source."
+          },
           "continued_as_run_id": {
             "$ref": "#/components/schemas/OpaqueId",
             "description": "Present on a source frozen by a freeze-style fork; identifies the one run that continues its state."

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -103,6 +104,10 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 			if err != nil {
 				return fmt.Errorf("resolve fork bundle identity: %w", err)
 			}
+			target, err := contracts.SourceExecutionIdentity(identity.SourceArtifactFact.BundleHash())
+			if err != nil {
+				return err
+			}
 			if err := requireOriginalFanOutCarriage(ctx, runForkSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 				return s.RunLifecyclePostgresOwner.RequireActiveSourceTx(ctx, tx, runID)
 			}), plan, req.OriginalLoopCarriage); err != nil {
@@ -174,7 +179,7 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 			for _, entity := range plan.Entities {
 				if err := materializeRunForkEntityState(forkCtx, s.DecisionPostgresOwner, s.MaterializeRunForkProposedEffectCardsTx, true, tx, attempt, activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 					return s.RunLifecyclePostgresOwner.RequireActiveSourceTx(ctx, tx, runID)
-				}), forkRunID, plan, entity, metadata[entity.EntityID], now); err != nil {
+				}), forkRunID, target, plan, entity, metadata[entity.EntityID], now); err != nil {
 					return err
 				}
 			}
@@ -268,6 +273,10 @@ func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork
 			if err != nil {
 				return fmt.Errorf("resolve fork bundle identity: %w", err)
 			}
+			target, err := contracts.SourceExecutionIdentity(identity.SourceArtifactFact.BundleHash())
+			if err != nil {
+				return err
+			}
 			if err := requireOriginalFanOutCarriage(txctx, runForkSourceOwnerFunc(source), plan, req.OriginalLoopCarriage); err != nil {
 				return err
 			}
@@ -336,7 +345,7 @@ func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork
 			}
 			forkCtx := runtimecorrelation.WithRunID(txctx, forkRunID)
 			for _, entity := range plan.Entities {
-				if err := materializeRunForkEntityState(forkCtx, s.DecisionSQLiteOwner, s.MaterializeRunForkProposedEffectCardsTx, false, tx, attempt, source, forkRunID, plan, entity, metadata[entity.EntityID], now); err != nil {
+				if err := materializeRunForkEntityState(forkCtx, s.DecisionSQLiteOwner, s.MaterializeRunForkProposedEffectCardsTx, false, tx, attempt, source, forkRunID, target, plan, entity, metadata[entity.EntityID], now); err != nil {
 					return err
 				}
 			}
@@ -622,7 +631,7 @@ func projectRunForkEntityIdentity(sourceRunID, forkRunID, entityID, flowInstance
 	return projection.Fork, err
 }
 
-func materializeRunForkEntityState(ctx context.Context, decisions runForkDecisionMaterializer, materializeProposed runForkProposedEffectMaterializer, postgres bool, tx *sql.Tx, attempt *mutationprotocol.Attempt, runLifecycle privatemutationlog.ActiveRunSourceOwner, forkRunID string, plan runfork.RunForkPlan, entity runfork.RunForkEntityState, meta runForkEntityMetadata, now time.Time) error {
+func materializeRunForkEntityState(ctx context.Context, decisions runForkDecisionMaterializer, materializeProposed runForkProposedEffectMaterializer, postgres bool, tx *sql.Tx, attempt *mutationprotocol.Attempt, runLifecycle privatemutationlog.ActiveRunSourceOwner, forkRunID string, target contracts.BundleIdentity, plan runfork.RunForkPlan, entity runfork.RunForkEntityState, meta runForkEntityMetadata, now time.Time) error {
 	projection, err := projectRunForkEntityOwnership(plan.SourceRunID, forkRunID, entity.EntityID, meta.FlowInstance)
 	if err != nil {
 		return err
@@ -652,7 +661,7 @@ func materializeRunForkEntityState(ctx context.Context, decisions runForkDecisio
 	if err != nil {
 		return fmt.Errorf("encode fork gates for entity %s: %w", entityID, err)
 	}
-	forkAccumulator, gateBindings, err := forkGateActivationState(forkAccumulator, forkRunID, meta.FlowInstance, entityID)
+	forkAccumulator, gateBindings, err := forkGateActivationState(forkAccumulator, forkRunID, meta.FlowInstance, entityID, target.BundleHash)
 	if err != nil {
 		return fmt.Errorf("fork gate state for entity %s: %w", entityID, err)
 	}
@@ -678,13 +687,13 @@ func materializeRunForkEntityState(ctx context.Context, decisions runForkDecisio
 	if err := attempt.AddFact(forkRunID, privaterunforkrevision.FamilyEntityMetadata, entityID); err != nil {
 		return err
 	}
-	if err := materializeRunForkDecisionCards(ctx, decisions, attempt, forkRunID, projection, gateBindings, now); err != nil {
+	if err := materializeRunForkDecisionCards(ctx, decisions, attempt, forkRunID, target, projection, gateBindings, now); err != nil {
 		return err
 	}
 	if materializeProposed == nil {
 		return fmt.Errorf("fork proposed-effect materialization owner is required")
 	}
-	if err := materializeProposed(ctx, attempt, plan.SourceRunID, forkRunID, projection, plan.ForkPoint, correspondence, now); err != nil {
+	if err := materializeProposed(ctx, attempt, plan.SourceRunID, forkRunID, target, projection, plan.ForkPoint, correspondence, now); err != nil {
 		return err
 	}
 	after := runtimemutationlog.EntityStateProjection{

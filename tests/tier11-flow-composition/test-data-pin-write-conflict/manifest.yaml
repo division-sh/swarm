@@ -1,4 +1,3 @@
 name: test-data-pin-write-conflict
 version: 1.0.0
-description: Two sibling child flows declare the same writes data pin. Boot should fail.
 platform_version: ">=0.7.0 <0.8.0"

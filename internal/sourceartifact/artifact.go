@@ -73,6 +73,23 @@ func (e Entry) Disposition() Disposition { return e.disposition }
 func (e Entry) Bytes() []byte            { return append([]byte(nil), e.body...) }
 func (e Entry) Size() int                { return len(e.body) }
 
+type MemberEvidence struct {
+	Label       string `json:"label"`
+	Disposition string `json:"disposition"`
+	Bytes       int    `json:"bytes"`
+}
+
+func (a *AdmittedSourceArtifact) MemberTable() []MemberEvidence {
+	if a == nil {
+		return nil
+	}
+	table := make([]MemberEvidence, 0, len(a.entries))
+	for _, entry := range a.entries {
+		table = append(table, MemberEvidence{Label: entry.Label(), Disposition: entry.Disposition().String(), Bytes: entry.Size()})
+	}
+	return table
+}
+
 type FlowNode struct {
 	flowPath     string
 	declarations map[string]string
@@ -130,12 +147,14 @@ func (n *FlowNode) Children() []*FlowNode {
 }
 
 type AdmittedSourceArtifact struct {
-	entries    []Entry
-	byLabel    map[string]int
-	yaml       map[string]yamlsource.Snapshot
-	root       *FlowNode
-	logical    []byte
-	bundleHash string
+	directoryLabel string
+	entries        []Entry
+	byLabel        map[string]int
+	yaml           map[string]yamlsource.Snapshot
+	manifests      map[string]Manifest
+	root           *FlowNode
+	logical        []byte
+	bundleHash     string
 }
 
 func newArtifact(entries []Entry) (*AdmittedSourceArtifact, error) {
@@ -149,6 +168,7 @@ func newArtifact(entries []Entry) (*AdmittedSourceArtifact, error) {
 	owned := make([]Entry, len(entries))
 	byLabel := make(map[string]int, len(entries))
 	yamlSnapshots := make(map[string]yamlsource.Snapshot)
+	manifests := make(map[string]Manifest)
 	folded := make(map[string]string, len(entries))
 	total := 0
 	for index, candidate := range entries {
@@ -187,6 +207,13 @@ func newArtifact(entries []Entry) (*AdmittedSourceArtifact, error) {
 				return nil, fmt.Errorf("parse admitted YAML %s: %w", label, err)
 			}
 			yamlSnapshots[label] = snapshot
+			if disposition == DispositionManifest {
+				manifest, err := projectManifest(snapshot.Document(label).Root())
+				if err != nil {
+					return nil, err
+				}
+				manifests[label] = manifest
+			}
 		}
 	}
 	sort.Slice(owned, func(i, j int) bool { return owned[i].label < owned[j].label })
@@ -204,7 +231,7 @@ func newArtifact(entries []Entry) (*AdmittedSourceArtifact, error) {
 	}
 	digest := sha256.Sum256(logical)
 	return &AdmittedSourceArtifact{
-		entries: owned, byLabel: byLabel, yaml: yamlSnapshots, root: root,
+		entries: owned, byLabel: byLabel, yaml: yamlSnapshots, manifests: manifests, root: root,
 		logical: logical, bundleHash: HashPrefix + hex.EncodeToString(digest[:]),
 	}, nil
 }

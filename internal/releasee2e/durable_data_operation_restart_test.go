@@ -121,7 +121,7 @@ func TestDurableDataOperationAggregatePublicRestartBothStores(t *testing.T) {
 			createdID, rejectedID := uuid.NewString(), uuid.NewString()
 			create := func(id, path string, accepted bool) {
 				result := runReleaseCommand(t, goldenStartupTimeout, project, env, "", binary,
-					"run", "start", "--connect", p.apiBase, "--bundle-hash", hash, "--run-id", id,
+					"run", "start", "--connect", p.apiBase, "--run-id", id,
 					"--idempotency-key", "receipt-"+id, "--data", "item.registered="+path, "--no-follow")
 				if accepted && (result.err != nil || !strings.Contains(result.output, "run_id="+id)) {
 					t.Fatalf("compiled creation/reconstruction: %v\n%s", result.err, result.output)

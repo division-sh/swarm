@@ -60,7 +60,7 @@ func assertSelectedRootRejectsPrivatePublication(t *testing.T, process *releaseS
 		}
 		cli := runReleaseCommand(t, goldenStartupTimeout, cwd, env, "", binary,
 			"event", "publish", event, "--payload-json", string(payloadJSON),
-			"--bundle-hash", hash, "--idempotency-key", "reject-cli-"+event,
+			"--idempotency-key", "reject-cli-"+event,
 			"--config", config, "--api-server", process.apiBase, "--api-token-file", token)
 		if cli.err == nil || !strings.Contains(cli.output, "EVENT_NOT_DECLARED") {
 			t.Fatalf("private CLI input %s: %v\n%s", event, cli.err, cli.output)

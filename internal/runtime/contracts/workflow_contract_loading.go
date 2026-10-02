@@ -159,6 +159,9 @@ func LoadWorkflowContractBundleFromArtifact(repoRoot string, artifact *sourceart
 	if err := loadYAMLFile(platformSpecFile, &bundle.Platform); err != nil {
 		return nil, err
 	}
+	if err := artifact.ValidatePlatformVersion(bundle.Platform.Platform.Version); err != nil {
+		return nil, err
+	}
 	projectPacks, err := packartifact.LoadProjectPackSetFS(artifact.FS())
 	if err != nil {
 		return nil, err

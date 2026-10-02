@@ -7,34 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/store"
 )
-
-func ServeBundleHashes(opts ServeOptions) ([]string, error) {
-	candidates := []string{}
-	if hash := strings.TrimSpace(opts.BundleHash); hash != "" {
-		candidates = append(candidates, hash)
-	}
-	candidates = append(candidates, opts.BundleHashes...)
-	out := make([]string, 0, len(candidates))
-	seen := map[string]struct{}{}
-	for _, candidate := range candidates {
-		hash := strings.TrimSpace(candidate)
-		if hash == "" {
-			return nil, fmt.Errorf("--bundle-hash must be non-empty")
-		}
-		if err := runtimecontracts.ValidateBundleHash(hash); err != nil {
-			return nil, fmt.Errorf("--bundle-hash must be bundle-v2:sha256:<64 lowercase hex>")
-		}
-		if _, ok := seen[hash]; ok {
-			return nil, fmt.Errorf("--bundle-hash values must be unique")
-		}
-		seen[hash] = struct{}{}
-		out = append(out, hash)
-	}
-	return out, nil
-}
 
 func NormalizeSourceRoot(path string) (string, error) {
 	root := strings.TrimSpace(path)

@@ -2,13 +2,34 @@ package sourceartifact
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func Test2376IndependentHashRecomputation(t *testing.T) {
+	const preimage = "737761726d2d62756e646c652d763200000000000000000101000000000000000b736368656d612e79616d6c00000000000000126465736372697074696f6e3a20726f6f740a"
+	const hash = "bundle-v2:sha256:1b776d7b397fecaaefceaf4cbfab1e7fb5cf36f6cc2c1958d575463bf01a22d9"
+	framed, err := hex.DecodeString(preimage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(framed)
+	root := t.TempDir()
+	writeTestFile(t, root, "schema.yaml", "description: root\n")
+	artifact, err := AdmitDirectory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if HashPrefix+hex.EncodeToString(digest[:]) != hash || artifact.BundleHash() != hash || !bytes.Equal(artifact.LogicalBlob(), framed) {
+		t.Fatal("artifact does not match independently framed normative vector")
+	}
+}
 
 func TestAdmitDirectoryBuildsFiniteFlowTreeAndBundleV2(t *testing.T) {
 	root := t.TempDir()
@@ -164,20 +185,20 @@ func TestAdmissionLinksDoNotChangeWithSelectedRootSpelling(t *testing.T) {
 	}
 }
 
-func TestManifestIsExactArtifactDataButNotSemanticYAML(t *testing.T) {
+func TestManifestIsExactArtifactDataAndTypedMetadata(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, root, "schema.yaml", "name: root\n")
-	writeTestFile(t, root, "manifest.yaml", "distribution: [metadata\n")
+	writeTestFile(t, root, "manifest.yaml", manifest2376)
 	artifact, err := AdmitDirectory(root)
 	if err != nil {
 		t.Fatalf("AdmitDirectory: %v", err)
 	}
 	entry, ok := artifact.Entry("manifest.yaml")
-	if !ok || string(entry.Bytes()) != "distribution: [metadata\n" {
+	if !ok || string(entry.Bytes()) != manifest2376 {
 		t.Fatalf("manifest artifact member = %#v, %v", entry, ok)
 	}
-	if _, ok := artifact.YAML("manifest.yaml"); ok {
-		t.Fatal("manifest.yaml became an admitted semantic YAML document")
+	if manifest, ok := artifact.RootManifest(); !ok || manifest.Name != "Shop Reception" || manifest.Version != "1.2.3" {
+		t.Fatalf("root manifest = %#v, %v", manifest, ok)
 	}
 }
 
@@ -197,7 +218,7 @@ func TestDecodeLogicalRejectsNonCanonicalOrder(t *testing.T) {
 func TestBundleV2LogicalFramingIncludesCanonicalDisposition(t *testing.T) {
 	artifact, err := newArtifact([]Entry{
 		{label: "schema.yaml", body: []byte("name: root\n")},
-		{label: "manifest.yaml", body: []byte("name: package\n")},
+		{label: "manifest.yaml", body: []byte(manifest2376)},
 		{label: "prompts/worker.md", body: []byte("worker\n")},
 		{label: "README.md", body: []byte("read me\n")},
 	})
@@ -212,7 +233,7 @@ func TestBundleV2LogicalFramingIncludesCanonicalDisposition(t *testing.T) {
 		body  string
 	}{
 		{byte(DispositionDocument), "README.md", "read me\n"},
-		{byte(DispositionManifest), "manifest.yaml", "name: package\n"},
+		{byte(DispositionManifest), "manifest.yaml", manifest2376},
 		{byte(DispositionResource), "prompts/worker.md", "worker\n"},
 		{byte(DispositionDeclaration), "schema.yaml", "name: root\n"},
 	} {

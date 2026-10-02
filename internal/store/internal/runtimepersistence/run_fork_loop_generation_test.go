@@ -20,7 +20,8 @@ func TestForkGateActivationStateRemintsAuthorityIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw := runtimeengine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets()
-	forkedRaw, bindings, err := forkGateActivationState(raw, "fork-run", "launch/review", "entity-1")
+	targetHash := "bundle-v2:sha256:" + strings.Repeat("b", 64)
+	forkedRaw, bindings, err := forkGateActivationState(raw, "fork-run", "launch/review", "entity-1", targetHash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +36,7 @@ func TestForkGateActivationStateRemintsAuthorityIdentity(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("forked gate = %#v found=%v err=%v", forked, found, err)
 	}
-	if forked.ActivationID == source.ActivationID || forked.CardID == source.CardID || forked.Status != gateruntime.StatusOpen {
+	if forked.ActivationID == source.ActivationID || forked.CardID == source.CardID || forked.Status != gateruntime.StatusOpen || forked.BundleHash != targetHash || bindings[0].Source.BundleHash != source.BundleHash {
 		t.Fatalf("forked gate retained source authority: fork=%#v source=%#v", forked, source)
 	}
 }

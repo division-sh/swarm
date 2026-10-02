@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -47,6 +48,7 @@ type RunForkExecutionRequest struct {
 }
 
 type RunForkExecutionResult struct {
+	SourceLabel            string            `json:"source_label"`
 	Owner                  string            `json:"owner"`
 	SourceRunID            string            `json:"source_run_id"`
 	SourceRunStatus        string            `json:"source_run_status"`
@@ -177,7 +179,7 @@ func executeRunFork(ctx context.Context, req Request, opts RunForkHandlerOptions
 				return nil, runForkError(params.SourceRunID, params.ForkEventID, fmt.Errorf("durable fork operation disagrees with request coordinates"))
 			}
 			if stored.Status == runfork.ForkOperationActivated {
-				return projectForkOperationResult(stored)
+				return projectForkOperationResult(ctx, opts.SourceArtifacts, stored)
 			}
 			if stored.Status != runfork.ForkOperationMaterialized {
 				return nil, runForkError(params.SourceRunID, params.ForkEventID, fmt.Errorf("durable fork operation ended with %s", stored.Status))
@@ -242,7 +244,7 @@ func executeRunFork(ctx context.Context, req Request, opts RunForkHandlerOptions
 			diaglog.ProcessLog(diaglog.LevelWarn, "api", "acknowledged run.fork cleanup failed",
 				"source_run_id", canonical.SourceRunID, "fork_run_id", stored.ForkRunID, "error", executionErr.Error())
 		}
-		return projectForkOperationResult(stored)
+		return projectForkOperationResult(ctx, opts.SourceArtifacts, stored)
 	}
 	if executionErr != nil {
 		return nil, runForkError(params.SourceRunID, params.ForkEventID, executionErr)
@@ -250,7 +252,7 @@ func executeRunFork(ctx context.Context, req Request, opts RunForkHandlerOptions
 	return nil, runForkError(params.SourceRunID, params.ForkEventID, fmt.Errorf("run.fork returned without a durable activation result"))
 }
 
-func projectForkOperationResult(record runfork.ForkOperationRecord) (RunForkExecutionResult, error) {
+func projectForkOperationResult(ctx context.Context, artifacts sourceartifact.Reader, record runfork.ForkOperationRecord) (RunForkExecutionResult, error) {
 	if err := record.Validate(); err != nil {
 		return RunForkExecutionResult{}, err
 	}
@@ -272,6 +274,13 @@ func projectForkOperationResult(record runfork.ForkOperationRecord) (RunForkExec
 	}
 	if err := validateRunForkExecutionResult(result); err != nil {
 		return RunForkExecutionResult{}, err
+	}
+	if artifacts != nil {
+		label, err := sourceartifact.LoadHumanLabel(ctx, artifacts, result.BundleHash)
+		if err != nil {
+			return RunForkExecutionResult{}, err
+		}
+		result.SourceLabel = label
 	}
 	return result, nil
 }

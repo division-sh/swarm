@@ -30,7 +30,7 @@ func CopyReceiverInitializationGeometry(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
-		"manifest.yaml": "name: receiver-initialization-geometry\nversion: 1.0.0\n",
+		"manifest.yaml": "name: receiver-initialization-geometry\nversion: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml": `name: receiver-initialization-geometry
 pins:
   inputs:

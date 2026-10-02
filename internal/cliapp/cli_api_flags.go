@@ -71,6 +71,7 @@ func cliAPIConnectionFlagAfterLeafCommand(prefix []string) bool {
 		{"agent", "deliveries"},
 		{"agent", "diagnose"},
 		{"agent", "view"},
+		{"agent", "frame"},
 		{"agent", "restart"},
 		{"agent", "replay"},
 		{"agent", "directive"},

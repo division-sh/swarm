@@ -232,7 +232,8 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 	}
 	// #2486 adds the accepted-base fixture-relocation ratchet; no root is removed.
 	// #2241 adds the backend/delay isolation proof for the authorized reporter ceiling.
-	want := []int{162, 14, 5, 1}
+	// #2376 adds one manifest-reader ledger ratchet without moving existing roots.
+	want := []int{163, 14, 5, 1}
 	for i, group := range groups {
 		if len(group) != want[i] {
 			t.Fatalf("%s census=%d, want reviewed %d; account new roots explicitly", conformance2394Units[i], len(group), want[i])
@@ -242,6 +243,10 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 		}
 	}
 	const preparedFaultProof = "TestSemanticProofPreparedFaultMatchesRawBothStores"
+	const manifestReaderProof = "Test2376ManifestReaderLedgerIsAdditive"
+	if i := sort.SearchStrings(groups[0], manifestReaderProof); i == len(groups[0]) || groups[0][i] != manifestReaderProof {
+		t.Fatalf("#2376 manifest reader proof missing from %s", conformance2394Units[0])
+	}
 	const relocationProof = "TestCatalogFixtureDecodeRelocationPreservesAcceptedBaseBudget"
 	if i := sort.SearchStrings(groups[0], relocationProof); i == len(groups[0]) || groups[0][i] != relocationProof {
 		t.Fatalf("#2486 relocation proof missing from %s", conformance2394Units[0])
