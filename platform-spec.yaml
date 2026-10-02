@@ -12494,7 +12494,10 @@ flow_model:
                 signing_secret: webhook_signing.telegram
         rules:
         - activation is explicit and is never inferred from ingress
-        - 'activation: standing is valid only for an eligible canonical keyless no-argument flow constructor; runtime declaration and boot verification consume that constructor contract, not contained-flow singleton resolution'
+        - 'activation: standing is valid only when the declaring flow and every ancestor, including the root, have eligible canonical keyless no-argument constructors; keyed ancestry refuses before any service, generation, run, or header mutation. Runtime declaration, reconstructed-source admission, and boot verification consume that constructor contract, not contained-flow singleton resolution'
+        - 'Each independently selected standing generation constructs the complete eligible root tree through the canonical constructor in one activation commit, recursively including all keyless descendants and skipping keyed branches. The root coordinate belongs to that generation run; the returned standing target is the exact declaring descendant with its constructed parent identity, never a service-only subtree or a shared service generation'
+        - 'Restart verifies the complete committed root tree, canonical headers, and iff-declared field companions before attachment or standing-set publication. Missing or mismatched descendants refuse without constructing replacements. Reset constructs a fresh tree under the new selected generation; attachment retry preserves construction and creating receipts'
+        - 'Standing preparation remains non-executable: process topology may be staged before the startup grant, but timers and committed initial-entry/creation publication finalize only after Manager startup. A construction failure prevents publication of a partial standing target set'
         - standing activation without ingress is valid for timer-driven or connect-fed services
         - ingress requires activation: standing and defaults alias to the package flow id
         - 'ingress alias is exactly one URL path segment matching [A-Za-z0-9][A-Za-z0-9._-]* so every verified alias is addressable as /webhooks/{alias}/{provider}'
@@ -18308,6 +18311,13 @@ run_model:
       status, stage-entry, creation, update and termination clocks through fixed-revision metadata. Mutation bookkeeping
       time is not stage-entry time. Only exact instance/parent ownership is projected. It does not create readiness
       or initial-materialization receipts.
+      Ordinary and selected-contract activation inventory every canonical constructed header through the same strict
+      transaction-local header/optional-fields reader, including fieldless instances; state-only imports do not count
+      as executable instances. The public MaterializedEntityCount is this constructed-instance count, not a count of
+      entity_state rows. An existing replay receiver must match the exact fixed-revision historical header projection,
+      declared template, route, entity contract, lifecycle/configuration and declared fields before replay mutation.
+      Missing, foreign, malformed, state-only or contradictory evidence refuses without repair. Optional field rows
+      own business fields only; their obsolete lifecycle copies cannot override or veto canonical header progress.
       Root stage-entry projection retains flow scope `.` and rebinds only the run, entity, instance ID and instance
       path to the fork run. The recorded occurrence and original lineage remain unchanged; a run-ID-as-scope
       spelling is contradictory evidence, not a compatibility form.

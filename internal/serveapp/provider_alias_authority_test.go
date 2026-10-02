@@ -21,9 +21,13 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/providertriggers"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"gopkg.in/yaml.v3"
 )
@@ -80,6 +84,7 @@ func runProviderAliasAuthorityScenario(t *testing.T, scenario providerAliasScena
 			}
 			root := writeProviderAliasAuthorityFixture(t, scenario)
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
+			requireIndependentStandingRootTrees(t, rt, scenario)
 			baseURL := strings.TrimSuffix(rt.Endpoint, "/v1/rpc")
 			for aliasIndex, alias := range []string{"alpha", "beta"} {
 				for shapeIndex, shape := range []string{"text", "callback"} {
@@ -160,6 +165,51 @@ func runProviderAliasAuthorityScenario(t *testing.T, scenario providerAliasScena
 				requireProviderAliasRootConnection(t, rt, scenario.alphaReceiver)
 			}
 		})
+	}
+}
+
+func requireIndependentStandingRootTrees(t *testing.T, rt servedControlProofRuntime, scenario providerAliasScenario) {
+	t.Helper()
+	source := rt.Runtime.Options.WorkflowModule.SemanticSource()
+	bundle, found := semanticview.Bundle(source)
+	if !found {
+		t.Fatal("standing tree proof requires admitted source")
+	}
+	var reader pipeline.WorkflowTargetPersistenceReader = rt.SQLite
+	if rt.Postgres != nil {
+		reader = rt.Postgres
+	}
+	seen := map[string]bool{}
+	for _, alias := range []string{"alpha", "beta"} {
+		var runID string
+		if err := rt.DB.QueryRow(`SELECT current_run_id FROM standing_services WHERE current_bundle_hash=$1 AND flow_path=$2`, rt.BundleHash, scenario.source(alias)).Scan(&runID); err != nil {
+			t.Fatal(err)
+		}
+		if seen[runID] {
+			t.Fatal("independent standing services shared a generation run")
+		}
+		seen[runID] = true
+		for _, view := range bundle.FlowViews() {
+			if !view.Schema.Instance.Empty() {
+				continue
+			}
+			expected, err := flowidentity.StandingForGeneration(source, view.Paths.FlowPath, runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			owner, err := flowidentity.NewRunScopedFlowInstance(runID, expected.Route())
+			if err != nil {
+				t.Fatal(err)
+			}
+			target, err := reader.LoadWorkflowTargetPersistence(context.Background(), owner, identity.NormalizeEntityID(expected.EntityID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			stored, err := target.DecodeComplete(owner.Route, identity.NormalizeEntityID(expected.EntityID))
+			if err != nil || stored.WorkflowName != expected.TemplateID || stored.ParentEntityID != expected.ParentEntityID || stored.ParentFlowInstance != expected.ParentRoute.FlowInstance {
+				t.Fatalf("standing %s generation lost root-tree member %s: %+v err=%v", alias, expected.InstancePath, stored, err)
+			}
+		}
 	}
 }
 

@@ -1229,6 +1229,14 @@ func (s *flowActivationTestInstanceStore) Load(_ context.Context, flowIdentity r
 	return instance, ok, nil
 }
 
+func (s *flowActivationTestInstanceStore) LoadConstructedFlowInstance(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, entityID identity.EntityID) (runtimepipeline.WorkflowInstance, bool, error) {
+	instance, found, err := s.Load(ctx, owner)
+	if found && instance.EntityID != entityID.String() {
+		return runtimepipeline.WorkflowInstance{}, false, fmt.Errorf("constructed fixture identity mismatch")
+	}
+	return instance, found, err
+}
+
 func (s *flowActivationTestInstanceStore) LoadRouteRecoveryProjection(_ context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstanceRouteRecoveryProjection, error) {
 	flowIdentity = flowIdentity.Normalize()
 	route := flowIdentity.Route

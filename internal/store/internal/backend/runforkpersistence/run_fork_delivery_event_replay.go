@@ -20,6 +20,7 @@ import (
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	"github.com/google/uuid"
 )
 
@@ -147,12 +148,20 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, attempt *m
 			return result, fmt.Errorf("project source delivery %s into fork ownership: %w", sourceDeliveryID, err)
 		}
 		if forkRoute.Target.ExistingEntity() {
-			var childFlow string
-			if err := tx.QueryRowContext(ctx, `SELECT flow_instance FROM entity_state WHERE run_id = $1 AND entity_id = $2`, lineage.ForkRunID, forkRoute.Target.Route().EntityID).Scan(&childFlow); err != nil {
-				return result, fmt.Errorf("load reconstructed replay receiver: %w", err)
+			state, err := loadRunForkConstructedEntityState(snapshot, sourceDelivery.Route.Target.Route().EntityID)
+			if err != nil {
+				return result, fmt.Errorf("load reconstructed replay receiver authority: %w", err)
 			}
-			if childFlow != forkRoute.Target.Route().FlowInstance {
-				return result, fmt.Errorf("reconstructed replay receiver contradicts fixed-revision ownership")
+			target := forkRoute.Target.Route()
+			expected, err := projectRunForkHistoricalHeader(lineage.SourceRunID, lineage.ForkRunID, target.EntityID, target.FlowInstance, state)
+			if err != nil {
+				return result, fmt.Errorf("project reconstructed replay receiver: %w", err)
+			}
+			if expected.WorkflowName != target.FlowID {
+				return result, fmt.Errorf("reconstructed replay receiver contradicts fixed-revision template")
+			}
+			if err := pipelinepersistence.RequireSelectedHistoricalWorkflowHeader(ctx, tx, store.postgres, expected); err != nil {
+				return result, fmt.Errorf("reconstructed replay receiver contradicts fixed-revision ownership: %w", err)
 			}
 		}
 		obligation, err := runtimedelivery.NewObligation(forkEventID, lineage.ForkRunID, forkRoute, deliveryAuthority)
@@ -269,7 +278,7 @@ func projectRunForkReplayInitializedReceiver(snapshot *runForkRevisionSnapshot, 
 		return events.DeliveryRoute{}, fmt.Errorf("agent-only replay requires a reconstructed receiver, not future initialization: %w", err)
 	}
 	metadata := state.MaterializationMetadata
-	if target.FlowInstance != metadata.FlowInstance {
+	if target.FlowInstance != metadata.FlowInstance || target.FlowID != metadata.FlowTemplate {
 		return events.DeliveryRoute{}, fmt.Errorf("replay receiver contradicts fixed-revision entity ownership")
 	}
 	projection, err := runfork.ProjectEntityOwnership(snapshot.RunID, forkRunID, target.EntityID, metadata.FlowInstance)

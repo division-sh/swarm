@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/google/uuid"
 )
 
@@ -85,5 +87,75 @@ func LoadForMutation(ctx context.Context, tx *sql.Tx, postgres bool, runID, enti
 	} else if fieldID.Valid {
 		return Projection{}, false, fmt.Errorf("fieldless constructed header acquired a field row")
 	}
+	for _, object := range []struct {
+		name string
+		raw  any
+	}{{"gates", header.Gates}, {"bookkeeping", header.Bookkeeping}, {"accumulator", header.Accumulator}} {
+		if err := requireJSONObject(object.name, object.raw); err != nil {
+			return Projection{}, false, err
+		}
+	}
+	if header.EntityType != "" {
+		if err := requireJSONObject("fields", header.Fields); err != nil {
+			return Projection{}, false, err
+		}
+	}
 	return header, true, nil
+}
+
+// Inventory uses the same strict header/optional-field pairing as exact reads.
+// Field rows without construction authority never become executable instances.
+func InventoryForMutation(ctx context.Context, tx *sql.Tx, postgres bool, runID string) ([]Projection, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT CAST(entity_id AS TEXT), instance_path FROM flow_instances WHERE run_id = $1 ORDER BY entity_id`, runID)
+	if err != nil {
+		return nil, err
+	}
+	var coordinates []Projection
+	for rows.Next() {
+		var coordinate Projection
+		if err := rows.Scan(&coordinate.EntityID, &coordinate.InstancePath); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		coordinates = append(coordinates, coordinate)
+	}
+	readErr := rows.Err()
+	closeErr := rows.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	if closeErr != nil {
+		return nil, closeErr
+	}
+	for i, coordinate := range coordinates {
+		header, found, err := LoadForMutation(ctx, tx, postgres, runID, coordinate.EntityID, coordinate.InstancePath)
+		if err != nil {
+			return nil, err
+		}
+		if !found {
+			return nil, fmt.Errorf("constructed inventory member disappeared")
+		}
+		coordinates[i] = header
+	}
+	return coordinates, nil
+}
+
+func requireJSONObject(name string, raw any) error {
+	var data []byte
+	switch value := raw.(type) {
+	case []byte:
+		data = value
+	case string:
+		data = []byte(value)
+	default:
+		return fmt.Errorf("constructed header %s requires persisted JSON object", name)
+	}
+	value, err := canonicaljson.Decode(data)
+	if err != nil {
+		return fmt.Errorf("decode constructed header %s: %w", name, err)
+	}
+	if value.Kind() != semanticvalue.KindObject {
+		return fmt.Errorf("constructed header %s requires persisted JSON object", name)
+	}
+	return nil
 }

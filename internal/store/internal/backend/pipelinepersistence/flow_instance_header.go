@@ -104,22 +104,21 @@ func RequireSelectedHistoricalWorkflowHeader(ctx context.Context, tx *sql.Tx, po
 		!lifecycle.TerminatedAt.Equal(expected.TerminatedAt) || !workflowCommitJSONEqual(lifecycle.Config, expected.Config) {
 		return fmt.Errorf("historical workflow header %s disagrees with fixed snapshot", expected.Identity.Route.InstancePath)
 	}
-	states := []pipeline.WorkflowEntityStatePersistenceRecord{header}
 	if expected.EntityType != "" {
-		states = append(states, target.State)
 		if !workflowCommitJSONEqual(target.State.Fields, expected.Fields) {
 			return fmt.Errorf("historical workflow fields disagree with fixed snapshot")
 		}
 	}
-	for _, state := range states {
-		if state.EntityID != expected.EntityID || state.FlowInstance != expected.Identity.Route.InstancePath ||
-			state.EntityType != expected.EntityType || state.Slug != expected.Slug || state.Name != expected.Name ||
-			state.CurrentState != expected.CurrentState || state.Revision != 1 ||
-			!state.EnteredStageAt.Equal(expected.EnteredStageAt) || !state.CreatedAt.Equal(expected.CreatedAt) || !state.UpdatedAt.Equal(expected.UpdatedAt) ||
-			!workflowCommitJSONEqual(state.Gates, expected.Gates) || !workflowCommitJSONEqual(state.Bookkeeping, expected.Bookkeeping) ||
-			!workflowCommitJSONEqual(state.Accumulator, expected.Accumulator) {
-			return fmt.Errorf("historical workflow state %s disagrees with fixed snapshot", expected.Identity.Route.InstancePath)
-		}
+	if header.EntityID != expected.EntityID || header.FlowInstance != expected.Identity.Route.InstancePath ||
+		header.EntityType != expected.EntityType || header.Slug != expected.Slug || header.Name != expected.Name ||
+		header.CurrentState != expected.CurrentState || header.Revision != 1 {
+		return fmt.Errorf("historical workflow state %s disagrees with fixed snapshot", expected.Identity.Route.InstancePath)
+	}
+	if !header.EnteredStageAt.Equal(expected.EnteredStageAt) || !header.CreatedAt.Equal(expected.CreatedAt) || !header.UpdatedAt.Equal(expected.UpdatedAt) {
+		return fmt.Errorf("historical workflow clocks %s disagree with fixed snapshot", expected.Identity.Route.InstancePath)
+	}
+	if !workflowCommitJSONEqual(header.Gates, expected.Gates) || !workflowCommitJSONEqual(header.Bookkeeping, expected.Bookkeeping) || !workflowCommitJSONEqual(header.Accumulator, expected.Accumulator) {
+		return fmt.Errorf("historical workflow projection %s disagrees with fixed snapshot", expected.Identity.Route.InstancePath)
 	}
 	return nil
 }

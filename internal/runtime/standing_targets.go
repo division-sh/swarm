@@ -138,12 +138,8 @@ func ResolveStandingTargetDeclarations(source semanticview.Source, catalog *prov
 		if flowID == "" {
 			return nil, fmt.Errorf("%s standing activation requires non-empty flow id", location)
 		}
-		constructor, err := runtimepipeline.CompileFlowConstructor(source, flowID, "")
-		if err != nil {
+		if err := runtimepipeline.RequireStandingConstructionPath(source, flowID); err != nil {
 			return nil, fmt.Errorf("%s standing constructor is invalid: %w", location, err)
-		}
-		if !constructor.Eligible() {
-			return nil, fmt.Errorf("%s standing constructor is ineligible: %s", location, strings.Join(constructor.Refusals(), "; "))
 		}
 		decl := StandingTargetDeclaration{
 			SourcePath: location,

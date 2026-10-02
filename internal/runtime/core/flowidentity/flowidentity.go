@@ -265,7 +265,19 @@ func StandingForGeneration(source semanticview.Source, flowID, runID string) (In
 	if flowID == semanticview.RootExecutionFlowID(source) {
 		return Stored(source, flowID, runID, instanceID, entityID, ""), nil
 	}
-	return instance, nil
+	bundle, found := semanticview.Bundle(source)
+	if !found {
+		return Instance{}, fmt.Errorf("standing generation requires its admitted root tree")
+	}
+	view, found := bundle.FlowViewByID(flowID)
+	if !found || view.Parent == nil {
+		return Instance{}, fmt.Errorf("standing generation flow %s has no admitted parent", flowID)
+	}
+	parent, err := StandingForGeneration(source, view.Parent.Paths.FlowPath, runID)
+	if err != nil {
+		return Instance{}, err
+	}
+	return KeylessChild(source, parent, flowID)
 }
 
 // The canonical root flow is '.', never an inferred UUID-shaped path. Its

@@ -543,6 +543,10 @@ func (*startupReadinessFinalizationStore) Load(context.Context, runtimeflowident
 	return runtimepipeline.WorkflowInstance{}, false, errors.New("unexpected readiness workflow load")
 }
 
+func (*startupReadinessFinalizationStore) LoadConstructedFlowInstance(context.Context, runtimeflowidentity.RunScopedFlowInstance, identity.EntityID) (runtimepipeline.WorkflowInstance, bool, error) {
+	return runtimepipeline.WorkflowInstance{}, false, errors.New("unexpected readiness constructed workflow load")
+}
+
 func (*startupReadinessFinalizationStore) LoadRouteRecoveryProjection(
 	context.Context,
 	runtimeflowidentity.RunScopedFlowInstance,

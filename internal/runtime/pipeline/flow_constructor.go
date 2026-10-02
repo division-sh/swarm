@@ -40,6 +40,52 @@ func (c FlowConstructor) SuppliedFields() []string {
 	return c.analysis.ConstructorSuppliedFields()
 }
 
+// RequireStandingConstructionPath admits the whole no-argument ancestry before
+// a service generation can be reconciled or its root tree constructed.
+func RequireStandingConstructionPath(source semanticview.Source, flowID string) error {
+	bundle, found := semanticview.Bundle(source)
+	if !found {
+		return fmt.Errorf("standing constructor requires the admitted flow tree")
+	}
+	view, found := bundle.FlowViewByID(flowID)
+	if !found {
+		return fmt.Errorf("standing constructor flow %s is absent", flowID)
+	}
+	rootID := flowID
+	for current := view; current != nil; current = current.Parent {
+		rootID = current.Paths.FlowPath
+		constructor, err := CompileFlowConstructor(source, current.Paths.FlowPath, "")
+		if err != nil {
+			return err
+		}
+		if !constructor.Eligible() {
+			return fmt.Errorf("standing constructor is ineligible for %s: %s", current.Paths.FlowPath, strings.Join(constructor.Refusals(), "; "))
+		}
+	}
+	return requireKeylessConstructionTree(source, rootID)
+}
+
+func requireKeylessConstructionTree(source semanticview.Source, flowID string) error {
+	constructor, err := CompileFlowConstructor(source, flowID, "")
+	if err != nil {
+		return err
+	}
+	if !constructor.Eligible() {
+		return fmt.Errorf("standing constructor is ineligible for %s: %s", flowID, strings.Join(constructor.Refusals(), "; "))
+	}
+	bundle, _ := semanticview.Bundle(source)
+	view, _ := bundle.FlowViewByID(flowID)
+	for _, child := range view.Children {
+		if !child.Schema.Instance.Empty() {
+			continue
+		}
+		if err := requireKeylessConstructionTree(source, child.Paths.FlowPath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // CompileFlowConstructors preserves every candidate's own analysis and refusal.
 // Keyless flows have exactly one no-argument candidate, never payload seeds.
 func CompileFlowConstructors(source semanticview.Source, flowID string) ([]FlowConstructor, error) {

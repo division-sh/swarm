@@ -134,9 +134,12 @@ duplicate field ownership and malformed persisted authority fail closed.
 
 The post-cutover direct read/write census also found generic historical replay
 receiver verification and both generic activation inventories using entity_state
-as executable owner evidence. These surviving same-concept consumers are
-unchanged and explicitly escalated at5946306433, pending absorb/split disposition.
+as executable owner evidence. These surviving same-concept consumers were
+escalated at5946306433 and authorized for same-PR repair by5947674701. The WIP2
+repair now migrates both inventories and replay validation; exact owners and
+positive/negative receipts are in issue-2496-wip2-repair.md. Final frozen-head
+qualification remains required.
 Import/scenario state-only rows, optional business-field collections, immutable
 historical field snapshots and deliberate hostile test rows remain separate
 contracts; they do not acquire executable header authority. This census does
-not claim owner-complete closure while the generic readers survive.
+does not substitute implementation or development receipts for final closure proof.

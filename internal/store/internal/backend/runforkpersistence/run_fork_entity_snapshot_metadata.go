@@ -22,18 +22,21 @@ func loadRunForkConstructedEntityState(snapshot *runForkRevisionSnapshot, entity
 	if err != nil {
 		return runfork.RunForkEntityState{}, err
 	}
+	states, _, err = attachRunForkMaterializedEntitySnapshotMetadata(snapshot, states)
+	if err != nil {
+		return runfork.RunForkEntityState{}, err
+	}
 	for _, state := range states {
 		if state.EntityID != entityID {
 			continue
 		}
-		metadata, message, ok := loadRunForkMaterializedEntitySnapshotMetadata(snapshot, state)
-		if !ok {
-			return runfork.RunForkEntityState{}, fmt.Errorf("%s", message)
+		metadata := state.MaterializationMetadata
+		if metadata == nil {
+			return runfork.RunForkEntityState{}, fmt.Errorf("entity %s has no admitted fixed-revision header metadata", entityID)
 		}
 		if metadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance {
 			return runfork.RunForkEntityState{}, fmt.Errorf("entity %s requires constructed-header evidence, not imported state", entityID)
 		}
-		state.MaterializationMetadata = &metadata
 		return state, nil
 	}
 	return runfork.RunForkEntityState{}, fmt.Errorf("entity %s has no reconstructed state in the fixed revision", entityID)

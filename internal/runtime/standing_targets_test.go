@@ -86,6 +86,43 @@ func TestResolveStandingTargetDeclarationsConsumesRootConstructor(t *testing.T) 
 	}
 }
 
+func TestStandingRequiresConstructibleAncestry(t *testing.T) {
+	for _, keyed := range []string{".", "parent"} {
+		t.Run(keyed, func(t *testing.T) {
+			root := t.TempDir()
+			documents := map[string]string{
+				"schema.yaml":                "name: root\n",
+				"parent/schema.yaml":         "name: parent\n",
+				"parent/service/schema.yaml": "name: service\nactivation: standing\nstages: []\n",
+			}
+			documents[filepath.Join(keyed, "schema.yaml")] += "instance: tenant\n"
+			documents[filepath.Join(keyed, "entities.yaml")] = "owner:\n  tenant: text\n"
+			for name, contents := range documents {
+				path := filepath.Join(root, name)
+				if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			source := loadWorkflowValidationSourceAt(t, root)
+			bundle, _ := semanticview.Bundle(source)
+			repo := canonicalrouting.RepoRoot(t)
+			rebuilt, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, bundle.SourceArtifact, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, admitted := range []semanticview.Source{source, semanticview.Wrap(rebuilt)} {
+				declarations, err := ResolveStandingTargetDeclarations(admitted, nil)
+				if err == nil || len(declarations) != 0 || !strings.Contains(err.Error(), "keyless no-argument signature") {
+					t.Fatalf("standing accepted without input for ancestor %s: declarations=%+v err=%v", keyed, declarations, err)
+				}
+			}
+		})
+	}
+}
+
 func TestResolveStandingTargetDeclarationsRequiresExactProviderPin(t *testing.T) {
 	source, registry := standingTelegramDeclarationSource(t, "inbound.telegram")
 	declarations, err := ResolveStandingTargetDeclarations(source, registry)

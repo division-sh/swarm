@@ -13,6 +13,7 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 )
 
@@ -91,6 +92,11 @@ func (pc *PipelineCoordinator) commitStandingTargets(ctx context.Context, req St
 	if observedAt.IsZero() {
 		return nil, nil, fmt.Errorf("standing target mutation requires observed_at")
 	}
+	for _, target := range req.Targets {
+		if err := RequireStandingConstructionPath(target.Activation.ContractBundle, target.Candidate.FlowPath); err != nil {
+			return nil, nil, err
+		}
+	}
 	var completions []func() error
 	results := make([]StandingTargetMutationResult, 0, len(req.Targets))
 	for _, target := range req.Targets {
@@ -122,7 +128,15 @@ func (pc *PipelineCoordinator) commitStandingTargets(ctx context.Context, req St
 				}
 			}
 			activation := target.Activation
-			activation.Instance = instance
+			activation.Instance, err = runtimeflowidentity.StandingForGeneration(activation.ContractBundle, semanticview.RootExecutionFlowID(activation.ContractBundle), reconciliation.RunID)
+			if err != nil {
+				return nil, nil, err
+			}
+			if instance.TemplateID != activation.Instance.TemplateID {
+				activation.InitialState = ""
+				activation.Config = nil
+				activation.Bookkeeping = nil
+			}
 			activation.StandingGenerationReplacement = reconciliation.Generation > 1
 			var created bool
 			var err error
@@ -139,12 +153,22 @@ func (pc *PipelineCoordinator) commitStandingTargets(ctx context.Context, req St
 				return nil, nil, err
 			}
 			result.Created = created
-			result.PublicationSequence, err = pc.workflowStore.PublishStandingService(operationCtx, reconciliation.ServiceID, reconciliation.RunID, reconciliation.Generation)
-			if err != nil {
-				return nil, nil, err
-			}
 		}
 		results = append(results, result)
+	}
+	// Do not publish any member until every generation's complete tree exists.
+	for i := range results {
+		reconciliation := results[i].Reconciliation
+		if !reconciliation.RestartDisposition.Executable() {
+			continue
+		}
+		publicationCtx := runtimecorrelation.WithRunID(ctx, reconciliation.RunID)
+		publicationCtx = runtimecorrelation.WithSourceArtifactFact(publicationCtx, req.Targets[i].Candidate.Source)
+		sequence, err := pc.workflowStore.PublishStandingService(publicationCtx, reconciliation.ServiceID, reconciliation.RunID, reconciliation.Generation)
+		if err != nil {
+			return nil, nil, err
+		}
+		results[i].PublicationSequence = sequence
 	}
 	return results, func() error {
 		for _, complete := range completions {
@@ -189,6 +213,15 @@ func (pc *PipelineCoordinator) CommitFlowInstanceTermination(ctx context.Context
 
 func (pc *PipelineCoordinator) Load(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) (WorkflowInstance, bool, error) {
 	return pc.workflowStore.Load(ctx, identity)
+}
+
+func (pc *PipelineCoordinator) LoadConstructedFlowInstance(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, entityID identity.EntityID) (WorkflowInstance, bool, error) {
+	target, err := pc.workflowStore.LoadTargetPersistence(ctx, owner, entityID)
+	if err != nil || target.Presence == WorkflowTargetPersistenceAbsent {
+		return WorkflowInstance{}, false, err
+	}
+	instance, err := target.DecodeComplete(owner.Route, entityID)
+	return instance, err == nil, err
 }
 
 func (pc *PipelineCoordinator) ListWorkflowInstances(ctx context.Context, runID string) ([]WorkflowInstance, error) {

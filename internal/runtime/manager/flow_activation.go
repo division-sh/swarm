@@ -53,6 +53,7 @@ type flowInstancePersistence interface {
 	AbandonDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) error
 	MarkTerminated(ctx context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance, entityID identity.EntityID, terminatedAt time.Time) error
 	Load(ctx context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstance, bool, error)
+	LoadConstructedFlowInstance(context.Context, runtimeflowidentity.RunScopedFlowInstance, identity.EntityID) (runtimepipeline.WorkflowInstance, bool, error)
 	LoadRouteRecoveryProjection(ctx context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstanceRouteRecoveryProjection, error)
 }
 
@@ -355,6 +356,7 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 		_, childPlan, err := am.prepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{
 			Context: req.Context, ContractBundle: req.ContractBundle, Instance: child,
 			TriggerEvent: req.TriggerEvent, OccurredAt: occurredAt,
+			StandingGenerationReplacement: req.StandingGenerationReplacement,
 		})
 		if err != nil {
 			return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("prepare eager child %s: %w", child.TemplateID, err)
@@ -400,11 +402,11 @@ func (am *AgentManager) PrepareStandingFlowInstance(ctx context.Context, req run
 	if err != nil {
 		return false, nil, err
 	}
-	identity, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, req.Instance.Route())
+	flowIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, req.Instance.Route())
 	if err != nil {
 		return false, nil, err
 	}
-	stored, found, err := am.workflowInstances.Load(ctx, identity)
+	stored, found, err := am.workflowInstances.LoadConstructedFlowInstance(ctx, flowIdentity, identity.NormalizeEntityID(req.Instance.EntityID))
 	if err != nil {
 		return false, nil, err
 	}
@@ -434,12 +436,21 @@ func (am *AgentManager) PrepareStandingFlowInstance(ctx context.Context, req run
 		}
 		finish = func() error { return am.FinalizeCommittedFlowInstanceActivation(ctx, committed) }
 		if commitErr != nil {
-			topologyErr := am.PreparePersistedDynamicFlowRuntimeProcessTopology(ctx, identity)
-			return true, nil, errors.Join(commitErr, topologyErr, finish())
+			return true, nil, commitErr
 		}
 	}
-	if err := am.PreparePersistedDynamicFlowRuntimeProcessTopology(ctx, identity); err != nil {
-		return false, nil, err
+	tree, err := am.verifyConstructedFlowTree(ctx, req, runID)
+	if err != nil {
+		return !found, nil, err
+	}
+	for _, instance := range tree {
+		owner, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, instance.Route())
+		if err != nil {
+			return !found, nil, err
+		}
+		if err := am.PreparePersistedDynamicFlowRuntimeProcessTopology(ctx, owner); err != nil {
+			return !found, nil, err
+		}
 	}
 	return !found, finish, nil
 }
@@ -465,7 +476,7 @@ func (am *AgentManager) EnsureFlowInstance(ctx context.Context, req runtimepipel
 	if err != nil {
 		return false, err
 	}
-	stored, exists, err := am.workflowInstances.Load(ctx, flowIdentity)
+	stored, exists, err := am.workflowInstances.LoadConstructedFlowInstance(ctx, flowIdentity, identity.NormalizeEntityID(instance.EntityID))
 	if err != nil {
 		return false, err
 	}
@@ -479,13 +490,21 @@ func (am *AgentManager) EnsureFlowInstance(ctx context.Context, req runtimepipel
 		return false, fmt.Errorf("standing flow instance %s belongs to template %s, not %s; run `swarm standing reset %s`",
 			instance.InstancePath, stored.WorkflowName, instance.TemplateID, instance.InstanceID)
 	}
-	readiness, err := am.reconcileEnsuredDynamicFlowRuntimeReadinessPlan(ctx, req, runID)
+	tree, err := am.verifyConstructedFlowTree(ctx, req, runID)
 	if err != nil {
 		return false, err
 	}
-	if err := am.reconcileDynamicFlowRuntimeReadinessItem(ctx, readiness, admittedSource, false, false); err != nil {
-		am.signalDynamicFlowRuntimeReadiness()
-		return false, err
+	for _, constructed := range tree {
+		request := req
+		request.Instance = constructed
+		readiness, err := am.reconcileEnsuredDynamicFlowRuntimeReadinessPlan(ctx, request, runID)
+		if err != nil {
+			return false, err
+		}
+		if err := am.reconcileDynamicFlowRuntimeReadinessItem(ctx, readiness, admittedSource, false, false); err != nil {
+			am.signalDynamicFlowRuntimeReadiness()
+			return false, err
+		}
 	}
 	return false, nil
 }
