@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
@@ -763,6 +764,7 @@ type RunHeader struct {
 	ContinuedAsRunID string                        `json:"continued_as_run_id,omitempty"`
 	Failure          *runtimefailures.Envelope     `json:"failure,omitempty"`
 	ControlReason    string                        `json:"control_reason,omitempty"`
+	ClockSchedules   []genericschedule.ClockReadback `json:"clock_schedules,omitempty"`
 }
 
 type RunHeaderListOptions struct {

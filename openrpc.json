@@ -15175,6 +15175,88 @@
         ],
         "type": "object"
       },
+      "ClockScheduleReadback": {
+        "additionalProperties": false,
+        "properties": {
+          "activation_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "cancel_cause": {
+            "type": "string"
+          },
+          "cancelled_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "cron": {
+            "type": "string"
+          },
+          "emit": {
+            "type": "string"
+          },
+          "every": {
+            "type": "string"
+          },
+          "failure": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "flow_id": {
+            "type": "string"
+          },
+          "flow_instance": {
+            "type": "string"
+          },
+          "initial_due_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "name": {
+            "type": "string"
+          },
+          "next_due_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Exact persisted current due coordinate; present only while active, not recomputed on read."
+          },
+          "retains_run": {
+            "description": "True only for an active durable clock in an active run.",
+            "type": "boolean"
+          },
+          "run_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "cancelled",
+              "failed"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "activation_id",
+          "name",
+          "run_id",
+          "flow_id",
+          "flow_instance",
+          "emit",
+          "status",
+          "initial_due_at",
+          "retains_run"
+        ],
+        "type": "object"
+      },
       "ConnectedChannelActivation": {
         "additionalProperties": false,
         "properties": {
@@ -21150,6 +21232,13 @@
           "bundle_hash": {
             "$ref": "#/components/schemas/BundleHash",
             "description": "Exact durable run source; default fork pin resolution consumes this, not the health source."
+          },
+          "clock_schedules": {
+            "description": "Detailed run reads include durable instance-owned clock activations, including cancelled and failed records. Run listings omit this detail.",
+            "items": {
+              "$ref": "#/components/schemas/ClockScheduleReadback"
+            },
+            "type": "array"
           },
           "continued_as_run_id": {
             "$ref": "#/components/schemas/OpaqueId",
