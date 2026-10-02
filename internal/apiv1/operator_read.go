@@ -166,15 +166,8 @@ func OperatorRunReadHandlers(opts RunReadHandlerOptions) map[string]MethodHandle
 	return map[string]MethodHandler{
 		"run.fan_out.list": runFanOutListHandler(opts),
 		"run.get": func(ctx context.Context, req Request) (any, error) {
-			runs, err := requireRunReadStore(opts.Runs)
-			if err != nil {
-				return nil, err
-			}
 			runID := stringParam(req.Params, "run_id")
-			header, err := runs.LoadRunHeader(ctx, runID)
-			if errors.Is(err, operatorread.ErrRunNotFound) {
-				return nil, NewApplicationError(RunNotFoundCode, false, map[string]any{"run_id": runID})
-			}
+			header, err := loadRunHeaderWithClocks(ctx, opts.Runs, runID)
 			if err != nil {
 				return nil, err
 			}
@@ -202,19 +195,12 @@ func OperatorRunReadHandlers(opts RunReadHandlerOptions) map[string]MethodHandle
 			return runListResult{Runs: headers, NextCursor: nextCursor}, nil
 		},
 		"run.diagnose": func(ctx context.Context, req Request) (any, error) {
-			runs, err := requireRunReadStore(opts.Runs)
-			if err != nil {
-				return nil, err
-			}
 			runID := stringParam(req.Params, "run_id")
-			header, err := runs.LoadRunHeader(ctx, runID)
-			if errors.Is(err, operatorread.ErrRunNotFound) {
-				return nil, NewApplicationError(RunNotFoundCode, false, map[string]any{"run_id": runID})
-			}
+			header, err := loadRunHeaderWithClocks(ctx, opts.Runs, runID)
 			if err != nil {
 				return nil, err
 			}
-			report, err := runs.LoadRunDebugReport(ctx, runID, operatorread.RunDebugQueryOptions{})
+			report, err := opts.Runs.LoadRunDebugReport(ctx, runID, operatorread.RunDebugQueryOptions{})
 			if errors.Is(err, operatorread.ErrRunNotFound) {
 				return nil, NewApplicationError(RunNotFoundCode, false, map[string]any{"run_id": runID})
 			}

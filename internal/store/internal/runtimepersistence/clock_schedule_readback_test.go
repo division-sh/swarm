@@ -12,6 +12,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/google/uuid"
@@ -23,11 +24,11 @@ func TestClockScheduleRunReadbackOnBothStores(t *testing.T) {
 			store, _, ctx := tc.open(t)
 			runID := runtimecorrelation.RunIDFromContext(ctx)
 			reader := store.(interface {
-				LoadRunHeader(context.Context, string) (operatorread.RunHeader, error)
+				LoadRunClockSchedules(context.Context, string) ([]genericschedule.ClockReadback, error)
 			})
-			header, err := reader.LoadRunHeader(ctx, runID)
-			if err != nil || len(header.ClockSchedules) != 0 {
-				t.Fatalf("read invented a clock binding: %#v, %v", header, err)
+			clocks, err := reader.LoadRunClockSchedules(ctx, runID)
+			if err != nil || len(clocks) != 0 {
+				t.Fatalf("read invented a clock binding: %#v, %v", clocks, err)
 			}
 			var activations []genericschedule.Activation
 			for _, flow := range []string{".", "alpha/poller", "beta/poller"} {
@@ -46,11 +47,11 @@ func TestClockScheduleRunReadbackOnBothStores(t *testing.T) {
 			}
 			admitGenericScheduleFixture(t, ctx, store, testAgentGenericScheduleCommand(t, runID, "agent", "agent/instance", uuid.NewString(), "poll", genericschedule.DelayDue(time.Hour)))
 			for repeatedRead := 0; repeatedRead < 2; repeatedRead++ {
-				header, err = reader.LoadRunHeader(ctx, runID)
-				if err != nil || len(header.ClockSchedules) != 3 {
-					t.Fatalf("read omitted clocks: %#v, %v", header, err)
+				clocks, err = reader.LoadRunClockSchedules(ctx, runID)
+				if err != nil || len(clocks) != 3 {
+					t.Fatalf("read omitted clocks: %#v, %v", clocks, err)
 				}
-				for i, view := range header.ClockSchedules {
+				for i, view := range clocks {
 					want, err := genericschedule.ProjectClockReadback(activations[i], true)
 					if err != nil || !reflect.DeepEqual(view, want) {
 						t.Fatalf("read fabricated clock facts: got=%#v want=%#v err=%v", view, want, err)
@@ -62,13 +63,13 @@ func TestClockScheduleRunReadbackOnBothStores(t *testing.T) {
 				}
 			}
 			cancelGenericScheduleFixture(t, ctx, store, activations[1], "clock_removed", activations[1].AdmittedAt.Add(time.Second))
-			header, err = reader.LoadRunHeader(ctx, runID)
-			if err != nil || len(header.ClockSchedules) != 3 {
-				t.Fatalf("cancelled clock disappeared from readback: %#v, %v", header, err)
+			clocks, err = reader.LoadRunClockSchedules(ctx, runID)
+			if err != nil || len(clocks) != 3 {
+				t.Fatalf("cancelled clock disappeared from readback: %#v, %v", clocks, err)
 			}
-			cancelled := header.ClockSchedules[1]
-			if cancelled.Status != genericschedule.StatusCancelled || cancelled.NextDueAt != nil || cancelled.RetainsRun || cancelled.CancelCause != "clock_removed" || !header.ClockSchedules[2].RetainsRun {
-				t.Fatalf("cancellation corrupted sibling retention: %#v", header.ClockSchedules)
+			cancelled := clocks[1]
+			if cancelled.Status != genericschedule.StatusCancelled || cancelled.NextDueAt != nil || cancelled.RetainsRun || cancelled.CancelCause != "clock_removed" || !clocks[2].RetainsRun {
+				t.Fatalf("cancellation corrupted sibling retention: %#v", clocks)
 			}
 			scope, err := timerobligation.Run(runID)
 			if err != nil {
@@ -107,9 +108,18 @@ func TestClockScheduleReadbackRefusesCorruptEvidenceWithoutMutationOnBothStores(
 			if _, err := db.ExecContext(ctx, query, activation.ID); err != nil {
 				t.Fatal(err)
 			}
-			_, err = store.(interface {
+			reader := store.(interface {
 				LoadRunHeader(context.Context, string) (operatorread.RunHeader, error)
-			}).LoadRunHeader(ctx, runID)
+				LoadRunOrigin(context.Context, string) (runlifecycle.RunOrigin, error)
+				LoadRunClockSchedules(context.Context, string) ([]genericschedule.ClockReadback, error)
+			})
+			if _, err := reader.LoadRunHeader(ctx, runID); err != nil {
+				t.Fatalf("basic header depends on clock history: %v", err)
+			}
+			if _, err := reader.LoadRunOrigin(ctx, runID); err != nil {
+				t.Fatalf("run origin depends on clock history: %v", err)
+			}
+			_, err = reader.LoadRunClockSchedules(ctx, runID)
 			if err == nil || !strings.Contains(err.Error(), "immutable hash") {
 				t.Fatalf("corrupt clock rendered as admitted: %v", err)
 			}
