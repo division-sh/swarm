@@ -1,7 +1,7 @@
 {
-  "baseline": "issue-2151-source-revision-durable-compound-integration-provenance",
-  "previous_baseline": "ee9b091526f89154a425c1f1d1321085aa9b832b",
-  "contract_change": "The source-revision fixture rule changes embedded platform identity and shifts downstream source coordinates by one line. Actual intended-base/head binaries reproduce all ten accepted master JSON hashes and prove zero non-provenance changes; all 35 other surfaces, assertions and normalization remain unchanged.",
+  "baseline": "issue-2154-canonical-permission-retirement-source-revision-integration-provenance",
+  "previous_baseline": "276d7723f9f6c66458d416a0554c107be373772b",
+  "contract_change": "Reserved messaging retirement and strict permission-bundle ownership change embedded platform identity and source coordinates after the source-revision fixture owner merge. Actual master/head binaries reproduce all ten accepted master JSON hashes and prove zero non-provenance differences. All 35 other surfaces, 45-by-two assertions and exact path-only normalization remain unchanged.",
   "normalization": "repository and isolated CLI scope absolute paths only; source filenames, cache identity and coordinates remain exact",
   "results": [
     {
