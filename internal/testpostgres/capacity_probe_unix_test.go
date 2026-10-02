@@ -66,3 +66,29 @@ func TestCapacityProbeFailedStartupCleansUpBeforeRemoval(t *testing.T) {
 		})
 	}
 }
+
+func TestCapacityProbeQuotedTemporaryPath(t *testing.T) {
+	root, err := os.MkdirTemp("/tmp", "capacity 'quoted'-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(root); err != nil {
+			t.Error(err)
+		}
+	})
+	t.Setenv("TMPDIR", root)
+	probe := StartCapacityProbe(t, RequiredMaxConnections)
+	connection, err := ParseConnection(probe.DSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := connection.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := ValidateServerCapacity(context.Background(), db); err != nil {
+		t.Fatalf("quoted temporary path did not yield a usable server: %v", err)
+	}
+}
