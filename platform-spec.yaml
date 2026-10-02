@@ -1182,7 +1182,11 @@ contract_formats:
         declaration flow; its run and typed static-instance source carry the remaining
         identity coordinates. It requires an already-active run, zero causal depth,
         no parent event, and the exact business publication spelling derived by the
-        existing publication-identity owner. It cannot create a run, impersonate
+        existing publication-identity owner. For the selected root, the source
+        instance coordinate MUST equal the actual run ID before event-name
+        projection removes that coordinate. A foreign run, earlier generation,
+        service identity or absent root instance cannot authorize publication,
+        schedule admission or restored readback. It cannot create a run, impersonate
         platform-control authority, or acquire a causal parent during readback.
 
         Persisted event admission is the canonical boundary between constructed
