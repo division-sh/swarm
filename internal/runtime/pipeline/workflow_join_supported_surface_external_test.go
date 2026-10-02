@@ -61,7 +61,7 @@ type exactJoinFailureLog struct {
 	failure         runtimefailures.Envelope
 }
 
-func (l *exactJoinRuntimeLogger) Log(_ context.Context, _ diaglog.Level, _, _, action string, _ string, eventID string, _ string, _ string, _ string, _ map[string]string, detail any, failure *runtimefailures.Envelope, _ int) error {
+func (l *exactJoinRuntimeLogger) Log(_ context.Context, _ diaglog.Level, _, _, action string, eventID string, _ string, _ string, _ string, _ string, _ map[string]string, detail any, failure *runtimefailures.Envelope, _ int) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.details = append(l.details, fmt.Sprint(detail))
