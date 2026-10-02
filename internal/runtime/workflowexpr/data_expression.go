@@ -945,20 +945,7 @@ func projectCELValue(path string, value any) (any, error) {
 		}
 		return out, nil
 	case map[ref.Val]ref.Val:
-		out := make(map[string]any, len(typed))
-		for key, item := range typed {
-			projectedKey, err := projectCELValue(path+".<key>", key)
-			if err != nil {
-				return nil, err
-			}
-			name := fmt.Sprint(projectedKey)
-			projected, err := projectCELValue(projectionChildPath(path, name), item)
-			if err != nil {
-				return nil, err
-			}
-			out[name] = projected
-		}
-		return out, nil
+		return projectCELObject(path, typed)
 	case map[string]any:
 		out := make(map[string]any, len(typed))
 		keys := make([]string, 0, len(typed))
@@ -986,6 +973,29 @@ func projectCELValue(path string, value any) (any, error) {
 	default:
 		return typed, nil
 	}
+}
+
+func projectCELObject(path string, value map[ref.Val]ref.Val) (map[string]any, error) {
+	out := make(map[string]any, len(value))
+	for key, item := range value {
+		projectedKey, err := projectCELValue(path+".<key>", key)
+		if err != nil {
+			return nil, err
+		}
+		name, ok := projectedKey.(string)
+		if !ok {
+			return nil, &CELProjectionError{Path: path + ".<key>", Cause: fmt.Errorf("object keys must be text, got %T", projectedKey)}
+		}
+		if _, exists := out[name]; exists {
+			return nil, &CELProjectionError{Path: path + ".<key>", Cause: fmt.Errorf("duplicate object key %q", name)}
+		}
+		projected, err := projectCELValue(projectionChildPath(path, name), item)
+		if err != nil {
+			return nil, err
+		}
+		out[name] = projected
+	}
+	return out, nil
 }
 
 // ProjectSemanticValue gives admitted JSON values canonical execution kinds.

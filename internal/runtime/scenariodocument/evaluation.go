@@ -24,13 +24,14 @@ func Materialize(value any) (Materialized, error) {
 	if err != nil {
 		return Materialized{}, err
 	}
-	if _, err := canonicaljson.FromGo(projected); err != nil {
+	closed, err := canonicaljson.CloneRuntimeValue(projected)
+	if err != nil {
 		return Materialized{}, err
 	}
-	return Materialized{value: projected}, nil
+	return Materialized{value: closed}, nil
 }
 
-func (v Materialized) Interface() (any, error) { return workflowexpr.ProjectCELValue(v.value) }
+func (v Materialized) Interface() (any, error) { return canonicaljson.CloneRuntimeValue(v.value) }
 
 type Evaluator struct {
 	env  *cel.Env
@@ -70,6 +71,18 @@ func NewEvaluator(seed string, rawVars map[string]any) (*Evaluator, error) {
 func (e *Evaluator) Seed() string { return e.seed }
 
 func (e *Evaluator) Evaluate(value any) (any, error) {
+	value, err := e.evaluate(value)
+	if err != nil {
+		return nil, err
+	}
+	data, err := Materialize(value)
+	if err != nil {
+		return nil, err
+	}
+	return data.Interface()
+}
+
+func (e *Evaluator) evaluate(value any) (any, error) {
 	switch typed := value.(type) {
 	case Materialized:
 		return typed.Interface()
@@ -82,7 +95,7 @@ func (e *Evaluator) Evaluate(value any) (any, error) {
 		out := make([]any, len(typed))
 		for i, item := range typed {
 			var err error
-			out[i], err = e.Evaluate(item)
+			out[i], err = e.evaluate(item)
 			if err != nil {
 				return nil, fmt.Errorf("[%d]: %w", i, err)
 			}
@@ -91,7 +104,7 @@ func (e *Evaluator) Evaluate(value any) (any, error) {
 	case map[string]any:
 		out := make(map[string]any, len(typed))
 		for _, key := range sortedKeys(typed) {
-			item, err := e.Evaluate(typed[key])
+			item, err := e.evaluate(typed[key])
 			if err != nil {
 				return nil, fmt.Errorf("%s: %w", key, err)
 			}
@@ -119,7 +132,11 @@ func (e *Evaluator) EvaluateExpression(expression string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return workflowexpr.ProjectCELValue(out)
+	data, err := Materialize(out)
+	if err != nil {
+		return nil, err
+	}
+	return data.Interface()
 }
 
 func SHA40(value string) string {
