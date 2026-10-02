@@ -73,7 +73,7 @@ func TestCapacityProbeQuotedTemporaryPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if err := os.RemoveAll(root); err != nil {
+		if err := os.Remove(root); err != nil {
 			t.Error(err)
 		}
 	})
