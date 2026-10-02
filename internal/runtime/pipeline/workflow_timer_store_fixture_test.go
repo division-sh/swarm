@@ -87,7 +87,7 @@ func (s *workflowInstanceStore) insertWorkflowTimerActivation(ctx context.Contex
 	if !found {
 		return WorkflowTimerActivation{}, false, fmt.Errorf("workflow timer activation %s disappeared after insert", activation.Ref.ActivationID)
 	}
-	if err := requireSameWorkflowTimerActivationFacts(persisted, activation); err != nil {
+	if err := persisted.ValidateCauseReplay(activation); err != nil {
 		return WorkflowTimerActivation{}, false, err
 	}
 	return persisted, rows > 0, nil

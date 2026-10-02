@@ -601,7 +601,7 @@ func (r *recordingRuntimeMutationRunner) CommitWorkflowTimerOccurrence(ctx conte
 		if !found || activation.Status != workflowTimerStatusActive || !activation.FireAt.Equal(command.Occurrence.DueAt) {
 			return nil
 		}
-		if err := requireSameWorkflowTimerActivationFacts(activation, command.Activation); err != nil {
+		if err := activation.ValidateCauseReplay(command.Activation); err != nil {
 			return err
 		}
 		tx, ok := sqlTxFromContext(txctx)
