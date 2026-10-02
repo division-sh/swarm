@@ -1,6 +1,7 @@
 package packmodel
 
 import (
+	"gopkg.in/yaml.v3"
 	"strings"
 	"testing"
 
@@ -50,6 +51,105 @@ func TestEnvelopeAdmissionPreservesTypedPresence(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPackEnvelopeAdmissionPresenceMatrix(t *testing.T) {
+	body := strings.Replace(admittedEnvelopeFixture, "persist_dedupe_markers: true", "persist_dedupe_markers: true, verify_secret: header.secret", 1)
+	body = strings.Replace(body, "requires: {}", "requires: {secrets: [demo], managed_credentials: [demo], packs: {trigger: provider.demo}}", 1)
+	for _, row := range []struct {
+		path                          string
+		optional, emptyMap, emptyList bool
+	}{
+		{"id", false, false, false}, {"version", false, false, false}, {"platform_version", false, false, false}, {"type", false, false, false}, {"manifest_hash", false, false, false},
+		{"provenance", false, false, false}, {"provenance.source", false, false, false}, {"capabilities", false, false, false}, {"capabilities.can", false, false, false}, {"capabilities.cannot", false, false, false},
+		{"capabilities.can.receive_https_route", false, false, false}, {"capabilities.can.verify_secret", true, false, false}, {"capabilities.can.emit_events", false, false, false}, {"capabilities.can.persist_dedupe_markers", false, false, false},
+		{"requires", false, true, false}, {"requires.secrets", true, false, true}, {"requires.managed_credentials", true, false, true}, {"requires.packs", true, true, false}, {"requires.packs.trigger", true, false, false}, {"tests", false, false, false},
+	} {
+		for _, state := range []string{"missing", "null", "empty_text", "empty_list", "empty_map", "wrong_kind", "valid", "merge"} {
+			t.Run(row.path+"/"+state, func(t *testing.T) {
+				_, err := ParseEnvelopeAt(envelopePresenceBody(t, []byte(body), row.path, state), "packs/demo/pack.yaml")
+				want := state == "valid" || state == "merge" || state == "missing" && row.optional || state == "empty_map" && row.emptyMap || state == "empty_list" && row.emptyList
+				if (err == nil) != want {
+					t.Fatalf("want admission=%t: %v", want, err)
+				}
+			})
+		}
+	}
+	for _, kind := range []string{TypeConnector, TypeChannel} {
+		branch := strings.Replace(admittedEnvelopeFixture, "type: trigger", "type: "+kind, 1)
+		can := "{call_provider_actions: [demo.call], lower_through_activity: true, journal_activity_attempts: true}"
+		if kind == TypeChannel {
+			can = "{}"
+			branch += "implements: [sample/v1]\n"
+		}
+		branch = strings.Replace(branch, "{receive_https_route: demo, emit_events: [inbound.demo], persist_dedupe_markers: true}", can, 1)
+		paths := []string{"capabilities.can.call_provider_actions", "capabilities.can.lower_through_activity", "capabilities.can.journal_activity_attempts"}
+		if kind == TypeChannel {
+			paths = []string{"implements"}
+		}
+		for _, field := range paths {
+			for _, state := range []string{"missing", "null", "empty_text", "empty_list", "empty_map", "wrong_kind", "valid", "merge"} {
+				t.Run(kind+"/"+field+"/"+state, func(t *testing.T) {
+					_, err := ParseEnvelopeAt(envelopePresenceBody(t, []byte(branch), field, state), "packs/demo/pack.yaml")
+					if (err == nil) != (state == "valid" || state == "merge") {
+						t.Fatalf("branch admission differs: %v", err)
+					}
+				})
+			}
+		}
+	}
+}
+
+func envelopePresenceBody(t testing.TB, body []byte, path, state string) []byte {
+	t.Helper()
+	var doc yaml.Node
+	if err := yaml.Unmarshal(body, &doc); err != nil {
+		t.Fatal(err)
+	}
+	parts, parent := strings.Split(path, "."), doc.Content[0]
+	for _, name := range parts[:len(parts)-1] {
+		var next *yaml.Node
+		for i := 0; i < len(parent.Content); i += 2 {
+			if parent.Content[i].Value == name {
+				next = parent.Content[i+1]
+				break
+			}
+		}
+		if next == nil {
+			t.Fatalf("missing fixture path %s", path)
+		}
+		parent = next
+	}
+	index := -1
+	for i := 0; i < len(parent.Content); i += 2 {
+		if parent.Content[i].Value == parts[len(parts)-1] {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		t.Fatalf("missing fixture field %s", path)
+	}
+	switch state {
+	case "missing":
+		parent.Content = append(parent.Content[:index], parent.Content[index+2:]...)
+	case "merge":
+		key, value := parent.Content[index], parent.Content[index+1]
+		parent.Content = append(parent.Content[:index], parent.Content[index+2:]...)
+		parent.Content = append(parent.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!merge", Value: "<<"}, &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Content: []*yaml.Node{key, value}})
+	case "valid":
+	default:
+		var value yaml.Node
+		if err := yaml.Unmarshal([]byte(map[string]string{"null": "null", "empty_text": "''", "empty_list": "[]", "empty_map": "{}", "wrong_kind": "1.5"}[state]), &value); err != nil {
+			t.Fatal(err)
+		}
+		parent.Content[index+1] = value.Content[0]
+	}
+	out, err := yaml.Marshal(&doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
 }
 
 func TestEnvelopeAdmissionRetainsAliasSourceAndExactText(t *testing.T) {

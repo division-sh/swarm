@@ -273,7 +273,8 @@ func compileEmbeddedTelegramOperatorChannelPlan(t *testing.T) packs.Satisfaction
 		t.Fatal(err)
 	}
 	var spec runtimecontracts.PlatformSpecDocument
-	if err := snapshot.Decode(&spec); err != nil {
+	spec, err = runtimecontracts.AdmitPlatformSpecValue(snapshot.Document(filepath.Join(repoRoot, "platform-spec.yaml")).Root())
+	if err != nil {
 		t.Fatal(err)
 	}
 	registry, err := packs.NewInterfaceRegistry(spec)

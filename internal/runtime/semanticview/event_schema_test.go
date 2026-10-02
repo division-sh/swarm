@@ -87,9 +87,9 @@ payload:
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{}
-	bundle.Platform.PlatformEvents.Catalog = map[string]yaml.Node{
+	bundle.Platform = admittedCatalogTestSpec(t, map[string]yaml.Node{
 		"mailbox.card_decided": *doc.Content[0],
-	}
+	})
 
 	resolution := ResolveEventSchema(Wrap(bundle), "", "mailbox.card_decided")
 	if !resolution.HasSchema {
@@ -120,9 +120,9 @@ note: Full payload schema is owned by the diagnostic subtype.
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{}
-	bundle.Platform.PlatformEvents.Catalog = map[string]yaml.Node{
+	bundle.Platform = admittedCatalogTestSpec(t, map[string]yaml.Node{
 		"platform.runtime_log": *doc.Content[0],
-	}
+	})
 
 	resolution := ResolveEventSchema(Wrap(bundle), "", "platform.runtime_log")
 	if resolution.HasSchema {

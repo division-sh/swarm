@@ -267,7 +267,7 @@ func (i GeneratedPackIndex) BuiltinByID() map[string]GeneratedPackIndexEntry {
 	return out
 }
 
-func validateGeneratedPackIdentity(fsys fs.FS, pack LoadedPack, expected GeneratedPackIndexEntry) error {
+func validateGeneratedPackIdentity(fsys fs.FS, pack *LoadedPack, expected GeneratedPackIndexEntry) error {
 	if pack.Manifest.Generation == nil {
 		return fmt.Errorf("generated connector pack %q is indexed as generated but generation evidence is missing", pack.Envelope.ID)
 	}
@@ -293,6 +293,7 @@ func validateGeneratedPackIdentity(fsys fs.FS, pack LoadedPack, expected Generat
 		normalizeSHA(profile.Source.SHA256) != normalizeSHA(pack.Manifest.Generation.Source.SHA256) {
 		return fmt.Errorf("generated connector pack %q source evidence does not match indexed profile", pack.Envelope.ID)
 	}
+	pack.identitySource = profile.SourceValue()
 	return nil
 }
 

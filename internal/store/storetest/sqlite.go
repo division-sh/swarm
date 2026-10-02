@@ -188,7 +188,8 @@ func canonicalPlatformPlans(t testing.TB) (runtimecontracts.PlatformSpecDocument
 	if err != nil {
 		t.Fatalf("parse platform spec: %v", err)
 	}
-	if err := source.Decode(&platformSpec); err != nil {
+	platformSpec, err = runtimecontracts.AdmitPlatformSpecValue(source.Document("platform-spec.yaml").Root())
+	if err != nil {
 		t.Fatalf("unmarshal platform spec: %v", err)
 	}
 	plans, err := store.GeneratePlatformTableDDLs(platformSpec)

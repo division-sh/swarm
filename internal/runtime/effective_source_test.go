@@ -321,7 +321,8 @@ func effectiveSourceTestChannelPlans(t *testing.T, repoRoot string) (packs.Satis
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := snapshot.Decode(&spec); err != nil {
+	spec, err = runtimecontracts.AdmitPlatformSpecValue(snapshot.Document(filepath.Join(repoRoot, "platform-spec.yaml")).Root())
+	if err != nil {
 		t.Fatal(err)
 	}
 	registry, err := packs.NewInterfaceRegistry(spec)

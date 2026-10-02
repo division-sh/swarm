@@ -26,15 +26,32 @@ type ConnectorManifest struct {
 }
 
 type LoadedPack struct {
-	Envelope     packs.Envelope
-	Manifest     ConnectorManifest
-	ManifestBody []byte
-	Directory    string
-	Source       string
+	identitySource yamlsource.Value
+	Envelope       packs.Envelope
+	Manifest       ConnectorManifest
+	ManifestBody   []byte
+	Directory      string
+	Source         string
 }
 
 type PackRegistry struct {
-	byProvider map[string]map[string]LoadedPack
+	byProvider  map[string]map[string]LoadedPack
+	indexSource yamlsource.Value
+}
+
+func (r *PackRegistry) SourceValues() map[string]yamlsource.Value {
+	out := map[string]yamlsource.Value{}
+	if r == nil {
+		return out
+	}
+	out["generated_index"] = r.indexSource
+	for _, tools := range r.byProvider {
+		for _, pack := range tools {
+			out[pack.Envelope.ID+".connector"] = pack.Manifest.SourceValue()
+			out[pack.Envelope.ID+".generated_profile"] = pack.identitySource
+		}
+	}
+	return out
 }
 
 func (r *PackRegistry) PackDescriptors() []packs.ConnectorPackDescriptor {
@@ -102,7 +119,7 @@ func NewPackRegistryFromInventory(inventory *packartifact.EffectivePackInventory
 		pack.Source = entry.Source() + ":" + entry.ID()
 		expected, indexed := expectedGenerated[strings.TrimSpace(pack.Envelope.ID)]
 		if indexed {
-			if err := validateGeneratedPackIdentity(generatedConnectorIdentityFS, pack, expected); err != nil {
+			if err := validateGeneratedPackIdentity(generatedConnectorIdentityFS, &pack, expected); err != nil {
 				return nil, fmt.Errorf("admit effective generated connector pack %q: %w", pack.Envelope.ID, err)
 			}
 			seenGenerated[strings.TrimSpace(pack.Envelope.ID)] = struct{}{}
@@ -116,7 +133,11 @@ func NewPackRegistryFromInventory(inventory *packartifact.EffectivePackInventory
 			return nil, fmt.Errorf("generated connector pack index references unavailable effective pack id %q", packID)
 		}
 	}
-	return NewPackRegistry(loaded...)
+	registry, err := NewPackRegistry(loaded...)
+	if err == nil {
+		registry.indexSource = index.source
+	}
+	return registry, err
 }
 
 func NewPackRegistry(loaded ...LoadedPack) (*PackRegistry, error) {

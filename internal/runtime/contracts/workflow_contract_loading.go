@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 type WorkflowContractLoadOptions struct {
@@ -18,6 +19,7 @@ type WorkflowContractLoadOptions struct {
 
 type PackAdmissionProjection interface {
 	EffectivePackInventoryDigest() string
+	PackSourceValues() map[string]yamlsource.Value
 }
 
 func rootWorkflowPolicy(bundle *WorkflowContractBundle) PolicyDocument {
