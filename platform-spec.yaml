@@ -107,6 +107,8 @@ spec_authority:
       Admitted inventory entries hand their typed envelope and exact body to each existing body owner. Serialization back to
       YAML and reflected re-decoding are not admission. Project manifest_hash remains authored derived while its effective
       digest is computed from exact body bytes; provenance records those as distinct facts.
+      Development envelopes retain their original configured absolute source paths through this handoff. Synthesized
+      complete-development membership is a boundary snapshot, not an authored inventory with synthetic YAML coordinates.
     platform_catalog: >
       Platform event payloads are materialized once during admission. Malformed present payloads and retired required lists
       reject then, not through empty fallback or lookup panic. Lookup returns defensive typed copies and cannot mutate authority.
