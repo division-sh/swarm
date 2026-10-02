@@ -1,12 +1,11 @@
 package packs
 
 import (
-	"bytes"
 	"fmt"
 	"io/fs"
+	"path"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
@@ -19,7 +18,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	"github.com/division-sh/swarm/internal/yamlsource"
-	"gopkg.in/yaml.v3"
 )
 
 const ChannelInterfaceKind = "pack_channel"
@@ -270,6 +268,7 @@ func validateInterfaceField(subject string, field runtimecontracts.PackInterface
 }
 
 type ChannelManifest struct {
+	source       yamlsource.Value
 	Provider     string                                      `yaml:"provider"`
 	OpaqueTypes  map[string]runtimecontracts.ToolInputSchema `yaml:"opaque_types"`
 	Operations   map[string]ChannelOperationBinding          `yaml:"operations"`
@@ -425,62 +424,6 @@ type ChannelMapping struct {
 	Item []map[string]ChannelMapping
 }
 
-func (m *ChannelMapping) UnmarshalYAML(node *yaml.Node) error {
-	if m == nil || node == nil {
-		return nil
-	}
-	switch node.Kind {
-	case yaml.ScalarNode:
-		m.From = strings.TrimSpace(node.Value)
-		if m.From == "" {
-			return fmt.Errorf("channel mapping source path is required")
-		}
-		return nil
-	case yaml.MappingNode:
-		if err := rejectChannelMappingFields(node, "from", "each", "item"); err != nil {
-			return err
-		}
-		type wire struct {
-			From string                      `yaml:"from"`
-			Each string                      `yaml:"each"`
-			Item []map[string]ChannelMapping `yaml:"item"`
-		}
-		var decoded wire
-		if err := node.Decode(&decoded); err != nil {
-			return err
-		}
-		m.From = strings.TrimSpace(decoded.From)
-		m.Each = strings.TrimSpace(decoded.Each)
-		m.Item = decoded.Item
-		if m.Each != "" {
-			if m.From != "" || len(m.Item) == 0 {
-				return fmt.Errorf("channel each mapping requires each and item only")
-			}
-			return nil
-		}
-		if m.From == "" || len(m.Item) != 0 {
-			return fmt.Errorf("channel scalar mapping requires from only")
-		}
-		return nil
-	default:
-		return fmt.Errorf("channel mapping must be a source path or mapping")
-	}
-}
-
-func rejectChannelMappingFields(node *yaml.Node, allowed ...string) error {
-	known := make(map[string]struct{}, len(allowed))
-	for _, field := range allowed {
-		known[field] = struct{}{}
-	}
-	for index := 0; index < len(node.Content); index += 2 {
-		field := strings.TrimSpace(node.Content[index].Value)
-		if _, ok := known[field]; !ok {
-			return fmt.Errorf("channel mapping field %q is unsupported", field)
-		}
-	}
-	return nil
-}
-
 type LoadedChannelPack struct {
 	Envelope     Envelope
 	Manifest     ChannelManifest
@@ -504,7 +447,7 @@ func LoadChannelPack(loaded Loaded) (LoadedChannelPack, error) {
 	if len(loaded.Envelope.Requires.Packs) != 2 || strings.TrimSpace(loaded.Envelope.Requires.Packs[TypeTrigger]) == "" || strings.TrimSpace(loaded.Envelope.Requires.Packs[TypeConnector]) == "" {
 		return LoadedChannelPack{}, fmt.Errorf("channel pack %q requires exactly trigger and connector pack roles", loaded.Envelope.ID)
 	}
-	manifest, err := ParseChannelManifest(loaded.ManifestBody)
+	manifest, err := parseChannelManifestAt(loaded.ManifestBody, path.Join(loaded.Directory, "channel.yaml"))
 	if err != nil {
 		return LoadedChannelPack{}, fmt.Errorf("parse channel manifest for pack %q: %w", loaded.Envelope.ID, err)
 	}
@@ -518,46 +461,7 @@ func LoadChannelPack(loaded Loaded) (LoadedChannelPack, error) {
 }
 
 func ParseChannelManifest(body []byte) (ChannelManifest, error) {
-	snapshot, err := yamlsource.Load(body)
-	if err != nil {
-		return ChannelManifest{}, err
-	}
-	root := snapshot.Document("channel.yaml").Root()
-	if err := root.ValidateExpansion(); err != nil {
-		return ChannelManifest{}, err
-	}
-	lookup, err := root.Lookup("opaque_types")
-	if err != nil {
-		return ChannelManifest{}, err
-	}
-	fields, err := lookup.Value.Mapping()
-	if err != nil {
-		return ChannelManifest{}, err
-	}
-	opaque := make(map[string]runtimecontracts.ToolInputSchema, len(fields))
-	for _, field := range fields {
-		schema, err := runtimecontracts.AdmitToolInputSchemaValue(field.Value)
-		if err != nil {
-			return ChannelManifest{}, err
-		}
-		opaque[field.Name] = schema
-	}
-	var wire struct {
-		Provider     string                             `yaml:"provider"`
-		OpaqueTypes  map[string]map[string]any          `yaml:"opaque_types"`
-		Operations   map[string]ChannelOperationBinding `yaml:"operations"`
-		Events       map[string]ChannelEventBinding     `yaml:"events"`
-		Registration *ChannelRegistrationProfile        `yaml:"registration,omitempty"`
-		Onboarding   *ChannelOnboardingProfile          `yaml:"onboarding,omitempty"`
-	}
-	decoder := yaml.NewDecoder(bytes.NewReader(body))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&wire); err != nil {
-		return ChannelManifest{}, err
-	}
-	manifest := ChannelManifest{Provider: wire.Provider, Operations: wire.Operations, Events: wire.Events, Registration: wire.Registration, Onboarding: wire.Onboarding}
-	manifest.OpaqueTypes = opaque
-	return manifest, nil
+	return parseChannelManifestAt(body, "channel.yaml")
 }
 
 func CompileChannelInventory(registry *InterfaceRegistry, channels []LoadedChannelPack, triggers []TriggerPackDescriptor, connectors []ConnectorPackDescriptor) ([]SatisfactionPlan, error) {
@@ -2365,9 +2269,6 @@ func exactInteger(value any) (int64, bool) {
 		return typed, true
 	case int32:
 		return int64(typed), true
-	case yaml.Node:
-		parsed, err := strconv.ParseInt(strings.TrimSpace(typed.Value), 10, 64)
-		return parsed, err == nil
 	default:
 		return 0, false
 	}

@@ -25,7 +25,8 @@ func loadPlatformSpecDocumentForStoreTest(t testing.TB, path string) runtimecont
 		t.Fatalf("read platform spec: %v", err)
 	}
 	var spec runtimecontracts.PlatformSpecDocument
-	if err := source.Decode(&spec); err != nil {
+	spec, err = runtimecontracts.AdmitPlatformSpecValue(source.Document(path).Root())
+	if err != nil {
 		t.Fatalf("unmarshal platform spec: %v", err)
 	}
 	return spec

@@ -1050,7 +1050,8 @@ func loadTelegramRegistrationPlan(t *testing.T) packs.CompiledChannelRegistratio
 		t.Fatalf("load platform spec: %v", err)
 	}
 	var spec contracts.PlatformSpecDocument
-	if err := snapshot.Decode(&spec); err != nil {
+	spec, err = contracts.AdmitPlatformSpecValue(snapshot.Document(filepath.Join(repo, "platform-spec.yaml")).Root())
+	if err != nil {
 		t.Fatalf("decode platform spec: %v", err)
 	}
 	registry, err := packs.NewInterfaceRegistry(spec)

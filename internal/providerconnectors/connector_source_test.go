@@ -69,7 +69,7 @@ func TestConnectorAndGeneratedIndexAdmissionPreservePresence(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, artifact := range artifacts {
-		for _, path := range []string{"provider", "generation", "generation.schema_version", "generation.source", "generation.source.path", "generation.source.sha256", "generation.profile", "generation.profile.path", "generation.operations", "generation.operations.0.permissions", "generation.operations.0.permissions.0.note", "generation.operations.0.response_success", "generation.operations.0.fixture_id"} {
+		for _, path := range []string{"provider", "tools", "generation", "generation.schema_version", "generation.generator_version", "generation.source", "generation.source.path", "generation.source.sha256", "generation.source.openapi_version", "generation.profile", "generation.profile.path", "generation.profile.schema_version", "generation.profile.sha256", "generation.operations", "generation.operations.0.operation_id", "generation.operations.0.tool_id", "generation.operations.0.permissions", "generation.operations.0.permissions.0.id", "generation.operations.0.permissions.0.note", "generation.operations.0.response_success", "generation.operations.0.response_success.kind", "generation.operations.0.fixture_id", "generation.operations.0.fixture_status", "generation.operations.0.review_status"} {
 			for _, state := range []string{"missing", "null", "empty text", "empty sequence", "empty mapping", "wrong kind", "valid", "merge"} {
 				t.Run(artifact.Manifest.Provider+"/"+path+"/"+state, func(t *testing.T) {
 					manifest, err := ParseConnectorManifest(mutateCatalogField(t, artifact.ConnectorBody, path, state))

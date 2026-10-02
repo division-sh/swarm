@@ -52,19 +52,3 @@ func TestNodeValueBoolRejectsLegacyConditional(t *testing.T) {
 		}
 	}
 }
-
-func TestParseTypedFieldString_PreservesFlagsAndDefault(t *testing.T) {
-	got := parseTypedFieldString("text indexed nullable default pending")
-	if got.Type != "text indexed nullable" {
-		t.Fatalf("Type = %q", got.Type)
-	}
-	if !got.Indexed {
-		t.Fatal("expected indexed")
-	}
-	if !got.Nullable {
-		t.Fatal("expected nullable")
-	}
-	if got.Default != "pending" {
-		t.Fatalf("Default = %#v", got.Default)
-	}
-}

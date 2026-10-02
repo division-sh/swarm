@@ -1226,7 +1226,8 @@ func loadPlatformSpec() (runtimecontracts.PlatformSpecDocument, error) {
 		return runtimecontracts.PlatformSpecDocument{}, fmt.Errorf("read platform spec: %w", err)
 	}
 	var spec runtimecontracts.PlatformSpecDocument
-	if err := source.Decode(&spec); err != nil {
+	spec, err = runtimecontracts.AdmitPlatformSpecValue(source.Document(path).Root())
+	if err != nil {
 		return runtimecontracts.PlatformSpecDocument{}, fmt.Errorf("unmarshal platform spec: %w", err)
 	}
 	return spec, nil

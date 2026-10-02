@@ -29,11 +29,8 @@ const (
 	ServiceDiscoveryPolicyRuntimeBehaviorMethodNotFound = "out_of_catalog_method_not_found"
 )
 
-type PlatformSpec struct {
-	APISpecification APISpecification `yaml:"api_specification"`
-}
-
 type APISpecification struct {
+	source                 yamlsource.Value
 	Description            string                 `yaml:"description" json:"description,omitempty"`
 	Components             Components             `yaml:"components" json:"components"`
 	ExamplesPolicy         ExamplesPolicy         `yaml:"examples_policy" json:"examples_policy,omitempty"`
@@ -169,14 +166,7 @@ func LoadPlatformSpec(path string) (*APISpecification, error) {
 		}
 		return nil, err
 	}
-	var spec PlatformSpec
-	if err := source.Decode(&spec); err != nil {
-		return nil, fmt.Errorf("parse platform spec: %w", err)
-	}
-	if len(spec.APISpecification.MethodCatalog) == 0 {
-		return nil, fmt.Errorf("platform spec missing api_specification.method_catalog")
-	}
-	return &spec.APISpecification, nil
+	return AdmitPlatformAPIValue(source.Document(path).Root())
 }
 
 func Validate(api *APISpecification) (ValidationReport, error) {

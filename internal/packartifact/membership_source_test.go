@@ -1,6 +1,7 @@
 package packartifact
 
 import (
+	"gopkg.in/yaml.v3"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -18,6 +19,91 @@ func TestPackMembershipAdmissionRequiresIntegerVersion(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPackMembershipAdmissionPresenceMatrix(t *testing.T) {
+	for _, kind := range []string{"inventory", "project"} {
+		collection := "packs"
+		body := "version: 1\npacks: [{id: provider.demo, type: trigger, path: demo}]\n"
+		paths := []string{"version", "packs", "packs.0.id", "packs.0.type", "packs.0.path"}
+		if kind == "project" {
+			collection = "imports"
+			body = "version: 1\nimports: [{id: provider.demo, type: trigger, path: demo, origin: {source: embedded, id: provider.demo, version: 0.1.0, manifest_hash: 'sha256:" + strings.Repeat("1", 64) + "', envelope_hash: 'sha256:" + strings.Repeat("2", 64) + "'}}]\n"
+			paths = []string{"version", "imports", "imports.0.id", "imports.0.type", "imports.0.path", "imports.0.origin", "imports.0.origin.source", "imports.0.origin.id", "imports.0.origin.version", "imports.0.origin.manifest_hash", "imports.0.origin.envelope_hash"}
+		}
+		for _, field := range paths {
+			for _, state := range []string{"missing", "null", "empty_text", "empty_list", "empty_map", "wrong_kind", "valid", "merge"} {
+				t.Run(kind+"/"+field+"/"+state, func(t *testing.T) {
+					mutated := membershipPresenceBody(t, []byte(body), field, state)
+					var err error
+					if collection == "packs" {
+						_, err = LoadInventoryManifest(fstest.MapFS{InventoryManifestFileName: {Data: mutated}}, InventoryManifestFileName)
+					} else {
+						_, err = ParseProjectPackManifest(mutated)
+					}
+					if (err == nil) != (state == "valid" || state == "merge") {
+						t.Fatalf("presence admitted=%t: %v", err == nil, err)
+					}
+				})
+			}
+		}
+	}
+}
+
+func membershipPresenceBody(t testing.TB, body []byte, path, state string) []byte {
+	t.Helper()
+	var doc yaml.Node
+	if err := yaml.Unmarshal(body, &doc); err != nil {
+		t.Fatal(err)
+	}
+	parts, parent := strings.Split(path, "."), doc.Content[0]
+	for _, name := range parts[:len(parts)-1] {
+		if parent.Kind == yaml.SequenceNode {
+			parent = parent.Content[0]
+			continue
+		}
+		var next *yaml.Node
+		for i := 0; i < len(parent.Content); i += 2 {
+			if parent.Content[i].Value == name {
+				next = parent.Content[i+1]
+				break
+			}
+		}
+		if next == nil {
+			t.Fatalf("missing fixture path %s", path)
+		}
+		parent = next
+	}
+	index := -1
+	for i := 0; i < len(parent.Content); i += 2 {
+		if parent.Content[i].Value == parts[len(parts)-1] {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		t.Fatalf("missing fixture field %s", path)
+	}
+	switch state {
+	case "missing":
+		parent.Content = append(parent.Content[:index], parent.Content[index+2:]...)
+	case "merge":
+		key, value := parent.Content[index], parent.Content[index+1]
+		parent.Content = append(parent.Content[:index], parent.Content[index+2:]...)
+		parent.Content = append(parent.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!merge", Value: "<<"}, &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Content: []*yaml.Node{key, value}})
+	case "valid":
+	default:
+		var value yaml.Node
+		if err := yaml.Unmarshal([]byte(map[string]string{"null": "null", "empty_text": "''", "empty_list": "[]", "empty_map": "{}", "wrong_kind": "1.5"}[state]), &value); err != nil {
+			t.Fatal(err)
+		}
+		parent.Content[index+1] = value.Content[0]
+	}
+	out, err := yaml.Marshal(&doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
 }
 
 func TestPackMembershipAdmissionRejectsMalformedRowsAndOrigins(t *testing.T) {

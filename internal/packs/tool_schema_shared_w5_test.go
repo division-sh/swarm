@@ -10,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	contracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/yamlsource"
-	"gopkg.in/yaml.v3"
 )
 
 func TestW5ToolSchemaSharedConsumerParity(t *testing.T) {
@@ -48,12 +47,11 @@ func TestW5ToolSchemaSharedConsumerParity(t *testing.T) {
 					return manifest.Tools["probe"].InputSchema(), err
 				},
 				"pack_interface": func() (contracts.ToolInputSchema, error) {
-					var entry contracts.PackInterfaceDefinition
-					err := yaml.Unmarshal([]byte("kind: channel\nschemas: {probe: "+text+"}\n"), &entry)
-					return entry.Schemas["probe"], err
+					spec, err := contracts.ParsePlatformSpecDocument([]byte("interfaces:\n  probe:\n    v1:\n      kind: channel\n      schemas: {probe: "+text+"}\n      operations: {check: {effect_class: non_idempotent_write}}\n      events: {checked: {required_fields: {value: {schema: probe}}}}\n"), "platform-spec.yaml")
+					return spec.Interfaces["probe"]["v1"].Schemas["probe"], err
 				},
 				"channel_opaque": func() (contracts.ToolInputSchema, error) {
-					manifest, err := packs.ParseChannelManifest([]byte("provider: probe\nopaque_types: {probe: " + text + "}\n"))
+					manifest, err := packs.ParseChannelManifest([]byte("provider: probe\nopaque_types: {probe: " + text + "}\noperations: {check: {tool: probe.check}}\nevents: {checked: {event: probe.checked, fields: {value: payload.value}}}\n"))
 					return manifest.OpaqueTypes["probe"], err
 				},
 				"trigger": func() (contracts.ToolInputSchema, error) {
@@ -93,7 +91,7 @@ func TestW5ToolSchemaSharedConsumerParity(t *testing.T) {
 		})
 	}
 	for _, source := range []string{"{<<: {minLength: 1.5}, type: string}", "{type: object, properties: {value: &p {type: string}, other: *p}}"} {
-		_, err := packs.ParseChannelManifest([]byte("provider: probe\nopaque_types: {probe: " + source + "}\n"))
+		_, err := packs.ParseChannelManifest([]byte("provider: probe\nopaque_types: {probe: " + source + "}\noperations: {check: {tool: probe.check}}\nevents: {checked: {event: probe.checked, fields: {value: payload.value}}}\n"))
 		if strings.Contains(source, "1.5") && (err == nil || !strings.Contains(err.Error(), "channel.yaml")) {
 			t.Fatalf("merged bound diagnostic: %v", err)
 		}

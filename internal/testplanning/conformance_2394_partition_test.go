@@ -230,7 +230,8 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 		"TestKeyedPortfolioStreamRoutesAndRetainsIndependentPeriodsOnBothStores",
 		"TestKeyedStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBackends",
 	}
-	want := []int{160, 14, 5, 1}
+	// #2486 adds the accepted-base fixture-relocation ratchet; no root is removed.
+	want := []int{161, 14, 5, 1}
 	for i, group := range groups {
 		if len(group) != want[i] {
 			t.Fatalf("%s census=%d, want reviewed %d; account new roots explicitly", conformance2394Units[i], len(group), want[i])
@@ -240,6 +241,10 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 		}
 	}
 	const preparedFaultProof = "TestSemanticProofPreparedFaultMatchesRawBothStores"
+	const relocationProof = "TestCatalogFixtureDecodeRelocationPreservesAcceptedBaseBudget"
+	if i := sort.SearchStrings(groups[0], relocationProof); i == len(groups[0]) || groups[0][i] != relocationProof {
+		t.Fatalf("#2486 relocation proof missing from %s", conformance2394Units[0])
+	}
 	const nodeAdmissionProof = "TestNodeAdmissionUsesSourceValueWithoutRawDecoderFallback"
 	const schemaAdmissionProof = "TestSchemaAdmissionOwnershipHasNoRetiredInterpreter"
 	if i := sort.SearchStrings(groups[0], schemaAdmissionProof); i == len(groups[0]) || groups[0][i] != schemaAdmissionProof {
