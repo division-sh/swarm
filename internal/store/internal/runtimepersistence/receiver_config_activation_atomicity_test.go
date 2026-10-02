@@ -46,6 +46,11 @@ func newReceiverConfigActivationFixtureWithAgents(t *testing.T, backend string, 
 
 func newReceiverConfigActivationFixtureWithOptions(t *testing.T, backend string, withAgents, autoEmit bool) receiverConfigActivationFixture {
 	t.Helper()
+	return newReceiverConfigActivationFixtureWithTimer(t, backend, withAgents, autoEmit, false, false)
+}
+
+func newReceiverConfigActivationFixtureWithTimer(t *testing.T, backend string, withAgents, autoEmit, withTimer, recurring bool) receiverConfigActivationFixture {
+	t.Helper()
 	_, selected := newAgentFixtureAuthorityStore(t, backend)
 	actors := sqliteFlowActivationBundle(t)
 	files := map[string]string{
@@ -71,7 +76,14 @@ pins:
 		files["review/schema.yaml"] += "auto_emit_on_create: {event: task.started}\n"
 		files["review/events.yaml"] = "task.started:\n  request_id: string\n  label: string\n  enabled: boolean\n  nested: json\n"
 	}
+	if withTimer {
+		files["review/schema.yaml"] = strings.Replace(files["review/schema.yaml"], "  pending: {initial: true}", "  pending:\n    initial: true\n    timers:\n      - {id: pending.timeout, after: 1h, emit: timer.elapsed}", 1)
+		files["review/events.yaml"] += "timer.elapsed:\n"
+	}
 	bundle := loadLifecyclePersistenceFixtureForTest(t, files)
+	if withTimer && recurring {
+		bundle.Semantics.Timers[0].Recurring = true
+	}
 	if withAgents {
 		bundle.FlowTree.ByID["review"].Agents = actors.FlowTree.ByID["review"].Agents
 		bundle.FlowTree.ByID["review"].AgentURIs = actors.FlowTree.ByID["review"].AgentURIs
