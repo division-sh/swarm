@@ -94,7 +94,7 @@ func TestDurableDataOperationAggregatePublicRestartBothStores(t *testing.T) {
 			before := captureReceiptRestartOperations(t, ctx, p.rpc, operations)
 			var pruned durabledata.VersionSummary
 			if err := p.rpc.call(ctx, "data.show", map[string]any{"view": "version", "declaration": receiptRestartDeclaration(),
-				"selector": map[string]any{"kind": "version_id", "version_id": sources[0].Candidate.VersionID}}, &pruned); err != nil || pruned.PayloadState != "pruned" || pruned.Manifest.RowCount != 1 || pruned.VersionID != sources[0].Candidate.VersionID {
+				"selector": map[string]any{"kind": "version", "version_id": sources[0].Candidate.VersionID}}, &pruned); err != nil || pruned.PayloadState != "pruned" || pruned.Manifest.RowCount != 1 || pruned.VersionID != sources[0].Candidate.VersionID {
 				t.Fatalf("pruned payload lost permanent version metadata: %+v error=%v", pruned, err)
 			}
 			rematerialized := receiptRestartSource(t, ctx, p.rpc, hash, "import", latest.Head.After, rows[0]+"\n", "accepted")
