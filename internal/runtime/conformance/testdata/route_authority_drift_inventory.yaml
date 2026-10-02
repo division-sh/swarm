@@ -1112,14 +1112,13 @@ seam_families:
       - internal/apiv1/operator_event_replay.go
       - internal/apiv1/operator_read.go
       - internal/store/internal/operatorsurface/operator_observability_read_surface.go
-      - internal/dashboard/server/observability_sql.go
       - internal/serveapp/main_runtime_test.go
       - openrpc.json
     search_dimensions: [public_readback, event_name_type, entity_context, run_source_event_context, event_deliveries, event_receipts]
     invalid_authority:
       - API readback
       - CLI readback
-      - dashboard readback
+      - canonical v1 readback
       - OpenRPC projection
       - delivery count reconstruction
     notes: >
@@ -1154,7 +1153,6 @@ seam_families:
       - internal/store/internal/runtimepersistence/standalone_runtime_convergence_parity_test.go
       - internal/store/internal/runtimepersistence/standing_service_store_test.go
       - internal/runtime/template_instance_delivery_test.go
-      - internal/dashboard/server/observability_sql_test.go
       - internal/runtime/runforkexecution/execution_test.go
     search_dimensions: [event_name_type, entity_context, run_source_event_context, event_deliveries, event_receipts, delivery_authority_writers, pending_agent_subscription_recovery_authority]
     notes: >

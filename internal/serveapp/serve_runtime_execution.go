@@ -55,7 +55,7 @@ func buildServeRuntimeExecution(stores *storeselected.Owner, req selectedAPICapa
 		Source:               req.Source, Bundle: primary.bootIdentity, ScenarioExecutionProfiles: stores.ScenarioExecutionProfiles(),
 	}
 	handlers := apiv1.MergeOperatorHandlers(
-		apiv1.OperatorAgentControlHandlers(apiv1.AgentControlHandlerOptions{Controller: dashboardDynamicAgentControl{supervisor: req.RuntimeSupervisor}, Idempotency: idempotency, RuntimeContexts: caps.RuntimeContexts, SelectedForkControls: caps.SelectedForkControls}),
+		apiv1.OperatorAgentControlHandlers(apiv1.AgentControlHandlerOptions{Controller: processDynamicAgentControl{supervisor: req.RuntimeSupervisor}, Idempotency: idempotency, RuntimeContexts: caps.RuntimeContexts, SelectedForkControls: caps.SelectedForkControls}),
 		apiv1.OperatorAgentFrameHandlers(apiv1.AgentFrameHandlerOptions{Effective: rt.Manager}),
 		apiv1.OperatorConversationForkHandlers(apiv1.ConversationForkHandlerOptions{Reads: caps.ConversationForks, Lifecycle: caps.ConversationForkLifecycle, Chat: cliapp.NewWorkspaceAdmittedForkChatExecutor(apiv1.NewLLMForkChatExecutor(forkChatLLM), forkChatLLM, primary.workspaceBackend), Idempotency: idempotency, ExecutionPosture: rt.ExecutionPosture}),
 		apiv1.OperatorDecisionCardHandlers(apiv1.DecisionCardHandlerOptions{Cards: deps.DecisionCards, ProposedEffects: deps.ProposedEffects, Mailbox: stores.MailboxAPI(), NoticeAcknowledgment: stores.MailboxNoticeAcknowledgment(), Authority: rt.Pipeline, SourceArtifact: rt.Bus, RuntimeContexts: caps.RuntimeContexts, SelectedForkControls: caps.SelectedForkControls}),

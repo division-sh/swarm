@@ -84,7 +84,7 @@ rows:
       smoke because they prove the main write path consumes the same RoutePlan.
 
   - id: public_operator_typed_readback
-    concept: API, CLI, OpenRPC, and dashboard readback consume persisted typed delivery identity without creating authority.
+    concept: API, CLI, and OpenRPC readback consume persisted typed delivery identity without creating authority.
     classification: already_covered_by_existing_proof
     tier: required_pr_smoke
     proof_dimensions: [public_projection, real_v1_handler, cli_v1_path, openrpc_publication, required_pr_smoke]
@@ -578,14 +578,14 @@ rows:
       owners. Markers alone do not authorize new workflow-node work.
 
   - id: readback_not_authority
-    concept: API, CLI, dashboard, OpenRPC, and event read surfaces expose persisted owner data without replanning.
+    concept: API, CLI, OpenRPC, and event read surfaces expose persisted owner data without replanning.
     classification: add_to_matrix
     tier: required_pr_smoke
     proof_dimensions: [negative_authority, public_projection, required_pr_smoke]
     invalid_authority:
       - API readback
       - CLI readback
-      - dashboard readback
+      - canonical v1 readback
       - delivery count reconstruction
     owner_refs:
       - {kind: spec_ref, path: platform-spec.yaml, ref: readback}

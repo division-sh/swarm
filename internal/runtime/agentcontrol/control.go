@@ -74,7 +74,6 @@ const (
 
 	RunResolutionSpecified         = "specified"
 	DirectiveSourceV1RPC           = "v1_rpc"
-	DirectiveSourceDashboardLegacy = "dashboard_legacy_adapter"
 	DirectiveSourceInternalRuntime = "internal_runtime"
 )
 

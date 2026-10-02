@@ -1519,7 +1519,7 @@ rows:
         name: TestRuntimeLogPredicateBoundariesBothStores
     notes: >
       #1402 promotes runtime-log/readback to first-class selected-store
-      accounting. Dashboard SQL readers are adjacent read-model consumers; this
+      accounting. Canonical typed operator readers back v1 directly; this
       row owns public API selected-store proof only. #2454 adds conjunctive
       log filtering through authenticated HTTP, WebSocket replay/live follow
       and CLI consumers on both stores, plus direct predicate boundary controls.

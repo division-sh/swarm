@@ -557,10 +557,8 @@ func operatorAgentSummaryFromPersisted(row runtimemanager.PersistedAgent, projec
 		LiveTurn:              projection.LiveTurn,
 		DiagnosisActive:       cloneOperatorAgentDiagnosisActive(projection.DiagnosisActive),
 		StartedAt:             row.StartedAt,
-		DashboardStatus:       strings.TrimSpace(projection.Status),
-		DashboardState:        projection.dashboardState(),
 		DeliveryLifecycle:     strings.TrimSpace(projection.LifecycleState),
-		BlockingLayer:         projection.dashboardBlockingLayer(),
+		BlockingLayer:         projection.blockingLayer(),
 		CurrentSessionRef:     projection.currentSessionRef(),
 		LastTurnRef:           projection.LastTurnRef,
 		DiagnosisRuntimeState: operatorAgentDiagnosisRuntimeStateFromConversationWatchdog(projection.Watchdog),
@@ -797,18 +795,7 @@ func (p operatorAgentProjection) currentSessionRef() *operatorread.OperatorSessi
 	return &operatorread.OperatorSessionRef{SessionID: strings.TrimSpace(p.SessionID), StartedAt: p.SessionStartedAt}
 }
 
-func (p operatorAgentProjection) dashboardState() string {
-	status := strings.ToLower(strings.TrimSpace(p.Status))
-	if status == "terminated" {
-		return "terminated"
-	}
-	if state := strings.TrimSpace(p.LifecycleState); state != "" {
-		return state
-	}
-	return "idle"
-}
-
-func (p operatorAgentProjection) dashboardBlockingLayer() string {
+func (p operatorAgentProjection) blockingLayer() string {
 	if layer := strings.TrimSpace(p.BlockingLayer); layer != "" {
 		return layer
 	}

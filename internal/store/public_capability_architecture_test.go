@@ -50,7 +50,7 @@ func TestAPIMethodsDeclareExactCapabilities(t *testing.T) {
 
 func TestPublicCapabilityConsumersDoNotDiscoverRoles(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
-	for _, dir := range []string{"internal/apiv1", "internal/dashboard", "internal/serveapp"} {
+	for _, dir := range []string{"internal/apiv1", "internal/serveapp"} {
 		walkProductionGo(t, root, dir, func(path, source string) {
 			for _, retired := range []string{
 				".(AcknowledgedEventPublisher)", ".(EventRecipientPlanChecker)",
@@ -113,8 +113,6 @@ func TestOperatorReadOwnersDoNotExportGenericReadAdapters(t *testing.T) {
 func TestNonAPIReadConsumersUseCanonicalOperatorReadOwner(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	for _, file := range []string{
-		"internal/dashboard/server/conversations_sql.go",
-		"internal/dashboard/server/observability_sql.go",
 		"internal/serveapp/run_stalled_monitor.go",
 		"internal/cliapp/forkchat_workspace_admission.go",
 	} {

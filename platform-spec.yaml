@@ -2446,12 +2446,12 @@ contract_formats:
         public_projection_policy:
           current_boundary: |
             The internal and persisted RoutePlan authority is typed. Public
-            event.publish, dashboard, and operator delivery readback projections
+            event.publish and operator delivery readback projections
             expose persisted typed delivery identity as delivery_id,
             subscriber_type, and subscriber_id. They remain non-authoritative
             readback surfaces and must not re-plan subscribers, fabricate rows,
             or expose delivery_target_route unless a separately gated public
-            schema change promotes route-target identity. Dashboard event-list
+            schema change promotes route-target identity. Canonical event.list
             subscriber selectors consume the same typed subscriber_id +
             subscriber_type delivery identity as the canonical event.list owner.
           split_owner: '#1345 owns the public/operator readback projection for delivery_id, subscriber_type, and subscriber_id; route-target public exposure remains split.'
@@ -6238,7 +6238,7 @@ engine:
       typed backend. Platform table intent remains authored in platform_tables.tables, but executable DDL is backend
       specific. Each selected store starts in a private unaccepted state. The backend compatibility inspector validates
       the actual catalog before mutation; successful canonical platform bootstrap atomically marks that concrete store
-      current. Serve, runtime, and dashboard assembly expose selected persistence owners only after that transition.
+      current. Serve and runtime assembly expose selected persistence owners only after that transition.
       Former schema-dependent or capability-gated entry points and owner-crossing event/fork mutation paths require the
       accepted concrete owner before SQL; other fixed-current-SQL methods rely on that assembly ordering and never interpret
       catalog or schema state.
@@ -6271,7 +6271,7 @@ engine:
       rule: >
         Catalog interpretation belongs only to backend compatibility inspection during bootstrap. There is no runtime
         schema flavor DTO, capability cache, bind/resolve API, lazy binding, or per-reader catalog interpretation. Successful
-        platform bootstrap marks the same concrete store current before serve, runtime, or dashboard assembly exposes its
+        platform bootstrap marks the same concrete store current before serve or runtime assembly exposes its
         selected persistence owners. Former schema-dependent or capability-gated entry points and owner-crossing event/fork
         mutation paths reject an unaccepted owner before SQL. Runtime methods otherwise issue fixed current SQL and do not
         inspect or infer schema state.
@@ -6306,7 +6306,7 @@ engine:
         status: active_local_dev_default_store_backend
         rules:
         - Must be file-backed and use the canonical SQLite path selected by internal/store/backendselection.
-        - "Must consume the #1085 SQLite schema admission/bootstrap owner before selected runtime persistence is wired into serve, runtime, or dashboard assembly."
+        - "Must consume the #1085 SQLite schema admission/bootstrap owner before selected runtime persistence is wired into serve or runtime assembly."
         - Must not silently replace missing unsupported sibling semantics with in-memory state.
         - >
           May expose typed SQLite store owners for the #1087 session, startup ownership, delivery/replay, conversation/turn,
@@ -6452,7 +6452,6 @@ engine:
             - internal/store/internal/operatorsurface.ObservabilityPostgres and ObservabilitySQLite
           consumers:
             - internal/apiv1 exact handler families
-            - internal/dashboard typed projections
             - internal/serveapp run-stalled monitor
             - internal/cliapp fork-chat admission
           rules:
@@ -6461,7 +6460,7 @@ engine:
             - Public conversation turn/list/get SQL and conversation-fork source resolution belong to the bounded ConversationPostgres and ConversationSQLite owners. Run-fork consumes only the typed runtime/runfork ConversationForkSource fact and MUST NOT consume SQL source fragments or reinterpret public conversation rows.
             - Run, agent, conversation, observability, and bundle parity claims require selected-store public API execution on each claimed backend; store-unit and fake-handler tests cannot substitute for that proof.
             - PostgreSQL and SQLite decode canonical persisted facts into the same consumer-owned models and fail closed on malformed or missing authority.
-            - Dashboard constructors accept typed projections only. Missing owners and read or stream failures are explicit errors; empty-success, fabricated not-found, loose Details reconstruction, and silent SSE continuation are forbidden.
+            - Public operator readers accept typed projections only. Missing owners and read or stream failures are explicit errors; empty-success, fabricated not-found, loose Details reconstruction, and silent subscription continuation are forbidden.
             - The retired internal/digest SQL source and runtime digest persistence contract have no replacement because no supported production consumer exists.
         administrative_operation_contract:
           destructive_reset_owner: internal/runtime/destructivereset Coordinator with private adminpersistence DestructiveResetPostgresOwner and DestructiveResetSQLiteOwner adapters
@@ -6550,7 +6549,7 @@ engine:
             classification: removed by '#2148'; runtime construction exposes no raw selected-store handle
           - dependency: apiv1 exact handler option families
             classification: typed public-surface capability consumers; broad OperatorReadOptions is removed
-          - dependency: dashboard typed conversation and observability projections
+          - dependency: canonical v1 typed conversation and observability projections
             classification: consumer projections over internal/operatorread owners; SQL constructors and concrete-store wrappers are removed by '#2149'
           - dependency: ConversationForkReadStore and ConversationForkLifecycleStore
             classification: segregated selected capabilities backed by one shared semantic owner; read availability does not imply lifecycle mutation, while Postgres and local/dev SQLite explicitly wire both roles
@@ -16396,7 +16395,7 @@ platform_tables:
         turn_blocks is the ordered per-turn projection/surface for the flight recorder. It is populated from the canonical
         platform.runtime_log stream plus turn-local publish/tool transcript context. turn_blocks MUST include exactly one
         canonical turn_summary block when assistant-visible output, outcome, reasoning blocks, progress updates, or tool
-        results are present for the turn. The turn_summary block is the canonical persisted read-model surface for dashboard/debug
+        results are present for the turn. The turn_summary block is the canonical persisted read-model surface for operator/debug
         consumers; readers MUST NOT reconstruct those fields from raw transcript payloads. Used by all memory plans.
         For memory false, this is the primary per-turn audit record (no agent_sessions row exists). For memory true, this
         complements the live session with a queryable historical record.'
@@ -16460,7 +16459,7 @@ platform_tables:
       description: 'Write-only audit table for memory-false conversation snapshots. One row per stateless
         agent invocation. The conversation transcript is persisted here after each invocation for operator debugging.
         This table is NEVER read back for subsequent invocations — it is purely
-        for audit/debug. Dashboard/readers distinguish live memory (agent_sessions) from stateless audits
+        for audit/debug. Operator readers distinguish live memory (agent_sessions) from stateless audits
         (agent_conversation_audits) by table, not by convention.'
       ddl: |
         CREATE TABLE agent_conversation_audits (
@@ -16488,8 +16487,8 @@ platform_tables:
         );
       primary_key: 'session_id — shared identifier with agent_turns.session_id. Stateless turns reference
         the audit row via the same session_id, matching the runtime''s existing linking model.'
-      status_lifecycle: 'Stateless audit rows remain active for dashboard/reader visibility. The status values
-        (active, suspended, terminated) match the agent_sessions status model for consistency. Dashboard
+      status_lifecycle: 'Stateless audit rows remain active for operator-reader visibility. The status values
+        (active, suspended, terminated) match the agent_sessions status model for consistency. Operator
         readers query status = active to find visible stateless audit records. The runtime does NOT
         transition stateless audits to completed/failed — they stay active as part of the visible audit surface.'
       identity_model: 'run_id plus the complete typed agent identity are required evidence identity. Root-agent route absence
@@ -16497,7 +16496,7 @@ platform_tables:
         execution evidence and no audit row is used to reload conversation context.'
       write_only: 'This table is append/update only from the runtime perspective. The runtime writes the
         audit row after each memory-disabled invocation. It is NEVER read back to construct agent context.
-        Readers are: dashboard API, flight recorder queries, debug tools.'
+        Readers are: v1 operator API, flight recorder queries, debug tools.'
       relationship_to_agent_turns: 'agent_conversation_audits holds the full conversation snapshot per
         invocation. agent_turns holds the per-turn structured execution log. Both are audit surfaces.
         agent_turns is more granular (one row per turn). agent_conversation_audits captures the complete
@@ -16786,7 +16785,7 @@ platform_tables:
       description: 'Canonical forkchat lifecycle store for conversation.fork, conversation.fork_list, conversation.fork_view,
         conversation.fork_chat, and conversation.fork_delete. Rows record source session/run/exact-agent lineage, the validated
         fork-point descriptor, creator token, fixed lifecycle TTL, and soft-deletion state. This table is isolated from
-        agent_sessions, agent_turns, events, runtime logs, and dashboard conversation readers; fork chat execution consumes
+        agent_sessions, agent_turns, events, runtime logs, and canonical conversation readers; fork chat execution consumes
         conversation_fork_snapshots and conversation_fork_turns rather than writing normal conversation/event/log surfaces.'
       ddl: |
         CREATE TABLE conversation_forks (
@@ -16924,7 +16923,7 @@ platform_tables:
     runtime_ingress_state:
       description: 'Durable singleton runtime ingress state owned by the canonical runtime ingress controller. It records whether
         queueable event-producing ingress is running or paused, the last transition reason/actor, and the platform event emitted
-        for that transition. Runtime pause/resume API handlers, dashboard adapters, inbound admission, MCP/tool admission,
+        for that transition. Runtime pause/resume API handlers, inbound admission, MCP/tool admission,
         auth-breaker safety triggers, and reset safety triggers consume this owner instead of interpreting a process-local flag
         as semantic truth.'
       ddl: "CREATE TABLE runtime_ingress_state (\n    id                  INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),\n\
@@ -26670,7 +26669,7 @@ cli_specification:
         platform_boot_payload: >
           `platform.boot` carries the boot decision summary: boot timestamps/duration, canonical bundle_hash,
           startup recovery decision, static and flow-required agent materialization lists, system container names,
-          self-check-required state, and nullable self-check pass state. CLI/dashboard/API readers consume this persisted event; they do not reconstruct boot
+          self-check-required state, and nullable self-check pass state. CLI/API readers consume this persisted event; they do not reconstruct boot
           decisions from text logs.
       source_artifact_startup_admission:
         implemented_by: '#753/#754/#2320'
@@ -26972,7 +26971,7 @@ cli_specification:
       - a healthy trace sink renders a valid burst through the complete 16-row transport bound without detaching; queue_overflow is produced only by the canonical subscription transport owner
       - TTY and non-TTY render the same typed detach facts, including the exact connect-aware reattach command
       - a compiled public local foreground run exceeding the trace queue bound detaches observation loudly, reaches terminal completion, and exits 0 without premature runtime teardown
-      - standalone `swarm run trace --follow`, dashboard SSE, API WebSocket subscriptions, event/log followers, and the serve story follower retain their separate non-cancelling lifecycle contracts
+      - standalone `swarm run trace --follow`, API WebSocket subscriptions, event/log followers, and the serve story follower retain their separate non-cancelling lifecycle contracts
       - no direct DB/store/runtime/EventBus reads or writes
       - no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, or legacy token fallback
       - tests for every mode, invalid bundle_hash, retired flag rejection, invalid flag combination, Ctrl-C behavior, exit mapping, malformed RPC/WS response, and no-call invalid paths
@@ -28065,8 +28064,8 @@ cli_specification:
         The CLI must call only the shared `/v1/rpc` API client. It must not import or read internal store, runtime,
         EventBus, dashboard, Builder, conversation_forks tables, conversation_fork_snapshots, or conversation_fork_turns.
       split_out:
-        include_forks_cross_surface: '#749 parent tail; normal conversation/dashboard surfaces do not consume fork-local turns in this slice.'
-        dashboard: '#749 parent tail.'
+        include_forks_cross_surface: '#749 parent tail; normal conversation and future v1 dashboard surfaces do not consume fork-local turns in this slice.'
+        dashboard: '#749 explicitly deferred future v1-consumer parent tail.'
         sharing_acl_pinning: '#749 parent tail; fixed TTL/delete lifecycle only.'
         run_fork_swarm_fork: '#989/#1023 implemented separately as the distinct run.fork/swarm fork concept (pre-v2.2 spelling; the public command is now `swarm run fork`).'
         direct_storage_or_runtime_reads: forbidden for the CLI consumer.
@@ -29955,27 +29954,7 @@ api_specification:
           updated_at:
             $ref: '#/components/schemas/Timestamp'
       EntityFull:
-        description: 'Entity-native shape: typed fields, gates, accumulator state. This
-
-          is the destination shape entity.get returns. v1 implementation
-
-          may need to translate from the existing instance-shaped readers
-
-          in internal/dashboard/server/server.go (which return flat
-
-          WorkflowInstance structs without the typed-fields/gates/
-
-          accumulated decomposition). The spec commits to the entity-native
-
-          shape; implementations are responsible for providing it. A real
-
-          entity-read owner may need to land before entity.* methods can
-
-          honor this shape, which is why the entity.* methods are
-
-          should_have rather than must_have for v1.
-
-          '
+        description: 'Entity-native operator shape from the canonical typed entity-read owner: entity identity, authored fields, platform bookkeeping, gates and accumulator state. The v1 entity.get reader returns this decomposition directly; retired dashboard instance projections are not an alternate owner.'
         type: object
         additionalProperties: false
         required:
@@ -37539,6 +37518,7 @@ api_specification:
         retained target artifact under independent selected-fork preparation and execution ownership, not a loaded
         normal runtime. Any future reload product requires a new lifecycle owner and specification.
     operator_api_disposition:
+      implementation_retirement: The retired internal/dashboard/server package, test-only projection adapters and dashboard-only declarations are deleted. Supported assertions consume canonical typed operatorread owners and v1 HTTP/WebSocket surfaces; no retired constructor or compatibility layer remains.
       transport: "REST at /api/* is retired as an operator-facing compatibility surface. It MUST NOT remain reachable in\
         \ production; consumers use /v1/rpc or /v1/ws."
       methods:

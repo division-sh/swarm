@@ -212,8 +212,8 @@ rows:
       - kind: go_test
         name: TestHandlerWebSocketRunSubscribeTraceUsesOwnerReplayAndRunNotFound
     notes: >
-      First-class #1402 row required by gate. Dashboard SQL readers remain
-      adjacent read-model consumers and do not own selected runtime persistence.
+      First-class #1402 row required by gate. Canonical typed operator readers
+      back v1 directly; retired dashboard adapters are not persistence owners.
 
   - id: typed_runtime_mutation_uow_guard
     classification: guard

@@ -18,7 +18,6 @@
     "github.com/division-sh/swarm/internal/cli/readwindow": 0,
     "github.com/division-sh/swarm/internal/cliapp": 86.528,
     "github.com/division-sh/swarm/internal/config": 0.01,
-    "github.com/division-sh/swarm/internal/dashboard/server": 4.212,
     "github.com/division-sh/swarm/internal/durabledata": 0.261,
     "github.com/division-sh/swarm/internal/events": 6.011,
     "github.com/division-sh/swarm/internal/events/eventtest": 0,

@@ -523,8 +523,6 @@ var bundleIdentityFixtureLedger = []string{
 	"internal/apiv1/sqlite_observability_supported_surface_test.go",
 	"internal/apiv1/sqlite_operator_read_supported_surface_test.go",
 	"internal/cliapp/entities_test.go",
-	"internal/dashboard/server/observability_sql_test.go",
-	"internal/dashboard/server/server_test.go",
 	"internal/runtime/budget_recovery_parity_test.go",
 	"internal/runtime/bus/event_identity_dispatch_surface_test.go",
 	"internal/runtime/bus/eventbus_publish_test.go",

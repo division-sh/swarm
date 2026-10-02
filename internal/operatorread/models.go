@@ -389,8 +389,6 @@ type OperatorAgentSummary struct {
 	LiveTurn              *OperatorLiveTurn                   `json:"-"`
 	DiagnosisActive       *OperatorAgentDiagnosisActive       `json:"-"`
 	StartedAt             time.Time                           `json:"-"`
-	DashboardStatus       string                              `json:"-"`
-	DashboardState        string                              `json:"-"`
 	DeliveryLifecycle     string                              `json:"-"`
 	BlockingLayer         string                              `json:"-"`
 	CurrentSessionRef     *OperatorSessionRef                 `json:"-"`
