@@ -186,16 +186,6 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      # U1000 fails only after merging native reachability, not during collection.
-      - name: Collect native Linux unused analysis
-        run: go run ./cmd/swarm-unused -collect -out test-results/unused/linux
-      - name: Upload native Linux unused analysis
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: unused-linux
-          path: test-results/unused/linux
-          if-no-files-found: error
       - name: Check formatting
         run: |
           unformatted=$(gofmt -l .)
@@ -249,15 +239,6 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Collect native Darwin unused analysis
-        run: go run ./cmd/swarm-unused -collect -out test-results/unused/darwin
-      - name: Upload native Darwin unused analysis
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: unused-darwin
-          path: test-results/unused/darwin
-          if-no-files-found: error
       - name: Prove store ownership and engine-disjoint crash reclaim
         run: go test ./internal/store/internal/startupownership -count=1
       - name: Prove selected SQLite construction consumes the owner
@@ -271,9 +252,55 @@ jobs:
       - name: Prove shipped dev and non-dev SQLite serve
         run: go test ./internal/releasee2e -run '^TestGoldenSQLitePossessionServeJourney$' -count=1 -v
 
+  # Cold analysis uses a separate pinned toolchain. Keep its budget independent
+  # of the existing product build and possession proof, without extending either.
+  unused-linux:
+    name: Native Linux unused analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Collect native Linux unused analysis
+        run: go run ./cmd/swarm-unused -collect -out test-results/unused/linux
+      - name: Upload native Linux unused analysis
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unused-linux
+          path: test-results/unused/linux
+          if-no-files-found: error
+
+  unused-darwin:
+    name: Native Darwin unused analysis
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Collect native Darwin unused analysis
+        run: go run ./cmd/swarm-unused -collect -out test-results/unused/darwin
+      - name: Upload native Darwin unused analysis
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unused-darwin
+          path: test-results/unused/darwin
+          if-no-files-found: error
+
   unused-checks:
     name: Native union unused checks
-    needs: [static-checks, macos-sqlite-possession]
+    needs: [unused-linux, unused-darwin]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -587,7 +614,7 @@ jobs:
   required-tests:
     name: ${{ github.event_name == 'workflow_dispatch' && 'Full dispatch summary' || 'Required test summary' }}
     if: always()
-    needs: [complexity, ci-plan, static-checks, sqlite-local-dev, macos-sqlite-possession, unused-checks, proof-unit, mandatory-soak, semantic-smoke, timing-budget]
+    needs: [complexity, ci-plan, static-checks, sqlite-local-dev, macos-sqlite-possession, unused-linux, unused-darwin, unused-checks, proof-unit, mandatory-soak, semantic-smoke, timing-budget]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -601,6 +628,8 @@ jobs:
             "complexity:${{ needs.complexity.result }}" \
             "static-checks:${{ needs.static-checks.result }}" \
             "macos-sqlite-possession:${{ needs.macos-sqlite-possession.result }}" \
+            "unused-linux:${{ needs.unused-linux.result }}" \
+            "unused-darwin:${{ needs.unused-darwin.result }}" \
             "unused-checks:${{ needs.unused-checks.result }}"
           do
             name="${item%%:*}"; result="${item#*:}"
