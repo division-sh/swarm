@@ -1,44 +1,50 @@
 # Pre-Implementation Coverage Audit: #2535
 
-Date: 2026-10-02. Implementer: agent-g. Phase: audit only; coding frozen pending
-reviewer-g's independent gate. Source base:
-`ae80bac4fe61c15d60c96189544707d4c1d89d8e` (`origin/master`). Docs read at
-`f6b04f2`; follow `IMPLEMENTER_GUIDELINES.md` and `SEMANTIC_DRIFT.md`.
+Date: 2026-10-02. Implementer: agent-g. **Repaired gate cycle 2.** Phase: audit
+only; coding frozen after the [cycle-1 insufficient/widen-split ruling](https://github.com/division-sh/swarm/issues/2535#issuecomment-5957050174).
+This version supersedes the original first-PR class and cap acceptance, not the
+historical baseline evidence. Source base:
+`c3f38293e16cebc09b552447cb6235f600692d12` (`origin/master`, merged #2482).
+Docs read at `7cf2086`; follow `IMPLEMENTER_GUIDELINES.md` and `SEMANTIC_DRIFT.md`.
 
 ## Class and governing context
 
 - Category: high-risk maintenance / CI qualification and publication authority.
 - Observed symptom: fleet CI takes hours predominantly in admission/start wait;
-  actual draft PRs run full proof, generated-model PRs get a second automatic full
-  dispatch, and both proof matrices admit all rows without per-run caps.
+  actual draft PRs run full proof and generated-model PRs get a second automatic
+  full dispatch. Matrix fairness is a separate, unproven performance hypothesis.
 - Exact concepts: native draft versus reviewable qualification; automatic
-  generated-PR qualification authority; per-run proof scheduling versus proof
-  membership; required aggregate/check identity.
-- Chosen working class: `ci_qualification_admission_ignores_native_draft_state_and_duplicates_generated_pr_dispatch_with_unbounded_per_run_proof_matrices`.
-- Immediate parent: excessive CI runner demand and unfair per-run admission under
-  concurrent ready PRs. Parent above it: complete hosted qualification latency
+  generated-PR qualification authority; required aggregate/check identity and
+  same-SHA native draft-to-ready protected-check acceptance. Physical scheduling
+  does not change logical proof completeness and is not this first-PR concept.
+- Chosen working class: `ci_full_qualification_admits_native_drafts_and_redundantly_dispatches_automatic_generated_pr_qualification`.
+- Immediate parent: avoidable CI runner demand under concurrent ready PRs.
+  Parent above it: complete hosted qualification latency
   under normal fleet load, targeted at 20 minutes (#2535); broader local test
   efficiency remains open in #1196, not a dependency on local box capacity.
 - Framing: the new issue is broad enough as a parent. This PR is an explicit
   user-authorized first slice, not a closure of the 20-minute parent. The observed
   publisher shell line and queue snapshot are entry points, not audit boundaries.
 - Intended closure: **failure class eliminated for the bounded admission class**.
-  Commit to closing all D/B/C/Q rows below, not just one duplicate run. The parent
-  retains recommendations 4-6 and fleet acceptance; use `Part of #2535`.
+  Commit to closing all 24 D/B/Q rows below, not just one duplicate run. C01-C06
+  become a separately gated, non-closure-bearing scheduling experiment under the
+  open parent. The parent retains recommendations 3-6 and fleet acceptance;
+  use `Part of #2535`. No cap implementation or cap change is part of this PR.
 
 No exact `platform-spec.yaml` section governs GitHub native draft admission,
-publisher dispatch multiplicity or `max-parallel`. Binding context is user
+publisher dispatch multiplicity. Binding context is user
 approval, #2535, existing workflow/planner/evidence contracts, and #1967's
 [independent gate](https://github.com/division-sh/swarm/issues/1967#issuecomment-4948539974)
 and [master-only environment ruling](https://github.com/division-sh/swarm/issues/1967#issuecomment-4949417169).
 This gate must expressly supersede their requirement for the redundant automatic
 publisher full dispatch, **not** their security or protected-proof requirements.
-#1967 stays closed; new policy is tracked by #2535.
+#1967 stays closed; new policy is tracked by #2535. Cycle-1 ruling directs the
+split and in-principle retirement; fresh coding approval is still required.
 
 Adjacent binding product contracts, read in full:
 `platform-spec.yaml#test_specification.internal_catalog_conformance.compiled_process_golden_profile`
 and `platform-spec.yaml#test_specification.internal_catalog_conformance.compiled_process_full_lifecycle_profile`
-(lines 22173-22305): PR profiles retain their SQLite smoke,
+(lines 22709-22841 on the repaired base): PR profiles retain their SQLite smoke,
 continuous full/nightly retain both-store restart/burst/J1-J5, and M24 retains the
 complete top-level partition. No profile inclusion, assertion, fixture, backend,
 deadline or runtime/platform semantic changes are authorized. Therefore no new
@@ -74,15 +80,23 @@ full remains supported; only the publisher's redundant automatic dispatch is
 retired. A distinct earlier agent PR/manual pair spent approximately588 runner
 minutes; it is demand evidence, not an instruction to merge their evidence.
 
-Two required soaks each cost approximately17min. A one-slot soak cap would create
-a ~34min floor. Proposed experiment: ordinary4 /soak2, keeping all rows and
-`fail-fast:false`. Four ordinary slots also impose a nontrivial throughput floor:
-caps alone cannot turn the current ~300 runner-minute workload into a20min run.
-This is a fairness experiment, not a claimed latency optimization or parent
-closure. Measure fleet demand, aggregate throughput, idle-host regression, p50/
-p90/max and runner-minutes. A clearly regressing setting must be revised or removed
-before calling the experiment useful; a cap-only rollback does not restore the
-obsolete automatic dispatch or draft qualification.
+`issue-2535-cap-feasibility.json` independently re-reads both review receipts:
+run37008266512 has70 ordinary proof jobs /217.32 runner-minutes; run36759529305
+has69 /215.68. At four simultaneous slots, their work/cap floors are54.33 and
+53.92min. The quieter uncapped whole run finished~22.3min. Any cap<=10 has a
+>21.5min ordinary floor before planning, other gates or queueing. Thus the literal
+four-slot proposal is rejected, not merely uncertain ROI. A lower queue metric
+cannot justify a predictable wall-time regression. `max-parallel` cannot reduce
+runner-minutes of actual work. Two soaks each cost~17min, so serializing them also
+imposes an unacceptable~34min floor.
+
+**First PR changes no matrix caps, strategies, row membership or fail-fast mode.**
+C01-C06 remain a separately tracked recommendation3 experiment under #2535. Any
+future candidate needs its own independent gate, a quantified work/cap floor
+compatible with20min after realistic nonmatrix cost, matched fleet-demand and
+quiet-host controls, and p50/p90/max/throughput/runner-minute acceptance. No
+candidate number is approved here. Reverting a regressing cap earns no cap-class
+closure; preserving all proof is not proof of scheduling value.
 
 ## Complete execution path and gates
 
@@ -100,15 +114,19 @@ obsolete automatic dispatch or draft qualification.
    exact-checkout cache seed and digest binding: **different membership concept,
    with proof** `TestResolveProfileCoversEveryEventAndEscalationFamily`,
    `TestForcedPRProfileCannotBypassRouting`, `TestCurrentProofPlansBindActiveRequiredRoots`.
-5. Every existing ordinary/soak row runs with capped *scheduling*, not capped row
-   count: **same admission class**; exact typed-plan consumption is preserved by
+5. Every existing ordinary/soak row retains unchanged physical scheduling and row
+   membership: **different scheduling concept, explicitly split in C01-C06**;
+   exact typed-plan consumption is preserved by
    `TestCIConsumesOnePlanAndCompletePlanBoundEvidence` and evidence negatives.
 6. Static/native Linux+Darwin unused/union, SQLite and macOS possession, semantic
    smoke, command timing and complete artifact qualification join:
    **same qualification class**, with existing exact-head negative contracts.
 7. Always-present `Required test summary` explicitly refuses draft qualification;
-   a ready same-head transition starts a real complete run, and no missing required
-   owner is blessed as a draft-related skip: **same chosen class**. Live master
+   a ready same-head transition starts a real complete run. That later green run
+   must satisfy the actual protected rollup despite the retained failed draft run
+   on that SHA, with the PR blocked only by ordinary review; D11 is required.
+   No missing required owner is blessed as a draft-related skip:
+   **same chosen class**. Live master
    protection requires summary +SQLite smoke (App15368), strict checks and one
    review. Protection configuration stays unchanged.
 8. Successful trusted master schedule may mint the existing restricted App token,
@@ -117,8 +135,9 @@ obsolete automatic dispatch or draft qualification.
    exits without work; publication errors fail closed. Explicit operator dispatch
    remains a different intentional full-profile request with non-required names.
 9. Record whole-job costs and fleet latency: admission measurement is in scope;
-   physical batching/build reuse, expensive-unit cost and soak *selection* are
-   **explicitly split/tracked in #2535 recommendations4-6**. They are not cleared
+   matrix-cap feasibility/tuning, physical batching/build reuse, expensive-unit
+   cost and soak *selection* are **explicitly split/tracked in #2535
+   recommendations3-6**. They are not cleared
    by a green admission PR.
 
 Ready work must succeed at planning, exact SHA/digest, every selected proof,
@@ -135,20 +154,20 @@ found in the repository census.
 
 | Owner / consumer seam | Disposition | Exact boundary / planned proof |
 | --- | --- | --- |
-| Workflow `on.pull_request` event types, native draft fact | moved to canonical owner in this work | explicit opened/synchronize/reopened/ready_for_review/converted_to_draft; D01-D06 |
+| Workflow `on.pull_request` event types, native draft fact | moved to canonical owner in this work | explicit opened/synchronize/reopened/ready_for_review/converted_to_draft; D01-D06/D11 |
 | Workflow branch+repo+event concurrency | already consumes the canonical owner | preserve group/cancel semantics; D07-D08; distinct manual runs remain independent |
 | `complexity`, `static-checks` | already consumes the canonical owner | unchanged feedback/proof commands, no profile bypass; D01-D08/Q02 |
 | `ci-plan` plus cache seed/decode census | moved to canonical owner in this work | skip only nonqualifying drafts; ready output/digest/cache contracts unchanged; D/Q rows |
-| `proof-unit`, `mandatory-soak` | moved to canonical owner in this work | admission before strategy expansion, literal caps4/2, unchanged row identity and fail-fast:false; C01-C06 |
+| `proof-unit`, `mandatory-soak` | moved to canonical owner in this work | draft exclusion before strategy expansion, unchanged ready strategy/row identity/fail-fast:false; D09/Q01; physical cap tuning is separately split C01-C06 |
 | `sqlite-local-dev`, `macos-sqlite-possession`, `semantic-smoke` | moved to canonical owner in this work | draft skips are visibly unqualified; ready supported journeys unchanged; D09/Q02 |
 | `unused-linux`, `unused-darwin`, `unused-checks` | moved to canonical owner in this work | draft-only nonqualification; required native-union unchanged on every qualifying event; Q02 |
 | `timing-budget` | moved to canonical owner in this work | never download/qualify missing draft plan; complete ready evidence and exact run attempt mandatory; D09/Q03 |
-| `required-tests`, live protected context mapping | moved to canonical owner in this work | explicit draft refusal before absent-output interpretation; no context/protection rename; D03-D06/Q02 |
+| `required-tests`, live protected context mapping and same-SHA check-suite/PR rollup | moved to canonical owner in this work | explicit draft refusal before absent-output interpretation; new ready run must satisfy actual protected contexts despite historical draft failure; no context/protection rename; D03-D06/D11/Q02 |
 | `publish-timing-model` stable branch/PR and App/environment | moved to canonical owner in this work | remove only automatic full dispatch; existing master/schedule/material-only/generated-only owner preserved; B01-B08 |
 | `internal/testplanning/{policy,plan,routing,execution,publication}.go` and `cmd/swarm-test-timing` | already consumes the canonical owner | profiles, inclusion, exact inventory, digest, generated-only validation remain unchanged; Q01/Q03 |
 | `internal/testtiming/{jobs,budget}.go` | already consumes the canonical owner | same run/attempt/head/execution profile, all expected jobs exactly once; Q03 |
 | `cmd/swarm-test` / `internal/testpostgres` | different semantic concept, with proof | local process/service lifetime and capacity, preserved canonical proof invocation; `TestCIPostgresJobsShareOwnedRunner` |
-| `ci_contract_test.go`, `soak_ci_test.go`, `cmd/swarm-unused/workflow_test.go`, `cmd/swarm-complexity/workflow_test.go` | moved to canonical owner in this work | amend exact workflow postures, preserve old qualifying negatives, add draft/cap/publisher execution cases |
+| `ci_contract_test.go`, `soak_ci_test.go`, `cmd/swarm-unused/workflow_test.go`, `cmd/swarm-complexity/workflow_test.go` | moved to canonical owner in this work | amend exact draft/publisher workflow postures, preserve every ready strategy and negative; no cap test/implementation added here |
 | `internal/testutil/postgres_ci_test.go`, `internal/cliapp/{ci_execution_selection,source_root_ci}_test.go`, `internal/testcatalog/inventory_test.go` | already consumes the canonical owner | exact commands/backend source roots/fixture membership remain, no test deletion |
 | `internal/testchanged/plan_test.go`, `internal/testplanning/routing_test.go` | different semantic concept, with proof | dependent package/changed-file profile selection, not draft/title interpretation; preserved routing tests |
 | Selected-store abstraction guard matrix/tests and cataloge2e README | already consumes the canonical owner | canonical runner and required SQLite smoke references stay accurate; Q02/Q04 |
@@ -158,16 +177,19 @@ found in the repository census.
 
 Census: `rg -l --hidden 'ci.yml|gh workflow run|Full dispatch summary|Required test summary'`
 and workflow/planning/timing/profile/soak scans, all14 jobs tabulated. Current API
-workflow inventory and protected contexts read back. Open PR #2482 shares ci.yml
-only for its authorized Darwin timeout; preserve it. #2525 changes partition
-policy; preserve integration and repeat census, not redraw membership silently.
+workflow inventory and protected contexts read back. #2482 merged into the new
+audit base: its Darwin timeout19, partition and timing-budget/test guards are
+preserved; repeat focused controls. #2525 changes partition policy; preserve
+integration and repeat census, not redraw membership silently.
 
 Old invalid paths: automatic publisher `gh workflow run ci.yml --ref ... -f profile=full`;
 its positive recurrence assertion; native drafts entering full jobs; absent native
-ready/draft transition subscriptions; unlimited proof admission. Surviving valid
+ready/draft transition subscriptions. Surviving valid
 paths: explicit operator dispatch with distinct check contexts; separate PR merge
 versus branch execution identities; every required proof/plan/artifact, trusted
-master schedule, App scope and human review. No legacy dispatcher is retained.
+master schedule, App scope and human review, and unchanged uncapped matrix
+scheduling pending the separate measured experiment. No legacy dispatcher is
+retained. No qualification semantics are inferred from a shared head alone.
 
 ## Manifestation matrix (planned proof, not completed proof)
 
@@ -183,11 +205,12 @@ not existing or passing tests. Hosted proof is required where specified.
 | D03 | Skipped draft leaf can look green/qualified | E | `TestCIRequiredSummaryRefusesDraftQualification`; execute real aggregate shell with draft fact and skipped/missing outputs; hosted required summary must not succeed |
 | D04 | Same-SHA ready_for_review not subscribed | F | explicit native transition fixture and real hosted conversion; full matrix/required checks created despite no commit |
 | D05 | Ready synchronize/reopen remains fully qualified | E | separate event fixtures and hosted ready update; all planned jobs, exact execution SHA and aggregate pass |
-| D06 | Converted-to-draft leaves obsolete full work alive | F | converted_to_draft fixture and hosted same-branch cancellation; new nonqualified summary, no heavy replacement admission |
+| D06 | Converted-to-draft leaves obsolete full work alive or a stale green qualification | F | converted_to_draft fixture and hosted same-SHA conversion after a green ready/update run; obsolete work canceled, current required-summary refusal recorded, PR/check-suite/protected rollup readback proves no older green run permits merge; no heavy replacement admission |
 | D07 | Same-branch superseded updates continue stale work | E | `TestCIConcurrencyNamespaceIsolation` + hosted latest-run readback; preserve cancel-in-progress |
 | D08 | Other agents/forks/manual profiles accidentally canceled | E | exact repository/branch/event fixture matrix; hosted distinct branch control and intentional dispatch remain independent |
 | D09 | Missing draft plan attempts matrix expansion/download | E | `TestCIDraftSkipsPlanAndProofExpansion`; parsed job-if/needs plus malformed/absent-output cases before strategy expansion; hosted jobs API records |
 | D10 | WIP title/label/author becomes heuristic draft authority | E | native draft false with WIP title remains full; native draft true without WIP title remains unqualified; no actor special case |
+| D11 | Failed draft required context on a SHA prevents later valid same-SHA ready qualification | E | `TestCISameSHARequiredContextTransition` mechanics plus real hosted draft-failed -> same-SHA ready-full-green: retain failed run, record unchanged headRefOid, exact run/check-suite and merge execution identities, App15368 required contexts and PR protected rollup; strict up-to-date/conflict-free PR must be blocked only by ordinary human review, not stale draft failure. Merely launching/existing green jobs is insufficient. |
 | B01 | Changed generated-model PR gets automatic PR plus dispatch | F | `TestGeneratedPublisherUsesOnlyAutomaticPRQualification`; extracted publisher shell with recording gh stub AND restricted App real native-PR run receipt, no automatic dispatch |
 | B02 | New generated-model PR creation fails to qualify | E | publisher stub create branch + actual App-created PR history/readback; one qualifying native run, required names unchanged |
 | B03 | Existing canonical PR update fails or opens duplicates | E | publisher stub update branch + actual App same-PR synchronize history; one canonical generated-only PR; B01 qualified receipt |
@@ -196,12 +219,12 @@ not existing or passing tests. Hosted proof is required where specified.
 | B06 | Publisher gains untrusted event/branch/environment authority | E | `TestPublisherIsMasterRestrictedGeneratedOnlyAndReviewRequired`; workflow/App/environment API readback; no feature-branch credential exposure |
 | B07 | Manual full/nightly retired or emits duplicate protected contexts | E | `TestCIManualProfilesRemainIndependent`; profiles + existing Full dispatch summary/SQLite names; actual full dispatch readback, not merged with PR evidence |
 | B08 | Dispatch deletion treated as same-tree/profile equivalence | E | `TestRunPlanRejectsWrongExecutionSHA` / `TestWholeJobEvidenceIsExactAndIncludesAllCosts`; real plan profile/SHA inspection distinguishes PR merge from branch |
-| C01 | Ordinary matrix expands with unbounded running rows | F | `TestCIMatrixAdmissionCapsPreserveProofInventory`; parsed max-parallel4, fail-fast:false, identical planned row IDs; hosted assigned intervals <=4 |
-| C02 | Soak serialized beyond20min or backend lost | E | same cap test requires2 and both backend IDs; `TestMandatorySoakEvidenceRequiresBothFullBackendReceipts`; hosted both unchanged15min proofs overlap |
-| C03 | Cap interpreted as truncation of plan or early-fail shortcut | E | `TestCIMatrixAdmissionCapsPreserveProofInventory` plus zero/missing/duplicate/failed row evidence; all logical units remain required after one failure |
-| C04 | Caps bypassed for push/manual/nightly | E | all qualifying event fixtures and exact YAML strategies; real retained profile plans, no alternate uncapped matrix |
-| C05 | Per-run cap incorrectly called a global quota | E | concurrent distinct-run hosted intervals reported per run and globally; no global lock; record static/macOS/auxiliary jobs separately |
-| C06 | Reduced queue headline conceals higher wall time/cost | E | `issue-2535-ci-cap-measurement` receipt: trigger->summary, runner-minutes, p50/p90/max, matching workload/active demand; no20min closure from one pass |
+| C01 | Proposed ordinary cap makes target infeasible / fairness hypothesis unproven | S | Separate #2535 recommendation3 experiment: quantified work/cap floor and target-compatible candidate before its own gate. Current four-slot floor54.33/53.92min is rejection evidence, not first-PR cap code or proof. |
+| C02 | Future cap serializes required soaks or loses a backend | S | Separate recommendation3: candidate must preserve both unchanged ~17min cells and require real hosted overlap/full backend receipts; no soak cap or selection change in this PR. |
+| C03 | Future physical cap conflated with logical truncation/early-fail shortcut | S | Separate recommendation3: candidate inventory/strategy negatives and all-row hosted evidence before approval. This first PR preserves current strategies and Q01/Q03. |
+| C04 | Future scheduling experiment silently changes push/manual/nightly posture | S | Separate recommendation3: explicit per-event candidate design/proof and no qualified-path bypass; current scheduling remains unchanged in every posture. |
+| C05 | Per-run cap incorrectly claimed as a global quota | S | Separate recommendation3: assigned intervals per run versus global auxiliary/matrix occupancy under concurrent PR demand; no global lock and no capacity assumption. |
+| C06 | Lower queue headline conceals deterministic wall-time/cost regression | S | Separate recommendation3: pre-merge quiet-host and matched-load p50/p90/max/throughput/runner-minute comparisons, exact required-summary endpoint, reject regression; rejected/reverted caps earn no closure. |
 | Q01 | Draft handling changes selected profile/inventory/soak admission | E | full focused testplanning suite; compare current profile plans and declared rows; `TestPRChangeOptionsConservativelyRoutesParityAndSoak` unchanged |
 | Q02 | Required native/platform/product owners become optional when ready | E | preserve unused/complexity aggregate status matrices for success/failure/skipped/cancelled/missing; ready/static/macOS/SQLite/semantic smoke and protected-check API readback |
 | Q03 | Timing incomplete/wrong-head evidence becomes green | E | `TestEvaluateBudgetRequiresEveryPlanUnitExactlyOnce`, `TestCIJobCollectionWaitsOnlyForTerminalEvidence`, `TestWholeJobEvidenceIsExactAndIncludesAllCosts`; unchanged deadlines and exact-head CI |
@@ -211,7 +234,7 @@ not existing or passing tests. Hosted proof is required where specified.
 | T02 | Unused/pipeline/CLI/serve critical-path work remains long | S | #2535 recommendation5 + existing #2353/#2394; retain measured command receipts and specific authorized budgets |
 | T03 | Audit/model/non-Go deltas conservatively select mandatory soaks | S | #2535 recommendation6; existing PRChangeOptions tests are valid until new independent policy approval; no skip/drop now |
 
-Generic failing proof: current YAML has no ready/draft event handling/caps and
+Generic failing proof: current YAML has no ready/draft event handling and
 requires publisher dispatch, while real #2325 same-head PR+manual runs duplicate
 qualification. Create an execution-oriented event/status/publisher shell matrix
 that goes red on those admissions. String absence alone is insufficient.
@@ -221,6 +244,9 @@ Official event semantics used for the design:
 [skipped required jobs report success](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-jobs-with-conditions),
 [App events trigger automatic workflows](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow),
 and [published hosted concurrency defaults](https://docs.github.com/en/actions/reference/limits).
+[Actual required-check acceptance](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks)
+governs D11, and [max-parallel semantics](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/run-job-variations)
+establish the work/cap floor for the separately rejected proposal.
 The actual paired generated-PR receipts, not these docs alone, establish the live
 automatic PR path in this repository.
 
@@ -234,6 +260,11 @@ capacity. Those are live siblings, not dismissed as shared-owner coverage.
 Parent sibling probe outcomes:
 - Admission/publisher multiplicity: **broken now**, baseline workflow+actual paired
   run receipts; absorbed entirely by this bounded class.
+- Cap4 hypothesis: **broken now as proposed**, independently reproduced physical
+  floor>53min; proposal withdrawn. Future target-compatible tuning is **still
+  unproven** and independently gated under recommendation3, not admission closure.
+- Same-SHA protected-context transition: **still unproven**, now explicitly D11;
+  actual hosted protected rollup is mandatory, not inferred from a newer green run.
 - Native analysis/build/cache and ordinary job proliferation: **still unproven**
   as optimizations, actual long-job evidence exists; recommendations4-5 stay here.
 - Mandatory soak inclusion: **different class, with proof** routing.go owns it;
@@ -249,61 +280,89 @@ Watchlist-backed promotion: the node proves physical scheduling and test cost
 must stay visible. Absorbing them now would invent optimization/proof-selection
 contracts without profiling and violate the user's focused-first-PR approval.
 Post-pre-audit parent action: **keep first-slice scope; parent explicitly open**.
-Estimated tail3-5 slices, medium-low confidence: build/job reuse; one or more
-measured long-unit optimizations; reviewed soak admission; fleet acceptance.
-All recommendation4-6 obligations remain assignable in #2535; #2353/#2394 keep
+Estimated tail4-6 slices, medium-low confidence: separate cap investigation;
+build/job reuse; one or more measured long-unit optimizations; reviewed soak
+admission; fleet acceptance. The added slice follows the independent split, not
+a new framework. All recommendation3-6 obligations remain assignable in #2535;
+#2353/#2394 keep
 their existing defect/performance authority. No untracked same-owner bypass is
 left in the bounded slice.
 
-Tracker-state decision: **current issue remains correct as written**, with the
-explicit 20min parent/first-slice split. Refine existing watchlist now, not create
-a new node or POTENTIAL_ISSUES entry. #1967 historic dispatch condition is
-superseded only if the new independent gate explicitly approves it; no reopening.
+Tracker-state decision: **current issue must be updated before coding**; repair
+completed with recommendations1-2 first PR, C01-C06 recommendation3 experiment,
+D11 hosted protected acceptance, quantified cap-floor correction and the
+publisher acceptance sequence. Refine the same watchlist node before requesting
+the fresh gate, not a new node or POTENTIAL_ISSUES entry. #1967 historic dispatch
+condition is ratified only in principle by cycle1; coding still requires fresh
+gate approval. No reopening, new child issue or hidden scheduling obligation.
 
 Architecture feedback: CI currently conflates work-in-progress feedback with
 qualification admission and duplicates publication demand. Promote removal using
-the existing workflow/planner/evaluator, not another dispatcher. Track remaining
-physical versus logical unit cost in #2535 and its watchlist; no new architecture
-issue. Effort: first slice~1-2 engineering days plus hosted gate/operational proof;
-parent~3-7 days plus measurement, low-medium confidence. High ROI from removing
-duplicated/generated and draft demand; caps' ROI is empirical, not established.
+the existing workflow/planner/evaluator, not another dispatcher. **Logical proof
+completeness is not physical scheduling value**; track them separately in #2535
+and its watchlist. No new architecture issue. Effort: first slice~1-2 engineering
+days plus hosted gate/operational proof; parent~3-7 days plus measurement,
+low-medium confidence. High ROI from removing demonstrated duplicate/draft demand;
+future cap ROI is empirical and the withdrawn cap is a demonstrated regression.
 
 ## Feasibility, supported proof and stop conditions
 
 Can the chosen class close in one PR? Yes, one executable workflow owner,
 associated contract tests and no new runtime model. A local publisher-only fix
-would leave draft and unbounded matrix admissions live; all are included here.
+would leave draft admission/protected-check handling live; both are included here.
+Uncapped physical scheduling is not labeled a proven same-class defect and is
+unchanged pending the separate gated experiment.
 Can it prove20min parent closure? **No**, explicitly not claimed.
 
 Supported surfaces: actual GitHub native draft/ready transitions; real generated
 App PR qualification; explicit manual dispatch; required context/protection API;
-ordinary and both-store mandatory soak actual hosted execution. Local shell/YAML
+ordinary and both-store mandatory soak actual hosted execution, **and D11's
+same-SHA actual protected-check acceptance**. Local shell/YAML
 fixtures earn mechanics credit, not App credentials/hosted scheduling credit.
 
+Required hosted D11/D06 sequence: draft-failed -> same-SHA ready-full-green ->
+updated-ready-green -> same-SHA converted-draft-refusal -> final ready-full-green.
+At each boundary retain PR/head/base/run/attempt/check-suite/App/context and
+actual executed merge SHA, required-status/protection readback, draft state,
+current rollup and merge/review classification. Preserve the old red draft checks
+and old green ready checks as controls; do not delete/rewrite/rerun them to fake
+acceptance. With an up-to-date conflict-free base and no unresolved non-review
+requirements, the ready posture must have accepted protected checks and remain
+blocked only by ordinary review. If base drift obscures this, restore the normal
+up-to-date precondition without pretending a different head proves the original
+same-SHA transition. Converted draft must not permit merge via its older green
+run. End with a normal reviewable PR and complete exact-head qualification.
+
 Master-only scheduled publisher cannot run the edited literal environment job
-pre-merge without violating its trust boundary. Before merge, prove native App
-PR event ownership and generated-only branch/create/update/no-op behavior using
-existing authorized receipts/controlled probes. Reviewer must explicitly decide
-whether a bounded post-merge scheduled literal-job acceptance is necessary;
-record it in #2535 and keep generated publication acceptance open until that
-receipt, with immediate disable/repair on failure. Never temporarily expand the
-environment to a feature branch. No credential reading is required for this
-pre-audit. Any live App write must use existing permitted publication authority,
-not a human/PAT/GITHUB_TOKEN substitute.
+pre-merge without violating its trust boundary. The repaired issue explicitly
+records the cycle1-permitted bounded acceptance sequence for fresh gate approval:
+pre-merge execute every unchanged shell/security/create/update/no-op/failure branch
+and establish native App event ownership; after merge inspect the **first literal
+scheduled master execution with the edited workflow** for one canonical App PR
+update/create when material, one automatic qualifying PR run, zero automatic full
+dispatch and no fallback. A no-op proves zero work but leaves material-update
+acceptance open until the next material scheduled execution. #2535's publication
+acceptance stays open until that receipt; immediately disable/repair publication
+if it fails. Literal edited environment-job success is not claimed pre-merge.
+Never expand the environment to a feature branch or substitute human/PAT/
+GITHUB_TOKEN authority. Fresh gate must ratify this sequencing before merge.
 
 Stop/re-gate if another automatic full-qualification producer appears, policy
 selection/required proof must change, protected context mapping must weaken, App
 trigger proof is unavailable, cap measurement requires new cross-run ownership,
-or publisher acceptance would require a broader security exception. Do not
-silently broaden scope. An empirical cap regression alone requires rejecting or
-retuning the experiment under recorded evidence, not changing test deadlines.
+or publisher acceptance would require a broader security exception. D11 failure
+to satisfy actual protected contexts despite green jobs also requires a new
+ruling; no context/protection weakening. Do not silently broaden scope. Any cap
+proposal is outside this first PR and requires a separate measured gate.
 
-Baseline verification run on the audited source: focused CI job collection,
+Baseline verification repeated on the repaired c3f38293e source: focused CI job collection,
 plan/evidence consumption, restricted publisher, exact soak/shell workflow,
 native-unused union and complexity aggregate tests **passed**. This proves
-preserved baseline contracts, not new D/B/C fixes. New fixture/mutation/hosted
+preserved baseline contracts, not new D/B fixes. New fixture/mutation/hosted
 qualification and default swarm-test **not run** in pre-audit.
 
-Independent gate: **requested, not recorded/approved yet**. Implementation must
-remain frozen until reviewer-g posts the explicit first-slice gate and addresses
-the historical publisher-dispatch/security acceptance sequencing conditions.
+Independent gate: cycle1 **insufficient; widen/split class**, recorded on the
+issue. The repaired cycle2 artifact requests one fresh gate. Implementation
+remains frozen until reviewer-g records approval for this draft/duplicate class,
+D11 protected acceptance and the explicit publisher acceptance sequence. No
+workflow implementation, cap setting, new framework or PR is authorized yet.
