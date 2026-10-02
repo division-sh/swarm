@@ -353,6 +353,13 @@ func (o pipelineEngineMutationOwner) commitPreparedEngineMutation(
 	}
 	result.Committed = true
 	resultErr = commitErr
+	// Retain the whole declared follow-up before any acknowledged cleanup hook.
+	emissions, requests, publicationErr := committedEnginePublicationIntents(command.Publications, committed.Publications, mutation.ActivityIntents)
+	result.EmitIntents, result.ActivityRequestIntents = emissions, requests
+	if publicationErr == nil {
+		result.ActivityIntents = append([]runtimeengine.ActivityIntent(nil), mutation.ActivityIntents...)
+	}
+	resultErr = errors.Join(resultErr, publicationErr)
 	terminalEvidence = committed.PostCommit.FlowDeactivation != nil
 	// Retain exact committed claim evidence before a post-commit hook may fail.
 	if committed.DeliverySuccess != nil && deliverySuccess != nil && committed.DeliverySuccess.Same(deliverySuccess.Claim) {
@@ -373,26 +380,52 @@ func (o pipelineEngineMutationOwner) commitPreparedEngineMutation(
 		resultErr = errors.Join(resultErr, o.finishCommittedEnginePublications(ctx, committed.Publications))
 	}
 	resultErr = errors.Join(resultErr, o.finishCommittedWorkflowLifecycle(ctx, committed.Lifecycle))
-	if len(committed.Publications) < len(mutation.EmitIntents) {
-		return result, errors.Join(resultErr, fmt.Errorf("committed engine publications = %d, want at least %d emitted events", len(committed.Publications), len(mutation.EmitIntents)))
-	}
-	committedIntents := make([]runtimeengine.EmitIntent, 0, len(mutation.EmitIntents))
-	for index, publication := range committed.Publications[:len(mutation.EmitIntents)] {
-		if publication == nil {
-			return result, errors.Join(resultErr, fmt.Errorf("committed engine publication %d is required", index))
-		}
-		intent := publication.CommittedDurablePublicationIntent()
-		if strings.TrimSpace(intent.Event.ID()) != strings.TrimSpace(publication.CommittedDurablePublicationEventID()) {
-			return result, errors.Join(resultErr, fmt.Errorf("committed engine publication %d intent identity is inconsistent", index))
-		}
-		committedIntents = append(committedIntents, intent)
-	}
-	result.ActivityIntents = append([]runtimeengine.ActivityIntent(nil), mutation.ActivityIntents...)
-	result.EmitIntents = committedIntents
-	activityRequests, activityErr := committedActivityRequestIntents(committed.Publications, mutation.ActivityIntents)
-	result.ActivityRequestIntents = activityRequests
-	resultErr = errors.Join(resultErr, activityErr)
 	return result, resultErr
+}
+
+func committedEnginePublicationIntents(planned []runtimeengine.DurablePublicationPlan, committed []runtimeengine.CommittedDurablePublication, activities []runtimeengine.ActivityIntent) ([]runtimeengine.EmitIntent, []runtimeengine.EmitIntent, error) {
+	if len(planned) != len(committed) {
+		return nil, nil, fmt.Errorf("committed engine publications = %d, want exactly %d declared publications", len(committed), len(planned))
+	}
+	intents := make([]runtimeengine.EmitIntent, 0, len(planned))
+	seen := make(map[string]struct{}, len(planned))
+	for index, plan := range planned {
+		publication := committed[index]
+		if plan == nil || publication == nil {
+			return nil, nil, fmt.Errorf("engine publication %d requires declared and committed evidence", index)
+		}
+		if err := plan.ValidateDurablePublicationPlan(); err != nil {
+			return nil, nil, fmt.Errorf("declared engine publication %d: %w", index, err)
+		}
+		if err := publication.ValidateCommittedDurablePublication(); err != nil {
+			return nil, nil, fmt.Errorf("committed engine publication %d: %w", index, err)
+		}
+		id := plan.DurablePublicationEventID()
+		intent := publication.CommittedDurablePublicationIntent()
+		if id != publication.CommittedDurablePublicationEventID() || id != intent.Event.ID() {
+			return nil, nil, fmt.Errorf("committed engine publication %d differs from its declared event identity", index)
+		}
+		if _, duplicate := seen[id]; duplicate {
+			return nil, nil, fmt.Errorf("declared engine publication %s occurs more than once", id)
+		}
+		seen[id] = struct{}{}
+		intents = append(intents, intent)
+	}
+	requests, err := committedActivityRequestIntents(committed, activities)
+	if err != nil {
+		return nil, nil, err
+	}
+	requestIDs := make(map[string]struct{}, len(requests))
+	for _, request := range requests {
+		requestIDs[request.Event.ID()] = struct{}{}
+	}
+	emissions := make([]runtimeengine.EmitIntent, 0, len(intents)-len(requests))
+	for _, intent := range intents {
+		if _, activity := requestIDs[intent.Event.ID()]; !activity {
+			emissions = append(emissions, intent)
+		}
+	}
+	return emissions, requests, nil
 }
 
 func committedActivityRequestIntents(publications []runtimeengine.CommittedDurablePublication, activities []runtimeengine.ActivityIntent) ([]runtimeengine.EmitIntent, error) {

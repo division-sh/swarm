@@ -5119,6 +5119,18 @@ handler_specification:
         emit. Explicit on_success.emit is additive only as a second distinct success event.
 engine:
   description: Specification for the platform engine — how it loads, validates, and executes flows.
+  committed_publication_handoff:
+    owner: existing workflow engine mutation result
+    rule: >-
+      After acknowledged commit, the mutation result carries every declared
+      non-activity publication, including lifecycle follow-up, in exact committed
+      order. Activity request publications retain their separate exact intent
+      mapping. Count, ID, ordering, duplicate, missing or unexpected receipt
+      disagreement fails closed without dispatching ambiguous work. Auxiliary
+      finalization error, cancellation or panic cannot erase valid committed
+      publication evidence or repeat the settled handler. Claim settlement and
+      exact publication/lifecycle cleanup retain their existing owners; no second
+      dispatcher or independent publication reconstruction is permitted.
   flow_tree_walker:
     canonical_owner: platform-spec.yaml#filesystem_source_model.flow_tree
     rule: Consume the immutable admitted trie rooted at dot; never walk package manifests or ambient directories.
