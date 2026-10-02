@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,9 +17,35 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
+
+type a2HeldDeadlineDeliveryProbe struct {
+	*lifecycleprobe.Probe
+	entered     chan struct{}
+	release     chan struct{}
+	enteredOnce sync.Once
+	releaseOnce sync.Once
+}
+
+func (p *a2HeldDeadlineDeliveryProbe) NotifyLifecycle(ctx context.Context, signal lifecycleprobe.Signal) {
+	p.Probe.NotifyLifecycle(ctx, signal)
+	if signal.Kind != lifecycleprobe.DeliveryStatusChanged || signal.Status != "delivered" ||
+		!strings.HasSuffix(signal.EventType, "platform.join_timeout") {
+		return
+	}
+	p.enteredOnce.Do(func() { close(p.entered) })
+	select {
+	case <-p.release:
+	case <-ctx.Done():
+	}
+}
+
+func (p *a2HeldDeadlineDeliveryProbe) resume() {
+	p.releaseOnce.Do(func() { close(p.release) })
+}
 
 func TestA2JoinDeadlineExecutionRetainsEntryAndPartialContextOnBothStores(t *testing.T) {
 	for _, backend := range []struct {
@@ -61,7 +88,8 @@ func TestA2JoinDeadlineExecutionRetainsEntryAndPartialContextOnBothStores(t *tes
 				node := externalPipelineSourceNode(t, source, ".", "collector")
 				module := proposedEffectProofModule{source: source, nodes: []pipeline.WorkflowNode{{Node: node,
 					Subscriptions: []events.EventType{"item.completed", "halt.requested", "touch"}, ExecutionType: contracts.SystemNodeExecutionType}}}
-				probe, logger := lifecycleprobe.New(), &exactJoinRuntimeLogger{}
+				probe := &a2HeldDeadlineDeliveryProbe{Probe: lifecycleprobe.New(), entered: make(chan struct{}), release: make(chan struct{})}
+				logger := &exactJoinRuntimeLogger{}
 				bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, TestLifecycleProbe: probe, Logger: logger},
 					"platform.join_complete", "platform.join_timeout")
 				if err != nil {
@@ -71,6 +99,7 @@ func TestA2JoinDeadlineExecutionRetainsEntryAndPartialContextOnBothStores(t *tes
 				options := pipeline.PipelineCoordinatorOptions{Module: module, GenericSchedules: schedules, TestLifecycleProbe: probe}
 				pc := newGateRecoveryCoordinator(bus, selected, options)
 				bus.SetInterceptors(pc)
+				t.Cleanup(probe.resume)
 				owner := testRunScopedWorkflowInstanceForRun(runID, runID)
 				// Hold only wake dispatch. The real persisted entry is already due;
 				// no schedule timestamp or lifecycle status is rewritten by the test.
@@ -104,7 +133,7 @@ func TestA2JoinDeadlineExecutionRetainsEntryAndPartialContextOnBothStores(t *tes
 					if err := bus.PublishAcknowledged(ctx, event); err != nil {
 						t.Fatal(err)
 					}
-					a2KnownTargetWaitForSettlement(t, ctx, bus, probe, event, node.Key(), handlerStatus, deliveryStatus, logger)
+					a2KnownTargetWaitForSettlement(t, ctx, bus, probe.Probe, event, node.Key(), handlerStatus, deliveryStatus, logger)
 					return event
 				}
 				arrival := publish("item.completed", []byte(`{"member_id":"z","result":{"value":"z"}}`), "completed", "delivered")
@@ -149,6 +178,23 @@ func TestA2JoinDeadlineExecutionRetainsEntryAndPartialContextOnBothStores(t *tes
 				if err != nil || !found {
 					t.Fatalf("deadline readback: found=%v err=%v", found, err)
 				}
+				waitCtx, cancel = context.WithTimeout(ctx, 10*time.Second)
+				select {
+				case <-probe.entered:
+				case <-waitCtx.Done():
+					t.Fatalf("deadline delivery did not reach held publication cut: %v", waitCtx.Err())
+				}
+				cancel()
+				if err := bus.PublishAcknowledged(ctx, prepared.Event.Event()); !errors.Is(err, pipelineobligation.ErrBusy) {
+					t.Fatalf("unsettled deadline replay did not retain exact claim refusal: %v", err)
+				}
+				if after := load(); !reflect.DeepEqual(after, final) {
+					t.Fatal("refused overlapping replay changed the settled handler outcome")
+				}
+				probe.resume()
+				// Handler completion and delivery status precede the enclosing
+				// publication claim's settlement. Join it before exact replay.
+				a2KnownTargetWaitForSettlement(t, ctx, bus, probe.Probe, prepared.Event.Event(), node.Key(), "completed", "delivered", logger)
 				for _, event := range []events.Event{arrival, prepared.Event.Event()} {
 					if err := bus.PublishAcknowledged(ctx, event); err != nil {
 						t.Fatal(err)
