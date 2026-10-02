@@ -14,14 +14,37 @@ var defaultPlatformPermissions = []string{
 	"configure_routing",
 	"create_flow_instance",
 	"ask_human",
-	"message_flow",
-	"message_peers",
 	"schedule",
 }
 
 var toolPermissionRequirements = map[string]string{
 	"configure_routing": "configure_routing",
 	"schedule":          "schedule",
+}
+
+func isRetiredMessagePermission(name string) bool {
+	switch strings.TrimSpace(name) {
+	case "message_flow", "message_peers":
+		return true
+	default:
+		return false
+	}
+}
+
+func permissionReferenceError(name, location string) error {
+	if isRetiredMessagePermission(name) {
+		return fmt.Errorf("%s: permission %s is retired; %s", location, strings.TrimSpace(name), agentMessageRetiredTeaching)
+	}
+	return hitlIdentityReferenceError(name, location)
+}
+
+// Vocabulary membership cannot re-enable a retired permission. Authored use
+// is rejected separately by source admission and permission expansion.
+func addKnownPermission(out map[string]struct{}, name string) {
+	name = strings.TrimSpace(name)
+	if name != "" && !isRetiredMessagePermission(name) {
+		out[name] = struct{}{}
+	}
 }
 
 func agentHasPermission(agent models.AgentConfig, perm string) bool {
@@ -153,14 +176,14 @@ func resolveAgentPermissionsFromPolicy(entry runtimecontracts.AgentRegistryEntry
 			return nil, fmt.Errorf("unknown permissions_bundle %q", bundleName)
 		}
 		for _, permission := range bundlePerms {
-			if err := hitlIdentityReferenceError(permission, fmt.Sprintf("permission_bundles.%s.permissions", bundleName)); err != nil {
+			if err := permissionReferenceError(permission, fmt.Sprintf("permission_bundles.%s.permissions", bundleName)); err != nil {
 				return nil, err
 			}
 		}
 		perms = append(perms, bundlePerms...)
 	}
 	for _, permission := range entry.Permissions {
-		if err := hitlIdentityReferenceError(permission, "permissions"); err != nil {
+		if err := permissionReferenceError(permission, "permissions"); err != nil {
 			return nil, err
 		}
 	}
@@ -231,17 +254,11 @@ func stringsFromPolicyValue(value any) ([]string, error) {
 func knownPermissionNames(source semanticview.Source) map[string]struct{} {
 	out := make(map[string]struct{}, len(defaultPlatformPermissions)+8)
 	for _, perm := range defaultPlatformPermissions {
-		perm = strings.TrimSpace(perm)
-		if perm != "" {
-			out[perm] = struct{}{}
-		}
+		addKnownPermission(out, perm)
 	}
 	if source != nil {
 		for _, perm := range source.PlatformSpec().PermissionsModel.Permissions {
-			perm = strings.TrimSpace(perm)
-			if perm != "" {
-				out[perm] = struct{}{}
-			}
+			addKnownPermission(out, perm)
 		}
 		for _, scope := range source.FlowScopes() {
 			collectPermissionBundleExtensions(out, source.ResolvedPolicyForFlow(scope.ID))
@@ -259,10 +276,7 @@ func collectToolPermissionExtensions(out map[string]struct{}, source semanticvie
 		return
 	}
 	for _, entry := range source.ToolEntries() {
-		perm := entry.Permission().String()
-		if perm != "" {
-			out[perm] = struct{}{}
-		}
+		addKnownPermission(out, entry.Permission().String())
 	}
 }
 
@@ -285,10 +299,7 @@ func collectPermissionBundleExtensions(out map[string]struct{}, policy runtimeco
 			continue
 		}
 		for _, perm := range perms {
-			perm = strings.TrimSpace(perm)
-			if perm != "" {
-				out[perm] = struct{}{}
-			}
+			addKnownPermission(out, perm)
 		}
 	}
 }
