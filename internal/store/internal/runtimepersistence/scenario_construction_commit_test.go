@@ -137,8 +137,7 @@ func TestScenarioConstructionFieldlessStateBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-				"schema.yaml":   "name: fieldless-scenario\nstages:\n  pending: {initial: true}\n",
-				"entities.yaml": "",
+				"schema.yaml": "name: fieldless-scenario\nstages:\n  pending: {initial: true}\n",
 			}, nil)
 			runID := uuid.NewString()
 			ctx := correlation.WithRunID(f.ctx, runID)

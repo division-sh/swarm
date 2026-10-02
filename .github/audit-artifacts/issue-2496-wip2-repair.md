@@ -1,5 +1,33 @@
 # R5.1 WIP Pass 2 Repair
 
+## Master f805cdb7f Reconciliation
+
+Rebased all repair commits onto master f805cdb7f. The only conflict was the
+compiled describe characterization: master adds pack/platform source provenance
+and R5.1 adds the constructor projection. Both implementations remain intact.
+The first exact compiled root is RED89.615s, limited to ten JSON surfaces. For
+each, removing only the 2488 newly added provenance entries reproduces the old
+exact stdout hash; all other output is byte-identical. The baseline retains
+the new provenance, all 45 cells, two repetitions and 35 unchanged hashes.
+The normalization remains repository/isolated-scope absolute paths only.
+Detailed before/after receipts are in issue-2496-describe-baseline-migration.json.
+The earlier mistyped TestReadProofFactoringDescribe selector ran no tests and
+receives no credit. A fresh correct-root qualification remains required.
+
+The new physical deployment/scenario constructor matrix initially failed the
+fieldless fixture's empty entities.yaml admission on both stores (RED54.119s).
+Omitting that undeclared file preserves strict source admission. The corrected
+three-root matrix passes through swarm-test at race/count3: PASS58.109s, both
+stores, including rollback-before-ack, commit-before-lost-ack, exact replay,
+cancelled admission and fieldless header without a field companion. This is
+native transaction proof, not public launcher qualification.
+
+Against f805cdb7f, no-rename non-test Go accounting is 194 files, +7502/-7683,
+net -181. Readiness core is 386 lines. Exact-snapshot measurement at e7dc25131
+reduces cognitive hotspots >=30 from 581 to 578 and cyclomatic hotspots >=30
+from 266 to 262. The policy and thresholds are unchanged. Default managed
+qualification, remaining race supplements and exact-head CI are still pending.
+
 Binding issue authorization: 5947674701. Independent review/checklist:
 5947664407 / 5947675035. This additive receipt is not a final proof audit or
 merge-readiness claim. No new grammar, framework, compatibility path, or A/B
