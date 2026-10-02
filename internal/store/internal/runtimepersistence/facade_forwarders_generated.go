@@ -119,6 +119,10 @@ func (s *PostgresStore) AdvanceChannelOnboarding(ctx context.Context, req channe
 	return s.channelOnboardingPostgresOwner.AdvanceChannelOnboarding(ctx, req)
 }
 
+func (s *PostgresStore) AdvanceFlowAttachment(ctx context.Context, attempt pipeline.DynamicFlowRuntimeActivationAttempt, previous pipeline.FlowAttachmentPhase, at time.Time) (pipeline.FlowAttachmentAdvanceResult, error) {
+	return s.pipelinePostgresOwner.AdvanceFlowAttachment(ctx, attempt, previous, at)
+}
+
 func (s *PostgresStore) AggregateOperatorEntities(ctx context.Context, opts operatorread.OperatorEntityAggregateOptions) (operatorread.OperatorEntityAggregateResult, error) {
 	return s.operatorEntityPostgres.AggregateOperatorEntities(ctx, opts)
 }
@@ -231,10 +235,6 @@ func (s *PostgresStore) CommitWorkflowEngineMutation(ctx context.Context, comman
 	return s.pipelinePostgresOwner.CommitWorkflowEngineMutation(ctx, command)
 }
 
-func (s *PostgresStore) CommitWorkflowInitialMaterialization(ctx context.Context, command pipeline.WorkflowInitialMaterializationCommand) (pipeline.CommittedWorkflowInitialMaterialization, error) {
-	return s.pipelinePostgresOwner.CommitWorkflowInitialMaterialization(ctx, command)
-}
-
 func (s *PostgresStore) CommitWorkflowTimerOccurrence(ctx context.Context, command pipeline.WorkflowTimerOccurrenceCommand) (pipeline.CommittedWorkflowTimerOccurrence, error) {
 	return s.pipelinePostgresOwner.CommitWorkflowTimerOccurrence(ctx, command)
 }
@@ -293,10 +293,6 @@ func (s *PostgresStore) CreateAPIConversationFork(ctx context.Context, req runfo
 
 func (s *PostgresStore) CreateDecisionCard(ctx context.Context, card decisioncard.Card) error {
 	return s.decisionPostgresOwner.CreateDecisionCard(ctx, card)
-}
-
-func (s *PostgresStore) CreateEntity(ctx context.Context, rec tools.EntityCreateRecord) (tools.EntityCreateResult, error) {
-	return s.entityPostgresOwner.CreateEntity(ctx, rec)
 }
 
 func (s *PostgresStore) CreateHumanTaskCard(ctx context.Context, card decisioncard.Card, continuation decisioncard.HumanTaskContinuation) error {
@@ -863,10 +859,6 @@ func (s *PostgresStore) MarkActivityAttemptUncertain(ctx context.Context, record
 	return s.activityPostgresOwner.MarkActivityAttemptUncertain(ctx, record)
 }
 
-func (s *PostgresStore) MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx context.Context, attempt pipeline.DynamicFlowRuntimeActivationAttempt, expected pipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) (pipeline.DynamicFlowRuntimeTopologyReadyResult, error) {
-	return s.pipelinePostgresOwner.MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx, attempt, expected, readyAt)
-}
-
 func (s *PostgresStore) MarkExternalAttemptLaunched(ctx context.Context, attempt effects.Attempt, now time.Time) error {
 	return s.effectPostgresOwner.MarkExternalAttemptLaunched(ctx, attempt, now)
 }
@@ -1371,6 +1363,10 @@ func (s *SQLiteRuntimeStore) AdvanceChannelOnboarding(ctx context.Context, req c
 	return s.channelOnboardingSQLiteOwner.AdvanceChannelOnboarding(ctx, req)
 }
 
+func (s *SQLiteRuntimeStore) AdvanceFlowAttachment(ctx context.Context, attempt pipeline.DynamicFlowRuntimeActivationAttempt, previous pipeline.FlowAttachmentPhase, at time.Time) (pipeline.FlowAttachmentAdvanceResult, error) {
+	return s.pipelineSQLiteOwner.AdvanceFlowAttachment(ctx, attempt, previous, at)
+}
+
 func (s *SQLiteRuntimeStore) AggregateOperatorEntities(ctx context.Context, opts operatorread.OperatorEntityAggregateOptions) (operatorread.OperatorEntityAggregateResult, error) {
 	return s.operatorEntitySQLite.AggregateOperatorEntities(ctx, opts)
 }
@@ -1479,10 +1475,6 @@ func (s *SQLiteRuntimeStore) CommitWorkflowEngineMutation(ctx context.Context, c
 	return s.pipelineSQLiteOwner.CommitWorkflowEngineMutation(ctx, command)
 }
 
-func (s *SQLiteRuntimeStore) CommitWorkflowInitialMaterialization(ctx context.Context, command pipeline.WorkflowInitialMaterializationCommand) (pipeline.CommittedWorkflowInitialMaterialization, error) {
-	return s.pipelineSQLiteOwner.CommitWorkflowInitialMaterialization(ctx, command)
-}
-
 func (s *SQLiteRuntimeStore) CommitWorkflowTimerOccurrence(ctx context.Context, command pipeline.WorkflowTimerOccurrenceCommand) (pipeline.CommittedWorkflowTimerOccurrence, error) {
 	return s.pipelineSQLiteOwner.CommitWorkflowTimerOccurrence(ctx, command)
 }
@@ -1541,10 +1533,6 @@ func (s *SQLiteRuntimeStore) CreateAPIConversationFork(ctx context.Context, req 
 
 func (s *SQLiteRuntimeStore) CreateDecisionCard(ctx context.Context, card decisioncard.Card) error {
 	return s.decisionSQLiteOwner.CreateDecisionCard(ctx, card)
-}
-
-func (s *SQLiteRuntimeStore) CreateEntity(ctx context.Context, rec tools.EntityCreateRecord) (tools.EntityCreateResult, error) {
-	return s.entitySQLiteOwner.CreateEntity(ctx, rec)
 }
 
 func (s *SQLiteRuntimeStore) CreateHumanTaskCard(ctx context.Context, card decisioncard.Card, continuation decisioncard.HumanTaskContinuation) error {
@@ -2081,10 +2069,6 @@ func (s *SQLiteRuntimeStore) LookupAPIEventPublication(ctx context.Context, requ
 
 func (s *SQLiteRuntimeStore) MarkActivityAttemptUncertain(ctx context.Context, record pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, bool, error) {
 	return s.activitySQLiteOwner.MarkActivityAttemptUncertain(ctx, record)
-}
-
-func (s *SQLiteRuntimeStore) MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx context.Context, attempt pipeline.DynamicFlowRuntimeActivationAttempt, expected pipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) (pipeline.DynamicFlowRuntimeTopologyReadyResult, error) {
-	return s.pipelineSQLiteOwner.MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx, attempt, expected, readyAt)
 }
 
 func (s *SQLiteRuntimeStore) MarkExternalAttemptLaunched(ctx context.Context, attempt effects.Attempt, now time.Time) error {

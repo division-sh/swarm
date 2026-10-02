@@ -34,6 +34,9 @@ func Project(
 	if source == nil {
 		return nil, fmt.Errorf("selected-contract workflow state projection requires semantic source")
 	}
+	if !modelOptions.ExecutionPosture.Valid() {
+		return nil, fmt.Errorf("selected-contract readiness requires an admitted process execution posture")
+	}
 	if err := validateSelectedContractReadinessEntityMetadata(plan.Entities); err != nil {
 		return nil, err
 	}
@@ -93,6 +96,8 @@ func Project(
 			sort.Slice(state.Agents, func(i, j int) bool {
 				return runtimeagentidentity.LessPlan(state.Agents[i].Plan, state.Agents[j].Plan)
 			})
+		} else {
+			state.ExecutionMode = modelOptions.ExecutionPosture.RootMode()
 		}
 		if existing, ok := byEntity[state.EntityID]; ok {
 			if !selectedContractWorkflowStatesEqual(existing, state) {
@@ -332,8 +337,7 @@ func selectedContractNodeWorkflowState(
 	if !handler.Matched {
 		return runfork.RunForkSelectedContractWorkflowState{}, false, fmt.Errorf("selected-contract node %s has no admitted handler for %s", node.Key(), localEvent)
 	}
-	policy, err := runtimepipeline.CompileDeliveryTargetCompatibilityPolicy(source, node, flowID, localEvent, handler.Handler)
-	if err != nil {
+	if err := runtimepipeline.ValidateExecutionHandlerDeclaration(source, node, handler.Handler); err != nil {
 		return runfork.RunForkSelectedContractWorkflowState{}, false, err
 	}
 	path := strings.TrimSpace(recipientPath)
@@ -349,12 +353,7 @@ func selectedContractNodeWorkflowState(
 		return runfork.RunForkSelectedContractWorkflowState{}, false, err
 	}
 	if !found {
-		if policy.Dependency == runtimepipeline.DeliveryTargetExistingEntityRequired {
-			return runfork.RunForkSelectedContractWorkflowState{}, false, fmt.Errorf("receiver target owner is missing for flow instance %q", path)
-		}
-		// Optional absence needs no companion. Fresh acquisition stays with the
-		// ordinary publication classifier and its canonical materialization owner.
-		return runfork.RunForkSelectedContractWorkflowState{}, false, nil
+		return runfork.RunForkSelectedContractWorkflowState{}, false, fmt.Errorf("receiver target owner is missing for flow instance %q", path)
 	}
 	state, err := selectedContractReadinessState(source, eventID, flowID, entity)
 	return state, true, err
@@ -369,8 +368,10 @@ func validateSelectedContractReadinessEntityMetadata(entities []runfork.RunForkE
 		}
 		metadata := entity.MaterializationMetadata
 		if id == "" || metadata == nil || metadata.Owner != runfork.RunForkMaterializedEntitySnapshotMetadataOwner ||
-			metadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState ||
-			strings.TrimSpace(metadata.FlowInstance) == "" || strings.TrimSpace(metadata.EntityType) == "" {
+			metadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance ||
+			metadata.FlowTemplate == "" || (metadata.Mode != "static" && metadata.Mode != "template") || len(metadata.FlowConfig) == 0 ||
+			strings.TrimSpace(metadata.FlowInstance) == "" || strings.TrimSpace(entity.CurrentState) == "" ||
+			entity.EnteredStateAt == nil || entity.EnteredStateAt.IsZero() {
 			return fmt.Errorf("%s: entity %s requires exact fixed-revision owner metadata", runfork.RunForkMaterializedEntitySnapshotMetadataOwner, id)
 		}
 		seen[id] = struct{}{}
@@ -396,8 +397,12 @@ func selectedContractReadinessEntityForRoute(source semanticview.Source, plan ru
 		if found {
 			return runfork.RunForkEntityState{}, false, fmt.Errorf("selected-contract receiving route %s has multiple fixed-revision entity owners", path)
 		}
+		scope, declared := semanticview.FlowScopeByID(source, flowID)
+		if !declared || metadata.FlowTemplate != flowID || metadata.Mode != scope.Mode {
+			return runfork.RunForkEntityState{}, false, fmt.Errorf("selected-contract historical header %s disagrees with selected flow ownership", entity.EntityID)
+		}
 		contract, ok := entityruntime.ResolveForFlow(source, flowID)
-		if !ok || strings.TrimSpace(contract.EntityType) != metadata.EntityType {
+		if (ok && strings.TrimSpace(contract.EntityType) != metadata.EntityType) || (!ok && (metadata.EntityType != "" || len(entity.Fields) != 0)) {
 			return runfork.RunForkEntityState{}, false, fmt.Errorf("selected-contract entity %s type %q disagrees with selected flow %s", entity.EntityID, metadata.EntityType, flowID)
 		}
 		matched, found = entity, true
@@ -411,12 +416,10 @@ func selectedContractReadinessState(source semanticview.Source, eventID, flowID 
 		SourceEventID: eventID, EntityID: entity.EntityID, EntityType: metadata.EntityType, FlowID: flowID,
 		WorkflowVersion: strings.TrimSpace(source.WorkflowVersion()), Mode: "static",
 	}
-	if len(metadata.FlowConfig) != 0 && strings.TrimSpace(string(metadata.FlowConfig)) != "null" {
-		var err error
-		state.Config, err = runtimepipeline.WorkflowInstanceBusinessConfigForRoute(runtimeflowidentity.RouteForInstancePath(metadata.FlowInstance), metadata.FlowConfig)
-		if err != nil {
-			return runfork.RunForkSelectedContractWorkflowState{}, fmt.Errorf("selected-contract fixed-revision receiver configuration for entity %s: %w", entity.EntityID, err)
-		}
+	var err error
+	state.Config, err = runtimepipeline.WorkflowInstanceBusinessConfigForRoute(runtimeflowidentity.RouteForInstancePath(metadata.FlowInstance), metadata.FlowConfig)
+	if err != nil {
+		return runfork.RunForkSelectedContractWorkflowState{}, fmt.Errorf("selected-contract fixed-revision receiver configuration for entity %s: %w", entity.EntityID, err)
 	}
 	if flowID == semanticview.RootExecutionFlowID(source) {
 		state.AddressKind = runfork.RunForkSelectedContractWorkflowStateRunScope
@@ -438,7 +441,7 @@ func selectedContractWorkflowStatesEqual(left, right runfork.RunForkSelectedCont
 	rightConfig, rightErr := canonicaljson.MarshalPreservingNumberKinds(right.Config)
 	return left.EntityID == right.EntityID && left.EntityType == right.EntityType && left.FlowID == right.FlowID &&
 		left.WorkflowVersion == right.WorkflowVersion && left.Mode == right.Mode &&
-		(left.Mode != "template" || left.ExecutionMode == right.ExecutionMode) && left.AddressKind == right.AddressKind &&
+		left.ExecutionMode == right.ExecutionMode && left.AddressKind == right.AddressKind &&
 		left.Route == right.Route && leftErr == nil && rightErr == nil && string(leftConfig) == string(rightConfig) &&
 		selectedContractWorkflowStateAgentsEqual(left.Agents, right.Agents)
 }

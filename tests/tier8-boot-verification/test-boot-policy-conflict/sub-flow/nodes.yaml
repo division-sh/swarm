@@ -4,5 +4,4 @@ sub-node:
   produces: []
   event_handlers:
     sub.requested:
-      create_entity: true
       advances_to: done

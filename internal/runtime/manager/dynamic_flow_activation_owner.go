@@ -12,12 +12,19 @@ import (
 
 // AdoptSelectedFlowActivation transfers a committed selected attempt from the
 // outer preparation owner to the Manager that will receive its deliveries.
-func (am *AgentManager) AdoptSelectedFlowActivation(attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt, publication runtimebus.FlowRoutePublicationHandle, timersProjected bool) error {
+func (am *AgentManager) AdoptSelectedFlowActivation(identity runtimeflowidentity.RunScopedFlowInstance, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt, publication runtimebus.FlowRoutePublicationHandle, timersProjected bool) error {
 	if am == nil || am.lifecycle == nil || publication == nil {
 		return errors.New("selected flow activation requires a manager and exact route publication")
 	}
 	if err := attempt.Validate(); err != nil {
 		return err
+	}
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
+		return err
+	}
+	if identity.RunID != attempt.RunID() || identity.Route.InstancePath != attempt.InstancePath() {
+		return errors.New("selected flow identity differs from activation attempt")
 	}
 	am.lifecycle.mu.Lock()
 	provider, ok := am.lifecycle.store.(processExecutionBindingProvider)
@@ -42,7 +49,7 @@ func (am *AgentManager) AdoptSelectedFlowActivation(attempt runtimepipeline.Dyna
 		return errors.New("selected flow activation already has a Manager owner")
 	}
 	am.dynamicFlowActiveAttempts[key] = &dynamicFlowActiveAttempt{
-		receipt: attempt, publication: publication, timersProjected: timersProjected, complete: true,
+		receipt: attempt, identity: identity, publication: publication, timersProjected: timersProjected, complete: true,
 	}
 	return nil
 }
@@ -71,6 +78,13 @@ func (am *AgentManager) beginDynamicFlowActiveAttempt(
 	plan runtimepipeline.DynamicFlowRuntimeReadinessPlan,
 	revision uint64,
 ) (*dynamicFlowActiveAttempt, bool, error) {
+	identity, err := runtimeflowidentity.NewRunScopedFlowInstance(plan.RunID, plan.Identity.Route())
+	if err != nil {
+		return nil, false, err
+	}
+	if identity.RunID != key.runID || identity.Route.InstancePath != key.instancePath {
+		return nil, false, errors.New("flow activation identity differs from admitted key")
+	}
 	am.lifecycle.mu.Lock()
 	provider, ok := am.lifecycle.store.(processExecutionBindingProvider)
 	am.lifecycle.mu.Unlock()
@@ -96,12 +110,19 @@ func (am *AgentManager) beginDynamicFlowActiveAttempt(
 			am.dynamicFlowReadinessMu.Unlock()
 			return nil, false, errors.New("dynamic flow activation predecessor retirement is incomplete")
 		}
-		if previous.retirementKind == 0 && previous.receipt.PlanRevision() == revision && previous.receipt.ProcessBinding().Equal(binding) {
+		if previous.retirementKind == 0 && previous.receipt.Ordinal() == revision && previous.receipt.ProcessBinding().Equal(binding) {
 			am.dynamicFlowReadinessMu.Unlock()
-			return previous, false, nil
+			if err := am.workflowInstances.VerifyDynamicFlowRuntimeActivationAttempt(ctx, previous.receipt); err == nil {
+				return previous, false, nil
+			} else if !errors.Is(err, runtimepipeline.ErrFlowAttachmentStale) {
+				return nil, false, err
+			}
+		} else {
+			am.dynamicFlowReadinessMu.Unlock()
 		}
+	} else {
+		am.dynamicFlowReadinessMu.Unlock()
 	}
-	am.dynamicFlowReadinessMu.Unlock()
 	if previous != nil {
 		disposition := flowActivationProcessRetirement
 		if previousDisposition != 0 {
@@ -126,7 +147,7 @@ func (am *AgentManager) beginDynamicFlowActiveAttempt(
 	if admitted.Reused {
 		return nil, false, errors.Join(commitErr, errors.New("committed flow activation attempt has no retained process owner"))
 	}
-	active := &dynamicFlowActiveAttempt{receipt: admitted.Attempt}
+	active := &dynamicFlowActiveAttempt{receipt: admitted.Attempt, identity: identity}
 	am.dynamicFlowReadinessMu.Lock()
 	if am.dynamicFlowActiveAttempts == nil {
 		am.dynamicFlowActiveAttempts = make(map[dynamicFlowRuntimeReadinessKey]*dynamicFlowActiveAttempt)
@@ -179,8 +200,8 @@ func (am *AgentManager) settleDynamicFlowActiveAttempt(
 		}
 		am.dynamicFlowReadinessMu.Unlock()
 	}()
-	identity, err := runtimeflowidentity.NewRunScopedFlowInstance(key.runID, runtimeflowidentity.RouteForInstancePath(key.instancePath))
-	if err != nil {
+	identity := active.identity
+	if err := identity.Validate(); err != nil {
 		return err
 	}
 	if !locallyRetired {
@@ -207,7 +228,7 @@ func (am *AgentManager) settleDynamicFlowActiveAttempt(
 			if disposition != flowActivationProcessRetirement && disposition != flowActivationFailedRetirement {
 				return errors.New("failed terminal flow retirement requires process replacement")
 			}
-			if err := am.retireFlowRouteAttempt(active.receipt, active.publication); err != nil {
+			if err := am.retireFlowRouteAttempt(identity, active.receipt, active.publication); err != nil {
 				return fmt.Errorf("retry exact flow route retirement: %w", err)
 			}
 			if err := am.lifecycle.retryProcessFlowRetirement(previousSet); err != nil {
@@ -346,7 +367,7 @@ func (am *AgentManager) settleDynamicFlowAttemptAfterJoin(ctx context.Context, k
 		}
 	}()
 	if !active.locallyRetired {
-		if err := am.retireFlowRouteAttempt(active.receipt, active.publication); err != nil {
+		if err := am.retireFlowRouteAttempt(active.identity, active.receipt, active.publication); err != nil {
 			return fmt.Errorf("retire flow route publication %s: %w", key.instancePath, err)
 		}
 		if active.retirementSet != nil {
@@ -360,8 +381,8 @@ func (am *AgentManager) settleDynamicFlowAttemptAfterJoin(ctx context.Context, k
 	}
 	if !active.timersRetired {
 		if active.timersProjected {
-			identity, err := runtimeflowidentity.NewRunScopedFlowInstance(key.runID, runtimeflowidentity.RouteForInstancePath(key.instancePath))
-			if err != nil {
+			identity := active.identity
+			if err := identity.Validate(); err != nil {
 				return err
 			}
 			if err := am.workflowInstances.RetireInitialEntryTimerWakeups(ctx, identity); err != nil {

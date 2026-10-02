@@ -15,8 +15,8 @@ import (
 )
 
 func TestExecutorFanOutCapturesReceiverWithoutPublicationAuthority(t *testing.T) {
-	for _, flowOwned := range []bool{false, true} {
-		t.Run(map[bool]string{false: "node", true: "flow"}[flowOwned], func(t *testing.T) {
+	for _, initialized := range []bool{false, true} {
+		t.Run(map[bool]string{false: "existing", true: "construction"}[initialized], func(t *testing.T) {
 			exec, err := NewExecutor(RuntimeDependencies{
 				Source: sourceWithFixtureStages(fanOutPayloadSource(t, "flow-1", "task.completed"), "flow-1", "pending", "pending"), StateRepo: stubStateRepo{},
 				MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, PayloadShaper: stubPayloadShaper{},
@@ -27,10 +27,10 @@ func TestExecutorFanOutCapturesReceiverWithoutPublicationAuthority(t *testing.T)
 			node := testFlowExecutableNode(t, "flow-1", "node-1")
 			event := eventtest.ExistingRunRootIngress(eventtest.UUID("fan-out-receiver-event"), "task.completed", "operator", "", json.RawMessage(`{"items":["a","b"]}`), 0, eventtest.UUID("fan-out-receiver-run"), events.EventEnvelope{}, time.Now())
 			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: "flow-1", FlowInstance: "flow-1", EntityID: "entity-1"})}
-			if flowOwned {
+			if initialized {
 				route.Initialization, err = events.AdmitFlowReceiverInitialization(event, route.Target)
 			} else {
-				route.Initialization, err = events.AdmitNodeReceiverInitialization(event, route.Target, node)
+				route.Target, err = events.NewExistingEntityTarget(route.Target.Route())
 			}
 			if err != nil {
 				t.Fatal(err)

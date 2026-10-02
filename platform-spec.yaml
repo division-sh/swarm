@@ -470,8 +470,10 @@ contract_formats:
         terminal-state guards are scoped to the exact executing flow, never
         borrowed from another flow with equal stage names. This does not add
         ordinary source-stage authoring: ordinary carriers retain their current
-        compiled nonterminal source set, create carriers their initial source,
-        and loop/join/timer/gate carriers their declared source restrictions.
+        compiled nonterminal source set, and loop/join/timer/gate carriers their
+        declared source restrictions. Canonical construction establishes initial
+        stage entry before delivery; it is not a handler advance carrier and
+        cannot restrict an ordinary handler to the initial stage.
         Authored stage IDs are case-sensitive and exact within the selected
         source and flow. The compiled topology privately owns declared
         membership and terminal metadata; execution, receiver admission,
@@ -1828,25 +1830,23 @@ contract_formats:
             one generation-consistent selected-run projection classifies every node target as exactly one closed typed variant:
             existing_entity carries the exact selected entity owner; materializing_entity carries the exact future entity ID
             produced by the canonical materialization owner; entityless_receiver carries explicit entity absence only when no
-            admitted receiver-owner evidence exists. One closed compatibility policy classifies the handler execution
-            dependency as entity_optional, existing_required, or materializing. Flow instance keys and compiled input/edge
+            admitted receiver-owner evidence exists. Handler dependency classification describes reads and effects only,
+            never permission to construct. Flow instance keys and compiled input/edge
             resolution select the receiving instance; handlers cannot acquire or select another receiver. Classification
             accounts for durable state buckets, lifecycle transitions and gates, guard kill,
             approval lifecycle, persistent clears, evidence recording, accumulation, joins, and nested rule sites rather than
             inferring dependency only from authored entity references. Entity-optional means that execution can proceed without
-            entity state; it does not forbid an exact existing or admitted materializing receiver owner. No supported handler
-            class treats selected ownership as forbidden. Compiled parent-to-child topology supplies source/causal context,
+            declared fields; it still requires an exact constructed lifecycle header. Compiled parent-to-child topology supplies source/causal context,
             not ownership of the parent's state. References to persisted platform entity identity, state, or gates are existing-entity
             requirements; flow-instance platform metadata alone remains route metadata and does not invent entity ownership.
-            An exact admitted same-plan materializing owner may satisfy an entity-optional or existing-required handler and a
-            later existing-required handler in the same plan.
-            Handler-derived materialization MUST agree with the canonical future identity. Routing, stamped validation,
-            and pipeline execution consume that same compatibility owner. External and mixed-provenance inputs use the same
-            composition-selected receiving instance. Missing required state fails before publication; explicit or implicit
-            initialization stamps only that instance's canonical future entity. If its row appears before execution, exact
-            ownership, type and state must agree. Business payload matches never redirect an admitted target, and an unavailable
-            exact owner is never treated as missing or recreated. Target evidence reads the run-scoped entity_state registry
-            through one source-backed exact receiving-flow owner. Every candidate route is classified against the complete admitted authored-flow set and is accepted only
+            Construction commits before ordinary handler delivery. A materializing target is preparation evidence for the
+            canonical constructor commit, not executable permission to synthesize a header or fields in a handler.
+            Routing, stamped validation and pipeline execution consume the constructor's exact committed owner.
+            External and mixed-provenance inputs use the same composition-selected receiving instance. Missing construction
+            or required fields fails closed without repair. Business payload matches never redirect an admitted target, and an unavailable
+            exact owner is never treated as missing or recreated. Target evidence reads the run-scoped lifecycle header for every instance
+            and its field row iff fields are declared, through one source-backed exact receiving-flow owner.
+            Every candidate route is classified against the complete admitted authored-flow set and is accepted only
             when exactly one authored flow grammar claims it and that flow is the receiver. Static and singleton flows admit
             only their exact authored scope. Template flows admit exactly one scalar concrete instance segment under their
             authored scope. The bundle root is owned by the closed coordinate consisting of the canonical authored root
@@ -1859,8 +1859,8 @@ contract_formats:
             mutation. Root EventBus delivery planning, root connect materialization, declared-agent projection, and root gate,
             loop, and timer declaration matching consume the same authored root owner. Root connect planning projects the
             exact authored-root/current-run blueprint without requiring pre-existing state or inheriting source entity data.
-            The canonical handler classifier then admits existing state, initialization of that route's canonical entity,
-            or entityless execution. A root agent's declaration route remains root; its execution coordinates project to the
+            The canonical constructor completes that root before handler admission, including a fieldless header when no
+            fields are declared. Handler classification cannot initialize it. A root agent's declaration route remains root; its execution coordinates project to the
             exact run for dependency admission and state readback. Entityless root-agent publication carries that same
             exact run coordinate from its admitted live identity, never from the inbound event; its business name stays local.
             Planned agents are never fabricated active descriptors.
@@ -1887,75 +1887,64 @@ contract_formats:
             nested child row never becomes a parent candidate even when it shares the declared key and has no
             lifecycle companion. Composition resolution, exact state appearance, target application, and engine preparation
             all consume this same classifier before assigning workflow identity; caller relabeling is forbidden.
-            A matching active state row remains selectable before its flow_instances lifecycle companion exists; when a
-            companion exists, any non-active lifecycle (including draining or terminated) excludes that row. Joining through lifecycle as a prerequisite
-            for selected ownership is forbidden.
+            A selectable receiver requires its canonical constructed flow_instances header and an entity_state row exactly
+            when fields are declared. A fieldless header is complete without an entity_state row. State-only or incomplete
+            header evidence is corruption, not construction permission. Scenario import does not grant execution authority;
+            its explicit constructor handoff must finish before ordinary delivery. Any non-active lifecycle, including
+            draining or terminated, excludes the receiver.
             Once committed, later matching rows cannot redirect the delivery. Any non-active lifecycle companion, including
             draining or terminated, makes that exact receiver unavailable to delayed, retry, replay, and restart execution even when its
             entity stage is non-terminal; every execution path rejects before business state or effect mutation. A claimed
             rejection MUST still use the canonical delivery failure settlement and continuation owner. Pipeline computes one immutable
             DeliveryTargetApplication from the stamped target and passes it through state preload, both production engines,
             mutation ownership, and producer-source projection. Those consumers validate availability and agreement but do not
-            select ownership. An exact selected entity_state row may predate its flow_instances lifecycle companion, including
-            accepted scenario setup. The application reads that state only by the admitted run, route, and entity identity; the
-            first mutation may create the exact companion while preserving the existing state and revision. Broad state scans,
-            synthetic compatibility rows, and treating a missing companion as missing selected ownership are forbidden.
+            select ownership. The application reads the exact constructed aggregate only by the admitted run, route, and
+            entity identity. Ordinary mutation cannot create a missing header or required field row, repair a companion,
+            or reinterpret absent persistence as a first handler invocation. Broad state scans and synthetic compatibility
+            rows are forbidden.
             Pipeline consumes the persisted target variant
             directly; source-event identity, path text, descriptors, singleton fan-in, and missing-row fallback cannot repair
             or reinterpret it. Every explicitly
             targeted agent route resolves to existing_entity or materializing_entity; an untargeted agent route instead records
             an explicitly empty target because its required typed AgentIdentity is the complete receiver owner. A same-flow
-            declaration-owned agent-policy route may consume a node/materialization owner from the same admitted plan only
+            declaration-owned agent-policy route may consume a constructed receiver from the same admitted plan only
             when the exact typed active-agent descriptor already carries that entity fact and the selected owner agrees;
             runtime-created carriers remain targetless. Sharing only a flow instance, handler, recipient spelling, or
             publication is not ownership evidence. Node intents are classified
-            independently against the selected-run snapshot. A node's speculative materialization result is not receiving
-            activation evidence for an agent; only actual selected ownership or an admitted receiver activation plan supplies
-            that authority, so intent order cannot create it. Each future agent receiver carries closed ReceiverInitialization
-            evidence binding its publication run/event and exact future target to either flow_lifecycle or node_delivery.
-            A node_delivery supplier additionally identifies the exact executable initializer node. This evidence is projected
-            from the admitted flow activation or canonical handler classifier; equal pins or future targets never establish
-            initialization responsibility. An optional observer does not become another initializer. The evidence is part of
-            durable route identity and the full route wire, and shares the existing receiver_materialization_plan JSON record
-            with the optional node dependency. Missing, contradictory, old-form or crossed supplier records fail closed.
-            The closed ReceiverMaterializationPlan binds the exact run,
-            publication, admitted RoutingSource, materializing target, materializer delivery route identity and complete
-            dependent agent route identities. Dependent identities in this plan identify their pre-binding routes; each
-            final durable agent route identity includes the complete plan. The materializer retains its ordinary route
-            identity. Complete publication validation checks both directions of this relation, rejects ambiguous suppliers,
-            and cannot accept a dropped dependent plan. The plan is committed with the publication and delivery obligations,
-            never manufactured from current descriptors during recovery. It is future ownership, not evidence of execution.
-            A node-supplied agent cannot drop its dependency, including when every dependent plan is erased. A flow-lifecycle
-            supplier has no fictitious node dependency: its exact activation commits initialization, and claim/readiness
-            admission still requires the exact persisted state and admitted lifecycle. Ordinary and historical hydration
-            consume the same supplier/dependency record and validate its publication identity. Ordinary agent-only fork
-            replay validates the complete source publication at the selected revision. A node supplier requires the exact
-            initializer's successful settlement at that revision; flow and node suppliers both require exact reconstructed
-            receiver state. Replay projects that state through the canonical entity ownership owner and rechecks the child
-            row in the activation transaction, admitting existing_entity without a copied source initialization dependency.
-            Existing root receivers use the same projection. An unfinished initializer cannot be omitted or fabricated as
-            child work. Untargeted agent receivers retain their explicit absence of entity ownership. Agent claims and continuation
-            eligibility for node-supplied state require the exact materializer's successful settlement and actual
-            persisted target state admitted by the workflow target owner, the exact
-            admitted agent lifecycle cell, and the matching live normal or selected generation grant. An agent descriptor
-            with an explicit entity must agree; lawful descriptor absence does not erase the materializer's exact ownership.
+            independently against the selected-run snapshot and exact canonical construction plans. Keyed and keyless
+            construction, including recursive static children, finishes in the canonical constructor commit before any
+            ordinary node or agent handler executes. Handler flags, field references, effects, route ordering, future IDs
+            and node completion cannot establish construction authority. A materializing receiver carries closed
+            ReceiverInitialization evidence with exactly kind=flow_lifecycle, run_id, event_id and target. Its exact
+            immutable creating-publication coordinate is committed by the constructor; current workflow progress is not
+            a substitute for that original evidence. The receipt belongs to durable route identity and the full route
+            wire. The existing receiver_materialization_plan column carries only {initialization: receipt}; node_delivery,
+            dependency records, retired node fields, missing or contradictory receipts fail closed with no compatibility
+            reader. Ordinary observers remain ordinary deliveries and never become construction suppliers. Aggregate
+            validation binds every receipt to its own publication and target, independently of ordinary node settlement.
+            Claim admission additionally verifies actual constructed persistence and current attachment readiness.
+            Ordinary agent-only fork replay validates the complete source publication at the selected revision, requires
+            exact reconstructed receiver ownership, and rechecks the child row in the selected activation transaction.
+            Historical projection is not fresh construction: it admits existing_entity without copying source
+            initialization or granting unsupported historical execution. Existing root receivers use the same projection;
+            staged non-agent and timer replay refusals remain unchanged. Untargeted agent receivers retain their explicit
+            absence of entity ownership. Agent claims and continuation eligibility require the exact constructed target,
+            the exact admitted agent lifecycle cell, and the matching live normal or selected generation grant. An agent
+            descriptor with an explicit entity must agree; lawful descriptor absence does not erase persisted ownership.
             The claim transaction consumes the shared generation-authority mutation fence on either a pooled or retained
             connection and revalidates the exact current grant inside it. Readiness scans are observations, never admission.
-            A completed materializer remains valid
-            when normal startup rebinds an unfinished agent delivery to
-            a successor runtime generation. Its immutable completed evidence remains bound to the same run, publication,
-            compiled route and source artifact; the agent still requires its own current admitted grant. Pending
-            materializers must retain exact execution-authority agreement, and no normal/selected crossing is admitted.
-            Awaiting materialization or readiness
+            Immutable construction remains bound to its original run, creating publication, compiled input and source
+            artifact when normal startup rebinds an unfinished delivery to a successor runtime generation. Attachment
+            retry receives a new attempt only after acknowledged exact predecessor cleanup; it does not repeat
+            construction or its creating delivery. Each delivery still requires its own current admitted grant, and no
+            normal/selected crossing is admitted. Awaiting construction or readiness
             creates no agent attempt, timer or polling loop; canonical commit and readiness signals wake the existing
-            continuation owner. Retryable materialization retains its existing retry policy. Terminal materializer failure
-            atomically terminalizes its dependent obligations through the delivery owner, with exact failure/outcome and
-            dead-letter evidence and no provider execution. Run cancellation retains the ordinary run-terminalization owner.
-            A successful node settlement without its exact target state terminalizes dependents as
-            receiver_materialization_missing rather than pretending the entity exists or waiting forever. Agent-only
-            template activation uses its existing lifecycle commit owner, but a future-target agent still requires exact
-            persisted state and readiness before claim. Publication duplicates validate the stored aggregate; they never
-            trust a caller's replacement plan or repair damaged dependency evidence.
+            continuation owner. Constructor failure rolls back the complete construction/publication mutation; it cannot
+            leave ordinary handler obligations behind. Once construction commits, ordinary node failure settles only its
+            own obligation and does not erase construction or terminalize unrelated agent deliveries. Missing required
+            constructed persistence fails closed rather than waiting for node completion or repairing state. Run
+            cancellation retains the ordinary run-terminalization owner. Publication duplicates validate the stored
+            aggregate and immutable constructor evidence; they never trust a caller's replacement plan or repair damage.
             Missing,
             ambiguous, malformed, stale, foreign, contradictory, or disagreeing owner evidence fails before event, delivery,
             settlement, lifecycle, warning, or reply mutation during publication admission. A nested static receiver uses
@@ -2856,9 +2845,10 @@ entity_contracts:
     - 'A `materialize_from` field is runtime-owned and not agent-writable.'
     - 'A trailing ? marks an optional field edge, not a nullable value. Bare entity roots may remain progressively
       unassigned until a proven write; supplied named records still require every bare member.'
-    - 'Explicit initial values apply once at creation and never during reads, reload, retry, replay or fork hydration.
-      Confirmed first materialization by an admitted entity-writing handler follows the same creation plan
-      as explicit create_entity. Creation inputs overlay explicit initial values before complete candidate validation.
+    - 'Explicit initial values apply once through the canonical keyed/keyless constructor and never during reads,
+      reload, attachment retry, replay or fork hydration. Ordinary handlers cannot construct missing state.
+      Only actually supplied same-name constructor fields project into state; an internal-literal collision rejects.
+      The resolved typed key is separate from supplied-field projection. Complete candidate validation precedes commit.
       A successfully loaded empty snapshot is existing state, never a creation miss. Null initial values reject.'
     - 'A root runtime instance resolves its entity contract only when its flow_instance equals the active run_id
       and the admitted source declares a root flow. UUID shape alone is not root ownership; child instances resolve
@@ -3489,15 +3479,13 @@ runtime_enforcement:
     entity tool APIs. This section does not introduce a second tool
     family; it defines the contract semantics those tools must honor.
   create_entity:
+    status: retired_unsupported
     rule: |
-      create_entity writes only fields declared in the inferred
-      flow-owned entity contract. The caller does not supply
-      `entity_id` or `entity_type`; the runtime derives the canonical
-      receiving-flow primary identity from flow-instance/run context
-      and infers the contract from flow context. Envelope field names
-      are rejected as caller input. Only explicit `initial:` values and
-      admitted bindings are materialized. Other root fields remain absent;
-      supplied named records must satisfy their required-field declarations.
+      The direct create_entity tool and handler create_entity flag are unsupported.
+      Ordinary handlers cannot construct missing headers or required field rows.
+      Only engine.flow_constructor owns construction through the named activation
+      commit. No trusted/internal tool switch, callback or missing-state branch
+      restores this authority. Existing selected stores have no compatibility reader.
   save_entity_field:
     rule: |
       save_entity_field targets only declared non-envelope top-level fields
@@ -3694,42 +3682,15 @@ handler_specification:
       purpose: Human-readable description of what this handler does. Not executed.
     create_entity:
       field: create_entity
-      type: boolean
-      purpose: When true, the handler materializes the canonical receiving-flow primary entity before any other processing.
-        All subsequent handler steps (guard, data_accumulation, advances_to, emit, etc.) operate on that canonical entity.
-        The inbound event's entity_id is parent/source context only and is ignored for state ownership; the receiving-flow
-        entity starts at the flow's compiled initial stage with schema-declared initial values already materialized.
-      default: false — handler consumes its admitted receiver ownership; inbound source entity identity is not inherited as state
-      when_to_use: When an event arriving from outside the flow represents a new entity entering this flow's lifecycle.
-        Example — vertical.discovered arriving at scoring creates scoring's canonical primary entity. Without create_entity,
-        receiver policy preserves actual receiving ownership, auto-materializes where permitted, executes entityless optional
-        work, or rejects missing required state; it never borrows discovery's scan entity.
-      execution_position: First step in the dependency graph. Runs before query, guard, and all other steps. Establishes
-        the entity context for the entire handler.
-      entity_creation:
-        entity_id: Canonical receiving-flow primary entity identity derived from flow-instance/run context, not caller payload identity
-        initial_stage: 'From the schema.yaml stages entry with initial: true; markerless/stateless flows have no authored initial stage'
-        flow_instance: Current flow instance path
-        fields: Only explicit `initial:` values and admitted bindings materialize root fields at create_entity time.
-          Other roots remain absent; declaration alone is not assignment evidence.
-      interactions:
-        with_accumulate: 'PROHIBITED. create_entity establishes the canonical receiving-flow lifecycle entity for this handler.
-          Accumulate waits across multiple arrivals and must not be combined with same-handler lifecycle materialization.
-          Boot error if both are declared on the same handler.'
-        with_fan_out: 'ALLOWED. create_entity materializes ONE canonical entity, then fan_out commits one durable obligation
-          whose later ordinary publications all carry that entity_id. Fan-out ordinals share the canonical entity.'
-        with_guard: 'ALLOWED. Guards evaluate against the materialized canonical entity state after schema initial values materialize.
-          Direct bare-field reads require assignment proof at this program point. Optional reads require an explicit
-          presence decision; a declaration alone does not prove a readable value.'
-        with_on_complete: 'ALLOWED. on_complete conditions evaluate according to the handler dependency graph. They may rely on
-          schema initial values and earlier step outputs, but not on same-handler top-level data_accumulation writes.'
-        with_rules: 'ALLOWED. rule conditions evaluate according to the handler dependency graph. They may rely on schema initial
-          values and earlier step outputs, but not on same-handler top-level data_accumulation writes.'
-        with_advances_to: ALLOWED. Advances the new entity from its compiled initial stage to the target stage.
-      note_on_static_flows: 'A derived-static handler may use create_entity or ordinary writes for its canonical primary
-        entity. Arbitrary multi-row ownership and caller-selected entity_id remain invalid. Model keyed multiplicity with
-        scalar instance and connection-owned resolution; contained coordinator state requires actual operation demand.
-        Authored mode is retired on presence. Historical selected stores are unsupported; no migration machinery is provided.'
+      status: retired_unsupported
+      rule: >-
+        Retired on presence in every handler, including false, null and empty values.
+        Ordinary handlers cannot construct missing headers or required field rows.
+        Keyless construction precedes delivery; keyed acquisition belongs to the
+        compiled receiver input's create/select-or-create resolution and the one
+        canonical constructor. Migrating an old keyed handler's creation behavior
+        requires select-or-create, not a conflicting create. No compatibility path
+        or replacement handler-local initialization flag exists.
     guard:
       field: guard
       type: object — single check OR list of checks
@@ -5461,10 +5422,11 @@ engine:
       canonical: The flow declares one scalar instance key. Input resolution and compiled composition select or create
         the receiving instance before handler execution, including external and mixed-provenance ingress.
       state: The exact admitted receiver has existing_entity, materializing_entity, or entityless_receiver ownership.
-        Handler requirements determine whether state is needed and whether canonical initialization is permitted; they
-        never select another receiver. Initialization preserves existing state and uses only canonical instance/run identity.
-      availability: Exact receiver state and its optional lifecycle companion are projected together by the selected-store
-        owner. A missing companion permits state-only ownership; an existing draining or terminated companion does not.
+        Handler requirements describe reads/effects only, never select another receiver or grant construction.
+        Canonical construction preserves existing state and uses only canonical instance/run identity.
+      availability: The exact constructed lifecycle header and its field row iff fields are declared are projected together
+        by the selected-store owner. State-only rows cannot authorize ordinary execution or companion repair.
+        A missing header or required field row rejects; a fieldless header never requires fabricated fields.
         Declared terminal state or inactive lifecycle evidence rejects admission and execution without publication or
         receiver mutation. Contradictory duplicate evidence cannot be discarded by descriptor deduplication. An unavailable
         exact receiver is not an absent receiver and cannot be recreated or replaced by a business-key match.
@@ -5554,6 +5516,85 @@ engine:
     not_in_scope: Cross-machine distribution remains unsupported.
     addressing: Parallel child/template work is addressed by normal typed flow-instance identity and routing. There is no
       ephemeral dynamic-agent shard address space.
+  flow_constructor:
+    authority: >-
+      One canonical constructor owns keyed and keyless instance admission and its
+      atomic persistence. Ordinary handlers cannot construct missing headers or
+      required field rows from actions, field references, effects, preview, or
+      future-ID carriers. A state-only import is not execution authority.
+    commit_boundary: >-
+      PrepareInitialEntryLifecycle prepares the initialized instance and its exact
+      lifecycle together but grants no persistence authority. The selected-store
+      CommitFlowInstanceActivation operation owns the complete atomic construction
+      tree, route staging, immutable receipts and planned attachment rows. A
+      standalone MaterializeInitialEntry or CommitWorkflowInitialMaterialization
+      operation is unsupported and must not remain as an independent writer,
+      compatibility wrapper or test-only execution path. Callers consume typed
+      acknowledgment and finalize only the returned committed lifecycle; exact
+      replay returns no creation-only lifecycle work.
+    signature: >-
+      Each keyed input is checked independently using the existing definite-assignment
+      analysis. Initial facts are internal literals, the resolved typed key, and
+      guaranteed same-name supplied fields from that input alone. A keyless flow
+      has a no-argument constructor and no supplied class. Optional payload members
+      cannot prove presence. Later definitely-assigned fields remain supported.
+    projection: >-
+      Only actually supplied same-name bare fields are projected. Incompatible
+      structural types and any collision with an internal literal are verification
+      errors. The key comes from resolution, not payload projection; a same-name
+      payload key must agree. A receiver-owned synthetic key is checked against
+      that exact resolved typed key without becoming an extra producer-schema
+      member or supplied field. The original publication fields are validated
+      against the constructor input schema; resolution satisfies a declared key
+      slot without rewriting the publication. An undeclared key is not added to
+      that schema. The stamped delivery projection remains handler-local and
+      retains its collision refusal. Message-only fields never become state.
+    ordering: >-
+      Construction atomically persists the header, state iff fields are declared,
+      recursively constructed keyless descendants, exact initial-entry lifecycle,
+      and the creating ordinary-delivery obligation. Attachment is a separate
+      attempt lifetime; retry never repeats construction or initial-entry facts.
+      The creating input is delivered exactly once after readiness, not consumed
+      by construction. Missing required persistence fails closed without repair.
+    creating_delivery_receipt: >-
+      The immutable initial-materialization projection includes creating_input
+      with the exact creating event_id and selected receiver-local constructor
+      input. Eager keyless descendants retain that event_id but have no argument
+      input. No-argument startup construction without a creating delivery records
+      the explicit empty origin. This receipt is independent of optional
+      auto_emit_on_create; absence of auto-emission never discards creating
+      publication identity. Exact construction replay cannot substitute another
+      creating event. A materializing agent claim consumes the exact constructed
+      header, required field row if declared, and immutable receipt under the
+      claim transaction before its existing lifecycle/generation admission. A
+      missing, partial, foreign-publication or contradictory receipt fails closed
+      without repair. Node completion is not construction evidence and does not
+      terminalize unrelated receiver deliveries.
+    recursive_commit: >-
+      The existing FlowInstanceActivationPlan carries an exact tree of immediate
+      keyless child plans. Each plan carries the Instance and Lifecycle returned
+      together by PrepareInitialEntryLifecycle, the exact parent, source, run and
+      occurrence, and its separate planned attachment row. Keyed children are not
+      instantiated without their own admitted creating input and resolved key.
+      The selected-store activation/publication commit persists the complete tree
+      and its exact route topology atomically and returns matching descendant
+      evidence. Transaction-local evidence remains unacknowledged; the outer
+      selected-store commit acknowledgment promotes every construction descendant
+      and nested publication together, including API, inbound, engine, timer,
+      decision and fan-out compositions. Any descendant failure rolls back the
+      entire tree. Exact replay
+      verifies every original descendant; a missing or conflicting descendant
+      is corruption, never permission to repair or repeat construction. A concrete
+      descendant path retains keyed ancestor coordinates, while its semantic
+      scope comes from its exact authored workflow owner, not path-shape inference.
+      A root creating input is prepared through this same activation owner before
+      recipient classification. Its concrete root coordinate is the exact run ID;
+      immediate keyless children retain their authored paths without adding that
+      run ID as a business discriminator. Their parent route still names the
+      exact run-local root. Root construction and its creating publication commit
+      together; neither ordinary delivery nor restart may fill missing headers.
+      Descendant attachment is finalized before its parent's ready publication;
+      attachment retry never re-runs the initial-entry lifecycle planner.
   dynamic_instance_lifecycle:
     description: 'Keyed flow instances derive from scalar instance declarations owned by a filesystem FlowNode; each connection owns creation or selection policy.'
     creation:
@@ -5570,19 +5611,19 @@ engine:
         - Platform loads the exact template FlowNode from the admitted artifact.
         - '5. Platform constructs paths: {template_id}/{instance_id}/{local_name}'
         - 6. Platform atomically creates the entity at initial_state, dormant initial timers, and one durable runtime-readiness plan containing the exact route, declared-agent revisions, run, and optional deterministic creation event occurrence
-        - 7. When creation participates in a selected mutation, the compiled graph identifies the exact active dynamic-instance dependencies and affected route owners. Route derivation uses fresh selected-store descriptors in that dependency scope carrying the exact creating-run semantic source coordinate `{bundle_hash, workflow_version}`. Bundle hash/source and workflow version are authoritative only when projected through the exact current-run `flow_instance_runtime_readiness` owner. The querying run, current `flow_instances.config`, path shape, or a readiness row from another run cannot supply or complete that coordinate. Missing, partial, malformed, wrong-run, or nonmatching source coordinates in the selected scope fail closed before any exact route owner is replaced. When an active run's source revision changes, one run-scoped readiness reconciler must advance every active `{run_id, instance_path}` plan from the revised semantic source and its exact persisted route projection before any route derivation in that selected mutation. For an un-emitted creation occurrence it re-derives event identity, type, validated payload, and delivery projection from the revised schema and persisted trigger lineage; removal of `auto_emit_on_create` removes that pending occurrence, while introducing one without persisted trigger lineage fails before readiness mutation. An already emitted creation occurrence is immutable. The reconciler clears topology readiness for every changed desired plan and queues each changed key for post-commit reconciliation; no per-route or stale-creation-plan repair is permitted. It admits only selected descriptors matching the current EventBus source and replaces the complete active route-row set for every affected owner in that mutation, where rows absent from the newly derived set become inactive and expected rows are upserted. This includes cross-instance observer routes owned by an already-active consumer when the new instance is the observed source. An unscoped descriptor read may support non-authoritative target description but cannot authorize route persistence. Persisted route truth MUST remain absent from the global process route table and independent recipient planning until readiness reconciliation publishes it. The selected mutation's private route overlay consumes the same exact topology so the triggering delivery can complete atomically; that overlay is not global publication authority.
-        - 8. One idempotent reconciler keyed by exact `{run_id, instance_path}` reloads the current readiness row and lifecycle eligibility; captured callback snapshots are not authority. The readiness owner assigns a positive, monotonic plan revision at first materialization and increments it on every changed desired plan. The revision does not reset when a later plan has identical content; A -> B -> A is not the original A permission. Unchanged reconciliation preserves the revision. A plan fingerprint or JSON equality alone cannot authorize an admitted predecessor after its revision changes. Before executable work escapes, the selected store admits one opaque activation attempt bound to the exact plan revision and admitted process generation grant. The same process cannot acquire a successor while its predecessor owns unsettled resources; after process loss, exact possession takeover may admit reconstruction. Process-retirement cleanup retains that exact local attempt across failures and resumes its route/agent join, timer retirement, and durable-attempt retirement in order. After local cleanup joins, the selected store may settle at most 128 orderly process-retirement attempts in one transaction. It verifies every member's exact grant, attempt, revision, current slot or foreign successor under that transaction; any invalid member rolls back the whole batch. A failed batch retains each local attempt for idempotent retry without repeating completed local cleanup. Failed activation abandonment remains a distinct single-attempt settlement and cannot enter the orderly batch. A successful earlier stage is never replayed as fresh executable authority; durable retirement cannot commit before local cleanup joins. Failed terminal lifecycle commits remain fail-closed rather than being reinterpreted as process-retirement retries. An attempt is not a substitute for the generation-owned work barrier or proof of process liveness.
-        - 9. The reconciler coalesces concurrent attempts for that key, reconciles and verifies the complete declared-agent topology, then publishes and verifies the already-persisted route in process. The desired agent set is exact. agents absent from the revised plan are retired through the canonical generation lifecycle, retained agents whose canonical config revision changed are exactly replaced through that lifecycle, and newly declared agents are admitted and persisted through it. A declared agent ID that was previously terminated advances by exact CAS from the terminated predecessor to a higher registered/running successor generation; it never deletes, resets, or reuses the predecessor lifecycle cell. The readiness plan is the sole desired-set writer for its active dynamic instance. Generic hire cannot add an agent to that instance, and generic fire/reconfigure cannot mutate a declared agent; those operations fail at the selected-store mutation boundary unless they carry the exact current readiness-plan authority. Recovery adopts the exact persisted generation before any retire or replace transition; it cannot infer a local generation, keep a removed process agent, or patch an old config. Every expected executable declaration consumes one phase-aware AgentManager handoff backed by `agent_lifecycle_authority.process_execution_projection` and `prepared_execution_publication`. Before a Manager run occurrence, that handoff may produce only an exact `registered`/`stopped` `prepared_before_run` projection; this is preparation, not process-liveness evidence, and both Manager run modes must upgrade every such projection before startup can become public-ready. During a live Manager occurrence, reconciliation completes only on `runnable_current_occurrence`; the durable cell is `running` in the current run mode, the current projection is unfenced, and its exact lifecycle route and loop are installed. Config presence, lifecycle registration, revision or topology equality, and a prior `topology_ready_at` are insufficient. Lifecycle-only adoption for a removed or replaced declaration remains a closed non-executable variant used solely to authorize exact retirement or replacement; it never builds provider execution, installs a route, or starts a loop.
-        - A replacement ordinary generation in prepared or probe-settled posture may only rebind an existing lifecycle cell through a shape-checked, non-executable process takeover without a replacement agent projection. It must retain the exact current run, source set, readiness plan and declared-agent membership; it cannot use that posture to acquire an activation attempt, create or replace executable topology, launch an agent, or publish a route. A process takeover carrying a replacement agent projection is executable reconciliation, including across source revisions: it requires the admitted ordinary grant, the current activation attempt and plan revision, and exact desired-agent membership and config revision in the same lifecycle transaction. The grant must be admitted before those executable steps. Selected-fork crash recovery does not acquire the pre-admission takeover permission.
-        - Standing startup may prepare declared agents before the ordinary generation grant is admitted only under the exact current readiness plan revision and current prepared or probe-settled grant. This preparation may register or reconfigure only `registered`/`stopped` agent projections; removal of obsolete declarations waits for admitted reconciliation. Preparation does not acquire an activation attempt, publish a route, arm timers, emit creation work, or mark topology ready. After grant admission but before Manager.Run, the startup owner finds each prepared flow agent, reacquires the current plan, admits the exact attempt and upgrades those stopped cells to attempt-bound topology. It does not publish routes or mark readiness in this pre-run pass. Manager.Run then upgrades the cells to runnable; post-run reconciliation retires obsolete declarations and completes route, timer and creation work before public readiness. A prepared topology coordinate is never executable permission.
-        - Startup captures completed reconstruction authority as the exact current source and plan revision before pre-Run admission. A new attempt for an unchanged completed plan preserves its durable completion marker while the prepared agents become runnable; the marker is historical durable topology evidence, never permission to publish from the new process. Post-Run completion consumes the captured authority only for the exact locally retained pre-Run attempt and revision, and refreshes the marker after verifying the new process topology. If admission succeeds but the process exits before Manager.Run or completion, orderly retirement preserves that historical marker for another recovery-disabled restart. A genuinely interrupted pending row remains pending and requires recovery; a changed source or revision cannot inherit completion.
+        - 7. When creation participates in a selected mutation, the compiled graph identifies the exact active dynamic-instance dependencies and affected route owners. Route derivation uses fresh selected-store descriptors in that dependency scope carrying the exact creating-run semantic source coordinate `{bundle_hash, workflow_version}`. Bundle hash/source and workflow version are authoritative only when projected through the exact current-run `flow_instance_runtime_readiness` owner. The querying run, current `flow_instances.config`, path shape, or a readiness row from another run cannot supply or complete that coordinate. Missing, partial, malformed, wrong-run, or nonmatching source coordinates in the selected scope fail closed before any exact route owner is replaced. When an active run's source revision changes, one run-scoped readiness reconciler must advance every active `{run_id, instance_path}` plan from the revised semantic source and its exact persisted route projection before any route derivation in that selected mutation. For an un-emitted creation occurrence it re-derives event identity, type, validated payload, and delivery projection from the revised schema and persisted trigger lineage; removal of `auto_emit_on_create` removes that pending occurrence, while introducing one without persisted trigger lineage fails before readiness mutation. An already emitted creation occurrence is immutable. The reconciler supersedes every unsettled changed-plan attempt and queues a fresh planned successor only after its exact joined settlement; it queues each changed key for post-commit reconciliation; no per-route or stale-creation-plan repair is permitted. It admits only selected descriptors matching the current EventBus source and replaces the complete active route-row set for every affected owner in that mutation, where rows absent from the newly derived set become inactive and expected rows are upserted. This includes cross-instance observer routes owned by an already-active consumer when the new instance is the observed source. An unscoped descriptor read may support non-authoritative target description but cannot authorize route persistence. Persisted route truth MUST remain absent from the global process route table and independent recipient planning until readiness reconciliation publishes it. The selected mutation's private route overlay consumes the same exact topology so the triggering delivery can complete atomically; that overlay is not global publication authority.
+        - 8. The selected-store row owns one positive monotonic per-instance activation_attempt_id and the five forward phases planned, agents_registered, route_installed, timers_armed and ready. Activation binds its planned attempt to the admitted process generation grant. A changed plan supersedes an unsettled attempt without disposing resources; planning equality cannot revive it. Whole-set fencing, accepted-work settlement, dependency release and owned retirement joins precede acknowledged retired/aborted settlement. A same-process successor starts at planned with the next ordinal even for an unchanged generation and plan. Unknown settlement acknowledgment retains its exact owner. Exact different-process possession takeover remains the only reconstruction exception. Orderly retirement batches contain at most 128 exact joined attempts and are all-or-nothing; failure abandonment is a separate settlement, never reclassified as orderly retirement.
+        - 9. The reconciler coalesces concurrent attempts for that key, reconciles and verifies the complete declared-agent topology, then publishes and verifies the already-persisted route in process. The desired agent set is exact. agents absent from the revised plan are retired through the canonical generation lifecycle, retained agents whose canonical config revision changed are exactly replaced through that lifecycle, and newly declared agents are admitted and persisted through it. A declared agent ID that was previously terminated advances by exact CAS from the terminated predecessor to a higher registered/running successor generation; it never deletes, resets, or reuses the predecessor lifecycle cell. The readiness plan is the sole desired-set writer for its active dynamic instance. Generic hire cannot add an agent to that instance, and generic fire/reconfigure cannot mutate a declared agent; those operations fail at the selected-store mutation boundary unless they carry the exact current readiness-plan authority. Recovery adopts the exact persisted generation before any retire or replace transition; it cannot infer a local generation, keep a removed process agent, or patch an old config. Every expected executable declaration consumes one phase-aware AgentManager handoff backed by `agent_lifecycle_authority.process_execution_projection` and `prepared_execution_publication`. Before a Manager run occurrence, that handoff may produce only an exact `registered`/`stopped` `prepared_before_run` projection; this is preparation, not process-liveness evidence, and both Manager run modes must upgrade every such projection before startup can become public-ready. During a live Manager occurrence, reconciliation completes only on `runnable_current_occurrence`; the durable cell is `running` in the current run mode, the current projection is unfenced, and its exact lifecycle route and loop are installed. Config presence, lifecycle registration, revision or topology equality, and a prior attempt's ready phase are insufficient. Lifecycle-only adoption for a removed or replaced declaration remains a closed non-executable variant used solely to authorize exact retirement or replacement; it never builds provider execution, installs a route, or starts a loop.
+        - A replacement ordinary generation in prepared or probe-settled posture may only rebind an existing lifecycle cell through a shape-checked, non-executable process takeover without a replacement agent projection. It must retain the exact current run, source set, readiness plan and declared-agent membership; it cannot use that posture to acquire an activation attempt, create or replace executable topology, launch an agent, or publish a route. A process takeover carrying a replacement agent projection is executable reconciliation, including across source revisions: it requires the admitted ordinary grant, the current exact activation attempt, and exact desired-agent membership and config revision in the same lifecycle transaction. The grant must be admitted before those executable steps. Selected-fork crash recovery does not acquire the pre-admission takeover permission.
+        - Standing startup may prepare declared agents before the ordinary generation grant is admitted only under the exact current planned readiness attempt and current prepared or probe-settled grant. This preparation may register or reconfigure only `registered`/`stopped` agent projections; removal of obsolete declarations waits for admitted reconciliation. Preparation does not bind an executable activation attempt, publish a route, arm timers, emit creation work, or advance attachment phase. After grant admission but before Manager.Run, the startup owner finds each prepared flow agent, reacquires the current plan, admits the exact attempt and upgrades those stopped cells to attempt-bound topology. It does not publish routes or mark readiness in this pre-run pass. Manager.Run then upgrades the cells to runnable; post-run reconciliation retires obsolete declarations and completes route, timer and creation work before public readiness. A prepared topology coordinate is never executable permission.
+        - Startup consumes the current selected-store attempt and source, prepares non-executable stopped agents, then reconstructs the complete physical topology through the five phases after grant and Manager admission. Every successor starts planned. Post-run completion consumes the exact retained pre-run admission receipt and its observed predecessor ordinal, not equality between a successor ordinal and the startup snapshot. A retired attempt's historical ready phase or a prior creation occurrence does not authorize current process resources; interrupted reconstruction remains pending and requires explicit recovery admission. Construction, creating-delivery receipts and initial-entry lifecycle are unchanged by reconstruction.
         - Rebinding a retained declared agent from prepared topology to an exact activation attempt, or to a successor attempt after process recovery, replaces its lifecycle generation without rotating or terminating reusable memory when the canonical agent configuration revision is unchanged. A changed configuration revision retains the ordinary subordinate-session mutation. Topology authority alone is not an authored memory change.
         - Lifecycle-only recovery of a retained agent preserves its exact durable configuration and revision in the stopped cell while admitting no executable subscriptions or provider work. Its later attempt-bound rebind cannot interpret a stripped placeholder configuration as an authored change or rotate memory on that basis.
-        - 10. The reconciler verifies the exact current attempt and grant before process publication and transactionally reconciles the initial timer declaration set under that same attempt and source revision. Each durable mutation checks the current attempt and grant inside its own transaction; a preceding read is never sufficient permission. The committed active set is projected before topology completion. While the instance remains at its initial-entry stage, the selected-store operation preserves unchanged exact activations, monotonically cancels changed and removed activations, and inserts changed and added successors. Once the instance has progressed beyond that stage, it preserves unchanged initial-caused activations, cancels changed or removed ones, and does not retroactively arm changed or newly added declarations after their initial-entry causal edge has passed. Stale wakeups and accepted timer events from a prior declaration revision fail closed before publication or workflow handling. `topology_ready_at` means the route, complete declared-agent set, and initial timer family have all completed reconciliation; it is not merely a route/agent checkpoint or proof that the current process still owns a publication. Any reconciliation failure leaves the row pending for automatic retry. The selected-store transition itself rejects terminal/inactive work.
-        - Timer reconciliation consumes the same current run/instance lifecycle eligibility, source bundle, plan revision, attempt state and admitted grant as activation verification under the timer mutation's own locks. Terminalization, stop, source revision or grant retirement winning first rejects the entire timer insert/cancel/projection transaction; a healthy timer mutation winning first may commit before subsequent lifecycle transition. Caller-side Verify is not transaction authority.
+        - 10. The reconciler verifies the exact current attempt and grant before process publication and transactionally reconciles the initial timer declaration set under that same attempt and source revision. Each durable mutation checks the current attempt and grant inside its own transaction; a preceding read is never sufficient permission. The committed active set is projected before topology completion. While the instance remains at its initial-entry stage, the selected-store operation preserves unchanged exact activations, monotonically cancels changed and removed activations, and inserts changed and added successors. Once the instance has progressed beyond that stage, it preserves unchanged initial-caused activations, cancels changed or removed ones, and does not retroactively arm changed or newly added declarations after their initial-entry causal edge has passed. Stale wakeups and accepted timer events from a prior declaration revision fail closed before publication or workflow handling. The current attempt's ready phase means the route, complete declared-agent set, and initial timer family have all completed reconciliation; it is not merely a route/agent checkpoint or proof that the current process still owns a publication. Any reconciliation failure leaves the row pending for automatic retry. The selected-store transition itself rejects terminal/inactive work.
+        - Timer reconciliation consumes the same current run/instance lifecycle eligibility, source bundle, exact attempt ID and disposition and admitted grant as activation verification under the timer mutation's own locks. Terminalization, stop, source revision or grant retirement winning first rejects the entire timer insert/cancel/projection transaction; a healthy timer mutation winning first may commit before subsequent lifecycle transition. Caller-side Verify is not transaction authority.
         - 11. One selected-store operation locks the exact run and flow-instance lifecycle rows, verifies the current attempt and admitted grant, reloads the immutable readiness plan, appends the deterministic creation-only event through EventBus `PublishInMutation`, and records `creation_event_emitted_at` in the same transaction. Dispatch occurs only after commit. This operation linearizes with terminalization; when terminalization wins, neither event nor completion exists and terminal-owned agent topology is retired; when creation wins, event and completion commit together before the terminal transition. A failed or cancelled creation commit without terminal evidence retires only this attempt's process projections; it does not terminate still-desired durable agents. Accepted cleanup joins before the attempt is released for another same-process admission.
         - 12. Direct activation, selected-mutation post-commit activation, exact replay / EnsureFlowInstance, the joined manager automatic-retry loop, and startup all consume this same keyed reconciler. Post-commit failure signals that retry owner rather than abandoning durable pending work.
-        - A failed activation which has retired its exact route, agent and timer projections abandons its attempt in the selected store and clears topology readiness for the still-current plan, preserving any already-emitted immutable creation occurrence. It is then pending for the same source-scoped retry owner even if there is no creation event or that occurrence was already emitted. Orderly process retirement after completed topology preserves the historical completion marker for mandatory serving-generation reconstruction, including when recovery is disabled. A crash after durable completion without a local failure disposition likewise reconstructs completed topology; it is not inferred to be an abandoned activation. Retirement and abandonment are distinct, mutually exclusive named selected-store settlements under the same exact attempt/grant authority; same-disposition retries are idempotent, conflicting settlement fails closed, and neither can alter a successor slot.
+        - After exact route/agent/timer cleanup and owned joins, failed activation receives durable aborted settlement. The row remains retry-visible even without an optional creation occurrence or after that occurrence was emitted. Its successor receives the next attempt ID at planned; no progress belonging to removed resources is inherited. Orderly retired and failed aborted dispositions are mutually exclusive, idempotent only for the exact predecessor and cannot mutate a successor.
       parent_route:
         description: Full structural route from the child instance back to the creating parent.
         metadata_fields:
@@ -5593,6 +5634,13 @@ engine:
         incomplete_policy: Creation validates its required context. Complete metadata does not authorize a child output.
         single_parent_v1: Each child has exactly one ParentRoute in v1. Multiple parents are v2.
       route_materialization:
+        process_resolution_cache: >-
+          Exact publication retirement removes its route owner and advances the
+          process route generation before returning. Subscriber resolution indexes
+          are derived caches, not route authority: retirement may invalidate them
+          without rebuilding them, but a lookup must rebuild under the same route
+          lock and retain a clean read lock before consuming cached subscribers.
+          An old publication handle cannot retire a successor at the same path.
         canonical_template_source: Dynamic flow-instance routes MUST materialize only from the exact template registered by
           the EventBus semantic source. FlowInstanceRouteMaterializationRequest carries only typed route identity and
           activation variables; it MUST NOT carry a request-local node/template contract or any compatibility fallback that
@@ -6798,7 +6846,7 @@ engine:
           path must not join an outer-owned child or invoke outer cleanup while holding a startup lock. Cleanup
           preserves the original startup failure and independent retirement failures; no detached cleanup is allowed.
         scope: |
-          One exact obligation exists per admitted event and complete opaque DeliveryRoute identity. The owner alone constructs obligations, selects eligible work, mints persisted lease-fenced claims, binds execution, schedules retries, records exact outcomes, terminalizes parent-owned work, and decodes snapshots and run summaries. Agent and node consumers cannot reconstruct lifecycle behavior from status strings, retry counters, receipts, timestamps, or raw SQL. Every obligation carries one closed execution authority. Normal authority consists of the exact bundle source, runtime instance, and runtime generation with no selected-execution fields. Selected-contract authority consists of the exact selected execution, fork run, generation, and bundle source and is structurally coupled to the selected execution row. Bundle identity or subscriber identity alone is never execution authority. Every named event/delivery commit returns exact durable handoff proofs. The retained publication owns those exact continuations until it transfers them to one route carrier or the one normal-runtime-generation delivery coordinator. A route carrier must either consume its exact continuation into a fenced attempt or return it to the coordinator before completing. Read-only handoff proof is not transfer authority, and no nonterminal transition may have zero or two process-local continuation owners. Successful canonical platform/pipeline settlement atomically stamps the exact delivery rows' continuation_handoff_at fact using database time in the same transaction as the receipt. Coordinator enumeration consumes only that delivery-owned fact and never interprets receipt SQL. Pipeline settlement returns one closed outcome that reports whether the receipt and delivery handoff committed independently of any later claim, session, or candidate cleanup error. Consumers signal whenever that outcome says the handoff committed and never infer rollback or commit from the auxiliary error alone. A freshly committed row without that handoff remains publication-owned and cannot be discovered or executed by the coordinator; startup recovers the event-level obligation before enumerating delivery continuations. Recovery-enabled startup first admits the exact managed-execution and delivery authorities without executing replay or starting the coordinator. After manager execution loops and completed dynamic agent/flow routes become live, it drives the event-level pipeline scope to explicit exhaustion, then starts the normal coordinator and performs its bounded authority-scoped selected-store scan to explicit exhaustion. Startup synchronizes one further event-driven scan through that same coordinator before runtime readiness; the synchronization returns the exact scan or dispatch failure and cannot manufacture eligibility or wait for a future durable due time. Recovery-disabled startup inventories the exact bundle-source delivery scope and rejects pending, failed, busy, or reclaimable agent or node work before execution-authority activation. It never silently adopts that work. The coordinator receives only an opaque relative wake duration computed from the same selected-store time observation that classified a retry or lease; persisted eligibility and lease timestamps never cross into process scheduling. Canonical post-commit pipeline handoff, committed delivery transfer, carrier return, topology/authentication change, and parent terminalization signal the coordinator only after their owning transition commits. Parent terminalization always queues that signal as a synchronous transaction-owned post-commit finalizer inside the same selected-store mutation, even when no execution authority is registered at queue time; an outer post-commit cleanup error cannot erase it, while rollback cannot emit it. The finalizer runs before the mutation call returns and never escapes as independent process-local work. Each concurrently live normal execution authority owns one opaque runtime-generation signal registration installed only after that generation's coordinator and process-local occurrence are admitted. Duplicate registration for the same exact authority fails closed; distinct bundle/runtime authorities may coexist on one selected store. Release is authority-exact. A committed callback signals the typed authorities registered at callback execution, closing the scan-versus-commit race across generation replacement; released predecessors receive nothing, and every current coordinator rechecks only its own selected-store scope. Reconciliation before any registration commits durable terminal state without a process-local callback; each admitted coordinator's authoritative startup scan discovers its own state. A wake is not eligibility authority: every execution decision is rechecked by the selected store. The cursor is opaque and monotonic; an empty or under-filled page is not exhaustion. Claim and scan results are closed over acquired, deferred, busy, reclaimable, terminal, wrong-authority, absent, invariant-invalid, and explicit exhaustion. Exact continuation dispatch is separately closed over transferred, terminally settled, deferred under one named live agent-route/internal-subscription/carrier-return wake authority, and fatal. A materializing node route executes through its exact compiled receiver and cannot defer behind topology that only its own execution creates. Child publications emitted while an exact node continuation executes are committed by that node mutation's selected-store owner and dispatched only by consuming its exact staged post-commit evidence before the continuation reports transfer or terminal settlement. A successful workflow-node mutation commits its state/lifecycle facts, proposed effects, child publications, and the exact inbound node-delivery success in one selected-store transaction; it also requests run-completion evaluation in that transaction. No runtime caller may settle that successful claim in a later transaction. Any publication or settlement conflict rolls back every mutation fact. The claim heartbeat excludes renewal while the transaction commits, records the exact committed claim without canceling handler context, and stops and joins only after declared post-commit dispatch returns. Missing or mismatched settlement evidence fails closed; mutation-free handled outcomes retain their named delivery-only settlement. Missing publication evidence fails closed; continuation dispatch never re-appends or reconstructs the child publication. A workflow engine revision compare-and-set loss is a typed retryable lifecycle conflict: its complete node mutation rolls back and the exact inbound delivery returns to the durable lifecycle owner for a fresh state read. It is never normalized into a terminal handler failure or repaired by process-local route serialization. When an accepted agent delivery emits the event that terminalizes its own flow instance, lifecycle ownership fences that exact route before returning from terminalization but retains the current durable generation until the accepted route carrier settles. The agent loop then commits the terminal lifecycle transition and removes the route from its finalizer. Terminal authority cannot overtake tool-follow-up effects that belong to the already accepted delivery, and no later carrier can enter behind the fence. Once the exact child's nonempty durable delivery handoff is accepted by the generation coordinator, an unavailable immediate carrier is transferred work rather than a fatal parent failure; no-handoff or pre-transfer failure remains fatal. Generic errors, free-form blockage classification, and fixed dispatch or scan retry intervals are not continuation authority. Corrupt or missing durable facts and fatal dispatch results fail closed. Activating a successor normal authority atomically shortens any exact predecessor open-attempt lease in the same bundle source using selected-store time; the ordinary fenced claim path then reports it reclaimable, and the stale predecessor capability remains unable to settle. Manager, workflow pipeline, public API, CLI, and dashboard code do not poll, enumerate, or manually claim a delivery backlog. Event-targeted event and agent replay remain named producers and transfer their newly committed exact obligations through the same owner. Claims use database time, a random token, monotonic version, and persisted expiry. Every completion requires the current capability; reclaim occurs only after expiry and stale writers cannot mutate the obligation or any coupled outcome/activity/diagnostic fact. An executing agent or node handler renews its exact claim through the owner before, during, and after execution. Renewal atomically extends the obligation and its one open attempt using database time; renewal failure cancels handler execution and forbids settlement through that stale capability. Backlog work is claimed one item at a time immediately before execution so queued local work cannot consume its lease before starting. Agent max_retries=1 means two total attempts; node max_retries=3 means four total attempts. Existing selected stores are unsupported and no migration, fallback, or compatibility interpretation exists. Selected-contract execution installs no normal or process-global continuation coordinator. Retryable selected agent and node failures terminalize under the exact selected execution owner, and activation requires every fork-local agent and node obligation to be terminal. Pending, in-progress, or retry-scheduled selected work blocks activation and is cleaned up by the selected execution failure path. Feature-preserving long-lived selected deferred work requires its own future typed owner and cannot be inferred as a normal-runtime handoff. Parent terminalization is one closed named store operation: it records a typed lifecycle-conflict failure, advances the delivery fence, closes any prior open attempt, commits the exact terminalization attempt/outcome at the new fence, and inserts the matching dead_letters row before the transaction may commit. Every terminal dead-letter delivery therefore has exact `{delivery_id, claim_version}` evidence; terminalization cannot leave lifecycle state visible without that evidence.
+          One exact obligation exists per admitted event and complete opaque DeliveryRoute identity. The owner alone constructs obligations, selects eligible work, mints persisted lease-fenced claims, binds execution, schedules retries, records exact outcomes, terminalizes parent-owned work, and decodes snapshots and run summaries. Agent and node consumers cannot reconstruct lifecycle behavior from status strings, retry counters, receipts, timestamps, or raw SQL. Every obligation carries one closed execution authority. Normal authority consists of the exact bundle source, runtime instance, and runtime generation with no selected-execution fields. Selected-contract authority consists of the exact selected execution, fork run, generation, and bundle source and is structurally coupled to the selected execution row. Bundle identity or subscriber identity alone is never execution authority. Every named event/delivery commit returns exact durable handoff proofs. The retained publication owns those exact continuations until it transfers them to one route carrier or the one normal-runtime-generation delivery coordinator. A route carrier must either consume its exact continuation into a fenced attempt or return it to the coordinator before completing. Read-only handoff proof is not transfer authority, and no nonterminal transition may have zero or two process-local continuation owners. Successful canonical platform/pipeline settlement atomically stamps the exact delivery rows' continuation_handoff_at fact using database time in the same transaction as the receipt. Coordinator enumeration consumes only that delivery-owned fact and never interprets receipt SQL. Pipeline settlement returns one closed outcome that reports whether the receipt and delivery handoff committed independently of any later claim, session, or candidate cleanup error. Consumers signal whenever that outcome says the handoff committed and never infer rollback or commit from the auxiliary error alone. A freshly committed row without that handoff remains publication-owned and cannot be discovered or executed by the coordinator; startup recovers the event-level obligation before enumerating delivery continuations. Recovery-enabled startup first admits the exact managed-execution and delivery authorities without executing replay or starting the coordinator. After manager execution loops and completed dynamic agent/flow routes become live, it drives the event-level pipeline scope to explicit exhaustion, then starts the normal coordinator and performs its bounded authority-scoped selected-store scan to explicit exhaustion. Startup synchronizes one further event-driven scan through that same coordinator before runtime readiness; the synchronization returns the exact scan or dispatch failure and cannot manufacture eligibility or wait for a future durable due time. Recovery-disabled startup inventories the exact bundle-source delivery scope and rejects pending, failed, busy, or reclaimable agent or node work before execution-authority activation. It never silently adopts that work. The coordinator receives only an opaque relative wake duration computed from the same selected-store time observation that classified a retry or lease; persisted eligibility and lease timestamps never cross into process scheduling. Canonical post-commit pipeline handoff, committed delivery transfer, carrier return, topology/authentication change, and parent terminalization signal the coordinator only after their owning transition commits. Parent terminalization always queues that signal as a synchronous transaction-owned post-commit finalizer inside the same selected-store mutation, even when no execution authority is registered at queue time; an outer post-commit cleanup error cannot erase it, while rollback cannot emit it. The finalizer runs before the mutation call returns and never escapes as independent process-local work. Each concurrently live normal execution authority owns one opaque runtime-generation signal registration installed only after that generation's coordinator and process-local occurrence are admitted. Duplicate registration for the same exact authority fails closed; distinct bundle/runtime authorities may coexist on one selected store. Release is authority-exact. A committed callback signals the typed authorities registered at callback execution, closing the scan-versus-commit race across generation replacement; released predecessors receive nothing, and every current coordinator rechecks only its own selected-store scope. Reconciliation before any registration commits durable terminal state without a process-local callback; each admitted coordinator's authoritative startup scan discovers its own state. A wake is not eligibility authority: every execution decision is rechecked by the selected store. The cursor is opaque and monotonic; an empty or under-filled page is not exhaustion. Claim and scan results are closed over acquired, deferred, busy, reclaimable, terminal, wrong-authority, absent, invariant-invalid, and explicit exhaustion. Exact continuation dispatch is separately closed over transferred, terminally settled, deferred under one named live agent-route/internal-subscription/carrier-return wake authority, and fatal. Canonical construction and attachment complete through their named owners before ordinary node delivery; node execution cannot create missing receiver topology or construction evidence. Child publications emitted while an exact node continuation executes are committed by that node mutation's selected-store owner and dispatched only by consuming its exact staged post-commit evidence before the continuation reports transfer or terminal settlement. A successful workflow-node mutation commits its state/lifecycle facts, proposed effects, child publications, and the exact inbound node-delivery success in one selected-store transaction; it also requests run-completion evaluation in that transaction. No runtime caller may settle that successful claim in a later transaction. Any publication or settlement conflict rolls back every mutation fact. The claim heartbeat excludes renewal while the transaction commits, records the exact committed claim without canceling handler context, and stops and joins only after declared post-commit dispatch returns. Missing or mismatched settlement evidence fails closed; mutation-free handled outcomes retain their named delivery-only settlement. Missing publication evidence fails closed; continuation dispatch never re-appends or reconstructs the child publication. A workflow engine revision compare-and-set loss is a typed retryable lifecycle conflict: its complete node mutation rolls back and the exact inbound delivery returns to the durable lifecycle owner for a fresh state read. It is never normalized into a terminal handler failure or repaired by process-local route serialization. When an accepted agent delivery emits the event that terminalizes its own flow instance, lifecycle ownership fences that exact route before returning from terminalization but retains the current durable generation until the accepted route carrier settles. The agent loop then commits the terminal lifecycle transition and removes the route from its finalizer. Terminal authority cannot overtake tool-follow-up effects that belong to the already accepted delivery, and no later carrier can enter behind the fence. Once the exact child's nonempty durable delivery handoff is accepted by the generation coordinator, an unavailable immediate carrier is transferred work rather than a fatal parent failure; no-handoff or pre-transfer failure remains fatal. Generic errors, free-form blockage classification, and fixed dispatch or scan retry intervals are not continuation authority. Corrupt or missing durable facts and fatal dispatch results fail closed. Activating a successor normal authority atomically shortens any exact predecessor open-attempt lease in the same bundle source using selected-store time; the ordinary fenced claim path then reports it reclaimable, and the stale predecessor capability remains unable to settle. Manager, workflow pipeline, public API, CLI, and dashboard code do not poll, enumerate, or manually claim a delivery backlog. Event-targeted event and agent replay remain named producers and transfer their newly committed exact obligations through the same owner. Claims use database time, a random token, monotonic version, and persisted expiry. Every completion requires the current capability; reclaim occurs only after expiry and stale writers cannot mutate the obligation or any coupled outcome/activity/diagnostic fact. An executing agent or node handler renews its exact claim through the owner before, during, and after execution. Renewal atomically extends the obligation and its one open attempt using database time; renewal failure cancels handler execution and forbids settlement through that stale capability. Backlog work is claimed one item at a time immediately before execution so queued local work cannot consume its lease before starting. Agent max_retries=1 means two total attempts; node max_retries=3 means four total attempts. Existing selected stores are unsupported and no migration, fallback, or compatibility interpretation exists. Selected-contract execution installs no normal or process-global continuation coordinator. Retryable selected agent and node failures terminalize under the exact selected execution owner, and activation requires every fork-local agent and node obligation to be terminal. Pending, in-progress, or retry-scheduled selected work blocks activation and is cleaned up by the selected execution failure path. Feature-preserving long-lived selected deferred work requires its own future typed owner and cannot be inferred as a normal-runtime handoff. Parent terminalization is one closed named store operation: it records a typed lifecycle-conflict failure, advances the delivery fence, closes any prior open attempt, commits the exact terminalization attempt/outcome at the new fence, and inserts the matching dead_letters row before the transaction may commit. Every terminal dead-letter delivery therefore has exact `{delivery_id, claim_version}` evidence; terminalization cannot leave lifecycle state visible without that evidence.
         bounded_execution_and_atomic_renewal: |
           The generation-owned delivery continuation coordinator enumerates the selected-store backlog to explicit
           exhaustion before startup readiness, but executable handlers run through a fixed, finite worker set.
@@ -8205,9 +8253,9 @@ engine:
       then returns `already_materialized` without reapplying initial-entry effects. Public dynamic-instance creation treats an
       exact replay as an idempotent readiness-reconciliation request; a semantically different duplicate remains a canonical
       conflicting-duplicate failure before route, agent, timer, or `auto_emit_on_create` side effects.
-      Ordinary mutation is existing-only. Before a first handled entity-materializing event executes, every handler entry
-      path supplies the exact authored initial stage as its source state; persistence then commits `InitialEntry` before
-      applying that event's transition in the same selected mutation. An accepted event produces
+      Ordinary mutation is existing-only. The canonical constructor commits the exact authored initial stage and
+      InitialEntry before releasing the creating input for delivery after attachment readiness.
+      Ordinary handlers cannot synthesize InitialEntry or construct missing persistence. An accepted event produces
       one ordered `AcceptedEvent` effect carrying exact event identity, occurrence time, and either no transition or a
       complete typed from/to/transition identity. Timer, join, and gate reactions consume those effects in order and do
       not reconstruct empty-string transitions or choose local clocks. A workflow timer activation is derived only from
@@ -9047,7 +9095,7 @@ engine:
       scope: per-node
       trigger: A handler uses on_complete as a map instead of an ordered list. Or a rules mapping is structurally ambiguous
         between one singleton rule and keyed rule rows. Or a handler uses both on_complete and rules on the same handler. Or
-        uses both accumulate and handler-level on_complete. Or uses both create_entity and accumulate on the same handler.
+        uses both accumulate and handler-level on_complete. Handler create_entity is independently retired on presence.
       when: boot-only
     - id: single_node_per_event
       severity: error
@@ -9474,8 +9522,6 @@ tool_model:
     description: Authoritative list of platform-provided tools. Defined here only. This list is exhaustive. The runtime MUST
       ship a Go handler for each of these. Any tool not on this list MUST NOT have a Go handler in the generic runtime.
     tools:
-      create_entity: Create a new entity row in entity_state. Legacy trusted runtime-internal compatibility surface; not
-        provider-visible or callable for normal agents.
       get_entity: Read an entity by ID. Legacy trusted runtime-internal compatibility surface; not provider-visible or
         callable for normal agents in favor of generated read_{entity_type} tools.
       ask_human:
@@ -9543,27 +9589,6 @@ tool_model:
         generic entity_state interface. For normal agents, these legacy schemas are non-provider-visible runtime-internal
         compatibility surfaces; the valid provider-visible surface is the generated role-scoped tool set from
         contract_formats.persistence_model.role_scoped_entity_tools.
-      create_entity:
-        description: Create a new entity row in entity_state.
-        input:
-          flow_instance: string — existing addressing surface. The platform infers the flow-owned entity contract from this context.
-          fields: object — authored field values for the new entity. Keys must be declared on the inferred entity contract.
-        output:
-          entity_id: string — the created entity's ID
-          current_state: string — the entity's initial state from the owning flow state machine
-          created_at: string — ISO 8601
-          status: string — present as committed_with_post_commit_error only when an acknowledged create has a later post-commit failure
-          write_committed: boolean — true on that post-commit failure response
-          retry_write: boolean — false on that post-commit failure response; creation must not be repeated
-          post_commit_error_code: string — fixed safe code entity_create_post_commit_failure on that response; raw backend errors are never tool output
-        response_semantics: |
-          An acknowledged create returns the generated canonical entity_id even
-          if cleanup or another post-commit step fails. The safe response has no
-          tool error and forbids a duplicate retry. Raw joined causes are limited
-          to internal runtime diagnostics. An unacknowledged create returns
-          write_failed without a created entity response.
-        validation: The caller does not supply entity_id, entity_type, or envelope fields. Only explicit creation initializers
-          and supplied fields assign values, validated together as one candidate. Other entity roots remain unassigned.
       get_entity:
         description: Read an entity by ID. Returns the full entity state from entity_state table.
         input:
@@ -12457,7 +12482,7 @@ flow_model:
                 signing_secret: webhook_signing.telegram
         rules:
         - activation is explicit and is never inferred from ingress
-        - 'activation: standing is valid only for the ResolveFlowSingleton base cardinality contract'
+        - 'activation: standing is valid only for an eligible canonical keyless no-argument flow constructor; runtime declaration and boot verification consume that constructor contract, not contained-flow singleton resolution'
         - standing activation without ingress is valid for timer-driven or connect-fed services
         - ingress requires activation: standing and defaults alias to the package flow id
         - 'ingress alias is exactly one URL path segment matching [A-Za-z0-9][A-Za-z0-9._-]* so every verified alias is addressable as /webhooks/{alias}/{provider}'
@@ -12987,9 +13012,9 @@ flow_model:
       - '1. Source flow handler emits a cross-flow event (output pin). Example: scoring emits vertical.shortlisted.'
       - '2. Destination flow handler receives the event through parent-owned connect / instance-key routing or another
         supported route owner.'
-      - '3. Destination updates or canonically creates its own primary entity, contained state, usage-demanded singleton
-        coordinator state, or child/template flow instance. Optional work without receiving state executes entityless.
-        Static input-pin handlers do not create or select arbitrary receiving-flow rows.'
+      - '3. Canonical construction and attachment complete before the destination handler updates its own instance.
+        A fieldless instance still has its constructed lifecycle header. Static input-pin handlers do not create
+        or select arbitrary receiving-flow rows.'
       - '4. Data from the source entity is passed via the event payload. Creating receivers map declared payload paths
         into their typed configuration with initialize. Direct runtime entity reads do not cross flow ownership boundaries.'
       service_request_pattern:
@@ -13000,11 +13025,11 @@ flow_model:
       - '3. Parent connect / route-plan authority supplies the target flow-instance context, not source-state ownership.
         Supported ordinary primary acquisition remains receiver-owned; retired static multi-row acquisition is not a repair path.'
       - '4. Handler writes and transitions remain same-flow owned under the supported receiver ownership model.'
-      enforcement: 'Keyless static input handlers may canonically create and write their one primary entity,
-        but MUST NOT elect caller-selected or multiple rows. Boot verification fails closed with canonical diagnostics. Handler
+      enforcement: 'Handler create_entity is retired on presence in every flow. Boot verification fails closed with
+        canonical authoring diagnostics. Handler
         receiver-selection fields are rejected during strict loading in every flow mode, including stateless and
-        template flows. Composition selects the receiving instance; canonical activation or permitted handler
-        initialization supplies that instance''s own state, never an independently elected entity.'
+        template flows. Composition selects the receiving instance; only canonical construction supplies
+        that instance''s own header and declared state, never handler initialization or an independently elected entity.'
     cross_flow_writes:
       description: 'Cross-flow entity writes are prohibited by the platform.'
       rule: 'save_entity_field checks that the target entity''s stored flow_instance resolves to the same
@@ -16162,12 +16187,16 @@ platform_tables:
         \ idx_entity_slug (run_id, slug) WHERE slug IS NOT NULL,\n    INDEX idx_entity_cross_run (entity_id)\n);"
     workflow_instance_initial_materializations:
       description: >-
-        Immutable run-generation-scoped creation identity for a workflow instance. The initial materialization transaction
-        inserts exactly one canonical projection of the original workflow, state, config, entity fields, bookkeeping, gates,
-        accumulator, control facts, and exact occurrence coordinate. Exact replay compares this record together with the separately owned
-        immutable flow_instance_runtime_readiness plan. Later workflow progress never updates or reconstructs this record and
-        never participates in creation replay identity. A current entity without this record is invalid fresh-schema state and
-        fails closed; no migration, fallback, inference, or compatibility reader is supported.
+        Immutable run-scoped construction identity for a workflow instance. The canonical activation transaction inserts
+        exactly one projection of the original workflow, state, config, entity fields, bookkeeping, gates, accumulator,
+        control facts, creating input and exact occurrence coordinate together with the complete header and declared field
+        row, if any. Exact replay compares this receipt and requires valid paired target evidence and a valid attachment
+        owner. Missing fields, a contradictory field contract, a foreign workflow header or an incomplete receipt fail
+        closed without repair. Later workflow progress never updates or reconstructs this receipt and never participates
+        in construction replay identity. The separately owned readiness plan and attachment phase may advance without
+        changing immutable construction identity. Fresh normal construction without this receipt is invalid; historical
+        import/selected projection retains its separately named fixed-revision authority and cannot acquire ordinary
+        construction permission. No migration, fallback, inference or compatibility reader is supported.
       ddl: |
         CREATE TABLE workflow_instance_initial_materializations (
             run_id             UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
@@ -16179,7 +16208,7 @@ platform_tables:
             created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             PRIMARY KEY (run_id, entity_id),
             UNIQUE (run_id, instance_path),
-            FOREIGN KEY (run_id, entity_id) REFERENCES entity_state(run_id, entity_id) ON DELETE CASCADE,
+            FOREIGN KEY (run_id, entity_id) REFERENCES flow_instances(run_id, entity_id) ON DELETE CASCADE,
             FOREIGN KEY (run_id, instance_path) REFERENCES flow_instances(run_id, instance_path) ON DELETE CASCADE
         );
     agent_sessions:
@@ -17014,7 +17043,13 @@ platform_tables:
         );
     flow_instances:
       description: >-
-        Run-scoped registry of all live flow instances (static and dynamic). Identity is the exact
+        Canonical constructed header and lifecycle of every flow instance, including fieldless
+        instances. An entity_state row exists only for a declared field contract; it is not
+        construction, stage, revision or execution authority. entity_type is NULL exactly for
+        a fieldless header; missing required fields fail closed rather than acquire construction
+        permission. stage_defined records whether the admitted topology declares stages;
+        lifecycle counts include staged headers independently of field-row presence and exclude
+        inert no-stage headers. Identity is the exact
         `(run_id, instance_path)` tuple; no reader may infer run authority from ambient context or path shape.
         `mode=template` is selected at initial
         construction only by the exact dynamic runtime-readiness fact committed with that instance; slash/path shape is not
@@ -17023,110 +17058,142 @@ platform_tables:
         CREATE TABLE flow_instances (
             run_id            UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
             instance_path     TEXT NOT NULL,
+            entity_id         UUID NOT NULL,
+            entity_type       TEXT CHECK (entity_type IS NULL OR LENGTH(TRIM(entity_type)) > 0),
+            slug              TEXT,
+            name              TEXT,
             flow_template     TEXT NOT NULL,
             mode              TEXT NOT NULL CHECK (mode IN ('static', 'template')),
             parent_instance   TEXT,
             config            JSONB NOT NULL DEFAULT '{}',
             status            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'draining', 'terminated')),
+            stage_defined     BOOLEAN NOT NULL,
+            current_state     TEXT NOT NULL CHECK (LENGTH(TRIM(current_state)) > 0),
+            gates             JSONB NOT NULL,
+            bookkeeping       JSONB NOT NULL,
+            accumulator       JSONB NOT NULL,
+            revision          INTEGER NOT NULL CHECK (revision > 0),
+            entered_state_at  TIMESTAMPTZ NOT NULL,
             created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at        TIMESTAMPTZ NOT NULL,
             terminated_at     TIMESTAMPTZ,
             PRIMARY KEY (run_id, instance_path),
+            UNIQUE (run_id, entity_id),
+            CHECK (updated_at >= created_at),
             FOREIGN KEY (run_id, parent_instance) REFERENCES flow_instances (run_id, instance_path)
         );
     flow_instance_runtime_readiness:
       description: >-
-        Durable run-generation-scoped desired runtime topology and creation occurrence for dynamic flow instances. The typed plan is written
-        atomically with initial workflow materialization. Activation, post-commit signaling, EnsureFlowInstance/replay,
-        automatic retry, and startup consume one idempotent reconciler keyed by exact `{run_id, instance_path}`. Route rows
-        may be persisted before reconciliation but remain process-invisible. The reconciler reloads current lifecycle
-        eligibility, reconciles and verifies the complete declared-agent revision set, publishes and verifies the persisted
-        route, transactionally reconciles the exact initial workflow-timer declaration set for the admitted source revision,
-        projects the committed active set, reloads lifecycle eligibility, and only then records `topology_ready_at`.
-        Therefore a non-null `topology_ready_at` is the completion coordinate for route, declared-agent, and initial-timer
-        reconciliation; any timer-arm failure leaves the row pending. One final selected-store operation then locks the
-        exact run and instance lifecycle rows and atomically appends the deterministic creation-only event plus
-        creation_event_emitted_at before post-commit dispatch. Both completion writes require an active nonterminated
-        instance in a running or paused run. Every changed desired plan clears topology_ready_at, including after the
-        immutable creation occurrence was emitted, so revised agent/route/timer topology remains pending until the exact
-        keyed reconciler converges it again. While one eligible row owns an instance, its canonical plan is the sole desired
-        declared-agent topology owner. The positive `plan_revision` is a monotonic temporal coordinate: a changed plan
-        increments it even when a later revision restores identical plan bytes. The row retains one exact activation
-        attempt ID, its generation-grant reference and accepted plan revision. A current admitted grant may acquire
-        an attempt only after the preceding same-process attempt has settled; a different process may reconstruct
-        after exact possession takeover. Orderly retirement records `retired`; failed abandonment records `aborted`.
-        Both are terminal attempt states and reject a conflicting later disposition. A new attempt preserves a completed marker for the unchanged plan as historical
-        durable topology evidence; an initially pending plan stays pending, and neither marker authorizes current-process
-        publication. Changed plans supersede
-        the prior attempt without conferring permission to dispose its process resources; their exact owner settles
-        before a same-process successor begins. Retirement validates the retained binding against its original
-        generation-grant snapshot inside the settlement transaction, including when that grant is retired. Retirement
-        after a verified different-process takeover is a no-op against the successor's slot, but a same-process
-        identity mismatch remains an error. Only the accepted current attempt may commit topology readiness,
-        and an acknowledged same-attempt commit is idempotent. Failed-attempt abandonment clears readiness for
-        its still-current plan but cannot clear a successor plan or attempt; orderly retirement preserves completed
-        readiness for mandatory reconstruction. Durable attempt state is not evidence that
-        local goroutines, routes or provider resources have joined. Once an attempt selects failed abandonment, neither
-        Manager shutdown nor a joined retry may substitute orderly retirement. A failed cleanup retains its exact
-        disposition and completed local stages; after the Manager occurrence joins, later shutdown retries settle those
-        stages and the same durable disposition before the preparation can release its grant or process possession.
-        The current-format plan requires exact normalized
-        `bundle_hash` and `workflow_version`; the bundle hash is decoded through `SourceArtifactFact`, and workflow
-        version is checked against the admitted semantic source. Any member change invalidates
-        `topology_ready_at`, participates in the canonical plan fingerprint and completion compare-and-set, and queues
-        reconciliation. The strict workflow-timer activation reference carries one typed activation cause and a canonical
-        declaration revision over every execution-bearing declaration fact. While the instance remains at initial entry,
-        source revision reconciliation preserves exact unchanged activations, cancels changed and removed initial-entry
-        activations, and inserts changed and added successors. After progress it preserves unchanged initial-caused
-        activations, cancels changed and removed ones, and does not retroactively insert changed or added declarations;
-        event- and transition-caused activations remain outside that operation. A stale activation from a prior
-        declaration revision cannot register, fire, or authorize an accepted event.
-        Process-local initial-timer wakeup retirement reads active timer rows by exact run and route, independent of
-        the workflow instance projection and run activity after failed activation or terminalization. It withdraws
-        only initial-caused wakeups; it does not cancel durable timer rows or event- and transition-caused wakeups.
-        Malformed matching timer rows fail closed rather than silently skipping retirement.
-        One selected-store agent-topology admission covers lifecycle first execution,
-        duplicate/stored-result replay, raw agent projection writes, config/path/status rewrites, replacement, and
-        terminalization. It locks and matches the exact `{run_id, instance_path, canonical plan fingerprint}`, desired
-        membership or absence, and declared config revision before any write or replay return. Authorized replay remains
-        idempotent only while that current owner is unchanged; missing authority or stale authority after source revision
-        fails before durable or process publication. Candidate and current paths plus declared agent identity are all
-        considered. Terminal topology change is classified from the typed target phase, never trigger or operation-kind
-        labels. Generic and raw agent mutations fail closed. Topology completion is one selected-store compare-and-set
-        against the exact normalized plan that was reconciled; a concurrent source revision leaves its new plan pending
-        and rejects completion by the stale attempt. After that compare-and-set, the reconciler reloads and accepts
-        completion only while the exact plan still matches and `topology_ready_at` remains non-null. The keyed
-        reconciliation owner first requires the callback context/EventBus source fact and manager-owned semantic source to
-        match the plan's exact `{bundle_hash, workflow_version}` coordinate. It admits one private capability
-        containing that complete source authority only when the declared exact committed plan equals the current durable
-        plan under owner serialization. Final execution carries that same capability across the durable reload and validates
-        the reloaded coordinate before route retirement or semantic interpretation; it cannot fetch or infer a newer source
-        after admission. A delayed stale callback cannot overwrite or join a queued current successor. The owner records a
-        newer durable plan as a mandatory successor with that caller's live context and admitted source capability, and
-        completes that successor before releasing any waiter or returning success; no post-CAS revision may join an older
-        successful result or inherit a canceled predecessor request context. A pending
-        creation occurrence is rebuilt from revised
-        schema/config plus its persisted trigger lineage,
-        while an emitted occurrence is immutable and introduction without lineage is rejected. This table is
-        platform lifecycle state, never application flow config. Fresh schemas only; no migration, inference, fallback, or
-        compatibility reader is supported.
+        The selected-store row is the sole attachment state machine for an already constructed
+        exact {run_id, instance_path}. Process projections are caches, never construction or
+        execution permission. Construction atomically records the normalized desired plan and its
+        canonical plan_hash, a positive per-instance activation_attempt_id starting at 1, and
+        planned phase/disposition. Construction, initial-entry lifecycle and the exact creating
+        ordinary-delivery receipt have separate immutable ownership and are never repeated by
+        attachment retry. Optional creation_event_emitted_at is a separate once-ever occurrence,
+        not a sixth attachment phase.
+        Each desired agent records its exact configured entity_id alongside its identity and
+        config revision in the hashed plan. Static declaration agents remain entityless even
+        when attached to a constructed field-bearing header. Publication planning consumes this
+        agent-owned coordinate rather than borrowing the enclosing flow's entity; attachment
+        verification rejects a changed agent entity coordinate. Creating-receiver verification
+        consumes the exact target flow owner and checks its canonical agent route, including the
+        root scope '.', never the run UUID as a semantic scope. Old plan shapes are unsupported.
+        The five forward phases are planned -> agents_registered -> route_installed ->
+        timers_armed -> ready. The exact selected-store attempt owns each conditional phase
+        transition. Before advancing, the corresponding declared-agent, route or initial-timer
+        owner reconciles and verifies its complete installed resource set. Partial construction,
+        incomplete resource installation, terminal/ineligible lifecycle, retired generation or a
+        stale attempt cannot advance. Same-attempt acknowledged progress is idempotent. An exact
+        attempt's timer acquisition is synchronous: scheduler admission or projection failure
+        propagates to that attempt's exact cleanup owner. Acquisition panic releases the scheduler
+        admission lock before exact retirement joins every previously acquired wakeup; it cannot
+        strand partial resources or record forward progress. Background timer recovery cannot stand
+        in for installed resources or authorize timers_armed/ready; attachment retry resumes only
+        after its predecessor resources have joined and abandonment is acknowledged.
+        An exact retained attempt consumes its current phase to skip already completed installation
+        and its acknowledged phase writes; ordinary ready replay does not issue backward progress
+        mutations. Callbacks still verify the current attempt, installed agent and route owners and do not re-arm initial
+        timers. Admission of a new attempt resets installation to planned regardless of the
+        predecessor phase. Historical ready evidence never authorizes a new process publication
+        or successor attempt.
+        Activation binds the planned attempt to the exact admitted generation grant. Its sole
+        temporal coordinate is activation_attempt_id; there is no plan revision, accepted-revision
+        copy, hash-derived epoch or second attempt fence. plan_hash serves canonical planning
+        equality and strict plan decoding, not temporal permission. A changed plan supersedes an
+        accepted predecessor without disposing its resources or granting a successor. Even if
+        later planning restores identical bytes, superseded disposition rejects the original
+        callback, agent mutation, timer mutation and phase progress. Exact observation comparison
+        includes attempt ID, disposition, phase, source and lifecycle facts, so planning ABA cannot
+        revive an old observation. Changing an unbound or settled plan advances the ordinal and
+        starts a new unbound planned attempt; ordinal exhaustion fails closed.
+        Within one process, whole-set fencing, accepted-work settlement, dependency release,
+        exact route/agent/timer cleanup and owned retirement joins finish before the selected store
+        acknowledges retired or aborted. Incomplete cleanup or unknown acknowledgment retains
+        the exact predecessor owner and disposition; concurrent retry cannot create multiple
+        successors. A new attempt then receives the next ordinal and planned phase even when
+        generation and plan are unchanged. It never inherits removed agents, routes or timers.
+        Orderly retirement and failed abandonment are mutually exclusive idempotent settlements.
+        Neither may mutate a successor. Different-process reconstruction requires verified
+        possession takeover through the existing process-generation authority, not a caller claim.
+        Terminalization and forward progress linearize under the existing selected-store run and
+        instance locks. Resource joins remain necessary: a SQL disposition is not physical liveness.
+        One keyed Manager owner serves activation, post-commit signaling, Ensure/replay,
+        automatic retry and startup. It consumes current selected-store facts, retains accepted
+        work through caller cancellation, and queues changed desired plans using their exact
+        admitted source. Stale-source callbacks cannot replace or join a current successor.
+        At most two public readiness loads occur per pass. Startup reconstructs current physical
+        resources through the same phases instead of treating a historical completion marker as
+        current process authority.
+        Startup finalization consumes the exact retained preparation attempt and observes its
+        current selected-store row. The inventory snapshot taken before preparation cannot
+        authorize finalization after acceptance or predecessor replacement. Exact source, plan,
+        ordinal and process possession remain required; superseded or foreign attempts refuse.
+        Readiness reconciliation retains the plan's complete authored scope and concrete instance
+        identity; it never reconstructs that scope from path segments. Source-backed route blueprints
+        cover keyed and keyless flows, including the selected root. A keyless scope's installed route
+        is run-owned, distinct from its authored declaration. The root's concrete coordinate remains
+        the exact current run; route admission rejects borrowing another run's root identity.
+        Constructor and static-attachment agent blueprints consume that same declared scope and
+        concrete instance identity. For a constructed root the scope is `.` while the instance ID
+        and path are the run ID; a path-only blueprint must not replace the scope with that run ID.
+        Retirement retains that same complete identity from admission through selected-runtime
+        transfer, route cleanup and timer cleanup. Cleanup after a lost publication response
+        consumes both the admitted identity and exact attempt; it never reconstructs scope from
+        an instance path. A stale attempt cannot remove a successor publication.
+        The plan requires exact bundle_hash and workflow_version. The source artifact is decoded
+        through SourceArtifactFact and checked against the admitted semantic source; partial,
+        malformed or nonmatching authority fails closed. The existing initial-timer owner retains
+        causal-history rules: preserve unchanged declarations, cancel changed/removed ones and
+        only insert new initial-caused declarations while initial-entry eligibility remains.
+        Event/transition-caused timers are not attachment repair. Exact initial wakeup retirement
+        neither cancels durable timer rows nor withdraws another cause's wakeups.
+        Agent topology admission consumes the exact current attempt, desired membership and
+        configuration revision. Explicit preparation may register stopped non-executable agents
+        against a planned attempt but cannot authorize execution or progress. The optional creation
+        occurrence owner atomically appends its deterministic event and completion evidence only
+        after ready under the same current attempt and lifecycle locks, with dispatch after commit.
+        Construction and readiness authority are shared by normal, standing and admitted selected
+        execution; unsupported historical replay remains refused under its existing contract.
+        Fresh schemas only. No legacy selected-store reader, repair, migration or compatibility
+        path is supported.
       ddl: |
         CREATE TABLE flow_instance_runtime_readiness (
             run_id                      UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
             instance_path               TEXT NOT NULL,
             plan                        JSONB NOT NULL,
-            plan_revision               BIGINT NOT NULL DEFAULT 1 CHECK (plan_revision > 0),
-            activation_attempt_id       UUID,
+            plan_hash                   TEXT NOT NULL CHECK (length(plan_hash) = 71),
+            activation_attempt_id       BIGINT NOT NULL DEFAULT 1 CHECK (activation_attempt_id > 0),
             activation_attempt_grant_id UUID,
-            activation_attempt_revision BIGINT,
-            activation_attempt_state    TEXT CHECK (activation_attempt_state IN ('accepted', 'topology_committed', 'superseded', 'retired', 'aborted')),
-            topology_ready_at           TIMESTAMPTZ,
+            activation_attempt_state    TEXT NOT NULL DEFAULT 'planned' CHECK (activation_attempt_state IN ('planned', 'accepted', 'superseded', 'retired', 'aborted')),
+            phase                       TEXT NOT NULL DEFAULT 'planned' CHECK (phase IN ('planned', 'agents_registered', 'route_installed', 'timers_armed', 'ready')),
             creation_event_emitted_at   TIMESTAMPTZ,
             created_at                  TIMESTAMPTZ NOT NULL,
             updated_at                  TIMESTAMPTZ NOT NULL,
             PRIMARY KEY (run_id, instance_path),
             FOREIGN KEY (run_id, instance_path) REFERENCES flow_instances(run_id, instance_path) ON DELETE CASCADE,
             CHECK (updated_at >= created_at),
-            CHECK ((activation_attempt_id IS NULL AND activation_attempt_grant_id IS NULL AND activation_attempt_revision IS NULL AND activation_attempt_state IS NULL) OR (activation_attempt_id IS NOT NULL AND activation_attempt_grant_id IS NOT NULL AND activation_attempt_revision > 0 AND activation_attempt_state IS NOT NULL))
+            CHECK ((activation_attempt_state = 'planned' AND activation_attempt_grant_id IS NULL AND phase = 'planned') OR (activation_attempt_state <> 'planned' AND activation_attempt_grant_id IS NOT NULL))
         );
     timers:
       description: 'Durable timer and scheduled task store. Persisted across restarts. Run-scoped timers carry run_id and
@@ -17399,7 +17466,10 @@ platform_tables:
           bucket identity and terminal evidence. External-effect ownership starts from exact run-bound logical operations
           and validates prepared operations, latest-attempt coherence, terminal retry history, usage-target identity, and
           subordinate reservation ownership. Entity ownership resolves exact terminal descriptors through the admitted
-          terminal catalog. Lifecycle completion SQL is forbidden from naming or classifying those owners' tables or
+          terminal catalog. Constructed headers use the exact authored template '.', including a fieldless root;
+          its concrete instance is the run scope, not another stage-catalog key. The compiled catalog indexes that
+          root explicitly and rejects a contradictory root graph or known instance graph. Lifecycle completion SQL
+          is forbidden from naming or classifying those owners' tables or
           status vocabularies. A
           standalone runtime run consumes its typed durable creation evidence and delivery summary only. When all
           required summaries are terminally eligible, the executor commits completed status, ended_at, terminal side
@@ -17591,8 +17661,8 @@ platform_tables:
           handler_step = the handler step name (e.g., data_accumulation, compute, sets_gate).'
         agent_tool_calls: 'save_entity_field tool calls. writer_type = agent, writer_id = agent ID,
           handler_step = save_entity_field.'
-        platform_operations: 'create_entity (initial field population), entity state fixes during recovery, and immutable
-          fan-out entity-source revision binding.
+        platform_operations: 'Canonical flow construction (initial field population), exact admitted historical/import
+          projection, and immutable fan-out entity-source revision binding. Recovery does not repair missing construction.
           writer_type = platform, writer_id = operation name.'
       not_logged: 'Event payloads (already in events table). Agent conversation turns (already in agent_turns).
         Read operations (get_entity, search_entities, query_entities). Timer creation/cancellation.'
@@ -18182,13 +18252,45 @@ run_model:
       closed. Source-dependent activity and fan-out still require their exact typed source evidence.
     selected_contract_receiver_preparation: >
       Snapshot restoration and receiver acquisition are independent decisions. Node, agent, and activity preparation
-      consume fixed-revision entity metadata and canonical selected-source ownership, entity contract, and handler
-      requirements. A producer entity is never paired with a different recipient flow. A receiving handler uses its own
-      existing entity, materializes its own canonical entity, or executes entityless when its execution semantics permit
-      that. Flow membership alone proves neither entity type nor lifecycle readiness. Every retained frontier event
+      consume fixed-revision constructed-header metadata and canonical selected-source ownership, entity contract,
+      and handler requirements. A producer entity is never paired with a different recipient flow. Every receiving
+      flow has its historical lifecycle header projected before ordinary handler execution; a field row exists if
+      and only if fields are declared. Fieldless staged and inert headers retain their recorded stage meaning and
+      never acquire artificial entity fields. Source-event producer-state preparation and agent-only receiver replay
+      validate constructed headers against the reconstructed entity state from the same fixed-revision snapshot;
+      an entity ID alone is not state evidence. Missing or contradictory mutation history refuses without header
+      repair, and imported state cannot authorize either runnable path. Metadata distinguishes source_flow_instance construction evidence from
+      source_entity_state import evidence. Imported state alone cannot authorize selected execution or ordinary
+      state-only companion repair. The named selected historical projection consumes the canonical header writer
+      without repeating the creating business event, initial-entry contributions or timer arming. Exact materialize-only
+      reuse consumes the recorded header/optional-fields relation; a field-row count is
+      not an instance count or construction proof. Materialize-only projection retains recorded workflow version,
+      business configuration and runtime controls through the shared persisted-config owner, and recorded header
+      status, stage-entry, creation, update and termination clocks through fixed-revision metadata. Mutation bookkeeping
+      time is not stage-entry time. Only exact instance/parent ownership is projected. It does not create readiness
+      or initial-materialization receipts.
+      Root stage-entry projection retains flow scope `.` and rebinds only the run, entity, instance ID and instance
+      path to the fork run. The recorded occurrence and original lineage remain unchanged; a run-ID-as-scope
+      spelling is contradictory evidence, not a compatibility form.
+      Historical header and field projections consume the same exact stage-entry and execution-state correspondence;
+      the header cannot retain source-run bookkeeping while the fields carry fork-run evidence. Root headers retain
+      declared scope `.` rather than inferring scope from their run-ID instance path.
+      A missing historical header or changed historical lifecycle/configuration/clock/state fact on exact reuse is corruption and refuses
+      without repair. Reuse consumes the canonical paired header/optional-fields reader and the same fixed-revision
+      projection as the historical writer, not presence counts alone. Imported state-only rows remain non-executable:
+      exact materialize-only reuse verifies their projected fields, stage, entry time, revision, gates, bookkeeping,
+      accumulator, names and branch-creation clocks through the same paired reader and historical writer projection.
+      Their branch-creation clocks use the canonical run-start timestamp; they do not replace recorded stage-entry
+      time. Changed import evidence refuses without repair or construction. Flow membership
+      alone proves neither entity type nor lifecycle readiness. Every retained frontier event
       association and its execution mode remains explicit; duplicate or conflicting projections cannot elect an owner.
       A child companion and its readiness are fresh work admitted through the canonical selected declaration and
       materialization owners, not a copy of historical flow status, readiness, runtime controls, or execution authority.
+      Every constructed selected receiver, static or template and fieldless or field-bearing, has its own fresh
+      planned attachment attempt. Static attachment consumes the explicitly admitted selected-process root execution
+      mode; it does not elect a mode from retained frontier events, which may have different modes. Template attachment
+      retains its exact admitted generation mode. Missing mode or plan evidence refuses before header writes. Exact
+      child reuse requires the readiness row and validates its plan hash without repairing missing or corrupt evidence.
       A template receiver's business configuration comes from the exact fixed-revision metadata config envelope,
       validated against its recorded route by the shared persisted-config decoder. It is not reconstructed from
       a path leaf, hashed instance ID, current flow row, selected-source defaults, or the triggering event payload.
@@ -19242,11 +19344,16 @@ agent_identity_model:
         route facts. It is not live authority. Only run admission composes that plan with a required run_id. Empty,
         optional, ambient, inferred, or fabricated runs and runless live-identity constructors are forbidden.
       committed_static_readiness: >
-        First committed delivery composes an admitted static declaration plan with its exact run and finalizes agent
-        readiness before dispatch. Same-flow and connect delivery planning preserve that declaration authority from
-        the route table; absence of a live agent is not evidence that a new flow instance is being created. A connect
-        recipient may consume an existing entity only through its exact static declaration plan. Newly materializing
-        flows still require materializing_entity ownership; speculative node creation cannot grant agent readiness.
+        Canonical flow construction and attachment compose each admitted static declaration plan with its exact run
+        before dispatch. Same-flow and connect delivery planning bind that declaration to the constructor's exact
+        planned or already-installed agent identity; absence cannot authorize independent agent materialization.
+        Static agents retain their declaration-owned entityless execution even when attachment owns an entity-bearing
+        flow header. The exact constructed target and lifecycle admission remain separate facts. Root declaration
+        identities have an explicit root route and a required live run_id, not a fabricated child route at the run UUID.
+        Readiness installation, verification and retirement consume that same root-versus-present route conversion.
+        Committed-delivery finalization activates an already-admitted lifecycle only; it cannot create a declaration.
+        Newly materializing flows still require the exact constructor receipt and current attachment authority;
+        speculative node creation cannot grant agent readiness.
       repeated_template_instances: >
         Repeated instances of one template may carry the same declared agent_id because their explicit routes differ.
         No ownership-bearing consumer may collapse those siblings to the display slug.
@@ -21752,10 +21859,9 @@ static_analyzer:
       join_timeout_branch:
         rule: Effective WorkflowJoinPlan timeout outcomes with advances_to contribute possible edges.
     source_state_derivation:
-      create_entity_handlers:
-        rule: create_entity handlers source from the compiled initial stage only.
-      non_create_entity_handlers:
-        rule: non-create_entity handlers source from all non-terminal declared states.
+      ordinary_handlers:
+        rule: Handlers source from all non-terminal declared states of their already-constructed instance;
+          retired create_entity flags do not restrict or authorize a source state.
       terminal_states:
         rule: terminal states are sinks in this slice.
     rule: Reject an unreachable declared stage in the compiled lifecycle model as hard-invalid because `stages:` is
@@ -27793,8 +27899,8 @@ cli_specification:
         are supplied with --run-id, the CLI serializes them as `target: {flow_instance, entity_id}` and the server validates
         the selected-run entity, entity_state.flow_instance equality, event routability for that concrete receiver route,
         and source-event same-run lineage before persistence. Caller-supplied payload.entity_id is not target or
-        entity authority. If the selected handler uses create_entity, /v1/rpc event.publish rejects payload.entity_id with
-        PAYLOAD_VALIDATION_FAILED because create_entity materializes the platform-owned canonical receiving-flow identity.
+        entity authority. Composition selects the typed receiver key and the canonical constructor owns any creating
+        input. Unknown or invalid payload fields fail schema admission; handler flags never authorize construction.
       flags:
         - name: --payload-json <json-object>
           required: true
@@ -27852,7 +27958,7 @@ cli_specification:
       - event names are passed through exactly by the CLI; the server admits only exact selected-root input pins and rejects private leaf/qualified references with EVENT_NOT_DECLARED without mutation or idempotency completion
       - existing-run follow-up publish with no selected persisted delivery recipient or delivery route produces server EVENT_NOT_DECLARED before event/idempotency persistence; the CLI exits through publish_rejected and never reports deliveries=0 as success for that path
       - explicit target route publish persists event.target and one delivery_target_route through the server-owned event.publish/EventBus path; nonexistent entity, mismatched entity/flow ownership, not-routable target flow, missing/terminal run, source lineage mismatch, blank/malformed target params, and payload-only entity_id/flow_instance non-authority fail closed before event/idempotency persistence
-      - payload.entity_id on a create_entity event produces server PAYLOAD_VALIDATION_FAILED before event/idempotency persistence; the CLI exits through publish_rejected and does not treat payload.entity_id as target/entity routing authority
+      - payload.entity_id never supplies target/entity routing authority; payload validation follows the admitted input schema, while construction consumes only the resolved typed key and eligible constructor fields
       - missing/blank event name, invalid or non-object --payload-json, blank optional flags, partial target route flags, target route flags without --run-id, malformed bundle_hash, retired identity flags, invalid args, and missing explicit token for non-loopback API targets make zero API calls
       - success output renders only server-owned EventPublishResult event_id, run_id, operator_reference_event_id when present, new_run_created, and typed persisted delivery rows; it never labels operator reference provenance as causal source_event_id
       - RUN_NOT_FOUND, EVENT_NOT_FOUND, publish rejection errors, auth/HTTP/RPC failures, and malformed EventPublishResult values fail closed with tested exit codes
@@ -34932,7 +35038,7 @@ api_specification:
         noncanonical route ownership, or target failure returns EVENT_NOT_DECLARED, not success with zero deliveries.
         Optional target is a singular flow_instance/entity_id address validated against the selected run and actual consuming
         relation; it cannot make a private input public. run_id and payload.entity_id do not imply a receiver.
-        Handler create_entity owns materialization; caller payload.entity_id for such a handler fails PAYLOAD_VALIDATION_FAILED.
+        The canonical constructor owns construction before ordinary delivery; handlers cannot materialize a missing instance.
         Composition owns receiver keys and resolution; retired handler-side acquisition grants no authority.
 
         Optional source_event_id requires run_id and an existing event in that same run. It is persisted exclusively as
@@ -34961,7 +35067,7 @@ api_specification:
             type: string
         - name: payload
           required: true
-          description: JSON object business payload. payload.entity_id is not an event envelope, target, or stateful-context authority. If the selected handler uses create_entity, caller-supplied payload.entity_id fails closed with PAYLOAD_VALIDATION_FAILED because the handler materializes the platform-owned canonical receiving-flow identity.
+          description: JSON object business payload validated against the admitted input schema. payload.entity_id is not an event envelope, target, or stateful-context authority. Canonical construction consumes the resolved typed receiver key and only eligible supplied fields; handler flags confer no construction authority.
           schema:
             type: object
             additionalProperties: true
@@ -37694,7 +37800,7 @@ process_local_work_lifetime_authority:
       before dependencies are released. Cancellation of a retirement waiter does not release the
       read's lease. Neither query retry nor SQLSTATE-based error suppression is permitted.
     delivery_continuation: The exact opaque continuation capability is attached to the EventDelivery before enqueue. One scoped carrier guard retains the exact EventDelivery or raw continuation across every Manager and Pipeline exit and resolves the capability exactly once through one atomic typed operation. The only successful resolutions are returned to the same coordinator, consumed into a fenced execution attempt, or terminal-fenced because terminal settlement won the race. Terminal claim outcomes fence the exact continuation before returning rather than consuming the carrier, so direct dispatch reports terminal evidence rather than a fabricated transfer or deferral. Resolution errors remain visible and fence the owning generation; carriers never poll, sleep, retry the capability, or infer success. Retry settlement returns a fresh retry-scheduled snapshot to that coordinator before attempt completion. A current agent delivery that authors its own flow-terminal event retains its exact lifecycle generation while the route is fenced and the accepted carrier finishes; the loop finalizer publishes terminal lifecycle authority only after that carrier settles. Duplicate resolution and cross-authority transfer fail closed. Coordinator retirement rejects new carriers and attempt admission, including Consume after Acquire; that refusal retains typed retirement identity. Worker, scanner and finalizer classification consumes the actual coordinator retirement fence even before cancellation becomes visible in the admitted lease context. Every error branch must be that owner's typed retirement refusal or actual owning-context cancellation to be ordinary shutdown; an unowned retirement refusal, invalid result, independent joined failure, exact carrier-cleanup error or lease-settlement error remains fatal. An already accepted exact carrier must still return to its predecessor or resolve an existing terminal fence before process-local joins can finish; that cleanup cannot acquire, wake or mutate a successor.
-    coordinator: The normal runtime-generation coordinator begins under the runtime occurrence before readiness, enumerates its exact persisted authority to explicit bounded-cursor exhaustion, and is joined before runtime/store teardown. After startup publishes restored routes, one event-driven synchronization through that same coordinator returns the exact scan/dispatch result before readiness. Dispatch results are closed over transferred, already held by another proven exact owner, terminally settled, deferred under an exact named live agent-route/internal-subscription/carrier-return wake owner, and fatal. A fatal scan or dispatch result atomically retires the coordinator, rejects every later handoff/acquire/retain admission, closes runtime admission, and cancels the serving generation; a runtime cannot remain ready after losing its only continuation owner. A materializing node cannot defer behind topology created only by its own execution. Successor authority activation uses selected-store time to make predecessor open attempts immediately reclaimable through the ordinary fenced claim path. Canonical route, topology, authentication, carrier-return, and durable due-time lifecycle changes signal the coordinator; no free-form blockage interpreter, fixed scan/dispatch retry, manual backlog API, process-global retry registry, or successor-barrier reuse exists.
+    coordinator: The normal runtime-generation coordinator begins under the runtime occurrence before readiness, enumerates its exact persisted authority to explicit bounded-cursor exhaustion, and is joined before runtime/store teardown. After startup publishes restored routes, one event-driven synchronization through that same coordinator returns the exact scan/dispatch result before readiness. Dispatch results are closed over transferred, already held by another proven exact owner, terminally settled, deferred under an exact named live agent-route/internal-subscription/carrier-return wake owner, and fatal. A fatal scan or dispatch result atomically retires the coordinator, rejects every later handoff/acquire/retain admission, closes runtime admission, and cancels the serving generation; a runtime cannot remain ready after losing its only continuation owner. Canonical construction and attachment precede ordinary node delivery; a node cannot defer behind topology that a retired handler-construction path would create. Successor authority activation uses selected-store time to make predecessor open attempts immediately reclaimable through the ordinary fenced claim path. Canonical route, topology, authentication, carrier-return, and durable due-time lifecycle changes signal the coordinator; no free-form blockage interpreter, fixed scan/dispatch retry, manual backlog API, process-global retry registry, or successor-barrier reuse exists.
     concurrent_dispatch: >
       The coordinator may dispatch independent durable continuations concurrently through a
       bounded worker pool. The selected store may lower that operational bound to respect its
@@ -38633,7 +38739,7 @@ agent_lifecycle_authority:
       reset: Reset requests create at most one successor reset transition. Shutdown completes before reset cleanup starts; concurrent resets join one cleanup/result, and shutdown requested during reset joins that active result.
     prepared_execution_publication:
       rule: A running agent generation is reachable only after its Manager run lease and exact lifecycle route authority are both prepared. The lifecycle transition may then commit the running cell. Route publication revalidates the still-live Manager owner, and the execution loop launches last using the already-admitted lease. Both standard and authoritative-delivery-only startup propagate every preparation, persistence, publication, or owner-fence failure.
-      compensation: Any failure after durable running-state commit removes or discards the exact prepared route, cancels and settles the unlaunched generation completion authority, transitions the durable lifecycle cell fail-closed, settles the prepared Manager lease, and returns the error. No running durable cell, reachable route, open completion, or detached loop may survive compensation.
+      compensation: Any failure or publication panic after durable running-state commit removes or discards the exact prepared route, cancels and settles the unlaunched generation completion authority, conditionally self-releases the same durable generation to registered/stopped, settles the prepared Manager lease, and returns the error. Compensation does not mint another lifecycle operation kind or advance generation. No running durable cell, reachable route, open completion, or detached loop may survive compensation.
     subordinate_resource_transaction:
       owner: the selected SQLite/Postgres lifecycle transition transaction, or the in-memory lifecycle projection under the coordinator lock
       plan:
@@ -38661,7 +38767,7 @@ agent_lifecycle_authority:
     diagnostic: Success requires durable transition outcome and durable outbox enqueue with immutable validated provenance; immediate projection is auxiliary. Its failure retains pending work and is reported through the nonrecursive process diagnostic sink, without changing a committed lifecycle result or repeating restart.
   reconfigure:
     candidate_derivation: The canonical per-agent decision point encloses the authoritative current-config read, partial-patch merge, validation and agent build, subordinate-plan derivation, durable lifecycle/config/session commit, and process-local agent/config projection. A candidate or subordinate plan derived before that serialization point is invalid; concurrent partial patches execute in one serial order against the predecessor committed by the prior decision.
-    operation_identity: After per-agent serialization, derive one stable operation id from the agent id, authoritative expected lifecycle occurrence (runtime epoch, generation, and phase), candidate config revision, normalized subordinate plan, and exact dynamic readiness authority when present. Retry while that expected occurrence and authority remain current reuses the id; the same candidate and plan after any intervening committed generation or readiness-plan revision is a distinct operation. A candidate whose revision already equals the authoritative current cell is a no-op and creates no lifecycle operation.
+    operation_identity: After per-agent serialization, derive one stable operation id from the agent id, authoritative expected lifecycle occurrence (runtime epoch, generation, and phase), candidate config revision, normalized subordinate plan, and exact dynamic readiness authority when present. Retry while that expected occurrence and authority remain current reuses the id; the same candidate and plan after any intervening committed generation or attachment attempt is a distinct operation. A candidate whose revision already equals the authoritative current cell is a no-op and creates no lifecycle operation.
     session_rotation: Rotation consumes the same operation identity and is idempotent, so persistence retry never rotates twice.
   recovery:
     rule: Recovery hydrates only durable non-terminal cells and projects pending diagnostic outbox rows through the runtime log owner before marking them projected; projection failure leaves the row pending and never repeats the lifecycle transition.

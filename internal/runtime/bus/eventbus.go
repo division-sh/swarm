@@ -27,7 +27,6 @@ import (
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/google/uuid"
 )
 
 // EventInterceptor runs deterministic coordination in the publish path.
@@ -1061,8 +1060,8 @@ func (eb *EventBus) RetireCommittedFlowInstanceRoute(retirement runtimepipeline.
 	if retirement.ActivationAttemptID == "" {
 		return nil
 	}
-	if parsed, err := uuid.Parse(retirement.ActivationAttemptID); err != nil || parsed == uuid.Nil || parsed.String() != retirement.ActivationAttemptID {
-		return errors.New("committed flow route retirement requires canonical activation attempt id")
+	if _, err := runtimeflowidentity.ParseActivationAttemptID(retirement.ActivationAttemptID); err != nil {
+		return err
 	}
 	eb.mu.RLock()
 	table := eb.routeTable

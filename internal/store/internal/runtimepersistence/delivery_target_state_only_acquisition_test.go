@@ -448,11 +448,11 @@ func seedStateOnlyAcquisitionLifecycleForFlow(t *testing.T, backend string, db *
 	if err != nil {
 		t.Fatalf("encode exact template readiness: %v", err)
 	}
-	readinessQuery := `INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`
+	readinessQuery := `INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, plan_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
 	if backend == "postgres" {
-		readinessQuery = `INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, created_at, updated_at) VALUES ($1::uuid, $2, $3::jsonb, $4, $5)`
+		readinessQuery = `INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, plan_hash, created_at, updated_at) VALUES ($1::uuid, $2, $3::jsonb, $4, $5, $6)`
 	}
-	if _, err := db.ExecContext(context.Background(), readinessQuery, runID, instancePath, string(readiness), now, now); err != nil {
+	if _, err := db.ExecContext(context.Background(), readinessQuery, runID, instancePath, string(readiness), readinessPlanFixtureHash(t, string(readiness)), now, now); err != nil {
 		t.Fatalf("seed exact template readiness: %v", err)
 	}
 }

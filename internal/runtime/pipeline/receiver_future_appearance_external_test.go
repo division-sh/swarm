@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/google/uuid"
 )
 
@@ -46,6 +47,7 @@ func TestReceiverCompositionActivationReuseAndConflictBothStores(t *testing.T) {
 				if !ok {
 					t.Fatal("missing admitted source")
 				}
+				commitKeylessConstructorComponent(t, ctx, selected, pc, source)
 				// A real live template supplies the subscriber, but its unrelated key
 				// must not become the receiver for this zero-match delivery.
 				unrelatedPath := "review/" + uuid.NewString()
@@ -55,12 +57,33 @@ func TestReceiverCompositionActivationReuseAndConflictBothStores(t *testing.T) {
 					Identity: runtimeflowidentity.Instance{TemplateID: "review", ScopeKey: "review", InstanceID: unrelatedRoute.InstanceID, InstancePath: unrelatedPath, EntityID: runtimeflowidentity.EntityID(unrelatedPath), HasStoredPath: true},
 					RunID:    runID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
 				}
-				if _, err := pc.MaterializeInitialEntry(ctx, unrelatedIdentity, runtimepipeline.WorkflowInstance{
-					InstanceID: unrelatedRoute.InstanceID, StorageRef: unrelatedPath, EntityID: runtimeflowidentity.EntityID(unrelatedPath),
-					WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), Mode: "template", CurrentState: "active", EntityType: "review_entity",
-					Fields: map[string]any{"receiver_id": unrelatedRoute.InstanceID, "account_id": "unrelated-key"}, RuntimeReadiness: &unrelatedReadiness,
-				}, time.Now().UTC()); err != nil {
-					t.Fatal(err)
+				{
+					construction58Ctx := ctx
+					construction58At := time.Now().UTC()
+					construction58Instance, construction58Lifecycle, err := pc.PrepareInitialEntryLifecycle(construction58Ctx, unrelatedIdentity, runtimepipeline.WorkflowInstance{
+						InstanceID: unrelatedRoute.InstanceID, StorageRef: unrelatedPath, EntityID: runtimeflowidentity.EntityID(unrelatedPath),
+						WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), Mode: "template", CurrentState: "active", EntityType: "review_entity",
+						Fields: map[string]any{"receiver_id": unrelatedRoute.InstanceID, "account_id": "unrelated-key"}, RuntimeReadiness: &unrelatedReadiness,
+					}, construction58At)
+					if err != nil {
+						t.Fatalf("prepare fixture initial lifecycle: %v", err)
+					}
+					construction58Command, err := flowactivationfixture.Command(construction58Ctx, construction58Instance, construction58Lifecycle, construction58At)
+					if err != nil {
+						t.Fatalf("prepare fixture activation command: %v", err)
+					}
+					construction58Committed, err := any(selected.events).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction58Ctx, construction58Command)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err == nil && !construction58Committed.Acknowledged {
+						t.Fatal("fixture activation was not acknowledged")
+					}
+					if construction58Committed.Acknowledged && construction58Committed.Created {
+						if finalizeErr := pc.FinalizeInitialEntryLifecycle(construction58Ctx, construction58Committed.Lifecycle); finalizeErr != nil {
+							t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+						}
+					}
 				}
 				markGateRecoveryTopologyReadyFixture(t, selected, unrelatedReadiness, time.Now().UTC())
 				if err := flowroutefixture.Publish(bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: unrelatedIdentity}); err != nil {
@@ -85,8 +108,29 @@ func TestReceiverCompositionActivationReuseAndConflictBothStores(t *testing.T) {
 					Fields: map[string]any{"receiver_id": receiverKey, "account_id": "stored-business-key", "owner": "appeared"}, RuntimeReadiness: &readiness}
 				// Composition activation establishes the receiver before handler execution.
 				// There is no lawful second, payload-derived future receiver to invent.
-				if _, err := pc.MaterializeInitialEntry(ctx, identity, instance, time.Now().UTC()); err != nil {
-					t.Fatal(err)
+				{
+					construction88Ctx := ctx
+					construction88At := time.Now().UTC()
+					construction88Instance, construction88Lifecycle, err := pc.PrepareInitialEntryLifecycle(construction88Ctx, identity, instance, construction88At)
+					if err != nil {
+						t.Fatalf("prepare fixture initial lifecycle: %v", err)
+					}
+					construction88Command, err := flowactivationfixture.Command(construction88Ctx, construction88Instance, construction88Lifecycle, construction88At)
+					if err != nil {
+						t.Fatalf("prepare fixture activation command: %v", err)
+					}
+					construction88Committed, err := any(selected.events).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction88Ctx, construction88Command)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err == nil && !construction88Committed.Acknowledged {
+						t.Fatal("fixture activation was not acknowledged")
+					}
+					if construction88Committed.Acknowledged && construction88Committed.Created {
+						if finalizeErr := pc.FinalizeInitialEntryLifecycle(construction88Ctx, construction88Committed.Lifecycle); finalizeErr != nil {
+							t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+						}
+					}
 				}
 				markGateRecoveryTopologyReadyFixture(t, selected, readiness, time.Now().UTC())
 				if err := flowroutefixture.Publish(bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {

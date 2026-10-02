@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	swarmruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
@@ -29,6 +30,7 @@ import (
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/google/uuid"
 )
 
@@ -134,14 +136,35 @@ func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 			startedAt := time.Now().UTC().Add(-time.Second)
 			materializeCtx := worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
 			rootRoute := runID
-			if _, err := rt.Pipeline.MaterializeInitialEntry(testLiveExecutionContext(materializeCtx), runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath(rootRoute)}, runtimepipeline.WorkflowInstance{
-				InstanceID: rootRoute, StorageRef: rootRoute,
-				WorkflowName: bundle.WorkflowName(), WorkflowVersion: bundle.WorkflowVersion(),
-				CurrentState: "pending", EnteredStageAt: startedAt, CreatedAt: startedAt,
-				Fields:     map[string]any{},
-				EntityType: "test_entity",
-			}, startedAt); err != nil {
-				t.Fatalf("materialize receiver authority workflow: %v", err)
+			{
+				construction137Ctx := testLiveExecutionContext(materializeCtx)
+				construction137At := startedAt
+				construction137Instance, construction137Lifecycle, err := rt.Pipeline.PrepareInitialEntryLifecycle(construction137Ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.StoredRoute(".", rootRoute, rootRoute)}, runtimepipeline.WorkflowInstance{
+					InstanceID: rootRoute, StorageRef: rootRoute,
+					WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(),
+					CurrentState: "pending", EnteredStageAt: startedAt, CreatedAt: startedAt,
+					Fields:     map[string]any{},
+					EntityType: "test_entity",
+				}, construction137At)
+				if err != nil {
+					t.Fatalf("prepare fixture initial lifecycle: %v", err)
+				}
+				construction137Command, err := flowactivationfixture.Command(construction137Ctx, construction137Instance, construction137Lifecycle, construction137At)
+				if err != nil {
+					t.Fatalf("prepare fixture activation command: %v", err)
+				}
+				construction137Committed, err := any(selected).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction137Ctx, construction137Command)
+				if err != nil {
+					t.Fatalf("materialize receiver authority workflow: %v", err)
+				}
+				if err == nil && !construction137Committed.Acknowledged {
+					t.Fatal("fixture activation was not acknowledged")
+				}
+				if construction137Committed.Acknowledged && construction137Committed.Created {
+					if finalizeErr := rt.Pipeline.FinalizeInitialEntryLifecycle(construction137Ctx, construction137Committed.Lifecycle); finalizeErr != nil {
+						t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+					}
+				}
 			}
 			rootSource := eventtest.RootRoutingSource(entityID)
 			root := eventtest.ExistingRunRootIngressWithRoutingSource(

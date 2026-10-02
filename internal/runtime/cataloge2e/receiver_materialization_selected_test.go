@@ -121,15 +121,18 @@ func runReceiverMaterializationSelectedForkExecution(t *testing.T, publicationFr
 					agent = snapshot
 				}
 			}
-			if agent.Route.Materialization.Empty() || agent.Route.Materialization.RunID() != child || agent.Route.Materialization.Materializer() != node.RouteIdentity || agent.StartedAt.Before(node.SettledAt) || agent.Route.AgentIdentity.RunID != child || !agent.Authority.Equal(node.Authority) {
+			requireDeclaredAgentReceiverOwnership(t, child, node, agent)
+			if !agent.Authority.Equal(node.Authority) {
 				t.Fatalf("selected ownership relation changed: node=%+v agent=%+v", node, agent)
 			}
+			requireReceiverConstructedBeforeDelivery(t, h, child, node)
+			requireReceiverConstructedBeforeDelivery(t, h, child, agent)
 			var providerCalls int
 			h.llm.mu.Lock()
 			calls := append([]scriptedDeliveryCall(nil), h.llm.deliveryCalls...)
 			h.llm.mu.Unlock()
 			for _, call := range calls {
-				if call.RunID == child && call.EventID == eventID && call.AgentID == agent.SubscriberID && call.TargetEntityID == node.Route.Target.Route().EntityID {
+				if call.RunID == child && call.EventID == eventID && call.AgentID == agent.SubscriberID && call.TargetEntityID == "" {
 					providerCalls++
 				}
 			}

@@ -173,6 +173,9 @@ func (s *EventPostgresOwner) CommitInboundPublication(ctx context.Context, comma
 		return runtimeinbound.CommitResult{}, outcome.Err()
 	}
 	result.Acknowledged = true
+	for index, publication := range result.Publications {
+		result.Publications[index] = publication.WithCommitAcknowledgment()
+	}
 	return result, outcome.Err()
 }
 

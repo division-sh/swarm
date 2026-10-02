@@ -1180,6 +1180,10 @@ func TestHandleEmitTool_RoutesTypedRootOutputToRootNodeConsumer(t *testing.T) {
 	}
 	source := toolTestSourceWithDeclaredAgent(t, bundle, "root-agent", ".", "cycle.ping")
 	store := newEmitRoutePlanStore()
+	store.targetOwners = []runtimebus.ActiveTargetDescriptor{{
+		ID: toolTestRunID, EntityID: runtimeflowidentity.EntityID(toolTestRunID), FlowInstance: toolTestRunID,
+		Availability: runtimepipeline.NewDeliveryTargetAvailability("", "active", false),
+	}}
 	eventBus := newEmitRoutePlanEventBus(t, store, source)
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "root-agent", Identity: toolTestRootAgentIdentity(t, "root-agent"), FlowID: ".", Role: "root-agent", EntityID: eventtest.UUID("root-agent-cycle-source"), EmitEvents: []string{"cycle.ping"}}
 	exec := NewExecutorWithOptions(eventBus, ExecutorOptions{WorkflowSource: source, EmitRegistry: NewEmitRegistry(source, nil)})
@@ -1192,13 +1196,9 @@ func TestHandleEmitTool_RoutesTypedRootOutputToRootNodeConsumer(t *testing.T) {
 	persisted := store.events[eventID]
 	wantRoute := events.DeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient(identitytest.RootNode(t, "test-node")),
-		Target: events.MustMaterializingEntityTarget(events.RouteIdentity{
-			FlowID: ".", FlowInstance: persisted.RunID(), EntityID: runtimeflowidentity.EntityID(persisted.RunID()),
+		Target: events.MustExistingEntityTarget(events.RouteIdentity{
+			FlowID: semanticview.RootExecutionFlowID(source), FlowInstance: persisted.RunID(), EntityID: runtimeflowidentity.EntityID(persisted.RunID()),
 		}),
-	}
-	wantRoute.Initialization, err = events.AdmitNodeReceiverInitialization(persisted, wantRoute.Target, identitytest.RootNode(t, "test-node"))
-	if err != nil {
-		t.Fatal(err)
 	}
 	if !emitDeliveryRoutesContain(store.routes[eventID], wantRoute) {
 		t.Fatalf("persisted delivery routes = %#v, want typed root node consumer", store.routes[eventID])
@@ -1232,6 +1232,10 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNode(t *testing.
 		t.Fatalf("PublishPersistedFlowInstanceRoute: %v", err)
 	}
 	entityID := runtimeflowidentity.EntityID(route.InstancePath)
+	store.targetOwners = []runtimebus.ActiveTargetDescriptor{{
+		ID: route.InstancePath, EntityID: entityID, FlowInstance: route.InstancePath,
+		Availability: runtimepipeline.NewDeliveryTargetAvailability("", "active", false),
+	}}
 	actor := models.AgentConfig{
 		ExecutionMode: "live", ID: "reviewer", Identity: toolTestAgentIdentity(t, "reviewer", "review", route.InstancePath),
 		Role: "reviewer", FlowID: "review", FlowPath: route.InstancePath, EntityID: entityID,
@@ -1251,7 +1255,7 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNode(t *testing.
 	routes := store.routes[eventID]
 	want := events.DeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient(identitytest.FlowNode(t, "review", "review-finalize")),
-		Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "review", FlowInstance: route.InstancePath}),
+		Target:    events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "review", FlowInstance: route.InstancePath, EntityID: entityID}),
 	}
 	if !emitDeliveryRoutesContain(routes, want) {
 		t.Fatalf("persisted delivery routes = %#v, want same-instance template node %#v", routes, want)
@@ -1266,6 +1270,10 @@ func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t
 		Rename: "deploy.completed",
 	})
 	store := newEmitRoutePlanStore()
+	store.targetOwners = []runtimebus.ActiveTargetDescriptor{{
+		ID: "consumer", EntityID: runtimeflowidentity.EntityID("consumer"), FlowInstance: "consumer",
+		Availability: runtimepipeline.NewDeliveryTargetAvailability("", "active", false),
+	}}
 	eb := newEmitRoutePlanEventBus(t, store, source)
 	emitRegistry := NewEmitRegistry(source, nil)
 	actor := models.AgentConfig{
@@ -1303,12 +1311,13 @@ func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t
 	if got, want := string(persisted.Type()), "producer/deploy.done"; got != want {
 		t.Fatalf("persisted event type = %q, want %q", got, want)
 	}
-	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(identitytest.FlowNode(t, "consumer", "consumer-node")), Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
+	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(identitytest.FlowNode(t, "consumer", "consumer-node")), Target: events.MustExistingEntityTarget(events.RouteIdentity{
 		FlowID:       "consumer",
 		FlowInstance: "consumer",
+		EntityID:     runtimeflowidentity.EntityID("consumer"),
 	}),
 	}
-	wantEventTarget := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer"}
+	wantEventTarget := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: runtimeflowidentity.EntityID("consumer")}
 	if got := persisted.TargetRoute().Normalized(); got != wantEventTarget {
 		t.Fatalf("persisted event target route = %#v, want connect address %#v", got, wantEventTarget)
 	}

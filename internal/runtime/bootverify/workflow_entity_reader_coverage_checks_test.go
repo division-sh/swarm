@@ -46,7 +46,7 @@ func TestRun_UnusedReaderReasonDoesNotSatisfyEntityWriterCoverage(t *testing.T) 
 
 	report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
 
-	if !reportContains(report.HardInvalidities(), "entity_writer_coverage", "without authored writer coverage") {
+	if !reportContains(report.HardInvalidities(), "entity_writer_coverage", "without constructor supply, authored writer coverage") {
 		t.Fatalf("_unused_reader_reason must not satisfy writer coverage, got %#v", report.HardInvalidities())
 	}
 	if reportContains(report.LintEvidence(), "entity_reader_coverage", "resolution") {

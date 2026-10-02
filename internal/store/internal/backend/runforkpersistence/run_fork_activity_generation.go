@@ -76,6 +76,7 @@ type runForkSourceStateAdmission struct {
 type runForkProjectedSourceState struct {
 	runfork.EntityProjection
 	entityType     string
+	history        runfork.RunForkEntityState
 	correspondence *loopruntime.ForkCorrespondence
 }
 
@@ -132,10 +133,11 @@ func (a runForkSourceStateAdmission) project(event runfork.RunForkSelectedContra
 		if meta.EntityID != entityID {
 			continue
 		}
-		metadata, message, ok := loadRunForkMaterializedEntitySnapshotMetadata(a.snapshot, runfork.RunForkEntityState{EntityID: entityID})
-		if !ok {
-			return event, nil, fmt.Errorf("source event state metadata: %s", message)
+		state, err := loadRunForkConstructedEntityState(a.snapshot, entityID)
+		if err != nil {
+			return event, nil, fmt.Errorf("source event state metadata: %w", err)
 		}
+		metadata := state.MaterializationMetadata
 		projection, err := runfork.ProjectEntityOwnership(a.snapshot.RunID, a.forkRunID, entityID, metadata.FlowInstance)
 		if err != nil {
 			return event, nil, err
@@ -148,22 +150,11 @@ func (a runForkSourceStateAdmission) project(event runfork.RunForkSelectedContra
 		if route.EntityID != projection.Fork.EntityID || flowInstance != projection.Fork.FlowInstance {
 			return event, nil, fmt.Errorf("source event %s producer disagrees with fixed-revision state owner", event.SourceEventID)
 		}
-		states, err := loadRunForkEntityStates(a.snapshot)
+		_, correspondence, err := projectRunForkAttemptGenerationState(state.Accumulator, a.forkRunID, projection.Fork.EntityID)
 		if err != nil {
 			return event, nil, err
 		}
-		var accumulator map[string]any
-		for _, state := range states {
-			if state.EntityID == entityID {
-				accumulator = state.Accumulator
-				break
-			}
-		}
-		_, correspondence, err := projectRunForkAttemptGenerationState(accumulator, a.forkRunID, projection.Fork.EntityID)
-		if err != nil {
-			return event, nil, err
-		}
-		return projected, &runForkProjectedSourceState{EntityProjection: projection, entityType: metadata.EntityType, correspondence: correspondence}, nil
+		return projected, &runForkProjectedSourceState{EntityProjection: projection, entityType: metadata.EntityType, history: state, correspondence: correspondence}, nil
 	}
 	for _, mutation := range a.snapshot.EntityMutations {
 		if mutation.EntityID == entityID {
@@ -192,6 +183,7 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 		flowInstance = state.Fork.FlowInstance
 		if err := requireSelectedContractWorkflowEntity(ctx, tx, admission.postgres, selectedContractWorkflowState{
 			RunID: forkRunID, EntityID: state.Fork.EntityID, Route: state.Fork.FlowInstance, EntityType: state.entityType,
+			History: state.history,
 		}); err != nil {
 			return event, fmt.Errorf("load fork-local loop state for entity %s: %w", state.Fork.EntityID, err)
 		}

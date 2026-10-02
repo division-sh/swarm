@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/google/uuid"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -381,18 +382,36 @@ func catalogRunContext(h *runtimeHarness, runID string) context.Context {
 
 func seedCatalogRootStateForRun(t testing.TB, h *runtimeHarness, runID string) {
 	t.Helper()
-	owner, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, runtimeflowidentity.RouteForInstancePath(runID))
+	owner, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, runtimeflowidentity.StoredRoute(".", runID, runID))
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx := worklifetime.WithOccurrence(catalogRunContext(h, runID), h.rt.WorkOccurrence())
 	ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
-	_, err = h.workflow.MaterializeInitialEntry(ctx, owner, runtimepipeline.WorkflowInstance{
+	construction390Ctx := ctx
+	construction390At := h.startedAt
+	construction390Instance, construction390Lifecycle, err := h.workflow.PrepareInitialEntryLifecycle(construction390Ctx, owner, runtimepipeline.WorkflowInstance{
 		InstanceID: runID, StorageRef: runID, EntityID: runtimepipeline.FlowInstanceEntityID(runID),
-		WorkflowName: h.bundle.WorkflowName(), WorkflowVersion: h.bundle.WorkflowVersion(),
+		WorkflowName: ".", WorkflowVersion: h.bundle.WorkflowVersion(),
 		CurrentState: h.initialState, EnteredStageAt: h.startedAt, CreatedAt: h.startedAt,
 		EntityType: h.requireRootEntityType(),
-	}, h.startedAt)
+	}, construction390At)
+	if err != nil {
+		h.t.Fatalf("prepare fixture initial lifecycle: %v", err)
+	}
+	construction390Command, err := flowactivationfixture.Command(construction390Ctx, construction390Instance, construction390Lifecycle, construction390At)
+	if err != nil {
+		h.t.Fatalf("prepare fixture activation command: %v", err)
+	}
+	construction390Committed, err := any(h.activationStore).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction390Ctx, construction390Command)
+	if err == nil && !construction390Committed.Acknowledged {
+		h.t.Fatal("fixture activation was not acknowledged")
+	}
+	if construction390Committed.Acknowledged && construction390Committed.Created {
+		if finalizeErr := h.workflow.FinalizeInitialEntryLifecycle(construction390Ctx, construction390Committed.Lifecycle); finalizeErr != nil {
+			h.t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+		}
+	}
 	if err != nil {
 		t.Fatalf("materialize root state for run %s: %v", runID, err)
 	}
@@ -405,7 +424,7 @@ func materializeCatalogSelectedForkSourceFlow(t testing.TB, h *runtimeHarness, r
 	ctx := worklifetime.WithOccurrence(catalogRunContext(h, runID), h.rt.WorkOccurrence())
 	ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
 	trigger := eventtest.ExistingRunRootIngress(
-		uuid.NewString(), "catalog.selected_fork_source_admitted", "cataloge2e", "", nil, 0, runID,
+		uuid.NewString(), "worker.ready", "cataloge2e", "", []byte(`{"worker_id":"worker-001"}`), 0, runID,
 		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), at,
 	)
 	if err := h.rt.Manager.ActivateFlowInstance(ctx, runtimepipeline.FlowInstanceActivationRequest{
@@ -413,8 +432,8 @@ func materializeCatalogSelectedForkSourceFlow(t testing.TB, h *runtimeHarness, r
 		Instance: runtimeflowidentity.Stored(
 			semanticview.Wrap(h.bundle), "worker-flow", flowPath, "worker-001", entityID, "",
 		),
-		Config:       map[string]any{"worker_id": "worker-001"},
-		Fields:       map[string]any{"worker_id": "worker-001"},
+		Config:           map[string]any{"worker_id": "worker-001"},
+		ConstructorInput: "worker.ready", ResolvedKey: "worker-001",
 		TriggerEvent: trigger,
 		OccurredAt:   at,
 	}); err != nil {

@@ -166,7 +166,7 @@ func authoredTransitionRelation(t *testing.T, family, flow string) []contracts.W
 		active := []string{"ready", "working", "awaiting"}
 		handler("direct", "handler.advances_to", "", "awaiting", active, 0)
 		handler("inherited", "handler.advances_to", "", "done", active, 0)
-		handler("created", "handler.advances_to", "", "working", []string{"ready"}, 0)
+		handler("created", "handler.advances_to", "", "working", active, 0)
 		for i := 0; i < 2; i++ {
 			handler("selected", "handler.rules", "rules", "done", active, i)
 			handler("completed", "handler.on_complete", "on_complete", "done", active, i)
@@ -178,7 +178,6 @@ func authoredTransitionRelation(t *testing.T, family, flow string) []contracts.W
 		timer := map[string]string{".": "advance", "left": "left.advance", "right": "right.advance"}[flow]
 		rows = append(rows, contracts.WorkflowStageTopologyEdge{From: "ready", To: "working", Source: "timer", InternalOwner: "runtime", EventType: "timer:" + timer, TimerID: timer, After: "1h", Timed: true})
 	case "loop":
-		handler("created", "handler.advances_to", "", "waiting", []string{"waiting"}, 0)
 		for _, op := range []struct{ event, operation, from, to string }{
 			{"start", "start", "waiting", "drafting"},
 			{"admit", "admit", "drafting", "review"},
@@ -189,7 +188,7 @@ func authoredTransitionRelation(t *testing.T, family, flow string) []contracts.W
 		}
 		rows = append(rows, contracts.WorkflowStageTopologyEdge{From: "review", To: "escaped", Source: "loop.escape", Node: node, HandlerEvent: "repeat", EventType: "repeat", LoopID: "revision", LoopOperation: "repeat"})
 	case "gate":
-		handler("created", "handler.advances_to", "", "waiting", []string{"ready"}, 0)
+		handler("created", "handler.advances_to", "", "waiting", []string{"ready", "waiting"}, 0)
 		for _, verdict := range []string{"approve", "waive"} {
 			rows = append(rows, contracts.WorkflowStageTopologyEdge{From: "waiting", To: "done", Source: "gate", InternalOwner: "runtime", EventType: "mailbox.card_decided", DecisionID: "review", Verdict: verdict})
 		}
@@ -325,7 +324,7 @@ func transitionRelationDeclarations(family string) (schema, handlers, events str
   awaiting: {}
   done: {terminal: true}
 `, `    direct: {advances_to: awaiting}
-    created: {create_entity: true, advances_to: working}
+    created: {advances_to: working}
     selected:
       rules:
         first: {when: "true", advances_to: done}
@@ -361,8 +360,7 @@ loops:
     revision_field: revision_id
     max_attempts: 2
     escape: {advances_to: escaped}
-`, `    created: {create_entity: true, advances_to: waiting}
-    start:
+`, `    start:
       loop: {start: revision, from: waiting}
       advances_to: drafting
     admit:
@@ -374,7 +372,7 @@ loops:
     close:
       loop: {close: revision, from: review}
       advances_to: done
-`, "created:\nstart:\nadmit: {revision_id: text}\nrepeat: {revision_id: text}\nclose: {revision_id: text}\n"
+`, "start:\nadmit: {revision_id: text}\nrepeat: {revision_id: text}\nclose: {revision_id: text}\n"
 	case "gate":
 		return `stages:
   ready: {initial: true}
@@ -385,7 +383,7 @@ loops:
         approve: {advances_to: done}
         waive: {advances_to: done}
   done: {terminal: true}
-`, "    created: {create_entity: true, advances_to: waiting}\n", "created:\n"
+`, "    created: {advances_to: waiting}\n", "created:\n"
 	default:
 		panic("unknown relation fixture " + family)
 	}

@@ -3,7 +3,9 @@ package pipelinepersistence
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -57,8 +59,8 @@ func inspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, db dynamic
 	}
 	bundleHash := source.BundleHash()
 	query := `
-		SELECT readiness.run_id::text, readiness.instance_path, readiness.plan, readiness.plan_revision,
-		       readiness.topology_ready_at, readiness.creation_event_emitted_at,
+		SELECT readiness.run_id::text, readiness.instance_path, readiness.plan, readiness.plan_hash, readiness.activation_attempt_id,
+		       readiness.phase, readiness.activation_attempt_state, readiness.creation_event_emitted_at,
 		       run.bundle_hash, run.status,
 		       instance.status, instance.terminated_at
 		FROM flow_instance_runtime_readiness AS readiness
@@ -70,8 +72,8 @@ func inspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, db dynamic
 		ORDER BY readiness.run_id, readiness.instance_path`
 	if !postgres {
 		query = `
-			SELECT readiness.run_id, readiness.instance_path, readiness.plan, readiness.plan_revision,
-			       readiness.topology_ready_at, readiness.creation_event_emitted_at,
+			SELECT readiness.run_id, readiness.instance_path, readiness.plan, readiness.plan_hash, readiness.activation_attempt_id,
+			       readiness.phase, readiness.activation_attempt_state, readiness.creation_event_emitted_at,
 			       run.bundle_hash, run.status,
 			       instance.status, instance.terminated_at
 			FROM flow_instance_runtime_readiness AS readiness
@@ -155,8 +157,8 @@ func inspectDynamicFlowRuntimeReadinessForRun(ctx context.Context, db dynamicFlo
 	}
 	bundleHash := source.BundleHash()
 	query := `
-		SELECT readiness.run_id::text, readiness.instance_path, readiness.plan, readiness.plan_revision,
-		       readiness.topology_ready_at, readiness.creation_event_emitted_at,
+		SELECT readiness.run_id::text, readiness.instance_path, readiness.plan, readiness.plan_hash, readiness.activation_attempt_id,
+		       readiness.phase, readiness.activation_attempt_state, readiness.creation_event_emitted_at,
 		       run.bundle_hash, run.status,
 		       instance.status, instance.terminated_at
 		FROM flow_instance_runtime_readiness AS readiness
@@ -169,8 +171,8 @@ func inspectDynamicFlowRuntimeReadinessForRun(ctx context.Context, db dynamicFlo
 		ORDER BY readiness.instance_path`
 	if !postgres {
 		query = `
-			SELECT readiness.run_id, readiness.instance_path, readiness.plan, readiness.plan_revision,
-			       readiness.topology_ready_at, readiness.creation_event_emitted_at,
+			SELECT readiness.run_id, readiness.instance_path, readiness.plan, readiness.plan_hash, readiness.activation_attempt_id,
+			       readiness.phase, readiness.activation_attempt_state, readiness.creation_event_emitted_at,
 			       run.bundle_hash, run.status,
 			       instance.status, instance.terminated_at
 			FROM flow_instance_runtime_readiness AS readiness
@@ -198,18 +200,17 @@ func queryDynamicFlowRuntimeReadiness(ctx context.Context, db dynamicFlowReadine
 	items := make([]runtimepipeline.DynamicFlowRuntimeReadiness, 0)
 	for rows.Next() {
 		var record runtimepipeline.DynamicFlowRuntimeReadinessPersistenceRecord
-		var topologyReadyAt, creationEventEmittedAt, instanceTerminatedAt any
+		var attemptState sql.NullString
+		var creationEventEmittedAt, instanceTerminatedAt any
 		if err := rows.Scan(
-			&record.RunID, &record.InstancePath, &record.Plan, &record.PlanRevision,
-			&topologyReadyAt, &creationEventEmittedAt,
+			&record.RunID, &record.InstancePath, &record.Plan, &record.PlanHash, &record.AttemptOrdinal,
+			&record.Phase, &attemptState, &creationEventEmittedAt,
 			&record.OwningRunBundleHash, &record.RunStatus,
 			&record.InstanceStatus, &instanceTerminatedAt,
 		); err != nil {
 			return nil, err
 		}
-		if record.TopologyReadyAt, record.HasTopologyReadyAt, err = sqliteTimeValue(topologyReadyAt); err != nil {
-			return nil, err
-		}
+		record.AttemptState = attemptState.String
 		if record.CreationEventEmittedAt, record.HasCreationEventEmittedAt, err = sqliteTimeValue(creationEventEmittedAt); err != nil {
 			return nil, err
 		}
@@ -240,6 +241,7 @@ type preparedDynamicFlowRuntimeReadinessReconciliation struct {
 	observed     runtimepipeline.DynamicFlowRuntimeReadiness
 	expected     runtimepipeline.DynamicFlowRuntimeReadinessPlan
 	expectedJSON []byte
+	expectedHash string
 }
 
 func reconcileDynamicFlowRuntimeReadinessPlans(
@@ -263,6 +265,10 @@ func reconcileDynamicFlowRuntimeReadinessPlans(
 		observedPlan, err := request.Observed.Plan.Normalized()
 		if err != nil {
 			return nil, fmt.Errorf("normalize observed dynamic flow runtime readiness: %w", err)
+		}
+		observedHash, err := observedPlan.Hash()
+		if err != nil || request.Observed.PlanHash != observedHash {
+			return nil, fmt.Errorf("dynamic flow runtime readiness reconciliation requires an exact observed plan hash")
 		}
 		normalized, err := request.Expected.Normalized()
 		if err != nil {
@@ -295,8 +301,12 @@ func reconcileDynamicFlowRuntimeReadinessPlans(
 		if err != nil {
 			return nil, fmt.Errorf("encode expected dynamic flow runtime readiness %s: %w", instancePath, err)
 		}
+		expectedHash, err := normalized.Hash()
+		if err != nil {
+			return nil, err
+		}
 		prepared = append(prepared, preparedDynamicFlowRuntimeReadinessReconciliation{
-			observed: request.Observed, expected: normalized, expectedJSON: expectedJSON,
+			observed: request.Observed, expected: normalized, expectedJSON: expectedJSON, expectedHash: expectedHash,
 		})
 	}
 	sort.Slice(prepared, func(i, j int) bool {
@@ -340,11 +350,7 @@ func reconcileDynamicFlowRuntimeReadinessPlans(
 				if loaded.Plan.ExecutionMode != request.expected.ExecutionMode {
 					return fmt.Errorf("dynamic flow runtime readiness reconciliation execution mode changed for %s", instancePath)
 				}
-				actualJSON, err := runtimecanonicaljson.MarshalPreservingNumberKinds(loaded.Plan)
-				if err != nil {
-					return fmt.Errorf("encode persisted dynamic flow runtime readiness %s: %w", instancePath, err)
-				}
-				changed := string(actualJSON) != string(request.expectedJSON)
+				changed := loaded.PlanHash != request.expectedHash
 				if changed && !loaded.CreationEventEmittedAt.IsZero() {
 					actualCreationJSON, err := runtimecanonicaljson.MarshalPreservingNumberKinds(loaded.Plan.CreationEvent)
 					if err != nil {
@@ -360,22 +366,38 @@ func reconcileDynamicFlowRuntimeReadinessPlans(
 				}
 				attemptResults[index] = runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliationResult{
 					RunID: request.expected.RunID, InstancePath: instancePath, Changed: changed,
-					PlanRevision: loaded.PlanRevision,
+					AttemptOrdinal: loaded.AttemptOrdinal,
 				}
-				if changed {
-					attemptResults[index].PlanRevision++
+				if changed && loaded.AttemptState != "accepted" && loaded.AttemptState != "superseded" {
+					if loaded.AttemptOrdinal == math.MaxInt64 {
+						return fmt.Errorf("flow activation attempt cannot advance its ordinal")
+					}
+					attemptResults[index].AttemptOrdinal++
 				}
 			}
 			for index, request := range prepared {
 				if !attemptResults[index].Changed {
 					continue
 				}
-				query := `UPDATE flow_instance_runtime_readiness SET plan = $1::jsonb, plan_revision = plan_revision + 1, activation_attempt_state = CASE WHEN activation_attempt_state IN ('accepted', 'topology_committed') THEN 'superseded' ELSE activation_attempt_state END, topology_ready_at = NULL, updated_at = $2 WHERE run_id = $3::uuid AND instance_path = $4 AND plan_revision = $5`
-				args := []any{request.expectedJSON, observedAt, request.expected.RunID, request.expected.Identity.InstancePath}
+				query := `UPDATE flow_instance_runtime_readiness SET plan = $1::jsonb, plan_hash = $2,
+					activation_attempt_id = $6,
+					activation_attempt_state = CASE WHEN activation_attempt_state IN ('accepted', 'superseded') THEN 'superseded' ELSE 'planned' END,
+					activation_attempt_grant_id = CASE WHEN activation_attempt_state IN ('accepted', 'superseded') THEN activation_attempt_grant_id ELSE NULL END,
+					phase = CASE WHEN activation_attempt_state IN ('accepted', 'superseded') THEN phase ELSE 'planned' END,
+					updated_at = $3 WHERE run_id = $4::uuid AND instance_path = $5 AND activation_attempt_id = $7 AND plan_hash = $8 AND activation_attempt_state = $9 AND phase = $10`
+				args := []any{request.expectedJSON, request.expectedHash, observedAt, request.expected.RunID, request.expected.Identity.InstancePath}
 				if !postgres {
-					query = `UPDATE flow_instance_runtime_readiness SET plan = ?, plan_revision = plan_revision + 1, activation_attempt_state = CASE WHEN activation_attempt_state IN ('accepted', 'topology_committed') THEN 'superseded' ELSE activation_attempt_state END, topology_ready_at = NULL, updated_at = ? WHERE run_id = ? AND instance_path = ? AND plan_revision = ?`
+					query = `UPDATE flow_instance_runtime_readiness SET plan = ?, plan_hash = ?, updated_at = ?,
+						activation_attempt_id = ?,
+						activation_attempt_state = CASE WHEN activation_attempt_state IN ('accepted', 'superseded') THEN 'superseded' ELSE 'planned' END,
+						activation_attempt_grant_id = CASE WHEN activation_attempt_state IN ('accepted', 'superseded') THEN activation_attempt_grant_id ELSE NULL END,
+						phase = CASE WHEN activation_attempt_state IN ('accepted', 'superseded') THEN phase ELSE 'planned' END
+						WHERE run_id = ? AND instance_path = ? AND activation_attempt_id = ? AND plan_hash = ? AND activation_attempt_state = ? AND phase = ?`
+					args = []any{request.expectedJSON, request.expectedHash, observedAt, attemptResults[index].AttemptOrdinal, request.expected.RunID, request.expected.Identity.InstancePath}
+				} else {
+					args = append(args, attemptResults[index].AttemptOrdinal)
 				}
-				args = append(args, request.observed.PlanRevision)
+				args = append(args, request.observed.AttemptOrdinal, request.observed.PlanHash, request.observed.AttemptState, request.observed.Phase)
 				result, err := tx.ExecContext(txctx, query, args...)
 				if err != nil {
 					return err
@@ -387,6 +409,13 @@ func reconcileDynamicFlowRuntimeReadinessPlans(
 				if rows != 1 {
 					return fmt.Errorf("dynamic flow runtime readiness reconciliation changed %d rows for %s", rows, request.expected.Identity.InstancePath)
 				}
+			}
+			for index, request := range prepared {
+				current, found, err := loadDynamicFlowRuntimeReadiness(txctx, tx, postgres, request.expected.RunID, request.expected.Identity.Route(), false)
+				if err != nil || !found {
+					return errors.Join(err, errors.New("reconciled attachment row is missing"))
+				}
+				attemptResults[index].Readiness = current
 			}
 			return nil
 		})
@@ -402,26 +431,13 @@ func reconcileDynamicFlowRuntimeReadinessPlans(
 }
 
 func changedDynamicFlowRuntimeReadinessObservationCoordinate(observed, current runtimepipeline.DynamicFlowRuntimeReadiness) (string, error) {
-	if observed.PlanRevision != current.PlanRevision {
-		return "plan_revision", nil
+	if observed.AttemptOrdinal != current.AttemptOrdinal {
+		return "activation_attempt_id", nil
 	}
-	observedPlan, err := observed.Plan.Normalized()
-	if err != nil {
-		return "", fmt.Errorf("normalize observed dynamic flow readiness plan: %w", err)
+	if observed.AttemptState != current.AttemptState {
+		return "activation_attempt_state", nil
 	}
-	currentPlan, err := current.Plan.Normalized()
-	if err != nil {
-		return "", fmt.Errorf("normalize current dynamic flow readiness plan: %w", err)
-	}
-	observedJSON, err := runtimecanonicaljson.MarshalPreservingNumberKinds(observedPlan)
-	if err != nil {
-		return "", fmt.Errorf("encode observed dynamic flow readiness plan: %w", err)
-	}
-	currentJSON, err := runtimecanonicaljson.MarshalPreservingNumberKinds(currentPlan)
-	if err != nil {
-		return "", fmt.Errorf("encode current dynamic flow readiness plan: %w", err)
-	}
-	if string(observedJSON) != string(currentJSON) {
+	if observed.PlanHash != current.PlanHash {
 		return "plan", nil
 	}
 	if !observed.OwningRunSource.Matches(current.OwningRunSource) {
@@ -436,8 +452,8 @@ func changedDynamicFlowRuntimeReadinessObservationCoordinate(observed, current r
 	if !sameDynamicFlowRuntimeReadinessTime(observed.InstanceTerminatedAt, current.InstanceTerminatedAt) {
 		return "instance_terminated_at", nil
 	}
-	if !sameDynamicFlowRuntimeReadinessTime(observed.TopologyReadyAt, current.TopologyReadyAt) {
-		return "topology_ready_at", nil
+	if observed.Phase != current.Phase {
+		return "phase", nil
 	}
 	if !sameDynamicFlowRuntimeReadinessTime(observed.CreationEventEmittedAt, current.CreationEventEmittedAt) {
 		return "creation_event_emitted_at", nil
@@ -481,7 +497,7 @@ func loadDynamicFlowRuntimeReadiness(ctx context.Context, queryer dynamicFlowRea
 		return runtimepipeline.DynamicFlowRuntimeReadiness{}, false, fmt.Errorf("dynamic flow runtime readiness requires an exact instance route")
 	}
 	query := `
-		SELECT readiness.plan, readiness.plan_revision, readiness.topology_ready_at, readiness.creation_event_emitted_at,
+		SELECT readiness.plan, readiness.plan_hash, readiness.activation_attempt_id, readiness.phase, readiness.activation_attempt_state, readiness.creation_event_emitted_at,
 		       run.bundle_hash, run.status,
 		       instance.status, instance.terminated_at
 		FROM flow_instance_runtime_readiness AS readiness
@@ -493,7 +509,7 @@ func loadDynamicFlowRuntimeReadiness(ctx context.Context, queryer dynamicFlowRea
 	}
 	if !postgres {
 		query = `
-			SELECT readiness.plan, readiness.plan_revision, readiness.topology_ready_at, readiness.creation_event_emitted_at,
+			SELECT readiness.plan, readiness.plan_hash, readiness.activation_attempt_id, readiness.phase, readiness.activation_attempt_state, readiness.creation_event_emitted_at,
 			       run.bundle_hash, run.status,
 			       instance.status, instance.terminated_at
 			FROM flow_instance_runtime_readiness AS readiness
@@ -502,9 +518,10 @@ func loadDynamicFlowRuntimeReadiness(ctx context.Context, queryer dynamicFlowRea
 			WHERE readiness.run_id = ? AND readiness.instance_path = ?`
 	}
 	record := runtimepipeline.DynamicFlowRuntimeReadinessPersistenceRecord{RunID: runID, InstancePath: route.InstancePath}
-	var topologyReadyAt, creationEventEmittedAt, instanceTerminatedAt any
+	var attemptState sql.NullString
+	var creationEventEmittedAt, instanceTerminatedAt any
 	err := queryer.QueryRowContext(ctx, query, runID, route.InstancePath).Scan(
-		&record.Plan, &record.PlanRevision, &topologyReadyAt, &creationEventEmittedAt,
+		&record.Plan, &record.PlanHash, &record.AttemptOrdinal, &record.Phase, &attemptState, &creationEventEmittedAt,
 		&record.OwningRunBundleHash, &record.RunStatus,
 		&record.InstanceStatus, &instanceTerminatedAt,
 	)
@@ -514,9 +531,7 @@ func loadDynamicFlowRuntimeReadiness(ctx context.Context, queryer dynamicFlowRea
 	if err != nil {
 		return runtimepipeline.DynamicFlowRuntimeReadiness{}, false, fmt.Errorf("load dynamic flow runtime readiness %s: %w", route.InstancePath, err)
 	}
-	if record.TopologyReadyAt, record.HasTopologyReadyAt, err = sqliteTimeValue(topologyReadyAt); err != nil {
-		return runtimepipeline.DynamicFlowRuntimeReadiness{}, false, err
-	}
+	record.AttemptState = attemptState.String
 	if record.CreationEventEmittedAt, record.HasCreationEventEmittedAt, err = sqliteTimeValue(creationEventEmittedAt); err != nil {
 		return runtimepipeline.DynamicFlowRuntimeReadiness{}, false, err
 	}

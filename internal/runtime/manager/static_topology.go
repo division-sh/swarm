@@ -60,10 +60,8 @@ func (am *AgentManager) CompileStaticTopologyDesiredAgents(source semanticview.S
 }
 
 // FinalizeCommittedAgentReadiness makes every committed agent delivery's exact
-// run-owned lifecycle executable before dispatch. Static declaration plans are
-// materialized here because this is the first boundary that owns a committed
-// run; dynamic and standing agents must already have been materialized by their
-// dedicated readiness owners.
+// already-constructed run-owned lifecycle executable before dispatch. It cannot
+// materialize a declaration independently of its flow attachment owner.
 func (am *AgentManager) FinalizeCommittedAgentReadiness(ctx context.Context, event events.Event, routes []events.DeliveryRoute) error {
 	if am == nil || am.lifecycle == nil {
 		return errors.New("committed agent readiness requires manager lifecycle ownership")
@@ -75,8 +73,6 @@ func (am *AgentManager) FinalizeCommittedAgentReadiness(ctx context.Context, eve
 	if err := am.requireRunExecutionOwnership(ctx, runID); err != nil {
 		return err
 	}
-	var staticByPlan map[runtimeagentidentity.Plan]staticAgentBlueprint
-	var admission runtimeagenttopology.Admission
 	seen := make(map[runtimeagentidentity.Identity]struct{}, len(routes))
 	for _, route := range events.NormalizeDeliveryRoutes(routes) {
 		if err := ctx.Err(); err != nil {
@@ -107,68 +103,10 @@ func (am *AgentManager) FinalizeCommittedAgentReadiness(ctx context.Context, eve
 			return fmt.Errorf("agent %s: %w", identity.Description(), runtimebus.ErrCommittedAgentRouteTransition)
 		case committedRouteUnavailable:
 			return fmt.Errorf("committed agent %s is unavailable in lifecycle phase %s", identity.Description(), readiness.State.Phase)
-		case committedRouteExistingExecution:
-			if _, err := am.ensureExecutableAgentLifecycle(ctx, identity); err != nil {
-				if err := am.committedRouteFinalizeError(ctx, identity, err); err != nil {
-					return err
-				}
-			}
-			continue
 		}
-		// Existing admitted cells need their execution grant, not permission to
-		// create a new static declaration. In particular, a selected runtime does
-		// not own the normal startup topology merely because it owns such a cell.
-		if staticByPlan == nil {
-			var err error
-			admission, err = am.staticTopologyAdmission()
-			if err != nil {
+		if _, err := am.ensureExecutableAgentLifecycle(ctx, identity); err != nil {
+			if err := am.committedRouteFinalizeError(ctx, identity, err); err != nil {
 				return err
-			}
-			blueprints, err := am.resolvedStaticTopologyBlueprints(am.semanticSource)
-			if err != nil {
-				return err
-			}
-			staticByPlan = make(map[runtimeagentidentity.Plan]staticAgentBlueprint, len(blueprints))
-			for _, blueprint := range blueprints {
-				staticByPlan[blueprint.Identity.Normalize()] = blueprint
-			}
-		}
-		plan, err := identity.Plan()
-		if err != nil {
-			return err
-		}
-		blueprint, static := staticByPlan[plan.Normalize()]
-		if !static {
-			if _, err := am.ensureExecutableAgentLifecycle(ctx, identity); err != nil {
-				if err := am.committedRouteFinalizeError(ctx, identity, err); err != nil {
-					return err
-				}
-			}
-			continue
-		}
-		record, err := blueprint.Materialize(runID)
-		if err != nil {
-			return err
-		}
-		record.Topology = admission
-		materialized, err := record.Config.ConcreteIdentity()
-		if err != nil {
-			return err
-		}
-		if materialized != identity {
-			return fmt.Errorf("static declaration materialized %s instead of committed route %s", materialized.Description(), identity.Description())
-		}
-		if err := am.spawnAgentInternal(ctx, record, true); err != nil {
-			if !errors.Is(err, ErrAgentAlreadyExists) {
-				if err := am.committedRouteFinalizeError(ctx, identity, err); err != nil {
-					return err
-				}
-				continue
-			}
-			if _, readyErr := am.ensureExecutableAgentLifecycle(ctx, identity); readyErr != nil {
-				if err := am.committedRouteFinalizeError(ctx, identity, readyErr); err != nil {
-					return err
-				}
 			}
 		}
 	}

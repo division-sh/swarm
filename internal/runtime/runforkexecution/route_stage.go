@@ -18,7 +18,7 @@ type selectedFlowRoutePublisher interface {
 }
 
 type selectedFlowRouteRetirer interface {
-	RetireFlowInstanceRouteForAttempt(runtimepipeline.DynamicFlowRuntimeActivationAttempt) error
+	RetireFlowInstanceRouteForAttempt(runtimeflowidentity.RunScopedFlowInstance, runtimepipeline.DynamicFlowRuntimeActivationAttempt) error
 }
 
 type selectedFlowActivationRetirementStore interface {
@@ -30,6 +30,7 @@ type selectedFlowActivation struct {
 	attempt         runtimepipeline.DynamicFlowRuntimeActivationAttempt
 	identity        runtimeflowidentity.RunScopedFlowInstance
 	plan            runtimepipeline.DynamicFlowRuntimeReadinessPlan
+	route           runtimebus.FlowInstanceRouteMaterializationRequest
 	publication     runtimebus.FlowRoutePublicationHandle
 	timersProjected bool
 }
@@ -39,7 +40,7 @@ func admitSelectedContractFlowRoute(ctx context.Context, workflow *runtimepipeli
 	if err != nil {
 		return err
 	}
-	if !found || !readiness.Eligible() || readiness.PlanRevision == 0 {
+	if !found || !readiness.Eligible() || readiness.AttemptOrdinal == 0 {
 		return errors.New("selected flow route has no eligible durable readiness plan")
 	}
 	plan, err := readiness.Plan.Normalized()
@@ -49,7 +50,7 @@ func admitSelectedContractFlowRoute(ctx context.Context, workflow *runtimepipeli
 	if plan.RunID != route.Identity.RunID || plan.Identity.Route() != route.Identity.Route || plan.BundleHash != binding.BundleHash {
 		return errors.New("selected flow route differs from its exact generation readiness plan")
 	}
-	admitted, commitErr := workflow.BeginDynamicFlowRuntimeActivation(ctx, plan, readiness.PlanRevision, binding)
+	admitted, commitErr := workflow.BeginDynamicFlowRuntimeActivation(ctx, plan, readiness.AttemptOrdinal, binding)
 	if !admitted.Acknowledged || admitted.Reused {
 		return errors.Join(commitErr, errors.New("selected flow activation attempt was not freshly admitted"))
 	}
@@ -60,27 +61,41 @@ func admitSelectedContractFlowRoute(ctx context.Context, workflow *runtimepipeli
 		*published = append(*published, selectedFlowActivation{attempt: admitted.Attempt, identity: route.Identity})
 		return err
 	}
-	err = publishSelectedContractFlowRoute(ctx, bus, route, admitted.Attempt, diagnostics, published)
-	(*published)[len(*published)-1].plan = plan
-	if err != nil {
-		return err
-	}
+	*published = append(*published, selectedFlowActivation{attempt: admitted.Attempt, identity: route.Identity, plan: plan, route: route})
 	return workflow.VerifyDynamicFlowRuntimeActivationAttempt(ctx, admitted.Attempt)
 }
 
-func completeSelectedContractFlowRoutes(ctx context.Context, workflow *runtimepipeline.PipelineCoordinator, published []selectedFlowActivation, diagnostics *selectedForkCommitDiagnostics) error {
+func completeSelectedContractFlowRoutes(ctx context.Context, workflow *runtimepipeline.PipelineCoordinator, bus selectedFlowRoutePublisher, published []selectedFlowActivation, diagnostics *selectedForkCommitDiagnostics) error {
 	for i := range published {
 		activation := &published[i]
+		advance := func(previous runtimepipeline.FlowAttachmentPhase) error {
+			result, err := workflow.AdvanceFlowAttachment(ctx, activation.attempt, previous, time.Now().UTC())
+			if !result.Admitted() {
+				return errors.Join(err, errors.New("selected flow attachment progress was not admitted"))
+			}
+			if err != nil {
+				diagnostics.add(err)
+			}
+			return nil
+		}
+		if err := advance(runtimepipeline.FlowAttachmentPlanned); err != nil {
+			return err
+		}
+		if err := publishSelectedContractFlowRoute(ctx, bus, activation.route, activation.attempt, diagnostics, activation); err != nil {
+			return err
+		}
+		if err := advance(runtimepipeline.FlowAttachmentAgentsRegistered); err != nil {
+			return err
+		}
 		activation.timersProjected = true
 		if err := workflow.ReconcileInitialEntryTimersForAttempt(ctx, activation.identity, activation.attempt, activation.plan); err != nil {
 			return err
 		}
-		result, err := workflow.MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx, activation.attempt, activation.plan, time.Now().UTC())
-		if !result.Acknowledged {
-			return errors.Join(err, errors.New("selected flow topology completion was not acknowledged"))
+		if err := advance(runtimepipeline.FlowAttachmentRouteInstalled); err != nil {
+			return err
 		}
-		if err != nil {
-			diagnostics.add(err)
+		if err := advance(runtimepipeline.FlowAttachmentTimersArmed); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -94,7 +109,7 @@ func retireSelectedFlowActivations(ctx context.Context, bus selectedFlowRouteRet
 		if activation.publication != nil {
 			err = activation.publication.Retire()
 		} else if bus != nil {
-			err = bus.RetireFlowInstanceRouteForAttempt(activation.attempt)
+			err = bus.RetireFlowInstanceRouteForAttempt(activation.identity, activation.attempt)
 		} else {
 			err = errors.New("selected flow route retirement owner is required")
 		}
@@ -112,8 +127,7 @@ func retireSelectedFlowActivations(ctx context.Context, bus selectedFlowRouteRet
 	return retained, result
 }
 
-func publishSelectedContractFlowRoute(ctx context.Context, bus selectedFlowRoutePublisher, route runtimebus.FlowInstanceRouteMaterializationRequest, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt, diagnostics *selectedForkCommitDiagnostics, published *[]selectedFlowActivation) error {
-	*published = append(*published, selectedFlowActivation{attempt: attempt, identity: route.Identity})
+func publishSelectedContractFlowRoute(ctx context.Context, bus selectedFlowRoutePublisher, route runtimebus.FlowInstanceRouteMaterializationRequest, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt, diagnostics *selectedForkCommitDiagnostics, activation *selectedFlowActivation) error {
 	staged, stageErr := bus.StageFlowInstanceRouteContext(ctx, route)
 	if !staged.Acknowledged {
 		return errors.Join(stageErr, errors.New("selected-contract flow route stage was not acknowledged"))
@@ -128,6 +142,6 @@ func publishSelectedContractFlowRoute(ctx context.Context, bus selectedFlowRoute
 	if err != nil {
 		return err
 	}
-	(*published)[len(*published)-1].publication = publication
+	activation.publication = publication
 	return bus.VerifyFlowInstanceRoute(ctx, route.Identity)
 }

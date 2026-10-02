@@ -53,7 +53,6 @@ pins:
   inputs:
     events:
       - work.requested
-      - work.bootstrap
       - review.retry
       - review.closed
   outputs:
@@ -63,9 +62,7 @@ pins:
   members: {type: "[text]"}
   window: text
 `,
-		"events.yaml": `work.bootstrap:
-  token: text
-work.requested:
+		"events.yaml": `work.requested:
   token: text
 review.requested:
   token: text
@@ -79,17 +76,7 @@ join.observed:
   revision_id: text
   completed: integer
 `,
-		"nodes.yaml": `initializer:
-  execution_type: system_node
-  subscribes_to: [work.bootstrap]
-  event_handlers:
-    work.bootstrap:
-      create_entity: true
-      emit:
-        event: work.requested
-        fields:
-          token: "${payload.token}"
-controller:
+		"nodes.yaml": `controller:
   execution_type: system_node
   subscribes_to: [work.requested, review.requested, review.retry, review.closed]
   event_handlers:

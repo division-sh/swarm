@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
@@ -45,14 +47,21 @@ func newReceiverConfigActivationFixtureWithAgents(t *testing.T, backend string, 
 }
 
 func newReceiverConfigActivationFixtureWithOptions(t *testing.T, backend string, withAgents, autoEmit bool) receiverConfigActivationFixture {
+	return newReceiverConfigActivationFixtureWithCommitter(t, backend, withAgents, autoEmit, nil)
+}
+
+func newReceiverConfigActivationFixtureWithCommitter(t *testing.T, backend string, withAgents, autoEmit bool, decorate func(manager.FlowInstanceActivationCommitter) manager.FlowInstanceActivationCommitter) receiverConfigActivationFixture {
 	t.Helper()
-	return newReceiverConfigActivationFixtureWithTimer(t, backend, withAgents, autoEmit, false, false)
+	return newReceiverConfigActivationFixtureWithTimerAndCommitter(t, backend, withAgents, autoEmit, false, false, decorate)
 }
 
 func newReceiverConfigActivationFixtureWithTimer(t *testing.T, backend string, withAgents, autoEmit, withTimer, recurring bool) receiverConfigActivationFixture {
 	t.Helper()
-	_, selected := newAgentFixtureAuthorityStore(t, backend)
-	actors := sqliteFlowActivationBundle(t)
+	return newReceiverConfigActivationFixtureWithTimerAndCommitter(t, backend, withAgents, autoEmit, withTimer, recurring, nil)
+}
+
+func newReceiverConfigActivationFixtureWithTimerAndCommitter(t *testing.T, backend string, withAgents, autoEmit, withTimer, recurring bool, decorate func(manager.FlowInstanceActivationCommitter) manager.FlowInstanceActivationCommitter) receiverConfigActivationFixture {
+	t.Helper()
 	files := map[string]string{
 		"schema.yaml": "name: receiver-config-atomicity\n",
 		"review/schema.yaml": `name: review
@@ -72,7 +81,7 @@ pins:
 		"review/events.yaml":   "task.started:\n",
 	}
 	if autoEmit {
-		files["events.yaml"] = "request.started:\n"
+		files["events.yaml"] = "request.started:\n  request_id: string\n  label: string\n  enabled: boolean\n  nested: json\n"
 		files["review/schema.yaml"] += "auto_emit_on_create: {event: task.started}\n"
 		files["review/events.yaml"] = "task.started:\n  request_id: string\n  label: string\n  enabled: boolean\n  nested: json\n"
 	}
@@ -80,11 +89,33 @@ pins:
 		files["review/schema.yaml"] = strings.Replace(files["review/schema.yaml"], "  pending: {initial: true}", "  pending:\n    initial: true\n    timers:\n      - {id: pending.timeout, after: 1h, emit: timer.elapsed}", 1)
 		files["review/events.yaml"] += "timer.elapsed:\n"
 	}
+	return newReceiverConfigActivationFixtureWithDocuments(t, backend, withAgents, files, decorate, func(options *manager.AgentManagerOptions) {
+		if withTimer && recurring {
+			bundle, ok := semanticview.Bundle(options.SemanticSource)
+			if !ok || len(bundle.Semantics.Timers) != 1 {
+				t.Fatal("recurring timer control requires its exact compiled timer")
+			}
+			bundle.Semantics.Timers[0].Recurring = true
+		}
+	})
+}
+
+func newReceiverConfigActivationFixtureWithDocuments(t *testing.T, backend string, withAgents bool, files map[string]string, decorate func(manager.FlowInstanceActivationCommitter) manager.FlowInstanceActivationCommitter, configure ...func(*manager.AgentManagerOptions)) receiverConfigActivationFixture {
+	t.Helper()
+	return newReceiverConfigActivationFixtureWithOwnership(t, backend, withAgents, files, decorate, ownStoreTestAgentManager, nil, configure...)
+}
+
+func newReceiverConfigActivationFixtureWithOwnership(t *testing.T, backend string, withAgents bool, files map[string]string, decorate func(manager.FlowInstanceActivationCommitter) manager.FlowInstanceActivationCommitter, own func(*testing.T, *manager.AgentManager) *manager.AgentManager, configureLifecycle func(*pipeline.PipelineCoordinatorOptions), configure ...func(*manager.AgentManagerOptions)) receiverConfigActivationFixture {
+	t.Helper()
+	_, selected := newAgentFixtureAuthorityStore(t, backend)
+	return newReceiverConfigActivationFixtureForStore(t, selected, withAgents, files, decorate, own, configureLifecycle, configure...)
+}
+
+func newReceiverConfigActivationFixtureForStore(t *testing.T, selected agentFixtureFlowStore, withAgents bool, files map[string]string, decorate func(manager.FlowInstanceActivationCommitter) manager.FlowInstanceActivationCommitter, own func(*testing.T, *manager.AgentManager) *manager.AgentManager, configureLifecycle func(*pipeline.PipelineCoordinatorOptions), configure ...func(*manager.AgentManagerOptions)) receiverConfigActivationFixture {
+	t.Helper()
 	bundle := loadLifecyclePersistenceFixtureForTest(t, files)
-	if withTimer && recurring {
-		bundle.Semantics.Timers[0].Recurring = true
-	}
 	if withAgents {
+		actors := sqliteFlowActivationBundle(t)
 		bundle.FlowTree.ByID["review"].Agents = actors.FlowTree.ByID["review"].Agents
 		bundle.FlowTree.ByID["review"].AgentURIs = actors.FlowTree.ByID["review"].AgentURIs
 		bundle.URIRegistry = actors.URIRegistry
@@ -93,7 +124,7 @@ pins:
 	ctx := correlation.WithRunID(storeTestWorkContext(t, testAuthorActivityContextForBundle(fact.BundleHash())), uuid.NewString())
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: correlation.RunIDFromContext(ctx), Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash()})
 	bus := &sqliteFlowActivationBus{}
-	workflows := configureAgentFixtureFlowLifecycle(t, selected, bus, bundle)
+	workflows := configureAgentFixtureFlowLifecycle(t, selected, bus, bundle, configureLifecycle)
 	coordinate := agenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
 	sourceSet, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
@@ -103,14 +134,22 @@ pins:
 	if err != nil {
 		t.Fatal(err)
 	}
-	am := ownStoreTestAgentManager(t, manager.NewAgentManagerWithOptions(bus, nil, manager.AgentManagerOptions{
+	var committer manager.FlowInstanceActivationCommitter = agentFixtureFlowActivationCommitter{store: selected}
+	if decorate != nil {
+		committer = decorate(committer)
+	}
+	options := manager.AgentManagerOptions{
 		ExecutionPosture: executionposture.Live, BaseContext: ctx, SourceArtifactFact: fact,
 		SemanticSource: semanticview.Wrap(bundle), WorkflowInstances: workflows, LLMBackend: "anthropic",
 		DeliveryStore: selected, WorkOwner: storeTestWorkOwner(t),
 		PersistenceRoles: manager.PersistenceRoles{
-			AgentRoutes: bus, FlowActivation: agentFixtureFlowActivationCommitter{store: selected},
+			AgentRoutes: bus, FlowActivation: committer,
 			RouteInstaller: bus, RouteVerifier: bus, RouteRestorer: bus}, ReceiverExecution: eventreceiver.NormalExecution(),
-	}, selected))
+	}
+	for _, apply := range configure {
+		apply(&options)
+	}
+	am := own(t, manager.NewAgentManagerWithOptions(bus, nil, options, selected))
 	admission, err := agenttopology.StaticAdmission(sourceSet.Revision, fact.BundleHash(), agenttopology.LifetimeDurableManaged)
 	if err != nil {
 		t.Fatal(err)
@@ -155,12 +194,15 @@ func admitReceiverConfigFixtureGrant(t *testing.T, ctx context.Context, grant st
 func (f receiverConfigActivationFixture) request(key, instanceID, label string) pipeline.FlowInstanceActivationRequest {
 	req := sqliteFlowActivationRequest(f.bundle, "review", instanceID, "", "review/"+instanceID)
 	req.Config = map[string]any{"request_id": key, "label": label, "nested": []any{int64(7), float64(7), nil}}
+	req.ConstructorInput = "task.started"
+	req.ResolvedKey = key
+	req.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "task.started", "constructor-fixture", "", []byte(`{}`), 0, correlation.RunIDFromContext(f.ctx), events.EventEnvelope{}, req.OccurredAt)
 	return req
 }
 
 func TestReceiverConfigActivationRaceAndRollbackBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, scenario := range []string{"same_key", "numeric_kind_only", "numeric_kind_no_agents", "different_keys", "rollback_first"} {
+		for _, scenario := range []string{"exact", "same_key", "numeric_kind_only", "numeric_kind_no_agents", "different_keys", "rollback_first"} {
 			t.Run(backend+"/"+scenario, func(t *testing.T) {
 				// Register the SQLite blocking function before opening connections.
 				barrier := newForkContentionBarrier(t, backend, scenario == "rollback_first")
@@ -172,6 +214,9 @@ func TestReceiverConfigActivationRaceAndRollbackBothStores(t *testing.T) {
 				ctx, cancel := context.WithTimeout(f.ctx, 25*time.Second)
 				defer cancel()
 				requests := []pipeline.FlowInstanceActivationRequest{f.request("business-key", "ti-receiver-one", "first"), f.request("business-key", "ti-receiver-one", "second")}
+				if scenario == "exact" {
+					requests[1] = requests[0]
+				}
 				if strings.HasPrefix(scenario, "numeric_kind_") {
 					requests[1].Config["label"] = "first"
 					requests[1].Config["nested"].([]any)[1] = int64(7)
@@ -190,7 +235,7 @@ func TestReceiverConfigActivationRaceAndRollbackBothStores(t *testing.T) {
 						t.Fatal("typed preparation omitted defaults or agent plan")
 					}
 				}
-				if agentCount != 0 && plans[0].Readiness.Agents[0].ConfigRevision == plans[1].Readiness.Agents[0].ConfigRevision {
+				if agentCount != 0 && scenario != "exact" && plans[0].Readiness.Agents[0].ConfigRevision == plans[1].Readiness.Agents[0].ConfigRevision {
 					t.Fatal("different business config produced the same agent plan")
 				}
 				f.requireCounts(t, 0)
@@ -252,13 +297,21 @@ func TestReceiverConfigActivationRaceAndRollbackBothStores(t *testing.T) {
 					if backend == "sqlite" {
 						f.requireCounts(t, 0)
 					}
-				} else if first.err != nil || !committed[0].Created {
+				} else if first.err != nil || !committed[0].Acknowledged || !committed[0].Created {
 					t.Fatalf("first activation failed: %v", first.err)
 				}
 				barrier.resume()
 				second := awaitForkContentionResult(t, ctx, done[1])
 				winner := 0
-				if scenario == "same_key" || strings.HasPrefix(scenario, "numeric_kind_") {
+				if scenario == "exact" {
+					if second.err != nil || !committed[1].Acknowledged || committed[1].Created {
+						t.Fatalf("exact contender did not consume the winner: %+v %v", committed[1], second.err)
+					}
+					lifecycle := committed[1].Lifecycle
+					if len(lifecycle.Wakeups)+len(lifecycle.Cancellations)+len(lifecycle.GenericScheduleActivations)+len(lifecycle.GenericScheduleCancellations) != 0 {
+						t.Fatalf("exact contender repeated initial lifecycle: %+v", lifecycle)
+					}
+				} else if scenario == "same_key" || strings.HasPrefix(scenario, "numeric_kind_") {
 					failure, ok := failures.As(second.err)
 					if !ok || failure.Failure.Class != failures.ClassConflictingDuplicate || committed[1].Created {
 						t.Fatalf("losing preparation accepted: created=%v config=%#v err=%v", committed[1].Created, committed[1].Plan.Instance.Config, second.err)

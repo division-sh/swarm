@@ -42,6 +42,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
@@ -103,19 +104,20 @@ func markGateRecoveryTopologyReadyFixture(t *testing.T, selected gateRecoverySto
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, err := canonicaljson.Bytes(normalized)
+	want, err := normalized.Hash()
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := canonicaljson.Bytes(current.Plan)
-	if err != nil || string(got) != string(want) {
-		t.Fatalf("readiness fixture plan changed: got=%s want=%s err=%v", got, want, err)
+	if current.PlanHash != want || current.Phase != runtimepipeline.FlowAttachmentPlanned || current.AttemptState != "planned" {
+		t.Fatalf("readiness fixture requires the exact planned attempt: current=%#v want_hash=%s", current, want)
 	}
-	query := `UPDATE flow_instance_runtime_readiness SET topology_ready_at=? WHERE run_id=? AND instance_path=? AND plan_revision=?`
+	// This is a persisted-projection fixture, not installed-topology proof. A
+	// completed historical attempt is retired, never a phase-advanced planned row.
+	query := `UPDATE flow_instance_runtime_readiness SET phase='ready', activation_attempt_state='retired', activation_attempt_grant_id=?, updated_at=? WHERE run_id=? AND instance_path=? AND activation_attempt_id=? AND phase='planned' AND plan_hash=? AND activation_attempt_state='planned'`
 	if selected.postgres {
-		query = `UPDATE flow_instance_runtime_readiness SET topology_ready_at=$1 WHERE run_id=$2::uuid AND instance_path=$3 AND plan_revision=$4`
+		query = `UPDATE flow_instance_runtime_readiness SET phase='ready', activation_attempt_state='retired', activation_attempt_grant_id=$1::uuid, updated_at=$2 WHERE run_id=$3::uuid AND instance_path=$4 AND activation_attempt_id=$5 AND phase='planned' AND plan_hash=$6 AND activation_attempt_state='planned'`
 	}
-	result, err := selected.db.ExecContext(ctx, query, at.UTC(), plan.RunID, plan.Identity.InstancePath, current.PlanRevision)
+	result, err := selected.db.ExecContext(ctx, query, uuid.NewString(), at.UTC(), plan.RunID, plan.Identity.InstancePath, current.AttemptOrdinal, want)
 	if err != nil {
 		t.Fatalf("mark exact topology fixture: %v", err)
 	}
@@ -422,18 +424,40 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 			coordinator := newCoordinator(gateRecoveryBundle)
 			bus.SetInterceptors(coordinator)
 
-			runID, entityID := uuid.NewString(), uuid.NewString()
+			runID := uuid.NewString()
+			entityID := runID
 			insertGateRecoveryRun(t, selected, runID)
 			ctx := runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContext(t, context.Background()), bundleSource)
 			ctx = withLiveGateExecution(runtimecorrelation.WithRunID(ctx, runID))
 			enteredAt := time.Now().UTC()
-			if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
-				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1", CurrentState: "drafting",
-				EnteredStageAt: enteredAt, CreatedAt: enteredAt,
-				Fields:     map[string]any{},
-				EntityType: "test_entity",
-			}, enteredAt); err != nil {
-				t.Fatal(err)
+			{
+				construction430Ctx := ctx
+				construction430At := enteredAt
+				construction430Instance, construction430Lifecycle, err := coordinator.PrepareInitialEntryLifecycle(construction430Ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
+					InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(), CurrentState: "drafting", StageDefined: true,
+					EnteredStageAt: enteredAt, CreatedAt: enteredAt,
+					Fields:     map[string]any{},
+					EntityType: "test_entity",
+				}, construction430At)
+				if err != nil {
+					t.Fatalf("prepare fixture initial lifecycle: %v", err)
+				}
+				construction430Command, err := flowactivationfixture.Command(construction430Ctx, construction430Instance, construction430Lifecycle, construction430At)
+				if err != nil {
+					t.Fatalf("prepare fixture activation command: %v", err)
+				}
+				construction430Committed, err := any(selected.events).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction430Ctx, construction430Command)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err == nil && !construction430Committed.Acknowledged {
+					t.Fatal("fixture activation was not acknowledged")
+				}
+				if construction430Committed.Acknowledged && construction430Committed.Created {
+					if finalizeErr := coordinator.FinalizeInitialEntryLifecycle(construction430Ctx, construction430Committed.Lifecycle); finalizeErr != nil {
+						t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+					}
+				}
 			}
 			const replyContextID = "reply-context-proposed-effect"
 			sourceEvent := eventtest.ForDelivery(eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType("support.reply_drafted"), "support-agent", "task-1",
@@ -671,7 +695,9 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 			t.Run(storeCase.name+"/"+verdict, func(t *testing.T) {
 				selected := storeCase.open(t)
 				ctx := testAuthorActivityContext(t, context.Background())
-				runID, entityID := uuid.NewString(), uuid.NewString()
+				runID := uuid.NewString()
+				entityID := runID
+				ctx = runtimecorrelation.WithRunID(runtimecorrelation.WithSourceArtifactFact(ctx, mustAuthorActivityTestSourceArtifactFactForHash(gateRecoveryBundle)), runID)
 				supportNode := externalPipelineNode(t, "", "support")
 				supportOwner := activityidentity.MustNodeOwner(supportNode)
 				insertGateRecoveryRun(t, selected, runID)
@@ -768,6 +794,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 					Module: gateRecoveryModule{source: source}, Persistence: selected.persistence,
 					DecisionCards: selected.cards, SourceArtifactFact: mustAuthorActivityTestSourceArtifactFactForHash(gateRecoveryBundle),
 				})
+				commitKeylessConstructorComponent(t, withLiveGateExecution(ctx), selected, coordinator, source)
 				forward, emitted, _, err := coordinator.Intercept(withLiveGateExecution(ctx), decisionEvent)
 				if err != nil || forward || len(emitted) != 0 {
 					t.Fatalf("route %s = forward:%v emitted:%d error:%v", verdict, forward, len(emitted), err)
@@ -849,13 +876,34 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 			ctx := runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContext(t, context.Background()), bundleSource)
 			ctx = withLiveGateExecution(runtimecorrelation.WithRunID(ctx, runID))
 			enteredAt := time.Now().UTC()
-			if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
-				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1", CurrentState: "drafting",
-				EnteredStageAt: enteredAt, CreatedAt: enteredAt,
-				Fields:     map[string]any{},
-				EntityType: "test_entity",
-			}, enteredAt); err != nil {
-				t.Fatal(err)
+			{
+				construction852Ctx := ctx
+				construction852At := enteredAt
+				construction852Instance, construction852Lifecycle, err := coordinator.PrepareInitialEntryLifecycle(construction852Ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
+					InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(), CurrentState: "drafting", StageDefined: true,
+					EnteredStageAt: enteredAt, CreatedAt: enteredAt,
+					Fields:     map[string]any{},
+					EntityType: "test_entity",
+				}, construction852At)
+				if err != nil {
+					t.Fatalf("prepare fixture initial lifecycle: %v", err)
+				}
+				construction852Command, err := flowactivationfixture.Command(construction852Ctx, construction852Instance, construction852Lifecycle, construction852At)
+				if err != nil {
+					t.Fatalf("prepare fixture activation command: %v", err)
+				}
+				construction852Committed, err := any(selected.events).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction852Ctx, construction852Command)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err == nil && !construction852Committed.Acknowledged {
+					t.Fatal("fixture activation was not acknowledged")
+				}
+				if construction852Committed.Acknowledged && construction852Committed.Created {
+					if finalizeErr := coordinator.FinalizeInitialEntryLifecycle(construction852Ctx, construction852Committed.Lifecycle); finalizeErr != nil {
+						t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+					}
+				}
 			}
 			installProposedEffectCreateFailure(t, selected)
 
@@ -1105,7 +1153,7 @@ type gateRecoveryForegroundFixture struct {
 func seedGateRecoveryForegroundRoute(t *testing.T, tc gateRecoveryStoreCase, runID string, at time.Time) gateRecoveryForegroundFixture {
 	t.Helper()
 	ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
-	entityID := uuid.NewString()
+	entityID := runID
 	bundle := gateRecoveryContractBundle(t)
 	setupBus, err := newScopedTestEventBus(t, tc.events, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
 	if err != nil {
@@ -1115,13 +1163,34 @@ func seedGateRecoveryForegroundRoute(t *testing.T, tc gateRecoveryStoreCase, run
 		Module: gateRecoveryModule{source: semanticview.Wrap(bundle)}, Persistence: tc.persistence,
 		DecisionCards: tc.cards, SourceArtifactFact: mustAuthorActivityTestSourceArtifactFactForHash(gateRecoveryBundle),
 	})
-	if _, err := setupCoordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
-		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
-		CurrentState: "awaiting_review", EnteredStageAt: at,
-		Fields:     map[string]any{},
-		EntityType: "test_entity",
-	}, at); err != nil {
-		t.Fatal(err)
+	{
+		construction1118Ctx := ctx
+		construction1118At := at
+		construction1118Instance, construction1118Lifecycle, err := setupCoordinator.PrepareInitialEntryLifecycle(construction1118Ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
+			InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(), StageDefined: true,
+			CurrentState: "awaiting_review", EnteredStageAt: at,
+			Fields:     map[string]any{},
+			EntityType: "test_entity",
+		}, construction1118At)
+		if err != nil {
+			t.Fatalf("prepare fixture initial lifecycle: %v", err)
+		}
+		construction1118Command, err := flowactivationfixture.Command(construction1118Ctx, construction1118Instance, construction1118Lifecycle, construction1118At)
+		if err != nil {
+			t.Fatalf("prepare fixture activation command: %v", err)
+		}
+		construction1118Committed, err := any(tc.events).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction1118Ctx, construction1118Command)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err == nil && !construction1118Committed.Acknowledged {
+			t.Fatal("fixture activation was not acknowledged")
+		}
+		if construction1118Committed.Acknowledged && construction1118Committed.Created {
+			if finalizeErr := setupCoordinator.FinalizeInitialEntryLifecycle(construction1118Ctx, construction1118Committed.Lifecycle); finalizeErr != nil {
+				t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+			}
+		}
 	}
 	items, _, err := tc.cards.ListDecisionCards(ctx, decisioncard.ListOptions{RunID: runID, Limit: 10})
 	if err != nil {
@@ -1216,12 +1285,11 @@ func firstGateRecoveryEventID(ids map[string]struct{}) string {
 
 func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreCase) {
 	t.Helper()
-	ctx := testAuthorActivityContext(t, context.Background())
 	runID, entityID := uuid.NewString(), uuid.NewString()
-	insertGateRecoveryRun(t, tc, runID)
-	ctx = withLiveGateExecution(runtimecorrelation.WithRunID(ctx, runID))
 	bundle := gateRecoveryTerminalContractBundle(t)
-	bus, err := newScopedTestEventBus(t, tc.events, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
+	ctx, fact := workflowLifecycleSourceContext(t, tc, bundle, runID)
+	bundleHash := bundle.SourceArtifact.BundleHash()
+	bus, err := newScopedTestEventBus(t, tc.events, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle), SourceArtifactFact: fact})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1231,15 +1299,36 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 			DecisionCards: tc.cards, SourceArtifactFact: mustAuthorActivityTestSourceArtifactFactForHash(bundleHash),
 		})
 	}
-	matching := newCoordinator(gateRecoveryBundle)
+	matching := newCoordinator(bundleHash)
 	enteredAt := time.Now().UTC().Add(-25 * time.Hour)
-	if _, err := matching.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
-		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
-		CurrentState: "awaiting_review", EnteredStageAt: enteredAt,
-		Fields:     map[string]any{},
-		EntityType: "test_entity",
-	}, enteredAt); err != nil {
-		t.Fatal(err)
+	{
+		construction1236Ctx := ctx
+		construction1236At := enteredAt
+		construction1236Instance, construction1236Lifecycle, err := matching.PrepareInitialEntryLifecycle(construction1236Ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
+			InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(),
+			CurrentState: "awaiting_review", StageDefined: true, EnteredStageAt: enteredAt,
+			Fields:     map[string]any{},
+			EntityType: "test_entity",
+		}, construction1236At)
+		if err != nil {
+			t.Fatalf("prepare fixture initial lifecycle: %v", err)
+		}
+		construction1236Command, err := flowactivationfixture.Command(construction1236Ctx, construction1236Instance, construction1236Lifecycle, construction1236At)
+		if err != nil {
+			t.Fatalf("prepare fixture activation command: %v", err)
+		}
+		construction1236Committed, err := any(tc.events).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction1236Ctx, construction1236Command)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err == nil && !construction1236Committed.Acknowledged {
+			t.Fatal("fixture activation was not acknowledged")
+		}
+		if construction1236Committed.Acknowledged && construction1236Committed.Created {
+			if finalizeErr := matching.FinalizeInitialEntryLifecycle(construction1236Ctx, construction1236Committed.Lifecycle); finalizeErr != nil {
+				t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+			}
+		}
 	}
 	items, _, err := tc.cards.ListDecisionCards(ctx, decisioncard.ListOptions{RunID: runID, Limit: 10})
 	if err != nil || len(items) != 1 {
@@ -1278,7 +1367,7 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 	completion, err := storetest.ExecuteRunCompletionCandidate(
 		ctx,
 		tc.lifecycle,
-		gateRecoveryBundle,
+		bundleHash,
 		runID,
 		stagecatalogfixture.NewTerminalCatalog(
 			bundle.FlowTerminalStages("."),
@@ -1306,7 +1395,7 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 	t.Helper()
 	ctx := testAuthorActivityContext(t, context.Background())
 	runID := uuid.NewString()
-	entityID := uuid.NewString()
+	entityID := runID
 	insertGateRecoveryRun(t, tc, runID)
 	ctx = withLiveGateExecution(runtimecorrelation.WithRunID(ctx, runID))
 
@@ -1333,13 +1422,34 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 	matching := newCoordinator(gateRecoveryBundle)
 
 	scenarioAt := time.Now().UTC().Add(-25 * time.Hour)
-	if _, err := matching.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
-		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
-		CurrentState: "awaiting_review", EnteredStageAt: scenarioAt,
-		Fields:     map[string]any{},
-		EntityType: "test_entity",
-	}, scenarioAt); err != nil {
-		t.Fatalf("materialize workflow instance: %v", err)
+	{
+		construction1336Ctx := ctx
+		construction1336At := scenarioAt
+		construction1336Instance, construction1336Lifecycle, err := matching.PrepareInitialEntryLifecycle(construction1336Ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
+			InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(), StageDefined: true,
+			CurrentState: "awaiting_review", EnteredStageAt: scenarioAt,
+			Fields:     map[string]any{},
+			EntityType: "test_entity",
+		}, construction1336At)
+		if err != nil {
+			t.Fatalf("prepare fixture initial lifecycle: %v", err)
+		}
+		construction1336Command, err := flowactivationfixture.Command(construction1336Ctx, construction1336Instance, construction1336Lifecycle, construction1336At)
+		if err != nil {
+			t.Fatalf("prepare fixture activation command: %v", err)
+		}
+		construction1336Committed, err := any(tc.events).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction1336Ctx, construction1336Command)
+		if err != nil {
+			t.Fatalf("materialize workflow instance: %v", err)
+		}
+		if err == nil && !construction1336Committed.Acknowledged {
+			t.Fatal("fixture activation was not acknowledged")
+		}
+		if construction1336Committed.Acknowledged && construction1336Committed.Created {
+			if finalizeErr := matching.FinalizeInitialEntryLifecycle(construction1336Ctx, construction1336Committed.Lifecycle); finalizeErr != nil {
+				t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+			}
+		}
 	}
 	items, _, err := tc.cards.ListDecisionCards(ctx, decisioncard.ListOptions{RunID: runID, Limit: 10})
 	if err != nil || len(items) != 1 {

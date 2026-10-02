@@ -114,6 +114,7 @@ func testA2BoundReplyJourney(t *testing.T, corruptEntryField, siblingFlow string
 			options := runtimepipeline.PipelineCoordinatorOptions{Module: module, GenericSchedules: schedules, TestLifecycleProbe: probe}
 			pc := newGateRecoveryCoordinator(bus, selected, options)
 			bus.SetInterceptors(pc)
+			commitKeylessConstructorComponent(t, ctx, selected, pc, source)
 			path := "requester/" + key
 			owner := testRunScopedWorkflowInstanceForRun(runID, path)
 			readiness := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
@@ -121,13 +122,11 @@ func testA2BoundReplyJourney(t *testing.T, corruptEntryField, siblingFlow string
 				RunID:    runID, BundleHash: authorActivityTestSourceArtifactFact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
 			}
 			now := time.Now().UTC()
-			if _, err := pc.MaterializeInitialEntry(ctx, owner, runtimepipeline.WorkflowInstance{
+			commitA2FixtureConstruction(t, pc, selected.events, ctx, owner, runtimepipeline.WorkflowInstance{
 				InstanceID: key, StorageRef: path, EntityID: flowidentity.EntityID(path), WorkflowName: "requester", WorkflowVersion: source.WorkflowVersion(),
 				Mode: "template", RuntimeReadiness: &readiness, CurrentState: "awaiting", EntityType: "request_state",
 				Fields: map[string]any{"order_id": key, "expected": []any{"a", "b"}},
-			}, now); err != nil {
-				t.Fatal(err)
-			}
+			}, now)
 			markGateRecoveryTopologyReadyFixture(t, selected, readiness, now)
 			if err := flowroutefixture.Publish(bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: owner}); err != nil {
 				t.Fatal(err)
@@ -187,13 +186,11 @@ func testA2BoundReplyJourney(t *testing.T, corruptEntryField, siblingFlow string
 				siblingReadiness := readiness
 				siblingReadiness.Identity = flowidentity.Instance{TemplateID: siblingFlow, ScopeKey: siblingFlow, InstanceID: siblingKey,
 					InstancePath: siblingPath, EntityID: siblingEntity, HasStoredPath: true}
-				if _, err := pc.MaterializeInitialEntry(ctx, siblingOwner, runtimepipeline.WorkflowInstance{
+				commitA2FixtureConstruction(t, pc, selected.events, ctx, siblingOwner, runtimepipeline.WorkflowInstance{
 					InstanceID: siblingKey, StorageRef: siblingPath, EntityID: siblingEntity, WorkflowName: siblingFlow, WorkflowVersion: source.WorkflowVersion(),
 					Mode: "template", RuntimeReadiness: &siblingReadiness, CurrentState: "awaiting", EntityType: "request_state",
 					Fields: map[string]any{"order_id": siblingKey, "expected": []any{"a", "b"}},
-				}, now); err != nil {
-					t.Fatal(err)
-				}
+				}, now)
 				markGateRecoveryTopologyReadyFixture(t, selected, siblingReadiness, now)
 				if err := flowroutefixture.Publish(bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: siblingOwner}); err != nil {
 					t.Fatal(err)

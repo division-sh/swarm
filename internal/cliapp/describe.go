@@ -155,6 +155,16 @@ func runDescribeRoutesCommandWithOutput(ctx context.Context, repo string, opts d
 	return 0
 }
 
+func writeDescribeConstructors(out io.Writer, constructors []authoringview.FlowConstructorView, indent string) {
+	for _, constructor := range constructors {
+		if constructor.NoArguments {
+			fmt.Fprintf(out, "%sconstructor: (no arguments)\n", indent)
+		} else {
+			fmt.Fprintf(out, "%sconstructor: %s key=%s supplied=[%s]\n", indent, constructor.Input, constructor.KeyField, strings.Join(constructor.SuppliedFields, ", "))
+		}
+	}
+}
+
 func writeDescribeRoutesError(out io.Writer, format string, args ...any) {
 	if out != nil {
 		fmt.Fprintf(out, format, args...)
@@ -224,6 +234,7 @@ func writeDescribeText(out io.Writer, view authoringview.View) {
 	if view.Root.PrimaryEntity != nil {
 		fmt.Fprintf(out, "root primary entity: %s\n", view.Root.PrimaryEntity.Type)
 	}
+	writeDescribeConstructors(out, view.Root.Constructors, "root ")
 	if len(view.Flows) > 0 {
 		fmt.Fprintln(out, "flows:")
 		for _, flow := range view.Flows {
@@ -252,6 +263,7 @@ func writeDescribeFlowDetails(out io.Writer, flow authoringview.FlowView) {
 	if flow.TemplateInstance != nil {
 		fmt.Fprintf(out, "    instance: field=%s identity=%s\n", flow.TemplateInstance.Field, flow.TemplateInstance.Identity)
 	}
+	writeDescribeConstructors(out, flow.Constructors, "    ")
 	if flow.SingletonCoordinator != nil {
 		fmt.Fprintf(out, "    singleton coordinator: primary_entity=%s contained_fields=%d\n", flow.SingletonCoordinator.PrimaryEntity, len(flow.SingletonCoordinator.ContainedState))
 	}
@@ -366,30 +378,31 @@ func writeDescribeStageTimers(out io.Writer, timers []authoringview.StageGraphTi
 }
 
 func writeDescribeStageJoins(out io.Writer, joins []authoringview.StageGraphJoinView) {
-	if len(joins) > 0 {
-		fmt.Fprintln(out, "    joins:")
-		for _, join := range joins {
-			parts := []string{join.ID}
-			if join.MembersFromFanOut {
-				parts = append(parts, "members from_fan_out")
+	if len(joins) == 0 {
+		return
+	}
+	fmt.Fprintln(out, "    joins:")
+	for _, join := range joins {
+		parts := []string{join.ID}
+		if join.MembersFromFanOut {
+			parts = append(parts, "members from_fan_out")
+		} else {
+			parts = append(parts, "stage "+join.Stage)
+			if join.MemberCount != nil {
+				parts = append(parts, fmt.Sprintf("members count %d by %s", *join.MemberCount, strings.TrimSpace(join.MembersBy)))
 			} else {
-				parts = append(parts, "stage "+join.Stage)
-				if join.MemberCount != nil {
-					parts = append(parts, fmt.Sprintf("members count %d by %s", *join.MemberCount, strings.TrimSpace(join.MembersBy)))
-				} else {
-					parts = append(parts, "members "+join.MembersFrom+" by "+strings.TrimSpace(join.MembersBy))
-				}
-				parts = append(parts, "output "+join.Output)
+				parts = append(parts, "members "+join.MembersFrom+" by "+strings.TrimSpace(join.MembersBy))
 			}
-			if join.DeadlineAfter != "" {
-				parts = append(parts, "deadline "+join.DeadlineAfter+" from "+join.DeadlineFrom)
-			}
-			if join.Until != "" {
-				parts = append(parts, "until "+join.Until)
-			}
-			parts = append(parts, "("+join.NodeID+" on "+join.HandlerEvent+")")
-			fmt.Fprintf(out, "      - %s\n", strings.Join(parts, " "))
+			parts = append(parts, "output "+join.Output)
 		}
+		if join.DeadlineAfter != "" {
+			parts = append(parts, "deadline "+join.DeadlineAfter+" from "+join.DeadlineFrom)
+		}
+		if join.Until != "" {
+			parts = append(parts, "until "+join.Until)
+		}
+		parts = append(parts, "("+join.NodeID+" on "+join.HandlerEvent+")")
+		fmt.Fprintf(out, "      - %s\n", strings.Join(parts, " "))
 	}
 }
 

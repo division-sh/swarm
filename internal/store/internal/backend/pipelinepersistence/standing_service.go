@@ -740,7 +740,7 @@ func (s *standingServiceAdapter) admitStandingServiceRunTx(ctx context.Context, 
 		UNION ALL SELECT 1 FROM decision_cards WHERE run_id = ? AND status = 'pending' AND execution_mode = 'live'
 		UNION ALL SELECT 1 FROM activity_attempts WHERE run_id = ? AND status IN ('started', 'uncertain') AND execution_mode = 'live'
 		UNION ALL SELECT 1 FROM flow_instance_runtime_readiness
-			WHERE run_id = ? AND (topology_ready_at IS NULL OR creation_event_emitted_at IS NULL)
+			WHERE run_id = ? AND (phase != 'ready' OR creation_event_emitted_at IS NULL)
 			AND json_extract(plan, '$.execution_mode') = 'live'
 		UNION ALL SELECT 1 FROM events e
 			LEFT JOIN event_receipts receipt ON receipt.event_id = e.event_id
@@ -766,7 +766,7 @@ func (s *standingServiceAdapter) admitStandingServiceRunTx(ctx context.Context, 
 			UNION ALL SELECT 1 FROM decision_cards WHERE run_id = $1::uuid AND status = 'pending' AND execution_mode = 'live'
 			UNION ALL SELECT 1 FROM activity_attempts WHERE run_id = $1::uuid AND status IN ('started', 'uncertain') AND execution_mode = 'live'
 			UNION ALL SELECT 1 FROM flow_instance_runtime_readiness
-				WHERE run_id = $1::uuid AND (topology_ready_at IS NULL OR creation_event_emitted_at IS NULL)
+				WHERE run_id = $1::uuid AND (phase != 'ready' OR creation_event_emitted_at IS NULL)
 				AND plan->>'execution_mode' = 'live'
 			UNION ALL SELECT 1 FROM events e
 				LEFT JOIN event_receipts receipt ON receipt.event_id = e.event_id

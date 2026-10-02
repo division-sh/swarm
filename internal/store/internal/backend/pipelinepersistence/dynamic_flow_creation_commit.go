@@ -4,9 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"strings"
 
-	runtimecanonicaljson "github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
@@ -26,81 +25,31 @@ func prepareDynamicFlowCreationOccurrenceCommit(
 	if err != nil {
 		return false, fmt.Errorf("authorize dynamic flow creation occurrence attempt: %w", err)
 	}
-	if state != "topology_committed" {
+	if state != "accepted" {
 		return false, fmt.Errorf("dynamic flow creation occurrence requires completed activation attempt")
 	}
 	expected, err := req.Plan.Normalized()
 	if err != nil {
 		return false, err
 	}
-	expectedJSON, err := runtimecanonicaljson.MarshalPreservingNumberKinds(expected)
+	expectedHash, err := expected.Hash()
 	if err != nil {
 		return false, fmt.Errorf("encode expected dynamic flow readiness %s: %w", req.InstancePath, err)
 	}
-	query := `
-		SELECT readiness.plan,
-		       readiness.topology_ready_at IS NOT NULL,
-		       readiness.creation_event_emitted_at IS NOT NULL,
-		       run.status,
-		       instance.status,
-		       instance.terminated_at IS NULL
-		FROM flow_instance_runtime_readiness AS readiness
-		JOIN flow_instances AS instance ON instance.run_id = readiness.run_id AND instance.instance_path = readiness.instance_path
-		JOIN runs AS run ON run.run_id = readiness.run_id
-		WHERE readiness.run_id = $1::uuid AND readiness.instance_path = $2
-		FOR UPDATE OF readiness, instance, run
-	`
-	if !postgres {
-		query = `
-			SELECT readiness.plan,
-			       readiness.topology_ready_at IS NOT NULL,
-			       readiness.creation_event_emitted_at IS NOT NULL,
-			       run.status,
-			       instance.status,
-			       instance.terminated_at IS NULL
-			FROM flow_instance_runtime_readiness AS readiness
-			JOIN flow_instances AS instance ON instance.run_id = readiness.run_id AND instance.instance_path = readiness.instance_path
-			JOIN runs AS run ON run.run_id = readiness.run_id
-			WHERE readiness.run_id = ? AND readiness.instance_path = ?
-		`
+	current, found, err := loadDynamicFlowRuntimeReadiness(ctx, tx, postgres, req.RunID, runtimeflowidentity.RouteForInstancePath(req.InstancePath), true)
+	if err != nil {
+		return false, err
 	}
-	var (
-		actualJSON                    []byte
-		topologyReady, alreadyEmitted bool
-		runStatus, instanceStatus     string
-		unterminated                  bool
-	)
-	if err := tx.QueryRowContext(ctx, query, req.RunID, req.InstancePath).Scan(
-		&actualJSON,
-		&topologyReady,
-		&alreadyEmitted,
-		&runStatus,
-		&instanceStatus,
-		&unterminated,
-	); err != nil {
-		if err == sql.ErrNoRows {
-			return false, fmt.Errorf("dynamic flow runtime creation occurrence requires one readiness record: %s", req.InstancePath)
-		}
-		return false, fmt.Errorf("lock dynamic flow runtime creation occurrence %s: %w", req.InstancePath, err)
-	}
-	if !dynamicFlowCreationRunActive(runStatus) || !strings.EqualFold(strings.TrimSpace(instanceStatus), "active") || !unterminated {
+	if !found || !current.Eligible() {
 		return false, fmt.Errorf("dynamic flow runtime creation occurrence requires one active eligible record: %s", req.InstancePath)
 	}
-	if !topologyReady {
+	if current.Phase != runtimepipeline.FlowAttachmentReady {
 		return false, fmt.Errorf("dynamic flow runtime creation occurrence requires topology readiness: %s", req.InstancePath)
 	}
-	var actual any
-	if err := runtimecanonicaljson.DecodePreservingNumberLexemes(actualJSON, &actual); err != nil {
-		return false, fmt.Errorf("decode persisted dynamic flow readiness %s: %w", req.InstancePath, err)
-	}
-	actualJSON, err = runtimecanonicaljson.MarshalPreservingNumberKinds(actual)
-	if err != nil {
-		return false, fmt.Errorf("canonicalize persisted dynamic flow readiness %s: %w", req.InstancePath, err)
-	}
-	if string(actualJSON) != string(expectedJSON) {
+	if current.PlanHash != expectedHash {
 		return false, fmt.Errorf("dynamic flow runtime creation occurrence readiness plan changed for %s", req.InstancePath)
 	}
-	return alreadyEmitted, nil
+	return !current.CreationEventEmittedAt.IsZero(), nil
 }
 
 func (s *PipelinePostgresOwner) PrepareDynamicFlowCreationOccurrenceCommitTx(ctx context.Context, tx *sql.Tx, req runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest) (bool, error) {
@@ -122,10 +71,11 @@ func markDynamicFlowCreationOccurrenceCommitted(
 		SET creation_event_emitted_at = $1, updated_at = $1
 		WHERE run_id = $2::uuid
 		  AND instance_path = $3
-		  AND plan_revision = $4
-		  AND activation_attempt_id = $5::uuid
+		  AND activation_attempt_id = $4
+		  AND activation_attempt_id = $5
 		  AND activation_attempt_grant_id = $6::uuid
-		  AND activation_attempt_state = 'topology_committed'
+		  AND activation_attempt_state = 'accepted'
+		  AND phase = 'ready'
 		  AND creation_event_emitted_at IS NULL
 	`
 	if !postgres {
@@ -134,19 +84,20 @@ func markDynamicFlowCreationOccurrenceCommitted(
 			SET creation_event_emitted_at = ?, updated_at = ?
 			WHERE run_id = ?
 			  AND instance_path = ?
-			  AND plan_revision = ?
+			  AND activation_attempt_id = ?
 			  AND activation_attempt_id = ?
 			  AND activation_attempt_grant_id = ?
-			  AND activation_attempt_state = 'topology_committed'
+			  AND activation_attempt_state = 'accepted'
+			  AND phase = 'ready'
 			  AND creation_event_emitted_at IS NULL
 		`
 	}
 	var result sql.Result
 	var err error
 	if postgres {
-		result, err = tx.ExecContext(ctx, query, req.OccurredAt.UTC(), req.RunID, req.InstancePath, req.Attempt.PlanRevision(), req.Attempt.ID(), req.Attempt.ProcessBinding().GenerationGrantID)
+		result, err = tx.ExecContext(ctx, query, req.OccurredAt.UTC(), req.RunID, req.InstancePath, req.Attempt.Ordinal(), req.Attempt.ID(), req.Attempt.ProcessBinding().GenerationGrantID)
 	} else {
-		result, err = tx.ExecContext(ctx, query, req.OccurredAt.UTC(), req.OccurredAt.UTC(), req.RunID, req.InstancePath, req.Attempt.PlanRevision(), req.Attempt.ID(), req.Attempt.ProcessBinding().GenerationGrantID)
+		result, err = tx.ExecContext(ctx, query, req.OccurredAt.UTC(), req.OccurredAt.UTC(), req.RunID, req.InstancePath, req.Attempt.Ordinal(), req.Attempt.ID(), req.Attempt.ProcessBinding().GenerationGrantID)
 	}
 	if err != nil {
 		return fmt.Errorf("mark dynamic flow runtime creation occurrence complete: %w", err)
@@ -167,13 +118,4 @@ func (s *PipelinePostgresOwner) MarkDynamicFlowCreationOccurrenceCommittedTx(ctx
 
 func (s *PipelineSQLiteOwner) MarkDynamicFlowCreationOccurrenceCommittedTx(ctx context.Context, tx *sql.Tx, req runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest) error {
 	return markDynamicFlowCreationOccurrenceCommitted(ctx, tx, false, req)
-}
-
-func dynamicFlowCreationRunActive(status string) bool {
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "running", "paused":
-		return true
-	default:
-		return false
-	}
 }

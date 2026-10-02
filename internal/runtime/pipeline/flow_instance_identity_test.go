@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func TestFlowInstanceIdentity_DistinguishesScopeKeyInstancePathAndEntityID(t *testing.T) {
@@ -39,39 +40,23 @@ func TestFlowInstanceIdentity_DistinguishesScopeKeyInstancePathAndEntityID(t *te
 	}
 }
 
-func TestFlowInstanceIdentity_CreateEntityUsesTypedPathAndLogicalInstance(t *testing.T) {
-	source := loadWorkflowFixtureSource(t, "test-gates-in-child-flow")
-
-	handler, ok := source.ExecutableNodeEventHandler(pipelineSourceNode(t, source, "child", "validator"), "validate.start")
-	if !ok {
-		t.Fatal("expected validator handler for validate.start")
+func TestFlowInstanceIdentity_ConstructorUsesTypedPathAndLogicalInstance(t *testing.T) {
+	source := loadWorkflowFixtureSource(t, "test-dynamic-flow-instance")
+	instance := deriveFlowInstanceIdentity(source, "worker", "inst-1")
+	if instance.InstancePath != "worker/inst-1" || instance.InstanceID != "inst-1" || instance.EntityID != FlowInstanceEntityID(instance.InstancePath) {
+		t.Fatalf("constructor identity = %#v", instance)
 	}
-	state := &WorkflowState{
-		EntityID: "11111111-1111-1111-1111-111111111111",
-		Metadata: map[string]any{},
-	}
+}
 
-	entityID, _, err := resolveHandlerEntityIDForFlow(source, "child", handler, state.EntityID, mustEvent("child/validate.start", state.EntityID), state)
+func TestFlowInstanceIdentity_RootConstructorAndExecutionShareRoute(t *testing.T) {
+	source := semanticview.Wrap(compiledAdapterSource(t))
+	constructed := runtimeflowidentity.Stored(source, ".", testPipelineRunID, testPipelineRunID, "", "")
+	execution, err := workflowInstanceRouteForExecution(source, ".", testPipelineRunID)
 	if err != nil {
-		t.Fatalf("resolveHandlerEntityIDForFlow: %v", err)
+		t.Fatal(err)
 	}
-
-	if got := strings.TrimSpace(state.EntityID); got != entityID {
-		t.Fatalf("state.EntityID = %q, want %q", got, entityID)
-	}
-	instanceID := strings.TrimSpace(state.Control.InstanceID)
-	if instanceID == "" {
-		t.Fatal("expected typed logical instance_id")
-	}
-	flowPath := strings.TrimSpace(state.Control.FlowPath)
-	if flowPath != "child" {
-		t.Fatalf("flow_path = %q, want child", flowPath)
-	}
-	if got := strings.TrimSpace(state.Control.StorageRef); got != flowPath {
-		t.Fatalf("storage_ref = %q, want %q", got, flowPath)
-	}
-	if wantEntityID := FlowInstanceEntityID(flowPath); entityID != wantEntityID {
-		t.Fatalf("entityID = %q, want canonical flow entity id %q", entityID, wantEntityID)
+	if execution != constructed.Route() || execution.ScopeKey != "." || execution.InstancePath != testPipelineRunID {
+		t.Fatalf("root execution route %#v disagrees with constructor %#v", execution, constructed.Route())
 	}
 }
 

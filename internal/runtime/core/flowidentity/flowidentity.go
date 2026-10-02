@@ -134,10 +134,21 @@ func (i RunScopedFlowInstance) Key() string {
 	return i.RunID + "\x00" + i.Route.InstancePath
 }
 
+func (i RunScopedFlowInstance) MatchesAgentRoute(agent runtimeagentidentity.Identity) bool {
+	if i.Validate() != nil || agent.Validate() != nil {
+		return false
+	}
+	route, err := i.Route.AgentIdentityRoute()
+	return err == nil && agent.RunID == i.RunID && agent.Route == route
+}
+
 func (r Route) AgentIdentityRoute() (runtimeagentidentity.Route, error) {
 	r = StoredRoute(r.ScopeKey, r.InstanceID, r.InstancePath)
 	if !r.Valid() {
 		return runtimeagentidentity.Route{}, fmt.Errorf("flow route is incomplete")
+	}
+	if r.ScopeKey == "." {
+		return runtimeagentidentity.RootRoute(), nil
 	}
 	return runtimeagentidentity.PresentRoute(r.ScopeKey, r.InstanceID, r.InstancePath)
 }
@@ -342,7 +353,7 @@ func Stored(
 		scopeKey = normalizeRef(ScopeKey(source, workflowName))
 		instancePath = scopeKey
 	} else {
-		scopeKey = normalizeRef(storedScopeKey(source, workflowName, instancePath))
+		scopeKey = normalizeRef(ScopeKey(source, workflowName))
 	}
 	if strings.TrimSpace(instanceID) == "" && materializedPath != "" {
 		instanceID = LogicalInstanceID(materializedPath)
@@ -424,16 +435,4 @@ func OwnedByScope(ownerScope, targetInstancePath string) bool {
 		return true
 	}
 	return ownerScope == targetScope
-}
-
-func storedScopeKey(source semanticview.Source, workflowName, instancePath string) string {
-	instancePath = normalizeRef(instancePath)
-	if instancePath != "" {
-		expectedScope := normalizeRef(ScopeKey(source, workflowName))
-		if expectedScope != "" && (instancePath == expectedScope || strings.HasPrefix(instancePath, expectedScope+"/")) {
-			return expectedScope
-		}
-		return SemanticScope(instancePath)
-	}
-	return normalizeRef(ScopeKey(source, workflowName))
 }

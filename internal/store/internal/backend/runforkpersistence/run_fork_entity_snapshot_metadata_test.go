@@ -1,9 +1,11 @@
 package runforkpersistence
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -11,7 +13,7 @@ import (
 
 func TestRunForkSnapshotOwnershipMetadataAuthority(t *testing.T) {
 	const entityID = "entity-1"
-	metadata := runForkRevisionEntityMetadata{EntityID: entityID, FlowInstance: "owner/one", EntityType: "case", Slug: "case-one", Name: "Case One"}
+	metadata := runForkRevisionEntityMetadata{EntityID: entityID, FlowInstance: "owner/one", EntityType: "case", Slug: "case-one", Name: "Case One", ConstructionKind: "imported_state"}
 	for _, flows := range [][]string{{"context/one", "context/two"}, {"context/two", "context/one"}, {"owner/one", "owner/one"}, {"", ""}} {
 		t.Run("event_context_not_owner/"+strings.Join(flows, ","), func(t *testing.T) {
 			snapshot := &runForkRevisionSnapshot{EntityMetadata: []runForkRevisionEntityMetadata{metadata}}
@@ -144,15 +146,52 @@ func TestRunForkSnapshotMetadataDoesNotRetainCallerSuppliedAuthority(t *testing.
 func TestRunForkSnapshotMetadataRejectsBlankHistoricalEntityContract(t *testing.T) {
 	entityID := "entity-1"
 	snapshot := &runForkRevisionSnapshot{EntityMetadata: []runForkRevisionEntityMetadata{{
-		EntityID: entityID, FlowInstance: "review/one", EntityType: "  ",
+		EntityID: entityID, FlowInstance: "review/one", EntityType: "  ", ConstructionKind: "imported_state",
 	}}}
 
 	_, message, ok := loadRunForkMaterializedEntitySnapshotMetadata(snapshot, runfork.RunForkEntityState{EntityID: entityID})
 	if ok {
 		t.Fatal("blank historical entity contract was admitted")
 	}
-	if !strings.Contains(message, "cannot prove source-at-revision flow_instance/entity_type metadata") {
+	if !strings.Contains(message, "imported state has no entity type") {
 		t.Fatalf("blank historical entity contract error = %q", message)
+	}
+}
+
+func TestRunForkSnapshotMetadataKeepsConstructedFieldlessHeader(t *testing.T) {
+	for _, stageDefined := range []bool{false, true} {
+		for _, change := range []string{"exact", "missing_config", "missing_clock", "missing_entry_clock", "missing_update_clock", "missing_status", "contradictory_stage", "terminal_without_clock", "unknown_kind"} {
+			t.Run(fmt.Sprintf("staged_%t/%s", stageDefined, change), func(t *testing.T) {
+				at := time.Now().UTC()
+				fact := runForkRevisionEntityMetadata{EntityID: "flow-1", FlowInstance: "review", FlowConfig: []byte(`{}`), ConstructionKind: "constructed", StageDefined: stageDefined,
+					CreatedAt: at, UpdatedAt: at, EnteredStateAt: at, CurrentState: "pending", Status: "active", FlowTemplate: "review", Mode: "static"}
+				switch change {
+				case "missing_config":
+					fact.FlowConfig = nil
+				case "missing_clock":
+					fact.CreatedAt = time.Time{}
+				case "missing_entry_clock":
+					fact.EnteredStateAt = time.Time{}
+				case "missing_update_clock":
+					fact.UpdatedAt = time.Time{}
+				case "missing_status":
+					fact.Status = ""
+				case "contradictory_stage":
+					fact.CurrentState = "foreign"
+				case "terminal_without_clock":
+					fact.Status = "terminated"
+				case "unknown_kind":
+					fact.ConstructionKind = ""
+				}
+				got, reason, accepted := loadRunForkMaterializedEntitySnapshotMetadata(&runForkRevisionSnapshot{EntityMetadata: []runForkRevisionEntityMetadata{fact}}, runfork.RunForkEntityState{EntityID: fact.EntityID, CurrentState: "pending"})
+				if accepted != (change == "exact") {
+					t.Fatalf("constructed fieldless metadata: %+v accepted=%t reason=%s", got, accepted, reason)
+				}
+				if accepted && (got.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance || got.EntityType != "" || got.StageDefined != stageDefined) {
+					t.Fatalf("historical header facts changed: %+v", got)
+				}
+			})
+		}
 	}
 }
 

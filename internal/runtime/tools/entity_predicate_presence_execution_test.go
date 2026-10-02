@@ -30,7 +30,7 @@ accounts:
 				if region != "" {
 					metadata["region"] = region
 				}
-				mustCreateEntityID(t, ctx, exec, map[string]any{"flow_instance": "review/inst-1", "fields": map[string]any{"status": "open", "metadata": metadata}})
+				seedImportedEntityForToolTest(t, ctx, map[string]any{"flow_instance": "review/inst-1", "fields": map[string]any{"status": "open", "metadata": metadata}})
 			}
 		}
 		for _, tool := range []string{"query_entities", "query_metrics"} {

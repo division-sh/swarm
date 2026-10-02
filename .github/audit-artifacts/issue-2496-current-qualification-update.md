@@ -1,0 +1,284 @@
+# #2496: Integrated Consumer And Qualification Checkpoint
+
+Not closure, a Post-Implementation Proof Audit, or PR readiness. A/#2515 is
+merged and consumed at8466039d; E is not waiting on A integration. Preserved
+development branch: agent-e/2496-upstream-integration. The consumer repair below
+follows checkpointac6f6939a; its committed head is recorded in the issue thread.
+Authoritative watchlist refinement: swarm-docs af82fee. The original chosen
+class, P01-P60/C01-C20 and replacement Gate5916752092 remain binding.
+
+## Repairs And Actual Receipts
+
+- The previous default run atf2fe842b9 failed only the retired create_entity
+  fixture's diagnostic category. Commit9a5d6878a fixes that category; the complete
+  managed158-case catalog root passes12.660s. The earlier default RED and
+  single-subtest parent failure remain recorded, not converted into GREEN.
+- Standing declaration and bootverify now consume O6's exact no-argument
+  constructor, not child-only ResolveFlowSingleton. This is an ordinary
+  P25/P33-P36 predicate migration under the approved gate, not a new cardinality
+  owner. Disk/reconstructed keyless-root, keyed-root refusal and unassigned
+  initial-reader refusal pass race3: runtime3.649s, bootverify3.885s. The
+  authoritative standing declaration spec is updated; A's contained
+  collection checks are unchanged.
+- The complete real standing-root provider journey then reproduces the second
+  already-recorded coordinate seam on both stores: construction descendant0
+  disagrees with its exact parent/source/occurrence, RED2.598s before webhook
+  execution. O2 is rejecting a static authored root coordinate where the root
+  must belong to the selected standing generation run. No generation-one guess,
+  removed invariant or successful public-journey claim is made.
+- Activity projection fixtures now construct their actual source through O2,
+  retain initial-entry evidence, and require the root's full two-entity tree
+  versus the static producer's one entity. Rehomed child flow/type control
+  passes both stores3.727s. Historical generation's existing eight cells pass
+  both stores8.897s at43b5ab564, preserving all previous admission/refusal
+  meanings; neither receipt is served execution proof.
+- C10/C11 ordinary-source coverage is expanded to eight rows on each store:
+  absent, zero, fieldless, missing, corrupt, wrong-header-flow,
+  wrong-header-type and original-loop. Its node authority comes from the actual
+  original artifact. The fieldless replacement preserves the same fieldless
+  contract; one header/zero field rows are proven before loading. Preparation
+  compares the complete source/child/application snapshot. All16 leaves are
+  required in the proof plan; partition control passes0.008s. Actual matrix
+  remains RED22.687s: absent/zero/loop pass on both stores; fieldless fails the
+  entity_state-only read, and the other four invalid-header cases are ignored.
+- Frozena82888074's managed public construction/restart, unchanged sequential
+  terminal/public readback56.18s and unchanged1362 settlement/public readback/
+  hash-only restart200.94s pass on both stores. No race flag or deadline changes.
+  They remain earlier-tree evidence, not final-head qualification.
+
+Measured production Go, including generated/moved/production fixture lines,
+against merged8466039d:162 files,6003 additions/7410 deletions, net-1407.
+The cap is soft per the user, not an excuse to hide gross additions. Readiness
+core381 lines; the actual <=2 public-loads-per-pass guard now passes, as recorded
+below. Neither measurement establishes full chosen-class closure.
+
+## Receiver And Agent-Ownership Consumer Repair
+
+- The exact receiver owner resolves root agent routes through the admitted
+  RunScopedFlowInstance, whose stored root scope is `.`, not the run UUID.
+  Immutable construction/creating-input receipt validation remains strict.
+- Readiness plan version5 declares each agent's actual configured EntityID.
+  Static declaration agents remain entityless and do not borrow the flow
+  header's entity. Template agents retain their exact constructor entity.
+  Producers, routing projection, Manager verification and selected lifecycle
+  admission consume this field; it is hashed and old plan shapes are refused.
+  Authoritative platform-spec.yaml is updated in this same change.
+- Catalog fixtures use O2 and exact declared-agent identity, not missing-header
+  SQL or equality between static-agent and node entity ownership. Component
+  execution receives its actual acknowledged grant; managed startup admission
+  is not weakened. Restart, no-repair, source isolation, provider-call and
+  immutable publication assertions remain.
+- Two lifecycle fixtures also replace raw header/readiness INSERTs with an
+  actual prepared initial entry and atomic O2 constructor commit. Their exact
+  actor expectation controls remain store tests, not public launch proof.
+  A foreign entity with unchanged config revision is refused on both stores,
+  without authority mutation. Both backend roots are required in the proof plan.
+- A's unreachable standingActivatedFlow helper is deleted rather than revived
+  solely by new tests. Its disk/reconstructed eligibility control consumes O6
+  directly as TestStandingFlowConstructorEligibility. This follows A's handoff
+  5943078121 and E's acknowledgment5943177977; no collection/join code changed.
+
+| Executed development receipt | Result and exact boundary |
+| --- | --- |
+| /tmp/agent-e-2496-catalog-receiver-consumption-matrix-v2.log | RED21.915s; duplicate-name probe counted short names and root receipt decoding used the wrong scope. The later scope-only run remained RED3.616s on the static-agent borrowed entity. Both diagnostic results are retained. |
+| /tmp/agent-e-2496-catalog-receiver-consumption-matrix-v3.log | PASS in three packages, 49 pass records/14 roots, no failures/skips. Root preflight, duplicate-name siblings/nested receivers, source-local/child-root observer, restart, selected publication frontier, construction-before-execution, catalog smoke and assertion fixtures. Not final-head public-launcher qualification. |
+| /tmp/agent-e-2496-agent-ownership-receipt-matrix-v2.log | PASS in four packages, 85 pass records/10 roots, no failures/skips. Root/keyed/fieldless descendant receipt matrix, including crossed-agent scope; presence refusal; exact agent entity/hash and selected template controls; Manager entity verification and actual <=2 public loads/pass. The first run's root fixture had an invalid zero event and remains RED, not a production defect. |
+| /tmp/agent-e-2496-agent-ownership-receiver-race-matrix.log | Aggregate RED retained: 411 pass records, no skips. Catalog PASS383.499s at race count3; Manager/pipeline/bootverify and both private adapter packages PASS. Only two lifecycle fixture roots fail, on missing NOT NULL flow header entity IDs, on both stores/all three repetitions; no complete GREEN claim for this run. |
+| /tmp/agent-e-2496-lifecycle-constructor-fixtures.log | Corrected two-root SQLite/PostgreSQL control PASS2.223s through O2. |
+| /tmp/agent-e-2496-lifecycle-constructor-fixtures-race.log | Managed race count3 PASS48.254s, five roots/15 root executions/46 pass records, no failures/skips. Exact flow authority, sealed rejection with foreign-entity negative, source-set rebind, removed-source retirement, process-binding/preparation/takeover. |
+| Isolated d64b515c5 minus only the three-line selected-store entity guard, /tmp/agent-e-2496-entity-admission-red-probe.log | Intended RED2.351s on both stores: `readiness ownership allowed a changed agent entity: <nil>`. No fixture, hash, lifecycle, source-set or admission condition was changed. This proves the negative reaches the actual store decision; the production branch retains the guard and its corrected race matrix passes. The isolated worktree was not pushed. |
+
+### Configured-Agent Owner Consumption Census
+
+The semantic owner is the exact configured-agent expectation in the immutable
+readiness plan, consumed under its selected-store plan hash/attempt. This table
+accounts for every production producer and interpreter found by searching
+DynamicFlowRuntimeAgentExpectation, readiness.Agents and plan.Agents. It is a
+bounded owner-consumption receipt, not a substitute for the whole-class audit.
+
+| Consumer | Current authority and proof |
+| --- | --- |
+| Manager buildDynamicFlowRuntimeReadinessPlan | Produces Config.EntityID verbatim, including entityless static agents. Construction-before-execution and root/source-local observer matrices execute this path. |
+| Manager reconcileDynamicFlowRuntimeReadinessPlan | Rebuilds the same configured expectation on source/restart reconciliation; pending-agent restart, publication frontier and <=2 public-loads/pass controls execute it. |
+| Selected-store selectedContractWorkflowReadiness | Template-only producer declares its exact source entity. Existing static-agent refusal remains; selected readiness coordinate controls assert the expectation. |
+| DynamicFlowRuntimeReadinessPlan.Normalized / Hash / DecodeFlowReadinessPlan | Canonicalizes and hashes the declared empty/owned entity distinction, rejects foreign or noncanonical ownership and unsupported versions. TestFlowReadinessPlanAgentEntityOwnershipIsExactAndHashed and corrupt-authority controls prove these decisions. |
+| Bus selectedRunTargetOwnerProjection.withActivationPlans | Uses the configured expectation for agent targets; only entity-owning agents acquire materializing-entity posture. Node targets retain the independent constructed header. Root/source-local, duplicate-name, child-root, selected-fork and restart receiver journeys execute the corrected path. |
+| Manager verifyDynamicFlowAgentExpectations | Compares actual configured entity before config revision; unchanged-revision entity drift is rejected by TestFlowReadinessVerifiesAgentEntityOwnership. |
+| Both selected stores authorizeFlowReadinessMutation | Validates the exact agent payload against the hashed expectation before mutation. Foreign-entity parity, actual red control and the corrected lifecycle race matrix prove the decision, without weakening takeover or non-executable preparation. |
+| pipeline engine persisted projection clone | Copies the typed expectation without interpreting it. TestFlowReadinessPlanAgentEntityOwnershipIsExactAndHashed checks identical ownership/hash and independent mutable expectations through cloneWorkflowInstanceForEngineMutation; no default or borrowed-header ownership is introduced. |
+
+The old projection that assigned the enclosing header entity to every agent is
+deleted. Production search found no remaining producer of this plan expectation
+outside the three named producers. Legacy plan decoding is not supported.
+
+## Remaining Authority Decisions And Proof Work
+
+1. P11 exact lost-Begin acknowledgment retention/resolution is still requested
+   in5941372820. The actual Manager loses its non-executable admission owner
+   after an unknown committed response; standalone store replay is not proof.
+   Retain the exact pending request before Begin, resolve that request through
+   the selected owner, then transfer executable authority only on acknowledged
+   exact evidence. The named port extension has not been guessed into existence.
+2. C10/C11's four selected header consumers are individually enumerated in
+   5942328365. The five broader sibling families also need their explicit
+   integrate/split owner disposition; no different-package exemption or silent
+   A join ownership transfer is inferred. No production header-reader SQL was
+   changed while this recorded ownership clarification remains pending.
+3. Standing root coordinate binding is requested in5942515887: select the
+   service generation first, then bind O2/runtime/public targets to its exact
+   run-root identity, retaining separate service_id. Restart/reset and desired
+   inventory comparisons must agree. No new generation owner or shared
+   signature change is proposed.
+4. The constructor-backed contention control passes four uncontended cells,
+   but its pending-to-done writer still carries pending construction StageEntry
+   evidence and fails before the actual SQL barrier. This remains unfinished
+   fixture work: preserve the frontier commit/rollback/cancellation oracles,
+   obtain a real admitted transition, and preserve #642's replay refusals.
+
+Default managed qualification on frozen3836036a4 completed RED, not queued:
+broad-01, catalog-required-inventory and the158-case catalog verification
+passed; local-catalog-smoke then failed5.099s on the retired fixture assumptions
+corrected above. The later ten planned units did not execute. A fresh default
+run is required on the repaired committed tree. No bypass, full-suite GREEN,
+exact-head CI, formal proof audit, PR or
+failure-class elimination is claimed. The remaining decisions do not narrow
+the approved class. Parents2411/2250 stay open; no new framework, old-store
+compatibility or vendor dependency is introduced.
+
+## d64b515c5 Qualification And Constructor Projection Repair
+
+The default managed job on frozen d64b515c5 finished RED, not running or queued.
+Its first seven units passed: broad-01, catalog-required-inventory,
+catalog-required-verify, local-catalog-smoke, local-generated-fanout-fixture,
+local-fanout-handoff-ack-loss and local-api-matrix-registry.
+local-api-routing-canaries then failed2.016s because its fixture lacked the
+canonical root activation planner. The later six units did not execute.
+The log is /tmp/agent-e-2496-default-d64b515c5.log; its 181 package and5701 root
+pass records span planned units and are not a unique whole-suite pass count.
+
+The first API fixture repair used newAPIConstructorPublicationFixture; the
+shared composition below now replaces that duplicate helper.
+Its hand-built discovery child also requires the actual Parent link; the first
+constructor-backed run exposed that invalid source rather than bypassing it.
+The corrected canonical provenance matrix passes1.581s on both stores. The
+renamed connected caller-identity refusal and provenance canaries together pass
+2.330s, preserving class/operator/producer identity and immutable publication
+assertions. Receipts: api-canonical-construction-v2.log and
+remaining-local-canaries.log under /tmp/agent-e-2496-.
+
+| Executed receipt | Result and exact boundary |
+| --- | --- |
+| /tmp/agent-e-2496-remaining-local-canaries.log | Aggregate RED. 25 of28 roots pass; only mixed constructor projection, initial gate-supersession settlement and standing root coordinates fail. apiv1 PASS2.330s; deliverycontinuation PASS0.160s, including42 normal/selected retirement cells; releasee2e PASS64.449s, including both-store restart/kill and payload-less persistence. serveapp RED138.833s. This is a managed supplement, not the default plan completing. |
+| /tmp/agent-e-2496-public-volume-d64b515c5.log | Frozen d64 passes public progressive-presence construction/hash restart on both stores19.95s; unchanged sequential terminal/public-readback57.67s; unchanged1362 import/settlement/public-readback/hash restart210.83s. SQLite settles126.192915s and PostgreSQL77.249087s within the original deadlines. The sequential proof uses the compiled internal mock-lifecycle process with public RPC readback, not real-provider/public-launcher qualification. |
+| /tmp/agent-e-2496-runtime-bus-full.log | Earlier complete bus RED42.241s: five route tests populated a derived route cache without registering its source patterns. Rebuild correctly removed those unregistered entries. This is a fixture defect, not admission authority to bypass reconstruction. |
+| /tmp/agent-e-2496-routing-pattern-fixtures-race.log | All six corrected routing roots PASS under race count20,12.019s. Fixtures register their exact patterns and rebuild through the existing owner. Duplicate-ID, lineage, authored route and admission assertions remain. These manual unit routes do not prove persisted constructor authority. |
+| /tmp/agent-e-2496-runtime-bus-pattern-repair.log | Complete bus remained RED46.606s on three synthetic create/preflight/replay controls. Their constructor input declares the resolved key required, but the original producer payload does not carry it. No schema or original payload assertion was relaxed. |
+| /tmp/agent-e-2496-constructor-key-slot-red-v2.log | Actual red-first14-cell declared/undeclared-key unit matrix RED0.115s: the declared-required-key positive fails. The earlier first attempt was a build error caused by moving a diagnostic file during compilation and is not semantic reproduction evidence. |
+| /tmp/agent-e-2496-constructor-projection-key-slot-race.log | Both constructor projection/key-slot roots PASS under race count10,5.258s. Exact key, unrelated/extra projection, missing resolution, key collision, required message, unknown field, wrong type, original payload and numeric lexeme checks remain. |
+| /tmp/agent-e-2496-synthetic-constructor-complete-path.log | Managed three bus synthetic create/preflight/replay controls PASS0.164s; all eight real mixed-connection cases PASS14.452s on both stores. No remint, recipient, target, local/connect or immutable producer assertion changed. |
+| /tmp/agent-e-2496-runtime-bus-constructor-repair.log | Complete bus PASS46.806s after the common constructor repair, no failures/skips. This is package qualification of the working tree, not exact committed-head/full-suite/CI evidence. |
+| /tmp/agent-e-2496-agent-expectation-clone.log | Configured-agent clone/hash owner controls PASS under race count20,1.112s. Exact ownership/hash and independently mutable clones are asserted. |
+
+### Original Publication, Resolved Key And Handler Projection
+
+The constructor consumes original publication fields, not a handler-local merged
+delivery. The request validates that a nonempty projection contains exactly its
+declared instance key, agrees with typed resolution and preserves producer-key
+collision refusal. O6 InitialFields normalizes the resolved key first. If its
+admitted input schema declares that key, resolution satisfies only that slot in
+a validation copy; otherwise the key is not added. Supplied-field projection and
+publication bytes remain unchanged. Extra fields and other required input
+members are still validated normally. platform-spec.yaml states this invariant.
+
+Production search found one consumer of ConstructorPayload and InitialFields:
+Manager flow_activation.go, which obtains the former and passes it plus the exact
+ResolvedKey to the latter before construction. CompileFlowConstructor remains
+the eligibility/fact owner; the existing engine constructor assignment checker
+excludes the key from supplied-field inference. Delivery projection remains the
+events.NewDeliveryEvent owner, consumed independently by the actual handler.
+The producer event is not rewritten and no alternate constructor was added.
+
+### Additional Qualification Blocker
+
+The actual run-control setup reaches eager initial entry, then commits a real
+mailbox.card_superseded publication on its first handler. The existing engine
+commit-result consumer omits lifecycle emissions from the returned follow-up;
+both stores retain Replayable=1 before run.pause. RED12.957s in
+/tmp/agent-e-2496-run-control-initial-settlement.log. The32-cell typed
+result-consumption probe is also RED0.011s:16 lifecycle-present cells fail and
+16 lifecycle-absent controls pass. Its source is parked as text; no production
+handoff edit is made pending disposition. Exact ownership/path/proof accounting
+is in issue-2496-lifecycle-publication-handoff-probe.md and issue comment5943854895.
+
+This is a fourth separately recorded decision request, not evidence that the
+three earlier authority requests or the contention fixture have been settled.
+The mixed projection failure is repaired; public run-control and standing-root
+journeys remain RED. The full pipeline/API supplement completed as recorded
+below. No PR readiness or failure-class elimination is claimed.
+
+## Shared API Construction And Canonical Root Completion
+
+The actual complete pipeline/API supplement passed pipeline219.057s but failed
+API125.540s at43 roots. Most lacked O2 construction composition. The shared
+durable API fixture now installs the real Manager constructor and existing
+initial-entry coordinator for its exact selected source. Its post-commit
+finalizer validates acknowledged construction only; it does not claim physical
+attachment or public launcher readiness. The duplicate local constructor
+fixture is deleted. Custom publication interceptors and fault owners remain.
+
+The next complete API run failed111.584s at six roots, retained as
+/tmp/agent-e-2496-api-shared-constructor-v2.log. Three private-target fixtures
+used partial SQL headers/readiness; they now construct their exact typed key
+and actual creating receipt through O2. The deliberately undeclared state-only
+orphan remains a hostile import fixture, without a forged header or readiness.
+The root/template input-name collision still proves caller payload identity
+does not select a private receiver. Its source now actually declares the keyed
+template that its existing concrete-instance oracle names.
+
+The mailbox fixture removes retired handler construction and its unused field
+declaration. It constructs the actual run-root header through O2 before creating
+the approval card, uses the admitted source payload and declared handler key,
+and retains the single real HTTP call, exact body, persisted request/outcome,
+card readback and both-store assertions. It is an API/provider component proof,
+not compiled public-launcher qualification.
+
+The two completion fixtures exposed another O2 consumer omission. The compiled
+stage classifier did not index the canonical root template '.', so a genuinely
+constructed fieldless root remained malformed to completion. The existing
+classifier now indexes its admitted root and rejects a competing root catalog;
+known contradictory instance catalogs and exact stage spelling remain refused.
+The actual writer journey also explicitly advances the eagerly constructed
+parent through its declared root handler before terminal completion.
+platform-spec.yaml records the canonical header/catalog contract.
+
+| Executed receipt | Result and exact boundary |
+| --- | --- |
+| /tmp/agent-e-2496-constructor-pipeline-api-full.log | Pipeline PASS219.057s; API RED125.540s at43 roots. Not aggregate GREEN. |
+| /tmp/agent-e-2496-api-shared-constructor-v2.log | Complete API RED111.584s at six remaining roots. Their exact constructor/grammar/terminal oracles are retained above. |
+| /tmp/agent-e-2496-root-stage-classifier-red.log | RED0.005s: exact constructed root rejected, contradictory child/root catalog accepted. This directly exercises the compiled classifier, not a fixture catalog. |
+| /tmp/agent-e-2496-root-stage-classifier-race.log | Three classifier roots PASS under race count20,1.066s: canonical root, exact stage/flow contradiction and stateless posture. |
+| /tmp/agent-e-2496-root-classifier-budget-race.log | Existing selected-stage budget control PASS under race count20,1.062s; no recovery policy change. |
+| /tmp/agent-e-2496-api-construction-completion.log | Five focused API roots PASS7.868s, including both-store actual writer/rehydrated-source terminal completion and public readback. The earlier similarly named filter selected no tests and receives no execution credit. |
+| /tmp/agent-e-2496-api-complete-migration.log | Complete API PASS269.206s:310 roots/1732 pass records, zero failures/skips. Includes both-store real HTTP proposed-effect release. Working-tree evidence, not exact committed-head CI or full-suite qualification. |
+| /tmp/agent-e-2496-partition-consumer-migrations.log | Current required-root/census/constructor-backend partition controls PASS43.446s. No backend leaf removed. |
+| /tmp/agent-e-2496-stage-owner-guard-red.log | RED4.789s on the exact existing classifier owner's metadata-use count changing1 to3. The two added uses index/protect its root; no new consumer authority is added. |
+| /tmp/agent-e-2496-stage-owner-guard.log | Positive and adversarial ownership guards PASS21.516s after recording the exact existing owner's three uses. Foreign authority, additional approved-owner uses and hostile type-erasure controls remain required. |
+| /tmp/agent-e-2496-api-constructor-completion-race.log | All six API construction/completion/mailbox roots PASS under race count3,61.759s, zero failures/skips. Both-store backend leaves and all three repetitions execute; private-target controls remain PostgreSQL as originally authored. |
+| /tmp/agent-e-2496-retired-readiness-api-guards.log | Two API-retirement/production-consumer static guards PASS1.226s. No retired API or handler-construction interpreter is restored. |
+
+Systematic consumption: runtime selectedWorkflowStageClassifier constructs this
+one compiled owner from the selected source; runLifecycleTerminalCatalog and
+the runlifecycle typed catalog delegate to it; selected-store ReadRunSummary
+passes canonical flow-instance header coordinates; budget recovery consumes
+the classifier built for each exact source. No SQL stage-name classification or
+second root graph owner is added. Existing empty selectors in domain/component
+controls remain selectors, not a retained empty-template selected-store writer.
+
+Current measured production Go versus merged8466039d, no renames and including
+generated/moved/production fixtures:163 files,+6042/-7411,net-1369. Readiness
+core remains381 lines. The committed162-file measurement above is historical.
+The four recorded authority requests and contention transition proof remain
+unresolved. Managed owner-guard and six-root API race qualification completed
+as recorded above. YAML parsing and diff checks pass. Canonical watchlist
+refinement is pushed to the docs hub atce5dd0b. No formal proof audit, default full-suite GREEN,
+exact-head CI or reviewable PR is claimed.

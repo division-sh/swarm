@@ -163,11 +163,7 @@ func (p deliveryRecipientPolicy) evaluate(ctx context.Context, evt events.Event,
 		}
 		return manifest, nil
 	}
-	manifest, err := filterDeliveryRecipientCandidates(p.semanticSource, evt, recipients, descriptors, targetDescriptors, projection, localSource)
-	if err != nil {
-		return deliveryRecipientManifest{}, err
-	}
-	return admitPendingStaticAgentRecipients(evt, recipients, descriptors, projection, manifest, localSource)
+	return filterDeliveryRecipientCandidates(p.semanticSource, evt, recipients, descriptors, targetDescriptors, projection, localSource)
 }
 
 func agentLifecycleAdmissionsForCandidates(recipients []deliveryRecipientCandidate) map[agentidentity.Identity]agentLifecycleAdmission {
@@ -182,88 +178,6 @@ func agentLifecycleAdmissionsForCandidates(recipients []deliveryRecipientCandida
 		return nil
 	}
 	return out
-}
-
-func admitPendingStaticAgentRecipients(
-	evt events.Event,
-	recipients []deliveryRecipientCandidate,
-	descriptors map[agentidentity.Identity]ActiveAgentDescriptor,
-	projection selectedRunTargetOwnerProjection,
-	manifest deliveryRecipientManifest,
-	localSource ordinaryPublicationSource,
-) (deliveryRecipientManifest, error) {
-	admitted := false
-	root := rootExecutionCoordinate(projection.source, evt.RunID())
-	for _, candidate := range normalizeDeliveryRecipientCandidates(recipients) {
-		if candidate.AgentLifecycle != agentLifecycleAdmissionStaticDeclaration {
-			continue
-		}
-		identity := candidate.AgentIdentity.Normalize()
-		if _, active := descriptors[identity]; active {
-			continue
-		}
-		if err := identity.Validate(); err != nil || identity.RunID != strings.TrimSpace(evt.RunID()) {
-			return deliveryRecipientManifest{}, fmt.Errorf("admit static declaration delivery identity: event and agent run ownership disagree")
-		}
-		target, matched := staticAgentLifecycleTarget(evt, identity, root)
-		if len(eventDeliveryTargetRoutes(evt)) == 0 && !localSource.route.Empty() {
-			target, matched = localSource.route, localSource.ownsAgent(identity.FlowInstance())
-		}
-		if !matched {
-			continue
-		}
-		owner := events.DeliveryTargetOwnership{}
-		if !target.Empty() {
-			var err error
-			owner, err = projection.resolveSelectedRoute(target)
-			if err != nil {
-				return deliveryRecipientManifest{}, fmt.Errorf("admit static declaration delivery target for %s: %w", identity.Description(), err)
-			}
-			if !owner.ExistingEntity() && !owner.MaterializingEntity() {
-				return deliveryRecipientManifest{}, fmt.Errorf("admit static declaration delivery target for %s: exact entity owner is required", identity.Description())
-			}
-		}
-		manifest.LiveRecipients = append(manifest.LiveRecipients, candidate)
-		manifest.Recipients = append(manifest.Recipients, candidate.ID)
-		manifest.PersistedRecipients = append(manifest.PersistedRecipients, candidate.ID)
-		manifest.DeliveryRoutes = append(manifest.DeliveryRoutes, events.DeliveryRoute{
-			Recipient: events.MustAgentDeliveryRecipient(candidate.ID), AgentIdentity: identity, Target: owner,
-		})
-		if manifest.AgentLifecycles == nil {
-			manifest.AgentLifecycles = make(map[agentidentity.Identity]agentLifecycleAdmission)
-		}
-		manifest.AgentLifecycles[identity] = agentLifecycleAdmissionStaticDeclaration
-		admitted = true
-	}
-	manifest.LiveRecipients = normalizeDeliveryRecipientCandidates(manifest.LiveRecipients)
-	manifest.Recipients = uniqueStrings(manifest.Recipients)
-	manifest.PersistedRecipients = uniqueStrings(manifest.PersistedRecipients)
-	manifest.DeliveryRoutes = events.NormalizeDeliveryRoutes(manifest.DeliveryRoutes)
-	if admitted {
-		manifest.TargetFailure = 0
-	}
-	return manifest, nil
-}
-
-func staticAgentLifecycleTarget(evt events.Event, identity agentidentity.Identity, root semanticview.RootExecutionCoordinate) (events.RouteIdentity, bool) {
-	targets := eventDeliveryTargetRoutes(evt)
-	if len(targets) == 0 {
-		return events.RouteIdentity{}, true
-	}
-	for _, target := range targets {
-		target = target.Normalized()
-		switch identity.Route.Presence {
-		case agentidentity.RouteRoot:
-			if exactRootTarget(target, root) {
-				return target, true
-			}
-		case agentidentity.RoutePresent:
-			if target.FlowInstance == identity.FlowInstance() {
-				return target, true
-			}
-		}
-	}
-	return events.RouteIdentity{}, false
 }
 
 type deliveryPlanner struct {
@@ -341,6 +255,15 @@ func (p deliveryPlanner) planAtGeneration(ctx context.Context, evt events.Event)
 		})
 		return projection.resolveRoutePlan(routePlan)
 	}
+	rootPlans, err := p.prepareRootConstruction(ctx, evt, projection)
+	if err != nil {
+		return RoutePlan{}, err
+	}
+	projection, err = projection.withActivationPlans(rootPlans)
+	if err != nil {
+		return RoutePlan{}, err
+	}
+	ctx = withSelectedRunTargetOwnerProjection(ctx, projection)
 	connectPlan, err := p.connectPlanner.Plan(ctx, evt)
 	if err != nil {
 		return RoutePlan{}, err
@@ -350,6 +273,8 @@ func (p deliveryPlanner) planAtGeneration(ctx context.Context, evt events.Event)
 		if err != nil {
 			return RoutePlan{}, err
 		}
+		ctx = withSelectedRunTargetOwnerProjection(ctx, projection)
+		connectPlan.ActivationPlans = append(rootPlans, connectPlan.ActivationPlans...)
 		routePlan = routePlanFromConnectRouteDispatch(evt, connectPlan)
 		if routePlan.AuthorityState == RoutePlanAuthorityCanonicalFailedClosed {
 			localPlan, localErr := p.planIndependentPubsubBranch(ctx, evt, true)
@@ -376,6 +301,7 @@ func (p deliveryPlanner) planAtGeneration(ctx context.Context, evt events.Event)
 		return RoutePlan{}, err
 	}
 	routePlan.ConnectEvaluation = connectPlan.Evaluation
+	routePlan.ActivationPlans = rootPlans
 	return projection.resolveRoutePlan(routePlan)
 }
 
@@ -952,6 +878,12 @@ func filterDeliveryRecipientCandidates(
 			}
 			scoped := recipient
 			scoped.AgentIdentity = descriptor.Identity
+			if scoped.AgentLifecycle == agentLifecycleAdmissionStaticDeclaration {
+				scoped.AgentLifecycle = agentLifecycleAdmissionNone
+			}
+			if _, constructing := projection.constructingAgents[descriptor.Identity]; constructing {
+				scoped.AgentLifecycle = agentLifecycleAdmissionMaterializingFlow
+			}
 			allowed = append(allowed, scoped.ID)
 			allowedCandidates = append(allowedCandidates, scoped)
 			persisted = append(persisted, scoped.ID)
@@ -972,6 +904,7 @@ func filterDeliveryRecipientCandidates(
 		Recipients:          uniqueStrings(allowed),
 		PersistedRecipients: persisted,
 		DeliveryRoutes:      events.NormalizeDeliveryRoutes(deliveryRoutes),
+		AgentLifecycles:     agentLifecycleAdmissionsForCandidates(allowedCandidates),
 	}
 	if len(targets) > 0 && len(manifest.LiveRecipients) == 0 {
 		manifest.TargetFailure = targetDeliveryFailure(evt, targetFailureDescriptors)
@@ -983,7 +916,7 @@ func matchingAgentDescriptors(
 	recipient deliveryRecipientCandidate,
 	descriptors map[agentidentity.Identity]ActiveAgentDescriptor,
 ) []ActiveAgentDescriptor {
-	if !recipient.AgentIdentity.IsZero() {
+	if !recipient.AgentIdentity.IsZero() && recipient.AgentLifecycle != agentLifecycleAdmissionStaticDeclaration {
 		descriptor, ok := descriptors[recipient.AgentIdentity.Normalize()]
 		if !ok {
 			return nil
@@ -995,6 +928,12 @@ func matchingAgentDescriptors(
 		descriptor = descriptor.Normalized()
 		if identity.AgentID() != recipient.ID || descriptor.Identity != identity {
 			continue
+		}
+		if recipient.AgentLifecycle == agentLifecycleAdmissionStaticDeclaration {
+			declared := recipient.AgentIdentity.Normalize()
+			if identity.RunID != declared.RunID || identity.Name != declared.Name || identity.Route.Presence != declared.Route.Presence || identity.Route.ScopeKey != declared.Route.ScopeKey {
+				continue
+			}
 		}
 		out = append(out, descriptor)
 	}

@@ -252,6 +252,10 @@ func seedServeDynamicTopologyReadiness(
 	if err != nil {
 		t.Fatalf("marshal readiness plan: %v", err)
 	}
+	planHash, err := plan.Hash()
+	if err != nil {
+		t.Fatal(err)
+	}
 	flowInsert := `
 		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
 		VALUES ($1::uuid, $2, $3, 'template', '{}'::jsonb, 'active', NOW())
@@ -262,8 +266,8 @@ func seedServeDynamicTopologyReadiness(
 	`
 	readinessInsert := `
 		INSERT INTO flow_instance_runtime_readiness (
-			run_id, instance_path, plan, topology_ready_at, created_at, updated_at
-		) VALUES ($1::uuid, $2, $3::jsonb, $4, NOW(), NOW())
+			run_id, instance_path, plan, plan_hash, phase, created_at, updated_at
+		) VALUES ($1::uuid, $2, $3::jsonb, $4, $5, NOW(), NOW())
 	`
 	if backend == "sqlite" {
 		flowInsert = `
@@ -276,8 +280,8 @@ func seedServeDynamicTopologyReadiness(
 		`
 		readinessInsert = `
 			INSERT INTO flow_instance_runtime_readiness (
-				run_id, instance_path, plan, topology_ready_at, created_at, updated_at
-			) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+				run_id, instance_path, plan, plan_hash, phase, created_at, updated_at
+			) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 		`
 	}
 	if _, err := db.Exec(flowInsert, runID, instancePath, parts[0]); err != nil {
@@ -286,23 +290,20 @@ func seedServeDynamicTopologyReadiness(
 	if _, err := db.Exec(entityInsert, entityID, runID, instancePath); err != nil {
 		t.Fatalf("seed entity state %s: %v", instancePath, err)
 	}
-	if _, err := db.Exec(readinessInsert, runID, instancePath, raw, nullableServeReadinessTime(complete)); err != nil {
+	phase := runtimepipeline.FlowAttachmentPlanned
+	if complete {
+		phase = runtimepipeline.FlowAttachmentReady
+	}
+	if _, err := db.Exec(readinessInsert, runID, instancePath, raw, planHash, phase); err != nil {
 		t.Fatalf("seed readiness %s: %v", instancePath, err)
 	}
-}
-
-func nullableServeReadinessTime(complete bool) any {
-	if !complete {
-		return nil
-	}
-	return time.Now().UTC()
 }
 
 func snapshotServeDynamicTopologyReadiness(t *testing.T, db *sql.DB) []string {
 	t.Helper()
 	rows, err := db.Query(`
 		SELECT CAST(readiness.run_id AS TEXT), readiness.instance_path, CAST(readiness.plan AS TEXT),
-		       COALESCE(CAST(readiness.topology_ready_at AS TEXT), ''), CAST(readiness.updated_at AS TEXT),
+		       readiness.phase, CAST(readiness.updated_at AS TEXT),
 		       run.bundle_hash, run.status
 		FROM flow_instance_runtime_readiness AS readiness
 		JOIN runs AS run ON run.run_id = readiness.run_id

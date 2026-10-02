@@ -136,6 +136,15 @@ func (c FlowInstanceActivationCommand) Validate() error {
 	if len(c.RouteTopology) == 0 {
 		return errors.New("flow instance activation requires exact route topology")
 	}
+	owners := make(map[runtimeflowidentity.RunScopedFlowInstance]bool, len(c.RouteTopology))
+	for _, set := range c.RouteTopology {
+		owners[set.Identity] = true
+	}
+	for _, plan := range c.Plan.ConstructionPlans() {
+		if !owners[runtimeflowidentity.RunScopedFlowInstance{RunID: plan.Readiness.RunID, Route: plan.Identity.Route()}] {
+			return fmt.Errorf("construction %s omitted its exact route topology", plan.Identity.InstancePath)
+		}
+	}
 	return nil
 }
 
@@ -244,6 +253,16 @@ type CommittedPublication struct {
 	RouteTopology    []FlowInstanceRouteRecordSet
 	// Acknowledged is false for transaction-local publication evidence.
 	Acknowledged bool
+}
+
+func (r CommittedPublication) WithCommitAcknowledgment() CommittedPublication {
+	r.Acknowledged = true
+	activations := make([]CommittedFlowInstanceActivation, len(r.Activations))
+	for index, activation := range r.Activations {
+		activations[index] = activation.WithCommitAcknowledgment()
+	}
+	r.Activations = activations
+	return r
 }
 
 func (r CommittedPublication) Validate() error {

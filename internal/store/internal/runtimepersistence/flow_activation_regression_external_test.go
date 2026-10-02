@@ -2,6 +2,7 @@ package runtimepersistence_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -14,6 +15,116 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/google/uuid"
 )
+
+func TestFlowAttachmentConditionalPhaseProgressBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newDynamicFlowCreationAtomicityFixture(t, backend)
+			// This component fixture installs no process resources. Settlement here
+			// exercises the store protocol, not a claim of Manager cleanup proof.
+			if err := f.selected.AbandonDynamicFlowRuntimeActivationAttempt(f.ctx, f.attempt); err != nil {
+				t.Fatal(err)
+			}
+			observed, found, err := f.selected.LoadDynamicFlowRuntimeReadiness(f.ctx, f.runID, f.plan.Identity.Route())
+			if err != nil || !found {
+				t.Fatalf("load abandoned predecessor: found=%v err=%v", found, err)
+			}
+			admitted, err := f.selected.BeginDynamicFlowRuntimeActivation(f.ctx, observed.Plan, observed.AttemptOrdinal, f.attempt.ProcessBinding())
+			if err != nil || !admitted.Acknowledged {
+				t.Fatalf("admit successor: %+v %v", admitted, err)
+			}
+			attempt := admitted.Attempt
+			if result, err := f.selected.AdvanceFlowAttachment(f.ctx, attempt, runtimepipeline.FlowAttachmentAgentsRegistered, time.Now().UTC()); err == nil || result.Acknowledged {
+				t.Fatalf("skipped initial phase: %+v %v", result, err)
+			}
+			for _, previous := range []runtimepipeline.FlowAttachmentPhase{runtimepipeline.FlowAttachmentPlanned, runtimepipeline.FlowAttachmentAgentsRegistered, runtimepipeline.FlowAttachmentRouteInstalled, runtimepipeline.FlowAttachmentTimersArmed} {
+				canceled, cancel := context.WithCancel(f.ctx)
+				cancel()
+				result, err := f.selected.AdvanceFlowAttachment(canceled, attempt, previous, time.Now().UTC())
+				if !errors.Is(err, context.Canceled) || result.Acknowledged {
+					t.Fatalf("canceled %s progressed: %+v %v", previous, result, err)
+				}
+				row, found, err := f.selected.LoadDynamicFlowRuntimeReadiness(f.ctx, f.runID, f.plan.Identity.Route())
+				if err != nil || !found || row.Phase != previous || row.AttemptOrdinal != attempt.Ordinal() {
+					t.Fatalf("cancellation changed %s: found=%v row=%+v err=%v", previous, found, row, err)
+				}
+				next, err := previous.Next()
+				if err != nil {
+					t.Fatal(err)
+				}
+				result, err = f.selected.AdvanceFlowAttachment(f.ctx, attempt, previous, time.Now().UTC())
+				if err != nil || !result.Acknowledged || result.Progress != runtimepipeline.FlowAttachmentAdvanced || result.Phase != next {
+					t.Fatalf("advance %s: %+v %v", previous, result, err)
+				}
+				result, err = f.selected.AdvanceFlowAttachment(f.ctx, attempt, previous, time.Now().UTC())
+				if err != nil || !result.Acknowledged || result.Progress != runtimepipeline.FlowAttachmentAlreadyAdvanced || result.Phase != next {
+					t.Fatalf("idempotent %s: %+v %v", previous, result, err)
+				}
+			}
+			if result, err := f.selected.AdvanceFlowAttachment(f.ctx, attempt, runtimepipeline.FlowAttachmentReady, time.Now().UTC()); err == nil || result.Acknowledged {
+				t.Fatalf("ready had a sixth attachment phase: %+v %v", result, err)
+			}
+			stale, err := f.selected.AdvanceFlowAttachment(f.ctx, f.attempt, runtimepipeline.FlowAttachmentPlanned, time.Now().UTC())
+			if err != nil || !stale.Acknowledged || stale.Progress != runtimepipeline.FlowAttachmentStale {
+				t.Fatalf("old predecessor progressed successor: %+v %v", stale, err)
+			}
+		})
+	}
+}
+
+func TestFlowAttachmentPlanABARetainsPredecessorUntilSettlementBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newDynamicFlowCreationAtomicityFixture(t, backend)
+			original, found, err := f.selected.LoadDynamicFlowRuntimeReadiness(f.ctx, f.runID, f.plan.Identity.Route())
+			if err != nil || !found || original.AttemptState != "accepted" {
+				t.Fatalf("load admitted predecessor: found=%v row=%+v err=%v", found, original, err)
+			}
+			current := original
+			for _, version := range []string{original.Plan.WorkflowVersion + "-changed", original.Plan.WorkflowVersion} {
+				desired := current.Plan
+				desired.WorkflowVersion = version
+				results, err := f.selected.ReconcileDynamicFlowRuntimeReadinessPlans(f.ctx, []runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation{{Observed: current, Expected: desired}}, time.Now().UTC())
+				if err != nil || len(results) != 1 || !results[0].Changed || results[0].AttemptOrdinal != original.AttemptOrdinal {
+					t.Fatalf("plan change disposed an unsettled predecessor: result=%+v err=%v", results, err)
+				}
+				current, found, err = f.selected.LoadDynamicFlowRuntimeReadiness(f.ctx, f.runID, f.plan.Identity.Route())
+				if err != nil || !found || current.AttemptState != "superseded" || current.AttemptOrdinal != original.AttemptOrdinal {
+					t.Fatalf("lost exact predecessor: found=%v row=%+v err=%v", found, current, err)
+				}
+			}
+			if current.PlanHash != original.PlanHash {
+				t.Fatal("ABA did not restore exact planning equality")
+			}
+			_, err = f.selected.ReconcileDynamicFlowRuntimeReadinessPlans(f.ctx, []runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation{{Observed: original, Expected: original.Plan}}, time.Now().UTC())
+			if !errors.Is(err, runtimepipeline.ErrDynamicFlowRuntimeReadinessObservationStale) {
+				t.Fatalf("planning equality revived stale observed authority: %v", err)
+			}
+			stale, err := f.selected.AdvanceFlowAttachment(f.ctx, f.attempt, runtimepipeline.FlowAttachmentTimersArmed, time.Now().UTC())
+			if err != nil || !stale.Acknowledged || stale.Progress != runtimepipeline.FlowAttachmentStale {
+				t.Fatalf("superseded predecessor progressed restored plan: %+v %v", stale, err)
+			}
+			if _, err := f.selected.BeginDynamicFlowRuntimeActivation(f.ctx, current.Plan, current.AttemptOrdinal, f.attempt.ProcessBinding()); err == nil {
+				t.Fatal("successor bypassed predecessor settlement")
+			}
+			if err := f.selected.AbandonDynamicFlowRuntimeActivationAttempt(f.ctx, f.attempt); err != nil {
+				t.Fatal(err)
+			}
+			successor, err := f.selected.BeginDynamicFlowRuntimeActivation(f.ctx, current.Plan, current.AttemptOrdinal, f.attempt.ProcessBinding())
+			if err != nil || !successor.Acknowledged || successor.Reused || successor.Attempt.Ordinal() != original.AttemptOrdinal+1 {
+				t.Fatalf("settled ABA successor: %+v %v", successor, err)
+			}
+			row, found, err := f.selected.LoadDynamicFlowRuntimeReadiness(f.ctx, f.runID, f.plan.Identity.Route())
+			if err != nil || !found || row.Phase != runtimepipeline.FlowAttachmentPlanned || row.PlanHash != original.PlanHash {
+				t.Fatalf("successor inherited removed resources: found=%v row=%+v err=%v", found, row, err)
+			}
+			stale, err = f.selected.AdvanceFlowAttachment(f.ctx, f.attempt, runtimepipeline.FlowAttachmentPlanned, time.Now().UTC())
+			if err != nil || !stale.Acknowledged || stale.Progress != runtimepipeline.FlowAttachmentStale {
+				t.Fatalf("late predecessor changed successor: %+v %v", stale, err)
+			}
+		})
+	}
+}
 
 func TestFlowActivationTerminalTimerMutationBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
@@ -120,11 +231,11 @@ func TestFailedFlowActivationRetirementIsPendingBothStores(t *testing.T) {
 			if err := f.selected.RetireDynamicFlowRuntimeActivationAttempt(f.ctx, f.attempt); err != nil {
 				t.Fatal(err)
 			}
-			admitted, err := f.selected.BeginDynamicFlowRuntimeActivation(f.ctx, plan, results[0].PlanRevision, f.attempt.ProcessBinding())
+			admitted, err := f.selected.BeginDynamicFlowRuntimeActivation(f.ctx, plan, results[0].AttemptOrdinal, f.attempt.ProcessBinding())
 			if err != nil || !admitted.Acknowledged {
 				t.Fatalf("begin: %+v %v", admitted, err)
 			}
-			ready, err := f.selected.MarkDynamicFlowRuntimeTopologyReadyForAttempt(f.ctx, admitted.Attempt, plan, time.Now().UTC())
+			ready, err := completeFlowAttachmentFixture(f.ctx, f.selected, admitted.Attempt, time.Now().UTC())
 			if err != nil || !ready.Acknowledged {
 				t.Fatalf("mark: %+v %v", ready, err)
 			}
@@ -159,7 +270,7 @@ func TestFailedFlowActivationCreationPosturesRemainRetryableBothStores(t *testin
 					}
 				}
 				before, found, err := f.selected.LoadDynamicFlowRuntimeReadiness(f.ctx, f.runID, f.plan.Identity.Route())
-				if err != nil || !found || before.TopologyReadyAt.IsZero() {
+				if err != nil || !found || (before.Phase != runtimepipeline.FlowAttachmentReady) {
 					t.Fatalf("load completed attempt: found=%v readiness=%+v err=%v", found, before, err)
 				}
 				if err := f.selected.AbandonDynamicFlowRuntimeActivationAttempt(f.ctx, f.attempt); err != nil {
@@ -170,12 +281,16 @@ func TestFailedFlowActivationCreationPosturesRemainRetryableBothStores(t *testin
 					t.Fatalf("failed attempt lost retry projection: pending=%d err=%v", len(projection.CurrentPending), err)
 				}
 				after := projection.CurrentPending[0]
-				if !after.TopologyReadyAt.IsZero() || !after.CreationEventEmittedAt.Equal(before.CreationEventEmittedAt) {
+				if after.AttemptState != "aborted" || after.AttemptOrdinal != before.AttemptOrdinal || after.Phase != before.Phase || !after.CreationEventEmittedAt.Equal(before.CreationEventEmittedAt) {
 					t.Fatalf("abandonment changed creation evidence: before=%+v after=%+v", before, after)
 				}
-				admitted, err := f.selected.BeginDynamicFlowRuntimeActivation(f.ctx, after.Plan, after.PlanRevision, f.attempt.ProcessBinding())
+				admitted, err := f.selected.BeginDynamicFlowRuntimeActivation(f.ctx, after.Plan, after.AttemptOrdinal, f.attempt.ProcessBinding())
 				if err != nil || !admitted.Acknowledged || admitted.Reused || admitted.Attempt.ID() == f.attempt.ID() {
 					t.Fatalf("retry admission: %+v %v", admitted, err)
+				}
+				retried, found, err := f.selected.LoadDynamicFlowRuntimeReadiness(f.ctx, f.runID, f.plan.Identity.Route())
+				if err != nil || !found || retried.Phase != runtimepipeline.FlowAttachmentPlanned || retried.AttemptState != "accepted" || retried.AttemptOrdinal != after.AttemptOrdinal+1 {
+					t.Fatalf("retry inherited abandoned physical progress: found=%v row=%+v err=%v", found, retried, err)
 				}
 			})
 		}

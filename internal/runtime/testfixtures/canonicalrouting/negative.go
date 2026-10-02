@@ -20,7 +20,7 @@ func ApplyCompositionConnectReceiverPinCollisionMutation(t testing.TB, root stri
 		"  subscribes_to: [deploy.completed, deploy.audited]\n")
 	applyClosedReplacement(t, filepath.Join(root, "consumer", "nodes.yaml"),
 		"      advances_to: done\n",
-		"      advances_to: done\n    deploy.audited:\n      create_entity: true\n      advances_to: done\n")
+		"      advances_to: done\n    deploy.audited:\n      advances_to: done\n")
 }
 
 // TemplateSelectOrCreateNegativeMutation is the closed fail-closed matrix for

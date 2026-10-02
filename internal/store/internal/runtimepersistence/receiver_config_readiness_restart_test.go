@@ -63,7 +63,13 @@ func TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores(t *tes
 				publisher := newPublisher()
 				req := f.request("business-key", "ti-restart", "committed")
 				req.Config["nested"] = []any{int64(7), float64(7)}
-				req.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "request.started", "operator", "", []byte(`{}`), 0, correlation.RunIDFromContext(f.ctx), events.EventEnvelope{}, req.OccurredAt)
+				payload, err := canonicaljson.MarshalPreservingNumberKinds(map[string]any{
+					"request_id": req.ResolvedKey, "label": req.Config["label"], "enabled": true, "nested": req.Config["nested"],
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				req.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "request.started", "operator", "", payload, 0, correlation.RunIDFromContext(f.ctx), events.EventEnvelope{}, req.OccurredAt)
 				if err := publisher.Publish(f.ctx, req.TriggerEvent); err != nil {
 					t.Fatal(err)
 				}
@@ -86,7 +92,7 @@ func TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores(t *tes
 					if err != nil || !found {
 						t.Fatalf("load numeric readiness: found=%v err=%v", found, err)
 					}
-					admitted, err := f.workflows.BeginDynamicFlowRuntimeActivation(f.ctx, readiness.Plan, readiness.PlanRevision, binding)
+					admitted, err := f.workflows.BeginDynamicFlowRuntimeActivation(f.ctx, readiness.Plan, readiness.AttemptOrdinal, binding)
 					if err != nil || !admitted.Acknowledged {
 						t.Fatalf("admit numeric activation: %+v err=%v", admitted, err)
 					}
@@ -94,15 +100,17 @@ func TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores(t *tes
 					creation := *changed.CreationEvent
 					creation.Payload = []byte(strings.ReplaceAll(string(creation.Payload), "7.0", "7"))
 					changed.CreationEvent = &creation
-					if _, err := f.workflows.MarkDynamicFlowRuntimeTopologyReadyForAttempt(f.ctx, admitted.Attempt, changed, req.OccurredAt); err == nil {
-						t.Fatal("topology CAS accepted a substituted numeric kind")
+					if admission, err := f.workflows.BeginDynamicFlowRuntimeActivation(f.ctx, changed, admitted.Attempt.Ordinal(), admitted.Attempt.ProcessBinding()); err == nil || admission.Acknowledged {
+						t.Fatal("attachment planning accepted a substituted numeric kind")
 					}
 					stored, _, err := f.store.LoadDynamicFlowRuntimeReadiness(f.ctx, plan.Readiness.RunID, plan.Identity.Route())
-					if err != nil || !stored.TopologyReadyAt.IsZero() {
+					if err != nil || (stored.Phase == pipeline.FlowAttachmentReady) {
 						t.Fatalf("rejected topology CAS mutated readiness: %#v err=%v", stored, err)
 					}
-					if _, err := f.workflows.MarkDynamicFlowRuntimeTopologyReadyForAttempt(f.ctx, admitted.Attempt, plan.Readiness, req.OccurredAt); err != nil {
-						t.Fatal(err)
+					for _, phase := range []pipeline.FlowAttachmentPhase{pipeline.FlowAttachmentPlanned, pipeline.FlowAttachmentAgentsRegistered, pipeline.FlowAttachmentRouteInstalled, pipeline.FlowAttachmentTimersArmed} {
+						if progress, err := f.workflows.AdvanceFlowAttachment(f.ctx, admitted.Attempt, phase, req.OccurredAt); err != nil || !progress.Admitted() {
+							t.Fatalf("fixture phase %s: %+v err=%v", phase, progress, err)
+						}
 					}
 					event := eventtest.PersistedChildForProducer(creation.EventID, events.EventType(creation.EventType), eventtest.Producer(events.EventProducerPlatform, "flow-instance-activator"), "", creation.Payload, 0, creation.RunID, creation.ParentEventID,
 						events.EnvelopeForSourceRoute(events.EventEnvelope{EntityID: plan.Identity.EntityID, FlowInstance: plan.Identity.InstancePath}, events.RouteIdentity{FlowID: plan.Identity.TemplateID, FlowInstance: plan.Identity.InstancePath, EntityID: plan.Identity.EntityID}), creation.CreatedAt)

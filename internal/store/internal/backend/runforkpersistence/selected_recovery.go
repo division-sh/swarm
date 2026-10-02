@@ -442,7 +442,7 @@ func selectedFiniteFeedRecoveryPinsTx(ctx context.Context, tx *sql.Tx, forkRunID
 }
 
 func selectedFiniteFeedRecoveryTopologiesTx(ctx context.Context, tx *sql.Tx, forkRunID, bundleHash string) ([]runfork.RunForkSelectedContractAgentTopology, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT f.instance_path,f.flow_template,f.mode,r.plan
+	rows, err := tx.QueryContext(ctx, `SELECT f.instance_path,f.flow_template,f.mode,r.plan,r.plan_hash
 		FROM flow_instances f LEFT JOIN flow_instance_runtime_readiness r
 			ON r.run_id=f.run_id AND r.instance_path=f.instance_path
 		WHERE f.run_id=$1 ORDER BY f.instance_path`, forkRunID)
@@ -455,7 +455,8 @@ func selectedFiniteFeedRecoveryTopologiesTx(ctx context.Context, tx *sql.Tx, for
 	for rows.Next() {
 		var path, template, mode string
 		var raw []byte
-		if err := rows.Scan(&path, &template, &mode, &raw); err != nil {
+		var planHash sql.NullString
+		if err := rows.Scan(&path, &template, &mode, &raw, &planHash); err != nil {
 			return nil, fmt.Errorf("decode selected finite-feed workflow readiness: %w", err)
 		}
 		if path == "" || template == "" {
@@ -474,24 +475,15 @@ func selectedFiniteFeedRecoveryTopologiesTx(ctx context.Context, tx *sql.Tx, for
 			if len(raw) == 0 {
 				return nil, fmt.Errorf("template selected finite-feed workflow %s lacks readiness", path)
 			}
-			var plan runtimepipeline.DynamicFlowRuntimeReadinessPlan
-			if err := canonicaljson.DecodeInto(raw, &plan); err != nil {
-				return nil, fmt.Errorf("decode selected finite-feed readiness %s: %w", path, err)
-			}
-			normalized, err := plan.Normalized()
+			normalized, err := runtimepipeline.DecodeFlowReadinessPlan(raw, planHash.String)
 			if err != nil {
 				return nil, fmt.Errorf("validate selected finite-feed readiness %s: %w", path, err)
 			}
-			encoded, err := json.Marshal(normalized)
-			if err != nil || !workflowCommitJSONEqual(raw, encoded) || normalized.RunID != forkRunID ||
+			if normalized.RunID != forkRunID ||
 				normalized.BundleHash != bundleHash || normalized.Identity.InstancePath != path || normalized.Identity.TemplateID != template {
 				return nil, fmt.Errorf("selected finite-feed readiness %s conflicts with committed workflow", path)
 			}
-			fingerprint, err := canonicaljson.Hash(normalized)
-			if err != nil {
-				return nil, fmt.Errorf("hash selected finite-feed readiness %s: %w", path, err)
-			}
-			admission, err := agenttopology.FlowReadinessAdmission(forkRunID, path, fingerprint)
+			admission, err := agenttopology.FlowReadinessAdmission(forkRunID, path, planHash.String)
 			if err != nil {
 				return nil, fmt.Errorf("admit selected finite-feed readiness %s: %w", path, err)
 			}

@@ -2,6 +2,7 @@ package bus_test
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -36,8 +37,10 @@ func TestFlowRoutePublicationRetiresOnlyItsAttempt(t *testing.T) {
 		GenerationGrantID: uuid.NewString(), BundleHash: owned.BundleHash(),
 		RuntimeInstanceID: runtimeID, RuntimeGeneration: 1,
 	}
+	var ordinal uint64
 	newAttempt := func() runtimepipeline.DynamicFlowRuntimeActivationAttempt {
-		attempt, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt(uuid.NewString(), identity.RunID, identity.Route.InstancePath, 1, binding)
+		ordinal++
+		attempt, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt(strconv.FormatUint(ordinal, 10), identity.RunID, identity.Route.InstancePath, binding)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -58,7 +61,17 @@ func TestFlowRoutePublicationRetiresOnlyItsAttempt(t *testing.T) {
 	if !eb.RouteTable().HasFlowInstanceRoute(identity) {
 		t.Fatal("predecessor route disappeared during rejected successor publication")
 	}
-	if err := firstHandle.Retire(); err != nil {
+	// Losing the publication response still leaves an exact identity/attempt
+	// cleanup obligation, not permission to infer a route from its path.
+	foreign := identity
+	foreign.RunID = uuid.NewString()
+	if err := eb.RetireFlowInstanceRouteForAttempt(foreign, first); err == nil {
+		t.Fatal("foreign identity retired an admitted publication")
+	}
+	if !eb.RouteTable().HasFlowInstanceRoute(identity) {
+		t.Fatal("refused foreign retirement removed the admitted publication")
+	}
+	if err := eb.RetireFlowInstanceRouteForAttempt(identity, first); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := eb.PublishPersistedFlowInstanceRouteForAttempt(context.Background(), req, first); err == nil {
@@ -69,6 +82,9 @@ func TestFlowRoutePublicationRetiresOnlyItsAttempt(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := firstHandle.Retire(); err != nil {
+		t.Fatal(err)
+	}
+	if err := eb.RetireFlowInstanceRouteForAttempt(identity, first); err != nil {
 		t.Fatal(err)
 	}
 	if !eb.RouteTable().HasFlowInstanceRoute(identity) {
@@ -82,7 +98,7 @@ func TestFlowRoutePublicationRetiresOnlyItsAttempt(t *testing.T) {
 	}
 	wrongBinding := binding
 	wrongBinding.BundleHash = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	wrongAttempt, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt(uuid.NewString(), identity.RunID, identity.Route.InstancePath, 1, wrongBinding)
+	wrongAttempt, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt("1", identity.RunID, identity.Route.InstancePath, wrongBinding)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +107,7 @@ func TestFlowRoutePublicationRetiresOnlyItsAttempt(t *testing.T) {
 	}
 	wrongBinding = binding
 	wrongBinding.RuntimeInstanceID = uuid.NewString()
-	wrongAttempt, err = runtimepipeline.NewDynamicFlowRuntimeActivationAttempt(uuid.NewString(), identity.RunID, identity.Route.InstancePath, 1, wrongBinding)
+	wrongAttempt, err = runtimepipeline.NewDynamicFlowRuntimeActivationAttempt("1", identity.RunID, identity.Route.InstancePath, wrongBinding)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +140,7 @@ func TestFlowRoutePublicationFenceBeforePublish(t *testing.T) {
 		GenerationGrantID: uuid.NewString(), BundleHash: owned.BundleHash(),
 		RuntimeInstanceID: runtimeID, RuntimeGeneration: 1,
 	}
-	attempt, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt(uuid.NewString(), identity.RunID, identity.Route.InstancePath, 1, binding)
+	attempt, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt("1", identity.RunID, identity.Route.InstancePath, binding)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,8 +175,10 @@ func TestCommittedFlowRouteRetirementCannotRemoveSuccessor(t *testing.T) {
 		ProcessAuthorityID: uuid.NewString(), ProcessOwnerID: "terminal-route-test", ProcessBootID: uuid.NewString(),
 		GenerationGrantID: uuid.NewString(), BundleHash: owned.BundleHash(), RuntimeInstanceID: runtimeID, RuntimeGeneration: 1,
 	}
+	var ordinal uint64
 	newAttempt := func() runtimepipeline.DynamicFlowRuntimeActivationAttempt {
-		attempt, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt(uuid.NewString(), identity.RunID, identity.Route.InstancePath, 1, binding)
+		ordinal++
+		attempt, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt(strconv.FormatUint(ordinal, 10), identity.RunID, identity.Route.InstancePath, binding)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -217,7 +235,7 @@ func TestFlowRoutePublicationRejectsForeignSourceContext(t *testing.T) {
 		GenerationGrantID: uuid.NewString(), BundleHash: owned.BundleHash(),
 		RuntimeInstanceID: runtimeID, RuntimeGeneration: 1,
 	}
-	attempt, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt(uuid.NewString(), identity.RunID, identity.Route.InstancePath, 1, binding)
+	attempt, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt("1", identity.RunID, identity.Route.InstancePath, binding)
 	if err != nil {
 		t.Fatal(err)
 	}

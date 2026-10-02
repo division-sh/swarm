@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -112,5 +113,52 @@ func TestReceiverConfigCodecRejectsFlatAndMalformedBusinessObjects(t *testing.T)
 	// An empty business object is evidence; absence or null is not.
 	if config, _, err := decodeWorkflowInstanceConfigPayload([]byte(`{"config":{}}`), workflowInstancePersistedControl{}); err != nil || config == nil || len(config) != 0 {
 		t.Fatalf("explicit empty config rejected: %#v %v", config, err)
+	}
+}
+
+func TestHistoricalWorkflowConfigProjectsOnlyOwnership(t *testing.T) {
+	parent := flowidentity.ParentRoute{FlowID: "parent", FlowInstance: "parent/one", EntityID: uuid.NewString()}
+	source := materializedWorkflowInstanceForTest(WorkflowInstance{
+		StorageRef: "parent/one/review", EntityID: uuid.NewString(), WorkflowName: "review",
+		WorkflowVersion: "source-version", InstanceKind: "static", TemplateVersion: "source-template",
+		Status: "active", ParentFlowID: parent.FlowID, ParentFlowInstance: parent.FlowInstance, ParentEntityID: parent.EntityID,
+		Config: map[string]any{"workflow_version": "business-version", "parent_entity_id": "business-parent", "nested": []any{int64(3), float64(3)}},
+	})
+	projection, err := workflowInstancePersistedProjectionFromInstance(source, source.StorageRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := canonicaljson.MarshalPreservingNumberKinds(projection.ConfigPayload(source.WorkflowVersion))
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorded, err := DecodeWorkflowInstanceRecordedConfig(flowidentity.RouteForInstancePath(source.StorageRef), raw)
+	if err != nil || recorded.WorkflowVersion() != source.WorkflowVersion || recorded.ParentRoute() != parent {
+		t.Fatalf("recorded controls: %+v %v", recorded, err)
+	}
+	target := flowidentity.RouteForInstancePath("parent/two/review")
+	projectedParent := flowidentity.ParentRoute{FlowID: parent.FlowID, FlowInstance: "parent/two", EntityID: uuid.NewString()}
+	projected, err := recorded.Project(target, projectedParent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	business, control, err := decodeWorkflowInstanceConfigPayload(projected, workflowInstancePersistedControl{})
+	if err != nil || !reflect.DeepEqual(business, source.Config) || control.WorkflowVersion != source.WorkflowVersion ||
+		control.InstanceKind != source.InstanceKind || control.TemplateVersion != source.TemplateVersion || control.Status != source.Status ||
+		control.StorageRef != target.InstancePath || control.FlowPath != target.InstancePath || control.InstanceID != target.InstanceID ||
+		control.ParentFlowInstance != projectedParent.FlowInstance || control.ParentEntityID != projectedParent.EntityID {
+		t.Fatalf("historical projection changed non-ownership controls: business=%+v controls=%+v err=%v", business, control, err)
+	}
+	for _, invalid := range []flowidentity.ParentRoute{{}, {FlowID: "different", FlowInstance: "parent/two", EntityID: projectedParent.EntityID}, {FlowID: parent.FlowID, FlowInstance: "parent/two"}} {
+		if _, err := recorded.Project(target, invalid); err == nil {
+			t.Fatalf("accepted incomplete/changed parent %+v", invalid)
+		}
+	}
+	if _, err := DecodeWorkflowInstanceRecordedConfig(flowidentity.RouteForInstancePath(source.StorageRef), []byte(strings.Replace(string(raw), `"workflow_version":"source-version"`, `"workflow_version":1`, 1))); err == nil {
+		t.Fatal("accepted malformed recorded workflow version")
+	}
+	again, err := recorded.Project(target, projectedParent)
+	if err != nil || string(again) != string(projected) {
+		t.Fatalf("projection mutated recorded controls: %s %v", again, err)
 	}
 }

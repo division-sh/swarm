@@ -64,22 +64,17 @@ func TestActiveWorkflowRouteRecoveryUsesExactRunOwnerOnBothStores(t *testing.T) 
 			currentEntityID := uuid.NewString()
 			ambiguousEntityID := uuid.NewString()
 			config := `{"workflow_version":"1","instance_id":"one","flow_path":"` + instancePath + `"}`
-			if tc.sqlite {
-				if _, err := db.ExecContext(ctx, `
-					INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
-					VALUES (?, ?, 'review', 'template', ?, 'active', CURRENT_TIMESTAMP),
-					       (?, ?, 'review', 'template', ?, 'active', CURRENT_TIMESTAMP),
-					       (?, ?, 'review', 'template', ?, 'active', CURRENT_TIMESTAMP)
-				`, retiredRunID, instancePath, config, currentRunID, instancePath, config, ambiguousRunID, instancePath, config); err != nil {
-					t.Fatalf("seed SQLite flow instance: %v", err)
+			// Exact adapter-component headers; this is not constructor proof.
+			headerQuery := `INSERT INTO flow_instances (run_id, instance_path, entity_id, entity_type, flow_template, mode, config, status, current_state, stage_defined, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
+				VALUES ($1, $2, $3, 'review_entity', 'review', 'template', $4, 'active', 'active', TRUE, '{}', '{}', '{}', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
+			if !tc.sqlite {
+				headerQuery = `INSERT INTO flow_instances (run_id, instance_path, entity_id, entity_type, flow_template, mode, config, status, current_state, stage_defined, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
+					VALUES ($1::uuid, $2, $3::uuid, 'review_entity', 'review', 'template', $4::jsonb, 'active', 'active', TRUE, '{}', '{}', '{}', 1, NOW(), NOW(), NOW())`
+			}
+			for _, owner := range []struct{ runID, entityID string }{{retiredRunID, retiredEntityID}, {currentRunID, currentEntityID}, {ambiguousRunID, ambiguousEntityID}} {
+				if _, err := db.ExecContext(ctx, headerQuery, owner.runID, instancePath, owner.entityID, config); err != nil {
+					t.Fatalf("seed exact flow header: %v", err)
 				}
-			} else if _, err := db.ExecContext(ctx, `
-				INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
-				VALUES ($1::uuid, $2, 'review', 'template', $3::jsonb, 'active', NOW()),
-				       ($4::uuid, $2, 'review', 'template', $3::jsonb, 'active', NOW()),
-				       ($5::uuid, $2, 'review', 'template', $3::jsonb, 'active', NOW())
-			`, retiredRunID, instancePath, config, currentRunID, ambiguousRunID); err != nil {
-				t.Fatalf("seed Postgres flow instance: %v", err)
 			}
 
 			insertOwner := func(runID, entityID string) {
@@ -118,7 +113,7 @@ func TestActiveWorkflowRouteRecoveryUsesExactRunOwnerOnBothStores(t *testing.T) 
 
 			secondCurrentOwner := uuid.NewString()
 			insertOwner(currentRunID, secondCurrentOwner)
-			if _, err := selected.LoadActiveWorkflowRoute(ctx, currentIdentity); err == nil || !strings.Contains(err.Error(), "exactly one current persisted entity owner") {
+			if _, err := selected.LoadActiveWorkflowRoute(ctx, currentIdentity); err == nil || !strings.Contains(err.Error(), "exactly one matching declared field row") {
 				t.Fatalf("ambiguous exact-run owner error = %v", err)
 			}
 
@@ -127,7 +122,7 @@ func TestActiveWorkflowRouteRecoveryUsesExactRunOwnerOnBothStores(t *testing.T) 
 			}); err != nil {
 				t.Fatalf("retire exact route owner run %s: %v", currentRunID, err)
 			}
-			if _, err := selected.LoadActiveWorkflowRoute(ctx, currentIdentity); err == nil || !strings.Contains(err.Error(), "exactly one current persisted entity owner") {
+			if _, err := selected.LoadActiveWorkflowRoute(ctx, currentIdentity); err == nil || !strings.Contains(err.Error(), "active flow instance not found") {
 				t.Fatalf("retired exact-run owner error = %v", err)
 			}
 		})

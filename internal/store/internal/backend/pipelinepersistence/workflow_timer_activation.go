@@ -214,7 +214,7 @@ func commitWorkflowTimerReconciliation(
 				if err != nil {
 					return err
 				}
-				if state != "accepted" && state != "topology_committed" {
+				if state != "accepted" {
 					return fmt.Errorf("workflow timer reconciliation requires active activation attempt")
 				}
 				return nil

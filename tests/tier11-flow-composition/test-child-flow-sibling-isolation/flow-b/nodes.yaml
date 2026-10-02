@@ -4,5 +4,4 @@ beta-worker:
   produces: []
   event_handlers:
     beta.start:
-      create_entity: true
       advances_to: finished

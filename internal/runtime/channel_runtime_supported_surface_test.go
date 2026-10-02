@@ -47,6 +47,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/division-sh/swarm/internal/yamlsource"
@@ -219,12 +220,33 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				FlowRoutes:          bus,
 			})
 			owner := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath(flowInstance)}
-			if _, err := coordinator.MaterializeInitialEntry(testLiveExecutionContext(ctx), owner, runtimepipeline.WorkflowInstance{
-				InstanceID: flowInstanceID, StorageRef: flowInstance, EntityID: entityID,
-				EntityType: "channel_state", WorkflowName: "global", WorkflowVersion: source.WorkflowVersion(),
-				Mode: runtimecontracts.FlowModeStatic, CurrentState: "active", Config: map[string]any{}, Fields: map[string]any{},
-			}, time.Now().UTC()); err != nil {
-				t.Fatalf("materialize configured channel flow instance: %v", err)
+			{
+				construction224Ctx := testLiveExecutionContext(ctx)
+				construction224At := time.Now().UTC()
+				construction224Instance, construction224Lifecycle, err := coordinator.PrepareInitialEntryLifecycle(construction224Ctx, owner, runtimepipeline.WorkflowInstance{
+					InstanceID: flowInstanceID, StorageRef: flowInstance, EntityID: entityID,
+					EntityType: "channel_state", WorkflowName: "global", WorkflowVersion: source.WorkflowVersion(),
+					Mode: runtimecontracts.FlowModeStatic, CurrentState: "active", Config: map[string]any{}, Fields: map[string]any{},
+				}, construction224At)
+				if err != nil {
+					t.Fatalf("prepare fixture initial lifecycle: %v", err)
+				}
+				construction224Command, err := flowactivationfixture.Command(construction224Ctx, construction224Instance, construction224Lifecycle, construction224At)
+				if err != nil {
+					t.Fatalf("prepare fixture activation command: %v", err)
+				}
+				construction224Committed, err := any(eventStore).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction224Ctx, construction224Command)
+				if err != nil {
+					t.Fatalf("materialize configured channel flow instance: %v", err)
+				}
+				if err == nil && !construction224Committed.Acknowledged {
+					t.Fatal("fixture activation was not acknowledged")
+				}
+				if construction224Committed.Acknowledged && construction224Committed.Created {
+					if finalizeErr := coordinator.FinalizeInitialEntryLifecycle(construction224Ctx, construction224Committed.Lifecycle); finalizeErr != nil {
+						t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+					}
+				}
 			}
 
 			stopActivityNode := startConfiguredChannelActivityNode(t, ctx, coordinator, bus, db)

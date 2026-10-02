@@ -33,11 +33,12 @@ type observedProspectiveBus struct {
 
 type observedProspectivePersistence struct {
 	runtimepipeline.WorkflowPersistenceOwner
-	mode  string
-	calls int
-	err   error
-	db    *sql.DB
-	raced bool
+	mode    string
+	calls   int
+	err     error
+	db      *sql.DB
+	raced   bool
+	armRace bool
 }
 
 func (p *observedProspectivePersistence) CommitWorkflowEngineMutation(ctx context.Context, command runtimepipeline.WorkflowEngineMutationCommand) (runtimepipeline.CommittedWorkflowEngineMutation, error) {
@@ -48,15 +49,30 @@ func (p *observedProspectivePersistence) CommitWorkflowEngineMutation(ctx contex
 	case "changed_lifecycle":
 		command.Lifecycle.RequestCompletionCandidate = !command.Lifecycle.RequestCompletionCandidate
 	case "competing_revision":
-		if !command.State.Transition.CreatesState() {
+		if p.armRace && !p.raced {
 			// Advance persisted state after the real planner has read it, without
 			// altering the prepared command or its prospective evidence.
-			result, err := p.db.ExecContext(ctx, `UPDATE entity_state SET revision=revision+1 WHERE run_id=$1 AND flow_instance=$2 AND entity_id=$3 AND revision=$4`, command.State.Identity.RunID, command.State.Identity.Route.InstancePath, command.State.EntityID, command.State.ExpectedRevision)
+			tx, err := p.db.BeginTx(ctx, nil)
+			if err != nil {
+				return runtimepipeline.CommittedWorkflowEngineMutation{}, err
+			}
+			defer tx.Rollback()
+			result, err := tx.ExecContext(ctx, `UPDATE flow_instances SET revision=revision+1 WHERE run_id=$1 AND instance_path=$2 AND entity_id=$3 AND revision=$4`, command.State.Identity.RunID, command.State.Identity.Route.InstancePath, command.State.EntityID, command.State.ExpectedRevision)
 			if err != nil {
 				return runtimepipeline.CommittedWorkflowEngineMutation{}, err
 			}
 			if count, err := result.RowsAffected(); err != nil || count != 1 {
 				return runtimepipeline.CommittedWorkflowEngineMutation{}, fmt.Errorf("competing revision cut rows=%d err=%v", count, err)
+			}
+			result, err = tx.ExecContext(ctx, `UPDATE entity_state SET revision=revision+1 WHERE run_id=$1 AND flow_instance=$2 AND entity_id=$3 AND revision=$4`, command.State.Identity.RunID, command.State.Identity.Route.InstancePath, command.State.EntityID, command.State.ExpectedRevision)
+			if err != nil {
+				return runtimepipeline.CommittedWorkflowEngineMutation{}, err
+			}
+			if count, err := result.RowsAffected(); err != nil || count != 1 {
+				return runtimepipeline.CommittedWorkflowEngineMutation{}, fmt.Errorf("competing field revision cut rows=%d err=%v", count, err)
+			}
+			if err := tx.Commit(); err != nil {
+				return runtimepipeline.CommittedWorkflowEngineMutation{}, err
 			}
 			p.raced = true
 		}
@@ -108,6 +124,26 @@ func TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStor
 				persistence := &observedProspectivePersistence{WorkflowPersistenceOwner: selected.events.(runtimepipeline.WorkflowPersistenceOwner), mode: name, db: selected.db}
 				selected.persistence = runtimepipeline.NewWorkflowPersistence(persistence)
 				coordinator := newGateRecoveryCoordinator(observed, selected, runtimepipeline.PipelineCoordinatorOptions{Module: proposedEffectProofModule{source: source, nodes: nodes}, SourceArtifactFact: authorActivityTestSourceArtifactFact})
+				commitKeylessConstructorComponent(t, ctx, selected, coordinator, source)
+				var initialFields string
+				var initialRevision int64
+				if err := selected.db.QueryRow(`SELECT CAST(fields AS TEXT), revision FROM entity_state WHERE run_id=$1`, runID).Scan(&initialFields, &initialRevision); err != nil {
+					t.Fatal(err)
+				}
+				assertUnchangedConstruction := func() {
+					t.Helper()
+					var fields string
+					var fieldRevision, headerRevision int64
+					if err := selected.db.QueryRow(`SELECT CAST(fields AS TEXT), revision FROM entity_state WHERE run_id=$1`, runID).Scan(&fields, &fieldRevision); err != nil {
+						t.Fatal(err)
+					}
+					if err := selected.db.QueryRow(`SELECT revision FROM flow_instances WHERE run_id=$1`, runID).Scan(&headerRevision); err != nil {
+						t.Fatal(err)
+					}
+					if fields != initialFields || fieldRevision != initialRevision || headerRevision != initialRevision {
+						t.Fatalf("failed handler changed construction: fields=%s field revision=%d header revision=%d; want %s at %d", fields, fieldRevision, headerRevision, initialFields, initialRevision)
+					}
+				}
 				if name == "publication_failure" {
 					fault := `CREATE TRIGGER prospective_publication_failure BEFORE INSERT ON events WHEN NEW.event_name='work.ready' BEGIN SELECT RAISE(ABORT,'prospective_publication_fault_cut'); END`
 					if selected.postgres {
@@ -138,6 +174,7 @@ func TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStor
 						t.Fatalf("initial creation failed before race: commits=%d err=%v planner=%v", persistence.calls, persistence.err, observed.err)
 					}
 					observed.calls, persistence.calls = 0, 0
+					persistence.armRace = true
 				}
 				seed := eventtest.ExistingRunRootIngress(uuid.NewString(), "start", "operator", "", []byte(`{"case_id":"exact"}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
 				if err := canonical.Publish(ctx, seed); err != nil {
@@ -151,7 +188,7 @@ func TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStor
 				if err != nil {
 					t.Fatal(err)
 				}
-				_, _, _, _ = coordinator.InterceptDeliveryRoute(ctx, delivery, prepared.DeliveryRoutes[0])
+				_, _, execution, dispatchErr := coordinator.InterceptDeliveryRoute(ctx, delivery, prepared.DeliveryRoutes[0])
 				if observed.calls != 1 {
 					t.Fatalf("actual prepared mutation reached planner %d times", observed.calls)
 				}
@@ -167,15 +204,16 @@ func TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStor
 					if !errors.As(observed.err, &refusal) || refusal.Stage != "done" || refusal.FlowID != "." {
 						t.Fatalf("exact planning refusal=%v", observed.err)
 					}
-					if states != 0 || published != 0 {
+					if states != 1 || published != 0 {
 						t.Fatalf("terminal mutation leaked: state=%d publications=%d", states, published)
 					}
+					assertUnchangedConstruction()
 					return
 				}
 				if name == "competing_revision" {
 					failure, typed := runtimefailures.EnvelopeFromError(persistence.err)
 					if !persistence.raced || !typed || failure.Detail.Code != "workflow_engine_state_revision_conflict" || observed.err != nil || len(observed.plans) != 1 {
-						t.Fatalf("wrong revision fence: raced=%t commit=%v planning=%v", persistence.raced, persistence.err, observed.err)
+						t.Fatalf("wrong revision fence: raced=%t commits=%d commit=%v planning=%v execution=%+v dispatch=%v", persistence.raced, persistence.calls, persistence.err, observed.err, execution, dispatchErr)
 					}
 					var fields string
 					if err := selected.db.QueryRow(`SELECT CAST(fields AS TEXT) FROM entity_state WHERE run_id=$1`, runID).Scan(&fields); err != nil {
@@ -202,9 +240,10 @@ func TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStor
 					if err := selected.db.QueryRow(`SELECT count(*) FROM flow_instances WHERE run_id=$1`, runID).Scan(&companions); err != nil {
 						t.Fatal(err)
 					}
-					if states != 0 || published != 0 || companions != 0 {
+					if states != 1 || published != 0 || companions != 1 {
 						t.Fatalf("failed transaction leaked: states=%d publications=%d companions=%d", states, published, companions)
 					}
+					assertUnchangedConstruction()
 					return
 				}
 				if observed.err != nil || states != 1 || published != 1 || len(observed.plans) != 1 {

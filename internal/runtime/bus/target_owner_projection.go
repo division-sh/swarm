@@ -15,14 +15,15 @@ import (
 )
 
 type selectedRunTargetOwnerProjection struct {
-	prospective      runtimepipeline.PreparedWorkflowPublicationState
-	context          context.Context
-	agents           map[agentidentity.Identity]ActiveAgentDescriptor
-	agentsAvailable  bool
-	descriptors      []ActiveTargetDescriptor
-	targetsAvailable bool
-	source           semanticview.Source
-	required         bool
+	prospective        runtimepipeline.PreparedWorkflowPublicationState
+	context            context.Context
+	agents             map[agentidentity.Identity]ActiveAgentDescriptor
+	constructingAgents map[agentidentity.Identity]struct{}
+	agentsAvailable    bool
+	descriptors        []ActiveTargetDescriptor
+	targetsAvailable   bool
+	source             semanticview.Source
+	required           bool
 }
 
 func (p selectedRunTargetOwnerProjection) resolveRoutePlan(plan RoutePlan) (RoutePlan, error) {
@@ -349,6 +350,19 @@ func (p selectedRunTargetOwnerProjection) resolveConnectEvaluation(ledger events
 
 func (p selectedRunTargetOwnerProjection) withActivationPlans(plans []runtimepipeline.FlowInstanceActivationPlan) (selectedRunTargetOwnerProjection, error) {
 	ordered := newOrderedActiveTargetDescriptors(p.descriptors)
+	agents := make(map[agentidentity.Identity]ActiveAgentDescriptor, len(p.agents))
+	for identity, descriptor := range p.agents {
+		agents[identity] = descriptor
+	}
+	constructing := make(map[agentidentity.Identity]struct{}, len(p.constructingAgents))
+	for identity := range p.constructingAgents {
+		constructing[identity] = struct{}{}
+	}
+	var constructionPlans []runtimepipeline.FlowInstanceActivationPlan
+	for _, plan := range plans {
+		constructionPlans = append(constructionPlans, plan.ConstructionPlans()...)
+	}
+	plans = constructionPlans
 	for _, plan := range plans {
 		normalized, err := plan.Normalized()
 		if err != nil {
@@ -363,8 +377,18 @@ func (p selectedRunTargetOwnerProjection) withActivationPlans(plans []runtimepip
 			EntityID:      normalized.Identity.EntityID,
 			Materializing: true,
 		})
+		for _, expected := range normalized.Readiness.Agents {
+			identity := expected.Identity.Normalize()
+			agents[identity] = ActiveAgentDescriptor{Identity: identity, EntityID: expected.EntityID}
+			if expected.EntityID != "" {
+				constructing[identity] = struct{}{}
+			}
+		}
+		p.agentsAvailable = true
 		p.targetsAvailable = true
 	}
+	p.agents = agents
+	p.constructingAgents = constructing
 	p.descriptors = ordered.descriptors
 	return p, nil
 }

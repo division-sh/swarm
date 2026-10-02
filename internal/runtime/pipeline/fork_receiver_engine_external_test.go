@@ -199,12 +199,44 @@ func TestSelectedForkReceiverSupportedDeliveryBothStores(t *testing.T) {
 					want = runtimedelivery.StatusDeadLetter
 				}
 				if err != nil || current.Status != want || current.ClaimVersion != claim.Version() {
-					t.Fatalf("bridge exact settlement=%+v err=%v", current, err)
+					t.Fatalf("bridge exact settlement status=%s reason=%s failure=%+v claim=%d want=%s err=%v diagnostics=%v", current.Status, current.ReasonCode, current.Failure, current.ClaimVersion, want, err, forkEngineHandlerErrors(t, db, claim.RunID()))
 				}
 				assertForkEngineRows(t, db, runID, claim.RunID(), target.EntityID, sourceConsumer, beforeRevision+1, missing)
 			})
 		}
 	}
+}
+
+func forkEngineHandlerErrors(t *testing.T, db *sql.DB, runID string) []string {
+	t.Helper()
+	rows, err := db.Query(`SELECT CAST(payload AS TEXT) FROM events WHERE run_id=$1 AND event_name='platform.runtime_log'`, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var failures []string
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		var entry struct {
+			Details struct {
+				Action string
+				Error  string
+			}
+		}
+		if err := json.Unmarshal(raw, &entry); err != nil {
+			t.Fatal(err)
+		}
+		if entry.Details.Action == "handler_error" {
+			failures = append(failures, entry.Details.Error)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return failures
 }
 
 func forkEngineMarker(t *testing.T, raw string) any {

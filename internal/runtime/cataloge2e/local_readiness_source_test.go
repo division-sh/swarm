@@ -286,9 +286,10 @@ func activateLocalReadinessFrontier(t *testing.T, ctx context.Context, h *runtim
 	defer h.rt.Pipeline.SetTestLifecycleProbe(nil)
 	entityID := eventtest.UUID("run-scoped-selected-fork-worker")
 	if err := h.rt.Manager.ActivateFlowInstance(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimepipeline.FlowInstanceActivationRequest{
-		ContractBundle: semanticview.Wrap(h.bundle),
-		Instance:       runtimeflowidentity.Stored(semanticview.Wrap(h.bundle), "worker-flow", "worker-flow/worker-001", "worker-001", entityID, ""),
-		Config:         map[string]any{"worker_id": "worker-001"}, Fields: map[string]any{"worker_id": "worker-001"},
+		ContractBundle:   semanticview.Wrap(h.bundle),
+		Instance:         runtimeflowidentity.Stored(semanticview.Wrap(h.bundle), "worker-flow", "worker-flow/worker-001", "worker-001", entityID, ""),
+		Config:           map[string]any{"worker_id": "worker-001"},
+		ConstructorInput: "worker.ready", ResolvedKey: "worker-001",
 		TriggerEvent: trigger, OccurredAt: trigger.CreatedAt(),
 	}); err != nil {
 		t.Fatal(err)

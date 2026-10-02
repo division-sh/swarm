@@ -167,7 +167,7 @@ func TestA2JoinAdmissionOwnerUsesCanonicalRootScope(t *testing.T) {
 	owner, err := WorkflowJoinAdmissionOwner(source, run, events.RouteIdentity{
 		FlowID: source.WorkflowName(), FlowInstance: run, EntityID: run,
 	})
-	if err != nil || owner.Route != flowidentity.StoredRoute(run, run, run) {
+	if err != nil || owner.Route != flowidentity.StoredRoute(".", run, run) {
 		t.Fatalf("root owner = %#v err=%v", owner, err)
 	}
 }

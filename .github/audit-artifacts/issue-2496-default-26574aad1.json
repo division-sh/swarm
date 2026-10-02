@@ -1,0 +1,25 @@
+{
+  "head": "26574aad1eadbce74ac82044b4b851073ca79ca9",
+  "receipt": "/tmp/agent-e-2496-default-schema-sequence-repair.log",
+  "result": "RED",
+  "managed_exit_code": 1,
+  "passed_package_events": 176,
+  "failed_records": 36,
+  "failed_roots": [
+    {
+      "Time": "2026-10-01T18:15:33.418096649Z",
+      "Action": "fail",
+      "Package": "github.com/division-sh/swarm/internal/cliapp",
+      "Test": "TestReadProofFactoringCompiledDescribe",
+      "Elapsed": 54.28
+    },
+    {
+      "Time": "2026-10-01T18:15:45.47307607Z",
+      "Action": "fail",
+      "Package": "github.com/division-sh/swarm/internal/cliapp",
+      "Test": "TestReadProofFactoringCompiledScenario",
+      "Elapsed": 12.05
+    }
+  ],
+  "unexecuted": "Remaining local proof units after catalog-required-verify refusal; no full-suite success claimed"
+}

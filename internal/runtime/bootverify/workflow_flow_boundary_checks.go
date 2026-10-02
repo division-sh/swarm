@@ -281,13 +281,13 @@ func (c *checkerContext) flowBoundaryCreateEntityValidation() []Finding {
 					continue
 				}
 				nodeRef, _ := semanticview.ResolveExecutableNodeDeclaration(c.source, validationScope.semanticFlowID, nodeID)
-				if bootverifyHandlerMaterializesEntity(c.source, nodeRef, eventType, validationScope.semanticFlowID, handler) &&
+				if bootverifyHandlerUsesCanonicalEntity(c.source, nodeRef, eventType, validationScope.semanticFlowID, handler) &&
 					flowInputEventDeclaresPayloadField(c.source, validationScope.semanticFlowID, eventType, "entity_id") &&
 					flowInputHasCallerSelectedIdentity(c.source, validationScope.semanticFlowID, eventType) {
 					c.flowBoundaryCreateEntityFindings = append(c.flowBoundaryCreateEntityFindings, Finding{
 						CheckID:  "flow_boundary_create_entity_validation",
 						Severity: "error",
-						Message:  fmt.Sprintf("flow %s handler %s on node %s materializes entity state from caller-selected entity_id, but normal flow instances must write the canonical primary entity", validationScope.displayFlowID, eventType, nodeID),
+						Message:  fmt.Sprintf("flow %s handler %s on node %s uses entity state with caller-selected entity_id, but normal flow instances must write the canonical primary entity", validationScope.displayFlowID, eventType, nodeID),
 						Location: validationScope.displayFlowID,
 					})
 				}
@@ -349,10 +349,7 @@ func flowInputHasCallerSelectedIdentity(source semanticview.Source, flowID, even
 		!producer.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryIntrinsicIngress)
 }
 
-func bootverifyHandlerMaterializesEntity(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType, flowID string, handler runtimecontracts.SystemNodeEventHandler) bool {
-	if handler.CreateEntity {
-		return true
-	}
+func bootverifyHandlerUsesCanonicalEntity(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType, flowID string, handler runtimecontracts.SystemNodeEventHandler) bool {
 	if bootverifyHandlerMutatesEntityLifecycle(handler) {
 		return true
 	}

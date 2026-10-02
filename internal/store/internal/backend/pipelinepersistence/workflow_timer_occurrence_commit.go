@@ -93,6 +93,9 @@ func commitWorkflowTimerOccurrence(
 	if !acknowledged {
 		return runtimepipeline.CommittedWorkflowTimerOccurrence{}, outcome.Err()
 	}
+	if result.Publication != nil {
+		result.Publication = result.Publication.(runtimebus.CommittedEnginePublication).WithCommitAcknowledgment()
+	}
 	return result, errors.Join(outcome.Err(), result.Validate())
 }
 

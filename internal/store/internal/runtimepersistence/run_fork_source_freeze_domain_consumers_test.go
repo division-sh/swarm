@@ -18,6 +18,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
@@ -26,7 +27,7 @@ import (
 )
 
 type forkedDomainConsumerSurface interface {
-	CreateEntity(context.Context, runtimetools.EntityCreateRecord) (runtimetools.EntityCreateResult, error)
+	SetupScenarioEntities(context.Context, pipeline.ScenarioSetupRequest) (pipeline.ScenarioSetupResult, error)
 	SaveEntityField(context.Context, runtimetools.EntityFieldUpdate) (runtimetools.EntityFieldWriteResult, error)
 	RecordSpend(context.Context, budgetspend.SpendRecord) error
 	ListBudgetProjectionTargets(context.Context) ([]budgetspend.ProjectionTarget, error)
@@ -66,14 +67,16 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 				t.Fatalf("bind freeze domain source: %v", err)
 			}
 			fixture.sourceBundleHash = fact.BundleHash()
+			ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
 
 			entityID := uuid.NewString()
-			entity := runtimetools.EntityCreateRecord{
-				Source: source, RunID: fixture.sourceRun, EntityID: entityID, FlowInstance: "freeze/domain", EntityType: "review_item",
-				CurrentState: "active", FieldsJSON: json.RawMessage(`{"account_id":"domain"}`), CreatedAt: fixture.forkedAt.Add(-time.Minute),
-				Writer: runtimetools.EntityMutationWriter{Type: "platform", ID: "source-freeze"},
+			entity := pipeline.ScenarioSetupEntityRequest{
+				Alias: "domain", EntityID: entityID, FlowInstance: "freeze/domain", EntityType: "review_item",
+				CurrentState: "active", Fields: map[string]any{"account_id": "domain"},
 			}
-			if _, err := surface.CreateEntity(ctx, entity); err != nil {
+			if _, err := surface.SetupScenarioEntities(ctx, pipeline.ScenarioSetupRequest{
+				RunID: fixture.sourceRun, CreatedAt: fixture.forkedAt.Add(-time.Minute), Entities: []pipeline.ScenarioSetupEntityRequest{entity},
+			}); err != nil {
 				t.Fatal(err)
 			}
 			mutationQuery := `SELECT COUNT(*) FROM entity_mutations WHERE entity_id = ?`
@@ -99,8 +102,10 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 
 			lateEntity := entity
 			lateEntity.EntityID = uuid.NewString()
-			_, err := surface.CreateEntity(ctx, lateEntity)
-			requireForkedSourceRefusal(t, "create entity", err)
+			_, err := surface.SetupScenarioEntities(ctx, pipeline.ScenarioSetupRequest{
+				RunID: fixture.sourceRun, CreatedAt: fixture.forkedAt, Entities: []pipeline.ScenarioSetupEntityRequest{lateEntity},
+			})
+			requireForkedSourceRefusal(t, "scenario import", err)
 			_, err = surface.SaveEntityField(ctx, runtimetools.EntityFieldUpdate{
 				Source: source, RunID: fixture.sourceRun, EntityID: entityID, FieldPath: "account_id", Value: "changed",
 				Writer: runtimetools.EntityMutationWriter{Type: "platform", ID: "source-freeze"},

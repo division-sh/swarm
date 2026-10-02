@@ -121,6 +121,7 @@ func TestStructuralCheckPurposeCensus(t *testing.T) {
 		"entity_reader_coverage":                  "structural",
 		"primary_entity_validation":               "structural",
 		"template_instance_validation":            "structural",
+		"flow_constructor_validation":             "structural",
 		"singleton_coordinator_validation":        "structural",
 		"cross_surface_named_type_use":            "structural",
 		"transition_ownership_validation":         "structural",

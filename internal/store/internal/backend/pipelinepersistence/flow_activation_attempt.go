@@ -5,15 +5,15 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
+	"strconv"
 	"time"
 
-	runtimecanonicaljson "github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeprocessbinding "github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
-	"github.com/google/uuid"
 )
 
 type flowActivationAttemptMutation struct {
@@ -52,7 +52,7 @@ func beginDynamicFlowRuntimeActivation(
 		return runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult{}, err
 	}
 	if revision == 0 {
-		return runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult{}, errors.New("flow activation requires a positive plan revision")
+		return runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult{}, errors.New("flow activation requires a positive attachment attempt")
 	}
 	if err := binding.Validate(); err != nil {
 		return runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult{}, err
@@ -60,7 +60,7 @@ func beginDynamicFlowRuntimeActivation(
 	if plan.BundleHash != binding.BundleHash {
 		return runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult{}, errors.New("flow activation plan differs from generation grant bundle")
 	}
-	expectedJSON, err := runtimecanonicaljson.MarshalPreservingNumberKinds(plan)
+	expectedHash, err := plan.Hash()
 	if err != nil {
 		return runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult{}, err
 	}
@@ -74,34 +74,26 @@ func beginDynamicFlowRuntimeActivation(
 			if err != nil {
 				return err
 			}
-			if !found || !current.Eligible() || current.PlanRevision != revision {
-				return &runtimepipeline.DynamicFlowRuntimeReadinessObservationConflict{RunID: plan.RunID, InstancePath: plan.Identity.InstancePath, Coordinate: "plan_revision_or_lifecycle"}
+			if !found || !current.Eligible() || current.AttemptOrdinal != revision {
+				return &runtimepipeline.DynamicFlowRuntimeReadinessObservationConflict{RunID: plan.RunID, InstancePath: plan.Identity.InstancePath, Coordinate: "activation_attempt_id_or_lifecycle"}
 			}
-			currentJSON, err := runtimecanonicaljson.MarshalPreservingNumberKinds(current.Plan)
-			if err != nil {
-				return err
-			}
-			if string(currentJSON) != string(expectedJSON) {
+			if current.PlanHash != expectedHash {
 				return &runtimepipeline.DynamicFlowRuntimeReadinessObservationConflict{RunID: plan.RunID, InstancePath: plan.Identity.InstancePath, Coordinate: "plan"}
 			}
-			query := `SELECT activation_attempt_id::text, activation_attempt_grant_id::text, activation_attempt_revision, activation_attempt_state FROM flow_instance_runtime_readiness WHERE run_id=$1::uuid AND instance_path=$2`
+			query := `SELECT activation_attempt_id::text, activation_attempt_grant_id::text, activation_attempt_state FROM flow_instance_runtime_readiness WHERE run_id=$1::uuid AND instance_path=$2`
 			if !postgres {
-				query = `SELECT activation_attempt_id, activation_attempt_grant_id, activation_attempt_revision, activation_attempt_state FROM flow_instance_runtime_readiness WHERE run_id=? AND instance_path=?`
+				query = `SELECT activation_attempt_id, activation_attempt_grant_id, activation_attempt_state FROM flow_instance_runtime_readiness WHERE run_id=? AND instance_path=?`
 			}
 			var oldID, oldGrantID, oldState sql.NullString
-			var oldRevision sql.NullInt64
-			if err := tx.QueryRowContext(txctx, query, plan.RunID, plan.Identity.InstancePath).Scan(&oldID, &oldGrantID, &oldRevision, &oldState); err != nil {
+			if err := tx.QueryRowContext(txctx, query, plan.RunID, plan.Identity.InstancePath).Scan(&oldID, &oldGrantID, &oldState); err != nil {
 				return fmt.Errorf("load flow activation attempt: %w", err)
 			}
-			if oldID.Valid {
-				if !oldGrantID.Valid || !oldRevision.Valid || !oldState.Valid {
-					return errors.New("flow activation attempt is incomplete")
-				}
-				if oldGrantID.String == binding.GenerationGrantID && oldRevision.Int64 == int64(revision) && oldState.String == "topology_committed" {
-					if current.TopologyReadyAt.IsZero() {
-						return errors.New("committed flow activation attempt has no topology completion")
-					}
-					admitted.attempt, err = runtimepipeline.NewDynamicFlowRuntimeActivationAttempt(oldID.String, plan.RunID, plan.Identity.InstancePath, revision, binding)
+			if !oldID.Valid || !oldState.Valid || (oldState.String != "planned" && !oldGrantID.Valid) {
+				return errors.New("flow activation attempt is incomplete")
+			}
+			if oldState.String != "planned" {
+				if oldGrantID.String == binding.GenerationGrantID && oldState.String == "accepted" {
+					admitted.attempt, err = runtimepipeline.NewDynamicFlowRuntimeActivationAttempt(oldID.String, plan.RunID, plan.Identity.InstancePath, binding)
 					admitted.reused = true
 					return err
 				}
@@ -115,19 +107,26 @@ func beginDynamicFlowRuntimeActivation(
 					}
 				}
 			}
-			id := uuid.NewString()
-			admitted.attempt, err = runtimepipeline.NewDynamicFlowRuntimeActivationAttempt(id, plan.RunID, plan.Identity.InstancePath, revision, binding)
+			ordinal, err := runtimeflowidentity.ParseActivationAttemptID(oldID.String)
 			if err != nil {
 				return err
 			}
-			query = `UPDATE flow_instance_runtime_readiness SET activation_attempt_id=$1::uuid, activation_attempt_grant_id=$2::uuid, activation_attempt_revision=$3, activation_attempt_state='accepted', updated_at=$4 WHERE run_id=$5::uuid AND instance_path=$6 AND plan_revision=$3`
-			if !postgres {
-				query = `UPDATE flow_instance_runtime_readiness SET activation_attempt_id=?, activation_attempt_grant_id=?, activation_attempt_revision=?, activation_attempt_state='accepted', updated_at=? WHERE run_id=? AND instance_path=? AND plan_revision=?`
+			if oldState.String != "planned" {
+				if ordinal == math.MaxInt64 {
+					return errors.New("flow activation attempt cannot advance its ordinal")
+				}
+				ordinal++
 			}
-			args := []any{id, binding.GenerationGrantID, revision, time.Now().UTC(), plan.RunID, plan.Identity.InstancePath}
-			if !postgres {
-				args = append(args, revision)
+			id := strconv.FormatUint(ordinal, 10)
+			admitted.attempt, err = runtimepipeline.NewDynamicFlowRuntimeActivationAttempt(id, plan.RunID, plan.Identity.InstancePath, binding)
+			if err != nil {
+				return err
 			}
+			query = `UPDATE flow_instance_runtime_readiness SET activation_attempt_id=$1, activation_attempt_grant_id=$2::uuid, activation_attempt_state='accepted', phase='planned', updated_at=$3 WHERE run_id=$4::uuid AND instance_path=$5 AND activation_attempt_id=$6 AND plan_hash=$7 AND activation_attempt_state=$8`
+			if !postgres {
+				query = `UPDATE flow_instance_runtime_readiness SET activation_attempt_id=?, activation_attempt_grant_id=?, activation_attempt_state='accepted', phase='planned', updated_at=? WHERE run_id=? AND instance_path=? AND activation_attempt_id=? AND plan_hash=? AND activation_attempt_state=?`
+			}
+			args := []any{id, binding.GenerationGrantID, time.Now().UTC(), plan.RunID, plan.Identity.InstancePath, oldID.String, expectedHash, oldState.String}
 			result, err := tx.ExecContext(txctx, query, args...)
 			if err != nil {
 				return err
@@ -137,7 +136,7 @@ func beginDynamicFlowRuntimeActivation(
 				return err
 			}
 			if rows != 1 {
-				return errors.New("flow activation admission lost its plan revision")
+				return errors.New("flow activation admission lost its observed attachment attempt")
 			}
 			return nil
 		})
@@ -156,19 +155,17 @@ func authorizeCurrentFlowActivationAttemptTx(ctx context.Context, tx *sql.Tx, po
 	if err := agentpersistence.AuthorizeDynamicFlowActivationTx(ctx, tx, attempt.ProcessBinding(), attempt.RunID(), !postgres); err != nil {
 		return "", err
 	}
-	query := `SELECT activation_attempt_id::text, activation_attempt_grant_id::text, activation_attempt_revision, activation_attempt_state, plan_revision FROM flow_instance_runtime_readiness WHERE run_id=$1::uuid AND instance_path=$2 FOR UPDATE`
+	query := `SELECT activation_attempt_id::text, activation_attempt_grant_id::text, activation_attempt_state FROM flow_instance_runtime_readiness WHERE run_id=$1::uuid AND instance_path=$2 FOR UPDATE`
 	if !postgres {
-		query = `SELECT activation_attempt_id, activation_attempt_grant_id, activation_attempt_revision, activation_attempt_state, plan_revision FROM flow_instance_runtime_readiness WHERE run_id=? AND instance_path=?`
+		query = `SELECT activation_attempt_id, activation_attempt_grant_id, activation_attempt_state FROM flow_instance_runtime_readiness WHERE run_id=? AND instance_path=?`
 	}
 	var id, grantID, state sql.NullString
-	var revision sql.NullInt64
-	var currentRevision int64
-	if err := tx.QueryRowContext(ctx, query, attempt.RunID(), attempt.InstancePath()).Scan(&id, &grantID, &revision, &state, &currentRevision); err != nil {
+	if err := tx.QueryRowContext(ctx, query, attempt.RunID(), attempt.InstancePath()).Scan(&id, &grantID, &state); err != nil {
 		return "", fmt.Errorf("load current flow activation attempt: %w", err)
 	}
 	if !id.Valid || id.String != attempt.ID() || !grantID.Valid || grantID.String != attempt.ProcessBinding().GenerationGrantID ||
-		!revision.Valid || revision.Int64 != int64(attempt.PlanRevision()) || currentRevision != int64(attempt.PlanRevision()) || !state.Valid {
-		return "", errors.New("flow activation attempt is no longer current")
+		!state.Valid {
+		return "", runtimepipeline.ErrFlowAttachmentStale
 	}
 	return state.String, nil
 }
@@ -182,7 +179,7 @@ func authorizeEligibleFlowActivationAttemptTx(ctx context.Context, tx *sql.Tx, p
 	if err != nil {
 		return "", err
 	}
-	if !found || !current.Eligible() || current.PlanRevision != attempt.PlanRevision() || current.Plan.BundleHash != attempt.ProcessBinding().BundleHash {
+	if !found || !current.Eligible() || current.AttemptOrdinal != attempt.Ordinal() || current.Plan.BundleHash != attempt.ProcessBinding().BundleHash {
 		return "", errors.New("flow activation attempt lost current instance eligibility")
 	}
 	return state, nil
@@ -221,8 +218,8 @@ func verifyDynamicFlowRuntimeActivationAttempt(
 			if err != nil {
 				return err
 			}
-			if state != "accepted" && state != "topology_committed" {
-				return errors.New("flow activation attempt is not admitted for forward progress")
+			if state != "accepted" {
+				return runtimepipeline.ErrFlowAttachmentStale
 			}
 			return nil
 		})
@@ -317,7 +314,16 @@ func retireDynamicFlowRuntimeActivationAttempts(
 	}
 	outcome := run(ctx, func(txctx context.Context, mutation *mutationprotocol.Attempt) (struct{}, error) {
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			// Authority is shared only for identical bindings inside this transaction.
+			verified := make(map[runtimeprocessbinding.Binding]struct{}, len(attempts))
 			for _, attempt := range attempts {
+				binding := attempt.ProcessBinding()
+				if _, found := verified[binding]; !found {
+					if err := agentpersistence.VerifyFlowActivationRetirementBindingTx(txctx, tx, binding); err != nil {
+						return fmt.Errorf("verify retiring flow activation %s: %w", attempt.InstancePath(), err)
+					}
+					verified[binding] = struct{}{}
+				}
 				if err := retireDynamicFlowRuntimeActivationAttemptTx(txctx, tx, postgres, attempt, settledState, failed); err != nil {
 					return fmt.Errorf("retire flow activation attempt %s: %w", attempt.InstancePath(), err)
 				}
@@ -330,14 +336,11 @@ func retireDynamicFlowRuntimeActivationAttempts(
 }
 
 func retireDynamicFlowRuntimeActivationAttemptTx(ctx context.Context, tx *sql.Tx, postgres bool, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt, settledState string, failed bool) error {
-	if err := agentpersistence.VerifyFlowActivationRetirementBindingTx(ctx, tx, attempt.ProcessBinding()); err != nil {
-		return err
-	}
-	query := `UPDATE flow_instance_runtime_readiness SET activation_attempt_state=$1, topology_ready_at=CASE WHEN $2 THEN NULL ELSE topology_ready_at END, updated_at=$3 WHERE run_id=$4::uuid AND instance_path=$5 AND activation_attempt_id=$6::uuid AND activation_attempt_grant_id=$7::uuid AND activation_attempt_revision=$8 AND activation_attempt_state IN ('accepted', 'topology_committed', 'superseded', $1)`
+	query := `UPDATE flow_instance_runtime_readiness SET activation_attempt_state=$1, updated_at=$2 WHERE run_id=$3::uuid AND instance_path=$4 AND activation_attempt_id=$5 AND activation_attempt_grant_id=$6::uuid AND activation_attempt_state IN ('accepted', 'superseded', $1)`
 	if !postgres {
-		query = `UPDATE flow_instance_runtime_readiness SET activation_attempt_state=?, topology_ready_at=CASE WHEN ? THEN NULL ELSE topology_ready_at END, updated_at=? WHERE run_id=? AND instance_path=? AND activation_attempt_id=? AND activation_attempt_grant_id=? AND activation_attempt_revision=? AND activation_attempt_state IN ('accepted', 'topology_committed', 'superseded', ?)`
+		query = `UPDATE flow_instance_runtime_readiness SET activation_attempt_state=?, updated_at=? WHERE run_id=? AND instance_path=? AND activation_attempt_id=? AND activation_attempt_grant_id=? AND activation_attempt_state IN ('accepted', 'superseded', ?)`
 	}
-	args := []any{settledState, failed, time.Now().UTC(), attempt.RunID(), attempt.InstancePath(), attempt.ID(), attempt.ProcessBinding().GenerationGrantID, attempt.PlanRevision()}
+	args := []any{settledState, time.Now().UTC(), attempt.RunID(), attempt.InstancePath(), attempt.ID(), attempt.ProcessBinding().GenerationGrantID}
 	if !postgres {
 		args = append(args, settledState)
 	}
@@ -370,100 +373,4 @@ func retireDynamicFlowRuntimeActivationAttemptTx(ctx context.Context, tx *sql.Tx
 		}
 	}
 	return nil
-}
-
-func (s *PipelinePostgresOwner) MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx context.Context, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt, expected runtimepipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) (runtimepipeline.DynamicFlowRuntimeTopologyReadyResult, error) {
-	if err := s.requireCurrentSchema(); err != nil {
-		return runtimepipeline.DynamicFlowRuntimeTopologyReadyResult{}, err
-	}
-	return markDynamicFlowRuntimeTopologyReadyForAttempt(ctx, true, attempt, expected, readyAt, func(ctx context.Context, fn func(context.Context, *mutationprotocol.Attempt) (struct{}, error)) mutationprotocol.Result[struct{}] {
-		return mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, fn)
-	})
-}
-
-func (s *PipelineSQLiteOwner) MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx context.Context, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt, expected runtimepipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) (runtimepipeline.DynamicFlowRuntimeTopologyReadyResult, error) {
-	if err := s.requireCurrentSchema(); err != nil {
-		return runtimepipeline.DynamicFlowRuntimeTopologyReadyResult{}, err
-	}
-	return markDynamicFlowRuntimeTopologyReadyForAttempt(ctx, false, attempt, expected, readyAt, func(ctx context.Context, fn func(context.Context, *mutationprotocol.Attempt) (struct{}, error)) mutationprotocol.Result[struct{}] {
-		return mutationprotocol.RunSQLite(ctx, s.backend, "sqlite flow activation topology completion", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, fn)
-	})
-}
-
-func markDynamicFlowRuntimeTopologyReadyForAttempt(
-	ctx context.Context,
-	postgres bool,
-	attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt,
-	expected runtimepipeline.DynamicFlowRuntimeReadinessPlan,
-	readyAt time.Time,
-	run func(context.Context, func(context.Context, *mutationprotocol.Attempt) (struct{}, error)) mutationprotocol.Result[struct{}],
-) (runtimepipeline.DynamicFlowRuntimeTopologyReadyResult, error) {
-	if err := attempt.Validate(); err != nil {
-		return runtimepipeline.DynamicFlowRuntimeTopologyReadyResult{}, err
-	}
-	plan, err := expected.Normalized()
-	if err != nil {
-		return runtimepipeline.DynamicFlowRuntimeTopologyReadyResult{}, err
-	}
-	if plan.RunID != attempt.RunID() || plan.Identity.InstancePath != attempt.InstancePath() {
-		return runtimepipeline.DynamicFlowRuntimeTopologyReadyResult{}, errors.New("flow activation topology plan differs from attempt identity")
-	}
-	if readyAt.IsZero() {
-		return runtimepipeline.DynamicFlowRuntimeTopologyReadyResult{}, errors.New("flow activation topology completion requires an occurrence time")
-	}
-	planJSON, err := runtimecanonicaljson.MarshalPreservingNumberKinds(plan)
-	if err != nil {
-		return runtimepipeline.DynamicFlowRuntimeTopologyReadyResult{}, err
-	}
-	outcome := run(ctx, func(txctx context.Context, mutation *mutationprotocol.Attempt) (struct{}, error) {
-		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-			state, err := authorizeCurrentFlowActivationAttemptTx(txctx, tx, postgres, attempt)
-			if err != nil {
-				return err
-			}
-			current, found, err := loadDynamicFlowRuntimeReadiness(txctx, tx, postgres, plan.RunID, plan.Identity.Route(), true)
-			if err != nil {
-				return err
-			}
-			if !found || !current.Eligible() {
-				return errors.New("flow activation topology completion requires an eligible instance")
-			}
-			currentJSON, err := runtimecanonicaljson.MarshalPreservingNumberKinds(current.Plan)
-			if err != nil {
-				return err
-			}
-			if string(currentJSON) != string(planJSON) {
-				return errors.New("flow activation topology completion plan changed")
-			}
-			if state == "topology_committed" && !current.TopologyReadyAt.IsZero() {
-				return nil
-			}
-			if state != "accepted" {
-				return errors.New("flow activation topology completion requires one accepted attempt")
-			}
-			query := `UPDATE flow_instance_runtime_readiness SET topology_ready_at=$1, activation_attempt_state='topology_committed', updated_at=$1 WHERE run_id=$2::uuid AND instance_path=$3 AND plan_revision=$4 AND activation_attempt_id=$5::uuid AND activation_attempt_grant_id=$6::uuid AND activation_attempt_revision=$4 AND activation_attempt_state='accepted'`
-			if !postgres {
-				query = `UPDATE flow_instance_runtime_readiness SET topology_ready_at=?, activation_attempt_state='topology_committed', updated_at=? WHERE run_id=? AND instance_path=? AND plan_revision=? AND activation_attempt_id=? AND activation_attempt_grant_id=? AND activation_attempt_revision=? AND activation_attempt_state='accepted'`
-			}
-			args := []any{readyAt.UTC(), plan.RunID, plan.Identity.InstancePath, attempt.PlanRevision(), attempt.ID(), attempt.ProcessBinding().GenerationGrantID}
-			if !postgres {
-				args = []any{readyAt.UTC(), readyAt.UTC(), plan.RunID, plan.Identity.InstancePath, attempt.PlanRevision(), attempt.ID(), attempt.ProcessBinding().GenerationGrantID, attempt.PlanRevision()}
-			}
-			result, err := tx.ExecContext(txctx, query, args...)
-			if err != nil {
-				return err
-			}
-			rows, err := result.RowsAffected()
-			if err != nil {
-				return err
-			}
-			if rows != 1 {
-				return errors.New("flow activation topology completion lost its exact attempt")
-			}
-			return nil
-		})
-		return struct{}{}, err
-	})
-	_, acknowledged := outcome.Value()
-	return runtimepipeline.DynamicFlowRuntimeTopologyReadyResult{Acknowledged: acknowledged}, standalonePipelineMutationError(outcome)
 }

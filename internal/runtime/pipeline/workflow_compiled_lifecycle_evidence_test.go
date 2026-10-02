@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"encoding/json"
 	"reflect"
 	"strings"
@@ -74,8 +75,26 @@ func TestPipelineCompiledTimerTransitionEvidenceOnBothStores(t *testing.T) {
 					}
 					instance.StateBuckets = carrier.PersistedStateBuckets()
 				}
-				if _, err := pc.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instance.StorageRef), instance, now); err != nil {
-					t.Fatal(err)
+				{
+					// Seed only the unit fixture; selected-store constructor proof lives in runtimepersistence.
+					preparedInstance, preparedLifecycle, err := pc.PrepareInitialEntryLifecycle(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instance.StorageRef), instance, now)
+					if err != nil {
+						t.Fatalf("prepare fixture lifecycle: %v", err)
+					}
+					if err := store.upsert(ctx, preparedInstance); err != nil {
+						t.Fatalf("seed fixture state: %v", err)
+					}
+					var committedLifecycle CommittedWorkflowLifecycleMutation
+					if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
+						var commitErr error
+						committedLifecycle, commitErr = commitPipelineTestWorkflowLifecycle(txctx, store, preparedLifecycle)
+						return commitErr
+					}); err != nil {
+						t.Fatalf("seed fixture lifecycle: %v", err)
+					}
+					if err := pc.FinalizeInitialEntryLifecycle(ctx, committedLifecycle); err != nil {
+						t.Fatalf("finalize fixture lifecycle: %v", err)
+					}
 				}
 				if err := pc.ArmInitialEntryTimers(ctx, testRunScopedWorkflowInstanceFromContext(ctx, route.InstancePath)); err != nil {
 					t.Fatal(err)

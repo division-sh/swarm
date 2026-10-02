@@ -12,7 +12,11 @@ func testWorkflowInstanceRoute(instancePath string) runtimeflowidentity.Route {
 }
 
 func testRunScopedWorkflowInstanceForRun(runID, instancePath string) runtimeflowidentity.RunScopedFlowInstance {
-	identity, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, testWorkflowInstanceRoute(instancePath))
+	route := testWorkflowInstanceRoute(instancePath)
+	if instancePath == runID {
+		route = runtimeflowidentity.StoredRoute(".", runID, runID)
+	}
+	identity, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, route)
 	if err != nil {
 		panic(err)
 	}

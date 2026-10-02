@@ -76,12 +76,10 @@ func TestA2KnownTargetUnarmedPublicationRetainsEarlyRefusalAfterArmAndRestartOnB
 				})
 				bus.SetInterceptors(pc)
 				now := time.Now().UTC()
-				if _, err := pc.MaterializeInitialEntry(ctx, owner, runtimepipeline.WorkflowInstance{
+				commitA2FixtureConstruction(t, pc, selected.events, ctx, owner, runtimepipeline.WorkflowInstance{
 					InstanceID: instanceID, StorageRef: path, EntityID: entityID, WorkflowName: "orders", WorkflowVersion: source.WorkflowVersion(),
 					CurrentState: "dispatching", EntityType: "order_state", Fields: map[string]any{"order_id": instanceID, "expected": []any{"a", "b"}},
-				}, now); err != nil {
-					t.Fatalf("materialize known unarmed receiver: %v", err)
-				}
+				}, now)
 				publishRoute := func() {
 					t.Helper()
 					if err := flowroutefixture.Publish(bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: owner}); err != nil {
@@ -265,25 +263,21 @@ func TestA2KnownTargetWorkIssuedBeforeArmPublishesOutputBoundToActualArmOnBothSt
 			})
 			bus.SetInterceptors(pc)
 			now := time.Now().UTC()
-			if _, err := pc.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
+			commitA2FixtureConstruction(t, pc, selected.events, ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: runID, WorkflowName: source.WorkflowName(), WorkflowVersion: source.WorkflowVersion(),
 				CurrentState: "active", EntityType: "root_state", Fields: map[string]any{"work_count": int64(0)},
-			}, now); err != nil {
-				t.Fatal(err)
-			}
+			}, now)
 			// Existing-receiver readiness/route fixtures do not prove C/E eager
 			// construction or same-commit runtime boot activation.
 			readiness := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 				Identity: flowidentity.Instance{TemplateID: "orders", ScopeKey: "orders", InstanceID: instanceID, InstancePath: path, EntityID: entityID, HasStoredPath: true},
 				RunID:    runID, BundleHash: authorActivityTestSourceArtifactFact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
 			}
-			if _, err := pc.MaterializeInitialEntry(ctx, owner, runtimepipeline.WorkflowInstance{
+			commitA2FixtureConstruction(t, pc, selected.events, ctx, owner, runtimepipeline.WorkflowInstance{
 				InstanceID: instanceID, StorageRef: path, EntityID: entityID, WorkflowName: "orders", WorkflowVersion: source.WorkflowVersion(),
 				Mode: "template", RuntimeReadiness: &readiness, CurrentState: "dispatching", EntityType: "order_state",
 				Fields: map[string]any{"order_id": instanceID, "expected": []any{"a", "b"}},
-			}, now); err != nil {
-				t.Fatal(err)
-			}
+			}, now)
 			markGateRecoveryTopologyReadyFixture(t, selected, readiness, now)
 			if err := flowroutefixture.Publish(bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: owner}); err != nil {
 				t.Fatal(err)

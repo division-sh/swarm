@@ -218,10 +218,6 @@ func (pc *PipelineCoordinator) LoadRouteRecoveryProjection(ctx context.Context, 
 	return pc.workflowStore.LoadRouteRecoveryProjection(ctx, identity)
 }
 
-func (pc *PipelineCoordinator) MaterializeInitialEntry(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, instance WorkflowInstance, occurredAt time.Time) (WorkflowInitialMaterializationResult, error) {
-	return pc.workflowStore.MaterializeInitialEntry(ctx, owner, instance, occurredAt)
-}
-
 func (pc *PipelineCoordinator) PrepareInitialEntryLifecycle(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, instance WorkflowInstance, occurredAt time.Time) (WorkflowInstance, WorkflowLifecycleMutationPlan, error) {
 	if pc == nil || pc.workflowStore == nil {
 		return WorkflowInstance{}, WorkflowLifecycleMutationPlan{}, fmt.Errorf("workflow instance lifecycle store is required")
@@ -280,8 +276,8 @@ func (pc *PipelineCoordinator) VerifyDynamicFlowRuntimeActivationAttempt(ctx con
 	return pc.workflowStore.VerifyDynamicFlowRuntimeActivationAttempt(ctx, attempt)
 }
 
-func (pc *PipelineCoordinator) MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx context.Context, attempt DynamicFlowRuntimeActivationAttempt, plan DynamicFlowRuntimeReadinessPlan, readyAt time.Time) (DynamicFlowRuntimeTopologyReadyResult, error) {
-	return pc.workflowStore.MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx, attempt, plan, readyAt)
+func (pc *PipelineCoordinator) AdvanceFlowAttachment(ctx context.Context, attempt DynamicFlowRuntimeActivationAttempt, previous FlowAttachmentPhase, at time.Time) (FlowAttachmentAdvanceResult, error) {
+	return pc.workflowStore.AdvanceFlowAttachment(ctx, attempt, previous, at)
 }
 
 func (pc *PipelineCoordinator) RetireDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt DynamicFlowRuntimeActivationAttempt) error {

@@ -144,6 +144,9 @@ func commitDecisionCardOperation(
 		return runtimepipeline.CommittedDecisionCardMutation{}, outcome.Err()
 	}
 	result.Acknowledged = true
+	if result.HasPublication {
+		result.Publication = result.Publication.(runtimebus.CommittedEnginePublication).WithCommitAcknowledgment()
+	}
 	return result, errors.Join(outcome.Err(), result.Validate())
 }
 

@@ -932,8 +932,8 @@ func seedDurableReplyConformanceTargetOwners(t *testing.T, ctx context.Context, 
 		VALUES ($1::uuid, $2, $3, 'template', '{}'::jsonb, 'active')
 		ON CONFLICT (run_id, instance_path) DO NOTHING`
 	readinessQuery := `INSERT INTO flow_instance_runtime_readiness
-		(run_id, instance_path, plan, topology_ready_at, created_at, updated_at)
-		VALUES ($1::uuid, $2, $3::jsonb, $4, $4, $4)
+		(run_id, instance_path, plan, plan_hash, phase, created_at, updated_at)
+		VALUES ($1::uuid, $2, $3::jsonb, $4, 'ready', $5, $5)
 		ON CONFLICT (run_id, instance_path) DO NOTHING`
 	query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state)
 		VALUES ($1::uuid, $2::uuid, $3, 'requester_state', $4)
@@ -942,8 +942,8 @@ func seedDurableReplyConformanceTargetOwners(t *testing.T, ctx context.Context, 
 		flowQuery = `INSERT OR IGNORE INTO flow_instances (run_id, instance_path, flow_template, mode, config, status)
 			VALUES (?, ?, ?, 'template', '{}', 'active')`
 		readinessQuery = `INSERT OR IGNORE INTO flow_instance_runtime_readiness
-			(run_id, instance_path, plan, topology_ready_at, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?)`
+			(run_id, instance_path, plan, plan_hash, phase, created_at, updated_at)
+			VALUES (?, ?, ?, ?, 'ready', ?, ?)`
 		query = `INSERT OR IGNORE INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state)
 			VALUES (?, ?, ?, 'requester_state', ?)`
 	}
@@ -967,10 +967,14 @@ func seedDurableReplyConformanceTargetOwners(t *testing.T, ctx context.Context, 
 		if err != nil {
 			t.Fatalf("encode reply conformance readiness %s: %v", owner.FlowInstance, err)
 		}
+		planHash, err := plan.Hash()
+		if err != nil {
+			t.Fatal(err)
+		}
 		now := time.Now().UTC()
-		readinessArgs := []any{runID, owner.FlowInstance, planRaw, now}
+		readinessArgs := []any{runID, owner.FlowInstance, planRaw, planHash, now}
 		if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-			readinessArgs = []any{runID, owner.FlowInstance, planRaw, now, now, now}
+			readinessArgs = []any{runID, owner.FlowInstance, planRaw, planHash, now, now}
 		}
 		if _, err := db.ExecContext(ctx, readinessQuery, readinessArgs...); err != nil {
 			t.Fatalf("seed reply conformance readiness %s: %v", owner.FlowInstance, err)

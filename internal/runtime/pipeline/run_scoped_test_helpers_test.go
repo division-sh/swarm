@@ -33,7 +33,7 @@ import (
 
 func pipelineTestFlowActivationAttempt(t *testing.T, runID, instancePath, bundleHash string) DynamicFlowRuntimeActivationAttempt {
 	t.Helper()
-	attempt, err := NewDynamicFlowRuntimeActivationAttempt(uuid.NewString(), runID, instancePath, 1, runtimeprocessbinding.Binding{
+	attempt, err := NewDynamicFlowRuntimeActivationAttempt("1", runID, instancePath, runtimeprocessbinding.Binding{
 		ProcessAuthorityID: uuid.NewString(), ProcessOwnerID: "pipeline-projection-test", ProcessBootID: uuid.NewString(),
 		GenerationGrantID: uuid.NewString(), BundleHash: bundleHash, RuntimeInstanceID: uuid.NewString(), RuntimeGeneration: 1,
 	})
@@ -92,9 +92,6 @@ func newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db *sql.DB, run
 	if owner, ok := runner.(WorkflowEngineMutationOwner); ok {
 		store.engineMutations = owner
 	}
-	if owner, ok := runner.(WorkflowInitialMaterializationCommitOwner); ok {
-		store.initialCommits = owner
-	}
 	store.timerObligations = pipelineTestTimerObligationReader{db: db, dialect: pipelineTestTimerObligationSQLite}
 	if owner, ok := runner.(runtimerunlifecycle.OperationOwner); ok {
 		store.runLifecycle = owner
@@ -147,9 +144,6 @@ func newWorkflowPersistenceFixtureStore(runner *recordingRuntimeMutationRunner) 
 	if owner, ok := any(runner).(WorkflowTargetPersistenceReader); ok {
 		store.targetReader = owner
 	}
-	if owner, ok := any(runner).(WorkflowInitialMaterializationCommitOwner); ok {
-		store.initialCommits = owner
-	}
 	store.standingServices = pipelineTestStandingServices{store: store}
 	return store
 }
@@ -190,8 +184,16 @@ func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) ReconcileDynamicFlow
 		if err != nil {
 			return nil, err
 		}
+		readiness, found, err := p.store.legacyLoadDynamicFlowRuntimeReadiness(ctx, request.Expected.RunID, request.Expected.Identity.Route())
+		if err != nil {
+			return nil, fmt.Errorf("load reconciled fixture readiness: %w", err)
+		}
+		if !found {
+			return nil, errors.New("reconciled fixture readiness is missing")
+		}
 		results = append(results, DynamicFlowRuntimeReadinessPlanReconciliationResult{
 			RunID: request.Expected.RunID, InstancePath: request.Expected.Identity.InstancePath, Changed: changed,
+			AttemptOrdinal: readiness.AttemptOrdinal, Readiness: readiness,
 		})
 	}
 	return results, nil
@@ -239,9 +241,9 @@ func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) InspectDynamicFlowRu
 	return result, nil
 }
 
-func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, plan DynamicFlowRuntimeReadinessPlan, readyAt time.Time) (DynamicFlowRuntimeTopologyReadyResult, error) {
+func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, plan DynamicFlowRuntimeReadinessPlan, readyAt time.Time) (FlowAttachmentAdvanceResult, error) {
 	err := p.store.legacyMarkDynamicFlowRuntimeTopologyReady(ctx, plan, readyAt)
-	return DynamicFlowRuntimeTopologyReadyResult{Acknowledged: err == nil}, err
+	return FlowAttachmentAdvanceResult{Acknowledged: err == nil}, err
 }
 
 func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) BeginDynamicFlowRuntimeActivation(context.Context, DynamicFlowRuntimeReadinessPlan, uint64, runtimeprocessbinding.Binding) (DynamicFlowRuntimeActivationAdmissionResult, error) {
@@ -252,8 +254,8 @@ func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) VerifyDynamicFlowRun
 	return errors.New("in-memory readiness fixture has no activation attempt")
 }
 
-func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) MarkDynamicFlowRuntimeTopologyReadyForAttempt(context.Context, DynamicFlowRuntimeActivationAttempt, DynamicFlowRuntimeReadinessPlan, time.Time) (DynamicFlowRuntimeTopologyReadyResult, error) {
-	return DynamicFlowRuntimeTopologyReadyResult{}, errors.New("in-memory readiness fixture has no activation attempt")
+func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) AdvanceFlowAttachment(context.Context, DynamicFlowRuntimeActivationAttempt, FlowAttachmentPhase, time.Time) (FlowAttachmentAdvanceResult, error) {
+	return FlowAttachmentAdvanceResult{}, errors.New("in-memory readiness fixture has no activation attempt")
 }
 
 func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) RetireDynamicFlowRuntimeActivationAttempt(context.Context, DynamicFlowRuntimeActivationAttempt) error {

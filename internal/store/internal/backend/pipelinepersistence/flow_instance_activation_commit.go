@@ -6,11 +6,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecanonicaljson "github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
@@ -32,30 +32,54 @@ func commitFlowInstanceActivations(
 	seen := make(map[string]struct{}, len(plans))
 	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		for index, plan := range plans {
-			record, err := plan.PersistenceRecord()
+			result, err := commitFlowConstructionTree(ctx, tx, attempt, store, postgres, plan, true, seen)
 			if err != nil {
-				return fmt.Errorf("prepare flow activation %d: %w", index, err)
+				return fmt.Errorf("commit flow activation %d: %w", index, err)
 			}
-			key := record.Identity.RunID + "\x00" + record.Identity.Route.InstancePath
-			if _, duplicate := seen[key]; duplicate {
-				return fmt.Errorf("flow activation %d repeats route %q", index, record.Identity.Route.InstancePath)
-			}
-			seen[key] = struct{}{}
-			created, lifecycle, err := commitFlowInstanceActivation(ctx, tx, attempt, store, postgres, plan, record)
-			if err != nil {
-				return fmt.Errorf("commit flow activation %s: %w", record.Identity.Route.InstancePath, err)
-			}
-			readiness, found, err := loadDynamicFlowRuntimeReadiness(ctx, tx, postgres, record.Identity.RunID, record.Identity.Route, false)
-			if err != nil || !found {
-				return errors.Join(err, fmt.Errorf("committed flow activation %s has no readiness owner", record.Identity.Route.InstancePath))
-			}
-			committed = append(committed, runtimepipeline.CommittedFlowInstanceActivation{
-				Plan: plan, Created: created, Lifecycle: lifecycle, ReadinessRevision: readiness.PlanRevision,
-			})
+			committed = append(committed, result)
 		}
 		return nil
 	})
 	return committed, err
+}
+
+func commitFlowConstructionTree(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, store eventCommitTxStore, postgres bool,
+	plan runtimepipeline.FlowInstanceActivationPlan, mayCreate bool, seen map[string]struct{},
+) (runtimepipeline.CommittedFlowInstanceActivation, error) {
+	record, err := plan.PersistenceRecord()
+	if err != nil {
+		return runtimepipeline.CommittedFlowInstanceActivation{}, err
+	}
+	key := record.Identity.Key()
+	if _, duplicate := seen[key]; duplicate {
+		return runtimepipeline.CommittedFlowInstanceActivation{}, fmt.Errorf("construction repeats route %q", record.Identity.Route.InstancePath)
+	}
+	seen[key] = struct{}{}
+	if !mayCreate {
+		equal, found, err := loadFlowInstanceActivationEqual(ctx, tx, postgres, record)
+		if err != nil || !found || !equal {
+			return runtimepipeline.CommittedFlowInstanceActivation{}, errors.Join(err, fmt.Errorf("construction replay has missing or conflicting descendant %s", record.Identity.Route.InstancePath))
+		}
+	}
+	created, lifecycle, err := commitFlowInstanceActivation(ctx, tx, attempt, store, postgres, plan, record)
+	if err != nil {
+		return runtimepipeline.CommittedFlowInstanceActivation{}, err
+	}
+	readiness, found, err := loadDynamicFlowRuntimeReadiness(ctx, tx, postgres, record.Identity.RunID, record.Identity.Route, false)
+	if err != nil || !found {
+		return runtimepipeline.CommittedFlowInstanceActivation{}, errors.Join(err, fmt.Errorf("committed construction %s has no attachment owner", record.Identity.Route.InstancePath))
+	}
+	result := runtimepipeline.CommittedFlowInstanceActivation{
+		Plan: plan, Created: created, Lifecycle: lifecycle, ReadinessAttemptOrdinal: readiness.AttemptOrdinal,
+	}
+	for _, child := range plan.Children {
+		committed, err := commitFlowConstructionTree(ctx, tx, attempt, store, postgres, child, created, seen)
+		if err != nil {
+			return runtimepipeline.CommittedFlowInstanceActivation{}, err
+		}
+		result.Children = append(result.Children, committed)
+	}
+	return result, nil
 }
 
 func (s *PipelinePostgresOwner) CommitFlowInstanceActivationsTx(ctx context.Context, attempt *mutationprotocol.Attempt, plans []runtimepipeline.FlowInstanceActivationPlan) ([]runtimepipeline.CommittedFlowInstanceActivation, error) {
@@ -94,7 +118,7 @@ func commitOneFlowInstanceActivation(
 	if !acknowledged {
 		return runtimepipeline.CommittedFlowInstanceActivation{}, outcome.Err()
 	}
-	result.Acknowledged = true
+	result = result.WithCommitAcknowledgment()
 	return result, errors.Join(outcome.Err(), result.Validate())
 }
 
@@ -167,147 +191,81 @@ func loadFlowInstanceActivationEqual(
 	postgres bool,
 	want runtimepipeline.FlowInstanceActivationRecord,
 ) (bool, bool, error) {
-	query := `
-		SELECT
-			fi.flow_template, fi.mode, fi.config, fi.status, fi.created_at,
-			es.flow_instance, es.entity_type, COALESCE(es.slug, ''), COALESCE(es.name, ''),
-			es.current_state, es.gates, es.fields, es.bookkeeping, es.accumulator,
-			es.entered_state_at, es.created_at,
-			m.projection_version, m.projection, m.occurred_at,
-			r.plan, r.created_at
+	query := `SELECT fi.entity_id, fi.entity_type, fi.stage_defined,
+		m.projection_version, m.projection, m.occurred_at, r.plan, r.plan_hash
 		FROM flow_instances fi
-		JOIN entity_state es
-		  ON es.flow_instance = fi.instance_path
-		 AND es.run_id = fi.run_id
-		 AND es.entity_id = $2::uuid
 		JOIN workflow_instance_initial_materializations m
-		  ON m.run_id = es.run_id
-		 AND m.entity_id = es.entity_id
-		 AND m.instance_path = es.flow_instance
-		JOIN flow_instance_runtime_readiness r
-		  ON r.run_id = es.run_id
-		 AND r.instance_path = es.flow_instance
-		WHERE fi.run_id = $1::uuid AND fi.instance_path = $3
-	`
-	if !postgres {
-		query = `
-			SELECT
-				fi.flow_template, fi.mode, fi.config, fi.status, fi.created_at,
-				es.flow_instance, es.entity_type, COALESCE(es.slug, ''), COALESCE(es.name, ''),
-				es.current_state, es.gates, es.fields, es.bookkeeping, es.accumulator,
-				es.entered_state_at, es.created_at,
-				m.projection_version, m.projection, m.occurred_at,
-				r.plan, r.created_at
+			ON m.run_id = fi.run_id AND m.entity_id = fi.entity_id AND m.instance_path = fi.instance_path
+		JOIN flow_instance_runtime_readiness r ON r.run_id = fi.run_id AND r.instance_path = fi.instance_path
+		WHERE fi.run_id = ? AND fi.instance_path = ?`
+	if postgres {
+		query = `SELECT fi.entity_id::text, fi.entity_type, fi.stage_defined,
+			m.projection_version, m.projection, m.occurred_at, r.plan, r.plan_hash
 			FROM flow_instances fi
-			JOIN entity_state es
-			  ON es.flow_instance = fi.instance_path
-			 AND es.run_id = fi.run_id
-			 AND es.entity_id = ?
 			JOIN workflow_instance_initial_materializations m
-			  ON m.run_id = es.run_id
-			 AND m.entity_id = es.entity_id
-			 AND m.instance_path = es.flow_instance
-			JOIN flow_instance_runtime_readiness r
-			  ON r.run_id = es.run_id
-			 AND r.instance_path = es.flow_instance
-			WHERE fi.run_id = ? AND fi.instance_path = ?
-		`
+				ON m.run_id = fi.run_id AND m.entity_id = fi.entity_id AND m.instance_path = fi.instance_path
+			JOIN flow_instance_runtime_readiness r ON r.run_id = fi.run_id AND r.instance_path = fi.instance_path
+			WHERE fi.run_id = $1::uuid AND fi.instance_path = $2`
 	}
-	var (
-		workflowName, mode, status, instancePath, entityType, slug, name, state      string
-		config, gates, fields, bookkeeping, accumulator, initial, readiness          []byte
-		projectionVersion                                                            int
-		flowCreated, enteredAt, entityCreated, initialAt, readinessAt                time.Time
-		flowCreatedRaw, enteredAtRaw, entityCreatedRaw, initialAtRaw, readinessAtRaw any
+	var entityID, planHash string
+	var entityType sql.NullString
+	var staged bool
+	var projectionVersion int
+	var initial, readiness []byte
+	var occurredAt any
+	err := tx.QueryRowContext(ctx, query, want.Identity.RunID, want.Identity.Route.InstancePath).Scan(
+		&entityID, &entityType, &staged, &projectionVersion, &initial, &occurredAt, &readiness, &planHash,
 	)
-	destinations := []any{
-		&workflowName, &mode, &config, &status, &flowCreated,
-		&instancePath, &entityType, &slug, &name,
-		&state, &gates, &fields, &bookkeeping, &accumulator,
-		&enteredAt, &entityCreated,
-		&projectionVersion, &initial, &initialAt,
-		&readiness, &readinessAt,
-	}
-	if !postgres {
-		destinations = []any{
-			&workflowName, &mode, &config, &status, &flowCreatedRaw,
-			&instancePath, &entityType, &slug, &name,
-			&state, &gates, &fields, &bookkeeping, &accumulator,
-			&enteredAtRaw, &entityCreatedRaw,
-			&projectionVersion, &initial, &initialAtRaw,
-			&readiness, &readinessAtRaw,
-		}
-	}
-	args := []any{want.Identity.RunID, want.EntityID, want.Identity.Route.InstancePath}
-	if !postgres {
-		args = []any{want.EntityID, want.Identity.RunID, want.Identity.Route.InstancePath}
-	}
-	err := tx.QueryRowContext(ctx, query, args...).Scan(destinations...)
 	if err == sql.ErrNoRows {
 		occupied, occupiedErr := flowInstanceActivationIdentityOccupied(ctx, tx, postgres, want)
 		return false, occupied, occupiedErr
 	}
 	if err != nil {
-		return false, false, fmt.Errorf("load flow activation: %w", err)
+		return false, false, fmt.Errorf("load flow construction receipt: %w", err)
 	}
-	if !postgres {
-		decodeTime := func(raw any, target *time.Time) error {
-			parsed, present, parseErr := sqliteTimeValue(raw)
-			if parseErr != nil || !present {
-				if parseErr == nil {
-					parseErr = fmt.Errorf("time is missing")
-				}
-				return parseErr
-			}
-			*target = parsed
-			return nil
-		}
-		for _, item := range []struct {
-			raw    any
-			target *time.Time
-		}{
-			{flowCreatedRaw, &flowCreated},
-			{enteredAtRaw, &enteredAt},
-			{entityCreatedRaw, &entityCreated},
-			{initialAtRaw, &initialAt},
-			{readinessAtRaw, &readinessAt},
-		} {
-			if err := decodeTime(item.raw, item.target); err != nil {
-				return false, true, fmt.Errorf("decode flow activation time: %w", err)
-			}
-		}
+	target, err := loadWorkflowTargetPersistence(ctx, tx, want.Identity, runtimeidentity.NormalizeEntityID(want.EntityID), !postgres)
+	if err != nil {
+		return false, true, fmt.Errorf("load constructed workflow target: %w", err)
 	}
-	jsonEqual := func(actual []byte, expected []byte) bool {
-		actualValue, actualErr := runtimecanonicaljson.Decode(actual)
-		expectedValue, expectedErr := runtimecanonicaljson.Decode(expected)
-		if actualErr != nil || expectedErr != nil {
-			return false
-		}
-		actualCanonical, actualErr := runtimecanonicaljson.Encode(actualValue)
-		expectedCanonical, expectedErr := runtimecanonicaljson.Encode(expectedValue)
-		return actualErr == nil && expectedErr == nil && bytes.Equal(actualCanonical, expectedCanonical)
+	if !target.Presence.Constructed() {
+		// Occupied but incomplete construction is a conflicting replay, not a
+		// fresh constructor or an opportunity to repair the missing fields.
+		return false, true, nil
 	}
-	configEqual := func(actual, expected []byte) bool {
-		var left, right any
-		if runtimecanonicaljson.DecodePreservingNumberLexemes(actual, &left) != nil || runtimecanonicaljson.DecodePreservingNumberLexemes(expected, &right) != nil {
-			return false
-		}
-		a, err := runtimecanonicaljson.MarshalPreservingNumberKinds(left)
-		b, otherErr := runtimecanonicaljson.MarshalPreservingNumberKinds(right)
-		return err == nil && otherErr == nil && bytes.Equal(a, b)
+	if err := target.Validate(want.Identity.Route, runtimeidentity.NormalizeEntityID(want.EntityID)); err != nil {
+		return false, true, fmt.Errorf("constructed workflow target: %w", err)
 	}
-	equal := strings.TrimSpace(workflowName) == strings.TrimSpace(want.WorkflowName) &&
-		strings.TrimSpace(mode) == want.Mode && strings.TrimSpace(status) == "active" &&
-		strings.Trim(strings.TrimSpace(instancePath), "/") == want.Identity.Route.InstancePath &&
-		strings.TrimSpace(entityType) == want.EntityType && strings.TrimSpace(slug) == want.Slug && strings.TrimSpace(name) == want.Name &&
-		strings.TrimSpace(state) == want.CurrentState && projectionVersion == want.InitialProjectionVersion &&
-		configEqual(config, want.Config) && jsonEqual(gates, want.Gates) && jsonEqual(fields, want.Fields) &&
-		jsonEqual(bookkeeping, want.Bookkeeping) && jsonEqual(accumulator, want.Accumulator) && jsonEqual(initial, want.InitialMaterialization) && jsonEqual(readiness, want.Readiness) &&
-		canonicalActivationTime(flowCreated).Equal(canonicalActivationTime(want.CreatedAt)) &&
-		canonicalActivationTime(enteredAt).Equal(canonicalActivationTime(want.EnteredStageAt)) &&
-		canonicalActivationTime(entityCreated).Equal(canonicalActivationTime(want.CreatedAt)) &&
-		canonicalActivationTime(initialAt).Equal(canonicalActivationTime(want.CreatedAt)) &&
-		canonicalActivationTime(readinessAt).Equal(canonicalActivationTime(want.CreatedAt))
+	if target.Lifecycle.WorkflowName != want.WorkflowName || target.Lifecycle.Mode != want.Mode ||
+		!canonicalActivationTime(target.Lifecycle.CreatedAt).Equal(canonicalActivationTime(want.CreatedAt)) {
+		return false, true, nil
+	}
+	if _, err := runtimepipeline.DecodeFlowReadinessPlan(readiness, planHash); err != nil {
+		return false, true, fmt.Errorf("constructed workflow readiness: %w", err)
+	}
+	timestamp, present, err := sqliteTimeValue(occurredAt)
+	if err != nil || !present {
+		return false, true, errors.Join(err, fmt.Errorf("construction receipt requires exact occurrence time"))
+	}
+	// Compare immutable construction, never current fields, stage, configuration
+	// or a mutable desired attachment plan. Progress cannot change replay identity.
+	var actual, expected any
+	if err := runtimecanonicaljson.DecodePreservingNumberLexemes(initial, &actual); err != nil {
+		return false, true, fmt.Errorf("decode construction receipt: %w", err)
+	}
+	if err := runtimecanonicaljson.DecodePreservingNumberLexemes(want.InitialMaterialization, &expected); err != nil {
+		return false, true, fmt.Errorf("decode planned construction receipt: %w", err)
+	}
+	actualJSON, err := runtimecanonicaljson.MarshalPreservingNumberKinds(actual)
+	if err != nil {
+		return false, true, err
+	}
+	expectedJSON, err := runtimecanonicaljson.MarshalPreservingNumberKinds(expected)
+	if err != nil {
+		return false, true, err
+	}
+	equal := entityID == want.EntityID && entityType.String == want.EntityType && staged == want.State.StageDefined &&
+		projectionVersion == want.InitialProjectionVersion && bytes.Equal(actualJSON, expectedJSON) &&
+		canonicalActivationTime(timestamp).Equal(canonicalActivationTime(want.CreatedAt))
 	return equal, true, nil
 }
 
@@ -366,9 +324,9 @@ func insertFlowInstanceActivation(
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO flow_instance_runtime_readiness (
-				run_id, instance_path, plan, plan_revision, topology_ready_at, creation_event_emitted_at, created_at, updated_at
-			) VALUES ($1::uuid, $2, $3::jsonb, 1, NULL, NULL, $4, $4)
-		`, record.Identity.RunID, record.Identity.Route.InstancePath, record.Readiness, record.CreatedAt); err != nil {
+				run_id, instance_path, plan, plan_hash, activation_attempt_id, phase, creation_event_emitted_at, created_at, updated_at
+			) VALUES ($1::uuid, $2, $3::jsonb, $4, 1, 'planned', NULL, $5, $5)
+		`, record.Identity.RunID, record.Identity.Route.InstancePath, record.Readiness, record.ReadinessPlanHash, record.CreatedAt); err != nil {
 			return runtimepipeline.CommittedWorkflowLifecycleMutation{}, fmt.Errorf("insert flow runtime readiness: %w", err)
 		}
 	} else {
@@ -381,9 +339,9 @@ func insertFlowInstanceActivation(
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO flow_instance_runtime_readiness (
-				run_id, instance_path, plan, plan_revision, topology_ready_at, creation_event_emitted_at, created_at, updated_at
-			) VALUES (?, ?, ?, 1, NULL, NULL, ?, ?)
-		`, record.Identity.RunID, record.Identity.Route.InstancePath, record.Readiness, record.CreatedAt, record.CreatedAt); err != nil {
+				run_id, instance_path, plan, plan_hash, activation_attempt_id, phase, creation_event_emitted_at, created_at, updated_at
+			) VALUES (?, ?, ?, ?, 1, 'planned', NULL, ?, ?)
+		`, record.Identity.RunID, record.Identity.Route.InstancePath, record.Readiness, record.ReadinessPlanHash, record.CreatedAt, record.CreatedAt); err != nil {
 			return runtimepipeline.CommittedWorkflowLifecycleMutation{}, fmt.Errorf("insert sqlite flow runtime readiness: %w", err)
 		}
 	}
@@ -403,4 +361,15 @@ func insertFlowInstanceActivation(
 
 func canonicalActivationTime(value time.Time) time.Time {
 	return value.UTC().Truncate(time.Microsecond)
+}
+
+func workflowCommitJSONEqual(actual, expected []byte) bool {
+	actualValue, actualErr := runtimecanonicaljson.Decode(actual)
+	expectedValue, expectedErr := runtimecanonicaljson.Decode(expected)
+	if actualErr != nil || expectedErr != nil {
+		return false
+	}
+	actualCanonical, actualErr := runtimecanonicaljson.Encode(actualValue)
+	expectedCanonical, expectedErr := runtimecanonicaljson.Encode(expectedValue)
+	return actualErr == nil && expectedErr == nil && bytes.Equal(actualCanonical, expectedCanonical)
 }

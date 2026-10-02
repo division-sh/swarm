@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -49,7 +48,6 @@ func TestHandlerRuleSelectionRunsThroughDurableEventBusAndReconstructedTraceOnBo
 			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			source := handlerRuleSelectionSupportedSource(t)
 			node := externalPipelineSourceNode(t, source, ".", "selection-node")
-			workflowName := source.WorkflowName()
 			subscriptions := make([]events.EventType, 0, len(tests))
 			for _, tc := range tests {
 				eventType := tc.event
@@ -67,11 +65,12 @@ func TestHandlerRuleSelectionRunsThroughDurableEventBusAndReconstructedTraceOnBo
 			}
 			coordinator := newGateRecoveryCoordinator(eventBus, selected, runtimepipeline.PipelineCoordinatorOptions{Module: module})
 			eventBus.SetInterceptors(coordinator)
+			commitKeylessConstructorComponent(t, ctx, selected, coordinator, source)
 
 			for index, tc := range tests {
 				t.Run(tc.event, func(t *testing.T) {
 					sourceEnvelope := events.EnvelopeForFlowInstance(
-						events.EnvelopeForEntityID(events.EventEnvelope{}, runtimeflowidentity.EntityID(workflowName)),
+						events.EnvelopeForEntityID(events.EventEnvelope{}, runID),
 						runID,
 					)
 					event := eventtest.ExistingRunRootIngress(

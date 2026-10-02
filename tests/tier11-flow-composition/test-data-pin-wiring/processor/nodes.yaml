@@ -4,7 +4,6 @@ processor-node:
   produces: [process.done]
   event_handlers:
     process.run:
-      create_entity: true
       guard:
         id: task_config_present
         check: has(entity.task_config)

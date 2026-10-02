@@ -76,7 +76,10 @@ func TestImportBoundaryConnectConsumesBindingsForInputAndRootOutputDelivery(t *t
 	if len(issues) != 0 || len(plans) != 2 {
 		t.Fatalf("connect plans = %#v, issues = %#v, want two valid plans", plans, issues)
 	}
-	store := &routePersistenceTestStore{}
+	store := &routePersistenceTestStore{targetOwners: []runtimebus.ActiveTargetDescriptor{
+		{ID: ".", FlowInstance: eventBusTestRunID, EntityID: runtimeflowidentity.EntityID(eventBusTestRunID)},
+		{ID: "worker", FlowInstance: "worker", EntityID: runtimeflowidentity.EntityID("worker")},
+	}}
 	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -104,7 +107,7 @@ func TestImportBoundaryConnectConsumesBindingsForInputAndRootOutputDelivery(t *t
 			}),
 		},
 	} {
-		evt := eventtest.RunCreatingRootIngressWithRoutingSource(tc.id, events.EventType(tc.eventType), "", "", []byte(`{}`), 0, "", "", tc.envelope, tc.source, time.Now().UTC())
+		evt := eventtest.ExistingRunRootIngressWithRoutingSource(tc.id, events.EventType(tc.eventType), "", "", []byte(`{}`), 0, eventBusTestRunID, tc.envelope, tc.source, time.Now().UTC())
 		plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 		if err != nil {
 			t.Fatalf("CheckPublishRecipientPlan(%s): %v", tc.eventType, err)

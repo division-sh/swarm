@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -18,6 +20,39 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
+
+func TestCommittedReadinessCannotConstructMissingStaticDeclaration(t *testing.T) {
+	store := &flowActivationTestStore{}
+	am := newFlowActivationManager(t, &flowActivationTestBus{}, &flowActivationTestInstanceStore{}, store)
+	source := loadRootAndFlowStaticAgentSource(t)
+	setFlowActivationManagerSemanticSource(am, source)
+	name, err := managerTestFlowAgentNamePlan(t, source, ".", "test-agent").Materialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := runtimeagentidentity.NewPlan(name, runtimeagentidentity.RootRoute())
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := plan.Live(managerIdentityTestRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := eventtest.RunCreatingRootIngress("", "task.assigned", "", "", nil, 0, identity.RunID, "", events.EventEnvelope{}, time.Now().UTC())
+	err = am.FinalizeCommittedAgentReadiness(testAuthorActivityContext(context.Background()), event, []events.DeliveryRoute{{
+		Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity,
+	}})
+	if !errors.Is(err, ErrAgentNotFound) {
+		t.Fatalf("missing constructed declaration finalization=%v, want exact lifecycle absence", err)
+	}
+	if _, exists := am.lifecycle.stateByIdentity(identity); exists {
+		t.Fatal("delivery finalization created an independent static lifecycle")
+	}
+	stored, err := store.LoadAgents(context.Background())
+	if err != nil || len(stored) != 0 || len(am.ListAgentConfigs()) != 0 {
+		t.Fatalf("delivery finalization mutated agent topology: stored=%+v process=%+v err=%v", stored, am.ListAgentConfigs(), err)
+	}
+}
 
 func TestCommittedRouteStateSeparatesLaunchRetirementAndAbsence(t *testing.T) {
 	identity := runtimeagentidentitytest.RootRuntime(t, "test-agent", "committed-route-state")
@@ -676,14 +711,23 @@ func TestSourceScopedCompletedTopologyReconstructsIntoLiveManagerOccurrence(t *t
 		_ = restarted.ShutdownWithOptions(ShutdownOptions{Grace: time.Second})
 	})
 	armedBefore := len(instances.armedEntries)
+	constructedBefore := len(instances.creates)
+	predecessor, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, req.TriggerEvent.RunID(), req.Instance.Route())
+	if err != nil || !found {
+		t.Fatalf("read predecessor readiness: found=%v err=%v", found, err)
+	}
 	if err := reconcileDynamicFlowRuntimeStartupForTest(restarted, ctx, authorActivityTestSourceArtifactFact, false); err != nil {
 		t.Fatalf("ReconstructDynamicFlowRuntimeStartupTopology: %v", err)
 	}
 	if !restartBus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
 		t.Fatal("completed topology did not publish its persisted process route")
 	}
-	if len(instances.armedEntries) != armedBefore || len(restartBus.published) != 0 {
-		t.Fatalf("topology-only reconstruction replayed durable work: timers=%d/%d events=%d", len(instances.armedEntries), armedBefore, len(restartBus.published))
+	if len(instances.armedEntries) != armedBefore+1 || len(restartBus.published) != 0 || len(instances.creates) != constructedBefore {
+		t.Fatalf("successor reconstruction repeated construction/creation or missed timer reconciliation: timers=%d/%d events=%d construction=%d/%d", len(instances.armedEntries), armedBefore, len(restartBus.published), len(instances.creates), constructedBefore)
+	}
+	successor, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, req.TriggerEvent.RunID(), req.Instance.Route())
+	if err != nil || !found || successor.AttemptOrdinal != predecessor.AttemptOrdinal+1 || successor.Pending() {
+		t.Fatalf("successor did not complete its own attempt: predecessor=%+v successor=%+v found=%v err=%v", predecessor, successor, found, err)
 	}
 	for _, agentID := range []string{"reviewer", "writer"} {
 		cfg, ok := testAgentConfigForRun(t, restarted, req.TriggerEvent.RunID(), agentID, req.Instance.InstancePath)
@@ -726,7 +770,7 @@ func TestSourceScopedStartupPreparesEverySiblingBeforeFirstPendingFinalizer(t *t
 	for _, req := range requests {
 		key := flowActivationReadinessKey(req.TriggerEvent.RunID(), req.Instance.InstancePath)
 		readiness := instances.readiness[key]
-		readiness.TopologyReadyAt = time.Time{}
+		readiness.Phase = runtimepipeline.FlowAttachmentPlanned
 		instances.readiness[key] = readiness
 	}
 	instances.readinessMu.Unlock()

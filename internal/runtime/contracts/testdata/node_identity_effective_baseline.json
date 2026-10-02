@@ -216,7 +216,6 @@
           "node_id": "telegram-responder"
         },
         "EventType": "telegram.reply_requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -1985,7 +1984,6 @@
           "node_id": "ingress-node"
         },
         "EventType": "operating.report.triggered",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -2079,7 +2077,6 @@
           "node_id": "operating-node"
         },
         "EventType": "operating.report.requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -2184,7 +2181,219 @@
           "node_id": "portfolio-router"
         },
         "EventType": "operating.reported",
-        "CreateEntity": false,
+        "Activity": {
+          "ID": "",
+          "Tool": "",
+          "Input": null,
+          "Approval": null
+        },
+        "Guard": null,
+        "AdvancesTo": "",
+        "SetsGate": null,
+        "ClearGates": null,
+        "DataAccumulation": {
+          "Writes": null,
+          "SourceEvent": ""
+        },
+        "Emit": {
+          "Event": "period.reported",
+          "From": "",
+          "Fields": {
+            "operating_id": {
+              "Kind": "cel",
+              "Literal": null,
+              "Ref": "",
+              "RefPath": {
+                "Root": 0,
+                "Segments": null,
+                "Raw": ""
+              },
+              "CEL": "payload.operating_id"
+            },
+            "period_id": {
+              "Kind": "cel",
+              "Literal": null,
+              "Ref": "",
+              "RefPath": {
+                "Root": 0,
+                "Segments": null,
+                "Raw": ""
+              },
+              "CEL": "payload.period_id"
+            },
+            "portfolio_id": {
+              "Kind": "cel",
+              "Literal": null,
+              "Ref": "",
+              "RefPath": {
+                "Root": 0,
+                "Segments": null,
+                "Raw": ""
+              },
+              "CEL": "payload.portfolio_id"
+            },
+            "revenue": {
+              "Kind": "cel",
+              "Literal": null,
+              "Ref": "",
+              "RefPath": {
+                "Root": 0,
+                "Segments": null,
+                "Raw": ""
+              },
+              "CEL": "payload.revenue"
+            }
+          }
+        },
+        "OnSuccess": {
+          "Emit": {
+            "Event": "",
+            "From": "",
+            "Fields": null
+          }
+        },
+        "Condition": "",
+        "Loop": null,
+        "OnComplete": null,
+        "Rules": null,
+        "Accumulate": null,
+        "Join": null,
+        "Compute": null,
+        "Query": null,
+        "FanOut": null,
+        "GroupBy": null,
+        "Filter": null,
+        "Reduce": null,
+        "Count": null,
+        "Clear": null
+      },
+      {
+        "ID": "cG9ydGZvbGlv.cG9ydGZvbGlvLXJvdXRlcg:portfolio.setup",
+        "Node": {
+          "flow_path": "portfolio",
+          "node_id": "portfolio-router"
+        },
+        "EventType": "portfolio.setup",
+        "Activity": {
+          "ID": "",
+          "Tool": "",
+          "Input": null,
+          "Approval": null
+        },
+        "Guard": null,
+        "AdvancesTo": "",
+        "SetsGate": null,
+        "ClearGates": null,
+        "DataAccumulation": {
+          "Writes": [
+            {
+              "source_field": "portfolio_id",
+              "target_field": "portfolio_id",
+              "value": {
+                "Kind": "",
+                "Literal": null,
+                "Ref": "",
+                "RefPath": {
+                  "Root": 0,
+                  "Segments": null,
+                  "Raw": ""
+                },
+                "CEL": ""
+              },
+              "key": {
+                "Kind": "",
+                "Literal": null,
+                "Ref": "",
+                "RefPath": {
+                  "Root": 0,
+                  "Segments": null,
+                  "Raw": ""
+                },
+                "CEL": ""
+              },
+              "index": {
+                "Kind": "",
+                "Literal": null,
+                "Ref": "",
+                "RefPath": {
+                  "Root": 0,
+                  "Segments": null,
+                  "Raw": ""
+                },
+                "CEL": ""
+              }
+            }
+          ],
+          "SourceEvent": "portfolio.setup"
+        },
+        "Emit": {
+          "Event": "period.setup",
+          "From": "",
+          "Fields": {
+            "expected_operating_ids": {
+              "Kind": "cel",
+              "Literal": null,
+              "Ref": "",
+              "RefPath": {
+                "Root": 0,
+                "Segments": null,
+                "Raw": ""
+              },
+              "CEL": "payload.expected_operating_ids"
+            },
+            "period_id": {
+              "Kind": "cel",
+              "Literal": null,
+              "Ref": "",
+              "RefPath": {
+                "Root": 0,
+                "Segments": null,
+                "Raw": ""
+              },
+              "CEL": "payload.period_id"
+            },
+            "portfolio_id": {
+              "Kind": "cel",
+              "Literal": null,
+              "Ref": "",
+              "RefPath": {
+                "Root": 0,
+                "Segments": null,
+                "Raw": ""
+              },
+              "CEL": "payload.portfolio_id"
+            }
+          }
+        },
+        "OnSuccess": {
+          "Emit": {
+            "Event": "",
+            "From": "",
+            "Fields": null
+          }
+        },
+        "Condition": "",
+        "Loop": null,
+        "OnComplete": null,
+        "Rules": null,
+        "Accumulate": null,
+        "Join": null,
+        "Compute": null,
+        "Query": null,
+        "FanOut": null,
+        "GroupBy": null,
+        "Filter": null,
+        "Reduce": null,
+        "Count": null,
+        "Clear": null
+      },
+      {
+        "ID": "cG9ydGZvbGlvL3BlcmlvZA.cG9ydGZvbGlvLWNvbGxlY3Rvcg:period.reported",
+        "Node": {
+          "flow_path": "portfolio/period",
+          "node_id": "portfolio-collector"
+        },
+        "EventType": "period.reported",
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -2572,7 +2781,6 @@
           "node_id": "portfolio-collector"
         },
         "EventType": "period.setup",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -3544,7 +3752,6 @@
           "node_id": "ingress-node"
         },
         "EventType": "operating.report.triggered",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -3616,7 +3823,6 @@
           "node_id": "operating-node"
         },
         "EventType": "operating.report.requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -3699,7 +3905,6 @@
           "node_id": "portfolio-collector"
         },
         "EventType": "operating.reported",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -4043,7 +4248,6 @@
           "node_id": "worker-node"
         },
         "EventType": "work.requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -4740,7 +4944,7 @@
             "Input": null,
             "Approval": null
           },
-          "CreateEntity": true,
+          "CreateEntity": false,
           "Description": "",
           "Emit": {
             "Event": "",
@@ -5428,7 +5632,7 @@
               "Compute": null,
               "Condition": "",
               "Count": null,
-              "CreateEntity": true,
+              "CreateEntity": false,
               "DataAccumulation": {
                 "SourceEvent": "",
                 "Writes": [
@@ -5576,7 +5780,6 @@
           "node_id": "account-node"
         },
         "EventType": "account.notification.completed",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -5625,7 +5828,6 @@
           "node_id": "account-node"
         },
         "EventType": "account.notify.requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -5712,7 +5914,6 @@
           "node_id": "account-node"
         },
         "EventType": "account.registered",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -5799,7 +6000,6 @@
           "node_id": "portfolio-coordinator"
         },
         "EventType": "portfolio.account.register.requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -5860,7 +6060,6 @@
           "node_id": "portfolio-coordinator"
         },
         "EventType": "portfolio.accounts.register.requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -5977,7 +6176,6 @@
           "node_id": "portfolio-coordinator"
         },
         "EventType": "portfolio.membership.seeded",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -6064,7 +6262,6 @@
           "node_id": "portfolio-coordinator"
         },
         "EventType": "portfolio.notify.requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -6154,7 +6351,6 @@
           "node_id": "portfolio-coordinator"
         },
         "EventType": "portfolio.opened",
-        "CreateEntity": true,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -6567,7 +6763,6 @@
           "node_id": "consumer-node"
         },
         "EventType": "work.ready",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -6616,7 +6811,6 @@
           "node_id": "producer-node"
         },
         "EventType": "work.requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -6980,7 +7174,6 @@
           "node_id": "item-handler"
         },
         "EventType": "item.received",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -7041,7 +7234,6 @@
           "node_id": "item-observer"
         },
         "EventType": "item.processed",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -7746,7 +7938,6 @@
           "node_id": "producer-node"
         },
         "EventType": "validation.started",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -7882,7 +8073,6 @@
           "node_id": "producer-node"
         },
         "EventType": "validation.triggered",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -7943,7 +8133,6 @@
           "node_id": "validator-node"
         },
         "EventType": "validation.requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -8904,7 +9093,6 @@
           "node_id": "initiator-node"
         },
         "EventType": "request.submitted",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -8965,7 +9153,6 @@
           "node_id": "initiator-node"
         },
         "EventType": "requester.setup.requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -9026,7 +9213,6 @@
           "node_id": "provider-node"
         },
         "EventType": "provider.requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -9098,7 +9284,6 @@
           "node_id": "requester-node"
         },
         "EventType": "provider.replied",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -9147,7 +9332,6 @@
           "node_id": "requester-node"
         },
         "EventType": "requester.requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -9208,7 +9392,6 @@
           "node_id": "requester-node"
         },
         "EventType": "requester.setup",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -9821,7 +10004,6 @@
           "node_id": "account-node"
         },
         "EventType": "account.ready",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -9870,7 +10052,6 @@
           "node_id": "account-node"
         },
         "EventType": "account.setup",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -9919,7 +10100,6 @@
           "node_id": "producer-node"
         },
         "EventType": "account.setup.requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -9980,7 +10160,6 @@
           "node_id": "producer-node"
         },
         "EventType": "account.work.requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -10367,7 +10546,6 @@
           "node_id": "account-node"
         },
         "EventType": "account.ready",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -10416,7 +10594,6 @@
           "node_id": "producer-node"
         },
         "EventType": "account.requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -10666,7 +10843,6 @@
           "node_id": "send-notification"
         },
         "EventType": "automation.requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",

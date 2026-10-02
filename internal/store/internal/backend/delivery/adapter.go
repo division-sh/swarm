@@ -102,7 +102,7 @@ func (a *Adapter) commitInitialTx(ctx context.Context, tx *sql.Tx, attempt *muta
 	}
 	routes = events.NormalizeDeliveryRoutes(routes)
 	for _, route := range routes {
-		if route.Materialization.Empty() && route.Initialization.Empty() && !(route.Recipient.IsAgent() && route.Target.MaterializingEntity()) {
+		if route.Initialization.Empty() && !(route.Recipient.IsAgent() && route.Target.MaterializingEntity()) {
 			continue
 		}
 		event, err := a.materializationEvent(ctx, tx, eventID)

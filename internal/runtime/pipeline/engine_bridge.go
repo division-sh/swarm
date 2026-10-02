@@ -7,7 +7,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -47,18 +46,17 @@ type handlerExecutionOutcome struct {
 }
 
 type contractHandlerExecutionResult struct {
-	Committed                 bool
-	Plan                      handlerExecutionPlan
-	Outcome                   *handlerExecutionOutcome
-	GuardsEvaluated           []string
-	PreviewMetadata           map[string]any
-	InitialValuesMaterialized map[string]any
-	FollowUp                  handlerCommittedFollowUp
-	DiagnosticEmissions       []events.Event
-	SettledDeliveryClaim      *runtimedelivery.Claim
-	Handled                   bool
-	RuleSelection             handlerselection.Observation
-	Transition                *workflowlifecycle.Transition
+	Committed            bool
+	Plan                 handlerExecutionPlan
+	Outcome              *handlerExecutionOutcome
+	GuardsEvaluated      []string
+	PreviewMetadata      map[string]any
+	FollowUp             handlerCommittedFollowUp
+	DiagnosticEmissions  []events.Event
+	SettledDeliveryClaim *runtimedelivery.Claim
+	Handled              bool
+	RuleSelection        handlerselection.Observation
+	Transition           *workflowlifecycle.Transition
 }
 
 // The selected mutation has already committed these exact events. The
@@ -140,41 +138,11 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		triggerCtx.Event = application.Event()
 		triggerCtx.State = application.State()
 	}
-	originalEntityID := entityID
-	originalStateEntityID := strings.TrimSpace(triggerCtx.State.EntityID)
-	if !exactDelivery {
-		handlerEvent := events.EventType(firstNonEmptyString(triggerCtx.HandlerEventKey, string(triggerCtx.Event.Type())))
-		resolvedEntityID, resolvedEvent, err := resolveHandlerEntityIDForFlowAtNode(source, node, handlerEvent, flowID, handler, entityID, triggerCtx.Event, &triggerCtx.State)
-		if err != nil {
-			return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, err
-		}
-		entityID, triggerCtx.Event = resolvedEntityID, resolvedEvent
+	if entityID == "" || (!exactDelivery && strings.TrimSpace(triggerCtx.State.EntityID) != entityID) {
+		return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, runtimeengine.ErrUnconstructedWorkflowTarget
 	}
-	if !exactDelivery && !handler.CreateEntity && entityID != "" && originalStateEntityID != "" && originalStateEntityID != entityID {
-		stateRoute, err := canonicalHandlerRoute(
-			source,
-			flowID,
-			firstNonEmptyString(triggerCtx.State.Control.FlowPath, triggerCtx.Event.FlowInstance()),
-			triggerCtx.Event,
-		)
-		if err != nil {
-			return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, err
-		}
-		flowOwner, err := runtimeflowidentity.NewRunScopedFlowInstance(triggerCtx.Event.RunID(), stateRoute)
-		if err != nil {
-			return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, err
-		}
-		currentState, err := pc.currentWorkflowState(ctx, flowOwner, identity.NormalizeEntityID(entityID))
-		if err != nil {
-			return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, err
-		}
-		triggerCtx.State = currentState
-		if strings.TrimSpace(triggerCtx.State.EntityID) == "" {
-			triggerCtx.State.EntityID = entityID
-		}
-	}
-	if !exactDelivery && !handler.CreateEntity && entityID != "" && originalEntityID != "" && originalEntityID != entityID && strings.TrimSpace(triggerCtx.State.EntityID) == "" {
-		triggerCtx.State.EntityID = entityID
+	if err := ValidateExecutionHandlerDeclaration(source, node, handler); err != nil {
+		return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, err
 	}
 	terminalRejected, err := terminalStateHandlerRejected(pc, flowID, triggerCtx.State, handler)
 	if err != nil {
@@ -199,14 +167,6 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	ctx = withPipelineFlowScope(ctx, flowID)
 	ctx = runtimecorrelation.WithInboundEvent(ctx, triggerCtx.Event)
 	ctx = runtimecorrelation.WithHandlerID(ctx, node.Key()+":"+strings.TrimSpace(string(triggerCtx.Event.Type())))
-	initialFieldValues := map[string]any(nil)
-	if handler.CreateEntity {
-		var err error
-		initialFieldValues, err = workflowEntitySchemaInitialValues(source, flowID)
-		if err != nil {
-			return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, err
-		}
-	}
 	handlerEventKey := strings.TrimSpace(triggerCtx.HandlerEventKey)
 	if handlerEventKey == "" {
 		handlerEventKey = workflowNodeHandlerEventKeyForExecution(ctx, source, node, triggerCtx.Event)
@@ -245,26 +205,20 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if err != nil {
 		return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, err
 	}
-	materializationAdmitted := handlerExecutionEntityRequirementForNode(source, node, events.EventType(handlerEventKey), flowID, handler).materializes()
-	if exactDelivery {
-		materializationAdmitted = application.Policy().Dependency.materializes()
-	}
 	result, err := exec.Execute(ctx, runtimeengine.ExecutionRequest{
-		EntityMaterializationAdmitted: materializationAdmitted,
-		EntityID:                      identity.NormalizeEntityID(entityID),
-		Node:                          node,
-		ExecutionFlowID:               identity.NormalizeFlowID(flowID),
-		Route:                         stateRoute,
-		Event:                         triggerCtx.Event,
-		ProducerSource:                producerSource,
-		HandlerEventKey:               handlerEventKey,
-		JoinDeclaration:               joinDeclaration,
-		ChainDepth:                    triggerCtx.Event.ChainDepth(),
-		Handler:                       handler,
-		FanOutPlans:                   source.FanOutPlansForHandler(node, handlerEventKey),
-		Preview:                       preview,
-		State:                         stateSnapshot,
-		InitialFieldValues:            initialFieldValues,
+		EntityID:        identity.NormalizeEntityID(entityID),
+		Node:            node,
+		ExecutionFlowID: identity.NormalizeFlowID(flowID),
+		Route:           stateRoute,
+		Event:           triggerCtx.Event,
+		ProducerSource:  producerSource,
+		HandlerEventKey: handlerEventKey,
+		JoinDeclaration: joinDeclaration,
+		ChainDepth:      triggerCtx.Event.ChainDepth(),
+		Handler:         handler,
+		FanOutPlans:     source.FanOutPlansForHandler(node, handlerEventKey),
+		Preview:         preview,
+		State:           stateSnapshot,
 	})
 	if !preview {
 		logComputeModuleReplayEvidence(ctx, pc.bus, node.Key(), triggerCtx.Event, result.ComputeModuleTraces)
@@ -279,10 +233,6 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		}, err
 	}
 	previewMetadata := previewMetadataAfterExecution(stateSnapshot, result.StateMutation)
-	initialValuesMaterialized := map[string]any(nil)
-	if handler.CreateEntity {
-		initialValuesMaterialized = cloneStringAnyMap(initialFieldValues)
-	}
 	followUp := handlerCommittedFollowUp{}
 	if result.Committed {
 		followUp = handlerCommittedFollowUp{
@@ -321,18 +271,17 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	}
 	plan.DataAccumulation = outcome.DataAccumulation
 	return contractHandlerExecutionResult{
-		Committed:                 result.Committed,
-		Plan:                      plan,
-		Outcome:                   outcome,
-		GuardsEvaluated:           append([]string{}, outcome.GuardsEvaluated...),
-		PreviewMetadata:           previewMetadata,
-		InitialValuesMaterialized: initialValuesMaterialized,
-		FollowUp:                  followUp,
-		DiagnosticEmissions:       diagnostics.immutableEvents(),
-		SettledDeliveryClaim:      result.SettledDeliveryClaim,
-		Handled:                   handled,
-		RuleSelection:             result.HandlerRuleSelection,
-		Transition:                result.StateMutation.Transition,
+		Committed:            result.Committed,
+		Plan:                 plan,
+		Outcome:              outcome,
+		GuardsEvaluated:      append([]string{}, outcome.GuardsEvaluated...),
+		PreviewMetadata:      previewMetadata,
+		FollowUp:             followUp,
+		DiagnosticEmissions:  diagnostics.immutableEvents(),
+		SettledDeliveryClaim: result.SettledDeliveryClaim,
+		Handled:              handled,
+		RuleSelection:        result.HandlerRuleSelection,
+		Transition:           result.StateMutation.Transition,
 	}, err
 }
 
@@ -352,148 +301,6 @@ func logLoopExecution(ctx context.Context, bus Bus, nodeID string, evt events.Ev
 		Action: "workflow_loop_" + strings.TrimSpace(trace.Operation), EventID: strings.TrimSpace(evt.ID()),
 		EventType: strings.TrimSpace(string(evt.Type())), EntityID: workflowEventEntityID(evt), Detail: trace,
 	})
-}
-
-func resolveHandlerEntityIDForFlow(
-	source semanticview.Source,
-	flowID string,
-	handler runtimecontracts.SystemNodeEventHandler,
-	entityID string,
-	evt events.Event,
-	state *WorkflowState,
-	targetOwnership ...events.DeliveryTargetOwnership,
-) (string, events.Event, error) {
-	return resolveHandlerEntityIDForFlowAtNode(source, identity.ExecutableNode{}, evt.Type(), flowID, handler, entityID, evt, state, targetOwnership...)
-}
-
-func resolveHandlerEntityIDForFlowAtNode(
-	source semanticview.Source,
-	node identity.ExecutableNode,
-	handlerEvent events.EventType,
-	flowID string,
-	handler runtimecontracts.SystemNodeEventHandler,
-	entityID string,
-	evt events.Event,
-	state *WorkflowState,
-	targetOwnership ...events.DeliveryTargetOwnership,
-) (string, events.Event, error) {
-	entityID = strings.TrimSpace(entityID)
-	if handler.CreateEntity {
-		sourceEntityID := strings.TrimSpace(evt.EntityID())
-		stampedEntityID := ""
-		if len(targetOwnership) > 0 && targetOwnership[0].MaterializingEntity() {
-			stampedEntityID = targetOwnership[0].Route().EntityID
-		}
-		instanceID := canonicalHandlerInstanceID(flowID, evt)
-		instance := deriveFlowInstanceIdentity(source, flowID, instanceID)
-		if source != nil && strings.TrimSpace(flowID) == strings.TrimSpace(semanticview.RootExecutionFlowID(source)) {
-			route, err := canonicalHandlerRoute(source, flowID, "", evt)
-			if err != nil {
-				return "", evt, err
-			}
-			instance = FlowInstanceIdentity{Instance: runtimeflowidentity.Instance{
-				TemplateID:    strings.TrimSpace(flowID),
-				ScopeKey:      route.ScopeKey,
-				InstanceID:    route.InstanceID,
-				InstancePath:  route.InstancePath,
-				EntityID:      runtimeflowidentity.EntityID(route.InstancePath),
-				HasStoredPath: true,
-			}}
-		}
-		if !instance.Route().Valid() {
-			return "", evt, fmt.Errorf("create_entity requires an exact workflow instance route")
-		}
-		if stampedEntityID != "" && stampedEntityID != instance.EntityID {
-			return "", evt, fmt.Errorf("create_entity stamped target %q disagrees with canonical future entity %q", stampedEntityID, instance.EntityID)
-		}
-		instance.ParentEntityID = sourceEntityID
-		entityID = instance.EntityID
-		if state != nil {
-			entityType, err := requireWorkflowEntityType(source, flowID)
-			if err != nil {
-				return "", evt, err
-			}
-			initialStage, err := workflowInitialStateForFlow(source, flowID)
-			if err != nil {
-				return "", evt, err
-			}
-			state.EntityID = entityID
-			state.Stage = NormalizeWorkflowStateID(initialStage)
-			state.Status = ""
-			state.Metadata, err = workflowCreateEntityFields(source, flowID)
-			if err != nil {
-				return "", evt, err
-			}
-			state.Control = workflowStateControlFromIdentity(instance, entityType)
-		}
-		envelope := events.EnvelopeForFlowInstance(evt.NormalizedEnvelope(), instance.InstancePath)
-		resolved, err := events.ResolveEnvelope(evt, envelope)
-		if err != nil {
-			return "", evt, fmt.Errorf("carry created workflow instance route: %w", err)
-		}
-		return entityID, resolved, nil
-	}
-	var err error
-	entityID, evt, err = ensureHandlerEntityIDAtNode(source, node, handlerEvent, flowID, handler, entityID, evt)
-	if err != nil {
-		return "", evt, err
-	}
-	if handlerExecutionEntityRequirementForNode(source, node, handlerEvent, flowID, handler).materializes() {
-		statePath := ""
-		if state != nil {
-			statePath = state.Control.FlowPath
-		}
-		route, routeErr := canonicalHandlerRoute(source, flowID, statePath, evt)
-		if routeErr != nil {
-			return "", evt, routeErr
-		}
-		if err := prepareHandlerMaterializationStateAtNode(source, node, handlerEvent, flowID, handler, route, entityID, state); err != nil {
-			return "", evt, err
-		}
-	}
-	if state != nil && strings.TrimSpace(state.EntityID) == "" {
-		state.EntityID = entityID
-	}
-	return entityID, evt, nil
-}
-
-func canonicalHandlerInstanceID(flowID string, evt events.Event) string {
-	if targetInstance := strings.Trim(strings.TrimSpace(evt.TargetRoute().FlowInstance), "/"); targetInstance != "" {
-		if idx := strings.LastIndex(targetInstance, "/"); idx >= 0 {
-			return strings.TrimSpace(targetInstance[idx+1:])
-		}
-		return targetInstance
-	}
-	if flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/"); flowInstance != "" {
-		if idx := strings.LastIndex(flowInstance, "/"); idx >= 0 {
-			return strings.TrimSpace(flowInstance[idx+1:])
-		}
-		return flowInstance
-	}
-	if strings.TrimSpace(flowID) == "" {
-		if runID := strings.TrimSpace(evt.RunID()); runID != "" {
-			return runID
-		}
-		return "root"
-	}
-	flowID = strings.Trim(strings.TrimSpace(flowID), "/")
-	if idx := strings.LastIndex(flowID, "/"); idx >= 0 {
-		return strings.TrimSpace(flowID[idx+1:])
-	}
-	return flowID
-}
-
-func workflowCreateEntityFields(source semanticview.Source, flowID string) (map[string]any, error) {
-	return workflowEntitySchemaInitialValues(source, flowID)
-}
-
-func workflowStateControlFromIdentity(instance FlowInstanceIdentity, entityType string) runtimeengine.StateControl {
-	return runtimeengine.StateControl{
-		FlowPath: instance.InstancePath, StorageRef: instance.InstancePath, InstanceID: instance.InstanceID,
-		EntityType:   strings.TrimSpace(entityType),
-		ParentFlowID: instance.ParentRoute.FlowID, ParentFlowInstance: instance.ParentRoute.FlowInstance,
-		ParentEntityID: instance.ParentEntityID,
-	}
 }
 
 func previewMetadataAfterExecution(snapshot runtimeengine.StateSnapshot, mutation runtimeengine.StateMutation) map[string]any {

@@ -9,12 +9,16 @@ import (
 	"time"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/store/internal/backend/scenarioexecutionpersistence"
 	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
@@ -22,10 +26,11 @@ import (
 )
 
 type runForkEntityMetadata struct {
-	FlowInstance string
-	EntityType   string
-	Slug         string
-	Name         string
+	FlowInstance   string
+	EntityType     string
+	Slug           string
+	Name           string
+	PreparedHeader *runtimepipeline.WorkflowEngineStateRecord
 }
 
 type ActiveRunSourceOwnerFunc func(context.Context, string) (runtimecorrelation.SourceArtifactFact, error)
@@ -119,7 +124,7 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 			existing, found, err := loadExactRunForkMaterialization(
 				ctx, func(ctx context.Context, tx *sql.Tx, runID string) (storerunlifecycle.Snapshot, error) {
 					return s.RunLifecyclePostgresOwner.LoadSnapshotTx(ctx, tx, runID, true)
-				}, tx, forkRunID, plan, identity, selection,
+				}, tx, true, forkRunID, plan, identity, selection,
 			)
 			if err != nil {
 				return err
@@ -284,7 +289,7 @@ func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork
 				func(ctx context.Context, tx *sql.Tx, runID string) (storerunlifecycle.Snapshot, error) {
 					return s.RunLifecycleSQLiteOwner.LoadSnapshotTx(ctx, tx, runID)
 				},
-				tx, forkRunID, plan, identity, selection,
+				tx, false, forkRunID, plan, identity, selection,
 			)
 			if err != nil {
 				return err
@@ -375,6 +380,7 @@ func loadExactRunForkMaterialization(
 	ctx context.Context,
 	loadSnapshot runForkLifecycleSnapshotLoader,
 	tx *sql.Tx,
+	postgres bool,
 	forkRunID string,
 	plan runfork.RunForkPlan,
 	identity runForkBundleInsertIdentity,
@@ -432,11 +438,17 @@ func loadExactRunForkMaterialization(
 		return runfork.RunForkMaterialization{}, false, err
 	}
 	bundleHash := identity.SourceArtifactFact.BundleHash()
+	fieldRows := 0
+	for _, entity := range plan.Entities {
+		if entity.MaterializationMetadata != nil && entity.MaterializationMetadata.EntityType != "" {
+			fieldRows++
+		}
+	}
 	if snapshot.State != storerunlifecycle.StatePaused ||
 		!snapshot.Origin.Equal(wantOrigin) ||
 		snapshot.BundleHash != bundleHash ||
 		snapshot.EventCount != 0 ||
-		snapshot.EntityCount != len(plan.Entities) {
+		snapshot.EntityCount != fieldRows {
 		return runfork.RunForkMaterialization{}, false, fmt.Errorf(
 			"fork materialization %s conflicts with persisted lifecycle state",
 			forkRunID,
@@ -447,48 +459,66 @@ func loadExactRunForkMaterialization(
 	if err != nil {
 		return runfork.RunForkMaterialization{}, false, err
 	}
-	expectedEntities := make(map[string]string, len(plan.Entities))
+	type historicalOwner struct{ path, entityType string }
+	expectedEntities := make(map[string]historicalOwner, 2*len(plan.Entities))
+	projectedEntities := make(map[string]struct{}, len(plan.Entities))
 	for _, entity := range plan.Entities {
 		sourceEntityID := strings.TrimSpace(entity.EntityID)
 		identity, err := projectRunForkEntityIdentity(plan.SourceRunID, forkRunID, sourceEntityID, metadata[sourceEntityID].FlowInstance)
 		if err != nil {
 			return runfork.RunForkMaterialization{}, false, err
 		}
-		if _, duplicate := expectedEntities[identity.EntityID]; duplicate {
+		if _, duplicate := projectedEntities[identity.EntityID]; duplicate {
 			return runfork.RunForkMaterialization{}, false, fmt.Errorf("fork materialization projects duplicate entity %s", identity.EntityID)
 		}
-		expectedEntities[identity.EntityID] = identity.FlowInstance
+		projectedEntities[identity.EntityID] = struct{}{}
+		meta := metadata[sourceEntityID]
+		owner := historicalOwner{identity.FlowInstance, meta.EntityType}
+		if meta.EntityType != "" {
+			expectedEntities["fields/"+identity.EntityID] = owner
+		}
+		if entity.MaterializationMetadata.Source == runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance {
+			expectedEntities["header/"+identity.EntityID] = owner
+		}
 	}
+	// One historical instance can own a header and optional fields. Imports own
+	// fields only; exact replay must preserve that distinction, not count fields
+	// as a proxy for construction or repair a missing header.
 	entityRows, err := tx.QueryContext(ctx, `
-		SELECT CAST(entity_id AS TEXT), flow_instance
-		FROM entity_state
+		SELECT 'header', CAST(entity_id AS TEXT), instance_path, entity_type
+		FROM flow_instances
+		WHERE run_id = $1
+		UNION ALL
+		SELECT 'fields', CAST(entity_id AS TEXT), flow_instance, entity_type FROM entity_state
 		WHERE run_id = $1
 	`, forkRunID)
 	if err != nil {
 		return runfork.RunForkMaterialization{}, false, fmt.Errorf("load existing fork entities: %w", err)
 	}
 	for entityRows.Next() {
-		var entityID, flowInstance string
-		if err := entityRows.Scan(&entityID, &flowInstance); err != nil {
+		var kind, entityID, flowInstance string
+		var entityType sql.NullString
+		if err := entityRows.Scan(&kind, &entityID, &flowInstance, &entityType); err != nil {
 			_ = entityRows.Close()
 			return runfork.RunForkMaterialization{}, false, fmt.Errorf("scan existing fork entity: %w", err)
 		}
-		expectedFlowInstance, ok := expectedEntities[entityID]
+		key := kind + "/" + entityID
+		expected, ok := expectedEntities[key]
 		if !ok {
 			_ = entityRows.Close()
 			return runfork.RunForkMaterialization{}, false, fmt.Errorf(
 				"fork materialization %s has unexpected entity %s",
-				forkRunID, entityID,
+				forkRunID, key,
 			)
 		}
-		if flowInstance != expectedFlowInstance {
+		if flowInstance != expected.path || entityType.String != expected.entityType || entityType.Valid != (expected.entityType != "") {
 			_ = entityRows.Close()
 			return runfork.RunForkMaterialization{}, false, fmt.Errorf(
-				"fork materialization %s entity %s has flow_instance %q; want %q",
-				forkRunID, entityID, flowInstance, expectedFlowInstance,
+				"fork materialization %s entity %s has flow_instance/type %q/%q; want %q/%q",
+				forkRunID, key, flowInstance, entityType.String, expected.path, expected.entityType,
 			)
 		}
-		delete(expectedEntities, entityID)
+		delete(expectedEntities, key)
 	}
 	if err := entityRows.Err(); err != nil {
 		_ = entityRows.Close()
@@ -500,6 +530,37 @@ func loadExactRunForkMaterialization(
 			"fork materialization %s is missing expected entities",
 			forkRunID,
 		)
+	}
+	if selection == nil {
+		for _, entity := range plan.Entities {
+			projected, err := projectRunForkEntityIdentity(plan.SourceRunID, forkRunID, entity.EntityID, entity.MaterializationMetadata.FlowInstance)
+			if err != nil {
+				return runfork.RunForkMaterialization{}, false, err
+			}
+			if entity.MaterializationMetadata.Source == runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState {
+				meta := metadata[entity.EntityID]
+				meta.FlowInstance = projected.FlowInstance
+				fields, err := projectRunForkHistoricalFields(plan.SourceRunID, forkRunID, projected.EntityID, entity, meta, snapshot.StartedAt)
+				if err != nil {
+					return runfork.RunForkMaterialization{}, false, err
+				}
+				owner, err := runtimeflowidentity.NewRunScopedFlowInstance(forkRunID, runtimeflowidentity.RouteForInstancePath(projected.FlowInstance))
+				if err != nil {
+					return runfork.RunForkMaterialization{}, false, err
+				}
+				if err := pipelinepersistence.RequireHistoricalImportedWorkflowState(ctx, tx, postgres, owner, fields.Record); err != nil {
+					return runfork.RunForkMaterialization{}, false, err
+				}
+				continue
+			}
+			header, err := projectRunForkHistoricalHeader(plan.SourceRunID, forkRunID, projected.EntityID, projected.FlowInstance, entity)
+			if err != nil {
+				return runfork.RunForkMaterialization{}, false, err
+			}
+			if err := pipelinepersistence.RequireSelectedHistoricalWorkflowHeader(ctx, tx, postgres, header); err != nil {
+				return runfork.RunForkMaterialization{}, false, err
+			}
+		}
 	}
 
 	var binding *runfork.RunForkSelectedContractBinding
@@ -592,7 +653,7 @@ func loadRunForkEntityMetadata(plan runfork.RunForkPlan) (map[string]runForkEnti
 		if metadataOwner != runfork.RunForkMaterializedEntitySnapshotMetadataOwner {
 			return nil, runForkReplayResumeError(runfork.RunForkBlockerEntitySnapshotMetadataUnproven, runfork.RunForkReplayResumeFactEntityStateSnapshot, fmt.Sprintf("fork materialization metadata for entity %s must be owned by %s", entityID, runfork.RunForkMaterializedEntitySnapshotMetadataOwner))
 		}
-		if entity.MaterializationMetadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState {
+		if entity.MaterializationMetadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState && entity.MaterializationMetadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance {
 			return nil, runForkReplayResumeError(runfork.RunForkBlockerEntitySnapshotMetadataUnproven, runfork.RunForkReplayResumeFactEntityStateSnapshot, fmt.Sprintf("fork materialization metadata for entity %s requires fixed-revision entity state metadata", entityID))
 		}
 		meta := runForkEntityMetadata{
@@ -601,7 +662,7 @@ func loadRunForkEntityMetadata(plan runfork.RunForkPlan) (map[string]runForkEnti
 			Slug:         strings.TrimSpace(entity.MaterializationMetadata.Slug),
 			Name:         strings.TrimSpace(entity.MaterializationMetadata.Name),
 		}
-		if meta.FlowInstance == "" || meta.EntityType == "" {
+		if meta.FlowInstance == "" || (meta.EntityType == "" && (entity.MaterializationMetadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance || len(entity.Fields) != 0)) {
 			return nil, runForkReplayResumeError(runfork.RunForkBlockerEntitySnapshotMetadataUnproven, runfork.RunForkReplayResumeFactEntityStateSnapshot, fmt.Sprintf("source entity_state metadata for entity %s must include flow_instance and entity_type", entityID))
 		}
 		out[entityID] = meta
@@ -629,38 +690,13 @@ func materializeRunForkEntityState(ctx context.Context, decisions runForkDecisio
 	}
 	entityID := projection.Fork.EntityID
 	meta.FlowInstance = projection.Fork.FlowInstance
-	currentState := strings.TrimSpace(entity.CurrentState)
-	if currentState == "" {
-		return fmt.Errorf("reconstructed current_state is required for entity %s", entityID)
-	}
-	if entity.EnteredStateAt == nil || entity.EnteredStateAt.IsZero() {
-		return fmt.Errorf("reconstructed entered_state_at is required for entity %s", entityID)
-	}
-	fieldsJSON, err := jsonMapArg(entity.Fields)
+	fields, err := projectRunForkHistoricalFields(plan.SourceRunID, forkRunID, entityID, entity, meta, now)
 	if err != nil {
-		return fmt.Errorf("encode fork fields for entity %s: %w", entityID, err)
+		return err
 	}
-	forkBookkeeping, forkAccumulator, correspondence, err := projectRunForkEntityExecutionState(entity, plan.SourceRunID, forkRunID, projection)
-	if err != nil {
-		return fmt.Errorf("fork execution state for entity %s: %w", entityID, err)
-	}
-	bookkeepingJSON, err := jsonMapArg(forkBookkeeping)
-	if err != nil {
-		return fmt.Errorf("encode fork bookkeeping for entity %s: %w", entityID, err)
-	}
-	gatesJSON, err := jsonMapArg(entity.Gates)
-	if err != nil {
-		return fmt.Errorf("encode fork gates for entity %s: %w", entityID, err)
-	}
-	forkAccumulator, gateBindings, err := forkGateActivationState(forkAccumulator, forkRunID, meta.FlowInstance, entityID)
-	if err != nil {
-		return fmt.Errorf("fork gate state for entity %s: %w", entityID, err)
-	}
-	accJSON, err := jsonMapArg(forkAccumulator)
-	if err != nil {
-		return fmt.Errorf("encode fork accumulator for entity %s: %w", entityID, err)
-	}
-	if _, err := tx.ExecContext(ctx, `
+	record := fields.Record
+	if meta.EntityType != "" {
+		if _, err := tx.ExecContext(ctx, `
 		INSERT INTO entity_state (
 			run_id, entity_id, flow_instance, entity_type, slug, name,
 			current_state, gates, fields, bookkeeping, accumulator, revision,
@@ -669,30 +705,41 @@ func materializeRunForkEntityState(ctx context.Context, decisions runForkDecisio
 		VALUES (
 			$1, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''),
 			$7, $8, $9, $10, $11, 1,
-			$12, $13, $13
+			$12, $13, $14
 		)
 	`, forkRunID, entityID, meta.FlowInstance, meta.EntityType, meta.Slug, meta.Name,
-		currentState, gatesJSON, fieldsJSON, bookkeepingJSON, accJSON, entity.EnteredStateAt, now); err != nil {
-		return fmt.Errorf("insert fork entity_state %s: %w", entityID, err)
+			record.CurrentState, string(record.Gates), string(record.Fields), string(record.Bookkeeping), string(record.Accumulator), record.EnteredStageAt, record.CreatedAt, record.UpdatedAt); err != nil {
+			return fmt.Errorf("insert fork entity_state %s: %w", entityID, err)
+		}
+	}
+	if entity.MaterializationMetadata.Source == runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance {
+		var header runtimepipeline.WorkflowEngineStateRecord
+		if meta.PreparedHeader != nil {
+			header = *meta.PreparedHeader
+		} else {
+			header, err = projectRunForkHistoricalHeader(plan.SourceRunID, forkRunID, entityID, meta.FlowInstance, entity)
+			if err != nil {
+				return err
+			}
+		}
+		if header.Identity.RunID != forkRunID || header.Identity.Route.InstancePath != meta.FlowInstance || header.EntityID != entityID || header.EntityType != meta.EntityType {
+			return fmt.Errorf("historical header projection crossed entity ownership")
+		}
+		if err := pipelinepersistence.CommitSelectedHistoricalWorkflowHeader(ctx, tx, postgres, header); err != nil {
+			return err
+		}
 	}
 	if err := attempt.AddFact(forkRunID, privaterunforkrevision.FamilyEntityMetadata, entityID); err != nil {
 		return err
 	}
-	if err := materializeRunForkDecisionCards(ctx, decisions, attempt, forkRunID, projection, gateBindings, now); err != nil {
+	if err := materializeRunForkDecisionCards(ctx, decisions, attempt, forkRunID, projection, fields.GateBindings, now); err != nil {
 		return err
 	}
 	if materializeProposed == nil {
 		return fmt.Errorf("fork proposed-effect materialization owner is required")
 	}
-	if err := materializeProposed(ctx, attempt, plan.SourceRunID, forkRunID, projection, plan.ForkPoint, correspondence, now); err != nil {
+	if err := materializeProposed(ctx, attempt, plan.SourceRunID, forkRunID, projection, plan.ForkPoint, fields.Correspondence, now); err != nil {
 		return err
-	}
-	after := runtimemutationlog.EntityStateProjection{
-		CurrentState: currentState,
-		Fields:       entity.Fields,
-		Bookkeeping:  forkBookkeeping,
-		Gates:        entity.Gates,
-		Accumulator:  forkAccumulator,
 	}
 	writer := runtimemutationlog.Writer{
 		Type:        "platform",
@@ -700,9 +747,96 @@ func materializeRunForkEntityState(ctx context.Context, decisions runForkDecisio
 		HandlerStep: "materialize_snapshot",
 	}
 	if postgres {
-		return privatemutationlog.InsertEntityStateDiff(ctx, attempt, runLifecycle, entityID, runtimemutationlog.EntityStateProjection{}, after, writer)
+		return privatemutationlog.InsertEntityStateDiff(ctx, attempt, runLifecycle, entityID, runtimemutationlog.EntityStateProjection{}, fields.Mutation, writer)
 	}
-	return privatemutationlog.InsertSQLiteEntityStateDiff(ctx, attempt, runLifecycle, entityID, runtimemutationlog.EntityStateProjection{}, after, writer, now)
+	return privatemutationlog.InsertSQLiteEntityStateDiff(ctx, attempt, runLifecycle, entityID, runtimemutationlog.EntityStateProjection{}, fields.Mutation, writer, now)
+}
+
+type runForkHistoricalFields struct {
+	Record         runtimepipeline.WorkflowEntityStatePersistenceRecord
+	Mutation       runtimemutationlog.EntityStateProjection
+	Correspondence *loopruntime.ForkCorrespondence
+	GateBindings   []runForkGateActivationBinding
+}
+
+// Writer and exact reuse share the same historical projection. Its loop/gate
+// rebinding changes branch identity, never grants construction or execution.
+func projectRunForkHistoricalFields(sourceRunID, forkRunID, entityID string, entity runfork.RunForkEntityState, meta runForkEntityMetadata, now time.Time) (runForkHistoricalFields, error) {
+	var projected runForkHistoricalFields
+	if strings.TrimSpace(entity.CurrentState) == "" || entity.EnteredStateAt == nil || entity.EnteredStateAt.IsZero() {
+		return projected, fmt.Errorf("reconstructed state and entry time are required for entity %s", entityID)
+	}
+	projection, err := projectRunForkEntityOwnership(sourceRunID, forkRunID, entity.EntityID, entity.MaterializationMetadata.FlowInstance)
+	if err != nil {
+		return projected, err
+	}
+	if projection.Fork.EntityID != entityID || projection.Fork.FlowInstance != meta.FlowInstance {
+		return projected, fmt.Errorf("historical fields disagree with exact fork ownership")
+	}
+	bookkeeping, accumulator, correspondence, err := projectRunForkEntityExecutionState(entity, sourceRunID, forkRunID, projection)
+	if err != nil {
+		return projected, fmt.Errorf("fork loop state for entity %s: %w", entityID, err)
+	}
+	accumulator, bindings, err := forkGateActivationState(accumulator, forkRunID, meta.FlowInstance, entityID)
+	if err != nil {
+		return projected, fmt.Errorf("fork gate state for entity %s: %w", entityID, err)
+	}
+	createdAt := storerunlifecycle.CanonicalTimestamp(now)
+	updatedAt := createdAt
+	if meta.PreparedHeader != nil {
+		createdAt, updatedAt = meta.PreparedHeader.CreatedAt, meta.PreparedHeader.UpdatedAt
+	} else if entity.MaterializationMetadata.Source == runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance {
+		createdAt, updatedAt = entity.MaterializationMetadata.CreatedAt, entity.MaterializationMetadata.UpdatedAt
+	}
+	projected.Record = runtimepipeline.WorkflowEntityStatePersistenceRecord{
+		EntityID: entityID, FlowInstance: meta.FlowInstance, EntityType: meta.EntityType, Slug: meta.Slug, Name: meta.Name,
+		CurrentState: strings.TrimSpace(entity.CurrentState), Revision: 1, EnteredStageAt: *entity.EnteredStateAt,
+		CreatedAt: createdAt, UpdatedAt: updatedAt,
+	}
+	for _, field := range []struct {
+		value map[string]any
+		raw   *json.RawMessage
+	}{{entity.Fields, &projected.Record.Fields}, {entity.Gates, &projected.Record.Gates}, {bookkeeping, &projected.Record.Bookkeeping}, {accumulator, &projected.Record.Accumulator}} {
+		encoded, err := jsonMapArg(field.value)
+		if err != nil {
+			return projected, fmt.Errorf("encode historical fork state for entity %s: %w", entityID, err)
+		}
+		*field.raw = json.RawMessage(encoded)
+	}
+	projected.Mutation = runtimemutationlog.EntityStateProjection{
+		CurrentState: projected.Record.CurrentState, Fields: entity.Fields, Bookkeeping: bookkeeping, Gates: entity.Gates, Accumulator: accumulator,
+	}
+	projected.Correspondence, projected.GateBindings = correspondence, bindings
+	return projected, nil
+}
+
+func projectRunForkHistoricalHeader(sourceRunID, forkRunID, entityID, path string, entity runfork.RunForkEntityState) (runtimepipeline.WorkflowEngineStateRecord, error) {
+	metadata := entity.MaterializationMetadata
+	recorded, err := runtimepipeline.DecodeWorkflowInstanceRecordedConfig(runtimeflowidentity.RouteForInstancePath(metadata.FlowInstance), metadata.FlowConfig)
+	if err != nil {
+		return runtimepipeline.WorkflowEngineStateRecord{}, err
+	}
+	parent := recorded.ParentRoute()
+	if !parent.Empty() {
+		projected, err := projectRunForkEntityOwnership(sourceRunID, forkRunID, parent.EntityID, parent.FlowInstance)
+		if err != nil {
+			return runtimepipeline.WorkflowEngineStateRecord{}, err
+		}
+		parent.FlowInstance, parent.EntityID = projected.Fork.FlowInstance, projected.Fork.EntityID
+	}
+	config, err := recorded.Project(runtimeflowidentity.RouteForInstancePath(path), parent)
+	if err != nil {
+		return runtimepipeline.WorkflowEngineStateRecord{}, err
+	}
+	header, err := selectedContractHistoricalHeader(selectedContractWorkflowState{
+		SourceRunID: sourceRunID, RunID: forkRunID, EntityID: entityID, EntityType: metadata.EntityType, WorkflowName: metadata.FlowTemplate,
+		Mode: metadata.Mode, WorkflowVersion: recorded.WorkflowVersion(), Route: path, History: entity,
+	}, config, metadata.CreatedAt)
+	if err != nil {
+		return runtimepipeline.WorkflowEngineStateRecord{}, err
+	}
+	header.Status, header.CreatedAt, header.UpdatedAt, header.TerminatedAt = metadata.Status, metadata.CreatedAt, metadata.UpdatedAt, metadata.TerminatedAt
+	return header, header.Validate()
 }
 
 func deterministicRunForkMaterializationID(sourceRunID, forkEventID string) string {

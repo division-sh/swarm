@@ -1,0 +1,94 @@
+package testplanning
+
+import (
+	"os"
+	"path/filepath"
+	"reflect"
+	"regexp"
+	"testing"
+)
+
+func TestFlowConstructorProofPartitionRequiresBothStores(t *testing.T) {
+	f, err := os.Open(filepath.Join("..", "..", ".github", "test-proof-plan.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	policy, err := LoadPolicy(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, roots := range map[string][]string{
+		"local-serveapp-canaries": {"TestReceiverCompositionRestartBothStores"},
+		"serveapp-channel":        {"TestReceiverCompositionRestartBothStores"},
+		"runtime-full":            {"TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStores"},
+		"store-runtime-full-01":   {"TestRunControlControllerStopReconcilesBothTimerFamiliesOnBothStores"},
+		"store-runtime-full-02": {
+			"TestDynamicFlowRuntimeCreationOccurrenceLinearizesWithTerminalizationOnBothStores",
+			"TestDynamicFlowRuntimeCreationOccurrenceRollsBackAppendedEventOnBothStores",
+			"TestDynamicFlowRuntimeCreationOccurrenceRejectsRetiredAttemptOnBothStores",
+			"TestFlowConstructorAcknowledgedFailureRetainsExactIdentityBothStores",
+			"TestFlowConstructorReplayAndRefusalBothStores",
+			"TestFlowConstructorImmutableReplayConflictBothStores",
+			"TestFlowConstructorActivationConsumesExactInputBothStores",
+			"TestFlowConstructorPersistsCreatingInputWithoutAutoEmitBothStores",
+			"TestFlowConstructorCommitsKeylessDescendantsBothStores",
+			"TestFlowConstructorRootEagerTreeBothStores",
+			"TestFlowConstructorHistoricalFieldlessSnapshotBothStores",
+			"TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores",
+			"TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores",
+			"TestFlowConstructorDescendantFaultRollsBackTreeBothStores",
+			"TestFlowConstructorDescendantCancellationAndCorruptionBothStores",
+			"TestFieldlessFlowConstructionKeepsLifecycleWithoutStateRowBothStores",
+			"TestFlowAttachmentPhaseFailureRetainsConstructionBothStores",
+			"TestFlowAttachmentCleanupRetainsExactPredecessorBothStores",
+			"TestFlowAttachmentTimerAcquisitionFailureCannotBecomeReadyBothStores",
+			"TestFlowAttachmentTimerAcquisitionCutsBothStores",
+			"TestFlowAttachmentAgentAcquisitionCutsBothStores",
+			"TestFlowAttachmentRouteAcquisitionCutsBothStores",
+			"TestFlowAttachmentNativeCommitAcknowledgmentBothStores",
+		},
+		"store-runtime-full-03-i-l": {
+			"TestOrdinaryHandlerRequiresCanonicalConstructionBothStores",
+			"TestOrdinaryWorkflowMutationCannotConstructOrRepairBothStores",
+		},
+		"store-runtime-full-05": {"TestReceiverConfigActivationRaceAndRollbackBothStores"},
+		"store-runtime-full-06": {
+			"TestSelectedRunTargetOwnersUseConstructedHeadersBothStores",
+			"TestWorkflowTimerSchedulerConsumesCommittedErrorOnBothStores",
+			"TestWorkflowGateConsumesCommittedErrorWithoutRouteReplayOnBothStores",
+		},
+	} {
+		unit := policy.Units[id]
+		pattern := regexp.MustCompile(unit.Run)
+		for _, root := range roots {
+			if !pattern.MatchString(root) || !reflect.DeepEqual(unit.RequiredChildren[root], []string{"sqlite", "postgres"}) {
+				t.Errorf("%s must select %s and require both stores", id, root)
+			}
+		}
+	}
+	for id, proofs := range map[string]map[string][]string{
+		"store-runtime-full-06": {
+			"TestSelectedContractOrdinarySourceStatePresenceBothStores": {
+				"sqlite/absent", "sqlite/zero", "sqlite/fieldless", "sqlite/missing", "sqlite/corrupt", "sqlite/wrong-header-flow", "sqlite/wrong-header-type", "sqlite/loop",
+				"postgres/absent", "postgres/zero", "postgres/fieldless", "postgres/missing", "postgres/corrupt", "postgres/wrong-header-flow", "postgres/wrong-header-type", "postgres/loop",
+			},
+		},
+		"local-serveapp-canaries": {
+			"TestReleaseReceiverInitializationBothStores":    {"default_sqlite/connected_typed_creation", "default_sqlite/direct_provider_schema", "explicit_postgres/connected_typed_creation", "explicit_postgres/direct_provider_schema"},
+			"TestProviderSelectedRootStandingBootBothStores": {"default_sqlite", "explicit_postgres"},
+		},
+		"serveapp-other-late": {"TestProviderSelectedRootStandingBootBothStores": {"default_sqlite", "explicit_postgres"}},
+		"local-catalog-smoke": {"TestReceiverConstructionBeforeNodeAndAgentExecutionBothStores": {"sqlite/collector", "sqlite/renamed-observer", "postgres/collector", "postgres/renamed-observer"}},
+		"catalog-runtime":     {"TestReceiverConstructionBeforeNodeAndAgentExecutionBothStores": {"sqlite/collector", "sqlite/renamed-observer", "postgres/collector", "postgres/renamed-observer"}},
+		"serveapp-runtime":    {"TestReleaseReceiverInitializationBothStores": {"default_sqlite/connected_typed_creation", "default_sqlite/direct_provider_schema", "explicit_postgres/connected_typed_creation", "explicit_postgres/direct_provider_schema"}},
+	} {
+		unit := policy.Units[id]
+		pattern := regexp.MustCompile(unit.Run)
+		for root, children := range proofs {
+			if !pattern.MatchString(root) || !reflect.DeepEqual(unit.RequiredChildren[root], children) {
+				t.Errorf("%s must select %s and require all named public construction surfaces", id, root)
+			}
+		}
+	}
+}

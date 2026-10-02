@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -287,12 +288,19 @@ func newForkContentionFixture(t *testing.T, backend eventRecordContractBackend) 
 	f.ctx = runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash()), f.runID)
 	at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	requireRunFixtureForTest(t, f.ctx, opened.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: f.runID, StartedAt: at, BundleHash: bundle.SourceArtifact.BundleHash(), Artifact: bundle.SourceArtifact})
-	if _, err := f.store.SetupScenarioEntities(f.ctx, runtimepipeline.ScenarioSetupRequest{RunID: f.runID, CreatedAt: at,
-		Entities: []runtimepipeline.ScenarioSetupEntityRequest{{Alias: "subject", EntityID: f.entityID, FlowInstance: "flow-a/1", EntityType: "default", CurrentState: "pending", Fields: map[string]any{"name": "At R"}}},
-	}); err != nil {
+	req := sqliteFlowActivationRequest(bundle, "flow-a/1", "flow-a/1", "", "flow-a/1")
+	req.Instance = flowidentity.Stored(req.ContractBundle, "flow-a/1", "flow-a/1", flowidentity.LogicalInstanceID("flow-a/1"), f.entityID, "")
+	req.OccurredAt = at
+	plan := constructHistoricalSourceFixture(t, f.ctx, opened.store.(agentFixtureFlowStore), req)
+	persisted, err := plan.PersistenceRecord()
+	if err != nil {
 		t.Fatal(err)
 	}
-	f.state = stateOnlyWorkflowEngineMutationRecord(t, f.runID, "flow-a/1", "flow-a/1", f.entityID, "pending", 1, at)
+	f.state = persisted.State
+	f.state.Transition = runtimepipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
+	f.state.ExpectedState, f.state.ExpectedRevision = "pending", 1
+	// This source-frontier fixture supplies ordinary historical state, not an
+	// executing lifecycle transition; its compiled initial entry stays intact.
 	f.state.CurrentState, f.state.EntityType, f.state.Name = "pending", "default", "At R"
 	f.state.Fields = json.RawMessage(`{"name":"At R"}`)
 	if _, err := f.store.CommitWorkflowEngineMutation(f.ctx, runtimepipeline.WorkflowEngineMutationCommand{State: f.state}); err != nil {

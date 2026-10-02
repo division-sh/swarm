@@ -754,7 +754,7 @@ func TestWorkflowEngineFirstMaterializationRejectsMissingOrContradictoryEntityCo
 				}).CommitEngineMutation(ctx, runtimeengine.EngineMutation{
 					Address: testEngineStateAddress(".", testPipelineRunID, entityID), State: mutation,
 				})
-				if err == nil || !strings.Contains(err.Error(), "workflow initial materialization carried entity_type") {
+				if !errors.Is(err, runtimeengine.ErrUnconstructedWorkflowTarget) {
 					t.Fatalf("%s entity contract materialization error = %v", label, err)
 				}
 				for _, table := range []string{"entity_state", "flow_instances", "entity_mutations"} {

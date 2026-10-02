@@ -29,10 +29,14 @@ func TestTemplateSubscriptionProjectionMatchesFreshAdmission(t *testing.T) {
 			}
 			_, inputProducers := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(source)
 			for path, template := range table.templates {
+				authorityPath := path
+				if template.FlowID == semanticview.RootExecutionFlowID(source) {
+					authorityPath = ""
+				}
 				for _, subscriber := range template.Subscribers {
 					for _, pattern := range subscriber.Patterns {
 						for _, instancePath := range []string{path + "/first", path + "/second"} {
-							want, err := routeResolveSubscriberPatternsWithInputProducers(source, subscriber.Kind, template.FlowID, template.InputEvents, path, instancePath, template.LocalEvents, pattern.raw, inputProducers)
+							want, err := routeResolveSubscriberPatternsWithInputProducers(source, subscriber.Kind, template.FlowID, template.InputEvents, authorityPath, instancePath, template.LocalEvents, pattern.raw, inputProducers)
 							if err != nil {
 								t.Fatal(err)
 							}

@@ -75,16 +75,11 @@ func TestExistingEntityFlowInstanceSchemaDocumentsRootSemantics(t *testing.T) {
 			t.Fatalf("%s flow_instance description = %q, want concrete path and semantic-root descendant guidance", toolName, description)
 		}
 	}
-	createProperties := entries["create_entity"].InputSchema["properties"].(map[string]any)
-	if _, ok := createProperties["subject_id"]; ok {
-		t.Fatalf("create_entity schema should not expose subject_id: %#v", createProperties)
+	if _, ok := entries["create_entity"]; ok {
+		t.Fatal("retired create_entity tool remains in the runtime catalog")
 	}
 	searchProperties := entries["search_entities"].InputSchema["properties"].(map[string]any)
 	if _, ok := searchProperties["subject_id"]; ok {
 		t.Fatalf("search_entities schema should not expose subject_id: %#v", searchProperties)
-	}
-	createFlowSchema := createProperties["flow_instance"].(map[string]any)
-	if _, ok := createFlowSchema["description"]; ok {
-		t.Fatalf("create_entity flow_instance gained existing-entity guidance: %#v", createFlowSchema)
 	}
 }

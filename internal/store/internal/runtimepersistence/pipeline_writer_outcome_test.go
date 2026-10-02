@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -20,15 +21,15 @@ func TestWorkflowEngineMutationRetainsCommittedResultAfterHandoffFailure(t *test
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, phase := range []string{"healthy", "handoff_failure", "stale_claim"} {
 			t.Run(backend+"/"+phase, func(t *testing.T) {
-				selected, db, ctx, runID := openStateOnlyAcquisitionStore(t, backend)
-				owner := selected.(runtimepipeline.WorkflowEngineMutationOwner)
 				flowID := "engine-outcome-" + uuid.NewString()
 				instancePath := flowID + "/receiver"
-				entityID := uuid.NewString()
 				createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-				seedWorkflowTargetStateForTransition(t, backend, db, runID, entityID, instancePath, "active", 1, createdAt)
+				fixture, record := constructWorkflowMutationFixture(t, backend, flowID, createdAt)
+				selected, db, ctx, runID := fixture.store.(stateOnlyAcquisitionStore), fixture.db, fixture.ctx, correlation.RunIDFromContext(fixture.ctx)
+				owner, entityID := fixture.store.(runtimepipeline.WorkflowEngineMutationOwner), record.EntityID
+				node := mustPersistenceNode(flowID, "engine-outcome")
 				route := events.DeliveryRoute{
-					Recipient: events.MustNodeDeliveryRecipient(mustPersistenceRootNode("engine-outcome")),
+					Recipient: events.MustNodeDeliveryRecipient(node),
 					Target: events.MustExistingEntityTarget(events.RouteIdentity{
 						FlowID: flowID, FlowInstance: instancePath, EntityID: entityID,
 					}),
@@ -42,6 +43,7 @@ func TestWorkflowEngineMutationRetainsCommittedResultAfterHandoffFailure(t *test
 				if err != nil {
 					t.Fatal(err)
 				}
+				record = workflowMutationDeliveryEntry(t, record, node, event, claimed.Claim)
 				if phase == "stale_claim" {
 					if _, err := selected.SettleSuccess(ctx, claimed.Claim, []string{"pre_settled"}, time.Millisecond, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 						t.Fatal(err)
@@ -74,7 +76,7 @@ func TestWorkflowEngineMutationRetainsCommittedResultAfterHandoffFailure(t *test
 				}
 				defer registration.Release()
 				result, err := owner.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{
-					State: stateOnlyWorkflowEngineMutationRecord(t, runID, flowID, instancePath, entityID, "active", 1, createdAt),
+					State: record,
 					DeliverySuccess: &runtimepipeline.WorkflowEngineDeliverySuccess{
 						Claim: claimed.Claim, SideEffects: []string{"handler_completed"}, Duration: time.Second,
 						RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
@@ -84,7 +86,7 @@ func TestWorkflowEngineMutationRetainsCommittedResultAfterHandoffFailure(t *test
 					if err == nil || !reflect.DeepEqual(result, runtimepipeline.CommittedWorkflowEngineMutation{}) || submits != 0 {
 						t.Fatalf("uncommitted result=%+v error=%v submits=%d", result, err, submits)
 					}
-					assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, "", "active", 1, 0)
+					assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, flowID, "active", 1, 1)
 					return
 				}
 				if phase == "handoff_failure" && !errors.Is(err, injected) || phase == "healthy" && err != nil {

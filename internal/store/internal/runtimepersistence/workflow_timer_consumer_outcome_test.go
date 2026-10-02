@@ -80,27 +80,30 @@ func TestWorkflowTimerSchedulerConsumesCommittedErrorOnBothStores(t *testing.T) 
 				phase = "postcommit_error"
 			}
 			t.Run(backend.name+"/"+phase, func(t *testing.T) {
-				selected, db, ctx := backend.open(t)
-				ctx = authorGenericScheduleConsumerContext(runtimecorrelation.RunIDFromContext(ctx))
-				registerTestAuthorActivityCatalogForContext(t, selected.(testAuthorActivityCatalogRegistrar), testAuthorActivityContext())
+				f := newReceiverConfigActivationFixtureWithDocuments(t, backend.name, false, map[string]string{
+					"schema.yaml": "name: timer-consumer\nstages:\n  waiting: {initial: true}\n",
+					"events.yaml": "test.node_emitted:\n",
+					"nodes.yaml":  "clock:\n  execution_type: system_node\n  timers:\n    - {id: heartbeat, event: test.node_emitted, delay: 1h, start_on: 'state:waiting', recurring: true}\n",
+				}, nil)
+				selected, db, ctx := f.store, f.db, f.ctx
+				registerTestAuthorActivityCatalogForContext(t, selected.(testAuthorActivityCatalogRegistrar), ctx)
 				store := &timerConsumerOutcomeStore{workflowTestSelectedStore: selected.(workflowTestSelectedStore), reconciled: make(chan runtimepipeline.WorkflowTimerActivation, 8)}
 				if fail {
 					store.injected = errors.New("injected timer cleanup after real COMMIT")
 				}
 				owner := storeTestWorkOwner(t)
-				eventBus, err := newStoreTestEventBus(t, selected.(storeTestDurableEventBusStore), runtimebus.EventBusOptions{WorkOwner: owner})
+				bundle := f.bundle
+				fact := mustStoreTestSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+				eventBus, err := newStoreTestEventBus(t, selected.(storeTestDurableEventBusStore), runtimebus.EventBusOptions{WorkOwner: owner, ContractBundle: semanticview.Wrap(bundle), SourceArtifactFact: fact})
 				if err != nil {
 					t.Fatal(err)
 				}
 				bus := &timerConsumerOutcomeBus{EventBus: eventBus, dispatched: make(chan error, 8)}
 				scheduler := runtimepipeline.NewSchedulerWithWorkOwner(owner)
-				bundle := runControlTimerBundle(t)
-				bundle.Semantics.Timers[0].Event = "test.node_emitted"
-				bundle.Semantics.Timers[0].AdvancesTo = ""
-				bundle.Semantics.Timers[0].Recurring = true
 				options := completeWorkflowTestCoordinatorOptions(runtimepipeline.NewWorkflowPersistence(store), store)
 				options.Module = runControlTimerWorkflowModule{source: semanticview.Wrap(bundle)}
 				options.TimerScheduler, options.WorkOwner = scheduler, owner
+				options.SourceArtifactFact = fact
 				coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, options)
 				if coordinator == nil {
 					t.Fatal("construct timer coordinator")
@@ -108,13 +111,17 @@ func TestWorkflowTimerSchedulerConsumesCommittedErrorOnBothStores(t *testing.T) 
 				t.Cleanup(func() { _ = coordinator.StopWorkflowTimerLifecycle(context.Background()); scheduler.Stop() })
 				runID := runtimecorrelation.RunIDFromContext(ctx)
 				scope := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath(runID)}
-				enteredAt := time.Now().UTC().Add(-time.Hour - time.Second)
-				_, err = coordinator.MaterializeInitialEntry(ctx, scope, runtimepipeline.WorkflowInstance{
-					InstanceID: runID, StorageRef: runID, EntityID: uuid.NewString(), WorkflowName: ".", WorkflowVersion: "1",
-					CurrentState: "waiting", EnteredStageAt: enteredAt, CreatedAt: enteredAt, EntityType: "test_entity",
-				}, enteredAt)
+				enteredAt := time.Now().UTC().Add(-time.Hour - time.Second).Truncate(time.Microsecond)
+				plan, err := f.manager.PrepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{
+					ContractBundle: semanticview.Wrap(bundle), OccurredAt: enteredAt,
+					Instance: runtimeflowidentity.Instance{TemplateID: ".", ScopeKey: ".", InstanceID: runID, InstancePath: runID, EntityID: uuid.NewString(), HasStoredPath: true},
+				})
 				if err != nil {
 					t.Fatal(err)
+				}
+				committed, err := (agentFixtureFlowActivationCommitter{store: selected}).CommitFlowInstanceActivation(ctx, plan)
+				if err != nil || !committed.Acknowledged || !committed.Created {
+					t.Fatalf("canonical timer construction: %+v %v", committed, err)
 				}
 				if err := coordinator.ArmInitialEntryTimers(ctx, scope); err != nil {
 					t.Fatal(err)

@@ -56,6 +56,7 @@ func commitProposedEffectRoute(
 	if !acknowledged {
 		return runtimepipeline.CommittedProposedEffectRoute{}, outcome.Err()
 	}
+	result.Publication = result.Publication.(runtimebus.CommittedEnginePublication).WithCommitAcknowledgment()
 	return result, errors.Join(outcome.Err(), result.Validate())
 }
 
@@ -90,6 +91,7 @@ func commitHumanTaskRoute(
 	if !acknowledged {
 		return runtimepipeline.CommittedHumanTaskRoute{}, outcome.Err()
 	}
+	result.Publication = result.Publication.(runtimebus.CommittedEnginePublication).WithCommitAcknowledgment()
 	return result, errors.Join(outcome.Err(), result.Validate())
 }
 

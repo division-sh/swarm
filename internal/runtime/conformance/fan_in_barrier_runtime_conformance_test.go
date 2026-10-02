@@ -911,7 +911,7 @@ func seedFanInBarrierRun(t *testing.T, ctx context.Context, backend fanInBarrier
 func seedFanInBarrierPortfolioShell(t *testing.T, ctx context.Context, eventBus *runtimebus.EventBus, manager *runtimemanager.AgentManager, source semanticview.Source, entityID string) {
 	t.Helper()
 	enteredAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	trigger := eventtest.ExistingRunRootIngress(uuid.NewString(), "portfolio.setup", "operator", "", []byte(`{}`), 0,
+	trigger := eventtest.ExistingRunRootIngress(uuid.NewString(), "portfolio.setup", "operator", "", []byte(`{"portfolio_id":"selected-period","period_id":"2026-Q3","expected_operating_ids":[]}`), 0,
 		runtimecorrelation.RunIDFromContext(ctx), events.EventEnvelope{}, enteredAt)
 	plan, err := manager.PrepareFlowInstanceActivation(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimepipeline.FlowInstanceActivationRequest{
 		ContractBundle: source,
@@ -920,8 +920,7 @@ func seedFanInBarrierPortfolioShell(t *testing.T, ctx context.Context, eventBus 
 			InstancePath: "portfolio/selected-period", EntityID: entityID,
 			HasStoredPath: true,
 		},
-		Fields:       map[string]any{"period_id": "2026-Q3"},
-		Config:       map[string]any{"period_id": "2026-Q3"},
+		ConstructorInput: "portfolio.setup", ResolvedKey: "selected-period",
 		TriggerEvent: trigger, OccurredAt: enteredAt,
 	})
 	if err != nil {

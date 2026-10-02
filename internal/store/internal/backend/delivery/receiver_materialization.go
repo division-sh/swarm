@@ -8,10 +8,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	"github.com/division-sh/swarm/internal/runtime/failures"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
-	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 )
 
@@ -34,97 +32,24 @@ func (a *Adapter) materializationEvent(ctx context.Context, q queryer, eventID s
 	return admitted.Event(), nil
 }
 
-func (a *Adapter) publicationRecords(ctx context.Context, q queryer, eventID string) ([]deliveryRecord, error) {
-	rows, err := q.QueryContext(ctx, `SELECT delivery_id FROM event_deliveries WHERE event_id=$1 ORDER BY delivery_id`, eventID)
-	if err != nil {
-		return nil, err
-	}
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	err = rows.Err()
-	if closeErr := rows.Close(); err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		return nil, err
-	}
-	records := make([]deliveryRecord, 0, len(ids))
-	for _, id := range ids {
-		record, err := a.loadByID(ctx, q, id, false)
-		if err != nil {
-			return nil, err
-		}
-		records = append(records, record)
-	}
-	return records, nil
-}
-
 func (a *Adapter) materializationReady(ctx context.Context, q queryer, record deliveryRecord, claimTx *sql.Tx) (bool, error) {
-	plan := record.Route.Materialization
 	if !record.Route.Recipient.IsAgent() || !record.Route.Target.MaterializingEntity() {
 		return true, nil
+	}
+	if !record.Route.Initialization.FlowLifecycle() {
+		return false, fmt.Errorf("receiver claim requires a canonical flow construction receipt, not node completion")
 	}
 	event, err := a.materializationEvent(ctx, q, record.EventID)
 	if err != nil {
 		return false, err
 	}
-	records, err := a.publicationRecords(ctx, q, record.EventID)
-	if err != nil {
+	if err := record.Route.Initialization.ValidateEvent(event); err != nil {
 		return false, err
 	}
-	routes := make([]events.DeliveryRoute, len(records))
-	var materializer deliveryRecord
-	for i, candidate := range records {
-		routes[i] = candidate.Route
-		if candidate.RouteIdentity == plan.Materializer() {
-			materializer = candidate
-		}
-	}
-	if err := events.ValidateReceiverMaterializations(event, routes); err != nil {
+	if err := record.Route.Initialization.ValidateRoute(record.Route); err != nil {
 		return false, err
-	}
-	if plan.Empty() {
-		if !record.Route.Initialization.FlowLifecycle() {
-			return false, fmt.Errorf("materializing agent has no admitted lifecycle supplier or node dependency")
-		}
-		return a.materializedReceiverExecutionReady(ctx, q, record, claimTx)
-	}
-	if err := validateMaterializerAuthority(materializer.Snapshot, record.Snapshot); err != nil {
-		return false, err
-	}
-	if materializer.Status == deliverylifecycle.StatusDeadLetter {
-		return false, fmt.Errorf("receiver dependency survived terminal materializer settlement")
-	}
-	if materializer.Status != deliverylifecycle.StatusDelivered {
-		return false, nil
 	}
 	return a.materializedReceiverExecutionReady(ctx, q, record, claimTx)
-}
-
-func validateMaterializerAuthority(materializer, dependent deliverylifecycle.Snapshot) error {
-	if materializer.RunID != dependent.RunID {
-		return fmt.Errorf("receiver materializer run contradicts dependent delivery")
-	}
-	if materializer.Authority.Equal(dependent.Authority) {
-		return nil
-	}
-	// Normal startup rebinds unfinished deliveries, not completed history. A
-	// committed materialization remains valid; the dependent's own current grant
-	// is still independently admitted and fenced before it can acquire a claim.
-	if materializer.Status == deliverylifecycle.StatusDelivered &&
-		materializer.Authority.Kind() == deliverylifecycle.ExecutionAuthorityNormalRuntime &&
-		dependent.Authority.Kind() == deliverylifecycle.ExecutionAuthorityNormalRuntime &&
-		materializer.Authority.SourceArtifact() == dependent.Authority.SourceArtifact() {
-		return nil
-	}
-	return fmt.Errorf("receiver materializer execution authority contradicts dependent delivery")
 }
 
 func (a *Adapter) materializedReceiverExecutionReady(ctx context.Context, q queryer, record deliveryRecord, claimTx *sql.Tx) (bool, error) {
@@ -137,7 +62,7 @@ func (a *Adapter) materializedReceiverExecutionReady(ctx context.Context, q quer
 		return false, err
 	}
 	if !materialized {
-		return false, fmt.Errorf("settled receiver materializer has no exact persisted target")
+		return false, fmt.Errorf("receiver construction receipt has no exact persisted target")
 	}
 	return a.receiverExecution.ReceiverExecutionReadyTx(ctx, tx, record.Route, record.Authority, claimTx != nil)
 }
@@ -183,66 +108,4 @@ func (a *Adapter) normalDispatchParked(ctx context.Context, q queryer, record de
 		return false, nil
 	}
 	return runstate.DispatchParked(ctx, q, a.dialect == DialectPostgres, record.RunID)
-}
-
-// TerminalizeMaterializationDependents is part of the materializer's terminal
-// transaction. It never runs an agent or fabricates a successful materialization.
-func (a *Adapter) TerminalizeMaterializationDependents(ctx context.Context, attempt *mutationprotocol.Attempt, materializer deliverylifecycle.Snapshot) ([]deliverylifecycle.Terminalization, error) {
-	return withDeliverySQL(ctx, attempt, func(ctx context.Context, tx *sql.Tx) ([]deliverylifecycle.Terminalization, error) {
-		return a.terminalizeMaterializationDependentsTx(ctx, tx, attempt, materializer)
-	})
-}
-
-func (a *Adapter) terminalizeMaterializationDependentsTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, materializer deliverylifecycle.Snapshot) ([]deliverylifecycle.Terminalization, error) {
-	if !materializer.Route.Recipient.IsNode() || (materializer.Status != deliverylifecycle.StatusDeadLetter && materializer.Status != deliverylifecycle.StatusDelivered) {
-		return nil, nil
-	}
-	records, err := a.publicationRecords(ctx, tx, materializer.EventID)
-	if err != nil {
-		return nil, err
-	}
-	var ids []string
-	var routes []events.DeliveryRoute
-	reason := "receiver_materialization_terminal"
-	for _, record := range records {
-		routes = append(routes, record.Route)
-		plan := record.Route.Materialization
-		if plan.Empty() || plan.Materializer() != materializer.RouteIdentity {
-			continue
-		}
-		if err := validateMaterializerAuthority(materializer, record.Snapshot); err != nil {
-			return nil, err
-		}
-		if materializer.Status == deliverylifecycle.StatusDelivered {
-			materialized, err := a.receiverMaterialized(ctx, tx, record.Route)
-			if err != nil {
-				return nil, err
-			}
-			if materialized {
-				continue
-			}
-			reason = "receiver_materialization_missing"
-		}
-		if record.Status == deliverylifecycle.StatusDelivered || record.Status == deliverylifecycle.StatusInProgress {
-			return nil, fmt.Errorf("dependent agent executed before materialization succeeded")
-		}
-		ids = append(ids, record.DeliveryID)
-	}
-	if len(ids) == 0 {
-		return nil, nil
-	}
-	event, err := a.materializationEvent(ctx, tx, materializer.EventID)
-	if err != nil {
-		return nil, err
-	}
-	if err := events.ValidateReceiverMaterializations(event, routes); err != nil {
-		return nil, err
-	}
-	failure, ok := failures.EnvelopeFromError(failures.New(failures.ClassLifecycleConflict,
-		reason, "delivery_lifecycle", "receiver_materialization",
-		map[string]any{"materializer_delivery_id": materializer.DeliveryID, "materializer_reason_code": materializer.ReasonCode}))
-	if !ok {
-		return nil, fmt.Errorf("construct receiver materialization failure")
-	}
-	return a.terminalizeDeliveries(ctx, tx, attempt, ids, reason, failure)
 }

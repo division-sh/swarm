@@ -26,7 +26,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
-	"github.com/division-sh/swarm/internal/runtime/tools"
 	deliveryowner "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
@@ -119,13 +118,13 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 					t.Fatalf("exact lifecycle/grant: state=%+v grant=%+v found=%v err=%v", state, evidence, found, err)
 				}
 				writer := selected.(interface {
-					CreateEntity(context.Context, tools.EntityCreateRecord) (tools.EntityCreateResult, error)
+					SetupScenarioEntities(context.Context, pipeline.ScenarioSetupRequest) (pipeline.ScenarioSetupResult, error)
 				})
-				if _, err := writer.CreateEntity(ctx, tools.EntityCreateRecord{
-					Source: source,
-					RunID:  runID, EntityID: entityID, FlowInstance: identity.FlowInstance(),
-					EntityType: "receiver", CurrentState: "active", FieldsJSON: []byte(`{}`), CreatedAt: time.Now().UTC(),
-					Writer: tools.EntityMutationWriter{Type: "agent", ID: identity.AgentID(), HandlerStep: "grant_probe_setup"},
+				if _, err := writer.SetupScenarioEntities(ctx, pipeline.ScenarioSetupRequest{
+					RunID: runID, CreatedAt: time.Now().UTC(),
+					Entities: []pipeline.ScenarioSetupEntityRequest{{
+						Alias: "receiver", EntityID: entityID, FlowInstance: identity.FlowInstance(), EntityType: "receiver", CurrentState: "active",
+					}},
 				}); err != nil {
 					t.Fatal(err)
 				}

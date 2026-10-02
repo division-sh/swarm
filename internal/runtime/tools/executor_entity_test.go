@@ -115,7 +115,7 @@ func assertEntityToolDiagnosticLineage(t *testing.T, bus *entityToolRuntimeLogBu
 
 func TestEntityTools_HappyPath(t *testing.T) {
 	ctx, exec := newEntityToolTestExecutor(t)
-	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
+	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "review/inst-1",
 		"name":          "Acme",
 		"fields": map[string]any{
@@ -265,7 +265,7 @@ func TestEntityTools_HappyPath(t *testing.T) {
 
 func TestEntityTools_SaveEntityField_JSONBRoundTripsPlainTextWithoutBase64(t *testing.T) {
 	ctx, exec := newEntityToolTestExecutor(t)
-	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
+	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
 			"status": "open",
@@ -303,9 +303,9 @@ func TestEntityTools_SaveEntityField_JSONBRoundTripsPlainTextWithoutBase64(t *te
 	}
 }
 
-func TestEntityTools_CreateEntityAcceptsAnnotatedJSONBFields(t *testing.T) {
+func TestEntityTools_ReadImportedAnnotatedJSONBFields(t *testing.T) {
 	ctx, exec := newAnnotatedEntityToolExecutor(t)
-	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
+	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "validation/inst-1",
 		"fields": map[string]any{
 			"business_brief": map[string]any{"summary": "validated"},
@@ -803,7 +803,7 @@ func TestRoleScopedEntityTools_ReadsLargeValidationCaseWithoutLoss(t *testing.T)
 
 func TestEntityTools_SaveEntityFieldAcceptsAnnotatedJSONBFields(t *testing.T) {
 	ctx, exec := newAnnotatedEntityToolExecutor(t)
-	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{"flow_instance": "validation/inst-1"})
+	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{"flow_instance": "validation/inst-1"})
 	if _, err := exec.Execute(ctx, "save_entity_field", map[string]any{
 		"entity_id": entityID,
 		"field":     "mvp_spec",
@@ -833,7 +833,7 @@ func TestEntityTools_SaveEntityFieldAcceptsAnnotatedJSONBFields(t *testing.T) {
 func TestEntityTools_SearchEntitiesAcceptsAnnotatedJSONBFilter(t *testing.T) {
 	ctx, exec := newAnnotatedEntityToolExecutor(t)
 	brief := map[string]any{"summary": "validated"}
-	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
+	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "validation/inst-1",
 		"fields": map[string]any{
 			"business_brief": brief,
@@ -864,7 +864,7 @@ func TestEntityTools_SearchEntitiesAcceptsAnnotatedJSONBFilter(t *testing.T) {
 
 func TestEntityTools_SaveEntityFieldAllowsDeclaredNestedWritePath(t *testing.T) {
 	ctx, exec := newAnnotatedEntityToolExecutor(t)
-	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
+	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "validation/inst-1",
 		"fields": map[string]any{
 			"mvp_spec": map[string]any{
@@ -913,7 +913,7 @@ func TestEntityTools_SaveEntityFieldAllowsDeclaredNestedWritePath(t *testing.T) 
 
 func TestEntityTools_SaveEntityFieldAllowsNestedListWritePath(t *testing.T) {
 	ctx, exec := newAnnotatedEntityToolExecutor(t)
-	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
+	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "validation/inst-1",
 		"fields": map[string]any{
 			"validation_kit": map[string]any{
@@ -959,7 +959,7 @@ func TestEntityTools_SaveEntityFieldRejectsInvalidDottedPathsBeforePersistence(t
 		Role:          "operator",
 		Tools:         []string{"create_entity", "get_entity", "save_entity_field"},
 	})
-	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
+	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
 			"status":   "open",
@@ -1034,7 +1034,7 @@ accounts:
   status: text
 `)
 	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, actor, bundle)
-	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
+	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
 			"code":   "acct-001",
@@ -1068,7 +1068,7 @@ func TestEntityTools_ReadsRejectUndeclaredStoredFields(t *testing.T) {
 		Role:          "operator",
 		Tools:         []string{"create_entity", "get_entity", "query_entities", "search_entities"},
 	})
-	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
+	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
 			"status": "open",
@@ -1101,7 +1101,7 @@ func TestEntityTools_ReadsRejectUndeclaredStoredFields(t *testing.T) {
 
 func TestEntityTools_SaveEntityField_LogsMutationRow(t *testing.T) {
 	ctx, exec, db := newEntityToolTestHarness(t)
-	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
+	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
 			"status": "open",
@@ -1162,7 +1162,7 @@ func TestEntityTools_SaveEntityField_LogsNestedMutationRow(t *testing.T) {
 		Role:          "operator",
 		Tools:         []string{"create_entity", "get_entity", "save_entity_field"},
 	})
-	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
+	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
 			"metadata": map[string]any{"region": "us"},
@@ -1216,9 +1216,9 @@ func TestEntityTools_SaveEntityField_LogsNestedMutationRow(t *testing.T) {
 	}
 }
 
-func TestEntityTools_CreateEntity_LogsInitialMutationRows(t *testing.T) {
-	ctx, exec, db := newEntityToolTestHarness(t)
-	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
+func TestEntityTools_ImportedFixtureLogsInitialMutationRows(t *testing.T) {
+	ctx, _, db := newEntityToolTestHarness(t)
+	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
 			"status": "open",
@@ -1260,15 +1260,15 @@ func TestEntityTools_CreateEntity_LogsInitialMutationRows(t *testing.T) {
 		if !ok {
 			t.Fatalf("missing mutation field %q in %#v", want, fields)
 		}
-		if meta[0] != "platform" || meta[1] != "create_entity" || meta[2] != "create_entity" {
-			t.Fatalf("mutation metadata for %q = %#v, want platform/create_entity/create_entity", want, meta)
+		if meta[0] != "platform" || meta[1] != "test.setup_entities" || meta[2] != "" {
+			t.Fatalf("import mutation metadata for %q = %#v, want platform/test.setup_entities/empty", want, meta)
 		}
 	}
 }
 
 func TestEntityTools_GetEntityReturnsStoredCurrentState(t *testing.T) {
 	ctx, exec, db := newEntityToolTestHarness(t)
-	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
+	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
 			"status": "open",
@@ -1556,7 +1556,7 @@ func captureEntityToolRunForkRevision(t *testing.T, db *sql.DB, runID string) {
 
 func TestEntityTools_SearchAndQueryUseStoredCurrentState(t *testing.T) {
 	ctx, exec, db := newEntityToolTestHarness(t)
-	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
+	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
 			"status": "open",
@@ -1612,7 +1612,7 @@ func TestEntityTools_SearchAndQueryUseStoredCurrentState(t *testing.T) {
 
 func TestEntityTools_QueryEntitiesFilterAllowsDeclaredNestedLeaf(t *testing.T) {
 	ctx, exec := newEntityToolTestExecutor(t)
-	_ = mustCreateEntityID(t, ctx, exec, map[string]any{
+	_ = seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
 			"status":   "open",
@@ -1903,13 +1903,13 @@ validation_case:
 `)
 	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, actor, bundle)
 
-	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
+	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "validation/case-1",
 		"fields": map[string]any{
 			"score": 7,
 		},
 	})
-	_ = mustCreateEntityID(t, ctx, exec, map[string]any{
+	_ = seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "validation/case-2",
 		"fields": map[string]any{
 			"mvp_spec": map[string]any{
@@ -2096,7 +2096,7 @@ signal:
 
 func TestEntityTools_InvalidField(t *testing.T) {
 	ctx, exec := newEntityToolTestExecutor(t)
-	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
+	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
 			"status": "open",
@@ -2124,53 +2124,6 @@ func TestEntityTools_GetEntityNotFound(t *testing.T) {
 	}
 }
 
-func TestEntityTools_CreateEntityRejectsCallerSuppliedEntityID(t *testing.T) {
-	ctx, exec := newEntityToolTestExecutor(t)
-	_, err := exec.Execute(ctx, "create_entity", map[string]any{
-		"entity_id":     uuid.NewString(),
-		"flow_instance": "review/inst-1",
-		"fields": map[string]any{
-			"status": "open",
-			"score":  10.0,
-			"active": true,
-		},
-	})
-	entityIDFailure := requireToolFailure(t, err, runtimefailures.ClassSchemaInvalid, "invalid_tool_input")
-	if entityIDFailure.Detail.Attributes["field"] != "entity_id" {
-		t.Fatalf("entity_id failure attributes = %#v", entityIDFailure.Detail.Attributes)
-	}
-}
-
-func TestEntityTools_CreateEntityRejectsCallerSuppliedEntityType(t *testing.T) {
-	ctx, exec := newEntityToolTestExecutor(t)
-	_, err := exec.Execute(ctx, "create_entity", map[string]any{
-		"entity_type":   "accounts",
-		"flow_instance": "review/inst-1",
-		"fields": map[string]any{
-			"status": "open",
-		},
-	})
-	entityTypeFailure := requireToolFailure(t, err, runtimefailures.ClassSchemaInvalid, "invalid_tool_input")
-	if entityTypeFailure.Detail.Attributes["field"] != "entity_type" {
-		t.Fatalf("entity_type failure attributes = %#v", entityTypeFailure.Detail.Attributes)
-	}
-}
-
-func TestEntityTools_CreateEntityRejectsCallerSuppliedSubjectID(t *testing.T) {
-	ctx, exec := newEntityToolTestExecutor(t)
-	_, err := exec.Execute(ctx, "create_entity", map[string]any{
-		"subject_id":    uuid.NewString(),
-		"flow_instance": "review/inst-1",
-		"fields": map[string]any{
-			"status": "open",
-		},
-	})
-	subjectFailure := requireToolFailure(t, err, runtimefailures.ClassSchemaInvalid, "invalid_tool_input")
-	if subjectFailure.Detail.Attributes["field"] != "subject_id" {
-		t.Fatalf("subject_id failure attributes = %#v", subjectFailure.Detail.Attributes)
-	}
-}
-
 func TestEntityTools_ConstrainedAllowedToolsDoNotPermitLegacyEntityTools(t *testing.T) {
 	ctx, exec := newEntityToolTestExecutorWithActor(t, models.AgentConfig{
 		ExecutionMode: "live",
@@ -2192,26 +2145,6 @@ func TestEntityTools_ConstrainedAllowedToolsDoNotPermitLegacyEntityTools(t *test
 	}
 	_, err := exec.Execute(ctx, "query_entities", map[string]any{})
 	requireToolFailure(t, err, runtimefailures.ClassAuthorizationDenied, "tool_not_allowed")
-}
-
-func TestEntityTools_CreateEntityRejectsFlowWithoutEntityContract(t *testing.T) {
-	actor := models.AgentConfig{
-		ExecutionMode: "live",
-		ID:            "tester",
-		Role:          "operator",
-		Tools:         []string{"create_entity", "save_entity_field", "get_entity"},
-	}
-	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
-		"review": {AgentsYAML: entityToolAgentYAML(actor)},
-	})
-	ctx, exec := newEntityToolTestExecutorWithBundle(t, actor, bundle)
-	_, err := exec.Execute(ctx, "create_entity", map[string]any{
-		"flow_instance": "review/inst-1",
-	})
-	missingContract := requireToolFailure(t, err, runtimefailures.ClassTargetUnreachable, "not_found")
-	if missingContract.Detail.Attributes["flow_path"] != "review/inst-1" {
-		t.Fatalf("missing contract attributes = %#v", missingContract.Detail.Attributes)
-	}
 }
 
 func TestEntityTools_SaveEntityFieldRejectsCrossFlowWrite(t *testing.T) {
@@ -2325,7 +2258,7 @@ analysis:
 		Role:          "analyzer",
 		Tools:         []string{"create_entity", "save_entity_field", "get_entity"},
 	}, bundle)
-	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
+	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "analyzer-flow/inst-1",
 		"fields": map[string]any{
 			"status": "open",
@@ -2357,7 +2290,7 @@ analysis:
 		Role:          "analyzer",
 		Tools:         []string{"create_entity", "save_entity_field", "get_entity"},
 	}, bundle)
-	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
+	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "analyzer-flow/inst-1",
 		"fields": map[string]any{
 			"status": "open",
@@ -2434,14 +2367,14 @@ operating_case:
 		},
 	})
 	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, actor, bundle)
-	firstID := mustCreateEntityID(t, ctx, exec, map[string]any{
+	firstID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "validation/case-1",
 		"fields": map[string]any{
 			"status": "open",
 			"score":  10,
 		},
 	})
-	secondID := mustCreateEntityID(t, ctx, exec, map[string]any{
+	secondID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "validation/case-2",
 		"fields": map[string]any{
 			"status": "open",
@@ -2651,7 +2584,7 @@ foreign:
 		"name":            "Example Vertical",
 		"composite_score": 72,
 	}, time.Now().UTC().Truncate(time.Second))
-	validationID := mustCreateEntityID(t, ctx, exec, map[string]any{
+	validationID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "analyzer-flow/validation-1",
 		"initial_state": "queued",
 		"fields": map[string]any{
@@ -2845,24 +2778,41 @@ func testNumericValue(v any) float64 {
 	}
 }
 
-func mustCreateEntityID(t *testing.T, ctx context.Context, exec *runtimetools.Executor, input map[string]any) string {
+func seedImportedEntityForToolTest(t *testing.T, ctx context.Context, input map[string]any) string {
 	t.Helper()
-	cloned := map[string]any{}
-	for key, value := range input {
-		cloned[key] = value
-	}
-	delete(cloned, "entity_id")
-	out, err := exec.Execute(ctx, "create_entity", cloned)
-	if err != nil {
-		t.Fatalf("create_entity: %v", err)
-	}
-	created, ok := out.(map[string]any)
+	fixture, ok := ctx.Value(entityToolImportFixtureKey{}).(entityToolImportFixture)
 	if !ok {
-		t.Fatalf("unexpected create_entity output: %#v", out)
+		t.Fatal("entity tool fixture requires an explicit scenario import owner")
 	}
-	entityID := strings.TrimSpace(asString(created["entity_id"]))
-	if entityID == "" {
-		t.Fatalf("create_entity entity_id = %#v, want minted uuid", created["entity_id"])
+	runID := runtimecorrelation.RunIDFromContext(ctx)
+	flowInstance := asString(input["flow_instance"])
+	contract, ok := entityruntime.ResolveForRuntimeInstance(fixture.source, runID, flowInstance)
+	if !ok {
+		t.Fatalf("entity tool fixture has no contract for %q", flowInstance)
+	}
+	supplied, _ := input["fields"].(map[string]any)
+	fields, err := entityruntime.Initialize(contract, supplied)
+	if err != nil {
+		t.Fatalf("initialize imported fixture fields: %v", err)
+	}
+	graph, ok := semanticview.WorkflowStageTopology(fixture.source, contract.FlowID)
+	if !ok {
+		t.Fatalf("entity tool fixture has no stage catalog for %q", contract.FlowID)
+	}
+	initial, err := graph.InitialStoredStage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entityID := uuid.NewString()
+	// Import supplies read/write test data, not runnable constructor evidence.
+	if _, err := fixture.owner.SetupScenarioEntities(ctx, runtimepipeline.ScenarioSetupRequest{
+		RunID: runID, CreatedAt: time.Now().UTC(),
+		Entities: []runtimepipeline.ScenarioSetupEntityRequest{{
+			Alias: entityID, EntityID: entityID, FlowInstance: flowInstance,
+			EntityType: contract.EntityType, CurrentState: initial.ID(), Fields: fields,
+		}},
+	}); err != nil {
+		t.Fatalf("import entity tool fixture: %v", err)
 	}
 	return entityID
 }

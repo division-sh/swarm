@@ -21,7 +21,7 @@ func CopyConnectionPolicies(t testing.TB, reverse bool) string {
 		"schema.yaml":          "name: edge-policy\npins:\n  inputs:\n    events: [work.requested]\n  outputs:\n    events: [work.ready]\nconnect:\n" + edges,
 		"events.yaml":          "work.requested:\n  creation_id: text\n  reuse_id: text\nwork.ready:\n  creation_id: text\n  reuse_id: text\n",
 		"entities.yaml":        "run: {}\n",
-		"nodes.yaml":           "relay:\n  execution_type: system_node\n  event_handlers:\n    work.requested:\n      create_entity: true\n      emit:\n        event: work.ready\n        fields:\n          creation_id: ${payload.creation_id}\n          reuse_id: ${payload.reuse_id}\n",
+		"nodes.yaml":           "relay:\n  execution_type: system_node\n  event_handlers:\n    work.requested:\n      emit:\n        event: work.ready\n        fields:\n          creation_id: ${payload.creation_id}\n          reuse_id: ${payload.reuse_id}\n",
 		"worker/schema.yaml":   "name: worker\ninstance: worker_id\npins:\n  inputs:\n    events: [work.ready]\n",
 		"worker/entities.yaml": "work:\n  worker_id: {type: text, _unused_reason: receiver identity}\n",
 		"worker/nodes.yaml":    "worker:\n  execution_type: system_node\n  event_handlers:\n    work.ready:\n      guard: {check: \"payload.creation_id != ''\"}\n",

@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -23,10 +24,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// Static route headers are compiler-owned component-fixture inputs. This does
-// not prove C/E boot materialization of persisted lifecycle headers. No entity
-// or lifecycle rows are inserted to make these payload-only handlers execute.
-func TestA2FieldlessPairedReplyPreservesEntitylessExecutionOnBothStores(t *testing.T) {
+// Component construction persists fieldless headers without inventing business
+// field rows. This is not public boot/eager-construction qualification.
+func TestA2FieldlessPairedReplyPreservesConstructedExecutionOnBothStores(t *testing.T) {
 	for _, backend := range []struct {
 		name string
 		open func(*testing.T) gateRecoveryStoreCase
@@ -52,9 +52,9 @@ func TestA2FieldlessPairedReplyPreservesEntitylessExecutionOnBothStores(t *testi
 				{"provider", "provider.requested", provider},
 			} {
 				handler, found := source.ExecutableNodeEventHandlers(declaration.node)[declaration.event]
-				policy, err := pipeline.CompileDeliveryTargetCompatibilityPolicy(source, declaration.node, declaration.flow, events.EventType(declaration.event), handler)
-				if !found || err != nil || policy.Dependency != pipeline.DeliveryTargetEntityOptional {
-					t.Fatalf("payload-only handler requires invented state: handler=%s found=%v policy=%#v err=%v", declaration.node.Key(), found, policy, err)
+				err := pipeline.ValidateExecutionHandlerDeclaration(source, declaration.node, handler)
+				if !found || err != nil {
+					t.Fatalf("payload-only handler declaration: handler=%s found=%v err=%v", declaration.node.Key(), found, err)
 				}
 			}
 			probe := &a2HeldWorkerProbe{Probe: lifecycleprobe.New(), nodeID: provider.Key(), started: make(chan lifecycleprobe.Signal, 1), release: make(chan struct{})}
@@ -77,6 +77,20 @@ func TestA2FieldlessPairedReplyPreservesEntitylessExecutionOnBothStores(t *testi
 			options := pipeline.PipelineCoordinatorOptions{Module: module, TestLifecycleProbe: probe}
 			pc := newGateRecoveryCoordinator(bus, selected, options)
 			bus.SetInterceptors(pc)
+			for _, flow := range []string{"requester", "provider"} {
+				graph, found := semanticview.WorkflowStageTopology(source, flow)
+				if !found {
+					t.Fatalf("missing fieldless flow topology: %s", flow)
+				}
+				initial, err := graph.InitialStoredStage()
+				if err != nil {
+					t.Fatal(err)
+				}
+				commitA2FixtureConstruction(t, pc, selected.events, ctx, testRunScopedWorkflowInstanceForRun(runID, flow), pipeline.WorkflowInstance{
+					InstanceID: flow, StorageRef: flow, EntityID: flowidentity.EntityID(flow), WorkflowName: flow,
+					WorkflowVersion: source.WorkflowVersion(), CurrentState: initial.ID(),
+				}, time.Now().UTC())
+			}
 			count := func(query string) int {
 				t.Helper()
 				var n int
@@ -85,12 +99,16 @@ func TestA2FieldlessPairedReplyPreservesEntitylessExecutionOnBothStores(t *testi
 				}
 				return n
 			}
+			constructionHistory := count("SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1")
 			assertNoState := func() {
 				t.Helper()
-				for _, table := range []string{"entity_state", "entity_mutations", "workflow_instance_initial_materializations", "timers"} {
+				for _, table := range []string{"entity_state", "timers"} {
 					if n := count("SELECT COUNT(*) FROM " + table + " WHERE run_id=$1"); n != 0 {
 						t.Fatalf("payload-only reply invented %s rows: %d", table, n)
 					}
+				}
+				if count("SELECT COUNT(*) FROM flow_instances WHERE run_id=$1") != 2 || count("SELECT COUNT(*) FROM workflow_instance_initial_materializations WHERE run_id=$1") != 2 || count("SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1") != constructionHistory {
+					t.Fatal("fieldless execution changed immutable construction evidence")
 				}
 			}
 			assertNoState()
@@ -98,10 +116,10 @@ func TestA2FieldlessPairedReplyPreservesEntitylessExecutionOnBothStores(t *testi
 			if err != nil {
 				t.Fatal(err)
 			}
-			origin := events.RouteIdentity{FlowID: "requester", FlowInstance: "requester"}
-			providerRoute := events.RouteIdentity{FlowID: "provider", FlowInstance: "provider"}
+			origin := events.RouteIdentity{FlowID: "requester", FlowInstance: "requester", EntityID: flowidentity.EntityID("requester")}
+			providerRoute := events.RouteIdentity{FlowID: "provider", FlowInstance: "provider", EntityID: flowidentity.EntityID("provider")}
 			trigger := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "requester/request.send", "operator", "", payload, 0, runID,
-				events.EventEnvelope{}, eventtest.StaticFlowRoutingSource(origin.FlowID, origin.FlowInstance, ""), time.Now().UTC())
+				events.EventEnvelope{}, eventtest.StaticFlowRoutingSource(origin.FlowID, origin.FlowInstance, origin.EntityID), time.Now().UTC())
 			if err := bus.PublishAcknowledged(ctx, trigger); err != nil {
 				t.Fatal(err)
 			}
@@ -118,7 +136,7 @@ func TestA2FieldlessPairedReplyPreservesEntitylessExecutionOnBothStores(t *testi
 			}
 			requestEvent, requestRoute := request.Event.Event(), request.DeliveryRoutes[0]
 			if requestEvent.ParentEventID() != trigger.ID() || requestEvent.SourceRoute() != origin || requestEvent.RoutingSource().Route() != origin ||
-				requestEvent.Producer().ID() != sender.Key() || requestRoute.Recipient.ID() != provider.Key() || !requestRoute.Target.EntitylessReceiver() ||
+				requestEvent.Producer().ID() != sender.Key() || requestRoute.Recipient.ID() != provider.Key() || !requestRoute.Target.ExistingEntity() ||
 				requestRoute.Target.Route() != providerRoute || len(requestRoute.Context.Joins) != 0 {
 				t.Fatalf("request lost canonical entityless source/target headers: event=%#v route=%#v", requestEvent, requestRoute)
 			}
@@ -137,7 +155,7 @@ func TestA2FieldlessPairedReplyPreservesEntitylessExecutionOnBothStores(t *testi
 			}
 			replyEvent, replyRoute := reply.Event.Event(), reply.DeliveryRoutes[0]
 			if replyEvent.ParentEventID() != requestID || replyEvent.SourceRoute() != providerRoute || replyEvent.RoutingSource().Route() != providerRoute ||
-				replyEvent.Producer().ID() != provider.Key() || replyRoute.Recipient.ID() != receiver.Key() || !replyRoute.Target.EntitylessReceiver() ||
+				replyEvent.Producer().ID() != provider.Key() || replyRoute.Recipient.ID() != receiver.Key() || !replyRoute.Target.ExistingEntity() ||
 				replyRoute.Target.Route() != origin || replyRoute.Context.Reply != nil || len(replyRoute.Context.Joins) != 0 {
 				t.Fatalf("paired reply lost exact entityless origin: event=%#v route=%#v", replyEvent, replyRoute)
 			}

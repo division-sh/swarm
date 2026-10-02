@@ -8,9 +8,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -45,6 +47,7 @@ func TestActivateFlowInstanceAdmitsReceiverConfigBeforeAllConsumers(t *testing.T
 			})
 			setFlowActivationManagerSemanticSource(manager, semanticview.Wrap(bundle))
 			req := testActivationRequest(bundle, "review", "one", "parent", "review/one")
+			setReceiverConfigConstructorPayload(&req, `{"name":"business","count":3,"flag":true}`)
 			req.Config = cloneFlowConfig(tc.config)
 			if req.Config == nil {
 				req.Config = map[string]any{}
@@ -113,6 +116,7 @@ func TestEnsureFlowInstanceReuseCannotReplaceCommittedConfigOrPendingAutoEmit(t 
 				ctx := testAuthorActivityContext(context.Background())
 				setFlowActivationManagerSemanticSource(first, semanticview.Wrap(bundle))
 				req := testActivationRequest(bundle, "review", "one", "parent", "review/one")
+				setReceiverConfigConstructorPayload(&req, `{"name":"supplied","priority":1}`)
 				committedConfig := map[string]any{
 					"instance_key": "one",
 					"name":         "committed", "priority": int64(7), "status": false, "flow_path": []any{"business", "path"},
@@ -229,6 +233,7 @@ func TestReceiverConfigRecoverySourceRevisionDoesNotReadmitDefaults(t *testing.T
 			bundle := makeBundle("task.started", 7, false)
 			setFlowActivationManagerSemanticSource(first, semanticview.Wrap(bundle))
 			req := testActivationRequest(bundle, "review", "one", "parent", "review/one")
+			setReceiverConfigConstructorPayload(&req, `{"name":"supplied","priority":1}`)
 			ctx := testAuthorActivityContext(context.Background())
 			if err := first.ActivateFlowInstance(ctx, req); err == nil || len(instances.creates) != 1 {
 				t.Fatalf("missing pending committed activation: %v", err)
@@ -274,6 +279,14 @@ func TestReceiverConfigRecoverySourceRevisionDoesNotReadmitDefaults(t *testing.T
 			}
 		})
 	}
+}
+
+// Constructor arguments and receiver configuration are distinct authorities.
+func setReceiverConfigConstructorPayload(req *runtimepipeline.FlowInstanceActivationRequest, payload string) {
+	event := req.TriggerEvent
+	req.TriggerEvent = eventtest.RunCreatingRootIngressWithMode(event.ID(), event.Type(),
+		event.SourceAgent(), event.TaskID(), json.RawMessage(payload), event.ChainDepth(),
+		event.RunID(), event.ParentEventID(), event.Envelope(), event.CreatedAt(), event.ExecutionMode())
 }
 
 func declareReceiverConfig(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, variables map[string]runtimecontracts.FlowVariable) {

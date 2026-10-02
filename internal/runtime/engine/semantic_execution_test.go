@@ -132,7 +132,7 @@ func (e *Executor) ExecuteSemanticFixture(ctx context.Context, req ExecutionRequ
 		copyBundle.Semantics.StageTopologies[flowID] = runtimecontracts.BuildWorkflowStageTopology(
 			flowID, e.deps.Source.FlowInitialStage(flowID), e.deps.Source.FlowStates(flowID), e.deps.Source.FlowTerminalStages(flowID),
 			[]runtimecontracts.HandlerTransitionSemantic{{Node: req.Node, EventType: req.HandlerEventKey,
-				CreateEntity: h.CreateEntity, AdvancesTo: h.AdvancesTo, Rules: h.Rules, OnComplete: h.OnComplete, Join: h.Join, Loop: h.Loop}},
+				AdvancesTo: h.AdvancesTo, Rules: h.Rules, OnComplete: h.OnComplete, Join: h.Join, Loop: h.Loop}},
 			nil, bundle.Semantics.Loops,
 		)
 		copyExecutor := *e

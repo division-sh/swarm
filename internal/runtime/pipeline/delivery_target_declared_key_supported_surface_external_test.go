@@ -21,6 +21,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/google/uuid"
 )
 
@@ -53,6 +54,7 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 						t.Fatalf("new declared-key EventBus: %v", err)
 					}
 					coordinator := newGateRecoveryCoordinator(eventBus, selected, runtimepipeline.PipelineCoordinatorOptions{Module: module})
+					commitKeylessConstructorComponent(t, ctx, selected, coordinator, source)
 
 					exactPath := "review/" + uuid.NewString()
 					exactRoute := runtimeflowidentity.RouteForInstancePath(exactPath)
@@ -95,8 +97,29 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 							WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
 						}
 						instance.RuntimeReadiness = &readiness
-						if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, instance.StorageRef), instance, createdAt); err != nil {
-							t.Fatalf("materialize %s: %v", instance.Fields["owner"], err)
+						{
+							construction98Ctx := ctx
+							construction98At := createdAt
+							construction98Instance, construction98Lifecycle, err := coordinator.PrepareInitialEntryLifecycle(construction98Ctx, testRunScopedWorkflowInstanceForRun(runID, instance.StorageRef), instance, construction98At)
+							if err != nil {
+								t.Fatalf("prepare fixture initial lifecycle: %v", err)
+							}
+							construction98Command, err := flowactivationfixture.Command(construction98Ctx, construction98Instance, construction98Lifecycle, construction98At)
+							if err != nil {
+								t.Fatalf("prepare fixture activation command: %v", err)
+							}
+							construction98Committed, err := any(selected.events).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction98Ctx, construction98Command)
+							if err != nil {
+								t.Fatalf("materialize %s: %v", instance.Fields["owner"], err)
+							}
+							if err == nil && !construction98Committed.Acknowledged {
+								t.Fatal("fixture activation was not acknowledged")
+							}
+							if construction98Committed.Acknowledged && construction98Committed.Created {
+								if finalizeErr := coordinator.FinalizeInitialEntryLifecycle(construction98Ctx, construction98Committed.Lifecycle); finalizeErr != nil {
+									t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+								}
+							}
 						}
 						markGateRecoveryTopologyReadyFixture(t, selected, readiness, createdAt)
 						if err := flowroutefixture.Publish(eventBus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: testRunScopedWorkflowInstanceForRun(runID, instance.StorageRef)}); err != nil {

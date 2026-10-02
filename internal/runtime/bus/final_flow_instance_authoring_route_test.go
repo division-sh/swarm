@@ -62,7 +62,7 @@ func (s *finalFlowInstanceAuthoringLifecycleStore) setTestSemanticSource(fact ru
 
 func (s *finalFlowInstanceAuthoringLifecycleStore) Activate(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
 	s.activations = append(s.activations, req)
-	accountID, _ := req.Fields[finalflowinstanceauthoring.TemplateInstanceBy].(string)
+	accountID, _ := req.ResolvedKey.(string)
 	s.flowInstances = append(s.flowInstances, ActiveFlowInstanceDescriptor{
 		RunID:         req.TriggerEvent.RunID(),
 		InstanceID:    req.Instance.InstanceID,
@@ -123,15 +123,19 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsRe
 		t.Fatalf("activations = %d, want 1", len(store.activations))
 	}
 	activation := store.activations[0]
+	fields, err := testFlowActivationConstructorFields(activation)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if activation.Config[finalflowinstanceauthoring.TemplateInstanceBy] != "acct-42" ||
-		activation.Fields[finalflowinstanceauthoring.TemplateInstanceBy] != "acct-42" {
-		t.Fatalf("activation config/fields = %#v/%#v, want account_id from receiver carry", activation.Config, activation.Fields)
+		fields[finalflowinstanceauthoring.TemplateInstanceBy] != "acct-42" {
+		t.Fatalf("activation config/constructor fields = %#v/%#v, want account_id from receiver carry", activation.Config, fields)
 	}
-	if _, exists := activation.Fields["entity_type"]; exists {
-		t.Fatalf("activation fields retain typed entity_type: %#v", activation.Fields)
+	if _, exists := fields["entity_type"]; exists {
+		t.Fatalf("constructor fields retain typed entity_type: %#v", fields)
 	}
-	if _, exists := activation.Fields["instance_kind"]; exists {
-		t.Fatalf("activation fields retain typed instance_kind: %#v", activation.Fields)
+	if _, exists := fields["instance_kind"]; exists {
+		t.Fatalf("constructor fields retain typed instance_kind: %#v", fields)
 	}
 	if activation.Bookkeeping["last_source_event"] != evt.ID() {
 		t.Fatalf("activation bookkeeping = %#v, want last_source_event", activation.Bookkeeping)

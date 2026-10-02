@@ -69,13 +69,13 @@ func TestW5ToolsPinnedModuleRunsThroughSelectedForkBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			runID, eventID, entityID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+			runID, eventID := uuid.NewString(), uuid.NewString()
 			input := eventtest.OperatorInjectedWithRoutingSource(eventID, "item.received", "operator", "", []byte(`{"component":"api","owner":"platform","language":"go","files":["main.go"]}`), 0, runID, nil, events.EventEnvelope{}, eventtest.RootRoutingSource(runID), time.Unix(1700002200, 0).UTC())
 			input, err = eventtest.AdmitPayload(input, ".", "item.received")
 			if err != nil {
 				t.Fatal(err)
 			}
-			seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, runID, eventID, entityID, input)
+			seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, runID, eventID, input)
 			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 				SourceRunID: runID, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
 				ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),

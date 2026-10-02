@@ -276,12 +276,13 @@ func executeClaimedWorkflowJoinForTest(t *testing.T, pc *PipelineCoordinator, ct
 
 func initialWorkflowJoinRefForTest(t *testing.T, ctx context.Context, node identity.ExecutableNode, path, entityID, stage, joinID string) timeridentity.JoinRef {
 	t.Helper()
-	route := testWorkflowInstanceRoute(path)
+	owner := testRunScopedWorkflowInstanceFromContext(ctx, path)
+	route := owner.Route
 	effect, err := workflowlifecycle.NewInitialEntry(route, identity.NormalizeEntityID(entityID), stage, executionmode.Live, time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry, found, err := effect.StageEntry(testRunScopedWorkflowRoute(ctx, route))
+	entry, found, err := effect.StageEntry(owner)
 	if err != nil || !found {
 		t.Fatalf("initial lifecycle entry: found=%v err=%v", found, err)
 	}

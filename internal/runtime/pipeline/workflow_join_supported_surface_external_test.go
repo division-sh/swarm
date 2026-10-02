@@ -27,6 +27,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"github.com/google/uuid"
 )
@@ -190,7 +191,7 @@ func TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBoth
 				source := exactExternalWorkflowJoinSource(t, flowID)
 				joinNode := externalPipelineSourceNode(t, source, flowID, "join-node")
 				path := runID
-				workflowName := source.WorkflowName()
+				workflowName := semanticview.RootExecutionFlowID(source)
 				instanceID := runID
 				if flowID != "" {
 					instanceID = uuid.NewString()
@@ -227,16 +228,37 @@ func TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBoth
 				})
 				eventBus.SetInterceptors(coordinator)
 
-				route := runtimeflowidentity.RouteForInstancePath(path)
+				route := testRunScopedWorkflowInstanceForRun(runID, path).Route
 				entityID := runtimeflowidentity.EntityID(path)
 				createdAt := time.Now().UTC()
-				if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, path), runtimepipeline.WorkflowInstance{
-					InstanceID: instanceID, StorageRef: path, WorkflowName: workflowName, WorkflowVersion: "1.0.0",
-					EntityID: entityID, CurrentState: "awaiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
-					Fields:     map[string]any{"expected": []any{"a", "b"}},
-					EntityType: "join_state",
-				}, createdAt); err != nil {
-					t.Fatalf("materialize exact join owner: %v", err)
+				{
+					construction142Ctx := ctx
+					construction142At := createdAt
+					construction142Instance, construction142Lifecycle, err := coordinator.PrepareInitialEntryLifecycle(construction142Ctx, testRunScopedWorkflowInstanceForRun(runID, path), runtimepipeline.WorkflowInstance{
+						InstanceID: instanceID, StorageRef: path, WorkflowName: workflowName, WorkflowVersion: source.WorkflowVersion(),
+						EntityID: entityID, CurrentState: "awaiting", StageDefined: true, EnteredStageAt: createdAt, CreatedAt: createdAt,
+						Fields:     map[string]any{"expected": []any{"a", "b"}},
+						EntityType: "join_state",
+					}, construction142At)
+					if err != nil {
+						t.Fatalf("prepare fixture initial lifecycle: %v", err)
+					}
+					construction142Command, err := flowactivationfixture.Command(construction142Ctx, construction142Instance, construction142Lifecycle, construction142At)
+					if err != nil {
+						t.Fatalf("prepare fixture activation command: %v", err)
+					}
+					construction142Committed, err := any(selected.events).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction142Ctx, construction142Command)
+					if err != nil {
+						t.Fatalf("materialize exact join owner: %v", err)
+					}
+					if err == nil && !construction142Committed.Acknowledged {
+						t.Fatal("fixture activation was not acknowledged")
+					}
+					if construction142Committed.Acknowledged && construction142Committed.Created {
+						if finalizeErr := coordinator.FinalizeInitialEntryLifecycle(construction142Ctx, construction142Committed.Lifecycle); finalizeErr != nil {
+							t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+						}
+					}
 				}
 				if flowID != "" {
 					if err := flowroutefixture.Publish(eventBus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: testRunScopedWorkflowInstanceForRun(runID, route.InstancePath)}); err != nil {
@@ -431,7 +453,7 @@ func TestWorkflowJoinScheduleOccurrencePreservesExactDeclarationThroughDurableEv
 					source := exactExternalWorkflowJoinSourceWithTimeout(t, flowID, outcome.timeout)
 					joinNode := externalPipelineSourceNode(t, source, flowID, "join-node")
 					path := runID
-					workflowName := source.WorkflowName()
+					workflowName := semanticview.RootExecutionFlowID(source)
 					instanceID := runID
 					if flowID != "" {
 						instanceID = uuid.NewString()
@@ -460,16 +482,37 @@ func TestWorkflowJoinScheduleOccurrencePreservesExactDeclarationThroughDurableEv
 					})
 					eventBus.SetInterceptors(coordinator)
 
-					route := runtimeflowidentity.RouteForInstancePath(path)
+					route := testRunScopedWorkflowInstanceForRun(runID, path).Route
 					entityID := runtimeflowidentity.EntityID(path)
 					createdAt := time.Now().UTC()
-					if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, path), runtimepipeline.WorkflowInstance{
-						InstanceID: instanceID, StorageRef: path, WorkflowName: workflowName, WorkflowVersion: "1.0.0",
-						EntityID: entityID, CurrentState: "awaiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
-						Fields:     map[string]any{"expected": outcome.expected},
-						EntityType: "join_state",
-					}, createdAt); err != nil {
-						t.Fatalf("materialize immediate join owner: %v", err)
+					{
+						construction337Ctx := ctx
+						construction337At := createdAt
+						construction337Instance, construction337Lifecycle, err := coordinator.PrepareInitialEntryLifecycle(construction337Ctx, testRunScopedWorkflowInstanceForRun(runID, path), runtimepipeline.WorkflowInstance{
+							InstanceID: instanceID, StorageRef: path, WorkflowName: workflowName, WorkflowVersion: source.WorkflowVersion(),
+							EntityID: entityID, CurrentState: "awaiting", StageDefined: true, EnteredStageAt: createdAt, CreatedAt: createdAt,
+							Fields:     map[string]any{"expected": outcome.expected},
+							EntityType: "join_state",
+						}, construction337At)
+						if err != nil {
+							t.Fatalf("prepare fixture initial lifecycle: %v", err)
+						}
+						construction337Command, err := flowactivationfixture.Command(construction337Ctx, construction337Instance, construction337Lifecycle, construction337At)
+						if err != nil {
+							t.Fatalf("prepare fixture activation command: %v", err)
+						}
+						construction337Committed, err := any(selected.events).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction337Ctx, construction337Command)
+						if err != nil {
+							t.Fatalf("materialize immediate join owner: %v", err)
+						}
+						if err == nil && !construction337Committed.Acknowledged {
+							t.Fatal("fixture activation was not acknowledged")
+						}
+						if construction337Committed.Acknowledged && construction337Committed.Created {
+							if finalizeErr := coordinator.FinalizeInitialEntryLifecycle(construction337Ctx, construction337Committed.Lifecycle); finalizeErr != nil {
+								t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+							}
+						}
 					}
 					if flowID != "" {
 						if err := flowroutefixture.Publish(eventBus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: testRunScopedWorkflowInstanceForRun(runID, route.InstancePath)}); err != nil {
@@ -592,8 +635,9 @@ func exactJoinPersistedArm(t *testing.T, instance runtimepipeline.WorkflowInstan
 	if err != nil || len(arms) != 1 {
 		t.Fatalf("exact persisted join arm = %#v err=%v", arms, err)
 	}
+	owner := testRunScopedWorkflowInstanceForRun(arms[0].JoinRef().StageEntry().RunID, instance.StorageRef)
 	if err := arms[0].JoinRef().StageEntry().RequireOwner(
-		arms[0].JoinRef().StageEntry().RunID, runtimeflowidentity.RouteForInstancePath(instance.StorageRef).ScopeKey,
+		owner.RunID, owner.Route.ScopeKey,
 		instance.InstanceID, instance.StorageRef, instance.EntityID, "awaiting",
 	); err != nil {
 		t.Fatalf("persisted join entry contradicts its concrete owner: %v", err)

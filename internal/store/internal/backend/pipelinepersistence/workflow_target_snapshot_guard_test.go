@@ -82,7 +82,7 @@ func TestWorkflowTargetPersistenceReadersUseOneAggregateStatement(t *testing.T) 
 	}
 }
 func requireAggregateDelegation(fn *ast.FuncDecl) error {
-	shared, queries, split := 0, 0, 0
+	shared, queries, split, receipts, validations := 0, 0, 0, 0, 0
 	ast.Inspect(fn.Body, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
@@ -96,15 +96,31 @@ func requireAggregateDelegation(fn *ast.FuncDecl) error {
 		case *ast.SelectorExpr:
 			switch callee.Sel.Name {
 			case "QueryRowContext", "QueryContext":
+				// The immutable creating-delivery receipt is a separate fact,
+				// read in the same transaction after the aggregate is admitted.
+				if fn.Name.Name == "receiverMaterializedTx" && callee.Sel.Name == "QueryRowContext" && len(call.Args) == 5 {
+					if literal, ok := call.Args[1].(*ast.BasicLit); ok && literal.Kind == token.STRING {
+						query, err := strconv.Unquote(literal.Value)
+						if err == nil && strings.Join(strings.Fields(query), " ") == "SELECT projection FROM workflow_instance_initial_materializations WHERE run_id=$1 AND instance_path=$2 AND entity_id=$3" {
+							receipts++
+							break
+						}
+					}
+				}
 				queries++
 			case "LoadWorkflowEntityState", "LoadWorkflowInstance":
 				split++
+			case "ValidateFlowConstructionPublication":
+				validations++
 			}
 		}
 		return true
 	})
 	if shared != 1 || queries != 0 || split != 0 {
 		return fmt.Errorf("%s must delegate once to aggregate owner: shared=%d queries=%d split=%d", fn.Name.Name, shared, queries, split)
+	}
+	if fn.Name.Name == "receiverMaterializedTx" && (receipts != 1 || validations != 1) {
+		return fmt.Errorf("receiver must verify its exact creating receipt once: receipts=%d validations=%d", receipts, validations)
 	}
 	return nil
 }
@@ -248,6 +264,37 @@ func TestWorkflowTargetAggregateGuardRejectsSplitReaders(t *testing.T) {
 			if err := checkWorkflowTargetAggregateConsumers(parsed); err == nil {
 				t.Fatal("hostile reader passed aggregate guard")
 			}
+		})
+	}
+}
+
+func TestReceiverAggregateGuardRequiresExactConstructionReceipt(t *testing.T) {
+	raw, err := os.ReadFile("receiver_materialization.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ name, from, to string }{
+		{"foreign receipt", "WHERE run_id=$1 AND instance_path=$2 AND entity_id=$3", "WHERE instance_path=$2 AND entity_id=$3"},
+		{"split read", "var receipt []byte", "tx.QueryRowContext(ctx, \"SELECT 1\"); var receipt []byte"},
+		{"missing validation", "ValidateFlowConstructionPublication", "OtherConstructionValidation"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if !strings.Contains(string(raw), tc.from) {
+				t.Fatal("hostile receipt injection missed")
+			}
+			file, err := parser.ParseFile(token.NewFileSet(), "receiver_materialization.go", strings.Replace(string(raw), tc.from, tc.to, 1), 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, decl := range file.Decls {
+				if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name.Name == "receiverMaterializedTx" {
+					if err := requireAggregateDelegation(fn); err == nil {
+						t.Fatal("hostile construction receipt passed aggregate guard")
+					}
+					return
+				}
+			}
+			t.Fatal("receiver aggregate consumer is missing")
 		})
 	}
 }

@@ -13,7 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
-func TestReceiverMaterializationNodeThenAgentExecutionBothStores(t *testing.T) {
+func TestReceiverConstructionBeforeNodeAndAgentExecutionBothStores(t *testing.T) {
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		for _, agent := range []string{"collector", "renamed-observer"} {
 			t.Run(string(backend)+"/"+agent, func(t *testing.T) {
@@ -70,18 +70,16 @@ func TestReceiverMaterializationNodeThenAgentExecutionBothStores(t *testing.T) {
 						observer = snapshot
 					}
 				}
-				if observer.Route.Materialization.Empty() || observer.Route.Materialization.Materializer() != materializer.RouteIdentity || !events.SameDeliveryTargetOwnership(observer.Route.Target, materializer.Route.Target) {
-					t.Fatal("node and agent did not consume exact admitted materialization relation")
-				}
-				if observer.StartedAt.Before(materializer.SettledAt) {
-					t.Fatal("agent claimed before exact node settlement")
-				}
-				var entity, phase string
-				if err := h.db.QueryRowContext(ctx, `SELECT state.entity_id,agent.lifecycle_phase FROM agents agent JOIN entity_state state ON state.run_id=agent.run_id AND state.flow_instance=agent.flow_instance WHERE agent.run_id=$1 AND agent.agent_id=$2`, catalogRuntimeRunID, observer.SubscriberID).Scan(&entity, &phase); err != nil {
+				nodeTarget := materializer.Route.Target.Route()
+				requireDeclaredAgentReceiverOwnership(t, catalogRuntimeRunID, materializer, observer)
+				requireReceiverConstructedBeforeDelivery(t, h, catalogRuntimeRunID, materializer)
+				requireReceiverConstructedBeforeDelivery(t, h, catalogRuntimeRunID, observer)
+				var entity, agentEntity, phase string
+				if err := h.db.QueryRowContext(ctx, `SELECT header.entity_id,COALESCE(CAST(agent.entity_id AS TEXT),''),agent.lifecycle_phase FROM agents agent JOIN flow_instances header ON header.run_id=agent.run_id AND header.instance_path=agent.flow_instance WHERE agent.run_id=$1 AND agent.agent_id=$2`, catalogRuntimeRunID, observer.SubscriberID).Scan(&entity, &agentEntity, &phase); err != nil {
 					t.Fatal(err)
 				}
-				if entity != observer.Route.Target.Route().EntityID || phase != "running" {
-					t.Fatalf("agent readiness owner=%s/%s", entity, phase)
+				if entity != nodeTarget.EntityID || agentEntity != "" || phase != "running" {
+					t.Fatalf("agent/header readiness ownership=%s/%s/%s", entity, agentEntity, phase)
 				}
 				if materializer.ClaimVersion != 1 || observer.ClaimVersion != 1 {
 					t.Fatalf("exactly-once provider execution missing: node=%+v agent=%+v", materializer, observer)
@@ -91,7 +89,7 @@ func TestReceiverMaterializationNodeThenAgentExecutionBothStores(t *testing.T) {
 				calls := append([]scriptedDeliveryCall(nil), h.llm.deliveryCalls...)
 				h.llm.mu.Unlock()
 				for _, call := range calls {
-					if call.RunID == catalogRuntimeRunID && call.EventID == eventID && call.AgentID == observer.SubscriberID && call.TargetEntityID == entity {
+					if call.RunID == catalogRuntimeRunID && call.EventID == eventID && call.AgentID == observer.SubscriberID && call.TargetEntityID == "" {
 						turns++
 					}
 				}
@@ -121,8 +119,8 @@ func TestReceiverMaterializationNodeThenAgentExecutionBothStores(t *testing.T) {
 					t.Fatal("public readback omitted receiver obligations")
 				}
 				for _, delivery := range public[eventID].Deliveries {
-					if delivery.Status != "delivered" || (delivery.Route.Recipient.IsAgent() && !delivery.Route.Materialization.Equal(observer.Route.Materialization)) {
-						t.Fatalf("public dependency readback changed evidence: %+v", delivery)
+					if delivery.Status != "delivered" || (delivery.Route.Recipient.IsAgent() && (!delivery.Route.Initialization.Equal(observer.Route.Initialization) || !events.SameDeliveryTargetOwnership(delivery.Route.Target, observer.Route.Target))) {
+						t.Fatalf("public construction readback changed evidence: %+v", delivery)
 					}
 				}
 				bundleHash, err := contracts.BundleHash(h.bundle)

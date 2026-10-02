@@ -20,7 +20,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -30,11 +29,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
-	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store"
-	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -270,16 +269,7 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 					route = selectedExecutionTestAgentRoute(t, sourceID, "source-agent-that-must-not-route", "")
 					route.Target = events.MustExistingEntityTarget(historicalTarget)
 				}
-				if backend == "postgres" {
-					seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(t, db, sourceID, entityID, eventID, "item.received", at, "test_entity", executionmode.Mock, route, nil, events.NoRoutingSource(), events.EnvelopeForTargetRoute(events.EventEnvelope{}, historicalTarget), selectedExecutionInputFixture{}, loaded.SourceArtifactFact)
-					if _, err := db.ExecContext(ctx, `UPDATE entity_state SET flow_instance=$1 WHERE run_id=$2::uuid AND entity_id=$3::uuid`, sourceID, sourceID, entityID); err != nil {
-						t.Fatal(err)
-					}
-					seedSourceOutcomeThatMustNotSuppressFork(t, db, eventID, entityID, at)
-					captureSelectedExecutionSourceRevision(t, db, sourceID)
-				} else {
-					seedSelectedRuntimeOutcomeSQLite(t, ctx, selected.(*store.SQLiteRuntimeStore), loaded, sourceID, entityID, eventID, route, at)
-				}
+				seedSelectedRuntimeOutcomeSource(t, ctx, backend, db, selected, loaded, sourceID, eventID, route, at)
 				selection := runforkadmission.SelectedContractSelection(loaded.Source)
 				probe := &selectedRuntimeOutcomeProbe{
 					SelectedContractRuntimeExecutionLifecycle: owner.ports.runtimeExecution,
@@ -440,62 +430,46 @@ func selectedRuntimeOutcomeSQLiteOwner(t *testing.T, selected *store.SQLiteRunti
 	return selectedContractSQLiteExecutionOwnerForTest(t, selected)
 }
 
-func seedSelectedRuntimeOutcomeSQLite(t *testing.T, ctx context.Context, selected *store.SQLiteRuntimeStore, loaded LoadedSelectedContractSource, runID, entityID, eventID string, route events.DeliveryRoute, at time.Time) {
+func seedSelectedRuntimeOutcomeSource(t *testing.T, ctx context.Context, backend string, db *sql.DB, selected SelectedContractForkLifecycle, loaded LoadedSelectedContractSource, runID, eventID string, route events.DeliveryRoute, at time.Time) {
 	t.Helper()
-	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
-		RunID: runID, Origin: storetest.ScenarioSetupOrigin(), StartedAt: at.Add(-time.Minute),
-		Artifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()),
-	})
-	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	if _, err := selected.CreateEntity(ctx, runtimetools.EntityCreateRecord{
-		Source: loaded.Source,
-		RunID:  runID, EntityID: entityID, FlowInstance: runID, EntityType: "test_entity", Name: "Selected Execution Entity",
-		CurrentState: "pending", FieldsJSON: json.RawMessage(`{}`), CreatedAt: at.Add(-time.Second),
-		Writer: runtimetools.EntityMutationWriter{Type: "platform", ID: "selected-execution-test", HandlerStep: "seed"},
-	}); err != nil {
-		t.Fatal(err)
+	fixture := runlifecyclefixture.Fixture{
+		RunID: runID, Origin: runlifecyclefixture.ScenarioSetupOrigin(), Source: loaded.SourceArtifactFact,
+		Artifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()), StartedAt: at.Add(-time.Minute),
 	}
-	payload, err := json.Marshal(map[string]any{"entity_id": entityID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	envelope := events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(loaded.Source), FlowInstance: runID, EntityID: entityID})
-	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "item.received", "source-runtime", "", payload, 0, runID,
-		envelope, events.NoRoutingSource(), at, executionmode.Mock)
-	event, err = eventfixture.BindPayload(event)
-	if err != nil {
-		t.Fatal(err)
-	}
-	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ledger, err := events.NewConnectEvaluationLedger(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	settlement, err := events.NewDeliverySettlement(events.EventWriteNormalPublication, ledger)
-	if err != nil {
-		t.Fatal(err)
-	}
-	claim, err := selected.PipelineObligations().ClaimPublication(ctx, eventID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := selected.PipelineObligations().Release(context.WithoutCancel(ctx), claim); err != nil {
+	if backend == "sqlite" {
+		if _, err := selected.(*store.SQLiteRuntimeStore).EnsureSourceArtifact(ctx, fixture.Artifact); err != nil {
 			t.Fatal(err)
 		}
-	}()
-	authority, err := runtimedelivery.NewNormalExecutionAuthority(loaded.SourceArtifactFact, runForkTestRuntimeInstanceID, 1)
+		runlifecyclefixture.RequireSQLite(t, ctx, db, fixture)
+	} else {
+		if _, err := selected.(*store.PostgresStore).EnsureSourceArtifact(ctx, fixture.Artifact); err != nil {
+			t.Fatal(err)
+		}
+		runlifecyclefixture.RequirePostgres(t, ctx, db, fixture)
+	}
+	payload, err := json.Marshal(map[string]any{"entity_id": runID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = selected.CommitPublication(ctx, runtimebus.PublicationCommand{Commit: runtimebus.CommitPublishRequest{
-		Event: admitted, RouteSettlement: settlement, ReplayScope: runtimepipelineobligation.ScopeSubscribed,
-		PipelineClaim: claim, DeliveryRoutes: []events.DeliveryRoute{route}, DeliveryAuthority: authority,
-	}})
+	envelope := events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(loaded.Source), FlowInstance: runID, EntityID: runID})
+	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "item.received", "source-runtime", "", payload, 0, runID,
+		envelope, events.NoRoutingSource(), at, executionmode.Mock)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
+	commitSelectedOperationRootFixture(t, ctx, selected, loaded, event)
+	if backend == "postgres" {
+		seedSourceOutcomeThatMustNotSuppressFork(t, db, eventID, runID, at)
+		captureSelectedExecutionSourceRevision(t, db, runID)
+		return
+	}
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if _, err := runforkrevision.CaptureSQLite(ctx, tx, runID, runforkrevision.AllFamilies()...); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
 }

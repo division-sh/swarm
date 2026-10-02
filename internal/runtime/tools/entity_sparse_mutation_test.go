@@ -19,6 +19,8 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -30,9 +32,21 @@ import (
 
 type sparseEntityToolStore interface {
 	tools.EntityPersistence
+	entityToolImportOwner
 	EnsureSourceArtifact(context.Context, *sourceartifact.AdmittedSourceArtifact) (sourceartifact.EnsureResult, error)
 	LoadRunDebugReport(context.Context, string, operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error)
 }
+
+type entityToolImportOwner interface {
+	SetupScenarioEntities(context.Context, pipeline.ScenarioSetupRequest) (pipeline.ScenarioSetupResult, error)
+}
+
+type entityToolImportFixture struct {
+	owner  entityToolImportOwner
+	source semanticview.Source
+}
+
+type entityToolImportFixtureKey struct{}
 
 func seedEntityToolSourceRun(t *testing.T, selected any, bundle *contracts.WorkflowContractBundle) context.Context {
 	t.Helper()
@@ -55,7 +69,11 @@ func seedEntityToolSourceRun(t *testing.T, selected any, bundle *contracts.Workf
 	default:
 		t.Fatalf("unsupported entity test backend %T", selected)
 	}
-	return ctx
+	owner, ok := selected.(entityToolImportOwner)
+	if !ok {
+		t.Fatalf("entity test backend %T has no scenario import owner", selected)
+	}
+	return context.WithValue(ctx, entityToolImportFixtureKey{}, entityToolImportFixture{owner: owner, source: semanticview.Wrap(bundle)})
 }
 
 func TestEntitySparseGeneratedToolMutation(t *testing.T) {
@@ -121,10 +139,19 @@ writer:
 			if problems := tools.ValidateGeneratedToolSchemaClosureForSource(source); len(problems) != 0 {
 				t.Fatalf("source-loaded sparse entity tool schemas rejected: %v", problems)
 			}
-			if _, err := persistence.CreateEntity(ctx, tools.EntityCreateRecord{
-				RunID: runID, EntityID: entityID, Source: source, FlowInstance: "work/one", EntityType: "work", CurrentState: "queued",
-				FieldsJSON: json.RawMessage(`{"left":"paired","right":"paired","token":"fixed"}`), CreatedAt: time.Now().UTC(),
-				Writer: tools.EntityMutationWriter{Type: "system_node", ID: "creator", HandlerStep: "create_entity"},
+			contract, ok := entityruntime.ResolveForFlow(source, "work")
+			if !ok {
+				t.Fatal("import fixture requires work contract")
+			}
+			fields, err := entityruntime.Initialize(contract, map[string]any{"left": "paired", "right": "paired", "token": "fixed"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := persistence.SetupScenarioEntities(ctx, pipeline.ScenarioSetupRequest{
+				RunID: runID, CreatedAt: time.Now().UTC(),
+				Entities: []pipeline.ScenarioSetupEntityRequest{{
+					Alias: "work", EntityID: entityID, FlowInstance: "work/one", EntityType: "work", CurrentState: "queued", Fields: fields,
+				}},
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -148,7 +175,7 @@ writer:
 			if err != nil {
 				t.Fatal(err)
 			}
-			fields := whole.(map[string]any)["fields"].(map[string]any)
+			fields = whole.(map[string]any)["fields"].(map[string]any)
 			if _, present := fields["label"]; present {
 				t.Fatalf("read fabricated label: %#v", fields)
 			}

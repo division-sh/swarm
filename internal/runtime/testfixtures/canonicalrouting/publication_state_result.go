@@ -70,7 +70,6 @@ result.rejected:
   produces: [result.accepted, result.rejected]
   event_handlers:
     document.requested:
-      create_entity: true
       data_accumulation:
         writes:
           - {source_field: request_id, target_field: request_id}

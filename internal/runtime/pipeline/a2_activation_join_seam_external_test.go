@@ -73,8 +73,9 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 				}
 				now := time.Now().UTC().Truncate(time.Microsecond)
 				req := pipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: identity,
-					Config: map[string]any{"order_id": identity.InstanceID},
-					Fields: map[string]any{"order_id": identity.InstanceID, "final_count": int64(-1)}, OccurredAt: now}
+					ConstructorInput: "order.created", ResolvedKey: identity.InstanceID,
+					Config:       map[string]any{"order_id": identity.InstanceID},
+					TriggerEvent: eventtest.ExistingRunRootIngress(uuid.NewString(), "order.created", "operator", "", []byte(`{"order_id":"order-1"}`), 0, runID, events.EventEnvelope{}, now), OccurredAt: now}
 				plan, err := am.PrepareFlowInstanceActivation(ctx, req)
 				if err != nil {
 					t.Fatalf("manager activation preparation: %v", err)
@@ -130,7 +131,7 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 					t.Fatalf("activation changed prepared membership/entry: actual=%#v planned=%#v", arm, plannedArm)
 				}
 				readiness, found, err := pc.LoadDynamicFlowRuntimeReadiness(ctx, runID, identity.Route())
-				if err != nil || !found || readiness.PlanRevision != committed.ReadinessRevision || !readiness.TopologyReadyAt.IsZero() {
+				if err != nil || !found || readiness.AttemptOrdinal != committed.ReadinessAttemptOrdinal || readiness.Phase != pipeline.FlowAttachmentPlanned {
 					t.Fatalf("commit did not retain unfinalized readiness: found=%v readiness=%#v err=%v", found, readiness, err)
 				}
 				history := count("entity_mutations")
@@ -146,7 +147,7 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 					t.Fatalf("duplicate readiness finalization: %v", err)
 				}
 				readiness, found, err = pc.LoadDynamicFlowRuntimeReadiness(ctx, runID, identity.Route())
-				if err != nil || !found || readiness.TopologyReadyAt.IsZero() || !bus.HasFlowInstanceRoute(owner) || count("timers") != 1 {
+				if err != nil || !found || readiness.Phase != pipeline.FlowAttachmentReady || !bus.HasFlowInstanceRoute(owner) || count("timers") != 1 {
 					t.Fatalf("readiness/route did not converge once: found=%v readiness=%#v err=%v", found, readiness, err)
 				}
 				if scenario.name == "restart_before_arrival" {
@@ -324,9 +325,9 @@ func a2ActivationJoinScheduleFault(t *testing.T, ctx context.Context, selected g
 func a2ActivationJoinFiles(count int) map[string]string {
 	return map[string]string{
 		"schema.yaml":          "name: a2-activation-join\nstages:\n  active: {initial: true}\n",
-		"orders/schema.yaml":   "name: orders\ninstance: order_id\nstages:\n  awaiting: {initial: true}\n",
-		"orders/entities.yaml": "order_state:\n  order_id: {type: text, indexed: true}\n  final_count: integer\n",
-		"orders/events.yaml":   "item.completed:\n  order_id: text\n  member_id: text\n  result: text\n",
+		"orders/schema.yaml":   "name: orders\ninstance: order_id\npins:\n  inputs:\n    events: [order.created]\nstages:\n  awaiting: {initial: true}\n",
+		"orders/entities.yaml": "order_state:\n  order_id: {type: text, indexed: true}\n  final_count: {type: integer, initial: -1}\n",
+		"orders/events.yaml":   "order.created:\n  order_id: text\nitem.completed:\n  order_id: text\n  member_id: text\n  result: text\n",
 		"orders/nodes.yaml": fmt.Sprintf(`collector:
   execution_type: system_node
   event_handlers:

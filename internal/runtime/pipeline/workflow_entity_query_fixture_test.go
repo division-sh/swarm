@@ -58,55 +58,55 @@ func (r *recordingRuntimeMutationRunner) LoadActiveWorkflowRoute(ctx context.Con
 	if err := identity.Validate(); err != nil {
 		return runtimeworkflowroute.RecoveryRecord{}, err
 	}
+	// Component adapter: identity belongs to the header, not an inferred field-row owner.
 	query := `
-		SELECT fi.flow_template, fi.config, COALESCE(owner.entity_id, ''), COALESCE(owner.owner_count, 0)
-		  FROM flow_instances fi
-		  LEFT JOIN (
-			SELECT candidates.run_id, candidates.flow_instance,
-			       candidates.entity_id,
-			       COUNT(*) OVER (PARTITION BY candidates.run_id, candidates.flow_instance) AS owner_count
-			  FROM (
-				SELECT DISTINCT state.run_id, state.flow_instance, state.entity_id::text AS entity_id
-				  FROM entity_state AS state
-				  JOIN runs AS run ON run.run_id = state.run_id
-				 WHERE state.run_id = $1::uuid AND LOWER(BTRIM(run.status)) IN ('running', 'paused')
-			  ) AS candidates
-		  ) AS owner ON owner.run_id = fi.run_id AND owner.flow_instance = fi.instance_path
-		 WHERE fi.run_id = $1::uuid AND fi.instance_path = $2 AND fi.status = 'active' AND fi.terminated_at IS NULL
+		SELECT fi.flow_template, fi.config, fi.entity_id::text, fi.entity_type,
+			(SELECT COUNT(*) FROM entity_state fields WHERE fields.run_id = fi.run_id AND fields.flow_instance = fi.instance_path),
+			es.entity_id::text, es.entity_type
+		FROM flow_instances fi
+		JOIN runs run ON run.run_id = fi.run_id
+		LEFT JOIN entity_state es ON es.run_id = fi.run_id AND es.flow_instance = fi.instance_path
+		WHERE fi.run_id = $1::uuid AND fi.instance_path = $2
+			AND fi.status = 'active' AND fi.terminated_at IS NULL AND run.status IN ('running', 'paused')
 	`
 	args := []any{identity.RunID, identity.Route.InstancePath}
 	if r.dialect != workflowStoreDialectPostgres {
 		query = `
-			SELECT fi.flow_template, fi.config, COALESCE(owner.entity_id, ''), COALESCE(owner.owner_count, 0)
-			  FROM flow_instances fi
-			  LEFT JOIN (
-				SELECT candidates.run_id, candidates.flow_instance,
-				       candidates.entity_id,
-				       COUNT(*) OVER (PARTITION BY candidates.run_id, candidates.flow_instance) AS owner_count
-				  FROM (
-					SELECT DISTINCT state.run_id, state.flow_instance, CAST(state.entity_id AS TEXT) AS entity_id
-					  FROM entity_state AS state
-					  JOIN runs AS run ON run.run_id = state.run_id
-					 WHERE state.run_id = ? AND LOWER(TRIM(run.status)) IN ('running', 'paused')
-				  ) AS candidates
-			  ) AS owner ON owner.run_id = fi.run_id AND owner.flow_instance = fi.instance_path
-			 WHERE fi.run_id = ? AND fi.instance_path = ? AND fi.status = 'active' AND fi.terminated_at IS NULL
+			SELECT fi.flow_template, fi.config, fi.entity_id, fi.entity_type,
+				(SELECT COUNT(*) FROM entity_state fields WHERE fields.run_id = fi.run_id AND fields.flow_instance = fi.instance_path),
+				es.entity_id, es.entity_type
+			FROM flow_instances fi
+			JOIN runs run ON run.run_id = fi.run_id
+			LEFT JOIN entity_state es ON es.run_id = fi.run_id AND es.flow_instance = fi.instance_path
+			WHERE fi.run_id = ? AND fi.instance_path = ?
+				AND fi.status = 'active' AND fi.terminated_at IS NULL AND run.status IN ('running', 'paused')
 		`
-		args = []any{identity.RunID, identity.RunID, identity.Route.InstancePath}
 	}
 	var record runtimeworkflowroute.RecoveryRecord
 	var config any
-	var ownerCount int
-	err := r.db.QueryRowContext(ctx, query, args...).Scan(&record.WorkflowName, &config, &record.EntityID, &ownerCount)
+	var fieldCount int
+	var contract, fieldEntityID, fieldContract sql.NullString
+	err := r.db.QueryRowContext(ctx, query, args...).Scan(&record.WorkflowName, &config, &record.EntityID, &contract, &fieldCount, &fieldEntityID, &fieldContract)
 	if err == sql.ErrNoRows {
 		return runtimeworkflowroute.RecoveryRecord{}, &runtimeworkflowroute.ActiveRouteNotFound{InstancePath: identity.Route.InstancePath}
 	}
 	if err != nil {
 		return runtimeworkflowroute.RecoveryRecord{}, err
 	}
+	record.WorkflowName = strings.TrimSpace(record.WorkflowName)
+	if record.WorkflowName == "" {
+		return runtimeworkflowroute.RecoveryRecord{}, fmt.Errorf("flow instance %s has empty flow_template for route recovery", identity.Route.InstancePath)
+	}
 	record.EntityID = strings.TrimSpace(record.EntityID)
-	if ownerCount != 1 || record.EntityID == "" {
-		return runtimeworkflowroute.RecoveryRecord{}, fmt.Errorf("flow instance %s does not have exactly one current persisted entity owner (owners=%d entity_id=%q)", identity.Route.InstancePath, ownerCount, record.EntityID)
+	if record.EntityID == "" {
+		return runtimeworkflowroute.RecoveryRecord{}, fmt.Errorf("flow instance %s requires exact constructed header identity", identity.Route.InstancePath)
+	}
+	if contract.Valid {
+		if fieldCount != 1 || fieldEntityID.String != record.EntityID || fieldContract.String != contract.String {
+			return runtimeworkflowroute.RecoveryRecord{}, fmt.Errorf("constructed flow %s requires exactly one matching declared field row (rows=%d)", identity.Route.InstancePath, fieldCount)
+		}
+	} else if fieldCount != 0 {
+		return runtimeworkflowroute.RecoveryRecord{}, fmt.Errorf("fieldless flow %s cannot have entity state rows", identity.Route.InstancePath)
 	}
 	switch typed := config.(type) {
 	case []byte:
@@ -115,6 +115,9 @@ func (r *recordingRuntimeMutationRunner) LoadActiveWorkflowRoute(ctx context.Con
 		record.Config = append(record.Config, typed...)
 	default:
 		return runtimeworkflowroute.RecoveryRecord{}, fmt.Errorf("unsupported test workflow route config type %T", config)
+	}
+	if len(record.Config) == 0 {
+		return runtimeworkflowroute.RecoveryRecord{}, fmt.Errorf("flow instance %s has empty config", identity.Route.InstancePath)
 	}
 	return record, nil
 }

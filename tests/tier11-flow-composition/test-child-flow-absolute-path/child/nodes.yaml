@@ -4,7 +4,6 @@ child-worker:
   produces: [task.done]
   event_handlers:
     task.requested:
-      create_entity: true
       advances_to: finished
       emit:
         event: task.done

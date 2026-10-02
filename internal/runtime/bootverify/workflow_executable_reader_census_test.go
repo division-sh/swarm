@@ -16,8 +16,9 @@ import (
 )
 
 func TestExecutableReaderCensusClassifiesEveryHandlerAndRuleField(t *testing.T) {
-	assertExecutableReaderCensusFields(t, reflect.TypeOf(runtimecontracts.SystemNodeEventHandler{}), systemNodeEventHandlerExecutableReaderCensus)
-	assertExecutableReaderCensusFields(t, reflect.TypeOf(runtimecontracts.HandlerRuleEntry{}), handlerRuleEntryExecutableReaderCensus)
+	handlerFields, ruleFields := runtimepipeline.WorkflowExecutableReaderCensusFields()
+	assertExecutableReaderCensusFields(t, reflect.TypeOf(runtimecontracts.SystemNodeEventHandler{}), handlerFields)
+	assertExecutableReaderCensusFields(t, reflect.TypeOf(runtimecontracts.HandlerRuleEntry{}), ruleFields)
 }
 
 func TestExecutableReaderCensusCoversEveryReaderFamily(t *testing.T) {
@@ -405,16 +406,13 @@ func findingContainsAll(findings []Finding, checkID string, values ...string) bo
 	return false
 }
 
-func assertExecutableReaderCensusFields[T any](t *testing.T, typ reflect.Type, census map[string]T) {
+func assertExecutableReaderCensusFields(t *testing.T, typ reflect.Type, census []string) {
 	t.Helper()
 	want := make([]string, 0, typ.NumField())
 	for i := 0; i < typ.NumField(); i++ {
 		want = append(want, typ.Field(i).Name)
 	}
-	got := make([]string, 0, len(census))
-	for field := range census {
-		got = append(got, field)
-	}
+	got := append([]string(nil), census...)
 	sort.Strings(want)
 	sort.Strings(got)
 	if !reflect.DeepEqual(got, want) {

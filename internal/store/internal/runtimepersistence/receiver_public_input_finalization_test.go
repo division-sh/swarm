@@ -74,7 +74,7 @@ func TestReceiverPublicInputFinalizesCreationWithoutRecoveryBothStores(t *testin
 					err := am.FinalizeCommittedFlowInstanceActivation(ctx, activation)
 					if err == nil {
 						readiness, found, readErr := selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, activation.Plan.Identity.Route())
-						if readErr != nil || !found || readiness.TopologyReadyAt.IsZero() || readiness.CreationEventEmittedAt.IsZero() {
+						if readErr != nil || !found || (readiness.Phase != pipeline.FlowAttachmentReady) || readiness.CreationEventEmittedAt.IsZero() {
 							err = fmt.Errorf("readiness incomplete inside initial finalizer: %+v found=%v err=%v", readiness, found, readErr)
 						}
 					}
@@ -135,7 +135,7 @@ func TestReceiverPublicInputFinalizesCreationWithoutRecoveryBothStores(t *testin
 			}
 			plan := finalized[0].Plan
 			readiness, found, err := selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, plan.Identity.Route())
-			if err != nil || !found || readiness.TopologyReadyAt.IsZero() || readiness.CreationEventEmittedAt.IsZero() {
+			if err != nil || !found || (readiness.Phase != pipeline.FlowAttachmentReady) || readiness.CreationEventEmittedAt.IsZero() {
 				t.Fatalf("first-pass readiness incomplete: %+v found=%v err=%v", readiness, found, err)
 			}
 			if plan.Readiness.CreationEvent == nil {

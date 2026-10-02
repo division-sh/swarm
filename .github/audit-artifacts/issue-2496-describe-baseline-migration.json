@@ -1,0 +1,266 @@
+{
+  "measured_head": "26574aad1eadbce74ac82044b4b851073ca79ca9",
+  "receipt": "/tmp/agent-e-2496-default-schema-sequence-repair.log",
+  "previous_baseline": "1c4cce2094bdaf48dd4d5faf6dbfe33da662bc0f",
+  "changed_rows": 30,
+  "unchanged_rows": 15,
+  "normalization": "repository absolute path only",
+  "merged_constructor_revision": {
+    "measured_head": "4b5c9356a",
+    "receipt": "/tmp/agent-e-2496-merged-public-construction-proof.log",
+    "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+    "context": "Remove two retired handler create_entity flags; preserve merged A2 join grammar and all public output assertions.",
+    "changed_rows": 7,
+    "unchanged_rows": 38,
+    "normalization": "repository absolute path only",
+    "changes": [
+      {
+        "surface": "describe-text",
+        "before": "cdada9aef16e7224bd85ad3e72e0949006e5487cd78ac65e1479a72cece89423",
+        "after": "6f8e34f6dc600ecfd54692c97233c609fbe544b61af96375cd236e13a56ad620"
+      },
+      {
+        "surface": "describe-json",
+        "before": "f607df6c219cc189d77df183715ea1f9af3690c37addb44124c74b1f8d8a6058",
+        "after": "105337581f85e7e7e07db83c84696915ef9ff7fb75d0cd0593b5329a7f8de445"
+      },
+      {
+        "surface": "describe-quiet",
+        "before": "35f244e264187b08c0967dd01b6a38c4fe6716b560a7b3b3650fa61f1ca17bde",
+        "after": "1fdddbc98da8f20c1e269ce9af09276b0c9390143c8977a9caa940b7ffcb9688"
+      },
+      {
+        "surface": "describe-graph-text",
+        "before": "2ebb675610161cd7f98598fb2b5e06cf0c9bbd6a1056959de72d6d9cdafce915",
+        "after": "7c82c5b9b78c78b523d873a40399ced58a8bd87df4cf8ba06d6cfdc19aec624d"
+      },
+      {
+        "surface": "describe-graph-json",
+        "before": "3599a9509731805a549e27a4cadbd2d383896a49ae7536f73166e935532b2c31",
+        "after": "4cc2de48837b89575cbea88277da93f760cb5ad2277402c7bf5e4c7c6c4a03a4"
+      },
+      {
+        "surface": "describe-no-color",
+        "before": "cdada9aef16e7224bd85ad3e72e0949006e5487cd78ac65e1479a72cece89423",
+        "after": "6f8e34f6dc600ecfd54692c97233c609fbe544b61af96375cd236e13a56ad620"
+      },
+      {
+        "surface": "routes-json",
+        "before": "66657ffd552bf164408ada1094026268e10cff40b748160bb91222efbfbd2ce6",
+        "after": "20c679a9e1947d5ea64d2735281ab90ad7905a3188ea51a693b6aaf2c81ba7dc"
+      }
+    ]
+  },
+  "changes": [
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-text",
+      "before": "455d23c5e737c96e712e3c89dd30f5a85b9834382ff17e5e555aa47470bfa780",
+      "after": "2d035d7d966baded00f8d18c920b121b694dafd5c85792d4746bd1211aed2fb3",
+      "context": "#2496 canonical constructor projection"
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-json",
+      "before": "0d5815fb3ff5c5fdd92ee8e3ed0394830bc7553c73d435e5c3ddd1caa7edd7e8",
+      "after": "15e785406d903934802320d47cb71169f1cd4818e6d29bbe055cae9125398d8e",
+      "context": "#2496 canonical constructor projection"
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-graph-text",
+      "before": "455d23c5e737c96e712e3c89dd30f5a85b9834382ff17e5e555aa47470bfa780",
+      "after": "2d035d7d966baded00f8d18c920b121b694dafd5c85792d4746bd1211aed2fb3",
+      "context": "#2496 canonical constructor projection"
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-graph-json",
+      "before": "0d5815fb3ff5c5fdd92ee8e3ed0394830bc7553c73d435e5c3ddd1caa7edd7e8",
+      "after": "15e785406d903934802320d47cb71169f1cd4818e6d29bbe055cae9125398d8e",
+      "context": "#2496 canonical constructor projection"
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-no-color",
+      "before": "455d23c5e737c96e712e3c89dd30f5a85b9834382ff17e5e555aa47470bfa780",
+      "after": "2d035d7d966baded00f8d18c920b121b694dafd5c85792d4746bd1211aed2fb3",
+      "context": "#2496 canonical constructor projection"
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-text",
+      "before": "3455b0f11e9a010abd516c95fd0d75b2134bf87ebb4b2b5183b71490686d51ca",
+      "after": "4dcb2dc84f9d2342f48819b140e6957be3c90b4c01e1f138351e1fbee493280a",
+      "context": "#2496 canonical constructor projection"
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-json",
+      "before": "24bb93541cce788fc67f56d859ef80bc2afb72af0d59dcbf646719962a7dba3a",
+      "after": "bde9f6b3089f3f8a7fe3b83e2631d92e4558f2132d74b189eb228ca44c66cc3e",
+      "context": "#2496 canonical constructor projection"
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-graph-text",
+      "before": "3455b0f11e9a010abd516c95fd0d75b2134bf87ebb4b2b5183b71490686d51ca",
+      "after": "4dcb2dc84f9d2342f48819b140e6957be3c90b4c01e1f138351e1fbee493280a",
+      "context": "#2496 canonical constructor projection"
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-graph-json",
+      "before": "24bb93541cce788fc67f56d859ef80bc2afb72af0d59dcbf646719962a7dba3a",
+      "after": "bde9f6b3089f3f8a7fe3b83e2631d92e4558f2132d74b189eb228ca44c66cc3e",
+      "context": "#2496 canonical constructor projection"
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-no-color",
+      "before": "3455b0f11e9a010abd516c95fd0d75b2134bf87ebb4b2b5183b71490686d51ca",
+      "after": "4dcb2dc84f9d2342f48819b140e6957be3c90b4c01e1f138351e1fbee493280a",
+      "context": "#2496 canonical constructor projection"
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-text",
+      "before": "4e6c0338612b5729b950b06560cad6a0493d97e64419f2b215d0672d4fb505e4",
+      "after": "e7fb5101c210fb08c1ea3d72d8336b398ac443b58df0a71ca4eada3921e3173b",
+      "context": "#2496 canonical constructor projection"
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-json",
+      "before": "376aaf60263019e6c89f51350a8a24efcaaab1c1687b3d3caab70606c10e616f",
+      "after": "e1e78b1624aa93cff6a3a6b790adf928cd9a3f38806f12b2569544ba08b5db7f",
+      "context": "#2496 canonical constructor projection"
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-graph-text",
+      "before": "c4dfa1b9046c40a5788579bda7034e3fb7628d36f7e695731c65130c332b053b",
+      "after": "e293ed51bb5790be27ffe0ba6fbd0b0809b509ae84867f4888df701611e36c86",
+      "context": "#2496 canonical constructor projection"
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-graph-json",
+      "before": "d0c52b906df9b001d6fa47ba6e72cd1195f99e2660f365cc7a13a45e48c2a801",
+      "after": "d4251ea2c66a52bf693245d1088815bcdcbe8f080deb9886048c023ef53e39bf",
+      "context": "#2496 canonical constructor projection"
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-no-color",
+      "before": "4e6c0338612b5729b950b06560cad6a0493d97e64419f2b215d0672d4fb505e4",
+      "after": "e7fb5101c210fb08c1ea3d72d8336b398ac443b58df0a71ca4eada3921e3173b",
+      "context": "#2496 canonical constructor projection"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-text",
+      "before": "22b42b2f522c2d49499cb3141e2a58b811c7037b492ab70c5ef51b91c563ad25",
+      "after": "26aa67eb04572295edc649b0fc29d4944ee821a41f732ea90dff2c594d92db25",
+      "context": "#2496 constructor projection plus pinned #1994 join grammar/artifact changes"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-json",
+      "before": "dd2fb2131bed4567be43f9be405db9ed9df9156808670391a56e9029b3af006f",
+      "after": "037772f51210101f947169a10bc9a02d3535504e8c4842edf0ee43e5bd74e74c",
+      "context": "#2496 constructor projection plus pinned #1994 join grammar/artifact changes"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-quiet",
+      "before": "8b4e9a65689032ab226954778ac6d7b2bbcfbb90d4b84358f56d1cb634c49f4b",
+      "after": "ec7cb0781f201870ae6f6b76e14a9936c687b8fbe6e8f0d9d327dc918cc2bb31",
+      "context": "#2496 constructor projection plus pinned #1994 join grammar/artifact changes"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-graph-text",
+      "before": "494d25613ae1ffc476417b4af83eda1c6809bb7cc2222199c6b886a2f21117ab",
+      "after": "126e635b670c0a83830a0b31bbff5961f7d7e4196e03e0055dfd3ec1e681f7c5",
+      "context": "#2496 constructor projection plus pinned #1994 join grammar/artifact changes"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-graph-json",
+      "before": "52b5f998f4687bbab72f275a2e7d03a632fd31690eaa186b7ec1cd8c0e75e89f",
+      "after": "0eb55ccb41b412b2625d54aca9fe3a9f7a426c854523703955f55b8af3b46a02",
+      "context": "#2496 constructor projection plus pinned #1994 join grammar/artifact changes"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-no-color",
+      "before": "22b42b2f522c2d49499cb3141e2a58b811c7037b492ab70c5ef51b91c563ad25",
+      "after": "26aa67eb04572295edc649b0fc29d4944ee821a41f732ea90dff2c594d92db25",
+      "context": "#2496 constructor projection plus pinned #1994 join grammar/artifact changes"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "routes-text",
+      "before": "d3e250d2a3b8952ae087ead88f777251eb3bf4383e3752183d7bb78f3c38ce7f",
+      "after": "bfead8a7c6742f825ae536c1ee1089df440966f920efed6a344c60da7e96ac0a",
+      "context": "#2496 constructor projection plus pinned #1994 join grammar/artifact changes"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "routes-json",
+      "before": "2cba1e986e79a4714ec647d8810709df9d876dae3e9ea34b9ebfab90dd72297b",
+      "after": "6993774157618225d8ada629158d8d5501e0f6cf4bba8c2d8876441b3b9ae6ac",
+      "context": "#2496 constructor projection plus pinned #1994 join grammar/artifact changes"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "routes-quiet",
+      "before": "a1b8ef669368cd7502ff5c2d8a42e709550067814a48f39fcc946c5e70d48360",
+      "after": "995e660da9c0a68dead683d6cb3319333555e168e31d416e22bb9a0d3200b2ee",
+      "context": "#2496 constructor projection plus pinned #1994 join grammar/artifact changes"
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-text",
+      "before": "3eb7558d11fa879dd47caaae09c783499b5269bd4fe9ec5d44b3de55fbd9e0ec",
+      "after": "cdada9aef16e7224bd85ad3e72e0949006e5487cd78ac65e1479a72cece89423",
+      "context": "#2496 constructor projection plus pinned #1994 join grammar/artifact changes"
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-json",
+      "before": "de4a3a76d5e07259c5a0b2d1583c35d96c9fb7b761b2ca4fccfea732eae9b806",
+      "after": "f607df6c219cc189d77df183715ea1f9af3690c37addb44124c74b1f8d8a6058",
+      "context": "#2496 constructor projection plus pinned #1994 join grammar/artifact changes"
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-quiet",
+      "before": "8dc818075f836ded1472564b2ab95cd567779164778ef3d10a1eb84573aad47a",
+      "after": "35f244e264187b08c0967dd01b6a38c4fe6716b560a7b3b3650fa61f1ca17bde",
+      "context": "#2496 constructor projection plus pinned #1994 join grammar/artifact changes"
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-graph-text",
+      "before": "1074146407b78d32036cfb9ee17d4530e2817049c5fd4e559f2fdd6c1f385cb7",
+      "after": "2ebb675610161cd7f98598fb2b5e06cf0c9bbd6a1056959de72d6d9cdafce915",
+      "context": "#2496 constructor projection plus pinned #1994 join grammar/artifact changes"
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-graph-json",
+      "before": "578d5c0cf69cacb345d3c5fd10a7e266b660cba273699c619b2dae10feb20eb1",
+      "after": "3599a9509731805a549e27a4cadbd2d383896a49ae7536f73166e935532b2c31",
+      "context": "#2496 constructor projection plus pinned #1994 join grammar/artifact changes"
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-no-color",
+      "before": "3eb7558d11fa879dd47caaae09c783499b5269bd4fe9ec5d44b3de55fbd9e0ec",
+      "after": "cdada9aef16e7224bd85ad3e72e0949006e5487cd78ac65e1479a72cece89423",
+      "context": "#2496 constructor projection plus pinned #1994 join grammar/artifact changes"
+    }
+  ]
+}

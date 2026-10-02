@@ -49,25 +49,55 @@ type entityAssignmentCondition struct {
 // order. It never treats writer grants, event spelling or a destination-only
 // graph edge as evidence of an executed assignment.
 type EntityAssignmentAnalysis struct {
-	source   semanticview.Source
-	entity   c.ResolvedCatalogType
-	initial  entityruntime.AssignmentFacts
-	topology c.WorkflowStageTopology
-	stages   map[string]entityruntime.AssignmentFacts
+	source            semanticview.Source
+	entity            c.ResolvedCatalogType
+	initial           entityruntime.AssignmentFacts
+	topology          c.WorkflowStageTopology
+	stages            map[string]entityruntime.AssignmentFacts
+	constructorKey    string
+	constructorFields []string
 }
 
-func BuildEntityAssignmentAnalysis(source semanticview.Source, flowID string) (*EntityAssignmentAnalysis, error) {
+func (a *EntityAssignmentAnalysis) ConstructorKey() string { return a.constructorKey }
+func (a *EntityAssignmentAnalysis) ConstructorSuppliedFields() []string {
+	return append([]string(nil), a.constructorFields...)
+}
+
+// BuildConstructorAssignmentAnalysis analyzes one creating input, independently
+// of every other input. An empty input denotes the keyless no-argument constructor.
+func BuildConstructorAssignmentAnalysis(source semanticview.Source, flowID, input string) (*EntityAssignmentAnalysis, error) {
+	return buildEntityAssignmentAnalysis(source, flowID, input)
+}
+
+func buildEntityAssignmentAnalysis(source semanticview.Source, flowID, input string) (*EntityAssignmentAnalysis, error) {
+	if source == nil {
+		return nil, fmt.Errorf("flow %s has no admitted constructor source", flowID)
+	}
 	entityScope := flowID
 	if flowID == "." {
 		entityScope = ""
 	}
 	contract, ok := entityruntime.ResolveForFlow(source, entityScope)
+	var typ *c.ResolvedCatalogType
 	if !ok {
-		return nil, fmt.Errorf("flow %s has no entity assignment contract", flowID)
-	}
-	typ, err := semanticview.ResolveEntityStructuralType(source, flowID)
-	if err != nil || typ == nil {
-		return nil, fmt.Errorf("flow %s has no structural entity type", flowID)
+		bundle, admitted := semanticview.Bundle(source)
+		if !admitted || bundle == nil {
+			return nil, fmt.Errorf("flow %s has no admitted constructor source", flowID)
+		}
+		declarations, _ := bundle.FlowEntityContractsByID(flowID)
+		if flowID == "." {
+			declarations = bundle.RootEntityContracts()
+		}
+		if len(declarations) != 0 || input != "" {
+			return nil, fmt.Errorf("flow %s has no entity assignment contract", flowID)
+		}
+		typ = &c.ResolvedCatalogType{Kind: c.CatalogTypeObject}
+	} else {
+		var err error
+		typ, err = semanticview.ResolveEntityStructuralType(source, flowID)
+		if err != nil || typ == nil {
+			return nil, fmt.Errorf("flow %s has no structural entity type", flowID)
+		}
 	}
 	a := &EntityAssignmentAnalysis{source: source, entity: typ.Clone(), initial: entityruntime.AssignmentFacts{}, stages: map[string]entityruntime.AssignmentFacts{}}
 	for name, decl := range contract.Entity.Fields {
@@ -76,6 +106,11 @@ func BuildEntityAssignmentAnalysis(source semanticview.Source, flowID string) (*
 		}
 		if field, found := a.entity.Field(name); found {
 			a.initial.AssignValue(name, field.Type, decl.Initial)
+		}
+	}
+	if input != "" {
+		if err := seedConstructorAssignment(source, flowID, input, contract, a); err != nil {
+			return nil, err
 		}
 	}
 	var found bool
@@ -177,6 +212,27 @@ func BuildEntityAssignmentAnalysis(source semanticview.Source, flowID string) (*
 	}
 	return a, nil
 }
+
+// IntersectConstructorAssignments exposes only facts guaranteed by every
+// eligible constructor. No input can borrow another input's supplied fields.
+func IntersectConstructorAssignments(analyses []*EntityAssignmentAnalysis) *EntityAssignmentAnalysis {
+	if len(analyses) == 0 {
+		return nil
+	}
+	out := *analyses[0]
+	out.initial = out.initial.Clone()
+	out.stages = maps.Clone(out.stages)
+	out.constructorKey, out.constructorFields = "", nil
+	for _, analysis := range analyses[1:] {
+		out.initial = out.initial.Intersect(analysis.initial)
+		for stage, facts := range out.stages {
+			out.stages[stage] = facts.Intersect(analysis.stages[stage])
+		}
+	}
+	return &out
+}
+
+func (a *EntityAssignmentAnalysis) DeclaresFields() bool { return len(a.entity.Fields) != 0 }
 
 // StageFacts is the committed-state fact at a stage-owned read boundary. Gate
 // context freezing consumes this same result, not a separate writer census.

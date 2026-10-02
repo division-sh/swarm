@@ -22,7 +22,6 @@ func TestHistoricalDeliveryProjectionCoversEveryRouteField(t *testing.T) {
 		"Context":           {"delivery_context"},
 		"PayloadProjection": {"delivery_payload_projection"},
 		"ConnectClaim":      {"connect_execution_claim"},
-		"Materialization":   {"receiver_materialization_plan"},
 		"Initialization":    {"receiver_materialization_plan"},
 	}
 	routeType := reflect.TypeOf(events.DeliveryRoute{})

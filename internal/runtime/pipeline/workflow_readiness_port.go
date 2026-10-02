@@ -52,11 +52,11 @@ func (s *workflowInstanceStore) VerifyDynamicFlowRuntimeActivationAttempt(ctx co
 	return s.readiness.VerifyDynamicFlowRuntimeActivationAttempt(ctx, attempt)
 }
 
-func (s *workflowInstanceStore) MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx context.Context, attempt DynamicFlowRuntimeActivationAttempt, plan DynamicFlowRuntimeReadinessPlan, readyAt time.Time) (DynamicFlowRuntimeTopologyReadyResult, error) {
+func (s *workflowInstanceStore) AdvanceFlowAttachment(ctx context.Context, attempt DynamicFlowRuntimeActivationAttempt, previous FlowAttachmentPhase, at time.Time) (FlowAttachmentAdvanceResult, error) {
 	if s == nil || s.readiness == nil {
-		return DynamicFlowRuntimeTopologyReadyResult{}, fmt.Errorf("dynamic flow runtime readiness owner is required")
+		return FlowAttachmentAdvanceResult{}, fmt.Errorf("dynamic flow runtime readiness owner is required")
 	}
-	return s.readiness.MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx, attempt, plan, readyAt)
+	return s.readiness.AdvanceFlowAttachment(ctx, attempt, previous, at)
 }
 
 func (s *workflowInstanceStore) RetireDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt DynamicFlowRuntimeActivationAttempt) error {

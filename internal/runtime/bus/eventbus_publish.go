@@ -719,6 +719,11 @@ func (eb *EventBus) prepareFlowInstanceActivationRouteTopology(
 	if len(plans) == 0 {
 		return nil, nil
 	}
+	var constructionPlans []runtimepipeline.FlowInstanceActivationPlan
+	for _, plan := range plans {
+		constructionPlans = append(constructionPlans, plan.ConstructionPlans()...)
+	}
+	plans = constructionPlans
 	eb.mu.RLock()
 	table := eb.routeTable
 	lister := eb.durable.ActiveFlows

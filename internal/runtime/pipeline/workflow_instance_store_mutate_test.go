@@ -65,12 +65,16 @@ func TestWorkflowEngineCompleteCarrierPreservesBookkeepingOnBothStores(t *testin
 			if err := store.create(ctx, instance); err != nil {
 				t.Fatalf("create workflow instance: %v", err)
 			}
-			update := `UPDATE entity_state SET bookkeeping = '{"platform_fact":"preserve"}' WHERE flow_instance = ?`
+			update := `UPDATE flow_instances SET bookkeeping = '{"platform_fact":"preserve"}' WHERE instance_path = ? AND run_id = ?`
 			if setup.name == "postgres" {
-				update = `UPDATE entity_state SET bookkeeping = '{"platform_fact":"preserve"}'::jsonb WHERE flow_instance = $1`
+				update = `UPDATE flow_instances SET bookkeeping = '{"platform_fact":"preserve"}'::jsonb WHERE instance_path = $1 AND run_id = $2::uuid`
 			}
-			if _, err := store.testDB().ExecContext(ctx, update, route.Route.InstancePath); err != nil {
+			result, err := store.testDB().ExecContext(ctx, update, route.Route.InstancePath, runtimecorrelation.RunIDFromContext(ctx))
+			if err != nil {
 				t.Fatalf("seed existing platform bookkeeping: %v", err)
+			}
+			if changed, err := result.RowsAffected(); err != nil || changed != 1 {
+				t.Fatalf("seed exact constructed header: rows=%d err=%v", changed, err)
 			}
 			created, ok, err := store.Load(ctx, route)
 			if err != nil || !ok || created.Bookkeeping["platform_fact"] != "preserve" {

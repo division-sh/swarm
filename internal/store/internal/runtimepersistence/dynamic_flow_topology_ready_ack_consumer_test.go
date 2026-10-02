@@ -12,6 +12,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -24,10 +25,13 @@ type readinessPostcommitFaultWorkflow struct {
 	marks atomic.Int32
 }
 
-func (w *readinessPostcommitFaultWorkflow) MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx context.Context, attempt pipeline.DynamicFlowRuntimeActivationAttempt, plan pipeline.DynamicFlowRuntimeReadinessPlan, at time.Time) (pipeline.DynamicFlowRuntimeTopologyReadyResult, error) {
-	result, err := w.PipelineCoordinator.MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx, attempt, plan, at)
+func (w *readinessPostcommitFaultWorkflow) AdvanceFlowAttachment(ctx context.Context, attempt pipeline.DynamicFlowRuntimeActivationAttempt, previous pipeline.FlowAttachmentPhase, at time.Time) (pipeline.FlowAttachmentAdvanceResult, error) {
+	result, err := w.PipelineCoordinator.AdvanceFlowAttachment(ctx, attempt, previous, at)
 	if err != nil || !result.Acknowledged {
 		return result, err
+	}
+	if previous != pipeline.FlowAttachmentTimersArmed {
+		return result, nil
 	}
 	w.marks.Add(1)
 	return result, w.fault
@@ -55,7 +59,13 @@ func TestDynamicFlowTopologyReadyAcknowledgedFaultCompletesCreationBothStores(t 
 			}
 			req := f.request("acknowledged-ready", "ti-acknowledged", "committed")
 			req.Config["nested"] = []any{int64(7), float64(7)}
-			req.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "request.started", "operator", "", []byte(`{}`), 0, correlation.RunIDFromContext(f.ctx), events.EventEnvelope{}, req.OccurredAt)
+			payload, err := canonicaljson.MarshalPreservingNumberKinds(map[string]any{
+				"request_id": req.ResolvedKey, "label": req.Config["label"], "enabled": true, "nested": req.Config["nested"],
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "request.started", "operator", "", payload, 0, correlation.RunIDFromContext(f.ctx), events.EventEnvelope{}, req.OccurredAt)
 			if err := publisher.Publish(f.ctx, req.TriggerEvent); err != nil {
 				t.Fatal(err)
 			}
@@ -79,7 +89,7 @@ func TestDynamicFlowTopologyReadyAcknowledgedFaultCompletesCreationBothStores(t 
 				t.Fatalf("finalization error=%v marks=%d, want acknowledged fault after one mark", finalizeErr, workflow.marks.Load())
 			}
 			readiness, found, err := f.store.LoadDynamicFlowRuntimeReadiness(f.ctx, plan.Readiness.RunID, plan.Identity.Route())
-			if err != nil || !found || readiness.TopologyReadyAt.IsZero() || readiness.CreationEventEmittedAt.IsZero() {
+			if err != nil || !found || (readiness.Phase != pipeline.FlowAttachmentReady) || readiness.CreationEventEmittedAt.IsZero() {
 				t.Fatalf("committed readiness = %+v found=%v loadErr=%v finalizeErr=%v", readiness, found, err, finalizeErr)
 			}
 			restarted.requireCreationOccurrence(t, plan, 1)

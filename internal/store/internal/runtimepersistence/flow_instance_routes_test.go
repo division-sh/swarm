@@ -952,9 +952,9 @@ func TestPostgresStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates(
 		t.Fatalf("marshal readiness plan: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, created_at, updated_at)
-		VALUES ($1::uuid, 'component-scaffold/active', $2::jsonb, NOW(), NOW())
-	`, runID, readinessPlan); err != nil {
+		INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, plan_hash, created_at, updated_at)
+		VALUES ($1::uuid, 'component-scaffold/active', $2::jsonb, $3, NOW(), NOW())
+	`, runID, readinessPlan, readinessPlanFixtureHash(t, string(readinessPlan))); err != nil {
 		t.Fatalf("seed flow-instance readiness: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -1030,9 +1030,9 @@ func TestPostgresStoreListActiveFlowInstanceDescriptorsDoesNotReadAmbientTransac
 		t.Fatalf("seed flow_instances in tx: %v", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, created_at, updated_at)
-		VALUES ($1::uuid, 'component-scaffold/uncommitted', '{"workflow_version":"1.0.0"}'::jsonb, NOW(), NOW())
-	`, runID); err != nil {
+		INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, plan_hash, created_at, updated_at)
+		VALUES ($1::uuid, 'component-scaffold/uncommitted', '{"workflow_version":"1.0.0"}'::jsonb, $2, NOW(), NOW())
+	`, runID, readinessPlanFixtureHash(t, `{"workflow_version":"1.0.0"}`)); err != nil {
 		t.Fatalf("seed readiness in tx: %v", err)
 	}
 	if _, err := tx.ExecContext(ctx, `

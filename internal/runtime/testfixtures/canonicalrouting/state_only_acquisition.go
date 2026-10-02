@@ -70,8 +70,7 @@ upserter:
   execution_type: system_node
   subscribes_to: [test.node_emitted.upserter]
   event_handlers:
-    test.node_emitted.upserter:
-      create_entity: true
+    test.node_emitted.upserter: {}
 `)
 	}
 	return root

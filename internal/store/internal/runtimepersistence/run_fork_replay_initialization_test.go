@@ -98,13 +98,10 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 			trigger = command.Commit.Event.Event()
 			t.Logf("source aggregate flow=%q producer=%+v", trigger.FlowInstance(), trigger.RoutingSource().Route())
 			for _, route := range command.Commit.DeliveryRoutes {
-				if !route.Initialization.NodeDelivery() || route.Initialization.ValidateEvent(trigger) != nil {
-					t.Fatal("publication lost canonical node initialization")
+				if !route.Initialization.FlowLifecycle() || route.Initialization.ValidateEvent(trigger) != nil {
+					t.Fatal("publication lost canonical construction receipt")
 				}
 				if route.Recipient.IsAgent() {
-					if route.Materialization.Empty() {
-						t.Fatal("agent lacks exact source dependency")
-					}
 					continue
 				}
 				delivery, err := events.NewDeliveryEvent(trigger, route)
@@ -219,7 +216,6 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 					want.AgentIdentity.RunID = child.ForkRunID
 					want.Target = events.MustExistingEntityTarget(want.Target.Route())
 					want.Initialization = events.ReceiverInitialization{}
-					want.Materialization = events.ReceiverMaterializationPlan{}
 					if !reflect.DeepEqual(want, delivery.Route) {
 						t.Fatalf("child route differs from exact initialized owner:\nwant=%+v\ngot=%+v", want, delivery.Route)
 					}

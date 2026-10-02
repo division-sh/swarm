@@ -4,14 +4,35 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/google/uuid"
 )
+
+// FlowConstructionInput is immutable construction provenance, not attachment
+// progress or permission for a handler to create missing state.
+type FlowConstructionInput struct {
+	EventID string `json:"event_id"`
+	Input   string `json:"input"`
+}
+
+func (i FlowConstructionInput) Validate() error {
+	if i.EventID == "" && i.Input == "" {
+		return nil // No-argument startup construction has no creating delivery.
+	}
+	id, err := uuid.Parse(i.EventID)
+	if err != nil || id.String() != i.EventID || i.Input != strings.TrimSpace(i.Input) {
+		return fmt.Errorf("flow construction requires exact creating event and local input")
+	}
+	return nil
+}
 
 type FlowInstanceActivationRequest struct {
 	Context                       events.DeliveryContext
@@ -19,11 +40,49 @@ type FlowInstanceActivationRequest struct {
 	Instance                      runtimeflowidentity.Instance
 	InitialState                  string
 	Config                        map[string]any
-	Fields                        map[string]any
+	ConstructorInput              string
+	ResolvedKey                   any
+	PayloadProjection             events.DeliveryPayloadProjection
 	Bookkeeping                   map[string]any
 	TriggerEvent                  events.Event
 	OccurredAt                    time.Time
 	StandingGenerationReplacement bool
+}
+
+func (r FlowInstanceActivationRequest) ConstructorPayload() (map[string]any, error) {
+	if r.ConstructorInput == "" {
+		if !r.PayloadProjection.Empty() {
+			return nil, fmt.Errorf("keyless construction cannot accept a payload projection")
+		}
+		return nil, nil
+	}
+	_, err := events.NewDeliveryEvent(r.TriggerEvent, events.DeliveryRoute{PayloadProjection: r.PayloadProjection})
+	if err != nil {
+		return nil, err
+	}
+	if !r.PayloadProjection.Empty() {
+		if r.ContractBundle == nil {
+			return nil, fmt.Errorf("constructor projection requires its admitted field contract")
+		}
+		schema, found := r.ContractBundle.FlowSchemaByID(r.Instance.TemplateID)
+		contract, declared := entityruntime.ResolveForFlow(r.ContractBundle, r.Instance.TemplateID)
+		fields := r.PayloadProjection.Fields()
+		if !found || !declared || schema.Instance.Empty() || len(fields) != 1 {
+			return nil, fmt.Errorf("constructor projection must contain only its resolved instance key")
+		}
+		key := schema.Instance.Path()
+		stamped, present := fields[key]
+		value, valueErr := entityruntime.NormalizeFieldValue(contract, key, stamped)
+		resolved, resolvedErr := entityruntime.NormalizeFieldValue(contract, key, r.ResolvedKey)
+		if !present || r.ResolvedKey == nil || valueErr != nil || resolvedErr != nil || !reflect.DeepEqual(value, resolved) {
+			return nil, fmt.Errorf("constructor projection key %s contradicts its resolved typed key", key)
+		}
+	}
+	var payload map[string]any
+	if err := canonicaljson.DecodePreservingNumberLexemes(r.TriggerEvent.Payload(), &payload); err != nil {
+		return nil, err
+	}
+	return payload, nil
 }
 
 // FlowInstanceActivationPlan is the exact durable command derived from one
@@ -34,6 +93,8 @@ type FlowInstanceActivationPlan struct {
 	Identity                      runtimeflowidentity.Instance
 	Readiness                     DynamicFlowRuntimeReadinessPlan
 	Lifecycle                     WorkflowLifecycleMutationPlan
+	CreatingInput                 FlowConstructionInput
+	Children                      []FlowInstanceActivationPlan
 	ActivationVariables           map[string]string
 	OccurredAt                    time.Time
 	StandingGenerationReplacement bool
@@ -43,20 +104,33 @@ type FlowInstanceActivationPlan struct {
 // planned activation is durable. Process-local topology and readiness may be
 // published only after this value is returned.
 type CommittedFlowInstanceActivation struct {
-	Plan              FlowInstanceActivationPlan
-	Created           bool
-	Lifecycle         CommittedWorkflowLifecycleMutation
-	ReadinessRevision uint64
+	Plan                    FlowInstanceActivationPlan
+	Created                 bool
+	Lifecycle               CommittedWorkflowLifecycleMutation
+	ReadinessAttemptOrdinal uint64
+	Children                []CommittedFlowInstanceActivation
 	// Acknowledged is set only after the selected-store commit is acknowledged.
 	Acknowledged bool
+}
+
+// WithCommitAcknowledgment promotes the complete construction tree only after
+// its enclosing selected-store transaction has acknowledged the commit.
+func (a CommittedFlowInstanceActivation) WithCommitAcknowledgment() CommittedFlowInstanceActivation {
+	a.Acknowledged = true
+	children := make([]CommittedFlowInstanceActivation, len(a.Children))
+	for index, child := range a.Children {
+		children[index] = child.WithCommitAcknowledgment()
+	}
+	a.Children = children
+	return a
 }
 
 func (a CommittedFlowInstanceActivation) Validate() error {
 	if err := a.Plan.Validate(); err != nil {
 		return err
 	}
-	if a.ReadinessRevision == 0 {
-		return fmt.Errorf("committed flow instance activation requires exact readiness revision")
+	if a.ReadinessAttemptOrdinal == 0 {
+		return fmt.Errorf("committed flow instance activation requires an exact attachment attempt")
 	}
 	if err := a.Lifecycle.Validate(); err != nil {
 		return fmt.Errorf("committed flow instance activation lifecycle: %w", err)
@@ -64,7 +138,28 @@ func (a CommittedFlowInstanceActivation) Validate() error {
 	if !a.Created && !emptyCommittedWorkflowLifecycleMutation(a.Lifecycle) {
 		return fmt.Errorf("replayed flow instance activation cannot carry new lifecycle evidence")
 	}
+	if len(a.Children) != len(a.Plan.Children) {
+		return fmt.Errorf("committed construction omitted descendant evidence")
+	}
+	for index, child := range a.Children {
+		if child.Plan.Identity != a.Plan.Children[index].Identity || (!a.Created && child.Created) {
+			return fmt.Errorf("committed construction changed descendant identity or repeated construction")
+		}
+		if err := child.Validate(); err != nil {
+			return fmt.Errorf("committed construction descendant %d: %w", index, err)
+		}
+	}
 	return nil
+}
+
+// ConstructionPlans returns the exact parent-first tree for route projection.
+// Persistence commits this same tree; callers cannot infer missing descendants.
+func (p FlowInstanceActivationPlan) ConstructionPlans() []FlowInstanceActivationPlan {
+	plans := []FlowInstanceActivationPlan{p}
+	for _, child := range p.Children {
+		plans = append(plans, child.ConstructionPlans()...)
+	}
+	return plans
 }
 
 // FlowInstanceActivationRecord is the exact immutable persistence projection
@@ -89,6 +184,7 @@ type FlowInstanceActivationRecord struct {
 	InitialProjectionVersion int
 	InitialMaterialization   json.RawMessage
 	Readiness                json.RawMessage
+	ReadinessPlanHash        string
 	EnteredStageAt           time.Time
 	CreatedAt                time.Time
 }
@@ -110,13 +206,13 @@ func (r FlowInstanceActivationRecord) Validate() error {
 	if strings.TrimSpace(r.WorkflowName) == "" || strings.TrimSpace(r.WorkflowVersion) == "" || strings.TrimSpace(r.CurrentState) == "" {
 		return fmt.Errorf("flow instance activation record requires exact workflow and initial state")
 	}
-	if strings.TrimSpace(r.EntityType) == "" || strings.TrimSpace(r.State.EntityType) != strings.TrimSpace(r.EntityType) {
+	if strings.TrimSpace(r.State.EntityType) != strings.TrimSpace(r.EntityType) {
 		return fmt.Errorf("flow instance activation record requires one exact entity contract")
 	}
 	if r.InitialProjectionVersion != workflowInitialMaterializationProjectionVersion {
 		return fmt.Errorf("flow instance activation record requires initial projection version %d", workflowInitialMaterializationProjectionVersion)
 	}
-	if r.Mode != "template" {
+	if r.Mode != "template" && r.Mode != "static" {
 		return fmt.Errorf("flow instance activation record mode %q is unsupported", r.Mode)
 	}
 	for label, raw := range map[string]json.RawMessage{
@@ -130,6 +226,9 @@ func (r FlowInstanceActivationRecord) Validate() error {
 	}
 	if r.EnteredStageAt.IsZero() || r.CreatedAt.IsZero() {
 		return fmt.Errorf("flow instance activation record requires exact persisted times")
+	}
+	if _, err := DecodeFlowReadinessPlan(r.Readiness, r.ReadinessPlanHash); err != nil {
+		return fmt.Errorf("flow instance activation record readiness hash is invalid")
 	}
 	return nil
 }
@@ -185,12 +284,18 @@ func (p FlowInstanceActivationPlan) PersistenceRecord() (FlowInstanceActivationR
 		InitialState:    instance.CurrentState,
 		OccurredAt:      canonicalWorkflowInstancePersistedTime(normalized.OccurredAt),
 		Persisted:       projection,
+		Readiness:       &normalized.Readiness,
+		CreatingInput:   normalized.CreatingInput,
 	}
 	initialJSON, err := canonicaljson.MarshalPreservingNumberKinds(initial)
 	if err != nil {
 		return FlowInstanceActivationRecord{}, err
 	}
 	readinessJSON, err := canonicaljson.MarshalPreservingNumberKinds(normalized.Readiness)
+	if err != nil {
+		return FlowInstanceActivationRecord{}, err
+	}
+	readinessHash, err := normalized.Readiness.Hash()
 	if err != nil {
 		return FlowInstanceActivationRecord{}, err
 	}
@@ -208,7 +313,7 @@ func (p FlowInstanceActivationPlan) PersistenceRecord() (FlowInstanceActivationR
 		CurrentState: instance.CurrentState, EntityType: projection.Control.EntityType, Slug: projection.Control.Slug, Name: projection.Control.Name,
 		Fields: fields, Bookkeeping: bookkeeping, Gates: gates, Accumulator: accumulator, Config: config,
 		InitialProjectionVersion: workflowInitialMaterializationProjectionVersion,
-		InitialMaterialization:   initialJSON, Readiness: readinessJSON,
+		InitialMaterialization:   initialJSON, Readiness: readinessJSON, ReadinessPlanHash: readinessHash,
 		EnteredStageAt: canonicalWorkflowInstancePersistedTime(instance.EnteredStageAt),
 		CreatedAt:      canonicalWorkflowInstancePersistedTime(instance.CreatedAt),
 	}
@@ -232,10 +337,21 @@ func (p FlowInstanceActivationPlan) Normalized() (FlowInstanceActivationPlan, er
 	p.Instance.EntityType = strings.TrimSpace(p.Instance.EntityType)
 	p.ActivationVariables = cloneStringMap(p.ActivationVariables)
 	p.OccurredAt = p.OccurredAt.UTC()
+	children := make([]FlowInstanceActivationPlan, len(p.Children))
+	for index, child := range p.Children {
+		children[index], err = child.Normalized()
+		if err != nil {
+			return FlowInstanceActivationPlan{}, fmt.Errorf("construction descendant %d: %w", index, err)
+		}
+	}
+	p.Children = children
 	return p, nil
 }
 
 func (p FlowInstanceActivationPlan) Validate() error {
+	if err := p.CreatingInput.Validate(); err != nil {
+		return err
+	}
 	var err error
 	p, err = p.Normalized()
 	if err != nil {
@@ -244,8 +360,8 @@ func (p FlowInstanceActivationPlan) Validate() error {
 	if !p.Identity.Route().Valid() || p.Instance.StorageRef == "" || p.Instance.InstanceID == "" {
 		return fmt.Errorf("flow instance activation plan requires exact instance identity")
 	}
-	if p.Instance.EntityType == "" {
-		return fmt.Errorf("flow instance activation plan requires exact entity contract")
+	if p.Instance.EntityType == "" && len(p.Instance.Fields) != 0 {
+		return fmt.Errorf("fieldless flow instance activation cannot carry entity fields")
 	}
 	if p.Instance.StorageRef != p.Identity.InstancePath || p.Instance.InstanceID != p.Identity.InstanceID {
 		return fmt.Errorf("flow instance activation plan identity does not match workflow instance")
@@ -258,6 +374,26 @@ func (p FlowInstanceActivationPlan) Validate() error {
 	}
 	if p.Lifecycle.RequestCompletionCandidate {
 		return fmt.Errorf("flow instance activation cannot request run completion")
+	}
+	seen := map[string]bool{p.Identity.InstancePath: true}
+	for index, child := range p.Children {
+		withinParent := strings.HasPrefix(child.Identity.InstancePath, p.Identity.InstancePath+"/") ||
+			(p.Identity.TemplateID == "." && p.Identity.InstancePath == p.Readiness.RunID && child.Identity.InstancePath == child.Identity.ScopeKey && !strings.Contains(child.Identity.ScopeKey, "/"))
+		if child.Identity.ParentRoute != (runtimeflowidentity.ParentRoute{FlowID: p.Identity.TemplateID, FlowInstance: p.Identity.InstancePath, EntityID: p.Identity.EntityID}) ||
+			child.Instance.ParentEntityID != p.Identity.EntityID || child.Readiness.RunID != p.Readiness.RunID ||
+			child.Readiness.BundleHash != p.Readiness.BundleHash || child.Readiness.WorkflowVersion != p.Readiness.WorkflowVersion || child.Readiness.ExecutionMode != p.Readiness.ExecutionMode ||
+			!child.OccurredAt.Equal(p.OccurredAt) || child.CreatingInput.EventID != p.CreatingInput.EventID || !withinParent {
+			return fmt.Errorf("construction descendant %d disagrees with its exact parent/source/occurrence", index)
+		}
+		if err := child.Validate(); err != nil {
+			return fmt.Errorf("construction descendant %d: %w", index, err)
+		}
+		for _, descendant := range child.ConstructionPlans() {
+			if seen[descendant.Identity.InstancePath] {
+				return fmt.Errorf("construction repeats descendant %s", descendant.Identity.InstancePath)
+			}
+			seen[descendant.Identity.InstancePath] = true
+		}
 	}
 	return nil
 }

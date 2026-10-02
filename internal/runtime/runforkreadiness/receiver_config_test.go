@@ -41,7 +41,7 @@ func TestSelectedContractReceiverConfigMissingHistoricalEvidenceFailsClosed(t *t
 					pending.RoutingSource = eventtest.ConcreteTemplateRoutingSource("consumer", path, req.Plan.Entities[0].EntityID)
 				}
 				projection, err := Project(req.Plan, req.Source, req.RecipientPlanning, req.SourceModes, req.ModelOptions)
-				if err == nil || !strings.Contains(err.Error(), "exact fixed-revision receiver configuration") || projection != nil {
+				if err == nil || !strings.Contains(err.Error(), runfork.RunForkMaterializedEntitySnapshotMetadataOwner) || !strings.Contains(err.Error(), "requires exact fixed-revision owner metadata") || projection != nil {
 					t.Fatalf("missing config acquired readiness: projection=%#v err=%v", projection, err)
 				}
 			})

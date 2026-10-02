@@ -417,7 +417,6 @@ validation-orchestrator:
     - validation.started
   event_handlers:
     vertical.shortlisted:
-      create_entity: true
       emit: validation.started
 `)
 

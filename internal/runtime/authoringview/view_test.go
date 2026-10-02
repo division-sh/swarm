@@ -593,7 +593,6 @@ func TestBuildStageGraphShowsFanOutMultiplicity(t *testing.T) {
 			"dispatcher": {
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"order.accepted": {
-						CreateEntity: true,
 						FanOut: &runtimecontracts.FanOutSpec{
 							ItemsFrom: "payload.line_items",
 							As:        "line_item",
@@ -643,8 +642,8 @@ func TestBuildStageGraphShowsFanOutMultiplicity(t *testing.T) {
 	if got.Emit != "line_item.requested" || got.ItemsFrom != "payload.line_items" || got.ItemAlias != "line_item" || got.Identity != "line_item.id" || got.MaxItems != runtimecontracts.DefaultFanOutMaxItems {
 		t.Fatalf("fan-out view = %#v, want multiplicity metadata", got)
 	}
-	if len(got.From) != 1 || got.From[0] != "waiting" {
-		t.Fatalf("fan-out from = %#v, want initial stage", got.From)
+	if !reflect.DeepEqual(got.From, []string{"waiting", "awaiting_line_items"}) {
+		t.Fatalf("fan-out from = %#v, want every ordinary nonterminal handler stage", got.From)
 	}
 	if got.Source != "handler.fan_out" || got.NodeID != identitytest.RootNode(t, "dispatcher").Key() || got.EventType != "order.accepted" {
 		t.Fatalf("fan-out source = %#v, want handler fan_out dispatcher/order.accepted", got)

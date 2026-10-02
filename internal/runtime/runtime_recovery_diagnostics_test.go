@@ -414,15 +414,6 @@ type startupReadinessFinalizationStore struct {
 	items []runtimepipeline.DynamicFlowRuntimeReadiness
 }
 
-func (*startupReadinessFinalizationStore) MaterializeInitialEntry(
-	context.Context,
-	runtimeflowidentity.RunScopedFlowInstance,
-	runtimepipeline.WorkflowInstance,
-	time.Time,
-) (runtimepipeline.WorkflowInitialMaterializationResult, error) {
-	return 0, errors.New("unexpected readiness materialization")
-}
-
 func (*startupReadinessFinalizationStore) PrepareInitialEntryLifecycle(
 	context.Context,
 	runtimeflowidentity.RunScopedFlowInstance,
@@ -517,8 +508,8 @@ func (*startupReadinessFinalizationStore) VerifyDynamicFlowRuntimeActivationAtte
 	return errors.New("unexpected readiness activation verification")
 }
 
-func (*startupReadinessFinalizationStore) MarkDynamicFlowRuntimeTopologyReadyForAttempt(context.Context, runtimepipeline.DynamicFlowRuntimeActivationAttempt, runtimepipeline.DynamicFlowRuntimeReadinessPlan, time.Time) (runtimepipeline.DynamicFlowRuntimeTopologyReadyResult, error) {
-	return runtimepipeline.DynamicFlowRuntimeTopologyReadyResult{}, errors.New("unexpected readiness topology completion")
+func (*startupReadinessFinalizationStore) AdvanceFlowAttachment(context.Context, runtimepipeline.DynamicFlowRuntimeActivationAttempt, runtimepipeline.FlowAttachmentPhase, time.Time) (runtimepipeline.FlowAttachmentAdvanceResult, error) {
+	return runtimepipeline.FlowAttachmentAdvanceResult{}, errors.New("unexpected readiness topology completion")
 }
 
 func (*startupReadinessFinalizationStore) RetireDynamicFlowRuntimeActivationAttempt(context.Context, runtimepipeline.DynamicFlowRuntimeActivationAttempt) error {

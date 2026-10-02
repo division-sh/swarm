@@ -1623,7 +1623,7 @@ func assertGoldenRoutePayloads(t *testing.T, events []goldenEvent, entities gold
 
 	scoutRequested := goldenSingleNamedEvent(t, events, "scout.requested")
 	assertGoldenExactPayload(t, scoutRequested, map[string]any{"query": "golden workload", "candidate_ids": payloadCandidateIDs})
-	assertGoldenSingleDelivery(t, scoutRequested, "node", "scout-intake", "materializing_entity", "scout", entities.scout)
+	assertGoldenSingleDelivery(t, scoutRequested, "node", "scout-intake", "existing_entity", "scout", entities.scout)
 
 	scoutWork := goldenSingleNamedEvent(t, events, "scout/scout.work.requested")
 	assertGoldenExactPayload(t, scoutWork, map[string]any{"query": "golden workload", "candidate_ids": payloadCandidateIDs})
@@ -1675,7 +1675,7 @@ func assertGoldenJoinContinuation(t *testing.T, ctx context.Context, rpc *releas
 	// The process test checks wire evidence; it does not compile an in-process oracle.
 	const collectingTransition = "transition:1c1b19802675aed7db4fab06bcffbf688ca5ed66eeea050adffca0c8b03ede28"
 	entry := map[string]any{
-		"run_id": completion.RunID, "flow_scope": completion.RunID, "instance_id": completion.RunID,
+		"run_id": completion.RunID, "flow_scope": ".", "instance_id": completion.RunID,
 		"instance_path": entities.root.FlowInstance, "entity_id": entities.root.EntityID, "stage": "collecting",
 		"cause": "delivery", "event_id": scout.EventID, "occurrence_id": entryDelivery.DeliveryID, "transition_id": collectingTransition,
 	}

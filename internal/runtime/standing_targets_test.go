@@ -42,6 +42,50 @@ func TestDeriveStandingTargets_HarnessSourceCreatesNoTarget(t *testing.T) {
 	}
 }
 
+func TestResolveStandingTargetDeclarationsConsumesRootConstructor(t *testing.T) {
+	for _, tc := range []struct {
+		name, schema, fields, handler, refusal string
+	}{
+		{name: "keyless root"},
+		{name: "keyed root", schema: "instance: tenant\n", fields: "  tenant: text\n", refusal: "keyless no-argument signature"},
+		{name: "unassigned initial read", fields: "  brief: text\n", handler: "      guard: {check: entity.brief != ''}\n", refusal: "standing constructor is ineligible"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			documents := map[string]string{"schema.yaml": "name: standing-root\nactivation: standing\nstages: []\n" + tc.schema}
+			if tc.fields != "" {
+				documents["entities.yaml"] = "root_state:\n" + tc.fields
+			}
+			if tc.handler != "" {
+				documents["events.yaml"] = "work:\n"
+				documents["nodes.yaml"] = "reader:\n  execution_type: system_node\n  subscribes_to: [work]\n  event_handlers:\n    work:\n" + tc.handler
+			}
+			for name, contents := range documents {
+				if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			source := loadWorkflowValidationSourceAt(t, root)
+			bundle, _ := semanticview.Bundle(source)
+			repo := canonicalrouting.RepoRoot(t)
+			rebuilt, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, bundle.SourceArtifact, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, admitted := range []semanticview.Source{source, semanticview.Wrap(rebuilt)} {
+				declarations, err := ResolveStandingTargetDeclarations(admitted, nil)
+				if tc.refusal != "" {
+					if err == nil || !strings.Contains(err.Error(), tc.refusal) || len(declarations) != 0 {
+						t.Fatalf("standing refusal=%q declarations=%#v err=%v", tc.refusal, declarations, err)
+					}
+				} else if err != nil || len(declarations) != 1 || declarations[0].FlowPath != "." {
+					t.Fatalf("standing root constructor declarations=%#v err=%v", declarations, err)
+				}
+			}
+		})
+	}
+}
+
 func TestResolveStandingTargetDeclarationsRequiresExactProviderPin(t *testing.T) {
 	source, registry := standingTelegramDeclarationSource(t, "inbound.telegram")
 	declarations, err := ResolveStandingTargetDeclarations(source, registry)

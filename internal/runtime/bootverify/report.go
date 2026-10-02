@@ -38,6 +38,7 @@ const (
 )
 
 var stableHardInvalidityRemediation = map[string]string{
+	"flow_constructor_validation":             "Supply the required same-name fields in an eligible creating input, remove internal-field collisions, or definitely assign fields before their first read.",
 	"agent_permission_validation":             "Grant the required agent permission or remove the unauthorized tool/action from the contract.",
 	"agent_prompt_lint_structural":            "Fix the agent prompt lint declaration so it uses supported structural fields, or remove the unsupported prompt lint entry.",
 	"accumulator_entity_projection":           "Fix the accumulator projection so it writes declared entity fields through the supported accumulator projection shape.",
