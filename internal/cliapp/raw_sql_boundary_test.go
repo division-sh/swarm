@@ -114,6 +114,16 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Issue:          1943,
 			Reason:         "testpostgres owns the typed Postgres DSN and connector boundary used by test lifecycle consumers",
 		},
+		"internal/testpostgres/capacity.go": {
+			Classification: rawSQLTestSupportBoundary,
+			Issue:          1702,
+			Reason:         "shared test-server admission reads max_connections before resource writes; it exposes no product SQL authority",
+		},
+		"internal/testpostgres/capacity_probe.go": {
+			Classification: rawSQLTestSupportBoundary,
+			Issue:          1702,
+			Reason:         "private capacity fixtures independently read database names and metadata through the canonical test connection for no-mutation proof",
+		},
 		"internal/testpostgres/manager.go": {
 			Classification: rawSQLTestSupportBoundary,
 			Issue:          1943,
