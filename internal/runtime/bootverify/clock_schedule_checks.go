@@ -32,7 +32,11 @@ func clockScheduleContractFailure(source semanticview.Source, schedule semanticv
 	if !ref.HasSchema || !ref.IsAuthored(source) {
 		return fmt.Sprintf("schedule %s emit %s requires an authored business event declaration", schedule.Name, schedule.Declaration.Emit)
 	}
-	if len(ref.Entry.Payload.Properties) != 0 || len(ref.Entry.Payload.Required) != 0 {
+	schema, found, err := source.ResolveEffectiveCompiledFlowEventSchema(schedule.FlowID, schedule.Declaration.Emit)
+	if err != nil || !found {
+		return fmt.Sprintf("schedule %s emit %s requires an admitted event schema", schedule.Name, schedule.Declaration.Emit)
+	}
+	if len(schema.Fields()) != 0 {
 		return fmt.Sprintf("schedule %s emits a bare event; %s declares payload fields", schedule.Name, schedule.Declaration.Emit)
 	}
 	if !timerFireEventHasConsumer(source, ref) {
