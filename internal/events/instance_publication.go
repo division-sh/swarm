@@ -40,6 +40,9 @@ func validateInstancePublication(event Event) error {
 	scope := eventidentity.PublicationStatic
 	instance := route.FlowInstance
 	if route.FlowID == "." {
+		if instance != event.RunID() {
+			return fmt.Errorf("root instance publication source must match its run")
+		}
 		scope, instance = eventidentity.PublicationRoot, ""
 	}
 	name, err := eventidentity.ProjectPublication(declaration, scope, route.FlowID, instance)
