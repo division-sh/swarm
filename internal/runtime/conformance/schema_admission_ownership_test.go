@@ -16,7 +16,7 @@ import (
 
 func TestSchemaAdmissionOwnershipHasNoRetiredInterpreter(t *testing.T) {
 	root := conformanceRepoRoot(t)
-	assertExactYAMLFields(t, reflect.TypeOf(runtimecontracts.FlowSchemaDocument{}), []string{"activation", "auto_emit_on_create", "connect", "imports", "ingress", "instance", "loops", "name", "pins", "required_agents", "stages"})
+	assertExactYAMLFields(t, reflect.TypeOf(runtimecontracts.FlowSchemaDocument{}), []string{"activation", "auto_emit_on_create", "connect", "imports", "ingress", "instance", "loops", "name", "pins", "required_agents", "schedules", "stages"})
 	retired := strings.Fields(`decodeReceiverInitialize decodeReceiverVariable validateFlowSchemaDocumentFields resolveHandlerRuleYAMLNode validateHandlerRuleYAMLAliasGraph validateFlowPinsNode validateFlowPinDirectionNode decodeFlowInputPinEventsNode decodeFlowOutputPinEventsNode decodeFlowInputPinEventNode decodeFlowOutputPinEventNode decodeExactFlowPinEvent validateExactW2MappingKeys decodeExactNonEmptyFlowPinScalar decodeFlowPinFieldNamesNode decodeExactFlowPinFieldSequence decodeStageGateOutcomes decodeStageGateInputFields validateUniqueNormalizedMappingKeys decodeEmitFieldsNode decodeExpressionValueMapNode decodeExpressionValueNode decodeExpressionContainer decodeLiteralExpressionNode validateKnownMappingFields decodeSchemaRefinementPattern decodeSchemaLengthRefinement decodeSchemaRangeRefinement decodeIntNode decodeFloatNode admitEventLengthRefinement admitEventRangeRefinement`)
 	forbidden := map[string]bool{}
 	for _, name := range retired {
