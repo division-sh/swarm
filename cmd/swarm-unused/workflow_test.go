@@ -40,8 +40,8 @@ func TestWorkflowNativeUnionIsRequired(t *testing.T) {
 		{"unused-linux", "linux", "ubuntu-latest", 15}, {"unused-darwin", "darwin", "macos-latest", 19},
 	} {
 		job, ok := workflow.Jobs[owner.job]
-		if !ok || job.If != "" || len(job.Needs) != 0 || job.ContinueOnError != nil || job.RunsOn != owner.runner || job.TimeoutMinutes != owner.timeoutMinutes {
-			t.Fatalf("native %s analysis is conditional, optional, or not native", owner.platform)
+		if !ok || job.If != "github.event_name != 'pull_request' || !github.event.pull_request.draft" || len(job.Needs) != 0 || job.ContinueOnError != nil || job.RunsOn != owner.runner || job.TimeoutMinutes != owner.timeoutMinutes {
+			t.Fatalf("native %s analysis must qualify every non-draft event on its native platform", owner.platform)
 		}
 		checkout, collect, upload := false, false, false
 		for _, step := range job.Steps {
@@ -71,7 +71,7 @@ func TestWorkflowNativeUnionIsRequired(t *testing.T) {
 		}
 	}
 	union, ok := workflow.Jobs["unused-checks"]
-	if !ok || union.If != "" || union.ContinueOnError != nil || union.TimeoutMinutes != 15 || !slices.Contains(union.Needs, "unused-linux") || !slices.Contains(union.Needs, "unused-darwin") {
+	if !ok || union.If != "github.event_name != 'pull_request' || !github.event.pull_request.draft" || union.ContinueOnError != nil || union.TimeoutMinutes != 15 || !slices.Contains(union.Needs, "unused-linux") || !slices.Contains(union.Needs, "unused-darwin") {
 		t.Fatal("union must require both native collectors without a profile condition")
 	}
 	checkout, merge := false, false
@@ -111,7 +111,7 @@ func TestWorkflowNativeUnionIsRequired(t *testing.T) {
 			}
 			script = strings.ReplaceAll(script, "${{ needs.ci-plan.outputs.soak_matrix }}", `{"include":[]}`)
 			c := exec.Command("bash", "-c", script)
-			c.Env = append(os.Environ(), "GITHUB_STEP_SUMMARY="+filepath.Join(t.TempDir(), "summary"))
+			c.Env = append(os.Environ(), "IS_DRAFT=false", "GITHUB_STEP_SUMMARY="+filepath.Join(t.TempDir(), "summary"))
 			b, err := c.CombinedOutput()
 			if (err == nil) != (status == "success") {
 				t.Fatalf("required %s status %q: %v %s", owner, status, err, b)
