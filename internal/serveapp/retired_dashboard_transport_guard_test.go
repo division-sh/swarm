@@ -29,6 +29,8 @@ var retiredDashboardPaths = []string{
 	"/api/agents/id/restart", "/api/conversations", "/api/conversations/id",
 	"/api/instances", "/api/instances/id", "/api/mailbox", "/api/mailbox/id",
 	"/rpc", "/api/rpc", "/ws", "/api/ws",
+	"/api/runs/run-1/trace", "/api/events/flow", "/api/instances/aggregate",
+	"/api/agents/id/actions/directive", "/api/agents/id/actions/restart",
 }
 
 func assertServedRetiredDashboardRefusal(t *testing.T, rt servedControlProofRuntime) {
