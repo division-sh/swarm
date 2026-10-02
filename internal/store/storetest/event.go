@@ -409,7 +409,7 @@ func commitSemanticEventWithInitialFacts(
 		t.Fatalf("project admitted event fixture: %v", err)
 	}
 
-	runner, ok := selectedStore.(runLifecycleOperationRunner)
+	runner, ok := selectedStore.(RunFixtureStore)
 	if !ok {
 		t.Fatalf("semantic event fixture store %T has no run lifecycle mutation owner", selectedStore)
 	}

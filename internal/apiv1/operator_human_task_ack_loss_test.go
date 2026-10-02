@@ -41,11 +41,7 @@ func TestHumanTaskDecisionAcknowledgmentLossReplaysWithoutDuplicateOnBothStores(
 			}
 			now := time.Date(2026, 7, 14, 14, 0, 0, 0, time.UTC)
 			runID := uuid.NewString()
-			if backend == "postgres" {
-				storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
-			} else {
-				storetest.RequireSQLiteRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
-			}
+			storetest.RequireRun(t, ctx, cardStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 			card, continuation := newAPIHumanTaskAckLossCard(t, runID, fact.BundleHash(), now)
 			if err := humanStore.CreateHumanTaskCard(ctx, card, continuation); err != nil {
 				t.Fatalf("create human-task card: %v", err)
@@ -123,7 +119,7 @@ func newHumanTaskAckLossOwners(
 	t *testing.T,
 	ctx context.Context,
 	backend string,
-) (decisioncard.Store, decisioncard.HumanTaskStore, APIIdempotencyStore, MailboxAPIStore, DecisionCardAuthority, *sql.DB) {
+) (humanTaskAckLossCardFixtureStore, decisioncard.HumanTaskStore, APIIdempotencyStore, MailboxAPIStore, DecisionCardAuthority, *sql.DB) {
 	t.Helper()
 	if backend == "postgres" {
 		_, db, cleanup := testutil.StartPostgres(t)
@@ -134,6 +130,11 @@ func newHumanTaskAckLossOwners(
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 	return sqliteStore, sqliteStore, sqliteStore, sqliteStore,
 		newHumanTaskAckLossDecisionAuthority(t, storetest.Database(sqliteStore), sqliteStore, runtimepipeline.NewWorkflowPersistence(sqliteStore), sqliteStore, sqliteStore), storetest.Database(sqliteStore)
+}
+
+type humanTaskAckLossCardFixtureStore interface {
+	decisioncard.Store
+	storetest.RunFixtureStore
 }
 
 type humanTaskAckLossPersistence interface {

@@ -2295,7 +2295,7 @@ func TestEventBusPostgresPublicationClaimsDoNotExhaustPersistencePool(t *testing
 			for i := 0; i < poolSize; i++ {
 				eventIDs[i] = uuid.NewString()
 				runIDs[i] = uuid.NewString()
-				storetest.RequirePostgresRun(t, context.Background(), db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runIDs[i]})
+				storetest.RequireRun(t, context.Background(), pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runIDs[i]})
 				eventID := eventIDs[i]
 				runID := runIDs[i]
 				go func() {

@@ -27,6 +27,7 @@ import (
 )
 
 type stageRecoverySelectedStore interface {
+	storetest.RunFixtureStore
 	budgetspend.Store
 	sourceArtifactReader
 	sourceartifactfixture.Writer
@@ -101,11 +102,7 @@ func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
 					t.Fatalf("load retained entity source %d: %v", i, err)
 				}
 				fixture := storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runs[i], Artifact: artifact, StartedAt: time.Now().UTC()}
-				if backend == "sqlite" {
-					storetest.RequireSQLiteRun(t, ctx, db, fixture)
-				} else {
-					storetest.RequirePostgresRun(t, ctx, db, fixture)
-				}
+				storetest.RequireRun(t, ctx, selected, fixture)
 				seedStageRecoveryFlowInstance(t, ctx, db, backend, runs[i])
 				initial := "ready"
 				entityID := sharedEntity

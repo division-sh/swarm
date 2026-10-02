@@ -16,9 +16,8 @@ import (
 )
 
 type stageCompletionReadStore interface {
+	storetest.RunFixtureStore
 	RunReadStore
-	runtimerunlifecycle.CandidateStore
-	RequestCompletionCandidate(context.Context, runtimerunlifecycle.CandidateRequest) (runtimerunlifecycle.CandidateRequestDisposition, error)
 }
 
 func TestExactStageCompletionPublicReadbackBothStores(t *testing.T) {
@@ -53,11 +52,7 @@ func TestExactStageCompletionPublicReadbackBothStores(t *testing.T) {
 				t.Run(tc.stage, func(t *testing.T) {
 					runID := uuid.NewString()
 					fixture := storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: artifact, StartedAt: time.Now().UTC()}
-					if backend == "sqlite" {
-						storetest.RequireSQLiteRun(t, ctx, db, fixture)
-					} else {
-						storetest.RequirePostgresRun(t, ctx, db, fixture)
-					}
+					storetest.RequireRun(t, ctx, selected, fixture)
 					query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state) VALUES (?, ?, '', 'stage-proof', ?)`
 					if backend == "postgres" {
 						query = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state) VALUES ($1::uuid, $2::uuid, '', 'stage-proof', $3)`

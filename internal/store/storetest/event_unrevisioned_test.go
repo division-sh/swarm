@@ -29,13 +29,13 @@ func TestUnrevisionedSemanticEventFixtureMatchesCanonicalMutationProjection(t *t
 	for _, backend := range []struct {
 		name    string
 		dialect authoractivityfixture.Dialect
-		open    func(*testing.T) (runLifecycleOperationRunner, *sql.DB)
+		open    func(*testing.T) (RunFixtureStore, *sql.DB)
 	}{
-		{"sqlite", authoractivityfixture.DialectSQLite, func(t *testing.T) (runLifecycleOperationRunner, *sql.DB) {
+		{"sqlite", authoractivityfixture.DialectSQLite, func(t *testing.T) (RunFixtureStore, *sql.DB) {
 			selected := StartSQLiteRuntimeStore(t)
 			return selected, DatabaseForTest(selected)
 		}},
-		{"postgres", authoractivityfixture.DialectPostgres, func(t *testing.T) (runLifecycleOperationRunner, *sql.DB) {
+		{"postgres", authoractivityfixture.DialectPostgres, func(t *testing.T) (RunFixtureStore, *sql.DB) {
 			_, db, _ := testutil.StartPostgres(t)
 			return AdmitPostgresRuntimeStore(t, db), db
 		}},
@@ -46,7 +46,7 @@ func TestUnrevisionedSemanticEventFixtureMatchesCanonicalMutationProjection(t *t
 			canonicalStore, canonicalDB := backend.open(t)
 			runID, eventID := uuid.NewString(), uuid.NewString()
 			at := time.Now().UTC().Truncate(time.Microsecond)
-			for _, selected := range []runLifecycleOperationRunner{rawStore, canonicalStore} {
+			for _, selected := range []RunFixtureStore{rawStore, canonicalStore} {
 				RequireRun(t, ctx, selected, RunFixture{RunID: runID, Origin: ScenarioSetupOrigin(), StartedAt: at.Add(-time.Minute)})
 			}
 			node, err := runtimeidentity.ParseExecutableNode("flow_a", "fixture-node")
@@ -133,7 +133,7 @@ func TestUnrevisionedSemanticEventFixtureMatchesCanonicalMutationProjection(t *t
 
 func TestUnrevisionedSemanticDeliveryFixtureImmediateTerminalization(t *testing.T) {
 	type terminalizingStore interface {
-		runLifecycleOperationRunner
+		RunFixtureStore
 		TerminalizeRun(context.Context, string, string) ([]runtimedelivery.Terminalization, error)
 		Snapshot(context.Context, string) (runtimedelivery.Snapshot, error)
 	}

@@ -27,7 +27,7 @@ func TestSelectedStoreRunReadHandlersExecuteAcrossBackends(t *testing.T) {
 			open: func(t *testing.T, ctx context.Context) (RunReadStore, string) {
 				selected := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 				runID := uuid.NewString()
-				storetest.RequireSQLiteRun(t, ctx, storetest.DatabaseForTest(selected), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC().Add(-time.Minute)})
+				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC().Add(-time.Minute)})
 				return selected, runID
 			},
 		},
@@ -38,7 +38,7 @@ func TestSelectedStoreRunReadHandlersExecuteAcrossBackends(t *testing.T) {
 				t.Cleanup(cleanup)
 				selected := storetest.AdmitPostgresRuntimeStore(t, db)
 				runID := uuid.NewString()
-				storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC().Add(-time.Minute)})
+				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC().Add(-time.Minute)})
 				return selected, runID
 			},
 		},
@@ -81,7 +81,7 @@ func TestPostgresAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 	if err != nil {
 		t.Fatalf("operator read identity fields: %v", err)
 	}
-	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: base.Add(-time.Hour)})
+	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: base.Add(-time.Hour)})
 	if err := storetest.UpsertStaticAgentFixture(t, ctx, selected, manager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			Identity: identity, ID: agentID, Role: "researcher", Type: "managed", Model: "cheap",

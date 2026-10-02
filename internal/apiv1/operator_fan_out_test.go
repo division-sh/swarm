@@ -365,13 +365,13 @@ func TestFanOutReadAPISelectedStores(t *testing.T) {
 			var runs RunReadStore
 			if backend == "sqlite" {
 				selected := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-				storetest.RequireSQLiteRun(t, ctx, storetest.DatabaseForTest(selected), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC()})
+				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC()})
 				runs = selected
 			} else {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				selected := storetest.AdmitPostgresRuntimeStore(t, db)
-				storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC()})
+				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC()})
 				runs = selected
 			}
 			handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: OperatorRunReadHandlers(RunReadHandlerOptions{Runs: runs})})

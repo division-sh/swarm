@@ -184,7 +184,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
 				ctx = runtimecorrelation.WithSourceArtifactFact(ctx, persistedSource)
 				ensureStartupRecoverySourceArtifact(t, ctx, selected, authorActivityTestSourceArtifact)
-				storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{
+				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 					Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID,
 					BundleHash: persistedBundleHash,
 				})
@@ -198,7 +198,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
 				ctx = runtimecorrelation.WithSourceArtifactFact(ctx, persistedSource)
 				ensureStartupRecoverySourceArtifact(t, ctx, selected, authorActivityTestSourceArtifact)
-				storetest.RequireSQLiteRun(t, ctx, storetest.Database(selected), storetest.RunFixture{
+				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 					Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID,
 					BundleHash: persistedBundleHash,
 				})
@@ -851,8 +851,9 @@ func TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSe
 			setup: func(t *testing.T) (context.Context, *sql.DB, nodeDeliveryRecoveryStore) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				ctx := seedRuntimeTestRun(t, db)
-				return ctx, db, storetest.AdmitPostgresRuntimeStore(t, db)
+				selected := storetest.AdmitPostgresRuntimeStore(t, db)
+				ctx := seedRuntimeTestRun(t, selected)
+				return ctx, db, selected
 			},
 		},
 		{
@@ -860,7 +861,7 @@ func TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSe
 			setup: func(t *testing.T) (context.Context, *sql.DB, nodeDeliveryRecoveryStore) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
-				storetest.RequireSQLiteRun(t, ctx, storetest.Database(selected), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID})
+				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID})
 				return ctx, storetest.Database(selected), selected
 			},
 		},
@@ -945,8 +946,9 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 			setup: func(t *testing.T) (context.Context, *sql.DB, nodeDeliveryRecoveryStore) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				ctx := seedRuntimeTestRun(t, db)
-				return ctx, db, storetest.AdmitPostgresRuntimeStore(t, db)
+				selected := storetest.AdmitPostgresRuntimeStore(t, db)
+				ctx := seedRuntimeTestRun(t, selected)
+				return ctx, db, selected
 			},
 		},
 		{
@@ -954,7 +956,7 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 			setup: func(t *testing.T) (context.Context, *sql.DB, nodeDeliveryRecoveryStore) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
-				storetest.RequireSQLiteRun(t, ctx, storetest.Database(selected), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID})
+				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID})
 				return ctx, storetest.Database(selected), selected
 			},
 		},
@@ -1089,8 +1091,9 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 			setup: func(t *testing.T) (context.Context, *sql.DB, nodeDeliveryRecoveryStore) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				ctx := seedRuntimeTestRun(t, db)
-				return ctx, db, storetest.AdmitPostgresRuntimeStore(t, db)
+				selected := storetest.AdmitPostgresRuntimeStore(t, db)
+				ctx := seedRuntimeTestRun(t, selected)
+				return ctx, db, selected
 			},
 		},
 		{
@@ -1098,7 +1101,7 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 			setup: func(t *testing.T) (context.Context, *sql.DB, nodeDeliveryRecoveryStore) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
-				storetest.RequireSQLiteRun(t, ctx, storetest.Database(selected), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID})
+				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID})
 				return ctx, storetest.Database(selected), selected
 			},
 		},

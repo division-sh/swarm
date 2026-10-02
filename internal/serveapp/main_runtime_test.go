@@ -4234,16 +4234,14 @@ func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, rt servedCont
 	if bundleHash == "" || bundleHash != rt.BundleHash {
 		t.Fatalf("%s served runtime source artifact = %q, want exact hash %q", backend, bundleHash, rt.BundleHash)
 	}
-	var selectedStore any
+	var selectedStore storetest.RunFixtureStore
 	switch backend {
 	case "postgres":
-		runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: bundleHash})
 		if rt.Postgres == nil {
 			t.Fatal("served postgres store owner is required for run-control seed")
 		}
 		selectedStore = rt.Postgres
 	case "sqlite":
-		storetest.RequireSQLiteRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: bundleHash})
 		if rt.SQLite == nil {
 			t.Fatal("served sqlite store owner is required for run-control seed")
 		}
@@ -4251,6 +4249,7 @@ func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, rt servedCont
 	default:
 		t.Fatalf("unknown proof backend %q", backend)
 	}
+	storetest.RequireRun(t, ctx, selectedStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: bundleHash})
 	event := eventtest.PersistedProjection(eventID, "control.stop.pending", "test", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
 	storetest.CommitSemanticEventWithInitialFacts(t, ctx, selectedStore, event,
 		[]events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient("agent-pending"), AgentIdentity: agentidentitytest.RootRuntimeForRun(t, runID, "agent-pending", "serveapp-test")}},
@@ -7548,7 +7547,8 @@ func TestServeListenerServersPartitionAPIAndMCPRoutes(t *testing.T) {
 func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db *sql.DB, runID, entityID, eventID, bundleHash, eventName, subscriberID, currentState, entityName, writerID string, at time.Time) {
 	t.Helper()
 	ctx := context.Background()
-	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{
+	selected := storetest.AdmitPostgresRuntimeStore(t, db)
+	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute),
 		BundleHash: bundleHash,
 	})
@@ -7556,7 +7556,7 @@ func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db *sql.DB, runID, en
 		eventID, runID, events.EventType(eventName), eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(fmt.Sprintf(`{"entity_id":%q}`, entityID)),
 		events.EventEnvelope{EntityID: entityID, FlowInstance: "flow-a/1", Scope: events.EventScopeEntity}, at)
-	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, storetest.NewPostgresStoreForTest(db), event,
+	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, selected, event,
 		[]events.DeliveryRoute{{
 			Recipient: events.MustNodeDeliveryRecipient(identitytest.RootNode(t, subscriberID)),
 			Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{

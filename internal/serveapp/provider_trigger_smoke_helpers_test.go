@@ -194,7 +194,7 @@ func seedProviderTriggerSmokeRuntime(
 ) {
 	t.Helper()
 	now := time.Now().UTC()
-	storetest.RequireSQLiteRun(t, ctx, storetest.DatabaseForTest(sqliteStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now})
+	storetest.RequireRun(t, ctx, sqliteStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now})
 	configBytes, err := json.Marshal(map[string]any{
 		"secrets": map[string]any{
 			"webhook_signing": map[string]string{

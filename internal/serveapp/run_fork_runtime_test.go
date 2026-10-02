@@ -32,12 +32,13 @@ import (
 
 func TestRunForkRuntimeOwnerHarness_DryRunUsesCanonicalPlannerJSON(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	setPostgresEnvFromDSN(t, dsn)
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000300, 0).UTC()
 	ctx := context.Background()
-	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute)})
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventID, runID, "fork.cli",
 		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
@@ -78,15 +79,16 @@ func TestRunForkRuntimeOwnerHarness_DryRunUsesCanonicalPlannerJSON(t *testing.T)
 
 func TestRunForkRuntimeOwnerHarness_DryRunJSONReportsDeliveryEventReplayReady(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	setPostgresEnvFromDSN(t, dsn)
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000305, 0).UTC()
 	ctx := context.Background()
-	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute)})
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventID, runID, "fork.cli.pending",
 		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
-	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, storetest.NewPostgresStoreForTest(db), event,
+	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, pg, event,
 		[]events.DeliveryRoute{{
 			Recipient:     events.MustAgentDeliveryRecipient("cli-agent"),
 			AgentIdentity: servedRuntimeRootIdentityForRun(t, runID, "cli-agent"),
@@ -119,15 +121,16 @@ func TestRunForkRuntimeOwnerHarness_DryRunJSONReportsDeliveryEventReplayReady(t 
 
 func TestRunForkRuntimeOwnerHarness_DryRunBundleAddsContractFrontierAdmissionJSON(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	setPostgresEnvFromDSN(t, dsn)
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000307, 0).UTC()
 	ctx := context.Background()
-	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute)})
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventID, runID, "flow-a/work.begin",
 		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
-	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, storetest.NewPostgresStoreForTest(db), event,
+	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, pg, event,
 		[]events.DeliveryRoute{{
 			Recipient: events.MustNodeDeliveryRecipient(identitytest.FlowNode(t, "flow-a", "source-node")),
 			Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "fixture", FlowInstance: "fixture/source-node"}),
@@ -513,6 +516,7 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteReportsSourceAdvance
 
 func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	setPostgresEnvFromDSN(t, dsn)
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -522,7 +526,7 @@ func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t
 	repo := repoRootForTest()
 	sourceRoot := filepath.Join(repo, "tests", "tier11-flow-composition", "test-sibling-both-instantiated-isolated")
 	bundleHash := registerRunForkCLIContractCatalog(t, ctx, db, sourceRoot)
-	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute),
 		BundleHash: bundleHash,
 	})

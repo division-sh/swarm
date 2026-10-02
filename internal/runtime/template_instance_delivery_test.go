@@ -54,8 +54,8 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 	source := semanticview.Wrap(bundle)
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	ctx := seedRuntimeTestRun(t, db)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	ctx := seedRuntimeTestRun(t, pg)
 	var pc *runtimepipeline.PipelineCoordinator
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle: source,
@@ -131,8 +131,8 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandle
 	source := semanticview.Wrap(bundle)
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	ctx := seedRuntimeTestRun(t, db)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	ctx := seedRuntimeTestRun(t, pg)
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -206,8 +206,8 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 	source := semanticview.Wrap(bundle)
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	ctx := seedRuntimeTestRun(t, db)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	ctx := seedRuntimeTestRun(t, pg)
 	var manager *runtimemanager.AgentManager
 	var activationCalls atomic.Int32
 	activationResults := make(chan error, 4)
@@ -328,8 +328,8 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 	source := semanticview.Wrap(bundle)
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	ctx := seedRuntimeTestRun(t, db)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	ctx := seedRuntimeTestRun(t, pg)
 	proofStore := routeMaterializationDBProofStore{pg: pg}
 	durable := externalRuntimeTestDurableDependencies(pg)
 	durable.FlowRoutes = proofStore
@@ -430,8 +430,8 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 	source := semanticview.Wrap(bundle)
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	ctx := seedRuntimeTestRun(t, db)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	ctx := seedRuntimeTestRun(t, pg)
 	testsql.InstallPostgresEventDeliveryFailureAfterFlowMaterialization(t, ctx, db, testsql.EventCorruptionClaim{
 		Invariant: "store.event_record.named_operation_atomicity",
 		Reason:    "prove late delivery failure rolls back the event and connect-created lifecycle facts",
@@ -517,8 +517,8 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 	source := semanticview.Wrap(bundle)
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	ctx := seedRuntimeTestRun(t, db)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	ctx := seedRuntimeTestRun(t, pg)
 	var pc *runtimepipeline.PipelineCoordinator
 	var manager *runtimemanager.AgentManager
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
@@ -648,8 +648,8 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 	source := semanticview.Wrap(bundle)
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	ctx := seedRuntimeTestRun(t, db)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	ctx := seedRuntimeTestRun(t, pg)
 	var pc *runtimepipeline.PipelineCoordinator
 	var manager *runtimemanager.AgentManager
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
@@ -912,11 +912,11 @@ func (s routeMaterializationDBProofStore) ListActiveFlowInstanceDescriptors(ctx 
 	return s.pg.ListActiveFlowInstanceDescriptors(ctx, runID)
 }
 
-func seedRuntimeTestRun(t *testing.T, db *sql.DB) context.Context {
+func seedRuntimeTestRun(t *testing.T, selected *store.PostgresStore) context.Context {
 	t.Helper()
 	ctx := runtimecorrelation.WithRuntimeInstanceID(testAuthorActivityContext(context.Background()), authorActivityTestRuntimeInstanceID)
 	ctx = runtimecorrelation.WithRunID(ctx, templateInstanceDeliveryRunID)
-	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID})
+	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID})
 	return ctx
 }
 

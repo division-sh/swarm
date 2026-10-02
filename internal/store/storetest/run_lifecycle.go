@@ -2,7 +2,6 @@ package storetest
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 	"testing"
@@ -20,7 +19,9 @@ import (
 const SemanticFixtureBundleHash = sourceartifactfixture.BundleHash
 const semanticFixtureRuntimeInstanceID = "00000000-0000-4000-8000-000000000001"
 
-type runLifecycleOperationRunner interface {
+// RunFixtureStore uses the selected lifecycle and completion owners without
+// constructing a store or recovering storage authority.
+type RunFixtureStore interface {
 	runtimerunlifecycle.OperationOwner
 	runtimerunlifecycle.CandidateStore
 }
@@ -52,7 +53,7 @@ func EventOrigin(t testing.TB, eventID, eventType string) runtimerunlifecycle.Ru
 func RequireRun(
 	t testing.TB,
 	ctx context.Context,
-	runner runLifecycleOperationRunner,
+	runner RunFixtureStore,
 	fixture RunFixture,
 ) {
 	t.Helper()
@@ -64,7 +65,7 @@ func RequireRun(
 func RequireRunningRun(
 	t testing.TB,
 	ctx context.Context,
-	runner runLifecycleOperationRunner,
+	runner RunFixtureStore,
 	runID string,
 	startedAt time.Time,
 ) {
@@ -80,7 +81,7 @@ func RequireRunningRun(
 func RequirePausedRun(
 	t testing.TB,
 	ctx context.Context,
-	runner runLifecycleOperationRunner,
+	runner RunFixtureStore,
 	runID string,
 	startedAt time.Time,
 ) {
@@ -93,51 +94,9 @@ func RequirePausedRun(
 	})
 }
 
-func RequirePostgresRun(
-	t testing.TB,
-	ctx context.Context,
-	db *sql.DB,
-	fixture RunFixture,
-) {
-	t.Helper()
-	RequireRun(t, ctx, AdmitPostgresRuntimeStore(t, db), fixture)
-}
-
-func RequireSQLiteRun(
-	t testing.TB,
-	ctx context.Context,
-	db *sql.DB,
-	fixture RunFixture,
-) {
-	t.Helper()
-	RequireRun(t, ctx, AdmitSQLiteRuntimeStore(t, db), fixture)
-}
-
-func RequireRunningPostgresRun(
-	t testing.TB,
-	ctx context.Context,
-	db *sql.DB,
-	runID string,
-	startedAt time.Time,
-) {
-	t.Helper()
-	RequireRunningRun(t, ctx, AdmitPostgresRuntimeStore(t, db), runID, startedAt)
-}
-
-func RequireRunningSQLiteRun(
-	t testing.TB,
-	ctx context.Context,
-	db *sql.DB,
-	runID string,
-	startedAt time.Time,
-) {
-	t.Helper()
-	RequireRunningRun(t, ctx, AdmitSQLiteRuntimeStore(t, db), runID, startedAt)
-}
-
 func MaterializeRun(
 	ctx context.Context,
-	runner runLifecycleOperationRunner,
+	runner RunFixtureStore,
 	fixture RunFixture,
 ) error {
 	if runner == nil {
@@ -230,7 +189,7 @@ type sourceArtifactFixtureOwner interface {
 	GetSourceArtifact(context.Context, string) (sourceartifact.Persisted, error)
 }
 
-func ensureSemanticFixtureSourceArtifact(ctx context.Context, runner runLifecycleOperationRunner, bundleHash string, artifact *sourceartifact.AdmittedSourceArtifact) error {
+func ensureSemanticFixtureSourceArtifact(ctx context.Context, runner RunFixtureStore, bundleHash string, artifact *sourceartifact.AdmittedSourceArtifact) error {
 	owner, ok := runner.(sourceArtifactFixtureOwner)
 	if !ok {
 		return fmt.Errorf("semantic fixture source artifact owner is required; got %T", runner)
@@ -256,7 +215,7 @@ func ensureSemanticFixtureSourceArtifact(ctx context.Context, runner runLifecycl
 
 func EnsureEphemeralRun(
 	ctx context.Context,
-	runner runLifecycleOperationRunner,
+	runner RunFixtureStore,
 	runID string,
 	startedAt time.Time,
 ) error {
@@ -285,7 +244,7 @@ func EnsureEphemeralRun(
 
 func EnsureRunForAdmittedEvent(
 	ctx context.Context,
-	runner runLifecycleOperationRunner,
+	runner RunFixtureStore,
 	admitted events.AdmittedEvent,
 	startedAt time.Time,
 ) error {
@@ -380,7 +339,7 @@ func semanticFixtureContext(
 
 func TerminalizeRun(
 	ctx context.Context,
-	runner runLifecycleOperationRunner,
+	runner RunFixtureStore,
 	request runtimerunlifecycle.TerminalRequest,
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 	if runner == nil {
@@ -391,7 +350,7 @@ func TerminalizeRun(
 
 func TransitionRun(
 	ctx context.Context,
-	runner runLifecycleOperationRunner,
+	runner RunFixtureStore,
 	request runtimerunlifecycle.ActiveTransitionRequest,
 ) (runtimerunlifecycle.MutationDisposition, error) {
 	if runner == nil {
@@ -402,7 +361,7 @@ func TransitionRun(
 
 func ForkRun(
 	ctx context.Context,
-	runner runLifecycleOperationRunner,
+	runner RunFixtureStore,
 	request runtimerunlifecycle.ForkSourceRequest,
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 	if runner == nil {
@@ -413,7 +372,7 @@ func ForkRun(
 
 func ReviseRunSource(
 	ctx context.Context,
-	runner runLifecycleOperationRunner,
+	runner RunFixtureStore,
 	request runtimerunlifecycle.SourceRevisionRequest,
 ) (runtimerunlifecycle.MutationDisposition, error) {
 	if runner == nil {
@@ -424,7 +383,7 @@ func ReviseRunSource(
 
 func SyncRunCounters(
 	ctx context.Context,
-	runner runLifecycleOperationRunner,
+	runner RunFixtureStore,
 	runID string,
 ) error {
 	if runner == nil {
