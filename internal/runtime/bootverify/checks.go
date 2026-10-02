@@ -439,10 +439,11 @@ func (c *checkerContext) permissionWarnings() []Finding {
 	c.permissionWarningLoaded = true
 	for _, item := range mergedAgentPermissionWarnings(c.source) {
 		c.permissionWarningFindings = append(c.permissionWarningFindings, Finding{
-			CheckID:  "agent_permission_validation",
-			Severity: "warning",
-			Message:  strings.TrimSpace(item.Message),
-			Location: locationFromMessage(item.Message),
+			CheckID:     "agent_permission_validation",
+			Severity:    "warning",
+			Message:     strings.TrimSpace(item.Message),
+			Location:    locationFromMessage(item.Message),
+			Remediation: stableHardInvalidityRemediation["agent_permission_validation"],
 		})
 	}
 	return c.permissionWarningFindings
