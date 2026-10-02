@@ -143,6 +143,17 @@ func TestDevelopmentOverrideEntriesRetainTheirConfiguredDirectories(t *testing.T
 		if got, want := entry.Directory(), wantByID[entry.ID()]; got != want {
 			t.Errorf("pack %q directory = %q, want configured directory %q", entry.ID(), got, want)
 		}
+		loaded, err := entry.Loaded(testPlatformVersion)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := filepath.Join(wantByID[entry.ID()], EnvelopeFileName)
+		for _, source := range []Envelope{entry.Envelope(), loaded.Envelope} {
+			location := source.SourceValue().Location()
+			if location.File != want || location.Line == 0 || location.Column == 0 {
+				t.Errorf("pack %q admitted source = %#v, want original %s", entry.ID(), location, want)
+			}
+		}
 	}
 }
 

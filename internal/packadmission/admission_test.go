@@ -13,6 +13,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/manifesthash"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"gopkg.in/yaml.v3"
 )
 
@@ -144,6 +145,35 @@ func TestPackPlatformAdmissionDiskLogicalRetainedParity(t *testing.T) {
 	delete(views, "provider.telegram.connector.connector")
 	if _, ok := diskProjection.PackSourceValues()["provider.telegram.connector.connector"]; !ok {
 		t.Fatal("returned view map mutated canonical owner")
+	}
+}
+
+func TestDevelopmentPackAdmissionPreservesOriginalSourceProvenance(t *testing.T) {
+	repo := repoRoot(t)
+	base, _ := packfixture.DevelopmentBase(t, nil)
+	options := runtimecontracts.WorkflowContractLoadOptions{PlatformPackBase: base, AdmitPackInventory: AdmitInventory}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(repo, filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple"), runtimecontracts.DefaultPlatformSpecFile(repo), options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledger := bundle.EffectiveProvenance()
+	membership, ok := ledger.Lookup("packs.platform_membership")
+	if !ok || membership.Origin != runtimecontracts.EffectiveValueOriginBoundarySnapshot || membership.RuleID != "pack.complete_development_inventory" || membership.SourceFile != "" || membership.SourceLine != 0 {
+		t.Fatalf("synthetic membership was presented as authored source: %#v", membership)
+	}
+	for _, entry := range base.Entries() {
+		proof, ok := ledger.Lookup("packs[\"" + entry.ID() + "\"].envelope.id")
+		want := filepath.Join(entry.Directory(), packartifact.EnvelopeFileName)
+		if !ok || proof.SourceFile != want || proof.SourceLine == 0 || proof.PackIdentity != entry.ID() {
+			t.Fatalf("pack %s original envelope source missing: %#v, want %s", entry.ID(), proof, want)
+		}
+	}
+	for _, id := range []string{"provider.telegram.connector", "provider.telegram.hitl_channel", "provider.github.connector"} {
+		entry, _ := base.Lookup(id)
+		proof, ok := ledger.Lookup("pack_sources[\"" + id + "." + entry.Type() + "\"]")
+		if !ok || proof.SourceFile != filepath.Join(entry.Directory(), packartifact.ManifestFileNameForType(entry.Type())) || proof.SourceLine == 0 {
+			t.Fatalf("original body source missing for %s: %#v", id, proof)
+		}
 	}
 }
 

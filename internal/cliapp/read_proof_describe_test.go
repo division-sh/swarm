@@ -53,7 +53,8 @@ func TestReadProofFactoringCompiledDescribe(t *testing.T) {
 			t.Parallel()
 			processes <- struct{}{}
 			defer func() { <-processes }()
-			env := readProofCompiledScopeEnv(t.TempDir())
+			scope := t.TempDir()
+			env := readProofCompiledScopeEnv(scope)
 			args, ok := surfaces[row.Surface]
 			if !ok {
 				t.Fatal(row.Surface)
@@ -70,7 +71,8 @@ func TestReadProofFactoringCompiledDescribe(t *testing.T) {
 					t.Fatalf("compiled %v: err=%v stdout=%s stderr=%s", args, err, &stdout, &stderr)
 				}
 				out := stdout.String()
-				got := fmt.Sprintf("%x", sha256.Sum256([]byte(strings.ReplaceAll(out, repo, "<repo>"))))
+				normalized := strings.ReplaceAll(strings.ReplaceAll(out, repo, "<repo>"), scope, "<scope>")
+				got := fmt.Sprintf("%x", sha256.Sum256([]byte(normalized)))
 				if got != row.StdoutSHA256 {
 					t.Fatalf("%s characterized %s output changed: sha=%s want=%s\n%s", baseline.Baseline, row.Surface, got, row.StdoutSHA256, out)
 				}

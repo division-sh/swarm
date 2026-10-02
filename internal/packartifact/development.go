@@ -66,7 +66,7 @@ func LoadDevelopmentPlatformPackInventory(runningPlatformVersion string, dirs []
 			return nil, fmt.Errorf("inspect development platform pack %q: %w", dir, err)
 		}
 		envelopeBody := artifactBodies[EnvelopeFileName]
-		envelope, err := basepacks.ParseEnvelope(envelopeBody)
+		envelope, err := basepacks.ParseEnvelopeAt(envelopeBody, filepath.Join(dir, EnvelopeFileName))
 		if err != nil {
 			_ = root.close()
 			return nil, fmt.Errorf("parse development platform pack envelope %q: %w", dir, err)
@@ -119,6 +119,7 @@ func LoadDevelopmentPlatformPackInventory(runningPlatformVersion string, dirs []
 	for _, candidate := range candidates {
 		entry := inventory.entries[candidate.envelope.ID]
 		entry.directory = candidate.directory
+		entry.envelope = cloneEnvelope(candidate.envelope)
 		inventory.entries[candidate.envelope.ID] = entry
 	}
 	if err := requireCompleteReplacement(embedded, inventory); err != nil {
