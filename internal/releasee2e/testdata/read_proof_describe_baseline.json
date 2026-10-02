@@ -1,7 +1,7 @@
 {
   "baseline": "eff1fc8f459524069e6a82231b3753a4e243a601",
   "previous_baseline": "1c4cce2094bdaf48dd4d5faf6dbfe33da662bc0f",
-  "contract_change": "A2 retires pin fan-in fields from semantic digests and migrates barrier/golden joins to lifecycle-owned membership and deadlines; 24 unaffected surface hashes remain unchanged.",
+  "contract_change": "A2 retires pin fan-in fields from semantic digests and migrates barrier/golden joins to lifecycle-owned membership and deadlines; 24 unaffected surface hashes remain unchanged. Telegram JSON pin/schema digests include the reviewed reply-reference and command-invocation fields.",
   "normalization": "repository absolute path only",
   "results": [
     {
@@ -102,7 +102,7 @@
     {
       "fixture": "examples/integrations/telegram-agent",
       "surface": "describe-json",
-      "stdout_sha256": "1f0d538c74d6a7499b0449d5839e7cb027b17b024226774a86c822db9e401969"
+      "stdout_sha256": "72fe647566f8ca73dc4f2a3db95ba35f367713407591ea38c9fdc02c549fd3ea"
     },
     {
       "fixture": "examples/integrations/telegram-agent",
@@ -117,7 +117,7 @@
     {
       "fixture": "examples/integrations/telegram-agent",
       "surface": "describe-graph-json",
-      "stdout_sha256": "563f7da6f810899295a79ce3a9e09dfac994dfbce8a2d771c59e5c65dbb20454"
+      "stdout_sha256": "ed186e32efe3bdbc82c27516be602931ce012c28693e7b6d70b34ceea0c0d288"
     },
     {
       "fixture": "examples/integrations/telegram-agent",
