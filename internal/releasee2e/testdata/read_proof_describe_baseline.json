@@ -12,7 +12,7 @@
     {
       "fixture": "examples/routing/template-select-or-create",
       "surface": "describe-json",
-      "stdout_sha256": "7030bb12e1469adf89dd5f986c316d4484934c6c8bacd87d4f64f5adc8dd6981"
+      "stdout_sha256": "38e73bc39b758d5462d5cc3b58e5e4ca5a11f50ce7a640b3bae32bf31f005857"
     },
     {
       "fixture": "examples/routing/template-select-or-create",
@@ -27,7 +27,7 @@
     {
       "fixture": "examples/routing/template-select-or-create",
       "surface": "describe-graph-json",
-      "stdout_sha256": "7030bb12e1469adf89dd5f986c316d4484934c6c8bacd87d4f64f5adc8dd6981"
+      "stdout_sha256": "38e73bc39b758d5462d5cc3b58e5e4ca5a11f50ce7a640b3bae32bf31f005857"
     },
     {
       "fixture": "examples/routing/template-select-or-create",
@@ -57,7 +57,7 @@
     {
       "fixture": "examples/routing/template-create-minted-key",
       "surface": "describe-json",
-      "stdout_sha256": "37ed9bbe058b2532e00d3842e07342b3da1db73785ef23ac211fdf18dbdadb71"
+      "stdout_sha256": "02ab6d202d7cd2a8e9d5492a2973b9d7faa8cc53d155dd522372b289b8f9139a"
     },
     {
       "fixture": "examples/routing/template-create-minted-key",
@@ -72,7 +72,7 @@
     {
       "fixture": "examples/routing/template-create-minted-key",
       "surface": "describe-graph-json",
-      "stdout_sha256": "37ed9bbe058b2532e00d3842e07342b3da1db73785ef23ac211fdf18dbdadb71"
+      "stdout_sha256": "02ab6d202d7cd2a8e9d5492a2973b9d7faa8cc53d155dd522372b289b8f9139a"
     },
     {
       "fixture": "examples/routing/template-create-minted-key",
@@ -102,7 +102,7 @@
     {
       "fixture": "examples/integrations/telegram-agent",
       "surface": "describe-json",
-      "stdout_sha256": "3f1af8f4197c3a427bff1bbe7ee0686bd09cd8550205a8456bb66cb5fe587400"
+      "stdout_sha256": "f672321126654f795367c6dce60c67565e11fbaf54ef08b90d8bd8ac754de516"
     },
     {
       "fixture": "examples/integrations/telegram-agent",
@@ -117,7 +117,7 @@
     {
       "fixture": "examples/integrations/telegram-agent",
       "surface": "describe-graph-json",
-      "stdout_sha256": "9bb579277fa1ad47c297acb5dc47597cfec2bd4ea05dcc291ae741f3185e5b8b"
+      "stdout_sha256": "d6ca1171966dbb7f7a86d27c6691202442a91a6b94281d3df1764686df20ea35"
     },
     {
       "fixture": "examples/integrations/telegram-agent",
@@ -147,7 +147,7 @@
     {
       "fixture": "examples/routing/fan-in/barrier",
       "surface": "describe-json",
-      "stdout_sha256": "b2ad9e54eb43694297ed441eb11de99d2ba48e5bb7fc1fc4f4a362f4b6f613c4"
+      "stdout_sha256": "7d083a999c3ca3a8869afa696561fbd08090b153ac473ea051f626a235728b05"
     },
     {
       "fixture": "examples/routing/fan-in/barrier",
@@ -162,7 +162,7 @@
     {
       "fixture": "examples/routing/fan-in/barrier",
       "surface": "describe-graph-json",
-      "stdout_sha256": "5172c125d55b69aa6a25abac77fd2ce7a81d41b84155638c89657d9588212d3a"
+      "stdout_sha256": "0a5f8bb4b2ff311c3dae3e80b39982f1e95541e027f9ce9ef4d3f474fe3d7fcc"
     },
     {
       "fixture": "examples/routing/fan-in/barrier",
@@ -192,7 +192,7 @@
     {
       "fixture": "internal/releasee2e/testdata/golden_agent_workload",
       "surface": "describe-json",
-      "stdout_sha256": "9e5d58054d8a5c564d5166f886a9b6d06b69c0eb2873d8da20d79f6120ff6fd0"
+      "stdout_sha256": "041ef3dcab1df990da9df7096817cc9db0443ed215d8f489a6b2e3f44ad0a9db"
     },
     {
       "fixture": "internal/releasee2e/testdata/golden_agent_workload",
@@ -207,7 +207,7 @@
     {
       "fixture": "internal/releasee2e/testdata/golden_agent_workload",
       "surface": "describe-graph-json",
-      "stdout_sha256": "a7231566a572dff41121bcce3e4e58de7b75b2d0ad1703c536dc694337b29c12"
+      "stdout_sha256": "1fdc75a58953a46c4e4a3889ff09ee4e0a943c5978f9eb8ddcec71c02a743e36"
     },
     {
       "fixture": "internal/releasee2e/testdata/golden_agent_workload",
