@@ -147,8 +147,17 @@ func VerifyWorkflowTimerCauseReplayEngineConsumersOnBothStoresForTest(t *testing
 								t.Fatalf("ordinary later-cause publication: %v", err)
 							}
 							rows := listTimerCauseReplayActivationsForTest(t, f.Coordinator.workflowStore.timerActivations, ctx, entityID)
-							if len(rows) != 2 {
-								t.Fatalf("later cause produced %d activations, want exactly two", len(rows))
+							want := storage
+							want.Events++
+							wantRows := 1
+							if state != "active" && state != "advanced" {
+								wantRows++
+								want.Timers++
+								want.ActiveTimers++
+								want.TimerRevisionFacts++
+							}
+							if len(rows) != wantRows {
+								t.Fatalf("later cause produced %d activations, want %d", len(rows), wantRows)
 							}
 							var old, successor WorkflowTimerActivation
 							for _, row := range rows {
@@ -158,17 +167,22 @@ func VerifyWorkflowTimerCauseReplayEngineConsumersOnBothStoresForTest(t *testing
 									successor = row
 								}
 							}
-							if !reflect.DeepEqual(old, before) || successor.Ref.ActivationID == initial.Ref.ActivationID ||
-								successor.Ref.Cause != timeridentity.WorkflowTimerActivationCauseEvent || successor.Status != workflowTimerStatusActive {
-								t.Fatalf("later cause changed old authority or failed to create one active successor: old=%+v successor=%+v", old, successor)
+							if !reflect.DeepEqual(old, before) {
+								t.Fatalf("later cause changed old activation authority: %+v", old)
 							}
-							want := storage
-							want.Timers++
-							want.ActiveTimers++
-							want.TimerRevisionFacts++
-							want.Events++
+							if wantRows == 2 && (successor.Ref.ActivationID == initial.Ref.ActivationID ||
+								successor.Ref.DeclarationKey != initial.Ref.DeclarationKey || successor.Ref.DeclarationRevision != initial.Ref.DeclarationRevision ||
+								successor.Ref.Cause != timeridentity.WorkflowTimerActivationCauseEvent || successor.Status != workflowTimerStatusActive) {
+								t.Fatalf("later cause failed to create one active successor of the same declaration: %+v", successor)
+							}
 							if got := f.Observe(); got != want {
 								t.Fatalf("later cause effects: got=%+v want=%+v", got, want)
+							}
+							if err := f.Publish(runtimecorrelation.WithInboundEvent(f.Context, later), later); err != nil {
+								t.Fatalf("ordinary later-cause replay: %v", err)
+							}
+							if got := listTimerCauseReplayActivationsForTest(t, f.Coordinator.workflowStore.timerActivations, ctx, entityID); !reflect.DeepEqual(got, rows) || f.Observe() != want {
+								t.Fatalf("later-cause replay changed exact activations/effects: %+v", got)
 							}
 						})
 					}
