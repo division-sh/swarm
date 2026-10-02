@@ -67,7 +67,9 @@ func StartCapacityProbe(t *testing.T, capacity int) *CapacityProbe {
 			t.Errorf("remove private PostgreSQL cluster: %v", err)
 		}
 	})
-	p.run(t, "initdb", "-D", p.data, "-U", "swarm_capacity_probe", "--auth-local=trust", "--auth-host=reject", "--no-locale", "--encoding=UTF8")
+	// This disposable admission fixture does not test bootstrap crash durability.
+	// Keep server durability defaults; avoid syncing the entire initial cluster.
+	p.run(t, "initdb", "-D", p.data, "-U", "swarm_capacity_probe", "--auth-local=trust", "--auth-host=reject", "--no-locale", "--encoding=UTF8", "--no-sync")
 	p.start(t, capacity)
 	return p
 }
