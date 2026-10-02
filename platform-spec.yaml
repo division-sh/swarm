@@ -8485,6 +8485,7 @@ engine:
           - A wake directly creates its instance_publication business event. Event acceptance and recurrence advancement commit atomically through CommitGenericScheduleOccurrence. No intermediate platform event, second dispatcher, process-local recurrence or acknowledgment-loss resend.
           - Retention derives from an enabled binding or an actually active durable schedule in the current generation, never from declaration presence. Stop, removal, suspension, restart and reset consume the existing desired-state and exact cancellation owners.
           - Offline publication eligibility and describe share one transient compiled projection. Live inspection supplements it with exact durable binding, activation, due and retention evidence; no persisted publication artifact or independent next-fire interpreter.
+          - run.get and run.diagnose include clock_schedules in the detailed run header; swarm run status renders those same records. Each record carries the admitted activation ID, schedule name, run and instance coordinates, cadence, lifecycle status and exact persisted initial due. Only active records expose next_due_at; retains_run also requires an active run. Cancellation and failure remain visible without a next occurrence. Listing run headers remains a summary, not a clock inventory. Reading clocks never arms, advances or repairs them; malformed immutable evidence fails closed.
     declaration:
       description: >
         Public staged lifecycle timers are declared as stage-resident rows in schema.yaml. Legacy/kernel timers are
@@ -30599,6 +30600,56 @@ api_specification:
           control_reason:
             type: string
             description: Separate lifecycle-control reason from run_control_state; for cancelled runs this is the terminal reason and never a failure class.
+          clock_schedules:
+            type: array
+            description: Detailed run reads include durable instance-owned clock activations, including cancelled and failed records. Run listings omit this detail.
+            items:
+              $ref: '#/components/schemas/ClockScheduleReadback'
+      ClockScheduleReadback:
+        type: object
+        additionalProperties: false
+        required: [activation_id, name, run_id, flow_id, flow_instance, emit, status, initial_due_at, retains_run]
+        properties:
+          activation_id:
+            $ref: '#/components/schemas/OpaqueId'
+          name:
+            type: string
+          run_id:
+            $ref: '#/components/schemas/OpaqueId'
+          flow_id:
+            type: string
+          flow_instance:
+            type: string
+          emit:
+            type: string
+          cron:
+            type: string
+          every:
+            type: string
+          status:
+            type: string
+            enum: [active, cancelled, failed]
+          initial_due_at:
+            $ref: '#/components/schemas/Timestamp'
+          next_due_at:
+            $ref: '#/components/schemas/Timestamp'
+            description: Exact persisted current due coordinate; present only while active, not recomputed on read.
+          retains_run:
+            type: boolean
+            description: True only for an active durable clock in an active run.
+          cancel_cause:
+            type: string
+          cancelled_at:
+            $ref: '#/components/schemas/Timestamp'
+          failure:
+            type: object
+            additionalProperties: false
+            required: [code, message]
+            properties:
+              code:
+                type: string
+              message:
+                type: string
       OperationalState:
         type: string
         description: 'Operational state of a run. Source of truth:

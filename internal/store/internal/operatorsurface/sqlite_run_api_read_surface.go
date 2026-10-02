@@ -41,7 +41,7 @@ WHERE r.run_id = ?
 	if err != nil {
 		return operatorread.RunHeader{}, err
 	}
-	return header, nil
+	return s.withClockReadback(ctx, header)
 }
 
 func (s *RunSQLite) LoadRunOrigin(ctx context.Context, runID string) (runtimerunlifecycle.RunOrigin, error) {
