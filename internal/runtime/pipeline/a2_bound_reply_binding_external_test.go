@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -275,13 +274,23 @@ func testA2BoundReplyJourney(t *testing.T, corruptEntryField, siblingFlow string
 			}
 			if corruptEntryField != "" {
 				corrupted := a2CorruptBoundReplyEntry(t, ctx, selected, record, corruptEntryField)
+				entry := record.ReturnJoins[0].Ref.StageEntry()
+				if err := entry.RequireOwner(entry.RunID, entry.FlowScope, entry.InstanceID, entry.InstancePath, entry.EntityID, entry.Stage); err != nil {
+					t.Fatalf("uncorrupted return entry is not owner-admitted: %v", err)
+				}
+				ownerErr := corrupted.ReturnJoins[0].Ref.StageEntry().RequireOwner(entry.RunID, entry.FlowScope, entry.InstanceID, entry.InstancePath, entry.EntityID, entry.Stage)
+				if ownerErr == nil || ownerErr.Error() != "stage entry disagrees with its lifecycle owner" {
+					t.Fatalf("corruption did not reach the canonical owner refusal: %v", ownerErr)
+				}
 				providerTarget := request.DeliveryRoutes[0].Target.Route()
 				providerBefore := a2BoundReplySourceSnapshot(t, ctx, selected, runID, providerTarget.FlowInstance)
 				beforeCommits := commits.witnesses()
 				probe.resume()
 				a2KnownTargetWaitForSettlement(t, ctx, bus, probe.Probe, request.Event.Event(), provider.Key(), "failed", "dead_letter", logger)
-				if !strings.Contains(logger.String(), "stage entry disagrees with its lifecycle owner") {
-					t.Fatalf("real reply publication failed outside the canonical owner gate: logs=%s", logger.String())
+				wantFailure := failures.FromError(ownerErr, "workflow", "execute_handler").Failure
+				failureLogs := logger.failuresFor("handler_error", requestID)
+				if len(failureLogs) != 1 || !reflect.DeepEqual(failureLogs[0], wantFailure) {
+					t.Fatalf("handler diagnostic discarded or changed canonical refusal: got=%+v want=%+v", failureLogs, wantFailure)
 				}
 				var replies int
 				if err := selected.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM events WHERE source_event_id=$1 AND event_name=$2", requestID, source.ResolveFlowEventReference("provider", "provider.replied")).Scan(&replies); err != nil || replies != 0 {
