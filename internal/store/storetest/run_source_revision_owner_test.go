@@ -92,7 +92,7 @@ func TestSourceRevisionFixtureUsesExactSelectedOwner(t *testing.T) {
 				ctx     context.Context
 				request runtimerunlifecycle.SourceRevisionRequest
 			}{
-				{"missing_artifact", ctx, runtimerunlifecycle.SourceRevisionRequest{RunID: runID, Source: sourceartifactfixture.FactFor(sourceartifactfixture.New("missing.yaml", []byte("absent")))}},
+				{"missing_artifact", ctx, runtimerunlifecycle.SourceRevisionRequest{RunID: runID, Source: sourceartifactfixture.FactFor(sourceartifactfixture.New("agents.yaml", []byte("agents: {absent: {}}\n")))}},
 				{"missing_run", ctx, runtimerunlifecycle.SourceRevisionRequest{RunID: uuid.NewString(), Source: changed}},
 				{"invalid_source", ctx, runtimerunlifecycle.SourceRevisionRequest{RunID: runID}},
 			} {
