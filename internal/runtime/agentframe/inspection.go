@@ -60,11 +60,12 @@ type InspectionTurn struct {
 }
 
 type Inspection struct {
-	Version  string             `json:"version"`
-	Scope    InspectionScope    `json:"scope"`
-	Selector InspectionSelector `json:"selector"`
-	Session  InspectionSession  `json:"session_contract"`
-	Turn     InspectionTurn     `json:"turn_context"`
+	SourceLabel string             `json:"source_label"`
+	Version     string             `json:"version"`
+	Scope       InspectionScope    `json:"scope"`
+	Selector    InspectionSelector `json:"selector"`
+	Session     InspectionSession  `json:"session_contract"`
+	Turn        InspectionTurn     `json:"turn_context"`
 }
 
 type PreviewSeed struct {

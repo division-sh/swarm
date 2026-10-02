@@ -375,10 +375,17 @@ func TestFilesystemSourceAuthorityPublishesOnlyAdmittedArtifactRuntimeMethods(t 
 	assertScalarValue(t, mustMappingValue(t, multi, "status"), "source_artifact_authority")
 	assertScalarValue(t, mustMappingValue(t, multi, "canonical_owner"), "platform-spec.yaml#filesystem_source_model")
 	assertScalarValue(t, mustYAMLPath(t, multi, "generated_artifact_policy", "current_openrpc_status"), "run_fork_only")
-	publicationProof := mustYAMLPath(t, multi, "explicit_splits", "publication", "fork_journey_proof")
-	assertScalarContains(t, publicationProof, "never public publication")
-	assertScalarContains(t, publicationProof, "journey remains pending this publication work")
-	assertScalarContains(t, publicationProof, "no retired register command is restored")
+	publication := mustYAMLPath(t, multi, "historical_publication_disposition", "retired")
+	assertScalarContains(t, mustMappingValue(t, publication, "rule"), "USTAR transport, registry coordinates, publication receipts and catalog promises are withdrawn")
+	assertScalarContains(t, mustMappingValue(t, publication, "rule"), "artifact exists only in the selected store")
+	publicationProof := mustMappingValue(t, publication, "fork_journey_proof")
+	assertScalarContains(t, publicationProof, "already canonically admitted exact source")
+	assertScalarContains(t, publicationProof, "run fork --source")
+	assertScalarContains(t, publicationProof, "missing target refuses before freeze or mutation")
+	assertScalarContains(t, publicationProof, "no upload, implicit serve, registration, migration or compatibility path")
+	if hasMappingKey(multi, "explicit_splits") {
+		t.Fatal("retired publication promises must not survive as pending split obligations")
+	}
 
 	methods := mustYAMLPath(t, root, "api_specification", "method_catalog")
 	for _, retired := range []string{"bundle.register", "bundle.delete", "bundle.list", "bundle.get", "bundle.agents"} {

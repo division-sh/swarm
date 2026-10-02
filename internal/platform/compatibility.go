@@ -63,15 +63,32 @@ func ValidateProductPlatformVersion(declaredRange, platformVersion string) error
 	if err != nil {
 		return &CompatibilityError{Kind: CompatibilityErrorInvalidPlatform, PlatformVersion: platformVersion, Err: err}
 	}
-	if declaredRange == "" {
-		return &CompatibilityError{Kind: CompatibilityErrorMissingRange, PlatformVersion: platformVersion}
-	}
-	constraint, err := semver.NewConstraint(declaredRange)
-	if err != nil {
-		return &CompatibilityError{Kind: CompatibilityErrorInvalidRange, DeclaredRange: declaredRange, PlatformVersion: platformVersion, Err: err}
+	constraint, compatibilityErr := productPlatformConstraint(declaredRange)
+	if compatibilityErr != nil {
+		compatibilityErr.PlatformVersion = platformVersion
+		return compatibilityErr
 	}
 	if !constraint.Check(version) {
 		return &CompatibilityError{Kind: CompatibilityErrorOutOfRange, DeclaredRange: declaredRange, PlatformVersion: platformVersion}
 	}
 	return nil
+}
+
+func ValidateProductPlatformRange(declaredRange string) error {
+	_, err := productPlatformConstraint(strings.TrimSpace(declaredRange))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func productPlatformConstraint(declaredRange string) (*semver.Constraints, *CompatibilityError) {
+	if declaredRange == "" {
+		return nil, &CompatibilityError{Kind: CompatibilityErrorMissingRange}
+	}
+	constraint, err := semver.NewConstraint(declaredRange)
+	if err != nil {
+		return nil, &CompatibilityError{Kind: CompatibilityErrorInvalidRange, DeclaredRange: declaredRange, Err: err}
+	}
+	return constraint, nil
 }

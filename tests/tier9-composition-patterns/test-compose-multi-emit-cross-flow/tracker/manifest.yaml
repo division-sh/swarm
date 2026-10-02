@@ -1,4 +1,3 @@
 name: tracker
 version: 1.0.0
-description: Tracking child flow
 platform_version: ">=0.7.0 <0.8.0"

@@ -139,10 +139,16 @@ var canonicalDecodeBypassFamilies = map[string]struct{}{
 var unquotedConnectYAMLKey = regexp.MustCompile(`(?m)^[\t ]*(?:-[\t ]+)?connect[\t ]*:`)
 
 type canonicalFormsRegistry struct {
-	Kind              string                         `yaml:"kind"`
-	RegistryVersion   int                            `yaml:"registry_version"`
-	Inventory         canonicalFormsInventory        `yaml:"inventory"`
-	Rows              []canonicalFormsRow            `yaml:"rows"`
+	Kind             string                  `yaml:"kind"`
+	RegistryVersion  int                     `yaml:"registry_version"`
+	Inventory        canonicalFormsInventory `yaml:"inventory"`
+	Rows             []canonicalFormsRow     `yaml:"rows"`
+	AdditiveFamilies []struct {
+		ID             string   `yaml:"id"`
+		Owner          string   `yaml:"owner"`
+		Substrate      string   `yaml:"substrate"`
+		RetiredReaders []string `yaml:"retired_public_readers"`
+	} `yaml:"additive_document_families"`
 	DecoderCoverage   map[string]map[string][]string `yaml:"decoder_coverage"`
 	DecoderRetired    map[string]map[string][]string `yaml:"decoder_retired"`
 	DecoderDeleted    map[string]map[string][]string `yaml:"decoder_deleted"`
@@ -151,6 +157,17 @@ type canonicalFormsRegistry struct {
 	Wave1             canonicalFormsWave1            `yaml:"wave_1"`
 	Wave2             canonicalFormsWave2            `yaml:"wave_2"`
 	Wave3             canonicalFormsWave3            `yaml:"wave_3"`
+}
+
+func Test2376ManifestReaderLedgerIsAdditive(t *testing.T) {
+	record := loadCanonicalFormsRegistry(t, conformanceRepoRoot(t))
+	if len(record.Rows) != 45 || len(record.AdditiveFamilies) != 1 {
+		t.Fatal("historical census was replaced rather than supplemented")
+	}
+	family := record.AdditiveFamilies[0]
+	if family.ID != "source.flow_manifest" || family.Owner != "internal/sourceartifact.projectManifest" || family.Substrate != "admitted yamlsource.Value" || len(family.RetiredReaders) != 12 {
+		t.Fatalf("manifest ownership/retirement accounting incomplete: %+v", family)
+	}
 }
 
 type canonicalFormsInventory struct {

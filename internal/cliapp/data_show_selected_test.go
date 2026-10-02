@@ -12,6 +12,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/durabledata"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -20,12 +22,21 @@ import (
 	"github.com/google/uuid"
 )
 
+type source2376Publication struct {
+	bundle runtimecontracts.BundleIdentity
+}
+
+func (p source2376Publication) CurrentPublication() (runtimepkg.RuntimeContextPublicationSnapshot, error) {
+	return runtimepkg.RuntimeContextPublicationSnapshot{PrimaryBundle: p.bundle}, nil
+}
+
 func TestDataShowCLIReadFamilyAcrossSelectedStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			setCLIAPITestToken(t, "test-token")
 			var selected interface {
 				apiv1.DurableDataStore
+				Ping(context.Context) error
 				EnsureSourceArtifactWithData(context.Context, *sourceartifact.AdmittedSourceArtifact, durabledata.Catalog) (sourceartifact.EnsureResult, error)
 			}
 			if backend == "sqlite" {
@@ -77,7 +88,11 @@ func TestDataShowCLIReadFamilyAcrossSelectedStores(t *testing.T) {
 				t.Fatalf("keyless import=%#v/%v", positionResult, err)
 			}
 			work := worklifetime.NewProcess()
-			handler, err := apiv1.NewHandler(apiv1.Options{PlatformSpecPath: ResolvePath(RepoRoot(), defaultPlatformSpecPath), AuthTokens: []string{"test-token"}, ProcessWorkOwner: work, Handlers: apiv1.OperatorDataHandlers(apiv1.DataHandlerOptions{Store: selected})})
+			handlers := apiv1.OperatorDataHandlers(apiv1.DataHandlerOptions{Store: selected})
+			for method, handler := range apiv1.OperatorHealthHandlers(apiv1.HealthHandlerOptions{Ready: func() bool { return true }, Database: selected, Publication: source2376Publication{bundle: runtimecontracts.BundleIdentity{BundleHash: artifact.BundleHash(), WorkflowName: ".", WorkflowVersion: artifact.BundleHash(), SourceLabel: artifact.HumanLabel()}}}) {
+				handlers[method] = handler
+			}
+			handler, err := apiv1.NewHandler(apiv1.Options{PlatformSpecPath: ResolvePath(RepoRoot(), defaultPlatformSpecPath), AuthTokens: []string{"test-token"}, ProcessWorkOwner: work, Handlers: handlers})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -96,7 +111,7 @@ func TestDataShowCLIReadFamilyAcrossSelectedStores(t *testing.T) {
 			for _, mode := range []string{"text", "json", "quiet"} {
 				for _, operand := range []string{"inventory", "./records.loaded@head", "./records.loaded@v1", "./records.loaded@" + string(result.Candidate.VersionID), "row", "position"} {
 					t.Run(mode+"/"+operand, func(t *testing.T) {
-						args := []string{"--bundle-hash", artifact.BundleHash()}
+						args := []string{}
 						if mode != "text" {
 							args = append(args, "--"+mode)
 						}
@@ -143,7 +158,7 @@ func TestDataShowCLIReadFamilyAcrossSelectedStores(t *testing.T) {
 				cmd := newDataShowCommand(root)
 				var out bytes.Buffer
 				cmd.SetOut(&out)
-				cmd.SetArgs([]string{"--bundle-hash", artifact.BundleHash(), "./records.loaded@v1", "--format", "jsonl"})
+				cmd.SetArgs([]string{"./records.loaded@v1", "--format", "jsonl"})
 				if err := cmd.ExecuteContext(ctx); err != nil {
 					t.Fatal(err)
 				}
@@ -176,7 +191,7 @@ func TestDataShowCLIReadFamilyAcrossSelectedStores(t *testing.T) {
 				cmd := newDataShowCommand(root)
 				var out bytes.Buffer
 				cmd.SetOut(&out)
-				cmd.SetArgs([]string{"--bundle-hash", artifact.BundleHash(), "./records.loaded@head", "--format", "jsonl"})
+				cmd.SetArgs([]string{"./records.loaded@head", "--format", "jsonl"})
 				if err := cmd.ExecuteContext(ctx); err != nil || out.Len() != 0 {
 					t.Fatalf("canonical empty CLI export=%q/%v", out.String(), err)
 				}

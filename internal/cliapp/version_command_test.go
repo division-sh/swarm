@@ -81,7 +81,7 @@ func TestVersionServerUsesHealthCheck(t *testing.T) {
 		"Go:",
 		"Server:",
 		"alive=true ready=false db_ok=true runtime_ok=false",
-		"bundle_hash=bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		"source=bbbbbbb",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())

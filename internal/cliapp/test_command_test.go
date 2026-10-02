@@ -1642,7 +1642,7 @@ func TestScenarioTestSourceArtifactFactConsumesExactRuntimeIdentity(t *testing.T
 	}{
 		{name: "present", sources: []map[string]any{{"bundle_hash": bundleHash}}},
 		{name: "among multiple", sources: []map[string]any{{"bundle_hash": otherHash}, {"bundle_hash": bundleHash}}},
-		{name: "missing", sources: []map[string]any{{"bundle_hash": otherHash}}, wantErr: "does not serve bundle_hash"},
+		{name: "missing", sources: []map[string]any{{"bundle_hash": otherHash}}, wantErr: "does not serve source"},
 		{name: "duplicate", sources: []map[string]any{{"bundle_hash": bundleHash}, {"bundle_hash": bundleHash}}, wantErr: "duplicate source facts"},
 		{name: "invalid", sources: []map[string]any{{"bundle_hash": "not-canonical"}}, wantErr: "invalid source fact"},
 	} {

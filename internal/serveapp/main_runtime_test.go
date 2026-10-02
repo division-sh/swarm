@@ -780,7 +780,7 @@ func startServedJoinProofRuntime(t *testing.T) (string, *sql.DB, string, *runtim
 	bundleHash := bundle.SourceArtifact.BundleHash()
 	endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 		ConfigPath:              writeServeRuntimeTestConfig(t),
-		BundleHash:              bundleHash,
+		SourceRoot:              root,
 		PlatformSpecPath:        defaultPlatformSpecPath,
 		StoreMode:               "postgres",
 		StoreModeSet:            true,
@@ -4915,7 +4915,6 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	t.Helper()
 	initialStdout, initialStderr, code := runServedCLICommand(t, endpoint, []string{
 		"event", "publish", "item.received",
-		"--bundle-hash", bundleHash,
 		"--payload-json", `{"item_id":"item-1"}`,
 		"--idempotency-key", "issue-1255-" + backend + "-initial",
 	})
@@ -5035,7 +5034,6 @@ func runServedEventPublishTargetRouteProof(t *testing.T, endpoint string, db *sq
 	t.Helper()
 	bootstrapStdout, bootstrapStderr, code := runServedCLICommand(t, endpoint, []string{
 		"event", "publish", "opco.bootstrap_requested",
-		"--bundle-hash", bundleHash,
 		"--payload-json", `{"owner":"operator"}`,
 		"--idempotency-key", "issue-1438-" + backend + "-bootstrap",
 	})
@@ -7010,44 +7008,7 @@ func TestRunServeRuntimeSQLiteAbandonActiveRunsQuiescesBeforeReadiness(t *testin
 	}
 }
 
-func TestRunServeRuntimeBundleHashMissingFailsBeforeReadiness(t *testing.T) {
-	_, _, _ = installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
-		return serveRuntimeWorkspaceStub{}
-	})
-	missingHash := "bundle-v2:sha256:2222222222222222222222222222222222222222222222222222222222222222"
-	var out lockedBuffer
-	code := runFrom(context.Background(), repoRootForTest(), cliapp.ServeOptions{
-		ConfigPath:       writeServeRuntimeTestConfig(t),
-		BundleHash:       missingHash,
-		PlatformSpecPath: defaultPlatformSpecPath,
-		StoreMode:        "postgres",
-		APIListenAddr:    "127.0.0.1:0",
-		MCPListenAddr:    "127.0.0.1:0",
-		SelfCheck:        true,
-		Verbose:          true,
-		Output:           &out,
-	})
-	if code == 0 {
-		t.Fatalf("Run code = 0, want startup failure\noutput:\n%s", out.String())
-	}
-	for _, want := range []string{
-		"bundle_hash=" + missingHash,
-		"BUNDLE_UNAVAILABLE",
-		"bundle_hash " + missingHash + " is not present in source_artifacts",
-	} {
-		if !strings.Contains(out.String(), want) {
-			t.Fatalf("serve output missing %q:\n%s", want, out.String())
-		}
-	}
-	if strings.Contains(out.String(), "ready                      ok") || strings.Contains(out.String(), "[22/22]") {
-		t.Fatalf("serve reached readiness after missing DB-loaded bundle:\n%s", out.String())
-	}
-	if strings.Contains(out.String(), "source artifacts read surface requires bundles columns") || strings.Contains(out.String(), "relation \"bundles\" does not exist") {
-		t.Fatalf("serve reported schema/bootstrap failure instead of typed bundle unavailability:\n%s", out.String())
-	}
-}
-
-func TestRunServeRuntimeBundleHashBootsFromSelectedStores(t *testing.T) {
+func Test2376DirectoryBootUsesExactSelectedStoreSource(t *testing.T) {
 	for _, backend := range []storebackend.Backend{storebackend.BackendSQLite, storebackend.BackendPostgres} {
 		t.Run(backend.String(), func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
@@ -7065,7 +7026,7 @@ func TestRunServeRuntimeBundleHashBootsFromSelectedStores(t *testing.T) {
 			bundleHash := bundle.SourceArtifact.BundleHash()
 			var workspaceBundleScopes []string
 			opts := cliapp.ServeOptions{
-				BundleHash:       bundleHash,
+				SourceRoot:       filepath.Join(repoRootForTest(), "tests", "tier8-boot-verification", "test-boot-success"),
 				PlatformSpecPath: defaultPlatformSpecPath,
 				StoreMode:        backend.String(),
 				StoreModeSet:     true,
@@ -7162,7 +7123,7 @@ func TestValidateServeMultiContextToolGatewayAdmission(t *testing.T) {
 			name:        "multi context claude backend fails closed",
 			cfg:         claudeCfg,
 			loaded:      twoContexts,
-			wantErr:     "multi-context swarm serve --bundle-hash with llm.backend=claude_cli is not supported in this configuration",
+			wantErr:     "multiple retained runtime contexts with llm.backend=claude_cli are not supported in this configuration",
 			wantDetails: true,
 		},
 		{
@@ -8209,7 +8170,7 @@ func TestRunServeRuntimeNonDevClaudeCLIRetiredGatewayURLEnvFailsClosed(t *testin
 	}
 }
 
-func TestRunServeRuntimeBundleHashRetiredGatewayURLEnvFailsBeforeStartupSideEffects(t *testing.T) {
+func TestRunServeRuntimeDirectoryRetiredGatewayURLEnvFailsBeforeStartupSideEffects(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:"+freeDoctorTCPPort(t))
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
@@ -8224,7 +8185,6 @@ func TestRunServeRuntimeBundleHashRetiredGatewayURLEnvFailsBeforeStartupSideEffe
 		APIListenAddr:    "127.0.0.1:0",
 		MCPListenAddr:    "127.0.0.1:0",
 		SelfCheck:        true,
-		BundleHash:       "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 	})
 }
 

@@ -1,6 +1,3 @@
 name: test-compose-create-instance-config
 version: 1.0.0
-description: >
-  Composition: a creating receiver initializes three typed variables from a connected event payload.
-
 platform_version: ">=0.7.0 <0.8.0"

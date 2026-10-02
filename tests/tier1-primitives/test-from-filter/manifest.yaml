@@ -1,4 +1,3 @@
 name: test-from-filter
 version: 1.0.0
-description: Handler transition and emit preserve the existing matched-sender case; the inert handler.from restriction is retired.
 platform_version: ">=0.7.0 <0.8.0"

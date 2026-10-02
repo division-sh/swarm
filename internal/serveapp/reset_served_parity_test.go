@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -24,7 +25,14 @@ func TestServedResetRetainClearAndHistoricalReplayBothStores(t *testing.T) {
 	servedparity.Run(t, scenario, func(t *testing.T, backend servedparity.Backend) {
 		for _, clear := range []bool{false, true} {
 			t.Run(fmt.Sprintf("clear=%t", clear), func(t *testing.T) {
-				proof := startServedControlProofRuntime(t, backend)
+				var originalRoot string
+				proof := startServedControlProofRuntimeWithFixture(t, backend, func(t *testing.T) string {
+					originalRoot = writeServedEventPublishFollowUpFixture(t)
+					return originalRoot
+				})
+				if err := os.RemoveAll(originalRoot); err != nil {
+					t.Fatal(err)
+				}
 				predecessorGrant, err := proof.Runtime.CurrentStartupGrantEvidence()
 				if err != nil {
 					t.Fatal(err)

@@ -150,7 +150,7 @@ func (l SourceArtifactSelectedContractSourceLoader) LoadRunForkSelectedContractS
 	record, err := l.Store.GetSourceArtifact(ctx, bundleHash)
 	if errors.Is(err, sourceartifact.ErrNotFound) {
 		if selection.Mode == runfork.RunForkContractSelectionModeBundleHash {
-			return LoadedSelectedContractSource{}, fmt.Errorf("%s: target bundle %s is not available", runbundle.CodeBundleUnavailable, bundleHash)
+			return LoadedSelectedContractSource{}, fmt.Errorf("%s: target source is not available; serve this directory first", runbundle.CodeBundleUnavailable)
 		}
 		return LoadedSelectedContractSource{}, fmt.Errorf("%s: source run %s source artifact missing for %s", runbundle.CodeBundleDataIntegrityError, sourceRunID, bundleHash)
 	}

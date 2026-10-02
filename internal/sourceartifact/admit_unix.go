@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -26,7 +27,16 @@ func AdmitDirectory(root string) (*AdmittedSourceArtifact, error) {
 	if err := admitDirectoryFD(fd, "", false, &state); err != nil {
 		return nil, err
 	}
-	return newArtifact(state.entries)
+	artifact, err := newArtifact(state.entries)
+	if err != nil {
+		return nil, err
+	}
+	selectedRoot, err := filepath.Abs(root)
+	if err != nil {
+		return nil, err
+	}
+	artifact.directoryLabel = filepath.Base(selectedRoot)
+	return artifact, nil
 }
 
 type admissionState struct {

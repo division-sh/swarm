@@ -1,4 +1,3 @@
 name: test-create-flow-instance-config
 version: 1.0.0
-description: Receiver-owned initialize binds typed configuration from the emitted payload.
 platform_version: ">=0.7.0 <0.8.0"

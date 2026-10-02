@@ -12,14 +12,14 @@ func TestBootBundleIdentityStableAcrossRootsAndFileOrder(t *testing.T) {
 	rootA := t.TempDir()
 	rootB := t.TempDir()
 
-	writeBundleIdentityFile(t, filepath.Join(rootA, "manifest.yaml"), "name: identity-test\nversion: 1.0.0\n")
+	writeBundleIdentityFile(t, filepath.Join(rootA, "manifest.yaml"), "name: identity-test\nversion: 1.0.0\nplatform_version: '*'\n")
 	writeBundleIdentityFile(t, filepath.Join(rootA, "agents.yaml"), "guide:\n  role: guide\n  intent: prompts/a.md\n  model: regular\n  subscriptions: [guide.requested]\n")
 	writeBundleIdentityFile(t, filepath.Join(rootA, "prompts", "a.md"), "alpha\n")
 	writeBundleIdentityFile(t, filepath.Join(rootA, "prompts", "b.md"), "beta\n")
 
 	writeBundleIdentityFile(t, filepath.Join(rootB, "prompts", "b.md"), "beta\r\n")
 	writeBundleIdentityFile(t, filepath.Join(rootB, "prompts", "a.md"), "alpha\r\n")
-	writeBundleIdentityFile(t, filepath.Join(rootB, "manifest.yaml"), "version: 1.0.0\r\nname: identity-test\r\n")
+	writeBundleIdentityFile(t, filepath.Join(rootB, "manifest.yaml"), "version: 1.0.0\r\nname: identity-test\nplatform_version: '*'\n")
 	writeBundleIdentityFile(t, filepath.Join(rootB, "agents.yaml"), "guide:\r\n  role: guide\r\n  intent: prompts/a.md\r\n  model: regular\r\n  subscriptions: [guide.requested]\r\n")
 
 	bundleA, err := LoadWorkflowContractBundleWithOverrides(repo, rootA, platformSpec)
@@ -55,10 +55,10 @@ func TestBootBundleIdentityChangesWithLoadedContent(t *testing.T) {
 	rootA := t.TempDir()
 	rootB := t.TempDir()
 
-	writeBundleIdentityFile(t, filepath.Join(rootA, "manifest.yaml"), "name: identity-test\nversion: 1.0.0\n")
+	writeBundleIdentityFile(t, filepath.Join(rootA, "manifest.yaml"), "name: identity-test\nversion: 1.0.0\nplatform_version: '*'\n")
 	writeBundleIdentityFile(t, filepath.Join(rootA, "agents.yaml"), "guide:\n  role: guide\n  intent: prompts/a.md\n  model: regular\n  subscriptions: [guide.requested]\n")
 	writeBundleIdentityFile(t, filepath.Join(rootA, "prompts", "a.md"), "alpha\n")
-	writeBundleIdentityFile(t, filepath.Join(rootB, "manifest.yaml"), "name: identity-test\nversion: 1.0.0\n")
+	writeBundleIdentityFile(t, filepath.Join(rootB, "manifest.yaml"), "name: identity-test\nversion: 1.0.0\nplatform_version: '*'\n")
 	writeBundleIdentityFile(t, filepath.Join(rootB, "agents.yaml"), "guide:\n  role: guide\n  intent: prompts/a.md\n  model: regular\n  subscriptions: [guide.requested]\n")
 	writeBundleIdentityFile(t, filepath.Join(rootB, "prompts", "a.md"), "changed\n")
 
