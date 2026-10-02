@@ -567,6 +567,10 @@ var cliHumanCodeRawOutputAllowances = map[string]cliHumanCodeRawOutputAllowance{
 		Names:  []string{"mode"},
 		Reason: "flow composition mode is an authoring-view concept, not ConversationMode",
 	},
+	"diagnostic_clock.go\x00diagnosticClockRows": {
+		Names:  []string{"status"},
+		Reason: "clock activation status is genericschedule.Status, a separate schedule-lifecycle taxonomy, not a registered run/agent/delivery status family",
+	},
 	"entities.go\x00writeEntityLoopSection": {
 		Names:  []string{"status"},
 		Reason: "loop activation status is loopruntime.Status rendered as data, a separate loop-lifecycle taxonomy, not a registered run/agent status family",

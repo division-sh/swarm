@@ -17,12 +17,16 @@ func TestDiagnosticClockRowsUseDurableStatusAndDue(t *testing.T) {
 	rows := diagnosticClockRows([]genericschedule.ClockReadback{
 		{FlowID: ".", Name: "poll", Status: genericschedule.StatusActive, NextDueAt: &due, RetainsRun: true},
 		{FlowID: "worker", Name: "poll", Status: genericschedule.StatusCancelled, CancelCause: "clock_removed"},
+		{FlowID: "worker", Name: "retry", Status: genericschedule.StatusFailed, Failure: &genericschedule.ClockFailure{Code: "dispatch_failed", Message: "clock publication failed"}},
 	})
-	if len(rows) != 2 || rows[0].Label != "clock" || !strings.Contains(rows[0].Value, "next due 2026-10-02T14:32:00Z; retaining this run") {
+	if len(rows) != 3 || rows[0].Label != "clock" || rows[0].Value != "./poll: active; next due 2026-10-02T14:32:00Z; retaining this run" {
 		t.Fatalf("active clock lost exact due/retention: %#v", rows)
 	}
 	if rows[1].Value != "worker/poll: cancelled; clock_removed" {
 		t.Fatalf("cancelled clock rendered a future occurrence: %#v", rows[1])
+	}
+	if rows[2].Value != "worker/retry: failed; clock publication failed" {
+		t.Fatalf("failed clock lost failure evidence or rendered a future occurrence: %#v", rows[2])
 	}
 }
 
