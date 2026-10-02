@@ -112,3 +112,51 @@ func TestInstanceScheduleHashBindsSourceAndOwner(t *testing.T) {
 		}
 	}
 }
+
+func TestInstanceScheduleRootRequiresExactRun(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		instance string
+	}{
+		{"foreign run", uuid.NewString()},
+		{"previous generation", uuid.NewSHA1(uuid.NameSpaceURL, []byte("clock-service/generation/1")).String()},
+		{"service identity", "clock-service"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			command := instanceScheduleCommand(t, ".")
+			var err error
+			command.FlowInstance = tc.instance
+			command.RoutingSource, err = events.NewStaticFlowRoutingSource(events.RouteIdentity{FlowID: ".", FlowInstance: tc.instance})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := command.Validate(); err == nil {
+				t.Error("root schedule admitted an instance outside its run")
+			}
+			if _, err := command.ScopeKey(); err == nil {
+				t.Error("invalid root schedule acquired a persistence scope")
+			}
+			if _, err := command.ImmutableHash(); err == nil {
+				t.Error("invalid root schedule acquired an admission hash")
+			}
+			if _, err := occurrenceEvent(Activation{ID: uuid.NewString(), Command: command}, Occurrence{EventID: uuid.NewString(), DueAt: time.Now().UTC()}, []byte(`{}`)); err == nil {
+				t.Error("invalid root schedule constructed a business occurrence")
+			}
+		})
+	}
+	for _, mutate := range []struct {
+		name  string
+		apply func(*AdmissionCommand)
+	}{
+		{"changed run only", func(c *AdmissionCommand) { c.RunID = uuid.NewString() }},
+		{"missing instance", func(c *AdmissionCommand) { c.FlowInstance = "" }},
+	} {
+		t.Run(mutate.name, func(t *testing.T) {
+			command := instanceScheduleCommand(t, ".")
+			mutate.apply(&command)
+			if err := command.Validate(); err == nil {
+				t.Fatal("root schedule lost its exact run/instance coordinate")
+			}
+		})
+	}
+}
