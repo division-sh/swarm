@@ -214,6 +214,45 @@ func (*Store) Configure(Options) error { return nil }
 	}
 }
 
+func TestPersistenceEventRecordMethodSetScopeStaysClosed(t *testing.T) {
+	const prefix = "github.com/division-sh/swarm/internal/store/internal/"
+	for path, want := range map[string]bool{
+		prefix + "backend/eventrecord":          true,
+		prefix + "runtimepersistence":           true,
+		prefix + "backend/eventrecord/postgres": false,
+		prefix + "backend/eventrecord/sqlite":   false,
+	} {
+		if got := semanticOwnerMethodSetScope(path); got != want {
+			t.Errorf("method-set enforcement scope %s = %v, want %v", path, got, want)
+		}
+	}
+	const hostile = `package eventrecord
+import (
+  "context"
+  "database/sql"
+)
+type Record struct { EventID string }
+type Alias = Record
+type Carrier struct { *Alias }
+func (Record) ValidateInheritedFanOutOwner(context.Context, *sql.DB) error { return nil }
+func (*Record) HiddenQueryer(context.Context, interface { QueryRowContext(context.Context, string, ...any) *sql.Row }) error { return nil }
+`
+	findings := authorityFindingsFromSource(t, "internal/store/internal/backend/eventrecord/hostile.go", hostile)
+	for _, receiver := range []string{"Record", "Alias", "Carrier"} {
+		for _, method := range []string{"ValidateInheritedFanOutOwner", "HiddenQueryer"} {
+			found := false
+			for _, finding := range findings {
+				if finding.Kind == "effective-method" && finding.RawSQL && strings.HasSuffix(finding.Enclosing, "."+receiver) && finding.Member == "method:"+method {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("record SQL method %s on %s escaped effective-method enforcement", method, receiver)
+			}
+		}
+	}
+}
+
 func TestPersistenceAuthorityRegistryRejectsUnknownLocalOperationInAuthorizedFile(t *testing.T) {
 	const source = `package postgres
 import (
@@ -344,7 +383,8 @@ func collectEffectiveMethodSetFindings(root string, pkg *packages.Package) []aut
 
 func semanticOwnerMethodSetScope(pkgPath string) bool {
 	const prefix = "github.com/division-sh/swarm/internal/store/internal/"
-	return strings.HasPrefix(pkgPath, prefix) && !strings.Contains(pkgPath, "/backend/")
+	return pkgPath == prefix+"backend/eventrecord" ||
+		(strings.HasPrefix(pkgPath, prefix) && !strings.Contains(pkgPath, "/backend/"))
 }
 
 func collectPackageEffectiveMethodSetFindings(path string, pkg *types.Package, includeTyped bool) []authorityFinding {

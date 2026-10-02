@@ -74,7 +74,7 @@ func LoadAdmittedMany(ctx context.Context, q Queryer, eventIDs []string) ([]even
 			if decoded[i].Err != nil {
 				return nil, decoded[i].Err
 			}
-			if err := record.ValidateInheritedFanOutOwner(ctx, q, true); err != nil {
+			if err := eventrecord.ValidateInheritedFanOutOwner(ctx, q, true, record); err != nil {
 				return nil, err
 			}
 			out = append(out, decoded[i].AdmittedRecord)

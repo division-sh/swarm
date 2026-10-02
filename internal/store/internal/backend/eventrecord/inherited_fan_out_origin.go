@@ -12,7 +12,8 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/fanoutorigin"
 )
 
-func (r Record) ValidateInheritedFanOutOwner(ctx context.Context, q fanoutorigin.Queryer, postgres bool) error {
+// Only backend hydration owns this storage check; Record remains a data-only codec.
+func ValidateInheritedFanOutOwner(ctx context.Context, q fanoutorigin.Queryer, postgres bool, r Record) error {
 	if r.Class != events.EventAdmissionInheritedFanOut {
 		return nil
 	}

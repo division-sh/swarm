@@ -192,6 +192,11 @@ func TestFanOutBatchEventAdmissionHostileBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			for _, reader := range []string{"record", "record_batch"} {
+				t.Run("healthy_"+reader, func(t *testing.T) {
+					assertFanOutRecordHydration(t, ctx, db, postgres, reader, ids, original)
+				})
+			}
 			for _, corruption := range []string{"unknown_settlement_field", "invalid_settlement_arm", "wrong_event_class", "payload_identity", "inherited_owner_mismatch"} {
 				t.Run(corruption, func(t *testing.T) {
 					hostile := original.Clone()
@@ -246,15 +251,80 @@ func TestFanOutBatchEventAdmissionHostileBothStores(t *testing.T) {
 					if got != nil {
 						t.Fatal("batch leaked admitted prefix before hostile suffix")
 					}
+					for _, reader := range []string{"record", "record_batch"} {
+						t.Run(reader, func(t *testing.T) {
+							got, readErr := loadFanOutFixtureRecords(t, ctx, tx, postgres, reader, ids)
+							assertJointSourceReadCorrupt(t, ids[1], readErr)
+							if got != nil {
+								t.Fatalf("%s exposed records before corrupt-owner refusal: %+v", reader, got)
+							}
+						})
+					}
 					if err := tx.Rollback(); err != nil {
 						t.Fatal(err)
 					}
 					if _, err := m29LoadBatch(ctx, db, postgres, ids); err != nil {
 						t.Fatalf("rollback must restore fresh admission: %v", err)
 					}
+					for _, reader := range []string{"record", "record_batch"} {
+						assertFanOutRecordHydration(t, ctx, db, postgres, reader, ids, original)
+					}
 				})
 			}
 		})
+	}
+}
+
+func loadFanOutFixtureRecords(t testing.TB, ctx context.Context, q eventReadQueryer, postgres bool, reader string, ids []string) ([]eventrecord.Record, error) {
+	t.Helper()
+	if reader == "record" {
+		var record eventrecord.Record
+		var found bool
+		var err error
+		if postgres {
+			record, found, err = eventrecordpostgres.Load(ctx, q, ids[1])
+		} else {
+			record, found, err = eventrecordsqlite.Load(ctx, q, ids[1])
+		}
+		if err != nil {
+			if !reflect.DeepEqual(record, eventrecord.Record{}) || found {
+				t.Fatalf("scalar record hydration exposed partial success: found=%v record=%+v err=%v", found, record, err)
+			}
+			return nil, err
+		}
+		if !found {
+			t.Fatal("committed ordinal record disappeared")
+		}
+		return []eventrecord.Record{record}, nil
+	}
+	if reader != "record_batch" {
+		t.Fatalf("unknown record reader %q", reader)
+	}
+	var records []eventrecord.Record
+	var err error
+	if postgres {
+		records, err = eventrecordpostgres.LoadMany(ctx, q, ids)
+	} else {
+		records, err = eventrecordsqlite.LoadMany(ctx, q, ids)
+	}
+	if err != nil && records != nil {
+		t.Fatalf("batch record hydration exposed a partial prefix: records=%+v err=%v", records, err)
+	}
+	return records, err
+}
+
+func assertFanOutRecordHydration(t testing.TB, ctx context.Context, q eventReadQueryer, postgres bool, reader string, ids []string, original eventrecord.Record) {
+	t.Helper()
+	got, err := loadFanOutFixtureRecords(t, ctx, q, postgres, reader, ids)
+	if err != nil {
+		t.Fatalf("%s fresh committed-owner hydration: %v", reader, err)
+	}
+	wantCount := len(ids)
+	if reader == "record" {
+		wantCount = 1
+	}
+	if len(got) != wantCount || !got[len(got)-1].Equal(original) {
+		t.Fatalf("%s changed complete ordinal record: got=%+v want=%+v count=%d", reader, got, original, wantCount)
 	}
 }
 

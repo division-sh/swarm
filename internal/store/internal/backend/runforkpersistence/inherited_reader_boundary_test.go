@@ -17,16 +17,16 @@ import record "github.com/division-sh/swarm/internal/store/internal/backend/even
 type unrelated struct{}
 func (unrelated) ValidateInheritedFanOutOwner() {}
 func LoadAdmitted(arbitrary record.Record) {
-    _ = arbitrary.ValidateInheritedFanOutOwner(nil, nil, false)
+    _ = record.ValidateInheritedFanOutOwner(nil, nil, false, arbitrary)
     // EXTRA
 }
 func LoadAdmittedMany(arbitrary record.Record) {
-    validate := arbitrary.ValidateInheritedFanOutOwner
-    _ = validate(nil, nil, false)
+    validate := record.ValidateInheritedFanOutOwner
+    _ = validate(nil, nil, false, arbitrary)
     // EXTRA
 }
 func otherReader(arbitrary record.Record) {
-    _ = arbitrary.ValidateInheritedFanOutOwner(nil, nil, false)
+    _ = record.ValidateInheritedFanOutOwner(nil, nil, false, arbitrary)
 }
 func sameSpelling(arbitrary unrelated) { arbitrary.ValidateInheritedFanOutOwner() }
 `
@@ -34,7 +34,7 @@ func sameSpelling(arbitrary unrelated) { arbitrary.ValidateInheritedFanOutOwner(
 		for _, duplicate := range []bool{false, true} {
 			fixture := source
 			if duplicate {
-				fixture = strings.ReplaceAll(fixture, "// EXTRA", "_ = arbitrary.ValidateInheritedFanOutOwner(nil, nil, false)")
+				fixture = strings.ReplaceAll(fixture, "// EXTRA", "_ = record.ValidateInheritedFanOutOwner(nil, nil, false, arbitrary)")
 			}
 			fset := token.NewFileSet()
 			file, err := parser.ParseFile(fset, "admitted_batch.go", fixture, 0)
@@ -48,7 +48,7 @@ func sameSpelling(arbitrary unrelated) { arbitrary.ValidateInheritedFanOutOwner(
 				t.Fatal(err)
 			}
 			problems := historicalBoundaryProblems(historicalBoundaryCollect(pkg, info, fset, file), historicalBoundaryAllowances(), false)
-			callee := "/reference:store/internal/backend/eventrecord::Record.ValidateInheritedFanOutOwner"
+			callee := "/reference:store/internal/backend/eventrecord::ValidateInheritedFanOutOwner"
 			want := []string{scope + "otherReader" + callee + " at "}
 			if duplicate {
 				want = append(want, scope+"LoadAdmitted"+callee+": observed 2, audited 1", scope+"LoadAdmittedMany"+callee+": observed 2, audited 1")

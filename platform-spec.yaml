@@ -1222,6 +1222,13 @@ contract_formats:
         the canonical decoded event and preserve every fact not explicitly changed
         by their typed replay-lineage rule.
 
+        eventrecord.Record is a data-only codec with no SQL/queryer-bearing methods.
+        Private backend hydration owns the inherited fan-out committed-origin check
+        and invokes it on both stores for scalar/batch record and admitted-event reads.
+        The record cannot carry that storage capability through method promotion or
+        an alias. Moving the check off the DTO does not remove, cache, or defer the
+        fresh exact committed-origin observation or relax corrupt-owner refusal.
+
         Within one canonical record operation, eventrecord.Record.DecodeWithSettlement may return
         the admitted event and strictly decoded settlement together for operation-local reuse.
         FromAdmitted may validate its actual typed settlement after successful strict canonical encoding
