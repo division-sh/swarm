@@ -22,6 +22,7 @@ func TestWorkflowNativeUnionIsRequired(t *testing.T) {
 			RunsOn          string   `yaml:"runs-on"`
 			Needs           []string `yaml:"needs"`
 			ContinueOnError any      `yaml:"continue-on-error"`
+			TimeoutMinutes  int      `yaml:"timeout-minutes"`
 			Steps           []struct {
 				Run, Uses, If   string
 				ContinueOnError any            `yaml:"continue-on-error"`
@@ -33,10 +34,10 @@ func TestWorkflowNativeUnionIsRequired(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, owner := range []struct{ job, platform, runner string }{
-		{"static-checks", "linux", "ubuntu-latest"}, {"macos-sqlite-possession", "darwin", "macos-latest"},
+		{"unused-linux", "linux", "ubuntu-latest"}, {"unused-darwin", "darwin", "macos-latest"},
 	} {
 		job, ok := workflow.Jobs[owner.job]
-		if !ok || job.If != "" || len(job.Needs) != 0 || job.ContinueOnError != nil || job.RunsOn != owner.runner {
+		if !ok || job.If != "" || len(job.Needs) != 0 || job.ContinueOnError != nil || job.RunsOn != owner.runner || job.TimeoutMinutes != 15 {
 			t.Fatalf("native %s analysis is conditional, optional, or not native", owner.platform)
 		}
 		checkout, collect, upload := false, false, false
@@ -55,8 +56,19 @@ func TestWorkflowNativeUnionIsRequired(t *testing.T) {
 			t.Fatalf("%s: exact checkout=%v collect=%v upload=%v", owner.job, checkout, collect, upload)
 		}
 	}
+	for _, owner := range []string{"static-checks", "macos-sqlite-possession"} {
+		job, ok := workflow.Jobs[owner]
+		if !ok || job.TimeoutMinutes != 15 {
+			t.Fatalf("%s: preserve the product proof budget", owner)
+		}
+		for _, step := range job.Steps {
+			if strings.Contains(step.Run, "./cmd/swarm-unused") {
+				t.Fatalf("%s: cold analysis must not consume the product proof budget", owner)
+			}
+		}
+	}
 	union, ok := workflow.Jobs["unused-checks"]
-	if !ok || union.If != "" || union.ContinueOnError != nil || !slices.Contains(union.Needs, "static-checks") || !slices.Contains(union.Needs, "macos-sqlite-possession") {
+	if !ok || union.If != "" || union.ContinueOnError != nil || !slices.Contains(union.Needs, "unused-linux") || !slices.Contains(union.Needs, "unused-darwin") {
 		t.Fatal("union must require both native collectors without a profile condition")
 	}
 	checkout, merge := false, false
@@ -81,7 +93,7 @@ func TestWorkflowNativeUnionIsRequired(t *testing.T) {
 	if aggregate.If != "always()" || len(aggregate.Steps) != 1 {
 		t.Fatal("required aggregate must execute even when a required job fails/skips")
 	}
-	for _, owner := range []string{"static-checks", "macos-sqlite-possession", "unused-checks"} {
+	for _, owner := range []string{"static-checks", "macos-sqlite-possession", "unused-linux", "unused-darwin", "unused-checks"} {
 		if !slices.Contains(aggregate.Needs, owner) {
 			t.Fatalf("missing aggregate owner %s", owner)
 		}
