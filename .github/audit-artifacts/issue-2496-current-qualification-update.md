@@ -498,3 +498,55 @@ an explicit size measurement, not semantic closure. Generic activation/replay
 readers and full standing-tree preparation still await recorded dispositions
 5946306433 and5945687624. No chosen-class elimination, final proof audit,
 managed-suite GREEN, exact-head CI GREEN or final review request is made.
+
+### Frozen Repaired-Head Public And Managed Qualification
+
+At frozen7a689daf2, the additional managed public proof command completed with
+no failures: TestEntityProgressivePresencePublicServeRestartSQLitePostgres
+19.69s (four backend/shape cells), TestGoldenAgentWorkloadSequentialRunsBothStores
+54.86s, and unchanged
+TestVolumeFanOutExactJobflow1362ImportRouteAndSettleBothStores193.91s.
+The package receipts are releasee2e74.562s and conformance193.928s. The first
+proof executes public verify/serve/source removal/hash-only restart. The
+sequential proof uses the compiled internal mock-lifecycle process with public
+RPC terminal readback, not real-provider/public-launcher qualification. Its two
+approved fixture assertions now expect a constructed scout target and `.`
+StageEntry scope; it is not literally unchanged source. The volume test file,
+deadlines, settlement/readback/restart assertions and exact counts are unchanged.
+These receipts do not establish all P01-P60 obligations or race3 qualification.
+Log: /tmp/agent-e-2496-public-repaired-head.log.
+
+The default14-unit `go run ./cmd/swarm-test` run on7a689 completed RED. The first
+12 units passed, including broad-01 (complete pipeline290.903s), catalog,
+generated fan-out, API/routing/continuation and release restart/lifecycle units.
+The13th served-canary unit failed117.801s solely at
+TestProviderSelectedRootStandingBootBothStores on both stores. The final bus
+unit did not execute in that run; the separately capacity-admitted complete
+bus package then passed40.930s. This is not a full-suite GREEN and must not be
+described as a completed14-unit run. Log:
+/tmp/agent-e-2496-default-repaired-head.log; supplemental bus receipt:
+/tmp/agent-e-2496-bus-repaired-head.log.
+
+The alpha webhook admission succeeds; its old oracle incorrectly required an
+entityless node even though the canonical fieldless receiver is constructed.
+The oracle now verifies the exact run/template/path/entity against its header,
+and requires a business-field row iff the header declares one. Static agents
+remain declaration-owned/entityless, separately from node ownership. The
+selected alpha text/callback leaves on both stores pass3.682s through the
+managed runner with this corrected oracle; beta leaves are deliberately not
+selected and receive no passing credit. Log:
+/tmp/agent-e-2496-root-provider-alpha-exact-header.log.
+
+Beta still refuses publication because its independent selected standing run
+has no constructed connected sibling beta-receiver. No header is fabricated,
+handler construction restored or refusal weakened. The root-tree prerequisite
+remains pending disposition5945687624. Generic historical replay/activation
+header consumers remain pending5946306433. The repair checkpoint therefore
+does not claim R2/R3 or chosen-class elimination.
+
+The exact complexity verification at7a689 passes under unchanged policy after
+regeneration; cognitive>=30 hotspots581->577 and cyclomatic266->262. CI
+36975893516 is pending at the last check, with no completed jobs, not GREEN.
+Earlier failed CI36973380834 remains recorded. Qualification and final review
+must follow completion/disposition of the remaining consumers; no waiver or
+final review request is made.

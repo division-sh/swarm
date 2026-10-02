@@ -3,6 +3,7 @@ package serveapp
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -132,7 +133,7 @@ func runProviderAliasAuthorityScenario(t *testing.T, scenario providerAliasScena
 						}
 						seen := map[string]bool{}
 						for _, eventID := range receipt.EventIDs {
-							name := requireProviderAliasDeliveries(t, rt.Endpoint, eventID, scenario.source(alias), normalized, scenario.receiver(alias), scenario.agents, scenario.rawConnected, scenario.noLocalConsumers, false)
+							name := requireProviderAliasDeliveries(t, rt, eventID, scenario.source(alias), normalized, scenario.receiver(alias), scenario.agents, scenario.rawConnected, scenario.noLocalConsumers)
 							requireProviderAliasStoredSource(t, rt, eventID, scenario.source(alias))
 							if scenario.replay && name == normalized {
 								requireProviderAliasAgentReplay(t, rt, eventID, alias)
@@ -209,7 +210,7 @@ func requireProviderAliasRootConnection(t *testing.T, rt servedControlProofRunti
 		published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 			"bundle_hash": rt.BundleHash, "event_name": name, "payload": payload, "idempotency_key": "root-" + name,
 		})
-		requireProviderAliasDeliveries(t, rt.Endpoint, published.EventID, ".", name, receiver, false, false, false, true)
+		requireProviderAliasDeliveries(t, rt, published.EventID, ".", name, receiver, false, false, false)
 		// A public root event must not borrow the provider's authenticated
 		// declaring-flow source or acquire either standing provider's consumers.
 		var stored operatorread.OperatorEventFull
@@ -255,10 +256,11 @@ func postProviderAliasUpdate(t *testing.T, baseURL, alias, secret, body string) 
 	return response.StatusCode, raw
 }
 
-func requireProviderAliasDeliveries(t *testing.T, endpoint, eventID, alias, normalized, receiver string, agents, rawConnected, noLocalConsumers, publicRoot bool) string {
+func requireProviderAliasDeliveries(t *testing.T, rt servedControlProofRuntime, eventID, alias, normalized, receiver string, agents, rawConnected, noLocalConsumers bool) string {
 	t.Helper()
 	type readback struct {
 		EventName  string `json:"event_name"`
+		RunID      string `json:"run_id"`
 		Deliveries []struct {
 			SubscriberID string                              `json:"subscriber_id"`
 			Status       string                              `json:"status"`
@@ -271,7 +273,7 @@ func requireProviderAliasDeliveries(t *testing.T, endpoint, eventID, alias, norm
 	deadline := time.Now().Add(servedProofPollDeadline)
 	for time.Now().Before(deadline) {
 		var event readback
-		requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": eventID}, &event)
+		requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": eventID}, &event)
 		last = event
 		want := []string{identitytest.FlowNode(t, alias, "observer").Key()}
 		if noLocalConsumers {
@@ -304,12 +306,12 @@ func requireProviderAliasDeliveries(t *testing.T, endpoint, eventID, alias, norm
 			if delivery.Target.FlowID != wantFlow || delivery.Target.FlowInstance == "" {
 				t.Fatalf("recipient %s target=%#v, want complete owner for %s", delivery.SubscriberID, delivery.Target, wantFlow)
 			}
-			if connected || publicRoot {
+			if agents && delivery.SubscriberID == alias+"-agent" {
 				if delivery.Target.Kind != "entityless_receiver" || delivery.Target.EntityID != "" {
-					t.Fatalf("stateless connected receiver borrowed an entity: %#v", delivery.Target)
+					t.Fatalf("declaration-owned static agent borrowed an entity: %#v", delivery.Target)
 				}
-			} else if delivery.Target.Kind != "existing_entity" || delivery.Target.EntityID == "" {
-				t.Fatalf("local standing consumer lost its exact entity: %#v", delivery.Target)
+			} else {
+				requireProviderAliasConstructedNodeTarget(t, rt, event.RunID, wantFlow, delivery.Target)
 			}
 			complete = complete && delivery.Status == "delivered"
 		}
@@ -329,6 +331,41 @@ func requireProviderAliasDeliveries(t *testing.T, endpoint, eventID, alias, norm
 	}
 	t.Fatalf("provider delivery did not settle: %#v", last)
 	return ""
+}
+
+func requireProviderAliasConstructedNodeTarget(t *testing.T, rt servedControlProofRuntime, runID, flow string, target operatorread.OperatorDeliveryTarget) {
+	t.Helper()
+	wantPath := flow
+	if flow == "." {
+		wantPath = runID
+	}
+	if runID == "" || target.Kind != "existing_entity" || target.EntityID == "" || target.FlowInstance != wantPath {
+		t.Fatalf("node target lost its exact constructed owner in run %s: %#v", runID, target)
+	}
+	var entityID, template, mode string
+	var entityType sql.NullString
+	if err := rt.DB.QueryRow(`SELECT entity_id, entity_type, flow_template, mode FROM flow_instances WHERE run_id=$1 AND instance_path=$2`, runID, wantPath).Scan(&entityID, &entityType, &template, &mode); err != nil {
+		t.Fatalf("read exact constructed node target: %v", err)
+	}
+	if entityID != target.EntityID || template != flow || mode != "static" {
+		t.Fatalf("target=%#v header entity=%s template=%s mode=%s", target, entityID, template, mode)
+	}
+	// Even a fieldless node has a constructed header, not a business-field row.
+	var fields int
+	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE run_id=$1 AND flow_instance=$2`, runID, wantPath).Scan(&fields); err != nil {
+		t.Fatal(err)
+	}
+	wantFields := 0
+	if entityType.Valid {
+		wantFields = 1
+		var exact int
+		if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE run_id=$1 AND flow_instance=$2 AND entity_id=$3 AND entity_type=$4`, runID, wantPath, entityID, entityType.String).Scan(&exact); err != nil || exact != 1 {
+			t.Fatalf("declared fields lost header identity: count=%d err=%v", exact, err)
+		}
+	}
+	if fields != wantFields {
+		t.Fatalf("node %s has %d business-field rows, want %d for header type %#v", flow, fields, wantFields, entityType)
+	}
 }
 
 func writeProviderAliasAuthorityFixture(t *testing.T, scenario providerAliasScenario) string {
