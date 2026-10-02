@@ -170,18 +170,19 @@ func Complete(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActiveRun
 	query := `
 		UPDATE activity_attempts
 		SET status = ?, result_event_id = ?, result_event_type = ?, result_payload = ?, failure = NULLIF(?, ''),
-		    completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+		    completed_at = ?, updated_at = ?
 		WHERE request_event_id = ? AND execution_mode = ? AND status = 'started'
 	`
 	if dialect == DialectPostgres {
 		query = `
 			UPDATE activity_attempts
 			SET status = $1, result_event_id = $2::uuid, result_event_type = $3, result_payload = $4::jsonb,
-			    failure = NULLIF($5, '')::jsonb, completed_at = NOW(), updated_at = NOW()
-			WHERE request_event_id = $6::uuid AND execution_mode = $7 AND status = 'started'
+			    failure = NULLIF($5, '')::jsonb, completed_at = $6, updated_at = $7
+			WHERE request_event_id = $8::uuid AND execution_mode = $9 AND status = 'started'
 		`
 	}
-	result, err := tx.ExecContext(ctx, query, record.Status, record.ResultEventID, record.ResultEventType, string(payload), nullableString(failure), record.RequestEventID, record.ExecutionMode)
+	completedAt := terminalTimestamp()
+	result, err := tx.ExecContext(ctx, query, record.Status, record.ResultEventID, record.ResultEventType, string(payload), nullableString(failure), completedAt, completedAt, record.RequestEventID, record.ExecutionMode)
 	if err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, fmt.Errorf("complete activity attempt %s: %w", record.RequestEventID, err)
 	}
@@ -236,18 +237,19 @@ func MarkUncertain(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActi
 	query := `
 		UPDATE activity_attempts
 		SET status = 'uncertain', result_event_id = ?, result_event_type = ?, result_payload = ?, failure = ?,
-		    completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+		    completed_at = ?, updated_at = ?
 		WHERE request_event_id = ? AND execution_mode = ? AND status = 'started'
 	`
 	if dialect == DialectPostgres {
 		query = `
 			UPDATE activity_attempts
 			SET status = 'uncertain', result_event_id = $1::uuid, result_event_type = $2, result_payload = $3::jsonb,
-			    failure = $4::jsonb, completed_at = NOW(), updated_at = NOW()
-			WHERE request_event_id = $5::uuid AND execution_mode = $6 AND status = 'started'
+			    failure = $4::jsonb, completed_at = $5, updated_at = $6
+			WHERE request_event_id = $7::uuid AND execution_mode = $8 AND status = 'started'
 		`
 	}
-	result, err := tx.ExecContext(ctx, query, record.ResultEventID, record.ResultEventType, string(payload), failure, record.RequestEventID, record.ExecutionMode)
+	completedAt := terminalTimestamp()
+	result, err := tx.ExecContext(ctx, query, record.ResultEventID, record.ResultEventType, string(payload), failure, completedAt, completedAt, record.RequestEventID, record.ExecutionMode)
 	if err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, fmt.Errorf("mark activity attempt %s uncertain: %w", record.RequestEventID, err)
 	}
@@ -274,6 +276,11 @@ func MarkUncertain(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActi
 		}
 	}
 	return actual, nil
+}
+
+// Capture once after admission; dialect defaults cannot define immutable result time.
+func terminalTimestamp() string {
+	return time.Now().UTC().Truncate(time.Microsecond).Format(time.RFC3339Nano)
 }
 
 func Load(ctx context.Context, db QueryRower, dialect Dialect, requestEventID string) (runtimepipeline.ActivityAttemptRecord, bool, error) {
