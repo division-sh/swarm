@@ -12,23 +12,27 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	"github.com/google/uuid"
-	"gopkg.in/yaml.v3"
 )
 
 func TestChannelLearnedObjectDestination(t *testing.T) {
 	channel, trigger, connector := mockChannelSatisfier()
-	var profile packs.ChannelOnboardingProfile
-	if err := yaml.Unmarshal([]byte(`activation: webhook_registration
-ceremony: authenticated_text_challenge
-provider_credential: mock_api_key
-signing_credential: mock_callback_key
-confirmation: deliver
-learned_destination:
-  destination.queue: conversation_reference.room
-`), &profile); err != nil {
+	manifest, err := packs.ParseChannelManifest([]byte(`provider: mock
+opaque_types: {reference: {type: string}}
+operations: {deliver: {tool: mock.deliver}}
+events: {received: {event: mock.received, fields: {text: event.text}}}
+onboarding:
+  activation: webhook_registration
+  ceremony: authenticated_text_challenge
+  provider_credential: mock_api_key
+  signing_credential: mock_callback_key
+  confirmation: deliver
+  learned_destination:
+    destination.queue: conversation_reference.room
+`))
+	if err != nil {
 		t.Fatal(err)
 	}
-	channel.Manifest.Onboarding = &profile
+	channel.Manifest.Onboarding = manifest.Onboarding
 	// A learned relation must be provable over its complete admitted source domain.
 	destinationLeaf, _ := channel.Manifest.OpaqueTypes["destination"].Property("queue")
 	channel.Manifest.OpaqueTypes["conversation_reference"] = mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"room": destinationLeaf}, "room")

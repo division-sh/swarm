@@ -1,7 +1,7 @@
 {
   "baseline": "issue-2486-pack-platform-source-provenance",
-  "previous_baseline": "eff1fc8f459524069e6a82231b3753a4e243a601",
-  "contract_change": "Adds admitted pack/platform source provenance. All prior provenance entries and every non-provenance JSON field match the accepted base; 35 unaffected surface hashes remain unchanged.",
+  "previous_baseline": "a51c0a2f9b63f7083c6290f24f042ae24411a2a3",
+  "contract_change": "Reconciles merged pack/platform source admission with operator-channel fields. Independent binaries verify all 45 prior hashes, every prior provenance entry and every non-provenance JSON field; 3082 admitted pack/platform provenance entries are added per describe JSON surface. All 35 unaffected surface hashes remain unchanged.",
   "normalization": "repository and isolated CLI scope absolute paths only; source filenames, cache identity and coordinates remain exact",
   "results": [
     {
@@ -12,7 +12,7 @@
     {
       "fixture": "examples/routing/template-select-or-create",
       "surface": "describe-json",
-      "stdout_sha256": "ad638804c2559f2c52f2bb9599eb0c25d5589fbe114f01f89ab9001c819bebf8"
+      "stdout_sha256": "c2d571aa847b4a0a58bfd305842f09f1cfb431e57153917220ac31a4bc5efa01"
     },
     {
       "fixture": "examples/routing/template-select-or-create",
@@ -27,7 +27,7 @@
     {
       "fixture": "examples/routing/template-select-or-create",
       "surface": "describe-graph-json",
-      "stdout_sha256": "ad638804c2559f2c52f2bb9599eb0c25d5589fbe114f01f89ab9001c819bebf8"
+      "stdout_sha256": "c2d571aa847b4a0a58bfd305842f09f1cfb431e57153917220ac31a4bc5efa01"
     },
     {
       "fixture": "examples/routing/template-select-or-create",
@@ -57,7 +57,7 @@
     {
       "fixture": "examples/routing/template-create-minted-key",
       "surface": "describe-json",
-      "stdout_sha256": "bf13d636a30a964f9d5f0c8983b881f693dd6c86942f159a6d0473524c9abe82"
+      "stdout_sha256": "51aa60d68e13d32362595daaf6f5d9a2a91b47c50914decfc633b738ce773358"
     },
     {
       "fixture": "examples/routing/template-create-minted-key",
@@ -72,7 +72,7 @@
     {
       "fixture": "examples/routing/template-create-minted-key",
       "surface": "describe-graph-json",
-      "stdout_sha256": "bf13d636a30a964f9d5f0c8983b881f693dd6c86942f159a6d0473524c9abe82"
+      "stdout_sha256": "51aa60d68e13d32362595daaf6f5d9a2a91b47c50914decfc633b738ce773358"
     },
     {
       "fixture": "examples/routing/template-create-minted-key",
@@ -102,7 +102,7 @@
     {
       "fixture": "examples/integrations/telegram-agent",
       "surface": "describe-json",
-      "stdout_sha256": "ec6f348dc250e769de683ed1539f57f27f1341bcaa46bc71e245fd6050e68bc8"
+      "stdout_sha256": "7d5f3b30816449f55bbc69cde4ea6cb0bec1be61cd2965c65b0fc5d18c837491"
     },
     {
       "fixture": "examples/integrations/telegram-agent",
@@ -117,7 +117,7 @@
     {
       "fixture": "examples/integrations/telegram-agent",
       "surface": "describe-graph-json",
-      "stdout_sha256": "2e06f0d76b74329d3fd1d434358b4c9de3e985094ac5a36abdd8a74161af072d"
+      "stdout_sha256": "71fb8b34e56f70a6c54112bfd24e11540d123a8fc1f26bf606786734a0f2ad9b"
     },
     {
       "fixture": "examples/integrations/telegram-agent",
@@ -147,7 +147,7 @@
     {
       "fixture": "examples/routing/fan-in/barrier",
       "surface": "describe-json",
-      "stdout_sha256": "006f08e39439a24e4c0179e188c040c637e46148a1d399873a0516d65fd75227"
+      "stdout_sha256": "ef49af38af6c8f52ae0b771c14a9050922bfcbb7af7c22928fdf4af569c159da"
     },
     {
       "fixture": "examples/routing/fan-in/barrier",
@@ -162,7 +162,7 @@
     {
       "fixture": "examples/routing/fan-in/barrier",
       "surface": "describe-graph-json",
-      "stdout_sha256": "86af5ec8308d6ae45a90f0e794384c47ac6ce8c34bfd48321e6dd6b72c6979f0"
+      "stdout_sha256": "be974fe159819a85a914cbc7eb1bbb91a7fcd249452917776902137f1a9217e5"
     },
     {
       "fixture": "examples/routing/fan-in/barrier",
@@ -192,7 +192,7 @@
     {
       "fixture": "internal/releasee2e/testdata/golden_agent_workload",
       "surface": "describe-json",
-      "stdout_sha256": "5576f9abb74122cef275726eb78397d40430123b4bf908b10bea59161536fabd"
+      "stdout_sha256": "2f5c9a80489c999b6c2fc793e77fc977c49f477b85c91f6faf72dded18f28547"
     },
     {
       "fixture": "internal/releasee2e/testdata/golden_agent_workload",
@@ -207,7 +207,7 @@
     {
       "fixture": "internal/releasee2e/testdata/golden_agent_workload",
       "surface": "describe-graph-json",
-      "stdout_sha256": "c0b13135fd98a3b4efba60f0826b205506c23b4e8845f28a3dd49a14be228375"
+      "stdout_sha256": "a8eadb5cb95b4f4204bed210dd38c977f25e732a9d0c87e8c2c82659135dde27"
     },
     {
       "fixture": "internal/releasee2e/testdata/golden_agent_workload",
