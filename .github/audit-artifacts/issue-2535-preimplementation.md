@@ -1,5 +1,43 @@
 # Pre-Implementation Coverage Audit: #2535
 
+## Implementation Status: Updated-Ready Checkpoint
+
+The historical pre-audit below records the frozen cycle-1/cycle-2 preparation;
+that freeze was superseded by the independent cycle-2 first-slice approval
+5957437668. Recommendations1-2 are implemented, not review-ready yet. No cap,
+profile/membership/budget/protection change or parent closure is authorized.
+
+Master integration is now `412194d721cfbbcda889780e6c864b3abedb1051`; its compound
+fixture/owner changes are preserved. Rebased focused controls and the exact
+complexity ratchet pass. The only baseline delta is the excluded new test file;
+production scores remain identical to this base.
+
+D11 has actual hosted proof on unchanged head
+`136953775f3050c5a3f1eda3f1c5c5a70f2a21a2`: draft run37051806562 fails its explicit
+nonqualification summary with green static/complexity, then ready run37052855349
+fully succeeds, attempt1/check-suite100366942795. The plan has77 units,
+profilepr-escalated, execution merge`2b030e09a04b4eec51b2207afe84561c71e44d4c`,
+digest`7b912ca39e26f3775200144cceaa29e5820e74aec540adbb13f37bb8ffba9ec8`.
+GitHub's actual head rollup is SUCCESS, both protected contexts pass, the branch
+is up-to-date/conflict-free and blocked only by REVIEW_REQUIRED. Required summary
+and SQLite local smoke retain App15368, strict protection and ordinary review.
+The failed draft checks are retained, not rewritten or rerun.
+
+Earlier draft-open/sync/reopen receipts37040537258/37045162194/37045457039 remain
+controls. First ready run37048233179 was canceled for base integration after both
+soaks passed; it is not whole-run/protected-acceptance proof. The first local
+qualification failed with host ENOSPC; its replacement passed three units before
+graceful cancellation for rebase, not a whole-suite pass. The omitted generated
+test-file fact was repaired and stale derived cache trimmed; no runtime change.
+
+This audit-only update is the required ready-update entrance. Updated-ready green,
+same-head converted-draft refusal despite that retained green, final same-head
+ready qualification, fresh default swarm-test and the final PR proof audit remain
+mandatory. No literal edited master-only publisher execution is claimed; #2535
+retains that post-merge acceptance and recommendations3-6/the20-minute fleet goal.
+
+## Historical Pre-Audit
+
 Date: 2026-10-02. Implementer: agent-g. **Repaired gate cycle 2.** Phase: audit
 only; coding frozen after the [cycle-1 insufficient/widen-split ruling](https://github.com/division-sh/swarm/issues/2535#issuecomment-5957050174).
 This version supersedes the original first-PR class and cap acceptance, not the
