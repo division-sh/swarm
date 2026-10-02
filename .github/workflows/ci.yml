@@ -4,6 +4,7 @@ on:
   push:
     branches: [master, main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   workflow_dispatch:
     inputs:
       profile:
@@ -47,6 +48,7 @@ jobs:
 
   ci-plan:
     name: CI plan
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -205,6 +207,7 @@ jobs:
         run: go vet ./...
 
   sqlite-local-dev:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: ${{ github.event_name == 'workflow_dispatch' && 'Full dispatch SQLite smoke' || 'SQLite local smoke' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -228,6 +231,7 @@ jobs:
             --api-port 18091
 
   macos-sqlite-possession:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: macOS SQLite possession
     runs-on: macos-latest
     timeout-minutes: 15
@@ -255,6 +259,7 @@ jobs:
   # Cold analysis uses a separate pinned toolchain. Keep its budget independent
   # of the existing product build and possession proof, without extending either.
   unused-linux:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: Native Linux unused analysis
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -277,6 +282,7 @@ jobs:
           if-no-files-found: error
 
   unused-darwin:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: Native Darwin unused analysis
     runs-on: macos-latest
     # Lead-authorized <=30% allowance; integer minutes round 19.5 down to 19.
@@ -300,6 +306,7 @@ jobs:
           if-no-files-found: error
 
   unused-checks:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: Native union unused checks
     needs: [unused-linux, unused-darwin]
     runs-on: ubuntu-latest
@@ -326,6 +333,7 @@ jobs:
         run: go run ./cmd/swarm-unused -merge -in test-results/unused
 
   proof-unit:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: Go proof ${{ matrix.unit }}
     needs: [ci-plan]
     runs-on: ubuntu-latest
@@ -410,7 +418,7 @@ jobs:
   mandatory-soak:
     name: Go proof ${{ matrix.unit }}
     needs: [ci-plan]
-    if: ${{ needs.ci-plan.outputs.soak_matrix != '{"include":[]}' }}
+    if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && needs.ci-plan.outputs.soak_matrix != '{"include":[]}' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -483,6 +491,7 @@ jobs:
           if-no-files-found: error
 
   semantic-smoke:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: Semantic smoke proofs
     runs-on: ubuntu-latest
     timeout-minutes: 12
@@ -538,7 +547,7 @@ jobs:
 
   timing-budget:
     name: CI timing budget
-    if: always()
+    if: ${{ always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     needs: [ci-plan, proof-unit, mandatory-soak]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -621,8 +630,14 @@ jobs:
     steps:
       - name: Summarize required checks
         shell: bash
+        env:
+          IS_DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
         run: |
           set -euo pipefail
+          if [ "$IS_DRAFT" = true ]; then
+            echo "Draft PR is not qualified; mark it ready for full CI." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
           failed=0
           if [ '${{ needs.ci-plan.outputs.soak_matrix }}' != '{"include":[]}' ] && [ "${{ needs.mandatory-soak.result }}" != success ]; then failed=1; fi
           for item in \
@@ -631,13 +646,7 @@ jobs:
             "macos-sqlite-possession:${{ needs.macos-sqlite-possession.result }}" \
             "unused-linux:${{ needs.unused-linux.result }}" \
             "unused-darwin:${{ needs.unused-darwin.result }}" \
-            "unused-checks:${{ needs.unused-checks.result }}"
-          do
-            name="${item%%:*}"; result="${item#*:}"
-            echo "- ${name}: \`${result}\`" >> "$GITHUB_STEP_SUMMARY"
-            if [ "$result" != success ]; then failed=1; fi
-          done
-          for item in \
+            "unused-checks:${{ needs.unused-checks.result }}" \
             "ci-plan:${{ needs.ci-plan.result }}" \
             "sqlite-local-dev:${{ needs.sqlite-local-dev.result }}" \
             "proof-unit:${{ needs.proof-unit.result }}" \
@@ -646,7 +655,7 @@ jobs:
           do
             name="${item%%:*}"; result="${item#*:}"
             echo "- ${name}: \`${result}\`" >> "$GITHUB_STEP_SUMMARY"
-            case "$result" in success|skipped) ;; *) failed=1 ;; esac
+            if [ "$result" != success ]; then failed=1; fi
           done
           exit "$failed"
 
@@ -750,4 +759,3 @@ jobs:
           else
             gh pr edit "$pr" --title "[automation][issue #1967] Refresh CI timing weights"
           fi
-          gh workflow run ci.yml --ref "$branch" -f profile=full

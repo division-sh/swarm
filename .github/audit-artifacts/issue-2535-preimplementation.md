@@ -361,8 +361,18 @@ native-unused union and complexity aggregate tests **passed**. This proves
 preserved baseline contracts, not new D/B fixes. New fixture/mutation/hosted
 qualification and default swarm-test **not run** in pre-audit.
 
-Independent gate: cycle1 **insufficient; widen/split class**, recorded on the
-issue. The repaired cycle2 artifact requests one fresh gate. Implementation
-remains frozen until reviewer-g records approval for this draft/duplicate class,
-D11 protected acceptance and the explicit publisher acceptance sequence. No
-workflow implementation, cap setting, new framework or PR is authorized yet.
+Independent gate: cycle1 **insufficient; widen/split class**; cycle2
+**approved as first slice**, recorded at
+https://github.com/division-sh/swarm/issues/2535#issuecomment-5957437668.
+Only recommendations1-2 are authorized; D11/D06 actual hosted protection proof
+and the explicit master-only post-merge publisher acceptance sequence are
+binding. Recommendations3-6 and the parent target remain open. No cap setting,
+new framework, security exception or proof-selection change is authorized.
+
+Implementation characterization: new execution-oriented admission/summary and
+publisher-shell tests failed against the original workflow (missing native event
+subscriptions, draft plan admission, missing draft refusal and redundant
+dispatch). With the bounded workflow correction, focused timing/planner/native
+unused/complexity controls pass; timing/admission/publisher race tests pass.
+This is local mechanics proof only. Default swarm-test and real hosted
+draft/ready/protection proof are pending; no review-ready or parent closure claim.
