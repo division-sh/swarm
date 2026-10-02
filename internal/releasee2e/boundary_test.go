@@ -37,7 +37,7 @@ func TestReleaseE2EPackageStaysAtPublicProcessBoundary(t *testing.T) {
 			if err != nil {
 				t.Fatalf("decode import in %s: %v", entry.Name(), err)
 			}
-			if strings.Contains(name, "github.com/division-sh/swarm") {
+			if releaseE2EImplementationImport(entry.Name(), name) {
 				t.Fatalf("release E2E source %s imports Swarm implementation package %q", entry.Name(), name)
 			}
 		}
@@ -60,5 +60,32 @@ func TestReleaseE2EPackageStaysAtPublicProcessBoundary(t *testing.T) {
 				t.Fatalf("release E2E source %s names forbidden in-process seam %q", entry.Name(), forbidden)
 			}
 		}
+	}
+}
+
+func releaseE2EImplementationImport(file, name string) bool {
+	// Only the shared database fixture owner may cross this boundary, in its
+	// allocator and admission regression. Product execution stays in processes.
+	if name == "github.com/division-sh/swarm/internal/testpostgres" &&
+		(file == "golden_agent_workload_test.go" || file == "postgres_capacity_admission_test.go") {
+		return false
+	}
+	return strings.Contains(name, "github.com/division-sh/swarm")
+}
+
+func TestReleaseE2ECapacityFixtureImportBoundary(t *testing.T) {
+	const fixture = "github.com/division-sh/swarm/internal/testpostgres"
+	for _, file := range []string{"golden_agent_workload_test.go", "postgres_capacity_admission_test.go"} {
+		if releaseE2EImplementationImport(file, fixture) {
+			t.Fatalf("shared fixture owner refused in %s", file)
+		}
+		for _, forbidden := range []string{fixture + "/other", fixture + "other", "github.com/division-sh/swarm/internal/serveapp", "github.com/division-sh/swarm/internal/runtime/contracts"} {
+			if !releaseE2EImplementationImport(file, forbidden) {
+				t.Fatalf("capacity exception allowed %q", forbidden)
+			}
+		}
+	}
+	if !releaseE2EImplementationImport("another_test.go", fixture) {
+		t.Fatal("capacity exception escaped its two fixture files")
 	}
 }
