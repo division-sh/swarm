@@ -192,6 +192,9 @@ func TestFanOutBatchEventAdmissionHostileBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			t.Run("healthy_admitted_scalar", func(t *testing.T) {
+				assertFanOutAdmittedScalarHydration(t, ctx, db, postgres, ids[1], original)
+			})
 			for _, reader := range []string{"record", "record_batch"} {
 				t.Run("healthy_"+reader, func(t *testing.T) {
 					assertFanOutRecordHydration(t, ctx, db, postgres, reader, ids, original)
@@ -266,12 +269,25 @@ func TestFanOutBatchEventAdmissionHostileBothStores(t *testing.T) {
 					if _, err := m29LoadBatch(ctx, db, postgres, ids); err != nil {
 						t.Fatalf("rollback must restore fresh admission: %v", err)
 					}
+					assertFanOutAdmittedScalarHydration(t, ctx, db, postgres, ids[1], original)
 					for _, reader := range []string{"record", "record_batch"} {
 						assertFanOutRecordHydration(t, ctx, db, postgres, reader, ids, original)
 					}
 				})
 			}
 		})
+	}
+}
+
+func assertFanOutAdmittedScalarHydration(t testing.TB, ctx context.Context, q eventReadQueryer, postgres bool, id string, original eventrecord.Record) {
+	t.Helper()
+	admitted, settlement, found, err := loadJointSourceReadAdmitted(ctx, q, postgres, id)
+	if err != nil || !found {
+		t.Fatalf("fresh scalar admission: found=%v err=%v", found, err)
+	}
+	got, err := eventrecord.FromAdmitted(admitted, settlement)
+	if err != nil || !got.Equal(original) {
+		t.Fatalf("scalar admission changed complete ordinal record: got=%+v want=%+v err=%v", got, original, err)
 	}
 }
 
