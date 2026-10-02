@@ -175,7 +175,8 @@ absent required row, unchanged source and sibling state before release, then
 checks the named activation refusal and discard. It exposed a real omitted
 retirement consumer: retained-completion discard removed fields but left three
 constructed headers on both stores. The same named atomic discard now removes
-those headers and cascaded readiness/construction rows. Retention, story order,+completion tombstones, dependency refusal and rollback remain unchanged.
+those headers and cascaded readiness/construction rows. Retention, story order,
+completion tombstones, dependency refusal and rollback remain unchanged.
 The before-edit class/census repair is recorded on2496 at5950195540, under the
 existing O2/C11/P35-P36 retirement boundary; no additional semantic owner.
 
