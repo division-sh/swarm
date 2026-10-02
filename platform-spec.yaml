@@ -16794,12 +16794,16 @@ platform_tables:
           local execution admission and generation grants as ownership_unprovable without waiting on stalled SQL or an
           operation/grant mutex held across it. This is a local permission decision, not proof of physical database loss,
           completed SQL cleanup or released remote possession. Outstanding proof SQL and cleanup remain owned and joined.
+          SQLite reproof uses the process session's private reserved connection, not ordinary workload pool admission;
+          its deadline is not postponed by pool pressure. Failed durable release retains that resource for reproof.
         terminal_readback: >-
           Observed retained-session disposal or unexpected SQLite possession-coordinate release fences the capability
           and local grants before optional successor-lineage readback. Only exact validated lineage may enrich diagnostics
           as ownership_superseded; missing, unavailable or malformed readback cannot delay the safety decision. Readback
           and cleanup remain owned and joined. Late successful SQL, transitions or diagnostic enrichment cannot revive
-          retired capability/grants or authorize takeover. The monitor deadline is not a universal query or shutdown timeout.
+          retired capability/grants or authorize takeover. SQLite successor readback uses fresh autocommit reads on
+          the same retained proof connection. Local fencing precedes optional bounded readback, and readback completion
+          closes the resource and restores its reservation. The monitor deadline is not a universal query or shutdown timeout.
       diagnostic_inspection_contract: >-
         `swarm store status` is read-only. It never creates a SQLite parent, database file, or possession coordinate, bootstraps or origin-stamps
         either selected store, or creates PostgreSQL schema objects. An absent SQLite target or an empty PostgreSQL/SQLite
@@ -38990,6 +38994,10 @@ agent_topology_authority:
       before selected-store mutation; a pool bound to one inode and a possession value bound to another database or
       coordinate fails closed. Swarm never deletes, replaces, rotates, migrates, or exports the coordinate. Missing or
       replaced database/coordinate identity terminalizes the retained process capability as ownership_unprovable.
+      Before publishing SQLite authority, the existing selected backend retains one private proof connection and
+      revalidates the same possession pair. Finite pool capacity reserves exactly that connection without reducing
+      ordinary workload capacity; an unlimited pool remains unlimited. Reservation and partial startup failures
+      close the proof resource and release possession. This is not another database open, pool, or authority.
       Deliberate same-user coordinate replacement is unsupported filesystem tampering and is not claimed as a hostile
       zero-overlap boundary. Only then may the same retained capability lock and classify the global durable authority head. A valid active
       predecessor with absent backend possession is atomically superseded, every predecessor new-work grant is
@@ -39015,7 +39023,12 @@ agent_topology_authority:
       caller error, rolls back any current transaction, and preserves the retained backend possession,
       session, process capability, and grants. An independent exact proof or the separately owned
       possession monitor decides whether ownership was actually lost; caller cancellation is never
-      translated into ownership_unprovable. PostgreSQL checks operation admission before starting owned SQL,
+      translated into ownership_unprovable. SQLite ordinary proof, operation-error and failed-release reproof use
+      the same privately retained connection for fresh autocommit authority reads, never pooled fallback, cached
+      health, or a retained read transaction. Failed durable release retains proof access for independent reproof
+      and monitor rearming. Successful durable and possession release close it and restore its reservation;
+      selected-backend disposal cancels and joins pending retention and closes all retained proof resources.
+      PostgreSQL checks operation admission before starting owned SQL,
       drains admitted BEGIN/statements/results and checks explicit cancellation before COMMIT admission. After
       COMMIT admission the actual acknowledged outcome or uncertainty governs; later cleanup errors do not erase
       acknowledged commit. The retained session owns outstanding SQL until commit/rollback and cleanup join. Retained-session release
@@ -39066,7 +39079,10 @@ agent_topology_authority:
     monitor: >-
       One process-work-owned monitor proves only the exact retained backend capability. Probe serialization is shared
       with canonical operations, so waiting behind an in-flight operation is neutral and the bounded backend deadline
-      starts only after serialization. Release cancellation is checked after serialization and before backend I/O;
+      starts only after serialization. SQLite proof access does not wait for an ordinary workload connection.
+      Its existing backend-failure budget still covers fresh I/O; pool saturation alone cannot terminalize healthy
+      ownership. Real failure, corruption, disposal, or database/coordinate replacement still fails closed without
+      reconnect or fallback. Release cancellation is checked after serialization and before backend I/O;
       a probe already in I/O is cancelled and joined before unlock. Cancellation before or during a proof is a
       neutral monitor outcome: it cannot terminalize the retained adapter or release possession. Release first
       cancels and joins the current monitor so an in-flight proof cannot block serialized durable grant retirement.

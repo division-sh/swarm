@@ -135,24 +135,34 @@ func (s *StartupSQLiteOwner) AcquireProcessCapability(ctx context.Context, req r
 		}
 		return nil, err
 	}
+	proof, err := s.backend.RetainOwnershipProof(ctx)
+	if err != nil {
+		return nil, errors.Join(err, possession.Release())
+	}
+	cleanup := func(err error) error {
+		return errors.Join(err, proof.Close(), possession.Release())
+	}
+	if err := possession.ProveCurrent(ctx); err != nil {
+		return nil, cleanup(err)
+	}
 	var authority runtimestartupownership.Authority
-	session := &sqliteSession{owner: s, authority: authority, possession: possession}
+	session := &sqliteSession{owner: s, authority: authority, possession: possession, proof: proof}
 	err = s.backend.RunTransaction(ctx, "acquire runtime process capability", func(txctx context.Context, tx *sql.Tx) error {
 		var acquireErr error
 		authority, acquireErr = acquireAuthorityTx(txctx, tx, req, "sqlite_retained_owner", true)
 		return acquireErr
 	})
 	if err != nil {
-		return nil, errors.Join(err, possession.Release())
+		return nil, cleanup(err)
 	}
 	session.authority = authority
 	session.fanOutStore, err = s.fanOutPipeline.NewFanOutServingStore(&fanOutAdmission{session: session, sqlite: true})
 	if err != nil {
-		return nil, errors.Join(err, possession.Release())
+		return nil, cleanup(err)
 	}
 	capability, err := runtimestartupownership.NewProcessCapability(session)
 	if err != nil {
-		return nil, errors.Join(err, possession.Release())
+		return nil, cleanup(err)
 	}
 	return capability, nil
 }
@@ -371,6 +381,7 @@ type sqliteSession struct {
 	terminalOwner    runtimestartupownership.SessionTerminalOwner
 	terminalDeadline time.Duration
 	possession       sqlitePossession
+	proof            *sqlitebackend.OwnershipProof
 	released         bool
 	fanOutStore      runtimestartupownership.FanOutServingStore
 }
@@ -403,7 +414,7 @@ func (s *sqliteSession) proveCurrent(ctx context.Context, terminalOnFailure bool
 		return err
 	}
 	var snapshot []byte
-	err = s.owner.backend.QueryRowContext(ctx, `SELECT snapshot FROM runtime_startup_authority_facts WHERE authority_id = ? ORDER BY transition_ordinal DESC LIMIT 1`, authority.AuthorityID).Scan(&snapshot)
+	err = s.proof.QueryRowContext(ctx, `SELECT snapshot FROM runtime_startup_authority_facts WHERE authority_id = ? ORDER BY transition_ordinal DESC LIMIT 1`, authority.AuthorityID).Scan(&snapshot)
 	if err != nil {
 		if callerErr := contextError(ctx); callerErr != nil {
 			return callerErr
@@ -563,7 +574,7 @@ func (s *sqliteSession) Release(ctx context.Context) error {
 	s.authority = next
 	s.released = true
 	s.mu.Unlock()
-	return s.possession.Release()
+	return errors.Join(s.possession.Release(), s.proof.Close())
 }
 
 func (s *sqliteSession) terminal() {
@@ -574,17 +585,19 @@ func (s *sqliteSession) terminal() {
 	release := !s.released
 	s.released = true
 	s.mu.Unlock()
+	if !release {
+		return
+	}
 	if owner != nil {
 		owner.SelectedStoreSessionTerminal(runtimestartupownership.TerminalResult{Cause: runtimestartupownership.TerminalOwnershipUnprovable})
 	}
-	if release {
-		_ = s.possession.Release()
-	}
+	_ = s.possession.Release()
 	if owner != nil {
 		owner.SelectedStoreSessionTerminal(boundedTerminalResult(deadline, func(ctx context.Context) runtimestartupownership.TerminalResult {
-			return s.owner.terminalResult(ctx, authority, true)
+			return loadTerminalAuthorityResult(ctx, s.proof, authority, true)
 		}))
 	}
+	_ = s.proof.Close()
 }
 
 func boundedTerminalResult(deadline time.Duration, load func(context.Context) runtimestartupownership.TerminalResult) runtimestartupownership.TerminalResult {
@@ -608,10 +621,6 @@ func reportTerminalWithReadback(owner runtimestartupownership.SessionTerminalOwn
 }
 
 func (s *StartupPostgresOwner) terminalResult(ctx context.Context, authority runtimestartupownership.Authority, sqlite bool) runtimestartupownership.TerminalResult {
-	return loadTerminalAuthorityResult(ctx, s.backend, authority, sqlite)
-}
-
-func (s *StartupSQLiteOwner) terminalResult(ctx context.Context, authority runtimestartupownership.Authority, sqlite bool) runtimestartupownership.TerminalResult {
 	return loadTerminalAuthorityResult(ctx, s.backend, authority, sqlite)
 }
 

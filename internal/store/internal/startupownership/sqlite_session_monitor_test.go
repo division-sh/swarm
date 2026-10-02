@@ -91,74 +91,13 @@ func TestSQLiteSessionOrdinaryCancellationPreservesPossessionUntilDurableRelease
 
 func proveSQLiteSessionCancellationPreservesPossessionUntilDurableRelease(t *testing.T, phase string, monitor bool) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "runtime.db")
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatalf("open SQLite: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve session fixture source")
-	}
-	source, err := yamlsource.LoadFile(filepath.Join(filepath.Dir(file), "..", "..", "..", "..", "platform-spec.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var spec runtimecontracts.PlatformSpecDocument
-	spec, err = runtimecontracts.AdmitPlatformSpecValue(source.Document("platform-spec.yaml").Root())
-	if err != nil {
-		t.Fatal(err)
-	}
-	plans, err := platformschema.GeneratePlatformTableDDLs(spec)
-	if err != nil {
-		t.Fatal(err)
-	}
-	created := 0
-	for _, plan := range plans {
-		if plan.TableName != "runtime_startup_authority_facts" && plan.TableName != "author_activity_order" {
-			continue
-		}
-		statements, err := schemastore.SQLiteStatementsForPlan(plan)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, statement := range statements {
-			if _, err := db.Exec(statement); err != nil {
-				t.Fatalf("create canonical %s: %v", plan.TableName, err)
-			}
-		}
-		created++
-	}
-	if created != 2 {
-		t.Fatalf("session fixture requires authority and mutation-order tables: created=%d", created)
-	}
-	backend, err := sqlitebackend.New(db)
-	if err != nil {
-		t.Fatalf("construct SQLite backend: %v", err)
-	}
-	authority, err := runtimestartupownership.NewColdAuthority(runtimestartupownership.AcquireRequest{
-		OwnerID: "sqlite-monitor-release", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
-	}, "sqlite_retained_owner")
-	if err != nil {
-		t.Fatalf("construct authority: %v", err)
-	}
-	if err := backend.RunTransaction(context.Background(), "seed runtime process authority", func(ctx context.Context, tx *sql.Tx) error {
-		return recordAuthorityTransitionTx(ctx, tx, nil, authority, true)
-	}); err != nil {
-		t.Fatalf("seed authority: %v", err)
-	}
-
-	retained, err := acquireSQLiteFilePossession(path)
-	if err != nil {
-		t.Fatalf("acquire retained SQLite possession: %v", err)
-	}
+	session, db := newSQLiteProofSession(t, 4)
+	path := session.owner.path
 	blocking := &cancellingSQLitePossession{
-		delegate: retained, entered: make(chan struct{}), resume: make(chan struct{}), phase: phase,
+		delegate: session.possession, entered: make(chan struct{}), resume: make(chan struct{}), phase: phase,
 	}
-	owner := &StartupSQLiteOwner{backend: backend, path: path, schemaGuard: func() error { return nil }}
-	session := &sqliteSession{owner: owner, authority: authority, possession: blocking}
-	terminal := &sqliteSessionTerminalProbe{results: make(chan runtimestartupownership.TerminalResult, 1)}
+	session.possession = blocking
+	terminal := &sqliteSessionTerminalProbe{results: make(chan runtimestartupownership.TerminalResult, 2)}
 	if err := session.InstallTerminalOwner(terminal, time.Minute); err != nil {
 		t.Fatalf("install terminal owner: %v", err)
 	}
@@ -206,7 +145,7 @@ func proveSQLiteSessionCancellationPreservesPossessionUntilDurableRelease(t *tes
 		t.Fatalf("release SQLite session: %v", err)
 	}
 	var durableState string
-	if err := db.QueryRow(`SELECT state FROM runtime_startup_authority_facts WHERE authority_id=? ORDER BY transition_ordinal DESC LIMIT 1`, authority.AuthorityID).Scan(&durableState); err != nil {
+	if err := db.QueryRow(`SELECT state FROM runtime_startup_authority_facts WHERE authority_id=? ORDER BY transition_ordinal DESC LIMIT 1`, session.authority.AuthorityID).Scan(&durableState); err != nil {
 		t.Fatalf("read durable release: %v", err)
 	}
 	if durableState != string(runtimestartupownership.StateReleased) {
@@ -219,4 +158,80 @@ func proveSQLiteSessionCancellationPreservesPossessionUntilDurableRelease(t *tes
 	if err := contender.Release(); err != nil {
 		t.Fatalf("release successor SQLite possession: %v", err)
 	}
+}
+
+func newSQLiteProofSession(t *testing.T, maximum int) (*sqliteSession, *sql.DB) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "runtime.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open SQLite: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	db.SetMaxOpenConns(maximum)
+	db.SetMaxIdleConns(4)
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve session fixture source")
+	}
+	source, err := yamlsource.LoadFile(filepath.Join(filepath.Dir(file), "..", "..", "..", "..", "platform-spec.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec runtimecontracts.PlatformSpecDocument
+	spec, err = runtimecontracts.AdmitPlatformSpecValue(source.Document("platform-spec.yaml").Root())
+	if err != nil {
+		t.Fatal(err)
+	}
+	plans, err := platformschema.GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := 0
+	for _, plan := range plans {
+		if plan.TableName != "runtime_startup_authority_facts" && plan.TableName != "author_activity_order" {
+			continue
+		}
+		statements, err := schemastore.SQLiteStatementsForPlan(plan)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, statement := range statements {
+			if _, err := db.Exec(statement); err != nil {
+				t.Fatalf("create canonical %s: %v", plan.TableName, err)
+			}
+		}
+		created++
+	}
+	if created != 2 {
+		t.Fatalf("session fixture requires authority and mutation-order tables: created=%d", created)
+	}
+	backend, err := sqlitebackend.New(db)
+	if err != nil {
+		t.Fatalf("construct SQLite backend: %v", err)
+	}
+	t.Cleanup(func() { _ = backend.Close() })
+	authority, err := runtimestartupownership.NewColdAuthority(runtimestartupownership.AcquireRequest{
+		OwnerID: "sqlite-monitor-release", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
+	}, "sqlite_retained_owner")
+	if err != nil {
+		t.Fatalf("construct authority: %v", err)
+	}
+	if err := backend.RunTransaction(context.Background(), "seed runtime process authority", func(ctx context.Context, tx *sql.Tx) error {
+		return recordAuthorityTransitionTx(ctx, tx, nil, authority, true)
+	}); err != nil {
+		t.Fatalf("seed authority: %v", err)
+	}
+
+	retained, err := acquireSQLiteFilePossession(path)
+	if err != nil {
+		t.Fatalf("acquire retained SQLite possession: %v", err)
+	}
+	t.Cleanup(func() { _ = retained.Release() })
+	proof, err := backend.RetainOwnershipProof(context.Background())
+	if err != nil {
+		t.Fatalf("retain SQLite proof access: %v", err)
+	}
+	owner := &StartupSQLiteOwner{backend: backend, path: path, schemaGuard: func() error { return nil }}
+	return &sqliteSession{owner: owner, authority: authority, possession: retained, proof: proof}, db
 }
