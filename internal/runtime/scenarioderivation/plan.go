@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
+	"github.com/division-sh/swarm/internal/runtime/scenariodocument"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -139,8 +140,15 @@ func compileEndpoint(source semanticview.Source, identity scenarioexecution.Effe
 		return Plan{}, fmt.Errorf("derive flow %q input %q requires an object event schema, got %T", endpoint.FlowID, endpoint.PinName, generated)
 	}
 	if len(request.Set) > 0 {
-		payload = cloneObject(payload)
-		applyObjectOverlay(payload, request.Set)
+		data, err := scenariodocument.Materialize(request.Set)
+		if err != nil {
+			return Plan{}, fmt.Errorf("derive.payload.set: %w", err)
+		}
+		projection, err := data.Interface()
+		if err != nil {
+			return Plan{}, err
+		}
+		applyObjectOverlay(payload, projection.(map[string]any))
 	}
 	if err := runtimeeventschema.ValidatePayloadAgainstSchema(resolution.Schema.Schema, payload); err != nil {
 		return Plan{}, fmt.Errorf("derive flow %q input %q payload overlay failed canonical validation: %w", endpoint.FlowID, endpoint.PinName, err)
@@ -206,16 +214,9 @@ func applyObjectOverlay(target map[string]any, overlay map[string]any) {
 				applyObjectOverlay(current, nested)
 				continue
 			}
-			target[key] = cloneObject(nested)
+			target[key] = nested
 			continue
 		}
 		target[key] = value
 	}
-}
-
-func cloneObject(input map[string]any) map[string]any {
-	raw, _ := json.Marshal(input)
-	var out map[string]any
-	_ = json.Unmarshal(raw, &out)
-	return out
 }

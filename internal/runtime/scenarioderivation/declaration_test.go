@@ -42,7 +42,7 @@ func TestParseDeclarationRejectsMissingOrNonTextIdentityFields(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, found, err := ParseDeclaration([]byte(tc.yaml))
+			_, found, err := ParseDeclaration([]byte(tc.yaml), "tests/probe.yaml")
 			if found || err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("ParseDeclaration() found=%v err=%v, want %q", found, err, tc.want)
 			}

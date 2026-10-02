@@ -2,7 +2,6 @@ package cliapp
 
 import (
 	"context"
-	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -31,16 +30,14 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/scenarioderivation"
+	"github.com/division-sh/swarm/internal/runtime/scenariodocument"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/division-sh/swarm/internal/sourceartifact"
-	"github.com/google/cel-go/cel"
-	"github.com/google/cel-go/common/types"
-	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -71,7 +68,7 @@ type scenarioTestFile struct {
 	Path     string
 	FlowID   string
 	Raw      []byte
-	Document *scenarioDocument
+	Document *scenariodocument.Document
 }
 
 type preparedScenario struct {
@@ -81,50 +78,10 @@ type preparedScenario struct {
 	execution *scenarioexecution.Selector
 }
 
-type scenarioDocument struct {
-	Name    string
-	Seed    string
-	Vars    map[string]any
-	Setup   scenarioSetup
-	Steps   []scenarioStep
-	Expect  scenarioExpect
-	Invalid *scenarioInvalid
-	Derive  *scenarioderivation.Declaration
-}
-
-type scenarioSetup struct {
-	Entities []scenarioSetupEntity
-}
-
-type scenarioSetupEntity struct {
-	Alias        string
-	EntityType   string
-	Flow         any
-	CurrentState any
-	StateSet     bool
-	Fields       map[string]any
-	FieldsSet    bool
-	Gates        map[string]any
-	GatesSet     bool
-}
-
-type scenarioStep struct {
-	Action             string
-	PublishEvent       string
-	Payload            any
-	Match              map[string]any
-	Reason             any
-	Verdict            any
-	Fields             any
-	Until              any
-	IdempotencyKey     any
-	Emitter            any
-	SourceEventID      any
-	Target             any
-	TargetFlowInstance any
-	TargetEntityID     any
-	GeneratePayload    bool
-}
+type scenarioDocument = scenariodocument.CLI
+type scenarioSetup = scenariodocument.Setup
+type scenarioSetupEntity = scenariodocument.SetupEntity
+type scenarioStep = scenariodocument.Step
 
 type generatedInputFixturePlan struct {
 	flowID          string
@@ -136,40 +93,11 @@ type generatedInputFixturePlan struct {
 	payload         json.RawMessage
 }
 
-type scenarioExpect struct {
-	Events        scenarioEventExpect
-	NoDeadLetters *bool
-	Entities      []scenarioEntityExpect
-}
-
-type scenarioEventExpect struct {
-	Include []string
-	Exact   []string
-	Ordered []string
-}
-
-type scenarioEntityExpect struct {
-	Ref          string
-	EntityType   string
-	Count        *int
-	CurrentState any
-	StateSet     bool
-	Fields       map[string]any
-	FieldsSet    bool
-	Gates        map[string]any
-	GatesSet     bool
-}
-
-type scenarioInvalid struct {
-	Base  map[string]any
-	Cases []scenarioInvalidCase
-}
-
-type scenarioInvalidCase struct {
-	Name   string
-	Set    map[string]any
-	Expect string
-}
+type scenarioExpect = scenariodocument.Expect
+type scenarioEventExpect = scenariodocument.EventExpect
+type scenarioEntityExpect = scenariodocument.EntityExpect
+type scenarioInvalid = scenariodocument.Invalid
+type scenarioInvalidCase = scenariodocument.InvalidCase
 
 type scenarioRunState struct {
 	RunID         string
@@ -226,11 +154,7 @@ type scenarioRunner struct {
 	scenarioExecution       *scenarioexecution.Selector
 }
 
-type scenarioExpressionEvaluator struct {
-	env  *cel.Env
-	seed string
-	vars map[string]any
-}
+type scenarioExpressionEvaluator = scenariodocument.Evaluator
 
 func newTestCommand(root InvocationRoot, opts rootCommandOptions) *cobra.Command {
 	testOpts := scenarioTestCommandOptions{
@@ -502,7 +426,12 @@ func discoverScenarioTestFiles(bundle *runtimecontracts.WorkflowContractBundle, 
 	}
 	out := make([]scenarioTestFile, 0, len(byLabel))
 	for _, file := range byLabel {
-		if autoDiscoveredScenarioCandidate(file.Raw) {
+		document, found, err := scenariodocument.Discover(file.Raw, file.Path)
+		if err != nil {
+			return nil, err
+		}
+		if found {
+			file.Document = &document
 			out = append(out, file)
 		}
 	}
@@ -553,76 +482,121 @@ func normalizeScenarioLabel(raw string) (string, error) {
 	return label, nil
 }
 
-func autoDiscoveredScenarioCandidate(raw []byte) bool {
-	var root yaml.Node
-	if err := yaml.Unmarshal(raw, &root); err != nil || len(root.Content) == 0 || root.Content[0].Kind != yaml.MappingNode {
-		return true
-	}
-	top := mappingNode(root.Content[0])
-	return top["version"] != nil || top["steps"] != nil || top["derive"] != nil || top["invalid"] != nil
-}
-
 func (r scenarioRunner) prepareScenario(file scenarioTestFile) (preparedScenario, error) {
-	var doc scenarioDocument
-	if file.Document != nil {
-		doc = *file.Document
-	} else {
-		if len(file.Raw) == 0 {
-			return preparedScenario{}, fmt.Errorf("%s: admitted scenario bytes are missing", file.Path)
-		}
-		var err error
-		doc, err = parseScenarioDocument(file.Raw)
-		if err != nil {
-			return preparedScenario{}, fmt.Errorf("%s: %w", file.Path, err)
-		}
-	}
-	if doc.Derive != nil {
-		plans, err := scenarioderivation.Compile(r.source, r.effectiveSourceIdentity, scenarioderivation.Request{
-			FlowID: doc.Derive.FlowID, Input: doc.Derive.Input, Set: doc.Derive.Set,
-			ProfileID: doc.Derive.Name, Responses: doc.Derive.ConnectorResponses,
-		})
-		if err != nil {
-			return preparedScenario{}, fmt.Errorf("%s: %w", file.Path, err)
-		}
-		payload, err := materializeScenarioSemanticPayload(plans[0].Payload)
-		if err != nil {
-			return preparedScenario{}, fmt.Errorf("%s: materialize derived payload: %w", file.Path, err)
-		}
-		doc.Steps = []scenarioStep{{Action: "publish", PublishEvent: plans[0].EventKey, Payload: payload}}
-		file.FlowID = plans[0].FlowID
-		selector, err := scenarioexecution.NewSelector(plans[0].Profile)
-		if err != nil {
-			return preparedScenario{}, fmt.Errorf("%s: select scenario execution profile: %w", file.Path, err)
-		}
-		r.scenarioExecution = &selector
-		addDerivedGenericOracle(&doc.Expect, plans[0].EventKey)
+	doc, err := scenarioDocumentForFile(file)
+	if err != nil {
+		return preparedScenario{}, fmt.Errorf("%s: %w", file.Path, err)
 	}
 	seed, err := r.scenarioEvaluatorSeed(file, doc)
 	if err != nil {
-		return preparedScenario{}, fmt.Errorf("%s: %w", file.Path, err)
+		return preparedScenario{}, err
 	}
 	evaluator, err := newScenarioExpressionEvaluator(seed, doc.Vars)
 	if err != nil {
 		return preparedScenario{}, fmt.Errorf("%s: %w", file.Path, err)
+	}
+	if doc.Derive != nil {
+		file, doc, r.scenarioExecution, err = r.prepareAuthoredDerivedScenario(file, doc, evaluator)
+		if err != nil {
+			return preparedScenario{}, fmt.Errorf("%s: %w", file.Path, err)
+		}
 	}
 	if doc.Invalid != nil {
 		if err := r.runInvalidVariants(file, doc, evaluator); err != nil {
 			return preparedScenario{}, err
 		}
 	}
+	doc, err = scenariodocument.PrepareCLI(doc, evaluator, func(label string) (semanticvalue.Value, error) { return r.loadFixturePayload(file.Path, label) })
+	if err != nil {
+		return preparedScenario{}, fmt.Errorf("%s: %w", file.Path, err)
+	}
+	if err := r.validatePreparedScenario(file, doc, evaluator); err != nil {
+		return preparedScenario{}, err
+	}
+	return preparedScenario{file: file, document: doc, evaluator: evaluator, execution: r.scenarioExecution}, nil
+}
+
+func scenarioDocumentForFile(file scenarioTestFile) (scenarioDocument, error) {
+	if file.Document != nil {
+		return file.Document.Projection()
+	}
+	if len(file.Raw) == 0 {
+		return scenarioDocument{}, fmt.Errorf("admitted scenario bytes are missing")
+	}
+	admitted, err := scenariodocument.Admit(file.Raw, file.Path)
+	if err != nil {
+		return scenarioDocument{}, err
+	}
+	return admitted.Projection()
+}
+
+func (r scenarioRunner) prepareAuthoredDerivedScenario(file scenarioTestFile, doc scenarioDocument, evaluator *scenarioExpressionEvaluator) (scenarioTestFile, scenarioDocument, *scenarioexecution.Selector, error) {
+	declaration, err := scenarioderivation.MaterializeDeclaration(*doc.Derive, evaluator)
+	if err != nil {
+		return file, doc, nil, err
+	}
+	plans, err := scenarioderivation.Compile(r.source, r.effectiveSourceIdentity, scenarioderivation.Request{
+		FlowID: declaration.FlowID, Input: declaration.Input, Set: declaration.Set,
+		ProfileID: declaration.Name, Responses: declaration.ConnectorResponses,
+	})
+	if err != nil {
+		return file, doc, nil, err
+	}
+	payload, err := materializeScenarioSemanticPayload(plans[0].Payload)
+	if err != nil {
+		return file, doc, nil, err
+	}
+	data, err := scenariodocument.Materialize(payload)
+	if err != nil {
+		return file, doc, nil, err
+	}
+	doc.Steps = []scenarioStep{{Action: "publish", PublishEvent: plans[0].EventKey, Payload: data}}
+	file.FlowID = plans[0].FlowID
+	selector, err := scenarioexecution.NewSelector(plans[0].Profile)
+	if err != nil {
+		return file, doc, nil, err
+	}
+	addDerivedGenericOracle(&doc.Expect, plans[0].EventKey)
+	return file, doc, &selector, nil
+}
+
+func (r scenarioRunner) validatePreparedScenario(file scenarioTestFile, doc scenarioDocument, evaluator *scenarioExpressionEvaluator) error {
 	for _, entity := range doc.Setup.Entities {
 		if _, err := r.evaluateScenarioSetupEntity(file, evaluator, entity); err != nil {
-			return preparedScenario{}, fmt.Errorf("%s: setup: %w", file.Path, err)
+			return fmt.Errorf("%s: setup: %w", file.Path, err)
 		}
 	}
 	for i, step := range doc.Steps {
-		if step.Action == "publish" {
-			if _, _, err := r.buildPublishPayload(file, evaluator, step); err != nil {
-				return preparedScenario{}, fmt.Errorf("%s: step %d: %w", file.Path, i+1, err)
-			}
+		if err := r.validatePreparedStep(file, evaluator, step); err != nil {
+			return fmt.Errorf("%s: step %d: %w", file.Path, i+1, err)
 		}
 	}
-	return preparedScenario{file: file, document: doc, evaluator: evaluator, execution: r.scenarioExecution}, nil
+	for _, expectation := range doc.Expect.Entities {
+		if _, err := evaluateScenarioEntityDetail(expectation, evaluator); err != nil {
+			return fmt.Errorf("%s: expect.entities: %w", file.Path, err)
+		}
+	}
+	return nil
+}
+
+func (r scenarioRunner) validatePreparedStep(file scenarioTestFile, evaluator *scenarioExpressionEvaluator, step scenarioStep) error {
+	if step.Action == "publish" {
+		_, _, err := r.buildPublishPayload(file, evaluator, step)
+		return err
+	}
+	if _, _, err := evaluateScenarioCardMatch(evaluator, "", step.Match); err != nil {
+		return err
+	}
+	if step.Action == "mailbox.defer" {
+		until, err := evaluator.Evaluate(step.Until)
+		if err != nil {
+			return err
+		}
+		if _, err := time.Parse(time.RFC3339, optionalScenarioString(until)); err != nil {
+			return fmt.Errorf("mailbox.defer until must be RFC3339: %w", err)
+		}
+	}
+	return nil
 }
 
 func (r scenarioRunner) runPreparedScenario(ctx context.Context, prepared preparedScenario) error {
@@ -648,7 +622,7 @@ func (r scenarioRunner) runPreparedScenario(ctx context.Context, prepared prepar
 		if err := r.waitForQuiescence(ctx, state.RunID); err != nil {
 			return fmt.Errorf("%s: %w", file.Path, err)
 		}
-		if !doc.Expect.empty() {
+		if !doc.Expect.Empty() {
 			if err := r.evaluateExpectations(ctx, state, evaluator, doc.Expect); err != nil {
 				return fmt.Errorf("%s: %w", file.Path, err)
 			}
@@ -664,7 +638,7 @@ func prepareScenarioTestFiles(files []scenarioTestFile) ([]scenarioTestFile, err
 		if len(prepared[i].Raw) == 0 {
 			return nil, fmt.Errorf("%s: admitted scenario bytes are missing", prepared[i].Path)
 		}
-		doc, err := parseScenarioDocument(prepared[i].Raw)
+		doc, err := scenariodocument.Admit(prepared[i].Raw, prepared[i].Path)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", prepared[i].Path, err)
 		}
@@ -685,9 +659,13 @@ func (r scenarioRunner) runDerivedPlan(ctx context.Context, plan scenarioderivat
 	r.scenarioExecution = &selector
 	defer func() { r.scenarioExecution = nil }()
 	file := scenarioTestFile{Path: path.Join("tests", "derived-"+scenarioSHA40(plan.FlowID+"\x00"+plan.PinName)+".yaml"), FlowID: plan.FlowID}
+	data, err := scenariodocument.Materialize(payload)
+	if err != nil {
+		return scenarioTestValidationError{err: err}
+	}
 	doc := scenarioDocument{
 		Name:  "derived:" + plan.FlowID + "/" + plan.PinName,
-		Steps: []scenarioStep{{Action: "publish", PublishEvent: plan.EventKey, Payload: payload}},
+		Steps: []scenarioStep{{Action: "publish", PublishEvent: plan.EventKey, Payload: data}},
 	}
 	addDerivedGenericOracle(&doc.Expect, plan.EventKey)
 	seed := strings.Join([]string{scenarioderivation.PlanVersion, r.effectiveSourceIdentity.Digest(), plan.FlowID, plan.PinName}, "\x00")
@@ -727,165 +705,11 @@ deadLetters:
 }
 
 func parseScenarioDocument(raw []byte) (scenarioDocument, error) {
-	declaration, derived, err := scenarioderivation.ParseDeclaration(raw)
+	document, err := scenariodocument.Admit(raw, "")
 	if err != nil {
 		return scenarioDocument{}, err
 	}
-	var root yaml.Node
-	if err := yaml.Unmarshal(raw, &root); err != nil {
-		return scenarioDocument{}, fmt.Errorf("parse YAML: %w", err)
-	}
-	if len(root.Content) == 0 || root.Content[0].Kind != yaml.MappingNode {
-		return scenarioDocument{}, fmt.Errorf("scenario document must be a YAML mapping")
-	}
-	top := mappingNode(root.Content[0])
-	for key := range top {
-		switch key {
-		case "version", "name", "seed", "vars", "setup", "steps", "derive", "connector_responses", "expect", "invalid":
-		default:
-			return scenarioDocument{}, fmt.Errorf("unsupported top-level field %q", key)
-		}
-	}
-	if node := top["version"]; node != nil {
-		version := strings.TrimSpace(fmt.Sprint(yamlNodeValue(node)))
-		if version != "" && version != "1" && version != "v1" {
-			return scenarioDocument{}, fmt.Errorf("unsupported scenario version %q", version)
-		}
-	}
-	doc := scenarioDocument{Vars: map[string]any{}}
-	if derived {
-		doc.Derive = &declaration
-	}
-	if node := top["name"]; node != nil {
-		doc.Name = strings.TrimSpace(fmt.Sprint(yamlNodeValue(node)))
-	}
-	if node := top["seed"]; node != nil {
-		doc.Seed = strings.TrimSpace(fmt.Sprint(yamlNodeValue(node)))
-	}
-	if node := top["vars"]; node != nil {
-		vars, ok := yamlNodeValue(node).(map[string]any)
-		if !ok {
-			return scenarioDocument{}, fmt.Errorf("vars must be a mapping")
-		}
-		doc.Vars = vars
-	}
-	if node := top["setup"]; node != nil {
-		setup, err := parseScenarioSetup(node)
-		if err != nil {
-			return scenarioDocument{}, err
-		}
-		doc.Setup = setup
-	}
-	stepsNode := top["steps"]
-	if stepsNode == nil && !derived {
-		return scenarioDocument{}, fmt.Errorf("steps is required")
-	}
-	if stepsNode != nil && (stepsNode.Kind != yaml.SequenceNode || len(stepsNode.Content) == 0) {
-		return scenarioDocument{}, fmt.Errorf("steps must be a non-empty list")
-	}
-	if stepsNode != nil {
-		for _, node := range stepsNode.Content {
-			step, err := parseScenarioStep(node)
-			if err != nil {
-				return scenarioDocument{}, err
-			}
-			doc.Steps = append(doc.Steps, step)
-		}
-	}
-	if node := top["expect"]; node != nil {
-		expect, err := parseScenarioExpect(node)
-		if err != nil {
-			return scenarioDocument{}, err
-		}
-		doc.Expect = expect
-	}
-	if node := top["invalid"]; node != nil {
-		invalid, err := parseScenarioInvalid(node)
-		if err != nil {
-			return scenarioDocument{}, err
-		}
-		doc.Invalid = &invalid
-	}
-	return doc, nil
-}
-
-func parseScenarioSetup(node *yaml.Node) (scenarioSetup, error) {
-	if node.Kind != yaml.MappingNode {
-		return scenarioSetup{}, fmt.Errorf("setup must be a mapping")
-	}
-	m := yamlNodeValue(node).(map[string]any)
-	for key := range m {
-		switch key {
-		case "entities":
-		default:
-			return scenarioSetup{}, fmt.Errorf("unsupported setup field %q", key)
-		}
-	}
-	rawEntities, ok := m["entities"].([]any)
-	if !ok || len(rawEntities) == 0 {
-		return scenarioSetup{}, fmt.Errorf("setup.entities must be a non-empty list")
-	}
-	seen := map[string]struct{}{}
-	out := scenarioSetup{Entities: make([]scenarioSetupEntity, 0, len(rawEntities))}
-	for i, raw := range rawEntities {
-		item, err := parseScenarioSetupEntity(raw, i)
-		if err != nil {
-			return scenarioSetup{}, err
-		}
-		if _, ok := seen[item.Alias]; ok {
-			return scenarioSetup{}, fmt.Errorf("setup.entities[%d].as %q is duplicated", i, item.Alias)
-		}
-		seen[item.Alias] = struct{}{}
-		out.Entities = append(out.Entities, item)
-	}
-	return out, nil
-}
-
-func parseScenarioSetupEntity(raw any, i int) (scenarioSetupEntity, error) {
-	m, ok := raw.(map[string]any)
-	if !ok {
-		return scenarioSetupEntity{}, fmt.Errorf("setup.entities[%d] must be a mapping", i)
-	}
-	var item scenarioSetupEntity
-	for key, value := range m {
-		switch key {
-		case "as":
-			item.Alias = strings.TrimSpace(fmt.Sprint(value))
-		case "type":
-			item.EntityType = strings.TrimSpace(fmt.Sprint(value))
-		case "flow":
-			item.Flow = cloneAny(value)
-		case "current_state":
-			if text, ok := value.(string); ok && strings.TrimSpace(text) == "" {
-				return scenarioSetupEntity{}, fmt.Errorf("setup.entities[%d].current_state must be non-empty", i)
-			}
-			item.CurrentState = cloneAny(value)
-			item.StateSet = true
-		case "fields":
-			fields, ok := value.(map[string]any)
-			if !ok {
-				return scenarioSetupEntity{}, fmt.Errorf("setup.entities[%d].fields must be a mapping", i)
-			}
-			item.Fields = cloneAnyMap(fields)
-			item.FieldsSet = true
-		case "gates":
-			gates, ok := value.(map[string]any)
-			if !ok {
-				return scenarioSetupEntity{}, fmt.Errorf("setup.entities[%d].gates must be a mapping", i)
-			}
-			item.Gates = cloneAnyMap(gates)
-			item.GatesSet = true
-		default:
-			return scenarioSetupEntity{}, fmt.Errorf("unsupported setup.entities[%d] field %q", i, key)
-		}
-	}
-	if item.Alias == "" {
-		return scenarioSetupEntity{}, fmt.Errorf("setup.entities[%d].as is required", i)
-	}
-	if item.EntityType == "" {
-		return scenarioSetupEntity{}, fmt.Errorf("setup.entities[%d].type is required", i)
-	}
-	return item, nil
+	return document.Projection()
 }
 
 func (r scenarioRunner) scenarioEvaluatorSeed(file scenarioTestFile, doc scenarioDocument) (string, error) {
@@ -893,509 +717,21 @@ func (r scenarioRunner) scenarioEvaluatorSeed(file scenarioTestFile, doc scenari
 	if err != nil {
 		return "", fmt.Errorf("derive scenario identity: %w", err)
 	}
-	parts := []string{
-		"scenario-v1",
-		"path=" + label,
-		"name=" + strings.TrimSpace(doc.Name),
-		"seed=" + strings.TrimSpace(doc.Seed),
-	}
-	return strings.Join(parts, "\x00"), nil
-}
-
-func parseScenarioStep(node *yaml.Node) (scenarioStep, error) {
-	if node.Kind != yaml.MappingNode {
-		return scenarioStep{}, fmt.Errorf("scenario step must be a mapping")
-	}
-	m := yamlNodeValue(node).(map[string]any)
-	if rawPublish, ok := m["publish"]; ok {
-		eventName := strings.TrimSpace(fmt.Sprint(rawPublish))
-		if eventName == "" {
-			return scenarioStep{}, fmt.Errorf("publish step requires non-empty event name")
-		}
-		for key := range m {
-			switch key {
-			case "publish", "payload", "idempotency_key", "emitter", "source_event_id", "target", "target_flow_instance", "target_entity_id":
-			default:
-				return scenarioStep{}, fmt.Errorf("unsupported publish step field %q", key)
-			}
-		}
-		if _, ok := m["target"]; ok {
-			if _, hasFlow := m["target_flow_instance"]; hasFlow {
-				return scenarioStep{}, fmt.Errorf("publish step target cannot be combined with target_flow_instance")
-			}
-			if _, hasEntity := m["target_entity_id"]; hasEntity {
-				return scenarioStep{}, fmt.Errorf("publish step target cannot be combined with target_entity_id")
-			}
-		}
-		payload, generatePayload, err := parseScenarioPublishPayload(mappingNode(node)["payload"], m["payload"])
-		if err != nil {
-			return scenarioStep{}, err
-		}
-		return scenarioStep{
-			Action:             "publish",
-			PublishEvent:       eventName,
-			Payload:            payload,
-			IdempotencyKey:     m["idempotency_key"],
-			Emitter:            m["emitter"],
-			SourceEventID:      m["source_event_id"],
-			Target:             m["target"],
-			TargetFlowInstance: m["target_flow_instance"],
-			TargetEntityID:     m["target_entity_id"],
-			GeneratePayload:    generatePayload,
-		}, nil
-	}
-	if len(m) != 1 {
-		return scenarioStep{}, fmt.Errorf("scenario step must contain publish or one mailbox action")
-	}
-	for key, value := range m {
-		action := normalizeScenarioMailboxAction(key)
-		if action == "" {
-			return scenarioStep{}, fmt.Errorf("unsupported scenario action %q", key)
-		}
-		cfg, ok := value.(map[string]any)
-		if !ok {
-			return scenarioStep{}, fmt.Errorf("%s step must be a mapping", key)
-		}
-		for cfgKey := range cfg {
-			switch cfgKey {
-			case "match", "verdict", "fields", "until", "idempotency_key":
-			default:
-				return scenarioStep{}, fmt.Errorf("unsupported %s step field %q", key, cfgKey)
-			}
-		}
-		match, ok := cfg["match"].(map[string]any)
-		if !ok {
-			match = map[string]any{}
-		}
-		return scenarioStep{
-			Action:         action,
-			Match:          match,
-			Payload:        cfg["payload"],
-			Verdict:        cfg["verdict"],
-			Fields:         cfg["fields"],
-			Until:          cfg["until"],
-			IdempotencyKey: cfg["idempotency_key"],
-		}, nil
-	}
-	return scenarioStep{}, fmt.Errorf("scenario step is empty")
-}
-
-func parseScenarioPublishPayload(node *yaml.Node, decoded any) (any, bool, error) {
-	if node == nil {
-		return nil, false, nil
-	}
-	if node.Kind == yaml.AliasNode {
-		return nil, false, fmt.Errorf("publish payload aliases are not supported; author scalar payload: generate directly")
-	}
-	if node.Kind == yaml.ScalarNode {
-		if node.Tag == "!!str" && node.Value == "generate" {
-			return nil, true, nil
-		}
-		if text, ok := decoded.(string); !ok || !strings.HasPrefix(strings.TrimSpace(text), "${") {
-			return nil, false, fmt.Errorf("publish payload scalar must be exactly \"generate\" or a CEL expression that evaluates to an object")
-		}
-	}
-	if node.Kind == yaml.MappingNode {
-		fields := mappingNode(node)
-		if len(fields) == 1 && fields["generate"] != nil {
-			return nil, false, fmt.Errorf("publish payload generation uses scalar payload: generate; mapping sentinels are unsupported")
-		}
-	}
-	return decoded, false, nil
-}
-
-func normalizeScenarioMailboxAction(value string) string {
-	switch strings.TrimSpace(value) {
-	case "mailbox.decide":
-		return "mailbox.decide"
-	case "mailbox.defer":
-		return "mailbox.defer"
-	default:
-		return ""
-	}
-}
-
-func parseScenarioExpect(node *yaml.Node) (scenarioExpect, error) {
-	if node.Kind != yaml.MappingNode {
-		return scenarioExpect{}, fmt.Errorf("expect must be a mapping")
-	}
-	m := yamlNodeValue(node).(map[string]any)
-	var expect scenarioExpect
-	for key, value := range m {
-		switch key {
-		case "events":
-			events, err := parseScenarioEventExpect(value)
-			if err != nil {
-				return scenarioExpect{}, err
-			}
-			expect.Events = events
-		case "no_dead_letters":
-			b, ok := value.(bool)
-			if !ok {
-				return scenarioExpect{}, fmt.Errorf("expect.no_dead_letters must be boolean")
-			}
-			expect.NoDeadLetters = &b
-		case "entities":
-			entities, err := parseScenarioEntityExpect(value)
-			if err != nil {
-				return scenarioExpect{}, err
-			}
-			expect.Entities = entities
-		default:
-			return scenarioExpect{}, fmt.Errorf("unsupported expect field %q", key)
-		}
-	}
-	return expect, nil
-}
-
-func parseScenarioEventExpect(value any) (scenarioEventExpect, error) {
-	if list, ok := value.([]any); ok {
-		values, err := stringListFromAny("expect.events", list)
-		return scenarioEventExpect{Include: values}, err
-	}
-	m, ok := value.(map[string]any)
-	if !ok {
-		return scenarioEventExpect{}, fmt.Errorf("expect.events must be a list or mapping")
-	}
-	var out scenarioEventExpect
-	for key, raw := range m {
-		list, ok := raw.([]any)
-		if !ok {
-			return scenarioEventExpect{}, fmt.Errorf("expect.events.%s must be a list", key)
-		}
-		values, err := stringListFromAny("expect.events."+key, list)
-		if err != nil {
-			return scenarioEventExpect{}, err
-		}
-		switch key {
-		case "include":
-			out.Include = values
-		case "exact":
-			out.Exact = values
-		case "ordered":
-			out.Ordered = values
-		default:
-			return scenarioEventExpect{}, fmt.Errorf("unsupported expect.events field %q", key)
-		}
-	}
-	return out, nil
-}
-
-func parseScenarioEntityExpect(value any) ([]scenarioEntityExpect, error) {
-	list, ok := value.([]any)
-	if !ok {
-		return nil, fmt.Errorf("expect.entities must be a list")
-	}
-	out := make([]scenarioEntityExpect, 0, len(list))
-	for i, raw := range list {
-		m, ok := raw.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("expect.entities[%d] must be a mapping", i)
-		}
-		var item scenarioEntityExpect
-		for key, value := range m {
-			switch key {
-			case "ref":
-				item.Ref = strings.TrimSpace(fmt.Sprint(value))
-			case "type":
-				item.EntityType = strings.TrimSpace(fmt.Sprint(value))
-			case "count":
-				count, ok := intFromAny(value)
-				if !ok || count < 0 {
-					return nil, fmt.Errorf("expect.entities[%d].count must be a non-negative integer", i)
-				}
-				item.Count = &count
-			case "current_state":
-				if text, ok := value.(string); ok && strings.TrimSpace(text) == "" {
-					return nil, fmt.Errorf("expect.entities[%d].current_state must be non-empty", i)
-				}
-				item.CurrentState = cloneAny(value)
-				item.StateSet = true
-			case "fields":
-				fields, ok := value.(map[string]any)
-				if !ok {
-					return nil, fmt.Errorf("expect.entities[%d].fields must be a mapping", i)
-				}
-				item.Fields = cloneAnyMap(fields)
-				item.FieldsSet = true
-			case "gates":
-				gates, ok := value.(map[string]any)
-				if !ok {
-					return nil, fmt.Errorf("expect.entities[%d].gates must be a mapping", i)
-				}
-				item.Gates = cloneAnyMap(gates)
-				item.GatesSet = true
-			default:
-				return nil, fmt.Errorf("unsupported expect.entities[%d] field %q", i, key)
-			}
-		}
-		if item.EntityType == "" {
-			if item.Ref == "" {
-				return nil, fmt.Errorf("expect.entities[%d].type is required", i)
-			}
-		}
-		detail := item.hasDetailAssertion()
-		if item.Ref != "" && item.Count != nil {
-			return nil, fmt.Errorf("expect.entities[%d].count cannot be combined with ref", i)
-		}
-		if item.Count != nil && detail {
-			return nil, fmt.Errorf("expect.entities[%d].count cannot be combined with current_state, fields, or gates", i)
-		}
-		if item.Count == nil && !detail {
-			return nil, fmt.Errorf("expect.entities[%d] requires count, current_state, fields, or gates", i)
-		}
-		out = append(out, item)
-	}
-	return out, nil
-}
-
-func (e scenarioExpect) empty() bool {
-	return len(e.Events.Include) == 0 && len(e.Events.Exact) == 0 && len(e.Events.Ordered) == 0 && e.NoDeadLetters == nil && len(e.Entities) == 0
-}
-
-func (e scenarioEntityExpect) hasDetailAssertion() bool {
-	return e.StateSet || e.FieldsSet || e.GatesSet
-}
-
-func parseScenarioInvalid(node *yaml.Node) (scenarioInvalid, error) {
-	if node.Kind != yaml.MappingNode {
-		return scenarioInvalid{}, fmt.Errorf("invalid must be a mapping")
-	}
-	m := yamlNodeValue(node).(map[string]any)
-	for key := range m {
-		switch key {
-		case "base", "cases":
-		default:
-			return scenarioInvalid{}, fmt.Errorf("unsupported invalid field %q", key)
-		}
-	}
-	base, ok := m["base"].(map[string]any)
-	if !ok || len(base) == 0 {
-		return scenarioInvalid{}, fmt.Errorf("invalid.base must be a mapping")
-	}
-	casesRaw, ok := m["cases"].([]any)
-	if !ok || len(casesRaw) == 0 {
-		return scenarioInvalid{}, fmt.Errorf("invalid.cases must be a non-empty list")
-	}
-	out := scenarioInvalid{Base: base}
-	for i, raw := range casesRaw {
-		m, ok := raw.(map[string]any)
-		if !ok {
-			return scenarioInvalid{}, fmt.Errorf("invalid.cases[%d] must be a mapping", i)
-		}
-		item := scenarioInvalidCase{Expect: "reject"}
-		for key, value := range m {
-			switch key {
-			case "name":
-				item.Name = strings.TrimSpace(fmt.Sprint(value))
-			case "set":
-				set, ok := value.(map[string]any)
-				if !ok {
-					return scenarioInvalid{}, fmt.Errorf("invalid.cases[%d].set must be a mapping", i)
-				}
-				item.Set = set
-			case "expect":
-				item.Expect = strings.TrimSpace(fmt.Sprint(value))
-			default:
-				return scenarioInvalid{}, fmt.Errorf("unsupported invalid.cases[%d] field %q", i, key)
-			}
-		}
-		if item.Name == "" {
-			item.Name = fmt.Sprintf("case-%d", i+1)
-		}
-		if item.Expect != "reject" && item.Expect != "fail_closed" {
-			return scenarioInvalid{}, fmt.Errorf("invalid.cases[%d].expect must be reject or fail_closed", i)
-		}
-		out.Cases = append(out.Cases, item)
-	}
-	return out, nil
-}
-
-func stringListFromAny(field string, list []any) ([]string, error) {
-	out := make([]string, 0, len(list))
-	for i, raw := range list {
-		value := strings.TrimSpace(fmt.Sprint(raw))
-		if value == "" {
-			return nil, fmt.Errorf("%s[%d] must be non-empty", field, i)
-		}
-		out = append(out, value)
-	}
-	return out, nil
-}
-
-func intFromAny(value any) (int, bool) {
-	switch typed := value.(type) {
-	case int:
-		return typed, true
-	case int64:
-		return int(typed), int64(int(typed)) == typed
-	case float64:
-		i := int(typed)
-		return i, typed == float64(i)
-	default:
-		return 0, false
-	}
-}
-
-func mappingNode(node *yaml.Node) map[string]*yaml.Node {
-	out := map[string]*yaml.Node{}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		out[strings.TrimSpace(node.Content[i].Value)] = node.Content[i+1]
-	}
-	return out
-}
-
-func yamlNodeValue(node *yaml.Node) any {
-	switch node.Kind {
-	case yaml.MappingNode:
-		out := map[string]any{}
-		for i := 0; i+1 < len(node.Content); i += 2 {
-			out[strings.TrimSpace(node.Content[i].Value)] = yamlNodeValue(node.Content[i+1])
-		}
-		return out
-	case yaml.SequenceNode:
-		out := make([]any, 0, len(node.Content))
-		for _, item := range node.Content {
-			out = append(out, yamlNodeValue(item))
-		}
-		return out
-	case yaml.ScalarNode:
-		var value any
-		if err := node.Decode(&value); err == nil {
-			return value
-		}
-		return node.Value
-	default:
-		return nil
-	}
+	return scenariodocument.Seed(label, doc.Name, doc.Seed), nil
 }
 
 func newScenarioExpressionEvaluator(seed string, rawVars map[string]any) (*scenarioExpressionEvaluator, error) {
-	e := &scenarioExpressionEvaluator{seed: seed, vars: map[string]any{}}
-	env, err := cel.NewEnv(
-		cel.Variable("vars", cel.DynType),
-		cel.Function("scenario.sha40",
-			cel.Overload("scenario_sha40_string", []*cel.Type{cel.StringType}, cel.StringType,
-				cel.UnaryBinding(func(value ref.Val) ref.Val {
-					return types.String(scenarioSHA40(fmt.Sprint(value.Value())))
-				}),
-			),
-		),
-		cel.Function("scenario.uuid",
-			cel.Overload("scenario_uuid_string", []*cel.Type{cel.StringType}, cel.StringType,
-				cel.UnaryBinding(func(value ref.Val) ref.Val {
-					return types.String(scenarioUUID(seed, fmt.Sprint(value.Value())))
-				}),
-			),
-		),
-	)
-	if err != nil {
-		return nil, err
-	}
-	e.env = env
-	keys := make([]string, 0, len(rawVars))
-	for key := range rawVars {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		value, err := e.evalValue(rawVars[key])
-		if err != nil {
-			return nil, fmt.Errorf("vars.%s: %w", key, err)
-		}
-		e.vars[key] = value
-	}
-	return e, nil
-}
-
-func (e *scenarioExpressionEvaluator) evalValue(value any) (any, error) {
-	switch typed := value.(type) {
-	case string:
-		if strings.HasPrefix(typed, "${") && strings.HasSuffix(typed, "}") && len(typed) >= 3 {
-			return e.evalExpression(strings.TrimSpace(typed[2 : len(typed)-1]))
-		}
-		return typed, nil
-	case []any:
-		out := make([]any, 0, len(typed))
-		for _, item := range typed {
-			value, err := e.evalValue(item)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, value)
-		}
-		return out, nil
-	case map[string]any:
-		out := map[string]any{}
-		keys := make([]string, 0, len(typed))
-		for key := range typed {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			value, err := e.evalValue(typed[key])
-			if err != nil {
-				return nil, fmt.Errorf("%s: %w", key, err)
-			}
-			out[key] = value
-		}
-		return out, nil
-	default:
-		return typed, nil
-	}
-}
-
-func (e *scenarioExpressionEvaluator) evalExpression(expression string) (any, error) {
-	if expression == "" {
-		return nil, fmt.Errorf("CEL expression is empty")
-	}
-	ast, issues := e.env.Compile(expression)
-	if issues != nil && issues.Err() != nil {
-		return nil, issues.Err()
-	}
-	program, err := e.env.Program(ast)
-	if err != nil {
-		return nil, err
-	}
-	out, _, err := program.Eval(map[string]any{"vars": e.vars})
-	if err != nil {
-		return nil, err
-	}
-	return scenarioCELValue(out), nil
-}
-
-func scenarioCELValue(value ref.Val) any {
-	switch typed := value.(type) {
-	case types.String:
-		return string(typed)
-	case types.Bool:
-		return bool(typed)
-	case types.Int:
-		return int64(typed)
-	case types.Uint:
-		return uint64(typed)
-	case types.Double:
-		return float64(typed)
-	default:
-		return value.Value()
-	}
+	return scenariodocument.NewEvaluator(seed, rawVars)
 }
 
 func optionalScenarioString(value any) string {
-	if value == nil {
-		return ""
-	}
-	return strings.TrimSpace(fmt.Sprint(value))
+	text, _ := value.(string)
+	return strings.TrimSpace(text)
 }
 
-func scenarioSHA40(value string) string {
-	sum := sha1.Sum([]byte(value))
-	return hex.EncodeToString(sum[:])
-}
+func scenarioSHA40(value string) string { return scenariodocument.SHA40(value) }
 
-func scenarioUUID(seed, label string) string {
-	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(seed+"\x00"+label)).String()
-}
+func scenarioUUID(seed, label string) string { return scenariodocument.UUID(seed, label) }
 
 func scenarioSetupEntityID(seed, runID string, entity evaluatedScenarioSetupEntity) string {
 	flowID := strings.TrimSpace(entity.FlowID)
@@ -1410,26 +746,42 @@ func (r scenarioRunner) runInvalidVariants(file scenarioTestFile, doc scenarioDo
 	if err != nil {
 		return fmt.Errorf("%s: invalid.base: %w", file.Path, err)
 	}
+	base, _, err := r.buildPublishPayload(file, evaluator, baseStep)
+	if err != nil {
+		return fmt.Errorf("%s: invalid.base must be valid: %w", file.Path, err)
+	}
 	for _, item := range doc.Invalid.Cases {
+		payload := cloneAnyMap(base)
+		if err := scenariodocument.ValidateSetPaths(item.Set); err != nil {
+			return fmt.Errorf("%s: invalid case %s: %w", file.Path, item.Name, err)
+		}
+		keys := make([]string, 0, len(item.Set))
+		for key := range item.Set {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			value, err := evaluator.Evaluate(item.Set[key])
+			if err != nil {
+				return fmt.Errorf("%s: invalid case %s: %w", file.Path, item.Name, err)
+			}
+			if err := scenariodocument.SetPath(payload, key, value); err != nil {
+				return err
+			}
+		}
+		data, err := scenariodocument.Materialize(payload)
+		if err != nil {
+			return fmt.Errorf("%s: invalid case %s: %w", file.Path, item.Name, err)
+		}
 		step := baseStep
-		payloadSpec, _ := step.Payload.(map[string]any)
-		payloadSpec = cloneAnyMap(payloadSpec)
-		if payloadSpec == nil {
-			payloadSpec = map[string]any{}
-		}
-		if len(item.Set) > 0 {
-			payloadSet, _ := payloadSpec["set"].(map[string]any)
-			if payloadSet == nil {
-				payloadSet = map[string]any{}
-			}
-			for key, value := range item.Set {
-				payloadSet[key] = value
-			}
-			payloadSpec["set"] = payloadSet
-		}
-		step.Payload = payloadSpec
-		if _, _, err := r.buildPublishPayload(file, evaluator, step); err == nil {
+		step.Payload = data
+		_, _, err = r.buildPublishPayload(file, evaluator, step)
+		if err == nil {
 			return fmt.Errorf("%s: invalid case %s unexpectedly passed pre-mutation validation", file.Path, item.Name)
+		}
+		var violation *runtimeeventschema.Violation
+		if !errors.As(err, &violation) {
+			return fmt.Errorf("%s: invalid case %s did not produce a payload-schema violation: %w", file.Path, item.Name, err)
 		}
 	}
 	return nil
@@ -1440,9 +792,9 @@ func invalidBasePublishStep(base map[string]any) (scenarioStep, error) {
 	if !ok {
 		return scenarioStep{}, fmt.Errorf("publish is required")
 	}
-	eventName := strings.TrimSpace(fmt.Sprint(raw))
-	if eventName == "" {
-		return scenarioStep{}, fmt.Errorf("publish must be non-empty")
+	eventName, ok := raw.(string)
+	if !ok || strings.TrimSpace(eventName) == "" {
+		return scenarioStep{}, fmt.Errorf("publish must be non-empty text")
 	}
 	payload := base["payload"]
 	if text, ok := payload.(string); ok && text == "generate" {
@@ -1455,11 +807,11 @@ func (r scenarioRunner) runScenarioSetup(ctx context.Context, file scenarioTestF
 	if state.RunID != "" {
 		return scenarioTestValidationError{err: fmt.Errorf("setup requires an empty run context")}
 	}
-	runID := scenarioUUID(evaluator.seed, "setup.run")
+	runID := scenarioUUID(evaluator.Seed(), "setup.run")
 	params := map[string]any{
 		"bundle_hash":     r.bundleHash,
 		"run_id":          runID,
-		"idempotency_key": scenarioSHA40(evaluator.seed + "\x00setup.entities"),
+		"idempotency_key": scenarioSHA40(evaluator.Seed() + "\x00setup.entities"),
 	}
 	if selector := r.scenarioExecutionParams(); selector != nil {
 		params["scenario_execution"] = selector
@@ -1470,7 +822,7 @@ func (r scenarioRunner) runScenarioSetup(ctx context.Context, file scenarioTestF
 		if err != nil {
 			return scenarioTestValidationError{err: err}
 		}
-		entityID := scenarioSetupEntityID(evaluator.seed, runID, evaluated)
+		entityID := scenarioSetupEntityID(evaluator.Seed(), runID, evaluated)
 		flowInstance := evaluated.FlowID
 		if flowInstance == "." {
 			// Setup persistence owns the root runtime coordinate (the run ID), not the authored dot path.
@@ -1521,7 +873,7 @@ type evaluatedScenarioSetupEntity struct {
 func (r scenarioRunner) evaluateScenarioSetupEntity(file scenarioTestFile, evaluator *scenarioExpressionEvaluator, entity scenarioSetupEntity) (evaluatedScenarioSetupEntity, error) {
 	flowID := strings.Trim(strings.TrimSpace(file.FlowID), "/")
 	if entity.Flow != nil {
-		value, err := evaluator.evalValue(entity.Flow)
+		value, err := evaluator.Evaluate(entity.Flow)
 		if err != nil {
 			return evaluatedScenarioSetupEntity{}, fmt.Errorf("setup.entities[%s].flow: %w", entity.Alias, err)
 		}
@@ -1544,7 +896,7 @@ func (r scenarioRunner) evaluateScenarioSetupEntity(file scenarioTestFile, evalu
 	}
 	currentState := ""
 	if entity.StateSet {
-		value, err := evaluator.evalValue(entity.CurrentState)
+		value, err := evaluator.Evaluate(entity.CurrentState)
 		if err != nil {
 			return evaluatedScenarioSetupEntity{}, fmt.Errorf("setup.entities[%s].current_state: %w", entity.Alias, err)
 		}
@@ -1583,7 +935,7 @@ func (r scenarioRunner) evaluateScenarioSetupFields(evaluator *scenarioExpressio
 	if !entity.FieldsSet {
 		return map[string]any{}, nil
 	}
-	value, err := evaluator.evalValue(entity.Fields)
+	value, err := evaluator.Evaluate(entity.Fields)
 	if err != nil {
 		return nil, fmt.Errorf("setup.entities[%s].fields: %w", entity.Alias, err)
 	}
@@ -1611,7 +963,7 @@ func (r scenarioRunner) evaluateScenarioSetupGates(evaluator *scenarioExpression
 	if !entity.GatesSet {
 		return map[string]bool{}, nil
 	}
-	value, err := evaluator.evalValue(entity.Gates)
+	value, err := evaluator.Evaluate(entity.Gates)
 	if err != nil {
 		return nil, fmt.Errorf("setup.entities[%s].gates: %w", entity.Alias, err)
 	}
@@ -1752,7 +1104,7 @@ func (r scenarioRunner) runPublishStep(ctx context.Context, file scenarioTestFil
 		{name: "emitter", value: step.Emitter},
 		{name: "source_event_id", value: step.SourceEventID},
 	} {
-		value, err := evaluator.evalValue(field.value)
+		value, err := evaluator.Evaluate(field.value)
 		if err != nil {
 			return fmt.Errorf("%s: %w", field.name, err)
 		}
@@ -1760,18 +1112,18 @@ func (r scenarioRunner) runPublishStep(ctx context.Context, file scenarioTestFil
 			params[field.name] = text
 		}
 	}
-	targetFlow, err := evaluator.evalValue(step.TargetFlowInstance)
+	targetFlow, err := evaluator.Evaluate(step.TargetFlowInstance)
 	if err != nil {
 		return fmt.Errorf("target_flow_instance: %w", err)
 	}
-	targetEntity, err := evaluator.evalValue(step.TargetEntityID)
+	targetEntity, err := evaluator.Evaluate(step.TargetEntityID)
 	if err != nil {
 		return fmt.Errorf("target_entity_id: %w", err)
 	}
 	targetFlowText := optionalScenarioString(targetFlow)
 	targetEntityText := optionalScenarioString(targetEntity)
 	if step.Target != nil {
-		targetAliasValue, err := evaluator.evalValue(step.Target)
+		targetAliasValue, err := evaluator.Evaluate(step.Target)
 		if err != nil {
 			return fmt.Errorf("target: %w", err)
 		}
@@ -1870,7 +1222,7 @@ func (r scenarioRunner) compileGeneratedInputFixture(file scenarioTestFile, eval
 	if r.bundle == nil {
 		return generatedInputFixturePlan{}, fmt.Errorf("generated payload requires a loaded contract bundle")
 	}
-	if evaluator == nil || strings.TrimSpace(evaluator.seed) == "" {
+	if evaluator == nil || strings.TrimSpace(evaluator.Seed()) == "" {
 		return generatedInputFixturePlan{}, fmt.Errorf("generated payload requires a recorded scenario identity")
 	}
 
@@ -1900,7 +1252,7 @@ func (r scenarioRunner) compileGeneratedInputFixture(file scenarioTestFile, eval
 	schemaDigest := "sha256:" + hex.EncodeToString(schemaSum[:])
 	identity := strings.Join([]string{
 		"generated-input-fixture-v1",
-		evaluator.seed,
+		evaluator.Seed(),
 		strings.Trim(strings.TrimSpace(file.FlowID), "/"),
 		strings.TrimSpace(endpoint.PinName),
 		strings.TrimSpace(resolution.EventKey),
@@ -2053,108 +1405,36 @@ func publishInputEndpointError(census semanticview.AuthoredEventEndpointCensus, 
 }
 
 func (r scenarioRunner) buildPayloadFromSpec(file scenarioTestFile, evaluator *scenarioExpressionEvaluator, spec any) (map[string]any, error) {
-	if spec == nil {
-		return nil, fmt.Errorf("payload is required")
-	}
-	spec, err := evaluator.evalValue(spec)
+	data, err := scenariodocument.PreparePayload(spec, evaluator, func(label string) (semanticvalue.Value, error) {
+		return r.loadFixturePayload(file.Path, label)
+	})
 	if err != nil {
 		return nil, err
 	}
-	m, ok := spec.(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("payload must be an object")
+	value, err := data.Interface()
+	if err != nil {
+		return nil, err
 	}
-	var payload map[string]any
-	if rawFrom, ok := m["from"]; ok {
-		fixturePath := strings.TrimSpace(fmt.Sprint(rawFrom))
-		if fixturePath == "" {
-			return nil, fmt.Errorf("payload.from must be non-empty")
-		}
-		payload, err = r.loadFixturePayload(file.Path, fixturePath)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		payload = cloneAnyMap(m)
-	}
-	if rawSet, ok := m["set"]; ok {
-		set, ok := rawSet.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("payload.set must be a mapping")
-		}
-		for path, value := range set {
-			value, err := evaluator.evalValue(value)
-			if err != nil {
-				return nil, fmt.Errorf("payload.set.%s: %w", path, err)
-			}
-			if err := setPathValue(payload, strings.TrimPrefix(path, "payload."), value); err != nil {
-				return nil, err
-			}
-		}
-	}
-	delete(payload, "from")
-	delete(payload, "set")
-	return payload, nil
+	return value.(map[string]any), nil
 }
 
-func (r scenarioRunner) loadFixturePayload(scenarioLabel, rawLabel string) (map[string]any, error) {
+func (r scenarioRunner) loadFixturePayload(scenarioLabel, rawLabel string) (semanticvalue.Value, error) {
 	if r.bundle == nil || r.bundle.SourceArtifact == nil {
-		return nil, fmt.Errorf("payload.from requires an admitted source artifact")
+		return semanticvalue.Value{}, fmt.Errorf("payload.from requires an admitted source artifact")
 	}
 	rawLabel = strings.TrimSpace(rawLabel)
 	if rawLabel == "" || path.IsAbs(rawLabel) || strings.Contains(rawLabel, "\\") {
-		return nil, fmt.Errorf("payload.from %q must be a scenario-relative artifact label", rawLabel)
+		return semanticvalue.Value{}, fmt.Errorf("payload.from %q must be a scenario-relative artifact label", rawLabel)
 	}
 	label := path.Clean(path.Join(path.Dir(scenarioLabel), rawLabel))
 	if label == "." || label == ".." || strings.HasPrefix(label, "../") {
-		return nil, fmt.Errorf("payload.from %s escapes the admitted source artifact", rawLabel)
+		return semanticvalue.Value{}, fmt.Errorf("payload.from %s escapes the admitted source artifact", rawLabel)
 	}
 	entry, ok := r.bundle.SourceArtifact.Entry(label)
 	if !ok {
-		return nil, fmt.Errorf("payload.from %s does not name an admitted source member", rawLabel)
+		return semanticvalue.Value{}, fmt.Errorf("payload.from %s does not name an admitted source member", rawLabel)
 	}
-	raw := entry.Bytes()
-	var node yaml.Node
-	if err := yaml.Unmarshal(raw, &node); err != nil {
-		return nil, fmt.Errorf("parse payload.from %s: %w", rawLabel, err)
-	}
-	if len(node.Content) == 0 {
-		return nil, fmt.Errorf("payload.from %s is empty", rawLabel)
-	}
-	payload, ok := yamlNodeValue(node.Content[0]).(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("payload.from %s must contain an object", rawLabel)
-	}
-	return payload, nil
-}
-
-func setPathValue(root map[string]any, rawPath string, value any) error {
-	parts := strings.Split(strings.TrimSpace(rawPath), ".")
-	if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
-		return fmt.Errorf("payload.set path is required")
-	}
-	cursor := root
-	for i, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			return fmt.Errorf("payload.set path %q contains an empty segment", rawPath)
-		}
-		if i == len(parts)-1 {
-			if value == nil {
-				delete(cursor, part)
-			} else {
-				cursor[part] = value
-			}
-			return nil
-		}
-		next, _ := cursor[part].(map[string]any)
-		if next == nil {
-			next = map[string]any{}
-			cursor[part] = next
-		}
-		cursor = next
-	}
-	return nil
+	return scenariodocument.AdmitFixture(entry.Bytes(), label)
 }
 
 func cloneAnyMap(in map[string]any) map[string]any {
@@ -2188,14 +1468,14 @@ func (r scenarioRunner) runMailboxStep(ctx context.Context, evaluator *scenarioE
 		return fmt.Errorf("%s requires an existing run context", step.Action)
 	}
 	params := map[string]any{}
-	if key, err := evaluator.evalValue(step.IdempotencyKey); err != nil {
+	if key, err := evaluator.Evaluate(step.IdempotencyKey); err != nil {
 		return fmt.Errorf("idempotency_key: %w", err)
 	} else if text := optionalScenarioString(key); text != "" {
 		params["idempotency_key"] = text
 	}
 	switch step.Action {
 	case "mailbox.decide":
-		verdict, err := evaluator.evalValue(step.Verdict)
+		verdict, err := evaluator.Evaluate(step.Verdict)
 		if err != nil {
 			return scenarioTestValidationError{err: fmt.Errorf("verdict: %w", err)}
 		}
@@ -2204,7 +1484,7 @@ func (r scenarioRunner) runMailboxStep(ctx context.Context, evaluator *scenarioE
 		} else {
 			return scenarioTestValidationError{err: fmt.Errorf("mailbox.decide verdict is required")}
 		}
-		fields, err := evaluator.evalValue(step.Fields)
+		fields, err := evaluator.Evaluate(step.Fields)
 		if err != nil {
 			return scenarioTestValidationError{err: fmt.Errorf("fields: %w", err)}
 		}
@@ -2216,7 +1496,7 @@ func (r scenarioRunner) runMailboxStep(ctx context.Context, evaluator *scenarioE
 			params["fields"] = m
 		}
 	case "mailbox.defer":
-		until, err := evaluator.evalValue(step.Until)
+		until, err := evaluator.Evaluate(step.Until)
 		if err != nil {
 			return scenarioTestValidationError{err: fmt.Errorf("until: %w", err)}
 		}
@@ -2277,11 +1557,15 @@ func evaluateScenarioCardMatch(evaluator *scenarioExpressionEvaluator, runID str
 	}
 	evaluatedMatch := make(map[string]string, len(match))
 	for key, value := range match {
-		evaluated, err := evaluator.evalValue(value)
+		evaluated, err := evaluator.Evaluate(value)
 		if err != nil {
 			return nil, nil, fmt.Errorf("match.%s: %w", key, err)
 		}
-		text := strings.TrimSpace(fmt.Sprint(evaluated))
+		text, ok := evaluated.(string)
+		if !ok {
+			return nil, nil, fmt.Errorf("match.%s must resolve to text", key)
+		}
+		text = strings.TrimSpace(text)
 		if text == "" {
 			continue
 		}
@@ -2531,7 +1815,7 @@ func assertScenarioEventExpectations(actual []string, expect scenarioEventExpect
 			}
 		}
 	}
-	if len(expect.Exact) > 0 {
+	if expect.Exact != nil {
 		got := append([]string(nil), actual...)
 		want := append([]string(nil), expect.Exact...)
 		sort.Strings(got)
@@ -2659,7 +1943,7 @@ func (r scenarioRunner) assertEntityExpectation(ctx context.Context, state *scen
 	if expect.Count != nil && count != *expect.Count {
 		return fmt.Errorf("entity expectation for type %s got count %d, want %d", expect.EntityType, count, *expect.Count)
 	}
-	if !expect.hasDetailAssertion() {
+	if !expect.HasDetailAssertion() {
 		return nil
 	}
 	if count != 1 {
@@ -2669,7 +1953,7 @@ func (r scenarioRunner) assertEntityExpectation(ctx context.Context, state *scen
 }
 
 func (r scenarioRunner) assertEntityDetailExpectation(ctx context.Context, runID string, entityID string, entityType string, evaluator *scenarioExpressionEvaluator, expect scenarioEntityExpect) error {
-	detail, err := expect.evaluatedDetail(evaluator)
+	detail, err := evaluateScenarioEntityDetail(expect, evaluator)
 	if err != nil {
 		return err
 	}
@@ -2713,13 +1997,13 @@ type evaluatedScenarioEntityDetail struct {
 	GatesSet  bool
 }
 
-func (e scenarioEntityExpect) evaluatedDetail(evaluator *scenarioExpressionEvaluator) (evaluatedScenarioEntityDetail, error) {
+func evaluateScenarioEntityDetail(e scenarioEntityExpect, evaluator *scenarioExpressionEvaluator) (evaluatedScenarioEntityDetail, error) {
 	var out evaluatedScenarioEntityDetail
 	if evaluator == nil {
 		return out, fmt.Errorf("scenario expression evaluator is required for entity detail assertions")
 	}
 	if e.StateSet {
-		value, err := evaluator.evalValue(e.CurrentState)
+		value, err := evaluator.Evaluate(e.CurrentState)
 		if err != nil {
 			return out, fmt.Errorf("expect.entities.current_state: %w", err)
 		}
@@ -2731,7 +2015,7 @@ func (e scenarioEntityExpect) evaluatedDetail(evaluator *scenarioExpressionEvalu
 		out.State = &state
 	}
 	if e.FieldsSet {
-		value, err := evaluator.evalValue(e.Fields)
+		value, err := evaluator.Evaluate(e.Fields)
 		if err != nil {
 			return out, fmt.Errorf("expect.entities.fields: %w", err)
 		}
@@ -2743,7 +2027,7 @@ func (e scenarioEntityExpect) evaluatedDetail(evaluator *scenarioExpressionEvalu
 		out.FieldsSet = true
 	}
 	if e.GatesSet {
-		value, err := evaluator.evalValue(e.Gates)
+		value, err := evaluator.Evaluate(e.Gates)
 		if err != nil {
 			return out, fmt.Errorf("expect.entities.gates: %w", err)
 		}
@@ -2780,15 +2064,7 @@ func assertScenarioJSONEqual(label string, got, want any) error {
 }
 
 func scenarioCanonicalJSON(value any) (string, error) {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return "", err
-	}
-	var normalized any
-	if err := json.Unmarshal(raw, &normalized); err != nil {
-		return "", err
-	}
-	out, err := json.Marshal(normalized)
+	out, err := canonicaljson.Bytes(value)
 	if err != nil {
 		return "", err
 	}

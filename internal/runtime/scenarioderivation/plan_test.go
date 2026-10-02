@@ -117,6 +117,51 @@ func TestCompileCatalogRejectsDuplicateExactFlowInputCoordinates(t *testing.T) {
 	}
 }
 
+func TestAuthoredDerivedProjectionKeepsCLIAssertionsOutOfProfile(t *testing.T) {
+	base := "name: projection\nderive: {flow: '.', input: work.requested, payload: {generate: true, set: {mode: fast, details: {count: 7}}}}\n"
+	withCLI := base + "setup: {entities: [{as: item, type: task, fields: {value: literal}}]}\nexpect: {events: {exact: []}, entities: [{ref: item, fields: {value: literal}}]}\n"
+	first, found, err := ParseDeclaration([]byte(base), "tests/projection.yaml")
+	if err != nil || !found {
+		t.Fatalf("base declaration: %v %v", found, err)
+	}
+	second, found, err := ParseDeclaration([]byte(withCLI), "tests/projection.yaml")
+	if err != nil || !found || !reflect.DeepEqual(first, second) {
+		t.Fatalf("CLI fields leaked into derived declaration: %#v %#v %v", first, second, err)
+	}
+	source, identity := derivationHostileTestSource(t)
+	compile := func(declaration Declaration) Plan {
+		t.Helper()
+		plans, err := Compile(source, identity, Request{FlowID: declaration.FlowID, Input: declaration.Input, Set: declaration.Set, ProfileID: declaration.Name, Responses: declaration.ConnectorResponses})
+		if err != nil || len(plans) != 1 {
+			t.Fatalf("compile declaration: %v %v", plans, err)
+		}
+		return plans[0]
+	}
+	left, right := compile(first), compile(second)
+	if string(left.Payload) != string(right.Payload) || string(left.Profile.CanonicalBytes()) != string(right.Profile.CanonicalBytes()) {
+		t.Fatal("assertion projection changed execution data under the same effective source")
+	}
+}
+
+func TestDerivedOverlayAdmissionRejectsUnsafeDataAndIsolatesCallers(t *testing.T) {
+	source, identity := derivationHostileTestSource(t)
+	set := map[string]any{"mode": "fast", "details": map[string]any{"count": int64(7)}}
+	plans, err := Compile(source, identity, Request{FlowID: ".", Input: "work.requested", Set: set})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := string(plans[0].Payload)
+	set["details"].(map[string]any)["count"] = int64(9)
+	if string(plans[0].Payload) != before {
+		t.Fatal("caller mutated compiled plan")
+	}
+	for _, invalid := range []any{int64(9007199254740993), make(chan int)} {
+		if _, err := Compile(source, identity, Request{FlowID: ".", Input: "work.requested", Set: map[string]any{"details": map[string]any{"count": invalid}}}); err == nil {
+			t.Fatalf("unchecked overlay admitted %T", invalid)
+		}
+	}
+}
+
 func derivationHostileTestSource(t *testing.T) (semanticview.Source, scenarioexecution.EffectiveSourceIdentity) {
 	t.Helper()
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))

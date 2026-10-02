@@ -56,22 +56,16 @@ steps:
 `,
 			want: `must be exactly "generate"`,
 		},
-		{
-			name: "alias",
-			raw: `steps:
-  - publish: item_received
-    payload: &generated generate
-  - publish: item_received
-    payload: *generated
-`,
-			want: "payload aliases are not supported",
-		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := parseScenarioDocument([]byte(tc.raw)); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("parse error = %v, want %q", err, tc.want)
 			}
 		})
+	}
+	aliased, err := parseScenarioDocument([]byte("steps: [{publish: item_received, payload: &generated generate}, {publish: item_received, payload: *generated}]\n"))
+	if err != nil || len(aliased.Steps) != 2 || !aliased.Steps[1].GeneratePayload {
+		t.Fatalf("bounded alias admission = %#v, %v", aliased, err)
 	}
 }
 

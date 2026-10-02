@@ -49,7 +49,7 @@ func TestDiscoverScenarioTestFilesUsesCanonicalTestsResourceBranches(t *testing.
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(target, []byte("version: 1\n"), 0o644); err != nil {
+		if err := os.WriteFile(target, []byte("steps: [{publish: request, payload: {id: example}}]\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
