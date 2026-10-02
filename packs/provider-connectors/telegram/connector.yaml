@@ -162,6 +162,228 @@ tools:
       url: https://api.telegram.org/bot{{credentials.telegram_bot_token}}/answerCallbackQuery
       body:
         callback_query_id: "{{input.callback_query_id}}"
+  telegram.install_inbox_commands:
+    category: provider_connector
+    description: install the Open inbox command for one Telegram chat
+    handler_type: http
+    effect_class: non_idempotent_write
+    credentials: [telegram_bot_token]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [chat_id, commands]
+      properties:
+        chat_id: {type: string, pattern: '^-?[0-9]+$', minLength: 1, maxLength: 17}
+        commands:
+          type: array
+          minItems: 1
+          maxItems: 1
+          items:
+            type: object
+            additionalProperties: false
+            required: [command, description]
+            properties:
+              command: {type: string, minLength: 1, maxLength: 32}
+              description: {type: string, minLength: 1, maxLength: 256}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [accepted]
+      properties:
+        accepted: {type: boolean}
+    response_success:
+      kind: json_field_equals
+      path: response.body.ok
+      equals: true
+    response_mapping:
+      accepted: "{{response.body.result}}"
+    http:
+      method: POST
+      url: https://api.telegram.org/bot{{credentials.telegram_bot_token}}/setMyCommands
+      body:
+        scope:
+          type: chat
+          chat_id: "{{input.chat_id}}"
+        commands: "{{input.commands}}"
+  telegram.read_inbox_commands:
+    category: provider_registration
+    description: read commands for one Telegram chat
+    handler_type: http
+    effect_class: read_only
+    credentials: [telegram_bot_token]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [chat_id, language_code]
+      properties:
+        chat_id: {type: string, pattern: '^-?[0-9]+$', minLength: 1, maxLength: 17}
+        language_code: {type: string, enum: ['', en, fr]}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [commands]
+      properties:
+        commands:
+          type: array
+          minItems: 0
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required: [command, description]
+            properties:
+              command: {type: string, minLength: 1, maxLength: 32}
+              description: {type: string, minLength: 1, maxLength: 256}
+    response_success:
+      kind: json_field_equals
+      path: response.body.ok
+      equals: true
+    response_mapping:
+      commands: "{{response.body.result}}"
+    http:
+      method: POST
+      url: https://api.telegram.org/bot{{credentials.telegram_bot_token}}/getMyCommands
+      body:
+        language_code: "{{input.language_code}}"
+        scope:
+          type: chat
+          chat_id: "{{input.chat_id}}"
+  telegram.install_shared_inbox_commands:
+    category: provider_connector
+    description: install Open inbox for one Telegram group member
+    handler_type: http
+    effect_class: non_idempotent_write
+    credentials: [telegram_bot_token]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [chat_id, user_id, commands]
+      properties:
+        chat_id: {type: string, pattern: '^-?[0-9]+$', minLength: 1, maxLength: 17}
+        user_id: {type: string, pattern: '^[0-9]+$', minLength: 1, maxLength: 17}
+        commands:
+          type: array
+          minItems: 1
+          maxItems: 1
+          items:
+            type: object
+            additionalProperties: false
+            required: [command, description]
+            properties:
+              command: {type: string, minLength: 1, maxLength: 32}
+              description: {type: string, minLength: 1, maxLength: 256}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [accepted]
+      properties:
+        accepted: {type: boolean}
+    response_success:
+      kind: json_field_equals
+      path: response.body.ok
+      equals: true
+    response_mapping:
+      accepted: "{{response.body.result}}"
+    http:
+      method: POST
+      url: https://api.telegram.org/bot{{credentials.telegram_bot_token}}/setMyCommands
+      body:
+        scope:
+          type: chat_member
+          chat_id: "{{input.chat_id}}"
+          user_id: "{{input.user_id}}"
+        commands: "{{input.commands}}"
+  telegram.read_shared_inbox_commands:
+    category: provider_registration
+    description: read Open inbox commands for one Telegram group member
+    handler_type: http
+    effect_class: read_only
+    credentials: [telegram_bot_token]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [chat_id, user_id, language_code]
+      properties:
+        chat_id: {type: string, pattern: '^-?[0-9]+$', minLength: 1, maxLength: 17}
+        user_id: {type: string, pattern: '^[0-9]+$', minLength: 1, maxLength: 17}
+        language_code: {type: string, enum: ['', en, fr]}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [commands]
+      properties:
+        commands:
+          type: array
+          minItems: 0
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required: [command, description]
+            properties:
+              command: {type: string, minLength: 1, maxLength: 32}
+              description: {type: string, minLength: 1, maxLength: 256}
+    response_success:
+      kind: json_field_equals
+      path: response.body.ok
+      equals: true
+    response_mapping:
+      commands: "{{response.body.result}}"
+    http:
+      method: POST
+      url: https://api.telegram.org/bot{{credentials.telegram_bot_token}}/getMyCommands
+      body:
+        language_code: "{{input.language_code}}"
+        scope:
+          type: chat_member
+          chat_id: "{{input.chat_id}}"
+          user_id: "{{input.user_id}}"
+  telegram.read_chat_menu_button:
+    category: provider_registration
+    description: read the private chat launcher without changing it
+    handler_type: http
+    effect_class: read_only
+    credentials: [telegram_bot_token]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [chat_id]
+      properties:
+        chat_id: {type: string, pattern: '^-?[0-9]+$', minLength: 1, maxLength: 17}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [launcher]
+      properties:
+        launcher: {type: string, enum: [commands, default, web_app]}
+    response_success: {kind: json_field_equals, path: response.body.ok, equals: true}
+    response_mapping:
+      launcher: "{{response.body.result.type}}"
+    http:
+      method: POST
+      url: https://api.telegram.org/bot{{credentials.telegram_bot_token}}/getChatMenuButton
+      body:
+        chat_id: "{{input.chat_id}}"
+  telegram.read_default_menu_button:
+    category: provider_registration
+    description: read the default private chat launcher without changing it
+    handler_type: http
+    effect_class: read_only
+    credentials: [telegram_bot_token]
+    input_schema: {type: object, additionalProperties: false}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [launcher]
+      properties:
+        launcher: {type: string, enum: [commands, default, web_app]}
+    response_success: {kind: json_field_equals, path: response.body.ok, equals: true}
+    response_mapping:
+      launcher: "{{response.body.result.type}}"
+    http:
+      method: POST
+      url: https://api.telegram.org/bot{{credentials.telegram_bot_token}}/getChatMenuButton
+      body: {}
   telegram.identify_bot:
     category: provider_registration
     description: identify the Telegram bot webhook slot
@@ -183,6 +405,28 @@ tools:
       equals: true
     response_mapping:
       bot_id: "{{response.body.result.id}}"
+    http:
+      method: GET
+      url: https://api.telegram.org/bot{{credentials.telegram_bot_token}}/getMe
+  telegram.read_bot_address:
+    category: provider_registration
+    description: read the current Telegram bot command address
+    handler_type: http
+    effect_class: read_only
+    credentials: [telegram_bot_token]
+    input_schema: {type: object, additionalProperties: false}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [address]
+      properties:
+        address: {type: string, pattern: '^[A-Za-z0-9_]{5,32}$', minLength: 5, maxLength: 32}
+    response_success:
+      kind: json_field_equals
+      path: response.body.ok
+      equals: true
+    response_mapping:
+      address: "{{response.body.result.username}}"
     http:
       method: GET
       url: https://api.telegram.org/bot{{credentials.telegram_bot_token}}/getMe

@@ -12,6 +12,9 @@ hard:
     limit_seconds: 540
     justification: Existing ceiling for the required 20-journey served lifecycle matrix; the 492s primary baseline remains measured without an automatic confirmation pass.
   unit_command_seconds:
+    broad-03:
+      limit_seconds: 300
+      justification: 'Lead authorized up to30% timing allowances on 2026-10-02; CI36960543887 measured this exact generated unit at324s against312s, with all tests passing. The unit-only 240s ->300s baseline and312s ->390s ceiling increase25%; the fixed evaluator buffer and every sibling budget remain unchanged.'
     catalog-required-verify:
       limit_seconds: 360
       justification: 'Reviewed #2353 disposition 5939565179 retains all 90 serial compiled describe calls and exact hashes after hosted 274s/372s measurements; this unit-only target preserves the normal 30% buffer and sibling budgets. Master independently measured 359s/374s in CI 36868835790/36867590432; the original 240s performance target remains tracked by issue 2394.'

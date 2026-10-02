@@ -25,6 +25,37 @@ func (p OutboundBindingPlan) Generation() (plangeneration.Generation, error) {
 	return p.structural.Generation()
 }
 
+func (p OutboundBindingPlan) PresentationBounds() (PresentationBounds, error) {
+	return p.structural.PresentationBounds()
+}
+
+func (p SatisfactionPlan) PresentationBounds() (PresentationBounds, error) {
+	var bounds PresentationBounds
+	for _, selected := range []struct {
+		name   string
+		target *int
+		array  bool
+	}{
+		{"actions", &bounds.Actions, true},
+		{"presentation.text", &bounds.TextRunes, false},
+		{"actions[].label", &bounds.LabelRunes, false},
+	} {
+		constraint, found := p.Constraint(selected.name)
+		if !found {
+			return bounds, fmt.Errorf("channel %s has no selected constraint", selected.name)
+		}
+		maximum, finite := constraint.MaxLength()
+		if selected.array {
+			maximum, finite = constraint.MaxItems()
+		}
+		if !finite {
+			return bounds, fmt.Errorf("channel %s requires a finite selected bound", selected.name)
+		}
+		*selected.target = maximum
+	}
+	return bounds, bounds.Validate()
+}
+
 // ActivationCanonicalValue is the complete behavior-bearing value of one
 // executable channel binding. It is intentionally separate from the
 // structural SatisfactionPlan generation because destinations, credential
@@ -117,10 +148,12 @@ func compileSatisfactionPlanGeneration(p SatisfactionPlan) (plangeneration.Gener
 			"signing_credential":  p.onboarding.SigningCredential(),
 			"confirmation":        p.onboarding.ConfirmationOperation(),
 			"connection_health":   p.onboarding.ConnectionHealth(),
+			"learned_destination": compiledChannelMappingGenerationValue(p.onboarding.learnedDestination),
 		}
 	}
 	return plangeneration.FromCanonicalValue(map[string]any{
 		"interface_ref":      p.interfaceRef.String(),
+		"native_inbox":       p.nativeInbox.canonicalValue(),
 		"channel":            p.channel,
 		"trigger":            p.trigger,
 		"connector":          p.connector,
@@ -137,6 +170,9 @@ func compileSatisfactionPlanGeneration(p SatisfactionPlan) (plangeneration.Gener
 }
 
 func validateSatisfactionPlanGenerationInputs(plan SatisfactionPlan) error {
+	if plan.nativeInbox == nil {
+		return fmt.Errorf("channel generation requires a compiled native inbox profile")
+	}
 	for family, schemas := range map[string]map[string]runtimecontracts.ToolInputSchema{
 		"schema": plan.schemas, "opaque type": plan.opaqueTypes, "constraint": plan.constraints,
 	} {

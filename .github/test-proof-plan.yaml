@@ -73,6 +73,11 @@ profiles:
       - runtime-full
       - delivery-continuation-full
       - serveapp-channel
+      - serveapp-channel-learned
+      - serveapp-channel-delivery
+      - serveapp-channel-process-temporal
+      - serveapp-channel-lifecycle
+      - serveapp-channel-native
       - serveapp-runtime
       - contracts-first
       - contracts-rest
@@ -134,6 +139,11 @@ profiles:
       - runtime-full
       - delivery-continuation-full
       - serveapp-channel
+      - serveapp-channel-learned
+      - serveapp-channel-delivery
+      - serveapp-channel-process-temporal
+      - serveapp-channel-lifecycle
+      - serveapp-channel-native
       - serveapp-runtime
       - contracts-first
       - contracts-rest
@@ -195,6 +205,11 @@ profiles:
       - runtime-full
       - delivery-continuation-full
       - serveapp-channel
+      - serveapp-channel-learned
+      - serveapp-channel-delivery
+      - serveapp-channel-process-temporal
+      - serveapp-channel-lifecycle
+      - serveapp-channel-native
       - serveapp-runtime
       - contracts-first
       - contracts-rest
@@ -256,6 +271,11 @@ profiles:
       - runtime-full
       - delivery-continuation-full
       - serveapp-channel
+      - serveapp-channel-learned
+      - serveapp-channel-delivery
+      - serveapp-channel-process-temporal
+      - serveapp-channel-lifecycle
+      - serveapp-channel-native
       - serveapp-runtime
       - contracts-first
       - contracts-rest
@@ -669,9 +689,46 @@ units:
   serveapp-channel:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    # 34287939711: move the independent 53.10s reset and 46.06s rotation
-    # journeys to existing lighter units; no backend/case split or extra job.
-    run: '^Test(Canonical.*|Channel(Connect.*|Effect.*|Listener.*|Onboarding(Admitted.*|Early.*|E2E.*|Crash.*))|Claude.*|CLI_.*|Composed.*|Configure.*|Connected.*|Create.*|Receiver.*)$'
+    # 36644617733 exhausted the unchanged 600s budget after passing whole
+    # delivery families. Keep complete journeys together in distinct units.
+    run: '^Test(Canonical.*|Channel(Connect.*|Draft.*|Duplicate.*|Effect.*|Listener.*|OneBot.*|Onboarding(Admitted.*|Early.*|E2E.*|Crash.*))|Claude.*|CLI_.*|Composed.*|Configure.*|Connected.*|Create.*|Receiver.*)$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  serveapp-channel-learned:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    # The channel unit took 350s before the new serial learned journeys.
+    # Preserve their complete family under the same environment and budget.
+    run: '^TestChannelLearned.*$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  serveapp-channel-delivery:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^TestChannel(ActionWorker.*|Delivery(Backlog.*|Bare.*|Budget.*|Cancel.*|Change.*|Chooser.*|Compiled.*|Inbound.*|Invalid.*|Manual.*|Native.*|Notice.*|Ordered.*|Paged.*|Quoted.*|Real.*|Reconciliation.*|Recovery.*|Required.*|Resend.*|Shared.*|Skip.*|UncertainNotice.*|Verdict.*|View.*)|Notice.*)$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  serveapp-channel-process-temporal:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^TestChannel(ActionAcknowledgmentAbruptProcessDeathPublicJourney|Input(AbruptProcessDeathPublicJourney|AuthorityRestartPublicJourney)|Delivery(AbruptProcessDeathPublicJourney|HumanTemporalReceiptPublicJourney|UncertainCopyAuthorityPublicJourney|SettlementWaitIncludesPlannedWork))$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  serveapp-channel-lifecycle:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^TestChannel(SelectedFork.*|Source.*)$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  serveapp-channel-native:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^TestChannelNative.*$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full

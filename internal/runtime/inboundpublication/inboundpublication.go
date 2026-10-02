@@ -162,11 +162,14 @@ type Finalization struct {
 // every event before entering storage; the selected store owns the one atomic
 // transaction and cannot call back into runtime or borrow transaction context.
 type CommitCommand struct {
-	Request              Request
-	Finalization         Finalization
-	Publications         []runtimebus.PublicationCommand
-	AuthorProjection     runtimeauthoractivity.InboundProjection
-	OperatorChannelClaim *operatorchannel.InboundClaim
+	Request               Request
+	Finalization          Finalization
+	Publications          []runtimebus.PublicationCommand
+	AuthorProjection      runtimeauthoractivity.InboundProjection
+	OperatorChannelClaim  *operatorchannel.InboundClaim
+	OperatorChannelAction *operatorchannel.InboundAction
+	OperatorChannelText   *operatorchannel.InboundText
+	PotentialBareText     *operatorchannel.InboundText
 }
 
 func (c CommitCommand) Validate() error {
@@ -177,18 +180,55 @@ func (c CommitCommand) Validate() error {
 	if len(c.Finalization.Events) > 2 {
 		return fmt.Errorf("inbound publication requires raw plus zero or one normalized event")
 	}
-	if len(c.Finalization.Events) == 0 {
-		if c.OperatorChannelClaim == nil {
-			return fmt.Errorf("zero-event inbound publication requires an operator channel claim")
+	operatorKinds := 0
+	for _, present := range []bool{c.OperatorChannelClaim != nil, c.OperatorChannelAction != nil, c.OperatorChannelText != nil} {
+		if present {
+			operatorKinds++
 		}
-		if err := c.OperatorChannelClaim.Validate(); err != nil {
+	}
+	if operatorKinds > 1 {
+		return fmt.Errorf("inbound publication cannot contain multiple operator channel facts")
+	}
+	if c.PotentialBareText != nil {
+		text := c.PotentialBareText
+		if operatorKinds != 0 || len(c.Finalization.Events) == 0 || text.EntryReference != "" || text.ReplyToReference != "" {
+			return fmt.Errorf("potential bare channel text requires only business events")
+		}
+		if err := text.Validate(); err != nil {
 			return err
 		}
-		if c.OperatorChannelClaim.PublicationID != request.PublicationID || c.OperatorChannelClaim.Provider != request.Provider || c.OperatorChannelClaim.ProviderEventID != request.ProviderEventID {
-			return fmt.Errorf("operator channel claim provenance does not match inbound request")
+		if text.PublicationID != request.PublicationID || text.Provider != request.Provider || text.ProviderEventID != request.ProviderEventID {
+			return fmt.Errorf("potential bare channel text provenance does not match inbound request")
 		}
-	} else if c.OperatorChannelClaim != nil {
-		return fmt.Errorf("operator channel claim publication must contain zero business events")
+	}
+	if len(c.Finalization.Events) == 0 {
+		switch {
+		case c.OperatorChannelClaim != nil:
+			if err := c.OperatorChannelClaim.Validate(); err != nil {
+				return err
+			}
+			if c.OperatorChannelClaim.PublicationID != request.PublicationID || c.OperatorChannelClaim.Provider != request.Provider || c.OperatorChannelClaim.ProviderEventID != request.ProviderEventID {
+				return fmt.Errorf("operator channel claim provenance does not match inbound request")
+			}
+		case c.OperatorChannelAction != nil:
+			if err := c.OperatorChannelAction.Validate(); err != nil {
+				return err
+			}
+			if c.OperatorChannelAction.PublicationID != request.PublicationID || c.OperatorChannelAction.Provider != request.Provider || c.OperatorChannelAction.ProviderEventID != request.ProviderEventID {
+				return fmt.Errorf("operator channel action provenance does not match inbound request")
+			}
+		case c.OperatorChannelText != nil:
+			if err := c.OperatorChannelText.Validate(); err != nil {
+				return err
+			}
+			if c.OperatorChannelText.PublicationID != request.PublicationID || c.OperatorChannelText.Provider != request.Provider || c.OperatorChannelText.ProviderEventID != request.ProviderEventID {
+				return fmt.Errorf("operator channel text provenance does not match inbound request")
+			}
+		default:
+			return fmt.Errorf("zero-event inbound publication requires an operator channel fact")
+		}
+	} else if operatorKinds != 0 {
+		return fmt.Errorf("operator channel publication must contain zero business events")
 	}
 	if len(c.Publications) != len(c.Finalization.Events) {
 		return fmt.Errorf("inbound publication event and publication command counts differ")

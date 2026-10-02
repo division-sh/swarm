@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	"github.com/lib/pq"
 )
 
@@ -111,6 +112,9 @@ func applyDestructiveResetCleanupTx(ctx context.Context, tx *sql.Tx, req destruc
 			return destructivereset.CleanupResult{}, err
 		}
 		rows[i].DeletedRows = deleted
+	}
+	if err := channeldelivery.RetireStaleNativeInboxConsumersTx(ctx, tx, !sqlite); err != nil {
+		return destructivereset.CleanupResult{}, err
 	}
 	out.Tables = rows
 	return out, nil

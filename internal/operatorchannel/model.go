@@ -197,18 +197,49 @@ type TextFact struct {
 	ConversationRef     string            `json:"conversation_reference"`
 	ConversationScope   ConversationScope `json:"conversation_scope"`
 	Text                string            `json:"text"`
+	MessageReference    string            `json:"provider_message_reference"`
+	ReplyToReference    string            `json:"reply_to_message_reference,omitempty"`
+	EntryReference      string            `json:"entry_reference,omitempty"`
+	EntryAddress        string            `json:"entry_address,omitempty"`
 	AccountPresentation string            `json:"account_presentation,omitempty"`
+}
+
+type ActionFact struct {
+	Interface          InterfaceIdentity `json:"interface"`
+	ExternalAccountRef string            `json:"external_account_reference"`
+	ConversationRef    string            `json:"conversation_reference"`
+	ConversationScope  ConversationScope `json:"conversation_scope"`
+	MessageReference   string            `json:"provider_message_reference"`
+	InteractionRef     string            `json:"interaction_reference"`
+	Token              string            `json:"token"`
+}
+
+func (f ActionFact) Validate() error {
+	if err := f.Interface.Validate(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(f.ExternalAccountRef) == "" || strings.TrimSpace(f.ConversationRef) == "" ||
+		strings.TrimSpace(f.MessageReference) == "" || strings.TrimSpace(f.InteractionRef) == "" || strings.TrimSpace(f.Token) == "" {
+		return fmt.Errorf("%w: action fact requires complete identity, message, interaction, and token", ErrInvalidRequest)
+	}
+	if !f.ConversationScope.Valid() {
+		return fmt.Errorf("%w: conversation_scope must be direct or shared", ErrInvalidRequest)
+	}
+	return nil
 }
 
 func (f TextFact) Validate() error {
 	if err := f.Interface.Validate(); err != nil {
 		return err
 	}
-	if strings.TrimSpace(f.ExternalAccountRef) == "" || strings.TrimSpace(f.ConversationRef) == "" || strings.TrimSpace(f.Text) == "" {
-		return fmt.Errorf("%w: text claim requires account, conversation, and text", ErrInvalidRequest)
+	if strings.TrimSpace(f.ExternalAccountRef) == "" || strings.TrimSpace(f.ConversationRef) == "" || strings.TrimSpace(f.Text) == "" || strings.TrimSpace(f.MessageReference) == "" {
+		return fmt.Errorf("%w: text fact requires account, conversation, text, and message reference", ErrInvalidRequest)
 	}
 	if !f.ConversationScope.Valid() {
 		return fmt.Errorf("%w: conversation_scope must be direct or shared", ErrInvalidRequest)
+	}
+	if f.EntryAddress != "" && f.EntryReference == "" {
+		return fmt.Errorf("%w: addressed entry requires an entry reference", ErrInvalidRequest)
 	}
 	return nil
 }
@@ -220,6 +251,48 @@ type InboundClaim struct {
 	PublicationID         string `json:"publication_id"`
 	ProviderAuthorization string `json:"provider_authorization"`
 	Challenge             string `json:"challenge"`
+}
+
+// InboundAction records a verified callback as an intent. Its token is only a
+// lookup key; current binding, receipt, render, and card admission happen later.
+type InboundAction struct {
+	ActionFact
+	Provider              string `json:"provider"`
+	ProviderEventID       string `json:"provider_event_id"`
+	PublicationID         string `json:"publication_id"`
+	ProviderAuthorization string `json:"provider_authorization"`
+}
+
+// InboundText records a verified non-challenge text occurrence. Its contents
+// are not principal, entry, or draft authority until currentness is checked.
+type InboundText struct {
+	TextFact
+	Provider              string `json:"provider"`
+	ProviderEventID       string `json:"provider_event_id"`
+	PublicationID         string `json:"publication_id"`
+	ProviderAuthorization string `json:"provider_authorization"`
+}
+
+func (t InboundText) Validate() error {
+	if err := t.TextFact.Validate(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(t.Provider) == "" || strings.TrimSpace(t.ProviderEventID) == "" ||
+		strings.TrimSpace(t.ProviderAuthorization) == "" || uuid.Validate(t.PublicationID) != nil {
+		return fmt.Errorf("%w: inbound text provenance is required", ErrInvalidRequest)
+	}
+	return nil
+}
+
+func (a InboundAction) Validate() error {
+	if err := a.ActionFact.Validate(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(a.Provider) == "" || strings.TrimSpace(a.ProviderEventID) == "" ||
+		strings.TrimSpace(a.ProviderAuthorization) == "" || uuid.Validate(a.PublicationID) != nil {
+		return fmt.Errorf("%w: inbound action provenance is required", ErrInvalidRequest)
+	}
+	return nil
 }
 
 func (c InboundClaim) Validate() error {

@@ -25,6 +25,38 @@ interfaces:
         nonempty_text: {type: string, minLength: 1}
         inbound_text: {type: string, minLength: 1}
         conversation_scope: {type: string, enum: [direct, shared]}
+        entry_invocation:
+          type: object
+          additionalProperties: false
+          required: [reference]
+          properties:
+            reference: {type: string, minLength: 1, maxLength: 32}
+            address: {type: string, minLength: 5, maxLength: 32}
+        inbox_install_commands:
+          type: array
+          minItems: 1
+          maxItems: 1
+          items:
+            type: object
+            additionalProperties: false
+            required: [command, description]
+            properties:
+              command: {type: string, minLength: 1, maxLength: 32}
+              description: {type: string, minLength: 1, maxLength: 256}
+        inbox_readback_commands:
+          type: array
+          minItems: 0
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required: [command, description]
+            properties:
+              command: {type: string, minLength: 1, maxLength: 32}
+              description: {type: string, minLength: 1, maxLength: 256}
+        inbox_address: {type: string, minLength: 5, maxLength: 32}
+        inbox_language: {type: string, enum: ['', en, fr]}
+        inbox_launcher: {type: string, enum: [commands, default, web_app]}
       operations:
         deliver:
           effect_class: non_idempotent_write
@@ -49,6 +81,50 @@ interfaces:
           effect_class: non_idempotent_write
           input:
             interaction_reference: {opaque: interaction_reference}
+        install_inbox_entry:
+          effect_class: non_idempotent_write
+          input:
+            commands: {schema: inbox_install_commands}
+          context:
+            destination: {opaque: destination}
+        read_inbox_entry:
+          effect_class: read_only
+          input:
+            language_code: {schema: inbox_language}
+          context:
+            destination: {opaque: destination}
+          output:
+            commands: {schema: inbox_readback_commands}
+        install_shared_inbox_entry:
+          effect_class: non_idempotent_write
+          input:
+            member_reference: {opaque: external_account_reference}
+            commands: {schema: inbox_install_commands}
+          context:
+            destination: {opaque: destination}
+        read_shared_inbox_entry:
+          effect_class: read_only
+          input:
+            member_reference: {opaque: external_account_reference}
+            language_code: {schema: inbox_language}
+          context:
+            destination: {opaque: destination}
+          output:
+            commands: {schema: inbox_readback_commands}
+        identify_inbox_address:
+          effect_class: read_only
+          output:
+            address_reference: {schema: inbox_address}
+        read_inbox_launcher:
+          effect_class: read_only
+          context:
+            destination: {opaque: destination}
+          output:
+            launcher: {schema: inbox_launcher}
+        read_default_inbox_launcher:
+          effect_class: read_only
+          output:
+            launcher: {schema: inbox_launcher}
       events:
         action:
           required_fields:
@@ -65,6 +141,9 @@ interfaces:
             conversation_reference: {opaque: conversation_reference}
             conversation_scope: {schema: conversation_scope}
             provider_message_reference: {opaque: delivery_reference}
+          optional_fields:
+            reply_to_message_reference: {opaque: delivery_reference}
+            entry_invocation: {schema: entry_invocation}
 spec_authority:
   merge_bearing_owner: platform-spec.yaml
   rule: |
@@ -638,8 +717,13 @@ contract_formats:
           Card creation evaluates context once and freezes the structured
           presentation snapshot, authored verdict/input schema, effective cadence,
           provenance, bundle/workflow identity, card_content_hash, and
-          decision_schema_hash. The raw top-level decision_id MUST already equal
-          its trimmed canonical spelling and MUST equal snapshot.decision before
+          decision_schema_hash. Each outcome's input_order freezes the exact authored
+          YAML field order or the explicit deterministic order supplied by a
+          programmatic producer. It must name each declared input exactly once;
+          missing, duplicate, or foreign names fail before card creation. The
+          order is part of snapshot content and card_content_hash but not the
+          acceptance-only decision_schema_hash. The raw top-level decision_id MUST
+          already equal its trimmed canonical spelling and MUST equal snapshot.decision before
           either hash or any persistence is acquired; deriving a canonical
           snapshot identity from a different public/persisted spelling is
           forbidden. decision_schema_hash is the versioned canonical semantic
@@ -10498,14 +10582,23 @@ tool_model:
       claim_rule: >
         Setup accepts only exact canonical SWARM- plus sixteen base32-character text from one current pack-authorized v2
         text fact. The fact carries opaque authenticated external-account and conversation references plus exactly direct
-        or shared scope. Provider display names, configured destinations, OS names, CLI strings, callback actions,
+        or shared scope. The same compiled text projection retains the required provider message reference and the
+        optional reply-to message reference. An absent reply-to reference is distinct from a malformed present one;
+        only the accepted trigger schema and channel satisfaction plan may project either reference. The same compiled
+        plan may project an optional typed native-entry invocation with a reference and optional provider address;
+        that projection is evidence only and grants no entry or mutation authority. Provider command spelling is
+        interpreted only inside its accepted trigger/adapter, never by the generic operator-channel runtime. The same compiled
+        plan projects authenticated action facts with the required token, interaction reference, message reference,
+        account, conversation, and scope; projection itself grants no decision authority. Provider display names, configured destinations, OS names, CLI strings, callback actions,
         provider-native conversation kinds, proof filenames, and bearer-token hashes carry no authority. Accepted setup
         claims commit in the same selected-store transaction as the inbound publication and publish zero raw or normalized
         business events. Duplicate, expired, wrong-target, and rejected challenge-shaped facts receive one named durable
         disposition; silent absence and consumed-but-unbound terminal states are forbidden.
       confirmation_rule: >
         A provider-authenticated claimant first moves the operation to awaiting_confirmation. The authenticated operator
-        must confirm that exact claimant before local binding mutation. connect requires no current binding, reconnect
+        must confirm that exact claimant before local binding mutation. A shared-conversation confirmation states that
+        future notices, decision cards, and their updates sent to the selected default will be visible to that group;
+        it does not add a second dialog or grant another member action authority. connect requires no current binding, reconnect
         requires the same account/conversation, rebind requires a different claimant and a current binding, and unbind
         writes an explicit fence. Every transition is exact-revision fenced; same-key replay and same-confirmation replay
         return the original outcome while changed input conflicts. An exact selected-store begin replay is classified
@@ -10602,6 +10695,14 @@ tool_model:
     connected_channel_onboarding:
       issue: '#2079'
       implementation_status: implemented
+      physical_bot_ownership_rule: >
+        One physical bot resource admits one current ingress connection serving many business conversations.
+        Different targets or credential aliases do not create independent physical registration namespaces.
+        Preserve exact same-semantic-pair candidate/predecessor handoff, identity confirmation and current binding
+        joins. Reject competing independent connections with a typed durable collision outcome while preserving the
+        surviving connection. Original #2241 M51 simultaneous independent context-consumer sharing is superseded,
+        not reproduced and fixed by one-bot conversation evidence. Reusable multi-store identity and correct-bot
+        replies remain separately audited under #2500; they grant no additional operator mailbox authority.
       canonical_owners:
         provider_profile: admitted ChannelOnboardingProfile compiled with the exact swarm.hitl-channel/v2 satisfaction plan
         context_coordinate: ChannelRuntimeContextCoordinate
@@ -10638,6 +10739,15 @@ tool_model:
           authenticated_text_challenge. Discord paper conformance is the second webhook/text shape. WhatsApp paper
           conformance is session_connection plus provider_pairing and grants no executable session authority before
           #2338/#2341 provide the service and health owners.
+      learned_destination_declaration: >
+        Every channel onboarding profile requires an explicit learned_destination map using ChannelMapping syntax.
+        Sources are scalar leaves rooted at conversation_reference; targets are scalar leaves rooted at destination.
+        Each required source and target leaf is covered exactly once, with no duplicate or overlapping paths, and the
+        existing directional compiler must prove assignability over the complete admitted source domain. Literals,
+        conversions, ambient values, each/fanout, functions and provider branches are unsupported. Telegram declares
+        destination <- conversation_reference explicitly; distinct object slots may declare
+        destination.queue <- conversation_reference.room. The immutable compiled relation and its complete semantic
+        projection participate in SatisfactionPlan generation. Declared-only bindings without onboarding need no relation.
       operation_rule: >
         connect, reconnect, and rebind are distinct whole-journey verbs. One selected-store operation reserves exact
         semantic input and target-slot responsibility before credential writes or provider effects. Same-key/same-input
@@ -10727,10 +10837,13 @@ tool_model:
         readiness, and runtime-context readback consume that owner; no config-only map or independent current-state copy
         survives. The selected-store ConnectedChannelActivation remains the durable learned source; the process
         publication is its exact-current compiled projection, not a second durable owner. Each learned activation retains
-        the exact conversation destination and binding revision admitted at publication. Compilation consumes those durable
-        activation facts rather than rereading mutable current identity, so an activation remains reconstructable while a
+        the exact conversation reference and binding revision admitted at publication. The exact generation-pinned
+        SatisfactionPlan restores that reference under its declared conversation_reference schema and consumes its
+        compiled learned_destination relation to derive the typed destination. Conversation and destination are independent
+        opaque slots, never implicitly interchangeable. No additional mutable destination row or durable owner exists.
+        Compilation consumes those durable activation facts rather than rereading mutable current identity, so an activation remains reconstructable while a
         rebind advances identity and until the successor process publication is exact-current. Missing or contradictory
-        activation-owned destination, coordinate, credential, or revision facts fail closed.
+        activation-owned conversation, exact plan/relation generation, coordinate, credential, or revision facts fail closed.
         Serve prepares the exact runtime-context occurrence and required standing/topology facts before reconstructing
         connected state and publishing the complete executable activation catalog. Destructive-effect reconciliation and
         publication must succeed before recovered or new business work, delivery continuations, autonomous producers,
@@ -10856,8 +10969,15 @@ tool_model:
         leaves are all required. Generic channel code validates and carries these semantic values but must not inspect their
         provider-owned fields or assume scalar, decimal, message-id, account-id, conversation-id, or callback-token shapes.
         When an opaque account or conversation reference enters the selected-store operator-channel text projection, an
-        admitted string remains exact and an admitted closed object is encoded as canonical JSON; no consumer parses its
-        provider-owned members or reconstructs identity from presentation text.
+        admitted string remains exact and an admitted closed object is encoded as canonical JSON; no consumer independently
+        interprets its provider-owned members or reconstructs identity from presentation text. The same carrier rule applies
+        to retained interaction and message references. At executable boundaries, one SatisfactionPlan restoration operation
+        selects the exact declared slot schema from the admitted generation-pinned plan. String slots remain exact strings,
+        including JSON-looking strings; object slots restore canonical semantic JSON and validate the complete declared schema.
+        Malformed, empty, duplicate-key, noncanonical, wrong-slot or schema-contradictory values fail closed, with no
+        string/object fallback. Restoration confers no identity, principal, audience, credential or effect authority.
+        Callback ACK consumes the interaction_reference slot; both shared native read and install consume
+        external_account_reference for member_reference. PrepareOperation remains strict for typed semantic input.
         Provider-native conversation-kind vocabulary does not cross the v2 interface. The required provider-neutral
         conversation_scope is exactly direct or shared and is projected once by the accepted provider trigger.
     operation_model:
@@ -10865,7 +10985,24 @@ tool_model:
       - deliver
       - edit
       - acknowledge_interaction
-      effect: non_idempotent_write
+      - install_inbox_entry
+      - read_inbox_entry
+      - install_shared_inbox_entry
+      - read_shared_inbox_entry
+      - identify_inbox_address
+      - read_inbox_launcher
+      - read_default_inbox_launcher
+      effects:
+        deliver: non_idempotent_write
+        edit: non_idempotent_write
+        acknowledge_interaction: non_idempotent_write
+        install_inbox_entry: non_idempotent_write
+        read_inbox_entry: read_only
+        install_shared_inbox_entry: non_idempotent_write
+        read_shared_inbox_entry: read_only
+        identify_inbox_address: read_only
+        read_inbox_launcher: read_only
+        read_default_inbox_launcher: read_only
       presentation: closed non-empty text
       actions: ordered closed label/token rows; an empty list is valid and edit with an empty list clears controls
       acknowledgement_context: >
@@ -10876,12 +11013,13 @@ tool_model:
       - resolve exactly one trigger and connector dependency by immutable pack id and role from the accepted inventory
       - reject duplicate pack ids across trigger, connector, and channel roles
       - require exact operation and event key sets; missing, duplicate, or unknown rows fail admission
-      - require exact non_idempotent_write effect equality between interface operation and connector tool
+      - require exact compiled effect equality between each interface operation and connector tool; both read_only and non_idempotent_write are explicit, never inferred by the caller
       - recursively require every required interface input/context leaf to be consumed once and every required connector target leaf to be assigned once
       - reject duplicate or ancestor/descendant overlap in mapped targets and recursively consumed item sources; the compiler records one topology that runtime preparation consumes
       - prove recursively that every admitted source value is assignable to its target, including object requiredness and additional-properties policy, array items and bounds, enums, patterns, and scalar bounds
       - reject any directional relation the finite compiler cannot prove; constraint intersection is not assignability
       - permit only scalar identity and one ordered each-item object projection; channel-operation conversions are not supported
+      - compile learned_destination through the same mapping topology and directional schema owner, permitting scalar-leaf projection only with complete required source/target coverage and no overlap or implicit identity
       - reject caller-supplied provider context, ambient values, defaults, functions, concatenation, conditions, or partial mappings
       - validate connector output first, then apply the compiled channel output projection, then validate the satisfier-bound opaque result
       - require every normalized trigger field to declare one post-conversion schema; normalization admits against that schema and the accepted trigger owner exports the same schema to the recursive event-mapping relation
@@ -14306,6 +14444,15 @@ platform_tables:
         - operator_channel_operations
         - operator_channel_bindings
         - operator_channel_claim_receipts
+        - operator_channel_action_intents
+        - operator_channel_text_intents
+        - channel_delivery_defaults
+        - channel_native_settings
+        - channel_native_setting_consumers
+        - channel_delivery_plans
+        - channel_delivery_renders
+        - channel_delivery_receipts
+        - channel_delivery_actions
         - channel_onboarding_teardowns
         - run_fork_selected_contract_runtime_executions
         - budget_admission_scopes
@@ -14980,6 +15127,319 @@ platform_tables:
             INDEX idx_operator_channel_bindings_principal (principal_id, interface_key),
             INDEX idx_operator_channel_bindings_proof (proof_id, proof_revision)
         );
+    channel_delivery_defaults:
+      description: >-
+        The single explicitly chosen operator delivery destination. The first verified binding
+        establishes the default in its confirmation transaction. A different connected interface
+        never replaces it by recency or availability. Reconnect retains its destination, verified
+        rebind advances its delivery epoch and changes only the chosen interface's destination;
+        reconnect preserves that epoch. Unbind retires authority while
+        preserving the selected identity as a fence. Notice admission serializes on the principal
+        before reading this row; only notices committed after the first-current cut may be planned
+        individually. No historical notice is inferred deliverable from a timestamp or list order.
+        Confirming a shared conversation as default explicitly discloses that future notices,
+        decision cards, and their updates will be visible to that conversation; this does not
+        grant its other members the operator principal's action authority.
+        The card change cursor advances in the same selected-store transaction that verifies the
+        exact change and durably plans an open card. Paginated open-card list reconciliation and
+        exact readback of every retained delivery receipt remain mandatory independent repairs.
+      ddl: |
+        CREATE TABLE channel_delivery_defaults (
+            singleton_id BIGINT PRIMARY KEY CHECK (singleton_id = 1),
+            principal_id UUID NOT NULL REFERENCES operator_principals(principal_id),
+            interface_key TEXT NOT NULL REFERENCES operator_channel_bindings(interface_key),
+            binding_revision BIGINT NOT NULL CHECK (binding_revision > 0),
+            delivery_epoch BIGINT NOT NULL CHECK (delivery_epoch > 0),
+            external_account_reference TEXT NOT NULL,
+            conversation_reference TEXT NOT NULL,
+            conversation_scope TEXT NOT NULL CHECK (conversation_scope IN ('direct','shared')),
+            state TEXT NOT NULL CHECK (state IN ('current','retired')),
+            card_change_cursor BIGINT NOT NULL DEFAULT 0 CHECK (card_change_cursor >= 0),
+            first_operation_id UUID NOT NULL REFERENCES operator_channel_operations(operation_id),
+            updated_at TIMESTAMPTZ NOT NULL
+        );
+    channel_native_settings:
+      description: >-
+        One selected-store owner for a provider-authenticated physical bot resource and exact
+        native Open inbox scope. Direct chats use a chat scope; shared chats use the verified
+        operator's chat-member scope. The command spelling is opaque and deterministic for the
+        setting generation, so a stale menu entry never borrows successor authority. The provider
+        slot comes from verified registration identity;
+        credential aliases and runtime contexts are not independent settings. A current setting
+        has one exact current connection authority; independent registrations for the same bot
+        are unsupported. Retained predecessor consumers describe sequential handoff history,
+        not simultaneous sharing. Unknown launched writes remain durable
+        and block overlapping successor writes and usable readiness, even if a later readback
+        happens to match. Retirement is local only and never deletes a remote command.
+        A compatible current successor may reclaim a locally retired generation only when its
+        original install has settled, its retained readback hash matches the exact desired
+        commands, and fresh compiled effective-locale/launcher qualification succeeds. This reuses the same command
+        without a new write; a mismatch becomes unavailable, while an uncertain predecessor
+        remains non-usable. An incompatible or never-installed retired setting cannot borrow
+        that readback or entry authority.
+        Successfully recording an uncertain setting outcome is not successful installation:
+        delivery readiness requires the exact acknowledged write and successful readback,
+        and readback failure or mismatch remains non-usable.
+        Foreground and startup settlement use the same typed generation/install owner in
+        the journal transaction. Recovery of a launched or response-observed install records
+        uncertainty without a fabricated readback or another provider write. An authorized,
+        proven-unlaunched install is abandoned without projecting installation or uncertainty;
+        settled evidence remains unchanged. Original committed authority is not replaced by
+        a current consumer, binding, or activation. A generation/install or projection conflict
+        rolls back both journal and setting state rather than advancing a successor.
+        A text invocation is entry evidence only when its exact verified pending inbound intent
+        resolves through the current binding, succeeded activation, current compatible consumer,
+        and installed setting generation with the same opaque command reference. A shared
+        invocation additionally requires the current bot address; provider-native command
+        spelling is never interpreted by the selected-store owner.
+      ddl: |
+        CREATE TABLE channel_native_settings (
+            setting_id UUID PRIMARY KEY,
+            provider TEXT NOT NULL,
+            resource_slot_id TEXT NOT NULL,
+            conversation_reference TEXT NOT NULL,
+            scope_kind TEXT NOT NULL CHECK (scope_kind IN ('chat','chat_member')),
+            member_reference TEXT NOT NULL,
+            language_code TEXT NOT NULL CHECK (language_code = ''),
+            pack_id TEXT NOT NULL,
+            pack_version TEXT NOT NULL,
+            pack_manifest_hash TEXT NOT NULL,
+            entry_contract_hash TEXT NOT NULL,
+            entry_command TEXT NOT NULL,
+            desired_commands JSONB NOT NULL,
+            principal_id UUID NOT NULL REFERENCES operator_principals(principal_id),
+            generation BIGINT NOT NULL CHECK (generation > 0),
+            state TEXT NOT NULL CHECK (state IN ('planned','installed','uncertain','unavailable','retired')),
+            install_operation_id UUID NOT NULL,
+            readback_hash TEXT,
+            created_at TIMESTAMPTZ NOT NULL,
+            updated_at TIMESTAMPTZ NOT NULL,
+            UNIQUE (provider, resource_slot_id, conversation_reference, scope_kind, member_reference, language_code),
+            CHECK ((scope_kind = 'chat' AND member_reference = '') OR (scope_kind = 'chat_member' AND member_reference <> '')),
+            INDEX idx_channel_native_setting_state (state, updated_at)
+        );
+    channel_native_setting_consumers:
+      description: >-
+        Exact current connection reference and retained predecessor history for one physical
+        setting. Sequential handoff preserves generation/effect evidence; contradictory
+        simultaneous current authority is invalid. Stale predecessor retirement cannot fence
+        the successor. Last-current retirement fences local entry without a provider delete.
+        activation_id is an immutable historical coordinate, not a foreign key to a live
+        activation row. Consumer creation and every usable current read still require the
+        exact current activation, binding and context. Destructive reset preserves that
+        coordinate and all historical setting/install evidence while atomically retiring
+        consumers whose executable activations are removed. A healthy last-consumer setting
+        becomes locally retired; an unresolved launched install remains uncertain, never
+        acknowledged or replayed by reset. Dry-run does not retire, and failed cleanup
+        rolls back both deletion and retirement.
+        Client qualification is independent of acknowledged installation. It pins the explicitly
+        declared language/revision, compiled profile, physical setting generation and exact
+        activation/context. Missing, invalid or stale qualification withholds native usability.
+        A locale change invalidates the qualification but never rewrites install history or
+        causes an install replay. Fresh reads consume selected exact-scope commands before
+        fallback and private chat launcher before the default launcher; lower-precedence
+        settings do not contradict an effective valid selection. Reconciliation, prelaunch,
+        native entry admission and restart require current qualification. Foreign command or
+        launcher settings are neither deleted nor overwritten. English labels qualify explicit
+        English and French clients; no language inference, translation or all-device claim exists.
+      ddl: |
+        CREATE TABLE channel_native_setting_consumers (
+            setting_id UUID NOT NULL REFERENCES channel_native_settings(setting_id),
+            activation_id UUID NOT NULL,
+            activation_revision BIGINT NOT NULL CHECK (activation_revision > 0),
+            interface_key TEXT NOT NULL REFERENCES operator_channel_bindings(interface_key),
+            binding_revision BIGINT NOT NULL CHECK (binding_revision > 0),
+            context_publication_generation BIGINT NOT NULL CHECK (context_publication_generation > 0),
+            state TEXT NOT NULL CHECK (state IN ('current','retired')),
+            qualification_state TEXT NOT NULL DEFAULT 'missing' CHECK (qualification_state IN ('missing','invalid','stale','qualified')),
+            qualification_locale_revision BIGINT NOT NULL DEFAULT 0,
+            qualification_setting_generation BIGINT NOT NULL DEFAULT 0,
+            qualification_activation_revision BIGINT NOT NULL DEFAULT 0,
+            qualification_binding_revision BIGINT NOT NULL DEFAULT 0,
+            qualification_context_generation BIGINT NOT NULL DEFAULT 0,
+            qualification_contract_hash TEXT NOT NULL DEFAULT '',
+            qualification_readback_hash TEXT NOT NULL DEFAULT '',
+            qualification_reason TEXT NOT NULL DEFAULT '',
+            qualification_observed_at TIMESTAMPTZ,
+            updated_at TIMESTAMPTZ NOT NULL,
+            PRIMARY KEY (setting_id, activation_id),
+            UNIQUE (activation_id),
+            INDEX idx_channel_native_setting_consumer_current (setting_id, state)
+        );
+    channel_delivery_plans:
+      description: >-
+        Selected-store responsibility for one source at one verified destination. A notice
+        plan is inserted in the same transaction as its mailbox item, after locking the
+        operator principal and reading the explicit current default. A missing or retired
+        default leaves the notice durable but creates no individual delivery obligation.
+        Reconnect does not create another plan for the same source and delivery epoch; verified
+        rebind or a fresh connect after retirement advances the epoch, even when returning to a
+        previously used destination. The first verified connection also freezes one bounded
+        count-only summary of older pending notices; those notices are never planned individually.
+        A response plan is a separate, inbound-publication-owned readback responsibility.
+        Its original verified, settled request intent, requested audience and request activation
+        remain authoritative through every action-page visit and provider edit; a later navigation
+        tap does not replace that source with a new request or the default destination.
+        Every plan pins the compiled channel's finite action, text and label bounds before
+        provider presentation. All families use the same immutable, monotonic action-page
+        visits, including recovery, draft chooser, notices, summary and response navigation.
+        Full semantic text and unabridged choice labels remain in the render/hash; excerpts,
+        deterministic View full pages and bounded labels consume that pinned contract.
+        When all controls do not fit, one immutable action page is visible at a time and a
+        More choices control cycles through every page on the same card receipt. The selected
+        page visit is durable and monotonic even when visible choices cycle, and a canonical
+        card change resets it before a new render. Every visit has a distinct frozen render;
+        old-page action tokens never regain current mutation authority.
+        It freezes its complete presentation in the render ledger and targets only the
+        current authenticated conversation that requested it, which need not be the default.
+        A native entry or summary Open inbox action traverses the canonical mixed mailbox
+        cursor to completion before freezing one readback. View full and Next page derive
+        deterministic content only from the original immutable render, with each admitted
+        tap owning its own response plan. Opening the inbox is not acknowledgment, a verdict,
+        or resend consent. An uncertain notice or card delivery is never retried automatically.
+        A separate current recovery action may create one linked new delivery generation for the
+        same pending source after checking the current default; the predecessor and its uncertainty
+        remain durable. The recovery presentation states that the first message may have arrived
+        and the resend creates another message. Repeating that action cannot create another generation;
+        a later occurrence after the source loses eligibility settles as stale rather than retrying.
+        Native entry and summary Open inbox freeze a small warning and canonical current source outcome
+        from retained uncertain notice/card plans for the exact current principal, interface, delivery
+        epoch and conversation. Disclosure is independent of resend eligibility and survives a linked
+        fresh copy and source completion; it grants no history-feed or mutation authority. These
+        readbacks use the same compiled bounds and immutable paging as other responses. Planning is not
+        evidence that a provider write was launched, accepted, or acknowledged by a human.
+      ddl: |
+        CREATE TABLE channel_delivery_plans (
+            delivery_id UUID PRIMARY KEY,
+            source_kind TEXT NOT NULL CHECK (source_kind IN ('notice','card','summary','response')),
+            source_id UUID NOT NULL,
+            request_activation_id UUID,
+            summary_count BIGINT CHECK (summary_count > 0),
+            principal_id UUID NOT NULL REFERENCES operator_principals(principal_id),
+            interface_key TEXT NOT NULL REFERENCES operator_channel_bindings(interface_key),
+            binding_revision BIGINT NOT NULL CHECK (binding_revision > 0),
+            delivery_epoch BIGINT NOT NULL CHECK (delivery_epoch > 0),
+            external_account_reference TEXT NOT NULL,
+            conversation_reference TEXT NOT NULL,
+            conversation_scope TEXT NOT NULL CHECK (conversation_scope IN ('direct','shared')),
+            state TEXT NOT NULL CHECK (state IN ('planned','rendered','sent','uncertain','retired')),
+            current_render_id UUID,
+            current_receipt_operation_id UUID,
+            action_capacity BIGINT NOT NULL DEFAULT 0 CHECK (action_capacity >= 0),
+            text_capacity BIGINT NOT NULL DEFAULT 0 CHECK (text_capacity >= 0),
+            label_capacity BIGINT NOT NULL DEFAULT 0 CHECK (label_capacity >= 0),
+            action_page_index BIGINT NOT NULL DEFAULT 0 CHECK (action_page_index >= 0),
+            resend_generation BIGINT NOT NULL DEFAULT 0 CHECK (resend_generation >= 0),
+            resend_of_delivery_id UUID REFERENCES channel_delivery_plans(delivery_id),
+            resend_action_publication_id UUID UNIQUE,
+            created_at TIMESTAMPTZ NOT NULL,
+            CHECK ((source_kind = 'summary' AND summary_count IS NOT NULL) OR (source_kind <> 'summary' AND summary_count IS NULL)),
+            CHECK ((source_kind = 'response' AND request_activation_id IS NOT NULL) OR (source_kind <> 'response' AND request_activation_id IS NULL)),
+            CHECK ((resend_generation = 0 AND resend_of_delivery_id IS NULL AND resend_action_publication_id IS NULL) OR (resend_generation > 0 AND resend_of_delivery_id IS NOT NULL AND resend_action_publication_id IS NOT NULL)),
+            UNIQUE (source_kind, source_id, interface_key, delivery_epoch, resend_generation),
+            INDEX idx_channel_delivery_plan_source (source_kind, source_id),
+            INDEX idx_channel_delivery_plan_pending (state, created_at)
+        );
+    channel_delivery_renders:
+      description: >-
+        Immutable complete provider-neutral render evidence for a planned delivery. The exact
+        canonical JSON input, its hash, source revision, audience, and projection version are
+        checked together at selected-store admission and readback. A provider excerpt or page
+        never replaces this full input. A new card or independent dispatch state creates a
+        separate render member; previously shown input is never overwritten. This table owns
+        no verdict, provider effect attempt, or acknowledgment state. Proposed-effect dispatch
+        text consumes the canonical proposed-effect readback, including the exact activity attempt
+        status; an approved verdict or released continuation does not imply successful dispatch.
+        A deferred pending card renders its canonical deferred-until timestamp without inventing
+        a verdict, hiding the deferral, or removing still-authorized pending-card controls.
+        An active principal-owned
+        card draft contributes only its verdict, next declared field, position and expiry to a
+        new frozen card render after the exact draft change; private entered values never enter
+        render input, group output, or the public change cursor. A chooser freezes the complete
+        current candidate list and retains only the inbound answer reference, never the answer
+        text. A recovery page freezes uncertain delivery identities and requires a separate
+        exact resend tap. Navigation pages derive only from those immutable lists. A requested response
+        stores its immutable readback here in the same transaction that settles the exact
+        verified inbound intent; later launch reads these frozen bytes rather than
+        reconstructing the inbox from newer mailbox state.
+      ddl: |
+        CREATE TABLE channel_delivery_renders (
+            render_id UUID PRIMARY KEY,
+            delivery_id UUID NOT NULL REFERENCES channel_delivery_plans(delivery_id),
+            source_revision BIGINT NOT NULL CHECK (source_revision > 0),
+            projection_version TEXT NOT NULL,
+            render_input JSONB NOT NULL,
+            render_hash TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL,
+            UNIQUE (delivery_id, render_hash),
+            INDEX idx_channel_delivery_render_delivery (delivery_id, created_at)
+        );
+    channel_delivery_receipts:
+      description: >-
+        Immutable domain projection of one exact managed channel-delivery effect settlement. Known accepted output
+        carries the complete compiled provider-neutral delivery reference; an edit additionally retains its distinct
+        provider acknowledgment alongside the predecessor's original message reference. An edit names the exact
+        current sent predecessor operation in its effect authority and advances the current receipt only when that
+        predecessor remains current. Uncertainty carries no invented reference and blocks automatic resend or re-edit.
+        The effect journal remains the launch/attempt authority. Receipt and plan state commit atomically with that
+        journal's terminal settlement, so restart never infers success from a missing receipt or resends uncertain work.
+        Ordinary startup recovery consumes this same projection for both ordinary-source and
+        requested-response sends and edits. Launched or response-observed recovery creates
+        the exact original-render uncertainty receipt without inventing provider acceptance;
+        an edit retains its predecessor's sent reference and cannot move a successor pointer.
+        Proven-unlaunched abandonment creates no receipt, and already terminal rows are
+        unchanged, not backfilled. Original evidence/render or predecessor-CAS conflicts
+        roll back the journal and domain projection together.
+        Historical receipts survive rebind and retirement but confer no current destination authority.
+        Healthy current copies update from canonical state. An unresolved provider write may leave
+        an older physical copy visually stale, including a delayed apply after a fresh copy progresses;
+        convergence of every uncertain historical physical copy is not guaranteed. A successor's
+        acknowledgment never resolves that predecessor or authorizes automatic replay/re-edit.
+      ddl: |
+        CREATE TABLE channel_delivery_receipts (
+            effect_operation_id UUID PRIMARY KEY REFERENCES runtime_external_effect_operations(operation_id),
+            attempt_id UUID NOT NULL UNIQUE REFERENCES runtime_external_effect_attempts(attempt_id),
+            delivery_id UUID NOT NULL REFERENCES channel_delivery_plans(delivery_id),
+            render_id UUID NOT NULL REFERENCES channel_delivery_renders(render_id),
+            state TEXT NOT NULL CHECK (state IN ('sent','uncertain')),
+            provider_reference JSONB,
+            settled_at TIMESTAMPTZ NOT NULL,
+            CHECK ((state = 'sent' AND provider_reference IS NOT NULL) OR (state = 'uncertain' AND provider_reference IS NULL)),
+            INDEX idx_channel_delivery_receipts_delivery (delivery_id, settled_at)
+        );
+    channel_delivery_actions:
+      description: >-
+        Immutable opaque callbacks for one exact frozen channel render. The selected store mints
+        one stable token per ordered verdict, notice acknowledgment, draft cancel/skip,
+        chooser selection, explicit resend, or navigation control in the render transaction;
+        duplicate preparation reads back the same tokens. Tokens do not grant authority alone:
+        authenticated provider facts must still match current principal, binding, destination,
+        receipt, render and canonical card, draft, notice, or uncertain delivery state before any mutation. Notice
+        acknowledgment consumes the canonical principal-scoped mailbox completion transaction,
+        independently of the provider callback acknowledgment. The acknowledged notice is
+        re-rendered without its mutation control and every current receipt is edited from
+        that canonical state. Historical tokens remain evidence but cannot mutate a
+        successor render or destination.
+        A chooser whose selected input draft is no longer authoritative settles the verified tap
+        as stale without completion or a new response; a storage failure is not a stale disposition.
+        The canonical database decision remains authoritative even when an uncertain old physical
+        copy looks actionable. Callbacks and quoted-input selection require exact healthy current
+        receipt/render authority; retained sent evidence from an uncertain plan cannot select a draft.
+        Explicit fresh-copy consent applies only to eligible pending sources and cannot revive a
+        completed decision. Late provider application cannot restore local mutation authority.
+      ddl: |
+        CREATE TABLE channel_delivery_actions (
+            action_token UUID PRIMARY KEY,
+            render_id UUID NOT NULL REFERENCES channel_delivery_renders(render_id),
+            action_position INTEGER NOT NULL CHECK (action_position > 0),
+            action_kind TEXT NOT NULL CHECK (action_kind IN ('verdict','view_full','open_inbox','next_page','acknowledge_notice','cancel_input','skip_input','select_draft','resend','more_controls')),
+            verdict TEXT,
+            label TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL,
+            CHECK ((action_kind = 'verdict' AND verdict IS NOT NULL) OR (action_kind <> 'verdict' AND verdict IS NULL)),
+            UNIQUE (render_id, action_position),
+            INDEX idx_channel_delivery_action_render (render_id, action_position)
+        );
     channel_onboarding_operations:
       description: >-
         Durable whole-journey responsibility for one exact runtime-context-scoped channel connect,
@@ -15016,6 +15476,8 @@ platform_tables:
             phase TEXT NOT NULL CHECK (phase IN ('preparing','credentials_admitted','activating_provider','awaiting_external_identity','awaiting_operator_confirmation','publishing_activation','publishing_process_activation','promoting_registration','retiring_predecessor','delivering_confirmation','succeeded','failed','retired')),
             operation_revision BIGINT NOT NULL CHECK (operation_revision > 0),
             save_proof BOOLEAN NOT NULL,
+            client_language TEXT NOT NULL DEFAULT '',
+            client_locale_revision BIGINT NOT NULL DEFAULT 1 CHECK (client_locale_revision > 0),
             credential_reservations TEXT NOT NULL,
             credential_admissions TEXT NOT NULL DEFAULT '[]',
             identity_operation_id UUID,
@@ -15077,7 +15539,10 @@ platform_tables:
         Current or historical learned channel activation for one exact bundle/runtime-context,
         interface, and target slot. It links rather than duplicates operator account identity and
         stores no secret values. A current row is executable only through the canonical compiled
-        activation and exact-current readiness owners.
+        activation and exact-current readiness owners. Its exact retained conversation_reference,
+        interface and plan-generation provenance determine destination through the immutable
+        compiled onboarding.learned_destination relation; destination is not a separate mutable
+        durable owner and must not be recovered from the current identity binding.
       ddl: |
         CREATE TABLE connected_channel_activations (
             activation_id UUID PRIMARY KEY,
@@ -15198,6 +15663,71 @@ platform_tables:
             reason TEXT NOT NULL,
             recorded_at TIMESTAMPTZ NOT NULL,
             UNIQUE (provider, provider_event_id, interface_key)
+        );
+    operator_channel_action_intents:
+      description: >-
+        Verified channel callback facts commit with their inbound publication and publish zero business
+        events. This row is an intent, not verdict or principal authority: processing must recheck the
+        current binding, exact provider receipt, render, card and selected-source authority before
+        replay or mutation. A committed pending row survives callback acknowledgement loss and restart.
+        Applied verdict and input-start dispositions settle atomically with the canonical human mutation;
+        stale, rejected and unsupported dispositions settle the same exact verified fact without mutation.
+        A negative disposition grants neither private response content nor later action authority.
+      ddl: |
+        CREATE TABLE operator_channel_action_intents (
+            publication_id UUID PRIMARY KEY,
+            provider TEXT NOT NULL,
+            provider_event_id TEXT NOT NULL,
+            interface_key TEXT NOT NULL,
+            fact JSONB NOT NULL,
+            provider_authorization TEXT NOT NULL,
+            state TEXT NOT NULL CHECK (state IN ('pending','settled')),
+            disposition TEXT CHECK (disposition IN ('applied','input_started','navigation','stale','rejected','unsupported')),
+            recorded_at TIMESTAMPTZ NOT NULL,
+            settled_at TIMESTAMPTZ,
+            CHECK ((state = 'pending' AND disposition IS NULL AND settled_at IS NULL) OR (state = 'settled' AND disposition IS NOT NULL AND settled_at IS NOT NULL)),
+            INDEX idx_operator_channel_action_pending (state, recorded_at)
+        );
+    operator_channel_text_intents:
+      description: >-
+        Verified non-challenge channel text commits in the inbound-publication transaction
+        without a business event. The fact retains provider occurrence, exact message and
+        reply references, but grants no entry, draft or principal authority until a current
+        selected-store admission resolves it. An acknowledged webhook is replayable after
+        process death without interpreting provider text from process memory. Bare text is
+        operator input only when the selected store proves an active draft tied to a sent
+        card receipt in the exact current bound conversation. That selection is checked
+        again in the publication transaction; a changed selection fails without committing
+        either an operator intent or a business event. Bare text with no such draft remains
+        ordinary business publication. Quoted and native-entry text remain reserved for
+        exact operator admission and never fall back to business publication. Unknown, stale,
+        foreign or wrong-address native entries settle once as entry_rejected without a
+        response, principal mutation or later revival. Temporary owner, publication or
+        provider readback unavailability remains pending for retry. Delivery reconciliation
+        continues across other valid intents; rejection grants no private-response authority.
+        Selected-fork card input is a deferred execution control, not business ingress:
+        an exact refused verified occurrence settles once as unsupported without draft,
+        verdict, event or response mutation. A refused chooser selection atomically settles
+        its exact retained answer as unsupported too; it cannot consume unrelated text or
+        report that answer applied. Duplicate publication, reconciliation and restart retain
+        the terminal refusal and cannot revive executable authority.
+        Terminal refusal pairs use the immutable frozen chooser and exact historical sent
+        reference if activation or draft authority retires after refusal; this evidence
+        never authorizes a business mutation, response, or provider write.
+      ddl: |
+        CREATE TABLE operator_channel_text_intents (
+            publication_id UUID PRIMARY KEY,
+            provider TEXT NOT NULL,
+            provider_event_id TEXT NOT NULL,
+            interface_key TEXT NOT NULL,
+            fact JSONB NOT NULL,
+            provider_authorization TEXT NOT NULL,
+            state TEXT NOT NULL CHECK (state IN ('pending','settled')),
+            disposition TEXT,
+            recorded_at TIMESTAMPTZ NOT NULL,
+            settled_at TIMESTAMPTZ,
+            CHECK ((state = 'pending' AND disposition IS NULL AND settled_at IS NULL) OR (state = 'settled' AND disposition IS NOT NULL AND settled_at IS NOT NULL)),
+            INDEX idx_operator_channel_text_pending (state, recorded_at)
         );
     runtime_reset_operations:
       description: >-
@@ -15508,7 +16038,7 @@ platform_tables:
             effect_class       TEXT NOT NULL CHECK (effect_class IN ('read_only', 'write_or_unknown')),
             execution_mode     TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
             bundle_hash        TEXT NOT NULL,
-            authority_kind     TEXT NOT NULL CHECK (authority_kind IN ('normal_agent', 'selected_contract_fork', 'conversation_fork_chat', 'startup_probe', 'serve_registration', 'channel_confirmation')),
+            authority_kind     TEXT NOT NULL CHECK (authority_kind IN ('normal_agent', 'selected_contract_fork', 'conversation_fork_chat', 'startup_probe', 'serve_registration', 'channel_confirmation', 'channel_delivery', 'channel_action_ack', 'channel_native_setting')),
             authority_id       TEXT NOT NULL,
             agent_run_id       UUID,
             agent_id           TEXT,
@@ -15532,10 +16062,10 @@ platform_tables:
             created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             completed_at       TIMESTAMPTZ,
-            CHECK (authority_kind IN ('conversation_fork_chat', 'serve_registration', 'channel_confirmation') OR NULLIF(TRIM(COALESCE(capability_plan_fingerprint, '')), '') IS NOT NULL),
+            CHECK (authority_kind IN ('conversation_fork_chat', 'serve_registration', 'channel_confirmation', 'channel_delivery', 'channel_action_ack', 'channel_native_setting') OR NULLIF(TRIM(COALESCE(capability_plan_fingerprint, '')), '') IS NOT NULL),
             CHECK (authority_kind <> 'conversation_fork_chat' OR capability_plan_fingerprint IS NULL),
             CHECK ((effect_kind <> 'provider_turn' OR authority_kind NOT IN ('normal_agent', 'selected_contract_fork') OR agent_frame_bytes IS NOT NULL) AND (agent_frame_bytes IS NULL OR (effect_kind = 'provider_turn' AND authority_kind IN ('normal_agent', 'selected_contract_fork')))),
-            CHECK ((authority_kind = 'normal_agent' AND agent_run_id IS NOT NULL AND agent_id IS NOT NULL AND agent_name_owner IS NOT NULL AND agent_name_source IS NOT NULL AND agent_route_presence IS NOT NULL AND flow_scope_key IS NOT NULL AND flow_instance_id IS NOT NULL AND flow_instance IS NOT NULL AND runtime_epoch > 0 AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NULL) OR (authority_kind = 'selected_contract_fork' AND agent_run_id IS NULL AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NOT NULL AND fork_turn_id IS NULL AND startup_authority_id IS NULL) OR (authority_kind = 'conversation_fork_chat' AND agent_run_id IS NULL AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NOT NULL AND startup_authority_id IS NULL) OR (authority_kind = 'startup_probe' AND agent_run_id IS NULL AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NOT NULL) OR (authority_kind = 'serve_registration' AND agent_run_id IS NULL AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NOT NULL) OR (authority_kind = 'channel_confirmation' AND agent_run_id IS NULL AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NULL)),
+            CHECK ((authority_kind = 'normal_agent' AND agent_run_id IS NOT NULL AND agent_id IS NOT NULL AND agent_name_owner IS NOT NULL AND agent_name_source IS NOT NULL AND agent_route_presence IS NOT NULL AND flow_scope_key IS NOT NULL AND flow_instance_id IS NOT NULL AND flow_instance IS NOT NULL AND runtime_epoch > 0 AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NULL) OR (authority_kind = 'selected_contract_fork' AND agent_run_id IS NULL AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NOT NULL AND fork_turn_id IS NULL AND startup_authority_id IS NULL) OR (authority_kind = 'conversation_fork_chat' AND agent_run_id IS NULL AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NOT NULL AND startup_authority_id IS NULL) OR (authority_kind = 'startup_probe' AND agent_run_id IS NULL AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NOT NULL) OR (authority_kind = 'serve_registration' AND agent_run_id IS NULL AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NOT NULL) OR (authority_kind IN ('channel_confirmation', 'channel_delivery', 'channel_action_ack', 'channel_native_setting') AND agent_run_id IS NULL AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NULL)),
             UNIQUE (authority_kind, authority_id, operation_id),
             INDEX idx_runtime_external_effect_operations_agent (agent_id, created_at) WHERE agent_id IS NOT NULL,
             INDEX idx_runtime_external_effect_operations_authority (authority_kind, authority_id, created_at),
@@ -16694,7 +17224,11 @@ platform_tables:
         or already-consumed drafts fail closed. Replacement, cancellation, consumption, expiry, stage supersession, and run
         supersession close every affected active draft and append an exact decision_card_changes cursor row in the same mutation.
         Storage, request and JSON readback use principal_id; changing a bearer credential for the same principal does not
-        change draft authority. No token-shaped draft decoder or compatibility alias is supported.'
+        change draft authority. Ordered partial input and the next field index are owned by this row;
+        progress change records contain no entered value. A quoted channel answer may select the active draft using
+        the exact current sent receipt and render of a sent plan for its card at the current default destination,
+        including a healthy linked manual resend. The original draft receipt remains retained provenance,
+        not independent current quoted-input authority. No token-shaped draft decoder or compatibility alias is supported.'
       ddl: |
         CREATE TABLE decision_card_input_drafts (
             input_draft_id UUID PRIMARY KEY,
@@ -16704,6 +17238,8 @@ platform_tables:
             verdict        TEXT NOT NULL,
             delivery_receipt_id TEXT,
             status         TEXT NOT NULL CHECK (status IN ('active', 'cancelled', 'consumed', 'expired')),
+            input_fields   JSONB NOT NULL DEFAULT '{}',
+            next_field_index BIGINT NOT NULL DEFAULT 0 CHECK (next_field_index >= 0),
             expires_at     TIMESTAMPTZ NOT NULL,
             created_at     TIMESTAMPTZ NOT NULL,
             updated_at     TIMESTAMPTZ NOT NULL,
@@ -16721,7 +17257,7 @@ platform_tables:
             change_id  BIGSERIAL PRIMARY KEY,
             run_id     UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
             card_id    UUID NOT NULL REFERENCES decision_cards(card_id) ON DELETE CASCADE,
-            change_type TEXT NOT NULL CHECK (change_type IN ('created', 'decided', 'deferred', 'expired', 'superseded', 'input_draft_started', 'input_draft_cancelled', 'input_draft_expired', 'input_draft_consumed')),
+            change_type TEXT NOT NULL CHECK (change_type IN ('created', 'decided', 'deferred', 'expired', 'superseded', 'input_draft_started', 'input_draft_progressed', 'input_draft_cancelled', 'input_draft_expired', 'input_draft_consumed')),
             payload    JSONB NOT NULL DEFAULT '{}',
             created_at TIMESTAMPTZ NOT NULL,
             INDEX idx_decision_card_changes_card (card_id, change_id),
@@ -29056,6 +29592,18 @@ api_specification:
       status_storage_model: 'Typed cards are pending, decided, or superseded. Defer is non-terminal: status remains pending and
         deferred_until is updated independently. An input draft is never a verdict. Notice acknowledgment mutates only notice
         notification state.'
+      input_draft_admission: 'Any verdict with a declared input field, including an optional-only field set, may start a durable
+        principal-owned input draft. A verdict with no declared input fields cannot start a draft.'
+      selected_fork_control_admission: >
+        Decide, defer, begin_input and cancel_input, and all partial or final ordered-field
+        text, chosen-answer and skip writes, consume the same exact durable selected-fork
+        classification before mutation at their shared selected-store owners. These controls
+        remain unsupported for selected forks; ordinary bundle execution or channel principal
+        authority cannot bypass that restriction. API admission may refuse earlier but is not
+        the mutation authority. Classification read failure or missing owner fails closed.
+        Readback, navigation, delivery and notice acknowledgment are distinct concepts and
+        remain admitted by their existing owners. Callback acknowledgment may settle
+        independently; it is never a successful business decision.
       decision_input_types: >
         Stage-gate verdict inputs use one closed scalar vocabulary: text,
         integer, numeric, boolean, timestamp, and uuid. Gate authoring rejects
@@ -30794,7 +31342,7 @@ api_specification:
           sequence: {type: integer, minimum: 1}
           card_id: {$ref: '#/components/schemas/OpaqueId'}
           run_id: {$ref: '#/components/schemas/OpaqueId'}
-          change_type: {type: string, enum: [created, decided, deferred, expired, superseded, input_draft_started, input_draft_cancelled, input_draft_expired, input_draft_consumed]}
+          change_type: {type: string, enum: [created, decided, deferred, expired, superseded, input_draft_started, input_draft_progressed, input_draft_cancelled, input_draft_expired, input_draft_consumed]}
           payload: {type: object, additionalProperties: true}
           created_at: {$ref: '#/components/schemas/Timestamp'}
           effect: {$ref: '#/components/schemas/ProposedEffectState'}
@@ -32822,7 +33370,7 @@ api_specification:
       ChannelOnboardingOperation:
         type: object
         additionalProperties: false
-        required: [operation_id, principal_id, verb, provider, interface, coordinate, target_selector, activation_posture, identity_ceremony, phase, revision, save_proof, credential_reservations, requested_at, updated_at]
+        required: [operation_id, principal_id, verb, provider, interface, coordinate, target_selector, activation_posture, identity_ceremony, phase, revision, save_proof, client_language, client_locale_revision, credential_reservations, requested_at, updated_at]
         properties:
           operation_id: {$ref: '#/components/schemas/OpaqueId'}
           principal_id: {$ref: '#/components/schemas/OpaqueId'}
@@ -32836,6 +33384,8 @@ api_specification:
           phase: {type: string, enum: [preparing, credentials_admitted, activating_provider, awaiting_external_identity, awaiting_operator_confirmation, publishing_activation, publishing_process_activation, promoting_registration, retiring_predecessor, delivering_confirmation, succeeded, failed, retired]}
           revision: {type: integer, minimum: 1}
           save_proof: {type: boolean}
+          client_language: {type: string}
+          client_locale_revision: {type: integer, minimum: 1}
           credential_reservations:
             type: array
             minItems: 1
@@ -32898,12 +33448,25 @@ api_specification:
         additionalProperties: false
         required: [ready, reason, coordinate, activation_revision, binding_revision, observed_at]
         properties:
+          native_inbox: {$ref: '#/components/schemas/NativeInboxQualification'}
           ready: {type: boolean}
           reason: {type: string, enum: [ready, runtime_context_coordinate_invalid, channel_plan_unavailable, activation_not_current, binding_not_current, proof_not_current, credentials_not_current, confirmation_not_terminal_success, target_not_current, exposure_not_current, registration_not_current, session_not_current]}
           coordinate: {$ref: '#/components/schemas/ChannelRuntimeContextCoordinate'}
           activation_generation: {type: string, minLength: 1}
           activation_revision: {type: integer, minimum: 0}
           binding_revision: {type: integer, minimum: 0}
+          observed_at: {$ref: '#/components/schemas/Timestamp'}
+      NativeInboxQualification:
+        type: object
+        additionalProperties: false
+        required: [state, client_language, locale_revision]
+        properties:
+          state: {type: string, enum: [missing, invalid, stale, qualified]}
+          client_language: {type: string}
+          locale_revision: {type: integer, minimum: 0}
+          setting_id: {$ref: '#/components/schemas/OpaqueId'}
+          setting_generation: {type: integer, minimum: 1}
+          reason: {type: string}
           observed_at: {$ref: '#/components/schemas/Timestamp'}
       ConnectedChannelActivation:
         type: object
@@ -32957,7 +33520,7 @@ api_specification:
       ChannelOnboardingResult:
         type: object
         additionalProperties: false
-        required: [operation, candidate]
+        required: [operation]
         properties:
           operation: {$ref: '#/components/schemas/ChannelOnboardingOperation'}
           candidate: {$ref: '#/components/schemas/ChannelOnboardingCandidate'}
@@ -34392,6 +34955,7 @@ api_specification:
             description: Canonical standing-control guidance when suspension or orphaning owns the paused generation; generic run.continue cannot clear that authority.
       SELECTED_FORK_CONTROL_UNSUPPORTED:
         type: object
+        description: Exact selected-run refusal shared by transport admission and canonical card/input mutation owners; channel authority cannot substitute ordinary execution.
         additionalProperties: false
         required: [operation, run_id, binding_id, required_capability]
         properties:
@@ -36030,6 +36594,8 @@ api_specification:
         preserves anchor-before-card lock ordering and CAS; API projection must not
         infer refusal from diagnostic strings or an unfenced reread. Cancel-input
         and notice acknowledgment retain their separate draft/notice authority.
+        Canonical card/input mutation also consumes the shared selected-fork control
+        admission before mutation; an earlier API check is not its sole enforcement.
       scope:
         required:
         - decide:mailbox
@@ -36085,6 +36651,8 @@ api_specification:
         use the decision-card UTC-microsecond timestamp contract.
         Principal-scoped replay completion, card change and deferral publication
         commit together before outcome dispatch.
+        The canonical deferral transaction consumes shared selected-fork control
+        admission independently of the calling transport.
       scope:
         required:
         - decide:mailbox
@@ -36119,6 +36687,8 @@ api_specification:
         Start a durable operator-principal/card/verdict-scoped input draft.
         Replacement, draft change cursor and principal-scoped completion commit
         together. This operation never creates a verdict or publication.
+        Shared selected-fork control admission runs before draft creation; channel
+        text, chooser and skip progress cannot bypass it at later mutation owners.
       scope: {required: ['decide:mailbox']}
       idempotency: per the convention.
       params:
@@ -36136,6 +36706,8 @@ api_specification:
         Foreign, stale, expired, replaced, or consumed drafts fail closed on
         fresh execution. Cancellation, its change cursor and exact completion
         commit together; matching replay does not re-plan the cancelled draft.
+        The canonical cancellation owner consumes shared selected-fork control
+        admission for the exact draft run before writing cancellation.
       scope: {required: ['decide:mailbox']}
       idempotency: per the convention.
       params:
@@ -37279,6 +37851,11 @@ api_specification:
           schema:
             type: boolean
             default: true
+        - name: client_language
+          required: false
+          schema:
+            type: string
+            minLength: 1
         - name: idempotency_key
           required: false
           schema:
@@ -37296,11 +37873,18 @@ api_specification:
     channel.onboarding_retry:
       tier: must_have
       description: Resume the same durable onboarding responsibility from settled component evidence. It never blindly resends uncertain provider work or rotates credentials merely because the client retried.
+      locale_requalification: >-
+        Supplying client_language requires expected_locale_revision. The canonical setup owner
+        validates the declaration against the compiler-pinned provider profile and advances
+        only that declaration's revision. Reconciliation requalifies provider settings without
+        reinstalling an acknowledged generation. Missing language is not an English default.
       scope: {required: [control:channels]}
       idempotency: exact durable operation phase/revision and external-effect journal state.
       params:
       - {name: operation_id, required: true, schema: {$ref: '#/components/schemas/OpaqueId'}}
       - {name: provider_credential, required: false, schema: {type: string, minLength: 1, writeOnly: true}}
+      - {name: client_language, required: false, schema: {type: string, minLength: 1}}
+      - {name: expected_locale_revision, required: false, schema: {type: integer, minimum: 1}}
       - {name: idempotency_key, required: false, schema: {type: string}}
       result: {name: result, required: true, schema: {$ref: '#/components/schemas/ChannelOnboardingResult'}}
       errors: [CHANNEL_OPERATION_NOT_FOUND, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, CHANNEL_CREDENTIAL_REQUIRED]
@@ -37393,6 +37977,8 @@ api_specification:
         Public destructive runtime reset wrapper. The API layer owns only the v1 request/response/auth/idempotency contract and MUST consume the destructive-reset owner chain for execution: plan/result/lock, active-run and delivery quiescence, run-scoped cleanup/preservation, and managed workspace-container selection/stop. It MUST NOT directly truncate tables, call raw Docker stop/list helpers, call AgentManager.ResetRuntimeStateWithSource, or migrate dashboard/Builder/CLI reset seams in this method implementation.
 
         `dry_run=true` returns the same top-level shape with side-effect-free previews from each owner. Apply mode sequences durable operation admission/replay -> complete-context admission withdrawal and join -> persisted plan -> persisted-work quiescence -> cleanup -> managed-container settlement -> context convergence. Managed-container stop failures are represented as `status=partial_failure`, `ok=false`, and explicit `errors`; they must not masquerade as complete success. `include_source_artifacts` defaults true and is the only runtime.nuke control for whether server-wide admitted source artifacts are deleted with the cleanup owner. True atomically commits empty source topology with cleanup and leaves contexts unavailable, including on partial container failure. False preserves the identical admitted artifact set and source topology, temporarily withdraws execution for cleanup, then reconstructs fresh runtime generations and workspace projections before republishing the complete set. It must not leave successfully reconstructed retained contexts terminally unloaded. No original source directory is reread and no changed source is admitted. Public final-response idempotency follows the v1 API convention; it is only a response cache, not authority to repeat domain cleanup or to skip process-local reconstruction after a crash.
+
+        Both source modes preserve historical channel bindings, native install/consumer coordinates, managed effects, delivery plans/renders/receipts/actions and verified claim/action/text evidence while withdrawing executable activation and run authority. Cleanup atomically retires absent native consumers through the existing native retirement owner; historical activation coordinates do not require live activation rows. Healthy acknowledged settings become locally retired; unresolved launched installs remain uncertain without provider deletion, acknowledgment or replay. Dry-run does not retire, failed cleanup rolls back deletion and retirement together, and restart/reconnect cannot borrow historical executable authority.
       scope:
         required:
         - control:runtime
@@ -38868,6 +39454,47 @@ managed_external_effect_authority:
       authority check fences predecessor processes and stale handlers without making startup generation part of provider
       request identity. Read-only identify, readback, and reachability observations are operator infrastructure and never
       create effect rows.
+    channel_delivery: >
+      A runless channel-delivery send or edit has one typed authority over an exact selected-store delivery plan and immutable
+      render, current explicit default and verified binding, succeeded connected activation, principal, destination,
+      delivery epoch, bundle, and compiled plan generation. Its stable effect operation identity derives from the
+      delivery and render IDs. Ordinary first-send source admission requires a pending notice/card or an admitted
+      summary. A requested response instead requires exactly one original verified, settled text or navigation
+      intent backing its immutable readback, exact requested audience and request activation. Both source variants
+      use one receipt-admission rule: an initial send requires no predecessor and no current receipt; an edit
+      requires the exact current sent predecessor for that delivery and the exact new frozen render. The predecessor
+      normally belongs to the previous render, not the new render. Response edits retain their original settled
+      request and request activation rather than replacing them with the latest navigation tap or default audience.
+      An edit retains its provider message reference separately from the edit
+      acknowledgment, and admits a terminal card only when the new render matches that exact current canonical source.
+      The selected store rechecks and locks that authority at authorization and prelaunch;
+      a stale source, retired or replaced default/binding/activation, or changed render fails before dispatch.
+      An authorized attempt proven unlaunched may resume under the journal's exact prelaunch retry rule. Launched,
+      response-observed, and uncertain attempts never redispatch automatically. Confirmation authority cannot
+      authorize notice or card delivery. A manual resend is a distinct linked delivery and effect operation
+      admitted only by a current, single-use recovery action; it never reuses or settles the uncertain attempt.
+      Foreground and ordinary startup settlement consume the same typed original-authority
+      and frozen-render owners atomically with the journal. Historical settlement may survive
+      retirement or a newer render, but cannot borrow current activation authority, move a
+      successor receipt pointer, or authorize another send/edit. A conflict rolls back all
+      settlement writes; selected-fork recovery does not admit this authority.
+      No agent, run, entity, or synthetic token is required.
+    channel_native_setting: >
+      A native-entry install requires the exact physical setting, generation, install operation,
+      compiled contract and current connection authority at authorization and launch.
+      Foreground and ordinary startup settlement validate the original committed journal
+      authority and consume the same typed generation/install projection in that transaction.
+      Launched or response-observed recovery records uncertainty without readback success or
+      redispatch; proven-unlaunched abandonment projects neither installation nor uncertainty.
+      A retired consumer does not erase historical outcome evidence, and a changed generation
+      or install operation cannot consume predecessor settlement. Selected-fork recovery
+      excludes this authority; settlement grants no new provider-write or entry capability.
+    channel_action_ack: >
+      A callback acknowledgment is a separate runless managed provider effect keyed by the verified inbound action
+      publication. Before launch, the selected store requires the exact pending fact, current receipt/render,
+      principal, binding and connected activation plus its compiled coordinate. Provider acknowledgment does not
+      decide a card or settle the inbound intent. A launched or uncertain acknowledgment never redispatches
+      automatically; the canonical card mutation retains its own admission and idempotency authority.
     gateway_reentry: Turn-context registration and gateway reconstruction preserve lifecycle token, controller, the full explicit logical identity, inbound identity, and lineage. Managed Claude CLI MCP tools/call requests MUST carry the provider-owned non-empty params._meta["claudecode/toolUseId"] call-occurrence coordinate. The gateway refines the preserved provider-turn identity with that coordinate and fails closed before executor admission when it is absent. JSON-RPC id, progressToken, method, tool name, arguments, and other request content are correlation or fingerprint evidence, never occurrence identity; identical sibling calls remain distinct while replay of one provider call remains stable across transport-correlation replacement.
     different_owner: Runtime dependency, pipeline activity, credential lifecycle, operator infrastructure, and build/test infrastructure calls use a closed typed different-owner context. Unknown owner labels and missing lifecycle context fail closed.
   logical_operation:
@@ -38918,6 +39545,23 @@ managed_external_effect_authority:
     authorized: An authorized attempt has proven no primitive launch because the exact primitive contract requires durable launched state before every dispatch/start/write/mutation; startup settles it as effect_recovery_prelaunch_abandoned without dispatch. Exact authorized/prelaunch attempts remain eligible for this no-dispatch resolution when their run has become terminal, including non-provider effects. Recovery must preserve selected-process possession and live-owner fences, must not resurrect the run, must not reacquire a session grant for abandoned work, and must not request new external work or completion from a terminal run.
     launched_or_response_observed: Startup first reconciles exact provider-attempt drains and then remaining ordinary effect attempts. It settles the existing attempt and operation as platform.outcome_uncertain/effect_recovery_outcome_unconfirmed without dispatch, atomically settles the exact delivery or directive-operation origin and pending drain when present, releases reservation authority, and finalizes the terminal lifecycle cell when the last drain closes. The original attempt's session grant is historical evidence, not authority to touch a replacement session. Recovery with an expired or replaced grant commits only permitted immutable evidence and exact-origin effects, never an agent_sessions timestamp, revision fact, conversation or provider head. Recovery may restore a bounded delivery or directive lease only for the exact still-open origin token/version while holding that origin's lifecycle row; any newer origin, foreign execution owner or identity mismatch fails closed. It does not reacquire a session grant to settle abandoned work. If the exact origin already has its terminal attempt/outcome, recovery verifies and preserves that settlement. A terminal run does not hide its pending normal-provider attempts; exact-origin recovery remains mandatory and may settle only through the stored closed origin. Delivery recovery starts only after this phase reaches explicit completion.
     terminal: Existing settled, terminal_failure, and outcome_uncertain attempts are unchanged.
+    channel_source_projection: >
+      Ordinary startup channel_delivery and channel_native_setting recovery loads exact original
+      committed operation/attempt authority, execution coordinates and available observed evidence
+      inside the journal transaction, then consumes the same typed settlement owners as foreground
+      execution. Attempt/operation terminalization and required receipt/plan or native-setting
+      projection commit together or all roll back. Projection is invoked only for a successful
+      attempt transition. Authorized/proven-unlaunched abandonment creates no acknowledgment,
+      uncertainty receipt or installed setting. Launched/response-observed recovery persists
+      uncertainty while retaining original render, audience, edit predecessor and observed facts;
+      observed facts alone are not provider acceptance or native readback success. Retirement,
+      successor activation and newer render do not authorize new work; predecessor-pointer and
+      native generation/install conflicts fail closed with a typed lifecycle conflict. Already
+      terminal attempts are unchanged, with no migration/backfill. Selected-execution recovery
+      admits only its exact selected_contract_fork authority, and ordinary recovery excludes it;
+      sharing recovery code adds no channel capability to forks. Callback ACK is not card/intent
+      completion authority, text completion keeps its canonical transaction, and specialized
+      provider-turn accounting/recovery remains distinct. No automatic-redispatch permission changes.
   invariant_ids:
     runtime.provider_attempt.origin_exact:
       owner_ref: platform-spec.yaml#managed_external_effect_authority
@@ -38999,10 +39643,15 @@ managed_external_effect_authority:
     - adapter: provider_registration
       condition: preceding operation and attempt are terminal_failure with exact launch_rejected=true evidence proving zero provider dispatch, retain the same registration operation identity, and remain under the current serve-registration authority
       exclusion: provider HTTP dispatch, launched/response_observed/outcome_uncertain/settled state, acknowledgment loss, readback mismatch or unavailability, and inferred provider state never authorize another attempt
+    - adapter: channel_delivery
+      condition: preceding operation and attempt are terminal_failure with exact zero-dispatch evidence, the same immutable delivery/render identity and request fingerprint, and a current selected-store delivery authority
+      exclusion: launched/response_observed/outcome_uncertain/settled state, lost provider acknowledgment, changed render/destination, and inferred receipt absence never authorize another attempt
   adapters:
     provider: [anthropic_api, openai_compatible, openai_responses, claude_cli]
     provider_registration: [provider_registration]
     channel_confirmation: [channel_confirmation]
+    channel_delivery: [channel_delivery]
+    channel_action_ack: [channel_action_ack]
     tool: [authored_http_tool, managed_credential, native_web_search]
     mcp: [mcp_tools_call_http, mcp_tools_call_stdio]
     native: [native_bash, native_read_file, native_write_file]

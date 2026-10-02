@@ -3085,8 +3085,8 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 		t.Fatalf("seed gated workflow instance: %v", err)
 	}
 	snapshot, err := decisioncard.FreezeSnapshot(activation.DecisionID, "Launch review", map[string]any{"environment": "staging"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
-		"approve": {Verdict: "approve", AdvancesTo: "done", Input: map[string]runtimecontracts.WorkflowGateInputField{"score": {Type: "integer", Required: true}}},
-		"reject":  {Verdict: "reject", AdvancesTo: "rework", Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}}},
+		"approve": {Verdict: "approve", AdvancesTo: "done", Input: map[string]runtimecontracts.WorkflowGateInputField{"score": {Type: "integer", Required: true}}, InputOrder: []string{"score"}},
+		"reject":  {Verdict: "reject", AdvancesTo: "rework", Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}}, InputOrder: []string{"feedback"}},
 	})
 	if err != nil {
 		t.Fatalf("freeze decision card snapshot: %v", err)
@@ -8325,8 +8325,8 @@ func assertServePreflightStaleGatewayWarning(t *testing.T, opts cliapp.ServeOpti
 	if report.HasBlockers() {
 		t.Fatalf("stale local gateway URL env produced blockers, want warnings only:\n%#v", report)
 	}
-	if len(report.CapabilitySubjects) != 19 {
-		t.Fatalf("%s capability subjects = %#v, want eight triggers, ten connector actions, and one channel", wantMode, report.CapabilitySubjects)
+	if len(report.CapabilitySubjects) != 21 {
+		t.Fatalf("%s capability subjects = %#v, want eight triggers, twelve connector actions, and one channel", wantMode, report.CapabilitySubjects)
 	}
 }
 

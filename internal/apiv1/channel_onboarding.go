@@ -65,12 +65,16 @@ func ChannelOnboardingHandlers(opts ChannelOnboardingHandlerOptions) map[string]
 			if err != nil {
 				return nil, err
 			}
+			language, err := channelClientLanguageParam(req.Params)
+			if err != nil {
+				return nil, err
+			}
 			result, err := opts.Onboarding.Start(ctx, channelonboarding.StartInput{
 				Verb: verb,
 				Selection: channelonboarding.CandidateSelection{
 					Provider: provider, BundleHash: bundleHash, InterfaceSelector: interfaceSelector, TargetSelector: target,
 				},
-				IdempotencyKey: idempotencyKey, ProviderCredential: credential, SaveProof: saveProof,
+				IdempotencyKey: idempotencyKey, ProviderCredential: credential, SaveProof: saveProof, ClientLanguage: language,
 			})
 			if err != nil {
 				return nil, channelOnboardingError(err)
@@ -106,13 +110,37 @@ func ChannelOnboardingHandlers(opts ChannelOnboardingHandlerOptions) map[string]
 			if _, _, err := optionalStringParam(req.Params, "idempotency_key"); err != nil {
 				return nil, err
 			}
-			result, err := opts.Onboarding.Retry(ctx, channelonboarding.RetryInput{OperationID: operationID, ProviderCredential: credential})
+			language, err := channelClientLanguageParam(req.Params)
+			if err != nil {
+				return nil, err
+			}
+			var localeRevision int64
+			if _, supplied := req.Params["expected_locale_revision"]; supplied {
+				localeRevision, err = channelRevisionParam(req.Params, "expected_locale_revision", false)
+				if err != nil {
+					return nil, err
+				}
+			}
+			result, err := opts.Onboarding.Retry(ctx, channelonboarding.RetryInput{OperationID: operationID, ProviderCredential: credential,
+				ClientLanguage: language, ExpectedLocaleRevision: localeRevision})
 			if err != nil {
 				return nil, channelOnboardingError(err)
 			}
 			return result, nil
 		},
 	}
+}
+
+func channelClientLanguageParam(params map[string]any) (string, error) {
+	value, supplied := params["client_language"]
+	if !supplied {
+		return "", nil
+	}
+	language, ok := value.(string)
+	if !ok || language == "" || language != strings.TrimSpace(language) {
+		return "", NewInvalidParamsError(map[string]any{"field": "client_language", "reason": "must be an exact non-empty language string"})
+	}
+	return language, nil
 }
 
 func channelOnboardingError(err error) error {

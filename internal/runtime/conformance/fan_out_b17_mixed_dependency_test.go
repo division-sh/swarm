@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -35,8 +36,19 @@ func TestB17MixedNestedDependencyCapacityOneBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			source := loadCanonicalRoutingSource(t, b17MixedNestedSource(t))
 			probe := newNestedServingProbe(t)
+			lastReturnHeld, releaseLastReturn := make(chan struct{}), make(chan struct{})
+			releaseReturn := sync.OnceFunc(func() { close(releaseLastReturn) })
+			t.Cleanup(releaseReturn)
+			var accountReturns atomic.Int32
+			probe.beforeReturn = func(key fanoutobligation.IntentKey) {
+				if key.ElementRef.FlowPath == "account" && accountReturns.Add(1) == 2 {
+					close(lastReturnHeld)
+					<-releaseLastReturn
+				}
+			}
 			childGate := newNestedChildHandlerGateCount(t, "account.task.requested", 2)
 			rt, db := b17MixedNestedRuntime(t, backend, source, probe, childGate)
+			t.Cleanup(releaseReturn)
 			t.Cleanup(func() {
 				if t.Failed() {
 					t.Logf("B17 serving counters: %+v", probe.snapshot())
@@ -70,6 +82,11 @@ func TestB17MixedNestedDependencyCapacityOneBothStores(t *testing.T) {
 			for range 1 {
 				childGate.wait(t)
 			}
+			select {
+			case <-lastReturnHeld:
+			case <-time.After(5 * time.Second):
+				t.Fatal("last nested caller never reached its committed pre-return boundary")
+			}
 			reader := nestedPublicReader(t, rt.selected)
 			deadline := time.Now().Add(5 * time.Second)
 			var status string
@@ -98,6 +115,27 @@ func TestB17MixedNestedDependencyCapacityOneBothStores(t *testing.T) {
 			child, err := reader.LoadOperatorEvent(ctx, signal.EventID)
 			if err != nil || len(child.Deliveries) != 1 || child.Deliveries[0].Terminal || child.NoDelivery != nil {
 				t.Fatalf("held real grandchild was prematurely settled: %+v err=%v", child, err)
+			}
+			// Durable publication precedes caller return; consume its exact receipt
+			// rather than treating commit visibility as a drained serving permit.
+			wantReturns := before.Started + 3
+			pending := probe.snapshot()
+			if pending.Active != 1 || pending.PeakActive != 1 || pending.Started != wantReturns || pending.Returned != wantReturns-1 {
+				t.Fatalf("incorrect committed pre-return cut: %+v", pending)
+			}
+			receipts := make([]nestedServingReceipt, 0, wantReturns)
+			returnDeadline := time.NewTimer(5 * time.Second)
+			defer returnDeadline.Stop()
+			for i := 0; i < wantReturns; i++ {
+				if i == wantReturns-1 {
+					releaseReturn()
+				}
+				select {
+				case receipt := <-probe.receipts:
+					receipts = append(receipts, receipt)
+				case <-returnDeadline.C:
+					t.Fatalf("exact serving return receipts=%d, want %d: %+v", len(receipts), wantReturns, probe.snapshot())
+				}
 			}
 			counts := probe.snapshot()
 			if counts.Active != 0 || counts.PeakActive != 1 || counts.Started != before.Started+3 || counts.Returned != counts.Started || counts.Carriers != 0 {
@@ -133,8 +171,7 @@ func TestB17MixedNestedDependencyCapacityOneBothStores(t *testing.T) {
 
 			var parentReturned time.Time
 			nested := map[string]nestedServingReceipt{}
-			for i := 0; i < probe.snapshot().Returned; i++ {
-				receipt := <-probe.receipts
+			for _, receipt := range receipts {
 				if receipt.Err != nil {
 					t.Fatalf("actual finite turn failed: %+v", receipt)
 				}

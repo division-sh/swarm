@@ -10,6 +10,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/runtime/channelnative"
 )
 
 const (
@@ -18,6 +21,33 @@ const (
 	operatorChannelCLIOperation = "00000000-0000-4000-8000-000000000224"
 	operatorChannelCLIChallenge = "SWARM-AAAAAAAAAAAAAAAA"
 )
+
+func TestChannelCLIReportsNativeQualificationWithoutInventingLocale(t *testing.T) {
+	for _, state := range []channelnative.QualificationState{channelnative.QualificationMissing, channelnative.QualificationInvalid, channelnative.QualificationStale, channelnative.QualificationQualified} {
+		t.Run(string(state), func(t *testing.T) {
+			language := "fr"
+			if state == channelnative.QualificationMissing {
+				language = ""
+			}
+			result := channelOnboardingResult{
+				Operation: channelonboarding.Operation{OperationID: operatorChannelCLIOperation, ClientLanguage: language},
+				Readiness: &channelonboarding.ConnectedChannelReadiness{Ready: true, NativeInbox: &channelnative.Qualification{
+					State: state, ClientLanguage: language, LocaleRevision: 2, Reason: "exact owner evidence",
+				}},
+			}
+			var output bytes.Buffer
+			writeChannelNativeQualification(&output, result)
+			text := output.String()
+			if !strings.Contains(text, "qualification: "+string(state)) || !strings.Contains(text, "exact owner evidence") {
+				t.Fatalf("qualification evidence missing: %q", text)
+			}
+			if language == "" && (!strings.Contains(text, "resume "+operatorChannelCLIOperation) ||
+				strings.Contains(text, "--client-language en") || strings.Contains(text, "--client-language fr")) {
+				t.Fatalf("missing declaration invented client language: %q", text)
+			}
+		})
+	}
+}
 
 func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 	t.Run("credential-required and list expose one exact resume path", func(t *testing.T) {
@@ -239,10 +269,13 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 		if code != 0 || strings.TrimSpace(stderr) != "" {
 			t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 		}
-		for _, want := range []string{operatorChannelCLIChallenge, "Waiting for an authenticated claimant", "Claimed by @m***o in a shared conversation", "Connected telegram channel READY"} {
+		for _, want := range []string{operatorChannelCLIChallenge, "Waiting for an authenticated claimant", "Claimed by @m***o in a shared conversation", "This conversation will receive future notices, decision cards, and their updates. Members of the conversation can see them.", "Connected telegram channel READY"} {
 			if !strings.Contains(stdout, want) {
 				t.Fatalf("connect output missing %q:\n%s", want, stdout)
 			}
+		}
+		if strings.Count(stdout, "This conversation will receive future notices") != 1 {
+			t.Fatalf("shared audience disclosure was not presented exactly once: %q", stdout)
 		}
 		wantMethods := []string{"channel.onboarding_start", "channel.onboarding_get", "channel.confirm", "channel.onboarding_retry"}
 		if strings.Join(methods, ",") != strings.Join(wantMethods, ",") {

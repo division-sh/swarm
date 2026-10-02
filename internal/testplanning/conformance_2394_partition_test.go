@@ -231,7 +231,8 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 		"TestKeyedStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBackends",
 	}
 	// #2486 adds the accepted-base fixture-relocation ratchet; no root is removed.
-	want := []int{161, 14, 5, 1}
+	// #2241 adds the backend/delay isolation proof for the authorized reporter ceiling.
+	want := []int{162, 14, 5, 1}
 	for i, group := range groups {
 		if len(group) != want[i] {
 			t.Fatalf("%s census=%d, want reviewed %d; account new roots explicitly", conformance2394Units[i], len(group), want[i])
@@ -247,6 +248,10 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 	}
 	const nodeAdmissionProof = "TestNodeAdmissionUsesSourceValueWithoutRawDecoderFallback"
 	const schemaAdmissionProof = "TestSchemaAdmissionOwnershipHasNoRetiredInterpreter"
+	const reporterCeilingProof = "TestNumericReporterIssuanceMergeCeilingIsolation"
+	if i := sort.SearchStrings(groups[0], reporterCeilingProof); i == len(groups[0]) || groups[0][i] != reporterCeilingProof {
+		t.Fatalf("general conformance partition omitted reporter ceiling isolation proof %s", reporterCeilingProof)
+	}
 	if i := sort.SearchStrings(groups[0], schemaAdmissionProof); i == len(groups[0]) || groups[0][i] != schemaAdmissionProof {
 		t.Fatalf("schema admission ownership proof missing from %s", conformance2394Units[0])
 	}
@@ -322,7 +327,7 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 	if i := sort.SearchStrings(groups[3], reporterProof); i == len(groups[3]) || groups[3][i] != reporterProof {
 		t.Fatalf("reporter conformance partition omitted %s", reporterProof)
 	}
-	t.Log("complete disjoint census:183 =160 general +14 core +5 pressure +1 reporter +3 long file-row roots in conformance-1")
+	t.Log("complete disjoint census:185 =162 general +14 core +5 pressure +1 reporter +3 long file-row roots in conformance-1")
 	for _, profile := range []string{ProfilePRCommon, ProfilePREscalated, ProfileFull, ProfileNightly} {
 		var units []ProofUnit
 		for _, id := range policy.Profiles[profile].Units {
