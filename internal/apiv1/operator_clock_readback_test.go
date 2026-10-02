@@ -92,6 +92,23 @@ func TestClockScheduleHTTPReadbackOnBothStores(t *testing.T) {
 					}
 				}
 			}
+			query := "UPDATE timers SET immutable_hash = 'corrupt' WHERE timer_id = ?"
+			if backend == "postgres" {
+				query = "UPDATE timers SET immutable_hash = 'corrupt' WHERE timer_id = $1::uuid"
+			}
+			if _, err := db.ExecContext(ctx, query, activation.ID); err != nil {
+				t.Fatal(err)
+			}
+			for _, method := range []string{"run.get", "run.diagnose"} {
+				response := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"corrupt-clock","method":%q,"params":{"run_id":%q}}`, method, runID))
+				if response.Error == nil || response.Result != nil {
+					t.Fatalf("%s returned partial clock evidence: %#v", method, response)
+				}
+			}
+			var status, hash string
+			if err := db.QueryRowContext(ctx, "SELECT status, immutable_hash FROM timers").Scan(&status, &hash); err != nil || status != "cancelled" || hash != "corrupt" {
+				t.Fatalf("inspection mutated corrupt evidence: status=%q hash=%q err=%v", status, hash, err)
+			}
 		})
 	}
 }

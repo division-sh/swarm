@@ -61,7 +61,7 @@ WHERE r.run_id = $1::uuid
 	if err != nil {
 		return operatorread.RunHeader{}, err
 	}
-	return s.withClockReadback(ctx, header)
+	return header, nil
 }
 
 func (s *RunPostgres) LoadRunOrigin(ctx context.Context, runID string) (runtimerunlifecycle.RunOrigin, error) {
