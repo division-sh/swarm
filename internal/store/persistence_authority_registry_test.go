@@ -48,6 +48,9 @@ func (f authorityFinding) registryLine() string {
 func TestPersistenceAuthorityFindingRegistry(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	findings := loadPersistenceAuthorityFindings(t, root)
+	if violations := compoundEventFixtureAuthorityViolations(findings); len(violations) != 0 {
+		t.Fatalf("compound event fixtures regained raw authority:\n%s", strings.Join(violations, "\n"))
+	}
 	registryPath := filepath.Join(root, "internal", "store", "testdata", "persistence_authority_findings.tsv")
 	expected := readAuthorityRegistryIfPresent(t, registryPath)
 	if os.Getenv(authorityRegistryUpdateEnv) == "1" {
@@ -112,6 +115,40 @@ func TestPersistenceEffectiveMethodSetsDoNotExposeRawAuthority(t *testing.T) {
 	sort.Strings(leaked)
 	if len(leaked) != 0 {
 		t.Fatalf("effective persistence method sets expose raw authority:\n%s", strings.Join(leaked, "\n"))
+	}
+}
+
+func compoundEventFixtureAuthorityViolations(findings []authorityFinding) []string {
+	var violations []string
+	for _, finding := range findings {
+		if finding.File != "internal/store/storetest/event.go" || !finding.RawSQL {
+			continue
+		}
+		switch finding.Enclosing {
+		case "CommitSemanticEvent", "CommitSemanticEventWithRoutes", "CommitSemanticEventWithInitialFacts", "CommitSemanticForkFrontier", "commitSemanticEventWithInitialFacts":
+			violations = append(violations, finding.registryLine())
+		}
+	}
+	return violations
+}
+
+func TestCompoundEventFixtureAuthorityRejectsRawCarriers(t *testing.T) {
+	for _, source := range []string{
+		`package fixture
+import ("context"; "database/sql")
+func commitSemanticEventWithInitialFacts(ctx context.Context, db *sql.DB) { _, _ = db.BeginTx(ctx, nil) }
+`,
+		`package fixture
+import "database/sql"
+type Alias = sql.DB
+type Carrier struct { *Alias }
+func CommitSemanticEventWithInitialFacts(selected Carrier) { _ = selected.Alias }
+`,
+	} {
+		findings := authorityFindingsFromSource(t, "internal/store/storetest/event.go", source)
+		if violations := compoundEventFixtureAuthorityViolations(findings); len(violations) == 0 {
+			t.Fatal("raw compound fixture authority was accepted")
+		}
 	}
 }
 
