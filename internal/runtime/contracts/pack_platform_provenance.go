@@ -76,8 +76,14 @@ func populatePackPlatformProvenance(bundle *WorkflowContractBundle, builder *eff
 		return err
 	}
 	if bundle.PackInventory != nil {
-		if err := add("packs.platform_membership", bundle.PackInventory.SourceValue(), ""); err != nil {
-			return err
+		if bundle.PackInventory.BaseSelectionMode() == packartifact.SelectionDevelopmentOverride {
+			builder.set("packs.platform_membership", EffectiveValueProvenance{
+				Origin: EffectiveValueOriginBoundarySnapshot, RuleID: "pack.complete_development_inventory",
+			})
+		} else {
+			if err := add("packs.platform_membership", bundle.PackInventory.SourceValue(), ""); err != nil {
+				return err
+			}
 		}
 		for _, entry := range bundle.PackInventory.Entries() {
 			prefix := "packs[" + strconv.Quote(entry.ID()) + "].envelope"
