@@ -2240,9 +2240,13 @@ scoring_phase:
 }
 
 func TestRetiredEntitySchemaAdmissionRejectsScalarInitialSuffix(t *testing.T) {
-	_, err := loadSchemaFragment(t, "name: retired\nentity:\n  state_field: scoring_phase\n  fields:\n    revision_count: integer initial 0\n")
-	if err == nil || !strings.Contains(err.Error(), "RETIRED") {
-		t.Fatalf("retired entity-schema grammar admitted: %v", err)
+	for _, field := range []string{"integer initial 0", "text indexed nullable default pending"} {
+		t.Run(field, func(t *testing.T) {
+			_, err := loadSchemaFragment(t, "name: retired\nentity:\n  state_field: scoring_phase\n  fields:\n    revision_count: "+field+"\n")
+			if err == nil || !strings.Contains(err.Error(), "RETIRED") {
+				t.Fatalf("retired entity-schema grammar admitted: %v", err)
+			}
+		})
 	}
 }
 
