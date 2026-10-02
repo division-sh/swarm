@@ -1,21 +1,18 @@
 package packartifact
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
-	"io"
 	"io/fs"
 	"path"
 	"sort"
 	"strings"
-	"testing/fstest"
 
 	basepacks "github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/runtime/core/manifesthash"
 	"github.com/division-sh/swarm/internal/runtime/core/packidentity"
-	"gopkg.in/yaml.v3"
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 const (
@@ -61,6 +58,7 @@ func (m SelectionMode) Valid() bool {
 }
 
 type InventoryManifest struct {
+	source  yamlsource.Value
 	Version int                     `yaml:"version"`
 	Packs   []InventoryManifestPack `yaml:"packs"`
 }
@@ -83,18 +81,9 @@ func LoadInventoryManifest(fsys fs.FS, manifestPath string) (InventoryManifest, 
 	if err != nil {
 		return InventoryManifest{}, fmt.Errorf("read platform pack inventory manifest %q: %w", manifestPath, err)
 	}
-	var manifest InventoryManifest
-	decoder := yaml.NewDecoder(bytes.NewReader(manifestBody))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&manifest); err != nil {
+	manifest, err := admitInventoryManifest(manifestBody, manifestPath)
+	if err != nil {
 		return InventoryManifest{}, fmt.Errorf("parse platform pack inventory manifest %q: %w", manifestPath, err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		if err == nil {
-			return InventoryManifest{}, fmt.Errorf("platform pack inventory manifest %q contains multiple YAML documents", manifestPath)
-		}
-		return InventoryManifest{}, fmt.Errorf("parse platform pack inventory manifest %q trailing document: %w", manifestPath, err)
 	}
 	if manifest.Version != 1 {
 		return InventoryManifest{}, fmt.Errorf("platform pack inventory version %d is unsupported", manifest.Version)
@@ -184,15 +173,11 @@ func (e Entry) Envelope() Envelope   { return cloneEnvelope(e.envelope) }
 func (e Entry) EnvelopeBody() []byte { return append([]byte(nil), e.envelopeBody...) }
 func (e Entry) ManifestBody() []byte { return append([]byte(nil), e.manifestBody...) }
 
-func (e Entry) FileSystem() fs.FS {
-	envelopeBody, err := yaml.Marshal(e.envelope)
-	if err != nil {
-		panic(fmt.Sprintf("marshal admitted pack %q envelope: %v", e.ID(), err))
+func (e Entry) Loaded(runningPlatformVersion string) (basepacks.Loaded, error) {
+	if err := e.envelope.ValidateCommon(runningPlatformVersion); err != nil {
+		return basepacks.Loaded{}, err
 	}
-	return fstest.MapFS{
-		EnvelopeFileName:                         &fstest.MapFile{Data: envelopeBody, Mode: 0o444},
-		ManifestFileNameForType(e.envelope.Type): &fstest.MapFile{Data: e.ManifestBody(), Mode: 0o444},
-	}
+	return basepacks.Loaded{Envelope: e.Envelope(), ManifestBody: e.ManifestBody(), Directory: e.directory}, nil
 }
 
 func cloneEntry(e Entry) Entry {
@@ -221,12 +206,20 @@ func cloneEnvelope(envelope Envelope) Envelope {
 }
 
 type PlatformPackInventory struct {
+	source                 yamlsource.Value
 	mode                   SelectionMode
 	digest                 string
 	runningPlatformVersion string
 	sourceDirectories      []string
 	entries                map[string]Entry
 	embeddedImportOrigins  map[string]ImportOrigin
+}
+
+func (i *PlatformPackInventory) SourceValue() yamlsource.Value {
+	if i == nil {
+		return yamlsource.Value{}
+	}
+	return i.source
 }
 
 func (i *PlatformPackInventory) SelectionMode() SelectionMode {
@@ -327,7 +320,8 @@ func LoadPlatformPackInventoryFS(fsys fs.FS, manifestPath, runningPlatformVersio
 		return nil, err
 	}
 	inventory := &PlatformPackInventory{
-		mode: mode, digest: digest, runningPlatformVersion: runningPlatformVersion, entries: entries,
+		source: manifest.source,
+		mode:   mode, digest: digest, runningPlatformVersion: runningPlatformVersion, entries: entries,
 	}
 	if mode == SelectionEmbedded {
 		inventory.embeddedImportOrigins = make(map[string]ImportOrigin, len(entries))
@@ -377,7 +371,7 @@ func NewEffectivePackInventory(base *PlatformPackInventory, projects []ProjectPa
 		if source.Origin != expectedOrigin {
 			return nil, fmt.Errorf("project pack %q import origin contradicts the embedded import baseline for %q", projectPath, source.Origin.ID)
 		}
-		envelope, err := basepacks.ParseEnvelope(source.EnvelopeBody)
+		envelope, err := basepacks.ParseEnvelopeAt(source.EnvelopeBody, path.Join(projectPath, EnvelopeFileName))
 		if err != nil {
 			return nil, fmt.Errorf("parse project pack %q envelope: %w", projectPath, err)
 		}

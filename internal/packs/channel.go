@@ -494,6 +494,10 @@ func LoadChannelPackFS(fsys fs.FS, dir, runningPlatformVersion string) (LoadedCh
 	if err != nil {
 		return LoadedChannelPack{}, err
 	}
+	return LoadChannelPack(loaded)
+}
+
+func LoadChannelPack(loaded Loaded) (LoadedChannelPack, error) {
 	if strings.TrimSpace(loaded.Envelope.Type) != TypeChannel {
 		return LoadedChannelPack{}, fmt.Errorf("channel pack %q has unsupported type %q", loaded.Envelope.ID, loaded.Envelope.Type)
 	}
