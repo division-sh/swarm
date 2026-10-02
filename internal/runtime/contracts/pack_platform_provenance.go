@@ -10,68 +10,12 @@ import (
 
 func populatePackPlatformProvenance(bundle *WorkflowContractBundle, builder *effectiveProvenanceBuilder) error {
 	add := func(prefix string, value yamlsource.Value, packID string) error {
-		if value.Presence() == yamlsource.PresenceMissing {
-			return nil
-		}
-		entries := map[string]EffectiveValueProvenance{prefix: authoredSourceProvenance(value)}
-		if err := collectNodeValueProvenance(value, prefix, entries, nil); err != nil {
-			return err
-		}
-		for path, entry := range entries {
-			entry.PackIdentity = packID
-			builder.set(path, entry)
-		}
-		return nil
+		return addPackPlatformSourceProvenance(builder, prefix, value, packID)
 	}
-	root := bundle.Platform.SourceValue()
-	if root.Presence() != yamlsource.PresenceMissing {
-		for _, name := range []string{"platform", "interfaces", "permissions_model", "workflow_state", "platform_tables", "builtin_hooks"} {
-			lookup, err := root.Lookup(name)
-			if err != nil {
-				return err
-			}
-			if err = add("platform."+name, lookup.Value, ""); err != nil {
-				return err
-			}
-		}
-		for _, path := range [][]string{{"vocabulary", "participant", "types"}, {"platform_events", "catalog"}} {
-			value := root
-			for _, name := range path {
-				lookup, err := value.Lookup(name)
-				if err != nil {
-					return err
-				}
-				value = lookup.Value
-				if value.Presence() == yamlsource.PresenceMissing {
-					break
-				}
-			}
-			if value.Presence() == yamlsource.PresenceMissing {
-				continue
-			}
-			if path[0] == "vocabulary" {
-				if err := add("platform.vocabulary.participant.types", value, ""); err != nil {
-					return err
-				}
-				continue
-			}
-			rows, err := value.Mapping()
-			if err != nil {
-				return err
-			}
-			for _, row := range rows {
-				prefix := "platform.events[" + strconv.Quote(row.Name) + "]"
-				builder.set(prefix, authoredSourceProvenance(row.Value))
-				payload, err := row.Value.Lookup("payload")
-				if err != nil {
-					return err
-				}
-				if err := add(prefix+".payload", payload.Value, ""); err != nil {
-					return err
-				}
-			}
-		}
+	if err := populatePlatformLawProvenance(bundle.Platform.SourceValue(), builder, add); err != nil {
+		return err
 	}
+
 	if err := add("packs.project_membership", bundle.ProjectPacks.SourceValue(), ""); err != nil {
 		return err
 	}
@@ -111,6 +55,85 @@ func populatePackPlatformProvenance(bundle *WorkflowContractBundle, builder *eff
 			if err := add("pack_sources["+strconv.Quote(name)+"]", value, identities[name]); err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+func addPackPlatformSourceProvenance(builder *effectiveProvenanceBuilder, prefix string, value yamlsource.Value, packID string) error {
+	if value.Presence() == yamlsource.PresenceMissing {
+		return nil
+	}
+	entries := map[string]EffectiveValueProvenance{prefix: authoredSourceProvenance(value)}
+	if err := collectNodeValueProvenance(value, prefix, entries, nil); err != nil {
+		return err
+	}
+	for path, entry := range entries {
+		entry.PackIdentity = packID
+		builder.set(path, entry)
+	}
+	return nil
+}
+
+func populatePlatformLawProvenance(root yamlsource.Value, builder *effectiveProvenanceBuilder, add func(string, yamlsource.Value, string) error) error {
+	if root.Presence() == yamlsource.PresenceMissing {
+		return nil
+	}
+	for _, name := range []string{"platform", "interfaces", "permissions_model", "workflow_state", "platform_tables", "builtin_hooks"} {
+		lookup, err := root.Lookup(name)
+		if err != nil {
+			return err
+		}
+		if err := add("platform."+name, lookup.Value, ""); err != nil {
+			return err
+		}
+	}
+	participant, err := platformProvenanceValueAt(root, []string{"vocabulary", "participant", "types"})
+	if err != nil {
+		return err
+	}
+	if err := add("platform.vocabulary.participant.types", participant, ""); err != nil {
+		return err
+	}
+	catalog, err := platformProvenanceValueAt(root, []string{"platform_events", "catalog"})
+	if err != nil {
+		return err
+	}
+	return populatePlatformCatalogProvenance(catalog, builder, add)
+}
+
+func platformProvenanceValueAt(root yamlsource.Value, path []string) (yamlsource.Value, error) {
+	value := root
+	for _, name := range path {
+		lookup, err := value.Lookup(name)
+		if err != nil {
+			return yamlsource.Value{}, err
+		}
+		value = lookup.Value
+		if value.Presence() == yamlsource.PresenceMissing {
+			break
+		}
+	}
+	return value, nil
+}
+
+func populatePlatformCatalogProvenance(value yamlsource.Value, builder *effectiveProvenanceBuilder, add func(string, yamlsource.Value, string) error) error {
+	if value.Presence() == yamlsource.PresenceMissing {
+		return nil
+	}
+	rows, err := value.Mapping()
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		prefix := "platform.events[" + strconv.Quote(row.Name) + "]"
+		builder.set(prefix, authoredSourceProvenance(row.Value))
+		payload, err := row.Value.Lookup("payload")
+		if err != nil {
+			return err
+		}
+		if err := add(prefix+".payload", payload.Value, ""); err != nil {
+			return err
 		}
 	}
 	return nil

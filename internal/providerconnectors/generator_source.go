@@ -140,44 +140,7 @@ func admitGeneratorOperation(value yamlsource.Value) (GeneratorOperation, error)
 	if out.PathParameters, err = admitGeneratorFields(parameters); err != nil {
 		return out, err
 	}
-	body, err := connectorRequired(value, fields, "request_body")
-	if err != nil {
-		return out, err
-	}
-	members, err := connectorFields(body, "required", "variant", "fields")
-	if err != nil {
-		return out, err
-	}
-	required, err := connectorRequired(body, members, "required")
-	if err != nil {
-		return out, err
-	}
-	if out.RequestBody.Required, err = connectorBool(required); err != nil {
-		return out, err
-	}
-	bodyFields, err := connectorRequired(body, members, "fields")
-	if err != nil {
-		return out, err
-	}
-	if out.RequestBody.Fields, err = admitGeneratorFields(bodyFields); err != nil {
-		return out, err
-	}
-	variant, err := connectorRequired(body, members, "variant")
-	if err != nil {
-		return out, err
-	}
-	members, err = connectorFields(variant, "kind", "fields")
-	if err != nil {
-		return out, err
-	}
-	if err := connectorTextFields(variant, members, map[string]*string{"kind": &out.RequestBody.Variant.Kind}); err != nil {
-		return out, err
-	}
-	variantFields, err := connectorRequired(variant, members, "fields")
-	if err != nil {
-		return out, err
-	}
-	if out.RequestBody.Variant.Fields, err = connectorTextList(variantFields); err != nil {
+	if err := admitGeneratorRequestBody(value, fields, &out); err != nil {
 		return out, err
 	}
 	injected, err := connectorRows(value, fields, "injected_inputs")
@@ -209,7 +172,7 @@ func admitGeneratorOperation(value yamlsource.Value) (GeneratorOperation, error)
 	if err != nil {
 		return out, err
 	}
-	members, err = connectorFields(output, "type", "items_type")
+	members, err := connectorFields(output, "type", "items_type")
 	if err != nil {
 		return out, err
 	}
@@ -281,4 +244,48 @@ func generatorItemsType(parent yamlsource.Value, members map[string]yamlsource.V
 		return "", connectorError(forbidden, "non-array field forbids items_type")
 	}
 	return "", nil
+}
+
+func admitGeneratorRequestBody(value yamlsource.Value, fields map[string]yamlsource.Value, out *GeneratorOperation) error {
+	body, err := connectorRequired(value, fields, "request_body")
+	if err != nil {
+		return err
+	}
+	members, err := connectorFields(body, "required", "variant", "fields")
+	if err != nil {
+		return err
+	}
+	required, err := connectorRequired(body, members, "required")
+	if err != nil {
+		return err
+	}
+	if out.RequestBody.Required, err = connectorBool(required); err != nil {
+		return err
+	}
+	bodyFields, err := connectorRequired(body, members, "fields")
+	if err != nil {
+		return err
+	}
+	if out.RequestBody.Fields, err = admitGeneratorFields(bodyFields); err != nil {
+		return err
+	}
+	variant, err := connectorRequired(body, members, "variant")
+	if err != nil {
+		return err
+	}
+	members, err = connectorFields(variant, "kind", "fields")
+	if err != nil {
+		return err
+	}
+	if err := connectorTextFields(variant, members, map[string]*string{"kind": &out.RequestBody.Variant.Kind}); err != nil {
+		return err
+	}
+	variantFields, err := connectorRequired(variant, members, "fields")
+	if err != nil {
+		return err
+	}
+	if out.RequestBody.Variant.Fields, err = connectorTextList(variantFields); err != nil {
+		return err
+	}
+	return nil
 }
