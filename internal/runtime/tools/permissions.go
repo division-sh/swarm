@@ -81,11 +81,7 @@ func ValidateAgentPermissions(source semanticview.Source) (int, []error) {
 		return len(agents), append(errs, err)
 	}
 	for _, agent := range agents {
-		policy := agent.policy
-		if len(policy.Values) == 0 && source != nil {
-			policy = source.ResolvedPolicyForFlow(agent.flowID)
-		}
-		perms, err := resolveAgentPermissionsFromPolicy(agent.entry, policy)
+		perms, err := ResolveAgentPermissions(source, agent.flowID, agent.entry)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("agent %s: %w", agent.id, err))
 			continue
@@ -142,7 +138,6 @@ type scopedAgentEntry struct {
 	role   string
 	flowID string
 	entry  runtimecontracts.AgentRegistryEntry
-	policy runtimecontracts.PolicyDocument
 }
 
 func scopedAgentEntries(source semanticview.Source) ([]scopedAgentEntry, []error) {
@@ -162,7 +157,6 @@ func scopedAgentEntries(source semanticview.Source) ([]scopedAgentEntry, []error
 			role:   plan.EffectiveRole(declaration.Entry),
 			flowID: plan.OwnerFlowID,
 			entry:  declaration.Entry,
-			policy: source.ResolvedPolicyForFlow(plan.OwnerFlowID),
 		})
 	}
 	return entries, errs
