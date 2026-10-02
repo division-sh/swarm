@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/cli/readwindow"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/spf13/cobra"
 )
@@ -151,16 +152,17 @@ type diagnosticBundleIdentity struct {
 }
 
 type diagnosticRunHeader struct {
-	RunID            string                        `json:"run_id"`
-	Status           string                        `json:"status"`
-	Origin           runtimerunlifecycle.RunOrigin `json:"origin"`
-	EntityCount      *int                          `json:"entity_count"`
-	EventCount       *int                          `json:"event_count"`
-	StartedAt        string                        `json:"started_at"`
-	EndedAt          string                        `json:"ended_at,omitempty"`
-	ContinuedAsRunID string                        `json:"continued_as_run_id,omitempty"`
-	Failure          *runtimefailures.Envelope     `json:"failure,omitempty"`
-	ControlReason    string                        `json:"control_reason,omitempty"`
+	RunID            string                          `json:"run_id"`
+	Status           string                          `json:"status"`
+	Origin           runtimerunlifecycle.RunOrigin   `json:"origin"`
+	EntityCount      *int                            `json:"entity_count"`
+	EventCount       *int                            `json:"event_count"`
+	StartedAt        string                          `json:"started_at"`
+	EndedAt          string                          `json:"ended_at,omitempty"`
+	ContinuedAsRunID string                          `json:"continued_as_run_id,omitempty"`
+	Failure          *runtimefailures.Envelope       `json:"failure,omitempty"`
+	ControlReason    string                          `json:"control_reason,omitempty"`
+	ClockSchedules   []genericschedule.ClockReadback `json:"clock_schedules,omitempty"`
 }
 
 type diagnosticRunTraceRow struct {
@@ -1600,7 +1602,7 @@ func diagnosticRunHeaderRows(run diagnosticRunHeader) []cliLabeledDetailRow {
 	if run.ControlReason != "" {
 		rows = append(rows, cliLabeledDetailRow{Label: "control reason", Value: run.ControlReason})
 	}
-	return rows
+	return append(rows, diagnosticClockRows(run.ClockSchedules)...)
 }
 
 func diagnosticRunOriginLabel(origin runtimerunlifecycle.RunOrigin) string {

@@ -14,9 +14,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule/cadence"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/google/uuid"
-	"github.com/robfig/cron/v3"
 )
 
 const occurrenceProducerID = "runtime.generic_schedule"
@@ -24,8 +24,9 @@ const occurrenceProducerID = "runtime.generic_schedule"
 type OwnerKind string
 
 const (
-	OwnerAgent  OwnerKind = "agent"
-	OwnerSystem OwnerKind = "system"
+	OwnerAgent    OwnerKind = "agent"
+	OwnerSystem   OwnerKind = "system"
+	OwnerInstance OwnerKind = "instance"
 )
 
 type DueBasisKind string
@@ -85,15 +86,15 @@ func (b DueBasis) Validate() error {
 		if !b.Absolute.IsZero() || b.Delay != 0 || b.Cron == "" || b.Every != 0 {
 			return errors.New("cron schedule due basis requires only a canonical UTC cron expression")
 		}
-		if strings.HasPrefix(b.Cron, "@every") {
-			return errors.New("@every recurrence must use the every due-basis kind")
-		}
-		if _, err := cron.ParseStandard(b.Cron); err != nil {
-			return fmt.Errorf("invalid UTC cron expression: %w", err)
+		if _, err := cadence.ParseCron(b.Cron); err != nil {
+			return err
 		}
 	case DueEvery:
 		if !b.Absolute.IsZero() || b.Delay != 0 || b.Cron != "" || b.Every <= 0 {
 			return errors.New("every schedule due basis requires only a positive exact duration")
+		}
+		if err := cadence.ValidateEvery(b.Every); err != nil {
+			return err
 		}
 	default:
 		return fmt.Errorf("generic schedule due basis kind %q is invalid", b.Kind)
@@ -122,14 +123,8 @@ func (b DueBasis) FirstDue(admittedAt time.Time) (time.Time, error) {
 		return b.Absolute, nil
 	case DueDelay:
 		return canonicalTime(admittedAt.Add(b.Delay)), nil
-	case DueEvery:
-		return canonicalTime(admittedAt.Add(b.Every)), nil
-	case DueCron:
-		parsed, err := cron.ParseStandard(b.Cron)
-		if err != nil {
-			return time.Time{}, err
-		}
-		return canonicalTime(parsed.Next(admittedAt)), nil
+	case DueEvery, DueCron:
+		return b.Next(admittedAt)
 	default:
 		return time.Time{}, errors.New("generic schedule due basis is invalid")
 	}
@@ -138,18 +133,21 @@ func (b DueBasis) FirstDue(admittedAt time.Time) (time.Time, error) {
 func (b DueBasis) Next(previous time.Time) (time.Time, error) {
 	b = b.Canonical()
 	previous = canonicalTime(previous)
+	if err := b.Validate(); err != nil {
+		return time.Time{}, err
+	}
 	if previous.IsZero() {
 		return time.Time{}, errors.New("generic schedule recurrence requires the prior persisted coordinate")
 	}
 	switch b.Kind {
 	case DueEvery:
-		return canonicalTime(previous.Add(b.Every)), nil
+		return cadence.Advance(previous, previous.Add(b.Every))
 	case DueCron:
-		parsed, err := cron.ParseStandard(b.Cron)
+		parsed, err := cadence.ParseCron(b.Cron)
 		if err != nil {
 			return time.Time{}, err
 		}
-		return canonicalTime(parsed.Next(previous)), nil
+		return cadence.Advance(previous, parsed.Next(previous))
 	default:
 		return time.Time{}, errors.New("one-shot schedule has no next occurrence")
 	}
@@ -208,6 +206,23 @@ func (c AdmissionCommand) Validate() error {
 	if c.Due.Recurring() && c.ReplyContext != "" {
 		return errors.New("recurring generic schedules cannot carry reply context")
 	}
+	if err := validateCommandOwner(c); err != nil {
+		return err
+	}
+	if err := validateRoutingScope(c); err != nil {
+		return err
+	}
+	if err := validateSystemJoinSchedule(c); err != nil {
+		return err
+	}
+	if c.OwnerKind == OwnerInstance {
+		return validateInstanceEmission(c)
+	}
+	_, err := events.AdmitRuntimeControlEventType(events.EventType(c.EventType), c.RoutingSource)
+	return err
+}
+
+func validateCommandOwner(c AdmissionCommand) error {
 	switch c.OwnerKind {
 	case OwnerAgent:
 		if err := c.AgentIdentity.Validate(); err != nil {
@@ -222,19 +237,26 @@ func (c AdmissionCommand) Validate() error {
 		if !c.AgentIdentity.IsZero() {
 			return errors.New("system-owned generic schedule cannot carry agent identity")
 		}
+	case OwnerInstance:
+		if !c.AgentIdentity.IsZero() || c.ReplyContext != "" || c.TaskID != "" || !c.Due.Recurring() || c.Payload.Len() != 0 {
+			return errors.New("instance-owned schedules require a bare recurring business emission without agent, task, or reply context")
+		}
 	default:
 		return fmt.Errorf("generic schedule owner kind %q is invalid", c.OwnerKind)
 	}
-	if err := validateRoutingScope(c); err != nil {
-		return err
-	}
-	if err := validateSystemJoinSchedule(c); err != nil {
-		return err
-	}
-	if _, err := events.AdmitRuntimeControlEventType(events.EventType(c.EventType), c.RoutingSource); err != nil {
-		return err
-	}
 	return nil
+}
+
+func validateInstanceEmission(c AdmissionCommand) error {
+	_, err := events.NewInstancePublicationEvent(events.InstancePublicationEventInput{
+		RunID: c.RunID,
+		Facts: events.EventFacts{
+			Type: events.EventType(c.EventType), Producer: events.ProducerClaim{Type: events.EventProducerInstance, ID: c.OwnerID},
+			Payload: []byte(`{}`), RoutingSource: c.RoutingSource,
+			Envelope: events.EventEnvelope{EntityID: c.EntityID, FlowInstance: c.FlowInstance}, ExecutionMode: c.ExecutionMode,
+		},
+	})
+	return err
 }
 
 func validateSystemJoinSchedule(c AdmissionCommand) error {
@@ -274,6 +296,11 @@ func validateSystemJoinSchedule(c AdmissionCommand) error {
 
 func validateRoutingScope(c AdmissionCommand) error {
 	switch c.RoutingSource.Kind() {
+	case events.RoutingSourceStaticFlow:
+		route := c.RoutingSource.Route()
+		if c.OwnerKind != OwnerInstance || c.RunID == "" || route.EntityID != c.EntityID || route.FlowInstance != c.FlowInstance || route.FlowID != c.OwnerID {
+			return errors.New("instance generic schedule source does not match run/entity/flow owner")
+		}
 	case events.RoutingSourceRoot:
 		route := c.RoutingSource.Route()
 		if route.EntityID != c.EntityID || c.FlowInstance != "" || c.RunID == "" {
@@ -289,7 +316,7 @@ func validateRoutingScope(c AdmissionCommand) error {
 			return errors.New("platform-control generic schedule must be global and system-owned")
 		}
 	default:
-		return errors.New("generic schedule requires root, flow-owned, or platform-control routing source")
+		return errors.New("generic schedule requires its typed instance or control routing source")
 	}
 	return nil
 }

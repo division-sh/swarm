@@ -485,6 +485,10 @@ func occurrenceEvent(activation Activation, occurrence Occurrence, payload []byt
 		Envelope:      events.EventEnvelope{EntityID: activation.Command.EntityID, FlowInstance: activation.Command.FlowInstance},
 		RoutingSource: activation.Command.RoutingSource, CreatedAt: occurrence.DueAt, ExecutionMode: activation.Command.ExecutionMode,
 	}
+	if activation.Command.OwnerKind == OwnerInstance {
+		facts.Producer = events.ProducerClaim{Type: events.EventProducerInstance, ID: activation.Command.OwnerID}
+		return events.NewInstancePublicationEvent(events.InstancePublicationEventInput{Facts: facts, RunID: activation.Command.RunID})
+	}
 	if activation.Command.RunID == "" {
 		return events.NewStandaloneRuntimeControlEvent(events.StandaloneRuntimeEventInput{Facts: facts})
 	}

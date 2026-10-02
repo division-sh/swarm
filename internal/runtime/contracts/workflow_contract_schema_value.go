@@ -77,10 +77,15 @@ func projectFlowSchemaValue(root yamlsource.Value) (FlowSchemaDocument, error) {
 			out.StageDeclarations, err = projectSchemaStagesValue(value)
 		case "loops":
 			out.LoopDeclarations, err = projectSchemaLoopsValue(value)
+		case "schedules":
+			out.Schedules, err = projectSchemaSchedulesValue(value)
 		}
 		if err != nil {
 			return FlowSchemaDocument{}, nodeValueError(value, err)
 		}
+	}
+	if len(out.Schedules) > 0 && !out.Instance.Empty() {
+		return FlowSchemaDocument{}, nodeValueError(fields["schedules"], fmt.Errorf("schedules fire per run; per-instance cadence is not supported"))
 	}
 	out.admissionProvenance = map[string]EffectiveValueProvenance{"declaration": authoredSourceProvenance(root)}
 	if err := collectNodeValueProvenance(root, "", out.admissionProvenance, nil); err != nil {

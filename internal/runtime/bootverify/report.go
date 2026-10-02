@@ -89,6 +89,7 @@ var stableHardInvalidityRemediation = map[string]string{
 	"stage_gate_validation":                   "Fix the stage gate so every typed verdict has one valid direct route and one schema-compatible immutable decision contract.",
 	"template_instance_validation":            "Fix the template instance declaration so instance keys and policies are valid.",
 	"timer_validation":                        "Use only supported timer start_on/cancel_on forms and ensure referenced states/events are declared and reachable.",
+	"clock_schedule_validation":               "Declare one cron or every cadence and a bare business emit with an actual consumer or selected-root output; schedules arm only on deployment.",
 	"transition_ownership_validation":         "Move the transition owner to the handler that owns the triggering event or change the transition.",
 	"transition_reference_validation":         "Fix transition references so all events and states are declared and reachable.",
 	"workflow_contract_validation":            "Fix the contract source/load error named by the message, then rerun `swarm verify`.",

@@ -63,6 +63,11 @@ func RestoreAdmittedEvent(input RestoredEventInput) (AdmittedEvent, error) {
 		event, err = NewOperatorInjectedEvent(OperatorInjectedEventInput{Facts: input.Facts, RunID: input.RunID, Provenance: input.OperatorRef})
 	case EventAdmissionChild:
 		event, err = NewChildEvent(ChildEventInput{Facts: input.Facts, Lineage: EventLineage{RunID: input.RunID, ParentEventID: input.ParentEventID, TaskID: input.Facts.TaskID, ExecutionMode: input.Facts.ExecutionMode}})
+	case EventAdmissionInstancePublication:
+		if input.ParentEventID != "" {
+			return AdmittedEvent{}, fmt.Errorf("instance publication cannot acquire a causal parent during readback")
+		}
+		event, err = NewInstancePublicationEvent(InstancePublicationEventInput{Facts: input.Facts, RunID: input.RunID})
 	case EventAdmissionReplay:
 		event, err = NewReplayEvent(ReplayEventInput{Facts: input.Facts, Lineage: EventLineage{RunID: input.RunID, ParentEventID: input.ParentEventID, TaskID: input.Facts.TaskID, ExecutionMode: input.Facts.ExecutionMode}})
 	case EventAdmissionSelectedForkReplay:

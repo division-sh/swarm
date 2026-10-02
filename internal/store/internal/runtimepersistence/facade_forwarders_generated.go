@@ -37,6 +37,7 @@ import (
 	executionposture "github.com/division-sh/swarm/internal/runtime/executionposture"
 	failures "github.com/division-sh/swarm/internal/runtime/failures"
 	fanoutobligation "github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	genericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	inboundpublication "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	ingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -785,6 +786,10 @@ func (s *PostgresStore) LoadReplyContext(ctx context.Context, id string) (replyc
 
 func (s *PostgresStore) LoadRoutingRules(ctx context.Context) ([]manager.PersistedRoutingRule, error) {
 	return s.routingPostgresOwner.LoadRoutingRules(ctx)
+}
+
+func (s *PostgresStore) LoadRunClockSchedules(ctx context.Context, runID string) ([]genericschedule.ClockReadback, error) {
+	return s.operatorRunPostgres.LoadRunClockSchedules(ctx, runID)
 }
 
 func (s *PostgresStore) LoadRunDebugReport(ctx context.Context, runID string, opts operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error) {
@@ -2009,6 +2014,10 @@ func (s *SQLiteRuntimeStore) LoadRecordedActivityResult(ctx context.Context, req
 
 func (s *SQLiteRuntimeStore) LoadReplyContext(ctx context.Context, id string) (replycontext.Record, error) {
 	return s.replySQLiteOwner.LoadReplyContext(ctx, id)
+}
+
+func (s *SQLiteRuntimeStore) LoadRunClockSchedules(ctx context.Context, runID string) ([]genericschedule.ClockReadback, error) {
+	return s.operatorRunSQLite.LoadRunClockSchedules(ctx, runID)
 }
 
 func (s *SQLiteRuntimeStore) LoadRunDebugReport(ctx context.Context, runID string, opts operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error) {

@@ -59,6 +59,11 @@ func ValidateEventContract(event Event) error {
 			return fmt.Errorf("%s event requires run_id and parent_event_id", class)
 		}
 	}
+	if class == EventAdmissionInstancePublication {
+		if err := validateInstancePublication(event); err != nil {
+			return err
+		}
+	}
 	if class == EventAdmissionSelectedForkReplay {
 		if event.RunID() == "" {
 			return fmt.Errorf("selected-fork replay requires destination run_id")
@@ -145,6 +150,10 @@ func validateEventIdentityContract(class EventAdmissionClass, eventType EventTyp
 	case EventAdmissionInheritedFanOut:
 		if producer.Type() != EventProducerNode {
 			return fmt.Errorf("inherited fan-out event requires its node producer")
+		}
+	case EventAdmissionInstancePublication:
+		if producer.Type() != EventProducerInstance {
+			return fmt.Errorf("instance publication requires its instance producer")
 		}
 	case EventAdmissionChild:
 		switch producer.Type() {
@@ -280,6 +289,8 @@ func BindManagerOutputIdentity(event Event, eventID string) (Event, error) {
 		return NewOperatorInjectedEvent(OperatorInjectedEventInput{Facts: facts, RunID: event.RunID(), Provenance: provenance})
 	case EventAdmissionChild:
 		return NewChildEvent(ChildEventInput{Facts: facts, Lineage: EventLineage{RunID: event.RunID(), ParentEventID: event.ParentEventID(), TaskID: event.TaskID(), ExecutionMode: event.ExecutionMode()}})
+	case EventAdmissionInstancePublication:
+		return NewInstancePublicationEvent(InstancePublicationEventInput{Facts: facts, RunID: event.RunID()})
 	case EventAdmissionReplay:
 		return NewReplayEvent(ReplayEventInput{Facts: facts, Lineage: EventLineage{RunID: event.RunID(), ParentEventID: event.ParentEventID(), TaskID: event.TaskID(), ExecutionMode: event.ExecutionMode()}})
 	case EventAdmissionSelectedForkReplay:

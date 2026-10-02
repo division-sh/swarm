@@ -22,6 +22,7 @@ type View struct {
 	Root                RootView                                    `json:"root"`
 	Flows               []FlowView                                  `json:"flows"`
 	ApprovalPoints      []ApprovalPointView                         `json:"approval_points,omitempty"`
+	ClockSchedules      []semanticview.ClockSchedule                `json:"clock_schedules,omitempty"`
 	StageGraphs         []StageGraphView                            `json:"stage_graphs,omitempty"`
 	RoutingTopology     RoutingTopologyView                         `json:"routing_topology"`
 	Diagnostics         []DiagnosticView                            `json:"diagnostics,omitempty"`
@@ -354,6 +355,7 @@ func Build(_ context.Context, source semanticview.Source, opts BuildOptions) (Vi
 		Root:                root,
 		Flows:               flows,
 		ApprovalPoints:      buildApprovalPoints(bundle),
+		ClockSchedules:      semanticview.ClockSchedules(source),
 		RoutingTopology:     BuildRoutingTopologyWithReport(source, bundle, opts.BootReport),
 		Diagnostics:         buildDiagnostics(bundle, opts.BootReport),
 		EffectiveProvenance: bundle.EffectiveProvenance().Entries(),

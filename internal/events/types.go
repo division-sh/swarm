@@ -56,16 +56,17 @@ const (
 type EventAdmissionClass string
 
 const (
-	EventAdmissionUnknown            EventAdmissionClass = ""
-	EventAdmissionRootIngress        EventAdmissionClass = "root_ingress"
-	EventAdmissionOperatorInjected   EventAdmissionClass = "operator_injected"
-	EventAdmissionRuntimeControl     EventAdmissionClass = "runtime_control"
-	EventAdmissionRuntimeDiagnostic  EventAdmissionClass = "runtime_diagnostic"
-	EventAdmissionDiagnosticDirect   EventAdmissionClass = "diagnostic_direct"
-	EventAdmissionChild              EventAdmissionClass = "child"
-	EventAdmissionReplay             EventAdmissionClass = "replay"
-	EventAdmissionSelectedForkReplay EventAdmissionClass = "selected_fork_replay"
-	EventAdmissionInheritedFanOut    EventAdmissionClass = "inherited_fan_out"
+	EventAdmissionUnknown             EventAdmissionClass = ""
+	EventAdmissionRootIngress         EventAdmissionClass = "root_ingress"
+	EventAdmissionOperatorInjected    EventAdmissionClass = "operator_injected"
+	EventAdmissionRuntimeControl      EventAdmissionClass = "runtime_control"
+	EventAdmissionRuntimeDiagnostic   EventAdmissionClass = "runtime_diagnostic"
+	EventAdmissionDiagnosticDirect    EventAdmissionClass = "diagnostic_direct"
+	EventAdmissionChild               EventAdmissionClass = "child"
+	EventAdmissionInstancePublication EventAdmissionClass = "instance_publication"
+	EventAdmissionReplay              EventAdmissionClass = "replay"
+	EventAdmissionSelectedForkReplay  EventAdmissionClass = "selected_fork_replay"
+	EventAdmissionInheritedFanOut     EventAdmissionClass = "inherited_fan_out"
 )
 
 type EventProducerType string
@@ -75,11 +76,12 @@ const (
 	EventProducerAgent    EventProducerType = "agent"
 	EventProducerPlatform EventProducerType = "platform"
 	EventProducerExternal EventProducerType = "external"
+	EventProducerInstance EventProducerType = "instance"
 )
 
 func (t EventProducerType) Valid() bool {
 	switch EventProducerType(strings.TrimSpace(string(t))) {
-	case EventProducerNode, EventProducerAgent, EventProducerPlatform, EventProducerExternal:
+	case EventProducerNode, EventProducerAgent, EventProducerPlatform, EventProducerExternal, EventProducerInstance:
 		return true
 	default:
 		return false

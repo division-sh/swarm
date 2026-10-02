@@ -215,6 +215,7 @@ func (r Record) validateWithSettlementEnvelope(settlement events.RouteSettlement
 	case events.EventAdmissionRootIngress,
 		events.EventAdmissionOperatorInjected,
 		events.EventAdmissionChild,
+		events.EventAdmissionInstancePublication,
 		events.EventAdmissionReplay,
 		events.EventAdmissionSelectedForkReplay,
 		events.EventAdmissionInheritedFanOut,
@@ -312,7 +313,7 @@ func (r Record) validateClassFacts() error {
 	selectedAuthority := strings.TrimSpace(r.SelectedForkAuthorityStamp)
 
 	switch r.Class {
-	case events.EventAdmissionRootIngress, events.EventAdmissionOperatorInjected:
+	case events.EventAdmissionRootIngress, events.EventAdmissionOperatorInjected, events.EventAdmissionInstancePublication:
 		if runID == "" {
 			return fmt.Errorf("event record class %q requires run_id", r.Class)
 		}

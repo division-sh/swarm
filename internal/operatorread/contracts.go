@@ -5,10 +5,12 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 )
 
 type RunReader interface {
 	LoadRunHeader(context.Context, string) (RunHeader, error)
+	LoadRunClockSchedules(context.Context, string) ([]genericschedule.ClockReadback, error)
 	ListRunHeaders(context.Context, RunHeaderListOptions) ([]RunHeader, string, error)
 	LoadRunDebugReport(context.Context, string, RunDebugQueryOptions) (RunDebugReport, error)
 }
