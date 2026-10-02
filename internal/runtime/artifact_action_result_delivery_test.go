@@ -55,8 +55,8 @@ func TestRuleResultEventsFlowThroughDurableCallbackDelivery(t *testing.T) {
 			source := semanticview.Wrap(bundle)
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
-			ctx := seedRuntimeTestRun(t, db)
 			pg := storetest.AdmitPostgresRuntimeStore(t, db)
+			ctx := seedRuntimeTestRun(t, pg)
 			var pc *runtimepipeline.PipelineCoordinator
 			bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 				ContractBundle: source,
@@ -212,8 +212,8 @@ func TestRuleResultEventsFlowThroughStaticServiceCallbackDelivery(t *testing.T) 
 			source := semanticview.Wrap(bundle)
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
-			ctx := seedRuntimeTestRun(t, db)
 			pg := storetest.AdmitPostgresRuntimeStore(t, db)
+			ctx := seedRuntimeTestRun(t, pg)
 			var pc *runtimepipeline.PipelineCoordinator
 			bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 				ContractBundle: source,

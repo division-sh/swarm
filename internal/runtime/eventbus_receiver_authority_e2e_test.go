@@ -33,6 +33,7 @@ import (
 )
 
 type closedReceiverE2EStore interface {
+	storetest.RunFixtureStore
 	startupRecoveryOrderStore
 	swarmruntime.RuntimeLogPersistence
 	runtimeeffects.Store
@@ -62,17 +63,10 @@ func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 
 			runID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-			if backend == "postgres" {
-				storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{
-					Origin: storetest.ScenarioSetupOrigin(), RunID: runID,
-					BundleHash: authorActivityTestSourceArtifactFact.BundleHash(),
-				})
-			} else {
-				storetest.RequireSQLiteRun(t, ctx, db, storetest.RunFixture{
-					Origin: storetest.ScenarioSetupOrigin(), RunID: runID,
-					BundleHash: authorActivityTestSourceArtifactFact.BundleHash(),
-				})
-			}
+			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
+				Origin: storetest.ScenarioSetupOrigin(), RunID: runID,
+				BundleHash: authorActivityTestSourceArtifactFact.BundleHash(),
+			})
 
 			bundle := loadRuntimeTempBundle(t, closedReceiverAuthorityFixtureFiles())
 			source := semanticview.Wrap(bundle)

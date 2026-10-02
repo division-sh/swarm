@@ -76,7 +76,7 @@ func TestCatalogCausalEntityIDs_FollowsSourceEventIDChain(t *testing.T) {
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	registerTestAuthorActivityCatalog(t, pg, "root.started", "child.started", "grandchild.done")
 	ctx := catalogRuntimeContext()
-	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: catalogRuntimeRunID})
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: catalogRuntimeRunID})
 	startedAt := time.Now().UTC().Add(-time.Second)
 
 	for _, stmt := range []struct {
@@ -287,8 +287,8 @@ func newCatalogAssertionHarness(t *testing.T) *runtimeHarness {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	ctx := catalogRuntimeContext()
-	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: catalogRuntimeRunID})
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: catalogRuntimeRunID})
 	registerTestAuthorActivityCatalog(t, pg, "score.requested")
 	bus := catalogPersistenceBus{}
 	workflow := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, runtimepipeline.PipelineCoordinatorOptions{

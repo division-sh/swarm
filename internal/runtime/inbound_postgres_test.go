@@ -1120,7 +1120,7 @@ func seedPostgresInboundGatewayRuntime(
 	agentID string,
 ) runtimepkg.InboundTarget {
 	t.Helper()
-	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{
 		Origin: boundedInboundStandingOrigin(t, provider),
 		RunID:  runID,
 	})
@@ -1263,7 +1263,7 @@ func seedSQLiteInboundGatewayRuntime(
 ) runtimepkg.InboundTarget {
 	t.Helper()
 	now := time.Now().UTC()
-	storetest.RequireSQLiteRun(t, ctx, storetest.DatabaseForTest(sqliteStore), storetest.RunFixture{
+	storetest.RequireRun(t, ctx, sqliteStore, storetest.RunFixture{
 		Origin:    boundedInboundStandingOrigin(t, provider),
 		RunID:     runID,
 		StartedAt: now,

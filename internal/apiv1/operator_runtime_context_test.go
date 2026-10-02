@@ -369,7 +369,7 @@ func TestOperatorRuntimeContextManagerRoutesEveryDecisionMutationThroughSelected
 	fixture := newOperatorRuntimeContextFixture(t)
 	now := time.Date(2026, 7, 14, 14, 0, 0, 0, time.UTC)
 	runID := uuid.NewString()
-	storetest.RequirePostgresRun(t, testAuthorActivityContext(context.Background()), fixture.db, storetest.RunFixture{
+	storetest.RequireRun(t, testAuthorActivityContext(context.Background()), fixture.pg, storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: runID,
 		BundleHash: runtimeContextTestBundleHashB,
 	})

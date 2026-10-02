@@ -59,7 +59,7 @@ func TestDestructiveResetFailsClosedWhileDirectiveBoardStepIsRunning(t *testing.
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	bus, err := newStoreTestEventBus(t, pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)

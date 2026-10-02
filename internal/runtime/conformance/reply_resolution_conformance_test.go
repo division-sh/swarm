@@ -874,6 +874,7 @@ func receiveReplyConformanceHumanTaskOutcome(t *testing.T, outcomes <-chan *bus.
 }
 
 type durableReplyConformanceStore interface {
+	storetest.RunFixtureStore
 	conformanceDurableEventBusStore
 	runtimepipeline.WorkflowPersistenceOwner
 	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
@@ -1050,14 +1051,7 @@ func seedDurableReplyConformanceRun(t *testing.T, ctx context.Context, backend d
 		t.Fatal("reply conformance requires an admitted source artifact")
 	}
 	fixture := storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: conformanceSourceArtifactFact(t, source).BundleHash(), Artifact: bundle.SourceArtifact}
-	switch typed := backend.(type) {
-	case *store.PostgresStore:
-		storetest.RequirePostgresRun(t, ctx, storetest.DatabaseForTest(typed), fixture)
-	case *store.SQLiteRuntimeStore:
-		storetest.RequireSQLiteRun(t, ctx, storetest.DatabaseForTest(typed), fixture)
-	default:
-		t.Fatalf("unsupported reply conformance backend %T", backend)
-	}
+	storetest.RequireRun(t, ctx, backend, fixture)
 }
 
 func replyConformanceEventForRun(eventType, id, runID, flowID, flowInstance string, payload map[string]any) events.Event {

@@ -29,7 +29,7 @@ func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 		t.Fatalf("operator read identity fields: %v", err)
 	}
 
-	storetest.RequireSQLiteRun(t, ctx, storetest.DatabaseForTest(sqliteStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: base.Add(-time.Hour)})
+	storetest.RequireRun(t, ctx, sqliteStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: base.Add(-time.Hour)})
 	seedSQLiteAgentUsageAgentForRun(t, ctx, sqliteStore, runID, agentID)
 	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
 		INSERT INTO agent_sessions (

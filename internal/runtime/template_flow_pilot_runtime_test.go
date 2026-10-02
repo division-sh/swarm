@@ -36,8 +36,8 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	ctx := seedRuntimeTestRun(t, db)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	ctx := seedRuntimeTestRun(t, pg)
 	var manager *runtimemanager.AgentManager
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle: source,

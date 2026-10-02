@@ -1591,7 +1591,7 @@ func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.Po
 	t.Helper()
 	eventID := uuid.NewString()
 	runID := operatorReplayRunID
-	storetest.RequirePostgresRun(t, ctx, storetest.DatabaseForTest(pg), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	semanticEvent := eventtest.PersistedProjection(
 		eventID,
 		events.EventType(eventName),

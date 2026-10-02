@@ -219,6 +219,67 @@ func ApplyFixture(fn func()) {}
 	}
 }
 
+func runFixtureAuthorityLeaks(findings []authorityFinding) []authorityFinding {
+	return slices.DeleteFunc(slices.Clone(findings), func(finding authorityFinding) bool {
+		return finding.File != "internal/store/storetest/run_lifecycle.go" ||
+			(!finding.RawSQL && !strings.HasPrefix(finding.Kind, "context-"))
+	})
+}
+
+func TestRunFixtureAuthorityStaysClosed(t *testing.T) {
+	findings := loadPersistenceAuthorityFindings(t, persistenceAuthorityRepoRoot(t))
+	if leaked := runFixtureAuthorityLeaks(findings); len(leaked) != 0 {
+		t.Fatalf("completed storetest run fixture family exposes raw/context authority: %+v", leaked)
+	}
+}
+
+func TestRunFixtureGuardRejectsHostileAuthority(t *testing.T) {
+	for name, source := range map[string]string{
+		"aliased-handle": `package storetest
+import "database/sql"
+type Alias = sql.DB
+func RequireRun(*Alias) {}
+`,
+		"raw-getter": `package storetest
+import "database/sql"
+func Recover(any) *sql.DB { return nil }
+`,
+		"transaction-callback": `package storetest
+import (
+ "context"
+ "database/sql"
+)
+func RequireRun(func(context.Context, *sql.Tx) error) {}
+`,
+		"independent-transaction": `package storetest
+import (
+ "context"
+ "database/sql"
+)
+func RequireRun(ctx context.Context, db *sql.DB) error {
+ tx, err := db.BeginTx(ctx, nil)
+ if err != nil { return err }
+ defer tx.Rollback()
+ return tx.Commit()
+}
+`,
+		"ambient-transaction": `package storetest
+import (
+ "context"
+ "database/sql"
+)
+func RequireRun(ctx context.Context) *sql.Tx { return ctx.Value("transaction").(*sql.Tx) }
+`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			findings := authorityFindingsFromSource(t, "internal/store/storetest/run_lifecycle.go", source)
+			if len(runFixtureAuthorityLeaks(findings)) == 0 {
+				t.Fatal("hostile run fixture escaped the completed-family guard")
+			}
+		})
+	}
+}
+
 func TestPersistenceAuthorityRegistryRejectsHostileResolvedTypes(t *testing.T) {
 	fixtures := map[string]string{
 		"postgres-field": `package fixture

@@ -18,6 +18,7 @@ import (
 )
 
 type forkCommitOmissionProbeStore interface {
+	storetest.RunFixtureStore
 	ConversationForkLifecycleStore
 	ConversationForkReadStore
 	APIIdempotencyStore
@@ -57,13 +58,12 @@ func newConversationForkCommitFixture(t *testing.T, backend string) (context.Con
 	if backend == "sqlite" {
 		s := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 		selected, db = s, storetest.DatabaseForTest(s)
-		storetest.RequireSQLiteRun(t, ctx, db, runFixture)
 	} else {
 		_, pg, _ := testutil.StartPostgres(t)
 		db = pg
 		selected = storetest.AdmitPostgresRuntimeStore(t, db)
-		storetest.RequirePostgresRun(t, ctx, db, runFixture)
 	}
+	storetest.RequireRun(t, ctx, selected, runFixture)
 	const agentID = "fork-commit-omission-source"
 	identity := sqliteAgentUsageIdentityForRun(t, runID, agentID)
 	if err := storetest.UpsertStaticAgentFixture(t, ctx, selected, manager.PersistedAgent{

@@ -50,8 +50,8 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 	ctx := correlation.WithRunID(correlation.WithSourceArtifactFact(testAuthorActivityContext(context.Background()), fact), templateInstanceDeliveryRunID)
 	ctx = correlation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
-	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID, Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash()})
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID, Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash()})
 	var manager *runtimemanager.AgentManager
 	var pc *runtimepipeline.PipelineCoordinator
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
