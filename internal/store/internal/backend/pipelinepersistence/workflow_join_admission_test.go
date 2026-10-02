@@ -21,14 +21,21 @@ import (
 )
 
 func TestA2FirstPublicationStageEntryFenceOnBothStores(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
+	for _, scenario := range []struct {
+		backend string
+		fields  bool
+	}{{"sqlite", false}, {"sqlite", true}, {"postgres", false}, {"postgres", true}} {
+		backend := scenario.backend
+		t.Run(fmt.Sprintf("%s/fields=%t", backend, scenario.fields), func(t *testing.T) {
 			db := fanOutReadbackTestDB(t, backend)
 			idType := "TEXT"
 			if backend == "postgres" {
 				idType = "UUID"
 			}
-			if _, err := db.Exec(fmt.Sprintf(`CREATE TABLE entity_state (run_id %s, entity_id %s, flow_instance TEXT, revision BIGINT, current_state TEXT, bookkeeping TEXT, accumulator TEXT, PRIMARY KEY (run_id, entity_id))`, idType, idType)); err != nil {
+			if _, err := db.Exec(fmt.Sprintf(`CREATE TABLE entity_state (run_id %s, entity_id %s, flow_instance TEXT, entity_type TEXT, fields TEXT, PRIMARY KEY (run_id, entity_id))`, idType, idType)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec(fmt.Sprintf(`CREATE TABLE flow_instances (run_id %s, entity_id %s, instance_path TEXT, entity_type TEXT, flow_template TEXT, current_state TEXT, revision BIGINT, gates TEXT, bookkeeping TEXT, accumulator TEXT, PRIMARY KEY (run_id, instance_path))`, idType, idType)); err != nil {
 				t.Fatal(err)
 			}
 			run, entity := uuid.NewString(), uuid.NewString()
@@ -91,7 +98,14 @@ func TestA2FirstPublicationStageEntryFenceOnBothStores(t *testing.T) {
 			}
 			check(true)
 			book, arms := encode()
-			if _, err := db.Exec(`INSERT INTO entity_state VALUES ($1,$2,$3,1,$4,$5,$6)`, run, entity, owner.Route.InstancePath, entry.Stage, book, arms); err != nil {
+			var entityType any
+			if scenario.fields {
+				entityType = "default"
+				if _, err := db.Exec(`INSERT INTO entity_state VALUES ($1,$2,$3,'default','{}')`, run, entity, owner.Route.InstancePath); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := db.Exec(`INSERT INTO flow_instances VALUES ($1,$2,$3,$4,'collector',$5,1,'{}',$6,$7)`, run, entity, owner.Route.InstancePath, entityType, entry.Stage, book, arms); err != nil {
 				t.Fatal(err)
 			}
 			check(false)
@@ -102,14 +116,14 @@ func TestA2FirstPublicationStageEntryFenceOnBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			book, arms = encode()
-			if _, err := db.Exec(`UPDATE entity_state SET revision=2,bookkeeping=$3,accumulator=$4 WHERE run_id=$1 AND entity_id=$2`, run, entity, book, arms); err != nil {
+			if _, err := db.Exec(`UPDATE flow_instances SET revision=2,bookkeeping=$3,accumulator=$4 WHERE run_id=$1 AND entity_id=$2`, run, entity, book, arms); err != nil {
 				t.Fatal(err)
 			}
 			check(true)
 			// A close winner changes admission even without a new stage entry.
 			activation.CloseForStageExit()
 			book, arms = encode()
-			if _, err := db.Exec(`UPDATE entity_state SET revision=3,bookkeeping=$3,accumulator=$4 WHERE run_id=$1 AND entity_id=$2`, run, entity, book, arms); err != nil {
+			if _, err := db.Exec(`UPDATE flow_instances SET revision=3,bookkeeping=$3,accumulator=$4 WHERE run_id=$1 AND entity_id=$2`, run, entity, book, arms); err != nil {
 				t.Fatal(err)
 			}
 			check(false)
@@ -131,7 +145,7 @@ func TestA2FirstPublicationStageEntryFenceOnBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer tx.Rollback()
-			if _, err := tx.Exec(`UPDATE entity_state SET revision=3,bookkeeping=$3,accumulator=$4 WHERE run_id=$1 AND entity_id=$2`, run, entity, book, arms); err != nil {
+			if _, err := tx.Exec(`UPDATE flow_instances SET revision=3,bookkeeping=$3,accumulator=$4 WHERE run_id=$1 AND entity_id=$2`, run, entity, book, arms); err != nil {
 				t.Fatal(err)
 			}
 			if err := requireWorkflowJoinAdmissionTx(context.Background(), tx, []pipeline.WorkflowJoinAdmissionFence{fence}, backend == "postgres"); err == nil {
@@ -141,7 +155,7 @@ func TestA2FirstPublicationStageEntryFenceOnBothStores(t *testing.T) {
 			if err := requireWorkflowJoinAdmissionTx(context.Background(), tx, []pipeline.WorkflowJoinAdmissionFence{fence}, backend == "postgres"); err != nil {
 				t.Fatalf("same-commit entry rejected: %v", err)
 			}
-			if _, err := tx.Exec(`UPDATE entity_state SET accumulator='{}' WHERE run_id=$1 AND entity_id=$2`, run, entity); err != nil {
+			if _, err := tx.Exec(`UPDATE flow_instances SET accumulator='{}' WHERE run_id=$1 AND entity_id=$2`, run, entity); err != nil {
 				t.Fatal(err)
 			}
 			if err := requireWorkflowJoinAdmissionTx(context.Background(), tx, []pipeline.WorkflowJoinAdmissionFence{fence}, backend == "postgres"); err == nil {

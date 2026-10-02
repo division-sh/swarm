@@ -1100,10 +1100,10 @@ func acknowledgeDecisionCardPipelineEvent(t *testing.T, ctx context.Context, own
 
 func setDecisionCardCompletionEntityState(t *testing.T, db *sql.DB, postgres bool, runID, entityID, state string) {
 	t.Helper()
-	query := `UPDATE entity_state SET current_state = ?, updated_at = ? WHERE run_id = ? AND entity_id = ?`
+	query := `UPDATE flow_instances SET current_state = ?, updated_at = ? WHERE run_id = ? AND entity_id = ?`
 	args := []any{state, time.Now().UTC(), runID, entityID}
 	if postgres {
-		query = `UPDATE entity_state SET current_state = $1, updated_at = $2 WHERE run_id = $3::uuid AND entity_id = $4::uuid`
+		query = `UPDATE flow_instances SET current_state = $1, updated_at = $2 WHERE run_id = $3::uuid AND entity_id = $4::uuid`
 	}
 	if _, err := db.ExecContext(context.Background(), query, args...); err != nil {
 		t.Fatal(err)
@@ -1112,6 +1112,7 @@ func setDecisionCardCompletionEntityState(t *testing.T, db *sql.DB, postgres boo
 
 func seedDecisionCardCompletionEntity(t *testing.T, db *sql.DB, postgres bool, runID, entityID, state string, now time.Time) {
 	t.Helper()
+	seedWorkflowHeaderProjectionFixture(t, context.Background(), db, runID, entityID, "launch/review", "launch", "default", state, "{}", now)
 	query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, slug, name, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES (?, ?, 'launch/review', 'default', 'launch', 'Launch', ?, '{}', '{}', '{}', 1, ?, ?, ?)`
 	args := []any{runID, entityID, state, now, now, now}
 	if postgres {
@@ -1447,6 +1448,7 @@ func seedDecisionCardGateEntity(t *testing.T, db *sql.DB, postgres bool, runID, 
 	if err != nil {
 		t.Fatal(err)
 	}
+	seedWorkflowHeaderProjectionFixture(t, testAuthorActivityContext(), db, runID, entityID, "launch/review", "launch", "default", "awaiting_review", string(accumulator), now)
 	query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, slug, name, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES (?, ?, 'launch/review', 'default', 'launch', 'Launch', 'awaiting_review', '{}', '{}', ?, 1, ?, ?, ?)`
 	args := []any{runID, entityID, string(accumulator), now, now, now}
 	if postgres {
@@ -1459,9 +1461,9 @@ func seedDecisionCardGateEntity(t *testing.T, db *sql.DB, postgres bool, runID, 
 
 func loadDecisionCardGateActivation(t *testing.T, db *sql.DB, postgres bool, runID, entityID string) gateruntime.Activation {
 	t.Helper()
-	query := `SELECT accumulator FROM entity_state WHERE run_id = ? AND entity_id = ?`
+	query := `SELECT accumulator FROM flow_instances WHERE run_id = ? AND entity_id = ?`
 	if postgres {
-		query = `SELECT accumulator FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`
+		query = `SELECT accumulator FROM flow_instances WHERE run_id = $1::uuid AND entity_id = $2::uuid`
 	}
 	var raw any
 	if err := db.QueryRowContext(testAuthorActivityContext(), query, runID, entityID).Scan(&raw); err != nil {

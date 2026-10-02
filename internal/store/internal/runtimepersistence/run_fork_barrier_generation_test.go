@@ -29,7 +29,7 @@ func TestForkBarrierGenerationCorrespondenceBothStores(t *testing.T) {
 func readForkBarrierLoop(t *testing.T, ctx context.Context, db *sql.DB, runID string) loopruntime.Activation {
 	t.Helper()
 	var raw []byte
-	if err := db.QueryRowContext(ctx, `SELECT accumulator FROM entity_state WHERE run_id=$1 AND entity_id=$1`, runID).Scan(&raw); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT accumulator FROM flow_instances WHERE run_id=$1 AND entity_id=$1`, runID).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
 	var buckets map[string]any

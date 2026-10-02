@@ -828,6 +828,7 @@ units:
     required_children:
       TestAgentFixtureSealedAuthorityRejectionParity: [sqlite, postgres]
       TestAgentLifecycleProcessBindingReadbackParity: [sqlite, postgres]
+      TestActivityAdmissionConsumesConstructedHeaderBothStores: [sqlite/fieldless, sqlite/fields, postgres/fieldless, postgres/fields]
       TestRunControlControllerStopReconcilesBothTimerFamiliesOnBothStores: [sqlite, postgres]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
@@ -896,6 +897,8 @@ units:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
     # TestC moves here after full01 exceeded its unchanged command budget.
     run: '^Test(C.*|[G-H].*)$'
+    required_children:
+      TestConstructedHeaderGateSummaryBothStores: [sqlite, postgres]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
@@ -906,6 +909,7 @@ units:
     required_children:
       TestOrdinaryHandlerRequiresCanonicalConstructionBothStores: [sqlite, postgres]
       TestOrdinaryWorkflowMutationCannotConstructOrRepairBothStores: [sqlite, postgres]
+      TestManagerNativeLostAdmissionCleanupBothStores: [sqlite/commit, sqlite/rollback, sqlite/unresolved, sqlite/panic, postgres/commit, postgres/rollback, postgres/unresolved, postgres/panic]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
@@ -959,6 +963,7 @@ units:
       TestSupportedStateOnlyProducersCannotAcquireWorkflowConstructionOnBothStores: [sqlite, postgres]
       TestWorkflowTimerSchedulerConsumesCommittedErrorOnBothStores: [sqlite, postgres]
       TestWorkflowGateConsumesCommittedErrorWithoutRouteReplayOnBothStores: [sqlite, postgres]
+      TestSelectedRunForkActivationFrontierContentionBothStores: [sqlite, postgres]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
@@ -966,6 +971,9 @@ units:
     packages:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
     run: '^TestRunFork.*$'
+    required_children:
+      TestRunForkActivationFrontierContentionBothStores: [sqlite, postgres]
+      TestRunForkActivationContentionFixtureControlBothStores: [sqlite, postgres]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad

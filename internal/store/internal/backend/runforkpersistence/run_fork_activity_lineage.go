@@ -126,7 +126,7 @@ func selectedContractActivityLineage(ctx context.Context, tx *sql.Tx, postgres b
 				}
 				executions = append(executions, pipeline.ActivityParentExecution{Delivery: snapshot, RuleSelection: selection})
 			}
-			activations, readErr := loadRunForkEntityActivations(ctx, tx, runID, event.RoutingSource().Route().EntityID)
+			activations, readErr := loadRunForkEntityActivations(ctx, tx, runID, event.RoutingSource().Route().EntityID, event.RoutingSource().Route().FlowInstance, event.RoutingSource().Route().FlowID)
 			if readErr != nil {
 				return reject(id, readErr)
 			}

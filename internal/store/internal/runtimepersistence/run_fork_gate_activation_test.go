@@ -135,6 +135,7 @@ func TestMaterializeRunForkGateAuthoritiesSelectedStoreParity(t *testing.T) {
 			if err := selected.CreateProposedEffectCard(ctx, sourceEffectCard, sourceEffect); err != nil {
 				t.Fatalf("create source proposed effect: %v", err)
 			}
+			seedWorkflowHeaderProjectionFixture(t, ctx, db, forkRunID, sourceEffect.EntityID, "root", sourceEffect.FlowID, "default", "operating", "{}", now)
 			if _, err := db.ExecContext(ctx, `
 				INSERT INTO entity_state (
 					run_id, entity_id, flow_instance, entity_type, current_state,

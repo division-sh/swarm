@@ -17060,6 +17060,15 @@ platform_tables:
         construction, stage, revision or execution authority. entity_type is NULL exactly for
         a fieldless header; missing required fields fail closed rather than acquire construction
         permission. stage_defined records whether the admitted topology declares stages;
+        Selected source preparation, activity lineage, proposed-effect continuation and fan-out
+        capsules consume this header at their exact fixed-revision source coordinates. Activity
+        eligibility/result admission, join entry/arm admission, fan-out generation settlement,
+        completion summaries and terminal decision-card supersession consume header lifecycle
+        evidence in their owning transaction. Only declared business fields come from entity_state.
+        Terminal supersession conditionally writes the same header identity and revision from
+        which it read the gate, retaining the existing journal and exact decision serialization.
+        These consumers preserve their gate, loop, join and correspondence decoders; they must
+        neither fall back to field-row lifecycle shadows nor synthesize a missing constructed owner.
         lifecycle counts include staged headers independently of field-row presence and exclude
         inert no-stage headers. Identity is the exact
         `(run_id, instance_path)` tuple; no reader may infer run authority from ambient context or path shape.

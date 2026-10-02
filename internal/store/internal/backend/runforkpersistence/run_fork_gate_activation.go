@@ -189,8 +189,7 @@ func materializeRunForkProposedEffectCards(ctx context.Context, decisions runFor
 		if len(cardIDs) == 0 {
 			return nil
 		}
-		forkActivations, err = loadRunForkEntityActivations(ctx, tx, forkRunID, projection.Fork.EntityID)
-		return err
+		return nil
 	})
 	if err != nil {
 		return err
@@ -218,6 +217,12 @@ func materializeRunForkProposedEffectCards(ctx context.Context, decisions runFor
 		}
 		if sourceCard.RunID != sourceRunID || sourceContinuation.RunID != sourceRunID {
 			return fmt.Errorf("source proposed effect %s belongs to another run", cardID)
+		}
+		if err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+			forkActivations, err = loadRunForkEntityActivations(ctx, tx, forkRunID, projection.Fork.EntityID, projection.Fork.FlowInstance, sourceContinuation.FlowID)
+			return err
+		}); err != nil {
+			return err
 		}
 		forkCard, forkContinuation, err := forkPendingProposedEffect(sourceCard, sourceContinuation, forkRunID, projection, correspondence, forkActivations, now)
 		if err != nil {

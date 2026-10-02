@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store/internal/workflowheader"
 )
 
 const runForkActivityRequestEvent = "platform.activity_requested"
@@ -187,7 +188,7 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 		}); err != nil {
 			return event, fmt.Errorf("load fork-local loop state for entity %s: %w", state.Fork.EntityID, err)
 		}
-		actual, err = loadRunForkEntityActivations(ctx, tx, forkRunID, state.Fork.EntityID)
+		actual, err = loadRunForkEntityActivations(ctx, tx, forkRunID, state.Fork.EntityID, state.Fork.FlowInstance, state.history.MaterializationMetadata.FlowTemplate)
 		if err != nil {
 			return event, err
 		}
@@ -387,13 +388,27 @@ func bindRunForkActivitySourceEvent(raw json.RawMessage, forkRunID, sourceReques
 	payload["source_event_id"], _ = json.Marshal(activityidentity.ForkLineageEventID(forkRunID, sourceRequestEventID))
 	return json.Marshal(payload)
 }
-func loadRunForkEntityActivations(ctx context.Context, tx *sql.Tx, forkRunID, entityID string) ([]loopruntime.Activation, error) {
+func loadRunForkEntityActivations(ctx context.Context, tx *sql.Tx, forkRunID, entityID, instancePath, flowID string) ([]loopruntime.Activation, error) {
 	if strings.TrimSpace(entityID) == "" {
 		return nil, nil
 	}
+	header, found, err := workflowheader.LoadForMutation(ctx, tx, false, forkRunID, entityID, instancePath)
+	if err != nil {
+		return nil, fmt.Errorf("load fork-local loop state for entity %s disagrees with exact child route/type: %w", entityID, err)
+	}
+	if !found {
+		return nil, fmt.Errorf("load fork-local loop state for entity %s: constructed header is missing: %w", entityID, sql.ErrNoRows)
+	}
+	if flowID == "" || header.FlowTemplate != flowID {
+		return nil, fmt.Errorf("fork-local constructed header disagrees with exact child route/type")
+	}
 	var raw []byte
-	if err := tx.QueryRowContext(ctx, `SELECT accumulator FROM entity_state WHERE run_id = $1 AND entity_id = $2`, forkRunID, entityID).Scan(&raw); err != nil {
-		return nil, fmt.Errorf("load fork-local loop state for entity %s: %w", entityID, err)
+	if bytesValue, ok := header.Accumulator.([]byte); ok {
+		raw = bytesValue
+	} else if textValue, ok := header.Accumulator.(string); ok {
+		raw = []byte(textValue)
+	} else {
+		return nil, fmt.Errorf("fork-local accumulator has unsupported persisted representation %T", header.Accumulator)
 	}
 	state := map[string]any{}
 	if err := json.Unmarshal(raw, &state); err != nil {

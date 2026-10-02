@@ -343,9 +343,9 @@ func exactOutcomeEvent(ctx context.Context, q SummaryQueryer, dialect SummaryDia
 }
 
 func summarizeGates(ctx context.Context, q SummaryQueryer, dialect SummaryDialect, runID string) (int, int, error) {
-	query := `SELECT accumulator FROM entity_state WHERE run_id = ? ORDER BY entity_id`
+	query := `SELECT accumulator FROM flow_instances WHERE run_id = ? ORDER BY entity_id`
 	if dialect == SummaryDialectPostgres {
-		query = `SELECT accumulator::text FROM entity_state WHERE run_id = $1::uuid ORDER BY entity_id FOR SHARE`
+		query = `SELECT accumulator::text FROM flow_instances WHERE run_id = $1::uuid ORDER BY entity_id FOR SHARE`
 	}
 	rows, err := q.QueryContext(ctx, query, runID)
 	if err != nil {

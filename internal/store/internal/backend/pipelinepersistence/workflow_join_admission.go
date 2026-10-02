@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	storeentity "github.com/division-sh/swarm/internal/store/internal/backend/entityruntime"
+	"github.com/division-sh/swarm/internal/store/internal/workflowheader"
 )
 
 func (s *PipelinePostgresOwner) RequireWorkflowJoinAdmissionTx(ctx context.Context, tx *sql.Tx, fences []pipeline.WorkflowJoinAdmissionFence) error {
@@ -29,32 +30,28 @@ func requireWorkflowJoinAdmissionTx(ctx context.Context, tx *sql.Tx, fences []pi
 		if err := fence.Validate(); err != nil {
 			return err
 		}
-		query := `SELECT current_state, bookkeeping, accumulator FROM entity_state WHERE run_id = ? AND entity_id = ? AND flow_instance = ?`
 		if postgres {
 			// Share the constructor's lock so absence cannot race an initial arm.
 			lock := fmt.Sprintf("%d:%s%s", len(fence.Owner.RunID), fence.Owner.RunID, fence.Owner.Route.InstancePath)
 			if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lock); err != nil {
 				return err
 			}
-			query = `SELECT current_state, bookkeeping, accumulator FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid AND flow_instance = $3 FOR UPDATE`
 		}
-		var stage string
-		var bookkeepingRaw, stateBucketsRaw any
-		err := tx.QueryRowContext(ctx, query, fence.Owner.RunID, fence.EntityID, fence.Owner.Route.InstancePath).Scan(&stage, &bookkeepingRaw, &stateBucketsRaw)
-		if err != nil && err != sql.ErrNoRows {
+		header, found, err := workflowheader.LoadForMutation(ctx, tx, postgres, fence.Owner.RunID, fence.EntityID, fence.Owner.Route.InstancePath)
+		if err != nil {
 			return err
 		}
-		matches := err == sql.ErrNoRows && fence.Entry.Empty()
-		if err == nil {
-			bookkeeping, err := storeentity.DecodeJSONMap(bookkeepingRaw)
+		matches := !found && fence.Entry.Empty()
+		if found {
+			bookkeeping, err := storeentity.DecodeJSONMap(header.Bookkeeping)
 			if err != nil {
 				return fmt.Errorf("decode join admission lifecycle: %w", err)
 			}
-			stateBuckets, err := storeentity.DecodeJSONMap(stateBucketsRaw)
+			stateBuckets, err := storeentity.DecodeJSONMap(header.Accumulator)
 			if err != nil {
 				return fmt.Errorf("decode join admission arms: %w", err)
 			}
-			matches, err = fence.MatchesCurrent(stage, bookkeeping, stateBuckets)
+			matches, err = fence.MatchesCurrent(header.Stage, bookkeeping, stateBuckets)
 			if err != nil {
 				return err
 			}

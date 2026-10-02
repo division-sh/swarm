@@ -130,7 +130,7 @@ func projectRunForkFanOutCapsule(ctx context.Context, tx *sql.Tx, forkRunID stri
 	if err != nil {
 		return capsule, nil, err
 	}
-	actual, err := loadRunForkEntityActivations(ctx, tx, forkRunID, projection.Fork.EntityID)
+	actual, err := loadRunForkEntityActivations(ctx, tx, forkRunID, projection.Fork.EntityID, projection.Fork.FlowInstance, role.FlowID())
 	if err != nil {
 		return capsule, nil, err
 	}

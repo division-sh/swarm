@@ -282,3 +282,61 @@ unresolved. Managed owner-guard and six-root API race qualification completed
 as recorded above. YAML parsing and diff checks pass. Canonical watchlist
 refinement is pushed to the docs hub atce5dd0b. No formal proof audit, default full-suite GREEN,
 exact-head CI or reviewable PR is claimed.
+
+## Authorized WIP Repair Checkpoint
+
+The preceding entries are historical receipts, not current closure evidence.
+PR #2525 is open for the requested WIP inspection. Lead disposition5944833985
+authorizes R1-R4 inside this PR and supersedes the earlier pending requests;
+the final proof audit and merge qualification are still outstanding.
+
+R1 now retains an immutable request before Begin in both Manager and selected
+staging. Its exact row-correlated resolution is transaction-serialized and
+verifies the complete process binding even for cleanup of a retired grant.
+Unknown results remain owned; cancellation does not install resources to gain
+cleanup permission. The physical commit matrix passes all12 cells: both stores,
+initial/retired/aborted predecessor, committed-response-loss/rollback. Duplicate
+resolution, forged runtime refusal, foreign requests and exact successors are
+asserted in those executions. This is native transaction evidence, not process
+crash qualification.
+
+The native Manager resource matrix's eight backend/cut leaves pass after using
+the actual EventBus constructor committer and genuinely compiled agent. Its
+lost-ack commit installs/verifies the declared route and agents, then joined
+retirement removes the route; rollback/panic/unresolved admission installs no
+route. Persistent resolution failure survives joined shutdown until an exact
+second cleanup resolves it. Immutable headers and the actual mutation ledger
+remain unchanged. The enclosing four-root managed command is RED10.508s solely
+at the contention fixture; this receipt is not aggregate GREEN.
+
+R2 migrates all four selected consumers and all five enumerated sibling families
+to canonical header lifecycle evidence plus fields iff declared. Terminal
+supersession migrates its CAS writer too. The timestamp-reuse and current/
+historical generation-correspondence matrices pass after their fixtures use
+canonical construction and exact compiled carriers. New activity input and
+join header matrices remain under execution/qualification. Controlled gate or
+loop bucket injections are explicitly decoder-input component proofs; they do
+not establish a served gate/loop production journey.
+
+R3 separates declaration identity from the selected generation's run, carries
+the actual instance through commit/readback/reset/startup, and restores exact
+run-root local event qualification without changing recipient selection. The
+remaining standing child topology disposition is recorded at5945687624:
+constructing only the service subtree cannot supply a connected static sibling.
+The proposed root-first canonical tree (keyed roots without creating input
+refused) is not implemented pending that precise ruling. C's clock handoff is
+recorded at5945086512 and is not yet claimed integrated or qualified.
+
+R4 is committed at248e0d4df with exact publication count/order/identity checks
+and all declared lifecycle follow-up retained separately from activity mapping.
+Its32-cell handoff, eight hostile receipts, native commit and unchanged served
+run-control receipts are recorded in the associated handoff audit. No settled
+handler is repeated.
+
+Contention is being rebuilt around the existing gate consumer's actual accepted
+decision and new StageEntry. No non-agent history is fabricated, marked settled
+to evade admission, or deleted. Commit/rollback/cancellation and complete-table
+oracles remain. Master reconciliation, this proof, final read/write census,
+supported-surface qualification, managed-suite GREEN and exact-head CI remain
+required. Honest closure is still partial canonicalization, not failure-class
+elimination; parents #2411/#2250 remain open.

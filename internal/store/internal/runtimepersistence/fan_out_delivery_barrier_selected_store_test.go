@@ -878,6 +878,7 @@ func seedFanOutBarrierLoopState(t *testing.T, ctx context.Context, db *sql.DB, r
 		t.Fatal(err)
 	}
 	raw, _ := json.Marshal(buckets)
+	seedWorkflowHeaderProjectionFixture(t, ctx, db, runID, entityID, "root", ".", "fan_out_fixture", "work", string(raw), at)
 	if _, err := db.ExecContext(ctx, `INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type,current_state,gates,fields,bookkeeping,accumulator,revision,entered_state_at,created_at,updated_at) VALUES ($1,$2,'root','fan_out_fixture','work','{}','{"entity_type":"fan_out_fixture"}','{}',$3,1,$4,$4,$4)`, runID, entityID, string(raw), at); err != nil {
 		t.Fatal(err)
 	}
@@ -890,7 +891,7 @@ func updateFanOutBarrierLoopState(t *testing.T, ctx context.Context, db *sql.DB,
 		t.Fatal(err)
 	}
 	raw, _ := json.Marshal(buckets)
-	if _, err := db.ExecContext(ctx, `UPDATE entity_state SET accumulator=$1,revision=revision+1,updated_at=$2 WHERE run_id=$3 AND entity_id=$4`, string(raw), at, runID, entityID); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE flow_instances SET accumulator=$1,revision=revision+1,updated_at=$2 WHERE run_id=$3 AND entity_id=$4`, string(raw), at, runID, entityID); err != nil {
 		t.Fatal(err)
 	}
 }
