@@ -20,6 +20,19 @@ func TestAdmissionRejectsRetiredAndConditionalForms(t *testing.T) {
 			}
 		}
 	}
+	for _, value := range []string{"null", "''", "7", "{}", "[]", "{tool: {ok: true}}", "[witness]"} {
+		if _, err := Admit([]byte(ordinary+"connector_responses: "+value+"\n"), "tests/witness.yaml"); err == nil || !strings.Contains(err.Error(), "connector_responses requires derive") {
+			t.Fatalf("non-derived witness %s: %v", value, err)
+		}
+	}
+	for _, raw := range []string{
+		"vars: {witness: &witness {tool: {ok: true}}}\n" + ordinary + "connector_responses: *witness\n",
+		"vars: {fields: &fields {connector_responses: null}}\n" + ordinary + "<<: *fields\n",
+	} {
+		if _, err := Admit([]byte(raw), "tests/introduced-witness.yaml"); err == nil || !strings.Contains(err.Error(), "connector_responses requires derive") {
+			t.Fatalf("introduced non-derived witness: %v", err)
+		}
+	}
 	for _, row := range []struct{ raw, want string }{
 		{ordinary + "connector_responses: {}\n", "connector_responses requires derive"},
 		{ordinary + "derive: null\n", "mutually exclusive"},
@@ -46,10 +59,12 @@ func TestAdmissionRejectsRetiredAndConditionalForms(t *testing.T) {
 func TestAdmissionRetainsExactValuesAndDefensiveProjections(t *testing.T) {
 	document, err := Admit([]byte(`vars:
   original: &object {id: exact, ' id ': spaced, nested: [null, 4.5]}
+setup: {entities: [{as: item, type: task, fields: *object, gates: {approved: true}}]}
 steps:
   - publish: request
     payload: {<<: *object}
-expect: {events: {exact: []}}
+  - mailbox.decide: {match: {anchor_kind: stage_gate}, verdict: approve, fields: *object}
+expect: {events: {exact: []}, entities: [{ref: item, fields: {<<: *object}}]}
 `), "tests/aliased.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -65,6 +80,11 @@ expect: {events: {exact: []}}
 	if !reflect.DeepEqual(first.Steps[0].Payload, want) {
 		t.Fatalf("payload = %#v", first.Steps[0].Payload)
 	}
+	for name, value := range map[string]any{"vars": first.Vars["original"], "setup fields": first.Setup.Entities[0].Fields, "verdict fields": first.Steps[1].Fields, "assertion fields": first.Expect.Entities[0].Fields} {
+		if !reflect.DeepEqual(value, want) {
+			t.Fatalf("%s lost literal data: %#v", name, value)
+		}
+	}
 	first.Steps[0].Payload.(map[string]any)["id"] = "mutated"
 	first.Vars["original"].(map[string]any)["nested"].([]any)[1] = int64(9)
 	second, err := document.Projection()
@@ -73,6 +93,19 @@ expect: {events: {exact: []}}
 	}
 	if document.SourceValue().Location().File != "tests/aliased.yaml" {
 		t.Fatalf("missing source coordinate: %#v", document.SourceValue().Location())
+	}
+	derivedDocument, err := Admit([]byte("name: profile\nvars: {original: &object {id: exact, ' id ': spaced, nested: [null, 4.5]}}\nderive: {flow: '.', input: request, payload: {generate: true, set: {data: *object}}}\nconnector_responses: {tool: {<<: *object}}\n"), "tests/derived-alias.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	projection, err := derivedDocument.Projection()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range map[string]any{"derived overlay": projection.Derive.Set["data"], "response witness": projection.Derive.ConnectorResponses["tool"]} {
+		if !reflect.DeepEqual(value, want) {
+			t.Fatalf("%s lost literal data: %#v", name, value)
+		}
 	}
 }
 
