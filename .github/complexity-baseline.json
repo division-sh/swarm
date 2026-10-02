@@ -4177,6 +4177,7 @@
     {"path":"internal/testpostgres/state_authority_windows.go","class":"authored"},
     {"path":"internal/testtiming/budget.go","class":"authored"},
     {"path":"internal/testtiming/budget_test.go","class":"test"},
+    {"path":"internal/testtiming/ci_admission_test.go","class":"test"},
     {"path":"internal/testtiming/ci_contract_test.go","class":"test"},
     {"path":"internal/testtiming/jobs.go","class":"authored"},
     {"path":"internal/testtiming/jobs_test.go","class":"test"},
