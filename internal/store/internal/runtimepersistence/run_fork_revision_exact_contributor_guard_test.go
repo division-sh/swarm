@@ -660,6 +660,52 @@ func TestRunForkRevisionExactContributorGuardHostileControls(t *testing.T) {
 }
 
 func TestRunForkRevisionJoinedPhysicalWriterGuardHostileControls(t *testing.T) {
+	t.Run("factored_storage_owners_are_not_file_exemptions", func(t *testing.T) {
+		classified := map[string]struct{}{}
+		for _, row := range runForkRevisionWriterCensus() {
+			for _, symbol := range row.Symbols {
+				for _, table := range row.Tables {
+					classified[row.Path+"|"+symbol+"|"+table] = struct{}{}
+				}
+			}
+		}
+		for _, tc := range []struct{ path, symbol, table string }{
+			{"delivery/adapter.go", "persistExactObligation", "event_deliveries"},
+			{"delivery/adapter.go", "persistPipelineHandoffTx", "event_deliveries"},
+			{"eventrecord/postgres/adapter.go", "insertRecord", "events"},
+			{"eventrecord/sqlite/adapter.go", "insertRecord", "events"},
+			{"pipelinepersistence/owner_operations.go", "persistCommittedPipelineScopeTx", "committed_replay_scopes"},
+			{"pipelinepersistence/owner_operations.go", "persistExactPlatformPipelineReceipt", "event_receipts"},
+		} {
+			t.Run(tc.path+"/"+tc.symbol, func(t *testing.T) {
+				root := t.TempDir()
+				path := "internal/store/internal/backend/" + tc.path
+				file := filepath.Join(root, path)
+				if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
+					t.Fatal(err)
+				}
+				write := "_ = `INSERT INTO " + tc.table + " (id) VALUES (?)`"
+				source := "package backend\nfunc " + tc.symbol + "() { " + write + " }\n" +
+					"func unclassifiedContributor() { " + write + " }"
+				if err := os.WriteFile(file, []byte(source), 0600); err != nil {
+					t.Fatal(err)
+				}
+				got := scanRunForkRevisionPhysicalWriters(t, root)
+				known := path + "|" + tc.symbol + "|" + tc.table
+				unknown := path + "|unclassifiedContributor|" + tc.table
+				want := map[string]struct{}{known: {}, unknown: {}}
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("factored writer census lost an exact physical site: got=%v want=%v", got, want)
+				}
+				if _, ok := classified[known]; !ok {
+					t.Fatalf("canonical storage writer is not classified: %s", known)
+				}
+				if _, ok := classified[unknown]; ok {
+					t.Fatalf("classified backend file authorized an independent writer: %s", unknown)
+				}
+			})
+		}
+	})
 	root := t.TempDir()
 	dir := filepath.Join(root, "internal/store")
 	if err := os.MkdirAll(dir, 0755); err != nil {
