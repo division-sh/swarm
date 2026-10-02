@@ -2,6 +2,7 @@ package bootverify
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,8 +52,64 @@ func TestClockScheduleBareEventAndConsumerLaw(t *testing.T) {
 			} else if len(findings) != 1 || !strings.Contains(findings[0].Message, tc.want) {
 				t.Fatalf("missing exact clock refusal %q: %#v", tc.want, findings)
 			}
+			t.Run("readback projection is non-authoritative", func(t *testing.T) {
+				source := clockScheduleSchemaProbe{
+					Source: semanticview.Wrap(bundle), hideFields: tc.fields != "",
+				}
+				projected := checkClockScheduleValidation(newCheckerContext(t.Context(), source, Options{}))
+				if tc.want == "" {
+					if len(projected) != 0 {
+						t.Fatalf("readback projection overruled admitted bare schema: %#v", projected)
+					}
+				} else if len(projected) != 1 || !strings.Contains(projected[0].Message, tc.want) {
+					t.Fatalf("readback projection overruled admitted schema refusal %q: %#v", tc.want, projected)
+				}
+			})
+			if tc.want == "" {
+				for _, unavailable := range []struct {
+					name string
+					err  error
+				}{
+					{name: "missing admitted schema"},
+					{name: "failed admitted schema", err: errors.New("compiled schema unavailable")},
+				} {
+					t.Run(unavailable.name, func(t *testing.T) {
+						source := clockScheduleSchemaProbe{Source: semanticview.Wrap(bundle), hideFields: true, unavailable: true, schemaErr: unavailable.err}
+						findings := checkClockScheduleValidation(newCheckerContext(t.Context(), source, Options{}))
+						if len(findings) != 1 || !strings.Contains(findings[0].Message, "requires an admitted event schema") {
+							t.Fatalf("unavailable compiled schema fell back to readback (error %v): %#v", unavailable.err, findings)
+						}
+					})
+				}
+			}
 		})
 	}
+}
+
+type clockScheduleSchemaProbe struct {
+	semanticview.Source
+	hideFields  bool
+	unavailable bool
+	schemaErr   error
+}
+
+func (s clockScheduleSchemaProbe) ResolveFlowEventCatalogEntry(flowID, eventType string) (contracts.EventCatalogEntry, string, bool) {
+	entry, key, found := s.Source.ResolveFlowEventCatalogEntry(flowID, eventType)
+	entry.Payload = contracts.EventPayloadSpec{}
+	if !s.hideFields {
+		entry.Payload = contracts.EventPayloadSpec{
+			Properties: map[string]contracts.EventFieldSpec{"readback_only": {Type: "text"}},
+			Required:   []string{"readback_only"},
+		}
+	}
+	return entry, key, found
+}
+
+func (s clockScheduleSchemaProbe) ResolveEffectiveCompiledFlowEventSchema(flowID, eventType string) (contracts.CompiledEventSchema, bool, error) {
+	if s.unavailable {
+		return contracts.CompiledEventSchema{}, false, s.schemaErr
+	}
+	return s.Source.ResolveEffectiveCompiledFlowEventSchema(flowID, eventType)
 }
 
 func TestClockScheduleRequiresActualConnectionToPrivateConsumer(t *testing.T) {
