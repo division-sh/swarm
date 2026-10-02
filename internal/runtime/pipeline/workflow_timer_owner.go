@@ -359,7 +359,7 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 			}
 		}
 		if keep {
-			if err := requireSameWorkflowTimerActivationFacts(activation, expected); err != nil {
+			if err := activation.ValidateCauseReplay(expected); err != nil {
 				return err
 			}
 			delete(desired, activation.Ref.ActivationID)

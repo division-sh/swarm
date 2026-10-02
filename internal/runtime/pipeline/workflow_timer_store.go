@@ -297,8 +297,16 @@ func workflowTimerIntervalString(activation WorkflowTimerActivation) string {
 	return activation.RecurrenceInterval.String()
 }
 
-func requireSameWorkflowTimerActivationFacts(actual, expected WorkflowTimerActivation) error {
+// ValidateCauseReplay compares current durable facts with the original cause,
+// not the authority to execute a current occurrence or cancel an activation.
+func (actual WorkflowTimerActivation) ValidateCauseReplay(expected WorkflowTimerActivation) error {
 	actual, expected = actual.normalized(), expected.normalized()
+	if err := actual.validate(); err != nil {
+		return fmt.Errorf("persisted workflow timer cause replay: %w", err)
+	}
+	if err := expected.validate(); err != nil {
+		return fmt.Errorf("requested workflow timer cause replay: %w", err)
+	}
 	if actual.Ref != expected.Ref || actual.RunID != expected.RunID || actual.EntityID != expected.EntityID ||
 		actual.Route != expected.Route || actual.RoutingSource.Kind() != expected.RoutingSource.Kind() || actual.RoutingSource.Route() != expected.RoutingSource.Route() || actual.OwnerAgent != expected.OwnerAgent ||
 		actual.EventType != expected.EventType || actual.ExecutionMode != expected.ExecutionMode || actual.Recurring != expected.Recurring ||
