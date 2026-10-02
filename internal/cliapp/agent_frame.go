@@ -16,8 +16,6 @@ type agentFrameCommandOptions struct {
 	output       cliOutputOptions
 	scope        string
 	runID        string
-	bundleHash   string
-	flow         string
 	root         bool
 	flowInstance string
 }
@@ -26,7 +24,7 @@ func newAgentFrameCommand(opts rootCommandOptions) *cobra.Command {
 	frameOpts := agentFrameCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "frame <agent-id>",
-		Short: "Inspect an agent's static or effective execution frame.",
+		Short: "Inspect an agent's effective execution frame.",
 		Args:  argcount.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := frameOpts.output.validate(); err != nil {
@@ -36,10 +34,8 @@ func newAgentFrameCommand(opts rootCommandOptions) *cobra.Command {
 		},
 	}
 	argcount.SetDiscoveryHint(cmd, "List agent ids with `swarm agent list`.")
-	cmd.Flags().StringVar(&frameOpts.scope, "scope", "", "Inspection scope: static or effective")
+	cmd.Flags().StringVar(&frameOpts.scope, "scope", "effective", "Inspection scope: effective")
 	cmd.Flags().StringVar(&frameOpts.runID, "run-id", "", "Effective run identity")
-	cmd.Flags().StringVar(&frameOpts.bundleHash, "bundle-hash", "", "Static bundle identity")
-	cmd.Flags().StringVar(&frameOpts.flow, "flow", "", "Static authored flow path, or root")
 	cmd.Flags().BoolVar(&frameOpts.root, "root", false, "Select the effective root agent")
 	cmd.Flags().StringVar(&frameOpts.flowInstance, "flow-instance", "", "Select one effective concrete flow instance")
 	bindCLIOutputFlags(cmd, &frameOpts.output)
@@ -86,43 +82,11 @@ func (opts agentFrameCommandOptions) params(agentID string) (map[string]any, err
 		return nil, err
 	}
 	switch scope {
-	case string(agentframe.InspectionStatic):
-		flowInstance, err := exactAgentFrameCLIPath(opts.flowInstance, "--flow-instance")
-		if err != nil {
-			return nil, err
-		}
-		if runID != "" || opts.root || flowInstance != "" {
-			return nil, fmt.Errorf("--scope static forbids --run-id, --root, and --flow-instance")
-		}
-		bundleHash, err := exactAgentFrameCLIScalar(opts.bundleHash, "--bundle-hash")
-		if err != nil {
-			return nil, err
-		}
-		flow, err := exactAgentFrameCLIPath(opts.flow, "--flow")
-		if err != nil {
-			return nil, err
-		}
-		if bundleHash == "" || flow == "" {
-			return nil, fmt.Errorf("--scope static requires --bundle-hash and --flow")
-		}
-		params["bundle_hash"] = bundleHash
-		params["flow"] = flow
 	case string(agentframe.InspectionEffective):
 		if runID == "" {
 			return nil, fmt.Errorf("--scope effective requires --run-id")
 		}
 		params["run_id"] = runID
-		bundleHash, err := exactAgentFrameCLIScalar(opts.bundleHash, "--bundle-hash")
-		if err != nil {
-			return nil, err
-		}
-		flow, err := exactAgentFrameCLIPath(opts.flow, "--flow")
-		if err != nil {
-			return nil, err
-		}
-		if bundleHash != "" || flow != "" {
-			return nil, fmt.Errorf("--scope effective forbids --bundle-hash and --flow")
-		}
 		flowInstance, err := exactAgentFrameCLIPath(opts.flowInstance, "--flow-instance")
 		if err != nil {
 			return nil, err
@@ -136,7 +100,7 @@ func (opts agentFrameCommandOptions) params(agentID string) (map[string]any, err
 			params["flow_instance"] = flowInstance
 		}
 	default:
-		return nil, fmt.Errorf("--scope must be static or effective")
+		return nil, fmt.Errorf("--scope must be effective")
 	}
 	return params, nil
 }
@@ -172,7 +136,7 @@ func writeAgentFrameResult(out io.Writer, result agentframe.Inspection) {
 			{Label: "Agent", Value: result.Session.AgentID},
 			{Label: "Scope", Value: string(result.Scope)},
 			{Label: "Version", Value: result.Version},
-			{Label: "Bundle", Value: result.Session.BundleHash},
+			{Label: "Source", Value: humanSourceIdentity(result.Session.BundleHash, result.SourceLabel)},
 			{Label: "Flow", Value: result.Session.AuthoredFlow},
 			{Label: "Intent", Value: result.Session.Intent.Identity},
 			{Label: "Criteria", Value: result.Session.Criteria.Identity},

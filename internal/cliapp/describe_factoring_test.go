@@ -16,7 +16,7 @@ func TestDescribeTextFactoringCharacterization(t *testing.T) {
 	writeDescribeText(nil, view)
 	var out bytes.Buffer
 	writeDescribeText(&out, view)
-	const want = `describe: source=source-hash
+	const want = `describe: source=Reception@1.0.0
 source authority: projection_only_existing_contract_owners
 validation: structural; live readiness: not evaluated
 events:
@@ -76,12 +76,12 @@ diagnostics:
 	if out.String() != want {
 		t.Fatalf("describe transcript changed:\n%s\nwant:\n%s", out.String(), want)
 	}
-	if got := describeQuietValues(view); !reflect.DeepEqual(got, []string{"source-hash", "review", "bare"}) {
+	if got := describeQuietValues(view); !reflect.DeepEqual(got, []string{"Reception@1.0.0", "review", "bare"}) {
 		t.Fatalf("quiet values=%v", got)
 	}
 	var empty bytes.Buffer
 	writeDescribeText(&empty, authoringview.View{})
-	const emptyWant = "describe: source=\nsource authority: \nvalidation: structural; live readiness: not evaluated\nrouting topology: \n  source authority: \n  routes: none\n"
+	const emptyWant = "describe: source=unavailable\nsource authority: \nvalidation: structural; live readiness: not evaluated\nrouting topology: \n  source authority: \n  routes: none\n"
 	if empty.String() != emptyWant {
 		t.Fatalf("empty transcript=%q", empty.String())
 	}
@@ -144,7 +144,7 @@ func TestDescribeFactoringRetiredJoinFieldsRemainAbsent(t *testing.T) {
 func describeFactoringView() authoringview.View {
 	count := 2
 	return authoringview.View{
-		SourceHash: "source-hash", SourceAuthority: "projection_only_existing_contract_owners",
+		SourceHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), SourceLabel: "Reception@1.0.0", SourceAuthority: "projection_only_existing_contract_owners",
 		Root: authoringview.RootView{Events: []authoringview.EventView{{Name: "root.empty"}, {Name: "root.ready", Fields: []string{"id", "text"}}}, PrimaryEntity: &authoringview.PrimaryEntityView{Type: "Root"}},
 		Flows: []authoringview.FlowView{
 			{ID: " review ", Mode: "template", Events: []authoringview.EventView{{Name: "ready", Fields: []string{"id"}}}, Activation: "standing",

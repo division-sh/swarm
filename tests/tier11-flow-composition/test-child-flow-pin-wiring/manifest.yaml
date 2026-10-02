@@ -1,4 +1,3 @@
 name: test-child-flow-pin-wiring
 version: 1.0.0
-description: Parent emits event matching child input pin, child processes it.
 platform_version: ">=0.7.0 <0.8.0"

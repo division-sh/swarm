@@ -13,22 +13,27 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 type verifyCommandResult struct {
-	OK                      bool                  `json:"ok"`
-	SourceRoot              string                `json:"source_root"`
-	ValidationScope         string                `json:"validation_scope"`
-	LiveReadiness           string                `json:"live_readiness"`
-	HarnessInjectedInputs   int                   `json:"harness_injected_inputs"`
-	HarnessObservedOutputs  int                   `json:"harness_observed_outputs"`
-	HarnessInputProvenance  []string              `json:"harness_input_provenance,omitempty"`
-	HarnessOutputProvenance []string              `json:"harness_output_provenance,omitempty"`
-	ProductionValid         bool                  `json:"production_valid"`
-	Errors                  []verifyFindingOutput `json:"errors"`
-	Warnings                []verifyFindingOutput `json:"warnings"`
-	LintEvidence            []verifyFindingOutput `json:"lint_evidence"`
-	PackInventory           packInventoryReadback `json:"pack_inventory"`
+	BundleHash              string                          `json:"bundle_hash"`
+	SourceLabel             string                          `json:"source_label"`
+	Members                 []sourceartifact.MemberEvidence `json:"members"`
+	Manifest                *sourceartifact.Manifest        `json:"manifest,omitempty"`
+	OK                      bool                            `json:"ok"`
+	SourceRoot              string                          `json:"source_root"`
+	ValidationScope         string                          `json:"validation_scope"`
+	LiveReadiness           string                          `json:"live_readiness"`
+	HarnessInjectedInputs   int                             `json:"harness_injected_inputs"`
+	HarnessObservedOutputs  int                             `json:"harness_observed_outputs"`
+	HarnessInputProvenance  []string                        `json:"harness_input_provenance,omitempty"`
+	HarnessOutputProvenance []string                        `json:"harness_output_provenance,omitempty"`
+	ProductionValid         bool                            `json:"production_valid"`
+	Errors                  []verifyFindingOutput           `json:"errors"`
+	Warnings                []verifyFindingOutput           `json:"warnings"`
+	LintEvidence            []verifyFindingOutput           `json:"lint_evidence"`
+	PackInventory           packInventoryReadback           `json:"pack_inventory"`
 }
 
 type verifyFindingOutput struct {
@@ -105,7 +110,7 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 		result, err := verifyBundleResultWithOptions(ctx, source, validationOpts)
 		if err != nil {
 			if opts.output.asJSON && verifyValidationResultHasBlockingBootFindings(result, validationOpts) {
-				output := verifyCommandOutput(false, sourceRoot, result, packReadback)
+				output := verifyCommandOutput(false, sourceRoot, result, packReadback, bundle.SourceArtifact)
 				if renderErr := renderCLIOutput(out, errOut, opts.output, output, nil, nil); renderErr != nil {
 					return 2
 				}
@@ -116,15 +121,15 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 			}
 			return 1
 		}
-		output := verifyCommandOutput(true, sourceRoot, result, packReadback)
+		output := verifyCommandOutput(true, sourceRoot, result, packReadback, bundle.SourceArtifact)
 		if err := renderCLIOutput(out, errOut, opts.output, output, func(_ io.Writer) {
 			writeVerifyFindings(errOut, result.BootReport.Warnings(), false)
 			writeVerifyFindings(errOut, result.BootReport.LintEvidence(), false)
 			if out != nil {
 				if result.HarnessInjectedInputCount > 0 || result.HarnessObservedOutputCount > 0 {
-					fmt.Fprintf(out, "verify ok: source=%s -- %s; not production-valid\n", sourceRoot, harnessValidationSummary(result))
+					fmt.Fprintf(out, "verify ok: source=%s -- %s; not production-valid\n", output.SourceLabel, harnessValidationSummary(result))
 				} else {
-					fmt.Fprintf(out, "verify ok: source=%s\n", sourceRoot)
+					fmt.Fprintf(out, "verify ok: source=%s\n", output.SourceLabel)
 				}
 				fmt.Fprintln(out, "validation: structural; live readiness: not evaluated (production_valid describes harness independence only)")
 				writePackInventory(out, packReadback)
@@ -149,8 +154,16 @@ func harnessValidationSummary(result runtime.WorkflowContractValidationResult) s
 	return strings.Join(parts, ", ")
 }
 
-func verifyCommandOutput(ok bool, sourceRoot string, result runtime.WorkflowContractValidationResult, packInventory packInventoryReadback) verifyCommandResult {
+func verifyCommandOutput(ok bool, sourceRoot string, result runtime.WorkflowContractValidationResult, packInventory packInventoryReadback, artifact *sourceartifact.AdmittedSourceArtifact) verifyCommandResult {
+	var manifest *sourceartifact.Manifest
+	if metadata, present := artifact.RootManifest(); present {
+		manifest = &metadata
+	}
 	return verifyCommandResult{
+		BundleHash:              artifact.BundleHash(),
+		SourceLabel:             artifact.HumanLabel(),
+		Members:                 artifact.MemberTable(),
+		Manifest:                manifest,
 		OK:                      ok,
 		SourceRoot:              sourceRoot,
 		ValidationScope:         "structural",

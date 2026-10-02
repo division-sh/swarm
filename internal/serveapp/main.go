@@ -170,15 +170,16 @@ type serveRuntimeBundleContextRequest struct {
 }
 
 func (b serveRuntimeBundle) serveIdentityDetail() string {
-	if b.dbLoaded && b.sourceArtifactFact.BundleHash() != "" {
-		return b.sourceArtifactFact.BundleHash()
-	}
-	return strings.TrimSpace(b.bootIdentity.BundleHash)
+	return serveRuntimeBundleAuthorLabel(b)
 }
 
 func serveRuntimeBundleIdentitiesDetail(bundles []serveRuntimeBundle) string {
+	ordered := append([]serveRuntimeBundle(nil), bundles...)
+	sort.Slice(ordered, func(i, j int) bool {
+		return ordered[i].sourceArtifactFact.BundleHash() < ordered[j].sourceArtifactFact.BundleHash()
+	})
 	parts := make([]string, 0, len(bundles))
-	for _, bundle := range bundles {
+	for _, bundle := range ordered {
 		if detail := bundle.serveIdentityDetail(); detail != "" {
 			parts = append(parts, detail)
 		}
@@ -186,7 +187,6 @@ func serveRuntimeBundleIdentitiesDetail(bundles []serveRuntimeBundle) string {
 	if len(parts) == 0 {
 		return ""
 	}
-	sort.Strings(parts)
 	return strings.Join(parts, ",")
 }
 
@@ -265,25 +265,11 @@ func serveRuntimeStateStoreSummary(contexts []serveRuntimeBundleContext) string 
 
 func serveConfigLoadDetail(configDetail string, resolvedPaths cliapp.CLISourcePlatformSpecPaths, opts cliapp.ServeOptions) string {
 	parts := []string{"config=" + strings.TrimSpace(configDetail)}
-	hashes, _ := cliapp.ServeBundleHashes(opts)
-	if len(hashes) == 1 {
-		parts = append(parts, "bundle_hash="+hashes[0])
-	} else if len(hashes) > 1 {
-		parts = append(parts, "bundle_hashes="+strings.Join(hashes, ","))
-	} else {
-		parts = append(parts, "source="+filepath.Clean(resolvedPaths.SourceRoot))
-	}
+	parts = append(parts, "source="+filepath.Clean(resolvedPaths.SourceRoot))
 	return strings.Join(parts, " ")
 }
 
 func servePreCatalogPlatformSpecPath(resolvedPaths cliapp.CLISourcePlatformSpecPaths, opts cliapp.ServeOptions) (string, error) {
-	hashes, err := cliapp.ServeBundleHashes(opts)
-	if err != nil {
-		return "", err
-	}
-	if len(hashes) > 0 {
-		return cliapp.EmbeddedPlatformSpecPath()
-	}
 	return resolvedPaths.PlatformSpecPath, nil
 }
 
@@ -292,30 +278,6 @@ type sourceArtifactReader interface {
 }
 
 func loadServeRuntimeBundles(ctx context.Context, repo string, artifacts sourceArtifactReader, resolvedPaths cliapp.CLISourcePlatformSpecPaths, opts cliapp.ServeOptions, packBases *packartifact.PlatformPackBaseGenerationOwner) ([]serveRuntimeBundle, error) {
-	hashes, err := cliapp.ServeBundleHashes(opts)
-	if err != nil {
-		return nil, err
-	}
-	if len(hashes) > 0 {
-		out := make([]serveRuntimeBundle, 0, len(hashes))
-		runningPlatformSpecPath, err := cliapp.EmbeddedPlatformSpecPath()
-		if err != nil {
-			return nil, fmt.Errorf("resolve embedded platform spec for source artifact admission: %w", err)
-		}
-		for _, hash := range hashes {
-			loaded, err := loadServeRuntimeBundleFromArtifact(ctx, repo, artifacts, hash, runningPlatformSpecPath, packBases, materializeServeSourceProjection)
-			if err != nil {
-				for _, prior := range out {
-					if prior.cleanup != nil {
-						_ = prior.cleanup()
-					}
-				}
-				return nil, err
-			}
-			out = append(out, loaded)
-		}
-		return out, nil
-	}
 	loaded, err := loadServeRuntimeBundle(ctx, repo, artifacts, resolvedPaths, opts, packBases)
 	if err != nil {
 		return nil, err
@@ -324,20 +286,6 @@ func loadServeRuntimeBundles(ctx context.Context, repo string, artifacts sourceA
 }
 
 func loadServeRuntimeBundle(ctx context.Context, repo string, artifacts sourceArtifactReader, resolvedPaths cliapp.CLISourcePlatformSpecPaths, opts cliapp.ServeOptions, packBases *packartifact.PlatformPackBaseGenerationOwner) (serveRuntimeBundle, error) {
-	hashes, err := cliapp.ServeBundleHashes(opts)
-	if err != nil {
-		return serveRuntimeBundle{}, err
-	}
-	if len(hashes) > 1 {
-		return serveRuntimeBundle{}, fmt.Errorf("loadServeRuntimeBundle supports one bundle_hash; use loadServeRuntimeBundles for multi-context boot")
-	}
-	if len(hashes) == 1 {
-		runningPlatformSpecPath, err := cliapp.EmbeddedPlatformSpecPath()
-		if err != nil {
-			return serveRuntimeBundle{}, fmt.Errorf("resolve embedded platform spec for source artifact admission: %w", err)
-		}
-		return loadServeRuntimeBundleFromArtifact(ctx, repo, artifacts, hashes[0], runningPlatformSpecPath, packBases, materializeServeSourceProjection)
-	}
 	sourceRoot, err := cliapp.NormalizeSourceRoot(resolvedPaths.SourceRoot)
 	if err != nil {
 		return serveRuntimeBundle{}, err
@@ -375,10 +323,6 @@ func materializeRuntimeBundle(module runtimepipeline.WorkflowModule, bundle *run
 	}, nil
 }
 
-func materializeServeSourceProjection(artifact *sourceartifact.AdmittedSourceArtifact, _ semanticview.Source) (*sourceartifact.RuntimeProjection, error) {
-	return sourceartifact.MaterializeRuntimeProjection(artifact)
-}
-
 func loadBudgetRecoveryStageSource(ctx context.Context, reader sourceArtifactReader, repoRoot, runningSpecPath string, packBases *packartifact.PlatformPackBaseGenerationOwner, bundleHash string) (semanticview.Source, error) {
 	if reader == nil {
 		return nil, fmt.Errorf("budget recovery source artifact reader is required")
@@ -405,7 +349,7 @@ func loadBudgetRecoveryStageSource(ctx context.Context, reader sourceArtifactRea
 
 func loadServeRuntimeBundleFromArtifact(ctx context.Context, repo string, artifacts sourceArtifactReader, bundleHash, runningPlatformSpecPath string, packBases *packartifact.PlatformPackBaseGenerationOwner, materialize func(*sourceartifact.AdmittedSourceArtifact, semanticview.Source) (*sourceartifact.RuntimeProjection, error)) (serveRuntimeBundle, error) {
 	if artifacts == nil {
-		return serveRuntimeBundle{}, fmt.Errorf("BUNDLE_UNAVAILABLE: swarm serve --bundle-hash requires selected source artifact store")
+		return serveRuntimeBundle{}, fmt.Errorf("BUNDLE_UNAVAILABLE: exact source reconstruction requires selected source artifact store")
 	}
 	if err := runtimecontracts.ValidateBundleHash(bundleHash); err != nil {
 		return serveRuntimeBundle{}, err
@@ -463,7 +407,7 @@ func loadServeRuntimeBundleFromArtifact(ctx context.Context, repo string, artifa
 func prepareLoadedServeSourceArtifact(ctx context.Context, persistence serveRuntimePersistence, loaded serveRuntimeBundle, dev bool) (runtimecorrelation.SourceArtifactFact, error) {
 	if loaded.dbLoaded {
 		if dev {
-			return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("--bundle-hash is mutually exclusive with --dev")
+			return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("stored source reconstruction cannot replace development scratch state")
 		}
 		fact := loaded.sourceArtifactFact
 		if err := fact.Validate(); err != nil {
@@ -1218,7 +1162,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			return 1
 		}
 	}
-	if len(bundlePackLoads) > 0 && req.Purpose == executionposture.Live && cliapp.ShouldRunServeLocalClaudeCLIPreflight(opts) {
+	if len(bundlePackLoads) > 0 && req.Purpose == executionposture.Live {
 		primaryPackLoad := bundlePackLoads[0]
 		preflight := cliapp.RunServeLocalClaudeCLIPreflight(ctx, repo, opts, cfg, resolvedPaths, workspaceBackendPreference, mountSources, platformPackBase, primaryPackLoad.ProviderTriggers.Loaded, primaryPackLoad.ProviderTriggers.Catalog, providerCredentialStore, primaryPackLoad.Channels, loadedBundle.source)
 		if preflight.HasBlockers() {
@@ -1550,6 +1494,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	}
 	channelOnboarding, err := channelonboarding.NewService(channelonboarding.ServiceOptions{
 		Store: channelOnboardingStore, Identities: operatorChannels, Credentials: credentialWriter,
+		SourceArtifacts: stores.SourceArtifactStore(),
 		Catalog: func() (*channelonboarding.CandidateCatalog, error) {
 			return serveChannelOnboardingCatalog(runtimeContextManager)
 		},
@@ -2512,15 +2457,10 @@ func serveLifecycleProjectName(localState cliapp.LocalRuntimeStateResolution, bu
 }
 
 func serveRuntimeBundleAuthorLabel(bundle serveRuntimeBundle) string {
-	name := strings.TrimSpace(bundle.bootIdentity.WorkflowName)
-	version := strings.TrimSpace(bundle.bootIdentity.WorkflowVersion)
-	if name == "" {
-		return ""
+	if bundle.bundle != nil && bundle.bundle.SourceArtifact != nil {
+		return bundle.bundle.SourceArtifact.HumanLabel()
 	}
-	if version == "" {
-		return name
-	}
-	return name + " " + version
+	return sourceartifact.ShortHashLabel(bundle.bootIdentity.BundleHash)
 }
 
 func serveLifecycleWorkspaceLabels(bundles []serveRuntimeBundle) []string {
@@ -3235,7 +3175,7 @@ func validateServeMultiContextToolGatewayAdmission(cfg *config.Config, loadedBun
 	if profile.ID != llmselection.BackendClaudeCLI {
 		return nil
 	}
-	return fmt.Errorf("multi-context swarm serve --bundle-hash with llm.backend=claude_cli is not supported in this configuration: ToolGatewayBinding, MCP /mcp and /tools routes, and forkchat sandbox runtime are single-context; use one --bundle-hash or a non-claude_cli backend")
+	return fmt.Errorf("multiple retained contexts with llm.backend=claude_cli are not supported in this configuration: ToolGatewayBinding, MCP /mcp and /tools routes, and forkchat sandbox runtime are single-context; use a non-claude_cli backend")
 }
 
 func validateServeGatewayURLEnvForNonDev() error {

@@ -155,7 +155,7 @@ func TestMaterializeRunForkGateAuthoritiesSelectedStoreParity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := materializeRunForkGateAuthoritiesForTest(ctx, selected, sourceRunID, forkRunID, decisionProjection, effectProjection, sourceActivation, forkActivation, runfork.RunForkPoint{EventID: uuid.NewString(), Timestamp: now.Add(time.Minute)}, now.Add(2*time.Minute)); err != nil {
+			if err := materializeRunForkGateAuthoritiesForTest(ctx, selected, sourceRunID, forkRunID, runtimecontracts.BundleIdentity{BundleHash: sourceActivation.BundleHash, WorkflowVersion: "1"}, decisionProjection, effectProjection, sourceActivation, forkActivation, runfork.RunForkPoint{EventID: uuid.NewString(), Timestamp: now.Add(time.Minute)}, now.Add(2*time.Minute)); err != nil {
 				t.Fatalf("materialize fork-local gate authorities: %v", err)
 			}
 
@@ -206,7 +206,7 @@ func TestMaterializeRunForkGateAuthoritiesSelectedStoreParity(t *testing.T) {
 	}
 }
 
-func materializeRunForkGateAuthoritiesForTest(ctx context.Context, selected runForkGateSelectedStore, sourceRunID, forkRunID string, decisionProjection, effectProjection runForkEntityProjection, sourceActivation, forkActivation gateruntime.Activation, point runfork.RunForkPoint, now time.Time) error {
+func materializeRunForkGateAuthoritiesForTest(ctx context.Context, selected runForkGateSelectedStore, sourceRunID, forkRunID string, target runtimecontracts.BundleIdentity, decisionProjection, effectProjection runForkEntityProjection, sourceActivation, forkActivation gateruntime.Activation, point runfork.RunForkPoint, now time.Time) error {
 	// These fixtures explicitly have no source loops or generation-bearing effect.
 	correspondence, err := loopruntime.NewForkCorrespondence(nil, forkRunID, effectProjection.Fork.EntityID)
 	if err != nil {
@@ -216,15 +216,15 @@ func materializeRunForkGateAuthoritiesForTest(ctx context.Context, selected runF
 		bindings := []runForkGateActivationBinding{{Source: sourceActivation, Fork: forkActivation}}
 		switch store := selected.(type) {
 		case *PostgresStore:
-			if err := store.runForkPostgresOwner.MaterializeRunForkDecisionCardsTx(txctx, attempt, forkRunID, decisionProjection, bindings, now); err != nil {
+			if err := store.runForkPostgresOwner.MaterializeRunForkDecisionCardsTx(txctx, attempt, forkRunID, target, decisionProjection, bindings, now); err != nil {
 				return err
 			}
-			return store.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRunID, forkRunID, effectProjection, point, correspondence, now)
+			return store.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRunID, forkRunID, target, effectProjection, point, correspondence, now)
 		case *SQLiteRuntimeStore:
-			if err := store.runForkSQLiteOwner.MaterializeRunForkDecisionCardsTx(txctx, attempt, forkRunID, decisionProjection, bindings, now); err != nil {
+			if err := store.runForkSQLiteOwner.MaterializeRunForkDecisionCardsTx(txctx, attempt, forkRunID, target, decisionProjection, bindings, now); err != nil {
 				return err
 			}
-			return store.runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRunID, forkRunID, effectProjection, point, correspondence, now)
+			return store.runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRunID, forkRunID, target, effectProjection, point, correspondence, now)
 		default:
 			return fmt.Errorf("unsupported selected-store gate test owner %T", selected)
 		}
@@ -250,7 +250,6 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 			forkRunID := "00000000-0000-0000-0000-000000023621"
 			now := time.Date(2026, 8, 28, 9, 0, 0, 0, time.UTC)
 			requireRunningRunForTest(t, ctx, selected, sourceRunID, now)
-			requireRunningRunForTest(t, ctx, selected, forkRunID, now)
 
 			rootOutcomes := map[string]runtimecontracts.WorkflowGateOutcomePlan{
 				"approve": {
@@ -261,6 +260,13 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 				},
 			}
 			rootBundle := runForkRootGateBundleForTest(t)
+			target, err := runtimecontracts.BootBundleIdentity(rootBundle)
+			if err != nil {
+				t.Fatal(err)
+			}
+			targetCtx := testAuthorActivityContextForBundle(target.BundleHash)
+			registerTestAuthorActivityCatalogForContext(t, selected, targetCtx)
+			requireRunFixtureForTest(t, targetCtx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: forkRunID, BundleHash: target.BundleHash, Artifact: rootBundle.SourceArtifact, StartedAt: now})
 			rootGraph, found := rootBundle.WorkflowStageTopology(".")
 			if !found {
 				t.Fatal("root gate declaration has no compiled topology")
@@ -303,12 +309,28 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 			if err := selected.CreateDecisionCard(ctx, sourceCard); err != nil {
 				t.Fatalf("create source root stage gate: %v", err)
 			}
+			stageDecisionEventID := uuid.NewString()
+			decisionAt := now.Add(30 * time.Second)
+			if _, err := DecisionCardDomainForTest(selected).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
+				CardID: sourceCard.CardID, Verdict: "approve", Fields: admitDecisionCardTestObject(t, map[string]any{}),
+				PrincipalID: "operator", ObservedContentHash: sourceCard.CardContentHash,
+				DecisionEventID: stageDecisionEventID, Now: decisionAt,
+			}); err != nil {
+				t.Fatalf("commit source decision before fork: %v", err)
+			}
+			if err := sourceActivation.CommitDecision(stageDecisionEventID, decisionAt); err != nil {
+				t.Fatal(err)
+			}
 			sourceEffectCard, sourceEffect := newRootProposedEffectTestCard(t, sourceRunID, now)
 			if err := selected.CreateProposedEffectCard(ctx, sourceEffectCard, sourceEffect); err != nil {
 				t.Fatalf("create source root proposed effect: %v", err)
 			}
-			forkActivation, err := gateruntime.New(forkRunID, forkRunID, forkRunID, ".", "awaiting_review", "root_review", sourceActivation.BundleHash, sourceActivation.RoutesJSON, sourceActivation.StartedByEvent, sourceActivation.OpenedAt)
+			ctx = targetCtx
+			forkActivation, err := gateruntime.New(forkRunID, forkRunID, forkRunID, ".", "awaiting_review", "root_review", target.BundleHash, sourceActivation.RoutesJSON, sourceActivation.StartedByEvent, sourceActivation.OpenedAt)
 			if err != nil {
+				t.Fatal(err)
+			}
+			if err := forkActivation.CommitDecision(stageDecisionEventID, decisionAt); err != nil {
 				t.Fatal(err)
 			}
 			buckets := map[string]map[string]any{}
@@ -319,7 +341,7 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 			if err != nil {
 				t.Fatal(err)
 			}
-			flowInstanceConfig := fmt.Sprintf(`{"config":{},"workflow_version":"1","instance_id":%q,"storage_ref":%q,"flow_path":%q}`, forkRunID, forkRunID, forkRunID)
+			flowInstanceConfig := fmt.Sprintf(`{"config":{},"workflow_version":%q,"instance_id":%q,"storage_ref":%q,"flow_path":%q}`, target.WorkflowVersion, forkRunID, forkRunID, forkRunID)
 			flowInstanceQuery := `
 				INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
 				VALUES (?, ?, '.', 'static', ?, 'active', ?)
@@ -346,7 +368,7 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := materializeRunForkGateAuthoritiesForTest(ctx, selected, sourceRunID, forkRunID, projection, projection, sourceActivation, forkActivation, runfork.RunForkPoint{EventID: uuid.NewString(), Timestamp: now.Add(time.Minute)}, now.Add(2*time.Minute)); err != nil {
+			if err := materializeRunForkGateAuthoritiesForTest(ctx, selected, sourceRunID, forkRunID, target, projection, projection, sourceActivation, forkActivation, runfork.RunForkPoint{EventID: uuid.NewString(), Timestamp: now.Add(time.Minute)}, now.Add(2*time.Minute)); err != nil {
 				t.Fatalf("materialize fork-local root authorities: %v", err)
 			}
 
@@ -365,28 +387,23 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 				t.Fatal(err)
 			}
 			gateBundle := semanticview.Wrap(rootBundle)
-			eventBus, err := newStoreTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: gateBundle})
+			eventBus, err := newStoreTestEventBus(t, selected, runtimebus.EventBusOptions{
+				ContractBundle:     gateBundle,
+				SourceArtifactFact: mustStoreTestSourceArtifactFact(target.BundleHash),
+			})
 			if err != nil {
 				t.Fatalf("construct fork root gate event bus: %v", err)
 			}
 			options := completeWorkflowTestCoordinatorOptions(runtimepipeline.NewWorkflowPersistence(selected), selected)
 			options.Module = runForkGateWorkflowModule{source: gateBundle}
-			options.SourceArtifactFact = mustStoreTestSourceArtifactFact(authorActivityTestBundleHash)
+			options.SourceArtifactFact = mustStoreTestSourceArtifactFact(target.BundleHash)
 			coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(eventBus, options)
 			if coordinator == nil {
 				t.Fatal("construct fork root gate coordinator")
 			}
-			stageDecisionEventID := uuid.NewString()
-			decisionAt := now.Add(3 * time.Minute)
-			if err := coordinator.CommitDecision(pipelineCtx, forkStageCard, stageDecisionEventID, decisionAt); err != nil {
-				t.Fatalf("commit fork root gate activation decision: %v", err)
-			}
-			if _, err := DecisionCardDomainForTest(selected).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
-				CardID: forkStageCard.CardID, Verdict: "approve", Fields: admitDecisionCardTestObject(t, map[string]any{}),
-				PrincipalID: "operator", ObservedContentHash: forkStageCard.CardContentHash,
-				DecisionEventID: stageDecisionEventID, Now: decisionAt,
-			}); err != nil {
-				t.Fatalf("execute fork root stage authority: %v", err)
+			// Consume the inherited committed decision, never a fresh child approval.
+			if forkStageCard.Status != decisioncard.StatusDecided || forkStageCard.DecisionEventID != stageDecisionEventID {
+				t.Fatalf("fork lost committed parent decision: %+v", forkStageCard)
 			}
 			decisionPayload, err := canonicaljson.Bytes(map[string]any{"card_id": forkStageCard.CardID})
 			if err != nil {
@@ -449,6 +466,12 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 			if outputEventID == "" || outputRunID != forkRunID || outputEntityID != forkRunID || outputFlowInstance != forkRunID || outputParentID != stageDecisionEventID {
 				t.Fatalf("fork root gate output retained source identity: event=%q run=%q entity=%q flow=%q parent=%q", outputEventID, outputRunID, outputEntityID, outputFlowInstance, outputParentID)
 			}
+			if _, _, _, err := coordinator.Intercept(pipelineCtx, decisionEvent); err != nil {
+				t.Fatalf("repeat committed gate route: %v", err)
+			}
+			if err := db.QueryRowContext(pipelineCtx, outputCountQuery, "run_fork.compiled_root_gate_approved", forkRunID).Scan(&outputCount); err != nil || outputCount != 1 {
+				t.Fatalf("repeat duplicated gate outcome: count=%d error=%v", outputCount, err)
+			}
 
 			items, _, err := selected.ListDecisionCards(ctx, decisioncard.ListOptions{RunID: forkRunID, Limit: 10})
 			if err != nil {
@@ -474,17 +497,9 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 			if forkEffectAnchor.Scope.FlowInstance != forkRunID || forkEffectAnchor.Scope.EntityID != forkRunID || effectSourceRoute.EntityID != forkRunID {
 				t.Fatalf("fork root proposed-effect authority retained source identity: anchor=%#v source=%#v", forkEffectAnchor, effectSourceRoute)
 			}
-			effectDecisionEventID := uuid.NewString()
-			if _, err := DecisionCardDomainForTest(selected).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
-				CardID: forkEffectCard.CardID, Verdict: "approve", Fields: admitDecisionCardTestObject(t, map[string]any{}),
-				PrincipalID: "operator", ObservedContentHash: forkEffectCard.CardContentHash,
-				DecisionEventID: effectDecisionEventID, Now: now.Add(4 * time.Minute),
-			}); err != nil {
-				t.Fatalf("decide fork root proposed effect: %v", err)
-			}
-			completed := completeProposedEffectRouteInTestMutation(t, ctx, selected, forkEffectCard.CardID, effectDecisionEventID, now.Add(5*time.Minute))
-			if completed.RunID != forkRunID || completed.SourceRunID != forkRunID || completed.EntityID != forkRunID || completed.FlowInstance != forkRunID || completed.State != decisioncard.ProposedEffectRequestReleased {
-				t.Fatalf("executed fork root proposed effect retained source authority: %#v", completed)
+			pending, err := selected.LoadProposedEffectContinuation(ctx, forkEffectCard.CardID)
+			if err != nil || pending.Validate(forkEffectCard) != nil || forkEffectCard.Status != decisioncard.StatusPending || pending.DecisionEventID != "" || pending.RunID != forkRunID || pending.SourceRunID != forkRunID || pending.EntityID != forkRunID || pending.FlowInstance != forkRunID || pending.BundleHash != target.BundleHash || pending.WorkflowVersion != target.WorkflowVersion {
+				t.Fatalf("fork pending effect identity/authority = %#v, %v", pending, err)
 			}
 		})
 	}
@@ -560,7 +575,7 @@ func TestMaterializeRunForkDecisionCardsCreatesForkLocalPendingAuthority(t *test
 		t.Fatal(err)
 	}
 	if err := runSelectedFixtureMutation(ctx, cardStore, "materialize decision cards", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
-		return cardStore.runForkPostgresOwner.MaterializeRunForkDecisionCardsTx(txctx, attempt, forkRunID, projection, []runForkGateActivationBinding{{Source: sourceActivation, Fork: forkActivation}}, now.Add(time.Minute))
+		return cardStore.runForkPostgresOwner.MaterializeRunForkDecisionCardsTx(txctx, attempt, forkRunID, runtimecontracts.BundleIdentity{BundleHash: sourceActivation.BundleHash, WorkflowVersion: "1"}, projection, []runForkGateActivationBinding{{Source: sourceActivation, Fork: forkActivation}}, now.Add(time.Minute))
 	}); err != nil {
 		t.Fatalf("materialize fork cards: %v", err)
 	}
@@ -641,7 +656,7 @@ func TestMaterializeRunForkDecisionCardsPreservesCommittedSemanticFields(t *test
 		t.Fatal(err)
 	}
 	if err := runSelectedFixtureMutation(ctx, cardStore, "materialize committed decision cards", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
-		return cardStore.runForkPostgresOwner.MaterializeRunForkDecisionCardsTx(txctx, attempt, forkRunID, projection, []runForkGateActivationBinding{{Source: sourceActivation, Fork: forkActivation}}, now.Add(2*time.Minute))
+		return cardStore.runForkPostgresOwner.MaterializeRunForkDecisionCardsTx(txctx, attempt, forkRunID, runtimecontracts.BundleIdentity{BundleHash: sourceActivation.BundleHash, WorkflowVersion: "1"}, projection, []runForkGateActivationBinding{{Source: sourceActivation, Fork: forkActivation}}, now.Add(2*time.Minute))
 	}); err != nil {
 		t.Fatalf("materialize committed fork card: %v", err)
 	}
@@ -690,7 +705,7 @@ func TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority(t *testing
 		t.Fatal(err)
 	}
 	if err := runSelectedFixtureMutation(ctx, cards, "materialize proposed effect cards", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
-		return cards.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRunID, forkRunID, projection, point, correspondence, now.Add(2*time.Minute))
+		return cards.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRunID, forkRunID, runtimecontracts.BundleIdentity{BundleHash: sourceContinuation.BundleHash, WorkflowVersion: sourceContinuation.WorkflowVersion}, projection, point, correspondence, now.Add(2*time.Minute))
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -854,9 +869,39 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 				if _, err := cards.CompleteProposedEffectRoute(ctx, card.CardID, decisionEventID, now.Add(2*time.Minute)); err != nil {
 					t.Fatal(err)
 				}
-				child := materializeSelectedActivityFixture(t, ctx, cards, sourceRunID, request.ID())
+				// A README-only target changes executable identity, not the frozen effect contract.
+				parentBundle, ok := semanticview.Bundle(source)
+				if !ok {
+					t.Fatal("source fixture has no admitted bundle")
+				}
+				targetRoot := t.TempDir()
+				for _, entry := range parentBundle.SourceArtifact.Entries() {
+					path := filepath.Join(targetRoot, filepath.FromSlash(entry.Label()))
+					if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(path, entry.Bytes(), 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := os.WriteFile(filepath.Join(targetRoot, "README.md"), []byte("Exact target C, unchanged effect declaration.\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				repo := runtimepipeline.WorkflowRepoRoot()
+				targetBundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, targetRoot, runtimecontracts.DefaultPlatformSpecFile(repo))
+				if err != nil {
+					t.Fatal(err)
+				}
+				materializationRequest := selectedSourceMaterializationRequest(t, ctx, cards, sourceRunID, request.ID(), semanticview.Wrap(targetBundle))
+				child, err := cards.MaterializeRunForkForSelectedContractExecution(ctx, materializationRequest)
+				if err != nil {
+					t.Fatal(err)
+				}
 				if child.MaterializedEntityCount != 1 || child.SelectedContractBinding == nil {
 					t.Fatalf("approved-effect fixture requires its bound source state: %#v", child)
+				}
+				if child.SelectedContractBinding.ContractSelection.BundleHash != targetBundle.SourceArtifact.BundleHash() || child.SelectedContractBinding.ContractSelection.BundleHash == parentBundle.SourceArtifact.BundleHash() {
+					t.Fatal("recorded-result fork did not consume independent target C")
 				}
 				forkRunID := child.ForkRunID
 				var prepared runfork.RunForkSelectedContractSourceEvent

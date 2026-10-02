@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -158,9 +159,9 @@ func TestForkPendingGenerationCorrespondenceBothStores(t *testing.T) {
 						return runSelectedFixtureMutation(ctx, fixture.store, "test exact pending generation", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
 							switch s := fixture.store.(type) {
 							case *PostgresStore:
-								return s.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRun, childRun, projection, point, c, now.Add(2*time.Minute))
+								return s.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRun, childRun, runtimecontracts.BundleIdentity{BundleHash: effect.BundleHash, WorkflowVersion: effect.WorkflowVersion}, projection, point, c, now.Add(2*time.Minute))
 							case *SQLiteRuntimeStore:
-								return s.runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRun, childRun, projection, point, c, now.Add(2*time.Minute))
+								return s.runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRun, childRun, runtimecontracts.BundleIdentity{BundleHash: effect.BundleHash, WorkflowVersion: effect.WorkflowVersion}, projection, point, c, now.Add(2*time.Minute))
 							default:
 								return fmt.Errorf("unsupported store %T", fixture.store)
 							}

@@ -1,4 +1,3 @@
 name: test-child-flow-local-events
 version: 1.0.0
-description: Child flow has internal events visible only within child. Parent cannot see them.
 platform_version: ">=0.7.0 <0.8.0"

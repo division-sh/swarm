@@ -36,7 +36,7 @@ func TestChannelDuplicatePhysicalBotRejectsDurablyWithoutStealingConnection(t *t
 				var rejected channelonboarding.Result
 				requireServedJSONRPCResult(t, h.rpcEndpoint(), "channel.onboarding_start", map[string]any{
 					"provider": "telegram", "verb": "reconnect", "provider_credential": credential,
-					"save_proof": true, "bundle": second.bundle, "interface": second.interfaceRef, "target": second.target,
+					"save_proof": true, "bundle": servedEventPublishFixtureBundleHash(t, second.source), "interface": second.interfaceRef, "target": second.target,
 				}, &rejected)
 				if rejected.Operation.Phase != channelonboarding.PhaseFailed || rejected.Operation.FailureCode != "provider_slot_collision" || rejected.IdentityOperation != nil {
 					t.Fatalf("duplicate target did not terminally reject before identity: %#v", rejected)

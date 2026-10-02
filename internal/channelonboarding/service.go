@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -149,32 +150,34 @@ const (
 type TestLifecycleBarrier func(TestLifecycleBoundary, string) error
 
 type ServiceOptions struct {
-	Store        Store
-	Identities   IdentityLifecycle
-	Credentials  *CredentialWriter
-	Catalog      CatalogProvider
-	Activations  ActivationRefresher
-	Confirmation ConfirmationDispatcher
-	Readiness    ReadinessProjector
-	Now          func() time.Time
-	Secret       func() (string, error)
-	TestBarrier  TestLifecycleBarrier
+	SourceArtifacts sourceartifact.Reader
+	Store           Store
+	Identities      IdentityLifecycle
+	Credentials     *CredentialWriter
+	Catalog         CatalogProvider
+	Activations     ActivationRefresher
+	Confirmation    ConfirmationDispatcher
+	Readiness       ReadinessProjector
+	Now             func() time.Time
+	Secret          func() (string, error)
+	TestBarrier     TestLifecycleBarrier
 }
 
 type Service struct {
-	store        Store
-	identities   IdentityLifecycle
-	credentials  *CredentialWriter
-	catalog      CatalogProvider
-	activations  ActivationRefresher
-	confirmation ConfirmationDispatcher
-	effects      EffectRebindReconciler
-	readiness    ReadinessProjector
-	now          func() time.Time
-	secret       func() (string, error)
-	driveMu      sync.Mutex
-	driveLocks   map[string]*operationDriveLock
-	testBarrier  TestLifecycleBarrier
+	sourceArtifacts sourceartifact.Reader
+	store           Store
+	identities      IdentityLifecycle
+	credentials     *CredentialWriter
+	catalog         CatalogProvider
+	activations     ActivationRefresher
+	confirmation    ConfirmationDispatcher
+	effects         EffectRebindReconciler
+	readiness       ReadinessProjector
+	now             func() time.Time
+	secret          func() (string, error)
+	driveMu         sync.Mutex
+	driveLocks      map[string]*operationDriveLock
+	testBarrier     TestLifecycleBarrier
 }
 
 type operationDriveLock struct {
@@ -221,7 +224,8 @@ func NewService(opts ServiceOptions) (*Service, error) {
 		opts.Secret = randomSigningSecret
 	}
 	return &Service{
-		store: opts.Store, identities: opts.Identities, credentials: opts.Credentials, catalog: opts.Catalog,
+		sourceArtifacts: opts.SourceArtifacts,
+		store:           opts.Store, identities: opts.Identities, credentials: opts.Credentials, catalog: opts.Catalog,
 		activations: opts.Activations, confirmation: opts.Confirmation, effects: effects, readiness: opts.Readiness, now: opts.Now, secret: opts.Secret,
 		testBarrier: opts.TestBarrier,
 	}, nil
@@ -417,7 +421,44 @@ func (s *Service) ReadbackConnectedChannels(ctx context.Context) ([]ConnectedCha
 		}
 		rows = append(rows, row)
 	}
+	if s.sourceArtifacts != nil {
+		for i := range rows {
+			label, err := s.connectedChannelSourceLabel(ctx, rows[i])
+			if err != nil {
+				return nil, err
+			}
+			rows[i].SourceLabel = label
+		}
+	}
 	return rows, nil
+}
+
+func (s *Service) connectedChannelSourceLabel(ctx context.Context, row ConnectedChannelReadback) (string, error) {
+	hash := ""
+	if row.Activation != nil {
+		hash = row.Activation.Coordinate.BundleHash
+	} else if row.Operation != nil {
+		hash = row.Operation.Coordinate.BundleHash
+	}
+	if hash == "" {
+		return "", nil
+	}
+	label, err := sourceartifact.LoadHumanLabel(ctx, s.sourceArtifacts, hash)
+	if err != nil {
+		return "", err
+	}
+	if row.Operation == nil {
+		return label, nil
+	}
+	catalog, err := s.catalog()
+	if err != nil {
+		return "", err
+	}
+	op := row.Operation
+	if current, present := catalog.FindDurableSuccessor(op.Provider, op.Interface, op.Coordinate, op.TargetSelector, op.Posture, op.Ceremony); present && current.SourceLabel != "" {
+		return current.SourceLabel, nil
+	}
+	return label, nil
 }
 
 func activeOperationRecovery(operation Operation) *ConnectedChannelRecovery {
@@ -457,8 +498,8 @@ func (s *Service) activationRecovery(identity operatorchannel.InterfaceIdentity)
 	} else {
 		for _, candidate := range matches {
 			commands = append(commands, fmt.Sprintf(
-				"swarm channel reconnect %s --bundle %s --interface %s --target %s",
-				provider, candidate.Coordinate.BundleHash, candidate.Interface.Selector, candidate.Target.Selector,
+				"swarm channel reconnect %s --source <matching-source-directory> --interface %s --target %s",
+				provider, candidate.Interface.Selector, candidate.Target.Selector,
 			))
 		}
 	}

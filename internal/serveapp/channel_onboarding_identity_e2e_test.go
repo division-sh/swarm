@@ -23,10 +23,10 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
-var channelOnboardingExactChoicePattern = regexp.MustCompile(`--bundle (\S+) --interface (\S+) --target (\S+)`)
+var channelOnboardingExactChoicePattern = regexp.MustCompile(`source=.+? --interface (\S+) --target (\S+)`)
 
 type channelOnboardingExactChoice struct {
-	bundle       string
+	source       string
 	interfaceRef string
 	target       string
 }
@@ -368,7 +368,7 @@ func requireAmbiguousChannelOnboardingChoices(t *testing.T, harness *channelOnbo
 	}
 	choices := make([]channelOnboardingExactChoice, 0, len(matches))
 	for _, match := range matches {
-		choices = append(choices, channelOnboardingExactChoice{bundle: match[1], interfaceRef: match[2], target: strings.TrimRight(match[3], ";,)")})
+		choices = append(choices, channelOnboardingExactChoice{source: harness.opts.SourceRoot, interfaceRef: match[1], target: strings.TrimRight(match[2], ";,)")})
 	}
 	sort.Slice(choices, func(i, j int) bool { return choices[i].target < choices[j].target })
 	return choices
@@ -377,7 +377,7 @@ func requireAmbiguousChannelOnboardingChoices(t *testing.T, harness *channelOnbo
 func exactChannelOnboardingArgs(verb string, choice channelOnboardingExactChoice) []string {
 	return []string{
 		"channel", verb, "telegram", "--yes",
-		"--bundle", choice.bundle, "--interface", choice.interfaceRef, "--target", choice.target,
+		"--source", choice.source, "--interface", choice.interfaceRef, "--target", choice.target,
 	}
 }
 

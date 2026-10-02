@@ -288,7 +288,7 @@ func formatCLIBundleScopeRequiredDiagnostic(err error, diagnostic cliBundleScope
 	return strings.Join([]string{
 		"ERROR: " + cliAPIProblemWithWrapper(err, diagnostic.leaf, "creating new work requires a bundle scope."),
 		"  The server has no active bundle context for this request.",
-		"  Remediation: publish into an existing run with --run-id <run-id>, or pass the bundle_hash of an admitted source artifact with --bundle-hash.",
+		"  Remediation: publish into an existing run with --run-id <run-id>, or serve the intended source directory before creating new work.",
 		"  Code: BUNDLE_SCOPE_REQUIRED.",
 	}, "\n")
 }

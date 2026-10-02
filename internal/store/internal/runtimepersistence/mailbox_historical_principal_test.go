@@ -88,9 +88,9 @@ func TestForkMaterializedDecisionPrincipalBothStores(t *testing.T) {
 						return runSelectedFixtureMutation(ctx, selected, "historical mailbox principal proof", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
 							switch s := selected.(type) {
 							case *PostgresStore:
-								return s.runForkPostgresOwner.MaterializeRunForkDecisionCardsTx(txctx, attempt, forkRunID, p, bindings, now.Add(2*time.Second))
+								return s.runForkPostgresOwner.MaterializeRunForkDecisionCardsTx(txctx, attempt, forkRunID, runtimecontracts.BundleIdentity{BundleHash: source.BundleHash, WorkflowVersion: "1"}, p, bindings, now.Add(2*time.Second))
 							case *SQLiteRuntimeStore:
-								return s.runForkSQLiteOwner.MaterializeRunForkDecisionCardsTx(txctx, attempt, forkRunID, p, bindings, now.Add(2*time.Second))
+								return s.runForkSQLiteOwner.MaterializeRunForkDecisionCardsTx(txctx, attempt, forkRunID, runtimecontracts.BundleIdentity{BundleHash: source.BundleHash, WorkflowVersion: "1"}, p, bindings, now.Add(2*time.Second))
 							default:
 								panic("unexpected selected store")
 							}

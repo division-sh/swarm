@@ -1631,7 +1631,7 @@ rows:
       the supported proof is fail-closed admission before runtime startup.
 
   - id: persisted_source_boot
-    surface: selected-store swarm serve --bundle-hash source-artifact boot
+    surface: directory swarm serve with exact selected-store source-artifact admission
     classification: add_to_matrix
     tier: full_conformance
     backends: [default_sqlite, explicit_postgres]
@@ -1642,12 +1642,13 @@ rows:
     proof_dimensions: [backend_selection, selected_store, real_runtime_startup, canonical_store_owner]
     proof_refs:
       - kind: go_test
-        name: TestCLI_ServeBundleHashValidationAndSerialScope
+        name: Test2376RetiredHashSelectorsFailBeforeIO
       - kind: go_test
-        name: TestRunServeRuntimeBundleHashBootsFromSelectedStores
+        name: Test2376DirectoryBootUsesExactSelectedStoreSource
       - kind: artifact
         path: platform-spec.yaml
     notes: >
-      The exact persisted source artifact is the source for both selected
-      backends. No catalog projection, local filesystem fallback, or
-      backend-specific source interpretation participates.
+      Public boot admits a directory and persists its exact artifact before
+      runtime publication on both stores. Internal reconstruction uses stored
+      artifacts without an ambient directory. Hash-only public boot is retired;
+      no catalog projection or backend-specific source interpretation participates.

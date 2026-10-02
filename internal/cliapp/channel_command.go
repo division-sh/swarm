@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cli/argcount"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/spf13/cobra"
 )
 
@@ -34,7 +35,8 @@ type channelConnectOptions struct {
 	verb             string
 	noSave           bool
 	yes              bool
-	bundle           string
+	source           string
+	sourceSet        bool
 	interfaceRef     string
 	target           string
 	idempotencyKey   string
@@ -46,7 +48,8 @@ type channelConnectOptions struct {
 type channelStatusOptions struct {
 	apiOptions rootCommandOptions
 	output     cliOutputOptions
-	bundle     string
+	source     string
+	sourceSet  bool
 	target     string
 }
 
@@ -81,6 +84,7 @@ func newChannelLifecycleCommand(opts rootCommandOptions, verb string) *cobra.Com
 		Short: channelLifecycleShort(verb),
 		Args:  argcount.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			commandOpts.sourceSet = cmd.Flags().Changed("source")
 			return runChannelConnect(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args[0], commandOpts)
 		},
 	}
@@ -88,7 +92,7 @@ func newChannelLifecycleCommand(opts rootCommandOptions, verb string) *cobra.Com
 		cmd.Flags().BoolVar(&commandOpts.noSave, "no-save", false, "Do not save the verified account proof on this machine")
 	}
 	cmd.Flags().BoolVarP(&commandOpts.yes, "yes", "y", false, "Approve the authenticated claimant without an interactive prompt")
-	cmd.Flags().StringVar(&commandOpts.bundle, "bundle", "", "Select the exact bundle hash")
+	cmd.Flags().StringVar(&commandOpts.source, "source", "", "Select the exact source directory for this channel")
 	cmd.Flags().StringVar(&commandOpts.interfaceRef, "interface", "", "Select the exact pack-qualified channel interface")
 	cmd.Flags().StringVar(&commandOpts.target, "target", "", "Select the exact provider activation target")
 	cmd.Flags().StringVar(&commandOpts.clientLanguage, "client-language", "", "Declare the Telegram client language to qualify (en or fr); labels remain English")
@@ -154,10 +158,11 @@ func newChannelStatusCommand(opts rootCommandOptions) *cobra.Command {
 		Short: "Inspect one exact connected-channel activation.",
 		Args:  argcount.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			commandOpts.sourceSet = cmd.Flags().Changed("source")
 			return runChannelStatus(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args[0], commandOpts)
 		},
 	}
-	cmd.Flags().StringVar(&commandOpts.bundle, "bundle", "", "Select the exact bundle hash")
+	cmd.Flags().StringVar(&commandOpts.source, "source", "", "Select the exact source directory; pair with --target")
 	cmd.Flags().StringVar(&commandOpts.target, "target", "", "Select the exact provider activation target")
 	bindCLIAPIConnectionFlagsWithClass(cmd, &commandOpts.apiOptions, cliAPICommandClassReadOnly, "swarm channel status")
 	bindCLIOutputFlags(cmd, &commandOpts.output)
@@ -233,6 +238,14 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 	if (opts.verb == "connect" || opts.verb == "rebind") && !opts.yes && !controlStdinIsTerminal(opts.apiOptions) {
 		return returnCLIValidationError(errOut, errors.New("channel claimant confirmation requires a terminal or --yes"))
 	}
+	bundleHash := ""
+	if opts.sourceSet {
+		sourceHash, err := admitCLIIdentitySource(opts.apiOptions.invocationRoot, opts.source)
+		if err != nil {
+			return returnCLIValidationError(errOut, err)
+		}
+		bundleHash = sourceHash
+	}
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
 		return returnCLIAPIError(errOut, err, channelErrorClassifier())
@@ -243,7 +256,7 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 	if opts.clientLanguage != "" {
 		params["client_language"] = opts.clientLanguage
 	}
-	for key, value := range map[string]string{"bundle": opts.bundle, "interface": opts.interfaceRef, "target": opts.target} {
+	for key, value := range map[string]string{"bundle": bundleHash, "interface": opts.interfaceRef, "target": opts.target} {
 		if value = strings.TrimSpace(value); value != "" {
 			params[key] = value
 		}
@@ -509,6 +522,17 @@ func runChannelStatus(ctx context.Context, out, errOut io.Writer, selector strin
 	if err := opts.output.validate(); err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
+	if opts.sourceSet != (strings.TrimSpace(opts.target) != "") {
+		return returnCLIValidationError(errOut, errors.New("channel status requires --source and --target together"))
+	}
+	bundleHash := ""
+	if opts.sourceSet {
+		sourceHash, err := admitCLIIdentitySource(opts.apiOptions.invocationRoot, opts.source)
+		if err != nil {
+			return returnCLIValidationError(errOut, err)
+		}
+		bundleHash = sourceHash
+	}
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
 		return returnCLIAPIError(errOut, err, channelErrorClassifier())
@@ -517,7 +541,7 @@ func runChannelStatus(ctx context.Context, out, errOut io.Writer, selector strin
 	if err != nil {
 		return returnCLIAPIError(errOut, err, channelErrorClassifier())
 	}
-	row, err := selectChannelActivationReadback(result.Channels, selector, opts.bundle, opts.target)
+	row, err := selectChannelActivationReadback(result.Channels, selector, bundleHash, opts.target)
 	if err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
@@ -641,7 +665,7 @@ func sameChannelIdentityReadback(left, right operatorchannel.Readback) bool {
 func selectChannelActivationReadback(rows []channelReadbackResult, selector, bundle, target string) (channelReadbackResult, error) {
 	selector, bundle, target = strings.TrimSpace(selector), strings.TrimSpace(bundle), strings.TrimSpace(target)
 	if (bundle == "") != (target == "") {
-		return channelReadbackResult{}, errors.New("channel status requires --bundle and --target together")
+		return channelReadbackResult{}, errors.New("channel status requires --source and --target together")
 	}
 	matches := []channelReadbackResult{}
 	for _, row := range rows {
@@ -659,7 +683,7 @@ func selectChannelActivationReadback(rows []channelReadbackResult, selector, bun
 	if len(matches) == 0 {
 		return channelReadbackResult{}, fmt.Errorf("connected channel activation %q is not active", selector)
 	}
-	return channelReadbackResult{}, fmt.Errorf("connected channel activation %q is ambiguous; provide --bundle and --target from `swarm channel list`", selector)
+	return channelReadbackResult{}, fmt.Errorf("connected channel activation %q is ambiguous; provide --source with its matching source directory and --target from `swarm channel list`", selector)
 }
 
 func writeChannelList(out io.Writer, result channelListResult) {
@@ -684,11 +708,14 @@ func writeChannelList(out io.Writer, result channelListResult) {
 		}
 		bundle, target := "-", "-"
 		if row.Activation != nil {
-			bundle = row.Activation.Coordinate.BundleHash
+			bundle = sourceartifact.ShortHashLabel(row.Activation.Coordinate.BundleHash)
 			target = row.Activation.TargetSelector
 		} else if row.Operation != nil {
-			bundle = row.Operation.Coordinate.BundleHash
+			bundle = sourceartifact.ShortHashLabel(row.Operation.Coordinate.BundleHash)
 			target = row.Operation.TargetSelector
+		}
+		if row.SourceLabel != "" {
+			bundle = row.SourceLabel
 		}
 		rows = append(rows, []string{row.Identity.Interface.ChannelPackID, string(row.Identity.Status), ready, nativeInbox, account, fmt.Sprintf("%d", row.Identity.BindingRevision), string(row.Identity.ConversationScope), reason, bundle, target, row.Identity.Interface.Selector})
 		if row.Identity.PendingOperation != nil {

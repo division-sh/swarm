@@ -129,7 +129,7 @@ func TestCheckedYAMLRoutingCensusIsRepoWideAndStructural(t *testing.T) {
 			if err := os.MkdirAll(root, 0o755); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("name: adversarial\n"), 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("name: adversarial\nversion: 1.0.0\nplatform_version: '*'\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.WriteFile(filepath.Join(root, "routing.yaml"), []byte(routing), 0o644); err != nil {
@@ -157,7 +157,7 @@ func TestCheckedYAMLRoutingCensusIsRepoWideAndStructural(t *testing.T) {
 		if err := os.MkdirAll(root, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("name: adversarial\n"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("name: adversarial\nversion: 1.0.0\nplatform_version: '*'\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("pins: {inputs: {events: [{name: ingress, event: ingress.received, source: external}]}}\n"), 0o644); err != nil {

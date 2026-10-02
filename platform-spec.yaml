@@ -713,6 +713,13 @@ contract_formats:
           a verdict is decision_committed it fences ordinary, timer, terminal,
           and quiescence exits until that frozen route succeeds; only an open
           activation may be superseded.
+          A selected-source fork binds child activations, stage cards and
+          proposed-effect continuations to the admitted child's exact bundle hash
+          and compiled workflow version. Parent records, frozen snapshots/routes
+          and explicit lineage remain historical source evidence; distribution
+          manifest versions are never execution pins. Reminting child authority
+          must not inherit source approval or reply authority, relax frozen-route
+          compatibility, bypass selected-control fences or duplicate effects.
           Every active competing-exit supersession lifecycle event carries the
           card's full run, entity, and flow-instance identity and publishes
           through EventBus inside its selected-store mutation. Run-terminal and
@@ -1102,7 +1109,7 @@ contract_formats:
         Source-artifact persistence retains the exact authored member bytes
         and bundle hash. Admission does not rewrite bare keys to `null`, an
         empty string, or an empty mapping. Qualification is public `verify`,
-        local `serve` persistence, then restart by `--bundle-hash`, on SQLite
+        local `serve` persistence, then restart from the same exact source tree, on SQLite
         and PostgreSQL, with byte-identical event source and unchanged hash.
         The retired `bundle.register` command is not a supported proof surface.
     recursive_field_presence:
@@ -6970,7 +6977,7 @@ engine:
         postgres_support: supported through the backend-neutral selected-contract run-fork owner and private PostgreSQL transaction adapters
         sqlite_support: supported through the same artifact-backed selected-contract run-fork owner as PostgreSQL, including exact changed-target preparation independent of loaded normal runtimes
         semantic_owner: internal/runtime/runforkexecution plus the closed internal/store/selected RunFork capability
-        boundary: >
+      boundary: >
           Both selected backends expose the same planning, historical readback, materialization, source-freeze,
           decision/effect gate, binding, route-recovery, activation, selected execution, delivery/settlement,
           cleanup, and terminal public-readback contract. Backend SQL is private adapter implementation and does
@@ -6980,7 +6987,7 @@ engine:
           the committed opaque topology admissions consumed by the fork-local runtime. It never fabricates a source-run
           live identity, recomputes topology after commit, or emits a new dynamic-flow creation occurrence while
           reconstructing historical state. Exact replay verifies the same readiness bytes and topology evidence.
-          SQLite DB-loaded --bundle-hash boot remains unsupported, and changed-bundle or
+          Public hash-only boot is retired on both stores, and changed-bundle or
           post-boot Dynamic Load remains split; neither may be inferred or emulated by the run.fork capability.
       runtime_nuke:
         method: runtime.nuke
@@ -14023,7 +14030,7 @@ versioning:
   description: Platform and products version independently.
   platform_versioning:
     scheme: semver (major.minor.patch)
-    author_facing_version: platform.version is the runtime platform version. Source-semantic compatibility declarations are not authored in manifest.yaml.
+    author_facing_version: platform.version is the runtime platform version; optional strict root manifest.yaml metadata declares the authored version and required platform range, never source identity or topology.
     active_train_policy: Semantic PRs land on the active platform train without repeatedly editing platform.version.
       Release validation confirms the train version and tags the binary as v<platform.version>.
     major: Breaking changes to flow model, handler fields, boot validation, or contract formats
@@ -14035,8 +14042,8 @@ versioning:
     minor: New agents, new events, new tools, threshold adjustments
     patch: Agent-intent content improvements, policy tuning, bug fixes
   compatibility:
-    declaration: 'No authored source file declares platform compatibility in this source-core contract; publication compatibility metadata is deferred to #2376.'
-    enforcement: Source admission does not interpret manifest.yaml compatibility metadata.
+    declaration: 'Optional manifest.yaml contains exactly name, version, and platform_version; all three are required when present. The root platform_version uses the existing Masterminds SemVer constraint grammar.'
+    enforcement: All flow manifests are grammar-validated during immutable construction and stored decode. Only the selected root range is checked against the running platform before executable admission or local identity selection; nested metadata never resets scope or compatibility.
     forward_compatible: Platform minor/patch releases do not break existing products
     example: 'Product v3.0.0 declares platform_version: ">=0.7.0 <0.8.0". Works on platform 0.7.x after re-verification.
       A later train such as 0.8.0 requires an updated compatibility range.'
@@ -18515,7 +18522,7 @@ run_model:
       Later events and lifecycle transitions preserve the
       origin unchanged. Readers decode only these persisted facts and never infer origin from event history.
       Public run forking is governed by multi_bundle_persistence.api_surface.run_fork and the intended CLI command
-      `swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--idempotency-key <key>]`.
+      `swarm run fork <source-run-id> [--source <directory>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--idempotency-key <key>]`.
     propagation: 'run_id propagates through the causal chain. When a handler, agent, or contextual platform
       producer emits an event, it supplies typed EventLineage from the exact parent at construction. EventBus
       validates but never infers or mutates run_id, source_event_id, task_id, or execution_mode. Producers that
@@ -18578,7 +18585,7 @@ run_model:
       unfinished work; in-progress delivery, session, turn, audit, non-agent, route, retry/idempotency, and other
       unsupported historical facts remain permanently fail-closed unless a later issue names a concrete consumer and
       proves a new owner.'
-    command: 'public CLI: `swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--allow-source-freeze] [--idempotency-key <key>]`, consuming /v1/rpc run.fork'
+    command: 'public CLI: `swarm run fork <source-run-id> [--source <directory>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--allow-source-freeze] [--idempotency-key <key>]`, consuming /v1/rpc run.fork'
     dry_run_command: 'retired in v1 CLI; historical `swarm fork --dry-run` is not a supported operator command'
     materialize_only_command: 'retired in v1 CLI; historical `swarm fork --materialize-only` is not a supported operator command'
     activation_command: 'retired in v1 CLI; historical `swarm fork --activate` is not a supported operator command'
@@ -18938,6 +18945,19 @@ run_model:
       receipt-only redelivery, session/turn/timer/route reconstruction, contract swap execution, or runtime-wide replay
       mutation. There is no separately promised arbitrary source-run resume lane: unsupported fact families remain
       fail-closed unless a consumer-named successor promotes a new owner.'
+    selected_child_decision_execution_identity:
+      owner: internal/runtime/runforkreadiness.Admission plus selected-store run-fork materialization
+      rule: >-
+        Sealed readiness supplies the admitted target bundle hash and compiled workflow version before child writes.
+        Child gate activations, stage cards and proposed-effect continuations consume that same execution identity;
+        downstream transition and activity pin checks remain strict. Parent cards, continuations, history, frozen
+        snapshots, routes and provenance are not rewritten. Exact repeated materialization verifies target pins and
+        frozen content and creates no duplicate authority or effect; contradictory repeats roll back completely.
+        A compatible documentation-only target change is valid. Contract incompatibility, unavailable targets and
+        contradictory evidence remain fail-closed. Approved source effects reuse only unambiguous terminal recorded
+        results under fork-local identity, never inherited approval as permission for another external call. Missing,
+        uncertain or nonterminal evidence remains refused; human-task authority is not copied and fresh pending
+        proposed effects detach source reply authority and consume the existing fork-generation correspondence.
     selected_contract_readiness_classifier: 'Selected-contract fixed-event revision readiness explanation is owned by
       runtime.run_fork.selected_contract_readiness_classifier. This owner is non-mutating and consumes the canonical
       store planner, store.run_fork.replay_resume_admission, runtime.run_fork.contract_frontier_admission, selected
@@ -19926,13 +19946,13 @@ multi_bundle_persistence:
   source_evidence:
     agent_identity_source_authority: '#2133'
     source_owner: '#2320'
-    publication_split:
+    source_admission_and_presentation:
       - '#2376'
       - '#2322'
   authority_rule: Bundle identity and selected-store availability are projections of the admitted bundle-v2 logical blob. Catalog registration, deletion, parsed reconstruction, and package coordinates are retired rather than parallel source owners.
   generated_artifact_policy:
     current_openrpc_status: run_fork_only
-    rule: 'Generated openrpc.json publishes run.fork bundle_hash selection but no bundle catalog methods. Publication methods remain absent until #2376/#2322 define their replacement.'
+    rule: 'Generated openrpc.json retains exact internal run.fork bundle_hash selection. Public bundle catalog methods are retired, not reserved for replacement.'
   agent_identity_boundary:
     owner: platform-spec.yaml#agent_identity_model
     status: concrete_route_identity_with_cross_bundle_slug_constraint
@@ -19961,22 +19981,22 @@ multi_bundle_persistence:
       - bundle.get
       - bundle.agents
   cli_surface:
-    run_fork: run fork selects persisted bundle_hash authority and accepts no local-source override
+    run_fork: run fork defaults to its source run; optional --source admits a local directory only to compute an exact already-stored target hash. Pin overrides use that same target, never the unrelated health source.
     canonical_owner: platform-spec.yaml#filesystem_source_model.local_root_selection
     local_source: serve and local run start require one positional directory; `.` is the explicit current-directory spelling
-    persisted_source: serve --bundle-hash consumes a selected-store source artifact and rejects a local root
+    persisted_source: Internal recovery, replay, reset and fork reconstruct exact selected-store blobs without the original directory. Public serve accepts a directory only; hash-only boot is absent.
     retired: bundle build/register/delete/list/get/agents commands are absent
-  explicit_splits:
-    publication:
+  historical_publication_disposition:
+    retired:
       trackers:
         - '#2376'
         - '#2322'
-      rule: USTAR, coordinates, receipts, and catalog behavior begin after the logical source artifact.
+      rule: USTAR transport, registry coordinates, publication receipts and catalog promises are withdrawn. The artifact exists only in the selected store; no transport or second owner is introduced.
       fork_journey_proof: |
         Fork ownership and public execution/readback consume an already canonically admitted exact source
-        artifact without requiring the target to be loaded. Private test artifact admission proves only
-        that fork-consumer boundary, never public publication. The complete user-facing publish-changed-workflow
-        then fork journey remains pending this publication work; no retired register command is restored.
+        artifact without requiring the target to be loaded. Authors serve the target directory first, then
+        select it with run fork --source. A missing target refuses before freeze or mutation and teaches
+        serving the directory first; no upload, implicit serve, registration, migration or compatibility path exists.
   canonical_owner: platform-spec.yaml#filesystem_source_model
 platform_events:
   description: Events emitted by the platform engine itself. These are NOT product events — they are operational signals from
@@ -24560,9 +24580,7 @@ cli_specification:
             display_shortening_eligible: false
         input_rows:
           agent_frame_agent: {command: swarm agent frame, selector: 'arg:agent-id', family: agent, mode: full_only}
-          agent_frame_bundle_hash: {command: swarm agent frame, selector: 'flag:bundle-hash', family: bundle, mode: full_only}
           agent_frame_flow_instance: {command: swarm agent frame, selector: 'flag:flow-instance', family: flow_instance, mode: full_only}
-          agent_frame_flow: {command: swarm agent frame, selector: 'flag:flow', family: none, mode: different_concept, scope_rule: authored canonical flow path}
           agent_view_agent: {command: swarm agent view, selector: 'arg:agent-id', family: agent, mode: resolver_bounded}
           agent_view_flow_instance: {command: swarm agent view, selector: 'flag:flow-instance', family: flow_instance, mode: full_only}
           agent_diagnose_agent: {command: swarm agent diagnose, selector: 'arg:agent-id', family: agent, mode: resolver_bounded}
@@ -24578,13 +24596,7 @@ cli_specification:
           conversation_list_agent: {command: swarm conversation list, selector: 'flag:agent-id', family: agent, mode: full_only}
           conversation_list_flow_instance: {command: swarm conversation list, selector: 'flag:flow-instance', family: flow_instance, mode: full_only}
           event_replay_subscriber: {command: swarm event replay, selector: 'flag:subscriber', family: agent, mode: full_only, safety: mutating}
-          data_import_bundle_hash: {command: swarm data import, selector: 'flag:bundle-hash', family: bundle, mode: full_only, safety: mutating}
-          data_show_bundle_hash: {command: swarm data show, selector: 'flag:bundle-hash', family: bundle, mode: full_only}
-          data_prune_bundle_hash: {command: swarm data prune, selector: 'flag:bundle-hash', family: bundle, mode: full_only, safety: mutating}
-          serve_bundle_hash: {command: swarm serve, selector: 'flag:bundle-hash', family: bundle, mode: full_only, safety: boot}
-          run_start_bundle_hash: {command: swarm run start, selector: 'flag:bundle-hash', family: bundle, mode: full_only, safety: creation}
-          run_fork_bundle_hash: {command: swarm run fork, selector: 'flag:bundle-hash', family: bundle, mode: full_only, safety: mutating}
-          event_publish_bundle_hash: {command: swarm event publish, selector: 'flag:bundle-hash', family: bundle, mode: full_only, safety: mutating}
+          run_fork_source: {command: swarm run fork, selector: 'flag:source', family: none, mode: different_concept, scope_rule: 'explicit local directory admitted once for exact source identity; no upload', safety: mutating}
           run_status_run: {command: swarm run status, selector: 'arg:run-id', family: run, mode: full_only}
           run_fan_out_list_run: {command: swarm run fan-out list, selector: 'arg:run-id', family: run, mode: full_only}
           run_fan_out_list_delivery: {command: swarm run fan-out list, selector: 'flag:triggering-delivery-id', family: none, mode: different_concept, scope_rule: 'exact run-scoped triggering delivery UUID, not an event identifier'}
@@ -24664,20 +24676,20 @@ cli_specification:
           import_pack: {command: swarm import, selector: 'arg:pack-id', family: pack, mode: full_only, safety: mutating}
           packs_show_pack: {command: swarm packs show, selector: 'arg:pack-id', family: pack, mode: full_only}
           channel_connect_provider: {command: swarm channel connect, selector: 'arg:provider', family: none, mode: different_concept, scope_rule: admitted provider shorthand resolved through the exact onboarding candidate catalog, safety: mutating}
-          channel_connect_bundle: {command: swarm channel connect, selector: 'flag:bundle', family: bundle, mode: full_only, safety: mutating}
+          channel_connect_source: {command: swarm channel connect, selector: 'flag:source', family: none, mode: different_concept, scope_rule: explicit local directory admitted once for exact source identity, safety: mutating}
           channel_connect_interface: {command: swarm channel connect, selector: 'flag:interface', family: operator_channel, mode: full_only, safety: mutating}
           channel_connect_target: {command: swarm channel connect, selector: 'flag:target', family: none, mode: different_concept, scope_rule: exact package-qualified provider activation target, safety: mutating}
           channel_reconnect_provider: {command: swarm channel reconnect, selector: 'arg:provider', family: none, mode: different_concept, scope_rule: admitted provider shorthand resolved through the exact onboarding candidate catalog, safety: mutating}
-          channel_reconnect_bundle: {command: swarm channel reconnect, selector: 'flag:bundle', family: bundle, mode: full_only, safety: mutating}
+          channel_reconnect_source: {command: swarm channel reconnect, selector: 'flag:source', family: none, mode: different_concept, scope_rule: explicit local directory admitted once for exact source identity, safety: mutating}
           channel_reconnect_interface: {command: swarm channel reconnect, selector: 'flag:interface', family: operator_channel, mode: full_only, safety: mutating}
           channel_reconnect_target: {command: swarm channel reconnect, selector: 'flag:target', family: none, mode: different_concept, scope_rule: exact package-qualified provider activation target, safety: mutating}
           channel_rebind_provider: {command: swarm channel rebind, selector: 'arg:provider', family: none, mode: different_concept, scope_rule: admitted provider shorthand resolved through the exact onboarding candidate catalog, safety: mutating}
-          channel_rebind_bundle: {command: swarm channel rebind, selector: 'flag:bundle', family: bundle, mode: full_only, safety: mutating}
+          channel_rebind_source: {command: swarm channel rebind, selector: 'flag:source', family: none, mode: different_concept, scope_rule: explicit local directory admitted once for exact source identity, safety: mutating}
           channel_rebind_interface: {command: swarm channel rebind, selector: 'flag:interface', family: operator_channel, mode: full_only, safety: mutating}
           channel_rebind_target: {command: swarm channel rebind, selector: 'flag:target', family: none, mode: different_concept, scope_rule: exact package-qualified provider activation target, safety: mutating}
           channel_resume_operation: {command: swarm channel resume, selector: 'arg:operation-id', family: none, mode: different_concept, scope_rule: exact durable channel onboarding operation identifier, safety: mutating}
           channel_status_interface: {command: swarm channel status, selector: 'arg:interface', family: operator_channel, mode: full_only}
-          channel_status_bundle: {command: swarm channel status, selector: 'flag:bundle', family: bundle, mode: full_only}
+          channel_status_source: {command: swarm channel status, selector: 'flag:source', family: none, mode: different_concept, scope_rule: 'explicit local directory admitted once for exact source identity; paired with exact target'}
           channel_status_target: {command: swarm channel status, selector: 'flag:target', family: none, mode: different_concept, scope_rule: exact package-qualified provider activation target}
           channel_unbind_interface: {command: swarm channel unbind, selector: 'arg:interface', family: operator_channel, mode: full_only, safety: mutating}
           mutating_idempotency: {command: 'swarm <mutating>', selector: 'flag:idempotency-key', family: none, mode: different_concept, scope_rule: caller-authored retry key}
@@ -26352,7 +26364,7 @@ cli_specification:
           - local output block first
           - 'Server:'
           - alive=<bool> ready=<bool> db_ok=<bool> runtime_ok=<bool>
-          - bundle_hash=<bundle-hash> workflow_name=<workflow-name-or-dash> workflow_version=<workflow-version-or-dash>
+          - source=<human-source-label>
           forbidden_claims:
           - remote server binary version
           - remote server commit
@@ -26723,25 +26735,25 @@ cli_specification:
         the selected store, provider payload, credential file, or provider HTTP directly.
       subcommands:
         connect:
-          command: swarm channel connect <provider> [--bundle <bundle-hash>] [--interface <exact-selector>] [--target <exact-target>] [--no-save] [--yes] [--json|--quiet]
+          command: swarm channel connect <provider> [--source <directory>] [--interface <exact-selector>] [--target <exact-target>] [--no-save] [--yes] [--json|--quiet]
           api_owner: /v1/rpc channel.onboarding_start|get|retry plus nested channel.confirm
         reconnect:
-          command: swarm channel reconnect <provider> [--bundle <bundle-hash>] [--interface <exact-selector>] [--target <exact-target>] [--json|--quiet]
+          command: swarm channel reconnect <provider> [--source <directory>] [--interface <exact-selector>] [--target <exact-target>] [--json|--quiet]
           api_owner: /v1/rpc channel.onboarding_start|get|retry
         rebind:
-          command: swarm channel rebind <provider> [--bundle <bundle-hash>] [--interface <exact-selector>] [--target <exact-target>] [--no-save] [--yes] [--json|--quiet]
+          command: swarm channel rebind <provider> [--source <directory>] [--interface <exact-selector>] [--target <exact-target>] [--no-save] [--yes] [--json|--quiet]
           api_owner: /v1/rpc channel.onboarding_start|get|retry plus nested channel.confirm
         list:
           command: swarm channel list [--json|--quiet]
           api_owner: /v1/rpc channel.list
         status:
-          command: swarm channel status <interface> [--bundle <bundle-hash> --target <exact-target>] [--json|--quiet]
+          command: swarm channel status <interface> [--source <directory> --target <exact-target>] [--json|--quiet]
           api_owner: /v1/rpc channel.list
         unbind:
           command: swarm channel unbind <interface> [--json|--quiet]
           api_owner: /v1/rpc channel.unbind
     serve:
-      command: swarm serve [directory] [flags] | swarm serve --bundle-hash <bundle-v2-hash> [flags]
+      command: swarm serve [directory] [flags]
       group: getting_started
       tier: must_have
       implementation_status: partial
@@ -27451,7 +27463,6 @@ cli_specification:
         - --connect <url>
         - --no-follow
         - --reattach <run-id>
-        - --bundle-hash <bundle-v2:sha256:...>
         - --config <path>
         - --backend <anthropic|claude_cli|openai_compatible|openai_responses>
         - --data <name=file.jsonl> (repeatable fused import)
@@ -27471,8 +27482,7 @@ cli_specification:
             authoritative run.get status/interrupt handling, and attempt optional bounded run.subscribe_trace observation.
             Render available trace rows and the final status-owned summary until terminal. Local runtime config and
             backend selection consume the same shared resolver as `swarm serve`. Fused imports and pins consume the same
-            exact selected-bundle data declarations and method-neutral run-creation owner as connected starts. When the caller does not pass
-            `--bundle-hash`, run.start uses the active canonical bundle_hash
+            exact selected-bundle data declarations and method-neutral run-creation owner as connected starts. New work uses the active canonical bundle_hash
             returned by health.check for create-new-work scope. `--data` and `--pin` are create-new-work inputs, are valid for
             local and connected starts, and fail closed with `--reattach`.
           ctrl_c: 'First Ctrl-C calls run.stop after a run_id exists, shuts down the locally started runtime, and exits 130. A second interrupt may hard-exit.'
@@ -27554,7 +27564,7 @@ cli_specification:
         workflow_failed_or_cancelled: 7
         interrupted: 130
       proof_expectations:
-      - exact /v1/rpc calls for health.check, run.start, run.get, and run.stop; health.check exposes the active canonical bundle_hash and run.start carries explicit --bundle-hash or the health.check bundle_hash when create-new-work scope is required; missing create-new-work bundle scope maps server BUNDLE_SCOPE_REQUIRED and valid non-routable hashes map BUNDLE_UNAVAILABLE
+      - exact /v1/rpc calls for health.check, run.start, run.get, and run.stop; health.check exposes the active canonical bundle_hash and run.start carries that hash for new work; existing request replay retains its permanent source binding. Missing new-work scope maps server BUNDLE_SCOPE_REQUIRED and valid non-routable internal hashes map BUNDLE_UNAVAILABLE; authored hash flags are absent.
       - connected start failures for EVENT_NOT_DECLARED, PAYLOAD_VALIDATION_FAILED, EVENT_PUBLISH_FAILED, bundle identity rejection, and IDEMPOTENCY_CONFLICT render canonical API codes on stderr, exit 6, and do not open /v1/ws or follow work after failed run.start
       - exact /v1/ws subscription for run.subscribe_trace where observation is in scope, with finite acquisition timeout, cancellation close/join, and unchanged 16-row transport bound
       - every post-start attach, timeout, protocol, transport, validation, mismatch, clean-close, and overflow manifestation emits exactly one typed detach fact and continues run.get polling
@@ -28012,14 +28022,14 @@ cli_specification:
       - --json, --quiet, --no-color, and --json/--quiet collision consume the shared output owner
       - output remains refs-only; no conversation.current_for_agent, conversation.get, transcript, direct DB/store/runtime/EventBus/agentcontrol, or legacy endpoint usage
     agent_frame:
-      command: swarm agent frame <agent-id> --scope <static|effective> [selector] [--run-id <run-id>] [--json|--quiet] [--no-color]
+      command: swarm agent frame <agent-id> [--scope effective] (--root|--flow-instance <id>) --run-id <run-id> [--json|--quiet] [--no-color]
       group: run_operate
       tier: should_have
       implementation_status: implemented
       owner: /v1/rpc agent.frame
       behavior: >
-        Read-only exact execution-frame inspection. Static requires --bundle-hash and --flow and forbids runtime selectors.
-        Effective requires --run-id plus exactly one of --root or --flow-instance and forbids static selectors. The CLI renders only the
+        Read-only exact effective execution-frame inspection. Static, --bundle-hash and --flow are retired.
+        Effective requires --run-id plus exactly one of --root or --flow-instance. The CLI renders only the
         AgentExecutionFrameInspection returned by the API and never reads bundles, runtime state, provider evidence, turn
         history, files, databases, or event payloads to reconstruct frame facts locally.
       output:
@@ -28035,7 +28045,7 @@ cli_specification:
         not_found: 5
         not_found_errors: [AGENT_NOT_FOUND, BUNDLE_NOT_FOUND]
       proof_expectations:
-      - static sends only scope, agent_id, bundle_hash, and authored flow
+      - static and authored hash/flow selectors fail before API calls; only effective inspection is supported
       - effective sends scope, agent_id, exact run_id, and exactly one exact runtime selector
       - selector conflicts fail before API client construction or request
       - all occurrence fields remain explicit unresolved values in static and effective inspection
@@ -28357,20 +28367,22 @@ cli_specification:
       - EVENT_NOT_FOUND, replay conflict errors, auth/HTTP/RPC failures, and malformed EventReplayResult values fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads or writes and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.start, event.publish, or agent.replay usage
     event_publish:
-      command: swarm event publish <event-name> --payload-json <json-object> [--run-id <run-id>] [--source-event-id <event-id>] [--target-flow-instance <flow-instance>] [--target-entity-id <entity-id>] [--bundle-hash <bundle-v2:sha256:...>] [--emitter <source>] [--idempotency-key <key>]
+      command: swarm event publish <event-name> --payload-json <json-object> [--run-id <run-id>] [--source-event-id <event-id>] [--target-flow-instance <flow-instance>] [--target-entity-id <entity-id>] [--emitter <source>] [--idempotency-key <key>]
       group: run_operate
       tier: should_have
       implementation_status: implemented
       owner: /v1/rpc event.publish
       behavior: >-
         Mutating event publication CLI consumer. The CLI validates the event name, required JSON object payload, optional run
-        target, optional same-run source event id, optional singular receiver target route identity, optional canonical bundle_hash assertion, optional emitter, and optional
-        idempotency key, then sends exactly those params to /v1/rpc event.publish through the shared v1 API client. The server
+        target, optional same-run source event id, optional singular receiver target route identity, optional emitter, and optional
+        idempotency key, then sends those params through the shared v1 API client. For new work only, the existing health
+        readiness owner supplies the exact served bundle_hash before /v1/rpc event.publish; malformed/unready health
+        refuses before mutation. Existing-run requests never substitute the current health source for their durable binding. The server
         remains the event-publication owner:
         it validates declared event/payload/run/bundle/idempotency semantics, publishes through the runtime EventBus/store
-        owner, derives delivery rows, and returns EventPublishResult. The server requires --bundle-hash for create-new-work
-        when --run-id is omitted, checks optional --bundle-hash against existing run context when --run-id is supplied, and
-        rejects valid but non-routable hashes with BUNDLE_UNAVAILABLE under the single-active-runtime boundary. The CLI sends
+        owner, derives delivery rows, and returns EventPublishResult. New work derives source from the served runtime;
+        existing work derives source from its exact durable run binding. Internal API bundle_hash assertions remain exact,
+        with mismatches and unavailable source rejected before mutation. The CLI has no authored hash selector and sends
         the caller event name unchanged. /v1/rpc event.publish requires an exact selected-root input pin; schema visibility,
         private leaf names and qualified private references do not grant publication authority. Rejection is
         EVENT_NOT_DECLARED before mutation or idempotency completion. When --run-id selects
@@ -28404,9 +28416,6 @@ cli_specification:
         - name: --target-entity-id <entity-id>
           maps_to: target.entity_id
           behavior: Optional existing-run receiver target entity id. Must be used with --run-id and --target-flow-instance.
-        - name: --bundle-hash <bundle-v2:sha256:...>
-          maps_to: bundle_hash
-          behavior: Canonical bundle scope. Required by the server when --run-id is omitted; optional with --run-id as a same-run bundle assertion.
         - name: --emitter <source>
           maps_to: emitter
           behavior: Optional producer identifier. Omitted means the server default emitter applies.
@@ -28549,7 +28558,7 @@ cli_specification:
       - SESSION_NOT_FOUND, TURN_NOT_FOUND, malformed results, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, conversation.current_for_agent, runtime.logs, run.trace, or forkchat usage
     run_fork:
-      command: swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--allow-source-freeze] [--idempotency-key <key>]
+      command: swarm run fork <source-run-id> [--source <directory>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--allow-source-freeze] [--idempotency-key <key>]
       group: run_operate
       tier: should_have
       implementation_status: implemented_public_cli_consumer
@@ -28558,7 +28567,10 @@ cli_specification:
       api_owner: /v1/rpc run.fork
       behavior: >
         Public run-fork CLI. `swarm run fork` is the public command (CLI v2.2); top-level `swarm fork` is a retired spelling that fails closed. The bundle selector flag is
-        `--bundle-hash`; draft `--bundle` is retired. `--at-event` is an explicit fork-event selector only.
+        `--source <directory>` computes an exact already-stored target identity without uploading or serving it.
+        Default fork and pin selection follow the source run, not health. Missing target source refuses before freeze
+        or mutation and teaches serving the directory first. `--bundle-hash` and draft `--bundle` are retired.
+        `--at-event` is an explicit fork-event selector only.
         A currently running or paused source requires `--allow-source-freeze`; this authorizes the operation to
         permanently freeze a source that has not advanced beyond the fork point. A frozen source cannot resume.
         The selected source-advanced branch-divergence path preserves the source as an independently live branch.
@@ -29162,7 +29174,7 @@ cli_specification:
         group: run_operate
         inherits_contract: cli_specification.command_catalog.trace
       run_fork:
-        command: swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--allow-source-freeze] [--idempotency-key <key>]
+        command: swarm run fork <source-run-id> [--source <directory>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--allow-source-freeze] [--idempotency-key <key>]
         group: run_operate
         inherits_contract: cli_specification.command_catalog.run_fork
         supersession_scope: >
@@ -29289,8 +29301,6 @@ api_specification:
     rule: Public bundle catalog methods and commands are retired. run.fork and other live runtime methods may select an admitted bundle_hash but cannot reconstruct source from package metadata or catalog projections.
     blocked_children:
       agent_identity_duplicate_slug_migration: '#977'
-      publication_transport_and_receipts: '#2376'
-      catalog_and_coordinates: '#2322'
   agent_identity_boundary:
     owner: platform-spec.yaml#agent_identity_model
     status: exact_concrete_target_resolution
@@ -29922,9 +29932,7 @@ api_specification:
         - read:data
         - write:data
       BundleIdentity:
-        description: "Server bundle identity returned by health.check. bundle_hash is the active canonical v1 bundle identity\
-          \ and the value clients use for create-new-work bundle scope; workflow_name and workflow_version are human-friendly\
-          \ labels. Server-local filesystem paths are intentionally not exposed.\n"
+        description: Exact server source identity returned by health.check. bundle_hash owns new-work scope; source_label is display only. Existing workflow fields remain exact readback, never source selection. Server-local paths are not exposed.
         type: object
         additionalProperties: false
         required:
@@ -29932,6 +29940,9 @@ api_specification:
         - workflow_name
         - workflow_version
         properties:
+          source_label:
+            type: string
+            description: Admitted metadata name@version, matching directory@hash7, or stored hash7 alone; never an authority key.
           bundle_hash:
             $ref: '#/components/schemas/BundleHash'
           workflow_name:
@@ -30117,6 +30128,9 @@ api_specification:
         - event_count
         - started_at
         properties:
+          bundle_hash:
+            $ref: '#/components/schemas/BundleHash'
+            description: Exact durable run source; default fork pin resolution consumes this, not the health source.
           run_id:
             $ref: '#/components/schemas/OpaqueId'
           status:
@@ -31039,6 +31053,7 @@ api_specification:
           additionalProperties: false
           required: [owner, source_run_id, source_run_status, source_frozen, fork_run_id, fork_point_kind, fork_revision, fork_event_id, fork_run_status, bundle_hash, executed_event_count, data_pins]
           properties:
+            source_label: {type: string, description: Display-only label derived from exact stored artifact bytes.}
             owner:
               type: string
               description: Canonical runtime/store owner that executed the selected-contract fork.
@@ -31063,6 +31078,7 @@ api_specification:
           additionalProperties: false
           required: [owner, source_run_id, source_run_status, source_frozen, fork_run_id, fork_point_kind, fork_revision, fork_run_status, bundle_hash, executed_event_count, data_pins]
           properties:
+            source_label: {type: string, description: Display-only label derived from exact stored artifact bytes.}
             owner:
               type: string
               description: Canonical runtime/store owner that executed the selected-contract fork.
@@ -31864,6 +31880,7 @@ api_specification:
         additionalProperties: false
         required: [version, scope, selector, session_contract, turn_context]
         properties:
+          source_label: {type: string, description: Display-only exact admitted or stored source label.}
           version: {type: string, const: agent-execution-frame.v1}
           scope: {type: string, enum: [static, effective]}
           selector:
@@ -33557,6 +33574,7 @@ api_specification:
         additionalProperties: false
         required: [identity]
         properties:
+          source_label: {type: string, description: Display-only artifact label; exact activation and operation coordinates remain unchanged.}
           identity: {$ref: '#/components/schemas/OperatorChannelReadback'}
           operation: {$ref: '#/components/schemas/ChannelOnboardingOperation'}
           activation: {$ref: '#/components/schemas/ConnectedChannelActivation'}
@@ -39826,7 +39844,7 @@ filesystem_source_model:
       - swarm packs show <pack-id> [directory]
       - swarm import <pack-id> [directory]
     source_free_commands: |
-      Remote connect and reattach modes, persisted-hash serve, doctor, workspace build, secrets, connections, channels, and operational API commands do not inspect a local source root. A local positional root is mutually exclusive with remote or persisted-source authority.
+      Remote connect and reattach modes, doctor, workspace build, secrets, connections and operational API commands do not inspect a local source root. A local positional root is mutually exclusive with remote authority. Fork and channel connect/reconnect/rebind/status inspect a directory only when their optional --source identity selector is supplied; operation-ID resume remains source-free.
   admission:
     owner: internal/sourceartifact
     read_rule: |
@@ -39871,8 +39889,9 @@ filesystem_source_model:
         - tools.yaml
         - policy.yaml
         - rules.yaml
-      source_semantic_inert:
+      flow_metadata:
         - manifest.yaml
+      source_semantic_inert:
         - README
         - README.md
         - LICENSE
@@ -39891,7 +39910,22 @@ filesystem_source_model:
         - docs
       selected_root_only_branch: packs
       rule: |
-        Resource descendants are resource labels, never child flows. For scenario discovery, tests is a scenario resource branch only when it is the first typed-resource segment after the owning flow path; a nested tests directory below data, mocks, or another resource branch remains part of that first resource and is never a scenario branch. Unknown included paths fail closed. manifest.yaml bytes belong to the artifact but do not create topology, identity, imports, activation, routing, or compilation behavior. Distribution and catalog interpretation of those bytes is deferred to the publication owner.
+        Resource descendants are resource labels, never child flows. For scenario discovery, tests is a scenario resource branch only when it is the first typed-resource segment after the owning flow path; a nested tests directory below data, mocks, or another resource branch remains part of that first resource and is never a scenario branch. Unknown included paths fail closed. Flow-disposition manifest.yaml bytes are strict metadata, never topology, declaration identity, imports, activation or routing. Resource/document lookalikes retain their original disposition and are not flow metadata.
+  manifest_metadata:
+    owner: internal/sourceartifact.AdmittedSourceArtifact
+    optional: true
+    fields: [name, version, platform_version]
+    max_field_utf8_bytes: 256
+    rule: |
+      A present flow manifest is exactly one YAML mapping with exactly these three required nonempty text fields. Unknown or duplicate fields, null or wrong-kind values, malformed/multiple documents and invalid expansion fail closed. name is free text, not a directory slug; version requires strict SemVer; platform_version uses the existing platform-range grammar. Construction and stored decode project only admitted yamlsource.Value, preserving semantic path, introduction location and separately resolved alias/merge provenance. No flatten/reparse reader exists. Only the selected root range gates executable admission and explicit CLI identity selection, before publication or mutation; every nested manifest is grammar-checked but cannot reset the inherited scope or compatibility.
+      Each decoded name, version, and platform_version scalar is at most 256 UTF-8 bytes, including whitespace, checked before SemVer or range parsing; construction and stored decode reject oversized values with exact field and introduction/resolution evidence, never truncation.
+  human_source_presentation:
+    owner: internal/sourceartifact.AdmittedSourceArtifact.HumanLabel
+    rule: |
+      Human output uses root manifest name@version when present; otherwise a genuinely matching admitted directory basename@hash7; otherwise hash7 alone for stored artifacts with no known directory. hash7 means seven digest hex characters, never a selector. Stored decoding must not invent a basename from synthetic sourceRoot dot, borrow cwd or an unrelated serving tree, or persist display metadata. JSON/API and existing explicit YAML retain exact full machine identities. Equality, candidate ordering, deduplication, fences, idempotency, workspace keys and historical channel BundleIdentity strings never consume human labels. Equal names or abbreviated-prefix collisions must remain distinct.
+      HumanLabel replaces Unicode control and format (Cf) characters and line/paragraph separators with spaces for display only; admitted metadata, authored member bytes, logical framing, full hashes, and machine authority are never sanitized or rewritten.
+    consumers: [verify, describe, serve, health, version_server_quiet, run_fork, agent_frame_effective, channel_list, channel_status, channel_candidates, test_diagnostics]
+    verify_evidence: swarm verify --json returns the full bundle_hash and ASCII-sorted member table of label, canonical disposition and exact body byte count, plus optional root manifest metadata, from the already-admitted artifact without a second filesystem pass.
   flow_tree:
     root_path: .
     derivation: |
@@ -39919,9 +39953,13 @@ filesystem_source_model:
     format: bundle-v2:sha256:<64 lowercase hex>
     owner: internal/sourceartifact
     preimage_and_blob: |
-      The sole logical blob begins with the exact bytes "swarm-bundle-v2\x00", followed by a uint64 big-endian member count. Each entry, sorted by raw ASCII label bytes, is disposition_code as one uint8 byte, label_length as uint64 big-endian, exact label bytes, body_length as uint64 big-endian, and exact owned body bytes. Disposition codes are closed: 1 = declaration, 2 = manifest, 3 = resource, 4 = documentation. Unknown codes and codes that disagree with the canonical classification of their label fail closed. SHA-256 of the entire blob is bundle_hash. The logical blob is both the hash preimage and the only canonical selected-store source blob. No earlier untagged entry framing is accepted.
+      The sole logical blob begins with the exact bytes "swarm-bundle-v2\x00", followed by a uint64 big-endian member count. Each entry, sorted by raw ASCII label bytes, is disposition_code as one uint8 byte, label_length as uint64 big-endian, exact label bytes, body_length as uint64 big-endian, and exact owned body bytes. Disposition codes and member-table names are closed: 1 = declaration, 2 = manifest, 3 = resource, 4 = document (inert documentation). Unknown codes and codes that disagree with the canonical classification of their label fail closed. SHA-256 of the entire blob is bundle_hash. The logical blob is both the hash preimage and the only canonical selected-store source blob. No earlier untagged entry framing is accepted.
+    known_vector:
+      members: [{label: schema.yaml, disposition: declaration, bytes: 18, body: "description: root\n"}]
+      preimage_hex: 737761726d2d62756e646c652d763200000000000000000101000000000000000b736368656d612e79616d6c00000000000000126465736372697074696f6e3a20726f6f740a
+      bundle_hash: bundle-v2:sha256:1b776d7b397fecaaefceaf4cbfab1e7fb5cf36f6cc2c1958d575463bf01a22d9
     codec_rule: |
-      Decode validates framing, bounds, ordering, classification, admitted YAML provenance, and recomputed hash. It checks the running aggregate body-byte bound before allocating or retaining each decoded member body. USTAR publication transport, when implemented by #2376, must decode to and encode from this artifact and is never a second identity or store.
+      Decode validates framing, bounds, ordering, classification, admitted YAML provenance, strict flow metadata, and recomputed hash. It checks the running aggregate body-byte bound before allocating or retaining each decoded member body. The framing above is independently recomputable from exact tree bytes; archive transport and canonicalized YAML are not supported alternate identities.
   durable_lifecycle:
     store_owner: internal/store selected SourceArtifact owner
     stores:
@@ -39930,9 +39968,9 @@ filesystem_source_model:
     rule: |
       Local durable run/serve persists or reconciles the exact logical blob before publishing a runtime or run that references its hash. Missing, corrupt, conflicting, or hash-mismatched blobs fail closed. Acknowledgment uncertainty is reconciled by exact hash/blob readback; it never permits a runtime without proven source availability.
     reconstruction: |
-      Persisted boot, recovery, replay, and fork decode the selected-store blob and compile only the reconstructed artifact. They never require or inspect the original filesystem. Fresh selected stores are required; no old-row migration, export, purge, compatibility reader, or inferred reconstruction exists.
+      Internal standing recovery, replay, reset and fork decode the selected-store blob and compile only the reconstructed artifact. They never require or inspect the original filesystem. Public process restart admits the same exact directory tree and reconciles its blob; a changed tree is a distinct source, never a fallback for retained work. Fresh selected stores are required; no old-row migration, export, purge, compatibility reader, or inferred reconstruction exists.
     process_epoch_rule: |
-      Serve admits its complete source set once before runtime publication and keeps it fixed for the process epoch. Editing the original directory cannot replace a live runtime source. A different local artifact or persisted hash requires a new serve process; project reload and dynamic project replacement are retired rather than emulated.
+      Serve admits its source directory once before runtime publication and keeps it fixed for the process epoch. Editing the original directory cannot replace a live runtime source. A different local artifact requires a new serve process; public persisted-hash boot, project reload and dynamic project replacement are retired rather than emulated. Internal retained contexts remain exact stored-artifact authority.
       Retained-source destructive reset is an execution-lifetime reconstruction of that identical admitted set, not source replacement. It consumes the already admitted artifact bytes and canonical serve construction inputs to mint fresh runtime and projection lifetimes. It does not restore retired bundle-management helpers or admit edited source bytes.
   startup_integrity:
     owner: internal/runtime/startuprecovery.Recover
@@ -39966,9 +40004,13 @@ filesystem_source_model:
       - --contracts, SWARM_CONTRACTS_PATH, SWARM_CONTRACTS_DIR, and config paths.contracts_path
       - ambient source rereads and persisted ContractsPath
       - source-local .swarm/pack-selection.yaml
+      - --bundle-hash on serve, event publish, data import/show/prune, run start/fork and agent frame
+      - --bundle on channel connect/reconnect/rebind/status
+      - static agent frame CLI, --flow and authored frame hash selection
+      - archive transport, registry publication, coordinates and catalog reconstruction
+  projection_cache_lifetime:
+    rule: YAML and compiled platform-pack projections are process-local generations; filesystem projections are explicitly released lifetimes. No compiled projection survives a binary. An immutable-binary cache key therefore has no current owner or requirement; durable source and causal evidence are not reusable compiled caches.
   adjacent_splits:
-    publication_transport_and_receipts: '#2376'
-    catalog_and_coordinates: '#2322'
     vendoring_and_upgrade: '#2377'
     rule: |
       These consumers may begin only after this artifact owner. They may not reclassify, rehash, persist, or reconstruct authored source independently.
