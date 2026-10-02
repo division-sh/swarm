@@ -178,9 +178,14 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		}
 		return nil
 	}
-	active, created, beginErr := am.beginDynamicFlowActiveAttempt(ctx, key, plan, admission.attemptOrdinal)
+	active, created, beginErr := am.beginDynamicFlowActiveAttempt(ctx, key, plan, admission.attemptOrdinal, readiness.AttemptState)
 	if active == nil {
 		return beginErr
+	}
+	if err := ctx.Err(); err != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dynamicFlowRuntimeReadinessCleanupTimeout)
+		defer cancel()
+		return errors.Join(beginErr, err, am.settleDynamicFlowActiveAttempt(cleanupCtx, key, active, retirement, flowActivationFailedRetirement))
 	}
 	phase := readiness.Phase
 	if created {

@@ -23,7 +23,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
-	runtimeprocessbinding "github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -500,8 +499,12 @@ func (s *startupReadinessFinalizationStore) InspectDynamicFlowRuntimeReadinessFo
 	return result, nil
 }
 
-func (*startupReadinessFinalizationStore) BeginDynamicFlowRuntimeActivation(context.Context, runtimepipeline.DynamicFlowRuntimeReadinessPlan, uint64, runtimeprocessbinding.Binding) (runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult, error) {
+func (*startupReadinessFinalizationStore) BeginDynamicFlowRuntimeActivation(context.Context, runtimepipeline.DynamicFlowRuntimeActivationRequest) (runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult, error) {
 	return runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult{}, errors.New("unexpected readiness activation admission")
+}
+
+func (*startupReadinessFinalizationStore) ResolveDynamicFlowRuntimeActivation(context.Context, runtimepipeline.DynamicFlowRuntimeActivationRequest) (runtimepipeline.DynamicFlowRuntimeActivationResolution, error) {
+	return runtimepipeline.DynamicFlowRuntimeActivationResolution{}, errors.New("unexpected readiness activation resolution")
 }
 
 func (*startupReadinessFinalizationStore) VerifyDynamicFlowRuntimeActivationAttempt(context.Context, runtimepipeline.DynamicFlowRuntimeActivationAttempt) error {

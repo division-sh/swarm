@@ -9,7 +9,6 @@ import (
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
-	runtimeprocessbinding "github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -268,8 +267,12 @@ func (pc *PipelineCoordinator) InspectDynamicFlowRuntimeReadinessForRun(ctx cont
 	return pc.workflowStore.InspectDynamicFlowRuntimeReadinessForRun(ctx, runID, source)
 }
 
-func (pc *PipelineCoordinator) BeginDynamicFlowRuntimeActivation(ctx context.Context, plan DynamicFlowRuntimeReadinessPlan, revision uint64, binding runtimeprocessbinding.Binding) (DynamicFlowRuntimeActivationAdmissionResult, error) {
-	return pc.workflowStore.BeginDynamicFlowRuntimeActivation(ctx, plan, revision, binding)
+func (pc *PipelineCoordinator) BeginDynamicFlowRuntimeActivation(ctx context.Context, request DynamicFlowRuntimeActivationRequest) (DynamicFlowRuntimeActivationAdmissionResult, error) {
+	return pc.workflowStore.BeginDynamicFlowRuntimeActivation(ctx, request)
+}
+
+func (pc *PipelineCoordinator) ResolveDynamicFlowRuntimeActivation(ctx context.Context, request DynamicFlowRuntimeActivationRequest) (DynamicFlowRuntimeActivationResolution, error) {
+	return pc.workflowStore.ResolveDynamicFlowRuntimeActivation(ctx, request)
 }
 
 func (pc *PipelineCoordinator) VerifyDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt DynamicFlowRuntimeActivationAttempt) error {

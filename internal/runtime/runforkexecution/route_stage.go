@@ -22,11 +22,20 @@ type selectedFlowRouteRetirer interface {
 }
 
 type selectedFlowActivationRetirementStore interface {
+	ResolveDynamicFlowRuntimeActivation(context.Context, runtimepipeline.DynamicFlowRuntimeActivationRequest) (runtimepipeline.DynamicFlowRuntimeActivationResolution, error)
 	RetireInitialEntryTimerWakeups(context.Context, runtimeflowidentity.RunScopedFlowInstance) error
 	AbandonDynamicFlowRuntimeActivationAttempt(context.Context, runtimepipeline.DynamicFlowRuntimeActivationAttempt) error
 }
 
+type selectedFlowActivationAdmissionStore interface {
+	LoadDynamicFlowRuntimeReadiness(context.Context, string, runtimeflowidentity.Route) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error)
+	BeginDynamicFlowRuntimeActivation(context.Context, runtimepipeline.DynamicFlowRuntimeActivationRequest) (runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult, error)
+	ResolveDynamicFlowRuntimeActivation(context.Context, runtimepipeline.DynamicFlowRuntimeActivationRequest) (runtimepipeline.DynamicFlowRuntimeActivationResolution, error)
+	VerifyDynamicFlowRuntimeActivationAttempt(context.Context, runtimepipeline.DynamicFlowRuntimeActivationAttempt) error
+}
+
 type selectedFlowActivation struct {
+	pending         *runtimepipeline.DynamicFlowRuntimeActivationRequest
 	attempt         runtimepipeline.DynamicFlowRuntimeActivationAttempt
 	identity        runtimeflowidentity.RunScopedFlowInstance
 	plan            runtimepipeline.DynamicFlowRuntimeReadinessPlan
@@ -35,7 +44,7 @@ type selectedFlowActivation struct {
 	timersProjected bool
 }
 
-func admitSelectedContractFlowRoute(ctx context.Context, workflow *runtimepipeline.PipelineCoordinator, bus selectedFlowRoutePublisher, binding runtimeprocessbinding.Binding, route runtimebus.FlowInstanceRouteMaterializationRequest, diagnostics *selectedForkCommitDiagnostics, published *[]selectedFlowActivation) error {
+func admitSelectedContractFlowRoute(ctx context.Context, workflow selectedFlowActivationAdmissionStore, bus selectedFlowRoutePublisher, binding runtimeprocessbinding.Binding, route runtimebus.FlowInstanceRouteMaterializationRequest, diagnostics *selectedForkCommitDiagnostics, published *[]selectedFlowActivation) error {
 	readiness, found, err := workflow.LoadDynamicFlowRuntimeReadiness(ctx, route.Identity.RunID, route.Identity.Route)
 	if err != nil {
 		return err
@@ -50,19 +59,38 @@ func admitSelectedContractFlowRoute(ctx context.Context, workflow *runtimepipeli
 	if plan.RunID != route.Identity.RunID || plan.Identity.Route() != route.Identity.Route || plan.BundleHash != binding.BundleHash {
 		return errors.New("selected flow route differs from its exact generation readiness plan")
 	}
-	admitted, commitErr := workflow.BeginDynamicFlowRuntimeActivation(ctx, plan, readiness.AttemptOrdinal, binding)
-	if !admitted.Acknowledged || admitted.Reused {
-		return errors.Join(commitErr, errors.New("selected flow activation attempt was not freshly admitted"))
+	request := runtimepipeline.NewDynamicFlowRuntimeActivationRequest(plan, readiness.AttemptOrdinal, readiness.AttemptState, binding)
+	if err := request.Validate(); err != nil {
+		return err
 	}
+	index := len(*published)
+	*published = append(*published, selectedFlowActivation{pending: &request, identity: route.Identity, plan: plan, route: route})
+	admitted, commitErr := workflow.BeginDynamicFlowRuntimeActivation(ctx, request)
+	if !admitted.Acknowledged {
+		resolved, resolveErr := workflow.ResolveDynamicFlowRuntimeActivation(ctx, request)
+		commitErr = errors.Join(commitErr, resolveErr)
+		if err := request.ValidateResolution(resolved); err != nil {
+			return errors.Join(commitErr, err)
+		}
+		if resolved.Disposition != runtimepipeline.FlowActivationAdmitted {
+			return errors.Join(commitErr, errors.New("selected flow activation admission requires exact resolution"))
+		}
+		admitted.Attempt = resolved.Attempt
+	}
+	if err := admitted.Attempt.Validate(); err != nil {
+		return errors.Join(commitErr, err)
+	}
+	if admitted.Attempt.RunID() != plan.RunID || admitted.Attempt.InstancePath() != plan.Identity.InstancePath || !admitted.Attempt.ProcessBinding().Equal(binding) {
+		return errors.Join(commitErr, errors.New("selected flow activation acknowledgment differs from its retained request"))
+	}
+	(*published)[index].attempt, (*published)[index].pending = admitted.Attempt, nil
 	if commitErr != nil {
 		diagnostics.add(commitErr)
 	}
 	if err := workflow.VerifyDynamicFlowRuntimeActivationAttempt(ctx, admitted.Attempt); err != nil {
-		*published = append(*published, selectedFlowActivation{attempt: admitted.Attempt, identity: route.Identity})
 		return err
 	}
-	*published = append(*published, selectedFlowActivation{attempt: admitted.Attempt, identity: route.Identity, plan: plan, route: route})
-	return workflow.VerifyDynamicFlowRuntimeActivationAttempt(ctx, admitted.Attempt)
+	return nil
 }
 
 func completeSelectedContractFlowRoutes(ctx context.Context, workflow *runtimepipeline.PipelineCoordinator, bus selectedFlowRoutePublisher, published []selectedFlowActivation, diagnostics *selectedForkCommitDiagnostics) error {
@@ -106,6 +134,26 @@ func retireSelectedFlowActivations(ctx context.Context, bus selectedFlowRouteRet
 	var result error
 	for _, activation := range activations {
 		var err error
+		if activation.pending != nil {
+			resolved, resolveErr := workflow.ResolveDynamicFlowRuntimeActivation(ctx, *activation.pending)
+			resolveErr = errors.Join(resolveErr, activation.pending.ValidateResolution(resolved))
+			if resolveErr != nil || resolved.Disposition == runtimepipeline.FlowActivationUnresolved {
+				result = errors.Join(result, resolveErr, errors.New("selected flow activation retains unresolved admission"))
+				retained = append(retained, activation)
+				continue
+			}
+			if resolved.Disposition != runtimepipeline.FlowActivationAdmitted {
+				continue
+			}
+			activation.attempt, activation.pending = resolved.Attempt, nil
+			// A pending request never installs resources before acknowledgment.
+			err = workflow.AbandonDynamicFlowRuntimeActivationAttempt(ctx, activation.attempt)
+			if err != nil {
+				result = errors.Join(result, err)
+				retained = append(retained, activation)
+			}
+			continue
+		}
 		if activation.publication != nil {
 			err = activation.publication.Retire()
 		} else if bus != nil {

@@ -315,7 +315,7 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	seedLifecycleReadinessOwner(t, ctx, store, readinessPlan, now)
 	activationStore, ok := store.(interface {
 		LoadDynamicFlowRuntimeReadiness(context.Context, string, runtimeflowidentity.Route) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error)
-		BeginDynamicFlowRuntimeActivation(context.Context, runtimepipeline.DynamicFlowRuntimeReadinessPlan, uint64, runtimemanager.ProcessExecutionBinding) (runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult, error)
+		BeginDynamicFlowRuntimeActivation(context.Context, runtimepipeline.DynamicFlowRuntimeActivationRequest) (runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult, error)
 	})
 	if !ok {
 		t.Fatal("process takeover fixture requires exact flow activation owner")
@@ -388,7 +388,7 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	if _, err := readinessGrant.CommitAgentLifecycleTransition(ctx, forgedPreparation); err == nil || !strings.Contains(err.Error(), "flow topology preparation requires a current pre-admission") {
 		t.Fatalf("admitted grant reused preparation authority: %v", err)
 	}
-	admitted, err := activationStore.BeginDynamicFlowRuntimeActivation(ctx, readinessPlan, readiness.AttemptOrdinal, readinessBinding)
+	admitted, err := activationStore.BeginDynamicFlowRuntimeActivation(ctx, runtimepipeline.NewDynamicFlowRuntimeActivationRequest(readinessPlan, readiness.AttemptOrdinal, readiness.AttemptState, readinessBinding))
 	if err != nil || !admitted.Acknowledged {
 		t.Fatalf("admit readiness lifecycle attempt: result=%+v err=%v", admitted, err)
 	}

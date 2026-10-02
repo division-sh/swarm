@@ -32,6 +32,8 @@ type dynamicFlowRuntimeReadinessAttempt struct {
 }
 
 type dynamicFlowActiveAttempt struct {
+	pending                  *runtimepipeline.DynamicFlowRuntimeActivationRequest
+	admissionDone            chan struct{}
 	receipt                  runtimepipeline.DynamicFlowRuntimeActivationAttempt
 	identity                 runtimeflowidentity.RunScopedFlowInstance
 	publication              runtimebus.FlowRoutePublicationHandle

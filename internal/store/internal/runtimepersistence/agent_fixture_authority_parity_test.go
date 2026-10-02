@@ -37,7 +37,7 @@ type agentFixtureFlowStore interface {
 	agentfixture.Store
 	runtimedelivery.Store
 	LoadDynamicFlowRuntimeReadiness(context.Context, string, runtimeflowidentity.Route) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error)
-	BeginDynamicFlowRuntimeActivation(context.Context, runtimepipeline.DynamicFlowRuntimeReadinessPlan, uint64, runtimemanager.ProcessExecutionBinding) (runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult, error)
+	BeginDynamicFlowRuntimeActivation(context.Context, runtimepipeline.DynamicFlowRuntimeActivationRequest) (runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult, error)
 	CommitFlowInstanceActivation(context.Context, runtimebus.FlowInstanceActivationCommand) (runtimepipeline.CommittedFlowInstanceActivation, error)
 }
 
@@ -637,7 +637,7 @@ func seedExactAgentFixtureFlowState(
 	if err != nil || !found {
 		t.Fatalf("load seeded flow readiness: found=%v err=%v", found, err)
 	}
-	admitted, err := selected.BeginDynamicFlowRuntimeActivation(ctx, readiness.Plan, readiness.AttemptOrdinal, binding)
+	admitted, err := selected.BeginDynamicFlowRuntimeActivation(ctx, runtimepipeline.NewDynamicFlowRuntimeActivationRequest(readiness.Plan, readiness.AttemptOrdinal, readiness.AttemptState, binding))
 	if err != nil || !admitted.Acknowledged {
 		t.Fatalf("admit seeded flow activation: acknowledged=%v err=%v", admitted.Acknowledged, err)
 	}

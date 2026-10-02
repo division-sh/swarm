@@ -92,7 +92,7 @@ func TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores(t *tes
 					if err != nil || !found {
 						t.Fatalf("load numeric readiness: found=%v err=%v", found, err)
 					}
-					admitted, err := f.workflows.BeginDynamicFlowRuntimeActivation(f.ctx, readiness.Plan, readiness.AttemptOrdinal, binding)
+					admitted, err := f.workflows.BeginDynamicFlowRuntimeActivation(f.ctx, pipeline.NewDynamicFlowRuntimeActivationRequest(readiness.Plan, readiness.AttemptOrdinal, readiness.AttemptState, binding))
 					if err != nil || !admitted.Acknowledged {
 						t.Fatalf("admit numeric activation: %+v err=%v", admitted, err)
 					}
@@ -100,7 +100,7 @@ func TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores(t *tes
 					creation := *changed.CreationEvent
 					creation.Payload = []byte(strings.ReplaceAll(string(creation.Payload), "7.0", "7"))
 					changed.CreationEvent = &creation
-					if admission, err := f.workflows.BeginDynamicFlowRuntimeActivation(f.ctx, changed, admitted.Attempt.Ordinal(), admitted.Attempt.ProcessBinding()); err == nil || admission.Acknowledged {
+					if admission, err := f.workflows.BeginDynamicFlowRuntimeActivation(f.ctx, pipeline.NewDynamicFlowRuntimeActivationRequest(changed, admitted.Attempt.Ordinal(), "planned", admitted.Attempt.ProcessBinding())); err == nil || admission.Acknowledged {
 						t.Fatal("attachment planning accepted a substituted numeric kind")
 					}
 					stored, _, err := f.store.LoadDynamicFlowRuntimeReadiness(f.ctx, plan.Readiness.RunID, plan.Identity.Route())

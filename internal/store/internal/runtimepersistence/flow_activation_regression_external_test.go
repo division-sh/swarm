@@ -29,7 +29,7 @@ func TestFlowAttachmentConditionalPhaseProgressBothStores(t *testing.T) {
 			if err != nil || !found {
 				t.Fatalf("load abandoned predecessor: found=%v err=%v", found, err)
 			}
-			admitted, err := f.selected.BeginDynamicFlowRuntimeActivation(f.ctx, observed.Plan, observed.AttemptOrdinal, f.attempt.ProcessBinding())
+			admitted, err := f.selected.BeginDynamicFlowRuntimeActivation(f.ctx, runtimepipeline.NewDynamicFlowRuntimeActivationRequest(observed.Plan, observed.AttemptOrdinal, observed.AttemptState, f.attempt.ProcessBinding()))
 			if err != nil || !admitted.Acknowledged {
 				t.Fatalf("admit successor: %+v %v", admitted, err)
 			}
@@ -104,13 +104,13 @@ func TestFlowAttachmentPlanABARetainsPredecessorUntilSettlementBothStores(t *tes
 			if err != nil || !stale.Acknowledged || stale.Progress != runtimepipeline.FlowAttachmentStale {
 				t.Fatalf("superseded predecessor progressed restored plan: %+v %v", stale, err)
 			}
-			if _, err := f.selected.BeginDynamicFlowRuntimeActivation(f.ctx, current.Plan, current.AttemptOrdinal, f.attempt.ProcessBinding()); err == nil {
+			if _, err := f.selected.BeginDynamicFlowRuntimeActivation(f.ctx, runtimepipeline.NewDynamicFlowRuntimeActivationRequest(current.Plan, current.AttemptOrdinal, current.AttemptState, f.attempt.ProcessBinding())); err == nil {
 				t.Fatal("successor bypassed predecessor settlement")
 			}
 			if err := f.selected.AbandonDynamicFlowRuntimeActivationAttempt(f.ctx, f.attempt); err != nil {
 				t.Fatal(err)
 			}
-			successor, err := f.selected.BeginDynamicFlowRuntimeActivation(f.ctx, current.Plan, current.AttemptOrdinal, f.attempt.ProcessBinding())
+			successor, err := f.selected.BeginDynamicFlowRuntimeActivation(f.ctx, runtimepipeline.NewDynamicFlowRuntimeActivationRequest(current.Plan, current.AttemptOrdinal, current.AttemptState, f.attempt.ProcessBinding()))
 			if err != nil || !successor.Acknowledged || successor.Reused || successor.Attempt.Ordinal() != original.AttemptOrdinal+1 {
 				t.Fatalf("settled ABA successor: %+v %v", successor, err)
 			}
@@ -231,7 +231,11 @@ func TestFailedFlowActivationRetirementIsPendingBothStores(t *testing.T) {
 			if err := f.selected.RetireDynamicFlowRuntimeActivationAttempt(f.ctx, f.attempt); err != nil {
 				t.Fatal(err)
 			}
-			admitted, err := f.selected.BeginDynamicFlowRuntimeActivation(f.ctx, plan, results[0].AttemptOrdinal, f.attempt.ProcessBinding())
+			predecessor, found, err := f.selected.LoadDynamicFlowRuntimeReadiness(f.ctx, f.runID, plan.Identity.Route())
+			if err != nil || !found {
+				t.Fatalf("load retired predecessor: found=%v err=%v", found, err)
+			}
+			admitted, err := f.selected.BeginDynamicFlowRuntimeActivation(f.ctx, runtimepipeline.NewDynamicFlowRuntimeActivationRequest(plan, predecessor.AttemptOrdinal, predecessor.AttemptState, f.attempt.ProcessBinding()))
 			if err != nil || !admitted.Acknowledged {
 				t.Fatalf("begin: %+v %v", admitted, err)
 			}
@@ -284,7 +288,7 @@ func TestFailedFlowActivationCreationPosturesRemainRetryableBothStores(t *testin
 				if after.AttemptState != "aborted" || after.AttemptOrdinal != before.AttemptOrdinal || after.Phase != before.Phase || !after.CreationEventEmittedAt.Equal(before.CreationEventEmittedAt) {
 					t.Fatalf("abandonment changed creation evidence: before=%+v after=%+v", before, after)
 				}
-				admitted, err := f.selected.BeginDynamicFlowRuntimeActivation(f.ctx, after.Plan, after.AttemptOrdinal, f.attempt.ProcessBinding())
+				admitted, err := f.selected.BeginDynamicFlowRuntimeActivation(f.ctx, runtimepipeline.NewDynamicFlowRuntimeActivationRequest(after.Plan, after.AttemptOrdinal, after.AttemptState, f.attempt.ProcessBinding()))
 				if err != nil || !admitted.Acknowledged || admitted.Reused || admitted.Attempt.ID() == f.attempt.ID() {
 					t.Fatalf("retry admission: %+v %v", admitted, err)
 				}

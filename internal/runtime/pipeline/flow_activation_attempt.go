@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeprocessbinding "github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/google/uuid"
@@ -23,6 +24,103 @@ type DynamicFlowRuntimeActivationAdmissionResult struct {
 	Attempt      DynamicFlowRuntimeActivationAttempt
 	Acknowledged bool
 	Reused       bool
+}
+
+// A request correlates a possibly lost admission acknowledgment. It cannot
+// authorize topology execution; only the selected store's exact receipt can.
+type DynamicFlowRuntimeActivationRequest struct {
+	id          string
+	planJSON    []byte
+	planHash    string
+	planError   error
+	predecessor uint64
+	disposition string
+	binding     runtimeprocessbinding.Binding
+}
+
+func NewDynamicFlowRuntimeActivationRequest(plan DynamicFlowRuntimeReadinessPlan, predecessor uint64, disposition string, binding runtimeprocessbinding.Binding) DynamicFlowRuntimeActivationRequest {
+	request := DynamicFlowRuntimeActivationRequest{id: uuid.NewString(), predecessor: predecessor, disposition: disposition, binding: binding}
+	normalized, err := plan.Normalized()
+	if err != nil {
+		request.planError = err
+		return request
+	}
+	request.planJSON, request.planError = canonicaljson.MarshalPreservingNumberKinds(normalized)
+	request.planHash = canonicaljson.HashBytes(request.planJSON)
+	return request
+}
+
+func (r DynamicFlowRuntimeActivationRequest) Validate() error {
+	if id, err := uuid.Parse(r.id); err != nil || id == uuid.Nil || id.String() != r.id {
+		return fmt.Errorf("flow activation request requires an exact nonzero request id")
+	}
+	if r.predecessor == 0 {
+		return fmt.Errorf("flow activation request requires an observed predecessor")
+	}
+	switch r.disposition {
+	case "planned", "accepted", "superseded", "retired", "aborted":
+	default:
+		return fmt.Errorf("flow activation request requires its exact observed disposition")
+	}
+	if err := r.binding.Validate(); err != nil {
+		return err
+	}
+	if r.planError != nil {
+		return r.planError
+	}
+	plan, err := DecodeFlowReadinessPlan(r.planJSON, r.planHash)
+	if err != nil {
+		return err
+	}
+	if plan.BundleHash != r.binding.BundleHash {
+		return fmt.Errorf("flow activation request differs from its generation source")
+	}
+	return nil
+}
+
+func (r DynamicFlowRuntimeActivationRequest) ID() string { return r.id }
+func (r DynamicFlowRuntimeActivationRequest) Plan() DynamicFlowRuntimeReadinessPlan {
+	plan, _ := DecodeFlowReadinessPlan(r.planJSON, r.planHash)
+	return plan
+}
+func (r DynamicFlowRuntimeActivationRequest) Predecessor() uint64            { return r.predecessor }
+func (r DynamicFlowRuntimeActivationRequest) PredecessorDisposition() string { return r.disposition }
+func (r DynamicFlowRuntimeActivationRequest) ProcessBinding() runtimeprocessbinding.Binding {
+	return r.binding
+}
+
+func (r DynamicFlowRuntimeActivationRequest) ValidateResolution(resolved DynamicFlowRuntimeActivationResolution) error {
+	switch resolved.Disposition {
+	case FlowActivationUnresolved, FlowActivationUnadmitted, FlowActivationForeign:
+		if resolved.Attempt != (DynamicFlowRuntimeActivationAttempt{}) {
+			return fmt.Errorf("non-admitted activation resolution returned execution authority")
+		}
+	case FlowActivationAdmitted:
+		if err := resolved.Attempt.Validate(); err != nil {
+			return err
+		}
+		plan := r.Plan()
+		if resolved.Attempt.RunID() != plan.RunID || resolved.Attempt.InstancePath() != plan.Identity.InstancePath || !resolved.Attempt.ProcessBinding().Equal(r.binding) {
+			return fmt.Errorf("activation resolution differs from its exact retained request")
+		}
+	default:
+		return fmt.Errorf("invalid activation resolution disposition")
+	}
+	return nil
+}
+
+type FlowActivationResolution uint8
+
+const (
+	FlowActivationUnresolved FlowActivationResolution = iota
+	FlowActivationUnadmitted
+	FlowActivationAdmitted
+	FlowActivationForeign
+)
+
+type DynamicFlowRuntimeActivationResolution struct {
+	Disposition FlowActivationResolution
+	Attempt     DynamicFlowRuntimeActivationAttempt
 }
 
 func NewDynamicFlowRuntimeActivationAttempt(id, runID, instancePath string, binding runtimeprocessbinding.Binding) (DynamicFlowRuntimeActivationAttempt, error) {

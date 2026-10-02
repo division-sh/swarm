@@ -24,7 +24,6 @@ import (
 	flowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	identity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	managedcapabilities "github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
-	processbinding "github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	correlation "github.com/division-sh/swarm/internal/runtime/correlation"
 	deadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -155,8 +154,8 @@ func (s *PostgresStore) BeginChannelBinding(ctx context.Context, req operatorcha
 	return s.operatorChannelPostgresOwner.BeginChannelBinding(ctx, req)
 }
 
-func (s *PostgresStore) BeginDynamicFlowRuntimeActivation(ctx context.Context, plan pipeline.DynamicFlowRuntimeReadinessPlan, revision uint64, binding processbinding.Binding) (pipeline.DynamicFlowRuntimeActivationAdmissionResult, error) {
-	return s.pipelinePostgresOwner.BeginDynamicFlowRuntimeActivation(ctx, plan, revision, binding)
+func (s *PostgresStore) BeginDynamicFlowRuntimeActivation(ctx context.Context, request pipeline.DynamicFlowRuntimeActivationRequest) (pipeline.DynamicFlowRuntimeActivationAdmissionResult, error) {
+	return s.pipelinePostgresOwner.BeginDynamicFlowRuntimeActivation(ctx, request)
 }
 
 func (s *PostgresStore) BindAgentSession(ctx context.Context, claim deliverylifecycle.Claim, sessionID string) (deliverylifecycle.ClaimCommit, error) {
@@ -1119,6 +1118,10 @@ func (s *PostgresStore) ResolveConversationForkPoint(ctx context.Context, source
 	return s.runForkPostgresOwner.ResolveConversationForkPoint(ctx, sourceSessionID, selector)
 }
 
+func (s *PostgresStore) ResolveDynamicFlowRuntimeActivation(ctx context.Context, request pipeline.DynamicFlowRuntimeActivationRequest) (pipeline.DynamicFlowRuntimeActivationResolution, error) {
+	return s.pipelinePostgresOwner.ResolveDynamicFlowRuntimeActivation(ctx, request)
+}
+
 func (s *PostgresStore) ResolveFlowInstance(ctx context.Context, runID string, entityID string) (string, error) {
 	return s.budgetPostgresOwner.ResolveFlowInstance(ctx, runID, entityID)
 }
@@ -1395,8 +1398,8 @@ func (s *SQLiteRuntimeStore) BeginChannelBinding(ctx context.Context, req operat
 	return s.operatorChannelSQLiteOwner.BeginChannelBinding(ctx, req)
 }
 
-func (s *SQLiteRuntimeStore) BeginDynamicFlowRuntimeActivation(ctx context.Context, plan pipeline.DynamicFlowRuntimeReadinessPlan, revision uint64, binding processbinding.Binding) (pipeline.DynamicFlowRuntimeActivationAdmissionResult, error) {
-	return s.pipelineSQLiteOwner.BeginDynamicFlowRuntimeActivation(ctx, plan, revision, binding)
+func (s *SQLiteRuntimeStore) BeginDynamicFlowRuntimeActivation(ctx context.Context, request pipeline.DynamicFlowRuntimeActivationRequest) (pipeline.DynamicFlowRuntimeActivationAdmissionResult, error) {
+	return s.pipelineSQLiteOwner.BeginDynamicFlowRuntimeActivation(ctx, request)
 }
 
 func (s *SQLiteRuntimeStore) BindAgentSession(ctx context.Context, claim deliverylifecycle.Claim, sessionID string) (deliverylifecycle.ClaimCommit, error) {
@@ -2333,6 +2336,10 @@ func (s *SQLiteRuntimeStore) ResolveAuthorActivityEventDescriptor(scope authorac
 
 func (s *SQLiteRuntimeStore) ResolveConversationForkPoint(ctx context.Context, sourceSessionID string, selector runfork.ConversationForkPointSelector) (runfork.ConversationForkPointDescriptor, error) {
 	return s.runForkSQLiteOwner.ResolveConversationForkPoint(ctx, sourceSessionID, selector)
+}
+
+func (s *SQLiteRuntimeStore) ResolveDynamicFlowRuntimeActivation(ctx context.Context, request pipeline.DynamicFlowRuntimeActivationRequest) (pipeline.DynamicFlowRuntimeActivationResolution, error) {
+	return s.pipelineSQLiteOwner.ResolveDynamicFlowRuntimeActivation(ctx, request)
 }
 
 func (s *SQLiteRuntimeStore) ResolveFlowInstance(ctx context.Context, runID string, entityID string) (string, error) {

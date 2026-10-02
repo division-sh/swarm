@@ -145,7 +145,7 @@ func TestDynamicFlowRuntimeCreationOccurrenceRejectsRetiredAttemptOnBothStores(t
 			if err != nil || !found {
 				t.Fatalf("load successor plan: found=%v err=%v", found, err)
 			}
-			admitted, err := fixture.selected.BeginDynamicFlowRuntimeActivation(fixture.ctx, readiness.Plan, readiness.AttemptOrdinal, fixture.attempt.ProcessBinding())
+			admitted, err := fixture.selected.BeginDynamicFlowRuntimeActivation(fixture.ctx, runtimepipeline.NewDynamicFlowRuntimeActivationRequest(readiness.Plan, readiness.AttemptOrdinal, readiness.AttemptState, fixture.attempt.ProcessBinding()))
 			if err != nil || !admitted.Acknowledged || admitted.Attempt.ID() == stale.attempt.ID() {
 				t.Fatalf("admit same-plan successor: result=%+v err=%v", admitted, err)
 			}
@@ -314,7 +314,7 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	if err != nil {
 		t.Fatal(err)
 	}
-	admitted, err := selected.BeginDynamicFlowRuntimeActivation(ctx, readiness.Plan, readiness.AttemptOrdinal, binding)
+	admitted, err := selected.BeginDynamicFlowRuntimeActivation(ctx, runtimepipeline.NewDynamicFlowRuntimeActivationRequest(readiness.Plan, readiness.AttemptOrdinal, readiness.AttemptState, binding))
 	if err != nil || !admitted.Acknowledged {
 		t.Fatalf("begin creation activation: admitted=%+v err=%v", admitted, err)
 	}

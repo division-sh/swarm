@@ -383,6 +383,7 @@ func reconcileDynamicFlowRuntimeReadinessPlans(
 					activation_attempt_id = $6,
 					activation_attempt_state = CASE WHEN activation_attempt_state IN ('accepted', 'superseded') THEN 'superseded' ELSE 'planned' END,
 					activation_attempt_grant_id = CASE WHEN activation_attempt_state IN ('accepted', 'superseded') THEN activation_attempt_grant_id ELSE NULL END,
+					activation_request_id = CASE WHEN activation_attempt_state IN ('accepted', 'superseded') THEN activation_request_id ELSE NULL END,
 					phase = CASE WHEN activation_attempt_state IN ('accepted', 'superseded') THEN phase ELSE 'planned' END,
 					updated_at = $3 WHERE run_id = $4::uuid AND instance_path = $5 AND activation_attempt_id = $7 AND plan_hash = $8 AND activation_attempt_state = $9 AND phase = $10`
 				args := []any{request.expectedJSON, request.expectedHash, observedAt, request.expected.RunID, request.expected.Identity.InstancePath}
@@ -391,6 +392,7 @@ func reconcileDynamicFlowRuntimeReadinessPlans(
 						activation_attempt_id = ?,
 						activation_attempt_state = CASE WHEN activation_attempt_state IN ('accepted', 'superseded') THEN 'superseded' ELSE 'planned' END,
 						activation_attempt_grant_id = CASE WHEN activation_attempt_state IN ('accepted', 'superseded') THEN activation_attempt_grant_id ELSE NULL END,
+						activation_request_id = CASE WHEN activation_attempt_state IN ('accepted', 'superseded') THEN activation_request_id ELSE NULL END,
 						phase = CASE WHEN activation_attempt_state IN ('accepted', 'superseded') THEN phase ELSE 'planned' END
 						WHERE run_id = ? AND instance_path = ? AND activation_attempt_id = ? AND plan_hash = ? AND activation_attempt_state = ? AND phase = ?`
 					args = []any{request.expectedJSON, request.expectedHash, observedAt, attemptResults[index].AttemptOrdinal, request.expected.RunID, request.expected.Identity.InstancePath}

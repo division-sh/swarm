@@ -17189,6 +17189,21 @@ platform_tables:
         execution; unsupported historical replay remains refused under its existing contract.
         Fresh schemas only. No legacy selected-store reader, repair, migration or compatibility
         path is supported.
+        Before Begin, the Manager or selected preparation owner retains a typed non-executable
+        request binding the exact run/route, observed predecessor ordinal and disposition,
+        desired plan/source and process grant. Admission records its opaque correlation id
+        atomically on this same row; it is not another fence or request registry. Begin and
+        resolution serialize on this row. The owner joins Begin before resolving an unknown
+        acknowledgment; a read while that commit may still finish cannot establish rollback.
+        Resolution distinguishes the unchanged unadmitted predecessor, this request's exact
+        admitted receipt, a foreign successor, and unresolved evidence. Neither equal plan
+        bytes nor Reused establishes ownership. An unresolved request remains owned through
+        retry, panic, cancellation, selected failure, reset and joined shutdown. Resolution of
+        a superseded or settled own receipt grants cleanup responsibility, not execution.
+        Only exact acknowledged admission and current generation/eligibility checks permit
+        attachment; cancellation of that owned operation or shutdown resolves and abandons
+        its own attempt without installing topology for cleanup. Foreign successors are never
+        adopted or retired. B's existing process-possession takeover remains the crash boundary.
       ddl: |
         CREATE TABLE flow_instance_runtime_readiness (
             run_id                      UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
@@ -17197,6 +17212,7 @@ platform_tables:
             plan_hash                   TEXT NOT NULL CHECK (length(plan_hash) = 71),
             activation_attempt_id       BIGINT NOT NULL DEFAULT 1 CHECK (activation_attempt_id > 0),
             activation_attempt_grant_id UUID,
+            activation_request_id       UUID,
             activation_attempt_state    TEXT NOT NULL DEFAULT 'planned' CHECK (activation_attempt_state IN ('planned', 'accepted', 'superseded', 'retired', 'aborted')),
             phase                       TEXT NOT NULL DEFAULT 'planned' CHECK (phase IN ('planned', 'agents_registered', 'route_installed', 'timers_armed', 'ready')),
             creation_event_emitted_at   TIMESTAMPTZ,

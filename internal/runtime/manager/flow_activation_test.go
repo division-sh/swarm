@@ -212,6 +212,7 @@ type flowActivationTestInstanceStore struct {
 	settleAttemptPostCommitErr error
 	readiness                  map[string]runtimepipeline.DynamicFlowRuntimeReadiness
 	activationAttempts         map[string]runtimepipeline.DynamicFlowRuntimeActivationAttempt
+	activationRequests         map[string]string
 	committedAttempts          map[string]bool
 	retiredAttemptIDs          map[runtimepipeline.DynamicFlowRuntimeActivationAttempt]struct{}
 	foreignSupersededIDs       map[runtimepipeline.DynamicFlowRuntimeActivationAttempt]struct{}
@@ -868,7 +869,11 @@ func (s *flowActivationTestInstanceStore) InspectDynamicFlowRuntimeReadinessForR
 	return result, nil
 }
 
-func (s *flowActivationTestInstanceStore) BeginDynamicFlowRuntimeActivation(_ context.Context, plan runtimepipeline.DynamicFlowRuntimeReadinessPlan, revision uint64, binding ProcessExecutionBinding) (runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult, error) {
+func (s *flowActivationTestInstanceStore) BeginDynamicFlowRuntimeActivation(_ context.Context, request runtimepipeline.DynamicFlowRuntimeActivationRequest) (runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult, error) {
+	if err := request.Validate(); err != nil {
+		return runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult{}, err
+	}
+	plan, revision, binding := request.Plan(), request.Predecessor(), request.ProcessBinding()
 	if err := binding.Validate(); err != nil {
 		return runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult{}, err
 	}
@@ -879,7 +884,7 @@ func (s *flowActivationTestInstanceStore) BeginDynamicFlowRuntimeActivation(_ co
 	defer s.readinessMu.Unlock()
 	key := flowActivationReadinessKey(plan.RunID, plan.Identity.InstancePath)
 	item, found := s.readiness[key]
-	if !found || !item.Eligible() || item.AttemptOrdinal != revision {
+	if !found || !item.Eligible() {
 		return runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult{}, errors.New("activation readiness revision is stale")
 	}
 	actual, err := json.Marshal(item.Plan)
@@ -894,8 +899,11 @@ func (s *flowActivationTestInstanceStore) BeginDynamicFlowRuntimeActivation(_ co
 		return runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult{}, errors.New("activation readiness plan is stale")
 	}
 	if previous, exists := s.activationAttempts[key]; exists {
-		if previous.Ordinal() == revision && previous.ProcessBinding().Equal(binding) && item.AttemptState == "accepted" {
+		if s.activationRequests[key] == request.ID() && previous.ProcessBinding().Equal(binding) && item.AttemptState == "accepted" {
 			return runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult{Attempt: previous, Acknowledged: true, Reused: true}, nil
+		}
+		if item.AttemptOrdinal != revision || item.AttemptState != request.PredecessorDisposition() {
+			return runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult{}, errors.New("activation readiness predecessor is stale")
 		}
 		if previous.ProcessBinding().ProcessBootID == binding.ProcessBootID {
 			return runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult{}, errors.New("activation predecessor remains unsettled")
@@ -904,6 +912,9 @@ func (s *flowActivationTestInstanceStore) BeginDynamicFlowRuntimeActivation(_ co
 			s.foreignSupersededIDs = make(map[runtimepipeline.DynamicFlowRuntimeActivationAttempt]struct{})
 		}
 		s.foreignSupersededIDs[previous] = struct{}{}
+	}
+	if item.AttemptOrdinal != revision || item.AttemptState != request.PredecessorDisposition() {
+		return runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult{}, errors.New("activation readiness predecessor is stale")
 	}
 	ordinal := item.AttemptOrdinal
 	if item.AttemptState != "planned" {
@@ -918,11 +929,35 @@ func (s *flowActivationTestInstanceStore) BeginDynamicFlowRuntimeActivation(_ co
 		s.committedAttempts = make(map[string]bool)
 	}
 	s.activationAttempts[key] = attempt
+	if s.activationRequests == nil {
+		s.activationRequests = make(map[string]string)
+	}
+	s.activationRequests[key] = request.ID()
 	item.Phase = runtimepipeline.FlowAttachmentPlanned
 	item.AttemptOrdinal = ordinal
 	item.AttemptState = "accepted"
 	s.readiness[key] = item
 	return runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult{Attempt: attempt, Acknowledged: true}, nil
+}
+
+func (s *flowActivationTestInstanceStore) ResolveDynamicFlowRuntimeActivation(_ context.Context, request runtimepipeline.DynamicFlowRuntimeActivationRequest) (runtimepipeline.DynamicFlowRuntimeActivationResolution, error) {
+	if err := request.Validate(); err != nil {
+		return runtimepipeline.DynamicFlowRuntimeActivationResolution{}, err
+	}
+	s.readinessMu.Lock()
+	defer s.readinessMu.Unlock()
+	key := flowActivationReadinessKey(request.Plan().RunID, request.Plan().Identity.InstancePath)
+	item, found := s.readiness[key]
+	if !found {
+		return runtimepipeline.DynamicFlowRuntimeActivationResolution{Disposition: runtimepipeline.FlowActivationForeign}, nil
+	}
+	if s.activationRequests[key] == request.ID() {
+		return runtimepipeline.DynamicFlowRuntimeActivationResolution{Disposition: runtimepipeline.FlowActivationAdmitted, Attempt: s.activationAttempts[key]}, nil
+	}
+	if item.AttemptOrdinal == request.Predecessor() && item.AttemptState == request.PredecessorDisposition() && (item.AttemptState == "planned" || item.AttemptState == "retired" || item.AttemptState == "aborted") {
+		return runtimepipeline.DynamicFlowRuntimeActivationResolution{Disposition: runtimepipeline.FlowActivationUnadmitted}, nil
+	}
+	return runtimepipeline.DynamicFlowRuntimeActivationResolution{Disposition: runtimepipeline.FlowActivationForeign}, nil
 }
 
 func (s *flowActivationTestInstanceStore) VerifyDynamicFlowRuntimeActivationAttempt(_ context.Context, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) error {
@@ -2473,7 +2508,7 @@ func TestFlowActivationRetirementResumesExactOwnerAfterTransientCleanupFailure(t
 				if err != nil || !found {
 					t.Fatalf("load retry readiness: found=%v err=%v", found, err)
 				}
-				successor, created, err := am.beginDynamicFlowActiveAttempt(ctx, key, readiness.Plan, readiness.AttemptOrdinal)
+				successor, created, err := am.beginDynamicFlowActiveAttempt(ctx, key, readiness.Plan, readiness.AttemptOrdinal, readiness.AttemptState)
 				if err != nil || !created || successor == active || successor.receipt.ID() == oldAttemptID {
 					t.Fatalf("same-plan retry reused unsettled predecessor: created=%v successor=%+v err=%v", created, successor, err)
 				}

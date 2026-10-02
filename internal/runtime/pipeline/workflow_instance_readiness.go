@@ -14,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	runtimeprocessbinding "github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -223,7 +222,8 @@ type DynamicFlowRuntimeReadinessPersistence interface {
 	LoadDynamicFlowRuntimeReadiness(context.Context, string, runtimeflowidentity.Route) (DynamicFlowRuntimeReadiness, bool, error)
 	InspectDynamicFlowRuntimeReadinessForSource(context.Context, runtimecorrelation.SourceArtifactFact) (DynamicFlowRuntimeReadinessProjection, error)
 	InspectDynamicFlowRuntimeReadinessForRun(context.Context, string, runtimecorrelation.SourceArtifactFact) ([]DynamicFlowRuntimeReadiness, error)
-	BeginDynamicFlowRuntimeActivation(context.Context, DynamicFlowRuntimeReadinessPlan, uint64, runtimeprocessbinding.Binding) (DynamicFlowRuntimeActivationAdmissionResult, error)
+	BeginDynamicFlowRuntimeActivation(context.Context, DynamicFlowRuntimeActivationRequest) (DynamicFlowRuntimeActivationAdmissionResult, error)
+	ResolveDynamicFlowRuntimeActivation(context.Context, DynamicFlowRuntimeActivationRequest) (DynamicFlowRuntimeActivationResolution, error)
 	VerifyDynamicFlowRuntimeActivationAttempt(context.Context, DynamicFlowRuntimeActivationAttempt) error
 	AdvanceFlowAttachment(context.Context, DynamicFlowRuntimeActivationAttempt, FlowAttachmentPhase, time.Time) (FlowAttachmentAdvanceResult, error)
 	RetireDynamicFlowRuntimeActivationAttempt(context.Context, DynamicFlowRuntimeActivationAttempt) error

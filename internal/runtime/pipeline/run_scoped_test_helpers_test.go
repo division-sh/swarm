@@ -246,8 +246,12 @@ func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) MarkDynamicFlowRunti
 	return FlowAttachmentAdvanceResult{Acknowledged: err == nil}, err
 }
 
-func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) BeginDynamicFlowRuntimeActivation(context.Context, DynamicFlowRuntimeReadinessPlan, uint64, runtimeprocessbinding.Binding) (DynamicFlowRuntimeActivationAdmissionResult, error) {
+func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) BeginDynamicFlowRuntimeActivation(context.Context, DynamicFlowRuntimeActivationRequest) (DynamicFlowRuntimeActivationAdmissionResult, error) {
 	return DynamicFlowRuntimeActivationAdmissionResult{}, errors.New("in-memory readiness fixture has no generation grant")
+}
+
+func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) ResolveDynamicFlowRuntimeActivation(context.Context, DynamicFlowRuntimeActivationRequest) (DynamicFlowRuntimeActivationResolution, error) {
+	return DynamicFlowRuntimeActivationResolution{}, errors.New("in-memory readiness fixture has no generation grant")
 }
 
 func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) VerifyDynamicFlowRuntimeActivationAttempt(context.Context, DynamicFlowRuntimeActivationAttempt) error {

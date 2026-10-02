@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
@@ -134,6 +135,12 @@ func newReceiverConfigActivationFixtureForStore(t *testing.T, selected agentFixt
 	if err != nil {
 		t.Fatal(err)
 	}
+	evidence, err := grant.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = correlation.WithRuntimeInstanceID(ctx, evidence.RuntimeInstanceID)
+	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(evidence.RuntimeInstanceID, fact.BundleHash()))
 	var committer manager.FlowInstanceActivationCommitter = agentFixtureFlowActivationCommitter{store: selected}
 	if decorate != nil {
 		committer = decorate(committer)

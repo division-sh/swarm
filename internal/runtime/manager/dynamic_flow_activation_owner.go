@@ -77,6 +77,7 @@ func (am *AgentManager) beginDynamicFlowActiveAttempt(
 	key dynamicFlowRuntimeReadinessKey,
 	plan runtimepipeline.DynamicFlowRuntimeReadinessPlan,
 	revision uint64,
+	disposition string,
 ) (*dynamicFlowActiveAttempt, bool, error) {
 	identity, err := runtimeflowidentity.NewRunScopedFlowInstance(plan.RunID, plan.Identity.Route())
 	if err != nil {
@@ -110,7 +111,7 @@ func (am *AgentManager) beginDynamicFlowActiveAttempt(
 			am.dynamicFlowReadinessMu.Unlock()
 			return nil, false, errors.New("dynamic flow activation predecessor retirement is incomplete")
 		}
-		if previous.retirementKind == 0 && previous.receipt.Ordinal() == revision && previous.receipt.ProcessBinding().Equal(binding) {
+		if previous.pending == nil && previous.retirementKind == 0 && previous.receipt.Ordinal() == revision && previous.receipt.ProcessBinding().Equal(binding) {
 			am.dynamicFlowReadinessMu.Unlock()
 			if err := am.workflowInstances.VerifyDynamicFlowRuntimeActivationAttempt(ctx, previous.receipt); err == nil {
 				return previous, false, nil
@@ -137,28 +138,97 @@ func (am *AgentManager) beginDynamicFlowActiveAttempt(
 			return nil, false, fmt.Errorf("settle flow activation predecessor: %w", err)
 		}
 	}
-	admitted, commitErr := am.workflowInstances.BeginDynamicFlowRuntimeActivation(ctx, plan, revision, binding)
-	if !admitted.Acknowledged {
-		return nil, false, errors.Join(commitErr, errors.New("flow activation admission was not acknowledged"))
+	am.dynamicFlowReadinessMu.Lock()
+	if previous != nil && previous.receipt.Validate() == nil {
+		// Exact acknowledged settlement supersedes the earlier observation.
+		disposition = "retired"
+		if previous.retirementKind == flowActivationFailedRetirement {
+			disposition = "aborted"
+		}
 	}
-	if err := admitted.Attempt.Validate(); err != nil {
-		return nil, false, errors.Join(commitErr, err)
+	am.dynamicFlowReadinessMu.Unlock()
+	request := runtimepipeline.NewDynamicFlowRuntimeActivationRequest(plan, revision, disposition, binding)
+	if err := request.Validate(); err != nil {
+		return nil, false, err
 	}
-	if admitted.Reused {
-		return nil, false, errors.Join(commitErr, errors.New("committed flow activation attempt has no retained process owner"))
-	}
-	active := &dynamicFlowActiveAttempt{receipt: admitted.Attempt, identity: identity}
+	active := &dynamicFlowActiveAttempt{pending: &request, admissionDone: make(chan struct{}), identity: identity, retirementKind: flowActivationFailedRetirement}
 	am.dynamicFlowReadinessMu.Lock()
 	if am.dynamicFlowActiveAttempts == nil {
 		am.dynamicFlowActiveAttempts = make(map[dynamicFlowRuntimeReadinessKey]*dynamicFlowActiveAttempt)
 	}
 	if am.dynamicFlowActiveAttempts[key] != nil {
 		am.dynamicFlowReadinessMu.Unlock()
-		return nil, false, errors.Join(commitErr, errors.New("flow activation local owner changed after durable admission"))
+		return nil, false, errors.New("flow activation local owner changed before durable admission")
 	}
 	am.dynamicFlowActiveAttempts[key] = active
 	am.dynamicFlowReadinessMu.Unlock()
+	defer close(active.admissionDone)
+	admitted, commitErr := am.workflowInstances.BeginDynamicFlowRuntimeActivation(ctx, request)
+	if !admitted.Acknowledged {
+		resolved, resolveErr := am.workflowInstances.ResolveDynamicFlowRuntimeActivation(ctx, request)
+		commitErr = errors.Join(commitErr, resolveErr)
+		if err := request.ValidateResolution(resolved); err != nil {
+			return nil, false, errors.Join(commitErr, err)
+		}
+		switch resolved.Disposition {
+		case runtimepipeline.FlowActivationAdmitted:
+			admitted.Attempt = resolved.Attempt
+		case runtimepipeline.FlowActivationUnadmitted, runtimepipeline.FlowActivationForeign:
+			am.dynamicFlowReadinessMu.Lock()
+			if am.dynamicFlowActiveAttempts[key] == active {
+				delete(am.dynamicFlowActiveAttempts, key)
+			}
+			am.dynamicFlowReadinessMu.Unlock()
+			return nil, false, errors.Join(commitErr, errors.New("flow activation request did not own a current admission"))
+		default:
+			return nil, false, errors.Join(commitErr, errors.New("flow activation admission remains unresolved"))
+		}
+	}
+	if err := admitted.Attempt.Validate(); err != nil {
+		return nil, false, errors.Join(commitErr, err)
+	}
+	if admitted.Attempt.RunID() != key.runID || admitted.Attempt.InstancePath() != key.instancePath || !admitted.Attempt.ProcessBinding().Equal(binding) {
+		return nil, false, errors.Join(commitErr, errors.New("flow activation acknowledgment differs from its exact request"))
+	}
+	am.dynamicFlowReadinessMu.Lock()
+	active.receipt, active.pending, active.retirementKind = admitted.Attempt, nil, 0
+	am.dynamicFlowReadinessMu.Unlock()
 	return active, true, commitErr
+}
+
+func (am *AgentManager) resolvePendingDynamicFlowActivation(ctx context.Context, key dynamicFlowRuntimeReadinessKey, active *dynamicFlowActiveAttempt) (bool, error) {
+	am.dynamicFlowReadinessMu.Lock()
+	pending, done := active.pending, active.admissionDone
+	am.dynamicFlowReadinessMu.Unlock()
+	if pending == nil {
+		return true, nil
+	}
+	select {
+	case <-done:
+	case <-ctx.Done():
+		return false, ctx.Err()
+	}
+	resolved, err := am.workflowInstances.ResolveDynamicFlowRuntimeActivation(ctx, *pending)
+	if validateErr := pending.ValidateResolution(resolved); validateErr != nil {
+		return false, errors.Join(err, validateErr)
+	}
+	if resolved.Disposition == runtimepipeline.FlowActivationUnresolved {
+		return false, errors.Join(err, errors.New("flow activation request remains unresolved"))
+	}
+	am.dynamicFlowReadinessMu.Lock()
+	defer am.dynamicFlowReadinessMu.Unlock()
+	if am.dynamicFlowActiveAttempts[key] != active {
+		return false, errors.Join(err, errors.New("flow activation request lost its retained owner"))
+	}
+	if resolved.Disposition == runtimepipeline.FlowActivationAdmitted {
+		if validateErr := resolved.Attempt.Validate(); validateErr != nil {
+			return false, errors.Join(err, validateErr)
+		}
+		active.receipt, active.pending = resolved.Attempt, nil
+		return true, err
+	}
+	delete(am.dynamicFlowActiveAttempts, key)
+	return false, err
 }
 
 func (am *AgentManager) settleDynamicFlowActiveAttempt(
@@ -173,6 +243,10 @@ func (am *AgentManager) settleDynamicFlowActiveAttempt(
 			return errors.Join(errors.New("flow activation settlement requires exact local owner"), retirement.abort())
 		}
 		return errors.New("flow activation settlement requires exact local owner")
+	}
+	owned, resolveErr := am.resolvePendingDynamicFlowActivation(ctx, key, active)
+	if resolveErr != nil || !owned {
+		return errors.Join(resolveErr, retirement.abort())
 	}
 	am.dynamicFlowReadinessMu.Lock()
 	if am.dynamicFlowActiveAttempts[key] != active || active.retiring {
@@ -313,6 +387,11 @@ func (am *AgentManager) retireDynamicFlowAttemptsAfterJoin(ctx context.Context) 
 		batch = batch[:0]
 	}
 	for key, active := range attempts {
+		owned, resolveErr := am.resolvePendingDynamicFlowActivation(ctx, key, active)
+		result = errors.Join(result, resolveErr)
+		if resolveErr != nil || !owned {
+			continue
+		}
 		am.dynamicFlowReadinessMu.Lock()
 		current := am.dynamicFlowActiveAttempts[key] == active
 		incomplete := active.retiring || (active.retirementKind == flowActivationTerminalRetirement && !active.locallyRetired)

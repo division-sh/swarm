@@ -165,7 +165,7 @@ func TestDynamicFlowCreationSourceRevisionPublicationBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				admitted, err := f.selected.BeginDynamicFlowRuntimeActivation(ctx, desired, settled.AttemptOrdinal, binding)
+				admitted, err := f.selected.BeginDynamicFlowRuntimeActivation(ctx, runtimepipeline.NewDynamicFlowRuntimeActivationRequest(desired, settled.AttemptOrdinal, settled.AttemptState, binding))
 				if err != nil || !admitted.Acknowledged {
 					t.Fatalf("admit revised activation: %+v err=%v", admitted, err)
 				}

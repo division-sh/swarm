@@ -20,7 +20,7 @@ import (
 type flowActivationAttemptTestStore interface {
 	runtimestartupownership.Store
 	LoadDynamicFlowRuntimeReadiness(context.Context, string, runtimeflowidentity.Route) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error)
-	BeginDynamicFlowRuntimeActivation(context.Context, runtimepipeline.DynamicFlowRuntimeReadinessPlan, uint64, runtimeprocessbinding.Binding) (runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult, error)
+	BeginDynamicFlowRuntimeActivation(context.Context, runtimepipeline.DynamicFlowRuntimeActivationRequest) (runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult, error)
 	VerifyDynamicFlowRuntimeActivationAttempt(context.Context, runtimepipeline.DynamicFlowRuntimeActivationAttempt) error
 	AdvanceFlowAttachment(context.Context, runtimepipeline.DynamicFlowRuntimeActivationAttempt, runtimepipeline.FlowAttachmentPhase, time.Time) (runtimepipeline.FlowAttachmentAdvanceResult, error)
 	RetireDynamicFlowRuntimeActivationAttempt(context.Context, runtimepipeline.DynamicFlowRuntimeActivationAttempt) error
@@ -87,7 +87,7 @@ func TestFlowActivationAttemptBatchRetirementBothStores(t *testing.T) {
 				if err != nil || !found {
 					t.Fatalf("load %s readiness: found=%v err=%v", path, found, err)
 				}
-				admitted, err := selected.BeginDynamicFlowRuntimeActivation(ctx, readiness.Plan, readiness.AttemptOrdinal, binding)
+				admitted, err := selected.BeginDynamicFlowRuntimeActivation(ctx, runtimepipeline.NewDynamicFlowRuntimeActivationRequest(readiness.Plan, readiness.AttemptOrdinal, readiness.AttemptState, binding))
 				if err != nil || !admitted.Acknowledged {
 					t.Fatalf("admit %s attempt: result=%+v err=%v", path, admitted, err)
 				}
@@ -201,7 +201,7 @@ func TestFlowActivationAttemptAdmissionBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result, err := selected.BeginDynamicFlowRuntimeActivation(ctx, readiness.Plan, readiness.AttemptOrdinal, binding); err == nil || result.Acknowledged {
+			if result, err := selected.BeginDynamicFlowRuntimeActivation(ctx, runtimepipeline.NewDynamicFlowRuntimeActivationRequest(readiness.Plan, readiness.AttemptOrdinal, readiness.AttemptState, binding)); err == nil || result.Acknowledged {
 				t.Fatalf("prepared grant admitted activation: result=%+v err=%v", result, err)
 			}
 			if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
@@ -210,7 +210,8 @@ func TestFlowActivationAttemptAdmissionBothStores(t *testing.T) {
 			if _, err := grant.AdmitExecution(ctx); err != nil {
 				t.Fatal(err)
 			}
-			admitted, err := selected.BeginDynamicFlowRuntimeActivation(ctx, readiness.Plan, readiness.AttemptOrdinal, binding)
+			request := runtimepipeline.NewDynamicFlowRuntimeActivationRequest(readiness.Plan, readiness.AttemptOrdinal, readiness.AttemptState, binding)
+			admitted, err := selected.BeginDynamicFlowRuntimeActivation(ctx, request)
 			if err != nil || !admitted.Acknowledged || admitted.Reused || admitted.Attempt.Validate() != nil {
 				t.Fatalf("begin exact attempt: result=%+v err=%v", admitted, err)
 			}
@@ -246,7 +247,7 @@ func TestFlowActivationAttemptAdmissionBothStores(t *testing.T) {
 			if err := selected.VerifyDynamicFlowRuntimeActivationAttempt(ctx, admitted.Attempt); err != nil {
 				t.Fatalf("invented retirement affected current attempt: %v", err)
 			}
-			if again, err := selected.BeginDynamicFlowRuntimeActivation(ctx, readiness.Plan, readiness.AttemptOrdinal, binding); err != nil || !again.Acknowledged || !again.Reused || again.Attempt.ID() != admitted.Attempt.ID() {
+			if again, err := selected.BeginDynamicFlowRuntimeActivation(ctx, request); err != nil || !again.Acknowledged || !again.Reused || again.Attempt.ID() != admitted.Attempt.ID() {
 				t.Fatalf("intact exact-attempt admission replay: result=%+v err=%v", again, err)
 			}
 			if err := selected.VerifyDynamicFlowRuntimeActivationAttempt(ctx, admitted.Attempt); err != nil {
@@ -260,7 +261,7 @@ func TestFlowActivationAttemptAdmissionBothStores(t *testing.T) {
 			if err != nil || !replayedReady.Acknowledged {
 				t.Fatalf("replay acknowledged topology completion: ready=%+v err=%v", replayedReady, err)
 			}
-			reused, err := selected.BeginDynamicFlowRuntimeActivation(ctx, readiness.Plan, readiness.AttemptOrdinal, binding)
+			reused, err := selected.BeginDynamicFlowRuntimeActivation(ctx, request)
 			if err != nil || !reused.Acknowledged || !reused.Reused || reused.Attempt.ID() != admitted.Attempt.ID() {
 				t.Fatalf("reuse committed attempt: result=%+v err=%v", reused, err)
 			}
@@ -280,7 +281,7 @@ func TestFlowActivationAttemptAdmissionBothStores(t *testing.T) {
 			if err != nil || !found || (readiness.Phase != runtimepipeline.FlowAttachmentReady) {
 				t.Fatalf("process retirement erased completed durable topology: found=%v readiness=%+v err=%v", found, readiness, err)
 			}
-			admitted, err = selected.BeginDynamicFlowRuntimeActivation(ctx, readiness.Plan, readiness.AttemptOrdinal, binding)
+			admitted, err = selected.BeginDynamicFlowRuntimeActivation(ctx, runtimepipeline.NewDynamicFlowRuntimeActivationRequest(readiness.Plan, readiness.AttemptOrdinal, readiness.AttemptState, binding))
 			if err != nil || !admitted.Acknowledged || admitted.Reused || admitted.Attempt.ID() == reused.Attempt.ID() {
 				t.Fatalf("fresh attempt after retirement: result=%+v err=%v", admitted, err)
 			}
@@ -313,7 +314,7 @@ func TestFlowActivationAttemptAdmissionBothStores(t *testing.T) {
 			if err != nil || !found || readiness.Phase != runtimepipeline.FlowAttachmentPlanned {
 				t.Fatalf("interrupted reconstruction fabricated installed resources: found=%v readiness=%+v err=%v", found, readiness, err)
 			}
-			admitted, err = selected.BeginDynamicFlowRuntimeActivation(ctx, readiness.Plan, readiness.AttemptOrdinal, binding)
+			admitted, err = selected.BeginDynamicFlowRuntimeActivation(ctx, runtimepipeline.NewDynamicFlowRuntimeActivationRequest(readiness.Plan, readiness.AttemptOrdinal, readiness.AttemptState, binding))
 			if err != nil || !admitted.Acknowledged || admitted.Reused {
 				t.Fatalf("readmit completed reconstruction after interruption: result=%+v err=%v", admitted, err)
 			}
@@ -331,7 +332,7 @@ func TestFlowActivationAttemptAdmissionBothStores(t *testing.T) {
 			if err != nil || len(results) != 1 || results[0].AttemptOrdinal != readiness.AttemptOrdinal {
 				t.Fatalf("changed plan must retain the unsettled predecessor: results=%+v err=%v", results, err)
 			}
-			if stale, err := selected.BeginDynamicFlowRuntimeActivation(ctx, readiness.Plan, readiness.AttemptOrdinal, binding); err == nil || stale.Acknowledged {
+			if stale, err := selected.BeginDynamicFlowRuntimeActivation(ctx, runtimepipeline.NewDynamicFlowRuntimeActivationRequest(readiness.Plan, readiness.AttemptOrdinal, readiness.AttemptState, binding)); err == nil || stale.Acknowledged {
 				t.Fatalf("stale revision admitted activation: result=%+v err=%v", stale, err)
 			}
 			if stale, err := completeFlowAttachmentFixture(ctx, selected, admitted.Attempt, time.Now().UTC()); stale.Admitted() || !stale.Acknowledged {
@@ -340,13 +341,21 @@ func TestFlowActivationAttemptAdmissionBothStores(t *testing.T) {
 			if err := selected.VerifyDynamicFlowRuntimeActivationAttempt(ctx, admitted.Attempt); err == nil {
 				t.Fatal("superseded attempt retained activation authority")
 			}
-			if next, err := selected.BeginDynamicFlowRuntimeActivation(ctx, revised, results[0].AttemptOrdinal, binding); err == nil || next.Acknowledged || !strings.Contains(err.Error(), "unsettled") {
+			predecessor, found, err := selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(path))
+			if err != nil || !found {
+				t.Fatalf("load superseded predecessor: found=%v err=%v", found, err)
+			}
+			if next, err := selected.BeginDynamicFlowRuntimeActivation(ctx, runtimepipeline.NewDynamicFlowRuntimeActivationRequest(revised, predecessor.AttemptOrdinal, predecessor.AttemptState, binding)); err == nil || next.Acknowledged || !strings.Contains(err.Error(), "unsettled") {
 				t.Fatalf("successor bypassed predecessor settlement: result=%+v err=%v", next, err)
 			}
 			if err := selected.RetireDynamicFlowRuntimeActivationAttempt(ctx, admitted.Attempt); err != nil {
 				t.Fatalf("settle predecessor: %v", err)
 			}
-			next, err := selected.BeginDynamicFlowRuntimeActivation(ctx, revised, results[0].AttemptOrdinal, binding)
+			predecessor, found, err = selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(path))
+			if err != nil || !found {
+				t.Fatalf("load retired predecessor: found=%v err=%v", found, err)
+			}
+			next, err := selected.BeginDynamicFlowRuntimeActivation(ctx, runtimepipeline.NewDynamicFlowRuntimeActivationRequest(revised, predecessor.AttemptOrdinal, predecessor.AttemptState, binding))
 			if err != nil || !next.Acknowledged || next.Reused || next.Attempt.ID() == admitted.Attempt.ID() {
 				t.Fatalf("begin successor after settlement: result=%+v err=%v", next, err)
 			}
@@ -386,7 +395,7 @@ func TestFlowActivationAttemptAdmissionBothStores(t *testing.T) {
 			if err != nil || !found || current.AttemptOrdinal != next.Attempt.Ordinal() {
 				t.Fatalf("load retained predecessor before takeover: found=%v current=%+v err=%v", found, current, err)
 			}
-			successor, err := selected.BeginDynamicFlowRuntimeActivation(ctx, revised, current.AttemptOrdinal, successorBinding)
+			successor, err := selected.BeginDynamicFlowRuntimeActivation(ctx, runtimepipeline.NewDynamicFlowRuntimeActivationRequest(revised, current.AttemptOrdinal, current.AttemptState, successorBinding))
 			if err != nil || !successor.Acknowledged || successor.Reused {
 				t.Fatalf("begin exact successor after process takeover: result=%+v err=%v", successor, err)
 			}
