@@ -51,15 +51,36 @@ func (s exactExternalJoinSource) WorkflowJoins() []runtimecontracts.WorkflowJoin
 type exactJoinScheduleLogger struct{ t *testing.T }
 
 type exactJoinRuntimeLogger struct {
-	mu      sync.Mutex
-	details []string
+	mu       sync.Mutex
+	details  []string
+	failures []exactJoinFailureLog
 }
 
-func (l *exactJoinRuntimeLogger) Log(_ context.Context, _ diaglog.Level, _, _, _ string, _ string, _ string, _ string, _ string, _ string, _ map[string]string, detail any, _ *runtimefailures.Envelope, _ int) error {
+type exactJoinFailureLog struct {
+	action, eventID string
+	failure         runtimefailures.Envelope
+}
+
+func (l *exactJoinRuntimeLogger) Log(_ context.Context, _ diaglog.Level, _, _, action string, _ string, eventID string, _ string, _ string, _ string, _ map[string]string, detail any, failure *runtimefailures.Envelope, _ int) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.details = append(l.details, fmt.Sprint(detail))
+	if failure != nil {
+		l.failures = append(l.failures, exactJoinFailureLog{action: action, eventID: eventID, failure: *runtimefailures.CloneEnvelope(failure)})
+	}
 	return nil
+}
+
+func (l *exactJoinRuntimeLogger) failuresFor(action, eventID string) []runtimefailures.Envelope {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var failures []runtimefailures.Envelope
+	for _, record := range l.failures {
+		if record.action == action && record.eventID == eventID {
+			failures = append(failures, *runtimefailures.CloneEnvelope(&record.failure))
+		}
+	}
+	return failures
 }
 
 func (l *exactJoinRuntimeLogger) String() string {
