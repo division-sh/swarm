@@ -16,13 +16,21 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
+	decisionstore "github.com/division-sh/swarm/internal/store/internal/backend/decisioncard"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	"github.com/google/uuid"
 	modernsqlite "modernc.org/sqlite"
@@ -81,14 +89,9 @@ func exerciseForkActivationFrontierContention(t *testing.T, selected bool) {
 					loserCtx, cancelLoser := context.WithCancel(ctx)
 					defer cancelLoser()
 					loserCtx = context.WithValue(loserCtx, forkContentionContextKey{}, barrier)
-					state := f.state
-					state.Transition = runtimepipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
-					state.ExpectedRevision, state.ExpectedState = 2, "pending"
-					state.CurrentState, state.Name = "done", "Committed Concurrent Writer"
-					state.UpdatedAt, state.EnteredStageAt = time.Now().UTC(), time.Now().UTC()
 					invoke := func(ctx context.Context, operation string) forkContentionResult {
 						if operation == "writer" {
-							_, err := writer.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{State: state})
+							err := f.write(ctx, writer)
 							return forkContentionResult{err: err}
 						}
 						if selected {
@@ -192,7 +195,7 @@ func exerciseForkActivationFrontierContention(t *testing.T, selected bool) {
 							if _, fact, ok := runForkReplayResumeBlockerFromError(lost.err); !ok || fact != runfork.RunForkReplayResumeFactSourceAdvanced || lost.activation.Activated {
 								t.Fatalf("generic losing activation must retain source-advanced refusal: %#v", lost)
 							}
-						} else if !errors.Is(lost.err, runlifecycle.ErrRunNotActive) {
+						} else if !errors.Is(lost.err, runlifecycle.ErrRunNotActive) && (lost.err == nil || !strings.Contains(lost.err.Error(), "gate route run "+f.runID+" is not routable in status forked")) {
 							t.Fatalf("losing writer must observe committed source freeze: %v", lost.err)
 						}
 						if !reflect.DeepEqual(winnerOnly, snapshotForkHistoricalExecutionTables(t, observer, backend.name == "postgres")) {
@@ -212,23 +215,70 @@ func exerciseForkActivationFrontierContention(t *testing.T, selected bool) {
 	}
 }
 
-func requireForkContentionState(t *testing.T, db *sql.DB, f snapshotOwnershipFixture, child string, writerCommitted, activated bool) {
+func requireForkContentionState(t *testing.T, db *sql.DB, f forkContentionFixture, child string, writerCommitted, activated bool) {
 	t.Helper()
 	for _, id := range []string{f.runID, child} {
 		var state, name string
 		var revision int64
-		if err := db.QueryRow(`SELECT current_state,name,revision FROM entity_state WHERE run_id=$1 AND entity_id=$2`, id, f.entityID).Scan(&state, &name, &revision); err != nil {
+		if err := db.QueryRow(`SELECT f.current_state,e.name,f.revision FROM flow_instances f JOIN entity_state e ON e.run_id=f.run_id AND e.entity_id=f.entity_id WHERE f.run_id=$1 AND f.entity_id=$2`, id, id).Scan(&state, &name, &revision); err != nil {
 			t.Fatal(err)
 		}
 		wantState, wantName, wantRevision := "pending", "At R", int64(1)
 		if id == f.runID {
-			wantRevision = 2
+			wantRevision = 3
 			if writerCommitted {
-				wantState, wantName, wantRevision = "done", "Committed Concurrent Writer", 3
+				wantState, wantRevision = "done", 4
+			} else if activated {
+				// Freezing the source durably supersedes its exact open gate.
+				// That header CAS is a real activation write, not a field shadow.
+				wantRevision = 4
 			}
 		}
 		if state != wantState || name != wantName || revision != wantRevision {
 			t.Fatalf("%s entity state=%s/%s/r%d, want %s/%s/r%d", id, state, name, revision, wantState, wantName, wantRevision)
+		}
+	}
+	var accumulatorRaw string
+	if err := db.QueryRow(`SELECT accumulator FROM flow_instances WHERE run_id=$1 AND entity_id=$2`, f.runID, f.entityID).Scan(&accumulatorRaw); err != nil {
+		t.Fatal(err)
+	}
+	var buckets map[string]map[string]any
+	if err := json.Unmarshal([]byte(accumulatorRaw), &buckets); err != nil {
+		t.Fatal(err)
+	}
+	gate, found, err := gateruntime.Load(buckets, ".", "review")
+	wantGate, wantOpen := gateruntime.StatusDecisionCommitted, 1
+	if writerCommitted {
+		wantGate, wantOpen = gateruntime.StatusRouted, 0
+	} else if activated {
+		wantGate, wantOpen = gateruntime.StatusSuperseded, 0
+	}
+	if err != nil || !found || gate.CardID != f.cardID || gate.DecisionEventID != f.eventID || gate.Status != wantGate {
+		t.Fatalf("canonical gate disposition: %+v found=%t err=%v; want %s", gate, found, err, wantGate)
+	}
+	dialect := decisionstore.SummaryDialectPostgres
+	if _, sqlite := f.store.(*SQLiteRuntimeStore); sqlite {
+		dialect = decisionstore.SummaryDialectSQLite
+	}
+	summary, err := decisionstore.ReadRunSummary(f.ctx, db, dialect, f.runID)
+	if err != nil || summary.OpenGateObligations != wantOpen || summary.MalformedObligations != 0 {
+		t.Fatalf("completion authority disagrees with canonical gate: %+v err=%v; want open=%d", summary, err, wantOpen)
+	}
+	if activated && !writerCommitted && !decisionGateStatusMutationExists(t, f.ctx, db, dialect == decisionstore.SummaryDialectPostgres, f.runID, f.entityID, string(gateruntime.StatusSuperseded)) {
+		t.Fatal("terminal gate supersession omitted its canonical mutation journal")
+	}
+	if writerCommitted {
+		var raw string
+		if err := db.QueryRow(`SELECT bookkeeping FROM flow_instances WHERE run_id=$1 AND entity_id=$2`, f.runID, f.entityID).Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		var bookkeeping map[string]any
+		if err := json.Unmarshal([]byte(raw), &bookkeeping); err != nil {
+			t.Fatal(err)
+		}
+		entry, found, err := workflowlifecycle.LoadStageEntry(bookkeeping)
+		if err != nil || !found || entry.Cause != "gate" || entry.EventID != f.eventID || entry.OccurrenceID != f.cardID || entry.TransitionID == "" || entry.Stage != "done" {
+			t.Fatalf("writer did not commit its exact admitted new StageEntry: %+v %t %v", entry, found, err)
 		}
 	}
 	var status string
@@ -275,7 +325,17 @@ func forkContentionRowsForRun(t *testing.T, snapshot map[string][]string, run st
 	return out
 }
 
-func newForkContentionFixture(t *testing.T, backend eventRecordContractBackend) snapshotOwnershipFixture {
+type forkContentionFixture struct {
+	snapshotOwnershipFixture
+	write  func(context.Context, snapshotOwnershipStore) error
+	cardID string
+}
+
+func newForkContentionFixture(t *testing.T, backend eventRecordContractBackend) forkContentionFixture {
+	return newForkContentionFixtureForFields(t, backend, true)
+}
+
+func newForkContentionFixtureForFields(t *testing.T, backend eventRecordContractBackend, fields bool) forkContentionFixture {
 	t.Helper()
 	opened := backend.open(t)
 	// The receipt fixture freezes its SQLite clock in July. This activation
@@ -283,13 +343,26 @@ func newForkContentionFixture(t *testing.T, backend eventRecordContractBackend) 
 	if store, ok := opened.store.(*SQLiteRuntimeStore); ok {
 		store.nowFn = func() time.Time { return time.Now().UTC() }
 	}
-	bundle := loadCanonicalSelectedContractStoreSource(t)
-	f := snapshotOwnershipFixture{store: opened.store.(snapshotOwnershipStore), db: opened.db, runID: uuid.NewString(), entityID: uuid.NewString(), eventID: uuid.NewString()}
+	files := map[string]string{
+		"schema.yaml":   "name: contention-gate\nstages:\n  pending:\n    initial: true\n    gate:\n      decision: review\n      outcomes:\n        approve: {advances_to: done}\n  done: {terminal: true}\n",
+		"entities.yaml": "default:\n  name: text\n",
+	}
+	if !fields {
+		delete(files, "entities.yaml")
+	}
+	bundle := loadLifecyclePersistenceFixtureForTest(t, files)
+	runID := uuid.NewString()
+	f := forkContentionFixture{snapshotOwnershipFixture: snapshotOwnershipFixture{store: opened.store.(snapshotOwnershipStore), db: opened.db, runID: runID, entityID: runID, eventID: uuid.NewString()}}
 	f.ctx = runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash()), f.runID)
+	var err error
+	f.ctx, err = eventreceiver.NormalExecution().Bind(f.ctx, executionmode.Live)
+	if err != nil {
+		t.Fatal(err)
+	}
 	at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	requireRunFixtureForTest(t, f.ctx, opened.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: f.runID, StartedAt: at, BundleHash: bundle.SourceArtifact.BundleHash(), Artifact: bundle.SourceArtifact})
-	req := sqliteFlowActivationRequest(bundle, "flow-a/1", "flow-a/1", "", "flow-a/1")
-	req.Instance = flowidentity.Stored(req.ContractBundle, "flow-a/1", "flow-a/1", flowidentity.LogicalInstanceID("flow-a/1"), f.entityID, "")
+	req := sqliteFlowActivationRequest(bundle, ".", f.runID, "", f.runID)
+	req.Instance = flowidentity.Stored(req.ContractBundle, ".", f.runID, flowidentity.LogicalInstanceID(f.runID), f.entityID, "")
 	req.OccurredAt = at
 	plan := constructHistoricalSourceFixture(t, f.ctx, opened.store.(agentFixtureFlowStore), req)
 	persisted, err := plan.PersistenceRecord()
@@ -299,16 +372,68 @@ func newForkContentionFixture(t *testing.T, backend eventRecordContractBackend) 
 	f.state = persisted.State
 	f.state.Transition = runtimepipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
 	f.state.ExpectedState, f.state.ExpectedRevision = "pending", 1
-	// This source-frontier fixture supplies ordinary historical state, not an
-	// executing lifecycle transition; its compiled initial entry stays intact.
+	// Set historical fields through the ordinary writer; retain the constructor's
+	// real initial gate and stage-entry evidence.
 	f.state.CurrentState, f.state.EntityType, f.state.Name = "pending", "default", "At R"
 	f.state.Fields = json.RawMessage(`{"name":"At R"}`)
+	if !fields {
+		f.state.EntityType, f.state.Name, f.state.Fields = "", "", json.RawMessage(`{}`)
+	}
 	if _, err := f.store.CommitWorkflowEngineMutation(f.ctx, runtimepipeline.WorkflowEngineMutationCommand{State: f.state}); err != nil {
 		t.Fatal(err)
 	}
-	event := eventtest.ExistingRunRootIngress(f.eventID, "item.received", "h18-fixture", "", json.RawMessage(`{}`), 0, f.runID, events.EventEnvelope{}, time.Now().UTC())
-	if err := commitSemanticPipelineProcessedEventFixture(f.ctx, f.store, event); err != nil {
+	coordinatorFor := func(selected snapshotOwnershipStore) *runtimepipeline.PipelineCoordinator {
+		store := selected.(workflowTestSelectedStore)
+		opts := completeWorkflowTestCoordinatorOptions(runtimepipeline.NewWorkflowPersistence(store), store)
+		opts.Module = runForkGateWorkflowModule{source: semanticview.Wrap(bundle)}
+		opts.SourceArtifactFact = mustStoreTestSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+		return runtimepipeline.NewPipelineCoordinatorWithOptions(&sqliteFlowActivationBus{}, opts)
+	}
+	coordinator := coordinatorFor(f.store)
+	owner := flowidentity.RunScopedFlowInstance{RunID: f.runID, Route: req.Instance.Route()}
+	instance, found, err := coordinator.Load(f.ctx, owner)
+	if err != nil || !found {
+		t.Fatalf("load canonical gate: found=%v error=%v", found, err)
+	}
+	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.Gates, instance.StateBuckets)
+	if err != nil {
 		t.Fatal(err)
+	}
+	gates, err := gateruntime.List(carrier.StateBuckets)
+	if err != nil || len(gates) != 1 {
+		t.Fatalf("constructed gate: %+v %v", gates, err)
+	}
+	card, err := opened.store.(workflowTestSelectedStore).GetDecisionCard(f.ctx, gates[0].CardID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.cardID = card.CardID
+	decidedAt := at.Add(time.Second)
+	if err := coordinator.CommitDecision(f.ctx, card, f.eventID, decidedAt); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DecisionCardDomainForTest(opened.store).ApplyDecisionForTest(f.ctx, decisioncard.DecideRequest{CardID: card.CardID, Verdict: "approve", Fields: admitDecisionCardTestObject(t, map[string]any{}), PrincipalID: "operator", ObservedContentHash: card.CardContentHash, DecisionEventID: f.eventID, Now: decidedAt}); err != nil {
+		t.Fatal(err)
+	}
+	control, err := card.Anchor.ControlRoutingSource()
+	if err != nil || control.Kind() != events.RoutingSourcePlatformControl {
+		t.Fatalf("root gate must retain closed platform-control authority: %+v %v", control, err)
+	}
+	// A root platform control has no flow-owned route. The exact committed card
+	// supplies the consumer's owner; no non-agent delivery history is invented.
+	event := eventtest.RuntimeControlWithRoutingSource(f.eventID, "mailbox.card_decided", "platform", "", []byte(`{"card_id":"`+card.CardID+`"}`), 0, f.runID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, f.entityID), control, decidedAt)
+	if err := commitSemanticEventFixture(f.ctx, opened.store.(workflowTestSelectedStore), event); err != nil {
+		t.Fatal(err)
+	}
+	// The contender uses the real gate consumer. Its accepted decision creates a
+	// new StageEntry in the same native transaction as the lifecycle transition.
+	// There is no pending node delivery or fabricated delivery history at R.
+	f.write = func(ctx context.Context, selected snapshotOwnershipStore) error {
+		pass, _, outcome, err := coordinatorFor(selected).Intercept(ctx, event)
+		if err == nil && (pass || !outcome.Committed) {
+			return fmt.Errorf("gate contender did not commit: pass=%v outcome=%+v", pass, outcome)
+		}
+		return err
 	}
 	return f
 }
@@ -334,7 +459,7 @@ func TestRunForkActivationContentionFixtureControlBothStores(t *testing.T) {
 	}
 }
 
-func stageForkContentionFixture(t *testing.T, f snapshotOwnershipFixture, selected bool) (runfork.RunForkMaterialization, runfork.RunForkSelectedContractExecutionActivateRequest) {
+func stageForkContentionFixture(t *testing.T, f forkContentionFixture, selected bool) (runfork.RunForkMaterialization, runfork.RunForkSelectedContractExecutionActivateRequest) {
 	t.Helper()
 	if !selected {
 		staged, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID})

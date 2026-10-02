@@ -792,9 +792,9 @@ func freezeDecisionCardRunInTestMutation(ctx context.Context, cards decisioncard
 
 func decisionGateStatusMutationExists(t *testing.T, ctx context.Context, db *sql.DB, postgres bool, runID, entityID, status string) bool {
 	t.Helper()
-	query := `SELECT path, new_value, writer_type, writer_id, COALESCE(handler_step, '') FROM entity_mutations WHERE run_id = ? AND entity_id = ? AND domain = 'accumulator' ORDER BY created_at, mutation_id`
+	query := `SELECT path, new_value, writer_type, writer_id, COALESCE(handler_step, '') FROM entity_mutations WHERE run_id = ? AND entity_id = ? AND domain = 'accumulator' AND handler_step = 'run_supersession' ORDER BY created_at, mutation_id`
 	if postgres {
-		query = `SELECT path, new_value, writer_type, writer_id, COALESCE(handler_step, '') FROM entity_mutations WHERE run_id = $1::uuid AND entity_id = $2::uuid AND domain = 'accumulator' ORDER BY created_at, mutation_id`
+		query = `SELECT path, new_value, writer_type, writer_id, COALESCE(handler_step, '') FROM entity_mutations WHERE run_id = $1::uuid AND entity_id = $2::uuid AND domain = 'accumulator' AND handler_step = 'run_supersession' ORDER BY created_at, mutation_id`
 	}
 	rows, err := db.QueryContext(ctx, query, runID, entityID)
 	if err != nil {

@@ -43,6 +43,9 @@ func requireWorkflowJoinAdmissionTx(ctx context.Context, tx *sql.Tx, fences []pi
 		}
 		matches := !found && fence.Entry.Empty()
 		if found {
+			if header.FlowTemplate != fence.Owner.Route.ScopeKey {
+				return fmt.Errorf("join admission disagrees with its constructed flow owner")
+			}
 			bookkeeping, err := storeentity.DecodeJSONMap(header.Bookkeeping)
 			if err != nil {
 				return fmt.Errorf("decode join admission lifecycle: %w", err)

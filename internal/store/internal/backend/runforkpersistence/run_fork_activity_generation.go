@@ -188,7 +188,7 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 		}); err != nil {
 			return event, fmt.Errorf("load fork-local loop state for entity %s: %w", state.Fork.EntityID, err)
 		}
-		actual, err = loadRunForkEntityActivations(ctx, tx, forkRunID, state.Fork.EntityID, state.Fork.FlowInstance, state.history.MaterializationMetadata.FlowTemplate)
+		actual, err = loadRunForkEntityActivations(ctx, tx, admission.postgres, forkRunID, state.Fork.EntityID, state.Fork.FlowInstance, state.history.MaterializationMetadata.FlowTemplate)
 		if err != nil {
 			return event, err
 		}
@@ -388,11 +388,11 @@ func bindRunForkActivitySourceEvent(raw json.RawMessage, forkRunID, sourceReques
 	payload["source_event_id"], _ = json.Marshal(activityidentity.ForkLineageEventID(forkRunID, sourceRequestEventID))
 	return json.Marshal(payload)
 }
-func loadRunForkEntityActivations(ctx context.Context, tx *sql.Tx, forkRunID, entityID, instancePath, flowID string) ([]loopruntime.Activation, error) {
+func loadRunForkEntityActivations(ctx context.Context, tx *sql.Tx, postgres bool, forkRunID, entityID, instancePath, flowID string) ([]loopruntime.Activation, error) {
 	if strings.TrimSpace(entityID) == "" {
 		return nil, nil
 	}
-	header, found, err := workflowheader.LoadForMutation(ctx, tx, false, forkRunID, entityID, instancePath)
+	header, found, err := workflowheader.LoadForMutation(ctx, tx, postgres, forkRunID, entityID, instancePath)
 	if err != nil {
 		return nil, fmt.Errorf("load fork-local loop state for entity %s disagrees with exact child route/type: %w", entityID, err)
 	}

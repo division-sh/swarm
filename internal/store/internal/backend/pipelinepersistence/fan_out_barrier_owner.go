@@ -419,12 +419,15 @@ func fanOutBarrierGenerationCurrent(ctx context.Context, tx *sql.Tx, postgres bo
 	if !generation.Valid() {
 		return true, nil
 	}
-	header, found, err := workflowheader.LoadForMutation(ctx, tx, postgres, registration.IntentKey.RunID, registration.EntityID, "")
+	header, found, err := workflowheader.LoadForMutation(ctx, tx, postgres, registration.IntentKey.RunID, registration.EntityID, registration.Route.InstancePath)
 	if err != nil {
 		return false, err
 	}
 	if !found {
 		return false, fmt.Errorf("fan-out barrier generation owner entity is missing")
+	}
+	if header.FlowTemplate != generation.FlowID {
+		return false, fmt.Errorf("fan-out generation disagrees with its constructed flow owner")
 	}
 	fields := map[string]any{}
 	if header.EntityType != "" {

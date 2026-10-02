@@ -20,7 +20,7 @@ import (
 func TestActivityAdmissionConsumesConstructedHeaderBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, shape := range []string{"fieldless", "fields"} {
-			for _, cell := range []string{"current", "stale", "wrong_entity", "wrong_path", "missing_header", "malformed_bucket"} {
+			for _, cell := range []string{"current", "stale", "wrong_entity", "wrong_path", "wrong_header_flow", "missing_header", "malformed_bucket"} {
 				t.Run(backend+"/"+shape+"/"+cell, func(t *testing.T) {
 					files := map[string]string{"schema.yaml": "name: activity-header\nstages:\n  review: {initial: true}\n"}
 					if shape == "fields" {
@@ -73,6 +73,10 @@ func TestActivityAdmissionConsumesConstructedHeaderBothStores(t *testing.T) {
 						record.EntityID = uuid.NewString()
 					case "wrong_path":
 						record.FlowInstance = "foreign/one"
+					case "wrong_header_flow":
+						if _, err := f.db.Exec(`UPDATE flow_instances SET flow_template='foreign' WHERE run_id=$1 AND entity_id=$2`, run, req.Instance.EntityID); err != nil {
+							t.Fatal(err)
+						}
 					case "missing_header":
 						if _, err := f.db.Exec(`DELETE FROM flow_instances WHERE run_id=$1 AND entity_id=$2`, run, req.Instance.EntityID); err != nil {
 							t.Fatal(err)

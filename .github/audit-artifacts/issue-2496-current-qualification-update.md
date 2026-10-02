@@ -340,3 +340,83 @@ oracles remain. Master reconciliation, this proof, final read/write census,
 supported-surface qualification, managed-suite GREEN and exact-head CI remain
 required. Honest closure is still partial canonicalization, not failure-class
 elimination; parents #2411/#2250 remain open.
+
+### Rebased WIP Repair Evidence, 2026-10-02
+
+Rebased the five WIP repair commits cleanly onto origin/master 5b3fbd5fb,
+preserving the merged timer controls and migrating their retired construction
+calls to the existing typed activation commit. No retired API is restored.
+The remote WIP head has not yet been qualified by these local receipts.
+
+| Executed command/scope | Actual result and boundary |
+| --- | --- |
+| Managed five-root contention/native Manager/activity header command, count1 | PASS22.043s in runtimepersistence: both stores, actual admitted gate transition and new StageEntry, generic/selected commit/rollback/cancel, native lost-ack cleanup, and28 header/activity leaves. This preceded the additional gate-summary/journal assertions. |
+| Broader managed five-package race3 command | RED. Pipeline did not compile at the newly merged timer API calls. Store process was interrupted for stack diagnosis at318.482s; it was executing repeated selected-artifact preparation, not proven deadlocked. No completed contention race3 or aggregate PASS is claimed. Backend join, selected pending responsibility and Manager load-budget packages passed; interruption is not a timeout waiver. |
+| Managed native acknowledgment/cleanup/header/summary/join/pending/load-budget race3, excluding expensive contention | runtimepersistence PASS290.553s; pipelinepersistence PASS7.395s; runforkexecution PASS1.054s; manager PASS3.794s. Aggregate RED solely because pipeline compiled before the final timer fixture correction. These native cells completed; no aggregate GREEN. |
+| Focused lifecycle publication handoff and hostile receipt unit matrix, race3 | pipeline PASS1.087s after timer compilation repair. Exact committed publication identities/order/count preserved. |
+
+R2 census additionally discovered generic replay receiver verification and both
+activation-lineage inventories still reading entity_state as executable owner
+evidence. Their precise same-concept escalation and proposed proof rows are
+recorded on #2496 at5946306433; these readers are unchanged pending disposition.
+The nine named migrations are not concept-wide elimination while these survive.
+R3's exact root-tree question remains at5945687624. No fabricated child header,
+empty-fields compatibility row or expanded replay capability is authorized.
+
+Current measurement before the final native gate-freeze proof:582 changed files,
+24123 added/14500 removed lines; test/evidence403 files account for17569/7269.
+Other production175 files are6097/6913 (net-negative816); generated/interfaces
+37/41; spec420/277. Readiness core386 lines. This is a measured soft-cap report,
+not a substitute for the two-load execution proof or manifestation closure.
+Further timer/join/served qualification is queued through capacity control.
+Default managed qualification and exact-head CI remain outstanding.
+
+### Native Contention And Merged Timer Integration
+
+The complete strengthened contention/gate-freeze command completed through
+swarm-test, not an interrupted partial run: runtimepersistence PASS281.015s,
+`-race -count=3`, with both backends. Roots:
+TestRunForkActivationContentionFixtureControlBothStores,
+TestRunForkActivationFrontierContentionBothStores,
+TestSelectedRunForkActivationFrontierContentionBothStores, and
+TestConstructedHeaderGateFreezeBothStores. The committed decision uses the real
+gate card/outcome and produces a new StageEntry. The oracle now checks canonical
+header revision/stage, exact gate/card/event disposition, the supersession
+writer's journal and ReadRunSummary, in addition to commit/rollback/cancellation
+and unchanged-table assertions. The fieldless/field-bearing freeze proof uses
+actual construction and native terminal mutation, not injected gate JSON. It is
+a native component proof, not public-fork qualification. This receipt precedes
+the subsequent selected-reader PostgreSQL lock-carriage correction.
+
+The journal oracle selects the supersession step before checking its exact
+writer; canonical construction also legitimately contributes accumulator
+mutations. Its first fieldless run was RED on that fixture-only overbroad
+selection; the corrected SQLite leaf passes0.601s.
+
+New master timer proofs now use the existing PrepareInitialEntryLifecycle and
+typed selected-store construction command. Reconciliation/cancellation receives
+a native accepted attachment attempt under an actual process/generation grant.
+Joined timer/publication work precedes exact attempt retirement and process
+release. Restart verifies the persisted source-set identity and admits a new
+attempt after predecessor settlement, without repeating construction or timer
+causes. SQLite initial replay passes0.442s; SQLite reopen/active, concurrent exact
+replay, ten corruption rollback rows and the foreign-attachment refusal pass
+0.576s. Earlier compilation errors, missing-attempt refusals, duplicate source
+installation and the mismatched-attachment fixture failure remain diagnostic
+RED receipts, not production rollback or full-matrix proof. The complete
+both-store timer/join/served supplement is queued through capacity control.
+
+The selected-reader loader now receives each existing adapter's dialect; this
+retains PostgreSQL header-then-declared-field locking. No dialect inference,
+semantic decoder replacement or fallback field row was added. The generation
+boundary census names precisely one new FlowID comparison in the already-owned
+fan-out barrier admission path: bind an admitted generation to its constructed
+header before the existing loop decoder. Unlisted coordinate interpretation
+remains rejected by the hostile guard. The initial static guard RED is retained;
+the corrected guard still requires its exact occurrence count.
+
+Current master was freshly fetched and is 5b3fbd5fb; it is already this branch's
+merge base. R2's generic activation/replay readers and R3's full standing-tree
+consumer still await the two recorded exact dispositions. Complete consumer
+supplements, default managed qualification, final proof audit and exact-head CI
+remain outstanding. No final review or merge readiness is requested.

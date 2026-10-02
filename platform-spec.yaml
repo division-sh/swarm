@@ -20064,8 +20064,9 @@ platform_events:
     mailbox.card_superseded:
       description: >-
         Platform evidence event emitted when an active anchor-owned lifecycle boundary supersedes a pending typed decision
-        card. Run-level terminal supersession commits only decision-card domain state and the append-only decision_card_changes
-        row; it creates no mailbox.card_superseded event, route, delivery, replay scope, receipt, or dispatch work.
+        card. Run-level terminal supersession atomically commits decision-card domain state, its append-only
+        decision_card_changes row, and the constructed header's gate disposition with its existing revision/mutation
+        journal. It creates no mailbox.card_superseded event, route, delivery, replay scope, receipt, or dispatch work.
       schema_authority: platform-spec.yaml#api_specification.conventions.mailbox.decision_event_payload_contract
       producer_evidence:
         produced_by_type: platform

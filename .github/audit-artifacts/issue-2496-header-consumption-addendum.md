@@ -106,3 +106,37 @@ public verify; in-memory runtime refusal; A's merged stage-graph oracle; restore
 describe whitespace normalization. Writer handoff/terminal race controls pass on
 both stores under race x3 (62.719s), without weakening rollback or terminal truth.
 Default qualification of f2fe842b9 is running. No PR or GREEN closure claim.
+
+## Authorized R2 Cutover, Current WIP
+
+The historical requests above were answered by the independent WIP ruling
+5944826849 and issue authorization5944833985. All four selected and five sibling
+families below have migrated. This is implementation status, not automatic
+execution credit or an exhaustive final closure claim.
+
+| Consumer | Current canonical consumption and exact proof obligation |
+| --- | --- |
+| prepareRunForkSelectedContractSourceEvent | Exact fixed-revision declaration/child correspondence, header route/type and iff-declared fields; ordinary-source presence and rehomed-child matrices, unchanged rejected snapshots. |
+| selectedContractActivityLineage | Exact header owner under selected source, retaining fresh-request parent execution and malformed/unrelated lineage refusal; reminted write/read-only activity and source-projection matrices. |
+| materializeRunForkProposedEffectCards | Exact child header activations before fresh card/continuation creation; native proposed-effect remint and gate refusal controls, no added effect execution. |
+| projectRunForkFanOutCapsule | Exact header generation for the admitted original-role/child relation, retaining #642 pending-work refusal; fixed-revision fan-out materialization and origin controls. |
+| activityjournal.loadLoopState | Header gates/loop buckets and only declared business fields; exact FlowID binding and canonical decoder retained. The28-leaf native activity matrix passed race3, including fieldless/current/stale/missing/wrong-flow controls. |
+| requireWorkflowJoinAdmissionTx | Constructor lock plus exact header route/template and stage-entry/arm MatchCurrent; header-input integration only, A's model unchanged. Native fieldless entry/arm matrix passed race3; composed arm/arrival and initial activation tests remain in the queued supplement. |
+| fanOutBarrierGenerationCurrent | Exact registration route/template/header generation, optional fields, existing fan-out/loop decoder. Current/stale/supersession/winner controls are named in the queued supplement, not credited by the shared helper. |
+| decisioncard.summarizeGates | Header accumulator, exact declared FlowID, strict gate decoding; open/committed/superseded/malformed projection controls passed race3. Native constructed gate-freeze/summary passed race3; real run-completion controls remain required. |
+| supersedeRunGateActivations | Header selection and revision-CAS writer, exact template, existing journal; no obsolete field-row gate writer. Native fieldless/field-bearing freeze and actual generic/selected terminal contention passed race3 with exact journal/readback/summary assertions. Other terminal producer controls remain required. |
+
+The shared workflowheader.LoadForMutation projection is transaction-local and
+strict, not a semantic decoder. PostgreSQL consumers pass their adapter dialect
+so it locks the exact header and declared field row. An absent fieldless row is
+the declaration's valid shape, never an empty-row repair. Header mismatch,
+duplicate field ownership and malformed persisted authority fail closed.
+
+The post-cutover direct read/write census also found generic historical replay
+receiver verification and both generic activation inventories using entity_state
+as executable owner evidence. These surviving same-concept consumers are
+unchanged and explicitly escalated at5946306433, pending absorb/split disposition.
+Import/scenario state-only rows, optional business-field collections, immutable
+historical field snapshots and deliberate hostile test rows remain separate
+contracts; they do not acquire executable header authority. This census does
+not claim owner-complete closure while the generic readers survive.

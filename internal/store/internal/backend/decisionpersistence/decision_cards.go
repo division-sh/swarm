@@ -1195,9 +1195,9 @@ func (s *DecisionSQLiteOwner) ExpireDecisionCardInputDrafts(ctx context.Context,
 
 func supersedeRunGateActivations(ctx context.Context, attempt *mutationprotocol.Attempt, tx *sql.Tx, runID, reason string, now time.Time, includeCommitted bool, postgres bool) error {
 	mutationCtx := runtimecorrelation.WithRunID(ctx, runID)
-	query := `SELECT entity_id, instance_path, revision, accumulator FROM flow_instances WHERE run_id = ? ORDER BY entity_id`
+	query := `SELECT entity_id, instance_path, flow_template, revision, accumulator FROM flow_instances WHERE run_id = ? ORDER BY entity_id`
 	if postgres {
-		query = `SELECT entity_id::text, instance_path, revision, accumulator FROM flow_instances WHERE run_id = $1::uuid ORDER BY entity_id FOR UPDATE`
+		query = `SELECT entity_id::text, instance_path, flow_template, revision, accumulator FROM flow_instances WHERE run_id = $1::uuid ORDER BY entity_id FOR UPDATE`
 	}
 	rows, err := tx.QueryContext(ctx, query, runID)
 	if err != nil {
@@ -1212,10 +1212,10 @@ func supersedeRunGateActivations(ctx context.Context, attempt *mutationprotocol.
 	}
 	updates := []update{}
 	for rows.Next() {
-		var entityID, instance string
+		var entityID, instance, flowTemplate string
 		var revision int64
 		var raw any
-		if err := rows.Scan(&entityID, &instance, &revision, &raw); err != nil {
+		if err := rows.Scan(&entityID, &instance, &flowTemplate, &revision, &raw); err != nil {
 			rows.Close()
 			return err
 		}
@@ -1236,6 +1236,10 @@ func supersedeRunGateActivations(ctx context.Context, attempt *mutationprotocol.
 		}
 		changed := false
 		for _, activation := range activations {
+			if activation.FlowID != flowTemplate {
+				rows.Close()
+				return fmt.Errorf("run gate activation disagrees with its constructed header owner")
+			}
 			if activation.Status == gateruntime.StatusDecisionCommitted && !includeCommitted {
 				rows.Close()
 				return fmt.Errorf("run %s cannot terminate while decision card %s has a committed verdict awaiting its frozen route", runID, activation.CardID)

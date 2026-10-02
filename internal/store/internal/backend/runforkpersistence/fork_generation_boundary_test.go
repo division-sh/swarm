@@ -152,6 +152,7 @@ func generationBoundaryAllowances() map[string]historicalBoundaryAllowance {
 		historicalBoundaryOwner + "projectForkRevisionPayload/coordinate:RevisionField":                           {2, "bound payload projection checks and replaces only the admitted field"},
 		historicalBoundaryOwner + "projectForkRevisionPayload/coordinate:RevisionID":                              {2, "bound payload projection checks and replaces the exact admitted revision"},
 		historicalBoundaryOwner + "runForkActivityFact/coordinate:RevisionID":                                     {1, "activity story readback projects admitted journal evidence"},
+		"store/internal/backend/pipelinepersistence::fanOutBarrierGenerationCurrent/coordinate:FlowID":            {1, "bind an already-admitted generation to its exact constructed header before the canonical loop eligibility decoder"},
 	}
 	for _, function := range []string{"prepareRunForkSelectedContractSourceEvent", "projectRunForkFanOutCapsule"} {
 		for _, coordinate := range []string{"FlowID", "LoopID", "RevisionField"} {

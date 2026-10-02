@@ -45,7 +45,7 @@ func Claim(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActiveRun Re
 	if err := requireActiveRun(ctx, record.RunID); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
-	metadata, stateBuckets, found, err := loadLoopState(ctx, tx, dialect, record.RunID, record.EntityID, record.FlowInstance)
+	metadata, stateBuckets, found, err := loadLoopState(ctx, tx, dialect, record.RunID, record.EntityID, record.FlowInstance, record.Generation.FlowID)
 	if err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
@@ -384,10 +384,13 @@ func scan(row interface{ Scan(...any) error }) (runtimepipeline.ActivityAttemptR
 	return runtimepipeline.NormalizeActivityAttemptRecord(record), nil
 }
 
-func loadLoopState(ctx context.Context, tx *sql.Tx, dialect Dialect, runID, entityID, flowInstance string) (map[string]any, map[string]any, bool, error) {
+func loadLoopState(ctx context.Context, tx *sql.Tx, dialect Dialect, runID, entityID, flowInstance, flowID string) (map[string]any, map[string]any, bool, error) {
 	header, found, err := workflowheader.LoadForMutation(ctx, tx, dialect == DialectPostgres, runID, entityID, flowInstance)
 	if err != nil || !found {
 		return nil, nil, found, err
+	}
+	if header.FlowTemplate != flowID {
+		return nil, nil, false, fmt.Errorf("activity generation disagrees with its constructed flow owner")
 	}
 	metadata := map[string]any{}
 	if header.EntityType != "" {
