@@ -97,15 +97,15 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 		}, false},
 	}
 	cases := []struct {
-		name, node, state, lifecycle, failure              string
-		initialize, duplicateOwner, wrongOwner, appearance bool
+		name, node, state, lifecycle, failure  string
+		duplicateOwner, wrongOwner, appearance bool
 	}{
 		{name: "existing", node: "selector", state: "active"},
 		{name: "missing-with-business-key-sibling", node: "selector", failure: "owner is missing"},
-		{name: "initialize-with-business-key-sibling", node: "upserter", initialize: true, failure: "owner is missing"},
+		{name: "initialize-with-business-key-sibling", node: "upserter", failure: "owner is missing"},
 		{name: "initializer-reuses-state", node: "upserter", state: "active"},
-		{name: "exact-state-appears-before-commit", node: "upserter", initialize: true, appearance: true, failure: "owner is missing"},
-		{name: "wrong-canonical-owner", node: "upserter", state: "active", wrongOwner: true, failure: "owner is missing"},
+		{name: "exact-state-appears-before-commit", node: "upserter", appearance: true, failure: "owner is missing"},
+		{name: "wrong-canonical-owner", node: "upserter", state: "active", wrongOwner: true, failure: "disagrees with receiver entity"},
 		{name: "duplicate-exact-owners", node: "selector", state: "active", duplicateOwner: true},
 		{name: "terminal-state", node: "selector", state: "done", failure: "owner is unavailable"},
 		{name: "draining-companion", node: "selector", state: "active", lifecycle: "draining", failure: "owner is unavailable"},
@@ -230,6 +230,9 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 					}
 					bus := newBus()
 					evt := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType(eventType), "", "", []byte(`{"account_id":"same-business-key","instance_key":"instance"}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
+					if tc.wrongOwner && scope.flow != "." {
+						evt = eventtest.TargetRouted(evt, events.RouteIdentity{FlowID: scope.flow, FlowInstance: instance, EntityID: entityID})
+					}
 					if tc.failure != "" {
 						failure := tc.failure
 						if scope.flow == "." && tc.state == "" {

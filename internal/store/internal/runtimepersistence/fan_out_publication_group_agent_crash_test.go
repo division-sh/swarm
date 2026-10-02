@@ -28,6 +28,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -131,7 +132,7 @@ func runPublicationGroupAgentCrashChild(t *testing.T, mode string) {
 	bundle, _ := semanticview.Bundle(source)
 	fact := mustStoreTestSourceArtifactFact(bundle.SourceArtifact.BundleHash())
 	runID := os.Getenv("SWARM_FAN_OUT_CRASH_RUN")
-	ctx, cancel := context.WithTimeout(correlation.WithRunID(correlation.WithSourceArtifactFact(testAuthorActivityContextForBundle(fact.BundleHash()), fact), runID), 40*time.Second)
+	ctx, cancel := context.WithTimeout(effects.WithExecutionMode(correlation.WithRunID(correlation.WithSourceArtifactFact(testAuthorActivityContextForBundle(fact.BundleHash()), fact), runID), executionmode.Mock), 40*time.Second)
 	defer cancel()
 	request := testStartupAcquireRequest("publication-group-agent-" + mode)
 	process, err := fixture.store.(startupownership.Store).AcquireProcessCapability(ctx, request)
@@ -275,6 +276,7 @@ func runPublicationGroupAgentCrashChild(t *testing.T, mode string) {
 	}
 	construction := sqliteFlowActivationRequest(bundle, ".", runID, "", runID)
 	construction.Instance = flowidentity.Stored(source, ".", runID, runID, runID, "")
+	construction.OccurredAt = time.Now().UTC()
 	if _, err := am.EnsureFlowInstance(ctx, construction); err != nil {
 		t.Fatalf("attach original constructed crash receiver: %v", err)
 	}

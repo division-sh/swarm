@@ -95,3 +95,29 @@ join fixture's ordinary Initialize seed was cross-recorded on #1994 in
 5948846117; A's production collection/join files and lifecycle signature remain
 unchanged. Managed default/public/recovery qualification, exact complexity and
 exact-head CI remain outstanding. This is not a final audit or merge claim.
+
+## Reconciled Qualification Checkpoint
+
+Rebased the complete branch onto origin/master9a1f27fbd. The authority registry
+keeps A's native delivery-cardinality witness; the retired receiver-dependent
+materializer helper is absent rather than restored during conflict resolution.
+
+The mock-agent crash fixture now declares Mock in its initial constructor
+context and successor context, with a current attachment clock. Its SQLite
+after_commit_before_ack cell passes6.763s after the mode/clock setup REDs.
+No persisted mode rewrite, new continuation owner, or admission bypass occurs.
+
+The connected wrong-owner negative explicitly routes the original constructed
+entity, then corrupts native header identity. Its focused SQLite control passes
+0.979s and rejects the changed entity before publication. Complete matrix
+qualification remains required.
+
+A's physical driver-COMMIT fixture now seeds an explicit native header beside
+its native field row and requests only UpdateStateAndCompanion. All eight
+SQLite/PostgreSQL commit, rollback, lost-acknowledgment and deferred-rejection
+cells pass3.333s with the original arm, deadline, revision and retry assertions.
+This is physical store-boundary proof, not compiler/public construction proof.
+A's production collection/join files and lifecycle signature are unchanged.
+
+Managed public standing restart/reset, complete connected/crash matrices,
+default suite and exact-head CI are still outstanding; no final closure claim.

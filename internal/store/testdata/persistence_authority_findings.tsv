@@ -10102,7 +10102,7 @@ private-backend	raw-type	raw-sql	internal/store/internal/backend/delivery/lifecy
 private-backend	raw-type	raw-sql	internal/store/internal/backend/delivery/lifecycle.go	hydrateContinuationEvents	param:tx	*database/sql.Tx
 private-backend	raw-type	raw-sql	internal/store/internal/backend/delivery/lifecycle.go	hydrateContinuationEventsIndividually	param:tx	*database/sql.Tx
 private-backend	raw-type	raw-sql	internal/store/internal/backend/delivery/lifecycle.go	observeDeliveryContinuationsTx	param:tx	*database/sql.Tx
-private-backend	raw-type	raw-sql	internal/store/internal/backend/delivery/lifecycle.go	settleReceiverDependentsTx	param:tx	*database/sql.Tx
+private-backend	raw-type	raw-sql	internal/store/internal/backend/delivery/read_projections.go	FixtureDeliveryCardinalityTx	param:tx	*database/sql.Tx
 private-backend	raw-type	raw-sql	internal/store/internal/backend/delivery/read_projections.go	UnfinishedRunDeliveryCountTx	param:tx	*database/sql.Tx
 private-backend	raw-type	raw-sql	internal/store/internal/backend/delivery/receiver_materialization.go	(*github.com/division-sh/swarm/internal/store/internal/backend/delivery.Adapter).materializationReady	param:claimTx	*database/sql.Tx
 private-backend	raw-type	raw-sql	internal/store/internal/backend/delivery/receiver_materialization.go	(*github.com/division-sh/swarm/internal/store/internal/backend/delivery.Adapter).materializedReceiverExecutionReady	param:claimTx	*database/sql.Tx

@@ -98,7 +98,7 @@ func seedPublicationGroupAgentIntent(t *testing.T, backend string, fixture autho
 		t.Fatal("agent crash source requires its actual admitted bundle")
 	}
 	runID, at := uuid.NewString(), time.Now().UTC()
-	ctx := correlation.WithRunID(seedSelectedActivitySourceRun(t, fixture, runID, source), runID)
+	ctx := effects.WithExecutionMode(correlation.WithRunID(seedSelectedActivitySourceRun(t, fixture, runID, source), runID), executionmode.Mock)
 	construction := sqliteFlowActivationRequest(bundle, ".", runID, "", runID)
 	construction.Instance = flowidentity.Stored(source, ".", runID, runID, runID, "")
 	construction.OccurredAt = at.Add(-time.Second)
