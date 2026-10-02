@@ -11,9 +11,64 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/google/uuid"
 )
+
+type receiptRestartHead struct {
+	State     string `json:"state"`
+	VersionID string `json:"version_id,omitempty"`
+}
+
+type receiptRestartSourceResult struct {
+	SourceInvocationID string             `json:"source_invocation_id"`
+	Operation          string             `json:"operation"`
+	Outcome            string             `json:"outcome"`
+	BundleHash         string             `json:"bundle_hash"`
+	ExpectedHead       receiptRestartHead `json:"expected_head"`
+	Candidate          struct {
+		VersionID string `json:"version_id"`
+	} `json:"candidate"`
+	Head struct {
+		After receiptRestartHead `json:"after"`
+	} `json:"head"`
+	Wire json.RawMessage `json:"-"`
+}
+
+func (r *receiptRestartSourceResult) UnmarshalJSON(raw []byte) error {
+	type fields receiptRestartSourceResult
+	if err := json.Unmarshal(raw, (*fields)(r)); err != nil {
+		return err
+	}
+	r.Wire = append(json.RawMessage(nil), raw...)
+	return nil
+}
+
+type receiptRestartPruneResult struct {
+	PruneInvocationID string             `json:"prune_invocation_id"`
+	VersionID         string             `json:"version_id"`
+	ExpectedHead      receiptRestartHead `json:"expected_head"`
+	Outcome           string             `json:"outcome"`
+	Defects           *json.RawMessage   `json:"defects"`
+	Pins              *json.RawMessage   `json:"pins"`
+	Wire              json.RawMessage    `json:"-"`
+}
+
+func (r *receiptRestartPruneResult) UnmarshalJSON(raw []byte) error {
+	type fields receiptRestartPruneResult
+	if err := json.Unmarshal(raw, (*fields)(r)); err != nil {
+		return err
+	}
+	r.Wire = append(json.RawMessage(nil), raw...)
+	return nil
+}
+
+type receiptRestartVersionSummary struct {
+	VersionID    string `json:"version_id"`
+	PayloadState string `json:"payload_state"`
+	Manifest     struct {
+		RowCount int `json:"row_count"`
+	} `json:"manifest"`
+}
 
 // The retained host uses the existing internal MockOnly composition. The CLI
 // and authenticated API are real compiled/public surfaces, not RPC doubles.
@@ -82,17 +137,17 @@ func TestDurableDataOperationAggregatePublicRestartBothStores(t *testing.T) {
 			}
 			// The source owner advances the head after CLI creation. Replay must
 			// reconstruct the original request, not substitute this newer head.
-			var current durabledata.VersionSummary
+			var current receiptRestartVersionSummary
 			if err := p.rpc.call(ctx, "data.show", map[string]any{"view": "version", "declaration": receiptRestartDeclaration(),
 				"selector": map[string]any{"kind": "head"}}, &current); err != nil {
 				t.Fatal(err)
 			}
-			latest := receiptRestartSource(t, ctx, p.rpc, hash, "import", durabledata.VersionHead(current.VersionID), rows[3]+"\n", "accepted")
+			latest := receiptRestartSource(t, ctx, p.rpc, hash, "import", receiptRestartHead{State: "version", VersionID: current.VersionID}, rows[3]+"\n", "accepted")
 			operations = append(operations, receiptRestartRef("source", latest.SourceInvocationID))
 			prunes := createReceiptRestartPrunes(t, ctx, p.rpc, sources, latest, createdID)
 			operations = append(operations, prunes...)
 			before := captureReceiptRestartOperations(t, ctx, p.rpc, operations)
-			var pruned durabledata.VersionSummary
+			var pruned receiptRestartVersionSummary
 			if err := p.rpc.call(ctx, "data.show", map[string]any{"view": "version", "declaration": receiptRestartDeclaration(),
 				"selector": map[string]any{"kind": "version", "version_id": sources[0].Candidate.VersionID}}, &pruned); err != nil || pruned.PayloadState != "pruned" || pruned.Manifest.RowCount != 1 || pruned.VersionID != sources[0].Candidate.VersionID {
 				t.Fatalf("pruned payload lost permanent version metadata: %+v error=%v", pruned, err)
@@ -123,7 +178,7 @@ func TestDurableDataOperationAggregatePublicRestartBothStores(t *testing.T) {
 					input = rows[1] + "\n"
 				}
 				params := receiptRestartSourceParams(hash, source.SourceInvocationID, source.ExpectedHead, input)
-				var replay durabledata.SourceOperationResult
+				var replay receiptRestartSourceResult
 				if err := p.rpc.call(ctx, "data."+source.Operation, params, &replay); err != nil || !reflect.DeepEqual(source, replay) {
 					t.Fatalf("permanent source replay: before=%+v after=%+v error=%v", source, replay, err)
 				}
@@ -132,7 +187,7 @@ func TestDurableDataOperationAggregatePublicRestartBothStores(t *testing.T) {
 			if after := captureReceiptRestartOperations(t, ctx, p.rpc, operations); !reflect.DeepEqual(before, after) {
 				t.Fatalf("fresh compiled CLI/permanent replay changed receipts: before=%s after=%s", before, after)
 			}
-			var head durabledata.VersionSummary
+			var head receiptRestartVersionSummary
 			if err := p.rpc.call(ctx, "data.show", map[string]any{"view": "version", "declaration": receiptRestartDeclaration(),
 				"selector": map[string]any{"kind": "head"}}, &head); err != nil || head.VersionID != rematerialized.Candidate.VersionID {
 				t.Fatalf("replay moved current head: %+v error=%v", head, err)
@@ -153,14 +208,14 @@ func receiptRestartRef(kind, id string) map[string]any {
 	return map[string]any{"kind": kind, field: id}
 }
 
-func receiptRestartSourceParams(hash, id string, expected durabledata.ExpectedHead, input string) map[string]any {
+func receiptRestartSourceParams(hash, id string, expected receiptRestartHead, input string) map[string]any {
 	return map[string]any{"source_invocation_id": id, "bundle_hash": hash, "declaration": receiptRestartDeclaration(),
 		"expected_head": expected, "input": map[string]any{"format": "jsonl", "content_base64": base64.StdEncoding.EncodeToString([]byte(input))}}
 }
 
-func receiptRestartSource(t *testing.T, ctx context.Context, rpc *releaseRPCClient, hash, operation string, expected durabledata.ExpectedHead, input, outcome string) durabledata.SourceOperationResult {
+func receiptRestartSource(t *testing.T, ctx context.Context, rpc *releaseRPCClient, hash, operation string, expected receiptRestartHead, input, outcome string) receiptRestartSourceResult {
 	t.Helper()
-	var result durabledata.SourceOperationResult
+	var result receiptRestartSourceResult
 	if err := rpc.call(ctx, "data."+operation, receiptRestartSourceParams(hash, uuid.NewString(), expected, input), &result); err != nil {
 		t.Fatal(err)
 	}
@@ -170,17 +225,17 @@ func receiptRestartSource(t *testing.T, ctx context.Context, rpc *releaseRPCClie
 	return result
 }
 
-func createReceiptRestartSources(t *testing.T, ctx context.Context, rpc *releaseRPCClient, hash string, rows []string) ([]map[string]any, []durabledata.SourceOperationResult) {
+func createReceiptRestartSources(t *testing.T, ctx context.Context, rpc *releaseRPCClient, hash string, rows []string) ([]map[string]any, []receiptRestartSourceResult) {
 	t.Helper()
-	first := receiptRestartSource(t, ctx, rpc, hash, "import", durabledata.AbsentHead(), rows[0]+"\n", "accepted")
+	first := receiptRestartSource(t, ctx, rpc, hash, "import", receiptRestartHead{State: "absent"}, rows[0]+"\n", "accepted")
 	second := receiptRestartSource(t, ctx, rpc, hash, "import", first.Head.After, rows[1]+"\n", "accepted")
-	sources := []durabledata.SourceOperationResult{first, second}
+	sources := []receiptRestartSourceResult{first, second}
 	for _, operation := range []string{"check", "import"} {
 		if operation == "check" {
 			sources = append(sources, receiptRestartSource(t, ctx, rpc, hash, operation, second.Head.After, rows[0]+"\n", "accepted"))
 		}
 		sources = append(sources, receiptRestartSource(t, ctx, rpc, hash, operation, second.Head.After, "{\"unknown\":true}\n", "validation_rejected"))
-		sources = append(sources, receiptRestartSource(t, ctx, rpc, hash, operation, durabledata.AbsentHead(), rows[0]+"\n", "head_conflict"))
+		sources = append(sources, receiptRestartSource(t, ctx, rpc, hash, operation, receiptRestartHead{State: "absent"}, rows[0]+"\n", "head_conflict"))
 	}
 	refs := make([]map[string]any, 0, len(sources))
 	for _, source := range sources {
@@ -189,33 +244,39 @@ func createReceiptRestartSources(t *testing.T, ctx context.Context, rpc *release
 	return refs, sources
 }
 
-func createReceiptRestartPrunes(t *testing.T, ctx context.Context, rpc *releaseRPCClient, sources []durabledata.SourceOperationResult, latest durabledata.SourceOperationResult, runID string) []map[string]any {
+func createReceiptRestartPrunes(t *testing.T, ctx context.Context, rpc *releaseRPCClient, sources []receiptRestartSourceResult, latest receiptRestartSourceResult, runID string) []map[string]any {
 	t.Helper()
-	var binding durabledata.PageResult[durabledata.RunCreationDataItem]
+	var binding struct {
+		Items []struct {
+			Pin *struct {
+				VersionID string `json:"version_id"`
+			} `json:"pin"`
+		} `json:"items"`
+	}
 	readReceiptRestartDetail(t, ctx, rpc, receiptRestartRef("run_creation", runID), "run_binding", &binding)
 	if len(binding.Items) != 2 || binding.Items[0].Pin == nil {
 		t.Fatalf("created run must retain exact pin/import group: %+v", binding)
 	}
 	refs := []map[string]any{}
 	for _, test := range []struct {
-		version durabledata.VersionID
-		head    durabledata.ExpectedHead
+		version string
+		head    receiptRestartHead
 		outcome string
 	}{
 		{sources[0].Candidate.VersionID, latest.Head.After, "pruned"},
 		{sources[0].Candidate.VersionID, latest.Head.After, "already_pruned"},
-		{sources[0].Candidate.VersionID, durabledata.AbsentHead(), "head_conflict"},
+		{sources[0].Candidate.VersionID, receiptRestartHead{State: "absent"}, "head_conflict"},
 		{latest.Candidate.VersionID, latest.Head.After, "refused_current"},
 		{binding.Items[0].Pin.VersionID, latest.Head.After, "refused_pinned"},
-		{durabledata.VersionID("resource-version-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), latest.Head.After, "rejected"},
+		{"resource-version-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", latest.Head.After, "rejected"},
 	} {
-		var result durabledata.PruneOperationResult
+		var result receiptRestartPruneResult
 		params := map[string]any{"prune_invocation_id": uuid.NewString(), "declaration": receiptRestartDeclaration(),
 			"version_id": test.version, "expected_head": test.head}
 		if err := rpc.call(ctx, "data.prune", params, &result); err != nil || result.Outcome != test.outcome {
 			t.Fatalf("prune %s: %+v error=%v", test.outcome, result, err)
 		}
-		var replay durabledata.PruneOperationResult
+		var replay receiptRestartPruneResult
 		if err := rpc.call(ctx, "data.prune", params, &replay); err != nil || !reflect.DeepEqual(result, replay) {
 			t.Fatalf("prune permanent replay: before=%+v after=%+v error=%v", result, replay, err)
 		}
@@ -239,7 +300,9 @@ func captureReceiptRestartOperations(t *testing.T, ctx context.Context, rpc *rel
 	t.Helper()
 	result := map[string]json.RawMessage{}
 	for index, ref := range refs {
-		var summary durabledata.OperationSummary
+		var summary struct {
+			Prune *receiptRestartPruneResult `json:"prune"`
+		}
 		readReceiptRestartDetail(t, ctx, rpc, ref, "summary", &summary)
 		details := []string{"summary"}
 		switch ref["kind"] {
@@ -270,12 +333,14 @@ func captureReceiptRestartOperations(t *testing.T, ctx context.Context, rpc *rel
 func replayReceiptRestartPrunes(t *testing.T, ctx context.Context, rpc *releaseRPCClient, refs []map[string]any) {
 	t.Helper()
 	for _, ref := range refs {
-		var original durabledata.OperationSummary
+		var original struct {
+			Prune *receiptRestartPruneResult `json:"prune"`
+		}
 		readReceiptRestartDetail(t, ctx, rpc, ref, "summary", &original)
 		if original.Prune == nil {
 			t.Fatalf("missing permanent prune: %+v", original)
 		}
-		var replay durabledata.PruneOperationResult
+		var replay receiptRestartPruneResult
 		params := map[string]any{"prune_invocation_id": original.Prune.PruneInvocationID, "declaration": receiptRestartDeclaration(),
 			"version_id": original.Prune.VersionID, "expected_head": original.Prune.ExpectedHead}
 		if err := rpc.call(ctx, "data.prune", params, &replay); err != nil || !reflect.DeepEqual(*original.Prune, replay) {
@@ -291,8 +356,11 @@ func assertReceiptRestartBinding(t *testing.T, records map[string]json.RawMessag
 		if !strings.HasSuffix(key, "/request_binding") {
 			continue
 		}
-		var binding durabledata.RunCreationRequestBinding
-		if err := json.Unmarshal(raw, &binding); err != nil || binding.Validate() != nil || len(binding.Imports) != 1 {
+		var binding struct {
+			RunID   string            `json:"run_id"`
+			Imports []json.RawMessage `json:"imports"`
+		}
+		if err := json.Unmarshal(raw, &binding); err != nil || len(binding.Imports) != 1 || (binding.RunID != createdID && binding.RunID != rejectedID) {
 			t.Fatalf("exact permanent request binding: %s error=%v", raw, err)
 		}
 		if strings.Contains(string(raw), "content_base64") || strings.Contains(string(raw), "actor") || strings.Contains(string(raw), "unknown") {
