@@ -220,7 +220,7 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 			t.Fatalf("generated OpenRPC missing %s", schemaName)
 		}
 	}
-	for _, schemaName := range []string{"TestSetupEntityResult", "TestSetupEntitiesResult"} {
+	for _, schemaName := range []string{"TestSetupEntityResult", "TestSetupEntitiesResult", "ClockScheduleReadback"} {
 		if _, ok := doc.Components.Schemas[schemaName]; !ok {
 			t.Fatalf("generated OpenRPC missing %s", schemaName)
 		}
@@ -413,6 +413,32 @@ func TestRoutingDerivationRequiresExactFlowOrCompiledConnectProducerProof(t *tes
 		assertScalarContains(t, mappingValue(inputSource, "rule"), fragment)
 	}
 	assertScalarContains(t, mappingValue(inputSource, "retired_paths"), "unconnected root/sibling emit inference")
+}
+
+func TestClockScheduleReadbackSchemaPublishesDurableEvidence(t *testing.T) {
+	root := loadPlatformSpecYAMLNode(t)
+	api := mustMappingValue(t, root, "api_specification")
+	schemas := mustMappingValue(t, mustMappingValue(t, api, "components"), "schemas")
+	clock := mustMappingValue(t, schemas, "ClockScheduleReadback")
+	assertScalarValue(t, mustMappingValue(t, clock, "additionalProperties"), "false")
+	required := mustMappingValue(t, clock, "required")
+	for _, field := range []string{"activation_id", "name", "run_id", "flow_id", "flow_instance", "emit", "status", "initial_due_at", "retains_run"} {
+		assertSurfaceListedValue(t, required, field)
+	}
+	properties := mustMappingValue(t, clock, "properties")
+	status := mustMappingValue(t, mustMappingValue(t, properties, "status"), "enum")
+	if status.Kind != yaml.SequenceNode || len(status.Content) != 3 {
+		t.Fatalf("clock status enum = %#v, want three clock lifecycle statuses", status)
+	}
+	for i, want := range []string{"active", "cancelled", "failed"} {
+		assertScalarValue(t, status.Content[i], want)
+	}
+	due := mustMappingValue(t, properties, "next_due_at")
+	assertScalarValue(t, mustMappingValue(t, due, "$ref"), "#/components/schemas/Timestamp")
+	assertScalarContains(t, mustMappingValue(t, due, "description"), "not recomputed on read")
+	runProperties := mustMappingValue(t, mustMappingValue(t, schemas, "RunHeader"), "properties")
+	clocks := mustMappingValue(t, runProperties, "clock_schedules")
+	assertScalarValue(t, mustMappingValue(t, mustMappingValue(t, clocks, "items"), "$ref"), "#/components/schemas/ClockScheduleReadback")
 }
 
 func TestEntityFullAccumulatedSchemaPublishesRuntimeAccumulatorState(t *testing.T) {
