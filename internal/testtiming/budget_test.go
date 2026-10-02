@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -60,7 +61,7 @@ hard:
 
 func TestCommittedUnitCommandBudgetsAreExactAndDeclared(t *testing.T) {
 	budget, proof := committedTimingPolicies(t)
-	want := map[string]float64{"catalog-required-verify": 360, "conformance-2394-core": 300, "conformance-2394-reporter": 480, "serveapp-i-reporter": 780}
+	want := map[string]float64{"broad-03": 300, "catalog-required-verify": 360, "conformance-2394-core": 300, "conformance-2394-reporter": 480, "serveapp-i-reporter": 780}
 	if len(budget.Hard.UnitCommandSeconds) != len(want) {
 		t.Fatalf("unit command budgets = %v, want only named units", budget.Hard.UnitCommandSeconds)
 	}
@@ -77,10 +78,91 @@ func TestCommittedUnitCommandBudgetsAreExactAndDeclared(t *testing.T) {
 		if !ok || got.LimitSeconds != limit || got.Justification == "" {
 			t.Fatalf("%s budget = %+v, want %gs and justification", id, got, limit)
 		}
-		if _, ok := proof.Units[id]; !ok {
+		if id == "broad-03" {
+			plan := committedBroadBudgetPlan(t, proof)
+			unit, err := plan.Unit(id)
+			if err != nil || unit.BudgetClass != "broad" {
+				t.Fatalf("%s has no generated broad proof owner: %+v, %v", id, unit, err)
+			}
+		} else if _, ok := proof.Units[id]; !ok {
 			t.Fatalf("%s has no declared proof unit", id)
 		}
 	}
+}
+
+func TestCommittedBroadCommandBudgetBoundariesAndIsolation(t *testing.T) {
+	budget, proof := committedTimingPolicies(t)
+	plan := committedBroadBudgetPlan(t, proof)
+	original := budget
+	original.Hard.UnitCommandSeconds = make(map[string]CommandBudget)
+	for id, value := range budget.Hard.UnitCommandSeconds {
+		if id != "broad-03" {
+			original.Hard.UnitCommandSeconds[id] = value
+		}
+	}
+	for _, tc := range []struct {
+		name                         string
+		broadSeconds, siblingSeconds float64
+		broadStatus, siblingStatus   BudgetStatus
+	}{
+		{"at baseline", 300, 312, BudgetPass, BudgetPass},
+		{"retained primary", 324, 312, BudgetPass, BudgetPass},
+		{"at ceiling", 390, 312, BudgetPass, BudgetPass},
+		{"above ceiling", 390.001, 312, BudgetFail, BudgetPass},
+		{"sibling above unchanged ceiling", 300, 312.001, BudgetPass, BudgetFail},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var evidence []CommandEvidence
+			for _, unit := range plan.Units {
+				seconds := 10.0
+				if unit.ID == "broad-03" {
+					seconds = tc.broadSeconds
+				} else if unit.ID == "broad-01" {
+					seconds = tc.siblingSeconds
+				}
+				evidence = append(evidence, timingTestEvidence(plan, unit.ID, AttemptPrimary, seconds))
+			}
+			result := EvaluateBudget(budget, EvaluationOptions{Plan: plan, WorkflowRunID: 1, WorkflowAttempt: 1}, evidence)
+			prior := EvaluateBudget(original, EvaluationOptions{Plan: plan, WorkflowRunID: 1, WorkflowAttempt: 1}, evidence)
+			wantStatus := BudgetPass
+			if tc.broadStatus == BudgetFail || tc.siblingStatus == BudgetFail {
+				wantStatus = BudgetFail
+			}
+			if result.Status != wantStatus || len(result.Surfaces) != len(plan.Units) {
+				t.Fatalf("result = %+v, want %s and every planned surface", result, wantStatus)
+			}
+			for i, surface := range result.Surfaces {
+				if surface.Surface == "broad-03" {
+					if surface.LimitSeconds != 300 || surface.BufferedCeilingSeconds != 390 || surface.Status != tc.broadStatus {
+						t.Fatalf("surface = %+v, want 300s/390s and %s", surface, tc.broadStatus)
+					}
+				} else if !reflect.DeepEqual(surface, prior.Surfaces[i]) {
+					t.Fatalf("unrelated surface changed: %+v, prior %+v", surface, prior.Surfaces[i])
+				}
+			}
+		})
+	}
+}
+
+func committedBroadBudgetPlan(t *testing.T, proof testplanning.Policy) testplanning.RunPlan {
+	t.Helper()
+	packages := []string{
+		"github.com/division-sh/swarm/internal/apispec",
+		"github.com/division-sh/swarm/internal/dashboard/server",
+		"github.com/division-sh/swarm/internal/runtime/pipeline",
+	}
+	weights := make(map[string]float64, len(packages))
+	for _, pkg := range packages {
+		weights[pkg] = proof.Planning.TargetSeconds
+	}
+	packages = append(packages, proof.SpecialPackages...)
+	plan, err := testplanning.BuildPlan(proof, testplanning.WeightModel{
+		Version: testplanning.WeightModelVersion, SourceRunID: "broad budget isolation", Packages: weights,
+	}, packages, testplanning.ProfilePREscalated, "broad budget isolation", "head")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return plan
 }
 
 func TestCommittedCLICommandBudgetBoundariesAndIsolation(t *testing.T) {
