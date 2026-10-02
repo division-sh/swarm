@@ -569,6 +569,39 @@ func TestIssue2394ReporterFiveHundredDelayedCommitsBothStores(t *testing.T) {
 	}, 2*time.Minute, true)
 }
 
+func numericReporterIssuanceMergeCeiling(backend string, delay, objective time.Duration) time.Duration {
+	if delay != 0 {
+		return objective
+	}
+	switch backend {
+	case "postgres":
+		return 20 * time.Second
+	case "sqlite":
+		return 13 * time.Second
+	default:
+		panic("unsupported numeric reporter backend: " + backend)
+	}
+}
+
+func TestNumericReporterIssuanceMergeCeilingIsolation(t *testing.T) {
+	for _, tc := range []struct {
+		name                   string
+		backend                string
+		delay, objective, want time.Duration
+	}{
+		{"normal PostgreSQL unchanged", "postgres", 0, 10 * time.Second, 20 * time.Second},
+		{"normal SQLite authorized thirty percent", "sqlite", 0, 10 * time.Second, 13 * time.Second},
+		{"delayed PostgreSQL unchanged", "postgres", 300 * time.Millisecond, 2 * time.Minute, 2 * time.Minute},
+		{"delayed SQLite unchanged", "sqlite", 300 * time.Millisecond, 2 * time.Minute, 2 * time.Minute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := numericReporterIssuanceMergeCeiling(tc.backend, tc.delay, tc.objective); got != tc.want {
+				t.Fatalf("issuance ceiling = %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
 func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.TransactionProbeOptions, issuanceBudget time.Duration, parallelBackends bool) {
 	for _, tc := range []struct {
 		name  string
@@ -657,10 +690,11 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 				t.Fatalf("500-row commit acknowledgement receipt is missing or predates submission: %+v", chunks)
 			}
 			issuanceElapsed := chunks.LastCommitAt.Sub(issuanceStarted)
-			mergeCeiling := issuanceBudget
+			mergeCeiling := numericReporterIssuanceMergeCeiling(tc.name, transactionOptions.Delay, issuanceBudget)
 			if tc.name == "postgres" && transactionOptions.Delay == 0 {
-				mergeCeiling = 20 * time.Second
 				t.Logf("normal PostgreSQL conformance500 provisional acceptance: original target=%s previous merge ceiling=15s provisional merge ceiling=%s", issuanceBudget, mergeCeiling)
+			} else if tc.name == "sqlite" && transactionOptions.Delay == 0 {
+				t.Logf("normal SQLite conformance500 lead-authorized thirty percent allowance: original target=%s previous merge ceiling=10s provisional merge ceiling=%s", issuanceBudget, mergeCeiling)
 			}
 			t.Logf("500-row issuance from first batch submission to final durable chunk acknowledgement: %s; cursor observed at %s; original target=%s merge ceiling=%s", issuanceElapsed, issuanceReached.Sub(issuanceStarted), issuanceBudget, mergeCeiling)
 			if !fanOutRaceBuild && issuanceElapsed > mergeCeiling {

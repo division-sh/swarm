@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	channeldelivery "github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	"github.com/google/uuid"
 )
 
@@ -50,6 +51,10 @@ func (s *MailboxSQLiteOwner) InsertMailboxItem(ctx context.Context, item runtime
 		`, item.ID, sqliteNullUUID(coalesceMailboxEntityID(item)), strings.Trim(strings.TrimSpace(item.FlowInstance), "/"), scope, item.Type, sqliteNullUUID(item.EventID),
 			sqliteNullString(item.FromAgent), normalizeMailboxSeverity(item.Priority), sqliteNullString(item.Summary), string(item.Context),
 			status, sqliteNullString(decision), sqliteNullString(item.DecisionNotes), item.Notified, sqliteNullTime(item.TimeoutAt), strings.TrimSpace(item.ReplyContextID), time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		_, err = channeldelivery.PlanNoticeTx(txctx, tx, item.ID, false)
 		return err
 	}); err != nil {
 		return "", fmt.Errorf("insert sqlite mailbox item: %w", err)
@@ -167,21 +172,6 @@ func (s *MailboxSQLiteOwner) ExpireMailboxItems(ctx context.Context, limit int) 
 		return nil, err
 	}
 	return items, nil
-}
-
-func (s *MailboxSQLiteOwner) ListUnnotifiedCriticalMailboxItems(ctx context.Context, limit int) ([]runtimetools.MailboxItem, error) {
-	if limit <= 0 {
-		limit = 50
-	}
-	if _, err := s.ExpireMailboxItems(ctx, 200); err != nil {
-		return nil, err
-	}
-	rows, err := s.backend.QueryContext(ctx, sqliteMailboxSelectSQL(`status = 'pending' AND severity = 'critical' AND COALESCE(notified, false) = false`)+` ORDER BY created_at ASC LIMIT ?`, limit)
-	if err != nil {
-		return nil, fmt.Errorf("query sqlite unnotified critical mailbox items: %w", err)
-	}
-	defer rows.Close()
-	return scanSpecMailboxItems(rows)
 }
 
 func sqliteMailboxSelectSQL(where string) string {

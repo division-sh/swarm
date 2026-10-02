@@ -182,6 +182,7 @@ func TestMailboxDecideAdmitsEveryCanonicalGateInputType(t *testing.T) {
 			"timestamp_value": {Type: "timestamp", Required: true},
 			"uuid_value":      {Type: "uuid", Required: true},
 		},
+		InputOrder: []string{"text_value", "integer_value", "numeric_value", "boolean_value", "timestamp_value", "uuid_value"},
 	}})
 	state.decisionCards.card.Snapshot.Outcomes["typed"] = typed.Outcomes["typed"]
 	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(state.options(t))})

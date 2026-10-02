@@ -10,6 +10,10 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/packs"
+	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	channeldelivery "github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -19,8 +23,15 @@ type operatorChannelContractStore interface {
 }
 
 type operatorChannelContractFixture struct {
-	store  operatorChannelContractStore
-	settle func(context.Context, operatorchannel.InboundClaim, time.Time) (operatorchannel.ClaimSettlement, error)
+	store         operatorChannelContractStore
+	settle        func(context.Context, operatorchannel.InboundClaim, time.Time) (operatorchannel.ClaimSettlement, error)
+	loadDefault   func(context.Context) (channeldelivery.Default, bool, error)
+	insertNotice  func(context.Context, runtimetools.MailboxItem) (string, error)
+	countPlans    func(context.Context, string) (int, error)
+	loadPlan      func(context.Context, string) (channeldelivery.Plan, bool, error)
+	loadSummary   func(context.Context, string) (channeldelivery.Plan, bool, error)
+	persistRender func(context.Context, string, render.Frozen) (string, bool, error)
+	loadRender    func(context.Context, string) (channeldelivery.StoredRender, bool, error)
 }
 
 func TestOperatorChannelSelectedStoreContractParity(t *testing.T) {
@@ -28,6 +39,218 @@ func TestOperatorChannelSelectedStoreContractParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openOperatorChannelContractFixture(t, backend)
 			runOperatorChannelContract(t, fixture)
+		})
+	}
+}
+
+func TestChannelDeliveryDefaultFollowsOnlyVerifiedSelectedBindingBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := context.Background()
+			fixture := openOperatorChannelContractFixture(t, backend)
+			now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
+			principal, err := fixture.store.EnsureOperatorPrincipal(ctx, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			first := operatorChannelContractIdentity("default-first-" + backend)
+			other := operatorChannelContractIdentity("default-other-" + backend)
+			confirm := func(identity operatorchannel.InterfaceIdentity, kind operatorchannel.OperationKind, revision int64, account, conversation string, scope operatorchannel.ConversationScope) operatorchannel.Binding {
+				t.Helper()
+				now = now.Add(time.Second)
+				id := uuid.NewString()
+				op, err := fixture.store.BeginChannelBinding(ctx, operatorchannel.BeginRequest{
+					OperationID: id, Kind: kind, PrincipalID: principal.ID, Interface: identity,
+					ExpectedRevision: revision, RequestKeyHash: id, RequestHash: id,
+					ProviderCredential: operatorChannelProviderEvidence(), RequestedAt: now, ExpiresAt: now.Add(operatorchannel.DefaultChallengeTTL),
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				settled, err := fixture.settle(ctx, operatorChannelContractClaim(op, scope, account, conversation, uuid.NewString()), now.Add(time.Second))
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, binding, err := fixture.store.ConfirmChannelBinding(ctx, operatorchannel.ConfirmRequest{
+					OperationID: id, PrincipalID: principal.ID, ExpectedRevision: settled.Operation.Revision,
+					Approve: true, ProviderCredentialCurrent: true, ConfirmedAt: now.Add(2 * time.Second),
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return binding
+			}
+			assertDefault := func(binding operatorchannel.Binding, state, firstOperationID string, epoch int64) {
+				t.Helper()
+				current, found, err := fixture.loadDefault(ctx)
+				if err != nil || !found {
+					t.Fatalf("load default = %#v, found=%t err=%v", current, found, err)
+				}
+				if current.PrincipalID != principal.ID || current.InterfaceKey != binding.Interface.Key() ||
+					current.BindingRevision != binding.Revision || current.ExternalAccountRef != binding.ExternalAccountRef ||
+					current.ConversationRef != binding.ConversationRef || current.ConversationScope != binding.ConversationScope ||
+					current.State != state || current.FirstOperationID != firstOperationID || current.DeliveryEpoch != epoch {
+					t.Fatalf("default = %#v, want binding %#v state=%s first=%s", current, binding, state, firstOperationID)
+				}
+			}
+			bound := confirm(first, operatorchannel.OperationConnect, 0, "account-a", "conversation-a", operatorchannel.ConversationScopeDirect)
+			assertDefault(bound, channeldelivery.StateCurrent, bound.OperationID, 1)
+			_ = confirm(other, operatorchannel.OperationConnect, 0, "account-b", "conversation-b", operatorchannel.ConversationScopeShared)
+			assertDefault(bound, channeldelivery.StateCurrent, bound.OperationID, 1)
+			reconnected := confirm(first, operatorchannel.OperationReconnect, bound.Revision, "account-a", "conversation-a", operatorchannel.ConversationScopeDirect)
+			assertDefault(reconnected, channeldelivery.StateCurrent, bound.OperationID, 1)
+			rebound := confirm(first, operatorchannel.OperationRebind, reconnected.Revision, "account-c", "conversation-c", operatorchannel.ConversationScopeShared)
+			assertDefault(rebound, channeldelivery.StateCurrent, bound.OperationID, 2)
+			now = now.Add(time.Second)
+			_, retired, err := fixture.store.UnbindOperatorChannel(ctx, operatorchannel.UnbindRequest{
+				OperationID: uuid.NewString(), PrincipalID: principal.ID, Interface: first,
+				ExpectedRevision: rebound.Revision, RequestKeyHash: uuid.NewString(), RequestHash: uuid.NewString(), RequestedAt: now,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			retiredDefault, found, err := fixture.loadDefault(ctx)
+			if err != nil || !found || retiredDefault.InterfaceKey != first.Key() || retiredDefault.BindingRevision != retired.Revision ||
+				retiredDefault.State != channeldelivery.StateRetired || retiredDefault.FirstOperationID != bound.OperationID || retiredDefault.DeliveryEpoch != 2 {
+				t.Fatalf("retired default = %#v, found=%t err=%v", retiredDefault, found, err)
+			}
+			fresh := confirm(first, operatorchannel.OperationConnect, retired.Revision, "account-d", "conversation-d", operatorchannel.ConversationScopeDirect)
+			assertDefault(fresh, channeldelivery.StateCurrent, bound.OperationID, 3)
+		})
+	}
+}
+
+func TestChannelDeliveryNoticeCutIsAtomicWithMailboxBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := context.Background()
+			fixture := openOperatorChannelContractFixture(t, backend)
+			notice := func(summary string) string {
+				t.Helper()
+				id, err := fixture.insertNotice(ctx, runtimetools.MailboxItem{Type: runtimetools.NotifyHumanMailboxItemType, Summary: summary, Context: []byte(`{"message":"` + summary + `"}`)})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return id
+			}
+			assertPlans := func(id string, want int) {
+				t.Helper()
+				got, err := fixture.countPlans(ctx, id)
+				if err != nil || got != want {
+					t.Fatalf("notice %s plans = %d, want %d, err=%v", id, got, want, err)
+				}
+			}
+			beforePrincipal := notice("before principal")
+			assertPlans(beforePrincipal, 0)
+			now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
+			principal, err := fixture.store.EnsureOperatorPrincipal(ctx, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			beforeDefault := notice("before default")
+			assertPlans(beforeDefault, 0)
+			identity := operatorChannelContractIdentity("notice-cut-" + backend)
+			operationID := uuid.NewString()
+			op, err := fixture.store.BeginChannelBinding(ctx, operatorchannel.BeginRequest{
+				OperationID: operationID, Kind: operatorchannel.OperationConnect, PrincipalID: principal.ID,
+				Interface: identity, ExpectedRevision: 0, RequestKeyHash: operationID, RequestHash: operationID,
+				ProviderCredential: operatorChannelProviderEvidence(), RequestedAt: now, ExpiresAt: now.Add(operatorchannel.DefaultChallengeTTL),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			settled, err := fixture.settle(ctx, operatorChannelContractClaim(op, operatorchannel.ConversationScopeDirect, "account", "conversation", uuid.NewString()), now.Add(time.Second))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, binding, err := fixture.store.ConfirmChannelBinding(ctx, operatorchannel.ConfirmRequest{
+				OperationID: operationID, PrincipalID: principal.ID, ExpectedRevision: settled.Operation.Revision,
+				Approve: true, ProviderCredentialCurrent: true, ConfirmedAt: now.Add(2 * time.Second),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			summary, found, err := fixture.loadSummary(ctx, operationID)
+			if err != nil || !found || summary.SourceKind != channeldelivery.PlanSummary ||
+				summary.SourceID != operationID || summary.SummaryCount != 2 || summary.DeliveryEpoch != 1 ||
+				summary.PrincipalID != principal.ID || summary.ConversationRef != "conversation" {
+				t.Fatalf("first backlog summary = %#v, found=%t err=%v", summary, found, err)
+			}
+			summaryFrozen, err := render.FreezeSummary(summary.SourceID, summary.SummaryCount, render.Audience{
+				PrincipalID: summary.PrincipalID, InterfaceKey: summary.InterfaceKey, DeliveryEpoch: summary.DeliveryEpoch,
+				ExternalAccountRef: summary.ExternalAccountRef, ConversationRef: summary.ConversationRef,
+				ConversationScope: summary.ConversationScope,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			summaryFrozen, err = render.WithPresentation(summaryFrozen, packs.PresentationBounds{Actions: 8, TextRunes: 4096, LabelRunes: 64}, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			summaryRenderID, created, err := fixture.persistRender(ctx, summary.DeliveryID, summaryFrozen)
+			if err != nil || !created {
+				t.Fatalf("persist backlog summary = %s, created=%t err=%v", summaryRenderID, created, err)
+			}
+			assertPlans(beforePrincipal, 0)
+			assertPlans(beforeDefault, 0)
+			afterDefault := notice("after default")
+			assertPlans(afterDefault, 1)
+			plan, found, err := fixture.loadPlan(ctx, afterDefault)
+			if err != nil || !found || plan.SourceKind != channeldelivery.PlanNotice || plan.SourceID != afterDefault ||
+				plan.PrincipalID != principal.ID || plan.InterfaceKey != identity.Key() || plan.BindingRevision != binding.Revision || plan.DeliveryEpoch != 1 ||
+				plan.ExternalAccountRef != "account" || plan.ConversationRef != "conversation" ||
+				plan.ConversationScope != operatorchannel.ConversationScopeDirect || plan.State != channeldelivery.PlanStatePlanned {
+				t.Fatalf("notice plan = %#v, found=%t err=%v", plan, found, err)
+			}
+			frozen, err := render.FreezeNotice(render.Notice{
+				ID: afterDefault, Type: runtimetools.NotifyHumanMailboxItemType, Summary: "after default",
+				Priority: "normal", Context: []byte(`{"message":"after default"}`),
+			}, render.Audience{
+				PrincipalID: plan.PrincipalID, InterfaceKey: plan.InterfaceKey, DeliveryEpoch: plan.DeliveryEpoch,
+				ExternalAccountRef: plan.ExternalAccountRef, ConversationRef: plan.ConversationRef, ConversationScope: plan.ConversationScope,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			frozen, err = render.WithPresentation(frozen, packs.PresentationBounds{Actions: 8, TextRunes: 4096, LabelRunes: 64}, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			renderID, created, err := fixture.persistRender(ctx, plan.DeliveryID, frozen)
+			if err != nil || !created {
+				t.Fatalf("persist notice render = %s, created=%t err=%v", renderID, created, err)
+			}
+			currentPlan, found, err := fixture.loadPlan(ctx, afterDefault)
+			if err != nil || !found || currentPlan.CurrentRenderID != renderID || currentPlan.CurrentReceiptID != "" || currentPlan.State != "rendered" {
+				t.Fatalf("current rendered notice plan = %#v, found=%t err=%v", currentPlan, found, err)
+			}
+			stored, found, err := fixture.loadRender(ctx, renderID)
+			if err != nil || !found || stored.DeliveryID != plan.DeliveryID || stored.Frozen.Hash != frozen.Hash ||
+				string(stored.Frozen.Input) != string(frozen.Input) {
+				t.Fatalf("notice render readback = %#v, found=%t err=%v", stored, found, err)
+			}
+			if replayID, created, err := fixture.persistRender(ctx, plan.DeliveryID, frozen); err != nil || created || replayID != renderID {
+				t.Fatalf("notice render replay = %s, created=%t err=%v", replayID, created, err)
+			}
+			corrupt := frozen
+			corrupt.Hash = "sha256:bad"
+			if _, _, err := fixture.persistRender(ctx, plan.DeliveryID, corrupt); err == nil {
+				t.Fatal("corrupt render hash was admitted")
+			}
+			_, retired, err := fixture.store.UnbindOperatorChannel(ctx, operatorchannel.UnbindRequest{
+				OperationID: uuid.NewString(), PrincipalID: principal.ID, Interface: identity,
+				ExpectedRevision: binding.Revision, RequestKeyHash: uuid.NewString(), RequestHash: uuid.NewString(), RequestedAt: now.Add(3 * time.Second),
+			})
+			if err != nil || retired.Revision <= binding.Revision {
+				t.Fatalf("unbind = %#v, %v", retired, err)
+			}
+			whileRetired := notice("while retired")
+			assertPlans(whileRetired, 0)
+			assertPlans(afterDefault, 1)
+			if _, _, err := fixture.persistRender(ctx, plan.DeliveryID, frozen); err == nil {
+				t.Fatal("retired default admitted new render")
+			}
 		})
 	}
 }
@@ -453,7 +676,54 @@ func openOperatorChannelContractFixture(t *testing.T, backend string) operatorCh
 	case "sqlite":
 		selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
 		return operatorChannelContractFixture{
-			store: selected,
+			store:        selected,
+			insertNotice: selected.InsertMailboxItem,
+			countPlans: func(ctx context.Context, sourceID string) (int, error) {
+				var count int
+				err := selected.backend.QueryRowContext(ctx, `SELECT COUNT(*) FROM channel_delivery_plans WHERE source_kind = 'notice' AND source_id = ?`, sourceID).Scan(&count)
+				return count, err
+			},
+			loadPlan: func(ctx context.Context, sourceID string) (channeldelivery.Plan, bool, error) {
+				var deliveryID string
+				err := selected.backend.QueryRowContext(ctx, `SELECT delivery_id FROM channel_delivery_plans WHERE source_kind = 'notice' AND source_id = ?`, sourceID).Scan(&deliveryID)
+				if errors.Is(err, sql.ErrNoRows) {
+					return channeldelivery.Plan{}, false, nil
+				}
+				if err != nil {
+					return channeldelivery.Plan{}, false, err
+				}
+				return channeldelivery.LoadPlan(ctx, selected.backend, deliveryID, false)
+			},
+			loadSummary: func(ctx context.Context, operationID string) (channeldelivery.Plan, bool, error) {
+				var deliveryID string
+				err := selected.backend.QueryRowContext(ctx, `SELECT delivery_id FROM channel_delivery_plans WHERE source_kind = 'summary' AND source_id = ?`, operationID).Scan(&deliveryID)
+				if errors.Is(err, sql.ErrNoRows) {
+					return channeldelivery.Plan{}, false, nil
+				}
+				if err != nil {
+					return channeldelivery.Plan{}, false, err
+				}
+				return channeldelivery.LoadPlan(ctx, selected.backend, deliveryID, false)
+			},
+			persistRender: func(ctx context.Context, deliveryID string, frozen render.Frozen) (string, bool, error) {
+				var id string
+				var created bool
+				err := selected.backend.RunTransaction(ctx, "persist channel render", func(txctx context.Context, tx *sql.Tx) error {
+					if err := channeldelivery.SetPresentationBoundsTx(txctx, tx, deliveryID, packs.PresentationBounds{Actions: 8, TextRunes: 4096, LabelRunes: 64}, false); err != nil {
+						return err
+					}
+					var err error
+					id, created, err = channeldelivery.PersistRenderTx(txctx, tx, deliveryID, frozen, false)
+					return err
+				})
+				return id, created, err
+			},
+			loadRender: func(ctx context.Context, renderID string) (channeldelivery.StoredRender, bool, error) {
+				return channeldelivery.LoadRender(ctx, selected.backend, renderID, false)
+			},
+			loadDefault: func(ctx context.Context) (channeldelivery.Default, bool, error) {
+				return channeldelivery.LoadDefault(ctx, selected.backend, false)
+			},
 			settle: func(ctx context.Context, claim operatorchannel.InboundClaim, now time.Time) (operatorchannel.ClaimSettlement, error) {
 				var result operatorchannel.ClaimSettlement
 				err := selected.backend.RunTransaction(ctx, "operator channel contract claim", func(txctx context.Context, tx *sql.Tx) error {
@@ -469,7 +739,57 @@ func openOperatorChannelContractFixture(t *testing.T, backend string) operatorCh
 		t.Cleanup(cleanup)
 		selected := admitTestPostgresStore(t, db)
 		return operatorChannelContractFixture{
-			store: selected,
+			store:        selected,
+			insertNotice: selected.InsertMailboxItem,
+			countPlans: func(ctx context.Context, sourceID string) (int, error) {
+				var count int
+				err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM channel_delivery_plans WHERE source_kind = 'notice' AND source_id = $1::uuid`, sourceID).Scan(&count)
+				return count, err
+			},
+			loadPlan: func(ctx context.Context, sourceID string) (channeldelivery.Plan, bool, error) {
+				var deliveryID string
+				err := db.QueryRowContext(ctx, `SELECT delivery_id::text FROM channel_delivery_plans WHERE source_kind = 'notice' AND source_id = $1::uuid`, sourceID).Scan(&deliveryID)
+				if errors.Is(err, sql.ErrNoRows) {
+					return channeldelivery.Plan{}, false, nil
+				}
+				if err != nil {
+					return channeldelivery.Plan{}, false, err
+				}
+				return channeldelivery.LoadPlan(ctx, db, deliveryID, true)
+			},
+			loadSummary: func(ctx context.Context, operationID string) (channeldelivery.Plan, bool, error) {
+				var deliveryID string
+				err := db.QueryRowContext(ctx, `SELECT delivery_id::text FROM channel_delivery_plans WHERE source_kind = 'summary' AND source_id = $1::uuid`, operationID).Scan(&deliveryID)
+				if errors.Is(err, sql.ErrNoRows) {
+					return channeldelivery.Plan{}, false, nil
+				}
+				if err != nil {
+					return channeldelivery.Plan{}, false, err
+				}
+				return channeldelivery.LoadPlan(ctx, db, deliveryID, true)
+			},
+			persistRender: func(ctx context.Context, deliveryID string, frozen render.Frozen) (string, bool, error) {
+				tx, err := db.BeginTx(ctx, nil)
+				if err != nil {
+					return "", false, err
+				}
+				if err := channeldelivery.SetPresentationBoundsTx(ctx, tx, deliveryID, packs.PresentationBounds{Actions: 8, TextRunes: 4096, LabelRunes: 64}, true); err != nil {
+					_ = tx.Rollback()
+					return "", false, err
+				}
+				id, created, err := channeldelivery.PersistRenderTx(ctx, tx, deliveryID, frozen, true)
+				if err != nil {
+					_ = tx.Rollback()
+					return "", false, err
+				}
+				return id, created, tx.Commit()
+			},
+			loadRender: func(ctx context.Context, renderID string) (channeldelivery.StoredRender, bool, error) {
+				return channeldelivery.LoadRender(ctx, db, renderID, true)
+			},
+			loadDefault: func(ctx context.Context) (channeldelivery.Default, bool, error) {
+				return channeldelivery.LoadDefault(ctx, selected.backend, true)
+			},
 			settle: func(ctx context.Context, claim operatorchannel.InboundClaim, now time.Time) (operatorchannel.ClaimSettlement, error) {
 				tx, err := db.BeginTx(ctx, nil)
 				if err != nil {
@@ -500,7 +820,7 @@ func operatorChannelContractClaim(op operatorchannel.Operation, scope operatorch
 	return operatorchannel.InboundClaim{
 		TextFact: operatorchannel.TextFact{
 			Interface: op.Interface, ExternalAccountRef: account, ConversationRef: conversation,
-			ConversationScope: scope, Text: op.Challenge, AccountPresentation: "@operator",
+			ConversationScope: scope, Text: op.Challenge, MessageReference: `{"id":1}`, AccountPresentation: "@operator",
 		},
 		Provider: "telegram", ProviderEventID: "event-" + publicationID, PublicationID: publicationID,
 		ProviderAuthorization: "verified-pack-generation", Challenge: op.Challenge,

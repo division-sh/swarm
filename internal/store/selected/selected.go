@@ -17,6 +17,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimechanneldelivery "github.com/division-sh/swarm/internal/runtime/channeldelivery"
+	runtimechannelnative "github.com/division-sh/swarm/internal/runtime/channelnative"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/effects"
@@ -79,6 +81,8 @@ type requiredPorts struct {
 	authorActivity         runtimeauthoractivity.Reader
 	operatorChannels       operatorchannel.Store
 	channelOnboarding      channelonboarding.Store
+	channelDelivery        runtimechanneldelivery.Store
+	channelNative          runtimechannelnative.Store
 	startupOwnership       runtimestartupownership.Store
 	runQuiescence          runtimerunquiescence.ServeAbandonStore
 	mailboxAPI             apiv1.MailboxAPIStore
@@ -361,7 +365,7 @@ func composePostgres(selected *private.PostgresStore) (*Owner, error) {
 		},
 		required: requiredPorts{
 			schema: selected, pinger: selected, authorActivity: selected,
-			operatorChannels: selected, channelOnboarding: selected, startupOwnership: selected, runQuiescence: selected,
+			operatorChannels: selected, channelOnboarding: selected, channelDelivery: selected, channelNative: selected, startupOwnership: selected, runQuiescence: selected,
 			mailboxAPI: selected, mailboxNoticeAck: selected, observability: selected,
 			agentUsage: selected, agentDeliveryLifecycle: selected, idempotency: selected,
 			runs: selected, entities: selected, agents: selected, conversations: selected,
@@ -415,7 +419,7 @@ func composeSQLite(selected *private.SQLiteRuntimeStore) (*Owner, error) {
 		},
 		required: requiredPorts{
 			schema: selected, pinger: selected, authorActivity: selected,
-			operatorChannels: selected, channelOnboarding: selected, startupOwnership: selected, runQuiescence: selected,
+			operatorChannels: selected, channelOnboarding: selected, channelDelivery: selected, channelNative: selected, startupOwnership: selected, runQuiescence: selected,
 			mailboxAPI: selected, mailboxNoticeAck: selected, observability: selected,
 			agentUsage: selected, agentDeliveryLifecycle: selected, idempotency: selected,
 			runs: selected, entities: selected, agents: selected, conversations: selected,

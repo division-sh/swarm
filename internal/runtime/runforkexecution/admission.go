@@ -369,27 +369,7 @@ func BuildSelectedContractExecutionAdmission(ctx context.Context, req SelectedCo
 }
 
 func validateSelectedContractExecutionBinding(forkRunID string, binding runfork.RunForkSelectedContractBinding) error {
-	if strings.TrimSpace(binding.Owner) != runfork.RunForkSelectedContractBindingOwner {
-		return fmt.Errorf("selected-contract execution admission requires %s binding; got %q", runfork.RunForkSelectedContractBindingOwner, binding.Owner)
-	}
-	if strings.TrimSpace(binding.ForkRunID) != forkRunID {
-		return fmt.Errorf("selected-contract execution admission binding fork run_id mismatch: got %q want %q", binding.ForkRunID, forkRunID)
-	}
-	for label, value := range map[string]string{"source run_id": binding.SourceRunID} {
-		if strings.TrimSpace(value) == "" {
-			return fmt.Errorf("selected-contract execution admission binding missing %s", label)
-		}
-		if _, err := uuid.Parse(strings.TrimSpace(value)); err != nil {
-			return fmt.Errorf("selected-contract execution admission binding %s must be a UUID: %w", label, err)
-		}
-	}
-	if err := binding.ForkPoint.Validate(); err != nil {
-		return fmt.Errorf("selected-contract execution admission binding fork point: %w", err)
-	}
-	if binding.ForkEventID != binding.ForkPoint.EventID {
-		return errors.New("selected-contract execution admission binding event differs from fork point")
-	}
-	return validateSelectedContractSelection("binding", binding.ContractSelection)
+	return binding.ValidateExecutionBinding(forkRunID)
 }
 
 func validateSelectedContractExecutionSource(binding runfork.RunForkSelectedContractBinding, loaded LoadedSelectedContractSource) error {
@@ -490,22 +470,7 @@ func validateSelectionMatches(label string, want, got runfork.RunForkContractSel
 }
 
 func validateSelectedContractSelection(label string, selection runfork.RunForkContractSelection) error {
-	switch strings.TrimSpace(selection.Mode) {
-	case runfork.RunForkContractSelectionModeSelectedContracts:
-		if strings.TrimSpace(selection.BundleHash) != "" {
-			return fmt.Errorf("selected-contract execution admission %s selected_contracts mode cannot carry bundle_hash", label)
-		}
-	case runfork.RunForkContractSelectionModeBundleHash:
-		if strings.TrimSpace(selection.BundleHash) == "" {
-			return fmt.Errorf("selected-contract execution admission %s requires bundle_hash", label)
-		}
-		if err := runtimecontracts.ValidateBundleHash(selection.BundleHash); err != nil {
-			return fmt.Errorf("selected-contract execution admission %s bundle_hash invalid: %w", label, err)
-		}
-	default:
-		return fmt.Errorf("selected-contract execution admission %s requires mode selected_contracts or bundle_hash; got %q", label, selection.Mode)
-	}
-	return nil
+	return selection.ValidateExecutionSelection(label)
 }
 
 func validateSelectedSourceLoaderSelection(selection runfork.RunForkContractSelection) error {

@@ -79,6 +79,36 @@ func TestTelegramSelectedTextMessageContractUsesShippedPack(t *testing.T) {
 	}
 }
 
+func TestTelegramCommandInvocationIsOptionalTypedTriggerEvidence(t *testing.T) {
+	_, _, plan := telegramPlatformContract(t)
+	for _, tc := range []struct {
+		name, text string
+		want       any
+	}{
+		{name: "direct entry", text: "/inbox_abc123", want: map[string]any{"reference": "inbox_abc123"}},
+		{name: "addressed shared entry", text: "/inbox_abc123@SampleBot", want: map[string]any{"reference": "inbox_abc123", "address": "SampleBot"}},
+		{name: "plain prose", text: "show my inbox"},
+		{name: "command with argument", text: "/inbox_abc123 extra"},
+		{name: "invalid command", text: "/inbox-abc123"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			delivery, err := plan.Accept(telegramContractRequest(t, map[string]any{
+				"update_id": 501,
+				"message": map[string]any{
+					"message_id": 7, "from": map[string]any{"id": 12345},
+					"chat": map[string]any{"id": 12345, "type": "private"}, "text": tc.text,
+				},
+			}))
+			if err != nil || len(delivery.Events) != 2 {
+				t.Fatalf("Accept = %#v, %v", delivery.Events, err)
+			}
+			if got := delivery.Events[1].Payload["command_invocation"]; !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("command_invocation = %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestTelegramSelectedCallbackActionContractUsesShippedPack(t *testing.T) {
 	_, _, plan := telegramPlatformContract(t)
 	delivery, err := plan.Accept(telegramContractRequest(t, map[string]any{
@@ -237,6 +267,33 @@ func TestTelegramTextRejectsOutOfRangeProviderMessageReference(t *testing.T) {
 			"chat": map[string]any{"id": 67890, "type": "private"}, "text": "hello",
 		},
 	}, "must be <= 2.147483647e+09")
+}
+
+func TestTelegramTextOptionalReplyToReference(t *testing.T) {
+	_, _, plan := telegramPlatformContract(t)
+	update := map[string]any{
+		"update_id": 207,
+		"message": map[string]any{
+			"message_id": 17, "from": map[string]any{"id": 12345},
+			"chat": map[string]any{"id": 67890, "type": "private"}, "text": "reason",
+		},
+	}
+	delivery, err := plan.Accept(telegramContractRequest(t, update))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := delivery.Events[1].Payload["reply_to_message_reference"]; exists {
+		t.Fatalf("absent optional reply was projected: %#v", delivery.Events[1].Payload)
+	}
+	update["message"].(map[string]any)["reply_to_message"] = map[string]any{"message_id": 11}
+	delivery, err = plan.Accept(telegramContractRequest(t, update))
+	if err != nil || delivery.Events[1].Payload["reply_to_message_reference"] != json.Number("11") {
+		t.Fatalf("present reply projection = %#v err=%v", delivery.Events, err)
+	}
+	update["message"].(map[string]any)["reply_to_message"] = map[string]any{"message_id": 2147483648}
+	if _, err := plan.Accept(telegramContractRequest(t, update)); err == nil || !strings.Contains(err.Error(), "message.reply_to_message.message_id") {
+		t.Fatalf("malformed present reply error = %v", err)
+	}
 }
 
 func TestTelegramTextRejectsNegativeExternalAccountReference(t *testing.T) {
@@ -498,10 +555,12 @@ func telegramSelectedTriggerDescriptors() []packs.TriggerEventDescriptor {
 		{
 			Event: "inbound.telegram.text_message", Kind: "normalized",
 			Fields: []packs.TriggerEventFieldDescriptor{
+				{Name: "command_invocation", Type: "object"},
 				{Name: "conversation_reference", Type: "text", Required: true, CarryEligible: true},
 				{Name: "conversation_scope", Type: "text", Required: true, CarryEligible: true},
 				{Name: "external_account_reference", Type: "text", Required: true, CarryEligible: true},
 				{Name: "provider_message_reference", Type: "integer", Required: true, CarryEligible: true},
+				{Name: "reply_to_message_reference", Type: "integer"},
 				{Name: "text", Type: "text", Required: true, CarryEligible: true},
 			},
 		},

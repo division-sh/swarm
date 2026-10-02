@@ -33,11 +33,14 @@ func TestWorkflowNativeUnionIsRequired(t *testing.T) {
 	if err := yaml.Unmarshal(b, &workflow); err != nil {
 		t.Fatal(err)
 	}
-	for _, owner := range []struct{ job, platform, runner string }{
-		{"unused-linux", "linux", "ubuntu-latest"}, {"unused-darwin", "darwin", "macos-latest"},
+	for _, owner := range []struct {
+		job, platform, runner string
+		timeoutMinutes        int
+	}{
+		{"unused-linux", "linux", "ubuntu-latest", 15}, {"unused-darwin", "darwin", "macos-latest", 19},
 	} {
 		job, ok := workflow.Jobs[owner.job]
-		if !ok || job.If != "" || len(job.Needs) != 0 || job.ContinueOnError != nil || job.RunsOn != owner.runner || job.TimeoutMinutes != 15 {
+		if !ok || job.If != "" || len(job.Needs) != 0 || job.ContinueOnError != nil || job.RunsOn != owner.runner || job.TimeoutMinutes != owner.timeoutMinutes {
 			t.Fatalf("native %s analysis is conditional, optional, or not native", owner.platform)
 		}
 		checkout, collect, upload := false, false, false
@@ -68,7 +71,7 @@ func TestWorkflowNativeUnionIsRequired(t *testing.T) {
 		}
 	}
 	union, ok := workflow.Jobs["unused-checks"]
-	if !ok || union.If != "" || union.ContinueOnError != nil || !slices.Contains(union.Needs, "unused-linux") || !slices.Contains(union.Needs, "unused-darwin") {
+	if !ok || union.If != "" || union.ContinueOnError != nil || union.TimeoutMinutes != 15 || !slices.Contains(union.Needs, "unused-linux") || !slices.Contains(union.Needs, "unused-darwin") {
 		t.Fatal("union must require both native collectors without a profile condition")
 	}
 	checkout, merge := false, false

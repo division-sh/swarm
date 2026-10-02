@@ -42,7 +42,7 @@ store_parity:
       constructor: OpenRuntime
       consumers: [internal/serveapp/main.go, internal/serveapp/store_runtime.go, internal/serveapp/store_capabilities.go, internal/serveapp/serve_runtime_execution.go]
       semantic_owner: internal/store/selected.Owner
-      proof_ids: [runtime-open-sqlite, runtime-open-postgres, runtime-port-projection, served-source-artifact, connected-channel-onboarding-surface, served-selected-contract-fork, destructive-reset-postgres, destructive-reset-served, destructive-reset-cli, destructive-reset-final-receipt, destructive-reset-crash, destructive-reset-candidates]
+      proof_ids: [runtime-open-sqlite, runtime-open-postgres, runtime-port-projection, served-source-artifact, connected-channel-onboarding-surface, channel-delivery-surface, served-selected-contract-fork, destructive-reset-postgres, destructive-reset-served, destructive-reset-cli, destructive-reset-final-receipt, destructive-reset-crash, destructive-reset-candidates]
       close_proof_ids: [runtime-close-postgres-ping, runtime-close-unactivated]
     - id: authority_inspection
       constructor: OpenAuthorityInspection
@@ -181,6 +181,16 @@ store_parity:
       purpose_ids: [runtime]
       capabilities:
         - {claim_id: connected_channel_onboarding, risk_dimensions: [selected_construction, real_v1_handler, served_lifecycle, restart]}
+    - id: channel-delivery-surface
+      kind: go_test
+      name: TestChannelDeliveryNativeInboxE2E
+      path: internal/serveapp/channel_delivery_inbound_supported_surface_test.go
+      profile: full
+      backends: [default_sqlite, explicit_postgres]
+      required_children: [sqlite, postgres]
+      purpose_ids: [runtime]
+      capabilities:
+        - {claim_id: operator_channel_delivery, risk_dimensions: [served_lifecycle]}
     - {id: served-agent-restart, kind: go_test, name: TestServedParityHarnessAgentRestartLifecycle, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], required_children: [default_sqlite, explicit_postgres], capabilities: [{claim_id: agent_lifecycle, risk_dimensions: [served_lifecycle]}]}
     - {id: served-agent-directive, kind: go_test, name: TestServedParityHarnessAgentDirectiveOutcomeLifecycle, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], required_children: [default_sqlite, explicit_postgres], capabilities: [{claim_id: agent_lifecycle, risk_dimensions: [served_lifecycle]}]}
     - {id: agent-manager-roles, kind: go_test, name: TestAgentManagerPersistenceRolesAreExplicit, path: internal/runtime/persistence_ownership_guard_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: agent_lifecycle, risk_dimensions: [served_lifecycle]}]}
@@ -369,6 +379,16 @@ store_parity:
       required_ports: [channelOnboarding]
       platform_tables: [channel_onboarding_operations, channel_onboarding_teardowns, connected_channel_activations]
       public_methods: [channel.onboarding_start, channel.onboarding_get, channel.onboarding_retry]
+    - id: operator_channel_delivery
+      semantic_owners: [internal/runtime/channeldelivery, internal/runtime/channelnative, internal/store selected channelDelivery and channelNative]
+      selected_purposes: [runtime]
+      backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
+      spec_refs: [platform-spec.yaml#tool_model.hitl_channel_pack_interface]
+      risk_dimensions: [served_lifecycle]
+      evidence:
+        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [served_lifecycle], proof_ids: [channel-delivery-surface]}
+      required_ports: [channelDelivery, channelNative]
+      platform_tables: [channel_delivery_actions, channel_delivery_defaults, channel_delivery_plans, channel_delivery_receipts, channel_delivery_renders, channel_native_setting_consumers, channel_native_settings, operator_channel_action_intents, operator_channel_text_intents]
     - id: agent_lifecycle
       semantic_owners: [internal/runtime/manager, internal/store agent lifecycle]
       selected_purposes: [runtime]

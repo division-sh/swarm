@@ -61,6 +61,9 @@ type NormalizedEventWhen struct {
 }
 
 const normalizedFieldConvertTextEnumMap = "text_enum_map"
+const normalizedFieldConvertTelegramCommand = "telegram_command"
+
+var telegramCommandPattern = regexp.MustCompile(`^/([A-Za-z0-9_]{1,32})(?:@([A-Za-z0-9_]{5,32}))?$`)
 
 type OutputManifest struct {
 	Kind          OutputKind
@@ -190,8 +193,12 @@ func (m Manifest) validateNormalizedEvents() error {
 						return fmt.Errorf("%s normalized event %q field %q conversion text_enum_map value %q violates its declared output schema: %w", provider, eventName, name, output, err)
 					}
 				}
+			case normalizedFieldConvertTelegramCommand:
+				if provider != "telegram" || len(field.Values) != 0 || field.Schema.Kind() != runtimecontracts.ToolSchemaObject || !field.Optional {
+					return fmt.Errorf("%s normalized event %q field %q telegram_command requires optional Telegram object output without values", provider, eventName, name)
+				}
 			default:
-				return fmt.Errorf("%s normalized event %q field %q has unsupported conversion %q; use number_to_text, text_enum_map, or remove convert", provider, eventName, name, field.Convert)
+				return fmt.Errorf("%s normalized event %q field %q has unsupported conversion %q", provider, eventName, name, field.Convert)
 			}
 			fields[name] = field
 		}
@@ -375,6 +382,9 @@ func (m Manifest) normalizedDeliveryEvents(payload any) ([]DeliveryEvent, error)
 		if err != nil {
 			return nil, NormalizationError{Event: output.Event, Path: field.From, Cause: err.Error()}
 		}
+		if field.Optional && field.Convert == normalizedFieldConvertTelegramCommand && converted == nil {
+			continue
+		}
 		normalized[name] = converted
 	}
 	result := DeliveryEvent{Name: events.EventType(output.Event), Kind: OutputKindNormalized, Payload: normalized}
@@ -461,6 +471,20 @@ func normalizeProjectedValue(value any, field NormalizedEventFieldProjection) (a
 		if !found {
 			return nil, fmt.Errorf("text_enum_map has no mapping for %q", text)
 		}
+	} else if field.Convert == normalizedFieldConvertTelegramCommand {
+		text, ok := value.(string)
+		if !ok {
+			return nil, fmt.Errorf("telegram_command requires text, got %T", value)
+		}
+		matches := telegramCommandPattern.FindStringSubmatch(text)
+		if matches == nil {
+			return nil, nil
+		}
+		command := map[string]any{"reference": matches[1]}
+		if matches[2] != "" {
+			command["address"] = matches[2]
+		}
+		normalized = command
 	} else {
 		normalized = value
 	}
