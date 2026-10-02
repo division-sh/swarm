@@ -56,6 +56,8 @@ func TestChannelManifestAdmissionPresenceMatrix(t *testing.T) {
 		{[]string{"onboarding", "provider_credential"}, false, false},
 		{[]string{"onboarding", "confirmation"}, false, false},
 		{[]string{"onboarding", "signing_credential"}, false, false},
+		{[]string{"onboarding", "learned_destination"}, false, false},
+		{[]string{"onboarding", "learned_destination", "destination"}, false, false},
 	}
 	for _, row := range rows {
 		for _, state := range []string{"missing", "null", "empty_text", "empty_list", "empty_map", "wrong_kind", "valid", "merge"} {
@@ -65,6 +67,29 @@ func TestChannelManifestAdmissionPresenceMatrix(t *testing.T) {
 				want := state == "valid" || state == "merge" || (state == "missing" && row.optional) || (state == "empty_map" && row.emptyMap)
 				if (err == nil) != want {
 					t.Fatalf("want admission=%v: %v", want, err)
+				}
+			})
+		}
+	}
+	for _, row := range []struct {
+		path                []string
+		optional, emptyList bool
+	}{
+		{[]string{"native_inbox"}, true, false},
+		{[]string{"native_inbox", "kind"}, false, false},
+		{[]string{"native_inbox", "client_languages"}, false, true},
+		{[]string{"native_inbox", "direct_launcher_read"}, false, false},
+		{[]string{"native_inbox", "default_launcher_read"}, false, false},
+		{[]string{"native_inbox", "commands_launcher"}, false, false},
+		{[]string{"native_inbox", "inherited_launcher"}, false, false},
+	} {
+		for _, state := range []string{"missing", "null", "empty_text", "empty_list", "empty_map", "wrong_kind", "valid", "merge"} {
+			t.Run(strings.Join(row.path, "/")+"/"+state, func(t *testing.T) {
+				modified := channelPresenceBody(t, body, row.path, state)
+				_, err := packs.ParseChannelManifest(modified)
+				want := state == "valid" || state == "merge" || (state == "missing" && row.optional) || (state == "empty_list" && row.emptyList)
+				if (err == nil) != want {
+					t.Fatalf("want native profile admission=%v: %v", want, err)
 				}
 			})
 		}

@@ -246,7 +246,7 @@ func admitChannelRegistration(value yamlsource.Value) (ChannelRegistrationProfil
 }
 
 func admitChannelOnboarding(value yamlsource.Value) (ChannelOnboardingProfile, error) {
-	f, err := channelFields(value, "activation", "ceremony", "provider_credential", "confirmation", "signing_credential", "connection_health")
+	f, err := channelFields(value, "activation", "ceremony", "provider_credential", "confirmation", "signing_credential", "connection_health", "learned_destination")
 	var out ChannelOnboardingProfile
 	if err != nil {
 		return out, err
@@ -282,6 +282,17 @@ func admitChannelOnboarding(value yamlsource.Value) (ChannelOnboardingProfile, e
 		out.SigningCredentialRole = text
 	} else {
 		out.ConnectionHealth = text
+	}
+	destination, err := channelRequired(value, f, "learned_destination")
+	if err != nil {
+		return out, err
+	}
+	out.LearnedDestination, err = admitChannelMappings(destination, false)
+	if err != nil {
+		return out, err
+	}
+	if len(out.LearnedDestination) == 0 {
+		return out, channelError(destination, "learned_destination requires a nonempty mapping")
 	}
 	return out, nil
 }

@@ -10,7 +10,9 @@ import (
 
 func TestChannelManifestRetainsNativeInboxProfileThroughStrictAdmission(t *testing.T) {
 	body := []byte(`provider: probe
-opaque_types: {}
+opaque_types: {reference: {type: string}}
+operations: {deliver: {tool: probe.deliver}}
+events: {received: {event: probe.received, fields: {text: event.text}}}
 native_inbox:
   kind: scoped_commands_v1
   client_languages: [en, fr]
