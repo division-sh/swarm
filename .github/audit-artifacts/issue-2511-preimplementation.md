@@ -1,5 +1,34 @@
 # Pre-Implementation Coverage Audit: #2511
 
+## Recorded Independent Gate
+
+[Reviewer-g's ruling5943495819](https://github.com/division-sh/swarm/issues/2511#issuecomment-5943495819)
+is **approved as first slice**. It authorizes complete five-validator maintenance,
+not broader receipt-validity/type-model closure. N01/N02 must be added and run
+on unchanged production before extraction; all48 proof rows, both-store public
+readback/retained restart/fresh compiled CLI reconstruction, representative
+mutations, exact-head ratchet, default swarm-test and CI remain required.
+No schema, ownership, constructor, compatibility or vendor change is approved.
+The pending statements below are the historical submitted audit, superseded
+only by this recorded gate. Implementation starts with characterization.
+
+## Pre-Extraction Characterization Receipt
+
+N01/N02 were added with every production file unchanged from `6646ea588`.
+`TestDurableDataAggregateValidationCharacterization` passes 150 leaf cases;
+`TestDurableDataAggregateValidationErrorPrecedence` passes 169 leaf cases.
+The cases cover all five targets, outcome decisions, canonical declaration
+and local-value gates, exact errors/wrapping, nil versus empty evidence and
+input immutability. Competing-error cases retain gate order; unordered child
+count validation is deliberately not assigned a deterministic multi-error
+order. Existing defensive branches dominated by earlier admission remain
+intact, rather than being credited as directly reachable.
+
+Commands run on 2026-10-02 before extraction:
+`go test ./internal/durabledata -run '^TestDurableDataAggregateValidation(Characterization|ErrorPrecedence)$' -count=1 -timeout=2m`
+and `go test ./internal/durabledata -race -count=3 -timeout=3m` (4.770s).
+Both passed. This is baseline characterization, not post-extraction closure.
+
 Agent-g, 2026-10-02. **Reviewer-g independent gate requested; implementation
 has not started.** Source baseline: merged
 `origin/master@6646ea5888f7c38d4d5e411717037a9d170ef062`. Source branch:
