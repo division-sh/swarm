@@ -98,7 +98,11 @@ func seedPublicationGroupAgentIntent(t *testing.T, backend string, fixture autho
 		t.Fatal("agent crash source requires its actual admitted bundle")
 	}
 	runID, at := uuid.NewString(), time.Now().UTC()
-	ctx := correlation.WithRunID(seedSelectedActivitySourceRun(t, fixture, runID, source), runID)
+	ctx := effects.WithExecutionMode(correlation.WithRunID(seedSelectedActivitySourceRun(t, fixture, runID, source), runID), executionmode.Mock)
+	construction := sqliteFlowActivationRequest(bundle, ".", runID, "", runID)
+	construction.Instance = flowidentity.Stored(source, ".", runID, runID, runID, "")
+	construction.OccurredAt = at.Add(-time.Second)
+	constructed := constructHistoricalSourceFixture(t, ctx, fixture.store.(agentFixtureFlowStore), construction)
 	node := mustPersistenceRootNode("fan-out-source")
 	plans := source.FanOutPlansForHandler(node, "items.ready")
 	if len(plans) != 1 {
@@ -114,20 +118,22 @@ func seedPublicationGroupAgentIntent(t *testing.T, backend string, fixture autho
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedWorkflowTargetStateForTransition(t, backend, fixture.db, runID, runID, runID, "pending", 1, at)
-	if _, err := fixture.db.ExecContext(ctx, `UPDATE entity_state SET entity_type='root' WHERE run_id=$1`, runID); err != nil {
-		t.Fatal(err)
-	}
 	request := fanoutobligation.IntentRequest{
 		Key: fanoutobligation.IntentKey{RunID: runID, TriggeringDeliveryID: claim.Claim.DeliveryID(), ElementRef: plans[0].Ref.ElementRef}, PlanRef: plans[0].Ref,
 		Source: fanoutobligation.SourceRef{Kind: fanoutobligation.SourceEventPayloadField, EventID: trigger.ID(), Field: "items"}, Cardinality: 3,
 		Capsule: fanoutobligation.Capsule{NodeKey: node.Key(), ExecutionFlowID: ".", Route: flowidentity.StoredRoute(".", runID, runID), EntityID: runID,
 			SourceProjection: plans[0].SemanticEvidence(),
-			HandlerEventKey:  "items.ready", CurrentState: "review", ProducerSource: trigger.RoutingSource(), Receiver: &fanoutobligation.ExecutionReceiver{Node: node, Target: route.Target}, Lineage: events.LineageFromEvent(trigger)},
+			HandlerEventKey:  "items.ready", CurrentState: "pending", ProducerSource: trigger.RoutingSource(), Receiver: &fanoutobligation.ExecutionReceiver{Node: node, Target: route.Target}, Lineage: events.LineageFromEvent(trigger)},
 	}
-	record := stateOnlyWorkflowEngineMutationRecord(t, runID, ".", runID, runID, "pending", 1, at)
-	record.CurrentState, record.EntityType, record.Mode = "review", "root", "static"
-	record.EnteredStageAt, record.UpdatedAt = at, at
+	persisted, err := constructed.PersistenceRecord()
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := persisted.State
+	record.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
+	record.ExpectedRevision = 1
+	record.ExpectedState = "pending"
+	record.UpdatedAt = at
 	if _, err := fixture.store.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(ctx, pipeline.WorkflowEngineMutationCommand{
 		State: record, FanOutIntent: &request,
 		DeliverySuccess: &pipeline.WorkflowEngineDeliverySuccess{Claim: claim.Claim, SideEffects: []string{"handler_completed"}, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleSelection()},

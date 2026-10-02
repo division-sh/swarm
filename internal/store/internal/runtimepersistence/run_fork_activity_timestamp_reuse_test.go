@@ -15,7 +15,9 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -279,12 +281,14 @@ func seedActivityEvidenceReuse(t *testing.T, fixture authorActivityReceiptFixtur
 	if err := commitSemanticPipelineProcessedEventFixture(ctx, fixture.store, parent); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.db.ExecContext(ctx, `INSERT INTO entity_mutations (run_id,entity_id,domain,path,old_value,new_value,caused_by_event,writer_type,writer_id,handler_step,created_at) VALUES ($1,$2,'lifecycle_state','','null','"pending"',$3,'platform','activity-timestamp-fixture','seed',$4)`, runID, entityID, parentID, at); err != nil {
-		t.Fatal(err)
+	bundle, found := semanticview.Bundle(declarations)
+	if !found {
+		t.Fatal("recorded activity requires its admitted constructor source")
 	}
-	if _, err := fixture.db.ExecContext(ctx, `INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type,current_state,gates,fields,bookkeeping,accumulator,revision,entered_state_at,created_at,updated_at) VALUES ($1,$2,$3,'default','pending','{}','{}','{}','{}',1,$4,$5,$6)`, runID, entityID, instance, at, at, at); err != nil {
-		t.Fatal(err)
-	}
+	req := sqliteFlowActivationRequest(bundle, flow, instance, "", instance)
+	req.Instance = flowidentity.Stored(declarations, flow, instance, instance, entityID, "")
+	req.OccurredAt = at
+	constructHistoricalSourceFixture(t, correlation.WithInboundEvent(correlation.WithRunID(ctx, runID), parent), fixture.store.(agentFixtureFlowStore), req)
 	var generation attemptgeneration.Generation
 	loopStage := ""
 	if loopAttempt > 0 {
@@ -305,7 +309,7 @@ func seedActivityEvidenceReuse(t *testing.T, fixture authorActivityReceiptFixtur
 		if err := loopruntime.Store(buckets, activation); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := fixture.db.ExecContext(ctx, `UPDATE entity_state SET accumulator=$3 WHERE run_id=$1 AND entity_id=$2`, runID, entityID, forkTestJSON(t, buckets)); err != nil {
+		if _, err := fixture.db.ExecContext(ctx, `UPDATE flow_instances SET accumulator=$3 WHERE run_id=$1 AND entity_id=$2`, runID, entityID, forkTestJSON(t, buckets)); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := fixture.db.ExecContext(ctx, `INSERT INTO entity_mutations (run_id,entity_id,domain,path,old_value,new_value,caused_by_event,writer_type,writer_id,handler_step,created_at) VALUES ($1,$2,'accumulator','handler_loops','null',$3,$4,'platform','activity-evidence-fixture','seed',$5)`, runID, entityID, forkTestJSON(t, buckets[loopruntime.BucketKey]), parentID, at); err != nil {
@@ -385,8 +389,13 @@ func seedActivityEvidenceReuse(t *testing.T, fixture authorActivityReceiptFixtur
 	}
 	fixture.advance()
 	child := materializeSelectedActivityFixture(t, ctx, fixture.store.(selectedActivityProjectionStore), runID, event.ID())
-	if child.MaterializedEntityCount != 1 {
-		t.Fatalf("producer materialization count=%d", child.MaterializedEntityCount)
+	wantEntities := 1
+	if approved {
+		// Root construction owns its keyless flow-a descendant as well.
+		wantEntities = 2
+	}
+	if child.MaterializedEntityCount != wantEntities {
+		t.Fatalf("producer materialization count=%d want=%d", child.MaterializedEntityCount, wantEntities)
 	}
 	return child, event, record
 }

@@ -109,7 +109,7 @@ item.ready:
 		"nodes.yaml": `writer:
   execution_type: system_node
   event_handlers:
-    seed: {create_entity: true}
+    seed: {}
     batch.ready:
       data_accumulation:
         writes: [{target_field: items, value: "${payload.items}"}]
@@ -198,10 +198,14 @@ func newA2MapFanOutExecutionFromFiles(t *testing.T, selected gateRecoveryStoreCa
 	}
 	selected.events.(swarmruntime.EventPayloadAdmissionBinder).SetEventPayloadAdmitter(admitter)
 	probe := lifecycleprobe.New()
+	var scheduleEvents []string
+	if gather {
+		scheduleEvents = []string{"platform.join_complete", "platform.join_timeout"}
+	}
 	bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
 		ContractBundle: source, SourceArtifactFact: fact, RuntimeInstanceID: runtimeID,
 		WorkOwner: work, PayloadAdmitter: admitter, TestLifecycleProbe: probe, DeliveryAuthority: authority,
-	}, "platform.join_complete", "platform.join_timeout")
+	}, scheduleEvents...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,6 +269,7 @@ func newA2MapFanOutExecutionFromFiles(t *testing.T, selected gateRecoveryStoreCa
 			t.Error(err)
 		}
 	})
+	commitKeylessConstructorComponent(t, ctx, selected, p.pc, source)
 	p.publish(t, "seed", nil)
 	return p
 }
@@ -637,7 +642,7 @@ func (p *a2MapFanOutExecution) compositeEntry(t *testing.T, trigger events.Event
 		entry.OccurrenceID == "" || entry.TransitionID == "" || instance.CurrentState != "awaiting" {
 		t.Fatalf("actual delivered stage entry=%#v found=%v err=%v state=%s", entry, found, err, instance.CurrentState)
 	}
-	if err := entry.RequireOwner(p.runID, flowidentity.RouteForInstancePath(p.runID).ScopeKey,
+	if err := entry.RequireOwner(p.runID, testRunScopedWorkflowInstanceForRun(p.runID, p.runID).Route.ScopeKey,
 		instance.InstanceID, instance.StorageRef, instance.EntityID, "awaiting"); err != nil {
 		t.Fatal(err)
 	}

@@ -88,15 +88,22 @@ func TestEntitylessNodeContractEmissionDoesNotMaterializeWorkflowStateOnSQLiteAn
 			store, ctx := tc.open(t)
 			bus := &recordingPipelineBus{}
 			pc := newDurablePipelineCoordinatorForTest(bus, store.testDB(), PipelineCoordinatorOptions{
-				Module:              staticSemanticWorkflowModule{source: handlerEntityRequirementExecutionSource()},
+				Module: staticSemanticWorkflowModule{source: loadWorkflowTempSource(t, map[string]string{
+					"schema.yaml": "stages:\n  active: {initial: true}\n",
+					"events.yaml": "work.ready:\n  item_id: text\nwork.emitted:\n",
+					"nodes.yaml":  "node-a:\n  execution_type: system_node\n  subscribes_to: [work.ready]\n",
+				})},
 				Persistence:         workflowPersistenceForTest(store),
 				PipelineObligations: unavailablePipelineTestObligationOwner{},
 			})
 			runID := runtimecorrelation.RunIDFromContext(ctx)
 			instancePath := runID
+			// Fieldless is not entityless: the constructor owns a header, but
+			// declarative emission must not create an entity_state row.
+			seedConstructorUnitInstance(t, pc, ctx, ".")
 			evt := handlerTestRootIngress(
 				uuid.NewString(), "work.ready", "", "", json.RawMessage(`{"item_id":"a"}`), 0, runID, "",
-				events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: instancePath}), time.Now().UTC(),
+				events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: instancePath, EntityID: runID}), time.Now().UTC(),
 			)
 			dialect := authoractivityfixture.DialectPostgres
 			if store.isSQLite() {
@@ -106,8 +113,8 @@ func TestEntitylessNodeContractEmissionDoesNotMaterializeWorkflowStateOnSQLiteAn
 			node := pipelineNode(t, ".", "node-a")
 			deliveryCtx := withWorkflowNodeDeliveryRoute(ctx, events.DeliveryRoute{
 				Recipient: events.MustNodeDeliveryRecipient(node),
-				Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
-					FlowID: ".", FlowInstance: instancePath,
+				Target: events.MustExistingEntityTarget(events.RouteIdentity{
+					FlowID: ".", FlowInstance: instancePath, EntityID: runID,
 				}),
 			})
 
@@ -139,7 +146,7 @@ func TestEntitylessNodeContractEmissionDoesNotMaterializeWorkflowStateOnSQLiteAn
 				}
 			}
 			assertCount("entity_state", "SELECT COUNT(*) FROM entity_state WHERE run_id = ?", "SELECT COUNT(*) FROM entity_state WHERE run_id = $1::uuid", runID)
-			assertCount("flow_instances", "SELECT COUNT(*) FROM flow_instances WHERE run_id = ? AND instance_path = ?", "SELECT COUNT(*) FROM flow_instances WHERE run_id = $1::uuid AND instance_path = $2", runID, instancePath)
+			assertCount("additional headers", "SELECT COUNT(*)-1 FROM flow_instances WHERE run_id = ? AND instance_path = ?", "SELECT COUNT(*)-1 FROM flow_instances WHERE run_id = $1::uuid AND instance_path = $2", runID, instancePath)
 		})
 	}
 }
@@ -261,9 +268,10 @@ func TestEntitylessPayloadGuardDoesNotPublishOrMaterializeOnBothStores(t *testin
 			})
 			runID := runtimecorrelation.RunIDFromContext(ctx)
 			instancePath := runID
+			seedConstructorUnitInstance(t, pc, ctx, ".")
 			evt := handlerTestRootIngress(
 				uuid.NewString(), "work.ready", "", "", json.RawMessage(`{"item_id":"a"}`), 0, runID, "",
-				handlerTestWorkflowEnvelope(".", instancePath, ""), time.Now().UTC(),
+				handlerTestWorkflowEnvelope(".", instancePath, runID), time.Now().UTC(),
 			)
 			dialect := authoractivityfixture.DialectPostgres
 			if store.isSQLite() {
@@ -273,8 +281,8 @@ func TestEntitylessPayloadGuardDoesNotPublishOrMaterializeOnBothStores(t *testin
 			node := pipelineNode(t, ".", "node-a")
 			deliveryCtx := withWorkflowNodeDeliveryRoute(ctx, events.DeliveryRoute{
 				Recipient: events.MustNodeDeliveryRecipient(node),
-				Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
-					FlowID: ".", FlowInstance: instancePath,
+				Target: events.MustExistingEntityTarget(events.RouteIdentity{
+					FlowID: ".", FlowInstance: instancePath, EntityID: runID,
 				}),
 			})
 
@@ -289,7 +297,7 @@ func TestEntitylessPayloadGuardDoesNotPublishOrMaterializeOnBothStores(t *testin
 			}
 			rejected := handlerTestRootIngress(
 				uuid.NewString(), "work.ready", "", "", json.RawMessage(`{"item_id":"b"}`), 0, runID, "",
-				handlerTestWorkflowEnvelope(".", instancePath, ""), time.Now().UTC(),
+				handlerTestWorkflowEnvelope(".", instancePath, runID), time.Now().UTC(),
 			)
 			seedPipelineEventRecordForDialect(t, ctx, store.testDB(), dialect, rejected)
 			outcome, err = pc.executeNodeContractHandler(deliveryCtx, node,
@@ -317,7 +325,7 @@ func TestEntitylessPayloadGuardDoesNotPublishOrMaterializeOnBothStores(t *testin
 				}
 			}
 			assertCount("entity_state", "SELECT COUNT(*) FROM entity_state WHERE run_id = ?", "SELECT COUNT(*) FROM entity_state WHERE run_id = $1::uuid", runID)
-			assertCount("flow_instances", "SELECT COUNT(*) FROM flow_instances WHERE run_id = ? AND instance_path = ?", "SELECT COUNT(*) FROM flow_instances WHERE run_id = $1::uuid AND instance_path = $2", runID, instancePath)
+			assertCount("additional headers", "SELECT COUNT(*)-1 FROM flow_instances WHERE run_id = ? AND instance_path = ?", "SELECT COUNT(*)-1 FROM flow_instances WHERE run_id = $1::uuid AND instance_path = $2", runID, instancePath)
 		})
 	}
 }

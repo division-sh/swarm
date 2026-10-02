@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	swarmruntime "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -31,6 +32,7 @@ import (
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
@@ -380,13 +382,31 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 			seedRuntime, seedProcess := newRuntime(selected)
 			seedCtx := testLiveExecutionContext(worklifetime.WithRuntimeOccurrence(workflowCtx, seedRuntime.WorkOccurrence()))
 			occurredAt := time.Now().UTC()
-			result, err := seedRuntime.Pipeline.MaterializeInitialEntry(seedCtx, runtimeflowidentity.RunScopedFlowInstance{RunID: workflowRunID, Route: runtimeflowidentity.RouteForInstancePath(workflowRunID)}, runtimepipeline.WorkflowInstance{
+			construction383Ctx := seedCtx
+			construction383At := occurredAt
+			construction383Instance, construction383Lifecycle, err := seedRuntime.Pipeline.PrepareInitialEntryLifecycle(construction383Ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: workflowRunID, Route: runtimeflowidentity.StoredRoute(".", workflowRunID, workflowRunID)}, runtimepipeline.WorkflowInstance{
 				InstanceID: workflowRunID, StorageRef: workflowRunID,
-				WorkflowName: source.WorkflowName(), WorkflowVersion: source.WorkflowVersion(), CurrentState: "waiting",
+				WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), CurrentState: "waiting",
 				Fields:     map[string]any{},
 				EntityType: "test_entity",
-			}, occurredAt)
-			if err != nil || result != runtimepipeline.WorkflowInitialMaterializationCreated {
+			}, construction383At)
+			if err != nil {
+				t.Fatalf("prepare fixture initial lifecycle: %v", err)
+			}
+			construction383Command, err := flowactivationfixture.Command(construction383Ctx, construction383Instance, construction383Lifecycle, construction383At)
+			if err != nil {
+				t.Fatalf("prepare fixture activation command: %v", err)
+			}
+			result, err := any(selected).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction383Ctx, construction383Command)
+			if err == nil && !result.Acknowledged {
+				t.Fatal("fixture activation was not acknowledged")
+			}
+			if result.Acknowledged && result.Created {
+				if finalizeErr := seedRuntime.Pipeline.FinalizeInitialEntryLifecycle(construction383Ctx, result.Lifecycle); finalizeErr != nil {
+					t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+				}
+			}
+			if err != nil || !result.Created {
 				t.Fatalf("materialize withheld workflow timer: result=%v err=%v", result, err)
 			}
 			closeRuntime("seed", seedRuntime, seedProcess, nil)
@@ -449,7 +469,7 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 			time.Sleep(100 * time.Millisecond)
 			instance, found, err := failedRuntime.Pipeline.Load(workflowCtx, runtimeflowidentity.RunScopedFlowInstance{
 				RunID: workflowRunID,
-				Route: runtimeflowidentity.RouteForInstancePath(workflowRunID),
+				Route: runtimeflowidentity.StoredRoute(".", workflowRunID, workflowRunID),
 			})
 			if err != nil || !found || instance.CurrentState != "waiting" {
 				t.Fatalf("workflow timer crossed failed topology latch: found=%v state=%q err=%v", found, instance.CurrentState, err)
@@ -481,7 +501,7 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 				if interruptedRuntime.Manager.IsRunning() || countGenericEvents() != 0 {
 					t.Fatalf("%s leaked executable work", interruption)
 				}
-				waiting, found, err := interruptedRuntime.Pipeline.Load(workflowCtx, runtimeflowidentity.RunScopedFlowInstance{RunID: workflowRunID, Route: runtimeflowidentity.RouteForInstancePath(workflowRunID)})
+				waiting, found, err := interruptedRuntime.Pipeline.Load(workflowCtx, runtimeflowidentity.RunScopedFlowInstance{RunID: workflowRunID, Route: runtimeflowidentity.StoredRoute(".", workflowRunID, workflowRunID)})
 				if err != nil || !found || waiting.CurrentState != "waiting" {
 					t.Fatalf("%s released workflow timer: found=%v state=%s err=%v", interruption, found, waiting.CurrentState, err)
 				}
@@ -502,7 +522,7 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 				t.Fatal("prepared runtime released an overdue generic schedule")
 			}
 			beforeRelease, _, err := recoveredRuntime.Pipeline.Load(workflowCtx, runtimeflowidentity.RunScopedFlowInstance{
-				RunID: workflowRunID, Route: runtimeflowidentity.RouteForInstancePath(workflowRunID),
+				RunID: workflowRunID, Route: runtimeflowidentity.StoredRoute(".", workflowRunID, workflowRunID),
 			})
 			if err != nil || beforeRelease.CurrentState != "waiting" {
 				t.Fatalf("prepared runtime released an overdue workflow timer: state=%s err=%v", beforeRelease.CurrentState, err)
@@ -519,7 +539,7 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 			for {
 				instance, instanceFound, loadErr := recoveredRuntime.Pipeline.Load(workflowCtx, runtimeflowidentity.RunScopedFlowInstance{
 					RunID: workflowRunID,
-					Route: runtimeflowidentity.RouteForInstancePath(workflowRunID),
+					Route: runtimeflowidentity.StoredRoute(".", workflowRunID, workflowRunID),
 				})
 				activation, activationFound, activationErr := selected.LoadGenericScheduleActivation(genericCtx, genericAdmission.Activation.ID)
 				if loadErr == nil && instanceFound && instance.CurrentState == "done" && activationErr == nil && activationFound &&
@@ -617,19 +637,37 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 
 			seedRuntime, seedProcess := newRuntime(selected)
 			seedCtx := testLiveExecutionContext(worklifetime.WithRuntimeOccurrence(ctx, seedRuntime.WorkOccurrence()))
-			result, err := seedRuntime.Pipeline.MaterializeInitialEntry(seedCtx, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath(runID)}, runtimepipeline.WorkflowInstance{
+			construction620Ctx := seedCtx
+			construction620At := time.Now().UTC()
+			construction620Instance, construction620Lifecycle, err := seedRuntime.Pipeline.PrepareInitialEntryLifecycle(construction620Ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.StoredRoute(".", runID, runID)}, runtimepipeline.WorkflowInstance{
 				InstanceID:      runID,
 				StorageRef:      runID,
-				WorkflowName:    source.WorkflowName(),
+				WorkflowName:    ".",
 				WorkflowVersion: source.WorkflowVersion(),
 				CurrentState:    "waiting",
 				Fields:          map[string]any{},
 				EntityType:      "test_entity",
-			}, time.Now().UTC())
+			}, construction620At)
+			if err != nil {
+				t.Fatalf("prepare fixture initial lifecycle: %v", err)
+			}
+			construction620Command, err := flowactivationfixture.Command(construction620Ctx, construction620Instance, construction620Lifecycle, construction620At)
+			if err != nil {
+				t.Fatalf("prepare fixture activation command: %v", err)
+			}
+			result, err := any(selected).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction620Ctx, construction620Command)
+			if err == nil && !result.Acknowledged {
+				t.Fatal("fixture activation was not acknowledged")
+			}
+			if result.Acknowledged && result.Created {
+				if finalizeErr := seedRuntime.Pipeline.FinalizeInitialEntryLifecycle(construction620Ctx, result.Lifecycle); finalizeErr != nil {
+					t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+				}
+			}
 			if err != nil {
 				t.Fatalf("materialize workflow timer before restart: %v", err)
 			}
-			if result != runtimepipeline.WorkflowInitialMaterializationCreated {
+			if !result.Created {
 				t.Fatalf("initial materialization result = %v, want created", result)
 			}
 			shutdown("seed", seedRuntime, seedProcess)
@@ -653,7 +691,7 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 
 			instance, found, err := restarted.Pipeline.Load(ctx, runtimeflowidentity.RunScopedFlowInstance{
 				RunID: runID,
-				Route: runtimeflowidentity.RouteForInstancePath(runID),
+				Route: runtimeflowidentity.StoredRoute(".", runID, runID),
 			})
 			if err != nil {
 				t.Fatalf("load workflow instance after failed restart: %v", err)
@@ -752,21 +790,42 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 			}
 
 			seedRuntime, seedProcess := newRuntime()
+			rootIdentity := runtimeflowidentity.Stored(source, ".", runID, runID, "", "")
+			rootOwner := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: rootIdentity.Route()}
 			occurredAt := time.Now().UTC().Add(-time.Second)
 			seedCtx := testLiveExecutionContext(worklifetime.WithRuntimeOccurrence(ctx, seedRuntime.WorkOccurrence()))
-			result, err := seedRuntime.Pipeline.MaterializeInitialEntry(seedCtx, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath(runID)}, runtimepipeline.WorkflowInstance{
-				InstanceID:      runID,
-				StorageRef:      runID,
-				WorkflowName:    source.WorkflowName(),
+			construction757Ctx := seedCtx
+			construction757At := occurredAt
+			construction757Instance, construction757Lifecycle, err := seedRuntime.Pipeline.PrepareInitialEntryLifecycle(construction757Ctx, rootOwner, runtimepipeline.WorkflowInstance{
+				InstanceID:      rootIdentity.InstanceID,
+				StorageRef:      rootIdentity.InstancePath,
+				EntityID:        rootIdentity.EntityID,
+				WorkflowName:    ".",
 				WorkflowVersion: source.WorkflowVersion(),
 				CurrentState:    "waiting",
 				Fields:          map[string]any{},
 				EntityType:      "test_entity",
-			}, occurredAt)
+			}, construction757At)
+			if err != nil {
+				t.Fatalf("prepare fixture initial lifecycle: %v", err)
+			}
+			construction757Command, err := flowactivationfixture.Command(construction757Ctx, construction757Instance, construction757Lifecycle, construction757At)
+			if err != nil {
+				t.Fatalf("prepare fixture activation command: %v", err)
+			}
+			result, err := any(selected).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction757Ctx, construction757Command)
+			if err == nil && !result.Acknowledged {
+				t.Fatal("fixture activation was not acknowledged")
+			}
+			if result.Acknowledged && result.Created {
+				if finalizeErr := seedRuntime.Pipeline.FinalizeInitialEntryLifecycle(construction757Ctx, result.Lifecycle); finalizeErr != nil {
+					t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+				}
+			}
 			if err != nil {
 				t.Fatalf("materialize workflow timer before restart: %v", err)
 			}
-			if result != runtimepipeline.WorkflowInitialMaterializationCreated {
+			if !result.Created {
 				t.Fatalf("initial materialization result = %v, want created", result)
 			}
 			shutdown("seed", seedRuntime, seedProcess)
@@ -813,10 +872,7 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 
 			deadline := time.Now().Add(8 * time.Second)
 			for {
-				instance, found, err := restarted.Pipeline.Load(ctx, runtimeflowidentity.RunScopedFlowInstance{
-					RunID: runID,
-					Route: runtimeflowidentity.RouteForInstancePath(runID),
-				})
+				instance, found, err := restarted.Pipeline.Load(ctx, rootOwner)
 				if err != nil {
 					t.Fatalf("load restored workflow instance: %v", err)
 				}

@@ -37,12 +37,27 @@ func (p *selectionCASPersistence) CommitWorkflowEngineMutation(ctx context.Conte
 		p.selection = command.DeliverySuccess.RuleSelection
 		// Model a different writer after the real engine's read, not a forged
 		// command revision or a synthetic CAS error returned by the test.
-		result, err := p.db.ExecContext(ctx, `UPDATE entity_state SET revision=revision+1, fields='{"marker":"second"}' WHERE run_id=$1 AND entity_id=$2 AND revision=$3`, command.State.Identity.RunID, command.State.EntityID, command.State.ExpectedRevision)
+		tx, err := p.db.BeginTx(ctx, nil)
+		if err != nil {
+			return pipeline.CommittedWorkflowEngineMutation{}, err
+		}
+		defer tx.Rollback()
+		result, err := tx.ExecContext(ctx, `UPDATE flow_instances SET revision=revision+1 WHERE run_id=$1 AND entity_id=$2 AND revision=$3`, command.State.Identity.RunID, command.State.EntityID, command.State.ExpectedRevision)
 		if err != nil {
 			return pipeline.CommittedWorkflowEngineMutation{}, err
 		}
 		if n, err := result.RowsAffected(); err != nil || n != 1 {
 			return pipeline.CommittedWorkflowEngineMutation{}, fmt.Errorf("competing writer rows=%d: %v", n, err)
+		}
+		result, err = tx.ExecContext(ctx, `UPDATE entity_state SET revision=revision+1, fields='{"marker":"second"}' WHERE run_id=$1 AND entity_id=$2 AND revision=$3`, command.State.Identity.RunID, command.State.EntityID, command.State.ExpectedRevision)
+		if err != nil {
+			return pipeline.CommittedWorkflowEngineMutation{}, err
+		}
+		if n, err := result.RowsAffected(); err != nil || n != 1 {
+			return pipeline.CommittedWorkflowEngineMutation{}, fmt.Errorf("competing field writer rows=%d: %v", n, err)
+		}
+		if err := tx.Commit(); err != nil {
+			return pipeline.CommittedWorkflowEngineMutation{}, err
 		}
 		p.fired = true
 	}
@@ -80,7 +95,9 @@ func TestSelectionRetryAfterRealCASConflictBothStores(t *testing.T) {
 			fault := &selectionCASPersistence{WorkflowPersistenceOwner: selected.events.(pipeline.WorkflowPersistenceOwner), db: selected.db}
 			selected.persistence = pipeline.NewWorkflowPersistence(fault)
 			module := proposedEffectProofModule{source: source, nodes: nodes}
-			bus.SetInterceptors(newGateRecoveryCoordinator(bus, selected, pipeline.PipelineCoordinatorOptions{Module: module}))
+			initialCoordinator := newGateRecoveryCoordinator(bus, selected, pipeline.PipelineCoordinatorOptions{Module: module})
+			commitKeylessConstructorComponent(t, ctx, selected, initialCoordinator, source)
+			bus.SetInterceptors(initialCoordinator)
 			publish := func(name string) events.Event {
 				t.Helper()
 				event := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType(name), "operator", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())

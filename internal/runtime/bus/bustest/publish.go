@@ -40,7 +40,7 @@ func CommitPublish(
 		}
 	}
 	for _, plan := range command.Activations {
-		result.Activations = append(result.Activations, runtimepipeline.CommittedFlowInstanceActivation{Plan: plan, Created: true, ReadinessRevision: 1})
+		result.Activations = append(result.Activations, runtimepipeline.CommittedFlowInstanceActivation{Plan: plan, Created: true, ReadinessAttemptOrdinal: 1})
 	}
 	return result, result.Validate()
 }

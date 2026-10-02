@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 )
 
 func TestRuleResultEventsFlowThroughDurableCallbackDelivery(t *testing.T) {
@@ -92,8 +93,29 @@ func TestRuleResultEventsFlowThroughDurableCallbackDelivery(t *testing.T) {
 			})
 
 			instance := artifactActionResultWorkflowInstance()
-			if _, err := pc.MaterializeInitialEntry(testLiveExecutionContext(ctx), runtimeflowidentity.RunScopedFlowInstance{RunID: templateInstanceDeliveryRunID, Route: runtimeflowidentity.RouteForInstancePath(instance.StorageRef)}, instance, time.Now().UTC()); err != nil {
-				t.Fatalf("seed workflow instance: %v", err)
+			{
+				construction95Ctx := testLiveExecutionContext(ctx)
+				construction95At := time.Now().UTC()
+				construction95Instance, construction95Lifecycle, err := pc.PrepareInitialEntryLifecycle(construction95Ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: templateInstanceDeliveryRunID, Route: runtimeflowidentity.RouteForInstancePath(instance.StorageRef)}, instance, construction95At)
+				if err != nil {
+					t.Fatalf("prepare fixture initial lifecycle: %v", err)
+				}
+				construction95Command, err := flowactivationfixture.Command(construction95Ctx, construction95Instance, construction95Lifecycle, construction95At)
+				if err != nil {
+					t.Fatalf("prepare fixture activation command: %v", err)
+				}
+				construction95Committed, err := any(pg).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction95Ctx, construction95Command)
+				if err != nil {
+					t.Fatalf("seed workflow instance: %v", err)
+				}
+				if err == nil && !construction95Committed.Acknowledged {
+					t.Fatal("fixture activation was not acknowledged")
+				}
+				if construction95Committed.Acknowledged && construction95Committed.Created {
+					if finalizeErr := pc.FinalizeInitialEntryLifecycle(construction95Ctx, construction95Committed.Lifecycle); finalizeErr != nil {
+						t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+					}
+				}
 			}
 			if err := flowroutefixture.StageAndPublish(ctx, bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
 				RunID: templateInstanceDeliveryRunID,
@@ -249,8 +271,29 @@ func TestRuleResultEventsFlowThroughStaticServiceCallbackDelivery(t *testing.T) 
 			})
 
 			instance := artifactActionResultStaticWorkflowInstance()
-			if _, err := pc.MaterializeInitialEntry(testLiveExecutionContext(ctx), runtimeflowidentity.RunScopedFlowInstance{RunID: templateInstanceDeliveryRunID, Route: runtimeflowidentity.RouteForInstancePath(instance.StorageRef)}, instance, time.Now().UTC()); err != nil {
-				t.Fatalf("seed workflow instance: %v", err)
+			{
+				construction252Ctx := testLiveExecutionContext(ctx)
+				construction252At := time.Now().UTC()
+				construction252Instance, construction252Lifecycle, err := pc.PrepareInitialEntryLifecycle(construction252Ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: templateInstanceDeliveryRunID, Route: runtimeflowidentity.RouteForInstancePath(instance.StorageRef)}, instance, construction252At)
+				if err != nil {
+					t.Fatalf("prepare fixture initial lifecycle: %v", err)
+				}
+				construction252Command, err := flowactivationfixture.Command(construction252Ctx, construction252Instance, construction252Lifecycle, construction252At)
+				if err != nil {
+					t.Fatalf("prepare fixture activation command: %v", err)
+				}
+				construction252Committed, err := any(pg).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction252Ctx, construction252Command)
+				if err != nil {
+					t.Fatalf("seed workflow instance: %v", err)
+				}
+				if err == nil && !construction252Committed.Acknowledged {
+					t.Fatal("fixture activation was not acknowledged")
+				}
+				if construction252Committed.Acknowledged && construction252Committed.Created {
+					if finalizeErr := pc.FinalizeInitialEntryLifecycle(construction252Ctx, construction252Committed.Lifecycle); finalizeErr != nil {
+						t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+					}
+				}
 			}
 
 			requestPayload, err := json.Marshal(map[string]any{

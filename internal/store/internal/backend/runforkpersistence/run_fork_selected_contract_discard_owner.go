@@ -139,6 +139,7 @@ func deleteSelectedContractForkState(ctx context.Context, tx *sql.Tx, forkRunID 
 		{"timers", `DELETE FROM timers WHERE run_id = $1`},
 		{"activity evidence", `DELETE FROM activity_attempts WHERE run_id = $1`},
 		{"mutations", `DELETE FROM entity_mutations WHERE run_id = $1`},
+		{"constructed instances", `DELETE FROM flow_instances WHERE run_id = $1`},
 	}
 	if !preserveCompletionEvidence {
 		statements = append([]struct{ label, query string }{

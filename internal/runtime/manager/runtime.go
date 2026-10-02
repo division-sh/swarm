@@ -1698,7 +1698,7 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 			abortErr := am.lifecycle.abortUnlaunchedLoopLocked(parent, identity, token, done, cell)
 			return replaceExecutionResult{}, errors.Join(transitionErr, abortErr, cleanupPrepared())
 		}
-		if err := preparedRoute.Publish(); err != nil {
+		if err := publishPreparedAgentRoute(preparedRoute); err != nil {
 			abortErr := am.lifecycle.abortUnlaunchedLoopLocked(parent, identity, token, done, cell)
 			return replaceExecutionResult{}, errors.Join(fmt.Errorf("publish generation-owned agent route: %w", err), abortErr, cleanupPrepared())
 		}
@@ -1719,6 +1719,19 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 		loopWorkLease = nil
 	}
 	return replaceExecutionResult{previous: current.Config, config: candidate.Config, transitioned: true}, nil
+}
+
+func publishPreparedAgentRoute(route runtimebus.AgentRoutePreparation) (result error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			if cause, ok := recovered.(error); ok {
+				result = fmt.Errorf("prepared agent route publication panicked: %w", cause)
+			} else {
+				result = fmt.Errorf("prepared agent route publication panicked: %v", recovered)
+			}
+		}
+	}()
+	return route.Publish()
 }
 
 func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *agentExecutionProjection, loopCtx context.Context, done chan struct{}, workLease *worklifetime.Lease, executionOwner worklifetime.Occurrence) {

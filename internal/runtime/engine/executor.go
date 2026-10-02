@@ -181,8 +181,8 @@ func (e *Executor) ValidateRequest(req ExecutionRequest) error {
 	if err := validateHandlerActivityRuntime(req.Handler, req.FanOutPlans); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
 	}
-	if req.Handler.CreateEntity && req.Handler.Accumulate != nil {
-		return fmt.Errorf("%w: handler declares both create_entity and accumulate", ErrInvalidConfig)
+	if req.Handler.CreateEntity {
+		return fmt.Errorf("%w: handler construction is retired; construct the exact workflow target before delivery", ErrInvalidConfig)
 	}
 	if req.Handler.Join != nil && req.Handler.Accumulate != nil {
 		return fmt.Errorf("%w: handler declares both join and accumulate", ErrInvalidConfig)
@@ -473,13 +473,12 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 		postCommitErr    error
 	)
 	err := e.deps.Locker.WithEntityLock(ctx, entityID, func(lockCtx context.Context) error {
-		loaded, creating, err := e.loadState(lockCtx, req)
+		loaded, err := e.loadState(lockCtx, req)
 		if err != nil {
 			SetExecutionFailure(&result, err, "runtime.engine", "load_state")
 			return err
 		}
 		req.State = loaded
-		req.creating = creating
 		frame, err := e.newExecutionFrame(lockCtx, req)
 		if err != nil {
 			SetExecutionFailure(&result, err, "runtime.engine", "base_context")
@@ -566,25 +565,24 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 	return result, postCommitErr
 }
 
-func (e *Executor) loadState(ctx context.Context, req ExecutionRequest) (StateSnapshot, bool, error) {
+func (e *Executor) loadState(ctx context.Context, req ExecutionRequest) (StateSnapshot, error) {
 	state := req.State
 	if state.EntityID.IsZero() {
 		state.EntityID = req.EntityID
 	}
 	if req.EntityID.IsZero() {
-		return state, false, nil
+		return StateSnapshot{}, failures.Wrap(failures.ClassInternalFailure, "workflow_target_not_constructed", "runtime.engine", "load_state", nil, ErrUnconstructedWorkflowTarget)
 	}
 	loaded, ok, err := e.deps.StateRepo.LoadState(ctx, req.StateAddress())
 	if err != nil {
-		return StateSnapshot{}, false, err
+		return StateSnapshot{}, err
 	}
 	if ok {
-		return mergeStateSnapshots(state, loaded), false, nil
+		return mergeStateSnapshots(state, loaded), nil
 	}
-	if req.Handler.CreateEntity || req.EntityMaterializationAdmitted || req.Preview {
-		return state, req.Handler.CreateEntity || req.EntityMaterializationAdmitted, nil
-	}
-	return StateSnapshot{}, false, fmt.Errorf("existing entity %s has no stored state", req.EntityID)
+	return StateSnapshot{}, failures.Wrap(failures.ClassInternalFailure, "workflow_target_not_constructed", "runtime.engine", "load_state", map[string]any{
+		"entity_id": req.EntityID.String(), "flow_instance": req.Route.InstancePath,
+	}, ErrUnconstructedWorkflowTarget)
 }
 
 func (e *Executor) newExecutionFrame(ctx context.Context, req ExecutionRequest) (executionFrame, error) {
@@ -612,22 +610,7 @@ func (e *Executor) newExecutionFrame(ctx context.Context, req ExecutionRequest) 
 		Event:   req.Event,
 		Payload: payload,
 	}
-	var base BaseContext
-	var creationPlan *entityruntime.MutationPlan
-	if req.creating {
-		contract, ok := entityruntime.ResolveForFlow(e.deps.Source, req.ExecutionFlowID.String())
-		if !ok {
-			return executionFrame{}, fmt.Errorf("entity creation requires a declared contract")
-		}
-		creationPlan, err = entityruntime.NewCreationMutationPlan(contract, state.StateCarrier.Fields)
-		if err == nil {
-			state.StateCarrier.Fields = creationPlan.Draft()
-			contextInput.State = state
-			base = baseContextWithAdmittedFields(contextInput, state.StateCarrier.Fields)
-		}
-	} else {
-		base, err = BuildBaseContext(contextInput)
-	}
+	base, err := BuildBaseContext(contextInput)
 	if err != nil {
 		return executionFrame{}, err
 	}
@@ -638,7 +621,6 @@ func (e *Executor) newExecutionFrame(ctx context.Context, req ExecutionRequest) 
 		return executionFrame{}, err
 	}
 	frame := executionFrame{
-		entityMutations:          creationPlan,
 		ctx:                      ctx,
 		req:                      req,
 		base:                     base,
@@ -2813,7 +2795,6 @@ func (e *Executor) persist(ctx context.Context, frame executionFrame) (Committed
 	frame.result.StateMutation.TriggerEventID = strings.TrimSpace(frame.req.Event.ID())
 	frame.result.StateMutation.TriggerEventType = strings.TrimSpace(string(frame.req.Event.Type()))
 	frame.result.StateMutation.TriggeredAt = frame.req.Event.CreatedAt()
-	frame.result.StateMutation.InitialFieldValues = cloneStringAnyMap(frame.req.InitialFieldValues)
 	deliveryContext := events.DeliveryContextFromContext(ctx).ReplyOnly()
 	if !deliveryContext.Empty() {
 		for i := range frame.result.EmitIntents {

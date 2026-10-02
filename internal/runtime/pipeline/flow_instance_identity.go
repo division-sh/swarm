@@ -34,7 +34,7 @@ func workflowInstanceRouteForExecution(source semanticview.Source, flowID, expli
 	rootRunScope := source != nil && flowID == strings.TrimSpace(semanticview.RootExecutionFlowID(source))
 	if rootRunScope {
 		if _, err := uuid.Parse(instancePath); err == nil {
-			return runtimeflowidentity.StoredRoute(instancePath, runtimeflowidentity.LogicalInstanceID(instancePath), instancePath), nil
+			return runtimeflowidentity.Stored(source, flowID, instancePath, runtimeflowidentity.LogicalInstanceID(instancePath), "", "").Route(), nil
 		}
 	}
 	if expectedScope == "" || (instancePath != expectedScope && !strings.HasPrefix(instancePath, expectedScope+"/")) {

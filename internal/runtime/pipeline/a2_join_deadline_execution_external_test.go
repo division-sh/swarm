@@ -104,15 +104,13 @@ func TestA2JoinDeadlineExecutionRetainsEntryAndPartialContextOnBothStores(t *tes
 				// Hold only wake dispatch. The real persisted entry is already due;
 				// no schedule timestamp or lifecycle status is rewritten by the test.
 				entryTime := time.Now().UTC().Truncate(time.Microsecond).Add(-2 * time.Hour)
-				if _, err := pc.MaterializeInitialEntry(ctx, owner, pipeline.WorkflowInstance{
+				commitA2FixtureConstruction(t, pc, selected.events, ctx, owner, pipeline.WorkflowInstance{
 					InstanceID: runID, StorageRef: runID, EntityID: runID, WorkflowName: source.WorkflowName(), WorkflowVersion: source.WorkflowVersion(),
 					CurrentState: "awaiting", EntityType: "count_state", Fields: map[string]any{
 						"final_expected": int64(0), "final_completed": int64(0), "final_results": []any{}, "final_reason": "",
 						"final_missing": []any{}, "final_timed_out": false, "marker": int64(0), "members_list": []any{"a", "z"},
 					},
-				}, entryTime); err != nil {
-					t.Fatal(err)
-				}
+				}, entryTime)
 				load := func() pipeline.WorkflowInstance {
 					t.Helper()
 					instance, found, err := pc.Load(ctx, owner)

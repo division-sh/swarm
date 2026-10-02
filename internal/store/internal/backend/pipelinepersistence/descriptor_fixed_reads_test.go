@@ -15,10 +15,10 @@ import (
 	"github.com/google/uuid"
 )
 
-// Frozen raw queries are the pre-preparation oracle; predicates and order are
-// intentionally identical, including nullable joined readiness/entity facts.
+// Raw queries independently exercise current header-owned read semantics;
+// predicates and order include nullable joined readiness/field facts.
 const descriptorFixedReadFlowsBefore = `
-		SELECT fi.run_id, fi.instance_path, fi.flow_template, readiness.plan, readiness.plan_revision,
+		SELECT fi.run_id, fi.instance_path, fi.flow_template, readiness.plan, readiness.plan_hash, readiness.activation_attempt_id, readiness.phase, readiness.activation_attempt_state,
 		       run.bundle_hash, es.fields
 		FROM flow_instances fi
 		LEFT JOIN flow_instance_runtime_readiness readiness
@@ -41,14 +41,13 @@ const descriptorFixedReadFlowsBefore = `
 	`
 
 const descriptorFixedReadTargetsBefore = `
-		SELECT es.entity_id, es.flow_instance, es.current_state,
- CASE WHEN fi.instance_path IS NULL THEN 'active' ELSE fi.status END, fi.terminated_at IS NOT NULL
-		FROM entity_state es
- LEFT JOIN flow_instances fi ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance
-		JOIN runs run ON run.run_id = es.run_id
-		WHERE es.run_id = ?
+		SELECT fi.entity_id, fi.instance_path, fi.current_state,
+		       fi.status, fi.terminated_at IS NOT NULL
+		FROM flow_instances fi
+		JOIN runs run ON run.run_id = fi.run_id
+		WHERE fi.run_id = ?
 		  AND LOWER(TRIM(run.status)) IN ('running', 'paused')
-		ORDER BY es.flow_instance ASC, es.entity_id ASC
+		ORDER BY fi.instance_path ASC, fi.entity_id ASC
 	`
 
 func TestDescriptorFixedReadsFreshFactsAndCanonicalErrors(t *testing.T) {
@@ -63,8 +62,8 @@ func TestDescriptorFixedReadsFreshFactsAndCanonicalErrors(t *testing.T) {
 	runID := uuid.NewString()
 	runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{RunID: runID, Origin: runlifecyclefixture.ScenarioSetupOrigin()})
 	for _, ddl := range []string{
-		`CREATE TABLE flow_instances (run_id TEXT, instance_path TEXT, flow_template TEXT, status TEXT, mode TEXT, terminated_at TIMESTAMP)`,
-		`CREATE TABLE flow_instance_runtime_readiness (run_id TEXT, instance_path TEXT, plan TEXT, plan_revision INTEGER)`,
+		`CREATE TABLE flow_instances (run_id TEXT, instance_path TEXT, flow_template TEXT, status TEXT, mode TEXT, terminated_at TIMESTAMP, entity_id TEXT, current_state TEXT)`,
+		`CREATE TABLE flow_instance_runtime_readiness (run_id TEXT, instance_path TEXT, plan TEXT, plan_hash TEXT, activation_attempt_id INTEGER, phase TEXT DEFAULT 'planned', activation_attempt_state TEXT DEFAULT 'planned')`,
 		`CREATE TABLE entity_state (run_id TEXT, flow_instance TEXT, entity_id TEXT, current_state TEXT, fields TEXT)`,
 	} {
 		if _, err := db.Exec(ddl); err != nil {
@@ -84,6 +83,10 @@ func TestDescriptorFixedReadsFreshFactsAndCanonicalErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	planRaw, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	planHash, err := plan.Hash()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,21 +121,21 @@ func TestDescriptorFixedReadsFreshFactsAndCanonicalErrors(t *testing.T) {
 		flowFailure, targetFailure bool
 	}{
 		{`INSERT INTO entity_state VALUES ('run','review/one',?,'ready','{"address":"first"}')`, []any{entityID}, false, false},
-		{`INSERT INTO flow_instances VALUES ('run','review/one','review','active','template',NULL)`, nil, true, false},
-		{`INSERT INTO flow_instance_runtime_readiness VALUES ('run','review/one',?,1)`, []any{string(planRaw)}, false, false},
+		{`INSERT INTO flow_instances VALUES ('run','review/one','review','active','template',NULL,?,'ready')`, []any{entityID}, true, false},
+		{`INSERT INTO flow_instance_runtime_readiness VALUES ('run','review/one',?,?,1,'planned','planned')`, []any{string(planRaw), planHash}, false, false},
 		{`UPDATE entity_state SET fields='{"address":"second"}', current_state='done'`, nil, false, false},
 		{`UPDATE entity_state SET fields='[]'`, nil, true, false},
 		{`UPDATE entity_state SET fields='{}'`, nil, false, false},
 		{`UPDATE flow_instance_runtime_readiness SET plan='{}'`, nil, true, false},
 		{`UPDATE flow_instance_runtime_readiness SET plan=?`, []any{string(planRaw)}, false, false},
-		{`UPDATE entity_state SET entity_id=''`, nil, true, true},
+		{`UPDATE entity_state SET entity_id=''`, nil, true, false},
 		{`UPDATE entity_state SET entity_id=?`, []any{entityID}, false, false},
 		{`INSERT INTO entity_state VALUES ('foreign','foreign/path','','ready','[]')`, nil, false, false},
 		{`ALTER TABLE entity_state RENAME COLUMN fields TO missing_fields`, nil, true, false},
 		{`ALTER TABLE entity_state RENAME COLUMN missing_fields TO fields`, nil, false, false},
 		{`DROP TABLE flow_instance_runtime_readiness`, nil, true, false},
-		{`CREATE TABLE flow_instance_runtime_readiness (run_id TEXT, instance_path TEXT, plan TEXT, plan_revision INTEGER)`, nil, true, false},
-		{`INSERT INTO flow_instance_runtime_readiness VALUES ('run','review/one',?,1)`, []any{string(planRaw)}, false, false},
+		{`CREATE TABLE flow_instance_runtime_readiness (run_id TEXT, instance_path TEXT, plan TEXT, plan_hash TEXT, activation_attempt_id INTEGER, phase TEXT DEFAULT 'planned', activation_attempt_state TEXT DEFAULT 'planned')`, nil, true, false},
+		{`INSERT INTO flow_instance_runtime_readiness VALUES ('run','review/one',?,?,1,'planned','planned')`, []any{string(planRaw), planHash}, false, false},
 		{`DELETE FROM entity_state WHERE run_id='run'`, nil, false, false},
 	} {
 		if _, err := db.ExecContext(ctx, strings.ReplaceAll(tc.query, "'run'", "'"+runID+"'"), tc.args...); err != nil {

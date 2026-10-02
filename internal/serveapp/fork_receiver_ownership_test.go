@@ -456,8 +456,8 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 			row, exists := sourceRows[path]
 			marker := receiver.Path + "-owned"
 			kind = "existing_entity"
-			if receiver.Policy == canonicalrouting.ForkReceiverAutoMaterializing || receiver.Policy == canonicalrouting.ForkReceiverExplicitCreate {
-				kind, marker = "materializing_entity", receiver.Path+"-created"
+			if receiver.Policy == canonicalrouting.ForkReceiverConstructorOwned {
+				marker = receiver.Path + "-created"
 			}
 			if !exists || row.ID == producer.ID || row.Type != "receipt" || row.State != "active" || row.Fields["marker"] != marker {
 				t.Fatalf("independent source receiver prerequisite: %s %+v", receiver.Path, sourceRows)
@@ -657,10 +657,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 func TestSelectedForkCanonicalReceiverAcquisitionStateEffectBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend)+"/auto_materializing", func(t *testing.T) {
-			runForkReceiverOwnershipJourney(t, backend, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: canonicalrouting.ForkReceiverAutoMaterializing}}, false, forkReceiverJourneyOptions{executionOnly: true})
-		})
-		t.Run(string(backend)+"/explicit_create", func(t *testing.T) {
-			runForkReceiverOwnershipJourney(t, backend, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: canonicalrouting.ForkReceiverExplicitCreate}}, false, forkReceiverJourneyOptions{executionOnly: true})
+			runForkReceiverOwnershipJourney(t, backend, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: canonicalrouting.ForkReceiverConstructorOwned}}, false, forkReceiverJourneyOptions{executionOnly: true})
 		})
 	}
 }
@@ -726,7 +723,7 @@ func TestSelectedForkReceiverPolicyPermutationExecutionBothStores(t *testing.T) 
 			})
 		}
 		t.Run(string(backend)+"/materializing_mixed", func(t *testing.T) {
-			runForkReceiverOwnershipJourney(t, backend, append(append([]canonicalrouting.ForkReceiver{}, receivers...), canonicalrouting.ForkReceiver{Path: "created", Policy: canonicalrouting.ForkReceiverAutoMaterializing}), false, forkReceiverJourneyOptions{executionOnly: true})
+			runForkReceiverOwnershipJourney(t, backend, append(append([]canonicalrouting.ForkReceiver{}, receivers...), canonicalrouting.ForkReceiver{Path: "created", Policy: canonicalrouting.ForkReceiverConstructorOwned}), false, forkReceiverJourneyOptions{executionOnly: true})
 		})
 		t.Run(string(backend)+"/same_owner_two_events_and_duplicate", func(t *testing.T) {
 			runForkReceiverOwnershipJourney(t, backend, receivers, false, forkReceiverJourneyOptions{repeated: true, executionOnly: true})
@@ -744,8 +741,8 @@ func TestSelectedForkReceiverStaticAcquisitionBootRefusal(t *testing.T) {
 	}
 }
 
-func TestSelectedForkReceiverCreateCompilationIsNotDynamicFlowCreation(t *testing.T) {
-	for _, policy := range []canonicalrouting.ForkReceiverPolicy{canonicalrouting.ForkReceiverExplicitCreate, canonicalrouting.ForkReceiverAutoMaterializing} {
+func TestSelectedForkReceiverConstructorCompilationIsNotHandlerCreation(t *testing.T) {
+	for _, policy := range []canonicalrouting.ForkReceiverPolicy{canonicalrouting.ForkReceiverConstructorOwned} {
 		t.Run(fmt.Sprint(policy), func(t *testing.T) {
 			source := semanticview.Wrap(loadWorkflowValidationBundleAt(t, canonicalrouting.CopyForkReceiverOwnership(t, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: policy}}, false)))
 			found := false
@@ -760,10 +757,9 @@ func TestSelectedForkReceiverCreateCompilationIsNotDynamicFlowCreation(t *testin
 					}
 					if node.FlowPath() == "consumer" && event == "work.ready" {
 						found = true
-						if handler.CreateEntity != (policy == canonicalrouting.ForkReceiverExplicitCreate) {
-							t.Fatalf("compiled create_entity fact differs: %+v", handler)
+						if handler.CreateEntity {
+							t.Fatalf("ordinary handler retained construction authority: %+v", handler)
 						}
-						t.Logf("consumer/work.ready CreateEntity=%t", handler.CreateEntity)
 					}
 				}
 			}
@@ -1071,8 +1067,7 @@ func TestSelectedForkReceiverGeometryPostRevisionPolicyRefusalBothStores(t *test
 		{"optional_entityless", canonicalrouting.ForkReceiverOptionalAbsent},
 		{"optional_existing", canonicalrouting.ForkReceiverOptionalExisting},
 		{"required_existing", canonicalrouting.ForkReceiverRequiredExisting},
-		{"auto_materializing", canonicalrouting.ForkReceiverAutoMaterializing},
-		{"explicit_create", canonicalrouting.ForkReceiverExplicitCreate},
+		{"auto_materializing", canonicalrouting.ForkReceiverConstructorOwned},
 	} {
 		cases = append(cases, geometry{name: policy.name, receivers: []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: policy.value}}})
 	}
@@ -1088,7 +1083,7 @@ func TestSelectedForkReceiverGeometryPostRevisionPolicyRefusalBothStores(t *test
 		cases = append(cases, geometry{name: fmt.Sprintf("permutation_%d%d%d", order[0], order[1], order[2]), receivers: []canonicalrouting.ForkReceiver{policies[order[0]], policies[order[1]], policies[order[2]]}})
 	}
 	cases = append(cases,
-		geometry{name: "materializing_mixed", receivers: append(append([]canonicalrouting.ForkReceiver{}, policies...), canonicalrouting.ForkReceiver{Path: "created", Policy: canonicalrouting.ForkReceiverAutoMaterializing})},
+		geometry{name: "materializing_mixed", receivers: append(append([]canonicalrouting.ForkReceiver{}, policies...), canonicalrouting.ForkReceiver{Path: "created", Policy: canonicalrouting.ForkReceiverConstructorOwned})},
 		geometry{name: "same_owner_two_events_and_duplicate", receivers: policies, repeated: true},
 		geometry{name: "nested_sibling_run", receivers: []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: canonicalrouting.ForkReceiverRequiredExisting}, {Path: "sibling", Policy: canonicalrouting.ForkReceiverOptionalExisting}}, nested: true},
 	)

@@ -23,6 +23,8 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/core/paths"
+	"github.com/division-sh/swarm/internal/runtime/core/values"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -39,6 +41,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
@@ -184,6 +187,7 @@ type runtimeHarness struct {
 	selectedOwners  []runforkexecution.SelectedContractExecutionOwner
 	processTopology runtimestartupownership.ProcessCapability
 	workflow        catalogWorkflowPersistence
+	activationStore runtimebus.FlowInstanceActivationCommitOwner
 	llm             *scriptedLLMRuntime
 	bundle          *runtimecontracts.WorkflowContractBundle
 	initialState    string
@@ -199,13 +203,18 @@ type runtimeHarness struct {
 type catalogWorkflowPersistence interface {
 	Load(context.Context, runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstance, bool, error)
 	ListWorkflowInstances(context.Context, string) ([]runtimepipeline.WorkflowInstance, error)
-	MaterializeInitialEntry(context.Context, runtimeflowidentity.RunScopedFlowInstance, runtimepipeline.WorkflowInstance, time.Time) (runtimepipeline.WorkflowInitialMaterializationResult, error)
+	PrepareInitialEntryLifecycle(context.Context, runtimeflowidentity.RunScopedFlowInstance, runtimepipeline.WorkflowInstance, time.Time) (runtimepipeline.WorkflowInstance, runtimepipeline.WorkflowLifecycleMutationPlan, error)
+	FinalizeInitialEntryLifecycle(context.Context, runtimepipeline.CommittedWorkflowLifecycleMutation) error
 }
 
 func catalogExactWorkflowRoute(instancePath string) runtimeflowidentity.RunScopedFlowInstance {
+	route := runtimeflowidentity.RouteForInstancePath(instancePath)
+	if instancePath == catalogRuntimeRunID {
+		route = runtimeflowidentity.StoredRoute(".", catalogRuntimeRunID, catalogRuntimeRunID)
+	}
 	return runtimeflowidentity.RunScopedFlowInstance{
 		RunID: catalogRuntimeRunID,
-		Route: runtimeflowidentity.RouteForInstancePath(instancePath),
+		Route: route,
 	}
 }
 
@@ -325,7 +334,7 @@ func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, bac
 	} else {
 		selected = sqlite
 	}
-	processTopology := installCatalogRuntimeStartupGrant(t, ctx, selected, rt)
+	processTopology := installCatalogRuntimeStartupGrant(t, ctx, selected, rt, !start)
 	if !start {
 		installCatalogHarnessDeliveryAuthority(t, ctx, rt, pg, sqlite)
 	}
@@ -363,6 +372,7 @@ func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, bac
 		processOwner:    processOwner,
 		processTopology: processTopology,
 		workflow:        rt.Pipeline,
+		activationStore: any(selected).(runtimebus.FlowInstanceActivationCommitOwner),
 		llm:             llmRuntime,
 		bundle:          bundle,
 		initialState:    initial.ID(),
@@ -381,6 +391,7 @@ func installCatalogRuntimeStartupGrant(
 	ctx context.Context,
 	selected runtimestartupownership.Store,
 	rt *runtime.Runtime,
+	componentExecution bool,
 ) runtimestartupownership.ProcessCapability {
 	t.Helper()
 	if selected == nil || rt == nil || rt.Manager == nil || rt.Options.WorkflowModule == nil {
@@ -433,6 +444,16 @@ func installCatalogRuntimeStartupGrant(
 	}
 	if err := rt.InstallStartupGrant(grant); err != nil {
 		t.Fatalf("install catalog runtime generation grant: %v", err)
+	}
+	// Component harnesses execute synchronously without Runtime.Start. Their
+	// real grant must still be admitted; this is not managed-startup proof.
+	if componentExecution {
+		if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
+			t.Fatalf("settle component runtime generation grant: %v", err)
+		}
+		if _, err := grant.AdmitExecution(ctx); err != nil {
+			t.Fatalf("admit component runtime generation grant: %v", err)
+		}
 	}
 	release = false
 	return capability
@@ -689,7 +710,7 @@ func (h *runtimeHarness) reopenFromTranscript(transcript *catalogExecutionTransc
 	} else {
 		selected = sqlite
 	}
-	processTopology := installCatalogRuntimeStartupGrant(h.t, ctx, selected, rt)
+	processTopology := installCatalogRuntimeStartupGrant(h.t, ctx, selected, rt, false)
 	if err := rt.PrepareAuthorActivityCatalog(); err != nil {
 		cancel()
 		h.t.Fatalf("prepare reopened author activity catalog: %v", err)
@@ -702,6 +723,7 @@ func (h *runtimeHarness) reopenFromTranscript(transcript *catalogExecutionTransc
 	reopened := &runtimeHarness{
 		t: h.t, backend: h.backend, ctx: ctx, cancel: cancel, db: db, pg: pg, sqlite: sqlite,
 		rt: rt, processOwner: processOwner, workflow: rt.Pipeline, llm: llmRuntime, bundle: bundle,
+		activationStore: any(selected).(runtimebus.FlowInstanceActivationCommitOwner),
 		processTopology: processTopology,
 		initialState:    h.initialState, startedAt: h.startedAt,
 		publishedIDs: cloneCatalogStringSet(h.publishedIDs), publishedOrder: append([]string(nil), h.publishedOrder...),
@@ -856,6 +878,14 @@ func (h *runtimeHarness) publishConcurrentAndWait(steps []catalogTriggerStep, ti
 	}
 	ctx, cancel := context.WithTimeout(h.ctx, timeout)
 	defer cancel()
+	constructionCtx := runtimeeffects.WithExecutionMode(worklifetime.WithOccurrence(ctx, h.rt.WorkOccurrence()), executionmode.Live)
+	if _, err := h.rt.Manager.EnsureFlowInstance(constructionCtx, runtimepipeline.FlowInstanceActivationRequest{
+		ContractBundle: semanticview.Wrap(h.bundle),
+		Instance:       runtimeflowidentity.Stored(semanticview.Wrap(h.bundle), ".", catalogRuntimeRunID, catalogRuntimeRunID, "", ""),
+		OccurredAt:     h.startedAt,
+	}); err != nil {
+		h.t.Fatalf("construct catalog root before concurrent input: %v", err)
+	}
 
 	type publishItem struct {
 		step catalogTriggerStep
@@ -903,7 +933,7 @@ func (h *runtimeHarness) publishConcurrentAndWait(steps []catalogTriggerStep, ti
 			events.EventType(strings.TrimSpace(step.Event)),
 			sourceAgent, "", raw, 0, catalogRuntimeRunID, eventEnvelope, createdAt)
 		if hasTarget {
-			h.ensureTargetFlowInstance(targetRoute, evt)
+			h.ensureTargetFlowInstance(targetRoute, evt, payload)
 		}
 		if preview, ok := h.previewHandlerOutcome(evt); ok {
 			h.mu.Lock()
@@ -1331,22 +1361,43 @@ func (h *runtimeHarness) seedInitialState(entityID string) {
 	entityType := h.requireRootEntityType()
 	ctx := worklifetime.WithOccurrence(h.ctx, h.rt.WorkOccurrence())
 	ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
-	if _, err := h.workflow.MaterializeInitialEntry(ctx, catalogRootWorkflowRoute(), runtimepipeline.WorkflowInstance{
-		InstanceID:      catalogRuntimeRunID,
-		StorageRef:      catalogRuntimeRunID,
-		EntityID:        entityID,
-		WorkflowName:    h.bundle.WorkflowName(),
-		WorkflowVersion: h.bundle.WorkflowVersion(),
-		CurrentState:    initialState,
-		EnteredStageAt:  h.startedAt,
-		CreatedAt:       h.startedAt,
-		EntityType:      entityType,
-	}, h.startedAt); err != nil {
-		h.t.Fatalf("seed initial workflow state for %s: %v", entityID, err)
+	{
+		construction1334Ctx := ctx
+		construction1334At := h.startedAt
+		construction1334Instance, construction1334Lifecycle, err := h.workflow.PrepareInitialEntryLifecycle(construction1334Ctx, catalogRootWorkflowRoute(), runtimepipeline.WorkflowInstance{
+			InstanceID:      catalogRuntimeRunID,
+			StorageRef:      catalogRuntimeRunID,
+			EntityID:        entityID,
+			WorkflowName:    ".",
+			WorkflowVersion: h.bundle.WorkflowVersion(),
+			CurrentState:    initialState,
+			EnteredStageAt:  h.startedAt,
+			CreatedAt:       h.startedAt,
+			EntityType:      entityType,
+		}, construction1334At)
+		if err != nil {
+			h.t.Fatalf("prepare fixture initial lifecycle: %v", err)
+		}
+		construction1334Command, err := flowactivationfixture.Command(construction1334Ctx, construction1334Instance, construction1334Lifecycle, construction1334At)
+		if err != nil {
+			h.t.Fatalf("prepare fixture activation command: %v", err)
+		}
+		construction1334Committed, err := any(h.activationStore).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction1334Ctx, construction1334Command)
+		if err != nil {
+			h.t.Fatalf("seed initial workflow state for %s: %v", entityID, err)
+		}
+		if err == nil && !construction1334Committed.Acknowledged {
+			h.t.Fatal("fixture activation was not acknowledged")
+		}
+		if construction1334Committed.Acknowledged && construction1334Committed.Created {
+			if finalizeErr := h.workflow.FinalizeInitialEntryLifecycle(construction1334Ctx, construction1334Committed.Lifecycle); finalizeErr != nil {
+				h.t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+			}
+		}
 	}
 }
 
-func (h *runtimeHarness) ensureTargetFlowInstance(target events.RouteIdentity, trigger events.Event) {
+func (h *runtimeHarness) ensureTargetFlowInstance(target events.RouteIdentity, trigger events.Event, payload map[string]any) {
 	h.t.Helper()
 	if h == nil || h.rt == nil || h.rt.Manager == nil || h.bundle == nil {
 		h.t.Fatal("catalog target activation requires the runtime manager and contract bundle")
@@ -1357,8 +1408,19 @@ func (h *runtimeHarness) ensureTargetFlowInstance(target events.RouteIdentity, t
 	}
 	route := runtimeflowidentity.RouteForInstancePath(target.FlowInstance)
 	config := map[string]any{}
+	constructorInput := ""
+	var resolvedKey any
 	if schema, ok := h.bundle.FlowSchemaByID(target.FlowID); ok && !schema.Instance.Empty() {
-		config[schema.Instance.Path()] = route.InstanceID
+		pin, found := h.bundle.FlowInputEventPin(target.FlowID, string(trigger.Type()))
+		if !found {
+			h.t.Fatalf("catalog target %s has no constructor input %s", target.FlowID, trigger.Type())
+		}
+		constructorInput = pin.EventType()
+		resolvedKey, found = values.Wrap(payload).Lookup(paths.Parse(schema.Instance.Path()))
+		if !found {
+			h.t.Fatalf("catalog constructor input %s has no resolved key %s", constructorInput, schema.Instance.Path())
+		}
+		config[schema.Instance.Path()] = resolvedKey
 	}
 	ctx := worklifetime.WithOccurrence(h.ctx, h.rt.WorkOccurrence())
 	ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
@@ -1372,12 +1434,11 @@ func (h *runtimeHarness) ensureTargetFlowInstance(target events.RouteIdentity, t
 			target.EntityID,
 			"",
 		),
-		Config: config,
-		// This fixture pre-creates selectable entities, including their authored
-		// business key. Agent configuration is not entity field initialization.
-		Fields:       cloneStringAnyMap(config),
-		TriggerEvent: trigger,
-		OccurredAt:   trigger.CreatedAt(),
+		Config:           config,
+		ConstructorInput: constructorInput,
+		ResolvedKey:      resolvedKey,
+		TriggerEvent:     trigger,
+		OccurredAt:       trigger.CreatedAt(),
 	})
 	if err != nil {
 		h.t.Fatalf("activate catalog target owner %s/%s: %v", target.FlowInstance, target.EntityID, err)
@@ -1472,8 +1533,29 @@ func (h *runtimeHarness) seedEntityFields(expected catalogExpectedDocument) {
 	}
 	materializeCtx := worklifetime.WithOccurrence(h.ctx, h.rt.WorkOccurrence())
 	materializeCtx = runtimeeffects.WithExecutionMode(materializeCtx, executionmode.Live)
-	if _, err := h.workflow.MaterializeInitialEntry(materializeCtx, catalogExactWorkflowRoute(instance.StorageRef), instance, h.startedAt); err != nil {
-		h.t.Fatalf("seed entity_fields_before for %s: %v", entityID, err)
+	{
+		construction1472Ctx := materializeCtx
+		construction1472At := h.startedAt
+		construction1472Instance, construction1472Lifecycle, err := h.workflow.PrepareInitialEntryLifecycle(construction1472Ctx, catalogExactWorkflowRoute(instance.StorageRef), instance, construction1472At)
+		if err != nil {
+			h.t.Fatalf("prepare fixture initial lifecycle: %v", err)
+		}
+		construction1472Command, err := flowactivationfixture.Command(construction1472Ctx, construction1472Instance, construction1472Lifecycle, construction1472At)
+		if err != nil {
+			h.t.Fatalf("prepare fixture activation command: %v", err)
+		}
+		construction1472Committed, err := any(h.activationStore).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction1472Ctx, construction1472Command)
+		if err != nil {
+			h.t.Fatalf("seed entity_fields_before for %s: %v", entityID, err)
+		}
+		if err == nil && !construction1472Committed.Acknowledged {
+			h.t.Fatal("fixture activation was not acknowledged")
+		}
+		if construction1472Committed.Acknowledged && construction1472Committed.Created {
+			if finalizeErr := h.workflow.FinalizeInitialEntryLifecycle(construction1472Ctx, construction1472Committed.Lifecycle); finalizeErr != nil {
+				h.t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+			}
+		}
 	}
 }
 

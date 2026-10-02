@@ -1,27 +1,19 @@
 package manager
 
+// The selected-store row owns phase progress. This reconciler consumes exact attempt receipts; process resources are reconciled by their physical owners.
+
 import (
 	"context"
 	"errors"
 	"fmt"
-	runtimestanding "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"sort"
-	"strings"
-	"time"
-
 	"github.com/division-sh/swarm/internal/events"
-	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	models "github.com/division-sh/swarm/internal/runtime/core/actors"
-	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"strings"
+	"time"
 )
 
 type dynamicFlowRuntimeReadinessFinalizationError struct {
@@ -47,80 +39,13 @@ func IsDynamicFlowRuntimeReadinessFinalizationError(err error) bool {
 	return errors.As(err, &target)
 }
 
-type dynamicFlowRuntimeReadinessKey struct {
-	runID        string
-	instancePath string
-}
-
-type dynamicFlowRuntimeReadinessAttempt struct {
-	done              chan struct{}
-	retiring          chan struct{}
-	err               error
-	planRevision      uint64
-	successorRequired bool
-	successor         *dynamicFlowRuntimeReadinessAdmission
-}
-
-type dynamicFlowActiveAttempt struct {
-	receipt         runtimepipeline.DynamicFlowRuntimeActivationAttempt
-	publication     runtimebus.FlowRoutePublicationHandle
-	retiring        bool
-	retirementSet   *terminalFlowRetirement
-	retirementKind  flowActivationRetirementDisposition
-	locallyRetired  bool
-	timersRetired   bool
-	complete        bool
-	timersProjected bool
-	admittedPreRun  bool
-}
-
-var errDynamicFlowRuntimeReadinessRetiring = errors.New("dynamic flow runtime readiness retains predecessor retirement")
-
-func (a *dynamicFlowRuntimeReadinessAttempt) wait(ctx context.Context) error {
-	select {
-	case <-a.done:
-		return a.err
-	default:
-	}
-	select {
-	case <-a.done:
-		return a.err
-	case <-a.retiring:
-		return errDynamicFlowRuntimeReadinessRetiring
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-type readinessRetirementWaitersKey struct{}
-
-// Only the owned readiness attempt installs this dependency. The lifecycle
-// owner releases its callers after capturing, not predicting, a joined predecessor.
-func releaseReadinessRetirementWaiters(ctx context.Context, retirement *agentRetirement) {
-	if retirement == nil || (retirement.done == nil && retirement.settled == nil && retirement.leases == nil && !retirement.token.Valid()) {
-		return
-	}
-	attempt, ok := ctx.Value(readinessRetirementWaitersKey{}).(*dynamicFlowRuntimeReadinessAttempt)
-	if !ok {
-		return
-	}
-	select {
-	case <-attempt.retiring:
-	default:
-		close(attempt.retiring)
-	}
-}
-
-type dynamicFlowRuntimeReadinessSource struct {
-	fact   runtimecorrelation.SourceArtifactFact
-	source semanticview.Source
-}
-
 type dynamicFlowRuntimeReadinessAdmission struct {
 	ctx                 context.Context
 	key                 dynamicFlowRuntimeReadinessKey
 	plan                runtimepipeline.DynamicFlowRuntimeReadinessPlan
-	planRevision        uint64
+	planHash            string
+	attemptOrdinal      uint64
+	observed            *runtimepipeline.DynamicFlowRuntimeReadiness
 	source              dynamicFlowRuntimeReadinessSource
 	topologyDurable     bool
 	processOnly         bool
@@ -130,1080 +55,17 @@ type dynamicFlowRuntimeReadinessAdmission struct {
 	processPrepared     bool
 }
 
-// DynamicFlowRuntimeStartupReadiness is the one-startup-attempt authority for
-// pending rows admitted by exact source transition or explicit recovery.
-type DynamicFlowRuntimeStartupReadiness struct {
-	sourceFact         runtimecorrelation.SourceArtifactFact
-	replayAllowed      bool
-	authorizedPending  map[dynamicFlowRuntimeReadinessKey]struct{}
-	completedBeforeRun map[dynamicFlowRuntimeReadinessKey]uint64
-	empty              bool
-}
-
-var errDynamicFlowRuntimeReadinessPlanStale = errors.New(
-	"dynamic flow runtime readiness declared plan is stale",
-)
-
-var errDynamicFlowRuntimeReadinessSourceStale = errors.New(
-	"dynamic flow runtime readiness callback source is stale",
-)
-
-const (
-	dynamicFlowRuntimeReadinessCleanupTimeout = 10 * time.Second
-	defaultDynamicFlowReadinessRetryInterval  = 5 * time.Second
-)
-
-func newDynamicFlowRuntimeReadinessKey(runID, instancePath string) (dynamicFlowRuntimeReadinessKey, error) {
-	key := dynamicFlowRuntimeReadinessKey{
-		runID:        strings.TrimSpace(runID),
-		instancePath: strings.Trim(strings.TrimSpace(instancePath), "/"),
-	}
-	if key.runID == "" || key.instancePath == "" {
-		return dynamicFlowRuntimeReadinessKey{}, fmt.Errorf("dynamic flow runtime readiness requires exact run_id and instance_id")
-	}
-	return key, nil
-}
-
-func (am *AgentManager) reconcilePendingDynamicFlowRuntimeReadiness(ctx context.Context) error {
-	if am == nil || am.workflowInstances == nil {
-		return nil
-	}
-	source, err := am.dynamicFlowRuntimeReadinessSource(ctx)
-	if err != nil {
-		return err
-	}
-	projection, err := am.InspectDynamicFlowRuntimeReadinessForSource(ctx, source.fact)
-	if err != nil {
-		return err
-	}
-	var reconcileErrs []error
-	for _, item := range projection.CurrentPending {
-		if err := am.reconcileDynamicFlowRuntimeReadiness(ctx, item.Plan.RunID, item.InstancePath); err != nil {
-			reconcileErrs = append(reconcileErrs, fmt.Errorf("%s: %w", item.InstancePath, err))
-		}
-	}
-	return errors.Join(reconcileErrs...)
-}
-
-func (am *AgentManager) InspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, source runtimecorrelation.SourceArtifactFact) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error) {
-	if am == nil || am.workflowInstances == nil {
-		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, nil
-	}
-	projection, err := am.workflowInstances.InspectDynamicFlowRuntimeReadinessForSource(ctx, source)
-	if err != nil {
-		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, err
-	}
-	if err := ctx.Err(); err != nil {
-		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, err
-	}
-	if am.roles.StandingRestarts == nil {
-		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, errors.New("dynamic flow runtime readiness requires standing restart disposition reader")
-	}
-	cache := make(map[string]runtimestanding.StandingRestartDisposition)
-	// This read-only inspection shares observations, never mutation authority.
-	ownershipCache := make(map[string]RunExecutionOwnership)
-	filter := func(items []runtimepipeline.DynamicFlowRuntimeReadiness) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error) {
-		filtered := make([]runtimepipeline.DynamicFlowRuntimeReadiness, 0, len(items))
-		for _, item := range items {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-			runID := strings.TrimSpace(item.Plan.RunID)
-			ownership, ok := ownershipCache[runID]
-			if !ok {
-				var err error
-				ownership, err = am.inspectRunExecutionOwnership(ctx, runID)
-				if err != nil {
-					return nil, fmt.Errorf("admit dynamic flow readiness run %s: %w", runID, err)
-				}
-				ownershipCache[runID] = ownership
-			}
-			if ownership != RunExecutionOwned {
-				continue
-			}
-			disposition, ok := cache[runID]
-			if !ok {
-				var err error
-				disposition, err = am.roles.StandingRestarts.StandingRunRestartDisposition(ctx, runID)
-				if err != nil {
-					return nil, fmt.Errorf("classify dynamic flow runtime readiness run %s: %w", runID, err)
-				}
-				cache[runID] = disposition
-			}
-			if disposition.UsesGenericRecovery() || disposition.Executable() {
-				filtered = append(filtered, item)
-			}
-		}
-		return filtered, nil
-	}
-	if projection.CurrentCompleted, err = filter(projection.CurrentCompleted); err != nil {
-		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, err
-	}
-	if projection.CurrentPending, err = filter(projection.CurrentPending); err != nil {
-		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, err
-	}
-	if projection.SourceTransitionRequired, err = filter(projection.SourceTransitionRequired); err != nil {
-		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, err
-	}
-	if err := ctx.Err(); err != nil {
-		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, err
-	}
-	return projection, nil
-}
-
-func (am *AgentManager) CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx context.Context, sourceFact runtimecorrelation.SourceArtifactFact, replayAllowed bool) (DynamicFlowRuntimeStartupReadiness, error) {
-	startup := DynamicFlowRuntimeStartupReadiness{
-		sourceFact: sourceFact, replayAllowed: replayAllowed,
-		authorizedPending:  make(map[dynamicFlowRuntimeReadinessKey]struct{}),
-		completedBeforeRun: make(map[dynamicFlowRuntimeReadinessKey]uint64),
-	}
-	projection, err := am.InspectDynamicFlowRuntimeReadinessForSource(ctx, sourceFact)
-	if err != nil {
-		return DynamicFlowRuntimeStartupReadiness{}, err
-	}
-	if len(projection.CurrentCompleted) == 0 && len(projection.CurrentPending) == 0 && len(projection.SourceTransitionRequired) == 0 {
-		startup.empty = true
-		return startup, nil
-	}
-	ownedSource, err := am.dynamicFlowRuntimeReadinessSource(ctx)
-	if err != nil {
-		return DynamicFlowRuntimeStartupReadiness{}, err
-	}
-	if !ownedSource.fact.Matches(sourceFact) {
-		return DynamicFlowRuntimeStartupReadiness{}, fmt.Errorf("dynamic flow startup readiness source is not manager-owned")
-	}
-	transitionRequests := make([]runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation, 0, len(projection.SourceTransitionRequired))
-	for _, item := range projection.SourceTransitionRequired {
-		if item.Pending() && !replayAllowed {
-			return DynamicFlowRuntimeStartupReadiness{}, &dynamicFlowRuntimeReadinessFinalizationError{cause: fmt.Errorf(
-				"source transition for %s retains incomplete predecessor readiness and requires recovery",
-				item.InstancePath,
-			)}
-		}
-		expected, err := am.deriveCurrentDynamicFlowRuntimeReadinessPlan(ctx, item, ownedSource)
-		if err != nil {
-			return DynamicFlowRuntimeStartupReadiness{}, &dynamicFlowRuntimeReadinessFinalizationError{cause: fmt.Errorf("derive current-source dynamic flow readiness %s: %w", item.InstancePath, err)}
-		}
-		transitionRequests = append(transitionRequests, runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation{Observed: item, Expected: expected})
-		key, err := newDynamicFlowRuntimeReadinessKey(expected.RunID, expected.Identity.InstancePath)
-		if err != nil {
-			return DynamicFlowRuntimeStartupReadiness{}, err
-		}
-		startup.authorizedPending[key] = struct{}{}
-	}
-	if len(transitionRequests) != 0 {
-		if _, err := am.workflowInstances.ReconcileDynamicFlowRuntimeReadinessPlans(ctx, transitionRequests, time.Now().UTC()); err != nil {
-			return DynamicFlowRuntimeStartupReadiness{}, &dynamicFlowRuntimeReadinessFinalizationError{cause: fmt.Errorf("canonicalize current-source dynamic flow readiness set: %w", err)}
-		}
-	}
-	projection, err = am.InspectDynamicFlowRuntimeReadinessForSource(ctx, sourceFact)
-	if err != nil {
-		return DynamicFlowRuntimeStartupReadiness{}, err
-	}
-	if len(projection.SourceTransitionRequired) != 0 {
-		return DynamicFlowRuntimeStartupReadiness{}, fmt.Errorf("dynamic topology startup retains %d unresolved source transition(s)", len(projection.SourceTransitionRequired))
-	}
-	for _, item := range projection.CurrentCompleted {
-		key, keyErr := newDynamicFlowRuntimeReadinessKey(item.Plan.RunID, item.InstancePath)
-		if keyErr != nil {
-			return DynamicFlowRuntimeStartupReadiness{}, keyErr
-		}
-		startup.completedBeforeRun[key] = item.PlanRevision
-	}
-	for _, item := range projection.CurrentPending {
-		key, keyErr := newDynamicFlowRuntimeReadinessKey(item.Plan.RunID, item.InstancePath)
-		if keyErr != nil {
-			return DynamicFlowRuntimeStartupReadiness{}, keyErr
-		}
-		if replayAllowed {
-			startup.authorizedPending[key] = struct{}{}
-		}
-		if _, authorized := startup.authorizedPending[key]; !authorized {
-			return DynamicFlowRuntimeStartupReadiness{}, fmt.Errorf("dynamic topology startup requires recovery for incomplete source-owned instance %s", item.InstancePath)
-		}
-	}
-	am.dynamicFlowReadinessMu.Lock()
-	am.dynamicFlowStartupTopologyPending = true
-	am.dynamicFlowReadinessMu.Unlock()
-	return startup, nil
-}
-
-// PrepareAdmittedDynamicFlowAgentsForStart transfers pre-run declarations to
-// the exact admitted attempt before Manager.Run upgrades their lifecycle cells.
-// Route publication and durable topology completion remain post-Run work.
-func (am *AgentManager) PrepareAdmittedDynamicFlowAgentsForStart(ctx context.Context) error {
-	if am == nil || am.lifecycle == nil {
-		return errors.New("admitted dynamic flow preparation requires manager lifecycle")
-	}
-	if am.lifecycle.phaseSnapshot() != runtimeLifecycleStopped {
-		return errors.New("admitted dynamic flow preparation requires a stopped manager")
-	}
-	prepared := make(map[dynamicFlowRuntimeReadinessKey]uint64)
-	for _, identity := range am.lifecycle.executionIdentities() {
-		state, found := am.lifecycle.stateByIdentity(identity)
-		if !found {
-			return fmt.Errorf("prepared dynamic flow agent %s has no lifecycle cell", identity.Description())
-		}
-		authority := state.Topology.Authority
-		if authority.Kind != runtimeagenttopology.AuthorityFlowReadinessPlan || authority.Readiness == nil || authority.Readiness.AttemptID != "" || authority.Readiness.PlanRevision == 0 {
-			continue
-		}
-		if authority.Readiness.RunID != identity.RunID || authority.Readiness.InstancePath != identity.FlowInstance() ||
-			state.Phase != AgentLifecycleRegistered || state.RunMode != AgentRunModeStopped {
-			return fmt.Errorf("dynamic flow agent %s is not an exact stopped preparation", identity.Description())
-		}
-		key, err := newDynamicFlowRuntimeReadinessKey(authority.Readiness.RunID, authority.Readiness.InstancePath)
-		if err != nil {
-			return err
-		}
-		if revision, exists := prepared[key]; exists && revision != authority.Readiness.PlanRevision {
-			return fmt.Errorf("dynamic flow %s has mixed preparation revisions", key.instancePath)
-		}
-		prepared[key] = authority.Readiness.PlanRevision
-	}
-	if len(prepared) == 0 {
-		return nil
-	}
-	if am.workflowInstances == nil {
-		return errors.New("admitted dynamic flow preparation requires workflow store")
-	}
-	source, err := am.dynamicFlowRuntimeReadinessSource(ctx)
-	if err != nil {
-		return err
-	}
-	keys := make([]dynamicFlowRuntimeReadinessKey, 0, len(prepared))
-	for key := range prepared {
-		keys = append(keys, key)
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		if keys[i].runID != keys[j].runID {
-			return keys[i].runID < keys[j].runID
-		}
-		return keys[i].instancePath < keys[j].instancePath
-	})
-	for _, key := range keys {
-		readiness, found, err := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, runtimeflowidentity.RouteForInstancePath(key.instancePath))
-		if err != nil {
-			return err
-		}
-		if !found || !readiness.Eligible() || readiness.PlanRevision != prepared[key] {
-			return fmt.Errorf("dynamic flow %s preparation is no longer current", key.instancePath)
-		}
-		plan, err := readiness.Plan.Normalized()
-		if err != nil {
-			return err
-		}
-		if err := validateDynamicFlowRuntimeReadinessCallbackSource(plan, source); err != nil {
-			return err
-		}
-		if err := am.reconcileDeclaredDynamicFlowRuntimeReadiness(dynamicFlowRuntimeReadinessAdmission{
-			ctx: ctx, key: key, plan: plan, planRevision: readiness.PlanRevision, source: source,
-			processOnly: true, admittedPreRun: true,
-		}); err != nil {
-			return fmt.Errorf("admit prepared dynamic flow %s before manager run: %w", key.instancePath, err)
-		}
-	}
-	if am.lifecycle.phaseSnapshot() != runtimeLifecycleStopped {
-		return errors.New("admitted dynamic flow preparation crossed manager run admission")
-	}
-	return nil
-}
-
-func (am *AgentManager) CompleteDynamicFlowRuntimeStartupTopology(ctx context.Context, startup DynamicFlowRuntimeStartupReadiness) error {
-	if startup.empty {
-		return nil
-	}
-	if err := startup.sourceFact.Validate(); err != nil {
-		return fmt.Errorf("dynamic flow startup topology authority: %w", err)
-	}
-	projection, err := am.InspectDynamicFlowRuntimeReadinessForSource(ctx, startup.sourceFact)
-	if err != nil {
-		return err
-	}
-	if len(projection.SourceTransitionRequired) != 0 {
-		return fmt.Errorf(
-			"dynamic flow startup topology retains %d source transition(s)",
-			len(projection.SourceTransitionRequired),
-		)
-	}
-	source, err := am.dynamicFlowRuntimeReadinessSource(ctx)
-	if err != nil {
-		return err
-	}
-	prepare := append([]runtimepipeline.DynamicFlowRuntimeReadiness{}, projection.CurrentCompleted...)
-	prepare = append(prepare, projection.CurrentPending...)
-	sort.Slice(prepare, func(i, j int) bool {
-		if prepare[i].Plan.RunID != prepare[j].Plan.RunID {
-			return prepare[i].Plan.RunID < prepare[j].Plan.RunID
-		}
-		return prepare[i].InstancePath < prepare[j].InstancePath
-	})
-	for _, item := range projection.CurrentPending {
-		key, keyErr := newDynamicFlowRuntimeReadinessKey(item.Plan.RunID, item.InstancePath)
-		if keyErr != nil {
-			return keyErr
-		}
-		if _, authorized := startup.authorizedPending[key]; !authorized {
-			am.dynamicFlowReadinessMu.Lock()
-			active := am.dynamicFlowActiveAttempts[key]
-			preRun := active != nil && active.admittedPreRun && active.receipt.PlanRevision() == item.PlanRevision
-			am.dynamicFlowReadinessMu.Unlock()
-			if startup.completedBeforeRun[key] != item.PlanRevision || !preRun {
-				return fmt.Errorf("dynamic flow startup topology lacks pending authorization for %s", item.InstancePath)
-			}
-		}
-	}
-	for _, item := range prepare {
-		if err := am.reconcileDynamicFlowRuntimeReadinessItem(ctx, item, source, true, false); err != nil {
-			return &dynamicFlowRuntimeReadinessFinalizationError{cause: fmt.Errorf("prepare dynamic flow process topology %s: %w", item.InstancePath, err)}
-		}
-	}
-	for _, item := range projection.CurrentPending {
-		if err := am.reconcileDynamicFlowRuntimeReadinessItem(ctx, item, source, false, true); err != nil {
-			return &dynamicFlowRuntimeReadinessFinalizationError{cause: fmt.Errorf("finalize dynamic flow runtime readiness %s: %w", item.InstancePath, err)}
-		}
-	}
-	fresh, err := am.InspectDynamicFlowRuntimeReadinessForSource(ctx, startup.sourceFact)
-	if err != nil {
-		return err
-	}
-	if len(fresh.CurrentPending) != 0 || len(fresh.SourceTransitionRequired) != 0 {
-		return fmt.Errorf("dynamic flow startup topology remains incomplete: current_pending=%d source_transition_required=%d", len(fresh.CurrentPending), len(fresh.SourceTransitionRequired))
-	}
-	for _, item := range fresh.CurrentCompleted {
-		if err := am.verifyDynamicFlowRuntimeProcessTopology(ctx, item, source); err != nil {
-			return &dynamicFlowRuntimeReadinessFinalizationError{cause: fmt.Errorf("verify dynamic flow startup topology %s: %w", item.InstancePath, err)}
-		}
-	}
-	am.dynamicFlowReadinessMu.Lock()
-	am.dynamicFlowStartupTopologyPending = false
-	am.dynamicFlowReadinessMu.Unlock()
-	return nil
-}
-
-func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessItem(ctx context.Context, item runtimepipeline.DynamicFlowRuntimeReadiness, source dynamicFlowRuntimeReadinessSource, processOnly, processPrepared bool) error {
-	plan, err := item.Plan.Normalized()
-	if err != nil {
-		return err
-	}
-	if err := validateDynamicFlowRuntimeReadinessCallbackSource(plan, source); err != nil {
-		return err
-	}
-	key, err := newDynamicFlowRuntimeReadinessKey(plan.RunID, item.InstancePath)
-	if err != nil {
-		return err
-	}
-	return am.reconcileDeclaredDynamicFlowRuntimeReadiness(dynamicFlowRuntimeReadinessAdmission{
-		ctx: ctx, key: key, plan: plan, planRevision: item.PlanRevision, source: source,
-		processOnly: processOnly, previouslyCompleted: !item.TopologyReadyAt.IsZero(), processPrepared: processPrepared,
-	})
-}
-
-func (am *AgentManager) verifyDynamicFlowRuntimeProcessTopology(ctx context.Context, item runtimepipeline.DynamicFlowRuntimeReadiness, source dynamicFlowRuntimeReadinessSource) error {
-	if !item.Eligible() || item.Pending() {
-		return fmt.Errorf("dynamic flow runtime readiness %s is not complete", item.InstancePath)
-	}
-	plan, err := item.Plan.Normalized()
-	if err != nil {
-		return err
-	}
-	if err := validateDynamicFlowRuntimeReadinessCallbackSource(plan, source); err != nil {
-		return err
-	}
-	ctx = runtimecorrelation.WithRunID(ctx, plan.RunID)
-	flowIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(plan.RunID, plan.Identity.Route())
-	if err != nil {
-		return err
-	}
-	projection, err := am.workflowInstances.LoadRouteRecoveryProjection(ctx, flowIdentity)
-	if err != nil {
-		return err
-	}
-	if projection.Identity.Route() != plan.Identity.Route() || projection.Identity.TemplateID != plan.Identity.TemplateID || projection.Identity.EntityID != plan.Identity.EntityID {
-		return fmt.Errorf("dynamic flow runtime readiness %s persisted identity changed", item.InstancePath)
-	}
-	scope, ok := semanticview.FlowScopeByID(source.source, plan.Identity.TemplateID)
-	if !ok {
-		return fmt.Errorf("flow contract view not found: %s", plan.Identity.TemplateID)
-	}
-	schema, ok := source.source.FlowSchemaByID(plan.Identity.TemplateID)
-	if !ok {
-		return fmt.Errorf("flow schema not found: %s", plan.Identity.TemplateID)
-	}
-	records, err := am.flowInstanceAgentRecords(plan.RunID, runtimepipeline.FlowInstanceActivationRequest{
-		ContractBundle: source.source,
-		Instance:       projection.Identity,
-		Config:         projection.Config,
-	}, schema, scope)
-	if err != nil {
-		return err
-	}
-	if err := verifyDynamicFlowAgentExpectations(records, plan.Agents); err != nil {
-		return err
-	}
-	topologyAuthority, err := DynamicFlowAgentTopologyAdmission(plan)
-	if err != nil {
-		return err
-	}
-	activeKey := dynamicFlowRuntimeReadinessKey{runID: plan.RunID, instancePath: plan.Identity.InstancePath}
-	am.dynamicFlowReadinessMu.Lock()
-	active := am.dynamicFlowActiveAttempts[activeKey]
-	am.dynamicFlowReadinessMu.Unlock()
-	if active == nil {
-		return errors.New("completed dynamic flow has no current process activation attempt")
-	}
-	topologyAuthority, err = topologyAuthority.WithFlowActivationAttempt(active.receipt.ID(), active.receipt.PlanRevision())
-	if err != nil {
-		return err
-	}
-	if err := am.verifyDynamicFlowAgents(ctx, flowIdentity, records, topologyAuthority); err != nil {
-		return err
-	}
-	return am.verifyDynamicFlowRoute(ctx, flowIdentity)
-}
-
-func (am *AgentManager) reconcileEnsuredDynamicFlowRuntimeReadinessPlan(
-	ctx context.Context,
-	req runtimepipeline.FlowInstanceActivationRequest,
-	runID string,
-) (runtimepipeline.DynamicFlowRuntimeReadinessPlan, uint64, error) {
-	if err := am.requireRunExecutionOwnership(ctx, runID); err != nil {
-		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, 0, err
-	}
-	flowIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, req.Instance.Route())
-	if err != nil {
-		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, 0, err
-	}
-	projection, err := am.workflowInstances.LoadRouteRecoveryProjection(ctx, flowIdentity)
-	if err != nil {
-		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, 0, fmt.Errorf("load ensured flow configuration: %w", err)
-	}
-	if projection.Identity.Route() != req.Instance.Route() || projection.Identity.TemplateID != req.Instance.TemplateID || projection.Identity.EntityID != req.Instance.EntityID {
-		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, 0, fmt.Errorf("ensured flow persisted identity disagrees with request")
-	}
-	// Ensure adopts the committed receiver; creation-only caller inputs cannot
-	// replace its configuration, agent revisions, or pending creation payload.
-	req.Instance = projection.Identity
-	req.Config = projection.Config
-	if req.Config != nil {
-		req.Config = cloneFlowConfig(req.Config)
-	}
-	templateID := strings.TrimSpace(req.Instance.TemplateID)
-	scope, ok := semanticview.FlowScopeByID(req.ContractBundle, templateID)
-	if !ok {
-		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, 0, fmt.Errorf("flow contract view not found: %s", templateID)
-	}
-	schema, ok := req.ContractBundle.FlowSchemaByID(templateID)
-	if !ok {
-		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, 0, fmt.Errorf("flow schema not found: %s", templateID)
-	}
-	agentRecords, err := am.flowInstanceAgentRecords(runID, req, schema, scope)
-	if err != nil {
-		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, 0, err
-	}
-	occurredAt := req.OccurredAt.UTC()
-	if !req.TriggerEvent.CreatedAt().IsZero() {
-		occurredAt = req.TriggerEvent.CreatedAt().UTC()
-	}
-	if occurredAt.IsZero() {
-		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, 0, fmt.Errorf("flow readiness reconciliation requires an exact occurrence time")
-	}
-	current, found, err := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, runID, req.Instance.Route())
-	if err != nil {
-		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, 0, err
-	}
-	if !found {
-		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, 0, fmt.Errorf("dynamic flow runtime readiness not found for %s", req.Instance.InstancePath)
-	}
-	expected := current.Plan
-	expected.Identity = req.Instance
-	expected.BundleHash, err = dynamicFlowRuntimeReadinessSourceCoordinate(ctx)
-	if err != nil {
-		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, 0, err
-	}
-	expected.WorkflowVersion = strings.TrimSpace(req.ContractBundle.WorkflowVersion())
-	expected.Agents = make([]runtimepipeline.DynamicFlowRuntimeAgentExpectation, 0, len(agentRecords))
-	for _, record := range agentRecords {
-		identity, err := record.Config.ConcreteIdentity()
-		if err != nil {
-			return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, 0, fmt.Errorf(
-				"derive dynamic flow agent identity %s: %w",
-				record.Config.ID,
-				err,
-			)
-		}
-		revision, err := lifecycleConfigRevision(record)
-		if err != nil {
-			return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, 0, fmt.Errorf("derive dynamic flow agent revision %s: %w", record.Config.ID, err)
-		}
-		expected.Agents = append(expected.Agents, runtimepipeline.DynamicFlowRuntimeAgentExpectation{
-			Identity: identity, ConfigRevision: revision,
-		})
-	}
-	if expected.BundleHash != current.Plan.BundleHash || expected.WorkflowVersion != current.Plan.WorkflowVersion {
-		expected.CreationEvent, err = rebuildPendingDynamicFlowRuntimeCreationEventPlan(
-			current.Plan.CreationEvent,
-			!current.CreationEventEmittedAt.IsZero(),
-			req.ContractBundle,
-			schema,
-			req.Instance,
-			req.Config,
-		)
-		if err != nil {
-			return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, 0, fmt.Errorf("rebuild dynamic flow creation plan %s: %w", req.Instance.InstancePath, err)
-		}
-	}
-	if err := am.executionPosture.Admit(expected.ExecutionMode, "dynamic flow runtime readiness plan reconciliation"); err != nil {
-		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, 0, err
-	}
-	results, err := am.workflowInstances.ReconcileDynamicFlowRuntimeReadinessPlans(ctx, []runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation{{Observed: current, Expected: expected}}, occurredAt)
-	if err != nil {
-		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, 0, fmt.Errorf("reconcile dynamic flow runtime readiness plan %s: %w", req.Instance.InstancePath, err)
-	}
-	if len(results) != 1 || results[0].PlanRevision == 0 {
-		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, 0, fmt.Errorf("readiness reconciliation returned no exact revision for %s", req.Instance.InstancePath)
-	}
-	return expected, results[0].PlanRevision, nil
-}
-
-// ReconcileDynamicFlowRuntimeReadinessPlansForRun advances every active
-// readiness owner in the selected run before revised routes are derived.
-func (am *AgentManager) ReconcileDynamicFlowRuntimeReadinessPlansForRun(
-	ctx context.Context,
-	observedAt time.Time,
-) error {
-	if am == nil || am.workflowInstances == nil {
-		return fmt.Errorf("dynamic flow runtime readiness reconciler requires manager and workflow store")
-	}
-	admittedSource, err := am.dynamicFlowRuntimeReadinessSource(ctx)
-	if err != nil {
-		return err
-	}
-	source := admittedSource.source
-	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
-	if runID == "" {
-		return fmt.Errorf("dynamic flow runtime readiness reconciliation requires exact run_id")
-	}
-	if err := am.requireRunExecutionOwnership(ctx, runID); err != nil {
-		return err
-	}
-	observedAt = observedAt.UTC()
-	if observedAt.IsZero() {
-		return fmt.Errorf("dynamic flow runtime readiness reconciliation requires exact occurrence time")
-	}
-	items, err := am.workflowInstances.InspectDynamicFlowRuntimeReadinessForRun(ctx, runID, admittedSource.fact)
-	if err != nil {
-		return err
-	}
-	requests := make([]runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation, 0, len(items))
-	plansByKey := make(map[runtimepipeline.DynamicFlowRuntimeReadinessKey]runtimepipeline.DynamicFlowRuntimeReadinessPlan, len(items))
-	for _, item := range items {
-		expected, err := am.deriveCurrentDynamicFlowRuntimeReadinessPlan(ctx, item, admittedSource)
-		if err != nil {
-			return err
-		}
-		requests = append(requests, runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation{Observed: item, Expected: expected})
-		plansByKey[runtimepipeline.DynamicFlowRuntimeReadinessKey{RunID: expected.RunID, InstancePath: expected.Identity.InstancePath}] = expected
-	}
-	results, err := am.workflowInstances.ReconcileDynamicFlowRuntimeReadinessPlans(ctx, requests, observedAt)
-	if err != nil {
-		return fmt.Errorf("reconcile dynamic flow runtime readiness plan set: %w", err)
-	}
-	for _, result := range results {
-		if !result.Changed {
-			continue
-		}
-		expected := plansByKey[runtimepipeline.DynamicFlowRuntimeReadinessKey{RunID: result.RunID, InstancePath: result.InstancePath}]
-		if err := am.reconcileDynamicFlowRuntimeReadinessPlan(ctx, expected, result.PlanRevision, source); err != nil {
-			am.signalDynamicFlowRuntimeReadiness()
-			return err
-		}
-	}
-	return nil
-}
-
-func (am *AgentManager) deriveCurrentDynamicFlowRuntimeReadinessPlan(
-	ctx context.Context,
-	item runtimepipeline.DynamicFlowRuntimeReadiness,
-	admittedSource dynamicFlowRuntimeReadinessSource,
-) (runtimepipeline.DynamicFlowRuntimeReadinessPlan, error) {
-	if !item.OwningRunSource.Matches(admittedSource.fact) {
-		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("dynamic flow readiness %s is not owned by the admitted source", item.InstancePath)
-	}
-	plan, err := item.Plan.Normalized()
-	if err != nil {
-		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, err
-	}
-	ctx = runtimecorrelation.WithRunID(ctx, plan.RunID)
-	flowIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(plan.RunID, plan.Identity.Route())
-	if err != nil {
-		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, err
-	}
-	projection, err := am.workflowInstances.LoadRouteRecoveryProjection(ctx, flowIdentity)
-	if err != nil {
-		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("load dynamic flow readiness projection %s: %w", item.InstancePath, err)
-	}
-	if projection.Identity.Route() != plan.Identity.Route() || projection.Identity.TemplateID != plan.Identity.TemplateID || projection.Identity.EntityID != plan.Identity.EntityID {
-		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("dynamic flow readiness %s persisted identity changed", item.InstancePath)
-	}
-	source := admittedSource.source
-	scope, ok := semanticview.FlowScopeByID(source, projection.Identity.TemplateID)
-	if !ok {
-		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("flow contract view not found: %s", projection.Identity.TemplateID)
-	}
-	schema, ok := source.FlowSchemaByID(projection.Identity.TemplateID)
-	if !ok {
-		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("flow schema not found: %s", projection.Identity.TemplateID)
-	}
-	records, err := am.flowInstanceAgentRecords(plan.RunID, runtimepipeline.FlowInstanceActivationRequest{
-		ContractBundle: source,
-		Instance:       projection.Identity,
-		Config:         projection.Config,
-	}, schema, scope)
-	if err != nil {
-		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("derive dynamic flow readiness agents %s: %w", item.InstancePath, err)
-	}
-	expected := plan
-	expected.Identity = projection.Identity
-	expected.BundleHash = admittedSource.fact.BundleHash()
-	expected.WorkflowVersion = strings.TrimSpace(source.WorkflowVersion())
-	expected.Agents = make([]runtimepipeline.DynamicFlowRuntimeAgentExpectation, 0, len(records))
-	for _, record := range records {
-		identity, err := record.Config.ConcreteIdentity()
-		if err != nil {
-			return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("derive dynamic flow agent identity %s: %w", record.Config.ID, err)
-		}
-		revision, err := lifecycleConfigRevision(record)
-		if err != nil {
-			return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("derive dynamic flow agent revision %s: %w", record.Config.ID, err)
-		}
-		expected.Agents = append(expected.Agents, runtimepipeline.DynamicFlowRuntimeAgentExpectation{
-			Identity: identity, ConfigRevision: revision,
-		})
-	}
-	if expected.BundleHash != plan.BundleHash || expected.WorkflowVersion != plan.WorkflowVersion {
-		expected.CreationEvent, err = rebuildPendingDynamicFlowRuntimeCreationEventPlan(
-			plan.CreationEvent,
-			!item.CreationEventEmittedAt.IsZero(),
-			source,
-			schema,
-			projection.Identity,
-			projection.Config,
-		)
-		if err != nil {
-			return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("rebuild dynamic flow creation plan %s: %w", item.InstancePath, err)
-		}
-	}
-	if err := am.executionPosture.Admit(expected.ExecutionMode, "dynamic flow runtime readiness plan reconciliation"); err != nil {
-		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, err
-	}
-	return expected.Normalized()
-}
-
-func rebuildPendingDynamicFlowRuntimeCreationEventPlan(
-	current *runtimepipeline.DynamicFlowRuntimeCreationEventPlan,
-	emitted bool,
-	source semanticview.Source,
-	schema runtimecontracts.FlowSchemaDocument,
-	identity runtimeflowidentity.Instance,
-	config map[string]any,
-) (*runtimepipeline.DynamicFlowRuntimeCreationEventPlan, error) {
-	if emitted {
-		return current, nil
-	}
-	autoEmit := strings.TrimSpace(schema.AutoEmitOnCreate.Event)
-	if current == nil {
-		if autoEmit != "" {
-			return nil, fmt.Errorf(
-				"cannot introduce auto-emit %s without persisted trigger lineage",
-				autoEmit,
-			)
-		}
-		return nil, nil
-	}
-	return buildDynamicFlowRuntimeCreationEventPlan(
-		source,
-		schema,
-		identity.TemplateID,
-		identity.InstancePath,
-		identity.EntityID,
-		events.EventLineage{
-			RunID:         current.RunID,
-			ParentEventID: current.ParentEventID,
-			ExecutionMode: current.ExecutionMode,
-		},
-		config,
-		current.DeliveryContext,
-		current.CreatedAt,
-	)
-}
-
-func (am *AgentManager) signalDynamicFlowRuntimeReadiness() {
-	if am == nil || am.dynamicFlowReadinessSignal == nil {
-		return
-	}
-	select {
-	case am.dynamicFlowReadinessSignal <- struct{}{}:
-	default:
-	}
-}
-
-func (am *AgentManager) reconcileDynamicFlowRuntimeReadiness(
-	ctx context.Context,
-	runID string,
-	instancePath string,
-) error {
-	if am == nil || am.workflowInstances == nil {
-		return fmt.Errorf("dynamic flow runtime readiness reconciler requires manager and workflow store")
-	}
-	key, err := newDynamicFlowRuntimeReadinessKey(runID, instancePath)
-	if err != nil {
-		return err
-	}
-	readiness, found, err := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, runtimeflowidentity.RouteForInstancePath(key.instancePath))
-	if err != nil {
-		return err
-	}
-	var plan runtimepipeline.DynamicFlowRuntimeReadinessPlan
-	var planRevision uint64
-	admittedSource, err := am.dynamicFlowRuntimeReadinessSource(ctx)
-	if err != nil {
-		return err
-	}
-	if found {
-		plan, err = readiness.Plan.Normalized()
-		if err != nil {
-			return err
-		}
-		if err := validateDynamicFlowRuntimeReadinessCallbackSource(plan, admittedSource); err != nil {
-			return err
-		}
-		planRevision = readiness.PlanRevision
-	}
-	return am.reconcileDeclaredDynamicFlowRuntimeReadiness(dynamicFlowRuntimeReadinessAdmission{
-		ctx: ctx, key: key, plan: plan, planRevision: planRevision, source: admittedSource,
-	})
-}
-
-func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessPlan(
-	ctx context.Context,
-	plan runtimepipeline.DynamicFlowRuntimeReadinessPlan,
-	planRevision uint64,
-	source semanticview.Source,
-) error {
-	normalized, err := plan.Normalized()
-	if err != nil {
-		return err
-	}
-	admittedSource, err := am.dynamicFlowRuntimeReadinessSource(ctx, source)
-	if err != nil {
-		return err
-	}
-	if err := validateDynamicFlowRuntimeReadinessCallbackSource(normalized, admittedSource); err != nil {
-		return err
-	}
-	key, err := newDynamicFlowRuntimeReadinessKey(normalized.RunID, normalized.Identity.InstancePath)
-	if err != nil {
-		return err
-	}
-	return am.reconcileDeclaredDynamicFlowRuntimeReadiness(dynamicFlowRuntimeReadinessAdmission{
-		ctx: ctx, key: key, plan: normalized, planRevision: planRevision, source: admittedSource,
-	})
-}
-
-func (am *AgentManager) reconcileCommittedDynamicFlowRuntimeReadinessPlan(
-	ctx context.Context,
-	plan runtimepipeline.DynamicFlowRuntimeReadinessPlan,
-	planRevision uint64,
-	source semanticview.Source,
-) error {
-	normalized, err := plan.Normalized()
-	if err != nil {
-		return err
-	}
-	admittedSource, err := am.dynamicFlowRuntimeReadinessSource(ctx, source)
-	if err != nil {
-		return err
-	}
-	if err := validateDynamicFlowRuntimeReadinessCallbackSource(normalized, admittedSource); err != nil {
-		return err
-	}
-	key, err := newDynamicFlowRuntimeReadinessKey(normalized.RunID, normalized.Identity.InstancePath)
-	if err != nil {
-		return err
-	}
-	return am.reconcileDeclaredDynamicFlowRuntimeReadiness(dynamicFlowRuntimeReadinessAdmission{
-		ctx: ctx, key: key, plan: normalized, planRevision: planRevision, source: admittedSource,
-		topologyDurable: true,
-	})
-}
-
-// PreparePersistedDynamicFlowRuntimeProcessTopology consumes the exact durable
-// plan for one live flow owner without claiming durable readiness completion.
-// It is used by bounded runtimes that execute before their run is activated.
-func (am *AgentManager) PreparePersistedDynamicFlowRuntimeProcessTopology(
-	ctx context.Context,
-	owner runtimeflowidentity.RunScopedFlowInstance,
-) error {
-	if am == nil || am.workflowInstances == nil {
-		return fmt.Errorf("dynamic flow runtime readiness finalizer requires manager and workflow store")
-	}
-	owner = owner.Normalize()
-	if err := owner.Validate(); err != nil {
-		return err
-	}
-	readiness, found, err := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, owner.RunID, owner.Route)
-	if err != nil {
-		return fmt.Errorf("load committed dynamic flow runtime readiness %s: %w", owner.Route.InstancePath, err)
-	}
-	if !found {
-		return fmt.Errorf("committed dynamic flow runtime readiness not found for %s", owner.Route.InstancePath)
-	}
-	if readiness.Plan.RunID != owner.RunID || readiness.Plan.Identity.Route() != owner.Route {
-		return fmt.Errorf("committed dynamic flow runtime readiness identity does not match %s", owner.Route.InstancePath)
-	}
-	source, err := am.dynamicFlowRuntimeReadinessSource(ctx)
-	if err != nil {
-		return err
-	}
-	plan, err := readiness.Plan.Normalized()
-	if err != nil {
-		return err
-	}
-	key, err := newDynamicFlowRuntimeReadinessKey(plan.RunID, readiness.InstancePath)
-	if err != nil {
-		return err
-	}
-	return am.reconcileDeclaredDynamicFlowRuntimeReadiness(dynamicFlowRuntimeReadinessAdmission{
-		ctx: ctx, key: key, plan: plan, planRevision: readiness.PlanRevision, source: source,
-		processOnly: true, preAdmission: true, previouslyCompleted: !readiness.TopologyReadyAt.IsZero(),
-	})
-}
-
-func (am *AgentManager) dynamicFlowRuntimeReadinessSource(
-	ctx context.Context,
-	candidates ...semanticview.Source,
-) (dynamicFlowRuntimeReadinessSource, error) {
-	if am == nil {
-		return dynamicFlowRuntimeReadinessSource{}, fmt.Errorf(
-			"dynamic flow runtime readiness requires manager",
-		)
-	}
-	owned := am.semanticReadinessSource
-	if owned.source == nil || !sameLoadedDynamicFlowSemanticSource(am.semanticSource, owned.source) {
-		return dynamicFlowRuntimeReadinessSource{}, fmt.Errorf(
-			"dynamic flow runtime readiness requires the manager-owned semantic source",
-		)
-	}
-	if len(candidates) > 0 && !sameLoadedDynamicFlowSemanticSource(owned.source, candidates[0]) {
-		return dynamicFlowRuntimeReadinessSource{}, fmt.Errorf(
-			"%w: callback semantic source is not the manager-owned loaded source",
-			errDynamicFlowRuntimeReadinessSourceStale,
-		)
-	}
-	if err := owned.fact.Validate(); err != nil {
-		return dynamicFlowRuntimeReadinessSource{}, fmt.Errorf(
-			"dynamic flow runtime readiness manager source fact: %w",
-			err,
-		)
-	}
-	sourceFact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
-	if !ok {
-		return dynamicFlowRuntimeReadinessSource{}, fmt.Errorf(
-			"dynamic flow runtime readiness requires exact bundle source fact",
-		)
-	}
-	if !sourceFact.Matches(owned.fact) {
-		return dynamicFlowRuntimeReadinessSource{}, fmt.Errorf(
-			"%w: declared=%s active=%s",
-			errDynamicFlowRuntimeReadinessSourceStale,
-			owned.fact.BundleHash(),
-			sourceFact.BundleHash(),
-		)
-	}
-	if strings.TrimSpace(owned.source.WorkflowVersion()) == "" {
-		return dynamicFlowRuntimeReadinessSource{}, fmt.Errorf(
-			"dynamic flow runtime readiness manager source requires workflow version",
-		)
-	}
-	return owned, nil
-}
-
-func sameLoadedDynamicFlowSemanticSource(left, right semanticview.Source) bool {
-	if left == nil || right == nil {
-		return left == nil && right == nil
-	}
-	leftBundle, leftOK := semanticview.Bundle(left)
-	rightBundle, rightOK := semanticview.Bundle(right)
-	return leftOK && rightOK && leftBundle == rightBundle
-}
-
-func dynamicFlowRuntimeReadinessSourceCoordinate(ctx context.Context) (string, error) {
-	sourceFact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
-	if !ok {
-		return "", fmt.Errorf("dynamic flow runtime readiness requires exact source artifact fact")
-	}
-	if err := sourceFact.Validate(); err != nil {
-		return "", fmt.Errorf("dynamic flow runtime readiness source artifact fact: %w", err)
-	}
-	return sourceFact.BundleHash(), nil
-}
-
-func validateDynamicFlowRuntimeReadinessCallbackSource(
-	plan runtimepipeline.DynamicFlowRuntimeReadinessPlan,
-	source dynamicFlowRuntimeReadinessSource,
-) error {
-	bundleHash := source.fact.BundleHash()
-	if bundleHash != plan.BundleHash {
-		return fmt.Errorf(
-			"%w: declared=%s active=%s",
-			errDynamicFlowRuntimeReadinessSourceStale,
-			plan.BundleHash,
-			bundleHash,
-		)
-	}
-	if source.source == nil {
-		return fmt.Errorf("dynamic flow runtime readiness reconciler requires semantic source")
-	}
-	if strings.TrimSpace(source.source.WorkflowVersion()) != plan.WorkflowVersion {
-		return fmt.Errorf(
-			"dynamic flow runtime readiness %s workflow version changed: persisted=%s active=%s",
-			plan.Identity.InstancePath,
-			plan.WorkflowVersion,
-			strings.TrimSpace(source.source.WorkflowVersion()),
-		)
-	}
-	return nil
-}
-
-func (am *AgentManager) reconcileDeclaredDynamicFlowRuntimeReadiness(
-	admission dynamicFlowRuntimeReadinessAdmission,
-) (result error) {
-	if err := am.requireRunExecutionOwnership(admission.ctx, admission.key.runID); err != nil {
-		return err
-	}
-	// The caller may stop waiting, but the accepted attempt must settle its
-	// retirement. Begin retains the exact Manager/standing/fork occurrence;
-	// cancellation of those owners, rather than the waiter, controls execution.
-	lease, err := am.beginWork(context.WithoutCancel(admission.ctx), "declared readiness attempt")
-	if err != nil {
-		return err
-	}
-	transferred := false
-	defer func() {
-		if !transferred {
-			result = errors.Join(result, lease.Done())
-		}
-	}()
-	am.dynamicFlowReadinessMu.Lock()
-	current, found, err := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(admission.ctx, admission.key.runID, runtimeflowidentity.RouteForInstancePath(admission.key.instancePath))
-	if err != nil {
-		am.dynamicFlowReadinessMu.Unlock()
-		return err
-	}
-	if (!found && admission.planRevision != 0) || (found && current.PlanRevision != admission.planRevision) {
-		am.dynamicFlowReadinessMu.Unlock()
-		return errDynamicFlowRuntimeReadinessPlanStale
-	}
-	if found {
-		matches, matchErr := dynamicFlowRuntimeReadinessPlanMatches(current.Plan, admission.plan)
-		if matchErr != nil || !matches {
-			am.dynamicFlowReadinessMu.Unlock()
-			return errors.Join(matchErr, errDynamicFlowRuntimeReadinessPlanStale)
-		}
-	}
-	if am.dynamicFlowReadinessAttempts == nil {
-		am.dynamicFlowReadinessAttempts = make(map[dynamicFlowRuntimeReadinessKey]*dynamicFlowRuntimeReadinessAttempt)
-	}
-	if attempt := am.dynamicFlowReadinessAttempts[admission.key]; attempt != nil {
-		if admission.planRevision > attempt.planRevision {
-			attempt.successorRequired = true
-			successor := admission
-			attempt.successor = &successor
-		} else if admission.planRevision < attempt.planRevision {
-			am.dynamicFlowReadinessMu.Unlock()
-			return errDynamicFlowRuntimeReadinessPlanStale
-		}
-		am.dynamicFlowReadinessMu.Unlock()
-		return attempt.wait(admission.ctx)
-	}
-	attempt := &dynamicFlowRuntimeReadinessAttempt{
-		done:         make(chan struct{}),
-		retiring:     make(chan struct{}),
-		planRevision: admission.planRevision,
-	}
-	am.dynamicFlowReadinessAttempts[admission.key] = attempt
-	am.dynamicFlowReadinessMu.Unlock()
-	transferred = true
-	owned := admission
-	owned.ctx = lease.Context()
-	go am.completeDeclaredDynamicFlowReadiness(owned, attempt, lease)
-	return attempt.wait(admission.ctx)
-}
-
-func (am *AgentManager) completeDeclaredDynamicFlowReadiness(admission dynamicFlowRuntimeReadinessAdmission, attempt *dynamicFlowRuntimeReadinessAttempt, lease *worklifetime.Lease) {
-	var result error
-	completed := false
-	finish := func() {
-		select {
-		case <-attempt.retiring:
-			am.lifecycle.recordTerminalCompletion(result)
-		default:
-		}
-		attempt.err = result
-		delete(am.dynamicFlowReadinessAttempts, admission.key)
-		close(attempt.done)
-		completed = true
-		am.lifecycle.recordTerminalCompletion(lease.Done())
-	}
-	defer func() {
-		if completed {
-			return
-		}
-		if recovered := recover(); recovered != nil {
-			result = errors.Join(result, fmt.Errorf("dynamic flow readiness attempt panic: %v", recovered))
-		}
-		am.dynamicFlowReadinessMu.Lock()
-		finish()
-		am.dynamicFlowReadinessMu.Unlock()
-	}()
-	if am.testAfterDynamicFlowReadinessAdmission != nil {
-		am.testAfterDynamicFlowReadinessAdmission()
-	}
-	current := admission
-	for {
-		// A coalesced successor contributes admitted source facts, not its
-		// caller's lifetime. All executions remain owned by this attempt.
-		current.ctx = runtimecorrelation.WithSourceArtifactFact(lease.Context(), current.source.fact)
-		scope, err := runtimeauthoractivity.BundleScopeForTarget(current.ctx, current.source.fact.BundleHash())
-		if err != nil {
-			result = err
-			return
-		}
-		current.ctx = runtimeauthoractivity.WithScope(current.ctx, scope)
-		current.ctx = context.WithValue(current.ctx, readinessRetirementWaitersKey{}, attempt)
-		attemptErr := am.reconcileDynamicFlowRuntimeReadinessOnce(current)
-		am.dynamicFlowReadinessMu.Lock()
-		if attempt.successorRequired {
-			current = *attempt.successor
-			attempt.planRevision = current.planRevision
-			attempt.successorRequired = false
-			attempt.successor = nil
-			am.dynamicFlowReadinessMu.Unlock()
-			continue
-		}
-		result = attemptErr
-		finish()
-		am.dynamicFlowReadinessMu.Unlock()
-		return
-	}
-}
-
 func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	admission dynamicFlowRuntimeReadinessAdmission,
 ) (retErr error) {
 	ctx := admission.ctx
 	var acknowledgedCleanupErr error
+	var cleanupCancels []context.CancelFunc
+	defer func() {
+		for _, cancel := range cleanupCancels {
+			cancel()
+		}
+	}()
 	defer func() { retErr = errors.Join(retErr, acknowledgedCleanupErr) }()
 	if err := am.requireRunExecutionOwnership(ctx, admission.key.runID); err != nil {
 		return err
@@ -1221,12 +83,12 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	}
 	flowIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(
 		key.runID,
-		runtimeflowidentity.RouteForInstancePath(key.instancePath),
+		admission.plan.Identity.Route(),
 	)
 	if err != nil {
 		return fmt.Errorf("resolve dynamic flow runtime identity %s: %w", key.instancePath, err)
 	}
-	readiness, found, err := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, runtimeflowidentity.RouteForInstancePath(key.instancePath))
+	readiness, found, err := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, flowIdentity.Route)
 	if err != nil {
 		return err
 	}
@@ -1240,12 +102,11 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	if err := am.executionPosture.Admit(plan.ExecutionMode, "dynamic flow runtime readiness topology reconciliation"); err != nil {
 		return err
 	}
-	if readiness.PlanRevision != admission.planRevision {
+	if readiness.AttemptOrdinal != admission.attemptOrdinal || readiness.AttemptState != admission.observed.AttemptState {
 		return errDynamicFlowRuntimeReadinessPlanStale
 	}
-	current, err := dynamicFlowRuntimeReadinessPlanMatches(plan, admission.plan)
-	if err != nil || !current {
-		return errors.Join(err, errDynamicFlowRuntimeReadinessPlanStale)
+	if readiness.PlanHash != admission.planHash {
+		return errDynamicFlowRuntimeReadinessPlanStale
 	}
 	if err := validateDynamicFlowRuntimeReadinessCallbackSource(plan, admission.source); err != nil {
 		return err
@@ -1301,7 +162,7 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		if err != nil {
 			return err
 		}
-		topologyAuthority, err = topologyAuthority.WithFlowPreparationRevision(admission.planRevision)
+		topologyAuthority, err = topologyAuthority.WithFlowPreparationAttempt(admission.attemptOrdinal)
 		if err != nil {
 			return err
 		}
@@ -1317,9 +178,18 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		}
 		return nil
 	}
-	active, _, beginErr := am.beginDynamicFlowActiveAttempt(ctx, key, plan, admission.planRevision)
+	active, created, beginErr := am.beginDynamicFlowActiveAttempt(ctx, key, plan, admission.attemptOrdinal, readiness.AttemptState)
 	if active == nil {
 		return beginErr
+	}
+	if err := ctx.Err(); err != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dynamicFlowRuntimeReadinessCleanupTimeout)
+		defer cancel()
+		return errors.Join(beginErr, err, am.settleDynamicFlowActiveAttempt(cleanupCtx, key, active, retirement, flowActivationFailedRetirement))
+	}
+	phase := readiness.Phase
+	if created {
+		phase = runtimepipeline.FlowAttachmentPlanned
 	}
 	if beginErr != nil {
 		acknowledgedCleanupErr = errors.Join(acknowledgedCleanupErr, fmt.Errorf("admit dynamic flow activation %s: %w", readiness.InstancePath, beginErr))
@@ -1328,21 +198,41 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		ctx = followupCtx
 	}
 	activationAccepted := false
-	verifyAttempt := func() (bool, error) {
-		if err := am.workflowInstances.VerifyDynamicFlowRuntimeActivationAttempt(ctx, active.receipt); err != nil {
-			fresh, found, loadErr := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, runtimeflowidentity.RouteForInstancePath(key.instancePath))
-			if loadErr == nil && (!found || !fresh.Eligible()) {
-				disposition := flowActivationProcessRetirement
-				if found && fresh.Terminal() {
-					disposition = flowActivationTerminalRetirement
-				}
-				cleanupErr := am.settleDynamicFlowActiveAttempt(context.WithoutCancel(ctx), key, active, retirement, disposition)
-				activationAccepted = true
-				return false, cleanupErr
+	advance := func(previous runtimepipeline.FlowAttachmentPhase) (bool, error) {
+		result, err := am.workflowInstances.AdvanceFlowAttachment(ctx, active.receipt, previous, time.Now().UTC())
+		if !result.Acknowledged {
+			return false, errors.Join(err, errors.New("attachment progress was not acknowledged"))
+		}
+		if !result.Admitted() {
+			disposition := flowActivationFailedRetirement
+			if result.Terminal {
+				disposition = flowActivationTerminalRetirement
 			}
-			return false, errors.Join(err, loadErr)
+			cleanupErr := am.settleDynamicFlowActiveAttempt(context.WithoutCancel(ctx), key, active, retirement, disposition)
+			activationAccepted = true
+			if result.Progress == runtimepipeline.FlowAttachmentStale {
+				err = errors.Join(err, errDynamicFlowRuntimeReadinessPlanStale)
+			}
+			return false, errors.Join(err, cleanupErr)
+		}
+		phase = result.Phase
+		if err != nil {
+			acknowledgedCleanupErr = errors.Join(acknowledgedCleanupErr, err)
+			followupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dynamicFlowRuntimeReadinessCleanupTimeout)
+			cleanupCancels = append(cleanupCancels, cancel)
+			ctx = followupCtx
 		}
 		return true, nil
+	}
+	advancePending := func(previous runtimepipeline.FlowAttachmentPhase) (bool, error) {
+		next, err := previous.Next()
+		if err != nil {
+			return false, err
+		}
+		if phase.Includes(next) {
+			return true, nil
+		}
+		return advance(previous)
 	}
 	defer func() {
 		am.dynamicFlowReadinessMu.Lock()
@@ -1357,11 +247,11 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	if err != nil {
 		return fmt.Errorf("authorize dynamic flow agent topology for %s: %w", readiness.InstancePath, err)
 	}
-	topologyAuthority, err = topologyAuthority.WithFlowActivationAttempt(active.receipt.ID(), active.receipt.PlanRevision())
+	topologyAuthority, err = topologyAuthority.WithFlowActivationAttempt(active.receipt.ID())
 	if err != nil {
 		return fmt.Errorf("bind dynamic flow agent topology to activation attempt for %s: %w", readiness.InstancePath, err)
 	}
-	if !admission.processPrepared {
+	if !admission.processPrepared && !phase.Includes(runtimepipeline.FlowAttachmentAgentsRegistered) {
 		persistedAgents, err := am.loadDynamicFlowPersistedAgents(ctx, flowIdentity)
 		if err != nil {
 			return fmt.Errorf("load dynamic flow agents for %s: %w", readiness.InstancePath, err)
@@ -1373,7 +263,7 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	if err := am.verifyDynamicFlowAgents(ctx, flowIdentity, records, topologyAuthority); err != nil {
 		return fmt.Errorf("verify dynamic flow agents for %s: %w", readiness.InstancePath, err)
 	}
-	if eligible, err := verifyAttempt(); err != nil {
+	if eligible, err := advancePending(runtimepipeline.FlowAttachmentPlanned); err != nil {
 		return err
 	} else if !eligible {
 		return nil
@@ -1384,11 +274,12 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		}
 		am.dynamicFlowReadinessMu.Lock()
 		active.admittedPreRun = true
+		active.preRunPredecessorOrdinal = admission.observed.AttemptOrdinal
 		am.dynamicFlowReadinessMu.Unlock()
 		activationAccepted = true
 		return nil
 	}
-	if !admission.processPrepared {
+	if !admission.processPrepared && !phase.Includes(runtimepipeline.FlowAttachmentRouteInstalled) {
 		flowIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(plan.RunID, req.Instance.Route())
 		if err != nil {
 			return fmt.Errorf("resolve dynamic flow route identity %s: %w", readiness.InstancePath, err)
@@ -1405,11 +296,6 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 				ctx = followupCtx
 			}
 		}
-		if eligible, err := verifyAttempt(); err != nil {
-			return err
-		} else if !eligible {
-			return nil
-		}
 		publication, err := am.publishPersistedDynamicFlowRoute(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{
 			Identity:            flowIdentity,
 			ActivationVariables: flowActivationVars(req),
@@ -1424,71 +310,34 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	if err := am.verifyDynamicFlowRoute(ctx, flowIdentity); err != nil {
 		return err
 	}
+	if eligible, err := advancePending(runtimepipeline.FlowAttachmentAgentsRegistered); err != nil {
+		return err
+	} else if !eligible {
+		return nil
+	}
 	if admission.processOnly {
-		if admission.previouslyCompleted {
-			committed, commitErr := am.workflowInstances.MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx, active.receipt, plan, time.Now().UTC())
-			if !committed.Acknowledged {
-				return errors.Join(commitErr, errors.New("reconstructed flow topology completion was not acknowledged"))
-			}
-			if commitErr != nil {
-				acknowledgedCleanupErr = errors.Join(acknowledgedCleanupErr, commitErr)
-			}
-			am.dynamicFlowReadinessMu.Lock()
-			active.complete = true
-			am.dynamicFlowReadinessMu.Unlock()
-		}
 		activationAccepted = true
 		return nil
 	}
-	if eligible, err := verifyAttempt(); err != nil {
-		return err
-	} else if !eligible {
-		return nil
-	}
-	am.dynamicFlowReadinessMu.Lock()
-	active.timersProjected = true
-	am.dynamicFlowReadinessMu.Unlock()
-	if err := am.workflowInstances.ReconcileInitialEntryTimersForAttempt(ctx, flowIdentity, active.receipt, plan); err != nil {
-		return fmt.Errorf("reconcile initial workflow timers for %s: %w", readiness.InstancePath, err)
-	}
-	if eligible, err := verifyAttempt(); err != nil {
-		return err
-	} else if !eligible {
-		return nil
-	}
-	now := time.Now().UTC()
-	committed, commitErr := am.workflowInstances.MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx, active.receipt, plan, now)
-	if !committed.Acknowledged {
-		return fmt.Errorf("record dynamic flow runtime readiness %s: %w", readiness.InstancePath, errors.Join(commitErr, errors.New("dynamic flow topology readiness commit was not acknowledged")))
-	}
-	if commitErr != nil {
-		acknowledgedCleanupErr = errors.Join(acknowledgedCleanupErr, fmt.Errorf("record dynamic flow runtime readiness %s: %w", readiness.InstancePath, commitErr))
-		followupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dynamicFlowRuntimeReadinessCleanupTimeout)
-		defer cancel()
-		ctx = followupCtx
-	}
-	fresh, found, err := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, runtimeflowidentity.RouteForInstancePath(key.instancePath))
-	if err != nil {
-		return err
-	}
-	if !found || !fresh.Eligible() {
-		disposition := flowActivationProcessRetirement
-		if found && fresh.Terminal() {
-			disposition = flowActivationTerminalRetirement
+	if !phase.Includes(runtimepipeline.FlowAttachmentTimersArmed) {
+		am.dynamicFlowReadinessMu.Lock()
+		active.timersProjected = true
+		am.dynamicFlowReadinessMu.Unlock()
+		if err := am.workflowInstances.ReconcileInitialEntryTimersForAttempt(ctx, flowIdentity, active.receipt, plan); err != nil {
+			return fmt.Errorf("reconcile initial workflow timers for %s: %w", readiness.InstancePath, err)
 		}
-		cleanupErr := am.settleDynamicFlowActiveAttempt(context.WithoutCancel(ctx), key, active, retirement, disposition)
-		activationAccepted = true
-		return cleanupErr
 	}
-	if fresh.PlanRevision != active.receipt.PlanRevision() || fresh.TopologyReadyAt.IsZero() {
-		return fmt.Errorf("dynamic flow runtime readiness changed after topology completion for %s", readiness.InstancePath)
-	}
-	if eligible, err := verifyAttempt(); err != nil {
+	if eligible, err := advancePending(runtimepipeline.FlowAttachmentRouteInstalled); err != nil {
 		return err
 	} else if !eligible {
 		return nil
 	}
-	if plan.CreationEvent == nil || !fresh.CreationEventEmittedAt.IsZero() {
+	if eligible, err := advancePending(runtimepipeline.FlowAttachmentTimersArmed); err != nil {
+		return err
+	} else if !eligible {
+		return nil
+	}
+	if plan.CreationEvent == nil || !readiness.CreationEventEmittedAt.IsZero() {
 		activationAccepted = true
 		am.dynamicFlowReadinessMu.Lock()
 		active.complete = true
@@ -1522,20 +371,10 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 			DispatchMode: dispatchMode,
 		},
 	); err != nil {
-		fresh, found, loadErr := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, runtimeflowidentity.RouteForInstancePath(key.instancePath))
-		if loadErr == nil && (!found || !fresh.Eligible()) {
-			if found && fresh.Terminal() {
-				cleanupErr := am.settleDynamicFlowActiveAttempt(context.WithoutCancel(ctx), key, active, retirement, flowActivationTerminalRetirement)
-				activationAccepted = true
-				return cleanupErr
-			}
+		if eligible, progressErr := advance(runtimepipeline.FlowAttachmentTimersArmed); progressErr != nil {
+			return errors.Join(err, progressErr)
+		} else if !eligible {
 			return nil
-		}
-		if loadErr != nil {
-			return errors.Join(
-				fmt.Errorf("commit dynamic flow creation occurrence %s: %w", readiness.InstancePath, err),
-				fmt.Errorf("reload dynamic flow creation eligibility %s: %w", readiness.InstancePath, loadErr),
-			)
 		}
 		return fmt.Errorf("commit dynamic flow creation occurrence %s: %w", readiness.InstancePath, err)
 	}
@@ -1544,431 +383,4 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	active.complete = true
 	am.dynamicFlowReadinessMu.Unlock()
 	return nil
-}
-
-func dynamicFlowRuntimeReadinessPlanMatches(
-	actual runtimepipeline.DynamicFlowRuntimeReadinessPlan,
-	expected runtimepipeline.DynamicFlowRuntimeReadinessPlan,
-) (bool, error) {
-	actualJSON, err := canonicaljson.Bytes(actual)
-	if err != nil {
-		return false, fmt.Errorf("encode current plan: %w", err)
-	}
-	expectedJSON, err := canonicaljson.Bytes(expected)
-	if err != nil {
-		return false, fmt.Errorf("encode expected plan: %w", err)
-	}
-	return string(actualJSON) == string(expectedJSON), nil
-}
-
-func (am *AgentManager) publishPersistedDynamicFlowRoute(ctx context.Context, req runtimebus.FlowInstanceRouteMaterializationRequest, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) (runtimebus.FlowRoutePublicationHandle, error) {
-	publisher := am.roles.RouteRestorer
-	if publisher == nil {
-		return nil, fmt.Errorf("event bus does not support process publication for persisted flow-instance route %s", req.Identity.Route.InstancePath)
-	}
-	return publisher.PublishPersistedFlowInstanceRouteForAttempt(ctx, req, attempt)
-}
-
-func (am *AgentManager) retireFlowRouteAttempt(attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt, publication runtimebus.FlowRoutePublicationHandle) (result error) {
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			result = fmt.Errorf("retire flow route attempt %s: %v", attempt.ID(), recovered)
-		}
-	}()
-	if err := attempt.Validate(); err != nil {
-		return err
-	}
-	if publication != nil {
-		return publication.Retire()
-	}
-	if am.roles.RouteRestorer == nil {
-		return errors.New("exact flow route attempt retirement owner is required")
-	}
-	return am.roles.RouteRestorer.RetireFlowInstanceRouteForAttempt(attempt)
-}
-
-func (am *AgentManager) loadDynamicFlowPersistedAgents(
-	ctx context.Context,
-	flowIdentity runtimeflowidentity.RunScopedFlowInstance,
-) (map[runtimeagentidentity.Identity]PersistedAgent, error) {
-	flowIdentity = flowIdentity.Normalize()
-	if err := flowIdentity.Validate(); err != nil {
-		return nil, err
-	}
-	persistedByIdentity := map[runtimeagentidentity.Identity]PersistedAgent{}
-	if am.store == nil {
-		return persistedByIdentity, nil
-	}
-	persisted, err := am.store.LoadAgents(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for _, rec := range persisted {
-		identity, err := rec.Config.ConcreteIdentity()
-		if err != nil {
-			return nil, err
-		}
-		if identity.RunID == flowIdentity.RunID && identity.FlowInstance() == flowIdentity.Route.InstancePath {
-			if _, exists := persistedByIdentity[identity]; exists {
-				return nil, fmt.Errorf("duplicate persisted agent identity %s", identity.Description())
-			}
-			persistedByIdentity[identity] = rec
-		}
-	}
-	return persistedByIdentity, nil
-}
-
-func (am *AgentManager) reconcileDynamicFlowAgentSet(
-	ctx context.Context,
-	source semanticview.Source,
-	flowIdentity runtimeflowidentity.RunScopedFlowInstance,
-	expected []PersistedAgent,
-	persisted map[runtimeagentidentity.Identity]PersistedAgent,
-	topologyAuthority runtimeagenttopology.Admission,
-	retireRemoved bool,
-) error {
-	flowIdentity = flowIdentity.Normalize()
-	if err := flowIdentity.Validate(); err != nil {
-		return err
-	}
-	if retireRemoved {
-		expectedIdentities := make(map[runtimeagentidentity.Identity]struct{}, len(expected))
-		for _, rec := range expected {
-			identity, err := rec.Config.ConcreteIdentity()
-			if err != nil {
-				return err
-			}
-			expectedIdentities[identity] = struct{}{}
-		}
-		removedIdentities := make(map[runtimeagentidentity.Identity]struct{})
-		for identity := range persisted {
-			if _, ok := expectedIdentities[identity]; !ok {
-				removedIdentities[identity] = struct{}{}
-			}
-		}
-		for _, cfg := range am.ListAgentConfigs() {
-			identity, err := cfg.ConcreteIdentity()
-			if err != nil {
-				return err
-			}
-			if identity.RunID != flowIdentity.RunID || identity.FlowInstance() != flowIdentity.Route.InstancePath {
-				continue
-			}
-			if _, ok := expectedIdentities[identity]; !ok {
-				removedIdentities[identity] = struct{}{}
-			}
-		}
-		orderedRemoved := make([]runtimeagentidentity.Identity, 0, len(removedIdentities))
-		for identity := range removedIdentities {
-			orderedRemoved = append(orderedRemoved, identity)
-		}
-		sort.Slice(orderedRemoved, func(i, j int) bool {
-			return runtimeagentidentity.Less(orderedRemoved[i], orderedRemoved[j])
-		})
-		for _, identity := range orderedRemoved {
-			if _, live := am.getAgentConfigIdentity(identity); !live {
-				stored, found := persisted[identity]
-				if !found {
-					return fmt.Errorf(
-						"removed dynamic flow agent %s has neither process nor durable lifecycle owner",
-						identity.Description(),
-					)
-				}
-				if err := am.adoptPersistedAgentLifecycleOnly(ctx, stored); err != nil {
-					return fmt.Errorf("adopt removed dynamic flow agent %s: %w", identity.Description(), err)
-				}
-			}
-			if err := am.teardownIdentityWithTopology(ctx, identity, "teardown", &topologyAuthority); err != nil {
-				return fmt.Errorf("retire removed dynamic flow agent %s: %w", identity.Description(), err)
-			}
-			delete(persisted, identity)
-		}
-	}
-	for _, rec := range expected {
-		identity, err := rec.Config.ConcreteIdentity()
-		if err != nil {
-			return err
-		}
-		rec.Topology = topologyAuthority
-		if err := am.reconcileDynamicFlowAgent(ctx, source, rec, persisted[identity], &topologyAuthority); err != nil {
-			return fmt.Errorf("reconcile dynamic flow agent %s: %w", identity.Description(), err)
-		}
-	}
-	return nil
-}
-
-func (am *AgentManager) reconcileDynamicFlowAgent(
-	ctx context.Context,
-	source semanticview.Source,
-	rec PersistedAgent,
-	persisted PersistedAgent,
-	topology *runtimeagenttopology.Admission,
-) error {
-	if topology == nil || !rec.Topology.Equal(*topology) {
-		return errors.New("dynamic flow agent requires the exact readiness topology admission")
-	}
-	if err := rec.Topology.Validate(); err != nil {
-		return fmt.Errorf("expected dynamic flow agent topology: %w", err)
-	}
-	identity, err := rec.Config.ConcreteIdentity()
-	if err != nil {
-		return err
-	}
-	expectedRevision, err := lifecycleConfigRevision(rec)
-	if err != nil {
-		return err
-	}
-	existing, present := am.getAgentConfigIdentity(identity)
-	actualRevision := ""
-	actualTopology := runtimeagenttopology.Admission{}
-	if present {
-		actualRevision, err = lifecycleConfigRevision(PersistedAgent{Config: existing})
-		if err != nil {
-			return err
-		}
-		state, found := am.lifecycle.stateByIdentity(identity)
-		if !found {
-			return fmt.Errorf("agent %s is process-ready without lifecycle state", identity.Description())
-		}
-		actualTopology = state.Topology
-	}
-	persistedIdentity := runtimeagentidentity.Identity{}
-	persistedRevision := ""
-	if strings.TrimSpace(persisted.Config.ID) != "" {
-		persistedIdentity, err = persisted.Config.ConcreteIdentity()
-		if err != nil {
-			return err
-		}
-		if err := persisted.Topology.Validate(); err != nil {
-			return fmt.Errorf("persisted dynamic flow agent %s topology: %w", identity.Description(), err)
-		}
-		persistedRevision, err = lifecycleConfigRevision(persisted)
-		if err != nil {
-			return err
-		}
-		if persistedIdentity != identity {
-			return fmt.Errorf("agent %s persisted identity changed", identity.Description())
-		}
-	}
-	if present && persistedIdentity.IsZero() {
-		return fmt.Errorf("agent %s is process-ready without durable registration", identity.Description())
-	}
-	if present && (actualRevision != persistedRevision || !actualTopology.Equal(persisted.Topology)) {
-		return fmt.Errorf("agent %s process and durable lifecycle facts disagree", identity.Description())
-	}
-	if !present && !persistedIdentity.IsZero() {
-		adopt := am.adoptPersistedAgentForLifecycle
-		if persistedRevision != expectedRevision || !persisted.Topology.Equal(rec.Topology) {
-			adopt = func(ctx context.Context, _ semanticview.Source, rec PersistedAgent) error {
-				return am.adoptPersistedAgentLifecycleOnly(ctx, rec)
-			}
-		}
-		if err := adopt(ctx, source, persisted); err != nil {
-			return fmt.Errorf("adopt persisted agent %s: %w", identity.Description(), err)
-		}
-		present = true
-		actualRevision = persistedRevision
-		actualTopology = persisted.Topology
-	}
-	if present {
-		if actualRevision == expectedRevision && actualTopology.Equal(rec.Topology) {
-			_, err := am.ensureExecutableAgentLifecycle(ctx, identity)
-			return err
-		}
-		if err := am.reconfigureAgentIdentityExactWithTopology(ctx, source, identity, rec.Config, topology); err != nil {
-			return err
-		}
-		_, err := am.ensureExecutableAgentLifecycle(ctx, identity)
-		return err
-	}
-	return am.spawnAgentInternalForSourceWithTopology(ctx, rec, true, source, topology)
-}
-
-// DynamicFlowAgentTopologyAdmission derives the one topology admission owned by
-// an exact durable readiness plan.
-func DynamicFlowAgentTopologyAdmission(plan runtimepipeline.DynamicFlowRuntimeReadinessPlan) (runtimeagenttopology.Admission, error) {
-	fingerprint, err := canonicaljson.Hash(plan)
-	if err != nil {
-		return runtimeagenttopology.Admission{}, err
-	}
-	return runtimeagenttopology.FlowReadinessAdmission(
-		strings.TrimSpace(plan.RunID),
-		strings.Trim(strings.TrimSpace(plan.Identity.InstancePath), "/"),
-		fingerprint,
-	)
-}
-
-func (am *AgentManager) verifyDynamicFlowAgents(
-	ctx context.Context,
-	flowIdentity runtimeflowidentity.RunScopedFlowInstance,
-	expected []PersistedAgent,
-	topology runtimeagenttopology.Admission,
-) error {
-	if err := topology.Validate(); err != nil {
-		return fmt.Errorf("verify dynamic flow topology admission: %w", err)
-	}
-	flowIdentity = flowIdentity.Normalize()
-	if err := flowIdentity.Validate(); err != nil {
-		return err
-	}
-	expectedByIdentity := make(map[runtimeagentidentity.Identity]PersistedAgent, len(expected))
-	for _, rec := range expected {
-		identity, err := rec.Config.ConcreteIdentity()
-		if err != nil {
-			return err
-		}
-		expectedByIdentity[identity] = rec
-	}
-	persistedByIdentity := make(map[runtimeagentidentity.Identity]PersistedAgent, len(expected))
-	if am.store == nil {
-		if len(expectedByIdentity) != 0 {
-			return fmt.Errorf("declared agents require durable manager persistence")
-		}
-	} else {
-		persisted, err := am.store.LoadAgents(ctx)
-		if err != nil {
-			return err
-		}
-		for _, rec := range persisted {
-			identity, err := rec.Config.ConcreteIdentity()
-			if err != nil {
-				return err
-			}
-			if identity.RunID == flowIdentity.RunID && identity.FlowInstance() == flowIdentity.Route.InstancePath {
-				persistedByIdentity[identity] = rec
-			}
-		}
-	}
-	processByIdentity := make(map[runtimeagentidentity.Identity]models.AgentConfig, len(expected))
-	for _, cfg := range am.ListAgentConfigs() {
-		identity, err := cfg.ConcreteIdentity()
-		if err != nil {
-			return err
-		}
-		if identity.RunID == flowIdentity.RunID && identity.FlowInstance() == flowIdentity.Route.InstancePath {
-			processByIdentity[identity] = cfg
-		}
-	}
-	if len(persistedByIdentity) != len(expectedByIdentity) || len(processByIdentity) != len(expectedByIdentity) {
-		return fmt.Errorf(
-			"declared agent set mismatch: expected=%d persisted=%d process=%d",
-			len(expectedByIdentity),
-			len(persistedByIdentity),
-			len(processByIdentity),
-		)
-	}
-	for _, rec := range expected {
-		identity, err := rec.Config.ConcreteIdentity()
-		if err != nil {
-			return err
-		}
-		expectedRevision, err := lifecycleConfigRevision(rec)
-		if err != nil {
-			return err
-		}
-		process, ok := processByIdentity[identity]
-		if !ok {
-			return fmt.Errorf("declared agent %s is not process-ready", identity.Description())
-		}
-		processRevision, err := lifecycleConfigRevision(PersistedAgent{Config: process})
-		if err != nil {
-			return err
-		}
-		stored, ok := persistedByIdentity[identity]
-		if !ok {
-			return fmt.Errorf("declared agent %s is not durably registered", identity.Description())
-		}
-		storedRevision, err := lifecycleConfigRevision(stored)
-		if err != nil {
-			return err
-		}
-		readiness, err := am.lifecycle.executableReadinessByIdentity(identity)
-		if err != nil {
-			return fmt.Errorf("declared agent %s executable readiness: %w", identity.Description(), err)
-		}
-		if processRevision != expectedRevision || storedRevision != expectedRevision ||
-			!readiness.State.Topology.Equal(topology) || !stored.Topology.Equal(topology) {
-			return fmt.Errorf(
-				"declared agent %s readiness facts mismatch: expected_revision=%s process_revision=%s stored_revision=%s process_topology_equal=%t stored_topology_equal=%t",
-				identity.Description(), expectedRevision, processRevision, storedRevision,
-				readiness.State.Topology.Equal(topology), stored.Topology.Equal(topology),
-			)
-		}
-	}
-	return nil
-}
-
-func verifyDynamicFlowAgentExpectations(actual []PersistedAgent, expected []runtimepipeline.DynamicFlowRuntimeAgentExpectation) error {
-	if len(actual) != len(expected) {
-		return fmt.Errorf("declared agent count changed: expected=%d actual=%d", len(expected), len(actual))
-	}
-	actualByIdentity := make(map[runtimeagentidentity.Identity]PersistedAgent, len(actual))
-	for _, rec := range actual {
-		identity, err := rec.Config.ConcreteIdentity()
-		if err != nil {
-			return err
-		}
-		if _, exists := actualByIdentity[identity]; exists {
-			return fmt.Errorf("duplicate declared agent %s", identity.Description())
-		}
-		actualByIdentity[identity] = rec
-	}
-	for _, item := range expected {
-		rec, ok := actualByIdentity[item.Identity]
-		if !ok {
-			return fmt.Errorf("declared agent topology missing %s", item.Identity.Description())
-		}
-		revision, err := lifecycleConfigRevision(rec)
-		if err != nil {
-			return err
-		}
-		if revision != item.ConfigRevision {
-			return fmt.Errorf("declared agent topology changed at %s: expected_revision=%s actual_revision=%s", item.Identity.Description(), item.ConfigRevision, revision)
-		}
-	}
-	return nil
-}
-
-func (am *AgentManager) verifyDynamicFlowRoute(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
-	verifier := am.roles.RouteVerifier
-	if verifier == nil || !verifier.HasFlowInstanceRoute(identity) {
-		return fmt.Errorf("dynamic flow route %s is not process-ready", identity.Key())
-	}
-	if err := verifier.VerifyFlowInstanceRoute(ctx, identity); err != nil {
-		return fmt.Errorf("verify dynamic flow route %s: %w", identity.Key(), err)
-	}
-	return nil
-}
-
-func dynamicFlowRuntimeCreationEvent(plan runtimepipeline.DynamicFlowRuntimeReadinessPlan) (events.Event, error) {
-	var empty events.Event
-	creation := plan.CreationEvent
-	if creation == nil {
-		return empty, fmt.Errorf("dynamic flow creation event plan is required")
-	}
-	routingSource, err := events.NewConcreteTemplateInstanceRoutingSource(events.RouteIdentity{
-		FlowID: plan.Identity.TemplateID, FlowInstance: plan.Identity.InstancePath, EntityID: plan.Identity.EntityID,
-	})
-	if err != nil {
-		return empty, err
-	}
-	envelope := events.EnvelopeForSourceRoute(events.EventEnvelope{
-		EntityID:     plan.Identity.EntityID,
-		FlowInstance: plan.Identity.InstancePath,
-	}, events.RouteIdentity{
-		FlowID:       plan.Identity.TemplateID,
-		FlowInstance: plan.Identity.InstancePath,
-		EntityID:     plan.Identity.EntityID,
-	})
-	return events.NewChildEvent(events.ChildEventInput{
-		Facts: events.EventFacts{
-			ID: creation.EventID, Type: events.EventType(creation.EventType),
-			Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "flow-instance-activator"},
-			Payload:  creation.Payload, Envelope: envelope, RoutingSource: routingSource,
-			CreatedAt: creation.CreatedAt, ExecutionMode: creation.ExecutionMode,
-		},
-		Lineage: events.EventLineage{
-			RunID: creation.RunID, ParentEventID: creation.ParentEventID, ExecutionMode: creation.ExecutionMode,
-		},
-	})
 }

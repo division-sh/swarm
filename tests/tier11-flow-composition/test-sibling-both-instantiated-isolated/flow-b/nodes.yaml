@@ -4,5 +4,4 @@ beta-intake:
   produces: []
   event_handlers:
     work.begin:
-      create_entity: true
       advances_to: active

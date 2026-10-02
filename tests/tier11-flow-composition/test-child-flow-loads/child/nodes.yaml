@@ -4,5 +4,4 @@ child-node:
   produces: []
   event_handlers:
     child.start:
-      create_entity: true
       advances_to: completed

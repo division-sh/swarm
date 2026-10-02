@@ -124,6 +124,7 @@ func projectNodeEventHandlersValue(value yamlsource.Value) (map[string]SystemNod
 }
 
 var retiredNodeHandlerFields = map[string]string{
+	"create_entity":           "handler creation is retired; use the canonical flow constructor at the composition boundary",
 	"condition":               "handler condition is retired; use rules.when or on_complete.condition",
 	"logic":                   "DEPRECATED: handler logic is retired",
 	"from":                    "handler.from is accepted but never executed; use the owning primitive's source",
@@ -153,8 +154,6 @@ func projectNodeHandlerValue(value yamlsource.Value) (SystemNodeEventHandler, er
 			out.Description = strings.TrimSpace(out.Description)
 		case "_note":
 			continue
-		case "create_entity":
-			out.CreateEntity, err = nodeValueBool(field, "handler.create_entity")
 		case "advances_to":
 			if field.Presence() == yamlsource.PresenceSequence || field.Presence() == yamlsource.PresenceEmptySequence {
 				return SystemNodeEventHandler{}, fmt.Errorf("DIALECT-ADV-LIST: advances_to at %s is list, must be string", field.Location())

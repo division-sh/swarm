@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -113,13 +114,15 @@ func TestReceiverMaterializationPendingAgentRestartBothStores(t *testing.T) {
 				t.Fatalf("restart rewrote historical materializer: %+v %v", afterNode, err)
 			}
 			afterAgent, err := recovered.Snapshot(recoveredCtx, agent.DeliveryID)
-			if err != nil || afterAgent.Status != deliverylifecycle.StatusDelivered || afterAgent.ClaimVersion != 1 || afterAgent.Authority.Equal(node.Authority) || !afterAgent.Route.Materialization.Equal(agent.Route.Materialization) {
-				t.Fatalf("successor did not consume exact original dependency once: %+v %v", afterAgent, err)
+			if err != nil || afterAgent.Status != deliverylifecycle.StatusDelivered || afterAgent.ClaimVersion != 1 || afterAgent.Authority.Equal(node.Authority) || !afterAgent.Route.Initialization.Equal(agent.Route.Initialization) || !events.SameDeliveryTargetOwnership(afterAgent.Route.Target, agent.Route.Target) {
+				t.Fatalf("successor did not consume exact original constructed receiver once: %+v %v", afterAgent, err)
 			}
+			requireReceiverConstructedBeforeDelivery(t, reopened, catalogRuntimeRunID, afterAgent)
+			requireDeclaredAgentReceiverOwnership(t, catalogRuntimeRunID, afterNode, afterAgent)
 			reopened.llm.mu.Lock()
 			calls := append([]scriptedDeliveryCall(nil), reopened.llm.deliveryCalls...)
 			reopened.llm.mu.Unlock()
-			if len(calls) != 1 || calls[0].EventID != eventID || calls[0].TargetEntityID != node.Route.Target.Route().EntityID {
+			if len(calls) != 1 || calls[0].RunID != catalogRuntimeRunID || calls[0].AgentID != agent.SubscriberID || calls[0].EventID != eventID || calls[0].TargetEntityID != "" {
 				t.Fatalf("restarted provider execution lost exact target: %+v", calls)
 			}
 		})

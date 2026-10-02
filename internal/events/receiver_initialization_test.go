@@ -2,43 +2,68 @@ package events
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"reflect"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/google/uuid"
 )
 
-func TestReceiverInitializationObserversDoNotBecomeMaterializers(t *testing.T) {
-	for _, flowOwned := range []bool{false, true} {
-		event, node, agents := receiverMaterializationFixture(t)
-		observer := node
-		identity := identitytest.FlowNode(t, "consumer", "observer")
-		observer.Recipient = MustNodeDeliveryRecipient(identity)
-		observer.ConnectClaim.handlerNode = identity
-		observer.ConnectClaim.recipientID = identity.Key()
-		publication := append([]DeliveryRoute{node, observer}, agents...)
-		if flowOwned {
-			supplier, err := AdmitFlowReceiverInitialization(event, node.Target)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for index := range publication {
-				publication[index].Initialization = supplier
-			}
-		} else {
-			plan, err := AdmitReceiverMaterializationPlan(event, node, agents, publication)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for index := 2; index < len(publication); index++ {
-				publication[index], err = plan.BindDependent(publication[index])
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
+func receiverMaterializationFixture(t testing.TB) (Event, DeliveryRoute, []DeliveryRoute) {
+	t.Helper()
+	event, err := NewExistingRunRootIngressEvent(ExistingRunRootIngressEventInput{Facts: validFacts(), RunID: uuid.NewString()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := NewMaterializingEntityTarget(RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: uuid.NewString()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := identitytest.FlowNode(t, "consumer", "observer")
+	observer := DeliveryRoute{Recipient: MustNodeDeliveryRecipient(node), Target: target}
+	observer.Initialization, err = AdmitFlowReceiverInitialization(event, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pin := sha256.Sum256([]byte("exact-compiled-receiver-pin"))
+	observer.ConnectClaim, err = AdmitConnectExecutionClaim(sha256.Sum256([]byte("node-edge")), pin, observer.Recipient, node, "item.received")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var agents []DeliveryRoute
+	for _, label := range []string{"observer", "renamed-observer"} {
+		name, err := agentidentity.DeclaredName(label, "consumer/agents.yaml")
+		if err != nil {
+			t.Fatal(err)
 		}
+		route, err := agentidentity.PresentRoute("consumer", "consumer", "consumer")
+		if err != nil {
+			t.Fatal(err)
+		}
+		actor, err := agentidentity.New(event.RunID(), name, route)
+		if err != nil {
+			t.Fatal(err)
+		}
+		agent := DeliveryRoute{Recipient: MustAgentDeliveryRecipient(actor.AgentID()), AgentIdentity: actor, Target: target, Initialization: observer.Initialization}
+		agent.ConnectClaim, err = AdmitConnectExecutionClaim(sha256.Sum256([]byte(label)), pin, agent.Recipient, identity.ExecutableNode{}, "item.received")
+		if err != nil {
+			t.Fatal(err)
+		}
+		agents = append(agents, agent)
+	}
+	return event, observer, agents
+}
+
+func TestReceiverInitializationObserversDoNotBecomeMaterializers(t *testing.T) {
+	event, observer, agents := receiverMaterializationFixture(t)
+	// Removing, reordering or adding ordinary node deliveries cannot create a
+	// dependency on their execution. Construction has its own exact receipt.
+	for _, nodes := range [][]DeliveryRoute{nil, {observer}, {observer, observer}} {
+		publication := append(append([]DeliveryRoute(nil), nodes...), agents...)
 		for _, reverse := range []bool{false, true} {
 			if reverse {
 				for i, j := 0, len(publication)-1; i < j; i, j = i+1, j-1 {
@@ -46,29 +71,26 @@ func TestReceiverInitializationObserversDoNotBecomeMaterializers(t *testing.T) {
 				}
 			}
 			if err := ValidateReceiverMaterializations(event, publication); err != nil {
-				t.Fatalf("flow=%v reverse=%v: %v", flowOwned, reverse, err)
+				t.Fatal(err)
 			}
 			for _, route := range publication {
 				full, err := json.Marshal(route)
 				if err != nil {
 					t.Fatal(err)
 				}
-				var fullRestored DeliveryRoute
-				if err := json.Unmarshal(full, &fullRestored); err != nil || !reflect.DeepEqual(fullRestored, route.Normalized()) {
-					t.Fatalf("public route wire lost supplier: %s %v", full, err)
+				var restored DeliveryRoute
+				if err := json.Unmarshal(full, &restored); err != nil || !reflect.DeepEqual(restored, route.Normalized()) {
+					t.Fatalf("public route roundtrip: %s %v", full, err)
 				}
 				raw, err := EncodeReceiverMaterializationRecord(route)
 				if err != nil {
 					t.Fatal(err)
 				}
 				bare := route
-				bare.Initialization, bare.Materialization = ReceiverInitialization{}, ReceiverMaterializationPlan{}
-				restored, err := RestoreReceiverMaterializationRecord(bare, raw)
-				if err != nil || !reflect.DeepEqual(restored, route) {
-					t.Fatalf("durable supplier roundtrip: %v", err)
-				}
-				if !SameDeliveryRouteIdentity(restored, route) {
-					t.Fatal("supplier disappeared from route identity")
+				bare.Initialization = ReceiverInitialization{}
+				restored, err = RestoreReceiverMaterializationRecord(bare, raw)
+				if err != nil || !reflect.DeepEqual(restored, route) || !SameDeliveryRouteIdentity(restored, route) {
+					t.Fatalf("durable construction receipt roundtrip: %v", err)
 				}
 			}
 		}
@@ -77,19 +99,15 @@ func TestReceiverInitializationObserversDoNotBecomeMaterializers(t *testing.T) {
 
 func TestReceiverInitializationClosedWireAndIdentity(t *testing.T) {
 	event, node, _ := receiverMaterializationFixture(t)
-	lifecycle, err := AdmitFlowReceiverInitialization(event, node.Target)
-	if err != nil {
-		t.Fatal(err)
+	bare := node
+	bare.Initialization = ReceiverInitialization{}
+	if SameDeliveryRouteIdentity(node, bare) {
+		t.Fatal("construction receipt omitted from identity")
 	}
-	other := node
-	other.Initialization = lifecycle
-	if SameDeliveryRouteIdentity(node, other) {
-		t.Fatal("supplier omitted from identity")
+	if err := ValidateDeliveryRoutes([]DeliveryRoute{node, bare}); err == nil {
+		t.Fatal("same execution accepted conflicting receipt identities")
 	}
-	if err := ValidateDeliveryRoutes([]DeliveryRoute{node, other}); err == nil {
-		t.Fatal("same execution accepted conflicting supplier identities")
-	}
-	raw, err := json.Marshal(lifecycle)
+	raw, err := json.Marshal(node.Initialization)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,50 +115,32 @@ func TestReceiverInitializationClosedWireAndIdentity(t *testing.T) {
 		[]byte(`null`), []byte(`[]`),
 		bytes.Replace(raw, []byte(`"kind":`), []byte(`"node":null,"kind":`), 1),
 		bytes.Replace(raw, []byte(`"kind":`), []byte(`"kind":"flow_lifecycle","kind":`), 1),
+		bytes.Replace(raw, []byte(`"flow_lifecycle"`), []byte(`"node_delivery"`), 1),
+		bytes.Replace(raw, []byte(`"event_id":`), []byte(`"EVENT_ID":`), 1),
 	} {
-		var restored ReceiverInitialization
-		if err := json.Unmarshal(bad, &restored); err == nil {
-			t.Fatalf("accepted noncanonical union: %s", bad)
+		before := node.Initialization
+		restored := before
+		if err := json.Unmarshal(bad, &restored); err == nil || restored != before {
+			t.Fatalf("accepted or mutated on invalid receipt: %s", bad)
 		}
 	}
-	record, err := EncodeReceiverMaterializationRecord(other)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := RestoreReceiverMaterializationRecord(node, record); err == nil {
-		t.Fatal("record replaced admitted supplier")
+	foreign := event.Clone()
+	foreign.id = uuid.NewString()
+	if err := node.Initialization.ValidateEvent(foreign); err == nil {
+		t.Fatal("accepted foreign publication")
 	}
 }
 
 func TestReceiverInitializationRejectsErasureAndForgedSupplier(t *testing.T) {
-	for _, variant := range []string{"erase_all", "erase_plan", "fake_lifecycle", "event", "run", "target", "node", "absent_supplier"} {
+	for _, variant := range []string{"erase_all", "event", "run", "target", "absent_supplier"} {
 		t.Run(variant, func(t *testing.T) {
 			event, node, agents := receiverMaterializationFixture(t)
-			plan, err := AdmitReceiverMaterializationPlan(event, node, agents, append([]DeliveryRoute{node}, agents...))
-			if err != nil {
-				t.Fatal(err)
-			}
-			publication := []DeliveryRoute{node}
-			for _, agent := range agents {
-				agent, err = plan.BindDependent(agent)
-				if err != nil {
-					t.Fatal(err)
-				}
-				publication = append(publication, agent)
-			}
+			publication := append([]DeliveryRoute{node}, agents...)
 			switch variant {
 			case "erase_all":
 				for i := range publication {
 					publication[i].Initialization = ReceiverInitialization{}
-					publication[i].Materialization = ReceiverMaterializationPlan{}
 				}
-			case "erase_plan":
-				for i := range publication {
-					publication[i].Materialization = ReceiverMaterializationPlan{}
-				}
-			case "fake_lifecycle":
-				publication[1].Initialization, _ = AdmitFlowReceiverInitialization(event, node.Target)
-				publication[1].Materialization = ReceiverMaterializationPlan{}
 			case "event":
 				publication[1].Initialization.eventID = uuid.NewString()
 			case "run":
@@ -149,38 +149,55 @@ func TestReceiverInitializationRejectsErasureAndForgedSupplier(t *testing.T) {
 				target := node.Target.Route()
 				target.EntityID = uuid.NewString()
 				publication[1].Initialization.target, _ = NewMaterializingEntityTarget(target)
-			case "node":
-				publication[1].Initialization.node = identitytest.FlowNode(t, "consumer", "fake")
 			case "absent_supplier":
 				publication[1].Initialization = ReceiverInitialization{}
 			}
 			if err := ValidateReceiverMaterializations(event, publication); err == nil {
-				t.Fatal("accepted corrupted supplier evidence")
+				t.Fatal("accepted corrupted construction evidence")
 			}
 		})
 	}
 }
 
 func TestReceiverInitializationDurableCodecRejectsOldAndPartialRecords(t *testing.T) {
-	event, node, agents := receiverMaterializationFixture(t)
-	plan, err := AdmitReceiverMaterializationPlan(event, node, agents, append([]DeliveryRoute{node}, agents...))
-	if err != nil {
-		t.Fatal(err)
-	}
-	agent, err := plan.BindDependent(agents[0])
-	if err != nil {
-		t.Fatal(err)
-	}
+	_, _, agents := receiverMaterializationFixture(t)
+	agent := agents[0]
 	raw, err := EncodeReceiverMaterializationRecord(agent)
 	if err != nil {
 		t.Fatal(err)
 	}
-	old, _ := json.Marshal(plan)
-	for _, bad := range [][]byte{old, []byte(`{}`), []byte(`{"initialization":null,"dependency":null}`), bytes.Replace(raw, []byte(`"node_delivery"`), []byte(`"unknown"`), 1), append(append([]byte(nil), raw...), []byte(` {}`)...)} {
+	for _, bad := range [][]byte{
+		[]byte(`{}`), []byte(`{"initialization":null}`),
+		bytes.Replace(raw, []byte(`"flow_lifecycle"`), []byte(`"node_delivery"`), 1),
+		bytes.Replace(raw, []byte(`"initialization":`), []byte(`"dependency":null,"initialization":`), 1),
+		bytes.Replace(raw, []byte(`"initialization":`), []byte(`"INITIALIZATION":`), 1),
+		append(append([]byte(nil), raw...), []byte(` {}`)...),
+	} {
 		bare := agent
-		bare.Materialization, bare.Initialization = ReceiverMaterializationPlan{}, ReceiverInitialization{}
-		if _, err := RestoreReceiverMaterializationRecord(bare, bad); err == nil {
-			t.Fatalf("accepted malformed supplier record: %s", bad)
+		bare.Initialization = ReceiverInitialization{}
+		got, err := RestoreReceiverMaterializationRecord(bare, bad)
+		if err == nil || !reflect.DeepEqual(got, DeliveryRoute{}) {
+			t.Fatalf("accepted malformed or retired record: %s", bad)
 		}
+	}
+	if _, err := RestoreReceiverMaterializationRecord(agent, []byte("null")); err == nil {
+		t.Fatal("erased construction evidence")
+	}
+	foreign := agent
+	foreign.Initialization.eventID = uuid.NewString()
+	foreignRaw, err := EncodeReceiverMaterializationRecord(foreign)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RestoreReceiverMaterializationRecord(agent, foreignRaw); err == nil {
+		t.Fatal("replaced construction evidence")
+	}
+	full, err := json.Marshal(agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var route DeliveryRoute
+	if err := json.Unmarshal(bytes.Replace(full, []byte(`"subscriber_type":`), []byte(`"receiver_materialization_plan":{},"subscriber_type":`), 1), &route); err == nil {
+		t.Fatal("accepted retired node dependency in a public route")
 	}
 }

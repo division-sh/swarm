@@ -1,30 +1,25 @@
 package pipeline
 
 import (
-	"context"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func TestRetainedNodeContractHandlerUsesRuntimeEnginePath(t *testing.T) {
-	bus := &recordingPipelineBus{}
-	pc := newPreviewPipelineCoordinatorForTest(bus, PipelineCoordinatorOptions{
-		Module: handlerEngineProjectNodeModule(t),
-	})
+	pc, bus, ctx := newConstructorHandlerUnitCoordinator(t, handlerEngineProjectNodeModule(t))
 
 	evt := eventtest.RunCreatingRootIngressWithRoutingSource(
 		"00000000-0000-0000-0000-000000000001", events.EventType("custom.trigger"), "", "", nil, 0, testPipelineRunID, "",
 		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: testPipelineRunID}), eventtest.StaticFlowRoutingSource(".", testPipelineRunID, ""), time.Unix(1, 0).UTC(),
 	)
-	outcome, err := executeNodeContractHandlerWithHandoff(t, pc, testAuthorActivityContext(t, context.Background()), pipelineNode(t, "", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	ctx, state := prepareConstructorUnitDelivery(t, pc, ctx, ".", "node-a", evt)
+	outcome, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
-	}, workflowTriggerContext{Event: evt, HandlerEventKey: "custom.trigger"}, false)
+	}, workflowTriggerContext{Event: evt, State: state, HandlerEventKey: "custom.trigger"}, false)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
@@ -53,65 +48,5 @@ func TestHandlerExecutionStateSnapshotKeepsAuthoredGatesFieldSeparate(t *testing
 	}
 	if len(snapshot.Gates) != 0 {
 		t.Fatalf("typed gates = %#v, want empty", snapshot.Gates)
-	}
-}
-
-func TestEnsureHandlerEntityIDUsesCanonicalPrimaryForEntityMaterializingHandler(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		RootEntities: runtimecontracts.EntityContractsDocument{
-			"subject": {
-				Fields: map[string]runtimecontracts.EntityFieldDecl{
-					"name": {Type: "text"},
-				},
-			},
-		},
-	})
-	handler := runtimecontracts.SystemNodeEventHandler{
-		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
-			Writes: []runtimecontracts.WorkflowDataWrite{
-				{TargetField: "name", Value: runtimecontracts.LiteralExpression("Minted Entity")},
-			},
-		},
-	}
-
-	runID := "77777777-7777-4777-8777-777777777777"
-	entityID, evt, resolveErr := ensureHandlerEntityIDAtNode(source, identity.ExecutableNode{}, events.EventType("custom.trigger"), "", handler, "", eventtest.RunCreatingRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{}))
-	if resolveErr != nil {
-		t.Fatalf("ensureHandlerEntityID: %v", resolveErr)
-	}
-
-	if entityID != FlowInstanceEntityID(runID) {
-		t.Fatalf("entityID = %q, want canonical root primary", entityID)
-	}
-	if got := evt.EntityID(); got == "" || got != entityID {
-		t.Fatalf("event entity_id = %q, want %q", got, entityID)
-	}
-}
-
-func TestEnsureHandlerEntityIDCreateEntityUsesInboundPrimaryReference(t *testing.T) {
-	handler := runtimecontracts.SystemNodeEventHandler{CreateEntity: true}
-	inbound := eventtest.RunCreatingRootIngress(
-		"",
-		events.EventType("custom.trigger"),
-		"",
-		"",
-		nil,
-		0,
-		"",
-		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-parent"),
-		time.Time{},
-	)
-
-	entityID, evt, resolveErr := ensureHandlerEntityIDAtNode(nil, identity.ExecutableNode{}, inbound.Type(), "", handler, "ent-parent", inbound)
-	if resolveErr != nil {
-		t.Fatalf("ensureHandlerEntityID: %v", resolveErr)
-	}
-
-	if entityID != "ent-parent" {
-		t.Fatalf("entityID = %q, want inbound primary reference", entityID)
-	}
-	if got := evt.EntityID(); got != "ent-parent" {
-		t.Fatalf("event entity_id = %q, want preserved inbound reference", got)
 	}
 }

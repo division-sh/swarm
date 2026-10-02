@@ -597,7 +597,7 @@ func TestTerminalReadinessRetirementReleasesAttemptBeforeJoin(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			attempt, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt(uuid.NewString(), rec.Config.Identity.RunID, "review/inst-1", 1, lifecycleProbeProcessBinding())
+			attempt, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt("1", rec.Config.Identity.RunID, "review/inst-1", lifecycleProbeProcessBinding())
 			if err != nil {
 				t.Fatal(err)
 			}

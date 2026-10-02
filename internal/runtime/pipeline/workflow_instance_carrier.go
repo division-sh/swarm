@@ -22,8 +22,8 @@ func workflowInstanceStateControl(instance WorkflowInstance) runtimeengine.State
 }
 
 func workflowInstanceStateCarrier(instance WorkflowInstance) (runtimeengine.StateCarrier, error) {
-	if strings.TrimSpace(instance.EntityType) == "" {
-		return runtimeengine.StateCarrier{}, fmt.Errorf("workflow instance state carrier requires entity_type")
+	if strings.TrimSpace(instance.EntityType) == "" && len(instance.Fields) != 0 {
+		return runtimeengine.StateCarrier{}, fmt.Errorf("fieldless workflow instance state carrier cannot carry entity fields")
 	}
 	carrier, err := runtimeengine.StateCarrierFromPersisted(
 		instance.Fields,

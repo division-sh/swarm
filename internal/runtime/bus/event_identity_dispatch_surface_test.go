@@ -24,6 +24,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -616,6 +617,25 @@ func (f completeEventDispatchFixture) newRecordingManager(
 	}
 	if err := manager.ReconcileStaticTopologyForStartup(f.ctx, f.source); err != nil {
 		t.Fatalf("reconcile complete-event static topology: %v", err)
+	}
+	blueprints, err := manager.PreRunAgentMaterializationBlueprints()
+	if err != nil {
+		t.Fatalf("compile complete-event declaration materialization: %v", err)
+	}
+	if len(blueprints) != 1 {
+		t.Fatalf("complete-event declaration count = %d, want 1", len(blueprints))
+	}
+	record, err := blueprints[0].Materialize(f.event.RunID())
+	if err != nil {
+		t.Fatalf("materialize complete-event run identity: %v", err)
+	}
+	if record.Config.Identity != f.identity {
+		t.Fatalf("complete-event materialized identity = %#v, want %#v", record.Config.Identity, f.identity)
+	}
+	record.Topology = admission
+	// Delivery finalization activates an admitted lifecycle; it cannot create it.
+	if err := manager.MaterializeAdmittedAgent(runtimecorrelation.WithRunID(f.ctx, f.event.RunID()), record); err != nil {
+		t.Fatalf("construct complete-event admitted agent lifecycle: %v", err)
 	}
 	return generation
 }

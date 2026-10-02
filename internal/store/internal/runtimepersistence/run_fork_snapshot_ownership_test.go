@@ -36,23 +36,38 @@ type snapshotOwnershipFixture struct {
 func newSnapshotOwnershipFixture(t *testing.T, backend eventRecordContractBackend, eventContext, reverse bool) snapshotOwnershipFixture {
 	t.Helper()
 	opened := backend.open(t)
-	f := snapshotOwnershipFixture{store: opened.store.(snapshotOwnershipStore), db: opened.db, ctx: testAuthorActivityContext(), runID: uuid.NewString(), entityID: uuid.NewString()}
-	f.ctx = runtimecorrelation.WithRunID(f.ctx, f.runID)
-	requireDefaultSourceArtifactForTest(t, f.ctx, opened.store)
+	construction := newReceiverConfigActivationFixtureForStore(t, opened.store.(agentFixtureFlowStore), false, map[string]string{
+		"schema.yaml":         "name: snapshot-ownership\n",
+		"owner/schema.yaml":   "name: owner\ninstance: subject_id\nstages:\n  active: {initial: true}\n  ready: {}\n  later: {}\npins:\n  inputs:\n    events: [construct.requested]\n",
+		"owner/entities.yaml": "review_item:\n  subject_id: text\n  entity_type: {type: text, initial: authored-not-owner}\n  value: text?\n",
+		"owner/events.yaml":   "construct.requested:\n",
+	}, nil, ownStoreTestAgentManager, nil)
+	f := snapshotOwnershipFixture{store: opened.store.(snapshotOwnershipStore), db: opened.db, ctx: construction.ctx, runID: runtimecorrelation.RunIDFromContext(construction.ctx)}
 	at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-	if _, err := f.store.SetupScenarioEntities(f.ctx, runtimepipeline.ScenarioSetupRequest{
-		RunID: f.runID, CreatedAt: at,
-		Entities: []runtimepipeline.ScenarioSetupEntityRequest{{
-			Alias: "subject", EntityID: f.entityID, FlowInstance: "owner/one", EntityType: "review_item", CurrentState: "active",
-			Fields: map[string]any{"entity_type": "authored-not-owner"},
-		}},
-	}); err != nil {
+	req := sqliteFlowActivationRequest(construction.bundle, "owner", "one", "", "owner/one")
+	req.OccurredAt = at
+	req.Config = map[string]any{"subject_id": "one"}
+	req.ConstructorInput, req.ResolvedKey = "construct.requested", "one"
+	req.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "construct.requested", "constructor-fixture", "", []byte(`{}`), 0, f.runID, events.EventEnvelope{}, at)
+	activation, err := construction.manager.PrepareFlowInstanceActivation(f.ctx, req)
+	if err != nil {
 		t.Fatal(err)
 	}
-	f.state = stateOnlyWorkflowEngineMutationRecord(t, f.runID, "owner", "owner/one", f.entityID, "active", 1, at)
+	committed, err := (agentFixtureFlowActivationCommitter{store: construction.store}).CommitFlowInstanceActivation(f.ctx, activation)
+	if err != nil || !committed.Acknowledged || !committed.Created {
+		t.Fatalf("construct snapshot source: %+v %v", committed, err)
+	}
+	persisted, err := activation.PersistenceRecord()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.entityID = persisted.State.EntityID
+	f.state = persisted.State
+	f.state.Transition = runtimepipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
+	f.state.ExpectedState, f.state.ExpectedRevision = "active", 1
 	f.state.CurrentState = "ready"
 	f.state.Slug, f.state.Name = "snapshot-slug", "Snapshot Name"
-	f.state.Fields = json.RawMessage(`{"entity_type":"authored-not-owner","value":"at-R"}`)
+	f.state.Fields = json.RawMessage(`{"subject_id":"one","entity_type":"authored-not-owner","value":"at-R"}`)
 	f.state.Gates = json.RawMessage(`{"review":true}`)
 	f.state.Bookkeeping = json.RawMessage(`{"activation":"snapshot"}`)
 	f.state.Accumulator = json.RawMessage(`{"total":7}`)
@@ -92,7 +107,7 @@ func (f snapshotOwnershipFixture) advance(t *testing.T) {
 	state.Transition = runtimepipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
 	state.ExpectedRevision, state.ExpectedState = 2, "ready"
 	state.CurrentState, state.Name, state.Slug = "later", "Later Name", "later-slug"
-	state.Fields, state.Gates = json.RawMessage(`{"entity_type":"later-authored","value":"after-R"}`), json.RawMessage(`{"review":false}`)
+	state.Fields, state.Gates = json.RawMessage(`{"subject_id":"one","entity_type":"later-authored","value":"after-R"}`), json.RawMessage(`{"review":false}`)
 	state.Bookkeeping, state.Accumulator = json.RawMessage(`{"activation":"later"}`), json.RawMessage(`{"total":99}`)
 	state.UpdatedAt, state.EnteredStageAt = time.Now().UTC(), time.Now().UTC()
 	if _, err := f.store.CommitWorkflowEngineMutation(f.ctx, runtimepipeline.WorkflowEngineMutationCommand{State: state}); err != nil {
@@ -116,8 +131,10 @@ func TestRunForkSnapshotOwnershipMetadataBothStores(t *testing.T) {
 					}
 					entity := plan.Entities[0]
 					wantMetadata := runfork.RunForkMaterializedEntitySnapshotMetadata{
-						Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState,
+						Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
 						FlowInstance: "owner/one", EntityType: "review_item", Slug: "snapshot-slug", Name: "Snapshot Name",
+						StageDefined: true, FlowTemplate: "owner", Mode: "template", Status: "active",
+						CreatedAt: f.state.CreatedAt, UpdatedAt: f.state.UpdatedAt, EnteredStateAt: f.state.EnteredStageAt,
 					}
 					if entity.MaterializationMetadata != nil {
 						var gotConfig, wantConfig any

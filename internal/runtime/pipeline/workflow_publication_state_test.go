@@ -33,7 +33,7 @@ func TestProspectivePublicationStateBindsCompleteMutationAndSource(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, transition := range []WorkflowEngineStateTransition{WorkflowEngineStateTransitionCreateStateAndCompanion, WorkflowEngineStateTransitionUpdateStateAndCompanion, WorkflowEngineStateTransitionUpdateStateCreateCompanion} {
+	for _, transition := range []WorkflowEngineStateTransition{WorkflowEngineStateTransitionCreateStateAndCompanion, WorkflowEngineStateTransitionUpdateStateAndCompanion} {
 		t.Run(string(rune('0'+transition)), func(t *testing.T) {
 			state := record
 			state.Transition = transition

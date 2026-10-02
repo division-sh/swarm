@@ -10,6 +10,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/routingtopology"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -37,14 +38,15 @@ type EquivalenceView struct {
 type RoutingTopologyView = routingtopology.Topology
 
 type RootView struct {
-	Policy             map[string]any                 `json:"policy,omitempty"`
-	Rules              runtimecontracts.RulesDocument `json:"rules,omitempty"`
+	Constructors       []FlowConstructorView          `json:"constructors"`
 	SourceFiles        RootSourceFiles                `json:"source_files"`
 	Events             []EventView                    `json:"events,omitempty"`
 	Agents             []AgentView                    `json:"agents,omitempty"`
 	RequiredAgents     RequiredAgentsView             `json:"required_agents"`
 	PrimaryEntity      *PrimaryEntityView             `json:"primary_entity,omitempty"`
 	PrimaryEntityError string                         `json:"primary_entity_error,omitempty"`
+	Policy             map[string]any                 `json:"policy,omitempty"`
+	Rules              runtimecontracts.RulesDocument `json:"rules,omitempty"`
 }
 
 type RootSourceFiles struct {
@@ -56,8 +58,7 @@ type RootSourceFiles struct {
 }
 
 type FlowView struct {
-	Policy               map[string]any                 `json:"policy,omitempty"`
-	Rules                runtimecontracts.RulesDocument `json:"rules,omitempty"`
+	Constructors         []FlowConstructorView          `json:"constructors"`
 	ID                   string                         `json:"id"`
 	Path                 string                         `json:"path,omitempty"`
 	Mode                 string                         `json:"mode,omitempty"`
@@ -76,6 +77,26 @@ type FlowView struct {
 	InputPins            []InputPinView                 `json:"input_pins,omitempty"`
 	OutputPins           []OutputPinView                `json:"output_pins,omitempty"`
 	ContainedOperations  []ContainedOperationView       `json:"contained_operations,omitempty"`
+	Policy               map[string]any                 `json:"policy,omitempty"`
+	Rules                runtimecontracts.RulesDocument `json:"rules,omitempty"`
+}
+
+type FlowConstructorView struct {
+	Input          string   `json:"input,omitempty"`
+	NoArguments    bool     `json:"no_arguments"`
+	KeyField       string   `json:"key_field,omitempty"`
+	SuppliedFields []string `json:"supplied_fields,omitempty"`
+}
+
+func constructorViews(source semanticview.Source, flowID string) []FlowConstructorView {
+	constructors, _ := pipeline.CompileFlowConstructors(source, flowID)
+	out := []FlowConstructorView{}
+	for _, constructor := range constructors {
+		if constructor.Eligible() {
+			out = append(out, FlowConstructorView{Input: constructor.Input(), NoArguments: constructor.Input() == "", KeyField: constructor.KeyField(), SuppliedFields: constructor.SuppliedFields()})
+		}
+	}
+	return out
 }
 
 type EventView struct {
@@ -452,6 +473,7 @@ func buildRoot(source semanticview.Source, bundle *runtimecontracts.WorkflowCont
 		Agents: agents,
 	}
 	if bundle.RootSchema != nil {
+		out.Constructors = constructorViews(source, ".")
 		out.RequiredAgents = requiredAgentsView(*bundle.RootSchema, bundle.RootRequiredAgentFacts(), rootFlow.Paths.SchemaFile, rootFlow.Paths.AgentsFile)
 	}
 	if len(bundle.RootEntities) == 0 {
@@ -485,14 +507,15 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 			return nil, err
 		}
 		item := FlowView{
-			Policy:      policyValues(source.ResolvedPolicyForFlow(flowID)),
-			Rules:       source.ResolvedRulesForFlow(flowID),
-			ID:          flowID,
-			Path:        flowID,
-			Mode:        strings.TrimSpace(schema.EffectiveMode()),
-			SourceFiles: flowSourceFiles(flow),
-			Events:      eventViews(flow.Events),
-			Agents:      agents,
+			Constructors: constructorViews(source, flowID),
+			ID:           flowID,
+			Path:         flowID,
+			Mode:         strings.TrimSpace(schema.EffectiveMode()),
+			SourceFiles:  flowSourceFiles(flow),
+			Events:       eventViews(flow.Events),
+			Agents:       agents,
+			Policy:       policyValues(source.ResolvedPolicyForFlow(flowID)),
+			Rules:        source.ResolvedRulesForFlow(flowID),
 			RequiredAgents: requiredAgentsView(
 				schema,
 				bundle.FlowRequiredAgentFacts(flowID),
@@ -609,7 +632,7 @@ func buildStageGraphForFlow(source semanticview.Source, flowID, label, path stri
 		Edges:             buildStageGraphEdgesForFlow(source, flowID),
 		Timers:            buildStageGraphTimersForFlow(source, flowID),
 		Joins:             buildStageGraphJoinsForFlow(source, flowID),
-		FanOuts:           buildStageGraphFanOutsForFlow(source, flowID, initial, states, terminalSet),
+		FanOuts:           buildStageGraphFanOutsForFlow(source, flowID, states, terminalSet),
 		Gates:             buildStageGraphGatesForFlow(source, flowID),
 		GuardTerminations: buildStageGraphGuardTerminationsForFlow(source, flowID),
 	}
@@ -807,7 +830,7 @@ func buildStageGraphTimersForFlow(source semanticview.Source, flowID string) []S
 	return out
 }
 
-func buildStageGraphFanOutsForFlow(source semanticview.Source, flowID, initial string, states []string, terminalSet map[string]struct{}) []StageGraphFanOutView {
+func buildStageGraphFanOutsForFlow(source semanticview.Source, flowID string, states []string, terminalSet map[string]struct{}) []StageGraphFanOutView {
 	if source == nil {
 		return nil
 	}
@@ -837,14 +860,7 @@ func buildStageGraphFanOutsForFlow(source semanticview.Source, flowID, initial s
 		}
 		sort.Strings(eventTypes)
 		for _, eventType := range eventTypes {
-			handler := handlers[eventType]
 			from := append([]string{}, nonTerminal...)
-			if handler.CreateEntity {
-				from = nil
-				if strings.TrimSpace(initial) != "" {
-					from = []string{strings.TrimSpace(initial)}
-				}
-			}
 			out = append(out, fanOutViewsForHandler(source, node, from, eventType)...)
 		}
 	}

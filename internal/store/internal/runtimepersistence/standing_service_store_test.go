@@ -911,7 +911,7 @@ func seedStandingCensusReadiness(t *testing.T, fixture authorActivityReceiptFixt
 		if _, err := fixture.db.ExecContext(ctx, `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status) VALUES ($1::uuid, $2, 'standing-census', 'static', '{}'::jsonb, 'active')`, runID, instanceID); err != nil {
 			t.Fatalf("seed postgres standing flow instance: %v", err)
 		}
-		if _, err := fixture.db.ExecContext(ctx, `INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, created_at, updated_at) VALUES ($1::uuid, $2, $3::jsonb, NOW(), NOW())`, runID, instanceID, plan); err != nil {
+		if _, err := fixture.db.ExecContext(ctx, `INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, plan_hash, created_at, updated_at) VALUES ($1::uuid, $2, $3::jsonb, $4, NOW(), NOW())`, runID, instanceID, plan, readinessPlanFixtureHash(t, plan)); err != nil {
 			t.Fatalf("seed postgres standing readiness: %v", err)
 		}
 		return
@@ -919,7 +919,7 @@ func seedStandingCensusReadiness(t *testing.T, fixture authorActivityReceiptFixt
 	if _, err := fixture.db.ExecContext(ctx, `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status) VALUES (?, ?, 'standing-census', 'static', '{}', 'active')`, runID, instanceID); err != nil {
 		t.Fatalf("seed sqlite standing flow instance: %v", err)
 	}
-	if _, err := fixture.db.ExecContext(ctx, `INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, runID, instanceID, plan, time.Now().UTC(), time.Now().UTC()); err != nil {
+	if _, err := fixture.db.ExecContext(ctx, `INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, plan_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`, runID, instanceID, plan, readinessPlanFixtureHash(t, plan), time.Now().UTC(), time.Now().UTC()); err != nil {
 		t.Fatalf("seed sqlite standing readiness: %v", err)
 	}
 }
@@ -938,7 +938,7 @@ func countStandingCensusFamily(t *testing.T, fixture authorActivityReceiptFixtur
 		"generic_schedule": `SELECT COUNT(*) FROM timers WHERE run_id = ` + placeholder + ` AND task_type IN ('timer','scheduled_task','global_recurring') AND status = 'active' AND execution_mode = ` + modePlaceholder,
 		"decision_card":    `SELECT COUNT(*) FROM decision_cards WHERE run_id = ` + placeholder + ` AND status = 'pending' AND execution_mode = ` + modePlaceholder,
 		"activity_attempt": `SELECT COUNT(*) FROM activity_attempts WHERE run_id = ` + placeholder + ` AND status = 'started' AND execution_mode = ` + modePlaceholder,
-		"runtime_readiness": `SELECT COUNT(*) FROM flow_instance_runtime_readiness WHERE run_id = ` + placeholder + ` AND topology_ready_at IS NULL AND ` + func() string {
+		"runtime_readiness": `SELECT COUNT(*) FROM flow_instance_runtime_readiness WHERE run_id = ` + placeholder + ` AND phase = 'planned' AND ` + func() string {
 			if fixture.dialect == authoractivityfixture.DialectPostgres {
 				return "plan->>'execution_mode'"
 			}

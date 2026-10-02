@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/google/uuid"
@@ -43,7 +44,11 @@ func TestRootInputSourceLoadedConsumerCardinality(t *testing.T) {
 					}
 					source := semanticview.Wrap(loadTargetRouteTempBundle(t, files))
 					store := newConnectRoutePlanStaticStore()
-					store.setTargetOwnerRoutes(events.RouteIdentity{FlowID: "first", FlowInstance: "first", EntityID: eventtest.UUID("first")}, events.RouteIdentity{FlowID: "second", FlowInstance: "second", EntityID: eventtest.UUID("second")})
+					store.setTargetOwnerRoutes(
+						events.RouteIdentity{FlowID: ".", FlowInstance: busInternalTestRunID, EntityID: runtimeflowidentity.EntityID(busInternalTestRunID)},
+						events.RouteIdentity{FlowID: "first", FlowInstance: "first", EntityID: runtimeflowidentity.EntityID("first")},
+						events.RouteIdentity{FlowID: "second", FlowInstance: "second", EntityID: runtimeflowidentity.EntityID("second")},
+					)
 					eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 					if err != nil {
 						t.Fatal(err)

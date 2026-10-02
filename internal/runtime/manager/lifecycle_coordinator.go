@@ -2135,7 +2135,7 @@ func (c *agentLifecycleCoordinator) abortUnlaunchedLoopLocked(ctx context.Contex
 	store := c.persistence()
 	if store != nil {
 		_, err = c.commitLifecycleTransition(context.WithoutCancel(ctx), store, AgentLifecycleTransition{
-			OperationID: operationID, OperationKind: "start_failed", RequestHash: requestHash, Identity: cell.identity,
+			OperationID: operationID, OperationKind: "self_release", RequestHash: requestHash, Identity: cell.identity,
 			AgentID: identity.AgentID(), Trigger: "start_failed", ExpectedEpoch: cell.epoch, ExpectedGeneration: cell.generation,
 			ExpectedPhase: cell.phase, TargetEpoch: cell.epoch, TargetGeneration: cell.generation,
 			TargetPhase: AgentLifecycleRegistered, ConfigRevision: cell.configRevision, RunMode: AgentRunModeStopped,

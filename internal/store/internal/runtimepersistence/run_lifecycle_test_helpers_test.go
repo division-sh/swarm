@@ -139,6 +139,13 @@ func materializeCompletedRunEntityForTest(
 	switch store := selected.(type) {
 	case *PostgresStore:
 		return store.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
+			if _, err := tx.ExecContext(txctx, `INSERT INTO flow_instances
+				(run_id, instance_path, entity_id, entity_type, flow_template, mode, stage_defined, current_state,
+				 config, status, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
+				VALUES ($1::uuid, $2, $1::uuid, 'semantic-run-fixture', $2, 'static', TRUE, 'completed',
+				 '{}', 'active', '{}', '{}', '{}', 1, now(), now(), now())`, runID, semanticRunFixtureFlow); err != nil {
+				return err
+			}
 			_, err := tx.ExecContext(txctx, `
 			INSERT INTO entity_state (
 				run_id, entity_id, flow_instance, entity_type, current_state
@@ -149,6 +156,13 @@ func materializeCompletedRunEntityForTest(
 		})
 	case *SQLiteRuntimeStore:
 		return store.runPrivateAuthorActivityMutation(ctx, "materialize completed SQLite run fixture", func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
+			if _, err := tx.ExecContext(txctx, `INSERT INTO flow_instances
+				(run_id, instance_path, entity_id, entity_type, flow_template, mode, stage_defined, current_state,
+				 config, status, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
+				VALUES (?1, ?2, ?1, 'semantic-run-fixture', ?2, 'static', TRUE, 'completed',
+				 '{}', 'active', '{}', '{}', '{}', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`, runID, semanticRunFixtureFlow); err != nil {
+				return err
+			}
 			_, err := tx.ExecContext(txctx, `
 			INSERT INTO entity_state (
 				run_id, entity_id, flow_instance, entity_type, current_state

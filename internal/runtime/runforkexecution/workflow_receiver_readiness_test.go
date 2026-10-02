@@ -45,7 +45,7 @@ func selectedContractReceiverReadinessPlan(entities ...runfork.RunForkEntityStat
 
 func TestSelectedContractReceiverReadinessDoesNotTransferProducerState(t *testing.T) {
 	loaded := selectedContractReceiverReadinessSource(t, canonicalrouting.ForkReceiverOptionalAbsent)
-	producer := selectedContractReadinessTestEntity("producer-entity", "producer", "work")
+	producer := selectedContractConstructedReadinessTestEntity(t, loaded.Source, "producer", "producer-entity", "producer", "work")
 	plan, planning := selectedContractReceiverReadinessPlan(producer)
 	before, err := json.Marshal(plan)
 	if err != nil {
@@ -53,11 +53,8 @@ func TestSelectedContractReceiverReadinessDoesNotTransferProducerState(t *testin
 	}
 	prepared, err := runforkreadiness.Project(plan, loaded.Source, planning,
 		map[string]executionmode.Mode{"source-event": executionmode.Mock}, runtimemanager.AgentManagerOptions{ExecutionPosture: executionposture.Live})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(prepared.States) != 0 || len(prepared.Flows) != 0 {
-		t.Fatalf("optional consumer acquired producer state/companion: %#v", prepared)
+	if err == nil || !strings.Contains(err.Error(), `receiver target owner is missing for flow instance "consumer"`) || prepared != nil {
+		t.Fatalf("unconstructed consumer acquired producer state or node-first construction: prepared=%#v err=%v", prepared, err)
 	}
 	after, err := json.Marshal(plan)
 	if err != nil || string(before) != string(after) {
@@ -68,7 +65,7 @@ func TestSelectedContractReceiverReadinessDoesNotTransferProducerState(t *testin
 func TestSelectedContractReceiverReadinessPreservesIndependentExistingOwnerWithoutProducer(t *testing.T) {
 	for _, policy := range []canonicalrouting.ForkReceiverPolicy{canonicalrouting.ForkReceiverOptionalExisting, canonicalrouting.ForkReceiverRequiredExisting} {
 		loaded := selectedContractReceiverReadinessSource(t, policy)
-		receiver := selectedContractReadinessTestEntity("receiver-entity", "consumer", "receipt")
+		receiver := selectedContractConstructedReadinessTestEntity(t, loaded.Source, "consumer", "receiver-entity", "consumer", "receipt")
 		plan, planning := selectedContractReceiverReadinessPlan(receiver)
 		plan.PendingWork[0].RoutingSource = events.NoRoutingSource()
 		prepared, err := runforkreadiness.Project(plan, loaded.Source, planning,
@@ -84,7 +81,7 @@ func TestSelectedContractReceiverReadinessPreservesIndependentExistingOwnerWitho
 
 func TestSelectedContractReceiverReadinessRejectsMissingRequiredAndContradictoryMetadata(t *testing.T) {
 	loaded := selectedContractReceiverReadinessSource(t, canonicalrouting.ForkReceiverRequiredMissing)
-	producer := selectedContractReadinessTestEntity("producer-entity", "producer", "work")
+	producer := selectedContractConstructedReadinessTestEntity(t, loaded.Source, "producer", "producer-entity", "producer", "work")
 	plan, planning := selectedContractReceiverReadinessPlan(producer)
 	if _, err := runforkreadiness.Project(plan, loaded.Source, planning,
 		map[string]executionmode.Mode{"source-event": executionmode.Mock}, runtimemanager.AgentManagerOptions{ExecutionPosture: executionposture.Live}); err == nil || !strings.Contains(err.Error(), "owner is missing") {
@@ -92,7 +89,7 @@ func TestSelectedContractReceiverReadinessRejectsMissingRequiredAndContradictory
 	}
 	for _, name := range []string{"missing metadata", "event metadata", "wrong type", "blank type", "duplicate owner", "duplicate contradictory owner", "ambiguous receiver"} {
 		t.Run(name, func(t *testing.T) {
-			receiver := selectedContractReadinessTestEntity("receiver-entity", "consumer", "receipt")
+			receiver := selectedContractConstructedReadinessTestEntity(t, loaded.Source, "consumer", "receiver-entity", "consumer", "receipt")
 			entities := []runfork.RunForkEntityState{producer, receiver}
 			switch name {
 			case "missing metadata":
@@ -106,9 +103,9 @@ func TestSelectedContractReceiverReadinessRejectsMissingRequiredAndContradictory
 			case "duplicate owner":
 				entities = append(entities, receiver)
 			case "duplicate contradictory owner":
-				entities = append(entities, selectedContractReadinessTestEntity(receiver.EntityID, "producer", "work"))
+				entities = append(entities, selectedContractConstructedReadinessTestEntity(t, loaded.Source, "producer", receiver.EntityID, "producer", "work"))
 			case "ambiguous receiver":
-				entities = append(entities, selectedContractReadinessTestEntity("another-receiver", "consumer", "receipt"))
+				entities = append(entities, selectedContractConstructedReadinessTestEntity(t, loaded.Source, "consumer", "another-receiver", "consumer", "receipt"))
 			}
 			plan, planning := selectedContractReceiverReadinessPlan(entities...)
 			if _, err := runforkreadiness.Project(plan, loaded.Source, planning,
@@ -121,7 +118,7 @@ func TestSelectedContractReceiverReadinessRejectsMissingRequiredAndContradictory
 
 func TestSelectedContractReceiverReadinessRetainsEveryEventAssociation(t *testing.T) {
 	loaded := selectedContractReceiverReadinessSource(t, canonicalrouting.ForkReceiverOptionalExisting)
-	plan, planning := selectedContractReceiverReadinessPlan(selectedContractReadinessTestEntity("receiver-entity", "consumer", "receipt"))
+	plan, planning := selectedContractReceiverReadinessPlan(selectedContractConstructedReadinessTestEntity(t, loaded.Source, "consumer", "receiver-entity", "consumer", "receipt"))
 	first := planning.RecipientPlanEvents[0]
 	first.SourceEventID = "another-event"
 	planning.RecipientPlanEvents = append(planning.RecipientPlanEvents, first)
@@ -141,7 +138,7 @@ func TestSelectedContractReceiverReadinessRetainsEveryEventAssociation(t *testin
 	modes["another-event"] = executionmode.Live
 	mixed, err := runforkreadiness.Project(plan, loaded.Source, planning, modes, runtimemanager.AgentManagerOptions{ExecutionPosture: executionposture.Live})
 	if err != nil || len(mixed.States) != 1 || len(mixed.States[0].SourceEvents) != 2 ||
-		mixed.States[0].ExecutionMode.Valid() || mixed.States[0].SourceEvents[0].ExecutionMode != executionmode.Live || mixed.States[0].SourceEvents[1].ExecutionMode != executionmode.Mock {
+		mixed.States[0].ExecutionMode != executionmode.Live || mixed.States[0].SourceEvents[0].ExecutionMode != executionmode.Live || mixed.States[0].SourceEvents[1].ExecutionMode != executionmode.Mock {
 		t.Fatalf("static state lost exact per-event modes: %#v, %v", mixed, err)
 	}
 	planning.RecipientPlanEvents[0], planning.RecipientPlanEvents[1] = planning.RecipientPlanEvents[1], planning.RecipientPlanEvents[0]
@@ -165,7 +162,7 @@ func TestSelectedContractReceiverReadinessTemplateAgentDoesNotElectFromHistory(t
 		},
 	}}}
 	plan := runfork.RunForkPlan{SourceRunID: selectedContractAgentTestRunID,
-		Entities: []runfork.RunForkEntityState{selectedContractReadinessTestEntity("selected-entity", "worker-flow/one", "worker")}}
+		Entities: []runfork.RunForkEntityState{selectedContractConstructedReadinessTestEntity(t, loaded.Source, "worker-flow", "selected-entity", "worker-flow/one", "worker")}}
 	for _, historicalRun := range []string{selectedContractAgentTestRunID, "sibling-run"} {
 		live, err := agentPlan.Live(historicalRun)
 		if err != nil {
@@ -196,7 +193,7 @@ func TestSelectedContractReceiverReadinessTemplateRequiresOneGenerationMode(t *t
 		t.Fatal(err)
 	}
 	plan := runfork.RunForkPlan{SourceRunID: selectedContractAgentTestRunID,
-		Entities: []runfork.RunForkEntityState{selectedContractReadinessTestEntity("receiver-entity", path, "worker")}}
+		Entities: []runfork.RunForkEntityState{selectedContractConstructedReadinessTestEntity(t, loaded.Source, "worker-flow", "receiver-entity", path, "worker")}}
 	for _, secondMode := range []executionmode.Mode{executionmode.Mock, executionmode.Live} {
 		for _, reversed := range []bool{false, true} {
 			planning := runfork.RunForkSelectedContractRecipientPlanning{RecipientPlanEvents: []runfork.RunForkSelectedContractRecipientPlanEvent{
@@ -242,7 +239,7 @@ func TestSelectedContractReceiverReadinessTemplateConsumesExactPlanRoute(t *test
 		t.Fatal(err)
 	}
 	plan := runfork.RunForkPlan{SourceRunID: selectedContractAgentTestRunID,
-		Entities: []runfork.RunForkEntityState{selectedContractReadinessTestEntity("receiver-entity", path, "worker")}}
+		Entities: []runfork.RunForkEntityState{selectedContractConstructedReadinessTestEntity(t, loaded.Source, "worker-flow", "receiver-entity", path, "worker")}}
 	for _, name := range []string{"exact", "wrong instance", "wrong scope", "outside scope", "sibling path", "wrong metadata type"} {
 		t.Run(name, func(t *testing.T) {
 			agentPlan := flow.Agents[0].Identity
@@ -258,7 +255,7 @@ func TestSelectedContractReceiverReadinessTemplateConsumesExactPlanRoute(t *test
 				agentPlan.Route.InstanceID = "other"
 				agentPlan.Route.InstancePath = "worker-flow/other"
 			case "wrong metadata type":
-				currentPlan.Entities = []runfork.RunForkEntityState{selectedContractReadinessTestEntity("receiver-entity", path, "foreign")}
+				currentPlan.Entities = []runfork.RunForkEntityState{selectedContractConstructedReadinessTestEntity(t, loaded.Source, "worker-flow", "receiver-entity", path, "foreign")}
 			}
 			recipient := testAgentFrontierRecipient(agentPlan, "worker.ready", agentPlan.FlowInstance(), "selected")
 			planning := runfork.RunForkSelectedContractRecipientPlanning{RecipientPlanEvents: []runfork.RunForkSelectedContractRecipientPlanEvent{{

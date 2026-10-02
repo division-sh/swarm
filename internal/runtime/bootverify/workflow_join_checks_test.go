@@ -333,15 +333,14 @@ func rebuildJoinValidationTopology(bundle *runtimecontracts.WorkflowContractBund
 		}
 		for eventType, handler := range node.EventHandlers {
 			transitions = append(transitions, runtimecontracts.HandlerTransitionSemantic{
-				Node:         nodeRef,
-				EventType:    eventType,
-				CreateEntity: handler.CreateEntity,
-				AdvancesTo:   handler.AdvancesTo,
-				OnComplete:   handler.OnComplete,
-				Rules:        handler.Rules,
-				Accumulate:   handler.Accumulate,
-				Join:         handler.Join,
-				Loop:         handler.Loop,
+				Node:       nodeRef,
+				EventType:  eventType,
+				AdvancesTo: handler.AdvancesTo,
+				OnComplete: handler.OnComplete,
+				Rules:      handler.Rules,
+				Accumulate: handler.Accumulate,
+				Join:       handler.Join,
+				Loop:       handler.Loop,
 			})
 			if handler.Join != nil {
 				resultType, _ := runtimecontracts.ResolveEventFieldType(bundle, ".", eventType, "result")

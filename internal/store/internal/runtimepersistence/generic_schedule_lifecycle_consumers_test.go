@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -205,26 +204,20 @@ type runControlTimerWorkflowModule struct {
 
 func (m runControlTimerWorkflowModule) SemanticSource() semanticview.Source { return m.source }
 
-func runControlTimerBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
-	t.Helper()
-	return loadLifecyclePersistenceFixtureForTest(t, map[string]string{
-		"schema.yaml":   "name: run-stop-timer-proof\nstages:\n  waiting:\n    initial: true\n    timers:\n      - after: 1h\n        advances_to: done\n  done: {terminal: true}\n",
-		"entities.yaml": "test_entity: {}\n",
-	})
-}
-
 func TestRunControlControllerStopReconcilesBothTimerFamiliesOnBothStores(t *testing.T) {
-	for _, tc := range selectedScheduleStoreCases() {
-		t.Run(tc.name, func(t *testing.T) {
-			store, db, seedCtx := tc.open(t)
-			selected := store.(genericScheduleLifecycleConsumerStore)
-			runID := runtimecorrelation.RunIDFromContext(seedCtx)
-			ctx := authorGenericScheduleConsumerContext(runID)
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
+				"schema.yaml": "name: run-stop-timer-proof\nstages:\n  waiting:\n    initial: true\n    timers:\n      - after: 1h\n        advances_to: done\n  done: {terminal: true}\n",
+			}, nil)
+			selected := f.store.(genericScheduleLifecycleConsumerStore)
+			db, ctx := f.db, f.ctx
+			runID := runtimecorrelation.RunIDFromContext(ctx)
 			entityID := uuid.NewString()
 
 			process := worklifetime.NewProcess()
 			workOwner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
-				RuntimeInstanceID: "run-stop-timer-proof", BundleHash: genericScheduleConsumerTestBundleHash,
+				RuntimeInstanceID: "run-stop-timer-proof", BundleHash: f.bundle.SourceArtifact.BundleHash(),
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -240,7 +233,7 @@ func TestRunControlControllerStopReconcilesBothTimerFamiliesOnBothStores(t *test
 				t.Fatal(err)
 			}
 
-			source := semanticview.Wrap(runControlTimerBundle(t))
+			source := semanticview.Wrap(f.bundle)
 			options := completeWorkflowTestCoordinatorOptions(runtimepipeline.NewWorkflowPersistence(selected.(workflowTestSelectedStore)), selected.(workflowTestSelectedStore))
 			options.Module = runControlTimerWorkflowModule{source: source}
 			options.TimerScheduler = scheduler
@@ -268,12 +261,20 @@ func TestRunControlControllerStopReconcilesBothTimerFamiliesOnBothStores(t *test
 				t.Fatal(err)
 			}
 			enteredAt := time.Now().UTC()
-			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath(runID)}, runtimepipeline.WorkflowInstance{
-				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
-				CurrentState: "waiting", EnteredStageAt: enteredAt, CreatedAt: enteredAt,
-				EntityType: "test_entity",
-			}, enteredAt); err != nil {
+			plan, err := f.manager.PrepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{
+				ContractBundle: source,
+				Instance: runtimeflowidentity.Instance{
+					TemplateID: ".", ScopeKey: ".", InstanceID: runID, InstancePath: runID,
+					EntityID: entityID, HasStoredPath: true,
+				},
+				OccurredAt: enteredAt,
+			})
+			if err != nil {
 				t.Fatal(err)
+			}
+			committed, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(ctx, plan)
+			if err != nil || !committed.Acknowledged || !committed.Created {
+				t.Fatalf("construct run-stop timer instance: commit=%+v err=%v", committed, err)
 			}
 			if err := coordinator.ArmInitialEntryTimers(ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath(runID)}); err != nil {
 				t.Fatal(err)

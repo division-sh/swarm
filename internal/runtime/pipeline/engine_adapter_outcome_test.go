@@ -2,11 +2,13 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -73,25 +75,37 @@ func (p *outcomeEnginePlanner) FinalizeEnginePublications(context.Context, []run
 	return p.finalizeErr
 }
 
-func TestEntitylessEngineMissingAcknowledgementDoesNotFinalize(t *testing.T) {
+func outcomeConstructedMutation(t *testing.T) (runtimeengine.EngineMutation, WorkflowEngineMutationCommand) {
+	t.Helper()
+	runID := eventtest.UUID("outcome-run")
+	flow := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath(runID)}
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	command := WorkflowEngineMutationCommand{State: WorkflowEngineStateRecord{
+		Identity: flow, EntityID: eventtest.UUID("outcome-entity"), WorkflowName: ".", WorkflowVersion: "v1",
+		Mode: "static", Status: "active", CurrentState: "pending", StageDefined: true,
+		Fields: json.RawMessage(`{}`), Bookkeeping: json.RawMessage(`{}`), Gates: json.RawMessage(`{}`),
+		Accumulator: json.RawMessage(`{}`), Config: json.RawMessage(`{}`), InitialFields: json.RawMessage(`{}`),
+		EnteredStageAt: at, CreatedAt: at, UpdatedAt: at, ExpectedState: "pending", ExpectedRevision: 1,
+		Transition: WorkflowEngineStateTransitionUpdateStateAndCompanion,
+	}}
+	if err := command.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	return runtimeengine.EngineMutation{Address: runtimeengine.StateAddress{FlowInstance: flow}}, command
+}
+
+func TestConstructedEngineMissingAcknowledgementDoesNotFinalize(t *testing.T) {
 	storeOwner := &missingAcknowledgementEngineOwner{}
 	planner := &outcomeEnginePlanner{recordingPipelineBus: &recordingPipelineBus{}}
 	owner := pipelineEngineMutationOwner{store: &workflowInstanceStore{engineMutations: storeOwner}, publication: planner}
-	flow := runtimeflowidentity.RunScopedFlowInstance{RunID: "11111111-1111-4111-8111-111111111111", Route: runtimeflowidentity.RouteForInstancePath("11111111-1111-4111-8111-111111111111")}
-	mutation := runtimeengine.EngineMutation{Address: runtimeengine.StateAddress{FlowInstance: flow}}
-	command, publications, err := owner.prepareEntitylessEngineMutation(context.Background(), mutation, events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: ".", FlowInstance: flow.Route.InstancePath}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := owner.commitPreparedEngineMutation(context.Background(), mutation, command, publications, nil)
+	mutation, command := outcomeConstructedMutation(t)
+	result, err := owner.commitPreparedEngineMutation(context.Background(), mutation, command, nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "no acknowledged result") || result.Committed || storeOwner.calls != 1 || planner.releases != 1 || planner.finalizes != 0 {
 		t.Fatalf("result=%+v error=%v commits=%d releases=%d finalizes=%d", result, err, storeOwner.calls, planner.releases, planner.finalizes)
 	}
 }
 
-func TestEntitylessEngineKeepsAcknowledgementThroughCleanupFailureAndPanic(t *testing.T) {
-	flow := runtimeflowidentity.RunScopedFlowInstance{RunID: "11111111-1111-4111-8111-111111111111", Route: runtimeflowidentity.RouteForInstancePath("11111111-1111-4111-8111-111111111111")}
-	target := events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: ".", FlowInstance: flow.Route.InstancePath})
+func TestConstructedEngineKeepsAcknowledgementThroughCleanupFailureAndPanic(t *testing.T) {
 	for _, test := range []struct {
 		name     string
 		postErr  error
@@ -101,15 +115,11 @@ func TestEntitylessEngineKeepsAcknowledgementThroughCleanupFailureAndPanic(t *te
 		{name: "cleanup_panic", panicNow: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			storeOwner := &acknowledgedEngineOwner{result: CommittedWorkflowEngineMutation{Committed: true}}
+			storeOwner := &acknowledgedEngineOwner{result: CommittedWorkflowEngineMutation{Committed: true, Lifecycle: CommittedWorkflowLifecycleMutation{Committed: true}}}
 			planner := &outcomeEnginePlanner{recordingPipelineBus: &recordingPipelineBus{}, finalizeErr: test.postErr, finalizePanic: test.panicNow}
 			owner := pipelineEngineMutationOwner{store: &workflowInstanceStore{engineMutations: storeOwner}, publication: planner}
-			mutation := runtimeengine.EngineMutation{Address: runtimeengine.StateAddress{FlowInstance: flow}}
-			command, publications, err := owner.prepareEntitylessEngineMutation(context.Background(), mutation, target)
-			if err != nil {
-				t.Fatal(err)
-			}
-			result, err := owner.commitPreparedEngineMutation(context.Background(), mutation, command, publications, nil)
+			mutation, command := outcomeConstructedMutation(t)
+			result, err := owner.commitPreparedEngineMutation(context.Background(), mutation, command, nil, nil)
 			if !result.Committed || planner.finalizes != 1 || planner.releases != 0 || err == nil {
 				t.Fatalf("result=%+v error=%v finalizes=%d releases=%d", result, err, planner.finalizes, planner.releases)
 			}
@@ -123,20 +133,14 @@ func TestEntitylessEngineKeepsAcknowledgementThroughCleanupFailureAndPanic(t *te
 	}
 }
 
-func TestEntitylessEngineKeepsAcknowledgementAfterCommitCancellation(t *testing.T) {
+func TestConstructedEngineKeepsAcknowledgementAfterCommitCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	flow := runtimeflowidentity.RunScopedFlowInstance{RunID: "11111111-1111-4111-8111-111111111111", Route: runtimeflowidentity.RouteForInstancePath("11111111-1111-4111-8111-111111111111")}
-	storeOwner := &acknowledgedEngineOwner{result: CommittedWorkflowEngineMutation{Committed: true}, afterCommit: cancel}
+	storeOwner := &acknowledgedEngineOwner{result: CommittedWorkflowEngineMutation{Committed: true, Lifecycle: CommittedWorkflowLifecycleMutation{Committed: true}}, afterCommit: cancel}
 	planner := &outcomeEnginePlanner{recordingPipelineBus: &recordingPipelineBus{}, finalizeErr: context.Canceled}
 	owner := pipelineEngineMutationOwner{store: &workflowInstanceStore{engineMutations: storeOwner}, publication: planner}
-	mutation := runtimeengine.EngineMutation{Address: runtimeengine.StateAddress{FlowInstance: flow}}
-	target := events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: ".", FlowInstance: flow.Route.InstancePath})
-	command, publications, err := owner.prepareEntitylessEngineMutation(ctx, mutation, target)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := owner.commitPreparedEngineMutation(ctx, mutation, command, publications, nil)
+	mutation, command := outcomeConstructedMutation(t)
+	result, err := owner.commitPreparedEngineMutation(ctx, mutation, command, nil, nil)
 	if !result.Committed || !errors.Is(err, context.Canceled) || planner.finalizes != 1 || planner.releases != 0 {
 		t.Fatalf("result=%+v error=%v finalizes=%d releases=%d", result, err, planner.finalizes, planner.releases)
 	}

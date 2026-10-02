@@ -83,6 +83,7 @@ import (
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -2436,6 +2437,34 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 	t.Helper()
 	runID, initialEventID, entityID := createServedControlWaitingRun(t, rt, "run-control-release-"+uuid.NewString())
 	keyPrefix := "issue-1864-" + rt.Backend + "-" + runID
+	var owner runtimepipelineobligation.Store
+	if rt.SQLite != nil {
+		owner = rt.SQLite.PipelineObligations()
+	} else {
+		owner = rt.Postgres.PipelineObligations()
+	}
+	// Node settlement can precede its initial gate's supersession handoff. The
+	// handed-only proof must start after that real publication work has settled.
+	initialCtx, cancelInitial := context.WithTimeout(servedControlProofAuthorActivityContext(t, rt), 5*time.Second)
+	defer cancelInitial()
+	for {
+		summary, err := owner.SummarizeRun(initialCtx, runID)
+		if err != nil {
+			t.Fatalf("read initial pipeline work: %v\n%s", err, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+		}
+		if summary.TerminalNonSuccess != 0 {
+			t.Fatalf("initial construction has non-success work: %+v\n%s", summary, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+		}
+		if !summary.HasOpenWork() {
+			break
+		}
+		select {
+		case <-initialCtx.Done():
+			t.Fatalf("initial construction did not settle: %+v\n%s", summary, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	cancelInitial()
 
 	pauseKey := keyPrefix + "-run-pause"
 	requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{
@@ -2465,12 +2494,6 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 	waitCtx, cancelWait := context.WithTimeout(servedControlProofAuthorActivityContext(t, rt), 5*time.Second)
 	defer cancelWait()
 	requireNoServedDeliveryStatusDuring(t, rt.DB, rt.Backend, queued.EventID, "node", "item-observer", "delivered", 250*time.Millisecond)
-	var owner runtimepipelineobligation.Store
-	if rt.SQLite != nil {
-		owner = rt.SQLite.PipelineObligations()
-	} else {
-		owner = rt.Postgres.PipelineObligations()
-	}
 	// Use the canonical owner to establish handed-only debt explicitly; the
 	// public publication above remains unhanded while the run is paused.
 	work, err := owner.ClaimEvent(waitCtx, queued.EventID, runtimepipelineobligation.PurposePublication)
@@ -2486,7 +2509,7 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 		t.Fatal(err)
 	}
 	if summary.HasOpenWork() || summary.TerminalNonSuccess != 0 {
-		t.Fatalf("handed-only public continue has event-level work: %+v", summary)
+		t.Fatalf("handed-only public continue has event-level work: %+v\n%s", summary, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
 	}
 	synchronizer, ok := rt.Runtime.Bus.DeliveryContinuationOwner().(interface{ Synchronize(context.Context) error })
 	if !ok {
@@ -3076,12 +3099,33 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 		t.Fatal("served decision-card fixture requires canonical root flow identity")
 	}
 	entityType := servedRequiredRootEntityType(t, workflow)
-	if _, err := workflow.MaterializeInitialEntry(materializeCtx, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath(runID)}, runtimepipeline.WorkflowInstance{
-		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: rootFlowID, WorkflowVersion: "1.0.0",
-		CurrentState: "awaiting_review", EnteredStageAt: now, Fields: carrier.PersistedFields(), Bookkeeping: carrier.PersistedBookkeeping(), Gates: carrier.Gates, StateBuckets: carrier.PersistedStateBuckets(),
-		EntityType: entityType,
-	}, now); err != nil {
-		t.Fatalf("seed gated workflow instance: %v", err)
+	{
+		construction3123Ctx := materializeCtx
+		construction3123At := now
+		construction3123Instance, construction3123Lifecycle, err := workflow.PrepareInitialEntryLifecycle(construction3123Ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.StoredRoute(rootFlowID, runID, runID)}, runtimepipeline.WorkflowInstance{
+			InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: rootFlowID, WorkflowVersion: "1.0.0",
+			CurrentState: "awaiting_review", EnteredStageAt: now, Fields: carrier.PersistedFields(), Bookkeeping: carrier.PersistedBookkeeping(), Gates: carrier.Gates, StateBuckets: carrier.PersistedStateBuckets(),
+			EntityType: entityType,
+		}, construction3123At)
+		if err != nil {
+			t.Fatalf("prepare fixture initial lifecycle: %v", err)
+		}
+		construction3123Command, err := flowactivationfixture.Command(construction3123Ctx, construction3123Instance, construction3123Lifecycle, construction3123At)
+		if err != nil {
+			t.Fatalf("prepare fixture activation command: %v", err)
+		}
+		construction3123Committed, err := any(cards).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction3123Ctx, construction3123Command)
+		if err != nil {
+			t.Fatalf("seed gated workflow instance: %v", err)
+		}
+		if err == nil && !construction3123Committed.Acknowledged {
+			t.Fatal("fixture activation was not acknowledged")
+		}
+		if construction3123Committed.Acknowledged && construction3123Committed.Created {
+			if finalizeErr := workflow.FinalizeInitialEntryLifecycle(construction3123Ctx, construction3123Committed.Lifecycle); finalizeErr != nil {
+				t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+			}
+		}
 	}
 	snapshot, err := decisioncard.FreezeSnapshot(activation.DecisionID, "Launch review", map[string]any{"environment": "staging"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 		"approve": {Verdict: "approve", AdvancesTo: "done", Input: map[string]runtimecontracts.WorkflowGateInputField{"score": {Type: "integer", Required: true}}},
@@ -4309,12 +4353,33 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 		t.Fatal("served run-control fixture requires canonical root flow identity")
 	}
 	entityType := servedRequiredRootEntityType(t, workflow)
-	if _, err := workflow.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath(runID)}, runtimepipeline.WorkflowInstance{
-		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: rootFlowID, WorkflowVersion: "1.0.0",
-		CurrentState: "awaiting_review", EnteredStageAt: now, Fields: carrier.PersistedFields(), Bookkeeping: carrier.PersistedBookkeeping(), Gates: carrier.Gates, StateBuckets: carrier.PersistedStateBuckets(),
-		EntityType: entityType,
-	}, now); err != nil {
-		t.Fatalf("seed %s run.stop gated workflow instance: %v", rt.Backend, err)
+	{
+		construction4356Ctx := runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
+		construction4356At := now
+		construction4356Instance, construction4356Lifecycle, err := workflow.PrepareInitialEntryLifecycle(construction4356Ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.StoredRoute(rootFlowID, runID, runID)}, runtimepipeline.WorkflowInstance{
+			InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: rootFlowID, WorkflowVersion: "1.0.0",
+			CurrentState: "awaiting_review", EnteredStageAt: now, Fields: carrier.PersistedFields(), Bookkeeping: carrier.PersistedBookkeeping(), Gates: carrier.Gates, StateBuckets: carrier.PersistedStateBuckets(),
+			EntityType: entityType,
+		}, construction4356At)
+		if err != nil {
+			t.Fatalf("prepare fixture initial lifecycle: %v", err)
+		}
+		construction4356Command, err := flowactivationfixture.Command(construction4356Ctx, construction4356Instance, construction4356Lifecycle, construction4356At)
+		if err != nil {
+			t.Fatalf("prepare fixture activation command: %v", err)
+		}
+		construction4356Committed, err := any(cards).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction4356Ctx, construction4356Command)
+		if err != nil {
+			t.Fatalf("seed %s run.stop gated workflow instance: %v", rt.Backend, err)
+		}
+		if err == nil && !construction4356Committed.Acknowledged {
+			t.Fatal("fixture activation was not acknowledged")
+		}
+		if construction4356Committed.Acknowledged && construction4356Committed.Created {
+			if finalizeErr := workflow.FinalizeInitialEntryLifecycle(construction4356Ctx, construction4356Committed.Lifecycle); finalizeErr != nil {
+				t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+			}
+		}
 	}
 	snapshot, err := decisioncard.FreezeSnapshot(activation.DecisionID, "Run stop review", map[string]any{"operation": "run.stop"}, outcomes)
 	if err != nil {
@@ -5630,6 +5695,7 @@ func servedEventPublishDebugSummary(t *testing.T, db *sql.DB, backend, runID str
 		servedEventPublishDebugQuery(t, db, backend, "event_deliveries", runID),
 		servedEventPublishDebugQuery(t, db, backend, "settled_delivery_attempts", runID),
 		servedEventPublishDebugQuery(t, db, backend, "event_receipts", runID),
+		servedEventPublishDebugQuery(t, db, backend, "pipeline_obligations", runID),
 		servedEventPublishDebugQuery(t, db, backend, "dead_letters", runID),
 		servedEventPublishDebugQuery(t, db, backend, "delivery_agents", runID),
 		servedEventPublishDebugQuery(t, db, backend, "runtime_logs", runID),
@@ -5649,7 +5715,7 @@ func servedEventPublishDebugQuery(t *testing.T, db *sql.DB, backend, scope, runI
 		case "entity_state":
 			sqlText = `SELECT entity_id::text, COALESCE(flow_instance, ''), COALESCE(current_state, '') FROM entity_state WHERE run_id = $1::uuid ORDER BY created_at, entity_id LIMIT 5`
 		case "flow_instances":
-			sqlText = `SELECT DISTINCT fi.instance_path, fi.flow_template, COALESCE(fi.status, '') FROM flow_instances fi JOIN entity_state es ON es.run_id = fi.run_id AND es.flow_instance = fi.instance_path WHERE es.run_id = $1::uuid ORDER BY fi.instance_path LIMIT 5`
+			sqlText = `SELECT instance_path, flow_template, status FROM flow_instances WHERE run_id = $1::uuid ORDER BY instance_path LIMIT 5`
 		case "events":
 			sqlText = `SELECT event_id::text, event_name, COALESCE(entity_id::text, ''), COALESCE(flow_instance, '') FROM events WHERE run_id = $1::uuid ORDER BY created_at, event_id LIMIT 5`
 		case "event_deliveries":
@@ -5658,8 +5724,10 @@ func servedEventPublishDebugQuery(t *testing.T, db *sql.DB, backend, scope, runI
 			sqlText = `SELECT o.delivery_id::text, o.claim_version, o.outcome, COALESCE(o.reason_code, '') FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o JOIN event_deliveries d ON d.delivery_id = o.delivery_id WHERE d.run_id = $1::uuid ORDER BY o.settled_at, o.delivery_id LIMIT 8`
 		case "event_receipts":
 			sqlText = `SELECT r.event_id::text, r.subscriber_type, r.subscriber_id, r.outcome, COALESCE(r.reason_code, ''), COALESCE(r.side_effects::text, '') FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = $1::uuid ORDER BY r.processed_at, r.event_id LIMIT 8`
+		case "pipeline_obligations":
+			sqlText = `SELECT e.event_id::text, e.event_name, COALESCE(r.outcome, ''), COALESCE(o.status, '') FROM events e LEFT JOIN event_receipts r ON r.event_id = e.event_id AND r.subscriber_type = 'platform' AND r.subscriber_id = 'pipeline' LEFT JOIN decision_card_route_obligations o ON o.event_id = e.event_id WHERE e.run_id = $1::uuid ORDER BY e.created_at, e.event_id LIMIT 12`
 		case "dead_letters":
-			sqlText = `SELECT d.original_event, COALESCE(d.entity_id::text, ''), COALESCE(d.failure->>'class', ''), COALESCE(d.failure->'detail'->>'code', ''), COALESCE(d.failure->'detail'->'attributes'->>'validation_error', '') FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id = $1::uuid ORDER BY d.created_at LIMIT 5`
+			sqlText = `SELECT d.original_event, COALESCE(d.entity_id::text, ''), d.failure::text FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id = $1::uuid ORDER BY d.created_at LIMIT 5`
 		case "delivery_agents":
 			sqlText = `SELECT d.subscriber_id, d.agent_name_owner, d.agent_name_source, d.agent_route_presence, d.agent_flow_scope_key, d.agent_flow_instance_id, d.agent_flow_instance_path, COALESCE(a.status, ''), COALESCE(a.lifecycle_phase, '') FROM event_deliveries d LEFT JOIN agents a ON a.agent_id = d.subscriber_id AND a.agent_name_owner = d.agent_name_owner AND a.agent_name_source = d.agent_name_source AND a.agent_route_presence = d.agent_route_presence AND a.flow_scope_key = d.agent_flow_scope_key AND a.flow_instance_id = d.agent_flow_instance_id AND a.flow_instance = d.agent_flow_instance_path WHERE d.run_id = $1::uuid ORDER BY d.created_at LIMIT 8`
 		case "runtime_logs":
@@ -5672,7 +5740,7 @@ func servedEventPublishDebugQuery(t *testing.T, db *sql.DB, backend, scope, runI
 		case "entity_state":
 			sqlText = `SELECT entity_id, COALESCE(flow_instance, ''), COALESCE(current_state, '') FROM entity_state WHERE run_id = ? ORDER BY created_at, entity_id LIMIT 5`
 		case "flow_instances":
-			sqlText = `SELECT DISTINCT fi.instance_path, fi.flow_template, COALESCE(fi.status, '') FROM flow_instances fi JOIN entity_state es ON es.run_id = fi.run_id AND es.flow_instance = fi.instance_path WHERE es.run_id = ? ORDER BY fi.instance_path LIMIT 5`
+			sqlText = `SELECT instance_path, flow_template, status FROM flow_instances WHERE run_id = ? ORDER BY instance_path LIMIT 5`
 		case "events":
 			sqlText = `SELECT event_id, event_name, COALESCE(entity_id, ''), COALESCE(flow_instance, '') FROM events WHERE run_id = ? ORDER BY created_at, event_id LIMIT 5`
 		case "event_deliveries":
@@ -5681,8 +5749,10 @@ func servedEventPublishDebugQuery(t *testing.T, db *sql.DB, backend, scope, runI
 			sqlText = `SELECT o.delivery_id, o.claim_version, o.outcome, COALESCE(o.reason_code, '') FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o JOIN event_deliveries d ON d.delivery_id = o.delivery_id WHERE d.run_id = ? ORDER BY o.settled_at, o.delivery_id LIMIT 8`
 		case "event_receipts":
 			sqlText = `SELECT r.event_id, r.subscriber_type, r.subscriber_id, r.outcome, COALESCE(r.reason_code, ''), COALESCE(r.side_effects, '') FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = ? ORDER BY r.processed_at, r.event_id LIMIT 8`
+		case "pipeline_obligations":
+			sqlText = `SELECT e.event_id, e.event_name, COALESCE(r.outcome, ''), COALESCE(o.status, '') FROM events e LEFT JOIN event_receipts r ON r.event_id = e.event_id AND r.subscriber_type = 'platform' AND r.subscriber_id = 'pipeline' LEFT JOIN decision_card_route_obligations o ON o.event_id = e.event_id WHERE e.run_id = ? ORDER BY e.created_at, e.event_id LIMIT 12`
 		case "dead_letters":
-			sqlText = `SELECT d.original_event, COALESCE(d.entity_id, ''), COALESCE(json_extract(d.failure, '$.class'), ''), COALESCE(json_extract(d.failure, '$.detail.code'), ''), COALESCE(json_extract(d.failure, '$.detail.attributes.validation_error'), '') FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id = ? ORDER BY d.created_at LIMIT 5`
+			sqlText = `SELECT d.original_event, COALESCE(d.entity_id, ''), d.failure FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id = ? ORDER BY d.created_at LIMIT 5`
 		case "delivery_agents":
 			sqlText = `SELECT d.subscriber_id, d.agent_name_owner, d.agent_name_source, d.agent_route_presence, d.agent_flow_scope_key, d.agent_flow_instance_id, d.agent_flow_instance_path, COALESCE(a.status, ''), COALESCE(a.lifecycle_phase, '') FROM event_deliveries d LEFT JOIN agents a ON a.agent_id = d.subscriber_id AND a.agent_name_owner = d.agent_name_owner AND a.agent_name_source = d.agent_name_source AND a.agent_route_presence = d.agent_route_presence AND a.flow_scope_key = d.agent_flow_scope_key AND a.flow_instance_id = d.agent_flow_instance_id AND a.flow_instance = d.agent_flow_instance_path WHERE d.run_id = ? ORDER BY d.created_at LIMIT 8`
 		case "runtime_logs":

@@ -19,7 +19,6 @@ type HandlerPreview struct {
 	Stage           WorkflowStateID
 	StatusText      string
 	Metadata        map[string]any
-	InitialValues   map[string]any
 	Emits           []string
 	ActionsExecuted []string
 	GuardsEvaluated []string
@@ -96,9 +95,10 @@ func PreviewContractHandlerExecution(ctx context.Context, bundle *runtimecontrac
 	}
 	pc.previewState = &snapshot
 	state := workflowStateFromEngine(snapshot)
-	// An explicit event target selects the entity ahead of the supplied snapshot.
 	if targetEntity := workflowEventEntityID(evt); targetEntity != "" {
-		state.EntityID = targetEntity
+		if targetEntity != state.EntityID {
+			return HandlerPreview{}, fmt.Errorf("preview event targets a different constructed entity")
+		}
 	}
 	result, err := pc.executeNodeContractHandler(ctx, node, handler, workflowTriggerContext{
 		Event: evt,
@@ -140,7 +140,6 @@ func PreviewContractHandlerExecution(ctx context.Context, bundle *runtimecontrac
 		Stage:           stage,
 		StatusText:      state.Status,
 		Metadata:        cloneStringAnyMap(result.PreviewMetadata),
-		InitialValues:   cloneStringAnyMap(result.InitialValuesMaterialized),
 		Emits:           emits,
 		ActionsExecuted: actions,
 		GuardsEvaluated: guards,
@@ -155,17 +154,24 @@ func PreviewContractHandlerExecution(ctx context.Context, bundle *runtimecontrac
 }
 
 func loadPreviewEngineState(snapshot runtimeengine.StateSnapshot, address runtimeengine.StateAddress) (runtimeengine.StateSnapshot, bool, error) {
-	if snapshot.WorkflowName != "" && snapshot.WorkflowName != address.FlowID.String() {
+	if err := address.FlowInstance.Validate(); err != nil || address.EntityID.IsZero() || snapshot.EntityID.IsZero() {
+		return runtimeengine.StateSnapshot{}, false, runtimeengine.ErrUnconstructedWorkflowTarget
+	}
+	if snapshot.WorkflowName != address.FlowID.String() {
 		return runtimeengine.StateSnapshot{}, false, fmt.Errorf("preview state belongs to a different compiled flow")
 	}
-	if !snapshot.EntityID.IsZero() && snapshot.EntityID != address.EntityID {
+	if snapshot.EntityID != address.EntityID {
 		return runtimeengine.StateSnapshot{}, false, fmt.Errorf("preview state belongs to a different entity")
 	}
-	if path := snapshot.StateCarrier.Control.FlowPath; path != "" && path != address.FlowInstance.Route.InstancePath {
+	control := snapshot.StateCarrier.Control
+	if control.FlowPath != address.FlowInstance.Route.InstancePath || control.StorageRef != address.FlowInstance.Route.InstancePath || control.InstanceID != address.FlowInstance.Route.InstanceID {
 		return runtimeengine.StateSnapshot{}, false, fmt.Errorf("preview state belongs to a different instance route")
 	}
-	if snapshot.CurrentState == "" {
-		return runtimeengine.StateSnapshot{}, false, nil
+	if snapshot.WorkflowVersion == "" || snapshot.CurrentState == "" || snapshot.EnteredStateAt.IsZero() {
+		return runtimeengine.StateSnapshot{}, false, runtimeengine.ErrUnconstructedWorkflowTarget
+	}
+	if control.EntityType == "" && len(snapshot.StateCarrier.Fields) != 0 {
+		return runtimeengine.StateSnapshot{}, false, fmt.Errorf("fieldless preview cannot carry undeclared fields")
 	}
 	carrier := snapshot.StateCarrier
 	snapshot.StateCarrier = runtimeengine.NewStateCarrierWithOwners(carrier.Fields, carrier.Bookkeeping, carrier.Control, carrier.Gates, carrier.StateBuckets)

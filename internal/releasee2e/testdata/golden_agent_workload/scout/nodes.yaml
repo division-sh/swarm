@@ -4,7 +4,6 @@ scout-intake:
   produces: [scout.work.requested]
   event_handlers:
     scout.requested:
-      create_entity: true
       advances_to: active
       emit:
         event: scout.work.requested

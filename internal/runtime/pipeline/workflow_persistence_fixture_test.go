@@ -183,15 +183,18 @@ func (s *workflowInstanceStore) persistFixtureWorkflowInstance(ctx context.Conte
 		if createOnly {
 			return runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "flow_instance_already_exists", "workflow-instance-store", "create", map[string]any{"flow_instance": identity.StorageRef})
 		}
-		if !target.Presence.HasState() {
+		if !target.Presence.Constructed() {
 			return errors.New("pipeline fixture rejects lifecycle companion without state")
 		}
-		expectedState = target.State.CurrentState
-		expectedRevision = target.State.Revision
+		expectedState = target.Lifecycle.State.CurrentState
+		expectedRevision = target.Lifecycle.State.Revision
 	}
-	transition, err := WorkflowEngineStateTransitionForPresence(target.Presence)
-	if err != nil {
-		return err
+	transition := WorkflowEngineStateTransitionCreateStateAndCompanion
+	if target.Presence != WorkflowTargetPersistenceAbsent {
+		transition, err = WorkflowEngineStateTransitionForPresence(target.Presence)
+		if err != nil {
+			return err
+		}
 	}
 	updatedAt := time.Now().UTC()
 	if updatedAt.Before(instance.CreatedAt) {
@@ -200,6 +203,13 @@ func (s *workflowInstanceStore) persistFixtureWorkflowInstance(ctx context.Conte
 	state, err := workflowEngineStateRecord(runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: identity.Instance.Route()}, instance, expectedState, expectedRevision, transition, updatedAt)
 	if err != nil {
 		return err
+	}
+	if target.Presence == WorkflowTargetPersistenceAbsent {
+		// Explicit unit-fixture seeding, not executable constructor evidence.
+		// Construction/replay authority is proven against the real store owner.
+		return s.runPipelineMutation(ctx, func(txctx context.Context) error {
+			return commitPipelineTestWorkflowState(txctx, s, state)
+		})
 	}
 	_, err = s.engineMutations.CommitWorkflowEngineMutation(ctx, WorkflowEngineMutationCommand{State: state})
 	return err

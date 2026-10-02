@@ -483,13 +483,8 @@ func (s *DeliveryPostgresOwner) SettleProviderOriginSuccessTx(
 	sideEffects []string,
 	duration time.Duration,
 ) error {
-	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		snapshot, err := postgresDeliveryAdapter.SettleSuccess(ctx, attempt, claim, sideEffects, duration, runtimedelivery.NotApplicableHandlerRuleSelection())
-		if err != nil {
-			return err
-		}
-		return settleReceiverDependentsTx(ctx, tx, attempt, s.receiverAdapter, snapshot, s.RecordDeadLetterTx)
-	})
+	_, err := postgresDeliveryAdapter.SettleSuccess(ctx, attempt, claim, sideEffects, duration, runtimedelivery.NotApplicableHandlerRuleSelection())
+	return err
 }
 
 func (s *DeliverySQLiteOwner) SettleProviderOriginSuccessTx(
@@ -499,13 +494,8 @@ func (s *DeliverySQLiteOwner) SettleProviderOriginSuccessTx(
 	sideEffects []string,
 	duration time.Duration,
 ) error {
-	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		snapshot, err := sqliteDeliveryAdapter.SettleSuccess(ctx, attempt, claim, sideEffects, duration, runtimedelivery.NotApplicableHandlerRuleSelection())
-		if err != nil {
-			return err
-		}
-		return settleReceiverDependentsTx(ctx, tx, attempt, s.receiverAdapter, snapshot, s.RecordDeadLetterTx)
-	})
+	_, err := sqliteDeliveryAdapter.SettleSuccess(ctx, attempt, claim, sideEffects, duration, runtimedelivery.NotApplicableHandlerRuleSelection())
+	return err
 }
 
 // SettleWorkflowNodeSuccessTx terminally settles the exact inbound node claim
@@ -524,9 +514,6 @@ func (s *DeliveryPostgresOwner) SettleWorkflowNodeSuccessTx(
 		}
 		snapshot, err := postgresDeliveryAdapter.SettleSuccess(ctx, attempt, claim, sideEffects, duration, selection)
 		if err != nil {
-			return runtimedelivery.Snapshot{}, err
-		}
-		if err := settleReceiverDependentsTx(ctx, tx, attempt, s.receiverAdapter, snapshot, s.RecordDeadLetterTx); err != nil {
 			return runtimedelivery.Snapshot{}, err
 		}
 		return snapshot, nil
@@ -551,9 +538,6 @@ func (s *DeliverySQLiteOwner) SettleWorkflowNodeSuccessTx(
 		if err != nil {
 			return runtimedelivery.Snapshot{}, err
 		}
-		if err := settleReceiverDependentsTx(ctx, tx, attempt, s.receiverAdapter, snapshot, s.RecordDeadLetterTx); err != nil {
-			return runtimedelivery.Snapshot{}, err
-		}
 		return snapshot, nil
 	})
 }
@@ -567,9 +551,6 @@ func (s *DeliveryPostgresOwner) SettleProviderOriginFailureTx(
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		snapshot, err := postgresDeliveryAdapter.SettleFailure(ctx, attempt, claim, settlement)
 		if err != nil || snapshot.Status != runtimedelivery.StatusDeadLetter {
-			return err
-		}
-		if err := settleReceiverDependentsTx(ctx, tx, attempt, s.receiverAdapter, snapshot, s.RecordDeadLetterTx); err != nil {
 			return err
 		}
 		record, found, err := eventrecordpostgres.Load(ctx, tx, snapshot.EventID)
@@ -596,9 +577,6 @@ func (s *DeliverySQLiteOwner) SettleProviderOriginFailureTx(
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		snapshot, err := sqliteDeliveryAdapter.SettleFailure(ctx, attempt, claim, settlement)
 		if err != nil || snapshot.Status != runtimedelivery.StatusDeadLetter {
-			return err
-		}
-		if err := settleReceiverDependentsTx(ctx, tx, attempt, s.receiverAdapter, snapshot, s.RecordDeadLetterTx); err != nil {
 			return err
 		}
 		record, found, err := eventrecordsqlite.Load(ctx, tx, snapshot.EventID)
@@ -797,10 +775,7 @@ func postgresDeliveryMutation(s *DeliveryPostgresOwner, ctx context.Context, can
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			var err error
 			snapshot, err = operation(txctx, tx, attempt)
-			if err != nil || strings.TrimSpace(snapshot.RunID) == "" {
-				return err
-			}
-			return settleReceiverDependentsTx(txctx, tx, attempt, s.receiverAdapter, snapshot, s.RecordDeadLetterTx)
+			return err
 		})
 		return snapshot, err
 	})
@@ -817,45 +792,12 @@ func sqliteDeliveryMutation(s *DeliverySQLiteOwner, ctx context.Context, candida
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			var err error
 			snapshot, err = operation(txctx, tx, attempt)
-			if err != nil || strings.TrimSpace(snapshot.RunID) == "" {
-				return err
-			}
-			return settleReceiverDependentsTx(txctx, tx, attempt, s.receiverAdapter, snapshot, s.RecordDeadLetterTx)
+			return err
 		})
 		return snapshot, err
 	})
 	snapshot, acknowledged := result.Value()
 	return runtimedelivery.ClaimCommit{Snapshot: snapshot, Acknowledged: acknowledged}, result.Err()
-}
-
-func settleReceiverDependentsTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, adapter *Adapter, materializer runtimedelivery.Snapshot, recordDiagnostic func(context.Context, *mutationprotocol.Attempt, runtimedeadletters.Record, bool) error) error {
-	terminalizations, err := adapter.TerminalizeMaterializationDependents(ctx, attempt, materializer)
-	if err != nil || len(terminalizations) == 0 {
-		return err
-	}
-	var record eventrecord.Record
-	var found bool
-	if adapter.dialect == DialectSQLite {
-		record, found, err = eventrecordsqlite.Load(ctx, tx, materializer.EventID)
-	} else {
-		record, found, err = eventrecordpostgres.Load(ctx, tx, materializer.EventID)
-	}
-	if err != nil {
-		return err
-	}
-	if !found {
-		return eventrecord.Missing(materializer.EventID)
-	}
-	for _, terminalization := range terminalizations {
-		diagnostic, err := deliveryDeadLetterRecord(record, terminalization.Current)
-		if err != nil {
-			return err
-		}
-		if err := recordDiagnostic(ctx, attempt, diagnostic, true); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (s *DeliveryPostgresOwner) Snapshot(ctx context.Context, deliveryID string) (runtimedelivery.Snapshot, error) {

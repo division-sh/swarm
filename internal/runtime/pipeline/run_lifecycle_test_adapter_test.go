@@ -494,7 +494,6 @@ func newPostgresWorkflowInstanceStoreForTest(db *sql.DB) *workflowInstanceStore 
 	store.entityStateReader = runner
 	store.targetReader = runner
 	store.engineMutations = runner
-	store.initialCommits = runner
 	return store
 }
 

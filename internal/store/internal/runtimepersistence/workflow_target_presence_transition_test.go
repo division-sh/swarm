@@ -5,219 +5,246 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
-func TestWorkflowEngineStateOnlyCompanionTransitionAtomicOnBothStores(t *testing.T) {
+func TestWorkflowEngineConstructedTransitionAtomicOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			selected, db, ctx, runID := openStateOnlyAcquisitionStore(t, backend)
-			owner, ok := selected.(runtimepipeline.WorkflowEngineMutationOwner)
-			if !ok {
-				t.Fatalf("%s selected store does not expose the workflow mutation owner", backend)
-			}
-
-			t.Run("state only creates exact companion", func(t *testing.T) {
-				flowID := "state-only-success-" + uuid.NewString()
-				instancePath := flowID + "/receiver"
-				entityID := uuid.NewString()
-				createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-				seedWorkflowTargetStateForTransition(t, backend, db, runID, entityID, instancePath, "active", 1, createdAt)
-				record := stateOnlyWorkflowEngineMutationRecord(t, runID, flowID, instancePath, entityID, "active", 1, createdAt)
-
-				if _, err := owner.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{State: record}); err != nil {
-					t.Fatalf("commit state-only companion transition: %v", err)
+		for _, change := range []string{"exact", "stale_revision", "invalid_transition", "foreign_header_owner", "contenders", "paired_reload"} {
+			t.Run(backend+"/"+change, func(t *testing.T) {
+				f, plan := newWorkflowTargetConstructionFixture(t, backend)
+				if _, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(f.ctx, plan); err != nil {
+					t.Fatal(err)
 				}
-				assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, flowID, "done", 2, 1)
-				assertWorkflowEngineHistoryStep(t, backend, db, runID, entityID, "mutate")
-			})
-
-			t.Run("absent target creates exact state and companion", func(t *testing.T) {
-				flowID := "absent-target-" + uuid.NewString()
-				instancePath := flowID + "/receiver"
-				entityID := uuid.NewString()
-				createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-				record := stateOnlyWorkflowEngineMutationRecord(t, runID, flowID, instancePath, entityID, "", 0, createdAt)
-				record.Transition = runtimepipeline.WorkflowEngineStateTransitionCreateStateAndCompanion
-
-				if _, err := owner.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{State: record}); err != nil {
-					t.Fatalf("commit absent target transition: %v", err)
+				persisted, err := plan.PersistenceRecord()
+				if err != nil {
+					t.Fatal(err)
 				}
-				assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, flowID, "done", 1, 1)
-				assertWorkflowEngineHistoryStep(t, backend, db, runID, entityID, "create")
-			})
-
-			t.Run("stale state rolls back companion", func(t *testing.T) {
-				flowID := "state-only-stale-" + uuid.NewString()
-				instancePath := flowID + "/receiver"
-				entityID := uuid.NewString()
-				createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-				seedWorkflowTargetStateForTransition(t, backend, db, runID, entityID, instancePath, "active", 1, createdAt)
-				record := stateOnlyWorkflowEngineMutationRecord(t, runID, flowID, instancePath, entityID, "active", 2, createdAt)
-
-				_, err := owner.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{State: record})
-				failure, typed := runtimefailures.As(err)
-				if err == nil || !typed || failure.Failure.Detail.Code != "workflow_engine_state_revision_conflict" || !failure.Failure.Retryable {
-					t.Fatalf("stale state-only transition error = %v", err)
+				record := persisted.State
+				record.ExpectedRevision, record.ExpectedState = 1, record.CurrentState
+				record.Transition = runtimepipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
+				record.CurrentState = "done"
+				record.Fields = json.RawMessage(`{"account_id":"preserved","handled":true}`)
+				record.EnteredStageAt, record.UpdatedAt = record.CreatedAt.Add(time.Minute), record.CreatedAt.Add(time.Minute)
+				record = workflowTargetMutationEntry(t, f, record, "finish.requested")
+				owner := f.store.(runtimepipeline.WorkflowEngineMutationOwner)
+				historyCount := func(step string) int {
+					var count int
+					if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1 AND entity_id=$2 AND writer_id='workflow_engine' AND handler_step=$3`, record.Identity.RunID, record.EntityID, step).Scan(&count); err != nil {
+						t.Fatal(err)
+					}
+					return count
 				}
-				assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, "", "active", 1, 0)
-				assertNoWorkflowEngineHistory(t, backend, db, runID, entityID)
-			})
-
-			t.Run("invalid transition cannot mutate state or companion", func(t *testing.T) {
-				flowID := "invalid-transition-" + uuid.NewString()
-				instancePath := flowID + "/receiver"
-				entityID := uuid.NewString()
-				createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-				seedWorkflowTargetStateForTransition(t, backend, db, runID, entityID, instancePath, "active", 1, createdAt)
-				record := stateOnlyWorkflowEngineMutationRecord(t, runID, flowID, instancePath, entityID, "active", 1, createdAt)
-				record.Transition = runtimepipeline.WorkflowEngineStateTransition(255)
-
-				if _, err := owner.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{State: record}); err == nil || !strings.Contains(err.Error(), "closed persistence transition") {
-					t.Fatalf("invalid transition error = %v", err)
+				constructionHistory := historyCount("create")
+				if constructionHistory == 0 || historyCount("mutate") != 0 {
+					t.Fatal("canonical constructor did not record exactly initial history")
 				}
-				assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, "", "active", 1, 0)
-				assertNoWorkflowEngineHistory(t, backend, db, runID, entityID)
-			})
-
-			t.Run("preexisting companion contradiction rolls back state", func(t *testing.T) {
-				flowID := "state-only-race-" + uuid.NewString()
-				instancePath := flowID + "/receiver"
-				entityID := uuid.NewString()
-				createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-				seedWorkflowTargetStateForTransition(t, backend, db, runID, entityID, instancePath, "active", 1, createdAt)
-				seedStateOnlyAcquisitionLifecycle(t, backend, db, runID, instancePath, "active")
-				record := stateOnlyWorkflowEngineMutationRecord(t, runID, flowID, instancePath, entityID, "active", 1, createdAt)
-
-				if _, err := owner.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{State: record}); err == nil {
-					t.Fatal("concurrent companion winner was accepted")
-				}
-				assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, "review", "active", 1, 1)
-				assertNoWorkflowEngineHistory(t, backend, db, runID, entityID)
-			})
-
-			t.Run("two simultaneous first mutations commit exactly one companion", func(t *testing.T) {
-				flowID := "state-only-contenders-" + uuid.NewString()
-				instancePath := flowID + "/receiver"
-				entityID := uuid.NewString()
-				createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-				seedWorkflowTargetStateForTransition(t, backend, db, runID, entityID, instancePath, "active", 1, createdAt)
-				record := stateOnlyWorkflowEngineMutationRecord(t, runID, flowID, instancePath, entityID, "active", 1, createdAt)
-
-				start := make(chan struct{})
-				results := make(chan error, 2)
-				var contenders sync.WaitGroup
-				for range 2 {
-					contenders.Add(1)
-					go func() {
-						defer contenders.Done()
-						<-start
-						_, err := owner.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{State: record})
-						results <- err
-					}()
-				}
-				close(start)
-				contenders.Wait()
-				close(results)
-
-				successes := 0
-				failures := 0
-				for err := range results {
-					if err == nil {
-						successes++
-					} else {
-						failures++
+				if change == "foreign_header_owner" {
+					if _, err := f.db.ExecContext(f.ctx, `UPDATE flow_instances SET flow_template='foreign' WHERE run_id=$1 AND instance_path=$2`, record.Identity.RunID, record.Identity.Route.InstancePath); err != nil {
+						t.Fatal(err)
 					}
 				}
-				if successes != 1 || failures != 1 {
-					t.Fatalf("simultaneous first mutations succeeded/failed = %d/%d, want 1/1", successes, failures)
+				before := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
+				switch change {
+				case "stale_revision":
+					record.ExpectedRevision++
+				case "invalid_transition":
+					record.Transition = runtimepipeline.WorkflowEngineStateTransition(255)
 				}
-				assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, flowID, "done", 2, 1)
+				if change == "contenders" {
+					start := make(chan struct{})
+					results := make(chan error, 2)
+					var contenders sync.WaitGroup
+					for range 2 {
+						contenders.Add(1)
+						go func() {
+							defer contenders.Done()
+							<-start
+							_, err := owner.CommitWorkflowEngineMutation(f.ctx, runtimepipeline.WorkflowEngineMutationCommand{State: record})
+							results <- err
+						}()
+					}
+					close(start)
+					contenders.Wait()
+					close(results)
+					successes := 0
+					for err := range results {
+						if err == nil {
+							successes++
+						} else if failure, typed := runtimefailures.As(err); !typed || failure.Failure.Detail.Code != "workflow_engine_state_revision_conflict" || !failure.Failure.Retryable {
+							t.Fatalf("contending constructed mutation error: %v", err)
+						}
+					}
+					if successes != 1 {
+						t.Fatalf("constructed mutation winners = %d, want 1", successes)
+					}
+				} else {
+					_, err := owner.CommitWorkflowEngineMutation(f.ctx, runtimepipeline.WorkflowEngineMutationCommand{State: record})
+					if change == "stale_revision" || change == "foreign_header_owner" || change == "invalid_transition" {
+						if err == nil {
+							t.Fatal("invalid constructed mutation committed")
+						}
+						if change == "stale_revision" {
+							failure, typed := runtimefailures.As(err)
+							if !typed || failure.Failure.Detail.Code != "workflow_engine_state_revision_conflict" || !failure.Failure.Retryable {
+								t.Fatalf("stale constructed mutation error: %v", err)
+							}
+						}
+						if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")) {
+							t.Fatal("refused mutation changed persisted construction or fields")
+						}
+						if historyCount("mutate") != 0 {
+							t.Fatal("refused ordinary mutation recorded new history")
+						}
+						return
+					}
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				assertWorkflowTargetTransitionRows(t, backend, f.db, record.Identity.RunID, record.EntityID, record.Identity.Route.InstancePath, "review", "done", 2, 1)
+				if historyCount("create") != constructionHistory || historyCount("mutate") == 0 {
+					t.Fatal("ordinary mutation repeated construction or lost mutation history")
+				}
+				if change == "paired_reload" {
+					reader := f.store.(runtimepipeline.WorkflowTargetPersistenceReader)
+					target, err := reader.LoadWorkflowTargetPersistence(f.ctx, record.Identity, runtimeidentity.NormalizeEntityID(record.EntityID))
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := target.Validate(record.Identity.Route, runtimeidentity.NormalizeEntityID(record.EntityID)); err != nil {
+						t.Fatal(err)
+					}
+					transition, err := runtimepipeline.WorkflowEngineStateTransitionForPresence(target.Presence)
+					if err != nil || transition != runtimepipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion {
+						t.Fatalf("constructed reload lost paired transition: %d %v", transition, err)
+					}
+					record.ExpectedState, record.ExpectedRevision = target.State.CurrentState, target.State.Revision
+					record.CurrentState = "settled"
+					record.EnteredStageAt, record.UpdatedAt = record.UpdatedAt.Add(time.Minute), record.UpdatedAt.Add(time.Minute)
+					record = workflowTargetMutationEntry(t, f, record, "settle.requested")
+					if _, err := owner.CommitWorkflowEngineMutation(f.ctx, runtimepipeline.WorkflowEngineMutationCommand{State: record}); err != nil {
+						t.Fatal(err)
+					}
+					assertWorkflowTargetTransitionRows(t, backend, f.db, record.Identity.RunID, record.EntityID, record.Identity.Route.InstancePath, "review", "settled", 3, 1)
+					if historyCount("create") != constructionHistory {
+						t.Fatal("paired reload repeated construction")
+					}
+				}
 			})
-
-			t.Run("committed first mutation reloads complete and uses paired update", func(t *testing.T) {
-				flowID := "state-only-retry-" + uuid.NewString()
-				instancePath := flowID + "/receiver"
-				entityID := uuid.NewString()
-				createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-				seedWorkflowTargetStateForTransition(t, backend, db, runID, entityID, instancePath, "active", 1, createdAt)
-				first := stateOnlyWorkflowEngineMutationRecord(t, runID, flowID, instancePath, entityID, "active", 1, createdAt)
-				if _, err := owner.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{State: first}); err != nil {
-					t.Fatalf("commit first state-only mutation: %v", err)
-				}
-
-				reader, ok := selected.(runtimepipeline.WorkflowTargetPersistenceReader)
-				if !ok {
-					t.Fatalf("%s selected store does not expose the workflow target reader", backend)
-				}
-				persisted, err := reader.LoadWorkflowTargetPersistence(ctx, first.Identity, runtimeidentity.NormalizeEntityID(entityID))
-				if err != nil {
-					t.Fatalf("reload committed target: %v", err)
-				}
-				if err := persisted.Validate(first.Identity.Route, runtimeidentity.NormalizeEntityID(entityID)); err != nil {
-					t.Fatalf("validate reloaded committed target: %v", err)
-				}
-				if persisted.Presence != runtimepipeline.WorkflowTargetPersistenceComplete {
-					t.Fatalf("reloaded target presence = %d, want complete", persisted.Presence)
-				}
-				transition, err := runtimepipeline.WorkflowEngineStateTransitionForPresence(persisted.Presence)
-				if err != nil || transition != runtimepipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion {
-					t.Fatalf("reloaded target transition = %d error = %v, want paired update", transition, err)
-				}
-
-				retry := first
-				retry.CurrentState = "settled"
-				retry.ExpectedState = persisted.State.CurrentState
-				retry.ExpectedRevision = persisted.State.Revision
-				retry.EnteredStageAt = first.EnteredStageAt.Add(time.Minute)
-				retry.UpdatedAt = first.UpdatedAt.Add(time.Minute)
-				retry.Transition = transition
-				if _, err := owner.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{State: retry}); err != nil {
-					t.Fatalf("commit mutation after complete reload: %v", err)
-				}
-				assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, flowID, "settled", 3, 1)
-				assertWorkflowEngineHistoryStep(t, backend, db, runID, entityID, "mutate")
-			})
-		})
+		}
 	}
+}
+
+func newWorkflowTargetConstructionFixture(t *testing.T, backend string) (receiverConfigActivationFixture, runtimepipeline.FlowInstanceActivationPlan) {
+	t.Helper()
+	f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
+		"schema.yaml":          "name: constructed-target-transition\n",
+		"review/schema.yaml":   "name: review\nstages:\n  active: {initial: true}\n  done: {}\n  settled: {}\n",
+		"review/entities.yaml": "review_item:\n  account_id: {type: text, initial: preserved}\n  handled: {type: boolean, initial: false}\n",
+		"review/events.yaml":   "finish.requested:\nsettle.requested:\n",
+		"review/nodes.yaml": `progress:
+  execution_type: system_node
+  subscribes_to: [finish.requested, settle.requested]
+  event_handlers:
+    finish.requested:
+      advances_to: done
+    settle.requested:
+      advances_to: settled
+`,
+	}, nil)
+	req := sqliteFlowActivationRequest(f.bundle, "review", "review", "", "review")
+	plan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return f, plan
+}
+
+func workflowTargetMutationEntry(t *testing.T, f receiverConfigActivationFixture, record runtimepipeline.WorkflowEngineStateRecord, localEvent string) runtimepipeline.WorkflowEngineStateRecord {
+	t.Helper()
+	// This is the native writer/contender proof, not handler execution: retain
+	// stage-entry authority from an actual declared and claimed occurrence.
+	node := mustPersistenceNode("review", "progress")
+	event := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType("review/"+localEvent), "fixture", "", []byte(`{}`), 0, record.Identity.RunID, events.EventEnvelope{}, record.UpdatedAt)
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node),
+		Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "review", FlowInstance: record.Identity.Route.InstancePath, EntityID: record.EntityID})}
+	if err := commitSemanticEventFixtureWithRoutes(f.ctx, f.store, event, []events.DeliveryRoute{route}); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := claimDeliveryFixture(f.ctx, f.store, event, route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	graph, found := f.bundle.WorkflowStageTopology("review")
+	if !found {
+		t.Fatal("transition fixture lost its declared lifecycle")
+	}
+	compiled, err := graph.AdmitTransition(runtimecontracts.WorkflowTransitionSite{Node: node, HandlerEvent: localEvent, AdvanceCarrier: runtimecontracts.HandlerAdvanceCarrierHandler}, record.ExpectedState, record.CurrentState)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transition, err := workflowlifecycle.NewCompiledTransition(compiled, handlerselection.NotApplicable(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	effect, err := workflowlifecycle.NewAcceptedEvent(record.Identity.Route, runtimeidentity.NormalizeEntityID(record.EntityID), event.ID(), string(event.Type()), event.ExecutionMode(), event.CreatedAt(), &transition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	effect, err = effect.WithExecutionOccurrence("delivery", claimed.Claim.DeliveryID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, found, err := effect.StageEntry(record.Identity)
+	if err != nil || !found {
+		t.Fatalf("prepare claimed transition entry: found=%t err=%v", found, err)
+	}
+	var bookkeeping map[string]any
+	if err := json.Unmarshal(record.Bookkeeping, &bookkeeping); err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowlifecycle.StoreStageEntry(bookkeeping, entry); err != nil {
+		t.Fatal(err)
+	}
+	record.Bookkeeping, err = json.Marshal(bookkeeping)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return record
 }
 
 func TestWorkflowTargetPersistenceReadNeverFabricatesMixedSnapshotOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			selected, _, ctx, runID := openStateOnlyAcquisitionStore(t, backend)
-			reader, ok := selected.(runtimepipeline.WorkflowTargetPersistenceReader)
-			if !ok {
-				t.Fatalf("%s selected store does not expose the workflow target reader", backend)
-			}
-			owner, ok := selected.(runtimepipeline.WorkflowEngineMutationOwner)
-			if !ok {
-				t.Fatalf("%s selected store does not expose the workflow mutation owner", backend)
-			}
-
 			for attempt := range 12 {
-				flowID := "snapshot-target-" + uuid.NewString()
-				instancePath := flowID + "/receiver"
-				entityID := uuid.NewString()
-				createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-				record := stateOnlyWorkflowEngineMutationRecord(t, runID, flowID, instancePath, entityID, "", 0, createdAt)
-				record.Transition = runtimepipeline.WorkflowEngineStateTransitionCreateStateAndCompanion
-				routeEntityID := runtimeidentity.NormalizeEntityID(entityID)
+				f, plan := newWorkflowTargetConstructionFixture(t, backend)
+				persisted, err := plan.PersistenceRecord()
+				if err != nil {
+					t.Fatal(err)
+				}
+				record, ctx := persisted.State, f.ctx
+				reader := f.store.(runtimepipeline.WorkflowTargetPersistenceReader)
+				routeEntityID := runtimeidentity.NormalizeEntityID(record.EntityID)
 
 				initial, err := reader.LoadWorkflowTargetPersistence(ctx, record.Identity, routeEntityID)
 				if err != nil || initial.Presence != runtimepipeline.WorkflowTargetPersistenceAbsent {
@@ -245,7 +272,7 @@ func TestWorkflowTargetPersistenceReadNeverFabricatesMixedSnapshotOnBothStores(t
 					}()
 				}
 				close(start)
-				if _, err := owner.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{State: record}); err != nil {
+				if _, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(ctx, plan); err != nil {
 					t.Fatalf("attempt %d commit atomic target pair: %v", attempt, err)
 				}
 				readers.Wait()
@@ -253,9 +280,9 @@ func TestWorkflowTargetPersistenceReadNeverFabricatesMixedSnapshotOnBothStores(t
 				for err := range errors {
 					t.Fatalf("attempt %d target snapshot read: %v", attempt, err)
 				}
-				persisted, err := reader.LoadWorkflowTargetPersistence(ctx, record.Identity, routeEntityID)
-				if err != nil || persisted.Presence != runtimepipeline.WorkflowTargetPersistenceComplete {
-					t.Fatalf("attempt %d final target presence = %d error = %v, want complete", attempt, persisted.Presence, err)
+				target, err := reader.LoadWorkflowTargetPersistence(ctx, record.Identity, routeEntityID)
+				if err != nil || target.Presence != runtimepipeline.WorkflowTargetPersistenceComplete {
+					t.Fatalf("attempt %d final target presence = %d error = %v, want complete", attempt, target.Presence, err)
 				}
 			}
 		})
@@ -269,8 +296,8 @@ func TestWorkflowTargetPresenceOwnsEveryValidTransition(t *testing.T) {
 		transition runtimepipeline.WorkflowEngineStateTransition
 		wantError  string
 	}{
-		{name: "absent", presence: runtimepipeline.WorkflowTargetPersistenceAbsent, transition: runtimepipeline.WorkflowEngineStateTransitionCreateStateAndCompanion},
-		{name: "state only", presence: runtimepipeline.WorkflowTargetPersistenceStateOnly, transition: runtimepipeline.WorkflowEngineStateTransitionUpdateStateCreateCompanion},
+		{name: "absent", presence: runtimepipeline.WorkflowTargetPersistenceAbsent, wantError: "requires a constructed header"},
+		{name: "state only", presence: runtimepipeline.WorkflowTargetPersistenceStateOnly, wantError: "cannot repair imported state without construction"},
 		{name: "complete", presence: runtimepipeline.WorkflowTargetPersistenceComplete, transition: runtimepipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion},
 		{name: "lifecycle only", presence: runtimepipeline.WorkflowTargetPersistenceLifecycleOnly, wantError: "rejects lifecycle companion without state"},
 		{name: "unknown", presence: runtimepipeline.WorkflowTargetPersistencePresenceUnknown, wantError: "requires closed target persistence presence"},
@@ -291,17 +318,16 @@ func TestWorkflowTargetPresenceOwnsEveryValidTransition(t *testing.T) {
 	}
 }
 
-func TestSupportedStateOnlyProducersReachWorkflowCompanionTransitionOnBothStores(t *testing.T) {
+func TestSupportedStateOnlyProducersCannotAcquireWorkflowConstructionOnBothStores(t *testing.T) {
 	type producerStore interface {
 		runtimepipeline.WorkflowEngineMutationOwner
 		runtimerunlifecycle.OperationOwner
 		sourceartifactfixture.Writer
 		SetupScenarioEntities(context.Context, runtimepipeline.ScenarioSetupRequest) (runtimepipeline.ScenarioSetupResult, error)
-		CreateEntity(context.Context, runtimetools.EntityCreateRecord) (runtimetools.EntityCreateResult, error)
 	}
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			for _, producer := range []string{"scenario_setup", "entity_tool"} {
+			for _, producer := range []string{"scenario_setup"} {
 				t.Run(producer, func(t *testing.T) {
 					selected, db, ctx, runID := openStateOnlyAcquisitionStore(t, backend)
 					store, ok := selected.(producerStore)
@@ -336,21 +362,25 @@ func TestSupportedStateOnlyProducersReachWorkflowCompanionTransitionOnBothStores
 						if err != nil {
 							t.Fatalf("setup scenario state-only target: %v", err)
 						}
-					case "entity_tool":
-						if _, err := store.CreateEntity(ctx, runtimetools.EntityCreateRecord{
-							Source: source, RunID: runID, EntityID: entityID, FlowInstance: instancePath,
-							EntityType: "review_item", CurrentState: "active", FieldsJSON: json.RawMessage(`{"account_id":"preserved"}`),
-							CreatedAt: createdAt, Writer: runtimetools.EntityMutationWriter{Type: "agent", ID: "producer-proof", HandlerStep: "create_entity"},
-						}); err != nil {
-							t.Fatalf("create entity-tool state-only target: %v", err)
-						}
 					}
 					assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, "", "active", 1, 0)
+					before := snapshotForkHistoricalExecutionTables(t, db, backend == "postgres")
 					record := stateOnlyWorkflowEngineMutationRecord(t, runID, flowID, instancePath, entityID, "active", 1, createdAt)
-					if _, err := store.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{State: record}); err != nil {
-						t.Fatalf("execute %s state-only target: %v", producer, err)
+					if _, err := store.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{State: record}); err == nil || !strings.Contains(err.Error(), "constructed target") {
+						t.Fatalf("ordinary execution admitted %s state-only target: %v", producer, err)
 					}
-					assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, flowID, "done", 2, 1)
+					// The remaining ordinary-update variant must also refuse the
+					// missing header, not manufacture construction from imported fields.
+					record.Transition = runtimepipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
+					if _, err := store.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{State: record}); err == nil {
+						t.Fatalf("ordinary update repaired %s state-only target", producer)
+					} else if !strings.Contains(err.Error(), "workflow engine state route is missing: "+instancePath) {
+						t.Fatalf("missing-header update lacked exact route refusal: %v", err)
+					}
+					assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, "", "active", 1, 0)
+					if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, db, backend == "postgres")) {
+						t.Fatal("refused imported execution changed persisted state")
+					}
 				})
 			}
 		})
@@ -376,7 +406,8 @@ func stateOnlyWorkflowEngineMutationRecord(t *testing.T, runID, flowID, instance
 		Gates: json.RawMessage(`{}`), Accumulator: json.RawMessage(`{}`), Config: config, InitialFields: json.RawMessage(`{}`),
 		EnteredStageAt: createdAt.Add(time.Minute), CreatedAt: createdAt, UpdatedAt: createdAt.Add(time.Minute),
 		ExpectedState: expectedState, ExpectedRevision: expectedRevision,
-		Transition: runtimepipeline.WorkflowEngineStateTransitionUpdateStateCreateCompanion,
+		// The deleted companion-repair variant has no replacement authority.
+		Transition: runtimepipeline.WorkflowEngineStateTransition(3),
 	}
 }
 

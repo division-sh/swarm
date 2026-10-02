@@ -56,7 +56,11 @@ func CopyStateOnlyAcquisition(t testing.TB, workflowName string, modes map[strin
 			}
 		}
 		writeClosedVariantFile(t, root, filepath.ToSlash(filepath.Join(path, "schema.yaml")), schema)
-		writeClosedVariantFile(t, root, filepath.ToSlash(filepath.Join(path, "entities.yaml")), "review_item:\n  account_id: text\n  instance_key: text\n  items: \"[json]\"\n")
+		entity := "review_item:\n  account_id: {type: text, initial: different-business-key}\n  instance_key: {type: text, initial: instance}\n  items: {type: '[json]', initial: []}\n"
+		if mode == "template" {
+			entity = "review_item:\n  account_id: text\n  instance_key: text\n  items: {type: '[json]', initial: []}\n"
+		}
+		writeClosedVariantFile(t, root, filepath.ToSlash(filepath.Join(path, "entities.yaml")), entity)
 		if path != "." && path != targetFlow {
 			writeClosedVariantFile(t, root, filepath.ToSlash(filepath.Join(path, "events.yaml")), eventSchemas)
 		}
@@ -70,8 +74,7 @@ upserter:
   execution_type: system_node
   subscribes_to: [test.node_emitted.upserter]
   event_handlers:
-    test.node_emitted.upserter:
-      create_entity: true
+    test.node_emitted.upserter: {}
 `)
 	}
 	return root

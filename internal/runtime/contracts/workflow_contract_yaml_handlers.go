@@ -46,7 +46,6 @@ var handlerFieldOptions = map[string]struct{}{
 	"activity":          {},
 	"description":       {},
 	"_note":             {},
-	"create_entity":     {},
 	"emit":              {},
 	"on_success":        {},
 	"guard":             {},

@@ -47,7 +47,7 @@ func OperatorTestSetupHandlers(opts TestSetupHandlerOptions) map[string]MethodHa
 }
 
 func testSetupConfigured(opts TestSetupHandlerOptions) bool {
-	if opts.Setup == nil || opts.Idempotency == nil || opts.RunBundleContext == nil {
+	if opts.Idempotency == nil || opts.RunBundleContext == nil {
 		return false
 	}
 	return runtimeContextManager(opts.RuntimeContexts) != nil || (opts.Source != nil && opts.SourceArtifact != nil)
@@ -106,12 +106,15 @@ func executeTestSetupEntities(ctx context.Context, req Request, opts TestSetupHa
 		if err := validateTestSetupEntitiesAgainstBundle(selectedScope.Source, request); err != nil {
 			return apiidempotency.Completion{}, err
 		}
-		result, setupErr := opts.Setup.SetupScenarioEntities(ctx, request)
+		setup, ok := selectedScope.SourceArtifact.(TestSetupStore)
+		if !ok {
+			return apiidempotency.Completion{}, fmt.Errorf("test.setup_entities requires the exact selected runtime construction owner")
+		}
+		result, setupErr := setup.SetupScenarioEntities(ctx, request)
+		if !result.Acknowledged || result.RunID != request.RunID {
+			return apiidempotency.Completion{}, errors.Join(setupErr, fmt.Errorf("test.setup_entities commit was not acknowledged for the selected run"))
+		}
 		if setupErr != nil {
-			// The setup owner returns its protocol value only after commit acknowledgement.
-			if result.RunID != request.RunID {
-				return apiidempotency.Completion{}, setupErr
-			}
 			postCommitErr = setupErr
 		}
 		apiResult := testSetupEntitiesAPIResult(result.Normalized())

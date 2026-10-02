@@ -65,8 +65,8 @@ func requireSupplementalForkAcquisitionSettlement(t *testing.T, rt servedControl
 		Old, New                   any
 		WriterType, WriterID, Step string
 	}
-	wantMutations := []markerMutation{{nil, "consumer-created", "platform", "workflow_engine", "create"}}
-	if policy != canonicalrouting.ForkReceiverExplicitCreate && policy != canonicalrouting.ForkReceiverAutoMaterializing {
+	wantMutations := []markerMutation{{nil, "consumer-created", "platform", "workflow_engine", "mutate"}}
+	if policy != canonicalrouting.ForkReceiverConstructorOwned {
 		t.Fatalf("unsupported supplemental test policy %d", policy)
 	}
 	rows, err := rt.DB.Query(`SELECT COALESCE(CAST(old_value AS TEXT),'null'),CAST(new_value AS TEXT),writer_type,writer_id,handler_step FROM entity_mutations WHERE run_id=$1 AND entity_id=$2 AND caused_by_event=$3 AND domain='authored_field' AND path='marker'`, runID, entityID, eventID)
@@ -120,7 +120,7 @@ func TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionB
 		for _, tc := range []struct {
 			name   string
 			policy canonicalrouting.ForkReceiverPolicy
-		}{{"auto_materializing", canonicalrouting.ForkReceiverAutoMaterializing}, {"explicit_create", canonicalrouting.ForkReceiverExplicitCreate}} {
+		}{{"constructor_owned", canonicalrouting.ForkReceiverConstructorOwned}} {
 			t.Run(string(backend)+"/"+tc.name, func(t *testing.T) {
 				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkReceiverAcquisitionWithoutFinishedEmission(t, tc.policy))
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "acquisition-seed"})

@@ -34,26 +34,20 @@ func ReadRunSummary(
 		return runtimeentity.RunSummary{}, fmt.Errorf("entity run summary requires selected store, run_id, and terminal catalog")
 	}
 	query := `
-		SELECT COALESCE(es.current_state, ''),
-		       COALESCE(es.flow_instance, ''),
-		       COALESCE(fi.flow_template, '')
-		FROM entity_state es
-		LEFT JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance
-		WHERE es.run_id = ?
-		ORDER BY es.entity_id`
+		SELECT current_state, instance_path, flow_template
+		FROM flow_instances
+		WHERE run_id = ? AND stage_defined = TRUE
+		ORDER BY entity_id`
 	args := []any{runID}
 	switch dialect {
 	case SummaryDialectSQLite:
 	case SummaryDialectPostgres:
 		query = `
-			SELECT COALESCE(es.current_state, ''),
-			       COALESCE(es.flow_instance, ''),
-			       COALESCE(fi.flow_template, '')
-			FROM entity_state es
-			LEFT JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance
-			WHERE es.run_id = $1::uuid
-			ORDER BY es.entity_id
-			FOR SHARE OF es`
+			SELECT current_state, instance_path, flow_template
+			FROM flow_instances
+			WHERE run_id = $1::uuid AND stage_defined = TRUE
+			ORDER BY entity_id
+			FOR SHARE`
 	default:
 		return runtimeentity.RunSummary{}, fmt.Errorf("entity run summary requires selected store dialect")
 	}

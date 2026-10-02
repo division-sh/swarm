@@ -4,7 +4,6 @@ b-node:
   produces: []
   event_handlers:
     b.start:
-      create_entity: true
       data_accumulation:
         writes:
           - target_field: shared_field

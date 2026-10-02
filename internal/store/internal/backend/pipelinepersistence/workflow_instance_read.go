@@ -23,9 +23,7 @@ func (s *PipelinePostgresOwner) LoadWorkflowInstance(ctx context.Context, identi
 		return runtimepipeline.WorkflowInstance{}, false, &runtimepipeline.WorkflowInstanceLookupMiss{RequestedKey: strings.TrimSpace(identity.Route.InstancePath)}
 	}
 	row := s.backend.QueryRowContext(ctx, postgresWorkflowInstanceSelect+`
-		WHERE es.flow_instance = $1 AND es.run_id = $2::uuid
-		ORDER BY es.created_at DESC, es.entity_id DESC
-		LIMIT 1
+		WHERE fi.instance_path = $1 AND fi.run_id = $2::uuid
 	`, identity.Route.InstancePath, identity.RunID)
 	record, err := scanPostgresWorkflowInstance(row)
 	if err == sql.ErrNoRows {
@@ -104,8 +102,8 @@ func (s *PipelinePostgresOwner) ListWorkflowInstances(ctx context.Context, runID
 	}
 	runID = strings.TrimSpace(runID)
 	rows, err := s.backend.QueryContext(ctx, postgresWorkflowInstanceSelect+`
-		WHERE es.run_id = $1::uuid
-		ORDER BY es.created_at ASC
+		WHERE fi.run_id = $1::uuid
+		ORDER BY fi.created_at ASC
 	`, runID)
 	if err != nil {
 		return nil, err
@@ -116,28 +114,29 @@ func (s *PipelinePostgresOwner) ListWorkflowInstances(ctx context.Context, runID
 
 const postgresWorkflowInstanceSelect = `
 	SELECT
-		es.entity_id::text,
+		fi.entity_id::text,
 		fi.flow_template,
 		fi.config->>'workflow_version',
 		fi.mode,
 		fi.status,
 		fi.terminated_at,
-		es.current_state,
-		es.revision,
-		es.entered_state_at,
-		es.gates,
+		fi.current_state,
+		fi.revision,
+		fi.entered_state_at,
+		fi.gates,
 		es.fields,
-		es.bookkeeping,
-		es.accumulator,
+		fi.bookkeeping,
+		fi.accumulator,
 		fi.config,
-		es.flow_instance,
-		es.entity_type,
-		es.slug,
-		es.name,
-		es.created_at,
-		es.updated_at
-	FROM entity_state es
-	JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance
+		fi.instance_path,
+		fi.entity_type,
+		fi.slug,
+		fi.name,
+		fi.created_at,
+		fi.updated_at,
+		fi.stage_defined
+	FROM flow_instances fi
+	LEFT JOIN entity_state es ON es.run_id = fi.run_id AND es.flow_instance = fi.instance_path AND es.entity_id = fi.entity_id
 `
 
 const postgresWorkflowEntityStateSelect = `
@@ -182,7 +181,10 @@ const postgresWorkflowTargetPersistenceSelect = `
 		fi.status,
 		fi.config,
 		fi.terminated_at,
-		fi.created_at
+		fi.created_at,
+		fi.entity_id::text, fi.entity_type, fi.slug, fi.name, fi.current_state,
+		fi.revision, fi.entered_state_at, fi.updated_at, fi.stage_defined,
+		fi.gates, fi.bookkeeping, fi.accumulator
 	FROM (VALUES ($1::uuid, $2::uuid, $3::text)) AS target(run_id, entity_id, flow_instance)
 	LEFT JOIN entity_state es
 		ON es.run_id = target.run_id
@@ -198,7 +200,8 @@ type workflowInstanceScanner interface {
 func scanPostgresWorkflowInstance(row workflowInstanceScanner) (runtimepipeline.WorkflowInstancePersistenceRecord, error) {
 	var record runtimepipeline.WorkflowInstancePersistenceRecord
 	var terminatedAt sql.NullTime
-	var slug, name sql.NullString
+	var slug, name, entityType sql.NullString
+	var fields []byte
 	if err := row.Scan(
 		&record.EntityID,
 		&record.WorkflowName,
@@ -210,16 +213,17 @@ func scanPostgresWorkflowInstance(row workflowInstanceScanner) (runtimepipeline.
 		&record.Revision,
 		&record.EnteredStageAt,
 		&record.Gates,
-		&record.Fields,
+		&fields,
 		&record.Bookkeeping,
 		&record.Accumulator,
 		&record.Config,
 		&record.FlowInstance,
-		&record.EntityType,
+		&entityType,
 		&slug,
 		&name,
 		&record.CreatedAt,
 		&record.UpdatedAt,
+		&record.StageDefined,
 	); err != nil {
 		return runtimepipeline.WorkflowInstancePersistenceRecord{}, err
 	}
@@ -228,6 +232,8 @@ func scanPostgresWorkflowInstance(row workflowInstanceScanner) (runtimepipeline.
 	}
 	record.Slug = slug.String
 	record.Name = name.String
+	record.EntityType = entityType.String
+	record.Fields = fields
 	return record, nil
 }
 
@@ -265,12 +271,19 @@ func scanPostgresWorkflowTargetPersistence(row workflowInstanceScanner, route ru
 	var lifecycleFlowInstance, lifecycleWorkflowName, lifecycleWorkflowVersion, lifecycleMode, lifecycleStatus sql.NullString
 	var lifecycleConfig []byte
 	var lifecycleTerminatedAt, lifecycleCreatedAt sql.NullTime
+	var headerID, headerType, headerSlug, headerName, headerStage sql.NullString
+	var headerRevision sql.NullInt64
+	var headerEnteredAt, headerUpdatedAt sql.NullTime
+	var headerStageDefined sql.NullBool
+	var headerGates, headerBookkeeping, headerAccumulator []byte
 	if err := row.Scan(
 		&stateEntityID, &stateFlowInstance, &stateEntityType, &stateSlug, &stateName,
 		&stateCurrent, &stateRevision, &stateEnteredAt, &stateGates, &stateFields,
 		&stateBookkeeping, &stateAccumulator, &stateCreatedAt, &stateUpdatedAt,
 		&lifecycleFlowInstance, &lifecycleWorkflowName, &lifecycleWorkflowVersion,
 		&lifecycleMode, &lifecycleStatus, &lifecycleConfig, &lifecycleTerminatedAt, &lifecycleCreatedAt,
+		&headerID, &headerType, &headerSlug, &headerName, &headerStage, &headerRevision,
+		&headerEnteredAt, &headerUpdatedAt, &headerStageDefined, &headerGates, &headerBookkeeping, &headerAccumulator,
 	); err != nil {
 		return runtimepipeline.WorkflowTargetPersistenceRecord{}, err
 	}
@@ -297,7 +310,14 @@ func scanPostgresWorkflowTargetPersistence(row workflowInstanceScanner, route ru
 		lifecycle = runtimepipeline.WorkflowLifecycleCompanionPersistenceRecord{
 			FlowInstance: lifecycleFlowInstance.String, WorkflowName: lifecycleWorkflowName.String,
 			WorkflowVersion: lifecycleWorkflowVersion.String, Mode: lifecycleMode.String, Status: lifecycleStatus.String,
-			Config: append(json.RawMessage(nil), lifecycleConfig...),
+			Config:       append(json.RawMessage(nil), lifecycleConfig...),
+			StageDefined: headerStageDefined.Bool,
+			State: runtimepipeline.WorkflowEntityStatePersistenceRecord{
+				EntityID: headerID.String, FlowInstance: lifecycleFlowInstance.String, EntityType: headerType.String,
+				Slug: headerSlug.String, Name: headerName.String, CurrentState: headerStage.String, Revision: headerRevision.Int64,
+				EnteredStageAt: headerEnteredAt.Time, CreatedAt: lifecycleCreatedAt.Time, UpdatedAt: headerUpdatedAt.Time,
+				Gates: headerGates, Bookkeeping: headerBookkeeping, Accumulator: headerAccumulator,
+			},
 		}
 		if lifecycleTerminatedAt.Valid {
 			lifecycle.TerminatedAt = lifecycleTerminatedAt.Time.UTC()
@@ -352,9 +372,7 @@ func (s *PipelineSQLiteOwner) LoadWorkflowInstance(ctx context.Context, identity
 		return runtimepipeline.WorkflowInstance{}, false, &runtimepipeline.WorkflowInstanceLookupMiss{RequestedKey: strings.TrimSpace(identity.Route.InstancePath)}
 	}
 	rows, err := s.backend.QueryContext(ctx, sqliteWorkflowInstanceSelect+`
-		WHERE es.flow_instance = ? AND es.run_id = ?
-		ORDER BY es.created_at DESC, es.entity_id DESC
-		LIMIT 1
+		WHERE fi.instance_path = ? AND fi.run_id = ?
 	`, identity.Route.InstancePath, identity.RunID)
 	if err != nil {
 		return runtimepipeline.WorkflowInstance{}, false, err
@@ -423,6 +441,8 @@ func assembleWorkflowTargetPersistence(
 		record.Presence = runtimepipeline.WorkflowTargetPersistenceComplete
 	case stateExists:
 		record.Presence = runtimepipeline.WorkflowTargetPersistenceStateOnly
+	case companionExists && companion.State.EntityType == "":
+		record.Presence = runtimepipeline.WorkflowTargetPersistenceCompleteFieldless
 	case companionExists:
 		record.Presence = runtimepipeline.WorkflowTargetPersistenceLifecycleOnly
 	default:
@@ -470,7 +490,7 @@ func (s *PipelineSQLiteOwner) ListWorkflowInstances(ctx context.Context, runID s
 		return nil, fmt.Errorf("sqlite workflow instance reader is required")
 	}
 	runID = strings.TrimSpace(runID)
-	rows, err := s.backend.QueryContext(ctx, sqliteWorkflowInstanceSelect+` WHERE es.run_id = ? ORDER BY es.created_at ASC`, runID)
+	rows, err := s.backend.QueryContext(ctx, sqliteWorkflowInstanceSelect+` WHERE fi.run_id = ? ORDER BY fi.created_at ASC`, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -480,28 +500,29 @@ func (s *PipelineSQLiteOwner) ListWorkflowInstances(ctx context.Context, runID s
 
 const sqliteWorkflowInstanceSelect = `
 	SELECT
-		es.entity_id,
+		fi.entity_id,
 		fi.flow_template,
 		json_extract(fi.config, '$.workflow_version'),
 		fi.mode,
 		fi.status,
 		fi.terminated_at,
-		es.current_state,
-		es.revision,
-		es.entered_state_at,
-		es.gates,
+		fi.current_state,
+		fi.revision,
+		fi.entered_state_at,
+		fi.gates,
 		es.fields,
-		es.bookkeeping,
-		es.accumulator,
+		fi.bookkeeping,
+		fi.accumulator,
 		fi.config,
-		es.flow_instance,
-		es.entity_type,
-		es.slug,
-		es.name,
-		es.created_at,
-		es.updated_at
-	FROM entity_state es
-	JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance
+		fi.instance_path,
+		fi.entity_type,
+		fi.slug,
+		fi.name,
+		fi.created_at,
+		fi.updated_at,
+		fi.stage_defined
+	FROM flow_instances fi
+	LEFT JOIN entity_state es ON es.run_id = fi.run_id AND es.flow_instance = fi.instance_path AND es.entity_id = fi.entity_id
 `
 
 const sqliteWorkflowEntityStateSelect = `
@@ -546,7 +567,10 @@ const sqliteWorkflowTargetPersistenceSelect = `
 		fi.status,
 		fi.config,
 		fi.terminated_at,
-		fi.created_at
+		fi.created_at,
+		fi.entity_id, fi.entity_type, fi.slug, fi.name, fi.current_state,
+		fi.revision, fi.entered_state_at, fi.updated_at, fi.stage_defined,
+		fi.gates, fi.bookkeeping, fi.accumulator
 	FROM (SELECT ? AS run_id, ? AS entity_id, ? AS flow_instance) AS target
 	LEFT JOIN entity_state es
 		ON es.run_id = target.run_id
@@ -614,12 +638,18 @@ func scanSQLiteWorkflowTargetPersistence(row workflowInstanceScanner, route runt
 	var stateEnteredAt, stateGates, stateFields, stateBookkeeping, stateAccumulator, stateCreatedAt, stateUpdatedAt any
 	var lifecycleFlowInstance, lifecycleWorkflowName, lifecycleWorkflowVersion, lifecycleMode, lifecycleStatus sql.NullString
 	var lifecycleConfig, lifecycleTerminatedAt, lifecycleCreatedAt any
+	var headerID, headerType, headerSlug, headerName, headerStage sql.NullString
+	var headerRevision sql.NullInt64
+	var headerStageDefined sql.NullBool
+	var headerEnteredAt, headerUpdatedAt, headerGates, headerBookkeeping, headerAccumulator any
 	if err := row.Scan(
 		&stateEntityID, &stateFlowInstance, &stateEntityType, &stateSlug, &stateName,
 		&stateCurrent, &stateRevision, &stateEnteredAt, &stateGates, &stateFields,
 		&stateBookkeeping, &stateAccumulator, &stateCreatedAt, &stateUpdatedAt,
 		&lifecycleFlowInstance, &lifecycleWorkflowName, &lifecycleWorkflowVersion,
 		&lifecycleMode, &lifecycleStatus, &lifecycleConfig, &lifecycleTerminatedAt, &lifecycleCreatedAt,
+		&headerID, &headerType, &headerSlug, &headerName, &headerStage, &headerRevision,
+		&headerEnteredAt, &headerUpdatedAt, &headerStageDefined, &headerGates, &headerBookkeeping, &headerAccumulator,
 	); err != nil {
 		return runtimepipeline.WorkflowTargetPersistenceRecord{}, err
 	}
@@ -664,7 +694,32 @@ func scanSQLiteWorkflowTargetPersistence(row workflowInstanceScanner, route runt
 		lifecycle = runtimepipeline.WorkflowLifecycleCompanionPersistenceRecord{
 			FlowInstance: lifecycleFlowInstance.String, WorkflowName: lifecycleWorkflowName.String,
 			WorkflowVersion: lifecycleWorkflowVersion.String, Mode: lifecycleMode.String, Status: lifecycleStatus.String,
-			Config: config,
+			Config:       config,
+			StageDefined: headerStageDefined.Bool,
+			State: runtimepipeline.WorkflowEntityStatePersistenceRecord{
+				EntityID: headerID.String, FlowInstance: lifecycleFlowInstance.String, EntityType: headerType.String,
+				Slug: headerSlug.String, Name: headerName.String, CurrentState: headerStage.String, Revision: headerRevision.Int64,
+			},
+		}
+		for _, item := range []struct {
+			raw    any
+			target *json.RawMessage
+		}{{headerGates, &lifecycle.State.Gates}, {headerBookkeeping, &lifecycle.State.Bookkeeping}, {headerAccumulator, &lifecycle.State.Accumulator}} {
+			value, err := sqliteWorkflowJSONValue(item.raw)
+			if err != nil {
+				return runtimepipeline.WorkflowTargetPersistenceRecord{}, fmt.Errorf("decode constructed header: %w", err)
+			}
+			*item.target = value
+		}
+		for _, item := range []struct {
+			raw    any
+			target *time.Time
+		}{{headerEnteredAt, &lifecycle.State.EnteredStageAt}, {headerUpdatedAt, &lifecycle.State.UpdatedAt}} {
+			value, present, err := sqliteTimeValue(item.raw)
+			if err != nil || !present {
+				return runtimepipeline.WorkflowTargetPersistenceRecord{}, fmt.Errorf("constructed header requires lifecycle time: %v", err)
+			}
+			*item.target = value
 		}
 		createdAt, ok, err := sqliteTimeValue(lifecycleCreatedAt)
 		if err != nil || !ok {
@@ -674,6 +729,7 @@ func scanSQLiteWorkflowTargetPersistence(row workflowInstanceScanner, route runt
 			return runtimepipeline.WorkflowTargetPersistenceRecord{}, err
 		}
 		lifecycle.CreatedAt = createdAt
+		lifecycle.State.CreatedAt = createdAt
 		if terminatedAt, ok, err := sqliteTimeValue(lifecycleTerminatedAt); err != nil {
 			return runtimepipeline.WorkflowTargetPersistenceRecord{}, err
 		} else if ok {
@@ -713,7 +769,7 @@ func scanSQLiteWorkflowInstances(rows *sql.Rows) ([]runtimepipeline.WorkflowInst
 	items := make([]runtimepipeline.WorkflowInstance, 0, 32)
 	for rows.Next() {
 		var record runtimepipeline.WorkflowInstancePersistenceRecord
-		var workflowVersion, slug, name sql.NullString
+		var workflowVersion, slug, name, entityType sql.NullString
 		var terminatedAt, enteredAt, createdAt, updatedAt any
 		var gates, fields, bookkeeping, accumulator, config any
 		if err := rows.Scan(
@@ -732,22 +788,27 @@ func scanSQLiteWorkflowInstances(rows *sql.Rows) ([]runtimepipeline.WorkflowInst
 			&accumulator,
 			&config,
 			&record.FlowInstance,
-			&record.EntityType,
+			&entityType,
 			&slug,
 			&name,
 			&createdAt,
 			&updatedAt,
+			&record.StageDefined,
 		); err != nil {
 			return nil, err
 		}
 		record.WorkflowVersion = workflowVersion.String
 		record.Slug = slug.String
 		record.Name = name.String
+		record.EntityType = entityType.String
 		for _, item := range []struct {
 			raw    any
 			target *json.RawMessage
 		}{{gates, &record.Gates}, {fields, &record.Fields}, {bookkeeping, &record.Bookkeeping}, {accumulator, &record.Accumulator}, {config, &record.Config}} {
 			raw, target := item.raw, item.target
+			if target == &record.Fields && raw == nil {
+				continue
+			}
 			switch value := raw.(type) {
 			case string:
 				*target = json.RawMessage(value)

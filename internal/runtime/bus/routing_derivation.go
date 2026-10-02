@@ -281,17 +281,17 @@ func deriveRouteTableWithInputProducers(source semanticview.Source, graph runtim
 		}
 		flowPath := strings.Trim(strings.TrimSpace(scope.Path), "/")
 		localEvents := routeFlowLocalEventSetWithInputProducers(scope, inputProducers)
+		subscribers, err := routeSubscriberTemplates(source, scope, agents, localEvents)
+		if err != nil {
+			return nil, err
+		}
+		rt.templates[runtimeflowidentity.ScopeKey(source, scope.ID)] = routeFlowTemplate{
+			FlowID:      scope.ID,
+			InputEvents: append([]string{}, scope.InputEvents...),
+			LocalEvents: cloneStringSet(localEvents),
+			Subscribers: subscribers,
+		}
 		if strings.EqualFold(scope.Mode, "template") || routeFlowStanding(source, scope.ID) {
-			subscribers, err := routeSubscriberTemplates(source, scope, agents, localEvents)
-			if err != nil {
-				return nil, err
-			}
-			rt.templates[flowPath] = routeFlowTemplate{
-				FlowID:      scope.ID,
-				InputEvents: append([]string{}, scope.InputEvents...),
-				LocalEvents: cloneStringSet(localEvents),
-				Subscribers: subscribers,
-			}
 			continue
 		}
 		if flowPath != "" {
@@ -353,6 +353,15 @@ func (rt *RouteTable) ResolveForRun(runID, eventType string) []Subscriber {
 		return nil
 	}
 	rt.mu.RLock()
+	for rt.resolutionIndexDirty {
+		rt.mu.RUnlock()
+		rt.mu.Lock()
+		if rt.resolutionIndexDirty {
+			rt.rebuildLocked()
+		}
+		rt.mu.Unlock()
+		rt.mu.RLock()
+	}
 	defer rt.mu.RUnlock()
 	out := cloneSubscribers(rt.routes[routeResolutionKey{runID: runID, eventType: eventType}])
 	if runID != "" {
@@ -364,12 +373,6 @@ func (rt *RouteTable) ResolveForRun(runID, eventType string) []Subscriber {
 		return projectSubscriberEvents(out, eventType)
 	}
 	indexes := rt.wildcardPatternIndexes
-	if rt.resolutionIndexDirty {
-		indexes = make([]int, len(rt.patterns))
-		for index := range rt.patterns {
-			indexes[index] = index
-		}
-	}
 	for _, index := range indexes {
 		pattern := rt.patterns[index]
 		if pattern.RunID != "" && pattern.RunID != runID {
@@ -748,7 +751,8 @@ func (rt *RouteTable) removeFlowInstanceRoute(identity runtimeflowidentity.RunSc
 		rt.templateObservers[sourceTemplatePath] = filteredObservers
 	}
 	rt.rebuildEventPathsLocked()
-	rt.rebuildLocked()
+	// Retirement is authoritative now; the derived index is rebuilt by its next consumer.
+	rt.resolutionIndexDirty = true
 	rt.generation++
 	return nil
 }
@@ -1011,7 +1015,9 @@ func (rt *RouteTable) matchFlowInstanceRouteOwnerLocked(identity runtimeflowiden
 	expected := runtimeflowidentity.StoredRoute(identity.Route.ScopeKey, identity.Route.InstanceID, "")
 	singleton := identity.Route.InstancePath == identity.Route.ScopeKey &&
 		identity.Route.InstanceID == runtimeflowidentity.LogicalInstanceID(identity.Route.ScopeKey)
-	if !singleton && expected.InstancePath != identity.Route.InstancePath {
+	runRoot := rt.source != nil && identity.Route.ScopeKey == semanticview.RootExecutionFlowID(rt.source) &&
+		identity.Route.InstanceID == identity.RunID && identity.Route.InstancePath == identity.RunID
+	if !runRoot && !singleton && expected.InstancePath != identity.Route.InstancePath {
 		return runtimeflowidentity.RunScopedFlowInstance{}, false, fmt.Errorf(
 			"flow-instance route identity is inconsistent: scope %q and instance %q derive path %q, not %q",
 			identity.Route.ScopeKey,
@@ -1032,6 +1038,13 @@ func (rt *RouteTable) flowInstanceRouteCollisionLocked(templateScope, instancePa
 	instancePath = eventidentity.Normalize(instancePath)
 	if templateScope == "" || instancePath == "" {
 		return ""
+	}
+	if templateScope == instancePath {
+		if template, found := rt.templates[templateScope]; found {
+			if schema, found := rt.source.FlowSchemaByID(template.FlowID); found && schema.Instance.Empty() {
+				return ""
+			}
+		}
 	}
 	for _, scopePath := range sortedStringKeys(rt.authoredScopes) {
 		scopePath = eventidentity.Normalize(scopePath)

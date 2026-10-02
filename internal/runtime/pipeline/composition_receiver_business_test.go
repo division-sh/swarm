@@ -26,7 +26,6 @@ func TestCompositionReceiverInitializationAndRepeatedBusinessWritesBothStores(t 
   subscribes_to: [spend.recorded]
   event_handlers:
     spend.recorded:
-      create_entity: true
       data_accumulation:
         writes:
           - {source_field: amount_usd, target_field: spent_usd}
@@ -46,7 +45,24 @@ func TestCompositionReceiverInitializationAndRepeatedBusinessWritesBothStores(t 
 				ctx = testPipelineRunContext(t, db)
 			}
 			node := pipelineSourceNode(t, source, ".", "budget-writer")
-			owner := events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: testPipelineRunID, EntityID: testPipelineRunID})
+			constructor, err := CompileFlowConstructor(source, semanticview.RootExecutionFlowID(source), "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			fields, err := constructor.InitialFields(nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Explicit component setup; public construction is qualified separately.
+			at := time.Now().UTC()
+			if err := store.create(ctx, WorkflowInstance{
+				InstanceID: testPipelineRunID, StorageRef: testPipelineRunID, EntityID: testPipelineRunID,
+				EntityType: "budget", WorkflowName: semanticview.RootExecutionFlowID(source), WorkflowVersion: source.WorkflowVersion(), Mode: "static",
+				CurrentState: "active", StageDefined: true, Fields: fields, CreatedAt: at, EnteredStageAt: at,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			owner := events.MustExistingEntityTarget(events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(source), FlowInstance: testPipelineRunID, EntityID: testPipelineRunID})
 			ctx = runtimedelivery.WithRoute(ctx, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: owner})
 			handler := bundle.Nodes["budget-writer"].EventHandlers["spend.recorded"]
 			for _, amount := range []int{42, 99} {

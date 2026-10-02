@@ -11,20 +11,21 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	runtimeprocessbinding "github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
 
-const dynamicFlowRuntimeReadinessVersion = 4
+const dynamicFlowRuntimeReadinessVersion = 5
 
 type DynamicFlowRuntimeAgentExpectation struct {
 	Identity       runtimeagentidentity.Identity `json:"identity"`
 	ConfigRevision string                        `json:"config_revision"`
+	EntityID       string                        `json:"entity_id"`
 }
 
 type DynamicFlowRuntimeCreationEventPlan struct {
@@ -110,15 +111,49 @@ type DynamicFlowRuntimeReadinessPlan struct {
 	CreationEvent   *DynamicFlowRuntimeCreationEventPlan `json:"creation_event,omitempty"`
 }
 
+// Hash is planning equality, never an attempt ID or a temporal permission.
+func (p DynamicFlowRuntimeReadinessPlan) Hash() (string, error) {
+	normalized, err := p.Normalized()
+	if err != nil {
+		return "", err
+	}
+	raw, err := canonicaljson.MarshalPreservingNumberKinds(normalized)
+	if err != nil {
+		return "", err
+	}
+	return canonicaljson.HashBytes(raw), nil
+}
+
+func DecodeFlowReadinessPlan(raw []byte, expectedHash string) (DynamicFlowRuntimeReadinessPlan, error) {
+	var plan DynamicFlowRuntimeReadinessPlan
+	if err := canonicaljson.DecodePreservingNumberLexemes(raw, &plan); err != nil {
+		return plan, fmt.Errorf("decode flow readiness plan: %w", err)
+	}
+	if plan.Version != dynamicFlowRuntimeReadinessVersion {
+		return plan, fmt.Errorf("flow readiness plan has unsupported version %d", plan.Version)
+	}
+	plan, err := plan.Normalized()
+	if err != nil {
+		return plan, err
+	}
+	hash, err := plan.Hash()
+	if err != nil || hash != expectedHash {
+		return plan, errors.Join(err, errors.New("flow readiness plan hash disagrees with its persisted plan"))
+	}
+	return plan, nil
+}
+
 type DynamicFlowRuntimeReadiness struct {
 	InstancePath           string
 	Plan                   DynamicFlowRuntimeReadinessPlan
-	PlanRevision           uint64
+	PlanHash               string
+	AttemptOrdinal         uint64
 	OwningRunSource        runtimecorrelation.SourceArtifactFact
 	RunStatus              string
 	InstanceStatus         string
 	InstanceTerminatedAt   time.Time
-	TopologyReadyAt        time.Time
+	Phase                  FlowAttachmentPhase
+	AttemptState           string
 	CreationEventEmittedAt time.Time
 }
 
@@ -141,10 +176,11 @@ type DynamicFlowRuntimeReadinessPlanReconciliation struct {
 }
 
 type DynamicFlowRuntimeReadinessPlanReconciliationResult struct {
-	RunID        string
-	InstancePath string
-	Changed      bool
-	PlanRevision uint64
+	RunID          string
+	InstancePath   string
+	Changed        bool
+	AttemptOrdinal uint64
+	Readiness      DynamicFlowRuntimeReadiness
 }
 
 var ErrDynamicFlowRuntimeReadinessObservationStale = errors.New("dynamic flow runtime readiness observation is stale")
@@ -179,10 +215,6 @@ func IsDynamicFlowRuntimeReadinessObservationConflict(err error) bool {
 // DynamicFlowRuntimeReadinessPersistence owns the complete selected-store
 // readiness projection. Runtime consumers receive only typed records and
 // named mutations; transaction and query authority remain private.
-type DynamicFlowRuntimeTopologyReadyResult struct {
-	Acknowledged bool
-}
-
 const DynamicFlowRuntimeRetirementBatchLimit = 128
 
 type DynamicFlowRuntimeReadinessPersistence interface {
@@ -190,9 +222,10 @@ type DynamicFlowRuntimeReadinessPersistence interface {
 	LoadDynamicFlowRuntimeReadiness(context.Context, string, runtimeflowidentity.Route) (DynamicFlowRuntimeReadiness, bool, error)
 	InspectDynamicFlowRuntimeReadinessForSource(context.Context, runtimecorrelation.SourceArtifactFact) (DynamicFlowRuntimeReadinessProjection, error)
 	InspectDynamicFlowRuntimeReadinessForRun(context.Context, string, runtimecorrelation.SourceArtifactFact) ([]DynamicFlowRuntimeReadiness, error)
-	BeginDynamicFlowRuntimeActivation(context.Context, DynamicFlowRuntimeReadinessPlan, uint64, runtimeprocessbinding.Binding) (DynamicFlowRuntimeActivationAdmissionResult, error)
+	BeginDynamicFlowRuntimeActivation(context.Context, DynamicFlowRuntimeActivationRequest) (DynamicFlowRuntimeActivationAdmissionResult, error)
+	ResolveDynamicFlowRuntimeActivation(context.Context, DynamicFlowRuntimeActivationRequest) (DynamicFlowRuntimeActivationResolution, error)
 	VerifyDynamicFlowRuntimeActivationAttempt(context.Context, DynamicFlowRuntimeActivationAttempt) error
-	MarkDynamicFlowRuntimeTopologyReadyForAttempt(context.Context, DynamicFlowRuntimeActivationAttempt, DynamicFlowRuntimeReadinessPlan, time.Time) (DynamicFlowRuntimeTopologyReadyResult, error)
+	AdvanceFlowAttachment(context.Context, DynamicFlowRuntimeActivationAttempt, FlowAttachmentPhase, time.Time) (FlowAttachmentAdvanceResult, error)
 	RetireDynamicFlowRuntimeActivationAttempt(context.Context, DynamicFlowRuntimeActivationAttempt) error
 	RetireDynamicFlowRuntimeActivationAttempts(context.Context, []DynamicFlowRuntimeActivationAttempt) error
 	AbandonDynamicFlowRuntimeActivationAttempt(context.Context, DynamicFlowRuntimeActivationAttempt) error
@@ -202,14 +235,15 @@ type DynamicFlowRuntimeReadinessPersistenceRecord struct {
 	RunID                     string
 	InstancePath              string
 	Plan                      []byte
-	PlanRevision              uint64
+	PlanHash                  string
+	AttemptOrdinal            uint64
 	OwningRunBundleHash       string
 	RunStatus                 string
 	InstanceStatus            string
 	InstanceTerminatedAt      time.Time
 	HasInstanceTerminatedAt   bool
-	TopologyReadyAt           time.Time
-	HasTopologyReadyAt        bool
+	Phase                     FlowAttachmentPhase
+	AttemptState              string
 	CreationEventEmittedAt    time.Time
 	HasCreationEventEmittedAt bool
 }
@@ -219,19 +253,26 @@ func DecodeDynamicFlowRuntimeReadinessPersistenceRecord(record DynamicFlowRuntim
 		record.RunID,
 		record.InstancePath,
 		record.Plan,
+		record.PlanHash,
 		record.RunStatus,
 		record.InstanceStatus,
 		dynamicFlowRuntimeReadinessTime{Time: record.InstanceTerminatedAt, Valid: record.HasInstanceTerminatedAt},
-		dynamicFlowRuntimeReadinessTime{Time: record.TopologyReadyAt, Valid: record.HasTopologyReadyAt},
+		record.Phase,
 		dynamicFlowRuntimeReadinessTime{Time: record.CreationEventEmittedAt, Valid: record.HasCreationEventEmittedAt},
 	)
 	if err != nil {
 		return DynamicFlowRuntimeReadiness{}, err
 	}
-	if record.PlanRevision == 0 {
-		return DynamicFlowRuntimeReadiness{}, fmt.Errorf("dynamic flow runtime readiness %s has no plan revision", record.InstancePath)
+	if record.AttemptOrdinal == 0 {
+		return DynamicFlowRuntimeReadiness{}, fmt.Errorf("dynamic flow runtime readiness %s has no attachment attempt", record.InstancePath)
 	}
-	item.PlanRevision = record.PlanRevision
+	item.AttemptOrdinal = record.AttemptOrdinal
+	switch record.AttemptState {
+	case "planned", "accepted", "superseded", "retired", "aborted":
+		item.AttemptState = record.AttemptState
+	default:
+		return DynamicFlowRuntimeReadiness{}, fmt.Errorf("invalid persisted attachment disposition %q", record.AttemptState)
+	}
 	item.OwningRunSource, err = runtimecorrelation.DecodeSourceArtifactFact(record.OwningRunBundleHash)
 	if err != nil {
 		return DynamicFlowRuntimeReadiness{}, fmt.Errorf("dynamic flow runtime readiness %s owning run source: %w", record.InstancePath, err)
@@ -253,7 +294,7 @@ func (r DynamicFlowRuntimeReadiness) Terminal() bool {
 }
 
 func (r DynamicFlowRuntimeReadiness) Pending() bool {
-	if !r.Eligible() || r.TopologyReadyAt.IsZero() {
+	if !r.Eligible() || r.Phase != FlowAttachmentReady || r.AttemptState == "aborted" || r.AttemptState == "superseded" {
 		return r.Eligible()
 	}
 	return r.Plan.CreationEvent != nil && r.CreationEventEmittedAt.IsZero()
@@ -369,6 +410,9 @@ func (p DynamicFlowRuntimeReadinessPlan) Normalized() (DynamicFlowRuntimeReadine
 	for idx := range agents {
 		agents[idx].Identity = agents[idx].Identity.Normalize()
 		agents[idx].ConfigRevision = strings.TrimSpace(agents[idx].ConfigRevision)
+		if agents[idx].EntityID != "" && agents[idx].EntityID != p.Identity.EntityID {
+			return DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("dynamic flow runtime readiness agent entity ownership disagrees with its flow")
+		}
 		if err := agents[idx].Identity.Validate(); err != nil {
 			return DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf(
 				"dynamic flow runtime readiness agent identity: %w",
@@ -442,20 +486,14 @@ func decodeDynamicFlowRuntimeReadiness(
 	runID string,
 	instancePath string,
 	raw []byte,
+	planHash string,
 	runStatus string,
 	instanceStatus string,
 	instanceTerminatedAt dynamicFlowRuntimeReadinessTime,
-	topologyReadyAt dynamicFlowRuntimeReadinessTime,
+	phase FlowAttachmentPhase,
 	creationEventEmittedAt dynamicFlowRuntimeReadinessTime,
 ) (DynamicFlowRuntimeReadiness, error) {
-	var plan DynamicFlowRuntimeReadinessPlan
-	if err := json.Unmarshal(raw, &plan); err != nil {
-		return DynamicFlowRuntimeReadiness{}, fmt.Errorf("decode dynamic flow runtime readiness %s: %w", instancePath, err)
-	}
-	if plan.Version != dynamicFlowRuntimeReadinessVersion {
-		return DynamicFlowRuntimeReadiness{}, fmt.Errorf("dynamic flow runtime readiness %s has unsupported version %d", instancePath, plan.Version)
-	}
-	normalized, err := plan.Normalized()
+	normalized, err := DecodeFlowReadinessPlan(raw, planHash)
 	if err != nil {
 		return DynamicFlowRuntimeReadiness{}, fmt.Errorf("validate dynamic flow runtime readiness %s: %w", instancePath, err)
 	}
@@ -466,15 +504,16 @@ func decodeDynamicFlowRuntimeReadiness(
 		return DynamicFlowRuntimeReadiness{}, fmt.Errorf("dynamic flow runtime readiness identity mismatch for %s", instancePath)
 	}
 	item := DynamicFlowRuntimeReadiness{
-		InstancePath: instancePath, Plan: normalized,
+		InstancePath: instancePath, Plan: normalized, PlanHash: planHash,
 		RunStatus: strings.TrimSpace(runStatus), InstanceStatus: strings.TrimSpace(instanceStatus),
 	}
 	if instanceTerminatedAt.Valid {
 		item.InstanceTerminatedAt = instanceTerminatedAt.Time.UTC()
 	}
-	if topologyReadyAt.Valid {
-		item.TopologyReadyAt = topologyReadyAt.Time.UTC()
+	if !phase.Valid() {
+		return DynamicFlowRuntimeReadiness{}, fmt.Errorf("invalid persisted attachment phase %q", phase)
 	}
+	item.Phase = phase
 	if creationEventEmittedAt.Valid {
 		item.CreationEventEmittedAt = creationEventEmittedAt.Time.UTC()
 	}

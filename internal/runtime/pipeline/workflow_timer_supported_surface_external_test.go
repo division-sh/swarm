@@ -15,6 +15,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -22,6 +23,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
+	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -37,11 +40,11 @@ func TestWorkflowTimerServedLifecycleConvergesOnBothStores(t *testing.T) {
 			selected := tc.open(t)
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
-			insertGateRecoveryRun(t, selected, runID)
-			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
-			source := semanticview.Wrap(workflowTimerServedLifecycleBundle(t, false))
+			bundle := workflowTimerServedLifecycleBundle(t, false)
+			ctx, fact := workflowLifecycleSourceContext(t, selected, bundle, runID)
+			source := semanticview.Wrap(bundle)
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-				ContractBundle: source, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter,
+				ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter,
 			}, runtimecontracts.WorkflowStageTimerInternalEvent)
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -59,13 +62,34 @@ func TestWorkflowTimerServedLifecycleConvergesOnBothStores(t *testing.T) {
 			bus.SetInterceptors(coordinator)
 
 			createdAt := time.Now().UTC()
-			if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
-				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
-				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
-				Fields:     map[string]any{},
-				EntityType: "test_entity",
-			}, createdAt); err != nil {
-				t.Fatalf("materialize workflow instance: %v", err)
+			{
+				construction62Ctx := ctx
+				construction62At := createdAt
+				construction62Instance, construction62Lifecycle, err := coordinator.PrepareInitialEntryLifecycle(construction62Ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
+					InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(),
+					CurrentState: "waiting", StageDefined: true, EnteredStageAt: createdAt, CreatedAt: createdAt,
+					Fields:     map[string]any{},
+					EntityType: "test_entity",
+				}, construction62At)
+				if err != nil {
+					t.Fatalf("prepare fixture initial lifecycle: %v", err)
+				}
+				construction62Command, err := flowactivationfixture.Command(construction62Ctx, construction62Instance, construction62Lifecycle, construction62At)
+				if err != nil {
+					t.Fatalf("prepare fixture activation command: %v", err)
+				}
+				construction62Committed, err := any(selected.events).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction62Ctx, construction62Command)
+				if err != nil {
+					t.Fatalf("materialize workflow instance: %v", err)
+				}
+				if err == nil && !construction62Committed.Acknowledged {
+					t.Fatal("fixture activation was not acknowledged")
+				}
+				if construction62Committed.Acknowledged && construction62Committed.Created {
+					if finalizeErr := coordinator.FinalizeInitialEntryLifecycle(construction62Ctx, construction62Committed.Lifecycle); finalizeErr != nil {
+						t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+					}
+				}
 			}
 			if err := coordinator.ArmInitialEntryTimers(ctx, testRunScopedWorkflowInstanceForRun(runID, runID)); err != nil {
 				t.Fatalf("arm initial workflow timers: %v", err)
@@ -118,9 +142,9 @@ func TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores(t *testin
 			selected := tc.open(t)
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
-			insertGateRecoveryRun(t, selected, runID)
-			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
-			eventBus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source})
+			ctx, fact := workflowLifecycleSourceContext(t, selected, bundle, runID)
+			logger := &exactJoinRuntimeLogger{}
+			eventBus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact, Logger: logger})
 			if err != nil {
 				t.Fatalf("new authored timer EventBus: %v", err)
 			}
@@ -139,13 +163,72 @@ func TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores(t *testin
 			})
 
 			createdAt := time.Now().UTC()
-			if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, "producer"), runtimepipeline.WorkflowInstance{
-				InstanceID: "producer", StorageRef: "producer", EntityID: entityID, WorkflowName: "producer", WorkflowVersion: "1.0.0",
-				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
-				Fields:     map[string]any{},
-				EntityType: "test_entity",
-			}, createdAt); err != nil {
-				t.Fatalf("materialize producer workflow instance: %v", err)
+			{
+				consumerConstructor, err := runtimepipeline.CompileFlowConstructor(source, "consumer", "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				consumerFields, err := consumerConstructor.InitialFields(nil, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				consumerTopology, found := semanticview.WorkflowStageTopology(source, "consumer")
+				if !found {
+					t.Fatal("consumer compiled stage topology missing")
+				}
+				consumerInitial, err := consumerTopology.InitialStoredStage()
+				if err != nil {
+					t.Fatal(err)
+				}
+				consumerContract, _ := entityruntime.ResolveForFlow(source, "consumer")
+				consumerOwner := testRunScopedWorkflowInstanceForRun(runID, "consumer")
+				consumerInstance, consumerLifecycle, err := coordinator.PrepareInitialEntryLifecycle(ctx, consumerOwner, runtimepipeline.WorkflowInstance{
+					InstanceID: "consumer", StorageRef: "consumer", WorkflowName: "consumer", WorkflowVersion: source.WorkflowVersion(),
+					EntityID: runtimepipeline.FlowInstanceEntityID("consumer"), EntityType: consumerContract.EntityType,
+					CurrentState: consumerInitial.ID(), StageDefined: consumerTopology.StageCount() != 0,
+					Fields: consumerFields, CreatedAt: createdAt,
+				}, createdAt)
+				if err != nil {
+					t.Fatalf("prepare consumer constructor lifecycle: %v", err)
+				}
+				consumerCommand, err := flowactivationfixture.Command(ctx, consumerInstance, consumerLifecycle, createdAt)
+				if err != nil {
+					t.Fatal(err)
+				}
+				consumerCommitted, err := eventBus.CommitFlowInstanceActivation(ctx, consumerCommand.Plan)
+				if err != nil || !consumerCommitted.Acknowledged || !consumerCommitted.Created {
+					t.Fatalf("construct timer consumer: acknowledged=%v created=%v err=%v", consumerCommitted.Acknowledged, consumerCommitted.Created, err)
+				}
+				if err := coordinator.FinalizeInitialEntryLifecycle(ctx, consumerCommitted.Lifecycle); err != nil {
+					t.Fatal(err)
+				}
+				construction142Ctx := ctx
+				construction142At := createdAt
+				construction142Instance, construction142Lifecycle, err := coordinator.PrepareInitialEntryLifecycle(construction142Ctx, testRunScopedWorkflowInstanceForRun(runID, "producer"), runtimepipeline.WorkflowInstance{
+					InstanceID: "producer", StorageRef: "producer", EntityID: entityID, WorkflowName: "producer", WorkflowVersion: source.WorkflowVersion(),
+					CurrentState: "waiting", StageDefined: true, EnteredStageAt: createdAt, CreatedAt: createdAt,
+					Fields:     map[string]any{},
+					EntityType: "test_entity",
+				}, construction142At)
+				if err != nil {
+					t.Fatalf("prepare fixture initial lifecycle: %v", err)
+				}
+				construction142Command, err := flowactivationfixture.Command(construction142Ctx, construction142Instance, construction142Lifecycle, construction142At)
+				if err != nil {
+					t.Fatalf("prepare fixture activation command: %v", err)
+				}
+				construction142Committed, err := any(selected.events).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction142Ctx, construction142Command)
+				if err != nil {
+					t.Fatalf("materialize producer workflow instance: %v", err)
+				}
+				if err == nil && !construction142Committed.Acknowledged {
+					t.Fatal("fixture activation was not acknowledged")
+				}
+				if construction142Committed.Acknowledged && construction142Committed.Created {
+					if finalizeErr := coordinator.FinalizeInitialEntryLifecycle(construction142Ctx, construction142Committed.Lifecycle); finalizeErr != nil {
+						t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+					}
+				}
 			}
 			if err := coordinator.ArmInitialEntryTimers(ctx, testRunScopedWorkflowInstanceForRun(runID, "producer")); err != nil {
 				t.Fatalf("arm authored workflow timer: %v", err)
@@ -174,7 +257,7 @@ func TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores(t *testin
 				}
 				cancel()
 			case <-time.After(5 * time.Second):
-				t.Fatalf("authored workflow timer did not deliver through compiled connect; trace=%v", workflowTimerDeliveryTrace(t, selected, runID))
+				t.Fatalf("authored workflow timer did not deliver through compiled connect; trace=%v; diagnostics=%s", workflowTimerDeliveryTrace(t, selected, runID), logger)
 			}
 			waitWorkflowTimerRowStatus(t, selected, runID, entityID, "fired")
 		})
@@ -193,13 +276,12 @@ func TestRecurringWorkflowTimerDoesNotReregisterAfterSynchronousTransitionCancel
 			selected := tc.open(t)
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
-			insertGateRecoveryRun(t, selected, runID)
-			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			bundle := workflowTimerServedLifecycleBundle(t, true)
 			bundle.Semantics.Timers[0].Delay = "5s"
+			ctx, fact := workflowLifecycleSourceContext(t, selected, bundle, runID)
 			source := semanticview.Wrap(bundle)
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-				ContractBundle: source, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter,
+				ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter,
 			}, runtimecontracts.WorkflowStageTimerInternalEvent)
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -214,13 +296,34 @@ func TestRecurringWorkflowTimerDoesNotReregisterAfterSynchronousTransitionCancel
 			bus.SetInterceptors(coordinator)
 
 			createdAt := time.Now().UTC().Add(-4900 * time.Millisecond)
-			if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
-				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
-				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
-				Fields:     map[string]any{},
-				EntityType: "test_entity",
-			}, createdAt); err != nil {
-				t.Fatalf("materialize workflow instance: %v", err)
+			{
+				construction217Ctx := ctx
+				construction217At := createdAt
+				construction217Instance, construction217Lifecycle, err := coordinator.PrepareInitialEntryLifecycle(construction217Ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
+					InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(),
+					CurrentState: "waiting", StageDefined: true, EnteredStageAt: createdAt, CreatedAt: createdAt,
+					Fields:     map[string]any{},
+					EntityType: "test_entity",
+				}, construction217At)
+				if err != nil {
+					t.Fatalf("prepare fixture initial lifecycle: %v", err)
+				}
+				construction217Command, err := flowactivationfixture.Command(construction217Ctx, construction217Instance, construction217Lifecycle, construction217At)
+				if err != nil {
+					t.Fatalf("prepare fixture activation command: %v", err)
+				}
+				construction217Committed, err := any(selected.events).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction217Ctx, construction217Command)
+				if err != nil {
+					t.Fatalf("materialize workflow instance: %v", err)
+				}
+				if err == nil && !construction217Committed.Acknowledged {
+					t.Fatal("fixture activation was not acknowledged")
+				}
+				if construction217Committed.Acknowledged && construction217Committed.Created {
+					if finalizeErr := coordinator.FinalizeInitialEntryLifecycle(construction217Ctx, construction217Committed.Lifecycle); finalizeErr != nil {
+						t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+					}
+				}
 			}
 			if err := coordinator.ArmInitialEntryTimers(ctx, testRunScopedWorkflowInstanceForRun(runID, runID)); err != nil {
 				t.Fatalf("arm initial workflow timers: %v", err)
@@ -276,11 +379,12 @@ func TestWorkflowTimerOneShotRestoresBeforeFireAndStaysTerminalAfterRestartOnBot
 			selected := tc.open(t)
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
-			insertGateRecoveryRun(t, selected, runID)
-			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
-			source := semanticview.Wrap(workflowTimerServedLifecycleBundle(t, false))
+			bundle := workflowTimerServedLifecycleBundle(t, false)
+			ctx, fact := workflowLifecycleSourceContext(t, selected, bundle, runID)
+			source := semanticview.Wrap(bundle)
+			logger := &exactJoinRuntimeLogger{}
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-				ContractBundle: source, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter,
+				ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter, Logger: logger,
 			}, runtimecontracts.WorkflowStageTimerInternalEvent)
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -292,13 +396,34 @@ func TestWorkflowTimerOneShotRestoresBeforeFireAndStaysTerminalAfterRestartOnBot
 			bus.SetInterceptors(coordinator)
 
 			createdAt := time.Now().UTC()
-			if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
-				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
-				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
-				Fields:     map[string]any{},
-				EntityType: "test_entity",
-			}, createdAt); err != nil {
-				t.Fatalf("materialize timer before restart: %v", err)
+			{
+				construction295Ctx := ctx
+				construction295At := createdAt
+				construction295Instance, construction295Lifecycle, err := coordinator.PrepareInitialEntryLifecycle(construction295Ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
+					InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(),
+					CurrentState: "waiting", StageDefined: true, EnteredStageAt: createdAt, CreatedAt: createdAt,
+					Fields:     map[string]any{},
+					EntityType: "test_entity",
+				}, construction295At)
+				if err != nil {
+					t.Fatalf("prepare fixture initial lifecycle: %v", err)
+				}
+				construction295Command, err := flowactivationfixture.Command(construction295Ctx, construction295Instance, construction295Lifecycle, construction295At)
+				if err != nil {
+					t.Fatalf("prepare fixture activation command: %v", err)
+				}
+				construction295Committed, err := any(selected.events).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction295Ctx, construction295Command)
+				if err != nil {
+					t.Fatalf("materialize timer before restart: %v", err)
+				}
+				if err == nil && !construction295Committed.Acknowledged {
+					t.Fatal("fixture activation was not acknowledged")
+				}
+				if construction295Committed.Acknowledged && construction295Committed.Created {
+					if finalizeErr := coordinator.FinalizeInitialEntryLifecycle(construction295Ctx, construction295Committed.Lifecycle); finalizeErr != nil {
+						t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+					}
+				}
 			}
 			assertWorkflowTimerServedRows(t, selected, runID, entityID, "active", 1)
 
@@ -341,7 +466,7 @@ func TestWorkflowTimerOneShotRestoresBeforeFireAndStaysTerminalAfterRestartOnBot
 			}
 			cancelWait()
 			if !completed {
-				t.Fatal("restored one-shot timer did not advance through the real EventBus path")
+				t.Fatalf("restored one-shot timer did not advance through the real EventBus path; diagnostics=%s", logger)
 			}
 			assertWorkflowTimerServedRows(t, selected, runID, entityID, "fired", 1)
 			if got := workflowTimerEventCount(t, selected, runID, runtimecontracts.WorkflowStageTimerInternalEvent); got != 1 {
@@ -380,10 +505,13 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 		t.Run(tc.name, func(t *testing.T) {
 			selected := tc.open(t)
 			runID := uuid.NewString()
-			entityID := uuid.NewString()
-			insertGateRecoveryRun(t, selected, runID)
-			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
+			entityID := runID
 			source := workflowTimerRecurringCancellationSource(t)
+			bundle, ok := semanticview.Bundle(source)
+			if !ok {
+				t.Fatal("recurring timer source requires its admitted bundle")
+			}
+			ctx, fact := workflowLifecycleSourceContext(t, selected, bundle, runID)
 			controllerNode := externalPipelineSourceNode(t, source, "", "controller")
 			lifecycleProbe := runtimelifecycleprobe.New()
 			module := proposedEffectProofModule{
@@ -394,7 +522,7 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 				}},
 			}
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-				ContractBundle: source, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter, TestLifecycleProbe: lifecycleProbe,
+				ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter, TestLifecycleProbe: lifecycleProbe,
 			}, runtimecontracts.WorkflowStageTimerInternalEvent)
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -414,13 +542,34 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 			bus.SetInterceptors(coordinator)
 
 			createdAt := time.Now().UTC()
-			if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
-				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
-				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
-				Fields:     map[string]any{},
-				EntityType: "timer_state",
-			}, createdAt); err != nil {
-				t.Fatalf("materialize workflow instance: %v", err)
+			{
+				construction417Ctx := ctx
+				construction417At := createdAt
+				construction417Instance, construction417Lifecycle, err := coordinator.PrepareInitialEntryLifecycle(construction417Ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
+					InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(),
+					CurrentState: "waiting", StageDefined: true, EnteredStageAt: createdAt, CreatedAt: createdAt,
+					Fields:     map[string]any{},
+					EntityType: "timer_state",
+				}, construction417At)
+				if err != nil {
+					t.Fatalf("prepare fixture initial lifecycle: %v", err)
+				}
+				construction417Command, err := flowactivationfixture.Command(construction417Ctx, construction417Instance, construction417Lifecycle, construction417At)
+				if err != nil {
+					t.Fatalf("prepare fixture activation command: %v", err)
+				}
+				construction417Committed, err := any(selected.events).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction417Ctx, construction417Command)
+				if err != nil {
+					t.Fatalf("materialize workflow instance: %v", err)
+				}
+				if err == nil && !construction417Committed.Acknowledged {
+					t.Fatal("fixture activation was not acknowledged")
+				}
+				if construction417Committed.Acknowledged && construction417Committed.Created {
+					if finalizeErr := coordinator.FinalizeInitialEntryLifecycle(construction417Ctx, construction417Committed.Lifecycle); finalizeErr != nil {
+						t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+					}
+				}
 			}
 			if err := coordinator.ArmInitialEntryTimers(ctx, testRunScopedWorkflowInstanceForRun(runID, runID)); err != nil {
 				t.Fatalf("arm initial workflow timers: %v", err)
@@ -542,10 +691,9 @@ func TestWorkflowTimerRealPublishRollbackRetriesPersistedOccurrenceOnBothStores(
 			selected := tc.open(t)
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
-			insertGateRecoveryRun(t, selected, runID)
-			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			bundle := workflowTimerServedLifecycleBundle(t, false)
 			bundle.Semantics.Timers[0].Delay = "200ms"
+			ctx, fact := workflowLifecycleSourceContext(t, selected, bundle, runID)
 			source := semanticview.Wrap(bundle)
 			admitter := newFailOnceWorkflowTimerPayloadAdmitter()
 			defer func() {
@@ -556,7 +704,7 @@ func TestWorkflowTimerRealPublishRollbackRetriesPersistedOccurrenceOnBothStores(
 				}
 			}()
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-				ContractBundle: source, PayloadAdmitter: admitter.admit,
+				ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: admitter.admit,
 			}, runtimecontracts.WorkflowStageTimerInternalEvent)
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -576,13 +724,34 @@ func TestWorkflowTimerRealPublishRollbackRetriesPersistedOccurrenceOnBothStores(
 			})
 
 			createdAt := time.Now().UTC()
-			if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
-				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
-				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
-				Fields:     map[string]any{},
-				EntityType: "test_entity",
-			}, createdAt); err != nil {
-				t.Fatalf("materialize workflow instance: %v", err)
+			{
+				construction579Ctx := ctx
+				construction579At := createdAt
+				construction579Instance, construction579Lifecycle, err := coordinator.PrepareInitialEntryLifecycle(construction579Ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
+					InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(),
+					CurrentState: "waiting", StageDefined: true, EnteredStageAt: createdAt, CreatedAt: createdAt,
+					Fields:     map[string]any{},
+					EntityType: "test_entity",
+				}, construction579At)
+				if err != nil {
+					t.Fatalf("prepare fixture initial lifecycle: %v", err)
+				}
+				construction579Command, err := flowactivationfixture.Command(construction579Ctx, construction579Instance, construction579Lifecycle, construction579At)
+				if err != nil {
+					t.Fatalf("prepare fixture activation command: %v", err)
+				}
+				construction579Committed, err := any(selected.events).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction579Ctx, construction579Command)
+				if err != nil {
+					t.Fatalf("materialize workflow instance: %v", err)
+				}
+				if err == nil && !construction579Committed.Acknowledged {
+					t.Fatal("fixture activation was not acknowledged")
+				}
+				if construction579Committed.Acknowledged && construction579Committed.Created {
+					if finalizeErr := coordinator.FinalizeInitialEntryLifecycle(construction579Ctx, construction579Committed.Lifecycle); finalizeErr != nil {
+						t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+					}
+				}
 			}
 			if err := coordinator.ArmInitialEntryTimers(ctx, testRunScopedWorkflowInstanceForRun(runID, runID)); err != nil {
 				t.Fatalf("arm initial workflow timers: %v", err)
@@ -638,12 +807,12 @@ func TestWorkflowTimerAcceptedEventReceiptRecoveryIsIdempotentOnBothStores(t *te
 			selected := tc.open(t)
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
-			insertGateRecoveryRun(t, selected, runID)
-			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
-			source := semanticview.Wrap(workflowTimerServedLifecycleBundle(t, false))
+			bundle := workflowTimerServedLifecycleBundle(t, false)
+			ctx, fact := workflowLifecycleSourceContext(t, selected, bundle, runID)
+			source := semanticview.Wrap(bundle)
 			failingOwner, failures := failNextWorkflowTimerPipelineDisposition(t, selected.events)
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-				ContractBundle: source, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter,
+				ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter,
 				PipelineObligations: failingOwner,
 			}, runtimecontracts.WorkflowStageTimerInternalEvent)
 			if err != nil {
@@ -660,13 +829,34 @@ func TestWorkflowTimerAcceptedEventReceiptRecoveryIsIdempotentOnBothStores(t *te
 			bus.SetInterceptors(coordinator)
 
 			createdAt := time.Now().UTC()
-			if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
-				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
-				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
-				Fields:     map[string]any{},
-				EntityType: "test_entity",
-			}, createdAt); err != nil {
-				t.Fatalf("materialize workflow instance: %v", err)
+			{
+				construction663Ctx := ctx
+				construction663At := createdAt
+				construction663Instance, construction663Lifecycle, err := coordinator.PrepareInitialEntryLifecycle(construction663Ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
+					InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(),
+					CurrentState: "waiting", StageDefined: true, EnteredStageAt: createdAt, CreatedAt: createdAt,
+					Fields:     map[string]any{},
+					EntityType: "test_entity",
+				}, construction663At)
+				if err != nil {
+					t.Fatalf("prepare fixture initial lifecycle: %v", err)
+				}
+				construction663Command, err := flowactivationfixture.Command(construction663Ctx, construction663Instance, construction663Lifecycle, construction663At)
+				if err != nil {
+					t.Fatalf("prepare fixture activation command: %v", err)
+				}
+				construction663Committed, err := any(selected.events).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction663Ctx, construction663Command)
+				if err != nil {
+					t.Fatalf("materialize workflow instance: %v", err)
+				}
+				if err == nil && !construction663Committed.Acknowledged {
+					t.Fatal("fixture activation was not acknowledged")
+				}
+				if construction663Committed.Acknowledged && construction663Committed.Created {
+					if finalizeErr := coordinator.FinalizeInitialEntryLifecycle(construction663Ctx, construction663Committed.Lifecycle); finalizeErr != nil {
+						t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+					}
+				}
 			}
 			if err := coordinator.ArmInitialEntryTimers(ctx, testRunScopedWorkflowInstanceForRun(runID, runID)); err != nil {
 				t.Fatalf("arm initial workflow timers: %v", err)
@@ -906,6 +1096,19 @@ func workflowTimerServedLifecycleBundle(t *testing.T, recurring bool) *runtimeco
 	// Recurrence is a runtime scheduler variant; the admitted timer transition stays exact.
 	bundle.Semantics.Timers[0].Recurring = recurring
 	return bundle
+}
+
+func workflowLifecycleSourceContext(t *testing.T, selected gateRecoveryStoreCase, bundle *runtimecontracts.WorkflowContractBundle, runID string) (context.Context, runtimecorrelation.SourceArtifactFact) {
+	t.Helper()
+	fact := mustAuthorActivityTestSourceArtifactFactForHash(bundle.SourceArtifact.BundleHash())
+	ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContextForSource(t, context.Background(), fact), runID))
+	fixture := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact}
+	if selected.postgres {
+		runlifecyclefixture.RequirePostgres(t, ctx, selected.db, fixture)
+	} else {
+		runlifecyclefixture.RequireSQLite(t, ctx, selected.db, fixture)
+	}
+	return ctx, fact
 }
 
 func workflowTimerRecurringCancellationSource(t *testing.T) semanticview.Source {

@@ -4,5 +4,4 @@ beta-node:
   produces: []
   event_handlers:
     trigger.beta:
-      create_entity: true
       advances_to: done

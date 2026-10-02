@@ -2,11 +2,12 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 
 	rc "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -90,10 +91,7 @@ func TestEntityReloadUsesCompleteStoredCarrier(t *testing.T) {
 		request := ExecutionRequest{EntityID: "entity-1", State: testStateSnapshot("pending",
 			map[string]any{"removed": "stale"}, map[string]bool{"stale_gate": true}, map[string]map[string]any{"stale_bucket": {"count": 1}})}
 		for i := 0; i < 2; i++ {
-			got, creating, err := exec.loadState(context.Background(), request)
-			if creating {
-				t.Fatal("complete stored snapshot admitted as creation")
-			}
+			got, err := exec.loadState(context.Background(), request)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -113,75 +111,44 @@ func TestEntityReloadUsesCompleteStoredCarrier(t *testing.T) {
 	}
 }
 
-func TestEntityReloadNotFoundRequiresCreationOrPreview(t *testing.T) {
-	exec := &Executor{deps: RuntimeDependencies{StateRepo: stubStateRepo{}}}
-	request := ExecutionRequest{EntityID: "entity-1", State: testStateSnapshot("ready", map[string]any{"note": "request"}, nil, nil)}
-	if _, _, err := exec.loadState(context.Background(), request); err == nil {
-		t.Fatal("existing owner admitted with only request state")
-	}
-	request.Handler.CreateEntity = true
-	if _, _, err := exec.loadState(context.Background(), request); err != nil {
-		t.Fatal(err)
-	}
-	request.Handler.CreateEntity = false
-	request.EntityMaterializationAdmitted = true
-	if _, creating, err := exec.loadState(context.Background(), request); err != nil || !creating {
-		t.Fatalf("admitted first materialization: creating=%t err=%v", creating, err)
-	}
-	request.EntityMaterializationAdmitted = false
-	request.Preview = true
-	if _, _, err := exec.loadState(context.Background(), request); err != nil {
-		t.Fatal(err)
-	}
-	request.Preview = false
-	request.EntityID = ""
-	if _, _, err := exec.loadState(context.Background(), request); err != nil {
-		t.Fatal(err)
+func TestEntityReloadRefusesMissingConstruction(t *testing.T) {
+	for _, name := range []string{"ordinary", "handler_creation", "materialization_hint", "preview", "missing_identity"} {
+		t.Run(name, func(t *testing.T) {
+			exec := &Executor{deps: RuntimeDependencies{StateRepo: stubStateRepo{}}}
+			request := ExecutionRequest{EntityID: "entity-1", State: testStateSnapshot("ready", map[string]any{"note": "request"}, nil, nil)}
+			switch name {
+			case "handler_creation":
+				request.Handler.CreateEntity = true
+			case "materialization_hint":
+				if _, survives := reflect.TypeOf(request).FieldByName("EntityMaterializationAdmitted"); survives {
+					t.Fatal("ordinary execution still carries materialization permission")
+				}
+			case "preview":
+				request.Preview = true
+			case "missing_identity":
+				request.EntityID = ""
+			}
+			_, err := exec.loadState(context.Background(), request)
+			failure, typed := failures.EnvelopeFromError(err)
+			if !errors.Is(err, ErrUnconstructedWorkflowTarget) || !typed || failure.Class != failures.ClassInternalFailure || failure.Detail.Code != "workflow_target_not_constructed" {
+				t.Fatalf("%s admitted request-only state: %v", name, err)
+			}
+		})
 	}
 }
 
-func TestEntityCreationInitializesOnlyAfterConfirmedMiss(t *testing.T) {
+func TestEntityReloadDoesNotReapplyConstructorInitials(t *testing.T) {
 	source := semanticview.Wrap(&rc.WorkflowContractBundle{RootEntities: rc.EntityContractsDocument{
 		"work": {Fields: map[string]rc.EntityFieldDecl{
 			"note":     {Type: "text", IsOptional: true, Initial: "seeded"},
 			"provided": {Type: "text", Initial: "initial"},
 		}},
 	}})
-	for _, found := range []bool{false, true} {
-		for _, explicit := range []bool{false, true} {
-			exec := &Executor{deps: RuntimeDependencies{Source: source, StateRepo: stubStateRepo{}}}
-			if found {
-				exec.deps.StateRepo = sparseSnapshotRepo{snapshot: testStateSnapshot("ready", nil, nil, nil)}
-			}
-			req := ExecutionRequest{EntityID: "entity-1", EntityMaterializationAdmitted: !explicit,
-				Handler: rc.SystemNodeEventHandler{CreateEntity: explicit},
-				State:   testStateSnapshot("ready", map[string]any{"provided": "actual"}, nil, nil),
-			}
-			var err error
-			req.State, req.creating, err = exec.loadState(context.Background(), req)
-			if err != nil {
-				t.Fatal(err)
-			}
-			contract, ok := entityruntime.ResolveForFlow(source, "")
-			if !ok {
-				t.Fatal("missing root contract")
-			}
-			fields := req.State.StateCarrier.Fields
-			if req.creating {
-				plan, err := entityruntime.NewCreationMutationPlan(contract, fields)
-				if err != nil {
-					t.Fatal(err)
-				}
-				fields = plan.Draft()
-			}
-			if found {
-				if len(fields) != 0 {
-					t.Fatalf("stored empty state resurrected: %#v", fields)
-				}
-			} else if fields["note"] != "seeded" || fields["provided"] != "actual" {
-				t.Fatalf("explicit=%v creation missed initial/supplied values: %#v", explicit, fields)
-			}
-		}
+	exec := &Executor{deps: RuntimeDependencies{Source: source, StateRepo: sparseSnapshotRepo{snapshot: testStateSnapshot("ready", nil, nil, nil)}}}
+	req := ExecutionRequest{EntityID: "entity-1", State: testStateSnapshot("ready", map[string]any{"provided": "actual"}, nil, nil)}
+	state, err := exec.loadState(context.Background(), req)
+	if err != nil || len(state.StateCarrier.Fields) != 0 {
+		t.Fatalf("reload reapplied construction: fields=%#v err=%v", state.StateCarrier.Fields, err)
 	}
 }
 

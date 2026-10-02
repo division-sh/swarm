@@ -100,7 +100,7 @@ platform_version: ">=0.7.0 <0.8.0"
 pins:
   inputs:
     events: [root.ready]
-`, "", "consumer_state:\n  entity_id: text\n", `consumer-node:
+`, "", "", `consumer-node:
   execution_type: system_node
   subscribes_to: [root.ready]
   event_handlers:
@@ -141,12 +141,11 @@ connect:
 pins:
   inputs:
     events: [root.ready]
-`, "", "consumer_state:\n  entity_id: text\n", `consumer-node:
+`, "", "", `consumer-node:
   execution_type: system_node
   subscribes_to: [root.ready]
   event_handlers:
-    root.ready:
-      create_entity: true
+    root.ready: {}
 `)
 	return root
 }
@@ -161,7 +160,6 @@ func CopyRootOutputSingletonArc(t testing.TB) string {
 		t.Fatalf("rename singleton receiver fixture: %v", err)
 	}
 	applyClosedReplacement(t, filepath.Join(receiverDir, "schema.yaml"), "name: consumer\n", "name: receiver\n")
-	applyClosedReplacement(t, filepath.Join(receiverDir, "entities.yaml"), "consumer_state:", "receiver_state:")
 	applyClosedReplacement(t, filepath.Join(receiverDir, "nodes.yaml"), "consumer-node", "arc-receiver")
 	return root
 }

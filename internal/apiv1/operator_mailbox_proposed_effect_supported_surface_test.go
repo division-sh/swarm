@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -76,17 +77,35 @@ func TestMailboxDecideHTTPReleasesProposedEffectThroughProviderOnBothStores(t *t
 			fact := sourceArtifactFactForTestBundle(t, bundle)
 			handler, bus := newProposedEffectMailboxHandler(t, persistence, db, source, fact)
 
-			runID, entityID := uuid.NewString(), uuid.NewString()
+			runID := uuid.NewString()
+			entityID := runID
 			cards := persistence.(decisioncard.Store)
 			card, continuation := proposedEffectAPICard(t, runID, entityID, fact, source.WorkflowVersion())
 			fixtureCtx := testAuthorActivityContextForSource(context.Background(), fact)
 			insertProposedEffectAPIRun(t, fixtureCtx, db, tc.name, runID, fact)
-			storetest.CommitSemanticEvent(t, fixtureCtx, persistence, eventtest.ExistingRunRootIngress(
+			sourceEvent := eventtest.ExistingRunRootIngress(
 				continuation.SourceEventID, events.EventType("thing.created"), "operator", continuation.SourceTaskID,
-				[]byte(`{"amount":250,"who":"alice"}`), 0, runID,
+				[]byte(`{"text":"Exact operator-approved content"}`), 0, runID,
 				events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), continuation.FlowInstance),
 				continuation.CreatedAt.Add(-time.Second),
-			))
+			)
+			storetest.CommitSemanticEvent(t, fixtureCtx, persistence, sourceEvent)
+			fixtureCtx = runtimecorrelation.WithRunID(fixtureCtx, runID)
+			constructor, err := newAPITestFlowConstructor(t, persistence.(runtimebus.EventStore), bus, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact})
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, err := constructor.PrepareFlowInstanceActivation(fixtureCtx, runtimepipeline.FlowInstanceActivationRequest{
+				ContractBundle: source, Instance: runtimeflowidentity.Stored(source, ".", runID, runID, "", ""),
+				TriggerEvent: sourceEvent, OccurredAt: sourceEvent.CreatedAt(),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			committed, err := bus.CommitFlowInstanceActivation(fixtureCtx, plan)
+			if err != nil || !committed.Acknowledged || !committed.Created || committed.Plan.Identity.EntityID != entityID {
+				t.Fatalf("construct proposed-effect root: %+v %v", committed, err)
+			}
 			if err := cards.(decisioncard.ProposedEffectStore).CreateProposedEffectCard(fixtureCtx, card, continuation); err != nil {
 				t.Fatal(err)
 			}
@@ -222,7 +241,7 @@ func proposedEffectAPICard(t *testing.T, runID, entityID string, fact runtimecor
 	activityOwner := activityidentity.MustNodeOwner(activityNode)
 	requestEventID := activityidentity.RequestEventID(activityidentity.Fact{
 		RunID: runID, SourceEventID: sourceEventID, EntityID: entityID,
-		Owner: activityOwner, ExecutionFlowID: ".", HandlerEventKey: "support.reply_drafted",
+		Owner: activityOwner, ExecutionFlowID: ".", HandlerEventKey: "thing.created",
 		ActivityID: "send_support_reply", Tool: "provider_write", Attempt: 1,
 	})
 	input, err := canonicaljson.FromGo(map[string]any{"text": "Exact operator-approved content"})
@@ -237,7 +256,7 @@ func proposedEffectAPICard(t *testing.T, runID, entityID string, fact runtimecor
 		SuccessEvent: "send_support_reply.succeeded", FailureEvent: "send_support_reply.failed",
 		RevisionEvent: "send_support_reply.revision_requested", RejectedEvent: "send_support_reply.rejected",
 		RetryMaxAttempts: 1, ForkPolicy: runtimecontracts.ActivityForkRequireConfirmation,
-		EntityID: entityID, NodeID: activityOwner.Key(), FlowID: ".", FlowInstance: runID, HandlerEventKey: "support.reply_drafted",
+		EntityID: entityID, NodeID: activityOwner.Key(), FlowID: ".", FlowInstance: runID, HandlerEventKey: "thing.created",
 		SourceEventID: sourceEventID, SourceRunID: runID, SourceTaskID: "task-1",
 		ExecutionMode: "live", State: decisioncard.ProposedEffectPending, CreatedAt: now, UpdatedAt: now,
 	}.Canonical()
@@ -290,15 +309,11 @@ pins:
 	writeRunCompletionFixtureFile(t, root+"/events.yaml", `thing.created:
   text: text
 `)
-	writeRunCompletionFixtureFile(t, root+"/entities.yaml", `review:
-  text: text
-`)
 	writeRunCompletionFixtureFile(t, root+"/nodes.yaml", `support-agent:
   execution_type: system_node
   subscribes_to: [thing.created]
   event_handlers:
     thing.created:
-      create_entity: true
       advances_to: done
       activity:
         id: send_support_reply

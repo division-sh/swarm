@@ -34,7 +34,7 @@ func TestSelectedForkWorkflowOwnerAssociations(t *testing.T) {
 	source := workflowOwnershipSource(t, canonicalrouting.CopyForkReceiverNestedOwnership(t, []canonicalrouting.ForkReceiver{{Path: "left", Policy: canonicalrouting.ForkReceiverOptionalExisting}, {Path: "right", Policy: canonicalrouting.ForkReceiverOptionalExisting}}))
 	for _, flow := range []string{".", "branch", "branch/producer", "branch/left", "branch/right"} {
 		t.Run(flow, func(t *testing.T) {
-			for _, change := range []string{"exact", "mixed_static_associations", "reordered_associations", "duplicate_entity", "contradictory_entity", "wrong_entity_type", "missing_event_mode"} {
+			for _, change := range []string{"exact", "mixed_static_associations", "reordered_associations", "mock_process", "missing_process_posture", "duplicate_entity", "contradictory_entity", "wrong_entity_type", "missing_event_mode"} {
 				t.Run(change, func(t *testing.T) {
 					plan, planning, _, modes, _ := workflowOwnershipProjection(t, source, flow)
 					switch change {
@@ -55,13 +55,34 @@ func TestSelectedForkWorkflowOwnerAssociations(t *testing.T) {
 					case "missing_event_mode":
 						delete(modes, "event-b")
 					}
-					got, err := runforkreadiness.Project(plan, source, planning, modes, manager.AgentManagerOptions{ExecutionPosture: executionposture.Live})
-					wantOK := change == "exact" || change == "mixed_static_associations" || change == "reordered_associations"
+					posture := executionposture.Live
+					if change == "mock_process" {
+						posture = executionposture.MockOnly
+						modes["event-a"], modes["event-b"] = executionmode.Mock, executionmode.Mock
+					} else if change == "missing_process_posture" {
+						posture = ""
+					}
+					got, err := runforkreadiness.Project(plan, source, planning, modes, manager.AgentManagerOptions{ExecutionPosture: posture})
+					wantOK := change == "exact" || change == "mixed_static_associations" || change == "reordered_associations" || change == "mock_process"
 					if (err == nil) != wantOK {
 						t.Fatalf("canonical owner projection: %v, want acceptance %t", err, wantOK)
 					}
-					if wantOK && (len(got.States) != 1 || got.States[0].FlowID != flow || got.States[0].ExecutionMode != "" || len(got.States[0].SourceEvents) != 2) {
-						t.Fatalf("owner/associations not retained: %+v", got.States)
+					if wantOK {
+						wantCount := 1
+						if flow == "branch/left" || flow == "branch/right" {
+							wantCount = 2
+						}
+						matched := false
+						for _, state := range got.States {
+							matched = matched || state.FlowID == flow
+							if state.ExecutionMode != posture.RootMode() || len(state.SourceEvents) != 2 ||
+								state.SourceEvents[0].ExecutionMode != modes[state.SourceEvents[0].SourceEventID] || state.SourceEvents[1].ExecutionMode != modes[state.SourceEvents[1].SourceEventID] {
+								t.Fatalf("owner/associations not retained: %+v", got.States)
+							}
+						}
+						if len(got.States) != wantCount || !matched {
+							t.Fatalf("complete constructed receiver set not retained: %+v", got.States)
+						}
 					}
 				})
 			}
@@ -130,7 +151,7 @@ func TestSelectedForkTemplateCompanionReadinessBothStores(t *testing.T) {
 						t.Fatalf("canonical template state missing: %+v", prepared.States)
 					}
 					canonical := prepared.States[0]
-					candidate := selectedContractWorkflowState{RunID: forkID, EntityID: canonical.EntityID, EntityType: canonical.EntityType, WorkflowName: canonical.FlowID, WorkflowVersion: canonical.WorkflowVersion, Mode: canonical.Mode, ExecutionMode: canonical.ExecutionMode, Route: canonical.Route.InstancePath, Config: canonical.Config, Agents: canonical.Agents}
+					candidate := selectedContractWorkflowState{SourceRunID: plan.SourceRunID, RunID: forkID, EntityID: canonical.EntityID, EntityType: canonical.EntityType, WorkflowName: canonical.FlowID, WorkflowVersion: canonical.WorkflowVersion, Mode: canonical.Mode, ExecutionMode: canonical.ExecutionMode, Route: canonical.Route.InstancePath, Config: canonical.Config, Agents: canonical.Agents, History: plan.Entities[0]}
 					fact, err := correlation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("a", 64))
 					if err != nil {
 						t.Fatal(err)
@@ -160,7 +181,7 @@ func TestSelectedForkTemplateCompanionReadinessBothStores(t *testing.T) {
 						return
 					}
 					if err != nil || len(topologies) != len(state.Agents) {
-						t.Fatalf("fresh template state-only construction: %v", err)
+						t.Fatalf("fresh template historical-header construction: %v", err)
 					}
 					var persisted []byte
 					if err := tx.QueryRow(`SELECT config FROM flow_instances WHERE run_id=$1 AND instance_path=$2`, candidate.RunID, candidate.Route).Scan(&persisted); err != nil {
@@ -196,7 +217,7 @@ func TestSelectedForkTemplateCompanionReadinessBothStores(t *testing.T) {
 						}
 					}
 					before := workflowOwnershipCompanionSnapshot(t, tx)
-					got, err := materializeSelectedContractWorkflowState(ctx, tx, backend == "postgres", fact, candidate, time.Now().UTC())
+					got, err := requireSelectedContractWorkflowState(ctx, tx, backend == "postgres", fact, candidate)
 					if (err == nil) != (change == "fresh_then_exact_reuse") {
 						t.Fatalf("existing template companion reuse: %v", err)
 					}
@@ -207,6 +228,106 @@ func TestSelectedForkTemplateCompanionReadinessBothStores(t *testing.T) {
 						t.Fatal("existing companion was repaired, revived, or rehomed")
 					}
 				})
+			}
+		})
+	}
+}
+
+func TestSelectedForkHistoricalFieldlessHeaderBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			db := workflowOwnershipCompanionDatabase(t, backend)
+			for _, staged := range []bool{false, true} {
+				for _, change := range []string{"exact", "imported_state", "missing_lifecycle", "spurious_fields", "spurious_state", "mismatched_type", "missing_execution_mode", "dynamic_agents", "missing_readiness", "wrong_readiness"} {
+					t.Run(fmt.Sprintf("staged_%t/%s", staged, change), func(t *testing.T) {
+						ctx := context.Background()
+						tx, err := db.BeginTx(ctx, nil)
+						if err != nil {
+							t.Fatal(err)
+						}
+						defer tx.Rollback()
+						entered := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
+						metadata := &runfork.RunForkMaterializedEntitySnapshotMetadata{Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance, FlowInstance: "receiver", StageDefined: staged}
+						sourceRun, childRun, sourceEntity := uuid.NewString(), uuid.NewString(), flowidentity.EntityID(metadata.FlowInstance)
+						projection, err := runfork.ProjectEntityOwnership(sourceRun, childRun, sourceEntity, metadata.FlowInstance)
+						if err != nil {
+							t.Fatal(err)
+						}
+						state := selectedContractWorkflowState{SourceRunID: sourceRun, RunID: childRun, EntityID: projection.Fork.EntityID, WorkflowName: "receiver", WorkflowVersion: "fixture", Mode: "static", ExecutionMode: executionmode.Mock, Route: projection.Fork.FlowInstance, Config: map[string]any{}, History: runfork.RunForkEntityState{EntityID: sourceEntity, CurrentState: "pending", EnteredStateAt: &entered, MaterializationMetadata: metadata}}
+						fact, err := correlation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("a", 64))
+						if err != nil {
+							t.Fatal(err)
+						}
+						switch change {
+						case "imported_state":
+							metadata.Source = runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState
+						case "missing_lifecycle":
+							state.History.EnteredStateAt = nil
+						case "spurious_fields":
+							state.History.Fields = map[string]any{"fake": "field"}
+						case "spurious_state":
+							if _, err := tx.Exec(`INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type) VALUES ($1,$2,$3,'fake')`, state.RunID, state.EntityID, state.Route); err != nil {
+								t.Fatal(err)
+							}
+						case "mismatched_type":
+							metadata.EntityType = "fake"
+						case "missing_execution_mode":
+							state.ExecutionMode = ""
+						case "dynamic_agents":
+							state.Agents = []runfork.RunForkSelectedContractAgentExpectation{{}}
+						}
+						before := workflowOwnershipCompanionSnapshot(t, tx)
+						_, err = materializeSelectedContractWorkflowState(ctx, tx, backend == "postgres", fact, state, time.Now().UTC())
+						if change != "exact" && change != "missing_readiness" && change != "wrong_readiness" {
+							if err == nil {
+								t.Fatal("invalid historical header acquired execution permission")
+							}
+							if after := workflowOwnershipCompanionSnapshot(t, tx); !reflect.DeepEqual(before, after) {
+								t.Fatal("refused historical construction changed selected state")
+							}
+							return
+						}
+						if err != nil {
+							t.Fatal(err)
+						}
+						var phase string
+						var attempt uint64
+						var raw []byte
+						var hash string
+						if err := tx.QueryRow(`SELECT plan,plan_hash,phase,activation_attempt_id FROM flow_instance_runtime_readiness WHERE run_id=$1 AND instance_path=$2`, state.RunID, state.Route).Scan(&raw, &hash, &phase, &attempt); err != nil {
+							t.Fatalf("static receiver has no attachment authority: %v", err)
+						}
+						plan, err := pipeline.DecodeFlowReadinessPlan(raw, hash)
+						if err != nil || plan.ExecutionMode != state.ExecutionMode || phase != "planned" || attempt != 1 || len(plan.Agents) != 0 {
+							t.Fatalf("static attachment evidence: %+v %s %d %v", plan, phase, attempt, err)
+						}
+						var count int
+						if err := tx.QueryRow(`SELECT count(*) FROM entity_state`).Scan(&count); err != nil || count != 0 {
+							t.Fatalf("fieldless history created entity fields: %d %v", count, err)
+						}
+						var stageDefined bool
+						var current, entityID string
+						if err := tx.QueryRow(`SELECT stage_defined,current_state,entity_id FROM flow_instances`).Scan(&stageDefined, &current, &entityID); err != nil || stageDefined != staged || current != "pending" || entityID != state.EntityID {
+							t.Fatalf("historical header identity/stage changed: %t %s %s %v", stageDefined, current, entityID, err)
+						}
+						if change == "missing_readiness" {
+							if _, err := tx.Exec(`DELETE FROM flow_instance_runtime_readiness`); err != nil {
+								t.Fatal(err)
+							}
+						} else if change == "wrong_readiness" {
+							if _, err := tx.Exec(`UPDATE flow_instance_runtime_readiness SET plan='{}'`); err != nil {
+								t.Fatal(err)
+							}
+						}
+						snapshot := workflowOwnershipCompanionSnapshot(t, tx)
+						if _, err := requireSelectedContractWorkflowState(ctx, tx, backend == "postgres", fact, state); (err == nil) != (change == "exact") {
+							t.Fatalf("read-only static reuse: %v", err)
+						}
+						if after := workflowOwnershipCompanionSnapshot(t, tx); !reflect.DeepEqual(snapshot, after) {
+							t.Fatal("historical header replay repeated construction")
+						}
+					})
+				}
 			}
 		})
 	}
@@ -239,9 +360,48 @@ func workflowOwnershipProjection(t *testing.T, source semanticview.Source, flow 
 	} else if schema.EffectiveMode() == "template" {
 		path, entityType, mode = flow+"/item", "deployment", "template"
 	}
-	plan := runfork.RunForkPlan{SourceRunID: runID, ForkPoint: runfork.RunForkPoint{Revision: 7}, Entities: []runfork.RunForkEntityState{{EntityID: entityID, MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
-		Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState, FlowInstance: path, EntityType: entityType,
+	graph, found := semanticview.WorkflowStageTopology(source, flow)
+	if !found {
+		t.Fatal("fixture flow has no compiled lifecycle")
+	}
+	initial, err := graph.InitialStoredStage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	enteredAt := time.Now().UTC().Add(-time.Hour)
+	configPayload, err := pipeline.WorkflowInstanceConfigPayloadForRoute(flowidentity.RouteForInstancePath(path), source.WorkflowVersion(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := json.Marshal(configPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := runfork.RunForkPlan{SourceRunID: runID, ForkPoint: runfork.RunForkPoint{Revision: 7}, Entities: []runfork.RunForkEntityState{{EntityID: entityID, CurrentState: initial.ID(), EnteredStateAt: &enteredAt, MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
+		Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance, FlowInstance: path, EntityType: entityType, StageDefined: graph.StageCount() != 0,
+		FlowTemplate: flow, Mode: mode, FlowConfig: config,
 	}}}}
+	if flow == "branch/left" || flow == "branch/right" {
+		sibling := "branch/right"
+		if flow == sibling {
+			sibling = "branch/left"
+		}
+		other := plan.Entities[0]
+		other.EntityID = uuid.NewString()
+		metadata := *other.MaterializationMetadata
+		metadata.FlowInstance = sibling
+		metadata.FlowTemplate = sibling
+		payload, err := pipeline.WorkflowInstanceConfigPayloadForRoute(flowidentity.RouteForInstancePath(sibling), source.WorkflowVersion(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		metadata.FlowConfig, err = json.Marshal(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		other.MaterializationMetadata = &metadata
+		plan.Entities = append(plan.Entities, other)
+	}
 	if mode == "template" {
 		plan.Entities[0].MaterializationMetadata.FlowConfig = json.RawMessage(`{"instance_id":"item","storage_ref":"consumer/item","flow_path":"consumer/item","config":{"vertical_id":"recorded-business-key","nested":[7,7.0,null],"status":false,"flow_path":["business","path"]}}`)
 	}
@@ -281,6 +441,7 @@ func workflowOwnershipProjection(t *testing.T, source semanticview.Source, flow 
 	state := runfork.RunForkSelectedContractWorkflowState{SourceEventID: "event-a", EntityID: entityID, EntityType: entityType, FlowID: flow, WorkflowVersion: source.WorkflowVersion(), Mode: mode,
 		SourceEvents: []runfork.RunForkSelectedContractWorkflowStateSourceEvent{{SourceEventID: "event-a", ExecutionMode: executionmode.Live}, {SourceEventID: "event-b", ExecutionMode: executionmode.Live}},
 		AddressKind:  runfork.RunForkSelectedContractWorkflowStateExact, Route: flowidentity.StoredRoute(flowidentity.ScopeKey(source, flow), flowidentity.LogicalInstanceID(path), path)}
+	state.Config = map[string]any{}
 	if flow == "." {
 		state.AddressKind, state.Route = runfork.RunForkSelectedContractWorkflowStateRunScope, flowidentity.Route{}
 	}
@@ -307,8 +468,8 @@ func workflowOwnershipCompanionDatabase(t *testing.T, backend string) *sql.DB {
 	// crosses full-schema materialization, revision, and rollback ownership.
 	for _, query := range []string{
 		fmt.Sprintf(`CREATE TEMP TABLE entity_state (run_id %s, entity_id %s, flow_instance TEXT, entity_type TEXT, PRIMARY KEY(run_id,entity_id))`, idType, idType),
-		fmt.Sprintf(`CREATE TEMP TABLE flow_instances (run_id %s, instance_path TEXT, flow_template TEXT, mode TEXT, config %s, status TEXT, created_at %s, terminated_at %s, PRIMARY KEY(run_id,instance_path))`, idType, jsonType, timeType, timeType),
-		fmt.Sprintf(`CREATE TEMP TABLE flow_instance_runtime_readiness (run_id %s, instance_path TEXT, plan %s, plan_revision BIGINT NOT NULL DEFAULT 1, activation_attempt_id %s, activation_attempt_grant_id %s, activation_attempt_revision BIGINT, activation_attempt_state TEXT, topology_ready_at %s, creation_event_emitted_at %s, created_at %s, updated_at %s, PRIMARY KEY(run_id,instance_path))`, idType, jsonType, idType, idType, timeType, timeType, timeType, timeType),
+		fmt.Sprintf(`CREATE TEMP TABLE flow_instances (run_id %s, instance_path TEXT, entity_id %s NOT NULL, entity_type TEXT, slug TEXT, name TEXT, flow_template TEXT, mode TEXT, config %s, status TEXT, stage_defined BOOLEAN NOT NULL, current_state TEXT NOT NULL, gates %s NOT NULL, bookkeeping %s NOT NULL, accumulator %s NOT NULL, revision BIGINT NOT NULL, entered_state_at %s NOT NULL, created_at %s, updated_at %s NOT NULL, terminated_at %s, PRIMARY KEY(run_id,instance_path))`, idType, idType, jsonType, jsonType, jsonType, jsonType, timeType, timeType, timeType, timeType),
+		fmt.Sprintf(`CREATE TEMP TABLE flow_instance_runtime_readiness (run_id %s, instance_path TEXT, plan %s, plan_hash TEXT NOT NULL, activation_attempt_id BIGINT NOT NULL DEFAULT 1, activation_attempt_grant_id %s, activation_attempt_state TEXT NOT NULL DEFAULT 'planned', phase TEXT NOT NULL DEFAULT 'planned', creation_event_emitted_at %s, created_at %s, updated_at %s, PRIMARY KEY(run_id,instance_path))`, idType, jsonType, idType, timeType, timeType, timeType),
 	} {
 		if _, err := db.Exec(query); err != nil {
 			t.Fatal(err)

@@ -77,14 +77,15 @@ func groupedAdmissionBoundaryHostile(t *testing.T, imports historicalBoundaryImp
 		refused             string
 	}{
 		{
-			pkg: "events", callee: "events::restoreDeliveryMaterialization",
-			approved: []string{"RestoreReceiverMaterializationRecord", "RestoreDeliveryMaterialization"}, refused: "otherDecoder",
+			pkg: "events", callee: "events::decodeReceiverInitialization",
+			approved: []string{"RestoreReceiverMaterializationRecord", "ReceiverInitialization.UnmarshalJSON"}, refused: "otherDecoder",
 			source: `package events
-func restoreDeliveryMaterialization() {}
-func RestoreReceiverMaterializationRecord() { restoreDeliveryMaterialization() }
-func RestoreDeliveryMaterialization() { restore := restoreDeliveryMaterialization; restore() }
-func otherDecoder() { restoreDeliveryMaterialization() }
-func localSpelling() { restoreDeliveryMaterialization := func() {}; restoreDeliveryMaterialization() }
+type ReceiverInitialization struct{}
+func decodeReceiverInitialization() {}
+func RestoreReceiverMaterializationRecord() { decodeReceiverInitialization() }
+func (*ReceiverInitialization) UnmarshalJSON() { restore := decodeReceiverInitialization; restore() }
+func otherDecoder() { decodeReceiverInitialization() }
+func localSpelling() { decodeReceiverInitialization := func() {}; decodeReceiverInitialization() }
 `,
 		},
 		{

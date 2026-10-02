@@ -102,7 +102,7 @@ func TestGuardTerminationSourceScopePrecedesJoin(t *testing.T) {
 		wantReachable bool
 	}{
 		{"ordinary", HandlerTransitionSemantic{Guard: kill}, []string{"ready", "unreachable"}, true},
-		{"create", HandlerTransitionSemantic{Guard: kill, CreateEntity: true}, []string{"ready"}, true},
+		{"constructed owner", HandlerTransitionSemantic{Guard: kill}, []string{"ready", "unreachable"}, true},
 		{"unreachable loop", HandlerTransitionSemantic{Guard: kill, Loop: &LoopOperationSpec{Repeat: "revision", From: "unreachable"}}, []string{"unreachable"}, false},
 		{"arrival join", HandlerTransitionSemantic{Guard: kill, Join: &JoinSpec{Stage: "unreachable"}}, []string{"ready", "unreachable"}, true},
 		{"loop before join", HandlerTransitionSemantic{Guard: kill, Loop: &LoopOperationSpec{Repeat: "revision", From: "unreachable"}, Join: &JoinSpec{Stage: "ready"}}, []string{"unreachable"}, false},

@@ -72,12 +72,10 @@ func TestA2MultiUntilIndependentRecipientEntriesAndRestartOnBothStores(t *testin
 			})
 			bus.SetInterceptors(pc)
 			now := time.Now().UTC()
-			if _, err := pc.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), pipeline.WorkflowInstance{
+			commitA2FixtureConstruction(t, pc, selected.events, ctx, testRunScopedWorkflowInstanceForRun(runID, runID), pipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: runID, WorkflowName: source.WorkflowName(), WorkflowVersion: source.WorkflowVersion(),
 				CurrentState: "active", EntityType: "root_state", Fields: map[string]any{"work_count": int64(0)},
-			}, now); err != nil {
-				t.Fatal(err)
-			}
+			}, now)
 			publishRoutes := func() {
 				t.Helper()
 				for _, path := range paths {
@@ -94,13 +92,11 @@ func TestA2MultiUntilIndependentRecipientEntriesAndRestartOnBothStores(t *testin
 						InstancePath: path, EntityID: flowidentity.EntityID(path), HasStoredPath: true},
 					RunID: runID, BundleHash: authorActivityTestSourceArtifactFact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
 				}
-				if _, err := pc.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, path), pipeline.WorkflowInstance{
+				commitA2FixtureConstruction(t, pc, selected.events, ctx, testRunScopedWorkflowInstanceForRun(runID, path), pipeline.WorkflowInstance{
 					InstanceID: key, StorageRef: path, EntityID: flowidentity.EntityID(path), WorkflowName: flows[index], WorkflowVersion: source.WorkflowVersion(),
 					Mode: "template", RuntimeReadiness: &readiness, CurrentState: "awaiting", EntityType: "order_state",
 					Fields: map[string]any{"order_id": key, "expected": []any{"a", "b"}, "halt_count": int64(0)},
-				}, now); err != nil {
-					t.Fatal(err)
-				}
+				}, now)
 				markGateRecoveryTopologyReadyFixture(t, selected, readiness, now)
 			}
 			publishRoutes()

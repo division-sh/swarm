@@ -297,7 +297,9 @@ profiles:
 units:
   local-catalog-smoke:
     packages: [github.com/division-sh/swarm/internal/runtime/cataloge2e]
-    run: '^TestCatalogRequiredSmoke$'
+    run: '^(TestCatalogRequiredSmoke|TestReceiverConstructionBeforeNodeAndAgentExecutionBothStores)$'
+    required_children:
+      TestReceiverConstructionBeforeNodeAndAgentExecutionBothStores: [sqlite/collector, sqlite/renamed-observer, postgres/collector, postgres/renamed-observer]
     count_mode: count-1
     environment_id: local-postgres-gateway-empty-v1
     budget_class: full
@@ -375,7 +377,7 @@ units:
     budget_class: full
   local-serveapp-canaries:
     packages: [github.com/division-sh/swarm/internal/serveapp]
-    run: '^(TestMockAgentSupportedSurfaceSQLitePostgres|TestServedResetRetainClearAndHistoricalReplayBothStores|TestSelectedForkPublicChangedTargetExecutionBothStores|TestIssue2394ServedStopTwentyBothStores|TestServedParityHarnessRunControlLifecycle|TestServedParityHarnessStandingServiceLifecycle|TestPausedMixedRunsStartupBothStores|TestPausedAcceptedTimerAndDecisionPublicBothStores|TestEdgeOwnedConnectionPoliciesSharingInputBothStores|TestEdgeOwnedMixedConnectionProjectionsBothStores)$'
+    run: '^(TestMockAgentSupportedSurfaceSQLitePostgres|TestServedResetRetainClearAndHistoricalReplayBothStores|TestSelectedForkPublicChangedTargetExecutionBothStores|TestIssue2394ServedStopTwentyBothStores|TestServedParityHarnessRunControlLifecycle|TestServedParityHarnessStandingServiceLifecycle|TestPausedMixedRunsStartupBothStores|TestPausedAcceptedTimerAndDecisionPublicBothStores|TestEdgeOwnedConnectionPoliciesSharingInputBothStores|TestEdgeOwnedMixedConnectionProjectionsBothStores|TestReceiverCompositionRestartBothStores|TestReleaseReceiverInitializationBothStores|TestProviderSelectedRootStandingBootBothStores)$'
     required_children:
       TestMockAgentSupportedSurfaceSQLitePostgres: [sqlite, postgres]
       TestServedResetRetainClearAndHistoricalReplayBothStores: [default_sqlite/clear=false, default_sqlite/clear=true, explicit_postgres/clear=false, explicit_postgres/clear=true]
@@ -387,6 +389,9 @@ units:
       TestPausedAcceptedTimerAndDecisionPublicBothStores: [default_sqlite/timer, default_sqlite/decision, explicit_postgres/timer, explicit_postgres/decision]
       TestEdgeOwnedConnectionPoliciesSharingInputBothStores: [sqlite/forward, sqlite/reverse, postgres/forward, postgres/reverse]
       TestEdgeOwnedMixedConnectionProjectionsBothStores: [sqlite/generated.uuid/forward, sqlite/generated.uuid/reverse, sqlite/event.id/forward, sqlite/event.id/reverse, postgres/generated.uuid/forward, postgres/generated.uuid/reverse, postgres/event.id/forward, postgres/event.id/reverse]
+      TestReceiverCompositionRestartBothStores: [sqlite, postgres]
+      TestReleaseReceiverInitializationBothStores: [default_sqlite/connected_typed_creation, default_sqlite/direct_provider_schema, explicit_postgres/connected_typed_creation, explicit_postgres/direct_provider_schema]
+      TestProviderSelectedRootStandingBootBothStores: [default_sqlite, explicit_postgres]
     count_mode: count-1
     environment_id: local-postgres-gateway-empty-v1
     budget_class: full
@@ -544,6 +549,8 @@ units:
     packages:
       - github.com/division-sh/swarm/internal/runtime/cataloge2e
     run: '^(Test($|[^CS].*|Stage.*|StaticDataInvocationGoldenConsumesAdmittedIdentity|ScatterGatherFrontierAggregatePreservesRefusalsBothStores|SelectedDownstreamPreparationFailsBeforeMaterializationBothStores|SelectedForkRecoveredReceiverReadinessBothStores|SelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic|SelectedForkPendingRootAgentInputBothStores)|Example.*|Fuzz.*)$'
+    required_children:
+      TestReceiverConstructionBeforeNodeAndAgentExecutionBothStores: [sqlite/collector, sqlite/renamed-observer, postgres/collector, postgres/renamed-observer]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
@@ -570,6 +577,7 @@ units:
       TestPayloadlessEventPublicPersistenceJourneyBothStores: [sqlite, postgres]
       TestStandingPauseAuthorityPublicBothStores: [sqlite, postgres]
       TestStandingResetNonExecutablePublicBothStores: [sqlite, postgres]
+      TestStandingRootTreePublicRestartAndResetBothStores: [sqlite, postgres]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
@@ -657,6 +665,8 @@ units:
   runtime-full:
     packages:
       - github.com/division-sh/swarm/internal/runtime
+    required_children:
+      TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStores: [sqlite, postgres]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
@@ -672,6 +682,8 @@ units:
     # 34287939711: move the independent 53.10s reset and 46.06s rotation
     # journeys to existing lighter units; no backend/case split or extra job.
     run: '^Test(Canonical.*|Channel(Connect.*|Effect.*|Listener.*|Onboarding(Admitted.*|Early.*|E2E.*|Crash.*))|Claude.*|CLI_.*|Composed.*|Configure.*|Connected.*|Create.*|Receiver.*)$'
+    required_children:
+      TestReceiverCompositionRestartBothStores: [sqlite, postgres]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
@@ -680,6 +692,8 @@ units:
       - github.com/division-sh/swarm/internal/serveapp
     # RE2 complement of TestReceiver; the adjacent unit owns that family.
     run: '^TestR($|[^e].*|e($|[^c].*|c($|[^e].*|e($|[^i].*|i($|[^v].*|v($|[^e].*|e($|[^r].*)))))))$'
+    required_children:
+      TestReleaseReceiverInitializationBothStores: [default_sqlite/connected_typed_creation, default_sqlite/direct_provider_schema, explicit_postgres/connected_typed_creation, explicit_postgres/direct_provider_schema]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
@@ -789,6 +803,8 @@ units:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
     run: '^(Test([J-LN-Q].*|ChannelOnboardingPendingResetRestartToReadyE2E|Issue2394(Held.*|Served(One.*|F.*|S.*)|Stop.*|Selected.*)|Inbound.*|Initialize.*|Internal.*|M($|[^a].*)|Ma[^i].*|ServedPublicationDirect.*)|Example.*|Fuzz.*)$'
+    required_children:
+      TestProviderSelectedRootStandingBootBothStores: [default_sqlite, explicit_postgres]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
@@ -810,6 +826,11 @@ units:
     packages:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
     run: '^(Test($|[AB].*|Ru($|[^n].*|n($|[^F].*)))|Example.*|Fuzz.*)$'
+    required_children:
+      TestAgentFixtureSealedAuthorityRejectionParity: [sqlite, postgres]
+      TestAgentLifecycleProcessBindingReadbackParity: [sqlite, postgres]
+      TestActivityAdmissionConsumesConstructedHeaderBothStores: [sqlite/fieldless, sqlite/fields, postgres/fieldless, postgres/fields]
+      TestRunControlControllerStopReconcilesBothTimerFamiliesOnBothStores: [sqlite, postgres]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
@@ -818,6 +839,33 @@ units:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
     # Positive RE2 complement of TestFanOut and TestForkG within D-F.
     run: '^Test([D-E].*|F($|[^ao].*|a($|[^n].*|n($|[^O].*|O($|[^u].*|u($|[^t].*))))|o($|[^r].*|r($|[^k].*|k($|[^G].*)))))$'
+    required_children:
+      TestForkActivationInventoriesConstructedHeadersBothStores: [sqlite/fieldless, sqlite/fields, postgres/fieldless, postgres/fields]
+      TestDynamicFlowRuntimeCreationOccurrenceLinearizesWithTerminalizationOnBothStores: [sqlite, postgres]
+      TestDynamicFlowRuntimeCreationOccurrenceRollsBackAppendedEventOnBothStores: [sqlite, postgres]
+      TestDynamicFlowRuntimeCreationOccurrenceRejectsRetiredAttemptOnBothStores: [sqlite, postgres]
+      TestFlowConstructorAcknowledgedFailureRetainsExactIdentityBothStores: [sqlite, postgres]
+      TestFlowConstructorReplayAndRefusalBothStores: [sqlite, postgres]
+      TestFlowConstructorImmutableReplayConflictBothStores: [sqlite, postgres]
+      TestFlowConstructorReadinessKeepsExactRunOwnershipBothStores: [sqlite, postgres]
+      TestFlowConstructorActivationConsumesExactInputBothStores: [sqlite, postgres]
+      TestFlowConstructorPersistsCreatingInputWithoutAutoEmitBothStores: [sqlite, postgres]
+      TestFlowConstructorCommitsKeylessDescendantsBothStores: [sqlite, postgres]
+      TestFlowConstructorRootEagerTreeBothStores: [sqlite, postgres]
+      TestFlowConstructorHistoricalFieldlessSnapshotBothStores: [sqlite, postgres]
+      TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores: [sqlite, postgres]
+      TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores: [sqlite, postgres]
+      TestFlowConstructorDescendantFaultRollsBackTreeBothStores: [sqlite, postgres]
+      TestFlowConstructorDescendantCancellationAndCorruptionBothStores: [sqlite, postgres]
+      TestFieldlessFlowConstructionKeepsLifecycleWithoutStateRowBothStores: [sqlite, postgres]
+      TestFlowAttachmentPhaseFailureRetainsConstructionBothStores: [sqlite, postgres]
+      TestFlowAttachmentCleanupRetainsExactPredecessorBothStores: [sqlite, postgres]
+      TestFlowAttachmentTimerAcquisitionFailureCannotBecomeReadyBothStores: [sqlite, postgres]
+      TestFlowAttachmentTimerAcquisitionCutsBothStores: [sqlite, postgres]
+      TestFlowAttachmentAgentAcquisitionCutsBothStores: [sqlite, postgres]
+      TestFlowAttachmentRouteAcquisitionCutsBothStores: [sqlite, postgres]
+      TestFlowAttachmentNativeCommitAcknowledgmentBothStores: [sqlite, postgres]
+      TestDeploymentConstructionNativeCommitBothStores: [sqlite/rollback_before_ack, sqlite/commit_before_lost_ack, postgres/rollback_before_ack, postgres/commit_before_lost_ack]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
@@ -826,6 +874,8 @@ units:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
     # Positive RE2 complement of Process; the complete crash proof runs separately.
     run: '^TestFanOut($|[^P].*|P($|[^r].*|r($|[^o].*|o($|[^c].*|c($|[^e].*|e($|[^s].*|s($|[^s].*)))))))$'
+    required_children:
+      TestFanOutBarrierConsumesConstructedHeaderBothStores: [sqlite/fieldless, sqlite/fields, postgres/fieldless, postgres/fields]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
@@ -852,6 +902,9 @@ units:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
     # TestC moves here after full01 exceeded its unchanged command budget.
     run: '^Test(C.*|[G-H].*)$'
+    required_children:
+      TestConstructedHeaderGateSummaryBothStores: [sqlite, postgres]
+      TestConstructedHeaderGateFreezeBothStores: [sqlite/fields=false, sqlite/fields=true, postgres/fields=false, postgres/fields=true]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
@@ -859,6 +912,12 @@ units:
     packages:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
     run: ^Test[I-O].*$
+    required_children:
+      TestOrdinaryHandlerRequiresCanonicalConstructionBothStores: [sqlite, postgres]
+      TestOrdinaryReplayInitializedReceiversBothStores: [sqlite/wrong_path, sqlite/wrong_run, sqlite/foreign_template, sqlite/wrong_stage, sqlite/malformed_bookkeeping, sqlite/state_only_receiver, sqlite/missing_declared_fields, postgres/wrong_path, postgres/wrong_run, postgres/foreign_template, postgres/wrong_stage, postgres/malformed_bookkeeping, postgres/state_only_receiver, postgres/missing_declared_fields]
+      TestOrdinaryWorkflowMutationCannotConstructOrRepairBothStores: [sqlite, postgres]
+      TestManagerNativeLostAdmissionCleanupBothStores: [sqlite/commit, sqlite/rollback, sqlite/unresolved, sqlite/panic, postgres/commit, postgres/rollback, postgres/unresolved, postgres/panic]
+      TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority: [sqlite/fields_false, sqlite/fields_true, postgres/fields_false, postgres/fields_true]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
@@ -875,6 +934,12 @@ units:
     # CI 35876869610: the former TestR unit took 245s. Its 60 non-Ru
     # top-level tests accounted for 84.85s of the 198.41s package test time.
     run: ^TestR[^u].*$
+    required_children:
+      TestReceiverReadinessRequiresConstructedHeaderBothStores: [sqlite, postgres]
+      TestReceiverConstructionReceiptBindsCreatingPublicationBothStores: [sqlite, postgres]
+      TestReceiverConstructionAndObserverIsolationBothStores: [sqlite, postgres]
+      TestReceiverFlowInitializationPublicationBothStores: [sqlite, postgres]
+      TestReceiverConfigActivationRaceAndRollbackBothStores: [sqlite, postgres]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
@@ -882,6 +947,38 @@ units:
     packages:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
     run: ^Test[S-Z].*$
+    required_children:
+      TestScenarioConstructionNativeCommitBothStores: [sqlite/rollback_before_ack, sqlite/commit_before_lost_ack, postgres/rollback_before_ack, postgres/commit_before_lost_ack]
+      TestScenarioConstructionFieldlessStateBothStores: [sqlite, postgres]
+      TestStandingPreparationVerifiesCompleteRootTreeBothStores: [sqlite/intact, sqlite/missing_sibling, sqlite/missing_fields, sqlite/foreign_parent, postgres/intact, postgres/missing_sibling, postgres/missing_fields, postgres/foreign_parent]
+      TestStandingTreeConstructionFailureDoesNotPublishPartialSetBothStores: [sqlite, postgres]
+      TestStandingKeyedAncestryRefusesBeforeMutationBothStores: [sqlite/., sqlite/parent, postgres/., postgres/parent]
+      TestSelectedContractOrdinarySourceStatePresenceBothStores:
+        - sqlite/absent
+        - sqlite/zero
+        - sqlite/fieldless
+        - sqlite/missing
+        - sqlite/corrupt
+        - sqlite/wrong-header-flow
+        - sqlite/wrong-header-type
+        - sqlite/loop
+        - postgres/absent
+        - postgres/zero
+        - postgres/fieldless
+        - postgres/missing
+        - postgres/corrupt
+        - postgres/wrong-header-flow
+        - postgres/wrong-header-type
+        - postgres/loop
+      TestSelectedRunTargetOwnersUseConstructedHeadersBothStores: [sqlite, postgres]
+      TestWorkflowEngineConstructedTransitionAtomicOnBothStores: [sqlite, postgres]
+      TestWorkflowTargetPersistenceReadNeverFabricatesMixedSnapshotOnBothStores: [sqlite, postgres]
+      TestSupportedStateOnlyProducersCannotAcquireWorkflowConstructionOnBothStores: [sqlite, postgres]
+      TestWorkflowTimerSchedulerConsumesCommittedErrorOnBothStores: [sqlite, postgres]
+      TestWorkflowGateConsumesCommittedErrorWithoutRouteReplayOnBothStores: [sqlite, postgres]
+      TestSelectedRunForkActivationFrontierContentionBothStores: [sqlite, postgres]
+      TestTerminalDecisionCardSupersessionStateChangeOnlyProducerParity: [sqlite/mark_failed, sqlite/mark_cancelled, sqlite/run_stop, sqlite/active_run_quiescence, postgres/mark_failed, postgres/mark_cancelled, postgres/run_stop, postgres/active_run_quiescence]
+      TestWorkflowTimerCauseReplayFlowActivationGateBothStores: [sqlite, postgres]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
@@ -889,6 +986,9 @@ units:
     packages:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
     run: '^TestRunFork.*$'
+    required_children:
+      TestRunForkActivationFrontierContentionBothStores: [sqlite, postgres]
+      TestRunForkActivationContentionFixtureControlBothStores: [sqlite, postgres]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad

@@ -120,7 +120,6 @@ line_item.requested:
     - ticket.closed
   event_handlers:
     ticket.opened:
-      create_entity: true
       fan_out:
         items_from: payload.line_items
         as: line_item

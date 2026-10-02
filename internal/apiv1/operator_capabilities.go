@@ -187,7 +187,6 @@ type StandingServiceHandlerOptions struct {
 
 type TestSetupHandlerOptions struct {
 	Now                       func() time.Time
-	Setup                     TestSetupStore
 	Idempotency               APIIdempotencyStore
 	RunBundleContext          RunBundleContextStore
 	RuntimeContexts           *runtime.RuntimeContextManager

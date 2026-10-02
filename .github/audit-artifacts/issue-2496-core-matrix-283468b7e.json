@@ -1,0 +1,18 @@
+{
+  "head": "283468b7e",
+  "receipt": "/tmp/agent-e-2496-constructor-attachment-core-matrix.log",
+  "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+  "result": "RED; incomplete repetition matrix",
+  "elapsed_seconds": 600.055,
+  "requested_count": 3,
+  "passed_root_executions": 39,
+  "failed_root_executions": {
+    "TestFlowConstructorRootEagerTreeBothStores": 2,
+    "TestFlowConstructorHistoricalFieldlessSnapshotBothStores": 2,
+    "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores": 2
+  },
+  "failure_records_including_package": 47,
+  "interruption": "Go aggregate command timeout at 10m; complete count=3 evidence not obtained",
+  "correction": "fc7febb09 migrates positive fixtures to exact root ownership; focused keyed root and staged fieldless history pass, full repaired matrix pending",
+  "scope": "The fresh aggregate uses a 25m command budget for three repetitions of the full constructor/attachment and cleanup matrix. No production deadline or per-case readiness/retirement assertion was increased."
+}

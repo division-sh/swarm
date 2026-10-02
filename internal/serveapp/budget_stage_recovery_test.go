@@ -18,7 +18,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -30,7 +29,7 @@ type stageRecoverySelectedStore interface {
 	budgetspend.Store
 	sourceArtifactReader
 	sourceartifactfixture.Writer
-	CreateEntity(context.Context, runtimetools.EntityCreateRecord) (runtimetools.EntityCreateResult, error)
+	SetupScenarioEntities(context.Context, runtimepipeline.ScenarioSetupRequest) (runtimepipeline.ScenarioSetupResult, error)
 }
 
 type countedStageRecoveryStore struct {
@@ -96,7 +95,7 @@ func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
 			for i, artifact := range artifacts {
 				runs[i] = uuid.NewString()
 				sourceartifactfixture.RequireArtifact(t, runStatusAuthorActivityContext(sourceartifactfixture.FactFor(artifact)), selected, artifact)
-				entitySource, err := loadBudgetRecoveryStageSource(ctx, selected, repo, spec, packBases, artifact.BundleHash())
+				_, err := loadBudgetRecoveryStageSource(ctx, selected, repo, spec, packBases, artifact.BundleHash())
 				if err != nil {
 					t.Fatalf("load retained entity source %d: %v", i, err)
 				}
@@ -115,9 +114,11 @@ func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
 					initial = "pending"
 				}
 				createCtx := runtimecorrelation.WithRunID(runStatusAuthorActivityContext(sourceartifactfixture.FactFor(artifact)), runs[i])
-				if _, err := selected.CreateEntity(createCtx, runtimetools.EntityCreateRecord{
-					RunID: runs[i], EntityID: entityID, FlowInstance: "child", EntityType: "item", CurrentState: initial,
-					Source: entitySource, CreatedAt: time.Now().UTC(), Writer: runtimetools.EntityMutationWriter{Type: "agent", ID: "stage-recovery-proof", HandlerStep: "create_entity"},
+				if _, err := selected.SetupScenarioEntities(createCtx, runtimepipeline.ScenarioSetupRequest{
+					RunID: runs[i], CreatedAt: time.Now().UTC(),
+					Entities: []runtimepipeline.ScenarioSetupEntityRequest{{
+						Alias: "retained", EntityID: entityID, FlowInstance: "child", EntityType: "item", CurrentState: initial,
+					}},
 				}); err != nil {
 					t.Fatalf("create retained entity %d: %v", i, err)
 				}

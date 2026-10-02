@@ -1098,11 +1098,23 @@ func TestValidateWorkflowContractSurface_FatalToolImplementationWarningsFollowSh
 func TestValidateWorkflowContractSurface_RejectsCreateEntityWithAccumulate(t *testing.T) {
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 
-	source := semanticview.Wrap(loadRuntimeWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-create-entity-plus-accumulate")))
-
-	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, DefaultWorkflowContractValidationOptions(nil, executionposture.Live))
-	if err == nil || !strings.Contains(err.Error(), "declares both create_entity and accumulate") {
-		t.Fatalf("ValidateWorkflowContractSurface error = %v, want create_entity/accumulate boot error", err)
+	bundle := loadRuntimeWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-success"))
+	node := bundle.Nodes["complete-task"]
+	handler := node.EventHandlers["task.requested"]
+	handler.CreateEntity = true
+	handler.Accumulate = &runtimecontracts.AccumulateSpec{Into: "items"}
+	node.EventHandlers["task.requested"] = handler
+	bundle.Nodes["complete-task"] = node
+	if bundle.Semantics.NodeHandlers == nil {
+		bundle.Semantics.NodeHandlers = map[string]map[string]runtimecontracts.SystemNodeEventHandler{}
+	}
+	if bundle.Semantics.NodeHandlers["complete-task"] == nil {
+		bundle.Semantics.NodeHandlers["complete-task"] = map[string]runtimecontracts.SystemNodeEventHandler{}
+	}
+	bundle.Semantics.NodeHandlers["complete-task"]["task.requested"] = handler
+	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticview.Wrap(bundle), DefaultWorkflowContractValidationOptions(nil, executionposture.Live))
+	if err == nil || !strings.Contains(err.Error(), "uses retired create_entity; construction belongs to the canonical flow constructor") {
+		t.Fatalf("ValidateWorkflowContractSurface error = %v, want retired-constructor refusal", err)
 	}
 }
 

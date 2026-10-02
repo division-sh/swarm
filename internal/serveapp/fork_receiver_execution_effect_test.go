@@ -38,20 +38,8 @@ func requireForkReceiverExecution(t *testing.T, rt servedControlProofRuntime, ru
 		}
 		wantStep, wantMutations := "mutate", 1
 		prior, numeric := oldValue.(float64)
-		if policy == canonicalrouting.ForkReceiverAutoMaterializing {
-			wantStep = "create"
-			if oldValue != nil {
-				t.Fatalf("automatic creation invented prior authored counter: %s", oldRaw)
-			}
-		} else if !numeric || prior < 0 || prior != float64(int(prior)) {
+		if !numeric || prior < 0 || prior != float64(int(prior)) {
 			t.Fatalf("existing counter was not an exact nonnegative integer: %s", oldRaw)
-		}
-		if policy == canonicalrouting.ForkReceiverExplicitCreate {
-			wantStep, wantMutations = "create", 2
-			var initial int
-			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1 AND entity_id=$2 AND caused_by_event=$3 AND domain='authored_field' AND path='processed_count' AND old_value IS NULL AND CAST(new_value AS TEXT)='0' AND writer_type='platform' AND writer_id='entity_initial_value' AND handler_step='create_entity'`, runID, entityID, sourceEvent).Scan(&initial); err != nil || initial != 1 {
-				t.Fatalf("explicit creation lost initial counter history: count=%d err=%v", initial, err)
-			}
 		}
 		if mutations != wantMutations || newValue != prior+1 || writer != "platform" || writerID != "workflow_engine" || step != wantStep {
 			t.Fatalf("%s business write: count=%d %s -> %s writer=%s/%s/%s", path, mutations, oldRaw, newRaw, writer, writerID, step)

@@ -2,7 +2,6 @@ package tools_test
 
 import (
 	"context"
-	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -74,7 +73,7 @@ accounts:
 		AllowInternalLegacyEntityTools: true,
 	})
 
-	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
+	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "review/inst-1",
 		"name":          "Acme",
 		"fields": map[string]any{
@@ -165,7 +164,7 @@ accounts:
 	}
 }
 
-func TestEntityTools_CreateEntityPersistsCanonicalEntityContractOnBothStores(t *testing.T) {
+func TestEntityTools_ReadImportedCanonicalEntityContractOnBothStores(t *testing.T) {
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "tester",
@@ -192,7 +191,7 @@ func TestEntityTools_CreateEntityPersistsCanonicalEntityContractOnBothStores(t *
 			exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 				EntityStore: entityStore, WorkflowSource: semanticview.Wrap(bundle), AllowInternalLegacyEntityTools: true,
 			})
-			entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
+			entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 				"flow_instance": "review/inst-1",
 				"fields":        map[string]any{"status": "open"},
 			})
@@ -218,27 +217,10 @@ func TestSQLiteEntityPersistence_MarshalsStructuredFilterValues(t *testing.T) {
 	sqliteStore := newSQLiteRuntimeToolStoreForTest(t)
 	bundle := loadWave1EntityToolBundle(t, models.AgentConfig{ID: "tester", Role: "operator"}, "review", "account", "types:\n  Brief:\n    summary: text\n", "account:\n  business_brief: Brief\n  tags: list<text>\n")
 	ctx := seedEntityToolSourceRun(t, sqliteStore, bundle)
-	entityID := uuid.NewString()
-	if _, err := sqliteStore.CreateEntity(ctx, runtimetools.EntityCreateRecord{
-		Source:       semanticview.Wrap(bundle),
-		RunID:        entityToolTestRunID,
-		EntityID:     entityID,
-		FlowInstance: "review/inst-structured",
-		EntityType:   "account",
-		CurrentState: "queued",
-		FieldsJSON: json.RawMessage(`{
-			"business_brief":{"summary":"validated"},
-			"tags":["alpha","beta"]
-		}`),
-		CreatedAt: time.Now().UTC(),
-		Writer: runtimetools.EntityMutationWriter{
-			Type:        "platform",
-			ID:          "sqlite-structured-filter-test",
-			HandlerStep: "seed",
-		},
-	}); err != nil {
-		t.Fatalf("seed sqlite structured entity: %v", err)
-	}
+	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
+		"flow_instance": "review/inst-structured",
+		"fields":        map[string]any{"business_brief": map[string]any{"summary": "validated"}, "tags": []any{"alpha", "beta"}},
+	})
 
 	rows, err := sqliteStore.QueryEntityStates(ctx, runtimetools.EntityStateQuery{
 		RunID: entityToolTestRunID,
@@ -260,24 +242,10 @@ func TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence(t *testing.T) {
 	bundle := loadRoleScopedEntityToolBundle(t, actor)
 	sqliteStore := newSQLiteRuntimeToolStoreForTest(t)
 	ctx := seedEntityToolSourceRun(t, sqliteStore, bundle)
-	entityID := uuid.NewString()
-	if _, err := sqliteStore.CreateEntity(ctx, runtimetools.EntityCreateRecord{
-		Source:       semanticview.Wrap(bundle),
-		RunID:        entityToolTestRunID,
-		EntityID:     entityID,
-		FlowInstance: "validation/inst-1",
-		EntityType:   "validation_case",
-		CurrentState: "queued",
-		FieldsJSON:   json.RawMessage(`{"status":"open","business_brief":{"summary":"before","confidence":1}}`),
-		CreatedAt:    time.Now().UTC(),
-		Writer: runtimetools.EntityMutationWriter{
-			Type:        "platform",
-			ID:          "sqlite-role-scoped-test",
-			HandlerStep: "seed",
-		},
-	}); err != nil {
-		t.Fatalf("seed sqlite role-scoped entity: %v", err)
-	}
+	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
+		"flow_instance": "validation/inst-1",
+		"fields":        map[string]any{"status": "open", "business_brief": map[string]any{"summary": "before", "confidence": int64(1)}},
+	})
 	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
 		UPDATE entity_state
 		SET bookkeeping = '{"private_fact":"must-not-leak"}'

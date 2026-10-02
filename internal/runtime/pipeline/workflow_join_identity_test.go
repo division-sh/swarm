@@ -86,7 +86,7 @@ func newExactWorkflowJoinHarness(
 		harness.path = flowID + "/" + uuid.NewString()
 		workflowName = flowID
 	}
-	harness.route = testWorkflowInstanceRoute(harness.path)
+	harness.route = testRunScopedWorkflowInstanceFromContext(ctx, harness.path).Route
 	harness.entityID = FlowInstanceEntityID(harness.path)
 	harness.pc = harness.newCoordinator()
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
@@ -235,7 +235,7 @@ func seedExactJoinScope(t *testing.T, store *workflowInstanceStore, ctx context.
 	if executionFlowID == "" {
 		executionFlowID = semanticview.RootExecutionFlowID(source)
 	}
-	route := testWorkflowInstanceRoute(path)
+	route := testRunScopedWorkflowInstanceFromContext(ctx, path).Route
 	entityID := FlowInstanceEntityID(path)
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: route.InstanceID, StorageRef: path, WorkflowName: executionFlowID, WorkflowVersion: "1.0.0",
@@ -327,7 +327,7 @@ func TestJoinScheduleFactsAreDerivedOnlyFromTypedDeclarationHandle(t *testing.T)
 			if path == "" {
 				path = runID
 			}
-			instanceRoute := testWorkflowInstanceRoute(path)
+			instanceRoute := testRunScopedWorkflowInstanceForRun(runID, path).Route
 			handle := pipelineJoinHandle(t, tc.flowID, timeridentity.TimerHandleJoinTimeout, runID, path, entityID)
 			ref, _ := handle.JoinRef()
 			activation, err := joinruntime.NewActivation(ref, []string{"a"}, nil, now, now.Add(time.Hour))
@@ -521,7 +521,7 @@ func TestRootAndFlowWorkflowJoinArrivalCompletionCancelsExactScheduleOnBothStore
 					path = scope.flowID + "/" + uuid.NewString()
 					workflowName = scope.flowID
 				}
-				route := testWorkflowInstanceRoute(path)
+				route := testRunScopedWorkflowInstanceFromContext(ctx, path).Route
 				entityID := FlowInstanceEntityID(path)
 				if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 					InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: workflowName, WorkflowVersion: "1.0.0",

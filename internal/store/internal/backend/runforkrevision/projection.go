@@ -356,11 +356,24 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 		}
 	case FamilyEntityMetadata:
 		spec = projectionSpec{
-			query: `SELECT CAST(e.entity_id AS TEXT), e.flow_instance, e.entity_type, e.slug, e.name, e.created_at, f.config`,
-			// Capture the config with its owning entity's revision, never by
-			// reading the mutable flow row during historical reconstruction.
-			source: `entity_state e LEFT JOIN flow_instances f ON f.run_id = e.run_id AND f.instance_path = e.flow_instance`, runAlias: "e",
-			columns: typedColumns(map[string]valueKind{"created_at": valueTime, "flow_config": valueJSON}, "entity_id", "flow_instance", "entity_type", "slug", "name", "created_at", "flow_config"),
+			query: `SELECT CAST(e.entity_id AS TEXT), e.flow_instance, e.entity_type, e.slug, e.name,
+				e.created_at, e.flow_config, e.construction_kind, e.stage_defined, e.flow_template, e.mode,
+				e.status, e.current_state, e.entered_state_at, e.updated_at, e.terminated_at`,
+			// Revision projection preserves both explicit producer kinds. A constructed
+			// header owns metadata even without fields; an import with no header is a
+			// different persisted fact, never inferred runnable construction.
+			source: `(SELECT run_id, entity_id, instance_path AS flow_instance, entity_type, slug, name,
+				created_at, config AS flow_config, 'constructed' AS construction_kind, stage_defined, flow_template, mode,
+				status, current_state, entered_state_at, updated_at, terminated_at
+				FROM flow_instances
+				UNION ALL
+				SELECT s.run_id, s.entity_id, s.flow_instance, s.entity_type, s.slug, s.name,
+					s.created_at, NULL AS flow_config, 'imported_state' AS construction_kind, FALSE AS stage_defined, NULL AS flow_template, NULL AS mode,
+					NULL AS status, NULL AS current_state, NULL AS entered_state_at, NULL AS updated_at, NULL AS terminated_at
+				FROM entity_state s WHERE NOT EXISTS (
+					SELECT 1 FROM flow_instances f WHERE f.run_id = s.run_id AND f.instance_path = s.flow_instance
+				)) e`, runAlias: "e",
+			columns: typedColumns(map[string]valueKind{"created_at": valueTime, "flow_config": valueJSON, "stage_defined": valueBool, "entered_state_at": valueTime, "updated_at": valueTime, "terminated_at": valueTime}, "entity_id", "flow_instance", "entity_type", "slug", "name", "created_at", "flow_config", "construction_kind", "stage_defined", "flow_template", "mode", "status", "current_state", "entered_state_at", "updated_at", "terminated_at"),
 		}
 	case FamilyEventDeliveries:
 		spec = projectionSpec{

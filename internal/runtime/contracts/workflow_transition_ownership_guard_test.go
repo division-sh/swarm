@@ -186,10 +186,10 @@ func t22RestoreTrigger(unexpected t22ErasedTrigger) runtimeengine.StateMutation 
 			2,
 		},
 		{
-			"if application.Owner().EntitylessReceiver() {",
+			"entityID := identity.NormalizeEntityID(application.EntityID())",
 			"\n_ = application.Event",
 			"internal/runtime/pipeline.PipelineCoordinator.loadCurrentDeliveryTargetState::call internal/runtime/pipeline.DeliveryTargetApplication.Event",
-			5,
+			4,
 		},
 	} {
 		if strings.Count(string(raw), entry.needle) != 1 {
@@ -363,9 +363,9 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/pipeline.PipelineCoordinator.executeNodeHandlerPlanResultWithEmissionPlan::call internal/runtime/pipeline.workflowNodeEventHandlerResolutionForDeliveryContext": 1,
 		// Reload reuses the accepted event for run/ownership and retained refusal,
 		// never derives a fresh event or a replacement receiver flow.
-		"internal/runtime/pipeline.PipelineCoordinator.loadCurrentDeliveryTargetState::call internal/runtime/pipeline.DeliveryTargetApplication.Event":      4,
+		"internal/runtime/pipeline.PipelineCoordinator.loadCurrentDeliveryTargetState::call internal/runtime/pipeline.DeliveryTargetApplication.Event":      3,
 		"internal/runtime/pipeline.PipelineCoordinator.loadCurrentDeliveryTargetState::call internal/runtime/pipeline.DeliveryTargetApplication.Validate":   1,
-		"internal/runtime/pipeline.PipelineCoordinator.prepareDeliveryTargetApplication::call internal/runtime/pipeline.DeliveryTargetApplication.Validate": 3,
+		"internal/runtime/pipeline.PipelineCoordinator.prepareDeliveryTargetApplication::call internal/runtime/pipeline.DeliveryTargetApplication.Validate": 2,
 		// Exact admitted receipt validation and terminal retained-work refusal;
 		// neither site selects a transition or creates fresh publication authority.
 		"internal/runtime/pipeline.PipelineCoordinator.prepareDeliveryTargetApplication::call internal/runtime/pipeline.workflowNodeDeliveryRoute":                          1,
@@ -414,20 +414,20 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/pipeline.PipelineCoordinator.routeWorkflowGateDecision::accepted trigger TriggeredAt":           1,
 		"internal/runtime/pipeline.pipelineEngineStateRepo.prepareMutation::accepted trigger TriggerEventID":              2,
 		"internal/runtime/pipeline.pipelineEngineStateRepo.prepareMutation::accepted trigger TriggerEventType":            1,
-		"internal/runtime/pipeline.pipelineEngineStateRepo.prepareMutation::accepted trigger TriggeredAt":                 8,
+		"internal/runtime/pipeline.pipelineEngineStateRepo.prepareMutation::accepted trigger TriggeredAt":                 4,
 		"internal/runtime/pipeline.pipelineEngineStateRepo.validateMutationTransition::accepted trigger TriggerEventID":   2,
 		"internal/runtime/pipeline.pipelineEngineStateRepo.validateMutationTransition::accepted trigger TriggerEventType": 2,
 		"internal/runtime/pipeline.pipelineEngineStateRepo.validateMutationTransition::accepted trigger TriggeredAt":      1,
 		// Definite-assignment reads the compiled graph and exact rule carrier; it
 		// does not admit or select a runtime transition.
-		"internal/runtime/engine.BuildEntityAssignmentAnalysis::call internal/runtime/semanticview.WorkflowStageTopology": 1,
-		"internal/runtime/engine.BuildEntityAssignmentAnalysis::carrier fields":                                           13,
-		"internal/runtime/engine.BuildEntityAssignmentAnalysis::edge inventory":                                           1,
+		"internal/runtime/engine.buildEntityAssignmentAnalysis::call internal/runtime/semanticview.WorkflowStageTopology": 1,
+		"internal/runtime/engine.buildEntityAssignmentAnalysis::carrier fields":                                           13,
+		"internal/runtime/engine.buildEntityAssignmentAnalysis::edge inventory":                                           1,
 		"internal/runtime/engine.entityAssignmentEdgeSelects::carrier fields":                                             5,
 		// T20/#2424: exact observation transport, including explicit NotReached at
 		// preparation exits; none of these sites reconstructs a final fact.
-		"internal/runtime/pipeline.PipelineCoordinator.executeNodeContractHandler::construct internal/runtime/pipeline.contractHandlerExecutionResult":                   19,
-		"internal/runtime/pipeline.PipelineCoordinator.executeNodeContractHandler::execution projection RuleSelection":                                                   19,
+		"internal/runtime/pipeline.PipelineCoordinator.executeNodeContractHandler::construct internal/runtime/pipeline.contractHandlerExecutionResult":                   16,
+		"internal/runtime/pipeline.PipelineCoordinator.executeNodeContractHandler::execution projection RuleSelection":                                                   16,
 		"internal/runtime/pipeline.PipelineCoordinator.executeNodeContractHandler::execution projection Transition":                                                      3,
 		"internal/runtime/pipeline.PipelineCoordinator.executeNodeHandlerPlanResultWithEmissionPlan::construct internal/runtime/pipeline.contractHandlerExecutionResult": 2,
 		"internal/runtime/pipeline.PipelineCoordinator.executeNodeHandlerPlanResultWithEmissionPlan::execution projection RuleSelection":                                 2,
@@ -589,7 +589,7 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/bootverify.flowIsStateless::graph metadata":                                                                                                  1,
 		"internal/runtime/bootverify.timerActivationStates::graph metadata":                                                                                            1,
 		"internal/runtime/contracts.BuildWorkflowStageTopology::graph metadata":                                                                                        12,
-		"internal/runtime/contracts.NewWorkflowStageClassifier::graph metadata":                                                                                        1,
+		"internal/runtime/contracts.NewWorkflowStageClassifier::graph metadata":                                                                                        3,
 		"internal/runtime/contracts.WorkflowStageClassifier.Valid::graph metadata":                                                                                     1,
 		"internal/runtime/contracts.CompiledTransition.ValidateAgainst::graph metadata":                                                                                1,
 		"internal/runtime/contracts.WorkflowContractBundle.WorkflowStageTopology::graph metadata":                                                                      9,
@@ -622,8 +622,6 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/pipeline.workflowInitialStateForFlow::graph metadata":                                                                                        1,
 		"internal/runtime.Runtime.standingTargetsMutation::call internal/runtime/semanticview.WorkflowStageTopology":                                                   1,
 		"internal/runtime.Runtime.standingTargetsMutation::graph metadata":                                                                                             1,
-		"internal/runtime/tools.Executor.execCreateEntity::call internal/runtime/semanticview.WorkflowStageTopology":                                                   1,
-		"internal/runtime/tools.Executor.execCreateEntity::graph metadata":                                                                                             1,
 		"internal/runtime/workflowlifecycle.NewGuardTermination::graph metadata":                                                                                       1,
 		"internal/runtime/workflowlifecycle.Transition.ValidateAgainst::graph metadata":                                                                                1,
 	}

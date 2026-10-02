@@ -99,10 +99,17 @@ func TestStoredCoordinates_SeparateScopeFromConcretePath(t *testing.T) {
 		},
 		{
 			name:         "template flow row keeps concrete path",
-			workflowName: "grandchild",
+			workflowName: "child/grandchild",
 			flowPath:     "child/grandchild/inst-1",
 			wantScope:    "child/grandchild",
 			wantPath:     "child/grandchild/inst-1",
+		},
+		{
+			name:         "keyless descendant keeps authored owner beneath a keyed parent",
+			workflowName: "review/scout",
+			flowPath:     "review/r1/scout",
+			wantScope:    "review/scout",
+			wantPath:     "review/r1/scout",
 		},
 	}
 
@@ -179,7 +186,7 @@ func TestStoredRoute_CanonicalizesScopeInstanceAndPath(t *testing.T) {
 		t.Fatalf("DeriveRoute = %#v, want %#v", derived, route)
 	}
 
-	instance := Stored(nil, "grandchild", "child/grandchild/inst-1", "inst-1", "", "")
+	instance := Stored(nil, "child/grandchild", "child/grandchild/inst-1", "inst-1", "", "")
 	if got := instance.Route(); got != route {
 		t.Fatalf("Instance.Route() = %#v, want %#v", got, route)
 	}

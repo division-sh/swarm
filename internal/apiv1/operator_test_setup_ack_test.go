@@ -29,6 +29,13 @@ type scenarioSetupPostCommitFaultStore struct {
 	calls int
 }
 
+// API acknowledgement controls intentionally exercise field-only import, not
+// supported runtime construction. The public served path uses the selected bus.
+type scenarioSetupImportPublisher struct {
+	bundleScopedFailingEventPublisher
+	TestSetupStore
+}
+
 func (s *scenarioSetupPostCommitFaultStore) SetupScenarioEntities(ctx context.Context, req runtimepipeline.ScenarioSetupRequest) (runtimepipeline.ScenarioSetupResult, error) {
 	s.calls++
 	result, err := s.TestSetupStore.SetupScenarioEntities(ctx, req)
@@ -68,11 +75,13 @@ func TestOperatorTestSetupAcknowledgedCleanupErrorCompletesIdempotencyBothStores
 			setup := &scenarioSetupPostCommitFaultStore{TestSetupStore: selected, fault: fault}
 			now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
 			opts := TestSetupHandlerOptions{
-				Setup:            setup,
 				Idempotency:      selected,
 				RunBundleContext: selected,
-				SourceArtifact:   bundleScopedFailingEventPublisher{fact: fact},
-				Source:           source,
+				SourceArtifact: scenarioSetupImportPublisher{
+					bundleScopedFailingEventPublisher: bundleScopedFailingEventPublisher{fact: fact},
+					TestSetupStore:                    setup,
+				},
+				Source: source,
 			}
 			runID, entityID := uuid.NewString(), uuid.NewString()
 			req := Request{

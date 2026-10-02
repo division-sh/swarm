@@ -304,7 +304,6 @@ func missingWorkflowPersistenceTestRoles(p WorkflowPersistence) []string {
 		{"entity_state_reader", p.store.entityStateReader == nil},
 		{"entity_collection_reader", p.store.entityCollectionReader == nil},
 		{"target_reader", p.store.targetReader == nil},
-		{"initial_commits", p.store.initialCommits == nil},
 	}
 	missing := make([]string, 0, len(roles))
 	for _, role := range roles {

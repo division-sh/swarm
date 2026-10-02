@@ -1153,7 +1153,7 @@ func TestExecutionScopeResolveOperand_AllowsPlatformEntityRoot(t *testing.T) {
 	}
 }
 
-func TestExecutor_ValidateRequestRejectsCreateEntityWithAccumulate(t *testing.T) {
+func TestExecutor_ValidateRequestRejectsHandlerConstruction(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        stubSource(),
 		StateRepo:     stubStateRepo{},
@@ -1169,8 +1169,8 @@ func TestExecutor_ValidateRequestRejectsCreateEntityWithAccumulate(t *testing.T)
 			Accumulate:   &runtimecontracts.AccumulateSpec{},
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "declares both create_entity and accumulate") {
-		t.Fatalf("ValidateRequest error = %v, want create_entity/accumulate error", err)
+	if !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), "handler construction is retired") {
+		t.Fatalf("ValidateRequest error = %v, want retired handler construction refusal", err)
 	}
 }
 

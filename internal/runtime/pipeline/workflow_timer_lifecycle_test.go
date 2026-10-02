@@ -154,6 +154,7 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	}
 
 	childEntityID := FlowInstanceEntityID("child")
+	seedConstructorUnitInstance(t, pc, testPipelineCoordinatorRunContext(t, pc), "child")
 	triggerEnvelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, childEntityID), "child")
 	triggerEnvelope = events.EnvelopeForTargetRoute(triggerEnvelope, events.RouteIdentity{
 		FlowID: "child", FlowInstance: "child", EntityID: childEntityID,
@@ -175,7 +176,7 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	childWorker := pipelineSourceNode(t, pc.SemanticSource(), "child", "child-worker")
 	triggerRoute := seedPipelineNodeDeliveryRouteAuthority(t, db, trigger, events.DeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient(childWorker),
-		Target: events.MustMaterializingEntityTarget(events.RouteIdentity{
+		Target: events.MustExistingEntityTarget(events.RouteIdentity{
 			FlowID: "child", FlowInstance: "child", EntityID: childEntityID,
 		}),
 	})

@@ -1545,7 +1545,7 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	`); err != nil {
 		t.Fatalf("seed runtime ingress: %v", err)
 	}
-	if _, err := pg.backend.ExecContext(ctx, `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode) VALUES ($1::uuid, 'flow/a', 'flow', 'static')`, runA); err != nil {
+	if _, err := pg.backend.ExecContext(ctx, `INSERT INTO flow_instances (run_id, instance_path, entity_id, entity_type, flow_template, mode, stage_defined, current_state, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at) VALUES ($1::uuid, 'flow/a', $2::uuid, 'reset_fixture', 'flow', 'static', TRUE, 'active', '{}', '{}', '{}', 1, now(), now(), now())`, runA, entityID); err != nil {
 		t.Fatalf("seed flow instance: %v", err)
 	}
 	if _, err := pg.backend.ExecContext(ctx, `

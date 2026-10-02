@@ -54,6 +54,60 @@ func TestEventBusRemoveFlowInstanceDropsDerivedRoutes(t *testing.T) {
 	}
 }
 
+func TestRouteTableKeylessConstructionPublishesExactRunOwners(t *testing.T) {
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyParentConnectTimer(t), runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := semanticview.Wrap(bundle)
+	routes, err := runtimebus.DeriveRouteTable(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, flowID := range []string{".", "producer", "consumer"} {
+		t.Run(flowID, func(t *testing.T) {
+			identity := runtimeflowidentity.Derive(source, flowID, "")
+			first := runtimeflowidentity.RunScopedFlowInstance{RunID: eventBusTestRunID, Route: identity.Route()}
+			second := first
+			second.RunID = eventtest.UUID("independent-keyless-run")
+			if flowID == "." {
+				first.Route = runtimeflowidentity.StoredRoute(".", first.RunID, first.RunID)
+				second.Route = runtimeflowidentity.StoredRoute(".", second.RunID, second.RunID)
+			}
+			for _, owner := range []runtimeflowidentity.RunScopedFlowInstance{first, second} {
+				if routes.HasFlowInstanceRoute(owner) {
+					t.Fatal("authored topology fabricated an installed run owner")
+				}
+				if err := routes.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: owner}); err != nil {
+					t.Fatalf("install constructed owner: %v", err)
+				}
+				if !routes.HasFlowInstanceRoute(owner) {
+					t.Fatal("constructed keyless owner was not installed")
+				}
+			}
+			if err := routes.RemoveFlowInstanceRoute(first); err != nil {
+				t.Fatal(err)
+			}
+			if routes.HasFlowInstanceRoute(first) || !routes.HasFlowInstanceRoute(second) {
+				t.Fatal("retirement crossed run ownership")
+			}
+			malformed := first
+			malformed.Route.InstancePath = "foreign/" + first.Route.InstancePath
+			if err := routes.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: malformed}); err == nil {
+				t.Fatal("keyless declaration admitted a foreign concrete path")
+			}
+			if flowID == "." {
+				foreignRun := first
+				foreignRun.RunID = second.RunID
+				if err := routes.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: foreignRun}); err == nil {
+					t.Fatal("root route borrowed a different run's identity")
+				}
+			}
+		})
+	}
+}
+
 func TestEventBusFlowInstanceTemplateDerivesSubscriptionsFromHandlerKeys(t *testing.T) {
 	source := routeMaterializationNodeSource("review", runtimecontracts.SystemNodeContract{
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{

@@ -443,7 +443,7 @@ func (m *RuntimeContextManager) register(contextDef BundleContext, activateOccur
 	if m == nil {
 		return fmt.Errorf("runtime context manager is required")
 	}
-	contextDef, err := validateRuntimeContextDefinition(contextDef)
+	contextDef, err := validateRuntimeContextDefinition(contextDef, activateOccurrences)
 	if err != nil {
 		return err
 	}
@@ -607,7 +607,7 @@ func (m *RuntimeContextManager) newStandingOccurrencesLocked(workOwner *worklife
 	return out, nil
 }
 
-func validateRuntimeContextDefinition(contextDef BundleContext) (BundleContext, error) {
+func validateRuntimeContextDefinition(contextDef BundleContext, executable bool) (BundleContext, error) {
 	contextDef = contextDef.normalized()
 	if err := contextDef.SourceArtifactFact.Validate(); err != nil {
 		return BundleContext{}, fmt.Errorf("runtime context bundle source fact: %w", err)
@@ -673,7 +673,7 @@ func validateRuntimeContextDefinition(contextDef BundleContext) (BundleContext, 
 	if runtimeOwner := contextDef.Runtime.WorkOccurrence(); runtimeOwner != nil && runtimeOwner != contextDef.WorkOwner {
 		return BundleContext{}, fmt.Errorf("runtime context %s work owner does not belong to runtime", bundleHash)
 	}
-	if err := validateRuntimeContextStandingTargets(contextDef); err != nil {
+	if err := validateRuntimeContextStandingTargets(contextDef, executable); err != nil {
 		return BundleContext{}, err
 	}
 	normalizedSubjects, err := packs.NormalizeSubjects(contextDef.InstalledTriggerSubjects)
@@ -719,7 +719,7 @@ func equalRuntimeContextSlice[T any](left, right []T) bool {
 	return reflect.DeepEqual(left, right)
 }
 
-func validateRuntimeContextStandingTargets(contextDef BundleContext) error {
+func validateRuntimeContextStandingTargets(contextDef BundleContext, executable bool) error {
 	bundleHash := contextDef.BundleHash()
 	seen := map[string]string{}
 	for _, target := range contextDef.StandingTargets {
@@ -727,7 +727,9 @@ func validateRuntimeContextStandingTargets(contextDef BundleContext) error {
 		if target.BundleHash != bundleHash {
 			return fmt.Errorf("runtime context %s standing target %q/%q bundle_hash %q does not match context", bundleHash, target.Alias, target.Provider, target.BundleHash)
 		}
-		if target.Alias == "" || target.Provider == "" || target.RunID == "" || target.Generation <= 0 || target.FlowPath == "" || target.FlowInstance == "" || target.EntityID == "" || !target.AdmissionPlan.Valid() {
+		bound := target.RunID != "" && target.Generation > 0
+		declarationOnly := target.RunID == "" && target.Generation == 0 && target.PublicationSequence == 0
+		if target.Alias == "" || target.Provider == "" || (executable && !bound) || (!bound && !declarationOnly) || target.FlowPath == "" || target.FlowInstance == "" || target.EntityID == "" || !target.AdmissionPlan.Valid() {
 			return fmt.Errorf("runtime context %s standing target requires alias, provider, run_id, flow_path, flow_instance, entity_id, and compiled admission plan", bundleHash)
 		}
 		if target.AdmissionPlan.RequiresSecret() != (target.SigningSecret != "") {

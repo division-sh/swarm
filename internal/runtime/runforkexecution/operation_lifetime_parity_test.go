@@ -12,18 +12,25 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
@@ -134,8 +141,8 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				sourceID, eventID, entityID := uuid.NewString(), uuid.NewString(), uuid.NewString()
-				seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, sourceID, eventID, entityID)
+				sourceID, eventID := uuid.NewString(), uuid.NewString()
+				seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, sourceID, eventID)
 				process, _ := worklifetime.ProcessFromContext(ctx)
 				retireRuntime := func() {
 					t.Helper()
@@ -326,7 +333,7 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 	}
 }
 
-func seedSelectedOperationSource(t *testing.T, ctx context.Context, backend string, db *sql.DB, selected any, loaded LoadedSelectedContractSource, runID, eventID, entityID string, input ...events.Event) {
+func seedSelectedOperationSource(t *testing.T, ctx context.Context, backend string, db *sql.DB, selected any, loaded LoadedSelectedContractSource, runID, eventID string, input ...events.Event) {
 	t.Helper()
 	at := time.Unix(1700002200, 0).UTC()
 	fixture := runlifecyclefixture.Fixture{RunID: runID, Origin: runlifecyclefixture.ScenarioSetupOrigin(), Source: loaded.SourceArtifactFact, Artifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()), StartedAt: at.Add(-time.Minute)}
@@ -349,14 +356,7 @@ func seedSelectedOperationSource(t *testing.T, ctx context.Context, backend stri
 		event = input[0]
 	}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{selectedExecutionEntitylessNodeRoute("source-only-node")}, pipelineobligation.ScopeSubscribed)
-	for _, query := range []string{
-		`INSERT INTO entity_mutations (run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at) VALUES ($1,$2,'lifecycle_state','','null','"pending"',$3,'platform','selected-execution-test','seed',$4)`,
-		`INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type,name,current_state,gates,fields,accumulator,revision,entered_state_at,created_at,updated_at) SELECT $1,$2,'flow-a/1','test_entity','Selected Execution Entity','pending','{}','{}','{}',1,$4,$4,$4 WHERE $3<>''`,
-	} {
-		if _, err := db.ExecContext(ctx, query, runID, entityID, eventID, at.Format(time.RFC3339Nano)); err != nil {
-			t.Fatal(err)
-		}
-	}
+	commitSelectedOperationRootFixture(t, ctx, selected, loaded, event)
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -373,4 +373,57 @@ func seedSelectedOperationSource(t *testing.T, ctx context.Context, backend stri
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// This is explicit component construction with no route/arm installation, not
+// public activation qualification. Source history must still contain a real
+// constructed header; imported fields cannot authorize selected execution.
+func commitSelectedOperationRootFixture(t *testing.T, ctx context.Context, selected any, loaded LoadedSelectedContractSource, event events.Event) {
+	t.Helper()
+	flowID := semanticview.RootExecutionFlowID(loaded.Source)
+	identity := flowidentity.Stored(loaded.Source, flowID, event.RunID(), event.RunID(), event.RunID(), "")
+	command := selectedExecutionSourceFlowCommand(t, ctx, loaded, event, identity)
+	ctx = effects.WithExecutionMode(correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, event.RunID()), loaded.SourceArtifactFact), event.ExecutionMode())
+	committed, err := selected.(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(ctx, command)
+	if err != nil || !committed.Created || !committed.Acknowledged {
+		t.Fatalf("component source construction: acknowledged=%v created=%v err=%v", committed.Acknowledged, committed.Created, err)
+	}
+}
+
+func selectedExecutionSourceFlowCommand(t *testing.T, ctx context.Context, loaded LoadedSelectedContractSource, event events.Event, identity flowidentity.Instance) runtimebus.FlowInstanceActivationCommand {
+	t.Helper()
+	constructor, err := pipeline.CompileFlowConstructor(loaded.Source, identity.TemplateID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields, err := constructor.InitialFields(nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	graph, found := semanticview.WorkflowStageTopology(loaded.Source, identity.TemplateID)
+	if !found {
+		t.Fatal("component construction requires its compiled stage topology")
+	}
+	stage, err := graph.InitialStoredStage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	contract, _ := entityruntime.ResolveForFlow(loaded.Source, identity.TemplateID)
+	readiness := pipeline.DynamicFlowRuntimeReadinessPlan{
+		Identity: identity, RunID: event.RunID(), BundleHash: loaded.SourceArtifactFact.BundleHash(),
+		WorkflowVersion: loaded.Source.WorkflowVersion(), ExecutionMode: event.ExecutionMode(),
+	}
+	instance := pipeline.WorkflowInstance{
+		InstanceID: identity.InstanceID, StorageRef: identity.InstancePath, EntityID: identity.EntityID,
+		ParentFlowID: identity.ParentRoute.FlowID, ParentFlowInstance: identity.ParentRoute.FlowInstance, ParentEntityID: identity.ParentEntityID,
+		EntityType: contract.EntityType, WorkflowName: identity.TemplateID, WorkflowVersion: loaded.Source.WorkflowVersion(),
+		Mode: "static", CurrentState: stage.ID(), StageDefined: graph.StageCount() != 0,
+		Fields: fields, Config: map[string]any{}, RuntimeReadiness: &readiness, CreatedAt: event.CreatedAt(), EnteredStageAt: event.CreatedAt(),
+	}
+	ctx = effects.WithExecutionMode(correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, event.RunID()), loaded.SourceArtifactFact), event.ExecutionMode())
+	command, err := flowactivationfixture.Command(ctx, instance, pipeline.WorkflowLifecycleMutationPlan{}, event.CreatedAt())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return command
 }

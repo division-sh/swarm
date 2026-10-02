@@ -63,7 +63,7 @@ func (p *preparedFlowTopologyRetirement) retireWithDisposition(flow runtimeflowi
 	if err != nil && set == nil {
 		return err
 	}
-	routeErr := am.retireFlowRouteAttempt(p.attempt, p.publication)
+	routeErr := am.retireFlowRouteAttempt(flow, p.attempt, p.publication)
 	retireErr := errors.Join(err, routeErr)
 	if set == nil {
 		return retireErr

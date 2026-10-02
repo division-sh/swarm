@@ -14,6 +14,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
@@ -119,6 +120,9 @@ func newWorkflowDiagnosticNativeFixture(t *testing.T, backend string, bundle *ru
 	})
 	return runtimepipeline.WorkflowDiagnosticFixtureForTest{
 		Context: ctx, Coordinator: pc,
+		CommitConstruction: func(ctx context.Context, owner flowidentity.RunScopedFlowInstance, instance runtimepipeline.WorkflowInstance, at time.Time) {
+			commitA2FixtureConstruction(t, pc, selected, ctx, owner, instance, at)
+		},
 		PublishHandler: func(ctx context.Context, event events.Event) error {
 			bus.SetInterceptors(pc)
 			return bus.PublishAndWait(ctx, event)

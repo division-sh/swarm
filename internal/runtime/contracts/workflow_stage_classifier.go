@@ -13,10 +13,14 @@ func NewWorkflowStageClassifier(root WorkflowStageTopology, flows map[string]Wor
 	if root.FlowID != "." || !root.ValidStageCatalog() {
 		return WorkflowStageClassifier{}, fmt.Errorf("selected source has no compiled root stage topology")
 	}
-	out := WorkflowStageClassifier{root: root, flows: make(map[string]WorkflowStageTopology, len(flows))}
+	out := WorkflowStageClassifier{root: root, flows: make(map[string]WorkflowStageTopology, len(flows)+1)}
+	out.flows[root.FlowID] = root
 	for key, graph := range flows {
 		if key == "" || !graph.ValidStageCatalog() {
 			return WorkflowStageClassifier{}, fmt.Errorf("flow key %q has no compiled stage topology", key)
+		}
+		if key == root.FlowID && !root.SameStageCatalog(graph) {
+			return WorkflowStageClassifier{}, fmt.Errorf("canonical root key %q has a foreign stage topology", key)
 		}
 		out.flows[key] = graph
 	}

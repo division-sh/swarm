@@ -15,17 +15,17 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestWorkflowInstanceStoreProjectionRejectsMissingEntityContract(t *testing.T) {
+func TestWorkflowInstanceStoreProjectionRejectsFieldsWithoutEntityContract(t *testing.T) {
 	instance := materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: "inst-1", StorageRef: "review/inst-1", EntityID: uuid.NewString(),
-		WorkflowName: "review", WorkflowVersion: "1", CurrentState: "active", Fields: map[string]any{},
+		WorkflowName: "review", WorkflowVersion: "1", CurrentState: "active", Fields: map[string]any{"value": "business-field"},
 	})
-	if _, err := workflowInstancePersistedProjectionFromInstance(instance, instance.StorageRef); err == nil || !strings.Contains(err.Error(), "entity_type is required") {
+	if _, err := workflowInstancePersistedProjectionFromInstance(instance, instance.StorageRef); err == nil || !strings.Contains(err.Error(), "fieldless workflow header cannot carry entity fields") {
 		t.Fatalf("missing entity contract projection error = %v", err)
 	}
 }
 
-func TestWorkflowInstanceReadRejectsBlankEntityContract(t *testing.T) {
+func TestWorkflowInstanceReadRejectsUnexpectedFieldRow(t *testing.T) {
 	now := time.Date(2026, time.August, 23, 4, 10, 0, 0, time.UTC)
 	record := WorkflowInstancePersistenceRecord{
 		EntityID: uuid.NewString(), WorkflowName: "review", WorkflowVersion: "1", Mode: "template", Status: "active",
@@ -34,8 +34,80 @@ func TestWorkflowInstanceReadRejectsBlankEntityContract(t *testing.T) {
 		Config:       []byte(`{"config":{},"workflow_version":"1","instance_id":"inst-1","flow_path":"review/inst-1"}`),
 		FlowInstance: "review/inst-1", EntityType: "   ", CreatedAt: now, UpdatedAt: now,
 	}
-	if _, err := DecodeWorkflowInstancePersistenceRecord(record); err == nil || !strings.Contains(err.Error(), "entity_state.entity_type is required") {
+	if _, err := DecodeWorkflowInstancePersistenceRecord(record); err == nil || !strings.Contains(err.Error(), "fieldless workflow review/inst-1 has an unexpected field row") {
 		t.Fatalf("blank entity contract read error = %v", err)
+	}
+	record.EntityType = ""
+	record.Fields = nil
+	if instance, err := DecodeWorkflowInstancePersistenceRecord(record); err != nil || instance.EntityID != record.EntityID || len(instance.Fields) != 0 || instance.CurrentState != record.CurrentState {
+		t.Fatalf("fieldless constructed read changed header: instance=%+v err=%v", instance, err)
+	}
+	record.EntityType = "review_subject"
+	if _, err := DecodeWorkflowInstancePersistenceRecord(record); err == nil || !strings.Contains(err.Error(), "missing its declared field row") {
+		t.Fatalf("declared field row absence accepted: %v", err)
+	}
+}
+
+func TestWorkflowInstanceFixtureListUsesConstructedHeadersBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			var store *workflowInstanceStore
+			if backend == "sqlite" {
+				store = newSQLiteWorkflowInstanceStoreForTest(t, newSQLiteWorkflowInstanceStoreTestDB(t))
+			} else {
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				store = newPostgresWorkflowInstanceStoreForTest(db)
+			}
+			var ctx context.Context
+			if backend == "sqlite" {
+				ctx = sqliteExactOnceRunContext(t, store.testDB())
+			} else {
+				ctx = testWorkflowStoreRunContext(t, store)
+			}
+			for _, fielded := range []bool{false, true} {
+				path, entityType := "fieldless", ""
+				var fields map[string]any
+				if fielded {
+					path, entityType = "fielded", "subject"
+					fields = map[string]any{"value": "business"}
+				}
+				instance := materializedWorkflowInstanceForTest(WorkflowInstance{
+					StorageRef: path, WorkflowName: path, WorkflowVersion: "fixture", CurrentState: "active", StageDefined: true,
+					EntityType: entityType, Fields: fields, Gates: map[string]bool{"ready": true},
+					Bookkeeping: map[string]any{"authority": "header"}, StateBuckets: map[string]any{"count": int64(1)},
+				})
+				if err := store.create(ctx, instance); err != nil {
+					t.Fatalf("construct fixture %s: %v", path, err)
+				}
+			}
+			query := `UPDATE entity_state SET current_state = 'obsolete', gates = '{}', bookkeeping = '{}', accumulator = '{}' WHERE run_id = ?`
+			if backend == "postgres" {
+				query = `UPDATE entity_state SET current_state = 'obsolete', gates = '{}'::jsonb, bookkeeping = '{}'::jsonb, accumulator = '{}'::jsonb WHERE run_id = $1::uuid`
+			}
+			result, err := store.testDB().ExecContext(ctx, query, testPipelineRunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if changed, err := result.RowsAffected(); err != nil || changed != 1 {
+				t.Fatalf("obsolete shadow fixture: rows=%d err=%v", changed, err)
+			}
+			instances, err := store.list(ctx, testPipelineRunID)
+			if err != nil || len(instances) != 2 {
+				t.Fatalf("list constructed headers: count=%d err=%v", len(instances), err)
+			}
+			for _, instance := range instances {
+				if instance.CurrentState != "active" || !instance.StageDefined || !instance.Gates["ready"] || instance.Bookkeeping["authority"] != "header" || instance.StateBuckets["count"] != int64(1) {
+					t.Fatalf("list consumed obsolete field-row lifecycle: %+v", instance)
+				}
+				if instance.StorageRef == "fieldless" && (instance.EntityType != "" || len(instance.Fields) != 0) {
+					t.Fatalf("fieldless header acquired fields: %+v", instance)
+				}
+				if instance.StorageRef == "fielded" && (instance.EntityType != "subject" || instance.Fields["value"] != "business") {
+					t.Fatalf("declared field projection changed: %+v", instance)
+				}
+			}
+		})
 	}
 }
 
@@ -482,15 +554,15 @@ func TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes(t *test
 		},
 		{
 			name:         "gates not bool map",
-			mutateSQL:    `UPDATE entity_state SET gates = $2::jsonb WHERE entity_id = $1::uuid AND run_id = $3::uuid`,
-			mutateKey:    "entity",
+			mutateSQL:    `UPDATE flow_instances SET gates = $2::jsonb WHERE instance_path = $1 AND run_id = $3::uuid`,
+			mutateKey:    "storage",
 			mutateArg:    `{"g_ready":1}`,
 			wantContains: "entity_state.gates must be an object of booleans",
 		},
 		{
 			name:         "accumulator not object",
-			mutateSQL:    `UPDATE entity_state SET accumulator = $2::jsonb WHERE entity_id = $1::uuid AND run_id = $3::uuid`,
-			mutateKey:    "entity",
+			mutateSQL:    `UPDATE flow_instances SET accumulator = $2::jsonb WHERE instance_path = $1 AND run_id = $3::uuid`,
+			mutateKey:    "storage",
 			mutateArg:    `[]`,
 			wantContains: "entity_state.accumulator must be a JSON object",
 		},
@@ -543,8 +615,12 @@ func TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes(t *test
 			if tc.mutateKey == "entity" {
 				mutateID = entityID
 			}
-			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), tc.mutateSQL, mutateID, tc.mutateArg, testPipelineRunID); err != nil {
+			result, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), tc.mutateSQL, mutateID, tc.mutateArg, testPipelineRunID)
+			if err != nil {
 				t.Fatalf("mutate malformed persisted shape: %v", err)
+			}
+			if changed, err := result.RowsAffected(); err != nil || changed != 1 {
+				t.Fatalf("mutate exact persisted authority: rows=%d err=%v", changed, err)
 			}
 
 			loaded, ok, err := store.Load(testWorkflowStoreRunContext(t, store), testRunScopedWorkflowInstance(storageRef))

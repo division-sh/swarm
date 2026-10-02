@@ -792,9 +792,9 @@ func freezeDecisionCardRunInTestMutation(ctx context.Context, cards decisioncard
 
 func decisionGateStatusMutationExists(t *testing.T, ctx context.Context, db *sql.DB, postgres bool, runID, entityID, status string) bool {
 	t.Helper()
-	query := `SELECT path, new_value, writer_type, writer_id, COALESCE(handler_step, '') FROM entity_mutations WHERE run_id = ? AND entity_id = ? AND domain = 'accumulator' ORDER BY created_at, mutation_id`
+	query := `SELECT path, new_value, writer_type, writer_id, COALESCE(handler_step, '') FROM entity_mutations WHERE run_id = ? AND entity_id = ? AND domain = 'accumulator' AND handler_step = 'run_supersession' ORDER BY created_at, mutation_id`
 	if postgres {
-		query = `SELECT path, new_value, writer_type, writer_id, COALESCE(handler_step, '') FROM entity_mutations WHERE run_id = $1::uuid AND entity_id = $2::uuid AND domain = 'accumulator' ORDER BY created_at, mutation_id`
+		query = `SELECT path, new_value, writer_type, writer_id, COALESCE(handler_step, '') FROM entity_mutations WHERE run_id = $1::uuid AND entity_id = $2::uuid AND domain = 'accumulator' AND handler_step = 'run_supersession' ORDER BY created_at, mutation_id`
 	}
 	rows, err := db.QueryContext(ctx, query, runID, entityID)
 	if err != nil {
@@ -858,42 +858,24 @@ func TestTerminalDecisionCardSupersessionStateChangeOnlyProducerParity(t *testin
 		}},
 		{name: "active_run_quiescence", invoke: quiesceDecisionCardRun, retry: quiesceDecisionCardRun},
 	}
-	for _, backend := range []string{"sqlite", "postgres"} {
+	for _, backend := range eventRecordContractBackends() {
 		for _, producer := range producers {
 			backend, producer := backend, producer
-			t.Run(backend+"/"+producer.name, func(t *testing.T) {
-				ctx := testAuthorActivityContext()
-				cardStore, runID := decisionCardTestStore(t, backend)
-				db, postgres := decisionCardStoreDB(t, cardStore)
-				now := time.Date(2026, 7, 14, 4, 0, 0, 0, time.UTC)
-				entityID := uuid.NewString()
-				activation, err := gateruntime.New(runID, "launch/review", entityID, "launch", "awaiting_review", "launch_review", authorActivityTestBundleHash, testGateRoutes(t), "state:awaiting_review", now)
-				if err != nil {
-					t.Fatal(err)
-				}
-				card := newDecisionCardTestCard(t, runID, now)
-				card.CardID = activation.CardID
-				card.Anchor = newDecisionCardTestStageAnchor("launch/review", "launch", entityID, activation.Stage, activation.ActivationID)
-				card.Snapshot.Decision, card.BundleHash = activation.DecisionID, activation.BundleHash
-				card, err = decisioncard.New(card)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := cardStore.CreateDecisionCard(ctx, card); err != nil {
-					t.Fatal(err)
-				}
-				seedDecisionCardGateEntity(t, db, postgres, runID, entityID, activation, now)
-				publishCompleteRunForkRevisionBaseline(t, ctx, db, postgres, runID)
-
-				if err := producer.invoke(ctx, cardStore, runID, now.Add(time.Minute)); err != nil {
-					t.Fatalf("first terminal producer: %v", err)
-				}
-				assertTerminalDecisionCardStateChangeOnly(t, ctx, cardStore, db, postgres, runID, entityID, card.CardID)
-				if err := producer.retry(ctx, cardStore, runID, now.Add(2*time.Minute)); err != nil {
-					t.Fatalf("terminal producer retry: %v", err)
-				}
-				assertTerminalDecisionCardStateChangeOnly(t, ctx, cardStore, db, postgres, runID, entityID, card.CardID)
-			})
+			for _, fields := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/fields=%t", backend.name, producer.name, fields), func(t *testing.T) {
+					f := newConstructedGateFixtureForFields(t, backend, fields, false)
+					cardStore := f.store.(decisioncard.Store)
+					now := f.state.UpdatedAt
+					if err := producer.invoke(f.ctx, cardStore, f.runID, now.Add(time.Minute)); err != nil {
+						t.Fatalf("first terminal producer: %v", err)
+					}
+					assertTerminalDecisionCardStateChangeOnly(t, f.ctx, cardStore, f.db, backend.name == "postgres", f.runID, f.entityID, f.cardID)
+					if err := producer.retry(f.ctx, cardStore, f.runID, now.Add(2*time.Minute)); err != nil {
+						t.Fatalf("terminal producer retry: %v", err)
+					}
+					assertTerminalDecisionCardStateChangeOnly(t, f.ctx, cardStore, f.db, backend.name == "postgres", f.runID, f.entityID, f.cardID)
+				})
+			}
 		}
 	}
 }
@@ -1100,10 +1082,10 @@ func acknowledgeDecisionCardPipelineEvent(t *testing.T, ctx context.Context, own
 
 func setDecisionCardCompletionEntityState(t *testing.T, db *sql.DB, postgres bool, runID, entityID, state string) {
 	t.Helper()
-	query := `UPDATE entity_state SET current_state = ?, updated_at = ? WHERE run_id = ? AND entity_id = ?`
+	query := `UPDATE flow_instances SET current_state = ?, updated_at = ? WHERE run_id = ? AND entity_id = ?`
 	args := []any{state, time.Now().UTC(), runID, entityID}
 	if postgres {
-		query = `UPDATE entity_state SET current_state = $1, updated_at = $2 WHERE run_id = $3::uuid AND entity_id = $4::uuid`
+		query = `UPDATE flow_instances SET current_state = $1, updated_at = $2 WHERE run_id = $3::uuid AND entity_id = $4::uuid`
 	}
 	if _, err := db.ExecContext(context.Background(), query, args...); err != nil {
 		t.Fatal(err)
@@ -1112,6 +1094,7 @@ func setDecisionCardCompletionEntityState(t *testing.T, db *sql.DB, postgres boo
 
 func seedDecisionCardCompletionEntity(t *testing.T, db *sql.DB, postgres bool, runID, entityID, state string, now time.Time) {
 	t.Helper()
+	seedWorkflowHeaderProjectionFixture(t, context.Background(), db, runID, entityID, "launch/review", "launch", "default", state, "{}", now)
 	query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, slug, name, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES (?, ?, 'launch/review', 'default', 'launch', 'Launch', ?, '{}', '{}', '{}', 1, ?, ?, ?)`
 	args := []any{runID, entityID, state, now, now, now}
 	if postgres {
@@ -1257,9 +1240,9 @@ func assertTerminalDecisionCardStateChangeOnly(t *testing.T, ctx context.Context
 	if eventCount != 0 {
 		t.Fatalf("terminal mailbox.card_superseded events = %d, want 0", eventCount)
 	}
-	mutationQuery := `SELECT path, new_value, writer_type, writer_id, COALESCE(handler_step, '') FROM entity_mutations WHERE run_id = ? AND entity_id = ? AND domain = 'accumulator' ORDER BY created_at, mutation_id`
+	mutationQuery := `SELECT path, new_value, writer_type, writer_id, COALESCE(handler_step, '') FROM entity_mutations WHERE run_id = ? AND entity_id = ? AND domain = 'accumulator' AND handler_step = 'run_supersession' ORDER BY created_at, mutation_id`
 	if postgres {
-		mutationQuery = `SELECT path, new_value, writer_type, writer_id, COALESCE(handler_step, '') FROM entity_mutations WHERE run_id = $1::uuid AND entity_id = $2::uuid AND domain = 'accumulator' ORDER BY created_at, mutation_id`
+		mutationQuery = `SELECT path, new_value, writer_type, writer_id, COALESCE(handler_step, '') FROM entity_mutations WHERE run_id = $1::uuid AND entity_id = $2::uuid AND domain = 'accumulator' AND handler_step = 'run_supersession' ORDER BY created_at, mutation_id`
 	}
 	rows, err := db.QueryContext(ctx, mutationQuery, runID, entityID)
 	if err != nil {
@@ -1447,6 +1430,7 @@ func seedDecisionCardGateEntity(t *testing.T, db *sql.DB, postgres bool, runID, 
 	if err != nil {
 		t.Fatal(err)
 	}
+	seedWorkflowHeaderProjectionFixture(t, testAuthorActivityContext(), db, runID, entityID, "launch/review", "launch", "default", "awaiting_review", string(accumulator), now)
 	query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, slug, name, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES (?, ?, 'launch/review', 'default', 'launch', 'Launch', 'awaiting_review', '{}', '{}', ?, 1, ?, ?, ?)`
 	args := []any{runID, entityID, string(accumulator), now, now, now}
 	if postgres {
@@ -1459,9 +1443,9 @@ func seedDecisionCardGateEntity(t *testing.T, db *sql.DB, postgres bool, runID, 
 
 func loadDecisionCardGateActivation(t *testing.T, db *sql.DB, postgres bool, runID, entityID string) gateruntime.Activation {
 	t.Helper()
-	query := `SELECT accumulator FROM entity_state WHERE run_id = ? AND entity_id = ?`
+	query := `SELECT accumulator FROM flow_instances WHERE run_id = ? AND entity_id = ?`
 	if postgres {
-		query = `SELECT accumulator FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`
+		query = `SELECT accumulator FROM flow_instances WHERE run_id = $1::uuid AND entity_id = $2::uuid`
 	}
 	var raw any
 	if err := db.QueryRowContext(testAuthorActivityContext(), query, runID, entityID).Scan(&raw); err != nil {

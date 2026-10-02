@@ -543,7 +543,7 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 	transferRoutes := func(manager *runtimemanager.AgentManager) error {
 		for len(runtimeOwner.pendingActivations) > 0 {
 			activation := runtimeOwner.pendingActivations[0]
-			if err := manager.AdoptSelectedFlowActivation(activation.attempt, activation.publication, activation.timersProjected); err != nil {
+			if err := manager.AdoptSelectedFlowActivation(activation.identity, activation.attempt, activation.publication, activation.timersProjected); err != nil {
 				return err
 			}
 			runtimeOwner.pendingActivations = runtimeOwner.pendingActivations[1:]
@@ -577,7 +577,7 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 		if err := publishRoutes(); err != nil {
 			return nil, managedexecution.Admission{}, err
 		}
-		if err := completeSelectedContractFlowRoutes(ctx, pipeline, runtimeOwner.pendingActivations, diagnostics); err != nil {
+		if err := completeSelectedContractFlowRoutes(ctx, pipeline, bus, runtimeOwner.pendingActivations, diagnostics); err != nil {
 			return nil, managedexecution.Admission{}, err
 		}
 		if err := transferRoutes(manager); err != nil {
@@ -628,7 +628,7 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 				if identity.RunID != activation.attempt.RunID() || identity.FlowInstance() != activation.attempt.InstancePath() {
 					continue
 				}
-				rec.Topology, err = rec.Topology.WithFlowActivationAttempt(activation.attempt.ID(), activation.attempt.PlanRevision())
+				rec.Topology, err = rec.Topology.WithFlowActivationAttempt(activation.attempt.ID())
 				if err != nil {
 					return nil, managedexecution.Admission{}, err
 				}
@@ -651,7 +651,7 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 			EntityID: rec.Config.EffectiveEntityID(),
 		})
 	}
-	if err := completeSelectedContractFlowRoutes(ctx, pipeline, runtimeOwner.pendingActivations, diagnostics); err != nil {
+	if err := completeSelectedContractFlowRoutes(ctx, pipeline, bus, runtimeOwner.pendingActivations, diagnostics); err != nil {
 		return nil, managedexecution.Admission{}, err
 	}
 	if err := transferRoutes(manager); err != nil {

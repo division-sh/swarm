@@ -2,7 +2,6 @@ reference:
   execution_type: system_node
   subscribes_to: [records.loaded, task.finished]
   event_handlers:
-    records.loaded:
-      create_entity: true
+    records.loaded: {}
     task.finished:
       advances_to: done

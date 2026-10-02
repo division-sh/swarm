@@ -269,7 +269,6 @@ type RoutePlanDeliveryIntent struct {
 	AgentIdentity     agentidentity.Identity
 	TargetBlueprint   events.RouteIdentity
 	TargetOwnership   events.DeliveryTargetOwnership
-	Materialization   events.ReceiverMaterializationPlan
 	Initialization    events.ReceiverInitialization
 	Handler           runtimepipeline.DeliveryTargetHandler
 	Context           events.DeliveryContext
@@ -681,7 +680,6 @@ func routePlanDeliveryIntentsFromAdmittedRoutes(routes []events.DeliveryRoute, p
 			AgentIdentity:     route.AgentIdentity,
 			TargetBlueprint:   route.Target.Route(),
 			TargetOwnership:   route.Target,
-			Materialization:   route.Materialization,
 			Initialization:    route.Initialization,
 			Context:           route.Context,
 			PayloadProjection: route.PayloadProjection,
@@ -874,7 +872,6 @@ type deliveryIntentKey struct {
 	connectClaim    events.ConnectExecutionClaim
 	agentLifecycle  agentLifecycleAdmission
 	connectPlan     events.ConnectPlanIdentity
-	materialization events.DeliveryRouteIdentity
 	initialization  events.ReceiverInitialization
 }
 
@@ -942,12 +939,6 @@ func deliveryIntentDeduplicationKey(intent RoutePlanDeliveryIntent) (deliveryInt
 		agentLifecycle:  intent.AgentLifecycle,
 		connectPlan:     intent.ConnectPlan,
 		initialization:  intent.Initialization,
-	}
-	if !intent.Materialization.Empty() {
-		key.materialization, err = intent.deliveryRoute().Identity()
-		if err != nil {
-			return deliveryIntentKey{}, false
-		}
 	}
 	return key, true
 }

@@ -16,6 +16,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
 	operatorread "github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 
 	"github.com/division-sh/swarm/internal/config"
 	dashboardserver "github.com/division-sh/swarm/internal/dashboard/server"
@@ -1758,24 +1759,45 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrite
 
 	entityID := uuid.NewString()
 	enteredAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	if _, err := pipeline.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath("mutation-flow")}, runtimepipeline.WorkflowInstance{
-		InstanceID:      "mutation-flow",
-		StorageRef:      "mutation-flow",
-		EntityID:        entityID,
-		WorkflowName:    "mutation-flow",
-		WorkflowVersion: "1.0.0",
-		CurrentState:    "done",
-		EnteredStageAt:  enteredAt,
-		CreatedAt:       enteredAt,
-		Fields:          map[string]any{"status": "closed"},
-		Gates:           map[string]bool{"g_done": true},
-		StateBuckets: map[string]any{
-			"evidence": map[string]any{"score": 2},
-			"notes":    map[string]any{"count": 1},
-		},
-		EntityType: "test_entity",
-	}, enteredAt); err != nil {
-		t.Fatalf("seed workflow instance: %v", err)
+	{
+		construction1761Ctx := runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
+		construction1761At := enteredAt
+		construction1761Instance, construction1761Lifecycle, err := pipeline.PrepareInitialEntryLifecycle(construction1761Ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath("mutation-flow")}, runtimepipeline.WorkflowInstance{
+			InstanceID:      "mutation-flow",
+			StorageRef:      "mutation-flow",
+			EntityID:        entityID,
+			WorkflowName:    "mutation-flow",
+			WorkflowVersion: "1.0.0",
+			CurrentState:    "done",
+			EnteredStageAt:  enteredAt,
+			CreatedAt:       enteredAt,
+			Fields:          map[string]any{"status": "closed"},
+			Gates:           map[string]bool{"g_done": true},
+			StateBuckets: map[string]any{
+				"evidence": map[string]any{"score": 2},
+				"notes":    map[string]any{"count": 1},
+			},
+			EntityType: "test_entity",
+		}, construction1761At)
+		if err != nil {
+			t.Fatalf("prepare fixture initial lifecycle: %v", err)
+		}
+		construction1761Command, err := flowactivationfixture.Command(construction1761Ctx, construction1761Instance, construction1761Lifecycle, construction1761At)
+		if err != nil {
+			t.Fatalf("prepare fixture activation command: %v", err)
+		}
+		construction1761Committed, err := any(selected).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction1761Ctx, construction1761Command)
+		if err != nil {
+			t.Fatalf("seed workflow instance: %v", err)
+		}
+		if err == nil && !construction1761Committed.Acknowledged {
+			t.Fatal("fixture activation was not acknowledged")
+		}
+		if construction1761Committed.Acknowledged && construction1761Committed.Created {
+			if finalizeErr := pipeline.FinalizeInitialEntryLifecycle(construction1761Ctx, construction1761Committed.Lifecycle); finalizeErr != nil {
+				t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+			}
+		}
 	}
 
 	if err := trackedMutationStateMatchesEntityState(db, runID, entityID); err != nil {

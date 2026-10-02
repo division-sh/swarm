@@ -37,7 +37,7 @@ func TestConnectedForkCompletedDynamicHistoryRefusalBothStores(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			root := selectedForkReadinessCatalogFixture(t, 0, "node")
 			h := newRuntimeHarnessForBackend(t, root, backend, true)
-			materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, "worker-flow/worker-001")
+			materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, "worker-flow/worker-001", "worker.inspect.requested")
 			ctx := catalogRunContext(h, catalogRuntimeRunID)
 			frontier := publishSelectedForkReadinessFrontier(t, ctx, h, "worker.inspect")
 			observed, err := catalogRunScopedOperatorEvents(h, catalogRuntimeRunID)

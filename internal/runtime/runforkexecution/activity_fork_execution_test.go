@@ -22,10 +22,14 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -110,7 +114,7 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 			activityNode := mustRunForkNode("flow_a", "test-node")
 			beforeCalls := connectorCalls.Load()
 			sourceRunID := uuid.NewString()
-			entityID := uuid.NewString()
+			entityID := flowidentity.EntityID("flow_a")
 			initiatingEventID := uuid.NewString()
 			at := time.Now().UTC().Truncate(time.Microsecond)
 			activation, err := loopruntime.New(sourceRunID, entityID, "flow_a", "revision", "revision_id", uuid.NewString(), "review", 3, at.Add(-time.Minute))
@@ -128,12 +132,9 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 			routingSource := eventtest.StaticFlowRoutingSource("flow_a", "flow_a", entityID)
 			activityRoute := events.DeliveryRoute{
 				Recipient: events.MustNodeDeliveryRecipient(activityNode),
-				Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "flow_a", FlowInstance: "flow_a"}),
+				Target:    events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "flow_a", FlowInstance: "flow_a", EntityID: entityID}),
 			}
 			fixture.seedSource(t, loaded, sourceRunID, entityID, sourceRequestEventID, at, activityRoute, routingSource)
-			if _, err := db.ExecContext(ctx, `UPDATE entity_state SET flow_instance = 'flow_a' WHERE run_id = $1::uuid AND entity_id = $2::uuid`, sourceRunID, entityID); err != nil {
-				t.Fatalf("canonicalize source activity workflow state route: %v", err)
-			}
 			seedSelectedContractActivityLoop(t, db, sourceRunID, entityID, sourceRequestEventID, activation, at)
 			seedSelectedContractActivityRequest(t, db, sourceRunID, sourceRequestEventID, selectedContractActivityRequestPayload{
 				ActivityID: "connector", Tool: "provider.connector", Input: map[string]any{"value": "x"},
@@ -327,36 +328,37 @@ func newActivityForkFixture(t *testing.T, backend string) activityForkFixture {
 func (f activityForkFixture) seedSource(t *testing.T, loaded LoadedSelectedContractSource, runID, entityID, eventID string, at time.Time, route events.DeliveryRoute, source events.RoutingSource) {
 	t.Helper()
 	envelope := events.EnvelopeForSourceRoute(events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow_a"), source.Route())
-	if f.sqlite == nil {
-		seedSelectedExecutionSourceRunWithPrimaryRouteAndSource(t, f.db.DB, runID, entityID, eventID, "platform.activity_requested", at,
-			"test_entity", route, nil, source, envelope, loaded.SourceArtifactFact)
-		return
-	}
 	ctx := runtimecorrelation.WithSourceArtifactFact(runForkTestContext(t), loaded.SourceArtifactFact)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, loaded.SourceArtifactFact.BundleHash()))
 	artifact := selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash())
-	if _, err := f.sqlite.EnsureSourceArtifact(ctx, artifact); err != nil {
-		t.Fatalf("admit SQLite source artifact: %v", err)
+	fixture := runlifecyclefixture.Fixture{
+		Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute), Source: loaded.SourceArtifactFact, Artifact: artifact,
 	}
-	runlifecyclefixture.RequireSQLite(t, ctx, f.db.DB, runlifecyclefixture.Fixture{
-		Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute), Source: loaded.SourceArtifactFact,
-	})
+	if f.sqlite == nil {
+		runlifecyclefixture.RequirePostgres(t, ctx, f.db.DB, fixture)
+	} else {
+		runlifecyclefixture.RequireSQLite(t, ctx, f.db.DB, fixture)
+	}
 	payload, err := json.Marshal(map[string]any{"entity_id": entityID})
 	if err != nil {
 		t.Fatal(err)
 	}
 	event := eventtest.ExistingRunRootIngressWithRoutingSource(eventID, "platform.activity_requested", "source-runtime", "", payload, 0, runID, envelope, source, at)
-	storetest.CommitSemanticEventWithRoutes(t, ctx, f.sqlite, event, []events.DeliveryRoute{route}, pipelineobligation.ScopeSubscribed)
-	if _, err := f.db.ExecContext(ctx, `INSERT INTO entity_mutations
-		(run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at)
-		VALUES ($1, $2, 'lifecycle_state', '', 'null', '"pending"', $3, 'platform', 'selected-execution-test', 'seed', $4),
-		($1, $2, 'authored_field', 'name', 'null', '"Selected Execution Entity"', $3, 'platform', 'selected-execution-test', 'seed', $4)`, runID, entityID, eventID, at); err != nil {
-		t.Fatalf("seed SQLite source mutations: %v", err)
+	selected := f.owner.ports.fork
+	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{route}, pipelineobligation.ScopeSubscribed)
+	root := flowidentity.Stored(loaded.Source, semanticview.RootExecutionFlowID(loaded.Source), runID, runID, runID, "")
+	child, err := flowidentity.KeylessChild(loaded.Source, root, "flow_a")
+	if err != nil || child.EntityID != entityID {
+		t.Fatalf("activity fixture child identity: %+v err=%v", child, err)
 	}
-	if _, err := f.db.ExecContext(ctx, `INSERT INTO entity_state
-		(run_id, entity_id, flow_instance, entity_type, name, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at)
-		VALUES ($1, $2, 'flow_a', 'test_entity', 'Selected Execution Entity', 'pending', '{}', '{"name":"Selected Execution Entity"}', '{}', 1, $3, $3, $3)`, runID, entityID, at); err != nil {
-		t.Fatalf("seed SQLite source state: %v", err)
+	ctx = effects.WithExecutionMode(runtimecorrelation.WithRunID(ctx, runID), executionmode.Live)
+	command := selectedExecutionSourceFlowCommand(t, ctx, loaded, event, root)
+	childCommand := selectedExecutionSourceFlowCommand(t, ctx, loaded, event, child)
+	command.Plan.Children = append(command.Plan.Children, childCommand.Plan)
+	command.RouteTopology = append(command.RouteTopology, childCommand.RouteTopology...)
+	committed, err := selected.(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(ctx, command)
+	if err != nil || !committed.Acknowledged || !committed.Created || len(committed.Children) != 1 || !committed.Children[0].Created || !committed.Children[0].Acknowledged {
+		t.Fatalf("construct activity source tree: committed=%+v err=%v", committed, err)
 	}
 }
 

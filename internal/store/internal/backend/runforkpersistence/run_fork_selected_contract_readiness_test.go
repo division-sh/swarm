@@ -33,7 +33,8 @@ func TestSelectedContractWorkflowReadinessComposesExactForkAgentTopology(t *test
 		t.Fatalf("selectedContractWorkflowReadiness: %v", err)
 	}
 	if plan == nil || len(encoded) == 0 || plan.RunID != runID || plan.Identity.InstancePath != "flow/instance" ||
-		plan.CreationEvent != nil || len(plan.Agents) != 1 || plan.Agents[0].Identity != identity {
+		plan.CreationEvent != nil || len(plan.Agents) != 1 || plan.Agents[0].Identity != identity ||
+		plan.Agents[0].EntityID != plan.Identity.EntityID {
 		t.Fatalf("readiness plan = %#v", plan)
 	}
 	if len(topologies) != 1 || topologies[0].Identity != identity ||

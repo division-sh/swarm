@@ -37,7 +37,7 @@ type agentFixtureFlowStore interface {
 	agentfixture.Store
 	runtimedelivery.Store
 	LoadDynamicFlowRuntimeReadiness(context.Context, string, runtimeflowidentity.Route) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error)
-	BeginDynamicFlowRuntimeActivation(context.Context, runtimepipeline.DynamicFlowRuntimeReadinessPlan, uint64, runtimemanager.ProcessExecutionBinding) (runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult, error)
+	BeginDynamicFlowRuntimeActivation(context.Context, runtimepipeline.DynamicFlowRuntimeActivationRequest) (runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult, error)
 	CommitFlowInstanceActivation(context.Context, runtimebus.FlowInstanceActivationCommand) (runtimepipeline.CommittedFlowInstanceActivation, error)
 }
 
@@ -46,11 +46,15 @@ type agentFixtureFlowActivationCommitter struct {
 }
 
 func (o agentFixtureFlowActivationCommitter) CommitFlowInstanceActivation(ctx context.Context, plan runtimepipeline.FlowInstanceActivationPlan) (runtimepipeline.CommittedFlowInstanceActivation, error) {
+	var topology []runtimebus.FlowInstanceRouteRecordSet
+	for _, construction := range plan.ConstructionPlans() {
+		topology = append(topology, runtimebus.FlowInstanceRouteRecordSet{
+			Identity: runtimeflowidentity.RunScopedFlowInstance{RunID: construction.Readiness.RunID, Route: construction.Identity.Route()},
+		})
+	}
 	return o.store.CommitFlowInstanceActivation(ctx, runtimebus.FlowInstanceActivationCommand{
-		Plan: plan,
-		RouteTopology: []runtimebus.FlowInstanceRouteRecordSet{{
-			Identity: runtimeflowidentity.RunScopedFlowInstance{RunID: plan.Readiness.RunID, Route: plan.Identity.Route()},
-		}},
+		Plan:          plan,
+		RouteTopology: topology,
 	})
 }
 
@@ -184,18 +188,19 @@ func configureAgentFixtureFlowLifecycle(
 	selected agentFixtureFlowStore,
 	bus *sqliteFlowActivationBus,
 	bundle *runtimecontracts.WorkflowContractBundle,
+	configure ...func(*runtimepipeline.PipelineCoordinatorOptions),
 ) *runtimepipeline.PipelineCoordinator {
 	t.Helper()
 	switch store := selected.(type) {
 	case *SQLiteRuntimeStore:
-		return configureSQLiteFlowActivationLifecycle(t, store, bus, bundle)
+		return configureSQLiteFlowActivationLifecycle(t, store, bus, bundle, configure...)
 	case *PostgresStore:
 		source := semanticview.Wrap(bundle)
 		module := sqliteFlowActivationWorkflowModule{
 			source: source,
 			guards: runtimepipeline.NewContractGuardRegistry(source),
 		}
-		return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, runtimepipeline.PipelineCoordinatorOptions{
+		options := runtimepipeline.PipelineCoordinatorOptions{
 			ExecutionPosture:        executionposture.Live,
 			Module:                  module,
 			Persistence:             runtimepipeline.NewWorkflowPersistence(store),
@@ -211,7 +216,13 @@ func configureAgentFixtureFlowLifecycle(
 			DeliveryRuntime:         workflowTestBus{},
 			WorkOwner:               storeTestWorkOwner(t),
 			ReceiverExecution:       eventreceiver.NormalExecution(),
-		})
+		}
+		for _, apply := range configure {
+			if apply != nil {
+				apply(&options)
+			}
+		}
+		return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, options)
 	default:
 		t.Fatalf("unsupported agent fixture flow store %T", selected)
 		return nil
@@ -255,7 +266,7 @@ func assertExactAgentFixtureFlowAuthority(
 	if err != nil || !found {
 		t.Fatalf("load readiness owner for %s: found=%v err=%v", path, found, err)
 	}
-	fingerprint, err := canonicaljson.Hash(readiness.Plan)
+	fingerprint, err := readiness.Plan.Hash()
 	if err != nil {
 		t.Fatalf("fingerprint readiness owner for %s: %v", path, err)
 	}
@@ -264,25 +275,25 @@ func assertExactAgentFixtureFlowAuthority(
 		t.Fatalf("build expected readiness authority for %s: %v", path, err)
 	}
 	var db *sql.DB
-	query := `SELECT activation_attempt_id::text, activation_attempt_grant_id::text, activation_attempt_revision FROM flow_instance_runtime_readiness WHERE run_id=$1::uuid AND instance_path=$2`
+	query := `SELECT activation_attempt_id::text, activation_attempt_grant_id::text FROM flow_instance_runtime_readiness WHERE run_id=$1::uuid AND instance_path=$2`
 	switch backend := selected.(type) {
 	case *SQLiteRuntimeStore:
 		db = backend.backend.ConstructionHandle()
-		query = `SELECT activation_attempt_id, activation_attempt_grant_id, activation_attempt_revision FROM flow_instance_runtime_readiness WHERE run_id=? AND instance_path=?`
+		query = `SELECT activation_attempt_id, activation_attempt_grant_id FROM flow_instance_runtime_readiness WHERE run_id=? AND instance_path=?`
 	case *PostgresStore:
 		db = backend.backend.ConstructionHandle()
 	default:
 		t.Fatalf("unsupported flow fixture store %T", selected)
 	}
 	var attemptID, grantID string
-	var attemptRevision uint64
-	if err := db.QueryRowContext(ctx, query, runID, path).Scan(&attemptID, &grantID, &attemptRevision); err != nil {
+	if err := db.QueryRowContext(ctx, query, runID, path).Scan(&attemptID, &grantID); err != nil {
 		t.Fatalf("load exact activation attempt for %s: %v", path, err)
 	}
-	if attemptRevision != readiness.PlanRevision || grantID != binding.GenerationGrantID {
-		t.Fatalf("activation attempt for %s = %s/%d/%s, want revision %d and grant %s", path, attemptID, attemptRevision, grantID, readiness.PlanRevision, binding.GenerationGrantID)
+	ordinal, err := runtimeflowidentity.ParseActivationAttemptID(attemptID)
+	if err != nil || ordinal != readiness.AttemptOrdinal || grantID != binding.GenerationGrantID {
+		t.Fatalf("activation attempt for %s = %s/%s, want ordinal %d and grant %s: %v", path, attemptID, grantID, readiness.AttemptOrdinal, binding.GenerationGrantID, err)
 	}
-	want, err = want.WithFlowActivationAttempt(attemptID, attemptRevision)
+	want, err = want.WithFlowActivationAttempt(attemptID)
 	if err != nil {
 		t.Fatalf("bind expected readiness authority for %s: %v", path, err)
 	}
@@ -508,6 +519,22 @@ func proveAgentFixtureMixedAuthorityRejection(t *testing.T, ctx context.Context,
 			t.Fatalf("%s mutated fixture authority:\nbefore=%#v\nafter=%#v", label, before, after)
 		}
 	}
+	foreignEntity := agentFixtureStaticRecord(t, flowIdentity)
+	foreignEntity.Config.EntityID = uuid.NewString()
+	foreignEntity.Topology = flowState.Topology
+	if _, err := agentfixture.CommitExact(t, ctx, selected, runtimemanager.AgentLifecycleTransition{
+		OperationID: uuid.NewString(), OperationKind: "reconfigure", RequestHash: "foreign-flow-agent-entity",
+		Identity: flowIdentity, AgentID: flowIdentity.AgentID(), Trigger: "fixture-proof",
+		ExpectedEpoch: flowState.RuntimeEpoch, ExpectedGeneration: flowState.Generation, ExpectedPhase: flowState.Phase,
+		TargetEpoch: flowState.RuntimeEpoch, TargetGeneration: flowState.Generation + 1, TargetPhase: flowState.Phase,
+		ConfigRevision: flowState.ConfigRevision, RunMode: flowState.RunMode, Topology: flowState.Topology,
+		Agent: &foreignEntity, Now: time.Now().UTC(),
+	}); err == nil || !strings.Contains(err.Error(), "readiness_agent_entity_mismatch") {
+		t.Fatalf("readiness ownership allowed a changed agent entity: %v", err)
+	}
+	if after := captureAgentFixtureAuthority(t, ctx, selected); !reflect.DeepEqual(after, before) {
+		t.Fatal("refused foreign agent entity mutated fixture authority")
+	}
 	requireRejectedUnchanged("static upsert", func() error {
 		return agentfixture.UpsertStatic(t, ctx, probe, staticRecord)
 	})
@@ -588,17 +615,13 @@ func seedExactAgentFixtureFlowState(
 		},
 		RunID: runID, BundleHash: plan.Sources[0].BundleHash,
 		WorkflowVersion: "1.0.0", ExecutionMode: runtimeexecutionmode.Live,
-		Agents: []runtimepipeline.DynamicFlowRuntimeAgentExpectation{{Identity: identity, ConfigRevision: revision}},
+		Agents: []runtimepipeline.DynamicFlowRuntimeAgentExpectation{{Identity: identity, ConfigRevision: revision, EntityID: record.Config.EntityID}},
 	}).Normalized()
 	if err != nil {
 		t.Fatalf("normalize flow readiness owner: %v", err)
 	}
-	encoded, err := canonicaljson.Bytes(readinessPlan)
-	if err != nil {
-		t.Fatal(err)
-	}
-	seedLifecycleReadinessOwner(t, ctx, selected, runID, identity.FlowInstance(), encoded, time.Now().UTC())
-	fingerprint, err := canonicaljson.Hash(readinessPlan)
+	seedLifecycleReadinessOwner(t, ctx, selected, readinessPlan, time.Now().UTC())
+	fingerprint, err := readinessPlan.Hash()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -614,11 +637,11 @@ func seedExactAgentFixtureFlowState(
 	if err != nil || !found {
 		t.Fatalf("load seeded flow readiness: found=%v err=%v", found, err)
 	}
-	admitted, err := selected.BeginDynamicFlowRuntimeActivation(ctx, readiness.Plan, readiness.PlanRevision, binding)
+	admitted, err := selected.BeginDynamicFlowRuntimeActivation(ctx, runtimepipeline.NewDynamicFlowRuntimeActivationRequest(readiness.Plan, readiness.AttemptOrdinal, readiness.AttemptState, binding))
 	if err != nil || !admitted.Acknowledged {
 		t.Fatalf("admit seeded flow activation: acknowledged=%v err=%v", admitted.Acknowledged, err)
 	}
-	topology, err = topology.WithFlowActivationAttempt(admitted.Attempt.ID(), admitted.Attempt.PlanRevision())
+	topology, err = topology.WithFlowActivationAttempt(admitted.Attempt.ID())
 	if err != nil {
 		t.Fatalf("bind seeded flow topology to activation attempt: %v", err)
 	}

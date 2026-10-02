@@ -913,6 +913,7 @@ func runStartTestBundle(eventName string) *runtimecontracts.WorkflowContractBund
 		}}},
 		Children: []runtimecontracts.FlowContractView{flow},
 	}
+	root.Children[0].Parent = &root
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		SourceArtifact: authorActivityTestSourceArtifact,
 		Semantics:      runtimecontracts.WorkflowSemanticView{Name: "review", Version: "1.0.0"},

@@ -226,13 +226,9 @@ func runTargetOwnerArc(t *testing.T, test targetOwnerArcCase) {
 		FlowID: test.receiverPath, FlowInstance: test.receiverPath,
 		EntityID: runtimeflowidentity.EntityID(test.receiverPath),
 	}.Normalized()
-	var wantOwner events.DeliveryTargetOwnership
-	if test.existing {
-		store.setTargetOwnerRoutes(wantRoute)
-		wantOwner = events.MustExistingEntityTarget(wantRoute)
-	} else {
-		wantOwner = events.MustMaterializingEntityTarget(wantRoute)
-	}
+	// Keyless receivers have been constructed before an ordinary handler runs.
+	store.setTargetOwnerRoutes(wantRoute)
+	wantOwner := events.MustExistingEntityTarget(wantRoute)
 	if sourceRoute.EntityID == wantRoute.EntityID {
 		t.Fatalf("source and receiver identities are not distinguishable: %#v", sourceRoute)
 	}
@@ -435,7 +431,7 @@ func targetOwnerArcFixture(
 
 func targetOwnerArcHandler(mode string) runtimecontracts.SystemNodeEventHandler {
 	if strings.TrimSpace(mode) == runtimecontracts.FlowModeStatic {
-		return runtimecontracts.SystemNodeEventHandler{CreateEntity: true}
+		return runtimecontracts.SystemNodeEventHandler{}
 	}
 	return existingOwnerHandlerFixture()
 }
@@ -609,7 +605,7 @@ func TestEventBusPoisonedMixedOwnerFanOutFailsAtomicallyThenLegalOwnersAgree(t *
 		}
 	}
 	existing := receiver("existing", runtimecontracts.FlowModeStatic, existingOwnerHandlerFixture())
-	materializing := receiver("materializing", runtimecontracts.FlowModeStatic, runtimecontracts.SystemNodeEventHandler{CreateEntity: true})
+	constructed := receiver("constructed", runtimecontracts.FlowModeStatic, runtimecontracts.SystemNodeEventHandler{})
 	entityless := receiver("entityless", runtimecontracts.FlowModeStatic, runtimecontracts.SystemNodeEventHandler{})
 	poison := receiver("poison", runtimecontracts.FlowModeStatic, existingOwnerHandlerFixture())
 	connect := func(id string) runtimecontracts.FlowConnect {
@@ -617,11 +613,13 @@ func TestEventBusPoisonedMixedOwnerFanOutFailsAtomicallyThenLegalOwnersAgree(t *
 	}
 	sourceRoute := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: eventtest.UUID("mixed-owner-source")}.Normalized()
 	existingRoute := events.RouteIdentity{FlowID: "fanout/existing", FlowInstance: "fanout/existing", EntityID: eventtest.UUID("mixed-owner-existing")}.Normalized()
+	constructedRoute := events.RouteIdentity{FlowID: "fanout/constructed", FlowInstance: "fanout/constructed", EntityID: runtimeflowidentity.EntityID("fanout/constructed")}
+	fieldlessRoute := events.RouteIdentity{FlowID: "fanout/entityless", FlowInstance: "fanout/entityless", EntityID: runtimeflowidentity.EntityID("fanout/entityless")}
 	poisonedStore := newTargetRouteMemoryStore()
-	poisonedStore.setTargetOwnerRoutes(sourceRoute, existingRoute)
+	poisonedStore.setTargetOwnerRoutes(sourceRoute, existingRoute, constructedRoute, fieldlessRoute)
 	poisonedBundle := connectRoutePlanTestBundle(t,
-		[]connectRoutePlanTestFlow{producer, existing, materializing, entityless, poison},
-		[]runtimecontracts.FlowConnect{connect("existing"), connect("materializing"), connect("entityless"), connect("poison")})
+		[]connectRoutePlanTestFlow{producer, existing, constructed, entityless, poison},
+		[]runtimecontracts.FlowConnect{connect("existing"), connect("constructed"), connect("entityless"), connect("poison")})
 
 	poisonedBus, err := newScopedTestEventBus(poisonedStore, EventBusOptions{ContractBundle: semanticview.Wrap(poisonedBundle)})
 	if err != nil {
@@ -646,10 +644,10 @@ func TestEventBusPoisonedMixedOwnerFanOutFailsAtomicallyThenLegalOwnersAgree(t *
 	}
 
 	legalStore := newTargetRouteMemoryStore()
-	legalStore.setTargetOwnerRoutes(sourceRoute, existingRoute)
+	legalStore.setTargetOwnerRoutes(sourceRoute, existingRoute, constructedRoute, fieldlessRoute)
 	legalBundle := connectRoutePlanTestBundle(t,
-		[]connectRoutePlanTestFlow{producer, existing, materializing, entityless},
-		[]runtimecontracts.FlowConnect{connect("existing"), connect("materializing"), connect("entityless")})
+		[]connectRoutePlanTestFlow{producer, existing, constructed, entityless},
+		[]runtimecontracts.FlowConnect{connect("existing"), connect("constructed"), connect("entityless")})
 
 	interceptor := &connectRoutePlanNodeInterceptor{}
 	legalBus, err := newScopedTestEventBus(legalStore, EventBusOptions{
@@ -666,13 +664,9 @@ func TestEventBusPoisonedMixedOwnerFanOutFailsAtomicallyThenLegalOwnersAgree(t *
 		t.Fatalf("legal mixed-owner preflight failure/routes = %q/%#v, want three exact owners", plan.TargetFailure, plan.DeliveryRoutes)
 	}
 	wantOwners := map[string]events.DeliveryTargetOwnership{
-		"existing-node": events.MustExistingEntityTarget(existingRoute),
-		"materializing-node": events.MustMaterializingEntityTarget(events.RouteIdentity{
-			FlowID: "fanout/materializing", FlowInstance: "fanout/materializing", EntityID: runtimeflowidentity.EntityID("fanout/materializing"),
-		}),
-		"entityless-node": events.MustEntitylessReceiverTarget(events.RouteIdentity{
-			FlowID: "fanout/entityless", FlowInstance: "fanout/entityless",
-		}),
+		"existing-node":    events.MustExistingEntityTarget(existingRoute),
+		"constructed-node": events.MustExistingEntityTarget(constructedRoute),
+		"entityless-node":  events.MustExistingEntityTarget(fieldlessRoute),
 	}
 	for _, route := range plan.DeliveryRoutes {
 		want, ok := wantOwners[route.Recipient.LocalID()]
@@ -734,7 +728,8 @@ func TestEventBusTwoLevelFanOutDiamondKeepsNestedOwnersAndRootConvergenceExact(t
 		},
 	}}
 	staticRoute := events.RouteIdentity{FlowID: "branch/worker/result-static", FlowInstance: "branch/worker/result-static", EntityID: runtimeflowidentity.EntityID("branch/worker/result-static")}
-	store.setTargetOwnerRoutes(rootRoute, leftRoute, rightRoute, hostileRoute, staticRoute)
+	singletonRoute := events.RouteIdentity{FlowID: "branch/worker/result", FlowInstance: "branch/worker/result", EntityID: runtimeflowidentity.EntityID("branch/worker/result")}
+	store.setTargetOwnerRoutes(rootRoute, leftRoute, rightRoute, hostileRoute, staticRoute, singletonRoute)
 	interceptor := &connectRoutePlanNodeInterceptor{}
 	eventBus, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: source, TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate), Interceptors: []EventInterceptor{interceptor},
@@ -824,8 +819,8 @@ func TestEventBusTwoLevelFanOutDiamondKeepsNestedOwnersAndRootConvergenceExact(t
 			} else if strings.Contains(route.Recipient.LocalID(), "singleton-result") {
 				singletonSeen = true
 				wantPath := "branch/worker/result"
-				if route.Target.Code() != "materializing_entity" || route.Target.Route().FlowInstance != wantPath || route.Target.Route().EntityID != runtimeflowidentity.EntityID(wantPath) {
-					t.Fatalf("%s nested singleton target = %s %#v, want materializing %q", parent.name, route.Target.Code(), route.Target.Route(), wantPath)
+				if !route.Target.ExistingEntity() || route.Target.Route().FlowInstance != wantPath || route.Target.Route().EntityID != runtimeflowidentity.EntityID(wantPath) {
+					t.Fatalf("%s nested singleton target = %s %#v, want constructed %q", parent.name, route.Target.Code(), route.Target.Route(), wantPath)
 				}
 				if route.Target.Route().EntityID == parent.route.EntityID || route.Target.Route().EntityID == rootRoute.EntityID {
 					t.Fatalf("%s singleton reused parent/root owner: %#v", parent.name, route.Target.Route())

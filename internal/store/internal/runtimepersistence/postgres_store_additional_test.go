@@ -637,10 +637,12 @@ func seedSpecEntityState(t *testing.T, ctx context.Context, db *sql.DB, entityID
 		state = "operating"
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
-		VALUES ($1::uuid, $2, 'test', 'static', '{"instance_kind":"entity","workflow_version":"v1"}'::jsonb, 'active', now())
+		INSERT INTO flow_instances (run_id, instance_path, entity_id, entity_type, flow_template, mode, config, status,
+			stage_defined, current_state, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
+		VALUES ($1::uuid, $2, $3::uuid, 'default', 'test', 'static', '{"instance_kind":"entity","workflow_version":"v1"}'::jsonb, 'active',
+			TRUE, $4, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, now(), now(), now())
 		ON CONFLICT (run_id, instance_path) DO NOTHING
-	`, specEntityStateRunID, flowInstance); err != nil {
+	`, specEntityStateRunID, flowInstance, entityID, state); err != nil {
 		t.Fatalf("seed flow instance: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `

@@ -192,23 +192,17 @@ func TestSelectedContractExecutionMaterializationConsumesPlanSnapshotMetadata(t 
 		t.Fatalf("metadata source = %q, want source entity_state", got)
 	}
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
-	if err != nil {
-		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
+	// Import metadata remains exact snapshot evidence, not construction authority.
+	storeTestWorkOwner(t)
+	work, _ := storeTestWorkFixtures.Load(t)
+	selectedMaterializationProcessForTest(t, work.(*storeTestWorkFixture), pg)
+	before := snapshotForkHistoricalExecutionTables(t, db, true)
+	prepared, err := prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"})
+	if prepared != nil || err == nil || !strings.Contains(err.Error(), runfork.RunForkMaterializedEntitySnapshotMetadataOwner) {
+		t.Fatalf("imported snapshot acquired selected execution: prepared=%v err=%v", prepared, err)
 	}
-	if materialized.ForkRunID == "" {
-		t.Fatalf("materialized fork run_id is empty: %#v", materialized)
-	}
-	var flowInstance, entityType string
-	if err := db.QueryRowContext(ctx, `
-		SELECT flow_instance, entity_type
-		FROM entity_state
-		WHERE run_id = $1::uuid AND entity_id = $2::uuid
-	`, materialized.ForkRunID, entityID).Scan(&flowInstance, &entityType); err != nil {
-		t.Fatalf("load selected fork entity_state: %v", err)
-	}
-	if flowInstance != "selected-state-flow/at-t" || entityType != "selected_case" {
-		t.Fatalf("selected fork metadata = flow:%s type:%s", flowInstance, entityType)
+	if after := snapshotForkHistoricalExecutionTables(t, db, true); !reflect.DeepEqual(before, after) {
+		t.Fatal("imported snapshot refusal mutated source or fork persistence")
 	}
 }
 

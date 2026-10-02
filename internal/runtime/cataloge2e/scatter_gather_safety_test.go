@@ -347,6 +347,11 @@ func TestScatterGatherSafetyBothStores(t *testing.T) {
 							t.Fatalf("duplicate changed domain: %v -> %v", before, after)
 						}
 						if after := scatterGatherStates(t, h, paths, collectorRef); !reflect.DeepEqual(states, after) {
+							for path, before := range states {
+								if !reflect.DeepEqual(before, after[path]) {
+									t.Errorf("duplicate changed %s: before=%+v after=%+v", path, before, after[path])
+								}
+							}
 							t.Fatal("duplicate mutated persisted workflow state")
 						}
 						check(index + 1)
@@ -563,7 +568,7 @@ func scatterGatherWaitForJoinOutcome(t testing.TB, h *runtimeHarness, collectorR
 			if matches != 1 {
 				t.Fatalf("gather completion publications=%d want 1", matches)
 			}
-			if settled {
+			if settled && collector.Status == "terminated" {
 				return
 			}
 		}

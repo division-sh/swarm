@@ -50,6 +50,10 @@ type pipelineExternalTestWorkFixture struct {
 var pipelineExternalTestWorkFixtures sync.Map
 
 func pipelineExternalTestWorkOwner(t *testing.T) *worklifetime.RuntimeOccurrence {
+	return pipelineExternalTestWorkOwnerForSource(t, authorActivityTestSourceArtifactFact)
+}
+
+func pipelineExternalTestWorkOwnerForSource(t *testing.T, fact runtimecorrelation.SourceArtifactFact) *worklifetime.RuntimeOccurrence {
 	t.Helper()
 	if existing, ok := pipelineExternalTestWorkFixtures.Load(t); ok {
 		return existing.(*pipelineExternalTestWorkFixture).runtime
@@ -57,7 +61,7 @@ func pipelineExternalTestWorkOwner(t *testing.T) *worklifetime.RuntimeOccurrence
 	fixture := &pipelineExternalTestWorkFixture{process: worklifetime.NewProcess()}
 	owner, err := fixture.process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
 		RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-		BundleHash:        authorActivityTestSourceArtifactFact.BundleHash(),
+		BundleHash:        fact.BundleHash(),
 	})
 	if err != nil {
 		t.Fatalf("create pipeline test work owner: %v", err)
@@ -83,12 +87,16 @@ func pipelineExternalTestWorkOwner(t *testing.T) *worklifetime.RuntimeOccurrence
 }
 
 func testAuthorActivityContext(t *testing.T, ctx context.Context) context.Context {
+	return testAuthorActivityContextForSource(t, ctx, authorActivityTestSourceArtifactFact)
+}
+
+func testAuthorActivityContextForSource(t *testing.T, ctx context.Context, fact runtimecorrelation.SourceArtifactFact) context.Context {
 	t.Helper()
-	ctx = worklifetime.WithOccurrence(ctx, pipelineExternalTestWorkOwner(t))
-	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, authorActivityTestSourceArtifactFact)
+	ctx = worklifetime.WithOccurrence(ctx, pipelineExternalTestWorkOwnerForSource(t, fact))
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		authorActivityTestRuntimeInstanceID,
-		authorActivityTestSourceArtifactFact.BundleHash(),
+		fact.BundleHash(),
 	))
 }
 
@@ -178,7 +186,7 @@ func newScopedTestEventBus(t *testing.T, eventStore scopedTestDurableStore, opts
 		})
 	}
 	lease, err := eventStore.RegisterAuthorActivityEventCatalog(
-		runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, authorActivityTestSourceArtifactFact.BundleHash()), descriptors,
+		runtimeauthoractivity.BundleScope(opts.RuntimeInstanceID, opts.SourceArtifactFact.BundleHash()), descriptors,
 	)
 	if err != nil {
 		return nil, err

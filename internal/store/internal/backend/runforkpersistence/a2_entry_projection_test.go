@@ -25,6 +25,9 @@ import (
 func a2ForkEntry(t *testing.T, runID, entityID, instancePath, stage, occurrence string) timeridentity.StageEntryRef {
 	t.Helper()
 	route := flowidentity.RouteForInstancePath(instancePath)
+	if entityID == runID && instancePath == runID {
+		route = flowidentity.StoredRoute(".", runID, runID)
+	}
 	entry := timeridentity.StageEntryRef{RunID: runID, FlowScope: route.ScopeKey, InstanceID: route.InstanceID, InstancePath: route.InstancePath,
 		EntityID: entityID, Stage: stage, Cause: "delivery", EventID: "event-" + occurrence, OccurrenceID: "delivery-" + occurrence, TransitionID: "transition-" + occurrence}
 	if err := entry.Validate(); err != nil {
@@ -76,7 +79,7 @@ func TestA2ForkStageEntryProjectsExactOwnersAndNestedOrigin(t *testing.T) {
 			want := source
 			want.RunID, want.OriginRunID, want.EntityID = "child", "source", projection.Fork.EntityID
 			if owner.name == "root" {
-				want.FlowScope, want.InstanceID, want.InstancePath = "child", "child", "child"
+				want.FlowScope, want.InstanceID, want.InstancePath = ".", "child", "child"
 			}
 			if err != nil || child != want || source != before {
 				t.Fatalf("exact owner/history projection = %#v, want %#v: %v", child, want, err)
@@ -88,7 +91,7 @@ func TestA2ForkStageEntryProjectsExactOwnersAndNestedOrigin(t *testing.T) {
 			grandchild, err := projectRunForkStageEntry(child, "child", "grandchild", projection)
 			want.RunID, want.EntityID = "grandchild", projection.Fork.EntityID
 			if owner.name == "root" {
-				want.FlowScope, want.InstanceID, want.InstancePath = "grandchild", "grandchild", "grandchild"
+				want.FlowScope, want.InstanceID, want.InstancePath = ".", "grandchild", "grandchild"
 			}
 			if err != nil || grandchild != want || child.OriginRunID != "source" {
 				t.Fatalf("nested fork invented a fresh occurrence/origin: %#v %v", grandchild, err)
@@ -113,7 +116,7 @@ func TestA2ForkStageEntryRejectsHostileOwnership(t *testing.T) {
 			case "source_path":
 				source.InstancePath = "foreign/one"
 			case "root_scope":
-				source.FlowScope = "."
+				source.FlowScope = "source"
 			case "root_instance":
 				source.InstanceID = "foreign"
 			case "origin_self":
@@ -252,7 +255,7 @@ func TestA2ForkEntryProjectionPreservesExactOldClosedArm(t *testing.T) {
 				t.Fatal(err)
 			}
 			entry, found, err := workflowlifecycle.LoadStageEntry(bookkeeping)
-			if err != nil || !found || entry.OccurrenceID != newEntry.OccurrenceID || entry.OriginRunID != "source" || entry.FlowScope != "child" {
+			if err != nil || !found || entry.OccurrenceID != newEntry.OccurrenceID || entry.OriginRunID != "source" || entry.FlowScope != "." {
 				t.Fatalf("current bookkeeping projection = %#v %v", entry, err)
 			}
 			admitted, err := correspondence.AdmitSource(oldGeneration)
@@ -286,7 +289,7 @@ func TestA2ForkEntryProjectionPreservesExactOldClosedArm(t *testing.T) {
 					continue
 				}
 				foundOld++
-				if ref.Generation() != pair.Generation() || ref.Generation().Attempt != 1 || ref.StageEntry().OccurrenceID != oldEntry.OccurrenceID || ref.StageEntry().OriginRunID != "source" || ref.StageEntry().FlowScope != "child" || ref.FlowPath() != "." {
+				if ref.Generation() != pair.Generation() || ref.Generation().Attempt != 1 || ref.StageEntry().OccurrenceID != oldEntry.OccurrenceID || ref.StageEntry().OriginRunID != "source" || ref.StageEntry().FlowScope != "." || ref.FlowPath() != "." {
 					t.Fatal("history selected newest arm or changed declaration/inherited occurrence")
 				}
 				if !reflect.DeepEqual(arm.Outputs, old.Outputs) || arm.Status != old.Status || arm.CloseReason != old.CloseReason || arm.OutcomePending != old.OutcomePending || arm.TimerCancelled != old.TimerCancelled || arm.ArmedAt != old.ArmedAt || arm.FireAt != old.FireAt {

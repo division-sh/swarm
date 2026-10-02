@@ -2383,7 +2383,7 @@ func waitNotifyAllChildrenRuntimeReadiness(
 	)
 	for time.Now().Before(deadline) {
 		last, found, err = workflow.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(instancePath))
-		if err == nil && found && !last.TopologyReadyAt.IsZero() {
+		if err == nil && found && (last.Phase == runtimepipeline.FlowAttachmentReady) {
 			return last
 		}
 		time.Sleep(10 * time.Millisecond)

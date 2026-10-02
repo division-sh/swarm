@@ -475,7 +475,7 @@ func TestConnectedEventSchemaOwnershipPreservesPortfolioInputs(t *testing.T) {
 			}
 			entry, _, ok := bundle.ResolveFlowEventCatalogEntry("operating", "operating.report.requested")
 			if !ok || entry.Payload.Properties["operating_id"].Type != tc.operatingIDType || entry.Payload.Properties[tc.instanceField].Type != "uuid" {
-				t.Fatalf("portfolio effective schema = %#v, found=%t", entry.Payload.Properties, ok)
+				t.Fatalf("fan-in effective schema = %#v, found=%t", entry.Payload.Properties, ok)
 			}
 		})
 	}

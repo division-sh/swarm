@@ -31,7 +31,6 @@ ack:
   subscribes_to: [seed]
   event_handlers:
     seed:
-      create_entity: true
       data_accumulation:
         writes: [{target_field: marker, value: first}]
 select:

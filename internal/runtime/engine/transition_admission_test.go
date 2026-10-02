@@ -245,24 +245,18 @@ func TestExecutorCompiledGuardDispositionHasExplicitCause(t *testing.T) {
 	}
 }
 
-func TestExecutorCompiledCreateCarrierRequiresCanonicalInitialStage(t *testing.T) {
+func TestExecutorRejectsRetiredHandlerConstructionBeforeMutation(t *testing.T) {
 	node := testFlowExecutableNode(t, "orders", "creator")
 	handler := contracts.SystemNodeEventHandler{CreateEntity: true, AdvancesTo: "working"}
 	graph := contracts.BuildWorkflowStageTopology("orders", "ready", []string{"ready", "working", "other"}, nil,
-		[]contracts.HandlerTransitionSemantic{{Node: node, EventType: "work.created", CreateEntity: true, AdvancesTo: "working"}}, nil, nil)
+		[]contracts.HandlerTransitionSemantic{{Node: node, EventType: "work.created", AdvancesTo: "working"}}, nil, nil)
 	source := semanticview.Wrap(&contracts.WorkflowContractBundle{Semantics: contracts.WorkflowSemanticView{StageTopologies: map[string]contracts.WorkflowStageTopology{"orders": graph}}})
 	for _, state := range []string{"ready", "", "other"} {
 		t.Run("source_"+state, func(t *testing.T) {
 			exec, recorder := transitionTestExecutor(t, source)
 			result, err := exec.ExecuteSemanticFixture(context.Background(), transitionTestRequest(t, node, "work.created", handler, state))
-			if state != "ready" {
-				if !errors.Is(err, ErrInvalidTransition) || len(recorder.mutations) != 0 {
-					t.Fatalf("arbitrary seed %q: err=%v mutations=%d", state, err, len(recorder.mutations))
-				}
-				return
-			}
-			if err != nil || result.StateMutation.Transition == nil || result.StateMutation.Transition.From() != "ready" || len(recorder.mutations) != 1 {
-				t.Fatalf("canonical initial source: result=%#v err=%v", result, err)
+			if !errors.Is(err, ErrInvalidConfig) || len(recorder.mutations) != 0 || result.Committed {
+				t.Fatalf("retired construction admitted from %q: result=%#v err=%v mutations=%d", state, result, err, len(recorder.mutations))
 			}
 		})
 	}

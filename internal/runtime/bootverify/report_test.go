@@ -2147,16 +2147,10 @@ func TestRun_MapsDialectDualToNamedError(t *testing.T) {
 	}
 }
 
-func TestRun_MapsCreateEntityPlusAccumulateToNamedError(t *testing.T) {
-	source := loadTier8Fixture(t, "test-boot-create-entity-plus-accumulate")
-
-	report := Run(context.Background(), source, Options{})
-
-	if !report.HasErrors() {
-		t.Fatalf("expected error report, got %#v", report.Findings)
-	}
-	if !reportContains(report.Errors(), "dialect_compliance", "declares both create_entity and accumulate") {
-		t.Fatalf("expected dialect_compliance create_entity/accumulate error, got %#v", report.Errors())
+func TestRun_RejectsRetiredCreateEntityBeforeAccumulateValidation(t *testing.T) {
+	err := loadTier8FixtureError(t, "test-boot-create-entity-plus-accumulate")
+	if err == nil || !strings.Contains(err.Error(), "create_entity") || !strings.Contains(err.Error(), "canonical flow constructor") {
+		t.Fatalf("expected lexical constructor retirement before accumulation validation, got %v", err)
 	}
 }
 
@@ -4083,9 +4077,8 @@ func TestRun_DoesNotErrorForPlatformEventCatalogInputProducerPath(t *testing.T) 
 		"platform.runtime_log": {},
 	})
 	renameFlowHandlerEvent(t, bundle, "child", "worker", "task.feedback", "platform.runtime_log", runtimecontracts.SystemNodeEventHandler{
-		CreateEntity: true,
-		AdvancesTo:   "done",
-		Emit:         runtimecontracts.EmitSpec{Event: "task.result"},
+		AdvancesTo: "done",
+		Emit:       runtimecontracts.EmitSpec{Event: "task.result"},
 	})
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -4395,7 +4388,6 @@ func TestRun_ReportsExpressionFieldReferenceWarning(t *testing.T) {
 func TestRun_AllowsGuardReferenceToDeclaredFieldEvenWhenHandlerClearsItLater(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
-	handler.CreateEntity = true
 	handler.Guard = &runtimecontracts.GuardSpec{Check: "entity.revision_count > 0"}
 	handler.Clear = &runtimecontracts.ClearSpec{Targets: []string{"revision_count"}}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
@@ -4928,7 +4920,6 @@ func TestRun_AllowsGuardReferenceToPersistedFieldEvenWhenHandlerWritesFieldLater
 func TestRun_AllowsOnCompleteReferenceToPersistedFieldEvenWhenHandlerWritesFieldLater(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
-	handler.CreateEntity = true
 	handler.DataAccumulation.Writes = []runtimecontracts.WorkflowDataWrite{{
 		TargetField: "revision_count",
 		Value:       runtimecontracts.CELExpression("entity.revision_count + 1"),
@@ -5121,7 +5112,6 @@ func clearWave1ExpressionStaticCreateEntity(t *testing.T, bundle *runtimecontrac
 func TestRun_AllowsCreateEntityGuardReferenceToSchemaInitializedField(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
-	handler.CreateEntity = true
 	handler.Guard = &runtimecontracts.GuardSpec{Check: "entity.revision_count == 0"}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 
@@ -5135,7 +5125,6 @@ func TestRun_AllowsCreateEntityGuardReferenceToSchemaInitializedField(t *testing
 func TestRun_AllowsSparsePresenceChecksWithoutInitializer(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
-	handler.CreateEntity = true
 	handler.Guard = &runtimecontracts.GuardSpec{Check: "!has(entity.kill_reason)"}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 
@@ -5149,7 +5138,6 @@ func TestRun_AllowsSparsePresenceChecksWithoutInitializer(t *testing.T) {
 func TestRun_AllowsHasGuardedTernaryReadWithoutInitializer(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
-	handler.CreateEntity = true
 	handler.Guard = &runtimecontracts.GuardSpec{Check: `has(entity.kill_reason) ? entity.kill_reason == "manual" : true`}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 
@@ -5163,7 +5151,6 @@ func TestRun_AllowsHasGuardedTernaryReadWithoutInitializer(t *testing.T) {
 func TestRun_AllowsCreateEntityGuardReferenceToDeclaredFieldEvenWhenSameHandlerAlsoWritesIt(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
-	handler.CreateEntity = true
 	handler.Guard = &runtimecontracts.GuardSpec{Check: "entity.revision_count == 0"}
 	handler.DataAccumulation.Writes = []runtimecontracts.WorkflowDataWrite{{
 		TargetField: "revision_count",
@@ -5181,7 +5168,6 @@ func TestRun_AllowsCreateEntityGuardReferenceToDeclaredFieldEvenWhenSameHandlerA
 func TestRun_AllowsCreateEntityEmitFieldReadOfSameHandlerTopLevelWrite(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
-	handler.CreateEntity = true
 	handler.DataAccumulation.Writes = []runtimecontracts.WorkflowDataWrite{{
 		TargetField: "revision_count",
 		Value:       runtimecontracts.LiteralExpression(0),
@@ -5204,7 +5190,6 @@ func TestRun_AllowsCreateEntityEmitFieldReadOfSameHandlerTopLevelWrite(t *testin
 func TestRun_AllowsCreateEntityEmitFieldReadOfDeclaredFieldEvenWhenOnlyRuleWritesIt(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
-	handler.CreateEntity = true
 	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
 		Condition: "_entity.id != null",
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
@@ -5232,7 +5217,6 @@ func TestRun_AllowsCreateEntityEmitFieldReadOfDeclaredFieldEvenWhenOnlyRuleWrite
 func TestRun_AllowsCreateEntityEmitFieldReadOfDeclaredFieldEvenWhenOnlyRuleComputeWritesIt(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
-	handler.CreateEntity = true
 	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
 		Condition: "_entity.id != null",
 		Compute: &runtimecontracts.ComputeSpec{
@@ -5258,7 +5242,6 @@ func TestRun_AllowsCreateEntityEmitFieldReadOfDeclaredFieldEvenWhenOnlyRuleCompu
 func TestRun_AllowsCreateEntityEmitFieldReadWhenRuleAlsoWritesUnconditionallyAvailableField(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
-	handler.CreateEntity = true
 	handler.Compute = &runtimecontracts.ComputeSpec{
 		Operation: runtimecontracts.ComputeOpCount,
 		StoreAs:   "entity.revision_count",
@@ -5399,8 +5382,8 @@ func TestRun_RejectsCreateEntityAccumulateWhenDynamicComputeProofWouldOtherwiseW
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "dialect_compliance", "declares both create_entity and accumulate") {
-		t.Fatalf("expected dialect_compliance create_entity/accumulate error, got %#v", report.Errors())
+	if !reportContains(report.Errors(), "dialect_compliance", "uses retired create_entity") {
+		t.Fatalf("expected typed constructor retirement, got %#v", report.Errors())
 	}
 }
 
@@ -5417,8 +5400,8 @@ func TestRun_RejectsCreateEntityAccumulateWithoutFiniteCompletionSemantics(t *te
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "dialect_compliance", "declares both create_entity and accumulate") {
-		t.Fatalf("expected dialect_compliance create_entity/accumulate error, got %#v", report.Errors())
+	if !reportContains(report.Errors(), "dialect_compliance", "uses retired create_entity") {
+		t.Fatalf("expected typed constructor retirement, got %#v", report.Errors())
 	}
 }
 
@@ -5444,7 +5427,7 @@ func TestRun_DoesNotRequireRetiredStaticAcquisitionForStatefulInputPinHandlers(t
 	}
 }
 
-func TestRun_AllowsCanonicalCreateEntityForStatefulStaticInputPinHandlers(t *testing.T) {
+func TestRun_AllowsConstructedEntityForStatefulStaticInputPinHandlers(t *testing.T) {
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-child-flow-pin-wiring"))
 	flowID := "child"
 	flowView, ok := bundle.FlowViewByID(flowID)
@@ -5453,7 +5436,6 @@ func TestRun_AllowsCanonicalCreateEntityForStatefulStaticInputPinHandlers(t *tes
 	}
 	for nodeID, node := range flowView.Nodes {
 		for eventType, handler := range node.EventHandlers {
-			handler.CreateEntity = true
 			writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 		}
 	}
@@ -5461,11 +5443,11 @@ func TestRun_AllowsCanonicalCreateEntityForStatefulStaticInputPinHandlers(t *tes
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
 	if reportContains(report.Errors(), "flow_boundary_create_entity_validation", "") || reportContains(report.Errors(), "primary_entity_validation", "") {
-		t.Fatalf("canonical-primary create_entity must not depend on authored mode: %#v", report.Errors())
+		t.Fatalf("canonical-primary handler must not depend on authored creation: %#v", report.Errors())
 	}
 }
 
-func TestRun_AllowsCanonicalCreateEntityForStagedStatefulStaticInputPinHandlers(t *testing.T) {
+func TestRun_AllowsConstructedEntityForStagedStatefulStaticInputPinHandlers(t *testing.T) {
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-child-flow-pin-wiring"))
 	flowID := "child"
 	useStagedLifecycleForFlow(t, bundle, flowID, "pending", []string{"pending", "done"}, []string{"done"})
@@ -5475,7 +5457,6 @@ func TestRun_AllowsCanonicalCreateEntityForStagedStatefulStaticInputPinHandlers(
 	}
 	for nodeID, node := range flowView.Nodes {
 		for eventType, handler := range node.EventHandlers {
-			handler.CreateEntity = true
 			writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 		}
 	}
@@ -5483,7 +5464,7 @@ func TestRun_AllowsCanonicalCreateEntityForStagedStatefulStaticInputPinHandlers(
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
 	if reportContains(report.Errors(), "flow_boundary_create_entity_validation", "") || reportContains(report.Errors(), "primary_entity_validation", "") {
-		t.Fatalf("staged canonical-primary create_entity must not depend on authored mode: %#v", report.Errors())
+		t.Fatalf("staged canonical-primary handler must not depend on authored creation: %#v", report.Errors())
 	}
 }
 
@@ -6101,8 +6082,8 @@ func TestRun_ReportsMissingRuntimeExecutorForOwnedRuntimeEvent(t *testing.T) {
 }
 
 func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 69 {
-		t.Fatalf("bootCheckRegistry count = %d, want 69", got)
+	if got := len(bootCheckRegistry); got != 70 {
+		t.Fatalf("bootCheckRegistry count = %d, want 70", got)
 	}
 	if got := len(supplementalChecks); got != 3 {
 		t.Fatalf("supplementalChecks count = %d, want 3", got)
@@ -6868,7 +6849,6 @@ consumer-node:
     - `+subscription+`
   event_handlers:
     ticket.ready:
-      create_entity: true
       advances_to: done
       emit: consumer.started
 `)
@@ -6920,7 +6900,6 @@ support-node:
     - ticket.closed
   event_handlers:
     ticket.opened:
-      create_entity: true
       advances_to: active
     ticket.closed:
 %s
@@ -6966,7 +6945,6 @@ support-node:
     - ticket.closed
   event_handlers:
     ticket.opened:
-      create_entity: true
       advances_to: active
     ticket.closed:
       advances_to: done
@@ -7036,10 +7014,8 @@ worker:
   produces: [task.result]
   event_handlers:
     task.assigned:
-      create_entity: true
       advances_to: working
     task.feedback:
-      create_entity: true
       advances_to: done
       emit: task.result
 `)

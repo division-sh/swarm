@@ -4,7 +4,6 @@ relay:
   produces: [grandchild/task.start]
   event_handlers:
     work.begin:
-      create_entity: true
       emit: grandchild/task.start
 
 listener:

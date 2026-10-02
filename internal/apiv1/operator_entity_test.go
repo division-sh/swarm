@@ -2,7 +2,6 @@ package apiv1
 
 import (
 	"context"
-	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
@@ -10,8 +9,8 @@ import (
 	operatorread "github.com/division-sh/swarm/internal/operatorread"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -255,23 +254,24 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromSQLite(t *testing.T) 
 
 }
 
-func createOperatorReadbackEntities(t *testing.T, ctx context.Context, selected runtimetools.EntityPersistence, source semanticview.Source, runID, entityA, entityB string, at time.Time) {
+func createOperatorReadbackEntities(t *testing.T, ctx context.Context, selected interface {
+	SetupScenarioEntities(context.Context, pipeline.ScenarioSetupRequest) (pipeline.ScenarioSetupResult, error)
+}, source semanticview.Source, runID, entityA, entityB string, at time.Time) {
 	t.Helper()
-	for _, record := range []runtimetools.EntityCreateRecord{
-		{
-			Source: source, RunID: runID, EntityID: entityA, FlowInstance: "scoring/vertical-a", EntityType: "vertical",
-			CurrentState: "discovered", FieldsJSON: json.RawMessage(`{"vertical_id":"vertical-a","vertical_name":"Healthcare"}`), CreatedAt: at,
-			Writer: runtimetools.EntityMutationWriter{Type: "platform", ID: "operator-readback-proof", HandlerStep: "create_entity"},
+	if _, err := selected.SetupScenarioEntities(ctx, pipeline.ScenarioSetupRequest{
+		RunID: runID, CreatedAt: at,
+		Entities: []pipeline.ScenarioSetupEntityRequest{
+			{
+				Alias: "a", EntityID: entityA, FlowInstance: "scoring/vertical-a", EntityType: "vertical",
+				CurrentState: "discovered", Fields: map[string]any{"vertical_id": "vertical-a", "vertical_name": "Healthcare"},
+			},
+			{
+				Alias: "b", EntityID: entityB, FlowInstance: "scoring/vertical-b", EntityType: "vertical",
+				CurrentState: "pending", Fields: map[string]any{"vertical_id": "vertical-b", "vertical_name": "Manufacturing"},
+			},
 		},
-		{
-			Source: source, RunID: runID, EntityID: entityB, FlowInstance: "scoring/vertical-b", EntityType: "vertical",
-			CurrentState: "pending", FieldsJSON: json.RawMessage(`{"vertical_id":"vertical-b","vertical_name":"Manufacturing"}`), CreatedAt: at,
-			Writer: runtimetools.EntityMutationWriter{Type: "platform", ID: "operator-readback-proof", HandlerStep: "create_entity"},
-		},
-	} {
-		if _, err := selected.CreateEntity(ctx, record); err != nil {
-			t.Fatalf("create materialized entity %s: %v", record.EntityID, err)
-		}
+	}); err != nil {
+		t.Fatalf("import readback entities: %v", err)
 	}
 }
 

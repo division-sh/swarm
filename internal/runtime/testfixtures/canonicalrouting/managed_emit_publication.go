@@ -59,12 +59,10 @@ func CopyManagedEmitPublication(t testing.TB, mode string) string {
 			events = strings.Replace(events, "sibling.requested:\n  case_id: text\n", "", 1)
 		}
 		writeClosedVariantFile(t, root, filepath.Join(flow, "events.yaml"), events)
-		create := ""
 		if mode == "template" && !sibling {
-			create = "      create_entity: true\n      data_accumulation:\n        writes:\n          - {target_field: case_id, value: \"${payload.case_id}\"}\n"
 			writeClosedVariantFile(t, root, filepath.Join(flow, "entities.yaml"), "work:\n  case_id: text\n")
 		}
-		nodes := "start:\n  execution_type: system_node\n  subscribes_to: [work.requested]\n  event_handlers:\n    work.requested:\n" + create + "      emit: {event: work.started, fields: {case_id: \"${payload.case_id}\"}}\nfinal:\n  execution_type: system_node\n  subscribes_to: [work.result]\n  event_handlers:\n    work.result:\n      emit: {event: work.ack, fields: {value: \"${payload.value}\"}}\n"
+		nodes := "start:\n  execution_type: system_node\n  subscribes_to: [work.requested]\n  event_handlers:\n    work.requested:\n      emit: {event: work.started, fields: {case_id: \"${payload.case_id}\"}}\nfinal:\n  execution_type: system_node\n  subscribes_to: [work.result]\n  event_handlers:\n    work.result:\n      emit: {event: work.ack, fields: {value: \"${payload.value}\"}}\n"
 		if sibling {
 			nodes = strings.ReplaceAll(nodes, "work.requested", "sibling.requested")
 		}

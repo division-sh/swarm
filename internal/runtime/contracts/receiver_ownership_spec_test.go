@@ -25,7 +25,7 @@ func TestReceiverCompositionAuthoritativeSpec(t *testing.T) {
 		{"contract_formats.event_schema.routing_derivation.route_plan_authority.compiled_connect_evaluation.target_owner_projection",
 			[]string{"topology does not transfer state ownership", "optional work without a receiver entity is entityless", "receipt alone is not a delivery outcome", "release newer claim authority"},
 			[]string{"proof minted by the compiled graph", "proves shared structural ownership"}},
-		{"handler_specification.handler_fields.create_entity.default", []string{"admitted receiver ownership"}, []string{"(inherit)"}},
+		{"handler_specification.handler_fields.create_entity.rule", []string{"Retired on presence", "canonical constructor", "No compatibility path"}, []string{"(inherit)"}},
 		{"flow_model.state_composition.ownership_semantics", []string{"Parent event identity is source/causal context only"}, nil},
 		{"static_analyzer.slice_3a_pin_target_resolution.static_failure_reasons.target_required_missing",
 			[]string{"actual typed same-flow consumer", "compiled connection", "addresses and template mode or static path depth are not consumers"}, nil},

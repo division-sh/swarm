@@ -172,3 +172,5 @@ func describeFactoringView() authoringview.View {
 		Diagnostics: []authoringview.DiagnosticView{{CheckID: "check", Severity: "warning", AuthoredLocation: " authored.yaml:2 ", Location: "ignored", Message: " Check this ", Remediation: " Fix it ", Evidence: []string{" first ", "", "second"}}, {CheckID: "fallback", Severity: "warning", Location: " lowered.yaml:3 ", Message: "Other"}},
 	}
 }
+
+func describeFactoringMemberCount(value int) *int { return &value }
