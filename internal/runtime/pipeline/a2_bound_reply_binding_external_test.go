@@ -287,7 +287,7 @@ func testA2BoundReplyJourney(t *testing.T, corruptEntryField, siblingFlow string
 				beforeCommits := commits.witnesses()
 				probe.resume()
 				a2KnownTargetWaitForSettlement(t, ctx, bus, probe.Probe, request.Event.Event(), provider.Key(), "failed", "dead_letter", logger)
-				wantFailure := failures.FromError(ownerErr, "workflow", "execute_handler").Failure
+				wantFailure := failures.FromError(ownerErr, "workflow-runtime", "execute_handler").Failure
 				failureLogs := logger.failuresFor("handler_error", requestID)
 				if len(failureLogs) != 1 || !reflect.DeepEqual(failureLogs[0], wantFailure) {
 					t.Fatalf("handler diagnostic discarded or changed canonical refusal: got=%+v want=%+v", failureLogs, wantFailure)
