@@ -138,7 +138,7 @@ func projectToolTransportOptions(fields map[string]yamlsource.Value) ([]ToolSche
 		options = append(options, WithToolResponseMapping(mapping))
 	}
 	if field, present := fields["response_success"]; present {
-		success, err := projectToolResponseSuccessValue(field)
+		success, err := ProjectToolResponseSuccessValue(field)
 		if err != nil {
 			return nil, err
 		}
@@ -152,7 +152,7 @@ func projectToolTransportOptions(fields map[string]yamlsource.Value) ([]ToolSche
 		options = append(options, WithToolCredentials(credentials...))
 	}
 	if field, present := fields["managed_credential"]; present {
-		ref, err := projectToolManagedCredentialValue(field)
+		ref, err := ProjectToolManagedCredentialValue(field)
 		if err != nil {
 			return nil, err
 		}
@@ -161,7 +161,7 @@ func projectToolTransportOptions(fields map[string]yamlsource.Value) ([]ToolSche
 	return options, nil
 }
 
-func projectToolResponseSuccessValue(field yamlsource.Value) (HTTPResponseSuccess, error) {
+func ProjectToolResponseSuccessValue(field yamlsource.Value) (HTTPResponseSuccess, error) {
 	members, err := schemaValueFields(field, "response_success", map[string]struct{}{"kind": {}, "path": {}, "equals": {}}, nil, true)
 	if err != nil {
 		return HTTPResponseSuccess{}, err
@@ -238,7 +238,7 @@ func toolValueTextMap(value yamlsource.Value) (map[string]string, error) {
 	return out, nil
 }
 
-func projectToolManagedCredentialValue(value yamlsource.Value) (ManagedCredentialRef, error) {
+func ProjectToolManagedCredentialValue(value yamlsource.Value) (ManagedCredentialRef, error) {
 	fields, err := schemaValueFields(value, "managed_credential", map[string]struct{}{
 		"key": {}, "header": {}, "prefix": {}, "grant_type": {}, "scopes": {}, "grant_model": {}, "token_request": {}, "installation_id_input": {},
 	}, nil, true)

@@ -23,6 +23,29 @@ func TestPlatformVersionFromYAMLRequiresVersion(t *testing.T) {
 	}
 }
 
+func TestPlatformVersionAdmissionPreservesScalarKindsAndUniqueness(t *testing.T) {
+	for _, value := range []string{"1", "1.5", "true", "null", "''", "[]", "{}"} {
+		if _, err := PlatformVersionFromYAML([]byte("platform: {version: " + value + "}\n")); err == nil {
+			t.Fatalf("invalid version %s admitted", value)
+		}
+	}
+	for _, body := range []string{
+		"platform: {version: 1.6.0, version: 1.7.0}\n",
+		"platform: {version: 1.6.0}\nplatform: {version: 1.7.0}\n",
+		"platform: {<<: {version: 1.6.0}, version: 1.7.0}\n",
+	} {
+		if _, err := PlatformVersionFromYAML([]byte(body)); err == nil {
+			t.Fatal("duplicate version admitted")
+		}
+	}
+	for _, body := range []string{"platform: {version: '1.6.0'}\n", "platform: {<<: {version: 1.6.0}}\n"} {
+		version, err := PlatformVersionFromYAML([]byte(body))
+		if err != nil || version != "1.6.0" {
+			t.Fatalf("typed version rejected: %s %v", version, err)
+		}
+	}
+}
+
 // TestPlatformSpecDigestMatchesMaterializedFilename ensures the version stamp
 // and the content-addressed materialized filename derive from the same digest,
 // so the two spellings of the binary↔spec stamp cannot diverge (#2182).

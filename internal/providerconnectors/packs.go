@@ -4,6 +4,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"path"
 	"sort"
 	"strings"
 
@@ -18,6 +19,7 @@ import (
 var generatedConnectorIdentityFS embed.FS
 
 type ConnectorManifest struct {
+	source     yamlsource.Value
 	Provider   string                                      `yaml:"provider"`
 	Generation *GenerationEvidence                         `yaml:"generation,omitempty"`
 	Tools      map[string]runtimecontracts.ToolSchemaEntry `yaml:"tools"`
@@ -88,7 +90,11 @@ func NewPackRegistryFromInventory(inventory *packartifact.EffectivePackInventory
 	seenGenerated := make(map[string]struct{}, len(expectedGenerated))
 	loaded := make([]LoadedPack, 0, len(entries))
 	for _, entry := range entries {
-		pack, err := LoadPackFS(entry.FileSystem(), ".", runningPlatformVersion)
+		admitted, err := entry.Loaded(runningPlatformVersion)
+		if err != nil {
+			return nil, err
+		}
+		pack, err := loadPackBody(admitted)
 		if err != nil {
 			return nil, fmt.Errorf("load effective connector pack %q: %w", entry.ID(), err)
 		}
@@ -240,10 +246,14 @@ func LoadPackFS(fsys fs.FS, dir, runningPlatformVersion string) (LoadedPack, err
 	if err != nil {
 		return LoadedPack{}, err
 	}
+	return loadPackBody(loaded)
+}
+
+func loadPackBody(loaded packs.Loaded) (LoadedPack, error) {
 	if strings.TrimSpace(loaded.Envelope.Type) != packs.TypeConnector {
 		return LoadedPack{}, fmt.Errorf("provider connector pack %q has unsupported type %q", loaded.Envelope.ID, loaded.Envelope.Type)
 	}
-	manifest, err := ParseConnectorManifest(loaded.ManifestBody)
+	manifest, err := parseConnectorManifestAt(loaded.ManifestBody, path.Join(loaded.Directory, packs.ConnectorManifestFileName))
 	if err != nil {
 		return LoadedPack{}, fmt.Errorf("parse connector manifest for pack %q: %w", loaded.Envelope.ID, err)
 	}
@@ -273,29 +283,10 @@ func LoadPackFS(fsys fs.FS, dir, runningPlatformVersion string) (LoadedPack, err
 }
 
 func ParseConnectorManifest(body []byte) (ConnectorManifest, error) {
-	var wire struct {
-		Provider   string              `yaml:"provider"`
-		Generation *GenerationEvidence `yaml:"generation,omitempty"`
-		Tools      map[string]any      `yaml:"tools"`
-	}
-	snapshot, err := yamlsource.Load(body)
-	if err != nil {
-		return ConnectorManifest{}, err
-	}
-	lookup, err := snapshot.Document("connector.yaml").Root().Lookup("tools")
-	if err != nil {
-		return ConnectorManifest{}, err
-	}
-	tools, err := runtimecontracts.AdmitToolDeclarationsValue(lookup.Value)
-	if err != nil {
-		return ConnectorManifest{}, err
-	}
-	if err := decodeYAMLStrict(body, &wire); err != nil {
-		return ConnectorManifest{}, err
-	}
-	manifest := ConnectorManifest{Provider: wire.Provider, Generation: wire.Generation, Tools: tools}
-	return manifest, nil
+	return parseConnectorManifestAt(body, "connector.yaml")
 }
+
+func (m ConnectorManifest) SourceValue() yamlsource.Value { return m.source }
 
 func (m ConnectorManifest) Validate() error {
 	provider := normalizeToken(m.Provider)
