@@ -52,18 +52,6 @@ var projectFlowIngressDeliveryIDFields = map[string]struct{}{
 	"source": {}, "header": {}, "json_path": {},
 }
 
-func yamlMappingValue(node *yaml.Node, key string) *yaml.Node {
-	if node == nil || node.Kind != yaml.MappingNode {
-		return nil
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		if strings.TrimSpace(node.Content[i].Value) == key {
-			return node.Content[i+1]
-		}
-	}
-	return nil
-}
-
 var connectorPackFieldOptions = map[string]struct{}{
 	"imports": {},
 }

@@ -7,19 +7,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func hasYAMLMappingKey(node *yaml.Node, key string) bool {
-	return yamlMappingValue(node, key) != nil
-}
-
-func hasAnyYAMLMappingKey(node *yaml.Node, keys ...string) bool {
-	for _, key := range keys {
-		if hasYAMLMappingKey(node, key) {
-			return true
-		}
-	}
-	return false
-}
-
 var flowSchemaDocumentFields = map[string]struct{}{
 	"name":                {},
 	"activation":          {},
