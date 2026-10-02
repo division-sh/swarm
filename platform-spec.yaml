@@ -9486,6 +9486,13 @@ permissions_model:
   bundle_semantics:
     description: An agent may declare permissions_bundle and/or explicit permissions. If both are present, the explicit permissions
       list EXTENDS the bundle. Duplicates are deduplicated. The bundle is expanded first, then explicit permissions are added.
+    admission: Every declared permission_bundles value must be a mapping of bundle names to mappings with a required permissions
+      list of strings. Absence of permission_bundles, an empty bundle map and empty permission lists are valid. Explicit nulls,
+      scalars, missing permissions and non-string list members are hard admission errors, including unused bundles, zero-agent
+      scopes and declarations shadowed by descendant scopes. Malformed declarations cannot be omitted or coerced into absence.
+    ownership: Source admission, scoped grant resolution, permission vocabulary extensions and verifier warning projections
+      consume the same strict permission-bundle reader and canonical scoped permission resolver. Warning projections compare
+      tool requirements against resolved grants; they do not independently parse or expand grants.
   permission_scoping:
     description: Defines the target scope for each permission. The platform enforces these constraints at tool execution time.
       All scoping is flow-instance-local — no permission grants cross-flow access. Cross-flow communication is via events only.
