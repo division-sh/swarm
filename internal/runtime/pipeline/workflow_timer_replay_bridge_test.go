@@ -32,9 +32,9 @@ func listTimerCauseReplayActivationsForTest(t *testing.T, store WorkflowTimerAct
 	return activations
 }
 
-func cancelSelectedWorkflowTimerForTest(ctx context.Context, pc *PipelineCoordinator, activation WorkflowTimerActivation) error {
+func cancelSelectedWorkflowTimerForTest(ctx context.Context, pc *PipelineCoordinator, activation WorkflowTimerActivation, attempt DynamicFlowRuntimeActivationAttempt) error {
 	committed, err := pc.workflowStore.timerActivations.CommitWorkflowTimerReconciliation(ctx, WorkflowTimerReconciliationCommand{
-		RunID: activation.RunID, Route: activation.Route, EntityID: activation.EntityID,
+		RunID: activation.RunID, Route: activation.Route, EntityID: activation.EntityID, ActivationAttempt: &attempt,
 		Plan: WorkflowLifecycleMutationPlan{Timers: []WorkflowTimerMutation{{Kind: WorkflowTimerMutationCancel, Activation: activation}}},
 	})
 	if err != nil {

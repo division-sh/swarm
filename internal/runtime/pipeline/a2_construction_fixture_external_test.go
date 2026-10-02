@@ -13,7 +13,7 @@ import (
 
 // These explicit component inputs exercise lifecycle persistence, not public
 // constructor eligibility or parent-driven eager construction.
-func commitA2FixtureConstruction(t *testing.T, coordinator *pipeline.PipelineCoordinator, selected any, ctx context.Context, owner flowidentity.RunScopedFlowInstance, initial pipeline.WorkflowInstance, at time.Time) {
+func commitA2FixtureConstruction(t *testing.T, coordinator *pipeline.PipelineCoordinator, selected any, ctx context.Context, owner flowidentity.RunScopedFlowInstance, initial pipeline.WorkflowInstance, at time.Time) pipeline.FlowInstanceActivationPlan {
 	t.Helper()
 	initialized, lifecycle, err := coordinator.PrepareInitialEntryLifecycle(ctx, owner, initial, at)
 	if err != nil {
@@ -32,4 +32,5 @@ func commitA2FixtureConstruction(t *testing.T, coordinator *pipeline.PipelineCoo
 			t.Fatalf("finalize acknowledged component lifecycle: %v", err)
 		}
 	}
+	return command.Plan
 }

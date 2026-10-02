@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/google/uuid"
@@ -20,10 +21,11 @@ type WorkflowTimerCauseReplayStorageForTest struct {
 }
 
 type WorkflowTimerCauseReplayFixtureForTest struct {
-	Context     context.Context
-	Coordinator *PipelineCoordinator
-	Observe     func() WorkflowTimerCauseReplayStorageForTest
-	Publish     func(context.Context, events.Event) error
+	Context            context.Context
+	Coordinator        *PipelineCoordinator
+	CommitConstruction func(context.Context, flowidentity.RunScopedFlowInstance, WorkflowInstance, time.Time) (DynamicFlowRuntimeActivationAttempt, DynamicFlowRuntimeReadinessPlan)
+	Observe            func() WorkflowTimerCauseReplayStorageForTest
+	Publish            func(context.Context, events.Event) error
 }
 
 type WorkflowTimerCauseReplayFactoryForTest func(*testing.T, string, *contracts.WorkflowContractBundle) WorkflowTimerCauseReplayFixtureForTest
@@ -64,9 +66,7 @@ func VerifyWorkflowTimerCauseReplayEngineConsumersOnBothStoresForTest(t *testing
 						WorkflowVersion: f.Coordinator.SemanticSource().WorkflowVersion(), EntityType: "test_entity", CurrentState: initialStage,
 						CreatedAt: at, EnteredStageAt: at,
 					})
-					if result, err := f.Coordinator.MaterializeInitialEntry(f.Context, identity, instance, at); err != nil || result != WorkflowInitialMaterializationCreated {
-						t.Fatalf("materialize admitted cause owner: %v, %v", result, err)
-					}
+					attempt, readiness := f.CommitConstruction(f.Context, identity, instance, at)
 					ctx := f.Context
 					var admittedEvent events.Event
 					if kind != workflowTimerCauseInitial {
@@ -92,7 +92,7 @@ func VerifyWorkflowTimerCauseReplayEngineConsumersOnBothStoresForTest(t *testing
 						}
 					}
 					if state == "cancelled" || state == "advanced_cancelled" {
-						if err := cancelSelectedWorkflowTimerForTest(ctx, f.Coordinator, initial); err != nil {
+						if err := cancelSelectedWorkflowTimerForTest(ctx, f.Coordinator, initial, attempt); err != nil {
 							t.Fatal(err)
 						}
 					}
@@ -100,7 +100,7 @@ func VerifyWorkflowTimerCauseReplayEngineConsumersOnBothStoresForTest(t *testing
 					storage := f.Observe()
 					for i := 0; i < 2; i++ {
 						if kind == workflowTimerCauseInitial {
-							if err := f.Coordinator.ReconcileInitialEntryTimers(ctx, identity); err != nil {
+							if err := f.Coordinator.ReconcileInitialEntryTimersForAttempt(ctx, identity, attempt, readiness); err != nil {
 								t.Fatalf("production initial-entry reconciliation: %v", err)
 							}
 						} else {
