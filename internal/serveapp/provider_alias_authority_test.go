@@ -110,7 +110,11 @@ func runProviderAliasAuthorityScenario(t *testing.T, scenario providerAliasScena
 								t.Fatalf("committed retry status=%d body=%s", status, response)
 							}
 						} else if status != http.StatusAccepted {
-							t.Fatalf("authenticated %s status=%d body=%s", alias, status, response)
+							var runID string
+							if err := rt.DB.QueryRow(`SELECT current_run_id FROM standing_services WHERE current_bundle_hash=$1 AND flow_path=$2`, rt.BundleHash, scenario.source(alias)).Scan(&runID); err != nil {
+								t.Fatalf("authenticated %s status=%d body=%s; read diagnostic run: %v", alias, status, response, err)
+							}
+							t.Fatalf("authenticated %s status=%d body=%s\n%s", alias, status, response, servedEventPublishDebugQuery(t, rt.DB, rt.Backend, "runtime_logs", runID))
 						}
 						var receipt struct {
 							EventIDs []string `json:"event_ids"`

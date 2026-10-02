@@ -27,7 +27,7 @@ func TestOrdinaryProviderSourceUsesExactSelectedOwner(t *testing.T) {
 			localAgent := agentidentitytest.DeclaredForRun(t, runID, "local", "alpha", "alpha", "alpha", "alpha")
 			if root {
 				instance = runID
-				wantKeys = []string{"inbound.telegram.text_message", "./inbound.telegram.text_message"}
+				wantKeys = []string{"inbound.telegram.text_message", "./inbound.telegram.text_message", runID + "/inbound.telegram.text_message"}
 				localAgent = agentidentitytest.RootDeclaredForRun(t, runID, "local", ".")
 			}
 			routing, err := events.NewExternalIngressRoutingSource(flow, entityID, events.RoutingSourceAuthorityProviderAdmissionPlan)

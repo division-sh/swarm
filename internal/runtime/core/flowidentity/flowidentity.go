@@ -247,6 +247,43 @@ func StandingForService(source semanticview.Source, flowID, serviceID string) In
 	return Derive(source, strings.TrimSpace(flowID), strings.TrimSpace(serviceID))
 }
 
+// Service identity is descriptive; only the selected generation supplies the
+// root's concrete construction coordinate. Keyless descendants keep their paths.
+func StandingForGeneration(source semanticview.Source, flowID, runID string) (Instance, error) {
+	if source == nil || strings.TrimSpace(flowID) != flowID {
+		return Instance{}, fmt.Errorf("standing generation requires its exact admitted flow")
+	}
+	schema, found := source.FlowSchemaByID(flowID)
+	if !found || !schema.Instance.Empty() {
+		return Instance{}, fmt.Errorf("standing generation flow %s is absent from its admitted source", flowID)
+	}
+	instance := Derive(source, flowID, runID)
+	instanceID, entityID, err := StandingGenerationCoordinates(flowID, instance.InstanceID, instance.EntityID, runID)
+	if err != nil {
+		return Instance{}, err
+	}
+	if flowID == semanticview.RootExecutionFlowID(source) {
+		return Stored(source, flowID, runID, instanceID, entityID, ""), nil
+	}
+	return instance, nil
+}
+
+// The canonical root flow is '.', never an inferred UUID-shaped path. Its
+// execution coordinate belongs to the selected run, not the service declaration.
+func StandingGenerationCoordinates(flowID, instanceID, entityID, runID string) (string, string, error) {
+	run, err := uuid.Parse(runID)
+	if err != nil || run == uuid.Nil || run.String() != runID {
+		return "", "", fmt.Errorf("standing generation requires its exact selected run UUID")
+	}
+	if flowID == "." {
+		return runID, EntityID(runID), nil
+	}
+	if flowID == "" || strings.TrimSpace(flowID) != flowID || instanceID == "" || entityID == "" {
+		return "", "", fmt.Errorf("standing generation requires its exact declared coordinate")
+	}
+	return instanceID, entityID, nil
+}
+
 func StandingGenerationRunID(serviceID string, generation int64) string {
 	material := strings.Join([]string{
 		strings.TrimSpace(serviceID),

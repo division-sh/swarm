@@ -70,8 +70,6 @@ type StandingActivation struct {
 type standingTargetPlan struct {
 	declaration StandingTargetDeclaration
 	serviceID   string
-	generation  int64
-	runID       string
 	instance    runtimeflowidentity.Instance
 	targets     []StandingTarget
 }
@@ -584,8 +582,8 @@ func (rt *Runtime) standingTargetsMutation(ctx context.Context, serviceID string
 	activations := make([]StandingActivation, 0, len(selectedPlans))
 	for i, plan := range selectedPlans {
 		declaration := plan.declaration
-		instance := plan.instance
 		result := results[i]
+		instance := result.Instance
 		reconciliation := result.Reconciliation
 		if !reconciliation.RestartDisposition.Executable() {
 			activations = append(activations, StandingActivation{
@@ -604,6 +602,9 @@ func (rt *Runtime) standingTargetsMutation(ctx context.Context, serviceID string
 			EffectiveState: reconciliation.EffectiveState, RestartDisposition: reconciliation.RestartDisposition, Created: result.Created,
 		})
 		for _, target := range plan.targets {
+			target.InstanceID = instance.InstanceID
+			target.FlowInstance = instance.InstancePath
+			target.EntityID = instance.EntityID
 			target.BundleHash = fact.BundleHash()
 			target.RunID = reconciliation.RunID
 			target.Generation = reconciliation.Generation
@@ -647,9 +648,8 @@ func (rt *Runtime) restoreAdoptedStandingWorkflowTimers(ctx context.Context, act
 	return nil
 }
 
-// PlanStandingTargets resolves all process-visible identities without mutating
-// runtime or durable state. Startup uses it to reject cross-context collisions
-// before any runtime starts.
+// PlanStandingTargets describes declaration coordinates for collision preflight.
+// Only selected-store reconciliation can supply a concrete generation and run.
 func (rt *Runtime) PlanStandingTargets() ([]StandingTarget, error) {
 	plans, err := rt.standingTargetPlans()
 	if err != nil {
@@ -697,15 +697,13 @@ func (rt *Runtime) standingTargetPlans() ([]standingTargetPlan, error) {
 	plans := make([]standingTargetPlan, 0, len(declarations))
 	for _, declaration := range declarations {
 		serviceID := runtimeflowidentity.StandingServiceID(declaration.FlowPath)
-		generation := int64(1)
-		runID := runtimeflowidentity.StandingGenerationRunID(serviceID, generation)
 		instance := runtimeflowidentity.StandingForService(source, declaration.FlowPath, serviceID)
-		plan := standingTargetPlan{declaration: declaration, serviceID: serviceID, generation: generation, runID: runID, instance: instance}
+		plan := standingTargetPlan{declaration: declaration, serviceID: serviceID, instance: instance}
 		for _, binding := range declaration.Ingress {
 			plan.targets = append(plan.targets, StandingTarget{
 				BundleHash: fact.BundleHash(), ServiceID: serviceID, SourcePath: declaration.SourcePath,
 				FlowPath: declaration.FlowPath, Alias: declaration.Alias,
-				Provider: binding.Provider, RunID: runID, Generation: generation, PublicationSequence: 1,
+				Provider:   binding.Provider,
 				InstanceID: instance.InstanceID, FlowInstance: instance.InstancePath,
 				EntityID: instance.EntityID, SigningSecret: binding.SigningSecret, AdmissionPlan: binding.AdmissionPlan,
 			}.normalized())

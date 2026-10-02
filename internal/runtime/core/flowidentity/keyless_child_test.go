@@ -25,3 +25,35 @@ func TestKeylessChildOfRunRootKeepsAuthoredCoordinate(t *testing.T) {
 		}
 	}
 }
+
+func TestStandingConstructionUsesSelectedGenerationRun(t *testing.T) {
+	root := contracts.FlowContractView{Path: ".", Paths: contracts.FlowContractPaths{FlowPath: "."}, Schema: contracts.FlowSchemaDocument{Name: "root"}}
+	root.Children = []contracts.FlowContractView{{Path: "child", Paths: contracts.FlowContractPaths{FlowPath: "child"}, Schema: contracts.FlowSchemaDocument{Name: "child"}, Parent: &root}}
+	source := semanticview.Wrap(&contracts.WorkflowContractBundle{RootSchema: &root.Schema, FlowSchemas: map[string]contracts.FlowSchemaDocument{"child": root.Children[0].Schema}, FlowTree: contracts.FlowTree{
+		Root: &root, ByID: map[string]*contracts.FlowContractView{".": &root, "child": &root.Children[0]},
+		ByPath: map[string]*contracts.FlowContractView{".": &root, "child": &root.Children[0]},
+	}})
+	serviceID := StandingServiceID(".")
+	for _, generation := range []int64{1, 2, 7} {
+		runID := StandingGenerationRunID(serviceID, generation)
+		parent, err := StandingForGeneration(source, ".", runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if parent.InstancePath != runID || parent.InstanceID != runID || parent.EntityID != runID || parent.ScopeKey != "." {
+			t.Fatalf("generation %d construction adopted service or stale run coordinates: %+v", generation, parent)
+		}
+		child, err := KeylessChild(source, parent, "child")
+		if err != nil || child.InstancePath != "child" || child.ParentRoute.FlowInstance != runID || child.ParentEntityID != parent.EntityID {
+			t.Fatalf("generation %d child=%+v err=%v", generation, child, err)
+		}
+	}
+	for _, invalid := range []string{"", ".", serviceID + "/stale"} {
+		if _, err := StandingForGeneration(source, ".", invalid); err == nil {
+			t.Fatalf("non-run coordinate %q admitted standing construction", invalid)
+		}
+	}
+	if _, err := StandingForGeneration(nil, ".", StandingGenerationRunID(serviceID, 1)); err == nil {
+		t.Fatal("missing selected source admitted standing construction")
+	}
+}

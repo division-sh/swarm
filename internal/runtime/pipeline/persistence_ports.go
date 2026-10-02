@@ -50,6 +50,7 @@ type StandingTargetMutationRequest struct {
 
 type StandingTargetMutationResult struct {
 	Reconciliation      StandingServiceReconciliation
+	Instance            runtimeflowidentity.Instance
 	Created             bool
 	PublicationSequence int64
 }
@@ -103,7 +104,11 @@ func (pc *PipelineCoordinator) commitStandingTargets(ctx context.Context, req St
 				return nil, nil, err
 			}
 		}
-		result := StandingTargetMutationResult{Reconciliation: reconciliation, PublicationSequence: reconciliation.PublicationSequence}
+		instance, err := runtimeflowidentity.StandingForGeneration(target.Activation.ContractBundle, reconciliation.FlowPath, reconciliation.RunID)
+		if err != nil {
+			return nil, nil, err
+		}
+		result := StandingTargetMutationResult{Reconciliation: reconciliation, Instance: instance, PublicationSequence: reconciliation.PublicationSequence}
 		if reconciliation.RestartDisposition.Executable() {
 			if err := pc.workflowStore.AdmitStandingServiceRun(ctx, reconciliation.RunID, pc.executionPosture); err != nil {
 				return nil, nil, err
@@ -117,6 +122,7 @@ func (pc *PipelineCoordinator) commitStandingTargets(ctx context.Context, req St
 				}
 			}
 			activation := target.Activation
+			activation.Instance = instance
 			activation.StandingGenerationReplacement = reconciliation.Generation > 1
 			var created bool
 			var err error
