@@ -1,0 +1,71 @@
+describe: source=golden-agent-workload@1.0.0
+source authority: projection_only_existing_contract_owners
+validation: structural; live readiness: not evaluated
+events:
+  - candidate.requested (fields: batch_id, candidate_id)
+  - scout.requested (fields: candidate_ids, query)
+  - search.requested (fields: candidate_ids, query)
+root primary entity: search_batch
+flows:
+  - candidate (template)
+    events:
+      - candidate.analyzed (fields: batch_id, candidate_id, summary)
+      - candidate.completed (fields: batch_id, candidate_id, summary)
+      - candidate.work.requested (fields: batch_id, candidate_id)
+    primary entity: candidate_analysis
+    instance: field=candidate_id identity=run + flow + instance_key
+  - scout (static)
+    events:
+      - scout.completed (fields: batch_id, candidate_ids)
+      - scout.work.requested (fields: candidate_ids, query)
+    primary entity: scout_task
+    singleton coordinator: primary_entity=scout_task contained_fields=1
+routing topology: routing-topology/v1
+  source authority: projection_only_existing_contract_owners
+  - [typed_pubsub] candidate/candidate.analyzed: candidate.candidate-worker -> candidate.candidate-completion
+    typed pub/sub: match=exact boundary=same_flow
+  - [typed_pubsub] candidate/candidate.work.requested: candidate.candidate-intake -> candidate.candidate-worker
+    typed pub/sub: match=exact boundary=same_flow
+  - [typed_pubsub] scout.completed: ..scout.completed -> ..scout-collector
+    typed pub/sub: match=exact boundary=same_flow
+  - [typed_pubsub] candidate/candidate.requested: candidate.candidate.requested -> candidate.candidate-intake
+    typed pub/sub: match=exact boundary=same_flow
+  - [typed_pubsub] scout/scout.completed: scout.scout-worker -> scout.scout-completion
+    typed pub/sub: match=exact boundary=same_flow
+  - [typed_pubsub] search.requested: ..search.requested -> ..search-intake
+    typed pub/sub: match=exact boundary=same_flow
+  - [inter_flow_connect] scout/scout.completed: scout.scout-worker -> ..scout.completed
+    connect: scout.scout.completed -> .scout.completed (schema.yaml:<line>)
+    resolution: mode=static target=target
+  - [typed_pubsub] scout/scout.completed: scout.scout-worker -> scout.scout-completion
+    typed pub/sub: match=exact boundary=same_flow
+  - [typed_pubsub] scout/scout.requested: scout.scout.requested -> scout.scout-intake
+    typed pub/sub: match=exact boundary=same_flow
+  - [inter_flow_connect] candidate.requested: ..scout-collector -> candidate.candidate.requested
+    connect: .candidate.requested -> candidate.candidate.requested (schema.yaml:<line>)
+    resolution: mode=select-or-create target=target field=candidate_id source_kind=payload source=payload.candidate_id derived_from="instance.candidate_id + carries.candidate_id.from"
+  - [inter_flow_connect] candidate/candidate.completed: candidate.candidate-completion -> ..candidate.completed
+    connect: candidate.candidate.completed -> .candidate.completed (schema.yaml:<line>)
+    resolution: mode=static target=target
+  - [inter_flow_connect] scout.requested: ..search-intake -> scout.scout.requested
+    connect: .scout.requested -> scout.scout.requested (schema.yaml:<line>)
+    resolution: mode=static target=target
+  - [inter_flow_connect] scout/scout.completed: scout.scout-worker -> ..scout.completed
+    connect: scout.scout.completed -> .scout.completed (schema.yaml:<line>)
+    resolution: mode=static target=target
+  - [typed_pubsub] candidate.completed: ..candidate.completed -> ..candidate-collector
+    typed pub/sub: match=exact boundary=same_flow
+  - [typed_pubsub] scout/scout.work.requested: scout.scout-intake -> scout.scout-worker
+    typed pub/sub: match=exact boundary=same_flow
+  - [typed_pubsub] candidate/candidate.analyzed: candidate.candidate-worker -> candidate.candidate-completion
+    typed pub/sub: match=exact boundary=same_flow
+  boundary exposures:
+    - candidate/candidate.completed: candidate.candidate-completion -> output candidate.candidate.completed
+    - scout.requested: ..search-intake -> output ..scout.requested
+    - scout/scout.completed: scout.scout-worker -> output scout.scout.completed
+    - candidate.requested: ..scout-collector -> output ..candidate.requested
+    - scout/scout.completed: scout.scout-worker -> output scout.scout.completed
+diagnostics:
+  - [INFO] entity_reader_coverage @ candidate/schema.yaml: flow candidate entity_type candidate_analysis declares field candidate_id with no detected internal reader coverage
+  - [INFO] entity_reader_coverage @ schema.yaml: flow root entity_type search_batch declares field batch_id with no detected internal reader coverage
+  - [INFO] entity_reader_coverage @ scout/schema.yaml: flow scout entity_type scout_task declares field candidate_ids with no detected internal reader coverage

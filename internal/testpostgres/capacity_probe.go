@@ -49,7 +49,7 @@ func StartCapacityProbe(t *testing.T, capacity int) *CapacityProbe {
 		}
 	}
 	// Keep the socket below sockaddr_un's limit even with long test names.
-	root, err := os.MkdirTemp("", "swarm-capacity-")
+	root, err := NewSocketDirectory("swarm-capacity-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,6 +72,20 @@ func StartCapacityProbe(t *testing.T, capacity int) *CapacityProbe {
 	p.run(t, "initdb", "-D", p.data, "-U", "swarm_capacity_probe", "--auth-local=trust", "--auth-host=reject", "--no-locale", "--encoding=UTF8", "--no-sync")
 	p.start(t, capacity)
 	return p
+}
+
+// NewSocketDirectory gives native probes a short, explicitly owned directory.
+// Long configured scratch roots are rejected rather than falling back to /tmp.
+func NewSocketDirectory(prefix string) (string, error) {
+	root, err := os.MkdirTemp("", prefix)
+	if err != nil {
+		return "", err
+	}
+	if len(filepath.Join(root, ".s.PGSQL.5432")) >= 100 {
+		_ = os.RemoveAll(root)
+		return "", fmt.Errorf("native PostgreSQL scratch path exceeds conservative Unix socket limit; set TMPDIR to a short writable disk path")
+	}
+	return root, nil
 }
 
 func (p *CapacityProbe) run(t *testing.T, name string, args ...string) {

@@ -10,13 +10,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const baselinePath = ".github/complexity-baseline.json"
 
 type options struct {
 	repo, head, base, event, eventFile, evidence string
-	update                                       bool
 }
 
 func main() {
@@ -27,7 +27,6 @@ func main() {
 	flag.StringVar(&o.event, "event", "", "CI event: pull_request, push, workflow_dispatch, schedule")
 	flag.StringVar(&o.eventFile, "event-file", "", "GitHub event JSON")
 	flag.StringVar(&o.evidence, "evidence", "", "directory for measured baseline and delta evidence")
-	flag.BoolVar(&o.update, "update", false, "write measured head baseline; does not approve growth")
 	flag.Parse()
 	if flag.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "unexpected positional arguments")
@@ -47,6 +46,10 @@ func run(ctx context.Context, o options, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	baseSHA, err := comparisonRevision(ctx, o.repo, headSHA, o.base)
+	if err != nil {
+		return err
+	}
 	head, err := measure(ctx, o.repo, headSHA, upstream)
 	if err != nil {
 		return fmt.Errorf("head: %w", err)
@@ -55,36 +58,32 @@ func run(ctx context.Context, o options, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	report := delta{Head: headSHA, HeadSummary: summaries(head)}
-	var admissionErr error
-	if o.update {
-		admissionErr = writeFile(filepath.Join(o.repo, baselinePath), data)
-	} else {
-		admissionErr = checkBaseline(ctx, o.repo, headSHA, data)
+	if err := checkBaseline(ctx, o.repo, headSHA, data); err != nil {
+		return err
 	}
-	if o.base != "" {
-		baseSHA, err := revision(ctx, o.repo, o.base)
+	base, err := measure(ctx, o.repo, baseSHA, upstream)
+	if err != nil {
+		return fmt.Errorf("base: %w", err)
+	}
+	if err := checkBasePolicy(ctx, o.repo, baseSHA, base); err != nil {
+		return err
+	}
+	report := compare(base, head)
+	report.Head, report.Base, report.PolicyVerdict = headSHA, baseSHA, "equal-reviewed-policy; independently-measured-base-and-head"
+	if o.evidence != "" {
+		baseData, err := encode(base)
 		if err != nil {
 			return err
 		}
-		base, err := measure(ctx, o.repo, baseSHA, upstream)
-		if err != nil {
-			return fmt.Errorf("base: %w", err)
-		}
-		if err := checkBasePolicy(ctx, o.repo, baseSHA, base); err != nil {
+		if err := writeFile(filepath.Join(o.evidence, "base.json"), baseData); err != nil {
 			return err
 		}
-		report = compare(base, head)
-		report.Head, report.Base = headSHA, baseSHA
 	}
 	if err := emitEvidence(o.evidence, data, report, out); err != nil {
 		return err
 	}
-	if admissionErr != nil {
-		return admissionErr
-	}
 	if report.Increased {
-		return fmt.Errorf("complexity hotspot count increased; updating the baseline cannot approve growth")
+		return fmt.Errorf("complexity hotspot count increased; generated evidence cannot approve growth")
 	}
 	return nil
 }
@@ -97,7 +96,7 @@ func encode(v any) ([]byte, error) {
 	return append(b, '\n'), err
 }
 
-// Keep the checked-in inventory diffable without ten lines of indentation per score.
+// Keep generated evidence readable without ten lines of indentation per score.
 func encodeBaseline(b baseline) ([]byte, error) {
 	var out bytes.Buffer
 	p, err := json.Marshal(b.Policy)
@@ -168,22 +167,105 @@ func applyEvent(o *options) error {
 		}
 		return nil
 	}
-	if o.update || o.base != "" {
-		return fmt.Errorf("CI events cannot update the baseline or override the comparison base")
-	}
-	if o.event == "workflow_dispatch" || o.event == "schedule" {
-		return nil
+	if o.base != "" {
+		return fmt.Errorf("CI events cannot override the comparison base")
 	}
 	data, err := os.ReadFile(o.eventFile)
 	if err != nil {
 		return err
+	}
+	if o.event == "workflow_dispatch" || o.event == "schedule" {
+		return applyBranchEvent(o, data)
 	}
 	head, base, err := eventRevisions(o.event, data)
 	if err != nil {
 		return err
 	}
 	o.head, o.base = head, base
+	if o.event == "pull_request" {
+		common, err := git(context.Background(), o.repo, "merge-base", head, base)
+		if err != nil {
+			return fmt.Errorf("PR merge-base: %w", err)
+		}
+		o.base = strings.TrimSpace(string(common))
+	}
 	return nil
+}
+
+func comparisonRevision(ctx context.Context, repo, head, base string) (string, error) {
+	if base == "" {
+		return "", fmt.Errorf("qualified complexity ratchet requires an independent comparison revision")
+	}
+	sha, err := revision(ctx, repo, base)
+	if err != nil {
+		return "", err
+	}
+	if sha == head {
+		return "", fmt.Errorf("comparison revision equals head; no independent change is qualified")
+	}
+	if _, err := git(ctx, repo, "merge-base", "--is-ancestor", sha, head); err != nil {
+		return "", fmt.Errorf("comparison revision is not on head lineage: %w", err)
+	}
+	return sha, nil
+}
+
+func applyBranchEvent(o *options, data []byte) error {
+	var event struct {
+		Ref        string `json:"ref"`
+		Repository struct {
+			DefaultBranch string `json:"default_branch"`
+		} `json:"repository"`
+	}
+	if err := json.Unmarshal(data, &event); err != nil {
+		return err
+	}
+	branch := strings.TrimPrefix(event.Ref, "refs/heads/")
+	if o.event == "schedule" {
+		branch = event.Repository.DefaultBranch
+	}
+	if branch == "" || strings.HasPrefix(branch, "refs/") {
+		return fmt.Errorf("%s requires a named branch lineage", o.event)
+	}
+	ctx := context.Background()
+	head, err := revision(ctx, o.repo, o.head)
+	if err != nil {
+		return err
+	}
+	tip, err := revision(ctx, o.repo, "refs/remotes/origin/"+branch)
+	if err != nil {
+		return fmt.Errorf("observed event branch is unavailable: %w", err)
+	}
+	if _, err := git(ctx, o.repo, "merge-base", "--is-ancestor", head, tip); err != nil {
+		return fmt.Errorf("event head is not on observed branch lineage: %w", err)
+	}
+	base, err := branchComparison(ctx, o.repo, head, branch, event.Repository.DefaultBranch)
+	if err != nil {
+		return err
+	}
+	o.head, o.base = head, base
+	return nil
+}
+
+func branchComparison(ctx context.Context, repo, head, branch, defaultBranch string) (string, error) {
+	if defaultBranch == "" {
+		return "", fmt.Errorf("branch event requires the default branch for independent comparison")
+	}
+	master, err := revision(ctx, repo, "refs/remotes/origin/"+defaultBranch)
+	if err != nil {
+		return "", fmt.Errorf("default branch comparison is unavailable: %w", err)
+	}
+	if branch == defaultBranch {
+		return revision(ctx, repo, head+"^1")
+	}
+	common, err := git(ctx, repo, "merge-base", head, master)
+	if err != nil {
+		return "", err
+	}
+	base := strings.TrimSpace(string(common))
+	if base == head {
+		return revision(ctx, repo, head+"^1")
+	}
+	return base, nil
 }
 
 func eventRevisions(event string, data []byte) (string, string, error) {

@@ -102,6 +102,13 @@ func TestRunAdmissionRejectsConflictingLiveCapacity(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "capacity is 1") {
 		t.Fatalf("Acquire() error = %v, want capacity mismatch", err)
 	}
+	if err := testRunAdmission(root, nil).CheckCapacity(2); err == nil {
+		t.Fatal("preflight resized live capacity")
+	}
+	doc, err := admission.loadRegistry()
+	if err != nil || len(doc.Waiting) != 0 || len(doc.Active) != 1 {
+		t.Fatalf("preflight created a ticket or mutated active authority: %+v %v", doc, err)
+	}
 }
 
 func TestRunAdmissionPublishesOnlySuccessfulDuration(t *testing.T) {
@@ -582,16 +589,37 @@ func TestRunCapacityFromEnvironment(t *testing.T) {
 			_ = os.Unsetenv(RunCapacityEnv)
 		}
 	})
-	if got, err := RunCapacityFromEnvironment(); err != nil || got != 1 {
+	limit := hostRunCapacity()
+	if got, err := RunCapacityFromEnvironment(); err != nil || got != limit {
 		t.Fatalf("default capacity = %d err=%v", got, err)
 	}
 	t.Setenv(RunCapacityEnv, "3")
-	if got, err := RunCapacityFromEnvironment(); err != nil || got != 3 {
-		t.Fatalf("capacity = %d err=%v", got, err)
+	if got, err := RunCapacityFromEnvironment(); limit >= 3 && (err != nil || got != 3) || limit < 3 && err == nil {
+		t.Fatalf("capacity = %d limit=%d err=%v", got, limit, err)
 	}
 	t.Setenv(RunCapacityEnv, "0")
 	if _, err := RunCapacityFromEnvironment(); err == nil {
 		t.Fatal("zero capacity accepted")
+	}
+}
+
+func TestConservativeHostRunCapacity(t *testing.T) {
+	for _, row := range []struct {
+		cpu  int
+		gib  uint64
+		want int
+	}{{1, 64, 1}, {16, 0, 1}, {16, 7, 1}, {12, 16, 2}, {12, 24, 3}, {16, 64, 4}, {128, 1024, 4}} {
+		if got := conservativeRunCapacity(row.cpu, row.gib<<30); got != row.want {
+			t.Fatalf("cpu=%d memory=%dGiB capacity=%d want=%d", row.cpu, row.gib, got, row.want)
+		}
+	}
+	t.Setenv("SWARM_TEST_POSTGRES_DSN", "postgres://user:secret@localhost:5433/tests?sslmode=disable")
+	if got := hostRunCapacity(); got != 1 {
+		t.Fatalf("shared server capacity=%d, want one conservative invocation", got)
+	}
+	t.Setenv(RunCapacityEnv, "2")
+	if _, err := RunCapacityFromEnvironment(); err == nil {
+		t.Fatal("explicit oversubscription of shared PostgreSQL accepted")
 	}
 }
 

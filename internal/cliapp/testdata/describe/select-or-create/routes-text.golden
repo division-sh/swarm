@@ -1,0 +1,14 @@
+routing topology: routing-topology/v1
+  source authority: projection_only_existing_contract_owners
+  - [inter_flow_connect] producer/account.ready: producer.producer-node -> account.account.ready
+    connect: producer.account.ready -> account.account.ready (schema.yaml:<line>)
+    resolution: mode=select-or-create target=target field=account_id source_kind=payload source=payload.account_id derived_from="instance.account_id + carries.account_id.from"
+  - [typed_pubsub] producer/account.requested: producer.account.requested -> producer.producer-node
+    typed pub/sub: match=exact boundary=same_flow
+  - [typed_pubsub] account/account.ready: account.account.ready -> account.account-node
+    typed pub/sub: match=exact boundary=same_flow
+  - [inter_flow_connect] account.requested: ..account.requested -> producer.account.requested
+    connect: .account.requested -> producer.account.requested (schema.yaml:<line>)
+    resolution: mode=static target=target
+  boundary exposures:
+    - producer/account.ready: producer.producer-node -> output producer.account.ready
