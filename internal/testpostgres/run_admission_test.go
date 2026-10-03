@@ -604,6 +604,7 @@ func TestRunCapacityFromEnvironment(t *testing.T) {
 }
 
 func TestConservativeHostRunCapacity(t *testing.T) {
+	t.Run("effective_cgroup_limits", proveEffectiveCgroupCapacity)
 	for _, row := range []struct {
 		cpu  int
 		gib  uint64

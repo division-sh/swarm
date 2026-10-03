@@ -106,4 +106,14 @@ wait after evidence has already been consumed. No cap, service isolation, deadli
 unit membership or application-runtime behavior is relaxed. Fresh clean-source full
 qualification on server2 and hosted full remain required after these corrections.
 
+L03 also includes the automated review's effective-cgroup counterexample: fixed
+mount-root reads can miss nested process/ancestor restrictions. Resolve the current
+unified membership and complete visible mount, apply every visible ancestor CPU and
+memory limit, and conservatively admit one for missing, partial, ambiguous, v1 or
+hybrid evidence. No cgroup modification, new resource owner, hidden capacity override
+or broad compatibility parser is authorized. The existing L03 root adds controlled
+leaf, parent, root, malformed, missing, unreadable and unsupported-layout proofs.
+The 96f qualification was explicitly interrupted and joined for this correction;
+its partial passing units cannot qualify the replacement head.
+
 Retained counterexample source and raw red log: `docs/audits/2550-service-namespace-probe_test.go.txt` and `docs/audits/2550-service-namespace-probe.log` in swarm-docs. These are diagnostic overlay evidence, not checked-in executable roots or green repair receipts. The current source-code service owner remains byte-identical to master.
