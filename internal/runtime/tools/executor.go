@@ -110,7 +110,7 @@ func NewExecutorWithOptions(bus EventPublisher, opts ExecutorOptions) *Executor 
 		exec.mcpClient = runtimemcp.NewClient(exec.credentials)
 	}
 	if exec.mcpClient != nil {
-		for _, err := range exec.mcpClient.Refresh(context.Background(), exec.workflowSource) {
+		for _, err := range exec.mcpClient.Refresh(context.Background(), exec.workflowSource, runtimemcp.DiscoveryOptions{}) {
 			processWarn("tool-executor", "mcp discovery warning: %v", err)
 		}
 	}

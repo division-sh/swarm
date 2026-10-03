@@ -8961,6 +8961,33 @@ engine:
       note: Chain depth overflow is NOT a handler failure. It is an emission interception. The dead_letter is for the downstream
         event, not the handler that produced it.
   boot_verification:
+    admission_evidence:
+      promoted_by: '#2286'
+      owner: internal/runtime/bootverify.Report and internal/runtime.ValidateWorkflowContractSurface
+      rule: >
+        Admission findings and observation completeness have one owner, independent of CLI rendering.
+        Registered checks declare source, deployment, or mixed purpose in the existing registry.
+        Mixed checks retain source validation and separately account for concrete fulfillment.
+        Post-registry clauses record their own execution and an early refusal leaves a named unperformed
+        tail, not an empty success list. Observations are scoped to the admitted source identity and
+        selected configuration; they never grant execution authority or a future lease.
+      observation_fields: [check_id, owner, subject, class, status, reason, started_at, finished_at, dependencies, failure_class]
+      observation_classes: [source, deployment]
+      observation_statuses: [passed, failed, unavailable, not_run, not_applicable]
+      applicability: >
+        not_applicable requires proof from the canonical applicability owner. A missing required read
+        port, unavailable dependency, timeout or failed cleanup is never evidence of empty state.
+        Portable validation may succeed with explicitly named unobserved deployment prerequisites,
+        but admission_complete remains false. Lint and warning fatality retain their existing policy.
+      execution_obligations: >
+        Production-only acquisition, preparation, provider visibility/authorization settlement and
+        gateway handshake are separately named by id, exact subject, owner and reason. They are neither
+        passed observations nor applicability exclusions. Complete admission with outstanding execution
+        obligations retains live_readiness: not_evaluated and does not promise successful startup.
+      reduction: >
+        Preserve every finding and observation. Numeric outcome priority is interruption 130, hard
+        invalidity 2, authentication 4, conflict 6, dependency/incomplete 3, otherwise 0. Applicable
+        unobserved admission cannot become an execution obligation merely to obtain exit 0.
     structural_validation:
       owner: internal/runtime.ValidateWorkflowContractSurface and internal/runtime/bootverify
       source_owner: internal/runtime.AdmitEffectiveSourceProjection over internal/packadmission.FromBundle metadata
@@ -24838,6 +24865,7 @@ cli_specification:
               fact_owner: local contract verification
               json_shape: >
                 object with ok, source_root, validation_scope: structural, live_readiness: not_evaluated,
+                admission_complete, source_artifact_hash, observations, execution_obligations,
                 production_valid, harness counts/provenance, pack_inventory, errors, warnings, and lint_evidence.
                 workspace_backend and operational capability_subjects are retired from structural verify.
                 production_valid describes harness independence, not deployment readiness. `errors`, `warnings`,
@@ -24847,10 +24875,11 @@ cli_specification:
                 this same object for structured boot verification failures with `ok: false` instead of requiring consumers
                 to parse human stderr.
               human_text_streams:
-                stdout: "successful load-bearing `verify ok: source=...` result only"
+                stdout: "scoped admission result and explicitly unperformed checks/obligations; portable success never claims deployment readiness"
                 stderr: "analyzer diagnostics and advisory findings rendered as typed diagnostic lists with `[BLOCKER]`, `[WARN]`, or `[INFO]`; single command-outcome failures still use `ERROR:`/`WARNING:`"
               quiet_values:
-              - ok
+              - scoped admission outcome; never bare ok
+              - named unperformed or failed observations and startup execution obligations
             runs:
               command: swarm run list
               classification: shared_output

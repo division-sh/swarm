@@ -78,7 +78,11 @@ func TestVerifyHarnessInjectionMissingDeclarationRestoresProducerFailure(t *test
 func TestVerifyValidationPolicyIsTheOnlyHarnessOptIn(t *testing.T) {
 	repo := RepoRoot()
 	source := loadHarnessSourceForCommandTest(t)
-	opts, err := verifyWorkflowContractValidationOptions(repo, writeTestVerifyRuntimeConfig(t), source)
+	configResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: writeTestVerifyRuntimeConfig(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts, err := verifyWorkflowContractValidationOptions(configResult, source)
 	if err != nil {
 		t.Fatalf("verifyWorkflowContractValidationOptions: %v", err)
 	}

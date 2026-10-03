@@ -12,23 +12,28 @@ import (
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type verifyCommandResult struct {
-	OK                      bool                  `json:"ok"`
-	SourceRoot              string                `json:"source_root"`
-	ValidationScope         string                `json:"validation_scope"`
-	LiveReadiness           string                `json:"live_readiness"`
-	HarnessInjectedInputs   int                   `json:"harness_injected_inputs"`
-	HarnessObservedOutputs  int                   `json:"harness_observed_outputs"`
-	HarnessInputProvenance  []string              `json:"harness_input_provenance,omitempty"`
-	HarnessOutputProvenance []string              `json:"harness_output_provenance,omitempty"`
-	ProductionValid         bool                  `json:"production_valid"`
-	Errors                  []verifyFindingOutput `json:"errors"`
-	Warnings                []verifyFindingOutput `json:"warnings"`
-	LintEvidence            []verifyFindingOutput `json:"lint_evidence"`
-	PackInventory           packInventoryReadback `json:"pack_inventory"`
+	OK                      bool                                             `json:"ok"`
+	SourceRoot              string                                           `json:"source_root"`
+	ValidationScope         string                                           `json:"validation_scope"`
+	LiveReadiness           string                                           `json:"live_readiness"`
+	AdmissionComplete       bool                                             `json:"admission_complete"`
+	Observations            []runtimebootverify.AdmissionObservation         `json:"observations"`
+	ExecutionObligations    []runtimebootverify.AdmissionExecutionObligation `json:"execution_obligations"`
+	SourceArtifactHash      string                                           `json:"source_artifact_hash,omitempty"`
+	HarnessInjectedInputs   int                                              `json:"harness_injected_inputs"`
+	HarnessObservedOutputs  int                                              `json:"harness_observed_outputs"`
+	HarnessInputProvenance  []string                                         `json:"harness_input_provenance,omitempty"`
+	HarnessOutputProvenance []string                                         `json:"harness_output_provenance,omitempty"`
+	ProductionValid         bool                                             `json:"production_valid"`
+	Errors                  []verifyFindingOutput                            `json:"errors"`
+	Warnings                []verifyFindingOutput                            `json:"warnings"`
+	LintEvidence            []verifyFindingOutput                            `json:"lint_evidence"`
+	PackInventory           packInventoryReadback                            `json:"pack_inventory"`
 }
 
 type verifyFindingOutput struct {
@@ -67,11 +72,16 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 		}
 		return 2
 	}
-	resolvedPaths, err := ResolveCLISourcePlatformSpecPaths(repo, CLISourcePlatformSpecPathOptions{
+	configResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: opts.configPath})
+	if err != nil {
+		writeCLIAPIError(errOut, err)
+		return CLIExitValidation
+	}
+	resolvedPaths, err := resolveCLISourcePlatformSpecPathsFromConfig(repo, CLISourcePlatformSpecPathOptions{
 		SourceRoot:       opts.sourceRoot,
 		PlatformSpecPath: opts.platformSpecPath,
 		ConfigPath:       opts.configPath,
-	})
+	}, configResult.cli)
 	if err != nil {
 		if errOut != nil {
 			fmt.Fprintf(errOut, "verify failed: resolve path config: %v\n", err)
@@ -85,17 +95,12 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 		writeCLIAPIError(errOut, err)
 		return CLIExitValidation
 	}
-	configResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: opts.configPath})
-	if err != nil {
-		writeCLIAPIError(errOut, err)
-		return CLIExitValidation
-	}
 	if _, bundle, err := NewSwarmWorkflowModuleWithRuntimeConfig(repo, sourceRoot, resolvedPlatformSpecPath, configResult); err != nil {
 		writeCLIAPIError(errOut, err)
 		return CLIExitValidation
 	} else {
 		packReadback := packInventoryReadbackFromInventory(bundle.PackInventory)
-		source, validationOpts, err := admitStructuralSource(repo, opts.configPath, bundle)
+		source, validationOpts, err := admitStructuralSource(configResult, bundle)
 		if err != nil {
 			if errOut != nil {
 				fmt.Fprintf(errOut, "verify failed: admit effective source: %v\n", err)
@@ -103,37 +108,34 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 			return 1
 		}
 		result, err := verifyBundleResultWithOptions(ctx, source, validationOpts)
-		if err != nil {
-			if opts.output.asJSON && verifyValidationResultHasBlockingBootFindings(result, validationOpts) {
-				output := verifyCommandOutput(false, sourceRoot, result, packReadback)
-				if renderErr := renderCLIOutput(out, errOut, opts.output, output, nil, nil); renderErr != nil {
-					return 2
-				}
-				return 1
-			}
-			if errOut != nil {
-				fmt.Fprintf(errOut, "verify failed: %v\n", err)
-			}
-			return 1
-		}
-		output := verifyCommandOutput(true, sourceRoot, result, packReadback)
+		decision := result.BootReport.AdmissionDecision(runtimebootverify.AdmissionFindingPolicy{
+			FatalWarnings: validationOpts.FatalBootWarnings, ExcludedFatalWarningChecks: validationOpts.ExcludedFatalBootWarningChecks,
+		})
+		output := verifyCommandOutput(err == nil && decision.FailureClass == "" && !decision.Interrupted, sourceRoot, result, packReadback)
+		output.AdmissionComplete = decision.Complete
 		if err := renderCLIOutput(out, errOut, opts.output, output, func(_ io.Writer) {
+			writeVerifyFindings(errOut, result.BootReport.Errors(), true)
 			writeVerifyFindings(errOut, result.BootReport.Warnings(), false)
 			writeVerifyFindings(errOut, result.BootReport.LintEvidence(), false)
 			if out != nil {
-				if result.HarnessInjectedInputCount > 0 || result.HarnessObservedOutputCount > 0 {
+				if !output.OK {
+					fmt.Fprintf(out, "verify failed: source=%s\n", sourceRoot)
+				} else if result.HarnessInjectedInputCount > 0 || result.HarnessObservedOutputCount > 0 {
 					fmt.Fprintf(out, "verify ok: source=%s -- %s; not production-valid\n", sourceRoot, harnessValidationSummary(result))
 				} else {
 					fmt.Fprintf(out, "verify ok: source=%s\n", sourceRoot)
 				}
-				fmt.Fprintln(out, "validation: structural; live readiness: not evaluated (production_valid describes harness independence only)")
+				for _, line := range verifyAdmissionTextLines(output) {
+					fmt.Fprintln(out, line)
+				}
 				writePackInventory(out, packReadback)
 			}
 		}, func() ([]string, error) {
-			return []string{"ok"}, nil
+			return verifyAdmissionTextLines(output), nil
 		}); err != nil {
 			return 2
 		}
+		return verifyAdmissionExitCode(decision)
 	}
 	return 0
 }
@@ -155,6 +157,9 @@ func verifyCommandOutput(ok bool, sourceRoot string, result runtime.WorkflowCont
 		SourceRoot:              sourceRoot,
 		ValidationScope:         "structural",
 		LiveReadiness:           "not_evaluated",
+		Observations:            append([]runtimebootverify.AdmissionObservation{}, result.BootReport.Observations...),
+		ExecutionObligations:    append([]runtimebootverify.AdmissionExecutionObligation{}, result.BootReport.ExecutionObligations...),
+		SourceArtifactHash:      result.BootReport.SourceArtifactHash,
 		HarnessInjectedInputs:   result.HarnessInjectedInputCount,
 		HarnessObservedOutputs:  result.HarnessObservedOutputCount,
 		HarnessInputProvenance:  append([]string(nil), result.HarnessInputDeclarations...),
@@ -167,33 +172,52 @@ func verifyCommandOutput(ok bool, sourceRoot string, result runtime.WorkflowCont
 	}
 }
 
+func verifyAdmissionExitCode(decision runtimebootverify.AdmissionDecision) int {
+	if decision.Interrupted {
+		return cliExitInterrupted
+	}
+	switch decision.FailureClass {
+	case "":
+		return cliExitOK
+	case failures.ClassSchemaInvalid:
+		return CLIExitValidation
+	case failures.ClassAuthenticationNeeded, failures.ClassAuthorizationDenied:
+		return cliExitAuth
+	case failures.ClassLifecycleConflict, failures.ClassConflictingDuplicate:
+		return cliExitConflict
+	default:
+		return CLIExitRuntime
+	}
+}
+
+func verifyAdmissionTextLines(output verifyCommandResult) []string {
+	message := "admission validation failed; startup execution not performed"
+	if output.OK && output.ValidationScope == "structural" {
+		message = "portable structural checks passed; deployment admission not evaluated"
+	} else if output.OK {
+		message = "admission checks passed; startup execution not performed"
+	}
+	lines := []string{message}
+	for _, observation := range output.Observations {
+		if observation.Status == runtimebootverify.AdmissionPassed || observation.Status == runtimebootverify.AdmissionNotApplicable {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("%s: %s @ %s (%s)", observation.Status, observation.CheckID, observation.Subject, observation.Reason))
+	}
+	for _, obligation := range output.ExecutionObligations {
+		lines = append(lines, fmt.Sprintf("startup not performed: %s @ %s (%s)", obligation.ID, obligation.Subject, obligation.Reason))
+	}
+	if !output.ProductionValid {
+		lines = append(lines, "not production-valid: source depends on validation-only harness declarations")
+	}
+	return lines
+}
+
 func pluralSuffix(count int) string {
 	if count == 1 {
 		return ""
 	}
 	return "s"
-}
-
-func verifyValidationResultHasBlockingBootFindings(result runtime.WorkflowContractValidationResult, opts runtime.WorkflowContractValidationOptions) bool {
-	if len(result.BootReport.Errors()) > 0 {
-		return true
-	}
-	if !opts.FatalBootWarnings {
-		return false
-	}
-	excluded := make(map[string]struct{}, len(opts.ExcludedFatalBootWarningChecks))
-	for _, checkID := range opts.ExcludedFatalBootWarningChecks {
-		if checkID = strings.TrimSpace(checkID); checkID != "" {
-			excluded[checkID] = struct{}{}
-		}
-	}
-	for _, finding := range result.BootReport.Warnings() {
-		if _, skip := excluded[strings.TrimSpace(finding.CheckID)]; skip {
-			continue
-		}
-		return true
-	}
-	return false
 }
 
 func verifyFindingOutputs(findings []runtimebootverify.Finding) []verifyFindingOutput {
@@ -231,10 +255,9 @@ func verifyBundleResultWithOptions(ctx context.Context, source semanticview.Sour
 	return runtime.ValidateWorkflowContractSurface(ctx, source, opts)
 }
 
-func verifyWorkflowContractValidationOptions(repo, configPath string, source semanticview.Source) (runtime.WorkflowContractValidationOptions, error) {
-	configResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: configPath})
-	if err != nil {
-		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("load runtime config: %w", err)
+func verifyWorkflowContractValidationOptions(configResult RuntimeConfigLoadResult, source semanticview.Source) (runtime.WorkflowContractValidationOptions, error) {
+	if configResult.Config == nil {
+		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("admitted runtime configuration is required")
 	}
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle == nil {
@@ -252,9 +275,9 @@ func verifyWorkflowContractValidationOptions(repo, configPath string, source sem
 	return opts, nil
 }
 
-func admitStructuralSource(repo, configPath string, bundle *runtimecontracts.WorkflowContractBundle) (semanticview.Source, runtime.WorkflowContractValidationOptions, error) {
+func admitStructuralSource(configResult RuntimeConfigLoadResult, bundle *runtimecontracts.WorkflowContractBundle) (semanticview.Source, runtime.WorkflowContractValidationOptions, error) {
 	source := semanticview.Wrap(bundle)
-	opts, err := verifyWorkflowContractValidationOptions(repo, configPath, source)
+	opts, err := verifyWorkflowContractValidationOptions(configResult, source)
 	if err != nil {
 		return nil, opts, err
 	}

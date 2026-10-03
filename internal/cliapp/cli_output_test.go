@@ -101,8 +101,8 @@ func TestCLIOutputModesForLocalConsumers(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("verify --quiet code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
-	if got := stdout.String(); got != "ok\n" {
-		t.Fatalf("verify --quiet stdout = %q, want ok", got)
+	if got := stdout.String(); !strings.HasPrefix(got, "portable structural checks passed; deployment admission not evaluated\n") || !strings.Contains(got, "not_run: credential_key_exists @") {
+		t.Fatalf("verify --quiet hid unobserved readiness: %q", got)
 	}
 }
 
