@@ -18,6 +18,86 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func TestDormantIngressTelegramScaffoldJourney(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	unsetStoreSelectorEnv(t)
+	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
+	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("TELEGRAM_BOT_TOKEN", "")
+	cwd := t.TempDir()
+	for _, args := range [][]string{
+		{"new", "webhook-responder", "--output", "telegram-agent"},
+		{"verify", "telegram-agent"},
+		{"test", "telegram-agent", "tests/smoke.yaml"},
+	} {
+		var out, errOut bytes.Buffer
+		if code := executeCLIFrom(context.Background(), cwd, args, &out, &errOut, nil); code != 0 {
+			t.Fatalf("public command %v exited %d: stdout=%s stderr=%s", args, code, &out, &errOut)
+		}
+		if args[0] == "test" && !strings.Contains(out.String(), "swarm test ok: scenarios=1") {
+			t.Fatalf("actual private scenario did not finish: %s", &out)
+		}
+	}
+	if _, err := os.Stat(credentialPath); !os.IsNotExist(err) {
+		t.Fatalf("structural/mock commands acquired credential authority: %v", err)
+	}
+	for _, old := range []string{"bot", "swarm.yaml", "swarm.live.yaml"} {
+		if _, err := os.Stat(filepath.Join(cwd, "telegram-agent", old)); !os.IsNotExist(err) {
+			t.Fatalf("scaffold restored legacy %s: %v", old, err)
+		}
+	}
+}
+
+func TestDormantIngressDevPublishesNoAuthority(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	unsetStoreSelectorEnv(t)
+	t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
+	root := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
+	disableChannelOnboardingBusinessConsumers(t, root)
+	opts := cliapp.ServeOptions{
+		SourceRoot: root, PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
+		ConfigPath: writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "", "", channelOnboardingHostWorkspaceFields()),
+		Dev:        true, SelfCheck: true, Verbose: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+		WorkspaceBackend: "host", WorkspaceBackendSet: true,
+	}
+	process := startServeRuntimeTestProcessAtRepo(t, root, opts)
+	process.waitForReadyLine()
+	if !strings.Contains(process.outputString(), "DORMANT ingress") {
+		t.Fatalf("dev hid the missing-credential decision: %s", process.outputString())
+	}
+	endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString())
+	var inventory struct {
+		Runs []struct {
+			Origin struct {
+				Kind string `json:"kind"`
+			} `json:"origin"`
+		} `json:"runs"`
+		NextCursor string `json:"next_cursor"`
+	}
+	requireServedJSONRPCResult(t, endpoint+"/v1/rpc", "run.list", map[string]any{}, &inventory)
+	if inventory.Runs == nil || inventory.NextCursor != "" {
+		t.Fatalf("incomplete public run inventory: %#v", inventory)
+	}
+	for _, run := range inventory.Runs {
+		if run.Origin.Kind == "" || run.Origin.Kind == "standing_generation" {
+			t.Fatalf("fresh dev created a dormant standing generation: %#v", run)
+		}
+	}
+	response, err := http.Post(endpoint+"/webhooks/chat/telegram", "application/json", strings.NewReader(`{"update_id":91,"message":{"message_id":91,"from":{"id":42},"chat":{"id":42,"type":"private"},"text":"not executable"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, response.Body)
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("dev published dormant ingress: HTTP %d", response.StatusCode)
+	}
+	if code := process.stop(); code != 0 {
+		t.Fatalf("dev stop=%d", code)
+	}
+}
+
 func TestDormantIngressProvisionRestartSignedInputBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
