@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/testplanning"
+	"github.com/division-sh/swarm/internal/testpostgres"
 )
 
 func TestCompletionWorkersBoundedAndJoined(t *testing.T) {
@@ -156,6 +157,102 @@ func TestCompletionMultiworkerSignals(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestCompletionParentDeathRetainsWorkerDescendants(t *testing.T) {
+	const fixture = "SWARM_COMPLETION_DEATH_FIXTURE"
+	if root := os.Getenv(fixture); root != "" {
+		if unit := os.Getenv("SWARM_COMPLETION_DEATH_UNIT"); unit != "" {
+			admission := testpostgres.NewRunAdmission(filepath.Join(root, "state"), nil)
+			lease, err := admission.Acquire(context.Background(), testpostgres.RunCommand{Args: []string{"fixture", unit}}, 2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			child := exec.Command("sh", "-c", `trap '' INT TERM HUP; touch "$1"; while [ ! -f "$2" ]; do sleep .01; done`, "descendant", filepath.Join(root, "started-"+unit), filepath.Join(root, "release"))
+			if err := lease.InheritTo(child); err != nil {
+				t.Fatal(err)
+			}
+			if err := child.Start(); err != nil {
+				t.Fatal(err)
+			}
+			if err := publishSignalFixturePID(filepath.Join(root, "worker-"+unit), os.Getpid(), nil); err != nil {
+				t.Fatal(err)
+			}
+			if err := child.Wait(); err != nil {
+				t.Fatal(err)
+			}
+			if err := lease.Complete(context.Background(), false); err != nil {
+				t.Fatal(err)
+			}
+			return
+		}
+		plan := testplanning.RunPlan{HeadSHA: "head", Digest: "plan", Profile: testplanning.ProfileFull}
+		for _, id := range []string{"one", "two", "three"} {
+			plan.Units = append(plan.Units, testplanning.ProofUnit{ID: id})
+		}
+		os.Exit(executeCompletionWorkers(context.Background(), plan, root, filepath.Join(root, "worker"), os.Environ(), true, 2))
+	}
+	root := t.TempDir()
+	script := "#!/bin/sh\nset -eu\nexport SWARM_COMPLETION_DEATH_UNIT=\"$3\"\nexec \"$SWARM_COMPLETION_DEATH_BINARY\" -test.run=^TestCompletionParentDeathRetainsWorkerDescendants$\n"
+	if err := os.WriteFile(filepath.Join(root, "worker"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	parent := exec.Command(os.Args[0], "-test.run=^TestCompletionParentDeathRetainsWorkerDescendants$")
+	parent.Env = append(os.Environ(), fixture+"="+root, "SWARM_COMPLETION_DEATH_BINARY="+os.Args[0])
+	if err := parent.Start(); err != nil {
+		t.Fatal(err)
+	}
+	var workers []int
+	t.Cleanup(func() {
+		_ = os.WriteFile(filepath.Join(root, "release"), []byte("release\n"), 0600)
+		for _, pid := range workers {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+		if parent.ProcessState == nil {
+			_ = parent.Process.Kill()
+			_ = parent.Wait()
+		}
+	})
+	for _, unit := range []string{"one", "two"} {
+		workers = append(workers, waitForSignalFixturePID(t, filepath.Join(root, "worker-"+unit)))
+		waitForTestPath(t, filepath.Join(root, "started-"+unit), 10*time.Second)
+	}
+	if err := parent.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	if err := parent.Wait(); err == nil {
+		t.Fatal("killed aggregate passed")
+	}
+	for _, pid := range workers {
+		if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
+			t.Fatal(err)
+		}
+	}
+	admission := testpostgres.NewRunAdmission(filepath.Join(root, "state"), nil)
+	blocked, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if lease, err := admission.Acquire(blocked, testpostgres.RunCommand{Args: []string{"successor"}}, 2); err == nil {
+		_ = lease.Complete(context.Background(), false)
+		t.Fatal("parent/worker death released descendant authority")
+	}
+	if _, err := os.Stat(filepath.Join(root, "workers.json")); !os.IsNotExist(err) {
+		t.Fatal("dead aggregate published full proof", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "started-three")); !os.IsNotExist(err) {
+		t.Fatal("dead parent launched another unit", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "release"), []byte("release\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, finish := context.WithTimeout(context.Background(), 5*time.Second)
+	defer finish()
+	lease, err := admission.Acquire(ctx, testpostgres.RunCommand{Args: []string{"successor-after-join"}}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.Complete(ctx, false); err != nil {
+		t.Fatal(err)
 	}
 }
 
