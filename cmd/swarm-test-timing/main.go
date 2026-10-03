@@ -295,10 +295,14 @@ func recordEvidence(cfg config) error {
 		GoTimeout:       unit.GoTimeout,
 		Report:          report,
 	}
+	// Preserve the observed attempt, including failures, without granting credit.
+	if err := writeJSON(cfg.evidencePath, evidence); err != nil {
+		return err
+	}
 	if problems := testtiming.ValidateCommandEvidence(evidence, plan); len(problems) != 0 {
 		return fmt.Errorf("invalid command evidence: %s", strings.Join(problems, "; "))
 	}
-	return writeJSON(cfg.evidencePath, evidence)
+	return nil
 }
 
 func evaluateBudget(cfg config) error {
