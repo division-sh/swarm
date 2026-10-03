@@ -20,6 +20,9 @@ type FixedReadStatement struct {
 }
 
 func (s *FixedReadStatement) PrepareContext(ctx context.Context, b *Backend, query string) (*sql.Stmt, error) {
+	if err := b.refuseInspectionMutation(ctx); err != nil {
+		return nil, err
+	}
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -60,6 +63,19 @@ func (s *FixedReadStatement) PrepareContext(ctx context.Context, b *Backend, que
 }
 
 func (s *FixedReadStatement) QueryContext(ctx context.Context, b *Backend, query string, args ...any) (*sql.Rows, error) {
+	if tx, err := b.inspectionTransaction(ctx); err != nil {
+		return nil, err
+	} else if tx != nil {
+		s.mu.Lock()
+		if s.backend == nil {
+			s.backend, s.query = b, query
+		} else if s.backend != b || s.query != query {
+			s.mu.Unlock()
+			return nil, fmt.Errorf("fixed sqlite read statement cannot change pool or SQL")
+		}
+		s.mu.Unlock()
+		return tx.QueryContext(ctx, query, args...)
+	}
 	stmt, err := s.PrepareContext(ctx, b, query)
 	if err != nil {
 		return nil, err
