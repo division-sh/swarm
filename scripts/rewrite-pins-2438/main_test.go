@@ -123,17 +123,23 @@ func TestRewriteMovesExactReplyAndCorrelationToResponseConnection(t *testing.T) 
 
 func TestRewriteRejectsUnratifiedOrAmbiguousForms(t *testing.T) {
 	for name, text := range map[string]string{
-		"extra_document": "pins: {inputs: {events: [work.start]}}\n---\nname: hidden\n",
-		"duplicate":      "pins: {inputs: {events: [work.start], events: [other.start]}}\n",
-		"null":           "pins: {inputs: null}\n",
-		"alias":          "pins: {inputs: {events: &names [work.start]}, outputs: {events: *names}}\n",
-		"unknown_grant":  "pins: {inputs: {events: [work.start], reads: [secret]}}\n",
-		"unknown_option": "pins: {inputs: {events: [{event: work.start, surprise: true}]}}\n",
-		"wrong_sink":     "pins: {outputs: {events: [{event: work.done, sink: other}]}}\n",
-		"output_init":    "pins: {outputs: {events: [{event: work.done, initialize: {x: payload.x}}]}}\n",
-		"fan_out":        "pins: {inputs: {events: [{event: work.start, resolution: {mode: fan-out}}]}}\n",
-		"fan_in":         "pins: {inputs: {events: [{event: work.start, resolution: {mode: fan-in, aggregation: sum}}]}}\n",
-		"invalid_event":  "pins: {inputs: {events: [/work.start]}}\n",
+		"extra_document":    "pins: {inputs: {events: [work.start]}}\n---\nname: hidden\n",
+		"duplicate":         "pins: {inputs: {events: [work.start], events: [other.start]}}\n",
+		"null":              "pins: {inputs: null}\n",
+		"alias":             "pins: {inputs: {events: &names [work.start]}, outputs: {events: *names}}\n",
+		"unknown_grant":     "pins: {inputs: {events: [work.start], reads: [secret]}}\n",
+		"unknown_option":    "pins: {inputs: {events: [{event: work.start, surprise: true}]}}\n",
+		"wrong_sink":        "pins: {outputs: {events: [{event: work.done, sink: other}]}}\n",
+		"output_init":       "pins: {outputs: {events: [{event: work.done, initialize: {x: payload.x}}]}}\n",
+		"fan_out":           "pins: {inputs: {events: [{event: work.start, resolution: {mode: fan-out}}]}}\n",
+		"fan_in":            "pins: {inputs: {events: [{event: work.start, resolution: {mode: fan-in, aggregation: sum}}]}}\n",
+		"invalid_event":     "pins: {inputs: {events: [/work.start]}}\n",
+		"qualified_event":   "pins: {inputs: {events: [worker/work.start]}}\n",
+		"padded_event":      "pins: {inputs: {events: [' work.start ']}}\n",
+		"duplicate_event":   "pins: {inputs: {events: [work.start, work.start]}}\n",
+		"mixed_duplicate":   "pins: {outputs: {events: [work.done, {event: work.done, sink: harness}]}}\n",
+		"empty_initialize":  "pins: {inputs: {events: [{event: work.start, initialize: {}}]}}\n",
+		"redundant_mapping": "pins: {inputs: {events: [{event: work.start}]}}\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			inputs := map[string][]byte{"valid/schema.yaml": []byte("name: valid\npins:\n  outputs:\n    events: [work.done]\n"), "invalid/schema.yaml": []byte(text)}
@@ -155,6 +161,13 @@ func TestRewriteRejectsUnratifiedOrAmbiguousForms(t *testing.T) {
 			}
 		})
 	}
+	t.Run("padded_correlation", func(t *testing.T) {
+		inputs := replySources(true)
+		inputs[replyRequester] = []byte(strings.Replace(string(inputs[replyRequester]), "correlation_key: request_id", "correlation_key: ' request_id '", 1))
+		if _, err := planRewrite(inputs); err == nil {
+			t.Fatal("nonexact correlation key admitted")
+		}
+	})
 }
 
 func TestRewriteDeletesOnlyExplicitRetiredFixtures(t *testing.T) {
@@ -180,12 +193,25 @@ func TestRewriteRetainsCommentsOnUntouchedSections(t *testing.T) {
 }
 
 func TestRewritePreflightFailureMakesNoWrites(t *testing.T) {
+	inputs := map[string][]byte{"schema.yaml": []byte("name: valid\npins:\n  outputs:\n    events: [work.done]\n"), "child/schema.yaml": []byte("pins: {inputs: {events: [invalid]}}\n---\nname: trailing\n")}
+	root := trackedTestSources(t, inputs)
+	if err := run(root, true); err == nil {
+		t.Fatal("trailing document admitted")
+	}
+	for name, before := range inputs {
+		after, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil || !bytes.Equal(before, after) {
+			t.Fatalf("preflight failure mutated %s", name)
+		}
+	}
+}
+
+func trackedTestSources(t *testing.T, inputs map[string][]byte) string {
+	t.Helper()
 	root := t.TempDir()
-	command := exec.Command("git", "init", "-q", root)
-	if result, err := command.CombinedOutput(); err != nil {
+	if result, err := exec.Command("git", "init", "-q", root).CombinedOutput(); err != nil {
 		t.Fatalf("git init: %s %v", result, err)
 	}
-	inputs := map[string][]byte{"schema.yaml": []byte("name: valid\npins:\n  outputs:\n    events: [work.done]\n"), "child/schema.yaml": []byte("pins: {inputs: {events: [invalid]}}\n---\nname: trailing\n")}
 	for name, data := range inputs {
 		file := filepath.Join(root, name)
 		if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
@@ -198,14 +224,76 @@ func TestRewritePreflightFailureMakesNoWrites(t *testing.T) {
 	if result, err := exec.Command("git", "-C", root, "add", ".").CombinedOutput(); err != nil {
 		t.Fatalf("git add: %s %v", result, err)
 	}
-	if err := run(root, true); err == nil {
-		t.Fatal("trailing document admitted")
+	return root
+}
+
+func TestRewriteApplicationPreservesModesAndIsIdempotent(t *testing.T) {
+	inputs := replySources(true)
+	inputs[retiredHarness+"README.md"] = []byte("retired example\n")
+	inputs["nodes.yaml"] = []byte("not part of this rewrite\n")
+	root := trackedTestSources(t, inputs)
+	requester := filepath.Join(root, replyRequester)
+	if err := os.Chmod(requester, 0640); err != nil {
+		t.Fatal(err)
+	}
+	if err := run(root, false); err != nil {
+		t.Fatal(err)
 	}
 	for name, before := range inputs {
 		after, err := os.ReadFile(filepath.Join(root, name))
 		if err != nil || !bytes.Equal(before, after) {
-			t.Fatalf("preflight failure mutated %s", name)
+			t.Fatalf("dry run mutated %s", name)
 		}
+	}
+	if err := run(root, true); err != nil {
+		t.Fatal(err)
+	}
+	selected := replySources(true)
+	selected[retiredHarness+"README.md"] = inputs[retiredHarness+"README.md"]
+	expected, _ := rewritten(t, selected)
+	expected["nodes.yaml"] = inputs["nodes.yaml"]
+	for name, data := range expected {
+		actual, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil || !bytes.Equal(actual, data) {
+			t.Fatalf("application did not match plan for %s: %v", name, err)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(root, retiredHarness, "README.md")); !os.IsNotExist(err) {
+		t.Fatalf("retired fixture survived: %v", err)
+	}
+	info, err := os.Stat(requester)
+	if err != nil || info.Mode().Perm() != 0640 {
+		t.Fatalf("requester permissions changed: %v", err)
+	}
+	if err := run(root, true); err != nil {
+		t.Fatalf("second application failed: %v", err)
+	}
+	for name, data := range expected {
+		actual, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil || !bytes.Equal(actual, data) {
+			t.Fatalf("second application changed %s: %v", name, err)
+		}
+	}
+}
+
+func TestRewriteRejectsTrackedSymlinkBeforeWriting(t *testing.T) {
+	before := []byte("name: valid\npins:\n  outputs:\n    events: [work.done]\n")
+	root := trackedTestSources(t, map[string][]byte{"schema.yaml": before})
+	if err := os.Mkdir(filepath.Join(root, "child"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../schema.yaml", filepath.Join(root, "child/schema.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := exec.Command("git", "-C", root, "add", "child/schema.yaml").CombinedOutput(); err != nil {
+		t.Fatalf("git add: %s %v", result, err)
+	}
+	if err := run(root, true); err == nil {
+		t.Fatal("tracked symlink admitted")
+	}
+	after, err := os.ReadFile(filepath.Join(root, "schema.yaml"))
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("symlink rejection changed the real source")
 	}
 }
 
