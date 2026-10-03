@@ -3,6 +3,7 @@ package bootverify
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -189,6 +190,53 @@ func TestAdmissionReportRejectsUnclassifiedRegisteredCheck(t *testing.T) {
 	report.runAdmissionCheck(c, Check{ID: "unclassified", Run: func(*checkerContext) []Finding { called = true; return nil }})
 	if called || !report.HasErrors() || report.AdmissionDecision(AdmissionFindingPolicy{}).Complete {
 		t.Fatalf("unclassified check accepted: %#v", report)
+	}
+}
+
+func TestAdmissionReportEarlyRejectionAccountsForRegisteredChecks(t *testing.T) {
+	for _, purpose := range []ValidationPurpose{StructuralValidation, ExecutionValidation} {
+		for _, input := range []string{"missing_source", "invalid_purpose", "canceled_missing_source"} {
+			t.Run(fmt.Sprintf("%d/%s", purpose, input), func(t *testing.T) {
+				ctx := context.Background()
+				opts := Options{Purpose: purpose}
+				if input == "invalid_purpose" {
+					opts.Purpose = ValidationPurpose(255)
+				}
+				if input == "canceled_missing_source" {
+					var cancel context.CancelFunc
+					ctx, cancel = context.WithCancel(ctx)
+					cancel()
+				}
+				report := Run(ctx, nil, opts)
+				checks := append(append([]Check{}, bootCheckRegistry...), supplementalChecks...)
+				want := make(map[string]bool)
+				for _, check := range checks {
+					class := AdmissionSourceObservation
+					if check.Mode == CheckDeployment {
+						class = AdmissionDeploymentObservation
+					}
+					want[check.ID+"/"+string(class)] = true
+					if check.Mode == CheckMixed {
+						want[check.ID+"/"+string(AdmissionDeploymentObservation)] = true
+					}
+				}
+				for _, observation := range report.Observations {
+					identity := observation.CheckID + "/" + string(observation.Class)
+					if !want[identity] || observation.Owner != registeredAdmissionOwner || observation.Status != AdmissionNotRun || observation.Reason == "" ||
+						len(observation.Dependencies) != 1 || observation.Dependencies[0] != "workflow_contract_validation" || !observation.StartedAt.IsZero() || !observation.FinishedAt.IsZero() {
+						t.Fatalf("invalid blocked check: %#v", observation)
+					}
+					delete(want, identity)
+				}
+				if len(want) != 0 {
+					t.Fatalf("early rejection hid registered checks: %#v", want)
+				}
+				decision := report.AdmissionDecision(AdmissionFindingPolicy{})
+				if decision.Complete || decision.FailureClass != failures.ClassSchemaInvalid || decision.Interrupted != (input == "canceled_missing_source") {
+					t.Fatalf("early refusal lost its category: %#v", decision)
+				}
+			})
+		}
 	}
 }
 
