@@ -1,6 +1,19 @@
 # Post-Implementation Proof Audit: #2376 / #2322
 
-Qualification status: supported proofs for the approved matrix passed. The user's
+Current qualification: hosted head `301539c51c6482ad1ccefe07ddf27d2414f78114`
+FAILED 14 substantive CI units in run 37122328426 after the approved queue rebase
+onto master `e63f4bdb197e473fe35e94f65ff3c77655957123`. Earlier R13 passes and
+cycle-2 approval are historical evidence, not final-head CI qualification.
+CI-quiet has ended. The bounded qualification repair updates incoming journeys
+to selected-server/permanent replay identity, regenerates the migrated static-data
+golden through admitted source/static-data owners, supplies fake run-header identity,
+and reconciles seven exact private-backend signature rows plus the spec ratchet.
+Only production delta since that rebase is the word "runtime" in the existing
+multi-context Claude refusal; the guard and execution semantics are unchanged.
+Local qualification of this repair is in progress. Merge remains gated on the
+new candidate's supported proofs and exact-head required CI.
+
+Historical R13 status: supported proofs for the approved matrix passed. The user's
 2026-10-03 ruling resolves the two additional label-safety manifestations; permanent
 red/green proofs now cover them at the existing owner and supported consumers.
 Final local default qualification passed all 14 planned units on committed head
