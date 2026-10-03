@@ -277,7 +277,7 @@ full execution requirement. No row is credited by shared-owner introduction.
 | V06 | Remaining four ordered pairs | Table-test all9 core/lifecycle/full pairs through shared resolver and entry points; no inferred coupling |
 | V07 | Missing/malformed/unknown/duplicate CI-Tier | Event JSON parser hostile-body controls resolve full explicitly; no shell evaluation |
 | V08 | Edited requirement or current-body read failure | Summary compares actual effective tier against current body; unavailable body fails closed; same-head higher edit invalidates thinner green |
-| V09 | Explicit user flag or raw arguments downgrade declared minimum | Refuse lower request, accept --full promotion; developer no-context run explicitly non-review-bound |
+| V09 | A local command is thinner than the human-required Local-Tier | Reviewer refuses thin local receipt; CLI refuses invalid/mixed selectors, accepts --full promotion and records effective tier. No local PR lookup or automatic verdict authority; no-context run is explicitly non-review-bound |
 | V10 | Reviewer raises requirement after green core | Real hosted pull_request.edited on same SHA; old green no longer mergeable; summary and human final review compare current requirement |
 | V11 | Native draft/ready and deliberate manual/scheduled posture | Preserve #2537 same-SHA draft refusal; ready resolves gate; manual checks remain distinct; schedules select full |
 | V12 | Source head, execution merge, venue/flags/profile evidence mismatch | Existing wrong-SHA/GOFLAGS/digest/count/env guards plus effective policy/tier mismatch fixtures; no authorization metadata |

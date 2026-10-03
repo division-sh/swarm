@@ -17,25 +17,24 @@ import (
 func TestPlanCIEmitsDigestBoundPlanAndMinimalMatrix(t *testing.T) {
 	dir := t.TempDir()
 	policyPath, modelPath, packagesPath := productionPlannerInputs(t, dir)
-	changedStatusPath := filepath.Join(dir, "changed-status.z")
-	if err := os.WriteFile(changedStatusPath, []byte("M\x00README.md\x00"), 0o644); err != nil {
+	eventPath := filepath.Join(dir, "event.json")
+	if err := os.WriteFile(eventPath, []byte(`{"pull_request":{"body":"CI-Tier: core"}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	planPath := filepath.Join(dir, "plan.json")
 	matrixPath := filepath.Join(dir, "matrix.json")
 	markdownPath := filepath.Join(dir, "plan.md")
 	if err := run(config{
-		planCI:            true,
-		proofPolicyPath:   policyPath,
-		weightModelPath:   modelPath,
-		packagesPath:      packagesPath,
-		changedStatusPath: changedStatusPath,
-		baseSHA:           currentHead(t),
-		planPath:          planPath,
-		matrixPath:        matrixPath,
-		markdownPath:      markdownPath,
-		event:             "pull_request",
-		headSHA:           "abc",
+		planCI:          true,
+		proofPolicyPath: policyPath,
+		weightModelPath: modelPath,
+		packagesPath:    packagesPath,
+		eventPath:       eventPath,
+		planPath:        planPath,
+		matrixPath:      matrixPath,
+		markdownPath:    markdownPath,
+		event:           "pull_request",
+		headSHA:         "abc",
 	}); err != nil {
 		t.Fatalf("run plan: %v", err)
 	}
@@ -43,7 +42,7 @@ func TestPlanCIEmitsDigestBoundPlanAndMinimalMatrix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.Profile != testplanning.ProfilePRCommon || plan.Digest == "" {
+	if plan.Profile != testplanning.ProfileCore || plan.Digest == "" {
 		t.Fatalf("plan = %+v", plan)
 	}
 	raw, err := os.ReadFile(matrixPath)
@@ -232,16 +231,14 @@ func TestUpdateWeightModelIsMaterialDiffOnly(t *testing.T) {
 func writePlannerFixtures(t *testing.T, dir string) (string, string, string) {
 	t.Helper()
 	policy := `
-version: 1
+version: 2
 module: module
 planning: {target_seconds: 100, max_shards: 2, unknown_package_seconds: 10}
-escalation_paths: ['^internal/runtime/conformance/']
 special_packages: [module/catalog]
 profiles:
-  pr-common: {count_mode: cache-default, environment_id: env, units: [catalog-smoke]}
-  pr-escalated: {count_mode: count-1, environment_id: env, units: [catalog-full]}
+  core: {count_mode: cache-default, environment_id: env, units: [catalog-smoke]}
+  lifecycle: {count_mode: count-1, environment_id: env, units: [catalog-full]}
   full: {count_mode: count-1, environment_id: env, units: [catalog-full]}
-  nightly: {count_mode: count-1, environment_id: env, units: [catalog-full]}
 units:
   catalog-smoke: {packages: [module/catalog], run: '^TestSmoke$', count_mode: count-1, environment_id: env, budget_class: full}
   catalog-full: {packages: [module/catalog], count_mode: count-1, environment_id: env, budget_class: full}

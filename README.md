@@ -278,10 +278,11 @@ go build ./cmd/swarm
 golangci-lint run
 go run ./cmd/swarm-unused
 go run ./cmd/swarm-test
-go run ./cmd/swarm-test --full # exhaustive non-soak proof
+go run ./cmd/swarm-test --tier lifecycle # retained restart journeys
+go run ./cmd/swarm-test --full # exhaustive proof, including both 900s soaks
 ```
 
-`swarm-unused` defaults to native-only analysis on the current host. Required
+`swarm-unused` defaults to native-only analysis on the current host. Full-tier
 CI merges native Linux and Darwin reachability with tests enabled across
 default, race, and `issue2413` configurations before enforcing U1000. The
 noncompiling `issue2438` configuration remains parked under E's

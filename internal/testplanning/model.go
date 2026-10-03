@@ -91,7 +91,7 @@ func (m WeightModel) Validate() error {
 	}
 	for profile, units := range m.Units {
 		switch profile {
-		case ProfilePRCommon, ProfilePREscalated, ProfileFull, ProfileNightly:
+		case ProfileCore, ProfileLifecycle, ProfileFull:
 		default:
 			return fmt.Errorf("unknown unit weight profile %q", profile)
 		}

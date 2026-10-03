@@ -430,12 +430,7 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 	}
 	planPackages := append([]string{"github.com/division-sh/swarm/internal/events"}, policy.SpecialPackages...)
 	model := testplanning.WeightModel{Version: testplanning.WeightModelVersion, SourceRunID: "issue-2143-ci-owner-guard", Packages: map[string]float64{}}
-	for _, profileName := range []string{
-		testplanning.ProfilePRCommon,
-		testplanning.ProfilePREscalated,
-		testplanning.ProfileFull,
-		testplanning.ProfileNightly,
-	} {
+	for _, profileName := range []string{testplanning.ProfileFull} {
 		profile := policy.Profiles[profileName]
 		for _, unit := range requiredUnits {
 			if !containsString(profile.Units, unit) {
@@ -448,7 +443,7 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 			}
 		}
 		expectedCatalogUnits := catalogUnits
-		if profileName == testplanning.ProfilePRCommon {
+		if profileName == testplanning.ProfileCore {
 			expectedCatalogUnits = []string{"catalog-required-smoke"}
 		}
 		for _, id := range append(append([]string{}, serveUnits...), expectedCatalogUnits...) {
@@ -493,12 +488,12 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 		"tests/tier1-primitives/test-advances-to/tests/expected.yaml",
 		"platform-spec.yaml",
 	} {
-		profile, _, err := policy.ResolveProfile("pull_request", []string{changedPath}, "")
+		profile, _, err := policy.ResolveProfile("pull_request", "CI-Tier: lifecycle", "")
 		if err != nil {
 			t.Fatalf("resolve profile for %s: %v", changedPath, err)
 		}
-		if profile != testplanning.ProfilePREscalated {
-			t.Errorf("changed path %s resolved profile %s, want %s", changedPath, profile, testplanning.ProfilePREscalated)
+		if profile != testplanning.ProfileLifecycle {
+			t.Errorf("changed path %s resolved profile %s, want %s", changedPath, profile, testplanning.ProfileLifecycle)
 		}
 	}
 	workflow, err := os.ReadFile(filepath.Join(catalogRepoRoot(t), ".github", "workflows", "ci.yml"))
@@ -656,19 +651,17 @@ func externalProofPolicyWithRun(executor, run string) string {
 	if run != "" {
 		runLine = "    run: " + run + "\n"
 	}
-	return `version: 1
+	return `version: 2
 module: github.com/division-sh/swarm
 planning:
   target_seconds: 1
   max_shards: 1
   unknown_package_seconds: 1
-escalation_paths: []
 special_packages: [` + executor + `]
 profiles:
-  pr-common: {count_mode: cache-default, environment_id: test, units: [external-proof]}
-  pr-escalated: {count_mode: count-1, environment_id: test, units: [external-proof]}
+  core: {count_mode: cache-default, environment_id: test, units: [external-proof]}
+  lifecycle: {count_mode: count-1, environment_id: test, units: [external-proof]}
   full: {count_mode: count-1, environment_id: test, units: [external-proof]}
-  nightly: {count_mode: count-1, environment_id: test, units: [external-proof]}
 units:
   external-proof:
     packages: [` + executor + `]

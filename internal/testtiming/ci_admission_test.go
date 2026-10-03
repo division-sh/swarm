@@ -78,16 +78,24 @@ func evaluateCICondition(t *testing.T, expression string, facts map[string]strin
 
 func ciEventFacts(event string, draft bool, soak string) map[string]string {
 	return map[string]string{
-		"github.event_name":                 strconv.Quote(event),
-		"github.event.pull_request.draft":   strconv.FormatBool(draft),
-		"needs.ci-plan.outputs.soak_matrix": strconv.Quote(soak),
-		"needs.required-tests.result":       strconv.Quote("success"),
+		"github.event_name":                   strconv.Quote(event),
+		"github.event.pull_request.draft":     strconv.FormatBool(draft),
+		"needs.ci-plan.outputs.soak_matrix":   strconv.Quote(soak),
+		"needs.required-tests.result":         strconv.Quote("success"),
+		"needs.ci-plan.outputs.master_replay": strconv.Quote("false"),
+		"needs.ci-plan.outputs.proof_matrix":  strconv.Quote(`{"include":[{"unit":"ordinary"}]}`),
+		"needs.ci-plan.outputs.profile": strconv.Quote(func() string {
+			if event == "pull_request" && draft {
+				return ""
+			}
+			return "full"
+		}()),
 	}
 }
 
 func TestCIDraftAdmissionAndReadyTransitions(t *testing.T) {
 	workflow := loadAdmissionWorkflow(t)
-	actions := []string{"opened", "synchronize", "reopened", "ready_for_review", "converted_to_draft"}
+	actions := []string{"opened", "synchronize", "reopened", "ready_for_review", "converted_to_draft", "edited"}
 	if !slices.Equal(workflow.On.PullRequest.Types, actions) {
 		t.Fatalf("PR subscriptions = %v, want %v", workflow.On.PullRequest.Types, actions)
 	}
@@ -157,7 +165,11 @@ func TestCIDraftSkipsPlanAndProofExpansion(t *testing.T) {
 func executeCISummary(t *testing.T, draft bool, statuses map[string]string, soak string) ([]byte, error) {
 	t.Helper()
 	job := loadAdmissionWorkflow(t).Jobs["required-tests"]
-	script := job.Steps[0].Run
+	step := findWorkflowStep(job.Steps, "Summarize required checks")
+	if step == nil {
+		t.Fatal("missing summary")
+	}
+	script := step.Run
 	for _, need := range job.Needs {
 		status := "success"
 		if override, ok := statuses[need]; ok {
@@ -166,7 +178,9 @@ func executeCISummary(t *testing.T, draft bool, statuses map[string]string, soak
 		script = strings.ReplaceAll(script, "${{ needs."+need+".result }}", status)
 	}
 	script = strings.ReplaceAll(script, "${{ needs.ci-plan.outputs.soak_matrix }}", soak)
-	if job.Steps[0].Env["IS_DRAFT"] != "${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}" {
+	script = strings.ReplaceAll(script, "${{ needs.ci-plan.outputs.profile }}", "full")
+	script = strings.ReplaceAll(script, "${{ needs.ci-plan.outputs.master_replay }}", "false")
+	if step.Env["IS_DRAFT"] != "${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}" {
 		t.Fatal("summary does not consume native draft authority")
 	}
 	command := exec.Command("bash", "-c", script)

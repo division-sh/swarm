@@ -84,7 +84,7 @@ func TestRuntimeFanOutPartitionPreservesCompleteRoots(t *testing.T) {
 	}
 	t.Logf("complete disjoint census: %d = %d D-F + %d fanout + %d process", len(groups[0])+len(groups[1])+len(groups[2]), len(groups[0]), len(groups[1]), len(groups[2]))
 	// Keep the whole-package census: new roots cannot escape via either partition.
-	for _, profile := range []string{ProfilePRCommon, ProfilePREscalated, ProfileFull, ProfileNightly} {
+	for _, profile := range []string{ProfileLifecycle, ProfileFull} {
 		var runs []string
 		for _, id := range policy.Profiles[profile].Units {
 			unit := policy.Units[id]
@@ -110,15 +110,19 @@ func validateRuntimeFanOutEnvelopes(policy Policy) error {
 			u.BudgetClass != "broad" || u.GoTimeout != "" || u.Skip != "" || strings.Contains(u.Run, "/") {
 			return fmt.Errorf("%s changed proof envelope: %+v", id, u)
 		}
-		for _, profile := range []string{ProfilePRCommon, ProfilePREscalated, ProfileFull, ProfileNightly} {
+		for _, profile := range []string{ProfileCore, ProfileLifecycle, ProfileFull} {
 			count := 0
 			for _, member := range policy.Profiles[profile].Units {
 				if member == id {
 					count++
 				}
 			}
-			if count != 1 {
-				return fmt.Errorf("%s has %d mandatory %s units", profile, count, id)
+			want := 1
+			if profile == ProfileCore {
+				want = 0
+			}
+			if count != want {
+				return fmt.Errorf("%s has %d mandatory %s units, want %d", profile, count, id, want)
 			}
 		}
 	}
@@ -162,7 +166,7 @@ func TestRuntimeFanOutPartitionRejectsScopeDrift(t *testing.T) {
 				return
 			}
 			var runs []string
-			for _, id := range p.Profiles[ProfilePRCommon].Units {
+			for _, id := range p.Profiles[ProfileCore].Units {
 				unit := p.Units[id]
 				if reflect.DeepEqual(unit.Packages, u.Packages) {
 					runs = append(runs, unit.Run)
@@ -173,7 +177,7 @@ func TestRuntimeFanOutPartitionRejectsScopeDrift(t *testing.T) {
 			}
 		})
 	}
-	for _, profile := range []string{ProfilePRCommon, ProfilePREscalated, ProfileFull, ProfileNightly} {
+	for _, profile := range []string{ProfileLifecycle, ProfileFull} {
 		t.Run("missing_"+profile, func(t *testing.T) {
 			p := load(t)
 			row := p.Profiles[profile]
