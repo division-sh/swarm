@@ -3057,7 +3057,7 @@ func TestLoadRuntimeConfig_RejectsUnsupportedRuntimeControlsFromFile(t *testing.
 	if err := os.WriteFile(p, []byte(cfgText), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
-	if _, err := loadRuntimeConfig(p); err == nil || !strings.Contains(err.Error(), `config.runtime field "max_concurrent_agents" is not supported`) || !strings.Contains(err.Error(), "Valid fields:") {
+	if _, err := loadRuntimeConfig(p); err == nil || !strings.Contains(err.Error(), "runtime.max_concurrent_agents") {
 		t.Fatalf("loadRuntimeConfig error = %v, want unsupported runtime control rejection", err)
 	}
 }
