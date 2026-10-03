@@ -109,10 +109,21 @@ func TestChannelConfirmationConsumesOneSealValidatedCredentialObservation(t *tes
 		t.Fatal(err)
 	}
 	source := string(raw)
-	if !strings.Contains(source, "d.credentials.ObserveValueMatchingSeal(") {
-		t.Fatal("channel confirmation does not consume the atomic seal-validated observation owner")
+	if !strings.Contains(source, "resolveChannelDeliveryCredentials(ctx, d.credentials, compiled.Plan, activation.CredentialAdmissions, tool)") ||
+		!strings.Contains(source, "channelCredentialHTTPExecutor(d.httpClient, d.credentials, compiled.Plan, activation.CredentialAdmissions, tool)") {
+		t.Fatal("channel confirmation does not consume exact admitted credential resolution and dispatch preflight")
 	}
-	if strings.Contains(source, "d.credentials.CurrentValueMatchesSeal(") || strings.Contains(source, "d.credentials.ObserveSecretBinding(") {
+	if strings.Contains(source, "d.credentials.CurrentValueMatchesSeal(") || strings.Contains(source, "d.credentials.ObserveSecretBinding(") || strings.Contains(source, "d.credentials.ObserveValueMatchingSeal(") {
 		t.Fatal("channel confirmation retains a split credential validation/read path")
+	}
+	raw, err = os.ReadFile(filepath.Join(repo, "internal", "serveapp", "channel_delivery.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source = string(raw)
+	for _, required := range []string{"projection.ObserveAdmittedActivationCredential(", "projection.ValidateCurrent(ctx)", "observations[logical].CredentialValue()"} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("shared confirmation credential owner is missing %q", required)
+		}
 	}
 }
