@@ -7,20 +7,6 @@ import (
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
-var retiredNodeRuleFields = map[string]string{
-	"element_id":        "rule identity derives from its declaration site",
-	"emits":             "use rule-local emit",
-	"payload_transform": "use rule-local emit.fields",
-	"switch":            "use when/case/range selection rows",
-	"threshold":         "use when/case/range selection rows",
-	"policy":            "a second policy-sheet authoring owner is unsupported; enhance rules in place",
-	"temporal":          "outside the selection-row grammar",
-	"join":              "outside the selection-row grammar",
-	"loop":              "outside the selection-row grammar",
-	"collection":        "outside the selection-row grammar",
-	"schedule":          "outside the selection-row grammar",
-}
-
 func projectNodeRuleRowsValue(value yamlsource.Value, context handlerRuleDecodeContext) ([]HandlerRuleEntry, error) {
 	if value.Presence() == yamlsource.PresenceNull {
 		return nil, fmt.Errorf("%s handler rule collection must not be null at %s", context, value.Location())
@@ -73,15 +59,18 @@ func nodeRuleMappingDiagnostic(value yamlsource.Value, singletonErr, keyedErr er
 		return keyedErr
 	}
 	for _, entry := range fields {
+		if _, known := ruleFieldOptions[entry.Name]; known && entry.Value.Presence() != yamlsource.PresenceMapping && entry.Value.Presence() != yamlsource.PresenceEmptyMapping {
+			return singletonErr
+		}
+	}
+	for _, entry := range fields {
 		if entry.Name == "condition" && (entry.Value.Presence() == yamlsource.PresenceMapping || entry.Value.Presence() == yamlsource.PresenceEmptyMapping) {
 			return keyedErr
 		}
 		if _, known := ruleFieldOptions[entry.Name]; known {
 			continue
 		}
-		_, retired := retiredNodeRuleFields[entry.Name]
-		_, handlerField := handlerFieldOptions[entry.Name]
-		if retired || handlerField || retiredHandlerActionFieldError("rule", entry.Name) != nil {
+		if entry.Value.Presence() != yamlsource.PresenceMapping && entry.Value.Presence() != yamlsource.PresenceEmptyMapping {
 			return singletonErr
 		}
 		return keyedErr
@@ -131,18 +120,16 @@ func projectNodeKeyedRulesValue(value yamlsource.Value, context handlerRuleDecod
 }
 
 func projectNodeRuleEntryValue(value yamlsource.Value, context handlerRuleDecodeContext) (HandlerRuleEntry, error) {
-	if context == handlerRuleDecodeContextRules && (value.Presence() == yamlsource.PresenceMapping || value.Presence() == yamlsource.PresenceEmptyMapping) {
-		entries, err := value.Mapping()
-		if err != nil {
-			return HandlerRuleEntry{}, err
-		}
-		for _, entry := range entries {
-			if entry.Name == "condition" {
-				return HandlerRuleEntry{}, fmt.Errorf("%w at %s", retiredHandlerActionFieldError("rules", "condition"), entry.IntroductionLocation())
+	allowed := ruleFieldOptions
+	if context != handlerRuleDecodeContextOnComplete {
+		allowed = make(map[string]struct{}, len(ruleFieldOptions)-1)
+		for key := range ruleFieldOptions {
+			if key != "condition" {
+				allowed[key] = struct{}{}
 			}
 		}
 	}
-	fields, err := nodeValueFields(value, "rule", ruleFieldOptions, retiredNodeRuleFields)
+	fields, err := nodeValueFields(value, "rule", allowed)
 	if err != nil {
 		return HandlerRuleEntry{}, err
 	}
@@ -159,9 +146,6 @@ func projectNodeRuleEntryValue(value yamlsource.Value, context handlerRuleDecode
 		return HandlerRuleEntry{}, err
 	}
 	if condition, present := fields["condition"]; present {
-		if context != handlerRuleDecodeContextOnComplete {
-			return HandlerRuleEntry{}, fmt.Errorf("%w at %s", retiredHandlerActionFieldError("rules", "condition"), condition.Location())
-		}
 		out.Condition, err = nodeValueText(condition, "rule.condition")
 		if err != nil {
 			return HandlerRuleEntry{}, err

@@ -7926,7 +7926,7 @@ func TestCreateServeToolGatewayBindingAlignsToMCPListenerWithoutMutatingURLEnv(t
 	}
 }
 
-func TestCreateServeToolGatewayBindingRejectsRetiredGatewayTokenEnv(t *testing.T) {
+func TestCreateServeToolGatewayBindingDoesNotConsumeAmbientToken(t *testing.T) {
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "operator-token")
@@ -7936,9 +7936,9 @@ func TestCreateServeToolGatewayBindingRejectsRetiredGatewayTokenEnv(t *testing.T
 	}
 	defer listener.Close()
 
-	_, err = createServeToolGatewayBinding(listener.Addr())
-	if err == nil || !strings.Contains(err.Error(), "SWARM_TOOL_GATEWAY_TOKEN is retired") || !strings.Contains(err.Error(), "ToolGatewayBinding") {
-		t.Fatalf("create gateway binding error = %v, want retired token env rejection", err)
+	binding, err := createServeToolGatewayBinding(listener.Addr())
+	if err != nil || !binding.IsRuntimeOwned() || binding.AuthToken() == "operator-token" {
+		t.Fatalf("ambient env acquired gateway authority: %#v, %v", binding, err)
 	}
 }
 

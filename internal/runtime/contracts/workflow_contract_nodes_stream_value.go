@@ -11,7 +11,7 @@ import (
 func projectNodeAccumulateValue(value yamlsource.Value) (*AccumulateSpec, error) {
 	fields, err := nodeValueFields(value, "accumulate", map[string]struct{}{
 		"into": {}, "from": {}, "description": {}, "key": {},
-	}, nil)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -33,12 +33,7 @@ func projectNodeAccumulateValue(value yamlsource.Value) (*AccumulateSpec, error)
 }
 
 func projectNodeFanOutValue(value yamlsource.Value) (*FanOutSpec, error) {
-	fields, err := nodeValueFields(value, "fan_out", fanOutFieldOptions, map[string]string{
-		"element_id":    "fan-out identity derives from the canonical declaration site",
-		"target":        "route fan_out.emit through typed consumers, output pins and connect",
-		"emit_per_item": "use emit: <event> or emit: {event, fields}",
-		"emit_mapping":  "move per-item payload ownership into fan_out.emit",
-	})
+	fields, err := nodeValueFields(value, "fan_out", fanOutFieldOptions)
 	if err != nil {
 		return nil, err
 	}

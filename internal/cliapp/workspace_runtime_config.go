@@ -71,9 +71,6 @@ func workspaceDockerBinFromRuntimeConfigOrDefault(cfg *config.Config) (string, e
 
 func dockerWorkspaceConfigFromRuntimeConfig(cfg *config.Config) (workspace.DockerConfig, error) {
 	out := workspace.DefaultDockerConfig()
-	if cfg != nil && (cfg.Workspace.DataSourceConfigured() || cfg.Workspace.VolumesFromConfigured()) {
-		return out, fmt.Errorf("workspace.data_source and workspace.volumes_from are retired; declare flow_data_access or data_access")
-	}
 	if image, ok, err := runtimeConfigWorkspaceImage(cfg); err != nil {
 		return out, err
 	} else if ok {
@@ -94,9 +91,6 @@ func dockerWorkspaceConfigFromRuntimeConfig(cfg *config.Config) (workspace.Docke
 
 func hostWorkspaceConfigFromRuntimeConfig(cfg *config.Config) (workspace.HostConfig, error) {
 	out := workspace.DefaultHostConfig()
-	if cfg != nil && (cfg.Workspace.DataSourceConfigured() || cfg.Workspace.VolumesFromConfigured()) {
-		return out, fmt.Errorf("workspace.data_source and workspace.volumes_from are retired; declare flow_data_access or data_access")
-	}
 	if hostRoot, ok, err := runtimeConfigWorkspaceHostRoot(cfg); err != nil {
 		return out, err
 	} else if ok {

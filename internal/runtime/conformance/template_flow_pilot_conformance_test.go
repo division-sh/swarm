@@ -106,18 +106,18 @@ func TestTemplateFlowPilotConformance_FailClosedMatrix(t *testing.T) {
 			name:        "unsupported receiver select_entity on connected normal path",
 			opts:        templateflowpilot.Options{UnsupportedReceiverSelection: true},
 			loadError:   true,
-			wantMessage: "RETIRED: handler field",
+			wantMessage: "handler field",
 		},
 		{
 			name:        "producer target cannot rescue common composition",
 			opts:        templateflowpilot.Options{ProducerTarget: true},
-			wantMessage: "RETIRED-EMIT-ROUTING: emit.target",
+			wantMessage: "emit field \"target\" is not supported",
 			loadError:   true,
 		},
 		{
 			name:        "producer broadcast cannot replace parent connect authority",
 			opts:        templateflowpilot.Options{ProducerBroadcast: true},
-			wantMessage: "RETIRED-EMIT-ROUTING: emit.broadcast",
+			wantMessage: "emit field \"broadcast\" is not supported",
 			loadError:   true,
 		},
 	}

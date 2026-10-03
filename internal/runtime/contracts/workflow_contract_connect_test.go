@@ -106,7 +106,7 @@ func TestW2CompiledResolutionRejectsFieldsOutsideClosedMode(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := admitSchemaFragment("pins: {inputs: {events: [{event: work.completed, resolution: {" + tc.resolution + "}}]}}\n")
-			if err == nil || !strings.Contains(err.Error(), "key_from") {
+			if err == nil || !strings.Contains(err.Error(), `field "from" is not supported`) {
 				t.Fatalf("admission error = %v, want retired-field rejection with teaching", err)
 			}
 		})

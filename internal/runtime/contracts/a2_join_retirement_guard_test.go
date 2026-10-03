@@ -496,7 +496,7 @@ func TestA2JoinRetirementGuardRejectsHostileAST(t *testing.T) {
 		{"accumulator partition", "internal/runtime/accumulator/hostile.go", `package accumulator; type State struct { PartitionPath []string }`, "PartitionPath"},
 		{"accumulator compatibility projection", "internal/runtime/accumulator/hostile.go", `package accumulator; func EffectiveSpecForHandler() {}`, "EffectiveSpecForHandler"},
 		{"unused accepted grammar", "internal/runtime/contracts/hostile.go", `package contracts; var accumulateFieldOptions = map[string]struct{}{"window": {}}`, "accepts retired field window"},
-		{"inline accepted grammar", "internal/runtime/contracts/hostile.go", `package contracts; func decode(v any) { nodeValueFields(v, "accumulate", map[string]struct{}{"dedup_by": {}}, nil) }`, "accepts retired field dedup_by"},
+		{"inline accepted grammar", "internal/runtime/contracts/hostile.go", `package contracts; func decode(v any) { nodeValueFields(v, "accumulate", map[string]struct{}{"dedup_by": {}}) }`, "accepts retired field dedup_by"},
 		{"positive mode branch", "internal/runtime/contracts/hostile.go", `package contracts; func ParseFlowInputResolutionMode(v string) (int, error) { switch v { case "fan-in": return 4, nil }; return 0, nil }`, "parser admits retired fan-in"},
 		{"singleton demand branch", "internal/runtime/bootverify/hostile.go", `package bootverify; func demand(kind string) bool { return kind == "fan_in_input" }`, "singleton fan-in demand"},
 		{"local type parser", "internal/runtime/bootverify/hostile.go", `package bootverify; func wave1ResolveNamedType() {}`, "wave1ResolveNamedType"},
@@ -528,7 +528,7 @@ func ParseFlowInputResolutionMode(v string) (int, error) {
     return 0, fmt.Errorf("unsupported")
 }
 func decode(v any) {
-    nodeValueFields(v, "accumulate", map[string]struct{}{"key": {}}, map[string]string{"window": "retired", "dedup_by": "retired"})
+    nodeValueFields(v, "accumulate", map[string]struct{}{"key": {}})
     _ = map[string]any{"window": "business", "aggregation": "sum", "dedup_by": "business"}
 }`
 	found, err := a2RetiredGoViolations("internal/runtime/contracts/homonyms.go", []byte(code))

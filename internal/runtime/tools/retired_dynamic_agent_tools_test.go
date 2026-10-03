@@ -363,7 +363,7 @@ func assertRetiredDynamicAgentToolRejected(t *testing.T, name string, source sem
 		joined = append(joined, err.Error())
 	}
 	message := strings.Join(joined, "\n")
-	for _, want := range []string{name, "RETIRED", "agents.yaml", "flow lifecycle/readiness", "typed fan-out"} {
+	for _, want := range []string{name, "is unsupported"} {
 		if !strings.Contains(message, want) {
 			t.Fatalf("retirement error = %q, want %q", message, want)
 		}

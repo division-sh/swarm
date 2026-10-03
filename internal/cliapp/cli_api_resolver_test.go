@@ -57,7 +57,7 @@ func TestResolveCLIAPISettingsPrecedence(t *testing.T) {
 		if err == nil {
 			t.Fatal("newCLIAPIClient returned nil error")
 		}
-		for _, want := range []string{"client-side API environment sources are no longer accepted", "SWARM_API_SERVER", "SWARM_API_TOKEN", "SWARM_API_TOKEN_FILE", "--api-server", "--api-token-file"} {
+		for _, want := range []string{"unknown SWARM_* env is not accepted", "SWARM_API_SERVER", "SWARM_API_TOKEN", "SWARM_API_TOKEN_FILE"} {
 			if !strings.Contains(err.Error(), want) {
 				t.Fatalf("err = %q, want %q", err.Error(), want)
 			}
@@ -78,7 +78,7 @@ func TestResolveCLIAPISettingsPrecedence(t *testing.T) {
 		if err == nil {
 			t.Fatal("newCLIAPIClient returned nil error")
 		}
-		if !strings.Contains(err.Error(), "SWARM_API_TOKEN_FILE") || !strings.Contains(err.Error(), "config connection.api_token_file") {
+		if !strings.Contains(err.Error(), "SWARM_API_TOKEN_FILE") || !strings.Contains(err.Error(), "unknown SWARM_* env is not accepted") {
 			t.Fatalf("err = %q, want SWARM_API_TOKEN_FILE replacement guidance", err.Error())
 		}
 	})
@@ -192,7 +192,7 @@ func TestCLIAPIResolverRejectsRetiredContractPathConfigKey(t *testing.T) {
 	}))
 
 	_, err := newCLIAPIClientForTest(t, rootCommandOptions{})
-	if err == nil || !strings.Contains(err.Error(), `config key "paths.contracts_path" is recognized but not yet supported`) {
+	if err == nil || !strings.Contains(err.Error(), `unknown config key "paths.contracts_path"`) {
 		t.Fatalf("newCLIAPIClient error = %v, want retired contracts_path rejection", err)
 	}
 }
@@ -204,8 +204,6 @@ func TestCLISwarmDirResolutionPrecedence(t *testing.T) {
 	t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
 		"swarm_dir": configDir,
 	}))
-	t.Setenv("SWARM_DIR", filepath.Join(t.TempDir(), "must-not-use"))
-	t.Setenv("SWARM_HOME", filepath.Join(t.TempDir(), "must-not-use"))
 
 	got, err := resolveCLISwarmDir(cliSwarmDirOptions{SwarmDir: flagDir, SwarmDirFlagSet: true})
 	if err != nil {
@@ -376,7 +374,7 @@ func TestCLIAPISettingsFailClosed(t *testing.T) {
 				return rootCommandOptions{}
 			},
 			wantExit: CLIExitValidation,
-			wantErr:  "client-side API environment sources are no longer accepted",
+			wantErr:  "unknown SWARM_* env is not accepted",
 		},
 		{
 			name: "environment API server with prefix is removed before endpoint shape validation",
@@ -386,7 +384,7 @@ func TestCLIAPISettingsFailClosed(t *testing.T) {
 				return rootCommandOptions{}
 			},
 			wantExit: CLIExitValidation,
-			wantErr:  "client-side API environment sources are no longer accepted",
+			wantErr:  "unknown SWARM_* env is not accepted",
 		},
 		{
 			name: "config API server rejects direct RPC endpoint",
@@ -461,12 +459,17 @@ func TestCLIAPIConnectionFlagsSurfaceAndIsolation(t *testing.T) {
 	withoutFlags := []string{
 		"", "verify", "completion", "run",
 		"event", "agent", "conversation", "entity", "mailbox", "control", "forkchat",
-		"investigate", "investigate health",
 	}
 	for _, path := range withoutFlags {
 		cmd := mustFindCLICommand(t, root, path)
 		if cmd.Flags().Lookup("api-server") != nil || cmd.Flags().Lookup("api-token-file") != nil {
 			t.Fatalf("%s unexpectedly accepts API connection flags", path)
+		}
+	}
+	for _, path := range []string{"investigate", "investigate health"} {
+		_, remaining, err := root.Find(strings.Fields(path))
+		if err == nil && len(remaining) == 0 {
+			t.Fatalf("unsupported command %q is registered", path)
 		}
 	}
 
@@ -746,7 +749,7 @@ func TestEndpointShapedAPIServerRejectedBeforeRequest(t *testing.T) {
 				t.Setenv("SWARM_API_SERVER", serverURL+"/v1/ws")
 				t.Setenv("SWARM_API_TOKEN", "env-token")
 			},
-			want: "client-side API environment sources are no longer accepted",
+			want: "unknown SWARM_* env is not accepted",
 		},
 		{
 			name: "environment prefixed RPC endpoint is removed",
@@ -755,7 +758,7 @@ func TestEndpointShapedAPIServerRejectedBeforeRequest(t *testing.T) {
 				t.Setenv("SWARM_API_SERVER", serverURL+"/proxy/v1/rpc")
 				t.Setenv("SWARM_API_TOKEN", "env-token")
 			},
-			want: "client-side API environment sources are no longer accepted",
+			want: "unknown SWARM_* env is not accepted",
 		},
 		{
 			name: "config direct RPC endpoint",

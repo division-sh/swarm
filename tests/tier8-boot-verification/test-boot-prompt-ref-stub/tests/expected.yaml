@@ -4,5 +4,5 @@ conformance:
   proves:
     - catalog.verify.boot_diagnostics
   diagnostic:
-    category: "RETIRED"
-    contains: "agent field prompt_ref"
+    category: "contract_loader.undefined_field"
+    contains: 'agent field "prompt_ref" is not supported'

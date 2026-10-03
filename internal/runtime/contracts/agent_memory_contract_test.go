@@ -34,7 +34,7 @@ func TestAgentRegistryEntryRejectsRetiredMemoryFields(t *testing.T) {
 		t.Run(field, func(t *testing.T) {
 			var entry AgentRegistryEntry
 			err := decodeNodeTestYAML([]byte("role: helper\n"+field+": task\n"), &entry)
-			if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "memory") {
+			if err == nil || !strings.Contains(err.Error(), "is not supported") || !strings.Contains(err.Error(), "memory") {
 				t.Fatalf("yaml.Unmarshal error = %v, want RETIRED guidance to memory", err)
 			}
 		})

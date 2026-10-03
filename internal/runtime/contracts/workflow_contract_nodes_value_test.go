@@ -12,15 +12,15 @@ func TestNodeValueFieldsPreserveNestedSourceAndRejectAuthoredPresence(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	root, err := nodeValueFields(source.Document("nodes.yaml").Root(), "nodes", map[string]struct{}{"node": {}}, nil)
+	root, err := nodeValueFields(source.Document("nodes.yaml").Root(), "nodes", map[string]struct{}{"node": {}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	node, err := nodeValueFields(root["node"], "node", map[string]struct{}{"handler": {}, "other": {}}, nil)
+	node, err := nodeValueFields(root["node"], "node", map[string]struct{}{"handler": {}, "other": {}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = nodeValueFields(node["other"], "handler", map[string]struct{}{}, map[string]string{"from": "not executable"})
+	_, err = nodeValueFields(node["other"], "handler", map[string]struct{}{})
 	if err == nil || !strings.Contains(err.Error(), "nodes.yaml:") || !strings.Contains(err.Error(), "from") {
 		t.Fatalf("expected source-located authored-presence rejection, got %v", err)
 	}
@@ -35,7 +35,7 @@ func TestNodeValueFieldsRejectDuplicateEffectiveAliasKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = nodeValueFields(nodes.Value, "node", map[string]struct{}{"handler": {}, "duplicate": {}}, nil)
+	_, err = nodeValueFields(nodes.Value, "node", map[string]struct{}{"handler": {}, "duplicate": {}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestNodeValueFieldsRejectDuplicateEffectiveAliasKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = nodeValueFields(duplicate.Value, "handler", map[string]struct{}{"emit": {}}, nil)
+	_, err = nodeValueFields(duplicate.Value, "handler", map[string]struct{}{"emit": {}})
 	if err == nil || !strings.Contains(err.Error(), "duplicate effective YAML key") || !strings.Contains(err.Error(), "nodes.yaml:") {
 		t.Fatalf("expected source-located duplicate effective key, got %v", err)
 	}
@@ -109,7 +109,7 @@ func TestProjectNodeEmitValuePreservesR2AndRetiredRouting(t *testing.T) {
 	}
 	lookup, _ = retired.Document("nodes.yaml").Root().Lookup("emit")
 	_, err = projectNodeEmitValue(lookup.Value)
-	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "nodes.yaml:") {
+	if err == nil || !strings.Contains(err.Error(), "broadcast") || !strings.Contains(err.Error(), "not supported") || !strings.Contains(err.Error(), "nodes.yaml:") {
 		t.Fatalf("expected source-located routing retirement, got %v", err)
 	}
 }

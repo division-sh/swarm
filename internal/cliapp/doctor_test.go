@@ -160,8 +160,8 @@ func TestDoctorClaudeCLIPreflightReportsRetiredBackendEnv(t *testing.T) {
 	}
 	for _, want := range []string{
 		"backend_prerequisite/config_load_failed",
-		"SWARM_LLM_BACKEND is retired",
-		"use --backend or llm.backend",
+		"SWARM_LLM_BACKEND",
+		"unknown SWARM_* env is not accepted",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("doctor output missing %q:\n%s", want, stdout.String())
@@ -188,11 +188,9 @@ func TestDoctorClaudeCLIPreflightBlocksGeneratedGatewayParentEnv(t *testing.T) {
 	for _, want := range []string{
 		"[BLOCKER] env/generated_boundary @ doctor: SWARM_TOOL_GATEWAY_URL",
 		"[BLOCKER] env/generated_boundary @ doctor: SWARM_TOOL_GATEWAY_CONTAINER_URL",
-		"[BLOCKER] env/known_retired @ doctor: SWARM_TOOL_GATEWAY_TOKEN",
-		"[WARN] gateway_prerequisite/swarm_tool_gateway_url_retired @ doctor:",
-		"[WARN] gateway_prerequisite/swarm_tool_gateway_container_url_retired @ doctor:",
-		"SWARM_TOOL_GATEWAY_URL is retired and not accepted as gateway endpoint configuration",
-		"unset SWARM_TOOL_GATEWAY_URL; local serve/run derives the gateway binding from the bound MCP listener and ignores this retired URL",
+		"[BLOCKER] env/unknown_stale @ doctor: SWARM_TOOL_GATEWAY_TOKEN",
+		"generated final-boundary env must be injected by Swarm",
+		"unset SWARM_TOOL_GATEWAY_URL",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("doctor output missing %q:\n%s", want, stdout.String())
@@ -334,9 +332,9 @@ func TestDoctorTargetReportsRemovedAPIClientEnv(t *testing.T) {
 	if report.OK {
 		t.Fatalf("report OK=true, want env blockers: %#v", report)
 	}
-	assertDoctorTargetEnvFinding(t, report, string(swarmEnvCategoryKnownRetired), "SWARM_API_SERVER")
-	assertDoctorTargetEnvFinding(t, report, string(swarmEnvCategoryKnownRetired), "SWARM_API_TOKEN")
-	assertDoctorTargetEnvFinding(t, report, string(swarmEnvCategoryKnownRetired), "SWARM_API_TOKEN_FILE")
+	assertDoctorTargetEnvFinding(t, report, string(swarmEnvCategoryUnknownStale), "SWARM_API_SERVER")
+	assertDoctorTargetEnvFinding(t, report, string(swarmEnvCategoryUnknownStale), "SWARM_API_TOKEN")
+	assertDoctorTargetEnvFinding(t, report, string(swarmEnvCategoryUnknownStale), "SWARM_API_TOKEN_FILE")
 }
 
 func TestDoctorTargetUsesResolvedSwarmDirForExplicitContext(t *testing.T) {

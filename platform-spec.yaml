@@ -1,6 +1,25 @@
 platform:
   name: swarm-orchestrator
   version: 0.7.0
+  pre_one_authoring_admission:
+    promoted_by: '#2547'
+    rule: >
+      Before 1.0, only the current authored vocabulary is supported. Removed spellings
+      are ordinary unknown keys, commands or flags, not a migration surface. Do not
+      register retirement stubs, replacement tables, codemods or compatibility readers.
+      Existing semantic owners reject unknown keys with the exact key, semantic path,
+      source file/line/column, current declared vocabulary and a deterministic nearest
+      current key when sufficiently close, in both structured and ordinary diagnostics.
+    preserved_constraints: >
+      Strict value/shape and presence constraints, reserved open names, capability
+      prohibitions and runtime revocation remain enforced by their existing owners.
+      Aliases and YAML merges cannot bypass these constraints. Removing old teaching
+      never makes an unsupported key into business data or grants execution authority.
+    environment_boundary: >
+      The accepted-set env owner rejects all nonempty unaccepted SWARM_* names as
+      unknown, without a retired-name inventory. Typed delegation, bootstrap,
+      generated child-boundary and test quarantine rules remain unchanged. The six
+      active sources retained under #1600 are not promoted as permanent env authority.
 interfaces:
   swarm.hitl-channel:
     v2:
@@ -236,13 +255,8 @@ vocabulary:
     - delay
     - cancellation
     - recurring
-    retired_fields:
-    - delay_seconds
-    - delay_minutes
-    - delay_hours
-    - delay_days
-    retirement_rule: Numeric duration aliases are retired public YAML. Timer declarations must use canonical delay
-      and retired aliases fail closed.
+    admission_rule: Timer declarations admit only the declared required and optional fields. Other keys fail
+      current-vocabulary admission on authored presence; no numeric-duration aliases or translation table exists.
   agent_role:
     description: 'An entity that owns transitions, handles events, and executes logic. Three execution types with different
       semantics.
@@ -2761,8 +2775,7 @@ type_system:
     enums: |
       Closed named sets of values. Each enum declares its members and an explicit default member: the canonical
       mapping form is `enums: {name: {values: [...], default: <member>}}`. Enum defaults are explicit, never implied
-      by member order; the retired sequence form and omitted/non-member defaults are contract-load errors rejected
-      with teaching guidance (#1532).
+      by member order; non-mapping declarations and omitted/non-member defaults are ordinary contract-load errors.
     lists: Ordered collections of a declared element type.
     opaque_json: |
       The supported json field type is an opaque JSON value: string, boolean,
@@ -3351,8 +3364,8 @@ compute_module_contracts:
     - Module handler types MUST NOT appear in agent grants, candidates, tools/list, tools/call or direct agent execution.
       Only compute_module rows can consume them. HTTP/MCP, credentials, permission, effect and rate-limit branches
       are forbidden even when authored null or empty. No alternate dispatch or module namespace exists.
-    - policy.modules and module kind spelling are retired on presence; teach flat tools.yaml and handler_type.
-      No omitted-kind default, compatibility adapter, migration or old-store fallback is supported.
+    - Only the current flat tools.yaml vocabulary and handler_type are admitted. Unknown fields fail ordinary
+      source admission. No omitted-kind default, compatibility adapter, migration or old-store fallback is supported.
     - Module declarations are flow-local, including the selected root FlowNode `.`. Shared module packs, source
       compilation, public build tooling, artifact repositories and remote module loading remain separate gates.
     - Module IDs are short stable identifiers. A row references a module by short ID, not by filesystem path.
@@ -4091,7 +4104,7 @@ handler_specification:
         \               # optional"
     emit:
       field: emit
-      type: 'scalar event name OR object: {event, fields}'
+      type: 'scalar event name OR object: {event, from, fields}'
       purpose: Publish the selected follow-up event for this emit site. Handler top-level emit is allowed only when the handler
         has no nested emit sites. Nested emit sites are selected on_complete emit, rules emit, join outcome emit,
         and fan_out emit.
@@ -4100,12 +4113,11 @@ handler_specification:
         fields: map of output_field_name → expression_value_grammar value. Optional. If omitted, the emitted payload contains
           no business fields. Runtime-owned envelope context is attached on the event carrier and is accessed through event.*
           rather than payload.*.
-      retired_fields:
-        target: Any authored emit.target value, including empty, null, malformed, sender, instance_id, or flow_match forms,
-          is a load-time RETIRED-EMIT-ROUTING error. Recipient identity belongs to typed consumers, connect topology,
-          receiver resolution/reply, structural routes, or accepted external boundaries.
-        broadcast: Any authored emit.broadcast value, including false, empty, null, or malformed forms, is a load-time
-          RETIRED-EMIT-ROUTING error. Static fan-out uses repeated connect edges; runtime-discovered instance fan-out remains #1934.
+      admission_rule: >
+        Emit objects admit only event, from and fields. Every other key fails strict current-vocabulary admission on
+        authored presence, irrespective of its value. Recipient identity belongs to typed consumers, connect topology,
+        receiver resolution/reply, structural routes, or accepted external boundaries. Static fan-out uses repeated
+        connect edges; runtime-discovered instance fan-out remains #1934. No removed-spelling translator or teaching table exists.
       pin_routing_activation:
         rule: Pin routing activates if and only if the emitted event is declared in the emitter flow's schema.yaml pins.outputs.events.
         ad_hoc_emits: Emits not declared in pins.outputs.events are ordinary event-loop emits and never authorize recipients.
@@ -4237,12 +4249,11 @@ handler_specification:
         advances_to: string — optional state change
         data_accumulation: object — optional data write (same format as handler-level)
         description: string — human-readable note
-      retired_fields:
-        condition: >-
-          Any authored `handler.rules[].condition`, including empty, null, aliased or merged occurrences,
-          fails admission with a teaching error. Use `when` for a predicate or `else: true` for a default.
-          Ordinary `on_complete.condition` remains its distinct ordered completion-rule predicate; join outcomes
-          and timeouts reject both `condition` and `when`.
+      admission_rule: >-
+        Selection rules admit when for a predicate and else/default for a default row. Unknown fields fail
+        current-vocabulary admission on authored presence, including null, empty, alias and merge forms.
+        Ordinary on_complete.condition remains its distinct ordered completion-rule predicate; join outcomes
+        and timeouts reject both condition and when. No removed-spelling teaching table exists.
       policy_sheet_selection_rows:
         scope: Selection rows are `when`, `case`, `range`, and explicit else/default rows. Lookup value rows are specified
           under `policy_sheet_value_rows`; validate value rows are governed by policy_validation_contracts. Arithmetic/expression
@@ -4775,7 +4786,7 @@ handler_specification:
       intermediate_outputs: Omitted query.store_as and filter.store_as mean computed.query and computed.filter respectively in both type resolution and runtime storage. No consumer may infer a different default.
       dataflow_rule: query executes before filter and may read only direct payload/entity input or its declared entities table. filter may additionally read a non-aggregate query collection output. standalone group_by, reduce, and count may read direct input or an earlier query/filter collection output; aggregate outputs are never collection sources. Every explicit-root source must select at least one field below payload or entity.
       output_ownership_rule: Effective store_as targets for query, filter, standalone group_by, reduce, and count form one exclusive handler-local namespace. Duplicate targets and ancestor/descendant overlaps are invalid regardless of operation phase or result type.
-      retired_fields: query.operation is rejected on authored presence; source/entities and the declared selectors own query behavior.
+      admission_rule: Only the declared fields are admitted; source/entities and the declared selectors own query behavior.
       execution_position: Before clear_gates. Pre-fetches cross-entity data into handler context for use by guard, compute,
         or on_complete.
     reduce:
@@ -4840,10 +4851,8 @@ handler_specification:
       purpose: Reset private accumulator or evaluation state, not entity fields.
       sub_fields:
         targets: 'Private accumulator_state or computed.*, accumulated.*, fan_out.* evaluation targets only.'
-      retired_fields:
-        target: RETIRED — use targets, including a one-item list for a single clear target.
-        pending_dedup: RETIRED — has no private effect; use typed entity mutations for optional business fields.
-        entity_fields: RETIRED — use data_accumulation op clear, not standalone clear.targets or metadata aliases.
+      admission_rule: Clear objects admit only targets. Unknown fields fail current-vocabulary admission on
+        authored presence. Private reset targets and entity mutation paths retain their distinct semantic owners.
       execution_position: |
         After activity intent persistence, as the last handler step. accumulator_state resets only
         the current node's private accumulator buckets. All declared accumulator projection bindings in that
@@ -5002,20 +5011,11 @@ handler_specification:
       execution_position: After emit.event selection point and before clear. The intent is persisted inside the handler
         transaction as either an immediate durable request or a held proposed-effect card plus continuation. Tool execution
         and generated result publication occur only after request release, commit, and entity-lock exit.
-    retired_fields:
-      description: Legacy handler fields retired by the structured handler grammar.
-      rule: These fields are retired compatibility syntax, not alternate current-contract forms.
-      entries:
-      - "`emits` — retired; use `emit`"
-      - "`payload_transform` — retired; move payload ownership into `emit.fields` at the active emit site"
-      - "`handler.branch` — retired; use `rules` for handler-phase branch selection"
-      - "`fan_out.emit_per_item` — retired; use `fan_out.emit`"
-      - "`fan_out.emit_mapping` — retired; no direct replacement in the current fan_out model. Use a single `fan_out.emit` and route before or after fan-out if per-item event-name branching is required."
-      - "top-level handler `completion_rule` — retired; it had no production interpreter"
-      - "top-level handler `policy_ref` — retired; use `guard.policy_ref` only"
-      - "loop counter guards `revision_count_below_limit` and `inner_revision_count_below_limit` — retired; use `loops:`"
-      - "clear targets `cycle_counters` and `cycle_index` — retired; loop activation owns attempt state"
-      - "`fan_out.target` — retired; `fan_out.emit` routes through typed consumers or, for composed pin-declared outputs, through output pin plus parent connect route authority."
+    admission_rule: >
+      Structured handlers and nested primitives admit only their declared vocabulary. Every other key fails
+      strict admission on authored presence, irrespective of its value; no alternate old grammar or translator
+      exists. Value constraints, reserved expression names, private reset targets and typed mutation ownership
+      are separate current semantic checks and remain enforced.
     clear_gates:
       field: clear_gates
       type: boolean
@@ -5174,8 +5174,8 @@ handler_specification:
           timer authoring for flows using `stages:` is owned by
           `stages.<stage>.timers`, not node-level state timers.
         gate_state: map — gate field definitions for this node (boolean flags on entity)
-      retired:
-        id: 'Any node-level id presence is rejected before value decoding: node.id is retired; the map key is the identity.'
+      admission_rule: Only the declared node vocabulary is admitted. Unknown keys fail before value decoding;
+        the map key is the identity. No authored identity override or removed-spelling table exists.
       effective_semantics:
         id: YAML map key only, scoped by the existing declaration identity. No authored override or template spelling.
         execution_type: system_node
@@ -7823,8 +7823,8 @@ engine:
         - true to false terminates the complete active/suspended set before successor config publication.
         - true to true reconfiguration rotates the complete current set before successor config publication.
         - fire and teardown terminate the complete current set.
-      retired_fields: [mode, conversation_mode, session_scope, session_scope_authority]
-      compatibility_policy: Old fields, schemas, rows, aliases, and global-memory authority are rejected. There is no
+      admission_rule: Only memory is an authored memory selector; other fields fail current-vocabulary admission.
+      compatibility_policy: Unsupported fields, schemas, rows, aliases, and global-memory authority are rejected. There is no
         migration, backfill, dual reader/writer, export, purge, or fallback path.
     platform_defaults:
       description: Agent contracts have a contracts-owned effective view before boot verification, generated/expanded
@@ -9611,9 +9611,9 @@ tool_model:
       status: retired_reopen_gated
       rule: >-
         agent_message is absent from universal grants, candidates, managed surfaces, authored-source admission, handlers,
-        and execution. Authored use fails with the exact teaching reason "RETIRED: agent_message is unsupported; use
-        declared typed workflow events. Reopening requires a named concrete product workload needing dynamic peer selection
-        and a demonstrated named limitation of declared typed workflow events (#2154)." Raw and canonical runtime-MCP
+        and execution. Authored use fails ordinary unsupported-tool or permission admission.
+        Reopening requires a named concrete product workload needing dynamic peer selection
+        and a demonstrated named limitation of declared typed workflow events (#2154). Raw and canonical runtime-MCP
         spellings consume the same denial. Public permission, tool-resolution and usage-hint findings must not suggest
         that a candidate, permission or usage hint can enable a retired identity. No compatibility or migration is supported.
     retired_author_model_names:
@@ -11803,9 +11803,8 @@ tool_model:
         resume/cancel slice.
       input_schema: object — parameter names and types the tool accepts
       output_schema: object — field names and types the tool returns
-    retired_fields:
-      parameters: RETIRED — use input_schema
-      returns: RETIRED — use output_schema
+    admission_rule: Only the declared tool vocabulary is admitted. Unknown fields fail strict source admission
+      before tool resolution; no removed-spelling table or translator exists.
     http_fields:
       http: object — HTTP request template (see http_tool_definition.schema.http_block)
       response_mapping: object — maps response fields to output fields
@@ -11817,9 +11816,6 @@ tool_model:
       managed_credential: object — managed OAuth/token credential reference; supported only for handler_type http
       rate_limit: string — optional external dispatch admission rate, supported only when handler_type resolves to http.
       rate_limit_max_wait: string — required when rate_limit is present.
-    not_accepted:
-      endpoint: NOT a valid field. Use http.url instead.
-      type: NOT a valid field. Use handler_type instead.
 agent_intent_model:
   status: canonical_local_inline_owner
   promoted_by: '#1788'
@@ -11952,7 +11948,7 @@ agent_intent_model:
     - event/payload-mode source switching
     - policy, instance, entity, date, or runtime-token text substitution
     - generated business-intent fallback prose
-    rule: All retired authored/config forms teaching-reject or are absent. No compatibility, migration, fallback, or second
+    rule: Unsupported authored/config forms fail current-vocabulary or value admission or are absent. No compatibility, migration, fallback, or second
       source owner exists; old persisted stores are unsupported.
   dynamic_mutation_boundary:
     retired_exact_names:
@@ -13366,14 +13362,11 @@ flow_model:
             Optional exact canonical receiver-visible event identity when it differs from `event`. It follows the same admission grammar as `event`; a value equal after canonical event normalization is hard-invalid redundancy rather than an accepted alternate spelling.
           resolution: Exact scalar create, select or select-or-create for an ordinary template edge; explicit empty, null, mappings, lists, retired fan-in and retained reply/fan-out values are invalid here.
           key_from: Exact top-level payload.<different-field>, generated.uuid or event.id source; requires resolution, and intrinsic sources require create. Omit the same-name payload source rather than restating it.
-        retired_fields:
-          endpoint_centric_from_to: Retired on presence. `{flow}.{pin}` and `.{root_pin}` endpoints are invalid; author `event` plus flow-only `from` and `to`.
-          delivery: Retired on presence. Ordinary instance selection belongs to flat connect.resolution; static fan-out is authored as multiple connect rows.
-          reply: |
-            Retired on presence. Reply routing belongs to receiver input `resolution: {mode: reply, replies_to: ...}` and paired connect edges.
-          map: Retired on presence. Ordinary source selection belongs only to flat connect.key_from.
-          using: Retired on presence. `using.instance` is not a receiver identity adapter.
-          adapter: Retired on presence. No payload-transform registry or compatibility executor exists.
+        admission_rule: |
+          Connect rows admit only event, from, to, rename, resolution and key_from. Unknown fields fail strict
+          current-vocabulary admission on authored presence. Endpoints remain exact flow identities, not pin
+          endpoints; reply/fan-out remain receiver-owned policies. Ordinary source selection belongs only to
+          connect.key_from. No payload-transform registry, compatibility executor or removed-spelling table exists.
         example: |
           connect:
             - event: deploy.completed
@@ -13455,8 +13448,8 @@ flow_model:
         canonical_code_owner: internal/runtime/contracts.FlowConnect + internal/runtime/core/pinrouting.ConnectRoutePlan
         rule: |
           Authored `connect.delivery` and `connect.reply` are invalid on presence. FlowConnect and ConnectRoutePlan expose no delivery or raw reply compatibility fields. Connect lowering consumes the directed edge, optional rename and connection-owned ordinary instance policy. Retained fan-out cardinality and typed reply resolution derive from receiver input resolution. Runtime dispatch, persistence, replay, topology readback, and describe output consume only target/target_set and typed ReplyResolution facts. No fan-in route-plan metadata or resolution branch remains.
-        migration:
-          rule: Retired delivery, reply-map, and compatibility fields fail strict admission; no codemod or compatibility reader exists.
+        admission:
+          rule: Only the current connect vocabulary is admitted; no codemod or compatibility reader exists.
         fail_closed:
           - delivery or reply present with any scalar, mapping, sequence, empty, or malformed value
           - runtime attempt to reconstruct retired delivery or raw reply authority
@@ -13894,7 +13887,7 @@ flow_model:
           - every authored emit surface
           - strict YAML field presence
         produces:
-          - RETIRED-EMIT-ROUTING before normalization, verification, or runtime
+          - unknown emit field rejection before normalization, verification, or runtime
         proof_obligations:
           - strict load rejects target and broadcast on every emit surface and for every YAML value shape
           - no runtime producer-routing interpreter survives
@@ -20762,357 +20755,76 @@ environment_source_authority:
     - generated_boundary
     - test_quarantine
     - seeded_legacy
-    - known_retired
     - unknown_stale
     accepted_env:
       - name: SWARM_CONFIG
         category: bootstrap
         owner: platform-spec.yaml#configuration_source_authority.unified_swarm_config
-        migration: keep bootstrap locator for swarm.yaml; --config wins when present
-      - name: SWARM_API_SERVER
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_API_TOKEN
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_API_TOKEN_FILE
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_API_LISTEN_ADDR
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_MCP_LISTEN_ADDR
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_API_PORT
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_MCP_PORT
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_CONTRACTS_PATH
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_CONTRACTS_DIR
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_PLATFORM_SPEC_PATH
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_DIR
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_HOME
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_STORE_BACKEND
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_SQLITE_PATH
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_DB_HOST
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_DB_PORT
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_DB_NAME
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_DB_USER
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_DB_SSLMODE
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_DB_POOL_SIZE
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_DB_PASSWORD
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_WORKSPACE_DATA_SOURCE
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_WORKSPACE_BACKEND
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_DOCKER_BIN
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_WORKSPACE_IMAGE
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_WORKSPACE_HOST_ROOT
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_WORKSPACE_VOLUMES_FROM
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_WORKSPACE_NETWORK
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_WORKSPACE_DATA_MOUNT
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_WORKSPACE_CONTRACTS_SOURCE
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_WORKSPACE_CONTRACTS_MOUNT
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_SCAFFOLD_CONTAINER
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_SCAFFOLD_WORKDIR
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_SCAFFOLD_VOLUME
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_SYSTEM_CONTAINER
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_SYSTEM_WORKDIR
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_SYSTEM_ENTITIES_VOLUME
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_SYSTEM_NGINX_VOLUME
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_SYSTEM_SYSTEMD_VOLUME
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_ENTITY_CONTAINER_PREFIX
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_ENTITY_WORKDIR
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_RUNTIME_RECOVERY_ON_STARTUP
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_RUNTIME_MAX_CONCURRENT_AGENTS
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_RUNTIME_EVENT_POLL_INTERVAL
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_LLM_SESSION_LOCK_TTL
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_LLM_SESSION_ROTATE_AFTER_TURNS
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_LLM_SESSION_ROTATE_ON_PARSE_FAILURES
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_CLAUDE_API_MAX_RETRIES
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_CLAUDE_API_RETRY_BACKOFF
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_CLAUDE_CLI_COMMAND
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_CLAUDE_CLI_TIMEOUT
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_CLAUDE_CLI_OUTPUT_FORMAT
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_CLAUDE_CLI_RETRIES
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_CLAUDE_CLI_NO_SESSION_PERSISTENCE
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_CLAUDE_CLI_USE_TMUX
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_CLAUDE_TIMEOUT_SECONDS
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
+        disposition: keep bootstrap locator for swarm.yaml; --config wins when present
       - name: SWARM_CLAUDE_PERMISSION_MODE
         category: seeded_legacy
         owner: platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority
-        migration: '#1600 llm.claude_cli.permission_mode'
+        disposition: 'Current source retained; future replacement or removal remains #1600.'
       - name: SWARM_CLAUDE_BYPASS_PERMISSIONS
         category: seeded_legacy
         owner: platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority
-        migration: '#1600 llm.claude_cli.permission_mode'
+        disposition: 'Current source retained; future replacement or removal remains #1600.'
       - name: SWARM_CLAUDE_USE_MCP
         category: seeded_legacy
         owner: platform-spec.yaml#cli_specification.foundations.local_tool_gateway_binding
-        migration: '#1600 typed Claude CLI transport config'
-      - name: SWARM_LLM_BACKEND
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_LLM_RUNTIME_MODE
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_CLAUDE_DEFAULT_MODEL
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_CLAUDE_HAIKU_MODEL
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_OPENAI_COMPATIBLE_BASE_URL
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_OPENAI_COMPATIBLE_DEFAULT_MODEL
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_OPENAI_COMPATIBLE_LOW_COST_MODEL
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
+        disposition: 'Current source retained; future replacement or removal remains #1600.'
       - name: SWARM_CREDENTIALS_FILE
         category: seeded_legacy
         owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: '#1600 secrets file config'
+        disposition: 'Current source retained; future replacement or removal remains #1600.'
       - name: SWARM_MANAGED_CREDENTIALS_FILE
         category: seeded_legacy
         owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: '#1600 managed credentials file config'
+        disposition: 'Current source retained; future replacement or removal remains #1600.'
       - name: SWARM_MONITOR_DIR
         category: seeded_legacy
         owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
-        migration: '#1600 monitor config'
-      - name: SWARM_AGENT_CONFIG_MAP_FILE
-        category: seeded_legacy
-        owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
-        migration: '#1600 spec helper config'
-      - name: SWARM_VERIFICATION_GATES_FILE
-        category: seeded_legacy
-        owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
-        migration: '#1600 spec helper config'
-      - name: SWARM_TOOLING_LOCK_FILE
-        category: seeded_legacy
-        owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
-        migration: '#1600 spec helper config'
-      - name: SWARM_LOG_LEVEL
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
+        disposition: 'Current source retained; future replacement or removal remains #1600.'
       - name: SWARM_SQL_DEBUG
         category: test_quarantine
         owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: test/debug quarantine
+        disposition: test/debug quarantine
       - name: SWARM_BOOT_WARNINGS_FATAL
         category: test_quarantine
         owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: test/debug quarantine
+        disposition: test/debug quarantine
       - name: SWARM_EMIT_SCHEMA_STRICT
         category: test_quarantine
         owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: test/debug quarantine
+        disposition: test/debug quarantine
       - name: SWARM_CATALOG_E2E_DEBUG
         category: test_quarantine
         owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: test/debug quarantine
+        disposition: test/debug quarantine
       - name: SWARM_FAKE_DOCKER_STATE
         category: test_quarantine
         owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: test/debug quarantine
+        disposition: test/debug quarantine
       - name: SWARM_LLM_FIRST_TURN_FAKE_DOCKER
         category: test_quarantine
         owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: test/debug quarantine
+        disposition: test/debug quarantine
       - name: SWARM_TEST_HARNESS
         category: test_quarantine
         owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: test/debug quarantine
+        disposition: test/debug quarantine
       - prefix: SWARM_TEST_
         category: test_quarantine
         owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: test/debug quarantine
+        disposition: test/debug quarantine
       - name: SWARM_TOOL_GATEWAY_URL
         category: generated_boundary
         owner: platform-spec.yaml#cli_specification.foundations.local_tool_gateway_binding
-        migration: generated final-boundary only
+        disposition: generated final-boundary only
       - name: SWARM_TOOL_GATEWAY_CONTAINER_URL
         category: generated_boundary
         owner: platform-spec.yaml#cli_specification.foundations.local_tool_gateway_binding
-        migration: generated final-boundary only
-      - name: SWARM_TOOL_GATEWAY_TOKEN
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_BUILDER_AUTH_TOKEN
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
-      - name: SWARM_OPERATOR_AUTH_TOKEN
-        category: known_retired
-        owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
-        migration: retired
+        disposition: generated final-boundary only
   workspace_monitor_artifact_debug_slice:
     promoted_by: '#1640'
     parent_tracker: '#1600'
@@ -21487,55 +21199,32 @@ configuration_source_authority:
           or "no supported replacement" guidance. They MUST NOT be silently ignored and MUST NOT be reported as typos or
           trust-tier violations.
       flat_cli_shape: >
-        Top-level flat CLI keys such as `api_server`, `api_token_file`, `serve_api_listen_addr`, and
-        `serve_api_token_file` are old-shape evidence outside their unified sections and must fail closed with
-        migration guidance.
+        Sectioned swarm.yaml declarations are the current config vocabulary.
+        Unsupported top-level fields fail current unknown-key admission; no translation is provided.
       runtime_config_shape: >
-        Runtime section keys that remain canonical may be valid as a subset of unified `swarm.yaml`; old command-local
-        runtime config discovery and executable-adjacent `config.yaml` remain superseded sources and must fail closed
-        or route through migration guidance when the parser/discovery child lands.
+        Canonical runtime section keys are admitted as a subset of swarm.yaml.
+        Unsupported source paths fail the existing unified source owner before effects.
       executable_adjacent_config_yaml: >
-        Executable-adjacent `config.yaml` is ambient file authority and is not part of the unified discovery model.
-        Removal is split but must be atomic with the parser/discovery implementation.
+        Executable-adjacent config.yaml is not an admitted source. Source-authority
+        refusal remains a current constraint, not a compatibility reader or migration layer.
     doctor_provenance:
       command: swarm doctor
       requirements:
       - list loaded config files and layers in precedence order
       - show per-key provenance for effective values
       - show blocked keys with source path, trust-tier reason, and remediation
-      - show old-shape diagnostics with migration guidance
+      - show current-vocabulary errors with key, source coordinates and valid fields
       - render despite config/env blockers where possible and exit nonzero when blockers exist
     env_drain:
       rule: >
-        Every seeded #1600 env row must drain to either a unified typed key in this owner or a terminal secret/token-file
-        owner. Direct env readers are not proof of configuration ownership; each migration child must shrink the seeded
-        accepted set or explicitly leave a tracked residual row.
-      examples:
-        SWARM_API_LISTEN_ADDR: serve.api_listen_addr
-        SWARM_MCP_LISTEN_ADDR: serve.mcp_listen_addr
-        SWARM_STORE_BACKEND: store.backend
-        SWARM_SQLITE_PATH: store.sqlite.path
-        SWARM_DB_HOST: database.host
-        SWARM_DB_PORT: database.port
-        SWARM_DB_NAME: database.name
-        SWARM_DB_USER: database.user
-        SWARM_DB_SSLMODE: database.sslmode
-        SWARM_DB_POOL_SIZE: database.pool_size
-        SWARM_WORKSPACE_DATA_SOURCE: retired; use explicit dataset imports/pins and declared flow_data_access or data_access
-        SWARM_WORKSPACE_BACKEND: workspace.backend
-        SWARM_DOCKER_BIN: workspace.docker_bin or --docker-bin for workspace build
-        SWARM_WORKSPACE_IMAGE: workspace.image or --image for workspace build
-        SWARM_WORKSPACE_HOST_ROOT: workspace.host_root
-        SWARM_WORKSPACE_VOLUMES_FROM: retired with no replacement
-        SWARM_WORKSPACE_NETWORK: workspace.network
-        SWARM_MONITOR_DIR: paths.monitor_dir
-        SWARM_AGENT_CONFIG_MAP_FILE: paths.agent_config_map_file
-        SWARM_VERIFICATION_GATES_FILE: paths.verification_gates_file
-        SWARM_CREDENTIALS_FILE: secrets file owner, not inline config secret
-        SWARM_MANAGED_CREDENTIALS_FILE: managed credential store owner, not inline config secret
+        The six active sources under #1600 keep their current authority; this
+        rule promises no future unified typed key or terminal secret/token-file owner.
+        Source replacement requires its own evidence and ruling. Known-retired
+        names have no catalog or translation map; the current unknown-env
+        admission owner refuses undelegated nonempty values before effects.
     consumer_matrix:
       flat_cli_config: superseded_by_unified_owner_first_slice_implemented
-      xdg_config_yaml: invalid_legacy_discovery_replaced_by_user_global_swarm_yaml_by_1858
+      xdg_config_yaml: unsupported_source_under_current_unified_source_admission
       runtime_config_loader: consumed_by_unified_owner_first_slice_implemented
       executable_adjacent_config_yaml: invalid_ambient_reader_removed_by_1858
       env_guard_delegated_env_sources: consumed_by_unified_owner_first_slice_implemented
@@ -23870,10 +23559,10 @@ cli_specification:
         disposition: promoted_first_slice
         tracker: '#886'
         action: '`swarm incidents` default-text read semantics are promoted as one bounded CLI child over runtime.incidents; richer output-mode work remains split to #848/#794.'
-      retired_namespace_legacy_spellings:
-        disposition: promoted_first_slice
-        tracker: '#839'
-        action: Retired namespace behavior is owned only by explicit current command rows. Removed source-root and publication surfaces remain absent; no compatibility aliases or hidden migration commands are authorized.
+      current_command_admission:
+        disposition: implemented
+        tracker: '#2547'
+        action: Only current command rows are registered. Unsupported spellings fail ordinary command admission; no compatibility aliases or hidden migration commands are authorized.
       forkchat:
         disposition: promoted_first_slice
         tracker: '#749'
@@ -23944,14 +23633,14 @@ cli_specification:
           Platform spec carries exact `swarm event list`, `swarm event follow`, and `swarm event view`
           API-owner/filter rules from #849/#858.
       investigate_fail_closed_stubs:
-        classification: legacy_migration_behavior
+        classification: removed_surface
         reason: >
-          `swarm investigate *` is not v2 topology. Fail-closed stubs remain only to prevent silent legacy
-          command resurrection and to provide migration guidance.
+          `swarm investigate *` is not registered. Ordinary command admission rejects it;
+          no migration stub or spelling pointer survives.
       control_mailbox_fail_closed_stubs:
-        classification: legacy_migration_behavior
+        classification: removed_surface
         reason: >
-          `swarm control mailbox *` is retired. Typed mailbox notices and decision cards use
+          `swarm control mailbox *` is not registered. Typed mailbox notices and decision cards use
           `swarm mailbox list|view|defer`; generic terminal decisions are API-owned until the
           separately tracked controller lands. Fixed approve/reject spellings do not survive.
       fork_fail_closed_stub:
@@ -23960,8 +23649,8 @@ cli_specification:
           Previous tracked prose treated top-level `swarm fork` as retired. #1012 then promoted the multi-bundle
           source authority and restored top-level `swarm fork <source-run-id> ...` as the then-intended public command
           over /v1/rpc run.fork, implemented by #989/#1023. That authority is itself superseded by CLI v2.2
-          (#1654/#1677): the top-level `swarm fork` spelling is retired fail-closed per
-          cli_specification.retired_namespaces.topology_v2_2_retired_spellings and the public command is
+          (#1654/#1677): the top-level `swarm fork` spelling is not registered under
+          cli_specification.topology_revision_v2_2.current_vocabulary_rule and the public command is
           `swarm run fork`. Historical harness flags remain rejected.
       runtime_and_control_run_legacy_spellings:
         classification: unpromoted_candidate_backlog
@@ -23969,9 +23658,8 @@ cli_specification:
           The ignored CLI UX v2 review artifact named `swarm runtime pause|resume` and
           `swarm control run pause|continue|stop` as old spellings for the promoted
           `swarm control pause|continue|stop` commands. This tracked spec does not promote
-          those spellings as retired migration surfaces. They intentionally remain generic
-          Cobra unknown-command behavior until a later tracked row promotes hidden fail-closed
-          stubs with exact migration text and proof.
+          those spellings. They remain ordinary Cobra unknown commands. Hidden migration
+          stubs, replacement text and compatibility aliases are not admitted.
   foundations:
     read_window_input:
       promoted_by: '#1955'
@@ -25010,7 +24698,7 @@ cli_specification:
               renders table/list/detail human text, consumes the shared display renderer. It accepts `--json`,
               `--quiet`, and `--no-color` through the shared helper path.
             exception: >
-              The command is an explicit help/process/retired-style surface that does not consume output modes and
+              The command is an explicit help/process surface that does not consume output modes and
               is governed by an exception rule.
             split: >
               The command is implemented, but shared-output route-through, table rendering, argument formatting,
@@ -25619,16 +25307,6 @@ cli_specification:
             presentation only and is supported; JSON and quiet output modes remain unsupported until a later tracked
             serve output-mode row defines a machine-readable boot/readiness stream. Unsupported output-mode flags
             fail before runtime boot or active-run mutation.
-        retired_namespaces:
-          commands:
-          - investigate
-          - control_mailbox
-          - fork
-          - status_v1_retirement_message
-          rule: >
-            Retired and migration-only namespaces remain fail-closed stderr surfaces. Output modes MUST NOT
-            resurrect legacy behavior, make API/runtime calls, or convert migration messages into successful
-            machine-readable output.
         absent_command_rows:
           commands: []
           rule: >
@@ -25637,7 +25315,6 @@ cli_specification:
       split_siblings:
       - '#844 universal flag/config/env precedence; config-file no_color and CLI logging behavior implementation remain split'
       - '#846 error-channel and exit-code classification; closed first slice'
-      - '#839 retired namespace migration cleanup'
       - '#743 swarm run start behavior and follow semantics; output-mode implementation may consume this contract later'
       - 'absent #735 command families'
       - API/runtime method semantics
@@ -26136,7 +25813,7 @@ cli_specification:
         discovery for API-backed commands. API-backed command leaves consume `--api-server`, `--api-token-file`,
         project/selected context descriptors, unified `swarm.yaml` connection config, and built-in defaults
         through one shared resolver. `SWARM_API_SERVER`, `SWARM_API_TOKEN`, and `SWARM_API_TOKEN_FILE` are removed as
-        client-side API target/auth sources and fail closed with replacement guidance when present. When no explicit
+        client-side API target/auth sources and fail closed through the unknown-env owner when present. When no explicit
         token source is configured, the shared resolver may
         use the fixed built-in dev API token only for numeric loopback API targets. This contract does not add OpenRPC behavior, retry behavior,
         output rendering, inline token flags, or serve listener binding.
@@ -26162,8 +25839,7 @@ cli_specification:
           built_in_default: http://127.0.0.1:8081
         rejected_sources:
           SWARM_API_SERVER: >
-            Removed by #1636. Client-side API target env is hidden mutable source authority; use `--api-server`,
-            `--context`, a project/selected context, or config `connection.api_server`.
+            Not admitted after #1636. The current accepted-set owner rejects undelegated environment sources.
         value_model: >
           The configured value is an API server base URL, not a direct `/v1/rpc` endpoint. It MUST include an
           `http` or `https` scheme and host, MUST NOT include query or fragment components, and SHOULD use an
@@ -26185,12 +25861,10 @@ cli_specification:
         - built-in loopback default
         rejected_sources:
           SWARM_API_TOKEN: >
-            Removed as a client-side API token source by #1636. Use `--api-token-file`, context descriptor auth, or
-            config `connection.api_token_file`. Server-side `swarm serve` API auth source ownership is a separate seam
-            tracked by #1647.
+            Not admitted after #1636. The current accepted-set owner rejects undelegated environment sources.
+            Server-side `swarm serve` API auth source ownership is a separate seam tracked by #1647.
           SWARM_API_TOKEN_FILE: >
-            Removed as a client-side API token-file source by #1636. Use `--api-token-file`, context descriptor auth,
-            or config `connection.api_token_file`.
+            Not admitted after #1636. The current accepted-set owner rejects undelegated environment sources.
           --api-token: >
             Not promoted. Inline token flags leak secrets into shell history and process listings; operators
             must use token-file, context descriptor, or future secure-source owners for file-backed credentials.
@@ -26232,11 +25906,11 @@ cli_specification:
           xdg_default: '${XDG_CONFIG_HOME:-$HOME/.config}/swarm/swarm.yaml'
         rejected_sources:
           '${XDG_CONFIG_HOME:-$HOME/.config}/swarm/config.yaml': >
-            Flat CLI config discovery is retired by #1858. Move values to unified `swarm.yaml` under `connection`,
-            `serve`, or `paths`.
+            Not admitted by current unified source authority. An ambient file outside the declared source set
+            fails closed; it is not parsed, translated or migrated.
           executable_adjacent_config.yaml: >
-            Executable-adjacent runtime config is ambient file authority and is retired by #1858. Use global
-            `--config`, `SWARM_CONFIG`, `.swarm/swarm.yaml`, `./swarm.yaml`, or user-global `swarm.yaml`.
+            Not admitted by current unified source authority. An executable-adjacent ambient file outside the
+            declared source set fails closed; it is not parsed, translated or migrated.
         accepted_keys:
           connection.api_server: API server base URL consumed by API-backed commands.
           connection.api_token_file: Path to a file containing the bearer token.
@@ -26278,8 +25952,8 @@ cli_specification:
           SWARM_API_PORT: 'Not promoted; final v2.1 listener topology uses full listen addresses.'
           SWARM_MCP_PORT: 'Not promoted; final v2.1 listener topology uses full listen addresses.'
         rejected_listener_environment:
-          SWARM_API_LISTEN_ADDR: 'Retired by #1891. Use `swarm serve --api-listen-addr` or config `serve.api_listen_addr`.'
-          SWARM_MCP_LISTEN_ADDR: 'Retired by #1891. Use `swarm serve --mcp-listen-addr` or config `serve.mcp_listen_addr`.'
+          SWARM_API_LISTEN_ADDR: 'Not admitted by the current accepted-set environment owner.'
+          SWARM_MCP_LISTEN_ADDR: 'Not admitted by the current accepted-set environment owner.'
         rule: >
           API client connection settings and serve listener bind settings are different concepts. This owner
           governs where CLI clients connect; the shared config parser accepts listener keys for the serve topology
@@ -26600,7 +26274,6 @@ cli_specification:
         - name: --all-inputs
           behavior: Derive one deterministic plan for every exact public input of the selected flow in canonical order; mutually exclusive with --input.
       dropped_flags:
-        --platform-spec: 'Retired (#1574); fail with exit 2 and a teaching error naming the embedded platform spec and the paths.platform_spec_path config escape.'
       output:
         success_detail: >-
           One scenario ok line per scenario file followed by
@@ -27459,9 +27132,8 @@ cli_specification:
       owner: cobra noun-group help
       behavior: >
         Bare `swarm run` prints the run noun-group help and exits 0; it does not start a run and
-        makes no API calls. Start-intent invocations (positional args or start flags on bare
-        `swarm run`) fail closed with exit 2 and the promoted pointer message from
-        topology_revision_v2_2.superseded_spellings.run_bare_start.
+        makes no API calls. Unsupported positional args or start flags on the bare
+        run group fail ordinary argument/flag admission with exit 2 and no side effects.
     run_fan_out_group:
       command: swarm run fan-out
       tier: must_have
@@ -27512,7 +27184,6 @@ cli_specification:
         - --mcp-port <int>
       dropped_flags:
         --detach: 'Unsupported in v2; fail before API calls with exit 2 and migration text. Use `swarm serve` plus `swarm run start --connect ... --no-follow`.'
-        --platform-spec: 'Retired (#1574); fail with exit 2 and a teaching error naming the embedded platform spec and the paths.platform_spec_path config escape.'
       modes:
         foreground_local_start:
           invocation: swarm run start [directory] [--event <name> --payload <file>] [--config <path>] [--backend <profile>] [--data <name=file.jsonl>] [--pin <name@selector>]
@@ -28984,55 +28655,11 @@ cli_specification:
       - level is validated as debug, info, warn, or error before API calls
       - empty result, next_cursor rendering, auth/HTTP/RPC failures, malformed result, and malformed Incident rows are tested with closed exit-code behavior
       - no direct DB/store/runtime/EventBus/dashboard/process-log/container-log reads and no legacy /api/*, /rpc, /api/rpc, /ws, or /api/ws usage
-  retired_namespaces:
-    investigate:
-      command: swarm investigate *
-      status: retired_legacy_v1_topology
-      current_code_state: fully_fail_closed_after_806; bare namespace and runs/run/trace/health subcommands exit 2 with migration guidance before API calls
-      v2_replacements:
-        swarm investigate runs: swarm run list
-        swarm investigate run: swarm run status
-        swarm investigate trace: swarm run trace
-        swarm investigate health: swarm health
-      rule: '`swarm investigate` is not CLI v2 topology and MUST NOT be extended for new commands.'
-    control_mailbox:
-      command: swarm control mailbox *
-      status: retired
-      v2_replacement: swarm mailbox list|view|defer; typed terminal decisions use /v1/rpc mailbox.decide until #1989
-    status_v1_retirement_message:
-      status: superseded
-      rule: 'The old v1 retirement of top-level `swarm status` is no longer authoritative; v2 restored top-level `swarm status`, and CLI v2.2 subsequently moved it to `swarm run status` per cli_specification.retired_namespaces.topology_v2_2_retired_spellings.'
-    topology_v2_2_retired_spellings:
-      status: retired_topology_v2_2
-      implemented_by: '#1677'
-      exit_code: 2
-      rule: >
-        Retired CLI v2.2 spellings fail closed with the exact messages below, make zero API
-        calls, and are hidden from help/completion. Dispositions were promoted by #1654 in
-        topology_revision_v2_2.superseded_spellings; no aliases exist.
-      spellings:
-        runs: 'ERROR: `swarm runs` was renamed. Use `swarm run list`.'
-        status: 'ERROR: `swarm status` was renamed. Use `swarm run status`.'
-        trace: 'ERROR: `swarm trace` was renamed. Use `swarm run trace`.'
-        fork: 'ERROR: `swarm fork` was renamed. Use `swarm run fork`.'
-        agents: 'ERROR: `swarm agents` was renamed. Use `swarm agent list`.'
-        events: 'ERROR: `swarm events` was renamed. Use `swarm event list` or `swarm event follow`.'
-        entities: 'ERROR: `swarm entities` was renamed. Use `swarm entity list`.'
-        conversations: 'ERROR: `swarm conversations` was renamed. Use `swarm conversation list`.'
-        run_bare_start: 'ERROR: `swarm run` no longer starts a run. Use `swarm run start ...`. Bare `swarm run` prints the run command group.'
-    unpromoted_review_only_legacy_spellings:
-      status: unpromoted_candidate_backlog
-      commands:
-      - swarm runtime pause
-      - swarm runtime resume
-      - swarm control run pause
-      - swarm control run continue
-      - swarm control run stop
-      current_code_state: generic_cobra_unknown_command
-      rule: >
-        These spellings appear only in ignored review-artifact migration prose and are not promoted
-        retired namespaces. Do not add successful aliases, replacement behavior, or hidden fail-closed
-        stubs for them unless a later tracked spec change explicitly promotes exact rows and proof.
+  command_admission:
+    rule: >
+      The current command catalog is the complete public vocabulary. Removed commands
+      are not registered, do not appear in help/completion and fail ordinary command
+      admission before API calls. No aliases, migration messages or retirement layer exists.
   blocker_state:
     '#748':
       state: stale_method_blocker
@@ -29136,26 +28763,23 @@ cli_specification:
     implemented_by: '#1677'
     authority_rule: >
       Historical decision record for the CLI v2.2 topology revision (D1-D7). The revision is
-      implemented: command_catalog rows above carry the v2.2 spellings as live behavior, retired
-      spellings fail closed per topology_v2_2_retired_spellings, and the cobra/catalog
+      implemented: command_catalog rows above carry the v2.2 spellings as live behavior, unsupported
+      spellings fail ordinary command admission, and the cobra/catalog
       conformance drift test enforces the binding. This block preserves the decision trail and
       MUST NOT be reused as a live migration target; future topology changes require a new
       tracked revision.
     old_spelling_policy:
-      default_disposition: fail_closed_retirement
+      default_disposition: ordinary_unknown_command
       rule: >
-        Superseded public spellings fail closed at Phase 2 with exit code 2 and a typed pointer
-        message naming the replacement spelling, following the retired-namespace precedent
-        (investigate, control mailbox, legacy fork flags). No hidden, successful, or
-        time-bounded aliases may be added unless a later explicit lead decision promotes exact
-        alias rows into this section.
+        Only current public spellings are registered. Unsupported commands and flags fail
+        ordinary admission before effects. There is no pre-1.0 migration surface, hidden stub,
+        replacement-pointer table or compatibility alias.
     group_field:
       status: contract_bearing
       allowed_values: [getting_started, author_validate, run_operate, observe_debug, utilities]
       rule: >
         `group` is a required command_catalog row field naming the operator help journey group.
-        Exempt rows: root (renders the groups), retired hidden stubs (investigate,
-        control_mailbox, fork_legacy_harness_forms). Current row values describe the live #1657
+        Only root is exempt because it renders the groups. Current row values describe the live #1657
         cobra group MEMBERSHIP; target-row values describe the v2.2 grouping. Phase 2 MUST bind
         cobra GroupID assignments to row group values through the conformance drift test.
       identifier_alignment: >
@@ -29239,70 +28863,10 @@ cli_specification:
         command: swarm conversation list [--agent-id <agent-id>] [--run-id <run-id>] [--limit <n>] [--cursor <cursor>]
         group: observe_debug
         inherits_contract: cli_specification.command_catalog.conversations_list
-    superseded_spellings:
-      run_bare_start:
-        current: swarm run [flags] # retired pre-v2.2 spelling (historical decision record)
-        replacement: swarm run start [flags]
-        current_status: retired
-        disposition: fail_closed_pointer
-        exit_code: 2
-        message: 'ERROR: `swarm run` no longer starts a run. Use `swarm run start ...`. Bare `swarm run` prints the run command group.'
-      runs:
-        current: swarm runs # retired pre-v2.2 spelling (historical decision record)
-        replacement: swarm run list
-        current_status: retired
-        disposition: fail_closed_pointer
-        exit_code: 2
-        message: 'ERROR: `swarm runs` was renamed. Use `swarm run list`.'
-      status:
-        current: swarm status # retired pre-v2.2 spelling (historical decision record)
-        replacement: swarm run status
-        current_status: retired
-        disposition: fail_closed_pointer
-        exit_code: 2
-        message: 'ERROR: `swarm status` was renamed. Use `swarm run status`.'
-      trace:
-        current: swarm trace # retired pre-v2.2 spelling (historical decision record)
-        replacement: swarm run trace
-        current_status: retired
-        disposition: fail_closed_pointer
-        exit_code: 2
-        message: 'ERROR: `swarm trace` was renamed. Use `swarm run trace`.'
-      fork:
-        current: swarm fork # retired pre-v2.2 spelling (historical decision record)
-        replacement: swarm run fork
-        current_status: retired
-        disposition: fail_closed_pointer
-        exit_code: 2
-        message: 'ERROR: `swarm fork` was renamed. Use `swarm run fork`.'
-      agents:
-        current: swarm agents [list] # retired pre-v2.2 spelling (historical decision record)
-        replacement: swarm agent list
-        current_status: retired
-        disposition: fail_closed_pointer
-        exit_code: 2
-        message: 'ERROR: `swarm agents` was renamed. Use `swarm agent list`.'
-      events:
-        current: swarm events list|follow # retired pre-v2.2 spelling (historical decision record)
-        replacement: swarm event list|follow
-        current_status: retired
-        disposition: fail_closed_pointer
-        exit_code: 2
-        message: 'ERROR: `swarm events` was renamed. Use `swarm event list` or `swarm event follow`.'
-      entities:
-        current: swarm entities list # retired pre-v2.2 spelling (historical decision record)
-        replacement: swarm entity list
-        current_status: retired
-        disposition: fail_closed_pointer
-        exit_code: 2
-        message: 'ERROR: `swarm entities` was renamed. Use `swarm entity list`.'
-      conversations:
-        current: swarm conversations list # retired pre-v2.2 spelling (historical decision record)
-        replacement: swarm conversation list
-        current_status: retired
-        disposition: fail_closed_pointer
-        exit_code: 2
-        message: 'ERROR: `swarm conversations` was renamed. Use `swarm conversation list`.'
+    current_vocabulary_rule: >
+      Only the current command catalog is registered. Unknown commands, misplaced flags,
+      and unsupported --platform-spec flags are ordinary Cobra errors before side effects.
+      There are no hidden migration stubs or old-to-new spelling pointers.
 
 api_specification:
   description: "Single canonical user-facing API for the Swarm platform. JSON-RPC 2.0 over\nHTTP for request/response, JSON-RPC\
@@ -40030,7 +39594,7 @@ filesystem_source_model:
     rule: |
       Host and Docker workspaces receive a disposable, read-only projection of the exact admitted artifact bound to bundle_hash and to one freshly minted process-local projection identity. Retained handles preserve that identity; separate materializations mint different identities even for the same bundle_hash. Native file operations and container mounts consume that projection. Every workspace lifecycle receives the exact projection binding before prerequisite or system-workspace creation, including single- and multi-context serve and selected-source rebind. Docker container names and runtime labels include both bundle and projection identity, so neither running nor stopped containers from another process projection can be reused. After runtime drain, the lifecycle removes every container it created for that projection, including partially launched containers, before the projection filesystem is released; acknowledgment loss is reconciled by readback of the exact inspected Docker object ID and a released lifecycle cannot restart. Process projection identity is never writable-workspace identity: one canonical owner derives every Docker named volume and Host workspace directory from a length-framed `(full validated bundle_hash, closed workspace kind, exact typed semantic identity)` tuple. The derived key is backend-neutral and injective for the platform contract: bundle digests are never truncated, and flow identities are never passed through display-slug normalization. Per-agent and per-flow-instance backings therefore attach to fresh process containers under the same durable names. Scaffold and system support volumes are bundle-owned operational state, are retained across process replacement, and are excluded from source-projection teardown; projection teardown removes containers only. The retired entity-container workspace and selected-store slug lookup do not exist. Hash-only container identity, fixed-name compatibility, hash-keyed queues, and dynamic replacement are never lifecycle authority. The original authored root, cwd, package checks, and mutable host paths are never execution authority.
   retired_surface:
-    behavior: fail_closed_with_teaching_error_or_absent_public_surface
+    behavior: ordinary_current_vocabulary_or_value_rejection_or_absent_public_surface
     no_compatibility: true
     names:
       - package.yaml topology or identity

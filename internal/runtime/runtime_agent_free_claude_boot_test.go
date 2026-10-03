@@ -14,6 +14,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"gopkg.in/yaml.v3"
 )
 
 func TestRuntimeStart_AgentFreeCLITestDoesNotRequireClaudeStartupEnv(t *testing.T) {
@@ -47,16 +48,8 @@ func TestRuntimeStart_AgentFreeCLITestDoesNotRequireClaudeStartupEnv(t *testing.
 
 func TestNewRuntimeRejectsRetiredLLMRuntimeMode(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.LLM.RuntimeMode = "cli_test"
-
-	_, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Options: RuntimeOptions{
-		SelfCheck:      false,
-		WorkflowModule: loadAgentFreeRuntimeWorkflowModule(t),
-		LLMRuntime:     claudeNoopLLMRuntime{},
-	}})
-
-	if err == nil || !strings.Contains(err.Error(), "llm.runtime_mode is retired") {
-		t.Fatalf("NewRuntime error = %v, want retired runtime mode rejection", err)
+	if err := yaml.Unmarshal([]byte("llm:\n  runtime_mode: cli_test\n"), cfg); err == nil || !strings.Contains(err.Error(), "runtime_mode") || !strings.Contains(err.Error(), "not supported") {
+		t.Fatalf("runtime source error = %v, want source admission rejection before runtime construction", err)
 	}
 }
 

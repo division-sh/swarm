@@ -247,7 +247,7 @@ func TestPlatformSpecIssue1640EnvClassificationCoversRetainedSlice(t *testing.T)
 		"SWARM_WORKSPACE_DATA_SOURCE",
 		"SWARM_WORKSPACE_BACKEND",
 		"SWARM_DOCKER_BIN",
-		"SWARM_WORKSPACE_IMAGE",
+		"SWARM_MONITOR_DIR",
 		"SWARM_WORKSPACE_HOST_ROOT",
 		"SWARM_WORKSPACE_VOLUMES_FROM",
 		"SWARM_WORKSPACE_NETWORK",
@@ -295,11 +295,11 @@ func TestRepoWideSwarmEnvAcceptedSetMatchesSpec(t *testing.T) {
 				SourceAuthorityRule  string   `yaml:"source_authority_rule"`
 				Categories           []string `yaml:"categories"`
 				AcceptedEnv          []struct {
-					Name      string `yaml:"name"`
-					Prefix    string `yaml:"prefix"`
-					Category  string `yaml:"category"`
-					Owner     string `yaml:"owner"`
-					Migration string `yaml:"migration"`
+					Name        string `yaml:"name"`
+					Prefix      string `yaml:"prefix"`
+					Category    string `yaml:"category"`
+					Owner       string `yaml:"owner"`
+					Disposition string `yaml:"disposition"`
 				} `yaml:"accepted_env"`
 			} `yaml:"repo_wide_swarm_env_accepted_set"`
 		} `yaml:"environment_source_authority"`
@@ -332,7 +332,6 @@ func TestRepoWideSwarmEnvAcceptedSetMatchesSpec(t *testing.T) {
 		swarmEnvCategoryGeneratedBoundary,
 		swarmEnvCategoryTestQuarantine,
 		swarmEnvCategorySeededLegacy,
-		swarmEnvCategoryKnownRetired,
 		swarmEnvCategoryUnknownStale,
 	} {
 		if !specCategories[string(category)] {
@@ -341,9 +340,9 @@ func TestRepoWideSwarmEnvAcceptedSetMatchesSpec(t *testing.T) {
 	}
 
 	specRows := map[string]struct {
-		Category  string
-		Owner     string
-		Migration string
+		Category    string
+		Owner       string
+		Disposition string
 	}{}
 	for _, row := range authority.AcceptedEnv {
 		key := specSwarmEnvRowKey(row.Name, row.Prefix)
@@ -356,17 +355,17 @@ func TestRepoWideSwarmEnvAcceptedSetMatchesSpec(t *testing.T) {
 		if !specCategories[row.Category] {
 			t.Fatalf("#1731 row %q uses unknown category %q", key, row.Category)
 		}
-		if strings.TrimSpace(row.Owner) == "" || strings.TrimSpace(row.Migration) == "" {
-			t.Fatalf("#1731 row %q missing owner/migration: %#v", key, row)
+		if strings.TrimSpace(row.Owner) == "" || strings.TrimSpace(row.Disposition) == "" {
+			t.Fatalf("#1731 row %q missing owner/disposition: %#v", key, row)
 		}
-		if row.Category == string(swarmEnvCategorySeededLegacy) && !strings.Contains(row.Migration, "#") && !strings.Contains(row.Migration, "config") && !strings.Contains(row.Migration, "--") {
-			t.Fatalf("#1731 seeded legacy row %q missing migration pointer: %#v", key, row)
+		if row.Category == string(swarmEnvCategorySeededLegacy) && !strings.Contains(row.Disposition, "#1600") {
+			t.Fatalf("#1731 seeded legacy row %q missing #1600 disposition: %#v", key, row)
 		}
 		specRows[key] = struct {
-			Category  string
-			Owner     string
-			Migration string
-		}{Category: row.Category, Owner: row.Owner, Migration: row.Migration}
+			Category    string
+			Owner       string
+			Disposition string
+		}{Category: row.Category, Owner: row.Owner, Disposition: row.Disposition}
 	}
 
 	codeRows := map[string]swarmEnvCatalogEntry{}
@@ -385,7 +384,7 @@ func TestRepoWideSwarmEnvAcceptedSetMatchesSpec(t *testing.T) {
 		if !ok {
 			t.Fatalf("code catalog row %q missing from #1731 spec", key)
 		}
-		if row.Category != string(entry.Category) || row.Owner != entry.Owner || row.Migration != entry.Migration {
+		if row.Category != string(entry.Category) || row.Owner != entry.Owner {
 			t.Fatalf("#1731 spec row %q mismatch\nspec: %#v\ncode: %#v", key, row, entry)
 		}
 	}
@@ -422,7 +421,7 @@ func TestSwarmEnvGuardBlocksRetiredArtifactRoot(t *testing.T) {
 
 func TestSwarmEnvGuardBlocksUnknownWithSuggestion(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
-	t.Setenv("SWARM_WORSKPACE_IMAGE", "stale")
+	t.Setenv("SWARM_MONITOR_DR", "stale")
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
@@ -434,9 +433,9 @@ func TestSwarmEnvGuardBlocksUnknownWithSuggestion(t *testing.T) {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, CLIExitValidation, stdout.String(), stderr.String())
 	}
 	for _, want := range []string{
-		"[BLOCKER] env/unknown_stale @ SWARM_WORSKPACE_IMAGE:",
-		"did you mean SWARM_WORKSPACE_IMAGE",
-		"unset SWARM_WORSKPACE_IMAGE",
+		"[BLOCKER] env/unknown_stale @ SWARM_MONITOR_DR:",
+		"did you mean SWARM_MONITOR_DIR",
+		"unset SWARM_MONITOR_DR",
 	} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
@@ -446,7 +445,7 @@ func TestSwarmEnvGuardBlocksUnknownWithSuggestion(t *testing.T) {
 
 func TestSwarmEnvGuardSkipsPureVersionAndCompletion(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
-	t.Setenv("SWARM_WORSKPACE_IMAGE", "stale")
+	t.Setenv("SWARM_MONITOR_DR", "stale")
 
 	for _, args := range [][]string{
 		{"version"},
@@ -457,7 +456,7 @@ func TestSwarmEnvGuardSkipsPureVersionAndCompletion(t *testing.T) {
 		if code != cliExitOK {
 			t.Fatalf("%v code = %d, want %d stdout=%s stderr=%s", args, code, cliExitOK, stdout.String(), stderr.String())
 		}
-		if strings.Contains(stdout.String()+stderr.String(), "SWARM_WORSKPACE_IMAGE") {
+		if strings.Contains(stdout.String()+stderr.String(), "SWARM_MONITOR_DR") {
 			t.Fatalf("%v should skip env guard, got stdout=%s stderr=%s", args, stdout.String(), stderr.String())
 		}
 	}
@@ -465,7 +464,7 @@ func TestSwarmEnvGuardSkipsPureVersionAndCompletion(t *testing.T) {
 
 func TestSwarmEnvGuardSkipsPureSubcommandHelpFlags(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
-	t.Setenv("SWARM_WORSKPACE_IMAGE", "stale")
+	t.Setenv("SWARM_MONITOR_DR", "stale")
 
 	for _, args := range [][]string{
 		{"event", "publish", "--help"},
@@ -479,7 +478,7 @@ func TestSwarmEnvGuardSkipsPureSubcommandHelpFlags(t *testing.T) {
 				t.Fatalf("%v code = %d, want %d stdout=%s stderr=%s", args, code, cliExitOK, stdout.String(), stderr.String())
 			}
 			output := stdout.String() + stderr.String()
-			if strings.Contains(output, "SWARM_WORSKPACE_IMAGE") {
+			if strings.Contains(output, "SWARM_MONITOR_DR") {
 				t.Fatalf("%v should skip env guard, got stdout=%s stderr=%s", args, stdout.String(), stderr.String())
 			}
 			if !strings.Contains(output, "Usage:") {
@@ -491,7 +490,7 @@ func TestSwarmEnvGuardSkipsPureSubcommandHelpFlags(t *testing.T) {
 
 func TestSwarmEnvGuardDoesNotSkipWhenHelpIsCommandData(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
-	t.Setenv("SWARM_WORSKPACE_IMAGE", "stale")
+	t.Setenv("SWARM_MONITOR_DR", "stale")
 
 	cases := []struct {
 		name string
@@ -518,8 +517,8 @@ func TestSwarmEnvGuardDoesNotSkipWhenHelpIsCommandData(t *testing.T) {
 				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, CLIExitValidation, stdout.String(), stderr.String())
 			}
 			for _, want := range []string{
-				"[BLOCKER] env/unknown_stale @ SWARM_WORSKPACE_IMAGE:",
-				"did you mean SWARM_WORKSPACE_IMAGE",
+				"[BLOCKER] env/unknown_stale @ SWARM_MONITOR_DR:",
+				"did you mean SWARM_MONITOR_DIR",
 			} {
 				if !strings.Contains(stderr.String(), want) {
 					t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
@@ -531,7 +530,7 @@ func TestSwarmEnvGuardDoesNotSkipWhenHelpIsCommandData(t *testing.T) {
 
 func TestSwarmEnvGuardDoesNotSkipVersionServerEqualsTrue(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
-	t.Setenv("SWARM_WORSKPACE_IMAGE", "stale")
+	t.Setenv("SWARM_MONITOR_DR", "stale")
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
@@ -543,8 +542,8 @@ func TestSwarmEnvGuardDoesNotSkipVersionServerEqualsTrue(t *testing.T) {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, CLIExitValidation, stdout.String(), stderr.String())
 	}
 	for _, want := range []string{
-		"[BLOCKER] env/unknown_stale @ SWARM_WORSKPACE_IMAGE:",
-		"did you mean SWARM_WORKSPACE_IMAGE",
+		"[BLOCKER] env/unknown_stale @ SWARM_MONITOR_DR:",
+		"did you mean SWARM_MONITOR_DIR",
 	} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
@@ -583,19 +582,19 @@ func TestSwarmEnvGuardBlocksRetiredRuntimeLLMConfigEnv(t *testing.T) {
 		want    []string
 		notWant []string
 	}{
-		{name: "SWARM_RUNTIME_RECOVERY_ON_STARTUP", value: "true", want: []string{"env/known_retired @ SWARM_RUNTIME_RECOVERY_ON_STARTUP", "runtime.recovery_on_startup"}},
-		{name: "SWARM_LLM_SESSION_LOCK_TTL", value: "1s", want: []string{"env/known_retired @ SWARM_LLM_SESSION_LOCK_TTL", "llm.session.lock_ttl"}},
-		{name: "SWARM_LLM_SESSION_ROTATE_AFTER_TURNS", value: "2", want: []string{"env/known_retired @ SWARM_LLM_SESSION_ROTATE_AFTER_TURNS", "llm.session.rotate_after_turns"}},
-		{name: "SWARM_LLM_SESSION_ROTATE_ON_PARSE_FAILURES", value: "2", want: []string{"env/known_retired @ SWARM_LLM_SESSION_ROTATE_ON_PARSE_FAILURES", "llm.session.rotate_on_parse_failures"}},
-		{name: "SWARM_CLAUDE_API_MAX_RETRIES", value: "7", want: []string{"env/known_retired @ SWARM_CLAUDE_API_MAX_RETRIES", "llm.claude_api.max_retries"}},
-		{name: "SWARM_CLAUDE_API_RETRY_BACKOFF", value: "7s", want: []string{"env/known_retired @ SWARM_CLAUDE_API_RETRY_BACKOFF", "llm.claude_api.retry_backoff"}},
-		{name: "SWARM_CLAUDE_CLI_COMMAND", value: "false", want: []string{"env/known_retired @ SWARM_CLAUDE_CLI_COMMAND", "llm.claude_cli.command"}},
-		{name: "SWARM_CLAUDE_CLI_TIMEOUT", value: "1s", want: []string{"env/known_retired @ SWARM_CLAUDE_CLI_TIMEOUT", "llm.claude_cli.timeout"}},
-		{name: "SWARM_CLAUDE_CLI_OUTPUT_FORMAT", value: "bad", want: []string{"env/known_retired @ SWARM_CLAUDE_CLI_OUTPUT_FORMAT", "llm.claude_cli.output_format"}},
-		{name: "SWARM_CLAUDE_TIMEOUT_SECONDS", value: "1", want: []string{"env/known_retired @ SWARM_CLAUDE_TIMEOUT_SECONDS", "llm.claude_cli.timeout"}},
-		{name: "SWARM_CLAUDE_CLI_RETRIES", value: "7", want: []string{"env/known_retired @ SWARM_CLAUDE_CLI_RETRIES", "no supported replacement"}, notWant: []string{"llm.claude_cli.retries", "#1803"}},
-		{name: "SWARM_CLAUDE_CLI_NO_SESSION_PERSISTENCE", value: "true", want: []string{"env/known_retired @ SWARM_CLAUDE_CLI_NO_SESSION_PERSISTENCE", "no supported replacement"}, notWant: []string{"llm.claude_cli.no_session_persistence", "#1803"}},
-		{name: "SWARM_CLAUDE_CLI_USE_TMUX", value: "true", want: []string{"env/known_retired @ SWARM_CLAUDE_CLI_USE_TMUX", "no supported replacement"}, notWant: []string{"llm.claude_cli.use_tmux", "#1803"}},
+		{name: "SWARM_RUNTIME_RECOVERY_ON_STARTUP", value: "true", want: []string{"env/unknown_stale @ SWARM_RUNTIME_RECOVERY_ON_STARTUP", "unknown SWARM_* env is not accepted"}},
+		{name: "SWARM_LLM_SESSION_LOCK_TTL", value: "1s", want: []string{"env/unknown_stale @ SWARM_LLM_SESSION_LOCK_TTL", "unknown SWARM_* env is not accepted"}},
+		{name: "SWARM_LLM_SESSION_ROTATE_AFTER_TURNS", value: "2", want: []string{"env/unknown_stale @ SWARM_LLM_SESSION_ROTATE_AFTER_TURNS", "unknown SWARM_* env is not accepted"}},
+		{name: "SWARM_LLM_SESSION_ROTATE_ON_PARSE_FAILURES", value: "2", want: []string{"env/unknown_stale @ SWARM_LLM_SESSION_ROTATE_ON_PARSE_FAILURES", "unknown SWARM_* env is not accepted"}},
+		{name: "SWARM_CLAUDE_API_MAX_RETRIES", value: "7", want: []string{"env/unknown_stale @ SWARM_CLAUDE_API_MAX_RETRIES", "unknown SWARM_* env is not accepted"}},
+		{name: "SWARM_CLAUDE_API_RETRY_BACKOFF", value: "7s", want: []string{"env/unknown_stale @ SWARM_CLAUDE_API_RETRY_BACKOFF", "unknown SWARM_* env is not accepted"}},
+		{name: "SWARM_CLAUDE_CLI_COMMAND", value: "false", want: []string{"env/unknown_stale @ SWARM_CLAUDE_CLI_COMMAND", "unknown SWARM_* env is not accepted"}},
+		{name: "SWARM_CLAUDE_CLI_TIMEOUT", value: "1s", want: []string{"env/unknown_stale @ SWARM_CLAUDE_CLI_TIMEOUT", "unknown SWARM_* env is not accepted"}},
+		{name: "SWARM_CLAUDE_CLI_OUTPUT_FORMAT", value: "bad", want: []string{"env/unknown_stale @ SWARM_CLAUDE_CLI_OUTPUT_FORMAT", "unknown SWARM_* env is not accepted"}},
+		{name: "SWARM_CLAUDE_TIMEOUT_SECONDS", value: "1", want: []string{"env/unknown_stale @ SWARM_CLAUDE_TIMEOUT_SECONDS", "unknown SWARM_* env is not accepted"}},
+		{name: "SWARM_CLAUDE_CLI_RETRIES", value: "7", want: []string{"env/unknown_stale @ SWARM_CLAUDE_CLI_RETRIES", "unknown SWARM_* env is not accepted"}, notWant: []string{"llm.claude_cli.retries", "#1803"}},
+		{name: "SWARM_CLAUDE_CLI_NO_SESSION_PERSISTENCE", value: "true", want: []string{"env/unknown_stale @ SWARM_CLAUDE_CLI_NO_SESSION_PERSISTENCE", "unknown SWARM_* env is not accepted"}, notWant: []string{"llm.claude_cli.no_session_persistence", "#1803"}},
+		{name: "SWARM_CLAUDE_CLI_USE_TMUX", value: "true", want: []string{"env/unknown_stale @ SWARM_CLAUDE_CLI_USE_TMUX", "unknown SWARM_* env is not accepted"}, notWant: []string{"llm.claude_cli.use_tmux", "#1803"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -632,14 +631,14 @@ func TestSwarmEnvGuardBlocksRetiredStoreDatabaseConfigEnv(t *testing.T) {
 		value string
 		want  []string
 	}{
-		{name: "SWARM_STORE_BACKEND", value: "postgres", want: []string{"env/known_retired", "SWARM_STORE_BACKEND", "--store or store.backend"}},
-		{name: "SWARM_SQLITE_PATH", value: "dev.db", want: []string{"env/known_retired", "SWARM_SQLITE_PATH", "store.sqlite.path"}},
-		{name: "SWARM_DB_HOST", value: "db.example.test", want: []string{"env/known_retired", "SWARM_DB_HOST", "database.host"}},
-		{name: "SWARM_DB_PORT", value: "15432", want: []string{"env/known_retired", "SWARM_DB_PORT", "database.port"}},
-		{name: "SWARM_DB_NAME", value: "swarm_test", want: []string{"env/known_retired", "SWARM_DB_NAME", "database.name"}},
-		{name: "SWARM_DB_USER", value: "swarm_user", want: []string{"env/known_retired", "SWARM_DB_USER", "database.user"}},
-		{name: "SWARM_DB_SSLMODE", value: "require", want: []string{"env/known_retired", "SWARM_DB_SSLMODE", "database.sslmode"}},
-		{name: "SWARM_DB_POOL_SIZE", value: "9", want: []string{"env/known_retired", "SWARM_DB_POOL_SIZE", "database.pool_size"}},
+		{name: "SWARM_STORE_BACKEND", value: "postgres", want: []string{"env/unknown_stale", "SWARM_STORE_BACKEND", "unknown SWARM_* env is not accepted"}},
+		{name: "SWARM_SQLITE_PATH", value: "dev.db", want: []string{"env/unknown_stale", "SWARM_SQLITE_PATH", "unknown SWARM_* env is not accepted"}},
+		{name: "SWARM_DB_HOST", value: "db.example.test", want: []string{"env/unknown_stale", "SWARM_DB_HOST", "unknown SWARM_* env is not accepted"}},
+		{name: "SWARM_DB_PORT", value: "15432", want: []string{"env/unknown_stale", "SWARM_DB_PORT", "unknown SWARM_* env is not accepted"}},
+		{name: "SWARM_DB_NAME", value: "swarm_test", want: []string{"env/unknown_stale", "SWARM_DB_NAME", "unknown SWARM_* env is not accepted"}},
+		{name: "SWARM_DB_USER", value: "swarm_user", want: []string{"env/unknown_stale", "SWARM_DB_USER", "unknown SWARM_* env is not accepted"}},
+		{name: "SWARM_DB_SSLMODE", value: "require", want: []string{"env/unknown_stale", "SWARM_DB_SSLMODE", "unknown SWARM_* env is not accepted"}},
+		{name: "SWARM_DB_POOL_SIZE", value: "9", want: []string{"env/unknown_stale", "SWARM_DB_POOL_SIZE", "unknown SWARM_* env is not accepted"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -776,7 +775,7 @@ func TestSwarmEnvGuardRejectsProjectTypedDatabasePasswordEnvDelegation(t *testin
 		t.Fatalf("serve callback was called after project config delegated env; stdout=%s stderr=%s", stdout.String(), stderr.String())
 	}
 	output := stdout.String() + stderr.String()
-	for _, want := range []string{"env/known_retired", "SWARM_DB_PASSWORD", "database.password_env"} {
+	for _, want := range []string{"env/unknown_stale", "SWARM_DB_PASSWORD", "unknown SWARM_* env is not accepted"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output missing %q:\n%s", want, output)
 		}
@@ -821,7 +820,7 @@ func TestSwarmEnvGuardHonorsTypedDatabasePasswordEnvClearOverride(t *testing.T) 
 		t.Fatalf("serve callback was called after typed env delegation was cleared; stdout=%s stderr=%s", stdout.String(), stderr.String())
 	}
 	output := stdout.String() + stderr.String()
-	for _, want := range []string{"env/known_retired", "SWARM_DB_PASSWORD", "database.password_env"} {
+	for _, want := range []string{"env/unknown_stale", "SWARM_DB_PASSWORD", "unknown SWARM_* env is not accepted"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output missing %q:\n%s", want, output)
 		}
@@ -861,7 +860,7 @@ func TestSwarmEnvGuardRejectsExecutableAdjacentTypedDatabasePasswordEnvDelegatio
 	if called {
 		t.Fatalf("serve callback was called after executable-adjacent config delegated env; stdout=%s stderr=%s", stdout.String(), stderr.String())
 	}
-	for _, want := range []string{"SWARM_DB_PASSWORD", "database.password_env", "known_retired"} {
+	for _, want := range []string{"SWARM_DB_PASSWORD", "unknown SWARM_* env is not accepted", "unknown_stale"} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
 		}
@@ -896,7 +895,7 @@ func TestSwarmEnvGuardEmptyRetiredEnvUsesNonEmptyBoundary(t *testing.T) {
 
 func TestDoctorReportsSwarmEnvFindingsWithConfigFailure(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
-	t.Setenv("SWARM_WORSKPACE_IMAGE", "stale")
+	t.Setenv("SWARM_MONITOR_DR", "stale")
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
 		"doctor",
@@ -913,13 +912,13 @@ func TestDoctorReportsSwarmEnvFindingsWithConfigFailure(t *testing.T) {
 	if report.OK {
 		t.Fatalf("doctor report OK=true, want blockers: %#v", report)
 	}
-	assertLocalPreflightFinding(t, report, localPreflightEnvPrerequisite, string(swarmEnvCategoryUnknownStale), "SWARM_WORSKPACE_IMAGE")
+	assertLocalPreflightFinding(t, report, localPreflightEnvPrerequisite, string(swarmEnvCategoryUnknownStale), "SWARM_MONITOR_DR")
 	assertLocalPreflightFinding(t, report, localPreflightBackendPrerequisite, "config_load_failed", "missing-runtime.yaml")
 }
 
 func TestDoctorTargetReportsSwarmEnvFindings(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
-	t.Setenv("SWARM_WORSKPACE_IMAGE", "stale")
+	t.Setenv("SWARM_MONITOR_DR", "stale")
 	repo := writeDoctorTargetRepo(t)
 
 	var stdout, stderr bytes.Buffer
@@ -941,7 +940,7 @@ func TestDoctorTargetReportsSwarmEnvFindings(t *testing.T) {
 	if report.OK {
 		t.Fatalf("doctor target report OK=true, want env blocker: %#v", report)
 	}
-	assertDoctorTargetEnvFinding(t, report, string(swarmEnvCategoryUnknownStale), "SWARM_WORSKPACE_IMAGE")
+	assertDoctorTargetEnvFinding(t, report, string(swarmEnvCategoryUnknownStale), "SWARM_MONITOR_DR")
 }
 
 func TestDoctorTargetReportsRuntimeConfigEnvRejectors(t *testing.T) {
@@ -988,10 +987,10 @@ func TestDoctorTargetReportsRuntimeConfigEnvRejectors(t *testing.T) {
 			if report.OK {
 				t.Fatalf("doctor target report OK=true, want env blocker: %#v", report)
 			}
-			assertDoctorTargetEnvFinding(t, report, string(swarmEnvCategoryKnownRetired), envName)
+			assertDoctorTargetEnvFinding(t, report, string(swarmEnvCategoryUnknownStale), envName)
 			if envName == "SWARM_CLAUDE_CLI_RETRIES" {
-				finding := findDoctorTargetEnvFinding(t, report, string(swarmEnvCategoryKnownRetired), envName)
-				if !strings.Contains(finding.Message, "no supported replacement") {
+				finding := findDoctorTargetEnvFinding(t, report, string(swarmEnvCategoryUnknownStale), envName)
+				if !strings.Contains(finding.Message, "unknown SWARM_* env is not accepted") {
 					t.Fatalf("retired inert finding message = %q, want no replacement guidance", finding.Message)
 				}
 				if strings.Contains(finding.Message+finding.Remediation, "#1803") {

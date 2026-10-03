@@ -29,7 +29,6 @@ var inputEventPinFieldOptions = map[string]struct{}{
 	"initialize": {},
 	"event":      {},
 	"source":     {},
-	"address":    {},
 	"resolution": {},
 }
 
@@ -48,7 +47,6 @@ var computeFieldOptions = map[string]struct{}{
 	"operation":   {},
 	"tiers":       {},
 	"keys":        {},
-	"params":      {},
 	"store_as":    {},
 	"description": {},
 }

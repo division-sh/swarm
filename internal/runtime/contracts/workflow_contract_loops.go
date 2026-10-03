@@ -107,7 +107,7 @@ func ValidateLoopHandlerCombination(handler SystemNodeEventHandler) error {
 		return fmt.Errorf("loop operation requires an existing workflow instance and cannot create or select-or-create an entity")
 	}
 	if strings.TrimSpace(handler.Condition) != "" || strings.TrimSpace(handler.Logic) != "" {
-		return fmt.Errorf("loop operation cannot use deprecated handler condition or logic")
+		return fmt.Errorf("loop operation cannot use handler condition or logic")
 	}
 	if kind == LoopOperationAdmit {
 		return nil

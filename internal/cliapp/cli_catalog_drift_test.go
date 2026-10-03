@@ -202,28 +202,24 @@ func TestCobraTreeMatchesCommandCatalog(t *testing.T) {
 	}
 }
 
-func TestRetiredSpellingsFailClosedWithPromotedMessages(t *testing.T) {
-	spec := loadCLISpecification(t)
-	retired := driftMappingValue(driftMappingValue(spec, "retired_namespaces"), "topology_v2_2_retired_spellings")
-	if retired == nil {
-		t.Fatal("topology_v2_2_retired_spellings not found")
-	}
-	spellings := driftMappingValue(retired, "spellings")
-	for i := 0; i+1 < len(spellings.Content); i += 2 {
-		name := spellings.Content[i].Value
-		message := spellings.Content[i+1].Value
-		args := []string{name}
-		if name == "run_bare_start" {
-			args = []string{"run", "--event", "x"}
-		}
-		var stdout, stderr bytes.Buffer
-		code := executeRootCommand(context.Background(), t.TempDir(), args, &stdout, &stderr)
-		if code != 2 {
-			t.Errorf("%v: exit = %d, want 2", args, code)
-		}
-		if !strings.Contains(stderr.String(), message) {
-			t.Errorf("%v: stderr %q missing promoted message %q", args, stderr.String(), message)
-		}
+func TestUnsupportedCLISpellingsFailCurrentAdmission(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	var out, errOut bytes.Buffer
+	root := newRootCommand(context.Background(), t.TempDir(), &out, &errOut)
+	for _, args := range [][]string{
+		{"runs"}, {"status"}, {"trace"}, {"fork"}, {"agents"}, {"events"}, {"entities"}, {"conversations"},
+		{"investigate"}, {"investigate", "runs"}, {"investigate", "run"}, {"investigate", "trace"}, {"investigate", "health"}, {"control", "mailbox"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			if command := findCommandByPath(root, args); command != nil {
+				t.Fatalf("unsupported command remains registered: %v", args)
+			}
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommand(context.Background(), t.TempDir(), args, &stdout, &stderr)
+			if code != 2 || !strings.Contains(stderr.String(), "unknown command") || strings.Contains(stderr.String(), "retired") {
+				t.Fatalf("%v: code=%d stderr=%q, want ordinary absent-command rejection", args, code, stderr.String())
+			}
+		})
 	}
 }
 
@@ -277,61 +273,25 @@ func TestCommandPathTablesCarryNoRetiredSpellings(t *testing.T) {
 	}
 }
 
-// Every retirement/pointer message must reference commands that are alive and
-// visible in the current tree — a retirement pointing at another retirement
-// (the #1686 review finding on investigate) is a topology drift class of its
-// own.
-func TestRetirementPointerMessagesReferenceLiveCommands(t *testing.T) {
-	commandRef := regexp.MustCompile("`swarm ([^`]+)`")
-	nameToken := regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
-	var out, errOut bytes.Buffer
-	root := newRootCommand(context.Background(), t.TempDir(), &out, &errOut)
-	retiredInvocations := [][]string{
-		{"runs"}, {"status"}, {"trace"}, {"fork"}, {"agents"}, {"events"}, {"entities"}, {"conversations"},
-		{"run", "--event", "x"},
-		{"fork", "--dry-run"},
-		{"investigate"}, {"investigate", "runs"}, {"investigate", "run"}, {"investigate", "trace"}, {"investigate", "health"},
+// Completion derives from the current command tree, not a removed-name registry.
+func TestUnsupportedCLISpellingsAreAbsentFromCompletion(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommand(context.Background(), t.TempDir(), []string{"__complete", ""}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("completion: %d %s", code, stderr.String())
 	}
-	for _, args := range retiredInvocations {
-		var stdout, stderr bytes.Buffer
-		code := executeRootCommand(context.Background(), t.TempDir(), args, &stdout, &stderr)
-		if code != 2 {
-			t.Errorf("%v: exit = %d, want 2", args, code)
-			continue
-		}
-		refs := commandRef.FindAllStringSubmatch(stderr.String(), -1)
-		if len(refs) == 0 {
-			t.Errorf("%v: retirement message has no `swarm ...` pointer: %q", args, stderr.String())
-			continue
-		}
-		for _, ref := range refs {
-			var path []string
-			for _, tok := range strings.Fields(ref[1]) {
-				if !nameToken.MatchString(tok) {
-					break
-				}
-				path = append(path, tok)
-			}
-			if len(path) == 0 {
-				continue // reference like `swarm run` handled above; bare flags skipped
-			}
-			if path[0] == args[0] {
-				continue // messages name the retired spelling itself before the pointer
-			}
-			target := findCommandByPath(root, path)
-			if target == nil {
-				t.Errorf("%v: pointer references `swarm %s` which does not resolve to a command", args, strings.Join(path, " "))
-			} else if target.Hidden {
-				t.Errorf("%v: pointer references `swarm %s` which is hidden/retired", args, strings.Join(path, " "))
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		name := strings.Split(line, "\t")[0]
+		for _, unsupported := range []string{"runs", "status", "trace", "fork", "agents", "events", "entities", "conversations", "investigate"} {
+			if name == unsupported {
+				t.Fatalf("completion advertises %q", name)
 			}
 		}
 	}
 }
 
-// Retired spellings invoked with pre-dispatch-validated flags (API connection,
-// log level) must still reach their pointer stubs instead of dying on a
-// generic flag-placement error (#1686 review finding).
-func TestRetiredSpellingsWithConnectionFlagsStillPointToReplacement(t *testing.T) {
+// Unsupported commands do not receive special flag-placement exceptions.
+func TestUnsupportedSpellingsWithFlagsFailCurrentAdmission(t *testing.T) {
 	for _, tc := range []struct {
 		args        []string
 		wantPointer string
@@ -348,7 +308,7 @@ func TestRetiredSpellingsWithConnectionFlagsStillPointToReplacement(t *testing.T
 			t.Errorf("%v: exit = %d, want 2 (stderr=%q)", tc.args, code, stderr.String())
 			continue
 		}
-		if !strings.Contains(stderr.String(), tc.wantPointer) {
+		if !strings.Contains(stderr.String(), "unknown flag") || strings.Contains(stderr.String(), tc.wantPointer) {
 			t.Errorf("%v: stderr %q missing pointer %q (generic flag error instead of promoted message?)", tc.args, stderr.String(), tc.wantPointer)
 		}
 	}
@@ -536,17 +496,17 @@ func TestPreDispatchValidatorsNormalizeRootPersistentFlags(t *testing.T) {
 		{"run list log-level", []string{"run", "list"}, []string{"--log-level", "debug"}, true},
 		{"conversation list log-level", []string{"conversation", "list"}, []string{"--log-level", "debug"}, true},
 		{"run status log-level", []string{"run", "status"}, []string{"--log-level", "debug"}, true},
-		// retired spellings + bare run group must fall through to their stubs
-		{"retired runs log-level", []string{"runs"}, []string{"--log-level", "debug"}, true},
-		{"bare run log-level", []string{"run"}, []string{"--log-level", "debug"}, true},
-		{"retired trace log-level", []string{"trace"}, []string{"--log-level", "debug"}, true},
+		// Unsupported spellings still reach ordinary command/flag admission.
+		{"unsupported runs log-level", []string{"runs"}, []string{"--log-level", "debug"}, false},
+		{"bare run log-level", []string{"run"}, []string{"--log-level", "debug"}, false},
+		{"unsupported trace log-level", []string{"trace"}, []string{"--log-level", "debug"}, false},
 		// api-connection flags, same matrix
 		{"run list api-server", []string{"run", "list"}, []string{"--api-server", "http://127.0.0.1:9"}, true},
 		{"channel connect api-server", []string{"channel", "connect", "telegram"}, []string{"--api-server", "http://127.0.0.1:9"}, true},
 		{"channel resume api-server", []string{"channel", "resume", "00000000-0000-4000-8000-000000000000"}, []string{"--api-server", "http://127.0.0.1:9"}, true},
 		{"channel list api-server", []string{"channel", "list"}, []string{"--api-server", "http://127.0.0.1:9"}, true},
-		{"retired fork api-server", []string{"fork"}, []string{"--api-server", "http://127.0.0.1:9"}, true},
-		{"bare run api-server", []string{"run"}, []string{"--api-server", "http://127.0.0.1:9"}, true},
+		{"unsupported fork api-server", []string{"fork"}, []string{"--api-server", "http://127.0.0.1:9"}, false},
+		{"bare run api-server", []string{"run"}, []string{"--api-server", "http://127.0.0.1:9"}, false},
 		// misplacement must still fail closed regardless of root flags
 		{"root-level log-level misplaced", nil, []string{"--log-level", "debug"}, false},
 		{"root-level api-server misplaced", nil, []string{"--api-server", "http://x"}, false},
@@ -564,18 +524,16 @@ func TestPreDispatchValidatorsNormalizeRootPersistentFlags(t *testing.T) {
 	}
 }
 
-// End-to-end proof for the exact reported failures: root persistent flags
-// before migrated and retired commands must reach cobra (live behavior or
-// promoted pointer stubs), never a generic pre-dispatch flag error.
+// Root persistent flags cannot restore an unsupported command or flag.
 func TestRootPersistentFlagsBeforeMigratedAndRetiredCommands(t *testing.T) {
 	for _, tc := range []struct {
 		args       []string
 		wantCode   int
 		wantStderr string
 	}{
-		{[]string{"--swarm-dir", "/tmp/swarm-x", "runs", "--log-level", "debug"}, 2, "Use `swarm run list`"},
-		{[]string{"--swarm-dir", "/tmp/swarm-x", "run", "--log-level", "debug"}, 2, "Use `swarm run start ...`"},
-		{[]string{"--swarm-dir", "/tmp/swarm-x", "fork", "--api-server", "http://127.0.0.1:9"}, 2, "Use `swarm run fork`"},
+		{[]string{"--swarm-dir", "/tmp/swarm-x", "runs", "--log-level", "debug"}, 2, "unknown flag: --log-level"},
+		{[]string{"--swarm-dir", "/tmp/swarm-x", "run", "--log-level", "debug"}, 2, "unknown flag: --log-level"},
+		{[]string{"--swarm-dir", "/tmp/swarm-x", "fork", "--api-server", "http://127.0.0.1:9"}, 2, "unknown flag: --api-server"},
 	} {
 		var stdout, stderr bytes.Buffer
 		code := executeRootCommand(context.Background(), t.TempDir(), tc.args, &stdout, &stderr)
@@ -586,8 +544,8 @@ func TestRootPersistentFlagsBeforeMigratedAndRetiredCommands(t *testing.T) {
 		if !strings.Contains(stderr.String(), tc.wantStderr) {
 			t.Errorf("%v: stderr %q missing %q", tc.args, stderr.String(), tc.wantStderr)
 		}
-		if strings.Contains(stderr.String(), "unknown flag: --log-level") || strings.Contains(stderr.String(), "unknown flag: --api-server") {
-			t.Errorf("%v: generic pre-dispatch flag error leaked: %q", tc.args, stderr.String())
+		if strings.Contains(stderr.String(), "retired") {
+			t.Errorf("%v: obsolete pointer leaked: %q", tc.args, stderr.String())
 		}
 	}
 }

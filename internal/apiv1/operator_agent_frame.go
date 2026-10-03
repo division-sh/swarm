@@ -50,7 +50,7 @@ func OperatorAgentFrameHandlers(opts AgentFrameHandlerOptions) map[string]Method
 				}
 				return inspection, nil
 			default:
-				return nil, NewInvalidParamsError(map[string]any{"field": "scope", "reason": "must be effective; static catalog inspection is retired"})
+				return nil, NewInvalidParamsError(map[string]any{"field": "scope", "reason": "must be effective"})
 			}
 		},
 	}

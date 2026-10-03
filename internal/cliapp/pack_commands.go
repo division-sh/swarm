@@ -185,7 +185,6 @@ func newImportPackCommand(invocationRoot InvocationRoot, root rootCommandOptions
 }
 
 func bindPackSourceFlags(cmd *cobra.Command, opts *packCommandOptions) {
-	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", "", retiredPlatformSpecFlagHelp)
 }
 
 func rootConfigPath(root rootCommandOptions) string {

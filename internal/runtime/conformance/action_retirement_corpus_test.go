@@ -411,7 +411,7 @@ func requireRetiredActionHistoricalFixture(t *testing.T, root string) {
 	if expected.Conformance.Disposition != "retired" || expected.Conformance.Retirement.Reason == "" || expected.Conformance.Retirement.Replacement != "tests/tier11-flow-composition/test-dynamic-flow-instance" {
 		t.Fatalf("historical fixture lost exact explicit retirement: %#v", expected)
 	}
-	if _, err := contracts.LoadWorkflowContractBundleWithOverrides(root, path, contracts.DefaultPlatformSpecFile(root)); err == nil || !strings.Contains(err.Error(), "RETIRED-HANDLER-ACTION") {
+	if _, err := contracts.LoadWorkflowContractBundleWithOverrides(root, path, contracts.DefaultPlatformSpecFile(root)); err == nil || !strings.Contains(err.Error(), "handler field \"action\" is not supported") {
 		t.Fatalf("historical action fixture became executable: %v", err)
 	}
 }

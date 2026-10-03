@@ -8,22 +8,11 @@ import (
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
-var retiredSchemaFields = map[string]string{
-	"mode":             "omit mode; instance: <field> declares a template, otherwise the flow is static",
-	"initial_state":    "declare stages with initial: true",
-	"states":           "declare stages; use stages: [] for stateless flows",
-	"terminal_states":  "declare stages with terminal: true",
-	"tool_surface":     "generated entity tools are mandatory and do not have a schema opt-in",
-	"entity":           "schema.yaml entity is unsupported; the primary entity has a single entity authority in entities.yaml",
-	"namespace_prefix": "the package tree owns the namespace",
-	"namespace_rule":   "the package tree owns the namespace",
-}
-
 func projectFlowSchemaValue(root yamlsource.Value) (FlowSchemaDocument, error) {
 	if err := root.ValidateExpansion(); err != nil {
 		return FlowSchemaDocument{}, err
 	}
-	fields, err := schemaValueFields(root, "schema", flowSchemaDocumentFields, retiredSchemaFields, true)
+	fields, err := schemaValueFields(root, "schema", flowSchemaDocumentFields, true)
 	if err != nil {
 		return FlowSchemaDocument{}, err
 	}
@@ -66,7 +55,7 @@ func projectFlowSchemaValue(root yamlsource.Value) (FlowSchemaDocument, error) {
 			out.RequiredAgents, err = projectSchemaRequiredAgentsValue(value)
 		case "auto_emit_on_create":
 			var members map[string]yamlsource.Value
-			members, err = schemaValueFields(value, "auto_emit_on_create", map[string]struct{}{"event": {}, "description": {}}, nil, true)
+			members, err = schemaValueFields(value, "auto_emit_on_create", map[string]struct{}{"event": {}, "description": {}}, true)
 			if err == nil {
 				err = schemaValueRequiredTexts(value, members, map[string]*string{"event": &out.AutoEmitOnCreate.Event})
 			}
@@ -125,8 +114,8 @@ func deriveSchemaProvenance(out *FlowSchemaDocument) {
 	}
 }
 
-func schemaValueFields(value yamlsource.Value, owner string, allowed map[string]struct{}, retired map[string]string, nonempty bool) (map[string]yamlsource.Value, error) {
-	fields, err := nodeValueFields(value, owner, allowed, retired)
+func schemaValueFields(value yamlsource.Value, owner string, allowed map[string]struct{}, nonempty bool) (map[string]yamlsource.Value, error) {
+	fields, err := nodeValueFields(value, owner, allowed)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +208,7 @@ func projectSchemaRequiredAgentsValue(value yamlsource.Value) ([]FlowRequiredAge
 	}
 	out := make([]FlowRequiredAgent, 0, len(items))
 	for _, item := range items {
-		fields, err := schemaValueFields(item, "required agent", map[string]struct{}{"role": {}, "subscribes_to": {}, "emits": {}, "description": {}}, nil, true)
+		fields, err := schemaValueFields(item, "required agent", map[string]struct{}{"role": {}, "subscribes_to": {}, "emits": {}, "description": {}}, true)
 		if err != nil {
 			return nil, err
 		}
@@ -254,7 +243,7 @@ func projectSchemaRequiredAgentsValue(value yamlsource.Value) ([]FlowRequiredAge
 }
 
 func projectSchemaReceiverVariablesValue(value yamlsource.Value) (FlowInstanceVariables, error) {
-	fields, err := schemaValueFields(value, "instance_variables", map[string]struct{}{"description": {}, "variables": {}}, nil, true)
+	fields, err := schemaValueFields(value, "instance_variables", map[string]struct{}{"description": {}, "variables": {}}, true)
 	if err != nil {
 		return FlowInstanceVariables{}, err
 	}

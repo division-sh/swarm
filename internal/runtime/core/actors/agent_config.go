@@ -152,7 +152,7 @@ func ValidateNoAuthoredSystemPrompt(raw json.RawMessage) error {
 		return fmt.Errorf("agent config must be valid JSON: %w", err)
 	}
 	if path, ok := authoredSystemPromptPath(value, "config"); ok {
-		return fmt.Errorf("RETIRED: authored %s is unsupported; declare intent: in agents.yaml", path)
+		return fmt.Errorf("authored %s is unsupported", path)
 	}
 	return nil
 }

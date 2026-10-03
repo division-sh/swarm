@@ -174,7 +174,7 @@ func projectTypeCatalogDocument(root yamlsource.Value) (TypeCatalogDocument, err
 			}
 			doc.Types = types
 		default:
-			return TypeCatalogDocument{}, NewUndefinedFieldDiagnostic("type catalog", key, typeCatalogFieldOptions)
+			return TypeCatalogDocument{}, NewUndefinedFieldDiagnostic("type catalog", key, typeCatalogFieldOptions, field)
 		}
 	}
 	enumNames := make([]string, 0, len(doc.Enums))
@@ -209,7 +209,7 @@ func (s *ScalarTypeDecl) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	if !isBuiltinWave1Scalar(base) {
-		return fmt.Errorf("RETIRED: scalar alias %q must resolve to a supported built-in scalar", strings.TrimSpace(base))
+		return fmt.Errorf("scalar alias %q must resolve to a supported built-in scalar", strings.TrimSpace(base))
 	}
 	s.Base = base
 	return nil
@@ -228,67 +228,40 @@ func (e *EnumTypeDecl) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-// decodeEnumDeclaration parses the canonical enum mapping form
-// (`{values: [...], default: <member>}`). The retired sequence form and the
-// scalar shorthand are rejected with teaching errors carrying the
-// behavior-preserving codemod: enum defaults are explicit, never implied by
-// member order (#1532).
+// Enum defaults are explicit and cannot be inferred from member order.
 func decodeEnumDeclaration(node *yaml.Node) ([]string, string, error) {
-	if node == nil || node.Kind == 0 {
-		return nil, "", fmt.Errorf("enum declaration requires the mapping form {values: [...], default: <member>}")
-	}
-	if node.Kind == yaml.SequenceNode {
-		values, err := decodeStringListNode(node)
-		if err != nil {
-			return nil, "", err
-		}
-		if len(values) == 0 {
-			return nil, "", fmt.Errorf("enum declaration requires at least one value")
-		}
-		return nil, "", fmt.Errorf("RETIRED: enum declaration uses the sequence form; convert to the mapping form and add default: %s to preserve behavior (e.g. {values: [...], default: %s})", values[0], values[0])
-	}
-	if node.Kind == yaml.ScalarNode {
-		member, _ := decodeScalarStringNode(node)
-		if member == "" {
-			return nil, "", fmt.Errorf("enum declaration requires the mapping form {values: [...], default: <member>}")
-		}
-		return nil, "", fmt.Errorf("RETIRED: enum declaration uses the scalar shorthand; convert to the mapping form and add default: %s to preserve behavior (e.g. {values: [%s], default: %s})", member, member, member)
-	}
-	if node.Kind != yaml.MappingNode {
-		return nil, "", fmt.Errorf("enum declaration must be a mapping {values: [...], default: <member>}")
+	fields, err := nodeValueFields(yamlsource.ValueFromNode(node), "enum declaration", enumDeclarationFields)
+	if err != nil {
+		return nil, "", err
 	}
 	var values []string
-	var defaultValue string
-	seen := map[string]struct{}{}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		value := node.Content[i+1]
-		if _, duplicate := seen[key]; duplicate {
-			return nil, "", fmt.Errorf("enum declaration repeats key %q; each of values and default may appear once", key)
+	if field, present := fields["values"]; present {
+		var node yaml.Node
+		if err = field.Project(&node); err == nil {
+			values, err = decodeStringListNode(&node)
 		}
-		seen[key] = struct{}{}
-		switch key {
-		case "values":
-			decoded, err := decodeStringListNode(value)
-			if err != nil {
-				return nil, "", fmt.Errorf("enum declaration values: %w", err)
-			}
-			values = decoded
-		case "default":
-			if value.Kind != yaml.ScalarNode {
-				return nil, "", fmt.Errorf("enum declaration default must be a scalar member")
-			}
-			decoded, _ := decodeScalarStringNode(value)
-			defaultValue = decoded
-		default:
-			return nil, "", NewUndefinedFieldDiagnostic("enum declaration", key, enumDeclarationFields)
+		if err != nil {
+			return nil, "", err
 		}
 	}
 	if len(values) == 0 {
 		return nil, "", fmt.Errorf("enum declaration requires values with at least one member")
 	}
+	defaultValue := ""
+	if field, present := fields["default"]; present {
+		var node yaml.Node
+		if err = field.Project(&node); err == nil {
+			if node.Kind != yaml.ScalarNode {
+				return nil, "", fmt.Errorf("enum declaration default must be a scalar member at %s", field.Location())
+			}
+			defaultValue, err = decodeScalarStringNode(&node)
+		}
+		if err != nil {
+			return nil, "", err
+		}
+	}
 	if defaultValue == "" {
-		return nil, "", fmt.Errorf("enum declaration requires default; add default: %s to preserve current behavior", values[0])
+		return nil, "", fmt.Errorf("enum declaration requires an explicit default member")
 	}
 	if slices.Contains(values, defaultValue) {
 		return values, defaultValue, nil
@@ -368,7 +341,7 @@ func projectNamedTypeDeclaration(value yamlsource.Value) (NamedTypeDecl, error) 
 					return NamedTypeDecl{}, err
 				}
 			default:
-				return NamedTypeDecl{}, NewUndefinedFieldDiagnostic("type metadata", name, typeMetadataFieldOptions)
+				return NamedTypeDecl{}, NewUndefinedFieldDiagnostic("type metadata", name, typeMetadataFieldOptions, field)
 			}
 			continue
 		}
@@ -486,10 +459,8 @@ func projectEntityContract(value yamlsource.Value) (EntityContract, error) {
 				decl.Description, err = optionalScalarString(field.Value, "entity description")
 			case "_owner":
 				decl.Owner, err = optionalScalarString(field.Value, "entity owner")
-			case "_state_model":
-				return EntityContract{}, fmt.Errorf("RETIRED: entity field %q is retired; state authority is implicit from schema.yaml", name)
 			default:
-				return EntityContract{}, NewUndefinedFieldDiagnostic("entity metadata", name, entityMetadataFieldOptions)
+				return EntityContract{}, NewUndefinedFieldDiagnostic("entity metadata", name, entityMetadataFieldOptions, field)
 			}
 			if err != nil {
 				return EntityContract{}, err
@@ -497,7 +468,7 @@ func projectEntityContract(value yamlsource.Value) (EntityContract, error) {
 			continue
 		}
 		if name == "state_field" {
-			return EntityContract{}, fmt.Errorf("RETIRED: entity field %q is retired; state authority is implicit from schema.yaml", name)
+			return EntityContract{}, fmt.Errorf("entity field name %q at %s is reserved for schema-owned state authority", name, field.IntroductionLocation())
 		}
 		spec, err := projectEntityFieldDecl(field.Value)
 		if err != nil {
@@ -601,10 +572,7 @@ func decodeWave1FieldValue(value yamlsource.Value, opts wave1FieldNodeOptions) (
 			return wave1ParsedFieldNode{}, fmt.Errorf("%s field %q must not have surrounding whitespace", opts.Context, candidate.Name)
 		}
 		if _, ok := allowed[key]; !ok && key != "of" {
-			if key == "properties" || key == "fields" || key == "shape" {
-				return wave1ParsedFieldNode{}, fmt.Errorf("RETIRED: %s inline object declarations are retired; declare a named type in types.yaml", opts.Context)
-			}
-			return wave1ParsedFieldNode{}, NewUndefinedFieldDiagnostic(opts.Context, key, allowed)
+			return wave1ParsedFieldNode{}, NewUndefinedFieldDiagnostic(opts.Context, key, allowed, candidate)
 		}
 		byName[key] = candidate
 	}
@@ -624,15 +592,15 @@ func decodeWave1FieldValue(value yamlsource.Value, opts wave1FieldNodeOptions) (
 	if strings.EqualFold(field.Type, "list") {
 		ofField, exists := byName["of"]
 		if !exists {
-			return wave1ParsedFieldNode{}, fmt.Errorf("RETIRED: %s list declarations require an of: element type", opts.Context)
+			return wave1ParsedFieldNode{}, fmt.Errorf("%s list declarations require an of: element type", opts.Context)
 		}
 		element, err := requiredLiteralString(ofField.Value, opts.Context+" list element type")
 		if err != nil {
 			return wave1ParsedFieldNode{}, err
 		}
 		field.Type = "[" + strings.TrimSpace(element) + "]"
-	} else if _, exists := byName["of"]; exists {
-		return wave1ParsedFieldNode{}, NewUndefinedFieldDiagnostic(opts.Context, "of", allowed)
+	} else if source, exists := byName["of"]; exists {
+		return wave1ParsedFieldNode{}, NewUndefinedFieldDiagnostic(opts.Context, "of", allowed, source)
 	}
 	if err := rejectEventTypeOptionalMarker(field.Type, opts.Context); err != nil {
 		return wave1ParsedFieldNode{}, err
@@ -919,12 +887,12 @@ func validateWave1TypeRef(raw, context string) error {
 	}
 	switch strings.ToLower(raw) {
 	case "jsonb":
-		return fmt.Errorf("RETIRED: %s type %q is retired; declare a named type in types.yaml", context, raw)
+		return fmt.Errorf("%s type %q is unsupported", context, raw)
 	case "object":
-		return fmt.Errorf("RETIRED: %s type %q is retired; declare a named type in types.yaml", context, raw)
+		return fmt.Errorf("%s type %q is unsupported", context, raw)
 	}
 	if strings.HasPrefix(raw, "Optional<") {
-		return fmt.Errorf("RETIRED: %s type %q is not supported by the current type system", context, raw)
+		return fmt.Errorf("%s type %q is not supported by the current type system", context, raw)
 	}
 	if keyType, valueType, ok := parseWave1MapTypeRef(raw); ok {
 		if keyType == "" || valueType == "" {
@@ -934,10 +902,10 @@ func validateWave1TypeRef(raw, context string) error {
 			return fmt.Errorf("%s map key type %q must be scalar or enum", context, keyType)
 		}
 		if strings.EqualFold(keyType, "object") || strings.EqualFold(keyType, "jsonb") {
-			return fmt.Errorf("RETIRED: %s map key type %q is retired", context, keyType)
+			return fmt.Errorf("%s map key type %q is unsupported", context, keyType)
 		}
 		if strings.EqualFold(valueType, "object") || strings.EqualFold(valueType, "jsonb") {
-			return fmt.Errorf("RETIRED: %s map value type %q is retired; declare a named type in types.yaml", context, valueType)
+			return fmt.Errorf("%s map value type %q is unsupported", context, valueType)
 		}
 		return nil
 	}
@@ -947,7 +915,7 @@ func validateWave1TypeRef(raw, context string) error {
 			return fmt.Errorf("%s list type requires an element type", context)
 		}
 		if strings.EqualFold(inner, "object") || strings.EqualFold(inner, "jsonb") {
-			return fmt.Errorf("RETIRED: %s type %q is retired; declare a named type in types.yaml", context, raw)
+			return fmt.Errorf("%s type %q is unsupported", context, raw)
 		}
 		return nil
 	}

@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	operatorread "github.com/division-sh/swarm/internal/operatorread"
 
 	"github.com/division-sh/swarm/internal/apiv1"
@@ -118,7 +120,7 @@ func TestCLI_VerifyHelpAndCompletionOwnedByCobra(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("%s code = %d stderr=%s stdout=%s", strings.Join(args, " "), code, stderr.String(), stdout.String())
 			}
-			for _, want := range []string{"Usage:", "[directory]", "--platform-spec", "--json", "--quiet", "--no-color", "--log-level"} {
+			for _, want := range []string{"Usage:", "[directory]", "--json", "--quiet", "--no-color", "--log-level"} {
 				if !strings.Contains(stdout.String(), want) {
 					t.Fatalf("%s help missing %q:\n%s", strings.Join(args, " "), want, stdout.String())
 				}
@@ -142,7 +144,7 @@ func TestCLI_VerifyHelpAndCompletionOwnedByCobra(t *testing.T) {
 	if verifySectionEnd := strings.Index(verifySection[len("_swarm_verify()"):], "\n_swarm_"); verifySectionEnd >= 0 {
 		verifySection = verifySection[:len("_swarm_verify()")+verifySectionEnd]
 	}
-	for _, want := range []string{"--platform-spec", "--json", "--quiet", "--no-color", "--log-level"} {
+	for _, want := range []string{"--json", "--quiet", "--no-color", "--log-level"} {
 		if !strings.Contains(verifySection, want) {
 			t.Fatalf("_swarm_verify completion missing %q:\n%s", want, verifySection)
 		}
@@ -157,7 +159,7 @@ func TestCLI_VerifyHelpAndCompletionOwnedByCobra(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("__complete verify -- code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"--platform-spec", "--json", "--quiet", "--no-color", "--log-level"} {
+	for _, want := range []string{"--json", "--quiet", "--no-color", "--log-level"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("__complete verify -- missing %q:\n%s", want, stdout.String())
 		}
@@ -246,12 +248,12 @@ func TestCLI_ServeOwnsRuntimeStartupFlags(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("serve help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"Start the Swarm runtime", "[directory]", "--config", "--backend", "openai_responses", "--workspace-backend", "--api-listen-addr", "API, WebSocket, health, and readiness routes", "--mcp-listen-addr", "MCP and tools routes", "--platform-spec", "--store", "--self-check", "--dev", "--abandon-active-runs", "--shutdown-grace", "--verbose"} {
+	for _, want := range []string{"Start the Swarm runtime", "[directory]", "--config", "--backend", "openai_responses", "--workspace-backend", "--api-listen-addr", "API, WebSocket, health, and readiness routes", "--mcp-listen-addr", "MCP and tools routes", "--store", "--self-check", "--dev", "--abandon-active-runs", "--shutdown-grace", "--verbose"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("serve help missing %q:\n%s", want, stdout.String())
 		}
 	}
-	for _, notWant := range []string{"--health-addr", "unified serve listener", "--api-port", "--mcp-port", "--api ", "--no-api", "--mcp ", "--no-mcp", "--log-level", "--require-bundle-match", "--no-require-bundle-match"} {
+	for _, notWant := range []string{"--platform-spec", "--health-addr", "unified serve listener", "--api-port", "--mcp-port", "--api ", "--no-api", "--mcp ", "--no-mcp", "--log-level", "--require-bundle-match", "--no-require-bundle-match"} {
 		if strings.Contains(stdout.String(), notWant) {
 			t.Fatalf("serve help exposed unpromoted listener/topology flag %q:\n%s", notWant, stdout.String())
 		}
@@ -507,7 +509,7 @@ func TestResolveServeAPIAuthSourceAuthority(t *testing.T) {
 		tokenFile := writeCLIAPITokenFile(t, "flag-token")
 		t.Setenv("SWARM_API_TOKEN", "env-token")
 		_, err := ResolveServeAPIAuth(mustInvocationRootForTest(t.TempDir()), ServeOptions{APITokenFile: tokenFile, APITokenFileFlagSet: true})
-		if err == nil || !strings.Contains(err.Error(), "server-side API environment source is no longer accepted") || !strings.Contains(err.Error(), "serve.api_token_file") {
+		if err == nil || !strings.Contains(err.Error(), "unknown SWARM_* env is not accepted") || !strings.Contains(err.Error(), "SWARM_API_TOKEN") {
 			t.Fatalf("err = %v, want removed-env diagnostic", err)
 		}
 	})
@@ -1042,7 +1044,7 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 		"--api-token":          "shell history",
 		"config api_token":     "inline",
 		"SWARM_API_TOKEN":      "#1636",
-		"SWARM_API_TOKEN_FILE": "config `connection.api_token_file`",
+		"SWARM_API_TOKEN_FILE": "current accepted-set owner",
 	} {
 		if !strings.Contains(spec.APIToken.RejectedSources[key], want) {
 			t.Fatalf("api_token rejected source %q missing %q:\n%s", key, want, spec.APIToken.RejectedSources[key])
@@ -1084,8 +1086,8 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 		}
 	}
 	for key, want := range map[string]string{
-		"${XDG_CONFIG_HOME:-$HOME/.config}/swarm/config.yaml": "retired",
-		"executable_adjacent_config.yaml":                     "retired",
+		"${XDG_CONFIG_HOME:-$HOME/.config}/swarm/config.yaml": "Not admitted",
+		"executable_adjacent_config.yaml":                     "Not admitted",
 	} {
 		if !strings.Contains(spec.CLIConfigFile.RejectedSources[key], want) {
 			t.Fatalf("cli config rejected source %q missing %q:\n%s", key, want, spec.CLIConfigFile.RejectedSources[key])
@@ -1325,7 +1327,7 @@ func TestConfiguredWorkspaceLifecycleRejectsExplicitAmbientData(t *testing.T) {
 		DataSource:       t.TempDir(),
 		DataSourceSource: "--data",
 	})
-	if err == nil || !strings.Contains(err.Error(), "ambient workspace data sources are retired") {
+	if err == nil || !strings.Contains(err.Error(), "ambient workspace data sources are unsupported") {
 		t.Fatalf("configuredWorkspaceLifecycle error = %v, want hard retirement", err)
 	}
 }
@@ -1336,19 +1338,16 @@ func TestConfiguredWorkspaceLifecycleRejectsUnreadableAmbientDataWithoutFallback
 		DataSource:       missingDataDir,
 		DataSourceSource: "--data",
 	})
-	if err == nil || !strings.Contains(err.Error(), "ambient workspace data sources are retired") {
+	if err == nil || !strings.Contains(err.Error(), "ambient workspace data sources are unsupported") {
 		t.Fatalf("configuredWorkspaceLifecycle error = %v, want hard retirement before filesystem fallback", err)
 	}
 }
 
 func TestConfiguredWorkspaceLifecycleRejectsExplicitDataSourceWithVolumesFrom(t *testing.T) {
-	cfg := &config.Config{Workspace: config.WorkspaceConfig{VolumesFrom: "swarm-orchestrator"}}
-	_, err := configuredWorkspaceLifecycle(cfg, nil, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{
-		DataSource:       t.TempDir(),
-		DataSourceSource: "workspace.data_source",
-	})
-	if err == nil || !strings.Contains(err.Error(), "workspace.data_source and workspace.volumes_from are retired") {
-		t.Fatalf("configuredWorkspaceLifecycle error = %v, want retired config rejection", err)
+	var cfg config.Config
+	err := yaml.Unmarshal([]byte("workspace: {data_source: /data, volumes_from: swarm-orchestrator}"), &cfg)
+	if err == nil || !strings.Contains(err.Error(), "data_source") || !strings.Contains(err.Error(), "Valid fields:") {
+		t.Fatalf("config admission error = %v, want rejection before workspace creation", err)
 	}
 }
 
@@ -1397,181 +1396,44 @@ func TestConfiguredWorkspaceLifecycleForBackendSelectsHostWithoutDocker(t *testi
 }
 
 func TestConfiguredWorkspaceLifecycleForBackendRejectsHostVolumesFrom(t *testing.T) {
-	cfg := &config.Config{Workspace: config.WorkspaceConfig{VolumesFrom: "swarm-orchestrator"}}
-	_, err := ConfiguredWorkspaceLifecycleForBackend(cfg, nil, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{}, WorkspaceBackendSelection{Backend: workspace.BackendHost, Source: "--workspace-backend"})
-	if err == nil || !strings.Contains(err.Error(), "workspace.data_source and workspace.volumes_from are retired") {
-		t.Fatalf("ConfiguredWorkspaceLifecycleForBackend error = %v, want retired config rejection", err)
+	var cfg config.Config
+	err := yaml.Unmarshal([]byte("workspace: {backend: host, volumes_from: swarm-orchestrator}"), &cfg)
+	if err == nil || !strings.Contains(err.Error(), "volumes_from") || !strings.Contains(err.Error(), "Valid fields:") {
+		t.Fatalf("config admission error = %v, want rejection before host workspace creation", err)
 	}
 }
 
-func TestResolveWorkspaceMountSourcesRejectsRetiredAuthorities(t *testing.T) {
-	RepoRoot := t.TempDir()
-	flagDir := filepath.Join(RepoRoot, "flag-data")
-	configDir := filepath.Join(RepoRoot, "config-data")
-	for _, dir := range []string{flagDir, configDir} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatalf("mkdir %s: %v", dir, err)
+func TestWorkspaceSourceAdmissionRejectsUnsupportedAuthoritiesBeforeEffects(t *testing.T) {
+	for _, key := range []string{"data_source", "volumes_from"} {
+		for _, value := range []string{"null", "''", "'   '", "{}", "[]", "false", "some-data"} {
+			for _, body := range []string{
+				"workspace: {" + key + ": " + value + "}\n",
+				"workspace: {<<: &source {" + key + ": " + value + "}}\n",
+			} {
+				t.Run(body, func(t *testing.T) {
+					root := t.TempDir()
+					configPath := filepath.Join(root, "swarm.yaml")
+					writeRuntimeConfigText(t, configPath, body)
+					if _, err := config.Load(configPath); err == nil || !strings.Contains(err.Error(), key) || !strings.Contains(err.Error(), "Valid fields:") {
+						t.Fatalf("source admission = %v, want current workspace vocabulary", err)
+					}
+					if _, err := os.Stat(filepath.Join(root, ".swarm", "data")); !os.IsNotExist(err) {
+						t.Fatalf("invalid source created default data: %v", err)
+					}
+				})
+			}
 		}
 	}
-
-	_, err := resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
-		RepoRoot:         RepoRoot,
-		FlagDataSource:   "flag-data",
-		ConfigDataSource: "config-data",
-	})
-	if err == nil || !strings.Contains(err.Error(), "ambient workspace data sources are retired") {
-		t.Fatalf("flag/config resolution error = %v, want hard retirement", err)
-	}
-
-	_, err = resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
-		RepoRoot:            RepoRoot,
-		ConfigDataSource:    "config-data",
-		ConfigDataSourceSet: true,
-	})
-	if err == nil || !strings.Contains(err.Error(), "ambient workspace data sources are retired") {
-		t.Fatalf("config resolution error = %v, want hard retirement", err)
-	}
-
-	result, err := resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
-		RepoRoot:                RepoRoot,
-		DefaultDataSource:       filepath.Join(RepoRoot, defaultWorkspaceDataSourceRelativePath),
-		DefaultDataSourceSource: defaultWorkspaceDataSourceSource,
-		CreateDefaultDataSource: true,
-	})
-	if err != nil {
-		t.Fatalf("resolve default workspace mount source: %v", err)
-	}
-	if result.DataSource != "" || result.DataSourceSource != "" {
-		t.Fatalf("default result = %#v, want no ambient data source", result)
-	}
-	if _, err := os.Stat(filepath.Join(RepoRoot, defaultWorkspaceDataSourceRelativePath)); !os.IsNotExist(err) {
-		t.Fatalf("retired default data directory exists: %v", err)
-	}
 }
 
-func TestResolveWorkspaceMountSourcesRejectsEmptyConfigBeforeAlternateOrDefault(t *testing.T) {
-	RepoRoot := t.TempDir()
-	result, err := resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
-		RepoRoot:                RepoRoot,
-		ConfigDataSource:        " \t ",
-		ConfigDataSourceSet:     true,
-		VolumesFrom:             "swarm-orchestrator",
-		VolumesFromSet:          true,
-		DefaultDataSource:       filepath.Join(RepoRoot, defaultWorkspaceDataSourceRelativePath),
-		DefaultDataSourceSource: defaultWorkspaceDataSourceSource,
-		CreateDefaultDataSource: true,
-	})
-	if err == nil || !strings.Contains(err.Error(), "ambient workspace data sources are retired") {
-		t.Fatalf("resolve workspace mount sources error = %v, want hard retirement", err)
+func TestWorkspaceMountAdmissionRejectsProgrammaticAmbientSource(t *testing.T) {
+	root := t.TempDir()
+	mount, err := resolveWorkspaceMountSourcesForLocalState(root, "some-data", nil, localRuntimeStateProject{}, true)
+	if err == nil || !strings.Contains(err.Error(), "unsupported") || mount != (WorkspaceMountSources{}) {
+		t.Fatalf("ambient source admitted or fell back: %#v, %v", mount, err)
 	}
-	if result.DataSource != "" || result.DataSourceSource != "" {
-		t.Fatalf("workspace mount sources = %#v, want no fallback", result)
-	}
-	if _, err := os.Stat(filepath.Join(RepoRoot, defaultWorkspaceDataSourceRelativePath)); !os.IsNotExist(err) {
-		t.Fatalf("default data source stat error = %v, want not created", err)
-	}
-}
-
-func TestResolveWorkspaceMountSourcesNeverInventsAmbientDefault(t *testing.T) {
-	RepoRoot := t.TempDir()
-	repoDataDir := filepath.Join(RepoRoot, "data")
-	if err := os.MkdirAll(repoDataDir, 0o755); err != nil {
-		t.Fatalf("mkdir repo data: %v", err)
-	}
-	result, err := resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
-		RepoRoot:                RepoRoot,
-		DefaultDataSource:       filepath.Join(RepoRoot, defaultWorkspaceDataSourceRelativePath),
-		DefaultDataSourceSource: defaultWorkspaceDataSourceSource,
-		CreateDefaultDataSource: true,
-	})
-	if err != nil {
-		t.Fatalf("resolve workspace mount sources: %v", err)
-	}
-	if result.DataSource != "" || result.DataSourceSource != "" {
-		t.Fatalf("workspace mount sources = %#v, want no ambient default", result)
-	}
-	if _, err := os.Stat(filepath.Join(RepoRoot, defaultWorkspaceDataSourceRelativePath)); !os.IsNotExist(err) {
-		t.Fatalf("retired default data directory exists: %v", err)
-	}
-	_ = repoDataDir
-}
-
-func TestResolveWorkspaceMountSourcesAllowsNoAmbientSource(t *testing.T) {
-	oldWD, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("get cwd: %v", err)
-	}
-	tmp := t.TempDir()
-	if err := os.Chdir(tmp); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := os.Chdir(oldWD); err != nil {
-			t.Fatalf("restore cwd: %v", err)
-		}
-	})
-
-	result, err := resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{})
-	if err != nil {
-		t.Fatalf("resolve workspace mount sources: %v", err)
-	}
-	if result.DataSource != "" || result.DataSourceSource != "" {
-		t.Fatalf("workspace mount sources = %#v, want no default source", result)
-	}
-	if _, err := os.Stat(filepath.Join(tmp, defaultWorkspaceDataSourceRelativePath)); !os.IsNotExist(err) {
-		t.Fatalf("default data source stat error = %v, want not created", err)
-	}
-}
-
-func TestResolveWorkspaceMountSourcesRejectsVolumesFromWithoutFallback(t *testing.T) {
-	RepoRoot := t.TempDir()
-	result, err := resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
-		RepoRoot:       RepoRoot,
-		VolumesFrom:    "swarm-orchestrator",
-		VolumesFromSet: true,
-	})
-	if err == nil || !strings.Contains(err.Error(), "ambient workspace data sources are retired") {
-		t.Fatalf("resolve workspace mount sources error = %v, want hard retirement", err)
-	}
-	if result.DataSource != "" || result.DataSourceSource != "" {
-		t.Fatalf("workspace mount sources = %#v, want volumes-from alternate without path source", result)
-	}
-	if _, err := os.Stat(filepath.Join(RepoRoot, defaultWorkspaceDataSourceRelativePath)); !os.IsNotExist(err) {
-		t.Fatalf("default data source stat error = %v, want not created", err)
-	}
-}
-
-func TestResolveWorkspaceMountSourcesReadsRuntimeConfigAndRejectsEmptyConfig(t *testing.T) {
-	RepoRoot := t.TempDir()
-	configDir := t.TempDir()
-
-	result, err := resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
-		RepoRoot:            RepoRoot,
-		ConfigDataSource:    configDir,
-		ConfigDataSourceSet: true,
-	})
-	if err == nil || !strings.Contains(err.Error(), "ambient workspace data sources are retired") {
-		t.Fatalf("config-backed workspace mount error = %v, want hard retirement", err)
-	}
-	if result.DataSource != "" || result.DataSourceSource != "" {
-		t.Fatalf("config-backed workspace mount sources = %#v, want no fallback", result)
-	}
-
-	configPath := filepath.Join(t.TempDir(), "swarm.yaml")
-	writeRuntimeConfigText(t, configPath, strings.Join([]string{
-		"runtime:",
-		"  recovery_on_startup: false",
-		"workspace:",
-		"  data_source: \"   \"",
-		"llm:",
-		"  backend: anthropic",
-		"  session:",
-		"    lock_ttl: 10s",
-		"    rotate_after_turns: 40",
-		"    rotate_on_parse_failures: 3",
-	}, "\n")+"\n")
-	if _, err := config.Load(configPath); err == nil || !strings.Contains(err.Error(), "workspace.data_source is retired") {
-		t.Fatalf("load config error = %v, want parser-level hard retirement", err)
+	if _, err := os.Stat(filepath.Join(root, ".swarm", "data")); !os.IsNotExist(err) {
+		t.Fatalf("invalid source created default data: %v", err)
 	}
 }
 
@@ -2878,7 +2740,7 @@ func TestSetPostgresEnvFromDSNConsumesCanonicalTypedConnection(t *testing.T) {
 
 func TestDefaultRuntimeConfig_RejectsUnsupportedRuntimeControlEnv(t *testing.T) {
 	t.Setenv("SWARM_RUNTIME_MAX_CONCURRENT_AGENTS", "4")
-	cfg, err := defaultRuntimeConfig()
+	cfg, err := DefaultRuntimeConfig()
 	if err == nil || !strings.Contains(err.Error(), "SWARM_RUNTIME_MAX_CONCURRENT_AGENTS") {
 		t.Fatalf("defaultRuntimeConfig error = %v, want unsupported env rejection", err)
 	}
@@ -2889,9 +2751,9 @@ func TestDefaultRuntimeConfig_RejectsUnsupportedRuntimeControlEnv(t *testing.T) 
 
 func TestDefaultRuntimeConfig_RejectsRetiredLLMRuntimeModeEnv(t *testing.T) {
 	t.Setenv("SWARM_LLM_RUNTIME_MODE", "api")
-	cfg, err := defaultRuntimeConfig()
-	if err == nil || !strings.Contains(err.Error(), "--backend") || !strings.Contains(err.Error(), "llm.backend") {
-		t.Fatalf("defaultRuntimeConfig error = %v, want retired runtime mode env guidance", err)
+	cfg, err := DefaultRuntimeConfig()
+	if err == nil || !strings.Contains(err.Error(), "SWARM_LLM_RUNTIME_MODE") || !strings.Contains(err.Error(), "unknown SWARM_* env is not accepted") {
+		t.Fatalf("DefaultRuntimeConfig error = %v, want unknown env rejection", err)
 	}
 	if cfg != nil {
 		t.Fatalf("defaultRuntimeConfig cfg = %#v, want nil on retired env", cfg)
@@ -2900,8 +2762,8 @@ func TestDefaultRuntimeConfig_RejectsRetiredLLMRuntimeModeEnv(t *testing.T) {
 
 func TestDefaultRuntimeConfig_RejectsRetiredLLMBackendEnv(t *testing.T) {
 	t.Setenv("SWARM_LLM_BACKEND", "cli_test")
-	cfg, err := defaultRuntimeConfig()
-	if err == nil || !strings.Contains(err.Error(), "SWARM_LLM_BACKEND") || !strings.Contains(err.Error(), "--backend") {
+	cfg, err := DefaultRuntimeConfig()
+	if err == nil || !strings.Contains(err.Error(), "SWARM_LLM_BACKEND") || !strings.Contains(err.Error(), "unknown SWARM_* env is not accepted") {
 		t.Fatalf("defaultRuntimeConfig error = %v, want retired backend env rejection", err)
 	}
 	if cfg != nil {
@@ -2963,8 +2825,8 @@ func TestDefaultRuntimeConfig_IgnoresRetiredRuntimeLLMConfigEnv(t *testing.T) {
 
 func TestDefaultRuntimeConfig_RejectsRetiredOpenAICompatibleBaseURLEnv(t *testing.T) {
 	t.Setenv("SWARM_OPENAI_COMPATIBLE_BASE_URL", "https://example.test/v1")
-	cfg, err := defaultRuntimeConfig()
-	if err == nil || !strings.Contains(err.Error(), "SWARM_OPENAI_COMPATIBLE_BASE_URL") || !strings.Contains(err.Error(), "llm.openai_compatible.base_url") {
+	cfg, err := DefaultRuntimeConfig()
+	if err == nil || !strings.Contains(err.Error(), "SWARM_OPENAI_COMPATIBLE_BASE_URL") || !strings.Contains(err.Error(), "unknown SWARM_* env is not accepted") {
 		t.Fatalf("defaultRuntimeConfig error = %v, want base URL env retirement", err)
 	}
 	if cfg != nil {
@@ -2973,19 +2835,6 @@ func TestDefaultRuntimeConfig_RejectsRetiredOpenAICompatibleBaseURLEnv(t *testin
 }
 
 func TestLoadRuntimeConfigWithOptions_PreservesRuntimeLLMTypedConfigValues(t *testing.T) {
-	for key, value := range map[string]string{
-		"SWARM_RUNTIME_RECOVERY_ON_STARTUP":          "false",
-		"SWARM_LLM_SESSION_LOCK_TTL":                 "1s",
-		"SWARM_LLM_SESSION_ROTATE_AFTER_TURNS":       "2",
-		"SWARM_LLM_SESSION_ROTATE_ON_PARSE_FAILURES": "2",
-		"SWARM_CLAUDE_CLI_COMMAND":                   "false",
-		"SWARM_CLAUDE_CLI_TIMEOUT":                   "1s",
-		"SWARM_CLAUDE_CLI_OUTPUT_FORMAT":             "stream-json",
-		"SWARM_CLAUDE_TIMEOUT_SECONDS":               "1",
-	} {
-		t.Setenv(key, value)
-	}
-
 	repo := t.TempDir()
 	configPath := filepath.Join(repo, "runtime.yaml")
 	writeRuntimeConfigText(t, configPath, strings.Join([]string{
@@ -3016,6 +2865,14 @@ func TestLoadRuntimeConfigWithOptions_PreservesRuntimeLLMTypedConfigValues(t *te
 	}
 	if cfg.LLM.ClaudeCLI.Command != "echo" || cfg.LLM.ClaudeCLI.Timeout != 44*time.Second || cfg.LLM.ClaudeCLI.OutputFormat != "json" {
 		t.Fatalf("claude_cli config = %#v, want typed config values", cfg.LLM.ClaudeCLI)
+	}
+	for _, key := range []string{"SWARM_RUNTIME_RECOVERY_ON_STARTUP", "SWARM_LLM_SESSION_LOCK_TTL", "SWARM_LLM_SESSION_ROTATE_AFTER_TURNS", "SWARM_LLM_SESSION_ROTATE_ON_PARSE_FAILURES", "SWARM_CLAUDE_CLI_COMMAND", "SWARM_CLAUDE_CLI_TIMEOUT", "SWARM_CLAUDE_CLI_OUTPUT_FORMAT", "SWARM_CLAUDE_TIMEOUT_SECONDS"} {
+		t.Run(key, func(t *testing.T) {
+			t.Setenv(key, "unsupported-source")
+			if _, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: configPath}); err == nil || !strings.Contains(err.Error(), "env/unknown_stale @ "+key) {
+				t.Fatalf("unsupported source must reject even with typed config: %v", err)
+			}
+		})
 	}
 }
 
@@ -3157,7 +3014,7 @@ func TestLoadRuntimeConfigWithOptions_RejectsRetiredModelEnvForConfiguredPaths(t
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := LoadRuntimeConfigWithOptions(tt.setup(t))
-			if err == nil || !strings.Contains(err.Error(), "SWARM_CLAUDE_DEFAULT_MODEL") || !strings.Contains(err.Error(), "llm.models") {
+			if err == nil || !strings.Contains(err.Error(), "SWARM_CLAUDE_DEFAULT_MODEL") || !strings.Contains(err.Error(), "unknown_stale") {
 				t.Fatalf("LoadRuntimeConfigWithOptions error = %v, want retired model env guidance", err)
 			}
 		})

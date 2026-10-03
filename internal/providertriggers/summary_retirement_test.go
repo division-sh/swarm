@@ -21,7 +21,7 @@ func TestProviderManifestRetiresSummarySelectorBeforeValueInterpretation(t *test
 			raw := []byte("provider: telegram\nnormalized_events:\n  - " + declaration + "\n")
 			for _, decode := range []func([]byte) (Manifest, error){ParseManifest, parseManifestStrict} {
 				_, err := decode(raw)
-				if err == nil || !strings.Contains(err.Error(), "RETIRED: author_summary_field") {
+				if err == nil || !strings.Contains(err.Error(), "author_summary_field") || (!strings.Contains(err.Error(), "is not supported") && !strings.Contains(err.Error(), "duplicate effective YAML key")) {
 					t.Fatalf("selector presence admitted: %v", err)
 				}
 			}

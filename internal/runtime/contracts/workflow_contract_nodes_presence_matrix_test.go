@@ -414,7 +414,7 @@ func TestW4RetiredNodeFieldPresence(t *testing.T) {
 				t.Run(shape.name, func(t *testing.T) {
 					body := tc.base + fmt.Sprintf("%s: %s\n", tc.field, shape.value)
 					err := tc.decode([]byte(body))
-					if err == nil || !strings.Contains(err.Error(), "RETIRED") {
+					if err == nil || !strings.Contains(err.Error(), "is not supported") {
 						t.Fatalf("retired field admitted: %v", err)
 					}
 				})
