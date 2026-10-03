@@ -29,12 +29,15 @@ func run(args []string) int {
 	if len(args) > 0 && args[0] == "--internal-create" {
 		return runCreator(args[1:])
 	}
-	if len(args) == 0 || len(args) == 1 && args[0] == "--full" {
-		profile := testplanning.ProfileLocal
-		if len(args) == 1 {
-			profile = testplanning.ProfileFull
+	if selected, profile, explicit, err := completionSelection(args); selected {
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 2
 		}
-		return runCompletion(profile)
+		if !explicit {
+			fmt.Fprintln(os.Stderr, "swarm-test: no explicit tier; core developer feedback, not reviewer-bound qualification")
+		}
+		return runCompletion(profile, explicit)
 	}
 	if len(args) > 0 && args[0] == "--planned" {
 		return runPlanned(args[1:])
@@ -45,6 +48,25 @@ func run(args []string) int {
 		return 2
 	}
 	return runTestArgs(testArgs, os.Stdout, false, "", "", 0)
+}
+
+func completionSelection(args []string) (selected bool, profile string, explicit bool, err error) {
+	if len(args) == 0 {
+		return true, testplanning.ProfileCore, false, nil
+	}
+	switch args[0] {
+	case "--full":
+		if len(args) == 1 {
+			return true, testplanning.ProfileFull, true, nil
+		}
+	case "--tier":
+		if len(args) == 2 && testplanning.TierRank(args[1]) != 0 {
+			return true, args[1], true, nil
+		}
+	default:
+		return false, "", false, nil
+	}
+	return true, "", true, fmt.Errorf("usage: swarm-test [--tier core|lifecycle|full | --full]")
 }
 
 func runTestArgs(testArgs []string, output io.Writer, completion bool, workloadProfile, executionTier string, fallback time.Duration) int {

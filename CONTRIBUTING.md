@@ -30,6 +30,7 @@ go run ./cmd/swarm-unused
 go run ./cmd/swarm-test-changed
 go run ./cmd/swarm-test-changed -dry-run
 go run ./cmd/swarm-test
+go run ./cmd/swarm-test --tier lifecycle
 go run ./cmd/swarm-test --full
 go run ./cmd/swarm-openrpc-gen --check
 ```
@@ -37,7 +38,7 @@ go run ./cmd/swarm-openrpc-gen --check
 `go run ./cmd/swarm-unused` defaults to native-only analysis on the current
 host, not the complete CI platform union. The guard internally pins its analysis
 toolchain to Go 1.26.8 and Staticcheck v0.8.1; product Go setup and `go.mod` are
-unchanged. Required CI collects native Linux and Darwin results with tests
+unchanged. Full-tier CI collects native Linux and Darwin results with tests
 enabled for default, race, and `issue2413` configurations, then uses upstream
 binary merge semantics: a declaration reachable in any admitted variant is
 live. Collection does not fail on U1000; the source-bound merged check does.
@@ -46,16 +47,38 @@ The noncompiling [#2438](https://github.com/division-sh/swarm/issues/2438)
 configuration remains explicitly parked under E's
 [#2496](https://github.com/division-sh/swarm/issues/2496) until compile repair.
 
-Routine PRs can cite scoped local proof from `swarm-test-changed` plus any
-named package families required by the touched surface; CI remains responsible
-for the full-truth push/manual/scheduled runs. Do not habitually force
+The reviewer records exactly one `CI-Tier: core|lifecycle|full` and one
+`Local-Tier: core|lifecycle|full` line in the PR body. The two decisions are
+independent. Missing, invalid or duplicate CI instructions select full.
+Body edits do not trigger heavy CI. The existing late five-minute summary checks
+the current body/head before success; it cannot revoke a completed green.
+An increase above successful current-head scope requires a new signed head and
+qualifying higher-tier protected checks. Keep the PR draft/non-mergeable until
+that qualification succeeds. At merge, the lead compares the current CI-Tier to
+the latest successful current-head trusted-App plan/summary, including edits
+after approval; old-head green and insufficient scope do not qualify. A completed
+higher tier may satisfy a lower requirement. This is not a branch-freshness rule.
+Local
+qualification uses explicit `--tier TIER` or `--full` and retains the effective
+plan and receipts under `test-results/local`. The reviewer compares that command
+and receipt with Local-Tier; an absent or invalid local instruction cannot earn
+thin qualification credit. No GitHub lookup or authorization sidecar is used.
+
+`swarm-test-changed` and no-context `swarm-test` are developer feedback, not
+substitutes for the reviewer-required tier. Do not habitually force
 `-count=1` for every local iteration because it defeats Go's local test cache.
 The no-argument runner is the bounded local tier, not an exhaustive `./...` run.
 Completion requires a terminal PASS for each selected executable root and its
 declared backend children. Finite profile replacements, opt-in live proofs, and
 subprocess helpers are explicit non-credit deferrals in
 `internal/testplanning/deferrals.go`; an undeclared SKIP fails completion.
-High-risk semantic/runtime migrations still require full non-soak local
+Core owns ordinary roots and fixed safety/smoke canaries. Lifecycle additionally
+owns retained both-store restart and recovery families. Full owns every admitted
+root, both unchanged 900s backend soaks, and hosted native Linux/Darwin unused
+union. The root census explicitly records every lower-tier deferral; omitted
+proofs earn no execution credit. Schedule and unverified master use full;
+manual exhaustive runs default to full. Local full cannot claim Darwin credit.
+High-risk semantic/runtime migrations require full local
 `go run ./cmd/swarm-test --full` when the issue
 gate or reviewer asks for it.
 

@@ -19,6 +19,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/testplanning"
 )
 
 func buildReleaseBinary(t *testing.T, outputRoot string) string {
@@ -33,11 +35,9 @@ func buildOwnedMockLifecycleBinary(t *testing.T, outputRoot string, buildArgs ..
 	t.Helper()
 	path := filepath.Join(outputRoot, "internal-mock-lifecycle.test")
 	args := append([]string{"test", "-c"}, buildArgs...)
-	args = append(args, "-o", path, "./internal/serveapp")
-	cmd := exec.Command("go", args...)
-	cmd.Dir = releaseE2ERepoRoot(t)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("build internal retained lifecycle binary: %v\n%s", err, output)
+	args = append(args, "./internal/serveapp")
+	if err := testplanning.BuildGoProduct(context.Background(), releaseE2ERepoRoot(t), os.Getenv("SWARM_TEST_BUILD_CACHE"), path, os.Getenv("SWARM_TEST_PROOF_PROFILE"), args...); err != nil {
+		t.Fatalf("build internal retained lifecycle binary: %v", err)
 	}
 	return path
 }
@@ -46,11 +46,9 @@ func buildReleaseBinaryWithArgs(t *testing.T, outputRoot string, buildArgs ...st
 	t.Helper()
 	binaryPath := filepath.Join(outputRoot, "swarm")
 	args := append([]string{"build"}, buildArgs...)
-	args = append(args, "-o", binaryPath, "./cmd/swarm")
-	cmd := exec.Command("go", args...)
-	cmd.Dir = releaseE2ERepoRoot(t)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("build release binary: %v\n%s", err, output)
+	args = append(args, "./cmd/swarm")
+	if err := testplanning.BuildGoProduct(context.Background(), releaseE2ERepoRoot(t), os.Getenv("SWARM_TEST_BUILD_CACHE"), binaryPath, os.Getenv("SWARM_TEST_PROOF_PROFILE"), args...); err != nil {
+		t.Fatalf("build release binary: %v", err)
 	}
 	return binaryPath
 }

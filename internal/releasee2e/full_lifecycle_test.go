@@ -119,7 +119,7 @@ func TestCompiledProcessLifecycleStartupEvidence(t *testing.T) {
 }
 
 func TestCompiledProcessFullLifecycleSQLiteSmoke(t *testing.T) {
-	if profile, continuous := goldenContinuousProofProfile(t); continuous {
+	if profile, continuous := goldenLifecycleProofProfile(t); continuous {
 		t.Skipf("complete J1-J5 lifecycle profile supersedes SQLite smoke in %s", profile)
 	}
 	releaseRoot := goldenReleaseRoot(t)
@@ -132,9 +132,9 @@ func TestCompiledProcessFullLifecycleSQLiteSmoke(t *testing.T) {
 }
 
 func TestCompiledProcessFullLifecycleJourneysSQLitePostgres(t *testing.T) {
-	profile, continuous := goldenContinuousProofProfile(t)
+	profile, continuous := goldenLifecycleProofProfile(t)
 	if !continuous {
-		t.Skipf("complete J1-J5 lifecycle profile requires full/nightly, got %q", profile)
+		t.Skipf("complete J1-J5 lifecycle profile requires lifecycle/full, got %q", profile)
 	}
 	dsn := strings.TrimSpace(os.Getenv(goldenPostgresEnv))
 	if dsn == "" {

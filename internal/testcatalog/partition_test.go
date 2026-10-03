@@ -51,16 +51,16 @@ func TestCatalogExternalProofPartitionsThroughInventory(t *testing.T) {
 			p.Units["second"] = u
 		}, "requires count-1"},
 		{"profile missing unit", func(_ *testing.T, _ string, p *testplanning.Policy) {
-			profile := p.Profiles[testplanning.ProfileNightly]
+			profile := p.Profiles[testplanning.ProfileFull]
 			profile.Units = []string{"external-proof"}
-			p.Profiles[testplanning.ProfileNightly] = profile
+			p.Profiles[testplanning.ProfileFull] = profile
 		}, "TestSecond matches 0"},
 		{"profile equivalent but different units", func(_ *testing.T, _ string, p *testplanning.Policy) {
 			p.Units["other"] = p.Units["second"]
-			profile := p.Profiles[testplanning.ProfileNightly]
+			profile := p.Profiles[testplanning.ProfileFull]
 			profile.Units = []string{"external-proof", "other"}
-			p.Profiles[testplanning.ProfileNightly] = profile
-		}, "changes CI owners"},
+			p.Profiles[testplanning.ProfileFull] = profile
+		}, ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			root := writeExternalProofInventory(t, externalProofSpec("examples/external", "github.com/division-sh/swarm/internal/executor", []string{"claim.external"}), "")

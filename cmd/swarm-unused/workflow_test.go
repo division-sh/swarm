@@ -22,11 +22,11 @@ func TestWorkflowNativeUnionIsRequired(t *testing.T) {
 			RunsOn          string   `yaml:"runs-on"`
 			Needs           []string `yaml:"needs"`
 			ContinueOnError any      `yaml:"continue-on-error"`
-			TimeoutMinutes  int      `yaml:"timeout-minutes"`
+			TimeoutMinutes  any      `yaml:"timeout-minutes"`
 			Steps           []struct {
-				Run, Uses, If   string
-				ContinueOnError any            `yaml:"continue-on-error"`
-				With            map[string]any `yaml:"with"`
+				Name, Run, Uses, If string
+				ContinueOnError     any            `yaml:"continue-on-error"`
+				With                map[string]any `yaml:"with"`
 			} `yaml:"steps"`
 		} `yaml:"jobs"`
 	}
@@ -40,8 +40,8 @@ func TestWorkflowNativeUnionIsRequired(t *testing.T) {
 		{"unused-linux", "linux", "ubuntu-latest", 15}, {"unused-darwin", "darwin", "macos-latest", 19},
 	} {
 		job, ok := workflow.Jobs[owner.job]
-		if !ok || job.If != "github.event_name != 'pull_request' || !github.event.pull_request.draft" || len(job.Needs) != 0 || job.ContinueOnError != nil || job.RunsOn != owner.runner || job.TimeoutMinutes != owner.timeoutMinutes {
-			t.Fatalf("native %s analysis must qualify every non-draft event on its native platform", owner.platform)
+		if !ok || job.If != "needs.ci-plan.outputs.profile == 'full' && needs.ci-plan.outputs.master_replay != 'true'" || !slices.Equal(job.Needs, []string{"ci-plan"}) || job.ContinueOnError != nil || job.RunsOn != owner.runner || job.TimeoutMinutes != owner.timeoutMinutes {
+			t.Fatalf("native %s analysis must qualify every selected full plan on its native platform", owner.platform)
 		}
 		checkout, collect, upload := false, false, false
 		for _, step := range job.Steps {
@@ -71,8 +71,8 @@ func TestWorkflowNativeUnionIsRequired(t *testing.T) {
 		}
 	}
 	union, ok := workflow.Jobs["unused-checks"]
-	if !ok || union.If != "github.event_name != 'pull_request' || !github.event.pull_request.draft" || union.ContinueOnError != nil || union.TimeoutMinutes != 15 || !slices.Contains(union.Needs, "unused-linux") || !slices.Contains(union.Needs, "unused-darwin") {
-		t.Fatal("union must require both native collectors without a profile condition")
+	if !ok || union.If != "needs.ci-plan.outputs.profile == 'full' && needs.ci-plan.outputs.master_replay != 'true'" || union.ContinueOnError != nil || union.TimeoutMinutes != 15 || !slices.Equal(union.Needs, []string{"ci-plan", "unused-linux", "unused-darwin"}) {
+		t.Fatal("selected full union must require both native collectors")
 	}
 	checkout, merge := false, false
 	downloads := map[string]bool{}
@@ -93,28 +93,48 @@ func TestWorkflowNativeUnionIsRequired(t *testing.T) {
 		t.Fatal("union must merge exact-head native artifacts from this run")
 	}
 	aggregate := workflow.Jobs["required-tests"]
-	if aggregate.If != "always()" || len(aggregate.Steps) != 1 {
+	if aggregate.If != "always()" {
 		t.Fatal("required aggregate must execute even when a required job fails/skips")
 	}
-	for _, owner := range []string{"static-checks", "macos-sqlite-possession", "unused-linux", "unused-darwin", "unused-checks"} {
-		if !slices.Contains(aggregate.Needs, owner) {
-			t.Fatalf("missing aggregate owner %s", owner)
+	var summary string
+	for _, step := range aggregate.Steps {
+		if step.Name == "Summarize required checks" {
+			summary = step.Run
 		}
-		for _, status := range []string{"success", "failure", "skipped", "cancelled", "", "unknown"} {
-			script := aggregate.Steps[0].Run
-			for _, need := range aggregate.Needs {
-				value := "success"
-				if need == owner {
-					value = status
-				}
-				script = strings.ReplaceAll(script, "${{ needs."+need+".result }}", value)
+	}
+	if summary == "" {
+		t.Fatal("missing executable aggregate")
+	}
+	for _, tier := range []string{"core", "lifecycle", "full"} {
+		for _, owner := range []string{"static-checks", "macos-sqlite-possession", "unused-linux", "unused-darwin", "unused-checks"} {
+			if !slices.Contains(aggregate.Needs, owner) {
+				t.Fatalf("missing aggregate owner %s", owner)
 			}
-			script = strings.ReplaceAll(script, "${{ needs.ci-plan.outputs.soak_matrix }}", `{"include":[]}`)
-			c := exec.Command("bash", "-c", script)
-			c.Env = append(os.Environ(), "IS_DRAFT=false", "GITHUB_STEP_SUMMARY="+filepath.Join(t.TempDir(), "summary"))
-			b, err := c.CombinedOutput()
-			if (err == nil) != (status == "success") {
-				t.Fatalf("required %s status %q: %v %s", owner, status, err, b)
+			for _, status := range []string{"success", "failure", "skipped", "cancelled", "", "unknown"} {
+				script := summary
+				for _, need := range aggregate.Needs {
+					value := "success"
+					if tier != "full" && strings.HasPrefix(need, "unused-") {
+						value = "skipped"
+					}
+					if need == owner {
+						value = status
+					}
+					script = strings.ReplaceAll(script, "${{ needs."+need+".result }}", value)
+				}
+				script = strings.ReplaceAll(script, "${{ needs.ci-plan.outputs.profile }}", tier)
+				script = strings.ReplaceAll(script, "${{ needs.ci-plan.outputs.master_replay }}", "false")
+				script = strings.ReplaceAll(script, "${{ needs.ci-plan.outputs.soak_matrix }}", `{"include":[]}`)
+				c := exec.Command("bash", "-c", script)
+				c.Env = append(os.Environ(), "IS_DRAFT=false", "GITHUB_STEP_SUMMARY="+filepath.Join(t.TempDir(), "summary"))
+				b, err := c.CombinedOutput()
+				expected := "success"
+				if tier != "full" && strings.HasPrefix(owner, "unused-") {
+					expected = "skipped"
+				}
+				if (err == nil) != (status == expected) {
+					t.Fatalf("%s required %s status %q: %v %s", tier, owner, status, err, b)
+				}
 			}
 		}
 	}

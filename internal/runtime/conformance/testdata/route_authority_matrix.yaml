@@ -617,7 +617,7 @@ rows:
   - id: replay_recovery_fork_consumers
     concept: Replay, retry, sweeper, fork, and recovery consume persisted RoutePlan output or explicitly gated replay/fork owners.
     classification: add_to_matrix
-    tier: full_conformance_manual_nightly
+    tier: full_conformance
     proof_dimensions: [replay_recovery, full_conformance, persistence_authority]
     owner_refs:
       - {kind: spec_ref, path: platform-spec.yaml, ref: replay_recovery}
@@ -634,7 +634,7 @@ rows:
   - id: catalog_e2e_route_behavior
     concept: Catalog route behavior remains covered by catalog E2E tiering and is cited rather than duplicated.
     classification: already_covered_by_existing_proof
-    tier: full_conformance_manual_nightly
+    tier: full_conformance
     proof_dimensions: [catalog_tiering, full_conformance]
     owner_refs:
       - {kind: artifact, path: internal/runtime/cataloge2e/README.md}

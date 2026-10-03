@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/testplanning"
+
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 	"gopkg.in/yaml.v3"
@@ -160,8 +162,8 @@ func TestGoldenSQLitePossessionServeJourney(t *testing.T) {
 }
 
 func TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends(t *testing.T) {
-	if profile, _ := goldenContinuousProofProfile(t); profile == "pr-common" || profile == "pr-escalated" {
-		t.Skipf("forced-restart proof runs in local/full/nightly or an affected-claim supplement, not %s", profile)
+	if profile, _ := goldenContinuousProofProfile(t); profile == testplanning.ProfileCore {
+		t.Skipf("forced-restart proof requires lifecycle/full, not %s", profile)
 	}
 	releaseRoot := goldenReleaseRoot(t)
 	binaryPath := buildReleaseBinary(t, releaseRoot)
@@ -201,7 +203,7 @@ func runGoldenAgentWorkloadBurstIteration(t *testing.T, iteration int) {
 	}
 	profile, continuous := goldenContinuousProofProfile(t)
 	if !continuous {
-		t.Skipf("burst proof requires full/nightly profile, got %q", profile)
+		t.Skipf("burst proof requires full profile, got %q", profile)
 	}
 	dsn := strings.TrimSpace(os.Getenv(goldenPostgresEnv))
 	if dsn == "" {
@@ -241,14 +243,19 @@ func goldenContinuousProofProfile(t *testing.T) (string, bool) {
 	switch profile {
 	case "":
 		return "", false
-	case "local", "pr-common", "pr-escalated":
+	case testplanning.ProfileCore, testplanning.ProfileLifecycle:
 		return profile, false
-	case "full", "nightly":
+	case testplanning.ProfileFull:
 		return profile, true
 	default:
 		t.Fatalf("%s has unsupported value %q", goldenProofProfileEnv, profile)
 		return profile, false
 	}
+}
+
+func goldenLifecycleProofProfile(t *testing.T) (string, bool) {
+	profile, _ := goldenContinuousProofProfile(t)
+	return profile, testplanning.TierRank(profile) >= testplanning.TierRank(testplanning.ProfileLifecycle)
 }
 
 func TestGoldenAgentWorkloadSQLiteDevScratchRestartStartsFreshEpoch(t *testing.T) {
@@ -1898,11 +1905,9 @@ func TestGoldenContinuousProofProfileSelection(t *testing.T) {
 		continuous bool
 	}{
 		{profile: ""},
-		{profile: "local"},
-		{profile: "pr-common"},
-		{profile: "pr-escalated"},
+		{profile: "core"},
+		{profile: "lifecycle"},
 		{profile: "full", continuous: true},
-		{profile: "nightly", continuous: true},
 	} {
 		name := test.profile
 		if name == "" {

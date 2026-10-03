@@ -49,10 +49,11 @@ func TestMandatorySoakCompleteDisjointPartitionAllProfiles(t *testing.T) {
 					units = append(units, u)
 				}
 			}
-			if profile == testplanning.ProfileLocal {
+			if profile == testplanning.ProfileCore {
 				allowed := map[string]string{
 					"local-generated-fanout-fixture": "^TestFanOutSemanticProofFixtureAdmitsExactProducerSites$",
 					"local-fanout-handoff-ack-loss":  "^TestIssue2394NestedGroupHandoffAcknowledgmentLossBothStores$",
+					"conformance-2394-pressure":      p.Units["conformance-2394-pressure"].Run,
 				}
 				if len(units) != len(allowed) {
 					t.Fatalf("local conformance canaries = %+v, want %d exact units", units, len(allowed))
@@ -73,11 +74,19 @@ func TestMandatorySoakCompleteDisjointPartitionAllProfiles(t *testing.T) {
 				}
 				return
 			}
+			if profile != testplanning.ProfileFull {
+				for _, u := range units {
+					if u.BudgetClass == "soak" || u.ID == "conformance-heavy-fanout" || u.ID == "conformance-2394-reporter" {
+						t.Fatalf("full-only unit in lifecycle: %s", u.ID)
+					}
+				}
+				return
+			}
 			if err := testplanning.ValidateConformanceProofPartition(dir, units); err != nil {
 				t.Fatal(err)
 			}
 			mutations := []string{"ordinary overlap", "broad skip"}
-			if profile == testplanning.ProfileNightly {
+			if profile == testplanning.ProfileFull {
 				mutations = append(mutations, "missing sqlite", "missing postgres", "duplicate", "partial cell", "wrong timeout", "cached cell")
 			}
 			for _, mutation := range mutations {
@@ -140,7 +149,7 @@ func TestMandatorySoakCompleteDisjointPartitionAllProfiles(t *testing.T) {
 			}
 			slices.Sort(cells)
 			wantCells := []string(nil)
-			if profile == testplanning.ProfileNightly {
+			if profile == testplanning.ProfileFull {
 				wantCells = []string{"conformance-soak-postgres", "conformance-soak-sqlite"}
 			}
 			if !slices.Equal(cells, wantCells) {
@@ -183,7 +192,7 @@ func TestMandatorySoakWorkflowRequiredExactHeadAndBudgets(t *testing.T) {
 		}
 	}
 	planner := findWorkflowStep(workflow.Jobs["ci-plan"].Steps, "Plan proof topology")
-	for _, selection := range []string{`.budget_class != "soak"`, `.budget_class == "soak"`, `--slurpfile plan test-results/proof-plan.json`, `select(.id == $id)`} {
+	for _, selection := range []string{`.budget_class != "soak"`, `.budget_class == "soak"`, `test-results/proof-matrix.json`} {
 		if planner == nil || !strings.Contains(planner.Run, selection) {
 			t.Fatalf("matrix partition missing %s", selection)
 		}
@@ -192,7 +201,8 @@ func TestMandatorySoakWorkflowRequiredExactHeadAndBudgets(t *testing.T) {
 		t.Fatal("ordinary matrix changed")
 	}
 	ordinary := findWorkflowStep(workflow.Jobs["proof-unit"].Steps, "Run exact planned proof unit")
-	if ordinary == nil || !strings.Contains(ordinary.Run, `go run ./cmd/swarm-test --planned "$plan" "$UNIT_ID"`) {
+	batch, err := os.ReadFile(filepath.Join(root, ".github/scripts/run-proof-batch.sh"))
+	if ordinary == nil || err != nil || ordinary.Run != "bash .github/scripts/run-proof-batch.sh" || !strings.Contains(string(batch), `go run ./cmd/swarm-test --planned "$plan" "$UNIT_ID"`) {
 		t.Fatal("ordinary consumer does not execute the exact planned unit")
 	}
 	proof := findWorkflowStep(job.Steps, "Run exact planned proof unit")
@@ -317,7 +327,7 @@ func TestMandatorySoakWorkflowMatrixExecutionAndShellSyntax(t *testing.T) {
 				}
 			}
 			wantSoaks := 0
-			if profile == testplanning.ProfileNightly {
+			if profile == testplanning.ProfileFull {
 				wantSoaks = 2
 			}
 			if len(seen) != len(plan.Units) || soaks != wantSoaks {
