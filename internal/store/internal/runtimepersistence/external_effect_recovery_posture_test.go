@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -77,69 +78,87 @@ func TestExternalEffectRecoveryPostureAdmissionGenericSQLiteAndPostgres(t *testi
 }
 
 func TestExternalEffectRecoveryParksInvalidExactCurrentStandingRunSQLiteAndPostgres(t *testing.T) {
-	for _, backend := range []struct {
-		name string
-		open func(*testing.T) neutralEffectParityFixture
-	}{
-		{name: "sqlite", open: func(t *testing.T) neutralEffectParityFixture {
-			store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-			return newNeutralEffectParityFixture(t, store, store.backend.ConstructionHandle(), true)
-		}},
-		{name: "postgres", open: func(t *testing.T) neutralEffectParityFixture {
-			_, db, cleanup := testutil.StartPostgres(t)
-			t.Cleanup(cleanup)
-			return newNeutralEffectParityFixture(t, admitTestPostgresStore(t, db), db, false)
-		}},
+	for _, reason := range []runtimerunlifecycle.StandingBindingBlockReason{
+		"", runtimerunlifecycle.StandingBindingCredentialsAbsent, runtimerunlifecycle.StandingBindingRecoveryRequired,
 	} {
-		backend := backend
-		t.Run(backend.name, func(t *testing.T) {
-			fixture := backend.open(t)
-			selected, ok := fixture.store.(workflowTestSelectedStore)
-			if !ok {
-				t.Fatalf("selected store %T does not expose standing persistence", fixture.store)
-			}
-			requireStoreTestPersistedBundle(t, fixture.db, runLifecycleCandidateParityBundleHash)
-			workflow := newPostgresWorkflowTestCoordinator(t, fixture.db, selected)
-			if fixture.sqlite {
-				workflow = newSQLiteWorkflowTestCoordinator(t, fixture.db, selected)
-			}
-			flowPath := "effect-recovery/invalid-current"
-			candidate := runtimepipeline.StandingServiceCandidate{
-				ServiceID: runtimeflowidentity.StandingServiceID(flowPath), FlowPath: flowPath,
-				InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
-				Source: mustStoreTestSourceArtifactFact(runLifecycleCandidateParityBundleHash),
-			}
-			standing, err := workflow.ReconcileStandingService(testAuthorActivityRuntimeContext(), candidate)
-			if err != nil {
-				t.Fatalf("create standing recovery owner: %v", err)
-			}
-			fixture = bindNeutralEffectFixtureToRun(t, fixture, standing.RunID)
-			handle := beginNeutralRecoveryAttempt(t, fixture, "authored_http_tool", "invalid-standing", false, false)
-			setStandingRecoveryOwnerDesiredState(t, fixture.db, fixture.sqlite, standing.ServiceID, "suspended", "suspended")
-			attempts := []recoveryPostureAttempt{{AttemptID: handle.Attempt().AttemptID, RunID: standing.RunID, Initial: runtimeeffects.StateAuthorized, Expected: runtimeeffects.StateAuthorized}}
-			before := snapshotExternalEffectRecoveryMatrix(t, fixture.db, fixture.sqlite, attempts)
+		for _, backend := range []struct {
+			name string
+			open func(*testing.T) neutralEffectParityFixture
+		}{
+			{name: "sqlite", open: func(t *testing.T) neutralEffectParityFixture {
+				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+				return newNeutralEffectParityFixture(t, store, store.backend.ConstructionHandle(), true)
+			}},
+			{name: "postgres", open: func(t *testing.T) neutralEffectParityFixture {
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				return newNeutralEffectParityFixture(t, admitTestPostgresStore(t, db), db, false)
+			}},
+		} {
+			backend := backend
+			t.Run(backend.name+"/"+string(reason), func(t *testing.T) {
+				fixture := backend.open(t)
+				selected, ok := fixture.store.(workflowTestSelectedStore)
+				if !ok {
+					t.Fatalf("selected store %T does not expose standing persistence", fixture.store)
+				}
+				requireStoreTestPersistedBundle(t, fixture.db, runLifecycleCandidateParityBundleHash)
+				workflow := newPostgresWorkflowTestCoordinator(t, fixture.db, selected)
+				if fixture.sqlite {
+					workflow = newSQLiteWorkflowTestCoordinator(t, fixture.db, selected)
+				}
+				flowPath := "effect-recovery/invalid-current"
+				candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
+					ServiceID: runtimeflowidentity.StandingServiceID(flowPath), FlowPath: flowPath,
+					InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
+					Source: mustStoreTestSourceArtifactFact(runLifecycleCandidateParityBundleHash),
+				}
+				standing, err := workflow.ReconcileStandingService(testAuthorActivityRuntimeContext(), candidate)
+				if err != nil {
+					t.Fatalf("create standing recovery owner: %v", err)
+				}
+				fixture = bindNeutralEffectFixtureToRun(t, fixture, standing.RunID)
+				handle := beginNeutralRecoveryAttempt(t, fixture, "authored_http_tool", "invalid-standing", false, false)
+				if reason == "" {
+					setStandingRecoveryOwnerDesiredState(t, fixture.db, fixture.sqlite, standing.ServiceID, "suspended", "suspended")
+				} else {
+					candidate.BindingEnabled, candidate.BindingBlockReason = false, reason
+					if _, err := workflow.ReconcileStandingService(testAuthorActivityRuntimeContext(), candidate); err != nil {
+						t.Fatal(err)
+					}
+				}
+				attempts := []recoveryPostureAttempt{{AttemptID: handle.Attempt().AttemptID, RunID: standing.RunID, Initial: runtimeeffects.StateAuthorized, Expected: runtimeeffects.StateAuthorized}}
+				before := snapshotExternalEffectRecoveryMatrix(t, fixture.db, fixture.sqlite, attempts)
 
-			summary, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(time.Now().UTC().Add(time.Minute)))
-			if err != nil {
-				t.Fatalf("reconcile invalid standing external effect: %v", err)
-			}
-			if summary != (runtimeeffects.RecoverySummary{}) {
-				t.Fatalf("invalid standing recovery summary = %#v, want empty", summary)
-			}
-			if after := snapshotExternalEffectRecoveryMatrix(t, fixture.db, fixture.sqlite, attempts); after != before {
-				t.Fatalf("invalid standing recovery mutated durable effect:\nbefore=%s\nafter=%s", before, after)
-			}
+				summary, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(time.Now().UTC().Add(time.Minute)))
+				if err != nil {
+					t.Fatalf("reconcile invalid standing external effect: %v", err)
+				}
+				if summary != (runtimeeffects.RecoverySummary{}) {
+					t.Fatalf("invalid standing recovery summary = %#v, want empty", summary)
+				}
+				if after := snapshotExternalEffectRecoveryMatrix(t, fixture.db, fixture.sqlite, attempts); after != before {
+					t.Fatalf("invalid standing recovery mutated durable effect:\nbefore=%s\nafter=%s", before, after)
+				}
 
-			setStandingRecoveryOwnerDesiredState(t, fixture.db, fixture.sqlite, standing.ServiceID, "none", "active")
-			summary, err = fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(time.Now().UTC().Add(2*time.Minute)))
-			if err != nil {
-				t.Fatalf("reconcile active standing external effect: %v", err)
-			}
-			if summary.PrelaunchTerminal != 1 || summary.OutcomeUncertain != 0 {
-				t.Fatalf("active standing recovery summary = %#v, want 1/0", summary)
-			}
-			requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateTerminalFailure)
-		})
+				if reason == "" {
+					setStandingRecoveryOwnerDesiredState(t, fixture.db, fixture.sqlite, standing.ServiceID, "none", "active")
+				} else {
+					candidate.BindingEnabled, candidate.BindingBlockReason = true, ""
+					if _, err := workflow.ReconcileStandingService(testAuthorActivityRuntimeContext(), candidate); err != nil {
+						t.Fatal(err)
+					}
+				}
+				summary, err = fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(time.Now().UTC().Add(2*time.Minute)))
+				if err != nil {
+					t.Fatalf("reconcile active standing external effect: %v", err)
+				}
+				if summary.PrelaunchTerminal != 1 || summary.OutcomeUncertain != 0 {
+					t.Fatalf("active standing recovery summary = %#v, want 1/0", summary)
+				}
+				requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateTerminalFailure)
+			})
+		}
 	}
 }
 

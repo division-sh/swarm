@@ -55,6 +55,24 @@ func TestChannelOnboardingCandidateCatalogRetainsExactBundleRuntimeContexts(t *t
 	}
 }
 
+func TestCandidateCatalogDiscoversDeclarationWithoutExecutableGeneration(t *testing.T) {
+	candidate := testCandidate(strings.Repeat("a", 64), "support")
+	candidate.Coordinate.TargetGeneration = 0
+	candidate.Target.Generation = 0
+	candidate.Target.PublicationSequence = 0
+	catalog, err := NewCandidateCatalog([]Candidate{candidate})
+	if err != nil {
+		t.Fatalf("credential-absent declaration is undiscoverable: %v", err)
+	}
+	selected, err := catalog.Resolve(CandidateSelection{Provider: candidate.Provider})
+	if err != nil || selected.Target.Generation != 0 || selected.Target.PublicationSequence != 0 || selected.Coordinate.TargetGeneration != 0 {
+		t.Fatalf("declaration selection fabricated execution: %#v, %v", selected, err)
+	}
+	if err := selected.Validate(); err == nil {
+		t.Fatal("declaration candidate granted live execution authority")
+	}
+}
+
 func TestCandidateCatalogRejectsDuplicateExactCoordinate(t *testing.T) {
 	candidate := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
 	if _, err := NewCandidateCatalog([]Candidate{candidate, candidate}); err == nil || !strings.Contains(err.Error(), "duplicate") {

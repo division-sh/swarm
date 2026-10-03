@@ -202,18 +202,40 @@ func (w *CredentialWriter) Admit(ctx context.Context, req CredentialWriteRequest
 }
 
 func (w *CredentialWriter) Observe(ctx context.Context, storeKey string) (CredentialWriteResult, error) {
-	if w == nil || w.snapshots == nil {
-		return CredentialWriteResult{}, fmt.Errorf("channel onboarding credential writer is required")
-	}
-	key := storeKey
-	if key == "" || key != strings.TrimSpace(key) {
-		return CredentialWriteResult{}, fmt.Errorf("channel onboarding credential key is required")
-	}
-	evidence, err := runtimecredentials.SealCurrentValue(ctx, w.values, key)
+	observed, present, err := w.ObserveOptional(ctx, storeKey)
 	if err != nil {
 		return CredentialWriteResult{}, err
 	}
-	return CredentialWriteResult{StoreKey: key, ValueSeal: evidence.Seal}, nil
+	if !present {
+		return CredentialWriteResult{}, fmt.Errorf("credential %q is not present", storeKey)
+	}
+	return observed, nil
+}
+
+func (w *CredentialWriter) ObserveOptional(ctx context.Context, storeKey string) (CredentialWriteResult, bool, error) {
+	if w == nil || w.snapshots == nil {
+		return CredentialWriteResult{}, false, fmt.Errorf("channel onboarding credential writer is required")
+	}
+	key := storeKey
+	if key == "" || key != strings.TrimSpace(key) {
+		return CredentialWriteResult{}, false, fmt.Errorf("channel onboarding credential key is required")
+	}
+	projection := w.snapshots.BeginSecretBindingProjection()
+	snapshot, err := projection.ObserveActivationCredential(ctx, key)
+	if err != nil {
+		return CredentialWriteResult{}, false, err
+	}
+	if !snapshot.Present {
+		return CredentialWriteResult{}, false, projection.ValidateCurrent(ctx)
+	}
+	evidence, err := runtimecredentials.SealCurrentValue(ctx, w.values, key)
+	if err != nil {
+		return CredentialWriteResult{}, false, err
+	}
+	if err := projection.ValidateCurrent(ctx); err != nil {
+		return CredentialWriteResult{}, false, err
+	}
+	return CredentialWriteResult{StoreKey: key, ValueSeal: evidence.Seal}, true, nil
 }
 
 func (w *CredentialWriter) ObserveWritten(ctx context.Context, storeKey, receipt string) (CredentialWriteResult, bool, error) {

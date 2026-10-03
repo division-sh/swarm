@@ -36,6 +36,7 @@ type ActivationAuthorityRefresher interface {
 
 type ActivationRefresher interface {
 	ActivationAuthorityRefresher
+	AdmitChannelTarget(context.Context, Operation, Candidate) (Candidate, error)
 	PreflightChannelActivation(context.Context, Operation, Candidate) error
 	RefreshChannelActivationCandidates(context.Context) error
 	PublishChannelActivation(context.Context, Operation, ConnectedChannelActivation) error
@@ -137,6 +138,8 @@ type TestLifecycleBoundary string
 
 const (
 	TestAfterCredentialWriteBeforeCheckpoint   TestLifecycleBoundary = "credential_write_before_checkpoint"
+	TestAfterStandingTargetReconciliation      TestLifecycleBoundary = "standing_reconciliation_before_target_publication"
+	TestAfterStandingTargetPublication         TestLifecycleBoundary = "standing_target_publication_before_registration"
 	TestAfterIdentityBeginBeforeCheckpoint     TestLifecycleBoundary = "identity_begin_before_checkpoint"
 	TestAfterBindingCheckpointBeforeActivation TestLifecycleBoundary = "binding_checkpoint_before_activation"
 	TestAfterStaleIdentitySettlement           TestLifecycleBoundary = "stale_identity_before_parent_reset"
@@ -462,12 +465,8 @@ func (s *Service) connectedChannelSourceLabel(ctx context.Context, row Connected
 }
 
 func activeOperationRecovery(operation Operation) *ConnectedChannelRecovery {
-	command := "swarm channel resume " + operation.OperationID
-	if operation.Phase == PhasePreparing {
-		command += " --credential-stdin"
-	}
 	return &ConnectedChannelRecovery{
-		Reason: ReadinessActivationUnavailable, Provider: operation.Provider, Commands: []string{command},
+		Reason: ReadinessActivationUnavailable, Provider: operation.Provider, Commands: []string{operation.CredentialRecoveryCommand()},
 	}
 }
 
@@ -652,7 +651,7 @@ func (s *Service) ReconcileLocal(ctx context.Context) error {
 		for step := 0; step < 5; step++ {
 			switch op.Phase {
 			case PhasePreparing:
-				admissions, err := s.admitCredentials(ctx, op, candidate, "")
+				admissions, err := s.admitCredentials(ctx, op, candidate, "", candidate.Target.Generation > 0)
 				var required *CredentialRequiredError
 				if errors.As(err, &required) {
 					step = 5
@@ -670,6 +669,10 @@ func (s *Service) ReconcileLocal(ctx context.Context) error {
 				}
 			case PhaseCredentialsAdmitted:
 				if err := s.validateCredentialAdmissions(ctx, op); err != nil {
+					var required *CredentialRequiredError
+					if !errors.As(err, &required) {
+						return fmt.Errorf("validate local credential admission for %s: %w", op.OperationID, err)
+					}
 					op, err = s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{
 						OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: PhasePreparing,
 						ReplaceCredentialAdmissions: true, Now: s.now().UTC(),
@@ -797,6 +800,11 @@ func (s *Service) Recover(ctx context.Context) error {
 			return err
 		}
 		op = rebound
+		if candidate.Target.Generation == 0 && (op.Phase == PhasePreparing || op.Phase.RequiresExecutableTarget()) {
+			// Local recovery may settle historical responsibility, but cannot
+			// execute a declaration-only candidate or adopt its default keys.
+			continue
+		}
 		if _, err := s.drive(context.WithoutCancel(ctx), op, candidate, ""); err != nil {
 			var credentialRequired *CredentialRequiredError
 			if errors.As(err, &credentialRequired) {
@@ -823,13 +831,13 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 		return Result{}, fmt.Errorf("%w: onboarding operation changed before execution", ErrRevisionConflict)
 	}
 	op = current
-	if !op.Coordinate.Matches(candidate.Coordinate) {
+	if !op.Coordinate.MatchesDeclaration(candidate.Coordinate) || op.Phase.RequiresExecutableTarget() && candidate.Validate() != nil {
 		return Result{Operation: op, Candidate: &candidate}, fmt.Errorf("%w: onboarding operation is not fenced to the exact current runtime occurrence", ErrRevisionConflict)
 	}
 	for {
 		switch op.Phase {
 		case PhasePreparing:
-			admissions, err := s.admitCredentials(ctx, op, candidate, providerCredential)
+			admissions, err := s.admitCredentials(ctx, op, candidate, providerCredential, true)
 			if err != nil {
 				result, blockedErr := s.blockedResult(ctx, op, candidate, err)
 				if blockedErr != nil {
@@ -850,6 +858,10 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 			op = next
 		case PhaseCredentialsAdmitted:
 			if err := s.validateCredentialAdmissions(ctx, op); err != nil {
+				var required *CredentialRequiredError
+				if !errors.As(err, &required) {
+					return s.blockedResult(ctx, op, candidate, err)
+				}
 				releaseErr := s.releaseCandidateCredentials(context.WithoutCancel(ctx), op.CredentialAdmissions)
 				reset, resetErr := s.store.AdvanceChannelOnboarding(context.WithoutCancel(ctx), AdvanceRequest{
 					OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: PhasePreparing,
@@ -860,6 +872,27 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 				}
 				return s.blockedResult(ctx, op, candidate, errors.Join(err, releaseErr, resetErr))
 			}
+			promoted, err := s.activations.AdmitChannelTarget(ctx, op, candidate)
+			if err != nil {
+				return s.blockedResult(ctx, op, candidate, fmt.Errorf("admit channel target: %w", err))
+			}
+			if err := promoted.Validate(); err != nil {
+				return Result{}, err
+			}
+			if !promoted.Coordinate.MatchesDurableIdentity(candidate.Coordinate) || promoted.Target.Selector != candidate.Target.Selector || promoted.Target.AdmissionGeneration != candidate.Target.AdmissionGeneration || promoted.Interface.Normalized() != candidate.Interface.Normalized() {
+				return Result{}, fmt.Errorf("%w: admitted channel target changed declaration authority", ErrRevisionConflict)
+			}
+			if !op.Coordinate.Matches(promoted.Coordinate) {
+				next, err := s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{
+					OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: op.Phase,
+					RebindCoordinate: &promoted.Coordinate, Now: s.now().UTC(),
+				})
+				if err != nil {
+					return Result{}, err
+				}
+				op = next
+			}
+			candidate = promoted
 			if err := s.activations.PreflightChannelActivation(ctx, op, candidate); err != nil {
 				if terminal, ok := AsTerminalActivationError(err); ok {
 					failed, failErr := s.failOperation(ctx, op, terminal.Code, terminal.Error())
@@ -1183,7 +1216,7 @@ func credentialRequiredForStaleParent(parent Operation, identity operatorchannel
 	return required
 }
 
-func (s *Service) admitCredentials(ctx context.Context, op Operation, candidate Candidate, providerCredential string) ([]CredentialAdmission, error) {
+func (s *Service) admitCredentials(ctx context.Context, op Operation, candidate Candidate, providerCredential string, allowNewAdmission bool) ([]CredentialAdmission, error) {
 	currentByRole := map[string]CredentialAdmission{}
 	if current, err := s.store.GetConnectedChannelActivation(ctx, op.SlotKey); err == nil {
 		for _, admission := range current.CredentialAdmissions {
@@ -1198,57 +1231,114 @@ func (s *Service) admitCredentials(ctx context.Context, op Operation, candidate 
 	} else if !errors.Is(err, ErrNotFound) {
 		return nil, err
 	}
-	admissions := make([]CredentialAdmission, 0, len(op.CredentialReservations))
-	for _, reservation := range op.CredentialReservations {
+	admissions := make([]CredentialAdmission, len(op.CredentialReservations))
+	writes := make([]CredentialWriteRequest, len(op.CredentialReservations))
+	generateSigning := -1
+	// Observe every required role before generating or writing any credential.
+	// A missing role must not conceal another role's invalid value or read error.
+	var missingErr error
+	for i, reservation := range op.CredentialReservations {
 		operationKey := operationCredentialStoreKey(reservation.StoreKey, op.OperationID, reservation.Role)
 		operationReceipt := credentialReceipt(op.OperationID, reservation.Role)
 		if written, found, err := s.credentials.ObserveWritten(ctx, operationKey, operationReceipt); err != nil {
 			return nil, err
 		} else if found {
-			admissions = append(admissions, CredentialAdmission{
+			admissions[i] = CredentialAdmission{
 				Role: reservation.Role, StoreKey: written.StoreKey, Kind: CredentialAdmissionWritten,
 				Receipt: written.Receipt, ValueSeal: written.ValueSeal,
-			})
+			}
+			continue
+		}
+		if !allowNewAdmission {
+			missingErr = errors.Join(missingErr, &CredentialRequiredError{OperationID: op.OperationID, Role: reservation.Role, StoreKey: operationKey})
 			continue
 		}
 		value := ""
 		switch reservation.Role {
 		case candidate.ProviderCredentialRole:
 			value = providerCredential
-		case candidate.SigningCredentialRole:
-			if current, ok := currentByRole[reservation.Role]; ok {
-				if observed, err := s.credentials.Observe(ctx, current.StoreKey); err == nil {
-					admissions = append(admissions, observedCredentialAdmissionForKey(op.OperationID, reservation.Role, current.StoreKey, observed))
-					continue
+			if value != "" {
+				if err := runtimecredentials.ValidateValue(value); err != nil {
+					return nil, err
 				}
 			}
-			if observed, err := s.credentials.Observe(ctx, reservation.StoreKey); err == nil {
-				admissions = append(admissions, observedCredentialAdmission(op.OperationID, reservation, observed))
+		case candidate.SigningCredentialRole:
+			if current, ok := currentByRole[reservation.Role]; ok {
+				observed, present, err := s.credentials.ObserveOptional(ctx, current.StoreKey)
+				if err != nil {
+					return nil, err
+				}
+				if !present {
+					missingErr = errors.Join(missingErr, &CredentialRequiredError{OperationID: op.OperationID, Role: reservation.Role, StoreKey: current.StoreKey})
+					continue
+				}
+				if observed.ValueSeal != current.ValueSeal {
+					return nil, fmt.Errorf("%w: current signing credential %q changed", ErrConflict, current.StoreKey)
+				}
+				admissions[i] = observedCredentialAdmissionForKey(op.OperationID, reservation.Role, current.StoreKey, observed)
 				continue
 			}
-			var err error
-			value, err = s.secret()
+			observed, present, err := s.credentials.ObserveOptional(ctx, reservation.StoreKey)
 			if err != nil {
 				return nil, err
 			}
+			if present {
+				admissions[i] = observedCredentialAdmission(op.OperationID, reservation, observed)
+				continue
+			}
+			if generateSigning != -1 {
+				return nil, fmt.Errorf("%w: duplicate signing credential reservation", ErrConflict)
+			}
+			generateSigning = i
+			writes[i] = CredentialWriteRequest{StoreKey: operationKey, Receipt: operationReceipt}
+			continue
 		}
 		if strings.TrimSpace(value) == "" {
 			storeKey := reservation.StoreKey
 			if current, ok := currentByRole[reservation.Role]; ok {
 				storeKey = current.StoreKey
 			}
-			observed, err := s.credentials.Observe(ctx, storeKey)
+			observed, present, err := s.credentials.ObserveOptional(ctx, storeKey)
 			if err != nil {
-				return nil, errors.Join(&CredentialRequiredError{OperationID: op.OperationID, Role: reservation.Role, StoreKey: storeKey}, err)
+				return nil, err
 			}
-			admissions = append(admissions, observedCredentialAdmissionForKey(op.OperationID, reservation.Role, storeKey, observed))
+			if !present {
+				missingErr = errors.Join(missingErr, &CredentialRequiredError{OperationID: op.OperationID, Role: reservation.Role, StoreKey: storeKey})
+				continue
+			}
+			admissions[i] = observedCredentialAdmissionForKey(op.OperationID, reservation.Role, storeKey, observed)
 			continue
 		}
-		written, err := s.credentials.Admit(ctx, CredentialWriteRequest{StoreKey: operationKey, Value: value, Receipt: operationReceipt})
+		writes[i] = CredentialWriteRequest{StoreKey: operationKey, Value: value, Receipt: operationReceipt}
+	}
+	if missingErr != nil {
+		return nil, missingErr
+	}
+	for _, admission := range admissions {
+		if admission.StoreKey == "" {
+			continue
+		}
+		current, err := s.credentials.Current(ctx, admission)
+		if err != nil || !current {
+			return nil, errors.Join(fmt.Errorf("%w: credential %q changed before admission", ErrConflict, admission.StoreKey), err)
+		}
+	}
+	if generateSigning != -1 {
+		value, err := s.secret()
 		if err != nil {
 			return nil, err
 		}
-		admissions = append(admissions, CredentialAdmission{Role: reservation.Role, StoreKey: written.StoreKey, Kind: CredentialAdmissionWritten, Receipt: written.Receipt, ValueSeal: written.ValueSeal})
+		writes[generateSigning].Value = value
+	}
+	for i, write := range writes {
+		if write.StoreKey == "" {
+			continue
+		}
+		written, err := s.credentials.Admit(ctx, write)
+		if err != nil {
+			return nil, err
+		}
+		admissions[i] = CredentialAdmission{Role: op.CredentialReservations[i].Role, StoreKey: written.StoreKey, Kind: CredentialAdmissionWritten, Receipt: written.Receipt, ValueSeal: written.ValueSeal}
 	}
 	return admissions, nil
 }
@@ -1258,6 +1348,7 @@ func (s *Service) validateCredentialAdmissions(ctx context.Context, op Operation
 		return fmt.Errorf("%w: onboarding operation has incomplete credential admission", ErrConflict)
 	}
 	byRole := make(map[string]CredentialAdmission, len(op.CredentialAdmissions))
+	var staleErr error
 	for _, admission := range op.CredentialAdmissions {
 		if err := admission.Validate(); err != nil {
 			return err
@@ -1266,14 +1357,23 @@ func (s *Service) validateCredentialAdmissions(ctx context.Context, op Operation
 			return fmt.Errorf("%w: onboarding operation has duplicate credential role %q", ErrConflict, admission.Role)
 		}
 		byRole[admission.Role] = admission
+		if _, _, err := s.credentials.ObserveOptional(ctx, admission.StoreKey); err != nil {
+			return err
+		}
 		current, err := s.credentials.Current(ctx, admission)
-		if err != nil || !current {
-			return errors.Join(fmt.Errorf("onboarding credential value %q is no longer current", admission.StoreKey), err)
+		if err != nil {
+			return err
+		}
+		if !current {
+			staleErr = errors.Join(staleErr, &CredentialRequiredError{OperationID: op.OperationID, Role: admission.Role, StoreKey: admission.StoreKey})
 		}
 		if admission.Kind == CredentialAdmissionWritten {
 			written, found, err := s.credentials.ObserveWritten(ctx, admission.StoreKey, admission.Receipt)
-			if err != nil || !found || written.ValueSeal != admission.ValueSeal {
-				return errors.Join(fmt.Errorf("onboarding written credential %q is no longer owned", admission.StoreKey), err)
+			if err != nil {
+				return err
+			}
+			if !found || written.ValueSeal != admission.ValueSeal {
+				staleErr = errors.Join(staleErr, &CredentialRequiredError{OperationID: op.OperationID, Role: admission.Role, StoreKey: admission.StoreKey})
 			}
 		}
 	}
@@ -1282,7 +1382,7 @@ func (s *Service) validateCredentialAdmissions(ctx context.Context, op Operation
 			return fmt.Errorf("%w: onboarding credential role %q is not admitted", ErrConflict, reservation.Role)
 		}
 	}
-	return nil
+	return staleErr
 }
 
 func (s *Service) advanceIdentity(ctx context.Context, op Operation, candidate Candidate) (Operation, bool, error) {
@@ -1525,11 +1625,20 @@ func (s *Service) reconcileConfirmedBinding(ctx context.Context, op Operation) (
 		return decision, err
 	}
 	decision.operation, decision.binding = op, binding
+	admissionErr := s.validateCredentialAdmissions(ctx, op)
+	var required *CredentialRequiredError
+	if admissionErr != nil && !errors.As(admissionErr, &required) {
+		return decision, admissionErr
+	}
+	stale = stale || required != nil
 	if !stale {
 		decision.blocked = identityOp.ProofStatus == operatorchannel.ProofPending || identityOp.ProofStatus == operatorchannel.ProofFailed
 		return decision, nil
 	}
-	decision.credentialRequired = credentialRequiredForStaleParent(op, identityOp)
+	decision.credentialRequired = required
+	if decision.credentialRequired == nil {
+		decision.credentialRequired = credentialRequiredForStaleParent(op, identityOp)
+	}
 	if err := s.releaseCandidateCredentials(context.WithoutCancel(ctx), op.CredentialAdmissions); err != nil {
 		return decision, fmt.Errorf("release bound credential-stale onboarding admissions: %w", err)
 	}
@@ -1618,8 +1727,13 @@ func (s *Service) bindCurrentCandidate(ctx context.Context, op Operation) (Opera
 		}
 	}
 	rebound := op
-	if !op.Coordinate.Matches(candidate.Coordinate) {
+	if !op.Coordinate.MatchesDeclaration(candidate.Coordinate) {
 		coordinate := candidate.Coordinate
+		if op.Phase.RequiresExecutableTarget() && coordinate.TargetGeneration == 0 {
+			// Retain the historical target coordinate for local reconciliation.
+			// Declaration discovery grants no replacement executable authority.
+			coordinate.TargetGeneration = op.Coordinate.TargetGeneration
+		}
 		rebound, err = s.store.AdvanceChannelOnboarding(context.WithoutCancel(ctx), AdvanceRequest{
 			OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: op.Phase,
 			RebindCoordinate: &coordinate, ClearConfirmationOperationID: disposition.RemintConfirmationOperation,
