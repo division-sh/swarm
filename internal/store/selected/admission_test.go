@@ -10,6 +10,8 @@ import (
 	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
+	"github.com/division-sh/swarm/internal/runtime/startuprecovery"
 	"github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
@@ -94,6 +96,12 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 					return err
 				}
 				if _, err := snapshot.ActiveNonStandingRunBundleAvailabilities(ctx); err != nil {
+					return err
+				}
+				if err := runbundle.AdmitPinnedSources(ctx, snapshot, "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", []string{"bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}); err != nil {
+					return err
+				}
+				if _, err := startuprecovery.Inspect(ctx, startuprecovery.Request{AvailabilityReader: snapshot, ArtifactReader: snapshot}); err != nil {
 					return err
 				}
 				if _, err := snapshot.ReadTimerObligations(ctx, timerobligation.All(), time.Now().UTC()); err != nil {
