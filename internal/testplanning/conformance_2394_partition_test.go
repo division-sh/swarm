@@ -77,7 +77,7 @@ func validateConformance2394Partition(policy Policy, names []string) ([][]string
 		}
 	}
 	ids := append(append([]string{}, conformance2394Units...), "conformance-soak-sqlite", "conformance-soak-postgres")
-	for _, profile := range []string{ProfilePRCommon, ProfilePREscalated, ProfileFull, ProfileNightly} {
+	for _, profile := range []string{ProfileCore, ProfileLifecycle, ProfileFull} {
 		for _, id := range ids {
 			count := 0
 			for _, member := range policy.Profiles[profile].Units {
@@ -86,7 +86,7 @@ func validateConformance2394Partition(policy Policy, names []string) ([][]string
 				}
 			}
 			want := 1
-			if strings.HasPrefix(id, "conformance-soak-") && profile != ProfileNightly {
+			if profile == ProfileCore && id != "conformance-2394-pressure" || profile != ProfileFull && (strings.HasPrefix(id, "conformance-soak-") || id == "conformance-2394-reporter") {
 				want = 0
 			}
 			if count != want {
@@ -147,15 +147,19 @@ func TestConformanceVolumeFanOutProofPartition(t *testing.T) {
 	if len(selectedNames) != 2 {
 		t.Fatalf("heavy fan-out partition has %d roots, want two: %v", len(selectedNames), selectedNames)
 	}
-	for _, profile := range []string{ProfilePRCommon, ProfilePREscalated, ProfileFull, ProfileNightly} {
+	for _, profile := range []string{ProfileCore, ProfileLifecycle, ProfileFull} {
 		count := 0
 		for _, id := range policy.Profiles[profile].Units {
 			if id == unitID {
 				count++
 			}
 		}
-		if count != 1 {
-			t.Fatalf("%s schedules %s %d times, want one", profile, unitID, count)
+		want := 0
+		if profile == ProfileFull {
+			want = 1
+		}
+		if count != want {
+			t.Fatalf("%s schedules %s %d times, want %d", profile, unitID, count, want)
 		}
 	}
 }
@@ -328,7 +332,7 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 		t.Fatalf("reporter conformance partition omitted %s", reporterProof)
 	}
 	t.Log("complete disjoint census:185 =162 general +14 core +5 pressure +1 reporter +3 long file-row roots in conformance-1")
-	for _, profile := range []string{ProfilePRCommon, ProfilePREscalated, ProfileFull, ProfileNightly} {
+	for _, profile := range []string{ProfileFull} {
 		var units []ProofUnit
 		for _, id := range policy.Profiles[profile].Units {
 			u := policy.Units[id]
@@ -378,7 +382,7 @@ func TestConformance2394PartitionRejectsScopeDrift(t *testing.T) {
 	})
 	t.Run("optional_profile", func(t *testing.T) {
 		policy, names, _ := conformance2394Fixture(t)
-		p := policy.Profiles[ProfilePRCommon]
+		p := policy.Profiles[ProfileCore]
 		var keep []string
 		for _, id := range p.Units {
 			if id != "conformance-2394-pressure" {
@@ -386,7 +390,7 @@ func TestConformance2394PartitionRejectsScopeDrift(t *testing.T) {
 			}
 		}
 		p.Units = keep
-		policy.Profiles[ProfilePRCommon] = p
+		policy.Profiles[ProfileCore] = p
 		if _, err := validateConformance2394Partition(policy, names); err == nil {
 			t.Fatal("optional ordinary unit accepted")
 		}

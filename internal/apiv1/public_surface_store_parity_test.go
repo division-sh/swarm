@@ -373,9 +373,9 @@ func TestPublicSurfaceStoreParityRejectsCoverageDrift(t *testing.T) {
 		{
 			name: "risk proof skipped profile",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
-				storeParityProofByID(t, matrix, "golden-forced-restart").Profile = "pr-common"
+				storeParityProofByID(t, matrix, "golden-forced-restart").Profile = "core"
 			},
-			want: "risk_dimension restart proof golden-forced-restart profile \"pr-common\" does not execute escalated risk proof",
+			want: "is not scheduled by profile core",
 		},
 		{
 			name: "risk proof claim overreach",
@@ -460,7 +460,7 @@ func TestPublicSurfaceStoreParityProofSchedulingRejectsOmittedSelector(t *testin
 		Module:          "github.com/division-sh/swarm",
 		SpecialPackages: []string{"github.com/division-sh/swarm/internal/apiv1"},
 		Profiles: map[string]testplanning.ProfilePolicy{
-			"pr-common": {Units: []string{"apiv1-selected"}},
+			"core": {Units: []string{"apiv1-selected"}},
 		},
 		Units: map[string]testplanning.UnitPolicy{
 			"apiv1-selected": {
@@ -469,7 +469,7 @@ func TestPublicSurfaceStoreParityProofSchedulingRejectsOmittedSelector(t *testin
 			},
 		},
 	}
-	if publicSurfaceStoreParityProofScheduled(policy, "pr-common", "TestParityProof", "internal/apiv1/parity_test.go") {
+	if publicSurfaceStoreParityProofScheduled(policy, "core", "TestParityProof", "internal/apiv1/parity_test.go") {
 		t.Fatal("selector omitted from its named profile was accepted")
 	}
 }
@@ -1027,9 +1027,6 @@ func validatePublicSurfaceStoreParityRiskExecution(label, claimID, dimension str
 		capability := findPublicSurfaceStoreProofCapability(proof, claimID)
 		if capability == nil || !publicSurfaceHasValue(capability.RiskDimensions, dimension) {
 			continue
-		}
-		if proof.Profile != "full" && proof.Profile != "nightly" {
-			return []string{fmt.Sprintf("%s risk_dimension %s proof %s profile %q does not execute escalated risk proof", label, dimension, proofID, proof.Profile)}
 		}
 		for _, backend := range proof.Backends {
 			coveredBackends[backend] = struct{}{}

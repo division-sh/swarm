@@ -236,11 +236,27 @@ func LoadParityProofs(path string) ([]ParityProof, error) {
 
 // BindExecution turns the selected source roots and existing parity references
 // into the exact, digest-bound pre-run completion obligations.
-func BindExecution(plan *RunPlan, inventory RootInventory, parity []ParityProof) error {
+func BindExecution(plan *RunPlan, inventory RootInventory, parity []ParityProof, policy Policy) error {
 	if plan == nil || len(inventory.Packages) == 0 || inventory.BuildContext.GOOS == "" {
 		return fmt.Errorf("cannot bind execution without a plan and active build inventory")
 	}
-	if plan.Profile == ProfileNightly {
+	var full *RunPlan
+	if plan.Profile != ProfileFull {
+		var packages []string
+		for pkg := range inventory.Packages {
+			packages = append(packages, pkg)
+		}
+		model := WeightModel{Version: WeightModelVersion, SourceRunID: "coverage-census"}
+		complete, err := BuildPlan(policy, model, packages, ProfileFull, "retained full ownership", plan.HeadSHA, BuildOptions{Venue: plan.Venue})
+		if err != nil {
+			return err
+		}
+		if err := BindExecution(&complete, inventory, parity, policy); err != nil {
+			return fmt.Errorf("full census: %w", err)
+		}
+		full = &complete
+	}
+	if plan.Profile == ProfileFull {
 		backends := map[string]bool{}
 		for _, unit := range plan.Units {
 			if backend, ok := SoakBackend(unit.Run); ok {
@@ -248,11 +264,10 @@ func BindExecution(plan *RunPlan, inventory RootInventory, parity []ParityProof)
 			}
 		}
 		if !backends["sqlite"] || !backends["postgres"] {
-			return fmt.Errorf("nightly plan requires both soak cells")
+			return fmt.Errorf("full plan requires both soak cells")
 		}
 	}
 	required := map[string]RequiredTest{}
-	parityByName := map[string]ParityProof{}
 	addRequired := func(pkg, name string, children ...string) {
 		key := pkg + "\x00" + name
 		test := required[key]
@@ -264,17 +279,16 @@ func BindExecution(plan *RunPlan, inventory RootInventory, parity []ParityProof)
 		if proof.Kind != "go_test" {
 			continue
 		}
-		parityByName[proof.Name] = proof
-		if plan.Profile == ProfileLocal || proof.Profile == ProfileFull && (plan.Profile == ProfilePRCommon || plan.Profile == ProfilePREscalated) {
-			continue
-		}
-		if proof.Profile != ProfileFull && proof.Profile != ProfilePRCommon {
+		if TierRank(proof.Profile) == 0 {
 			return fmt.Errorf("parity proof %s has unsupported profile %s", proof.ID, proof.Profile)
+		}
+		if TierRank(proof.Profile) > TierRank(plan.Profile) {
+			continue
 		}
 		pkg := strings.TrimSuffix(filepath.ToSlash(filepath.Dir(proof.Path)), "/")
 		addRequired(pkgFromPath(pkg, plan), proof.Name, proof.Children...)
 	}
-	if plan.Profile == ProfileLocal {
+	if plan.Profile == ProfileCore {
 		for _, unit := range plan.Units {
 			if unit.ID == "catalog-required-inventory" || strings.HasPrefix(unit.ID, "local-") {
 				for _, pkg := range unit.Packages {
@@ -296,13 +310,13 @@ func BindExecution(plan *RunPlan, inventory RootInventory, parity []ParityProof)
 		}
 	} else {
 		const release = "github.com/division-sh/swarm/internal/releasee2e"
-		if plan.Profile == ProfilePRCommon || plan.Profile == ProfilePREscalated {
+		addRequired(release, "TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends")
+		addRequired(release, "TestCompiledProcessFullLifecycleJourneysSQLitePostgres")
+		if plan.Profile == ProfileLifecycle {
 			addRequired(release, "TestGoldenAgentWorkloadSQLiteSmoke")
-			addRequired(release, "TestCompiledProcessFullLifecycleSQLiteSmoke")
 		} else {
-			for _, name := range []string{"TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends", "TestGoldenAgentWorkloadBurstConcurrencyOnBothBackendsIteration1", "TestGoldenAgentWorkloadBurstConcurrencyOnBothBackendsIteration2", "TestCompiledProcessFullLifecycleJourneysSQLitePostgres"} {
-				addRequired(release, name)
-			}
+			addRequired(release, "TestGoldenAgentWorkloadBurstConcurrencyOnBothBackendsIteration1")
+			addRequired(release, "TestGoldenAgentWorkloadBurstConcurrencyOnBothBackendsIteration2")
 		}
 	}
 	for i := range plan.Units {
@@ -336,14 +350,6 @@ func BindExecution(plan *RunPlan, inventory RootInventory, parity []ParityProof)
 					obligation.TestRoot = root
 				}
 				reason, profileReplacement := deferredRootReason(*unit, root, inventory.BuildContext)
-				if strings.HasPrefix(unit.ID, "parity-") {
-					proof, ok := parityByName[name]
-					if !ok || proof.Profile != ProfileFull {
-						return fmt.Errorf("supplement %s selects root %s absent from full parity catalog", unit.ID, name)
-					}
-					obligation.Children = append(obligation.Children, proof.Children...)
-					explicitlyRequired = true
-				}
 				if backend, soak := SoakBackend(unit.Run); soak {
 					obligation.Children = append(obligation.Children, backend)
 				}
@@ -397,6 +403,11 @@ func BindExecution(plan *RunPlan, inventory RootInventory, parity []ParityProof)
 			return fmt.Errorf("required proof %s.%s has no selected unit", obligation.Package, obligation.Name)
 		}
 	}
+	if full != nil {
+		if err := bindTierDeferrals(plan, *full, policy); err != nil {
+			return err
+		}
+	}
 	if err := validateRootSelection(plan, inventory); err != nil {
 		return err
 	}
@@ -426,32 +437,18 @@ func compactStrings(values []string) []string {
 func validateRootSelection(plan *RunPlan, inventory RootInventory) error {
 	owners := map[string][]string{}
 	for _, unit := range plan.Units {
-		if strings.HasPrefix(unit.ID, "parity-") {
-			continue // supplemental evidence is not an alternate partition owner
-		}
 		for _, root := range unit.SelectedRoots {
 			key := root.Package + "\x00" + root.Name
 			owners[key] = append(owners[key], unit.ID)
 		}
 	}
-	const catalog = "github.com/division-sh/swarm/internal/testcatalog"
-	for _, pkg := range plan.Packages {
-		entry := inventory.Packages[pkg]
+	deferred := map[string]bool{}
+	for _, root := range plan.DeferredRoots {
+		deferred[root.Package+"\x00"+root.Name] = true
+	}
+	for pkg, entry := range inventory.Packages {
 		for _, name := range entry.Roots {
-			if plan.Profile == ProfileLocal && pkg != catalog && strings.Contains(pkg, "/internal/") {
-				// Local special packages are intentionally sparse; broad packages
-				// are still complete and checked below.
-				isSpecial := false
-				for _, unit := range plan.Units {
-					if unit.BudgetClass != "broad" && len(unit.Packages) == 1 && unit.Packages[0] == pkg {
-						isSpecial = true
-					}
-				}
-				if isSpecial {
-					continue
-				}
-			}
-			if (plan.Profile == ProfilePRCommon || plan.Profile == ProfilePREscalated) && pkg == "github.com/division-sh/swarm/internal/runtime/cataloge2e" && plan.Profile == ProfilePRCommon && name != "TestCatalogRequiredSmoke" {
+			if deferred[pkg+"\x00"+name] {
 				continue
 			}
 			count := len(owners[pkg+"\x00"+name])
@@ -459,8 +456,8 @@ func validateRootSelection(plan *RunPlan, inventory RootInventory) error {
 				if count != 0 && count != 2 {
 					return fmt.Errorf("soak proof %s.%s has %d owners, want 0 or exact backend pair", pkg, name, count)
 				}
-				if plan.Profile == ProfileNightly && count != 2 {
-					return fmt.Errorf("nightly soak proof %s.%s is absent", pkg, name)
+				if plan.Profile == ProfileFull && count != 2 {
+					return fmt.Errorf("full soak proof %s.%s is absent", pkg, name)
 				}
 			} else if count != 1 {
 				return fmt.Errorf("active proof %s.%s has %d primary owners, want 1", pkg, name, count)

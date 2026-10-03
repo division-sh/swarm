@@ -22691,11 +22691,44 @@ test_specification:
       executor: github.com/division-sh/swarm/internal/releasee2e
       proves:
       - catalog.runtime.numeric_deployment_feed
+    qualification_tiers:
+      promoted_by: '#2544'
+      owners: [internal/testplanning, internal/testtiming, cmd/swarm-test, cmd/swarm-test-timing, .github/workflows/ci.yml]
+      admission: >-
+        The reviewer records one plain CI-Tier and one independent Local-Tier line in the PR body, each core,
+        lifecycle or full. CI reads its event JSON as data; missing, malformed or duplicate CI-Tier selects full.
+        PR body edits trigger qualification, and the required summary checks the current body and source head.
+        Local qualification selects --tier explicitly or promotes with --full and retains the effective plan and
+        receipts. No-context core and changed-package execution are developer feedback, not reviewer-bound proof.
+        No authorization sidecar, audit locator, GitHub lookup or branch/title inference is part of local admission.
+      membership: >-
+        Core executes ordinary admitted roots and fixed safety and smoke canaries. Lifecycle adds the retained
+        both-store restart, recovery and semantic families. Full owns every admitted executable root, both unchanged
+        900-second soak cells, and the hosted native Linux/Darwin unused-check union. All hosted tiers retain macOS
+        SQLite possession. Every lower-tier omitted root explicitly names its minimum tier and retained full owner;
+        it earns no execution credit. New ordinary roots enter core; an unowned special root blocks every tier.
+      execution: >-
+        Logical commands retain their own processes, stores, workspaces, deadlines, backend children and receipts.
+        Only explicitly eligible short units with valid measured weights may share a physical runner. Each physical
+        job is matched to its exact planned logical units and counted once, while every logical budget and failure
+        remains independent. Build-product reuse requires exact clean source, toolchain, native platform, dependency,
+        policy, profile and flags identity plus byte integrity; a miss or mismatch rebuilds, never supplies test credit.
+      master_replay: >-
+        Schedule and unverified master execute full. Master may reuse one exactly associated merged PR only when its
+        qualified execution tree equals the pushed tree, the current PR tier is satisfied, and the current App 15368
+        protected checks, exact successful run/attempt and canonical plan are verified through read-only observation.
+        Missing, ambiguous, stale, failed or unavailable evidence falls back to full. Reused proof is identified as
+        prior execution, not a new full run. Literal post-merge and fleet-latency acceptance remain tracked by #2535.
+      measured_cost_rule: >-
+        The provisional lifecycle tier is retained only if comparable actual whole-run assigned runner-minutes save
+        at least 20 percent versus full while retaining all declared obligations. Otherwise it collapses into full.
+        Historical component estimates do not establish candidate savings or the parent 20-minute p90 fleet target.
     compiled_process_numeric_feed_profile:
       promoted_by: '#2498'
       source: tests/tier11-flow-composition/test-numeric-data-scatter-park
       executor: github.com/division-sh/swarm/internal/releasee2e
       ci_owner: hitl-releasee2e-golden
+      minimum_tier: lifecycle
       proof_boundary: >-
         The catalog owns verify-only numeric source admission; releasee2e alone executes the runtime claim.
         Consume the strict finite expected.yaml assertions and exact 100-row checksum through the existing compiled
@@ -22733,11 +22766,11 @@ test_specification:
         serve/dev, possession/refusal, real provider readiness/turn and retained restart with supported prerequisites.
         Missing L prerequisites are an acceptance blocker, not a skipped-success row or permission to relabel H.
       pr_profile: >
-        pr-common and pr-escalated execute the complete N=2 SQLite composition shape.
-        Forced restart and contention rows are skipped explicitly by the canonical proof
-        profile, never by missing backend or deadline-as-success behavior.
+        core executes the complete N=2 SQLite composition shape. lifecycle also executes N=2 plus
+        forced restart convergence on both stores. Each omitted root is explicitly deferred to its
+        minimum tier and retained full owner; no tier earns credit for deferred execution.
       continuous_profile: >
-        full and nightly execute forced-kill/restart convergence on SQLite and host
+        full executes forced-kill/restart convergence on SQLite and host
         PostgreSQL, plus two complete N=10 burst repetitions on both stores. The N=10
         rows supersede the redundant N=2 initial smoke in these profiles.
         Each workload gets a fresh process and store; each repetition runs its SQLite and
@@ -22827,7 +22860,7 @@ test_specification:
         M21: Dev restart exposes a strictly later public started_at and none of the predecessor exact event, delivery, or card facts; deterministic service, run, generation, and standing ingress entity IDs may recur.
         M22: Fresh dev ingress converges exactly once from the empty public history after epoch replacement.
         M23: The release fixture's finite-source guard and canonical-routing overlay independently prove the same explicit source root without introducing a second topology owner.
-        M24: The mandatory top-level CI partition executes this complete proof, including smoke in PR profiles and all five journeys in full/nightly profiles; the package census proves exhaustive disjoint coverage across required units.
+        M24: The fixed tier partition executes J1 smoke in core and all five journeys in lifecycle and full; the full package census proves exhaustive disjoint coverage, and lower tiers explicitly defer omitted roots to retained full owners.
       supported_surfaces:
       - compiled swarm verify --json
       - compiled swarm test admission (T) and internal retained mock lifecycle child (H)
@@ -22840,8 +22873,9 @@ test_specification:
         lifecycle: The release profile names one explicit source root and admits it through sourceartifact. A fixture guard rejects package.yaml and flows/ and proves the required child-flow members; no executable/support package registry exists.
         canonical_routing: The existing canonical-routing artifact registry classifies the executable source as one canonical-overlay and proves exact production loading and boot verification.
       profiles:
-        pull_request: pr-common and pr-escalated execute J1 as the bounded SQLite smoke.
-        continuous: full and nightly execute J1 through J5, require host PostgreSQL, isolate every store and listener, and use bounded parallelism only between independent journeys.
+        core: J1 bounded SQLite smoke.
+        lifecycle: J1 through J5, with host PostgreSQL and isolated stores and listeners.
+        full: J1 through J5 plus every admitted root, both unchanged 900-second soak cells and hosted Linux/Darwin native unused-check union. Local full cannot claim Darwin execution. Bounded parallelism is only between independent journeys.
       forbidden:
       - runtime or store semantic changes made to satisfy the evidence profile
       - seeded runs, entities, instances, schedules, deliveries, cards, or direct store writes

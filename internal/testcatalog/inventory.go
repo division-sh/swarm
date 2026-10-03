@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 
@@ -447,8 +446,7 @@ func validateExternalProofRecord(repoRoot string, policy testplanning.Policy, in
 	if !containsCatalogString(policy.SpecialPackages, proof.Executor) {
 		return fmt.Errorf("external proof %s executor %s is not a special CI package", proof.Source, proof.Executor)
 	}
-	var selectedUnits []string
-	for _, profileName := range []string{testplanning.ProfilePRCommon, testplanning.ProfilePREscalated, testplanning.ProfileFull, testplanning.ProfileNightly} {
+	for _, profileName := range []string{testplanning.ProfileCore, testplanning.ProfileLifecycle, testplanning.ProfileFull} {
 		profile := policy.Profiles[profileName]
 		owners := make([]string, 0, 1)
 		for _, unitID := range profile.Units {
@@ -465,13 +463,10 @@ func validateExternalProofRecord(repoRoot string, policy testplanning.Policy, in
 			}
 			runs = append(runs, unit.Run)
 		}
-		if err := testplanning.ValidateGoProofPartition(filepath.Join(repoRoot, executorDir), runs); err != nil {
-			return fmt.Errorf("external proof %s executor %s profile %s: %w", proof.Source, proof.Executor, profileName, err)
-		}
-		if selectedUnits == nil {
-			selectedUnits = owners
-		} else if !slices.Equal(selectedUnits, owners) {
-			return fmt.Errorf("external proof %s executor %s changes CI owners from %v to %v", proof.Source, proof.Executor, selectedUnits, owners)
+		if profileName == testplanning.ProfileFull {
+			if err := testplanning.ValidateGoProofPartition(filepath.Join(repoRoot, executorDir), runs); err != nil {
+				return fmt.Errorf("external proof %s executor %s profile %s: %w", proof.Source, proof.Executor, profileName, err)
+			}
 		}
 	}
 	return nil

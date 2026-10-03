@@ -66,16 +66,22 @@ func deferredRootReason(unit ProofUnit, root TestRoot, build BuildContext) (reas
 	}
 	if root.Package == "github.com/division-sh/swarm/internal/releasee2e" {
 		switch root.Name {
-		case "TestGoldenAgentWorkloadSQLiteSmoke", "TestCompiledProcessFullLifecycleSQLiteSmoke":
-			if unit.WorkloadProfile == ProfileFull || unit.WorkloadProfile == ProfileNightly {
+		case "TestGoldenAgentWorkloadSQLiteSmoke":
+			if unit.WorkloadProfile == ProfileFull {
 				return "full continuous workload supersedes PR SQLite smoke", true
 			}
+		case "TestCompiledProcessFullLifecycleSQLiteSmoke":
+			if TierRank(unit.WorkloadProfile) >= TierRank(ProfileLifecycle) {
+				return "complete J1-J5 workload supersedes J1 smoke", true
+			}
 		case "TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends",
-			"TestGoldenAgentWorkloadBurstConcurrencyOnBothBackendsIteration1",
-			"TestGoldenAgentWorkloadBurstConcurrencyOnBothBackendsIteration2",
 			"TestCompiledProcessFullLifecycleJourneysSQLitePostgres":
-			if unit.WorkloadProfile == ProfilePRCommon || unit.WorkloadProfile == ProfilePREscalated {
+			if unit.WorkloadProfile == ProfileCore {
 				return "full continuous workload is replaced by PR N=2/J1 smoke", true
+			}
+		case "TestGoldenAgentWorkloadBurstConcurrencyOnBothBackendsIteration1", "TestGoldenAgentWorkloadBurstConcurrencyOnBothBackendsIteration2":
+			if unit.WorkloadProfile != ProfileFull {
+				return "N=10 race bursts require full tier", true
 			}
 		}
 	}

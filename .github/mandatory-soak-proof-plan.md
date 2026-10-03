@@ -1,10 +1,10 @@
 # Mandatory Fan-Out Soak
 
-Authority: the [conditional scheduling ruling](https://github.com/division-sh/swarm/issues/2394#issuecomment-5824204797)
+Authority: the [fixed-tier gate](https://github.com/division-sh/swarm/issues/2544#issuecomment-5965227266)
 governs placement; the [original soak ruling](https://github.com/division-sh/swarm/issues/2394#issuecomment-5743323725)
 governs workload and evidence.
 
-Nightly and fan-out-affected PR plans include two required units:
+Full-tier local and hosted plans include two required units:
 `conformance-soak-sqlite` and `conformance-soak-postgres`. They execute
 `TestIssue2394TwentyTwoIntentFifteenMinuteSoakBothStores` with exactly one backend
 selected per isolated Ubuntu worker. The ordinary conformance partition uses
@@ -30,8 +30,8 @@ timeout. CI retains the explicit 1500s command timeout.
 
 ## Required Evidence
 
-Both matrices are derived from the same digest-bound plan and contain only unit
-IDs. The soak workers check out and assert the plan's execution SHA. The existing
+Both matrices are derived from the same digest-bound batch map. Soaks are always
+singleton batches with the original unit IDs. The soak workers check out and assert the plan's execution SHA. The existing
 timing evaluator requires all planned primary receipts, exact workflow run and
 attempt, triggering-event head, execution head, and whole-job evidence. Soak
 receipts additionally require the exact backend and parent to pass, with backend

@@ -525,11 +525,11 @@ func allowedRouteAuthorityClassifications() map[string]struct{} {
 
 func allowedRouteAuthorityTiers() map[string]struct{} {
 	return map[string]struct{}{
-		"required_pr_smoke":               {},
-		"full_conformance_manual_nightly": {},
-		"touched_surface_only":            {},
-		"split_open":                      {},
-		"obsolete_duplicate":              {},
+		"required_pr_smoke":    {},
+		"full_conformance":     {},
+		"touched_surface_only": {},
+		"split_open":           {},
+		"obsolete_duplicate":   {},
 	}
 }
 

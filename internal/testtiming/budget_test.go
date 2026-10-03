@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -158,7 +159,7 @@ func committedBroadBudgetPlan(t *testing.T, proof testplanning.Policy) testplann
 	packages = append(packages, proof.SpecialPackages...)
 	plan, err := testplanning.BuildPlan(proof, testplanning.WeightModel{
 		Version: testplanning.WeightModelVersion, SourceRunID: "broad budget isolation", Packages: weights,
-	}, packages, testplanning.ProfilePREscalated, "broad budget isolation", "head")
+	}, packages, testplanning.ProfileLifecycle, "broad budget isolation", "head")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +171,7 @@ func TestCommittedCLICommandBudgetBoundariesAndIsolation(t *testing.T) {
 	packages := append([]string{"github.com/division-sh/swarm/internal/events"}, proof.SpecialPackages...)
 	plan, err := testplanning.BuildPlan(proof, testplanning.WeightModel{
 		Version: testplanning.WeightModelVersion, SourceRunID: "CLI budget isolation", Packages: map[string]float64{},
-	}, packages, testplanning.ProfilePREscalated, "CLI budget isolation", "head")
+	}, packages, testplanning.ProfileLifecycle, "CLI budget isolation", "head")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,7 +329,7 @@ func TestBoundOrdinaryRootSkipCannotQualifyCompletion(t *testing.T) {
 		packages = append(packages, pkg)
 	}
 	sort.Strings(packages)
-	plan, err := testplanning.BuildPlan(policy, model, packages, testplanning.ProfileLocal, "ordinary skip control", "head")
+	plan, err := testplanning.BuildPlan(policy, model, packages, testplanning.ProfileCore, "ordinary skip control", "head")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,10 +337,16 @@ func TestBoundOrdinaryRootSkipCannotQualifyCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := testplanning.BindExecution(&plan, inventory, proofs); err != nil {
+	if err := testplanning.BindExecution(&plan, inventory, proofs, policy); err != nil {
 		t.Fatal(err)
 	}
-	unit, err := plan.Unit("broad-01")
+	var unit testplanning.ProofUnit
+	for _, candidate := range plan.Units {
+		if slices.Contains(candidate.Packages, "github.com/division-sh/swarm/cmd/swarm-test") {
+			unit = candidate
+		}
+	}
+	_, err = plan.Unit(unit.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -678,7 +685,7 @@ func committedTimingPolicies(t *testing.T) (BudgetPolicy, testplanning.Policy) {
 func timingTestPlan(t *testing.T) testplanning.RunPlan {
 	t.Helper()
 	policy := testplanning.Policy{
-		Version: 1,
+		Version: testplanning.PolicyVersion,
 		Module:  "module",
 		Planning: testplanning.PlanningPolicy{
 			TargetSeconds:         100,
@@ -687,18 +694,16 @@ func timingTestPlan(t *testing.T) testplanning.RunPlan {
 		},
 		SpecialPackages: []string{"module/catalog"},
 		Profiles: map[string]testplanning.ProfilePolicy{
-			testplanning.ProfileLocal:       {CountMode: CountModeOne, EnvironmentID: "env", Units: []string{"catalog"}},
-			testplanning.ProfilePRCommon:    {CountMode: CountModeCacheDefault, EnvironmentID: "env", Units: []string{"catalog"}},
-			testplanning.ProfilePREscalated: {CountMode: CountModeOne, EnvironmentID: "env", Units: []string{"catalog"}},
-			testplanning.ProfileFull:        {CountMode: CountModeOne, EnvironmentID: "env", Units: []string{"catalog"}},
-			testplanning.ProfileNightly:     {CountMode: CountModeOne, EnvironmentID: "env", Units: []string{"catalog"}},
+			testplanning.ProfileCore:      {CountMode: CountModeOne, EnvironmentID: "env", Units: []string{"catalog"}},
+			testplanning.ProfileLifecycle: {CountMode: CountModeOne, EnvironmentID: "env", Units: []string{"catalog"}},
+			testplanning.ProfileFull:      {CountMode: CountModeOne, EnvironmentID: "env", Units: []string{"catalog"}},
 		},
 		Units: map[string]testplanning.UnitPolicy{
 			"catalog": {Packages: []string{"module/catalog"}, CountMode: CountModeOne, EnvironmentID: "env", BudgetClass: "full"},
 		},
 		Projections: map[string]testplanning.ProjectionPolicy{},
 	}
-	plan, err := testplanning.BuildPlan(policy, testplanning.WeightModel{Version: testplanning.WeightModelVersion, SourceRunID: "run", Packages: map[string]float64{}}, []string{"module/a", "module/catalog"}, testplanning.ProfilePRCommon, "test", "head")
+	plan, err := testplanning.BuildPlan(policy, testplanning.WeightModel{Version: testplanning.WeightModelVersion, SourceRunID: "run", Packages: map[string]float64{}}, []string{"module/a", "module/catalog"}, testplanning.ProfileCore, "test", "head")
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}

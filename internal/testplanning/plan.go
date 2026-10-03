@@ -10,25 +10,33 @@ import (
 	"strings"
 )
 
-const RunPlanVersion = 1
+const RunPlanVersion = 2
 
 type BuildOptions struct {
-	IncludeSoak       bool
-	IncludeParityFull bool
+	Venue string
 }
 
 type RunPlan struct {
-	Version        int          `json:"version"`
-	PolicyVersion  int          `json:"policy_version"`
-	Profile        string       `json:"profile"`
-	Reason         string       `json:"reason"`
-	HeadSHA        string       `json:"head_sha"`
-	Digest         string       `json:"digest"`
-	BuildContext   BuildContext `json:"build_context"`
-	TargetSeconds  float64      `json:"target_seconds"`
-	GranularityMax float64      `json:"granularity_max_seconds"`
-	Packages       []string     `json:"packages"`
-	Units          []ProofUnit  `json:"units"`
+	Version        int            `json:"version"`
+	PolicyVersion  int            `json:"policy_version"`
+	Profile        string         `json:"profile"`
+	Venue          string         `json:"venue"`
+	Reason         string         `json:"reason"`
+	HeadSHA        string         `json:"head_sha"`
+	Digest         string         `json:"digest"`
+	BuildContext   BuildContext   `json:"build_context"`
+	TargetSeconds  float64        `json:"target_seconds"`
+	GranularityMax float64        `json:"granularity_max_seconds"`
+	Packages       []string       `json:"packages"`
+	Units          []ProofUnit    `json:"units"`
+	Batches        []ProofBatch   `json:"batches"`
+	DeferredRoots  []TierDeferral `json:"deferred_roots,omitempty"`
+}
+
+type TierDeferral struct {
+	TestRoot
+	MinimumTier string   `json:"minimum_tier"`
+	FullOwners  []string `json:"full_owners"`
 }
 
 type ProofUnit struct {
@@ -63,6 +71,12 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 	if len(options) == 1 {
 		option = options[0]
 	}
+	if option.Venue == "" {
+		option.Venue = VenueCI
+	}
+	if option.Venue != VenueLocal && option.Venue != VenueCI {
+		return RunPlan{}, fmt.Errorf("unsupported execution venue %q", option.Venue)
+	}
 	if err := policy.Validate(); err != nil {
 		return RunPlan{}, err
 	}
@@ -92,7 +106,7 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 		special[pkg] = true
 	}
 	selectedPackages := append([]string(nil), packages...)
-	if profile == ProfileLocal {
+	if profile != ProfileFull {
 		selected := map[string]bool{}
 		for _, pkg := range packages {
 			if !special[pkg] {
@@ -136,7 +150,7 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 	if shardCount > policy.Planning.MaxShards {
 		shardCount = policy.Planning.MaxShards
 	}
-	if profile == ProfileLocal {
+	if option.Venue == VenueLocal {
 		shardCount = 1
 	}
 	if shardCount > len(broad) {
@@ -147,7 +161,7 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 		shards[i] = ProofUnit{
 			ID:              fmt.Sprintf("broad-%02d", i+1),
 			WorkloadProfile: profile,
-			ExecutionTier:   executionTier(profile, "broad"),
+			ExecutionTier:   executionTier(option.Venue, "broad"),
 			CountMode:       profilePolicy.CountMode,
 			EnvironmentID:   profilePolicy.EnvironmentID,
 			BudgetClass:     "broad",
@@ -169,18 +183,6 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 	}
 	units := append([]ProofUnit(nil), shards...)
 	unitIDs := append([]string(nil), profilePolicy.Units...)
-	if option.IncludeSoak {
-		if profile != ProfilePRCommon && profile != ProfilePREscalated {
-			return RunPlan{}, fmt.Errorf("affected soak is only an optional PR addition")
-		}
-		unitIDs = append(unitIDs, "conformance-soak-sqlite", "conformance-soak-postgres")
-	}
-	if option.IncludeParityFull {
-		if profile != ProfilePRCommon && profile != ProfilePREscalated {
-			return RunPlan{}, fmt.Errorf("parity supplements are only an optional PR addition")
-		}
-		unitIDs = append(unitIDs, "parity-served-source-artifact", "parity-connected-channel-onboarding-surface", "parity-destructive-reset-crash", "parity-golden-forced-restart")
-	}
 	for _, id := range unitIDs {
 		specialUnit := policy.Units[id]
 		for _, pkg := range specialUnit.Packages {
@@ -195,7 +197,7 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 		unit := ProofUnit{
 			ID:               id,
 			WorkloadProfile:  profile,
-			ExecutionTier:    executionTier(profile, specialUnit.BudgetClass),
+			ExecutionTier:    executionTier(option.Venue, specialUnit.BudgetClass),
 			Packages:         unitPackages,
 			Run:              specialUnit.Run,
 			Skip:             specialUnit.Skip,
@@ -206,10 +208,6 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 			RequiredChildren: specialUnit.RequiredChildren,
 		}
 		weightProfile := profile
-		if strings.HasPrefix(id, "parity-") {
-			unit.WorkloadProfile = ProfileFull
-			weightProfile = ProfileFull
-		}
 		weight, measured := model.UnitSeconds(weightProfile, unit)
 		if !measured {
 			weight = policy.Planning.UnknownPackageSeconds
@@ -221,12 +219,14 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 		Version:        RunPlanVersion,
 		PolicyVersion:  policy.Version,
 		Profile:        profile,
+		Venue:          option.Venue,
 		Reason:         reason,
 		HeadSHA:        strings.TrimSpace(headSHA),
 		TargetSeconds:  policy.Planning.TargetSeconds,
 		GranularityMax: granularityMax,
 		Packages:       selectedPackages,
 		Units:          units,
+		Batches:        buildBatches(units, policy, model, profile),
 	}
 	if plan.HeadSHA == "" {
 		return RunPlan{}, fmt.Errorf("head SHA must be non-empty")
@@ -243,13 +243,19 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 }
 
 func (p RunPlan) Validate() error {
+	if err := p.validateBatches(); err != nil {
+		return err
+	}
 	if p.Version != RunPlanVersion {
 		return fmt.Errorf("run plan version = %d, want %d", p.Version, RunPlanVersion)
 	}
 	switch p.Profile {
-	case ProfileLocal, ProfilePRCommon, ProfilePREscalated, ProfileFull, ProfileNightly:
+	case ProfileCore, ProfileLifecycle, ProfileFull:
 	default:
 		return fmt.Errorf("run plan has unsupported profile %q", p.Profile)
+	}
+	if p.Venue != VenueLocal && p.Venue != VenueCI {
+		return fmt.Errorf("run plan has unsupported venue %q", p.Venue)
 	}
 	if p.Profile == "" || p.HeadSHA == "" || p.Digest == "" {
 		return fmt.Errorf("run plan profile, head_sha, and digest must be non-empty")
@@ -259,6 +265,14 @@ func (p RunPlan) Validate() error {
 	}
 	seenUnits := map[string]bool{}
 	seenPackages := map[string][]ProofUnit{}
+	deferred := map[TestRoot]bool{}
+	for _, root := range p.DeferredRoots {
+		if p.Profile == ProfileFull || TierRank(root.MinimumTier) <= TierRank(p.Profile) ||
+			TierRank(root.MinimumTier) == 0 || len(root.FullOwners) == 0 || deferred[root.TestRoot] {
+			return fmt.Errorf("invalid tier deferral for %s.%s", root.Package, root.Name)
+		}
+		deferred[root.TestRoot] = true
+	}
 	soakBackends := map[string]bool{}
 	for _, unit := range p.Units {
 		if unit.ID == "" || seenUnits[unit.ID] {
@@ -271,10 +285,10 @@ func (p RunPlan) Validate() error {
 		if !validCountMode(unit.CountMode) || unit.EnvironmentID == "" {
 			return fmt.Errorf("unit %s has invalid count/environment identity", unit.ID)
 		}
-		if unit.ExecutionTier != executionTier(p.Profile, unit.BudgetClass) {
+		if unit.ExecutionTier != executionTier(p.Venue, unit.BudgetClass) {
 			return fmt.Errorf("unit %s has invalid execution tier %q", unit.ID, unit.ExecutionTier)
 		}
-		if unit.WorkloadProfile != p.Profile && !(strings.HasPrefix(unit.ID, "parity-") && unit.WorkloadProfile == ProfileFull && (p.Profile == ProfilePRCommon || p.Profile == ProfilePREscalated)) {
+		if unit.WorkloadProfile != p.Profile {
 			return fmt.Errorf("unit %s has invalid workload profile %q", unit.ID, unit.WorkloadProfile)
 		}
 		if unit.BudgetClass != "broad" && unit.BudgetClass != "full" && unit.BudgetClass != "soak" {
@@ -296,6 +310,9 @@ func (p RunPlan) Validate() error {
 			}
 			selected := map[string]bool{}
 			for _, root := range unit.SelectedRoots {
+				if deferred[root] {
+					return fmt.Errorf("selected root %s.%s is also tier-deferred", root.Package, root.Name)
+				}
 				key := root.Package + "\x00" + root.Name
 				if selected[key] {
 					return fmt.Errorf("unit %s selects duplicate root %s.%s", unit.ID, root.Package, root.Name)
@@ -358,11 +375,11 @@ func (p RunPlan) Validate() error {
 	return nil
 }
 
-func executionTier(profile, budget string) string {
+func executionTier(venue, budget string) string {
 	if budget == "soak" {
 		return "soak"
 	}
-	if profile == ProfileLocal {
+	if venue == VenueLocal {
 		return "local"
 	}
 	return "full"
@@ -396,22 +413,15 @@ func MatrixJSON(plan RunPlan) ([]byte, error) {
 		return nil, err
 	}
 	type entry struct {
-		Unit string `json:"unit"`
+		Unit           string `json:"unit"`
+		BudgetClass    string `json:"budget_class"`
+		TimeoutMinutes int    `json:"timeout_minutes"`
 	}
 	matrix := struct {
 		Include []entry `json:"include"`
 	}{Include: make([]entry, 0, len(plan.Units))}
-	// Offer expensive units first without changing the digest-bound plan. Actions
-	// controls admission; this ordering does not promise a runner start order.
-	ordered := append([]ProofUnit(nil), plan.Units...)
-	sort.Slice(ordered, func(i, j int) bool {
-		if ordered[i].WeightSeconds == ordered[j].WeightSeconds {
-			return ordered[i].ID < ordered[j].ID
-		}
-		return ordered[i].WeightSeconds > ordered[j].WeightSeconds
-	})
-	for _, unit := range ordered {
-		matrix.Include = append(matrix.Include, entry{Unit: unit.ID})
+	for _, batch := range plan.Batches {
+		matrix.Include = append(matrix.Include, entry{Unit: batch.ID, BudgetClass: batch.BudgetClass, TimeoutMinutes: batch.TimeoutMinutes})
 	}
 	return json.Marshal(matrix)
 }

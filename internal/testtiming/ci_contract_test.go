@@ -60,12 +60,12 @@ func TestCIJobCollectionWaitsOnlyForTerminalEvidence(t *testing.T) {
 		name, plan, jobs string
 		ready            bool
 	}{
-		{"complete", `{"units":[{"id":"one"},{"id":"two"}]}`, `[{"jobs":[{"name":"Go proof one","status":"completed"},{"name":"Go proof two","status":"completed"}]}]`, true},
-		{"stale successful job", `{"units":[{"id":"one"},{"id":"two"}]}`, `[{"jobs":[{"name":"Go proof one","status":"completed"},{"name":"Go proof two","status":"in_progress"}]}]`, false},
-		{"missing job", `{"units":[{"id":"one"},{"id":"two"}]}`, `[{"jobs":[{"name":"Go proof one","status":"completed"}]}]`, false},
-		{"duplicate job", `{"units":[{"id":"one"},{"id":"two"}]}`, `[{"jobs":[{"name":"Go proof one","status":"completed"},{"name":"Go proof two","status":"completed"},{"name":"Go proof two","status":"completed"}]}]`, false},
-		{"terminal failure reaches evaluator", `{"units":[{"id":"one"},{"id":"two"}]}`, `[{"jobs":[{"name":"Go proof one","status":"completed"},{"name":"Go proof two","status":"completed","conclusion":"failure"}]}]`, true},
-		{"empty plan", `{"units":[]}`, `[{"jobs":[]}]`, false},
+		{"complete", `{"batches":[{"id":"one"},{"id":"two"}]}`, `[{"jobs":[{"name":"Go proof one","status":"completed"},{"name":"Go proof two","status":"completed"}]}]`, true},
+		{"stale successful job", `{"batches":[{"id":"one"},{"id":"two"}]}`, `[{"jobs":[{"name":"Go proof one","status":"completed"},{"name":"Go proof two","status":"in_progress"}]}]`, false},
+		{"missing job", `{"batches":[{"id":"one"},{"id":"two"}]}`, `[{"jobs":[{"name":"Go proof one","status":"completed"}]}]`, false},
+		{"duplicate job", `{"batches":[{"id":"one"},{"id":"two"}]}`, `[{"jobs":[{"name":"Go proof one","status":"completed"},{"name":"Go proof two","status":"completed"},{"name":"Go proof two","status":"completed"}]}]`, false},
+		{"terminal failure reaches evaluator", `{"batches":[{"id":"one"},{"id":"two"}]}`, `[{"jobs":[{"name":"Go proof one","status":"completed"},{"name":"Go proof two","status":"completed","conclusion":"failure"}]}]`, true},
+		{"empty plan", `{"batches":[]}`, `[{"jobs":[]}]`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := os.WriteFile(planPath, []byte(tc.plan), 0600); err != nil {
@@ -165,7 +165,7 @@ type ciWorkflowJob struct {
 	Needs          []string         `yaml:"needs"`
 	Environment    string           `yaml:"environment"`
 	Steps          []ciWorkflowStep `yaml:"steps"`
-	TimeoutMinutes int              `yaml:"timeout-minutes"`
+	TimeoutMinutes any              `yaml:"timeout-minutes"`
 	RunsOn         string           `yaml:"runs-on"`
 	Strategy       struct {
 		FailFast    *bool  `yaml:"fail-fast"`
@@ -198,6 +198,14 @@ func TestCIConsumesOnePlanAndCompletePlanBoundEvidence(t *testing.T) {
 		}
 	}
 	producer := findWorkflowStep(workflow.Jobs["proof-unit"].Steps, "Run exact planned proof unit")
+	if producer == nil || producer.Run != "bash .github/scripts/run-proof-batch.sh" {
+		t.Fatal("missing isolated batch consumer")
+	}
+	batchScript, err := os.ReadFile(filepath.Join(root, ".github/scripts/run-proof-batch.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	producer.Run = string(batchScript)
 	for _, want := range []string{"-record-evidence", "-plan \"$plan\"", "-unit \"$UNIT_ID\""} {
 		if producer == nil || !strings.Contains(producer.Run, want) {
 			t.Fatalf("proof producer missing %q", want)
@@ -393,7 +401,7 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		}
 		contractsPatterns = append(contractsPatterns, regexp.MustCompile(unit.Run))
 		for name, profile := range policy.Profiles {
-			if name == testplanning.ProfileLocal {
+			if name == testplanning.ProfileCore {
 				continue
 			}
 			if !slices.Contains(profile.Units, id) {
@@ -407,7 +415,7 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		t.Fatalf("api-llm-bus-full unit = %#v, want complete uncached API/LLM/bus packages", apiUnit)
 	}
 	for name, profile := range policy.Profiles {
-		if name != testplanning.ProfileLocal && !slices.Contains(profile.Units, "api-llm-bus-full") {
+		if name != testplanning.ProfileCore && !slices.Contains(profile.Units, "api-llm-bus-full") {
 			t.Fatalf("profile %s omits api-llm-bus-full", name)
 		}
 	}
@@ -419,7 +427,7 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		}
 		conformanceUnits = append(conformanceUnits, testplanning.ProofUnit{ID: id, Packages: unit.Packages, Run: unit.Run, Skip: unit.Skip, GoTimeout: unit.GoTimeout, CountMode: unit.CountMode, BudgetClass: unit.BudgetClass})
 		for name, profile := range policy.Profiles {
-			if name == testplanning.ProfileLocal || id == "conformance-soak-sqlite" && name != testplanning.ProfileNightly || id == "conformance-soak-postgres" && name != testplanning.ProfileNightly {
+			if name == testplanning.ProfileCore || name != testplanning.ProfileFull && (strings.HasPrefix(id, "conformance-soak-") || id == "conformance-heavy-fanout" || id == "conformance-2394-reporter") {
 				continue
 			}
 			if !slices.Contains(profile.Units, id) {
@@ -448,7 +456,7 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		storeRuntimePatterns = append(storeRuntimePatterns, regexp.MustCompile(unit.Run))
 	}
 	assertGoProofPartition(t, filepath.Join(root, "internal", "store", "internal", "runtimepersistence"), storeRuntimePatterns)
-	for _, profileName := range []string{testplanning.ProfilePRCommon, testplanning.ProfilePREscalated, testplanning.ProfileFull, testplanning.ProfileNightly} {
+	for _, profileName := range []string{testplanning.ProfileLifecycle, testplanning.ProfileFull} {
 		foundRuntime := false
 		foundServeapp := map[string]bool{}
 		foundStore := false
