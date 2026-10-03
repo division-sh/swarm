@@ -197,6 +197,9 @@ func (p Policy) ResolveProfile(event string, prBody string, forced string) (stri
 		if _, ok := p.Profiles[forced]; !ok {
 			return "", "", fmt.Errorf("unknown forced profile %q", forced)
 		}
+		if forced != ProfileFull {
+			return "", "", fmt.Errorf("workflow_dispatch requires full qualification, not %s", forced)
+		}
 		return forced, "explicit profile", nil
 	}
 	switch event {

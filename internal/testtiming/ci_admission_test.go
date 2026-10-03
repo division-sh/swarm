@@ -22,6 +22,12 @@ type admissionWorkflow struct {
 		PullRequest struct {
 			Types []string `yaml:"types"`
 		} `yaml:"pull_request"`
+		WorkflowDispatch struct {
+			Inputs map[string]struct {
+				Default string   `yaml:"default"`
+				Options []string `yaml:"options"`
+			} `yaml:"inputs"`
+		} `yaml:"workflow_dispatch"`
 	} `yaml:"on"`
 	Concurrency struct {
 		Group  string `yaml:"group"`
@@ -110,6 +116,17 @@ func TestCITierIncreaseKeepsLateSummaryAndNewHeadEvent(t *testing.T) {
 		!strings.Contains(step.Run, "-workflow-head-sha") ||
 		!strings.Contains(step.Run, "current-pr.json") {
 		t.Fatal("late summary lost exact current-body/head refusal")
+	}
+}
+
+func TestCIManualDispatchFullSummaryHasOnlyFullAdmission(t *testing.T) {
+	workflow := loadAdmissionWorkflow(t)
+	profile, ok := workflow.On.WorkflowDispatch.Inputs["profile"]
+	if !ok || profile.Default != testplanning.ProfileFull || !slices.Equal(profile.Options, []string{testplanning.ProfileFull}) {
+		t.Fatalf("manual full summary admits thin input: %+v", profile)
+	}
+	if !strings.Contains(workflow.Jobs["required-tests"].Name, "Full dispatch summary") {
+		t.Fatal("manual exhaustive summary lost its full label")
 	}
 }
 

@@ -237,3 +237,26 @@ provisional until comparable hosted core/lifecycle/full whole-run cost is
 measured; collapse it into full if savings are below the binding 20% threshold.
 #2525 is still open and its actual policy/partition delta must be integrated if
 it merges. #2535 remains open. No new architecture tracker or vendor is needed.
+
+### Review Pass 1: Local Source Identity And Manual Truth
+
+Binding review5968576803 adds two manifestations within the existing owners.
+R01: explicit local --tier/--full must refuse tracked and untracked non-ignored
+worktree changes before planning, before each command and after each command;
+HEAD must remain the plan's actual commit. Default no-context developer feedback
+remains permissive. Ignored test-results and external build artifacts are not
+source changes. Planned hosted execution retains its existing execution-SHA
+validation. Proof uses real Git repositories, dirty tracked tests, untracked
+fixtures, post-admission dirt, changed HEAD, and clean/ignored-output controls.
+R02: workflow_dispatch is exhaustive only. Both the checked-in choice and
+canonical profile resolver must refuse core/lifecycle, rather than allowing thin
+success under Full dispatch summary. Workflow YAML and resolver negatives prove
+the full-only boundary. No runtime or second qualification owner is introduced.
+
+The previous vemew full at6ea56b2f1 was interrupted with SIGINT after waiting for
+shared admission; its partial evidence remains uncredited. Its hosted full run
+37112045175 succeeded, but neither that run nor the earlier default developer
+feedback qualifies this repair. Master5d3cc2400 is integrated before the repair.
+Final explicit full qualification runs on server2, with source and scratch on
+disk-backed /home, canonical PostgreSQL/admission ownership, and no /tmp worktree.
+Final audit must bind server2 full and hosted full to the same resulting head.

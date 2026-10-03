@@ -61,3 +61,17 @@ func TestFixedTierIsIndependentOfGitDelta(t *testing.T) {
 		t.Fatal("forced event bypass")
 	}
 }
+
+func TestManualDispatchRequiresExhaustiveFull(t *testing.T) {
+	policy := testPolicy()
+	for _, forced := range []string{"", ProfileFull, ProfileCore, ProfileLifecycle, "unknown"} {
+		got, _, err := policy.ResolveProfile("workflow_dispatch", "CI-Tier: core", forced)
+		if forced == "" || forced == ProfileFull {
+			if err != nil || got != ProfileFull {
+				t.Fatalf("manual full %q: %s %v", forced, got, err)
+			}
+		} else if err == nil {
+			t.Fatalf("thin/invalid manual dispatch admitted: %q -> %s", forced, got)
+		}
+	}
+}

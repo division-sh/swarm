@@ -22713,7 +22713,7 @@ test_specification:
         Body edits do not trigger CI. The late five-minute summary checks current body/head before success; it cannot revoke completed green.
         An unmet tier increase requires a new signed head and higher-tier qualifying protected checks; keep the PR draft/non-mergeable until qualification.
         Lead's final merge comparison checks current body against successful current-head trusted-App plan/summary, including post-approval edits; completed higher scope can satisfy lower.
-        Local --tier/--full retains plan/receipts for independent Local-Tier human comparison. No-context core/changed-package execution is developer feedback, not reviewer-bound proof; no local authorization sidecar, audit locator, GitHub lookup or branch/title inference.
+        Local --tier/--full requires unchanged HEAD and clean tracked/untracked non-ignored source before planning and after execution, retaining actual HEAD and plan/receipts for independent Local-Tier human comparison. No-context core/changed-package execution permits dirty developer feedback, not reviewer-bound proof; no local authorization sidecar, audit locator, GitHub lookup or branch/title inference.
       membership: >-
         Core executes ordinary admitted roots and fixed safety and smoke canaries. Lifecycle adds the retained
         both-store restart, recovery and semantic families. Full owns every admitted executable root, both unchanged
@@ -22727,7 +22727,7 @@ test_specification:
         remains independent. Build-product reuse requires exact clean source, toolchain, native platform, dependency,
         policy, profile and flags identity plus byte integrity; a miss or mismatch rebuilds, never supplies test credit.
       master_replay: >-
-        Schedule and unverified master execute full. Master may reuse one exactly associated merged PR only when its
+        Schedule, manual dispatch and unverified master execute full. Master may reuse one exactly associated merged PR only when its
         qualified execution tree equals the pushed tree, the current PR tier is satisfied, and the current App 15368
         protected checks, exact successful run/attempt and canonical plan are verified through read-only observation.
         Missing, ambiguous, stale, failed or unavailable evidence falls back to full. Reused proof is identified as

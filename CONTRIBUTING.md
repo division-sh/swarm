@@ -63,6 +63,9 @@ qualification uses explicit `--tier TIER` or `--full` and retains the effective
 plan and receipts under `test-results/local`. The reviewer compares that command
 and receipt with Local-Tier; an absent or invalid local instruction cannot earn
 thin qualification credit. No GitHub lookup or authorization sidecar is used.
+Explicit qualification requires clean tracked and untracked non-ignored source,
+with unchanged HEAD before planning and after execution. Ignored receipts are
+permitted; dirty source is allowed only for non-qualifying developer feedback.
 
 `swarm-test-changed` and no-context `swarm-test` are developer feedback, not
 substitutes for the reviewer-required tier. Do not habitually force
@@ -77,7 +80,7 @@ owns retained both-store restart and recovery families. Full owns every admitted
 root, both unchanged 900s backend soaks, and hosted native Linux/Darwin unused
 union. The root census explicitly records every lower-tier deferral; omitted
 proofs earn no execution credit. Schedule and unverified master use full;
-manual exhaustive runs default to full. Local full cannot claim Darwin credit.
+manual dispatch is full-only. Local full cannot claim Darwin credit.
 High-risk semantic/runtime migrations require full local
 `go run ./cmd/swarm-test --full` when the issue
 gate or reviewer asks for it.
