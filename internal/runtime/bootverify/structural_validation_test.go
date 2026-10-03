@@ -126,7 +126,6 @@ func TestStructuralCheckPurposeCensus(t *testing.T) {
 		"transition_ownership_validation":         "structural",
 		"event_runtime_wiring_validation":         "structural",
 		"timer_validation":                        "structural",
-		"write_pin_ownership_validation":          "structural",
 		"gate_schema_validation":                  "structural",
 		"composition_connect_validation":          "structural",
 		"input_pin_wiring":                        "structural",

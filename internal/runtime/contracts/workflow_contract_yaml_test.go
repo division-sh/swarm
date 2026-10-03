@@ -1850,31 +1850,10 @@ compute:
 	}
 }
 
-func TestFlowPinsDecode_AcceptsOptionMappingsAndScalarPermissions(t *testing.T) {
+func TestFlowPinsDecode_RejectsRetiredScalarPermissions(t *testing.T) {
 	var schema FlowSchemaDocument
-	if err := decodeNodeTestSnippet(t, canonicalrouting.W2OptionPinsParserSnippet(t), &schema); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
-	}
-	if got := len(schema.Pins.Inputs.EventPins); got != 1 {
-		t.Fatalf("len(Inputs.EventPins) = %d", got)
-	}
-	if got := schema.Pins.Inputs.EventPins[0].EventType(); got != "check.requested" {
-		t.Fatalf("Inputs.EventPins[0].EventType() = %q", got)
-	}
-	if got := schema.Pins.Inputs.EventPins[0].Source; got != FlowInputPinSourceHarness {
-		t.Fatalf("Inputs.EventPins[0].Source = %s", FlowInputPinSourceCode(got))
-	}
-	if got := schema.Pins.Outputs.EventPins[0].EventType(); got != "check.passed" {
-		t.Fatalf("Outputs.EventPins[0].EventType() = %q", got)
-	}
-	if got := schema.Pins.Outputs.EventPins[0].Sink; got != FlowOutputSinkHarness {
-		t.Fatalf("Outputs.EventPins[0].Sink = %s", FlowOutputSinkCode(got))
-	}
-	if got := schema.Pins.Inputs.Reads[0]; got != "entity.score" {
-		t.Fatalf("Inputs.Reads[0] = %q", got)
-	}
-	if got := schema.Pins.Outputs.Writes[0]; got != "entity.status" {
-		t.Fatalf("Outputs.Writes[0] = %q", got)
+	if err := decodeNodeTestSnippet(t, canonicalrouting.W2OptionPinsParserSnippet(t), &schema); err == nil {
+		t.Fatal("retired read/write grants were admitted")
 	}
 }
 
@@ -1954,8 +1933,8 @@ func TestW2RejectsNullEmptyAndRedundantPinForms(t *testing.T) {
 		{name: "optionless input mapping", raw: "pins:\n  inputs:\n    events:\n      - event: work.requested\n", want: "mapping requires a non-default source, resolution or initialize"},
 		{name: "optionless output mapping", raw: "pins:\n  outputs:\n    events:\n      - event: work.completed\n", want: "mapping requires a non-default sink"},
 		{name: "duplicate event", raw: "pins:\n  inputs:\n    events: [work.requested, work.requested]\n", want: "declared more than once"},
-		{name: "duplicate read", raw: "pins:\n  inputs:\n    reads: [entity.status, entity.status]\n", want: "declared more than once"},
-		{name: "structured write", raw: "pins:\n  outputs:\n    writes: [{field: entity.status}]\n", want: "scalar text, got mapping"},
+		{name: "retired read grant", raw: "pins:\n  inputs:\n    reads: [entity.status, entity.status]\n", want: `field "reads" is not supported`},
+		{name: "retired write grant", raw: "pins:\n  outputs:\n    writes: [{field: entity.status}]\n", want: `field "writes" is not supported`},
 		{name: "unknown pin direction", raw: "pins:\n  ingress:\n    events: [work.requested]\n", want: "is not supported"},
 		{name: "unknown input field", raw: "pins:\n  inputs:\n    aliases: [work.requested]\n", want: "is not supported"},
 	} {

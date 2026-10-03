@@ -9,26 +9,12 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 )
 
-func TestW2RejectsInvalidCompiledPinAndPermissionInputs(t *testing.T) {
+func TestW2RejectsInvalidCompiledPinInputs(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		bundle *WorkflowContractBundle
 		want   string
 	}{
-		{
-			name: "root duplicate read",
-			bundle: &WorkflowContractBundle{RootSchema: &FlowSchemaDocument{Pins: FlowPins{
-				Inputs: FlowInputPins{Reads: []string{"entity.status", "entity.status"}},
-			}}},
-			want: "compile root input entity permissions",
-		},
-		{
-			name: "flow inexact write",
-			bundle: &WorkflowContractBundle{FlowSchemas: map[string]FlowSchemaDocument{
-				"worker": {Pins: FlowPins{Outputs: FlowOutputPins{Writes: []string{" entity.status"}}}},
-			}},
-			want: "compile flow worker output entity permissions",
-		},
 		{
 			name: "flow duplicate input pin",
 			bundle: &WorkflowContractBundle{FlowSchemas: map[string]FlowSchemaDocument{

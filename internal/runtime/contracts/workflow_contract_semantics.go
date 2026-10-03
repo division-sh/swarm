@@ -52,13 +52,10 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 		FlowRules:              map[string]string{},
 		flowInputEventPins:     map[string][]CompiledFlowInputPin{},
 		flowOutputEventPins:    map[string][]CompiledFlowOutputPin{},
-		flowReads:              map[string]CompiledFlowEntityPermissions{},
-		flowWrites:             map[string]CompiledFlowEntityPermissions{},
 		CompositionConnects:    compositionConnects,
 		FlowAgents:             map[string][]FlowRequiredAgent{},
 		RootAgentFacts:         nil,
 		FlowAgentFacts:         map[string][]RequiredAgentFact{},
-		writePinOwners:         map[string][]string{},
 		EffectiveNodes:         map[string]SystemNodeEffectiveSemantics{},
 		NodeHandlers:           map[string]map[string]SystemNodeEventHandler{},
 		EventOwners:            map[string][]string{},
@@ -95,14 +92,6 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 		if err != nil {
 			return fmt.Errorf("compile root output pins: %w", err)
 		}
-		semantics.flowReads["."], err = CompileFlowEntityPermissions(bundle.RootSchema.Pins.Inputs.Reads)
-		if err != nil {
-			return fmt.Errorf("compile root input entity permissions: %w", err)
-		}
-		semantics.flowWrites["."], err = CompileFlowEntityPermissions(bundle.RootSchema.Pins.Outputs.Writes)
-		if err != nil {
-			return fmt.Errorf("compile root output entity permissions: %w", err)
-		}
 	}
 	for _, entry := range semantics.Guards {
 		if id := strings.TrimSpace(entry.ID); id != "" {
@@ -135,20 +124,9 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 		if err != nil {
 			return fmt.Errorf("compile flow %s output pins: %w", flowID, err)
 		}
-		semantics.flowReads[flowID], err = CompileFlowEntityPermissions(schema.Pins.Inputs.Reads)
-		if err != nil {
-			return fmt.Errorf("compile flow %s input entity permissions: %w", flowID, err)
-		}
-		semantics.flowWrites[flowID], err = CompileFlowEntityPermissions(schema.Pins.Outputs.Writes)
-		if err != nil {
-			return fmt.Errorf("compile flow %s output entity permissions: %w", flowID, err)
-		}
 		facts := bundle.FlowRequiredAgentFacts(flowID)
 		semantics.FlowAgentFacts[flowID] = facts
 		semantics.FlowAgents[flowID] = FlowRequiredAgentsFromFacts(facts)
-		for _, writePin := range semantics.flowWrites[flowID].Fields() {
-			semantics.writePinOwners[writePin] = appendIfMissingString(semantics.writePinOwners[writePin], flowID)
-		}
 	}
 	if failures := bundle.PrepareFanOutPlans(); len(failures) != 0 {
 		return fmt.Errorf("compile fan_out: %s", failures[0].Error())

@@ -96,13 +96,10 @@ type WorkflowSemanticView struct {
 	FlowRules              map[string]string
 	flowInputEventPins     map[string][]CompiledFlowInputPin
 	flowOutputEventPins    map[string][]CompiledFlowOutputPin
-	flowReads              map[string]CompiledFlowEntityPermissions
-	flowWrites             map[string]CompiledFlowEntityPermissions
 	CompositionConnects    []FlowConnect
 	FlowAgents             map[string][]FlowRequiredAgent
 	RootAgentFacts         []RequiredAgentFact
 	FlowAgentFacts         map[string][]RequiredAgentFact
-	writePinOwners         map[string][]string
 	EffectiveNodes         map[string]SystemNodeEffectiveSemantics
 	NodeHandlers           map[string]map[string]SystemNodeEventHandler
 	EventOwners            map[string][]string
@@ -1260,11 +1257,9 @@ type FlowPins struct {
 }
 type FlowInputPins struct {
 	EventPins []FlowInputEventPin `yaml:"-"`
-	Reads     []string            `yaml:"reads"`
 }
 type FlowOutputPins struct {
 	EventPins []FlowOutputEventPin `yaml:"-"`
-	Writes    []string             `yaml:"writes"`
 }
 type FlowInputEventPin struct {
 	Event      string                 `yaml:"event"`

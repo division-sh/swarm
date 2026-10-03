@@ -61,11 +61,6 @@ func wave1WriteTargetContract(source semanticview.Source, target wave1WriteTarge
 			return view, true
 		}
 	}
-	if target.flowID() != "" && wave1FlowWritesRootField(source, target.flowID(), target.Field) {
-		if root, ok := wave1RootFieldContract(source, target.Field); ok {
-			return root, true
-		}
-	}
 	return wave1EntityContractView{}, false
 }
 
@@ -690,11 +685,6 @@ func wave1ResolveWriteTargetPath(source semanticview.Source, target wave1WriteTa
 		if view := wave1EntityContractForFlow(source, target.flowID()); view.Defined {
 			if _, ok := view.Contract.Fields[strings.TrimSpace(rootField)]; ok {
 				return wave1ResolvedType{}, strings.TrimSpace(view.FlowID), strings.TrimSpace(rootField), nil
-			}
-		}
-		if target.flowID() != "" && wave1FlowWritesRootField(source, target.flowID(), rootField) {
-			if root, ok := wave1RootFieldContract(source, rootField); ok {
-				return wave1ResolvedType{}, strings.TrimSpace(root.FlowID), strings.TrimSpace(rootField), nil
 			}
 		}
 		if platformcontext.LegacyEntityMetadataField(rootField) {

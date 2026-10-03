@@ -1,7 +1,6 @@
 package contracts
 
 import (
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -46,7 +45,7 @@ func TestImportedOutputPinSchemaBindingIsImmutableAndSingleOwner(t *testing.T) {
 	}
 }
 
-func TestW2CanonicalPinAndPermissionEvidenceIgnoresSetAuthorOrderAndIsImmutable(t *testing.T) {
+func TestW2CanonicalPinEvidenceIsImmutable(t *testing.T) {
 	context := FlowPinCompilationContext{FlowID: "collector", FlowPath: "collector", SourceFile: "collector/schema.yaml"}
 	first, err := CompileFlowInputPin(context, FlowInputEventPin{
 		Event: "work.reported",
@@ -76,24 +75,6 @@ func TestW2CanonicalPinAndPermissionEvidenceIgnoresSetAuthorOrderAndIsImmutable(
 		t.Fatalf("resolution readback mutation escaped into compiled owner: %#v", got)
 	}
 
-	firstFields := []string{"entity.updated_at", "entity.status"}
-	permissionsA, err := CompileFlowEntityPermissions(firstFields)
-	if err != nil {
-		t.Fatalf("compile first permissions: %v", err)
-	}
-	permissionsB, err := CompileFlowEntityPermissions([]string{"entity.status", "entity.updated_at"})
-	if err != nil {
-		t.Fatalf("compile second permissions: %v", err)
-	}
-	if !reflect.DeepEqual(permissionsA.Fields(), permissionsB.Fields()) {
-		t.Fatalf("equivalent permission sets differ: %#v/%#v", permissionsA.Fields(), permissionsB.Fields())
-	}
-	firstFields[0] = "entity.changed"
-	fields := permissionsA.Fields()
-	fields[0] = "entity.changed_again"
-	if got := permissionsA.Fields(); !reflect.DeepEqual(got, []string{"entity.status", "entity.updated_at"}) {
-		t.Fatalf("permission readback mutation escaped into compiled owner: %#v", got)
-	}
 }
 
 func TestW2CompiledResolutionRejectsFieldsOutsideClosedMode(t *testing.T) {

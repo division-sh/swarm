@@ -93,7 +93,6 @@ var stableHardInvalidityRemediation = map[string]string{
 	"transition_reference_validation":         "Fix transition references so all events and states are declared and reachable.",
 	"workflow_contract_validation":            "Fix the contract source/load error named by the message, then rerun `swarm verify`.",
 	"workspace_class_exists":                  "Declare the referenced workspace class or update the agent workspace_class.",
-	"write_pin_ownership_validation":          "Fix write pin ownership so the writer and target field share the supported owner boundary.",
 }
 
 var routingRemediationSplitCheckIDs = map[string]struct{}{

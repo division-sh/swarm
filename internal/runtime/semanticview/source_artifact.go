@@ -221,8 +221,6 @@ func (s bundleSource) ConnectionInputs() runtimecontracts.CompiledConnectionInpu
 func (s bundleSource) FlowOutputEventPin(flowID, pinName string) (runtimecontracts.CompiledFlowOutputPin, bool) {
 	return s.bundle.FlowOutputEventPin(flowID, pinName)
 }
-func (s bundleSource) FlowWritePins(flowID string) []string { return s.bundle.FlowWritePins(flowID) }
-func (s bundleSource) WritePinOwners(pin string) []string   { return s.bundle.WritePinOwners(pin) }
 func (s bundleSource) FlowHasInputEvent(flowID, eventType string) bool {
 	return s.bundle.FlowHasInputEvent(flowID, eventType)
 }

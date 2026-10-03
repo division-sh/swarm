@@ -2,7 +2,6 @@ package contracts
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
@@ -131,24 +130,9 @@ func projectSchemaPinsValue(value yamlsource.Value) (FlowPins, error) {
 		return out, err
 	}
 	for _, direction := range sortedContractKeys(fields) {
-		key := "reads"
-		if direction == "outputs" {
-			key = "writes"
-		}
-		members, err := schemaValueFields(fields[direction], "pins."+direction, map[string]struct{}{"events": {}, key: {}}, true)
+		members, err := schemaValueFields(fields[direction], "pins."+direction, map[string]struct{}{"events": {}}, true)
 		if err != nil {
 			return out, err
-		}
-		if names, present := members[key]; present {
-			list, err := projectSchemaPinFieldsValue(names)
-			if err != nil {
-				return out, err
-			}
-			if direction == "inputs" {
-				out.Inputs.Reads = list
-			} else {
-				out.Outputs.Writes = list
-			}
 		}
 		if events, present := members["events"]; present {
 			items, err := schemaValueSequence(events, true)
@@ -177,28 +161,6 @@ func projectSchemaPinsValue(value yamlsource.Value) (FlowPins, error) {
 			}
 		}
 	}
-	return out, nil
-}
-
-func projectSchemaPinFieldsValue(value yamlsource.Value) ([]string, error) {
-	items, err := schemaValueSequence(value, true)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]string, 0, len(items))
-	seen := map[string]bool{}
-	for _, item := range items {
-		text, err := schemaValueText(item, true)
-		if err != nil {
-			return nil, err
-		}
-		if seen[text] {
-			return nil, nodeValueError(item, fmt.Errorf("field %q is declared more than once", text))
-		}
-		seen[text] = true
-		out = append(out, text)
-	}
-	sort.Strings(out)
 	return out, nil
 }
 
