@@ -28,8 +28,8 @@ func TestManagedHITLProjectionOwnsDefinitionsGrantsAndExecution(t *testing.T) {
 	if _, ok := withoutPermission[AskHumanToolName]; ok {
 		t.Fatal("ask_human was delivered without its permission")
 	}
-	if _, ok := withoutPermission[WithheldAgentMessageTool]; ok {
-		t.Fatal("agent_message was delivered while typed recipient authority is unavailable")
+	if _, ok := withoutPermission[RetiredAgentMessageTool]; ok {
+		t.Fatal("agent_message was delivered despite retirement")
 	}
 	if notify.Description != "Sends an informational notice to the human operator. Does NOT request approval and does not pause the flow - to ask for a decision that gates the flow, use ask_human." {
 		t.Fatalf("notify_human description = %q", notify.Description)
@@ -45,11 +45,11 @@ func TestManagedHITLProjectionOwnsDefinitionsGrantsAndExecution(t *testing.T) {
 		t.Fatal("ask_human was not delivered with its exact permission")
 	}
 
-	actor.Tools = []string{WithheldAgentMessageTool}
-	if _, ok := definitionMap(exec.ToolDefinitionsForActor(actor))[WithheldAgentMessageTool]; ok {
+	actor.Tools = []string{RetiredAgentMessageTool}
+	if _, ok := definitionMap(exec.ToolDefinitionsForActor(actor))[RetiredAgentMessageTool]; ok {
 		t.Fatal("authored tools reintroduced agent_message")
 	}
-	if err := NewToolAuthorizer(nil, nil).Authorize(unmanagedToolTestContext(), actor, WithheldAgentMessageTool); err == nil {
+	if err := NewToolAuthorizer(nil, nil).Authorize(unmanagedToolTestContext(), actor, RetiredAgentMessageTool); err == nil {
 		t.Fatal("agent_message execution authorization succeeded")
 	}
 }
@@ -176,7 +176,7 @@ func TestHITLIdentityLifecycleRejectsSourceDefinitionsWithoutAgents(t *testing.T
 	}{
 		{name: NotifyHumanToolName, teaching: "owned by the platform HITL contract"},
 		{name: AskHumanToolName, teaching: "owned by the platform HITL contract"},
-		{name: WithheldAgentMessageTool, teaching: agentMessageUnavailableTeaching},
+		{name: RetiredAgentMessageTool, teaching: agentMessageRetiredTeaching},
 		{name: "mailbox_send", teaching: "use notify_human"},
 		{name: "human_task_request", teaching: "use ask_human"},
 	}
@@ -223,7 +223,7 @@ func TestHITLIdentityLifecycleRejectsDiscoveredCandidates(t *testing.T) {
 	}{
 		{name: NotifyHumanToolName, teaching: "owned by the platform HITL contract"},
 		{name: AskHumanToolName, teaching: "owned by the platform HITL contract"},
-		{name: WithheldAgentMessageTool, teaching: agentMessageUnavailableTeaching},
+		{name: RetiredAgentMessageTool, teaching: agentMessageRetiredTeaching},
 		{name: "mailbox_send", teaching: "use notify_human"},
 		{name: "human_task_request", teaching: "use ask_human"},
 	}
@@ -257,7 +257,7 @@ func TestHITLIdentityLifecycleRejectsRuntimeMCPAliases(t *testing.T) {
 	}{
 		{name: NotifyHumanToolName, teaching: "owned by the platform HITL contract"},
 		{name: AskHumanToolName, teaching: "owned by the platform HITL contract"},
-		{name: WithheldAgentMessageTool, teaching: agentMessageUnavailableTeaching},
+		{name: RetiredAgentMessageTool, teaching: agentMessageRetiredTeaching},
 		{name: "mailbox_send", teaching: "use notify_human"},
 		{name: "human_task_request", teaching: "use ask_human"},
 	}
@@ -280,12 +280,12 @@ func TestHITLIdentityLifecycleRejectsRuntimeMCPAliases(t *testing.T) {
 	}
 }
 
-func TestHITLIdentityLifecycleRejectsWithheldAndRetiredReferences(t *testing.T) {
+func TestHITLIdentityLifecycleRejectsRetiredReferences(t *testing.T) {
 	identities := []struct {
 		name     string
 		teaching string
 	}{
-		{name: WithheldAgentMessageTool, teaching: agentMessageUnavailableTeaching},
+		{name: RetiredAgentMessageTool, teaching: agentMessageRetiredTeaching},
 		{name: "mailbox_send", teaching: "use notify_human"},
 		{name: "human_task_request", teaching: "use ask_human"},
 	}
@@ -330,7 +330,7 @@ func TestHITLIdentityLifecycleRejectsDirectDispatchBeforeResolution(t *testing.T
 		name     string
 		teaching string
 	}{
-		{name: WithheldAgentMessageTool, teaching: agentMessageUnavailableTeaching},
+		{name: RetiredAgentMessageTool, teaching: agentMessageRetiredTeaching},
 		{name: "mailbox_send", teaching: "use notify_human"},
 		{name: "human_task_request", teaching: "use ask_human"},
 	} {
@@ -379,7 +379,7 @@ func TestHITLIdentityLifecycleRejectsPermissionExpansion(t *testing.T) {
 		name     string
 		teaching string
 	}{
-		{name: WithheldAgentMessageTool, teaching: agentMessageUnavailableTeaching},
+		{name: RetiredAgentMessageTool, teaching: agentMessageRetiredTeaching},
 		{name: "mailbox_send", teaching: "use notify_human"},
 		{name: "human_task_request", teaching: "use ask_human"},
 	} {

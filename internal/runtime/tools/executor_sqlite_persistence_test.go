@@ -45,9 +45,6 @@ func (allowHumanTaskAuthority) ProducerRoles() []string          { return nil }
 func (allowHumanTaskAuthority) ProducerEventsForRole(string) []string {
 	return nil
 }
-func (allowHumanTaskAuthority) HasMessageAuthority(actor, target models.AgentConfig) bool {
-	return false
-}
 func (allowHumanTaskAuthority) AuthorizeNotifyHuman(actor models.AgentConfig) error {
 	return nil
 }

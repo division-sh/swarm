@@ -9403,7 +9403,7 @@ compliance:
     - Tool calls validated against tool schema before execution
     - Platform builtin tool calls checked against agent permissions before execution (tools field entries only — MCP, HTTP,
       and native tools have their own authorization models)
-    - Message delivery checked against agent message scope permission
+    - Retired agent messaging and its reserved permissions rejected before catalog publication or tool dispatch
     - State state_changes only follow declared advances_to paths
     - Guards evaluated before state advancement — block if false
     - Events validated against payload schema before publish
@@ -9471,32 +9471,35 @@ permissions_model:
   enforcement: Before executing a platform builtin tool call from tools, the platform checks the calling agent's permissions
     list. If the tool requires a permission the agent lacks, the call is rejected. MCP and HTTP tools are authorized by the
     tool registry and credential store, not by agent permissions. Native tools (bash, web_search, file_io) are authorized by
-    the native_tools field on the agent contract. agent_message has no current candidate, grant, source admission, handler,
-    or execution path; typed recipient authority remains tracked by #2154.
+    the native_tools field on the agent contract. agent_message is retired, with no candidate, grant, source admission,
+    handler or execution path. Declared typed workflow events own agent coordination.
   workflow_extensions: 'Workflows may define additional permissions beyond the platform set. The platform passes unrecognized
-    permissions to workflow-registered handlers. Example: a product workflow might define approve_deployment or override_scoring.'
+    permissions to workflow-registered handlers. Example: a product workflow might define approve_deployment or override_scoring.
+    Retired message_flow and message_peers permission tokens are forbidden in direct lists, selected or unselected bundles,
+    and tool-required permissions, including zero-agent and imported/merged root, project and flow scopes. Extensions cannot
+    re-enable them. These tokens are not globally forbidden business strings or tool identities.'
   permissions:
   - approve_spend
   - configure_routing
   - ask_human
-  - message_flow
-  - message_peers
   - schedule
   bundle_semantics:
     description: An agent may declare permissions_bundle and/or explicit permissions. If both are present, the explicit permissions
       list EXTENDS the bundle. Duplicates are deduplicated. The bundle is expanded first, then explicit permissions are added.
+    admission: Every declared permission_bundles value must be a mapping of bundle names to mappings with a required permissions
+      list of strings. Absence of permission_bundles, an empty bundle map and empty permission lists are valid. Explicit nulls,
+      scalars, missing permissions and non-string list members are hard admission errors, including unused bundles, zero-agent
+      scopes and declarations shadowed by descendant scopes. Malformed declarations cannot be omitted or coerced into absence.
+    ownership: Source admission, scoped grant resolution, permission vocabulary extensions and verifier warning projections
+      consume the same strict permission-bundle reader and canonical scoped permission resolver. Warning projections compare
+      tool requirements against resolved grants; they do not independently parse or expand grants.
   permission_scoping:
     description: Defines the target scope for each permission. The platform enforces these constraints at tool execution time.
       All scoping is flow-instance-local — no permission grants cross-flow access. Cross-flow communication is via events only.
     messaging:
-      status: reserved_unavailable_pending_typed_recipient_authority_2154
-      message_peers:
-        scope: Agents sharing the same manager_fallback value, within the same flow instance.
-        rule: Caller and target must be in the same flow instance AND target.manager_fallback == caller.manager_fallback.
-      message_flow:
-        scope: Any agent in the same flow instance.
-        rule: Caller and target must be in the same flow instance. No further constraint.
-      cross_flow: Direct agent messaging is unavailable. Cross-flow communication uses events (emit + subscribe).
+      status: retired_reopen_gated
+      rule: Direct agent messaging and its reserved permissions are unsupported. Declared typed events own coordination.
+      reopen_trigger: A named concrete product workload needing dynamic peer selection plus a demonstrated named limitation of declared typed workflow events requires a fresh pre-audit before reconsideration.
     routing:
       description: configure_routing is reserved authored vocabulary and has no generic runtime tool or dynamic-agent authority implementation.
       scope: No provider-callable runtime scope is defined.
@@ -9596,13 +9599,16 @@ tool_model:
       owner: One bounded runtime HITL descriptor projects the exact names, reviewed descriptions, closed schemas, grant kinds, permission requirement, usage guidance, and handlers into the existing catalog and policy owners.
       consumers: [actor_candidate_catalog, structural_verifier, tool_capability_policy, universal_grants, permission_requirements, provider_descriptions, handler_registry]
       rule: A consumer may not maintain a second HITL name or grant list. Descriptor presence alone is not fulfillability; verification consumes the exact scoped actor candidate and grant selected for execution.
-      identity_lifecycle: One bounded lifecycle owner classifies notify_human and ask_human as active platform-owned identities, agent_message as withheld, and mailbox_send and human_task_request as retired. Root, project, and flow tool declarations are validated source-wide even when no agent references them. Configured tools, direct permissions, permission bundles, discovered MCP admission, execution-map merge, candidate construction, and dispatch consume the same lifecycle classification; source artifact presence never changes an identity's lifecycle or grants execution authority.
-    unavailable_agent_message:
-      status: unavailable_pending_2154
+      identity_lifecycle: One bounded lifecycle owner classifies notify_human and ask_human as active platform-owned identities, and agent_message, mailbox_send and human_task_request as retired. Root, project, and flow tool declarations are validated source-wide even when no agent references them. Configured tools, direct permissions, permission bundles, tool-required permissions, discovered MCP admission, execution-map merge, candidate construction, and dispatch consume the same lifecycle classification; source artifact presence never changes an identity's lifecycle or grants execution authority. Retired permission tokens are checked only at permission positions by the existing permission owner, not interpreted as tool identities.
+    retired_agent_message:
+      status: retired_reopen_gated
       rule: >-
         agent_message is absent from universal grants, candidates, managed surfaces, authored-source admission, handlers,
-        and execution. Authored use fails with the exact teaching reason "not available: agent-to-agent messaging ships
-        with typed recipient authority (#2154)".
+        and execution. Authored use fails with the exact teaching reason "RETIRED: agent_message is unsupported; use
+        declared typed workflow events. Reopening requires a named concrete product workload needing dynamic peer selection
+        and a demonstrated named limitation of declared typed workflow events (#2154)." Raw and canonical runtime-MCP
+        spellings consume the same denial. Public permission, tool-resolution and usage-hint findings must not suggest
+        that a candidate, permission or usage hint can enable a retired identity. No compatibility or migration is supported.
     retired_author_model_names:
       mailbox_send: Rejected with no alias, fallback, compatibility reader, migration, or dual registration. Use notify_human.
       human_task_request: Rejected with no alias, fallback, compatibility reader, migration, or dual registration. Use ask_human.
@@ -9758,8 +9764,7 @@ tool_model:
       matching local event cannot supply its schema.
     universal_tools: 'notify_human is included in every agent session without listing in tools. Emit tools
       (emit_{event_name}) are auto-generated from emit_events. Neither notify_human nor emit tools require an explicit
-      tools entry. agent_message is unavailable and authored use fails with: not available: agent-to-agent messaging ships
-      with typed recipient authority (#2154).'
+      tools entry. agent_message is retired and reopen-gated under retired_agent_message; no universal grant or candidate exists.'
     role_scoped_entity_tools: 'When a normal actor resolves to a flow-owned entity contract, the platform generates
       current-entity read/save/update tools from that contract and the actor''s entity_writes declaration. The generated
       tools are eligible for the agent-visible/provider-visible surface without explicit tools entries, then filtered per

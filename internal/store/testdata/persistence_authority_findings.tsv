@@ -2047,7 +2047,6 @@ typed-process-local	interface-method	typed	internal/runtime/authoractivity/read.
 typed-process-local	interface-method	typed	internal/runtime/authoringview/view.go	stageDescriptionRootSchemaProvider	method:RootFlowSchema	func() (github.com/division-sh/swarm/internal/runtime/contracts.FlowSchemaDocument, bool)
 typed-process-local	interface-method	typed	internal/runtime/authority/provider.go	Provider	method:AuthorizeNotifyHuman	func(actor github.com/division-sh/swarm/internal/runtime/core/actors.AgentConfig) error
 typed-process-local	interface-method	typed	internal/runtime/authority/provider.go	Provider	method:CanonicalRole	func(role string) string
-typed-process-local	interface-method	typed	internal/runtime/authority/provider.go	Provider	method:HasMessageAuthority	func(actor github.com/division-sh/swarm/internal/runtime/core/actors.AgentConfig, target github.com/division-sh/swarm/internal/runtime/core/actors.AgentConfig) bool
 typed-process-local	interface-method	typed	internal/runtime/authority/provider.go	Provider	method:ProducerEventsForRole	func(role string) []string
 typed-process-local	interface-method	typed	internal/runtime/authority/provider.go	Provider	method:ProducerRoles	func() []string
 typed-process-local	interface-method	typed	internal/runtime/bootverify/workflow_timer_checks.go	timerRootFlowSchemaProvider	method:RootFlowSchema	func() (github.com/division-sh/swarm/internal/runtime/contracts.FlowSchemaDocument, bool)

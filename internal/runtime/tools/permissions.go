@@ -2,6 +2,7 @@ package tools
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -14,14 +15,37 @@ var defaultPlatformPermissions = []string{
 	"configure_routing",
 	"create_flow_instance",
 	"ask_human",
-	"message_flow",
-	"message_peers",
 	"schedule",
 }
 
 var toolPermissionRequirements = map[string]string{
 	"configure_routing": "configure_routing",
 	"schedule":          "schedule",
+}
+
+func isRetiredMessagePermission(name string) bool {
+	switch strings.TrimSpace(name) {
+	case "message_flow", "message_peers":
+		return true
+	default:
+		return false
+	}
+}
+
+func permissionReferenceError(name, location string) error {
+	if isRetiredMessagePermission(name) {
+		return fmt.Errorf("%s: permission %s is retired; %s", location, strings.TrimSpace(name), agentMessageRetiredTeaching)
+	}
+	return hitlIdentityReferenceError(name, location)
+}
+
+// Vocabulary membership cannot re-enable a retired permission. Authored use
+// is rejected separately by source admission and permission expansion.
+func addKnownPermission(out map[string]struct{}, name string) {
+	name = strings.TrimSpace(name)
+	if name != "" && !isRetiredMessagePermission(name) {
+		out[name] = struct{}{}
+	}
 }
 
 func agentHasPermission(agent models.AgentConfig, perm string) bool {
@@ -47,18 +71,17 @@ func ResolveAgentPermissions(source semanticview.Source, flowID string, entry ru
 
 func ValidateAgentPermissions(source semanticview.Source) (int, []error) {
 	agents, errs := scopedAgentEntries(source)
-	known := knownPermissionNames(source)
 	errs = append(errs, ValidateRetiredDynamicAgentToolReferences(source)...)
 	if lifecycleErrors := ValidateHITLIdentityLifecycleReferences(source); len(lifecycleErrors) > 0 {
 		errs = append(errs, lifecycleErrors...)
 		return len(agents), errs
 	}
+	known, err := knownPermissionNames(source)
+	if err != nil {
+		return len(agents), append(errs, err)
+	}
 	for _, agent := range agents {
-		policy := agent.policy
-		if len(policy.Values) == 0 && source != nil {
-			policy = source.ResolvedPolicyForFlow(agent.flowID)
-		}
-		perms, err := resolveAgentPermissionsFromPolicy(agent.entry, policy)
+		perms, err := ResolveAgentPermissions(source, agent.flowID, agent.entry)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("agent %s: %w", agent.id, err))
 			continue
@@ -115,7 +138,6 @@ type scopedAgentEntry struct {
 	role   string
 	flowID string
 	entry  runtimecontracts.AgentRegistryEntry
-	policy runtimecontracts.PolicyDocument
 }
 
 func scopedAgentEntries(source semanticview.Source) ([]scopedAgentEntry, []error) {
@@ -135,32 +157,32 @@ func scopedAgentEntries(source semanticview.Source) ([]scopedAgentEntry, []error
 			role:   plan.EffectiveRole(declaration.Entry),
 			flowID: plan.OwnerFlowID,
 			entry:  declaration.Entry,
-			policy: source.ResolvedPolicyForFlow(plan.OwnerFlowID),
 		})
 	}
 	return entries, errs
 }
 
 func resolveAgentPermissionsFromPolicy(entry runtimecontracts.AgentRegistryEntry, policy runtimecontracts.PolicyDocument) ([]string, error) {
+	bundles, err := permissionBundles(policy)
+	if err != nil {
+		return nil, err
+	}
 	perms := make([]string, 0, len(entry.Permissions)+4)
 	bundleName := strings.TrimSpace(entry.PermissionsBundle)
 	if bundleName != "" {
-		bundlePerms, ok, err := permissionBundlePermissionsFromPolicy(policy, bundleName)
-		if err != nil {
-			return nil, err
-		}
+		bundlePerms, ok := bundles[bundleName]
 		if !ok {
 			return nil, fmt.Errorf("unknown permissions_bundle %q", bundleName)
 		}
 		for _, permission := range bundlePerms {
-			if err := hitlIdentityReferenceError(permission, fmt.Sprintf("permission_bundles.%s.permissions", bundleName)); err != nil {
+			if err := permissionReferenceError(permission, fmt.Sprintf("permission_bundles.%s.permissions", bundleName)); err != nil {
 				return nil, err
 			}
 		}
 		perms = append(perms, bundlePerms...)
 	}
 	for _, permission := range entry.Permissions {
-		if err := hitlIdentityReferenceError(permission, "permissions"); err != nil {
+		if err := permissionReferenceError(permission, "permissions"); err != nil {
 			return nil, err
 		}
 	}
@@ -168,36 +190,38 @@ func resolveAgentPermissionsFromPolicy(entry runtimecontracts.AgentRegistryEntry
 	return dedupePermissionList(perms), nil
 }
 
-func permissionBundlePermissionsFromPolicy(policy runtimecontracts.PolicyDocument, bundle string) ([]string, bool, error) {
-	bundle = strings.TrimSpace(bundle)
-	if bundle == "" {
-		return nil, false, nil
-	}
+// Every declaration is checked, including unused bundles and empty-agent scopes.
+func permissionBundles(policy runtimecontracts.PolicyDocument) (map[string][]string, error) {
 	root, ok := policy.Values["permission_bundles"]
 	if !ok {
-		return nil, false, nil
+		return nil, nil
 	}
 	bundles, ok := normalizePolicyMap(root.Value)
 	if !ok {
-		return nil, false, fmt.Errorf("permission_bundles must be a mapping")
+		return nil, fmt.Errorf("permission_bundles must be a mapping")
 	}
-	rawBundle, ok := bundles[bundle]
-	if !ok {
-		return nil, false, nil
+	names := make([]string, 0, len(bundles))
+	for name := range bundles {
+		names = append(names, name)
 	}
-	bundleMap, ok := normalizePolicyMap(rawBundle)
-	if !ok {
-		return nil, false, fmt.Errorf("permission_bundles.%s must be a mapping", bundle)
+	sort.Strings(names)
+	out := make(map[string][]string, len(bundles))
+	for _, name := range names {
+		bundle, ok := normalizePolicyMap(bundles[name])
+		if !ok {
+			return nil, fmt.Errorf("permission_bundles.%s must be a mapping", name)
+		}
+		raw, ok := bundle["permissions"]
+		if !ok {
+			return nil, fmt.Errorf("permission_bundles.%s.permissions is required", name)
+		}
+		permissions, err := stringsFromPolicyValue(raw)
+		if err != nil {
+			return nil, fmt.Errorf("permission_bundles.%s.permissions: %w", name, err)
+		}
+		out[name] = permissions
 	}
-	rawPerms, ok := bundleMap["permissions"]
-	if !ok {
-		return nil, false, fmt.Errorf("permission_bundles.%s.permissions is required", bundle)
-	}
-	perms, err := stringsFromPolicyValue(rawPerms)
-	if err != nil {
-		return nil, false, fmt.Errorf("permission_bundles.%s.permissions: %w", bundle, err)
-	}
-	return dedupePermissionList(perms), true, nil
+	return out, nil
 }
 
 func normalizePolicyMap(value any) (map[string]any, bool) {
@@ -228,30 +252,28 @@ func stringsFromPolicyValue(value any) ([]string, error) {
 	}
 }
 
-func knownPermissionNames(source semanticview.Source) map[string]struct{} {
+func knownPermissionNames(source semanticview.Source) (map[string]struct{}, error) {
 	out := make(map[string]struct{}, len(defaultPlatformPermissions)+8)
 	for _, perm := range defaultPlatformPermissions {
-		perm = strings.TrimSpace(perm)
-		if perm != "" {
-			out[perm] = struct{}{}
-		}
+		addKnownPermission(out, perm)
 	}
 	if source != nil {
 		for _, perm := range source.PlatformSpec().PermissionsModel.Permissions {
-			perm = strings.TrimSpace(perm)
-			if perm != "" {
-				out[perm] = struct{}{}
-			}
+			addKnownPermission(out, perm)
 		}
 		for _, scope := range source.FlowScopes() {
-			collectPermissionBundleExtensions(out, source.ResolvedPolicyForFlow(scope.ID))
+			if err := collectPermissionBundleExtensions(out, source.ResolvedPolicyForFlow(scope.ID)); err != nil {
+				return nil, fmt.Errorf("flow %s %w", scope.ID, err)
+			}
 		}
 		if len(source.FlowScopes()) == 0 {
-			collectPermissionBundleExtensions(out, source.ResolvedPolicyForFlow(""))
+			if err := collectPermissionBundleExtensions(out, source.ResolvedPolicyForFlow("")); err != nil {
+				return nil, fmt.Errorf("root %w", err)
+			}
 		}
 		collectToolPermissionExtensions(out, source)
 	}
-	return out
+	return out, nil
 }
 
 func collectToolPermissionExtensions(out map[string]struct{}, source semanticview.Source) {
@@ -259,38 +281,21 @@ func collectToolPermissionExtensions(out map[string]struct{}, source semanticvie
 		return
 	}
 	for _, entry := range source.ToolEntries() {
-		perm := entry.Permission().String()
-		if perm != "" {
-			out[perm] = struct{}{}
-		}
+		addKnownPermission(out, entry.Permission().String())
 	}
 }
 
-func collectPermissionBundleExtensions(out map[string]struct{}, policy runtimecontracts.PolicyDocument) {
-	bundles, ok := policy.Values["permission_bundles"]
-	if !ok {
-		return
+func collectPermissionBundleExtensions(out map[string]struct{}, policy runtimecontracts.PolicyDocument) error {
+	bundles, err := permissionBundles(policy)
+	if err != nil {
+		return err
 	}
-	items, ok := normalizePolicyMap(bundles.Value)
-	if !ok {
-		return
-	}
-	for _, rawBundle := range items {
-		bundleMap, ok := normalizePolicyMap(rawBundle)
-		if !ok {
-			continue
-		}
-		perms, err := stringsFromPolicyValue(bundleMap["permissions"])
-		if err != nil {
-			continue
-		}
+	for _, perms := range bundles {
 		for _, perm := range perms {
-			perm = strings.TrimSpace(perm)
-			if perm != "" {
-				out[perm] = struct{}{}
-			}
+			addKnownPermission(out, perm)
 		}
 	}
+	return nil
 }
 
 func dedupePermissionList(perms []string) []string {

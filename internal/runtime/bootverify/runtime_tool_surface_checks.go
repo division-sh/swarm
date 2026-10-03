@@ -34,7 +34,7 @@ func (c *checkerContext) toolResolution() []Finding {
 			Severity:    SeverityHardInvalidity,
 			Message:     message,
 			Location:    finding.AgentID,
-			Remediation: "Declare an executable tool candidate and its required permission for this exact agent, or remove the tool reference.",
+			Remediation: "Remove retired or unsupported tool references; they cannot be enabled by a candidate or grant. For supported tools, declare an executable candidate and its required permission for this exact agent.",
 		})
 	}
 	return c.toolFindings
