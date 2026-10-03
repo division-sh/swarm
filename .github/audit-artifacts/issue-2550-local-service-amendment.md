@@ -78,4 +78,32 @@ All45 compiled describe cells x2 passed after integrating source-identity retire
 
 Request one focused independent delta gate for the L04/L07 owner amendment before service-lifetime edits. Full qualification, hosted full, final88-row proof audit and review remain outstanding.
 
+## Qualification delta within the approved boundary
+
+The fresh four-worker server2 run at 7dde578f388d7b430ebadd7d5f8bc1288ba1cf9e
+failed at the retirement census: the policy-only complexity file no longer contains
+retired action names, but the current-only corpus still classified it as generated
+measurements. Remove only that stale current-only row; preserve all 163 historical
+rows and strict unknown/stale refusal. The aggregate has 17 passed, four failed or
+interrupted, and 44 not-started units; it earns no complete qualification credit.
+Every started worker joined and no managed service container remained.
+
+Hosted run 37161729285 also identified three new runner launches missing from the
+async-site ledger. Classify the parent relay, bounded worker pool and subprocess
+relay explicitly. The subprocess relay must actually stop and join before return,
+not merely receive a stop notification. The existing bounded-worker root now has a
+held-relay negative control; existing signal/death and hostile inventory controls
+remain required. This is L05/L07/Q02 consumption proof, not a new lifetime owner.
+
+The real Docker focused test requested two slots on a hosted machine whose admitted
+ceiling is one. The test now proves exact fail-closed refusal before any service or
+admission authority is created when the requested capacity exceeds the actual host
+ceiling. It does not claim that refusal earns two-service execution credit. Both
+actual one-slot FIFO and two-slot independent-service execution remain mandatory on
+server2, alongside an over-ceiling negative control. Its early-exit observer also
+retains the joined process result for failure cleanup, avoiding a second unbounded
+wait after evidence has already been consumed. No cap, service isolation, deadline,
+unit membership or application-runtime behavior is relaxed. Fresh clean-source full
+qualification on server2 and hosted full remain required after these corrections.
+
 Retained counterexample source and raw red log: `docs/audits/2550-service-namespace-probe_test.go.txt` and `docs/audits/2550-service-namespace-probe.log` in swarm-docs. These are diagnostic overlay evidence, not checked-in executable roots or green repair receipts. The current source-code service owner remains byte-identical to master.
