@@ -28,7 +28,6 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
@@ -924,18 +923,19 @@ func TestInboundGatewayConcurrentLoserReturnsCommittedBatchDespiteCurrentProject
 
 func compiledRedactedNormalizedPlan(t *testing.T, version, projectedType string) (providertriggers.InboundAdmissionPlan, *providertriggers.CatalogSnapshot) {
 	t.Helper()
-	manifest := providertriggers.Manifest{
-		Provider: "telegram", PayloadObjectRequired: true,
-		DeliveryID: providertriggers.ValueSource{Literal: "delivery-1", Required: true},
-		EventType:  providertriggers.ValueSource{Literal: "message", Required: true},
-		EventName:  providertriggers.EventNameManifest{Literal: "inbound.telegram"},
-		RedactKeys: []string{"text"},
-		NormalizedEvents: []providertriggers.NormalizedEventManifest{{
-			Event: "inbound.telegram.text_message",
-			Fields: map[string]providertriggers.NormalizedEventFieldProjection{
-				"text": {From: "message.text", Schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind(mapProjectedSchemaType(projectedType)))},
-			},
-		}},
+	manifest, err := providertriggers.ParseManifest([]byte(fmt.Sprintf(`provider: telegram
+payload_object_required: true
+delivery_id: {literal: delivery-1, required: true}
+event_type: {literal: message, required: true}
+event_name: {literal: inbound.telegram}
+redact_keys: [text]
+normalized_events:
+  - event: inbound.telegram.text_message
+    fields:
+      text: {from: message.text, schema: {type: %s}}
+`, projectedType)))
+	if err != nil {
+		t.Fatal(err)
 	}
 	catalog, err := providertriggers.NewCatalogSnapshot(providertriggers.CatalogEntry{
 		Manifest: manifest,
@@ -2462,7 +2462,7 @@ func TestInboundGateway_TelegramRejectsInvalidInputsBeforeMarkerAndPublish(t *te
 			wantBodyParts: []string{
 				"provider.telegram", "version=0.1.0", "manifest_hash=sha256:",
 				`normalized event "inbound.telegram.text_message"`, `path "message.text"`,
-				"telegram_command requires text, got json.Number",
+				"pattern requires text, got json.Number",
 			},
 		},
 		{

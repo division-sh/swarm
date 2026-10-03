@@ -338,17 +338,17 @@ func providerTriggerCatalogProviders(catalog *providertriggers.CatalogSnapshot) 
 	}
 	providers := make([]string, 0, len(catalog.Entries()))
 	for _, entry := range catalog.Entries() {
-		providers = append(providers, providertriggers.NormalizeProviderName(entry.Manifest.Provider))
+		providers = append(providers, entry.Manifest.Provider())
 	}
 	sort.Strings(providers)
 	return providers
 }
 
 func providerTriggerNormalizedEvents(entry providertriggers.CatalogEntry) []string {
-	events := make([]string, 0, len(entry.Manifest.NormalizedEvents))
-	for _, declaration := range entry.Manifest.NormalizedEvents {
-		if name := strings.TrimSpace(declaration.Event); name != "" {
-			events = append(events, name)
+	events := []string{}
+	for _, output := range entry.Manifest.OutputManifest() {
+		if output.Kind == providertriggers.OutputKindNormalized {
+			events = append(events, output.Event)
 		}
 	}
 	sort.Strings(events)
@@ -362,8 +362,8 @@ func providerTriggerCatalogEvent(entry providertriggers.CatalogEntry, eventName 
 	if !exists {
 		return runtimecontracts.EventCatalogEntry{}, false, false
 	}
-	for _, normalized := range entry.Manifest.NormalizedEvents {
-		if strings.TrimSpace(normalized.Event) == eventName {
+	for _, output := range entry.Manifest.OutputManifest() {
+		if output.Kind == providertriggers.OutputKindNormalized && output.Event == eventName {
 			return eventEntry, true, true
 		}
 	}

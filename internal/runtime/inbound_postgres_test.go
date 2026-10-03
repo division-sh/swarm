@@ -706,7 +706,7 @@ func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *te
 
 	g := newTestInboundGateway(t, bus, nil, nil, pg)
 
-	body := []byte(`{"update_id":123456789,"undeclared_root":"root-must-not-enter-author-story","message":{"message_id":7,"from":{"id":41},"chat":{"id":42,"type":"private"},"text":"hello","undeclared_private":"private-must-not-enter-author-story"}}`)
+	body := []byte(`{"update_id":123456789,"undeclared_root":"root-must-not-enter-author-story","message":{"message_id":7,"from":{"id":41},"chat":{"id":42,"type":"private"},"text":"/start@other_bot","undeclared_private":"private-must-not-enter-author-story"}}`)
 	req := newSignedTelegramRequest("/webhooks/customer-a/telegram", webhookSecret, body)
 	rec := httptest.NewRecorder()
 	handleBoundedProviderDelivery(t, g, bus, target, rec, req, provider, webhookSecret)
@@ -735,6 +735,7 @@ func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *te
 	if err != nil || !found {
 		t.Fatalf("LoadInboundPublicationByIdentity = found:%v err:%v", found, err)
 	}
+	requireInboundTelegramPatternProjection(t, record, "start", "other_bot")
 	requireInboundPostCommitSnapshot(t, requireInboundBusEvent(t, ch, "Telegram PostgreSQL post-commit dispatch"), inboundPublicationEvent(t, record, eventID))
 	waitForInboundBusQuiescence(t, bus)
 
@@ -775,7 +776,7 @@ func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *test
 
 	g := newTestInboundGateway(t, bus, nil, nil, sqliteStore)
 
-	body := []byte(`{"update_id":987654321,"undeclared_root":"root-must-not-enter-author-story","message":{"message_id":8,"from":{"id":41},"chat":{"id":42,"type":"private"},"text":"hello sqlite","undeclared_private":"private-must-not-enter-author-story"}}`)
+	body := []byte(`{"update_id":987654321,"undeclared_root":"root-must-not-enter-author-story","message":{"message_id":8,"from":{"id":41},"chat":{"id":42,"type":"private"},"text":"/start@other_bot","undeclared_private":"private-must-not-enter-author-story"}}`)
 	req := newSignedTelegramRequest("/webhooks/customer-a/telegram", webhookSecret, body)
 	rec := httptest.NewRecorder()
 	handleBoundedProviderDelivery(t, g, bus, target, rec, req, provider, webhookSecret)
@@ -804,6 +805,7 @@ func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *test
 	if err != nil || !found {
 		t.Fatalf("LoadInboundPublicationByIdentity = found:%v err:%v", found, err)
 	}
+	requireInboundTelegramPatternProjection(t, record, "start", "other_bot")
 	requireInboundPostCommitSnapshot(t, requireInboundBusEvent(t, ch, "Telegram SQLite post-commit dispatch"), inboundPublicationEvent(t, record, eventID))
 	waitForInboundBusQuiescence(t, bus)
 
@@ -818,6 +820,29 @@ func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *test
 	}
 	requireNoInboundBusEvent(t, ch, "corrupt Telegram SQLite duplicate")
 	eventtestsql.RequireEventRowCount(t, ctx, storetest.DatabaseForTest(sqliteStore), authoractivityfixture.DialectSQLite, eventID, 1)
+}
+
+func requireInboundTelegramPatternProjection(t testing.TB, record runtimeinbound.Record, reference, address string) {
+	t.Helper()
+	for _, child := range record.Events {
+		if child.EventName != "inbound.telegram.text_message" {
+			continue
+		}
+		var payload struct {
+			Command struct {
+				Reference string `json:"reference"`
+				Address   string `json:"address"`
+			} `json:"command_invocation"`
+		}
+		if err := json.Unmarshal(child.Event.Payload(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.Command.Reference != reference || payload.Command.Address != address {
+			t.Fatalf("durable generic-pattern projection changed: %+v", payload.Command)
+		}
+		return
+	}
+	t.Fatal("durable publication omitted normalized Telegram text")
 }
 
 func inboundPublicationEvent(t testing.TB, record runtimeinbound.Record, eventID string) events.Event {

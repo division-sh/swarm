@@ -478,7 +478,7 @@ func telegramPlatformContract(t *testing.T) (LoadedPack, *CatalogSnapshot, Inbou
 	}
 	var telegram LoadedPack
 	for _, pack := range loaded {
-		if pack.Manifest.Provider == "telegram" {
+		if pack.Manifest.Provider() == "telegram" {
 			telegram = pack
 			break
 		}

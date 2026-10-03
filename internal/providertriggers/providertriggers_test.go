@@ -65,10 +65,10 @@ func TestPlatformPackInventoryIsCompleteFilesystemOnlyAndFreshlyStamped(t *testi
 			t.Fatalf("capability subject %s: %v", dir, err)
 		}
 		wantCapabilityCount := 3 + len(DerivedCapabilities(pack.Manifest).Can.EmitEvents)
-		if subject.Kind != packs.SubjectProviderTrigger || subject.Status != packs.StatusAvailable || subject.Provider != pack.Manifest.Provider || len(subject.Capabilities) != wantCapabilityCount || len(subject.Guarantees) != 3 {
+		if subject.Kind != packs.SubjectProviderTrigger || subject.Status != packs.StatusAvailable || subject.Provider != pack.Manifest.Provider() || len(subject.Capabilities) != wantCapabilityCount || len(subject.Guarantees) != 3 {
 			t.Fatalf("capability subject %s = %#v", dir, subject)
 		}
-		wantRoute := "/webhooks/{alias}/" + pack.Manifest.Provider
+		wantRoute := "/webhooks/{alias}/" + pack.Manifest.Provider()
 		var gotRoute string
 		for _, capability := range subject.Capabilities {
 			if capability.Code == packs.CapabilityReceiveHTTPSRoute {
@@ -81,7 +81,7 @@ func TestPlatformPackInventoryIsCompleteFilesystemOnlyAndFreshlyStamped(t *testi
 		if len(subject.Requirements) != 1 || subject.Requirements[0].Scope != packs.RequirementScopeTarget || subject.Requirements[0].Satisfied != nil || subject.Requirements[0].Status != "" {
 			t.Fatalf("capability subject %s requirements = %#v, want target-scoped unevaluated", dir, subject.Requirements)
 		}
-		providers = append(providers, pack.Manifest.Provider)
+		providers = append(providers, pack.Manifest.Provider())
 	}
 	sort.Strings(providers)
 	want := []string{"github", "intercom", "shopify", "slack", "stripe", "telegram", "twilio", "typeform"}
@@ -1145,11 +1145,11 @@ func TestTelegramManifestRejectsInvalidInputsBeforeDelivery(t *testing.T) {
 func TestManifestValidationRejectsAuthoringErrors(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
-		manifest Manifest
+		manifest triggerFixture
 	}{
 		{
 			name: "invalid json path syntax",
-			manifest: Manifest{
+			manifest: triggerFixture{
 				Provider:   "badpath",
 				DeliveryID: ValueSource{JSONPath: "$..id", Required: true},
 				EventType:  ValueSource{JSONPath: "$.type", Required: true},
@@ -1158,7 +1158,7 @@ func TestManifestValidationRejectsAuthoringErrors(t *testing.T) {
 		},
 		{
 			name: "unknown metadata source",
-			manifest: Manifest{
+			manifest: triggerFixture{
 				Provider:   "badmetadata",
 				DeliveryID: ValueSource{JSONPath: "$.id", Required: true},
 				EventType:  ValueSource{JSONPath: "$.type", Required: true},
@@ -1168,7 +1168,7 @@ func TestManifestValidationRejectsAuthoringErrors(t *testing.T) {
 		},
 		{
 			name: "new provider event name template",
-			manifest: Manifest{
+			manifest: triggerFixture{
 				Provider:   "badtemplate",
 				DeliveryID: ValueSource{JSONPath: "$.id", Required: true},
 				EventType:  ValueSource{JSONPath: "$.type", Required: true},
@@ -1177,7 +1177,7 @@ func TestManifestValidationRejectsAuthoringErrors(t *testing.T) {
 		},
 		{
 			name: "literal and template both set",
-			manifest: Manifest{
+			manifest: triggerFixture{
 				Provider:   "ambiguousname",
 				DeliveryID: ValueSource{JSONPath: "$.id", Required: true},
 				EventType:  ValueSource{JSONPath: "$.type", Required: true},
@@ -1189,7 +1189,7 @@ func TestManifestValidationRejectsAuthoringErrors(t *testing.T) {
 		},
 		{
 			name: "url sorted form requires hmac sha1",
-			manifest: Manifest{
+			manifest: triggerFixture{
 				Provider: "badformsignature",
 				Secret:   SecretManifest{Required: true},
 				Signature: SignatureManifest{
@@ -1205,7 +1205,7 @@ func TestManifestValidationRejectsAuthoringErrors(t *testing.T) {
 		},
 		{
 			name: "url sorted form requires base64",
-			manifest: Manifest{
+			manifest: triggerFixture{
 				Provider: "badformencoding",
 				Secret:   SecretManifest{Required: true},
 				Signature: SignatureManifest{
@@ -1221,7 +1221,7 @@ func TestManifestValidationRejectsAuthoringErrors(t *testing.T) {
 		},
 		{
 			name: "ambiguous value source",
-			manifest: Manifest{
+			manifest: triggerFixture{
 				Provider:   "badsource",
 				DeliveryID: ValueSource{Header: "X-Delivery", FormParam: "MessageSid", Required: true},
 				EventType:  ValueSource{Literal: "message_received", Required: true},
@@ -1230,7 +1230,7 @@ func TestManifestValidationRejectsAuthoringErrors(t *testing.T) {
 		},
 		{
 			name: "token equality requires secret",
-			manifest: Manifest{
+			manifest: triggerFixture{
 				Provider:   "badtokenwithoutsecret",
 				Signature:  SignatureManifest{Type: "token_equality", Header: "X-Token"},
 				DeliveryID: ValueSource{JSONPath: "$.update_id", Required: true},
@@ -1321,10 +1321,10 @@ func telegramRequest(secret string, body []byte, payload any) Request {
 	return req
 }
 
-func tokenEqualityValidationManifest(provider string, mutate func(*SignatureManifest)) Manifest {
+func tokenEqualityValidationManifest(provider string, mutate func(*SignatureManifest)) triggerFixture {
 	sig := SignatureManifest{Type: "token_equality", Header: "X-Token"}
 	mutate(&sig)
-	return Manifest{
+	return triggerFixture{
 		Provider:   provider,
 		Secret:     SecretManifest{Required: true},
 		Signature:  sig,
@@ -1336,7 +1336,7 @@ func tokenEqualityValidationManifest(provider string, mutate func(*SignatureMani
 
 func newHostileRegistry(t *testing.T) *CatalogSnapshot {
 	t.Helper()
-	manifest := Manifest{
+	manifest := triggerFixture{
 		Provider:              "hostile",
 		PayloadObjectRequired: true,
 		PayloadObjectError:    "hostile payload object is required",
@@ -1382,7 +1382,7 @@ func newHostileRegistry(t *testing.T) *CatalogSnapshot {
 
 func newHostilePayloadIdentityRegistry(t *testing.T) *CatalogSnapshot {
 	t.Helper()
-	manifest := Manifest{
+	manifest := triggerFixture{
 		Provider:              "hostile",
 		PayloadObjectRequired: true,
 		PayloadObjectError:    "hostile payload object is required",
@@ -1573,15 +1573,18 @@ func testEmbeddedPackInventory(t testing.TB) *packartifact.EffectivePackInventor
 	return inventory
 }
 
-func newTestCatalogSnapshot(manifests ...Manifest) (*CatalogSnapshot, error) {
+func newTestCatalogSnapshot(manifests ...triggerFixture) (*CatalogSnapshot, error) {
 	entries := make([]CatalogEntry, 0, len(manifests))
 	for _, manifest := range manifests {
-		body, _ := json.Marshal(manifest)
-		sum := sha256.Sum256(body)
-		provider := NormalizeProviderName(manifest.Provider)
+		admitted, err := manifest.admit()
+		if err != nil {
+			return nil, err
+		}
+		sum := sha256.Sum256(admitted.SourceBytes())
+		provider := admitted.Provider()
 		entries = append(entries, CatalogEntry{
 			Identity: PackIdentity{ID: "test." + provider, Version: "0.0.0", ManifestHash: "sha256:" + hex.EncodeToString(sum[:]), Provenance: "test"},
-			Manifest: manifest, Source: "test",
+			Manifest: admitted, Source: "test",
 		})
 	}
 	return NewCatalogSnapshot(entries...)

@@ -65,6 +65,7 @@ func TestInboundAdmissionSupportedSurfaceStartupFailuresSQLiteAndPostgres(t *tes
 			for _, tc := range []struct {
 				name         string
 				mutateSchema func(string) string
+				mutateBody   func(string) string
 				want         string
 			}{
 				{
@@ -97,15 +98,46 @@ func TestInboundAdmissionSupportedSurfaceStartupFailuresSQLiteAndPostgres(t *tes
 					},
 					want: `pins pack "provider.acme_public", but that id is not selected`,
 				},
+				{
+					name: "authored default acknowledgement",
+					mutateBody: func(body string) string {
+						return strings.Replace(body, "mode: durable_before_dispatch", "mode: after_publish", 1)
+					},
+					want: "want one of durable_before_dispatch",
+				},
+				{
+					name: "whitespace-distinct predicate paths",
+					mutateBody: func(body string) string {
+						return strings.Replace(body, "    when:\n", "    when:\n      equals: {kind: alpha, ' kind ': beta}\n", 1)
+					},
+					want: `relative dotted path " kind " is not canonical`,
+				},
+				{
+					name: "invalid generic pattern",
+					mutateBody: func(body string) string {
+						return strings.Replace(body, "pattern: '^/(?P<reference>[A-Za-z0-9_]{1,32})(?:@(?P<address>[A-Za-z0-9_]{5,32}))?$'", "pattern: '['", 1)
+					},
+					want: "invalid pattern",
+				},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					sourceRoot := writeInboundAdmissionPolicyMatrixFixture(t)
-					schemaPath := filepath.Join(sourceRoot, "matrix", "schema.yaml")
-					body, err := os.ReadFile(schemaPath)
+					path := filepath.Join(sourceRoot, "matrix", "schema.yaml")
+					mutate := tc.mutateSchema
+					if tc.mutateBody != nil {
+						importProjectTelegramTrigger(t, sourceRoot)
+						path = filepath.Join(sourceRoot, "packs", "provider.telegram", "trigger.yaml")
+						mutate = tc.mutateBody
+					}
+					body, err := os.ReadFile(path)
 					if err != nil {
 						t.Fatal(err)
 					}
-					if err := os.WriteFile(schemaPath, []byte(tc.mutateSchema(string(body))), 0o600); err != nil {
+					changed := mutate(string(body))
+					if changed == string(body) {
+						t.Fatal("startup proof did not mutate its admitted source")
+					}
+					if err := os.WriteFile(path, []byte(changed), 0o600); err != nil {
 						t.Fatal(err)
 					}
 					if backend == "postgres" {
@@ -117,7 +149,7 @@ func TestInboundAdmissionSupportedSurfaceStartupFailuresSQLiteAndPostgres(t *tes
 					configPath := writeInboundAdmissionRuntimeConfig(t, backend, filepath.Join(t.TempDir(), "failure.sqlite"))
 					process := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
 						ConfigPath: configPath, SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
-						StoreMode: backend, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+						StoreMode: backend, StoreModeSet: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 						SelfCheck: true, Dev: true, LocalRun: true, Verbose: true,
 					})
 					code, exited := process.waitForExit(15 * time.Second)
@@ -127,7 +159,7 @@ func TestInboundAdmissionSupportedSurfaceStartupFailuresSQLiteAndPostgres(t *tes
 					}
 					process.recordStopped(code)
 					output := process.outputString()
-					if code == 0 || strings.Contains(output, "swarm runtime ready") || !strings.Contains(output, tc.want) {
+					if code == 0 || strings.Contains(output, "swarm runtime ready") || !strings.Contains(output, tc.want) || !strings.Contains(output, "backend="+backend) {
 						t.Fatalf("exit=%d want=%q\n%s", code, tc.want, output)
 					}
 				})
@@ -279,6 +311,21 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 		if duplicate.Status != "duplicate" || strings.Join(duplicate.EventIDs, "\x00") != strings.Join(accepted.EventIDs, "\x00") || strings.Join(duplicate.EventNames, "\x00") != strings.Join(accepted.EventNames, "\x00") {
 			t.Fatalf("%s duplicate readback=%#v, want original %#v", test.provider, duplicate, accepted)
 		}
+		for index, eventID := range accepted.EventIDs {
+			var public struct {
+				EventName string         `json:"event_name"`
+				Payload   map[string]any `json:"payload"`
+			}
+			requireServedJSONRPCResult(t, baseURL+"/v1/rpc", "event.get", map[string]any{"event_id": eventID}, &public)
+			if public.EventName != test.eventNames[index] {
+				t.Fatalf("public provider readback changed event identity: %+v", public)
+			}
+			if test.provider == "telegram" && index == 1 {
+				if public.Payload["text"] != "hello" || public.Payload["command_invocation"] != nil {
+					t.Fatalf("public text readback changed admitted projection: %#v", public.Payload)
+				}
+			}
+		}
 	}
 	status, _ := sendInboundAdmissionSupportedRequest(t, baseURL, "partner_auth", []byte(`{"value":1}`), map[string]string{
 		"X-Partner-Delivery":  "partner-auth-invalid",
@@ -296,6 +343,11 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 	if code := process.stop(); code != 0 {
 		t.Fatalf("serve exit=%d\n%s", code, process.outputString())
 	}
+	opts.BundleHash = servedEventPublishFixtureBundleHash(t, sourceRoot)
+	opts.SourceRoot = ""
+	if err := os.RemoveAll(sourceRoot); err != nil {
+		t.Fatal(err)
+	}
 	if backend == "postgres" {
 		postgresStore, err = store.NewPostgresStore(postgresDSN)
 		if err != nil {
@@ -310,6 +362,17 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 	})
 	if status != http.StatusAccepted {
 		t.Fatalf("project Telegram after restart status=%d response=%s\nserve output:\n%s", status, response, restarted.outputString())
+	}
+	restored := decodeInboundAdmissionPublicationResponse(t, response)
+	if len(restored.EventIDs) != 2 {
+		t.Fatalf("retained policy lost its event batch: %+v", restored)
+	}
+	var public struct {
+		Payload map[string]any `json:"payload"`
+	}
+	requireServedJSONRPCResult(t, restartURL+"/v1/rpc", "event.get", map[string]any{"event_id": restored.EventIDs[1]}, &public)
+	if public.Payload["text"] != "after restart" || public.Payload["command_invocation"] != nil {
+		t.Fatalf("source-deleted restart changed admitted projection: %#v", public.Payload)
 	}
 	if code := restarted.stop(); code != 0 {
 		t.Fatalf("restarted serve exit=%d\n%s", code, restarted.outputString())
