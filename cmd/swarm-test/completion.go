@@ -3,16 +3,22 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/division-sh/swarm/internal/testplanning"
+	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testtiming"
 )
 
@@ -22,7 +28,60 @@ func runCompletion(profile string, explicit bool) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	inventory, err := testplanning.DiscoverRootInventory(context.Background(), ".")
+	return runCompletionWithSignals(func(ctx context.Context) int {
+		return runCompletionContext(ctx, profile, explicit, head)
+	})
+}
+
+func runCompletionWithSignals(execute func(context.Context) int) int {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var interrupted atomic.Int32
+	signals := make(chan os.Signal, 2)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	joined := make(chan struct{})
+	stop := make(chan struct{})
+	handle := func(value os.Signal) {
+		if signal, ok := value.(syscall.Signal); ok {
+			interrupted.CompareAndSwap(0, int32(signal))
+		}
+		cancel()
+	}
+	go func() {
+		defer close(joined)
+		for {
+			select {
+			case value := <-signals:
+				handle(value)
+			case <-stop:
+				// Freeze only after accepted signals have affected the final result.
+				for {
+					select {
+					case value := <-signals:
+						handle(value)
+					default:
+						return
+					}
+				}
+			}
+		}
+	}()
+	code := execute(ctx)
+	signal.Stop(signals)
+	close(stop)
+	<-joined
+	if value := interrupted.Load(); value != 0 {
+		return receivedSignalExitCode(value)
+	}
+	return code
+}
+
+func runCompletionContext(ctx context.Context, profile string, explicit bool, head string) int {
+	if err := completionHostPreflight(ctx); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	inventory, err := testplanning.DiscoverRootInventory(ctx, ".")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -75,6 +134,11 @@ func runCompletion(profile string, explicit bool) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+	capacity, err := completionPlanPreflight(ctx, plan)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
 	fmt.Fprintf(os.Stderr, "swarm-test %s: %d planned units; modeled ETA is approximate\n", profile, len(plan.Units))
 	fmt.Fprintf(os.Stderr, "source=%s venue=%s plan=%s tier-deferred=%d; no deferred root earns execution credit\n", plan.HeadSHA, plan.Venue, plan.Digest, len(plan.DeferredRoots))
 	receipts := filepath.Join("test-results", "local", profile+"-"+time.Now().UTC().Format("20060102T150405.000000000"))
@@ -94,32 +158,35 @@ func runCompletion(profile string, explicit bool) int {
 		return 1
 	}
 	defer os.RemoveAll(cache)
-	previous, existed := os.LookupEnv("SWARM_TEST_BUILD_CACHE")
-	_ = os.Setenv("SWARM_TEST_BUILD_CACHE", cache)
-	defer func() {
-		if existed {
-			_ = os.Setenv("SWARM_TEST_BUILD_CACHE", previous)
-		} else {
-			_ = os.Unsetenv("SWARM_TEST_BUILD_CACHE")
-		}
-	}()
-	for _, unit := range plan.Units {
-		fmt.Fprintf(os.Stderr, "swarm-test %s: starting %s\n", profile, unit.ID)
-		if code := executeCompletionUnit(plan, unit, explicit, receipts); code != 0 {
-			return code
-		}
+	executable, err := os.Executable()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
 	}
+	env := replaceEnvironment(os.Environ(), "SWARM_TEST_BUILD_CACHE", cache)
+	env = replaceEnvironment(env, testpostgres.RunCapacityEnv, fmt.Sprint(capacity))
+	env = replaceEnvironment(env, "GOMAXPROCS", fmt.Sprint(max(1, runtime.GOMAXPROCS(0)/capacity)))
+	code := executeCompletionWorkers(ctx, plan, receipts, executable, env, explicit, capacity)
 	if _, err := completionSource(".", head, explicit); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
+	}
+	if code != 0 {
+		return code
 	}
 	fmt.Fprintf(os.Stderr, "swarm-test %s: all %d planned units passed required execution\n", profile, len(plan.Units))
 	return 0
 }
 
 func runPlanned(args []string) int {
-	if len(args) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: go run ./cmd/swarm-test --planned <plan.json> <unit-id>")
+	if len(args) < 2 {
+		fmt.Fprintln(os.Stderr, "usage: go run ./cmd/swarm-test --planned <plan.json> <unit-id> [--receipts directory] [--feedback]")
+		return 2
+	}
+	flags := flag.NewFlagSet("planned", flag.ContinueOnError)
+	receipts := flags.String("receipts", "", "retain unit evidence in this directory")
+	feedback := flags.Bool("feedback", false, "unqualified default-core developer feedback only")
+	if err := flags.Parse(args[2:]); err != nil || flags.NArg() != 0 {
 		return 2
 	}
 	raw, err := os.ReadFile(args[0])
@@ -133,6 +200,14 @@ func runPlanned(args []string) int {
 		return 1
 	}
 	if err := plan.Validate(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if *feedback && (plan.Venue != testplanning.VenueLocal || plan.Profile != testplanning.ProfileCore || plan.Reason != "local developer feedback, not reviewer-bound qualification") {
+		fmt.Fprintln(os.Stderr, "feedback worker cannot execute a reviewer-bound plan")
+		return 1
+	}
+	if _, err := completionSource(".", plan.HeadSHA, !*feedback); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
@@ -163,7 +238,7 @@ func runPlanned(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	return executeCompletionUnit(plan, unit, false)
+	return executeCompletionUnit(plan, unit, !*feedback, *receipts)
 }
 
 func completionSource(repo, expectedHead string, requireClean bool) (string, error) {

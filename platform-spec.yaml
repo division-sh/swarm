@@ -6636,6 +6636,7 @@ engine:
             - Public PostgresStore and SQLiteRuntimeStore effective method sets, and every exported non-backend semantic-owner method set, must contain zero raw SQL/query/dialect/transaction-callback parameters or results.
             - Unknown or stale findings fail. Regeneration preserves reviewed dispositions and marks new findings unclassified; no file or enclosing-type allowlist exists.
             - Raw findings are valid only for an exact private backend/adapter, construction, or fixture disposition. The adjacent-2149 disposition is retired and its production finding count is zero.
+            - The reviewed registry remains one TSV, deterministically ordered first by exact source file and then finding identity. Ordering grants no authority; every consumer reads the complete set. Generated updates preserve existing judgments and leave new identities unclassified for independent review.
         dependency_classifications:
           - dependency: internal/store/backendselection and selector parsing
             classification: legitimate backend-selection/construction boundary
@@ -22481,6 +22482,44 @@ test_specification:
         job is matched to its exact planned logical units and counted once, while every logical budget and failure
         remains independent. Build-product reuse requires exact clean source, toolchain, native platform, dependency,
         policy, profile and flags identity plus byte integrity; a miss or mismatch rebuilds, never supplies test credit.
+      local_completion: >-
+        Local completion runs unchanged logical units in bounded subprocess workers, each through the existing
+        host/account FIFO admission, exact owned or explicit PostgreSQL service, descendant join and receipt validator.
+        The parent owns no admission slot. It cancels and joins started workers after a failure or signal, records
+        failed/not-started units without credit, and rechecks source. Every reviewer-bound planned worker independently
+        requires clean source and unchanged planned HEAD before and after execution. Ordering does not change plan
+        membership, selectors, backend children or deadlines. Conservative concurrency is at most four, constrained
+        by stable CPU and memory/cgroup limits (four CPUs and eight GiB per invocation); unknown capacity falls back
+        to one. Explicit shared PostgreSQL admits only one invocation; its 300-connection admission floor is not
+        measured spare capacity. An override cannot exceed the ceiling or resize a live slot universe. Cheap source,
+        tools, writable scratch bytes/inodes and host admission checks precede planning; selected native tools,
+        PostgreSQL capacity and private socket geometry are checked before workers. Long socket paths fail closed
+        rather than silently using another scratch root. Actual complete receipts, not modeled ETA, establish cost.
+      complexity_qualification: >-
+        The committed complexity record contains reviewed tool, threshold and source-census policy only.
+        Both pinned upstream analyzers independently measure immutable base and head, enforcing non-increasing
+        cyclomatic and cognitive hotspot counts. PR comparison uses the head/event-base merge-base; push uses
+        before/after. Schedule uses exact default-branch head/first-parent; manual dispatch requires observed selected
+        branch lineage and compares an unmerged feature's merge-base with the observed default branch, otherwise
+        head/first-parent. Missing, self, unrelated or unavailable comparison and policy drift refuse qualification.
+        Generated base/head/delta evidence records exact SHAs and policy verdict, never becomes committed authority.
+      generated_proof_oracles: >-
+        Describe proof compares readable per-fixture/per-surface bytes, retaining all compiled invocations, exits
+        and stderr assertions. Only explicitly enumerated presentation coordinates and the current embedded source
+        location may normalize; exact source identity must first match independently admitted fixture bytes.
+        File identity, coordinate presence, semantic payloads and wire formatting remain observable. Static-data
+        expectations retain exact content and semantic IDs while deriving current bundle identity from independent
+        fixture admission, never from runtime output. Corpus generation itself grants no execution or closure credit.
+      timing_publication_and_cadence: >-
+        Timing weights remain useful for partitioning, short-unit packing and ETA. Only exact successful full
+        evidence and a model-only diff authorize the master-only publisher; both create/update PR bodies declare
+        CI-Tier: core and Local-Tier: core, with ordinary native PR checks and no automatic duplicate dispatch.
+        Daily/manual full cadence is unchanged. Observations retain failed/incomplete attempt evidence without
+        weakening required checks. A full-only failure is an unclassified candidate until independent attribution;
+        confirmed core escape requires actual preceding successful core proof and a causal introducing commit
+        on the detected first-parent master lineage. Unknown provenance/lag remains unknown, and zero eligible
+        classified findings reports N/A rather than zero percent. Publication and measured fleet/cadence acceptance
+        remain open under #2535.
       master_replay: >-
         Schedule, manual dispatch and unverified master execute full. Master may reuse one exactly associated merged PR only when its
         qualified execution tree equals the pushed tree, the current PR tier is satisfied, and the current App 15368

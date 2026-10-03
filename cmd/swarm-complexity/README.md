@@ -1,34 +1,35 @@
 # Exact-snapshot complexity ratchet
 
-This development command implements #2407 R1.4 under #2447's approved baseline-only
-gate. No runtime semantics or factoring are included. The unmodified pinned
+This development command implements #2407 R1.4 and #2550's policy-only ratchet.
+No runtime semantics or factoring are included. The unmodified pinned
 gocyclo v0.6.0 and gocognit v1.2.1 commands own all scores; `go run module@version`
 provisions them in the normal Go cache, without vendoring or product dependencies.
 
-## Update and Check
+## Check
 
 Commit source changes first. Measurement never reads dirty or untracked Go files:
 
 ```sh
-go run ./cmd/swarm-complexity -head HEAD -base origin/master -update -evidence /tmp/complexity
-git add .github/complexity-baseline.json
-git commit -m 'chore: record exact complexity baseline'
-go run ./cmd/swarm-complexity -head HEAD -base origin/master -evidence /tmp/complexity
+go run ./cmd/swarm-complexity -head HEAD -base "$(git merge-base HEAD origin/master)" -evidence test-results/complexity
 ```
 
-The update writes measured facts, not permission to grow. Both independently
-remeasured >=30 counts must be non-increasing, even on the initial baseline PR.
-The committed head artifact must exactly equal deterministic measurement. Existing
-base artifacts must match their source and policy too; only genuine baseline
-absence is allowed for initial bootstrap. Tool, schema, threshold or scope changes
-require explicit policy review and comparable evidence, never an automatic reset.
+`.github/complexity-baseline.json` contains reviewed policy only, never scores.
+Both independently remeasured >=30 counts must be non-increasing. Missing policy,
+unknown head fields, missing comparison, self-comparison and unrelated comparison
+revisions fail closed. Historical base artifacts contribute only their reviewed
+policy; their score populations cannot influence independent measurement. Tool,
+schema, threshold or scope changes require explicit review and comparable evidence.
 
-PR events measure actual head/base SHAs, not the synthetic merge used by the test
-planner. Push measures before/after and refuses unavailable or all-zero history.
-Manual and scheduled runs validate the current snapshot only. An independent CI
+PR events measure actual head and its merge-base with the event's base tip, not the
+synthetic merge or unrelated newer-master changes. Push measures before/after and
+refuses unavailable, all-zero or non-ancestor history. Manual runs require a named
+branch; scheduled runs require the repository default branch. The selected head
+must be on that observed remote branch lineage. An unmerged feature compares its
+merge-base with the observed default branch; scheduled/default-branch and already
+merged heads compare their exact first parent. An independent CI
 job runs on every proof profile, and the aggregate requires success, not skipped.
-`head.json` and `delta.json` carry reproducible measurement and revision evidence;
-the committed baseline deliberately contains no self-referential commit SHA.
+`base.json`, `head.json` and `delta.json` carry reproducible measurement and revision evidence;
+the delta records the comparison SHA and reviewed-policy verdict.
 
 ## Scope and Identity
 

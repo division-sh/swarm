@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   complexity:
-    name: Exact-snapshot complexity ratchet
+    name: Independently measured complexity ratchet
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -650,6 +650,16 @@ jobs:
             -result-json test-results/timing-budget-result.json \
             -markdown test-results/timing-budget-result.md
           cat test-results/timing-budget-result.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Observe full cadence without granting qualification
+        if: always() && needs.ci-plan.outputs.profile == 'full'
+        run: |
+          go run ./cmd/swarm-test-timing -observe-full-cadence \
+            -plan test-results/plan/proof-plan.json \
+            -evidence-root test-results/evidence \
+            -workflow-run-id "$GITHUB_RUN_ID" -workflow-attempt "$GITHUB_RUN_ATTEMPT" \
+            -result-json test-results/full-cadence.json \
+            -markdown test-results/full-cadence.md
+          cat test-results/full-cadence.md >> "$GITHUB_STEP_SUMMARY"
       - name: Upload timing budget result
         if: always()
         uses: actions/upload-artifact@v4
@@ -659,6 +669,8 @@ jobs:
             test-results/timing-budget-result.json
             test-results/timing-budget-result.md
             test-results/jobs.json
+            test-results/full-cadence.json
+            test-results/full-cadence.md
           if-no-files-found: warn
 
   required-tests:
@@ -843,10 +855,11 @@ jobs:
           trap - EXIT
 
           pr=$(gh pr list --head "$branch" --base master --state open --json number --jq '.[0].number // empty')
+          body=$'Generated from independently validated successful full CI evidence.\n\nGenerated timing model only; human review and normal PR checks required.\n\nCI-Tier: core\nLocal-Tier: core\n\nPart of #2535. Related to #1967.'
           if [ -z "$pr" ]; then
             gh pr create --base master --head "$branch" \
-              --title "[automation][issue #1967] Refresh CI timing weights" \
-              --body $'Generated from successful fresh CI evidence.\n\nGenerated file only; human review and normal protection required.\n\nPart of #1967.'
+              --title "[automation][issue #2535] Refresh CI timing weights" \
+              --body "$body"
           else
-            gh pr edit "$pr" --title "[automation][issue #1967] Refresh CI timing weights"
+            gh pr edit "$pr" --title "[automation][issue #2535] Refresh CI timing weights" --body "$body"
           fi

@@ -65,6 +65,7 @@ func TestSwarmTestPreservesChildFailure(t *testing.T) {
 }
 
 func TestSwarmTestSettlementTimeoutFailsClosed(t *testing.T) {
+	t.Setenv(testpostgres.RunCapacityEnv, "1")
 	root := t.TempDir()
 	stateHome := filepath.Join(root, "state")
 	stateRoot := filepath.Join(stateHome, "swarm", "test-postgres")
@@ -158,6 +159,7 @@ func TestTimingFallbackUsesCanonicalModelForFullSuite(t *testing.T) {
 
 func chdirSwarmRepoRoot(t *testing.T) {
 	t.Helper()
+	t.Setenv(testpostgres.RunCapacityEnv, "1")
 	_, file, _, _ := runtime.Caller(0)
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 	old, err := os.Getwd()

@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
+	"github.com/division-sh/swarm/internal/testpostgres"
 )
 
 // This private, fsync-enabled cluster is the only server these outage probes
@@ -33,7 +34,11 @@ func newContractPostgresServer(t *testing.T) *contractPostgresServer {
 	if bin == "" {
 		t.Skip("set TEST_POSTGRES_BIN for disposable PostgreSQL server-loss investigation")
 	}
-	root := t.TempDir()
+	root, err := testpostgres.NewSocketDirectory("swarm-pg-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -43,7 +48,8 @@ func newContractPostgresServer(t *testing.T) *contractPostgresServer {
 		t.Fatal(err)
 	}
 	s := &contractPostgresServer{t: t, bin: bin, data: filepath.Join(root, "data"), log: filepath.Join(root, "postgres.log")}
-	s.options = fmt.Sprintf("-h 127.0.0.1 -p %d -k %s -c max_connections=80", port, root)
+	socket := "'" + strings.ReplaceAll(root, "'", "'\\''") + "'"
+	s.options = fmt.Sprintf("-h 127.0.0.1 -p %d -k %s -c max_connections=80", port, socket)
 	s.dsn = fmt.Sprintf("host=127.0.0.1 port=%d user=swarm_probe dbname=postgres sslmode=disable connect_timeout=2", port)
 	s.run("initdb", "-D", s.data, "-U", "swarm_probe", "--auth=trust", "--no-locale")
 	t.Cleanup(func() {

@@ -68,7 +68,7 @@ func TestCapacityProbeFailedStartupCleansUpBeforeRemoval(t *testing.T) {
 }
 
 func TestCapacityProbeQuotedTemporaryPath(t *testing.T) {
-	root, err := os.MkdirTemp("/tmp", "capacity 'quoted'-")
+	root, err := os.MkdirTemp("", "capacity 'quoted'-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,5 +90,20 @@ func TestCapacityProbeQuotedTemporaryPath(t *testing.T) {
 	defer db.Close()
 	if err := ValidateServerCapacity(context.Background(), db); err != nil {
 		t.Fatalf("quoted temporary path did not yield a usable server: %v", err)
+	}
+}
+
+func TestNativeSocketDirectoryRejectsLongScratchWithoutFallback(t *testing.T) {
+	root := filepath.Join(t.TempDir(), strings.Repeat("long", 30))
+	if err := os.Mkdir(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", root)
+	if path, err := NewSocketDirectory("swarm-pg-"); err == nil || path != "" {
+		t.Fatalf("long socket accepted/fell back: %s %v", path, err)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("refused socket directory leaked: %v %v", entries, err)
 	}
 }

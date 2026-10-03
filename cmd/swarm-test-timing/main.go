@@ -52,6 +52,11 @@ type config struct {
 	recordEvidence  bool
 	evaluateBudget  bool
 	updateWeights   bool
+	observeCadence  bool
+	classificationPath string
+	priorCorePlanPath string
+	priorCoreEvidenceRoot string
+	priorCoreRunPath string
 	validatePublish bool
 	assertExecution bool
 	warmProducts    bool
@@ -101,6 +106,11 @@ func main() {
 	flag.BoolVar(&cfg.recordEvidence, "record-evidence", false, "record evidence bound to a plan unit")
 	flag.BoolVar(&cfg.evaluateBudget, "evaluate-budget", false, "evaluate complete evidence against the emitted plan")
 	flag.BoolVar(&cfg.updateWeights, "update-weight-model", false, "update generated weights from successful plan evidence")
+	flag.BoolVar(&cfg.observeCadence, "observe-full-cadence", false, "retain full-run observations without granting qualification")
+	flag.StringVar(&cfg.classificationPath, "cadence-classifications", "", "optional independently reviewed finding provenance")
+	flag.StringVar(&cfg.priorCorePlanPath, "prior-core-plan", "", "optional preceding actual core proof plan")
+	flag.StringVar(&cfg.priorCoreEvidenceRoot, "prior-core-evidence-root", "", "optional preceding core command evidence")
+	flag.StringVar(&cfg.priorCoreRunPath, "prior-core-run", "", "optional successful preceding Actions run metadata")
 	flag.BoolVar(&cfg.validatePublish, "validate-publish-diff", false, "fail unless changed-files contains only the generated model")
 	flag.BoolVar(&cfg.assertExecution, "assert-execution-sha", false, "fail unless the checked-out commit matches the run plan")
 	flag.Parse()
@@ -113,7 +123,7 @@ func main() {
 
 func run(cfg config) error {
 	modes := 0
-	for _, enabled := range []bool{cfg.verifyMerged, cfg.warmProducts, cfg.checkCITier, cfg.planCI, cfg.recordEvidence, cfg.evaluateBudget, cfg.updateWeights, cfg.validatePublish, cfg.assertExecution} {
+	for _, enabled := range []bool{cfg.verifyMerged, cfg.warmProducts, cfg.checkCITier, cfg.planCI, cfg.recordEvidence, cfg.evaluateBudget, cfg.updateWeights, cfg.observeCadence, cfg.validatePublish, cfg.assertExecution} {
 		if enabled {
 			modes++
 		}
@@ -163,6 +173,8 @@ func run(cfg config) error {
 		return evaluateBudget(cfg)
 	case cfg.updateWeights:
 		return updateWeightModel(cfg)
+	case cfg.observeCadence:
+		return observeFullCadence(cfg)
 	case cfg.validatePublish:
 		paths, err := readLines(cfg.changedPath)
 		if err != nil {
@@ -364,6 +376,9 @@ func updateWeightModel(cfg config) error {
 	plan, err := readPlan(cfg.planPath)
 	if err != nil {
 		return err
+	}
+	if plan.Profile != testplanning.ProfileFull {
+		return fmt.Errorf("generated publication weights require successful full proof, not %s", plan.Profile)
 	}
 	current, err := readWeightModel(cfg.weightModelPath)
 	if err != nil {
