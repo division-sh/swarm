@@ -6,7 +6,7 @@ Agent: agent-g. This is a focused delta to gate5972816660, not a new issue or a 
 
 Fresh server2 Local-Tier: full at bf695ea171c5b14af44501dadc6d4b4cb96f3dab used private services, native PostgreSQL16 explicitly, disk TMPDIR, capacity4, and an unchanged65-unit full plan. It failed after151.397s: delivery-continuation-full refused provision because another legitimate lease did not match its registry container. Four units passed; four failed/interrupted;57 were not started. All started workers joined. No managed containers remained afterward. The error was service provisioning, not an application delivery test. Preserve the failed aggregate; no full or speed claim.
 
-Archive full-2550-failed-bf695.tar.gz SHA256 2caebcc259f64cb5bcde1ba04f89479beb023224e9804c1ee13bfd6abf705134 retains plan, workers, runner logs and canonical command evidence. Reproduction uses an external Go overlay; source remains clean and the service owner has NOT been modified.
+Archive full-2550-failed-bf695.tar.gz SHA256 2caebcc259f64cb5bcde1ba04f89479beb023224e9804c1ee13bfd6abf705134 retains plan, workers, runner logs and canonical command evidence. The real full run used clean committed source. Counterexamples use an external Go overlay that modifies no tracked production/test files; the service owner has NOT been modified. Audit documentation was being prepared during the diagnostic probes; those probes are not reviewer-bound qualification receipts.
 
 Two controlled same-owner counterexamples each reproduce3/3:
 - An actively leased ServiceCreating row also holds its exact creator fence and has an exact labelled container but has not published ContainerID. Reconcile refuses it as a mismatch before inspecting the active lease.
