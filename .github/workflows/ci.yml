@@ -8,11 +8,11 @@ on:
   workflow_dispatch:
     inputs:
       profile:
-        description: Proof profile to execute
+        description: Exhaustive full qualification
         required: false
         default: full
         type: choice
-        options: [core, lifecycle, full]
+        options: [full]
   schedule:
     - cron: "17 3 * * *"
 

@@ -17,6 +17,11 @@ import (
 )
 
 func runCompletion(profile string, explicit bool) int {
+	head, err := completionSource(".", "", explicit)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
 	inventory, err := testplanning.DiscoverRootInventory(context.Background(), ".")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -54,20 +59,19 @@ func runCompletion(profile string, explicit bool) int {
 		packages = append(packages, pkg)
 	}
 	sort.Strings(packages)
-	head, err := exec.Command("git", "rev-parse", "HEAD").Output()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "read source commit: %v\n", err)
-		return 1
-	}
 	reason := "local developer feedback, not reviewer-bound qualification"
 	if explicit {
 		reason = "explicit local tier selection; reviewer compares with Local-Tier"
 	}
-	plan, err := testplanning.BuildPlan(policy, model, packages, profile, reason, strings.TrimSpace(string(head)), testplanning.BuildOptions{Venue: testplanning.VenueLocal})
+	plan, err := testplanning.BuildPlan(policy, model, packages, profile, reason, head, testplanning.BuildOptions{Venue: testplanning.VenueLocal})
 	if err == nil {
 		err = testplanning.BindExecution(&plan, inventory, proofs, policy)
 	}
 	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if _, err := completionSource(".", head, explicit); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
@@ -101,9 +105,13 @@ func runCompletion(profile string, explicit bool) int {
 	}()
 	for _, unit := range plan.Units {
 		fmt.Fprintf(os.Stderr, "swarm-test %s: starting %s\n", profile, unit.ID)
-		if code := executeCompletionUnit(plan, unit, receipts); code != 0 {
+		if code := executeCompletionUnit(plan, unit, explicit, receipts); code != 0 {
 			return code
 		}
+	}
+	if _, err := completionSource(".", head, explicit); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
 	}
 	fmt.Fprintf(os.Stderr, "swarm-test %s: all %d planned units passed required execution\n", profile, len(plan.Units))
 	return 0
@@ -155,10 +163,37 @@ func runPlanned(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	return executeCompletionUnit(plan, unit)
+	return executeCompletionUnit(plan, unit, false)
 }
 
-func executeCompletionUnit(plan testplanning.RunPlan, unit testplanning.ProofUnit, receipts ...string) int {
+func completionSource(repo, expectedHead string, requireClean bool) (string, error) {
+	raw, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
+	if err != nil {
+		return "", fmt.Errorf("read source commit: %w", err)
+	}
+	head := strings.TrimSpace(string(raw))
+	if requireClean {
+		if expectedHead != "" && head != expectedHead {
+			return head, fmt.Errorf("qualification source HEAD changed: planned %s, actual %s", expectedHead, head)
+		}
+		status, err := exec.Command("git", "-C", repo, "status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=none").Output()
+		if err != nil {
+			return head, fmt.Errorf("inspect qualification source: %w", err)
+		}
+		if len(status) != 0 {
+			return head, fmt.Errorf("reviewer-bound qualification requires clean source at %s:\n%s", head, status)
+		}
+	}
+	return head, nil
+}
+
+func executeCompletionUnit(plan testplanning.RunPlan, unit testplanning.ProofUnit, reviewerBound bool, receipts ...string) int {
+	if reviewerBound {
+		if _, err := completionSource(".", plan.HeadSHA, true); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+	}
 	var directory string
 	if len(receipts) > 0 {
 		directory = receipts[0]
@@ -174,6 +209,14 @@ func executeCompletionUnit(plan testplanning.RunPlan, unit testplanning.ProofUni
 	defer file.Close()
 	start := time.Now()
 	code := runTestArgs(unitTestArgs(unit), io.MultiWriter(os.Stdout, file), true, unit.WorkloadProfile, unit.ExecutionTier, modeledDuration(unit))
+	if reviewerBound {
+		if _, err := completionSource(".", plan.HeadSHA, true); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			if code == 0 {
+				code = 1
+			}
+		}
+	}
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
