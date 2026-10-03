@@ -3,7 +3,10 @@
 Agent-g, 2026-10-03. Source baseline: merged #2537,
 `0fa24140aaa05e397509f451ba780fef3a260867`. Audit-only: no workflow,
 planner, runtime, test assertion, dependency or authoritative spec implementation.
-Independent coding gate: **requested, not yet granted**.
+Independent coding gate: **approved as amended**,
+https://github.com/division-sh/swarm/issues/2544#issuecomment-5965227266.
+The binding amendment replaces the original authorization machinery with plain
+PR-body tier lines and requires measured candidate cost before retaining lifecycle.
 
 ## Lead Disposition And Class Model
 
@@ -11,8 +14,8 @@ The user-lead accepted delayed exhaustive discovery, then explicitly replaced
 affected-owner selection with a fixed census/profile split. The reviewer must
 choose local and CI requirements independently; profile selection must consume
 that verdict automatically. Multiple cumulative tiers are allowed where the
-census establishes a meaningful coverage/cost difference. This is permission to
-finish the audit, not independent coding approval.
+census establishes a meaningful coverage/cost difference. Independent gate
+5965227266 now grants bounded coding permission after this documentation sync.
 
 - Category: high-risk qualification maintenance / semantic ownership / parity.
 - Symptom: ready qualifications consume approximately 339-347 assigned
@@ -136,63 +139,71 @@ retain the finite existing deferrals and explicit separate credit, at every tier
 
 ## Reviewer Verdict And Automatic Selection
 
-One small strict record lives in the existing checked-in issue audit artifacts;
-it contains version, issue, audit-scope digest, independent gate reference,
-`local_tier` and `ci_tier`. These are two independent choices, not booleans and
-not inferred from each other. Example gate declaration, not an approval:
+The reviewer writes exactly one of each plain line in the PR body. For #2544:
 
-```yaml
-qualification:
-  version: 1
-  issue: 2544
-  local_tier: full
-  ci_tier: full
-  audit_scope_digest: <exact reviewed scope digest>
-  gate_ref: <independent approved issue comment>
+```text
+CI-Tier: full
+Local-Tier: full
 ```
 
-The reviewer approves the normalized record payload as part of the issue gate;
-the implementer records the gate reference, not a self-authored approval. A
-scope/requirement alteration must be ratified, not smuggled into a repair push.
-The gate must include the exact typed qualification block, not just free-form
-approval wording. Existing independent human review remains the approval owner;
-a shared GitHub login is not invented proof of reviewer independence.
-No head-specific re-gate after every ordinary approved-scope implementation push:
-the verdict binds scope; execution evidence independently binds its exact head.
+CI parses its own PR event JSON as data, accepting exactly one valid CI-Tier
+line with core, lifecycle or full. Missing, malformed or duplicate lines resolve
+to full with an explicit diagnostic. Schedule, manual exhaustive and unverified
+master also run full. Never interpolate body text into shell or use publisher
+credentials. The independent human review remains the approval owner.
 
-Minimal explicit context, no new registry: the local task supplies the audit path
-once using `SWARM_TEST_QUALIFICATION_AUDIT` (or the equivalent audit-path argument),
-then normal `go run ./cmd/swarm-test` resolves the reviewer-required local tier.
-CI reads the same relative audit path from one structured `Qualification-Audit`
-field in the PR body. A locator is not a second policy owner. Never scan old
-audits or infer the issue from branch/title/path. No-context local execution
-remains an explicitly developer-only core run, not a reviewer-bound receipt.
+Add pull_request.edited and qualify same-head edits. Before success the summary
+compares its effective tier with the current PR body; a thinner run cannot earn
+green after an increase. Hosted evidence must prove post-success body increases
+invalidate stale qualification, and human final review compares the current
+body to the latest qualifying run. Keep existing policy/plan/head/run/attempt
+digests. No additional authorization digest, gate fetch, YAML record or locator.
 
-The existing testplanning owner validates schema, path confinement, scope
-digest and approved gate payload; the existing planner/runner consumes the same
-resolution. Fetch only read-only GitHub evidence with the existing token/context
-when admitting reviewer-bound proof; never execute comment content or expose
-publisher credentials. An inaccessible/missing/ambiguous/superseded verdict
-cannot produce thin qualified evidence. CI conservatively runs full and reports
-unresolved admission; reviewer-bound local proof fails clearly rather than
-guessing. Explicit `--full` may increase coverage, never lower a declared minimum.
+Local-Tier is a human instruction. Use a minimal explicit --tier selection;
+--full promotes. Print and record effective tier and source/plan evidence.
+No-context core is developer feedback, not reviewer-bound qualification.
+The reviewer compares the posted command/receipt to Local-Tier; missing/invalid
+requirements cannot earn thin credit. No GitHub lookup, env-var audit locator
+or branch/title inference. Explicit changed-test execution remains separate
+and cannot lower an explicitly requested tier.
 
-Print venue, requested/required/resolved tier, gate, scope/policy/record digest,
-source head and planned/deferred units before resource acquisition. Bind the
-verdict and policy digest into the existing RunPlan and command/job receipts.
-If a reviewer changes a requirement, update the shared record and trigger fresh
-normal head qualification; earlier thinner green cannot count. CI's summary
-must compare its resolved requirement with the current verdict before success.
-Do not parse free-form review wording, add labels as independent semantic input,
-or build a generic approval/framework service. Retire PR path escalation and
-soak/parity inference in this slice; retain local changed-test semantics separately.
+Retire PR path escalation and soak/parity inference; do not add labels, a
+dependency selector or another approval framework.
+
+## Measured Cost And Provisional Third Tier
+
+Independent gate accounting of successful jobs in run37083235335 attempt1:
+
+| Historical component | Assigned runner-minutes |
+| --- | ---: |
+| Nine ordinary broad proofs | 25.25 |
+| Seven proposed-core named proofs | 17.12 |
+| 45 lifecycle named proofs | 176.18 |
+| 16 full-only named proofs | 81.65 |
+| Shared non-proof work excluding native-unused union | 17.73 |
+| Linux/Darwin/native-unused union | 21.17 |
+| Total:77 proof jobs +11 other successful jobs | 339.10 |
+
+| Retrospective tier-equivalent components | Assigned runner-minutes |
+| --- | ---: |
+| core | 60.10 |
+| lifecycle | 236.28 |
+| full | 339.10 |
+
+These are measured OLD job components, not executed candidate-tier totals.
+The102.82-minute/30.3% lifecycle-to-full difference supports a provisional tier.
+Before finalizing, measure actual comparable whole-run core/lifecycle/full cost,
+including planner, static, macOS possession, required native union, packing and
+cache work. Retain lifecycle only with at least20% saving versus full AND exact
+declared coverage. Otherwise collapse lifecycle into full in this same PR;
+that fallback is pre-approved. Never claim historical sums as candidate savings.
 
 ## Execution Paths And Every Gate
 
 | Ordered path / gate | Classification | Named proof planned |
 | --- | --- | --- |
-| Lead scope -> independent issue gate -> recorded local/CI verdict | same chosen class for proof admission; semantic coding permission is existing human process | V01-V12 below; unapproved scope never generates qualified thin evidence |
-| Native draft/ready event -> explicit audit locator -> typed verdict -> fixed tier | same chosen class | T/V event matrix; real hosted tier transitions; preserve #2537 draft -> ready refusal/acceptance |
+| Lead scope -> independent issue gate -> reviewer PR-body lines | same chosen class for tier admission; coding permission remains existing human process | V01-V12 below; no automated approval claim |
+| Native draft/ready/edited event -> parsed event body -> fixed tier | same chosen class | T/V event matrix; real hosted same-head tier edits; preserve #2537 draft -> ready refusal/acceptance |
 | Checkout source/merge identity -> effective build context -> root census -> full ownership -> selected/deferred plan | same chosen class | T01-T12, original unmatched-root/head/GOFLAGS controls plus new tier negatives |
 | Required platform/static checks -> exact build products -> physical batches/isolated unit processes -> root/backend/child receipts | same chosen class for scope/provenance/physical lifetime | C/B rows; actual unchanged SQLite/PostgreSQL public source/channel and lifecycle paths |
 | Terminal job observation -> budget evaluation -> required summary -> human merge review | same chosen class for evidence/summary; final human review is separate existing approval owner | E rows; incomplete/canceled/stale/wrong-tier never green |
@@ -214,7 +225,7 @@ same-seam claim. Owners below are real semantic owners, not first helpers.
 | --- | --- |
 | testplanning policy, BuildPlan, root inventory, BindExecution, projection/census | A/M cmd/swarm-test-timing CI planning; M cmd/swarm-test default/full/planned completion; M strict RunPlan validation/signatures; M testcatalog inventory/external-proof identical-profile validator; M public_surface_backend_matrix catalogue and its validators; M catalog/compiled-profile guard tests; M runtime-fanout, conformance2394, flow-constructor and current-plan partition guards; M model exact-selection/profile keys; A ordinary go-list discovery and unknown weight inclusion |
 | Same owner, closed workload/profile interpretation | M releasee2e goldenContinuousProofProfile and full_lifecycle callers; M root deferral/replacement interpreter; M CI environment/workload labels and required-child binding; M command/help/docs profile projections. Delete retired local/pr-common/pr-escalated/nightly selection semantics rather than maintain aliases; event/venue map to fixed tiers through one owner |
-| Same owner, reviewer-bound qualification | M local entry, CI-plan, required summary, manual/scheduled policy; M issue/PR audit template and implementation/review checklist requirements. Both choices consume one typed record; no labels/comment heuristics or per-change test graph |
+| Same owner, reviewer-required qualification | M explicit local --tier entry, CI event-body parser, current-body required summary, manual/scheduled policy; M PR template/checklist with plain CI-Tier/Local-Tier lines. No auth record, gate fetch, locator, labels or per-change test graph |
 | testtiming CommandEvidence/EvaluateBudget/AttachJobEvidence | A/M CLI recorder/evaluator, local executeCompletionUnit, timing-budget aggregation; M workflow terminal poller and job mapping; M publisher weight-update evidence. All migrate together for verdict/tier and one-to-many ownership; keep logical command/root/backend failures and count physical cost once |
 | Existing RunPlan physical dispatch | M MatrixJSON/workflow proof strategy and isolated batch loop; M mandatory-soak strategy and aggregator; M exact-head job/evidence publication. Long, soak, platform or unproved-isolation rows remain separate |
 | Existing executable build owners | M ci-plan module/production/test/tool products and native/static tooling; M proof worker fallback/build/cache validation; M releasee2e buildReleaseBinaryWithArgs and buildOwnedMockLifecycleBinary; M SQLite smoke Docker-layer build. Exact manifests separate flags/race/toolchain/GOOS/go.sum/profile/source; no test-result cache credit |
@@ -264,12 +275,12 @@ full execution requirement. No row is credited by shared-owner introduction.
 | V04 | Local full / CI core | Actual local full includes both stores/soaks; hosted core separately passes; local cannot claim native Darwin |
 | V05 | Local core / CI full | Actual hosted full all corpus/platforms/soaks; no need to run local full merely because CI does |
 | V06 | Remaining four ordered pairs | Table-test all9 core/lifecycle/full pairs through shared resolver and entry points; no inferred coupling |
-| V07 | Missing/malformed/unknown/duplicate/path-escape record | Strict payload/context fixtures fail thin admission before acquisition; unresolved CI chooses full and exposes refusal, not assumed core |
-| V08 | Wrong issue/digest/gate, unapproved or superseded verdict, API failure | Read-only exact gate/provenance fixtures; no guessed issue/branch or stale thinner qualified receipt |
+| V07 | Missing/malformed/unknown/duplicate CI-Tier | Event JSON parser hostile-body controls resolve full explicitly; no shell evaluation |
+| V08 | Edited requirement or current-body read failure | Summary compares actual effective tier against current body; unavailable body fails closed; same-head higher edit invalidates thinner green |
 | V09 | Explicit user flag or raw arguments downgrade declared minimum | Refuse lower request, accept --full promotion; developer no-context run explicitly non-review-bound |
-| V10 | Reviewer raises requirement after green core | Real hosted requirement update normal synchronize; old green not accepted for new digest/tier; summary revalidates current requirement |
+| V10 | Reviewer raises requirement after green core | Real hosted pull_request.edited on same SHA; old green no longer mergeable; summary and human final review compare current requirement |
 | V11 | Native draft/ready and deliberate manual/scheduled posture | Preserve #2537 same-SHA draft refusal; ready resolves gate; manual checks remain distinct; schedules select full |
-| V12 | Source head, execution merge, venue/flags/profile evidence mismatch | Existing wrong-SHA/GOFLAGS/digest/count/env guards plus verdict/policy/tier mismatch fixtures |
+| V12 | Source head, execution merge, venue/flags/profile evidence mismatch | Existing wrong-SHA/GOFLAGS/digest/count/env guards plus effective policy/tier mismatch fixtures; no authorization metadata |
 | C01 | Cold/missing/evicted build cache | Real selected commands rebuild successfully; no cache prerequisite or previous result as evidence |
 | C02 | Stale/wrong-source/toolchain/go.sum/profile/race/native product | Tampered manifest/bytes negatives; exact source/tool/flags/policy verification rejects reuse and rebuilds |
 | C03 | Release binary/test child cache changes runtime/process semantics | Real compiled both-store source/channel/restart paths with cold and reused binaries, unchanged args/root/listener/fresh store |
@@ -312,8 +323,8 @@ No matrix cap, merge queue, assertions/deadlines/waits, in-test concurrency,
 third-party vendor or blanket deletion is authorized.
 
 Tracker decision: **update current issue and parent/watchlist before coding**.
-Replace source-aware/affected-owner scope and obsolete pending-lead language
-with the user's fixed cumulative tiers and independent local/CI choices. No
+Replace source-aware/affected-owner scope, obsolete pending-lead language and
+superseded authorization machinery with plain PR-body tier choices. No
 new child, superseded old issue, new watchlist node or POTENTIAL_ISSUES entry.
 Historical #1967 stays closed; amend its frequency/profile interpretations here
 without reopening its eliminated assignment/dispatcher class.
@@ -356,12 +367,11 @@ The approximately55-minute normal-core envelope is a hypothesis. Full requested
 by a reviewer may necessarily exceed20 minutes; report the tier mix honestly and
 retain #2535's aggregate acceptance, never exclude slow full verdicts silently.
 
-Blocking conditions: independent gate missing; exact tier/verdict mechanism not
-ratified; unmatched live profile consumer; inadequate full root/child/platform
+Blocking conditions: unapproved deviation from amended gate; unmatched live
+profile consumer; inadequate full root/child/platform
 owner; unsafe batch/product reuse; protected current requirement cannot be
 execution-proven; new security/token or runtime semantics required. No remaining
-user decision is requested by this artifact: the lead supplied the frequency
-tradeoff and tier flexibility. Reviewer-g must now accept or repair the proposed
-membership and record **both local and CI tiers for #2544 itself**. Proposed
+user decision is requested: the lead supplied the frequency tradeoff and plain
+two-line choice; reviewer-g approved the bounded class as amended. Binding
 requirements for this high-risk policy PR are **local full / CI full**, including
 one actual hosted all-corpus/native/two-soak qualification before merge.
