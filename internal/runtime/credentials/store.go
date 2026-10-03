@@ -409,6 +409,21 @@ func (p *SecretBindingProjection) ObserveSecretBinding(ctx context.Context, key 
 	return binding, nil
 }
 
+// Activation distinguishes absence from an unusable present value. Readback's
+// BOUND/UNBOUND vocabulary deliberately does not make that distinction.
+func (p *SecretBindingProjection) ObserveActivationCredential(ctx context.Context, key string) (AdmittedSnapshot, error) {
+	binding, err := p.ObserveSecretBinding(ctx, key)
+	if err != nil {
+		return AdmittedSnapshot{}, err
+	}
+	if binding.snapshot.Present {
+		if err := ValidateValue(binding.snapshot.CredentialValue()); err != nil {
+			return AdmittedSnapshot{}, &SecretBindingObservationError{Key: key, Err: err}
+		}
+	}
+	return binding.snapshot, nil
+}
+
 func (p *SecretBindingProjection) ValidateCurrent(ctx context.Context) error {
 	if p == nil || len(p.bindings) == 0 {
 		return nil
@@ -417,13 +432,30 @@ func (p *SecretBindingProjection) ValidateCurrent(ctx context.Context) error {
 	for key := range p.bindings {
 		keys = append(keys, key)
 	}
+	return p.ValidateCurrentKeys(ctx, keys)
+}
+
+// Explicit admission may refresh one binding, never unrelated consumers of the
+// same frozen projection. Unknown keys cannot be treated as checked evidence.
+func (p *SecretBindingProjection) ValidateCurrentKeys(ctx context.Context, keys []string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	if p == nil || p.owner == nil {
+		return fmt.Errorf("credential snapshot owner is required")
+	}
+	keys = append([]string(nil), keys...)
 	sort.Strings(keys)
 	for _, key := range keys {
+		prior, present := p.bindings[key]
+		if !present {
+			return fmt.Errorf("credential binding %q has no frozen observation", key)
+		}
 		current, err := p.owner.ObserveSecretBinding(ctx, key)
 		if err != nil {
 			return err
 		}
-		if current.ObservationToken() != p.bindings[key].ObservationToken() {
+		if current.ObservationToken() != prior.ObservationToken() {
 			return &SecretBindingProjectionStaleError{Key: key}
 		}
 	}

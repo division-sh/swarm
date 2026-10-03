@@ -539,7 +539,7 @@ func (f standingDispositionParityFixture) create(t *testing.T, ctx context.Conte
 
 func (f standingDispositionParityFixture) candidate(name string) runtimepipeline.StandingServiceCandidate {
 	flowPath := "restart-disposition/" + f.backend + "-" + name
-	return runtimepipeline.StandingServiceCandidate{
+	return runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 		ServiceID: runtimeflowidentity.StandingServiceID(flowPath), FlowPath: flowPath,
 		InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
 		Source: mustStoreTestSourceArtifactFact(f.hash),
@@ -677,10 +677,10 @@ func (f standingDispositionParityFixture) setDesiredState(t *testing.T, serviceI
 	if override == "suspended" {
 		actor, at = "test", time.Now().UTC()
 	}
-	query := `UPDATE standing_services SET declaration_present=?, effective_state=?, operator_override=?, override_actor=?, override_reason=NULL, override_at=? WHERE service_id=?`
-	args := []any{declared, effective, override, actor, at, serviceID}
+	query := `UPDATE standing_services SET declaration_present=?, binding_enabled=?, effective_state=?, operator_override=?, override_actor=?, override_reason=NULL, override_at=? WHERE service_id=?`
+	args := []any{declared, declared && effective != "dormant", effective, override, actor, at, serviceID}
 	if f.backend == "postgres" {
-		query = `UPDATE standing_services SET declaration_present=$1, effective_state=$2, operator_override=$3, override_actor=$4, override_reason=NULL, override_at=$5 WHERE service_id=$6::uuid`
+		query = `UPDATE standing_services SET declaration_present=$1, binding_enabled=$2, effective_state=$3, operator_override=$4, override_actor=$5, override_reason=NULL, override_at=$6 WHERE service_id=$7::uuid`
 	}
 	if _, err := f.db.Exec(query, args...); err != nil {
 		t.Fatalf("set standing desired state %t/%s/%s: %v", declared, effective, override, err)

@@ -12,24 +12,64 @@ import (
 type StandingRestartDispositionKind string
 
 const (
-	StandingRestartOrdinary         StandingRestartDispositionKind = "ordinary"
-	StandingRestartActiveIntrinsic  StandingRestartDispositionKind = "active_intrinsic"
-	StandingRestartSuspended        StandingRestartDispositionKind = "suspended"
-	StandingRestartOrphaned         StandingRestartDispositionKind = "orphaned"
-	StandingRestartTerminalDeclared StandingRestartDispositionKind = "terminal_declared"
-	StandingRestartTerminalOrphaned StandingRestartDispositionKind = "terminal_orphaned"
-	StandingRestartInvalidCurrent   StandingRestartDispositionKind = "invalid_current"
+	StandingRestartOrdinary          StandingRestartDispositionKind = "ordinary"
+	StandingRestartActiveIntrinsic   StandingRestartDispositionKind = "active_intrinsic"
+	StandingRestartSuspended         StandingRestartDispositionKind = "suspended"
+	StandingRestartCredentialDormant StandingRestartDispositionKind = "credential_dormant"
+	StandingRestartRecoveryRequired  StandingRestartDispositionKind = "recovery_required"
+	StandingRestartOrphaned          StandingRestartDispositionKind = "orphaned"
+	StandingRestartTerminalDeclared  StandingRestartDispositionKind = "terminal_declared"
+	StandingRestartTerminalOrphaned  StandingRestartDispositionKind = "terminal_orphaned"
+	StandingRestartInvalidCurrent    StandingRestartDispositionKind = "invalid_current"
 )
 
 type StandingRestartRemediation string
 
 const (
-	StandingRestartNoRemediation      StandingRestartRemediation = "none"
-	StandingRestartResumeOrReset      StandingRestartRemediation = "resume_or_reset"
-	StandingRestartRestoreDeclaration StandingRestartRemediation = "restore_declaration"
-	StandingRestartReset              StandingRestartRemediation = "reset"
-	StandingRestartRestoreThenReset   StandingRestartRemediation = "restore_then_reset"
+	StandingRestartNoRemediation        StandingRestartRemediation = "none"
+	StandingRestartResumeOrReset        StandingRestartRemediation = "resume_or_reset"
+	StandingRestartRestoreDeclaration   StandingRestartRemediation = "restore_declaration"
+	StandingRestartReset                StandingRestartRemediation = "reset"
+	StandingRestartRestoreThenReset     StandingRestartRemediation = "restore_then_reset"
+	StandingRestartProvisionCredentials StandingRestartRemediation = "provision_credentials_then_restart"
+	StandingRestartResumeChannel        StandingRestartRemediation = "resume_channel_onboarding"
 )
+
+type StandingBindingBlockReason string
+
+const (
+	StandingBindingCredentialsAbsent StandingBindingBlockReason = "credentials_absent"
+	StandingBindingRecoveryRequired  StandingBindingBlockReason = "recovery_required"
+)
+
+func (r StandingBindingBlockReason) Validate(enabled bool) error {
+	if enabled && r == "" || !enabled && (r == StandingBindingCredentialsAbsent || r == StandingBindingRecoveryRequired) {
+		return nil
+	}
+	return fmt.Errorf("standing binding enabled=%t contradicts block reason %q", enabled, r)
+}
+
+func (r StandingBindingBlockReason) EffectiveState() string {
+	switch r {
+	case StandingBindingCredentialsAbsent:
+		return "dormant"
+	case StandingBindingRecoveryRequired:
+		return "recovery_required"
+	default:
+		return ""
+	}
+}
+
+func (r StandingBindingBlockReason) QuiescenceReason() string {
+	switch r {
+	case StandingBindingCredentialsAbsent:
+		return "ingress_credentials_absent"
+	case StandingBindingRecoveryRequired:
+		return "ingress_authority_stale"
+	default:
+		return ""
+	}
+}
 
 // StandingRestartFact is the complete durable state product required to
 // classify one exact current standing generation. ExactCurrent=false is the
@@ -40,6 +80,7 @@ type StandingRestartFact struct {
 	RunID              string
 	Generation         int64
 	DeclarationPresent bool
+	BindingEnabled     bool
 	EffectiveState     string
 	OperatorOverride   string
 	RunState           string
@@ -51,6 +92,7 @@ type StandingRestartDisposition struct {
 	RunID              string
 	Generation         int64
 	DeclarationPresent bool
+	BindingEnabled     bool
 	EffectiveState     string
 	OperatorOverride   string
 	RunState           string
@@ -88,6 +130,10 @@ func (d StandingRestartDisposition) RunControlGuidance() string {
 		return fmt.Sprintf("use `swarm standing reset %s`", d.ServiceID)
 	case StandingRestartRestoreThenReset:
 		return fmt.Sprintf("restore the standing declaration, then use `swarm standing reset %s`", d.ServiceID)
+	case StandingRestartProvisionCredentials:
+		return "provision the named ingress credentials with `swarm secrets set <key>`, then restart serve or use explicit channel connect"
+	case StandingRestartResumeChannel:
+		return "inspect `swarm channel status`, then use `swarm channel resume <operation-id>` with fresh credentials and complete its required ceremony"
 	default:
 		return "repair the standing service disposition"
 	}
@@ -100,7 +146,7 @@ func (d StandingRestartDisposition) Validate() error {
 			return errors.New("ordinary standing restart disposition cannot carry a current owner")
 		}
 		return nil
-	case StandingRestartActiveIntrinsic, StandingRestartSuspended, StandingRestartOrphaned,
+	case StandingRestartActiveIntrinsic, StandingRestartSuspended, StandingRestartCredentialDormant, StandingRestartRecoveryRequired, StandingRestartOrphaned,
 		StandingRestartTerminalDeclared, StandingRestartTerminalOrphaned, StandingRestartInvalidCurrent:
 	default:
 		return fmt.Errorf("invalid standing restart disposition %q", d.Kind)
@@ -149,19 +195,20 @@ func ClassifyStandingRestart(fact StandingRestartFact) (StandingRestartDispositi
 	if err != nil {
 		return StandingRestartDisposition{}, err
 	}
-	if fact.EffectiveState != "active" && fact.EffectiveState != "suspended" && fact.EffectiveState != "orphaned" {
+	if fact.EffectiveState != "active" && fact.EffectiveState != "suspended" && fact.EffectiveState != "orphaned" && fact.EffectiveState != "dormant" && fact.EffectiveState != "recovery_required" {
 		return StandingRestartDisposition{}, fmt.Errorf("invalid standing restart effective_state %q", fact.EffectiveState)
 	}
 	if fact.OperatorOverride != "none" && fact.OperatorOverride != "suspended" {
 		return StandingRestartDisposition{}, fmt.Errorf("invalid standing restart operator_override %q", fact.OperatorOverride)
 	}
-	desiredValid := (!fact.DeclarationPresent && fact.EffectiveState == "orphaned" &&
+	desiredValid := (!fact.DeclarationPresent && !fact.BindingEnabled && fact.EffectiveState == "orphaned" &&
 		(fact.OperatorOverride == "none" || fact.OperatorOverride == "suspended")) ||
-		(fact.DeclarationPresent && fact.EffectiveState == "active" && fact.OperatorOverride == "none") ||
-		(fact.DeclarationPresent && fact.EffectiveState == "suspended" && fact.OperatorOverride == "suspended")
+		(fact.DeclarationPresent && fact.BindingEnabled && fact.EffectiveState == "active" && fact.OperatorOverride == "none") ||
+		(fact.DeclarationPresent && fact.BindingEnabled && fact.EffectiveState == "suspended" && fact.OperatorOverride == "suspended") ||
+		(fact.DeclarationPresent && !fact.BindingEnabled && (fact.EffectiveState == "dormant" || fact.EffectiveState == "recovery_required"))
 	result := StandingRestartDisposition{
 		ServiceID: fact.ServiceID, RunID: fact.RunID, Generation: fact.Generation,
-		DeclarationPresent: fact.DeclarationPresent, EffectiveState: fact.EffectiveState,
+		DeclarationPresent: fact.DeclarationPresent, BindingEnabled: fact.BindingEnabled, EffectiveState: fact.EffectiveState,
 		OperatorOverride: fact.OperatorOverride, RunState: string(state),
 	}
 	if !desiredValid {
@@ -177,6 +224,10 @@ func ClassifyStandingRestart(fact StandingRestartFact) (StandingRestartDispositi
 		result.Kind, result.Remediation = StandingRestartTerminalDeclared, StandingRestartReset
 	case state.Terminal():
 		result.Kind, result.Remediation = StandingRestartTerminalOrphaned, StandingRestartRestoreThenReset
+	case fact.DeclarationPresent && !fact.BindingEnabled && fact.EffectiveState == "recovery_required" && state == StatePaused:
+		result.Kind, result.Remediation = StandingRestartRecoveryRequired, StandingRestartResumeChannel
+	case fact.DeclarationPresent && !fact.BindingEnabled && fact.EffectiveState == "dormant" && state == StatePaused:
+		result.Kind, result.Remediation = StandingRestartCredentialDormant, StandingRestartProvisionCredentials
 	case !fact.DeclarationPresent && fact.EffectiveState == "orphaned" &&
 		(fact.OperatorOverride == "none" || fact.OperatorOverride == "suspended") &&
 		state == StatePaused:

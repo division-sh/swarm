@@ -68,12 +68,12 @@ type StandingActivation struct {
 }
 
 type standingTargetPlan struct {
-	declaration StandingTargetDeclaration
-	serviceID   string
-	generation  int64
-	runID       string
-	instance    runtimeflowidentity.Instance
-	targets     []StandingTarget
+	bindingEnabled bool
+	blockReason    runtimestanding.StandingBindingBlockReason
+	declaration    StandingTargetDeclaration
+	serviceID      string
+	instance       runtimeflowidentity.Instance
+	targets        []StandingTarget
 }
 
 func (t StandingTarget) normalized() StandingTarget {
@@ -228,34 +228,6 @@ func providerAdmissionDeclaration(admission runtimecontracts.ProjectFlowIngressA
 		}
 	}
 	return declaration
-}
-
-func RecompileStandingTargetAdmissions(source semanticview.Source, catalog *providertriggers.CatalogSnapshot, existing []StandingTarget) ([]StandingTarget, error) {
-	declarations, err := ResolveStandingTargetDeclarations(source, catalog)
-	if err != nil {
-		return nil, err
-	}
-	bindings := map[string]StandingIngressBinding{}
-	for _, declaration := range declarations {
-		for _, binding := range declaration.Ingress {
-			bindings[declaration.Alias+"\x00"+binding.Provider] = binding
-		}
-	}
-	if len(bindings) != len(existing) {
-		return nil, fmt.Errorf("candidate provider-trigger catalog recompile found %d declared standing ingress targets, but loaded context carries %d", len(bindings), len(existing))
-	}
-	out := make([]StandingTarget, 0, len(existing))
-	for _, target := range existing {
-		target = target.normalized()
-		binding, ok := bindings[target.Alias+"\x00"+target.Provider]
-		if !ok {
-			return nil, fmt.Errorf("candidate provider-trigger catalog recompile cannot resolve loaded standing target %q/%q", target.Alias, target.Provider)
-		}
-		target.SigningSecret = binding.SigningSecret
-		target.AdmissionPlan = binding.AdmissionPlan
-		out = append(out, target)
-	}
-	return out, nil
 }
 
 func baseStandingIngressCapabilitySubjects(source semanticview.Source, catalog *providertriggers.CatalogSnapshot) ([]packs.Subject, error) {
@@ -509,6 +481,9 @@ func (rt *Runtime) standingTargetsMutation(ctx context.Context, serviceID string
 	if len(plans) == 0 {
 		return nil, nil, nil, nil
 	}
+	if err := rt.ValidateStandingIngressCredentials(ctx); err != nil {
+		return nil, nil, nil, err
+	}
 	if rt.workOccurrence == nil {
 		return nil, nil, nil, fmt.Errorf("standing activation requires a runtime work occurrence")
 	}
@@ -544,7 +519,7 @@ func (rt *Runtime) standingTargetsMutation(ctx context.Context, serviceID string
 		}
 		selectedPlans = append(selectedPlans, plan)
 		mutations = append(mutations, runtimepipeline.StandingTargetMutation{
-			Candidate: runtimepipeline.StandingServiceCandidate{
+			Candidate: runtimepipeline.StandingServiceCandidate{BindingEnabled: plan.bindingEnabled, BindingBlockReason: plan.blockReason,
 				ServiceID: plan.serviceID, FlowPath: declaration.FlowPath,
 				InstanceID: instance.InstanceID, EntityID: instance.EntityID, Source: fact,
 			},
@@ -584,6 +559,9 @@ func (rt *Runtime) standingTargetsMutation(ctx context.Context, serviceID string
 		result := results[i]
 		reconciliation := result.Reconciliation
 		if !reconciliation.RestartDisposition.Executable() {
+			if reconciliation.RunID == "" {
+				continue
+			}
 			activations = append(activations, StandingActivation{
 				BundleHash: fact.BundleHash(), ServiceID: reconciliation.ServiceID, FlowPath: declaration.FlowPath,
 				RunID: reconciliation.RunID, Generation: reconciliation.Generation,
@@ -666,7 +644,7 @@ func (rt *Runtime) PlanStandingServiceCandidates() ([]runtimepipeline.StandingSe
 	fact := rt.Options.SourceArtifactFact
 	out := make([]runtimepipeline.StandingServiceCandidate, 0, len(plans))
 	for _, plan := range plans {
-		out = append(out, runtimepipeline.StandingServiceCandidate{
+		out = append(out, runtimepipeline.StandingServiceCandidate{BindingEnabled: plan.bindingEnabled, BindingBlockReason: plan.blockReason,
 			ServiceID: plan.serviceID, FlowPath: plan.declaration.FlowPath,
 			InstanceID: plan.instance.InstanceID, EntityID: plan.instance.EntityID, Source: fact,
 		})
@@ -679,10 +657,11 @@ func (rt *Runtime) standingTargetPlans() ([]standingTargetPlan, error) {
 		return nil, fmt.Errorf("runtime workflow module is required")
 	}
 	source := rt.Options.WorkflowModule.SemanticSource()
-	declarations, err := ResolveStandingTargetDeclarations(source, rt.Options.ProviderTriggerCatalog)
+	admission, err := rt.standingCredentials(context.Background())
 	if err != nil {
 		return nil, err
 	}
+	declarations := admission.declarations
 	if len(declarations) == 0 {
 		return nil, nil
 	}
@@ -693,18 +672,29 @@ func (rt *Runtime) standingTargetPlans() ([]standingTargetPlan, error) {
 	plans := make([]standingTargetPlan, 0, len(declarations))
 	for _, declaration := range declarations {
 		serviceID := runtimeflowidentity.StandingServiceID(declaration.FlowPath)
-		generation := int64(1)
-		runID := runtimeflowidentity.StandingGenerationRunID(serviceID, generation)
 		instance := runtimeflowidentity.StandingForService(source, declaration.FlowPath, serviceID)
-		plan := standingTargetPlan{declaration: declaration, serviceID: serviceID, generation: generation, runID: runID, instance: instance}
+		plan := standingTargetPlan{declaration: declaration, serviceID: serviceID, instance: instance, bindingEnabled: len(declaration.Ingress) == 0}
 		for _, binding := range declaration.Ingress {
+			credentials := admission.bindings[standingIngressSelector(declaration.FlowPath, binding.Provider)]
+			if !credentials.enabled {
+				if plan.blockReason == "" || credentials.blockReason == runtimestanding.StandingBindingRecoveryRequired {
+					plan.blockReason = credentials.blockReason
+				}
+				continue
+			}
+			plan.bindingEnabled = true
+			generation := int64(1)
+			runID := runtimeflowidentity.StandingGenerationRunID(serviceID, generation)
 			plan.targets = append(plan.targets, StandingTarget{
 				BundleHash: fact.BundleHash(), ServiceID: serviceID, SourcePath: declaration.SourcePath,
 				FlowPath: declaration.FlowPath, Alias: declaration.Alias,
 				Provider: binding.Provider, RunID: runID, Generation: generation, PublicationSequence: 1,
 				InstanceID: instance.InstanceID, FlowInstance: instance.InstancePath,
-				EntityID: instance.EntityID, SigningSecret: binding.SigningSecret, AdmissionPlan: binding.AdmissionPlan,
+				EntityID: instance.EntityID, SigningSecret: credentials.signingKey, AdmissionPlan: binding.AdmissionPlan,
 			}.normalized())
+		}
+		if plan.bindingEnabled {
+			plan.blockReason = ""
 		}
 		plans = append(plans, plan)
 	}

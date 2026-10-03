@@ -526,13 +526,23 @@ func TestBoundCredentialStaleIdentityResetsParentIntoExactReconnect(t *testing.T
 		Role: reservations[0].Role, StoreKey: written.StoreKey, Kind: CredentialAdmissionWritten,
 		Receipt: written.Receipt, ValueSeal: written.ValueSeal,
 	}
+	signing, err := credentials.Admit(context.Background(), CredentialWriteRequest{
+		StoreKey: operationCredentialStoreKey(reservations[1].StoreKey, parentID, reservations[1].Role),
+		Value:    "old-signing-secret", Receipt: credentialReceipt(parentID, reservations[1].Role),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	identityID := uuid.NewString()
 	op := Operation{
 		OperationID: parentID, RequestKeyHash: uuid.NewString(), RequestHash: uuid.NewString(), PrincipalID: "principal-a",
 		Verb: VerbConnect, Provider: candidate.Provider, Interface: candidate.Interface, Coordinate: candidate.Coordinate,
 		TargetSelector: candidate.Target.Selector, Posture: candidate.Posture, Ceremony: candidate.Ceremony,
 		Phase: PhaseAwaitingOperatorConfirmation, Revision: 5, CredentialReservations: reservations,
-		CredentialAdmissions: []CredentialAdmission{admission}, IdentityOperationID: identityID, BindingRevision: 1,
+		CredentialAdmissions: []CredentialAdmission{admission, {
+			Role: reservations[1].Role, StoreKey: signing.StoreKey, Kind: CredentialAdmissionWritten,
+			Receipt: signing.Receipt, ValueSeal: signing.ValueSeal,
+		}}, IdentityOperationID: identityID, BindingRevision: 1,
 		RequestedAt: now, UpdatedAt: now,
 	}
 	op.SlotKey = StartRequest{Provider: op.Provider, Interface: op.Interface, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector}.SlotKey()
@@ -2346,6 +2356,10 @@ type blockingCredentialRetryActivations struct {
 	attempts        int
 }
 
+func (a *blockingCredentialRetryActivations) AdmitChannelTarget(_ context.Context, _ Operation, candidate Candidate) (Candidate, error) {
+	return candidate, candidate.Validate()
+}
+
 func (a *blockingCredentialRetryActivations) PreflightChannelActivation(ctx context.Context, op Operation, _ Candidate) error {
 	a.mu.Lock()
 	a.attempts++
@@ -2364,6 +2378,10 @@ func (a *blockingCredentialRetryActivations) PreflightChannelActivation(ctx cont
 		return errors.New("provider rejected credential")
 	}
 	return nil
+}
+
+func (a *cancellationTestActivations) AdmitChannelTarget(_ context.Context, _ Operation, candidate Candidate) (Candidate, error) {
+	return candidate, candidate.Validate()
 }
 
 func (a *cancellationTestActivations) PreflightChannelActivation(ctx context.Context, _ Operation, _ Candidate) error {

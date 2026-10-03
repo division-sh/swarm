@@ -436,6 +436,13 @@ type channelOnboardingCrashServeProcess struct {
 
 func startChannelOnboardingCrashServeProcess(t *testing.T, opts cliapp.ServeOptions, telegramBaseURL string) *channelOnboardingCrashServeProcess {
 	t.Helper()
+	process := startChannelOnboardingCrashServeProcessAtBoundary(t, opts, telegramBaseURL, "")
+	process.endpoint(t)
+	return process
+}
+
+func startChannelOnboardingCrashServeProcessAtBoundary(t *testing.T, opts cliapp.ServeOptions, telegramBaseURL string, boundary channelonboarding.TestLifecycleBoundary) *channelOnboardingCrashServeProcess {
+	t.Helper()
 	if opts.PublicWebhookListener == nil {
 		t.Fatal("channel crash fixture requires an owned public listener")
 	}
@@ -444,7 +451,7 @@ func startChannelOnboardingCrashServeProcess(t *testing.T, opts cliapp.ServeOpti
 		t.Fatal(err)
 	}
 	defer listenerFile.Close()
-	return startServedCrashProcess(t, "TestChannelOnboardingCrashServeProcessHelper", []string{
+	return startServedCrashProcessBeforeReadiness(t, "TestChannelOnboardingCrashServeProcessHelper", []string{
 		channelOnboardingCrashServeHelperEnv + "=1",
 		"TEST_CHANNEL_ONBOARDING_CONFIG=" + opts.ConfigPath,
 		"TEST_CHANNEL_ONBOARDING_CONTRACTS=" + opts.SourceRoot,
@@ -453,6 +460,7 @@ func startChannelOnboardingCrashServeProcess(t *testing.T, opts cliapp.ServeOpti
 		"TEST_CHANNEL_ONBOARDING_PUBLIC_ORIGIN=" + opts.PublicWebhookBaseURL,
 		"TEST_CHANNEL_ONBOARDING_PUBLIC_LISTEN=" + opts.PublicWebhookListen,
 		"TEST_CHANNEL_ONBOARDING_TELEGRAM_BASE=" + telegramBaseURL,
+		"TEST_CHANNEL_ONBOARDING_CRASH_BOUNDARY=" + string(boundary),
 	}, listenerFile)
 }
 
@@ -594,6 +602,23 @@ func TestChannelOnboardingCrashServeProcessHelper(t *testing.T) {
 	opts.Output = os.Stdout
 	opts.ErrorOutput = os.Stderr
 	opts.TestLLMRuntime = telegramPhraseBotLLMRuntime{}
+	if boundary := channelonboarding.TestLifecycleBoundary(os.Getenv("TEST_CHANNEL_ONBOARDING_CRASH_BOUNDARY")); boundary != "" {
+		switch boundary {
+		case channelonboarding.TestAfterCredentialWriteBeforeCheckpoint,
+			channelonboarding.TestAfterStandingTargetReconciliation, channelonboarding.TestAfterStandingTargetPublication,
+			channelonboarding.TestAfterPendingResetCleanup, channelonboarding.TestAfterPendingResetCommit,
+			channelonboarding.TestAfterActivationCommitBeforePublication, channelonboarding.TestAfterProcessPublicationBeforePromotion:
+		default:
+			t.Fatalf("unsupported channel process-death boundary %q", boundary)
+		}
+		opts.TestChannelOnboardingBarrier = func(observed channelonboarding.TestLifecycleBoundary, operationID string) error {
+			if observed == boundary {
+				fmt.Fprintf(os.Stdout, "TEST_CHANNEL_CRASH_BOUNDARY %s %s\n", boundary, operationID)
+				select {}
+			}
+			return nil
+		}
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	if code := runFrom(ctx, repoRootForTest(), opts); code != 0 {

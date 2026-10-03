@@ -12,9 +12,11 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
+	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimechannelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -36,6 +38,7 @@ type RunBundleAvailabilityReader interface {
 }
 
 type BundleContext struct {
+	ProviderTriggerCatalog      *providertriggers.CatalogSnapshot
 	SourceArtifactFact          runtimecorrelation.SourceArtifactFact
 	BundleIdentity              runtimecontracts.BundleIdentity
 	RuntimeInstanceID           string
@@ -247,7 +250,7 @@ func (p *PreparedStandingServicePublication) Publish(targets []StandingTarget) e
 	if p.discarded || p.manager == nil || p.occurrence == nil {
 		return errors.New("prepared standing service publication is no longer active")
 	}
-	if err := p.manager.publishStandingServiceTargets(p.serviceID, targets, p); err != nil {
+	if err := p.manager.publishStandingServiceTargets(p.serviceID, targets, p, nil); err != nil {
 		return err
 	}
 	p.published = true
@@ -436,6 +439,11 @@ func ValidateRuntimeContextSet(contexts ...BundleContext) error {
 }
 
 func (m *RuntimeContextManager) Register(contextDef BundleContext) error {
+	if m == nil {
+		return fmt.Errorf("runtime context manager is required")
+	}
+	m.sourceSetMu.Lock()
+	defer m.sourceSetMu.Unlock()
 	return m.register(contextDef, true)
 }
 
@@ -691,6 +699,7 @@ func validateRuntimeContextDefinition(contextDef BundleContext) (BundleContext, 
 			return BundleContext{}, fmt.Errorf("runtime context %s load admitted pack projection: %w", bundleHash, err)
 		}
 		catalog := projection.ProviderTriggers
+		contextDef.ProviderTriggerCatalog = catalog
 		if !contextDef.ProviderTriggerGeneration.Equal(catalog.Generation()) {
 			return BundleContext{}, fmt.Errorf("runtime context %s provider-trigger generation %q does not match bundle inventory generation %q", bundleHash, contextDef.ProviderTriggerGeneration.Diagnostic(), catalog.Generation().Diagnostic())
 		}
@@ -757,15 +766,34 @@ func (m *RuntimeContextManager) refreshCapabilitySubjectsLocked() error {
 				generation:      entry.context.ProviderTriggerGeneration.Diagnostic(),
 			})
 		}
+		executableSubjects := map[string]struct{}{}
 		for _, target := range entry.context.StandingTargets {
 			if m.standingServiceSuppressedLocked(target.ServiceID) {
 				continue
 			}
 			subject, err := target.CapabilitySubject()
 			if err != nil {
-				return fmt.Errorf("derive standing ingress capability subject: %w", err)
+				return err
 			}
+			executableSubjects[subject.ID] = struct{}{}
 			subjects = append(subjects, subject)
+		}
+		declarations, err := ResolveStandingTargetDeclarations(entry.context.Source, entry.context.ProviderTriggerCatalog)
+		if err != nil {
+			return err
+		}
+		for _, declaration := range declarations {
+			for _, binding := range declaration.Ingress {
+				subject, err := binding.AdmissionPlan.EffectiveCapabilitySubject(providertriggers.EffectiveSubjectRequest{
+					BundleHash: bundleHash, Alias: declaration.Alias, SigningSecret: binding.SigningSecret, SourcePath: declaration.SourcePath,
+				})
+				if err != nil {
+					return fmt.Errorf("derive standing ingress capability subject: %w", err)
+				}
+				if _, executable := executableSubjects[subject.ID]; !executable {
+					subjects = append(subjects, subject)
+				}
+			}
 		}
 	}
 	projected, err := projectBundleScopedInstalledSubjects(installed)
@@ -892,10 +920,21 @@ func (m *RuntimeContextManager) EvaluatedCapabilitySubjects(ctx context.Context,
 	revision := m.capabilityRevision
 	base := packs.CloneSubjects(m.capabilitySubjects)
 	targets := make(map[string]StandingTarget)
+	ineligible := make(map[string]standingIngressReadback)
 	for _, bundleHash := range m.order {
 		entry := m.contexts[bundleHash]
 		if !runtimeContextEntryLoaded(entry) {
 			continue
+		}
+		if entry.runtime != nil {
+			blocked, err := entry.runtime.ineligibleStandingCapabilitySubjects()
+			if err != nil {
+				m.mu.RUnlock()
+				return nil, err
+			}
+			for id, subject := range blocked {
+				ineligible[id] = subject
+			}
 		}
 		activationSigning, err := currentChannelActivationSigningKeys(entry)
 		if err != nil {
@@ -929,7 +968,27 @@ func (m *RuntimeContextManager) EvaluatedCapabilitySubjects(ctx context.Context,
 		}
 		target, ok := targets[subject.ID]
 		if !ok {
-			return nil, fmt.Errorf("effective provider trigger subject %q has no current standing target", subject.ID)
+			current := subject
+			blocked, blockedPresent := ineligible[subject.ID]
+			if blockedPresent {
+				current = blocked.subject
+			}
+			if !blockedPresent || blocked.observeSigning {
+				var err error
+				current, err = evaluateProviderTriggerCapabilitySubject(ctx, current, projection)
+				if err != nil {
+					return nil, err
+				}
+			}
+			enabled := false
+			current.Status = ""
+			current.TriggerAdmission.BindingEnabled = &enabled
+			normalized, err := packs.NormalizeSubjects([]packs.Subject{current})
+			if err != nil {
+				return nil, err
+			}
+			evaluated = append(evaluated, normalized[0])
+			continue
 		}
 		activationBackedSubject, err := target.CapabilitySubject()
 		if err != nil {
@@ -942,6 +1001,8 @@ func (m *RuntimeContextManager) EvaluatedCapabilitySubjects(ctx context.Context,
 		if err != nil {
 			return nil, err
 		}
+		enabled := true
+		current.TriggerAdmission.BindingEnabled = &enabled
 		evaluated = append(evaluated, current)
 	}
 	normalized, err := packs.NormalizeSubjects(evaluated)
@@ -1018,7 +1079,14 @@ func (m *RuntimeContextManager) duplicateLoadedIngressAliasLocked(incoming Bundl
 	for _, target := range incoming.StandingTargets {
 		incomingAliases[target.normalized().Alias] = struct{}{}
 	}
+	return m.duplicateLoadedIngressAliasesLocked(incoming, incomingAliases)
+}
+
+func (m *RuntimeContextManager) duplicateLoadedIngressAliasesLocked(incoming BundleContext, incomingAliases map[string]struct{}) (BundleContext, BundleContext, string, bool) {
 	for _, bundleHash := range m.order {
+		if bundleHash == incoming.BundleHash() {
+			continue
+		}
 		entry := m.contexts[bundleHash]
 		if !runtimeContextEntryLoaded(entry) {
 			continue
@@ -1882,10 +1950,91 @@ func (m *RuntimeContextManager) PrepareStandingServicePublication(serviceID, run
 }
 
 func (m *RuntimeContextManager) PublishStandingServiceTargets(serviceID string, targets []StandingTarget) error {
-	return m.publishStandingServiceTargets(serviceID, targets, nil)
+	if m == nil {
+		return errors.New("runtime context manager is required")
+	}
+	m.sourceSetMu.Lock()
+	defer m.sourceSetMu.Unlock()
+	return m.publishStandingServiceTargets(serviceID, targets, nil, nil)
 }
 
-func (m *RuntimeContextManager) publishStandingServiceTargets(serviceID string, targets []StandingTarget, prepared *PreparedStandingServicePublication) error {
+// Admission and publication share source-set ownership. Alias refusal must
+// precede the durable standing mutation, not merely route publication.
+func (m *RuntimeContextManager) AdmitChannelStandingTarget(ctx context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate, barrier channelonboarding.TestLifecycleBarrier) error {
+	if m == nil {
+		return errors.New("runtime context manager is required")
+	}
+	if err := candidate.ValidateDeclaration(); err != nil {
+		return err
+	}
+	m.sourceSetMu.Lock()
+	defer m.sourceSetMu.Unlock()
+	m.mu.RLock()
+	entry := m.contexts[candidate.Coordinate.BundleHash]
+	if !runtimeContextEntryLoaded(entry) || entry.runtime == nil || entry.context.RuntimeInstanceID != candidate.Coordinate.RuntimeInstanceID || entry.context.PublicationGeneration != candidate.Coordinate.ContextPublicationGeneration {
+		m.mu.RUnlock()
+		return fmt.Errorf("%w: channel target runtime context is no longer current", channelonboarding.ErrRevisionConflict)
+	}
+	declarations, err := ResolveStandingTargetDeclarations(entry.context.Source, entry.context.ProviderTriggerCatalog)
+	if err != nil {
+		m.mu.RUnlock()
+		return err
+	}
+	owned := false
+	for _, declaration := range declarations {
+		if declaration.FlowPath != candidate.Target.FlowPath || declaration.Alias != candidate.Target.Alias || runtimeflowidentity.StandingServiceID(declaration.FlowPath) != candidate.Target.ServiceID {
+			continue
+		}
+		for _, ingress := range declaration.Ingress {
+			if ingress.Provider == candidate.Target.Provider && ingress.AdmissionPlan.Generation().Equal(candidate.Target.AdmissionGeneration) {
+				owned = true
+			}
+		}
+	}
+	if !owned {
+		m.mu.RUnlock()
+		return fmt.Errorf("channel target %s has no exact declaration owner", candidate.Target.Selector)
+	}
+	aliases := map[string]struct{}{candidate.Target.Alias: {}}
+	if existing, incoming, alias, collision := m.duplicateLoadedIngressAliasesLocked(*entry.context, aliases); collision {
+		m.mu.RUnlock()
+		return fmt.Errorf("duplicate standing ingress alias %q across loaded BundleContexts: existing %s; incoming %s", alias, runtimeContextBundleLabel(existing), runtimeContextBundleLabel(incoming))
+	}
+	use, err := m.acquireEntryLocked(ctx, entry)
+	m.mu.RUnlock()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = use.Done() }()
+	targets, err := use.Runtime().AdmitChannelStandingTarget(use.WorkContext(), op, candidate)
+	if err != nil {
+		return err
+	}
+	if barrier != nil {
+		if err := barrier(channelonboarding.TestAfterStandingTargetReconciliation, op.OperationID); err != nil {
+			return err
+		}
+	}
+	if err := use.Runtime().ValidateStandingIngressCredentials(use.WorkContext()); err != nil {
+		return err
+	}
+	m.mu.RLock()
+	current := m.contexts[candidate.Coordinate.BundleHash]
+	stillCurrent := current == entry && runtimeContextEntryLoaded(current) && current.context.PublicationGeneration == candidate.Coordinate.ContextPublicationGeneration && use.WorkContext().Err() == nil
+	m.mu.RUnlock()
+	if !stillCurrent {
+		return fmt.Errorf("%w: channel target runtime ownership changed before publication", channelonboarding.ErrRevisionConflict)
+	}
+	if err := m.publishStandingServiceTargets(candidate.Target.ServiceID, targets, nil, use); err != nil {
+		return err
+	}
+	if barrier != nil {
+		return barrier(channelonboarding.TestAfterStandingTargetPublication, op.OperationID)
+	}
+	return nil
+}
+
+func (m *RuntimeContextManager) publishStandingServiceTargets(serviceID string, targets []StandingTarget, prepared *PreparedStandingServicePublication, admitted *RuntimeContextUse) error {
 	if m == nil {
 		return nil
 	}
@@ -1907,6 +2056,15 @@ func (m *RuntimeContextManager) publishStandingServiceTargets(serviceID string, 
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if admitted != nil {
+		current := m.contexts[admitted.Context.BundleHash()]
+		if !runtimeContextEntryLoaded(current) || current.runtime != admitted.Runtime() || current.context.RuntimeInstanceID != admitted.Context.RuntimeInstanceID || current.context.PublicationGeneration != admitted.Context.PublicationGeneration || admitted.WorkContext().Err() != nil || m.resetExecutionFenced {
+			return fmt.Errorf("%w: channel target runtime ownership changed at publication", channelonboarding.ErrRevisionConflict)
+		}
+		if err := admitted.Runtime().ValidateStandingIngressCredentials(admitted.WorkContext()); err != nil {
+			return err
+		}
+	}
 	replaced := 0
 	planned := map[string]*BundleContext{}
 	for _, bundleHash := range m.order {
@@ -1915,23 +2073,58 @@ func (m *RuntimeContextManager) publishStandingServiceTargets(serviceID string, 
 			continue
 		}
 		copied := *entry.context
-		copied.StandingTargets = append([]StandingTarget(nil), entry.context.StandingTargets...)
+		copied.StandingTargets = nil
 		changed := false
-		for i, existing := range copied.StandingTargets {
+		for _, existing := range entry.context.StandingTargets {
 			if strings.TrimSpace(existing.ServiceID) != serviceID {
+				copied.StandingTargets = append(copied.StandingTargets, existing)
 				continue
 			}
 			key := bundleHash + "\x00" + existing.normalized().Alias + "\x00" + existing.normalized().Provider
 			published, ok := byBundleAndKey[key]
 			if !ok {
-				return fmt.Errorf("committed standing target publication omitted %s/%s", existing.Alias, existing.Provider)
+				changed = true
+				continue
 			}
-			copied.StandingTargets[i] = published
+			copied.StandingTargets = append(copied.StandingTargets, published)
+			delete(byBundleAndKey, key)
+			replaced++
+			changed = true
+		}
+		for key, target := range byBundleAndKey {
+			if target.BundleHash != bundleHash {
+				continue
+			}
+			declarations, err := ResolveStandingTargetDeclarations(copied.Source, copied.ProviderTriggerCatalog)
+			if err != nil {
+				return err
+			}
+			owned := false
+			for _, declaration := range declarations {
+				if declaration.FlowPath != target.FlowPath || runtimeflowidentity.StandingServiceID(declaration.FlowPath) != target.ServiceID || declaration.Alias != target.Alias {
+					continue
+				}
+				for _, binding := range declaration.Ingress {
+					if binding.Provider == target.Provider && binding.AdmissionPlan.Generation().Equal(target.AdmissionPlan.Generation()) {
+						owned = true
+					}
+				}
+			}
+			if !owned {
+				return fmt.Errorf("committed standing target %s/%s has no exact declaration owner", target.Alias, target.Provider)
+			}
+			copied.StandingTargets = append(copied.StandingTargets, target)
 			delete(byBundleAndKey, key)
 			replaced++
 			changed = true
 		}
 		if changed {
+			if err := validateRuntimeContextStandingTargets(copied); err != nil {
+				return err
+			}
+			if existing, incoming, alias, collision := m.duplicateLoadedIngressAliasLocked(copied); collision {
+				return fmt.Errorf("duplicate standing ingress alias %q across loaded BundleContexts: existing %s; incoming %s", alias, runtimeContextBundleLabel(existing), runtimeContextBundleLabel(incoming))
+			}
 			planned[bundleHash] = &copied
 		}
 	}
@@ -1948,12 +2141,16 @@ func (m *RuntimeContextManager) publishStandingServiceTargets(serviceID string, 
 		if entry == nil || entry.workOwner == nil || len(contextDef.StandingTargets) == 0 {
 			continue
 		}
-		if entry.standing != nil && entry.standing[serviceID] != nil {
-			return fmt.Errorf("standing service %s still owns an unretired process occurrence", serviceID)
-		}
 		for _, target := range contextDef.StandingTargets {
 			if target.ServiceID != serviceID {
 				continue
+			}
+			if existing := entry.standing[serviceID]; existing != nil {
+				identity := existing.Identity()
+				if prepared != nil || identity.RunID != target.RunID || identity.Generation != uint64(target.Generation) {
+					return fmt.Errorf("standing service %s still owns an unretired process occurrence", serviceID)
+				}
+				break
 			}
 			if prepared != nil {
 				if prepared.manager != m || prepared.entry != entry || prepared.serviceID != serviceID ||

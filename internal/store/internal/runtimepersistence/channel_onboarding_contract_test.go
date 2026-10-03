@@ -252,6 +252,10 @@ func (retiredOnboardingIdentities) Readback(context.Context) ([]operatorchannel.
 type retiredOnboardingActivations struct{}
 
 func (retiredOnboardingActivations) RefreshChannelActivations(context.Context) error { return nil }
+func (retiredOnboardingActivations) AdmitChannelTarget(_ context.Context, _ channelonboarding.Operation, candidate channelonboarding.Candidate) (channelonboarding.Candidate, error) {
+	return candidate, candidate.Validate()
+}
+
 func (retiredOnboardingActivations) PreflightChannelActivation(context.Context, channelonboarding.Operation, channelonboarding.Candidate) error {
 	return nil
 }

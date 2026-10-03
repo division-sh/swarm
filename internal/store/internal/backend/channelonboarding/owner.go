@@ -237,7 +237,7 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 	}
 	if req.RebindCoordinate != nil {
 		coordinate := req.RebindCoordinate.Normalized()
-		if err := coordinate.Validate(); err != nil {
+		if err := coordinate.ValidateContext(); err != nil {
 			return domain.Operation{}, err
 		}
 		req.RebindCoordinate = &coordinate
@@ -283,6 +283,9 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 			}
 		} else if req.ClearConfirmationOperationID {
 			return domain.ErrInvalidRequest
+		}
+		if err := op.Coordinate.ValidateForPhase(req.Phase); err != nil {
+			return fmt.Errorf("%w: %v", domain.ErrInvalidRequest, err)
 		}
 		if req.ReplaceCredentialAdmissions {
 			op.CredentialAdmissions = append([]domain.CredentialAdmission(nil), req.CredentialAdmissions...)
@@ -866,6 +869,9 @@ func scanOperationRow(row rowScanner) (domain.Operation, bool, error) {
 	op.Coordinate.PlanGeneration, err = plangeneration.Parse(planGeneration)
 	if err != nil {
 		return domain.Operation{}, false, fmt.Errorf("decode channel onboarding plan generation: %w", err)
+	}
+	if err := op.Coordinate.ValidateForPhase(op.Phase); err != nil {
+		return domain.Operation{}, false, fmt.Errorf("decode channel onboarding coordinate: %w", err)
 	}
 	op.Interface = op.Interface.Normalized()
 	if err := json.Unmarshal([]byte(reservations), &op.CredentialReservations); err != nil {

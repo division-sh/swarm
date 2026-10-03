@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -45,6 +46,10 @@ func serveChannelOnboardingCatalog(manager *runtime.RuntimeContextManager) (*cha
 		if strings.Trim(bundleIdentity, "@#") == "" {
 			return nil, fmt.Errorf("runtime context %s has no exact bundle identity", bundleHash)
 		}
+		declarations, err := runtime.ResolveStandingTargetDeclarations(contextDef.Source, contextDef.ProviderTriggerCatalog)
+		if err != nil {
+			return nil, err
+		}
 		for _, plan := range contextDef.ChannelPlans {
 			profile, ok := plan.OnboardingProfile()
 			if !ok {
@@ -65,30 +70,42 @@ func serveChannelOnboardingCatalog(manager *runtime.RuntimeContextManager) (*cha
 				// service-fulfillment target into the runtime context.
 				continue
 			}
-			for _, target := range contextDef.StandingTargets {
-				if strings.TrimSpace(target.Provider) != profile.Provider() || target.Generation <= 0 {
-					continue
+			for _, declaration := range declarations {
+				for _, binding := range declaration.Ingress {
+					if binding.Provider != profile.Provider() {
+						continue
+					}
+					target := runtime.StandingTarget{
+						ServiceID: runtimeflowidentity.StandingServiceID(declaration.FlowPath), FlowPath: declaration.FlowPath,
+						Alias: declaration.Alias, Provider: binding.Provider, SigningSecret: binding.SigningSecret, AdmissionPlan: binding.AdmissionPlan,
+					}
+					for _, executable := range contextDef.StandingTargets {
+						if executable.FlowPath == declaration.FlowPath && executable.Provider == binding.Provider {
+							target = executable
+							break
+						}
+					}
+					selector := fmt.Sprintf("ingress:%s:%s", target.FlowPath, target.Provider)
+					coordinate := channelonboarding.ChannelRuntimeContextCoordinate{
+						BundleHash: bundleHash, BundleIdentity: bundleIdentity,
+						PackInventoryGeneration:      contextDef.PackInventoryDigest,
+						RuntimeInstanceID:            contextDef.RuntimeInstanceID,
+						ContextPublicationGeneration: contextDef.PublicationGeneration,
+						PlanGeneration:               generation, TargetGeneration: uint64(target.Generation),
+					}
+					candidates = append(candidates, channelonboarding.Candidate{
+						SourceLabel: contextDef.BundleIdentity.SourceLabel,
+						Provider:    profile.Provider(), Interface: identity, Coordinate: coordinate,
+						Target: channelonboarding.CandidateTarget{
+							Selector: selector, ServiceID: target.ServiceID, FlowPath: target.FlowPath,
+							Alias: target.Alias, Provider: target.Provider, Generation: uint64(target.Generation), PublicationSequence: target.PublicationSequence,
+							AdmissionGeneration: target.AdmissionPlan.Generation(), SigningCredentialKey: target.SigningSecret,
+						},
+						Posture: posture, Ceremony: ceremony,
+						ProviderCredentialRole: profile.ProviderCredential(), SigningCredentialRole: profile.SigningCredential(),
+						ConfirmationOperation: profile.ConfirmationOperation(), ConnectionHealth: profile.ConnectionHealth(), Plan: plan,
+					})
 				}
-				selector := fmt.Sprintf("ingress:%s:%s", target.FlowPath, target.Provider)
-				coordinate := channelonboarding.ChannelRuntimeContextCoordinate{
-					BundleHash: bundleHash, BundleIdentity: bundleIdentity,
-					PackInventoryGeneration:      contextDef.PackInventoryDigest,
-					RuntimeInstanceID:            contextDef.RuntimeInstanceID,
-					ContextPublicationGeneration: contextDef.PublicationGeneration,
-					PlanGeneration:               generation, TargetGeneration: uint64(target.Generation),
-				}
-				candidates = append(candidates, channelonboarding.Candidate{
-					SourceLabel: contextDef.BundleIdentity.SourceLabel,
-					Provider:    profile.Provider(), Interface: identity, Coordinate: coordinate,
-					Target: channelonboarding.CandidateTarget{
-						Selector: selector, ServiceID: target.ServiceID, FlowPath: target.FlowPath,
-						Alias: target.Alias, Provider: target.Provider, Generation: uint64(target.Generation), PublicationSequence: target.PublicationSequence,
-						AdmissionGeneration: target.AdmissionPlan.Generation(), SigningCredentialKey: target.SigningSecret,
-					},
-					Posture: posture, Ceremony: ceremony,
-					ProviderCredentialRole: profile.ProviderCredential(), SigningCredentialRole: profile.SigningCredential(),
-					ConfirmationOperation: profile.ConfirmationOperation(), ConnectionHealth: profile.ConnectionHealth(), Plan: plan,
-				})
 			}
 		}
 	}
@@ -118,6 +135,32 @@ func compileServeChannelActivationSnapshot(ctx context.Context, manager *runtime
 	declared := []channelonboarding.CompiledActivation{}
 	for _, contextDef := range manager.LoadedContexts() {
 		for _, binding := range channelOnboardingDeclaredPlans(contextDef) {
+			if selector := binding.RegistrationTarget(); selector != "" {
+				_, enabled, err := findContextTarget(contextDef, selector)
+				if err != nil {
+					return serveChannelActivationSnapshot{}, err
+				}
+				if !enabled {
+					declarations, err := runtime.ResolveStandingTargetDeclarations(contextDef.Source, contextDef.ProviderTriggerCatalog)
+					if err != nil {
+						return serveChannelActivationSnapshot{}, err
+					}
+					declared := false
+					for _, declaration := range declarations {
+						for _, ingress := range declaration.Ingress {
+							if selector == fmt.Sprintf("ingress:%s:%s", declaration.FlowPath, ingress.Provider) {
+								declared = true
+							}
+						}
+					}
+					if !declared {
+						return serveChannelActivationSnapshot{}, fmt.Errorf("channels.bindings.%s.register has no admitted declaration %q", binding.BindingID(), selector)
+					}
+					// The runtime's admitted target set owns enabledness. A read or
+					// renewal cannot promote a still-declared dormant registration.
+					continue
+				}
+			}
 			coordinate, err := declaredActivationCoordinate(contextDef, binding)
 			if err != nil {
 				return serveChannelActivationSnapshot{}, err
@@ -243,6 +286,7 @@ type serveChannelActivationRefresher struct {
 	ingress     *runtimepublicingress.ReadinessOwner
 	preflight   func(context.Context, servePrebindingActivation) error
 	reconcile   func(context.Context) error
+	testBarrier channelonboarding.TestLifecycleBarrier
 }
 
 type serveConnectedChannelRecovery interface {
@@ -301,6 +345,24 @@ func reconcileRetiredConnectedChannelContexts(ctx context.Context, manager *runt
 		retired[key] = struct{}{}
 	}
 	return nil
+}
+
+func (r *serveChannelActivationRefresher) AdmitChannelTarget(ctx context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate) (channelonboarding.Candidate, error) {
+	if r == nil || r.manager == nil {
+		return channelonboarding.Candidate{}, fmt.Errorf("channel target admission requires runtime context ownership")
+	}
+	if err := r.manager.AdmitChannelStandingTarget(ctx, op, candidate, r.testBarrier); err != nil {
+		return channelonboarding.Candidate{}, err
+	}
+	catalog, err := serveChannelOnboardingCatalog(r.manager)
+	if err != nil {
+		return channelonboarding.Candidate{}, err
+	}
+	promoted, found := catalog.FindDurableSuccessor(candidate.Provider, candidate.Interface, candidate.Coordinate, candidate.Target.Selector, candidate.Posture, candidate.Ceremony)
+	if !found {
+		return channelonboarding.Candidate{}, fmt.Errorf("admitted channel target has no exact declaration owner")
+	}
+	return promoted, promoted.Validate()
 }
 
 func (r *serveChannelActivationRefresher) PreflightChannelActivation(ctx context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate) error {

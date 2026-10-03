@@ -197,16 +197,20 @@ func TestChannelOnboardingEarlyReconnectConfirmationRestartE2E(t *testing.T) {
 				if !rotated {
 					t.Fatal("provider credential admission missing")
 				}
+				registrations, deliveries := harness.provider.Counts()
 				harness.stop(t)
 				harness.start(t)
 				reset := getChannelOnboardingRPC(t, harness, begun.Operation.OperationID)
-				// The later effect-recovery pass can admit the still-current predecessor
-				// credential, but must start a fresh ceremony at the retained revision.
-				if reset.Operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity || reset.Operation.BindingRevision != 2 || reset.IdentityOperation == nil || reset.IdentityOperation.OperationID == committed.IdentityOperation.OperationID || reset.IdentityOperation.State != operatorchannel.StateAwaitingClaim {
-					t.Fatalf("startup skipped fresh reconnect: phase=%s binding=%d child=%+v", reset.Operation.Phase, reset.Operation.BindingRevision, reset.IdentityOperation)
+				// Startup settles the confirmed child, but cannot adopt predecessor
+				// authority or start provider effects without explicit fresh admission.
+				if reset.Operation.Phase != channelonboarding.PhasePreparing || reset.Operation.BindingRevision != 2 || reset.IdentityOperation != nil || len(reset.Operation.CredentialAdmissions) != 0 || reset.Readiness != nil && reset.Readiness.Ready {
+					t.Fatalf("startup did not preserve blocked reconnect: phase=%s binding=%d child=%+v", reset.Operation.Phase, reset.Operation.BindingRevision, reset.IdentityOperation)
+				}
+				if gotRegistrations, gotDeliveries := harness.provider.Counts(); gotRegistrations != registrations || gotDeliveries != deliveries {
+					t.Fatalf("startup replayed provider effects: registration %d->%d delivery %d->%d", registrations, gotRegistrations, deliveries, gotDeliveries)
 				}
 				resume := startChannelOnboardingCLICommand(t, harness.opts.ConfigPath, harness.endpoint,
-					[]string{"channel", "resume", begun.Operation.OperationID, "--yes"}, "")
+					[]string{"channel", "resume", begun.Operation.OperationID, "--yes", "--credential-stdin"}, "early-predecessor-token\n")
 				challenge := waitChannelOnboardingChallenge(t, resume.stdout, resume.stderr, resume.done)
 				fresh := getChannelOnboardingRPC(t, harness, begun.Operation.OperationID)
 				if fresh.IdentityOperation == nil || fresh.IdentityOperation.OperationID == begun.IdentityOperation.OperationID || fresh.IdentityOperation.Kind != operatorchannel.OperationReconnect || fresh.IdentityOperation.State != operatorchannel.StateAwaitingClaim {

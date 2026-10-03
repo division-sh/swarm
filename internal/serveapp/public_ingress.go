@@ -175,9 +175,20 @@ func exactActivationContext(contexts []runtime.BundleContext, coordinate channel
 }
 
 func exactContextTarget(contextDef runtime.BundleContext, rawSelector string) (runtime.StandingTarget, error) {
-	selector, err := runtimepublicingress.ParseTargetSelector(rawSelector)
+	target, found, err := findContextTarget(contextDef, rawSelector)
 	if err != nil {
 		return runtime.StandingTarget{}, err
+	}
+	if !found {
+		return runtime.StandingTarget{}, fmt.Errorf("registration target %q has no enabled target in exact runtime context %s", rawSelector, contextDef.BundleHash())
+	}
+	return target, nil
+}
+
+func findContextTarget(contextDef runtime.BundleContext, rawSelector string) (runtime.StandingTarget, bool, error) {
+	selector, err := runtimepublicingress.ParseTargetSelector(rawSelector)
+	if err != nil {
+		return runtime.StandingTarget{}, false, err
 	}
 	matches := []runtime.StandingTarget{}
 	for _, target := range contextDef.StandingTargets {
@@ -185,10 +196,13 @@ func exactContextTarget(contextDef runtime.BundleContext, rawSelector string) (r
 			matches = append(matches, target)
 		}
 	}
-	if len(matches) != 1 {
-		return runtime.StandingTarget{}, fmt.Errorf("registration target %q resolves to %d targets in exact runtime context %s; require one", rawSelector, len(matches), contextDef.BundleHash())
+	if len(matches) > 1 {
+		return runtime.StandingTarget{}, false, fmt.Errorf("registration target %q resolves to %d targets in exact runtime context %s; require one", rawSelector, len(matches), contextDef.BundleHash())
 	}
-	return matches[0], nil
+	if len(matches) == 0 {
+		return runtime.StandingTarget{}, false, nil
+	}
+	return matches[0], true, nil
 }
 
 func startServePublicIngressRenewal(

@@ -7,7 +7,7 @@ func TestClassifyStandingRestartTotalStateProduct(t *testing.T) {
 		serviceID = "11111111-1111-4111-8111-111111111111"
 		runID     = "22222222-2222-4222-8222-222222222222"
 	)
-	base := StandingRestartFact{
+	base := StandingRestartFact{BindingEnabled: true,
 		ExactCurrent: true, ServiceID: serviceID, RunID: runID, Generation: 3,
 		DeclarationPresent: true, EffectiveState: "active", OperatorOverride: "none", RunState: "running",
 	}
@@ -26,27 +26,32 @@ func TestClassifyStandingRestartTotalStateProduct(t *testing.T) {
 			f.EffectiveState, f.OperatorOverride, f.RunState = "suspended", "suspended", "paused"
 		}, wantKind: StandingRestartSuspended, wantRepair: StandingRestartResumeOrReset},
 		{name: "orphaned", mutate: func(f *StandingRestartFact) {
+			f.BindingEnabled = false
 			f.DeclarationPresent, f.EffectiveState, f.RunState = false, "orphaned", "paused"
 		}, wantKind: StandingRestartOrphaned, wantRepair: StandingRestartRestoreDeclaration},
 		{name: "terminal declared", mutate: func(f *StandingRestartFact) { f.RunState = "completed" }, wantKind: StandingRestartTerminalDeclared, wantRepair: StandingRestartReset},
 		{name: "terminal declared cancelled", mutate: func(f *StandingRestartFact) { f.RunState = "cancelled" }, wantKind: StandingRestartTerminalDeclared, wantRepair: StandingRestartReset},
 		{name: "terminal declared forked", mutate: func(f *StandingRestartFact) { f.RunState = "forked" }, wantKind: StandingRestartTerminalDeclared, wantRepair: StandingRestartReset},
 		{name: "terminal orphaned", mutate: func(f *StandingRestartFact) {
+			f.BindingEnabled = false
 			f.DeclarationPresent, f.EffectiveState, f.RunState = false, "orphaned", "failed"
 		}, wantKind: StandingRestartTerminalOrphaned, wantRepair: StandingRestartRestoreThenReset},
 		{name: "terminal orphaned forked", mutate: func(f *StandingRestartFact) {
+			f.BindingEnabled = false
 			f.DeclarationPresent, f.EffectiveState, f.RunState = false, "orphaned", "forked"
 		}, wantKind: StandingRestartTerminalOrphaned, wantRepair: StandingRestartRestoreThenReset},
 		{name: "terminal declared wins over suspended desired state", mutate: func(f *StandingRestartFact) {
 			f.EffectiveState, f.OperatorOverride, f.RunState = "suspended", "suspended", "failed"
 		}, wantKind: StandingRestartTerminalDeclared, wantRepair: StandingRestartReset},
 		{name: "terminal orphaned wins over orphaned desired state", mutate: func(f *StandingRestartFact) {
+			f.BindingEnabled = false
 			f.DeclarationPresent, f.EffectiveState, f.RunState = false, "orphaned", "cancelled"
 		}, wantKind: StandingRestartTerminalOrphaned, wantRepair: StandingRestartRestoreThenReset},
 		{name: "running suspended invalid", mutate: func(f *StandingRestartFact) {
 			f.EffectiveState, f.OperatorOverride = "suspended", "suspended"
 		}, wantKind: StandingRestartInvalidCurrent, wantRepair: StandingRestartReset},
 		{name: "running orphan invalid", mutate: func(f *StandingRestartFact) {
+			f.BindingEnabled = false
 			f.DeclarationPresent, f.EffectiveState = false, "orphaned"
 		}, wantKind: StandingRestartInvalidCurrent, wantRepair: StandingRestartRestoreThenReset},
 	}
@@ -71,7 +76,7 @@ func TestClassifyStandingRestartTotalStateProduct(t *testing.T) {
 }
 
 func TestClassifyStandingRestartRejectsUnprovableFacts(t *testing.T) {
-	base := StandingRestartFact{
+	base := StandingRestartFact{BindingEnabled: true,
 		ExactCurrent:       true,
 		ServiceID:          "11111111-1111-4111-8111-111111111111",
 		RunID:              "22222222-2222-4222-8222-222222222222",
