@@ -114,10 +114,14 @@ surfaces, with the original two repetitions and strict hashes. Lifecycle is
 temporary measured scope, not the final required full/full verdict or review
 readiness. The cancelled earlier runs remain uncredited.
 
-This subsequent signed audit-only head is reserved for the unmet final increase
-to full. Production code, policy, spec and tests are identical to8ea95a10d;
-only this sequencing record differs. Local full may qualify this clean head
-while hosted lifecycle runs on8ea95a10d. Publish this head with CI-Tier restored
+Prepared audit-only predecessor66257c296 has production/spec/policy/tests identical
+to8ea95a10d. Its interrupted local attempts earn no credit. The final full head
+also adds `TestLocalAndHostedTierSelectionsRemainIndependent`: all nine ordered
+local/CI tier pairs use the actual local selector and CI event parser/resolver;
+neither venue can infer the other requirement. This adds one ordinary test root,
+not a new owner, policy membership, workload, runtime or deadline. Local full
+qualifies the corrected clean head while hosted lifecycle measures8ea95a10d.
+Publish the corrected head with CI-Tier restored
 to full after lifecycle qualification, keeping the PR draft/non-mergeable during
 the transition. Final review must bind the new head's actual full plan, run,
 attempt and protected terminals plus the actual local full receipt. No higher
