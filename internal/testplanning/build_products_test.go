@@ -3,6 +3,7 @@ package testplanning
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,7 +30,7 @@ func TestBuildProductColdExactReuseAndCorruptionFallback(t *testing.T) {
 			t.Fatalf("git: %v %s", err, raw)
 		}
 	}
-	build := func() {
+	build := func(t *testing.T) {
 		t.Helper()
 		output := filepath.Join(t.TempDir(), "probe")
 		if err := BuildGoProduct(context.Background(), root, cache, output, ProfileCore, "build", "./cmd/probe"); err != nil {
@@ -39,7 +40,7 @@ func TestBuildProductColdExactReuseAndCorruptionFallback(t *testing.T) {
 			t.Fatalf("product %s %v", raw, err)
 		}
 	}
-	build()
+	build(t)
 	inputs, err := goProductInputs(context.Background(), root, ProfileCore, []string{"build", "./cmd/probe"})
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +51,7 @@ func TestBuildProductColdExactReuseAndCorruptionFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	build()
+	build(t)
 	second, _ := os.Stat(key)
 	if !first.ModTime().Equal(second.ModTime()) {
 		t.Fatal("valid warm product rebuilt")
@@ -87,9 +88,19 @@ func TestBuildProductColdExactReuseAndCorruptionFallback(t *testing.T) {
 			if err := os.WriteFile(key+".json", raw, 0600); err != nil {
 				t.Fatal(err)
 			}
-			build()
+			build(t)
 		})
 	}
+	t.Run("concurrent_shared_miss", func(t *testing.T) {
+		for _, path := range []string{key, key + ".json"} {
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for i := 0; i < 4; i++ {
+			t.Run(fmt.Sprint(i), func(t *testing.T) { t.Parallel(); build(t) })
+		}
+	})
 }
 
 func TestBuildProductWarmCacheBypassesDirtyRootInputs(t *testing.T) {

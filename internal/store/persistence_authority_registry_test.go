@@ -574,7 +574,7 @@ func loadPersistenceAuthorityFindings(t *testing.T, root string) []authorityFind
 		}
 		findings = append(findings, collectEffectiveMethodSetFindings(root, pkg)...)
 	}
-	sort.Slice(findings, func(i, j int) bool { return findings[i].key() < findings[j].key() })
+	sort.Slice(findings, func(i, j int) bool { return authorityFindingLess(findings[i], findings[j]) })
 	return findings
 }
 
@@ -1258,6 +1258,8 @@ func readAuthorityRegistry(t *testing.T, path string) map[string]string {
 
 func writeAuthorityRegistry(t *testing.T, path string, findings []authorityFinding, prior map[string]string) {
 	t.Helper()
+	findings = slices.Clone(findings)
+	sort.Slice(findings, func(i, j int) bool { return authorityFindingLess(findings[i], findings[j]) })
 	var buffer bytes.Buffer
 	buffer.WriteString("# disposition\tkind\tauthority\tfile\tenclosing\tmember\tresolved-type\n")
 	for _, finding := range findings {
@@ -1274,6 +1276,13 @@ func writeAuthorityRegistry(t *testing.T, path string, findings []authorityFindi
 	if err := os.WriteFile(path, buffer.Bytes(), 0o644); err != nil {
 		t.Fatalf("write persistence authority registry: %v", err)
 	}
+}
+
+func authorityFindingLess(a, b authorityFinding) bool {
+	if a.File != b.File {
+		return a.File < b.File
+	}
+	return a.key() < b.key()
 }
 
 func persistenceAuthorityRepoRoot(t *testing.T) string {

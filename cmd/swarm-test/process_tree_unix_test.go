@@ -130,7 +130,7 @@ func signalTestEnvironment(env []string, stateHome string, extra ...string) []st
 	filtered := make([]string, 0, len(env)+len(extra)+2)
 	for _, entry := range env {
 		key, _, _ := strings.Cut(entry, "=")
-		if key == "XDG_STATE_HOME" || key == testpostgres.SourceEnv || key == testpostgres.RunWrapperEnv || key == signalFixtureEnv || key == signalFixturePIDEnv {
+		if key == "XDG_STATE_HOME" || key == testpostgres.SourceEnv || key == testpostgres.RunWrapperEnv || key == testpostgres.RunCapacityEnv || key == signalFixtureEnv || key == signalFixturePIDEnv {
 			continue
 		}
 		filtered = append(filtered, entry)

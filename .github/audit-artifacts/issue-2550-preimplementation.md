@@ -1,9 +1,36 @@
 # Pre-Implementation Coverage Audit: #2550
 
-Agent: agent-g. Phase: pre-audit; implementation NOT authorized.
+Agent: agent-g. Phase: implementation approved under the independent gate below.
 Intake: 2026-10-03. Source: master `1afb7f20315e99400b7398ef13c205836abd5f98`,
 tree `069470d56363e7ed9695fb21e8f6a5dba66738b9`.
 Issue: https://github.com/division-sh/swarm/issues/2550
+
+## Independent coding gate and binding amendments
+
+Approved 2026-10-03 by reviewer-g:
+https://github.com/division-sh/swarm/issues/2550#issuecomment-5972816660
+This approval supersedes the historical pending-gate wording below. One PR is
+the ceiling for all six families; no gross-line ceiling. A complete describe-first
+split requires demonstrated material multi-day conflict/requalification cost and
+an explicit record before splitting. No such split is claimed now.
+
+Binding corrections supersede the original proposals:
+
+- C04: every qualifying complexity event requires an immutable lineage-valid
+  comparison. PR compares its head with merge-base of the exact event base tip;
+  push compares before/after; schedule/manual must follow an explicit tested
+  branch ancestry rule. Measure-only must never qualify the required summary.
+- Registry: 11,947 reviewed rows / 598 source files must NOT become per-file
+  shards. First test file-first deterministic ordering in the single TSV by
+  conflict replay; otherwise use a small stable set of coarse source-owner
+  partitions. Preserve exact identities/judgments and all negative guards.
+- Preflight is two-stage: cheap source/host/tool/scratch before planning; exact
+  selected-root/native/PG/socket admission after plan binding and before workers.
+- Zero eligible classified regression findings yields escape rate N/A, not 0%.
+  #1967 is closed history; material publication and cadence acceptance are
+  tracked only by open #2535. B05 does not reopen #1967.
+- Fresh exact-head server2 local full and hosted full remain mandatory; the
+  #2548 waiver does not transfer. All prior characterization is baseline only.
 
 ## Disposition and binding context
 
@@ -193,9 +220,8 @@ existing policy field is still checked, while their score populations cannot aff
 the independently computed verdict. Remove the update-and-commit-score workflow/
 `-update` behavior; measurement is evidence-only. Missing/malformed/unknown policy,
 tool drift, threshold drift, scope drift, wrong revision and analyzer failures all
-refuse. An explicit -base/CI event is comparison authority; a no-base invocation
-is measure-only, not ratchet credit. Reviewer-g may require a different filename,
-but it must preserve the exact pre/post policy comparison without a silent bootstrap.
+refuse. Every qualifying event requires a lineage-valid independent comparison;
+no-base invocation refuses, rather than giving qualified measure-only success.
 
 Migrate retired-builder symbol accounting and route-authority drift inventory too:
 they currently classify names contained only in the generated metric population.
@@ -203,14 +229,15 @@ Removing those generated names does NOT remove a real source-level retirement gu
 
 ### 4. Other testdata
 
-Shard persistence judgments deterministically by the finding's EXISTING source
-file/owner coordinate, retaining exact declaration/member/type keys. Independently
-discover every finding; read every declared shard; reject missing/duplicate/misplaced/
-unclassified/unknown/stale rows and filesystem errors. The updater preserves prior
-reviewed dispositions and labels new findings unclassified. Stable ordering and
-no global generated header reduce disjoint-source conflicts without approving raw
-authority or weakening classifiers. Migrate all four guard consumer families and
-the spec owner pointer; no flat-file fallback, path allowlist or generated acceptance.
+Keep one TSV with file-first deterministic ordering, retaining every exact
+declaration/member/type key and disposition. Independently discover every finding;
+reject missing/duplicate/malformed/unclassified/unknown/stale rows and filesystem
+errors. The updater preserves judgments and labels new findings unclassified.
+Six representative disjoint whole-source edit pairs on the original 11,947 rows
+produce one kind-first Git conflict hunk and zero file-first hunks. This is limited
+concrete reduction evidence, not replay of all historical fleet conflicts or a
+claim of conflict freedom. All four guard families retain their complete reader;
+no shard inventory, fallback, path allowlist or generated acceptance is introduced.
 
 Static-data expected output retains exact reviewed content/static IDs. Derive only
 the current bundle hash once from the independent canonical admitted fixture,
@@ -231,7 +258,7 @@ No title/branch-based general tier exception and no App access in feature branch
 Prove weight perturbations change balancing/packing while required roots do not
 change; a stale/malformed model or non-model diff still fails publication.
 Actual material scheduled publication stays an explicit post-merge acceptance
-obligation under #2535/#1967, not credited from a no-op or simulated shell.
+obligation under open #2535; #1967 is closed history. No credit from a no-op or simulated shell.
 
 ### 6. Full cadence observation
 
@@ -277,7 +304,7 @@ Owners are existing semantic owners, not merely the first failing file encounter
 | Complexity: cmd/swarm-complexity collector/inventory/model/events | M CLI main admission/update flag/README and complexity tests; A pinned tools, inventory, callable identity, compare and emitEvidence; M ci.yml static job label/invocation/evidence presentation; M serveapp retired_builder_transport_guard exact generated-text counts/classification; M conformance route_authority_drift_inventory and its full-census tests. No runtime reader of score snapshot found. |
 | Resolved persistence findings + reviewed classifications | M store registry reader/updater and hostile tests; M public_capability_architecture_test adjacent2149 guard; M credentials/currentness_owner_guard_test retired-epoch search; M serveapp/retired_builder_transport_guard_test exact artifact text classification; M two classification markdown docs and spec structural_enforcement owner. A independent typed/raw/effective-method/context finding discovery and compound/run/durable fixture guards. |
 | Static-data authored oracle + canonical sourceartifact identity | M releasee2e/static_data_invocation_test.go six compiled both-store shards; M runtime/cataloge2e/static_data_invocation_identity_test.go; A sourceartifact/contracts independent canonical admission, semanticview static content/ID admission; D production bundle/fork authority unchanged, explicit wrong-hash/foreign-cwd mutation proof. |
-| Timing weights/model publication: testplanning model/plan/batches and schedule publisher | A broad LPT/short packing/model ETA and strict LoadWeightModel/selector binding; M publisher ci.yml both PR create/update bodies; A cmd/swarm-test-timing updateWeightModel/ValidatePublicationDiff and master-only App boundary. A published bot PR is ordinary native PR qualification, not a second dispatcher. S literal material acceptance #2535/#1967. |
+| Timing weights/model publication: testplanning model/plan/batches and schedule publisher | A broad LPT/short packing/model ETA and strict LoadWeightModel/selector binding; M publisher ci.yml both PR create/update bodies; A cmd/swarm-test-timing updateWeightModel/ValidatePublicationDiff and master-only App boundary. A published bot PR is ordinary native PR qualification, not a second dispatcher. S literal material acceptance under open #2535; #1967 remains closed history. |
 | Timing/report evidence | M internal/testtiming report/observation and cmd/swarm-test-timing report entrance; M existing workflow artifact/step-summary presentation, failed-run preservation; M local completion wall/queue/capacity report. A budget evaluator, required-tests aggregate, run/attempt/head/job checks and full-root ownership. S confirmed regression classification #2353 and runtime perf #2394 remain independent; observation does not grant closure. |
 
 Searches included all tracked Go/workflow/spec/docs reads of both baseline paths,
@@ -287,7 +314,7 @@ model path/publication modes, full-profile selectors and report/evidence consume
 Other agents' scratch trees are not production authorities; no files there changed.
 
 Old invalid/removal paths: monolithic describe hashes/header; committed complexity
-score population and score updater instructions; flat registry reader/updater;
+score population and score updater instructions; kind-first registry ordering;
 static oracle's committed current bundle hash; serial completion and late-only
 environment refusal; bot PR body without declared model-only scope; unbound
 inference that any full failure is a core escape. Production source hashes,
@@ -363,21 +390,21 @@ readable golden, exit/stderr and independent identity assertion.
 | C01 | independent ratchet without score snapshot | Exact base/head compiled CLI with source changes, no committed population update; emit independent inventory/metrics/delta. |
 | C02 | cyclo-only / cognitive-only growth | Both existing adversarial >=30 growth arms must refuse independently; decrease/neutral controls pass. |
 | C03 | policy/tool/scope mutation | Threshold/tool/schema/scope/missing/unknown/trailing policy mutations fail before non-growth credit; no auto reset. |
-| C04 | wrong base/event / measure-only | Existing wrong/missing revision, event override/zero SHA controls plus no-base clearly unqualified measurement; PR/push/daily/manual lineage remains explicit. |
+| C04 | wrong base/event / no comparison | Existing wrong/missing revision, event override/zero SHA controls plus no-base refusal; PR/push/daily/manual lineage remains explicit. No head-only qualified ratchet. |
 | C05 | exhaustive analyzer source census | Existing generated/test/all-build variants, duplicate literal identity, suppression/line directive, unreadable source/analyzer missing/duplicate/invalid rows tests. |
 | C06 | no snapshot-dependent bypass | Retired-builder transport guard and full route-authority inventory pass after score removal; injected retired production symbol still fails. |
-| G01 | lossless reviewed registry sharding | Compare every original finding/disposition to sharded union; full independent TestPersistenceAuthorityFindingRegistry and effective-method-set suite. |
-| G02 | duplicate/misplaced/missing/unreadable shard | Hostile shard fixtures individually fail; wrong file ownership cannot authorize a finding; no flat legacy fallback. |
+| G01 | lossless reviewed file-first registry | Compare every original finding/disposition to the reordered set; full independent registry/effective-method-set suite and six-pair real Git layout replay. |
+| G02 | duplicate/malformed/missing/unreadable registry | Hostile TSV fixtures individually fail; exact file remains part of finding identity; no alternative reader or shard machinery. |
 | G03 | unknown/stale/unclassified/raw bypass | Existing resolved types, transitive methods, hostile local operation, compound event/run/durable fixtures plus new unclassified updater arm all refuse. |
-| G04 | secondary registry consumers | Public adjacent2149, credentials retired-epoch and serve retired-builder guards execute over every shard; sentinel inserted in a nonfirst shard is detected. |
+| G04 | secondary registry consumers | Public adjacent2149, credentials retired-epoch and serve retired-builder guards retain exhaustive TSV reads and detect hostile trailing sentinels. |
 | G05 | static oracle content/ID integrity | Existing catalog admitted-identity proof plus corrupt expected content/static ID/fixture byte counterexamples; only bundle authority independently derived. |
 | G06 | static authority/runtime parity | All six TestDurableDataInvocationInvarianceSQLitePostgresShard1..6, real compiled verify/lifecycle readback and refusal/geometry cells; wrong runtime bundle hash fails. |
 | B01 | model still has material consumers | Perturb valid weights: different broad partition/packing/ETA, identical exhaustive logical roots/children/tier/deadlines; existing balance/packing tests retained. |
 | B02 | stale/invalid model | Strict schema/version/negative/nonfinite/selector mismatch/refused evidence/publish diff controls; no unbound weights or unsafe core publication. |
 | B03 | bot create vs update scope | Actual shell/API-payload harness verifies both body entrances set core/core only after model-only validation; existing body prose/issue link preserved. |
 | B04 | no App leakage or duplicate dispatch | Existing workflow static/App/master-only/native draft-ready checks; feature/draft/no-op paths acquire no publisher credential; zero automatic dispatch callers census. |
-| B05 | material daily publication | Literal successful post-merge scheduled material update/native bot PR/normal core checks; S under #2535/#1967 until it actually runs. No-op is not proof. |
-| F01 | complete successful full, zero confirmed escapes | Source/attempt/plan-bound fixture with all terminal roots, valid prior core; report full coverage/zero classified escape and explicit eligible denominator. |
+| B05 | material daily publication | Literal successful post-merge scheduled material update/native bot PR/normal core checks; S under open #2535 until it actually runs. #1967 is closed history; no-op is not proof. |
+| F01 | complete successful full, no eligible finding | Source/attempt/plan-bound fixture with all terminal roots, valid prior core; report full coverage and rate N/A with explicit zero eligible denominator. |
 | F02 | failed full-only root, no attribution | Observation reports unclassified candidate, unknown lag, not zero escaped regressions or verified runtime bug; preserve failed summary. |
 | F03 | confirmed core escape and exact lag | Synthetic linear/squash/merge commit history with prior actual successful core, omitted root and recorded introducing SHA: exact first-parent merge count and first detection; duplicate rerun not second regression. |
 | F04 | not a core escape | Full-selected failure already caught by core, infra/timeout and harness attribution fixtures remain separate; no inferred causal/latest-head repair. |
@@ -385,7 +412,7 @@ readable golden, exit/stderr and independent identity assertion.
 | F06 | actual hosted observation | Replay real green #2548 full run 37143254718 and retained red qualification receipts with unknown attribution; then new-head hosted full publishes its own exact JSON/Markdown artifact, including failing-run control. |
 | F07 | nightly/manual/fleet boundary | Workflow census retains current daily/full-only manual/protected checks; no automatic cadence change or newly successful skip. One-week acceptance remains parent work. |
 | Q01 | canonical local/hosted qualification | Focused affected/race proof -> fresh explicit local full -> exact-head hosted full with both 900s soaks/macOS/native union/normal protected contexts, CI-Tier full and Local-Tier full. |
-| Q02 | final deletion/spec/owner census | No committed scores/global hash header/flat registry consumers/missing bot scope/unowned worker receipt; all spec/directory guards/current sources parse and exact complexity ratchet passes. |
+| Q02 | final deletion/spec/owner census | No committed scores/global hash header/kind-first registry ordering/missing bot scope/unowned worker receipt; all spec/directory guards/current sources parse and exact complexity ratchet passes. |
 
 Total: 88 planned rows (45 D cells plus D46-D48, L01-L14, C01-C06,
 G01-G06, B01-B05, F01-F07, Q01-Q02). No row earns credit from shared-owner

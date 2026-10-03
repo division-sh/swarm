@@ -284,7 +284,7 @@ func TestPublisherIsMasterRestrictedGeneratedOnlyAndReviewRequired(t *testing.T)
 		"repos/division-sh/swarm/contents/.github/test-timing-weights.json",
 		`-f branch="$staging_branch"`,
 		`-f sha="$generated_sha"`,
-		"human review and normal protection required",
+		"human review and normal PR checks required",
 		`gh pr list --head "$branch"`,
 	} {
 		if !strings.Contains(text, want) {
