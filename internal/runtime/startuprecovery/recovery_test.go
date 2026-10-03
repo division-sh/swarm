@@ -31,7 +31,7 @@ func TestRecoverFailsClosedWhenAnyActiveRunLacksItsSourceArtifact(t *testing.T) 
 		},
 	}}
 
-	result, err := Recover(context.Background(), Request{AvailabilityReader: reader, ArtifactReader: &fakeArtifactReader{artifact: artifact}})
+	result, err := Inspect(context.Background(), Request{AvailabilityReader: reader, ArtifactReader: &fakeArtifactReader{artifact: artifact}})
 	if err == nil || !IsDataIntegrityError(err) || !strings.Contains(err.Error(), runbundle.CodeBundleDataIntegrityError) {
 		t.Fatalf("Recover err = %v, want data integrity error", err)
 	}
@@ -51,7 +51,7 @@ func TestRecoverAcceptsOnlyAvailableSourceArtifacts(t *testing.T) {
 		},
 	}}
 
-	result, err := Recover(context.Background(), Request{AvailabilityReader: reader, ArtifactReader: &fakeArtifactReader{artifact: artifact}})
+	result, err := Inspect(context.Background(), Request{AvailabilityReader: reader, ArtifactReader: &fakeArtifactReader{artifact: artifact}})
 	if err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestRecoverValidatesStoredBytesAndNeverTreatsPresenceAsIntegrity(t *testing
 			availability := runbundle.Availability{RunID: "first", Status: "running", BundleHash: valid.BundleHash, SourceArtifactPresent: true}
 			peer := availability
 			peer.RunID = "second"
-			_, err := Recover(context.Background(), Request{
+			_, err := Inspect(context.Background(), Request{
 				AvailabilityReader: fakeAvailabilityReader{items: []runbundle.Availability{availability, peer}}, ArtifactReader: reader,
 			})
 			if (err == nil) != (name == "valid") {
@@ -93,6 +93,34 @@ func TestRecoverValidatesStoredBytesAndNeverTreatsPresenceAsIntegrity(t *testing
 			}
 		})
 	}
+}
+
+func TestInspectRequiresReadersAndPreservesCancellation(t *testing.T) {
+	for _, request := range []Request{{}, {AvailabilityReader: fakeAvailabilityReader{}}, {ArtifactReader: &fakeArtifactReader{}}} {
+		if _, err := Inspect(context.Background(), request); err == nil {
+			t.Fatal("missing required source reader admitted as an empty census")
+		}
+	}
+	readErr := errors.New("source snapshot unavailable")
+	if _, err := Inspect(context.Background(), Request{AvailabilityReader: fakeAvailabilityReader{err: readErr}, ArtifactReader: &fakeArtifactReader{}}); !errors.Is(err, readErr) {
+		t.Fatalf("source reader failure lost: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := Inspect(ctx, Request{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation lost: %v", err)
+	}
+	ctx, cancel = context.WithCancel(context.Background())
+	if _, err := Inspect(ctx, Request{AvailabilityReader: cancellingAvailabilityReader{cancel: cancel}, ArtifactReader: &fakeArtifactReader{}}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("late cancellation lost: %v", err)
+	}
+}
+
+type cancellingAvailabilityReader struct{ cancel context.CancelFunc }
+
+func (r cancellingAvailabilityReader) ActiveNonStandingRunBundleAvailabilities(context.Context) ([]runbundle.Availability, error) {
+	r.cancel()
+	return nil, errors.New("late read failure")
 }
 
 func recoveryArtifact(t *testing.T) sourceartifact.Persisted {

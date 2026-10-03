@@ -144,7 +144,7 @@ func TestSourceArtifactStartupIntegrityParityPreservesRunHistory(t *testing.T) {
 						}
 						setBlob(other.LogicalBlob())
 					}
-					_, err = startuprecovery.Recover(ctx, startuprecovery.Request{AvailabilityReader: selected, ArtifactReader: selected})
+					_, err = startuprecovery.Inspect(ctx, startuprecovery.Request{AvailabilityReader: selected, ArtifactReader: selected})
 					if (err == nil) != (condition == "valid") {
 						t.Fatalf("recovery = %v", err)
 					}
