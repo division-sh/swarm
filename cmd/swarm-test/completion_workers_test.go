@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -165,7 +166,7 @@ func TestCompletionParentDeathRetainsWorkerDescendants(t *testing.T) {
 	if root := os.Getenv(fixture); root != "" {
 		if unit := os.Getenv("SWARM_COMPLETION_DEATH_UNIT"); unit != "" {
 			admission := testpostgres.NewRunAdmission(filepath.Join(root, "state"), nil)
-			lease, err := admission.Acquire(context.Background(), testpostgres.RunCommand{Args: []string{"fixture", unit}}, 2)
+			lease, err := admission.Acquire(context.Background(), testpostgres.RunCommand{Args: []string{"go", "test", "./" + unit}}, 2)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -232,9 +233,11 @@ func TestCompletionParentDeathRetainsWorkerDescendants(t *testing.T) {
 	admission := testpostgres.NewRunAdmission(filepath.Join(root, "state"), nil)
 	blocked, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	if lease, err := admission.Acquire(blocked, testpostgres.RunCommand{Args: []string{"successor"}}, 2); err == nil {
-		_ = lease.Complete(context.Background(), false)
-		t.Fatal("parent/worker death released descendant authority")
+	if lease, err := admission.Acquire(blocked, testpostgres.RunCommand{Args: []string{"go", "test", "./successor"}}, 2); !errors.Is(err, context.DeadlineExceeded) {
+		if lease != nil {
+			_ = lease.Complete(context.Background(), false)
+		}
+		t.Fatal("descendant authority was not the blocking gate", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "workers.json")); !os.IsNotExist(err) {
 		t.Fatal("dead aggregate published full proof", err)
@@ -247,7 +250,7 @@ func TestCompletionParentDeathRetainsWorkerDescendants(t *testing.T) {
 	}
 	ctx, finish := context.WithTimeout(context.Background(), 5*time.Second)
 	defer finish()
-	lease, err := admission.Acquire(ctx, testpostgres.RunCommand{Args: []string{"successor-after-join"}}, 2)
+	lease, err := admission.Acquire(ctx, testpostgres.RunCommand{Args: []string{"go", "test", "./successor-after-join"}}, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
