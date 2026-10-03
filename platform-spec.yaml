@@ -11011,7 +11011,19 @@ tool_model:
         Any requested v2 proof and proof responsibility carry byte-identical evidence and cannot mint from a later credential read.
         Rejection compare-deletes operation-written candidate occurrences and returns the operation
         to preparing, so resume can admit a different credential while the predecessor activation and registration remain
-        current. Fresh webhook connect may generate a signing value only after the credential snapshot owner proves
+        current. The credentials_admitted-to-preparing reset has one owner-local cleanup-before-reset operation for
+        stale admission, rejected preflight and local reconciliation. It serializes the exact operation, verifies current
+        phase/revision and complete admissions before each receipt-and-value-seal-fenced delete, and preserves the entire
+        durable admission set on any cleanup failure, including evidence for already-deleted occurrences. Only successful
+        exact cleanup permits the expected-revision reset; interrupted or uncertain commit retains its exact recovery
+        responsibility without a forced second reset. Observed and successor values, inherited binding revision and
+        reservations are preserved. Pending-child and confirmed-binding resets keep their separate existing preconditions.
+        Public onboarding start/retry projects only the unusable-value sentinel to platform.authentication_required with
+        detail credential_value_unusable, required auth_kind=channel_credential, deterministic=true and retryable=false.
+        The typed cause survives internally but credential bytes, seals, receipts and wrapped diagnostics are not emitted.
+        Genuine absence/staleness retains CHANNEL_CREDENTIAL_REQUIRED; corruption, I/O, structural/revision conflicts and
+        mixed cleanup errors are not rewritten as unusable-value or routine credential requests.
+        Fresh webhook connect may generate a signing value only after the credential snapshot owner proves
         genuine absence of its reserved exact key. A present empty or whitespace-only value, read failure, corruption,
         rotated predecessor value or missing previous-current occurrence is a refusal, never permission to fall back to
         another key or generate a replacement. All required roles are checked before any generation or write, so an

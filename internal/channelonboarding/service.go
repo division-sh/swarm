@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -668,18 +669,12 @@ func (s *Service) ReconcileLocal(ctx context.Context) error {
 					return err
 				}
 			case PhaseCredentialsAdmitted:
-				if err := s.validateCredentialAdmissions(ctx, op); err != nil {
-					var required *CredentialRequiredError
-					if !errors.As(err, &required) {
-						return fmt.Errorf("validate local credential admission for %s: %w", op.OperationID, err)
-					}
-					op, err = s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{
-						OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: PhasePreparing,
-						ReplaceCredentialAdmissions: true, Now: s.now().UTC(),
-					})
-					if err != nil {
-						return err
-					}
+				var reset bool
+				op, reset, err = s.reconcileAdmittedCredentials(ctx, op.OperationID)
+				if err != nil {
+					return fmt.Errorf("reconcile local credential admission for %s: %w", op.OperationID, err)
+				}
+				if reset {
 					continue
 				}
 				step = 5
@@ -862,15 +857,9 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 				if !errors.As(err, &required) {
 					return s.blockedResult(ctx, op, candidate, err)
 				}
-				releaseErr := s.releaseCandidateCredentials(context.WithoutCancel(ctx), op.CredentialAdmissions)
-				reset, resetErr := s.store.AdvanceChannelOnboarding(context.WithoutCancel(ctx), AdvanceRequest{
-					OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: PhasePreparing,
-					ReplaceCredentialAdmissions: true, Now: s.now().UTC(),
-				})
-				if resetErr == nil {
-					op = reset
-				}
-				return s.blockedResult(ctx, op, candidate, errors.Join(err, releaseErr, resetErr))
+				var resetErr error
+				op, resetErr = s.resetRejectedCredentialAdmissions(context.WithoutCancel(ctx), op)
+				return s.blockedResult(ctx, op, candidate, errors.Join(err, resetErr))
 			}
 			promoted, err := s.activations.AdmitChannelTarget(ctx, op, candidate)
 			if err != nil {
@@ -901,15 +890,9 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 					}
 					return s.result(ctx, failed, &candidate)
 				}
-				releaseErr := s.releaseCandidateCredentials(context.WithoutCancel(ctx), op.CredentialAdmissions)
-				reset, resetErr := s.store.AdvanceChannelOnboarding(context.WithoutCancel(ctx), AdvanceRequest{
-					OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: PhasePreparing,
-					ReplaceCredentialAdmissions: true, Now: s.now().UTC(),
-				})
-				if resetErr == nil {
-					op = reset
-				}
-				return s.blockedResult(ctx, op, candidate, errors.Join(fmt.Errorf("preflight channel activation: %w", err), releaseErr, resetErr))
+				var resetErr error
+				op, resetErr = s.resetRejectedCredentialAdmissions(context.WithoutCancel(ctx), op)
+				return s.blockedResult(ctx, op, candidate, errors.Join(fmt.Errorf("preflight channel activation: %w", err), resetErr))
 			}
 			next, err := s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{
 				OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: PhaseActivatingProvider,
@@ -1166,6 +1149,61 @@ func (s *Service) releaseCandidateCredentials(ctx context.Context, admissions []
 		}
 	}
 	return releaseErr
+}
+
+func (s *Service) reconcileAdmittedCredentials(ctx context.Context, operationID string) (Operation, bool, error) {
+	unlock := s.lockDrive(operationID)
+	defer unlock()
+	op, err := s.store.GetChannelOnboarding(ctx, operationID)
+	if err != nil || op.Phase != PhaseCredentialsAdmitted {
+		return op, false, err
+	}
+	if err := s.validateCredentialAdmissions(ctx, op); err != nil {
+		var required *CredentialRequiredError
+		if !errors.As(err, &required) {
+			return op, false, err
+		}
+		reset, resetErr := s.resetRejectedCredentialAdmissions(context.WithoutCancel(ctx), op)
+		return reset, resetErr == nil, resetErr
+	}
+	return op, false, nil
+}
+
+// Callers hold the operation drive lock. File cleanup is not atomic with the
+// checkpoint: retain every admission until all exact deletes and the CAS succeed.
+func (s *Service) resetRejectedCredentialAdmissions(ctx context.Context, op Operation) (Operation, error) {
+	if op.Phase != PhaseCredentialsAdmitted {
+		return op, ErrRevisionConflict
+	}
+	checkCurrent := func() error {
+		current, err := s.store.GetChannelOnboarding(ctx, op.OperationID)
+		if err != nil {
+			return err
+		}
+		if current.Revision != op.Revision || current.Phase != PhaseCredentialsAdmitted || current.RequestHash != op.RequestHash || current.PrincipalID != op.PrincipalID || !slices.Equal(current.CredentialAdmissions, op.CredentialAdmissions) {
+			return fmt.Errorf("%w: rejected credential cleanup no longer owns its admitted responsibility", ErrRevisionConflict)
+		}
+		return nil
+	}
+	if err := checkCurrent(); err != nil {
+		return op, err
+	}
+	for _, admission := range op.CredentialAdmissions {
+		if err := checkCurrent(); err != nil {
+			return op, err
+		}
+		if _, err := s.credentials.Release(ctx, admission); err != nil {
+			return op, fmt.Errorf("release rejected channel credential %q: %w", admission.StoreKey, err)
+		}
+	}
+	reset, err := s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{
+		OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: PhasePreparing,
+		ReplaceCredentialAdmissions: true, Now: s.now().UTC(),
+	})
+	if err != nil {
+		return op, err
+	}
+	return reset, nil
 }
 
 func (s *Service) resetCredentialStaleIdentity(ctx context.Context, op Operation) (Operation, error) {

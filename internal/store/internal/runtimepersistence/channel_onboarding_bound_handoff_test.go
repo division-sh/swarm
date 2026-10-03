@@ -111,6 +111,7 @@ var errHandoffPublicationStop = errors.New("stop after real binding checkpoint")
 type boundHandoffRig struct {
 	fixture           channelOnboardingConfirmationFixture
 	file              *runtimecredentials.FileStore
+	credentialPath    string
 	service           *channelonboarding.Service
 	identities        *operatorchannel.Service
 	now               time.Time
@@ -171,7 +172,8 @@ func newBoundHandoffRig(t *testing.T, fixture channelOnboardingConfirmationFixtu
 	t.Helper()
 	rig := &boundHandoffRig{fixture: fixture, now: time.Date(2026, 9, 8, 1, 0, 0, 0, time.UTC)}
 	var err error
-	rig.file, err = runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	rig.credentialPath = filepath.Join(t.TempDir(), "credentials.json")
+	rig.file, err = runtimecredentials.NewFileStore(rig.credentialPath)
 	if err != nil {
 		t.Fatal(err)
 	}
