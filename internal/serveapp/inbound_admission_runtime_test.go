@@ -343,14 +343,48 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 	if code := process.stop(); code != 0 {
 		t.Fatalf("serve exit=%d\n%s", code, process.outputString())
 	}
-	opts.BundleHash = servedEventPublishFixtureBundleHash(t, sourceRoot)
-	opts.SourceRoot = ""
+	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 	if err := os.RemoveAll(sourceRoot); err != nil {
 		t.Fatal(err)
 	}
+	var artifacts sourceArtifactReader
 	if backend == "postgres" {
 		postgresStore, err = store.NewPostgresStore(postgresDSN)
 		if err != nil {
+			t.Fatal(err)
+		}
+		storetest.BootstrapPostgresRuntimeStore(t, postgresStore)
+		artifacts = postgresStore
+	} else {
+		sqliteStore, err = store.NewSQLiteRuntimeStore(inboundAdmissionSQLitePathFromConfig(t, configPath))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := initializeServePlatformStateStores(context.Background(), sqliteStore, filepath.Join(repoRootForTest(), opts.PlatformSpecPath)); err != nil {
+			t.Fatal(err)
+		}
+		artifacts = sqliteStore
+	}
+	record, err := artifacts.GetSourceArtifact(context.Background(), bundleHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := record.Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	projection, err := sourceartifact.MaterializeRuntimeProjection(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := projection.Release(); err != nil {
+			t.Error(err)
+		}
+	})
+	opts.SourceRoot = projection.PrivateRoot()
+	if sqliteStore != nil {
+		if err := sqliteStore.Close(); err != nil {
 			t.Fatal(err)
 		}
 	}
