@@ -84,12 +84,12 @@ func (r ProviderCredentialResolver) Resolve(ctx context.Context, profile llmsele
 	envPresent := r.envPresent(key)
 	value, ok, err := r.storeValue(ctx, key)
 	if err != nil {
-		return ProviderCredential{}, runtimefailures.Wrap(runtimefailures.ClassDependencyUnavailable, "provider_credential_store_unavailable", "llm-provider", "resolve_credential", map[string]any{"credential_key": key}, err)
+		return ProviderCredential{}, providerCredentialReadFailure(key, "resolve_credential", err)
 	}
 	if ok {
 		source := runtimecredentials.SourceFile
 		if meta, metaErr := inspectProviderCredentialStore(ctx, r.Store, key); metaErr != nil {
-			return ProviderCredential{}, metaErr
+			return ProviderCredential{}, providerCredentialReadFailure(key, "resolve_credential", metaErr)
 		} else if strings.TrimSpace(meta.Source) != "" {
 			source = strings.TrimSpace(meta.Source)
 		}
@@ -124,7 +124,7 @@ func (r ProviderCredentialResolver) Inspect(ctx context.Context, profile llmsele
 	envPresent := r.envPresent(key)
 	value, ok, err := r.storeValue(ctx, key)
 	if err != nil {
-		return ProviderCredential{}, err
+		return ProviderCredential{}, providerCredentialReadFailure(key, "inspect_credential", err)
 	}
 	credential := ProviderCredential{
 		Key:         key,
@@ -135,7 +135,7 @@ func (r ProviderCredentialResolver) Inspect(ctx context.Context, profile llmsele
 	if ok {
 		credential.Source = runtimecredentials.SourceFile
 		if meta, metaErr := inspectProviderCredentialStore(ctx, r.Store, key); metaErr != nil {
-			return ProviderCredential{}, metaErr
+			return ProviderCredential{}, providerCredentialReadFailure(key, "inspect_credential", metaErr)
 		} else if strings.TrimSpace(meta.Source) != "" {
 			credential.Source = strings.TrimSpace(meta.Source)
 		}
@@ -152,11 +152,17 @@ func (r ProviderCredentialResolver) envPresent(key string) bool {
 }
 
 func (r ProviderCredentialResolver) storeValue(ctx context.Context, key string) (string, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return "", false, err
+	}
 	if r.Store == nil {
-		return "", false, nil
+		return "", false, errors.New("provider credential read port is required")
 	}
 	value, ok, err := r.Store.Get(ctx, key)
 	if err != nil {
+		return "", false, err
+	}
+	if err := ctx.Err(); err != nil {
 		return "", false, err
 	}
 	value = strings.TrimSpace(value)
@@ -164,6 +170,18 @@ func (r ProviderCredentialResolver) storeValue(ctx context.Context, key string) 
 		return "", false, nil
 	}
 	return value, true, nil
+}
+
+type providerCredentialReadError struct{ cause error }
+
+func (e providerCredentialReadError) Error() string {
+	return "provider credential store could not be read"
+}
+func (e providerCredentialReadError) Unwrap() error { return e.cause }
+
+func providerCredentialReadFailure(key, operation string, cause error) error {
+	return runtimefailures.Wrap(runtimefailures.ClassDependencyUnavailable, "provider_credential_store_unavailable", "llm-provider", operation,
+		map[string]any{"credential_key": key}, providerCredentialReadError{cause: cause})
 }
 
 func inspectProviderCredentialStore(ctx context.Context, store runtimecredentials.Store, key string) (runtimecredentials.Metadata, error) {
