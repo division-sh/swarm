@@ -64,8 +64,15 @@ func TestVerifyPortableAdmissionOutputParity(t *testing.T) {
 	if err := json.Unmarshal(jsonOut.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if !result.OK || result.AdmissionComplete || result.ValidationScope != "structural" || result.LiveReadiness != "not_evaluated" || result.SourceArtifactHash == "" {
+	if !result.OK || result.AdmissionComplete || result.ValidationScope != "structural" || result.LiveReadiness != "not_evaluated" || result.BundleHash == "" || result.SourceLabel == "" || len(result.Members) == 0 {
 		t.Fatalf("portable result made a readiness claim: %#v", result)
+	}
+	var wire map[string]json.RawMessage
+	if err := json.Unmarshal(jsonOut.Bytes(), &wire); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := wire["source_artifact_hash"]; present {
+		t.Fatal("verify published a competing source identity instead of bundle_hash")
 	}
 	if len(result.Observations) == 0 || result.ExecutionObligations == nil {
 		t.Fatal("JSON omitted evidence or conflated execution with an absent field")
