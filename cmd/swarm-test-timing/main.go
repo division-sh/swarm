@@ -574,13 +574,6 @@ func readLines(path string) ([]string, error) {
 	return values, nil
 }
 
-func readOptionalLines(path string) ([]string, error) {
-	if path == "" {
-		return nil, nil
-	}
-	return readLines(path)
-}
-
 func readJSON(path string, value any) error {
 	file, err := os.Open(path)
 	if err != nil {
