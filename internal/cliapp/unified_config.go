@@ -138,7 +138,7 @@ func loadUnifiedConfigAllowDiagnostics(opts unifiedConfigLoadOptions) (unifiedCo
 		return unifiedConfigLoadResult{}, err
 	}
 	if len(merged.Content) > 0 {
-		if err := merged.Decode(cfg); err != nil {
+		if err := config.DecodeSource(yamlsource.ValueFromNode(&merged), cfg); err != nil {
 			diagnostics = append(diagnostics, unifiedConfigDiagnostic{
 				Kind:        unifiedConfigDiagnosticParseFailed,
 				Message:     fmt.Sprintf("decode swarm.yaml config: %v", err),
