@@ -57,6 +57,16 @@ execution receipts must identify their own snapshot.
    inside provenance objects. The 35 other cells, strict hash assertions,
    normalization and two-repeat public commands are unchanged. Refresh only
    those measured hashes, not the CLI or admission contract.
+9. Hosted core qualification at 28c0fc01a passed the compiled command tests but
+   failed owned temporary-workspace cleanup: downloaded Go modules left
+   read-only directories. The batch owner now restores directory write access
+   only inside its exact mktemp workspace, without following symlinks. Cleanup
+   failure still fails the unit but cannot suppress its receipt or later units.
+   The existing command recorder persists failed/skipped observations before
+   structural validation; the existing budget evaluator remains the outcome
+   authority and refuses unsuccessful qualification. No retry or pass credit
+   is introduced. Real script tests cover read-only disposal and fresh later
+   processes; recorder tests cover retained failures and evaluator refusal.
 
 ## Local Instruction Clarification
 

@@ -20,6 +20,9 @@ func TestProofBatchCollectsLaterUnitAfterFailureWithFreshProcessesAndTemps(t *te
 set -euo pipefail
 if [ "$2" = ./cmd/swarm-test ]; then
   printf '%s %s %s\n' "$5" "$$" "$TMPDIR" >> "$PROBE_LOG"
+  mkdir "$TMPDIR/readonly"
+  touch "$TMPDIR/readonly/downloaded-module"
+  chmod a-w "$TMPDIR/readonly"
   printf '{}\n'
   if [ "$5" = one ]; then exit 1; fi
 fi
@@ -66,6 +69,11 @@ fi
 	for _, id := range []string{"one", "two"} {
 		if _, err := os.Stat(filepath.Join(root, "test-results/evidence", id+"-primary-evidence.json")); err != nil {
 			t.Fatal(err)
+		}
+	}
+	for _, path := range []string{one[2], two[2]} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("owned read-only temp was not disposed: %s %v", path, err)
 		}
 	}
 }

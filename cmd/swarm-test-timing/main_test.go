@@ -112,6 +112,52 @@ func TestRecordEvidenceBindsPlanIdentity(t *testing.T) {
 	if problems := testtiming.ValidateCommandEvidence(evidence, plan); len(problems) > 0 {
 		t.Fatalf("evidence problems: %v", problems)
 	}
+	for _, outcome := range []string{"failed", "skipped"} {
+		t.Run(outcome, func(t *testing.T) {
+			input := jsonPath
+			exitCode := 1
+			if outcome == "skipped" {
+				exitCode = 0
+				input = filepath.Join(t.TempDir(), "skipped.json")
+				if err := os.WriteFile(input, []byte(strings.ReplaceAll(strings.Join(lines, "\n")+"\n", `"Action":"pass"`, `"Action":"skip"`)), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			path := filepath.Join(t.TempDir(), "failed-primary-evidence.json")
+			err := run(config{recordEvidence: true, workflowRunID: 1, workflowAttempt: 1, planPath: planPath, unitID: unit.ID, evidencePath: path, inputPath: input, attempt: testtiming.AttemptPrimary, elapsedSeconds: 1, exitCode: exitCode})
+			if (outcome == "skipped") != (err != nil) {
+				t.Fatalf("structural evidence validation: %v", err)
+			}
+			observed, err := readEvidence(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if observed.ExitCode != exitCode {
+				t.Fatal("failed attempt lost")
+			}
+			policy, err := readBudgetPolicy(".github/test-timing-budgets.yaml")
+			if err != nil {
+				t.Fatal(err)
+			}
+			result := testtiming.EvaluateBudget(policy, testtiming.EvaluationOptions{Plan: plan, WorkflowRunID: 1, WorkflowAttempt: 1}, []testtiming.CommandEvidence{observed})
+			wantProblem := "primary command failed with exit code 1"
+			if outcome == "skipped" {
+				wantProblem = "want pass"
+			}
+			found := false
+			for _, surface := range result.Surfaces {
+				if surface.Surface == unit.ID {
+					found = true
+					if surface.Status != testtiming.BudgetIncomplete || !strings.Contains(strings.Join(surface.Problems, "; "), wantProblem) {
+						t.Fatalf("unsuccessful observation earned credit or lost its cause: %+v", surface)
+					}
+				}
+			}
+			if !found {
+				t.Fatal("recorded unit missing from outcome evaluation")
+			}
+		})
+	}
 }
 
 func TestAssertExecutionSHARejectsDifferentCheckout(t *testing.T) {
