@@ -92,6 +92,33 @@ execution receipts must identify their own snapshot.
     compiled children, not in-process. This is a missed test guard consumer of
     the approved composition, not another production interpreter or owner.
     The red hosted run remains evidence, not lifecycle cost/qualification credit.
+12. Hosted full37108207931 on ef157f868 catches two unused remnants in the
+    already-audited native union: readOptionalLines and test-only currentHead
+    in cmd/swarm-test-timing. Delete both and the latter's now-unused import;
+    do not suppress U1000 or restore path/checkout inference. That full run is
+    red and cannot qualify full scope or the lifecycle savings threshold.
+    Local full/default on the same ef source also fail the unchanged SQLite
+    duplicate-publication state snapshot (line350), independently of tier
+    admission. Existing2353 receipt5961787663 diagnoses original termination
+    racing that snapshot; a diagnostic-only detached master0fa control again
+    observes complete/active/revision6 becoming complete/terminated/revision7.
+    The new receipts and narrow disposition request are recorded in2353
+    comment5967143311,2544 comment5967143498 and PR2548 comment5967143689.
+    Do not retry for green, weaken assertions or implement a runtime/catalogue
+    repair under the CI gate. Full/default qualification and the final audit
+    remain incomplete; lifecycle remains provisional. Prior successful
+    lifecycle389/37106541076 is actual measured244.07 assigned runner-minutes,
+    not qualification of a subsequent head or the full corpus. A separate
+    test-only disposition is requested before any snapshot-fence repair.
+    Hosted full finishes red: all70 physical Go proof jobs (73 logical units)
+    and timing-budget evaluation pass, including SQLite953.79s and
+    PostgreSQL967.36s soak leaves. Native unused union and the consequential
+    protected summary fail; no full or successful-cost credit is inferred.
+    Deleting both orphaned helpers passes the full cmd/swarm-test-timing package
+    normally11.165s and race57.263s. The local native Linux default/race/issue2413
+    unused matrix exits0 on the working correction; that is not Darwin union
+    or hosted-head qualification. Preserve the failed ef receipts and issue
+    records before one batched repair push and fresh required qualification.
 
 ## Local Instruction Clarification
 
