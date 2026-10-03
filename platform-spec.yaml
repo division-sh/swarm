@@ -9052,6 +9052,20 @@ engine:
         retain current execution authority and durable evidence. Verification cannot preconfirm
         visibility, construct an actor runtime, reuse stale authorization or manufacture a grant.
         Boot repeats applicable observations and retains final currentness and commit fences.
+      provider_capability_admission: >
+        Native-tool admission consumes the selected profile's existing provider contract and the
+        same native/fallback decision owner on verify and boot. Reading shipped capability facts
+        never constructs a provider runtime or session. Scoped agent selection and persisted
+        descriptor identity remain validated. Runtime execution independently requires the actual
+        adapter's valid provider contract and typed managed-call boundaries; static admission is
+        not provider-visible tool evidence or permission to execute a fallback tool.
+      workspace_capability_admission: >
+        Configured target capability and scoped workspace routing use the same workspace owner
+        on inspection and boot. Inspection reads planned host roots without creating them,
+        executing Docker, materializing source/data, or inventing physical source bindings. Its
+        resolver refuses execution workspace resolution and exposes no runtime lifecycle. Actual
+        source binding, host overlap, lifetime/revocation and run-bound data checks remain on boot
+        and execution paths; capability shape is not evidence of their successful settlement.
       output: >
         Complete passing deployment admission reports validation_scope: deployment,
         admission_complete: true and live_readiness: not_evaluated. Text and quiet say admission
