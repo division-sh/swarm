@@ -22491,7 +22491,9 @@ test_specification:
         requires clean source and unchanged planned HEAD before and after execution. Ordering does not change plan
         membership, selectors, backend children or deadlines. Conservative concurrency is at most four, constrained
         by stable CPU and memory/cgroup limits (four CPUs and eight GiB per invocation); unknown capacity falls back
-        to one. Explicit shared PostgreSQL admits only one invocation; its 300-connection admission floor is not
+        to one. Linux unified cgroup admission resolves the current process and all visible ancestor limits;
+        unavailable, v1/hybrid, partial or ambiguous hierarchies conservatively admit one rather than treating
+        missing limit files as unlimited. Explicit shared PostgreSQL admits only one invocation; its 300-connection admission floor is not
         measured spare capacity. An override cannot exceed the ceiling or resize a live slot universe. Cheap source,
         tools, writable scratch bytes/inodes and host admission checks precede planning; selected native tools,
         PostgreSQL capacity and private socket geometry are checked before workers. Long socket paths fail closed
