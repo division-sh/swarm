@@ -179,7 +179,7 @@ func TestChannelSigningFallbackPublicRefusalBothStores(t *testing.T) {
 								}
 							}
 							wantRegistrations := registrations + 1
-							if previous {
+							if previous && entry == "start" {
 								wantRegistrations = registrations
 							}
 							if gotRegistration, _ := h.provider.Counts(); gotRegistration != wantRegistrations {

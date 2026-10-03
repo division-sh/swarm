@@ -1036,6 +1036,7 @@ type preparedActivityHTTPTool struct {
 	compiledResult     runtimecontracts.ToolCompiledResultProjection
 	hasCompiledResult  bool
 	inputHash          string
+	validateAdmission  func(context.Context) error
 }
 
 func (d pipelineActivityDispatcher) executeActivityHTTPTool(ctx context.Context, client *http.Client, intent runtimeengine.ActivityIntent, tool runtimecontracts.ToolSchemaEntry) (any, error) {
@@ -1106,6 +1107,10 @@ func (d pipelineActivityDispatcher) prepareActivityHTTPTool(ctx context.Context,
 	responseSuccess, hasResponseSuccess := tool.ResponseSuccessPolicy()
 	responseMapping, hasResponseMapping := tool.CompiledResponseMapping()
 	compiledResult, hasCompiledResult := tool.CompiledResultExecution()
+	var validateAdmission func(context.Context) error
+	if target, private := activityChannelTargetFromContext(ctx); private {
+		validateAdmission = target.validateAdmission
+	}
 	return preparedActivityHTTPTool{
 		toolName:           intent.Tool,
 		method:             request.Method(),
@@ -1124,6 +1129,7 @@ func (d pipelineActivityDispatcher) prepareActivityHTTPTool(ctx context.Context,
 		compiledResult:     compiledResult,
 		hasCompiledResult:  hasCompiledResult,
 		inputHash:          activityInputHash(intent.Input),
+		validateAdmission:  validateAdmission,
 	}, nil
 }
 
@@ -1149,6 +1155,11 @@ func activityAuthenticationFailure(err error, tool, operation, authKind string) 
 }
 
 func executePreparedActivityHTTPTool(ctx context.Context, prepared preparedActivityHTTPTool) (any, error) {
+	if prepared.validateAdmission != nil {
+		if err := prepared.validateAdmission(ctx); err != nil {
+			return nil, err
+		}
+	}
 	reqCtx, cancel := context.WithTimeout(ctx, prepared.timeout)
 	defer cancel()
 	refreshedAfterUnauthorized := false
@@ -1408,6 +1419,12 @@ func parseHTTPActivityResponse(raw []byte) (any, error) {
 }
 
 func (d pipelineActivityDispatcher) resolveActivityToolCredentials(ctx context.Context, intent runtimeengine.ActivityIntent, keys []string) (map[string]any, []string, error) {
+	if target, private := activityChannelTargetFromContext(ctx); private {
+		if d.coordinator == nil {
+			return nil, nil, fmt.Errorf("private channel activity credential owner is unavailable")
+		}
+		return target.resolveAdmittedCredentials(ctx, d.coordinator.providerCredentials, keys)
+	}
 	out := make(map[string]any, len(keys))
 	secrets := make([]string, 0, len(keys))
 	store := runtimecredentials.Store(nil)
@@ -1422,16 +1439,10 @@ func (d pipelineActivityDispatcher) resolveActivityToolCredentials(ctx context.C
 		source = d.coordinator.SemanticSource()
 	}
 	flowID := intent.ExecutionFlowID.String()
-	channelTarget, channelPrivate := activityChannelTargetFromContext(ctx)
 	for _, key := range keys {
 		storeKey := ""
 		mapped := false
-		if channelPrivate {
-			storeKey, mapped = channelTarget.CredentialStoreKey(key)
-		}
-		if !mapped {
-			storeKey, mapped = semanticview.CredentialStoreKeyForFlow(source, flowID, key)
-		}
+		storeKey, mapped = semanticview.CredentialStoreKeyForFlow(source, flowID, key)
 		if mapped && storeKey == "" {
 			return nil, nil, fmt.Errorf("credential %q is not declared and bound for imported package flow %s", key, flowID)
 		}
