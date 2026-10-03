@@ -119,7 +119,14 @@ to8ea95a10d. Its interrupted local attempts earn no credit. The final full head
 also adds `TestLocalAndHostedTierSelectionsRemainIndependent`: all nine ordered
 local/CI tier pairs use the actual local selector and CI event parser/resolver;
 neither venue can infer the other requirement. This adds one ordinary test root,
-not a new owner, policy membership, workload, runtime or deadline. Local full
+not a new owner, policy membership, workload, runtime or deadline. B02's existing
+real-script test now covers first and last member failure and an actual child
+SIGTERM, collecting both members' evidence and disposing their distinct read-only
+workspaces. Canonical batches have at most two members, so no middle position
+exists; eligibility/plan negatives prove that bound. These are proof-completeness
+changes under the current gate, not runtime or planner changes. Earlier local
+qualification attempts are interrupted/uncredited rather than carried forward.
+Local full
 qualifies the corrected clean head while hosted lifecycle measures8ea95a10d.
 Publish the corrected head with CI-Tier restored
 to full after lifecycle qualification, keeping the PR draft/non-mergeable during
