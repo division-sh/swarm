@@ -18,6 +18,7 @@ func TestConfigCurrentVocabularySuggestionsFollowSourcePolicy(t *testing.T) {
 		excluded, supported []string
 	}{
 		{"runtime: {max_concurrent_agent: 2}", func() any { return &Config{} }, []string{"max_concurrent_agents", "event_poll_interval"}, []string{"fan_out_workers", "recovery_on_startup"}},
+		{"shardingtypo: {}", func() any { return &Config{} }, []string{"sharding"}, []string{"runtime", "workspace", "budget"}},
 		{"<<: {max_concurrent_agent: 2}", func() any { return &RuntimeConfig{} }, []string{"max_concurrent_agents", "event_poll_interval"}, []string{"fan_out_workers", "recovery_on_startup"}},
 		{"llm: {claude_cli: {retrie: 2}}", func() any { return &Config{} }, []string{"retries", "no_session_persistence", "use_tmux"}, []string{"command", "timeout"}},
 		{"database: {<<: {passwor: secret}}", func() any { return &Config{} }, []string{"password"}, []string{"password_env", "password_file"}},

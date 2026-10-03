@@ -22,6 +22,7 @@ func SourceKeyRules() map[string]SourceKeyRule {
 	section := SourceKeyRule{Container: true}
 	elevatedSection := SourceKeyRule{Container: true, Elevated: true}
 	return map[string]SourceKeyRule{
+		"sharding":                                {Split: "tracked split: runtime sharding has no supported production consumer; no supported replacement"},
 		"connection":                              elevatedSection,
 		"connection.api_server":                   {Elevated: true},
 		"connection.api_token_file":               {Elevated: true, SecretReference: true},
