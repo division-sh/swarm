@@ -1,9 +1,12 @@
 package releasee2e
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -45,15 +48,33 @@ func testDurableDataInvocation(t *testing.T, shard int) {
 	// Every worker compares against the same checked fixture, so splitting the
 	// process does not reset the cross-geometry/cross-backend equality oracle.
 	var expected struct {
-		BundleHash string                    `json:"bundle_hash"`
-		Readback   map[string]map[string]any `json:"readback"`
+		Readback map[string]map[string]any `json:"readback"`
 	}
 	oracle, err := os.ReadFile(filepath.Join(releaseE2ERepoRoot(t), "internal/releasee2e/testdata/static_data_invocation.expected.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := json.Unmarshal(oracle, &expected); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(oracle))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&expected); err != nil {
 		t.Fatal(err)
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		t.Fatalf("static oracle has trailing data: %v", err)
+	}
+	// Admit the immutable authored fixture independently through the structural
+	// public command, before opening any runtime/store. Only this current identity
+	// is derived; content/static IDs remain reviewed expectations below.
+	fixture := filepath.Join(releaseE2ERepoRoot(t), "internal/releasee2e/testdata/static_data_invocation")
+	admitted := runReleaseCommand(t, goldenStartupTimeout, releaseRoot, goldenProcessEnv(t, releaseRoot, "", 0), "", binary, "describe", "--json", fixture)
+	var source struct {
+		Hash string `json:"source_hash"`
+	}
+	decodeErr := json.Unmarshal([]byte(admitted.output), &source)
+	wantHash := source.Hash
+	digest, err := hex.DecodeString(strings.TrimPrefix(wantHash, "bundle-v2:sha256:"))
+	if admitted.err != nil || decodeErr != nil || !strings.HasPrefix(wantHash, "bundle-v2:sha256:") || err != nil || len(digest) != 32 {
+		t.Fatalf("independent fixture admission: %v\n%s", admitted.err, admitted.output)
 	}
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -121,7 +142,6 @@ func testDurableDataInvocation(t *testing.T, shard int) {
 					if len(identity.SourceArtifacts) != 1 || identity.SourceArtifacts[0].BundleHash != hash {
 						t.Fatalf("runtime.identity differs from health: %#v", identity)
 					}
-					wantHash := expected.BundleHash
 					if hash != wantHash {
 						t.Fatalf("hash = %s, want %s", hash, wantHash)
 					}

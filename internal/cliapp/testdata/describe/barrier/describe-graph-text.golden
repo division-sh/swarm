@@ -1,0 +1,81 @@
+describe: source=fan-in-barrier@1.0.0
+source authority: projection_only_existing_contract_owners
+validation: structural; live readiness: not evaluated
+events:
+  - operating.report.triggered (fields: operating_id, period_id, portfolio_id, revenue)
+  - portfolio.setup (fields: expected_operating_ids, period_id, portfolio_id)
+flows:
+  - ingress (static)
+    events:
+      - operating.report.requested (fields: operating_id, period_id, portfolio_id, revenue)
+  - operating (template)
+    events:
+      - operating.reported (fields: operating_id, operating_instance_id, period_id, portfolio_id, revenue)
+    primary entity: operating_state
+    instance: field=operating_instance_id identity=run + flow + instance_key
+  - portfolio (template)
+    events:
+      - period.reported (fields: operating_id, period_id, portfolio_id, revenue)
+      - period.setup (fields: expected_operating_ids, period_id, portfolio_id)
+    primary entity: portfolio_context
+    instance: field=portfolio_id identity=run + flow + instance_key
+  - portfolio/period (template)
+    primary entity: period_state
+    instance: field=period_id identity=run + flow + instance_key
+routing topology: routing-topology/v1
+  source authority: projection_only_existing_contract_owners
+  - [typed_pubsub] portfolio/operating.reported: portfolio.operating.reported -> portfolio.portfolio-router
+    typed pub/sub: match=exact boundary=same_flow
+  - [typed_pubsub] portfolio/portfolio.setup: portfolio.portfolio.setup -> portfolio.portfolio-router
+    typed pub/sub: match=exact boundary=same_flow
+  - [inter_flow_connect] portfolio/period.setup: portfolio.portfolio-router -> portfolio/period.period.setup
+    connect: portfolio.period.setup -> portfolio/period.period.setup (portfolio/schema.yaml:<line>)
+    resolution: mode=create target=target field=period_id source_kind=payload source=payload.period_id derived_from="instance.period_id + carries.period_id.from"
+  - [inter_flow_connect] operating.report.triggered: ..operating.report.triggered -> ingress.operating.report.triggered
+    connect: .operating.report.triggered -> ingress.operating.report.triggered (schema.yaml:<line>)
+    resolution: mode=static target=target
+  - [typed_pubsub] operating/operating.report.requested: operating.operating.report.requested -> operating.operating-node
+    typed pub/sub: match=exact boundary=same_flow
+  - [inter_flow_connect] ingress/operating.report.requested: ingress.ingress-node -> operating.operating.report.requested
+    connect: ingress.operating.report.requested -> operating.operating.report.requested (schema.yaml:<line>)
+    resolution: mode=create target=target field=operating_instance_id source_kind=event_id source=event.id derived_from="instance.operating_instance_id + carries.operating_instance_id.from"
+  - [inter_flow_connect] portfolio.setup: ..portfolio.setup -> portfolio.portfolio.setup
+    connect: .portfolio.setup -> portfolio.portfolio.setup (schema.yaml:<line>)
+    resolution: mode=select-or-create target=target field=portfolio_id source_kind=payload source=payload.portfolio_id derived_from="instance.portfolio_id + carries.portfolio_id.from"
+  - [inter_flow_connect] portfolio/period.reported: portfolio.portfolio-router -> portfolio/period.period.reported
+    connect: portfolio.period.reported -> portfolio/period.period.reported (portfolio/schema.yaml:<line>)
+    resolution: mode=select target=target field=period_id source_kind=payload source=payload.period_id derived_from="instance.period_id + carries.period_id.from"
+  - [inter_flow_connect] operating/operating.reported: operating.operating-node -> portfolio.operating.reported
+    connect: operating.operating.reported -> portfolio.operating.reported (schema.yaml:<line>)
+    resolution: mode=select target=target field=portfolio_id source_kind=payload source=payload.portfolio_id derived_from="instance.portfolio_id + carries.portfolio_id.from"
+  - [typed_pubsub] portfolio/period/period.setup: portfolio/period.period.setup -> portfolio/period.portfolio-collector
+    typed pub/sub: match=exact boundary=same_flow
+  - [typed_pubsub] portfolio/period/period.reported: portfolio/period.period.reported -> portfolio/period.portfolio-collector
+    typed pub/sub: match=exact boundary=same_flow
+  - [typed_pubsub] ingress/operating.report.triggered: ingress.operating.report.triggered -> ingress.ingress-node
+    typed pub/sub: match=exact boundary=same_flow
+  boundary exposures:
+    - portfolio/period.setup: portfolio.portfolio-router -> output portfolio.period.setup
+    - ingress/operating.report.requested: ingress.ingress-node -> output ingress.operating.report.requested
+    - operating/operating.reported: operating.operating-node -> output operating.operating.reported
+    - portfolio/period.reported: portfolio.portfolio-router -> output portfolio.period.reported
+stage graph:
+  flow portfolio/period (portfolio/period):
+    nodes:
+      - collecting [initial]
+      - awaiting
+      - complete [terminal]
+      - failed [terminal]
+    edges:
+      - awaiting -> awaiting (handler.advances_to cG9ydGZvbGlvL3BlcmlvZA.cG9ydGZvbGlvLWNvbGxlY3Rvcg on period.setup)
+      - awaiting -> complete (handler.join.on_complete cG9ydGZvbGlvL3BlcmlvZA.cG9ydGZvbGlvLWNvbGxlY3Rvcg on period.reported)
+      - awaiting -> failed (handler.join.on_deadline cG9ydGZvbGlvL3BlcmlvZA.cG9ydGZvbGlvLWNvbGxlY3Rvcg on platform.join_timeout after 5m timer awaiting)
+      - collecting -> awaiting (handler.advances_to cG9ydGZvbGlvL3BlcmlvZA.cG9ydGZvbGlvLWNvbGxlY3Rvcg on period.setup)
+    joins:
+      - awaiting stage awaiting members state.expected_operating_ids by payload.operating_id output payload.revenue deadline 5m from stage_entry (portfolio-collector on period.reported)
+diagnostics:
+  - [INFO] cross_surface_named_type_use @ global: authored object shape reuse candidate: identical shape {expected_operating_ids:[text], period_id:text, portfolio_id:text} appears in entity portfolio/period.period_state; event portfolio.setup payload; consider extracting or reusing a named type if these represent the same concept
+  - [INFO] entity_reader_coverage @ operating/schema.yaml: flow operating entity_type operating_state declares field operating_instance_id with no detected internal reader coverage
+  - [INFO] entity_reader_coverage @ portfolio/schema.yaml: flow portfolio entity_type portfolio_context declares field portfolio_id with no detected internal reader coverage
+  - [INFO] entity_reader_coverage @ portfolio/period/schema.yaml: flow portfolio/period entity_type period_state declares field period_id with no detected internal reader coverage
+  - [INFO] entity_reader_coverage @ portfolio/period/schema.yaml: flow portfolio/period entity_type period_state declares field portfolio_id with no detected internal reader coverage

@@ -389,6 +389,9 @@ esac
 				if strings.Count(text, verb) != 1 || !strings.Contains(text, "pr list --head automation/test-timing-model --base master --state open") || !strings.Contains(text, "DELETE repos/division-sh/swarm/git/refs/heads/automation/test-timing-model-build") {
 					t.Fatalf("missing canonical publication/cleanup: %s", text)
 				}
+				if strings.Count(text, "CI-Tier: core\nLocal-Tier: core\n") != 1 || !strings.Contains(text, "--body Generated from independently validated successful full CI evidence.") || !strings.Contains(text, "Part of #2535. Related to #1967.") {
+					t.Fatalf("model-only create/update must declare identical honest core tiers: %s", text)
+				}
 			}
 		})
 	}

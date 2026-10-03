@@ -1,0 +1,44 @@
+describe: source=telegram-agent@1.0.0
+source authority: projection_only_existing_contract_owners
+validation: structural; live readiness: not evaluated
+flows:
+  - telegram-chat (template)
+    events:
+      - telegram.reply_requested (fields: chat_id, text)
+    primary entity: chat
+    instance: field=conversation_reference identity=run + flow + instance_key
+  - telegram-ingress (static)
+    activation: standing
+    ingress: alias=chat
+      - provider=telegram admission=pack-required signing_secret=webhook_signing.telegram
+    primary entity: telegram_service
+routing topology: routing-topology/v1
+  source authority: projection_only_existing_contract_owners
+  root input sources:
+    - [standing_ingress] chat/telegram -> flow telegram-ingress admission=pack-required (telegram-ingress/schema.yaml:ingress.providers[0])
+  - [inter_flow_connect] telegram-ingress/inbound.telegram.text_message: telegram-ingress.external -> telegram-chat.inbound.telegram.text_message
+    connect: telegram-ingress.inbound.telegram.text_message -> telegram-chat.inbound.telegram.text_message (schema.yaml:<line>)
+    resolution: mode=select-or-create target=target field=conversation_reference source_kind=payload source=payload.conversation_reference derived_from="instance.conversation_reference + carries.conversation_reference.from"
+  - [typed_pubsub] telegram-chat/telegram.reply_requested: telegram-chat.phrase-bot -> telegram-chat.telegram-responder
+    typed pub/sub: match=exact boundary=same_flow
+  - [typed_pubsub] telegram-chat/telegram.reply_requested: telegram-chat.phrase-bot -> telegram-chat.telegram-responder
+    typed pub/sub: match=exact boundary=same_flow
+  - [inter_flow_connect] inbound.telegram.text_message: ..inbound.telegram.text_message -> telegram-chat.inbound.telegram.text_message
+    connect: .inbound.telegram.text_message -> telegram-chat.inbound.telegram.text_message (schema.yaml:<line>)
+    resolution: mode=select-or-create target=target field=conversation_reference source_kind=payload source=payload.conversation_reference derived_from="instance.conversation_reference + carries.conversation_reference.from"
+  - [typed_pubsub] inbound.telegram.text_message: telegram-chat.inbound.telegram.text_message -> telegram-chat.phrase-bot
+    typed pub/sub: match=exact boundary=same_flow
+  boundary exposures:
+    - telegram-ingress/inbound.telegram.text_message: telegram-ingress.external -> output telegram-ingress.inbound.telegram.text_message
+stage graph:
+  flow telegram-ingress (telegram-ingress):
+    nodes:
+      - active [initial]
+      - done [terminal]
+    edges:
+      - active -> done (gate runtime on mailbox.card_decided decision retire_service verdict retire)
+    gates:
+      - active decision retire_service authority=stage_activation_cas reminder=24h draft_ttl=15m
+        - retire -> done
+diagnostics:
+  - [INFO] entity_reader_coverage @ telegram-chat/schema.yaml: flow telegram-chat entity_type chat declares field conversation_reference with no detected internal reader coverage

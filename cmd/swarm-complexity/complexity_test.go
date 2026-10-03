@@ -22,8 +22,20 @@ func fixtureRepo(t *testing.T, files map[string]string) string {
 	for path, content := range files {
 		put(t, repo, path, content)
 	}
+	put(t, repo, baselinePath, policyFixture(t, currentPolicy()))
 	commit(t, repo)
 	return repo
+}
+
+func policyFixture(t *testing.T, p policy) string {
+	t.Helper()
+	data, err := encode(struct {
+		Policy policy `json:"policy"`
+	}{p})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }
 
 func g(t *testing.T, repo string, args ...string) string {
@@ -221,16 +233,15 @@ func TestGitBaselineAndPolicyAdmission(t *testing.T) {
 	ctx := context.Background()
 	repo := fixtureRepo(t, map[string]string{"p.go": "package p\nfunc F(){}"})
 	base := g(t, repo, "rev-parse", "HEAD")
-	if err := run(ctx, options{repo: repo, head: "HEAD", base: base, update: true}, io.Discard); err != nil {
-		t.Fatal(err)
-	}
+	put(t, repo, "new.go", "package p\nfunc G(){}")
 	head := commit(t, repo)
 	if err := run(ctx, options{repo: repo, head: head, base: base, evidence: t.TempDir()}, io.Discard); err != nil {
 		t.Fatal("first baseline:", err)
 	}
 	valid := measured(t, repo, head)
-	data, _ := encode(valid)
-	put(t, repo, baselinePath, strings.Replace(string(data), `"value":1`, `"value":999`, 1))
+	data := []byte(policyFixture(t, valid.Policy))
+	generated, _ := encode(valid)
+	put(t, repo, baselinePath, strings.Replace(string(generated), `"value":1`, `"value":999`, 1))
 	inflated := commit(t, repo)
 	if err := run(ctx, options{repo: repo, head: inflated, base: base}, io.Discard); err == nil {
 		t.Fatal("self bump passed")
@@ -268,16 +279,9 @@ func TestRealGitIndependentGrowthAndPRHeadNotMerge(t *testing.T) {
 			}
 			source := func(n int) string { return "package p\nfunc F(){" + strings.Repeat("if true {}\n", n) + "}" }
 			repo := fixtureRepo(t, map[string]string{"p.go": source(n)})
-			if err := run(ctx, options{repo: repo, head: "HEAD", update: true}, io.Discard); err != nil {
-				t.Fatal(err)
-			}
-			base := commit(t, repo)
+			base := g(t, repo, "rev-parse", "HEAD")
 			g(t, repo, "checkout", "-qb", "feature")
 			put(t, repo, "p.go", source(n+1))
-			commit(t, repo)
-			if err := run(ctx, options{repo: repo, head: "HEAD", update: true}, io.Discard); err != nil {
-				t.Fatal(err)
-			}
 			head := commit(t, repo)
 			var evidence bytes.Buffer
 			err := run(ctx, options{repo: repo, head: head, base: base}, &evidence)
@@ -318,14 +322,64 @@ func TestEventAdmission(t *testing.T) {
 	}
 	for _, event := range []string{"workflow_dispatch", "schedule"} {
 		o := options{event: event, head: "HEAD"}
-		if err := applyEvent(&o); err != nil || o.base != "" {
-			t.Fatal("invented manual history", o, err)
+		if err := applyEvent(&o); err == nil {
+			t.Fatal("unbound manual/scheduled comparison admitted", o)
 		}
 	}
-	for _, o := range []options{{event: "push", update: true}, {event: "push", base: base}, {eventFile: "unexpected"}, {event: "unknown"}} {
+	for _, o := range []options{{event: "push", base: base}, {eventFile: "unexpected"}, {event: "unknown"}} {
 		if err := applyEvent(&o); err == nil {
 			t.Fatal("invalid options admitted", o)
 		}
+	}
+}
+
+func TestComparisonLineageAndBranchEvents(t *testing.T) {
+	ctx := context.Background()
+	repo := fixtureRepo(t, map[string]string{"p.go": "package p\nfunc F(){}"})
+	base := g(t, repo, "rev-parse", "HEAD")
+	g(t, repo, "checkout", "-qb", "feature")
+	put(t, repo, "feature.go", "package p\nfunc Feature(){}")
+	head := commit(t, repo)
+	g(t, repo, "checkout", "master")
+	put(t, repo, "newer_master.go", "package p\nfunc Master(){}")
+	newer := commit(t, repo)
+	g(t, repo, "update-ref", "refs/remotes/origin/master", newer)
+	g(t, repo, "update-ref", "refs/remotes/origin/feature", head)
+	file := filepath.Join(t.TempDir(), "event.json")
+	if err := os.WriteFile(file, []byte(fmt.Sprintf(`{"pull_request":{"head":{"sha":%q},"base":{"sha":%q}}}`, head, newer)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	o := options{repo: repo, event: "pull_request", eventFile: file}
+	if err := applyEvent(&o); err != nil || o.base != base || o.head != head {
+		t.Fatalf("behind-master PR attributed newer master changes: %+v %v", o, err)
+	}
+	for _, comparison := range []string{"", head, newer, "absent"} {
+		if _, err := comparisonRevision(ctx, repo, head, comparison); err == nil {
+			t.Fatalf("invalid comparison accepted: %q", comparison)
+		}
+	}
+	for event, payload := range map[string]string{"schedule": `{"repository":{"default_branch":"master"}}`, "workflow_dispatch": `{"ref":"refs/heads/feature","repository":{"default_branch":"master"}}`} {
+		if err := os.WriteFile(file, []byte(payload), 0600); err != nil {
+			t.Fatal(err)
+		}
+		h := head
+		if event == "schedule" {
+			h = newer
+		}
+		o := options{repo: repo, head: h, event: event, eventFile: file}
+		if err := applyEvent(&o); err != nil || o.head != h || o.base != base {
+			t.Fatalf("branch event must bind exact first parent: %+v %v", o, err)
+		}
+		if err := run(ctx, options{repo: repo, head: h, event: event, eventFile: file}, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		foreign := options{repo: repo, head: base, event: event, eventFile: file}
+		if err := applyEvent(&foreign); err == nil {
+			t.Fatal("root commit's missing comparison accepted")
+		}
+	}
+	if err := run(ctx, options{repo: repo, head: head}, io.Discard); err == nil {
+		t.Fatal("head-only measurement earned qualified ratchet success")
 	}
 }
 

@@ -1,0 +1,376 @@
+{
+  "schema_version": "routing-topology/v1",
+  "projection_only": true,
+  "source_authority": "projection_only_existing_contract_owners",
+  "producers": [
+    {
+      "id": "endpoint-98ce77aaac97d518",
+      "direction": "producer",
+      "kind": "node_handler",
+      "flow_id": "producer",
+      "flow_path": "producer",
+      "event": {
+        "authored": "account.ready",
+        "local": "account.ready",
+        "canonical": "producer/account.ready"
+      },
+      "node_id": "producer-node",
+      "handler_event": "account.requested",
+      "site": "handler.emit",
+      "source_file": "producer/nodes.yaml",
+      "source_location": "handler.emit"
+    }
+  ],
+  "consumers": [
+    {
+      "id": "endpoint-9020afb6832e4e3c",
+      "direction": "consumer",
+      "kind": "node_handler",
+      "flow_id": "producer",
+      "flow_path": "producer",
+      "event": {
+        "authored": "account.requested",
+        "local": "account.requested",
+        "canonical": "producer/account.requested"
+      },
+      "node_id": "producer-node",
+      "handler_event": "account.requested",
+      "source_file": "producer/nodes.yaml",
+      "source_line": 1,
+      "source_location": "event_handlers.account.requested"
+    },
+    {
+      "id": "endpoint-b1261409d75e2f37",
+      "direction": "consumer",
+      "kind": "node_handler",
+      "flow_id": "account",
+      "flow_path": "account",
+      "event": {
+        "authored": "account.ready",
+        "local": "account.ready",
+        "canonical": "account/account.ready"
+      },
+      "node_id": "account-node",
+      "handler_event": "account.ready",
+      "source_file": "account/nodes.yaml",
+      "source_line": 1,
+      "source_location": "event_handlers.account.ready"
+    }
+  ],
+  "input_pins": [
+    {
+      "id": "endpoint-2d10fb15dd2ba588",
+      "direction": "input_pin",
+      "kind": "flow_input_pin",
+      "flow_id": ".",
+      "event": {
+        "authored": "account.requested",
+        "local": "account.requested",
+        "canonical": "account.requested"
+      },
+      "pin_name": "account.requested",
+      "source_location": "pins.inputs.events.account.requested"
+    },
+    {
+      "id": "endpoint-9a9b9f4a8a40940d",
+      "direction": "input_pin",
+      "kind": "flow_input_pin",
+      "flow_id": "producer",
+      "flow_path": "producer",
+      "event": {
+        "authored": "account.requested",
+        "local": "account.requested",
+        "canonical": "producer/account.requested"
+      },
+      "pin_name": "account.requested",
+      "source_location": "pins.inputs.events.account.requested"
+    },
+    {
+      "id": "endpoint-c19d28d4a096b1b0",
+      "direction": "input_pin",
+      "kind": "flow_input_pin",
+      "flow_id": "account",
+      "flow_path": "account",
+      "event": {
+        "authored": "account.ready",
+        "local": "account.ready",
+        "canonical": "account/account.ready"
+      },
+      "pin_name": "account.ready",
+      "source_location": "pins.inputs.events.account.ready"
+    }
+  ],
+  "output_pins": [
+    {
+      "id": "endpoint-728164033b68e60c",
+      "direction": "output_pin",
+      "kind": "flow_output_pin",
+      "flow_id": ".",
+      "event": {
+        "authored": "account.requested",
+        "local": "account.requested",
+        "canonical": "account.requested"
+      },
+      "pin_name": "account.requested",
+      "source_location": "pins.outputs.events.account.requested"
+    },
+    {
+      "id": "endpoint-830f6a4332d73334",
+      "direction": "output_pin",
+      "kind": "flow_output_pin",
+      "flow_id": "producer",
+      "flow_path": "producer",
+      "event": {
+        "authored": "account.ready",
+        "local": "account.ready",
+        "canonical": "producer/account.ready"
+      },
+      "pin_name": "account.ready",
+      "source_location": "pins.outputs.events.account.ready"
+    }
+  ],
+  "root_input_sources": [],
+  "boundary_exposures": [
+    {
+      "id": "endpoint-98ce77aaac97d518-\u003eendpoint-830f6a4332d73334",
+      "event": {
+        "authored": "account.ready",
+        "local": "account.ready",
+        "canonical": "producer/account.ready"
+      },
+      "producer": {
+        "id": "endpoint-98ce77aaac97d518",
+        "direction": "producer",
+        "kind": "node_handler",
+        "flow_id": "producer",
+        "flow_path": "producer",
+        "event": {
+          "authored": "account.ready",
+          "local": "account.ready",
+          "canonical": "producer/account.ready"
+        },
+        "node_id": "producer-node",
+        "handler_event": "account.requested",
+        "site": "handler.emit",
+        "source_file": "producer/nodes.yaml",
+        "source_location": "handler.emit"
+      },
+      "output": {
+        "id": "endpoint-830f6a4332d73334",
+        "direction": "output_pin",
+        "kind": "flow_output_pin",
+        "flow_id": "producer",
+        "flow_path": "producer",
+        "event": {
+          "authored": "account.ready",
+          "local": "account.ready",
+          "canonical": "producer/account.ready"
+        },
+        "pin_name": "account.ready",
+        "source_location": "pins.outputs.events.account.ready"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "route-0b717c30b8b6dc1a",
+      "scope": "inter_flow_connect",
+      "event": {
+        "authored": "account.ready",
+        "local": "account.ready",
+        "canonical": "producer/account.ready"
+      },
+      "producer": {
+        "id": "endpoint-98ce77aaac97d518",
+        "direction": "producer",
+        "kind": "node_handler",
+        "flow_id": "producer",
+        "flow_path": "producer",
+        "event": {
+          "authored": "account.ready",
+          "local": "account.ready",
+          "canonical": "producer/account.ready"
+        },
+        "node_id": "producer-node",
+        "handler_event": "account.requested",
+        "site": "handler.emit",
+        "source_file": "producer/nodes.yaml",
+        "source_location": "handler.emit"
+      },
+      "consumer": {
+        "id": "endpoint-c19d28d4a096b1b0",
+        "direction": "input_pin",
+        "kind": "flow_input_pin",
+        "flow_id": "account",
+        "flow_path": "account",
+        "event": {
+          "authored": "account.ready",
+          "local": "account.ready",
+          "canonical": "account/account.ready"
+        },
+        "pin_name": "account.ready",
+        "source_location": "pins.inputs.events.account.ready"
+      },
+      "boundary": {
+        "owner_flow_path": ".",
+        "authored_location": "schema.yaml:\u003cline\u003e",
+        "from": "producer.account.ready",
+        "to": "account.account.ready",
+        "output_pin": "account.ready",
+        "input_pin": "account.ready"
+      },
+      "resolution": {
+        "mode": "select-or-create",
+        "target_kind": "target",
+        "instance_key": {
+          "mode": "select-or-create",
+          "field": "account_id",
+          "source_kind": "payload",
+          "source_path": "payload.account_id",
+          "derived_from": "instance.account_id + carries.account_id.from"
+        }
+      },
+      "requires_runtime_resolution": true
+    },
+    {
+      "id": "route-d154014061a15bc8",
+      "scope": "typed_pubsub",
+      "event": {
+        "authored": "account.requested",
+        "local": "account.requested",
+        "canonical": "producer/account.requested"
+      },
+      "producer": {
+        "id": "endpoint-9a9b9f4a8a40940d",
+        "direction": "input_pin",
+        "kind": "flow_input_pin",
+        "flow_id": "producer",
+        "flow_path": "producer",
+        "event": {
+          "authored": "account.requested",
+          "local": "account.requested",
+          "canonical": "producer/account.requested"
+        },
+        "pin_name": "account.requested",
+        "source_location": "pins.inputs.events.account.requested"
+      },
+      "consumer": {
+        "id": "endpoint-9020afb6832e4e3c",
+        "direction": "consumer",
+        "kind": "node_handler",
+        "flow_id": "producer",
+        "flow_path": "producer",
+        "event": {
+          "authored": "account.requested",
+          "local": "account.requested",
+          "canonical": "producer/account.requested"
+        },
+        "node_id": "producer-node",
+        "handler_event": "account.requested",
+        "source_file": "producer/nodes.yaml",
+        "source_line": 1,
+        "source_location": "event_handlers.account.requested"
+      },
+      "typed_pubsub": {
+        "match": "exact",
+        "boundary": "same_flow"
+      },
+      "requires_runtime_resolution": false
+    },
+    {
+      "id": "route-eb723ede5ec6b06c",
+      "scope": "typed_pubsub",
+      "event": {
+        "authored": "account.ready",
+        "local": "account.ready",
+        "canonical": "account/account.ready"
+      },
+      "producer": {
+        "id": "endpoint-c19d28d4a096b1b0",
+        "direction": "input_pin",
+        "kind": "flow_input_pin",
+        "flow_id": "account",
+        "flow_path": "account",
+        "event": {
+          "authored": "account.ready",
+          "local": "account.ready",
+          "canonical": "account/account.ready"
+        },
+        "pin_name": "account.ready",
+        "source_location": "pins.inputs.events.account.ready"
+      },
+      "consumer": {
+        "id": "endpoint-b1261409d75e2f37",
+        "direction": "consumer",
+        "kind": "node_handler",
+        "flow_id": "account",
+        "flow_path": "account",
+        "event": {
+          "authored": "account.ready",
+          "local": "account.ready",
+          "canonical": "account/account.ready"
+        },
+        "node_id": "account-node",
+        "handler_event": "account.ready",
+        "source_file": "account/nodes.yaml",
+        "source_line": 1,
+        "source_location": "event_handlers.account.ready"
+      },
+      "typed_pubsub": {
+        "match": "exact",
+        "boundary": "same_flow"
+      },
+      "requires_runtime_resolution": false
+    },
+    {
+      "id": "route-edbe898a3d67e4dc",
+      "scope": "inter_flow_connect",
+      "event": {
+        "authored": "account.requested",
+        "local": "account.requested",
+        "canonical": "account.requested"
+      },
+      "producer": {
+        "id": "endpoint-728164033b68e60c",
+        "direction": "output_pin",
+        "kind": "flow_output_pin",
+        "flow_id": ".",
+        "event": {
+          "authored": "account.requested",
+          "local": "account.requested",
+          "canonical": "account.requested"
+        },
+        "pin_name": "account.requested",
+        "source_location": "pins.outputs.events.account.requested"
+      },
+      "consumer": {
+        "id": "endpoint-9a9b9f4a8a40940d",
+        "direction": "input_pin",
+        "kind": "flow_input_pin",
+        "flow_id": "producer",
+        "flow_path": "producer",
+        "event": {
+          "authored": "account.requested",
+          "local": "account.requested",
+          "canonical": "producer/account.requested"
+        },
+        "pin_name": "account.requested",
+        "source_location": "pins.inputs.events.account.requested"
+      },
+      "boundary": {
+        "owner_flow_path": ".",
+        "authored_location": "schema.yaml:\u003cline\u003e",
+        "from": ".account.requested",
+        "to": "producer.account.requested",
+        "output_pin": "account.requested",
+        "input_pin": "account.requested"
+      },
+      "resolution": {
+        "mode": "static",
+        "target_kind": "target"
+      },
+      "requires_runtime_resolution": false
+    }
+  ],
+  "issues": []
+}

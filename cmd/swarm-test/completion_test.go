@@ -104,6 +104,7 @@ func TestExplicitCompletionPostExecutionDirtInvalidatesReceipt(t *testing.T) {
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("SWARM_TEST_RUN_SLOTS", "1")
 	t.Setenv("SWARM_TEST_POSTGRES_DSN", "postgres://swarm:secret@127.0.0.1:1/postgres?sslmode=disable")
 	receipts := t.TempDir()
 	plan := testplanning.RunPlan{HeadSHA: head, Profile: testplanning.ProfileFull}
@@ -121,5 +122,49 @@ func TestExplicitCompletionPostExecutionDirtInvalidatesReceipt(t *testing.T) {
 	}
 	if evidence.HeadSHA != head || evidence.ExitCode != 1 {
 		t.Fatalf("misattributed successful receipt: %+v", evidence)
+	}
+}
+
+func TestPlannedQualificationWorkerRefusesStartDirt(t *testing.T) {
+	repo, head := completionRepo(t)
+	policy := testplanning.Policy{
+		Version: testplanning.PolicyVersion, Module: "proof",
+		Planning: testplanning.PlanningPolicy{TargetSeconds: 100, MaxShards: 1, UnknownPackageSeconds: 10},
+		Profiles: map[string]testplanning.ProfilePolicy{}, Units: map[string]testplanning.UnitPolicy{},
+	}
+	for _, tier := range []string{testplanning.ProfileCore, testplanning.ProfileLifecycle, testplanning.ProfileFull} {
+		policy.Profiles[tier] = testplanning.ProfilePolicy{CountMode: testtiming.CountModeOne, EnvironmentID: "fixture"}
+	}
+	plan, err := testplanning.BuildPlan(policy, testplanning.WeightModel{Version: testplanning.WeightModelVersion, SourceRunID: "fixture", Packages: map[string]float64{}}, []string{"proof"}, testplanning.ProfileCore, "explicit local tier selection; reviewer compares with Local-Tier", head, testplanning.BuildOptions{Venue: testplanning.VenueLocal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	planFile := filepath.Join(t.TempDir(), "plan.json")
+	raw, err := json.Marshal(plan)
+	if err != nil || os.WriteFile(planFile, raw, 0600) != nil {
+		t.Fatal("write worker plan", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "untracked-embed.yaml"), []byte("dirty\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(repo)
+	receipts := filepath.Join(repo, "test-results")
+	stderr, err := os.Create(filepath.Join(t.TempDir(), "stderr"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := os.Stderr
+	os.Stderr = stderr
+	code := runPlanned([]string{planFile, plan.Units[0].ID, "--receipts", receipts})
+	os.Stderr = previous
+	if err := stderr.Close(); err != nil {
+		t.Fatal(err)
+	}
+	message, err := os.ReadFile(stderr.Name())
+	if code != 1 || err != nil || !strings.Contains(string(message), "reviewer-bound qualification requires clean source") {
+		t.Fatalf("dirty worker start proceeded: %d", code)
+	}
+	if _, err := os.Stat(receipts); !os.IsNotExist(err) {
+		t.Fatal("refused worker published proof", err)
 	}
 }

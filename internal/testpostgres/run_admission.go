@@ -25,7 +25,6 @@ const (
 	runRegistryVersion = 1
 	RunCapacityEnv     = "SWARM_TEST_RUN_SLOTS"
 	RunWrapperEnv      = "SWARM_TEST_RUN_WRAPPER_ACTIVE"
-	defaultRunCapacity = 1
 	maxRunHistory      = 10
 	maxRunHistoryTotal = 100
 )
@@ -129,17 +128,40 @@ func NewRunAdmission(stateRoot string, output io.Writer) *RunAdmission {
 	}
 }
 
-// RunCapacityFromEnvironment returns the single configured slot universe.
+// RunCapacityFromEnvironment bounds the single configured slot universe by the
+// host's stable CPU/RAM budget and the selected service's isolation posture.
 func RunCapacityFromEnvironment() (int, error) {
+	limit := hostRunCapacity()
 	raw, ok := os.LookupEnv(RunCapacityEnv)
 	if !ok {
-		return defaultRunCapacity, nil
+		return limit, nil
 	}
 	capacity, err := strconv.Atoi(strings.TrimSpace(raw))
 	if err != nil || capacity <= 0 {
 		return 0, fmt.Errorf("%s must be a positive integer", RunCapacityEnv)
 	}
+	if capacity > limit {
+		return 0, fmt.Errorf("%s=%d exceeds conservative host/service capacity %d", RunCapacityEnv, capacity, limit)
+	}
 	return capacity, nil
+}
+
+// CheckCapacity uses existing host registry agreement before expensive planning.
+// It cannot resize a live slot universe or create a test ticket.
+func (a *RunAdmission) CheckCapacity(capacity int) error {
+	if capacity < 1 {
+		return fmt.Errorf("run capacity must be positive")
+	}
+	if err := a.initialize(); err != nil {
+		return err
+	}
+	return a.withRegistry(func(doc *runRegistryDocument) error {
+		occupied, err := a.reconcile(doc, "", capacity)
+		if err != nil {
+			return err
+		}
+		return agreeRunCapacity(doc, capacity, occupied)
+	})
 }
 
 // Acquire registers a durable FIFO ticket and blocks until its slot is owned.

@@ -5,8 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"reflect"
 	"sort"
+
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 )
 
 var toolModules = map[string]string{
@@ -60,14 +63,15 @@ type scoreChange struct {
 	After    *int     `json:"after"`
 }
 type delta struct {
-	Base         string             `json:"base,omitempty"`
-	Head         string             `json:"head"`
-	BaseSummary  map[string]summary `json:"base_summary,omitempty"`
-	HeadSummary  map[string]summary `json:"head_summary"`
-	Increased    bool               `json:"hotspot_count_increased"`
-	RemovedFiles []fileRecord       `json:"removed_file_facts"`
-	AddedFiles   []fileRecord       `json:"added_file_facts"`
-	Changes      []scoreChange      `json:"callable_changes"`
+	PolicyVerdict string             `json:"policy_verdict"`
+	Base          string             `json:"base,omitempty"`
+	Head          string             `json:"head"`
+	BaseSummary   map[string]summary `json:"base_summary,omitempty"`
+	HeadSummary   map[string]summary `json:"head_summary"`
+	Increased     bool               `json:"hotspot_count_increased"`
+	RemovedFiles  []fileRecord       `json:"removed_file_facts"`
+	AddedFiles    []fileRecord       `json:"added_file_facts"`
+	Changes       []scoreChange      `json:"callable_changes"`
 }
 
 func summaries(b baseline) map[string]summary {
@@ -156,42 +160,49 @@ func changes(metric string, base, head []score) []scoreChange {
 func checkBaseline(ctx context.Context, repo, sha string, expected []byte) error {
 	b, err := git(ctx, repo, "show", sha+":"+baselinePath)
 	if err != nil {
-		return fmt.Errorf("head baseline missing: %w", err)
+		return fmt.Errorf("head reviewed policy missing: %w", err)
 	}
-	if !bytes.Equal(b, expected) {
-		return fmt.Errorf("head baseline differs from exact measured snapshot; regenerate with -update")
+	var record struct {
+		Policy policy `json:"policy"`
+	}
+	if _, err := canonicaljson.Decode(b); err != nil {
+		return fmt.Errorf("head policy-only record: %w", err)
+	}
+	d := json.NewDecoder(bytes.NewReader(b))
+	d.DisallowUnknownFields()
+	if err := d.Decode(&record); err != nil {
+		return fmt.Errorf("head policy-only record: %w", err)
+	}
+	if err := d.Decode(new(any)); err != io.EOF {
+		return fmt.Errorf("head policy has trailing data: %v", err)
+	}
+	if !reflect.DeepEqual(record.Policy, currentPolicy()) {
+		return fmt.Errorf("complexity policy changed: explicit policy review and comparable evidence required")
 	}
 	return nil
 }
 
 func checkBasePolicy(ctx context.Context, repo, sha string, measured baseline) error {
-	// Only genuine absence is bootstrap, not an unreadable/malformed existing artifact.
-	b, err := git(ctx, repo, "ls-tree", sha, "--", baselinePath)
-	if err != nil {
-		return err
-	}
-	if len(b) == 0 {
-		return nil
-	}
-	b, err = git(ctx, repo, "show", sha+":"+baselinePath)
+	b, err := git(ctx, repo, "show", sha+":"+baselinePath)
 	if err != nil {
 		return err
 	}
 	var previous baseline
+	if _, err := canonicaljson.Decode(b); err != nil {
+		return fmt.Errorf("base reviewed policy: %w", err)
+	}
 	d := json.NewDecoder(bytes.NewReader(b))
 	d.DisallowUnknownFields()
 	if err := d.Decode(&previous); err != nil {
 		return fmt.Errorf("base baseline: %w", err)
 	}
+	if err := d.Decode(new(any)); err != io.EOF {
+		return fmt.Errorf("base policy has trailing data: %v", err)
+	}
 	if !reflect.DeepEqual(previous.Policy, measured.Policy) {
 		return fmt.Errorf("complexity policy changed: explicit policy review and comparable evidence required")
 	}
-	expected, err := encode(measured)
-	if err != nil {
-		return err
-	}
-	if !bytes.Equal(b, expected) {
-		return fmt.Errorf("base baseline does not match independent measurement")
-	}
+	// Historical score populations are not authority: check their reviewed policy
+	// and independently measure source instead of consulting generated scores.
 	return nil
 }

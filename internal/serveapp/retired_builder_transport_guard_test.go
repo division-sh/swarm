@@ -32,7 +32,6 @@ func TestRetiredBuilderSemanticReferencesStayExplicit(t *testing.T) {
 
 	expectedCounts := map[string]int{
 		".github/audit-artifacts/issue-2447-postimplementation.md":                     2,
-		".github/complexity-baseline.json":                                             81,
 		".github/audit-artifacts/issue-2007-failure-class.yaml":                        14,
 		".github/audit-artifacts/issue-2378-failure-class.yaml":                        82,
 		"internal/apiv1/handler_test.go":                                               2,
@@ -65,10 +64,9 @@ func TestRetiredBuilderSemanticReferencesStayExplicit(t *testing.T) {
 		"internal/userfacing/human_code_projection_cli_test.go":                             5,
 	}
 	classificationDocuments := map[string]bool{
-		".github/complexity-baseline.json":                      true,
 		".github/audit-artifacts/issue-2007-failure-class.yaml": true,
 		".github/audit-artifacts/issue-2378-failure-class.yaml": true,
-		"platform-spec.yaml":                                    true,
+		"platform-spec.yaml": true,
 	}
 	rawRetirementFixtures := map[string]bool{
 		"internal/apiv1/handler_test.go":                                               true,

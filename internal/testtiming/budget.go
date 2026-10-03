@@ -216,7 +216,9 @@ func mappingPath(document *yaml.Node, path ...string) *yaml.Node {
 	return node
 }
 
-func ValidateCommandEvidence(evidence CommandEvidence, plan testplanning.RunPlan) []string {
+// ValidateCommandIdentity admits provenance/selection independently of success.
+// Failed or incomplete execution may be observed, but never earns proof credit.
+func ValidateCommandIdentity(evidence CommandEvidence, plan testplanning.RunPlan) []string {
 	var problems []string
 	if evidence.WorkflowRunID <= 0 || evidence.WorkflowAttempt <= 0 {
 		problems = append(problems, "workflow run ID and attempt must be positive")
@@ -250,7 +252,6 @@ func ValidateCommandEvidence(evidence CommandEvidence, plan testplanning.RunPlan
 			if evidence.WorkloadProfile != unit.WorkloadProfile || evidence.ExecutionTier != unit.ExecutionTier {
 				problems = append(problems, "workload profile or execution tier does not match the planned unit")
 			}
-			problems = append(problems, requiredExecutionProblems(unit, evidence.Report)...)
 		}
 		if evidence.Attempt == AttemptPrimary && evidence.CountMode != unit.CountMode {
 			problems = append(problems, fmt.Sprintf("count_mode %q does not match unit %q", evidence.CountMode, unit.CountMode))
@@ -277,6 +278,18 @@ func ValidateCommandEvidence(evidence CommandEvidence, plan testplanning.RunPlan
 	}
 	declared, packageProblems := canonicalPackageList(evidence.Packages)
 	problems = append(problems, packageProblems...)
+	if err == nil && !equalStrings(declared, unit.Packages) {
+		problems = append(problems, "declared packages do not match planned unit")
+	}
+	return problems
+}
+
+func ValidateCommandEvidence(evidence CommandEvidence, plan testplanning.RunPlan) []string {
+	problems := ValidateCommandIdentity(evidence, plan)
+	if unit, err := plan.Unit(evidence.UnitID); err == nil && plan.BuildContext.GOOS != "" {
+		problems = append(problems, requiredExecutionProblems(unit, evidence.Report)...)
+	}
+	declared, _ := canonicalPackageList(evidence.Packages)
 	if evidence.Report.Summary.MalformedLines != 0 {
 		problems = append(problems, fmt.Sprintf("report has %d malformed lines", evidence.Report.Summary.MalformedLines))
 	}
