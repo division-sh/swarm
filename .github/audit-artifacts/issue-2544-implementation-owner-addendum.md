@@ -106,6 +106,23 @@ with draft/non-mergeable fencing until qualification. Lead compares the current
 body/current-head plan and actual local receipts at final merge, including edits
 after approval. No new status, credential, authorization or waiting owner.
 
+### Qualification Head Sequence
+
+Corrected signed head8ea95a10d starts the hosted lifecycle measurement and
+new-head acceptance proof. The repeated compiled describe check passes all45
+surfaces, with the original two repetitions and strict hashes. Lifecycle is
+temporary measured scope, not the final required full/full verdict or review
+readiness. The cancelled earlier runs remain uncredited.
+
+This subsequent signed audit-only head is reserved for the unmet final increase
+to full. Production code, policy, spec and tests are identical to8ea95a10d;
+only this sequencing record differs. Local full may qualify this clean head
+while hosted lifecycle runs on8ea95a10d. Publish this head with CI-Tier restored
+to full after lifecycle qualification, keeping the PR draft/non-mergeable during
+the transition. Final review must bind the new head's actual full plan, run,
+attempt and protected terminals plus the actual local full receipt. No higher
+scope, passing result, cost saving or lead merge approval is asserted here.
+
 Focused planner/timing/catalogue/runner controls and the updated public backend
 ledger have passed during implementation. These are not full-corpus, hosted
 new-head higher-tier acceptance, candidate cost or literal post-merge proof. Lifecycle remains
