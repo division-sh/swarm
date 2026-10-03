@@ -80,6 +80,11 @@ introduced.
 
 ## Status
 
+The hosted V10 experiment subsequently hit the gate's explicit stop condition:
+new lifecycle smoke passed while the only protected summary remained old core
+success. Implementation is frozen pending a narrow re-gate; exact observations
+and the separate review block are recorded in `issue-2544-tier-edit-stop.md`.
+
 Focused planner/timing/catalogue/runner controls and the updated public backend
 ledger have passed during implementation. These are not full-corpus, hosted
 edited-body, candidate cost or literal post-merge proof. Lifecycle remains
