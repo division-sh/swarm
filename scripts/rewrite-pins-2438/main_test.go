@@ -8,8 +8,29 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
 )
+
+type inspectedSource struct{ root *yaml.Node }
+
+func parseTestSource(data []byte) (*inspectedSource, error) {
+	snapshot, err := yamlsource.Load(data)
+	if err != nil {
+		return nil, err
+	}
+	copy := snapshot.NodeCopy()
+	return &inspectedSource{root: copy.Content[0]}, nil
+}
+
+func lookup(node *yaml.Node, key string) (*yaml.Node, error) {
+	for i := 0; i < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			return node.Content[i+1], nil
+		}
+	}
+	return nil, nil
+}
 
 func rewritten(t *testing.T, inputs map[string][]byte) (map[string][]byte, []change) {
 	t.Helper()
@@ -41,7 +62,7 @@ func TestRewriteNamesOnlyPreservesOtherSourceAndIsIdempotent(t *testing.T) {
 	if !strings.HasPrefix(text, "# original heading\nname: 'unchanged'\n") || !strings.HasSuffix(text, "\nstages: {idle: {initial: true}}\nconnect:\n  - {event: work.started, from: ., to: child, resolution: create}\n") {
 		t.Fatalf("unrelated source changed:\n%s", text)
 	}
-	doc, err := parse(after["schema.yaml"])
+	doc, err := parseTestSource(after["schema.yaml"])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +82,7 @@ func TestRewriteNamesOnlyPreservesOtherSourceAndIsIdempotent(t *testing.T) {
 func TestRewritePreservesInitializePassengerExactly(t *testing.T) {
 	before := []byte("name: worker\ninstance: worker_id\npins:\n  inputs:\n    events:\n      - initialize: {label: payload.label, nested: payload.details}\n        event: worker.ready\n  outputs:\n    events: []\ninstance_variables: {variables: {label: text}}\n")
 	after, _ := rewritten(t, map[string][]byte{"worker/schema.yaml": before})
-	doc, err := parse(after["worker/schema.yaml"])
+	doc, err := parseTestSource(after["worker/schema.yaml"])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +122,7 @@ func TestRewriteMovesExactReplyAndCorrelationToResponseConnection(t *testing.T) 
 			if strings.Contains(string(after[replyRequester]), "replies_to") || strings.Contains(string(after[replyRequester]), "resolution") {
 				t.Fatal("reply declaration survived on pin")
 			}
-			parent, err := parse(after[replyParent])
+			parent, err := parseTestSource(after[replyParent])
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -166,6 +187,19 @@ func TestRewriteRejectsUnratifiedOrAmbiguousForms(t *testing.T) {
 		inputs[replyRequester] = []byte(strings.Replace(string(inputs[replyRequester]), "correlation_key: request_id", "correlation_key: ' request_id '", 1))
 		if _, err := planRewrite(inputs); err == nil {
 			t.Fatal("nonexact correlation key admitted")
+		}
+	})
+	t.Run("multiple_reply_moves", func(t *testing.T) {
+		parent, err := parse(replySources(false)[replyParent])
+		if err != nil {
+			t.Fatal(err)
+		}
+		item := reply{event: "provider.replied", request: "provider.requested"}
+		if err := moveReply(parent, item); err != nil {
+			t.Fatal(err)
+		}
+		if err := moveReply(parent, item); err == nil {
+			t.Fatal("repeated reply move overwrote the first projection")
 		}
 	})
 }
@@ -320,11 +354,11 @@ func TestRewriteActualCorpusPreservesEventsAndDeferredInitialization(t *testing.
 	after, _ := rewritten(t, inputs)
 	initializers := 0
 	for name, data := range after {
-		before, err := parse(inputs[name])
+		before, err := parseTestSource(inputs[name])
 		if err != nil {
 			t.Fatal(err)
 		}
-		doc, err := parse(data)
+		doc, err := parseTestSource(data)
 		if err != nil {
 			t.Fatal(err)
 		}

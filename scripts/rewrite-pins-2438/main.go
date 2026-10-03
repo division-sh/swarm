@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path"
@@ -15,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
 )
 
@@ -40,14 +40,27 @@ type change struct {
 
 type source struct {
 	data []byte
-	root *yaml.Node
-	edit map[string]*yaml.Node
+	root yamlsource.Value
+	edit map[string]any
 }
 
 type reply struct {
 	event       string
-	request     *yaml.Node
-	correlation *yaml.Node
+	request     string
+	correlation string
+}
+
+type pinEntry struct {
+	Event      string            `yaml:"event"`
+	Initialize map[string]string `yaml:"initialize,omitempty"`
+}
+
+func (p pinEntry) MarshalYAML() (any, error) {
+	if p.Initialize == nil {
+		return p.Event, nil
+	}
+	type initializedPin pinEntry
+	return initializedPin(p), nil
 }
 
 func main() {
@@ -126,8 +139,8 @@ func planRewrite(inputs map[string][]byte) ([]change, error) {
 		docs[name] = doc
 	}
 	for name, doc := range docs {
-		pins, err := lookup(doc.root, "pins")
-		if err != nil || pins == nil {
+		pins, err := lookupValue(doc.root, "pins")
+		if err != nil || pins.Presence() == yamlsource.PresenceMissing {
 			if err != nil {
 				return nil, fmt.Errorf("%s: %w", name, err)
 			}
@@ -162,39 +175,35 @@ func planRewrite(inputs map[string][]byte) ([]change, error) {
 }
 
 func parse(data []byte) (*source, error) {
-	var doc yaml.Node
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	if err := decoder.Decode(&doc); err != nil {
+	snapshot, err := yamlsource.Load(data)
+	if err != nil {
 		return nil, err
 	}
-	var extra yaml.Node
-	if err := decoder.Decode(&extra); err != io.EOF {
-		return nil, fmt.Errorf("expected exactly one YAML document: %v", err)
-	}
-	if len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode {
+	root := snapshot.Document("schema.yaml").Root()
+	if root.Presence() != yamlsource.PresenceMapping {
 		return nil, fmt.Errorf("expected schema mapping")
 	}
-	if err := plainTree(doc.Content[0]); err != nil {
+	if err := root.ValidateExpansion(); err != nil {
 		return nil, err
 	}
-	return &source{data: data, root: doc.Content[0], edit: map[string]*yaml.Node{}}, nil
+	if err := root.ValidateUniqueMappings(); err != nil {
+		return nil, err
+	}
+	if err := plainTree(snapshot.Root()); err != nil {
+		return nil, err
+	}
+	return &source{data: data, root: root, edit: map[string]any{}}, nil
 }
 
-func plainTree(node *yaml.Node) error {
-	if node.Kind == yaml.AliasNode || node.Anchor != "" {
-		return fmt.Errorf("one-shot rewrite does not expand YAML aliases or anchors")
+func plainTree(node yamlsource.Node) error {
+	if node.Kind() == yamlsource.AliasNode {
+		return fmt.Errorf("one-shot rewrite does not expand YAML aliases")
 	}
-	if node.Kind == yaml.MappingNode {
-		seen := map[string]bool{}
-		for i := 0; i < len(node.Content); i += 2 {
-			key := node.Content[i]
-			if key.Kind != yaml.ScalarNode || key.Tag != "!!str" || seen[key.Value] {
-				return fmt.Errorf("invalid or duplicate mapping key %q", key.Value)
-			}
-			seen[key.Value] = true
+	for i := 0; i < node.Len(); i++ {
+		child, _ := node.Child(i)
+		if node.Kind() == yamlsource.MappingNode && i%2 == 0 && (child.Kind() != yamlsource.ScalarNode || child.Tag() != "!!str") {
+			return fmt.Errorf("invalid mapping key %q", child.Value())
 		}
-	}
-	for _, child := range node.Content {
 		if err := plainTree(child); err != nil {
 			return err
 		}
@@ -202,192 +211,209 @@ func plainTree(node *yaml.Node) error {
 	return nil
 }
 
-func lookup(node *yaml.Node, key string) (*yaml.Node, error) {
-	if node.Kind != yaml.MappingNode {
-		return nil, fmt.Errorf("expected mapping for %s", key)
-	}
-	for i := 0; i < len(node.Content); i += 2 {
-		if node.Content[i].Value == key {
-			return node.Content[i+1], nil
-		}
-	}
-	return nil, nil
+func lookupValue(value yamlsource.Value, key string) (yamlsource.Value, error) {
+	field, err := value.Lookup(key)
+	return field.Value, err
 }
 
-func rewritePins(pins *yaml.Node) (*yaml.Node, []reply, error) {
-	if pins.Kind != yaml.MappingNode {
-		return nil, nil, fmt.Errorf("expected pins mapping")
+func rewritePins(pins yamlsource.Value) (map[string][]pinEntry, []reply, error) {
+	fields, err := pins.Mapping()
+	if err != nil {
+		return nil, nil, err
 	}
-	result := *pins
-	result.Content = nil
+	result := map[string][]pinEntry{}
 	var replies []reply
-	for i := 0; i < len(pins.Content); i += 2 {
-		key, direction := pins.Content[i], pins.Content[i+1]
-		if key.Value != "inputs" && key.Value != "outputs" {
-			return nil, nil, fmt.Errorf("unknown pins direction %q", key.Value)
+	for _, field := range fields {
+		if field.Name != "inputs" && field.Name != "outputs" {
+			return nil, nil, fmt.Errorf("unknown pins direction %q", field.Name)
 		}
-		if direction.Kind == yaml.MappingNode {
-			if len(direction.Content) != 2 || direction.Content[0].Value != "events" {
+		direction := field.Value
+		if direction.Presence() == yamlsource.PresenceMapping {
+			wrapper, err := direction.Mapping()
+			if err != nil || len(wrapper) != 1 || wrapper[0].Name != "events" {
 				return nil, nil, fmt.Errorf("unexpected pin wrapper; grant fixtures must be retired explicitly")
 			}
-			direction = direction.Content[1]
+			direction = wrapper[0].Value
 		}
-		if direction.Kind != yaml.SequenceNode {
-			return nil, nil, fmt.Errorf("%s: expected event sequence", key.Value)
+		items, err := direction.Sequence()
+		if err != nil {
+			return nil, nil, err
 		}
-		list := *direction
-		list.Content = nil
+		list := make([]pinEntry, 0, len(items))
 		seen := map[string]bool{}
-		for _, item := range direction.Content {
-			converted, paired, err := rewritePin(item, key.Value)
+		for _, item := range items {
+			converted, paired, err := rewritePin(item, field.Name)
 			if err != nil {
 				return nil, nil, err
 			}
-			name := converted.Value
-			if converted.Kind == yaml.MappingNode {
-				event, _ := lookup(converted, "event")
-				name = event.Value
-			}
+			name := converted.Event
 			if seen[name] {
-				return nil, nil, fmt.Errorf("duplicate %s event %q", key.Value, name)
+				return nil, nil, fmt.Errorf("duplicate %s event %q", field.Name, name)
 			}
 			seen[name] = true
-			list.Content = append(list.Content, converted)
+			list = append(list, converted)
 			if paired != nil {
 				replies = append(replies, *paired)
 			}
 		}
-		result.Content = append(result.Content, key, &list)
+		result[field.Name] = list
 	}
-	return &result, replies, nil
+	return result, replies, nil
 }
 
-func rewritePin(item *yaml.Node, direction string) (*yaml.Node, *reply, error) {
-	if item.Kind == yaml.ScalarNode {
-		return item, nil, validEvent(item)
+func rewritePin(item yamlsource.Value, direction string) (pinEntry, *reply, error) {
+	if item.Presence() == yamlsource.PresenceScalar {
+		event, err := validEvent(item)
+		return pinEntry{Event: event}, nil, err
 	}
-	event, err := lookup(item, "event")
-	if err != nil || event == nil {
-		return nil, nil, fmt.Errorf("expected event pin: %v", err)
+	fields, err := item.Mapping()
+	if err != nil {
+		return pinEntry{}, nil, err
 	}
-	if err := validEvent(event); err != nil {
-		return nil, nil, err
+	event, _ := lookupValue(item, "event")
+	name, err := validEvent(event)
+	if err != nil {
+		return pinEntry{}, nil, err
 	}
-	if len(item.Content) == 2 {
-		return nil, nil, fmt.Errorf("pin mapping has no non-default option")
+	if len(fields) == 1 {
+		return pinEntry{}, nil, fmt.Errorf("pin mapping has no non-default option")
 	}
-	var initialize *yaml.Node
+	var initialize map[string]string
 	var paired *reply
-	for i := 0; i < len(item.Content); i += 2 {
-		key, value := item.Content[i].Value, item.Content[i+1]
+	for _, field := range fields {
+		key, value := field.Name, field.Value
 		switch {
 		case key == "event":
 		case key == "source" && direction == "inputs", key == "sink" && direction == "outputs":
-			if value.Kind != yaml.ScalarNode || value.Tag != "!!str" || value.Value != "harness" {
-				return nil, nil, fmt.Errorf("unexpected %s value", key)
+			if text, err := exactText(value); err != nil || text != "harness" {
+				return pinEntry{}, nil, fmt.Errorf("unexpected %s value", key)
 			}
 		case key == "initialize" && direction == "inputs":
-			initialize = value
+			initialize, err = textMapping(value)
+			if err != nil || len(initialize) == 0 {
+				return pinEntry{}, nil, fmt.Errorf("invalid initialization: %v", err)
+			}
 		case key == "resolution" && direction == "inputs":
-			paired, err = replyFrom(value, event.Value)
+			paired, err = replyFrom(value, name)
 			if err != nil {
-				return nil, nil, err
+				return pinEntry{}, nil, err
 			}
 		default:
-			return nil, nil, fmt.Errorf("unknown %s pin key %q", direction, key)
+			return pinEntry{}, nil, fmt.Errorf("unknown %s pin key %q", direction, key)
 		}
 	}
-	if initialize != nil {
-		if paired != nil || initialize.Kind != yaml.MappingNode || len(initialize.Content) == 0 {
-			return nil, nil, fmt.Errorf("unexpected combined reply/initialization or initialization shape")
+	if initialize != nil && paired != nil {
+		return pinEntry{}, nil, fmt.Errorf("unexpected combined reply/initialization")
+	}
+	return pinEntry{Event: name, Initialize: initialize}, paired, nil
+}
+
+func exactText(value yamlsource.Value) (string, error) {
+	scalar, err := value.Scalar()
+	if err != nil || scalar.Tag != "!!str" || scalar.Value == "" || scalar.Value != strings.TrimSpace(scalar.Value) || scalar.Anchor != "" || scalar.Alias != "" {
+		return "", fmt.Errorf("expected exact non-empty text at %s", value.Location())
+	}
+	return scalar.Value, nil
+}
+
+func validEvent(value yamlsource.Value) (string, error) {
+	text, err := exactText(value)
+	if err != nil || !eventidentity.IsCanonicalName(text) || strings.Contains(text, "/") {
+		return "", fmt.Errorf("invalid event at %s", value.Location())
+	}
+	return text, nil
+}
+
+func textMapping(value yamlsource.Value) (map[string]string, error) {
+	fields, err := value.Mapping()
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for _, field := range fields {
+		text, err := exactText(field.Value)
+		if err != nil {
+			return nil, err
 		}
-		copy := *item
-		copy.Content = []*yaml.Node{textNode("event"), event, textNode("initialize"), initialize}
-		return &copy, nil, nil
+		out[field.Name] = text
 	}
-	copy := *event
-	copy.HeadComment = item.HeadComment
-	return &copy, paired, nil
+	return out, nil
 }
 
-func validEvent(node *yaml.Node) error {
-	if node.Kind != yaml.ScalarNode || node.Tag != "!!str" || !eventidentity.IsCanonicalName(node.Value) || strings.Contains(node.Value, "/") {
-		return fmt.Errorf("invalid event %q", node.Value)
-	}
-	return nil
-}
-
-func replyFrom(resolution *yaml.Node, event string) (*reply, error) {
-	mode, err := lookup(resolution, "mode")
-	if err != nil || mode == nil || mode.Value != "reply" || mode.Tag != "!!str" {
+func replyFrom(resolution yamlsource.Value, event string) (*reply, error) {
+	fields, err := textMapping(resolution)
+	if err != nil || fields["mode"] != "reply" {
 		return nil, fmt.Errorf("unexpected pin resolution; only the ratified reply row is rewritten")
 	}
-	for i := 0; i < len(resolution.Content); i += 2 {
-		key := resolution.Content[i].Value
+	for key := range fields {
 		if key != "mode" && key != "replies_to" && key != "correlation_key" {
 			return nil, fmt.Errorf("unknown reply key %q", key)
 		}
 	}
-	request, _ := lookup(resolution, "replies_to")
-	if request == nil {
-		return nil, fmt.Errorf("missing reply request")
-	}
-	if err := validEvent(request); err != nil {
+	request, _ := lookupValue(resolution, "replies_to")
+	requestName, err := validEvent(request)
+	if err != nil {
 		return nil, err
 	}
-	correlation, _ := lookup(resolution, "correlation_key")
-	if correlation != nil && (correlation.Kind != yaml.ScalarNode || correlation.Tag != "!!str" || correlation.Value == "" || correlation.Value != strings.TrimSpace(correlation.Value)) {
-		return nil, fmt.Errorf("invalid correlation key")
-	}
-	return &reply{event: event, request: request, correlation: correlation}, nil
+	return &reply{event: event, request: requestName, correlation: fields["correlation_key"]}, nil
 }
 
 func moveReply(parent *source, item reply) error {
-	connections, err := lookup(parent.root, "connect")
-	if err != nil || connections == nil || connections.Kind != yaml.SequenceNode {
+	if _, alreadyEdited := parent.edit["connect"]; alreadyEdited {
+		return fmt.Errorf("multiple reply moves lie outside the ratified single-row corpus")
+	}
+	value, err := lookupValue(parent.root, "connect")
+	if err != nil {
+		return err
+	}
+	items, err := value.Sequence()
+	if err != nil {
 		return fmt.Errorf("missing exact reply connections")
+	}
+	connections := make([]map[string]string, 0, len(items))
+	for _, row := range items {
+		fields, err := textMapping(row)
+		if err != nil {
+			return err
+		}
+		connections = append(connections, fields)
 	}
 	response, err := connection(connections, "", "requester", item.event)
 	if err != nil {
 		return err
 	}
-	provider, _ := lookup(response, "from")
-	if provider == nil || provider.Tag != "!!str" {
+	provider := response["from"]
+	if provider == "" {
 		return fmt.Errorf("missing provider identity")
 	}
-	if _, err := connection(connections, "requester", provider.Value, item.request.Value); err != nil {
+	if _, err := connection(connections, "requester", provider, item.request); err != nil {
 		return err
 	}
-	if existing, _ := lookup(response, "replies_to"); existing != nil {
+	if response["replies_to"] != "" {
 		return fmt.Errorf("reply already has two declaration owners")
 	}
-	response.Content = append(response.Content, textNode("replies_to"), item.request)
-	if item.correlation != nil {
-		if existing, _ := lookup(response, "correlation_key"); existing != nil {
+	response["replies_to"] = item.request
+	if item.correlation != "" {
+		if response["correlation_key"] != "" {
 			return fmt.Errorf("correlation already has two declaration owners")
 		}
-		response.Content = append(response.Content, textNode("correlation_key"), item.correlation)
+		response["correlation_key"] = item.correlation
 	}
 	parent.edit["connect"] = connections
 	return nil
 }
 
-func connection(connections *yaml.Node, from, to, event string) (*yaml.Node, error) {
-	var matches []*yaml.Node
-	for _, row := range connections.Content {
-		producer, err := lookup(row, "from")
-		if err != nil {
-			return nil, err
-		}
-		receiver, _ := lookup(row, "to")
-		name, _ := lookup(row, "event")
-		if receiver == nil || producer == nil || name == nil {
+func connection(connections []map[string]string, from, to, event string) (map[string]string, error) {
+	var matches []map[string]string
+	for _, row := range connections {
+		producer, receiver, name := row["from"], row["to"], row["event"]
+		if receiver == "" || producer == "" || name == "" {
 			return nil, fmt.Errorf("incomplete connection")
 		}
-		if renamed, _ := lookup(row, "rename"); renamed != nil && from == "" {
+		if renamed := row["rename"]; renamed != "" && from == "" {
 			name = renamed
 		}
-		if receiver.Value == to && name.Value == event && (from == "" || producer.Value == from) {
+		if receiver == to && name == event && (from == "" || producer == from) {
 			matches = append(matches, row)
 		}
 	}
@@ -397,29 +423,24 @@ func connection(connections *yaml.Node, from, to, event string) (*yaml.Node, err
 	return matches[0], nil
 }
 
-func textNode(value string) *yaml.Node {
-	return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value}
-}
-
 func render(doc *source) ([]byte, error) {
+	fields, err := doc.root.Mapping()
+	if err != nil {
+		return nil, err
+	}
 	lines := bytes.SplitAfter(doc.data, []byte("\n"))
 	var output bytes.Buffer
 	cursor := 0
-	for i := 0; i < len(doc.root.Content); i += 2 {
-		key := doc.root.Content[i]
-		value := doc.edit[key.Value]
+	for i, field := range fields {
+		value := doc.edit[field.Name]
 		if value == nil {
 			continue
 		}
-		start, end := key.Line-1, len(lines)
-		if i+2 < len(doc.root.Content) {
-			next := doc.root.Content[i+2]
-			end = next.Line - 1
-			if next.HeadComment != "" {
-				end = precedingCommentStart(lines, start, end)
-			}
+		start, end := field.KeyLocation.Line-1, len(lines)
+		if i+1 < len(fields) {
+			end = precedingCommentStart(lines, start, fields[i+1].KeyLocation.Line-1)
 		}
-		if key.Column != 1 || start < cursor || end <= start {
+		if field.KeyLocation.Column != 1 || start < cursor || end <= start {
 			return nil, fmt.Errorf("unsupported inline root shape")
 		}
 		tail := end
@@ -427,12 +448,9 @@ func render(doc *source) ([]byte, error) {
 			tail--
 		}
 		output.Write(bytes.Join(lines[cursor:start], nil))
-		copy := *key
-		copy.HeadComment = ""
-		field := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Content: []*yaml.Node{&copy, value}}
 		encoder := yaml.NewEncoder(&output)
 		encoder.SetIndent(2)
-		if err := encoder.Encode(field); err != nil {
+		if err := encoder.Encode(map[string]any{field.Name: value}); err != nil {
 			return nil, err
 		}
 		if err := encoder.Close(); err != nil {
