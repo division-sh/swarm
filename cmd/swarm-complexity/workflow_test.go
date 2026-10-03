@@ -21,8 +21,8 @@ func TestWorkflowUnconditionalGateAndExecutableAggregate(t *testing.T) {
 			If    string   `yaml:"if"`
 			Needs []string `yaml:"needs"`
 			Steps []struct {
-				Run, Uses, If string
-				With          map[string]any
+				Name, Run, Uses, If string
+				With                map[string]any
 			} `yaml:"steps"`
 		} `yaml:"jobs"`
 	}
@@ -63,20 +63,37 @@ func TestWorkflowUnconditionalGateAndExecutableAggregate(t *testing.T) {
 	if !found || aggregate.If != "always()" {
 		t.Fatal("missing required complexity result")
 	}
-	for _, status := range []string{"success", "skipped", "cancelled", "failure", "", "unknown"} {
-		script := aggregate.Steps[0].Run
-		for _, need := range aggregate.Needs {
-			value := "success"
-			if need == "complexity" {
-				value = status
-			}
-			script = strings.ReplaceAll(script, "${{ needs."+need+".result }}", value)
+	var summary string
+	for _, step := range aggregate.Steps {
+		if step.Name == "Summarize required checks" {
+			summary = step.Run
 		}
-		c := exec.Command("bash", "-c", script)
-		c.Env = append(os.Environ(), "IS_DRAFT=false", "GITHUB_STEP_SUMMARY="+filepath.Join(t.TempDir(), "summary"))
-		out, err := c.CombinedOutput()
-		if (err == nil) != (status == "success") {
-			t.Fatalf("aggregate status %q: %v %s", status, err, out)
+	}
+	if summary == "" {
+		t.Fatal("missing executable summary")
+	}
+	for _, tier := range []string{"core", "lifecycle", "full"} {
+		for _, status := range []string{"success", "skipped", "cancelled", "failure", "", "unknown"} {
+			script := summary
+			for _, need := range aggregate.Needs {
+				value := "success"
+				if tier != "full" && strings.HasPrefix(need, "unused-") {
+					value = "skipped"
+				}
+				if need == "complexity" {
+					value = status
+				}
+				script = strings.ReplaceAll(script, "${{ needs."+need+".result }}", value)
+			}
+			script = strings.ReplaceAll(script, "${{ needs.ci-plan.outputs.profile }}", tier)
+			script = strings.ReplaceAll(script, "${{ needs.ci-plan.outputs.master_replay }}", "false")
+			script = strings.ReplaceAll(script, "${{ needs.ci-plan.outputs.soak_matrix }}", `{"include":[]}`)
+			c := exec.Command("bash", "-c", script)
+			c.Env = append(os.Environ(), "IS_DRAFT=false", "GITHUB_STEP_SUMMARY="+filepath.Join(t.TempDir(), "summary"))
+			out, err := c.CombinedOutput()
+			if (err == nil) != (status == "success") {
+				t.Fatalf("%s aggregate complexity status %q: %v %s", tier, status, err, out)
+			}
 		}
 	}
 }

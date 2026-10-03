@@ -37,7 +37,7 @@ func TestCIPostgresJobsShareOwnedRunner(t *testing.T) {
 		t.Fatalf("parse ci.yml: %v", err)
 	}
 
-	for _, jobName := range []string{"proof-unit", "semantic-smoke"} {
+	for _, jobName := range []string{"proof-unit", "mandatory-soak", "semantic-smoke"} {
 		job, ok := workflow.Jobs[jobName]
 		if !ok {
 			t.Fatalf("missing Postgres-consuming CI job %s", jobName)
@@ -50,8 +50,16 @@ func TestCIPostgresJobsShareOwnedRunner(t *testing.T) {
 		}
 		hasRunner := false
 		for _, step := range job.Steps {
-			hasRunner = hasRunner || strings.Contains(step.Run, "go run ./cmd/swarm-test --")
-			if strings.Contains(step.Run, "start-postgres-ci.sh") || strings.Contains(step.Run, "docker run") || strings.Contains(step.Run, "docker rm") {
+			command := step.Run
+			if command == "bash .github/scripts/run-proof-batch.sh" {
+				batch, err := os.ReadFile(filepath.Join(root, ".github/scripts/run-proof-batch.sh"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				command = string(batch)
+			}
+			hasRunner = hasRunner || strings.Contains(command, "go run ./cmd/swarm-test --")
+			if strings.Contains(command, "start-postgres-ci.sh") || strings.Contains(command, "docker run") || strings.Contains(command, "docker rm") {
 				t.Fatalf("job %s retains a competing Docker lifecycle in step %q", jobName, step.Name)
 			}
 		}
