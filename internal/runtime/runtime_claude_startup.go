@@ -87,9 +87,11 @@ func validateSelectedBackendCredentialForDeclaredAgents(ctx context.Context, cfg
 	return validateSelectedBackendCredential(ctx, cfg, providerCredentialResolverForRuntimeOptions(opts))
 }
 
-func validateSelectedBackendModelAliasesForDeclaredAgents(posture executionposture.Posture, cfg *config.Config, source semanticview.Source) error {
+// ValidateDeclaredAgentModelAdmission shares scoped model selection between
+// read-only deployment admission and boot, without constructing agent runtimes.
+func ValidateDeclaredAgentModelAdmission(posture executionposture.Posture, cfg *config.Config, source semanticview.Source) error {
 	if cfg == nil {
-		return nil
+		return fmt.Errorf("admitted configuration is required for llm model alias validation")
 	}
 	if source == nil {
 		return fmt.Errorf("semantic source is required for llm model alias validation")

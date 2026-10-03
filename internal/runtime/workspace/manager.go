@@ -708,28 +708,7 @@ func (m *DockerManager) ResolveWorkspaceForCapabilityAdmission(_ context.Context
 	if _, err := m.standardMountArgs(); err != nil {
 		return nil, err
 	}
-	class, err := m.workspaceClass(actor)
-	if err != nil {
-		return nil, err
-	}
-	container := strings.TrimSpace(m.cfg.SystemContainer)
-	workdir := strings.TrimSpace(m.cfg.SystemWorkdir)
-	switch workspaceRouteClass(class) {
-	case "scaffold":
-		container = strings.TrimSpace(m.cfg.ScaffoldContainer)
-		workdir = strings.TrimSpace(m.cfg.ScaffoldWorkdir)
-	case "system":
-	default:
-		if _, err := workspaceScopeForCapabilityAdmission(m.semanticSource(), actor); err != nil {
-			return nil, err
-		}
-	}
-	return &Target{
-		Container: container,
-		Workdir:   workdir,
-		Backend:   BackendDocker,
-		Mounts:    dockerExecutionMounts(m.cfg, false),
-	}, nil
+	return DockerCapabilityTarget(m.cfg, m.semanticSource(), actor)
 }
 
 func (m *DockerManager) resolveWorkspace(ctx context.Context, actor models.AgentConfig, materializeData bool) (*Target, error) {
