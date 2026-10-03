@@ -4,5 +4,5 @@ conformance:
   proves:
     - catalog.verify.boot_diagnostics
   diagnostic:
-    category: "DEPRECATED"
-    contains: "handler logic is retired"
+    category: "contract_loader.undefined_field"
+    contains: 'handler field "logic" is not supported'

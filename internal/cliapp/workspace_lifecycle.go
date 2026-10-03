@@ -26,7 +26,7 @@ func configuredWorkspaceLifecycle(cfg *config.Config, projection *sourceartifact
 		return nil, err
 	}
 	if strings.TrimSpace(mountSources.DataSource) != "" {
-		return nil, fmt.Errorf("ambient workspace data sources are retired; declare flow_data_access or data_access")
+		return nil, fmt.Errorf("ambient workspace data sources are unsupported")
 	}
 	workspaceCfg.SourceProjection = projection
 	manager.SetConfig(workspaceCfg)
@@ -62,7 +62,7 @@ func configuredHostWorkspaceLifecycle(cfg *config.Config, projection *sourcearti
 		return nil, err
 	}
 	if strings.TrimSpace(mountSources.DataSource) != "" {
-		return nil, fmt.Errorf("ambient workspace data sources are retired; declare flow_data_access or data_access")
+		return nil, fmt.Errorf("ambient workspace data sources are unsupported")
 	}
 	workspaceCfg.SourceProjection = projection
 	manager.SetConfig(workspaceCfg)

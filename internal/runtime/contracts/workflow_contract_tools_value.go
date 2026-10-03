@@ -6,11 +6,6 @@ import (
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
-var retiredToolFields = map[string]string{
-	"parameters": "use input_schema", "returns": "use output_schema", "endpoint": "use http.url",
-	"type": "use handler_type", "required_permission": "use permission", "kind": "use handler_type: wasm or python",
-}
-
 var toolEntryFields = map[string]struct{}{
 	"category": {}, "description": {}, "handler_type": {}, "effect_class": {}, "permission": {},
 	"rate_limit": {}, "rate_limit_max_wait": {}, "input_schema": {}, "output_schema": {},
@@ -56,7 +51,7 @@ func AdmitToolDeclarationsValue(root yamlsource.Value) (map[string]ToolSchemaEnt
 }
 
 func projectToolValue(value yamlsource.Value) (ToolSchemaEntry, error) {
-	fields, err := nodeValueFields(value, "tool", toolEntryFields, retiredToolFields)
+	fields, err := nodeValueFields(value, "tool", toolEntryFields)
 	if err != nil {
 		return ToolSchemaEntry{}, err
 	}
@@ -81,7 +76,7 @@ func projectToolValue(value yamlsource.Value) (ToolSchemaEntry, error) {
 				return ToolSchemaEntry{}, err
 			}
 			if !moduleKind && schema.Equal(defaultSchema) {
-				return ToolSchemaEntry{}, nodeValueError(field, fmt.Errorf("RETIRED: %s object schema is the default; remove it", name))
+				return ToolSchemaEntry{}, nodeValueError(field, fmt.Errorf("explicit %s object schema repeats the implicit default and is not supported", name))
 			}
 			schemas[name] = schema
 		} else if moduleKind {
@@ -162,7 +157,7 @@ func projectToolTransportOptions(fields map[string]yamlsource.Value) ([]ToolSche
 }
 
 func ProjectToolResponseSuccessValue(field yamlsource.Value) (HTTPResponseSuccess, error) {
-	members, err := schemaValueFields(field, "response_success", map[string]struct{}{"kind": {}, "path": {}, "equals": {}}, nil, true)
+	members, err := schemaValueFields(field, "response_success", map[string]struct{}{"kind": {}, "path": {}, "equals": {}}, true)
 	if err != nil {
 		return HTTPResponseSuccess{}, err
 	}
@@ -190,7 +185,7 @@ func ProjectToolResponseSuccessValue(field yamlsource.Value) (HTTPResponseSucces
 }
 
 func projectToolHTTPValue(value yamlsource.Value) (HTTPToolSpec, error) {
-	fields, err := schemaValueFields(value, "http", map[string]struct{}{"method": {}, "url": {}, "headers": {}, "body": {}, "timeout_seconds": {}}, nil, true)
+	fields, err := schemaValueFields(value, "http", map[string]struct{}{"method": {}, "url": {}, "headers": {}, "body": {}, "timeout_seconds": {}}, true)
 	if err != nil {
 		return HTTPToolSpec{}, err
 	}
@@ -241,7 +236,7 @@ func toolValueTextMap(value yamlsource.Value) (map[string]string, error) {
 func ProjectToolManagedCredentialValue(value yamlsource.Value) (ManagedCredentialRef, error) {
 	fields, err := schemaValueFields(value, "managed_credential", map[string]struct{}{
 		"key": {}, "header": {}, "prefix": {}, "grant_type": {}, "scopes": {}, "grant_model": {}, "token_request": {}, "installation_id_input": {},
-	}, nil, true)
+	}, true)
 	if err != nil {
 		return ManagedCredentialRef{}, err
 	}
@@ -259,7 +254,7 @@ func ProjectToolManagedCredentialValue(value yamlsource.Value) (ManagedCredentia
 		}
 	}
 	if request, present := fields["token_request"]; present {
-		members, err := schemaValueFields(request, "token_request", map[string]struct{}{"client_auth": {}, "body": {}, "static_headers": {}}, nil, false)
+		members, err := schemaValueFields(request, "token_request", map[string]struct{}{"client_auth": {}, "body": {}, "static_headers": {}}, false)
 		if err != nil {
 			return out, err
 		}
@@ -296,7 +291,7 @@ func projectToolModuleValue(value yamlsource.Value, fields map[string]yamlsource
 	if !present {
 		return out, nodeValueError(value, fmt.Errorf("module limits are required"))
 	}
-	members, err := schemaValueFields(limits, "limits", map[string]struct{}{"gas": {}, "memory_pages": {}, "output_bytes": {}}, nil, true)
+	members, err := schemaValueFields(limits, "limits", map[string]struct{}{"gas": {}, "memory_pages": {}, "output_bytes": {}}, true)
 	if err != nil {
 		return out, err
 	}
@@ -326,7 +321,7 @@ func projectToolModuleValue(value yamlsource.Value, fields map[string]yamlsource
 		}
 	}
 	if runtime, present := fields["runtime"]; present {
-		members, err := schemaValueFields(runtime, "runtime", map[string]struct{}{"interpreter": {}, "interpreter_digest": {}, "snapshot_digest": {}, "harness_abi": {}}, nil, false)
+		members, err := schemaValueFields(runtime, "runtime", map[string]struct{}{"interpreter": {}, "interpreter_digest": {}, "snapshot_digest": {}, "harness_abi": {}}, false)
 		if err != nil {
 			return out, err
 		}

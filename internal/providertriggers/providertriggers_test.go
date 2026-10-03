@@ -159,7 +159,7 @@ func TestProviderTriggerPackVerificationFailsClosed(t *testing.T) {
 				appendFile(t, filepath.Join(dir, "trigger.yaml"), "redact_keyz:\n  - secret\n")
 				rewritePackHash(t, dir)
 			},
-			want: "field redact_keyz not found",
+			want: "field \"redact_keyz\" is not supported",
 		},
 		{
 			name:     "capability declaration drift",
@@ -183,7 +183,7 @@ func TestProviderTriggerPackVerificationFailsClosed(t *testing.T) {
 			mutate: func(t *testing.T, dir string) {
 				appendFile(t, filepath.Join(dir, "pack.yaml"), "unexpected: true\n")
 			},
-			want: "field unexpected not found",
+			want: "field unexpected not found in pack envelope",
 		},
 		{
 			name:     "incompatible platform version",

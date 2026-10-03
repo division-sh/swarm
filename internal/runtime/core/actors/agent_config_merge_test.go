@@ -43,7 +43,7 @@ func TestValidateNoAuthoredSystemPromptRejectsEveryNestedIngress(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := ValidateNoAuthoredSystemPrompt(json.RawMessage(tc.raw))
-			if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), tc.want) {
+			if err == nil || !strings.Contains(err.Error(), "is unsupported") || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("ValidateNoAuthoredSystemPrompt error = %v, want retired path %q", err, tc.want)
 			}
 		})

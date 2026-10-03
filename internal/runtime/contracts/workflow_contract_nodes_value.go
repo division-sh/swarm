@@ -51,7 +51,7 @@ func nodeValueTexts(fields map[string]yamlsource.Value, targets map[string]*stri
 
 // nodeValueFields admits one node-family mapping without losing the authored
 // location of aliases, merges, or duplicate effective fields.
-func nodeValueFields(value yamlsource.Value, owner string, allowed map[string]struct{}, retired map[string]string) (map[string]yamlsource.Value, error) {
+func nodeValueFields(value yamlsource.Value, owner string, allowed map[string]struct{}) (map[string]yamlsource.Value, error) {
 	if value.Presence() != yamlsource.PresenceMapping && value.Presence() != yamlsource.PresenceEmptyMapping {
 		return nil, fmt.Errorf("%s at %s must be a mapping, got %s", value.SemanticPath(), value.Location(), value.Presence())
 	}
@@ -66,16 +66,8 @@ func nodeValueFields(value yamlsource.Value, owner string, allowed map[string]st
 			return nil, fmt.Errorf("duplicate effective YAML key %q at %s and %s for %s", field.Name, previous, field.KeyLocation, field.Value.SemanticPath())
 		}
 		seen[field.Name] = field.KeyLocation
-		if err := retiredHandlerActionFieldError(owner, field.Name); err != nil {
-			return nil, fmt.Errorf("%w at %s", err, field.IntroductionLocation())
-		}
-		if reason, ok := retired[field.Name]; ok {
-			return nil, fmt.Errorf("RETIRED: %s field %q at %s: %s", owner, field.Name, field.IntroductionLocation(), reason)
-		}
 		if _, ok := allowed[field.Name]; !ok {
-			diagnostic := NewUndefinedFieldDiagnostic(owner, field.Name, allowed)
-			location := field.IntroductionLocation()
-			diagnostic.Location = LoaderDiagnosticLocation{File: location.File, YAMLPath: field.Value.SemanticPath(), Line: location.Line, Column: location.Column}
+			diagnostic := NewUndefinedFieldDiagnostic(owner, field.Name, allowed, field)
 			return nil, fmt.Errorf("%s at %s: %w", field.Value.SemanticPath(), field.IntroductionLocation(), diagnostic)
 		}
 		out[field.Name] = field.Value
@@ -168,13 +160,8 @@ var nodeTimerFields = map[string]struct{}{
 	"cancellation": {}, "delay": {}, "start_on": {}, "cancel_on": {}, "recurring": {},
 }
 
-var retiredNodeTimerFields = map[string]string{
-	"delay_seconds": "use delay", "delay_minutes": "use delay",
-	"delay_hours": "use delay", "delay_days": "use delay",
-}
-
 func projectNodeTimerValue(value yamlsource.Value) (WorkflowTimerContract, error) {
-	fields, err := nodeValueFields(value, "timer", nodeTimerFields, retiredNodeTimerFields)
+	fields, err := nodeValueFields(value, "timer", nodeTimerFields)
 	if err != nil {
 		return WorkflowTimerContract{}, err
 	}
@@ -207,12 +194,7 @@ func projectNodeEmitValue(value yamlsource.Value) (EmitSpec, error) {
 		}
 		return EmitSpec{Event: strings.TrimSpace(event)}, nil
 	case yamlsource.PresenceMapping, yamlsource.PresenceEmptyMapping:
-		fields, err := nodeValueFields(value, "emit", map[string]struct{}{
-			"event": {}, "from": {}, "fields": {},
-		}, map[string]string{
-			"target":    "RETIRED-EMIT-ROUTING: emit.target; use declared connect or accepted output pins",
-			"broadcast": "RETIRED-EMIT-ROUTING: emit.broadcast; use declared connect or accepted output pins",
-		})
+		fields, err := nodeValueFields(value, "emit", emitFieldOptions)
 		if err != nil {
 			return EmitSpec{}, err
 		}
@@ -244,9 +226,7 @@ func projectNodeOnSuccessValue(value yamlsource.Value) (HandlerOnSuccessSpec, er
 	if value.Presence() == yamlsource.PresenceNull {
 		return HandlerOnSuccessSpec{}, nil
 	}
-	fields, err := nodeValueFields(value, "on_success", onSuccessFieldOptions, map[string]string{
-		"action": "authored actions are retired",
-	})
+	fields, err := nodeValueFields(value, "on_success", onSuccessFieldOptions)
 	if err != nil {
 		return HandlerOnSuccessSpec{}, err
 	}

@@ -485,7 +485,7 @@ func TestWorkflowContractBundleResolveFlowSingleton_AllowsEmptyAndScalarOnlyPrim
 func TestWorkflowContractBundleResolveFlowSingletonCoordinator_RejectsInvalidDeclarations(t *testing.T) {
 	t.Run("schema entity restatement rejected before projection", func(t *testing.T) {
 		_, err := admitSchemaFragment("mode: singleton\nentity: coordinator_state\n")
-		if err == nil || !strings.Contains(err.Error(), "RETIRED") {
+		if err == nil || !strings.Contains(err.Error(), "is not supported") {
 			t.Fatalf("schema entity restatement error = %v", err)
 		}
 	})
@@ -727,7 +727,7 @@ func TestEventCatalogEntryDecode_RejectsRetiredAuthorSummaryField(t *testing.T) 
 	for _, value := range []string{"text", "null", "false", "{}"} {
 		t.Run(value, func(t *testing.T) {
 			_, err := admitEventCatalogEntryForTest(t, "text: text\nauthor_summary_field: "+value+"\n")
-			if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "author_summary_field") {
+			if err == nil || !strings.Contains(err.Error(), "reserved") || !strings.Contains(err.Error(), "author_summary_field") {
 				t.Fatalf("retired selector admission = %v", err)
 			}
 		})
@@ -740,7 +740,7 @@ payload:
   entity_id: uuid
 vertical_name: text
 `)
-	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "payload") {
+	if err == nil || !strings.Contains(err.Error(), "not a nested payload block") || !strings.Contains(err.Error(), "payload") {
 		t.Fatalf("yaml.Unmarshal error = %v, want RETIRED nested payload rejection", err)
 	}
 }
@@ -754,7 +754,7 @@ vertical:
   metadata:
     type: jsonb
 `), &doc)
-	if err == nil || (!strings.Contains(err.Error(), "RETIRED") && !strings.Contains(err.Error(), "jsonb")) {
+	if err == nil || (!strings.Contains(err.Error(), "is not supported") && !strings.Contains(err.Error(), "jsonb")) {
 		t.Fatalf("yaml.Unmarshal error = %v, want retired parser-local form rejection", err)
 	}
 }
@@ -769,7 +769,7 @@ types:
       properties:
         primary: text
 `), &doc)
-	if err == nil || !strings.Contains(err.Error(), "RETIRED") {
+	if err == nil || !strings.Contains(err.Error(), "is not supported") {
 		t.Fatalf("yaml.Unmarshal error = %v, want RETIRED inline object rejection", err)
 	}
 }

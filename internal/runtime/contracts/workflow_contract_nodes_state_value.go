@@ -13,7 +13,7 @@ func projectNodeStateSchemaValue(value yamlsource.Value) (NodeStateSchema, error
 	}
 	fields, err := nodeValueFields(value, "state_schema", map[string]struct{}{
 		"description": {}, "fields": {},
-	}, nil)
+	})
 	if err != nil {
 		return NodeStateSchema{}, err
 	}
@@ -93,7 +93,7 @@ func projectNodeStateFieldValue(name string, value yamlsource.Value) (NodeStateF
 	case yamlsource.PresenceMapping, yamlsource.PresenceEmptyMapping:
 		fields, err := nodeValueFields(value, "state field", map[string]struct{}{
 			"name": {}, "type": {}, "default": {},
-		}, nil)
+		})
 		if err != nil {
 			return NodeStateField{}, err
 		}
@@ -159,7 +159,7 @@ func projectNodeGateStateValue(value yamlsource.Value) (NodeGateStateSchema, err
 	}
 	parts, err := nodeValueFields(value, "gate_state", map[string]struct{}{
 		"description": {}, "gates": {}, "storage": {},
-	}, nil)
+	})
 	if err != nil {
 		return NodeGateStateSchema{}, err
 	}
@@ -241,7 +241,7 @@ func projectNodeGateFieldValue(name string, value yamlsource.Value) (NodeGateFie
 	case yamlsource.PresenceMapping, yamlsource.PresenceEmptyMapping:
 		fields, err := nodeValueFields(value, "gate field", map[string]struct{}{
 			"name": {}, "description": {},
-		}, nil)
+		})
 		if err != nil {
 			return NodeGateField{}, err
 		}

@@ -23,13 +23,9 @@ var cliGroupAllowedValues = map[string]bool{
 
 // Rows exempt from the required group field per
 // cli_specification.topology_revision_v2_2.group_field: the root row renders
-// the groups; retired hidden stubs never render in help.
+// the groups. Removed command stubs have no catalog exception.
 var cliGroupExemptRows = map[string]bool{
-	"root":                      true,
-	"investigate":               true,
-	"control_mailbox":           true,
-	"fork_legacy_harness_forms": true,
-	"unpromoted_review_only_legacy_spellings": true,
+	"root": true,
 }
 
 func cliSpecification(t *testing.T) *yaml.Node {
@@ -430,7 +426,8 @@ func TestCLITopologyRevisionV22IsImplementedHistoricalRecord(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, revision, "authority_rule"), "Historical decision record")
 
 	policy := mustMappingValue(t, revision, "old_spelling_policy")
-	assertScalarValue(t, mustMappingValue(t, policy, "default_disposition"), "fail_closed_retirement")
+	assertScalarValue(t, mustMappingValue(t, policy, "default_disposition"), "ordinary_unknown_command")
+	assertScalarContains(t, mustMappingValue(t, policy, "rule"), "no pre-1.0 migration surface")
 
 	groupField := mustMappingValue(t, revision, "group_field")
 	assertScalarContains(t, mustMappingValue(t, groupField, "identifier_alignment"), "no translation table")
@@ -508,32 +505,21 @@ func TestCLITopologyTargetRowsInheritContractsAndNeverClaimImplemented(t *testin
 	assertScalarContains(t, mustMappingValue(t, runFork, "supersession_scope"), "CLI command spelling only")
 }
 
+// Historical proof name retained by the managed proof census; its authority is
+// now current vocabulary, not an old-to-new spelling table.
 func TestCLITopologySupersededSpellingsHaveCompleteDispositions(t *testing.T) {
-	revision := mustMappingValue(t, cliSpecification(t), "topology_revision_v2_2")
-	spellings := mustMappingValue(t, revision, "superseded_spellings")
-	count := 0
-	forEachMappingEntry(t, spellings, func(name string, row *yaml.Node) {
-		count++
-		assertScalarValue(t, mustMappingValue(t, row, "disposition"), "fail_closed_pointer")
-		assertScalarValue(t, mustMappingValue(t, row, "exit_code"), "2")
-		assertScalarValue(t, mustMappingValue(t, row, "current_status"), "retired")
-		current := mustMappingValue(t, row, "current")
-		replacement := mustMappingValue(t, row, "replacement")
-		message := mustMappingValue(t, row, "message")
-		// the pointer message must name the replacement's leading command words
-		replacementHead := replacement.Value
-		if idx := strings.Index(replacementHead, " ["); idx > 0 {
-			replacementHead = replacementHead[:idx]
-		}
-		if !strings.Contains(message.Value, replacementHead) && !strings.Contains(message.Value, strings.Split(replacementHead, "|")[0]) {
-			t.Errorf("superseded_spellings.%s: message %q does not name replacement %q", name, message.Value, replacementHead)
-		}
-		if current.Value == replacement.Value {
-			t.Errorf("superseded_spellings.%s: current and replacement are identical", name)
-		}
-	})
-	if count != 9 {
-		t.Fatalf("superseded spellings = %d, want exactly 9 (run bare-start, runs, status, trace, fork, agents, events, entities, conversations)", count)
+	spec := cliSpecification(t)
+	revision := mustMappingValue(t, spec, "topology_revision_v2_2")
+	if mappingValue(revision, "superseded_spellings") != nil || mappingValue(spec, "retired_namespaces") != nil {
+		t.Fatal("CLI spec reintroduced an obsolete spelling registry")
+	}
+	exceptions := mustYAMLPath(t, spec, "foundations", "output_contract", "exception_rules")
+	if mappingValue(exceptions, "retired_namespaces") != nil {
+		t.Fatal("CLI spec reintroduced a removed-command output exception")
+	}
+	rule := mustMappingValue(t, revision, "current_vocabulary_rule")
+	for _, want := range []string{"current command catalog", "ordinary Cobra errors", "before side effects"} {
+		assertScalarContains(t, rule, want)
 	}
 }
 
@@ -581,13 +567,7 @@ func TestCLITopologyCatalogRowsImplementTargetSpellings(t *testing.T) {
 	if !strings.HasPrefix(mustMappingValue(t, trace, "command").Value, "swarm run trace") {
 		t.Errorf("command_catalog.trace: command does not carry the v2.2 spelling")
 	}
-	retired := mustMappingValue(t, mustMappingValue(t, spec, "retired_namespaces"), "topology_v2_2_retired_spellings")
-	assertScalarValue(t, mustMappingValue(t, retired, "implemented_by"), "#1677")
-	assertScalarValue(t, mustMappingValue(t, retired, "exit_code"), "2")
-	spellings := mustMappingValue(t, retired, "spellings")
-	if len(spellings.Content)/2 != 9 {
-		t.Errorf("retired spellings = %d, want 9", len(spellings.Content)/2)
-	}
+	assertScalarContains(t, mustMappingValue(t, mustMappingValue(t, spec, "command_admission"), "rule"), "before API calls")
 }
 
 func TestCLIParentTailCarriesTopologyAccuracyNote(t *testing.T) {
@@ -597,26 +577,13 @@ func TestCLIParentTailCarriesTopologyAccuracyNote(t *testing.T) {
 	assertScalarContains(t, note, "#1677")
 }
 
-// Guard: the ten annotated rows and nine spellings must stay in sync — every
-// superseded spelling maps to at least one annotated catalog row family.
+// Removed registrations are covered through actual Cobra execution/completion;
+// the authoritative spec must not reintroduce a parallel migration catalog.
 func TestCLITopologySpellingsAndRowAnnotationsAgree(t *testing.T) {
-	revision := mustMappingValue(t, cliSpecification(t), "topology_revision_v2_2")
-	spellings := mustMappingValue(t, revision, "superseded_spellings")
-	var currents []string
-	forEachMappingEntry(t, spellings, func(name string, row *yaml.Node) {
-		currents = append(currents, mustMappingValue(t, row, "current").Value)
-	})
-	for _, want := range []string{"swarm run ", "swarm runs", "swarm status", "swarm trace", "swarm fork", "swarm agents", "swarm events", "swarm entities", "swarm conversations"} {
-		found := false
-		for _, current := range currents {
-			if strings.HasPrefix(current, strings.TrimSpace(want)) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("no superseded spelling covers %q; got %s", want, fmt.Sprintf("%v", currents))
-		}
+	spec := cliSpecification(t)
+	rule := mustMappingValue(t, mustMappingValue(t, spec, "command_admission"), "rule")
+	for _, want := range []string{"complete public vocabulary", "not registered", "help/completion", "No aliases"} {
+		assertScalarContains(t, rule, want)
 	}
 }
 

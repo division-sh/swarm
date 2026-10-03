@@ -47,7 +47,7 @@ func requireMessageRetirement(t *testing.T, source semanticview.Source, token st
 	t.Helper()
 	token = toolidentity.CanonicalName(token)
 	errs := tools.ValidateHITLIdentityLifecycleReferences(source)
-	if len(errs) == 0 || !strings.Contains(fmt.Sprint(errs), token) || !strings.Contains(fmt.Sprint(errs), "RETIRED: agent_message is unsupported") {
+	if len(errs) == 0 || !strings.Contains(fmt.Sprint(errs), token) || !strings.Contains(fmt.Sprint(errs), "is unsupported") {
 		t.Fatalf("retirement admission errors = %v", errs)
 	}
 	report := Run(context.Background(), source, Options{})

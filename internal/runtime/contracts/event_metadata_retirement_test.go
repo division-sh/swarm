@@ -18,7 +18,7 @@ func TestEventMetadataRetirementRejectsPresenceBeforeValueInterpretation(t *test
 		for _, value := range []string{"null", "''", "false", "{}", "[]", "text"} {
 			t.Run(field+"/"+value, func(t *testing.T) {
 				_, err := admitEventCatalogEntryForTest(t, field+": "+value)
-				if err == nil || !strings.Contains(err.Error(), "RETIRED: events.yaml metadata field "+field) {
+				if err == nil || !strings.Contains(err.Error(), `event field name "`+field+`"`) {
 					t.Fatalf("retired field presence admitted: %v", err)
 				}
 			})
@@ -31,7 +31,7 @@ func TestEventMetadataRetirementRejectsPresenceBeforeValueInterpretation(t *test
 		} {
 			t.Run(field+"/indirect/"+shape, func(t *testing.T) {
 				_, err := admitEventCatalogEntryForTest(t, shape)
-				if err == nil || !strings.Contains(err.Error(), "RETIRED: events.yaml metadata field "+field) {
+				if err == nil || !strings.Contains(err.Error(), `event field name "`+field+`"`) {
 					t.Fatalf("indirect retired declaration admitted: %v", err)
 				}
 			})

@@ -222,16 +222,16 @@ func TestW5AgentDefaultRetirementAndMergedFields(t *testing.T) {
 				} else {
 					body += field + "\n"
 				}
-				if _, err := admitW5Agents(t, body); err == nil || !strings.Contains(err.Error(), "RETIRED") {
+				if _, err := admitW5Agents(t, body); err == nil || !strings.Contains(err.Error(), "repeats the implicit default") {
 					t.Fatalf("default not retired: %v", err)
 				}
 			})
 		}
 	}
-	for field := range retiredAgentFields {
+	for _, field := range []string{"model_tier", "mode", "conversation_mode", "session_scope", "session_scope_authority", "tools_tier2", "subscriptions_bootstrap", "subscribes_to", "prompt_ref", "prompt_inputs", "profile", "agent_defaults", "agent_profiles", "runtime_id_template"} {
 		for _, value := range []string{"null", "''", "[]", "{}", "legacy"} {
 			body := fmt.Sprintf("worker:\n  intent: {inline: business intent}\n  <<: {%s: %s}\n", field, value)
-			if _, err := admitW5Agents(t, body); err == nil || !strings.Contains(err.Error(), "RETIRED") {
+			if _, err := admitW5Agents(t, body); err == nil || !strings.Contains(err.Error(), "not supported") || !strings.Contains(err.Error(), field) {
 				t.Errorf("%s %s not retired: %v", field, value, err)
 			}
 		}

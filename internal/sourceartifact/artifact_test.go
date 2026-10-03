@@ -73,7 +73,7 @@ func TestAdmitDirectoryRetiresPackageAndFlows(t *testing.T) {
 			root := t.TempDir()
 			writeTestFile(t, root, label, "name: old\n")
 			_, err := AdmitDirectory(root)
-			if err == nil || !strings.Contains(err.Error(), "RETIRED") {
+			if err == nil || !strings.Contains(err.Error(), "not an admitted") {
 				t.Fatalf("error = %v, want RETIRED", err)
 			}
 		})

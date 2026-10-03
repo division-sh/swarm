@@ -35,7 +35,7 @@ type cliProjectResolution struct {
 
 func resolveCLIAPITarget(opts rootCommandOptions, cfg cliCommandConfig) (cliAPITargetResolution, error) {
 	if opts.apiCommandClass != cliAPICommandClassTargetDiagnostic {
-		if err := rejectRemovedClientAPIEnvSources(); err != nil {
+		if err := validateSwarmEnvSources(swarmEnvGuardContext{RepoRoot: opts.invocationRoot.Path(), RuntimeConfigPath: opts.unifiedConfigLoadOptions().ExplicitPath}); err != nil {
 			return cliAPITargetResolution{}, err
 		}
 	}
@@ -119,7 +119,7 @@ func cliAPITargetFromDescriptor(entry localContextEntry, source string) (cliAPIT
 }
 
 func resolveCLIAPITokenForTarget(opts rootCommandOptions, cfg cliCommandConfig, target cliAPITargetResolution) (cliAPITokenResolution, error) {
-	if err := rejectRemovedClientAPIEnvSources(); err != nil {
+	if err := validateSwarmEnvSources(swarmEnvGuardContext{RepoRoot: opts.invocationRoot.Path(), RuntimeConfigPath: opts.unifiedConfigLoadOptions().ExplicitPath}); err != nil {
 		return cliAPITokenResolution{}, err
 	}
 	if tokenFile := strings.TrimSpace(opts.apiTokenFile); tokenFile != "" {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	runtimesharding "github.com/division-sh/swarm/internal/runtime/core/sharding"
+	"gopkg.in/yaml.v3"
 )
 
 func TestLoadRejectsRetiredExecutionPosture(t *testing.T) {
@@ -17,7 +18,7 @@ func TestLoadRejectsRetiredExecutionPosture(t *testing.T) {
 			if err := os.WriteFile(path, []byte("runtime:\n  execution_posture: "+value+"\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := Load(path); err == nil || !strings.Contains(err.Error(), RetiredExecutionPostureMessage) {
+			if _, err := Load(path); err == nil || !strings.Contains(err.Error(), `field "execution_posture" is not supported`) || !strings.Contains(err.Error(), "Valid fields:") {
 				t.Fatalf("Load() = %v, want retired selector rejection", err)
 			}
 		})
@@ -273,7 +274,7 @@ func TestLoad_RejectsRetiredWorkspaceDataSourceEvenWhenBlank(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 	_, err := Load(p)
-	if err == nil || !strings.Contains(err.Error(), "workspace.data_source is retired") {
+	if err == nil || !strings.Contains(err.Error(), "workspace field \"data_source\" is not supported") {
 		t.Fatalf("Load error = %v, want retired workspace.data_source rejection", err)
 	}
 }
@@ -357,9 +358,8 @@ func TestValidate_OpenAICompatibleRequiresProfileOwnedConfig(t *testing.T) {
 	if err := c.Validate(); err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
-	c.LLM.OpenAICompatible.DefaultModel = "gpt-compatible"
-	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "llm.models") {
-		t.Fatalf("Validate error = %v, want retired model config guidance", err)
+	if err := yaml.Unmarshal([]byte("llm:\n  openai_compatible:\n    default_model: gpt-compatible\n"), c); err == nil || !strings.Contains(err.Error(), "default_model") || !strings.Contains(err.Error(), "Valid fields: base_url") {
+		t.Fatalf("config source error = %v, want unsupported model config rejection", err)
 	}
 }
 
@@ -384,12 +384,8 @@ func TestValidate_OpenAIResponsesUsesProfileOwnedDefaultAndOverride(t *testing.T
 
 func TestValidate_RejectsRetiredRuntimeMode(t *testing.T) {
 	c := &Config{Runtime: RuntimeConfig{}}
-	c.LLM.RuntimeMode = "api"
-	c.LLM.Session.LockTTL = 1 * time.Second
-	c.LLM.Session.RotateAfterTurns = 1
-	c.LLM.Session.RotateOnParseFailures = 1
-	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "llm.backend") {
-		t.Fatalf("Validate error = %v, want retired runtime_mode guidance", err)
+	if err := yaml.Unmarshal([]byte("llm:\n  runtime_mode: api\n"), c); err == nil || !strings.Contains(err.Error(), "runtime_mode") || !strings.Contains(err.Error(), "Valid fields: backend") {
+		t.Fatalf("config source error = %v, want unsupported runtime_mode rejection", err)
 	}
 }
 

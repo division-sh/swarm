@@ -179,9 +179,6 @@ with 'swarm run trace', 'swarm event list', and 'swarm mailbox'.`,
 	addToGroup(commandGroupUtility,
 		newCompletionCommand(),
 	)
-	// Retired hidden stubs; intentionally ungrouped so they never render in help.
-	cmd.AddCommand(newInvestigateCommand(opts))
-	cmd.AddCommand(newRetiredTopologySpellingCommands()...)
 	cmd.SetHelpCommandGroupID(commandGroupUtility)
 	return cmd
 }
@@ -202,22 +199,9 @@ func newRunGroupCommand(root InvocationRoot, opts rootCommandOptions) *cobra.Com
 	cmd := &cobra.Command{
 		Use:   "run",
 		Short: "Start, inspect, trace, and branch workflow runs.",
-		Args:  cobra.ArbitraryArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 {
-				return cmd.Help()
-			}
-			fmt.Fprintln(cmd.ErrOrStderr(), runStartRetiredMessage)
-			return commandExitError{code: 2}
-		},
+		Args:  cobra.NoArgs,
+		RunE:  func(cmd *cobra.Command, args []string) error { return cmd.Help() },
 	}
-	cmd.SetFlagErrorFunc(func(c *cobra.Command, err error) error {
-		if c.Name() == "run" {
-			fmt.Fprintln(c.ErrOrStderr(), runStartRetiredMessage)
-			return commandExitError{code: 2}
-		}
-		return err
-	})
 	cmd.AddCommand(
 		newRunCommand(root, opts),
 		newRunsCommand(opts),
@@ -290,9 +274,6 @@ func newServeCommand(ctx context.Context, root InvocationRoot, runServe ServeRun
 		Example: `  swarm serve . --dev`,
 		Args:    argcount.MaximumNArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			if err := rejectRetiredPlatformSpecFlag(cmd); err != nil {
-				return err
-			}
 			if len(args) == 1 {
 				opts.SourceRoot = args[0]
 			}
@@ -359,7 +340,6 @@ func newServeCommand(ctx context.Context, root InvocationRoot, runServe ServeRun
 	cmd.Flags().StringVar(&opts.ConfigPath, "config", opts.ConfigPath, "Path to swarm.yaml config")
 	cmd.Flags().StringVar(&opts.Backend, "backend", opts.Backend, "LLM backend profile for local runtime startup: anthropic, claude_cli, openai_compatible, or openai_responses")
 	cmd.Flags().StringVar(&opts.WorkspaceBackend, "workspace-backend", opts.WorkspaceBackend, "Workspace backend preference for local serve: docker, or host for explicit trusted/unsafe local-dev opt-in")
-	cmd.Flags().StringVar(&opts.PlatformSpecPath, "platform-spec", opts.PlatformSpecPath, retiredPlatformSpecFlagHelp)
 	cmd.Flags().StringVar(&opts.StoreMode, "store", opts.StoreMode, RuntimeStoreBackendHelp)
 	cmd.Flags().StringVar(&opts.ContextName, "context", opts.ContextName, "Local Swarm context name to register for --dev")
 	cmd.Flags().StringVar(&opts.APITokenFile, "api-token-file", opts.APITokenFile, "Path to file containing the serve API bearer token")
@@ -386,9 +366,6 @@ func newVerifyCommand(ctx context.Context, root InvocationRoot, rootOpts rootCom
 		Example: `  swarm verify .`,
 		Args:    argcount.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := rejectRetiredPlatformSpecFlag(cmd); err != nil {
-				return returnCLIValidationError(cmd.ErrOrStderr(), err)
-			}
 			if err := opts.logging.validate(); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
@@ -408,7 +385,6 @@ func newVerifyCommand(ctx context.Context, root InvocationRoot, rootOpts rootCom
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", opts.platformSpecPath, retiredPlatformSpecFlagHelp)
 	bindCLIOutputFlags(cmd, &opts.output)
 	bindCLILoggingFlags(cmd, &opts.logging)
 	return cmd

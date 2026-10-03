@@ -453,19 +453,22 @@ func (r *LocalPreflightReport) checkListener(code, name, addr string) {
 }
 
 func (r *LocalPreflightReport) checkGatewayEnv() {
-	for _, name := range RetiredToolGatewayURLEnvNames {
+	for _, entry := range swarmEnvCatalogEntries() {
+		if entry.Category != swarmEnvCategoryGeneratedBoundary {
+			continue
+		}
+		name := entry.Name
 		raw := strings.TrimSpace(lookupEnvValue(name))
 		if raw == "" {
 			r.add(localPreflightGatewayPrerequisite, strings.ToLower(name)+"_empty", LocalPreflightSeverityInfo, LocalPreflightStatusOK, fmt.Sprintf("%s is empty; gateway endpoints are derived from ToolGatewayBinding", name), "")
 			continue
 		}
 		severity := LocalPreflightSeverityWarning
-		remediation := fmt.Sprintf("unset %s; local serve/run derives the gateway binding from the bound MCP listener and ignores this retired URL", name)
+		finding := findingForSwarmEnvEntry(name, entry)
 		if r.Mode == "serve" {
 			severity = LocalPreflightSeverityBlocker
-			remediation = fmt.Sprintf("unset %s; non-dev serve rejects retired gateway URL env because ToolGatewayBinding owns endpoint configuration", name)
 		}
-		r.add(localPreflightGatewayPrerequisite, strings.ToLower(name)+"_retired", severity, LocalPreflightStatusFailed, ValidateRetiredToolGatewayURLEnv(name, raw).Error(), remediation)
+		r.add(localPreflightGatewayPrerequisite, strings.ToLower(name)+"_generated_boundary", severity, LocalPreflightStatusFailed, finding.Message, finding.Remediation)
 	}
 }
 

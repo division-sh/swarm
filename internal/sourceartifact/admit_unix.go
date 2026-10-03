@@ -118,7 +118,7 @@ func admitDirectoryFD(fd int, prefix string, resource bool, state *admissionStat
 		}
 		if isDirectory {
 			if name == "flows" {
-				return fmt.Errorf("RETIRED: flows/ is not admitted; move its children directly under %q", displayFlowPrefix(prefix))
+				return fmt.Errorf("flows is not an admitted flow directory name under %q", displayFlowPrefix(prefix))
 			}
 			childResource := false
 			if _, ok := resourceBranches[name]; ok {
@@ -145,7 +145,7 @@ func admitDirectoryFD(fd int, prefix string, resource bool, state *admissionStat
 			continue
 		}
 		if name == "package.yaml" {
-			return fmt.Errorf("RETIRED: package.yaml is not admitted; use optional manifest.yaml and filesystem child flows")
+			return fmt.Errorf("package.yaml is not an admitted source filename")
 		}
 		if _, err := classifyLabel(label); err != nil {
 			return err

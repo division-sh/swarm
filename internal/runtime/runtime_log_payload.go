@@ -70,10 +70,10 @@ func DecodeCanonicalRuntimeLogPayload(raw []byte) (CanonicalRuntimeLogPayload, e
 		return CanonicalRuntimeLogPayload{}, err
 	}
 	if _, legacy := detail["error"]; legacy {
-		return CanonicalRuntimeLogPayload{}, fmt.Errorf("runtime log details.error is retired; use details.failure")
+		return CanonicalRuntimeLogPayload{}, fmt.Errorf("runtime log details.error is not a supported details field")
 	}
 	if _, legacy := detail["error_code"]; legacy {
-		return CanonicalRuntimeLogPayload{}, fmt.Errorf("runtime log details.error_code is retired; use details.failure.detail.code or decision_reason_code")
+		return CanonicalRuntimeLogPayload{}, fmt.Errorf("runtime log details.error_code is not a supported details field")
 	}
 	component, err := requiredRuntimeLogString(detail, "component")
 	if err != nil {

@@ -3,7 +3,6 @@ package contracts
 import (
 	"errors"
 	"fmt"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -48,6 +47,20 @@ func (d *LoaderDiagnostic) Error() string {
 		return ""
 	}
 	if problem := strings.TrimSpace(d.Problem); problem != "" {
+		if d.Code == "contract_loader.undefined_field" {
+			if location := d.Location.String(); location != "" {
+				problem = location + ": " + problem
+			}
+			if d.Location.Line > 0 {
+				problem += fmt.Sprintf(" (line %d, column %d)", d.Location.Line, d.Location.Column)
+			}
+			if len(d.ValidOptions) > 0 {
+				problem += " Valid fields: " + strings.Join(d.ValidOptions, ", ") + "."
+			}
+			if d.Remediation != "" {
+				problem += " " + d.Remediation
+			}
+		}
 		return problem
 	}
 	return strings.TrimSpace(d.RawCause)
@@ -99,7 +112,7 @@ func NewSourceArtifactRequiredDiagnostic() *LoaderDiagnostic {
 	}
 }
 
-func NewUndefinedFieldDiagnostic(context, key string, allowed map[string]struct{}) *LoaderDiagnostic {
+func NewUndefinedFieldDiagnostic(context, key string, allowed map[string]struct{}, source ...yamlsource.MappingField) *LoaderDiagnostic {
 	context = strings.TrimSpace(context)
 	key = strings.TrimSpace(key)
 	if context == "" {
@@ -107,10 +120,10 @@ func NewUndefinedFieldDiagnostic(context, key string, allowed map[string]struct{
 	}
 	options := sortedLoaderFieldOptions(allowed)
 	remediation := fmt.Sprintf("Use one of the supported %s fields.", context)
-	if context == "handler" && key == "mailbox_write" {
-		remediation = "Authored handler actions are retired; use supported notify_human/ask_human operations for mailbox notices or decisions."
+	if nearest := NearestFieldOption(key, options); nearest != "" {
+		remediation = fmt.Sprintf("Did you mean %q? %s", nearest, remediation)
 	}
-	return &LoaderDiagnostic{
+	diagnostic := &LoaderDiagnostic{
 		Code:         "contract_loader.undefined_field",
 		Problem:      fmt.Sprintf("%s field %q is not supported.", context, key),
 		Remediation:  remediation,
@@ -119,46 +132,46 @@ func NewUndefinedFieldDiagnostic(context, key string, allowed map[string]struct{
 			YAMLPath: context,
 		},
 	}
+	if len(source) != 0 {
+		field := source[0]
+		location := field.IntroductionLocation()
+		diagnostic.Location = LoaderDiagnosticLocation{File: location.File, YAMLPath: field.Value.SemanticPath(), Line: location.Line, Column: location.Column}
+	}
+	return diagnostic
 }
 
-func NewRetiredConnectDeliveryDiagnostic() *LoaderDiagnostic {
-	return NewExpectedShapeDiagnostic(
-		"contract_loader.retired_connect_delivery",
-		"schema.yaml.connect.delivery",
-		"connect.delivery is retired.",
-		"Remove delivery. A connect row declares one inter-flow edge; use multiple rows for static fan-out, and declare instance selection or cardinality on the receiver input resolution.",
-		nil,
-	)
-}
-
-func NewRetiredConnectReplyDiagnostic() *LoaderDiagnostic {
-	return NewExpectedShapeDiagnostic(
-		"contract_loader.retired_connect_reply",
-		"schema.yaml.connect.reply",
-		"connect.reply is retired.",
-		"Remove reply and declare receiver input resolution mode reply with replies_to; request and response remain separate connect edges.",
-		nil,
-	)
-}
-
-func NewRetiredResolutionInstanceKeyDiagnostic() *LoaderDiagnostic {
-	return NewExpectedShapeDiagnostic(
-		"contract_loader.retired_resolution_instance_key",
-		"schema.yaml.pins.inputs.events.resolution.instance_key",
-		"resolution.instance_key is retired; scalar instance: <field> is the sole receiver identity owner.",
-		"Remove instance_key; declare scalar instance on the receiver and resolution/key_from on the incoming connect row.",
-		nil,
-	)
-}
-
-func NewRetiredInstanceKeyCarrySourceDiagnostic() *LoaderDiagnostic {
-	return NewExpectedShapeDiagnostic(
-		"contract_loader.retired_instance_key_carry_source",
-		"schema.yaml.pins.inputs.events.carries.*.from",
-		"Input pin carries and instance.key.* carry sources are retired; connect.key_from owns exceptional instance sources.",
-		"Remove carries; omit connect.key_from for the same-named payload field, or use generated.uuid, event.id, or one alternate payload.<field> where connect.resolution permits it.",
-		nil,
-	)
+// NearestFieldOption suggests only a close member of the current vocabulary.
+// Sorting makes equal-distance choices independent of map iteration order.
+func NearestFieldOption(key string, options []string) string {
+	options = append([]string(nil), options...)
+	sort.Strings(options)
+	best, limit := "", 3
+	for _, option := range options {
+		a, b := []rune(key), []rune(option)
+		if len(a)-len(b) >= limit || len(b)-len(a) >= limit {
+			continue
+		}
+		previous := make([]int, len(b)+1)
+		for j := range previous {
+			previous[j] = j
+		}
+		for i, left := range a {
+			current := make([]int, len(b)+1)
+			current[0] = i + 1
+			for j, right := range b {
+				cost := 0
+				if left != right {
+					cost = 1
+				}
+				current[j+1] = min(current[j]+1, previous[j+1]+1, previous[j]+cost)
+			}
+			previous = current
+		}
+		if distance := previous[len(b)]; distance < limit {
+			best, limit = option, distance
+		}
+	}
+	return best
 }
 
 func NewExpectedShapeDiagnostic(code, yamlPath, problem, remediation string, cause error) *LoaderDiagnostic {
@@ -261,22 +274,19 @@ func wrapLoaderDiagnosticFile(err error, file string) error {
 	if diagnostic, ok := AsLoaderDiagnostic(err); ok {
 		return diagnostic.withLocation(LoaderDiagnosticLocation{File: file})
 	}
-	if diagnostic, ok := diagnoseLegacyLoaderError(err); ok {
+	if diagnostic, ok := diagnoseLoaderShapeError(err); ok {
 		return diagnostic.withLocation(LoaderDiagnosticLocation{File: file})
 	}
 	return fmt.Errorf("parse %s: %w", file, err)
 }
 
-func diagnoseLegacyLoaderError(err error) (*LoaderDiagnostic, bool) {
+func diagnoseLoaderShapeError(err error) (*LoaderDiagnostic, bool) {
 	if err == nil {
 		return nil, false
 	}
 	raw := strings.TrimSpace(err.Error())
 	if raw == "" {
 		return nil, false
-	}
-	if diagnostic, ok := diagnoseLegacyUndefinedField(err, raw); ok {
-		return diagnostic, true
 	}
 	if isYAMLParseError(raw) {
 		return NewYAMLParseDiagnostic(err), true
@@ -330,84 +340,6 @@ func isKnownContractLoaderShapeError(raw string) bool {
 	return strings.Contains(raw, "yaml: unmarshal errors:") ||
 		strings.Contains(raw, "cannot unmarshal !!") ||
 		strings.Contains(raw, "into contracts.")
-}
-
-var legacyUndefinedFieldPattern = regexp.MustCompile(`UNDEFINED-FIELD:\s+(.+?)\s+(?:field|option)\s+"([^"]+)"\s+not in platform spec`)
-
-func diagnoseLegacyUndefinedField(err error, raw string) (*LoaderDiagnostic, bool) {
-	match := legacyUndefinedFieldPattern.FindStringSubmatch(raw)
-	if len(match) != 3 {
-		return nil, false
-	}
-	context := strings.TrimSpace(match[1])
-	key := strings.TrimSpace(match[2])
-	diagnostic := NewUndefinedFieldDiagnostic(context, key, loaderFieldOptionsForContext(context))
-	diagnostic.RawCause = rawCauseString(err)
-	diagnostic.cause = err
-	return diagnostic, true
-}
-
-func loaderFieldOptionsForContext(context string) map[string]struct{} {
-	switch strings.TrimSpace(context) {
-	case "schema":
-		return flowSchemaDocumentFields
-	case "stage":
-		return stageDeclarationFieldOptions
-	case "node":
-		return systemNodeContractFields
-	case "handler":
-		return handlerFieldOptions
-	case "input event pin":
-		return inputEventPinFieldOptions
-	case "output event pin":
-		return outputEventPinFieldOptions
-	case "input event pin resolution":
-		return inputEventPinResolutionFieldOptions
-	case "rule":
-		return ruleFieldOptions
-	case "compute":
-		return computeFieldOptions
-	case "guard.on_fail":
-		return guardOnFailFieldOptions
-	case "guard.on_fail.escalate":
-		return guardOnFailEscalateFieldOptions
-	case "accumulate":
-		return accumulateFieldOptions
-	case "fan_out":
-		return fanOutFieldOptions
-	case "emit":
-		return emitFieldOptions
-	case "on_success":
-		return onSuccessFieldOptions
-	case "activity":
-		return activityFieldOptions
-	case "activity.approval":
-		return activityApprovalFieldOptions
-	case "agent":
-		return agentRegistryEntryFieldOptions
-	case "connector_packs":
-		return connectorPackFieldOptions
-	case "connector_packs.imports":
-		return connectorPackImportFieldOptions
-	case "provider_trigger_events":
-		return providerTriggerEventFieldOptions
-	case "provider_trigger_events.imports":
-		return providerTriggerEventImportFieldOptions
-	case "connect":
-		return flowConnectFieldOptions
-	case "type catalog":
-		return typeCatalogFieldOptions
-	case "type metadata":
-		return typeMetadataFieldOptions
-	case "entity metadata":
-		return entityMetadataFieldOptions
-	case "length":
-		return schemaLengthRefinementFieldOptions
-	case "range":
-		return schemaRangeRefinementFieldOptions
-	default:
-		return nil
-	}
 }
 
 func sortedLoaderFieldOptions(fields map[string]struct{}) []string {

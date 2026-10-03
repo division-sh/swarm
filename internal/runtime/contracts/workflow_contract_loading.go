@@ -291,8 +291,8 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 			if workflowHandlerDeclaresConflictingCompletion(handler) {
 				errs = append(errs, fmt.Errorf("%w: node %s handler %s declares both on_complete and rules", ErrConflictingCompletion, nodeID, eventType))
 			}
-			if usesDeprecatedGuardFallback(handler.Guard) {
-				errs = append(errs, fmt.Errorf("%w: node %s handler %s uses deprecated id-only guard; migrate to check:", ErrDeprecatedGuardFallback, nodeID, eventType))
+			if guardHasIdentityWithoutCheck(handler.Guard) {
+				errs = append(errs, fmt.Errorf("%w: node %s handler %s", ErrInvalidGuardCheck, nodeID, eventType))
 			}
 		}
 	}
@@ -322,7 +322,7 @@ func workflowHandlerDeclaresConflictingCompletion(handler SystemNodeEventHandler
 func workflowHandlerHasOnComplete(handler SystemNodeEventHandler) bool {
 	return len(handler.OnComplete) > 0
 }
-func usesDeprecatedGuardFallback(spec *GuardSpec) bool {
+func guardHasIdentityWithoutCheck(spec *GuardSpec) bool {
 	if spec == nil {
 		return false
 	}

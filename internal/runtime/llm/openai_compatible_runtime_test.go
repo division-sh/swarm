@@ -380,9 +380,11 @@ func openAICompatibleTestConfig(baseURL string) *config.Config {
 				RotateOnParseFailures: 3,
 			},
 			OpenAICompatible: config.OpenAICompatibleConfig{
-				BaseURL:      baseURL,
-				DefaultModel: "gpt-compatible",
-				LowCostModel: "gpt-compatible-mini",
+				BaseURL: baseURL,
+			},
+			Models: map[string]map[string]string{
+				"regular": {"openai_compatible": "gpt-compatible"},
+				"cheap":   {"openai_compatible": "gpt-compatible-mini"},
 			},
 		},
 	}

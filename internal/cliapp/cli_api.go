@@ -33,9 +33,6 @@ const (
 	// (#2016).
 	cliAPIResponseBudget = 1 << 20
 
-	cliServeAPIListenAddrEnv = "SWARM_API_LISTEN_ADDR"
-	cliServeMCPListenAddrEnv = "SWARM_MCP_LISTEN_ADDR"
-
 	cliAPIConfigServerSource      = "config connection.api_server"
 	cliAPIConfigTokenFileSource   = "config connection.api_token_file"
 	serveAPITokenFileFlagSource   = "--api-token-file"
@@ -228,7 +225,7 @@ func resolveCLIAPISettings(opts rootCommandOptions) (cliAPISettings, error) {
 
 func resolveCLIAPISettingsFromConfig(opts rootCommandOptions, cfg cliCommandConfig) (cliAPISettings, error) {
 	opts = opts.ensureRootFlagState()
-	if err := rejectRemovedClientAPIEnvSources(); err != nil {
+	if err := validateSwarmEnvSources(swarmEnvGuardContext{RepoRoot: opts.invocationRoot.Path(), RuntimeConfigPath: opts.unifiedConfigLoadOptions().ExplicitPath}); err != nil {
 		return cliAPISettings{}, err
 	}
 	target, err := resolveCLIAPITarget(opts, cfg)
@@ -249,7 +246,7 @@ type cliAPITokenResolution struct {
 }
 
 func resolveCLIAPIToken(opts rootCommandOptions, cfg cliCommandConfig, rpcEndpoint string) (cliAPITokenResolution, error) {
-	if err := rejectRemovedClientAPIEnvSources(); err != nil {
+	if err := validateSwarmEnvSources(swarmEnvGuardContext{RepoRoot: opts.invocationRoot.Path(), RuntimeConfigPath: opts.unifiedConfigLoadOptions().ExplicitPath}); err != nil {
 		return cliAPITokenResolution{}, err
 	}
 	if tokenFile := strings.TrimSpace(opts.apiTokenFile); tokenFile != "" {
@@ -267,24 +264,6 @@ func resolveCLIAPIToken(opts rootCommandOptions, cfg cliCommandConfig, rpcEndpoi
 	return cliAPITokenResolution{}, errCLIAPITokenRequired
 }
 
-func rejectRemovedClientAPIEnvSources() error {
-	replacements := map[string]string{
-		"SWARM_API_SERVER":     "use --api-server, --context, project/selected context, or config connection.api_server",
-		"SWARM_API_TOKEN":      "use --api-token-file, context descriptor auth, or config connection.api_token_file",
-		"SWARM_API_TOKEN_FILE": "use --api-token-file, context descriptor auth, or config connection.api_token_file",
-	}
-	var found []string
-	for _, name := range []string{"SWARM_API_SERVER", "SWARM_API_TOKEN", "SWARM_API_TOKEN_FILE"} {
-		if strings.TrimSpace(os.Getenv(name)) != "" {
-			found = append(found, fmt.Sprintf("%s (%s)", name, replacements[name]))
-		}
-	}
-	if len(found) == 0 {
-		return nil
-	}
-	return &cliAPIValidationError{message: "client-side API environment sources are no longer accepted: " + strings.Join(found, "; ")}
-}
-
 type cliServeListenerAddressOptions struct {
 	APIListenAddr        string
 	MCPListenAddr        string
@@ -295,7 +274,7 @@ type cliServeListenerAddressOptions struct {
 }
 
 func resolveCLIServeListenerAddresses(opts cliServeListenerAddressOptions) (string, string, error) {
-	if err := rejectRemovedServeListenerEnvSources(); err != nil {
+	if err := validateSwarmEnvSources(swarmEnvGuardContext{RepoRoot: opts.RepoRoot, RuntimeConfigPath: opts.ConfigPath}); err != nil {
 		return "", "", err
 	}
 	apiAddr, apiResolved := resolveCLIServeListenerAddressFlag(opts.APIListenAddr, opts.APIListenAddrFlagSet)
@@ -329,25 +308,8 @@ func resolveCLIServeListenerAddressFlag(flagValue string, flagSet bool) (string,
 	return "", false
 }
 
-func rejectRemovedServeListenerEnvSources() error {
-	replacements := map[string]string{
-		cliServeAPIListenAddrEnv: "use --api-listen-addr or config serve.api_listen_addr",
-		cliServeMCPListenAddrEnv: "use --mcp-listen-addr or config serve.mcp_listen_addr",
-	}
-	var found []string
-	for _, name := range []string{cliServeAPIListenAddrEnv, cliServeMCPListenAddrEnv} {
-		if strings.TrimSpace(os.Getenv(name)) != "" {
-			found = append(found, fmt.Sprintf("%s (%s)", name, replacements[name]))
-		}
-	}
-	if len(found) == 0 {
-		return nil
-	}
-	return &cliAPIValidationError{message: "serve listener environment sources are no longer accepted: " + strings.Join(found, "; ")}
-}
-
 func ResolveServeAPIAuth(root InvocationRoot, opts ServeOptions) (apiv1.AuthTokenResolution, error) {
-	if err := rejectRemovedServeAPIEnvSource(); err != nil {
+	if err := validateSwarmEnvSources(swarmEnvGuardContext{RepoRoot: root.Path(), RuntimeConfigPath: opts.ConfigPath}); err != nil {
 		return apiv1.AuthTokenResolution{}, err
 	}
 	if opts.APITokenFileFlagSet || strings.TrimSpace(opts.APITokenFile) != "" {
@@ -365,13 +327,6 @@ func ResolveServeAPIAuth(root InvocationRoot, opts ServeOptions) (apiv1.AuthToke
 		return readServeAPITokenFile(root.Resolve(tokenFile), serveAPITokenFileConfigSource)
 	}
 	return defaultServeAPIAuthResolution(), nil
-}
-
-func rejectRemovedServeAPIEnvSource() error {
-	if strings.TrimSpace(os.Getenv("SWARM_API_TOKEN")) == "" {
-		return nil
-	}
-	return &cliAPIValidationError{message: "server-side API environment source is no longer accepted: SWARM_API_TOKEN (use swarm serve --api-token-file or config serve.api_token_file)"}
 }
 
 func readServeAPITokenFile(tokenFile, source string) (apiv1.AuthTokenResolution, error) {

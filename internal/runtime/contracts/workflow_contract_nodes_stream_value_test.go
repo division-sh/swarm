@@ -29,7 +29,7 @@ func TestProjectNodeFanOutValuePreservesMetadataAndRejectsRetiredAddress(t *test
 	}
 	field, _ = retired.Document("nodes.yaml").Root().Lookup("fan_out")
 	_, err = projectNodeFanOutValue(field.Value)
-	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "nodes.yaml:") {
+	if err == nil || !strings.Contains(err.Error(), "is not supported") || !strings.Contains(err.Error(), "nodes.yaml:") {
 		t.Fatalf("expected source-located address retirement, got %v", err)
 	}
 }

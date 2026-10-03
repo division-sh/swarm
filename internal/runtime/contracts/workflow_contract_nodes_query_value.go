@@ -12,9 +12,7 @@ var nodeQueryFields = map[string]struct{}{
 }
 
 func projectNodeQueryValue(value yamlsource.Value) (*QuerySpec, error) {
-	fields, err := nodeValueFields(value, "query", nodeQueryFields, map[string]string{
-		"operation": "query.operation is not executed; use source/entities and the declared query selectors",
-	})
+	fields, err := nodeValueFields(value, "query", nodeQueryFields)
 	if err != nil {
 		return nil, err
 	}

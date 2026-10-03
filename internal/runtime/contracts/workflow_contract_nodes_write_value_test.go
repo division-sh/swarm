@@ -41,7 +41,7 @@ func TestProjectNodeDataAccumulationValueRejectsRetiredExpression(t *testing.T) 
 		t.Fatal(err)
 	}
 	_, err = projectNodeDeclarationsValue(snapshot.Document("nodes.yaml").Root())
-	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "nodes.yaml:5:") {
+	if err == nil || !strings.Contains(err.Error(), "is not supported") || !strings.Contains(err.Error(), "nodes.yaml:5:") {
 		t.Fatalf("expected source-located write retirement, got %v", err)
 	}
 }

@@ -134,7 +134,7 @@ func TestNodeIdentityCanonicalMapKeySQLitePostgres(t *testing.T) {
 					writeReleaseFile(t, file, strings.Replace(string(original), "worker:\n", "worker:\n  id: "+value+"\n", 1))
 					for _, command := range []string{"verify", "serve"} {
 						result := runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, command, root, "--config", config)
-						if result.err == nil || !strings.Contains(result.output, "node.id is retired; the map key is the identity.") || !strings.Contains(result.output, "nodes.yaml") {
+						if result.err == nil || !strings.Contains(result.output, "node field \"id\" is not supported") || !strings.Contains(result.output, "nodes.yaml") {
 							t.Fatalf("%s %s %s: %v\n%s", scope, value, command, result.err, result.output)
 						}
 					}

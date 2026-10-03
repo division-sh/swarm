@@ -222,7 +222,7 @@ func TestCanonicalFormsRegistryPinsNodeIDRetirement(t *testing.T) {
 		fixture := t.TempDir()
 		writeRegistryMutationFile(t, filepath.Join(fixture, "schema.yaml"), "name: node-retirement\n")
 		writeRegistryMutationFile(t, filepath.Join(fixture, "nodes.yaml"), "worker:\n  id: worker\n  event_handlers: {}\n")
-		if _, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(root, fixture, runtimecontracts.DefaultPlatformSpecFile(root)); err == nil || !strings.Contains(err.Error(), "node.id is retired; the map key is the identity.") {
+		if _, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(root, fixture, runtimecontracts.DefaultPlatformSpecFile(root)); err == nil || !strings.Contains(err.Error(), "node field \"id\" is not supported") {
 			t.Fatalf("node ID admitted: %v", err)
 		}
 		return

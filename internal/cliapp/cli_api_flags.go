@@ -27,7 +27,7 @@ func cliAPIConnectionFlagsChanged(cmd *cobra.Command) bool {
 func validateCLIAPIConnectionFlagPlacement(args []string) error {
 	stripped := stripRootPersistentFlags(args)
 	index, flag := firstCLIAPIConnectionFlagIndex(stripped)
-	if index < 0 || cliAPIConnectionFlagAfterLeafCommand(stripped[:index]) || cliTopologyRetiredOrGroupPrefix(stripped[:index]) {
+	if index < 0 || cliAPIConnectionFlagAfterLeafCommand(stripped[:index]) {
 		return nil
 	}
 	return &cliAPIValidationError{message: "unknown flag: " + flag}
@@ -83,8 +83,6 @@ func cliAPIConnectionFlagAfterLeafCommand(prefix []string) bool {
 		{"entity", "aggregate"},
 		{"mailbox", "list"},
 		{"mailbox", "view"},
-		{"mailbox", "approve"},
-		{"mailbox", "reject"},
 		{"mailbox", "defer"},
 		{"channel", "connect"},
 		{"channel", "reconnect"},

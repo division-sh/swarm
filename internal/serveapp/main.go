@@ -8,7 +8,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -3144,9 +3143,6 @@ func createServeToolGatewayBinding(mcpAddr net.Addr) (toolgateway.Binding, error
 	if err != nil {
 		return toolgateway.Binding{}, err
 	}
-	if strings.TrimSpace(os.Getenv(toolgateway.RetiredAuthTokenEnvName)) != "" {
-		return toolgateway.Binding{}, toolgateway.RetiredAuthTokenEnvError()
-	}
 	gatewayToken, err := toolgateway.GenerateAuthToken()
 	if err != nil {
 		return toolgateway.Binding{}, fmt.Errorf("generate mcp gateway token: %w", err)
@@ -3179,12 +3175,7 @@ func validateServeMultiContextToolGatewayAdmission(cfg *config.Config, loadedBun
 }
 
 func validateServeGatewayURLEnvForNonDev() error {
-	for _, name := range cliapp.RetiredToolGatewayURLEnvNames {
-		if err := cliapp.ValidateRetiredToolGatewayURLEnv(name, os.Getenv(name)); err != nil {
-			return fmt.Errorf("non-dev serve rejects retired gateway URL env: %w", err)
-		}
-	}
-	return nil
+	return cliapp.ValidateGeneratedBoundaryEnv()
 }
 
 func serveMCPContainerGatewayURL(addr net.Addr) (string, error) {

@@ -281,7 +281,7 @@ func TestHostManagerRejectsRetiredAmbientDataSource(t *testing.T) {
 		SourceMountPoint: "/opt/swarm/source",
 	})
 	err := manager.ValidateSource(context.Background(), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
-	if err == nil || !strings.Contains(err.Error(), "workspace.data_source is retired") {
+	if err == nil || !strings.Contains(err.Error(), "workspace.data_source is unsupported") {
 		t.Fatalf("ValidateSource error = %v, want retired ambient data source rejection", err)
 	}
 }

@@ -59,7 +59,7 @@ func projectRulesDeclarationsValue(root yamlsource.Value) (RulesDocument, error)
 }
 
 func projectRuleSetValue(value yamlsource.Value) (RuleSet, error) {
-	fields, err := nodeValueFields(value, "rule set", map[string]struct{}{"classes": {}, "rules": {}, "inputs": {}}, nil)
+	fields, err := nodeValueFields(value, "rule set", map[string]struct{}{"classes": {}, "rules": {}, "inputs": {}})
 	if err != nil {
 		return RuleSet{}, err
 	}
@@ -142,7 +142,7 @@ func projectRuleClassesValue(value yamlsource.Value) (map[string]PolicyCriteriaC
 	}
 	out := make(map[string]PolicyCriteriaClass, len(fields))
 	for _, field := range fields {
-		properties, err := nodeValueFields(field.Value, "rule class", map[string]struct{}{"disposition": {}}, nil)
+		properties, err := nodeValueFields(field.Value, "rule class", map[string]struct{}{"disposition": {}})
 		if err != nil {
 			return nil, err
 		}
@@ -161,7 +161,7 @@ func projectRuleRowValue(value yamlsource.Value, machine bool) (PolicyValidation
 		allowed["check"] = struct{}{}
 		allowed["pin_candidate"] = struct{}{}
 	}
-	fields, err := nodeValueFields(value, "rule", allowed, nil)
+	fields, err := nodeValueFields(value, "rule", allowed)
 	if err != nil {
 		return PolicyValidationRule{}, err
 	}
@@ -207,11 +207,11 @@ func projectRuleRowValue(value yamlsource.Value, machine bool) (PolicyValidation
 		return out, err
 	}
 	out.PinCandidate = &flag
-	checks, err := nodeValueFields(fields["check"], "rule check", map[string]struct{}{"equal": {}}, nil)
+	checks, err := nodeValueFields(fields["check"], "rule check", map[string]struct{}{"equal": {}})
 	if err != nil {
 		return out, err
 	}
-	operands, err := nodeValueFields(checks["equal"], "rule equal", map[string]struct{}{"left": {}, "right": {}}, nil)
+	operands, err := nodeValueFields(checks["equal"], "rule equal", map[string]struct{}{"left": {}, "right": {}})
 	if err != nil {
 		return out, err
 	}

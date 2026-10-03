@@ -7,7 +7,7 @@ import (
 )
 
 func projectSchemaIngressValue(value yamlsource.Value) (*ProjectFlowIngress, error) {
-	fields, err := schemaValueFields(value, "ingress", projectFlowIngressFields, nil, true)
+	fields, err := schemaValueFields(value, "ingress", projectFlowIngressFields, true)
 	if err != nil {
 		return nil, err
 	}
@@ -25,7 +25,7 @@ func projectSchemaIngressValue(value yamlsource.Value) (*ProjectFlowIngress, err
 	}
 	seen := map[string]bool{}
 	for _, item := range items {
-		members, err := schemaValueFields(item, "ingress provider", projectFlowIngressProviderFields, nil, true)
+		members, err := schemaValueFields(item, "ingress provider", projectFlowIngressProviderFields, true)
 		if err != nil {
 			return nil, err
 		}
@@ -59,7 +59,7 @@ func projectSchemaIngressValue(value yamlsource.Value) (*ProjectFlowIngress, err
 // Presence exclusions precede projection; catalog admission still owns the
 // authentication plan, installed pack agreement, and required secrets.
 func projectSchemaIngressAdmissionValue(value yamlsource.Value) (ProjectFlowIngressAdmission, error) {
-	fields, err := schemaValueFields(value, "ingress admission", projectFlowIngressAdmissionFields, nil, true)
+	fields, err := schemaValueFields(value, "ingress admission", projectFlowIngressAdmissionFields, true)
 	var out ProjectFlowIngressAdmission
 	if err != nil {
 		return out, err
@@ -73,7 +73,7 @@ func projectSchemaIngressAdmissionValue(value yamlsource.Value) (ProjectFlowIngr
 			return out, err
 		}
 		if pack, present := fields["pack"]; present {
-			members, err := schemaValueFields(pack, "ingress pack", projectFlowIngressAdmissionPackFields, nil, true)
+			members, err := schemaValueFields(pack, "ingress pack", projectFlowIngressAdmissionPackFields, true)
 			if err != nil {
 				return out, err
 			}
@@ -113,7 +113,7 @@ func projectSchemaIngressAdmissionValue(value yamlsource.Value) (ProjectFlowIngr
 
 func projectSchemaIngressAuthenticationValue(authentication yamlsource.Value) (*ProjectFlowIngressAuthentication, error) {
 	out := &ProjectFlowIngressAuthentication{}
-	members, err := schemaValueFields(authentication, "raw authentication", projectFlowIngressAuthenticationFields, nil, true)
+	members, err := schemaValueFields(authentication, "raw authentication", projectFlowIngressAuthenticationFields, true)
 	if err != nil {
 		return out, err
 	}
@@ -147,7 +147,7 @@ func projectSchemaIngressAuthenticationValue(authentication yamlsource.Value) (*
 
 func projectSchemaIngressDeliveryIDValue(delivery yamlsource.Value) (*ProjectFlowIngressDeliveryID, error) {
 	out := &ProjectFlowIngressDeliveryID{}
-	members, err := schemaValueFields(delivery, "raw delivery_id", projectFlowIngressDeliveryIDFields, nil, true)
+	members, err := schemaValueFields(delivery, "raw delivery_id", projectFlowIngressDeliveryIDFields, true)
 	if err != nil {
 		return out, err
 	}
