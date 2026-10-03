@@ -41,6 +41,22 @@ execution receipts must identify their own snapshot.
    summary. Failed observation chooses full; failed final revalidation refuses
    success rather than claiming that skipped work executed. Literal master and
    scheduled acceptance remain post-merge #2535 obligations.
+7. Qualification exposed three additional workflow assertion consumers:
+   `cmd/swarm-complexity/workflow_test.go`,
+   `cmd/swarm-unused/workflow_test.go` and
+   `internal/testutil/postgres_ci_test.go`. These are test guards over the
+   already-audited workflow, not new execution authorities. They now locate the
+   summary by its name, exercise every tier with success/failure/skip/cancel/
+   unknown controls, decode expression-valued deadlines, and follow the exact
+   checked-in batch script to retain canonical database-runner ownership. The
+   latter census also explicitly includes mandatory-soak.
+8. The approved authoritative-spec edits change exact embedded-source
+   provenance in the compiled describe characterization. Actual base/head
+   binaries reproduce all 45 base hashes. Only ten JSON cells change; they
+   compare equal after removing only source_file/source_line/source_column
+   inside provenance objects. The 35 other cells, strict hash assertions,
+   normalization and two-repeat public commands are unchanged. Refresh only
+   those measured hashes, not the CLI or admission contract.
 
 ## Local Instruction Clarification
 
