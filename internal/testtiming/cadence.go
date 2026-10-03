@@ -183,17 +183,24 @@ func cadenceRegressionLag(full CadenceAttempt, core *CadenceCoreProof, item Cade
 			}
 		}
 	}
+	if err := cadenceCoreCompleteness(core.CadenceAttempt); err != nil {
+		return 0, err
+	}
+	return introduced, nil
+}
+
+func cadenceCoreCompleteness(core CadenceAttempt) error {
 	seen := map[string]bool{}
 	for _, evidence := range core.Evidence {
 		if evidence.WorkflowRunID != core.RunID || evidence.WorkflowAttempt != core.Attempt || seen[evidence.UnitID] || evidence.ExitCode != 0 || evidence.Report.Summary.FailedPackages != 0 || evidence.Report.Summary.FailedTests != 0 || len(ValidateCommandEvidence(evidence, core.Plan)) != 0 {
-			return 0, fmt.Errorf("preceding core command is foreign/duplicate/failed/incomplete")
+			return fmt.Errorf("preceding core command is foreign/duplicate/failed/incomplete")
 		}
 		seen[evidence.UnitID] = true
 	}
 	if len(seen) != len(core.Plan.Units) {
-		return 0, fmt.Errorf("preceding core proof has missing units")
+		return fmt.Errorf("preceding core proof has missing units")
 	}
-	return introduced, nil
+	return nil
 }
 
 func WriteCadenceMarkdown(out io.Writer, observation CadenceObservation) error {
