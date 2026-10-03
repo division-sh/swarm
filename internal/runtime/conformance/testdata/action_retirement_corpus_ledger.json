@@ -3257,7 +3257,6 @@
     }
   ],
   "new_reference_files": {
-    ".github/complexity-baseline.json": "generated Go complexity measurements; matched names are source evidence, not authored actions or interpreters",
     "internal/apiv1/operator_mailbox_event_fixture_test.go": "d43a2ba2b retained mailbox event/selected-store helper split; action materializer is not retained",
     "internal/runtime/conformance/action_retirement_corpus_test.go": "historical corpus census and live-source/negative guards",
     "internal/runtime/conformance/handler_action_retirement_guard_test.go": "repository AST retirement guard and hostile mutations",

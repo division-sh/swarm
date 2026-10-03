@@ -22486,7 +22486,8 @@ test_specification:
         Local completion runs unchanged logical units in bounded subprocess workers, each through the existing
         host/account FIFO admission, exact owned or explicit PostgreSQL service, descendant join and receipt validator.
         The parent owns no admission slot. It cancels and joins started workers after a failure or signal, records
-        failed/not-started units without credit, and rechecks source. Every reviewer-bound planned worker independently
+        failed/not-started units without credit, and rechecks source. Each subprocess signal relay is stopped and
+        joined before its worker result can be published. Every reviewer-bound planned worker independently
         requires clean source and unchanged planned HEAD before and after execution. Ordering does not change plan
         membership, selectors, backend children or deadlines. Conservative concurrency is at most four, constrained
         by stable CPU and memory/cgroup limits (four CPUs and eight GiB per invocation); unknown capacity falls back
