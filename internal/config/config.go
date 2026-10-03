@@ -15,7 +15,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config contains platform-generic runtime configuration.
+// Config contains platform-generic runtime configuration. Authored input enters through DecodeSource.
 type Config struct {
 	Runtime    RuntimeConfig   `yaml:"runtime"`
 	Database   DatabaseConfig  `yaml:"database"`
@@ -45,14 +45,6 @@ type RuntimeConfig struct {
 
 type PlatformConfig struct {
 	Packs PlatformPacksConfig `yaml:"packs"`
-}
-
-func (c *Config) UnmarshalYAML(value *yaml.Node) error {
-	if err := validateConfigSource(yamlsource.ValueFromNode(value), reflect.TypeFor[Config](), "config"); err != nil {
-		return err
-	}
-	type raw Config
-	return value.Decode((*raw)(c))
 }
 
 func (r *RuntimeConfig) UnmarshalYAML(value *yaml.Node) error {
@@ -263,7 +255,11 @@ func LoadWithOptions(path string, opts LoadOptions) (*Config, error) {
 	}
 	var cfg Config
 	cfg.Runtime.RecoveryOnStartup = true
-	if err := yaml.Unmarshal(b, &cfg); err != nil {
+	var source yaml.Node
+	if err := yaml.Unmarshal(b, &source); err != nil {
+		return nil, fmt.Errorf("parse config %s: %w", path, err)
+	}
+	if err := DecodeSource(yamlsource.ValueFromNode(&source), &cfg); err != nil {
 		if diagnostic, ok := runtimecontracts.AsLoaderDiagnostic(err); ok {
 			located := *diagnostic
 			located.Location.File = path
