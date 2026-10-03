@@ -187,7 +187,7 @@ func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServePr
 		}
 		binary = options.InternalMockLifecycleBinary
 		args = []string{"-test.run=^TestOwnedMockLifecycleProcessEntry$", "-test.v", "-test.timeout=10m"}
-		env = append(env, "SWARM_INTERNAL_MOCK_LIFECYCLE_REQUEST="+string(request))
+		env = append(env, "SWARM_TEST_INTERNAL_MOCK_LIFECYCLE_REQUEST="+string(request))
 	}
 	cmd := exec.Command(binary, args...)
 	cmd.Dir = options.WorkingDir
