@@ -1,8 +1,6 @@
 stages: []
 pins:
   inputs:
-    events: [gates.clear_requested]
+    - gates.clear_requested
   outputs:
-    events:
-      - event: gates.cleared
-        sink: harness
+    - gates.cleared

@@ -4,7 +4,7 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events: [trigger.alpha]
+    - trigger.alpha
 connect:
   - event: trigger.alpha
     from: .

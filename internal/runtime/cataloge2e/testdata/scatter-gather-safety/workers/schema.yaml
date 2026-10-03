@@ -9,8 +9,7 @@ stages:
   expired: {terminal: true}
 pins:
   inputs:
-    events:
-      - item.registered
-      - item.finished
+    - item.registered
+    - item.finished
   outputs:
-    events: [item.reported]
+    - item.reported

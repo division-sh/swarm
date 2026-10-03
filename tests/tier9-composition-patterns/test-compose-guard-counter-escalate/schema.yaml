@@ -1,9 +1,6 @@
 stages: []
 pins:
   inputs:
-    events:
-      - retry.requested
+    - retry.requested
   outputs:
-    events:
-      - event: limit.reached
-        sink: harness
+    - limit.reached

@@ -4,4 +4,4 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events: [review.requested]
+    - review.requested

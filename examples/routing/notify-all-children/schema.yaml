@@ -1,19 +1,17 @@
 name: notify-all-children
 pins:
   inputs:
-    events:
-      - portfolio.opened
-      - portfolio.account.register.requested
-      - portfolio.accounts.register.requested
-      - portfolio.membership.seeded
-      - portfolio.notify.requested
+    - portfolio.opened
+    - portfolio.account.register.requested
+    - portfolio.accounts.register.requested
+    - portfolio.membership.seeded
+    - portfolio.notify.requested
   outputs:
-    events:
-      - portfolio.opened
-      - portfolio.account.register.requested
-      - portfolio.accounts.register.requested
-      - portfolio.membership.seeded
-      - portfolio.notify.requested
+    - portfolio.opened
+    - portfolio.account.register.requested
+    - portfolio.accounts.register.requested
+    - portfolio.membership.seeded
+    - portfolio.notify.requested
 connect:
   - event: portfolio.opened
     from: .

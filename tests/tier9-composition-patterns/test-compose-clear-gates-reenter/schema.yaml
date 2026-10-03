@@ -4,8 +4,7 @@ stages:
   approved: {terminal: true}
 pins:
   inputs:
-    events: [review.done, review.insufficient]
+    - review.done
+    - review.insufficient
   outputs:
-    events:
-      - event: review.approved
-        sink: harness
+    - review.approved

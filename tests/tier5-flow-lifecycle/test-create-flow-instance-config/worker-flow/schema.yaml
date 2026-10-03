@@ -13,10 +13,9 @@ auto_emit_on_create:
   event: worker.ready
 pins:
   inputs:
-    events:
-      - event: flow.spawned
-        initialize:
-          max_retries: payload.config.max_retries
-          timeout_ms: payload.config.timeout_ms
+    - event: flow.spawned
+      initialize:
+        max_retries: payload.config.max_retries
+        timeout_ms: payload.config.timeout_ms
   outputs:
-    events: [worker.ready]
+    - worker.ready

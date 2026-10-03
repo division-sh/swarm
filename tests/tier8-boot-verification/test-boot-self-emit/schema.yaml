@@ -3,6 +3,6 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events: [loop.event]
+    - loop.event
   outputs:
-    events: [loop.event]
+    - loop.event

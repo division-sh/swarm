@@ -11,6 +11,5 @@ auto_emit_on_create:
   event: auto.started
 pins:
   inputs:
-    events:
-      - worker.requested
-      - auto.started
+    - worker.requested
+    - auto.started

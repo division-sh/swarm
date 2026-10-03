@@ -3,8 +3,6 @@ stages:
   resolved: {terminal: true}
 pins:
   inputs:
-    events: [conflict.submitted]
+    - conflict.submitted
   outputs:
-    events:
-      - event: conflict.resolved
-        sink: harness
+    - conflict.resolved

@@ -1,8 +1,6 @@
 stages: []
 pins:
   inputs:
-    events: [evidence.submitted]
+    - evidence.submitted
   outputs:
-    events:
-      - event: evidence.recorded
-        sink: harness
+    - evidence.recorded

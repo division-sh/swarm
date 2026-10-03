@@ -4,8 +4,6 @@ stages:
   complete: {terminal: true}
 pins:
   inputs:
-    events: [order.submitted]
+    - order.submitted
   outputs:
-    events:
-      - event: order.finalized
-        sink: harness
+    - order.finalized

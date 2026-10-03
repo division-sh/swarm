@@ -4,9 +4,8 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events:
-      - task.requested
-      - task.result
+    - task.requested
+    - task.result
 connect:
   - event: task.result
     from: child

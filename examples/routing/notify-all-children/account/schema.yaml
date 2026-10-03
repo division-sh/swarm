@@ -5,6 +5,5 @@ stages:
 instance: account_id
 pins:
   inputs:
-    events:
-      - account.registered
-      - account.notify.requested
+    - account.registered
+    - account.notify.requested

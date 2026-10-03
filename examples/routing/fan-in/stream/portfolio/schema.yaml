@@ -2,5 +2,4 @@ name: portfolio
 instance: period_id
 pins:
   inputs:
-    events:
-      - operating.reported
+    - operating.reported

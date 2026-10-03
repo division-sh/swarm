@@ -4,9 +4,10 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events: [task.completed]
+    - task.completed
   outputs:
-    events: [task.logged, task.record]
+    - task.logged
+    - task.record
 connect:
   - event: task.record
     from: .

@@ -3,6 +3,8 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events: [monitor.started, monitor.stopped, timer.tick]
+    - monitor.started
+    - monitor.stopped
+    - timer.tick
   outputs:
-    events: [timer.tick]
+    - timer.tick

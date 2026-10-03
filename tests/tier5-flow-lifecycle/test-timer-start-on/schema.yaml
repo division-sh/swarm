@@ -4,8 +4,7 @@ stages:
   timed_out: {terminal: true}
 pins:
   inputs:
-    events: [task.started, timer.task_timeout]
+    - task.started
+    - timer.task_timeout
   outputs:
-    events:
-      - event: task.timed_out
-        sink: harness
+    - task.timed_out

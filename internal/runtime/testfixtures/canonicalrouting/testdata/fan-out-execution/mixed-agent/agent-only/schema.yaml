@@ -3,4 +3,4 @@ stages:
   active: {initial: true}
 pins:
   inputs:
-    events: [mixed.agent]
+    - mixed.agent

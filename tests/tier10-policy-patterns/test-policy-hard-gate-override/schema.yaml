@@ -5,8 +5,6 @@ stages:
   rejected: {terminal: true}
 pins:
   inputs:
-    events: [score.final]
+    - score.final
   outputs:
-    events:
-      - event: result.demoted
-        sink: harness
+    - result.demoted

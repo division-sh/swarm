@@ -3,8 +3,6 @@ stages:
   active: {terminal: true}
 pins:
   inputs:
-    events: [slot.requested]
+    - slot.requested
   outputs:
-    events:
-      - event: slot.granted
-        sink: harness
+    - slot.granted

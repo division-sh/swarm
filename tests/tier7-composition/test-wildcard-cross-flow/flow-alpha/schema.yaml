@@ -4,8 +4,6 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events: [trigger.alpha]
+    - trigger.alpha
   outputs:
-    events:
-      - event: job.alpha_done
-        sink: harness
+    - job.alpha_done

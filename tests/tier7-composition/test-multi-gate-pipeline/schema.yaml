@@ -4,10 +4,10 @@ stages:
   approved: {terminal: true}
 pins:
   inputs:
-    events: [gate.g1_set, gate.g2_set, gate.g3_set, approval.requested]
+    - gate.g1_set
+    - gate.g2_set
+    - gate.g3_set
+    - approval.requested
   outputs:
-    events:
-      - event: approval.granted
-        sink: harness
-      - event: gate.set
-        sink: harness
+    - approval.granted
+    - gate.set

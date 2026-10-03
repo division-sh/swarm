@@ -3,4 +3,4 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events: [item.requested]
+    - item.requested

@@ -22,7 +22,6 @@ func TestTier11Probe(t *testing.T) {
 		"test-child-flow-absolute-path",
 		"test-child-flow-local-events",
 		"test-child-flow-policy-inherit",
-		"test-data-pin-write-conflict",
 		"test-child-flow-pin-wiring",
 		"test-multi-level-policy-inherit",
 		"test-nested-three-levels",

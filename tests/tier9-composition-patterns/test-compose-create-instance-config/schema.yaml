@@ -4,11 +4,11 @@ stages:
   spawned: {terminal: true}
 pins:
   inputs:
-    events: [spawn.requested, task.assign]
+    - spawn.requested
+    - task.assign
   outputs:
-    events:
-      - spawn.done
-      - task.assign
+    - spawn.done
+    - task.assign
 connect:
   - event: spawn.done
     from: .

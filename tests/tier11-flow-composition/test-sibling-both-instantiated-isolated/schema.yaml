@@ -3,6 +3,6 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events: [start.all]
+    - start.all
   outputs:
-    events: [all.done]
+    - all.done

@@ -4,4 +4,4 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events: [task.submitted]
+    - task.submitted

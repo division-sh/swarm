@@ -3,12 +3,10 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events:
-      - pipeline.start
-      - micro.done
+    - pipeline.start
+    - micro.done
   outputs:
-    events:
-      - step.begin
+    - step.begin
 connect:
   - event: step.begin
     from: .

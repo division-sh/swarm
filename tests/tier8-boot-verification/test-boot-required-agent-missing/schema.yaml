@@ -6,4 +6,4 @@ required_agents:
     emits: [task.completed]
 pins:
   inputs:
-    events: [task.requested]
+    - task.requested

@@ -5,5 +5,4 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events:
-      - item.received
+    - item.received

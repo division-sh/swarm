@@ -3,11 +3,11 @@ instance: portfolio_id
 stages: []
 pins:
   inputs:
-    events:
-      - portfolio.setup
-      - operating.reported
+    - portfolio.setup
+    - operating.reported
   outputs:
-    events: [period.setup, period.reported]
+    - period.setup
+    - period.reported
 connect:
   - {event: period.setup, from: ., to: period, resolution: create}
   - {event: period.reported, from: ., to: period, resolution: select}

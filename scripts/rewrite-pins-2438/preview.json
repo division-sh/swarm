@@ -210,16 +210,13 @@
     "path": "internal/runtime/scenarioderivation/testdata/hostile/work/schema.yaml"
   },
   {
-    "path": "internal/runtime/testdata/generic-swarm-bundle/delivery/schema.yaml",
-    "delete": true
+    "path": "internal/runtime/testdata/generic-swarm-bundle/delivery/schema.yaml"
   },
   {
-    "path": "internal/runtime/testdata/generic-swarm-bundle/intake/schema.yaml",
-    "delete": true
+    "path": "internal/runtime/testdata/generic-swarm-bundle/intake/schema.yaml"
   },
   {
-    "path": "internal/runtime/testdata/generic-swarm-bundle/processing/schema.yaml",
-    "delete": true
+    "path": "internal/runtime/testdata/generic-swarm-bundle/processing/schema.yaml"
   },
   {
     "path": "internal/runtime/testfixtures/canonicalrouting/testdata/fan-out-execution/mixed-agent/agent-only/schema.yaml"
@@ -393,6 +390,34 @@
     "path": "tests/tier11-flow-composition/test-child-flow-tool-inherit/schema.yaml"
   },
   {
+    "path": "tests/tier11-flow-composition/test-data-pin-wiring/entities.yaml",
+    "delete": true
+  },
+  {
+    "path": "tests/tier11-flow-composition/test-data-pin-wiring/events.yaml",
+    "delete": true
+  },
+  {
+    "path": "tests/tier11-flow-composition/test-data-pin-wiring/manifest.yaml",
+    "delete": true
+  },
+  {
+    "path": "tests/tier11-flow-composition/test-data-pin-wiring/nodes.yaml",
+    "delete": true
+  },
+  {
+    "path": "tests/tier11-flow-composition/test-data-pin-wiring/processor/events.yaml",
+    "delete": true
+  },
+  {
+    "path": "tests/tier11-flow-composition/test-data-pin-wiring/processor/manifest.yaml",
+    "delete": true
+  },
+  {
+    "path": "tests/tier11-flow-composition/test-data-pin-wiring/processor/nodes.yaml",
+    "delete": true
+  },
+  {
     "path": "tests/tier11-flow-composition/test-data-pin-wiring/processor/schema.yaml",
     "delete": true
   },
@@ -401,7 +426,47 @@
     "delete": true
   },
   {
+    "path": "tests/tier11-flow-composition/test-data-pin-wiring/tests/expected.yaml",
+    "delete": true
+  },
+  {
+    "path": "tests/tier11-flow-composition/test-data-pin-wiring/tests/visible-smoke.yaml",
+    "delete": true
+  },
+  {
+    "path": "tests/tier11-flow-composition/test-data-pin-write-conflict/entities.yaml",
+    "delete": true
+  },
+  {
+    "path": "tests/tier11-flow-composition/test-data-pin-write-conflict/events.yaml",
+    "delete": true
+  },
+  {
+    "path": "tests/tier11-flow-composition/test-data-pin-write-conflict/flow-a/events.yaml",
+    "delete": true
+  },
+  {
+    "path": "tests/tier11-flow-composition/test-data-pin-write-conflict/flow-a/manifest.yaml",
+    "delete": true
+  },
+  {
+    "path": "tests/tier11-flow-composition/test-data-pin-write-conflict/flow-a/nodes.yaml",
+    "delete": true
+  },
+  {
     "path": "tests/tier11-flow-composition/test-data-pin-write-conflict/flow-a/schema.yaml",
+    "delete": true
+  },
+  {
+    "path": "tests/tier11-flow-composition/test-data-pin-write-conflict/flow-b/events.yaml",
+    "delete": true
+  },
+  {
+    "path": "tests/tier11-flow-composition/test-data-pin-write-conflict/flow-b/manifest.yaml",
+    "delete": true
+  },
+  {
+    "path": "tests/tier11-flow-composition/test-data-pin-write-conflict/flow-b/nodes.yaml",
     "delete": true
   },
   {
@@ -409,7 +474,20 @@
     "delete": true
   },
   {
-    "path": "tests/tier11-flow-composition/test-data-pin-write-conflict/schema.yaml"
+    "path": "tests/tier11-flow-composition/test-data-pin-write-conflict/manifest.yaml",
+    "delete": true
+  },
+  {
+    "path": "tests/tier11-flow-composition/test-data-pin-write-conflict/nodes.yaml",
+    "delete": true
+  },
+  {
+    "path": "tests/tier11-flow-composition/test-data-pin-write-conflict/schema.yaml",
+    "delete": true
+  },
+  {
+    "path": "tests/tier11-flow-composition/test-data-pin-write-conflict/tests/expected.yaml",
+    "delete": true
   },
   {
     "path": "tests/tier11-flow-composition/test-dynamic-flow-instance/schema.yaml"

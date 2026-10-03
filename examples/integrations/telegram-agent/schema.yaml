@@ -5,9 +5,9 @@ imports:
       event: inbound.telegram.text_message
 pins:
   inputs:
-    events: [inbound.telegram.text_message]
+    - inbound.telegram.text_message
   outputs:
-    events: [inbound.telegram.text_message]
+    - inbound.telegram.text_message
 connect:
   - event: inbound.telegram.text_message
     from: .

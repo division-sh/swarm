@@ -5,9 +5,9 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events: [timer.scheduled, timer.cancel_requested, timer.check]
+    - timer.scheduled
+    - timer.cancel_requested
+    - timer.check
   outputs:
-    events:
-      - timer.check
-      - event: timer.cancelled
-        sink: harness
+    - timer.check
+    - timer.cancelled

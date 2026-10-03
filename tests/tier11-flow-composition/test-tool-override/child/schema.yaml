@@ -4,7 +4,6 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events: [child.start]
+    - child.start
   outputs:
-    events:
-      - child.done
+    - child.done

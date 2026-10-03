@@ -5,8 +5,6 @@ stages:
   processed: {terminal: true}
 pins:
   inputs:
-    events: [child.start]
+    - child.start
   outputs:
-    events:
-      - event: child.done
-        sink: harness
+    - child.done

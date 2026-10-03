@@ -3,6 +3,6 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events: [job.created]
+    - job.created
   outputs:
-    events: [job.done]
+    - job.done

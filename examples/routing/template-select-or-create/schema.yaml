@@ -1,9 +1,9 @@
 name: template-select-or-create
 pins:
   inputs:
-    events: [account.requested]
+    - account.requested
   outputs:
-    events: [account.requested]
+    - account.requested
 connect:
   - event: account.requested
     from: .

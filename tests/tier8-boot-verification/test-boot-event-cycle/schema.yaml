@@ -4,6 +4,7 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events: [cycle.ping]
+    - cycle.ping
   outputs:
-    events: [cycle.ping, cycle.pong]
+    - cycle.ping
+    - cycle.pong

@@ -44,6 +44,7 @@ type producerRoutingRetirementLedgerRow struct {
 	Disposition    string `yaml:"disposition"`
 	Proof          string `yaml:"proof"`
 	RetiredFixture string `yaml:"retired_fixture,omitempty"`
+	RemovedFixture string `yaml:"removed_fixture,omitempty"`
 }
 
 func TestProducerRoutingRetirementLedger(t *testing.T) {
@@ -67,8 +68,8 @@ func TestProducerRoutingRetirementLedger(t *testing.T) {
 		fixtures[fixture.RelativePath] = fixture
 	}
 	wantDispositionCounts := map[string]int{
-		"harness": 88, "negative_removal": 39, "dead_removal": 47, "retired_handler_action": 1, "connected_creation": 4,
-		"same_flow": 7, "external": 3, "historical_connect": 8,
+		"harness": 88, "negative_removal": 36, "dead_removal": 46, "retired_handler_action": 1, "connected_creation": 4,
+		"same_flow": 7, "external": 3, "historical_connect": 7, "retired_pin_grant_fixture": 5,
 	}
 	gotDispositionCounts := map[string]int{}
 	seen := map[string]struct{}{}
@@ -88,18 +89,14 @@ func TestProducerRoutingRetirementLedger(t *testing.T) {
 			if _, exists := testEntrypoints[baseProof]; !exists {
 				t.Fatalf("proof %q does not identify an actual TestXxx entrypoint", row.Proof)
 			}
-			if row.RetiredFixture != "" {
-				fixture, exists := fixtures[row.RetiredFixture]
-				if !exists || fixture.Metadata.Disposition != testcatalog.DispositionRetired ||
-					fixture.Metadata.Retirement == nil ||
-					!strings.HasPrefix(row.Path, row.RetiredFixture+"/") ||
-					row.Proof != "TestStaticMultiEntityRetirementConformance" ||
-					!strings.Contains(fixture.Metadata.Retirement.Replacement, row.Proof) {
-					t.Fatalf("row %s has invalid retired-fixture replacement evidence: %#v", row.ID, row)
-				}
-				// The checks below still prove routing removal in the historical
-				// source. The replacement does not execute this retired fixture.
+			if row.Disposition == "retired_pin_grant_fixture" {
+				requireRemovedPinGrantFixture(t, repoRoot, row)
+				return
 			}
+			if row.RemovedFixture != "" {
+				t.Fatalf("unexpected whole-fixture removal: %#v", row)
+			}
+			requireRetiredProducerRoutingFixture(t, row, fixtures)
 			if row.Disposition == "same_flow" || row.Disposition == "external" {
 				if _, exists := testEntrypoints[strings.TrimSpace(row.Proof)]; !exists {
 					t.Fatalf("canonical consumer proof %q does not identify an exact executable subtest", row.Proof)
@@ -166,6 +163,51 @@ func TestProducerRoutingRetirementLedger(t *testing.T) {
 	}
 	if fmt.Sprint(gotDispositionCounts) != fmt.Sprint(wantDispositionCounts) {
 		t.Fatalf("disposition counts = %v, want %v", gotDispositionCounts, wantDispositionCounts)
+	}
+}
+
+func requireRetiredProducerRoutingFixture(t testing.TB, row producerRoutingRetirementLedgerRow, fixtures map[string]testcatalog.Fixture) {
+	t.Helper()
+	if row.RetiredFixture == "" {
+		return
+	}
+	fixture, exists := fixtures[row.RetiredFixture]
+	if !exists || fixture.Metadata.Disposition != testcatalog.DispositionRetired ||
+		fixture.Metadata.Retirement == nil ||
+		!strings.HasPrefix(row.Path, row.RetiredFixture+"/") ||
+		row.Proof != "TestStaticMultiEntityRetirementConformance" ||
+		!strings.Contains(fixture.Metadata.Retirement.Replacement, row.Proof) {
+		t.Fatalf("row %s has invalid retired-fixture replacement evidence: %#v", row.ID, row)
+	}
+}
+
+func requireRemovedPinGrantFixture(t testing.TB, repoRoot string, row producerRoutingRetirementLedgerRow) {
+	t.Helper()
+	want := map[string]struct{ root, proof string }{
+		"B059": {"tests/tier11-flow-composition/test-data-pin-wiring", "TestGrantFixtureRetirementPreservesCanonicalAncestorConnection"},
+		"B060": {"tests/tier11-flow-composition/test-data-pin-wiring", "TestRewriteDeletesOnlyExplicitRetiredFixtures"},
+		"B061": {"tests/tier11-flow-composition/test-data-pin-write-conflict", "TestFieldGrantAuthorityRetired"},
+		"B062": {"tests/tier11-flow-composition/test-data-pin-write-conflict", "TestFieldGrantAuthorityRetired"},
+		"B063": {"tests/tier11-flow-composition/test-data-pin-write-conflict", "TestRewriteDeletesOnlyExplicitRetiredFixtures"},
+	}[row.ID]
+	if want.root == "" || row.RemovedFixture != want.root || row.Proof != want.proof ||
+		row.RetiredFixture != "" || !strings.HasPrefix(row.Path, want.root+"/") {
+		t.Fatalf("invalid pin-grant fixture removal evidence: %#v", row)
+	}
+	root := filepath.Join(repoRoot, filepath.FromSlash(want.root))
+	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if !entry.IsDir() {
+			return fmt.Errorf("retired grant fixture retains %s", path)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 

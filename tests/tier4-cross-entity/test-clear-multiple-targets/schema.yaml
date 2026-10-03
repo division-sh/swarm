@@ -3,8 +3,6 @@ stages:
   cleared: {terminal: true}
 pins:
   inputs:
-    events: [state.reset_requested]
+    - state.reset_requested
   outputs:
-    events:
-      - event: state.reset_completed
-        sink: harness
+    - state.reset_completed

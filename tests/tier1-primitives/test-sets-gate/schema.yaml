@@ -1,8 +1,6 @@
 stages: []
 pins:
   inputs:
-    events: [gate.requested]
+    - gate.requested
   outputs:
-    events:
-      - event: gate.set
-        sink: harness
+    - gate.set

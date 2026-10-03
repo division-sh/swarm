@@ -4,8 +4,6 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events: [entity.create_requested]
+    - entity.create_requested
   outputs:
-    events:
-      - event: entity.created
-        sink: harness
+    - entity.created

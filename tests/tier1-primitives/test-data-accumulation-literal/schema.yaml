@@ -3,8 +3,6 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events: [item.received]
+    - item.received
   outputs:
-    events:
-      - event: item.categorized
-        sink: harness
+    - item.categorized

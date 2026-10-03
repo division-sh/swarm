@@ -2,4 +2,4 @@ name: test-chain-depth-limit
 stages: []
 pins:
   inputs:
-    events: [chain.start]
+    - chain.start

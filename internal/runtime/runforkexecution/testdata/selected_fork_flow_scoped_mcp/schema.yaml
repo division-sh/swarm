@@ -1,12 +1,10 @@
 name: selected-fork-flow-scoped-mcp
 pins:
   inputs:
-    events:
-      - task.assigned
-      - task.completed
+    - task.assigned
+    - task.completed
   outputs:
-    events:
-      - task.assigned
+    - task.assigned
 connect:
   - event: task.assigned
     from: .

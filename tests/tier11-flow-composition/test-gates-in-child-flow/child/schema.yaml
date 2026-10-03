@@ -3,9 +3,7 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events:
-      - validate.start
+    - validate.start
   outputs:
-    events:
-      - validation.done
+    - validation.done
 name: child

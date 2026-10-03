@@ -3,11 +3,7 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events:
-      - check.requested
+    - check.requested
   outputs:
-    events:
-      - event: check.escalated
-        sink: harness
-      - event: check.passed
-        sink: harness
+    - check.escalated
+    - check.passed

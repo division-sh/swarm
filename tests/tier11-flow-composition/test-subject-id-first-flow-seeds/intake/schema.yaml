@@ -4,8 +4,6 @@ stages:
   processed: {terminal: true}
 pins:
   inputs:
-    events: [work.assigned]
+    - work.assigned
   outputs:
-    events:
-      - event: item.processed
-        sink: harness
+    - item.processed

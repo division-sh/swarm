@@ -4,8 +4,6 @@ stages:
   finished: {terminal: true}
 pins:
   inputs:
-    events:
-      - micro.start
+    - micro.start
   outputs:
-    events:
-      - micro.done
+    - micro.done

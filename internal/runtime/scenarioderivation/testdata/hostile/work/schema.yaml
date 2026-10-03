@@ -3,6 +3,5 @@ stages:
   ready: {initial: true}
 pins:
   inputs:
-    events:
-      - work.requested
-      - work.alternate
+    - work.requested
+    - work.alternate

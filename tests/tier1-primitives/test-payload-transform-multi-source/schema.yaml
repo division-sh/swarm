@@ -3,8 +3,6 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events: [export.requested]
+    - export.requested
   outputs:
-    events:
-      - event: item.exported
-        sink: harness
+    - item.exported

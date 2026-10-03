@@ -10,9 +10,8 @@ auto_emit_on_create:
   event: work.setup
 pins:
   inputs:
-    events:
-      - event: worker.requested
-        initialize:
-          task_label: payload.task_label
-      - work.setup
-      - work.assign
+    - event: worker.requested
+      initialize:
+        task_label: payload.task_label
+    - work.setup
+    - work.assign

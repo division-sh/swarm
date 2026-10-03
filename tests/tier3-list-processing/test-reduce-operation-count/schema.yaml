@@ -3,8 +3,6 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events: [batch.submitted]
+    - batch.submitted
   outputs:
-    events:
-      - event: batch.counted
-        sink: harness
+    - batch.counted

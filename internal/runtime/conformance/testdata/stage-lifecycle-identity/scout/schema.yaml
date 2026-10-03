@@ -22,6 +22,5 @@ stages:
     terminal: true
 pins:
   inputs:
-    events:
-      - scout.setup
-      - scout.member.done
+    - scout.setup
+    - scout.member.done

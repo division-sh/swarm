@@ -6,9 +6,10 @@ stages:
   failed: {terminal: true}
 pins:
   inputs:
-    events: [batch.ready, item.reported]
+    - batch.ready
+    - item.reported
   outputs:
-    events: [item.requested]
+    - item.requested
 connect:
   - {event: item.requested, from: ., to: workers, resolution: select-or-create}
   - {event: item.reported, from: workers, to: .}

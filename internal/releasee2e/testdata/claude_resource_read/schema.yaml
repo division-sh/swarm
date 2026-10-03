@@ -3,8 +3,13 @@ stages:
   pending: {initial: true}
   done: {terminal: true}
 pins:
-  inputs: {events: [task.assigned, task.finished, records.loaded]}
-  outputs: {events: [task.assigned, task.finished]}
+  inputs:
+    - task.assigned
+    - task.finished
+    - records.loaded
+  outputs:
+    - task.assigned
+    - task.finished
 connect:
   - {event: task.assigned, from: ., to: worker}
   - {event: task.finished, from: ., to: worker}

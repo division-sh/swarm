@@ -4,4 +4,4 @@ stages:
   recorded: {terminal: true}
 pins:
   inputs:
-    events: [task.record]
+    - task.record

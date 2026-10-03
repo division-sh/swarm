@@ -2,13 +2,8 @@ name: requester
 instance: account_id
 pins:
   inputs:
-    events:
-      - requester.setup
-      - requester.requested
-      - event: provider.replied
-        resolution:
-          mode: reply
-          replies_to: provider.requested
+    - requester.setup
+    - requester.requested
+    - provider.replied
   outputs:
-    events:
-      - provider.requested
+    - provider.requested

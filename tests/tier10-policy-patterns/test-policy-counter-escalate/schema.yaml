@@ -1,9 +1,6 @@
 stages: []
 pins:
   inputs:
-    events:
-      - attempt.requested
+    - attempt.requested
   outputs:
-    events:
-      - event: attempt.limit_hit
-        sink: harness
+    - attempt.limit_hit

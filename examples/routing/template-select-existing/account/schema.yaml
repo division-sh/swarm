@@ -2,6 +2,5 @@ name: account
 instance: account_id
 pins:
   inputs:
-    events:
-      - account.setup
-      - account.ready
+    - account.setup
+    - account.ready

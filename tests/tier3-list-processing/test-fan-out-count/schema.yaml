@@ -3,8 +3,6 @@ stages:
   processing: {terminal: true}
 pins:
   inputs:
-    events: [batch.received]
+    - batch.received
   outputs:
-    events:
-      - event: task.dispatched
-        sink: harness
+    - task.dispatched

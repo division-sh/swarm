@@ -1,9 +1,11 @@
 name: template-reply
 pins:
   inputs:
-    events: [requester.setup.requested, request.submitted]
+    - requester.setup.requested
+    - request.submitted
   outputs:
-    events: [requester.setup.requested, request.submitted]
+    - requester.setup.requested
+    - request.submitted
 connect:
   - event: requester.setup.requested
     from: .
@@ -13,15 +15,16 @@ connect:
     to: initiator
   - event: requester.setup
     from: initiator
-    to: requester
     resolution: select-or-create
+    to: requester
   - event: requester.requested
     from: initiator
-    to: requester
     resolution: select
+    to: requester
   - event: provider.requested
     from: requester
     to: provider
   - event: provider.replied
     from: provider
+    replies_to: provider.requested
     to: requester

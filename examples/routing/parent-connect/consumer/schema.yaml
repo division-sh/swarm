@@ -1,5 +1,4 @@
 name: consumer
 pins:
   inputs:
-    events:
-      - work.ready
+    - work.ready

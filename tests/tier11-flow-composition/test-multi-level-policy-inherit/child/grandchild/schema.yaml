@@ -4,8 +4,6 @@ stages:
   approved: {terminal: true}
 pins:
   inputs:
-    events: [grandchild.check]
+    - grandchild.check
   outputs:
-    events:
-      - event: grandchild.passed
-        sink: harness
+    - grandchild.passed

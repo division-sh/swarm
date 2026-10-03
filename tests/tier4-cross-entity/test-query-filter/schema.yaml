@@ -3,8 +3,6 @@ stages:
   filtered: {terminal: true}
 pins:
   inputs:
-    events: [filter.requested]
+    - filter.requested
   outputs:
-    events:
-      - event: filter.completed
-        sink: harness
+    - filter.completed

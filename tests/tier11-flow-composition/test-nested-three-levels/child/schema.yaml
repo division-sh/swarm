@@ -5,13 +5,11 @@ stages:
   completed: {terminal: true}
 pins:
   inputs:
-    events:
-      - step.begin
-      - micro.done
+    - step.begin
+    - micro.done
   outputs:
-    events:
-      - micro.start
-      - micro.relayed
+    - micro.start
+    - micro.relayed
 connect:
   - event: micro.start
     from: .
