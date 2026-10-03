@@ -1,8 +1,39 @@
 package main
 
 import (
+	"encoding/json"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/testplanning"
 )
+
+func TestLocalAndHostedTierSelectionsRemainIndependent(t *testing.T) {
+	tiers := []string{testplanning.ProfileCore, testplanning.ProfileLifecycle, testplanning.ProfileFull}
+	for _, local := range tiers {
+		for _, hosted := range tiers {
+			t.Run(local+"/"+hosted, func(t *testing.T) {
+				raw, err := json.Marshal(map[string]any{"pull_request": map[string]string{
+					"body": "CI-Tier: " + hosted + "\nLocal-Tier: " + local,
+				}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				body, err := testplanning.PREventBody(raw)
+				if err != nil {
+					t.Fatal(err)
+				}
+				ciTier, _, err := (testplanning.Policy{}).ResolveProfile("pull_request", body, "")
+				if err != nil || ciTier != hosted {
+					t.Fatalf("hosted selection=%s, want %s: %v", ciTier, hosted, err)
+				}
+				selected, localTier, explicit, err := completionSelection([]string{"--tier", local})
+				if err != nil || !selected || !explicit || localTier != local {
+					t.Fatalf("local selection=%s, want %s: %v", localTier, local, err)
+				}
+			})
+		}
+	}
+}
 
 func TestCompletionTierSelectionIsExplicitAndNeverInferred(t *testing.T) {
 	for _, tc := range []struct {
