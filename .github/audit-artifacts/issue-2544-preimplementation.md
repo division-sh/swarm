@@ -3,16 +3,21 @@
 Agent-g, 2026-10-03. Source baseline: merged #2537,
 `0fa24140aaa05e397509f451ba780fef3a260867`. Audit-only: no workflow,
 planner, runtime, test assertion, dependency or authoritative spec implementation.
-Independent coding gate: **approved as amended**,
-https://github.com/division-sh/swarm/issues/2544#issuecomment-5965227266.
-The binding amendment replaces the original authorization machinery with plain
-PR-body tier lines and requires measured candidate cost before retaining lifecycle.
+Independent coding gates: **approved as amended**, 5965227266 and the binding
+hosted-edit correction 5966450116:
+https://github.com/division-sh/swarm/issues/2544#issuecomment-5966450116.
+Plain PR-body tier lines remain; measured candidate cost is required before
+retaining lifecycle. This documentation sync precedes resumed workflow coding.
 
-**Implementation stopped on the recorded hosted-edit condition.** The same-head
+**Implementation may resume under the new-head/final-review contract.** The same-head
 core-to-lifecycle experiment at 8714bf5f0 preserves an old successful protected
-summary while heavier proof runs. See `issue-2544-tier-edit-stop.md`. A narrow
-independent re-gate is requested before further implementation; this does not
-reintroduce the retired authorization machinery or claim the PR was mergeable.
+summary while heavier proof runs. See `issue-2544-tier-edit-stop.md`. Gate
+5966450116 withdraws automatic post-success invalidation and rejects an early-held
+summary. Keep the late five-minute summary; an unmet increase requires a new signed
+head and qualifying higher-tier CI. Lead compares the current body with current-head
+successful plan/summary and actual local receipts at final merge review, including
+post-approval edits. Draft/non-mergeable fencing remains until qualification.
+No automatic stale-green revocation or observed whole-PR merge bypass is claimed.
 Raw hosted runs, plans, protected checks and cost observations are retained in
 swarm-docs `docs/audits/2026-10-03-2544-hosted-tier-edit-stop.tar.gz`, SHA256
 `eef4cb50f38554f32e5bbcfcc474f6c1228f91fd92a9728875544e145c303ba9`.
@@ -24,7 +29,7 @@ affected-owner selection with a fixed census/profile split. The reviewer must
 choose local and CI requirements independently; profile selection must consume
 that verdict automatically. Multiple cumulative tiers are allowed where the
 census establishes a meaningful coverage/cost difference. Independent gate
-5965227266 now grants bounded coding permission after this documentation sync.
+5966450116 now grants resumed bounded coding permission after this documentation sync.
 
 - Category: high-risk qualification maintenance / semantic ownership / parity.
 - Symptom: ready qualifications consume approximately 339-347 assigned
@@ -161,12 +166,18 @@ to full with an explicit diagnostic. Schedule, manual exhaustive and unverified
 master also run full. Never interpolate body text into shell or use publisher
 credentials. The independent human review remains the approval owner.
 
-Add pull_request.edited and qualify same-head edits. Before success the summary
-compares its effective tier with the current PR body; a thinner run cannot earn
-green after an increase. Hosted evidence must prove post-success body increases
-invalidate stale qualification, and human final review compares the current
-body to the latest qualifying run. Keep existing policy/plan/head/run/attempt
-digests. No additional authorization digest, gate fetch, YAML record or locator.
+Remove pull_request.edited; body-only changes must not launch redundant same-head
+qualification. The existing late five-minute summary compares the current body
+and exact head before success and refuses an in-flight unmet increase; it cannot
+revoke an already-completed green. An increase above successful current-head
+scope requires a new signed head and higher-tier qualifying run. Keep the PR
+draft/non-mergeable until the new head's protected summary and smoke succeed.
+At final merge, the lead compares the current effective CI-Tier with the latest
+successful current-head trusted-App plan/summary, including post-approval edits;
+old-head green and insufficient scope are not qualification. A completed higher
+tier can satisfy a lower requirement. Local-Tier is separately compared to actual
+local receipts. Preserve existing policy/plan/head/run/attempt evidence, not new
+authorization metadata, gate fetch, YAML record, locator or status writer.
 
 Local-Tier is a human instruction. Use a minimal explicit --tier selection;
 --full promotes. Print and record effective tier and source/plan evidence.
@@ -212,7 +223,7 @@ that fallback is pre-approved. Never claim historical sums as candidate savings.
 | Ordered path / gate | Classification | Named proof planned |
 | --- | --- | --- |
 | Lead scope -> independent issue gate -> reviewer PR-body lines | same chosen class for tier admission; coding permission remains existing human process | V01-V12 below; no automated approval claim |
-| Native draft/ready/edited event -> parsed event body -> fixed tier | same chosen class | T/V event matrix; real hosted same-head tier edits; preserve #2537 draft -> ready refusal/acceptance |
+| Native draft/ready/synchronize event -> parsed event body -> fixed tier | same chosen class | T/V event matrix; edited excluded; hosted higher tier on new signed head; preserve #2537 draft -> ready refusal/acceptance |
 | Checkout source/merge identity -> effective build context -> root census -> full ownership -> selected/deferred plan | same chosen class | T01-T12, original unmatched-root/head/GOFLAGS controls plus new tier negatives |
 | Required platform/static checks -> exact build products -> physical batches/isolated unit processes -> root/backend/child receipts | same chosen class for scope/provenance/physical lifetime | C/B rows; actual unchanged SQLite/PostgreSQL public source/channel and lifecycle paths |
 | Terminal job observation -> budget evaluation -> required summary -> human merge review | same chosen class for evidence/summary; final human review is separate existing approval owner | E rows; incomplete/canceled/stale/wrong-tier never green |
@@ -285,10 +296,10 @@ full execution requirement. No row is credited by shared-owner introduction.
 | V05 | Local core / CI full | Actual hosted full all corpus/platforms/soaks; no need to run local full merely because CI does |
 | V06 | Remaining four ordered pairs | Table-test all9 core/lifecycle/full pairs through shared resolver and entry points; no inferred coupling |
 | V07 | Missing/malformed/unknown/duplicate CI-Tier | Event JSON parser hostile-body controls resolve full explicitly; no shell evaluation |
-| V08 | Edited requirement or current-body read failure | Summary compares actual effective tier against current body; unavailable body fails closed; same-head higher edit invalidates thinner green |
+| V08 | In-flight increased requirement or current-body read failure | Late summary compares effective tier/current exact head/body before success; unavailable body or unmet increase refuses. Already-completed green is not mechanically revoked |
 | V09 | A local command is thinner than the human-required Local-Tier | Reviewer refuses thin local receipt; CLI refuses invalid/mixed selectors, accepts --full promotion and records effective tier. No local PR lookup or automatic verdict authority; no-context run is explicitly non-review-bound |
-| V10 | Reviewer raises requirement after green core | Real hosted pull_request.edited on same SHA; old green no longer mergeable; summary and human final review compare current requirement |
-| V11 | Native draft/ready and deliberate manual/scheduled posture | Preserve #2537 same-SHA draft refusal; ready resolves gate; manual checks remain distinct; schedules select full |
+| V10 | Reviewer raises requirement after green core | Retain same-head stale-green counterexample; fence PR, push new signed head and qualify higher tier. Record exact head/plan/tier/run/attempt/trusted protected terminals and lead comparison; old-head green intentionally nonqualifying. Repeated unmet increase repeats rule |
+| V11 | Native draft/ready/synchronize and deliberate manual/scheduled posture | Prove edited excluded and late summary five-minute budget unchanged; preserve #2537 draft refusal/ready acceptance; manual checks remain distinct; schedules select full |
 | V12 | Source head, execution merge, venue/flags/profile evidence mismatch | Existing wrong-SHA/GOFLAGS/digest/count/env guards plus effective policy/tier mismatch fixtures; no authorization metadata |
 | C01 | Cold/missing/evicted build cache | Real selected commands rebuild successfully; no cache prerequisite or previous result as evidence |
 | C02 | Stale/wrong-source/toolchain/go.sum/profile/race/native product | Tampered manifest/bytes negatives; exact source/tool/flags/policy verification rejects reuse and rebuilds |
