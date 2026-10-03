@@ -205,3 +205,81 @@ func TestCredentialObservationFailureDoesNotResetAdmittedResponsibility(t *testi
 		}
 	}
 }
+
+func TestRejectedCredentialCleanupRetainsAdmittedResponsibility(t *testing.T) {
+	for _, reason := range []string{"credential_stale", "preflight_rejected", "local_reconciliation"} {
+		t.Run(reason, func(t *testing.T) {
+			ctx := context.Background()
+			candidate := testCandidate(strings.Repeat("a", 64), "support")
+			catalog, err := NewCandidateCatalog([]Candidate{candidate})
+			if err != nil {
+				t.Fatal(err)
+			}
+			file, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			writer, err := NewCredentialWriter(file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			op := testSucceededOperation(candidate, time.Now().UTC())
+			op.Phase = PhaseCredentialsAdmitted
+			op.CredentialAdmissions = writeTestOperationCredentials(t, writer, op, "admitted")
+			cleanupErr := errors.New("exact signing cleanup unavailable")
+			writer.deleter = &failedSigningAdmissionCleanup{
+				ReceiptDeleter: file, key: op.CredentialAdmissions[1].StoreKey, err: cleanupErr,
+			}
+			activations := &cancellationTestActivations{}
+			if reason != "preflight_rejected" {
+				if err := file.Set(ctx, op.CredentialAdmissions[0].StoreKey, "unadmitted-replacement"); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				activations.preflightErr = errors.New("provider rejected candidate")
+			}
+			store := &cancellationTestStore{op: op}
+			service, err := NewService(ServiceOptions{
+				Store: store, Identities: &cancellationTestIdentities{}, Credentials: writer,
+				Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: activations,
+				Confirmation: successfulTestConfirmation{}, Readiness: cancellationTestReadiness{},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if reason == "local_reconciliation" {
+				err = service.ReconcileLocal(ctx)
+			} else {
+				_, err = service.Retry(ctx, RetryInput{OperationID: op.OperationID})
+			}
+			if !errors.Is(err, cleanupErr) {
+				t.Errorf("cleanup failure identity = %v, want %v", err, cleanupErr)
+			}
+			if store.op.Phase != op.Phase || store.op.Revision != op.Revision || len(store.op.CredentialAdmissions) != len(op.CredentialAdmissions) {
+				t.Fatalf("failed cleanup discarded admitted responsibility: phase=%s revision=%d admissions=%d; want %s/%d/%d",
+					store.op.Phase, store.op.Revision, len(store.op.CredentialAdmissions), op.Phase, op.Revision, len(op.CredentialAdmissions))
+			}
+			for i, admission := range op.CredentialAdmissions {
+				if store.op.CredentialAdmissions[i] != admission {
+					t.Fatalf("failed cleanup changed exact admission %d", i)
+				}
+			}
+			if activations.publications != 0 || activations.promotions != 0 {
+				t.Fatalf("failed cleanup published executable authority: %#v", activations)
+			}
+		})
+	}
+}
+
+type failedSigningAdmissionCleanup struct {
+	runtimecredentials.ReceiptDeleter
+	key string
+	err error
+}
+
+func (s *failedSigningAdmissionCleanup) DeleteWithReceiptAndSeal(ctx context.Context, key, receipt string, seal runtimecredentials.ValueSeal) (bool, error) {
+	if key == s.key {
+		return false, s.err
+	}
+	return s.ReceiptDeleter.DeleteWithReceiptAndSeal(ctx, key, receipt, seal)
+}
