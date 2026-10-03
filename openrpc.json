@@ -14932,7 +14932,7 @@
             "type": "string"
           },
           "generation": {
-            "minimum": 1,
+            "minimum": 0,
             "type": "integer"
           },
           "provider": {
@@ -14940,7 +14940,7 @@
             "type": "string"
           },
           "publication_sequence": {
-            "minimum": 1,
+            "minimum": 0,
             "type": "integer"
           },
           "selector": {
@@ -15159,7 +15159,8 @@
             "$ref": "#/components/schemas/OpaqueId"
           },
           "target_generation": {
-            "minimum": 1,
+            "description": "Zero is declaration-only discovery/reservation; executable phases and connected activations require a positive exact generation.",
+            "minimum": 0,
             "type": "integer"
           }
         },
@@ -22017,7 +22018,9 @@
             "enum": [
               "active",
               "suspended",
-              "orphaned"
+              "orphaned",
+              "dormant",
+              "recovery_required"
             ],
             "type": "string"
           },

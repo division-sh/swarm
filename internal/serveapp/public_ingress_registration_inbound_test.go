@@ -455,6 +455,76 @@ func TestDeclaredActivationRejectsUnusableCredentialValues(t *testing.T) {
 	}
 }
 
+func TestDeclaredRegistrationWithoutEnabledTargetStaysDiscoverable(t *testing.T) {
+	ctx := context.Background()
+	sourceRoot := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
+	_, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), sourceRoot, cliapp.ResolvePath(repoRootForTest(), defaultPlatformSpecPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog := testProviderTriggerCatalog(t)
+	source := processIngressTransportSource(t, bundle, catalog)
+	plan := loadSupportedTelegramChannelPlan(t)
+	binding, err := packs.NewOutboundBindingPlanWithRegistration("telegram", plan, "42", nil,
+		map[string]string{"telegram_bot_token": "bot", "webhook_signing_secret": "webhook_signing.telegram"}, "ingress:telegram-ingress:telegram")
+	if err != nil {
+		t.Fatal(err)
+	}
+	declared, err := channelonboarding.NewDeclaredOnlyChannelActivationPublication([]packs.OutboundBindingPlan{binding})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := "bundle-v2:sha256:" + strings.Repeat("a", 64)
+	workOwner := newSupervisorTestRuntimeOccurrence(t, hash)
+	bus, err := runtimebus.NewEphemeralEventBusWithOptions(&processIngressEventStore{}, runtimebus.EventBusOptions{
+		WorkOwner: workOwner, ContractBundle: source, SourceArtifactFact: mustServeTestEphemeralSourceArtifactFact(hash),
+		ReceiverExecution: eventreceiver.NormalExecution(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := runtimepkg.NewRuntimeContextManager(nil, completeServeTestPackContext(t, runtimepkg.BundleContext{
+		SourceArtifactFact: mustServeTestEphemeralSourceArtifactFact(hash), Source: source,
+		BundleIdentity: runtimecontracts.BundleIdentity{WorkflowName: "telegram", WorkflowVersion: "1", BundleHash: hash},
+		Runtime: &runtimepkg.Runtime{Bus: bus, ExecutionPosture: executionposture.Live, Options: runtimepkg.RuntimeOptions{
+			RuntimeInstanceID: uuid.NewString(), DeclaredChannelPublication: declared, ChannelPlans: []packs.SatisfactionPlan{plan},
+		}}, WorkOwner: workOwner, ChannelPlans: []packs.SatisfactionPlan{plan},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = manager.QuiesceAllRuntimeContexts(context.Background()) })
+	file, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := runtimecredentials.NewSnapshotOwner(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, provisioned := range []bool{false, true} {
+		if provisioned {
+			for key, value := range map[string]string{"bot": "bot-token", "webhook_signing.telegram": "signing-value"} {
+				if err := file.Set(ctx, key, value); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		snapshot, err := compileServeChannelActivationSnapshot(ctx, manager, nil, nil, owner)
+		if err != nil || len(snapshot.Activations) != 0 || len(snapshot.Prebinding) != 0 {
+			t.Fatalf("disabled declared registration provisioned=%t = %#v, %v", provisioned, snapshot, err)
+		}
+		candidates, err := serveChannelOnboardingCatalog(manager)
+		if err != nil || len(candidates.Candidates()) != 1 {
+			t.Fatalf("declaration discovery = %#v, %v", candidates, err)
+		}
+		candidate := candidates.Candidates()[0]
+		if candidate.Target.Generation != 0 || candidate.Target.PublicationSequence != 0 || candidate.Coordinate.TargetGeneration != 0 || candidate.Validate() == nil {
+			t.Fatalf("discovery invented executable authority: %#v", candidate)
+		}
+	}
+}
+
 func loadSupportedTelegramRegistration(t *testing.T) packs.CompiledChannelRegistration {
 	t.Helper()
 	plan := loadSupportedTelegramChannelPlan(t)

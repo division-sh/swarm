@@ -55,7 +55,7 @@ func TestStandingPipelineRecoveryBlocksUntilExactOwnerIsInstalled(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	disposition, err := runtimerunlifecycle.ClassifyStandingRestart(runtimerunlifecycle.StandingRestartFact{
+	disposition, err := runtimerunlifecycle.ClassifyStandingRestart(runtimerunlifecycle.StandingRestartFact{BindingEnabled: true,
 		ExactCurrent: true, ServiceID: standing.ServiceID(), RunID: runID, Generation: 1,
 		DeclarationPresent: true, EffectiveState: "active", OperatorOverride: "none", RunState: "running",
 	})
@@ -89,34 +89,44 @@ func TestStandingPipelineRecoveryBlocksUntilExactOwnerIsInstalled(t *testing.T) 
 }
 
 func TestStandingPipelineRecoveryParksNonExecutableDispositionBeforeLease(t *testing.T) {
-	runID := uuid.NewString()
-	standing, err := runtimerunlifecycle.StandingGenerationRunOrigin(uuid.NewString(), 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	store := &recoveryOriginStore{
-		origin:      standing,
-		disposition: runtimerunlifecycle.StandingRestartDisposition{Kind: runtimerunlifecycle.StandingRestartTerminalDeclared},
-	}
-	bus := &EventBus{store: store, workOwner: newRecoveryControlOwner(t), durable: DurableDependencies{RunOrigins: store, StandingRestarts: store}}
-	event := eventtest.ExistingRunRootIngress(
-		uuid.NewString(),
-		events.EventType("test.standing.terminal-recovery"),
-		"test",
-		"",
-		json.RawMessage(`{}`),
-		0,
-		runID,
-		events.EventEnvelope{},
-		time.Now().UTC(),
-	)
+	for _, kind := range []runtimerunlifecycle.StandingRestartDispositionKind{
+		runtimerunlifecycle.StandingRestartTerminalDeclared,
+		runtimerunlifecycle.StandingRestartSuspended,
+		runtimerunlifecycle.StandingRestartOrphaned,
+		runtimerunlifecycle.StandingRestartCredentialDormant,
+		runtimerunlifecycle.StandingRestartRecoveryRequired,
+	} {
+		t.Run(string(kind), func(t *testing.T) {
+			runID := uuid.NewString()
+			standing, err := runtimerunlifecycle.StandingGenerationRunOrigin(uuid.NewString(), 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			store := &recoveryOriginStore{
+				origin:      standing,
+				disposition: runtimerunlifecycle.StandingRestartDisposition{Kind: kind},
+			}
+			bus := &EventBus{store: store, workOwner: newRecoveryControlOwner(t), durable: DurableDependencies{RunOrigins: store, StandingRestarts: store}}
+			event := eventtest.ExistingRunRootIngress(
+				uuid.NewString(),
+				events.EventType("test.standing.terminal-recovery"),
+				"test",
+				"",
+				json.RawMessage(`{}`),
+				0,
+				runID,
+				events.EventEnvelope{},
+				time.Now().UTC(),
+			)
 
-	_, lease, err := bus.bindClaimedRunWork(context.Background(), event)
-	if !errors.Is(err, errStandingRestartParked) {
-		t.Fatalf("bind terminal standing recovery error = %v, want parked disposition", err)
-	}
-	if lease != nil {
-		t.Fatal("terminal standing recovery acquired a lease")
+			_, lease, err := bus.bindClaimedRunWork(context.Background(), event)
+			if !errors.Is(err, errStandingRestartParked) {
+				t.Fatalf("bind non-executable standing recovery error = %v, want parked disposition", err)
+			}
+			if lease != nil {
+				t.Fatal("non-executable standing recovery acquired a lease")
+			}
+		})
 	}
 }
 

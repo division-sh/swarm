@@ -66,7 +66,7 @@ func TestStandingServiceAcknowledgedCleanupErrorStillSignalsContinuationBothStor
 			seedStoreTestPersistedArtifact(t, db, artifact)
 			source := mustStoreTestSourceArtifactFact(artifact.BundleHash())
 			candidate := func(path string) runtimepipeline.StandingServiceCandidate {
-				return runtimepipeline.StandingServiceCandidate{
+				return runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 					ServiceID: runtimeflowidentity.StandingServiceID(path), FlowPath: path,
 					InstanceID: uuid.NewString(), EntityID: uuid.NewString(), Source: source,
 				}

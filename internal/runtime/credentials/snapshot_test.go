@@ -135,6 +135,45 @@ func TestSecretBindingProjectionReusesExactKeyAndRejectsRotation(t *testing.T) {
 	}
 }
 
+func TestSecretBindingProjectionScopedCurrentnessNeverAdoptsSiblingChanges(t *testing.T) {
+	ctx := context.Background()
+	store, err := NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"selected", "sibling"} {
+		if err := store.Set(ctx, key, "original-"+key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	owner, err := NewSnapshotOwner(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projection := owner.BeginSecretBindingProjection()
+	for _, key := range []string{"selected", "sibling"} {
+		if _, err := projection.ObserveActivationCredential(ctx, key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.Set(ctx, "selected", "fresh-selected"); err != nil {
+		t.Fatal(err)
+	}
+	if err := projection.ValidateCurrentKeys(ctx, []string{"sibling"}); err != nil {
+		t.Fatalf("selected change altered independent sibling evidence: %v", err)
+	}
+	if err := projection.ValidateCurrentKeys(ctx, []string{"never-observed"}); err == nil {
+		t.Fatal("unobserved key was accepted as frozen evidence")
+	}
+	if err := store.Set(ctx, "sibling", "unadmitted-sibling"); err != nil {
+		t.Fatal(err)
+	}
+	var stale *SecretBindingProjectionStaleError
+	if err := projection.ValidateCurrentKeys(ctx, []string{"sibling"}); !errors.As(err, &stale) || stale.Key != "sibling" {
+		t.Fatalf("sibling change was adopted: %v", err)
+	}
+}
+
 func TestCredentialSnapshotOwnerUsesAtomicValueMetadataAndPrivateObservationToken(t *testing.T) {
 	ctx := context.Background()
 	store, err := NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))

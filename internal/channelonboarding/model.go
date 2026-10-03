@@ -106,6 +106,10 @@ func (p Phase) Valid() bool {
 	return false
 }
 
+func (p Phase) RequiresExecutableTarget() bool {
+	return p != PhasePreparing && p != PhaseCredentialsAdmitted && p != PhaseFailed && p != PhaseRetired
+}
+
 // ChannelDurableContextIdentity identifies the source semantics that survive a
 // process restart. It deliberately excludes process-local publication and
 // target occurrences.
@@ -214,6 +218,16 @@ func (c ChannelRuntimeContextCoordinate) ValidateContext() error {
 	return nil
 }
 
+func (c ChannelRuntimeContextCoordinate) ValidateForPhase(phase Phase) error {
+	if !phase.Valid() {
+		return fmt.Errorf("channel onboarding phase %q is invalid", phase)
+	}
+	if phase.RequiresExecutableTarget() {
+		return c.Validate()
+	}
+	return c.ValidateContext()
+}
+
 func (c ChannelRuntimeContextCoordinate) MatchesDurableIdentity(other ChannelRuntimeContextCoordinate) bool {
 	return c.DurableIdentity().Matches(other.DurableIdentity())
 }
@@ -228,6 +242,10 @@ func (c ChannelRuntimeContextCoordinate) MatchesContextOccurrence(runtimeInstanc
 func (c ChannelRuntimeContextCoordinate) Matches(other ChannelRuntimeContextCoordinate) bool {
 	c, other = c.Normalized(), other.Normalized()
 	return c.Validate() == nil && other.Validate() == nil && c == other
+}
+
+func (c ChannelRuntimeContextCoordinate) MatchesDeclaration(other ChannelRuntimeContextCoordinate) bool {
+	return c.ValidateContext() == nil && other.ValidateContext() == nil && c.Normalized() == other.Normalized()
 }
 
 type SlotState string
@@ -369,6 +387,20 @@ type ConnectedChannelRecovery struct {
 	Commands []string        `json:"commands"`
 }
 
+// A completed responsibility is immutable. Stale activation credentials need
+// a fresh reconnect ceremony, not a retry of that terminal operation.
+func (o Operation) CredentialRecoveryCommand() string {
+	if o.Phase.Terminal() {
+		return fmt.Sprintf("swarm channel reconnect %s --bundle %s --interface %s --target %s --credential-stdin",
+			o.Provider, o.Coordinate.BundleHash, o.Interface.Selector, o.TargetSelector)
+	}
+	command := "swarm channel resume " + o.OperationID
+	if o.Phase == PhasePreparing {
+		command += " --credential-stdin"
+	}
+	return command
+}
+
 func ProjectReadiness(f ReadinessFacts) ConnectedChannelReadiness {
 	result := ConnectedChannelReadiness{Coordinate: f.Coordinate, ActivationRevision: f.ActivationRevision, BindingRevision: f.BindingRevision, ObservedAt: f.ObservedAt.UTC()}
 	if f.ActivationGeneration.Valid() {
@@ -492,11 +524,16 @@ func (r StartRequest) Validate() error {
 	if err := r.Interface.Validate(); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidRequest, err)
 	}
-	if err := r.Coordinate.Validate(); err != nil {
+	if err := r.Coordinate.ValidateContext(); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidRequest, err)
 	}
 	if !r.Posture.Valid() || !r.Ceremony.Valid() {
 		return fmt.Errorf("%w: activation posture and identity ceremony are required", ErrInvalidRequest)
+	}
+	if r.Posture == ActivationSessionConnection {
+		if err := r.Coordinate.Validate(); err != nil {
+			return err
+		}
 	}
 	if len(r.CredentialReservations) == 0 {
 		return fmt.Errorf("%w: at least one credential reservation is required", ErrInvalidRequest)

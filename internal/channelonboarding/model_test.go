@@ -37,6 +37,54 @@ func TestChannelRuntimeContextCoordinateRequiresEveryExactGeneration(t *testing.
 	}
 }
 
+func TestChannelRuntimeCoordinatesFollowClosedPhaseProduct(t *testing.T) {
+	for _, phase := range append(ValidPhases(), Phase("unknown")) {
+		for _, executable := range []bool{false, true} {
+			name := string(phase) + "/declaration"
+			coordinate := testCoordinate()
+			if executable {
+				name = string(phase) + "/executable"
+			} else {
+				coordinate.TargetGeneration = 0
+			}
+			t.Run(name, func(t *testing.T) {
+				wantValid := phase.Valid() && (executable || !phase.RequiresExecutableTarget())
+				if err := coordinate.ValidateForPhase(phase); (err == nil) != wantValid {
+					t.Fatalf("coordinate phase product = %v, want valid=%t", err, wantValid)
+				}
+			})
+		}
+	}
+}
+
+func TestCredentialRecoveryCommandPreservesTerminalResponsibility(t *testing.T) {
+	for _, phase := range ValidPhases() {
+		t.Run(string(phase), func(t *testing.T) {
+			operation := Operation{OperationID: "exact-operation", Provider: "telegram", Phase: phase,
+				Coordinate: testCoordinate(), Interface: operatorchannel.InterfaceIdentity{Selector: "exact-interface"}, TargetSelector: "ingress:exact-flow:telegram"}
+			command := operation.CredentialRecoveryCommand()
+			if phase.Terminal() {
+				for _, exact := range []string{"swarm channel reconnect telegram", "--bundle " + operation.Coordinate.BundleHash, "--interface exact-interface", "--target ingress:exact-flow:telegram", "--credential-stdin"} {
+					if !strings.Contains(command, exact) {
+						t.Fatalf("terminal remedy lacks exact selector %q: %s", exact, command)
+					}
+				}
+				if strings.Contains(command, "resume") || strings.Contains(command, operation.OperationID) {
+					t.Fatalf("terminal remedy reopens historical responsibility: %s", command)
+				}
+				return
+			}
+			want := "swarm channel resume exact-operation"
+			if phase == PhasePreparing {
+				want += " --credential-stdin"
+			}
+			if command != want {
+				t.Fatalf("nonterminal remedy = %q, want %q", command, want)
+			}
+		})
+	}
+}
+
 func TestChannelRuntimeContextCoordinateSeparatesDurableIdentityFromLiveOccurrence(t *testing.T) {
 	original := testCoordinate()
 	abaSuccessor := original
