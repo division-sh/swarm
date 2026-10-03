@@ -189,7 +189,7 @@ func describePresentationField(path, topologyPrefix, key string) bool {
 
 func TestDescribeProofNormalization(t *testing.T) {
 	const identity = "bundle-v2:sha256:admitted"
-	const original = `{"source_hash":"bundle-v2:sha256:admitted","workflow_version":"bundle-v2:sha256:admitted","effective_provenance":[{"path":"flows.account","provenance":{"origin":"authored","source_file":"/cache/platform-spec-current.yaml","source_line":10,"source_column":3,"source_presence":"authored"}}],"routing_topology":{"edges":[{"id":"edge-unchanged","event":{"canonical":"account.ready"},"boundary":{"authored_location":"schema.yaml:10:3"}}]},"policy":{"source_line":10,"source_file":"/cache/platform-spec-current.yaml"}}`
+	const original = `{"source_hash":"bundle-v2:sha256:admitted","workflow_version":"bundle-v2:sha256:admitted","effective_provenance":[{"path":"flows.account","provenance":{"origin":"authored","source_file":"/cache/platform-spec-current.yaml","source_line":10,"source_column":3,"source_presence":"authored"}}],"routing_topology":{"edges":[{"id":"edge-unchanged","event":{"canonical":"account.ready"},"boundary":{"authored_location":"schema.yaml:10:3"},"producer_schema_digest":"sha256:producer","receiver_schema_digest":"sha256:receiver","derived_from":"instance.account_id + carries.account_id.from"}]},"policy":{"source_line":10,"source_file":"/cache/platform-spec-current.yaml"},"stages":{"active":{"initial":true},"complete":{"terminal":true}},"approvals":{"required":true},"rules":["account.amount > 10"],"diagnostics":[{"severity":"lint_evidence","message":"keep schema.yaml:10:3","location":"schema.yaml:10:3"}]}`
 	normalize := func(raw string) []byte {
 		t.Helper()
 		got, err := normalizeDescribeProof([]byte(raw), "describe-json", identity, "/repo", "/cache/platform-spec-current.yaml")
@@ -222,11 +222,24 @@ func TestDescribeProofNormalization(t *testing.T) {
 		{"coordinate_presence", `schema.yaml:10:3`, `schema.yaml:10`},
 		{"event", `account.ready`, `account.changed`},
 		{"edge_id", `edge-unchanged`, `edge-changed`},
+		{"producer_schema", `sha256:producer`, `sha256:other-producer`},
+		{"receiver_schema", `sha256:receiver`, `sha256:other-receiver`},
+		{"carries_derivation", `carries.account_id.from`, `carries.foreign_id.from`},
+		{"stage_initial", `"initial":true`, `"initial":false`},
+		{"stage_terminal", `"terminal":true`, `"terminal":false`},
+		{"approval", `"approvals":{"required":true}`, `"approvals":{"required":false}`},
+		{"rule", `account.amount > 10`, `account.amount > 20`},
+		{"severity", `"severity":"lint_evidence"`, `"severity":"error"`},
+		{"message_coordinate", `"message":"keep schema.yaml:10:3"`, `"message":"keep schema.yaml:90:7"`},
 		{"provenance", `"origin":"authored"`, `"origin":"platform_default"`},
 		{"policy_numeric_field", `"policy":{"source_line":10`, `"policy":{"source_line":200`},
 	} {
 		t.Run(row.name, func(t *testing.T) {
-			if bytes.Equal(want, normalize(strings.Replace(original, row.old, row.replacement, 1))) {
+			mutated := strings.Replace(original, row.old, row.replacement, 1)
+			if mutated == original {
+				t.Fatal("mutation did not change its named input")
+			}
+			if bytes.Equal(want, normalize(mutated)) {
 				t.Fatal("semantic/presence mutation was hidden")
 			}
 		})
