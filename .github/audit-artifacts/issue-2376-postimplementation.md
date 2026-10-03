@@ -10,26 +10,29 @@ golden through admitted source/static-data owners, supplies fake run-header iden
 and reconciles seven exact private-backend signature rows plus the spec ratchet.
 Only production delta since that rebase is the word "runtime" in the existing
 multi-context Claude refusal; the guard and execution semantics are unchanged.
-R14 records passing targeted repair proofs and a separate unclassified loaded
-ownership observation under #2353. The repair is now rebased on merged B master
-`d043efecf45d225e6e83935505d0ba6c1db3278c`; range-diff preserves both patches except
-the actual regenerated describe baseline. Qualification of this rebased tree is
-in progress. Merge remains gated on final supported proofs, required exact-head
-CI, independent closeout, and the user's #2548 merge ordering. No push yet.
+R14 records the repair and a separate unclassified loaded ownership observation
+under #2353. R15 records GREEN local qualification on clean committed
+`65ad84e6aceff8321a0d83f6152a19b9dd485f3b`, rebased on merged B master
+`d043efecf45d225e6e83935505d0ba6c1db3278c`: all 14 default units, all 41 originally
+failing roots, both-store supported/lifecycle proofs and static gates pass.
+Range-diff preserves both patches except the actual regenerated describe baseline.
+This receipt update changes only Markdown; executed proofs remain attributed to
+65ad84e6a, not a future receipt SHA. Required exact-head CI, independent delta
+closeout, the recorded accounting disposition and the user's #2548 merge ordering
+remain gates. No channel/source/runtime behavior was added in the repair.
 
-Historical R13 status: supported proofs for the approved matrix passed. The user's
-2026-10-03 ruling resolves the two additional label-safety manifestations; permanent
-red/green proofs now cover them at the existing owner and supported consumers.
-Final local default qualification passed all 14 planned units on committed head
-1ce88a3500d5cf1e69ae276091e4d5bb773e9292 (R13). Hosted qualification and independent
-merge approval remain outstanding. Changes are batched locally under the user's CI-quiet rule;
-the GitHub PR head does not yet contain this label-safety repair.
+Historical R13 status: supported proofs for the approved matrix passed, including
+the user's 2026-10-03 label-safety ruling and permanent red/green owner/consumer
+proofs. Its local default passed all 14 planned units on
+1ce88a3500d5cf1e69ae276091e4d5bb773e9292 (R13); Reviewer-f approved identical code
+at 5ec01b19f. The then-active CI-quiet period has ended. These historical passes
+do not erase the later hosted301 failure or substitute for R15/exact-head CI.
 The earlier default profile and native unused check remain FAILED due to shared
 disk exhaustion (R12). After the user reclaimed shared cache space, a fresh default
 profile and native analysis passed (R13); no product or timing waiver was used.
 This is one class-closure PR, not publication/archive work or a first slice.
-The local candidate is rebased on `0fa24140aaa05e397509f451ba780fef3a260867`,
-including merged #2537. No source or docs push is permitted until #2544 merges.
+R13's candidate was based on `0fa24140aaa05e397509f451ba780fef3a260867`, including
+merged #2537; that is not the current base. No --full was requested or used.
 Receipts R1-R7 below retain their original timing/log attribution. Receipt R9
 records actual post-rebase repetitions; an old pass is not relabeled as a new run.
 
@@ -479,7 +482,8 @@ source_line provenance. Digests match actual spec bytes: master4527e298304c5cb8,
 headac3592a6a77c4d65. No hand-merged hash, wildcard normalization, dropped row or
 weaker assertion. Capture `/tmp/swarm-2376-b-rebase-describe-capture.log` and
 `/tmp/swarm-2376-b-rebase-describe-evidence/{deltas,candidate}.json`.
-Fresh rebased supported/default/static qualification and hosted CI remain pending.
+Fresh rebased qualification was pending at R14; R15 below records its completed
+local results. Hosted CI remains an independent exact-candidate obligation.
 
 Canonical owners, approved semantic boundary, parent-tail estimate and architecture
 direction are unchanged by these fixture/ledger repairs. Q07 is a different
@@ -487,6 +491,71 @@ selected-store health concept tracked under existing #2353, awaiting its owner's
 assessment, not a hidden chosen-class residual or a blanket rerun waiver.
 Existing source watchlist nodes need no new semantic refinement for Q01-Q06;
 no new issue, POTENTIAL_ISSUES entry, framework, migration or third-party package.
+
+## R15: Final Rebased Local Qualification
+
+All executions below ran on clean committed
+`65ad84e6aceff8321a0d83f6152a19b9dd485f3b`, based on
+`d043efecf45d225e6e83935505d0ba6c1db3278c`. The final receipt commit changes only
+this Markdown. No executed result is relabeled with that later commit's SHA.
+All commands exited0; there is no --full, direct go test ./..., deadline increase,
+new skip, retry-to-green policy or other-worker cancellation.
+
+- Default `go run ./cmd/swarm-test`: all14 planned units passed required execution,
+  6,467 passing root executions /35,293 passing cases /193 package-pass records.
+  Five existing provisioned-Docker/remote-tracker deferrals are not proof credit;
+  no chosen-class test skipped. Broad: 180 packages /5,060 roots /30,403 cases;
+  pipeline284.141s. Whole CLI202.872s; all45 describe cells execute twice against
+  the regenerated baseline, TestReadProofFactoringCompiledDescribe PASS4.40s.
+  Golden forced-death/event restart35.832s; lifecycle smoke22.396s;
+  mock/reset/selected-fork/standing/pause/edge canaries56.896s; real bus46.602s.
+  Complete log `/tmp/swarm-2376-b-rebased-default.log`; final execution census
+  explicitly reports all14 passed, not just 14 started units.
+- Supported wrapper matrix: 50 roots /328 cases, zero failures/skips.
+  `/tmp/swarm-2376-b-rebased-supported.log`. All30 originally failing conformance
+  roots pass together, 427.510s, including the two exact public RPC refusal rows
+  and 1362-row both-store fan-out PASS283.29s. All six invocation shards and their
+  valid/invalid geometry controls pass, release364.601s; catalog golden and
+  unchanged terminal-panic root pass9.237s. New source/fork/channel/ack/admission
+  matrices pass on both stores: runtimepersistence9.622s /serveapp33.712s.
+  The read-surface root in this command is NOT the describe-baseline root;
+  the latter's distinct permanent execution is in the default CLI unit above.
+- Final lifecycle wrapper matrix: 23 roots /155 cases, zero failures/skips.
+  `/tmp/swarm-2376-b-rebased-lifecycle.log`. Changed-source standing restart and
+  correct reply authority: SQLite9.04s, PostgreSQL8.37s; mixed healthy/terminal
+  restart5.37s. Stored-source integrity refuses before readiness on both stores,
+  preserving history. Inherited committed gate routing, terminal no-call evidence,
+  pending pair/generation and startup integrity all pass: runtimepersistence15.238s.
+  Public durable data operation restart plus real binary verify pass27.990s;
+  compiled scope/external-platform identity0.245s /sealed readiness0.206s.
+- Separate finite ratchet command passes on this same head: successful API result
+  schemas3.884s; unchanged multi-context Claude refusal0.033s; all11,947 exact
+  current-base persistence findings4.532s (B's census changed from R14's11,955);
+  exact stored-source spec ratchet0.039s; twelve-selector/four-fixture census0.062s;
+  metadata byte/provenance/hash boundaries0.025s.
+  `/tmp/swarm-2376-b-rebased-ratchets.log`. Together with the supported matrix,
+  these execute all41 originally failing hosted roots; no root disappeared.
+- Native Linux default/race/issue2413 unused analysis passes; this is not race
+  execution or hosted Linux/Darwin union. Exact-base complexity passes with
+  cognit>=30 573->572 />=50 193->191, cyclo>=30 264 and >=50 53 unchanged,
+  max cyclo185->184. No policy or baseline waiver. OpenRPC71 methods /244 schemas /
+  68 errors /30 mutating /five subscriptions, diff and four-watchlist-document /
+  82-node validation pass. Logs `/tmp/swarm-2376-b-rebased-{unused,complexity,
+  openrpc}.log`; complexity evidence `/tmp/swarm-2376-b-rebased-complexity/`.
+
+Q07 remains unclassified, not fixed: the fresh broad root passes0.46s, but the
+original failed receipt, matched non-reproducing controls and interrupted profiles
+remain explicitly uncredited as fixes. Loaded-control supplement is recorded at
+https://github.com/division-sh/swarm/issues/2353#issuecomment-5969807490, awaiting
+the existing owner's assessment. No diagnostic source or ownership repair enters
+this PR. A fresh qualification after the required B rebase is not a causal waiver.
+
+Current history has three linear commits above B (zero merges); this receipt adds
+one documentation-only commit. The user authorizes one locally-green candidate push
+and reserves merge until #2548 lands. CI must qualify that exact pushed head;
+cycle-2 approval is not silently extended to the repair. Reviewer-f's delta is the
+finite fixture/ledger/test changes in R14, the regenerated describe characterization,
+and the presentation-only refusal word. Execution guards/semantics are unchanged.
 
 ## Manifestation Coverage
 
@@ -512,13 +581,13 @@ is required even when production previously used the correct owner.
 | M15 nested manifests/scopes | reproduced and fixed | Test2376ManifestDispositionAndSelectedRootCompatibility; Test2376NestedManifestPreservesSemanticScope topology/pins and nested-as-selected-root refusal (R2) |
 | M16 manifest lookalikes | execution-proven through the same corrected path | Test2376ManifestDispositionAndSelectedRootCompatibility packs/docs resource/document cases (R2) |
 | M17 platform contamination | execution-proven through the same corrected path | Test2376SourceHashIndependentOfPlatformAdmission; TestBootBundleIdentityStableAcrossRootsAndFileOrder; TestBootBundleIdentityChangesWithLoadedContent (R2) |
-| M18 corpus/generated fixtures | reproduced and fixed | TestTrackedManifestRootsUseFiniteSourceGrammar and actual generated serve/CLI/release fixtures (R1/R2/R4/R5); admitted static golden and all six both-store invocation shards (R14/Q02) |
+| M18 corpus/generated fixtures | reproduced and fixed | TestTrackedManifestRootsUseFiniteSourceGrammar and actual generated serve/CLI/release fixtures (R1/R2/R4/R5); admitted static golden and all six both-store invocation shards (R14/Q02; final R15) |
 | M19 public serve hash boot | reproduced and fixed | Test2376RetiredHashSelectorsFailBeforeIO/serve; Test2376DirectoryBootUsesExactSelectedStoreSource; directory restart (R1/R4/R5) |
 | M20 event hash guard | reproduced and fixed | Test2376RetiredHashSelectorsFailBeforeIO/event_publish; Test2376EventPublishDerivesExactRuntimeSource; TestPayloadlessEventPublicPersistenceJourneyBothStores new/existing run (R1/R5) |
-| M21 data import hash guard | reproduced and fixed | Test2376RetiredHashSelectorsFailBeforeIO/data_import; Test2376ForkSourceAndPinsFollowSourceRunBothStores public import exact source; durable receipt restart (R1/R4/R5); standalone text CLI check/import/replay and exact public RPC wrong-source refusal (R14/Q01) |
+| M21 data import hash guard | reproduced and fixed | Test2376RetiredHashSelectorsFailBeforeIO/data_import; Test2376ForkSourceAndPinsFollowSourceRunBothStores public import exact source; durable receipt restart (R1/R4/R5; R15); standalone text CLI check/import/replay and exact public RPC wrong-source refusal (R14/Q01; final R15) |
 | M22 data show hash guard | reproduced and fixed | Test2376RetiredHashSelectorsFailBeforeIO/data_show; Test2376ForkSourceAndPinsFollowSourceRunBothStores public exact version show; TestDurableDataOperationAggregatePublicRestartBothStores durable receipt controls (R1/R4/R5) |
 | M23 data prune hash guard | reproduced and fixed | Test2376RetiredHashSelectorsFailBeforeIO/data_prune; Test2376ForkSourceAndPinsFollowSourceRunBothStores public current-head refusal; TestDurableDataOperationAggregatePublicRestartBothStores prune idempotency/restart (R1/R4/R5) |
-| M24 run start hash guard | reproduced and fixed | Test2376RetiredHashSelectorsFailBeforeIO/run_start; Test2376ForkSourceAndPinsFollowSourceRunBothStores public pinned start; TestDurableDataOperationAggregatePublicRestartBothStores compiled accepted/rejected/replayed creation (R1/R4/R5); all30 incoming conformance roots including 1362-row fan-out and explicit mismatch/no-mutation RPC proof (R14/Q01) |
+| M24 run start hash guard | reproduced and fixed | Test2376RetiredHashSelectorsFailBeforeIO/run_start; Test2376ForkSourceAndPinsFollowSourceRunBothStores public pinned start; TestDurableDataOperationAggregatePublicRestartBothStores compiled accepted/rejected/replayed creation (R1/R4/R5; R15); all30 incoming conformance roots including 1362-row fan-out and explicit mismatch/no-mutation RPC proof (R14/Q01; final R15) |
 | M25 static/hash agent frame | reproduced and fixed | Test2376RetiredHashSelectorsFailBeforeIO/agent_frame; TestAgentFrameCLIRejectsSelectorConflictsBeforeAPIRequest static/flow negatives; TestMockAgentSupportedSurfaceSQLitePostgres/effective_frame_exact_source after restart, real --api-server human+JSON; TestCLIAPIConnectionFlagsSurfaceAndIsolation (R1/R4) |
 | M26 explicit already-stored C | reproduced and fixed | Test2376ForkSourceAndPinsFollowSourceRunBothStores/explicit, real CLI/API target and child card/activity pins (R4) |
 | M27 missing D target | reproduced and fixed | Test2376ForkSourceAndPinsFollowSourceRunBothStores/missing: unchanged run/event/source/domain counts and serve-first teaching (R4) |
@@ -539,12 +608,12 @@ is required even when production previously used the correct owner.
 | M36 human hash/placeholder leakage | reproduced and fixed | Test2376HumanSourceIdentityConsumerTable; Test2376TestDiagnosticsKeepExactLookupButHumanTeaching; actual verify/serve/frame; collision candidate diagnostics (R1/R2/R4) |
 | M36a oversized metadata at construct/decode and pre-publication admission | reproduced and fixed | Test2376ManifestUTF8ByteBoundaries all three fields and multibyte name, 255/256/257 bytes, root/nested construct/decode; Test2376ManifestOversizeEvidencePrecedesSemanticParsing exact field/alias/merge evidence; Test2376RootManifestRejectsBeforePublicationBothStores all three oversized fields with source/domain counts unchanged (R11) |
 | M36b Unicode format controls in human labels | reproduced and fixed | Test2376HumanLabelsRemoveEveryFormatControl exhaustive Cf census; Test2376FormatControlPresentationPreservesExactArtifact raw metadata/bytes/hash; Test2376HumanSourceIdentityConsumerTable every renderer and real verify human/JSON; Test2376ChannelExactSelectionAndStoredPresentationBothStores hostile stored readback after source deletion with exact authority unchanged (R11) |
-| M37 machine identities/equality/order | execution-proven through the same corrected path | Test2376MachineIdentityRemainsExact JSON/explicit YAML; both-store prefix/name selection and stored historical coordinate equality; public fork child SQL identity (R1/R3/R4); strict API result schema with exact fake header hash and 11,955 precise private-backend findings (R14/Q03/Q05) |
+| M37 machine identities/equality/order | execution-proven through the same corrected path | Test2376MachineIdentityRemainsExact JSON/explicit YAML; both-store prefix/name selection and stored historical coordinate equality; public fork child SQL identity (R1/R3/R4; R15); strict API result schema with exact fake header hash and precise private-backend findings (R14/Q03/Q05; current-base11,947 in R15) |
 | M38 stored source missing basename | reproduced and fixed | Test2376StoredSourcePresentationHasNoInventedRoot; Test2376ChannelExactSelectionAndStoredPresentationBothStores removed-origin readback, no invented store-/cwd basename (R2/R3) |
 | M39 same-tree public process restart | execution-proven through the same corrected path | TestPayloadlessEventPublicPersistenceJourneyBothStores; TestDurableDataOperationAggregatePublicRestartBothStores exact retained source/receipts after directory boot (R5) |
-| M40 changed-tree retained standing N | execution-proven through the same corrected path | TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplies and TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndReplies invoke requireChangedStandingColdStartMatrix; TestStandingRestartMixedHealthyAndTerminalProcessParity (R4/R6) |
-| M41 corrupt/missing stored fail-closed | execution-proven through the same corrected path | TestRunServeSourceArtifactIntegrityRejectsBeforeReadinessBothStores; TestSourceArtifactStartupIntegrityParityPreservesRunHistory (R3/R4) |
-| M42 internal recovery/fork/reset no files | execution-proven through the same corrected path | TestServedResetRetainClearAndHistoricalReplayBothStores removes original root before retained successor; TestRunForkRuntimeOwnerHarness_PersistedBundleDoesNotRequireAmbientSource; TestStaticDataArtifactReconstructionIgnoresOriginalRoot (R2/R4/R6) |
+| M40 changed-tree retained standing N | execution-proven through the same corrected path | TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplies and TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndReplies invoke requireChangedStandingColdStartMatrix; TestStandingRestartMixedHealthyAndTerminalProcessParity (R4/R6; final R15) |
+| M41 corrupt/missing stored fail-closed | execution-proven through the same corrected path | TestRunServeSourceArtifactIntegrityRejectsBeforeReadinessBothStores; TestSourceArtifactStartupIntegrityParityPreservesRunHistory (R3/R4; final R15) |
+| M42 internal recovery/fork/reset no files | execution-proven through the same corrected path | TestServedResetRetainClearAndHistoricalReplayBothStores removes original root before retained successor; TestRunForkRuntimeOwnerHarness_PersistedBundleDoesNotRequireAmbientSource; TestStaticDataArtifactReconstructionIgnoresOriginalRoot (R2/R4/R6; final default and lifecycle in R15) |
 | M43 uncertain persistence acknowledgment | execution-proven through the same corrected path | Test2376SourceArtifactCommitUncertaintyBothStores eight physical commit/rollback-ack cells, real selected owner/readback/exact explicit retry; Test2376ServeSourcePublicationRequiresAcknowledgedIngest caller result+error refuses source publication; TestPrepareServeSourceArtifactRequiresSelectedIngestWriter; verify durable-before-publication (R3/R4) |
 | M44 obsolete publication/spec promises | reproduced and fixed | Test2376PublicSurfaceSpecCensus actual Cobra/spec/known vector/retired names; OpenRPC/backend matrix/reader ledger (R1/R7) |
 | M45 durable compiled-cache suspicion | execution-proven through the same corrected path | TestRuntimeProjectionOwnsExactGenerationAndLifetime; retained handle/release synchronization; real process restart reconstructs stored source. Lifetime census/spec explicitly distinguishes cleanup/evidence from compiled cache (R2/R5/R6/R7) |
@@ -559,8 +628,9 @@ same-class label-safety repairs and their permanent red/green tests. No known
 same-concept interpreter remains in the enumerated class; the final local default
 profile passed on its original head (R13); later hosted301539c51 qualification
 FAILED and R14 accounts for every assertion repair plus the separately tracked
-health observation. Fresh rebased qualification, exact-head hosted CI and
-independent acceptance remain outstanding. No new
+health observation. Fresh rebased local qualification now passes (R15); exact-head
+hosted CI, independent delta acceptance and explicit accounting disposition remain
+outstanding. No new
 owner, deferred follow-up or framework is needed.
 User-coordinated disk recovery enabled fresh local qualification (R13); the earlier
 failed attempt (R12) is not reclassified as a pass. No production repair, relaxed
