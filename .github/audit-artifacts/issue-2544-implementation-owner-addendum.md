@@ -118,8 +118,12 @@ after approval. No new status, credential, authorization or waiting owner.
 
 ### Qualification Head Sequence
 
-Corrected signed head8ea95a10d starts the hosted lifecycle measurement and
-new-head acceptance proof. The repeated compiled describe check passes all45
+Historical signed head8ea95a10d starts the hosted lifecycle measurement and
+new-head acceptance probe. Its run37105291252 finishes red at the boundary
+guard in item11; all other physical proof jobs pass. The repaired lifecycle
+qualification head is389d5f5a9, with the import guard negatives, nine-pair
+selection and first/last/SIGTERM batch controls race-qualified. The repeated
+compiled describe check passes all45
 surfaces, with the original two repetitions and strict hashes. Lifecycle is
 temporary measured scope, not the final required full/full verdict or review
 readiness. The cancelled earlier runs remain uncredited.
@@ -143,6 +147,14 @@ to full after lifecycle qualification, keeping the PR draft/non-mergeable during
 the transition. Final review must bind the new head's actual full plan, run,
 attempt and protected terminals plus the actual local full receipt. No higher
 scope, passing result, cost saving or lead merge approval is asserted here.
+
+This final audit-only head leaves production, spec, policy and tests identical
+to repaired389d5f5a9. Local full/default qualification uses this clean source
+while hosted lifecycle qualifies389. Only after successful lifecycle measurement
+will this head be published with the restored CI-Tier: full requirement. The
+prior interrupted attempts and red hosted receipt stay intact and uncredited;
+neither a rerun-to-green claim nor unchanged runtime behavior is inferred from
+the missed guard. Required new-head full qualification and final review remain.
 
 Focused planner/timing/catalogue/runner controls and the updated public backend
 ledger have passed during implementation. These are not full-corpus, hosted
