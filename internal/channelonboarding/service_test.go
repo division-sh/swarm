@@ -1417,6 +1417,8 @@ func TestChannelOnboardingRecoveryRetriesProcessPublicationBeforePromotion(t *te
 	op.CompletedAt = time.Time{}
 	op.Revision = 5
 	op.BindingRevision = 3
+	credentials := testCredentialWriter(t)
+	op.CredentialAdmissions = writeTestOperationCredentials(t, credentials, op, "process-publication")
 	store := &cancellationTestStore{op: op}
 	activations := &cancellationTestActivations{publishErrOnce: errors.New("process publication unavailable")}
 	service, err := NewService(ServiceOptions{
@@ -1424,7 +1426,7 @@ func TestChannelOnboardingRecoveryRetriesProcessPublicationBeforePromotion(t *te
 		Identities: &cancellationTestIdentities{binding: operatorchannel.Binding{
 			PrincipalID: "principal-a", Interface: candidate.Interface, ConversationRef: "conversation-a", Revision: 3, Status: operatorchannel.BindingCurrent,
 		}},
-		Credentials: testCredentialWriter(t), Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: activations,
+		Credentials: credentials, Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: activations,
 		Confirmation: successfulTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
 	})
 	if err != nil {
