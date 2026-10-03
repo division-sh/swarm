@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/config"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 )
@@ -27,6 +28,35 @@ type RuntimeConfigLoadResult struct {
 	KeyOrigins  map[string]unifiedConfigKeyOrigin
 	Diagnostics []unifiedConfigDiagnostic
 	cli         cliCommandConfig
+}
+
+// DeploymentConfigured uses admitted layer facts, not a default backend or an
+// unrelated user's global connection settings, to select strict verification.
+func (r RuntimeConfigLoadResult) DeploymentConfigured() bool {
+	for _, layer := range r.Layers {
+		switch layer.Name {
+		case unifiedLayerExplicit, unifiedLayerLocalOperator, unifiedLayerProject:
+			return true
+		}
+	}
+	return false
+}
+
+func (r RuntimeConfigLoadResult) ResolveServeListeners(opts ServeOptions, apiFlagSet, mcpFlagSet bool) (string, string, error) {
+	if r.Config == nil {
+		return "", "", fmt.Errorf("admitted runtime configuration is required")
+	}
+	return resolveCLIServeListenerAddressesFromConfig(cliServeListenerAddressOptions{
+		APIListenAddr: opts.APIListenAddr, MCPListenAddr: opts.MCPListenAddr,
+		APIListenAddrFlagSet: apiFlagSet, MCPListenAddrFlagSet: mcpFlagSet,
+	}, r.cli)
+}
+
+func (r RuntimeConfigLoadResult) ResolveServeAPIAuth(root InvocationRoot, opts ServeOptions) (apiv1.AuthTokenResolution, error) {
+	if r.Config == nil {
+		return apiv1.AuthTokenResolution{}, fmt.Errorf("admitted runtime configuration is required")
+	}
+	return resolveServeAPIAuthFromConfig(root, opts, r.cli)
 }
 
 func (r RuntimeConfigLoadResult) Detail() string {

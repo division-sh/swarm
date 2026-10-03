@@ -759,7 +759,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		presenter.fail(1, "serve_admission", fmt.Errorf("--no-feed requires --dev"))
 		return 2
 	}
-	publicIngressMode, publicIngressEnabled, err := resolveServePublicIngressMode(opts)
+	publicIngressMode, publicIngressEnabled, err := cliapp.ResolveServePublicIngressMode(opts)
 	if err != nil {
 		presenter.fail(1, "serve_admission", err)
 		return 2
@@ -786,7 +786,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		presenter.fail(2, "config_load", err)
 		return 1
 	}
-	if err := validateServeAPIAuthBinding(opts.APIListenAddr, apiAuth); err != nil {
+	if err := cliapp.ValidateServeAPIAuthBinding(opts.APIListenAddr, apiAuth); err != nil {
 		presenter.fail(2, "config_load", err)
 		return 1
 	}
@@ -3077,23 +3077,6 @@ func runtimeAdmissionReady(ready serveReadiness) bool {
 		return runtimeReady.RuntimeLoad()
 	}
 	return ready.Load()
-}
-
-func validateServeAPIAuthBinding(apiListenAddr string, auth apiv1.AuthTokenResolution) error {
-	if !auth.UsesDefaultLoopbackToken() {
-		return nil
-	}
-	if err := cliapp.ValidateServeListenAddr("--api-listen-addr", apiListenAddr); err != nil {
-		return err
-	}
-	host, _, err := net.SplitHostPort(strings.TrimSpace(apiListenAddr))
-	if err != nil {
-		return fmt.Errorf("--api-listen-addr must be a host:port listen address: %w", err)
-	}
-	if apiv1.DefaultLoopbackAPITokenAllowedHost(host) {
-		return nil
-	}
-	return fmt.Errorf("non-loopback API bind %s requires --api-token-file or config serve.api_token_file", strings.TrimSpace(apiListenAddr))
 }
 
 func serveHTTPServer(name string, server *http.Server, listener net.Listener, onFailure func(string, error)) {

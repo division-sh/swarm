@@ -281,7 +281,7 @@ func TestValidateServeAPIAuthBindingDefaultTokenLoopbackBoundary(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := validateServeAPIAuthBinding(tc.addr, tc.auth)
+			err := cliapp.ValidateServeAPIAuthBinding(tc.addr, tc.auth)
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatalf("validateServeAPIAuthBinding: %v", err)
