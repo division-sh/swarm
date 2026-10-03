@@ -1415,7 +1415,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			return exitCode
 		}
 	}
-	if err := enforceServePinnedBundleAdmissionForHashes(ctx, stores.RunBundleAvailability(), serveRuntimeBundleIdentitiesDetail(loadedBundles), pinnedBundleHashes); err != nil {
+	if err := runbundle.AdmitPinnedSources(ctx, stores.RunBundleAvailability(), serveRuntimeBundleIdentitiesDetail(loadedBundles), pinnedBundleHashes); err != nil {
 		presenter.fail(5, "pinned_bundle_admission", err)
 		return 3
 	}
@@ -2545,7 +2545,7 @@ func runServeSourceArtifactStartupRecovery(
 	artifacts runtimestartuprecovery.ArtifactReader,
 	presenter *serveLifecyclePresenter,
 ) int {
-	_, err := runtimestartuprecovery.Recover(ctx, runtimestartuprecovery.Request{
+	_, err := runtimestartuprecovery.Inspect(ctx, runtimestartuprecovery.Request{
 		AvailabilityReader: recoveryStore.Availability(),
 		ArtifactReader:     artifacts,
 	})
@@ -2817,74 +2817,6 @@ func postgresDSNFromConfig(ctx context.Context, cfg config.DatabaseConfig) (stri
 		return "", err
 	}
 	return store.DSNFromConfig(cfg, password), nil
-}
-
-func enforceServePinnedBundleAdmissionForHashes(ctx context.Context, availability runbundle.AvailabilityStore, bootIdentity string, pinnedBundleHashes []string) error {
-	bootIdentity = strings.TrimSpace(bootIdentity)
-	pinnedBundleHashes = uniqueTrimmedServeBundleHashes(pinnedBundleHashes)
-	if len(pinnedBundleHashes) == 0 {
-		return nil
-	}
-	if bootIdentity == "" {
-		return fmt.Errorf("boot bundle identity is required")
-	}
-	if availability == nil {
-		return nil
-	}
-	mismatches, err := activeNonStandingRunPinnedBundleHashesConflicts(ctx, availability, pinnedBundleHashes)
-	if err != nil {
-		return err
-	}
-	if len(mismatches) == 0 {
-		return nil
-	}
-	details := make([]string, 0, len(mismatches))
-	for _, mismatch := range mismatches {
-		details = append(details, mismatch.DetailString())
-	}
-	return fmt.Errorf("active non-standing run pinned bundle_hash conflict: DB-loaded serve bundle_hash set %s cannot resume %d active non-standing run(s) with different bundle_hash: %s", strings.Join(pinnedBundleHashes, ","), len(mismatches), strings.Join(details, "; "))
-}
-
-func activeNonStandingRunPinnedBundleHashesConflicts(ctx context.Context, availability runbundle.AvailabilityStore, pinnedBundleHashes []string) ([]runbundle.Availability, error) {
-	allowed := map[string]struct{}{}
-	for _, hash := range uniqueTrimmedServeBundleHashes(pinnedBundleHashes) {
-		allowed[hash] = struct{}{}
-	}
-	if len(allowed) == 0 {
-		return nil, nil
-	}
-	availabilities, err := availability.ActiveNonStandingRunBundleAvailabilities(ctx)
-	if err != nil {
-		return nil, err
-	}
-	conflicts := make([]runbundle.Availability, 0, len(availabilities))
-	for _, availability := range availabilities {
-		if !availability.Available() {
-			continue
-		}
-		if _, ok := allowed[strings.TrimSpace(availability.BundleHash)]; !ok {
-			conflicts = append(conflicts, availability)
-		}
-	}
-	return conflicts, nil
-}
-
-func uniqueTrimmedServeBundleHashes(values []string) []string {
-	seen := map[string]struct{}{}
-	out := []string{}
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		out = append(out, value)
-	}
-	sort.Strings(out)
-	return out
 }
 
 func initializeStateStores(ctx context.Context, schema store.SchemaBootstrapper, bundle *runtimecontracts.WorkflowContractBundle) (string, error) {
