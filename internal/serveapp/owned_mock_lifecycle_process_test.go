@@ -30,7 +30,7 @@ import (
 // This entry exists only in a go test -c binary. The parent owns retained roots
 // and credentials across children; production swarm cannot parse this input.
 func TestOwnedMockLifecycleProcessEntry(t *testing.T) {
-	raw := os.Getenv("SWARM_INTERNAL_MOCK_LIFECYCLE_REQUEST")
+	raw := os.Getenv("SWARM_TEST_INTERNAL_MOCK_LIFECYCLE_REQUEST")
 	if raw == "" {
 		t.Skip("internal retained lifecycle child; launched by its parent proof")
 	}
@@ -140,7 +140,7 @@ func runOwnedMockLifecycle(ctx context.Context, root, retainedRoot string, opts 
 	}
 	presenter := newServeLifecyclePresenter(opts)
 	defer presenter.finish()
-	if os.Getenv("SWARM_INTERNAL_MOCK_LIFECYCLE_REQUEST") != "" {
+	if os.Getenv("SWARM_TEST_INTERNAL_MOCK_LIFECYCLE_REQUEST") != "" {
 		stopEvidence := startOwnedLifecycleEvidence(presenter, opts.ErrorOutput)
 		defer stopEvidence()
 	}

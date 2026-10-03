@@ -443,6 +443,49 @@ func TestSwarmEnvGuardBlocksUnknownWithSuggestion(t *testing.T) {
 	}
 }
 
+func TestOwnedLifecycleSignalUsesExistingTestQuarantine(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	const unsupported = "SWARM_INTERNAL_MOCK_LIFECYCLE_REQUEST"
+	const quarantined = "SWARM_TEST_INTERNAL_MOCK_LIFECYCLE_REQUEST"
+	t.Setenv(unsupported, "{}")
+	t.Setenv(quarantined, "{}")
+	args := os.Args
+	t.Cleanup(func() { os.Args = args })
+	for _, tc := range []struct {
+		binary   string
+		severity string
+	}{
+		{binary: "serveapp.test", severity: "info"},
+		{binary: "swarm", severity: "blocker"},
+	} {
+		t.Run(tc.binary, func(t *testing.T) {
+			os.Args = []string{tc.binary}
+			findings := collectSwarmEnvFindings(swarmEnvGuardContext{RepoRoot: t.TempDir()})
+			seen := map[string]bool{}
+			for _, finding := range findings {
+				switch finding.Name {
+				case unsupported:
+					seen[unsupported] = true
+					if finding.Category != swarmEnvCategoryUnknownStale || finding.Severity != "blocker" || finding.AcceptedBy != "" {
+						t.Fatalf("unsupported lifecycle signal must remain unknown: %#v", finding)
+					}
+				case quarantined:
+					seen[quarantined] = true
+					if finding.Category != swarmEnvCategoryTestQuarantine || finding.Severity != tc.severity {
+						t.Fatalf("test signal must use existing context restriction: %#v", finding)
+					}
+					if (finding.AcceptedBy != "") != (tc.severity == "info") {
+						t.Fatalf("test signal authority disagrees with its context: %#v", finding)
+					}
+				}
+			}
+			if !seen[unsupported] || !seen[quarantined] {
+				t.Fatalf("missing lifecycle signal findings: %#v", findings)
+			}
+		})
+	}
+}
+
 func TestSwarmEnvGuardSkipsPureVersionAndCompletion(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	t.Setenv("SWARM_MONITOR_DR", "stale")
