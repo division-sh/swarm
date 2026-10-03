@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -101,6 +102,61 @@ func TestCompletionWorkersBoundedAndJoined(t *testing.T) {
 			}
 		})
 	}
+	t.Run("signal_relay_join", func(t *testing.T) {
+		root := t.TempDir()
+		worker := filepath.Join(root, "worker")
+		if err := os.WriteFile(worker, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		ctx := heldCompletionRelayContext{Context: context.Background(), entered: make(chan struct{}), release: make(chan struct{})}
+		var once sync.Once
+		unblock := func() { once.Do(func() { close(ctx.release) }) }
+		completed := make(chan struct{})
+		var code int
+		go func() {
+			code = runCompletionWorker(ctx, worker, os.Environ(), "plan", "held-relay", root, true)
+			close(completed)
+		}()
+		defer func() {
+			unblock()
+			select {
+			case <-completed:
+			case <-time.After(5 * time.Second):
+				t.Error("worker did not join after relay release")
+			}
+		}()
+		select {
+		case <-ctx.entered:
+		case <-time.After(5 * time.Second):
+			t.Fatal("relay did not reach held context")
+		}
+		select {
+		case <-completed:
+			t.Fatal("worker returned while its signal relay was still held")
+		case <-time.After(50 * time.Millisecond):
+		}
+		unblock()
+		select {
+		case <-completed:
+			if code != 0 {
+				t.Fatalf("joined worker result = %d", code)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("worker did not join the released relay")
+		}
+	})
+}
+
+type heldCompletionRelayContext struct {
+	context.Context
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (c heldCompletionRelayContext) Done() <-chan struct{} {
+	close(c.entered)
+	<-c.release
+	return c.Context.Done()
 }
 
 func TestCompletionMultiworkerSignals(t *testing.T) {

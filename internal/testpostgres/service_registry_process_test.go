@@ -155,6 +155,10 @@ func TestSwarmTestDockerRunnersQueueBeforeSecondProvision(t *testing.T) {
 			proveDockerRunnerAdmission(t, capacity)
 		})
 	}
+	t.Run("over_host_capacity_refuses", func(t *testing.T) {
+		cpu, memory := hostResourceBudget()
+		proveDockerRunnerAdmission(t, conservativeRunCapacity(cpu, memory)+1)
+	})
 }
 
 func proveDockerRunnerAdmission(t *testing.T, capacity int) {
@@ -185,6 +189,28 @@ func proveDockerRunnerAdmission(t *testing.T, capacity int) {
 	}
 	stateHome := filepath.Join(root, "state-home")
 	stateRoot := filepath.Join(stateHome, "swarm", "test-postgres")
+	cpu, memory := hostResourceBudget()
+	if limit := conservativeRunCapacity(cpu, memory); capacity > limit {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		command := exec.CommandContext(ctx, runner, "--", "./internal/testpostgres", "-run", "^TestRunCapacityFromEnvironment$", "-count=1")
+		command.Env = append(withoutPostgresConnectionEnv(os.Environ()),
+			"PATH="+root+string(os.PathListSeparator)+os.Getenv("PATH"),
+			"XDG_STATE_HOME="+stateHome,
+			RunCapacityEnv+"="+strconv.Itoa(capacity),
+		)
+		output, err := command.CombinedOutput()
+		var exit *exec.ExitError
+		want := fmt.Sprintf("%s=%d exceeds conservative host/service capacity %d", RunCapacityEnv, capacity, limit)
+		if !errors.As(err, &exit) || exit.ExitCode() != 1 || !strings.Contains(string(output), want) {
+			t.Fatalf("over-capacity admission: %v\n%s", err, output)
+		}
+		if _, err := os.Stat(stateHome); !os.IsNotExist(err) {
+			t.Fatalf("refusal created service/admission authority: %v", err)
+		}
+		t.Logf("proved pre-resource refusal at capacity %d above actual host ceiling %d; this does not credit parallel service execution", capacity, limit)
+		return
+	}
 	registry := NewServiceRegistry(stateRoot, docker)
 	if err := registry.initialize(); err != nil {
 		t.Fatal(err)
@@ -274,10 +300,11 @@ func proveDockerRunnerAdmission(t *testing.T, capacity int) {
 	if err := os.WriteFile(prefixes[0]+".release", []byte("release\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := waitForProcess(t, done[0], time.Minute); err != nil {
+	err = waitForProcess(t, done[0], time.Minute)
+	finished[0] = true
+	if err != nil {
 		t.Fatalf("first runner: %v", err)
 	}
-	finished[0] = true
 	if capacity == 1 {
 		waitForRunnerPath(t, prefixes[1]+".started", done[1], logPaths, 2*time.Minute)
 	}
@@ -289,10 +316,11 @@ func proveDockerRunnerAdmission(t *testing.T, capacity int) {
 	if err := os.WriteFile(prefixes[1]+".release", []byte("release\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := waitForProcess(t, done[1], time.Minute); err != nil {
+	err = waitForProcess(t, done[1], time.Minute)
+	finished[1] = true
+	if err != nil {
 		t.Fatalf("second runner: %v", err)
 	}
-	finished[1] = true
 }
 
 func TestSwarmTestJoinsDescendantAuthorityBeforeSettlement(t *testing.T) {
@@ -696,7 +724,7 @@ func TestSwarmTestProcessFixture(t *testing.T) {
 	}
 }
 
-func waitForRunnerPath(t *testing.T, path string, result <-chan error, logs []string, timeout time.Duration) {
+func waitForRunnerPath(t *testing.T, path string, result chan error, logs []string, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -705,6 +733,8 @@ func waitForRunnerPath(t *testing.T, path string, result <-chan error, logs []st
 		}
 		select {
 		case err := <-result:
+			// Cleanup must still observe the already-joined process after Fatal.
+			result <- err
 			t.Fatalf("runner exited before %s: %v\n%s", path, err, readRunnerLogs(logs))
 		default:
 		}

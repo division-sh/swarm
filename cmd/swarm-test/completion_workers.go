@@ -121,13 +121,18 @@ func runCompletionWorker(ctx context.Context, executable string, env []string, p
 		return 1
 	}
 	joined := make(chan struct{})
-	defer close(joined)
+	stop := make(chan struct{})
+	defer func() {
+		close(stop)
+		<-joined
+	}()
 	go func() {
+		defer close(joined)
 		select {
 		case <-ctx.Done():
 			// The worker owns forwarding, cancellation and joining its process tree.
 			_ = cmd.Process.Signal(os.Interrupt)
-		case <-joined:
+		case <-stop:
 		}
 	}()
 	if err := cmd.Wait(); err != nil {
