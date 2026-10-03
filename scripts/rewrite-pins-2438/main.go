@@ -237,11 +237,21 @@ func rewritePins(pins *yaml.Node) (*yaml.Node, []reply, error) {
 		}
 		list := *direction
 		list.Content = nil
+		seen := map[string]bool{}
 		for _, item := range direction.Content {
 			converted, paired, err := rewritePin(item, key.Value)
 			if err != nil {
 				return nil, nil, err
 			}
+			name := converted.Value
+			if converted.Kind == yaml.MappingNode {
+				event, _ := lookup(converted, "event")
+				name = event.Value
+			}
+			if seen[name] {
+				return nil, nil, fmt.Errorf("duplicate %s event %q", key.Value, name)
+			}
+			seen[name] = true
 			list.Content = append(list.Content, converted)
 			if paired != nil {
 				replies = append(replies, *paired)
@@ -262,6 +272,9 @@ func rewritePin(item *yaml.Node, direction string) (*yaml.Node, *reply, error) {
 	}
 	if err := validEvent(event); err != nil {
 		return nil, nil, err
+	}
+	if len(item.Content) == 2 {
+		return nil, nil, fmt.Errorf("pin mapping has no non-default option")
 	}
 	var initialize *yaml.Node
 	var paired *reply
@@ -285,7 +298,7 @@ func rewritePin(item *yaml.Node, direction string) (*yaml.Node, *reply, error) {
 		}
 	}
 	if initialize != nil {
-		if paired != nil || initialize.Kind != yaml.MappingNode {
+		if paired != nil || initialize.Kind != yaml.MappingNode || len(initialize.Content) == 0 {
 			return nil, nil, fmt.Errorf("unexpected combined reply/initialization or initialization shape")
 		}
 		copy := *item
@@ -298,7 +311,7 @@ func rewritePin(item *yaml.Node, direction string) (*yaml.Node, *reply, error) {
 }
 
 func validEvent(node *yaml.Node) error {
-	if node.Kind != yaml.ScalarNode || node.Tag != "!!str" || !eventidentity.IsValidName(node.Value) {
+	if node.Kind != yaml.ScalarNode || node.Tag != "!!str" || !eventidentity.IsCanonicalName(node.Value) || strings.Contains(node.Value, "/") {
 		return fmt.Errorf("invalid event %q", node.Value)
 	}
 	return nil
@@ -323,7 +336,7 @@ func replyFrom(resolution *yaml.Node, event string) (*reply, error) {
 		return nil, err
 	}
 	correlation, _ := lookup(resolution, "correlation_key")
-	if correlation != nil && (correlation.Kind != yaml.ScalarNode || correlation.Tag != "!!str" || correlation.Value == "") {
+	if correlation != nil && (correlation.Kind != yaml.ScalarNode || correlation.Tag != "!!str" || correlation.Value == "" || correlation.Value != strings.TrimSpace(correlation.Value)) {
 		return nil, fmt.Errorf("invalid correlation key")
 	}
 	return &reply{event: event, request: request, correlation: correlation}, nil
