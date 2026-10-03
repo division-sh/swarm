@@ -199,7 +199,7 @@ func startDeploymentResourceRun(t *testing.T, f *deploymentResourceFixture, serv
 	runID := uuid.NewString()
 	var stdout, stderr bytes.Buffer
 	args := []string{"run", "start", "--connect", server.URL,
-		"--bundle-hash", f.runtime.sourceArtifactFact.BundleHash(), "--run-id", runID,
+		"--run-id", runID,
 		flag, value, "--no-follow"}
 	if code := cliapp.Execute(f.ctx, args, &stdout, &stderr, nil, nil); code != 0 {
 		t.Fatalf("operator %v: code=%d stderr=%s stdout=%s", args, code, stderr.String(), stdout.String())

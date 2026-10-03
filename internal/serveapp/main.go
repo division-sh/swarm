@@ -3175,7 +3175,7 @@ func validateServeMultiContextToolGatewayAdmission(cfg *config.Config, loadedBun
 	if profile.ID != llmselection.BackendClaudeCLI {
 		return nil
 	}
-	return fmt.Errorf("multiple retained contexts with llm.backend=claude_cli are not supported in this configuration: ToolGatewayBinding, MCP /mcp and /tools routes, and forkchat sandbox runtime are single-context; use a non-claude_cli backend")
+	return fmt.Errorf("multiple retained runtime contexts with llm.backend=claude_cli are not supported in this configuration: ToolGatewayBinding, MCP /mcp and /tools routes, and forkchat sandbox runtime are single-context; use a non-claude_cli backend")
 }
 
 func validateServeGatewayURLEnvForNonDev() error {
