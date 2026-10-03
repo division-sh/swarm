@@ -175,9 +175,7 @@ func testStaleLearnedIngressRecoveryRequiredBothStores(t *testing.T, completed b
 						}
 						h.stop(t)
 						h.start(t)
-						if !strings.Contains(h.process.outputString(), "swarm channel resume "+pendingID) {
-							t.Fatal("recovery readback did not select the pending reconnect responsibility")
-						}
+						waitForInboundAdmissionServeOutput(t, h.process, "swarm channel resume "+pendingID)
 						if targets, err := rt.PlanStandingTargets(); err != nil || len(targets) != 0 {
 							t.Fatalf("restart adopted an explicitly repaired but unadmitted key: %#v, %v", targets, err)
 						}
