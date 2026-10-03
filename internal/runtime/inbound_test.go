@@ -815,7 +815,7 @@ func TestInboundGatewayExactRetryBypassesCurrentProjectionAndConflictsOnChangedR
 	}
 	store := &recordingInboundStore{inserted: true}
 	gateway := newTestInboundGateway(t, bus, nil, nil, store)
-	firstPlan, firstCatalog := compiledRedactedNormalizedPlan(t, "1.0.0", "text")
+	firstPlan, firstCatalog := compiledRedactedNormalizedPlan(t, "1.0.0", "string")
 	bus.SetProviderOutputAuthorizationVerifier(firstCatalog)
 	target := InboundTarget{
 		ServiceID: "9f733ec3-f834-47ff-bd55-3ea9038187ef", FlowPath: "ingress",
@@ -868,7 +868,7 @@ func TestInboundGatewayConcurrentLoserReturnsCommittedBatchDespiteCurrentProject
 	}
 	store := newConcurrentInboundStore()
 	gateway := newTestInboundGateway(t, bus, nil, nil, store)
-	firstPlan, firstCatalog := compiledRedactedNormalizedPlan(t, "1.0.0", "text")
+	firstPlan, firstCatalog := compiledRedactedNormalizedPlan(t, "1.0.0", "string")
 	projectionFailingPlan, _ := compiledRedactedNormalizedPlan(t, "2.0.0", "integer")
 	bus.SetProviderOutputAuthorizationVerifier(firstCatalog)
 	target := InboundTarget{
