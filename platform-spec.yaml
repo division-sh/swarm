@@ -23646,12 +23646,10 @@ cli_specification:
       fork_fail_closed_stub:
         classification: superseded_by_multi_source_artifact_authority
         reason: >
-          Previous tracked prose treated top-level `swarm fork` as retired. #1012 then promoted the multi-bundle
-          source authority and restored top-level `swarm fork <source-run-id> ...` as the then-intended public command
-          over /v1/rpc run.fork, implemented by #989/#1023. That authority is itself superseded by CLI v2.2
-          (#1654/#1677): the top-level `swarm fork` spelling is not registered under
-          cli_specification.topology_revision_v2_2.current_vocabulary_rule and the public command is
-          `swarm run fork`. Historical harness flags remain rejected.
+          CLI v2.2 (#1654/#1677) exposes `swarm run fork` over /v1/rpc run.fork.
+          Multi-bundle source authority is preserved; command admission follows
+          cli_specification.topology_revision_v2_2.current_vocabulary_rule.
+          Historical harness flags remain rejected.
       runtime_and_control_run_legacy_spellings:
         classification: unpromoted_candidate_backlog
         reason: >
