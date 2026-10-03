@@ -2,8 +2,10 @@
 
 Implementation qualification exposed the additional L04/L07 private-service phase
 counterexamples in [the focused service amendment](issue-2550-local-service-amendment.md).
-Service-lifetime edits await an independent delta ruling; no full or review-ready
-closure is claimed. The original six-family/one-PR boundary otherwise remains.
+The independent delta gate is approved under
+https://github.com/division-sh/swarm/issues/2550#issuecomment-5974227335.
+The seven additional L04/L07/L14 rows are binding within the same one-PR boundary;
+no full or review-ready closure is claimed.
 
 Agent: agent-g. Phase: implementation approved under the independent gate below.
 Intake: 2026-10-03. Source: master `1afb7f20315e99400b7398ef13c205836abd5f98`,

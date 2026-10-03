@@ -2,6 +2,19 @@
 
 Agent: agent-g. This is a focused delta to gate5972816660, not a new issue or a claim of qualification. The other five families and the one-PR ceiling remain unchanged.
 
+## Independent delta gate
+
+Approved within the existing one-PR gate by reviewer-g:
+https://github.com/division-sh/swarm/issues/2550#issuecomment-5974227335.
+This supersedes the pending-request/freeze wording retained below as historical
+pre-implementation context. No further lead ruling is required inside this boundary.
+Current rows must authorize namespace observations; pre-ID creation requires exact
+live service AND creator locks, while published identity requires constructor and
+cidfile equality. Concurrent retirement requires exact absence, without recreating
+authority. Both Provision cleanup and pre-start runner settlement must retain
+independent errors. The seven added proof rows, real focused/planned consumers,
+fresh four-service server2 full and hosted full remain required; no closure waiver.
+
 ## New execution evidence and tracker decision
 
 Fresh server2 Local-Tier: full at bf695ea171c5b14af44501dadc6d4b4cb96f3dab used private services, native PostgreSQL16 explicitly, disk TMPDIR, capacity4, and an unchanged65-unit full plan. It failed after151.397s: delivery-continuation-full refused provision because another legitimate lease did not match its registry container. Four units passed; four failed/interrupted;57 were not started. All started workers joined. No managed containers remained afterward. The error was service provisioning, not an application delivery test. Preserve the failed aggregate; no full or speed claim.
