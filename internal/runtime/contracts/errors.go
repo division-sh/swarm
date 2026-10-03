@@ -9,7 +9,7 @@ var (
 	ErrLoadValidation              = errors.New("contracts: bundle load validation failed")
 	ErrInvalidField                = errors.New("contracts: invalid field")
 	ErrConflictingCompletion       = errors.New("contracts: handler declares both on_complete and rules")
-	ErrDeprecatedGuardFallback     = errors.New("contracts: deprecated id-only guard")
+	ErrInvalidGuardCheck           = errors.New("contracts: guard identity requires an executable check")
 	ErrMultipleAuthoritativeOwners = errors.New("contracts: multiple authoritative system node owners")
 )
 

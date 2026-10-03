@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -870,10 +869,6 @@ func startSelectedContractAgentRuntimeGateway(exec *runtimetools.Executor, mcpTu
 	port := ln.Addr().(*net.TCPAddr).Port
 	hostURL := fmt.Sprintf("http://127.0.0.1:%d", port)
 	containerURL := fmt.Sprintf("http://host.docker.internal:%d", port)
-	if strings.TrimSpace(os.Getenv(toolgateway.RetiredAuthTokenEnvName)) != "" {
-		_ = ln.Close()
-		return toolgateway.Binding{}, nil, toolgateway.RetiredAuthTokenEnvError()
-	}
 	gatewayToken, err := toolgateway.GenerateAuthToken()
 	if err != nil {
 		_ = ln.Close()

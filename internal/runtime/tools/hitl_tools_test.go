@@ -176,9 +176,9 @@ func TestHITLIdentityLifecycleRejectsSourceDefinitionsWithoutAgents(t *testing.T
 	}{
 		{name: NotifyHumanToolName, teaching: "owned by the platform HITL contract"},
 		{name: AskHumanToolName, teaching: "owned by the platform HITL contract"},
-		{name: RetiredAgentMessageTool, teaching: agentMessageRetiredTeaching},
-		{name: "mailbox_send", teaching: "use notify_human"},
-		{name: "human_task_request", teaching: "use ask_human"},
+		{name: RetiredAgentMessageTool, teaching: `tool "agent_message" is unsupported`},
+		{name: "mailbox_send", teaching: `tool "mailbox_send" is unsupported`},
+		{name: "human_task_request", teaching: `tool "human_task_request" is unsupported`},
 	}
 	for _, identity := range identities {
 		for _, scope := range []string{"root", "flow"} {
@@ -223,9 +223,9 @@ func TestHITLIdentityLifecycleRejectsDiscoveredCandidates(t *testing.T) {
 	}{
 		{name: NotifyHumanToolName, teaching: "owned by the platform HITL contract"},
 		{name: AskHumanToolName, teaching: "owned by the platform HITL contract"},
-		{name: RetiredAgentMessageTool, teaching: agentMessageRetiredTeaching},
-		{name: "mailbox_send", teaching: "use notify_human"},
-		{name: "human_task_request", teaching: "use ask_human"},
+		{name: RetiredAgentMessageTool, teaching: `tool "agent_message" is unsupported`},
+		{name: "mailbox_send", teaching: `tool "mailbox_send" is unsupported`},
+		{name: "human_task_request", teaching: `tool "human_task_request" is unsupported`},
 	}
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	for _, identity := range identities {
@@ -257,9 +257,9 @@ func TestHITLIdentityLifecycleRejectsRuntimeMCPAliases(t *testing.T) {
 	}{
 		{name: NotifyHumanToolName, teaching: "owned by the platform HITL contract"},
 		{name: AskHumanToolName, teaching: "owned by the platform HITL contract"},
-		{name: RetiredAgentMessageTool, teaching: agentMessageRetiredTeaching},
-		{name: "mailbox_send", teaching: "use notify_human"},
-		{name: "human_task_request", teaching: "use ask_human"},
+		{name: RetiredAgentMessageTool, teaching: `tool "agent_message" is unsupported`},
+		{name: "mailbox_send", teaching: `tool "mailbox_send" is unsupported`},
+		{name: "human_task_request", teaching: `tool "human_task_request" is unsupported`},
 	}
 	for _, identity := range identities {
 		t.Run(identity.name, func(t *testing.T) {
@@ -285,9 +285,9 @@ func TestHITLIdentityLifecycleRejectsRetiredReferences(t *testing.T) {
 		name     string
 		teaching string
 	}{
-		{name: RetiredAgentMessageTool, teaching: agentMessageRetiredTeaching},
-		{name: "mailbox_send", teaching: "use notify_human"},
-		{name: "human_task_request", teaching: "use ask_human"},
+		{name: RetiredAgentMessageTool, teaching: `tool "agent_message" is unsupported`},
+		{name: "mailbox_send", teaching: `tool "mailbox_send" is unsupported`},
+		{name: "human_task_request", teaching: `tool "human_task_request" is unsupported`},
 	}
 	for _, identity := range identities {
 		for _, scope := range []string{"root", "flow"} {
@@ -330,9 +330,9 @@ func TestHITLIdentityLifecycleRejectsDirectDispatchBeforeResolution(t *testing.T
 		name     string
 		teaching string
 	}{
-		{name: RetiredAgentMessageTool, teaching: agentMessageRetiredTeaching},
-		{name: "mailbox_send", teaching: "use notify_human"},
-		{name: "human_task_request", teaching: "use ask_human"},
+		{name: RetiredAgentMessageTool, teaching: `tool "agent_message" is unsupported`},
+		{name: "mailbox_send", teaching: `tool "mailbox_send" is unsupported`},
+		{name: "human_task_request", teaching: `tool "human_task_request" is unsupported`},
 	} {
 		for _, name := range []string{identity.name, "mcp__runtime-tools__" + identity.name} {
 			t.Run(name, func(t *testing.T) {
@@ -379,9 +379,9 @@ func TestHITLIdentityLifecycleRejectsPermissionExpansion(t *testing.T) {
 		name     string
 		teaching string
 	}{
-		{name: RetiredAgentMessageTool, teaching: agentMessageRetiredTeaching},
-		{name: "mailbox_send", teaching: "use notify_human"},
-		{name: "human_task_request", teaching: "use ask_human"},
+		{name: RetiredAgentMessageTool, teaching: `tool "agent_message" is unsupported`},
+		{name: "mailbox_send", teaching: `tool "mailbox_send" is unsupported`},
+		{name: "human_task_request", teaching: `tool "human_task_request" is unsupported`},
 	} {
 		for _, surface := range []string{"direct", "bundle"} {
 			t.Run(identity.name+"/"+surface, func(t *testing.T) {

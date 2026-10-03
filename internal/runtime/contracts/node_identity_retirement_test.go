@@ -14,7 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
-const retiredNodeID = "node.id is retired; the map key is the identity."
+const retiredNodeID = `node field "id" is not supported.`
 
 func TestNodeMapKeyIdentityAcrossRecordSources(t *testing.T) {
 	scoped := &WorkflowContractBundle{scopedNodes: map[string]SystemNodeContract{}, scopedNodeSources: map[string]ContractItemSource{}}

@@ -153,7 +153,7 @@ func TestPersistedAgentOpaqueAuthorityRejectsInsteadOfStripping(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			want := "config contains runtime-owned keys: " + name
 			if strings.Contains(name, "prompt") {
-				want = "RETIRED: authored config"
+				want = "authored config"
 			}
 			cfg := persistedIntentTestAgent(t)
 			cfg.Config = json.RawMessage(raw)

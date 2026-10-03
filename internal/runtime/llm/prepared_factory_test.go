@@ -81,7 +81,7 @@ func TestPreparedProviderFactoryRejectsMockConfiguredDefault(t *testing.T) {
 		} else {
 			set, err = NewAgentRuntimeSet(profile, factory, nil)
 		}
-		if set != nil || err == nil || !strings.Contains(err.Error(), "backend mock is retired as a public selector") {
+		if set != nil || err == nil || !strings.Contains(err.Error(), "backend mock is unsupported as a public selector") {
 			t.Fatalf("prepared=%t admitted configured mock default: %v", prepared, err)
 		}
 	}

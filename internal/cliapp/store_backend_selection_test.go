@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -31,9 +32,8 @@ func TestResolveRuntimeStoreSelectionConsumesCanonicalSources(t *testing.T) {
 		}
 	})
 
-	t.Run("runtime config ignores retired env", func(t *testing.T) {
+	t.Run("runtime config selects backend", func(t *testing.T) {
 		unsetStoreSelectorEnv(t)
-		t.Setenv("SWARM_STORE_BACKEND", storebackend.BackendPostgres.String())
 		got, err := ResolveRuntimeStoreSelection(t.TempDir(), storebackend.ActiveDefaultBackend().String(), false, &config.Config{
 			Store: config.StoreConfig{Backend: storebackend.BackendSQLite.String()},
 		})
@@ -45,22 +45,20 @@ func TestResolveRuntimeStoreSelectionConsumesCanonicalSources(t *testing.T) {
 		}
 	})
 
-	t.Run("retired env does not affect rollout default", func(t *testing.T) {
+	t.Run("absent backend uses rollout default", func(t *testing.T) {
 		unsetStoreSelectorEnv(t)
-		t.Setenv("SWARM_STORE_BACKEND", storebackend.BackendPostgres.String())
 		got, err := ResolveRuntimeStoreSelection(t.TempDir(), storebackend.ActiveDefaultBackend().String(), false, &config.Config{})
 		if err != nil {
 			t.Fatalf("ResolveRuntimeStoreSelection: %v", err)
 		}
 		if got.Backend != storebackend.BackendSQLite || got.BackendSource != storebackend.SourceRolloutDefault {
-			t.Fatalf("selection = %#v, want retired env to leave rollout default sqlite", got)
+			t.Fatalf("selection = %#v, want rollout default sqlite", got)
 		}
 	})
 
-	t.Run("runtime config sqlite path ignores retired env", func(t *testing.T) {
+	t.Run("runtime config selects sqlite path", func(t *testing.T) {
 		unsetStoreSelectorEnv(t)
 		repo := t.TempDir()
-		t.Setenv("SWARM_SQLITE_PATH", "env/dev.db")
 		got, err := ResolveRuntimeStoreSelection(repo, storebackend.ActiveDefaultBackend().String(), false, &config.Config{
 			Store: config.StoreConfig{
 				Backend: storebackend.BackendSQLite.String(),
@@ -75,23 +73,21 @@ func TestResolveRuntimeStoreSelectionConsumesCanonicalSources(t *testing.T) {
 		}
 	})
 
-	t.Run("retired sqlite path env does not affect default", func(t *testing.T) {
+	t.Run("absent sqlite path uses default", func(t *testing.T) {
 		unsetStoreSelectorEnv(t)
 		repo := t.TempDir()
-		t.Setenv("SWARM_SQLITE_PATH", "env/dev.db")
 		got, err := ResolveRuntimeStoreSelection(repo, storebackend.ActiveDefaultBackend().String(), false, &config.Config{})
 		if err != nil {
 			t.Fatalf("ResolveRuntimeStoreSelection: %v", err)
 		}
 		if !strings.HasSuffix(got.SQLitePath, filepath.Join("stores", "default", "dev.db")) || got.SQLitePathSource != storebackend.SourceSwarmDirDefault {
-			t.Fatalf("sqlite path = %q source %q, want swarm-dir default not retired env", got.SQLitePath, got.SQLitePathSource)
+			t.Fatalf("sqlite path = %q source %q, want swarm-dir default", got.SQLitePath, got.SQLitePathSource)
 		}
 	})
 
-	t.Run("flag beats config and ignores retired env", func(t *testing.T) {
+	t.Run("flag beats config", func(t *testing.T) {
 		unsetStoreSelectorEnv(t)
 		repo := t.TempDir()
-		t.Setenv("SWARM_STORE_BACKEND", storebackend.BackendPostgres.String())
 		got, err := ResolveRuntimeStoreSelection(repo, storebackend.BackendSQLite.String(), true, &config.Config{
 			Store: config.StoreConfig{
 				Backend: storebackend.BackendPostgres.String(),
@@ -108,6 +104,19 @@ func TestResolveRuntimeStoreSelectionConsumesCanonicalSources(t *testing.T) {
 			t.Fatalf("sqlite path = %q, want %q", got.SQLitePath, want)
 		}
 	})
+	for _, key := range []string{"SWARM_STORE_BACKEND", "SWARM_SQLITE_PATH"} {
+		for _, flagSet := range []bool{false, true} {
+			t.Run(key+"/flag_set="+strconv.FormatBool(flagSet), func(t *testing.T) {
+				isolateCLIAPIConfigEnv(t)
+				unsetStoreSelectorEnv(t)
+				t.Setenv(key, "unsupported-source")
+				_, err := ResolveRuntimeStoreSelection(t.TempDir(), "sqlite", flagSet, &config.Config{Store: config.StoreConfig{Backend: "sqlite"}})
+				if err == nil || !strings.Contains(err.Error(), "env/unknown_stale @ "+key) {
+					t.Fatalf("unsupported env with flag set=%v: %v", flagSet, err)
+				}
+			})
+		}
+	}
 }
 
 func TestDatabaseEnvDetailsDoNotImplyPostgresSelection(t *testing.T) {
@@ -129,6 +138,12 @@ func TestDatabaseEnvDetailsDoNotImplyPostgresSelection(t *testing.T) {
 	}
 	if cfg.Database.Host != "127.0.0.1" || cfg.Database.Port != 5432 || cfg.Database.Name != "swarm" || cfg.Database.User != "postgres" || cfg.Database.SSLMode != "disable" || cfg.Database.PoolSize != 5 {
 		t.Fatalf("database env fallback affected built-in default config: %#v", cfg.Database)
+	}
+	if _, err := ResolveRuntimeStoreSelection(t.TempDir(), storebackend.ActiveDefaultBackend().String(), false, cfg); err == nil || !strings.Contains(err.Error(), "env/unknown_stale @ SWARM_DB_HOST") {
+		t.Fatalf("unsupported database sources: %v", err)
+	}
+	for _, key := range []string{"SWARM_DB_HOST", "SWARM_DB_PORT", "SWARM_DB_NAME", "SWARM_DB_USER", "SWARM_DB_SSLMODE", "SWARM_DB_POOL_SIZE"} {
+		t.Setenv(key, "")
 	}
 	got, err := ResolveRuntimeStoreSelection(t.TempDir(), storebackend.ActiveDefaultBackend().String(), false, cfg)
 	if err != nil {

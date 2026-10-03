@@ -186,7 +186,7 @@ func requireNativeReceiverAgentCarrier(t *testing.T, cfg actors.AgentConfig, wan
 
 func TestReceiverAgentBusinessNamespaceKeepsAuthoredPromptGuard(t *testing.T) {
 	for _, raw := range []string{`{"system_prompt":"override"}`, `{"nested":{"system_prompt":"override"}}`, `{"records":[{"system_prompt":"override"}]}`} {
-		if err := actors.ValidateNoAuthoredSystemPrompt(json.RawMessage(raw)); err == nil || !strings.Contains(err.Error(), "RETIRED: authored config.") {
+		if err := actors.ValidateNoAuthoredSystemPrompt(json.RawMessage(raw)); err == nil || !strings.Contains(err.Error(), "authored config.") {
 			t.Fatalf("authored opaque prompt override accepted: %s: %v", raw, err)
 		}
 	}

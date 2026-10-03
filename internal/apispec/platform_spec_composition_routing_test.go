@@ -52,14 +52,15 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarContains(t, mustYAMLPath(t, connect, "fields", "from"), "producer flow ID")
 	assertScalarContains(t, mustYAMLPath(t, connect, "fields", "to"), "receiver flow ID")
 	assertScalarContains(t, mustYAMLPath(t, connect, "fields", "rename"), "receiver-visible event identity")
-	assertScalarContains(t, mustYAMLPath(t, connect, "retired_fields", "adapter"), "Retired on presence")
+	assertScalarContains(t, mustMappingValue(t, connect, "admission_rule"), "Unknown fields fail strict")
 	if hasMappingKey(mustMappingValue(t, connect, "fields"), "delivery") || hasMappingKey(mustMappingValue(t, connect, "fields"), "reply") {
 		t.Fatal("parent connect fields retain retired delivery/reply authoring")
 	}
-	assertScalarContains(t, mustYAMLPath(t, connect, "retired_fields", "delivery"), "Retired on presence")
-	assertScalarContains(t, mustYAMLPath(t, connect, "retired_fields", "reply"), "resolution")
-	assertScalarContains(t, mustYAMLPath(t, connect, "retired_fields", "map"), "Retired on presence")
-	assertScalarContains(t, mustYAMLPath(t, connect, "retired_fields", "using"), "Retired on presence")
+	assertScalarContains(t, mustMappingValue(t, connect, "admission_rule"), "reply/fan-out remain receiver-owned")
+	assertScalarContains(t, mustMappingValue(t, connect, "admission_rule"), "connect.key_from")
+	if hasMappingKey(connect, "retired_fields") {
+		t.Fatal("connect retains a removed-spelling table")
+	}
 
 	ownership := mustMappingValue(t, composition, "ownership_split")
 	assertScalarContains(t, mustMappingValue(t, ownership, "parent_connect"), "owns the directed inter-flow event edge")
@@ -137,7 +138,7 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	retirement := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1827_connect_delivery_reply_retirement")
 	assertScalarValue(t, mustMappingValue(t, retirement, "status"), "merge_bearing_aggressive_retirement")
 	assertScalarContains(t, mustMappingValue(t, retirement, "rule"), "ConnectRoutePlan expose no delivery or raw reply compatibility fields")
-	assertScalarContains(t, mustYAMLPath(t, retirement, "migration", "rule"), "no codemod or compatibility reader exists")
+	assertScalarContains(t, mustYAMLPath(t, retirement, "admission", "rule"), "no codemod or compatibility reader exists")
 	if !sequenceContainsScalar(mustMappingValue(t, retirement, "preserved"), "connection resolution create, select and select-or-create; retained receiver fan-out and reply") {
 		t.Fatal("connect retirement must preserve receiver-owned reply semantics")
 	}
@@ -152,7 +153,7 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarValue(t, mustMappingValue(t, slice1475, "status"), "superseded_by_complete_retirement")
 	assertScalarContains(t, mustMappingValue(t, slice1475, "canonical_code_owner"), "strict emit decoding")
 	assertScalarContains(t, mustMappingValue(t, slice1475, "rule"), "fails strict load")
-	if !sequenceContainsScalar(mustMappingValue(t, slice1475, "produces"), "RETIRED-EMIT-ROUTING before normalization, verification, or runtime") {
+	if !sequenceContainsScalar(mustMappingValue(t, slice1475, "produces"), "unknown emit field rejection before normalization, verification, or runtime") {
 		t.Fatal("implementation_slice_1475 missing complete retirement proof surface")
 	}
 	slice1508 := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1508")
@@ -446,7 +447,7 @@ func TestPlatformSpecExecutableNodeIdentityIsExactAndCanonicalOnly(t *testing.T)
 		assertScalarContains(t, rule, fragment)
 	}
 	nodeFields := mustYAMLPath(t, root, "handler_specification", "node_specification", "node_fields")
-	assertScalarContains(t, mustYAMLPath(t, nodeFields, "retired", "id"), "node.id is retired; the map key is the identity.")
+	assertScalarContains(t, mustMappingValue(t, nodeFields, "admission_rule"), "the map key is the identity.")
 	assertScalarContains(t, mustYAMLPath(t, nodeFields, "effective_semantics", "id"), "YAML map key only")
 	optional := mustMappingValue(t, nodeFields, "optional")
 	for i := 0; i+1 < len(optional.Content); i += 2 {

@@ -25,7 +25,7 @@ func IsRetiredDynamicAgentToolName(name string) bool {
 
 func retiredDynamicAgentToolError(name, location string) error {
 	return fmt.Errorf(
-		"%s: RETIRED: %s is unsupported; declare managed agents in agents.yaml, let flow lifecycle/readiness own residency and teardown, and use typed fan-out for per-item work",
+		"%s: tool %q is unsupported",
 		strings.TrimSpace(location),
 		strings.TrimSpace(name),
 	)

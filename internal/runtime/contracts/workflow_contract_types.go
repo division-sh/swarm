@@ -1291,7 +1291,7 @@ const (
 func ParseFlowInputPinSource(raw string) (FlowInputPinSource, error) {
 	switch raw {
 	case "external":
-		return FlowInputPinSourceNone, fmt.Errorf("RETIRED: input event pin source: external is unsupported; selected-root inputs are public, private inputs require connections or an admitted provider ingress")
+		return FlowInputPinSourceNone, fmt.Errorf("input event pin source must be public, harness, or omitted")
 	case "harness":
 		return FlowInputPinSourceHarness, nil
 	default:

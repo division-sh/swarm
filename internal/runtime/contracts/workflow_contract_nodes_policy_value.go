@@ -25,7 +25,7 @@ func projectNodePolicyValueRow(value yamlsource.Value, kind, rowID string) (Poli
 	}
 	fields, err := nodeValueFields(value, label, map[string]struct{}{
 		nameKey: {}, "input": {}, "into": {},
-	}, nil)
+	})
 	if err != nil {
 		return PolicySheetRowMetadata{}, nil, err
 	}
@@ -106,7 +106,7 @@ func projectNodePolicyInputsValue(value yamlsource.Value, label string) (map[str
 func projectNodePolicyLookupValue(value yamlsource.Value, rowID string) (PolicySheetRowMetadata, *ComputeSpec, error) {
 	fields, err := nodeValueFields(value, "lookup", map[string]struct{}{
 		"on": {}, "entries": {}, "into": {}, "default": {},
-	}, nil)
+	})
 	if err != nil {
 		return PolicySheetRowMetadata{}, nil, err
 	}
@@ -168,7 +168,7 @@ func projectNodePolicyLookupEntriesValue(value yamlsource.Value, width int) ([]C
 	seen := map[string]int{}
 	valueKind := ""
 	for index, item := range items {
-		fields, err := nodeValueFields(item, "lookup.entry", map[string]struct{}{"key": {}, "value": {}}, nil)
+		fields, err := nodeValueFields(item, "lookup.entry", map[string]struct{}{"key": {}, "value": {}})
 		if err != nil {
 			return nil, err
 		}

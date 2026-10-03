@@ -139,7 +139,7 @@ func TestPlatformEventCatalogUsesRequiredByDefaultTypedOmission(t *testing.T) {
 
 func TestPlatformEventCatalogRejectsRetiredRequiredList(t *testing.T) {
 	_, err := ParsePlatformSpecDocument([]byte("platform_events:\n  catalog:\n    sample:\n      payload: {value: string}\n      required: [value]\n"), "platform-spec.yaml")
-	if err == nil || !strings.Contains(err.Error(), "required lists are retired") {
+	if err == nil || !strings.Contains(err.Error(), "required is reserved") {
 		t.Fatalf("admission error = %v", err)
 	}
 }

@@ -160,7 +160,7 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 	consumerMatrix := mustMappingValue(t, authority, "consumer_matrix")
 	wantConsumers := map[string]string{
 		"flat_cli_config":                       "superseded_by_unified_owner_first_slice_implemented",
-		"xdg_config_yaml":                       "invalid_legacy_discovery_replaced_by_user_global_swarm_yaml_by_1858",
+		"xdg_config_yaml":                       "unsupported_source_under_current_unified_source_admission",
 		"runtime_config_loader":                 "consumed_by_unified_owner_first_slice_implemented",
 		"executable_adjacent_config_yaml":       "invalid_ambient_reader_removed_by_1858",
 		"env_guard_delegated_env_sources":       "consumed_by_unified_owner_first_slice_implemented",
@@ -203,7 +203,7 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 	}
 
 	envDrain := mustMappingValue(t, authority, "env_drain")
-	for _, want := range []string{"seeded #1600 env row", "unified typed key", "terminal secret/token-file owner"} {
+	for _, want := range []string{"six active sources under #1600", "no catalog or translation map", "unknown-env", "before effects"} {
 		if !strings.Contains(scalarValue(mustMappingValue(t, envDrain, "rule")), want) {
 			t.Fatalf("env_drain rule missing %q:\n%s", want, scalarValue(mustMappingValue(t, envDrain, "rule")))
 		}

@@ -4,11 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 	"time"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimesharding "github.com/division-sh/swarm/internal/runtime/core/sharding"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
 )
 
@@ -44,17 +47,23 @@ type PlatformConfig struct {
 	Packs PlatformPacksConfig `yaml:"packs"`
 }
 
-const RetiredExecutionPostureMessage = "runtime.execution_posture is retired; swarm serve selects live execution and swarm test selects mock execution"
+func (c *Config) UnmarshalYAML(value *yaml.Node) error {
+	if err := validateConfigSource(value, reflect.TypeFor[Config](), "config"); err != nil {
+		return err
+	}
+	type raw Config
+	return value.Decode((*raw)(c))
+}
 
 func (r *RuntimeConfig) UnmarshalYAML(value *yaml.Node) error {
+	if err := validateConfigSource(value, reflect.TypeFor[RuntimeConfig](), "runtime"); err != nil {
+		return err
+	}
 	if value.Kind == yaml.MappingNode {
 		// Resolve YAML merge keys before checking presence and scalar types.
 		var fields map[string]yaml.Node
 		if err := value.Decode(&fields); err != nil {
 			return err
-		}
-		if _, present := fields["execution_posture"]; present {
-			return errors.New(RetiredExecutionPostureMessage)
 		}
 		if workers, present := fields["fan_out_workers"]; present {
 			if workers.Kind == yaml.AliasNode {
@@ -123,26 +132,25 @@ type StoreSQLiteConfig struct {
 }
 
 type WorkspaceConfig struct {
-	DataSource      string `yaml:"data_source"`
 	Backend         string `yaml:"backend"`
 	AllowExecOnHost bool   `yaml:"allow_exec_on_host"`
 	Image           string `yaml:"image"`
 	DockerBin       string `yaml:"docker_bin"`
 	HostRoot        string `yaml:"host_root"`
-	VolumesFrom     string `yaml:"volumes_from"`
 	Network         string `yaml:"network"`
 
-	dataSourceSet      bool
 	backendSet         bool
 	allowExecOnHostSet bool
 	imageSet           bool
 	dockerBinSet       bool
 	hostRootSet        bool
-	volumesFromSet     bool
 	networkSet         bool
 }
 
 func (w *WorkspaceConfig) UnmarshalYAML(value *yaml.Node) error {
+	if err := validateConfigSource(value, reflect.TypeFor[WorkspaceConfig](), "workspace"); err != nil {
+		return err
+	}
 	type raw WorkspaceConfig
 	var decoded raw
 	if err := value.Decode(&decoded); err != nil {
@@ -150,10 +158,12 @@ func (w *WorkspaceConfig) UnmarshalYAML(value *yaml.Node) error {
 	}
 	*w = WorkspaceConfig(decoded)
 	if value.Kind == yaml.MappingNode {
-		for i := 0; i+1 < len(value.Content); i += 2 {
-			switch value.Content[i].Value {
-			case "data_source":
-				return fmt.Errorf("workspace.data_source is retired; declare flow_data_access or data_access")
+		fields, err := yamlsource.ValueFromNode(value).Mapping()
+		if err != nil {
+			return err
+		}
+		for _, field := range fields {
+			switch field.Name {
 			case "backend":
 				w.backendSet = true
 			case "allow_exec_on_host":
@@ -164,18 +174,12 @@ func (w *WorkspaceConfig) UnmarshalYAML(value *yaml.Node) error {
 				w.dockerBinSet = true
 			case "host_root":
 				w.hostRootSet = true
-			case "volumes_from":
-				return fmt.Errorf("workspace.volumes_from is retired; declare flow_data_access or data_access")
 			case "network":
 				w.networkSet = true
 			}
 		}
 	}
 	return nil
-}
-
-func (w WorkspaceConfig) DataSourceConfigured() bool {
-	return w.dataSourceSet || strings.TrimSpace(w.DataSource) != ""
 }
 
 func (w WorkspaceConfig) BackendConfigured() bool {
@@ -198,21 +202,15 @@ func (w WorkspaceConfig) HostRootConfigured() bool {
 	return w.hostRootSet || strings.TrimSpace(w.HostRoot) != ""
 }
 
-func (w WorkspaceConfig) VolumesFromConfigured() bool {
-	return w.volumesFromSet || strings.TrimSpace(w.VolumesFrom) != ""
-}
-
 func (w WorkspaceConfig) NetworkConfigured() bool {
 	return w.networkSet || strings.TrimSpace(w.Network) != ""
 }
 
 type LLMConfig struct {
 	Backend          string                            `yaml:"backend"`
-	RuntimeMode      string                            `yaml:"runtime_mode"`
 	Models           llmselection.ModelAliases         `yaml:"models"`
 	Session          LLMSessionConfig                  `yaml:"session"`
 	ProviderLimits   map[string]LLMProviderLimitPolicy `yaml:"provider_limits"`
-	ClaudeAPI        ClaudeAPIConfig                   `yaml:"claude_api"`
 	ClaudeCLI        ClaudeCLIConfig                   `yaml:"claude_cli"`
 	OpenAICompatible OpenAICompatibleConfig            `yaml:"openai_compatible"`
 	OpenAIResponses  OpenAIResponsesConfig             `yaml:"openai_responses"`
@@ -232,11 +230,6 @@ type LLMProviderLimitPolicy struct {
 	Models                map[string]LLMProviderLimitPolicy `yaml:"models"`
 }
 
-type ClaudeAPIConfig struct {
-	DefaultModel string `yaml:"default_model"`
-	HaikuModel   string `yaml:"haiku_model"`
-}
-
 type ClaudeCLIConfig struct {
 	Command              string        `yaml:"command"`
 	Timeout              time.Duration `yaml:"timeout"`
@@ -247,9 +240,7 @@ type ClaudeCLIConfig struct {
 }
 
 type OpenAICompatibleConfig struct {
-	BaseURL      string `yaml:"base_url"`
-	DefaultModel string `yaml:"default_model"`
-	LowCostModel string `yaml:"low_cost_model"`
+	BaseURL string `yaml:"base_url"`
 }
 
 type OpenAIResponsesConfig struct {
@@ -272,6 +263,11 @@ func LoadWithOptions(path string, opts LoadOptions) (*Config, error) {
 	var cfg Config
 	cfg.Runtime.RecoveryOnStartup = true
 	if err := yaml.Unmarshal(b, &cfg); err != nil {
+		if diagnostic, ok := runtimecontracts.AsLoaderDiagnostic(err); ok {
+			located := *diagnostic
+			located.Location.File = path
+			return nil, &located
+		}
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
 	backendOverride := strings.TrimSpace(opts.BackendOverride)
@@ -287,9 +283,6 @@ func LoadWithOptions(path string, opts LoadOptions) (*Config, error) {
 func (c *Config) LLMBackendProfile() (llmselection.Profile, error) {
 	if c == nil {
 		return llmselection.Profile{}, errors.New("config is required")
-	}
-	if err := llmselection.RejectRetiredConfigRuntimeMode(c.LLM.RuntimeMode); err != nil {
-		return llmselection.Profile{}, err
 	}
 	return llmselection.ResolveLiveBackend(c.LLM.Backend)
 }
@@ -312,9 +305,6 @@ func (c *Config) validate(backendOverride string) error {
 		return err
 	}
 	if err := c.validateChannels(); err != nil {
-		return err
-	}
-	if err := c.validateRetiredLLMModelConfig(); err != nil {
 		return err
 	}
 	if err := llmselection.ValidateModelAliases(c.LLM.Models); err != nil {
@@ -493,24 +483,6 @@ func DatabasePasswordSourceFields(db DatabaseConfig) []string {
 		fields = append(fields, "database.password_env")
 	}
 	return fields
-}
-
-func (c *Config) validateRetiredLLMModelConfig() error {
-	retired := []struct {
-		key   string
-		value string
-	}{
-		{llmselection.ClaudeDefaultModelConfig, c.LLM.ClaudeAPI.DefaultModel},
-		{llmselection.ClaudeHaikuModelConfig, c.LLM.ClaudeAPI.HaikuModel},
-		{llmselection.OpenAICompatibleDefaultModelConfig, c.LLM.OpenAICompatible.DefaultModel},
-		{llmselection.OpenAICompatibleLowCostModelConfig, c.LLM.OpenAICompatible.LowCostModel},
-	}
-	for _, item := range retired {
-		if strings.TrimSpace(item.value) != "" {
-			return fmt.Errorf("%s is retired for model selection; use llm.models", item.key)
-		}
-	}
-	return nil
 }
 
 func (c *Config) ValidateOperationalControls() error {

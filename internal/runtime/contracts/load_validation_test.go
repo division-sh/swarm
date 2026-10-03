@@ -42,7 +42,7 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsDeprecatedGuardFall
 	setLoadedWorkflowNode(t, bundle, nodeID, node)
 
 	err := validateWorkflowContractBundleLoadConstraints(bundle)
-	if err == nil || !errors.Is(err, ErrDeprecatedGuardFallback) {
+	if err == nil || !errors.Is(err, ErrInvalidGuardCheck) {
 		t.Fatalf("unexpected load validation error: %v", err)
 	}
 }
@@ -314,7 +314,7 @@ worker:
   idempotency_table: worker_idempotency
   event_handlers: {}
 `,
-			wantErr: "RETIRED",
+			wantErr: "is not supported",
 		},
 	}
 	for _, tc := range tests {
@@ -366,7 +366,7 @@ worker:
   event_handlers: {}
 `)
 	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
-	if err == nil || !contractErrorContains(err, "RETIRED") || !contractErrorContains(err, "delay_minutes") {
+	if err == nil || !contractErrorContains(err, "is not supported") || !contractErrorContains(err, "delay_minutes") {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want retired delay_minutes rejection", err)
 	}
 }
@@ -388,7 +388,7 @@ model: regular
 model_tier: sonnet
 subscriptions: [scan.requested]
 `), &entry)
-	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "model_tier") {
+	if err == nil || !strings.Contains(err.Error(), "is not supported") || !strings.Contains(err.Error(), "model_tier") {
 		t.Fatalf("yaml.Unmarshal error = %v, want retired model_tier rejection", err)
 	}
 }
@@ -470,12 +470,12 @@ func TestAgentRegistryEntryRejectsRetiredMemoryModeFieldsAndAliases(t *testing.T
 		body     string
 		contains string
 	}{
-		{name: "conversation_mode", body: "conversation_mode: task\n", contains: "RETIRED"},
-		{name: "session_scope", body: "session_scope: flow\n", contains: "RETIRED"},
-		{name: "session_scope_authority", body: "session_scope_authority: platform_internal\n", contains: "RETIRED"},
-		{name: "mode_global", body: "mode: global\n", contains: "RETIRED"},
-		{name: "mode_unknown", body: "mode: forever\n", contains: "RETIRED"},
-		{name: "mode_stateless", body: "mode: stateless\n", contains: "RETIRED"},
+		{name: "conversation_mode", body: "conversation_mode: task\n", contains: "is not supported"},
+		{name: "session_scope", body: "session_scope: flow\n", contains: "is not supported"},
+		{name: "session_scope_authority", body: "session_scope_authority: platform_internal\n", contains: "is not supported"},
+		{name: "mode_global", body: "mode: global\n", contains: "is not supported"},
+		{name: "mode_unknown", body: "mode: forever\n", contains: "is not supported"},
+		{name: "mode_stateless", body: "mode: stateless\n", contains: "is not supported"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -500,8 +500,8 @@ func TestAgentRegistryEntryRejectsUnsupportedLayerSyntaxAndUnknownFields(t *test
 		body     string
 		contains string
 	}{
-		{name: "profile", body: "profile: cheap\n", contains: "RETIRED"},
-		{name: "runtime_id_template", body: "runtime_id_template: worker-{entity_id}\n", contains: "RETIRED"},
+		{name: "profile", body: "profile: cheap\n", contains: "is not supported"},
+		{name: "runtime_id_template", body: "runtime_id_template: worker-{entity_id}\n", contains: "is not supported"},
 		{name: "unknown", body: "surprise_field: true\n", contains: `agent field "surprise_field" is not supported.`},
 	}
 	for _, tt := range tests {
@@ -522,7 +522,7 @@ subscriptions: [scan.requested]
 func TestLoadWorkflowContractBundleRejectsRetiredPromptInputs(t *testing.T) {
 	var entry AgentRegistryEntry
 	err := decodeNodeTestYAML([]byte("prompt_inputs: [customer_name, order_type]\n"), &entry)
-	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "intent:") {
+	if err == nil || !strings.Contains(err.Error(), "is not supported") || !strings.Contains(err.Error(), "intent") {
 		t.Fatalf("yaml.Unmarshal error = %v, want retired prompt_inputs teaching error", err)
 	}
 }
@@ -812,9 +812,9 @@ func TestAgentRegistryEntryRejectsRetiredAuthoringAliases(t *testing.T) {
 		body     string
 		contains string
 	}{
-		{name: "tools_tier2", body: "tools_tier2: [lookup_data]\n", contains: "RETIRED"},
-		{name: "subscriptions_bootstrap", body: "subscriptions_bootstrap: [scan.requested]\n", contains: "RETIRED"},
-		{name: "subscribes_to", body: "subscribes_to: [scan.requested]\n", contains: "RETIRED"},
+		{name: "tools_tier2", body: "tools_tier2: [lookup_data]\n", contains: "is not supported"},
+		{name: "subscriptions_bootstrap", body: "subscriptions_bootstrap: [scan.requested]\n", contains: "is not supported"},
+		{name: "subscribes_to", body: "subscribes_to: [scan.requested]\n", contains: "is not supported"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -906,7 +906,7 @@ func TestLoadWorkflowContractBundleRejectsTier8DialectFixtures(t *testing.T) {
 		{name: "unordered on_complete mapping", fixture: "test-boot-on-complete-dict", contains: "DIALECT-OC-ORDER"},
 		{name: "empty authored handler rule", fixture: "test-boot-empty-authored-rule", contains: "EMPTY-AUTHORED-RULE"},
 		{name: "undefined handler field", fixture: "test-boot-handler-field-undefined", contains: "handler field \"custom_logic\" is not supported"},
-		{name: "deprecated handler field", fixture: "test-boot-deprecated-field", contains: "DEPRECATED"},
+		{name: "unsupported handler field", fixture: "test-boot-deprecated-field", contains: "handler field \"logic\" is not supported"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

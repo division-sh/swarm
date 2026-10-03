@@ -11,7 +11,7 @@ import (
 func projectNodeGroupByValue(value yamlsource.Value) (*GroupBySpec, error) {
 	fields, err := nodeValueFields(value, "group_by", map[string]struct{}{
 		"items_from": {}, "key": {}, "store_as": {},
-	}, nil)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -30,8 +30,6 @@ func projectNodeGroupByValue(value yamlsource.Value) (*GroupBySpec, error) {
 func projectNodeFilterValue(value yamlsource.Value) (*FilterSpec, error) {
 	fields, err := nodeValueFields(value, "filter", map[string]struct{}{
 		"source": {}, "items_from": {}, "condition": {}, "store_as": {},
-	}, map[string]string{
-		"predicate": "filter.predicate is not executed; use condition",
 	})
 	if err != nil {
 		return nil, err
@@ -52,8 +50,6 @@ func projectNodeFilterValue(value yamlsource.Value) (*FilterSpec, error) {
 func projectNodeReduceValue(value yamlsource.Value) (*ReduceSpec, error) {
 	fields, err := nodeValueFields(value, "reduce", map[string]struct{}{
 		"operation": {}, "source": {}, "items_from": {}, "store_as": {},
-	}, map[string]string{
-		"params": "reduce.params is not executed; use the declared operation and source",
 	})
 	if err != nil {
 		return nil, err
@@ -74,7 +70,7 @@ func projectNodeReduceValue(value yamlsource.Value) (*ReduceSpec, error) {
 func projectNodeCountValue(value yamlsource.Value) (*CountSpec, error) {
 	fields, err := nodeValueFields(value, "count", map[string]struct{}{
 		"source": {}, "items_from": {}, "condition": {}, "store_as": {},
-	}, nil)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -94,8 +90,6 @@ func projectNodeCountValue(value yamlsource.Value) (*CountSpec, error) {
 func projectNodeClearValue(value yamlsource.Value) (*ClearSpec, error) {
 	fields, err := nodeValueFields(value, "clear", map[string]struct{}{
 		"targets": {},
-	}, map[string]string{
-		"target": "clear.target is retired; use targets",
 	})
 	if err != nil {
 		return nil, err

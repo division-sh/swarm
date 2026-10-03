@@ -81,9 +81,9 @@ func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 			cfg := &config.Config{
 				Runtime: config.RuntimeConfig{MaxConcurrentAgents: 4, EventPollInterval: 5 * time.Millisecond},
 				LLM: config.LLMConfig{
-					Backend:   "anthropic",
-					Session:   config.LLMSessionConfig{LockTTL: 30 * time.Second, RotateAfterTurns: 8, RotateOnParseFailures: 2},
-					ClaudeAPI: config.ClaudeAPIConfig{DefaultModel: "test-model", HaikuModel: "test-haiku"},
+					Backend: "anthropic",
+					Session: config.LLMSessionConfig{LockTTL: 30 * time.Second, RotateAfterTurns: 8, RotateOnParseFailures: 2},
+					Models:  map[string]map[string]string{"regular": {"anthropic": "test-model"}, "cheap": {"anthropic": "test-haiku"}},
 				},
 			}
 			rt, err := swarmruntime.NewValidationHarnessRuntime(ctx, completeExternalRuntimeTestWorkflowDeps(t, selected, swarmruntime.RuntimeDeps{

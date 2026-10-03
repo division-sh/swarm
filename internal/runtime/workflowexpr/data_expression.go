@@ -190,13 +190,13 @@ func prepareCheckedValueExpression(expression string, opts ValueExpressionOption
 		return nil, nil, err
 	}
 	if expressionReferencesFanOutField(expression, "target") {
-		return nil, nil, fmt.Errorf("fan_out.target is retired; use the current fan_out emit item alias for per-item values or fan_out.count for fan-out count")
+		return nil, nil, fmt.Errorf("fan_out.target is not a supported expression field")
 	}
 	if expressionReferencesFanOutField(expression, "identity") {
 		return nil, nil, fmt.Errorf("fan_out.identity is not supported; use the declared fan_out identity expression directly through the item alias")
 	}
 	if expressionReferencesFanOutField(expression, "item") {
-		return nil, nil, fmt.Errorf("fan_out.item is retired from authored fan_out expressions; use the required fan_out item alias")
+		return nil, nil, fmt.Errorf("fan_out.item is not a supported expression field")
 	}
 	if strings.TrimSpace(opts.ItemAlias) == "" && expressionReferencesFanOutField(expression, "index") {
 		return nil, nil, fmt.Errorf("fan_out.index is only available inside fan_out.emit fields")

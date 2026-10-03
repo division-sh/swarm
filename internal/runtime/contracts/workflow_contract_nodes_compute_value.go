@@ -7,7 +7,7 @@ import (
 )
 
 func projectNodeLoopValue(value yamlsource.Value) (*LoopOperationSpec, error) {
-	fields, err := nodeValueFields(value, "handler loop operation", loopOperationFieldOptions, nil)
+	fields, err := nodeValueFields(value, "handler loop operation", loopOperationFieldOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -28,10 +28,7 @@ func projectNodeLoopValue(value yamlsource.Value) (*LoopOperationSpec, error) {
 }
 
 func projectNodeComputeValue(value yamlsource.Value) (*ComputeSpec, error) {
-	fields, err := nodeValueFields(value, "compute", map[string]struct{}{
-		"operation": {}, "tiers": {}, "keys": {}, "store_as": {},
-		"description": {},
-	}, map[string]string{"params": "compute.params is not executed; use declared compute inputs"})
+	fields, err := nodeValueFields(value, "compute", computeFieldOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +49,7 @@ func projectNodeComputeValue(value yamlsource.Value) (*ComputeSpec, error) {
 	if keys, present := fields["keys"]; present {
 		keyFields, err := nodeValueFields(keys, "compute.keys", map[string]struct{}{
 			"dimension_key": {}, "score_keys": {}, "numeric_keys": {},
-		}, nil)
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -83,7 +80,7 @@ func projectNodeComputeValue(value yamlsource.Value) (*ComputeSpec, error) {
 		for _, item := range items {
 			tierFields, err := nodeValueFields(item, "compute.tiers", map[string]struct{}{
 				"dimensions": {}, "weight": {},
-			}, nil)
+			})
 			if err != nil {
 				return nil, err
 			}

@@ -616,7 +616,7 @@ func TestValidateValueExpression_RejectsRetiredFanOutTarget(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected %q to reject retired fan_out.target", expression)
 			}
-			if got := err.Error(); got == "" || !containsAll(got, "fan_out.target", "retired") {
+			if got := err.Error(); got == "" || !containsAll(got, "fan_out.target", "not a supported expression field") {
 				t.Fatalf("ValidateValueExpressionWithOptions(%q) error = %q, want retired fan_out.target", expression, got)
 			}
 		})
@@ -920,7 +920,7 @@ func TestValidateValueExpression_RejectsRetiredFanOutItem(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected %q to reject retired fan_out.item", expression)
 			}
-			if got := err.Error(); got == "" || !containsAll(got, "fan_out.item", "retired") {
+			if got := err.Error(); got == "" || !containsAll(got, "fan_out.item", "not a supported expression field") {
 				t.Fatalf("ValidateValueExpressionWithOptions(%q) error = %q, want retired fan_out.item", expression, got)
 			}
 		})

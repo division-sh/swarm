@@ -667,9 +667,7 @@ func TestAnthropicAPIRuntime_ContinueSessionReMarksInboundDeliveryForReusedSessi
 	setEffectHarnessAgent(t, effects, "agent-1", "support/inst-1")
 	runtime := NewAnthropicAPIRuntime(&config.Config{
 		LLM: config.LLMConfig{
-			ClaudeAPI: config.ClaudeAPIConfig{
-				DefaultModel: "claude-test",
-			},
+			Models: map[string]map[string]string{"regular": {"anthropic": "claude-test"}},
 		},
 	}, sessions.NewInMemoryRegistry(0), "worker-1", nil, publisher)
 
@@ -717,9 +715,7 @@ func TestAnthropicAPIRuntime_ContinueSessionFailsClosedWhenDeliveryRestampFails(
 	publisher := &eventPublisherStub{}
 	runtime := NewAnthropicAPIRuntime(&config.Config{
 		LLM: config.LLMConfig{
-			ClaudeAPI: config.ClaudeAPIConfig{
-				DefaultModel: "claude-test",
-			},
+			Models: map[string]map[string]string{"regular": {"anthropic": "claude-test"}},
 		},
 	}, sessions.NewInMemoryRegistry(0), "worker-1", nil, publisher)
 

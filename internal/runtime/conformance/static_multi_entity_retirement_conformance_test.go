@@ -29,13 +29,13 @@ func TestStaticMultiEntityRetirementConformance(t *testing.T) {
 			name:        "select_entity fails closed",
 			handler:     canonicalrouting.StaticRetirementSelect,
 			checkID:     "select_entity_validation",
-			wantMessage: "static multi-row entity ownership is retired",
+			wantMessage: "schema field \"entities\" is not supported",
 		},
 		{
 			name:        "select_or_create_entity fails closed",
 			handler:     canonicalrouting.StaticRetirementSelectOrCreate,
 			checkID:     "select_entity_validation",
-			wantMessage: "static multi-row entity ownership is retired",
+			wantMessage: "schema field \"entities\" is not supported",
 		},
 		{
 			name:        "missing acquisition materializing state fails closed",
@@ -127,7 +127,7 @@ func assertRetiredReceiverSelectorLoadError(t *testing.T, root string) {
 	t.Helper()
 	repo := conformanceRepoRoot(t)
 	_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
-	if err == nil || !strings.Contains(err.Error(), "RETIRED: handler field") || !strings.Contains(err.Error(), "composition boundary") {
+	if err == nil || !strings.Contains(err.Error(), "handler field") || !strings.Contains(err.Error(), "Valid fields:") {
 		t.Fatalf("retired receiver election must fail strict loading: %v", err)
 	}
 }

@@ -16,24 +16,7 @@ func projectSchemaConnectValue(value yamlsource.Value) ([]FlowConnect, error) {
 	}
 	out := make([]FlowConnect, 0, len(items))
 	for _, item := range items {
-		for _, retired := range []struct {
-			key        string
-			diagnostic *LoaderDiagnostic
-		}{
-			{"delivery", NewRetiredConnectDeliveryDiagnostic()}, {"reply", NewRetiredConnectReplyDiagnostic()},
-		} {
-			member, err := item.Lookup(retired.key)
-			if err != nil {
-				return nil, err
-			}
-			if member.Presence != yamlsource.PresenceMissing {
-				location := member.Value.Location()
-				return nil, nodeValueError(member.Value, retired.diagnostic.withLocation(LoaderDiagnosticLocation{File: location.File, Line: location.Line, Column: location.Column, YAMLPath: member.Value.SemanticPath()}))
-			}
-		}
-		fields, err := schemaValueFields(item, "connect", flowConnectFieldOptions, map[string]string{
-			"adapter": "connect.adapter is unsupported; declare an exact event contract or a distinct event", "using": "retired connect.using.instance; declare receiver-owned instance and resolution", "map": "retired connect.map; declare receiver-owned instance and resolution", "delivery": "delivery is compiled", "reply": "reply is receiver-owned",
-		}, true)
+		fields, err := schemaValueFields(item, "connect", flowConnectFieldOptions, true)
 		if err != nil {
 			return nil, err
 		}
@@ -100,7 +83,7 @@ func ordinaryInstanceResolution(mode FlowInputResolutionMode) bool {
 }
 
 func projectSchemaImportsValue(value yamlsource.Value) (FlowSchemaImports, error) {
-	fields, err := schemaValueFields(value, "imports", map[string]struct{}{"connector_packs": {}, "provider_trigger_events": {}}, nil, true)
+	fields, err := schemaValueFields(value, "imports", map[string]struct{}{"connector_packs": {}, "provider_trigger_events": {}}, true)
 	var out FlowSchemaImports
 	if err != nil {
 		return out, err
@@ -115,7 +98,7 @@ func projectSchemaImportsValue(value yamlsource.Value) (FlowSchemaImports, error
 			if family == "provider_trigger_events" {
 				key = "event"
 			}
-			row, err := schemaValueFields(item, family+" import", map[string]struct{}{"provider": {}, key: {}}, nil, true)
+			row, err := schemaValueFields(item, family+" import", map[string]struct{}{"provider": {}, key: {}}, true)
 			if err != nil {
 				return out, err
 			}
@@ -141,14 +124,8 @@ func projectSchemaImportsValue(value yamlsource.Value) (FlowSchemaImports, error
 	return out, nil
 }
 
-var retiredSchemaPinFields = map[string]string{
-	"name": "pin name is unsupported; use the exact local event identity", "address": "input pin address is unsupported; declare instance plus resolution",
-	"carries": "input event pin carries are unsupported; route evidence is compiled from event schema and receiver resolution",
-	"key":     "output event pin key is unsupported; use the producer event business key", "optional": "optional pin fields are unsupported", "convert": "conversion has no admitted runtime semantics",
-}
-
 func projectSchemaPinsValue(value yamlsource.Value) (FlowPins, error) {
-	fields, err := schemaValueFields(value, "pins", map[string]struct{}{"inputs": {}, "outputs": {}}, nil, true)
+	fields, err := schemaValueFields(value, "pins", map[string]struct{}{"inputs": {}, "outputs": {}}, true)
 	var out FlowPins
 	if err != nil {
 		return out, err
@@ -158,7 +135,7 @@ func projectSchemaPinsValue(value yamlsource.Value) (FlowPins, error) {
 		if direction == "outputs" {
 			key = "writes"
 		}
-		members, err := schemaValueFields(fields[direction], "pins."+direction, map[string]struct{}{"events": {}, key: {}}, nil, true)
+		members, err := schemaValueFields(fields[direction], "pins."+direction, map[string]struct{}{"events": {}, key: {}}, true)
 		if err != nil {
 			return out, err
 		}
@@ -237,14 +214,7 @@ func projectSchemaPinValue(value yamlsource.Value, direction string) (FlowInputE
 		if direction == "outputs" {
 			allowed = outputEventPinFieldOptions
 		}
-		retired := make(map[string]string, len(retiredSchemaPinFields))
-		for key, reason := range retiredSchemaPinFields {
-			retired[key] = reason
-		}
-		if direction == "outputs" {
-			retired["carries"] = "output event pin carries are unsupported; route evidence is compiled from event schema and receiver resolution"
-		}
-		fields, fieldErr := schemaValueFields(value, direction+" event pin", allowed, retired, true)
+		fields, fieldErr := schemaValueFields(value, direction+" event pin", allowed, true)
 		if fieldErr != nil {
 			return input, output, fieldErr
 		}
@@ -303,14 +273,7 @@ func projectSchemaPinValue(value yamlsource.Value, direction string) (FlowInputE
 }
 
 func projectSchemaResolutionValue(value yamlsource.Value) (FlowInputPinResolution, error) {
-	retired, err := value.Lookup("instance_key")
-	if err != nil {
-		return FlowInputPinResolution{}, err
-	}
-	if retired.Presence != yamlsource.PresenceMissing {
-		return FlowInputPinResolution{}, nodeValueError(retired.Value, NewRetiredResolutionInstanceKeyDiagnostic())
-	}
-	fields, err := schemaValueFields(value, "input pin resolution", inputEventPinResolutionFieldOptions, map[string]string{"from": "ordinary input-pin resolution.from is retired; use optional key_from on each creating/selecting connect row"}, true)
+	fields, err := schemaValueFields(value, "input pin resolution", inputEventPinResolutionFieldOptions, true)
 	var out FlowInputPinResolution
 	if err != nil {
 		return out, err

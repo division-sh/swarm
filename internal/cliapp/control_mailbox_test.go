@@ -235,7 +235,7 @@ func TestControlMailboxNamespaceFailsClosedBeforeRequest(t *testing.T) {
 	defer server.Close()
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"control", "mailbox", "anything"}, &stdout, &stderr, testRootCommandOptions(server))
-	if code != 2 || !strings.Contains(stderr.String(), "`swarm control mailbox` was removed") || calls.Load() != 0 {
+	if code != 2 || !strings.Contains(stderr.String(), "unknown command \"mailbox\"") || calls.Load() != 0 {
 		t.Fatalf("code=%d calls=%d stderr=%q", code, calls.Load(), stderr.String())
 	}
 }

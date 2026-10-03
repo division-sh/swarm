@@ -89,7 +89,7 @@ func TestFinalFlowInstanceAuthoringFixture_FailClosedMatrix(t *testing.T) {
 		{
 			name:        "retired receiver instance key",
 			opts:        finalflowinstanceauthoring.Options{RetiredInstanceKey: true},
-			wantMessage: "resolution.instance_key is retired",
+			wantMessage: "input pin resolution field \"instance_key\" is not supported",
 			loadError:   true,
 		},
 		{
@@ -102,18 +102,18 @@ func TestFinalFlowInstanceAuthoringFixture_FailClosedMatrix(t *testing.T) {
 			name:        "normal connected receiver select_entity is illegal",
 			opts:        finalflowinstanceauthoring.Options{UnsupportedReceiverSelector: true},
 			loadError:   true,
-			wantMessage: "RETIRED: handler field",
+			wantMessage: "handler field",
 		},
 		{
 			name:        "producer target cannot rescue common composition",
 			opts:        finalflowinstanceauthoring.Options{ProducerTarget: true},
-			wantMessage: "RETIRED-EMIT-ROUTING: emit.target",
+			wantMessage: "emit field \"target\" is not supported",
 			loadError:   true,
 		},
 		{
 			name:        "producer broadcast cannot replace parent connect authority",
 			opts:        finalflowinstanceauthoring.Options{ProducerBroadcast: true},
-			wantMessage: "RETIRED-EMIT-ROUTING: emit.broadcast",
+			wantMessage: "emit field \"broadcast\" is not supported",
 			loadError:   true,
 		},
 		{
@@ -126,13 +126,13 @@ func TestFinalFlowInstanceAuthoringFixture_FailClosedMatrix(t *testing.T) {
 			name:        "retired static select_entity",
 			opts:        finalflowinstanceauthoring.Options{StaticSelectEntity: true},
 			loadError:   true,
-			wantMessage: "RETIRED: handler field",
+			wantMessage: "handler field",
 		},
 		{
 			name:        "retired static select_or_create_entity",
 			opts:        finalflowinstanceauthoring.Options{StaticSelectOrCreate: true},
 			loadError:   true,
-			wantMessage: "RETIRED: handler field",
+			wantMessage: "handler field",
 		},
 		{
 			name:        "caller-selected static implicit materialization",

@@ -193,7 +193,6 @@ func newRunCommand(root InvocationRoot, rootOpts rootCommandOptions) *cobra.Comm
 	cmd.Flags().StringVar(&opts.backend, "backend", "", "LLM backend profile for local foreground startup: anthropic, claude_cli, openai_compatible, or openai_responses")
 	cmd.Flags().StringArrayVar(&opts.dataImports, "data", nil, "Fused immutable data import and pin: name=file.jsonl (repeatable)")
 	cmd.Flags().StringArrayVar(&opts.dataPins, "pin", nil, "Exact data version pin: name@head, name@vN, or name@ResourceVersionID (repeatable)")
-	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", "", retiredPlatformSpecFlagHelp)
 	cmd.Flags().StringVar(&opts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for run.start")
 	_ = cmd.Flags().MarkHidden("idempotency-key")
 	cmd.Flags().StringVar(&opts.runID, "run-id", "", "Optional caller-provided run id for run.start")
@@ -300,9 +299,6 @@ func (o runCommandOptions) validate() error {
 		if !cliBundleHashPattern.MatchString(bundleHash) {
 			return fmt.Errorf("--bundle-hash must be bundle-v2:sha256:<64 lowercase hex>")
 		}
-	}
-	if o.changedFlags["platform-spec"] {
-		return fmt.Errorf("--platform-spec is retired; the swarm binary embeds its own platform spec. Use config paths.platform_spec_path only for platform spec development")
 	}
 	for _, value := range o.dataImports {
 		if strings.TrimSpace(value) == "" {

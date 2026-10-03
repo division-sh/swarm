@@ -218,7 +218,7 @@ func TestCLI_ServeRetiredPlatformSpecWritesOnlyStderr(t *testing.T) {
 	if stdout.Len() != 0 {
 		t.Fatalf("retired platform spec contaminated stdout: %q", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "--platform-spec is retired") || !strings.Contains(stderr.String(), "paths.platform_spec_path") {
+	if !strings.Contains(stderr.String(), "unknown flag: --platform-spec") {
 		t.Fatalf("retired platform spec stderr is incomplete:\n%s", stderr.String())
 	}
 }

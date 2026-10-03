@@ -14,7 +14,8 @@ import (
 
 const eventRequiredByDefaultRule = "event_payload_field_required_by_default/v1"
 
-var retiredEventCatalogMetadataFields = map[string]struct{}{
+// Reserved names cannot be reinterpreted as business payload fields.
+var reservedEventCatalogFieldNames = map[string]struct{}{
 	"swarm":                {},
 	"emitter":              {},
 	"emitter_type":         {},
@@ -109,14 +110,14 @@ func admitEventCatalogEntry(name string, declaration yamlsource.MappingField) (E
 		}
 	}
 	for _, field := range fields {
-		if _, retired := retiredEventCatalogMetadataFields[field.Name]; retired {
-			return EventCatalogEntry{}, fmt.Errorf("RETIRED: events.yaml metadata field %s at %s is unsupported; remove it; inputs, outputs, connections and executable declarations own event roles, and event APIs expose full payloads", field.Name, field.KeyLocation)
+		if _, reserved := reservedEventCatalogFieldNames[field.Name]; reserved {
+			return EventCatalogEntry{}, fmt.Errorf("event field name %q at %s is reserved and cannot declare business payload", field.Name, field.IntroductionLocation())
 		}
 		if field.Name == "required" {
-			return EventCatalogEntry{}, fmt.Errorf("RETIRED: events.yaml field required at %s is no longer supported; fields are required by default and optional fields use one trailing ? on their type", field.KeyLocation)
+			return EventCatalogEntry{}, fmt.Errorf("event field name %q at %s is reserved for required-by-default field semantics", field.Name, field.IntroductionLocation())
 		}
 		if field.Name == "payload" && eventPayloadValueIsRetiredNestedBlock(field.Value) {
-			return EventCatalogEntry{}, fmt.Errorf("RETIRED: nested events.yaml payload blocks are no longer supported; move payload fields to the event top level")
+			return EventCatalogEntry{}, fmt.Errorf("event payload at %s must be a field type declaration, not a nested payload block", field.IntroductionLocation())
 		}
 	}
 	if !bare {
@@ -365,12 +366,7 @@ func admitEventPayloadField(value yamlsource.Value) (EventFieldSpec, bool, yamls
 	byName := make(map[string]yamlsource.MappingField, len(fields))
 	for _, field := range fields {
 		if _, ok := eventPayloadFieldMappingKeys[field.Name]; !ok {
-			switch field.Name {
-			case "properties", "fields", "shape":
-				return EventFieldSpec{}, false, yamlsource.Value{}, fmt.Errorf("RETIRED: %s inline object declarations are retired; declare a named type in types.yaml", context)
-			default:
-				return EventFieldSpec{}, false, yamlsource.Value{}, NewUndefinedFieldDiagnostic(context, field.Name, eventPayloadFieldMappingKeys)
-			}
+			return EventFieldSpec{}, false, yamlsource.Value{}, NewUndefinedFieldDiagnostic(context, field.Name, eventPayloadFieldMappingKeys, field)
 		}
 		byName[field.Name] = field
 	}
@@ -389,11 +385,11 @@ func admitEventPayloadField(value yamlsource.Value) (EventFieldSpec, bool, yamls
 	if strings.EqualFold(strings.TrimSpace(typeName), "list") {
 		element, err := requiredLiteralString(eventFieldValue(byName, "of"), context+" list element type")
 		if err != nil {
-			return EventFieldSpec{}, false, yamlsource.Value{}, fmt.Errorf("RETIRED: %s list declarations require an of: element type", context)
+			return EventFieldSpec{}, false, yamlsource.Value{}, fmt.Errorf("%s list declarations require an of: element type", context)
 		}
 		typeName = "[" + strings.TrimSpace(element) + "]"
-	} else if _, hasOf := byName["of"]; hasOf {
-		return EventFieldSpec{}, false, yamlsource.Value{}, NewUndefinedFieldDiagnostic(context, "of", eventPayloadFieldMappingKeys)
+	} else if source, hasOf := byName["of"]; hasOf {
+		return EventFieldSpec{}, false, yamlsource.Value{}, NewUndefinedFieldDiagnostic(context, "of", eventPayloadFieldMappingKeys, source)
 	}
 	if err := rejectEventTypeOptionalMarker(typeName, context); err != nil {
 		return EventFieldSpec{}, false, yamlsource.Value{}, err

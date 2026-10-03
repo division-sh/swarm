@@ -10,7 +10,7 @@ import (
 func projectNodeDataAccumulationValue(value yamlsource.Value) (WorkflowDataAccumulation, error) {
 	fields, err := nodeValueFields(value, "data_accumulation", map[string]struct{}{
 		"writes": {}, "source_event": {},
-	}, nil)
+	})
 	if err != nil {
 		return WorkflowDataAccumulation{}, err
 	}
@@ -50,7 +50,7 @@ func projectNodeDataWriteValue(value yamlsource.Value) (WorkflowDataWrite, error
 	fields, err := nodeValueFields(value, "data_accumulation.writes", map[string]struct{}{
 		"field": {}, "source_field": {}, "target_field": {}, "target_path": {}, "target": {},
 		"op": {}, "key": {}, "index": {}, "value": {},
-	}, map[string]string{"expression": "retired workflow data write expression; use value: ${...}"})
+	})
 	if err != nil {
 		return WorkflowDataWrite{}, err
 	}

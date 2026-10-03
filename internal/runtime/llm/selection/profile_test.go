@@ -118,29 +118,11 @@ func TestResolvePersistedBackendAcceptsActivatedOpenAIResponsesProfile(t *testin
 	}
 }
 
-func TestRejectRetiredSelectors(t *testing.T) {
-	if err := RejectRetiredConfigRuntimeMode("api"); err == nil || !strings.Contains(err.Error(), ConfigBackendField) {
-		t.Fatalf("RejectRetiredConfigRuntimeMode error = %v, want backend guidance", err)
-	}
-	if err := RejectRetiredEnvBackend(func(key string) (string, bool) {
-		return "api", key == EnvBackend
-	}); err == nil || !strings.Contains(err.Error(), "--backend") {
-		t.Fatalf("RejectRetiredEnvBackend error = %v, want flag/config guidance", err)
-	}
-	if err := RejectRetiredEnvRuntimeMode(func(key string) (string, bool) {
-		return "api", key == RetiredEnvRuntimeMode
-	}); err == nil || !strings.Contains(err.Error(), "--backend") {
-		t.Fatalf("RejectRetiredEnvRuntimeMode error = %v, want flag/config guidance", err)
-	}
-	if err := RejectRetiredOpenAICompatibleBaseURLEnv(func(key string) (string, bool) {
-		return "https://example.test/v1", key == OpenAICompatibleBaseURLEnv
-	}); err == nil || !strings.Contains(err.Error(), OpenAICompatibleBaseURLConfigField) {
-		t.Fatalf("RejectRetiredOpenAICompatibleBaseURLEnv error = %v, want config guidance", err)
-	}
-	if err := RejectRetiredModelEnv(func(key string) (string, bool) {
-		return "claude-test", key == ClaudeDefaultModelEnv
-	}); err == nil || !strings.Contains(err.Error(), "llm.models") {
-		t.Fatalf("RejectRetiredModelEnv error = %v, want llm.models guidance", err)
+func TestLiveBackendSelectionRejectsUnsupportedSelectors(t *testing.T) {
+	for _, backend := range []string{"mock", "local", "unknown"} {
+		if _, err := ResolveLiveBackend(backend); err == nil {
+			t.Fatalf("ResolveLiveBackend(%q) must reject unsupported live selection", backend)
+		}
 	}
 }
 
@@ -249,34 +231,5 @@ func TestResolveCLIModelNameUsesModel(t *testing.T) {
 	}
 	if _, err := ResolveModelName(profile, ModelResolution{}); err == nil || !strings.Contains(err.Error(), "model is required") {
 		t.Fatalf("ResolveModelName empty error = %v, want required model", err)
-	}
-}
-
-func TestMigrateLegacyModelTier(t *testing.T) {
-	tests := []struct {
-		raw     string
-		want    string
-		changed bool
-		wantErr bool
-	}{
-		{raw: "", changed: false},
-		{raw: "haiku", want: ModelAliasCheap, changed: true},
-		{raw: "low_cost", want: ModelAliasCheap, changed: true},
-		{raw: "sonnet", want: ModelAliasRegular, changed: true},
-		{raw: "general", want: ModelAliasRegular, changed: true},
-		{raw: "generic", want: ModelAliasRegular, changed: true},
-		{raw: "opus", changed: true, wantErr: true},
-	}
-	for _, tt := range tests {
-		got, changed, err := MigrateLegacyModelTier(tt.raw)
-		if tt.wantErr {
-			if err == nil {
-				t.Fatalf("MigrateLegacyModelTier(%q) err = nil, want error", tt.raw)
-			}
-			continue
-		}
-		if err != nil || got != tt.want || changed != tt.changed {
-			t.Fatalf("MigrateLegacyModelTier(%q) = %q, %v, %v; want %q, %v, nil", tt.raw, got, changed, err, tt.want, tt.changed)
-		}
 	}
 }

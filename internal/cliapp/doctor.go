@@ -39,9 +39,6 @@ func newDoctorCommand(ctx context.Context, root InvocationRoot, rootOpts rootCom
   swarm doctor --target    # show which runtime this CLI targets`,
 		Args: cobra.NoArgs,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			if err := rejectRetiredPlatformSpecFlag(cmd); err != nil {
-				return err
-			}
 			if cliAPIConnectionFlagsChanged(cmd) && !opts.target {
 				return fmt.Errorf("--api-server and --api-token-file require --target")
 			}
@@ -73,7 +70,6 @@ func newDoctorCommand(ctx context.Context, root InvocationRoot, rootOpts rootCom
 	cmd.Flags().StringVar(&opts.configPath, "config", opts.configPath, "Path to swarm.yaml config")
 	cmd.Flags().StringVar(&opts.backend, "backend", opts.backend, "LLM backend profile to diagnose: anthropic, claude_cli, openai_compatible, or openai_responses")
 	cmd.Flags().StringVar(&opts.workspaceBackend, "workspace-backend", opts.workspaceBackend, "Workspace backend for local diagnostics: docker or host")
-	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", opts.platformSpecPath, "Path to platform spec yaml")
 	cmd.Flags().StringVar(&opts.apiListenAddr, "api-listen-addr", opts.apiListenAddr, "HTTP bind address to preflight for API, WebSocket, health, and readiness routes")
 	cmd.Flags().StringVar(&opts.mcpListenAddr, "mcp-listen-addr", opts.mcpListenAddr, "HTTP bind address to preflight for MCP and tools routes")
 	cmd.Flags().BoolVar(&opts.target, "target", false, "Explain local target, state directory, project, and context resolution without runtime preflight")
@@ -101,7 +97,7 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 	if err != nil {
 		report := newReport()
 		addUnifiedConfigDiagnosticsToReport(&report, unifiedConfigDiagnosticsFromError(err))
-		report.add(localPreflightBackendPrerequisite, "config_load_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix --config, --backend, retired env vars, or llm.backend")
+		report.add(localPreflightBackendPrerequisite, "config_load_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix the reported config, backend, or environment source blocker")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
 	configReport := newReport()
@@ -207,7 +203,7 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 	})
 	if err != nil {
 		report := configReport
-		report.add(localPreflightWorkspacePrerequisite, "workspace_data_source_invalid", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "remove retired workspace data paths; declare flow_data_access or data_access, or import a dataset with swarm run start --data name=file.jsonl")
+		report.add(localPreflightWorkspacePrerequisite, "workspace_data_source_invalid", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "use declared data access and admitted dataset inputs")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
 	report := runLocalClaudeCLIPreflight(ctx, localPreflightRequest{

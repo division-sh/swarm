@@ -130,7 +130,7 @@ type mailboxDeferCommandOptions struct {
 
 func newControlCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{Use: "control", Short: "Pause, continue, stop, or reset runs (operator actions).", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() }}
-	cmd.AddCommand(newRetiredControlMailboxCommand(), newControlPauseCommand(opts), newControlContinueCommand(opts), newControlStopCommand(opts), newControlNukeCommand(opts))
+	cmd.AddCommand(newControlPauseCommand(opts), newControlContinueCommand(opts), newControlStopCommand(opts), newControlNukeCommand(opts))
 	return cmd
 }
 
@@ -139,14 +139,6 @@ func newMailboxCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.AddCommand(newMailboxListCommand(opts), newMailboxViewCommand(opts), newMailboxDeferCommand(opts))
 	return cmd
 }
-
-func newRetiredControlMailboxCommand() *cobra.Command {
-	return &cobra.Command{Use: "mailbox", Hidden: true, DisableFlagParsing: true, RunE: func(cmd *cobra.Command, _ []string) error {
-		fmt.Fprintln(cmd.ErrOrStderr(), "ERROR: `swarm control mailbox` was removed; use `swarm mailbox`.")
-		return commandExitError{code: 2}
-	}}
-}
-
 func newMailboxListCommand(opts rootCommandOptions) *cobra.Command {
 	listOpts := mailboxListCommandOptions{apiOptions: opts, status: "pending"}
 	cmd := &cobra.Command{Use: "list", Short: "List mailbox notices and decision cards.", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {

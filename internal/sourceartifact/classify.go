@@ -85,10 +85,10 @@ func classifyLabel(label string) (Disposition, error) {
 			return 0, fmt.Errorf("excluded local/tooling path %q cannot appear in a source artifact", label)
 		}
 		if segment == "package.yaml" {
-			return 0, fmt.Errorf("RETIRED: package.yaml is not admitted; rename distribution metadata to manifest.yaml and derive topology from directories")
+			return 0, fmt.Errorf("package.yaml is not an admitted source filename")
 		}
 		if segment == "flows" {
-			return 0, fmt.Errorf("RETIRED: flows/ is not admitted; make each flow an ordinary child directory")
+			return 0, fmt.Errorf("flows is not an admitted flow directory name")
 		}
 	}
 

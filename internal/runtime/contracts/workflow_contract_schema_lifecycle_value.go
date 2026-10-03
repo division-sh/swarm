@@ -17,7 +17,7 @@ func projectSchemaStagesValue(value yamlsource.Value) (FlowStageDeclarations, er
 		return out, err
 	}
 	for _, field := range fields {
-		members, err := schemaValueFields(field.Value, "stage", stageDeclarationFieldOptions, nil, false)
+		members, err := schemaValueFields(field.Value, "stage", stageDeclarationFieldOptions, false)
 		if err != nil {
 			return out, err
 		}
@@ -42,7 +42,7 @@ func projectSchemaStagesValue(value yamlsource.Value) (FlowStageDeclarations, er
 				return out, err
 			}
 			for _, item := range items {
-				row, err := schemaValueFields(item, "stage timer", stageTimerFieldOptions, nil, true)
+				row, err := schemaValueFields(item, "stage timer", stageTimerFieldOptions, true)
 				if err != nil {
 					return out, err
 				}
@@ -74,7 +74,7 @@ func projectSchemaStagesValue(value yamlsource.Value) (FlowStageDeclarations, er
 }
 
 func projectSchemaGateValue(value yamlsource.Value) (*FlowStageGateDeclaration, error) {
-	fields, err := schemaValueFields(value, "stage gate", stageGateFieldOptions, nil, true)
+	fields, err := schemaValueFields(value, "stage gate", stageGateFieldOptions, true)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +104,7 @@ func projectSchemaGateValue(value yamlsource.Value) (*FlowStageGateDeclaration, 
 	}
 	out.Outcomes = map[string]FlowStageGateOutcomeDeclaration{}
 	for _, row := range rows {
-		members, err := schemaValueFields(row.Value, "stage gate outcome", stageGateOutcomeFieldOptions, nil, true)
+		members, err := schemaValueFields(row.Value, "stage gate outcome", stageGateOutcomeFieldOptions, true)
 		if err != nil {
 			return nil, err
 		}
@@ -140,7 +140,7 @@ func projectSchemaGateInputValue(value yamlsource.Value) (map[string]WorkflowGat
 	out := map[string]WorkflowGateInputField{}
 	order := make([]string, 0, len(rows))
 	for _, row := range rows {
-		fields, err := schemaValueFields(row.Value, "stage gate input field", stageGateInputFieldOptions, nil, true)
+		fields, err := schemaValueFields(row.Value, "stage gate input field", stageGateInputFieldOptions, true)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -173,7 +173,7 @@ func projectSchemaEmitValue(value yamlsource.Value) (EmitSpec, error) {
 			return EmitSpec{}, err
 		}
 	} else {
-		fields, err := schemaValueFields(value, "emit", map[string]struct{}{"event": {}, "from": {}, "fields": {}}, nil, true)
+		fields, err := schemaValueFields(value, "emit", map[string]struct{}{"event": {}, "from": {}, "fields": {}}, true)
 		if err != nil {
 			return EmitSpec{}, err
 		}
@@ -196,7 +196,7 @@ func projectSchemaLoopsValue(value yamlsource.Value) (FlowLoopDeclarations, erro
 	}
 	revisions := map[string]string{}
 	for _, row := range rows {
-		fields, err := schemaValueFields(row.Value, "loop", loopDeclarationFieldOptions, nil, true)
+		fields, err := schemaValueFields(row.Value, "loop", loopDeclarationFieldOptions, true)
 		if err != nil {
 			return out, err
 		}
@@ -216,7 +216,7 @@ func projectSchemaLoopsValue(value yamlsource.Value) (FlowLoopDeclarations, erro
 		if !present {
 			return out, nodeValueError(row.Value, fmt.Errorf("escape is required"))
 		}
-		members, err := schemaValueFields(escape, "loop escape", loopEscapeFieldOptions, nil, true)
+		members, err := schemaValueFields(escape, "loop escape", loopEscapeFieldOptions, true)
 		if err != nil {
 			return out, err
 		}

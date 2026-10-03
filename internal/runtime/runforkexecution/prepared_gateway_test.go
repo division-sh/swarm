@@ -15,7 +15,7 @@ import (
 )
 
 func TestPreparedGatewayConstructionSettlesWork(t *testing.T) {
-	for _, scenario := range []string{"missing_executor", "canceled", "retired_environment", "success"} {
+	for _, scenario := range []string{"missing_executor", "canceled", "ambient_environment", "success"} {
 		t.Run(scenario, func(t *testing.T) {
 			t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 			process := worklifetime.NewProcess()
@@ -30,16 +30,19 @@ func TestPreparedGatewayConstructionSettlesWork(t *testing.T) {
 			case "canceled":
 				process.Retire()
 				<-work.Context().Done()
-			case "retired_environment":
+			case "ambient_environment":
 				t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "retired")
 			}
 			binding, cleanup, err := startSelectedContractAgentRuntimeGateway(executor, mcp.NewTurnContextRegistry(nil), work, nil)
-			if scenario == "success" {
+			if scenario == "success" || scenario == "ambient_environment" {
 				if err != nil || binding.Empty() || cleanup == nil {
 					t.Fatalf("gateway: %v", err)
 				}
 				if process.ActiveCount() != 1 {
 					t.Fatal("serving gateway lost its process work")
+				}
+				if binding.AuthToken() == "retired" {
+					t.Fatal("ambient environment supplied gateway authority")
 				}
 				cleanup()
 				cleanup()

@@ -170,9 +170,6 @@ func newTestCommand(root InvocationRoot, opts rootCommandOptions) *cobra.Command
 			if cliAPIConnectionFlagsChanged(cmd) {
 				return returnScenarioTestValidationError(cmd.ErrOrStderr(), fmt.Errorf("swarm test owns a fresh private session; --api-server, --context and --api-token-file are not supported"))
 			}
-			if err := rejectRetiredPlatformSpecFlag(cmd); err != nil {
-				return returnScenarioTestValidationError(cmd.ErrOrStderr(), err)
-			}
 			var scenarios []string
 			if len(args) > 0 {
 				testOpts.contracts = args[0]
@@ -183,7 +180,6 @@ func newTestCommand(root InvocationRoot, opts rootCommandOptions) *cobra.Command
 			return runScenarioTestCommand(cmd.Context(), root.Path(), cmd.OutOrStdout(), cmd.ErrOrStderr(), scenarios, testOpts)
 		},
 	}
-	cmd.Flags().StringVar(&testOpts.platformSpec, "platform-spec", "", retiredPlatformSpecFlagHelp)
 	cmd.Flags().DurationVar(&testOpts.timeout, "timeout", defaultScenarioTestTimeout, "Safety deadline for test quiescence")
 	cmd.Flags().DurationVar(&testOpts.pollInterval, "poll-interval", defaultScenarioTestPoll, "Canonical readback polling interval while waiting for quiescence")
 	cmd.Flags().StringVar(&testOpts.derive, "derive", "", "Derive and run a scenario for an exact flow")

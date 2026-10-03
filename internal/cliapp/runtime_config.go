@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -87,21 +86,6 @@ func executableAdjacentRuntimeConfigPath() (string, bool, error) {
 }
 
 func defaultRuntimeConfig() (*config.Config, error) {
-	if err := rejectUnsupportedRuntimeControlEnv(); err != nil {
-		return nil, err
-	}
-	if err := llmselection.RejectRetiredEnvBackend(os.LookupEnv); err != nil {
-		return nil, err
-	}
-	if err := llmselection.RejectRetiredEnvRuntimeMode(os.LookupEnv); err != nil {
-		return nil, err
-	}
-	if err := llmselection.RejectRetiredOpenAICompatibleBaseURLEnv(os.LookupEnv); err != nil {
-		return nil, err
-	}
-	if err := llmselection.RejectRetiredModelEnv(os.LookupEnv); err != nil {
-		return nil, err
-	}
 	cfg := &config.Config{
 		Runtime: config.RuntimeConfig{
 			RecoveryOnStartup: true,
@@ -121,7 +105,6 @@ func defaultRuntimeConfig() (*config.Config, error) {
 				RotateAfterTurns:      40,
 				RotateOnParseFailures: 3,
 			},
-			ClaudeAPI: config.ClaudeAPIConfig{},
 			ClaudeCLI: config.ClaudeCLIConfig{
 				Command:              "claude",
 				Timeout:              time.Hour,
@@ -137,20 +120,8 @@ func defaultRuntimeConfig() (*config.Config, error) {
 }
 
 func DefaultRuntimeConfig() (*config.Config, error) {
+	if err := validateSwarmEnvSources(swarmEnvGuardContext{}); err != nil {
+		return nil, err
+	}
 	return defaultRuntimeConfig()
-}
-
-func rejectUnsupportedRuntimeControlEnv() error {
-	unsupported := make([]string, 0, 2)
-	if strings.TrimSpace(os.Getenv("SWARM_RUNTIME_MAX_CONCURRENT_AGENTS")) != "" {
-		unsupported = append(unsupported, "SWARM_RUNTIME_MAX_CONCURRENT_AGENTS")
-	}
-	if strings.TrimSpace(os.Getenv("SWARM_RUNTIME_EVENT_POLL_INTERVAL")) != "" {
-		unsupported = append(unsupported, "SWARM_RUNTIME_EVENT_POLL_INTERVAL")
-	}
-	if len(unsupported) == 0 {
-		return nil
-	}
-	sort.Strings(unsupported)
-	return fmt.Errorf("unsupported inert runtime controls configured: %s", strings.Join(unsupported, ", "))
 }

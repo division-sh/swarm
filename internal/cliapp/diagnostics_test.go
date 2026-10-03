@@ -70,27 +70,21 @@ func TestInvestigateNamespaceIsRetiredWithoutRequest(t *testing.T) {
 			name: "bare investigate",
 			args: []string{"investigate"},
 			wantOutput: []string{
-				"ERROR: `swarm investigate` was retired in CLI v2.",
-				"Use `swarm run list`",
-				"Use `swarm run status [run-id]`",
-				"Use `swarm run trace [run-id] [--follow]`",
-				"Use `swarm health`",
+				`unknown command "investigate"`,
 			},
 		},
 		{
 			name: "investigate runs",
 			args: []string{"investigate", "runs"},
 			wantOutput: []string{
-				"ERROR: `swarm investigate runs` was retired in CLI v2.",
-				"Use `swarm run list`.",
+				`unknown command "investigate"`,
 			},
 		},
 		{
 			name: "investigate runs legacy flags",
 			args: []string{"investigate", "runs", "--status", "running", "--limit", "1", "--cursor", "cur", "--since", "2026-05-13T10:00:00Z", "--until", "2026-05-13T11:00:00Z"},
 			wantOutput: []string{
-				"ERROR: `swarm investigate runs` was retired in CLI v2.",
-				"Use `swarm run list`.",
+				`unknown command "investigate"`,
 			},
 		},
 	} {
@@ -432,7 +426,7 @@ func TestInvestigateRunIsRetiredWithoutRequest(t *testing.T) {
 			if strings.TrimSpace(stdout.String()) != "" {
 				t.Fatalf("stdout = %q, want empty", stdout.String())
 			}
-			if got := stderr.String(); !strings.Contains(got, "ERROR: `swarm investigate run` was retired in CLI v2.") || !strings.Contains(got, "Use `swarm run status`.") {
+			if got := stderr.String(); !strings.Contains(got, `unknown command "investigate"`) {
 				t.Fatalf("stderr = %q, want retired migration message", got)
 			}
 			if calls.Load() != 0 {
@@ -466,7 +460,7 @@ func TestInvestigateTraceIsRetiredWithoutRequest(t *testing.T) {
 			if strings.TrimSpace(stdout.String()) != "" {
 				t.Fatalf("stdout = %q, want empty", stdout.String())
 			}
-			if got := stderr.String(); !strings.Contains(got, "ERROR: `swarm investigate trace` was retired in CLI v2.") || !strings.Contains(got, "Use `swarm run trace`.") {
+			if got := stderr.String(); !strings.Contains(got, `unknown command "investigate"`) {
 				t.Fatalf("stderr = %q, want retired migration message", got)
 			}
 			if calls.Load() != 0 {
@@ -1367,7 +1361,7 @@ func TestInvestigateHealthIsRetiredWithoutRequest(t *testing.T) {
 	if strings.TrimSpace(stdout.String()) != "" {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
-	if got := stderr.String(); !strings.Contains(got, "ERROR: `swarm investigate health` was retired in CLI v2.") || !strings.Contains(got, "Use `swarm health`.") {
+	if got := stderr.String(); !strings.Contains(got, `unknown command "investigate"`) {
 		t.Fatalf("stderr = %q, want retired migration message", got)
 	}
 	if calls.Load() != 0 {

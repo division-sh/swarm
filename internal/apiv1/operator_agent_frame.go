@@ -34,7 +34,7 @@ func OperatorAgentFrameHandlers(opts AgentFrameHandlerOptions) map[string]Method
 			case agentframe.InspectionEffective:
 				return inspectEffectiveAgentFrame(opts.Effective, req.Params)
 			default:
-				return nil, NewInvalidParamsError(map[string]any{"field": "scope", "reason": "must be effective; static catalog inspection is retired"})
+				return nil, NewInvalidParamsError(map[string]any{"field": "scope", "reason": "must be effective"})
 			}
 		},
 	}

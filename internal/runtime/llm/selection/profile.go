@@ -37,19 +37,10 @@ const (
 
 	DefaultBackend = BackendAnthropic
 
-	EnvBackend            = "SWARM_LLM_BACKEND"
-	RetiredEnvRuntimeMode = "SWARM_LLM_RUNTIME_MODE"
-
-	ConfigBackendField            = "llm.backend"
-	RetiredConfigRuntimeModeField = "llm.runtime_mode"
+	ConfigBackendField = "llm.backend"
 
 	OpenAICompatibleCredentialEnv      = "OPENAI_COMPATIBLE_API_KEY"
-	OpenAICompatibleBaseURLEnv         = "SWARM_OPENAI_COMPATIBLE_BASE_URL"
-	OpenAICompatibleDefaultModelEnv    = "SWARM_OPENAI_COMPATIBLE_DEFAULT_MODEL"
-	OpenAICompatibleLowCostModelEnv    = "SWARM_OPENAI_COMPATIBLE_LOW_COST_MODEL"
 	OpenAICompatibleBaseURLConfigField = "llm.openai_compatible.base_url"
-	OpenAICompatibleDefaultModelConfig = "llm.openai_compatible.default_model"
-	OpenAICompatibleLowCostModelConfig = "llm.openai_compatible.low_cost_model"
 
 	OpenAIResponsesCredentialEnv      = "OPENAI_API_KEY"
 	OpenAIResponsesBaseURLConfigField = "llm.openai_responses.base_url"
@@ -124,12 +115,6 @@ const (
 	ModelAliasCheap    = "cheap"
 	ModelAliasRegular  = "regular"
 	ModelAliasFrontier = "frontier"
-
-	ClaudeDefaultModelEnv = "SWARM_CLAUDE_DEFAULT_MODEL"
-	ClaudeHaikuModelEnv   = "SWARM_CLAUDE_HAIKU_MODEL"
-
-	ClaudeDefaultModelConfig = "llm.claude_api.default_model"
-	ClaudeHaikuModelConfig   = "llm.claude_api.haiku_model"
 )
 
 var builtInModelAliases = ModelAliases{
@@ -317,7 +302,7 @@ func ResolveLiveBackend(raw string) (Profile, error) {
 		return Profile{}, err
 	}
 	if profile.ID == BackendMock {
-		return Profile{}, fmt.Errorf("backend mock is retired as a public selector; use swarm test to execute authored doubles")
+		return Profile{}, fmt.Errorf("backend mock is unsupported as a public selector")
 	}
 	return profile, nil
 }
@@ -332,60 +317,6 @@ func ResolvePersistedBackend(raw string) (Profile, error) {
 		return Profile{}, fmt.Errorf("unsupported llm backend profile %q", id)
 	}
 	return profile, nil
-}
-
-func RejectRetiredConfigRuntimeMode(raw string) error {
-	if strings.TrimSpace(raw) == "" {
-		return nil
-	}
-	return fmt.Errorf("%s is retired; use %s", RetiredConfigRuntimeModeField, ConfigBackendField)
-}
-
-func RejectRetiredEnvBackend(lookup EnvLookup) error {
-	if lookup == nil {
-		return nil
-	}
-	if value, ok := lookup(EnvBackend); ok && strings.TrimSpace(value) != "" {
-		return fmt.Errorf("%s is retired and must not select the LLM backend; use --backend or %s", EnvBackend, ConfigBackendField)
-	}
-	return nil
-}
-
-func RejectRetiredEnvRuntimeMode(lookup EnvLookup) error {
-	if lookup == nil {
-		return nil
-	}
-	if value, ok := lookup(RetiredEnvRuntimeMode); ok && strings.TrimSpace(value) != "" {
-		return fmt.Errorf("%s is retired; use --backend or %s", RetiredEnvRuntimeMode, ConfigBackendField)
-	}
-	return nil
-}
-
-func RejectRetiredOpenAICompatibleBaseURLEnv(lookup EnvLookup) error {
-	if lookup == nil {
-		return nil
-	}
-	if value, ok := lookup(OpenAICompatibleBaseURLEnv); ok && strings.TrimSpace(value) != "" {
-		return fmt.Errorf("%s is retired; use %s", OpenAICompatibleBaseURLEnv, OpenAICompatibleBaseURLConfigField)
-	}
-	return nil
-}
-
-func RejectRetiredModelEnv(lookup EnvLookup) error {
-	if lookup == nil {
-		return nil
-	}
-	for _, env := range []string{
-		ClaudeDefaultModelEnv,
-		ClaudeHaikuModelEnv,
-		OpenAICompatibleDefaultModelEnv,
-		OpenAICompatibleLowCostModelEnv,
-	} {
-		if value, ok := lookup(env); ok && strings.TrimSpace(value) != "" {
-			return fmt.Errorf("%s is retired for model selection; use %s", env, "llm.models")
-		}
-	}
-	return nil
 }
 
 func ResolveBaseURL(profile Profile, raw string) (string, error) {
@@ -527,19 +458,6 @@ func NormalizeModelAlias(raw string) string {
 
 func BuiltInModelAliasNames() []string {
 	return []string{ModelAliasCheap, ModelAliasRegular, ModelAliasFrontier}
-}
-
-func MigrateLegacyModelTier(raw string) (string, bool, error) {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "":
-		return "", false, nil
-	case "haiku", "low_cost":
-		return ModelAliasCheap, true, nil
-	case "sonnet", "general", "generic":
-		return ModelAliasRegular, true, nil
-	default:
-		return "", true, fmt.Errorf("legacy model_tier %q cannot be migrated; use model alias cheap, regular, or frontier", strings.TrimSpace(raw))
-	}
 }
 
 func cloneModelAliases(in ModelAliases) ModelAliases {

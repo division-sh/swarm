@@ -45,7 +45,7 @@ func TestRunServeRuntimeRejectsRetiredConfiguredContractPathBeforeBundleLoad(t *
 	}
 	for _, want := range []string{
 		`config key "paths.contracts_path" is recognized but not yet supported`,
-		`RETIRED: authored source roots are positional command inputs; remove paths.contracts_path`,
+		`unknown config key "paths.contracts_path"`,
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("serve boot output missing retired path rejection %q:\n%s", want, out.String())

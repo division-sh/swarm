@@ -8,8 +8,6 @@ import (
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
-const retiredPlatformRequired = "platform event required lists are retired; fields are required by default and optional fields use one trailing ? on their type"
-
 func admitPlatformEventCatalogValue(value yamlsource.Value) (map[string]EventCatalogEntry, error) {
 	f, err := platformValueFields(value)
 	if err != nil {
@@ -23,7 +21,7 @@ func admitPlatformEventCatalogValue(value yamlsource.Value) (map[string]EventCat
 			return nil, err
 		}
 		if required, ok := members["required"]; ok {
-			return nil, nodeValueError(required, fmt.Errorf("%s", retiredPlatformRequired))
+			return nil, nodeValueError(required, fmt.Errorf("platform event field name required is reserved for required-by-default field semantics"))
 		}
 		entry := EventCatalogEntry{Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{}}}
 		if payload, ok := members["payload"]; ok {
@@ -50,7 +48,7 @@ func admitPlatformPayloadValue(value yamlsource.Value) (map[string]EventFieldSpe
 		return nil, nil, err
 	}
 	if v, ok := f["required"]; ok {
-		return nil, nil, nodeValueError(v, fmt.Errorf("%s", retiredPlatformRequired))
+		return nil, nil, nodeValueError(v, fmt.Errorf("platform payload field name required is reserved for required-by-default field semantics"))
 	}
 	out := make(map[string]EventFieldSpec, len(f))
 	var required []string

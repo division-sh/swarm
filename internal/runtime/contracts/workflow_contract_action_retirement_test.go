@@ -8,8 +8,9 @@ import (
 
 func requireRetiredHandlerAction(t *testing.T, err error, key string) {
 	t.Helper()
-	if err == nil || !strings.Contains(err.Error(), "RETIRED-HANDLER-ACTION") || !strings.Contains(err.Error(), fmt.Sprintf("%q", key)) || !strings.Contains(err.Error(), "receiver input initialize") {
-		t.Fatalf("error = %v, want presence-based retirement of %q with migration guidance", err, key)
+	diagnostic, ok := AsLoaderDiagnostic(err)
+	if !ok || diagnostic.Code != "contract_loader.undefined_field" || !strings.Contains(diagnostic.Problem, fmt.Sprintf("%q", key)) || len(diagnostic.ValidOptions) == 0 || diagnostic.Location.YAMLPath == "" || diagnostic.Location.Line < 1 || diagnostic.Location.Column < 1 {
+		t.Fatalf("error = %v, want located current-vocabulary rejection of %q", err, key)
 	}
 }
 
@@ -47,6 +48,16 @@ func TestRetiredHandlerActionOptionsRejected(t *testing.T) {
 				t.Run(site.name+"/"+key+"/"+value, func(t *testing.T) {
 					var handler SystemNodeEventHandler
 					err := decodeNodeTestYAML([]byte(fmt.Sprintf(site.pattern, key, value)), &handler)
+					if site.name == "rules_lone_field" && value == "{}" {
+						if err == nil || !strings.Contains(err.Error(), "EMPTY-AUTHORED-RULE") {
+							t.Fatalf("empty keyed rule %q was admitted: %v", key, err)
+						}
+						return
+					}
+					if site.name == "rules_lone_field" && value == "{nested: value}" {
+						requireRetiredHandlerAction(t, err, "nested")
+						return
+					}
 					requireRetiredHandlerAction(t, err, key)
 				})
 			}

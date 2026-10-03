@@ -69,7 +69,7 @@ func TestPlatformSpecHandlerSpecificationHierarchy(t *testing.T) {
 		"filter",
 		"count",
 		"clear",
-		"retired_fields",
+		"admission_rule",
 		"clear_gates",
 	}
 	for _, key := range expectedHandlerFields {
@@ -82,7 +82,7 @@ func TestPlatformSpecHandlerSpecificationHierarchy(t *testing.T) {
 	}
 
 	ruleFields := mustYAMLPath(t, handlerFields, "rules", "rule_fields")
-	for _, retired := range []string{"select_entity", "select_or_create_entity", "action", "evidence_target", "template", "instance_id_from", "config_from"} {
+	for _, retired := range []string{"retired_fields", "select_entity", "select_or_create_entity", "action", "evidence_target", "template", "instance_id_from", "config_from"} {
 		for _, owner := range []struct {
 			name string
 			node *yaml.Node

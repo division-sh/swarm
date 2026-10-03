@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"gopkg.in/yaml.v3"
 )
 
 func TestProviderContractsValidateShippedRuntimes(t *testing.T) {
@@ -113,7 +114,6 @@ func TestRuntimeFactoryValidatesProviderContract(t *testing.T) {
 			}
 			if tt.backend == "openai_compatible" {
 				cfg.LLM.OpenAICompatible.BaseURL = "https://example.test/v1"
-				cfg.LLM.OpenAICompatible.DefaultModel = "gpt-compatible"
 			}
 			runtime, err := RuntimeFactory{
 				Cfg:                  cfg,
@@ -144,15 +144,9 @@ func TestMockRuntimeUsesCanonicalProviderContractWithoutPublicBackendSelector(t 
 }
 
 func TestRuntimeFactoryRejectsRetiredRuntimeMode(t *testing.T) {
-	harness := effecttest.New()
-	_, err := RuntimeFactory{
-		Cfg: &config.Config{
-			LLM: config.LLMConfig{RuntimeMode: "cli_test"},
-		},
-		CompletionController: liveTestCompletionController(harness, harness, harness, harness),
-	}.Build()
-	if err == nil || !strings.Contains(err.Error(), "llm.runtime_mode is retired") {
-		t.Fatalf("Build error = %v, want retired runtime mode rejection", err)
+	var cfg config.Config
+	if err := yaml.Unmarshal([]byte("llm:\n  runtime_mode: cli_test\n"), &cfg); err == nil || !strings.Contains(err.Error(), "runtime_mode") || !strings.Contains(err.Error(), "not supported") {
+		t.Fatalf("factory source error = %v, want rejection before building provider effects", err)
 	}
 }
 

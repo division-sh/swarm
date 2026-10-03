@@ -466,7 +466,7 @@ func (m *HostManager) hostRoot() (string, error) {
 
 func (m *HostManager) validateSharedMounts() error {
 	if strings.TrimSpace(m.cfg.SharedDataSource) != "" {
-		return fmt.Errorf("workspace.data_source is retired; declare flow_data_access or data_access")
+		return fmt.Errorf("workspace.data_source is unsupported")
 	}
 	sourceProjectionPath, err := validateSourceProjection(m.cfg.SourceProjection, m.cfg.BundleHash)
 	if err != nil {

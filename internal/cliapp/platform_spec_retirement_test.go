@@ -19,6 +19,9 @@ func TestPlatformSpecFlagRetiredAcrossCommandSurface(t *testing.T) {
 		{name: "describe routes", args: []string{"describe", "routes", ".", "--platform-spec", "platform.yaml"}},
 		{name: "doctor", args: []string{"doctor", "--platform-spec", "platform.yaml"}},
 		{name: "test", args: []string{"test", ".", "--platform-spec", "platform.yaml"}},
+		{name: "import", args: []string{"import", "pack", "--platform-spec", "platform.yaml"}},
+		{name: "packs list", args: []string{"packs", "list", "--platform-spec", "platform.yaml"}},
+		{name: "packs show", args: []string{"packs", "show", "pack", "--platform-spec", "platform.yaml"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
@@ -26,14 +29,8 @@ func TestPlatformSpecFlagRetiredAcrossCommandSurface(t *testing.T) {
 			if code != CLIExitValidation {
 				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, CLIExitValidation, stdout.String(), stderr.String())
 			}
-			for _, want := range []string{
-				"--platform-spec is retired",
-				"embeds its own platform spec",
-				"paths.platform_spec_path",
-			} {
-				if !strings.Contains(stderr.String(), want) {
-					t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
-				}
+			if !strings.Contains(stderr.String(), "unknown flag: --platform-spec") || strings.Contains(stderr.String(), "retired") {
+				t.Fatalf("stderr must use ordinary flag admission:\n%s", stderr.String())
 			}
 		})
 	}

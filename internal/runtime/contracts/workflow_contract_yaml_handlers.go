@@ -1,11 +1,9 @@
 package contracts
 
 var emitFieldOptions = map[string]struct{}{
-	"event":     {},
-	"from":      {},
-	"fields":    {},
-	"target":    {},
-	"broadcast": {},
+	"event":  {},
+	"from":   {},
+	"fields": {},
 }
 
 var onSuccessFieldOptions = map[string]struct{}{
@@ -54,8 +52,6 @@ var handlerFieldOptions = map[string]struct{}{
 	"sets_gate":         {},
 	"clear_gates":       {},
 	"data_accumulation": {},
-	"condition":         {},
-	"logic":             {},
 	"loop":              {},
 	"on_complete":       {},
 	"rules":             {},
@@ -69,7 +65,6 @@ var handlerFieldOptions = map[string]struct{}{
 	"reduce":            {},
 	"count":             {},
 	"clear":             {},
-	"from":              {},
 }
 
 type handlerRuleDecodeContext string

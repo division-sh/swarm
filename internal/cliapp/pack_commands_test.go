@@ -307,7 +307,7 @@ func TestMalformedPackBodiesFailBeforeEveryCLIPublishingSurface(t *testing.T) {
 	tests := []struct {
 		name, id, bodyFile, wantErr string
 	}{
-		{name: "trigger", id: "provider.telegram", bodyFile: packartifact.TriggerManifestFileName, wantErr: "admit provider trigger packs"},
+		{name: "trigger", id: "provider.telegram", bodyFile: packartifact.TriggerManifestFileName, wantErr: "provider trigger manifest field \"unknown_field\" is not supported"},
 		{name: "connector", id: "provider.telegram.connector", bodyFile: packartifact.ConnectorManifestFileName, wantErr: "admit provider connector packs"},
 		{name: "channel", id: "provider.telegram.hitl_channel", bodyFile: packartifact.ChannelManifestFileName, wantErr: "admit channel packs"},
 	}

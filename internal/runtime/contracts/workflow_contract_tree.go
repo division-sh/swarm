@@ -198,7 +198,7 @@ func normalizeAgentRegistryEntries(entries map[string]AgentRegistryEntry, source
 func validateAgentRegistryMapKey(key, sourceFile string) error {
 	switch strings.TrimSpace(key) {
 	case "agent_defaults", "agent_profiles", "profiles":
-		return fmt.Errorf("RETIRED: %s key %q is not accepted by Layer 1 platform defaults; author agent entries directly", strings.TrimSpace(sourceFile), key)
+		return fmt.Errorf("%s key %q is not accepted by Layer 1 platform defaults", strings.TrimSpace(sourceFile), key)
 	default:
 		return nil
 	}

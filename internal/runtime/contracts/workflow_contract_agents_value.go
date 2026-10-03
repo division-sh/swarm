@@ -8,16 +8,6 @@ import (
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
-var retiredAgentFields = map[string]string{
-	"model_tier": "model_tier is retired; use model", "mode": "mode is retired; omit memory for stateless execution or use memory: true",
-	"conversation_mode": "conversation_mode is retired; use memory", "session_scope": "agent field session_scope is retired; memory identity is run, agent and flow instance",
-	"session_scope_authority": "session_scope_authority is retired; use memory", "tools_tier2": "tools_tier2 is retired; use tools",
-	"subscriptions_bootstrap": "subscriptions_bootstrap is retired; use subscriptions", "subscribes_to": "subscribes_to is retired for agents.yaml; use subscriptions",
-	"prompt_ref": "agent field prompt_ref is retired; declare exactly one intent: source", "prompt_inputs": "agent field prompt_inputs is retired; declare exactly one intent: source",
-	"profile": "agent profiles are unsupported", "agent_defaults": "agent defaults are unsupported",
-	"agent_profiles": "agent profiles are unsupported", "runtime_id_template": "agent identity is declaration x instance route",
-}
-
 func projectAgentDeclarationsValue(root yamlsource.Value) (map[string]AgentRegistryEntry, error) {
 	if err := root.ValidateExpansion(); err != nil {
 		return nil, err
@@ -50,7 +40,7 @@ func projectAgentDeclarationsValue(root yamlsource.Value) (map[string]AgentRegis
 }
 
 func projectAgentValue(key string, value yamlsource.Value) (AgentRegistryEntry, error) {
-	fields, err := nodeValueFields(value, "agent", agentRegistryEntryFieldOptions, retiredAgentFields)
+	fields, err := nodeValueFields(value, "agent", agentRegistryEntryFieldOptions)
 	if err != nil {
 		return AgentRegistryEntry{}, err
 	}
@@ -135,13 +125,13 @@ func validateAgentAuthoredSpelling(key, name, text string, memory bool, turns in
 		duplicate = strings.TrimSpace(text) == ""
 	}
 	if duplicate {
-		return fmt.Errorf("RETIRED: %s is the default; remove it", name)
+		return fmt.Errorf("explicit %s repeats the implicit default and is not supported", name)
 	}
 	return nil
 }
 
 func projectAgentNativeValue(value yamlsource.Value) (map[string]any, error) {
-	fields, err := nodeValueFields(value, "native_tools", map[string]struct{}{"bash": {}, "web_search": {}, "file_io": {}}, nil)
+	fields, err := nodeValueFields(value, "native_tools", map[string]struct{}{"bash": {}, "web_search": {}, "file_io": {}})
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +206,7 @@ func projectAgentWritesValue(value yamlsource.Value) (map[string]AgentEntityWrit
 	}
 	out := map[string]AgentEntityWriteDecl{}
 	for _, entity := range entities {
-		fields, err := nodeValueFields(entity.Value, "entity_writes", map[string]struct{}{"create": {}, "save": {}}, nil)
+		fields, err := nodeValueFields(entity.Value, "entity_writes", map[string]struct{}{"create": {}, "save": {}})
 		if err != nil {
 			return nil, err
 		}
@@ -271,7 +261,7 @@ func projectAgentWriteRuleValue(value yamlsource.Value) (AgentEntityWriteRule, e
 }
 
 func projectAgentMockValue(value yamlsource.Value, out *AgentRegistryEntry) error {
-	fields, err := nodeValueFields(value, "mock", map[string]struct{}{"kind": {}, "module": {}, "post_tool_tail_latency_ms": {}}, nil)
+	fields, err := nodeValueFields(value, "mock", map[string]struct{}{"kind": {}, "module": {}, "post_tool_tail_latency_ms": {}})
 	if err != nil {
 		return err
 	}
@@ -305,7 +295,7 @@ func projectAgentDataAccessValue(value yamlsource.Value) ([]DurableDataAccessRef
 	}
 	out := make([]DurableDataAccessRef, 0, len(items))
 	for _, item := range items {
-		fields, err := nodeValueFields(item, "data_access", map[string]struct{}{"data": {}, "flow_path": {}}, nil)
+		fields, err := nodeValueFields(item, "data_access", map[string]struct{}{"data": {}, "flow_path": {}})
 		if err != nil {
 			return nil, err
 		}
