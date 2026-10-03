@@ -200,9 +200,6 @@ func TestComposedStartupCreationPublicationHandoffOnBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatalf("prepare predecessor: %v", err)
 				}
-				if err := startPredecessor(); err != nil {
-					t.Fatalf("start predecessor: %v", err)
-				}
 				db, _, _ := selectedRuntimeStoreForTest(t, persistence)
 				runID := uuid.NewString()
 				fact := candidate.runtime.Options.SourceArtifactFact
@@ -211,6 +208,10 @@ func TestComposedStartupCreationPublicationHandoffOnBothStores(t *testing.T) {
 					runlifecyclefixture.RequireSQLite(t, ctx, db, seed)
 				} else {
 					runlifecyclefixture.RequirePostgres(t, ctx, db, seed)
+				}
+				// Commit fixture setup before releasing autonomous runtime writers.
+				if err := startPredecessor(); err != nil {
+					t.Fatalf("start predecessor: %v", err)
 				}
 				activationCtx := correlation.WithRunID(correlation.WithSourceArtifactFact(ctx, fact), runID)
 				activationCtx = authoractivity.WithScope(activationCtx, authoractivity.BundleScope(instance, fact.BundleHash()))
