@@ -132,6 +132,53 @@ introduced.
 
 ## Status
 
+### Approved #2353 Test-Only Qualification Repair
+
+Reviewer-g ruling5967342845 approves absorption in #2548. Earlier full/default
+ef157f868 receipts and hosted37108207931 remain failed and uncredited. The
+working class is a premature replay snapshot, not a production lifecycle defect.
+Before replay, completed worker routes and the collector only after final gather
+must reach exact persisted termination: current run, route/instance, entity,
+status terminated and nonzero TerminatedAt. The root and active collector are
+not terminal obligations. Use the existing absolute publication/phase deadline;
+preserve the complete state-map, domain-count, delivery and join assertions.
+
+The existing pipeline WorkflowTerminalCommitted/committed probe is invoked after
+delivery settlement and before manager CommitFlowInstanceTermination. A scoped
+collector probe holds that boundary for a deterministic both-store negative
+control: delivery/join success cannot satisfy the fence, released finalization
+can, and replay must preserve the full persisted map and domain counts. Retain
+failure-only before/after evidence including status, revision and TerminatedAt.
+No runtime owner, assertion filter, delay, deadline reset, vendor or framework.
+If another mutation survives the exact fence, stop and re-gate. The bounded
+repair is batched with native-unused helper deletion and its exact generated
+complexity snapshot, then fresh local full/default and hosted full qualification.
+Existing #2353/watchlist own the failure history; #2535 retains fleet/postmerge
+acceptance. This approval is permission to repair, not proof or merge approval.
+
+Q04 names the added qualification-fixture manifestation separately from the CI
+owner migration. TestScatterGatherSafetyBothStores/{sqlite,postgres}/
+{duplicate_publication,held_finalization} passes ten normal repetitions
+(108.562s) and three race repetitions (140.081s). The held final gather has its
+exact delivered join outcome and complete current_state while the persisted
+collector is still active with zero TerminatedAt: the actual snapshot predicate
+refuses. Releasing the existing probe allows exact termination and full-map/
+domain-count replay equality. Each earlier completion still fences only its
+completed workers; the active collector and root remain in the unchanged full
+snapshot without becoming terminal obligations. Existing root ownership remains
+TestScatterGatherSafetyBothStores; no new root, policy membership, budget or
+workload deadline is introduced. The complete fourteen-leaf matrix passes
+(64.329s), including both original hundred_reverse_completion, restart,
+rejection and ordering proofs. Exact root/partition controls pass (11.219s).
+Final clean-head local/hosted full qualification must still complete before
+review. Raw receipts are
+retained as agent-g-2544-terminal-fence-both-ten.log (SHA256
+370838cf2a1aca3121cce65bf99a572a4b977d7bb005f9c8a654a2fba70ff41f)
+and agent-g-2544-terminal-fence-both-race-three.log (SHA256
+7648053b670991da2c49732848b356f381c46167989ab1893dba3575da380ed3);
+final evidence binds their
+candidate source/tree separately from the subsequent signed qualification head.
+
 The hosted V10 experiment hit the original stop condition: fresh lifecycle smoke
 passed while the only protected summary remained old core success. Exact facts
 and the separate review block remain in `issue-2544-tier-edit-stop.md`.
