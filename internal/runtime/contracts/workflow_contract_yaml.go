@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
 )
 
@@ -35,23 +36,23 @@ var systemNodeContractFields = map[string]struct{}{
 }
 
 func decodeStringListNode(node *yaml.Node) ([]string, error) {
-	if node == nil || node.Kind == 0 {
+	return decodeStringListValue(yamlsource.ValueFromNode(node))
+}
+
+func decodeStringListValue(value yamlsource.Value) ([]string, error) {
+	switch value.Presence() {
+	case yamlsource.PresenceMissing, yamlsource.PresenceNull:
 		return nil, nil
-	}
-	switch node.Kind {
-	case yaml.ScalarNode:
-		if strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") || strings.TrimSpace(node.Value) == "" {
-			return nil, nil
-		}
-		return []string{strings.TrimSpace(node.Value)}, nil
-	case yaml.SequenceNode:
-		var values []string
-		if err := node.Decode(&values); err != nil {
+	case yamlsource.PresenceScalar, yamlsource.PresenceEmptyScalar:
+		text, err := optionalScalarString(value, "string list")
+		if err != nil || text == "" {
 			return nil, err
 		}
-		return normalizeStrings(values), nil
+		return []string{text}, nil
+	case yamlsource.PresenceSequence, yamlsource.PresenceEmptySequence:
+		return optionalStrictStringSequence(value, "string list")
 	default:
-		return nil, fmt.Errorf("unsupported string list yaml node kind %d", node.Kind)
+		return nil, fmt.Errorf("string list at %s is %s, want scalar or sequence", value.Location(), value.Presence())
 	}
 }
 

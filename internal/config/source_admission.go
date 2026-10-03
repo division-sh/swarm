@@ -6,7 +6,6 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/yamlsource"
-	"gopkg.in/yaml.v3"
 )
 
 // CLISourceConfig is the CLI-owned portion of the same swarm.yaml document.
@@ -30,8 +29,7 @@ type CLISourceConfig struct {
 	} `yaml:"paths"`
 }
 
-func validateConfigSource(node *yaml.Node, shape reflect.Type, owner string) error {
-	value := yamlsource.ValueFromNode(node)
+func validateConfigSource(value yamlsource.Value, shape reflect.Type, owner string) error {
 	if err := value.ValidateExpansion(); err != nil {
 		return err
 	}
