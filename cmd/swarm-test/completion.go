@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -15,7 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/testtiming"
 )
 
-func runCompletion(profile string) int {
+func runCompletion(profile string, explicit bool) int {
 	inventory, err := testplanning.DiscoverRootInventory(context.Background(), ".")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -58,18 +59,49 @@ func runCompletion(profile string) int {
 		fmt.Fprintf(os.Stderr, "read source commit: %v\n", err)
 		return 1
 	}
-	plan, err := testplanning.BuildPlan(policy, model, packages, profile, "explicit wrapper completion", strings.TrimSpace(string(head)))
+	reason := "local developer feedback, not reviewer-bound qualification"
+	if explicit {
+		reason = "explicit local tier selection; reviewer compares with Local-Tier"
+	}
+	plan, err := testplanning.BuildPlan(policy, model, packages, profile, reason, strings.TrimSpace(string(head)), testplanning.BuildOptions{Venue: testplanning.VenueLocal})
 	if err == nil {
-		err = testplanning.BindExecution(&plan, inventory, proofs)
+		err = testplanning.BindExecution(&plan, inventory, proofs, policy)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 	fmt.Fprintf(os.Stderr, "swarm-test %s: %d planned units; modeled ETA is approximate\n", profile, len(plan.Units))
+	fmt.Fprintf(os.Stderr, "source=%s venue=%s plan=%s tier-deferred=%d; no deferred root earns execution credit\n", plan.HeadSHA, plan.Venue, plan.Digest, len(plan.DeferredRoots))
+	receipts := filepath.Join("test-results", "local", profile+"-"+time.Now().UTC().Format("20060102T150405.000000000"))
+	if err := os.MkdirAll(receipts, 0700); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	raw, _ := json.MarshalIndent(plan, "", "  ")
+	if err := os.WriteFile(filepath.Join(receipts, "proof-plan.json"), raw, 0600); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	fmt.Fprintf(os.Stderr, "local proof receipts: %s (effective tier %s)\n", receipts, profile)
+	cache, err := os.MkdirTemp("", "swarm-test-build-products-*")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer os.RemoveAll(cache)
+	previous, existed := os.LookupEnv("SWARM_TEST_BUILD_CACHE")
+	_ = os.Setenv("SWARM_TEST_BUILD_CACHE", cache)
+	defer func() {
+		if existed {
+			_ = os.Setenv("SWARM_TEST_BUILD_CACHE", previous)
+		} else {
+			_ = os.Unsetenv("SWARM_TEST_BUILD_CACHE")
+		}
+	}()
 	for _, unit := range plan.Units {
 		fmt.Fprintf(os.Stderr, "swarm-test %s: starting %s\n", profile, unit.ID)
-		if code := executeCompletionUnit(plan, unit); code != 0 {
+		if code := executeCompletionUnit(plan, unit, receipts); code != 0 {
 			return code
 		}
 	}
@@ -126,13 +158,19 @@ func runPlanned(args []string) int {
 	return executeCompletionUnit(plan, unit)
 }
 
-func executeCompletionUnit(plan testplanning.RunPlan, unit testplanning.ProofUnit) int {
-	file, err := os.CreateTemp("", "swarm-test-unit-*.json")
+func executeCompletionUnit(plan testplanning.RunPlan, unit testplanning.ProofUnit, receipts ...string) int {
+	var directory string
+	if len(receipts) > 0 {
+		directory = receipts[0]
+	}
+	file, err := os.CreateTemp(directory, unit.ID+"-*.json")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	defer os.Remove(file.Name())
+	if directory == "" {
+		defer os.Remove(file.Name())
+	}
 	defer file.Close()
 	start := time.Now()
 	code := runTestArgs(unitTestArgs(unit), io.MultiWriter(os.Stdout, file), true, unit.WorkloadProfile, unit.ExecutionTier, modeledDuration(unit))
@@ -153,6 +191,13 @@ func executeCompletionUnit(plan testplanning.RunPlan, unit testplanning.ProofUni
 		ElapsedSeconds: time.Since(start).Seconds(), ExitCode: code, Packages: unit.Packages,
 		EnvironmentID: unit.EnvironmentID, CountMode: unit.CountMode, Run: unit.Run,
 		Skip: unit.Skip, GoTimeout: unit.GoTimeout, Report: report,
+	}
+	if directory != "" {
+		raw, _ := json.MarshalIndent(evidence, "", "  ")
+		if err := os.WriteFile(filepath.Join(directory, unit.ID+"-primary-evidence.json"), raw, 0600); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
 	}
 	if problems := testtiming.ValidateCommandEvidence(evidence, plan); len(problems) != 0 {
 		fmt.Fprintf(os.Stderr, "swarm-test %s incomplete: %s\n", unit.ID, strings.Join(problems, "; "))

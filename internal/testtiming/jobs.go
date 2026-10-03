@@ -49,6 +49,7 @@ type JobSummary struct {
 	WorkflowHeadSHA string  `json:"workflow_head_sha"`
 	ExecutionSHA    string  `json:"execution_sha"`
 	UnitCount       int     `json:"unit_count"`
+	JobCount        int     `json:"job_count"`
 	RunnerMinutes   float64 `json:"runner_minutes"`
 	StartLagSeconds float64 `json:"start_lag_seconds"`
 	MakespanSeconds float64 `json:"makespan_seconds"`
@@ -93,9 +94,20 @@ func AttachJobEvidence(result *BudgetResult, plan testplanning.RunPlan, runID in
 		problem("workflow head SHA from the triggering event is required")
 		return
 	}
-	expected := map[string]int{}
+	indices := map[string]int{}
 	for i, surface := range result.Surfaces {
-		expected["Go proof "+surface.Surface] = i
+		indices[surface.Surface] = i
+	}
+	expected := map[string][]int{}
+	for _, batch := range plan.Batches {
+		for _, id := range batch.Units {
+			index, ok := indices[id]
+			if !ok {
+				problem("missing logical command surface " + id)
+				continue
+			}
+			expected["Go proof "+batch.ID] = append(expected["Go proof "+batch.ID], index)
+		}
 	}
 	seen := map[string]bool{}
 	ids := map[int64]bool{}
@@ -128,7 +140,7 @@ func AttachJobEvidence(result *BudgetResult, plan testplanning.RunPlan, runID in
 				continue
 			}
 		}
-		index, ok := expected[job.Name]
+		members, ok := expected[job.Name]
 		if !ok {
 			problem("unexpected proof job " + job.Name)
 			continue
@@ -150,9 +162,15 @@ func AttachJobEvidence(result *BudgetResult, plan testplanning.RunPlan, runID in
 			problem("proof job did not succeed: " + job.Name)
 		}
 		timing := &JobTiming{Job: job, ElapsedSeconds: job.CompletedAt.Sub(job.StartedAt).Seconds(), StartLagSeconds: job.StartedAt.Sub(job.CreatedAt).Seconds()}
-		result.Surfaces[index].Job = timing
-		if command := result.Surfaces[index].PrimarySeconds; command != nil && *command > timing.ElapsedSeconds+1 {
-			problem("primary command exceeds its whole job: " + job.Name)
+		var commandSeconds float64
+		for _, index := range members {
+			result.Surfaces[index].Job = timing
+			if command := result.Surfaces[index].PrimarySeconds; command != nil {
+				commandSeconds += *command
+			}
+		}
+		if commandSeconds > timing.ElapsedSeconds+1 {
+			problem("logical commands exceed their whole job: " + job.Name)
 		}
 		proofSteps, uploadSteps := 0, 0
 		for _, step := range job.Steps {
@@ -172,7 +190,8 @@ func AttachJobEvidence(result *BudgetResult, plan testplanning.RunPlan, runID in
 		if proofSteps != 1 || uploadSteps != 1 {
 			problem("missing/duplicate proof or upload step for " + job.Name)
 		}
-		summary.UnitCount++
+		summary.UnitCount += len(members)
+		summary.JobCount++
 		summary.RunnerMinutes += timing.ElapsedSeconds / 60
 		summary.StartLagSeconds += timing.StartLagSeconds
 		if first.IsZero() || job.StartedAt.Before(first) {

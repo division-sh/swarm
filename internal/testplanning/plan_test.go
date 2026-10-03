@@ -12,11 +12,11 @@ func TestBuildPlanDiscoversUnknownPackagesAndBalancesDeterministically(t *testin
 	policy := testPolicy()
 	model := WeightModel{Version: WeightModelVersion, SourceRunID: "run", Packages: map[string]float64{"module/a": 200, "module/b": 100}}
 	packages := []string{"module/catalog", "module/new", "module/b", "module/a"}
-	first, err := BuildPlan(policy, model, packages, ProfilePREscalated, "changed path", "abc")
+	first, err := BuildPlan(policy, model, packages, ProfileLifecycle, "changed path", "abc")
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
-	second, err := BuildPlan(policy, model, packages, ProfilePREscalated, "changed path", "abc")
+	second, err := BuildPlan(policy, model, packages, ProfileLifecycle, "changed path", "abc")
 	if err != nil {
 		t.Fatalf("BuildPlan second: %v", err)
 	}
@@ -48,23 +48,24 @@ func TestBuildPlanDiscoversUnknownPackagesAndBalancesDeterministically(t *testin
 func TestResolveProfileCoversEveryEventAndEscalationFamily(t *testing.T) {
 	policy := testPolicy()
 	tests := []struct {
-		event   string
-		changed []string
-		want    string
+		event string
+		body  string
+		want  string
 	}{
-		{event: "pull_request", want: ProfilePRCommon},
-		{event: "pull_request", changed: []string{"internal/runtime/conformance/a.go"}, want: ProfilePREscalated},
+		{event: "pull_request", want: ProfileFull},
+		{event: "pull_request", body: "CI-Tier: core", want: ProfileCore},
+		{event: "pull_request", body: "CI-Tier: lifecycle", want: ProfileLifecycle},
 		{event: "push", want: ProfileFull},
 		{event: "workflow_dispatch", want: ProfileFull},
-		{event: "schedule", want: ProfileNightly},
+		{event: "schedule", want: ProfileFull},
 	}
 	for _, tt := range tests {
-		got, _, err := policy.ResolveProfile(tt.event, tt.changed, "")
+		got, _, err := policy.ResolveProfile(tt.event, tt.body, "")
 		if err != nil {
 			t.Fatalf("ResolveProfile(%s): %v", tt.event, err)
 		}
 		if got != tt.want {
-			t.Fatalf("ResolveProfile(%s, %v) = %s, want %s", tt.event, tt.changed, got, tt.want)
+			t.Fatalf("ResolveProfile(%s, %v) = %s, want %s", tt.event, tt.body, got, tt.want)
 		}
 	}
 }
@@ -122,16 +123,16 @@ func TestBuildPlanAllowsExplicitFilteredPartitionsOfOneSpecialPackage(t *testing
 	policy := testPolicy()
 	policy.Units["catalog-a"] = UnitPolicy{Packages: []string{"module/catalog"}, Run: "^Test[A-M]", CountMode: "count-1", EnvironmentID: "env", BudgetClass: "broad"}
 	policy.Units["catalog-b"] = UnitPolicy{Packages: []string{"module/catalog"}, Run: "^Test[N-Z]", CountMode: "count-1", EnvironmentID: "env", BudgetClass: "broad"}
-	policy.Profiles[ProfilePRCommon] = ProfilePolicy{CountMode: "cache-default", EnvironmentID: "env", Units: []string{"catalog-a", "catalog-b"}}
+	policy.Profiles[ProfileCore] = ProfilePolicy{CountMode: "cache-default", EnvironmentID: "env", Units: []string{"catalog-a", "catalog-b"}}
 
 	model := WeightModel{Version: WeightModelVersion, SourceRunID: "run", Packages: map[string]float64{"module/catalog": 100},
-		Units: map[string]map[string]UnitWeight{ProfilePRCommon: {}}}
+		Units: map[string]map[string]UnitWeight{ProfileCore: {}}}
 	for id, seconds := range map[string]float64{"catalog-a": 80, "catalog-b": 20} {
 		u := policy.Units[id]
-		model.Units[ProfilePRCommon][id] = MeasureUnit(ProofUnit{ID: id, Packages: u.Packages, Run: u.Run,
+		model.Units[ProfileCore][id] = MeasureUnit(ProofUnit{ID: id, Packages: u.Packages, Run: u.Run,
 			CountMode: u.CountMode, EnvironmentID: u.EnvironmentID, BudgetClass: u.BudgetClass}, seconds)
 	}
-	plan, err := BuildPlan(policy, model, []string{"module/a", "module/catalog"}, ProfilePRCommon, "partitioned", "abc")
+	plan, err := BuildPlan(policy, model, []string{"module/a", "module/catalog"}, ProfileCore, "partitioned", "abc")
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -154,7 +155,7 @@ func TestBuildPlanAllowsExplicitFilteredPartitionsOfOneSpecialPackage(t *testing
 	} {
 		changed := first
 		mutate(&changed)
-		if _, ok := model.UnitSeconds(ProfilePRCommon, changed); ok {
+		if _, ok := model.UnitSeconds(ProfileCore, changed); ok {
 			t.Fatal("changed executable selection reused stale timing")
 		}
 	}
@@ -176,7 +177,7 @@ func TestBuildPlanRejectsFilteredAndUnfilteredDuplicateSpecialPackage(t *testing
 
 func TestNightlyProfileRunsFormerExtrasExactlyOnceAsBroadPackages(t *testing.T) {
 	packages := []string{"module/catalog", "module/python", "module/fork"}
-	plan, err := BuildPlan(testPolicy(), WeightModel{Version: WeightModelVersion, SourceRunID: "run", Packages: map[string]float64{}}, packages, ProfileNightly, "nightly", "abc")
+	plan, err := BuildPlan(testPolicy(), WeightModel{Version: WeightModelVersion, SourceRunID: "run", Packages: map[string]float64{}}, packages, ProfileFull, "full", "abc")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,23 +189,21 @@ func TestNightlyProfileRunsFormerExtrasExactlyOnceAsBroadPackages(t *testing.T) 
 	}
 	for _, pkg := range []string{"module/python", "module/fork"} {
 		if len(owners[pkg]) != 1 || !strings.HasPrefix(owners[pkg][0], "broad-") {
-			t.Fatalf("nightly package %s owners = %v, want one broad unit", pkg, owners[pkg])
+			t.Fatalf("full package %s owners = %v, want one broad unit", pkg, owners[pkg])
 		}
 	}
 }
 
 func TestLoadersFailClosedOnUnknownFields(t *testing.T) {
 	policyYAML := `
-version: 1
+version: 2
 module: module
 planning: {target_seconds: 10, max_shards: 2, unknown_package_seconds: 3}
-escalation_paths: []
 special_packages: []
 profiles:
-  pr-common: {count_mode: cache-default, environment_id: env, units: []}
-  pr-escalated: {count_mode: count-1, environment_id: env, units: []}
+  core: {count_mode: count-1, environment_id: env, units: []}
+  lifecycle: {count_mode: count-1, environment_id: env, units: []}
   full: {count_mode: count-1, environment_id: env, units: []}
-  nightly: {count_mode: count-1, environment_id: env, units: []}
 units: {}
 projections: {}
 unknown: true
@@ -218,7 +217,7 @@ unknown: true
 }
 
 func TestMatrixContainsOnlyPlanUnitIDs(t *testing.T) {
-	plan, err := BuildPlan(testPolicy(), WeightModel{Version: WeightModelVersion, SourceRunID: "run", Packages: map[string]float64{"module/a": 1}}, []string{"module/a", "module/catalog"}, ProfilePRCommon, "common", "abc")
+	plan, err := BuildPlan(testPolicy(), WeightModel{Version: WeightModelVersion, SourceRunID: "run", Packages: map[string]float64{"module/a": 1}}, []string{"module/a", "module/catalog"}, ProfileCore, "common", "abc")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +230,11 @@ func TestMatrixContainsOnlyPlanUnitIDs(t *testing.T) {
 		t.Fatal(err)
 	}
 	var matrix struct {
-		Include []map[string]string `json:"include"`
+		Include []struct {
+			Unit           string `json:"unit"`
+			BudgetClass    string `json:"budget_class"`
+			TimeoutMinutes int    `json:"timeout_minutes"`
+		} `json:"include"`
 	}
 	if err := json.NewDecoder(bytes.NewReader(raw)).Decode(&matrix); err != nil {
 		t.Fatal(err)
@@ -241,16 +244,16 @@ func TestMatrixContainsOnlyPlanUnitIDs(t *testing.T) {
 	}
 	seen := make(map[string]bool)
 	for i, row := range matrix.Include {
-		if len(row) != 1 || row["unit"] == "" {
-			t.Fatalf("matrix leaks a second authority: %v", row)
+		if row.Unit == "" || row.BudgetClass == "" || row.TimeoutMinutes <= 0 {
+			t.Fatalf("matrix lacks bound placement: %v", row)
 		}
-		unit, err := plan.Unit(row["unit"])
+		unit, err := plan.Unit(row.Unit)
 		if err != nil || seen[unit.ID] {
 			t.Fatalf("unknown or repeated matrix unit: %v", row)
 		}
 		seen[unit.ID] = true
 		if i > 0 {
-			prior, _ := plan.Unit(matrix.Include[i-1]["unit"])
+			prior, _ := plan.Unit(matrix.Include[i-1].Unit)
 			if prior.WeightSeconds < unit.WeightSeconds || (prior.WeightSeconds == unit.WeightSeconds && prior.ID > unit.ID) {
 				t.Fatalf("matrix is not longest-first with stable ID ties: %v", matrix.Include)
 			}
@@ -279,21 +282,18 @@ func TestValidatePublicationDiffFailsClosed(t *testing.T) {
 
 func testPolicy() Policy {
 	return Policy{
-		Version: 1,
+		Version: PolicyVersion,
 		Module:  "module",
 		Planning: PlanningPolicy{
 			TargetSeconds:         200,
 			MaxShards:             4,
 			UnknownPackageSeconds: 30,
 		},
-		EscalationPaths: []string{`^internal/runtime/conformance/`},
 		SpecialPackages: []string{"module/catalog"},
 		Profiles: map[string]ProfilePolicy{
-			ProfileLocal:       {CountMode: "count-1", EnvironmentID: "env", Units: []string{"catalog-smoke"}},
-			ProfilePRCommon:    {CountMode: "cache-default", EnvironmentID: "env", Units: []string{"catalog-smoke"}},
-			ProfilePREscalated: {CountMode: "count-1", EnvironmentID: "env", Units: []string{"catalog-full"}},
-			ProfileFull:        {CountMode: "count-1", EnvironmentID: "env", Units: []string{"catalog-full"}},
-			ProfileNightly:     {CountMode: "count-1", EnvironmentID: "env", Units: []string{"catalog-full"}},
+			ProfileCore:      {CountMode: "count-1", EnvironmentID: "env", Units: []string{"catalog-smoke"}},
+			ProfileLifecycle: {CountMode: "count-1", EnvironmentID: "env", Units: []string{"catalog-full"}},
+			ProfileFull:      {CountMode: "count-1", EnvironmentID: "env", Units: []string{"catalog-full"}},
 		},
 		Units: map[string]UnitPolicy{
 			"catalog-smoke": {Packages: []string{"module/catalog"}, Run: "^TestSmoke$", CountMode: "count-1", EnvironmentID: "env", BudgetClass: "full"},

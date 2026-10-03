@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -11,7 +10,6 @@ import (
 	"io/fs"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -21,40 +19,46 @@ import (
 )
 
 type config struct {
-	inputPath         string
-	markdownPath      string
-	packagesPath      string
-	changedPath       string
-	changedStatusPath string
-	baseSHA           string
-	proofPolicyPath   string
-	weightModelPath   string
-	planPath          string
-	matrixPath        string
-	evidencePath      string
-	evidenceRoot      string
-	jobsPath          string
-	workflowRunID     int64
-	workflowAttempt   int
-	workflowHeadSHA   string
-	budgetPath        string
-	resultJSONPath    string
-	event             string
-	profile           string
-	headSHA           string
-	executionSHA      string
-	unitID            string
-	attempt           string
-	sourceRunID       string
-	topN              int
-	exitCode          int
-	elapsedSeconds    float64
-	planCI            bool
-	recordEvidence    bool
-	evaluateBudget    bool
-	updateWeights     bool
-	validatePublish   bool
-	assertExecution   bool
+	inputPath       string
+	markdownPath    string
+	packagesPath    string
+	changedPath     string
+	eventPath       string
+	currentPRPath   string
+	checkCITier     bool
+	proofPolicyPath string
+	weightModelPath string
+	planPath        string
+	matrixPath      string
+	evidencePath    string
+	evidenceRoot    string
+	jobsPath        string
+	workflowRunID   int64
+	workflowAttempt int
+	workflowHeadSHA string
+	budgetPath      string
+	resultJSONPath  string
+	event           string
+	profile         string
+	headSHA         string
+	executionSHA    string
+	unitID          string
+	attempt         string
+	sourceRunID     string
+	topN            int
+	exitCode        int
+	elapsedSeconds  float64
+	planCI          bool
+	recordEvidence  bool
+	evaluateBudget  bool
+	updateWeights   bool
+	validatePublish bool
+	assertExecution bool
+	warmProducts    bool
+	buildCache      string
+	verifyMerged    bool
+	repository      string
+	branchRef       string
 }
 
 func main() {
@@ -63,8 +67,14 @@ func main() {
 	flag.StringVar(&cfg.markdownPath, "markdown", "-", "path to write Markdown output, or - for stdout")
 	flag.StringVar(&cfg.packagesPath, "packages", "", "newline-delimited discovered Go package inventory")
 	flag.StringVar(&cfg.changedPath, "changed-files", "", "newline-delimited changed paths")
-	flag.StringVar(&cfg.changedStatusPath, "changed-status", "", "NUL-delimited git name-status PR delta")
-	flag.StringVar(&cfg.baseSHA, "base-sha", "", "PR base commit for base-or-head soak impact")
+	flag.StringVar(&cfg.eventPath, "event-json", "", "GitHub event JSON data for CI-Tier selection")
+	flag.StringVar(&cfg.currentPRPath, "current-pr-json", "", "current PR API JSON data for summary revalidation")
+	flag.BoolVar(&cfg.checkCITier, "check-ci-tier", false, "refuse qualification thinner than the current PR body")
+	flag.BoolVar(&cfg.warmProducts, "warm-build-products", false, "compile-only release products for the exact plan tier")
+	flag.StringVar(&cfg.buildCache, "build-cache", "", "optional compilation-only product cache")
+	flag.BoolVar(&cfg.verifyMerged, "verify-merged-proof", false, "observe exact qualified merged-tree replay, otherwise require full")
+	flag.StringVar(&cfg.repository, "repository", "", "triggering repository for merged-tree observation")
+	flag.StringVar(&cfg.branchRef, "ref", "", "triggering push ref for merged-tree observation")
 	flag.StringVar(&cfg.proofPolicyPath, "proof-policy", ".github/test-proof-plan.yaml", "canonical proof policy")
 	flag.StringVar(&cfg.weightModelPath, "weight-model", ".github/test-timing-weights.json", "generated historical weight model")
 	flag.StringVar(&cfg.planPath, "plan", "", "run plan path")
@@ -103,13 +113,46 @@ func main() {
 
 func run(cfg config) error {
 	modes := 0
-	for _, enabled := range []bool{cfg.planCI, cfg.recordEvidence, cfg.evaluateBudget, cfg.updateWeights, cfg.validatePublish, cfg.assertExecution} {
+	for _, enabled := range []bool{cfg.verifyMerged, cfg.warmProducts, cfg.checkCITier, cfg.planCI, cfg.recordEvidence, cfg.evaluateBudget, cfg.updateWeights, cfg.validatePublish, cfg.assertExecution} {
 		if enabled {
 			modes++
 		}
 	}
 	if modes > 1 {
 		return fmt.Errorf("exactly one command mode may be selected")
+	}
+	if cfg.verifyMerged {
+		return verifyMergedProof(cfg)
+	}
+	if cfg.warmProducts {
+		plan, err := readPlan(cfg.planPath)
+		if err != nil {
+			return err
+		}
+		return testplanning.WarmReleaseProducts(context.Background(), ".", cfg.buildCache, plan.Profile)
+	}
+	if cfg.checkCITier {
+		plan, err := readPlan(cfg.planPath)
+		if err != nil {
+			return err
+		}
+		raw, err := os.ReadFile(cfg.currentPRPath)
+		if err != nil {
+			return err
+		}
+		var pr struct {
+			Body string `json:"body"`
+			Head struct {
+				SHA string `json:"sha"`
+			} `json:"head"`
+		}
+		if err := json.Unmarshal(raw, &pr); err != nil {
+			return err
+		}
+		if cfg.workflowHeadSHA == "" || pr.Head.SHA != cfg.workflowHeadSHA {
+			return fmt.Errorf("current PR head does not match qualifying event head")
+		}
+		return testplanning.CheckCurrentCITier(plan.Profile, pr.Body)
 	}
 	switch {
 	case cfg.planCI:
@@ -156,53 +199,23 @@ func planCI(cfg config) error {
 	if err != nil {
 		return err
 	}
-	changed, err := readOptionalLines(cfg.changedPath)
-	if err != nil {
-		return err
-	}
-	var options testplanning.BuildOptions
+	var body string
 	if cfg.event == "pull_request" {
-		if cfg.changedStatusPath == "" || cfg.baseSHA == "" {
-			return fmt.Errorf("PR planning requires -changed-status and -base-sha")
-		}
-		raw, err := os.ReadFile(cfg.changedStatusPath)
+		raw, err := os.ReadFile(cfg.eventPath)
 		if err != nil {
 			return err
 		}
-		changes, err := testplanning.ParseNameStatusZ(raw)
+		body, err = testplanning.PREventBody(raw)
 		if err != nil {
-			return err
-		}
-		changed = changed[:0]
-		for _, change := range changes {
-			changed = append(changed, change.Path)
-			if change.OldPath != "" {
-				changed = append(changed, change.OldPath)
-			}
-		}
-		head, err := testplanning.DiscoverRootInventory(context.Background(), ".")
-		if err != nil {
-			return err
-		}
-		baseRoot, cleanup, err := extractBaseSnapshot(cfg.baseSHA)
-		var base testplanning.RootInventory
-		if err == nil {
-			defer cleanup()
-			base, err = testplanning.DiscoverRootInventory(context.Background(), baseRoot)
-		}
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "base dependency graph unavailable; schedule both soak cells: %v\n", err)
-		}
-		options, err = testplanning.PRChangeOptions(baseRoot, ".", base, head, changes)
-		if err != nil {
-			return err
+			fmt.Fprintf(os.Stderr, "invalid PR event JSON: %v; conservative full qualification\n", err)
+			body = ""
 		}
 	}
-	profile, reason, err := policy.ResolveProfile(cfg.event, changed, cfg.profile)
+	profile, reason, err := policy.ResolveProfile(cfg.event, body, cfg.profile)
 	if err != nil {
 		return err
 	}
-	plan, err := testplanning.BuildPlan(policy, model, packages, profile, reason, cfg.headSHA, options)
+	plan, err := testplanning.BuildPlan(policy, model, packages, profile, reason, cfg.headSHA)
 	if err != nil {
 		return err
 	}
@@ -214,7 +227,7 @@ func planCI(cfg config) error {
 	if err != nil {
 		return err
 	}
-	if err := testplanning.BindExecution(&plan, inventory, proofs); err != nil {
+	if err := testplanning.BindExecution(&plan, inventory, proofs, policy); err != nil {
 		return err
 	}
 	if err := writeJSON(cfg.planPath, plan); err != nil {
@@ -228,26 +241,6 @@ func planCI(cfg config) error {
 		return fmt.Errorf("write matrix: %w", err)
 	}
 	return writePlanMarkdown(cfg.markdownPath, plan)
-}
-
-func extractBaseSnapshot(sha string) (string, func(), error) {
-	root, err := os.MkdirTemp("", "swarm-proof-base-*")
-	if err != nil {
-		return "", nil, err
-	}
-	cleanup := func() { _ = os.RemoveAll(root) }
-	archive, err := exec.Command("git", "archive", "--format=tar", sha).Output()
-	if err != nil {
-		cleanup()
-		return "", nil, fmt.Errorf("archive PR base %s: %w", sha, err)
-	}
-	command := exec.Command("tar", "-xf", "-", "-C", root)
-	command.Stdin = bytes.NewReader(archive)
-	if output, err := command.CombinedOutput(); err != nil {
-		cleanup()
-		return "", nil, fmt.Errorf("extract PR base: %v: %s", err, output)
-	}
-	return root, cleanup, nil
 }
 
 func recordEvidence(cfg config) error {

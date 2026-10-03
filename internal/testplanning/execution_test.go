@@ -52,19 +52,19 @@ func TestCurrentProofPlansBindActiveRequiredRoots(t *testing.T) {
 		packages = append(packages, pkg)
 	}
 	sort.Strings(packages)
-	for _, profile := range []string{ProfileLocal, ProfilePRCommon, ProfilePREscalated, ProfileFull, ProfileNightly} {
+	for _, profile := range []string{ProfileCore, ProfileLifecycle, ProfileFull} {
 		t.Run(profile, func(t *testing.T) {
 			plan, err := BuildPlan(policy, model, packages, profile, "census", "test-head")
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := BindExecution(&plan, inventory, proofs); err != nil {
+			if err := BindExecution(&plan, inventory, proofs, policy); err != nil {
 				t.Fatal(err)
 			}
 			if plan.BuildContext.GOOS == "" || len(plan.Units) == 0 {
 				t.Fatalf("unbound plan: %+v", plan)
 			}
-			if profile == ProfileLocal {
+			if profile == ProfileCore {
 				if err := validateLocalBusCoverage(plan, inventory, policy.Module+"/internal/runtime/bus"); err != nil {
 					t.Fatal(err)
 				}
@@ -75,7 +75,7 @@ func TestCurrentProofPlansBindActiveRequiredRoots(t *testing.T) {
 				}
 				fixtureCovered := false
 				for _, unit := range plan.Units {
-					if unit.ID == "broad-01" && slices.Contains(unit.Packages, policy.Module+"/internal/runtime/testfixtures/canonicalrouting") {
+					if strings.HasPrefix(unit.ID, "broad-") && slices.Contains(unit.Packages, policy.Module+"/internal/runtime/testfixtures/canonicalrouting") {
 						fixtureCovered = true
 					}
 				}
@@ -101,7 +101,7 @@ func TestCurrentProofPlansBindActiveRequiredRoots(t *testing.T) {
 					}
 				}
 			}
-			if profile == ProfilePRCommon || profile == ProfileFull {
+			if profile == ProfileFull {
 				golden, err := plan.Unit("hitl-releasee2e-golden")
 				if err != nil {
 					t.Fatal(err)
@@ -115,7 +115,7 @@ func TestCurrentProofPlansBindActiveRequiredRoots(t *testing.T) {
 					t.Fatalf("%s golden workload classification: required=%v deferred=%v", profile, golden.RequiredTests, golden.DeferredTests)
 				}
 			}
-			if profile != ProfileLocal {
+			if profile != ProfileCore {
 				assertNumericTimerInspectionOwnership(t, plan)
 			}
 		})
@@ -126,20 +126,17 @@ func TestCurrentProofPlansBindActiveRequiredRoots(t *testing.T) {
 	for name, profile := range policy.Profiles {
 		mutated.Profiles[name] = profile
 	}
-	local := mutated.Profiles[ProfileLocal]
+	local := mutated.Profiles[ProfileCore]
 	local.Units = slices.DeleteFunc(slices.Clone(local.Units), func(id string) bool { return id == "local-runtime-bus-full" })
-	mutated.Profiles[ProfileLocal] = local
-	missingBus, err := BuildPlan(mutated, model, packages, ProfileLocal, "missing local bus", "test-head")
+	mutated.Profiles[ProfileCore] = local
+	missingBus, err := BuildPlan(mutated, model, packages, ProfileCore, "missing local bus", "test-head")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := BindExecution(&missingBus, inventory, proofs); err != nil {
-		t.Fatal(err)
-	}
-	if err := validateLocalBusCoverage(missingBus, inventory, policy.Module+"/internal/runtime/bus"); err == nil {
+	if err := BindExecution(&missingBus, inventory, proofs, policy); err == nil {
 		t.Fatal("local bus omission escaped the required-root guard")
 	}
-	for _, profile := range []string{ProfilePRCommon, ProfilePREscalated, ProfileFull, ProfileNightly} {
+	for _, profile := range []string{ProfileLifecycle, ProfileFull} {
 		current, err := BuildPlan(policy, model, packages, profile, "unchanged CI selection", "test-head")
 		if err != nil {
 			t.Fatal(err)
@@ -148,10 +145,10 @@ func TestCurrentProofPlansBindActiveRequiredRoots(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := BindExecution(&current, inventory, proofs); err != nil {
+		if err := BindExecution(&current, inventory, proofs, policy); err != nil {
 			t.Fatal(err)
 		}
-		if err := BindExecution(&withoutLocal, inventory, proofs); err != nil {
+		if err := BindExecution(&withoutLocal, inventory, proofs, policy); err != nil {
 			t.Fatal(err)
 		}
 		if current.Digest != withoutLocal.Digest || !reflect.DeepEqual(current.Units, withoutLocal.Units) || !reflect.DeepEqual(current.Packages, withoutLocal.Packages) {
@@ -159,15 +156,16 @@ func TestCurrentProofPlansBindActiveRequiredRoots(t *testing.T) {
 		}
 		t.Logf("%s unchanged CI execution digest: %s", profile, current.Digest)
 	}
-	for _, profile := range []string{ProfilePRCommon, ProfilePREscalated} {
-		plan, err := BuildPlan(policy, model, packages, profile, "semantic PR", "test-head", BuildOptions{IncludeParityFull: true, IncludeSoak: true})
+	for _, profile := range []string{ProfileCore, ProfileLifecycle} {
+		t.Logf("%s retains exhaustive full owner separately", profile)
+		plan, err := BuildPlan(policy, model, packages, ProfileFull, "exhaustive proof", "test-head")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := BindExecution(&plan, inventory, proofs); err != nil {
+		if err := BindExecution(&plan, inventory, proofs, policy); err != nil {
 			t.Fatal(err)
 		}
-		for _, id := range []string{"parity-served-source-artifact", "parity-connected-channel-onboarding-surface", "parity-destructive-reset-crash", "parity-golden-forced-restart", "conformance-soak-sqlite", "conformance-soak-postgres"} {
+		for _, id := range []string{"conformance-soak-sqlite", "conformance-soak-postgres"} {
 			unit, err := plan.Unit(id)
 			if err != nil {
 				t.Fatal(err)
@@ -326,7 +324,7 @@ func TestFilteredCatalogNewRootFailsBeforeExecution(t *testing.T) {
 		packages = append(packages, pkg)
 	}
 	sort.Strings(packages)
-	plan, err := BuildPlan(policy, model, packages, ProfileLocal, "adversarial catalog root", "test-head")
+	plan, err := BuildPlan(policy, model, packages, ProfileCore, "adversarial catalog root", "test-head")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +332,7 @@ func TestFilteredCatalogNewRootFailsBeforeExecution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := BindExecution(&plan, inventory, proofs); err == nil || !strings.Contains(err.Error(), "TestNinthUnmatchedCatalogProof") {
+	if err := BindExecution(&plan, inventory, proofs, policy); err == nil || !strings.Contains(err.Error(), "TestNinthUnmatchedCatalogProof") {
 		t.Fatalf("ninth filtered catalog root was accepted: %v", err)
 	}
 }

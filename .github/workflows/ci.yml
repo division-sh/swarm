@@ -4,7 +4,7 @@ on:
   push:
     branches: [master, main]
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, edited]
   workflow_dispatch:
     inputs:
       profile:
@@ -12,7 +12,7 @@ on:
         required: false
         default: full
         type: choice
-        options: [full, nightly, pr-common, pr-escalated]
+        options: [core, lifecycle, full]
   schedule:
     - cron: "17 3 * * *"
 
@@ -51,12 +51,17 @@ jobs:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
     outputs:
       proof_matrix: ${{ steps.plan.outputs.proof_matrix }}
       soak_matrix: ${{ steps.plan.outputs.soak_matrix }}
       profile: ${{ steps.plan.outputs.profile }}
       plan_digest: ${{ steps.plan.outputs.plan_digest }}
       execution_sha: ${{ steps.plan.outputs.execution_sha }}
+      master_replay: ${{ steps.merged.outputs.result == 'verified' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -86,6 +91,21 @@ jobs:
           path: ~/go/pkg/mod
           key: ${{ steps.modules.outputs.cache-primary-key }}
 
+      - name: Observe exact qualified master merge
+        id: merged
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p test-results
+          result=$(go run ./cmd/swarm-test-timing -verify-merged-proof \
+            -repository "$GITHUB_REPOSITORY" -ref "$GITHUB_REF" -head-sha "$(git rev-parse HEAD)" \
+            -event-json "$GITHUB_EVENT_PATH" \
+            -plan test-results/proof-plan.json -matrix test-results/proof-matrix.json \
+            -result-json test-results/master-replay.json)
+          echo "result=$result" >> "$GITHUB_OUTPUT"
+
       - name: Restore exact-head production Go cache
         id: production-cache
         uses: actions/cache/restore@v4
@@ -93,7 +113,7 @@ jobs:
           path: ~/.cache/go-build
           key: go-production-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
       - name: Compile production dependencies once
-        if: steps.production-cache.outputs.cache-hit != 'true'
+        if: steps.merged.outputs.result != 'verified' && steps.production-cache.outputs.cache-hit != 'true'
         env:
           SOURCE_SHA: ${{ github.sha }}
         run: |
@@ -102,7 +122,7 @@ jobs:
           go build ./...
           go build -race -o "$RUNNER_TEMP/swarm-ci-race" ./cmd/swarm
       - name: Save exact-head production Go cache
-        if: steps.production-cache.outputs.cache-hit != 'true' && success()
+        if: steps.merged.outputs.result != 'verified' && steps.production-cache.outputs.cache-hit != 'true' && success()
         uses: actions/cache/save@v4
         with:
           path: ~/.cache/go-build
@@ -117,6 +137,7 @@ jobs:
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           FORCED_PROFILE: ${{ inputs.profile }}
+          MASTER_REPLAY: ${{ steps.merged.outputs.result }}
         run: |
           set -euo pipefail
           mkdir -p test-results
@@ -135,9 +156,13 @@ jobs:
             profile_args=(-profile "$FORCED_PROFILE")
           fi
           if [ "$EVENT_NAME" = "pull_request" ]; then
-            profile_args=(-changed-status test-results/changed-status.z -base-sha "$BASE_SHA")
+            profile_args=(-event-json "$GITHUB_EVENT_PATH")
           fi
-          go run ./cmd/swarm-test-timing \
+          if [ "$MASTER_REPLAY" = verified ]; then
+            printf 'Verified master reuses the exact qualifying PR plan, not fresh full execution.\n' > test-results/proof-plan.md
+            cat test-results/master-replay.json >> test-results/proof-plan.md
+          else
+            go run ./cmd/swarm-test-timing \
             -plan-ci \
             -proof-policy .github/test-proof-plan.yaml \
             -weight-model .github/test-timing-weights.json \
@@ -148,10 +173,11 @@ jobs:
             -plan test-results/proof-plan.json \
             -matrix test-results/proof-matrix.json \
             -markdown test-results/proof-plan.md \
-            "${profile_args[@]}"
+              "${profile_args[@]}"
+          fi
 
-          echo "proof_matrix=$(jq -c --slurpfile plan test-results/proof-plan.json '{include: [.include[] | .unit as $id | select($plan[0].units[] | select(.id == $id) | .budget_class != "soak")]}' test-results/proof-matrix.json)" >> "$GITHUB_OUTPUT"
-          echo "soak_matrix=$(jq -c --slurpfile plan test-results/proof-plan.json '{include: [.include[] | .unit as $id | select($plan[0].units[] | select(.id == $id) | .budget_class == "soak")]}' test-results/proof-matrix.json)" >> "$GITHUB_OUTPUT"
+          echo "proof_matrix=$(jq -c '{include: [.include[] | select(.budget_class != "soak")]}' test-results/proof-matrix.json)" >> "$GITHUB_OUTPUT"
+          echo "soak_matrix=$(jq -c '{include: [.include[] | select(.budget_class == "soak")]}' test-results/proof-matrix.json)" >> "$GITHUB_OUTPUT"
           echo "profile=$(jq -r .profile test-results/proof-plan.json)" >> "$GITHUB_OUTPUT"
           echo "plan_digest=$(jq -r .digest test-results/proof-plan.json)" >> "$GITHUB_OUTPUT"
           echo "execution_sha=$execution_sha" >> "$GITHUB_OUTPUT"
@@ -168,6 +194,32 @@ jobs:
             test-results/proof-plan.json
             test-results/proof-matrix.json
             test-results/proof-plan.md
+            test-results/master-replay.json
+          if-no-files-found: error
+
+      - name: Restore exact release build products
+        id: release-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/swarm-build-products
+          key: release-products-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum', '.github/test-proof-plan.yaml') }}-${{ steps.plan.outputs.profile }}-${{ github.sha }}
+      - name: Compile exact release products without executing tests
+        if: steps.merged.outputs.result != 'verified'
+        run: |
+          go run ./cmd/swarm-test-timing -warm-build-products \
+            -plan test-results/proof-plan.json -build-cache "$RUNNER_TEMP/swarm-build-products"
+      - name: Save exact release build products
+        if: steps.merged.outputs.result != 'verified' && steps.release-cache.outputs.cache-hit != 'true' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/swarm-build-products
+          key: ${{ steps.release-cache.outputs.cache-primary-key }}
+      - name: Upload exact release build products
+        if: steps.merged.outputs.result != 'verified'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-build-products
+          path: ${{ runner.temp }}/swarm-build-products
           if-no-files-found: error
 
       - name: Check YAML decode census against accepted base
@@ -231,7 +283,8 @@ jobs:
             --api-port 18091
 
   macos-sqlite-possession:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    needs: [ci-plan]
+    if: (github.event_name != 'pull_request' || !github.event.pull_request.draft) && needs.ci-plan.outputs.master_replay != 'true'
     name: macOS SQLite possession
     runs-on: macos-latest
     timeout-minutes: 15
@@ -259,7 +312,8 @@ jobs:
   # Cold analysis uses a separate pinned toolchain. Keep its budget independent
   # of the existing product build and possession proof, without extending either.
   unused-linux:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    needs: [ci-plan]
+    if: needs.ci-plan.outputs.profile == 'full' && needs.ci-plan.outputs.master_replay != 'true'
     name: Native Linux unused analysis
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -282,7 +336,8 @@ jobs:
           if-no-files-found: error
 
   unused-darwin:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    needs: [ci-plan]
+    if: needs.ci-plan.outputs.profile == 'full' && needs.ci-plan.outputs.master_replay != 'true'
     name: Native Darwin unused analysis
     runs-on: macos-latest
     # Lead-authorized <=30% allowance; integer minutes round 19.5 down to 19.
@@ -306,9 +361,9 @@ jobs:
           if-no-files-found: error
 
   unused-checks:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    if: needs.ci-plan.outputs.profile == 'full' && needs.ci-plan.outputs.master_replay != 'true'
     name: Native union unused checks
-    needs: [unused-linux, unused-darwin]
+    needs: [ci-plan, unused-linux, unused-darwin]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -333,11 +388,11 @@ jobs:
         run: go run ./cmd/swarm-unused -merge -in test-results/unused
 
   proof-unit:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    if: (github.event_name != 'pull_request' || !github.event.pull_request.draft) && needs.ci-plan.outputs.proof_matrix != '{"include":[]}'
     name: Go proof ${{ matrix.unit }}
     needs: [ci-plan]
     runs-on: ubuntu-latest
-    timeout-minutes: 18
+    timeout-minutes: ${{ matrix.timeout_minutes }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.ci-plan.outputs.proof_matrix) }}
@@ -360,6 +415,12 @@ jobs:
         with:
           path: ~/go/pkg/mod
           key: go-mod-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+      - name: Download compilation-only release products
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: release-build-products
+          path: ${{ runner.temp }}/swarm-build-products
       - name: Restore measured Go cache
         id: go-cache-restore
         uses: actions/cache/restore@v4
@@ -373,34 +434,12 @@ jobs:
       - name: Run exact planned proof unit
         shell: bash
         env:
-          UNIT_ID: ${{ matrix.unit }}
+          BATCH_ID: ${{ matrix.unit }}
+          SWARM_TEST_BUILD_CACHE: ${{ runner.temp }}/swarm-build-products
           SWARM_TOOL_GATEWAY_URL: ""
           SWARM_TOOL_GATEWAY_CONTAINER_URL: ""
           SWARM_TOOL_GATEWAY_TOKEN: ""
-        run: |
-          set -euo pipefail
-          mkdir -p test-results/evidence
-          plan=test-results/plan/proof-plan.json
-          go run ./cmd/swarm-test-timing -assert-execution-sha \
-            -plan "$plan" -execution-sha "$(git rev-parse HEAD)"
-          primary_json="test-results/evidence/${UNIT_ID}-primary.json"
-          primary_evidence="test-results/evidence/${UNIT_ID}-primary-evidence.json"
-
-          start=$(date +%s)
-          set +e
-          go run ./cmd/swarm-test --planned "$plan" "$UNIT_ID" | tee "$primary_json"
-          status=${PIPESTATUS[0]}
-          set -e
-          elapsed=$(( $(date +%s) - start ))
-          go run ./cmd/swarm-test-timing -record-evidence \
-            -workflow-run-id "$GITHUB_RUN_ID" -workflow-attempt "$GITHUB_RUN_ATTEMPT" \
-            -plan "$plan" -unit "$UNIT_ID" -attempt primary \
-            -input "$primary_json" -evidence "$primary_evidence" \
-            -elapsed-seconds "$elapsed" -exit-code "$status"
-
-          go run ./cmd/swarm-test-timing -input "$primary_json" -markdown "test-results/evidence/${UNIT_ID}-timing.md"
-          cat "test-results/evidence/${UNIT_ID}-timing.md" >> "$GITHUB_STEP_SUMMARY"
-          test "$status" -eq 0
+        run: bash .github/scripts/run-proof-batch.sh
       - name: Save measured Go cache
         if: github.event_name != 'pull_request' && steps.go-cache-restore.outputs.cache-hit != 'true' && success()
         uses: actions/cache/save@v4
@@ -491,7 +530,8 @@ jobs:
           if-no-files-found: error
 
   semantic-smoke:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    needs: [ci-plan]
+    if: (github.event_name != 'pull_request' || !github.event.pull_request.draft) && needs.ci-plan.outputs.master_replay != 'true'
     name: Semantic smoke proofs
     runs-on: ubuntu-latest
     timeout-minutes: 12
@@ -547,7 +587,7 @@ jobs:
 
   timing-budget:
     name: CI timing budget
-    if: ${{ always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
+    if: ${{ always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && needs.ci-plan.outputs.master_replay != 'true' }}
     needs: [ci-plan, proof-unit, mandatory-soak]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -589,7 +629,7 @@ jobs:
           for check in $(seq 1 12); do
             gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > test-results/jobs.json
             if jq -e --slurpfile plan test-results/plan/proof-plan.json '
-              ([$plan[0].units[].id | "Go proof " + .]) as $expected
+              ([$plan[0].batches[].id | "Go proof " + .]) as $expected
               | ([.[].jobs[] | select(.name | startswith("Go proof "))]) as $actual
               | ($expected | length > 0) and all($expected[]; . as $name
                   | [$actual[] | select(.name == $name)]
@@ -627,7 +667,51 @@ jobs:
     needs: [complexity, ci-plan, static-checks, sqlite-local-dev, macos-sqlite-possession, unused-linux, unused-darwin, unused-checks, proof-unit, mandatory-soak, semantic-smoke, timing-budget]
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
     steps:
+      - uses: actions/checkout@v4
+        if: needs.ci-plan.result == 'success'
+        with:
+          ref: ${{ needs.ci-plan.outputs.execution_sha }}
+      - uses: actions/setup-go@v5
+        if: needs.ci-plan.result == 'success'
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Download exact proof plan
+        if: needs.ci-plan.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: ci-plan
+          path: test-results/plan
+      - name: Revalidate current PR tier
+        if: github.event_name == 'pull_request' && needs.ci-plan.result == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          WORKFLOW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" > test-results/current-pr.json
+          go run ./cmd/swarm-test-timing -check-ci-tier \
+            -plan test-results/plan/proof-plan.json \
+            -current-pr-json test-results/current-pr.json -workflow-head-sha "$WORKFLOW_HEAD_SHA"
+      - name: Revalidate reused master evidence
+        if: needs.ci-plan.outputs.master_replay == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          go run ./cmd/swarm-test-timing -verify-merged-proof \
+            -repository "$GITHUB_REPOSITORY" -ref "$GITHUB_REF" -head-sha "$(git rev-parse HEAD)" \
+            -event-json "$GITHUB_EVENT_PATH" \
+            -plan test-results/revalidated-plan.json -matrix test-results/revalidated-matrix.json \
+            -result-json test-results/revalidated-master.json
+          jq -e '.verified == true' test-results/revalidated-master.json
+          test "$(jq -r .digest test-results/revalidated-plan.json)" = "$(jq -r .digest test-results/plan/proof-plan.json)"
       - name: Summarize required checks
         shell: bash
         env:
@@ -639,14 +723,17 @@ jobs:
             exit 1
           fi
           failed=0
+          replay='${{ needs.ci-plan.outputs.master_replay }}'
+          native_expected=skipped
+          if [ '${{ needs.ci-plan.outputs.profile }}' = full ] && [ "$replay" != true ]; then native_expected=success; fi
+          for native in '${{ needs.unused-linux.result }}' '${{ needs.unused-darwin.result }}' '${{ needs.unused-checks.result }}'; do
+            if [ "$native" != "$native_expected" ]; then failed=1; fi
+          done
           if [ '${{ needs.ci-plan.outputs.soak_matrix }}' != '{"include":[]}' ] && [ "${{ needs.mandatory-soak.result }}" != success ]; then failed=1; fi
           for item in \
             "complexity:${{ needs.complexity.result }}" \
             "static-checks:${{ needs.static-checks.result }}" \
             "macos-sqlite-possession:${{ needs.macos-sqlite-possession.result }}" \
-            "unused-linux:${{ needs.unused-linux.result }}" \
-            "unused-darwin:${{ needs.unused-darwin.result }}" \
-            "unused-checks:${{ needs.unused-checks.result }}" \
             "ci-plan:${{ needs.ci-plan.result }}" \
             "sqlite-local-dev:${{ needs.sqlite-local-dev.result }}" \
             "proof-unit:${{ needs.proof-unit.result }}" \
@@ -655,7 +742,11 @@ jobs:
           do
             name="${item%%:*}"; result="${item#*:}"
             echo "- ${name}: \`${result}\`" >> "$GITHUB_STEP_SUMMARY"
-            if [ "$result" != success ]; then failed=1; fi
+            expected=success
+            if [ "$replay" = true ]; then
+              case "$name" in macos-sqlite-possession|proof-unit|semantic-smoke|timing-budget) expected=skipped ;; esac
+            fi
+            if [ "$result" != "$expected" ]; then failed=1; fi
           done
           exit "$failed"
 

@@ -11,21 +11,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const PolicyVersion = 1
-
-const (
-	ProfileLocal       = "local"
-	ProfilePRCommon    = "pr-common"
-	ProfilePREscalated = "pr-escalated"
-	ProfileFull        = "full"
-	ProfileNightly     = "nightly"
-)
+const PolicyVersion = 2
 
 type Policy struct {
 	Version         int                         `yaml:"version"`
 	Module          string                      `yaml:"module"`
 	Planning        PlanningPolicy              `yaml:"planning"`
-	EscalationPaths []string                    `yaml:"escalation_paths"`
 	SpecialPackages []string                    `yaml:"special_packages"`
 	Profiles        map[string]ProfilePolicy    `yaml:"profiles"`
 	Units           map[string]UnitPolicy       `yaml:"units"`
@@ -45,6 +36,7 @@ type ProfilePolicy struct {
 }
 
 type UnitPolicy struct {
+	Packable         bool                `yaml:"packable,omitempty"`
 	Packages         []string            `yaml:"packages"`
 	RequiredChildren map[string][]string `yaml:"required_children,omitempty"`
 	Run              string              `yaml:"run,omitempty"`
@@ -104,15 +96,15 @@ func (p Policy) Validate() error {
 	if p.Planning.UnknownPackageSeconds <= 0 {
 		problems = append(problems, "planning.unknown_package_seconds must be positive")
 	}
-	for _, pattern := range p.EscalationPaths {
-		if _, err := regexp.Compile(pattern); err != nil {
-			problems = append(problems, fmt.Sprintf("escalation path %q: %v", pattern, err))
-		}
-	}
 	if duplicate := duplicateStrings(p.SpecialPackages); duplicate != "" {
 		problems = append(problems, fmt.Sprintf("special_packages duplicates %q", duplicate))
 	}
-	requiredProfiles := []string{ProfilePRCommon, ProfilePREscalated, ProfileFull, ProfileNightly}
+	requiredProfiles := []string{ProfileCore, ProfileLifecycle, ProfileFull}
+	for name := range p.Profiles {
+		if TierRank(name) == 0 {
+			problems = append(problems, fmt.Sprintf("unsupported profile %q", name))
+		}
+	}
 	for _, name := range requiredProfiles {
 		profile, ok := p.Profiles[name]
 		if !ok {
@@ -135,6 +127,9 @@ func (p Policy) Validate() error {
 		}
 	}
 	for name, unit := range p.Units {
+		if unit.Packable && (unit.BudgetClass == "soak" || unit.GoTimeout != "") {
+			problems = append(problems, fmt.Sprintf("units.%s cannot pack a soak or explicitly long command", name))
+		}
 		if strings.TrimSpace(name) == "" {
 			problems = append(problems, "units contains an empty id")
 		}
@@ -194,7 +189,7 @@ func (p Policy) Validate() error {
 	return nil
 }
 
-func (p Policy) ResolveProfile(event string, changedFiles []string, forced string) (string, string, error) {
+func (p Policy) ResolveProfile(event string, prBody string, forced string) (string, string, error) {
 	if forced != "" {
 		if event != "workflow_dispatch" {
 			return "", "", fmt.Errorf("forced profile is only valid for workflow_dispatch, not %s", event)
@@ -206,20 +201,10 @@ func (p Policy) ResolveProfile(event string, changedFiles []string, forced strin
 	}
 	switch event {
 	case "pull_request":
-		for _, path := range changedFiles {
-			for _, pattern := range p.EscalationPaths {
-				matched, err := regexp.MatchString(pattern, path)
-				if err != nil {
-					return "", "", err
-				}
-				if matched {
-					return ProfilePREscalated, "changed path: " + path, nil
-				}
-			}
-		}
-		return ProfilePRCommon, "no escalation path changed", nil
+		tier, reason := CITier(prBody)
+		return tier, reason, nil
 	case "schedule":
-		return ProfileNightly, "scheduled full truth", nil
+		return ProfileFull, "scheduled full truth", nil
 	case "push", "workflow_dispatch":
 		return ProfileFull, "full-truth event: " + event, nil
 	default:
