@@ -562,17 +562,13 @@ func walkUnifiedMapping(value yamlsource.Value, prefix []string, layer unifiedCo
 	for _, entry := range entries {
 		pathParts := append(append([]string{}, prefix...), entry.Name)
 		path := strings.Join(pathParts, ".")
-		var valueNode yaml.Node
-		if err := entry.Value.Project(&valueNode); err != nil {
-			*diagnostics = append(*diagnostics, unifiedConfigDiagnostic{Kind: unifiedConfigDiagnosticParseFailed, Layer: layer.Name, Path: layer.Path, Key: path, Message: err.Error()})
-			continue
-		}
+		scalar, _ := entry.Value.Scalar() // Containers have no scalar text.
 		rule, ok := unifiedConfigRule(pathParts)
 		if !ok {
 			*diagnostics = append(*diagnostics, unknownUnifiedConfigDiagnostic(path, layer, entry.IntroductionLocation()))
 			continue
 		}
-		if path == "llm.backend" && valueNode.Kind == yaml.ScalarNode && llmselection.NormalizeBackendID(valueNode.Value) == llmselection.BackendMock {
+		if path == "llm.backend" && llmselection.NormalizeBackendID(scalar.Value) == llmselection.BackendMock {
 			*diagnostics = append(*diagnostics, unifiedConfigDiagnostic{
 				Kind: unifiedConfigDiagnosticValidationFailed, Layer: layer.Name, Path: layer.Path, Key: path,
 				Message: fmt.Sprintf("config key %q in %s: backend mock is unsupported as a public selector", path, layer.Path), Remediation: "use swarm test to execute authored doubles",
@@ -590,7 +586,7 @@ func walkUnifiedMapping(value yamlsource.Value, prefix []string, layer unifiedCo
 			})
 			continue
 		}
-		if rule.InlineSecret && strings.TrimSpace(valueNode.Value) != "" {
+		if rule.InlineSecret && strings.TrimSpace(scalar.Value) != "" {
 			*diagnostics = append(*diagnostics, unifiedConfigDiagnostic{
 				Kind:        unifiedConfigDiagnosticTrustRejected,
 				Layer:       layer.Name,
@@ -600,7 +596,7 @@ func walkUnifiedMapping(value yamlsource.Value, prefix []string, layer unifiedCo
 				Remediation: "declare a file, secret key, or explicit env delegation field instead",
 			})
 		}
-		if remediation := trustViolationRemediation(path, rule, &valueNode, layer); remediation != "" {
+		if remediation := trustViolationRemediation(path, rule, scalar.Value, layer); remediation != "" {
 			*diagnostics = append(*diagnostics, unifiedConfigDiagnostic{
 				Kind:        unifiedConfigDiagnosticTrustRejected,
 				Layer:       layer.Name,
@@ -612,9 +608,9 @@ func walkUnifiedMapping(value yamlsource.Value, prefix []string, layer unifiedCo
 			continue
 		}
 		if rule.ProjectContainedPath && layer.Name == unifiedLayerProject {
-			*diagnostics = append(*diagnostics, validateProjectContainedConfigPath(path, &valueNode, layer, RepoRoot)...)
+			*diagnostics = append(*diagnostics, validateProjectContainedConfigPath(path, entry.Value, layer, RepoRoot)...)
 		}
-		if rule.Container && valueNode.Kind == yaml.MappingNode {
+		if rule.Container && (entry.Value.Presence() == yamlsource.PresenceMapping || entry.Value.Presence() == yamlsource.PresenceEmptyMapping) {
 			walkUnifiedMapping(entry.Value, pathParts, layer, RepoRoot, diagnostics)
 		}
 	}
@@ -698,13 +694,13 @@ func unifiedConfigProviderLimitPolicyLeaves() map[string]struct{} {
 	}
 }
 
-func trustViolationRemediation(path string, rule unifiedConfigKeyRule, value *yaml.Node, layer unifiedConfigLayer) string {
+func trustViolationRemediation(path string, rule unifiedConfigKeyRule, value string, layer unifiedConfigLayer) string {
 	switch layer.Name {
 	case unifiedLayerProject:
 		if rule.Elevated || rule.SecretReference {
 			return "move this key to .swarm/swarm.yaml, user-global swarm.yaml, explicit --config, or a flag"
 		}
-		if (path == "serve.api_listen_addr" || path == "serve.mcp_listen_addr") && !listenAddrIsProjectSafe(value.Value) {
+		if (path == "serve.api_listen_addr" || path == "serve.mcp_listen_addr") && !listenAddrIsProjectSafe(value) {
 			return "project config may only set loopback listener addresses; move public/wildcard binds to local-operator, user-global, explicit --config, or flags"
 		}
 	case unifiedLayerLocalOperator:
@@ -728,18 +724,21 @@ func listenAddrIsProjectSafe(raw string) bool {
 	return host == "127.0.0.1" || host == "::1" || strings.HasPrefix(host, "127.")
 }
 
-func validateProjectContainedConfigPath(path string, node *yaml.Node, layer unifiedConfigLayer, RepoRoot string) []unifiedConfigDiagnostic {
-	if node == nil {
-		return nil
-	}
-	if node.Kind == yaml.SequenceNode {
+func validateProjectContainedConfigPath(path string, value yamlsource.Value, layer unifiedConfigLayer, RepoRoot string) []unifiedConfigDiagnostic {
+	if value.Presence() == yamlsource.PresenceSequence || value.Presence() == yamlsource.PresenceEmptySequence {
 		var diagnostics []unifiedConfigDiagnostic
-		for i, item := range node.Content {
-			diagnostics = append(diagnostics, validateProjectContainedPathValue(fmt.Sprintf("%s[%d]", path, i), item.Value, layer, RepoRoot)...)
+		items, err := value.Sequence()
+		if err != nil {
+			return []unifiedConfigDiagnostic{{Kind: unifiedConfigDiagnosticParseFailed, Layer: layer.Name, Path: layer.Path, Key: path, Message: err.Error()}}
+		}
+		for i, item := range items {
+			scalar, _ := item.Scalar()
+			diagnostics = append(diagnostics, validateProjectContainedPathValue(fmt.Sprintf("%s[%d]", path, i), scalar.Value, layer, RepoRoot)...)
 		}
 		return diagnostics
 	}
-	return validateProjectContainedPathValue(path, node.Value, layer, RepoRoot)
+	scalar, _ := value.Scalar()
+	return validateProjectContainedPathValue(path, scalar.Value, layer, RepoRoot)
 }
 
 func validateProjectContainedPathValue(path, raw string, layer unifiedConfigLayer, RepoRoot string) []unifiedConfigDiagnostic {
