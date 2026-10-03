@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -339,15 +338,6 @@ func productionPlannerInputs(t *testing.T, dir string) (string, string, string) 
 		t.Fatal(err)
 	}
 	return filepath.Join(root, ".github/test-proof-plan.yaml"), filepath.Join(root, testplanning.GeneratedWeightModelPath), packagesPath
-}
-
-func currentHead(t *testing.T) string {
-	t.Helper()
-	raw, err := exec.Command("git", "rev-parse", "HEAD").Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return strings.TrimSpace(string(raw))
 }
 
 func writeSyntheticPlan(t *testing.T, dir, policyPath, modelPath, packagesPath, head string) string {
