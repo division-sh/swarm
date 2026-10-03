@@ -8,6 +8,15 @@ https://github.com/division-sh/swarm/issues/2544#issuecomment-5965227266.
 The binding amendment replaces the original authorization machinery with plain
 PR-body tier lines and requires measured candidate cost before retaining lifecycle.
 
+**Implementation stopped on the recorded hosted-edit condition.** The same-head
+core-to-lifecycle experiment at 8714bf5f0 preserves an old successful protected
+summary while heavier proof runs. See `issue-2544-tier-edit-stop.md`. A narrow
+independent re-gate is requested before further implementation; this does not
+reintroduce the retired authorization machinery or claim the PR was mergeable.
+Raw hosted runs, plans, protected checks and cost observations are retained in
+swarm-docs `docs/audits/2026-10-03-2544-hosted-tier-edit-stop.tar.gz`, SHA256
+`eef4cb50f38554f32e5bbcfcc474f6c1228f91fd92a9728875544e145c303ba9`.
+
 ## Lead Disposition And Class Model
 
 The user-lead accepted delayed exhaustive discovery, then explicitly replaced
