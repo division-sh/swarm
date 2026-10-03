@@ -11,6 +11,35 @@ import (
 
 const registeredAdmissionOwner = "internal/runtime/bootverify"
 
+// BlockRegisteredChecks records the existing registry's unperformed clauses
+// when an upstream admission prerequisite prevents registry execution.
+func (r *Report) BlockRegisteredChecks(subject, dependency, reason string) {
+	if r.SourceArtifactHash != "" {
+		subject = "source:" + r.SourceArtifactHash
+	}
+	appendCheck := func(check Check) {
+		observation := AdmissionObservation{
+			CheckID: check.ID, Owner: registeredAdmissionOwner, Subject: subject,
+			Class: AdmissionSourceObservation, Status: AdmissionNotRun,
+			Reason: reason, Dependencies: []string{dependency},
+		}
+		if check.Mode == CheckDeployment {
+			observation.Class = AdmissionDeploymentObservation
+		}
+		r.Observations = append(r.Observations, observation)
+		if check.Mode == CheckMixed {
+			observation.Class = AdmissionDeploymentObservation
+			r.Observations = append(r.Observations, observation)
+		}
+	}
+	for _, check := range bootCheckRegistry {
+		appendCheck(check)
+	}
+	for _, check := range supplementalChecks {
+		appendCheck(check)
+	}
+}
+
 func (r *Report) runAdmissionCheck(c *checkerContext, check Check) {
 	observation := AdmissionObservation{
 		CheckID: check.ID, Owner: registeredAdmissionOwner, Subject: "selected_source",
