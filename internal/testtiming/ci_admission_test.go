@@ -93,9 +93,29 @@ func ciEventFacts(event string, draft bool, soak string) map[string]string {
 	}
 }
 
+func TestCITierIncreaseKeepsLateSummaryAndNewHeadEvent(t *testing.T) {
+	workflow := loadAdmissionWorkflow(t)
+	if slices.Contains(workflow.On.PullRequest.Types, "edited") ||
+		!slices.Contains(workflow.On.PullRequest.Types, "synchronize") ||
+		!slices.Contains(workflow.On.PullRequest.Types, "ready_for_review") {
+		t.Fatal("tier increases must use new-head/ready qualification, not redundant edited runs")
+	}
+	summary := workflow.Jobs["required-tests"]
+	wantNeeds := []string{"complexity", "ci-plan", "static-checks", "sqlite-local-dev", "macos-sqlite-possession", "unused-linux", "unused-darwin", "unused-checks", "proof-unit", "mandatory-soak", "semantic-smoke", "timing-budget"}
+	if summary.TimeoutMinutes != 5 || !slices.Equal(summary.Needs, wantNeeds) {
+		t.Fatalf("summary must remain late and bounded: timeout=%v needs=%v", summary.TimeoutMinutes, summary.Needs)
+	}
+	step := findWorkflowStep(summary.Steps, "Revalidate current PR tier")
+	if step == nil || !strings.Contains(step.Run, "-check-ci-tier") ||
+		!strings.Contains(step.Run, "-workflow-head-sha") ||
+		!strings.Contains(step.Run, "current-pr.json") {
+		t.Fatal("late summary lost exact current-body/head refusal")
+	}
+}
+
 func TestCIDraftAdmissionAndReadyTransitions(t *testing.T) {
 	workflow := loadAdmissionWorkflow(t)
-	actions := []string{"opened", "synchronize", "reopened", "ready_for_review", "converted_to_draft", "edited"}
+	actions := []string{"opened", "synchronize", "reopened", "ready_for_review", "converted_to_draft"}
 	if !slices.Equal(workflow.On.PullRequest.Types, actions) {
 		t.Fatalf("PR subscriptions = %v, want %v", workflow.On.PullRequest.Types, actions)
 	}

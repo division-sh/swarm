@@ -48,7 +48,7 @@ func TestCurrentPRTierRevalidationFailsClosed(t *testing.T) {
 			}
 		})
 	}
-	// A thinner old green is not promoted by a later same-head body edit.
+	// Revalidation refuses thin scope; it cannot revoke an already-completed check.
 	if err := testplanning.CheckCurrentCITier(testplanning.ProfileCore, "CI-Tier: lifecycle"); err == nil {
 		t.Fatal("old thin green accepted")
 	}

@@ -49,8 +49,16 @@ configuration remains explicitly parked under E's
 
 The reviewer records exactly one `CI-Tier: core|lifecycle|full` and one
 `Local-Tier: core|lifecycle|full` line in the PR body. The two decisions are
-independent. Missing, invalid or duplicate CI instructions select full; a
-body edit triggers CI and the summary rechecks the current body. Local
+independent. Missing, invalid or duplicate CI instructions select full.
+Body edits do not trigger heavy CI. The existing late five-minute summary checks
+the current body/head before success; it cannot revoke a completed green.
+An increase above successful current-head scope requires a new signed head and
+qualifying higher-tier protected checks. Keep the PR draft/non-mergeable until
+that qualification succeeds. At merge, the lead compares the current CI-Tier to
+the latest successful current-head trusted-App plan/summary, including edits
+after approval; old-head green and insufficient scope do not qualify. A completed
+higher tier may satisfy a lower requirement. This is not a branch-freshness rule.
+Local
 qualification uses explicit `--tier TIER` or `--full` and retains the effective
 plan and receipts under `test-results/local`. The reviewer compares that command
 and receipt with Local-Tier; an absent or invalid local instruction cannot earn
