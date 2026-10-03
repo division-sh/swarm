@@ -19,7 +19,10 @@ for UNIT_ID in "${units[@]}"; do
   elapsed=$(( $(date +%s) - start ))
   status=${statuses[0]}
   if [ "${statuses[1]}" -ne 0 ]; then status=1; fi
-  rm -rf "$unit_tmp"
+  # Go module downloads can leave read-only directories inside this owned temp.
+  # Do not follow symlinks or let cleanup suppress this or later receipts.
+  if ! find "$unit_tmp" -type d -exec chmod u+rwx {} +; then status=1; fi
+  if ! rm -rf "$unit_tmp"; then status=1; fi
   # A failed member does not suppress the next member's independent receipt.
   if ! go run ./cmd/swarm-test-timing -record-evidence \
     -workflow-run-id "$GITHUB_RUN_ID" -workflow-attempt "$GITHUB_RUN_ATTEMPT" \
