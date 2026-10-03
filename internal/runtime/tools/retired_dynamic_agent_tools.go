@@ -88,7 +88,11 @@ func ValidateRetiredDynamicAgentToolReferences(source semanticview.Source) []err
 		for name := range scope.tools {
 			add(name, scope.label+" tool entry")
 		}
-		for bundle, names := range permissionBundles(scope.policy) {
+		bundles, err := permissionBundles(scope.policy)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s %w", scope.label, err))
+		}
+		for bundle, names := range bundles {
 			for _, name := range names {
 				add(name, fmt.Sprintf("%s permission_bundles.%s.permissions", scope.label, bundle))
 			}
@@ -96,32 +100,4 @@ func ValidateRetiredDynamicAgentToolReferences(source semanticview.Source) []err
 	}
 	sort.Slice(errs, func(i, j int) bool { return errs[i].Error() < errs[j].Error() })
 	return errs
-}
-
-func permissionBundles(policy runtimecontracts.PolicyDocument) map[string][]string {
-	root, ok := policy.Values["permission_bundles"]
-	if !ok {
-		return nil
-	}
-	bundles, ok := normalizePolicyMap(root.Value)
-	if !ok {
-		return nil
-	}
-	out := make(map[string][]string, len(bundles))
-	for name, raw := range bundles {
-		bundle, ok := normalizePolicyMap(raw)
-		if !ok {
-			continue
-		}
-		rawPermissions, ok := bundle["permissions"]
-		if !ok {
-			continue
-		}
-		permissions, err := stringsFromPolicyValue(rawPermissions)
-		if err != nil {
-			continue
-		}
-		out[strings.TrimSpace(name)] = permissions
-	}
-	return out
 }

@@ -439,10 +439,11 @@ func (c *checkerContext) permissionWarnings() []Finding {
 	c.permissionWarningLoaded = true
 	for _, item := range mergedAgentPermissionWarnings(c.source) {
 		c.permissionWarningFindings = append(c.permissionWarningFindings, Finding{
-			CheckID:  "agent_permission_validation",
-			Severity: "warning",
-			Message:  strings.TrimSpace(item.Message),
-			Location: locationFromMessage(item.Message),
+			CheckID:     "agent_permission_validation",
+			Severity:    "warning",
+			Message:     strings.TrimSpace(item.Message),
+			Location:    locationFromMessage(item.Message),
+			Remediation: stableHardInvalidityRemediation["agent_permission_validation"],
 		})
 	}
 	return c.permissionWarningFindings
@@ -1365,18 +1366,17 @@ func mergedAgentPermissionWarnings(source semanticview.Source) []permissionWarni
 			continue
 		}
 		scopeLabel := validationFlowLabel(plan.OwnerFlowID)
-		policy := source.ResolvedPolicyForFlow(plan.OwnerFlowID)
-		out = append(out, agentPermissionWarningsLocal(source, scopeLabel, plan.AgentID, declaration, policy)...)
+		out = append(out, agentPermissionWarnings(source, plan.OwnerFlowID, scopeLabel, plan.AgentID, declaration)...)
 	}
 	return out
 }
 
-func agentPermissionWarningsLocal(source semanticview.Source, scopeLabel, agentID string, declaration semanticview.AgentDeclaration, policy runtimecontracts.PolicyDocument) []permissionWarning {
+func agentPermissionWarnings(source semanticview.Source, flowID, scopeLabel, agentID string, declaration semanticview.AgentDeclaration) []permissionWarning {
 	if source == nil {
 		return nil
 	}
 	agent := declaration.Entry
-	perms, err := resolvedAgentPermissionsLocal(agent, policy)
+	perms, err := runtimetools.ResolveAgentPermissions(source, flowID, agent)
 	if err != nil {
 		return []permissionWarning{{Message: fmt.Sprintf("%s/%s permissions resolution failed: %v", strings.TrimSpace(scopeLabel), strings.TrimSpace(agentID), err)}}
 	}
@@ -1402,100 +1402,6 @@ func agentPermissionWarningsLocal(source semanticview.Source, scopeLabel, agentI
 		}
 		out = append(out, permissionWarning{Message: fmt.Sprintf("%s/%s: tool %q missing permission %q", strings.TrimSpace(scopeLabel), strings.TrimSpace(agentID), toolID, required)})
 	}
-	return out
-}
-
-func resolvedAgentPermissionsLocal(agent runtimecontracts.AgentRegistryEntry, policy runtimecontracts.PolicyDocument) ([]string, error) {
-	perms := make([]string, 0, len(agent.Permissions)+4)
-	bundleName := strings.TrimSpace(agent.PermissionsBundle)
-	if bundleName != "" {
-		bundlePerms, ok, err := permissionBundlePermissionsLocal(policy, bundleName)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, fmt.Errorf("unknown permissions_bundle %q", bundleName)
-		}
-		perms = append(perms, bundlePerms...)
-	}
-	perms = append(perms, agent.Permissions...)
-	return normalizeStringSliceLocal(perms), nil
-}
-
-func permissionBundlePermissionsLocal(policy runtimecontracts.PolicyDocument, bundle string) ([]string, bool, error) {
-	root, ok := policy.Values["permission_bundles"]
-	if !ok {
-		return nil, false, nil
-	}
-	bundles, ok := normalizePolicyMapLocal(root.Value)
-	if !ok {
-		return nil, false, fmt.Errorf("permission_bundles must be a mapping")
-	}
-	rawBundle, ok := bundles[strings.TrimSpace(bundle)]
-	if !ok {
-		return nil, false, nil
-	}
-	bundleMap, ok := normalizePolicyMapLocal(rawBundle)
-	if !ok {
-		return nil, false, fmt.Errorf("permission_bundles.%s must be a mapping", bundle)
-	}
-	rawPerms, ok := bundleMap["permissions"]
-	if !ok {
-		return nil, false, fmt.Errorf("permission_bundles.%s.permissions is required", bundle)
-	}
-	perms, err := stringsFromPolicyValueLocal(rawPerms)
-	if err != nil {
-		return nil, false, fmt.Errorf("permission_bundles.%s.permissions: %w", bundle, err)
-	}
-	return perms, true, nil
-}
-
-func normalizePolicyMapLocal(value any) (map[string]any, bool) {
-	switch typed := value.(type) {
-	case map[string]any:
-		return typed, true
-	default:
-		return nil, false
-	}
-}
-
-func stringsFromPolicyValueLocal(value any) ([]string, error) {
-	switch typed := value.(type) {
-	case []string:
-		return normalizeStringSliceLocal(typed), nil
-	case []any:
-		out := make([]string, 0, len(typed))
-		for _, item := range typed {
-			text, ok := item.(string)
-			if !ok {
-				return nil, fmt.Errorf("expected string list")
-			}
-			out = append(out, text)
-		}
-		return normalizeStringSliceLocal(out), nil
-	default:
-		return nil, fmt.Errorf("expected string list")
-	}
-}
-
-func normalizeStringSliceLocal(items []string) []string {
-	if len(items) == 0 {
-		return nil
-	}
-	seen := map[string]struct{}{}
-	out := make([]string, 0, len(items))
-	for _, item := range items {
-		item = strings.TrimSpace(item)
-		if item == "" {
-			continue
-		}
-		if _, ok := seen[item]; ok {
-			continue
-		}
-		seen[item] = struct{}{}
-		out = append(out, item)
-	}
-	sort.Strings(out)
 	return out
 }
 

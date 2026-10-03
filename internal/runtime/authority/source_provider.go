@@ -72,28 +72,6 @@ func (p *sourceProvider) ProducerEventsForRole(role string) []string {
 	return out
 }
 
-func (p *sourceProvider) HasMessageAuthority(actor, target models.AgentConfig) bool {
-	sender := canonicalRole(actor.Role)
-	recipient := canonicalRole(target.Role)
-	if sender == "" || recipient == "" {
-		return false
-	}
-	if same, err := SameAgent(actor, target); err == nil && same {
-		return true
-	}
-	if !SameFlowInstance(actor, target) {
-		return false
-	}
-	switch strongestMessagePermission(permissionSet(actor.Permissions)) {
-	case "message_flow":
-		return true
-	case "message_peers":
-		return PeerManagerFallback(actor, target)
-	default:
-		return false
-	}
-}
-
 func (p *sourceProvider) AuthorizeNotifyHuman(actor models.AgentConfig) error {
 	if containsCanonical(p.notifyHumanRoles, actor.Role) {
 		return nil
@@ -163,37 +141,6 @@ func buildProducerRegistry(source semanticview.Source) map[string][]string {
 	return agentEvents
 }
 
-func strongestMessagePermission(grants map[string]struct{}) string {
-	switch {
-	case hasToolGrant(grants, "message_flow"):
-		return "message_flow"
-	case hasToolGrant(grants, "message_peers"):
-		return "message_peers"
-	default:
-		return ""
-	}
-}
-
-func permissionSet(perms []string) map[string]struct{} {
-	out := make(map[string]struct{}, len(perms))
-	for _, perm := range perms {
-		perm = strings.TrimSpace(perm)
-		if perm == "" {
-			continue
-		}
-		out[perm] = struct{}{}
-	}
-	return out
-}
-
-func hasToolGrant(grants map[string]struct{}, toolName string) bool {
-	if len(grants) == 0 {
-		return false
-	}
-	_, ok := grants[strings.TrimSpace(toolName)]
-	return ok
-}
-
 func canonicalRole(role string) string {
 	role = strings.TrimSpace(strings.ToLower(role))
 	role = strings.ReplaceAll(role, "_", "-")
@@ -239,18 +186,6 @@ func appendUniqueSortedEvent(events []string, eventType string) []string {
 	events = append(events, eventType)
 	sort.Strings(events)
 	return events
-}
-
-func SameFlowInstance(actor, target models.AgentConfig) bool {
-	actorFlow := actor.CanonicalFlowPath()
-	targetFlow := target.CanonicalFlowPath()
-	return actorFlow != "" && actorFlow == targetFlow
-}
-
-func PeerManagerFallback(actor, target models.AgentConfig) bool {
-	actorFallback := strings.TrimSpace(actor.ManagerFallback)
-	targetFallback := strings.TrimSpace(target.ManagerFallback)
-	return actorFallback != "" && actorFallback == targetFallback
 }
 
 func firstNonEmpty(values ...string) string {

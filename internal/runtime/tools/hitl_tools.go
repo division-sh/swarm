@@ -13,17 +13,16 @@ import (
 const (
 	NotifyHumanToolName        = "notify_human"
 	AskHumanToolName           = "ask_human"
-	WithheldAgentMessageTool   = "agent_message"
+	RetiredAgentMessageTool    = "agent_message"
 	NotifyHumanMailboxItemType = "operator_notice"
 )
 
-const agentMessageUnavailableTeaching = "not available: agent-to-agent messaging ships with typed recipient authority (#2154)"
+const agentMessageRetiredTeaching = "RETIRED: agent_message is unsupported; use declared typed workflow events. Reopening requires a named concrete product workload needing dynamic peer selection and a demonstrated named limitation of declared typed workflow events (#2154)."
 
 type hitlIdentityLifecycle uint8
 
 const (
 	hitlIdentityActive hitlIdentityLifecycle = iota + 1
-	hitlIdentityWithheld
 	hitlIdentityRetired
 )
 
@@ -39,8 +38,8 @@ func hitlIdentityLifecycleForName(name string) (hitlIdentityLifecycleDescriptor,
 		return hitlIdentityLifecycleDescriptor{name: NotifyHumanToolName, lifecycle: hitlIdentityActive}, true
 	case AskHumanToolName:
 		return hitlIdentityLifecycleDescriptor{name: AskHumanToolName, lifecycle: hitlIdentityActive}, true
-	case WithheldAgentMessageTool:
-		return hitlIdentityLifecycleDescriptor{name: WithheldAgentMessageTool, lifecycle: hitlIdentityWithheld}, true
+	case RetiredAgentMessageTool:
+		return hitlIdentityLifecycleDescriptor{name: RetiredAgentMessageTool, lifecycle: hitlIdentityRetired}, true
 	case "mailbox_send":
 		return hitlIdentityLifecycleDescriptor{name: "mailbox_send", lifecycle: hitlIdentityRetired, replacement: NotifyHumanToolName}, true
 	case "human_task_request":
@@ -59,14 +58,10 @@ func hitlIdentityReferenceError(name, location string) error {
 	if location == "" {
 		location = "tool reference"
 	}
-	switch descriptor.lifecycle {
-	case hitlIdentityWithheld:
-		return fmt.Errorf("%s: tool %s %s", location, descriptor.name, agentMessageUnavailableTeaching)
-	case hitlIdentityRetired:
-		return fmt.Errorf("%s: RETIRED: %s is unsupported; use %s", location, descriptor.name, descriptor.replacement)
-	default:
-		return nil
+	if descriptor.name == RetiredAgentMessageTool {
+		return fmt.Errorf("%s: %s", location, agentMessageRetiredTeaching)
 	}
+	return fmt.Errorf("%s: RETIRED: %s is unsupported; use %s", location, descriptor.name, descriptor.replacement)
 }
 
 func hitlIdentityDefinitionError(name, location string) error {
@@ -140,16 +135,21 @@ func ValidateHITLIdentityLifecycleReferences(source semanticview.Source) []error
 			add(hitlIdentityReferenceError(name, label+" tools"))
 		}
 		for _, name := range declaration.Entry.Permissions {
-			add(hitlIdentityReferenceError(name, label+" permissions"))
+			add(permissionReferenceError(name, label+" permissions"))
 		}
 	}
 	for _, scope := range scopes {
-		for name := range scope.tools {
+		for name, entry := range scope.tools {
 			add(hitlIdentityDefinitionError(name, scope.label+" tool entry"))
+			add(permissionReferenceError(entry.Permission().String(), scope.label+" tool "+name+" permission"))
 		}
-		for bundle, names := range permissionBundles(scope.policy) {
+		bundles, err := permissionBundles(scope.policy)
+		if err != nil {
+			add(fmt.Errorf("%s %w", scope.label, err))
+		}
+		for bundle, names := range bundles {
 			for _, name := range names {
-				add(hitlIdentityReferenceError(name, fmt.Sprintf("%s permission_bundles.%s.permissions", scope.label, bundle)))
+				add(permissionReferenceError(name, fmt.Sprintf("%s permission_bundles.%s.permissions", scope.label, bundle)))
 			}
 		}
 	}

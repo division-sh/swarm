@@ -4,7 +4,7 @@ tool-agent:
   tools:
     - lookup_data
   permissions:
-    - message_peers
+    - schedule
   subscriptions:
     - task.completed
   emit_events: []

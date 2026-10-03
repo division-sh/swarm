@@ -255,6 +255,7 @@ func TestRetiredDynamicAgentToolTokensRemainOnlyInRetirementEvidence(t *testing.
 	root := retiredDynamicAgentToolRepoRoot(t)
 	allowed := map[string]struct{}{
 		"internal/runtime/workflow_validation_test.go":                          {},
+		"internal/runtime/bootverify/agent_message_retirement_test.go":          {},
 		"internal/runtime/tools/retired_dynamic_agent_tools.go":                 {},
 		"internal/runtime/tools/retired_dynamic_agent_tools_test.go":            {},
 		"internal/runtime/mcp/retired_dynamic_agent_tools_test.go":              {},
