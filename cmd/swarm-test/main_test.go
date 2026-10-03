@@ -138,6 +138,48 @@ exit 0
 	}
 }
 
+func TestSwarmTestProvisionFailurePreservesSettlementFailure(t *testing.T) {
+	chdirSwarmRepoRoot(t)
+	root := t.TempDir()
+	stateHome := filepath.Join(root, "state")
+	t.Setenv("XDG_STATE_HOME", stateHome)
+	t.Setenv("SWARM_TEST_POSTGRES_DSN", "")
+	if err := os.Unsetenv(testpostgres.SourceEnv); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", root+string(os.PathListSeparator)+os.Getenv("PATH"))
+	script := `#!/bin/sh
+set -eu
+if [ "$1" = "pull" ]; then
+  printf '{broken' > "$XDG_STATE_HOME/swarm/test-postgres/runs-v1.json"
+  printf 'injected pull failure\n' >&2
+  exit 42
+fi
+exit 0
+`
+	if err := os.WriteFile(filepath.Join(root, "docker"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	log, err := os.Create(filepath.Join(root, "failure.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer log.Close()
+	original := os.Stderr
+	os.Stderr = log
+	defer func() { os.Stderr = original }()
+	if code := run([]string{"--", "./cmd/swarm-test", "-run", "^TestParseTestArgs$", "-count=1"}); code != 1 {
+		t.Fatalf("provision failure status = %d", code)
+	}
+	raw, err := os.ReadFile(log.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "injected pull failure") || !strings.Contains(string(raw), "test settlement:") || !strings.Contains(string(raw), "decode") {
+		t.Fatalf("primary or independent settlement failure was hidden: %s", raw)
+	}
+}
+
 func TestTimingFallbackUsesCanonicalModelForFullSuite(t *testing.T) {
 	if duration := timingFallback([]string{"./cmd/swarm-test"}); duration != 0 {
 		t.Fatalf("focused fallback = %s, want unknown", duration)
