@@ -260,3 +260,23 @@ feedback qualifies this repair. Master5d3cc2400 is integrated before the repair.
 Final explicit full qualification runs on server2, with source and scratch on
 disk-backed /home, canonical PostgreSQL/admission ownership, and no /tmp worktree.
 Final audit must bind server2 full and hosted full to the same resulting head.
+
+### Master Integration After Review Pass 1
+
+User requires integrating merged #2543 at mastere63f4bdb1 before the next push.
+The unchanged existing-owner design needs no new ruling. C's scenario-document
+owner, tests, spec and complexity deltas are retained; new ordinary roots enter
+the canonical census. Rebase conflicts are generated complexity/describe
+artifacts, not a competing qualification owner. Actual rebuilt master/candidate
+CLI comparison must preserve all45 surfaces/two repetitions and reject any
+non-provenance change before updating ten JSON hashes. Requalify the resulting
+clean head on server2 with the same fixed full/full instructions.
+
+The first host-DSN server2 attempt failed PostgreSQL cleanup privilege checks
+and skipped two native capacity roots because pg_config names absent PG18 tools;
+it remains failed/uncredited. Existing runner-owned PostgreSQL and explicit
+installed PG16 tools pass their controls, without changing host roles/config.
+The subsequent canonical full at8b48e7518 passed six unit receipts, then was
+gracefully interrupted for the required rebase during scatter safety. Those
+partial receipts remain uncredited for whole qualification. No assertion,
+budget, source guard or runtime behavior is changed by this integration.
