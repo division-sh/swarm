@@ -123,6 +123,33 @@ func TestRetirementClosureMergedLayerOverride(t *testing.T) {
 	}
 }
 
+func TestRetirementClosureTypedValueTrustAndPathChecks(t *testing.T) {
+	for _, row := range []struct {
+		body, want string
+	}{
+		{"serve: {<<: {api_listen_addr: 0.0.0.0:8090}}\n", "project config may only set loopback"},
+		{"paths: {<<: {platform_spec_path: ../outside}}\n", "parent-directory escapes"},
+		{"platform: {packs: {platform_dirs: ['safe', '../outside']}}\n", "not allowed in project_config"},
+		{"llm: {models: {default: {anthropic: &path ../outside}}}\npaths: {platform_spec_path: *path}\n", "parent-directory escapes"},
+		{"serve: {api_listen_addr: 127.0.0.1:8090}\npaths: {platform_spec_path: platform-spec.yaml}\n", ""},
+		{"serve: {api_listen_addr: ''}\npaths: {platform_spec_path: ''}\n", ""},
+	} {
+		t.Run(row.body, func(t *testing.T) {
+			isolateCLIAPIConfigEnv(t)
+			repo := t.TempDir()
+			writeRuntimeConfigText(t, filepath.Join(repo, "swarm.yaml"), row.body)
+			_, err := loadUnifiedConfigForTest(t, unifiedConfigLoadOptions{RepoRoot: repo})
+			if row.want == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), row.want) {
+				t.Fatalf("error = %v, want %q", err, row.want)
+			}
+		})
+	}
+}
+
 func TestRetirementClosureLayerExpansionPrecedenceAndOrigins(t *testing.T) {
 	forms := []string{
 		"runtime: {recovery_on_startup: %s}\n",

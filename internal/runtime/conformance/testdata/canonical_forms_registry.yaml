@@ -717,12 +717,12 @@ decode_bypasses:
   # Direct roots count yaml.Unmarshal and yaml.NewDecoder calls repository-wide.
   # The canonical owner's root is classified but excluded from the off-owner ceiling.
   # CI compares each PR to the accepted base ledger, not just these initial ceilings.
-  node_site_ceiling: 67
-  off_owner_direct_decode_ceiling: 24
+  node_site_ceiling: 65
+  off_owner_direct_decode_ceiling: 23
   files:
     internal/cliapp/cli_output.go: {family: other_production_projection, node_sites: 0, direct_decode_roots: 1}
     internal/cliapp/test_command.go: {family: excluded_scenario_tooling, node_sites: 11, direct_decode_roots: 3}
-    internal/cliapp/unified_config.go: {family: excluded_deployment_config, node_sites: 18, direct_decode_roots: 2}
+    internal/cliapp/unified_config.go: {family: excluded_deployment_config, node_sites: 16, direct_decode_roots: 1}
     internal/config/config.go: {family: excluded_deployment_config, node_sites: 3, direct_decode_roots: 2}
     # #2486 removes the three runtime callers of the shared decoder. Its sole
     # surviving conformance-fixture root is explicitly #2487, not a new exemption.

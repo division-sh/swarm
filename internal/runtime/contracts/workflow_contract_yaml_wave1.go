@@ -236,10 +236,7 @@ func decodeEnumDeclaration(node *yaml.Node) ([]string, string, error) {
 	}
 	var values []string
 	if field, present := fields["values"]; present {
-		var node yaml.Node
-		if err = field.Project(&node); err == nil {
-			values, err = decodeStringListNode(&node)
-		}
+		values, err = decodeStringListValue(field)
 		if err != nil {
 			return nil, "", err
 		}
@@ -249,13 +246,12 @@ func decodeEnumDeclaration(node *yaml.Node) ([]string, string, error) {
 	}
 	defaultValue := ""
 	if field, present := fields["default"]; present {
-		var node yaml.Node
-		if err = field.Project(&node); err == nil {
-			if node.Kind != yaml.ScalarNode {
-				return nil, "", fmt.Errorf("enum declaration default must be a scalar member at %s", field.Location())
-			}
-			defaultValue, err = decodeScalarStringNode(&node)
+		switch field.Presence() {
+		case yamlsource.PresenceScalar, yamlsource.PresenceEmptyScalar, yamlsource.PresenceNull:
+		default:
+			return nil, "", fmt.Errorf("enum declaration default must be a scalar member at %s", field.Location())
 		}
+		defaultValue, err = optionalScalarString(field, "enum declaration default")
 		if err != nil {
 			return nil, "", err
 		}
