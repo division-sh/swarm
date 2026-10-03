@@ -94,6 +94,9 @@ func (b *Backend) ConstructionHandle() *sql.DB {
 }
 
 func (b *Backend) Conn(ctx context.Context) (*sql.Conn, error) {
+	if err := b.refuseInspectionMutation(ctx); err != nil {
+		return nil, err
+	}
 	if !b.Valid() {
 		return nil, fmt.Errorf("sqlite backend is required")
 	}
@@ -101,6 +104,9 @@ func (b *Backend) Conn(ctx context.Context) (*sql.Conn, error) {
 }
 
 func (b *Backend) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	if err := b.refuseInspectionMutation(ctx); err != nil {
+		return nil, err
+	}
 	if !b.Valid() {
 		return nil, fmt.Errorf("sqlite backend is required")
 	}
@@ -115,6 +121,11 @@ func (b *Backend) Exec(query string, args ...any) (sql.Result, error) {
 }
 
 func (b *Backend) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	if tx, err := b.inspectionTransaction(ctx); err != nil {
+		return nil, err
+	} else if tx != nil {
+		return tx.QueryContext(ctx, query, args...)
+	}
 	if !b.Valid() {
 		return nil, fmt.Errorf("sqlite backend is required")
 	}
@@ -129,6 +140,11 @@ func (b *Backend) Query(query string, args ...any) (*sql.Rows, error) {
 }
 
 func (b *Backend) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	if tx, err := b.inspectionTransaction(ctx); err != nil {
+		return invalidRow(err.Error())
+	} else if tx != nil {
+		return tx.QueryRowContext(ctx, query, args...)
+	}
 	if !b.Valid() {
 		return invalidRow("sqlite backend is required")
 	}

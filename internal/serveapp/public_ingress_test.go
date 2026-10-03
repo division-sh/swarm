@@ -32,7 +32,7 @@ func TestResolveServePublicIngressMode(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			mode, enabled, err := resolveServePublicIngressMode(tc.opts)
+			mode, enabled, err := cliapp.ResolveServePublicIngressMode(tc.opts)
 			if (err == nil) != tc.ok || mode != tc.mode || enabled != tc.enabled {
 				t.Fatalf("resolveServePublicIngressMode = %q,%v,%v want %q,%v,ok=%v", mode, enabled, err, tc.mode, tc.enabled, tc.ok)
 			}
@@ -49,7 +49,7 @@ func (f servePublicIngressRoundTripper) RoundTrip(request *http.Request) (*http.
 func TestRetainedServeExternalOriginExposesOnlyWebhookRoutes(t *testing.T) {
 	listener := reserveChannelOnboardingListener(t)
 	listenAddress := listener.Addr().String()
-	mode, enabled, err := resolveServePublicIngressMode(cliapp.ServeOptions{
+	mode, enabled, err := cliapp.ResolveServePublicIngressMode(cliapp.ServeOptions{
 		PublicWebhookBaseURL: "https://hooks.example.test", PublicWebhookListen: listenAddress,
 	})
 	if err != nil || !enabled || mode != publicingress.ModeExternalOrigin {
