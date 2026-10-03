@@ -11,6 +11,9 @@ go test ./scripts/rewrite-pins-2438
 
 The default prints a sorted plan without writes. All selected tracked sources are
 parsed and the reply's exact paired connections checked before applying a plan.
+Parsing consumes `yamlsource.Load` and its immutable `Value` view; the script has
+no raw YAML decoder or `yaml.Node` reader. Typed rewrite projections are encoded
+only after the complete source preflight. It adds no decoder-census exemption.
 Only pins and the affected reply connect section are re-encoded; other schema
 sections remain byte-identical. Unexpected forms fail rather than being guessed.
 Preflight rejects duplicate or non-local event names, padded identities,
@@ -47,3 +50,8 @@ carriers; this is not current-runtime admission of the rewritten grammar.
 `go vet ./scripts/rewrite-pins-2438` passes. The repo-pinned gocognit/gocyclo
 tools report no script function at or above the 30-point hotspot threshold.
 These are script proofs, not runtime, both-store or merge qualification.
+
+The whole-file deletion proposal is held: the three generic bundle schemas also
+contain live stage, instance and deferred constructor declarations. Those facts
+must not disappear as a side effect of retiring grants. No corpus writes have
+been made while that allocation conflict is being clarified.
