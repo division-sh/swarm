@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -13,6 +14,29 @@ import (
 )
 
 const testPublishedRunID = "11111111-1111-4111-8111-111111111111"
+
+func newEventPublishReadyServer(t *testing.T, handler http.Handler) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		var req jsonRPCRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Error(err)
+			return
+		}
+		if req.Method == "health.check" {
+			hash := "bundle-v2:sha256:" + strings.Repeat("a", 64)
+			writeJSONRPCResult(t, w, req.ID, map[string]any{"alive": true, "ready": true, "db_ok": true, "runtime_ok": true, "bundle": map[string]any{"bundle_hash": hash, "workflow_name": ".", "workflow_version": hash}})
+			return
+		}
+		handler.ServeHTTP(w, r)
+	}))
+}
 
 func TestEventPublishUsesEventPublishV1RPCWithBoundParams(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
@@ -37,7 +61,6 @@ func TestEventPublishUsesEventPublishV1RPCWithBoundParams(t *testing.T) {
 		"--payload-json", `{"topic":"sample","count":2}`,
 		"--run-id", "run-1",
 		"--source-event-id", "event-parent-1",
-		"--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		"--emitter", "cli:test",
 		"--idempotency-key", "idem-1",
 	}, &stdout, &stderr, testRootCommandOptions(server))
@@ -55,7 +78,6 @@ func TestEventPublishUsesEventPublishV1RPCWithBoundParams(t *testing.T) {
 		},
 		"run_id":          "run-1",
 		"source_event_id": "event-parent-1",
-		"bundle_hash":     "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		"emitter":         "cli:test",
 		"idempotency_key": "idem-1",
 	}
@@ -130,7 +152,7 @@ func TestEventPublishSerializesTargetRouteParam(t *testing.T) {
 func TestEventPublishPassesFlowScopedEventNameToV1RPC(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newEventPublishReadyServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
 			t.Errorf("decode request: %v", err)
 		}
@@ -143,7 +165,6 @@ func TestEventPublishPassesFlowScopedEventNameToV1RPC(t *testing.T) {
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
 		"event", "publish", eventName,
 		"--payload-json", `{"topic":"sample"}`,
-		"--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 	}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
@@ -162,14 +183,14 @@ func TestEventPublishPassesFlowScopedEventNameToV1RPC(t *testing.T) {
 	}
 }
 
-func TestEventPublishBundleHashSerializesCanonicalParamAndMapsUnsupported(t *testing.T) {
+func TestEventPublishUsesServedSourceAndMapsUnavailable(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newEventPublishReadyServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
 			t.Errorf("decode request: %v", err)
 		}
-		writeEventPublishJSONRPCError(t, w, captured.ID, "UNSUPPORTED_BUNDLE_HASH")
+		writeEventPublishJSONRPCError(t, w, captured.ID, "BUNDLE_UNAVAILABLE")
 	}))
 	defer server.Close()
 
@@ -177,23 +198,22 @@ func TestEventPublishBundleHashSerializesCanonicalParamAndMapsUnsupported(t *tes
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
 		"event", "publish", "scan.requested",
 		"--payload-json", `{}`,
-		"--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 	}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 6 {
 		t.Fatalf("code = %d, want 6 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
-	if got := captured.Params["bundle_hash"]; got != "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
-		t.Fatalf("bundle_hash = %#v", got)
+	if captured.Params["bundle_hash"] != "bundle-v2:sha256:"+strings.Repeat("a", 64) {
+		t.Fatalf("CLI omitted derived runtime source identity: %#v", captured.Params)
 	}
-	if !strings.Contains(stderr.String(), "UNSUPPORTED_BUNDLE_HASH") {
-		t.Fatalf("stderr = %q, want UNSUPPORTED_BUNDLE_HASH", stderr.String())
+	if !strings.Contains(stderr.String(), "BUNDLE_UNAVAILABLE") {
+		t.Fatalf("stderr = %q, want BUNDLE_UNAVAILABLE", stderr.String())
 	}
 }
 
 func TestEventPublishPayloadEntityIDServerRejectionMapsSupportedCLISurface(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newEventPublishReadyServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
 			t.Errorf("decode request: %v", err)
 		}
@@ -213,7 +233,6 @@ func TestEventPublishPayloadEntityIDServerRejectionMapsSupportedCLISurface(t *te
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
 		"event", "publish", "thing.created",
 		"--payload-json", `{"entity_id":"11111111-1111-4111-8111-111111111111","amount":50}`,
-		"--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		"--idempotency-key", "idem-cli-create-entity-supplied-id",
 	}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 6 {
@@ -226,8 +245,8 @@ func TestEventPublishPayloadEntityIDServerRejectionMapsSupportedCLISurface(t *te
 	if payload["entity_id"] != "11111111-1111-4111-8111-111111111111" || payload["amount"] != float64(50) {
 		t.Fatalf("payload = %#v, want supplied entity_id and amount", payload)
 	}
-	if got := captured.Params["bundle_hash"]; got != "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
-		t.Fatalf("bundle_hash = %#v", got)
+	if captured.Params["bundle_hash"] != "bundle-v2:sha256:"+strings.Repeat("a", 64) {
+		t.Fatalf("CLI omitted derived runtime source identity: %#v", captured.Params)
 	}
 	if got := captured.Params["idempotency_key"]; got != "idem-cli-create-entity-supplied-id" {
 		t.Fatalf("idempotency_key = %#v", got)
@@ -263,7 +282,7 @@ func retiredBundleIdentityFlag() string {
 func TestEventPublishOmitsOptionalParamsWhenNotProvided(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newEventPublishReadyServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
 			t.Errorf("decode request: %v", err)
 		}
@@ -280,8 +299,9 @@ func TestEventPublishOmitsOptionalParamsWhenNotProvided(t *testing.T) {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
 	wantParams := map[string]any{
-		"event_name": "scan.requested",
-		"payload":    map[string]any{},
+		"event_name":  "scan.requested",
+		"payload":     map[string]any{},
+		"bundle_hash": "bundle-v2:sha256:" + strings.Repeat("a", 64),
 	}
 	if !reflect.DeepEqual(captured.Params, wantParams) {
 		t.Fatalf("params = %#v, want %#v", captured.Params, wantParams)
@@ -321,8 +341,8 @@ func TestEventPublishRejectsInvalidInputBeforeRequest(t *testing.T) {
 		{name: "target flow without entity id", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--run-id", "run-1", "--target-flow-instance", "flow/inst-1"}, wantStderr: "--target-flow-instance requires --target-entity-id"},
 		{name: "target entity without flow instance", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--run-id", "run-1", "--target-entity-id", "entity-1"}, wantStderr: "--target-entity-id requires --target-flow-instance"},
 		{name: "target without run id", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--target-flow-instance", "flow/inst-1", "--target-entity-id", "entity-1"}, wantStderr: "target route flags require --run-id"},
-		{name: "blank bundle hash", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--bundle-hash", "  "}, wantStderr: "--bundle-hash must be non-empty"},
-		{name: "invalid bundle hash", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--bundle-hash", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantStderr: "--bundle-hash must be bundle-v2:sha256:<64 lowercase hex>"},
+		{name: "blank retired bundle hash", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--bundle-hash", "  "}, wantStderr: "unknown flag"},
+		{name: "invalid retired bundle hash", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--bundle-hash", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantStderr: "unknown flag"},
 		{name: "retired bundle flag", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", retiredBundleIdentityFlag(), "sha256:BAD"}, wantStderr: "unknown flag"},
 		{name: "blank emitter", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--emitter", "  "}, wantStderr: "--emitter must be non-empty"},
 		{name: "blank idempotency key", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--idempotency-key", "  "}, wantStderr: "--idempotency-key must be non-empty"},
@@ -552,7 +572,7 @@ func TestEventPublishMapsFailureExitCodes(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			setCLIAPITestToken(t, "test-token")
-			server := httptest.NewServer(tc.handler)
+			server := newEventPublishReadyServer(t, tc.handler)
 			defer server.Close()
 
 			var stdout, stderr bytes.Buffer
@@ -649,7 +669,7 @@ func TestEventPublishMalformedResultsFailClosed(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			setCLIAPITestToken(t, "test-token")
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server := newEventPublishReadyServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
 				result := eventPublishTestResult(true)

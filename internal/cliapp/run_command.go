@@ -61,7 +61,6 @@ type runCommandOptions struct {
 	connectURL       string
 	noFollow         bool
 	reattachRunID    string
-	bundleHash       string
 	configPath       string
 	backend          string
 	sourceRoot       string
@@ -188,7 +187,6 @@ func newRunCommand(root InvocationRoot, rootOpts rootCommandOptions) *cobra.Comm
 	cmd.Flags().StringVar(&opts.connectURL, "connect", "", "Existing Swarm API base URL")
 	cmd.Flags().BoolVar(&opts.noFollow, "no-follow", false, "Start through a connected server and print the run id without opening a trace subscription")
 	cmd.Flags().StringVar(&opts.reattachRunID, "reattach", "", "Existing run id to reattach to")
-	cmd.Flags().StringVar(&opts.bundleHash, "bundle-hash", "", "Expected server canonical bundle hash")
 	cmd.Flags().StringVar(&opts.configPath, "config", "", "Path to swarm.yaml config for local foreground startup")
 	cmd.Flags().StringVar(&opts.backend, "backend", "", "LLM backend profile for local foreground startup: anthropic, claude_cli, openai_compatible, or openai_responses")
 	cmd.Flags().StringArrayVar(&opts.dataImports, "data", nil, "Fused immutable data import and pin: name=file.jsonl (repeatable)")
@@ -292,15 +290,6 @@ func (o runCommandOptions) validate() error {
 	if o.mcpPort < 0 || o.mcpPort > 65535 || (o.changedFlags["mcp-port"] && o.mcpPort == 0) {
 		return fmt.Errorf("--mcp-port must be between 1 and 65535")
 	}
-	if o.changedFlags["bundle-hash"] {
-		bundleHash := strings.TrimSpace(o.bundleHash)
-		if bundleHash == "" {
-			return fmt.Errorf("--bundle-hash must be non-empty")
-		}
-		if !cliBundleHashPattern.MatchString(bundleHash) {
-			return fmt.Errorf("--bundle-hash must be bundle-v2:sha256:<64 lowercase hex>")
-		}
-	}
 	if o.changedFlags["platform-spec"] {
 		return fmt.Errorf("--platform-spec is retired; the swarm binary embeds its own platform spec. Use config paths.platform_spec_path only for platform spec development")
 	}
@@ -340,7 +329,7 @@ func (o runCommandOptions) validate() error {
 		if strings.TrimSpace(o.eventName) != "" || strings.TrimSpace(o.payloadPath) != "" || strings.TrimSpace(o.idempotencyKey) != "" || strings.TrimSpace(o.runID) != "" {
 			return fmt.Errorf("--reattach is mutually exclusive with --event, --payload, --idempotency-key, and --run-id")
 		}
-		for _, flag := range []string{"bundle-hash", "config", "backend", "data", "pin", "api-port", "mcp-port"} {
+		for _, flag := range []string{"config", "backend", "data", "pin", "api-port", "mcp-port"} {
 			if o.changedFlags[flag] {
 				return fmt.Errorf("--reattach is mutually exclusive with --%s", flag)
 			}
@@ -652,14 +641,8 @@ func runCommandStart(ctx context.Context, root InvocationRoot, client *cliAPICli
 			return runStartResult{}, fmt.Errorf("run %s event initiation contradicts its permanent request", runID)
 		}
 	}
-	bundleHash := strings.TrimSpace(opts.bundleHash)
-	if bundleHash == "" {
-		bundleHash = strings.TrimSpace(health.Bundle.BundleHash)
-	}
+	bundleHash := strings.TrimSpace(health.Bundle.BundleHash)
 	if binding != nil {
-		if explicit := strings.TrimSpace(opts.bundleHash); explicit != "" && explicit != binding.BundleHash {
-			return runStartResult{}, fmt.Errorf("run %s explicit bundle %s contradicts its permanent request", runID, explicit)
-		}
 		bundleHash = binding.BundleHash
 	}
 	if bundleHash != "" {
@@ -701,9 +684,6 @@ func runCommandStart(ctx context.Context, root InvocationRoot, client *cliAPICli
 		}
 		if recovered == nil {
 			return runStartResult{}, err
-		}
-		if explicit := strings.TrimSpace(opts.bundleHash); explicit != "" && explicit != recovered.BundleHash {
-			return runStartResult{}, fmt.Errorf("run %s explicit bundle %s contradicts its permanent request", runID, explicit)
 		}
 		if bundleHash != recovered.BundleHash {
 			return runStartResult{}, fmt.Errorf("run %s selected bundle changed while its file input was materialized; retry from a fresh invocation", runID)

@@ -72,8 +72,8 @@ func TestCLIOutputModesForLocalConsumers(t *testing.T) {
 			if result.Server == nil || result.Server.Bundle.BundleHash == "" {
 				t.Fatalf("version --server json = %#v, want server identity", result)
 			}
-		} else if got := stdout.String(); got != versionMetadata.BinaryVersion+"\nbundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n" {
-			t.Fatalf("version --server quiet stdout = %q, want binary and bundle hash", got)
+		} else if got := stdout.String(); got != versionMetadata.BinaryVersion+"\nbbbbbbb\n" {
+			t.Fatalf("version --server quiet stdout = %q, want binary and human source label", got)
 		}
 		assertEmptyStderr(t, stderr.String())
 	}

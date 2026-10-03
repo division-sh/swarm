@@ -15,6 +15,7 @@ import (
 )
 
 type View struct {
+	SourceLabel         string                                      `json:"source_label"`
 	WorkflowName        string                                      `json:"workflow_name,omitempty"`
 	WorkflowVersion     string                                      `json:"workflow_version,omitempty"`
 	SourceHash          string                                      `json:"source_hash"`
@@ -350,6 +351,7 @@ func Build(_ context.Context, source semanticview.Source, opts BuildOptions) (Vi
 		WorkflowName:        bundle.WorkflowName(),
 		WorkflowVersion:     bundle.WorkflowVersion(),
 		SourceHash:          bundle.SourceArtifact.BundleHash(),
+		SourceLabel:         bundle.SourceArtifact.HumanLabel(),
 		SourceAuthority:     "projection_only_existing_contract_owners",
 		Root:                root,
 		Flows:               flows,

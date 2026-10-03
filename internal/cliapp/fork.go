@@ -17,25 +17,26 @@ import (
 
 const (
 	runForkMethod       = "run.fork"
-	runForkCommandShape = "swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--allow-source-freeze] [--idempotency-key <key>]"
+	runForkCommandShape = "swarm run fork <source-run-id> [--source <directory>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--allow-source-freeze] [--idempotency-key <key>]"
 )
 
 type forkCommandOptions struct {
 	apiOptions rootCommandOptions
 	output     cliOutputOptions
 
-	bundleHash        string
+	source            string
 	atEvent           string
 	allowSourceFreeze bool
 	idempotencyKey    string
 	pins              []string
 
-	bundleHashSet     bool
+	sourceSet         bool
 	atEventSet        bool
 	idempotencyKeySet bool
 }
 
 type runForkResult struct {
+	SourceLabel        string            `json:"source_label"`
 	Owner              string            `json:"owner"`
 	SourceRunID        string            `json:"source_run_id"`
 	SourceRunStatus    string            `json:"source_run_status"`
@@ -59,7 +60,7 @@ func newForkCommand(opts rootCommandOptions) *cobra.Command {
 		Long:    runForkCommandShape + "\n\nBranch a run to replay it with changed contracts or policy.",
 		Args:    argcount.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			forkOpts.bundleHashSet = cmd.Flags().Changed("bundle-hash")
+			forkOpts.sourceSet = cmd.Flags().Changed("source")
 			forkOpts.atEventSet = cmd.Flags().Changed("at-event")
 			forkOpts.idempotencyKeySet = cmd.Flags().Changed("idempotency-key")
 			if err := forkOpts.output.validate(); err != nil {
@@ -69,7 +70,7 @@ func newForkCommand(opts rootCommandOptions) *cobra.Command {
 		},
 	}
 	argcount.SetDiscoveryHint(cmd, "List run ids with `swarm run list`.")
-	cmd.Flags().StringVar(&forkOpts.bundleHash, "bundle-hash", "", "Target bundle hash for run.fork selection")
+	cmd.Flags().StringVar(&forkOpts.source, "source", "", "Select a target source directory already served into the selected store; defaults to the source run")
 	cmd.Flags().StringVar(&forkOpts.atEvent, "at-event", "", "Fork at this source event id")
 	cmd.Flags().StringArrayVar(&forkOpts.pins, "pin", nil, "Exact data version override: name@vN or name@ResourceVersionID (repeatable)")
 	cmd.Flags().BoolVar(&forkOpts.allowSourceFreeze, "allow-source-freeze", false, "Allow permanent source freeze if it has not advanced beyond the fork point; a frozen source cannot resume. An advanced source stays independently live. Omit and decline the prompt to cancel")
@@ -90,9 +91,17 @@ func runForkCommand(ctx context.Context, out, errOut io.Writer, opts forkCommand
 		return returnCLIAPIError(errOut, err, runForkAPIErrorClassifier())
 	}
 	if len(opts.pins) > 0 {
-		bundleHash, err := selectedDataBundleIdentity(ctx, client, opts.bundleHash)
-		if err != nil {
-			return returnCLIAPIError(errOut, err, dataAPIErrorClassifier())
+		bundleHash, _ := params["bundle_hash"].(string)
+		if bundleHash == "" {
+			sourceRunID, _ := params["source_run_id"].(string)
+			run, err := runCommandGet(ctx, client, sourceRunID)
+			if err != nil {
+				return returnCLIAPIError(errOut, err, runForkAPIErrorClassifier())
+			}
+			if !cliBundleHashPattern.MatchString(run.BundleHash) {
+				return returnCLIValidationError(errOut, fmt.Errorf("source run has no exact source identity"))
+			}
+			bundleHash = run.BundleHash
 		}
 		declarations, err := listDataDeclarations(ctx, client, bundleHash)
 		if err != nil {
@@ -159,15 +168,12 @@ func (opts forkCommandOptions) params(rawSourceRunID string) (map[string]any, er
 		params["allow_source_freeze"] = true
 	}
 
-	bundleHash, err := optionalNonEmptyFlag("--bundle-hash", opts.bundleHash, opts.bundleHashSet)
-	if err != nil {
-		return nil, err
-	}
-	if bundleHash != "" {
-		if _, err := validateBundleHashArg("--bundle-hash", bundleHash); err != nil {
+	if opts.sourceSet {
+		sourceHash, err := admitCLIIdentitySource(opts.apiOptions.invocationRoot, opts.source)
+		if err != nil {
 			return nil, err
 		}
-		params["bundle_hash"] = bundleHash
+		params["bundle_hash"] = sourceHash
 	}
 
 	forkEventID, err := optionalNonEmptyFlag("--at-event", opts.atEvent, opts.atEventSet)
@@ -318,7 +324,7 @@ func writeRunForkHuman(w io.Writer, result runForkResult) {
 	}
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "source_status=%s source_frozen=%t\n", formatCLIHumanCode(cliHumanCodeRunStatus, result.SourceRunStatus), *result.SourceFrozen)
-	fmt.Fprintf(w, "status=%s bundle_hash=%s executed_event_count=%d\n", formatCLIHumanCode(cliHumanCodeRunStatus, result.ForkRunStatus), result.BundleHash, result.ExecutedEventCount)
+	fmt.Fprintf(w, "status=%s source=%s executed_event_count=%d\n", formatCLIHumanCode(cliHumanCodeRunStatus, result.ForkRunStatus), humanSourceIdentity(result.BundleHash, result.SourceLabel), result.ExecutedEventCount)
 	fmt.Fprintf(w, "data_pins=%d\n", len(result.DataPins))
 	fmt.Fprintf(w, "owner=%s\n", result.Owner)
 }

@@ -114,6 +114,7 @@ func TestStatusProjectsCanonicalBlockedFanOutEvidence(t *testing.T) {
 		t.Fatal("construct typed blocked failure")
 	}
 	result := validDiagnosticRunDiagnosis(runID, "stalled", "delivery_lifecycle", "no_active_deliveries", []any{})
+	result["run"].(map[string]any)["bundle_hash"] = "bundle-v2:sha256:" + strings.Repeat("a", 64)
 	summary := fanoutobligation.RunSummary{
 		RunID: runID, Intents: 2, Blocked: 2, Cardinality: 6, Cursor: 1, Owed: 5, Committed: 1, Settled: 1,
 		MinNextChunk: 4, MaxNextChunk: 4,

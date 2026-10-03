@@ -92,6 +92,8 @@ func TestDataFileOperandsUseInvocationRoot(t *testing.T) {
 			t.Fatal(err)
 		}
 		switch req.Method {
+		case "health.check":
+			writeJSONRPCResult(t, w, req.ID, runCommandHealthResult())
 		case dataShowMethod:
 			writeJSONRPCResult(t, w, req.ID, map[string]any{
 				"items": []durabledata.DeclarationSummary{summary}, "item_count": 1, "encoded_items_bytes": 1,
@@ -134,7 +136,7 @@ func TestDataFileOperandsUseInvocationRoot(t *testing.T) {
 
 	var out, errOut bytes.Buffer
 	err = runDataImportCommand(context.Background(), &out, &errOut, dataImportOptions{
-		dataCommandOptions: dataCommandOptions{apiOptions: rootCommandOptions{invocationRoot: root, apiServer: server.URL, httpClient: server.Client()}, bundleHash: bundleHash},
+		dataCommandOptions: dataCommandOptions{apiOptions: rootCommandOptions{invocationRoot: root, apiServer: server.URL, httpClient: server.Client()}},
 		sourceInvocationID: "00000000-0000-4000-8000-000000000001",
 		expectedHead:       "absent",
 	}, "records", "rows.jsonl")

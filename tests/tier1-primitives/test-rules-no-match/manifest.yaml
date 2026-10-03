@@ -1,4 +1,3 @@
 name: test-rules-no-match
 version: 1.0.0
-description: Rules handler where no predicate matches and the explicit fallback emits nothing.
 platform_version: ">=0.7.0 <0.8.0"

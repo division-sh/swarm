@@ -1,4 +1,3 @@
 name: test-record-evidence
 version: 1.0.0
-description: Handler appends a typed finding through supported contained-state writes.
 platform_version: ">=0.7.0 <0.8.0"

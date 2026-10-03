@@ -542,6 +542,7 @@ func readOnlyRuntimeProbeOptions(t *testing.T) testOperatorCapabilities {
 			headers: map[string]operatorread.RunHeader{
 				runID: {
 					RunID:       runID,
+					BundleHash:  readOnlyProbeBundleHash,
 					Status:      "running",
 					Origin:      mustEventRunOrigin(t, eventID, "scan.requested"),
 					EntityCount: 1,

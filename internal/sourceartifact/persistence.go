@@ -1,12 +1,32 @@
 package sourceartifact
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
 )
 
 var ErrNotFound = errors.New("source artifact not found")
+
+type Reader interface {
+	GetSourceArtifact(context.Context, string) (Persisted, error)
+}
+
+func LoadHumanLabel(ctx context.Context, reader Reader, hash string) (string, error) {
+	row, err := reader.GetSourceArtifact(ctx, hash)
+	if err != nil {
+		return "", err
+	}
+	if row.BundleHash != hash {
+		return "", fmt.Errorf("source presentation readback contradicts exact requested identity")
+	}
+	artifact, err := row.Decode()
+	if err != nil {
+		return "", err
+	}
+	return artifact.HumanLabel(), nil
+}
 
 type Persisted struct {
 	BundleHash  string

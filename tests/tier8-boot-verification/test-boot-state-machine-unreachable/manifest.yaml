@@ -1,6 +1,3 @@
 name: test-boot-state-machine-unreachable
 version: 1.0.0
-description: 'Boot verification: declared workflow stage is unreachable from the authored initial stage and lifecycle paths. Platform must reject it as hard-invalid on the supported verify path.
-
-'
 platform_version: ">=0.7.0 <0.8.0"
