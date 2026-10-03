@@ -45,7 +45,7 @@ func TestDeploymentSourceTwoPinnedFeedsSettleIndependentlyBothStores(t *testing.
 			}
 
 			runID := uuid.NewString()
-			args := []string{"run", "start", "--connect", server.URL, "--bundle-hash", f.runtime.sourceArtifactFact.BundleHash(), "--run-id", runID}
+			args := []string{"run", "start", "--connect", server.URL, "--run-id", runID}
 			for _, item := range imports {
 				args = append(args, "--pin", item.declaration+"@"+versions[item.declaration])
 			}

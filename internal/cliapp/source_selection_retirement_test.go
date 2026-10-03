@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -64,6 +66,25 @@ func Test2376NoAuthoredHashSelectorInCommandTree(t *testing.T) {
 		}
 	}
 	walk(newRootCommandAtInvocation(context.Background(), root, io.Discard, io.Discard, defaultRootCommandOptions()))
+}
+
+func Test2376OperatorJourneyFixturesDoNotRestoreRetiredSelectors(t *testing.T) {
+	for _, file := range []string{
+		"fan_out_resource_journey_test.go",
+		"fan_out_resource_multi_pin_test.go",
+		"data_text_file_journey_2456_test.go",
+		"data_text_file_support_2456_test.go",
+	} {
+		t.Run(file, func(t *testing.T) {
+			source, err := os.ReadFile(filepath.Join(RepoRoot(), "internal", "runtime", "conformance", file))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(source), `"--bundle-hash"`) {
+				t.Fatal("operator journey must consume selected-server or permanent replay identity, not an authored hash flag")
+			}
+		})
+	}
 }
 
 func Test2376ChannelStatusRequiresPairedSourceAndTargetBeforeIO(t *testing.T) {

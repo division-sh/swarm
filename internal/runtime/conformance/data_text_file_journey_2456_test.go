@@ -3,6 +3,7 @@ package conformance
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -83,7 +84,7 @@ func textFileVersion2456(t *testing.T, f *deploymentResourceFixture, rows []map[
 
 func startTextFileRun2456(t *testing.T, f *deploymentResourceFixture, server *httptest.Server, runID string, operands ...string) string {
 	t.Helper()
-	args := []string{"run", "start", "--connect", server.URL, "--bundle-hash", f.runtime.sourceArtifactFact.BundleHash(), "--run-id", runID}
+	args := []string{"run", "start", "--connect", server.URL, "--run-id", runID}
 	args = append(args, operands...)
 	args = append(args, "--no-follow")
 	var stdout, stderr bytes.Buffer
@@ -230,7 +231,7 @@ func TestDataTextFile2456KeylessOperatorRouteRestartReplayBothStores(t *testing.
 				t.Fatalf("external deployment data mutation changed bundle hash: %s -> %s", before, after)
 			}
 			var replayOut, replayErr bytes.Buffer
-			replayArgs := []string{"run", "start", "--connect", server.URL, "--bundle-hash", before, "--run-id", runID, "--data", "root.ready.body=" + path, "--no-follow"}
+			replayArgs := []string{"run", "start", "--connect", server.URL, "--run-id", runID, "--data", "root.ready.body=" + path, "--no-follow"}
 			if code := cliapp.Execute(f.ctx, replayArgs, &replayOut, &replayErr, nil, nil); code == 0 {
 				t.Fatalf("changed file silently replayed old operation: stdout=%s stderr=%s", replayOut.String(), replayErr.String())
 			}
@@ -445,7 +446,7 @@ func TestDataTextFile2456MultiFieldAndLimitsBothStores(t *testing.T) {
 			if err := os.WriteFile(tooLarge, bytes.Repeat([]byte("x"), durabledata.MaxDecodedImportBytes+1), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			args := []string{"run", "start", "--connect", server.URL, "--bundle-hash", f.runtime.sourceArtifactFact.BundleHash(), "--run-id", uuid.NewString(), "--data", "root.ready.body=" + oversizeDir, "--no-follow"}
+			args := []string{"run", "start", "--connect", server.URL, "--run-id", uuid.NewString(), "--data", "root.ready.body=" + oversizeDir, "--no-follow"}
 			var stdout, stderr bytes.Buffer
 			if code := cliapp.Execute(f.ctx, args, &stdout, &stderr, nil, nil); code == 0 || !strings.Contains(stderr.String(), fmt.Sprint(durabledata.MaxDecodedImportBytes)) {
 				t.Fatalf("oversize file escaped decoded import limit: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
@@ -458,7 +459,7 @@ func TestDataTextFile2456MultiFieldAndLimitsBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			largeRowRunID := uuid.NewString()
-			args = []string{"run", "start", "--connect", server.URL, "--bundle-hash", f.runtime.sourceArtifactFact.BundleHash(), "--run-id", largeRowRunID, "--data", "root.ready.body=" + largeRowDir, "--no-follow"}
+			args = []string{"run", "start", "--connect", server.URL, "--run-id", largeRowRunID, "--data", "root.ready.body=" + largeRowDir, "--no-follow"}
 			stdout.Reset()
 			stderr.Reset()
 			if code := cliapp.Execute(f.ctx, args, &stdout, &stderr, nil, nil); code == 0 {
@@ -804,7 +805,7 @@ func TestFileRow2456FreshProcessBindingAndExactWireBothStores(t *testing.T) {
 			rows := []map[string]any{{"body": body}}
 			original := textFileVersion2456(t, f, rows)
 			runID := uuid.NewString()
-			args := []string{"run", "start", "--connect", proxy.URL, "--bundle-hash", f.runtime.sourceArtifactFact.BundleHash(), "--run-id", runID, "--data", "root.ready.body=" + path, "--no-follow"}
+			args := []string{"run", "start", "--connect", proxy.URL, "--run-id", runID, "--data", "root.ready.body=" + path, "--no-follow"}
 			lost := textFileSwarmProcess2456(f.ctx, binary, repo, args...)
 			if lost.err == nil {
 				t.Fatalf("first CLI received a response that the proxy was required to drop: stdout=%s stderr=%s", lost.stdout, lost.stderr)
@@ -871,7 +872,7 @@ func TestFileRow2456FreshProcessBindingAndExactWireBothStores(t *testing.T) {
 			}
 			newRunID := uuid.NewString()
 			assertTextFileProcessRun2456(t, textFileSwarmProcess2456(f.ctx, binary, repo,
-				"run", "start", "--connect", server.URL, "--bundle-hash", binding.BundleHash,
+				"run", "start", "--connect", server.URL,
 				"--run-id", newRunID, "--data", "root.ready.body="+path, "--no-follow"), newRunID)
 			assertTextFileRun2456(t, f, server, newRunID, original, rows)
 			if newRunID == runID || textFileRequestBinding2456(t, server, newRunID).RequestHash == binding.RequestHash {
@@ -973,10 +974,31 @@ func TestFileRow2456DefaultBundleAndHeadPinReplayBothStores(t *testing.T) {
 				t.Fatalf("default switch unexpectedly moved resource head: import=%+v pin=%+v", beforeImport, beforePin)
 			}
 			importArgs[3], pinArgs[3] = server.URL, server.URL
-			conflictingBundleArgs := append([]string(nil), importArgs...)
-			conflictingBundleArgs = append(conflictingBundleArgs, "--bundle-hash", fact.BundleHash())
-			if conflict := textFileSwarmProcess2456(f.ctx, binary, repo, conflictingBundleArgs...); conflict.err == nil {
-				t.Fatalf("explicit conflicting bundle replay succeeded: stdout=%s stderr=%s", conflict.stdout, conflict.stderr)
+			importBinding := textFileRequestBinding2456(t, server, importRunID)
+			input, err := json.Marshal(rows[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			originalImport := importBinding.Imports[0]
+			conflict := textFileRPCParams2456(t, server, "run.start", map[string]any{
+				"run_id": importRunID, "bundle_hash": fact.BundleHash(),
+				"data": map[string]any{"imports": []any{map[string]any{
+					"source_invocation_id": originalImport.SourceInvocationID,
+					"declaration":          originalImport.Declaration, "expected_head": originalImport.ExpectedHead,
+					"input": map[string]any{"format": "jsonl", "content_base64": base64.StdEncoding.EncodeToString(append(input, '\n'))},
+				}}, "pins": []any{}},
+			})
+			var mismatch struct {
+				Data struct {
+					Code    string `json:"code"`
+					Details struct {
+						RequestedHash string `json:"requested_hash"`
+						RunBundleHash string `json:"run_bundle_hash"`
+					} `json:"details"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(conflict.Error, &mismatch); err != nil || mismatch.Data.Code != "BUNDLE_MISMATCH" || mismatch.Data.Details.RequestedHash != fact.BundleHash() || mismatch.Data.Details.RunBundleHash != originalBundle {
+				t.Fatalf("explicit conflicting bundle replay did not reach exact-source admission: result=%s error=%s", conflict.Result, conflict.Error)
 			}
 			if after := textFileSnapshot2456(t, f, importRunID); after != beforeImport {
 				t.Fatalf("explicit conflicting bundle mutated durable state: before=%+v after=%+v", beforeImport, after)
@@ -1199,7 +1221,7 @@ func TestDataTextFile2456ConcurrentFirstAttemptBothStores(t *testing.T) {
 			version := textFileVersion2456(t, f, rows)
 			runID := uuid.NewString()
 			proxy, barrier := textFileAbsentBindingBarrier2456(t, server, runID)
-			args := []string{"run", "start", "--connect", proxy.URL, "--bundle-hash", f.runtime.sourceArtifactFact.BundleHash(), "--run-id", runID, "--data", "root.ready.body=" + path, "--no-follow"}
+			args := []string{"run", "start", "--connect", proxy.URL, "--run-id", runID, "--data", "root.ready.body=" + path, "--no-follow"}
 			results := make(chan textFileProcessResult2456, 2)
 			start := make(chan struct{})
 			for i := 0; i < 2; i++ {
@@ -1256,7 +1278,7 @@ func rejectTextFileGrammar2456(t *testing.T, f *deploymentResourceFixture, serve
 		t.Fatalf("hostile grammar fixture is not fresh: %+v", before)
 	}
 	runID := uuid.NewString()
-	args := []string{"run", "start", "--connect", server.URL, "--bundle-hash", f.runtime.sourceArtifactFact.BundleHash(), "--run-id", runID}
+	args := []string{"run", "start", "--connect", server.URL, "--run-id", runID}
 	args = append(args, operands...)
 	args = append(args, "--no-follow")
 	var stdout, stderr bytes.Buffer

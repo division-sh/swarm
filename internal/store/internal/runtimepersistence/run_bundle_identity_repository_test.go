@@ -279,7 +279,7 @@ func TestRepositorySourceArtifactOwnershipHandoffsRequireExactOpaqueFacts(t *tes
 			path: "platform-spec.yaml",
 			required: []string{
 				"Local durable run/serve persists or reconciles the exact logical blob before publishing a runtime or run that references its hash",
-				"Persisted boot, recovery, replay, and fork decode the selected-store blob and compile only the reconstructed artifact",
+				"Internal standing recovery, replay, reset and fork decode the selected-store blob and compile only the reconstructed artifact",
 			},
 		},
 		{
