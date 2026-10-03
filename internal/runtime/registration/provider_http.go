@@ -22,7 +22,8 @@ import (
 const providerRegistrationSource = "provider_registration"
 
 type HTTPExecutor struct {
-	Client *http.Client
+	Client    *http.Client
+	Preflight func(context.Context) error
 }
 
 type ProviderCredentialRejectedError struct {
@@ -107,6 +108,11 @@ func (e HTTPExecutor) applyWithReadback(ctx context.Context, toolID string, tool
 	if err != nil {
 		return ApplyResult{}, err
 	}
+	if e.Preflight != nil {
+		if err := e.Preflight(ctx); err != nil {
+			return ApplyResult{}, err
+		}
+	}
 	handle, err := begin(ctx, fingerprint, lineage)
 	if err != nil {
 		return ApplyResult{}, err
@@ -185,6 +191,11 @@ func (e HTTPExecutor) deliverChannelWrite(ctx context.Context, toolID string, to
 	fingerprint, err := semanticProviderRequest(toolID, tool, input)
 	if err != nil {
 		return DeliveryResult{}, err
+	}
+	if e.Preflight != nil {
+		if err := e.Preflight(ctx); err != nil {
+			return DeliveryResult{}, err
+		}
 	}
 	handle, err := begin(ctx, fingerprint, lineage)
 	if err != nil {
@@ -364,6 +375,11 @@ func prepareProviderRequest(toolID string, tool runtimecontracts.ToolSchemaEntry
 }
 
 func (e HTTPExecutor) executeProviderRequest(ctx context.Context, prepared runtimecontracts.PreparedToolHTTPRequest) (*http.Response, []byte, error) {
+	if e.Preflight != nil {
+		if err := e.Preflight(ctx); err != nil {
+			return nil, nil, err
+		}
+	}
 	requestCtx, cancel := context.WithTimeout(ctx, prepared.Timeout())
 	defer cancel()
 	request, err := http.NewRequestWithContext(requestCtx, prepared.Method(), prepared.URL(), bytes.NewReader(prepared.Body()))
@@ -393,6 +409,11 @@ func (e HTTPExecutor) executeProviderApply(ctx context.Context, prepared runtime
 	}
 	request.Header = prepared.Headers()
 	client := e.providerClient(prepared.Timeout())
+	if e.Preflight != nil {
+		if err := e.Preflight(ctx); err != nil {
+			return nil, nil, false, nil, err
+		}
+	}
 	launchErr := handle.MarkLaunched(ctx)
 	if launchErr != nil {
 		if !runtimeeffects.CommittedMutationPhase(launchErr, runtimeeffects.MutationLaunch, handle.Attempt()) {
@@ -400,6 +421,11 @@ func (e HTTPExecutor) executeProviderApply(ctx context.Context, prepared runtime
 		}
 		if err := committedLaunchDispatchGate(ctx); err != nil {
 			return nil, nil, false, launchErr, err
+		}
+	}
+	if e.Preflight != nil {
+		if err := e.Preflight(ctx); err != nil {
+			return nil, nil, false, errors.Join(launchErr, err), err
 		}
 	}
 	response, err := client.Do(request)

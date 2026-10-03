@@ -28,6 +28,68 @@ func TestOwnerPublishesWholeExecutableSnapshot(t *testing.T) {
 	presentation.Release()
 }
 
+func TestAdmittedReplacementRechecksAfterDrainAndNeverRevivesStalePredecessor(t *testing.T) {
+	for _, cancel := range []bool{false, true} {
+		t.Run(map[bool]string{false: "changed_after_drain", true: "cancelled_while_draining"}[cancel], func(t *testing.T) {
+			predecessor := testEmptyPublication(t)
+			owner, err := NewOwner(predecessor)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lease, _ := owner.AcquirePresentation()
+			successor := testEmptyPublication(t)
+			ctx, stop := context.WithCancel(context.Background())
+			defer stop()
+			observed := make(chan struct{})
+			stale := false
+			checks := 0
+			admit := func(context.Context, channelonboarding.ChannelActivationPublication) error {
+				checks++
+				if checks == 1 {
+					close(observed)
+				}
+				if stale {
+					return errors.New("admission changed")
+				}
+				return nil
+			}
+			done := make(chan error, 1)
+			go func() { done <- owner.ReplaceAdmittedContext(ctx, successor, admit) }()
+			<-observed
+			owner.mu.Lock()
+			for owner.accepting {
+				owner.mu.Unlock()
+				time.Sleep(time.Millisecond)
+				owner.mu.Lock()
+			}
+			stale = true
+			owner.mu.Unlock()
+			if cancel {
+				stop()
+			}
+			lease.Release()
+			if err := <-done; err == nil {
+				t.Fatal("stale successor was published")
+			}
+			if got, available := owner.AcquirePresentation(); available {
+				got.Release()
+				t.Fatal("failed replacement revived stale executable authority")
+			}
+			if checks < 2 {
+				t.Fatal("admission was not rechecked at the mutation boundary")
+			}
+			if err := owner.ReplaceAdmittedContext(context.Background(), testEmptyPublication(t), func(context.Context, channelonboarding.ChannelActivationPublication) error { return nil }); err != nil {
+				t.Fatal(err)
+			}
+			if current, ok := owner.AcquirePresentation(); !ok {
+				t.Fatal("fresh admitted recovery stayed fenced")
+			} else {
+				current.Release()
+			}
+		})
+	}
+}
+
 func TestOwnerRejectsDeclaredOnlyPublication(t *testing.T) {
 	publication, err := channelonboarding.NewDeclaredOnlyChannelActivationPublication(nil)
 	if err != nil {

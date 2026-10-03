@@ -84,7 +84,7 @@ func (transport *supportedTelegramRegistrationTransport) applies() int {
 
 func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *testing.T) {
 	sourceRoot := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
-	_, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), sourceRoot, cliapp.ResolvePath(repoRootForTest(), defaultPlatformSpecPath))
+	module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), sourceRoot, cliapp.ResolvePath(repoRootForTest(), defaultPlatformSpecPath))
 	if err != nil {
 		t.Fatalf("load standing fixture: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
 	}
-	for key, value := range map[string]string{"bot": "telegram-bot-token", "webhook_signing.telegram": "telegram-secret-v1"} {
+	for key, value := range map[string]string{"bot": "telegram-bot-token", "webhook_signing.telegram": "telegram-secret-v1", "channel.generated.signing": "generated-secret"} {
 		if err := credentialStore.Set(context.Background(), key, value); err != nil {
 			t.Fatalf("Set(%s): %v", key, err)
 		}
@@ -144,7 +144,7 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 	manager, err := runtimepkg.NewRuntimeContextManager(nil, completeServeTestPackContext(t, runtimepkg.BundleContext{
 		SourceArtifactFact: mustServeTestEphemeralSourceArtifactFact(bundleHash), Source: source,
 		Runtime: &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus, InboundGateway: gateway, ChannelActivations: activationOwner,
-			Options: runtimepkg.RuntimeOptions{RuntimeInstanceID: uuid.NewString()}}, WorkOwner: workOwner,
+			Options: runtimepkg.RuntimeOptions{RuntimeInstanceID: uuid.NewString(), ProviderCredentials: credentialStore, WorkflowModule: module, ProviderTriggerCatalog: catalog}}, WorkOwner: workOwner,
 		StandingTargets: []runtimepkg.StandingTarget{target}, ProviderTriggerGeneration: catalog.Generation(), InstalledTriggerSubjects: installed,
 	}))
 	if err != nil {
@@ -167,19 +167,27 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 		t.Fatal(err)
 	}
 	bundleHash = loadedContext.SourceArtifactFact.BundleHash()
+	credentialSnapshots, err := runtimecredentials.NewSnapshotOwner(credentialStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admittedCredentials := []channelonboarding.CredentialAdmission{}
+	for role, key := range learnedBinding.CredentialStoreKeys() {
+		seal, err := credentialSnapshots.SealCurrentValue(context.Background(), key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		admittedCredentials = append(admittedCredentials, channelonboarding.CredentialAdmission{Role: role, StoreKey: key, Kind: channelonboarding.CredentialAdmissionObserved, ValueSeal: seal.Seal})
+	}
 	learnedPublication, err := channelonboarding.NewChannelActivationPublication([]channelonboarding.CompiledActivation{{
-		Source: channelonboarding.ActivationSourceLearned, OnboardingOperationID: uuid.NewString(), OnboardingRevision: 1,
+		Source: channelonboarding.ActivationSourceDeclared,
 		Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{
 			BundleHash: bundleHash, BundleIdentity: "telegram@1.0.0#activation-readiness",
 			PackInventoryGeneration: loadedContext.PackInventoryDigest, RuntimeInstanceID: loadedContext.RuntimeInstanceID,
 			ContextPublicationGeneration: loadedContext.PublicationGeneration,
 			PlanGeneration:               activationPlanGeneration, TargetGeneration: 1,
 		},
-		ActivationRevision: 1, Plan: learnedBinding,
-		CredentialAdmissions: []channelonboarding.CredentialAdmission{
-			{Role: "telegram_bot_token", StoreKey: "bot", Kind: channelonboarding.CredentialAdmissionObserved, ValueSeal: serveTestValueSeal('a')},
-			{Role: "webhook_signing_secret", StoreKey: "channel.generated.signing", Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "signing-write", ValueSeal: serveTestValueSeal('b')},
-		},
+		Plan: learnedBinding, CredentialAdmissions: admittedCredentials,
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -189,10 +197,6 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 	}
 
 	registration := loadSupportedTelegramRegistration(t)
-	credentialSnapshots, err := runtimecredentials.NewSnapshotOwner(credentialStore)
-	if err != nil {
-		t.Fatalf("NewSnapshotOwner: %v", err)
-	}
 	assertIngressStatus := func(want packs.SubjectStatus) {
 		t.Helper()
 		subjects, projectionErr := manager.EvaluatedCapabilitySubjects(context.Background(), credentialSnapshots)
@@ -208,10 +212,6 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 			}
 		}
 		t.Fatal("effective ingress subject is missing")
-	}
-	assertIngressStatus(packs.StatusNotReady)
-	if err := credentialStore.Set(context.Background(), "channel.generated.signing", "generated-secret"); err != nil {
-		t.Fatal(err)
 	}
 	assertIngressStatus(packs.StatusReady)
 	effectsStore := &supportedRegistrationEffectStore{Harness: effecttest.New()}
@@ -231,6 +231,7 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 		HTTP:    runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: transport}},
 		Posture: executionposture.Live, RuntimeInstanceID: uuid.NewString(),
 		StartupAuthority: func() (runtimestartupownership.GrantEvidence, error) { return startup, nil },
+		SelectionCurrent: func(context.Context, runtimepublicingress.RegistrationPair, bool) (bool, error) { return true, nil },
 		Readiness:        readiness,
 	})
 	if err != nil {
@@ -257,6 +258,16 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 			Generation: target.Generation, PublicationSequence: target.PublicationSequence,
 			AdmissionPlanGeneration: target.AdmissionPlan.Generation(), SigningCredentialKey: target.SigningSecret,
 		},
+	}
+	pair.CredentialKeys[registration.SigningCredential()] = target.SigningSecret
+	for role, key := range pair.CredentialKeys {
+		evidence, err := credentialSnapshots.SealCurrentValue(context.Background(), key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pair.CredentialAdmissions = append(pair.CredentialAdmissions, channelonboarding.CredentialAdmission{
+			Role: role, StoreKey: key, Kind: channelonboarding.CredentialAdmissionObserved, ValueSeal: evidence.Seal,
+		})
 	}
 	now := time.Now().UTC()
 	exposure := runtimepublicingress.Generation{ID: uuid.NewString(), Mode: runtimepublicingress.ModeExternalOrigin, PublicOrigin: "https://hooks.example.test", ListenAddress: "127.0.0.1:8443", CreatedAt: now}
@@ -287,8 +298,21 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 	if staleCallback.Code != http.StatusNotFound {
 		t.Fatalf("stale callback after rotation status=%d, want 404", staleCallback.Code)
 	}
+	if err := controller.Reconcile(context.Background(), exposure, []runtimepublicingress.RegistrationPair{pair}); err == nil {
+		t.Fatal("unadmitted signing rotation authorized registration")
+	}
+	seal, err := credentialSnapshots.SealCurrentValue(context.Background(), pair.Target.SigningCredentialKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range pair.CredentialAdmissions {
+		if pair.CredentialAdmissions[i].StoreKey == pair.Target.SigningCredentialKey {
+			pair.CredentialAdmissions[i].ValueSeal = seal.Seal
+		}
+	}
+	pair.OnboardingRevision++
 	if err := controller.Reconcile(context.Background(), exposure, []runtimepublicingress.RegistrationPair{pair}); err != nil {
-		t.Fatalf("rotated registration reconcile: %v", err)
+		t.Fatal(err)
 	}
 	rotated := readiness.Snapshot(time.Now().UTC())
 	if !rotated.PublicIngressReady || rotated.Registrations[0].CallbackURL == initial.Registrations[0].CallbackURL || transport.applies() != 2 {

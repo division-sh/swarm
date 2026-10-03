@@ -11401,11 +11401,15 @@ tool_model:
         registration success. Exact current callback URL settles the same retained operation and attempt by authoritative
         readback. Mismatch or unavailable readback terminalizes that same attempt as outcome_uncertain, discards the live
         process handle, retains immutable operation/attempt/base/failure evidence, and never resends under the same semantic
-        base. A settlement error retains that original operation and attempt until exact settlement or outcome-uncertain
+        base. Withdrawal retains pending-settlement and uncertain intent/attempt/physical-slot evidence without an
+        executable callback route. A changed candidate or semantic base cannot replace an unresolved outcome in that
+        physical slot; absence from the executable set is not proof that the slot is free. A settlement error retains
+        that original operation and attempt until exact settlement or outcome-uncertain
         terminalization durably succeeds. Proven pre-launch failure terminalizes the attempt
         with launch_rejected evidence and permits a fresh attempt under the same operation identity; an authorization whose
         commit acknowledgment was lost resumes the same authorized attempt. No provider dispatch occurs before the durable
-        launch marker is known. Process restart or changed semantic intent creates a new token and operation; replay and
+        launch marker is known. Process restart or a changed semantic intent with no unresolved selected-slot outcome
+        creates a new token and operation; replay and
         recovery never redispatch an old launched operation.
       phases: >
         The immutable process snapshot separates last_verified intent from the current attempt and publishes exactly one
@@ -12892,6 +12896,15 @@ flow_model:
         owners reconcile the exact responsibility while affected executable routes, retention, registration, renewal,
         native effects and replay remain unavailable. Clearing old admissions does not permit default-key fallback or
         replacement-value adoption. Only explicit authorized fresh admission and the required ceremony restore execution.
+        Retained activation identity/history is not executable authority: the complete channel publication excludes
+        stale learned admissions before registration selection, while an exact eligible pending operation may retain its
+        existing prebinding ceremony. Healthy predecessors remain selected until the existing successful handoff;
+        preparing, incomplete and rejected candidates never gain priority. Standing planning, executable publication and
+        registration consume the credential owner's exact seal/receipt observation; every required role is checked.
+        Selection carries exact source/context, operation/activation revision and admission evidence, revalidated at
+        mutation, post-drain publication, provider read/apply and settlement boundaries. Cancellation or failed replacement
+        cannot reopen stale predecessor admission. Ordinary writes, renewal and diagnostic reads never reseal stale
+        learned evidence or re-admit a changed declaration credential.
         Completed onboarding responsibilities and their credential evidence remain immutable; stale completed activations
         use the existing explicit reconnect owner and a fresh ceremony rather than reopening terminal operations.
         The runtime context manager admits exact source/runtime/publication/declaration ownership and cross-context alias

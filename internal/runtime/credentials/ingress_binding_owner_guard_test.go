@@ -34,7 +34,7 @@ func TestIngressSigningUsabilityHasNoSecondProductionInterpreter(t *testing.T) {
 			t.Errorf("public registration retains target-signing interpreter %q", forbidden)
 		}
 	}
-	if !strings.Contains(registration, "ObserveSecretBinding(ctx, signingKey)") {
+	if !strings.Contains(registration, "ObserveAdmittedActivationCredential(") {
 		t.Error("public registration does not consume the canonical secret-binding owner")
 	}
 
@@ -70,6 +70,27 @@ func TestIngressSigningUsabilityHasNoSecondProductionInterpreter(t *testing.T) {
 			if strings.Contains(body, forbidden) {
 				t.Errorf("%s retains legacy credential owner %q", path, forbidden)
 			}
+		}
+	}
+	for _, path := range []string{
+		"internal/runtime/standing_ingress_credentials.go",
+		"internal/runtime/channel_activation_admission.go",
+		"internal/runtime/pipeline/coordinator.go",
+		"internal/runtime/publicingress/registration.go",
+		"internal/serveapp/channel_onboarding.go",
+		"internal/serveapp/channel_delivery.go",
+	} {
+		body := read(path)
+		if !strings.Contains(body, "ObserveAdmittedActivationCredential(") {
+			t.Errorf("%s bypasses exact credential admission ownership", path)
+		}
+		if strings.Contains(body, "ObserveValueMatchingSeal(") {
+			t.Errorf("%s retains a receipt-blind learned credential interpreter", path)
+		}
+	}
+	for _, path := range []string{"internal/serveapp/channel_native.go", "internal/serveapp/channel_delivery.go", "internal/serveapp/channel_onboarding.go"} {
+		if strings.Contains(read(path), "runtimeregistration.HTTPExecutor{Client: d.httpClient}") {
+			t.Errorf("%s bypasses channel provider dispatch preflight", path)
 		}
 	}
 }
