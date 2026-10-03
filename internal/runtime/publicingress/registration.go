@@ -49,11 +49,13 @@ type RegistrationPair struct {
 	ActivationSource            channelonboarding.ActivationSource
 	OnboardingOperationID       string
 	OnboardingRevision          int64
+	ActivationRevision          int64
 	OnboardingCoordinate        channelonboarding.ChannelRuntimeContextCoordinate
 	ChannelActivationGeneration channelonboarding.ChannelActivationGeneration
 	PrebindingOperationID       string
 	Registration                packs.CompiledChannelRegistration
 	CredentialKeys              map[string]string
+	CredentialAdmissions        []channelonboarding.CredentialAdmission
 	Target                      RegistrationTarget
 }
 
@@ -64,6 +66,7 @@ type RegistrationControllerOptions struct {
 	Posture           executionposture.Posture
 	RuntimeInstanceID string
 	StartupAuthority  func() (runtimestartupownership.GrantEvidence, error)
+	SelectionCurrent  func(context.Context, RegistrationPair, bool) (bool, error)
 	Readiness         *ReadinessOwner
 	Now               func() time.Time
 }
@@ -105,6 +108,28 @@ type registrationState struct {
 	Terminal        *registrationIntent
 	Phase           registrationPhase
 	Failure         string
+}
+
+func (s registrationState) unsettled() bool {
+	return s.Phase == registrationPhasePendingSettlement || s.Phase == registrationPhaseOutcomeUncertain
+}
+
+func (c *ProviderRegistrationController) preserveUnsettledSelection(candidates []admittedPair) error {
+	for _, prior := range c.snapshot.capture().registrations {
+		if !prior.unsettled() {
+			continue
+		}
+		for _, candidate := range candidates {
+			if candidate.slotID != prior.SelectionSlotID {
+				continue
+			}
+			intent := prior.activeIntent()
+			if intent == nil || admittedPairKey(candidate) != registrationSelectionKey(prior.Pair, prior.SelectionSlotID) || candidate.base != intent.BaseFingerprint {
+				return fmt.Errorf("provider registration slot %q retains unresolved outcome; replacement cannot resend it", candidate.slotID)
+			}
+		}
+	}
+	return nil
 }
 
 type registrationIntent struct {
@@ -151,7 +176,7 @@ func (e *SlotCollisionError) Error() string {
 }
 
 func NewProviderRegistrationController(opts RegistrationControllerOptions) (*ProviderRegistrationController, error) {
-	if opts.CredentialOwner == nil || opts.EffectsStore == nil || opts.StartupAuthority == nil || opts.Readiness == nil {
+	if opts.CredentialOwner == nil || opts.EffectsStore == nil || opts.StartupAuthority == nil || opts.SelectionCurrent == nil || opts.Readiness == nil {
 		return nil, fmt.Errorf("provider registration controller dependencies are incomplete")
 	}
 	if !opts.Posture.Valid() {
@@ -169,6 +194,9 @@ func NewProviderRegistrationController(opts RegistrationControllerOptions) (*Pro
 		controller.credentialObservationTokensCurrent,
 		opts.EffectsStore.IsExternalEffectAuthorityCurrent,
 	)
+	opts.Readiness.selectionCurrent = func(ctx context.Context, pair RegistrationPair) (bool, error) {
+		return opts.SelectionCurrent(ctx, pair, false)
+	}
 	return controller, nil
 }
 
@@ -229,6 +257,9 @@ func (c *ProviderRegistrationController) Reconcile(ctx context.Context, exposure
 	if err != nil {
 		return err
 	}
+	if err := c.preserveUnsettledSelection(admitted); err != nil {
+		return err
+	}
 	c.snapshot.replaceSelected(admitted)
 	for _, pair := range admitted {
 		if err := c.reconcilePair(ctx, exposure, startup, pair); err != nil {
@@ -248,6 +279,9 @@ func (c *ProviderRegistrationController) Preflight(ctx context.Context, exposure
 	defer c.reconcileMu.Unlock()
 	candidate, err := c.admitAndIdentify(ctx, exposure, pair)
 	if err != nil {
+		return err
+	}
+	if err := c.preserveUnsettledSelection([]admittedPair{candidate}); err != nil {
 		return err
 	}
 	pairs := []admittedPair{candidate}
@@ -288,6 +322,9 @@ func (c *ProviderRegistrationController) admitAndIdentify(ctx context.Context, e
 	if pair.Registration.Provider() != strings.TrimSpace(pair.Target.Provider) {
 		return admittedPair{}, fmt.Errorf("provider registration pair %s provider conflicts with compiled channel registration", key)
 	}
+	if err := c.requireSelectionCurrent(ctx, pair); err != nil {
+		return admittedPair{}, err
+	}
 	provider, signing, err := c.admitCredentials(ctx, pair)
 	if err != nil {
 		return admittedPair{}, err
@@ -304,7 +341,11 @@ func (c *ProviderRegistrationController) admitAndIdentify(ctx context.Context, e
 	if err != nil {
 		return admittedPair{}, err
 	}
-	result, err := c.opts.HTTP.Read(ctx, identify.ToolID(), identify.Tool(), input, credentials)
+	executor := c.opts.HTTP
+	executor.Preflight = func(ctx context.Context) error {
+		return c.revalidateCredentials(ctx, admittedPair{pair: pair, provider: provider, signing: signing})
+	}
+	result, err := executor.Read(ctx, identify.ToolID(), identify.Tool(), input, credentials)
 	if err != nil {
 		return admittedPair{}, fmt.Errorf("identify provider registration slot for %s: %w", key, err)
 	}
@@ -323,38 +364,53 @@ func (c *ProviderRegistrationController) admitAndIdentify(ctx context.Context, e
 
 func (c *ProviderRegistrationController) admitCredentials(ctx context.Context, pair RegistrationPair) (map[string]runtimecredentials.AdmittedSnapshot, runtimecredentials.AdmittedSnapshot, error) {
 	key := pairSemanticKey(pair)
+	admissions := make(map[string]channelonboarding.CredentialAdmission, len(pair.CredentialAdmissions))
+	for _, admission := range pair.CredentialAdmissions {
+		if err := admission.Validate(); err != nil {
+			return nil, runtimecredentials.AdmittedSnapshot{}, err
+		}
+		if _, duplicate := admissions[admission.Role]; duplicate {
+			return nil, runtimecredentials.AdmittedSnapshot{}, fmt.Errorf("provider registration pair %s has competing credential admissions", key)
+		}
+		admissions[admission.Role] = admission
+	}
+	roles := append(pair.Registration.ProviderCredentials(), pair.Registration.SigningCredential())
+	if len(admissions) != len(roles) {
+		return nil, runtimecredentials.AdmittedSnapshot{}, fmt.Errorf("provider registration pair %s requires its complete admitted credential evidence", key)
+	}
+	projection := c.opts.CredentialOwner.BeginSecretBindingProjection()
+	observed := make(map[string]runtimecredentials.AdmittedSnapshot, len(roles))
+	var admissionErr error
+	for _, role := range roles {
+		storeKey := pair.CredentialKeys[role]
+		if role == pair.Registration.SigningCredential() {
+			storeKey = pair.Target.SigningCredentialKey
+		}
+		admission, present := admissions[role]
+		if !present || storeKey == "" || admission.StoreKey != storeKey {
+			return nil, runtimecredentials.AdmittedSnapshot{}, fmt.Errorf("provider registration pair %s credential %q contradicts its admitted role", key, role)
+		}
+		snapshot, current, err := projection.ObserveAdmittedActivationCredential(ctx,
+			runtimecredentials.ValueEvidence{Key: storeKey, Seal: admission.ValueSeal}, admission.Receipt)
+		if err != nil {
+			return nil, runtimecredentials.AdmittedSnapshot{}, err
+		}
+		if !current {
+			admissionErr = fmt.Errorf("provider registration pair %s credential %q is no longer admitted", key, role)
+		}
+		observed[role] = snapshot
+	}
+	if admissionErr != nil {
+		return nil, runtimecredentials.AdmittedSnapshot{}, admissionErr
+	}
+	if err := projection.ValidateCurrent(ctx); err != nil {
+		return nil, runtimecredentials.AdmittedSnapshot{}, err
+	}
 	provider := make(map[string]runtimecredentials.AdmittedSnapshot, len(pair.Registration.ProviderCredentials()))
 	for _, logical := range pair.Registration.ProviderCredentials() {
-		storeKey := pair.CredentialKeys[logical]
-		if storeKey == "" {
-			return nil, runtimecredentials.AdmittedSnapshot{}, fmt.Errorf("provider registration pair %s credential %q has no explicit store-key mapping", key, logical)
-		}
-		binding, err := c.opts.CredentialOwner.ObserveSecretBinding(ctx, storeKey)
-		if err != nil {
-			return nil, runtimecredentials.AdmittedSnapshot{}, err
-		}
-		if !binding.Bound() {
-			return nil, runtimecredentials.AdmittedSnapshot{}, fmt.Errorf("provider registration pair %s credential %q is UNBOUND", key, storeKey)
-		}
-		snapshot, err := binding.AdmittedSnapshot()
-		if err != nil {
-			return nil, runtimecredentials.AdmittedSnapshot{}, err
-		}
-		provider[logical] = snapshot
+		provider[logical] = observed[logical]
 	}
-	signingKey := strings.TrimSpace(pair.Target.SigningCredentialKey)
-	binding, err := c.opts.CredentialOwner.ObserveSecretBinding(ctx, signingKey)
-	if err != nil {
-		return nil, runtimecredentials.AdmittedSnapshot{}, err
-	}
-	if !binding.Bound() {
-		return nil, runtimecredentials.AdmittedSnapshot{}, fmt.Errorf("provider registration pair %s signing credential %q is UNBOUND; run `swarm secrets set %s`", key, signingKey, signingKey)
-	}
-	signing, err := binding.AdmittedSnapshot()
-	if err != nil {
-		return nil, runtimecredentials.AdmittedSnapshot{}, err
-	}
-	return provider, signing, nil
+	return provider, observed[pair.Registration.SigningCredential()], nil
 }
 
 func (c *ProviderRegistrationController) reconcilePair(ctx context.Context, exposure Generation, startup runtimestartupownership.GrantEvidence, candidate admittedPair) error {
@@ -452,7 +508,9 @@ func (c *ProviderRegistrationController) launchAttempt(ctx context.Context, expo
 	effectCtx = runtimeeffects.WithAuthority(effectCtx, intent.Authority)
 	effectCtx = runtimeeffects.WithExecutionMode(effectCtx, intent.Authority.ExecutionMode)
 	effectCtx = runtimeauthoractivity.WithScope(effectCtx, runtimeauthoractivity.BundleScope(c.opts.RuntimeInstanceID, candidate.pair.Target.BundleHash))
-	result, applyErr := c.opts.HTTP.Apply(effectCtx, apply.ToolID(), apply.Tool(), input, candidateCredentials(candidate), map[string]string{
+	executor := c.opts.HTTP
+	executor.Preflight = func(ctx context.Context) error { return c.revalidateCredentials(ctx, candidate) }
+	result, applyErr := executor.Apply(effectCtx, apply.ToolID(), apply.Tool(), input, candidateCredentials(candidate), map[string]string{
 		"binding_id": candidate.pair.BindingID, "target": candidate.pair.Target.Selector, "intent_id": intent.IntentID, "slot_id": candidate.slotID,
 	})
 	if applyErr != nil && result.Pending == nil {
@@ -485,6 +543,11 @@ func (c *ProviderRegistrationController) refreshReadback(ctx context.Context, ca
 		return fmt.Errorf("provider registration intent is missing")
 	}
 	intent := cloneRegistrationIntent(*active)
+	if err := c.revalidateCredentials(ctx, candidate); err != nil {
+		state.Failure = err.Error()
+		c.publishState(key, state)
+		return err
+	}
 	current, err := c.opts.EffectsStore.IsExternalEffectAuthorityCurrent(ctx, intent.Authority)
 	if err != nil || !current {
 		if err == nil {
@@ -501,7 +564,9 @@ func (c *ProviderRegistrationController) refreshReadback(ctx context.Context, ca
 	}
 	var result any
 	if readErr == nil {
-		result, readErr = c.opts.HTTP.Read(ctx, readback.ToolID(), readback.Tool(), input, candidateCredentials(candidate))
+		executor := c.opts.HTTP
+		executor.Preflight = func(ctx context.Context) error { return c.revalidateCredentials(ctx, candidate) }
+		result, readErr = executor.Read(ctx, readback.ToolID(), readback.Tool(), input, candidateCredentials(candidate))
 	}
 	exact := false
 	if readErr == nil {
@@ -516,6 +581,11 @@ func (c *ProviderRegistrationController) refreshReadback(ctx context.Context, ca
 		}
 	}
 	if intent.HasPending {
+		if err := c.revalidateCredentials(ctx, candidate); err != nil {
+			state.Failure = err.Error()
+			c.publishState(key, state)
+			return err
+		}
 		pending := intent.Pending
 		if settleErr := pending.SettleReadback(ctx, exact, readErr); settleErr != nil {
 			intent.Pending = pending
@@ -559,6 +629,9 @@ func (c *ProviderRegistrationController) refreshReadback(ctx context.Context, ca
 }
 
 func (c *ProviderRegistrationController) revalidateCredentials(ctx context.Context, candidate admittedPair) error {
+	if err := c.requireSelectionCurrent(ctx, candidate.pair); err != nil {
+		return err
+	}
 	for logical, admitted := range candidate.provider {
 		current, err := c.opts.CredentialOwner.Observe(ctx, admitted.Key)
 		if err != nil {
@@ -574,6 +647,17 @@ func (c *ProviderRegistrationController) revalidateCredentials(ctx context.Conte
 	}
 	if current.ObservationToken() != candidate.signing.ObservationToken() {
 		return fmt.Errorf("provider registration signing credential changed before launch")
+	}
+	return nil
+}
+
+func (c *ProviderRegistrationController) requireSelectionCurrent(ctx context.Context, pair RegistrationPair) error {
+	current, err := c.opts.SelectionCurrent(ctx, pair, true)
+	if err != nil {
+		return err
+	}
+	if !current {
+		return fmt.Errorf("%w: provider registration selection lost its exact onboarding admission", channelonboarding.ErrRevisionConflict)
 	}
 	return nil
 }
@@ -663,6 +747,8 @@ func (s registrationState) evidence(current bool) RegistrationEvidence {
 
 func cloneRegistrationState(source registrationState) registrationState {
 	out := source
+	out.Pair.CredentialKeys = cloneStringMap(source.Pair.CredentialKeys)
+	out.Pair.CredentialAdmissions = append([]channelonboarding.CredentialAdmission(nil), source.Pair.CredentialAdmissions...)
 	if source.LastVerified != nil {
 		intent := cloneRegistrationIntent(*source.LastVerified)
 		out.LastVerified = &intent

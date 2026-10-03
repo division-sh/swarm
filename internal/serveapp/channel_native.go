@@ -19,7 +19,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	runtimeregistration "github.com/division-sh/swarm/internal/runtime/registration"
 )
 
 func (d *serveChannelDeliveryDispatcher) qualifyNativeInboxActivation(ctx context.Context, activation channelonboarding.ConnectedChannelActivation, plan packs.OutboundBindingPlan, setting channelnative.Setting) error {
@@ -166,6 +165,10 @@ func (d *serveChannelDeliveryDispatcher) qualifyResolvedNativeEntry(ctx context.
 	if !matched {
 		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryUnavailable, fmt.Errorf("native inbox compiled publication is unavailable")
 	}
+	ctx, err = withChannelProviderAdmission(ctx, lease, plan)
+	if err != nil {
+		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryUnavailable, err
+	}
 	if err := d.reconcileNativeInboxActivation(ctx, selected); err != nil {
 		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryUnavailable, err
 	}
@@ -212,6 +215,10 @@ func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxActivation(ctx cont
 	}
 	if compiled.OnboardingOperationID == "" {
 		return fmt.Errorf("native inbox compiled activation is not exact-current")
+	}
+	ctx, err = withChannelProviderAdmission(ctx, lease, compiled.Plan)
+	if err != nil {
+		return err
 	}
 	registration, found := d.ingress.ChannelRegistrationCurrent(ctx, d.now().UTC(),
 		channelonboarding.LearnedBindingID(activation.SlotKey), activation.TargetSelector, activation.Provider)
@@ -302,7 +309,7 @@ func (d *serveChannelDeliveryDispatcher) readNativeInboxLauncher(ctx context.Con
 	if err != nil {
 		return "", err
 	}
-	output, err := (runtimeregistration.HTTPExecutor{Client: d.httpClient}).Read(ctx, toolID, tool, input, credentials)
+	output, err := channelCredentialHTTPExecutor(d.httpClient, d.credentials, plan, admissions, tool).Read(ctx, toolID, tool, input, credentials)
 	if err != nil {
 		return "", err
 	}
@@ -334,7 +341,7 @@ func (d *serveChannelDeliveryDispatcher) readNativeInboxAddress(ctx context.Cont
 	if err != nil {
 		return "", err
 	}
-	output, err := (runtimeregistration.HTTPExecutor{Client: d.httpClient}).Read(ctx, toolID, tool, input, credentials)
+	output, err := channelCredentialHTTPExecutor(d.httpClient, d.credentials, plan, admissions, tool).Read(ctx, toolID, tool, input, credentials)
 	if err != nil {
 		return "", err
 	}
@@ -419,7 +426,7 @@ func (d *serveChannelDeliveryDispatcher) readNativeInboxLanguageCommands(ctx con
 	if err != nil {
 		return nil, err
 	}
-	output, err := (runtimeregistration.HTTPExecutor{Client: d.httpClient}).Read(ctx, toolID, tool, input, credentials)
+	output, err := channelCredentialHTTPExecutor(d.httpClient, d.credentials, plan, admissions, tool).Read(ctx, toolID, tool, input, credentials)
 	if err != nil {
 		return nil, err
 	}
@@ -490,7 +497,7 @@ func (d *serveChannelDeliveryDispatcher) installNativeInboxCommands(ctx context.
 	effectCtx = runtimeeffects.WithController(effectCtx, runtimeeffects.NewController(d.effects).WithExecutionPosture(d.posture))
 	effectCtx = runtimeeffects.WithAuthority(effectCtx, authority)
 	effectCtx = runtimeauthoractivity.WithScope(effectCtx, runtimeauthoractivity.BundleScope(d.runtimeInstanceID, coordinate.BundleHash))
-	result, applyErr := (runtimeregistration.HTTPExecutor{Client: d.httpClient}).ApplyChannelNativeSetting(
+	result, applyErr := channelCredentialHTTPExecutor(d.httpClient, d.credentials, plan, activation.CredentialAdmissions, tool).ApplyChannelNativeSetting(
 		effectCtx, toolID, tool, input, credentials, map[string]string{"setting_id": setting.SettingID, "setting_generation": fmt.Sprint(setting.Generation)},
 	)
 	if result.Pending == nil {
