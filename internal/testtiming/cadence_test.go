@@ -177,3 +177,43 @@ func TestFullCadenceEvidenceAndHonestUnknowns(t *testing.T) {
 		}
 	}
 }
+
+func TestFullCadenceDoesNotCreditCoreSelectedFailure(t *testing.T) {
+	fullHead, coreHead, intro := strings.Repeat("c", 40), strings.Repeat("b", 40), strings.Repeat("a", 40)
+	full := cadenceFixtureAttempt(t, testplanning.ProfileFull, fullHead, 20, false)
+	core := CadenceCoreProof{CadenceAttempt: cadenceFixtureAttempt(t, testplanning.ProfileCore, coreHead, 10, false), SuccessfulRun: true}
+	failed := false
+	for i := range full.Evidence {
+		evidence := &full.Evidence[i]
+		for j := range evidence.Report.Tests {
+			result := &evidence.Report.Tests[j]
+			if result.Package != "module/proof" || result.Test != "TestCore" {
+				continue
+			}
+			result.Result = "fail"
+			evidence.ExitCode = 1
+			evidence.Report.Summary.FailedTests++
+			evidence.Report.Summary.FailedPackages++
+			for k := range evidence.Report.Packages {
+				if evidence.Report.Packages[k].Package == result.Package {
+					evidence.Report.Packages[k].Result = "fail"
+				}
+			}
+			failed = true
+		}
+	}
+	if !failed {
+		t.Fatal("full fixture omitted the core-selected failure")
+	}
+	review := CadenceAttribution{Package: "module/proof", Root: "TestCore", Kind: "regression", Review: "https://github.com/division-sh/swarm/issues/2353#issuecomment-1", IntroducingCommit: intro, FirstDetectionRunID: 20}
+	got, err := ObserveFullCadence(full, &core, []CadenceAttribution{review}, []string{fullHead, coreHead, intro})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Findings) != 1 || got.Findings[0].ConfirmedCoreEscape || got.Findings[0].FirstParentLag != nil || got.EscapeRate != nil || got.EligibleClassifiedRegressions != 0 {
+		t.Fatalf("core-selected failure earned escape credit: %+v", got)
+	}
+	if !strings.Contains(strings.Join(got.Problems, "\n"), "failure is not a full-only root") {
+		t.Fatalf("missing exact core-membership refusal: %+v", got)
+	}
+}
