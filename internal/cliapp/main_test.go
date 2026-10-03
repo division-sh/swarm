@@ -1125,8 +1125,12 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 		}
 	}
 	for _, key := range []string{"SWARM_API_LISTEN_ADDR", "SWARM_MCP_LISTEN_ADDR"} {
-		if !strings.Contains(spec.ServeListenerEnvConfigBoundary.RejectedListenerEnvironment[key], "Retired by #1891") {
-			t.Fatalf("serve listener rejected env %q missing retirement rule:\n%s", key, spec.ServeListenerEnvConfigBoundary.RejectedListenerEnvironment[key])
+		rule := spec.ServeListenerEnvConfigBoundary.RejectedListenerEnvironment[key]
+		if !strings.Contains(rule, "current accepted-set environment owner") {
+			t.Fatalf("serve listener rejected env %q missing current authority:\n%s", key, rule)
+		}
+		if strings.Contains(rule, "Retired") || strings.Contains(rule, "migrate") {
+			t.Fatalf("serve listener rejected env %q restores retirement teaching:\n%s", key, rule)
 		}
 	}
 	for _, want := range []string{"#848", "#884/#750", "#743", "#1636", "#1647", "`--no-retry`"} {
