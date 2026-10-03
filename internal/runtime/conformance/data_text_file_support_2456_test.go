@@ -3,6 +3,7 @@ package conformance
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -54,7 +55,6 @@ func standaloneTextDataConnect2456(t *testing.T, serverURL string) {
 func standaloneTextDataCommand2456(t *testing.T, f *deploymentResourceFixture, sourceID, expectedHead string, check bool, selector, assignment string) (durabledata.SourceOperationResult, int, string) {
 	t.Helper()
 	args := []string{"data", "import", selector, assignment,
-		"--bundle-hash", f.runtime.sourceArtifactFact.BundleHash(),
 		"--source-invocation-id", sourceID, "--expected-head", expectedHead, "--json"}
 	if check {
 		args = append(args, "--check")
@@ -248,12 +248,18 @@ func TestStandaloneTextFileImportSupport2456BothStores(t *testing.T) {
 			}
 
 			wrongID := uuid.NewString()
-			wrongArgs := []string{"data", "import", "./root.ready", assignment,
-				"--bundle-hash", "bundle-v2:sha256:" + strings.Repeat("f", 64),
-				"--source-invocation-id", wrongID, "--expected-head", "absent"}
-			var stdout, errorOut bytes.Buffer
-			if code := cliapp.Execute(f.ctx, wrongArgs, &stdout, &errorOut, nil, nil); code == 0 {
-				t.Fatalf("wrong-bundle import succeeded: %s", stdout.String())
+			input, err := json.Marshal(map[string]any{"body": "Standalone \"text\" and \\backslash\n"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			wrong := textFileRPCParams2456(t, server, "data.import", map[string]any{
+				"bundle_hash":          "bundle-v2:sha256:" + strings.Repeat("f", 64),
+				"source_invocation_id": wrongID, "declaration": ref,
+				"expected_head": map[string]any{"state": "absent"},
+				"input":         map[string]any{"format": "jsonl", "content_base64": base64.StdEncoding.EncodeToString(append(input, '\n'))},
+			})
+			if len(wrong.Error) == 0 || !bytes.Contains(wrong.Error, []byte(durabledata.CodeContractNotFound)) {
+				t.Fatalf("wrong-bundle import did not reach selected-source admission: result=%s error=%s", wrong.Result, wrong.Error)
 			}
 			if standaloneTextDataReceiptCount2456(t, f, wrongID) != 0 {
 				t.Fatal("wrong-bundle request created a source receipt")
