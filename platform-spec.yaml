@@ -22697,10 +22697,10 @@ test_specification:
       admission: >-
         The reviewer records one plain CI-Tier and one independent Local-Tier line in the PR body, each core,
         lifecycle or full. CI reads its event JSON as data; missing, malformed or duplicate CI-Tier selects full.
-        PR body edits trigger qualification, and the required summary checks the current body and source head.
-        Local qualification selects --tier explicitly or promotes with --full and retains the effective plan and
-        receipts. No-context core and changed-package execution are developer feedback, not reviewer-bound proof.
-        No authorization sidecar, audit locator, GitHub lookup or branch/title inference is part of local admission.
+        Body edits do not trigger CI. The late five-minute summary checks current body/head before success; it cannot revoke completed green.
+        An unmet tier increase requires a new signed head and higher-tier qualifying protected checks; keep the PR draft/non-mergeable until qualification.
+        Lead's final merge comparison checks current body against successful current-head trusted-App plan/summary, including post-approval edits; completed higher scope can satisfy lower.
+        Local --tier/--full retains plan/receipts for independent Local-Tier human comparison. No-context core/changed-package execution is developer feedback, not reviewer-bound proof; no local authorization sidecar, audit locator, GitHub lookup or branch/title inference.
       membership: >-
         Core executes ordinary admitted roots and fixed safety and smoke canaries. Lifecycle adds the retained
         both-store restart, recovery and semantic families. Full owns every admitted executable root, both unchanged
