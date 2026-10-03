@@ -267,31 +267,19 @@ func (m *HostManager) ResolveWorkspaceForCapabilityAdmission(_ context.Context, 
 		return nil, err
 	}
 	defer m.projectionOps.Done()
-	class, err := workspaceClassForSource(m.source, actor)
+	target, err := HostCapabilityTarget(m.cfg, m.source, actor)
 	if err != nil {
 		return nil, err
-	}
-	if workspaceRouteClass(class) == "" {
-		if _, err := workspaceScopeForCapabilityAdmission(m.source, actor); err != nil {
-			return nil, err
-		}
 	}
 	if err := m.validateSharedMounts(); err != nil {
 		return nil, err
 	}
-	root, err := m.hostRoot()
+	mounts, err := m.hostExecutionMounts(target.Workdir, "")
 	if err != nil {
 		return nil, err
 	}
-	mounts, err := m.hostExecutionMounts(root, "")
-	if err != nil {
-		return nil, err
-	}
-	return &Target{
-		Workdir: root,
-		Backend: BackendHost,
-		Mounts:  mounts,
-	}, nil
+	target.Mounts = mounts
+	return target, nil
 }
 
 func (m *HostManager) resolveWorkspace(ctx context.Context, actor models.AgentConfig, materializeData bool) (*Target, error) {
@@ -454,11 +442,15 @@ func (m *HostManager) hostRoot() (string, error) {
 	if m == nil {
 		return "", fmt.Errorf("host workspace manager is required")
 	}
-	root, err := cleanAbsPath(m.cfg.WorkspaceRoot, "host workspace root")
+	return hostWorkspaceRoot(m.cfg)
+}
+
+func hostWorkspaceRoot(cfg HostConfig) (string, error) {
+	root, err := cleanAbsPath(cfg.WorkspaceRoot, "host workspace root")
 	if err != nil {
 		return "", err
 	}
-	if scope := strings.TrimSpace(m.cfg.BundleScope); scope != "" {
+	if scope := strings.TrimSpace(cfg.BundleScope); scope != "" {
 		root = filepath.Join(root, scope)
 	}
 	return canonicalPathForOverlap(root, "host workspace root")

@@ -886,7 +886,7 @@ func (deps RuntimeDeps) validatedWithHarnessPolicy(allowValidationHarness bool) 
 	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("workflow contract validation failed: %w", err)
 	}
-	if err := validateSelectedBackendModelAliasesForDeclaredAgents(posture, cfg, source); err != nil {
+	if err := ValidateDeclaredAgentModelAdmission(posture, cfg, source); err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("llm model alias validation failed: %w", err)
 	}
 	providerCredentialResolver := providerCredentialResolverForRuntimeOptions(opts)

@@ -7,6 +7,7 @@ import (
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/llm"
 )
 
 func (e *Executor) ValidateNativeToolCapabilityAdmission(ctx context.Context, actor models.AgentConfig) error {
@@ -40,11 +41,15 @@ func (e *Executor) nativeToolAdmissionOptions(actor models.AgentConfig) (models.
 	if err != nil {
 		return actor, NativeToolAdmissionOptions{}, err
 	}
+	contract, err := llm.RequireProviderContract(resolved.Selection.Profile.RuntimeMode, resolved.Runtime)
+	if err != nil {
+		return actor, NativeToolAdmissionOptions{}, err
+	}
 	return resolved.Actor, NativeToolAdmissionOptions{
-		Runtime:     resolved.Runtime,
-		Credentials: credentials,
-		Source:      source,
-		Workspaces:  workspaces,
+		ProviderContract: contract,
+		Credentials:      credentials,
+		Source:           source,
+		Workspaces:       workspaces,
 	}, nil
 }
 

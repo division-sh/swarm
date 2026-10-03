@@ -131,6 +131,44 @@ func RequireProviderContractForProfile(profile llmselection.Profile, runtime Run
 	if err != nil {
 		return ProviderContract{}, err
 	}
+	return contractForProfile(profile, contract)
+}
+
+// ProviderContractForProfile reads the shipped adapter contract without
+// constructing a client, session, workspace, or completion authority.
+func ProviderContractForProfile(profile llmselection.Profile) (ProviderContract, error) {
+	canonical, err := llmselection.ResolveActiveBackend(profile.ID)
+	if err != nil {
+		return ProviderContract{}, err
+	}
+	if profile != canonical {
+		return ProviderContract{}, fmt.Errorf("llm backend profile %q is not canonical", profile.ID)
+	}
+	var contract ProviderContract
+	switch profile.ID {
+	case llmselection.BackendAnthropic:
+		contract = AnthropicAPIProviderContract()
+	case llmselection.BackendClaudeCLI:
+		contract = ClaudeCLIProviderContract()
+	case llmselection.BackendOpenAICompatible:
+		contract = OpenAICompatibleProviderContract()
+	case llmselection.BackendOpenAIResponses:
+		contract = OpenAIResponsesProviderContract()
+	case llmselection.BackendMock:
+		contract = MockProviderContract()
+	default:
+		return ProviderContract{}, fmt.Errorf("llm backend profile %q has no provider contract", profile.ID)
+	}
+	if err := contract.Validate(); err != nil {
+		return ProviderContract{}, err
+	}
+	return contractForProfile(profile, contract)
+}
+
+func contractForProfile(profile llmselection.Profile, contract ProviderContract) (ProviderContract, error) {
+	if contract.RuntimeMode != profile.RuntimeMode {
+		return ProviderContract{}, fmt.Errorf("llm backend profile %q resolves runtime mode %q but contract exposes %q", profile.ID, profile.RuntimeMode, contract.RuntimeMode)
+	}
 	if contract.Provider != profile.Provider {
 		return ProviderContract{}, fmt.Errorf("llm backend profile %q resolves provider %q but runtime exposes provider %q", profile.ID, profile.Provider, contract.Provider)
 	}
