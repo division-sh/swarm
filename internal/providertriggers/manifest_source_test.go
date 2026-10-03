@@ -65,7 +65,10 @@ func TestTriggerPredicatePathIdentityBeforeProjection(t *testing.T) {
 
 func TestTriggerPredicateExactTextPreservation(t *testing.T) {
 	body := []byte(fmt.Sprintf(triggerPredicateFixture, "{equals: {kind: ' alpha '}}"))
-	manifest := parseTriggerTestBody(t, string(body))
+	manifest, err := ParseManifest(body)
+	if err != nil {
+		t.Fatal(err)
+	}
 	plan := compileTriggerTestPlan(t, manifest)
 	for attempt := 0; attempt < 20; attempt++ {
 		if got := plan.Outputs()[1].When.Equals["kind"]; got != " alpha " {
@@ -177,7 +180,10 @@ func TestTriggerBodyProgrammaticAdmission(t *testing.T) {
 		}
 	}
 	body := []byte(fmt.Sprintf(triggerPredicateFixture, "{equals: {kind: ' alpha '}}"))
-	manifest := parseTriggerTestBody(t, string(body))
+	manifest, err := ParseManifest(body)
+	if err != nil {
+		t.Fatal(err)
+	}
 	plan := compileTriggerTestPlan(t, manifest)
 	for i := range body {
 		body[i] = 'x'
@@ -196,6 +202,10 @@ func TestTriggerBodyProgrammaticAdmission(t *testing.T) {
 	for _, next := range []InboundAdmissionPlan{plan, compileTriggerTestPlan(t, manifest)} {
 		if got := next.Outputs()[1]; got.When.Equals["kind"] != " alpha " || got.Fields["value"].From != "message.value" {
 			t.Fatalf("projection mutation changed executable policy: %#v", got)
+		}
+		delivery, err := next.Accept(Request{Payload: map[string]any{"kind": " alpha ", "message": map[string]any{"value": "unchanged"}}})
+		if err != nil || len(delivery.Events) != 2 || delivery.Events[1].Payload["value"] != "unchanged" {
+			t.Fatalf("carrier mutation changed request execution: %+v, %v", delivery, err)
 		}
 	}
 }
