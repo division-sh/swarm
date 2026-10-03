@@ -163,13 +163,13 @@ func (p pipelineTestStandingServices) StandingRunRestartDisposition(ctx context.
 	if p.store == nil || p.store.testDB() == nil {
 		return runtimerunlifecycle.StandingRestartDisposition{}, errors.New("pipeline test standing-service reader requires selected store")
 	}
-	query := `SELECT service_id, current_run_id, current_generation, declaration_present, effective_state, operator_override, COALESCE(r.status, '') FROM standing_services LEFT JOIN runs r ON r.run_id = current_run_id WHERE current_run_id = ?`
+	query := `SELECT service_id, current_run_id, current_generation, declaration_present, binding_enabled, effective_state, operator_override, COALESCE(r.status, '') FROM standing_services LEFT JOIN runs r ON r.run_id = current_run_id WHERE current_run_id = ?`
 	if !p.store.isSQLite() {
-		query = `SELECT service_id::text, current_run_id::text, current_generation, declaration_present, effective_state, operator_override, COALESCE(r.status, '') FROM standing_services LEFT JOIN runs r ON r.run_id = current_run_id WHERE current_run_id = $1::uuid`
+		query = `SELECT service_id::text, current_run_id::text, current_generation, declaration_present, binding_enabled, effective_state, operator_override, COALESCE(r.status, '') FROM standing_services LEFT JOIN runs r ON r.run_id = current_run_id WHERE current_run_id = $1::uuid`
 	}
 	fact := runtimerunlifecycle.StandingRestartFact{ExactCurrent: true}
 	if err := p.store.testDB().QueryRowContext(ctx, query, strings.TrimSpace(runID)).Scan(
-		&fact.ServiceID, &fact.RunID, &fact.Generation, &fact.DeclarationPresent,
+		&fact.ServiceID, &fact.RunID, &fact.Generation, &fact.DeclarationPresent, &fact.BindingEnabled,
 		&fact.EffectiveState, &fact.OperatorOverride, &fact.RunState,
 	); errors.Is(err, sql.ErrNoRows) {
 		return runtimerunlifecycle.ClassifyStandingRestart(runtimerunlifecycle.StandingRestartFact{})

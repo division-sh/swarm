@@ -42,11 +42,13 @@ func (e *StandingServiceError) Unwrap() error {
 }
 
 type StandingServiceCandidate struct {
-	ServiceID  string
-	FlowPath   string
-	InstanceID string
-	EntityID   string
-	Source     runtimecorrelation.SourceArtifactFact
+	BindingEnabled     bool
+	BindingBlockReason runtimestanding.StandingBindingBlockReason
+	ServiceID          string
+	FlowPath           string
+	InstanceID         string
+	EntityID           string
+	Source             runtimecorrelation.SourceArtifactFact
 }
 
 func (c StandingServiceCandidate) Normalized() StandingServiceCandidate {
@@ -59,6 +61,9 @@ func (c StandingServiceCandidate) Normalized() StandingServiceCandidate {
 
 func (c StandingServiceCandidate) Validate() error {
 	c = c.Normalized()
+	if err := c.BindingBlockReason.Validate(c.BindingEnabled); err != nil {
+		return err
+	}
 	for field, value := range map[string]string{
 		"service_id": c.ServiceID, "flow_path": c.FlowPath,
 		"instance_id": c.InstanceID, "entity_id": c.EntityID,
@@ -83,6 +88,7 @@ func (c StandingServiceCandidate) Validate() error {
 }
 
 type StandingServiceReconciliation struct {
+	BindingEnabled               bool
 	ServiceID                    string
 	FlowPath                     string
 	InstanceID                   string
