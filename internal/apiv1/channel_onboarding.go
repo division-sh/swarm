@@ -7,6 +7,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 type ChannelOnboardingLifecycle interface {
@@ -144,10 +146,22 @@ func channelClientLanguageParam(params map[string]any) (string, error) {
 }
 
 func channelOnboardingError(err error) error {
+	if errors.Is(err, credentials.ErrCredentialValueUnusable) {
+		if !runtimefailures.OnlyBranches(err, func(branch error) bool { return branch == credentials.ErrCredentialValueUnusable }) {
+			return err
+		}
+		return runtimefailures.Wrap(runtimefailures.ClassAuthenticationNeeded, "credential_value_unusable", "channel-onboarding", "credential_admission", map[string]any{"auth_kind": "channel_credential"}, err)
+	}
 	details := map[string]any{"reason": err.Error()}
 	var credentialRequired *channelonboarding.CredentialRequiredError
 	switch {
 	case errors.As(err, &credentialRequired):
+		if !runtimefailures.OnlyBranches(err, func(branch error) bool {
+			var required *channelonboarding.CredentialRequiredError
+			return errors.As(branch, &required)
+		}) {
+			return err
+		}
 		return NewApplicationError(ChannelCredentialRequiredCode, false, map[string]any{
 			"reason": err.Error(), "operation_id": credentialRequired.OperationID,
 			"role": credentialRequired.Role, "store_key": credentialRequired.StoreKey,
