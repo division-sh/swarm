@@ -37,7 +37,11 @@ func TestReleaseE2EPackageStaysAtPublicProcessBoundary(t *testing.T) {
 			if err != nil {
 				t.Fatalf("decode import in %s: %v", entry.Name(), err)
 			}
-			if strings.Contains(name, "github.com/division-sh/swarm") {
+			alias := ""
+			if imported.Name != nil {
+				alias = imported.Name.Name
+			}
+			if !releaseE2EImportAllowed(entry.Name(), name, alias) {
 				t.Fatalf("release E2E source %s imports Swarm implementation package %q", entry.Name(), name)
 			}
 		}
@@ -60,5 +64,40 @@ func TestReleaseE2EPackageStaysAtPublicProcessBoundary(t *testing.T) {
 				t.Fatalf("release E2E source %s names forbidden in-process seam %q", entry.Name(), forbidden)
 			}
 		}
+	}
+}
+
+func releaseE2EImportAllowed(file, name, alias string) bool {
+	if !strings.Contains(name, "github.com/division-sh/swarm") {
+		return true
+	}
+	// Compilation and qualification support is not in-process product execution.
+	return name == "github.com/division-sh/swarm/internal/testplanning" && alias == "" &&
+		(file == "process_harness_test.go" || file == "golden_agent_workload_test.go")
+}
+
+func TestReleaseE2EImportBoundaryRejectsRuntimeAndUnscopedPlanning(t *testing.T) {
+	for _, tc := range []struct {
+		file, name, alias string
+		allowed           bool
+	}{
+		{"process_harness_test.go", "github.com/division-sh/swarm/internal/testplanning", "", true},
+		{"golden_agent_workload_test.go", "github.com/division-sh/swarm/internal/testplanning", "", true},
+		{"other_test.go", "github.com/division-sh/swarm/internal/testplanning", "", false},
+		{"process_harness_test.go", "github.com/division-sh/swarm/internal/testplanning", ".", false},
+		{"process_harness_test.go", "github.com/division-sh/swarm/internal/testplanning", "other", false},
+		{"process_harness_test.go", "github.com/division-sh/swarm/internal/testplanning/subpackage", "", false},
+		{"process_harness_test.go", "github.com/division-sh/swarm/internal/runtime", "", false},
+		{"process_harness_test.go", "github.com/division-sh/swarm/internal/store", "", false},
+		{"process_harness_test.go", "github.com/division-sh/swarm/internal/serveapp", "", false},
+		{"golden_agent_workload_test.go", "github.com/division-sh/swarm/internal/runtime/llm", "", false},
+		{"golden_agent_workload_test.go", "github.com/division-sh/swarm/internal/cliapp", "", false},
+		{"other_test.go", "net/http", "", true},
+	} {
+		t.Run(tc.file+"/"+tc.name+"/"+tc.alias, func(t *testing.T) {
+			if got := releaseE2EImportAllowed(tc.file, tc.name, tc.alias); got != tc.allowed {
+				t.Fatalf("import admission=%t, want %t", got, tc.allowed)
+			}
+		})
 	}
 }
