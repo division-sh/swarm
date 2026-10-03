@@ -67,6 +67,11 @@ Explicit qualification requires clean tracked and untracked non-ignored source,
 with unchanged HEAD before planning and after execution. Ignored receipts are
 permitted; dirty source is allowed only for non-qualifying developer feedback.
 
+Compilation-product reuse likewise requires a clean complete worktree, including
+root Go and embedded inputs. Non-ignored dirt or active Go workspace mode bypasses
+reuse and compiles freshly; a workspace path does not identify external module
+contents. Ignored receipt outputs remain allowed.
+
 `swarm-test-changed` and no-context `swarm-test` are developer feedback, not
 substitutes for the reviewer-required tier. Do not habitually force
 `-count=1` for every local iteration because it defeats Go's local test cache.

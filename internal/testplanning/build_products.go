@@ -75,7 +75,7 @@ func goProductInputs(ctx context.Context, root, profile string, args []string) (
 		cmd.Dir = root
 		return cmd.Output()
 	}
-	dirty, err := git("status", "--porcelain", "--untracked-files=all", "--", "cmd", "internal", "go.mod", "go.sum", "platform-spec.yaml", ".github/test-proof-plan.yaml")
+	dirty, err := git("status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=none")
 	if err != nil || len(dirty) != 0 {
 		return productInputs{}, fmt.Errorf("build product source is not a clean committed snapshot")
 	}
@@ -98,6 +98,10 @@ func goProductInputs(ctx context.Context, root, profile string, args []string) (
 	var effective map[string]string
 	if err := json.Unmarshal(environment, &effective); err != nil {
 		return productInputs{}, err
+	}
+	// A workspace path does not identify its external module inputs.
+	if work := effective["GOWORK"]; work != "" && work != "off" {
+		return productInputs{}, fmt.Errorf("active Go workspace is not cacheable")
 	}
 	if effective["CGO_ENABLED"] == "1" {
 		compiler := strings.Fields(effective["CC"])

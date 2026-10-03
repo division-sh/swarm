@@ -303,3 +303,39 @@ receipt has exit 130 and the aggregate refuses incomplete execution; it is not
 whole qualification or a runtime failure claim. Final local and hosted full must
 now bind the same new clean signed head above the frozen d043efecf base. All older
 red and partial evidence remains retained. No checkpoint push is authorized.
+
+## Review Cycle 2: Complete Compilation Input Admission
+
+Binding repair: https://github.com/division-sh/swarm/pull/2548#issuecomment-5971753749.
+The previous C02 proof covered manifest tampering, but missed actual edits to
+compiled root Go and embedded inputs outside cmd/internal. That coverage claim
+is corrected, not treated as obsolete because explicit full refused dirty source.
+The same BuildGoProduct/goProductInputs owner and consumer set remain in scope:
+CI warming, worker fallback and both release process compilation entrances.
+
+Cache reuse now requires the entire worktree to have no tracked, staged,
+untracked non-ignored or submodule dirt, using the same Git status policy as
+explicit local qualification. Ignored receipt outputs remain permitted. Dirty
+source compiles freshly and cannot replace the clean cached product. Active
+Go workspace mode, explicit or auto-discovered, also bypasses reuse/publication:
+a workspace path alone cannot identify external module inputs. No import graph,
+new key framework, runtime change, compatibility path or vendor is introduced.
+This fulfills the existing authoritative qualification_tiers.execution exact
+clean-source/dependency identity contract; that contract is not relaxed.
+
+Real warm-cache tests first show clean reuse, then edit platform_artifacts.go,
+Dockerfile.workspace or an embedded example and execute the freshly changed
+binary. A non-ignored untracked root fixture also refuses reuse. Explicit and
+auto-discovered workspace tests mutate an external module while the repository
+remains clean and require the next binary to expose the new dependency bytes.
+Ignored outputs remain cacheable; prior byte/manifest/source/tool/profile/flag/
+dependency corruption controls remain. Both dirty-root and workspace probes
+fail against the old implementation before repair.
+
+C02 is expanded to these real-input cases; C06 records active workspace inputs.
+The proof matrix is now 48 rows. The prior 44+21 local receipts and green hosted
+full37140284308 qualify dac10e88b only, not a subsequent repair head. Current
+instruction permits the patch and new-head hosted CI but holds any local full
+rerun pending the user/lead's answer on an affected-unit waiver extension.
+Do not invent that extension or claim same-head full proof from old receipts.
+Existing #2535/#2353 and the qualification/harness watchlist remain open.
