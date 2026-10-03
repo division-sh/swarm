@@ -122,59 +122,10 @@ func loadUnifiedConfigAllowDiagnostics(opts unifiedConfigLoadOptions) (unifiedCo
 		return unifiedConfigLoadResult{}, err
 	}
 	layers, diagnostics := discoverUnifiedConfigLayers(RepoRoot, opts.ExplicitPath)
-	if err := validateSwarmEnvSources(swarmEnvGuardContext{RepoRoot: RepoRoot, RuntimeConfigPath: opts.ExplicitPath}); err != nil {
+	merged, keyOrigins, layerDiagnostics := composeUnifiedConfigLayers(layers, RepoRoot)
+	diagnostics = append(diagnostics, layerDiagnostics...)
+	if err := validateSwarmEnvSources(swarmEnvGuardContext{RepoRoot: RepoRoot, RuntimeConfigPath: opts.ExplicitPath, DelegatedSources: unifiedConfigDelegation(&merged)}); err != nil {
 		diagnostics = append(diagnostics, unifiedConfigDiagnostic{Kind: unifiedConfigDiagnosticValidationFailed, Message: err.Error()})
-	}
-	keyOrigins := map[string]unifiedConfigKeyOrigin{}
-	var merged yaml.Node
-	merged.Kind = yaml.MappingNode
-	for _, layer := range layers {
-		raw, err := os.ReadFile(layer.Path)
-		if err != nil {
-			diagnostics = append(diagnostics, unifiedConfigDiagnostic{
-				Kind:        unifiedConfigDiagnosticReadFailed,
-				Layer:       layer.Name,
-				Path:        layer.Path,
-				Message:     fmt.Sprintf("read swarm.yaml config %s: %v", layer.Path, err),
-				Remediation: unifiedConfigReadRemediation(layer),
-			})
-			continue
-		}
-		var doc yaml.Node
-		if err := yaml.Unmarshal(raw, &doc); err != nil {
-			diagnostics = append(diagnostics, unifiedConfigDiagnostic{
-				Kind:        unifiedConfigDiagnosticParseFailed,
-				Layer:       layer.Name,
-				Path:        layer.Path,
-				Message:     fmt.Sprintf("parse swarm.yaml config %s: %v", layer.Path, err),
-				Remediation: "fix YAML syntax in this config file",
-			})
-			continue
-		}
-		root := yamlDocumentRoot(&doc)
-		if root == nil || root.Kind == 0 {
-			diagnostics = append(diagnostics, unifiedConfigDiagnostic{Kind: unifiedConfigDiagnosticLoaded, Layer: layer.Name, Path: layer.Path, Message: "loaded empty swarm.yaml config"})
-			continue
-		}
-		if root.Kind != yaml.MappingNode {
-			diagnostics = append(diagnostics, unifiedConfigDiagnostic{
-				Kind:        unifiedConfigDiagnosticParseFailed,
-				Layer:       layer.Name,
-				Path:        layer.Path,
-				Message:     fmt.Sprintf("swarm.yaml config %s must be a YAML mapping", layer.Path),
-				Remediation: "use sectioned swarm.yaml keys such as runtime, workspace, connection, serve, paths, llm, store, or database",
-			})
-			continue
-		}
-		recordUnifiedConfigKeyOrigins(root, nil, layer, keyOrigins)
-		diagnostics = append(diagnostics, validateUnifiedConfigNode(root, layer, RepoRoot)...)
-		if len(unifiedConfigBlockers(diagnostics)) == 0 {
-			mergeYAMLMapping(&merged, root)
-		} else {
-			// Continue scanning later files so doctor can render a complete blocker set.
-			mergeYAMLMapping(&merged, root)
-		}
-		diagnostics = append(diagnostics, unifiedConfigDiagnostic{Kind: unifiedConfigDiagnosticLoaded, Layer: layer.Name, Path: layer.Path, Message: "loaded swarm.yaml config"})
 	}
 	if unsupported := executableAdjacentRuntimeConfigDiagnostic(); unsupported != nil {
 		diagnostics = append(diagnostics, *unsupported)
@@ -239,6 +190,64 @@ func loadUnifiedConfigAllowDiagnostics(opts unifiedConfigLoadOptions) (unifiedCo
 		return result, unifiedConfigError{Diagnostics: blockers}
 	}
 	return result, nil
+}
+
+func composeUnifiedConfigLayers(layers []unifiedConfigLayer, RepoRoot string) (yaml.Node, map[string]unifiedConfigKeyOrigin, []unifiedConfigDiagnostic) {
+	keyOrigins := map[string]unifiedConfigKeyOrigin{}
+	var diagnostics []unifiedConfigDiagnostic
+	merged := yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	for _, layer := range layers {
+		raw, err := os.ReadFile(layer.Path)
+		if err != nil {
+			diagnostics = append(diagnostics, unifiedConfigDiagnostic{
+				Kind:        unifiedConfigDiagnosticReadFailed,
+				Layer:       layer.Name,
+				Path:        layer.Path,
+				Message:     fmt.Sprintf("read swarm.yaml config %s: %v", layer.Path, err),
+				Remediation: unifiedConfigReadRemediation(layer),
+			})
+			continue
+		}
+		var doc yaml.Node
+		if err := yaml.Unmarshal(raw, &doc); err != nil {
+			diagnostics = append(diagnostics, unifiedConfigDiagnostic{
+				Kind:        unifiedConfigDiagnosticParseFailed,
+				Layer:       layer.Name,
+				Path:        layer.Path,
+				Message:     fmt.Sprintf("parse swarm.yaml config %s: %v", layer.Path, err),
+				Remediation: "fix YAML syntax in this config file",
+			})
+			continue
+		}
+		root := yamlDocumentRoot(&doc)
+		if root == nil || root.Kind == 0 {
+			diagnostics = append(diagnostics, unifiedConfigDiagnostic{Kind: unifiedConfigDiagnosticLoaded, Layer: layer.Name, Path: layer.Path, Message: "loaded empty swarm.yaml config"})
+			continue
+		}
+		if root.Kind != yaml.MappingNode {
+			diagnostics = append(diagnostics, unifiedConfigDiagnostic{
+				Kind:        unifiedConfigDiagnosticParseFailed,
+				Layer:       layer.Name,
+				Path:        layer.Path,
+				Message:     fmt.Sprintf("swarm.yaml config %s must be a YAML mapping", layer.Path),
+				Remediation: "use sectioned swarm.yaml keys such as runtime, workspace, connection, serve, paths, llm, store, or database",
+			})
+			continue
+		}
+		layerDiagnostics := validateUnifiedConfigNode(root, layer, RepoRoot)
+		diagnostics = append(diagnostics, layerDiagnostics...)
+		if len(unifiedConfigBlockers(layerDiagnostics)) != 0 {
+			continue
+		}
+		expanded, err := expandUnifiedConfigValue(yamlsource.ValueFromNode(root))
+		if err != nil {
+			diagnostics = append(diagnostics, unifiedConfigDiagnostic{Kind: unifiedConfigDiagnosticParseFailed, Layer: layer.Name, Path: layer.Path, Message: err.Error()})
+			continue
+		}
+		mergeUnifiedConfigLayer(&merged, expanded, nil, layer, keyOrigins)
+		diagnostics = append(diagnostics, unifiedConfigDiagnostic{Kind: unifiedConfigDiagnosticLoaded, Layer: layer.Name, Path: layer.Path, Message: "loaded swarm.yaml config"})
+	}
+	return merged, keyOrigins, diagnostics
 }
 
 func recordUnifiedConfigKeyOrigins(node *yaml.Node, prefix []string, layer unifiedConfigLayer, origins map[string]unifiedConfigKeyOrigin) {
@@ -399,7 +408,46 @@ func yamlDocumentRoot(doc *yaml.Node) *yaml.Node {
 	return doc
 }
 
-func mergeYAMLMapping(dst, src *yaml.Node) {
+// Expand each admitted layer before precedence, origins and env delegation consume it.
+func expandUnifiedConfigValue(value yamlsource.Value) (*yaml.Node, error) {
+	var node yaml.Node
+	if err := value.Project(&node); err != nil {
+		return nil, err
+	}
+	node.Anchor, node.Alias = "", nil
+	switch node.Kind {
+	case yaml.MappingNode:
+		fields, err := value.Mapping()
+		if err != nil {
+			return nil, err
+		}
+		node.Content = nil
+		for _, field := range fields {
+			child, err := expandUnifiedConfigValue(field.Value)
+			if err != nil {
+				return nil, err
+			}
+			key := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: field.Name, Line: field.KeyLocation.Line, Column: field.KeyLocation.Column}
+			node.Content = append(node.Content, key, child)
+		}
+	case yaml.SequenceNode:
+		items, err := value.Sequence()
+		if err != nil {
+			return nil, err
+		}
+		node.Content = nil
+		for _, item := range items {
+			child, err := expandUnifiedConfigValue(item)
+			if err != nil {
+				return nil, err
+			}
+			node.Content = append(node.Content, child)
+		}
+	}
+	return &node, nil
+}
+
+func mergeUnifiedConfigLayer(dst, src *yaml.Node, prefix []string, layer unifiedConfigLayer, origins map[string]unifiedConfigKeyOrigin) {
 	if dst == nil || src == nil || src.Kind != yaml.MappingNode {
 		return
 	}
@@ -407,15 +455,26 @@ func mergeYAMLMapping(dst, src *yaml.Node) {
 		dst.Kind = yaml.MappingNode
 	}
 	for i := 0; i+1 < len(src.Content); i += 2 {
-		key := cloneYAMLNode(src.Content[i])
-		value := cloneYAMLNode(src.Content[i+1])
+		key, value := src.Content[i], src.Content[i+1]
+		pathParts := append(append([]string{}, prefix...), key.Value)
+		path := strings.Join(pathParts, ".")
 		if value.Kind == yaml.MappingNode {
 			if existing := yamlMappingValue(dst, key.Value); existing != nil && existing.Kind == yaml.MappingNode {
-				mergeYAMLMapping(existing, value)
+				mergeUnifiedConfigLayer(existing, value, pathParts, layer, origins)
 				continue
 			}
 		}
+		for oldPath := range origins {
+			if oldPath == path || strings.HasPrefix(oldPath, path+".") {
+				delete(origins, oldPath)
+			}
+		}
 		yamlSetMappingValue(dst, key, value)
+		if value.Kind == yaml.MappingNode {
+			recordUnifiedConfigKeyOrigins(value, pathParts, layer, origins)
+		} else {
+			origins[path] = unifiedConfigKeyOrigin{Layer: layer.Name, Path: layer.Path}
+		}
 	}
 }
 
@@ -440,18 +499,6 @@ func yamlSetMappingValue(node, key, value *yaml.Node) {
 		}
 	}
 	node.Content = append(node.Content, key, value)
-}
-
-func cloneYAMLNode(node *yaml.Node) *yaml.Node {
-	if node == nil {
-		return nil
-	}
-	out := *node
-	out.Content = make([]*yaml.Node, len(node.Content))
-	for i, child := range node.Content {
-		out.Content[i] = cloneYAMLNode(child)
-	}
-	return &out
 }
 
 type unifiedCLIYAML = config.CLISourceConfig
@@ -573,22 +620,11 @@ func walkUnifiedMapping(value yamlsource.Value, prefix []string, layer unifiedCo
 	}
 }
 
-type unifiedConfigKeyRule struct {
-	Container            bool
-	Elevated             bool
-	SecretReference      bool
-	InlineSecret         bool
-	ProjectContainedPath bool
-	Split                string
-}
-
-func (r unifiedConfigKeyRule) supportedExampleLeaf() bool {
-	return !r.Container && r.Split == "" && !r.InlineSecret
-}
+type unifiedConfigKeyRule = config.SourceKeyRule
 
 func unifiedConfigRule(pathParts []string) (unifiedConfigKeyRule, bool) {
 	path := strings.Join(pathParts, ".")
-	rules := unifiedConfigRules()
+	rules := config.SourceKeyRules()
 	if rule, ok := rules[path]; ok {
 		return rule, true
 	}
@@ -659,91 +695,6 @@ func unifiedConfigProviderLimitPolicyLeaves() map[string]struct{} {
 		"rate_limit_max_wait":      {},
 		"max_concurrency":          {},
 		"max_concurrency_max_wait": {},
-	}
-}
-
-func unifiedConfigRules() map[string]unifiedConfigKeyRule {
-	section := unifiedConfigKeyRule{Container: true}
-	elevatedSection := unifiedConfigKeyRule{Container: true, Elevated: true}
-	return map[string]unifiedConfigKeyRule{
-		"connection":                              elevatedSection,
-		"connection.api_server":                   {Elevated: true},
-		"connection.api_token_file":               {Elevated: true, SecretReference: true},
-		"serve":                                   section,
-		"serve.api_listen_addr":                   {},
-		"serve.mcp_listen_addr":                   {},
-		"serve.api_token_file":                    {Elevated: true, SecretReference: true},
-		"runtime":                                 section,
-		"runtime.recovery_on_startup":             {},
-		"runtime.fan_out_workers":                 {},
-		"runtime.max_concurrent_agents":           {Split: "tracked split: runtime.max_concurrent_agents is not wired to runtime enforcement; no supported replacement"},
-		"runtime.event_poll_interval":             {Split: "tracked split: runtime.event_poll_interval is not wired to runtime polling; no supported replacement"},
-		"runtime.decision_card_first_reminder":    {},
-		"runtime.decision_card_urgency":           {},
-		"runtime.decision_card_reminder_interval": {},
-		"runtime.decision_card_input_draft_ttl":   {},
-		"store":                                   elevatedSection,
-		"store.backend":                           {Elevated: true},
-		"store.sqlite":                            elevatedSection,
-		"store.sqlite.path":                       {Elevated: true, ProjectContainedPath: true},
-		"database":                                elevatedSection,
-		"database.host":                           {Elevated: true},
-		"database.port":                           {Elevated: true},
-		"database.name":                           {Elevated: true},
-		"database.user":                           {Elevated: true},
-		"database.password":                       {Elevated: true, InlineSecret: true},
-		"database.password_secret_key":            {Elevated: true, SecretReference: true},
-		"database.password_file":                  {Elevated: true, SecretReference: true},
-		"database.password_env":                   {Elevated: true, SecretReference: true},
-		"database.sslmode":                        {Elevated: true},
-		"database.pool_size":                      {Elevated: true},
-		"workspace":                               section,
-		"workspace.backend":                       {},
-		"workspace.allow_exec_on_host":            {Elevated: true},
-		"workspace.image":                         {Elevated: true},
-		"workspace.docker_bin":                    {Elevated: true},
-		"workspace.host_root":                     {Elevated: true},
-		"workspace.network":                       {Elevated: true},
-		"llm":                                     section,
-		"llm.backend":                             {},
-		"llm.models":                              section,
-		"llm.session":                             section,
-		"llm.session.lock_ttl":                    {},
-		"llm.session.rotate_after_turns":          {},
-		"llm.session.rotate_on_parse_failures":    {},
-		"llm.provider_limits":                     section,
-		"llm.claude_cli":                          section,
-		"llm.claude_cli.command":                  {Elevated: true},
-		"llm.claude_cli.timeout":                  {},
-		"llm.claude_cli.output_format":            {},
-		"llm.claude_cli.retries":                  {Split: "tracked split: llm.claude_cli.retries remains unsupported/inert until #1803 promotes a production runtime owner; no supported replacement"},
-		"llm.claude_cli.no_session_persistence":   {Split: "tracked split: llm.claude_cli.no_session_persistence remains unsupported/inert until #1803 promotes a production runtime owner; no supported replacement"},
-		"llm.claude_cli.use_tmux":                 {Split: "tracked split: llm.claude_cli.use_tmux remains unsupported/inert until #1803 promotes a production runtime owner; no supported replacement"},
-		"llm.openai_compatible":                   section,
-		"llm.openai_compatible.base_url":          {Elevated: true},
-		"llm.openai_responses":                    section,
-		"llm.openai_responses.base_url":           {Elevated: true},
-		"platform":                                section,
-		"platform.packs":                          section,
-		"platform.packs.platform_dirs":            {Elevated: true},
-		"channels":                                section,
-		"channels.bindings":                       elevatedSection,
-		"budget":                                  section,
-		"budget.global_monthly_cap":               {},
-		"budget.per_entity_monthly_cap":           {},
-		"budget.system_monthly_cap":               {},
-		"budget.human_tasks":                      section,
-		"budget.human_tasks.max_tasks_per_week":   {},
-		"budget.human_tasks.budget_reset":         {},
-		"budget.human_tasks.auto_expire_hours":    {},
-		"budget.human_tasks.categories_enabled":   {},
-		"paths":                                   section,
-		"paths.swarm_dir":                         {Elevated: true},
-		"paths.platform_spec_path":                {ProjectContainedPath: true},
-		"paths.monitor_dir":                       {Elevated: true},
-		"paths.agent_config_map_file":             {ProjectContainedPath: true},
-		"paths.verification_gates_file":           {ProjectContainedPath: true},
-		"paths.tooling_lock_file":                 {ProjectContainedPath: true},
 	}
 }
 
@@ -865,7 +816,10 @@ func unknownUnifiedConfigDiagnostic(path string, layer unifiedConfigLayer, locat
 	parts := strings.Split(path, ".")
 	parent, key := parts[:len(parts)-1], parts[len(parts)-1]
 	allowed := map[string]struct{}{}
-	for candidate := range unifiedConfigRules() {
+	for candidate, rule := range config.SourceKeyRules() {
+		if !rule.Supported() {
+			continue
+		}
 		fields := strings.Split(candidate, ".")
 		if len(fields) == len(parts) && strings.Join(fields[:len(fields)-1], ".") == strings.Join(parent, ".") {
 			allowed[fields[len(fields)-1]] = struct{}{}
@@ -911,38 +865,19 @@ func unifiedConfigDiagnosticsFromError(err error) []unifiedConfigDiagnostic {
 }
 
 func unifiedConfigDelegatedSwarmEnvSources(RepoRoot, explicitPath string) map[string]string {
-	out := map[string]string{}
-	var err error
-	RepoRoot, err = requireInvocationRootPath(RepoRoot)
+	RepoRoot, err := requireInvocationRootPath(RepoRoot)
 	if err != nil {
-		return out
+		return map[string]string{}
 	}
 	layers, _ := discoverUnifiedConfigLayers(RepoRoot, explicitPath)
-	var merged yaml.Node
-	merged.Kind = yaml.MappingNode
-	for _, layer := range layers {
-		raw, err := os.ReadFile(layer.Path)
-		if err != nil {
-			continue
-		}
-		var doc yaml.Node
-		if err := yaml.Unmarshal(raw, &doc); err != nil {
-			continue
-		}
-		root := yamlDocumentRoot(&doc)
-		if root == nil || root.Kind != yaml.MappingNode {
-			continue
-		}
-		if diagnostics := validateUnifiedConfigNode(root, layer, RepoRoot); len(unifiedConfigBlockers(diagnostics)) > 0 {
-			continue
-		}
-		mergeYAMLMapping(&merged, root)
-	}
-	delegatedEnv := strings.TrimSpace(yamlScalarPath(&merged, "database", "password_env"))
-	if delegatedEnv == "" {
-		return out
-	}
-	if name := delegatedEnv; strings.HasPrefix(name, "SWARM_") {
+	merged, _, _ := composeUnifiedConfigLayers(layers, RepoRoot)
+	return unifiedConfigDelegation(&merged)
+}
+
+func unifiedConfigDelegation(merged *yaml.Node) map[string]string {
+	out := map[string]string{}
+	name := strings.TrimSpace(yamlScalarPath(merged, "database", "password_env"))
+	if strings.HasPrefix(name, "SWARM_") {
 		out[name] = "database.password_env"
 	}
 	return out
