@@ -1,7 +1,7 @@
 {
-  "baseline": "issue-2539-approved-queue-rebase-e63f4bdb1",
-  "previous_baseline": "e63f4bdb197e473fe35e94f65ff3c77655957123",
-  "contract_change": "Regenerated from exact master and rebased run-fixture binaries: all 45 master cells reproduced; 10 JSON cells change only embedded platform source identity and the +1 coordinate shift from line 6620. The 35 other outputs, non-provenance fields, assertions and path-only normalization remain unchanged.",
+  "baseline": "issue-2544-final-frozen-master-qualification-provenance",
+  "previous_baseline": "d043efecf45d225e6e83935505d0ba6c1db3278c",
+  "contract_change": "Actual frozen master/candidate compiled binaries reproduce all 45 master hashes twice. Ten JSON surfaces change only source_file/source_line/source_column inside provenance objects for the qualification spec; all 35 other surfaces, assertions and normalization remain unchanged.",
   "normalization": "repository and isolated CLI scope absolute paths only; source filenames, cache identity and coordinates remain exact",
   "results": [
     {
@@ -12,7 +12,7 @@
     {
       "fixture": "examples/routing/template-select-or-create",
       "surface": "describe-json",
-      "stdout_sha256": "c7f6cd951d35ef16ac1d55a29d8d7b24e823b75c666290460268945358e4beee"
+      "stdout_sha256": "88704b1f9051e136ea4aff1ff4ab1a107c96f6accb9ec499f154f9e91dd32a9a"
     },
     {
       "fixture": "examples/routing/template-select-or-create",
@@ -27,7 +27,7 @@
     {
       "fixture": "examples/routing/template-select-or-create",
       "surface": "describe-graph-json",
-      "stdout_sha256": "c7f6cd951d35ef16ac1d55a29d8d7b24e823b75c666290460268945358e4beee"
+      "stdout_sha256": "88704b1f9051e136ea4aff1ff4ab1a107c96f6accb9ec499f154f9e91dd32a9a"
     },
     {
       "fixture": "examples/routing/template-select-or-create",
@@ -57,7 +57,7 @@
     {
       "fixture": "examples/routing/template-create-minted-key",
       "surface": "describe-json",
-      "stdout_sha256": "5fcaa2a7271a6801a856823e79ed281fea626ce02e40ce30ab7a11833d6d9acf"
+      "stdout_sha256": "d0bf3504d28a43de0e771c08ae88ed69a2a0e0a08e33d983d846b6d41f6d0e58"
     },
     {
       "fixture": "examples/routing/template-create-minted-key",
@@ -72,7 +72,7 @@
     {
       "fixture": "examples/routing/template-create-minted-key",
       "surface": "describe-graph-json",
-      "stdout_sha256": "5fcaa2a7271a6801a856823e79ed281fea626ce02e40ce30ab7a11833d6d9acf"
+      "stdout_sha256": "d0bf3504d28a43de0e771c08ae88ed69a2a0e0a08e33d983d846b6d41f6d0e58"
     },
     {
       "fixture": "examples/routing/template-create-minted-key",
@@ -102,7 +102,7 @@
     {
       "fixture": "examples/integrations/telegram-agent",
       "surface": "describe-json",
-      "stdout_sha256": "c784925d4d81379705f427a327531695c09645a216fc167705543a05840d3a48"
+      "stdout_sha256": "f0a8e46261b815826d449f450077fcc72414e01a66951aa71ce7c20030c2ff64"
     },
     {
       "fixture": "examples/integrations/telegram-agent",
@@ -117,7 +117,7 @@
     {
       "fixture": "examples/integrations/telegram-agent",
       "surface": "describe-graph-json",
-      "stdout_sha256": "b5a16a733851bbfcd8c33e31b112f7924440151239756403077369972fa7e1b9"
+      "stdout_sha256": "5182eaf0fe11845cae11a69ac01ee4a91118b8377a3e9c6bb16f2ab3fe85f766"
     },
     {
       "fixture": "examples/integrations/telegram-agent",
@@ -147,7 +147,7 @@
     {
       "fixture": "examples/routing/fan-in/barrier",
       "surface": "describe-json",
-      "stdout_sha256": "11d04e73ad63b10e086bee677bb4d49abd2fd9af4874e58a5f6a31f85054ab00"
+      "stdout_sha256": "16a6c61469c7c36b6fae9e6332935a8fccf92ccf3df62c99394c3c27ab80d589"
     },
     {
       "fixture": "examples/routing/fan-in/barrier",
@@ -162,7 +162,7 @@
     {
       "fixture": "examples/routing/fan-in/barrier",
       "surface": "describe-graph-json",
-      "stdout_sha256": "aab5478d5718f966ab3be8751de22ec912c4e8445a43c70dcc3f6615c87feb52"
+      "stdout_sha256": "829eb032d6fe2c7a2229e196a68962c3b51896afa3448d379babe0b899167430"
     },
     {
       "fixture": "examples/routing/fan-in/barrier",
@@ -192,7 +192,7 @@
     {
       "fixture": "internal/releasee2e/testdata/golden_agent_workload",
       "surface": "describe-json",
-      "stdout_sha256": "7ea528d7217e4090276a80693c3967e9deb44bd5803f9951bb04371a29e5408d"
+      "stdout_sha256": "517c2e644bcd3b369ff532012b7365298afca945b4541fb526038bf1d0fc2bde"
     },
     {
       "fixture": "internal/releasee2e/testdata/golden_agent_workload",
@@ -207,7 +207,7 @@
     {
       "fixture": "internal/releasee2e/testdata/golden_agent_workload",
       "surface": "describe-graph-json",
-      "stdout_sha256": "5331dd9f5fcbc6ec77cc216e1f2adfd5a8c94025db7705bafa0bb5028bcd3a49"
+      "stdout_sha256": "37db9a1ad2a0afeaa442093a8a1d3611001eca98bf7a512f1f4409aed9490c22"
     },
     {
       "fixture": "internal/releasee2e/testdata/golden_agent_workload",
