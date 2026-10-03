@@ -19,6 +19,7 @@ type fakeDocker struct {
 	calls                 []string
 	removeLeavesContainer bool
 	beforeCall            func(string)
+	afterCall             func(string)
 }
 
 func (d *fakeDocker) CombinedOutput(_ context.Context, args ...string) ([]byte, error) {
@@ -33,7 +34,11 @@ func (d *fakeDocker) CombinedOutput(_ context.Context, args ...string) ([]byte, 
 		d.outputs[inspectKey] = []byte("Error: No such object: " + args[2])
 		d.errors[inspectKey] = errors.New("exit status 1")
 	}
-	return d.outputs[key], d.errors[key]
+	out, err := d.outputs[key], d.errors[key]
+	if d.afterCall != nil {
+		d.afterCall(key)
+	}
+	return out, err
 }
 
 func TestServiceRegistryPreparedStateClearsWithoutDockerAuthority(t *testing.T) {
@@ -629,6 +634,13 @@ func testRegistryRecord(t *testing.T, state ServiceState) (*ServiceRegistry, Ser
 		Labels: serviceLabels("owner", "daemon", "runner", "lease", "hash"),
 	}
 	if err := registry.putRecord(record); err != nil {
+		t.Fatal(err)
+	}
+	lease, acquired, err := acquireFileLock(registry.leasePath(record.LeaseID), false)
+	if err != nil || !acquired {
+		t.Fatalf("create service authority: acquired=%v err=%v", acquired, err)
+	}
+	if err := lease.Close(); err != nil {
 		t.Fatal(err)
 	}
 	return registry, record

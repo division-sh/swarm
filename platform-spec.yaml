@@ -22495,6 +22495,14 @@ test_specification:
         tools, writable scratch bytes/inodes and host admission checks precede planning; selected native tools,
         PostgreSQL capacity and private socket geometry are checked before workers. Long socket paths fail closed
         rather than silently using another scratch root. Actual complete receipts, not modeled ETA, establish cost.
+        Concurrent private service reconciliation treats discovery as a worklist and validates the current row
+        after Docker observation, without holding a registry lock across Docker calls. A published container must
+        match exact constructor identity and cidfile evidence. A pre-ID container is admissible only during creating
+        with both exact service and creator locks held and matching name/image/labels/spec. Missing, foreign,
+        duplicate, forged, corrupt and abandoned authority fails closed. A discovered object whose row was retired
+        is harmless only after its exact current absence is verified; surviving rowless objects remain blocking.
+        Observation never creates missing authority. Provisioning and pre-start failure preserve unrelated service
+        cleanup and run-lease errors, and retain ambiguous evidence without partial qualification credit.
       complexity_qualification: >-
         The committed complexity record contains reviewed tool, threshold and source-census policy only.
         Both pinned upstream analyzers independently measure immutable base and head, enforcing non-increasing
