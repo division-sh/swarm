@@ -39,13 +39,23 @@ func TestRestoredOriginalValueCanResumeBoundReset(t *testing.T) {
 		Role: reservations[0].Role, StoreKey: written.StoreKey, Kind: CredentialAdmissionWritten,
 		Receipt: written.Receipt, ValueSeal: written.ValueSeal,
 	}
+	signing, err := credentials.Admit(context.Background(), CredentialWriteRequest{
+		StoreKey: operationCredentialStoreKey(reservations[1].StoreKey, parentID, reservations[1].Role),
+		Value:    "old-signing-value", Receipt: credentialReceipt(parentID, reservations[1].Role),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	identityID := uuid.NewString()
 	op := Operation{
 		OperationID: parentID, RequestKeyHash: uuid.NewString(), RequestHash: uuid.NewString(), PrincipalID: "principal-a",
 		Verb: VerbConnect, Provider: candidate.Provider, Interface: candidate.Interface, Coordinate: candidate.Coordinate,
 		TargetSelector: candidate.Target.Selector, Posture: candidate.Posture, Ceremony: candidate.Ceremony,
 		Phase: PhaseAwaitingOperatorConfirmation, Revision: 5, CredentialReservations: reservations,
-		CredentialAdmissions: []CredentialAdmission{admission}, IdentityOperationID: identityID, BindingRevision: 1,
+		CredentialAdmissions: []CredentialAdmission{admission, {
+			Role: reservations[1].Role, StoreKey: signing.StoreKey, Kind: CredentialAdmissionWritten,
+			Receipt: signing.Receipt, ValueSeal: signing.ValueSeal,
+		}}, IdentityOperationID: identityID, BindingRevision: 1,
 		RequestedAt: now, UpdatedAt: now,
 	}
 	op.SlotKey = StartRequest{Provider: op.Provider, Interface: op.Interface, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector}.SlotKey()

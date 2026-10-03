@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/testutil"
+	"gopkg.in/yaml.v3"
 )
 
 func TestDormantIngressProvisionRestartSignedInputBothStores(t *testing.T) {
@@ -223,10 +225,37 @@ func TestDormantIngressDoesNotWaiveLiveModelReadiness(t *testing.T) {
 }
 
 func TestDormantIngressDoesNotWaiveIndependentOutboundCredential(t *testing.T) {
+	for _, signingKey := range []string{"webhook_signing.telegram", "telegram_bot_token"} {
+		t.Run(signingKey, func(t *testing.T) {
+			testDormantIngressDoesNotWaiveIndependentOutboundCredential(t, signingKey)
+		})
+	}
+}
+
+func testDormantIngressDoesNotWaiveIndependentOutboundCredential(t *testing.T, signingKey string) {
+	t.Helper()
 	isolateCLIAPIConfigEnv(t)
 	t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
-	t.Setenv("TELEGRAM_BOT_TOKEN", "")
+	unsetEnvForTest(t, "TELEGRAM_BOT_TOKEN")
+	unsetEnvForTest(t, "telegram_bot_token")
 	root := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
+	path := filepath.Join(root, "telegram-ingress", "schema.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema map[string]any
+	if err := yaml.Unmarshal(data, &schema); err != nil {
+		t.Fatal(err)
+	}
+	ingress := schema["ingress"].(map[string]any)
+	providers := ingress["providers"].([]any)
+	providers[0].(map[string]any)["signing_secret"] = signingKey
+	data, err = yaml.Marshal(schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeStandingCandidateFile(t, path, string(data))
 	writeStandingCandidateFile(t, filepath.Join(root, "schema.yaml"), `name: telegram-agent
 imports:
   provider_trigger_events:
@@ -243,12 +272,13 @@ imports:
   connector_packs:
     - provider: telegram
       tool: telegram.send_message
-  provider_trigger_events:
-    - provider: telegram
-      event: inbound.telegram.text_message
 stages: []
 `)
-	writeStandingCandidateFile(t, filepath.Join(root, "telegram-chat", "agents.yaml"), "{}\n")
+	for _, file := range []string{"agents.yaml", "events.yaml"} {
+		if err := os.Remove(filepath.Join(root, "telegram-chat", file)); err != nil {
+			t.Fatal(err)
+		}
+	}
 	writeStandingCandidateFile(t, filepath.Join(root, "telegram-chat", "nodes.yaml"), `independent-notifier:
   execution_type: system_node
   subscribes_to: [platform.boot]
@@ -268,7 +298,7 @@ stages: []
 		ConfigPath:    writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", filepath.Join(t.TempDir(), "outbound-readiness.sqlite"), channelOnboardingHostWorkspaceFields()),
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", WorkspaceBackend: "host", WorkspaceBackendSet: true,
 		TestLLMRuntime: servedNoopLLMRuntime{}, Output: &output})
-	if code == 0 || ctx.Err() != nil || !strings.Contains(output.String(), "missing required credentials") || !strings.Contains(output.String(), "telegram_bot_token") || strings.Contains(output.String(), "[22/22]") {
+	if code == 0 || ctx.Err() != nil || !strings.Contains(output.String(), "credential_key_exists @ telegram_bot_token") || !strings.Contains(output.String(), "required by tool telegram.send_message") || !strings.Contains(output.String(), "independent-notifier") || strings.Contains(output.String(), "[22/22]") {
 		t.Fatalf("dormant ingress waived independent outbound demand: exit=%d context=%v\n%s", code, ctx.Err(), output.String())
 	}
 }

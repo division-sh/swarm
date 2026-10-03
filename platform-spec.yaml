@@ -12870,8 +12870,8 @@ flow_model:
         That boundary refreshes only its selected binding: frozen observations for every other binding, including
         consumers of shared keys, must remain current before and after credential admission. An unrelated binding's
         provisioning, deletion or rotation is not adopted through a sibling connect.
-        Exact observation tokens are revalidated before activation mutation and publication; no credential epoch,
-        watcher, default credential, compatibility path or provider-specific waiver is introduced.
+        Exact observation tokens are revalidated before activation mutation and publication; no watcher,
+        default credential, compatibility path or provider-specific waiver is introduced.
         Structurally valid retained learned authority whose successful seal or receipt observation is no longer current
         has the finite recovery_required disposition, not process-fatal credential absence. A deleted learned key retains
         both key absence and its recovery responsibility. Every required role is still observed: invalid values,
