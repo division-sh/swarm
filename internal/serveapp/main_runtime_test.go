@@ -8367,13 +8367,19 @@ func TestValidateServeGatewayURLEnvForNonDevRejectsAnyRetiredURLEnv(t *testing.T
 			if err == nil {
 				t.Fatal("non-dev gateway env validation unexpectedly accepted retired URL env")
 			}
-			for _, want := range []string{tt.name, "retired", "unset " + tt.name, "ToolGatewayBinding"} {
+			for _, want := range []string{
+				"env/generated_boundary @ " + tt.name,
+				"generated final-boundary env must be injected by Swarm, not set in the parent process",
+				"unset " + tt.name,
+			} {
 				if !strings.Contains(err.Error(), want) {
 					t.Fatalf("error = %v, want %q", err, want)
 				}
 			}
-			if strings.Contains(err.Error(), "MCP listener port") {
-				t.Fatalf("error still suggests port-matching URL env is valid: %v", err)
+			for _, notWant := range []string{"retired", "MCP listener port", "ToolGatewayBinding"} {
+				if strings.Contains(err.Error(), notWant) {
+					t.Fatalf("error restored obsolete gateway translation %q: %v", notWant, err)
+				}
 			}
 		})
 	}
