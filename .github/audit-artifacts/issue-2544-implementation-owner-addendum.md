@@ -80,14 +80,20 @@ introduced.
 
 ## Status
 
-The hosted V10 experiment subsequently hit the gate's explicit stop condition:
-new lifecycle smoke passed while the only protected summary remained old core
-success. Implementation is frozen pending a narrow re-gate; exact observations
-and the separate review block are recorded in `issue-2544-tier-edit-stop.md`.
+The hosted V10 experiment hit the original stop condition: fresh lifecycle smoke
+passed while the only protected summary remained old core success. Exact facts
+and the separate review block remain in `issue-2544-tier-edit-stop.md`.
+Independent re-gate5966450116 now permits resumption after documentation sync.
+It rejects an early-held summary and withdraws automatic post-success invalidation.
+Keep the existing late five-minute summary/current-body/head check; remove edited.
+An unmet tier increase requires a new signed head plus successful higher-tier CI,
+with draft/non-mergeable fencing until qualification. Lead compares the current
+body/current-head plan and actual local receipts at final merge, including edits
+after approval. No new status, credential, authorization or waiting owner.
 
 Focused planner/timing/catalogue/runner controls and the updated public backend
 ledger have passed during implementation. These are not full-corpus, hosted
-edited-body, candidate cost or literal post-merge proof. Lifecycle remains
+new-head higher-tier acceptance, candidate cost or literal post-merge proof. Lifecycle remains
 provisional until comparable hosted core/lifecycle/full whole-run cost is
 measured; collapse it into full if savings are below the binding 20% threshold.
 #2525 is still open and its actual policy/partition delta must be integrated if

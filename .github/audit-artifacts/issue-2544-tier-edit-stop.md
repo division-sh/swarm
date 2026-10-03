@@ -4,6 +4,15 @@ Agent-g, 2026-10-03. Frozen implementation:
 `8714bf5f0f4d3b0acc23b93dca93c0b0b201808c`.
 Binding gate: https://github.com/division-sh/swarm/issues/2544#issuecomment-5965227266.
 
+**Historical stop, superseded by gate5966450116 (approved as amended).** The
+observations below remain immutable counterexample evidence. The proposed early
+summary is rejected, and automatic post-success revocation is withdrawn. Keep
+the late five-minute summary, remove edited, and require a new signed head with
+qualifying higher-tier CI after any unmet increase. Draft/non-mergeable fencing
+and the lead's final current-body/current-head/local-receipt comparison apply.
+Implementation may resume after the synchronized audit/issue/watchlist update.
+This is not merge approval or lifecycle/full credit.
+
 ## Exact Observations
 
 1. Core run `37101983331`, attempt 1, completed successfully on the frozen head.
