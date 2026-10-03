@@ -2,9 +2,11 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/packs"
@@ -15,6 +17,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -28,6 +31,7 @@ type WorkflowContractValidationOptions struct {
 	ProviderCredentials            runtimecredentials.Store
 	ManagedCredentials             runtimemanagedcredentials.Store
 	CheckMCPReachable              bool
+	MCPDiscoveryTimeout            time.Duration
 	StrictEmitSchemas              bool
 	FatalToolImplementationWarning bool
 	FatalBootWarnings              bool
@@ -43,19 +47,18 @@ type WorkflowContractValidationOptions struct {
 }
 
 type WorkflowContractValidationResult struct {
-	BootReport                       runtimebootverify.Report
-	ToolImplementationWarnings       []error
-	MissingEmitSchemaEventTypes      []string
-	GeneratedEmitSchemaErrors        []error
-	GeneratedToolSchemaClosureErrors []error
-	CapabilitySubjects               []packs.Subject
-	HarnessInjectedInputCount        int
-	HarnessObservedOutputCount       int
-	HarnessInputDeclarations         []string
-	HarnessOutputDeclarations        []string
-	ProductionValid                  bool
-	mockConnectorResponses           *providerconnectors.MockResponsePlan
-	bootEffectReachability           runtimebootverify.SourceBootEffectReachability
+	BootReport                  runtimebootverify.Report
+	ToolImplementationWarnings  []error
+	MissingEmitSchemaEventTypes []string
+	GeneratedEmitSchemaErrors   []error
+	CapabilitySubjects          []packs.Subject
+	HarnessInjectedInputCount   int
+	HarnessObservedOutputCount  int
+	HarnessInputDeclarations    []string
+	HarnessOutputDeclarations   []string
+	ProductionValid             bool
+	mockConnectorResponses      *providerconnectors.MockResponsePlan
+	bootEffectReachability      runtimebootverify.SourceBootEffectReachability
 }
 
 func DefaultWorkflowContractValidationOptions(credentials runtimecredentials.Store, posture executionposture.Posture) WorkflowContractValidationOptions {
@@ -89,13 +92,64 @@ func StructuralWorkflowContractValidationOptions() WorkflowContractValidationOpt
 // ValidateWorkflowContractSurface is the canonical verify/boot contract-validation entrypoint
 // for prompt guards, bootverify errors, tool implementation validation, and explicit emit-schema coverage.
 func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.Source, opts WorkflowContractValidationOptions) (result WorkflowContractValidationResult, err error) {
-	result = WorkflowContractValidationResult{ProductionValid: true}
+	result = WorkflowContractValidationResult{
+		ProductionValid: true,
+		BootReport:      runtimebootverify.Report{Purpose: opts.Purpose, Observations: workflowAdmissionObservations(opts.Purpose)},
+	}
 	reportBlocks := false
-	defer func() {
-		if err != nil && opts.Purpose == runtimebootverify.StructuralValidation && !reportBlocks {
-			result.BootReport.Add(runtimebootverify.NewHardInvalidityFinding("workflow_contract_validation", "global", err.Error(), "Fix the source declaration before validation or execution."))
-			result.BootReport.Sort()
+	blockingPrerequisite := ""
+	if source != nil {
+		if bundle, ok := semanticview.Bundle(source); ok && bundle.SourceArtifact != nil {
+			result.BootReport.SourceArtifactHash = bundle.SourceArtifact.BundleHash()
 		}
+	}
+	phase := "source_validation"
+	result.startAdmissionClause(phase)
+	defer func() {
+		if result.BootReport.SourceArtifactHash != "" {
+			for i := range result.BootReport.Observations {
+				observation := &result.BootReport.Observations[i]
+				if observation.Owner == workflowAdmissionOwner {
+					observation.Subject = "source:" + result.BootReport.SourceArtifactHash
+				}
+			}
+		}
+		if ctx.Err() != nil {
+			result.BootReport.Interrupted = result.BootReport.Interrupted || errors.Is(ctx.Err(), context.Canceled)
+			if err == nil {
+				err = ctx.Err()
+			}
+		}
+		if err != nil && !reportBlocks {
+			finding := runtimebootverify.NewHardInvalidityFinding("workflow_contract_validation", "global", err.Error(), "Fix the named admission input before validation or execution.")
+			finding.FailureClass = failures.ClassSchemaInvalid
+			if failure, ok := failures.As(err); ok {
+				finding.FailureClass = failure.Failure.Class
+			} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				finding.FailureClass = failures.ClassDependencyUnavailable
+			}
+			result.BootReport.Add(finding)
+			for i := range result.BootReport.Observations {
+				observation := &result.BootReport.Observations[i]
+				if observation.CheckID == phase && observation.Owner == workflowAdmissionOwner {
+					observation.Status, observation.Reason = runtimebootverify.AdmissionFailed, "canonical admission clause rejected the selected subject; see findings"
+					observation.FinishedAt, observation.FailureClass = time.Now().UTC(), finding.FailureClass
+				}
+			}
+		}
+		if err != nil {
+			dependency := phase
+			if reportBlocks {
+				dependency = blockingPrerequisite
+			}
+			for i := range result.BootReport.Observations {
+				observation := &result.BootReport.Observations[i]
+				if observation.Owner == workflowAdmissionOwner && observation.Status == runtimebootverify.AdmissionNotRun && dependency != "" {
+					observation.Dependencies = []string{dependency}
+				}
+			}
+		}
+		result.BootReport.Sort()
 	}()
 	if source == nil {
 		return result, fmt.Errorf("semantic source is required")
@@ -141,29 +195,38 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 		result.bootEffectReachability = bootEffects.Reachability
 	}
 
-	result.BootReport = runtimebootverify.Run(ctx, source, runtimebootverify.Options{
+	result.finishAdmissionClause(phase)
+	phase = ""
+	registered := runtimebootverify.Run(ctx, source, runtimebootverify.Options{
 		ExecutionPosture:        opts.ExecutionPosture,
 		Purpose:                 opts.Purpose,
 		Credentials:             opts.Credentials,
 		ManagedCredentials:      opts.ManagedCredentials,
 		EffectReachability:      result.bootEffectReachability,
 		CheckMCPReachable:       opts.CheckMCPReachable,
+		MCPDiscoveryTimeout:     opts.MCPDiscoveryTimeout,
 		ValidateModelResolution: opts.ValidateLLMModelResolution,
 		LLMProfile:              opts.LLMProfile,
 		ModelAliases:            opts.ModelAliases,
 	})
+	registered.Observations = append(result.BootReport.Observations, registered.Observations...)
+	result.BootReport = registered
 	if result.BootReport.HasErrors() {
 		reportBlocks = true
+		blockingPrerequisite = result.BootReport.Errors()[0].CheckID
 		return result, fmt.Errorf("boot verification failed:\n%s", formatWorkflowValidationFindings(result.BootReport.Errors(), true))
 	}
 	if opts.FatalBootWarnings {
 		warnings := filterWorkflowValidationFindings(result.BootReport.Warnings(), opts.ExcludedFatalBootWarningChecks...)
 		if len(warnings) > 0 {
 			reportBlocks = true
+			blockingPrerequisite = warnings[0].CheckID
 			return result, fmt.Errorf("boot verification blocked by policy-escalated findings:\n%s", formatWorkflowValidationFindings(warnings, true))
 		}
 	}
 
+	phase = "tool_implementation_validation"
+	result.startAdmissionClause(phase)
 	warnings, err := runtimetools.ValidateToolImplementations(source)
 	result.ToolImplementationWarnings = warnings
 	if err != nil {
@@ -172,7 +235,10 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	if opts.FatalToolImplementationWarning && len(warnings) > 0 {
 		return result, fmt.Errorf("tool implementation warnings:\n%s", formatValidationErrors(warnings))
 	}
+	result.finishAdmissionClause(phase)
 
+	phase = "emit_schema_coverage"
+	result.startAdmissionClause(phase)
 	emitRegistry := runtimetools.NewEmitRegistry(source, runtimeauthority.NewSourceProvider(source))
 	result.MissingEmitSchemaEventTypes = emitRegistry.GeneratedEmitSchemasForAgentRoles()
 	if opts.StrictEmitSchemas && len(result.MissingEmitSchemaEventTypes) > 0 {
@@ -182,22 +248,30 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 		}
 		return result, fmt.Errorf("emit schema strict mode enabled: %d agent-emitted schemas are missing explicit EventSchemaRegistry entries (sample: %s)", len(result.MissingEmitSchemaEventTypes), strings.Join(sample, ", "))
 	}
+	result.finishAdmissionClause(phase)
+	phase = "generated_emit_schema_validation"
+	result.startAdmissionClause(phase)
 	result.GeneratedEmitSchemaErrors = runtimetools.ValidateGeneratedEmitToolSchemasForSource(source)
 	if len(result.GeneratedEmitSchemaErrors) > 0 {
 		return result, fmt.Errorf("generated emit tool schema validation failed:\n%s", formatValidationErrors(result.GeneratedEmitSchemaErrors))
 	}
-	result.GeneratedToolSchemaClosureErrors = runtimetools.ValidateGeneratedToolSchemaClosureForSource(source)
-	if len(result.GeneratedToolSchemaClosureErrors) > 0 {
-		return result, fmt.Errorf("generated tool schema closure validation failed:\n%s", formatValidationErrors(result.GeneratedToolSchemaClosureErrors))
-	}
+	result.finishAdmissionClause(phase)
+	phase = "durable_activity_surface"
+	result.startAdmissionClause(phase)
 	activityErrors := validateDurableActivitySurface(source)
 	if len(activityErrors) > 0 {
 		return result, fmt.Errorf("durable activity validation failed:\n%s", formatValidationErrors(activityErrors))
 	}
+	result.finishAdmissionClause(phase)
+	phase = "provider_connector_surface"
+	result.startAdmissionClause(phase)
 	connectorErrors := providerconnectors.ValidateSource(source)
 	if len(connectorErrors) > 0 {
 		return result, fmt.Errorf("provider connector validation failed:\n%s", formatValidationErrors(connectorErrors))
 	}
+	result.finishAdmissionClause(phase)
+	phase = "standing_ingress_declaration"
+	result.startAdmissionClause(phase)
 	declarations, err := ResolveStandingTargetDeclarations(source, opts.ProviderTriggerCatalog)
 	if err != nil {
 		return result, fmt.Errorf("standing ingress validation failed: %w", err)
@@ -205,10 +279,14 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	for _, finding := range unsignedRawAdmissionFindings(declarations) {
 		result.BootReport.Add(finding)
 	}
+	result.finishAdmissionClause(phase)
+	phase = ""
 	result.BootReport.Sort()
 	if opts.Purpose == runtimebootverify.StructuralValidation {
 		return result, nil
 	}
+	phase = "provider_trigger_capability_projection"
+	result.startAdmissionClause(phase)
 	var providerCredentialOwner *runtimecredentials.SnapshotOwner
 	if opts.ProviderCredentials != nil {
 		providerCredentialOwner, err = runtimecredentials.NewSnapshotOwner(opts.ProviderCredentials)
@@ -220,6 +298,9 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	if err != nil {
 		return result, fmt.Errorf("provider trigger capability projection failed: %w", err)
 	}
+	result.finishAdmissionClause(phase)
+	phase = "channel_capability_projection"
+	result.startAdmissionClause(phase)
 	for _, plan := range opts.ChannelPlans {
 		subject, subjectErr := plan.CapabilitySubject()
 		if subjectErr != nil {
@@ -227,6 +308,9 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 		}
 		result.CapabilitySubjects = append(result.CapabilitySubjects, subject)
 	}
+	result.finishAdmissionClause(phase)
+	phase = "channel_activation_publication"
+	result.startAdmissionClause(phase)
 	activationPublication := opts.ChannelActivationPublication
 	if !activationPublication.Generation().Valid() {
 		activationPublication, err = channelonboarding.NewDeclaredOnlyChannelActivationPublication(nil)
@@ -244,10 +328,15 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 		}
 		result.CapabilitySubjects = append(result.CapabilitySubjects, subject)
 	}
+	result.finishAdmissionClause(phase)
+	phase = "capability_projection_normalization"
+	result.startAdmissionClause(phase)
 	result.CapabilitySubjects, err = packs.NormalizeSubjects(result.CapabilitySubjects)
 	if err != nil {
 		return result, fmt.Errorf("capability projection normalization failed: %w", err)
 	}
+	result.finishAdmissionClause(phase)
+	phase = ""
 
 	return result, nil
 }
