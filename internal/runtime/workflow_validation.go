@@ -97,6 +97,7 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 		BootReport:      runtimebootverify.Report{Purpose: opts.Purpose, Observations: workflowAdmissionObservations(opts.Purpose)},
 	}
 	reportBlocks := false
+	registryExecuted := false
 	blockingPrerequisite := ""
 	if source != nil {
 		if bundle, ok := semanticview.Bundle(source); ok && bundle.SourceArtifact != nil {
@@ -148,6 +149,9 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 					observation.Dependencies = []string{dependency}
 				}
 			}
+			if !registryExecuted {
+				result.BootReport.BlockRegisteredChecks("selected_source", dependency, "source admission prerequisite failed before registered checks could run")
+			}
 		}
 		result.BootReport.Sort()
 	}()
@@ -197,6 +201,7 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 
 	result.finishAdmissionClause(phase)
 	phase = ""
+	registryExecuted = true
 	registered := runtimebootverify.Run(ctx, source, runtimebootverify.Options{
 		ExecutionPosture:        opts.ExecutionPosture,
 		Purpose:                 opts.Purpose,

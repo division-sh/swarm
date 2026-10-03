@@ -2,6 +2,7 @@ package bootverify
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -193,6 +194,8 @@ func Run(ctx context.Context, source semanticview.Source, opts Options) Report {
 	report := Report{Purpose: opts.Purpose}
 	if !opts.Purpose.Valid() {
 		report.Add(NewHardInvalidityFinding("workflow_contract_validation", "global", "invalid validation purpose", "Select structural validation or execution admission."))
+		report.BlockRegisteredChecks("selected_source", "workflow_contract_validation", "invalid validation purpose prevents check execution")
+		report.Interrupted = errors.Is(ctx.Err(), context.Canceled)
 		return report
 	}
 	if source == nil {
@@ -202,6 +205,8 @@ func Run(ctx context.Context, source semanticview.Source, opts Options) Report {
 			Message:  "semantic source is not configured",
 			Location: "global",
 		})
+		report.BlockRegisteredChecks("selected_source", "workflow_contract_validation", "semantic source admission has not succeeded")
+		report.Interrupted = errors.Is(ctx.Err(), context.Canceled)
 		return report
 	}
 	checkCtx := newCheckerContext(ctx, source, opts)
