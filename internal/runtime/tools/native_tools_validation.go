@@ -14,20 +14,29 @@ import (
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
-func ValidateNativeToolBootConfig(ctx context.Context, posture executionposture.Posture, aliases llmselection.ModelAliases, source semanticview.Source, store runtimecredentials.Store, runtimes *llm.AgentRuntimeSet, workspaces workspace.Resolver) ([]error, error) {
+func ValidateNativeToolBootConfig(ctx context.Context, posture executionposture.Posture, aliases llmselection.ModelAliases, source semanticview.Source, store runtimecredentials.Store, providers llm.AgentProviderContractResolver, workspaces workspace.Resolver) ([]error, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if !posture.Valid() {
 		return nil, fmt.Errorf("native tool boot validation requires command execution purpose")
 	}
 	if source == nil {
-		return nil, nil
+		return nil, fmt.Errorf("native tool admission requires semantic source")
 	}
 	var failures []string
 	declarations := semanticview.AgentDeclarations(source)
 	localIDCounts := map[string]int{}
 	for _, declaration := range declarations {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		localIDCounts[declaration.LocalID]++
 	}
 	for _, declaration := range declarations {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		namePlan, err := semanticview.ScopedAgentNamePlan(source, declaration)
 		if err != nil {
 			failures = append(failures, err.Error())
@@ -42,24 +51,24 @@ func ValidateNativeToolBootConfig(ctx context.Context, posture executionposture.
 		if !actor.NativeTools.Any() {
 			continue
 		}
-		if runtimes == nil {
+		if providers == nil {
 			failures = append(failures, fmt.Sprintf("agent %s llm runtime resolver is required", strings.TrimSpace(agentID)))
 			continue
 		}
-		projected, err := llm.ResolveAgentExecution(posture, runtimes.ConfiguredDefault(), aliases, actor)
+		projected, err := llm.ResolveAgentExecution(posture, providers.ConfiguredDefault(), aliases, actor)
 		if err != nil {
 			failures = append(failures, fmt.Sprintf("agent %s execution selection: %v", strings.TrimSpace(agentID), err))
 			continue
 		}
-		resolved, err := runtimes.ResolveAgentRuntime(projected.Actor)
+		contract, err := providers.ResolveAgentProviderContract(projected.Actor)
 		if err != nil {
 			failures = append(failures, fmt.Sprintf("agent %s execution selection: %v", strings.TrimSpace(agentID), err))
 			continue
 		}
-		if resolved.Selection.Profile.ID == llmselection.BackendMock {
+		if projected.Selection.Profile.ID == llmselection.BackendMock {
 			continue
 		}
-		actor = resolved.Actor
+		actor = projected.Actor
 		_, err = namePlan.Materialize()
 		if err == nil {
 			flowID := strings.TrimSpace(declaration.OwnerFlowID)
@@ -82,13 +91,16 @@ func ValidateNativeToolBootConfig(ctx context.Context, posture executionposture.
 			continue
 		}
 		if err := validateNativeToolAgentCapabilityAdmission(ctx, actor, NativeToolAdmissionOptions{
-			Runtime:     resolved.Runtime,
-			Credentials: store,
-			Source:      source,
-			Workspaces:  workspaces,
+			ProviderContract: contract,
+			Credentials:      store,
+			Source:           source,
+			Workspaces:       workspaces,
 		}); err != nil {
 			failures = append(failures, err.Error())
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	if len(failures) == 0 {
 		return nil, nil

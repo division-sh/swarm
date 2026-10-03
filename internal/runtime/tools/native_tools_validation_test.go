@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -87,6 +88,124 @@ func nativeCapabilityRuntimeSet(t testing.TB, runtime llm.Runtime) *llm.AgentRun
 	return runtimes
 }
 
+func TestNativeToolBootAdmissionDoesNotConstructProviderOrWorkspaceRuntime(t *testing.T) {
+	source := wrapRootAgentBundle(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"agent": {ID: "agent", NativeTools: map[string]any{"bash": true, "file_io": true, "web_search": true}},
+		},
+	})
+	profile, err := llmselection.ResolveLiveBackend(llmselection.BackendClaudeCLI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	providers, err := llm.NewAgentProviderContracts(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimes, err := llm.NewAgentRuntimeSet(profile, llm.RuntimeFactory{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	regularCalls, admissionCalls := 0, 0
+	workspaces := nativeCapabilityAdmissionWorkspace{regularCalls: &regularCalls, admissionCalls: &admissionCalls}
+	for _, resolver := range []llm.AgentProviderContractResolver{providers, runtimes} {
+		if _, err := ValidateNativeToolBootConfig(context.Background(), executionposture.Live, nil, source, nil, resolver, workspaces); err != nil {
+			t.Fatalf("static native admission with %T: %v", resolver, err)
+		}
+	}
+	if regularCalls != 0 || admissionCalls != 0 {
+		t.Fatalf("provider-native capabilities resolved workspace: execution=%d, admission=%d", regularCalls, admissionCalls)
+	}
+}
+
+func TestNativeToolAdmissionRejectsInvalidContractBeforeCapabilityOrFallback(t *testing.T) {
+	actor := models.AgentConfig{ID: "actor", NativeTools: models.NativeToolConfig{Bash: true}}
+	contract := llm.AnthropicAPIProviderContract()
+	contract.Provider = ""
+	contract.NativeTools.Capabilities.Bash = true
+	if err := ValidateNativeToolAgentAdmission(context.Background(), actor, NativeToolAdmissionOptions{ProviderContract: contract}); err == nil || !strings.Contains(err.Error(), "provider is required") {
+		t.Fatalf("invalid provider contract admitted native capability: %v", err)
+	}
+}
+
+func TestNativeToolBootAdmissionConsumesReadOnlyWorkspaceInspection(t *testing.T) {
+	source := wrapRootAgentBundle(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"agent": {ID: "agent", NativeTools: map[string]any{"bash": true, "file_io": true}},
+		},
+	})
+	profile, err := llmselection.ResolveLiveBackend(llmselection.BackendAnthropic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	providers, err := llm.NewAgentProviderContracts(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := workspace.DefaultHostConfig()
+	cfg.WorkspaceRoot = filepath.Join(t.TempDir(), "not-created")
+	inspection, err := workspace.NewHostCapabilityInspection(cfg, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ValidateNativeToolBootConfig(context.Background(), executionposture.Live, nil, source, nil, providers, inspection); err != nil {
+		t.Fatalf("read-only native fallback admission: %v", err)
+	}
+	if _, err := os.Stat(cfg.WorkspaceRoot); !os.IsNotExist(err) {
+		t.Fatalf("native admission created workspace root: %v", err)
+	}
+}
+
+func TestNativeToolBootAdmissionRejectsMissingSourceAndPreservesCancellation(t *testing.T) {
+	if _, err := ValidateNativeToolBootConfig(context.Background(), executionposture.Live, nil, nil, nil, nil, nil); err == nil || !strings.Contains(err.Error(), "requires semantic source") {
+		t.Fatalf("missing source was admitted: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := ValidateNativeToolBootConfig(ctx, executionposture.Live, nil, nil, nil, nil, nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation was hidden: %v", err)
+	}
+}
+
+func TestNativeToolStaticInspectionUsesLoadedScopedDeclarations(t *testing.T) {
+	profile, err := llmselection.ResolveLiveBackend(llmselection.BackendAnthropic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	providers, err := llm.NewAgentProviderContracts(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range []struct {
+		name         string
+		load         func(*testing.T) semanticview.Source
+		declarations int
+	}{
+		{"project-and-flow", scopedNativeToolAgentFixture, 4},
+		{"same-flow-projects", sameFlowScopedNativeToolAgentFixture, 2},
+		{"per-instance-route", scopedFlowWorkspaceNativeToolFixture, 1},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			source := row.load(t)
+			if got := len(semanticview.AgentDeclarations(source)); got != row.declarations {
+				t.Fatalf("loaded declaration census = %d, want %d", got, row.declarations)
+			}
+			cfg := workspace.DefaultHostConfig()
+			cfg.WorkspaceRoot = filepath.Join(t.TempDir(), "not-created")
+			inspection, err := workspace.NewHostCapabilityInspection(cfg, source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := ValidateNativeToolBootConfig(context.Background(), executionposture.Live, nil, source, nil, providers, inspection); err != nil {
+				t.Fatalf("loaded scoped native admission: %v", err)
+			}
+			if _, err := os.Stat(cfg.WorkspaceRoot); !os.IsNotExist(err) {
+				t.Fatalf("loaded admission materialized a workspace: %v", err)
+			}
+		})
+	}
+}
+
 func TestExecutorNativeToolAdmissionUsesActorSelectedProviderContract(t *testing.T) {
 	mockActor := models.AgentConfig{ID: "mock-agent", NativeTools: models.NativeToolConfig{FileIO: true}}
 	liveActor := models.AgentConfig{ID: "live-agent", NativeTools: models.NativeToolConfig{FileIO: true}}
@@ -108,8 +227,8 @@ func TestExecutorNativeToolAdmissionUsesActorSelectedProviderContract(t *testing
 	if err != nil {
 		t.Fatalf("live nativeToolAdmissionOptions: %v", err)
 	}
-	mockContract, _ := llm.ProviderContractForRuntime(mockOpts.Runtime)
-	liveContract, _ := llm.ProviderContractForRuntime(liveOpts.Runtime)
+	mockContract := mockOpts.ProviderContract
+	liveContract := liveOpts.ProviderContract
 	if mockContract.Provider != llmselection.ProviderMock || liveContract.Provider != llmselection.ProviderAnthropic {
 		t.Fatalf("actor provider contracts = mock:%q live:%q", mockContract.Provider, liveContract.Provider)
 	}

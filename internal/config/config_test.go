@@ -8,7 +8,6 @@ import (
 	"time"
 
 	runtimesharding "github.com/division-sh/swarm/internal/runtime/core/sharding"
-	"gopkg.in/yaml.v3"
 )
 
 func TestLoadRejectsRetiredExecutionPosture(t *testing.T) {
@@ -358,7 +357,7 @@ func TestValidate_OpenAICompatibleRequiresProfileOwnedConfig(t *testing.T) {
 	if err := c.Validate(); err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
-	if err := yaml.Unmarshal([]byte("llm:\n  openai_compatible:\n    default_model: gpt-compatible\n"), c); err == nil || !strings.Contains(err.Error(), "default_model") || !strings.Contains(err.Error(), "Valid fields: base_url") {
+	if err := decodeConfigSourceTest("llm:\n  openai_compatible:\n    default_model: gpt-compatible\n", c); err == nil || !strings.Contains(err.Error(), "default_model") || !strings.Contains(err.Error(), "Valid fields: base_url") {
 		t.Fatalf("config source error = %v, want unsupported model config rejection", err)
 	}
 }
@@ -384,7 +383,7 @@ func TestValidate_OpenAIResponsesUsesProfileOwnedDefaultAndOverride(t *testing.T
 
 func TestValidate_RejectsRetiredRuntimeMode(t *testing.T) {
 	c := &Config{Runtime: RuntimeConfig{}}
-	if err := yaml.Unmarshal([]byte("llm:\n  runtime_mode: api\n"), c); err == nil || !strings.Contains(err.Error(), "runtime_mode") || !strings.Contains(err.Error(), "Valid fields: backend") {
+	if err := decodeConfigSourceTest("llm:\n  runtime_mode: api\n", c); err == nil || !strings.Contains(err.Error(), "runtime_mode") || !strings.Contains(err.Error(), "Valid fields: backend") {
 		t.Fatalf("config source error = %v, want unsupported runtime_mode rejection", err)
 	}
 }

@@ -798,7 +798,7 @@ func TestValidateManagedProviderPreflightFailsClosedWhenLiveClaudeRuntimeLacksSt
 func TestClaudeStartupCensusesScopedAgentsHiddenByAmbiguousAlias(t *testing.T) {
 	source := ambiguousScopedClaudeStartupSource(t)
 	cfg := &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendClaudeCLI}}
-	err := validateSelectedBackendModelAliasesForDeclaredAgents(executionposture.Live, cfg, source)
+	err := ValidateDeclaredAgentModelAdmission(executionposture.Live, cfg, source)
 	if err == nil || !strings.Contains(err.Error(), "flow packages/project-a agent shared-worker") || !strings.Contains(err.Error(), "missing-live-alias") {
 		t.Fatalf("model alias validation error = %v, want hidden scoped declaration", err)
 	}
