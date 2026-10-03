@@ -70,7 +70,7 @@ func TestSQLiteFanOutChunkNativeCommitBusyRetry(t *testing.T) {
 			name = "retry_callback_refused"
 		}
 		t.Run(name, func(t *testing.T) {
-			f := newGroupProofFixture(t, "sqlite", 2)
+			f := newGroupProofFixtureOn(t, "sqlite", 2, nil, true)
 			f.prepare(t)
 			f.seal(t)
 			before := f.snapshot(t)
@@ -82,7 +82,7 @@ func TestSQLiteFanOutChunkNativeCommitBusyRetry(t *testing.T) {
 			}
 			defer registration.Release()
 			dsn, _, _ := strings.Cut(f.probe.dsn, "?")
-			sink.blocker = llmSQLiteBusyBlocker(t, f.db, strings.TrimPrefix(dsn, "file:"), "commit")
+			sink.blocker = llmSQLiteBusyBlocker(t, f.db, strings.TrimPrefix(dsn, "file:"), "commit", 1)
 			collector, restore, err := InstallTransactionProbeForTest(f.raw, transactiontest.Options{})
 			if err != nil {
 				t.Fatal(err)
@@ -184,6 +184,12 @@ func TestSQLiteFanOutChunkNativeCommitBusyRetry(t *testing.T) {
 			}
 			if err := f.group.Close(f.ctx); err != nil {
 				t.Fatal(err)
+			}
+			if err := f.process.ProveCurrent(f.ctx); err != nil {
+				t.Fatalf("native retry lost retained process ownership: %v", err)
+			}
+			if stats := f.db.Stats(); stats.MaxOpenConnections != 2 || stats.InUse != 1 {
+				t.Fatalf("native retry did not preserve one workload plus one proof connection: %+v", stats)
 			}
 			for _, claim := range f.claims {
 				if err := f.store().Release(f.ctx, claim); !errors.Is(err, pipelineobligation.ErrStaleClaim) {

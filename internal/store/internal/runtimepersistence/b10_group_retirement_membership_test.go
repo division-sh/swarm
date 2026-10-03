@@ -18,7 +18,7 @@ func TestB10HostileGroupInputCannotRetireValidCallbacks(t *testing.T) {
 			for _, attack := range []string{"wrong_group", "foreign_member", "foreign_bus_value", "noncanonical_value"} {
 				t.Run(backend+"/"+operation+"/"+attack, func(t *testing.T) {
 					f := newGroupProofFixture(t, backend, 2)
-					other := newGroupProofFixtureOn(t, backend, 2, f)
+					other := newGroupProofFixtureOn(t, backend, 2, f, false)
 					if attack != "foreign_bus_value" {
 						other.bus = f.bus
 					}
@@ -78,7 +78,7 @@ func TestB10FinalizeEarlyFailureRetiresExactSiblingsOnly(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newGroupProofFixture(t, backend, 2)
-			other := newGroupProofFixtureOn(t, backend, 2, f)
+			other := newGroupProofFixtureOn(t, backend, 2, f, false)
 			other.bus = f.bus
 			values := stageB10RetirementGroup(t, f)
 			otherValues := stageB10RetirementGroup(t, other)

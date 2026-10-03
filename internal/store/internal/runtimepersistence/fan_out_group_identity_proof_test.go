@@ -315,7 +315,7 @@ func TestFanOutPublicationGroupForeignStoreAndRunBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newGroupProofFixture(t, backend, 2)
-			other := newGroupProofFixtureOn(t, backend, 2, f)
+			other := newGroupProofFixtureOn(t, backend, 2, f, false)
 			foreignStore := newGroupProofFixture(t, backend, 2)
 			for _, g := range []*groupProofFixture{f, other, foreignStore} {
 				g.prepare(t)

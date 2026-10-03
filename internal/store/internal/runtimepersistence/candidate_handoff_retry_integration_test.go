@@ -60,7 +60,7 @@ func TestSQLiteLifecycleCandidateCommitBusyResetsOuterHandoff(t *testing.T) {
 	defer registration.Release()
 	// A real reader forces the first COMMIT to return native SQLITE_BUSY.
 	// Canceling its rolled-back admission releases that reader before retry.
-	sink.blocker = llmSQLiteBusyBlocker(t, db, path, "commit")
+	sink.blocker = llmSQLiteBusyBlocker(t, db, path, "commit", 0)
 	probe, restore, err := store.backend.InstallTransactionProbeForTest(transactiontest.Options{})
 	if err != nil {
 		t.Fatal(err)
