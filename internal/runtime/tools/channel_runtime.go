@@ -124,6 +124,9 @@ func (e *Executor) execChannelOperation(ctx context.Context, actor models.AgentC
 		return nil, runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "channel_operation_lease_required", "channel-runtime", "execute", map[string]any{"tool": strings.TrimSpace(toolID)})
 	}
 	current := lease.Operation()
+	if err := lease.ValidateAdmission(ctx); err != nil {
+		return nil, err
+	}
 	operation := channelOperation{binding: current.Binding, operation: current.Name}
 	connectorToolID, prepared, err := operation.binding.PrepareOperation(operation.operation, input)
 	if err != nil {

@@ -76,6 +76,7 @@ type PipelineCoordinator struct {
 	deliveryRuntime              WorkflowDeliveryRuntime
 	flowRoutes                   FlowInstanceRouteOwner
 	credentials                  runtimecredentials.Store
+	providerCredentials          runtimecredentials.Store
 	managedCredentials           runtimemanagedcredentials.Store
 	mockConnectorResponses       *providerconnectors.MockResponsePlan
 	scenarioProfiles             ScenarioExecutionProfileReader
@@ -121,6 +122,7 @@ type PipelineCoordinatorOptions struct {
 	FlowRoutes                       FlowInstanceRouteOwner
 	RunLifecycle                     runtimerunlifecycle.OperationOwner
 	Credentials                      runtimecredentials.Store
+	ProviderCredentials              runtimecredentials.Store
 	ManagedCredentials               runtimemanagedcredentials.Store
 	MockConnectorResponses           *providerconnectors.MockResponsePlan
 	ScenarioExecutionProfiles        ScenarioExecutionProfileReader
@@ -145,6 +147,9 @@ type channelActivityTargetValue struct {
 	tool           runtimecontracts.ToolSchemaEntry
 	generation     plangeneration.Generation
 	credentialKeys map[string]string
+	admissions     []channelonboarding.CredentialAdmission
+	lease          *runtimechannelactivation.Lease
+	projection     *runtimecredentials.SecretBindingProjection
 }
 
 func NewChannelActivityTarget(tool runtimecontracts.ToolSchemaEntry, generation plangeneration.Generation) (ChannelActivityTarget, error) {
@@ -197,6 +202,10 @@ func (pc *PipelineCoordinator) channelActivityTarget(ctx context.Context, toolID
 		return ChannelActivityTarget{}, false, nil, nil
 	}
 	operation := lease.Operation()
+	if err := lease.ValidateAdmission(ctx); err != nil {
+		lease.Release()
+		return ChannelActivityTarget{}, false, nil, err
+	}
 	identity, err := operation.Binding.RuntimeActivityTarget(operation.Name)
 	if err != nil {
 		lease.Release()
@@ -212,6 +221,13 @@ func (pc *PipelineCoordinator) channelActivityTarget(ctx context.Context, toolID
 		lease.Release()
 		return ChannelActivityTarget{}, false, nil, err
 	}
+	for _, activation := range lease.Activations() {
+		if activation.Plan.BindingID() == operation.Binding.BindingID() {
+			target.value.admissions = activation.CredentialAdmissions
+			break
+		}
+	}
+	target.value.lease = lease
 	return target, true, lease, nil
 }
 
@@ -221,6 +237,63 @@ func (t ChannelActivityTarget) CredentialStoreKey(logical string) (string, bool)
 	}
 	value, ok := t.value.credentialKeys[strings.TrimSpace(logical)]
 	return value, ok
+}
+
+func (t ChannelActivityTarget) resolveAdmittedCredentials(ctx context.Context, store runtimecredentials.Store, roles []string) (map[string]any, []string, error) {
+	if t.value == nil || t.value.lease == nil || store == nil {
+		return nil, nil, fmt.Errorf("private channel activity requires its admitted credential and activation owners")
+	}
+	if err := t.value.lease.ValidateAdmission(ctx); err != nil {
+		return nil, nil, err
+	}
+	owner, err := runtimecredentials.NewSnapshotOwner(store)
+	if err != nil {
+		return nil, nil, err
+	}
+	projection := owner.BeginSecretBindingProjection()
+	observations := map[string]runtimecredentials.AdmittedSnapshot{}
+	current := true
+	for _, admission := range t.value.admissions {
+		if err := admission.Validate(); err != nil {
+			return nil, nil, err
+		}
+		if _, duplicate := observations[admission.Role]; duplicate || t.value.credentialKeys[admission.Role] != admission.StoreKey {
+			return nil, nil, fmt.Errorf("private channel activity credential admission contradicts its compiled role")
+		}
+		observed, matches, err := projection.ObserveAdmittedActivationCredential(ctx, runtimecredentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal}, admission.Receipt)
+		if err != nil {
+			return nil, nil, err
+		}
+		current = current && matches
+		observations[admission.Role] = observed
+	}
+	if !current {
+		return nil, nil, fmt.Errorf("private channel activity credential admission is no longer current")
+	}
+	if err := projection.ValidateCurrent(ctx); err != nil {
+		return nil, nil, err
+	}
+	values, secrets := map[string]any{}, []string{}
+	for _, role := range roles {
+		observed, admitted := observations[role]
+		if !admitted {
+			return nil, nil, fmt.Errorf("private channel activity credential role %q is not admitted", role)
+		}
+		values[role] = observed.CredentialValue()
+		secrets = append(secrets, observed.CredentialValue())
+	}
+	t.value.projection = projection
+	return values, secrets, nil
+}
+
+func (t ChannelActivityTarget) validateAdmission(ctx context.Context) error {
+	if t.value == nil || t.value.lease == nil || t.value.projection == nil {
+		return fmt.Errorf("private channel activity admission is incomplete")
+	}
+	if err := t.value.lease.ValidateAdmission(ctx); err != nil {
+		return err
+	}
+	return t.value.projection.ValidateCurrent(ctx)
 }
 
 type DecisionCardDraftExpiry interface {
@@ -292,6 +365,7 @@ func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions,
 		flowRoutes:                       opts.FlowRoutes,
 		credentials:                      credentials,
 		managedCredentials:               opts.ManagedCredentials,
+		providerCredentials:              opts.ProviderCredentials,
 		mockConnectorResponses:           opts.MockConnectorResponses,
 		scenarioProfiles:                 opts.ScenarioExecutionProfiles,
 		effectiveSource:                  opts.EffectiveSourceIdentity,

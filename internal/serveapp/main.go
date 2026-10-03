@@ -1571,6 +1571,9 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 				}
 				return current.CurrentStartupGrantEvidence()
 			},
+			SelectionCurrent: func(ctx context.Context, pair runtimepublicingress.RegistrationPair, exactRevision bool) (bool, error) {
+				return serveRegistrationSelectionCurrent(ctx, channelOnboardingStore, pair, exactRevision)
+			},
 			Readiness: ready,
 		})
 		if controllerErr != nil {
@@ -1582,6 +1585,9 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			snapshot, pairErr := compileServeChannelActivationSnapshot(reconcileCtx, manager, channelOnboardingStore, operatorChannels, providerCredentialOwner)
 			if pairErr != nil {
 				return pairErr
+			}
+			if err := publishServeChannelActivationSnapshot(reconcileCtx, manager, snapshot); err != nil {
+				return err
 			}
 			selection, pairErr := resolveServeRegistrationPairs(snapshot, manager)
 			if pairErr != nil {

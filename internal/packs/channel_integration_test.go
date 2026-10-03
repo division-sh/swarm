@@ -1261,6 +1261,7 @@ func TestDifferentialMockRegistrationExecutesThroughProviderNeutralLifecycle(t *
 		Posture:           executionposture.Live,
 		RuntimeInstanceID: uuid.NewString(),
 		StartupAuthority:  func() (startupownership.GrantEvidence, error) { return startup, nil },
+		SelectionCurrent:  func(context.Context, runtimepublicingress.RegistrationPair, bool) (bool, error) { return true, nil },
 		Readiness:         readiness,
 	})
 	if err != nil {
@@ -1291,6 +1292,17 @@ func TestDifferentialMockRegistrationExecutesThroughProviderNeutralLifecycle(t *
 		},
 	}
 	other := pair
+	pair.CredentialKeys[registration.SigningCredential()] = pair.Target.SigningCredentialKey
+	for role, key := range pair.CredentialKeys {
+		evidence, err := snapshots.SealCurrentValue(context.Background(), key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pair.CredentialAdmissions = append(pair.CredentialAdmissions, channelonboarding.CredentialAdmission{
+			Role: role, StoreKey: key, Kind: channelonboarding.CredentialAdmissionObserved, ValueSeal: evidence.Seal,
+		})
+	}
+	other = pair
 	other.BindingID = "mock-alerts"
 	other.Target.Selector = "ingress:alerts/mock:mock"
 	other.Target.FlowPath = "alerts/mock"
@@ -1329,73 +1341,69 @@ func TestDifferentialMockRegistrationExecutesThroughProviderNeutralLifecycle(t *
 	}
 
 	if err := credentialStore.Set(context.Background(), "signing", "mock-proof-v2"); err != nil {
-		t.Fatalf("rotate signing credential: %v", err)
+		t.Fatal(err)
 	}
-	transport.mu.Lock()
-	transport.loseAck = true
-	transport.readbackURL = "https://hooks.example.test/stale"
-	transport.mu.Unlock()
-	if err := controller.Reconcile(context.Background(), exposure, []runtimepublicingress.RegistrationPair{pair}); err == nil || strings.Contains(err.Error(), "mock-proof-v2") {
-		t.Fatalf("ack-loss mismatch error = %v", err)
-	}
-	if _, applied := transport.counts(); applied != 2 {
-		t.Fatalf("rotated acknowledgment-loss apply count = %d, want 2", applied)
-	}
-	transport.mu.Lock()
-	transport.loseAck = false
-	transport.readbackURL = ""
-	transport.mu.Unlock()
-	if err := controller.Reconcile(context.Background(), exposure, []runtimepublicingress.RegistrationPair{pair}); err != nil {
-		t.Fatalf("same-base uncertain reconcile: %v", err)
-	}
-	if _, applied := transport.counts(); applied != 2 {
-		t.Fatalf("mismatched readback resent apply: %d", applied)
-	}
-	uncertain := readiness.Snapshot(time.Now().UTC())
-	if uncertain.PublicIngressReady || len(uncertain.Registrations) != 1 || uncertain.Registrations[0].Phase != "outcome_uncertain" {
-		t.Fatalf("mismatched mock registration = %#v", uncertain)
-	}
-
-	if err := credentialStore.Set(context.Background(), "signing", "mock-proof-v3"); err != nil {
-		t.Fatalf("rotate signing credential for unavailable readback: %v", err)
-	}
-	transport.mu.Lock()
-	transport.loseAck = true
-	transport.readbackErr = errors.New("mock readback unavailable")
-	transport.mu.Unlock()
 	if err := controller.Reconcile(context.Background(), exposure, []runtimepublicingress.RegistrationPair{pair}); err == nil {
-		t.Fatal("unavailable mock readback returned nil")
+		t.Fatal("unadmitted rotation authorized registration")
 	}
-	if _, applied := transport.counts(); applied != 3 {
-		t.Fatalf("unavailable readback apply count = %d, want 3", applied)
+	seal, err := snapshots.SealCurrentValue(context.Background(), "signing")
+	if err != nil {
+		t.Fatal(err)
 	}
-	unavailable := readiness.Snapshot(time.Now().UTC())
-	if unavailable.PublicIngressReady || unavailable.Registrations[0].Phase != "outcome_uncertain" {
-		t.Fatalf("unavailable mock registration = %#v", unavailable)
+	for i := range pair.CredentialAdmissions {
+		if pair.CredentialAdmissions[i].StoreKey == "signing" {
+			pair.CredentialAdmissions[i].ValueSeal = seal.Seal
+		}
 	}
+	pair.OnboardingRevision++
 	if err := controller.Reconcile(context.Background(), exposure, []runtimepublicingress.RegistrationPair{pair}); err != nil {
-		t.Fatalf("same-base unavailable reconcile: %v", err)
-	}
-	if _, applied := transport.counts(); applied != 3 {
-		t.Fatalf("unavailable readback resent apply: %d", applied)
-	}
-
-	if err := credentialStore.Set(context.Background(), "signing", "mock-proof-v4"); err != nil {
-		t.Fatalf("rotate signing credential for fresh intent: %v", err)
-	}
-	transport.mu.Lock()
-	transport.loseAck = false
-	transport.readbackErr = nil
-	transport.mu.Unlock()
-	if err := controller.Reconcile(context.Background(), exposure, []runtimepublicingress.RegistrationPair{pair}); err != nil {
-		t.Fatalf("fresh semantic intent reconcile: %v", err)
-	}
-	if _, applied := transport.counts(); applied != 4 {
-		t.Fatalf("fresh semantic intent apply count = %d, want 4", applied)
+		t.Fatal(err)
 	}
 	rotated := readiness.Snapshot(time.Now().UTC())
 	if len(rotated.Registrations) != 1 || rotated.Registrations[0].CallbackURL == firstCallback || !rotated.Registrations[0].CallbackMatched {
-		t.Fatalf("rotated readiness = %#v", rotated)
+		t.Fatalf("explicitly admitted rotation: %#v", rotated)
+	}
+	for _, fault := range []string{"mismatch", "unavailable"} {
+		t.Run(fault, func(t *testing.T) {
+			faultTransport := &mockRegistrationTransport{loseAck: true}
+			if fault == "mismatch" {
+				faultTransport.readbackURL = "https://hooks.example.test/stale"
+			} else {
+				faultTransport.readbackErr = errors.New("mock readback unavailable")
+			}
+			faultReadiness := runtimepublicingress.NewReadinessOwner(true)
+			faultController, err := runtimepublicingress.NewProviderRegistrationController(runtimepublicingress.RegistrationControllerOptions{
+				CredentialOwner: snapshots, EffectsStore: mockRegistrationEffectStore{Harness: effecttest.New()},
+				HTTP:    runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: faultTransport}},
+				Posture: executionposture.Live, RuntimeInstanceID: uuid.NewString(), Readiness: faultReadiness,
+				StartupAuthority: func() (startupownership.GrantEvidence, error) { return startup, nil },
+				SelectionCurrent: func(context.Context, runtimepublicingress.RegistrationPair, bool) (bool, error) { return true, nil },
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			faultReadiness.SetExposure(runtimepublicingress.ExposureEvidence{GenerationID: exposure.ID, StartupAuthorityID: startup.GrantID, ExpiresAt: time.Now().Add(runtimepublicingress.EvidenceTTL)})
+			if err := faultController.Reconcile(context.Background(), exposure, []runtimepublicingress.RegistrationPair{pair}); err == nil {
+				t.Fatal("uncertain outcome returned success")
+			}
+			before := faultReadiness.Snapshot(time.Now().UTC())
+			if err := faultController.Reconcile(context.Background(), exposure, nil); err != nil {
+				t.Fatal(err)
+			}
+			if err := faultController.Reconcile(context.Background(), exposure, []runtimepublicingress.RegistrationPair{pair}); err != nil {
+				t.Fatal(err)
+			}
+			changed := pair
+			changed.Target.Alias = "replacement"
+			if err := faultController.Reconcile(context.Background(), exposure, []runtimepublicingress.RegistrationPair{changed}); err == nil {
+				t.Fatal("uncertain physical-slot outcome authorized another apply")
+			}
+			after := faultReadiness.Snapshot(time.Now().UTC())
+			if _, count := faultTransport.counts(); count != 1 || len(after.Registrations) != 1 || after.Registrations[0].Phase != "outcome_uncertain" ||
+				after.Registrations[0].IntentID != before.Registrations[0].IntentID || after.PublicIngressReady {
+				t.Fatalf("uncertain registration lost blocking responsibility: %#v", after)
+			}
+		})
 	}
 
 	var admitted int
