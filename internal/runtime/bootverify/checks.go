@@ -179,9 +179,6 @@ type checkerContext struct {
 	timerLoaded   bool
 	timerFindings []Finding
 
-	writePinLoaded   bool
-	writePinFindings []Finding
-
 	gateSchemaLoaded   bool
 	gateSchemaFindings []Finding
 
@@ -258,7 +255,6 @@ var bootCheckRegistry = []Check{
 	{ID: "transition_ownership_validation", Severity: "error", Run: checkTransitionOwnershipValidation},
 	{ID: "event_runtime_wiring_validation", Severity: "error", Run: checkEventRuntimeWiringValidation},
 	{ID: "timer_validation", Severity: "error", Run: checkTimerValidation},
-	{ID: "write_pin_ownership_validation", Severity: "error", Run: checkWritePinOwnershipValidation},
 	{ID: "gate_schema_validation", Severity: "error", Run: checkGateSchemaValidation},
 	{ID: "composition_connect_validation", Severity: "error", Run: checkCompositionConnectValidation},
 	{ID: "input_pin_wiring", Severity: SeverityHardInvalidity, Run: checkInputPinWiring},

@@ -4148,28 +4148,6 @@ func TestRun_DoesNotUseEventMetadataAsInputProducerPathProof(t *testing.T) {
 	}
 }
 
-func TestRun_ReportsConflictingWritePinOwners(t *testing.T) {
-	root := writeCrossFlowPinAmbiguityFixture(t, false)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-	for _, flowID := range []string{"producer_a", "producer_b"} {
-		flow, ok := bundle.FlowViewByID(flowID)
-		if !ok {
-			t.Fatalf("flow %s missing", flowID)
-		}
-		flow.Schema.Pins.Outputs.Writes = []string{"ticket.status"}
-		schema := bundle.FlowSchemas[flowID]
-		schema.Pins.Outputs.Writes = []string{"ticket.status"}
-		bundle.FlowSchemas[flowID] = schema
-	}
-	recompileBootverifySemantics(t, bundle)
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Errors(), "write_pin_ownership_validation", "ticket.status") {
-		t.Fatalf("expected write_pin_ownership_validation error, got %#v", report.Errors())
-	}
-}
-
 func TestRun_DoesNotWarnForLocalizedCrossFlowEventRouting(t *testing.T) {
 	root := writeLocalizedEventRoutingFixture(t)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
@@ -4485,13 +4463,16 @@ func TestRun_RejectsFilterReferenceToSparseFieldEvenWhenSameHandlerComputesField
 	}
 }
 
-func TestRun_AttributesReaderCoverageToResolvedRootContractOwner(t *testing.T) {
+func TestRun_DoesNotAttributePrivateReaderToParentContract(t *testing.T) {
 	bundle := loadWave1RootReaderCoverageFixtureBundle(t)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.LintEvidence(), "entity_reader_coverage", "flow root entity_type case declares field priority") {
-		t.Fatalf("unexpected root entity_reader_coverage lint, got %#v", report.LintEvidence())
+	if !reportContains(report.LintEvidence(), "entity_reader_coverage", "flow root entity_type case declares field priority") {
+		t.Fatalf("private child read credited parent state: %#v", report.LintEvidence())
+	}
+	if !reportContains(report.Errors(), "expression_field_reference_validation", "priority") {
+		t.Fatalf("undeclared private child read admitted: %#v", report.Errors())
 	}
 }
 
@@ -4757,44 +4738,6 @@ types:
 
 	if !reportContains(report.Errors(), "entity_writer_coverage", "undeclared field path validation_kit.checklist.size") {
 		t.Fatalf("expected prompt save_entity_field list selector validation error, got %#v", report.Errors())
-	}
-}
-
-func TestRun_ReportsPromptSaveEntityFieldRootReadPinWithAllAuthorization(t *testing.T) {
-	root := writePromptWriterCoverageFixture(t, `
-writer:
-  role: writer
-  intent: prompts/writer.md
-  workspace_class: factory
-  manager_fallback: ops
-  entity_writes:
-    case:
-      save: all
-`, `
-case:
-  local_status:
-    type: text
-`, "Use `save_entity_field` for `priority`.\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-root_case:
-  priority:
-    type: integer
-    _unused_reason: child read-pin save-path validation proof
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `name: child
-stages:
-  idle: {initial: true}
-  done: {terminal: true}
-pins:
-  inputs:
-    reads: [priority]
-`)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Errors(), "entity_writer_coverage", "undeclared field path priority") {
-		t.Fatalf("expected prompt save_entity_field root read-pin validation error, got %#v", report.Errors())
 	}
 }
 
@@ -7062,7 +7005,6 @@ func writeWave1RootReaderCoverageFixture(t *testing.T) string {
 case:
   priority:
     type: integer
-    _unused_reason: child read-pin coverage proof field
 `)
 
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `name: child
@@ -7072,8 +7014,8 @@ stages:
 pins:
   inputs:
     events: [task.assigned]
-    reads: [priority]
 `)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "entities.yaml"), "case:\n  local: text\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "events.yaml"), `
 task.assigned:
   entity_id: string

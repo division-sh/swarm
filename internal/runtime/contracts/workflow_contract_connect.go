@@ -2,7 +2,6 @@ package contracts
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -402,31 +401,6 @@ func compiledFlowPinDigest(direction string, context FlowPinCompilationContext, 
 		ReceiverSchemaDigest: receiverSchema.AcceptanceSchemaDigest(),
 		Initialization:       initialize,
 	})
-}
-
-// CompiledFlowEntityPermissions is a canonical immutable field set. The YAML
-// order cannot affect semantic identity and returned fields are defensive
-// copies.
-type CompiledFlowEntityPermissions struct{ fields []string }
-
-func CompileFlowEntityPermissions(fields []string) (CompiledFlowEntityPermissions, error) {
-	out := append([]string(nil), fields...)
-	for _, field := range out {
-		if field == "" || field != strings.TrimSpace(field) {
-			return CompiledFlowEntityPermissions{}, fmt.Errorf("entity permission field %q must be an exact non-empty scalar", field)
-		}
-	}
-	sort.Strings(out)
-	for index := 1; index < len(out); index++ {
-		if out[index-1] == out[index] {
-			return CompiledFlowEntityPermissions{}, fmt.Errorf("entity permission field %q is declared more than once", out[index])
-		}
-	}
-	return CompiledFlowEntityPermissions{fields: out}, nil
-}
-
-func (p CompiledFlowEntityPermissions) Fields() []string {
-	return append([]string(nil), p.fields...)
 }
 
 func (p FlowInputEventPin) EventType() string {

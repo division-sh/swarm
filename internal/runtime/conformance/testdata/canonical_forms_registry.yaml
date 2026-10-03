@@ -236,13 +236,13 @@ rows:
     corpus: {authored_key_rows: 0, authored_carries_rows: 0}
 
   - id: flow.pin_entity_fields
-    ruled: mechanical-ratified
+    ruled: issue-2438-slice-2b
     paths: "schema.pins.inputs.reads, schema.pins.outputs.writes"
-    owner: projectSchemaPinFieldsValue
-    information: {choice: [declared readable and writable entity fields]}
+    owners: []
+    information: {fact: [receiver-local entity ownership; cross-flow data travels through typed messages]}
     spelling:
-      canonical_candidate: scalar_field_sequence
-      retired_duplicates: [sequence_of_field_mappings]
+      canonical: no_authored_field_grants
+      retired_duplicates: [inputs.reads, outputs.writes, sequence_of_field_mappings]
     corpus: {scalar_entries: 0, mapping_entries: 0}
 
   - id: flow.other_surface
@@ -808,7 +808,8 @@ wave_2:
   status: closed
   rows: [flow.pin_event_entry, flow.input_pin_resolution, flow.output_pin_route_projection, schema.connect]
   retired_surfaces: [pin.name, input.carries, carry.type, carry.optional, carry.convert, output.key, output.carries, qualified_or_wildcard_flow_pin_event, connect.adapter]
-  canonical_owners: [CompiledFlowInputPin, CompiledFlowOutputPin, CompiledFlowEntityPermissions, CompiledEventSchema, ConnectRoutePlan]
+  # #2438 slice 2b deletes validation-only cross-flow field-grant authority.
+  canonical_owners: [CompiledFlowInputPin, CompiledFlowOutputPin, CompiledEventSchema, ConnectRoutePlan]
 
 wave_1:
   issue: 2320

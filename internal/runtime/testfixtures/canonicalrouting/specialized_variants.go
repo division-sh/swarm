@@ -26,7 +26,6 @@ pins:
   inputs:
     events:
       - task.assigned
-    reads: [priority]
 `, "", `case:
   priority:
     type: integer

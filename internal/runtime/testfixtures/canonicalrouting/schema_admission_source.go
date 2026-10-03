@@ -24,10 +24,8 @@ pins:
     events:
       - event: work.requested
         initialize: {note: payload.note}
-    reads: [note, work_id]
   outputs:
     events: [work.completed]
-    writes: [note]
 required_agents: [{role: worker, subscribes_to: [], emits: [work.completed], description: ''}]
 instance_variables:
   description: Configuration

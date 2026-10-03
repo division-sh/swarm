@@ -13,43 +13,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
-func checkWritePinOwnershipValidation(c *checkerContext) []Finding { return c.writePinOwnership() }
-func checkInputPinWiring(c *checkerContext) []Finding              { return c.inputPinWiring() }
+func checkInputPinWiring(c *checkerContext) []Finding { return c.inputPinWiring() }
 func checkFlowBoundaryCreateEntityValidation(c *checkerContext) []Finding {
 	return c.flowBoundaryCreateEntityValidation()
-}
-
-func (c *checkerContext) writePinOwnership() []Finding {
-	if c.writePinLoaded {
-		return c.writePinFindings
-	}
-	c.writePinLoaded = true
-	pins := map[string]struct{}{}
-	for flowID := range c.source.FlowSchemaEntries() {
-		flowID = strings.TrimSpace(flowID)
-		if flowID == "" {
-			continue
-		}
-		for _, pin := range c.source.FlowWritePins(flowID) {
-			pin = strings.TrimSpace(pin)
-			if pin != "" {
-				pins[pin] = struct{}{}
-			}
-		}
-	}
-	for _, pin := range sortedSetKeysLocal(pins) {
-		owners := c.source.WritePinOwners(pin)
-		if len(owners) <= 1 {
-			continue
-		}
-		c.writePinFindings = append(c.writePinFindings, Finding{
-			CheckID:  "write_pin_ownership_validation",
-			Severity: "error",
-			Message:  fmt.Sprintf("write pin %s is owned by multiple flows: %s", pin, strings.Join(owners, ", ")),
-			Location: strings.TrimSpace(pin),
-		})
-	}
-	return c.writePinFindings
 }
 
 func (c *checkerContext) inputPinWiring() []Finding {

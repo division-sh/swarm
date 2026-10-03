@@ -9263,11 +9263,6 @@ engine:
         derived internal event producer/consumer roles; all authored event role metadata is retired. Root exports are
         observable without internal consumers; private timer output needs an actual consuming relation.
       when: boot-only
-    - id: write_pin_ownership_validation
-      severity: error
-      scope: per-flow
-      trigger: Two flows declare writes to the same entity field (output data pin). Only one flow may write a given field.
-      when: boot-only
     - id: gate_schema_validation
       severity: error
       scope: per-node
@@ -13001,12 +12996,11 @@ flow_model:
         `sink: harness`, which production admission rejects and which creates no route or delivery authority. Output pins may
         not declare retired `key` or `carries`; event-level schema and business-key declarations own producer payload guarantees.
       required: false
-    input_data_pins:
-      description: Entity fields the flow reads. Required pins must be written by a prior flow or initial data.
-      required_configurable: true
-    output_data_pins:
-      description: Entity fields the flow writes. Always written. No two flows may write the same field.
-      conflict_rule: Two flows writing the same field is a boot error (short circuit).
+    field_access_rule: >-
+      Pins declare events, never cross-flow field grants. inputs.reads and outputs.writes are unsupported keys.
+      Each flow reads and writes its own declared entity contract; a child cannot borrow a parent field or its type.
+      Cross-flow business data travels in typed event payloads through explicit compiled connections. No access
+      fallback, root-field substitution, shared-column grant model or write-pin ownership checker exists.
     internal_events_convention: Schema pins declare the flow's EXTERNAL interface only. Internal agent-to-agent events within
       a flow (e.g., spec.requested between two agents in the same flow) exist in events.yaml but are NOT listed in schema
       pins. They are implementation details, not part of the flow's public contract. Only events that cross flow boundaries
@@ -13029,9 +13023,10 @@ flow_model:
       facts are generated from the same agents.yaml facts and then consumed by bootverify/runtime as the canonical effective
       required-agent view. Identity binding is by map key; behavioral fulfillment is by subscription/emit coverage.'
   schema_merging:
-    description: When a root flow installs multiple flows, the platform merges their schemas. All output data pins become
-      entity table columns. Input data pins are validated against available outputs. Two flows writing the same field is a
-      conflict (boot error).
+    description: >-
+      Composition compiles event schemas through explicit connections while retaining exact producer and receiver
+      ownership. Entity contracts stay flow-local; composition does not merge child field grants into shared root
+      columns or give a child read/write authority over parent state.
   cross_flow_events:
     rule: An event schema is defined once in the flow that emits it. A consuming flow declares an input pin, and the nearest
       common ancestor schema.yaml connects the producer output pin to that receiver input. The compiled connect edge carries
@@ -13255,13 +13250,14 @@ flow_model:
       canonical_owners:
         - internal/runtime/contracts.CompiledFlowInputPin
         - internal/runtime/contracts.CompiledFlowOutputPin
-        - internal/runtime/contracts.CompiledFlowEntityPermissions
         - internal/runtime/contracts.CompiledEventSchema
         - internal/runtime/contracts.CompiledConnectionInput
         - internal/runtime/core/pinrouting.ConnectRoutePlan
       rule: |
         Each admitted flow pin has one exact local event identity. Scalar entries are the default; mappings may add only a closed non-default source, sink, retained reply/fan-out policy, or creation-only initialize choice. Missing event containers mean no pins. Null, explicit empty, duplicate, non-exact, qualified, wildcard, alias-bearing, carry-bearing, or output-key/carries entries fail at admission. Producer event declarations own payload schema and business key. Every mapping key is byte-exact; alternate spellings fail rather than normalize. Ordinary selection and exceptional key source belong to each connect row, never the shared pin. CompiledConnectionInput owns immutable typed source and receiver acceptance projection from the bound producer schema. Provider/activity composition recompiles that connection evidence after exact schema binding, rejects producer-field collision and validates initialization through the existing typed owners. No connection means no ordinary template registration authority. The immutable edge contains endpoint, schema, projection, resolution, initialization, retained reply/fan-out, provenance and digest evidence. Verify, runtime, durable claims, restart, retry, replay, selected fork, graph and readback consume that evidence without authored-map fallback or synthetic private input edges. Stream partitioning, accumulation keys and finite join membership or closure are never pin or edge passengers.
       retired_on_presence:
+        - pins.inputs.reads
+        - pins.outputs.writes
         - pins.inputs.events[].name
         - pins.outputs.events[].name
         - pins.inputs.events[].carries

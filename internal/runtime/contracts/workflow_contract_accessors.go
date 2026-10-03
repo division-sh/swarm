@@ -814,18 +814,6 @@ func (b *WorkflowContractBundle) CompositionConnects() []FlowConnect {
 	}
 	return cloneFlowConnects(b.Semantics.CompositionConnects)
 }
-func (b *WorkflowContractBundle) FlowReadPins(flowID string) []string {
-	if b == nil {
-		return nil
-	}
-	return b.Semantics.flowReads[strings.TrimSpace(flowID)].Fields()
-}
-func (b *WorkflowContractBundle) FlowWritePins(flowID string) []string {
-	if b == nil {
-		return nil
-	}
-	return b.Semantics.flowWrites[strings.TrimSpace(flowID)].Fields()
-}
 func (b *WorkflowContractBundle) FlowHasInputEvent(flowID, eventType string) bool {
 	return b.flowEventScope(flowID).HasInput(eventType)
 }
@@ -957,12 +945,6 @@ func (b *WorkflowContractBundle) flowRequiredAgentSchemaFile(flowID string) stri
 		return strings.TrimSpace(view.Paths.SchemaFile)
 	}
 	return ""
-}
-func (b *WorkflowContractBundle) WritePinOwners(pin string) []string {
-	if b == nil {
-		return nil
-	}
-	return append([]string{}, b.Semantics.writePinOwners[strings.TrimSpace(pin)]...)
 }
 func (b *WorkflowContractBundle) EventContractSource(eventType string) (ContractItemSource, bool) {
 	if b == nil {

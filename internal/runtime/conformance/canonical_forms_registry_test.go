@@ -802,7 +802,7 @@ func TestCanonicalFormsRegistryPinsWave2RetirementsAndOwners(t *testing.T) {
 	record := loadCanonicalFormsRegistry(t, conformanceRepoRoot(t))
 	wantRows := []string{"flow.pin_event_entry", "flow.input_pin_resolution", "flow.output_pin_route_projection", "schema.connect"}
 	wantRetired := []string{"pin.name", "input.carries", "carry.type", "carry.optional", "carry.convert", "output.key", "output.carries", "qualified_or_wildcard_flow_pin_event", "connect.adapter"}
-	wantOwners := []string{"CompiledFlowInputPin", "CompiledFlowOutputPin", "CompiledFlowEntityPermissions", "CompiledEventSchema", "ConnectRoutePlan"}
+	wantOwners := []string{"CompiledFlowInputPin", "CompiledFlowOutputPin", "CompiledEventSchema", "ConnectRoutePlan"}
 	if record.Wave2.Issue != 2352 || record.Wave2.Status != "closed" || !reflect.DeepEqual(record.Wave2.Rows, wantRows) || !reflect.DeepEqual(record.Wave2.RetiredSurfaces, wantRetired) || !reflect.DeepEqual(record.Wave2.CanonicalOwners, wantOwners) {
 		t.Fatalf("wave 2 registry = %#v", record.Wave2)
 	}
@@ -811,7 +811,6 @@ func TestCanonicalFormsRegistryPinsWave2RetirementsAndOwners(t *testing.T) {
 	for _, owner := range []reflect.Type{
 		reflect.TypeOf(runtimecontracts.CompiledFlowInputPin{}),
 		reflect.TypeOf(runtimecontracts.CompiledFlowOutputPin{}),
-		reflect.TypeOf(runtimecontracts.CompiledFlowEntityPermissions{}),
 		reflect.TypeOf(runtimepinrouting.ConnectRoutePlan{}),
 	} {
 		for index := 0; index < owner.NumField(); index++ {
