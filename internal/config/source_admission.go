@@ -1,12 +1,27 @@
 package config
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
+
+// DecodeSource admits authored config before projecting into caller-owned defaults.
+func DecodeSource(value yamlsource.Value, target *Config) error {
+	if target == nil {
+		return errors.New("config projection target is required")
+	}
+	if err := validateConfigSource(value, reflect.TypeFor[Config](), "config"); err != nil {
+		return err
+	}
+	if value.Presence() == yamlsource.PresenceMissing {
+		return nil
+	}
+	return value.Project(target)
+}
 
 // CLISourceConfig is the CLI-owned portion of the same swarm.yaml document.
 type CLISourceConfig struct {
