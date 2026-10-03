@@ -8,8 +8,11 @@ stages:
   closed: {terminal: true}
 pins:
   inputs:
-    events: [phase.init, phase.activate, phase.start, phase.stabilize, phase.wind_down, phase.close]
+    - phase.init
+    - phase.activate
+    - phase.start
+    - phase.stabilize
+    - phase.wind_down
+    - phase.close
   outputs:
-    events:
-      - event: lifecycle.complete
-        sink: harness
+    - lifecycle.complete

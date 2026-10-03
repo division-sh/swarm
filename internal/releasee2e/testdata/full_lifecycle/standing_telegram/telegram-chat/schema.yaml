@@ -9,5 +9,4 @@ imports:
 instance: conversation_reference
 pins:
   inputs:
-    events:
-      - inbound.telegram.text_message
+    - inbound.telegram.text_message

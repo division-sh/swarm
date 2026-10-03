@@ -6,8 +6,6 @@ stages:
   complete: {terminal: true}
 pins:
   inputs:
-    events:
-      - candidate.requested
+    - candidate.requested
   outputs:
-    events:
-      - candidate.completed
+    - candidate.completed

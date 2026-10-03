@@ -108,8 +108,6 @@ groups:
       - tests/tier11-flow-composition/test-child-flow-policy-inherit
       - tests/tier11-flow-composition/test-child-flow-sibling-isolation
       - tests/tier11-flow-composition/test-child-flow-tool-inherit
-      - tests/tier11-flow-composition/test-data-pin-wiring
-      - tests/tier11-flow-composition/test-data-pin-write-conflict
       - tests/tier11-flow-composition/test-gates-in-child-flow
       - tests/tier11-flow-composition/test-multi-level-policy-inherit
       - tests/tier11-flow-composition/test-nested-three-levels

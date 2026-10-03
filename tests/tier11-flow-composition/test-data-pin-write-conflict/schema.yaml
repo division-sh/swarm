@@ -1,7 +1,0 @@
-name: test-data-pin-write-conflict
-stages:
-  idle: {initial: true}
-  done: {terminal: true}
-pins:
-  inputs:
-    events: [start]

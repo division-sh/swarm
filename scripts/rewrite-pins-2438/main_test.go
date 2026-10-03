@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -206,13 +207,21 @@ func TestRewriteRejectsUnratifiedOrAmbiguousForms(t *testing.T) {
 
 func TestRewriteDeletesOnlyExplicitRetiredFixtures(t *testing.T) {
 	inputs := map[string][]byte{retiredHarness + "README.md": []byte("retired example")}
-	for name := range retiredGrantSchemas {
-		inputs[name] = []byte("fixture marked for explicit deletion")
+	for _, root := range retiredGrantFixtures {
+		for _, name := range []string{"schema.yaml", "worker/schema.yaml", "tests/expected.yaml", "nodes.yaml", "manifest.yaml"} {
+			inputs[root+name] = []byte("fixture marked for explicit deletion")
+		}
 	}
 	inputs["other/schema.yaml"] = []byte("name: preserved\n")
+	inputs["tests/tier11-flow-composition/test-data-pin-wiring-other/schema.yaml"] = []byte("name: unrelated\n")
 	after, plan := rewritten(t, inputs)
-	if len(plan) != len(retiredGrantSchemas)+1 || len(after) != 1 || string(after["other/schema.yaml"]) != "name: preserved\n" {
+	if len(plan) != len(inputs)-2 || len(after) != 2 || string(after["other/schema.yaml"]) != "name: preserved\n" {
 		t.Fatalf("unexpected deletion set: %v", plan)
+	}
+	for name, data := range after {
+		if !bytes.Equal(inputs[name], data) {
+			t.Fatalf("unrelated source changed: %s", name)
+		}
 	}
 }
 
@@ -264,6 +273,9 @@ func trackedTestSources(t *testing.T, inputs map[string][]byte) string {
 func TestRewriteApplicationPreservesModesAndIsIdempotent(t *testing.T) {
 	inputs := replySources(true)
 	inputs[retiredHarness+"README.md"] = []byte("retired example\n")
+	for _, root := range retiredGrantFixtures {
+		inputs[root+"child/schema.yaml"] = []byte("retired grant mechanism\n")
+	}
 	inputs["nodes.yaml"] = []byte("not part of this rewrite\n")
 	root := trackedTestSources(t, inputs)
 	requester := filepath.Join(root, replyRequester)
@@ -284,6 +296,9 @@ func TestRewriteApplicationPreservesModesAndIsIdempotent(t *testing.T) {
 	}
 	selected := replySources(true)
 	selected[retiredHarness+"README.md"] = inputs[retiredHarness+"README.md"]
+	for _, root := range retiredGrantFixtures {
+		selected[root+"child/schema.yaml"] = inputs[root+"child/schema.yaml"]
+	}
 	expected, _ := rewritten(t, selected)
 	expected["nodes.yaml"] = inputs["nodes.yaml"]
 	for name, data := range expected {
@@ -294,6 +309,11 @@ func TestRewriteApplicationPreservesModesAndIsIdempotent(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(root, retiredHarness, "README.md")); !os.IsNotExist(err) {
 		t.Fatalf("retired fixture survived: %v", err)
+	}
+	for _, prefix := range append([]string{retiredHarness}, retiredGrantFixtures...) {
+		if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(prefix))); !os.IsNotExist(err) {
+			t.Fatalf("retired fixture still discoverable: %s %v", prefix, err)
+		}
 	}
 	info, err := os.Stat(requester)
 	if err != nil || info.Mode().Perm() != 0640 {
@@ -307,6 +327,30 @@ func TestRewriteApplicationPreservesModesAndIsIdempotent(t *testing.T) {
 		if err != nil || !bytes.Equal(actual, data) {
 			t.Fatalf("second application changed %s: %v", name, err)
 		}
+	}
+}
+
+func TestRewriteRetirementRejectsUntrackedFilesBeforeWrites(t *testing.T) {
+	inputs := map[string][]byte{
+		"schema.yaml":                           []byte("pins: {inputs: {events: [work.start]}}\n"),
+		retiredGrantFixtures[0] + "schema.yaml": []byte("retired fixture\n"),
+	}
+	root := trackedTestSources(t, inputs)
+	untracked := filepath.Join(root, filepath.FromSlash(retiredGrantFixtures[0]), "operator-notes.txt")
+	if err := os.WriteFile(untracked, []byte("keep me\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := run(root, true); err == nil || !strings.Contains(err.Error(), "untracked file") {
+		t.Fatalf("untracked data not rejected before writes: %v", err)
+	}
+	for name, before := range inputs {
+		after, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(name)))
+		if err != nil || !bytes.Equal(before, after) {
+			t.Fatalf("retirement preflight mutated %s: %v", name, err)
+		}
+	}
+	if data, err := os.ReadFile(untracked); err != nil || string(data) != "keep me\n" {
+		t.Fatalf("untracked operator data changed: %v", err)
 	}
 }
 
@@ -339,11 +383,11 @@ func TestRewriteActualCorpusPreservesEventsAndDeferredInitialization(t *testing.
 	}
 	inputs := map[string][]byte{}
 	for _, name := range strings.Split(string(tracked), "\x00") {
-		if !schemaFile(name) && !strings.HasPrefix(name, retiredHarness) {
+		if !schemaFile(name) && !retiredArtifact(name) {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(name)))
-		if os.IsNotExist(err) && (retiredGrantSchemas[name] || strings.HasPrefix(name, retiredHarness)) {
+		if os.IsNotExist(err) && retiredArtifact(name) {
 			continue
 		}
 		if err != nil {
@@ -352,6 +396,10 @@ func TestRewriteActualCorpusPreservesEventsAndDeferredInitialization(t *testing.
 		inputs[name] = data
 	}
 	after, _ := rewritten(t, inputs)
+	if err := checkGenericSchemaSurvivors(inputs, after); err != nil {
+		t.Fatal(err)
+	}
+	checkGenericSurvivorMutations(t, inputs, after)
 	initializers := 0
 	for name, data := range after {
 		before, err := parseTestSource(inputs[name])
@@ -406,4 +454,130 @@ func TestRewriteActualCorpusPreservesEventsAndDeferredInitialization(t *testing.
 	if len(repeat) != 0 {
 		t.Fatalf("actual corpus rewrite not idempotent: %d extra edits", len(repeat))
 	}
+}
+
+func checkGenericSurvivorMutations(t *testing.T, before, after map[string][]byte) {
+	t.Helper()
+	for name := range requiredGenericInputs {
+		t.Run(name, func(t *testing.T) {
+			original := after[name]
+			defer func() { after[name] = original }()
+			delete(after, name)
+			if err := checkGenericSchemaSurvivors(before, after); err == nil {
+				t.Fatal("restored old deletion selection escaped the required-survivor oracle")
+			}
+			after[name] = bytes.Replace(original, []byte("stages:"), []byte("lost_stages:"), 1)
+			if err := checkGenericSchemaSurvivors(before, after); err == nil {
+				t.Fatal("lost non-pin section escaped the preservation oracle")
+			}
+		})
+	}
+}
+
+func TestRewriteRejectsUnaccountedGrantLocations(t *testing.T) {
+	for name := range requiredGenericInputs {
+		for _, pins := range []string{
+			"inputs: {events: [work.start], writes: [field]}",
+			"outputs: {reads: [field]}",
+			"inputs: {events: [work.start], reads: null}",
+			"inputs: {events: [work.start], reads: []}",
+			"inputs: {events: [work.start], reads: [' padded ']}",
+		} {
+			if _, err := planRewrite(map[string][]byte{name: []byte("pins: {" + pins + "}\n")}); err == nil {
+				t.Fatalf("unaccounted grant admitted at %s: %s", name, pins)
+			}
+		}
+	}
+	if _, err := planRewrite(map[string][]byte{"other/schema.yaml": []byte("pins: {outputs: {writes: [field]}}\n")}); err == nil {
+		t.Fatal("grant at a new source location silently discarded")
+	}
+}
+
+var requiredGenericInputs = map[string][]string{
+	"internal/runtime/testdata/generic-swarm-bundle/intake/schema.yaml":     {"item.created", "item.processed", "item.rejected"},
+	"internal/runtime/testdata/generic-swarm-bundle/processing/schema.yaml": {"item.review_requested", "item.rejected"},
+	"internal/runtime/testdata/generic-swarm-bundle/delivery/schema.yaml":   {"item.completed", "timer.item.timeout"},
+}
+
+func TestRewriteGenericSchemasRetiresOnlyGrants(t *testing.T) {
+	inputs := map[string][]byte{}
+	for name, events := range requiredGenericInputs {
+		data, err := os.ReadFile(filepath.Join("..", "..", filepath.FromSlash(name)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		doc, err := parse(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Reapply the retired spelling to the live schemas so the regression
+		// continues to exercise grant removal after the corpus is rewritten.
+		doc.edit["pins"] = map[string]any{
+			"inputs":  map[string]any{"events": events, "reads": []string{"retired_read"}},
+			"outputs": map[string]any{"writes": []string{"retired_write"}},
+		}
+		inputs[name], err = render(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	after, plan := rewritten(t, inputs)
+	if len(plan) != 3 {
+		t.Fatalf("expected only the three preserved schemas rewritten: %v", plan)
+	}
+	if err := checkGenericSchemaSurvivors(inputs, after); err != nil {
+		t.Fatal(err)
+	}
+	checkGenericSurvivorMutations(t, inputs, after)
+}
+
+func checkGenericSchemaSurvivors(before, after map[string][]byte) error {
+	for name, events := range requiredGenericInputs {
+		if len(before[name]) == 0 || len(after[name]) == 0 {
+			return fmt.Errorf("required generic schema did not survive: %s", name)
+		}
+		doc, err := parseTestSource(after[name])
+		if err != nil {
+			return err
+		}
+		pins, _ := lookup(doc.root, "pins")
+		if pins == nil || len(pins.Content) != 2 || pins.Content[0].Value != "inputs" {
+			return fmt.Errorf("expected only real input events, no invented outputs: %s", name)
+		}
+		inputs := pins.Content[1]
+		if inputs.Kind != yaml.SequenceNode || len(inputs.Content) != len(events) {
+			return fmt.Errorf("required input cardinality changed: %s", name)
+		}
+		for index, event := range events {
+			if inputs.Content[index].Kind != yaml.ScalarNode || inputs.Content[index].Value != event {
+				return fmt.Errorf("required input changed: %s #%d", name, index)
+			}
+		}
+		oldSections, err := nonPinSections(before[name])
+		if err != nil {
+			return err
+		}
+		newSections, err := nonPinSections(after[name])
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(oldSections, newSections) {
+			return fmt.Errorf("non-pin semantic sections changed: %s", name)
+		}
+	}
+	return nil
+}
+
+func nonPinSections(data []byte) ([]byte, error) {
+	doc, err := parseTestSource(data)
+	if err != nil {
+		return nil, err
+	}
+	for i := 0; i < len(doc.root.Content); i += 2 {
+		if doc.root.Content[i].Value == "pins" {
+			doc.root.Content = append(doc.root.Content[:i], doc.root.Content[i+2:]...)
+			break
+		}
+	}
+	return yaml.Marshal(doc.root)
 }

@@ -3,9 +3,8 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events:
-      - job.submit
-      - work.completed
+    - job.submit
+    - work.completed
 connect:
   - event: work.completed
     from: child

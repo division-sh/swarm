@@ -1,10 +1,9 @@
 stages: []
 pins:
   inputs:
-    events: [flow.spawn_with_config]
+    - flow.spawn_with_config
   outputs:
-    events:
-      - flow.spawned
+    - flow.spawned
 connect:
   - event: flow.spawned
     from: .

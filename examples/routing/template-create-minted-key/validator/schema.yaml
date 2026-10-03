@@ -2,8 +2,6 @@ name: validator
 instance: validation_case_id
 pins:
   inputs:
-    events:
-      - validation.requested
+    - validation.requested
   outputs:
-    events:
-      - validation.started
+    - validation.started

@@ -370,7 +370,7 @@ func TestBuildDoesNotInventExternalRolesFromCatalogPresence(t *testing.T) {
 	}
 }
 
-func TestBuildProjectsCanonicalRootConnectInsteadOfQualifiedSubscriptionDebt(t *testing.T) {
+func TestGrantFixtureRetirementPreservesCanonicalAncestorConnection(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
 		repoRoot,
@@ -381,14 +381,19 @@ func TestBuildProjectsCanonicalRootConnectInsteadOfQualifiedSubscriptionDebt(t *
 		t.Fatalf("load migrated fixture: %v", err)
 	}
 	topology := Build(semanticview.Wrap(bundle))
-	found := false
+	// Retain the ancestor-edge invariant formerly carried by test-data-pin-wiring,
+	// using the independent absolute-path fixture rather than field-grant syntax.
+	matches := 0
 	for _, edge := range topology.Edges {
-		if edge.Scope == DeliveryScopeInterFlowConnect && edge.Boundary != nil && edge.Boundary.To == ".task.done" {
-			found = true
+		if edge.Scope == DeliveryScopeInterFlowConnect && edge.Boundary != nil && edge.Boundary.From == "child.task.done" && edge.Boundary.To == ".task.done" {
+			if !strings.Contains(edge.Boundary.AuthoredLocation, "schema.yaml:") {
+				t.Fatalf("ancestor connection lost declaration provenance: %#v", edge)
+			}
+			matches++
 		}
 	}
-	if !found {
-		t.Fatalf("topology edges = %#v, want canonical connect to root task.done", topology.Edges)
+	if matches != 1 || len(topology.Issues) != 0 {
+		t.Fatalf("topology edges = %#v issues = %#v, want exactly one canonical child-to-root task.done connection", topology.Edges, topology.Issues)
 	}
 }
 
@@ -400,7 +405,6 @@ func TestExactQualifiedSubscriptionFixturesUseCanonicalAncestorEdge(t *testing.T
 	}{
 		{fixture: "test-child-flow-absolute-path", minimumEdges: 1},
 		{fixture: "test-child-flow-pin-wiring", minimumEdges: 1},
-		{fixture: "test-data-pin-wiring", minimumEdges: 1},
 		{fixture: "test-gates-in-child-flow", minimumEdges: 1},
 		{fixture: "test-nested-three-levels", minimumEdges: 2},
 		{fixture: "test-tool-override", minimumEdges: 1},

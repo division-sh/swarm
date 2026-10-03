@@ -3,11 +3,10 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events: [pipeline.start, task.done]
+    - pipeline.start
+    - task.done
   outputs:
-    events:
-      - event: pipeline.complete
-        sink: harness
+    - pipeline.complete
 connect:
   - event: task.done
     from: child

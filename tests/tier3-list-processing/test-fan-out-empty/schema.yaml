@@ -3,8 +3,6 @@ stages:
   scanning: {terminal: true}
 pins:
   inputs:
-    events: [batch.submitted]
+    - batch.submitted
   outputs:
-    events:
-      - event: item.assigned
-        sink: harness
+    - item.assigned

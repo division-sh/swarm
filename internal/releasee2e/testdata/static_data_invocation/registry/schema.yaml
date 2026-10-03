@@ -6,7 +6,6 @@ stages:
   complete: {terminal: true}
 pins:
   inputs:
-    events:
-      - child.requested
+    - child.requested
   outputs:
-    events: [child.completed]
+    - child.completed

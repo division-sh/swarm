@@ -3,8 +3,6 @@ stages:
   accepted: {terminal: true}
 pins:
   inputs:
-    events: [candidate.submitted]
+    - candidate.submitted
   outputs:
-    events:
-      - event: candidate.accepted
-        sink: harness
+    - candidate.accepted

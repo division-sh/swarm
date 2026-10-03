@@ -5,8 +5,8 @@ stages:
   released: {terminal: true}
 pins:
   inputs:
-    events: [step.a_done, step.b_done, step.c_done]
+    - step.a_done
+    - step.b_done
+    - step.c_done
   outputs:
-    events:
-      - event: release.ready
-        sink: harness
+    - release.ready

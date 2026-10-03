@@ -10,10 +10,9 @@ instance_variables:
     owner: text
 pins:
   inputs:
-    events:
-      - event: spawn.done
-        initialize:
-          name: payload.name
-          priority: payload.priority
-          owner: payload.owner
-      - task.assign
+    - event: spawn.done
+      initialize:
+        name: payload.name
+        owner: payload.owner
+        priority: payload.priority
+    - task.assign

@@ -21,8 +21,6 @@ func TestTier11FlowCompositionCanonicalRoutingOwnership(t *testing.T) {
 		canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-child-flow-policy-inherit"),
 		canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-child-flow-sibling-isolation"),
 		canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-child-flow-tool-inherit"),
-		canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-data-pin-wiring"),
-		canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-data-pin-write-conflict"),
 		canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-dynamic-flow-instance"),
 		canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-gates-in-child-flow"),
 		canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-multi-level-policy-inherit"),

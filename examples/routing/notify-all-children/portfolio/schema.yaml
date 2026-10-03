@@ -1,13 +1,11 @@
 name: portfolio
 pins:
   inputs:
-    events:
-      - portfolio.opened
-      - portfolio.account.register.requested
-      - portfolio.accounts.register.requested
-      - portfolio.membership.seeded
-      - portfolio.notify.requested
+    - portfolio.opened
+    - portfolio.account.register.requested
+    - portfolio.accounts.register.requested
+    - portfolio.membership.seeded
+    - portfolio.notify.requested
   outputs:
-    events:
-      - account.registered
-      - account.notify.requested
+    - account.registered
+    - account.notify.requested

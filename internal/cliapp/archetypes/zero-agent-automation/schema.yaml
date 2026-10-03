@@ -5,5 +5,4 @@ imports:
 stages: []
 pins:
   inputs:
-    events:
-      - automation.requested
+    - automation.requested

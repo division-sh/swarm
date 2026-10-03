@@ -10,14 +10,12 @@ stages:
     terminal: true
 pins:
   inputs:
-    events:
-      - search.requested
-      - scout.completed
-      - candidate.completed
+    - search.requested
+    - scout.completed
+    - candidate.completed
   outputs:
-    events:
-      - scout.requested
-      - candidate.requested
+    - scout.requested
+    - candidate.requested
 connect:
   - event: scout.requested
     from: .

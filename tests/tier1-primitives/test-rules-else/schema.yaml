@@ -1,8 +1,6 @@
 stages: []
 pins:
   inputs:
-    events: [item.received]
+    - item.received
   outputs:
-    events:
-      - event: routed.unknown
-        sink: harness
+    - routed.unknown

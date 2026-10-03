@@ -4,4 +4,4 @@ stages:
   finished: {terminal: true}
 pins:
   inputs:
-    events: [beta.start]
+    - beta.start

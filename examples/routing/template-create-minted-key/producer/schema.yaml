@@ -1,9 +1,7 @@
 name: producer
 pins:
   inputs:
-    events:
-      - validation.triggered
-      - validation.started
+    - validation.triggered
+    - validation.started
   outputs:
-    events:
-      - validation.requested
+    - validation.requested

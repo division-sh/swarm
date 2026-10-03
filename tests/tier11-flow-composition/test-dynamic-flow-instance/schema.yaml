@@ -5,9 +5,11 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events: [spawn.requested, assign.requested]
+    - spawn.requested
+    - assign.requested
   outputs:
-    events: [work.assign, worker.requested]
+    - work.assign
+    - worker.requested
 connect:
   - event: worker.requested
     from: .

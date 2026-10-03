@@ -2,8 +2,8 @@ name: test-flow-data-access
 stages: []
 pins:
   inputs:
-    events: [support.requested]
+    - support.requested
   outputs:
-    events: [support.requested]
+    - support.requested
 connect:
   - {event: support.requested, from: ., to: support}

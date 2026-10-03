@@ -3,8 +3,6 @@ stages:
   processing: {terminal: true}
 pins:
   inputs:
-    events: [task.started]
+    - task.started
   outputs:
-    events:
-      - event: task.progressed
-        sink: harness
+    - task.progressed

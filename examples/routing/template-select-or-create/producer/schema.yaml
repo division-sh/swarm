@@ -1,8 +1,6 @@
 name: producer
 pins:
   inputs:
-    events:
-      - account.requested
+    - account.requested
   outputs:
-    events:
-      - account.ready
+    - account.ready

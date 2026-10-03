@@ -18,5 +18,4 @@ stages:
 instance: item_id
 pins:
   inputs:
-    events:
-      - item.registered
+    - item.registered

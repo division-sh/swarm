@@ -4,8 +4,6 @@ stages:
   failed: {terminal: true}
 pins:
   inputs:
-    events: [item.evaluated]
+    - item.evaluated
   outputs:
-    events:
-      - event: item.failed
-        sink: harness
+    - item.failed

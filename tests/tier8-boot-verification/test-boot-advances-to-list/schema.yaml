@@ -4,4 +4,4 @@ stages:
   failed: {terminal: true}
 pins:
   inputs:
-    events: [task.requested]
+    - task.requested

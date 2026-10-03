@@ -4,5 +4,8 @@ stages:
   active: {}
   done: {terminal: true}
 pins:
-  inputs: {events: [task.assigned, task.finished]}
-  outputs: {events: [records.loaded]}
+  inputs:
+    - task.assigned
+    - task.finished
+  outputs:
+    - records.loaded

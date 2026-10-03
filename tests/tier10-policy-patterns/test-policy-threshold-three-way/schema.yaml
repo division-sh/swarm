@@ -5,8 +5,6 @@ stages:
   tier_c: {terminal: true}
 pins:
   inputs:
-    events: [eval.submitted]
+    - eval.submitted
   outputs:
-    events:
-      - event: eval.tier_b
-        sink: harness
+    - eval.tier_b

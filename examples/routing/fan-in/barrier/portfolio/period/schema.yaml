@@ -7,4 +7,5 @@ stages:
   failed: {terminal: true}
 pins:
   inputs:
-    events: [period.setup, period.reported]
+    - period.setup
+    - period.reported

@@ -22,14 +22,15 @@ const replyRequester = "examples/routing/template-reply/requester/schema.yaml"
 const replyParent = "examples/routing/template-reply/schema.yaml"
 const retiredHarness = "examples/routing/harness-injection/"
 
-var retiredGrantSchemas = map[string]bool{
-	"internal/runtime/testdata/generic-swarm-bundle/intake/schema.yaml":             true,
-	"internal/runtime/testdata/generic-swarm-bundle/processing/schema.yaml":         true,
-	"internal/runtime/testdata/generic-swarm-bundle/delivery/schema.yaml":           true,
-	"tests/tier11-flow-composition/test-data-pin-wiring/schema.yaml":                true,
-	"tests/tier11-flow-composition/test-data-pin-wiring/processor/schema.yaml":      true,
-	"tests/tier11-flow-composition/test-data-pin-write-conflict/flow-a/schema.yaml": true,
-	"tests/tier11-flow-composition/test-data-pin-write-conflict/flow-b/schema.yaml": true,
+var preservedGrantSchemas = map[string]bool{
+	"internal/runtime/testdata/generic-swarm-bundle/intake/schema.yaml":     true,
+	"internal/runtime/testdata/generic-swarm-bundle/processing/schema.yaml": true,
+	"internal/runtime/testdata/generic-swarm-bundle/delivery/schema.yaml":   true,
+}
+
+var retiredGrantFixtures = []string{
+	"tests/tier11-flow-composition/test-data-pin-wiring/",
+	"tests/tier11-flow-composition/test-data-pin-write-conflict/",
 }
 
 type change struct {
@@ -80,12 +81,12 @@ func run(root string, write bool) error {
 	}
 	inputs := map[string][]byte{}
 	for _, name := range strings.Split(string(files), "\x00") {
-		if !schemaFile(name) && !strings.HasPrefix(name, retiredHarness) {
+		if !schemaFile(name) && !retiredArtifact(name) {
 			continue
 		}
 		file := filepath.Join(root, filepath.FromSlash(name))
 		info, err := os.Lstat(file)
-		if os.IsNotExist(err) && (retiredGrantSchemas[name] || strings.HasPrefix(name, retiredHarness)) {
+		if os.IsNotExist(err) && retiredArtifact(name) {
 			continue
 		}
 		if err != nil || !info.Mode().IsRegular() {
@@ -100,35 +101,95 @@ func run(root string, write bool) error {
 	if err != nil {
 		return err
 	}
+	directories, err := retirementDirectories(root, inputs)
+	if err != nil {
+		return err
+	}
 	if write {
-		for _, item := range plan {
-			file := filepath.Join(root, filepath.FromSlash(item.Path))
-			if item.Delete {
-				err = os.Remove(file)
-			} else {
-				info, statErr := os.Stat(file)
-				if statErr != nil {
-					return statErr
-				}
-				err = os.WriteFile(file, item.After, info.Mode().Perm())
+		if err := applyPlan(root, plan, directories); err != nil {
+			return err
+		}
+	}
+	return json.NewEncoder(os.Stdout).Encode(plan)
+}
+
+func applyPlan(root string, plan []change, directories []string) error {
+	for _, item := range plan {
+		file := filepath.Join(root, filepath.FromSlash(item.Path))
+		var err error
+		if item.Delete {
+			err = os.Remove(file)
+		} else {
+			info, statErr := os.Stat(file)
+			if statErr != nil {
+				return statErr
+			}
+			err = os.WriteFile(file, item.After, info.Mode().Perm())
+		}
+		if err != nil {
+			return err
+		}
+	}
+	for _, directory := range directories {
+		if err := os.Remove(directory); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func retirementDirectories(root string, inputs map[string][]byte) ([]string, error) {
+	var directories []string
+	for _, prefix := range append([]string{retiredHarness}, retiredGrantFixtures...) {
+		selected := filepath.Join(root, filepath.FromSlash(prefix))
+		if err := filepath.WalkDir(selected, func(file string, entry os.DirEntry, err error) error {
+			if os.IsNotExist(err) && file == selected {
+				return nil
 			}
 			if err != nil {
 				return err
 			}
+			if entry.IsDir() {
+				directories = append(directories, file)
+				return nil
+			}
+			name, err := filepath.Rel(root, file)
+			if err != nil {
+				return err
+			}
+			if _, tracked := inputs[filepath.ToSlash(name)]; !tracked {
+				return fmt.Errorf("retired fixture contains an untracked file: %s", file)
+			}
+			return nil
+		}); err != nil {
+			return nil, err
 		}
 	}
-	return json.NewEncoder(os.Stdout).Encode(plan)
+	sort.Sort(sort.Reverse(sort.StringSlice(directories)))
+	return directories, nil
 }
 
 func schemaFile(name string) bool {
 	return path.Base(name) == "schema.yaml" || path.Base(name) == "schema.yml"
 }
 
+func retiredArtifact(name string) bool {
+	if strings.HasPrefix(name, retiredHarness) {
+		return true
+	}
+	for _, prefix := range retiredGrantFixtures {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func planRewrite(inputs map[string][]byte) ([]change, error) {
 	docs := map[string]*source{}
 	var plan []change
 	for name, data := range inputs {
-		if strings.HasPrefix(name, retiredHarness) || retiredGrantSchemas[name] {
+		if retiredArtifact(name) {
 			plan = append(plan, change{Path: name, Delete: true})
 			continue
 		}
@@ -146,7 +207,7 @@ func planRewrite(inputs map[string][]byte) ([]change, error) {
 			}
 			continue
 		}
-		converted, replies, err := rewritePins(pins)
+		converted, replies, err := rewritePins(name, pins)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", name, err)
 		}
@@ -216,7 +277,7 @@ func lookupValue(value yamlsource.Value, key string) (yamlsource.Value, error) {
 	return field.Value, err
 }
 
-func rewritePins(pins yamlsource.Value) (map[string][]pinEntry, []reply, error) {
+func rewritePins(name string, pins yamlsource.Value) (map[string][]pinEntry, []reply, error) {
 	fields, err := pins.Mapping()
 	if err != nil {
 		return nil, nil, err
@@ -227,13 +288,12 @@ func rewritePins(pins yamlsource.Value) (map[string][]pinEntry, []reply, error) 
 		if field.Name != "inputs" && field.Name != "outputs" {
 			return nil, nil, fmt.Errorf("unknown pins direction %q", field.Name)
 		}
-		direction := field.Value
-		if direction.Presence() == yamlsource.PresenceMapping {
-			wrapper, err := direction.Mapping()
-			if err != nil || len(wrapper) != 1 || wrapper[0].Name != "events" {
-				return nil, nil, fmt.Errorf("unexpected pin wrapper; grant fixtures must be retired explicitly")
-			}
-			direction = wrapper[0].Value
+		direction, err := rewriteDirection(name, field.Name, field.Value)
+		if err != nil {
+			return nil, nil, err
+		}
+		if direction.Presence() == yamlsource.PresenceMissing {
+			continue
 		}
 		items, err := direction.Sequence()
 		if err != nil {
@@ -259,6 +319,44 @@ func rewritePins(pins yamlsource.Value) (map[string][]pinEntry, []reply, error) 
 		result[field.Name] = list
 	}
 	return result, replies, nil
+}
+
+func rewriteDirection(name, direction string, value yamlsource.Value) (yamlsource.Value, error) {
+	if value.Presence() != yamlsource.PresenceMapping {
+		return value, nil
+	}
+	wrapper, err := value.Mapping()
+	if err != nil || len(wrapper) == 0 {
+		return yamlsource.Value{}, fmt.Errorf("empty or invalid pin wrapper")
+	}
+	var events yamlsource.Value
+	for _, field := range wrapper {
+		if field.Name == "events" {
+			events = field.Value
+			continue
+		}
+		grant := (direction == "inputs" && field.Name == "reads") || (direction == "outputs" && field.Name == "writes")
+		if !preservedGrantSchemas[name] || !grant {
+			return yamlsource.Value{}, fmt.Errorf("unexpected pin field %q outside the approved grant retirement", field.Name)
+		}
+		if err := validateGrant(field.Value); err != nil {
+			return yamlsource.Value{}, err
+		}
+	}
+	return events, nil
+}
+
+func validateGrant(value yamlsource.Value) error {
+	items, err := value.Sequence()
+	if err != nil || len(items) == 0 {
+		return fmt.Errorf("expected a nonempty retired field grant")
+	}
+	for _, item := range items {
+		if _, err := exactText(item); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func rewritePin(item yamlsource.Value, direction string) (pinEntry, *reply, error) {

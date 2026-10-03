@@ -1,10 +1,8 @@
 name: initiator
 pins:
   inputs:
-    events:
-      - requester.setup.requested
-      - request.submitted
+    - requester.setup.requested
+    - request.submitted
   outputs:
-    events:
-      - requester.setup
-      - requester.requested
+    - requester.setup
+    - requester.requested

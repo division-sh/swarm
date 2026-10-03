@@ -3,8 +3,6 @@ stages:
   matched: {terminal: true}
 pins:
   inputs:
-    events: [task.completed]
+    - task.completed
   outputs:
-    events:
-      - event: match.found
-        sink: harness
+    - match.found

@@ -4,10 +4,8 @@ stages:
   complete: {terminal: true}
 pins:
   inputs:
-    events: [step.first, step.second]
+    - step.first
+    - step.second
   outputs:
-    events:
-      - event: step.first_done
-        sink: harness
-      - event: step.second_done
-        sink: harness
+    - step.first_done
+    - step.second_done

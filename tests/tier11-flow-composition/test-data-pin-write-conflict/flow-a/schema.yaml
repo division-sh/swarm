@@ -1,9 +1,0 @@
-name: flow-a
-stages:
-  idle: {initial: true}
-  done: {terminal: true}
-pins:
-  inputs:
-    events: [a.start]
-  outputs:
-    writes: [shared_field]

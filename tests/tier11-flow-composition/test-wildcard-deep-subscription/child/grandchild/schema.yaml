@@ -4,7 +4,6 @@ stages:
   finished: {terminal: true}
 pins:
   inputs:
-    events: [task.start]
+    - task.start
   outputs:
-    events:
-      - task.done
+    - task.done

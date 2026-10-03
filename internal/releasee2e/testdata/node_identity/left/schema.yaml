@@ -5,6 +5,5 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events:
-      - entry.left
-      - work.routed
+    - entry.left
+    - work.routed

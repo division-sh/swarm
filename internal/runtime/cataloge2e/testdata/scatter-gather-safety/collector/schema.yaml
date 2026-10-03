@@ -7,6 +7,5 @@ stages:
   failed: {terminal: true}
 pins:
   inputs:
-    events:
-      - batch.opened
-      - item.reported
+    - batch.opened
+    - item.reported

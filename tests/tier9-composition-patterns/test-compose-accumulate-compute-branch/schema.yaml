@@ -6,8 +6,6 @@ stages:
   low: {terminal: true}
 pins:
   inputs:
-    events: [score.submitted]
+    - score.submitted
   outputs:
-    events:
-      - event: result.high
-        sink: harness
+    - result.high

@@ -2,7 +2,7 @@ name: numeric-data-scatter-park
 stages: []
 pins:
   outputs:
-    events: [item.registered]
+    - item.registered
 connect:
   - event: item.registered
     from: .

@@ -1,8 +1,6 @@
 name: ingress
 pins:
   inputs:
-    events:
-      - operating.report.triggered
+    - operating.report.triggered
   outputs:
-    events:
-      - operating.report.requested
+    - operating.report.requested

@@ -4,8 +4,7 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events: [task.completed, task.updated]
+    - task.completed
+    - task.updated
   outputs:
-    events:
-      - event: task.finished
-        sink: harness
+    - task.finished

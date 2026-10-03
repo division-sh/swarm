@@ -312,32 +312,33 @@ rows:
 - id: B059
   path: tests/tier11-flow-composition/test-data-pin-wiring/processor/nodes.yaml
   event: process.done
-  disposition: historical_connect
-  proof: TestExactQualifiedSubscriptionFixturesUseCanonicalAncestorEdge/test-data-pin-wiring
+  disposition: retired_pin_grant_fixture
+  proof: TestGrantFixtureRetirementPreservesCanonicalAncestorConnection
+  removed_fixture: tests/tier11-flow-composition/test-data-pin-wiring
 - id: B060
   path: tests/tier11-flow-composition/test-data-pin-wiring/nodes.yaml
   event: job.complete
-  disposition: dead_removal
-  proof: TestStaticMultiEntityRetirementConformance
-  retired_fixture: tests/tier11-flow-composition/test-data-pin-wiring
+  disposition: retired_pin_grant_fixture
+  proof: TestRewriteDeletesOnlyExplicitRetiredFixtures
+  removed_fixture: tests/tier11-flow-composition/test-data-pin-wiring
 - id: B061
   path: tests/tier11-flow-composition/test-data-pin-write-conflict/flow-a/nodes.yaml
   event: a.done
-  disposition: negative_removal
-  proof: TestStaticMultiEntityRetirementConformance
-  retired_fixture: tests/tier11-flow-composition/test-data-pin-write-conflict
+  disposition: retired_pin_grant_fixture
+  proof: TestFieldGrantAuthorityRetired
+  removed_fixture: tests/tier11-flow-composition/test-data-pin-write-conflict
 - id: B062
   path: tests/tier11-flow-composition/test-data-pin-write-conflict/flow-b/nodes.yaml
   event: b.done
-  disposition: negative_removal
-  proof: TestStaticMultiEntityRetirementConformance
-  retired_fixture: tests/tier11-flow-composition/test-data-pin-write-conflict
+  disposition: retired_pin_grant_fixture
+  proof: TestFieldGrantAuthorityRetired
+  removed_fixture: tests/tier11-flow-composition/test-data-pin-write-conflict
 - id: B063
   path: tests/tier11-flow-composition/test-data-pin-write-conflict/nodes.yaml
   event: complete
-  disposition: negative_removal
-  proof: TestStaticMultiEntityRetirementConformance
-  retired_fixture: tests/tier11-flow-composition/test-data-pin-write-conflict
+  disposition: retired_pin_grant_fixture
+  proof: TestRewriteDeletesOnlyExplicitRetiredFixtures
+  removed_fixture: tests/tier11-flow-composition/test-data-pin-write-conflict
 - id: B064
   path: tests/tier11-flow-composition/test-dynamic-flow-instance/worker/nodes.yaml
   event: work.done

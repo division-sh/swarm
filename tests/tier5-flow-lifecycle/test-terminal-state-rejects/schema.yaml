@@ -5,8 +5,7 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events: [task.completed, task.reopen_requested]
+    - task.completed
+    - task.reopen_requested
   outputs:
-    events:
-      - event: task.finished
-        sink: harness
+    - task.finished

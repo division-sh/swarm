@@ -2,9 +2,11 @@ name: stage-lifecycle-identity-root
 stages: []
 pins:
   inputs:
-    events: [scout.setup, scout.member.done]
+    - scout.setup
+    - scout.member.done
   outputs:
-    events: [scout.setup, scout.member.done]
+    - scout.setup
+    - scout.member.done
 connect:
   - {event: scout.setup, from: ., to: scout, resolution: create}
   - {event: scout.member.done, from: ., to: scout, resolution: select}

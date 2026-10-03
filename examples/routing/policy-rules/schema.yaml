@@ -2,6 +2,7 @@ name: policy-rules
 stages: []
 pins:
   inputs:
-    events: [work.requested]
+    - work.requested
   outputs:
-    events: [work.accepted, work.rejected]
+    - work.accepted
+    - work.rejected

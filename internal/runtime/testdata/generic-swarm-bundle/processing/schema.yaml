@@ -5,16 +5,8 @@ stages:
   rejected: {terminal: true}
 pins:
   inputs:
-    events:
-      - item.review_requested
-      - item.rejected
-    reads:
-      - priority
-      - results
-  outputs:
-    writes:
-      - score
-      - status
+    - item.review_requested
+    - item.rejected
 required_agents:
   - role: control-plane
     subscribes_to:

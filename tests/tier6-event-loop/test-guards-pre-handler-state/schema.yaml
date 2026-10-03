@@ -4,4 +4,4 @@ stages:
   processing: {terminal: true}
 pins:
   inputs:
-    events: [process.requested]
+    - process.requested

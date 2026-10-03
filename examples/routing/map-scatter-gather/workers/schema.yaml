@@ -5,6 +5,6 @@ stages:
   complete: {terminal: true}
 pins:
   inputs:
-    events: [item.requested]
+    - item.requested
   outputs:
-    events: [item.reported]
+    - item.reported

@@ -1,9 +1,9 @@
 name: routing-parent-connect
 pins:
   inputs:
-    events: [work.requested]
+    - work.requested
   outputs:
-    events: [work.requested]
+    - work.requested
 connect:
   - event: work.requested
     from: .

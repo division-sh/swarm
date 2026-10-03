@@ -3,4 +3,4 @@ stages:
   accepted: {terminal: true}
 pins:
   inputs:
-    events: [check.requested]
+    - check.requested

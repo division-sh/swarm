@@ -3,4 +3,4 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events: [task.started]
+    - task.started

@@ -6,11 +6,10 @@ stages:
   complete: {terminal: true}
 pins:
   inputs:
-    events:
-      - read.requested
-      - child.completed
+    - read.requested
+    - child.completed
   outputs:
-    events: [child.requested]
+    - child.requested
 connect:
   - {event: child.requested, from: ., to: registry, resolution: select-or-create}
   - {event: child.completed, from: registry, to: .}

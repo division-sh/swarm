@@ -3,6 +3,6 @@ stages:
   dispatched: {terminal: true}
 pins:
   inputs:
-    events: [item.discovered]
+    - item.discovered
   outputs:
-    events: [item.dispatched]
+    - item.dispatched

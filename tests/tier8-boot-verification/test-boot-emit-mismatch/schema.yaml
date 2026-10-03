@@ -3,7 +3,7 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events: [task.requested]
+    - task.requested
 required_agents:
   - role: worker
     subscribes_to: [task.requested]

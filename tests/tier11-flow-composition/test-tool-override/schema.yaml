@@ -4,13 +4,10 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events:
-      - task.requested
-      - child.done
+    - task.requested
+    - child.done
   outputs:
-    events:
-      - event: task.done
-        sink: harness
+    - task.done
 connect:
   - event: child.done
     from: child

@@ -6,7 +6,6 @@ ingress:
       signing_secret: webhook_signing.telegram
 pins:
   inputs:
-    events:
-      - inbound.telegram
+    - inbound.telegram
   outputs:
-    events: [inbound.telegram.text_message]
+    - inbound.telegram.text_message

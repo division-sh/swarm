@@ -3,8 +3,6 @@ stages:
   approved: {terminal: true}
 pins:
   inputs:
-    events: [item.reviewed]
+    - item.reviewed
   outputs:
-    events:
-      - event: item.approved
-        sink: harness
+    - item.approved

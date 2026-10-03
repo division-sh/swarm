@@ -5,10 +5,8 @@ stages:
   complete: {terminal: true}
 pins:
   inputs:
-    events: [stage.one_done, stage.two_done]
+    - stage.one_done
+    - stage.two_done
   outputs:
-    events:
-      - event: stage.two_start
-        sink: harness
-      - event: stage.complete
-        sink: harness
+    - stage.two_start
+    - stage.complete

@@ -10,5 +10,4 @@ instance: conversation_reference
 stages: []
 pins:
   inputs:
-    events:
-      - inbound.telegram.text_message
+    - inbound.telegram.text_message

@@ -18,14 +18,8 @@ auto_emit_on_create:
   description: Seed delivery completion checks when a template instance is created.
 pins:
   inputs:
-    events:
-      - item.completed
-      - timer.item.timeout
-    reads:
-      - score
-  outputs:
-    writes:
-      - status
+    - item.completed
+    - timer.item.timeout
 required_agents:
   - role: control-plane
     subscribes_to:

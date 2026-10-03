@@ -4,8 +4,6 @@ stages:
   scored: {terminal: true}
 pins:
   inputs:
-    events: [score.requested]
+    - score.requested
   outputs:
-    events:
-      - event: score.done
-        sink: harness
+    - score.done

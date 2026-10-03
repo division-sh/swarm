@@ -2,4 +2,4 @@ name: test-selected-contract-fork-execution
 stages: []
 pins:
   inputs:
-    events: [task.ready]
+    - task.ready

@@ -4,10 +4,10 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events: [flow.spawn_requested, flow.finished]
+    - flow.spawn_requested
+    - flow.finished
   outputs:
-    events:
-      - flow.spawned
+    - flow.spawned
 connect:
   - event: flow.spawned
     from: .

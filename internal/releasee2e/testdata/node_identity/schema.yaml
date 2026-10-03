@@ -5,13 +5,15 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events:
-      - entry.root
-      - entry.left
-      - entry.right
-      - entry.nested
+    - entry.root
+    - entry.left
+    - entry.right
+    - entry.nested
   outputs:
-    events: [work.routed, entry.left, entry.right, entry.nested]
+    - work.routed
+    - entry.left
+    - entry.right
+    - entry.nested
 connect:
   - {event: entry.left, from: ., to: left}
   - {event: entry.right, from: ., to: right}

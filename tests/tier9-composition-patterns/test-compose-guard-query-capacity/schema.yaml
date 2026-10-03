@@ -3,8 +3,6 @@ stages:
   admitted: {terminal: true}
 pins:
   inputs:
-    events: [admission.requested]
+    - admission.requested
   outputs:
-    events:
-      - event: admission.granted
-        sink: harness
+    - admission.granted

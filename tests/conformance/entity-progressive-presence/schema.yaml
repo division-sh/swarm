@@ -8,7 +8,6 @@ stages:
     terminal: true
 pins:
   inputs:
-    events:
-      - work.opened
-      - work.assessed
-      - work.annotated
+    - work.opened
+    - work.assessed
+    - work.annotated

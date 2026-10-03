@@ -1,8 +1,6 @@
 name: provider
 pins:
   inputs:
-    events:
-      - provider.requested
+    - provider.requested
   outputs:
-    events:
-      - provider.replied
+    - provider.replied

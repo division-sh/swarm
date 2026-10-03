@@ -1,9 +1,11 @@
 name: fan-in-barrier
 pins:
   inputs:
-    events: [operating.report.triggered, portfolio.setup]
+    - operating.report.triggered
+    - portfolio.setup
   outputs:
-    events: [operating.report.triggered, portfolio.setup]
+    - operating.report.triggered
+    - portfolio.setup
 connect:
   - event: operating.report.triggered
     from: .

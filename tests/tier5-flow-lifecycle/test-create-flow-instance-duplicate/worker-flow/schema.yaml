@@ -9,7 +9,6 @@ auto_emit_on_create:
   event: worker.ready
 pins:
   inputs:
-    events:
-      - flow.spawned
+    - flow.spawned
   outputs:
-    events: [worker.ready]
+    - worker.ready
