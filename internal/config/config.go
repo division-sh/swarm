@@ -48,7 +48,7 @@ type PlatformConfig struct {
 }
 
 func (c *Config) UnmarshalYAML(value *yaml.Node) error {
-	if err := validateConfigSource(value, reflect.TypeFor[Config](), "config"); err != nil {
+	if err := validateConfigSource(yamlsource.ValueFromNode(value), reflect.TypeFor[Config](), "config"); err != nil {
 		return err
 	}
 	type raw Config
@@ -56,24 +56,25 @@ func (c *Config) UnmarshalYAML(value *yaml.Node) error {
 }
 
 func (r *RuntimeConfig) UnmarshalYAML(value *yaml.Node) error {
-	if err := validateConfigSource(value, reflect.TypeFor[RuntimeConfig](), "runtime"); err != nil {
+	source := yamlsource.ValueFromNode(value)
+	if err := validateConfigSource(source, reflect.TypeFor[RuntimeConfig](), "runtime"); err != nil {
 		return err
 	}
 	if value.Kind == yaml.MappingNode {
-		// Resolve YAML merge keys before checking presence and scalar types.
-		var fields map[string]yaml.Node
-		if err := value.Decode(&fields); err != nil {
+		fields, err := source.Mapping()
+		if err != nil {
 			return err
 		}
-		if workers, present := fields["fan_out_workers"]; present {
-			if workers.Kind == yaml.AliasNode {
-				workers = *workers.Alias
+		for _, field := range fields {
+			if field.Name != "fan_out_workers" {
+				continue
 			}
-			if workers.Kind != yaml.ScalarNode || workers.Tag != "!!int" {
+			workers, err := field.Value.Scalar()
+			if err != nil || workers.Tag != "!!int" {
 				return errors.New("runtime.fan_out_workers must be a positive integer")
 			}
 			var count int
-			if err := workers.Decode(&count); err != nil {
+			if err := field.Value.Project(&count); err != nil {
 				return fmt.Errorf("runtime.fan_out_workers must be a positive integer: %w", err)
 			}
 		}
@@ -148,7 +149,7 @@ type WorkspaceConfig struct {
 }
 
 func (w *WorkspaceConfig) UnmarshalYAML(value *yaml.Node) error {
-	if err := validateConfigSource(value, reflect.TypeFor[WorkspaceConfig](), "workspace"); err != nil {
+	if err := validateConfigSource(yamlsource.ValueFromNode(value), reflect.TypeFor[WorkspaceConfig](), "workspace"); err != nil {
 		return err
 	}
 	type raw WorkspaceConfig
