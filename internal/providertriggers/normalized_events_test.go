@@ -160,6 +160,7 @@ func TestNormalizedEventManifestRejectsOverlappingBranchesAtLoad(t *testing.T) {
 
 func TestNormalizedEventPlanRejectsForcedRuntimeMultiMatch(t *testing.T) {
 	manifest := normalizedEventTestManifest()
+	plan := compileTriggerTestPlan(t, manifest.mustAdmit())
 	manifest.NormalizedEvents = append(manifest.NormalizedEvents, NormalizedEventManifest{
 		Event: "inbound.telegram.message_copy",
 		Fields: map[string]NormalizedEventFieldProjection{
@@ -167,9 +168,8 @@ func TestNormalizedEventPlanRejectsForcedRuntimeMultiMatch(t *testing.T) {
 		},
 	})
 	// Exercise the runtime guard with an intentionally corrupted private plan.
-	definition := manifestDefinition(manifest)
-	definition.outputs = definition.OutputManifest()
-	_, err := definition.Accept(Request{
+	plan.manifest.value.definition.outputs = manifestDefinition(manifest).OutputManifest()
+	_, err := plan.Accept(Request{
 		Target: Target{EntityID: "entity-1"},
 		Payload: map[string]any{
 			"update_id": json.Number("123"),

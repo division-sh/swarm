@@ -805,14 +805,6 @@ type manifestAdmission struct {
 	response   *Response
 }
 
-func (m manifestDefinition) Accept(req Request) (Delivery, error) {
-	admitted, err := m.admitRequest(req)
-	if err != nil {
-		return Delivery{}, err
-	}
-	return m.projectAdmission(admitted)
-}
-
 func (m manifestDefinition) admitRequest(req Request) (manifestAdmission, error) {
 	provider := NormalizeProviderName(m.Provider)
 	secret := strings.TrimSpace(req.Target.WebhookSecret)
