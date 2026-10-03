@@ -5,21 +5,24 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type Finding struct {
-	CheckID     string
-	Severity    string
-	Message     string
-	Location    string
-	Remediation string
-	Evidence    []string
+	CheckID      string
+	Severity     string
+	Message      string
+	Location     string
+	Remediation  string
+	Evidence     []string
+	FailureClass failures.Class
 }
 
 const (
@@ -152,7 +155,12 @@ func NewHardInvalidityFinding(checkID, location, message, remediation string, ev
 }
 
 type Report struct {
-	Findings []Finding
+	Findings             []Finding
+	Purpose              ValidationPurpose
+	Observations         []AdmissionObservation
+	ExecutionObligations []AdmissionExecutionObligation
+	Interrupted          bool
+	SourceArtifactHash   string
 }
 
 type Options struct {
@@ -162,6 +170,7 @@ type Options struct {
 	ManagedCredentials      runtimemanagedcredentials.Store
 	EffectReachability      SourceBootEffectReachability
 	CheckMCPReachable       bool
+	MCPDiscoveryTimeout     time.Duration
 	ValidateModelResolution bool
 	LLMProfile              llmselection.Profile
 	ModelAliases            llmselection.ModelAliases
@@ -181,7 +190,7 @@ func (p ValidationPurpose) Valid() bool {
 }
 
 func Run(ctx context.Context, source semanticview.Source, opts Options) Report {
-	report := Report{}
+	report := Report{Purpose: opts.Purpose}
 	if !opts.Purpose.Valid() {
 		report.Add(NewHardInvalidityFinding("workflow_contract_validation", "global", "invalid validation purpose", "Select structural validation or execution admission."))
 		return report
@@ -196,15 +205,14 @@ func Run(ctx context.Context, source semanticview.Source, opts Options) Report {
 		return report
 	}
 	checkCtx := newCheckerContext(ctx, source, opts)
+	if bundle, ok := semanticview.Bundle(source); ok && bundle.SourceArtifact != nil {
+		report.SourceArtifactHash = bundle.SourceArtifact.BundleHash()
+	}
 	for _, check := range bootCheckRegistry {
-		for _, finding := range check.Run(checkCtx) {
-			report.Add(finding)
-		}
+		report.runAdmissionCheck(checkCtx, check)
 	}
 	for _, check := range supplementalChecks {
-		for _, finding := range check.Run(checkCtx) {
-			report.Add(finding)
-		}
+		report.runAdmissionCheck(checkCtx, check)
 	}
 
 	report.Sort()
