@@ -9005,11 +9005,67 @@ engine:
         Preserve every finding and observation. Numeric outcome priority is interruption 130, hard
         invalidity 2, authentication 4, conflict 6, dependency/incomplete 3, otherwise 0. Applicable
         unobserved admission cannot become an execution obligation merely to obtain exit 0.
+    deployment_validation:
+      promoted_by: '#2286'
+      owner: Existing source/config admission, selected-store inspection and consumer-owned admission predicates
+      selection: >
+        Default verify validates the exact ordinary live serve intent when the configuration owner's
+        admitted layer facts identify explicit, project or local operator configuration. Built-in
+        defaults and unrelated user-global configuration do not identify a project deployment.
+        Missing or malformed declared configuration is a refusal, not a portable fallback.
+        Explicit --portable opts down to structural validation; absence of deployment context may
+        also return structural success, with the reason and every unchecked family visible.
+      immutable_context: >
+        Source bytes, effective source identity, selected model/catalog and admitted configuration
+        are frozen once. Shared projections consume those values instead of reloading the file or
+        selecting another context. The result covers only that invocation's resolved intent, not
+        different later flags, contexts or observations. Token and credential observations never
+        expose secret values in findings or readback.
+      store_inspection: >
+        Selected-store observations share one consistent read-only snapshot: PostgreSQL repeatable
+        read and SQLite read transaction. Schema compatibility consumes the bootstrap owner's
+        decision without DDL, schema stamping, process possession or domain writes. Fresh supported
+        state names boot preparation as unperformed; unavailable or partial domain readers never
+        mean empty state. Inspection scope is revoked when the callback ends and cannot be escaped
+        by supplying a different context.
+      retained_sources: >
+        Run-bundle availability owns ordinary-versus-standing eligibility. Pinned-source admission
+        consumes that reader and the exact admitted hash set; a required missing reader or failed
+        read is incomplete. Source-artifact inspection validates exact stored bytes and identities,
+        not presence alone. Neither inspection recovers execution, edits runs or reconstructs
+        persisted source bytes from a query representation.
+      observation_protocol: >
+        Required observations have a 60-second aggregate budget, five seconds for local socket or
+        metadata steps, fifteen seconds for configured subprocess or remote discovery steps and
+        a separate bounded five-second cleanup tail. Caller cancellation wins. Permitted protocols
+        are exact configured HTTP/stdio MCP initialize/list (never tools/call), configured executable
+        version, inspect-only Docker metadata, and immediate bind-and-close. A CLI image version
+        probe uses an observed existing immutable image digest, read-only root, no mounts, ports,
+        network, privileges or credentials, dropped capabilities, no-new-privileges and a uniquely
+        owned cleanup identity. No pull, workspace/network preparation, store mutation, provider
+        turn, token refresh, tunnel or channel activation is a verification operation. Owned
+        children and readers must be canceled, drained and joined; sessions closed and probe
+        containers removed. Failed cleanup remains incomplete, never ignored successful admission.
+      execution_boundary: >
+        Derivable source, profile, catalog, permission, credential, binding-shape and static prompt/
+        tool-plan predicates are shared before persistence on both normal and selected-fork paths.
+        Actual provider-owned visibility/authorization settlement and runtime-gateway handshake
+        retain current execution authority and durable evidence. Verification cannot preconfirm
+        visibility, construct an actor runtime, reuse stale authorization or manufacture a grant.
+        Boot repeats applicable observations and retains final currentness and commit fences.
+      output: >
+        Complete passing deployment admission reports validation_scope: deployment,
+        admission_complete: true and live_readiness: not_evaluated. Text and quiet say admission
+        checks passed; startup execution not performed, with all outstanding execution obligations.
+        Required missing, failed, disallowed, timed-out or uncleaned observations are incomplete
+        and nonzero. Portable success reports structural scope and admission_complete: false,
+        including whether --portable was explicitly requested or no deployment context existed.
     structural_validation:
       owner: internal/runtime.ValidateWorkflowContractSurface and internal/runtime/bootverify
       source_owner: internal/runtime.AdmitEffectiveSourceProjection over internal/packadmission.FromBundle metadata
       rule: >
-        Bare verify, describe, describe --graph and describe routes validate one admitted effective source,
+        Explicit portable verify, verify without deployment context, describe, describe --graph and
+        describe routes validate one admitted effective source,
         including provider/channel declarations. Structural validation is an explicit validation purpose,
         not a live or mock execution selection. It acquires no credential owner, probes no MCP/Claude/Docker,
         constructs no actor and claims no selected store. It keeps declared schema, field, scope, model
@@ -9017,11 +9073,14 @@ engine:
         Missing test performances and live machine readiness are separate admission concerns.
       check_boundary: >
         Existing bootcheck and post-boot declaration owners remain authoritative. Credential state and
-        concrete MCP availability/discovery are execution observations, absent from structural reports.
+        concrete MCP availability/discovery are deployment observations, explicitly unperformed in
+        structural reports.
         Mixed tool/model checks retain declaration validation without inventing successful discovery or
         selecting an execution backend. Runtime boot and doctor retain concrete live readiness checks.
       output: >
-        Verify and describe report validation_scope: structural and live_readiness: not_evaluated.
+        Portable verify and describe report validation_scope: structural, admission_complete: false
+        and live_readiness: not_evaluated. Default verify with admitted deployment context consumes
+        deployment_validation instead.
         Structural workspace_backend and verify capability_subjects are retired without aliases.
         Verify retains pack_inventory and source capability validation. Operational capability subjects
         remain on their existing live diagnostic surfaces. production_valid continues to mean absence
@@ -25055,8 +25114,9 @@ cli_specification:
               classification: shared_output
               fact_owner: local contract verification
               json_shape: >
-                object with ok, source_root, validation_scope: structural, live_readiness: not_evaluated,
+                object with ok, source_root, validation_scope (structural or deployment), live_readiness,
                 admission_complete, source_artifact_hash, observations, execution_obligations,
+                portable_requested and the portable-context reason when applicable,
                 production_valid, harness counts/provenance, pack_inventory, errors, warnings, and lint_evidence.
                 workspace_backend and operational capability_subjects are retired from structural verify.
                 production_valid describes harness independence, not deployment readiness. `errors`, `warnings`,
