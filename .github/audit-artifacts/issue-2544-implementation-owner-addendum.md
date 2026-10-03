@@ -67,6 +67,21 @@ execution receipts must identify their own snapshot.
    authority and refuses unsuccessful qualification. No retry or pass credit
    is introduced. Real script tests cover read-only disposal and fresh later
    processes; recorder tests cover retained failures and evaluator refusal.
+10. Re-gate5966450116 synchronizes the issue/audit/watchlist before code in
+    source78b09b41d and docs474f469; issue receipt5966519370 records that order.
+    Source6691856f5 removes edited and guards the unchanged late five-minute
+    summary with `TestCITierIncreaseKeepsLateSummaryAndNewHeadEvent`.
+    Focused normal/race parser/current-body/event/owner and specification guards
+    pass. The amended spec's embedded-source identity changes the same ten
+    describe JSON hashes again. Real base/candidate compiled commands reproduce
+    all45 baseline surfaces and prove zero differences outside provenance
+    source_file/source_line/source_column; the35 other outputs are unchanged.
+    Refresh only those observed hashes, preserving exact normalization and
+    both repetitions. The failed characterization, cancelled6691856 lifecycle
+    attempt37104654294 and interrupted queued local full are retained and earn
+    no qualification credit. Resume higher-tier CI only on the corrected new
+    signed head; keep the original8714 core as historical measured core evidence,
+    not current-head or higher-scope qualification.
 
 ## Local Instruction Clarification
 
