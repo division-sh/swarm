@@ -669,41 +669,50 @@ func TestCoordinatorCanDispatchIndependentDeliveriesToOneTargetTogether(t *testi
 }
 
 func TestCoordinatorParksNonExecutableStandingDelivery(t *testing.T) {
-	authority, owner, cleanup := coordinatorTestAuthorityAndOwner(t)
-	defer cleanup()
-	event := coordinatorTestEvent("parked-standing")
-	route := coordinatorTestAgentRoute(t, "agent-parked")
-	deliveryID, err := runtimedelivery.DeliveryID(event.ID(), route)
-	if err != nil {
-		t.Fatal(err)
-	}
-	store := &coordinatorTestStore{pages: []runtimedelivery.ContinuationPage{{
-		Items: []runtimedelivery.ContinuationItem{{
-			DeliveryID: deliveryID,
-			Event:      event,
-			Snapshot: runtimedelivery.Snapshot{
-				DeliveryID: deliveryID, RunID: event.RunID(), Route: route,
-				Status: runtimedelivery.StatusPending, Authority: authority,
-			},
-			Disposition: runtimedelivery.ClaimAcquired,
-		}},
-		Exhausted: true,
-	}}}
-	dispatcher := &coordinatorTestDispatcher{dispatched: make(chan struct{}, 1)}
-	coordinator, err := New(store, coordinatorTestRestarts{
-		event.RunID(): runtimestanding.StandingRestartSuspended,
-	}, authority, owner, dispatcher, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := coordinator.Start(context.Background()); err != nil {
-		t.Fatalf("start coordinator: %v", err)
-	}
-	if err := coordinator.Retire(context.Background()); err != nil {
-		t.Fatalf("retire coordinator: %v", err)
-	}
-	if calls := dispatcher.callCount(); calls != 0 {
-		t.Fatalf("non-executable standing delivery dispatch calls = %d, want 0", calls)
+	for _, kind := range []runtimestanding.StandingRestartDispositionKind{
+		runtimestanding.StandingRestartSuspended,
+		runtimestanding.StandingRestartOrphaned,
+		runtimestanding.StandingRestartCredentialDormant,
+		runtimestanding.StandingRestartRecoveryRequired,
+	} {
+		t.Run(string(kind), func(t *testing.T) {
+			authority, owner, cleanup := coordinatorTestAuthorityAndOwner(t)
+			defer cleanup()
+			event := coordinatorTestEvent("parked-standing")
+			route := coordinatorTestAgentRoute(t, "agent-parked")
+			deliveryID, err := runtimedelivery.DeliveryID(event.ID(), route)
+			if err != nil {
+				t.Fatal(err)
+			}
+			store := &coordinatorTestStore{pages: []runtimedelivery.ContinuationPage{{
+				Items: []runtimedelivery.ContinuationItem{{
+					DeliveryID: deliveryID,
+					Event:      event,
+					Snapshot: runtimedelivery.Snapshot{
+						DeliveryID: deliveryID, RunID: event.RunID(), Route: route,
+						Status: runtimedelivery.StatusPending, Authority: authority,
+					},
+					Disposition: runtimedelivery.ClaimAcquired,
+				}},
+				Exhausted: true,
+			}}}
+			dispatcher := &coordinatorTestDispatcher{dispatched: make(chan struct{}, 1)}
+			coordinator, err := New(store, coordinatorTestRestarts{
+				event.RunID(): kind,
+			}, authority, owner, dispatcher, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := coordinator.Start(context.Background()); err != nil {
+				t.Fatalf("start coordinator: %v", err)
+			}
+			if err := coordinator.Retire(context.Background()); err != nil {
+				t.Fatalf("retire coordinator: %v", err)
+			}
+			if calls := dispatcher.callCount(); calls != 0 {
+				t.Fatalf("non-executable standing delivery dispatch calls = %d, want 0", calls)
+			}
+		})
 	}
 }
 

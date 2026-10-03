@@ -25,7 +25,7 @@ func standingOperatorProcessFixture(t *testing.T) (*RuntimeContextManager, runti
 	if err != nil {
 		t.Fatal(err)
 	}
-	disposition, err := runtimerunlifecycle.ClassifyStandingRestart(runtimerunlifecycle.StandingRestartFact{
+	disposition, err := runtimerunlifecycle.ClassifyStandingRestart(runtimerunlifecycle.StandingRestartFact{BindingEnabled: true,
 		ExactCurrent: true, ServiceID: target.ServiceID, RunID: target.RunID, Generation: target.Generation,
 		DeclarationPresent: true, EffectiveState: "active", OperatorOverride: "none", RunState: "running",
 	})
@@ -80,7 +80,7 @@ func TestStandingOperatorNoChildRestoresPriorSuppression(t *testing.T) {
 			if err := transition.Retire(context.Background()); err != nil {
 				t.Fatal(err)
 			}
-			fact := runtimerunlifecycle.StandingRestartFact{
+			fact := runtimerunlifecycle.StandingRestartFact{BindingEnabled: true,
 				ExactCurrent: true, ServiceID: expected.ServiceID, RunID: expected.RunID, Generation: expected.Generation,
 				DeclarationPresent: true, EffectiveState: "suspended", OperatorOverride: "suspended", RunState: "paused",
 			}

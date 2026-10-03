@@ -168,7 +168,7 @@ func TestStandingGenerationRunOriginNamedOperationParity(t *testing.T) {
 			serviceID := runtimeflowidentity.StandingServiceID(flowPath)
 			firstArtifact := storeTestSourceArtifact("standing-origin-first-" + backend)
 			firstHash := firstArtifact.BundleHash()
-			candidate := runtimepipeline.StandingServiceCandidate{
+			candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 				ServiceID: serviceID, FlowPath: flowPath,
 				InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
 				Source: mustStoreTestSourceArtifactFact(firstHash),
@@ -250,7 +250,7 @@ func TestTerminalStandingGenerationDoesNotSeedCompletionCandidateParity(t *testi
 			secondArtifact := storeTestSourceArtifact("standing-repair-second-" + backend)
 			firstHash := firstArtifact.BundleHash()
 			secondHash := secondArtifact.BundleHash()
-			candidate := runtimepipeline.StandingServiceCandidate{
+			candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 				ServiceID: serviceID, FlowPath: flowPath,
 				InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
 				Source: mustStoreTestSourceArtifactFact(firstHash),
@@ -321,7 +321,7 @@ func TestTerminalStandingGenerationDoesNotSeedCompletionCandidateParity(t *testi
 
 			suspendedFlowPath := "repair-candidate-suspended/standing"
 			suspendedServiceID := runtimeflowidentity.StandingServiceID(suspendedFlowPath)
-			suspendedCandidate := runtimepipeline.StandingServiceCandidate{
+			suspendedCandidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 				ServiceID: suspendedServiceID, FlowPath: suspendedFlowPath,
 				InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
 				Source: mustStoreTestSourceArtifactFact(firstHash),

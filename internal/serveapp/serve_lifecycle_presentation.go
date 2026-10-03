@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
@@ -286,6 +287,33 @@ func (p *serveLifecyclePresenter) recordNoConnectedChannels() {
 	p.mu.Lock()
 	p.operatorWarnings = append(p.operatorWarnings, "No channels connected yet. Run: swarm channel connect telegram")
 	p.mu.Unlock()
+}
+
+func (p *serveLifecyclePresenter) recordIneligibleIngress(bindings []runtime.StandingIngressIneligibility) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, binding := range bindings {
+		if binding.BlockReason == runtimerunlifecycle.StandingBindingRecoveryRequired {
+			missing := ""
+			if len(binding.MissingCredentials) > 0 {
+				missing = " Missing keys: " + strings.Join(binding.MissingCredentials, ", ") + "."
+			}
+			p.operatorWarnings = append(p.operatorWarnings, fmt.Sprintf(
+				"RECOVERY REQUIRED ingress %s/%s (%s): retained channel authority is not executable; no affected route or provider effects. Run %s with fresh credentials and complete the required ceremony.%s",
+				binding.FlowPath, binding.Provider, binding.SourcePath, binding.RecoveryCommand, missing))
+			continue
+		}
+		commands := make([]string, 0, len(binding.MissingCredentials))
+		for _, key := range binding.MissingCredentials {
+			commands = append(commands, fmt.Sprintf("swarm secrets set %q", key))
+		}
+		p.operatorWarnings = append(p.operatorWarnings, fmt.Sprintf(
+			"DORMANT ingress %s/%s (%s): missing credential keys %s; no ingress route or retention. Run %s then restart, or use the declared channel connect flow.",
+			binding.FlowPath, binding.Provider, binding.SourcePath, strings.Join(binding.MissingCredentials, ", "), strings.Join(commands, "; ")))
+	}
 }
 
 func (p *serveLifecyclePresenter) recordOperatorChannelProofReuse(binding operatorchannel.Binding) {

@@ -121,7 +121,7 @@ func TestExternalEffectTerminalPrelaunchSelectorParksStillCurrentStandingOwner(t
 			workflow = newSQLiteWorkflowTestCoordinator(t, fixture.db, selected)
 		}
 		flowPath := "effect-recovery/still-current/" + uuid.NewString()
-		candidate := runtimepipeline.StandingServiceCandidate{
+		candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 			ServiceID: runtimeflowidentity.StandingServiceID(flowPath), FlowPath: flowPath,
 			InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
 			Source: mustStoreTestSourceArtifactFact(runLifecycleCandidateParityBundleHash),

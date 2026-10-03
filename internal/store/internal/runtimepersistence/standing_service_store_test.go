@@ -83,7 +83,7 @@ func TestStandingServiceTerminalizationBeforeRegistrationIsRecoveredByStartupSca
 			}
 
 			artifact := storeTestSourceArtifact("standing-startup-order-" + backend)
-			candidate := runtimepipeline.StandingServiceCandidate{
+			candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 				ServiceID:  runtimeflowidentity.StandingServiceID("project/signal-startup-order"),
 				FlowPath:   "project/signal-startup-order",
 				InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
@@ -175,7 +175,7 @@ func TestSQLiteStandingServiceReconcileDoesNotRepairRestartAbandon(t *testing.T)
 	secondArtifact := storeTestSourceArtifact("sqlite-standing-second")
 	firstHash := firstArtifact.BundleHash()
 	secondHash := secondArtifact.BundleHash()
-	candidate := runtimepipeline.StandingServiceCandidate{
+	candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 		ServiceID: serviceID, FlowPath: flowPath,
 		InstanceID: instanceID, EntityID: entityID,
 		Source: mustStoreTestSourceArtifactFact(firstHash),
@@ -237,7 +237,7 @@ func TestSQLiteStandingServiceReconcileProjectsTerminalityWithCommand(t *testing
 	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.backend.ConstructionHandle(), store)
 	serviceID := runtimeflowidentity.StandingServiceID("project/ingress")
 	artifact := storeTestSourceArtifact("standing-unknown-terminality")
-	candidate := runtimepipeline.StandingServiceCandidate{
+	candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 		ServiceID: serviceID, FlowPath: "project/ingress",
 		InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
 		Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()),
@@ -268,7 +268,7 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 	workflowStore, genericReconciler := newGenericScheduleAwareWorkflowTestCoordinator(t, store)
 	serviceID := runtimeflowidentity.StandingServiceID("project/ingress")
 	artifact := storeTestSourceArtifact("sqlite-standing-operator-lifecycle")
-	candidate := runtimepipeline.StandingServiceCandidate{
+	candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 		ServiceID: serviceID, FlowPath: "project/ingress",
 		InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
 		Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()),
@@ -420,7 +420,7 @@ func TestSQLiteStandingServiceSetOrphansRemovedDeclaration(t *testing.T) {
 	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.backend.ConstructionHandle(), store)
 	serviceID := runtimeflowidentity.StandingServiceID("project/ingress")
 	artifact := storeTestSourceArtifact("sqlite-standing-orphan")
-	candidate := runtimepipeline.StandingServiceCandidate{
+	candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 		ServiceID: serviceID, FlowPath: "project/ingress",
 		InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
 		Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()),
@@ -458,7 +458,7 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 	workflowStore, genericReconciler := newGenericScheduleAwareWorkflowTestCoordinator(t, selected)
 	serviceID := runtimeflowidentity.StandingServiceID("project/ingress")
 	artifact := storeTestSourceArtifact("postgres-standing-operator-lifecycle")
-	candidate := runtimepipeline.StandingServiceCandidate{
+	candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 		ServiceID: serviceID, FlowPath: "project/ingress",
 		InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
 		Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()),
@@ -964,7 +964,7 @@ func TestSQLiteRunStopRefusesCurrentStandingGenerationWithTeachingCommand(t *tes
 	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.backend.ConstructionHandle(), store)
 	serviceID := runtimeflowidentity.StandingServiceID("project/ingress")
 	artifact := storeTestSourceArtifact("sqlite-standing-run-stop")
-	candidate := runtimepipeline.StandingServiceCandidate{
+	candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 		ServiceID: serviceID, FlowPath: "project/ingress", InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
 		Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()),
 	}
@@ -1013,7 +1013,7 @@ func TestRunStopUsesDeclarationAwareStandingGuidanceParity(t *testing.T) {
 			flowPath := "run-stop-guidance/" + backend
 			serviceID := runtimeflowidentity.StandingServiceID(flowPath)
 			artifact := storeTestSourceArtifact("standing-run-stop-guidance-" + backend)
-			candidate := runtimepipeline.StandingServiceCandidate{
+			candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 				ServiceID: serviceID, FlowPath: flowPath,
 				InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
 				Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()),

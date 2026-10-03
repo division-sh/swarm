@@ -641,6 +641,10 @@ func (r recordingActivationRefresher) RefreshChannelActivations(ctx context.Cont
 	return nil
 }
 
+func (r recordingActivationRefresher) AdmitChannelTarget(_ context.Context, _ Operation, candidate Candidate) (Candidate, error) {
+	return candidate, candidate.Validate()
+}
+
 func (r recordingActivationRefresher) PreflightChannelActivation(ctx context.Context, _ Operation, _ Candidate) error {
 	if r.sawCanceledContext != nil && ctx.Err() != nil {
 		*r.sawCanceledContext = true
