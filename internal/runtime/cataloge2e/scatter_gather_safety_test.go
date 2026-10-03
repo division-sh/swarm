@@ -6,16 +6,20 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
+	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/testutil/replayconformance"
@@ -29,17 +33,25 @@ func TestScatterGatherSafetyBothStores(t *testing.T) {
 			name                    string
 			order                   []int
 			restart, repeat, reject bool
+			holdFinalization        bool
 			hundred                 bool
 		}{
 			{name: "ordered", order: []int{0, 1, 2}},
 			{name: "reversed", order: []int{2, 1, 0}},
 			{name: "duplicate_publication", order: []int{1, 0, 2}, repeat: true},
+			{name: "held_finalization", order: []int{1, 0, 2}, repeat: true, holdFinalization: true},
 			{name: "partial_restart", order: []int{2, 0, 1}, restart: true},
 			{name: "rejected_input", order: []int{0, 2, 1}, reject: true},
 			{name: "hundred_reverse_completion", hundred: true},
 		} {
 			t.Run(string(backend)+"/"+variant.name, func(t *testing.T) {
 				h := newRuntimeHarnessForBackend(t, filepath.Join(canonicalrouting.RepoRoot(t), "internal/runtime/cataloge2e/testdata/scatter-gather-safety"), backend, true)
+				var finalization *scatterGatherFinalizationHold
+				if variant.holdFinalization {
+					finalization = &scatterGatherFinalizationHold{held: make(chan events.Event, 1), release: make(chan struct{})}
+					t.Cleanup(finalization.Release)
+					h.rt.Pipeline.SetTestLifecycleProbe(finalization)
+				}
 				observePublication := scatterGatherTransactionDiagnostics(t, h)
 				var groups []catalogTranscriptGroup
 				var phaseStart, phaseDeadline time.Time
@@ -310,7 +322,7 @@ func TestScatterGatherSafetyBothStores(t *testing.T) {
 						t.Fatalf("wrong refusal: %v", err)
 					}
 					if after := scatterGatherStates(t, h, paths, collectorRef); !reflect.DeepEqual(states, after) {
-						t.Fatal("rejected input mutated persisted workflow state")
+						t.Fatalf("rejected input mutated persisted workflow state: before=%+v after=%+v", states, after)
 					}
 					if after := scatterGatherCounts(t, h, h.ctx); !reflect.DeepEqual(before, after) {
 						t.Fatalf("rejected input mutated domain: before=%v after=%v", before, after)
@@ -338,6 +350,35 @@ func TestScatterGatherSafetyBothStores(t *testing.T) {
 						}
 					}
 					if variant.repeat {
+						terminalRoutes := map[string]string{}
+						for key := range done {
+							terminalRoutes[paths[key]] = ids[key]
+						}
+						if index+1 == len(items) {
+							terminalRoutes[collectorRef] = collectorID
+						}
+						if finalization != nil && index+1 == len(items) {
+							ctx, cancel := context.WithDeadline(catalogRunContext(h, catalogRuntimeRunID), publicationDeadline)
+							select {
+							case event := <-finalization.held:
+								if event.RunID() != catalogRuntimeRunID || event.FlowInstance() != collectorRef || event.EntityID() != collectorID {
+									t.Fatalf("held finalization belongs to another route: event=%s run=%s instance=%s entity=%s", event.ID(), event.RunID(), event.FlowInstance(), event.EntityID())
+								}
+							case <-ctx.Done():
+								t.Fatalf("collector finalization was not held within the publication deadline: %v", ctx.Err())
+							}
+							ready, err := scatterGatherTerminalRoutesReady(ctx, h, terminalRoutes)
+							if err != nil || ready {
+								t.Fatalf("delivered join passed terminal snapshot fence while finalization was held: ready=%v err=%v", ready, err)
+							}
+							held := scatterGatherLoad(t, h, collectorRef, ctx)
+							if held.CurrentState != "complete" || held.Status != "active" || !held.TerminatedAt.IsZero() {
+								t.Fatalf("negative control did not hold exact terminal lifecycle: %+v", held)
+							}
+							finalization.Release()
+							cancel()
+						}
+						scatterGatherWaitForTerminalRoutes(t, h, terminalRoutes, publicationDeadline)
 						before := scatterGatherCounts(t, h, h.ctx)
 						states := scatterGatherStates(t, h, paths, collectorRef)
 						if err := h.publishRuntimeEventResultForStep(step, 20*time.Second, false); err != nil {
@@ -347,7 +388,7 @@ func TestScatterGatherSafetyBothStores(t *testing.T) {
 							t.Fatalf("duplicate changed domain: %v -> %v", before, after)
 						}
 						if after := scatterGatherStates(t, h, paths, collectorRef); !reflect.DeepEqual(states, after) {
-							t.Fatal("duplicate mutated persisted workflow state")
+							t.Fatalf("duplicate mutated persisted workflow state: before=%+v after=%+v", states, after)
 						}
 						check(index + 1)
 					}
@@ -717,6 +758,74 @@ func scatterGatherPublicEvents(h *runtimeHarness, ctx context.Context) (map[stri
 		return nil, err
 	}
 	return replayconformance.LoadOperatorEvents(testAuthorActivityContext(ctx), lister, catalogRuntimeRunID)
+}
+
+type scatterGatherFinalizationHold struct {
+	held    chan events.Event
+	release chan struct{}
+	once    sync.Once
+}
+
+func (p *scatterGatherFinalizationHold) NotifyLifecycle(ctx context.Context, signal lifecycleprobe.Signal) {
+	if signal.Kind != lifecycleprobe.WorkflowTerminalCommitted || signal.Status != "committed" || signal.EventType != "platform.join_complete" {
+		return
+	}
+	event, ok := correlation.InboundEventFromContext(ctx)
+	if !ok || correlation.RunIDFromContext(ctx) != catalogRuntimeRunID {
+		panic("scatter finalization control requires its exact run-scoped inbound event")
+	}
+	p.held <- event
+	<-p.release
+}
+
+func (p *scatterGatherFinalizationHold) Release() {
+	p.once.Do(func() { close(p.release) })
+}
+
+func scatterGatherTerminalRoutesReady(ctx context.Context, h *runtimeHarness, routes map[string]string) (bool, error) {
+	if correlation.RunIDFromContext(ctx) != catalogRuntimeRunID || len(routes) == 0 {
+		return false, fmt.Errorf("terminal snapshot fence requires exact current-run routes")
+	}
+	ready := true
+	for path, entityID := range routes {
+		owner := catalogExactWorkflowRoute(path)
+		instance, found, err := h.workflow.Load(ctx, owner)
+		if err != nil {
+			return false, fmt.Errorf("terminal snapshot load %s: %w", path, err)
+		}
+		if !found || entityID == "" || instance.StorageRef != path || instance.InstanceID != owner.Route.InstanceID || instance.WorkflowName != owner.Route.ScopeKey || instance.EntityID != entityID {
+			return false, fmt.Errorf("terminal snapshot route %s entity %s has mismatched persisted authority: found=%v instance=%+v", path, entityID, found, instance)
+		}
+		if instance.Status != "terminated" || instance.TerminatedAt.IsZero() {
+			ready = false
+		}
+	}
+	return ready, nil
+}
+
+func scatterGatherWaitForTerminalRoutes(t testing.TB, h *runtimeHarness, routes map[string]string, deadline time.Time) {
+	t.Helper()
+	if deadline.IsZero() {
+		t.Fatal("terminal snapshot fence requires the original publication deadline")
+	}
+	ctx, cancel := context.WithDeadline(catalogRunContext(h, catalogRuntimeRunID), deadline)
+	defer cancel()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		ready, err := scatterGatherTerminalRoutesReady(ctx, h, routes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ready {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("terminal snapshot routes did not finalize within the original publication deadline: routes=%v err=%v", routes, ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 func scatterGatherLoad(t testing.TB, h *runtimeHarness, path string, ctx context.Context) pipeline.WorkflowInstance {
