@@ -725,7 +725,7 @@ units:
   serveapp-standing:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    run: '^Test(S($|[^e].*)|[T-Z].*|ChannelOnboardingConfirmedChildRotationResumeE2E|ChannelCredentialRotationBeforeTargetPublicationBothStores|ChannelSigningFallbackPublicRefusalBothStores|CompletedLearnedIngressRequiresFreshReconnectBothStores)$'
+    run: '^Test(S($|[^e].*)|[T-Z].*|ChannelOnboardingConfirmedChildRotationResumeE2E|ChannelCredentialRotationBeforeTargetPublicationBothStores|ChannelSigningFallbackPublicRefusalBothStores|ChannelProviderConsumersRequireExactAdmission|CompletedLearnedIngressRequiresFreshReconnectBothStores)$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
