@@ -54,13 +54,16 @@ Exact governing spec sections read:
 - Adjacent `compiled_process_golden_profile`, `compiled_process_full_lifecycle_profile`
   and `compiled_process_numeric_feed_profile`: retained both-store/restart/soak
   obligations and explicit surface credit cannot be thinned to make a faster run.
-- `cli_specification.foundations` shared-output `describe`/`describe_routes` rows
+- `cli_specification.foundations.output_contract.command_support.output_conformance_registry.rows.describe`
+  and `.describe_routes`
   (25561/25574): preserve source authority, graph, topology, diagnostics, roots,
   flows, policy/rules and approvals; structural validity is not live readiness.
-- Source authority: `source_artifact`/`canonical_owner: internal/sourceartifact.AdmittedSourceArtifact`
+- Source authority: `filesystem_source_model`, including `local_root_selection.invocation_invariance`
+  and `canonical_owner: internal/sourceartifact.AdmittedSourceArtifact`
   near 39840, and `flow_routing` lowered routing/topology contracts. Source identity
   and authored provenance are real production facts; only test comparison changes.
-- Persistence `structural_enforcement` (6624): exact resolved finding identity,
+- `engine.runtime_core_persistence_store_contracts.selected_contracts[1].structural_enforcement`
+  (6624): exact resolved finding identity,
   reviewed dispositions, and unknown/stale/unclassified fail-closed enforcement.
 
 No exact platform section specifies golden-file storage layout, complexity artifact
