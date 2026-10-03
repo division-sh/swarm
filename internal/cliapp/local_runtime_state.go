@@ -202,7 +202,7 @@ func legacyProjectSQLiteStoreError(project localRuntimeStateProject, selection s
 	if !pathExists(legacyPath) || pathExists(canonicalPath) {
 		return nil
 	}
-	return fmt.Errorf("legacy project SQLite store exists at %s; canonical project SQLite store is %s; move the file to the canonical path or remove the legacy file after confirming the old data is no longer needed", legacyPath, canonicalPath)
+	return fmt.Errorf("unsupported project SQLite store exists at %s; selected canonical project SQLite store %s is absent; source authority conflict", legacyPath, canonicalPath)
 }
 
 func resolveWorkspaceMountSourcesForLocalState(RepoRoot string, flagDataSource string, cfg *config.Config, project localRuntimeStateProject, createDefault bool) (WorkspaceMountSources, error) {

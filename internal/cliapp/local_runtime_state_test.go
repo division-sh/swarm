@@ -78,7 +78,7 @@ func TestResolveLocalRuntimeStateRejectsLegacySQLiteOrphan(t *testing.T) {
 		CreateDefaultDataSource: true,
 		EnforceLegacySQLite:     true,
 	})
-	if err == nil || !strings.Contains(err.Error(), "legacy project SQLite store exists") || !strings.Contains(err.Error(), ".swarm/stores/dev.db") {
+	if err == nil || !strings.Contains(err.Error(), "unsupported project SQLite store exists") || !strings.Contains(err.Error(), ".swarm/stores/dev.db") {
 		t.Fatalf("ResolveLocalRuntimeState error = %v, want legacy sqlite orphan rejection", err)
 	}
 }

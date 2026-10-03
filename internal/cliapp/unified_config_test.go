@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/config"
 )
 
 func TestUnifiedConfigExplicitPathBeatsSWARMCONFIGLocator(t *testing.T) {
@@ -124,8 +126,8 @@ func TestGeneratedUnifiedConfigExampleMetadataCoversSupportedRules(t *testing.T)
 			}
 		}
 	}
-	for path, rule := range unifiedConfigRules() {
-		if !rule.supportedExampleLeaf() {
+	for path, rule := range config.SourceKeyRules() {
+		if !rule.SupportedExampleLeaf() {
 			continue
 		}
 		if _, ok := entries[path]; !ok {
