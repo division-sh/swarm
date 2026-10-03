@@ -9,7 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
-	"gopkg.in/yaml.v3"
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 func TestProviderContractsValidateShippedRuntimes(t *testing.T) {
@@ -145,7 +145,11 @@ func TestMockRuntimeUsesCanonicalProviderContractWithoutPublicBackendSelector(t 
 
 func TestRuntimeFactoryRejectsRetiredRuntimeMode(t *testing.T) {
 	var cfg config.Config
-	if err := yaml.Unmarshal([]byte("llm:\n  runtime_mode: cli_test\n"), &cfg); err == nil || !strings.Contains(err.Error(), "runtime_mode") || !strings.Contains(err.Error(), "not supported") {
+	source, err := yamlsource.Load([]byte("llm:\n  runtime_mode: cli_test\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := config.DecodeSource(source.Document("swarm.yaml").Root(), &cfg); err == nil || !strings.Contains(err.Error(), "runtime_mode") || !strings.Contains(err.Error(), "Valid fields: backend") {
 		t.Fatalf("factory source error = %v, want rejection before building provider effects", err)
 	}
 }

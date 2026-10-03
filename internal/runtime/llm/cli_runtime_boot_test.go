@@ -8,7 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
-	"gopkg.in/yaml.v3"
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 func testProviderCredentialResolver(t *testing.T, key, value string) ProviderCredentialResolver {
@@ -43,7 +43,11 @@ func TestValidateClaudeCLIRuntimeConfig_RequiresToolGatewayBinding(t *testing.T)
 
 func TestValidateClaudeCLIRuntimeConfig_RejectsRetiredRuntimeMode(t *testing.T) {
 	cfg := &config.Config{}
-	if err := yaml.Unmarshal([]byte("llm:\n  runtime_mode: cli_test\n"), cfg); err == nil || !strings.Contains(err.Error(), "runtime_mode") || !strings.Contains(err.Error(), "not supported") {
+	source, err := yamlsource.Load([]byte("llm:\n  runtime_mode: cli_test\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := config.DecodeSource(source.Document("swarm.yaml").Root(), cfg); err == nil || !strings.Contains(err.Error(), "runtime_mode") || !strings.Contains(err.Error(), "Valid fields: backend") {
 		t.Fatalf("CLI runtime source error = %v, want source admission rejection before runtime construction", err)
 	}
 }

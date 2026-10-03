@@ -14,7 +14,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
-	"gopkg.in/yaml.v3"
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 func TestRuntimeStart_AgentFreeCLITestDoesNotRequireClaudeStartupEnv(t *testing.T) {
@@ -48,7 +48,11 @@ func TestRuntimeStart_AgentFreeCLITestDoesNotRequireClaudeStartupEnv(t *testing.
 
 func TestNewRuntimeRejectsRetiredLLMRuntimeMode(t *testing.T) {
 	cfg := &config.Config{}
-	if err := yaml.Unmarshal([]byte("llm:\n  runtime_mode: cli_test\n"), cfg); err == nil || !strings.Contains(err.Error(), "runtime_mode") || !strings.Contains(err.Error(), "not supported") {
+	source, err := yamlsource.Load([]byte("llm:\n  runtime_mode: cli_test\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := config.DecodeSource(source.Document("swarm.yaml").Root(), cfg); err == nil || !strings.Contains(err.Error(), "runtime_mode") || !strings.Contains(err.Error(), "Valid fields: backend") {
 		t.Fatalf("runtime source error = %v, want source admission rejection before runtime construction", err)
 	}
 }
