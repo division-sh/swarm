@@ -1,6 +1,10 @@
 # #2544 Fixed-Tier Proof Census
 
-Source: `0fa24140aaa05e397509f451ba780fef3a260867`. Proposal only; no profile changed and no candidate execution credit.
+Source: `0fa24140aaa05e397509f451ba780fef3a260867`. Membership approved as amended by gate5965227266; no profile changed or candidate execution credit yet.
+
+Tier selection uses plain CI-Tier/Local-Tier PR-body lines, not an authorization record. For #2544 both are full. Lifecycle is provisional: retain it only if actual comparable whole-run cost saves at least20% versus full with exact declared obligations; otherwise collapse it into full in this PR.
+
+Historical component equivalents: core60.10, lifecycle236.28, full339.10 runner-minutes. The102.82-minute/30.3% lifecycle difference is measured old-job accounting, not candidate-tier execution or savings. See the audit's measured component table and gate.
 
 Each existing unit is retained. Core projections select named existing roots; higher tiers consume their canonical containing partitions once rather than running overlapping helper projections twice.
 A full-only family remains full even when its source changes: this is the accepted fixed-frequency tradeoff, not affected-owner selection.
