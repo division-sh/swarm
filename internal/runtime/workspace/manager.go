@@ -1104,7 +1104,7 @@ func (m *DockerManager) ensureWorkspaceImage(ctx context.Context) error {
 
 func (m *DockerManager) validateSharedMounts(ctx context.Context) error {
 	if strings.TrimSpace(m.cfg.WorkspaceVolumesFrom) != "" || strings.TrimSpace(m.cfg.SharedDataSource) != "" {
-		return fmt.Errorf("workspace.data_source and workspace.volumes_from are retired; declare flow_data_access or data_access")
+		return fmt.Errorf("workspace.data_source and workspace.volumes_from are unsupported")
 	}
 	_, err := validateSourceProjection(m.cfg.SourceProjection, m.cfg.BundleHash)
 	return err

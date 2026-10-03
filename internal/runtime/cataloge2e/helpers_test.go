@@ -98,10 +98,7 @@ func testRuntimeConfig() *config.Config {
 				RotateAfterTurns:      8,
 				RotateOnParseFailures: 2,
 			},
-			ClaudeAPI: config.ClaudeAPIConfig{
-				DefaultModel: "test-model",
-				HaikuModel:   "test-haiku",
-			},
+			Models: map[string]map[string]string{"regular": {"anthropic": "test-model"}, "cheap": {"anthropic": "test-haiku"}},
 		},
 	}
 }

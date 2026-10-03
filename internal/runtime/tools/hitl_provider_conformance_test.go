@@ -270,8 +270,8 @@ func managedHITLProviderConfig(backend, baseURL string) *config.Config {
 	return &config.Config{LLM: config.LLMConfig{
 		Backend:          backend,
 		Session:          config.LLMSessionConfig{LockTTL: time.Second, RotateAfterTurns: 40, RotateOnParseFailures: 3},
-		ClaudeAPI:        config.ClaudeAPIConfig{DefaultModel: "test-model", HaikuModel: "test-model"},
-		OpenAICompatible: config.OpenAICompatibleConfig{BaseURL: baseURL, DefaultModel: "test-model", LowCostModel: "test-model"},
+		Models:           map[string]map[string]string{"regular": {"anthropic": "test-model"}, "cheap": {"anthropic": "test-model"}},
+		OpenAICompatible: config.OpenAICompatibleConfig{BaseURL: baseURL},
 		OpenAIResponses:  config.OpenAIResponsesConfig{BaseURL: baseURL},
 	}}
 }

@@ -34,7 +34,7 @@ func isRetiredMessagePermission(name string) bool {
 
 func permissionReferenceError(name, location string) error {
 	if isRetiredMessagePermission(name) {
-		return fmt.Errorf("%s: permission %s is retired; %s", location, strings.TrimSpace(name), agentMessageRetiredTeaching)
+		return fmt.Errorf("%s: permission %q is unsupported", location, strings.TrimSpace(name))
 	}
 	return hitlIdentityReferenceError(name, location)
 }

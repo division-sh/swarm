@@ -58,7 +58,7 @@ func TestSchemaAdmissionRetiredPresence(t *testing.T) {
 		for _, value := range []string{"null", "''", "false", "x", "{}", "{a: b}", "[]", "[x]"} {
 			t.Run(key+"/"+value, func(t *testing.T) {
 				_, err := loadSchemaFragment(t, "name: retired\n"+key+": "+value+"\n")
-				if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "schema.yaml:") {
+				if err == nil || !strings.Contains(err.Error(), "is not supported") || !strings.Contains(err.Error(), "schema.yaml:") {
 					t.Fatalf("expected source-located retirement: %v", err)
 				}
 			})

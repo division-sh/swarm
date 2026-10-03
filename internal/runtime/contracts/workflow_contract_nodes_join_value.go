@@ -8,7 +8,7 @@ import (
 )
 
 func projectNodeJoinValue(value yamlsource.Value) (*JoinSpec, error) {
-	fields, err := nodeValueFields(value, "join", joinFieldOptions, nil)
+	fields, err := nodeValueFields(value, "join", joinFieldOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +48,7 @@ func projectNodeJoinValue(value yamlsource.Value) (*JoinSpec, error) {
 		out.OnCompleteFound = !joinOutcomeEmpty(out.OnComplete)
 	}
 	if deadline, present := fields["deadline"]; present {
-		deadlineFields, err := nodeValueFields(deadline, "join.deadline", joinDeadlineFieldOptions, nil)
+		deadlineFields, err := nodeValueFields(deadline, "join.deadline", joinDeadlineFieldOptions)
 		if err != nil {
 			return nil, err
 		}
@@ -74,7 +74,7 @@ func projectNodeJoinValue(value yamlsource.Value) (*JoinSpec, error) {
 }
 
 func projectNodeJoinMembersValue(value yamlsource.Value) (JoinMembersSpec, error) {
-	fields, err := nodeValueFields(value, "join.members", joinMembersFieldOptions, nil)
+	fields, err := nodeValueFields(value, "join.members", joinMembersFieldOptions)
 	if err != nil {
 		return JoinMembersSpec{}, err
 	}
@@ -125,7 +125,7 @@ func joinTextScalarFields(fields map[string]yamlsource.Value, names ...string) e
 }
 
 func projectNodeJoinOutcomeValue(value yamlsource.Value, owner string) (HandlerRuleEntry, error) {
-	fields, err := nodeValueFields(value, owner, joinOutcomeFieldOptions, nil)
+	fields, err := nodeValueFields(value, owner, joinOutcomeFieldOptions)
 	if err != nil {
 		return HandlerRuleEntry{}, err
 	}

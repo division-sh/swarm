@@ -119,7 +119,7 @@ func TestGeneratedUnifiedConfigExampleMetadataCoversSupportedRules(t *testing.T)
 			if !ok {
 				t.Fatalf("example metadata path %q is not accepted by unified config rules", entry.Path)
 			}
-			if rule.Split != "" || rule.OldShape != "" || rule.InlineSecret {
+			if rule.Split != "" || rule.InlineSecret {
 				t.Fatalf("example metadata path %q is not a supported configurable leaf: %#v", entry.Path, rule)
 			}
 		}
@@ -234,12 +234,12 @@ func TestUnifiedConfigRejectsLegacyFlatShapeAndSplitUnsupported(t *testing.T) {
 		want string
 	}{
 		{name: "retired artifact root", body: "paths:\n  artifact_root: /tmp/artifacts\n", want: "unknown config key \"paths.artifact_root\""},
-		{name: "old flat", body: "api_server: http://127.0.0.1:8081\n", want: "old flat config key \"api_server\""},
+		{name: "old flat", body: "api_server: http://127.0.0.1:8081\n", want: "unknown config key \"api_server\""},
 		{name: "split unsupported", body: "runtime:\n  max_concurrent_agents: 4\n", want: "recognized but not yet supported"},
 		{name: "claude cli retries split unsupported", body: "llm:\n  claude_cli:\n    retries: 2\n", want: "llm.claude_cli.retries"},
 		{name: "claude cli no session persistence split unsupported", body: "llm:\n  claude_cli:\n    no_session_persistence: true\n", want: "llm.claude_cli.no_session_persistence"},
 		{name: "claude cli tmux split unsupported", body: "llm:\n  claude_cli:\n    use_tmux: true\n", want: "llm.claude_cli.use_tmux"},
-		{name: "retired prompt directory", body: "paths:\n  prompts_dir: ./prompts\n", want: "RETIRED: paths.prompts_dir"},
+		{name: "retired prompt directory", body: "paths:\n  prompts_dir: ./prompts\n", want: "unknown config key \"paths.prompts_dir\""},
 		{name: "sharding split unsupported", body: "sharding:\n  enabled: true\n", want: "config key \"sharding\" is recognized but not yet supported"},
 		{name: "sharding dotted split unsupported", body: "sharding.foo: true\n", want: "config key \"sharding.foo\" is recognized but not yet supported"},
 		{name: "sharding typo unknown", body: "shardingtypo:\n  enabled: true\n", want: "unknown config key \"shardingtypo\""},
@@ -319,7 +319,7 @@ func TestUnifiedConfigRejectsExecutableAdjacentConfigYAML(t *testing.T) {
 	t.Cleanup(func() { runtimeConfigExecutablePath = originalExecutablePath })
 
 	_, err := loadUnifiedConfigForTest(t, unifiedConfigLoadOptions{RepoRoot: t.TempDir()})
-	if err == nil || !strings.Contains(err.Error(), "executable-adjacent runtime config") || !strings.Contains(err.Error(), "no longer a config source") {
+	if err == nil || !strings.Contains(err.Error(), "executable-adjacent runtime config") || !strings.Contains(err.Error(), "not an admitted config source") {
 		t.Fatalf("loadUnifiedConfig error = %v, want executable-adjacent legacy diagnostic", err)
 	}
 }

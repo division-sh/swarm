@@ -660,7 +660,7 @@ func TestDecodeCanonicalRuntimeLogPayloadRejectsRetiredErrorCarrier(t *testing.T
 		"message":"legacy",
 		"details":{"component":"runtime","action":"legacy_failure","error":"raw prose"}
 	}`))
-	if err == nil || !strings.Contains(err.Error(), "details.error is retired") {
+	if err == nil || !strings.Contains(err.Error(), "details.error is not a supported details field") {
 		t.Fatalf("DecodeCanonicalRuntimeLogPayload() error = %v, want retired error carrier failure", err)
 	}
 }

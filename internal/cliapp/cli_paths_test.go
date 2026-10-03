@@ -100,7 +100,7 @@ func TestResolveCLISourcePlatformSpecPathsRejectsMissingInvocationRoot(t *testin
 	}
 }
 
-func TestCLIContractPathResolutionIgnoresLegacyContractsDir(t *testing.T) {
+func TestCLIContractPathResolutionRejectsUndelegatedContractsDir(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	repo := t.TempDir()
 	legacyContracts := filepath.Join(t.TempDir(), "legacy-contracts")
@@ -108,9 +108,13 @@ func TestCLIContractPathResolutionIgnoresLegacyContractsDir(t *testing.T) {
 	t.Setenv("SWARM_CONTRACTS_DIR", legacyContracts)
 
 	chdirForTest(t, t.TempDir())
+	if _, err := ResolveCLISourcePlatformSpecPaths(repo, CLISourcePlatformSpecPathOptions{SourceRoot: "."}); err == nil || !strings.Contains(err.Error(), "env/unknown_stale @ SWARM_CONTRACTS_DIR") {
+		t.Fatalf("unsupported source path environment: %v", err)
+	}
+	t.Setenv("SWARM_CONTRACTS_DIR", "")
 	got, err := ResolveCLISourcePlatformSpecPaths(repo, CLISourcePlatformSpecPathOptions{SourceRoot: "."})
 	if err != nil {
-		t.Fatalf("resolve paths: %v", err)
+		t.Fatalf("resolve supported source path: %v", err)
 	}
 	if want := mustInvocationRootForTest(repo).Path(); got.SourceRoot != want {
 		t.Fatalf("source path = %q, want invocation root %q; SWARM_CONTRACTS_DIR must not be a CLI source", got.SourceRoot, want)

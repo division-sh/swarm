@@ -50,9 +50,6 @@ func newDescribeCommand(ctx context.Context, root InvocationRoot, rootOpts rootC
 		Short: "Render the expanded authoring view for an admitted Swarm source tree.",
 		Args:  argcount.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := rejectRetiredPlatformSpecFlag(cmd); err != nil {
-				return returnCLIValidationError(cmd.ErrOrStderr(), err)
-			}
 			if err := opts.logging.validate(); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
@@ -72,7 +69,6 @@ func newDescribeCommand(ctx context.Context, root InvocationRoot, rootOpts rootC
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", opts.platformSpecPath, retiredPlatformSpecFlagHelp)
 	cmd.Flags().BoolVar(&opts.graph, "graph", opts.graph, "Render the per-flow lifecycle stage graph")
 	bindCLIOutputFlags(cmd, &opts.output)
 	bindCLILoggingFlags(cmd, &opts.logging)
@@ -87,9 +83,6 @@ func newDescribeRoutesCommand(ctx context.Context, root InvocationRoot, rootOpts
 		Short: "Render the frozen authored routing topology.",
 		Args:  argcount.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := rejectRetiredPlatformSpecFlag(cmd); err != nil {
-				return returnCLIValidationError(cmd.ErrOrStderr(), err)
-			}
 			if len(args) == 1 {
 				opts.sourceRoot = args[0]
 			}
@@ -103,7 +96,6 @@ func newDescribeRoutesCommand(ctx context.Context, root InvocationRoot, rootOpts
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", opts.platformSpecPath, retiredPlatformSpecFlagHelp)
 	bindCLIOutputFlags(cmd, &opts.output)
 	bindCLILoggingFlags(cmd, &opts.logging)
 	return cmd

@@ -24,7 +24,7 @@ func TestProjectNodeCollectionValueRejectsInertFields(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := test.project(field.Value); err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "nodes.yaml:") {
+			if err := test.project(field.Value); err == nil || !strings.Contains(err.Error(), "is not supported") || !strings.Contains(err.Error(), "nodes.yaml:") {
 				t.Fatalf("expected source-located retirement, got %v", err)
 			}
 		})

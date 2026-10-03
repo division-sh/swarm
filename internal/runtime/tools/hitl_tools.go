@@ -17,8 +17,6 @@ const (
 	NotifyHumanMailboxItemType = "operator_notice"
 )
 
-const agentMessageRetiredTeaching = "RETIRED: agent_message is unsupported; use declared typed workflow events. Reopening requires a named concrete product workload needing dynamic peer selection and a demonstrated named limitation of declared typed workflow events (#2154)."
-
 type hitlIdentityLifecycle uint8
 
 const (
@@ -27,9 +25,8 @@ const (
 )
 
 type hitlIdentityLifecycleDescriptor struct {
-	name        string
-	lifecycle   hitlIdentityLifecycle
-	replacement string
+	name      string
+	lifecycle hitlIdentityLifecycle
 }
 
 func hitlIdentityLifecycleForName(name string) (hitlIdentityLifecycleDescriptor, bool) {
@@ -41,9 +38,9 @@ func hitlIdentityLifecycleForName(name string) (hitlIdentityLifecycleDescriptor,
 	case RetiredAgentMessageTool:
 		return hitlIdentityLifecycleDescriptor{name: RetiredAgentMessageTool, lifecycle: hitlIdentityRetired}, true
 	case "mailbox_send":
-		return hitlIdentityLifecycleDescriptor{name: "mailbox_send", lifecycle: hitlIdentityRetired, replacement: NotifyHumanToolName}, true
+		return hitlIdentityLifecycleDescriptor{name: "mailbox_send", lifecycle: hitlIdentityRetired}, true
 	case "human_task_request":
-		return hitlIdentityLifecycleDescriptor{name: "human_task_request", lifecycle: hitlIdentityRetired, replacement: AskHumanToolName}, true
+		return hitlIdentityLifecycleDescriptor{name: "human_task_request", lifecycle: hitlIdentityRetired}, true
 	default:
 		return hitlIdentityLifecycleDescriptor{}, false
 	}
@@ -58,10 +55,7 @@ func hitlIdentityReferenceError(name, location string) error {
 	if location == "" {
 		location = "tool reference"
 	}
-	if descriptor.name == RetiredAgentMessageTool {
-		return fmt.Errorf("%s: %s", location, agentMessageRetiredTeaching)
-	}
-	return fmt.Errorf("%s: RETIRED: %s is unsupported; use %s", location, descriptor.name, descriptor.replacement)
+	return fmt.Errorf("%s: tool %q is unsupported", location, descriptor.name)
 }
 
 func hitlIdentityDefinitionError(name, location string) error {

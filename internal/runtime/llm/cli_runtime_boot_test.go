@@ -8,7 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
-	"github.com/division-sh/swarm/internal/runtime/toolgateway"
+	"gopkg.in/yaml.v3"
 )
 
 func testProviderCredentialResolver(t *testing.T, key, value string) ProviderCredentialResolver {
@@ -43,10 +43,8 @@ func TestValidateClaudeCLIRuntimeConfig_RequiresToolGatewayBinding(t *testing.T)
 
 func TestValidateClaudeCLIRuntimeConfig_RejectsRetiredRuntimeMode(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.LLM.RuntimeMode = "cli_test"
-
-	if err := ValidateClaudeCLIRuntimeConfig(context.Background(), cfg, toolgateway.Binding{}, ProviderCredentialResolver{}); err == nil || !strings.Contains(err.Error(), "llm.runtime_mode is retired") {
-		t.Fatalf("ValidateClaudeCLIRuntimeConfig error = %v, want retired runtime mode rejection", err)
+	if err := yaml.Unmarshal([]byte("llm:\n  runtime_mode: cli_test\n"), cfg); err == nil || !strings.Contains(err.Error(), "runtime_mode") || !strings.Contains(err.Error(), "not supported") {
+		t.Fatalf("CLI runtime source error = %v, want source admission rejection before runtime construction", err)
 	}
 }
 

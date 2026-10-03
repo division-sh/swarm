@@ -7,14 +7,6 @@ import (
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
-var retiredNodeContractFields = map[string]string{
-	"id":                "node.id is retired; the map key is the identity.",
-	"permissions":       "node permissions are not public YAML authority",
-	"implementation":    "executor binding is not public YAML authority",
-	"owned_transitions": "transition ownership is expressed through event_handlers",
-	"idempotency_table": "node idempotency table semantics are not public YAML authority",
-}
-
 func projectNodeDeclarationsValue(root yamlsource.Value) (map[string]SystemNodeContract, error) {
 	if err := root.ValidateAcyclic(); err != nil {
 		return nil, err
@@ -55,7 +47,7 @@ func projectNodeDeclarationsValue(root yamlsource.Value) (map[string]SystemNodeC
 }
 
 func projectSystemNodeValue(value yamlsource.Value) (SystemNodeContract, error) {
-	fields, err := nodeValueFields(value, "node", systemNodeContractFields, retiredNodeContractFields)
+	fields, err := nodeValueFields(value, "node", systemNodeContractFields)
 	if err != nil {
 		return SystemNodeContract{}, err
 	}
@@ -123,24 +115,8 @@ func projectNodeEventHandlersValue(value yamlsource.Value) (map[string]SystemNod
 	return out, nil
 }
 
-var retiredNodeHandlerFields = map[string]string{
-	"condition":               "handler condition is retired; use rules.when or on_complete.condition",
-	"logic":                   "DEPRECATED: handler logic is retired",
-	"from":                    "handler.from is accepted but never executed; use the owning primitive's source",
-	"dedup_by":                "handler.dedup_by is retired; use accumulate.key or explicit join members",
-	"action":                  "authored action is retired",
-	"select_entity":           "receiver selection belongs to the input/composition boundary",
-	"select_or_create_entity": "receiver selection belongs to the input/composition boundary",
-	"branch":                  "use rules for branch selection",
-	"emits":                   "use emit: <event> or emit: {event, fields}",
-	"payload_transform":       "move payload ownership into emit.fields",
-	"on_below_threshold":      "deprecated handler branch",
-	"on_dedup":                "deprecated handler branch",
-	"on_pass":                 "deprecated handler branch",
-}
-
 func projectNodeHandlerValue(value yamlsource.Value) (SystemNodeEventHandler, error) {
-	fields, err := nodeValueFields(value, "handler", handlerFieldOptions, retiredNodeHandlerFields)
+	fields, err := nodeValueFields(value, "handler", handlerFieldOptions)
 	if err != nil {
 		return SystemNodeEventHandler{}, err
 	}
@@ -228,9 +204,7 @@ func projectNodeGateEffectValue(value yamlsource.Value) (*GateSpec, error) {
 		}
 		return &GateSpec{Name: strings.TrimSpace(name), Value: true}, nil
 	}
-	fields, err := nodeValueFields(value, "sets_gate", map[string]struct{}{"name": {}}, map[string]string{
-		"value": "sets_gate always sets the named gate to true; value is not executed",
-	})
+	fields, err := nodeValueFields(value, "sets_gate", map[string]struct{}{"name": {}})
 	if err != nil {
 		return nil, err
 	}

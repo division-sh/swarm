@@ -106,7 +106,7 @@ func TestHandlerRuleIdentitySeparatesFlowsAndEvents(t *testing.T) {
 func TestAuthoredElementIDIsRetired(t *testing.T) {
 	var handler SystemNodeEventHandler
 	err := decodeNodeTestYAML([]byte("rules:\n  - element_id: 00000000-0000-4000-8000-000000000001\n    else: true\n"), &handler)
-	if err == nil || !strings.Contains(err.Error(), `RETIRED: rule field "element_id"`) {
+	if err == nil || !strings.Contains(err.Error(), `rule field "element_id" is not supported`) {
 		t.Fatalf("retired element_id error = %v", err)
 	}
 }

@@ -2752,7 +2752,7 @@ func (e *Executor) stepClear(frame *executionFrame) error {
 				return err
 			}
 		case "pending_dedup":
-			return fmt.Errorf("clear target pending_dedup is retired; use declared entity mutations")
+			return fmt.Errorf("clear target pending_dedup is unsupported")
 		default:
 			if err := e.clearStepValue(frame, target); err != nil {
 				return err
@@ -2994,7 +2994,7 @@ func (e *Executor) clearStepValue(frame *executionFrame, target string) error {
 	}
 	parsed := paths.Parse(target)
 	if !parsed.HasExplicitRoot() || parsed.Root == paths.RootEntity {
-		return fmt.Errorf("clear.targets entity fields are retired; use data_accumulation op: clear")
+		return fmt.Errorf("clear.targets cannot mutate entity fields")
 	}
 	switch parsed.Root {
 	case paths.RootComputed:
@@ -3007,7 +3007,7 @@ func (e *Executor) clearStepValue(frame *executionFrame, target string) error {
 	case paths.RootJoin:
 		return fmt.Errorf("join context is read-only")
 	case paths.RootMetadata:
-		return fmt.Errorf("clear.targets metadata alias is retired; use data_accumulation op: clear")
+		return fmt.Errorf("clear.targets metadata scope is unsupported")
 	default:
 		return fmt.Errorf("unsupported clear target %s", target)
 	}

@@ -294,7 +294,7 @@ func TestProducerRoutingRetiredIntentFixturesFailClosed(t *testing.T) {
 				filepath.Join(repoRoot, tc.fixture),
 				runtimecontracts.DefaultPlatformSpecFile(repoRoot),
 			)
-			if err == nil || !strings.Contains(err.Error(), `RETIRED: agent field "prompt_ref"`) {
+			if err == nil || !strings.Contains(err.Error(), `agent field "prompt_ref"`) {
 				t.Fatalf("load error = %v, want retired prompt_ref teaching rejection", err)
 			}
 		})

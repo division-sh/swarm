@@ -117,8 +117,8 @@ func TestAgentIntentSourceUnion_FailsClosed(t *testing.T) {
 		{name: "override_without_import", yaml: "intent: {override: worker.md}\n", want: "exactly inline"},
 		{name: "unpinned_import", yaml: "intent: {import: support-drafter}\n", want: "explicitly versioned"},
 		{name: "blank_import_version", yaml: "intent: {import: support-drafter@}\n", want: "explicitly versioned"},
-		{name: "retired_prompt_ref", yaml: "prompt_ref: worker\n", want: "RETIRED"},
-		{name: "retired_prompt_inputs", yaml: "prompt_inputs: [customer]\n", want: "RETIRED"},
+		{name: "retired_prompt_ref", yaml: "prompt_ref: worker\n", want: "is not supported"},
+		{name: "retired_prompt_inputs", yaml: "prompt_inputs: [customer]\n", want: "is not supported"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var entry AgentRegistryEntry

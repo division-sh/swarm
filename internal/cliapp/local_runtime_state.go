@@ -206,18 +206,10 @@ func legacyProjectSQLiteStoreError(project localRuntimeStateProject, selection s
 }
 
 func resolveWorkspaceMountSourcesForLocalState(RepoRoot string, flagDataSource string, cfg *config.Config, project localRuntimeStateProject, createDefault bool) (WorkspaceMountSources, error) {
-	configDataSource, configDataSourceSet := runtimeConfigWorkspaceDataSource(cfg)
-	volumesFrom := ""
-	volumesFromSet := false
-	if cfg != nil {
-		volumesFrom = cfg.Workspace.VolumesFrom
-		volumesFromSet = cfg.Workspace.VolumesFromConfigured()
+	if strings.TrimSpace(flagDataSource) != "" {
+		return WorkspaceMountSources{}, fmt.Errorf("ambient workspace data sources are unsupported")
 	}
-	return resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
-		RepoRoot: RepoRoot, FlagDataSource: flagDataSource,
-		ConfigDataSource: configDataSource, ConfigDataSourceSet: configDataSourceSet,
-		VolumesFrom: volumesFrom, VolumesFromSet: volumesFromSet,
-	})
+	return WorkspaceMountSources{}, nil
 }
 
 func pathExists(path string) bool {

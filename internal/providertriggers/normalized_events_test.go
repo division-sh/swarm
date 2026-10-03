@@ -248,7 +248,7 @@ normalized_events:
         from: message.text
         type: text
 `))
-	if err == nil || !strings.Contains(err.Error(), "RETIRED: normalized field type") {
+	if err == nil || !strings.Contains(err.Error(), `field "type" is not supported`) || !strings.Contains(err.Error(), "schema") {
 		t.Fatalf("parseManifestStrict error = %v, want retired type spelling rejection", err)
 	}
 }

@@ -75,9 +75,9 @@ func TestVerifyAgentMessageRetirementSupportedCLI(t *testing.T) {
 				for _, check := range []string{"agent_permission_validation", "tool_resolution", "platform_tool_usage_hints"} {
 					found := false
 					for _, finding := range findings {
-						if finding.CheckID == check && strings.Contains(finding.Message, "RETIRED: agent_message is unsupported") {
+						if finding.CheckID == check && strings.Contains(finding.Message, "is unsupported") {
 							found = true
-							if !strings.Contains(finding.Remediation, "cannot be enabled") || !strings.Contains(finding.Message, "declared typed workflow events") {
+							if !strings.Contains(finding.Remediation, "cannot be enabled") || strings.Contains(finding.Message, "requires permission") {
 								t.Fatalf("misleading %s diagnostic: %+v", check, finding)
 							}
 						}

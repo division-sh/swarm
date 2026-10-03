@@ -84,7 +84,7 @@ func TestAgentReceiverConfigNativeNamespacesBothStores(t *testing.T) {
 				{"missing_receiver", `{"config":{}}`, "requires exactly config and receiver_config"},
 				{"receiver_array", `{"config":{},"receiver_config":[]}`, "receiver_config must be a JSON object or null"},
 				{"authority_model", `{"config":{"model":"override"},"receiver_config":{}}`, "config contains runtime-owned keys: model"},
-				{"authority_prompt", `{"config":{"nested":[{"system_prompt":"override"}]},"receiver_config":{}}`, "RETIRED: authored config.nested[0].system_prompt"},
+				{"authority_prompt", `{"config":{"nested":[{"system_prompt":"override"}]},"receiver_config":{}}`, "authored config.nested[0].system_prompt is unsupported"},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					if _, err := db.ExecContext(ctx, `UPDATE agents SET config=$1 WHERE agent_id=$2`, tc.raw, cfg.ID); err != nil {

@@ -83,7 +83,7 @@ func assertSelectedRetiredToolAdmissionError(t *testing.T, err error, name strin
 	if err == nil {
 		t.Fatalf("selected source containing %s was admitted", name)
 	}
-	for _, want := range []string{"selected-contract source admission failed", name, "RETIRED"} {
+	for _, want := range []string{"selected-contract source admission failed", name, "is unsupported"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("selected source error = %v, want %q", err, want)
 		}

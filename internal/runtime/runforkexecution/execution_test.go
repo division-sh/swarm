@@ -3541,7 +3541,7 @@ func TestStartSelectedContractAgentRuntimeGatewayReturnsGeneratedBinding(t *test
 	}
 }
 
-func TestStartSelectedContractAgentRuntimeGatewayRejectsRetiredTokenEnv(t *testing.T) {
+func TestStartSelectedContractAgentRuntimeGatewayDoesNotConsumeAmbientToken(t *testing.T) {
 	const staleHostURL = "http://127.0.0.1:9998"
 	const staleContainerURL = "http://host.docker.internal:9998"
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", staleHostURL)
@@ -3555,15 +3555,15 @@ func TestStartSelectedContractAgentRuntimeGatewayRejectsRetiredTokenEnv(t *testi
 		t.Fatal(err)
 	}
 	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, turns, work, nil)
-	if err == nil || !strings.Contains(err.Error(), "SWARM_TOOL_GATEWAY_TOKEN is retired") || !strings.Contains(err.Error(), "ToolGatewayBinding") {
-		t.Fatalf("startSelectedContractAgentRuntimeGateway error = %v, want retired token env rejection", err)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if cleanup != nil {
-		cleanup()
-		t.Fatal("cleanup was returned for rejected retired token env")
+	if cleanup == nil {
+		t.Fatal("runtime-owned gateway did not return cleanup")
 	}
-	if !binding.Empty() {
-		t.Fatalf("binding = %#v, want empty rejected binding", binding)
+	defer cleanup()
+	if !binding.IsRuntimeOwned() || binding.AuthToken() == "operator-token" || binding.HostMCPURL() == staleHostURL+"/mcp" || binding.WorkspaceMCPURL() == staleContainerURL+"/mcp" {
+		t.Fatalf("ambient env acquired gateway authority: %#v", binding)
 	}
 	if got := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_URL")); got != staleHostURL {
 		t.Fatalf("SWARM_TOOL_GATEWAY_URL = %q, want unchanged %q", got, staleHostURL)

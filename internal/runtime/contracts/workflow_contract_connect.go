@@ -123,7 +123,7 @@ func validateCompiledFlowInputResolution(resolution FlowInputPinResolution) erro
 	}
 	switch resolution.Mode {
 	case FlowInputResolutionModeCreate, FlowInputResolutionModeSelect, FlowInputResolutionModeSelectOrCreate:
-		return fmt.Errorf("ordinary input-pin resolution is retired; move resolution: %s and optional key_from to each connect row", FlowInputResolutionModeCode(resolution.Mode))
+		return fmt.Errorf("input-pin resolution mode %s is not supported for ordinary instance selection", FlowInputResolutionModeCode(resolution.Mode))
 	case FlowInputResolutionModeFanOut:
 		if resolution.RepliesTo != "" || resolution.CorrelationKey != "" {
 			return fmt.Errorf("mode fan-out may only declare mode")

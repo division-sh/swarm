@@ -40,7 +40,7 @@ func TestFlowConnectDecodePinsCanonicalEventCentricShape(t *testing.T) {
 		yaml string
 		want string
 	}{
-		{name: "retired adapter", yaml: "event: work.ready\nfrom: producer\nto: consumer\nadapter: ready_to_accepted\n", want: "connect.adapter is unsupported"},
+		{name: "retired adapter", yaml: "event: work.ready\nfrom: producer\nto: consumer\nadapter: ready_to_accepted\n", want: `connect field "adapter" is not supported`},
 		{name: "old row without event", yaml: "from: producer.work_ready\nto: consumer.work_ready\n", want: "endpoint-centric connect rows"},
 		{name: "missing source", yaml: "event: work.ready\nto: consumer\n", want: "requires non-empty event, from, and to"},
 		{name: "missing receiver", yaml: "event: work.ready\nfrom: producer\n", want: "requires non-empty event, from, and to"},
@@ -471,7 +471,7 @@ func TestSystemNodeHandlerDecodeJoinRejectsUnsupportedFields(t *testing.T) {
 	}{
 		{"interrupting", strings.Replace(canonical, "stage: waiting", "stage: waiting, interrupting: true", 1), `join field "interrupting" is not supported`},
 		{"member dedup", strings.Replace(canonical, "by: payload.id", "by: payload.id, dedup_by: payload.id", 1), `join.members field "dedup_by" is not supported`},
-		{"outcome action", strings.Replace(canonical, "advances_to: done", "action: {id: noop}", 1), "RETIRED-HANDLER-ACTION"},
+		{"outcome action", strings.Replace(canonical, "advances_to: done", "action: {id: noop}", 1), `field "action" is not supported`},
 		{"timeout", strings.Replace(canonical, "stage: waiting", "stage: waiting, timeout: {after: 1h, repeat: 2}", 1), `join field "timeout" is not supported`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -506,7 +506,7 @@ func TestFlowSchemaDocumentDecodeRejectsRetiredInputAddressOnPresence(t *testing
 		t.Run(string(specimen), func(t *testing.T) {
 			var doc FlowSchemaDocument
 			err := decodeNodeTestSnippet(t, canonicalrouting.RetiredReceiverRoutingParserSnippet(t, specimen), &doc)
-			if err == nil || !strings.Contains(err.Error(), "input pin address is unsupported") {
+			if err == nil || !strings.Contains(err.Error(), `event pin field "address" is not supported`) {
 				t.Fatalf("yaml.Unmarshal error = %v, want retired input address rejection", err)
 			}
 		})
@@ -523,7 +523,7 @@ func TestFlowConnectDecodeRejectsRetiredMapOnPresence(t *testing.T) {
 		t.Run(string(specimen), func(t *testing.T) {
 			var doc FlowSchemaDocument
 			err := decodeNodeTestSnippet(t, canonicalrouting.RetiredReceiverRoutingParserSnippet(t, specimen), &doc)
-			if err == nil || !strings.Contains(err.Error(), "retired connect.map") {
+			if err == nil || !strings.Contains(err.Error(), `connect field "map" is not supported`) {
 				t.Fatalf("yaml.Unmarshal error = %v, want retired connect.map rejection", err)
 			}
 		})
@@ -541,7 +541,7 @@ func TestFlowConnectDecodeRejectsRetiredUsingInstanceOnPresence(t *testing.T) {
 		t.Run(string(specimen), func(t *testing.T) {
 			var doc FlowSchemaDocument
 			err := decodeNodeTestSnippet(t, canonicalrouting.RetiredReceiverRoutingParserSnippet(t, specimen), &doc)
-			if err == nil || !strings.Contains(err.Error(), "retired connect.using.instance") {
+			if err == nil || !strings.Contains(err.Error(), `connect field "using" is not supported`) {
 				t.Fatalf("yaml.Unmarshal error = %v, want retired connect.using.instance rejection", err)
 			}
 		})
@@ -569,7 +569,7 @@ func TestFlowSchemaDocumentDecode_PreservesClosedInputPinSourceEnum(t *testing.T
 	}
 
 	var retired FlowSchemaDocument
-	if err := decodeNodeTestSnippet(t, canonicalrouting.InputPinSourceParserSnippet(t, canonicalrouting.InputPinSourceExternal), &retired); err == nil || !strings.Contains(err.Error(), "RETIRED: input event pin source: external") {
+	if err := decodeNodeTestSnippet(t, canonicalrouting.InputPinSourceParserSnippet(t, canonicalrouting.InputPinSourceExternal), &retired); err == nil || !strings.Contains(err.Error(), "input event pin source must be public, harness, or omitted") {
 		t.Fatalf("retired source accepted: %v", err)
 	}
 	var doc FlowSchemaDocument
@@ -582,7 +582,7 @@ func TestFlowSchemaDocumentDecode_PreservesClosedInputPinSourceEnum(t *testing.T
 func TestFlowSchemaDocumentDecodeRejectsRetiredAddressBeforeNestedFields(t *testing.T) {
 	var doc FlowSchemaDocument
 	err := decodeNodeTestSnippet(t, canonicalrouting.RetiredReceiverRoutingParserSnippet(t, canonicalrouting.RetiredInputAddressUnsupportedNested), &doc)
-	if err == nil || !strings.Contains(err.Error(), "input pin address is unsupported") {
+	if err == nil || !strings.Contains(err.Error(), `event pin field "address" is not supported`) {
 		t.Fatalf("yaml.Unmarshal error = %v, want retired address rejection", err)
 	}
 }
@@ -634,12 +634,12 @@ func TestFlowSchemaDocumentDecode_RejectsUnsupportedInputPinResolutionFields(t *
 		{
 			name: "instance_key",
 			body: canonicalrouting.UnsupportedInputPinResolutionSnippet(t, canonicalrouting.UnsupportedInstanceKeyField),
-			want: "resolution.instance_key is retired",
+			want: `field "instance_key" is not supported`,
 		},
 		{
 			name: "carries",
 			body: canonicalrouting.UnsupportedInputPinResolutionSnippet(t, canonicalrouting.UnsupportedResolutionCarry),
-			want: "input event pin carries are unsupported",
+			want: `event pin field "carries" is not supported`,
 		},
 	}
 	for _, tc := range tests {
@@ -656,7 +656,7 @@ func TestFlowSchemaDocumentDecode_RejectsUnsupportedInputPinResolutionFields(t *
 func TestFlowSchemaDocumentDecodeRejectsRetiredCarriesBeforeNestedSource(t *testing.T) {
 	var doc FlowSchemaDocument
 	err := decodeNodeTestSnippet(t, canonicalrouting.UnsupportedInputPinResolutionSnippet(t, canonicalrouting.RetiredInstanceKeyCarry), &doc)
-	if err == nil || !strings.Contains(err.Error(), "input event pin carries are unsupported") {
+	if err == nil || !strings.Contains(err.Error(), `event pin field "carries" is not supported`) {
 		t.Fatalf("yaml.Unmarshal error = %v, want whole carries grammar retired before nested interpretation", err)
 	}
 }
@@ -728,14 +728,14 @@ func TestFlowConnectDecodeRejectsRetiredDeliveryAndReplyOnPresence(t *testing.T)
 		problem     string
 		remediation string
 	}{
-		{name: "delivery one", field: "delivery: one", code: "contract_loader.retired_connect_delivery", problem: "connect.delivery is retired.", remediation: "receiver input resolution"},
-		{name: "delivery many", field: "delivery: many", code: "contract_loader.retired_connect_delivery", problem: "connect.delivery is retired.", remediation: "multiple rows"},
-		{name: "delivery broadcast", field: "delivery: broadcast", code: "contract_loader.retired_connect_delivery", problem: "connect.delivery is retired.", remediation: "multiple rows"},
-		{name: "delivery reply", field: "delivery: reply", code: "contract_loader.retired_connect_delivery", problem: "connect.delivery is retired.", remediation: "receiver input resolution"},
-		{name: "delivery malformed", field: "delivery: [one]", code: "contract_loader.retired_connect_delivery", problem: "connect.delivery is retired.", remediation: "receiver input resolution"},
-		{name: "reply mapping", field: "reply: {source_event_id: event.source_event_id}", code: "contract_loader.retired_connect_reply", problem: "connect.reply is retired.", remediation: "resolution mode reply"},
-		{name: "reply empty", field: "reply: {}", code: "contract_loader.retired_connect_reply", problem: "connect.reply is retired.", remediation: "separate connect edges"},
-		{name: "reply malformed", field: "reply: [legacy]", code: "contract_loader.retired_connect_reply", problem: "connect.reply is retired.", remediation: "resolution mode reply"},
+		{name: "delivery one", field: "delivery: one", code: "contract_loader.undefined_field", problem: `connect field "delivery" is not supported.`, remediation: "supported connect fields"},
+		{name: "delivery many", field: "delivery: many", code: "contract_loader.undefined_field", problem: `connect field "delivery" is not supported.`, remediation: "supported connect fields"},
+		{name: "delivery broadcast", field: "delivery: broadcast", code: "contract_loader.undefined_field", problem: `connect field "delivery" is not supported.`, remediation: "supported connect fields"},
+		{name: "delivery reply", field: "delivery: reply", code: "contract_loader.undefined_field", problem: `connect field "delivery" is not supported.`, remediation: "supported connect fields"},
+		{name: "delivery malformed", field: "delivery: [one]", code: "contract_loader.undefined_field", problem: `connect field "delivery" is not supported.`, remediation: "supported connect fields"},
+		{name: "reply mapping", field: "reply: {source_event_id: event.source_event_id}", code: "contract_loader.undefined_field", problem: `connect field "reply" is not supported.`, remediation: "supported connect fields"},
+		{name: "reply empty", field: "reply: {}", code: "contract_loader.undefined_field", problem: `connect field "reply" is not supported.`, remediation: "supported connect fields"},
+		{name: "reply malformed", field: "reply: [legacy]", code: "contract_loader.undefined_field", problem: `connect field "reply" is not supported.`, remediation: "supported connect fields"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -765,8 +765,8 @@ func TestFlowSchemaDocumentDecode_RejectsRetiredAndUnsupportedTopLevelFields(t *
 		wantErr      string
 		wantDiagCode string
 	}{
-		{name: "namespace_prefix", field: "namespace_prefix: worker", wantErr: "RETIRED"},
-		{name: "namespace_rule", field: "namespace_rule: path", wantErr: "RETIRED"},
+		{name: "namespace_prefix", field: "namespace_prefix: worker", wantErr: "is not supported"},
+		{name: "namespace_rule", field: "namespace_rule: path", wantErr: "is not supported"},
 		{name: "namespace", field: "namespace: worker", wantErr: "schema field \"namespace\" is not supported.", wantDiagCode: "contract_loader.undefined_field"},
 		{name: "unknown", field: "legacy_owner: worker", wantErr: "schema field \"legacy_owner\" is not supported.", wantDiagCode: "contract_loader.undefined_field"},
 	}
@@ -922,7 +922,7 @@ payload_transform:
     score: payload.score
 emit: score.ready
 `), &handler)
-	if err == nil || !strings.Contains(err.Error(), "RETIRED") {
+	if err == nil || !strings.Contains(err.Error(), "is not supported") {
 		t.Fatalf("yaml.Unmarshal error = %v, want RETIRED payload_transform rejection", err)
 	}
 }
@@ -939,7 +939,7 @@ branch:
       emit:
         event: item.rejected
 `), &handler)
-	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "branch") || !strings.Contains(err.Error(), "rules") {
+	if err == nil || !strings.Contains(err.Error(), "is not supported") || !strings.Contains(err.Error(), "branch") || !strings.Contains(err.Error(), "rules") {
 		t.Fatalf("yaml.Unmarshal error = %v, want RETIRED branch rejection pointing to rules", err)
 	}
 }
@@ -1742,7 +1742,7 @@ func TestSystemNodeEventHandlerDecode_RejectsRetiredClearTarget(t *testing.T) {
 clear:
   target: entity.summary
 `), &handler)
-	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "targets") {
+	if err == nil || !strings.Contains(err.Error(), "is not supported") || !strings.Contains(err.Error(), "targets") {
 		t.Fatalf("yaml.Unmarshal error = %v, want RETIRED clear.target rejection", err)
 	}
 }
@@ -1789,7 +1789,7 @@ compute:
 func TestHandlerRuleEntryDecode_RejectsInertComputeParams(t *testing.T) {
 	var rule HandlerRuleEntry
 	err := decodeNodeTestYAML([]byte("else: true\ncompute:\n  operation: pick_or_average\n  params: {strategy: strict}\n"), &rule)
-	if err == nil || !strings.Contains(err.Error(), `RETIRED: compute field "params"`) {
+	if err == nil || !strings.Contains(err.Error(), `compute field "params" is not supported`) {
 		t.Fatalf("inert compute.params accepted: %v", err)
 	}
 }
@@ -1916,9 +1916,9 @@ func TestW2RejectsRetiredPinMetadataAndNonLocalEvents(t *testing.T) {
 		raw  string
 		want string
 	}{
-		{name: "input carries", raw: "pins:\n  inputs:\n    events:\n      - event: work.requested\n        carries:\n          work_id: {from: payload.work_id, type: string, optional: true, convert: text}\n", want: "input event pin carries are unsupported"},
-		{name: "output key", raw: "pins:\n  outputs:\n    events:\n      - event: work.completed\n        key: work_id\n", want: "output event pin key is unsupported"},
-		{name: "output carries", raw: "pins:\n  outputs:\n    events:\n      - event: work.completed\n        carries: [work_id]\n", want: "output event pin carries are unsupported"},
+		{name: "input carries", raw: "pins:\n  inputs:\n    events:\n      - event: work.requested\n        carries:\n          work_id: {from: payload.work_id, type: string, optional: true, convert: text}\n", want: `event pin field "carries" is not supported`},
+		{name: "output key", raw: "pins:\n  outputs:\n    events:\n      - event: work.completed\n        key: work_id\n", want: `event pin field "key" is not supported`},
+		{name: "output carries", raw: "pins:\n  outputs:\n    events:\n      - event: work.completed\n        carries: [work_id]\n", want: `event pin field "carries" is not supported`},
 		{name: "qualified input", raw: "pins:\n  inputs:\n    events: [producer/work.requested]\n", want: "exact local canonical event identity"},
 		{name: "wildcard input", raw: "pins:\n  inputs:\n    events: ['work.*']\n", want: "exact local canonical event identity"},
 		{name: "qualified output", raw: "pins:\n  outputs:\n    events: [consumer/work.completed]\n", want: "exact local canonical event identity"},
@@ -2006,7 +2006,7 @@ func TestW2LoaderRejectsResolutionFromOutsideInstanceSelectionModes(t *testing.T
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := LoadWorkflowContractBundleWithOverrides(repo, tc.root(t), DefaultPlatformSpecFile(repo))
-			if err == nil || !strings.Contains(err.Error(), "resolution.from is retired") {
+			if err == nil || !strings.Contains(err.Error(), `field "from" is not supported`) {
 				t.Fatalf("bundle load error = %v, want %s resolution.from rejection", err, tc.name)
 			}
 		})
@@ -2066,7 +2066,7 @@ id: reminder
 event: timer.reminder
 `+tc.field+`
 `), &timer)
-			if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), strings.Split(tc.field, ":")[0]) || !strings.Contains(err.Error(), "delay") {
+			if err == nil || !strings.Contains(err.Error(), "is not supported") || !strings.Contains(err.Error(), strings.Split(tc.field, ":")[0]) || !strings.Contains(err.Error(), "delay") {
 				t.Fatalf("yaml.Unmarshal error = %v, want retired alias rejection for %s", err, tc.field)
 			}
 		})
@@ -2081,7 +2081,7 @@ event: timer.reminder
 delay: 30m
 delay_minutes: 30
 `), &timer)
-	if err == nil || !strings.Contains(err.Error(), `RETIRED: timer field "delay_minutes"`) {
+	if err == nil || !strings.Contains(err.Error(), `timer field "delay_minutes" is not supported`) {
 		t.Fatalf("yaml.Unmarshal error = %v, want mixed canonical+retired alias rejection", err)
 	}
 }
@@ -2107,7 +2107,7 @@ timer:
   id: reminder
   event: timer.reminder
 `), "timer", &timer)
-			if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), strings.Split(tc.field, ":")[0]) {
+			if err == nil || !strings.Contains(err.Error(), "is not supported") || !strings.Contains(err.Error(), strings.Split(tc.field, ":")[0]) {
 				t.Fatalf("yaml.Unmarshal error = %v, want merged retired alias rejection for %s", err, tc.field)
 			}
 		})
@@ -2174,10 +2174,10 @@ func TestSystemNodeContractDecode_RejectsRetiredAndUnsupportedTopLevelFields(t *
 		wantErr      string
 		wantDiagCode string
 	}{
-		{name: "permissions", field: "permissions: [create_flow_instance]", wantErr: "RETIRED"},
-		{name: "implementation", field: "implementation: builtin", wantErr: "RETIRED"},
-		{name: "owned_transitions", field: "owned_transitions: [ticket-open]", wantErr: "RETIRED"},
-		{name: "idempotency_table", field: "idempotency_table: worker_idempotency", wantErr: "RETIRED"},
+		{name: "permissions", field: "permissions: [create_flow_instance]", wantErr: "is not supported"},
+		{name: "implementation", field: "implementation: builtin", wantErr: "is not supported"},
+		{name: "owned_transitions", field: "owned_transitions: [ticket-open]", wantErr: "is not supported"},
+		{name: "idempotency_table", field: "idempotency_table: worker_idempotency", wantErr: "is not supported"},
 		{name: "unknown", field: "legacy_owner: worker", wantErr: "node field \"legacy_owner\" is not supported.", wantDiagCode: "contract_loader.undefined_field"},
 	}
 	for _, tc := range tests {
@@ -2243,7 +2243,7 @@ func TestRetiredEntitySchemaAdmissionRejectsScalarInitialSuffix(t *testing.T) {
 	for _, field := range []string{"integer initial 0", "text indexed nullable default pending"} {
 		t.Run(field, func(t *testing.T) {
 			_, err := loadSchemaFragment(t, "name: retired\nentity:\n  state_field: scoring_phase\n  fields:\n    revision_count: "+field+"\n")
-			if err == nil || !strings.Contains(err.Error(), "RETIRED") {
+			if err == nil || !strings.Contains(err.Error(), "is not supported") {
 				t.Fatalf("retired entity-schema grammar admitted: %v", err)
 			}
 		})
@@ -2286,7 +2286,7 @@ emit_mapping:
     a: routed.a
     b: routed.b
 `), &spec)
-	if err == nil || !strings.Contains(err.Error(), "RETIRED") {
+	if err == nil || !strings.Contains(err.Error(), "is not supported") {
 		t.Fatalf("yaml.Unmarshal error = %v, want RETIRED legacy fan_out emit mapping rejection", err)
 	}
 }
@@ -2297,7 +2297,7 @@ func TestFanOutSpecDecode_RejectsLegacyEmitPerItem(t *testing.T) {
 items_from: payload.items
 emit_per_item: routed.item
 `), &spec)
-	if err == nil || !strings.Contains(err.Error(), "RETIRED") {
+	if err == nil || !strings.Contains(err.Error(), "is not supported") {
 		t.Fatalf("yaml.Unmarshal error = %v, want RETIRED legacy fan_out emit_per_item rejection", err)
 	}
 }
@@ -2310,7 +2310,7 @@ target: worker-a
 emit:
   event: routed.item
 `), &spec)
-	if err == nil || !strings.Contains(err.Error(), `RETIRED: fan_out field "target"`) {
+	if err == nil || !strings.Contains(err.Error(), `fan_out field "target" is not supported`) {
 		t.Fatalf("yaml.Unmarshal error = %v, want retired fan_out target rejection", err)
 	}
 }
@@ -2649,7 +2649,7 @@ func TestSystemNodeEventHandlerDecodeRejectsRetiredReceiverSelectors(t *testing.
 			t.Run(name+"/"+body, func(t *testing.T) {
 				var handler SystemNodeEventHandler
 				err := decodeNodeTestYAML([]byte(name+": "+body+"\ncreate_entity: true\nemit: receiver.ready\n"), &handler)
-				if err == nil || !strings.Contains(err.Error(), "RETIRED:") || !strings.Contains(err.Error(), name) || !strings.Contains(err.Error(), "composition boundary") {
+				if err == nil || !strings.Contains(err.Error(), "is not supported") || !strings.Contains(err.Error(), name) || !strings.Contains(err.Error(), "Valid fields:") {
 					t.Fatalf("retired receiver selector accepted or lacks teaching error: %v", err)
 				}
 			})
@@ -2712,7 +2712,7 @@ func TestWorkflowDataWriteDecode_RetiresExpressionAliasInListForm(t *testing.T) 
 target_field: dimensions_requested
 expression: policy.scoring_dimensions
 `), &write)
-	if err == nil || !strings.Contains(err.Error(), "retired workflow data write expression") {
+	if err == nil || !strings.Contains(err.Error(), `field "expression" is not supported`) {
 		t.Fatalf("yaml.Unmarshal error = %v, want retirement", err)
 	}
 }
@@ -2749,7 +2749,7 @@ func TestExpressionValueDecode_RetiresExpressionAliasInMappingForm(t *testing.T)
 	err := decodeNodeTestYAML([]byte(`
 expression: entity.score + 1
 `), &expr)
-	if err == nil || !strings.Contains(err.Error(), "retired expression value") {
+	if err == nil || !strings.Contains(err.Error(), "unsupported expression value") {
 		t.Fatalf("yaml.Unmarshal error = %v, want retirement", err)
 	}
 }
@@ -3136,7 +3136,7 @@ rules:
       fields:
         bucket: '"low"'
 `,
-			contains: "RETIRED-EMIT-ROUTING: emit.target",
+			contains: `emit field "target" is not supported`,
 		},
 		{
 			name: "on_success_split",
@@ -3383,7 +3383,7 @@ func TestEmitTargetDecode_RejectsEveryRetiredShapeOnPresence(t *testing.T) {
 			if err == nil {
 				t.Fatal("yaml.Unmarshal succeeded, want retired allow_fanout rejection")
 			}
-			if want := "RETIRED-EMIT-ROUTING: emit.target"; !strings.Contains(err.Error(), want) {
+			if want := `emit field "target" is not supported`; !strings.Contains(err.Error(), want) {
 				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, want)
 			}
 		})
@@ -3408,7 +3408,7 @@ func TestEmitSpecDecode_RejectsEveryRetiredProducerRoutingFieldOnPresence(t *tes
 		t.Run(tc.name, func(t *testing.T) {
 			var emit EmitSpec
 			err := decodeNodeTestSnippet(t, canonicalrouting.NewParserSnippet(t, tc.yaml), &emit)
-			if err == nil || !strings.Contains(err.Error(), "RETIRED-EMIT-ROUTING: "+tc.want) {
+			if err == nil || !strings.Contains(err.Error(), `emit field "`+strings.TrimPrefix(tc.want, "emit.")+`" is not supported`) {
 				t.Fatalf("yaml.Unmarshal error = %v, want retired %s rejection", err, tc.want)
 			}
 		})
@@ -3428,31 +3428,33 @@ emit:
       account_id: account_id
     allow_fanout: false
 `), &spec)
-	if err == nil || !strings.Contains(err.Error(), "RETIRED-EMIT-ROUTING: emit.target") {
+	if err == nil || !strings.Contains(err.Error(), `emit field "target" is not supported`) {
 		t.Fatalf("yaml.Unmarshal error = %v, want nested retired target diagnostic", err)
 	}
 }
 
+// Historical test names remain in the proof census; current admission never
+// proposes a member-order-derived default or a codemod.
 func TestEnumTypeDeclDecode_RetiresSequenceFormWithTeachingCodemod(t *testing.T) {
 	var decl EnumTypeDecl
 	err := decodeNodeTestYAML([]byte(`[low, medium, high]`), &decl)
-	if err == nil || !strings.Contains(err.Error(), "RETIRED: enum declaration uses the sequence form") || !strings.Contains(err.Error(), "default: low") {
-		t.Fatalf("sequence form error = %v, want teaching codemod naming default: low", err)
+	if err == nil || !strings.Contains(err.Error(), "must be a mapping") || strings.Contains(err.Error(), "default: low") {
+		t.Fatalf("sequence form error = %v, want current mapping-form rejection without an inferred default", err)
 	}
 }
 
 func TestEnumTypeDeclDecode_RetiresScalarShorthandWithTeachingCodemod(t *testing.T) {
 	var decl EnumTypeDecl
 	err := decodeNodeTestYAML([]byte(`fast`), &decl)
-	if err == nil || !strings.Contains(err.Error(), "RETIRED: enum declaration uses the scalar shorthand") || !strings.Contains(err.Error(), "default: fast") {
-		t.Fatalf("scalar shorthand error = %v, want teaching codemod naming default: fast", err)
+	if err == nil || !strings.Contains(err.Error(), "must be a mapping") || strings.Contains(err.Error(), "default: fast") {
+		t.Fatalf("scalar shorthand error = %v, want current mapping-form rejection without an inferred default", err)
 	}
 }
 
 func TestEnumTypeDeclDecode_RejectsDuplicateKeys(t *testing.T) {
 	var decl EnumTypeDecl
 	err := decodeNodeTestYAML([]byte("values: [low, high]\ndefault: low\ndefault: high\n"), &decl)
-	if err == nil || !strings.Contains(err.Error(), `repeats key "default"`) {
+	if err == nil || !strings.Contains(err.Error(), `duplicate effective YAML key "default"`) {
 		t.Fatalf("duplicate key error = %v, want duplicate-key rejection", err)
 	}
 }
@@ -3479,8 +3481,8 @@ func TestEnumTypeDeclDecode_UnknownFieldListsValidOptions(t *testing.T) {
 func TestEnumTypeDeclDecode_RequiresDefault(t *testing.T) {
 	var decl EnumTypeDecl
 	err := decodeNodeTestYAML([]byte("values: [low, medium, high]\n"), &decl)
-	if err == nil || !strings.Contains(err.Error(), "requires default") || !strings.Contains(err.Error(), "default: low") {
-		t.Fatalf("missing default error = %v, want teaching codemod naming default: low", err)
+	if err == nil || !strings.Contains(err.Error(), "requires an explicit default member") || strings.Contains(err.Error(), "default: low") {
+		t.Fatalf("missing default error = %v, want explicit-default rejection without an inferred default", err)
 	}
 }
 
@@ -3505,7 +3507,7 @@ func TestEnumTypeDeclDecode_AcceptsCanonicalMappingForm(t *testing.T) {
 func TestEnumTypeDeclDecode_EmptyScalarShorthandRequiresMappingForm(t *testing.T) {
 	var decl EnumTypeDecl
 	err := decodeNodeTestYAML([]byte(`""`), &decl)
-	if err == nil || !strings.Contains(err.Error(), "requires the mapping form") {
+	if err == nil || !strings.Contains(err.Error(), "must be a mapping") {
 		t.Fatalf("empty scalar shorthand error = %v, want mapping-form guidance", err)
 	}
 }

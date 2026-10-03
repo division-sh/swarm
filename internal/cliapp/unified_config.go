@@ -6,11 +6,12 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/config"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
 )
 
@@ -55,25 +56,27 @@ type unifiedConfigLayer struct {
 type unifiedConfigDiagnosticKind string
 
 const (
-	unifiedConfigDiagnosticLoaded           unifiedConfigDiagnosticKind = "loaded"
-	unifiedConfigDiagnosticUnknownKey       unifiedConfigDiagnosticKind = "unknown_key"
-	unifiedConfigDiagnosticOldShape         unifiedConfigDiagnosticKind = "old_shape"
-	unifiedConfigDiagnosticTrustRejected    unifiedConfigDiagnosticKind = "trust_rejected"
-	unifiedConfigDiagnosticSplitUnsupported unifiedConfigDiagnosticKind = "split_unsupported"
-	unifiedConfigDiagnosticPathViolation    unifiedConfigDiagnosticKind = "path_violation"
-	unifiedConfigDiagnosticReadFailed       unifiedConfigDiagnosticKind = "read_failed"
-	unifiedConfigDiagnosticParseFailed      unifiedConfigDiagnosticKind = "parse_failed"
-	unifiedConfigDiagnosticLegacyDiscovery  unifiedConfigDiagnosticKind = "legacy_discovery"
-	unifiedConfigDiagnosticValidationFailed unifiedConfigDiagnosticKind = "validation_failed"
+	unifiedConfigDiagnosticLoaded            unifiedConfigDiagnosticKind = "loaded"
+	unifiedConfigDiagnosticUnknownKey        unifiedConfigDiagnosticKind = "unknown_key"
+	unifiedConfigDiagnosticTrustRejected     unifiedConfigDiagnosticKind = "trust_rejected"
+	unifiedConfigDiagnosticSplitUnsupported  unifiedConfigDiagnosticKind = "split_unsupported"
+	unifiedConfigDiagnosticPathViolation     unifiedConfigDiagnosticKind = "path_violation"
+	unifiedConfigDiagnosticReadFailed        unifiedConfigDiagnosticKind = "read_failed"
+	unifiedConfigDiagnosticParseFailed       unifiedConfigDiagnosticKind = "parse_failed"
+	unifiedConfigDiagnosticUnsupportedSource unifiedConfigDiagnosticKind = "unsupported_source"
+	unifiedConfigDiagnosticValidationFailed  unifiedConfigDiagnosticKind = "validation_failed"
 )
 
 type unifiedConfigDiagnostic struct {
-	Kind        unifiedConfigDiagnosticKind `json:"kind"`
-	Layer       unifiedConfigLayerName      `json:"layer,omitempty"`
-	Path        string                      `json:"path,omitempty"`
-	Key         string                      `json:"key,omitempty"`
-	Message     string                      `json:"message"`
-	Remediation string                      `json:"remediation,omitempty"`
+	Kind         unifiedConfigDiagnosticKind `json:"kind"`
+	Layer        unifiedConfigLayerName      `json:"layer,omitempty"`
+	Path         string                      `json:"path,omitempty"`
+	Key          string                      `json:"key,omitempty"`
+	Message      string                      `json:"message"`
+	Remediation  string                      `json:"remediation,omitempty"`
+	Line         int                         `json:"line,omitempty"`
+	Column       int                         `json:"column,omitempty"`
+	ValidOptions []string                    `json:"valid_options,omitempty"`
 }
 
 func (d unifiedConfigDiagnostic) blocker() bool {
@@ -114,17 +117,14 @@ func loadUnifiedConfig(opts unifiedConfigLoadOptions) (unifiedConfigLoadResult, 
 }
 
 func loadUnifiedConfigAllowDiagnostics(opts unifiedConfigLoadOptions) (unifiedConfigLoadResult, error) {
-	if err := rejectUnsupportedRuntimeControlEnv(); err != nil {
-		return unifiedConfigLoadResult{}, err
-	}
-	if err := rejectRetiredLLMEnvSelectors(); err != nil {
-		return unifiedConfigLoadResult{}, err
-	}
 	RepoRoot, err := requireInvocationRootPath(opts.RepoRoot)
 	if err != nil {
 		return unifiedConfigLoadResult{}, err
 	}
 	layers, diagnostics := discoverUnifiedConfigLayers(RepoRoot, opts.ExplicitPath)
+	if err := validateSwarmEnvSources(swarmEnvGuardContext{RepoRoot: RepoRoot, RuntimeConfigPath: opts.ExplicitPath}); err != nil {
+		diagnostics = append(diagnostics, unifiedConfigDiagnostic{Kind: unifiedConfigDiagnosticValidationFailed, Message: err.Error()})
+	}
 	keyOrigins := map[string]unifiedConfigKeyOrigin{}
 	var merged yaml.Node
 	merged.Kind = yaml.MappingNode
@@ -176,11 +176,11 @@ func loadUnifiedConfigAllowDiagnostics(opts unifiedConfigLoadOptions) (unifiedCo
 		}
 		diagnostics = append(diagnostics, unifiedConfigDiagnostic{Kind: unifiedConfigDiagnosticLoaded, Layer: layer.Name, Path: layer.Path, Message: "loaded swarm.yaml config"})
 	}
-	if legacy := executableAdjacentRuntimeConfigDiagnostic(); legacy != nil {
-		diagnostics = append(diagnostics, *legacy)
+	if unsupported := executableAdjacentRuntimeConfigDiagnostic(); unsupported != nil {
+		diagnostics = append(diagnostics, *unsupported)
 	}
-	if legacy := userGlobalLegacyCLIConfigDiagnostic(); legacy != nil {
-		diagnostics = append(diagnostics, *legacy)
+	if unsupported := userGlobalUnsupportedConfigDiagnostic(); unsupported != nil {
+		diagnostics = append(diagnostics, *unsupported)
 	}
 	cfg, err := defaultRuntimeConfig()
 	if err != nil {
@@ -260,19 +260,6 @@ func recordUnifiedConfigKeyOrigins(node *yaml.Node, prefix []string, layer unifi
 	}
 }
 
-func rejectRetiredLLMEnvSelectors() error {
-	if err := llmselection.RejectRetiredEnvBackend(os.LookupEnv); err != nil {
-		return err
-	}
-	if err := llmselection.RejectRetiredEnvRuntimeMode(os.LookupEnv); err != nil {
-		return err
-	}
-	if err := llmselection.RejectRetiredOpenAICompatibleBaseURLEnv(os.LookupEnv); err != nil {
-		return err
-	}
-	return llmselection.RejectRetiredModelEnv(os.LookupEnv)
-}
-
 func unifiedConfigBlockers(diagnostics []unifiedConfigDiagnostic) []unifiedConfigDiagnostic {
 	blockers := make([]unifiedConfigDiagnostic, 0, len(diagnostics))
 	for _, d := range diagnostics {
@@ -340,7 +327,7 @@ func userGlobalUnifiedConfigPath() string {
 	return filepath.Join(dir, "swarm", "swarm.yaml")
 }
 
-func userGlobalLegacyCLIConfigDiagnostic() *unifiedConfigDiagnostic {
+func userGlobalUnsupportedConfigDiagnostic() *unifiedConfigDiagnostic {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return nil
@@ -350,11 +337,11 @@ func userGlobalLegacyCLIConfigDiagnostic() *unifiedConfigDiagnostic {
 		return nil
 	}
 	return &unifiedConfigDiagnostic{
-		Kind:        unifiedConfigDiagnosticLegacyDiscovery,
+		Kind:        unifiedConfigDiagnosticUnsupportedSource,
 		Layer:       unifiedLayerUserGlobal,
 		Path:        path,
-		Message:     fmt.Sprintf("legacy flat CLI config %s is no longer a config source", path),
-		Remediation: "move values to user-global swarm.yaml under connection, serve, or paths, then remove config.yaml",
+		Message:     fmt.Sprintf("config source %s is not a supported configuration source", path),
+		Remediation: "Only declared swarm.yaml layers and explicit config sources are admitted.",
 	}
 }
 
@@ -362,20 +349,20 @@ func executableAdjacentRuntimeConfigDiagnostic() *unifiedConfigDiagnostic {
 	path, ok, err := executableAdjacentRuntimeConfigPath()
 	if err != nil {
 		return &unifiedConfigDiagnostic{
-			Kind:        unifiedConfigDiagnosticLegacyDiscovery,
+			Kind:        unifiedConfigDiagnosticUnsupportedSource,
 			Path:        "",
 			Message:     err.Error(),
-			Remediation: "remove executable-adjacent config.yaml; use --config, SWARM_CONFIG, .swarm/swarm.yaml, ./swarm.yaml, or user-global swarm.yaml",
+			Remediation: "Only declared swarm.yaml layers and explicit config sources are admitted.",
 		}
 	}
 	if !ok {
 		return nil
 	}
 	return &unifiedConfigDiagnostic{
-		Kind:        unifiedConfigDiagnosticLegacyDiscovery,
+		Kind:        unifiedConfigDiagnosticUnsupportedSource,
 		Path:        path,
-		Message:     fmt.Sprintf("executable-adjacent runtime config %s is no longer a config source", path),
-		Remediation: "move this file to an explicit swarm.yaml source and remove executable-adjacent config.yaml",
+		Message:     fmt.Sprintf("executable-adjacent runtime config %s is not an admitted config source", path),
+		Remediation: "Only declared swarm.yaml layers and explicit config sources are admitted.",
 	}
 }
 
@@ -467,21 +454,7 @@ func cloneYAMLNode(node *yaml.Node) *yaml.Node {
 	return &out
 }
 
-type unifiedCLIYAML struct {
-	Connection struct {
-		APIServer    string `yaml:"api_server"`
-		APITokenFile string `yaml:"api_token_file"`
-	} `yaml:"connection"`
-	Serve struct {
-		APIListenAddr string `yaml:"api_listen_addr"`
-		MCPListenAddr string `yaml:"mcp_listen_addr"`
-		APITokenFile  string `yaml:"api_token_file"`
-	} `yaml:"serve"`
-	Paths struct {
-		SwarmDir         string `yaml:"swarm_dir"`
-		PlatformSpecPath string `yaml:"platform_spec_path"`
-	} `yaml:"paths"`
-}
+type unifiedCLIYAML = config.CLISourceConfig
 
 func decodeUnifiedCLIConfig(node *yaml.Node) (cliCommandConfig, error) {
 	if node == nil || len(node.Content) == 0 {
@@ -522,60 +495,40 @@ func yamlPathExists(node *yaml.Node, path ...string) bool {
 
 func validateUnifiedConfigNode(root *yaml.Node, layer unifiedConfigLayer, RepoRoot string) []unifiedConfigDiagnostic {
 	var diagnostics []unifiedConfigDiagnostic
-	walkUnifiedMapping(root, nil, layer, RepoRoot, &diagnostics)
+	value := yamlsource.ValueFromNode(root)
+	if err := value.ValidateExpansion(); err != nil {
+		return []unifiedConfigDiagnostic{{Kind: unifiedConfigDiagnosticParseFailed, Layer: layer.Name, Path: layer.Path, Message: err.Error()}}
+	}
+	if err := value.ValidateUniqueMappings(); err != nil {
+		return []unifiedConfigDiagnostic{{Kind: unifiedConfigDiagnosticUnknownKey, Layer: layer.Name, Path: layer.Path, Message: err.Error()}}
+	}
+	walkUnifiedMapping(value, nil, layer, RepoRoot, &diagnostics)
 	return diagnostics
 }
 
-func walkUnifiedMapping(node *yaml.Node, prefix []string, layer unifiedConfigLayer, RepoRoot string, diagnostics *[]unifiedConfigDiagnostic) {
-	if node == nil || node.Kind != yaml.MappingNode {
+func walkUnifiedMapping(value yamlsource.Value, prefix []string, layer unifiedConfigLayer, RepoRoot string, diagnostics *[]unifiedConfigDiagnostic) {
+	entries, err := value.Mapping()
+	if err != nil {
+		*diagnostics = append(*diagnostics, unifiedConfigDiagnostic{Kind: unifiedConfigDiagnosticParseFailed, Layer: layer.Name, Path: layer.Path, Message: err.Error()})
 		return
 	}
-	seen := map[string]struct{}{}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		keyNode := node.Content[i]
-		valueNode := node.Content[i+1]
-		key := strings.TrimSpace(keyNode.Value)
-		pathParts := append(append([]string{}, prefix...), key)
+	for _, entry := range entries {
+		pathParts := append(append([]string{}, prefix...), entry.Name)
 		path := strings.Join(pathParts, ".")
-		if _, ok := seen[key]; ok {
-			*diagnostics = append(*diagnostics, unifiedConfigDiagnostic{
-				Kind:        unifiedConfigDiagnosticUnknownKey,
-				Layer:       layer.Name,
-				Path:        layer.Path,
-				Key:         path,
-				Message:     fmt.Sprintf("duplicate config key %q in %s", path, layer.Path),
-				Remediation: "keep one value for this key",
-			})
+		var valueNode yaml.Node
+		if err := entry.Value.Project(&valueNode); err != nil {
+			*diagnostics = append(*diagnostics, unifiedConfigDiagnostic{Kind: unifiedConfigDiagnosticParseFailed, Layer: layer.Name, Path: layer.Path, Key: path, Message: err.Error()})
 			continue
 		}
-		seen[key] = struct{}{}
 		rule, ok := unifiedConfigRule(pathParts)
 		if !ok {
-			*diagnostics = append(*diagnostics, unknownUnifiedConfigDiagnostic(path, layer))
-			continue
-		}
-		if rule.Retired != "" {
-			*diagnostics = append(*diagnostics, unifiedConfigDiagnostic{
-				Kind: unifiedConfigDiagnosticOldShape, Layer: layer.Name, Path: layer.Path, Key: path,
-				Message: fmt.Sprintf("config key %q in %s is retired", path, layer.Path), Remediation: rule.Retired,
-			})
+			*diagnostics = append(*diagnostics, unknownUnifiedConfigDiagnostic(path, layer, entry.IntroductionLocation()))
 			continue
 		}
 		if path == "llm.backend" && valueNode.Kind == yaml.ScalarNode && llmselection.NormalizeBackendID(valueNode.Value) == llmselection.BackendMock {
 			*diagnostics = append(*diagnostics, unifiedConfigDiagnostic{
-				Kind: unifiedConfigDiagnosticOldShape, Layer: layer.Name, Path: layer.Path, Key: path,
-				Message: fmt.Sprintf("config key %q in %s: backend mock is retired as a public selector", path, layer.Path), Remediation: "use swarm test to execute authored doubles",
-			})
-			continue
-		}
-		if rule.OldShape != "" {
-			*diagnostics = append(*diagnostics, unifiedConfigDiagnostic{
-				Kind:        unifiedConfigDiagnosticOldShape,
-				Layer:       layer.Name,
-				Path:        layer.Path,
-				Key:         path,
-				Message:     fmt.Sprintf("old flat config key %q in %s is no longer accepted", path, layer.Path),
-				Remediation: rule.OldShape,
+				Kind: unifiedConfigDiagnosticValidationFailed, Layer: layer.Name, Path: layer.Path, Key: path,
+				Message: fmt.Sprintf("config key %q in %s: backend mock is unsupported as a public selector", path, layer.Path), Remediation: "use swarm test to execute authored doubles",
 			})
 			continue
 		}
@@ -600,7 +553,7 @@ func walkUnifiedMapping(node *yaml.Node, prefix []string, layer unifiedConfigLay
 				Remediation: "declare a file, secret key, or explicit env delegation field instead",
 			})
 		}
-		if remediation := trustViolationRemediation(path, rule, valueNode, layer); remediation != "" {
+		if remediation := trustViolationRemediation(path, rule, &valueNode, layer); remediation != "" {
 			*diagnostics = append(*diagnostics, unifiedConfigDiagnostic{
 				Kind:        unifiedConfigDiagnosticTrustRejected,
 				Layer:       layer.Name,
@@ -612,34 +565,29 @@ func walkUnifiedMapping(node *yaml.Node, prefix []string, layer unifiedConfigLay
 			continue
 		}
 		if rule.ProjectContainedPath && layer.Name == unifiedLayerProject {
-			*diagnostics = append(*diagnostics, validateProjectContainedConfigPath(path, valueNode, layer, RepoRoot)...)
+			*diagnostics = append(*diagnostics, validateProjectContainedConfigPath(path, &valueNode, layer, RepoRoot)...)
 		}
 		if rule.Container && valueNode.Kind == yaml.MappingNode {
-			walkUnifiedMapping(valueNode, pathParts, layer, RepoRoot, diagnostics)
+			walkUnifiedMapping(entry.Value, pathParts, layer, RepoRoot, diagnostics)
 		}
 	}
 }
 
 type unifiedConfigKeyRule struct {
-	Retired              string
 	Container            bool
 	Elevated             bool
 	SecretReference      bool
 	InlineSecret         bool
 	ProjectContainedPath bool
 	Split                string
-	OldShape             string
 }
 
 func (r unifiedConfigKeyRule) supportedExampleLeaf() bool {
-	return !r.Container && r.Retired == "" && r.Split == "" && r.OldShape == "" && !r.InlineSecret
+	return !r.Container && r.Split == "" && !r.InlineSecret
 }
 
 func unifiedConfigRule(pathParts []string) (unifiedConfigKeyRule, bool) {
 	path := strings.Join(pathParts, ".")
-	if remediation, ok := unifiedOldFlatKeyRemediation()[path]; ok {
-		return unifiedConfigKeyRule{OldShape: remediation}, true
-	}
 	rules := unifiedConfigRules()
 	if rule, ok := rules[path]; ok {
 		return rule, true
@@ -726,7 +674,6 @@ func unifiedConfigRules() map[string]unifiedConfigKeyRule {
 		"serve.mcp_listen_addr":                   {},
 		"serve.api_token_file":                    {Elevated: true, SecretReference: true},
 		"runtime":                                 section,
-		"runtime.execution_posture":               {Retired: config.RetiredExecutionPostureMessage},
 		"runtime.recovery_on_startup":             {},
 		"runtime.fan_out_workers":                 {},
 		"runtime.max_concurrent_agents":           {Split: "tracked split: runtime.max_concurrent_agents is not wired to runtime enforcement; no supported replacement"},
@@ -759,16 +706,12 @@ func unifiedConfigRules() map[string]unifiedConfigKeyRule {
 		"workspace.network":                       {Elevated: true},
 		"llm":                                     section,
 		"llm.backend":                             {},
-		"llm.runtime_mode":                        {Split: "tracked split: llm.runtime_mode is retired; use llm.backend"},
 		"llm.models":                              section,
 		"llm.session":                             section,
 		"llm.session.lock_ttl":                    {},
 		"llm.session.rotate_after_turns":          {},
 		"llm.session.rotate_on_parse_failures":    {},
 		"llm.provider_limits":                     section,
-		"llm.claude_api":                          section,
-		"llm.claude_api.default_model":            {Split: "retired model-selection input; use llm.models"},
-		"llm.claude_api.haiku_model":              {Split: "retired model-selection input; use llm.models"},
 		"llm.claude_cli":                          section,
 		"llm.claude_cli.command":                  {Elevated: true},
 		"llm.claude_cli.timeout":                  {},
@@ -778,21 +721,12 @@ func unifiedConfigRules() map[string]unifiedConfigKeyRule {
 		"llm.claude_cli.use_tmux":                 {Split: "tracked split: llm.claude_cli.use_tmux remains unsupported/inert until #1803 promotes a production runtime owner; no supported replacement"},
 		"llm.openai_compatible":                   section,
 		"llm.openai_compatible.base_url":          {Elevated: true},
-		"llm.openai_compatible.default_model":     {Split: "retired model-selection input; use llm.models"},
-		"llm.openai_compatible.low_cost_model":    {Split: "retired model-selection input; use llm.models"},
 		"llm.openai_responses":                    section,
 		"llm.openai_responses.base_url":           {Elevated: true},
 		"platform":                                section,
 		"platform.packs":                          section,
 		"platform.packs.platform_dirs":            {Elevated: true},
-		"provider_triggers":                       {Split: "RETIRED: built-in trigger packs are embedded; use swarm import <pack-id> for a project-owned copy or elevated platform.packs.platform_dirs for platform development"},
-		"provider_triggers.packs":                 {Split: "RETIRED: built-in trigger packs are embedded; use swarm import <pack-id> for a project-owned copy or elevated platform.packs.platform_dirs for platform development"},
-		"provider_triggers.packs.platform_dirs":   {Split: "RETIRED: per-kind platform pack paths are unsupported; use elevated platform.packs.platform_dirs for one complete development inventory"},
-		"provider_triggers.packs.external_dirs":   {Split: "RETIRED: path-loaded external packs are unsupported; vendor a project-owned pack with swarm import <pack-id>"},
 		"channels":                                section,
-		"channels.packs":                          {Split: "RETIRED: channel packs use the common effective pack inventory"},
-		"channels.packs.platform_dirs":            {Split: "RETIRED: per-kind platform pack paths are unsupported; use elevated platform.packs.platform_dirs for one complete development inventory"},
-		"channels.packs.external_dirs":            {Split: "RETIRED: path-loaded external packs are unsupported; vendor a project-owned pack with swarm import <pack-id>"},
 		"channels.bindings":                       elevatedSection,
 		"budget":                                  section,
 		"budget.global_monthly_cap":               {},
@@ -805,26 +739,11 @@ func unifiedConfigRules() map[string]unifiedConfigKeyRule {
 		"budget.human_tasks.categories_enabled":   {},
 		"paths":                                   section,
 		"paths.swarm_dir":                         {Elevated: true},
-		"paths.contracts_path":                    {Split: "RETIRED: authored source roots are positional command inputs; remove paths.contracts_path"},
 		"paths.platform_spec_path":                {ProjectContainedPath: true},
-		"paths.prompts_dir":                       {Split: "RETIRED: paths.prompts_dir is unsupported; declare each managed agent's intent: source explicitly in agents.yaml"},
 		"paths.monitor_dir":                       {Elevated: true},
 		"paths.agent_config_map_file":             {ProjectContainedPath: true},
 		"paths.verification_gates_file":           {ProjectContainedPath: true},
 		"paths.tooling_lock_file":                 {ProjectContainedPath: true},
-	}
-}
-
-func unifiedOldFlatKeyRemediation() map[string]string {
-	return map[string]string{
-		"api_server":            "move to connection.api_server in swarm.yaml",
-		"api_token_file":        "move to connection.api_token_file in swarm.yaml",
-		"swarm_dir":             "move to paths.swarm_dir in swarm.yaml",
-		"contracts_path":        "remove contracts_path; pass one positional directory on source-aware commands (use . explicitly for the current directory)",
-		"platform_spec_path":    "move to paths.platform_spec_path in swarm.yaml",
-		"serve_api_listen_addr": "move to serve.api_listen_addr in swarm.yaml",
-		"serve_mcp_listen_addr": "move to serve.mcp_listen_addr in swarm.yaml",
-		"serve_api_token_file":  "move to serve.api_token_file in swarm.yaml",
 	}
 }
 
@@ -942,46 +861,35 @@ func unifiedConfigPathWithin(path, root string) bool {
 	return rel != "." && !strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel)
 }
 
-func unknownUnifiedConfigDiagnostic(path string, layer unifiedConfigLayer) unifiedConfigDiagnostic {
-	known := knownUnifiedConfigKeys()
-	suggestion := nearestUnifiedConfigKey(path, known)
-	message := fmt.Sprintf("unknown config key %q in %s", path, layer.Path)
-	if suggestion != "" {
-		message += "; did you mean " + suggestion + "?"
-	}
-	return unifiedConfigDiagnostic{
-		Kind:        unifiedConfigDiagnosticUnknownKey,
-		Layer:       layer.Name,
-		Path:        layer.Path,
-		Key:         path,
-		Message:     message,
-		Remediation: "fix the key name or remove it; unsupported future config must be tracked as split_unsupported before use",
-	}
-}
-
-func knownUnifiedConfigKeys() []string {
-	keys := make([]string, 0, len(unifiedConfigRules())+len(unifiedOldFlatKeyRemediation()))
-	for key := range unifiedConfigRules() {
-		keys = append(keys, key)
-	}
-	for key := range unifiedOldFlatKeyRemediation() {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-func nearestUnifiedConfigKey(path string, keys []string) string {
-	best := ""
-	bestDistance := 3
-	for _, key := range keys {
-		dist := editDistance(path, key)
-		if dist < bestDistance {
-			bestDistance = dist
-			best = key
+func unknownUnifiedConfigDiagnostic(path string, layer unifiedConfigLayer, location yamlsource.Location) unifiedConfigDiagnostic {
+	parts := strings.Split(path, ".")
+	parent, key := parts[:len(parts)-1], parts[len(parts)-1]
+	allowed := map[string]struct{}{}
+	for candidate := range unifiedConfigRules() {
+		fields := strings.Split(candidate, ".")
+		if len(fields) == len(parts) && strings.Join(fields[:len(fields)-1], ".") == strings.Join(parent, ".") {
+			allowed[fields[len(fields)-1]] = struct{}{}
 		}
 	}
-	return best
+	if len(parent) >= 3 && parent[0] == "llm" && parent[1] == "provider_limits" {
+		for field := range unifiedConfigProviderLimitPolicyLeaves() {
+			allowed[field] = struct{}{}
+		}
+		if len(parent) == 3 {
+			allowed["models"] = struct{}{}
+		}
+	}
+	if len(parent) == 3 && parent[0] == "channels" && parent[1] == "bindings" {
+		allowed["pack"], allowed["destination"] = struct{}{}, struct{}{}
+	}
+	diagnostic := runtimecontracts.NewUndefinedFieldDiagnostic("config", key, allowed)
+	diagnostic.Problem = fmt.Sprintf("unknown config key %q", path)
+	diagnostic.Location = runtimecontracts.LoaderDiagnosticLocation{File: layer.Path, YAMLPath: path, Line: location.Line, Column: location.Column}
+	return unifiedConfigDiagnostic{
+		Kind: unifiedConfigDiagnosticUnknownKey, Layer: layer.Name, Path: layer.Path, Key: path,
+		Message: diagnostic.Error(), Remediation: diagnostic.Remediation,
+		Line: location.Line, Column: location.Column, ValidOptions: diagnostic.ValidOptions,
+	}
 }
 
 func addUnifiedConfigDiagnosticsToReport(report *LocalPreflightReport, diagnostics []unifiedConfigDiagnostic) {

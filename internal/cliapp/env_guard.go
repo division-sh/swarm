@@ -22,7 +22,6 @@ const (
 	swarmEnvCategoryGeneratedBoundary swarmEnvCategory = "generated_boundary"
 	swarmEnvCategoryTestQuarantine    swarmEnvCategory = "test_quarantine"
 	swarmEnvCategorySeededLegacy      swarmEnvCategory = "seeded_legacy"
-	swarmEnvCategoryKnownRetired      swarmEnvCategory = "known_retired"
 	swarmEnvCategoryUnknownStale      swarmEnvCategory = "unknown_stale"
 )
 
@@ -31,7 +30,6 @@ type swarmEnvCatalogEntry struct {
 	Prefix      string
 	Category    swarmEnvCategory
 	Owner       string
-	Migration   string
 	Message     string
 	Remediation string
 }
@@ -81,16 +79,34 @@ func validateSwarmEnvForCommand(args []string, RepoRoot string) error {
 	if shouldSkipSwarmEnvGuard(args) {
 		return nil
 	}
-	findings := collectSwarmEnvFindings(swarmEnvGuardContext{
+	return validateSwarmEnvSources(swarmEnvGuardContext{
 		RepoRoot:          RepoRoot,
 		Args:              args,
 		RuntimeConfigPath: runtimeConfigPathFromArgs(args),
 	})
-	blockers := swarmEnvBlockers(findings)
+}
+
+func validateSwarmEnvSources(ctx swarmEnvGuardContext) error {
+	blockers := swarmEnvBlockers(collectSwarmEnvFindings(ctx))
 	if len(blockers) == 0 {
 		return nil
 	}
 	return swarmEnvGuardError{findings: blockers}
+}
+
+// ValidateGeneratedBoundaryEnv preserves the parent-process boundary when a
+// serve consumer receives an already-built config rather than a source file.
+func ValidateGeneratedBoundaryEnv() error {
+	var findings []swarmEnvFinding
+	for _, entry := range swarmEnvCatalogEntries() {
+		if entry.Category == swarmEnvCategoryGeneratedBoundary && strings.TrimSpace(os.Getenv(entry.Name)) != "" {
+			findings = append(findings, findingForSwarmEnvEntry(entry.Name, entry))
+		}
+	}
+	if len(findings) != 0 {
+		return swarmEnvGuardError{findings: findings}
+	}
+	return nil
 }
 
 func shouldSkipSwarmEnvGuard(args []string) bool {
@@ -344,7 +360,7 @@ func findingForSwarmEnvEntry(name string, entry swarmEnvCatalogEntry) swarmEnvFi
 				finding.Remediation = "unset " + name + "; test-quarantined SWARM_* env is accepted only under the Swarm test harness"
 			}
 		}
-	case swarmEnvCategoryGeneratedBoundary, swarmEnvCategoryKnownRetired:
+	case swarmEnvCategoryGeneratedBoundary:
 		finding.Severity = "blocker"
 	default:
 		finding.Severity = "blocker"
@@ -358,15 +374,13 @@ func findingForSwarmEnvEntry(name string, entry swarmEnvCatalogEntry) swarmEnvFi
 func defaultSwarmEnvMessage(entry swarmEnvCatalogEntry) string {
 	switch entry.Category {
 	case swarmEnvCategorySeededLegacy:
-		return "accepted temporarily as seeded legacy env pending migration"
+		return "accepted by the current runtime source"
 	case swarmEnvCategoryBootstrap:
 		return "accepted as bootstrap config locator"
 	case swarmEnvCategoryTestQuarantine:
 		return "test-quarantined env is not production configuration"
 	case swarmEnvCategoryGeneratedBoundary:
 		return "generated final-boundary env must be injected by Swarm, not set in the parent process"
-	case swarmEnvCategoryKnownRetired:
-		return "known retired env source is no longer accepted"
 	default:
 		return "classified by the repo-wide SWARM env accepted-set"
 	}
@@ -512,165 +526,23 @@ func swarmEnvCatalogPrefixes() []swarmEnvCatalogEntry {
 }
 
 func swarmEnvCatalogEntries() []swarmEnvCatalogEntry {
-	e := func(name string, category swarmEnvCategory, owner, migration, message, remediation string) swarmEnvCatalogEntry {
-		return swarmEnvCatalogEntry{Name: name, Category: category, Owner: owner, Migration: migration, Message: message, Remediation: remediation}
-	}
-	p := func(prefix string, category swarmEnvCategory, owner, migration, message, remediation string) swarmEnvCatalogEntry {
-		return swarmEnvCatalogEntry{Prefix: prefix, Category: category, Owner: owner, Migration: migration, Message: message, Remediation: remediation}
-	}
-	seeded := func(name, owner, migration string) swarmEnvCatalogEntry {
-		target := swarmEnvUserFacingMigrationTarget(name, migration)
-		return e(name, swarmEnvCategorySeededLegacy, owner, migration, "", "migrate "+name+" to "+target+" and then remove it from the seeded accepted set")
-	}
-	retired := func(name, message, remediation string) swarmEnvCatalogEntry {
-		return e(name, swarmEnvCategoryKnownRetired, swarmEnvAuthorityOwner, "retired", message, remediation)
-	}
-	retiredRuntimeConfig := func(name, key string) swarmEnvCatalogEntry {
-		return retired(
-			name,
-			name+" is retired as runtime/LLM environment source; use "+key,
-			"unset "+name+"; set "+key+" in swarm.yaml",
-		)
-	}
-	retiredStoreDatabaseConfig := func(name, key string) swarmEnvCatalogEntry {
-		return retired(
-			name,
-			name+" is retired as store/database environment source; use "+key,
-			"unset "+name+"; set "+key+" in swarm.yaml",
-		)
-	}
-	retiredWorkspaceConfig := func(name, key string) swarmEnvCatalogEntry {
-		return retired(
-			name,
-			name+" is retired as workspace/tooling environment source; use "+key,
-			"unset "+name+"; set "+key+" in swarm.yaml",
-		)
-	}
-	retiredWorkspaceFlagOrConfig := func(name, replacement string) swarmEnvCatalogEntry {
-		return retired(
-			name,
-			name+" is retired as workspace/tooling environment source; use "+replacement,
-			"unset "+name+"; use "+replacement,
-		)
-	}
-	retiredWorkspaceInternal := func(name string) swarmEnvCatalogEntry {
-		return retired(
-			name,
-			name+" is retired as workspace lifecycle environment source; this value is internal runtime plumbing",
-			"unset "+name+"; no supported env replacement exists",
-		)
-	}
-	retiredUnsupported := func(name string) swarmEnvCatalogEntry {
-		return retired(
-			name,
-			name+" is retired; this Claude CLI control has no supported replacement",
-			"unset "+name+"; no supported replacement exists for this inert/unsupported Claude CLI control",
-		)
-	}
-	testOnly := func(name string) swarmEnvCatalogEntry {
-		return e(name, swarmEnvCategoryTestQuarantine, swarmEnvAuthorityOwner, "test/debug quarantine", "", "")
-	}
 	return []swarmEnvCatalogEntry{
-		e("SWARM_CONFIG", swarmEnvCategoryBootstrap, unifiedConfigOwner, "keep bootstrap locator for swarm.yaml; --config wins when present", "", ""),
-		retired("SWARM_API_SERVER", "client-side API environment sources are no longer accepted: SWARM_API_SERVER", "use --api-server, --context, project/selected context, or config connection.api_server"),
-		retired("SWARM_API_TOKEN", "client-side API environment sources are no longer accepted: SWARM_API_TOKEN", "use --api-token-file, context descriptor auth, config connection.api_token_file, or serve.api_token_file for server auth"),
-		retired("SWARM_API_TOKEN_FILE", "client-side API environment sources are no longer accepted: SWARM_API_TOKEN_FILE", "use --api-token-file, context descriptor auth, or config connection.api_token_file"),
-		retired("SWARM_API_LISTEN_ADDR", "SWARM_API_LISTEN_ADDR is retired as serve listener source", "use --api-listen-addr or config serve.api_listen_addr"),
-		retired("SWARM_MCP_LISTEN_ADDR", "SWARM_MCP_LISTEN_ADDR is retired as serve listener source", "use --mcp-listen-addr or config serve.mcp_listen_addr"),
-		retired("SWARM_API_PORT", "SWARM_API_PORT is retired; final listener topology uses full listen addresses", "use --api-listen-addr or config serve.api_listen_addr"),
-		retired("SWARM_MCP_PORT", "SWARM_MCP_PORT is retired; final listener topology uses full listen addresses", "use --mcp-listen-addr or config serve.mcp_listen_addr"),
-		retired("SWARM_CONTRACTS_PATH", "SWARM_CONTRACTS_PATH is retired; authored source roots are positional command inputs", "unset SWARM_CONTRACTS_PATH; pass one positional directory on source-aware commands (use . explicitly for the current directory)"),
-		retired("SWARM_CONTRACTS_DIR", "SWARM_CONTRACTS_DIR is retired; authored source roots are positional command inputs", "unset SWARM_CONTRACTS_DIR; pass one positional directory on source-aware commands (use . explicitly for the current directory)"),
-		retired("SWARM_PLATFORM_SPEC_PATH", "SWARM_PLATFORM_SPEC_PATH is not promoted", "use --platform-spec or config paths.platform_spec_path where supported"),
-		retired("SWARM_DIR", "SWARM_DIR is not promoted as state directory authority", "use --swarm-dir or config paths.swarm_dir"),
-		retired("SWARM_HOME", "SWARM_HOME is not promoted as state directory authority", "use --swarm-dir or config paths.swarm_dir"),
-		retiredStoreDatabaseConfig("SWARM_STORE_BACKEND", "--store or store.backend"),
-		retiredStoreDatabaseConfig("SWARM_SQLITE_PATH", "store.sqlite.path"),
-		retiredStoreDatabaseConfig("SWARM_DB_HOST", "database.host"),
-		retiredStoreDatabaseConfig("SWARM_DB_PORT", "database.port"),
-		retiredStoreDatabaseConfig("SWARM_DB_NAME", "database.name"),
-		retiredStoreDatabaseConfig("SWARM_DB_USER", "database.user"),
-		retiredStoreDatabaseConfig("SWARM_DB_SSLMODE", "database.sslmode"),
-		retiredStoreDatabaseConfig("SWARM_DB_POOL_SIZE", "database.pool_size"),
-		retired("SWARM_DB_PASSWORD", "SWARM_DB_PASSWORD is not read implicitly; it is accepted only when explicitly named by database.password_env", "unset SWARM_DB_PASSWORD or declare database.password_env: SWARM_DB_PASSWORD in swarm.yaml"),
-		retiredWorkspaceFlagOrConfig("SWARM_WORKSPACE_DATA_SOURCE", "--data or workspace.data_source"),
-		retiredWorkspaceFlagOrConfig("SWARM_WORKSPACE_BACKEND", "--workspace-backend or workspace.backend"),
-		retiredWorkspaceFlagOrConfig("SWARM_DOCKER_BIN", "--docker-bin for workspace build or workspace.docker_bin"),
-		retiredWorkspaceFlagOrConfig("SWARM_WORKSPACE_IMAGE", "--image for workspace build or workspace.image"),
-		retiredWorkspaceConfig("SWARM_WORKSPACE_HOST_ROOT", "workspace.host_root"),
-		retiredWorkspaceConfig("SWARM_WORKSPACE_VOLUMES_FROM", "workspace.volumes_from"),
-		retiredWorkspaceConfig("SWARM_WORKSPACE_NETWORK", "workspace.network"),
-		retiredWorkspaceInternal("SWARM_WORKSPACE_DATA_MOUNT"),
-		retiredWorkspaceInternal("SWARM_WORKSPACE_CONTRACTS_SOURCE"),
-		retiredWorkspaceInternal("SWARM_WORKSPACE_CONTRACTS_MOUNT"),
-		retiredWorkspaceInternal("SWARM_SCAFFOLD_CONTAINER"),
-		retiredWorkspaceInternal("SWARM_SCAFFOLD_WORKDIR"),
-		retiredWorkspaceInternal("SWARM_SCAFFOLD_VOLUME"),
-		retiredWorkspaceInternal("SWARM_SYSTEM_CONTAINER"),
-		retiredWorkspaceInternal("SWARM_SYSTEM_WORKDIR"),
-		retiredWorkspaceInternal("SWARM_SYSTEM_ENTITIES_VOLUME"),
-		retiredWorkspaceInternal("SWARM_SYSTEM_NGINX_VOLUME"),
-		retiredWorkspaceInternal("SWARM_SYSTEM_SYSTEMD_VOLUME"),
-		retiredWorkspaceInternal("SWARM_ENTITY_CONTAINER_PREFIX"),
-		retiredWorkspaceInternal("SWARM_ENTITY_WORKDIR"),
-		retiredRuntimeConfig("SWARM_RUNTIME_RECOVERY_ON_STARTUP", "runtime.recovery_on_startup"),
-		retired("SWARM_RUNTIME_MAX_CONCURRENT_AGENTS", "SWARM_RUNTIME_MAX_CONCURRENT_AGENTS is unsupported inert runtime control", "remove it; no runtime path enforces this control"),
-		retired("SWARM_RUNTIME_EVENT_POLL_INTERVAL", "SWARM_RUNTIME_EVENT_POLL_INTERVAL is unsupported inert runtime control", "remove it; no runtime path enforces this control"),
-		retiredRuntimeConfig("SWARM_LLM_SESSION_LOCK_TTL", "llm.session.lock_ttl"),
-		retiredRuntimeConfig("SWARM_LLM_SESSION_ROTATE_AFTER_TURNS", "llm.session.rotate_after_turns"),
-		retiredRuntimeConfig("SWARM_LLM_SESSION_ROTATE_ON_PARSE_FAILURES", "llm.session.rotate_on_parse_failures"),
-		retiredRuntimeConfig("SWARM_CLAUDE_API_MAX_RETRIES", "llm.claude_api.max_retries"),
-		retiredRuntimeConfig("SWARM_CLAUDE_API_RETRY_BACKOFF", "llm.claude_api.retry_backoff"),
-		retiredRuntimeConfig("SWARM_CLAUDE_CLI_COMMAND", "llm.claude_cli.command"),
-		retiredRuntimeConfig("SWARM_CLAUDE_CLI_TIMEOUT", "llm.claude_cli.timeout"),
-		retiredRuntimeConfig("SWARM_CLAUDE_CLI_OUTPUT_FORMAT", "llm.claude_cli.output_format"),
-		retiredUnsupported("SWARM_CLAUDE_CLI_RETRIES"),
-		retiredUnsupported("SWARM_CLAUDE_CLI_NO_SESSION_PERSISTENCE"),
-		retiredUnsupported("SWARM_CLAUDE_CLI_USE_TMUX"),
-		retiredRuntimeConfig("SWARM_CLAUDE_TIMEOUT_SECONDS", "llm.claude_cli.timeout"),
-		seeded("SWARM_CLAUDE_PERMISSION_MODE", "platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority", "#1600 llm.claude_cli.permission_mode"),
-		seeded("SWARM_CLAUDE_BYPASS_PERMISSIONS", "platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority", "#1600 llm.claude_cli.permission_mode"),
-		seeded("SWARM_CLAUDE_USE_MCP", "platform-spec.yaml#cli_specification.foundations.local_tool_gateway_binding", "#1600 typed Claude CLI transport config"),
-		retired("SWARM_LLM_BACKEND", "SWARM_LLM_BACKEND is retired; use --backend or llm.backend", "use --backend or llm.backend"),
-		retired("SWARM_LLM_RUNTIME_MODE", "SWARM_LLM_RUNTIME_MODE is retired; use llm.backend", "use llm.backend"),
-		retired("SWARM_CLAUDE_DEFAULT_MODEL", "SWARM_CLAUDE_DEFAULT_MODEL is retired for model selection; use llm.models", "use llm.models"),
-		retired("SWARM_CLAUDE_HAIKU_MODEL", "SWARM_CLAUDE_HAIKU_MODEL is retired for model selection; use llm.models", "use llm.models"),
-		retired("SWARM_OPENAI_COMPATIBLE_BASE_URL", "SWARM_OPENAI_COMPATIBLE_BASE_URL is retired; use llm.openai_compatible.base_url", "use llm.openai_compatible.base_url"),
-		retired("SWARM_OPENAI_COMPATIBLE_DEFAULT_MODEL", "SWARM_OPENAI_COMPATIBLE_DEFAULT_MODEL is retired for model selection; use llm.models", "use llm.models"),
-		retired("SWARM_OPENAI_COMPATIBLE_LOW_COST_MODEL", "SWARM_OPENAI_COMPATIBLE_LOW_COST_MODEL is retired for model selection; use llm.models", "use llm.models"),
-		seeded("SWARM_CREDENTIALS_FILE", "platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set", "#1600 secrets file config"),
-		seeded("SWARM_MANAGED_CREDENTIALS_FILE", "platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set", "#1600 managed credentials file config"),
-		seeded("SWARM_MONITOR_DIR", "platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice", "#1600 monitor config"),
-		seeded("SWARM_AGENT_CONFIG_MAP_FILE", "platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice", "#1600 spec helper config"),
-		seeded("SWARM_VERIFICATION_GATES_FILE", "platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice", "#1600 spec helper config"),
-		seeded("SWARM_TOOLING_LOCK_FILE", "platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice", "#1600 spec helper config"),
-		retired("SWARM_LOG_LEVEL", "SWARM_LOG_LEVEL is not promoted as CLI logging source", "use --log-level on supported commands"),
-		testOnly("SWARM_SQL_DEBUG"),
-		testOnly("SWARM_BOOT_WARNINGS_FATAL"),
-		testOnly("SWARM_EMIT_SCHEMA_STRICT"),
-		testOnly("SWARM_CATALOG_E2E_DEBUG"),
-		testOnly("SWARM_FAKE_DOCKER_STATE"),
-		testOnly("SWARM_LLM_FIRST_TURN_FAKE_DOCKER"),
-		testOnly(swarmTestHarnessEnv),
-		p("SWARM_TEST_", swarmEnvCategoryTestQuarantine, swarmEnvAuthorityOwner, "test/debug quarantine", "", ""),
-		e("SWARM_TOOL_GATEWAY_URL", swarmEnvCategoryGeneratedBoundary, "platform-spec.yaml#cli_specification.foundations.local_tool_gateway_binding", "generated final-boundary only", "SWARM_TOOL_GATEWAY_URL is retired and not accepted as gateway endpoint configuration; generated final-boundary env must be injected by Swarm", "unset SWARM_TOOL_GATEWAY_URL; local serve/run derives the gateway binding from the bound MCP listener and ignores this retired URL"),
-		e("SWARM_TOOL_GATEWAY_CONTAINER_URL", swarmEnvCategoryGeneratedBoundary, "platform-spec.yaml#cli_specification.foundations.local_tool_gateway_binding", "generated final-boundary only", "SWARM_TOOL_GATEWAY_CONTAINER_URL is retired and not accepted as gateway endpoint configuration; generated final-boundary env must be injected by Swarm", "unset SWARM_TOOL_GATEWAY_CONTAINER_URL; local serve/run derives the gateway binding from the bound MCP listener and ignores this retired URL"),
-		retired("SWARM_TOOL_GATEWAY_TOKEN", "SWARM_TOOL_GATEWAY_TOKEN is retired; ToolGatewayBinding owns per-boot gateway auth", "unset SWARM_TOOL_GATEWAY_TOKEN; use the generated ToolGatewayBinding token path"),
-		retired("SWARM_BUILDER_AUTH_TOKEN", "SWARM_BUILDER_AUTH_TOKEN is not accepted as API auth fallback", "use token files, context descriptor auth, or configured auth sources"),
-		retired("SWARM_OPERATOR_AUTH_TOKEN", "SWARM_OPERATOR_AUTH_TOKEN is not accepted as API auth fallback", "use token files, context descriptor auth, or configured auth sources"),
+		{Name: "SWARM_CONFIG", Category: swarmEnvCategoryBootstrap, Owner: unifiedConfigOwner},
+		{Name: "SWARM_CLAUDE_PERMISSION_MODE", Category: swarmEnvCategorySeededLegacy, Owner: "platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority"},
+		{Name: "SWARM_CLAUDE_BYPASS_PERMISSIONS", Category: swarmEnvCategorySeededLegacy, Owner: "platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority"},
+		{Name: "SWARM_CLAUDE_USE_MCP", Category: swarmEnvCategorySeededLegacy, Owner: "platform-spec.yaml#cli_specification.foundations.local_tool_gateway_binding"},
+		{Name: "SWARM_CREDENTIALS_FILE", Category: swarmEnvCategorySeededLegacy, Owner: swarmEnvAuthorityOwner},
+		{Name: "SWARM_MANAGED_CREDENTIALS_FILE", Category: swarmEnvCategorySeededLegacy, Owner: swarmEnvAuthorityOwner},
+		{Name: "SWARM_MONITOR_DIR", Category: swarmEnvCategorySeededLegacy, Owner: "platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice"},
+		{Name: "SWARM_SQL_DEBUG", Category: swarmEnvCategoryTestQuarantine, Owner: swarmEnvAuthorityOwner},
+		{Name: "SWARM_BOOT_WARNINGS_FATAL", Category: swarmEnvCategoryTestQuarantine, Owner: swarmEnvAuthorityOwner},
+		{Name: "SWARM_EMIT_SCHEMA_STRICT", Category: swarmEnvCategoryTestQuarantine, Owner: swarmEnvAuthorityOwner},
+		{Name: "SWARM_CATALOG_E2E_DEBUG", Category: swarmEnvCategoryTestQuarantine, Owner: swarmEnvAuthorityOwner},
+		{Name: "SWARM_FAKE_DOCKER_STATE", Category: swarmEnvCategoryTestQuarantine, Owner: swarmEnvAuthorityOwner},
+		{Name: "SWARM_LLM_FIRST_TURN_FAKE_DOCKER", Category: swarmEnvCategoryTestQuarantine, Owner: swarmEnvAuthorityOwner},
+		{Name: swarmTestHarnessEnv, Category: swarmEnvCategoryTestQuarantine, Owner: swarmEnvAuthorityOwner},
+		{Prefix: "SWARM_TEST_", Category: swarmEnvCategoryTestQuarantine, Owner: swarmEnvAuthorityOwner},
+		{Name: "SWARM_TOOL_GATEWAY_URL", Category: swarmEnvCategoryGeneratedBoundary, Owner: "platform-spec.yaml#cli_specification.foundations.local_tool_gateway_binding"},
+		{Name: "SWARM_TOOL_GATEWAY_CONTAINER_URL", Category: swarmEnvCategoryGeneratedBoundary, Owner: "platform-spec.yaml#cli_specification.foundations.local_tool_gateway_binding"},
 	}
-}
-
-func swarmEnvUserFacingMigrationTarget(name, migration string) string {
-	switch strings.TrimSpace(name) {
-	case "SWARM_API_LISTEN_ADDR":
-		return "serve.api_listen_addr or --api-listen-addr"
-	case "SWARM_MCP_LISTEN_ADDR":
-		return "serve.mcp_listen_addr or --mcp-listen-addr"
-	}
-	parts := strings.Fields(strings.TrimSpace(migration))
-	if len(parts) > 1 && strings.HasPrefix(parts[0], "#") {
-		return strings.Join(parts[1:], " ")
-	}
-	return strings.TrimSpace(migration)
 }

@@ -852,7 +852,7 @@ stages:
 			}
 			if strings.HasSuffix(tc.name, "metadata") {
 				_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-				if err == nil || !strings.Contains(err.Error(), "RETIRED") {
+				if err == nil || !strings.Contains(err.Error(), "is reserved") {
 					t.Fatalf("metadata-only role admission = %v, want retirement error", err)
 				}
 				return
@@ -1200,7 +1200,7 @@ func TestLoad_RejectsMissingIntentDeclaration(t *testing.T) {
 
 func TestLoad_RejectsRetiredPromptRef(t *testing.T) {
 	err := loadTier8FixtureError(t, "test-boot-prompt-ref")
-	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "intent:") {
+	if err == nil || !strings.Contains(err.Error(), "agent field \"prompt_ref\" is not supported") || !strings.Contains(err.Error(), "Valid fields:") {
 		t.Fatalf("load error = %v, want retired prompt_ref teaching rejection", err)
 	}
 }
@@ -1229,7 +1229,7 @@ func TestRun_MapsIntentStubToIntentResolutionWarning(t *testing.T) {
 
 func TestLoad_RejectsRetiredPromptRefBeforeStubLint(t *testing.T) {
 	err := loadTier8FixtureError(t, "test-boot-prompt-ref-stub")
-	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "intent:") {
+	if err == nil || !strings.Contains(err.Error(), "agent field \"prompt_ref\" is not supported") || !strings.Contains(err.Error(), "Valid fields:") {
 		t.Fatalf("load error = %v, want retired prompt_ref teaching rejection", err)
 	}
 }
@@ -2048,7 +2048,7 @@ stages:
     terminal: true
 `)
 	_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "initial_state") {
+	if err == nil || !strings.Contains(err.Error(), "schema field \"initial_state\" is not supported") || !strings.Contains(err.Error(), "Valid fields:") {
 		t.Fatalf("expected source retirement before lifecycle coherence, got %v", err)
 	}
 }
@@ -2274,7 +2274,7 @@ root-global:
 
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err == nil || !strings.Contains(err.Error(), "agent field session_scope is retired") {
+	if err == nil || !strings.Contains(err.Error(), "agent field \"session_scope\" is not supported") {
 		t.Fatalf("expected retired session_scope load error, got %v", err)
 	}
 }
@@ -2774,7 +2774,7 @@ func TestRun_RejectsRetiredFanOutTargetInDataAccumulationExpressions(t *testing.
 	report := Run(context.Background(), source, Options{})
 
 	if !reportContains(report.Errors(), "data_accumulation_expression_validation", "fan_out.target") ||
-		!reportContains(report.Errors(), "data_accumulation_expression_validation", "retired") {
+		!reportContains(report.Errors(), "data_accumulation_expression_validation", "not a supported expression field") {
 		t.Fatalf("expected retired fan_out.target in data_accumulation expression to fail validation, got %#v", report.Errors())
 	}
 }
@@ -2824,7 +2824,7 @@ func TestRun_RejectsRetiredFanOutTargetInFanOutEmitFieldExpressions(t *testing.T
 	report := Run(context.Background(), source, Options{})
 
 	if !reportContains(report.Errors(), "emit_field_expression_validation", "fan_out.target") ||
-		!reportContains(report.Errors(), "emit_field_expression_validation", "retired") {
+		!reportContains(report.Errors(), "emit_field_expression_validation", "not a supported expression field") {
 		t.Fatalf("expected retired fan_out.target in fan_out.emit.fields to fail validation, got %#v", report.Errors())
 	}
 }
@@ -3819,7 +3819,7 @@ func TestRun_ReportsInputPinWiringHardInvalidity(t *testing.T) {
 
 	if !reportContains(report.Errors(), "input_pin_wiring", "task.feedback") ||
 		!reportContains(report.Errors(), "input_pin_wiring", "Expected a producer proof for input pin target child.task.feedback") ||
-		!reportContains(report.Errors(), "input_pin_wiring", "Authored event role metadata") {
+		!reportContains(report.Errors(), "input_pin_wiring", "catalog visibility never grants delivery or public write access") {
 		t.Fatalf("expected input_pin_wiring hard invalidity, got %#v", report.Errors())
 	}
 }
@@ -4008,7 +4008,7 @@ func TestLoadRejectsExternalInputSourceEvenInConsumingScope(t *testing.T) {
 	root := writeInputPinExternalScopeFixture(t)
 	repo := repoRootForBootverifyTest(t)
 	_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
-	if err == nil || !strings.Contains(err.Error(), "RETIRED: input event pin source: external") {
+	if err == nil || !strings.Contains(err.Error(), "input event pin source must be public, harness, or omitted") {
 		t.Fatalf("private input marker admission = %v, want retired spelling error", err)
 	}
 }
@@ -6298,7 +6298,7 @@ func TestLoadRejectsTimerExternalConsumerMetadata(t *testing.T) {
 	repoRoot := repoRootForBootverifyTest(t)
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, platformSpec)
-	if err == nil || !strings.Contains(err.Error(), "RETIRED") {
+	if err == nil || !strings.Contains(err.Error(), "is reserved") {
 		t.Fatalf("external consumer annotation admission = %v, want retirement error", err)
 	}
 }
@@ -7151,7 +7151,7 @@ func assertRetiredReceiverSelectorRejected(t *testing.T, root string) {
 	t.Helper()
 	repo := repoRootForBootverifyTest(t)
 	_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
-	if err == nil || !strings.Contains(err.Error(), "RETIRED: handler field") || !strings.Contains(err.Error(), "composition boundary") {
+	if err == nil || !strings.Contains(err.Error(), "handler field") || !strings.Contains(err.Error(), "is not supported") || !strings.Contains(err.Error(), "Valid fields:") {
 		t.Fatalf("retired selector must fail before boot with actionable composition guidance: %v", err)
 	}
 }

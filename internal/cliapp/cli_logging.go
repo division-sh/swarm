@@ -42,7 +42,7 @@ func bindCLILoggingFlags(cmd *cobra.Command, opts *cliLoggingOptions) {
 func validateCLILoggingFlagPlacement(args []string) error {
 	stripped := stripRootPersistentFlags(args)
 	index, flag := firstCLILoggingFlagIndex(stripped)
-	if index < 0 || cliLoggingFlagAfterSupportedLeafCommand(stripped[:index]) || cliLoggingFlagUnderRetiredNamespace(stripped[:index]) || cliTopologyRetiredOrGroupPrefix(stripped[:index]) {
+	if index < 0 || cliLoggingFlagAfterSupportedLeafCommand(stripped[:index]) {
 		return nil
 	}
 	return fmt.Errorf("unknown flag: %s", flag)
@@ -79,10 +79,6 @@ func cliLoggingFlagAfterSupportedLeafCommand(prefix []string) bool {
 		}
 	}
 	return false
-}
-
-func cliLoggingFlagUnderRetiredNamespace(prefix []string) bool {
-	return len(prefix) > 0 && prefix[0] == "investigate"
 }
 
 func (opts cliLoggingOptions) validate() error {

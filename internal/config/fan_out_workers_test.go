@@ -116,7 +116,18 @@ func TestFanOutWorkersYAMLAliasesAndMerges(t *testing.T) {
 			"defaults: &defaults\n  fan_out_workers: " + value + "\nruntime:\n  <<: *defaults\n",
 		} {
 			var cfg Config
-			err := yaml.Unmarshal([]byte(source), &cfg)
+			// Anchor storage is not a config declaration. Exercise the real
+			// runtime section unmarshaler without admitting unknown root keys.
+			var document yaml.Node
+			err := yaml.Unmarshal([]byte(source), &document)
+			if err == nil {
+				root := document.Content[0]
+				for i := 0; i+1 < len(root.Content); i += 2 {
+					if root.Content[i].Value == "runtime" {
+						err = root.Content[i+1].Decode(&cfg.Runtime)
+					}
+				}
+			}
 			if value != "4" {
 				if err == nil || !strings.Contains(err.Error(), "runtime.fan_out_workers") {
 					t.Fatalf("source %q: error = %v, want worker declaration refusal", source, err)

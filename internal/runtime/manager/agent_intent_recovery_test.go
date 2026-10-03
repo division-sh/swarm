@@ -38,7 +38,7 @@ func TestAgentFactorySeparatesReceiverDataFromAuthoredPromptAuthority(t *testing
 				if err != nil || calls != 1 {
 					t.Fatalf("receiver business data rejected before factory: calls=%d err=%v", calls, err)
 				}
-			} else if err == nil || !strings.Contains(err.Error(), "RETIRED") || calls != 0 {
+			} else if err == nil || !strings.Contains(err.Error(), "is unsupported") || calls != 0 {
 				t.Fatalf("authored prompt reached factory: calls=%d err=%v", calls, err)
 			}
 		}

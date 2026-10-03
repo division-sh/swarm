@@ -34,7 +34,7 @@ func TestCommandConfigRejectsMaskedExecutionSelectors(t *testing.T) {
 					t.Fatal(err)
 				}
 				_, err := loadUnifiedConfigForTest(t, unifiedConfigLoadOptions{RepoRoot: root, ExplicitPath: paths["explicit"]})
-				if err == nil || !strings.Contains(err.Error(), selector.key) || !strings.Contains(err.Error(), paths[layer]) || !strings.Contains(err.Error(), "retired") {
+				if err == nil || !strings.Contains(err.Error(), selector.key) || !strings.Contains(err.Error(), paths[layer]) || !strings.Contains(err.Error(), "unsupported") && !strings.Contains(err.Error(), "unknown config key") {
 					t.Fatalf("masked %s selector = %v, want originating file/key refusal", layer, err)
 				}
 			})

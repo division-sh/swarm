@@ -773,9 +773,9 @@ lookup:
 			var tools map[string]ToolSchemaEntry
 			err := loadYAMLBytes([]byte(tc.body), &tools)
 			if err == nil ||
-				!strings.Contains(err.Error(), "RETIRED") ||
+				!strings.Contains(err.Error(), "is not supported") ||
 				!strings.Contains(err.Error(), tc.want) ||
-				!strings.Contains(err.Error(), tc.wantNext) {
+				!strings.Contains(err.Error(), "Valid fields:") {
 				t.Fatalf("load tool schema error = %v, want RETIRED %s -> %s", err, tc.want, tc.wantNext)
 			}
 		})
@@ -830,14 +830,14 @@ gate_state:
 
 func TestEventCatalogEntry_RejectsRetiredSwarmMetadata(t *testing.T) {
 	snippet := canonicalrouting.EventCatalogMetadataParserSnippet(t, canonicalrouting.CanonicalExternalEventMetadata)
-	if _, err := admitEventCatalogParserSnippet(t, snippet); err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "swarm") {
+	if _, err := admitEventCatalogParserSnippet(t, snippet); err == nil || !strings.Contains(err.Error(), "reserved") || !strings.Contains(err.Error(), "swarm") {
 		t.Fatalf("retired swarm metadata admission = %v", err)
 	}
 }
 
 func TestEventCatalogEntry_LegacyMetadataFieldsFailClosed(t *testing.T) {
 	snippet := canonicalrouting.EventCatalogMetadataParserSnippet(t, canonicalrouting.RetiredExternalEventMetadata)
-	if _, err := admitEventCatalogParserSnippet(t, snippet); err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "metadata field") {
+	if _, err := admitEventCatalogParserSnippet(t, snippet); err == nil || !strings.Contains(err.Error(), "reserved") {
 		t.Fatalf("load event catalog entry error = %v, want retired metadata failure", err)
 	}
 }
@@ -867,7 +867,7 @@ entity_id: string
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := admitEventCatalogEntryForTest(t, tc.yaml)
-			if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), tc.wantField) || !strings.Contains(err.Error(), "metadata field") {
+			if err == nil || !strings.Contains(err.Error(), "reserved") || !strings.Contains(err.Error(), tc.wantField) {
 				t.Fatalf("load event catalog entry error = %v, want retired %s failure", err, tc.wantField)
 			}
 		})
@@ -877,7 +877,7 @@ entity_id: string
 func TestEventCatalogEntry_ConflictingSwarmAndLegacyMetadataFailsClosed(t *testing.T) {
 	snippet := canonicalrouting.EventCatalogMetadataParserSnippet(t, canonicalrouting.ConflictingEventMetadata)
 	_, err := admitEventCatalogParserSnippet(t, snippet)
-	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "metadata field swarm") {
+	if err == nil || !strings.Contains(err.Error(), "reserved") || !strings.Contains(err.Error(), `event field name "swarm"`) {
 		t.Fatalf("load event catalog entry error = %v, want retirement before legacy conflict interpretation", err)
 	}
 }

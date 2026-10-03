@@ -10,7 +10,7 @@ func TestCompiledTransitionRetiredOwnershipRejectsPresence(t *testing.T) {
 		t.Run(value, func(t *testing.T) {
 			var node SystemNodeContract
 			err := decodeNodeTestYAML([]byte("owned_transitions: "+value+"\nevent_handlers: {}\n"), &node)
-			if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "owned_transitions") {
+			if err == nil || !strings.Contains(err.Error(), "is not supported") || !strings.Contains(err.Error(), "owned_transitions") {
 				t.Fatalf("retired ownership presence accepted: %v", err)
 			}
 		})

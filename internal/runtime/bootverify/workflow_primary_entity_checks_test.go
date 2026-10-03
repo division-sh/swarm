@@ -93,7 +93,7 @@ func TestRun_RejectsInvalidRootPrimaryEntityForConstructedBundle(t *testing.T) {
 		root := t.TempDir()
 		writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: root-primary-entity\nentity: vertical\n")
 		_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
-		if err == nil || !strings.Contains(err.Error(), "RETIRED") {
+		if err == nil || !strings.Contains(err.Error(), "schema field \"entity\" is not supported") {
 			t.Fatalf("root entity selector error = %v", err)
 		}
 	})

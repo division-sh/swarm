@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"gopkg.in/yaml.v3"
 )
 
 func TestDefaultWorkflowContractValidationRejectsHarnessInput(t *testing.T) {
@@ -184,10 +185,12 @@ func TestRetiredDynamicAgentToolsFailClosedAtVerifyAndBoot(t *testing.T) {
 	for _, name := range []string{"agent_hire", "agent_fire", "agent_reconfigure"} {
 		for _, manifestation := range []struct {
 			name      string
+			location  string
 			configure func(*runtimecontracts.WorkflowContractBundle)
 		}{
 			{
-				name: "agent_reference",
+				name:     "agent_reference",
+				location: "flow root agent worker tools",
 				configure: func(bundle *runtimecontracts.WorkflowContractBundle) {
 					bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
 						"worker": {ID: "worker", Tools: []string{name}},
@@ -195,7 +198,8 @@ func TestRetiredDynamicAgentToolsFailClosedAtVerifyAndBoot(t *testing.T) {
 				},
 			},
 			{
-				name: "http_tool_entry",
+				name:     "http_tool_entry",
+				location: "root tool entry",
 				configure: func(bundle *runtimecontracts.WorkflowContractBundle) {
 					bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
 						name: runtimecontracts.MustToolSchemaEntry(
@@ -220,23 +224,23 @@ func TestRetiredDynamicAgentToolsFailClosedAtVerifyAndBoot(t *testing.T) {
 					source,
 					DefaultWorkflowContractValidationOptions(nil, executionposture.Live),
 				)
-				assertRetiredDynamicAgentToolSurfaceError(t, "verify", name, err)
+				assertRetiredDynamicAgentToolSurfaceError(t, "verify", name, manifestation.location, err)
 
 				_, _, err = ensureWorkflowBootWiring(RuntimeOptions{
 					WorkflowModule: semanticOnlyWorkflowRuntime{source: source},
 				}, workflowValidationTestProfile(t), executionposture.Live)
-				assertRetiredDynamicAgentToolSurfaceError(t, "boot", name, err)
+				assertRetiredDynamicAgentToolSurfaceError(t, "boot", name, manifestation.location, err)
 			})
 		}
 	}
 }
 
-func assertRetiredDynamicAgentToolSurfaceError(t testing.TB, surface, name string, err error) {
+func assertRetiredDynamicAgentToolSurfaceError(t testing.TB, surface, name, location string, err error) {
 	t.Helper()
 	if err == nil {
 		t.Fatalf("%s admitted retired tool %s", surface, name)
 	}
-	for _, want := range []string{name, "RETIRED", "agents.yaml", "flow lifecycle/readiness", "typed fan-out"} {
+	for _, want := range []string{location, `tool "` + name + `" is unsupported`} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("%s error = %v, want %q", surface, err, want)
 		}
@@ -845,6 +849,12 @@ func workflowValidationTestProfile(t *testing.T) llmselection.Profile {
 }
 
 func TestRuntimeDepsValidateOwnsRequiredBootInputs(t *testing.T) {
+	t.Run("unsupported config source", func(t *testing.T) {
+		var cfg config.Config
+		if err := yaml.Unmarshal([]byte("llm:\n  runtime_mode: cli_test\n"), &cfg); err == nil || !strings.Contains(err.Error(), "runtime_mode") || !strings.Contains(err.Error(), "not supported") {
+			t.Fatalf("source admission = %v, want rejection before constructing runtime dependencies", err)
+		}
+	})
 	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 	validModule := semanticOnlyWorkflowRuntime{source: compiledRuntimeValidationSource(t, testRuntimeWorkflowValidationBundle())}
@@ -866,20 +876,6 @@ func TestRuntimeDepsValidateOwnsRequiredBootInputs(t *testing.T) {
 				Options: RuntimeOptions{ExecutionPosture: executionposture.Live, SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA)},
 			},
 			errContains: "workflow contract validation failed: workflow module is required",
-		},
-		{
-			name: "retired llm runtime mode",
-			deps: RuntimeDeps{
-				Config: &config.Config{
-					Runtime: config.RuntimeConfig{},
-					LLM:     config.LLMConfig{RuntimeMode: "cli_test"},
-				},
-				Options: RuntimeOptions{ExecutionPosture: executionposture.Live,
-					WorkflowModule:     validModule,
-					SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA),
-				},
-			},
-			errContains: "llm.runtime_mode is retired",
 		},
 		{
 			name: "valid dependency graph",

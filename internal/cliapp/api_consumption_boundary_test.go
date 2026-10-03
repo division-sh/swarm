@@ -198,9 +198,9 @@ func TestCLIRuntimeStateCommandsRequireSharedAPITokenBeforeRequest(t *testing.T)
 				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, CLIExitValidation, stdout.String(), stderr.String())
 			}
 			for _, want := range []string{
-				"env/known_retired @ SWARM_BUILDER_AUTH_TOKEN:",
-				"env/known_retired @ SWARM_OPERATOR_AUTH_TOKEN:",
-				"not accepted as API auth fallback",
+				"env/unknown_stale @ SWARM_BUILDER_AUTH_TOKEN:",
+				"env/unknown_stale @ SWARM_OPERATOR_AUTH_TOKEN:",
+				"unknown SWARM_* env is not accepted",
 			} {
 				if !strings.Contains(stderr.String(), want) {
 					t.Fatalf("stderr missing %q:\n%s", want, stderr.String())

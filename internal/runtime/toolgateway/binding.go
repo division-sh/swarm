@@ -13,8 +13,7 @@ type Transport string
 const (
 	TransportHTTP Transport = "http"
 
-	AuthTokenBytes          = 32
-	RetiredAuthTokenEnvName = "SWARM_TOOL_GATEWAY_TOKEN"
+	AuthTokenBytes = 32
 
 	LifecycleOwnerServeBoot            = "serve_boot"
 	LifecycleOwnerSelectedForkRuntime  = "selected_fork_agent_runtime"
@@ -119,10 +118,6 @@ func (b Binding) WorkspaceMCPURL() string {
 
 func (b Binding) AuthToken() string {
 	return strings.TrimSpace(b.Token)
-}
-
-func RetiredAuthTokenEnvError() error {
-	return fmt.Errorf("%s is retired and not accepted as gateway token configuration; unset %s because Swarm generates tool gateway auth tokens from ToolGatewayBinding", RetiredAuthTokenEnvName, RetiredAuthTokenEnvName)
 }
 
 func GenerateAuthToken() (string, error) {

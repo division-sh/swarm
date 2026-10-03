@@ -61,8 +61,8 @@ func TestHandlerRulesConditionRetiredInEveryAuthoredShape(t *testing.T) {
 	for name, source := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, err := ruleTestRows(source)
-			if err == nil || !strings.Contains(err.Error(), "RETIRED-POLICY-SHEET-ROW") || !strings.Contains(err.Error(), "use when") {
-				t.Fatalf("condition admission error = %v, want teaching retirement", err)
+			if err == nil || !strings.Contains(err.Error(), `field "condition" is not supported`) || !strings.Contains(err.Error(), "when") {
+				t.Fatalf("condition admission error = %v, want current rule vocabulary", err)
 			}
 		})
 	}
@@ -179,7 +179,7 @@ func TestBundleAdmissionRejectsRetiredRulePredicateAndCompilesWhen(t *testing.T)
 	nodes := filepath.Join(root, "nodes.yaml")
 	writeFixtureFile(t, nodes, "worker:\n  execution_type: system_node\n  event_handlers:\n    proof.requested:\n      rules:\n        - id: selected\n          condition: 'true'\n        - else: true\n")
 	repoRoot := contractRepoRoot(t)
-	if _, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot)); err == nil || !strings.Contains(err.Error(), "RETIRED-POLICY-SHEET-ROW") {
+	if _, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot)); err == nil || !strings.Contains(err.Error(), `field "condition" is not supported`) {
 		t.Fatalf("retired bundle admission = %v", err)
 	}
 	writeFixtureFile(t, nodes, "worker:\n  execution_type: system_node\n  event_handlers:\n    proof.requested:\n      rules:\n        - id: selected\n          when: 'true'\n        - else: true\n")

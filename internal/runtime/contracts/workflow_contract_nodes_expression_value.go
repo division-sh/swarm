@@ -70,7 +70,7 @@ func projectNodeExpressionObjectValue(value yamlsource.Value) (ExpressionValue, 
 	if len(fields) == 1 && fields[0].Name == "literal" {
 		return projectNodeLiteralValue(fields[0].Value)
 	}
-	if err := rejectNodeRetiredExpressionFields(fields); err != nil {
+	if err := rejectNodeReservedExpressionShape(fields); err != nil {
 		return ExpressionValue{}, err
 	}
 	codes := make(map[string]string, len(fields))
@@ -102,11 +102,11 @@ func projectNodeExpressionObjectValue(value yamlsource.Value) (ExpressionValue, 
 	return CELExpression("{" + strings.Join(items, ", ") + "}"), nil
 }
 
-func rejectNodeRetiredExpressionFields(fields []yamlsource.MappingField) error {
+func rejectNodeReservedExpressionShape(fields []yamlsource.MappingField) error {
 	if len(fields) == 1 {
 		switch fields[0].Name {
 		case "cel", "expression", "ref", "kind":
-			return fmt.Errorf("retired expression value form %q at %s; use ${...} or {literal: ...}", fields[0].Name, fields[0].IntroductionLocation())
+			return fmt.Errorf("unsupported expression value form %q at %s", fields[0].Name, fields[0].IntroductionLocation())
 		}
 	}
 	for _, field := range fields {
@@ -116,7 +116,7 @@ func rejectNodeRetiredExpressionFields(fields []yamlsource.MappingField) error {
 		for _, other := range fields {
 			switch other.Name {
 			case "cel", "expression", "ref", "literal":
-				return fmt.Errorf("retired expression value kind form at %s; use ${...} or {literal: ...}", field.IntroductionLocation())
+				return fmt.Errorf("unsupported expression value kind form at %s", field.IntroductionLocation())
 			}
 		}
 	}

@@ -13,6 +13,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/url"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -695,28 +696,6 @@ func parseManifestStrict(body []byte) (Manifest, error) {
 	if err != nil {
 		return Manifest{}, err
 	}
-	if outputs.Presence == yamlsource.PresenceSequence {
-		items, err := outputs.Value.Sequence()
-		if err != nil {
-			return Manifest{}, err
-		}
-		for _, item := range items {
-			selector, err := item.Lookup("author_summary_field")
-			if err != nil {
-				return Manifest{}, err
-			}
-			if selector.Presence != yamlsource.PresenceMissing {
-				return Manifest{}, fmt.Errorf("RETIRED: author_summary_field at %s is unsupported; remove it and read full content through event payload APIs", selector.Value.Location())
-			}
-		}
-	}
-	var schemas []map[string]runtimecontracts.ToolInputSchema
-	if outputs.Presence != yamlsource.PresenceMissing {
-		schemas, err = admitNormalizedEventSchemas(outputs.Value)
-		if err != nil {
-			return Manifest{}, err
-		}
-	}
 	var wire struct {
 		Provider              string             `yaml:"provider"`
 		PayloadObjectRequired bool               `yaml:"payload_object_required"`
@@ -744,6 +723,23 @@ func parseManifestStrict(body []byte) (Manifest, error) {
 		Ack        AckManifest       `yaml:"ack"`
 		RedactKeys []string          `yaml:"redact_keys"`
 		Metadata   map[string]string `yaml:"metadata"`
+	}
+	root := snapshot.Document("trigger.yaml").Root()
+	if err := root.ValidateExpansion(); err != nil {
+		return Manifest{}, err
+	}
+	if err := root.ValidateUniqueMappings(); err != nil {
+		return Manifest{}, err
+	}
+	if err := admitManifestVocabulary(root, reflect.TypeOf(wire)); err != nil {
+		return Manifest{}, err
+	}
+	var schemas []map[string]runtimecontracts.ToolInputSchema
+	if outputs.Presence != yamlsource.PresenceMissing {
+		schemas, err = admitNormalizedEventSchemas(outputs.Value)
+		if err != nil {
+			return Manifest{}, err
+		}
 	}
 	decoder := yaml.NewDecoder(bytes.NewReader(body))
 	decoder.KnownFields(true)
@@ -796,13 +792,6 @@ func admitNormalizedEventFieldSchemas(item yamlsource.Value) (map[string]runtime
 	}
 	admitted := map[string]runtimecontracts.ToolInputSchema{}
 	for _, member := range members {
-		retired, err := member.Value.Lookup("type")
-		if err != nil {
-			return nil, err
-		}
-		if retired.Presence != yamlsource.PresenceMissing {
-			return nil, fmt.Errorf("RETIRED: normalized field type is unsupported; use schema at %s", retired.Value.Location())
-		}
 		child, err := member.Value.Lookup("schema")
 		if err != nil {
 			return nil, err

@@ -312,7 +312,7 @@ func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFields
         predicate: entity.verticals
         condition: "true"
         store_as: metadata.filtered`,
-			rejection: `RETIRED: filter field "predicate"`,
+			rejection: `filter field "predicate"`,
 		},
 		{
 			name: "reduce params",
@@ -322,7 +322,7 @@ func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFields
         params:
           value: entity.verticals
         store_as: metadata.reduced`,
-			rejection: `RETIRED: reduce field "params"`,
+			rejection: `reduce field "params"`,
 		},
 		{
 			name: "filter source shadowed by items from",

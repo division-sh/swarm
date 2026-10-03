@@ -79,7 +79,7 @@ func TestAgentMessageRetirementManagedSurfaceMatrix(t *testing.T) {
 					t.Fatalf("active human candidates lost: %+v", surface)
 				}
 				for _, name := range names[2:] {
-					if _, err := exec.Execute(ctx, name, map[string]any{}); err == nil || !strings.Contains(err.Error(), agentMessageRetiredTeaching) {
+					if _, err := exec.Execute(ctx, name, map[string]any{}); err == nil || !strings.Contains(err.Error(), `tool "agent_message" is unsupported`) {
 						t.Fatalf("hostile execution %s = %v", name, err)
 					}
 				}
@@ -188,7 +188,7 @@ func TestAgentMessageRetirementAuthoritativeSpecMatchesLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	var teaching string
-	if err := rule.Value.Project(&teaching); err != nil || !strings.Contains(teaching, agentMessageRetiredTeaching) {
+	if err := rule.Value.Project(&teaching); err != nil || !strings.Contains(teaching, "agent_message") || !strings.Contains(teaching, "unsupported") {
 		t.Fatalf("authoritative/runtime teaching differs: %q, %v", teaching, err)
 	}
 }

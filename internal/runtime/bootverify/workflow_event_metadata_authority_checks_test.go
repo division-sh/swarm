@@ -48,7 +48,7 @@ func TestLoadRejectsRetiredRoleAnnotationsAcrossExecutableContexts(t *testing.T)
 			root := canonicalrouting.CopyEventMetadataAuthority(t, tc.variant)
 			repo := repoRootForBootverifyTest(t)
 			_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
-			if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "swarm") {
+			if err == nil || !strings.Contains(err.Error(), "is reserved") || !strings.Contains(err.Error(), "swarm") {
 				t.Fatalf("retired annotations must fail at source admission: %v", err)
 			}
 		})

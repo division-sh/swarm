@@ -11,7 +11,7 @@ import (
 func projectNodePolicyCaseValue(value yamlsource.Value) (string, PolicySheetRowMetadata, error) {
 	fields, err := nodeValueFields(value, "case", map[string]struct{}{
 		"selector": {}, "selectors": {}, "equals": {},
-	}, nil)
+	})
 	if err != nil {
 		return "", PolicySheetRowMetadata{}, err
 	}
@@ -81,7 +81,7 @@ func projectNodePolicyCaseValue(value yamlsource.Value) (string, PolicySheetRowM
 func projectNodePolicyRangeValue(value yamlsource.Value) (string, PolicySheetRowMetadata, error) {
 	fields, err := nodeValueFields(value, "range", map[string]struct{}{
 		"value": {}, "gt": {}, "gte": {}, "lt": {}, "lte": {}, "monotonicity": {},
-	}, nil)
+	})
 	if err != nil {
 		return "", PolicySheetRowMetadata{}, err
 	}
