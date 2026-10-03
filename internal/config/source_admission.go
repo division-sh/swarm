@@ -70,7 +70,11 @@ func validateConfigValue(value yamlsource.Value, shape reflect.Type, owner strin
 			return err
 		}
 		options := make(map[string]struct{}, len(declared))
+		policy := SourceKeyRules()
 		for name := range declared {
+			if rule, known := policy[strings.TrimPrefix(owner+"."+name, "config.")]; known && !rule.Supported() {
+				continue
+			}
 			options[name] = struct{}{}
 		}
 		for _, field := range fields {

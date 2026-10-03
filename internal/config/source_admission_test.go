@@ -3,12 +3,47 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"gopkg.in/yaml.v3"
 )
+
+func TestConfigCurrentVocabularySuggestionsFollowSourcePolicy(t *testing.T) {
+	for _, row := range []struct {
+		source              string
+		target              func() any
+		excluded, supported []string
+	}{
+		{"runtime: {max_concurrent_agent: 2}", func() any { return &Config{} }, []string{"max_concurrent_agents", "event_poll_interval"}, []string{"fan_out_workers", "recovery_on_startup"}},
+		{"<<: {max_concurrent_agent: 2}", func() any { return &RuntimeConfig{} }, []string{"max_concurrent_agents", "event_poll_interval"}, []string{"fan_out_workers", "recovery_on_startup"}},
+		{"llm: {claude_cli: {retrie: 2}}", func() any { return &Config{} }, []string{"retries", "no_session_persistence", "use_tmux"}, []string{"command", "timeout"}},
+		{"database: {<<: {passwor: secret}}", func() any { return &Config{} }, []string{"password"}, []string{"password_env", "password_file"}},
+	} {
+		t.Run(row.source, func(t *testing.T) {
+			err := yaml.Unmarshal([]byte(row.source), row.target())
+			diagnostic, ok := runtimecontracts.AsLoaderDiagnostic(err)
+			if !ok {
+				t.Fatalf("missing typed diagnostic: %v", err)
+			}
+			for _, field := range row.excluded {
+				if slices.Contains(diagnostic.ValidOptions, field) {
+					t.Fatalf("unsupported field advertised: %v", err)
+				}
+			}
+			for _, field := range row.supported {
+				if !slices.Contains(diagnostic.ValidOptions, field) {
+					t.Fatalf("supported field missing: %v", err)
+				}
+			}
+			if diagnostic.Location.Line == 0 || diagnostic.Location.Column == 0 {
+				t.Fatalf("missing source location: %v", err)
+			}
+		})
+	}
+}
 
 func TestCurrentConfigVocabularyRejectsUnknownAndMergedKeys(t *testing.T) {
 	for _, row := range []struct{ source, key string }{
