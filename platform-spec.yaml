@@ -20972,6 +20972,14 @@ configuration_source_authority:
       - user_global_config
       - built_in_defaults
       rules:
+        admitted_layer_values: >
+          Validate each authored layer, including duplicate effective keys, trust and path constraints, before
+          expanding its aliases and merges through the existing source owner. Precedence, typed projection,
+          key origins, explicit-field presence and environment delegation consume the same expanded layer values.
+          A later layer overrides an earlier value; an invalid declaration within one layer cannot be hidden by
+          an override. Whole-value replacement clears stale descendant origins; mapping-to-mapping overrides
+          retain untouched fields. An explicit empty/null secret reference removes the earlier delegation.
+          Unknown-key suggestions list current supported fields, never split/inert controls or inline secrets.
         flags: >
           Invocation-scoped flags win for the semantic owner they target. Inline secret values remain forbidden; flags
           may name files or other non-argv secret sources only where the owning section allows it.
@@ -24016,7 +24024,7 @@ cli_specification:
           entries classified as `shared_output`. Do not maintain a second consumer list here; the registry is the
           living current-state owner.
       stdout_stderr_boundary: >
-        Successful load-bearing output renders only to stdout. Errors, warnings, retired-namespace migration text,
+        Successful load-bearing output renders only to stdout. Errors, warnings, current-vocabulary diagnostics,
         validation failures, auth failures, transport/API failures, and diagnostics render to stderr under
         cli_specification.foundations.error_channel_and_exit_code_contract. `--json` and `--quiet` do not change
         error exit-code classification and do not create JSON error bodies in this first promoted contract.
@@ -27180,8 +27188,6 @@ cli_specification:
         - --run-id <id>
         - --api-port <int>
         - --mcp-port <int>
-      dropped_flags:
-        --detach: 'Unsupported in v2; fail before API calls with exit 2 and migration text. Use `swarm serve` plus `swarm run start --connect ... --no-follow`.'
       modes:
         foreground_local_start:
           invocation: swarm run start [directory] [--event <name> --payload <file>] [--config <path>] [--backend <profile>] [--data <name=file.jsonl>] [--pin <name@selector>]

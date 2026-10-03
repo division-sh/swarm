@@ -175,7 +175,6 @@ func swarmEnvGuardKnownBoolLongFlags() map[string]bool {
 		"code-stdin":          true,
 		"delivery-detail":     true,
 		"delivery-summary":    true,
-		"detach":              true,
 		"dev":                 true,
 		"dry-run":             true,
 		"follow":              true,
@@ -271,6 +270,7 @@ type swarmEnvGuardContext struct {
 	RepoRoot          string
 	Args              []string
 	RuntimeConfigPath string
+	DelegatedSources  map[string]string
 }
 
 func doctorSwarmEnvFindings(RepoRoot, runtimeConfigPath string) []swarmEnvFinding {
@@ -281,7 +281,10 @@ func doctorSwarmEnvFindings(RepoRoot, runtimeConfigPath string) []swarmEnvFindin
 }
 
 func collectSwarmEnvFindings(ctx swarmEnvGuardContext) []swarmEnvFinding {
-	delegated := delegatedSwarmEnvSources(ctx.RepoRoot, ctx.RuntimeConfigPath)
+	delegated := ctx.DelegatedSources
+	if delegated == nil {
+		delegated = delegatedSwarmEnvSources(ctx.RepoRoot, ctx.RuntimeConfigPath)
+	}
 	entries := swarmEnvCatalogByName()
 	prefixes := swarmEnvCatalogPrefixes()
 	names := visibleSwarmEnvNames()

@@ -71,7 +71,6 @@ type runCommandOptions struct {
 	runID            string
 	apiPort          int
 	mcpPort          int
-	detach           bool
 	changedFlags     map[string]bool
 }
 
@@ -196,7 +195,6 @@ func newRunCommand(root InvocationRoot, rootOpts rootCommandOptions) *cobra.Comm
 	cmd.Flags().StringVar(&opts.runID, "run-id", "", "Optional caller-provided run id for run.start")
 	cmd.Flags().IntVar(&opts.apiPort, "api-port", 0, "Local API listener port for local foreground startup")
 	cmd.Flags().IntVar(&opts.mcpPort, "mcp-port", 0, "Reserved local MCP port for local foreground startup")
-	cmd.Flags().BoolVar(&opts.detach, "detach", false, "Unsupported in CLI v2; use --connect with --no-follow")
 	return cmd
 }
 
@@ -280,9 +278,6 @@ func runRunCommand(ctx context.Context, root InvocationRoot, out, errOut io.Writ
 }
 
 func (o runCommandOptions) validate() error {
-	if o.detach {
-		return fmt.Errorf("ERROR: `--detach` is not supported in CLI v2. Use `swarm serve` plus `swarm run start --connect <url> --event <name> --payload <file> --no-follow`.")
-	}
 	if o.apiPort < 0 || o.apiPort > 65535 || (o.changedFlags["api-port"] && o.apiPort == 0) {
 		return fmt.Errorf("--api-port must be between 1 and 65535")
 	}

@@ -1031,7 +1031,7 @@ func TestRunCommandValidationAndAuthNoCallPaths(t *testing.T) {
 		wantCode   int
 		wantStderr string
 	}{
-		{name: "detach retired", token: "test-token", args: []string{"run", "start", "--detach", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 2, wantStderr: "swarm run start --connect"},
+		{name: "unknown detach", token: "test-token", args: []string{"run", "start", "--detach", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 2, wantStderr: "unknown flag: --detach"},
 		{name: "no follow requires connect", token: "test-token", args: []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--no-follow"}, wantCode: 2, wantStderr: "--no-follow requires --connect"},
 		{name: "no follow reattach rejected", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--no-follow"}, wantCode: 2, wantStderr: "--no-follow and --reattach are mutually exclusive"},
 		{name: "invalid retired bundle hash rejected", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--bundle-hash", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantCode: 2, wantStderr: "unknown flag"},
