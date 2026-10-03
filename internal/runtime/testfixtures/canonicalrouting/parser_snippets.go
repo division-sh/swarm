@@ -15,7 +15,7 @@ func ConnectionAdmissionCases() []ConnectionAdmissionCase {
 	for _, mode := range []string{"create", "select", "select-or-create"} {
 		out = append(out,
 			ConnectionAdmissionCase{Name: "edge/" + mode, Source: "connect: [{event: work.requested, from: ., to: worker, resolution: " + mode + "}]\n", Mode: mode},
-			ConnectionAdmissionCase{Name: "retired-pin/" + mode, Source: "pins: {inputs: {events: [{event: work.requested, resolution: {mode: " + mode + "}}]}}\n", WantError: "each connect row"},
+			ConnectionAdmissionCase{Name: "retired-pin/" + mode, Source: "pins: {inputs: {events: [{event: work.requested, resolution: {mode: " + mode + "}}]}}\n", WantError: "input-pin resolution mode " + mode + " is not supported for ordinary instance selection"},
 		)
 	}
 	for _, choice := range []string{

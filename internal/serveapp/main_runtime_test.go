@@ -7968,7 +7968,10 @@ func TestRunServeRuntimeDevClaudeCLIStaleGatewayEnvUsesTypedBinding(t *testing.T
 			bindingCh <- rt.Options.ToolGatewayBinding
 		},
 	}
-	assertServePreflightStaleGatewayWarning(t, opts, "serve_dev")
+	assertRunServeRuntimeRetiredGatewayURLAdmissionFailure(t, "SWARM_TOOL_GATEWAY_URL", opts)
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
+	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
+	assertServePreflightTypedGateway(t, opts, "serve_dev")
 
 	process := startServeRuntimeTestProcess(t, opts)
 	process.waitForReadyLine()
@@ -8028,7 +8031,10 @@ func TestStartLocalRunServeClaudeCLIStaleGatewayEnvUsesTypedBinding(t *testing.T
 		serveOpts.TestRuntimeReadyHook = func(rt *runtimepkg.Runtime) {
 			bindingCh <- rt.Options.ToolGatewayBinding
 		}
-		assertServePreflightStaleGatewayWarning(t, serveOpts, "run_local")
+		assertRunServeRuntimeRetiredGatewayURLAdmissionFailure(t, "SWARM_TOOL_GATEWAY_URL", serveOpts)
+		t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
+		t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
+		assertServePreflightTypedGateway(t, serveOpts, "run_local")
 		serveStarted <- serveOpts
 		return Run(ctx, root, serveOpts)
 	}
@@ -8211,18 +8217,16 @@ func assertRunServeRuntimeRetiredGatewayURLAdmissionFailure(t *testing.T, envNam
 	var out lockedBuffer
 	opts.Verbose = true
 	opts.Output = &out
+	opts.ErrorOutput = &out
 	code := runFrom(context.Background(), repoRootForTest(), opts)
-	if code != cliapp.CLIExitRuntime {
-		t.Fatalf("Run code = %d, want %d\noutput:\n%s", code, cliapp.CLIExitRuntime, out.String())
+	if code != 1 {
+		t.Fatalf("Run code = %d, want config admission failure 1\noutput:\n%s", code, out.String())
 	}
 	for _, want := range []string{
 		"config_load",
-		"serve admission",
-		envName,
-		"retired",
+		"env/generated_boundary @ " + envName,
+		"generated final-boundary env must be injected by Swarm, not set in the parent process",
 		"unset " + envName,
-		"ToolGatewayBinding",
-		"non-dev serve rejects retired gateway URL env",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("serve output missing %q:\n%s", want, out.String())
@@ -8235,7 +8239,7 @@ func assertRunServeRuntimeRetiredGatewayURLAdmissionFailure(t *testing.T, envNam
 	}
 }
 
-func assertServePreflightStaleGatewayWarning(t *testing.T, opts cliapp.ServeOptions, wantMode string) {
+func assertServePreflightTypedGateway(t *testing.T, opts cliapp.ServeOptions, wantMode string) {
 	t.Helper()
 	cfgResult, err := cliapp.LoadRuntimeConfigWithOptions(cliapp.RuntimeConfigLoadOptions{
 		RepoRoot:        repoRootForTest(),
@@ -8278,12 +8282,12 @@ func assertServePreflightStaleGatewayWarning(t *testing.T, opts cliapp.ServeOpti
 		t.Fatalf("preflight mode = %q, want %q", report.Mode, wantMode)
 	}
 	for _, code := range []string{"swarm_tool_gateway_url_retired", "swarm_tool_gateway_container_url_retired"} {
-		if !localPreflightReportHasFinding(report, code, cliapp.LocalPreflightSeverityWarning, cliapp.LocalPreflightStatusFailed) {
-			t.Fatalf("preflight report missing warning %q:\n%#v", code, report)
+		if localPreflightReportHasFinding(report, code, cliapp.LocalPreflightSeverityWarning, cliapp.LocalPreflightStatusFailed) {
+			t.Fatalf("preflight retained a deleted retirement warning %q:\n%#v", code, report)
 		}
 	}
 	if report.HasBlockers() {
-		t.Fatalf("stale local gateway URL env produced blockers, want warnings only:\n%#v", report)
+		t.Fatalf("valid typed gateway configuration produced blockers:\n%#v", report)
 	}
 	if len(report.CapabilitySubjects) != 21 {
 		t.Fatalf("%s capability subjects = %#v, want eight triggers, twelve connector actions, and one channel", wantMode, report.CapabilitySubjects)
@@ -8672,6 +8676,9 @@ func startRuntimeTestProcessWithRunner(t *testing.T, repo string, opts cliapp.Se
 	ctx, cancel := context.WithCancel(context.Background())
 	out := &lockedBuffer{}
 	opts.Output = out
+	if opts.ErrorOutput == nil {
+		opts.ErrorOutput = out
+	}
 	done := make(chan int, 1)
 	process := &serveRuntimeTestProcess{
 		t:      t,

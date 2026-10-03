@@ -71,9 +71,6 @@ func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
 		"    command: true",
 		"    timeout: 2s",
 		"    output_format: json",
-		"    retries: 1",
-		"    no_session_persistence: false",
-		"    use_tmux: false",
 		"budget:",
 		"  global_monthly_cap: 50000",
 		"  per_entity_monthly_cap: 20000",
@@ -571,8 +568,8 @@ func TestLoad_RejectsUnsupportedShardingExtension(t *testing.T) {
 	if err := os.WriteFile(p, []byte(cfgText), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if _, err := Load(p); err == nil || !strings.Contains(err.Error(), "sharding extension is unsupported") {
-		t.Fatalf("Load error = %v, want unsupported sharding extension", err)
+	if _, err := Load(p); err == nil || !strings.Contains(err.Error(), `config field "sharding" is not supported`) || !strings.Contains(err.Error(), "Valid fields:") {
+		t.Fatalf("Load error = %v, want current-vocabulary sharding rejection", err)
 	}
 }
 

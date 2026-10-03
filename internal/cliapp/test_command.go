@@ -56,7 +56,6 @@ const (
 type scenarioTestCommandOptions struct {
 	apiOptions   rootCommandOptions
 	contracts    string
-	platformSpec string
 	timeout      time.Duration
 	pollInterval time.Duration
 	derive       string

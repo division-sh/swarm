@@ -288,10 +288,6 @@ typed-process-local	callback-type	typed	internal/runtime/llm/provider_credential
 typed-process-local	callback-type	typed	internal/runtime/llm/runtime_resolver.go	newAgentRuntimeSet	param:prepareLive,prepareMock	func(github.com/division-sh/swarm/internal/runtime/llm.RuntimeFactory) (github.com/division-sh/swarm/internal/runtime/llm.RuntimeFactory, error)
 typed-process-local	callback-type	typed	internal/runtime/llm/runtime_resolver.go	runtimeFactoryBuilder	field:prepare	func(github.com/division-sh/swarm/internal/runtime/llm.RuntimeFactory) (github.com/division-sh/swarm/internal/runtime/llm.RuntimeFactory, error)
 typed-process-local	callback-type	typed	internal/runtime/llm/selection/profile.go	EnvLookup	named-function-type	func(string) (string, bool)
-typed-process-local	callback-type	typed	internal/runtime/llm/selection/profile.go	RejectRetiredEnvBackend	param:lookup	github.com/division-sh/swarm/internal/runtime/llm/selection.EnvLookup
-typed-process-local	callback-type	typed	internal/runtime/llm/selection/profile.go	RejectRetiredEnvRuntimeMode	param:lookup	github.com/division-sh/swarm/internal/runtime/llm/selection.EnvLookup
-typed-process-local	callback-type	typed	internal/runtime/llm/selection/profile.go	RejectRetiredModelEnv	param:lookup	github.com/division-sh/swarm/internal/runtime/llm/selection.EnvLookup
-typed-process-local	callback-type	typed	internal/runtime/llm/selection/profile.go	RejectRetiredOpenAICompatibleBaseURLEnv	param:lookup	github.com/division-sh/swarm/internal/runtime/llm/selection.EnvLookup
 typed-process-local	callback-type	typed	internal/runtime/llm/session_watchdog.go	sessionWatchdogMonitorWriter	field:cancel	context.CancelFunc
 typed-process-local	callback-type	typed	internal/runtime/llm/session_watchdog.go	sessionWatchdogMonitorWriter	field:nowFn	func() time.Time
 typed-process-local	callback-type	typed	internal/runtime/managedcredentials/file_lock_unix.go	lockManagedCredentialFile	result:#1	func()

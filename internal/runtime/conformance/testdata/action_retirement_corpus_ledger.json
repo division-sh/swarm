@@ -3261,10 +3261,7 @@
     "internal/apiv1/operator_mailbox_event_fixture_test.go": "d43a2ba2b retained mailbox event/selected-store helper split; action materializer is not retained",
     "internal/runtime/conformance/action_retirement_corpus_test.go": "historical corpus census and live-source/negative guards",
     "internal/runtime/conformance/handler_action_retirement_guard_test.go": "repository AST retirement guard and hostile mutations",
-    "internal/runtime/contracts/workflow_contract_action_retirement.go": "presence-based rejection only, no action interpreter",
     "internal/runtime/contracts/workflow_contract_action_retirement_test.go": "hostile rejection and distinct homonym preservation",
-    "internal/runtime/contracts/workflow_contract_nodes_rules_value.go": "source-aware rules admission calls shared presence-rejection helper; no action interpreter",
-    "internal/runtime/contracts/workflow_contract_nodes_value.go": "source-aware node field admission calls shared presence-rejection helper; no action interpreter",
     "internal/testplanning/conformance_2394_partition_test.go": "explicit eight-root action-retirement conformance partition census and hostile scope-drift controls; test names are proof references, not an interpreter"
   }
 }

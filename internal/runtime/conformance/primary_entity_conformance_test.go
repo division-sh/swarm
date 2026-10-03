@@ -31,7 +31,7 @@ func TestPrimaryEntityConformance(t *testing.T) {
 			name:          "schema entity selector fails closed",
 			flowSchema:    primaryEntityConformanceSchema("entity: vertical\n"),
 			flowEntities:  "vertical:\n  name: text\n",
-			wantLoadError: "schema.yaml entity",
+			wantLoadError: `schema field "entity" is not supported`,
 		},
 		{
 			name:          "multi entity normal flow fails closed",
@@ -43,7 +43,7 @@ func TestPrimaryEntityConformance(t *testing.T) {
 			name:          "schema entity selector for missing entity fails closed",
 			flowSchema:    primaryEntityConformanceSchema("entity: missing\n"),
 			flowEntities:  "vertical:\n  name: text\n",
-			wantLoadError: "schema.yaml entity",
+			wantLoadError: `schema field "entity" is not supported`,
 		},
 		{
 			name:          "stateful normal flow without entity fails verify",
@@ -64,6 +64,9 @@ func TestPrimaryEntityConformance(t *testing.T) {
 			if tc.wantLoadError != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantLoadError) {
 					t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want %q", err, tc.wantLoadError)
+				}
+				if strings.Contains(tc.wantLoadError, `schema field "entity"`) && !strings.Contains(err.Error(), "Valid fields: activation") {
+					t.Fatalf("schema entity rejection omitted current vocabulary: %v", err)
 				}
 				return
 			}

@@ -48,11 +48,11 @@ func TestResetProcessDeathRecoversBeforeSourceAdmissionBothStores(t *testing.T) 
 						cfg = writeChannelOnboardingPostgresRuntimeConfig(t, dsn)
 					}
 					environment := []string{
-						"SWARM_RESET_PROCESS_HELPER=1", "SWARM_RESET_CONFIG=" + cfg, "SWARM_RESET_SOURCE=" + source,
-						"SWARM_RESET_STORE=" + storeMode, "SWARM_RESET_FAULT_PHASE=" + phase,
+						"SWARM_TEST_RESET_PROCESS_HELPER=1", "SWARM_TEST_RESET_CONFIG=" + cfg, "SWARM_TEST_RESET_SOURCE=" + source,
+						"SWARM_TEST_RESET_STORE=" + storeMode, "SWARM_TEST_RESET_FAULT_PHASE=" + phase,
 						"TMPDIR=" + t.TempDir(),
 					}
-					first := startServedCrashProcess(t, "TestResetCrashServeProcessHelper", append(environment, "SWARM_RESET_RECOVER=0"))
+					first := startServedCrashProcess(t, "TestResetCrashServeProcessHelper", append(environment, "SWARM_TEST_RESET_RECOVER=0"))
 					endpoint := first.endpoint(t) + "/v1/rpc"
 					initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 						"event_name": "item.received", "bundle_hash": hash,
@@ -82,7 +82,7 @@ func TestResetProcessDeathRecoversBeforeSourceAdmissionBothStores(t *testing.T) 
 						if phase == "containers_settled" && len(operation.Allocations) != 1 {
 							t.Fatalf("unreceipted successor allocation was not journaled: %+v", operation)
 						}
-						middle := startServedCrashProcessBeforeReadiness(t, "TestResetCrashServeProcessHelper", append(environment, "SWARM_RESET_RECOVER=1", "SWARM_RESET_BLOCK_RECOVERY=1"))
+						middle := startServedCrashProcessBeforeReadiness(t, "TestResetCrashServeProcessHelper", append(environment, "SWARM_TEST_RESET_RECOVER=1", "SWARM_TEST_RESET_BLOCK_RECOVERY=1"))
 						deadline := time.After(serveRuntimeReadyTimeout)
 						tick := time.NewTicker(10 * time.Millisecond)
 						defer tick.Stop()
@@ -104,9 +104,9 @@ func TestResetProcessDeathRecoversBeforeSourceAdmissionBothStores(t *testing.T) 
 							t.Fatal(err)
 						}
 					}
-					recoveredEnv := append(append([]string{}, environment...), "SWARM_RESET_RECOVER=1")
+					recoveredEnv := append(append([]string{}, environment...), "SWARM_TEST_RESET_RECOVER=1")
 					if !clear {
-						recoveredEnv = append(recoveredEnv, "SWARM_RESET_FAULT_ALREADY_REMOVED=1")
+						recoveredEnv = append(recoveredEnv, "SWARM_TEST_RESET_FAULT_ALREADY_REMOVED=1")
 					}
 					second := startServedCrashProcess(t, "TestResetCrashServeProcessHelper", recoveredEnv)
 					endpoint = second.endpoint(t) + "/v1/rpc"
@@ -199,11 +199,11 @@ func readResetProcessOperation(t *testing.T, db *sql.DB) destructivereset.Operat
 }
 
 func TestResetCrashServeProcessHelper(t *testing.T) {
-	if os.Getenv("SWARM_RESET_PROCESS_HELPER") != "1" {
+	if os.Getenv("SWARM_TEST_RESET_PROCESS_HELPER") != "1" {
 		t.Skip("subprocess helper")
 	}
 	fault := storetest.SetResetFinalReceiptFault
-	if os.Getenv("SWARM_RESET_FAULT_PHASE") == "admitted" {
+	if os.Getenv("SWARM_TEST_RESET_FAULT_PHASE") == "admitted" {
 		fault = storetest.SetResetPlanReceiptFault
 	}
 	var selected any
@@ -214,29 +214,29 @@ func TestResetCrashServeProcessHelper(t *testing.T) {
 		} else {
 			selected = pg
 		}
-		if os.Getenv("SWARM_RESET_RECOVER") == "1" && os.Getenv("SWARM_RESET_FAULT_ALREADY_REMOVED") != "1" {
+		if os.Getenv("SWARM_TEST_RESET_RECOVER") == "1" && os.Getenv("SWARM_TEST_RESET_FAULT_ALREADY_REMOVED") != "1" {
 			if err := fault(context.Background(), selected, false); err != nil {
 				t.Fatal(err)
 			}
 		}
 	})
 	opts := cliapp.DefaultServeOptions()
-	opts.ConfigPath = os.Getenv("SWARM_RESET_CONFIG")
-	opts.SourceRoot = os.Getenv("SWARM_RESET_SOURCE")
+	opts.ConfigPath = os.Getenv("SWARM_TEST_RESET_CONFIG")
+	opts.SourceRoot = os.Getenv("SWARM_TEST_RESET_SOURCE")
 	opts.PlatformSpecPath = defaultPlatformSpecPath
-	opts.StoreMode = os.Getenv("SWARM_RESET_STORE")
+	opts.StoreMode = os.Getenv("SWARM_TEST_RESET_STORE")
 	opts.StoreModeSet = opts.StoreMode != ""
 	opts.WorkspaceBackend, opts.WorkspaceBackendSet = "host", true
 	opts.APIListenAddr, opts.MCPListenAddr = "127.0.0.1:0", "127.0.0.1:0"
 	opts.Verbose, opts.SelfCheck = true, true
 	opts.Output, opts.ErrorOutput = os.Stdout, os.Stderr
-	if os.Getenv("SWARM_RESET_RECOVER") != "1" {
+	if os.Getenv("SWARM_TEST_RESET_RECOVER") != "1" {
 		opts.TestRuntimeReadyHook = func(*runtime.Runtime) {
 			if err := fault(context.Background(), selected, true); err != nil {
 				t.Fatal(err)
 			}
 		}
-	} else if os.Getenv("SWARM_RESET_BLOCK_RECOVERY") == "1" {
+	} else if os.Getenv("SWARM_TEST_RESET_BLOCK_RECOVERY") == "1" {
 		opts.TestRuntimeReadyHook = func(*runtime.Runtime) {
 			fmt.Fprintln(os.Stdout, "RESET_RECOVERY_CANDIDATE_READY")
 			select {}

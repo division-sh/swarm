@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -59,6 +60,62 @@ func TestConfigCurrentVocabularySuggestionsFollowSourcePolicy(t *testing.T) {
 				t.Fatalf("missing source location: %v", err)
 			}
 		})
+	}
+}
+
+func TestConfigSourceRejectsExcludedDeclaredFieldsBeforeProjection(t *testing.T) {
+	for _, row := range []struct{ path, supported string }{
+		{"sharding", "runtime"},
+		{"runtime.max_concurrent_agents", "fan_out_workers"},
+		{"runtime.event_poll_interval", "recovery_on_startup"},
+		{"database.password", "password_env"},
+		{"llm.claude_cli.retries", "timeout"},
+		{"llm.claude_cli.no_session_persistence", "command"},
+		{"llm.claude_cli.use_tmux", "output_format"},
+	} {
+		parts := strings.Split(row.path, ".")
+		key := parts[len(parts)-1]
+		for _, literal := range []string{"null", "''", "{}", "[]", "1", "false"} {
+			for _, merged := range []bool{false, true} {
+				source := key + ": " + literal
+				if merged {
+					source = "<<: {" + source + "}"
+				}
+				for i := len(parts) - 2; i >= 0; i-- {
+					source = parts[i] + ": {" + source + "}"
+				}
+				t.Run(fmt.Sprintf("%s/%s/merged=%t", row.path, literal, merged), func(t *testing.T) {
+					assertDiagnostic := func(err error, file string) {
+						t.Helper()
+						diagnostic, ok := runtimecontracts.AsLoaderDiagnostic(err)
+						if !ok || !strings.Contains(diagnostic.Problem, key) || slices.Contains(diagnostic.ValidOptions, key) || !slices.Contains(diagnostic.ValidOptions, row.supported) || diagnostic.Location.File != file || diagnostic.Location.Line == 0 || diagnostic.Location.Column == 0 {
+							t.Fatalf("excluded field admitted or misdiagnosed: error=%v diagnostic=%#v", err, diagnostic)
+						}
+						if !strings.Contains(err.Error(), "Valid fields:") || strings.Contains(err.Error(), "RETIRED") {
+							t.Fatalf("not current-vocabulary rejection: %v", err)
+						}
+					}
+					before := Config{Runtime: RuntimeConfig{RecoveryOnStartup: true}, LLM: LLMConfig{Backend: "anthropic"}}
+					got := before
+					assertDiagnostic(decodeConfigSourceTest(source, &got), "")
+					if !reflect.DeepEqual(got, before) {
+						t.Fatal("excluded source changed caller-owned defaults")
+					}
+					path := filepath.Join(t.TempDir(), "swarm.yaml")
+					if err := os.WriteFile(path, []byte(source), 0600); err != nil {
+						t.Fatal(err)
+					}
+					for _, override := range []string{"", "openai_responses"} {
+						_, err := LoadWithOptions(path, LoadOptions{BackendOverride: override})
+						assertDiagnostic(err, path)
+					}
+					if parts[0] == "runtime" {
+						var runtime RuntimeConfig
+						assertDiagnostic(yaml.Unmarshal([]byte(strings.TrimSuffix(strings.TrimPrefix(source, "runtime: {"), "}")), &runtime), "")
+					}
+				})
+			}
+		}
 	}
 }
 

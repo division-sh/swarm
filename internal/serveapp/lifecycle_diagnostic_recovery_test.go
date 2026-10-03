@@ -74,9 +74,9 @@ func TestLifecycleDiagnosticServedCrashRecoveryAndResetBothStores(t *testing.T) 
 					t.Errorf("release killed child's test-owned projection: %v", err)
 				}
 			})
-			env := []string{"SWARM_DIAGNOSTIC_PROCESS_HELPER=1", "SWARM_DIAGNOSTIC_CONFIG=" + cfg,
-				"SWARM_DIAGNOSTIC_SOURCE=" + source, "SWARM_DIAGNOSTIC_STORE=" + storeMode, "TMPDIR=" + temporary}
-			first := startServedCrashProcess(t, "TestLifecycleDiagnosticServeProcessHelper", append(env, "SWARM_DIAGNOSTIC_FAIL=1"))
+			env := []string{"SWARM_TEST_DIAGNOSTIC_PROCESS_HELPER=1", "SWARM_TEST_DIAGNOSTIC_CONFIG=" + cfg,
+				"SWARM_TEST_DIAGNOSTIC_SOURCE=" + source, "SWARM_TEST_DIAGNOSTIC_STORE=" + storeMode, "TMPDIR=" + temporary}
+			first := startServedCrashProcess(t, "TestLifecycleDiagnosticServeProcessHelper", append(env, "SWARM_TEST_DIAGNOSTIC_FAIL=1"))
 			proof := servedControlProofRuntime{Endpoint: first.endpoint(t) + "/v1/rpc", DB: db, Backend: backendName, BundleHash: hash}
 			initial := requireServedEventPublishRPCResult(t, proof.Endpoint, map[string]any{
 				"event_name": "item.received", "bundle_hash": hash,
@@ -106,7 +106,7 @@ func TestLifecycleDiagnosticServedCrashRecoveryAndResetBothStores(t *testing.T) 
 			if err := first.kill(); err != nil {
 				t.Fatal(err)
 			}
-			second := startServedCrashProcess(t, "TestLifecycleDiagnosticServeProcessHelper", append(env, "SWARM_DIAGNOSTIC_FAIL=0"))
+			second := startServedCrashProcess(t, "TestLifecycleDiagnosticServeProcessHelper", append(env, "SWARM_TEST_DIAGNOSTIC_FAIL=0"))
 			proof.Endpoint = second.endpoint(t) + "/v1/rpc"
 			projected := readServedLifecycleDiagnosticReceipts(t, db, initial.RunID)
 			for id := range pending {
@@ -212,7 +212,7 @@ func requireServedDiagnosticEventCount(t *testing.T, db *sql.DB, id, runID strin
 }
 
 func TestLifecycleDiagnosticServeProcessHelper(t *testing.T) {
-	if os.Getenv("SWARM_DIAGNOSTIC_PROCESS_HELPER") != "1" {
+	if os.Getenv("SWARM_TEST_DIAGNOSTIC_PROCESS_HELPER") != "1" {
 		t.Skip("subprocess helper")
 	}
 	var fail atomic.Bool
@@ -224,16 +224,16 @@ func TestLifecycleDiagnosticServeProcessHelper(t *testing.T) {
 		return persistence
 	}
 	opts := cliapp.DefaultServeOptions()
-	opts.ConfigPath, opts.SourceRoot = os.Getenv("SWARM_DIAGNOSTIC_CONFIG"), os.Getenv("SWARM_DIAGNOSTIC_SOURCE")
+	opts.ConfigPath, opts.SourceRoot = os.Getenv("SWARM_TEST_DIAGNOSTIC_CONFIG"), os.Getenv("SWARM_TEST_DIAGNOSTIC_SOURCE")
 	opts.PlatformSpecPath = defaultPlatformSpecPath
-	opts.StoreMode = os.Getenv("SWARM_DIAGNOSTIC_STORE")
+	opts.StoreMode = os.Getenv("SWARM_TEST_DIAGNOSTIC_STORE")
 	opts.StoreModeSet = opts.StoreMode != ""
 	opts.WorkspaceBackend, opts.WorkspaceBackendSet = "host", true
 	opts.APIListenAddr, opts.MCPListenAddr = "127.0.0.1:0", "127.0.0.1:0"
 	opts.Verbose, opts.SelfCheck = true, true
 	opts.Output, opts.ErrorOutput = os.Stdout, os.Stderr
 	opts.TestLLMRuntime = servedLiveAgentProofLLMRuntime{}
-	opts.TestRuntimeReadyHook = func(*runtime.Runtime) { fail.Store(os.Getenv("SWARM_DIAGNOSTIC_FAIL") == "1") }
+	opts.TestRuntimeReadyHook = func(*runtime.Runtime) { fail.Store(os.Getenv("SWARM_TEST_DIAGNOSTIC_FAIL") == "1") }
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	if code := runFrom(ctx, repoRootForTest(), opts); code != 0 {

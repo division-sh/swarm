@@ -17,7 +17,7 @@ import (
 // This read-only child is supplementary persistence proof, not a public timer
 // surface. Its parent invokes it only after the retained serve child has joined.
 func TestOwnedNumericTimerInspection(t *testing.T) {
-	raw := os.Getenv("SWARM_NUMERIC_TIMER_INSPECTION")
+	raw := os.Getenv("SWARM_TEST_NUMERIC_TIMER_INSPECTION")
 	if raw == "" {
 		t.Skip("supplementary inspection child; invoked by the numeric lifecycle proof")
 	}
