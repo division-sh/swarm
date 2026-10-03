@@ -286,6 +286,12 @@ func resolveCLIServeListenerAddresses(opts cliServeListenerAddressOptions) (stri
 	if err != nil {
 		return "", "", err
 	}
+	return resolveCLIServeListenerAddressesFromConfig(opts, cfg)
+}
+
+func resolveCLIServeListenerAddressesFromConfig(opts cliServeListenerAddressOptions, cfg cliCommandConfig) (string, string, error) {
+	apiAddr, apiResolved := resolveCLIServeListenerAddressFlag(opts.APIListenAddr, opts.APIListenAddrFlagSet)
+	mcpAddr, mcpResolved := resolveCLIServeListenerAddressFlag(opts.MCPListenAddr, opts.MCPListenAddrFlagSet)
 	if !apiResolved {
 		apiAddr = defaultAPIListenAddr
 		if config := strings.TrimSpace(cfg.Serve.APIListenAddr); config != "" {
@@ -313,15 +319,22 @@ func ResolveServeAPIAuth(root InvocationRoot, opts ServeOptions) (apiv1.AuthToke
 		return apiv1.AuthTokenResolution{}, err
 	}
 	if opts.APITokenFileFlagSet || strings.TrimSpace(opts.APITokenFile) != "" {
+		return resolveServeAPIAuthFromConfig(root, opts, cliCommandConfig{})
+	}
+	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: root.Path(), ExplicitPath: opts.ConfigPath})
+	if err != nil {
+		return apiv1.AuthTokenResolution{}, err
+	}
+	return resolveServeAPIAuthFromConfig(root, opts, cfg)
+}
+
+func resolveServeAPIAuthFromConfig(root InvocationRoot, opts ServeOptions, cfg cliCommandConfig) (apiv1.AuthTokenResolution, error) {
+	if opts.APITokenFileFlagSet || strings.TrimSpace(opts.APITokenFile) != "" {
 		tokenFile := strings.TrimSpace(opts.APITokenFile)
 		if tokenFile == "" {
 			return apiv1.AuthTokenResolution{}, &cliAPIAuthConfigError{message: serveAPITokenFileFlagSource + " is blank"}
 		}
 		return readServeAPITokenFile(root.Resolve(tokenFile), serveAPITokenFileFlagSource)
-	}
-	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: root.Path(), ExplicitPath: opts.ConfigPath})
-	if err != nil {
-		return apiv1.AuthTokenResolution{}, err
 	}
 	if tokenFile := strings.TrimSpace(cfg.Serve.APITokenFile); tokenFile != "" {
 		return readServeAPITokenFile(root.Resolve(tokenFile), serveAPITokenFileConfigSource)
