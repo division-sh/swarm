@@ -82,6 +82,16 @@ execution receipts must identify their own snapshot.
     no qualification credit. Resume higher-tier CI only on the corrected new
     signed head; keep the original8714 core as historical measured core evidence,
     not current-head or higher-scope qualification.
+11. Hosted lifecycle37105291252 exposes the release package's static import
+    boundary reader: it still bans the approved shared testplanning compiler and
+    tier owner alongside actual in-process runtime packages. Its only new callers
+    are process_harness_test.go and golden_agent_workload_test.go, already named
+    in the audit. Admit that exact qualification-only package in those two files;
+    keep runtime/store/CLI/provider imports, foreign subpackages, aliases and other
+    files rejected, with negative controls. Public product execution stays in
+    compiled children, not in-process. This is a missed test guard consumer of
+    the approved composition, not another production interpreter or owner.
+    The red hosted run remains evidence, not lifecycle cost/qualification credit.
 
 ## Local Instruction Clarification
 
