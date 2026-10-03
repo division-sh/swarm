@@ -39,8 +39,11 @@ func TestManifestCurrentVocabularyDiagnosticAndMergeAdmission(t *testing.T) {
 		}
 	}
 
-	manifest, err := parseManifestStrict([]byte("provider: github\n<<: &options {redact_keys: [secret], metadata: {author_summary_field: business}}\n"))
-	if err != nil || !slices.Equal(manifest.RedactKeys, []string{"secret"}) || manifest.Metadata["author_summary_field"] != "business" {
+	manifest, err := parseManifestStrict([]byte("provider: github\nevent_name: {literal: inbound.github}\n<<: &options {redact_keys: [secret], metadata: {author_summary_field: user_agent}}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(manifest.value.definition.RedactKeys, []string{"secret"}) || manifest.Metadata()["author_summary_field"] != "user_agent" {
 		t.Fatalf("supported aliases/open business metadata changed: %+v, %v", manifest, err)
 	}
 }

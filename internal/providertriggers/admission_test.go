@@ -17,6 +17,7 @@ func TestManifestRejectsSignedOptionalSecretAndEmptyKeyExecution(t *testing.T) {
 			if err := manifest.Validate(); err == nil || !strings.Contains(err.Error(), "signed request authentication requires secret.required true") {
 				t.Fatalf("Validate error = %v", err)
 			}
+			manifest.Secret.Required = true
 			_, err := manifest.Accept(Request{Provider: "acme", Headers: http.Header{"X-Signature": []string{"value"}}, Body: []byte(`{}`), Payload: map[string]any{}})
 			requireProviderTriggerError(t, err, http.StatusUnauthorized)
 		})
@@ -69,15 +70,15 @@ func TestCatalogSnapshotDoesNotExposeMutableManifestState(t *testing.T) {
 	if !ok {
 		t.Fatal("catalog entry missing")
 	}
-	returned.Manifest.Metadata["delivery"] = "user_agent"
+	returned.Manifest.Metadata()["delivery"] = "user_agent"
 	again, _ := catalog.EntryByProvider("acme")
-	if got := again.Manifest.Metadata["delivery"]; got != "delivery_id" {
+	if got := again.Manifest.Metadata()["delivery"]; got != "delivery_id" {
 		t.Fatalf("catalog manifest metadata = %q, want immutable delivery_id", got)
 	}
 	entries := catalog.Entries()
-	entries[0].Manifest.Metadata["delivery"] = "event_type"
+	entries[0].Manifest.Metadata()["delivery"] = "event_type"
 	again, _ = catalog.EntryByID("provider.acme")
-	if got := again.Manifest.Metadata["delivery"]; got != "delivery_id" {
+	if got := again.Manifest.Metadata()["delivery"]; got != "delivery_id" {
 		t.Fatalf("catalog Entries exposed mutable state: %q", got)
 	}
 }
@@ -322,29 +323,27 @@ func TestCompileAdmissionTeachingFailures(t *testing.T) {
 	}
 }
 
-func admissionTestEntry(manifest Manifest, id string) CatalogEntry {
+func admissionTestEntry(manifest triggerFixture, id string) CatalogEntry {
 	return CatalogEntry{
 		Identity: PackIdentity{ID: id, Version: "1.0.0", ManifestHash: "sha256:" + strings.Repeat("a", 64), Provenance: "external"},
-		Manifest: manifest, Source: "test", SourcePath: "/tmp/" + id,
+		Manifest: manifest.mustAdmit(), Source: "test", SourcePath: "/tmp/" + id,
 	}
 }
 
-func admissionTestManifest(provider, signatureType string, secretRequired bool) Manifest {
+func admissionTestManifest(provider, signatureType string, secretRequired bool) triggerFixture {
 	signature := SignatureManifest{Type: signatureType, Header: "X-Signature"}
 	switch signatureType {
 	case signatureTypeHMACSHA256:
-		signature.Encoding = "hex"
 		signature.SignedPayload = "raw_body"
 	case signatureTypeHMACSHA1:
-		signature.Encoding = "hex"
 		signature.SignedPayload = "raw_body"
 	case signatureTypeTokenEquality:
 	default:
 		signature = SignatureManifest{}
 	}
-	return Manifest{
+	return triggerFixture{
 		Provider: provider, Secret: SecretManifest{Required: secretRequired}, Signature: signature,
 		DeliveryID: ValueSource{Header: "X-Delivery", Required: true}, EventType: ValueSource{Literal: "event", Required: true},
-		EventName: EventNameManifest{Literal: "inbound." + provider}, Ack: AckManifest{Mode: "after_publish"},
+		EventName: EventNameManifest{Literal: "inbound." + provider},
 	}
 }

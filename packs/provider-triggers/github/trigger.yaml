@@ -67,8 +67,6 @@ normalized_events:
       absent: [comment]
       one_of:
         action: [opened]
-ack:
-  mode: after_publish
 metadata:
   user_agent: user_agent
   github_delivery: delivery_id

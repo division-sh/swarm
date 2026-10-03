@@ -55,11 +55,11 @@ func TestW5ToolSchemaSharedConsumerParity(t *testing.T) {
 					return manifest.OpaqueTypes["probe"], err
 				},
 				"trigger": func() (contracts.ToolInputSchema, error) {
-					manifest, err := providertriggers.ParseManifest([]byte("provider: probe\nnormalized_events:\n- event: probe.observed\n  fields: {value: {from: payload.value, schema: " + text + "}}\n"))
+					manifest, err := providertriggers.ParseManifest([]byte("provider: probe\nevent_name: {literal: inbound.probe}\nnormalized_events:\n- event: inbound.probe.observed\n  fields: {value: {from: message.value, schema: " + text + "}}\n"))
 					if err != nil {
 						return contracts.ToolInputSchema{}, err
 					}
-					return manifest.NormalizedEvents[0].Fields["value"].Schema, nil
+					return manifest.OutputManifest()[1].Fields["value"].Schema, nil
 				},
 				"programmatic": func() (contracts.ToolInputSchema, error) {
 					var raw map[string]any

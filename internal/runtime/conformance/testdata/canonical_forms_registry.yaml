@@ -731,7 +731,7 @@ decode_bypasses:
   # The canonical owner's root is classified but excluded from the off-owner ceiling.
   # CI compares each PR to the accepted base ledger, not just these initial ceilings.
   node_site_ceiling: 54
-  off_owner_direct_decode_ceiling: 19
+  off_owner_direct_decode_ceiling: 18
   files:
     internal/cliapp/cli_output.go: {family: other_production_projection, node_sites: 0, direct_decode_roots: 1}
     internal/cliapp/unified_config.go: {family: excluded_deployment_config, node_sites: 16, direct_decode_roots: 1}
@@ -739,9 +739,8 @@ decode_bypasses:
     # #2486 removes the three runtime callers of the shared decoder. Its sole
     # surviving conformance-fixture root is explicitly #2487, not a new exemption.
     internal/providerconnectors/catalog_conformance.go: {family: excluded_test_tooling, node_sites: 0, direct_decode_roots: 1}
-    # Trigger BODY grammar remains #2487. Retain its original budget-family charge;
-    # #2486 changes only its admitted envelope handoff, not this excluded reader.
-    internal/providertriggers/providertriggers.go: {family: closure_pack_platform, node_sites: 0, direct_decode_roots: 1}
+    # #2533 deletes the trigger BODY wire decoder and all catalog/plan YAML roundtrips.
+    # Its lexical admission consumes yamlsource and existing shared schema leaves.
     internal/runtime/contracts/enums.go: {family: wave_4_node_handler, node_sites: 1, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_yaml.go: {family: mixed_wave_4_wave_5, node_sites: 2, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_yaml_wave1.go: {family: mixed_existing_typed_admission, node_sites: 9, direct_decode_roots: 0}
@@ -753,7 +752,7 @@ decode_bypasses:
     internal/yamlsource/source.go: {family: canonical_owner, node_sites: 0, direct_decode_roots: 1}
 
 registry_result:
-  completeness: "all 11 remaining production custom unmarshallers classified as 9 bundle-reachable row owners and 2 deployment swarm.yaml exclusions; audited pack/platform roots and both retired decoders removed; trigger-body and conformance-fixture roots stay explicitly outside #2486 under #2487 without resetting their accepted-base charges"
+  completeness: "all 11 remaining production custom unmarshallers classified as 9 bundle-reachable row owners and 2 deployment swarm.yaml exclusions; pack/platform and trigger BODY wire roots removed; conformance-fixture and scenario roots remain with their existing owners"
   wave_1_status: closed
   wave_2_status: closed
   later_wave_gate: "W4/W5 and #2486 pack/platform typed-admission cuts implemented; execution proof and independent gate are required for closure. Public scenario admission consumes scenariodocument (#2532); trigger bodies remain #2533 and private execution remains #2143. Accepted #2487 census is historical; publication #2322/#2376 and parent all-row proof #2287 remain separate."

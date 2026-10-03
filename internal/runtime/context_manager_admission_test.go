@@ -525,13 +525,15 @@ func runtimeContextTestWakeup(t *testing.T, key string, dueAt time.Time) runtime
 
 func runtimeAdmissionTestCatalog(t *testing.T, hashToken string) *providertriggers.CatalogSnapshot {
 	t.Helper()
-	manifest := providertriggers.Manifest{
-		Provider: "acme", Secret: providertriggers.SecretManifest{Required: true},
-		Signature:  providertriggers.SignatureManifest{Type: "token_equality", Header: "X-Acme-Token"},
-		DeliveryID: providertriggers.ValueSource{Header: "X-Acme-Delivery", Required: true},
-		EventType:  providertriggers.ValueSource{Literal: "event", Required: true},
-		EventName:  providertriggers.EventNameManifest{Literal: "inbound.acme"},
-		Ack:        providertriggers.AckManifest{Mode: "after_publish"},
+	manifest, err := providertriggers.ParseManifest([]byte(`provider: acme
+secret: {required: true}
+signature: {type: token_equality, header: X-Acme-Token}
+delivery_id: {header: X-Acme-Delivery, required: true}
+event_type: {literal: event, required: true}
+event_name: {literal: inbound.acme}
+`))
+	if err != nil {
+		t.Fatal(err)
 	}
 	catalog, err := providertriggers.NewCatalogSnapshot(providertriggers.CatalogEntry{
 		Identity: providertriggers.PackIdentity{

@@ -86,7 +86,8 @@ normalized_events:
           properties:
             reference: {type: string, pattern: '^[A-Za-z0-9_]{1,32}$', minLength: 1, maxLength: 32}
             address: {type: string, pattern: '^[A-Za-z0-9_]{5,32}$', minLength: 5, maxLength: 32}
-        convert: telegram_command
+        convert:
+          pattern: '^/(?P<reference>[A-Za-z0-9_]{1,32})(?:@(?P<address>[A-Za-z0-9_]{5,32}))?$'
         optional: true
     when:
       absent: [callback_query, message.sender_chat]

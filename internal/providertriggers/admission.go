@@ -159,7 +159,7 @@ func (s *CatalogSnapshot) compilePackAdmission(alias, provider, signingSecret st
 			}
 			return InboundAdmissionPlan{}, fmt.Errorf("ingress alias %q provider %q pins pack %q, but that id is not selected; fix admission.pack.id or the effective pack inventory", alias, provider, pin)
 		}
-		entryProvider := NormalizeProviderName(entry.manifest.Provider)
+		entryProvider := entry.manifest.Provider()
 		if entryProvider != provider {
 			return InboundAdmissionPlan{}, fmt.Errorf("ingress alias %q provider %q pins pack %q, which provides %q; use a pack for %q or change provider to %q", alias, provider, pin, entryProvider, provider, entryProvider)
 		}
@@ -184,10 +184,7 @@ func (s *CatalogSnapshot) compilePackAdmission(alias, provider, signingSecret st
 	if !requiresSecret && signingSecret != "" {
 		return InboundAdmissionPlan{}, fmt.Errorf("ingress alias %q provider %q is UNAUTHENTICATED and must not declare signing_secret; remove signing_secret", alias, provider)
 	}
-	manifest, err := cloneManifest(entry.manifest)
-	if err != nil {
-		return InboundAdmissionPlan{}, fmt.Errorf("clone admitted provider trigger manifest for %q: %w", provider, err)
-	}
+	manifest := entry.manifest
 	identity := entry.identity
 	return InboundAdmissionPlan{
 		generation: s.Generation(), provider: provider, policySource: PolicySourceVerifiedPack,
@@ -241,7 +238,10 @@ func hasRawFields(declaration AdmissionDeclaration) bool {
 }
 
 func manifestRequestAuthentication(manifest Manifest) (RequestAuthentication, error) {
-	switch strings.TrimSpace(manifest.Signature.Type) {
+	if err := manifest.Validate(); err != nil {
+		return "", err
+	}
+	switch manifest.value.definition.Signature.Type {
 	case signatureTypeTokenEquality:
 		return RequestAuthenticationTokenEquality, nil
 	case signatureTypeHMACSHA256:
@@ -251,7 +251,7 @@ func manifestRequestAuthentication(manifest Manifest) (RequestAuthentication, er
 	case "":
 		return RequestAuthenticationNone, nil
 	default:
-		return "", fmt.Errorf("provider trigger manifest %q has unsupported request authentication %q", NormalizeProviderName(manifest.Provider), manifest.Signature.Type)
+		return "", fmt.Errorf("provider trigger manifest %q has unsupported request authentication %q", manifest.Provider(), manifest.value.definition.Signature.Type)
 	}
 }
 
@@ -349,27 +349,7 @@ func (p InboundAdmissionPlan) RequestAuthentication() RequestAuthentication {
 }
 func (p InboundAdmissionPlan) RequiresSecret() bool { return p.requiresSecret }
 func (p InboundAdmissionPlan) Outputs() []OutputManifest {
-	out := make([]OutputManifest, 0, len(p.outputs))
-	for _, output := range p.outputs {
-		fields := make(map[string]NormalizedEventFieldProjection, len(output.Fields))
-		for name, field := range output.Fields {
-			fields[name] = field.normalized()
-		}
-		output.Fields = fields
-		output.When.Exists = append([]string{}, output.When.Exists...)
-		output.When.Absent = append([]string{}, output.When.Absent...)
-		output.When.Equals = cloneTextMap(output.When.Equals)
-		oneOf := output.When.OneOf
-		output.When.OneOf = nil
-		if len(oneOf) != 0 {
-			output.When.OneOf = make(map[string][]string, len(oneOf))
-			for path, values := range oneOf {
-				output.When.OneOf[path] = append([]string(nil), values...)
-			}
-		}
-		out = append(out, output)
-	}
-	return out
+	return cloneOutputs(p.outputs)
 }
 func (p InboundAdmissionPlan) RawOutput() (OutputManifest, bool) {
 	for _, output := range p.Outputs() {
@@ -439,9 +419,9 @@ func (p InboundAdmissionPlan) EffectiveCapabilitySubject(req EffectiveSubjectReq
 	if p.manifest != nil {
 		source = "trigger_pack_binding"
 		provenance = p.packIdentity.Source().Provenance()
-		admission.SignedPayload = strings.TrimSpace(p.manifest.Signature.SignedPayload)
-		admission.DigestEncoding = strings.TrimSpace(p.manifest.Signature.digestEncoding())
-		if strings.TrimSpace(p.manifest.Signature.Type) == signatureTypeTokenEquality || p.requestAuthentication == RequestAuthenticationNone {
+		admission.SignedPayload = p.manifest.value.definition.Signature.SignedPayload
+		admission.DigestEncoding = p.manifest.value.definition.Signature.digestEncoding()
+		if p.manifest.value.definition.Signature.Type == signatureTypeTokenEquality || p.requestAuthentication == RequestAuthenticationNone {
 			admission.DigestEncoding = ""
 		}
 		admission.Pack = &packs.TriggerPackIdentity{
@@ -535,13 +515,13 @@ func (p InboundAdmissionPlan) AdmitRequest(req Request) (AdmittedRequest, error)
 		admitted := AdmittedRequest{
 			ProviderEventID: manifestAdmission.deliveryID, ProviderEventType: manifestAdmission.eventType,
 			Response:                  manifestAdmission.response,
-			AcknowledgeBeforeDispatch: strings.TrimSpace(p.manifest.Ack.Mode) == "durable_before_dispatch",
+			AcknowledgeBeforeDispatch: p.manifest.value.definition.Ack.Mode == "durable_before_dispatch",
 			generation:                p.generation, provider: p.provider, manifestOwner: p.manifest,
 			manifestAdmission: &manifestAdmission,
 		}
 		if admitted.Response == nil {
 			semanticContent := req.Payload
-			if strings.TrimSpace(p.manifest.PayloadSource) == "form" {
+			if p.manifest.value.definition.PayloadSource == "form" {
 				semanticContent = formValuesPayload(req.Form)
 			}
 			admitted.SemanticContentDigest, err = semanticContentDigest(semanticContent)

@@ -11277,6 +11277,22 @@ tool_model:
       provider trigger admission. Runtime-local Go implementations for selected configured providers are non-authoritative.
       A selected configured provider must consume a provider-trigger manifest for signing, replay checks, delivery-id
       extraction, event-type extraction, event naming, acknowledgement timing, and redaction.
+    body_admission_authority:
+      owner: internal/providertriggers.Manifest
+      source_owner: internal/yamlsource and existing shared ToolInputSchema admission
+      rule: >
+        Construct one lexical BODY source from the pack owner's exact retained bytes and source path. Admit closed fields,
+        explicit presence, scalar kinds, conditional authentication and normalization rules before publishing an executable
+        Manifest. Structural nulls, wrong shapes, duplicate effective keys and unsupported fields fail admission. Text is not
+        numeric coercion; booleans and integer status retain their kinds. Field-specific meaningful empty text, false and
+        zero remain valid where their contract permits. Token authentication excludes HMAC-only field presence, even null
+        or empty values. Unknown keys and enum values use ordinary admission diagnostics, not migration or retirement errors.
+      carriers: >
+        Manifest is a closed immutable family value. Catalog construction, catalog readback and admission-plan compilation
+        share it without YAML serialization, decoding or host rereads. Schema, capability, output, predicate and metadata
+        projections are defensive values derived from that admitted policy. Request normalization consumes its frozen
+        outputs and compiled conversions. Zero or invalid policy cannot execute. Hash the original BODY bytes, never a
+        normalized or reserialized policy. Explicit build-time stamping remains the only envelope authoring operation.
     compiled_admission_authority:
       owner: internal/providertriggers.CatalogSnapshot and InboundAdmissionPlan
       issue: '#1936'
@@ -11511,7 +11527,8 @@ tool_model:
       payload_object_required: fail closed when the decoded request payload is not a JSON object
       payload_source: >
         Source for the provider payload embedded in the published normalized event. The default `payload` uses the decoded
-        JSON object or raw-body wrapper. `form` uses the gateway-parsed `application/x-www-form-urlencoded` parameter set
+        JSON object or raw-body wrapper and is spelled by omission only; an authored value may be exactly `form`.
+        `form` uses the gateway-parsed `application/x-www-form-urlencoded` parameter set
         and requires the relevant signed-payload recipe to fail closed on malformed form input.
       normalized_events:
         shape: >
@@ -11525,12 +11542,16 @@ tool_model:
           is admitted or persisted. Optional `author_subject` must declare its registered subject type and name one
           declared string field; both members are required together.
         paths: >
-          `from`, `when.exists/absent`, and `when.one_of` keys use strict dotted paths relative to the decoded raw provider object. Empty
+          `from`, `when.exists/absent`, `when.equals` and `when.one_of` keys use strict dotted paths relative to the decoded raw provider object. Empty
           segments, rooted JSONPath, CEL, runtime namespaces, expression syntax, and unsupported segments fail pack load.
+          Validate authored path identity before building predicate maps. Surrounding or segment whitespace is rejected,
+          never trimmed into a competing key; reordered whitespace-distinct declarations cannot choose a winner.
         predicates: >
           Omitted `when` means every required field path exists. Authored `when` may add closed `exists`, `absent`, `equals`,
-          and finite exact-text `one_of` constraints. `one_of` requires at least one unique canonical value and narrows
-          runtime matching only; it does not prove branch exclusivity from disjoint value sets. Verification proves every branch pair mutually exclusive; an overlap fails pack load with the two
+          and finite exact-text `one_of` constraints. `equals` values are nonempty text matched byte-for-byte, including surrounding spaces;
+          there is no trimming or reinterpretation. Separately authored challenge/delivery-condition `normalize` remains
+          an explicit operation. `one_of` requires at least one unique canonical value and narrows runtime matching only;
+          it does not prove branch exclusivity from disjoint value sets. Verification proves every branch pair mutually exclusive; an overlap fails pack load with the two
           events and a remediation naming `when.absent`. Runtime multi-match rejection remains a fail-closed unreachable
           backstop. No match publishes the raw event only.
         extraction: >
@@ -11539,9 +11560,15 @@ tool_model:
           or conversion failure rejects the provider delivery with pack id/version/manifest_hash, normalized event, field,
           and path provenance; no marker or output survives.
         conversion: >
-          The closed enum contains exactly `number_to_text` and `text_enum_map`. `number_to_text` converts a lossless JSON
+          The closed conversion union contains exactly `number_to_text`, `text_enum_map`, and `pattern`.
+          `number_to_text` converts a lossless JSON
           integer to canonical decimal text. `text_enum_map` requires a finite exact input/output map, accepts text only,
-          and validates every mapped output against the declared post-conversion schema at pack admission. Source artifact
+          and validates every mapped output against the declared post-conversion schema at pack admission.
+          `pattern` is authored as `convert: {pattern: <RE2 regex>}` over text, emitting an object of matched named captures.
+          Compile it once at BODY admission. Every named capture must be a distinct property of the declared object schema;
+          unmatched optional captures are omitted. A nonmatching optional field is omitted; a nonmatching required field
+          fails normalization. Validate the complete result against the declared schema. Provider-specific regex knowledge
+          lives in packs, not platform provider guards or constants. Source artifact
           presence is not conversion or backend selection. There is no implicit coercion, missing-key fallback, or unknown
           conversion behavior.
         output_route: >
@@ -11571,7 +11598,8 @@ tool_model:
       secret.required: require a configured signing secret before accepting the provider callback
       signature: >
         Configured-provider authenticity verification. HMAC-SHA256 and HMAC-SHA1 verify a manifest-selected signed payload,
-        encoded as lowercase hex by default or Base64 when the manifest selects `encoding: base64`. Supported signed
+        encoded as lowercase hex by omission only, or Base64 when the manifest selects `encoding: base64`. Explicit hex
+        is not an authored alternative. Supported signed
         payloads are `raw_body`, `slack_v0`, `timestamp_dot_raw_body`, and `url_plus_sorted_form`. The interpreter supports
         fixed signature prefixes, structured comma-separated signature parameters, timestamp extraction from headers or
         parameters, replay tolerance windows, exact request URL plus sorted form-parameter canonicalization, and
@@ -11599,6 +11627,8 @@ tool_model:
         `inbound.slack.<event_type>`. Any additional dynamic event-name template requires an explicit spec/gate migration
         decision.
       ack.mode: >
+        Omission selects `after_publish`; the only authored mode is `durable_before_dispatch`. Explicit `after_publish`
+        is not an authored alternative.
         Both modes consume the same committed inbound_publications operation, immutable ordered event batch, and each
         event's immutable commit-time recipient-manifest fingerprint.
         Recipient manifests use the existing complete DeliveryRoute normalization and exact-identity deduplication.

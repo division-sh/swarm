@@ -30,11 +30,11 @@ func TestProviderManifestRetiresSummarySelectorBeforeValueInterpretation(t *test
 }
 
 func TestProviderManifestSummarySpellingInsidePayloadIsNotASelector(t *testing.T) {
-	manifest, err := ParseManifest([]byte("provider: telegram\nnormalized_events:\n  - event: inbound.telegram.text_message\n    fields:\n      author_summary_field:\n        from: message.text\n        schema: {type: string}\n"))
+	manifest, err := ParseManifest([]byte("provider: telegram\nevent_name: {literal: inbound.telegram}\nnormalized_events:\n  - event: inbound.telegram.text_message\n    fields:\n      author_summary_field:\n        from: message.text\n        schema: {type: string}\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if manifest.NormalizedEvents[0].Fields["author_summary_field"].From != "message.text" {
+	if manifest.OutputManifest()[1].Fields["author_summary_field"].From != "message.text" {
 		t.Fatal("payload projection was consumed as a presentation selector")
 	}
 }

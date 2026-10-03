@@ -2,7 +2,7 @@ id: provider.github
 version: 0.1.0
 platform_version: '>=0.7.0 <0.8.0'
 type: trigger
-manifest_hash: sha256:981c92f8513923f4e1924e045c36a543ae2fe051f02f160c4fd227b2e04eb675
+manifest_hash: sha256:3df85cfd90cbd7fd349cbde2e1f3cbec8a974c4866a0af128d5df70ca9658f01
 provenance:
     source: platform
 capabilities:

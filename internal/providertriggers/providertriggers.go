@@ -1,7 +1,6 @@
 package providertriggers
 
 import (
-	"bytes"
 	"crypto/hmac"
 	"crypto/sha1"
 	"crypto/sha256"
@@ -13,7 +12,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/url"
-	"reflect"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -22,11 +21,8 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packs"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
-	"github.com/division-sh/swarm/internal/yamlsource"
-	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -160,7 +156,7 @@ func (s *CatalogSnapshot) PackDescriptors() []packs.TriggerPackDescriptor {
 		}
 		out = append(out, packs.TriggerPackDescriptor{
 			Identity: entry.identity,
-			Provider: entry.manifest.Provider, Generation: s.generation, Events: events,
+			Provider: entry.manifest.Provider(), Generation: s.generation, Events: events,
 		})
 	}
 	return out
@@ -173,24 +169,17 @@ func NewCatalogSnapshot(entries ...CatalogEntry) (*CatalogSnapshot, error) {
 	}
 	normalizedEntries := make([]catalogEntryValue, 0, len(entries))
 	for _, entry := range entries {
-		manifest := entry.Manifest
-		if err := manifest.Validate(); err != nil {
+		if err := entry.Manifest.Validate(); err != nil {
 			return nil, fmt.Errorf(
 				"validate provider trigger pack %q version=%s manifest_hash=%s: %w",
 				strings.TrimSpace(entry.Identity.ID), strings.TrimSpace(entry.Identity.Version),
 				strings.TrimSpace(entry.Identity.ManifestHash), err,
 			)
 		}
-		provider := NormalizeProviderName(manifest.Provider)
-		entry.Manifest.Provider = provider
+		provider := entry.Manifest.Provider()
 		entry.Identity.Provenance = strings.TrimSpace(entry.Identity.Provenance)
 		entry.SourcePath = strings.TrimSpace(entry.SourcePath)
 		entry.Source = firstNonEmpty(entry.Source, "unknown")
-		clonedManifest, err := cloneManifest(entry.Manifest)
-		if err != nil {
-			return nil, fmt.Errorf("clone provider trigger manifest %q: %w", provider, err)
-		}
-		entry.Manifest = clonedManifest
 		if entry.Identity.ID == "" || entry.Identity.Version == "" || entry.Identity.ManifestHash == "" || entry.Identity.Provenance == "" {
 			return nil, fmt.Errorf("provider trigger catalog entry for %q requires pack id, version, manifest_hash, and provenance", provider)
 		}
@@ -311,7 +300,7 @@ func LoadPackFS(fsys fs.FS, dir, runningPlatformVersion string) (LoadedPack, err
 }
 
 func loadPackBody(loaded packs.Loaded) (LoadedPack, error) {
-	manifest, err := parseManifestStrict(loaded.ManifestBody)
+	manifest, err := parseManifestAt(loaded.ManifestBody, path.Join(loaded.Directory, packs.TriggerManifestFileName))
 	if err != nil {
 		return LoadedPack{}, fmt.Errorf("parse trigger manifest for pack %q: %w", loaded.Envelope.ID, err)
 	}
@@ -337,8 +326,8 @@ func loadPackBody(loaded packs.Loaded) (LoadedPack, error) {
 }
 
 func DerivedCapabilities(manifest Manifest) packs.Capabilities {
-	provider := NormalizeProviderName(manifest.Provider)
-	eventNames := make([]string, 0, 1+len(manifest.NormalizedEvents))
+	provider := manifest.Provider()
+	eventNames := make([]string, 0, len(manifest.OutputManifest()))
 	for _, output := range manifest.OutputManifest() {
 		name := strings.TrimSpace(output.Event)
 		if output.Kind == OutputKindRaw {
@@ -353,7 +342,7 @@ func DerivedCapabilities(manifest Manifest) packs.Capabilities {
 	}
 	sort.Strings(eventNames)
 	verifySecret := ""
-	if manifest.Secret.Required {
+	if manifest.RequiresSecret() {
 		verifySecret = "webhook_signing." + provider
 	}
 	return packs.Capabilities{
@@ -372,8 +361,8 @@ func DerivedCapabilities(manifest Manifest) packs.Capabilities {
 }
 
 func DerivedRequires(manifest Manifest) packs.Requires {
-	provider := NormalizeProviderName(manifest.Provider)
-	if manifest.Secret.Required {
+	provider := manifest.Provider()
+	if manifest.RequiresSecret() {
 		return packs.Requires{Secrets: []string{"webhook_signing." + provider}}
 	}
 	return packs.Requires{}
@@ -384,7 +373,7 @@ func (p LoadedPack) CapabilitySubject() (packs.Subject, error) {
 	subject := packs.Subject{
 		ID:            strings.TrimSpace(p.Envelope.ID),
 		Kind:          packs.SubjectProviderTrigger,
-		Provider:      NormalizeProviderName(p.Manifest.Provider),
+		Provider:      p.Manifest.Provider(),
 		Source:        "trigger_pack",
 		Provenance:    strings.TrimSpace(p.Envelope.Provenance.Source),
 		SourcePath:    strings.TrimSpace(p.SourcePath),
@@ -473,11 +462,11 @@ func (s *CatalogSnapshot) VerifyProviderOutputAuthorization(authorization runtim
 	if entry.identity.Version() != authorization.PackVersion() || entry.identity.ManifestHash() != authorization.ManifestHash() {
 		return fmt.Errorf("pack %q version/hash does not match the current verified catalog", authorization.PackID())
 	}
-	if NormalizeProviderName(entry.manifest.Provider) != authorization.Provider() {
+	if entry.manifest.Provider() != authorization.Provider() {
 		return fmt.Errorf("pack %q does not own provider %q", authorization.PackID(), authorization.Provider())
 	}
-	for _, normalized := range entry.manifest.NormalizedEvents {
-		if strings.TrimSpace(normalized.Event) == authorization.Event() {
+	for _, output := range entry.manifest.value.definition.outputs {
+		if output.Kind == OutputKindNormalized && output.Event == authorization.Event() {
 			return nil
 		}
 	}
@@ -529,10 +518,6 @@ func (s *CatalogSnapshot) entryValueByID(id string) (catalogEntryValue, bool) {
 }
 
 func (entry catalogEntryValue) readback() CatalogEntry {
-	manifest, err := cloneManifest(entry.manifest)
-	if err != nil {
-		panic("provider trigger catalog contains an invalid manifest clone: " + err.Error())
-	}
 	source := entry.identity.Source()
 	return CatalogEntry{
 		Identity: PackIdentity{
@@ -541,18 +526,10 @@ func (entry catalogEntryValue) readback() CatalogEntry {
 			ManifestHash: entry.identity.ManifestHash(),
 			Provenance:   source.Provenance(),
 		},
-		Manifest:   manifest,
+		Manifest:   entry.manifest,
 		SourcePath: source.Path(),
 		Source:     entry.source,
 	}
-}
-
-func cloneManifest(manifest Manifest) (Manifest, error) {
-	body, err := yaml.Marshal(manifest)
-	if err != nil {
-		return Manifest{}, err
-	}
-	return parseManifestStrict(body)
 }
 
 func catalogGeneration(entries []catalogEntryValue) (triggergeneration.Generation, error) {
@@ -563,7 +540,7 @@ func catalogGeneration(entries []catalogEntryValue) (triggergeneration.Generatio
 	for _, entry := range entries {
 		source := entry.identity.Source()
 		tuples = append(tuples, tuple{
-			ID: entry.identity.ID(), Provider: NormalizeProviderName(entry.manifest.Provider),
+			ID: entry.identity.ID(), Provider: entry.manifest.Provider(),
 			Version: entry.identity.Version(), ManifestHash: entry.identity.ManifestHash(),
 			Provenance: source.Provenance(),
 		})
@@ -581,82 +558,83 @@ func (req Request) withProvider(provider string) Request {
 	return req
 }
 
-type Manifest struct {
-	Provider              string                    `yaml:"provider"`
-	PayloadObjectRequired bool                      `yaml:"payload_object_required"`
-	PayloadObjectError    string                    `yaml:"payload_object_error"`
-	PayloadSource         string                    `yaml:"payload_source"`
-	Secret                SecretManifest            `yaml:"secret"`
-	Signature             SignatureManifest         `yaml:"signature"`
-	Challenge             *ChallengeManifest        `yaml:"challenge"`
-	DeliveryCondition     *ConditionManifest        `yaml:"delivery_condition"`
-	DeliveryID            ValueSource               `yaml:"delivery_id"`
-	EventType             ValueSource               `yaml:"event_type"`
-	EventName             EventNameManifest         `yaml:"event_name"`
+type manifestDefinition struct {
+	Provider              string                    `yaml:"provider,omitempty"`
+	PayloadObjectRequired bool                      `yaml:"payload_object_required,omitempty"`
+	PayloadObjectError    string                    `yaml:"payload_object_error,omitempty"`
+	PayloadSource         string                    `yaml:"payload_source,omitempty"`
+	Secret                SecretManifest            `yaml:"secret,omitempty"`
+	Signature             SignatureManifest         `yaml:"signature,omitempty"`
+	Challenge             *ChallengeManifest        `yaml:"challenge,omitempty"`
+	DeliveryCondition     *ConditionManifest        `yaml:"delivery_condition,omitempty"`
+	DeliveryID            ValueSource               `yaml:"delivery_id,omitempty"`
+	EventType             ValueSource               `yaml:"event_type,omitempty"`
+	EventName             EventNameManifest         `yaml:"event_name,omitempty"`
 	NormalizedEvents      []NormalizedEventManifest `yaml:"normalized_events,omitempty"`
-	Ack                   AckManifest               `yaml:"ack"`
-	RedactKeys            []string                  `yaml:"redact_keys"`
-	Metadata              map[string]string         `yaml:"metadata"`
+	Ack                   AckManifest               `yaml:"ack,omitempty"`
+	RedactKeys            []string                  `yaml:"redact_keys,omitempty"`
+	Metadata              map[string]string         `yaml:"metadata,omitempty"`
+	outputs               []OutputManifest
 }
 
 type SecretManifest struct {
-	Required bool `yaml:"required"`
+	Required bool `yaml:"required,omitempty"`
 }
 
 type SignatureManifest struct {
-	Type           string             `yaml:"type"`
-	Encoding       string             `yaml:"encoding"`
-	Header         string             `yaml:"header"`
-	Prefix         string             `yaml:"prefix"`
-	SignedPayload  string             `yaml:"signed_payload"`
-	SignatureParam string             `yaml:"signature_param"`
-	MissingError   string             `yaml:"missing_error"`
-	InvalidError   string             `yaml:"invalid_error"`
-	Timestamp      *TimestampManifest `yaml:"timestamp"`
+	Type           string             `yaml:"type,omitempty"`
+	Encoding       string             `yaml:"encoding,omitempty"`
+	Header         string             `yaml:"header,omitempty"`
+	Prefix         string             `yaml:"prefix,omitempty"`
+	SignedPayload  string             `yaml:"signed_payload,omitempty"`
+	SignatureParam string             `yaml:"signature_param,omitempty"`
+	MissingError   string             `yaml:"missing_error,omitempty"`
+	InvalidError   string             `yaml:"invalid_error,omitempty"`
+	Timestamp      *TimestampManifest `yaml:"timestamp,omitempty"`
 }
 
 type TimestampManifest struct {
-	Header       string `yaml:"header"`
-	Param        string `yaml:"param"`
-	Tolerance    string `yaml:"tolerance"`
-	MissingError string `yaml:"missing_error"`
-	InvalidError string `yaml:"invalid_error"`
-	StaleError   string `yaml:"stale_error"`
+	Header       string `yaml:"header,omitempty"`
+	Param        string `yaml:"param,omitempty"`
+	Tolerance    string `yaml:"tolerance,omitempty"`
+	MissingError string `yaml:"missing_error,omitempty"`
+	InvalidError string `yaml:"invalid_error,omitempty"`
+	StaleError   string `yaml:"stale_error,omitempty"`
 }
 
 type ChallengeManifest struct {
-	When     ConditionManifest `yaml:"when"`
-	Response ResponseManifest  `yaml:"response"`
+	When     ConditionManifest `yaml:"when,omitempty"`
+	Response ResponseManifest  `yaml:"response,omitempty"`
 }
 
 type ResponseManifest struct {
-	JSONPath    string `yaml:"json_path"`
-	MissingErr  string `yaml:"missing_error"`
-	ContentType string `yaml:"content_type"`
-	Status      int    `yaml:"status"`
+	JSONPath    string `yaml:"json_path,omitempty"`
+	MissingErr  string `yaml:"missing_error,omitempty"`
+	ContentType string `yaml:"content_type,omitempty"`
+	Status      int    `yaml:"status,omitempty"`
 }
 
 type ConditionManifest struct {
-	JSONPath     string `yaml:"json_path"`
-	Equals       string `yaml:"equals"`
-	Normalize    bool   `yaml:"normalize"`
-	MissingError string `yaml:"missing_error"`
-	MismatchErr  string `yaml:"mismatch_error"`
+	JSONPath     string `yaml:"json_path,omitempty"`
+	Equals       string `yaml:"equals,omitempty"`
+	Normalize    bool   `yaml:"normalize,omitempty"`
+	MissingError string `yaml:"missing_error,omitempty"`
+	MismatchErr  string `yaml:"mismatch_error,omitempty"`
 }
 
 type ValueSource struct {
-	Header       string `yaml:"header"`
-	JSONPath     string `yaml:"json_path"`
-	FormParam    string `yaml:"form_param"`
-	QueryParam   string `yaml:"query_param"`
-	Literal      string `yaml:"literal"`
-	Required     bool   `yaml:"required"`
-	MissingError string `yaml:"missing_error"`
+	Header       string `yaml:"header,omitempty"`
+	JSONPath     string `yaml:"json_path,omitempty"`
+	FormParam    string `yaml:"form_param,omitempty"`
+	QueryParam   string `yaml:"query_param,omitempty"`
+	Literal      string `yaml:"literal,omitempty"`
+	Required     bool   `yaml:"required,omitempty"`
+	MissingError string `yaml:"missing_error,omitempty"`
 }
 
 type EventNameManifest struct {
-	Literal  string `yaml:"literal"`
-	Template string `yaml:"template"`
+	Literal  string `yaml:"literal,omitempty"`
+	Template string `yaml:"template,omitempty"`
 }
 
 func (m EventNameManifest) Accepts(eventName string) bool {
@@ -680,7 +658,7 @@ func (m EventNameManifest) Accepts(eventName string) bool {
 }
 
 type AckManifest struct {
-	Mode string `yaml:"mode"`
+	Mode string `yaml:"mode,omitempty"`
 }
 
 func ParseManifest(body []byte) (Manifest, error) {
@@ -688,124 +666,10 @@ func ParseManifest(body []byte) (Manifest, error) {
 }
 
 func parseManifestStrict(body []byte) (Manifest, error) {
-	snapshot, err := yamlsource.Load(body)
-	if err != nil {
-		return Manifest{}, err
-	}
-	outputs, err := snapshot.Document("trigger.yaml").Root().Lookup("normalized_events")
-	if err != nil {
-		return Manifest{}, err
-	}
-	var wire struct {
-		Provider              string             `yaml:"provider"`
-		PayloadObjectRequired bool               `yaml:"payload_object_required"`
-		PayloadObjectError    string             `yaml:"payload_object_error"`
-		PayloadSource         string             `yaml:"payload_source"`
-		Secret                SecretManifest     `yaml:"secret"`
-		Signature             SignatureManifest  `yaml:"signature"`
-		Challenge             *ChallengeManifest `yaml:"challenge"`
-		DeliveryCondition     *ConditionManifest `yaml:"delivery_condition"`
-		DeliveryID            ValueSource        `yaml:"delivery_id"`
-		EventType             ValueSource        `yaml:"event_type"`
-		EventName             EventNameManifest  `yaml:"event_name"`
-		NormalizedEvents      []struct {
-			Event  string `yaml:"event"`
-			Fields map[string]struct {
-				From     string            `yaml:"from"`
-				Schema   map[string]any    `yaml:"schema"`
-				Optional bool              `yaml:"optional,omitempty"`
-				Convert  string            `yaml:"convert,omitempty"`
-				Values   map[string]string `yaml:"values,omitempty"`
-			} `yaml:"fields"`
-			When          NormalizedEventWhen   `yaml:"when,omitempty"`
-			AuthorSubject AuthorSubjectManifest `yaml:"author_subject,omitempty"`
-		} `yaml:"normalized_events,omitempty"`
-		Ack        AckManifest       `yaml:"ack"`
-		RedactKeys []string          `yaml:"redact_keys"`
-		Metadata   map[string]string `yaml:"metadata"`
-	}
-	root := snapshot.Document("trigger.yaml").Root()
-	if err := root.ValidateExpansion(); err != nil {
-		return Manifest{}, err
-	}
-	if err := root.ValidateUniqueMappings(); err != nil {
-		return Manifest{}, err
-	}
-	if err := admitManifestVocabulary(root, reflect.TypeOf(wire)); err != nil {
-		return Manifest{}, err
-	}
-	var schemas []map[string]runtimecontracts.ToolInputSchema
-	if outputs.Presence != yamlsource.PresenceMissing {
-		schemas, err = admitNormalizedEventSchemas(outputs.Value)
-		if err != nil {
-			return Manifest{}, err
-		}
-	}
-	decoder := yaml.NewDecoder(bytes.NewReader(body))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&wire); err != nil {
-		return Manifest{}, err
-	}
-	manifest := Manifest{
-		Provider: wire.Provider, PayloadObjectRequired: wire.PayloadObjectRequired, PayloadObjectError: wire.PayloadObjectError,
-		PayloadSource: wire.PayloadSource, Secret: wire.Secret, Signature: wire.Signature, Challenge: wire.Challenge,
-		DeliveryCondition: wire.DeliveryCondition, DeliveryID: wire.DeliveryID, EventType: wire.EventType, EventName: wire.EventName,
-		Ack: wire.Ack, RedactKeys: wire.RedactKeys, Metadata: wire.Metadata,
-	}
-	for index, row := range wire.NormalizedEvents {
-		entry := NormalizedEventManifest{Event: row.Event, Fields: map[string]NormalizedEventFieldProjection{}, When: row.When, AuthorSubject: row.AuthorSubject}
-		for name, field := range row.Fields {
-			schema := schemas[index][name]
-			entry.Fields[name] = NormalizedEventFieldProjection{From: field.From, Schema: schema, Optional: field.Optional, Convert: field.Convert, Values: field.Values}
-		}
-		manifest.NormalizedEvents = append(manifest.NormalizedEvents, entry)
-	}
-	return manifest, nil
+	return parseManifestAt(body, "trigger.yaml")
 }
 
-func admitNormalizedEventSchemas(value yamlsource.Value) ([]map[string]runtimecontracts.ToolInputSchema, error) {
-	if err := value.ValidateExpansion(); err != nil {
-		return nil, err
-	}
-	items, err := value.Sequence()
-	if err != nil {
-		return nil, err
-	}
-	out := make([]map[string]runtimecontracts.ToolInputSchema, len(items))
-	for i, item := range items {
-		out[i], err = admitNormalizedEventFieldSchemas(item)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return out, nil
-}
-
-func admitNormalizedEventFieldSchemas(item yamlsource.Value) (map[string]runtimecontracts.ToolInputSchema, error) {
-	fields, err := item.Lookup("fields")
-	if err != nil {
-		return nil, err
-	}
-	members, err := fields.Value.Mapping()
-	if err != nil {
-		return nil, err
-	}
-	admitted := map[string]runtimecontracts.ToolInputSchema{}
-	for _, member := range members {
-		child, err := member.Value.Lookup("schema")
-		if err != nil {
-			return nil, err
-		}
-		schema, err := runtimecontracts.AdmitToolInputSchemaValue(child.Value)
-		if err != nil {
-			return nil, err
-		}
-		admitted[member.Name] = schema
-	}
-	return admitted, nil
-}
-
-func (m Manifest) Validate() error {
+func (m manifestDefinition) validate() error {
 	provider := NormalizeProviderName(m.Provider)
 	if provider == "" {
 		return fmt.Errorf("provider is required")
@@ -818,7 +682,7 @@ func (m Manifest) Validate() error {
 		return fmt.Errorf("provider trigger manifest %q declares signature.type %q with secret.required false; signed request authentication requires secret.required true", provider, signatureType)
 	}
 	switch strings.TrimSpace(m.PayloadSource) {
-	case "", "payload", "form":
+	case "", "form":
 	default:
 		return fmt.Errorf("%s manifest has unsupported payload_source %q", provider, m.PayloadSource)
 	}
@@ -913,7 +777,7 @@ func (m Manifest) Validate() error {
 		return fmt.Errorf("%s manifest event_name template is reserved for grandfathered GitHub/Slack compatibility", provider)
 	}
 	switch strings.TrimSpace(m.Ack.Mode) {
-	case "", "after_publish", "durable_before_dispatch":
+	case "", "durable_before_dispatch":
 	default:
 		return fmt.Errorf("%s manifest has unsupported ack mode %q", provider, m.Ack.Mode)
 	}
@@ -941,7 +805,7 @@ type manifestAdmission struct {
 	response   *Response
 }
 
-func (m Manifest) Accept(req Request) (Delivery, error) {
+func (m manifestDefinition) Accept(req Request) (Delivery, error) {
 	admitted, err := m.admitRequest(req)
 	if err != nil {
 		return Delivery{}, err
@@ -949,7 +813,7 @@ func (m Manifest) Accept(req Request) (Delivery, error) {
 	return m.projectAdmission(admitted)
 }
 
-func (m Manifest) admitRequest(req Request) (manifestAdmission, error) {
+func (m manifestDefinition) admitRequest(req Request) (manifestAdmission, error) {
 	provider := NormalizeProviderName(m.Provider)
 	secret := strings.TrimSpace(req.Target.WebhookSecret)
 	if m.Secret.Required && secret == "" {
@@ -1004,7 +868,7 @@ func (m Manifest) admitRequest(req Request) (manifestAdmission, error) {
 	return manifestAdmission{request: req, provider: provider, deliveryID: strings.TrimSpace(deliveryID), eventType: eventType}, nil
 }
 
-func (m Manifest) projectAdmission(admitted manifestAdmission) (Delivery, error) {
+func (m manifestDefinition) projectAdmission(admitted manifestAdmission) (Delivery, error) {
 	if admitted.response != nil {
 		return Delivery{Response: admitted.response}, nil
 	}
@@ -1031,11 +895,7 @@ func (m Manifest) projectAdmission(admitted manifestAdmission) (Delivery, error)
 	}, nil
 }
 
-func (m Manifest) EventCatalogEntries() map[string]runtimecontracts.EventCatalogEntry {
-	return m.eventCatalogEntries()
-}
-
-func (m Manifest) verifySignature(secret string, req Request) error {
+func (m manifestDefinition) verifySignature(secret string, req Request) error {
 	if strings.TrimSpace(secret) == "" {
 		return unauthorized(NormalizeProviderName(m.Provider) + " webhook signing secret is required")
 	}
@@ -1104,7 +964,7 @@ func (m Manifest) verifySignature(secret string, req Request) error {
 	return unauthorized(firstNonEmpty(m.Signature.InvalidError, "invalid signature"))
 }
 
-func (m Manifest) verifyTokenEquality(secret string, req Request) error {
+func (m manifestDefinition) verifyTokenEquality(secret string, req Request) error {
 	values := req.Headers.Values(m.Signature.Header)
 	if len(values) == 0 || strings.TrimSpace(values[0]) == "" {
 		return unauthorized(firstNonEmpty(m.Signature.MissingError, "signature is required"))
@@ -1242,7 +1102,7 @@ func (s ValueSource) Resolve(req Request) (string, bool) {
 	return "", false
 }
 
-func (m Manifest) resolveEventName(eventType string) string {
+func (m manifestDefinition) resolveEventName(eventType string) string {
 	if name := strings.TrimSpace(m.EventName.Literal); name != "" {
 		return name
 	}
@@ -1251,7 +1111,7 @@ func (m Manifest) resolveEventName(eventType string) string {
 	return name
 }
 
-func (m Manifest) buildPublishPayload(provider, entityID, deliveryID, eventType string, req Request) map[string]any {
+func (m manifestDefinition) buildPublishPayload(provider, entityID, deliveryID, eventType string, req Request) map[string]any {
 	rawPayload := redactPayload(req.Payload, m.RedactKeys)
 	if strings.TrimSpace(m.PayloadSource) == "form" {
 		rawPayload = redactPayload(formValuesPayload(req.Form), m.RedactKeys)

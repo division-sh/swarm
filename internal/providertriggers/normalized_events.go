@@ -39,6 +39,8 @@ type NormalizedEventFieldProjection struct {
 	Optional bool                             `yaml:"optional,omitempty" json:"optional,omitempty"`
 	Convert  string                           `yaml:"convert,omitempty" json:"convert,omitempty"`
 	Values   map[string]string                `yaml:"values,omitempty" json:"values,omitempty"`
+	Pattern  string                           `yaml:"-" json:"pattern,omitempty"`
+	pattern  *regexp.Regexp
 }
 
 func (p NormalizedEventFieldProjection) normalized() NormalizedEventFieldProjection {
@@ -61,9 +63,7 @@ type NormalizedEventWhen struct {
 }
 
 const normalizedFieldConvertTextEnumMap = "text_enum_map"
-const normalizedFieldConvertTelegramCommand = "telegram_command"
-
-var telegramCommandPattern = regexp.MustCompile(`^/([A-Za-z0-9_]{1,32})(?:@([A-Za-z0-9_]{5,32}))?$`)
+const normalizedFieldConvertPattern = "pattern"
 
 type OutputManifest struct {
 	Kind          OutputKind
@@ -86,7 +86,7 @@ func (e NormalizationError) Error() string {
 
 var normalizedFieldNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-func (m Manifest) OutputManifest() []OutputManifest {
+func (m manifestDefinition) OutputManifest() []OutputManifest {
 	out := []OutputManifest{{Kind: OutputKindRaw, EventName: m.EventName}}
 	for _, item := range m.NormalizedEvents {
 		fields := make(map[string]NormalizedEventFieldProjection, len(item.Fields))
@@ -101,7 +101,7 @@ func (m Manifest) OutputManifest() []OutputManifest {
 	return out
 }
 
-func (m Manifest) validateNormalizedEvents() error {
+func (m manifestDefinition) validateNormalizedEvents() error {
 	provider := NormalizeProviderName(m.Provider)
 	seen := map[string]struct{}{}
 	branches := make([]OutputManifest, 0, len(m.NormalizedEvents))
@@ -193,9 +193,9 @@ func (m Manifest) validateNormalizedEvents() error {
 						return fmt.Errorf("%s normalized event %q field %q conversion text_enum_map value %q violates its declared output schema: %w", provider, eventName, name, output, err)
 					}
 				}
-			case normalizedFieldConvertTelegramCommand:
-				if provider != "telegram" || len(field.Values) != 0 || field.Schema.Kind() != runtimecontracts.ToolSchemaObject || !field.Optional {
-					return fmt.Errorf("%s normalized event %q field %q telegram_command requires optional Telegram object output without values", provider, eventName, name)
+			case normalizedFieldConvertPattern:
+				if field.pattern == nil || len(field.Values) != 0 || field.Schema.Kind() != runtimecontracts.ToolSchemaObject {
+					return fmt.Errorf("%s normalized event %q field %q pattern requires a compiled pattern and object output without values", provider, eventName, name)
 				}
 			default:
 				return fmt.Errorf("%s normalized event %q field %q has unsupported conversion %q", provider, eventName, name, field.Convert)
@@ -220,6 +220,14 @@ func (m Manifest) validateNormalizedEvents() error {
 }
 
 func validateNormalizedWhen(provider, eventName string, declared NormalizedEventWhen, fields map[string]NormalizedEventFieldProjection) (NormalizedEventWhen, error) {
+	for path, text := range declared.Equals {
+		if err := validateTriggerRelativePath(path); err != nil {
+			return NormalizedEventWhen{}, fmt.Errorf("%s normalized event %q when.equals path: %w", provider, eventName, err)
+		}
+		if text == "" {
+			return NormalizedEventWhen{}, fmt.Errorf("%s normalized event %q when.equals[%q] must be non-empty", provider, eventName, path)
+		}
+	}
 	for path, values := range declared.OneOf {
 		if path == "" || strings.TrimSpace(path) != path {
 			return NormalizedEventWhen{}, fmt.Errorf("%s normalized event %q when.one_of path %q must be canonical non-empty text", provider, eventName, path)
@@ -274,11 +282,7 @@ func (w NormalizedEventWhen) normalized(fields map[string]NormalizedEventFieldPr
 	}
 	equals := make(map[string]string, len(w.Equals))
 	for path, value := range w.Equals {
-		path = strings.TrimSpace(path)
-		value = strings.TrimSpace(value)
-		if path != "" {
-			equals[path] = value
-		}
+		equals[path] = value
 	}
 	if len(equals) == 0 {
 		equals = nil
@@ -343,9 +347,9 @@ func pathIsSameOrDescendant(candidate, ancestor string) bool {
 	return candidate == ancestor || strings.HasPrefix(candidate, ancestor+".")
 }
 
-func (m Manifest) normalizedDeliveryEvents(payload any) ([]DeliveryEvent, error) {
+func (m manifestDefinition) normalizedDeliveryEvents(payload any) ([]DeliveryEvent, error) {
 	var matched []OutputManifest
-	for _, output := range m.OutputManifest() {
+	for _, output := range m.outputs {
 		if output.Kind != OutputKindNormalized || !normalizedWhenMatches(payload, output.When) {
 			continue
 		}
@@ -382,7 +386,7 @@ func (m Manifest) normalizedDeliveryEvents(payload any) ([]DeliveryEvent, error)
 		if err != nil {
 			return nil, NormalizationError{Event: output.Event, Path: field.From, Cause: err.Error()}
 		}
-		if field.Optional && field.Convert == normalizedFieldConvertTelegramCommand && converted == nil {
+		if field.Optional && field.Convert == normalizedFieldConvertPattern && converted == nil {
 			continue
 		}
 		normalized[name] = converted
@@ -471,20 +475,11 @@ func normalizeProjectedValue(value any, field NormalizedEventFieldProjection) (a
 		if !found {
 			return nil, fmt.Errorf("text_enum_map has no mapping for %q", text)
 		}
-	} else if field.Convert == normalizedFieldConvertTelegramCommand {
-		text, ok := value.(string)
-		if !ok {
-			return nil, fmt.Errorf("telegram_command requires text, got %T", value)
-		}
-		matches := telegramCommandPattern.FindStringSubmatch(text)
-		if matches == nil {
+	} else if field.Convert == normalizedFieldConvertPattern {
+		normalized, err = projectPattern(value, field)
+		if err == nil && normalized == nil && field.Optional {
 			return nil, nil
 		}
-		command := map[string]any{"reference": matches[1]}
-		if matches[2] != "" {
-			command["address"] = matches[2]
-		}
-		normalized = command
 	} else {
 		normalized = value
 	}
@@ -499,6 +494,30 @@ func normalizeProjectedValue(value any, field NormalizedEventFieldProjection) (a
 		return nil, fmt.Errorf("projected value violates its declared output schema: %w", err)
 	}
 	return normalized, nil
+}
+
+func projectPattern(value any, field NormalizedEventFieldProjection) (any, error) {
+	text, ok := value.(string)
+	if !ok {
+		return nil, fmt.Errorf("pattern requires text, got %T", value)
+	}
+	if field.pattern == nil {
+		return nil, fmt.Errorf("pattern has not been admitted")
+	}
+	indexes := field.pattern.FindStringSubmatchIndex(text)
+	if indexes == nil {
+		if field.Optional {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("required value does not match pattern")
+	}
+	out := map[string]any{}
+	for i, name := range field.pattern.SubexpNames() {
+		if name != "" && indexes[2*i] >= 0 {
+			out[name] = text[indexes[2*i]:indexes[2*i+1]]
+		}
+	}
+	return out, nil
 }
 
 func cloneTextMap(in map[string]string) map[string]string {
@@ -545,25 +564,26 @@ func exactNumberText(value any) (string, error) {
 	}
 }
 
-func (m Manifest) eventCatalogEntries() map[string]runtimecontracts.EventCatalogEntry {
+func (m manifestDefinition) eventCatalogEntries() map[string]runtimecontracts.EventCatalogEntry {
 	out := map[string]runtimecontracts.EventCatalogEntry{}
 	if literal := strings.TrimSpace(m.EventName.Literal); literal != "" {
 		out[literal] = RawEventCatalogEntry()
 	}
-	for _, normalized := range m.NormalizedEvents {
+	for _, normalized := range m.outputs {
+		if normalized.Kind != OutputKindNormalized {
+			continue
+		}
 		entry := runtimecontracts.EventCatalogEntry{
 			Payload: runtimecontracts.EventPayloadSpec{Type: "object", Properties: map[string]runtimecontracts.EventFieldSpec{}},
 		}
 		for name, projection := range normalized.Fields {
-			projection = projection.normalized()
-			name = strings.TrimSpace(name)
 			entry.Payload.Properties[name] = normalizedEventFieldSpec(projection.Schema)
 			if !projection.Optional {
-				entry.Payload.Required = append(entry.Payload.Required, strings.TrimSpace(name))
+				entry.Payload.Required = append(entry.Payload.Required, name)
 			}
 		}
 		sort.Strings(entry.Payload.Required)
-		out[strings.TrimSpace(normalized.Event)] = entry
+		out[normalized.Event] = entry
 	}
 	return out
 }

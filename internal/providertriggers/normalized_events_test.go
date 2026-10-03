@@ -57,7 +57,7 @@ func TestCompiledPackPlanOwnsNormalizedOutputAuthorization(t *testing.T) {
 		ID: "provider.telegram", Version: "1.0.0",
 		ManifestHash: "sha256:" + strings.Repeat("c", 64), Provenance: "platform",
 	}
-	catalog, err := NewCatalogSnapshot(CatalogEntry{Manifest: manifest, Identity: identity, Source: "test"})
+	catalog, err := NewCatalogSnapshot(CatalogEntry{Manifest: manifest.mustAdmit(), Identity: identity, Source: "test"})
 	if err != nil {
 		t.Fatalf("NewCatalogSnapshot: %v", err)
 	}
@@ -166,7 +166,10 @@ func TestNormalizedEventPlanRejectsForcedRuntimeMultiMatch(t *testing.T) {
 			"text": {From: "message.text", Schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string"))},
 		},
 	})
-	_, err := manifest.Accept(Request{
+	// Exercise the runtime guard with an intentionally corrupted private plan.
+	definition := manifestDefinition(manifest)
+	definition.outputs = definition.OutputManifest()
+	_, err := definition.Accept(Request{
 		Target: Target{EntityID: "entity-1"},
 		Payload: map[string]any{
 			"update_id": json.Number("123"),
@@ -184,7 +187,7 @@ func TestAdmittedSemanticDigestRetainsRedactedConsumedValues(t *testing.T) {
 	manifest := normalizedEventTestManifest()
 	manifest.RedactKeys = []string{"text"}
 	catalog, err := NewCatalogSnapshot(CatalogEntry{
-		Manifest: manifest,
+		Manifest: manifest.mustAdmit(),
 		Identity: PackIdentity{
 			ID: "provider.telegram", Version: "1.0.0",
 			ManifestHash: "sha256:" + strings.Repeat("c", 64), Provenance: "platform",
@@ -287,7 +290,7 @@ func TestNormalizedEventManifestRejectsNonCanonicalFieldNames(t *testing.T) {
 	manifest.NormalizedEvents[0].Fields[" text "] = manifest.NormalizedEvents[0].Fields["text"]
 	delete(manifest.NormalizedEvents[0].Fields, "text")
 	err := manifest.Validate()
-	if err == nil || !strings.Contains(err.Error(), "field name") || !strings.Contains(err.Error(), "not canonical") {
+	if err == nil || !strings.Contains(err.Error(), "invalid normalized field name") {
 		t.Fatalf("Validate error = %v, want non-canonical field-name rejection", err)
 	}
 }
@@ -310,7 +313,7 @@ func TestNormalizedEventPlanRejectsCompositeSchemaMismatchesWithPackProvenance(t
 			field.Optional = false
 			manifest.NormalizedEvents[0].Fields["raw"] = field
 			entry := CatalogEntry{
-				Manifest: manifest,
+				Manifest: manifest.mustAdmit(),
 				Identity: PackIdentity{
 					ID: "provider.telegram", Version: "1.0.0",
 					ManifestHash: "sha256:" + strings.Repeat("a", 64), Provenance: "platform",
@@ -349,21 +352,10 @@ func TestNormalizedEventPlanRejectsCompositeSchemaMismatchesWithPackProvenance(t
 }
 
 func TestNormalizedEventManifestRejectsMissingOutputSchemaWithPackProvenance(t *testing.T) {
-	manifest := normalizedEventTestManifest()
-	field := manifest.NormalizedEvents[0].Fields["text"]
-	field.Schema = runtimecontracts.ToolInputSchema{}
-	manifest.NormalizedEvents[0].Fields["text"] = field
-	_, err := NewCatalogSnapshot(CatalogEntry{
-		Manifest: manifest,
-		Identity: PackIdentity{
-			ID: "provider.telegram", Version: "1.0.0",
-			ManifestHash: "sha256:" + strings.Repeat("b", 64), Provenance: "platform",
-		},
-		Source: "test",
-	})
-	for _, want := range []string{"provider.telegram", "version=1.0.0", "manifest_hash=sha256:", "schema is missing"} {
+	_, err := ParseManifest([]byte("provider: telegram\nevent_name: {literal: inbound.telegram}\nnormalized_events:\n  - event: inbound.telegram.text_message\n    fields:\n      text: {from: message.text}\n"))
+	for _, want := range []string{"trigger.yaml", "normalized_events", "schema"} {
 		if err == nil || !strings.Contains(err.Error(), want) {
-			t.Fatalf("NewCatalogSnapshot error = %v, want %q", err, want)
+			t.Fatalf("BODY admission error = %v, want %q", err, want)
 		}
 	}
 }
@@ -373,7 +365,7 @@ func TestNormalizedEventManifestRejectsImplicitAndUnknownConversions(t *testing.
 	field := manifest.NormalizedEvents[0].Fields["chat_id"]
 	field.Convert = "stringify"
 	manifest.NormalizedEvents[0].Fields["chat_id"] = field
-	if err := manifest.Validate(); err == nil || !strings.Contains(err.Error(), "unsupported conversion") {
+	if err := manifest.Validate(); err == nil || !strings.Contains(err.Error(), "want one of number_to_text, text_enum_map") {
 		t.Fatalf("Validate error = %v, want closed conversion rejection", err)
 	}
 
@@ -460,13 +452,13 @@ func TestNormalizedEventFiniteSemanticsFailClosedAtAdmission(t *testing.T) {
 		want  string
 	}{
 		{name: "values without conversion", field: NormalizedEventFieldProjection{From: "message.chat.type", Schema: stringSchema, Values: map[string]string{"private": "direct"}}, want: "values require convert"},
-		{name: "number conversion values", field: NormalizedEventFieldProjection{From: "message.chat.id", Schema: stringSchema, Convert: runtimecontracts.FieldProjectionConvertNumberToText, Values: map[string]string{"1": "one"}}, want: "number_to_text forbids values"},
+		{name: "number conversion values", field: NormalizedEventFieldProjection{From: "message.chat.id", Schema: stringSchema, Convert: runtimecontracts.FieldProjectionConvertNumberToText, Values: map[string]string{"1": "one"}}, want: "values require convert"},
 		{name: "map missing values", field: NormalizedEventFieldProjection{From: "message.chat.type", Schema: stringSchema, Convert: normalizedFieldConvertTextEnumMap}, want: "requires values"},
 		{name: "map non-string output", field: NormalizedEventFieldProjection{From: "message.chat.type", Schema: integerSchema, Convert: normalizedFieldConvertTextEnumMap, Values: map[string]string{"private": "direct"}}, want: "requires a string output schema"},
 		{name: "map noncanonical input", field: NormalizedEventFieldProjection{From: "message.chat.type", Schema: stringSchema, Convert: normalizedFieldConvertTextEnumMap, Values: map[string]string{" private": "direct"}}, want: "exact non-empty text"},
 		{name: "map noncanonical output", field: NormalizedEventFieldProjection{From: "message.chat.type", Schema: stringSchema, Convert: normalizedFieldConvertTextEnumMap, Values: map[string]string{"private": " direct"}}, want: "exact non-empty text"},
 		{name: "map output outside enum", field: NormalizedEventFieldProjection{From: "message.chat.type", Schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string"), runtimecontracts.ToolSchemaEnum("direct", "shared")), Convert: normalizedFieldConvertTextEnumMap, Values: map[string]string{"private": "private"}}, want: "invalid enum"},
-		{name: "one-of hostile path", field: NormalizedEventFieldProjection{From: "message.chat.type", Schema: stringSchema}, oneOf: map[string][]string{"$.message.chat.type": {"private"}}, want: "when.one_of path"},
+		{name: "one-of hostile path", field: NormalizedEventFieldProjection{From: "message.chat.type", Schema: stringSchema}, oneOf: map[string][]string{"$.message.chat.type": {"private"}}, want: "must not use JSONPath syntax"},
 		{name: "one-of empty", field: NormalizedEventFieldProjection{From: "message.chat.type", Schema: stringSchema}, oneOf: map[string][]string{"message.chat.type": nil}, want: "requires at least one value"},
 		{name: "one-of noncanonical", field: NormalizedEventFieldProjection{From: "message.chat.type", Schema: stringSchema}, oneOf: map[string][]string{"message.chat.type": {" private"}}, want: "exact non-empty text"},
 		{name: "one-of duplicate", field: NormalizedEventFieldProjection{From: "message.chat.type", Schema: stringSchema}, oneOf: map[string][]string{"message.chat.type": {"private", "private"}}, want: "duplicates value"},
@@ -490,7 +482,7 @@ func TestNormalizedEventFiniteSemanticsAreDeeplyImmutable(t *testing.T) {
 	}
 	manifest.NormalizedEvents[0].When.OneOf = map[string][]string{"message.chat.type": {"private"}}
 	catalog, err := NewCatalogSnapshot(CatalogEntry{
-		Manifest: manifest,
+		Manifest: manifest.mustAdmit(),
 		Identity: PackIdentity{ID: "provider.telegram", Version: "1.0.0", ManifestHash: "sha256:" + strings.Repeat("c", 64), Provenance: "platform"},
 		Source:   "test",
 	})
@@ -545,7 +537,7 @@ func TestNormalizedEventCatalogDerivesSchemaAndCapabilities(t *testing.T) {
 	if got := strings.Join(entry.Payload.Required, ","); got != "chat_id,message_id,text" {
 		t.Fatalf("required = %q", got)
 	}
-	capabilities := DerivedCapabilities(manifest)
+	capabilities := DerivedCapabilities(manifest.mustAdmit())
 	if got := strings.Join(capabilities.Can.EmitEvents, ","); got != "inbound.telegram,inbound.telegram.text_message" {
 		t.Fatalf("emit events = %q", got)
 	}
@@ -617,7 +609,7 @@ additionalProperties:
 	}
 
 	entry := CatalogEntry{
-		Manifest: manifest,
+		Manifest: manifest.mustAdmit(),
 		Identity: PackIdentity{ID: "provider.telegram", Version: "1.0.0", ManifestHash: "sha256:" + strings.Repeat("c", 64), Provenance: "platform"},
 		Source:   "test",
 	}
@@ -695,8 +687,8 @@ func normalizedEventEnumText(t *testing.T, schema runtimecontracts.ToolInputSche
 	return value
 }
 
-func normalizedEventTestManifest() Manifest {
-	return Manifest{
+func normalizedEventTestManifest() triggerFixture {
+	return triggerFixture{
 		Provider:              "telegram",
 		PayloadObjectRequired: true,
 		DeliveryID:            ValueSource{Literal: "delivery-1", Required: true},
