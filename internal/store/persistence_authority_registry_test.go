@@ -152,6 +152,73 @@ func CommitSemanticEventWithInitialFacts(selected Carrier) { _, _ = selected.Beg
 	}
 }
 
+func retiredRunFixtureMutationBridges(file *ast.File) []string {
+	var retired []string
+	for _, decl := range file.Decls {
+		function, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		switch function.Name.Name {
+		case "RunPostgresMutation", "RunSQLiteMutation", "runMutationWithOwner",
+			"PostgresRequireActiveRunInMutation", "PostgresRequireActiveRunSourceInMutation",
+			"PostgresRequestCompletionCandidateInMutation", "PostgresTransitionActiveRunInMutation",
+			"PostgresMarkTerminalRunInMutation", "RevisePostgresSource", "ReviseSQLiteSource", "reviseSource":
+			retired = append(retired, function.Name.Name)
+		}
+		if function.Recv != nil && function.Name.Name == "ReviseSource" {
+			retired = append(retired, function.Name.Name)
+		}
+		if function.Name.IsExported() && function.Type.Params != nil {
+			for _, param := range function.Type.Params.List {
+				ast.Inspect(param.Type, func(node ast.Node) bool {
+					if _, callback := node.(*ast.FuncType); callback {
+						retired = append(retired, function.Name.Name+":transaction-callback")
+					}
+					return true
+				})
+			}
+		}
+	}
+	return retired
+}
+
+func TestRetiredRunFixtureMutationBridgesRemainAbsent(t *testing.T) {
+	path := filepath.Join(persistenceAuthorityRepoRoot(t), "internal/testutil/runlifecyclefixture/fixture.go")
+	file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.AllErrors)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored := retiredRunFixtureMutationBridges(file); len(restored) != 0 {
+		t.Fatalf("retired shared run mutation bridges were restored: %v", restored)
+	}
+}
+
+func TestRunMutationBridgeGuardRejectsRestoration(t *testing.T) {
+	for name, source := range map[string]string{
+		"source-revision": `package fixture
+func ReviseSQLiteSource() {}
+`,
+		"sql-interpreter": `package fixture
+type sqlMutation struct{}
+func (sqlMutation) ReviseSource() {}
+`,
+		"renamed-callback": `package fixture
+func ApplyFixture(fn func()) {}
+`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			file, err := parser.ParseFile(token.NewFileSet(), "fixture.go", source, parser.AllErrors)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(retiredRunFixtureMutationBridges(file)) == 0 {
+				t.Fatal("restored raw mutation bridge escaped the retired-capability guard")
+			}
+		})
+	}
+}
+
 func TestPersistenceAuthorityRegistryRejectsHostileResolvedTypes(t *testing.T) {
 	fixtures := map[string]string{
 		"postgres-field": `package fixture
