@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimechannelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
 	runtimechanneldelivery "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimechannelnative "github.com/division-sh/swarm/internal/runtime/channelnative"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -335,6 +336,10 @@ func (d *serveChannelDeliveryDispatcher) acknowledgeChannelAction(ctx context.Co
 	if compiled.OnboardingOperationID == "" {
 		return fmt.Errorf("channel callback compiled activation is absent")
 	}
+	ctx, err = withChannelProviderAdmission(ctx, lease, compiled.Plan)
+	if err != nil {
+		return err
+	}
 	input, err := channelAcknowledgmentInput(compiled.Plan, pending.Fact.InteractionRef)
 	if err != nil {
 		return err
@@ -376,7 +381,7 @@ func (d *serveChannelDeliveryDispatcher) acknowledgeChannelAction(ctx context.Co
 	effectCtx = runtimeeffects.WithController(effectCtx, runtimeeffects.NewController(d.effects).WithExecutionPosture(d.posture))
 	effectCtx = runtimeeffects.WithAuthority(effectCtx, authority)
 	effectCtx = runtimeauthoractivity.WithScope(effectCtx, runtimeauthoractivity.BundleScope(d.runtimeInstanceID, selected.Coordinate.BundleHash))
-	_, err = (runtimeregistration.HTTPExecutor{Client: d.httpClient}).AcknowledgeChannelAction(
+	_, err = channelCredentialHTTPExecutor(d.httpClient, d.credentials, compiled.Plan, selected.CredentialAdmissions, tool).AcknowledgeChannelAction(
 		effectCtx, toolID, tool, input, credentials, map[string]string{"publication_id": pending.PublicationID},
 	)
 	return err
@@ -408,7 +413,7 @@ func (d *serveChannelDeliveryDispatcher) dispatchEdit(ctx context.Context, candi
 	return d.dispatchChannel(ctx, candidate, prepared, "edit", previous.DeliveryReference)
 }
 
-func (d *serveChannelDeliveryDispatcher) currentCompiledDelivery(ctx context.Context, candidate runtimechanneldelivery.Candidate) (channelonboarding.ConnectedChannelActivation, packs.OutboundBindingPlan, func(), error) {
+func (d *serveChannelDeliveryDispatcher) currentCompiledDelivery(ctx context.Context, candidate runtimechanneldelivery.Candidate) (channelonboarding.ConnectedChannelActivation, packs.OutboundBindingPlan, *runtimechannelactivation.Lease, error) {
 	if d == nil || d.store == nil || d.activations == nil || d.manager == nil {
 		return channelonboarding.ConnectedChannelActivation{}, packs.OutboundBindingPlan{}, nil, fmt.Errorf("channel delivery binding owners are unavailable")
 	}
@@ -471,15 +476,15 @@ func (d *serveChannelDeliveryDispatcher) currentCompiledDelivery(ctx context.Con
 		lease.Release()
 		return channelonboarding.ConnectedChannelActivation{}, packs.OutboundBindingPlan{}, nil, fmt.Errorf("channel delivery compiled activation is absent")
 	}
-	return selected, compiled.Plan, lease.Release, nil
+	return selected, compiled.Plan, lease, nil
 }
 
 func (d *serveChannelDeliveryDispatcher) selectedPresentationBounds(ctx context.Context, candidate runtimechanneldelivery.Candidate) (packs.PresentationBounds, error) {
-	_, plan, release, err := d.currentCompiledDelivery(ctx, candidate)
+	_, plan, lease, err := d.currentCompiledDelivery(ctx, candidate)
 	if err != nil {
 		return packs.PresentationBounds{}, err
 	}
-	defer release()
+	defer lease.Release()
 	return plan.PresentationBounds()
 }
 
@@ -504,11 +509,15 @@ func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, ca
 	if err := validateChannelDispatch(candidate, prepared, operation, previousReference); err != nil {
 		return err
 	}
-	selected, plan, release, err := d.currentCompiledDelivery(ctx, candidate)
+	selected, plan, lease, err := d.currentCompiledDelivery(ctx, candidate)
 	if err != nil {
 		return err
 	}
-	defer release()
+	defer lease.Release()
+	ctx, err = withChannelProviderAdmission(ctx, lease, plan)
+	if err != nil {
+		return err
+	}
 	if err := d.reconcileNativeInboxActivation(ctx, selected); err != nil {
 		return fmt.Errorf("channel delivery recovery entry is unavailable: %w", err)
 	}
@@ -584,7 +593,7 @@ func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, ca
 	effectCtx = runtimeeffects.WithController(effectCtx, runtimeeffects.NewController(d.effects).WithExecutionPosture(d.posture))
 	effectCtx = runtimeeffects.WithAuthority(effectCtx, authority)
 	effectCtx = runtimeauthoractivity.WithScope(effectCtx, runtimeauthoractivity.BundleScope(d.runtimeInstanceID, selected.Coordinate.BundleHash))
-	_, err = (runtimeregistration.HTTPExecutor{Client: d.httpClient}).DeliverChannelMessage(
+	_, err = channelCredentialHTTPExecutor(d.httpClient, d.credentials, plan, selected.CredentialAdmissions, tool).DeliverChannelMessage(
 		effectCtx, toolID, tool, input, credentials,
 		map[string]string{"delivery_id": candidate.DeliveryID, "render_id": prepared.RenderID}, projection.Project,
 	)
@@ -597,6 +606,9 @@ func resolveChannelDeliveryCredentials(ctx context.Context, owner *runtimecreden
 	}
 	keys := plan.CredentialStoreKeys()
 	byRole := make(map[string]channelonboarding.CredentialAdmission, len(admissions))
+	projection := owner.BeginSecretBindingProjection()
+	observations := make(map[string]runtimecredentials.AdmittedSnapshot, len(admissions))
+	allCurrent := true
 	for _, admission := range admissions {
 		if err := admission.Validate(); err != nil {
 			return nil, err
@@ -604,7 +616,23 @@ func resolveChannelDeliveryCredentials(ctx context.Context, owner *runtimecreden
 		if _, duplicate := byRole[admission.Role]; duplicate {
 			return nil, fmt.Errorf("duplicate channel delivery credential role %q", admission.Role)
 		}
+		if admission.StoreKey != keys[admission.Role] {
+			return nil, fmt.Errorf("channel delivery credential role %q contradicts its compiled key", admission.Role)
+		}
 		byRole[admission.Role] = admission
+		observed, current, err := projection.ObserveAdmittedActivationCredential(ctx,
+			runtimecredentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal}, admission.Receipt)
+		if err != nil {
+			return nil, err
+		}
+		allCurrent = allCurrent && current
+		observations[admission.Role] = observed
+	}
+	if !allCurrent {
+		return nil, fmt.Errorf("channel activation credential admission is no longer current")
+	}
+	if err := projection.ValidateCurrent(ctx); err != nil {
+		return nil, err
 	}
 	credentials := make(map[string]any, len(tool.Credentials()))
 	for _, logical := range tool.Credentials() {
@@ -612,14 +640,30 @@ func resolveChannelDeliveryCredentials(ctx context.Context, owner *runtimecreden
 		if !admitted || admission.StoreKey == "" || admission.StoreKey != keys[logical] {
 			return nil, fmt.Errorf("channel delivery credential role %q is not admitted", logical)
 		}
-		observed, current, err := owner.ObserveValueMatchingSeal(ctx, runtimecredentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal})
-		if err != nil {
-			return nil, err
-		}
-		if !current || !observed.Present || strings.TrimSpace(observed.CredentialValue()) == "" {
-			return nil, fmt.Errorf("channel delivery credential role %q is unavailable", logical)
-		}
-		credentials[logical] = observed.CredentialValue()
+		credentials[logical] = observations[logical].CredentialValue()
 	}
 	return credentials, nil
+}
+
+func channelCredentialHTTPExecutor(client *http.Client, owner *runtimecredentials.SnapshotOwner, plan packs.OutboundBindingPlan, admissions []channelonboarding.CredentialAdmission, tool runtimecontracts.ToolSchemaEntry) runtimeregistration.HTTPExecutor {
+	return runtimeregistration.HTTPExecutor{Client: client, Preflight: func(ctx context.Context) error {
+		if lease, admitted := runtimechannelactivation.ExecutionLeaseFromContext(ctx); admitted {
+			if err := lease.ValidateAdmission(ctx); err != nil {
+				return err
+			}
+		}
+		_, err := resolveChannelDeliveryCredentials(ctx, owner, plan, admissions, tool)
+		return err
+	}}
+}
+
+func withChannelProviderAdmission(ctx context.Context, lease *runtimechannelactivation.Lease, plan packs.OutboundBindingPlan) (context.Context, error) {
+	operation, admitted := lease.BorrowRuntimeOperation(plan.RuntimeToolID("deliver"))
+	if !admitted {
+		return nil, fmt.Errorf("channel provider work requires its exact activation lease")
+	}
+	if err := operation.ValidateAdmission(ctx); err != nil {
+		return nil, err
+	}
+	return runtimechannelactivation.WithExecutionLease(ctx, operation), nil
 }

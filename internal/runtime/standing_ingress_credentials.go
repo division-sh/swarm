@@ -203,7 +203,17 @@ func (rt *Runtime) observeStandingCredentials(ctx context.Context) (*standingCre
 			for _, role := range roles {
 				key := keys[role]
 				result.credentialKeys = append(result.credentialKeys, key)
-				observed, err := admission.projection.ObserveActivationCredential(ctx, key)
+				var observed runtimecredentials.AdmittedSnapshot
+				if credential, present := sealed[role]; present {
+					var current bool
+					observed, current, err = admission.projection.ObserveAdmittedActivationCredential(ctx,
+						runtimecredentials.ValueEvidence{Key: key, Seal: credential.ValueSeal}, credential.Receipt)
+					if err == nil && !current {
+						result.enabled, result.blockReason = false, runtimerunlifecycle.StandingBindingRecoveryRequired
+					}
+				} else {
+					observed, err = admission.projection.ObserveActivationCredential(ctx, key)
+				}
 				if err != nil {
 					return nil, fmt.Errorf("%s %s credential %q: %w", declaration.SourcePath, selector, key, err)
 				}
@@ -213,28 +223,6 @@ func (rt *Runtime) observeStandingCredentials(ctx context.Context) (*standingCre
 						result.blockReason = runtimerunlifecycle.StandingBindingCredentialsAbsent
 					}
 					result.missing = append(result.missing, key)
-				}
-				if credential, present := sealed[role]; present {
-					current, err := owner.CurrentValueMatchesSeal(ctx, runtimecredentials.ValueEvidence{Key: key, Seal: credential.ValueSeal})
-					if err != nil {
-						return nil, err
-					}
-					if !current {
-						result.enabled, result.blockReason = false, runtimerunlifecycle.StandingBindingRecoveryRequired
-					}
-					if credential.Kind == channelonboarding.CredentialAdmissionWritten {
-						observer, ok := rt.Options.ProviderCredentials.(runtimecredentials.ReceiptObserver)
-						if !ok {
-							return nil, fmt.Errorf("learned ingress %s requires exact credential receipt ownership", selector)
-						}
-						_, current, err := observer.ObserveReceipt(ctx, key, credential.Receipt)
-						if err != nil {
-							return nil, fmt.Errorf("learned ingress %s credential receipt observation: %w", selector, err)
-						}
-						if !current {
-							result.enabled, result.blockReason = false, runtimerunlifecycle.StandingBindingRecoveryRequired
-						}
-					}
 				}
 				if role == signingRole {
 					result.signingKey = key

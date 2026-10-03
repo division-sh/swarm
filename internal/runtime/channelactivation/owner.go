@@ -24,6 +24,7 @@ type snapshot struct {
 	activities  map[string]Operation
 	tools       map[string]runtimecontracts.ToolSchemaEntry
 	leases      int
+	admit       func(context.Context, channelonboarding.ChannelActivationPublication) error
 }
 
 // Lease pins one exact executable activation snapshot until the caller has
@@ -153,6 +154,33 @@ func (l *Lease) Activations() []channelonboarding.CompiledActivation {
 	return l.snapshot.publication.Activations()
 }
 
+func (l *Lease) ValidateAdmission(ctx context.Context) error {
+	if !l.live() {
+		return fmt.Errorf("channel activation lease is no longer live")
+	}
+	if l.snapshot.admit != nil {
+		publication := l.snapshot.publication
+		if bindingID := l.operation.Binding.BindingID(); bindingID != "" {
+			selected := []channelonboarding.CompiledActivation{}
+			for _, activation := range publication.Activations() {
+				if activation.Plan.BindingID() == bindingID {
+					selected = append(selected, activation)
+				}
+			}
+			if len(selected) != 1 {
+				return fmt.Errorf("channel operation has no exact activation admission")
+			}
+			var err error
+			publication, err = channelonboarding.NewChannelActivationPublication(selected)
+			if err != nil {
+				return err
+			}
+		}
+		return l.snapshot.admit(ctx, publication)
+	}
+	return nil
+}
+
 func (l *Lease) Release() {
 	if l == nil {
 		return
@@ -216,6 +244,19 @@ func (o *Owner) Replace(publication channelonboarding.ChannelActivationPublicati
 }
 
 func (o *Owner) ReplaceContext(ctx context.Context, publication channelonboarding.ChannelActivationPublication) error {
+	return o.replaceContext(ctx, publication, nil)
+}
+
+// Deployment admission is rechecked after predecessor leases drain, immediately
+// before the complete publication changes. Structural compilation remains pure.
+func (o *Owner) ReplaceAdmittedContext(ctx context.Context, publication channelonboarding.ChannelActivationPublication, admit func(context.Context, channelonboarding.ChannelActivationPublication) error) error {
+	if admit == nil {
+		return fmt.Errorf("channel activation deployment admission is required")
+	}
+	return o.replaceContext(ctx, publication, admit)
+}
+
+func (o *Owner) replaceContext(ctx context.Context, publication channelonboarding.ChannelActivationPublication, admit func(context.Context, channelonboarding.ChannelActivationPublication) error) error {
 	if o == nil {
 		return fmt.Errorf("channel activation owner is required")
 	}
@@ -226,6 +267,12 @@ func (o *Owner) ReplaceContext(ctx context.Context, publication channelonboardin
 	if err != nil {
 		return err
 	}
+	if admit != nil {
+		if err := admit(ctx, publication); err != nil {
+			return err
+		}
+	}
+	next.admit = admit
 
 	o.mu.Lock()
 	if o.changed == nil {
@@ -243,10 +290,18 @@ func (o *Owner) ReplaceContext(ctx context.Context, publication channelonboardin
 		o.changed.Wait()
 	}
 	if err := ctx.Err(); err != nil {
-		o.accepting = true
+		o.accepting = admit == nil || predecessor == nil || admit(context.WithoutCancel(ctx), predecessor.publication) == nil
 		o.changed.Broadcast()
 		o.mu.Unlock()
 		return fmt.Errorf("fence predecessor channel activations: %w", err)
+	}
+	if admit != nil {
+		if err := admit(ctx, publication); err != nil {
+			o.accepting = predecessor == nil || admit(context.WithoutCancel(ctx), predecessor.publication) == nil
+			o.changed.Broadcast()
+			o.mu.Unlock()
+			return err
+		}
 	}
 	o.current = next
 	o.accepting = true

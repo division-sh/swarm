@@ -341,7 +341,7 @@ func (rt *Runtime) ReplaceChannelActivationsContext(ctx context.Context, publica
 	if rt == nil || rt.ChannelActivations == nil {
 		return fmt.Errorf("runtime channel activation owner is unavailable")
 	}
-	return rt.ChannelActivations.ReplaceContext(ctx, publication)
+	return rt.ChannelActivations.ReplaceAdmittedContext(ctx, publication, rt.validateChannelActivationPublication)
 }
 
 // CurrentStartupGrantEvidence returns the exact generation authority currently
@@ -1264,6 +1264,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			FlowRoutes:                rt.Bus,
 			RunLifecycle:              runtimeDeps.EventBusDurable.RunLifecycle,
 			Credentials:               rt.Credentials,
+			ProviderCredentials:       rt.Options.ProviderCredentials,
 			ManagedCredentials:        rt.ManagedCredentials,
 			MockConnectorResponses:    boot.MockConnectorResponses,
 			ScenarioExecutionProfiles: runtimeDeps.ScenarioExecutionProfiles,

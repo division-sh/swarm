@@ -988,6 +988,10 @@ func (p OutboundBindingPlan) Registration() (CompiledChannelRegistration, bool) 
 	return p.structural.Registration()
 }
 
+func (p OutboundBindingPlan) OnboardingProfile() (CompiledChannelOnboardingProfile, bool) {
+	return p.structural.OnboardingProfile()
+}
+
 func (p OutboundBindingPlan) PlanGeneration() (plangeneration.Generation, error) {
 	return p.structural.Generation()
 }

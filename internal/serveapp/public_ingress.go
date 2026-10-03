@@ -16,6 +16,17 @@ import (
 	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
 )
 
+func serveRegistrationSelectionCurrent(ctx context.Context, store channelonboarding.Store, pair runtimepublicingress.RegistrationPair, exactPendingRevision bool) (bool, error) {
+	if pair.ActivationSource == channelonboarding.ActivationSourceDeclared {
+		return pair.OnboardingOperationID == "" && pair.ChannelActivationGeneration.Valid(), nil
+	}
+	return channelonboarding.AdmissionResponsibilityCurrent(ctx, store, channelonboarding.AdmissionResponsibility{
+		OperationID: pair.OnboardingOperationID, OperationRevision: pair.OnboardingRevision,
+		ActivationRevision: pair.ActivationRevision, Coordinate: pair.OnboardingCoordinate,
+		TargetSelector: pair.Target.Selector, Provider: pair.Target.Provider, Credentials: pair.CredentialAdmissions,
+	}, exactPendingRevision)
+}
+
 type serveRegistrationSelection struct {
 	Pairs  []runtimepublicingress.RegistrationPair
 	leases []*runtimechannelactivation.Lease
@@ -99,10 +110,12 @@ func resolveServeRegistrationPairs(snapshot serveChannelActivationSnapshot, mana
 			ActivationSource:            activation.Source,
 			OnboardingOperationID:       activation.OnboardingOperationID,
 			OnboardingRevision:          activation.OnboardingRevision,
+			ActivationRevision:          activation.ActivationRevision,
 			OnboardingCoordinate:        activation.Coordinate,
 			ChannelActivationGeneration: activationGenerations[activation.Coordinate.BundleHash+"\x00"+activation.Coordinate.RuntimeInstanceID+"\x00"+fmt.Sprint(activation.Coordinate.ContextPublicationGeneration)],
 			Registration:                registration,
 			CredentialKeys:              credentialKeys,
+			CredentialAdmissions:        append([]channelonboarding.CredentialAdmission(nil), activation.CredentialAdmissions...),
 			Target: runtimepublicingress.RegistrationTarget{
 				Selector: rawSelector, BundleHash: target.BundleHash, ServiceID: target.ServiceID,
 				FlowPath: target.FlowPath, Alias: target.Alias, Provider: target.Provider,
@@ -150,6 +163,7 @@ func resolveServePrebindingRegistrationPair(intent servePrebindingActivation) (r
 		OnboardingOperationID: intent.Operation.OperationID, PrebindingOperationID: intent.Operation.OperationID,
 		OnboardingRevision: intent.Operation.Revision, OnboardingCoordinate: intent.Operation.Coordinate,
 		Registration: registration, CredentialKeys: credentials,
+		CredentialAdmissions: append([]channelonboarding.CredentialAdmission(nil), intent.Operation.CredentialAdmissions...),
 		Target: runtimepublicingress.RegistrationTarget{
 			Selector: target.Selector, BundleHash: intent.Candidate.Coordinate.BundleHash, ServiceID: target.ServiceID,
 			FlowPath: target.FlowPath, Alias: target.Alias, Provider: target.Provider,

@@ -116,6 +116,42 @@ func TestChannelConfirmationEffectOutcomes(t *testing.T) {
 	})
 }
 
+func TestChannelProviderPreflightGuardsAuthorizationLaunchAndDispatch(t *testing.T) {
+	for _, boundary := range []struct {
+		name  string
+		check int
+	}{{"before_authorization", 1}, {"before_launch", 2}, {"after_launch", 3}} {
+		t.Run(boundary.name, func(t *testing.T) {
+			h := &channelConfirmationHarness{Harness: effecttest.New()}
+			checks, requests := 0, 0
+			refusal := errors.New("exact admitted credential changed")
+			executor := HTTPExecutor{Client: &http.Client{Transport: registrationRoundTripFunc(func(*http.Request) (*http.Response, error) {
+				requests++
+				return registrationResponse(http.StatusOK, `{"ok":true,"result":{"message_id":1}}`), nil
+			})}, Preflight: func(context.Context) error {
+				checks++
+				if checks == boundary.check {
+					return refusal
+				}
+				return nil
+			}}
+			tool := packfixture.ConnectorTool(t, "telegram", "telegram.send_interactive").Tool
+			_, err := executor.DeliverChannelConfirmation(channelConfirmationTestContext(h, uuid.NewString()), "telegram.send_interactive", tool,
+				map[string]any{"chat_id": "42", "text": "Confirmation", "reply_markup": map[string]any{"inline_keyboard": []any{}}}, map[string]any{"telegram_bot_token": "token"}, nil)
+			if !errors.Is(err, refusal) || requests != 0 || checks != boundary.check {
+				t.Fatalf("preflight bypass: checks=%d requests=%d error=%v", checks, requests, err)
+			}
+			if boundary.check == 1 {
+				if len(h.Attempts) != 0 {
+					t.Fatal("failed admission authorized an effect")
+				}
+			} else if err := h.RequireState("channel_confirmation", runtimeeffects.StateTerminalFailure); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 type channelDeliveryHarness struct{ *effecttest.Harness }
 
 func (h *channelDeliveryHarness) IsExternalEffectAuthorityCurrent(_ context.Context, authority runtimeeffects.Authority) (bool, error) {
