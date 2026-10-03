@@ -32,7 +32,7 @@ func ReadByRun(ctx context.Context, q queryRower, postgres bool, runID string) (
 	query := `
 		SELECT ss.service_id, ss.flow_path, ss.instance_id, ss.entity_id,
 		       ss.current_run_id, ss.current_generation,
-		       ss.declaration_present, ss.effective_state, ss.operator_override,
+		       ss.declaration_present, ss.binding_enabled, ss.effective_state, ss.operator_override,
 		       COALESCE(r.status, ''), COALESCE(r.origin_kind, ''),
 		       COALESCE(r.origin_service_id, ''), COALESCE(r.origin_generation, 0),
 		       (SELECT COUNT(*) FROM standing_services owners WHERE owners.current_run_id = ?),
@@ -50,7 +50,7 @@ func ReadByRun(ctx context.Context, q queryRower, postgres bool, runID string) (
 		query = `
 			SELECT ss.service_id::text, ss.flow_path, ss.instance_id, ss.entity_id::text,
 			       ss.current_run_id::text, ss.current_generation,
-			       ss.declaration_present, ss.effective_state, ss.operator_override,
+			       ss.declaration_present, ss.binding_enabled, ss.effective_state, ss.operator_override,
 			       COALESCE(r.status, ''), COALESCE(r.origin_kind, ''),
 			       COALESCE(r.origin_service_id::text, ''), COALESCE(r.origin_generation, 0),
 			       (SELECT COUNT(*) FROM standing_services owners WHERE owners.current_run_id = $1::uuid),
@@ -71,7 +71,7 @@ func ReadByRun(ctx context.Context, q queryRower, postgres bool, runID string) (
 	var owners, generationRelations int
 	err := q.QueryRowContext(ctx, query, args...).Scan(
 		&fact.ServiceID, &flowPath, &instanceID, &entityID,
-		&fact.RunID, &fact.Generation, &fact.DeclarationPresent,
+		&fact.RunID, &fact.Generation, &fact.DeclarationPresent, &fact.BindingEnabled,
 		&fact.EffectiveState, &fact.OperatorOverride, &fact.RunState,
 		&originKind, &originServiceID, &originGeneration, &owners, &generationRelations,
 	)

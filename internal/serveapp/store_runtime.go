@@ -3,6 +3,7 @@ package serveapp
 import (
 	"context"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -20,12 +21,13 @@ type serveRuntimePersistence struct {
 	sourceReader interface {
 		GetSourceArtifact(context.Context, string) (sourceartifact.Persisted, error)
 	}
-	data durabledata.ResourceAccessStore
+	data              durabledata.ResourceAccessStore
+	channelOnboarding channelonboarding.Store
 }
 
 func projectServeRuntimePersistence(owner *storeselected.Owner) serveRuntimePersistence {
 	return serveRuntimePersistence{
-		deps: owner.RuntimeDeps(), schema: owner.Schema(), sourceWriter: owner.SourceArtifactWriter(), sourceReader: owner.SourceArtifactStore(), data: owner.DataAccess(),
+		deps: owner.RuntimeDeps(), schema: owner.Schema(), sourceWriter: owner.SourceArtifactWriter(), sourceReader: owner.SourceArtifactStore(), data: owner.DataAccess(), channelOnboarding: owner.ChannelOnboarding(),
 	}
 }
 

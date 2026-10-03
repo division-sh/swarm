@@ -96,6 +96,10 @@ type TriggerEventFieldDescriptor struct {
 }
 
 type TriggerAdmission struct {
+	BindingEnabled        *bool                `json:"binding_enabled,omitempty"`
+	BindingBlockReason    string               `json:"binding_block_reason,omitempty"`
+	RecoveryOperationID   string               `json:"recovery_operation_id,omitempty"`
+	RecoveryCommand       string               `json:"recovery_command,omitempty"`
 	BundleHash            string               `json:"bundle_hash"`
 	Alias                 string               `json:"alias"`
 	CatalogGeneration     string               `json:"catalog_generation"`
@@ -329,6 +333,10 @@ func CloneSubjects(subjects []Subject) []Subject {
 		}
 		if subject.TriggerAdmission != nil {
 			admission := *subject.TriggerAdmission
+			if admission.BindingEnabled != nil {
+				value := *admission.BindingEnabled
+				admission.BindingEnabled = &value
+			}
 			if subject.TriggerAdmission.Pack != nil {
 				identity := *subject.TriggerAdmission.Pack
 				admission.Pack = &identity
@@ -523,6 +531,20 @@ func normalizeProviderTriggerSubject(subject *Subject) (SubjectStatus, error) {
 			return "", fmt.Errorf("effective provider trigger subject %q requires typed trigger_admission", subject.ID)
 		}
 		admission := subject.TriggerAdmission
+		if admission.BindingBlockReason != "" {
+			if admission.BindingEnabled == nil || *admission.BindingEnabled {
+				return "", fmt.Errorf("effective provider trigger subject %q has a blocked enabled binding", subject.ID)
+			}
+			if admission.BindingBlockReason != "credentials_absent" && admission.BindingBlockReason != "recovery_required" {
+				return "", fmt.Errorf("effective provider trigger subject %q has invalid binding_block_reason %q", subject.ID, admission.BindingBlockReason)
+			}
+		}
+		if (admission.BindingBlockReason == "recovery_required") != (admission.RecoveryOperationID != "") {
+			return "", fmt.Errorf("effective provider trigger subject %q has contradictory recovery operation evidence", subject.ID)
+		}
+		if (admission.BindingBlockReason == "recovery_required") != (admission.RecoveryCommand != "") {
+			return "", fmt.Errorf("effective provider trigger subject %q has contradictory recovery command evidence", subject.ID)
+		}
 		admission.BundleHash = strings.TrimSpace(admission.BundleHash)
 		admission.Alias = strings.Trim(strings.TrimSpace(admission.Alias), "/")
 		admission.CatalogGeneration = strings.TrimSpace(admission.CatalogGeneration)
@@ -588,6 +610,9 @@ func normalizeProviderTriggerSubject(subject *Subject) (SubjectStatus, error) {
 			return "", fmt.Errorf("effective authenticated provider trigger subject %q must carry exactly one target secret requirement", subject.ID)
 		}
 		if unauthenticated {
+			if subject.TriggerAdmission.BindingEnabled != nil && !*subject.TriggerAdmission.BindingEnabled {
+				return StatusNotReady, nil
+			}
 			return StatusReady, nil
 		}
 		requirement := subject.Requirements[0]
@@ -595,12 +620,15 @@ func normalizeProviderTriggerSubject(subject *Subject) (SubjectStatus, error) {
 			return "", fmt.Errorf("effective authenticated provider trigger subject %q requirement %q must be a secret", subject.ID, requirement.Name)
 		}
 		if requirement.Satisfied == nil && requirement.Status == "" && requirement.Remediation == "" && requirement.Source == "" {
+			if subject.TriggerAdmission.BindingEnabled != nil && !*subject.TriggerAdmission.BindingEnabled {
+				return StatusNotReady, nil
+			}
 			return StatusAvailable, nil
 		}
 		if err := validateTriggerRequirement(subject.ID, requirement); err != nil {
 			return "", err
 		}
-		if *requirement.Satisfied {
+		if *requirement.Satisfied && (subject.TriggerAdmission.BindingEnabled == nil || *subject.TriggerAdmission.BindingEnabled) {
 			return StatusReady, nil
 		}
 		return StatusNotReady, nil
@@ -670,6 +698,12 @@ func RenderSubject(subject Subject, verbose bool) string {
 	}
 	if subject.TriggerAdmission != nil {
 		admission := subject.TriggerAdmission
+		if admission.BindingBlockReason != "" {
+			parts = append(parts, "binding_block_reason="+admission.BindingBlockReason)
+		}
+		if admission.RecoveryOperationID != "" {
+			parts = append(parts, "recover: "+admission.RecoveryCommand+" with fresh credentials and complete the required ceremony")
+		}
 		parts = append(parts,
 			"alias="+admission.Alias,
 			"policy_source="+admission.PolicySource,
@@ -746,6 +780,10 @@ func RenderEffectiveTriggerReadiness(subject Subject) string {
 	parts := []string{userfacing.ProjectHumanCode(userfacing.HumanCodeProviderSubjectStatus, string(subject.Status))}
 	authentication := subject.TriggerAdmission.RequestAuthentication
 	parts = append(parts, authentication)
+	if subject.TriggerAdmission.BindingBlockReason == "recovery_required" {
+		parts = append(parts, "recovery required", "fix: "+subject.TriggerAdmission.RecoveryCommand+" with fresh credentials and complete the required ceremony")
+		return strings.Join(parts, " · ")
+	}
 	if authentication == "UNAUTHENTICATED" {
 		return strings.Join(parts, " · ")
 	}

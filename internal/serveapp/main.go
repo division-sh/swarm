@@ -549,6 +549,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 		NoticePresentation:               req.NoticePresentation,
 		ChannelPlans:                     req.ChannelPlans,
 		DeclaredChannelPublication:       declaredChannelPublication,
+		ChannelOnboardingStore:           req.Stores.channelOnboarding,
 		ScenarioDeclarations:             scenarioDeclarations,
 		BootStartedAt:                    req.BootStartedAt,
 		BootProgress:                     req.BootProgress,
@@ -1470,6 +1471,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	channelActivationRefresher := &serveChannelActivationRefresher{
 		manager: runtimeContextManager, store: channelOnboardingStore, identities: operatorChannels,
 		credentials: providerCredentialOwner, ingress: ready,
+		testBarrier: opts.TestChannelOnboardingBarrier,
 	}
 	if !publicIngressEnabled {
 		channelActivationRefresher.preflight = func(_ context.Context, intent servePrebindingActivation) error {
@@ -1702,6 +1704,14 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			presenter.fail(22, "channel_onboarding", err)
 			return 1
 		}
+	}
+	for _, contextDef := range runtimeContexts {
+		dormant, err := contextDef.runtime.IneligibleStandingIngress()
+		if err != nil {
+			presenter.fail(22, "standing_ingress", err)
+			return 1
+		}
+		presenter.recordIneligibleIngress(dormant)
 	}
 	initialRegistrationPairs := []runtimepublicingress.RegistrationPair{}
 	if publicIngressEnabled {
@@ -2162,7 +2172,12 @@ func (c *serveStandingServiceController) mutateStandingService(ctx context.Conte
 	if owner == nil || owner.Pipeline == nil {
 		return runtimepipeline.StandingServiceReconciliation{}, fmt.Errorf("standing service %s selected runtime pipeline is unavailable", strings.TrimSpace(operation.ServiceID))
 	}
-	candidate := runtimepipeline.StandingServiceCandidate{
+	if command == "resume" || command == "reset" {
+		if err := owner.ValidateStandingIngressCredentials(ctx); err != nil {
+			return result, fmt.Errorf("standing service %s cannot use stale ingress admission: %w", operation.ServiceID, err)
+		}
+	}
+	candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 		ServiceID: target.ServiceID, FlowPath: target.FlowPath, InstanceID: target.InstanceID,
 		EntityID: target.EntityID, Source: use.Context.SourceArtifactFact,
 	}
@@ -2350,6 +2365,10 @@ func reportServeStandingReadiness(ctx context.Context, owner standingServiceStat
 		case runtimerunlifecycle.StandingRestartSuspended:
 			if out != nil {
 				fmt.Fprintf(out, "standing service %s suspended by=%s at=%s reason=%s resume=`swarm standing resume %s`\n", status.ServiceID, status.OverrideActor, status.OverrideAt.Format(time.RFC3339), status.OverrideReason, status.ServiceID)
+			}
+		case runtimerunlifecycle.StandingRestartCredentialDormant, runtimerunlifecycle.StandingRestartRecoveryRequired:
+			if out != nil {
+				fmt.Fprintf(out, "standing service %s %s declaration_present=true binding_enabled=false run=%s generation=%d override=%s remediation=%s\n", status.ServiceID, status.RestartDisposition.Kind, status.RunID, status.Generation, status.RestartDisposition.OperatorOverride, status.RestartDisposition.RunControlGuidance())
 			}
 		case runtimerunlifecycle.StandingRestartOrphaned:
 			if out != nil {

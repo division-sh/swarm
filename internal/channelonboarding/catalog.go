@@ -24,11 +24,21 @@ type CandidateTarget struct {
 }
 
 func (t CandidateTarget) Validate() error {
+	if err := t.ValidateDeclaration(); err != nil {
+		return err
+	}
+	if t.Generation == 0 || t.PublicationSequence < 1 {
+		return fmt.Errorf("channel onboarding target has no admitted executable generation")
+	}
+	return nil
+}
+
+func (t CandidateTarget) ValidateDeclaration() error {
 	parsed, err := packs.ParseChannelRegistrationTarget(t.Selector)
 	if err != nil {
 		return fmt.Errorf("channel onboarding target selector %q: %w", strings.TrimSpace(t.Selector), err)
 	}
-	if strings.TrimSpace(t.ServiceID) == "" || strings.TrimSpace(t.FlowPath) != parsed.FlowPath || strings.TrimSpace(t.Provider) != parsed.Provider || strings.TrimSpace(t.Alias) == "" || t.Generation == 0 || t.PublicationSequence < 1 || !t.AdmissionGeneration.Valid() {
+	if strings.TrimSpace(t.ServiceID) == "" || strings.TrimSpace(t.FlowPath) != parsed.FlowPath || strings.TrimSpace(t.Provider) != parsed.Provider || strings.TrimSpace(t.Alias) == "" || !t.AdmissionGeneration.Valid() || t.PublicationSequence < 0 || (t.Generation == 0) != (t.PublicationSequence == 0) {
 		return fmt.Errorf("channel onboarding target contradicts its exact selector")
 	}
 	return nil
@@ -50,13 +60,26 @@ type Candidate struct {
 }
 
 func (c Candidate) Validate() error {
+	if err := c.ValidateDeclaration(); err != nil {
+		return err
+	}
+	if err := c.Coordinate.Validate(); err != nil {
+		return err
+	}
+	if c.Posture == ActivationWebhookRegistration {
+		return c.Target.Validate()
+	}
+	return nil
+}
+
+func (c Candidate) ValidateDeclaration() error {
 	if strings.TrimSpace(c.Provider) == "" || strings.TrimSpace(c.ProviderCredentialRole) == "" || strings.TrimSpace(c.ConfirmationOperation) == "" {
 		return fmt.Errorf("channel onboarding candidate requires provider, credential role, and confirmation operation")
 	}
 	if err := c.Interface.Validate(); err != nil {
 		return err
 	}
-	if err := c.Coordinate.Validate(); err != nil {
+	if err := c.Coordinate.ValidateContext(); err != nil {
 		return err
 	}
 	if !c.Posture.Valid() || !c.Ceremony.Valid() {
@@ -67,7 +90,10 @@ func (c Candidate) Validate() error {
 		if strings.TrimSpace(c.SigningCredentialRole) == "" || strings.TrimSpace(c.ConnectionHealth) != "" {
 			return fmt.Errorf("webhook channel onboarding candidate requires signing credential and forbids connection health")
 		}
-		if err := c.Target.Validate(); err != nil {
+		if c.Target.Generation != c.Coordinate.TargetGeneration {
+			return fmt.Errorf("channel onboarding declaration contradicts its admitted target generation")
+		}
+		if err := c.Target.ValidateDeclaration(); err != nil {
 			return err
 		}
 	case ActivationSessionConnection:
@@ -93,7 +119,7 @@ func NewCandidateCatalog(candidates []Candidate) (*CandidateCatalog, error) {
 	projected := append([]Candidate(nil), candidates...)
 	seen := map[string]struct{}{}
 	for _, candidate := range projected {
-		if err := candidate.Validate(); err != nil {
+		if err := candidate.ValidateDeclaration(); err != nil {
 			return nil, err
 		}
 		key := candidate.Coordinate.BundleHash + "\x00" + candidate.Interface.Key() + "\x00" + candidate.Target.Selector

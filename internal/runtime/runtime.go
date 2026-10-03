@@ -97,6 +97,7 @@ type RuntimeOptions struct {
 	NoticePresentation               runtimetools.InformationalNoticePresentationSink
 	ChannelPlans                     []packs.SatisfactionPlan
 	DeclaredChannelPublication       channelonboarding.ChannelActivationPublication
+	ChannelOnboardingStore           channelonboarding.Store
 	ChannelActivationPublication     channelonboarding.ChannelActivationPublication
 	ScenarioDeclarations             []scenarioderivation.Declaration
 	BootStartedAt                    time.Time
@@ -228,39 +229,41 @@ type BootProgressEvent struct {
 }
 
 type Runtime struct {
-	generationMu               sync.Mutex
-	lifecycleMu                sync.Mutex
-	startupPrepareMu           sync.Mutex
-	startCtx                   context.Context
-	cancelStart                context.CancelFunc
-	startupGrant               runtimestartupownership.LiveGenerationGrant
-	fanOutServing              *runtimestartupownership.FanOutServingRegistration
-	fanOutContext              context.Context
-	startupLifecyclePrepared   bool
-	replacementQuiesced        bool
-	workOccurrence             *worklifetime.RuntimeOccurrence
-	runLifecycleExecutor       *runtimerunlifecycle.Executor
-	runLifecycleRegistration   runtimerunlifecycle.CandidateRegistration
-	deliveryContinuations      *runtimedeliverycontinuation.Coordinator
-	deliverySignalRegistration *runtimepipeline.DeliveryContinuationSignalRegistration
-	startupAdmission           managedexecution.Admission
-	shutdownGate               shutdownAdmission
-	payloadAdmitter            runtimebus.PayloadAdmitter
-	authorActivityDescriptors  []runtimeauthoractivity.EventDescriptor
-	authorActivityScope        runtimeauthoractivity.Scope
-	authorActivityLeases       []*runtimeauthoractivity.EventCatalogLease
-	authorActivityRegistrars   []AuthorActivityCatalogRegistrar
-	eventPayloadBinder         EventPayloadAdmissionBinder
-	inboundPayloadBinder       EventPayloadAdmissionBinder
-	runLifecycleCandidates     runtimerunlifecycle.CandidateOwner
-	deliveryStore              runtimedelivery.Store
-	timerObligationReader      runtimetimerobligation.Reader
-	standingRestartReader      runtimerunlifecycle.StandingRestartDispositionReader
-	mailboxStore               runtimetools.MailboxPersistence
-	effectsStore               runtimeeffects.Store
-	managedCapabilitiesStore   managedcapabilities.Persistence
-	EffectiveSourceIdentity    scenarioexecution.EffectiveSourceIdentity
-	ScenarioProfileCatalog     *scenarioexecution.Catalog
+	standingCredentialMu        sync.Mutex
+	standingCredentialAdmission *standingCredentialAdmission
+	generationMu                sync.Mutex
+	lifecycleMu                 sync.Mutex
+	startupPrepareMu            sync.Mutex
+	startCtx                    context.Context
+	cancelStart                 context.CancelFunc
+	startupGrant                runtimestartupownership.LiveGenerationGrant
+	fanOutServing               *runtimestartupownership.FanOutServingRegistration
+	fanOutContext               context.Context
+	startupLifecyclePrepared    bool
+	replacementQuiesced         bool
+	workOccurrence              *worklifetime.RuntimeOccurrence
+	runLifecycleExecutor        *runtimerunlifecycle.Executor
+	runLifecycleRegistration    runtimerunlifecycle.CandidateRegistration
+	deliveryContinuations       *runtimedeliverycontinuation.Coordinator
+	deliverySignalRegistration  *runtimepipeline.DeliveryContinuationSignalRegistration
+	startupAdmission            managedexecution.Admission
+	shutdownGate                shutdownAdmission
+	payloadAdmitter             runtimebus.PayloadAdmitter
+	authorActivityDescriptors   []runtimeauthoractivity.EventDescriptor
+	authorActivityScope         runtimeauthoractivity.Scope
+	authorActivityLeases        []*runtimeauthoractivity.EventCatalogLease
+	authorActivityRegistrars    []AuthorActivityCatalogRegistrar
+	eventPayloadBinder          EventPayloadAdmissionBinder
+	inboundPayloadBinder        EventPayloadAdmissionBinder
+	runLifecycleCandidates      runtimerunlifecycle.CandidateOwner
+	deliveryStore               runtimedelivery.Store
+	timerObligationReader       runtimetimerobligation.Reader
+	standingRestartReader       runtimerunlifecycle.StandingRestartDispositionReader
+	mailboxStore                runtimetools.MailboxPersistence
+	effectsStore                runtimeeffects.Store
+	managedCapabilitiesStore    managedcapabilities.Persistence
+	EffectiveSourceIdentity     scenarioexecution.EffectiveSourceIdentity
+	ScenarioProfileCatalog      *scenarioexecution.Catalog
 
 	Config             *config.Config
 	ExecutionPosture   executionposture.Posture

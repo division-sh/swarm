@@ -332,7 +332,7 @@ func newCompleteEventDispatchFixtureWithOrigin(
 			ReceiverExecution:       eventreceiver.NormalExecution(),
 		})
 
-		reconciled, err := workflow.ReconcileStandingService(ctx, runtimepipeline.StandingServiceCandidate{
+		reconciled, err := workflow.ReconcileStandingService(ctx, runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 			ServiceID:  origin.ServiceID(),
 			FlowPath:   backend,
 			InstanceID: uuid.NewString(),

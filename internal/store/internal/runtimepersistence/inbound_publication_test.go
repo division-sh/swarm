@@ -22,6 +22,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -164,6 +165,67 @@ func TestInboundEvidencePersistsTypedNoSubscriberByDesign(t *testing.T) {
 	})
 }
 
+func TestInboundPublicationRefusesCredentialIneligibleStandingBeforeDurableCommitBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, reason := range []runtimerunlifecycle.StandingBindingBlockReason{
+			runtimerunlifecycle.StandingBindingCredentialsAbsent, runtimerunlifecycle.StandingBindingRecoveryRequired,
+		} {
+			t.Run(backend+"/"+string(reason), func(t *testing.T) {
+				f := openStandingDispositionParityFixture(t, backend)
+				store, ok := f.selected.(inboundPublicationProofStore)
+				if !ok {
+					t.Fatalf("selected store %T has no inbound publication owner", f.selected)
+				}
+				candidate := f.candidate("credential-ineligible-inbound")
+				ctx := runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContextForBundle(candidate.Source.BundleHash()), candidate.Source)
+				registrar := store.(testAuthorActivityCatalogRegistrar)
+				registerTestAuthorActivityCatalogForContext(t, registrar, ctx)
+				standing, err := f.workflow.ReconcileStandingService(ctx, candidate)
+				if err != nil {
+					t.Fatal(err)
+				}
+				sequence, err := f.workflow.PublishStandingService(ctx, standing.ServiceID, standing.RunID, standing.Generation)
+				if err != nil {
+					t.Fatal(err)
+				}
+				publish := func(request runtimeinbound.Request) (runtimeinbound.Record, error) {
+					return runInboundPublicationProofMutation(t, store, ctx, request, func(mutation inboundPublicationProofMutation) error {
+						publications, evidence := inboundPublicationProofEvents(t, request)
+						for index := range publications {
+							if err := commitInboundPublicationTestEvent(t, store, mutation, &publications[index]); err != nil {
+								return err
+							}
+						}
+						return mutation.FinalizeInboundPublication(mutation.Context(), runtimeinbound.Finalization{EvidenceEvent: evidence, Events: publications})
+					})
+				}
+				request := inboundPublicationProofRequest(t, candidate, standing.RunID, standing.Generation, sequence, "credential-enabled")
+				if record, err := publish(request); err != nil || !record.Created {
+					t.Fatalf("executable positive control = %#v, %v", record, err)
+				}
+				candidate.BindingEnabled, candidate.BindingBlockReason = false, reason
+				blocked, err := f.workflow.ReconcileStandingService(ctx, candidate)
+				if err != nil {
+					t.Fatal(err)
+				}
+				request = inboundPublicationProofRequest(t, candidate, standing.RunID, standing.Generation, sequence, "credential-ineligible")
+				if _, err := publish(request); err == nil || !strings.Contains(err.Error(), string(blocked.RestartDisposition.Kind)) {
+					t.Fatalf("ineligible inbound reached durable commit: %v", err)
+				}
+				assertInboundPublicationProofCount(t, f.db, backend == "sqlite", `SELECT COUNT(*) FROM inbound_publications WHERE provider_event_id = `, request.ProviderEventID, 0)
+				publications, _ := inboundPublicationProofEvents(t, request)
+				for ordinal := range publications {
+					id, err := runtimeinbound.DeterministicEventID(request.PublicationID, ordinal)
+					if err != nil {
+						t.Fatal(err)
+					}
+					assertInboundPublicationProofCount(t, f.db, backend == "sqlite", `SELECT COUNT(*) FROM events WHERE event_id = `, id, 0)
+				}
+			})
+		}
+	}
+}
+
 func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, store inboundPublicationProofStore, workflowStore *runtimepipeline.PipelineCoordinator) {
 	t.Helper()
 	artifact := storeTestSourceArtifact("inbound-publication-proof")
@@ -171,7 +233,7 @@ func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, 
 	serviceID := runtimeflowidentity.StandingServiceID(flowPath)
 	instanceID := uuid.NewString()
 	entityID := uuid.NewString()
-	candidate := runtimepipeline.StandingServiceCandidate{
+	candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 		ServiceID: serviceID, FlowPath: flowPath, InstanceID: instanceID, EntityID: entityID,
 		Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()),
 	}
