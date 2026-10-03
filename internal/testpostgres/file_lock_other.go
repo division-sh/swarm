@@ -8,4 +8,8 @@ func acquireFileLock(path string, nonblocking bool) (*fileLock, bool, error) {
 	return nil, false, fmt.Errorf("Postgres test service locks are unsupported on this platform")
 }
 
+func acquireExistingFileLock(path string, nonblocking bool) (*fileLock, bool, error) {
+	return acquireFileLock(path, nonblocking)
+}
+
 func (l *fileLock) Close() error { return nil }

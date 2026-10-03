@@ -150,6 +150,15 @@ func TestServiceCloseTimeoutRetainsDescendantAuthorityForReconciliation(t *testi
 }
 
 func TestSwarmTestDockerRunnersQueueBeforeSecondProvision(t *testing.T) {
+	for _, capacity := range []int{1, 2} {
+		t.Run(fmt.Sprintf("capacity_%d", capacity), func(t *testing.T) {
+			proveDockerRunnerAdmission(t, capacity)
+		})
+	}
+}
+
+func proveDockerRunnerAdmission(t *testing.T, capacity int) {
+	t.Helper()
 	if os.Getenv(RunWrapperEnv) == "1" {
 		t.Skip("wrapper-of-wrapper Docker proof runs only from the unwrapped semantic-smoke topology")
 	}
@@ -185,12 +194,33 @@ func TestSwarmTestDockerRunnersQueueBeforeSecondProvision(t *testing.T) {
 	done := make([]chan error, 0, len(prefixes))
 	finished := make([]bool, len(prefixes))
 	logPaths := make([]string, 0, len(prefixes))
+	defer func() {
+		for _, prefix := range prefixes {
+			_ = os.WriteFile(prefix+".release", []byte("release\n"), 0o600)
+		}
+		for index, command := range commands {
+			if !finished[index] {
+				select {
+				case <-done[index]:
+				case <-time.After(5 * time.Second):
+					_ = command.Process.Kill()
+					<-done[index]
+				}
+			}
+		}
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := registry.Reconcile(cleanupCtx); err != nil {
+			t.Errorf("runner cleanup: %v", err)
+		}
+	}()
 	for index, prefix := range prefixes {
 		command := exec.Command(runner, "--", "./internal/testpostgres", "-run", "^TestRunCapacityFromEnvironment$", "-count=1")
 		command.Env = append(withoutPostgresConnectionEnv(os.Environ()),
 			"PATH="+root+string(os.PathListSeparator)+os.Getenv("PATH"),
 			"XDG_STATE_HOME="+stateHome,
 			"SWARM_TEST_PROCESS_PREFIX="+prefix,
+			RunCapacityEnv+"="+strconv.Itoa(capacity),
 		)
 		logPath := filepath.Join(root, fmt.Sprintf("runner-%d.log", index))
 		logPaths = append(logPaths, logPath)
@@ -207,7 +237,7 @@ func TestSwarmTestDockerRunnersQueueBeforeSecondProvision(t *testing.T) {
 		result := make(chan error, 1)
 		done = append(done, result)
 		go func() { result <- command.Wait() }()
-		if index == 0 {
+		if index == 0 || capacity > 1 {
 			waitForRunnerPath(t, prefix+".started", done[index], logPaths, 2*time.Minute)
 		} else {
 			waitForWaitingRuns(t, NewRunAdmission(stateRoot, nil), 1)
@@ -220,21 +250,27 @@ func TestSwarmTestDockerRunnersQueueBeforeSecondProvision(t *testing.T) {
 			}
 		}
 	}
-	defer func() {
-		for _, prefix := range prefixes {
-			_ = os.WriteFile(prefix+".release", []byte("release\n"), 0o600)
+	if capacity > 1 {
+		doc, err := registry.registrySnapshot()
+		if err != nil || len(doc.Services) != 2 {
+			t.Fatalf("parallel live services = %d err=%v, want two", len(doc.Services), err)
 		}
-		for index, command := range commands {
-			if !finished[index] {
-				select {
-				case <-done[index]:
-				case <-time.After(5 * time.Second):
-					_ = command.Process.Kill()
-				}
+		ids := map[string]bool{}
+		for _, record := range doc.Services {
+			if record.State != ServiceChildRunning || record.ContainerID == "" || ids[record.ContainerID] {
+				t.Fatalf("invalid independent service: %+v", record)
 			}
+			ids[record.ContainerID] = true
 		}
-		_ = registry.Reconcile(context.Background())
-	}()
+		first, err := os.ReadFile(prefixes[0] + ".dsn")
+		if err != nil {
+			t.Fatal(err)
+		}
+		second, err := os.ReadFile(prefixes[1] + ".dsn")
+		if err != nil || string(first) == string(second) {
+			t.Fatalf("parallel runners did not receive separate services: err=%v", err)
+		}
+	}
 	if err := os.WriteFile(prefixes[0]+".release", []byte("release\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +278,9 @@ func TestSwarmTestDockerRunnersQueueBeforeSecondProvision(t *testing.T) {
 		t.Fatalf("first runner: %v", err)
 	}
 	finished[0] = true
-	waitForRunnerPath(t, prefixes[1]+".started", done[1], logPaths, 2*time.Minute)
+	if capacity == 1 {
+		waitForRunnerPath(t, prefixes[1]+".started", done[1], logPaths, 2*time.Minute)
+	}
 	doc, err := registry.loadRegistry()
 	if err != nil || len(doc.Services) != 1 {
 		t.Fatalf("services after FIFO handoff = %d err=%v, want one", len(doc.Services), err)

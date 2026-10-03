@@ -118,7 +118,7 @@ func NewServiceRegistry(stateRoot, dockerBin string) *ServiceRegistry {
 	return &ServiceRegistry{StateRoot: stateRoot, DockerBin: dockerBin, docker: commandDocker{bin: dockerBin}}
 }
 
-func (r *ServiceRegistry) Provision(ctx context.Context, executable string) (*Service, error) {
+func (r *ServiceRegistry) Provision(ctx context.Context, executable string) (_ *Service, resultErr error) {
 	if err := validateCreatorProcessSupport(); err != nil {
 		return nil, err
 	}
@@ -165,9 +165,15 @@ func (r *ServiceRegistry) Provision(ctx context.Context, executable string) (*Se
 	cleanupOnError := true
 	defer func() {
 		if cleanupOnError {
-			_ = service.Close(context.Background())
+			resultErr = errors.Join(resultErr, service.Close(context.Background()))
 		}
 	}()
+	retainCreationFailure := func(primary error) error {
+		cleanupOnError = false
+		closeErr := service.lease.Close()
+		service.lease = nil
+		return errors.Join(primary, closeErr)
+	}
 	if err := r.putRecord(record); err != nil {
 		return nil, err
 	}
@@ -177,40 +183,31 @@ func (r *ServiceRegistry) Provision(ctx context.Context, executable string) (*Se
 	}
 	record.State = ServiceCreatorStarting
 	if err := r.putRecord(record); err != nil {
-		_ = creator.Close()
-		return nil, err
+		return nil, errors.Join(err, creator.Close())
 	}
 	cmd, err := creatorProcessCommand(executable, r.StateRoot, leaseID, creator)
 	if err != nil {
-		_ = creator.Close()
-		return nil, err
+		return nil, errors.Join(err, creator.Close())
 	}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
-		_ = creator.Close()
-		return nil, fmt.Errorf("start Postgres service creator: %w", err)
+		return nil, errors.Join(fmt.Errorf("start Postgres service creator: %w", err), creator.Close())
 	}
 	// Close only the runner's descriptor. Unlocking would also release the
 	// inherited flock held by the helper's shared open-file description.
-	_ = creator.File().Close()
+	dropErr := creator.File().Close()
 	waitErr := cmd.Wait()
 	record, err = r.record(leaseID)
 	if err != nil {
-		return nil, err
+		return nil, retainCreationFailure(errors.Join(err, waitErr, dropErr))
 	}
 	service.record = record
-	if waitErr != nil {
-		cleanupOnError = false
-		_ = service.lease.Close()
-		service.lease = nil
-		return nil, fmt.Errorf("Postgres service creator failed in state %q: %w", record.State, waitErr)
+	if err := errors.Join(waitErr, dropErr); err != nil {
+		return nil, retainCreationFailure(fmt.Errorf("Postgres service creator failed in state %q: %w", record.State, err))
 	}
 	if record.State != ServiceCreateSucceeded || record.ContainerID == "" {
-		cleanupOnError = false
-		_ = service.lease.Close()
-		service.lease = nil
-		return nil, fmt.Errorf("Postgres service creator ended in state %q: %s", record.State, record.CreateError)
+		return nil, retainCreationFailure(fmt.Errorf("Postgres service creator ended in state %q: %s", record.State, record.CreateError))
 	}
 	service.record = record
 	if err := r.transition(leaseID, ServiceStarting); err != nil {
@@ -247,7 +244,10 @@ func (r *ServiceRegistry) Provision(ctx context.Context, executable string) (*Se
 	if err := r.transition(leaseID, ServiceReady); err != nil {
 		return nil, err
 	}
-	record, _ = r.record(leaseID)
+	record, err = r.record(leaseID)
+	if err != nil {
+		return nil, err
+	}
 	service.record = record
 	service.Connection = connection
 	cleanupOnError = false
@@ -428,32 +428,44 @@ func (r *ServiceRegistry) Reconcile(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := validateManagedNamespace(&doc, candidates); err != nil {
+	if err := r.validateManagedNamespace(ctx, candidates); err != nil {
 		return err
 	}
 	if err := r.reconcileOrphanAuthority(doc); err != nil {
 		return err
 	}
-	leaseIDs := make([]string, 0, len(doc.Services))
+	worklist := make(map[string]bool, len(doc.Services)+len(candidates))
 	for leaseID := range doc.Services {
+		worklist[leaseID] = true
+	}
+	for leaseID := range candidates {
+		worklist[leaseID] = true
+	}
+	leaseIDs := make([]string, 0, len(worklist))
+	for leaseID := range worklist {
 		leaseIDs = append(leaseIDs, leaseID)
 	}
 	sort.Strings(leaseIDs)
 	for _, leaseID := range leaseIDs {
-		record := doc.Services[leaseID]
-		if err := validateServiceRecord(leaseID, record); err != nil {
-			return err
+		lease, acquired, err := acquireExistingFileLock(r.leasePath(leaseID), true)
+		if errors.Is(err, os.ErrNotExist) {
+			if _, rowErr := r.record(leaseID); errors.Is(rowErr, os.ErrNotExist) {
+				continue
+			} else if rowErr != nil {
+				return rowErr
+			}
 		}
-		lease, acquired, err := acquireFileLock(r.leasePath(leaseID), true)
 		if err != nil {
 			return err
 		}
 		if !acquired {
 			continue
 		}
-		record, err = r.record(leaseID)
+		record, err := r.record(leaseID)
 		if errors.Is(err, os.ErrNotExist) {
-			_ = lease.Close()
+			if err := errors.Join(lease.Close(), removeAuthorityFile(r.leasePath(leaseID), "retired service lease")); err != nil {
+				return err
+			}
 			continue
 		}
 		retired := false
@@ -461,11 +473,8 @@ func (r *ServiceRegistry) Reconcile(ctx context.Context) error {
 			retired, err = r.reconcileRecord(ctx, record, candidates[leaseID])
 		}
 		closeErr := lease.Close()
-		if err != nil {
+		if err := errors.Join(err, closeErr); err != nil {
 			return err
-		}
-		if closeErr != nil {
-			return closeErr
 		}
 		if retired {
 			if err := removeAuthorityFile(r.leasePath(leaseID), "service lease"); err != nil {
@@ -692,13 +701,11 @@ func (r *ServiceRegistry) inspectExactMaybe(ctx context.Context, record ServiceR
 		return dockerInspect{}, false, fmt.Errorf("decode Docker inspect for %s: %w", record.ContainerID, err)
 	}
 	got := values[0]
-	if got.ID != record.ContainerID || strings.TrimPrefix(got.Name, "/") != record.Name || got.Image != record.ImageID {
+	if got.ID != record.ContainerID {
 		return dockerInspect{}, false, fmt.Errorf("Postgres service %s identity mismatch; left untouched", record.ContainerID)
 	}
-	for key, want := range record.Labels {
-		if got.Config.Labels[key] != want {
-			return dockerInspect{}, false, fmt.Errorf("Postgres service %s label %s mismatch; left untouched", record.ContainerID, key)
-		}
+	if err := validateContainerConstructor(record, got); err != nil {
+		return dockerInspect{}, false, err
 	}
 	return got, true, nil
 }
@@ -1009,23 +1016,6 @@ func (r *ServiceRegistry) managedContainers(ctx context.Context) (map[string][]d
 		result[leaseID] = append(result[leaseID], got)
 	}
 	return result, nil
-}
-
-func validateManagedNamespace(doc *registryDocument, candidates map[string][]dockerInspect) error {
-	for leaseID, values := range candidates {
-		record, ok := doc.Services[leaseID]
-		if !ok {
-			return fmt.Errorf("managed Postgres service lease %s has no registry row; %d resource(s) left untouched", leaseID, len(values))
-		}
-		if len(values) != 1 {
-			return fmt.Errorf("managed Postgres service lease %s has %d candidates; all left untouched", leaseID, len(values))
-		}
-		got := values[0]
-		if record.ContainerID == "" || got.ID != record.ContainerID {
-			return fmt.Errorf("managed Postgres service lease %s does not match its registry container; left untouched", leaseID)
-		}
-	}
-	return nil
 }
 
 func validateServiceRecord(key string, record ServiceRecord) error {

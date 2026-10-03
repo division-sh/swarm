@@ -164,10 +164,11 @@ func runTestArgs(testArgs []string, output io.Writer, completion bool, workloadP
 		serviceErr, leaseErr := settle(success, nil)
 		if serviceErr != nil {
 			fmt.Fprintf(os.Stderr, "remove runner-owned Postgres: %v\n", serviceErr)
-			return 1
 		}
 		if leaseErr != nil {
 			fmt.Fprintf(os.Stderr, "release test slot: %v\n", leaseErr)
+		}
+		if serviceErr != nil || leaseErr != nil {
 			return 1
 		}
 		return 0
@@ -179,49 +180,40 @@ func runTestArgs(testArgs []string, output io.Writer, completion bool, workloadP
 		return receivedSignalExitCode(receivedSignal.Load())
 	}
 
-	connection, explicit, err := testpostgres.ConnectionFromEnvironmentIfSet()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		_, _ = settle(false, nil)
-		return 1
-	}
-	if !explicit {
-		registry, err := testpostgres.DefaultServiceRegistry()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			_, _ = settle(false, nil)
-			return 1
-		}
-		executable, err := os.Executable()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "resolve runner executable: %v\n", err)
-			_, _ = settle(false, nil)
-			return 1
-		}
-		provisionCtx, cancelProvision := context.WithTimeout(queueCtx, 3*time.Minute)
-		service, err = registry.Provision(provisionCtx, executable)
-		cancelProvision()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "provision runner-owned Postgres: %v\n", err)
-			_, _ = settle(false, nil)
-			return 1
-		}
-		connection = service.Connection
-	}
-
 	failBeforeStart := func(message string, err error) int {
 		serviceErr, leaseErr := settle(false, nil)
 		settlementErr := errors.Join(serviceErr, leaseErr)
 		if settlementErr != nil {
 			fmt.Fprintf(os.Stderr, "%s: %v (test settlement: %v)\n", message, err, settlementErr)
 			return 1
-		} else {
-			fmt.Fprintf(os.Stderr, "%s: %v\n", message, err)
 		}
+		fmt.Fprintf(os.Stderr, "%s: %v\n", message, err)
 		if value := receivedSignal.Load(); value != 0 {
 			return receivedSignalExitCode(value)
 		}
 		return 1
+	}
+
+	connection, explicit, err := testpostgres.ConnectionFromEnvironmentIfSet()
+	if err != nil {
+		return failBeforeStart("configure child Postgres connection", err)
+	}
+	if !explicit {
+		registry, err := testpostgres.DefaultServiceRegistry()
+		if err != nil {
+			return failBeforeStart("configure test service registry", err)
+		}
+		executable, err := os.Executable()
+		if err != nil {
+			return failBeforeStart("resolve runner executable", err)
+		}
+		provisionCtx, cancelProvision := context.WithTimeout(queueCtx, 3*time.Minute)
+		service, err = registry.Provision(provisionCtx, executable)
+		cancelProvision()
+		if err != nil {
+			return failBeforeStart("provision runner-owned Postgres", err)
+		}
+		connection = service.Connection
 	}
 
 	childEnv, err := testpostgres.ChildEnvironment(os.Environ(), connection)
@@ -276,10 +268,11 @@ func runTestArgs(testArgs []string, output io.Writer, completion bool, workloadP
 	})
 	if serviceErr != nil {
 		fmt.Fprintf(os.Stderr, "remove runner-owned Postgres: %v (child result: %v)\n", serviceErr, waitErr)
-		return 1
 	}
 	if leaseErr != nil {
 		fmt.Fprintf(os.Stderr, "release test slot: %v (child result: %v)\n", leaseErr, waitErr)
+	}
+	if serviceErr != nil || leaseErr != nil {
 		return 1
 	}
 	if value := receivedSignal.Load(); value != 0 {

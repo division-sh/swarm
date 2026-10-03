@@ -11,10 +11,22 @@ import (
 )
 
 func acquireFileLock(path string, nonblocking bool) (*fileLock, bool, error) {
+	return openFileLock(path, nonblocking, true)
+}
+
+func acquireExistingFileLock(path string, nonblocking bool) (*fileLock, bool, error) {
+	return openFileLock(path, nonblocking, false)
+}
+
+func openFileLock(path string, nonblocking, create bool) (*fileLock, bool, error) {
 	if err := validateExistingAuthorityFile(path); err != nil {
 		return nil, false, err
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	openFlags := os.O_RDWR
+	if create {
+		openFlags |= os.O_CREATE
+	}
+	file, err := os.OpenFile(path, openFlags, 0o600)
 	if err != nil {
 		return nil, false, fmt.Errorf("open lock %s: %w", path, err)
 	}
