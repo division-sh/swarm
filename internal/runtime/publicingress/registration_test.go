@@ -153,6 +153,7 @@ type telegramRegistrationTransport struct {
 	mu            sync.Mutex
 	applyCount    int
 	identifyCount int
+	readbackCount int
 	currentURLs   map[string]string
 	resourceIDs   map[string]int64
 	readbackURL   string
@@ -213,6 +214,7 @@ func (transport *telegramRegistrationTransport) RoundTrip(request *http.Request)
 		}
 		return registrationControllerResponse(http.StatusOK, `{"ok":true,"result":true}`), nil
 	case strings.HasSuffix(request.URL.Path, "/getWebhookInfo"):
+		transport.readbackCount++
 		if transport.readbackErr != nil {
 			return nil, transport.readbackErr
 		}
@@ -258,14 +260,21 @@ func TestProviderRegistrationRejectsUnusableCredentialsBeforeAnySideEffect(t *te
 					t.Fatal(err)
 				}
 				for key, value := range map[string]string{"bot": "provider-token", "signing": "signing-token"} {
-					if key != credentialKey {
-						if err := store.Set(ctx, key, value); err != nil {
-							t.Fatal(err)
-						}
+					if err := store.Set(ctx, key, value); err != nil {
+						t.Fatal(err)
 					}
 				}
+				admissionOwner, err := runtimecredentials.NewSnapshotOwner(store)
+				if err != nil {
+					t.Fatal(err)
+				}
+				pair := testRegistrationPair(t, registration, "negative", "ingress:support:telegram", admissionOwner)
 				if tc.set {
 					if err := store.Set(ctx, credentialKey, tc.value); err != nil {
+						t.Fatal(err)
+					}
+				} else if !tc.unreadable {
+					if err := store.Delete(ctx, credentialKey); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -285,7 +294,8 @@ func TestProviderRegistrationRejectsUnusableCredentialsBeforeAnySideEffect(t *te
 					CredentialOwner: owner, EffectsStore: effectsStore,
 					HTTP:    runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: transport}},
 					Posture: executionposture.Live, RuntimeInstanceID: uuid.NewString(),
-					StartupAuthority: func() (startupownership.GrantEvidence, error) { return startup, nil }, Readiness: readiness,
+					StartupAuthority: func() (startupownership.GrantEvidence, error) { return startup, nil },
+					SelectionCurrent: func(context.Context, RegistrationPair, bool) (bool, error) { return true, nil }, Readiness: readiness,
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -293,7 +303,6 @@ func TestProviderRegistrationRejectsUnusableCredentialsBeforeAnySideEffect(t *te
 				exposure := Generation{ID: uuid.NewString(), Mode: ModeExternalOrigin, PublicOrigin: "https://hooks.example.test", ListenAddress: "127.0.0.1:8443", CreatedAt: time.Now().UTC()}
 				readiness.SetRuntimeReady(true)
 				readiness.SetExposure(ExposureEvidence{GenerationID: exposure.ID, StartupAuthorityID: startup.GrantID, ObservedAt: exposure.CreatedAt, ExpiresAt: exposure.CreatedAt.Add(EvidenceTTL)})
-				pair := testRegistrationPair(t, registration, "negative", "ingress:support:telegram")
 				if err := controller.Reconcile(ctx, exposure, []RegistrationPair{pair}); err == nil {
 					t.Fatalf("Reconcile succeeded with unusable %s credential", credentialKey)
 				}
@@ -334,7 +343,8 @@ func TestProviderRegistrationRejectedReplacementPreservesVerifiedPredecessor(t *
 	controller, err := NewProviderRegistrationController(RegistrationControllerOptions{
 		CredentialOwner: owner, EffectsStore: &registrationEffectStore{Harness: effecttest.New(), current: true},
 		HTTP: runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: transport}}, Posture: executionposture.Live,
-		RuntimeInstanceID: uuid.NewString(), StartupAuthority: func() (startupownership.GrantEvidence, error) { return startup, nil }, Readiness: readiness,
+		RuntimeInstanceID: uuid.NewString(), StartupAuthority: func() (startupownership.GrantEvidence, error) { return startup, nil },
+		SelectionCurrent: func(context.Context, RegistrationPair, bool) (bool, error) { return true, nil }, Readiness: readiness,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -343,7 +353,7 @@ func TestProviderRegistrationRejectedReplacementPreservesVerifiedPredecessor(t *
 	exposure := Generation{ID: uuid.NewString(), Mode: ModeExternalOrigin, PublicOrigin: "https://hooks.example.test", ListenAddress: "127.0.0.1:8443", CreatedAt: now}
 	readiness.SetRuntimeReady(true)
 	readiness.SetExposure(ExposureEvidence{GenerationID: exposure.ID, StartupAuthorityID: startup.GrantID, ObservedAt: now, ExpiresAt: now.Add(EvidenceTTL)})
-	predecessor := testRegistrationPair(t, registration, "replacement", "ingress:support:telegram")
+	predecessor := testRegistrationPair(t, registration, "replacement", "ingress:support:telegram", owner)
 	if err := controller.Reconcile(ctx, exposure, []RegistrationPair{predecessor}); err != nil {
 		t.Fatalf("reconcile predecessor: %v", err)
 	}
@@ -358,6 +368,7 @@ func TestProviderRegistrationRejectedReplacementPreservesVerifiedPredecessor(t *
 	replacement.PrebindingOperationID = "replacement-operation"
 	replacement.OnboardingOperationID = replacement.PrebindingOperationID
 	replacement.CredentialKeys = map[string]string{"telegram_bot_token": "replacement-bot"}
+	replacement = admitTestRegistrationPairCredentials(t, owner, replacement)
 	if err := controller.Reconcile(ctx, exposure, []RegistrationPair{replacement}); err == nil || !strings.Contains(err.Error(), "rejected replacement token") {
 		t.Fatalf("replacement error = %v", err)
 	}
@@ -372,7 +383,7 @@ func TestProviderRegistrationRejectedReplacementPreservesVerifiedPredecessor(t *
 
 func TestProviderRegistrationHandoffKeepsAuthoritiesDistinctUntilPromotion(t *testing.T) {
 	registration := loadTelegramRegistrationPlan(t)
-	candidate := testRegistrationPair(t, registration, "replacement", "ingress:support:telegram")
+	candidate := testRegistrationPair(t, registration, "replacement", "ingress:support:telegram", nil)
 	publication, err := channelonboarding.NewChannelActivationPublication(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -479,6 +490,7 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 		HTTP:    runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: transport}},
 		Posture: executionposture.Live, RuntimeInstanceID: uuid.NewString(),
 		StartupAuthority: func() (startupownership.GrantEvidence, error) { return startup, nil },
+		SelectionCurrent: func(context.Context, RegistrationPair, bool) (bool, error) { return true, nil },
 		Readiness:        readiness,
 	})
 	if err != nil {
@@ -490,11 +502,12 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 		GenerationID: exposure.ID, StartupAuthorityID: startup.GrantID,
 		ObservedAt: exposure.CreatedAt, ExpiresAt: exposure.CreatedAt.Add(EvidenceTTL),
 	})
-	pair := testRegistrationPair(t, registration, "hitl", "ingress:support:telegram")
+	pair := testRegistrationPair(t, registration, "hitl", "ingress:support:telegram", snapshotOwner)
 
 	t.Run("duplicate slot rejects whole set before writes", func(t *testing.T) {
-		other := testRegistrationPair(t, registration, "alerts", "ingress:alerts:telegram")
+		other := testRegistrationPair(t, registration, "alerts", "ingress:alerts:telegram", snapshotOwner)
 		other.CredentialKeys = map[string]string{"telegram_bot_token": "bot-other"}
+		other = admitTestRegistrationPairCredentials(t, snapshotOwner, other)
 		err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair, other})
 		var collision *SlotCollisionError
 		if !errors.As(err, &collision) || collision.SlotID != "telegram:bot_webhook:42" || len(collision.Selections) != 2 {
@@ -507,8 +520,9 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 	})
 
 	t.Run("distinct provider resources reconcile independently", func(t *testing.T) {
-		other := testRegistrationPair(t, registration, "alerts", "ingress:alerts:telegram")
+		other := testRegistrationPair(t, registration, "alerts", "ingress:alerts:telegram", snapshotOwner)
 		other.CredentialKeys = map[string]string{"telegram_bot_token": "bot-other"}
+		other = admitTestRegistrationPairCredentials(t, snapshotOwner, other)
 		distinctTransport := &telegramRegistrationTransport{t: t, resourceIDs: map[string]int64{"token-v1": 42, "token-other": 84}}
 		distinctReadiness := NewReadinessOwner(true)
 		distinctController, err := NewProviderRegistrationController(RegistrationControllerOptions{
@@ -516,6 +530,7 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 			HTTP:    runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: distinctTransport}},
 			Posture: executionposture.Live, RuntimeInstanceID: uuid.NewString(),
 			StartupAuthority: func() (startupownership.GrantEvidence, error) { return startup, nil },
+			SelectionCurrent: func(context.Context, RegistrationPair, bool) (bool, error) { return true, nil },
 			Readiness:        distinctReadiness,
 		})
 		if err != nil {
@@ -594,6 +609,7 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 				HTTP:    runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: faultTransport}},
 				Posture: executionposture.Live, RuntimeInstanceID: uuid.NewString(),
 				StartupAuthority: func() (startupownership.GrantEvidence, error) { return startup, nil },
+				SelectionCurrent: func(context.Context, RegistrationPair, bool) (bool, error) { return true, nil },
 				Readiness:        faultReadiness,
 			})
 			if err != nil {
@@ -636,6 +652,13 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 			faultTransport.readbackURL = ""
 			faultTransport.readbackErr = nil
 			faultTransport.mu.Unlock()
+			if err := faultController.Reconcile(context.Background(), exposure, nil); err != nil {
+				t.Fatal(err)
+			}
+			withdrawn := faultReadiness.Snapshot(time.Now().UTC())
+			if len(withdrawn.Registrations) != 1 || withdrawn.Registrations[0].IntentID != pendingRegistration.IntentID || faultController.snapshot.routeSelected(pair.Target.Alias, pair.Target.Provider) {
+				t.Fatalf("withdrawal discarded uncertain evidence or retained its route: %#v", withdrawn)
+			}
 			if err := faultController.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); err != nil {
 				t.Fatalf("same-base uncertain reconcile: %v", err)
 			}
@@ -647,6 +670,14 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 				after.Registrations[0].IntentID != pendingRegistration.IntentID || after.Registrations[0].CallbackURL != pendingRegistration.CallbackURL ||
 				after.Registrations[0].SlotID != pendingRegistration.SlotID || len(faultStore.Attempts) != 1 {
 				t.Fatalf("same-base recovery replaced or verified uncertain identity: %#v", after)
+			}
+			changed := pair
+			changed.Target.Alias = "replacement"
+			if err := faultController.Reconcile(context.Background(), exposure, []RegistrationPair{changed}); err == nil {
+				t.Fatal("changed candidate resent an unresolved physical registration")
+			}
+			if _, applied := faultTransport.counts(); applied != 1 || len(faultStore.Attempts) != 1 {
+				t.Fatal("unresolved replacement created another effect")
 			}
 			rejected := httptest.NewRecorder()
 			faultController.Handler(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
@@ -713,8 +744,13 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 	if staleCredentialRecorder.Code != http.StatusNotFound {
 		t.Fatalf("stale credential callback status=%d, want 404", staleCredentialRecorder.Code)
 	}
+	if err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); err == nil {
+		t.Fatal("unadmitted signing rotation authorized registration")
+	}
+	pair = admitTestRegistrationPairCredentials(t, snapshotOwner, pair)
+	pair.OnboardingRevision++
 	if err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); err != nil {
-		t.Fatalf("signing credential rotation reconcile: %v", err)
+		t.Fatalf("explicit signing credential readmission reconcile: %v", err)
 	}
 	_, applied = transport.counts()
 	if applied != 2 {
@@ -751,6 +787,11 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 	if err := credentialStore.Set(context.Background(), "bot", "token-v2"); err != nil {
 		t.Fatalf("rotate provider credential: %v", err)
 	}
+	if err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); err == nil {
+		t.Fatal("unadmitted provider rotation authorized registration")
+	}
+	pair = admitTestRegistrationPairCredentials(t, snapshotOwner, pair)
+	pair.OnboardingRevision++
 	if err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); err != nil {
 		t.Fatalf("provider credential rotation reconcile: %v", err)
 	}
@@ -786,6 +827,7 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 		HTTP:    runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: transport}},
 		Posture: executionposture.Live, RuntimeInstanceID: uuid.NewString(),
 		StartupAuthority: func() (startupownership.GrantEvidence, error) { return startup, nil },
+		SelectionCurrent: func(context.Context, RegistrationPair, bool) (bool, error) { return true, nil },
 		Readiness:        restartedReadiness,
 	})
 	if err != nil {
@@ -818,12 +860,101 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 	if stale := restartedReadiness.Snapshot(time.Now().UTC()); stale.Ready || stale.PublicIngressReady || !strings.Contains(stale.Failure, "credential snapshots") {
 		t.Fatalf("deleted signing credential read-time readiness = %#v, want revoked", stale)
 	}
-	if err := restartedController.Reconcile(context.Background(), restartedExposure, []RegistrationPair{routeChanged}); err == nil || !strings.Contains(err.Error(), "signing credential") {
+	if err := restartedController.Reconcile(context.Background(), restartedExposure, []RegistrationPair{routeChanged}); err == nil || !strings.Contains(err.Error(), "webhook_signing_secret") {
 		t.Fatalf("deleted signing credential reconcile error = %v", err)
 	}
 	identifiedAfterDelete, appliedAfterDelete := transport.counts()
 	if identifiedAfterDelete != identifiedBeforeDelete || appliedAfterDelete != appliedBeforeDelete {
 		t.Fatalf("deleted signing credential reached provider: identify/apply %d/%d -> %d/%d", identifiedBeforeDelete, appliedBeforeDelete, identifiedAfterDelete, appliedAfterDelete)
+	}
+}
+
+func TestRegistrationSelectionCurrentnessAtProviderBoundaries(t *testing.T) {
+	for _, boundary := range []string{"identify", "apply", "readback", "settlement", "callback"} {
+		t.Run(boundary, func(t *testing.T) {
+			file, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for key, value := range map[string]string{"bot": "token", "signing": "signing"} {
+				if err := file.Set(context.Background(), key, value); err != nil {
+					t.Fatal(err)
+				}
+			}
+			owner, err := runtimecredentials.NewSnapshotOwner(file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pair := testRegistrationPair(t, loadTelegramRegistrationPlan(t), "hitl", "ingress:support:telegram", owner)
+			transport := &telegramRegistrationTransport{t: t}
+			effects := &registrationEffectStore{Harness: effecttest.New(), current: true}
+			readiness := NewReadinessOwner(true)
+			startup := testStartupAuthority(t, "boundary")
+			stale := false
+			controller, err := NewProviderRegistrationController(RegistrationControllerOptions{
+				CredentialOwner: owner, EffectsStore: effects,
+				HTTP:    runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: transport}},
+				Posture: executionposture.Live, RuntimeInstanceID: uuid.NewString(), Readiness: readiness,
+				StartupAuthority: func() (startupownership.GrantEvidence, error) { return startup, nil },
+				SelectionCurrent: func(_ context.Context, _ RegistrationPair, exact bool) (bool, error) {
+					transport.mu.Lock()
+					atBoundary := boundary == "identify" || boundary == "apply" && transport.identifyCount > 0 ||
+						boundary == "readback" && transport.applyCount > 0 || boundary == "settlement" && transport.readbackCount > 0
+					transport.mu.Unlock()
+					if exact && atBoundary {
+						stale = true
+					}
+					return !stale, nil
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			exposure := Generation{ID: uuid.NewString(), Mode: ModeExternalOrigin, PublicOrigin: "https://hooks.example.test", CreatedAt: time.Now().UTC()}
+			readiness.SetRuntimeReady(true)
+			readiness.SetExposure(ExposureEvidence{GenerationID: exposure.ID, StartupAuthorityID: startup.GrantID, ExpiresAt: exposure.CreatedAt.Add(EvidenceTTL)})
+			err = controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair})
+			if boundary == "callback" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				registered := readiness.Snapshot(time.Now().UTC())
+				stale = true
+				response := httptest.NewRecorder()
+				controller.Handler(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("stale onboarding admitted callback") })).ServeHTTP(response,
+					httptest.NewRequest(http.MethodPost, registered.Registrations[0].CallbackURL, nil))
+				if response.Code != http.StatusNotFound || readiness.Snapshot(time.Now().UTC()).PublicIngressReady {
+					t.Fatal("stale callback/readback stayed current")
+				}
+			} else if !errors.Is(err, channelonboarding.ErrRevisionConflict) {
+				t.Fatalf("boundary error: %v", err)
+			}
+			identified, applied := transport.counts()
+			wantIdentify, wantApply := 1, 1
+			if boundary == "identify" {
+				wantIdentify, wantApply = 0, 0
+			}
+			if boundary == "apply" {
+				wantApply = 0
+			}
+			if identified != wantIdentify || applied != wantApply {
+				t.Fatalf("provider work %d/%d, want %d/%d", identified, applied, wantIdentify, wantApply)
+			}
+			if boundary == "readback" || boundary == "settlement" {
+				states := controller.snapshot.capture().registrations
+				for _, state := range states {
+					if state.Attempt == nil || !state.Attempt.Intent.HasPending {
+						t.Fatal("lost unsettled effect responsibility")
+					}
+				}
+				if err := controller.Reconcile(context.Background(), exposure, nil); err != nil {
+					t.Fatal(err)
+				}
+				if len(controller.snapshot.capture().registrations) != 1 || len(effects.Attempts) != 1 {
+					t.Fatal("withdrawal lost pending settlement")
+				}
+			}
+		})
 	}
 }
 
@@ -854,6 +985,7 @@ func TestProviderRegistrationRetainsSettlementIdentityAndSharesCallbackCurrentne
 		HTTP:    runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: transport}},
 		Posture: executionposture.Live, RuntimeInstanceID: uuid.NewString(),
 		StartupAuthority: func() (startupownership.GrantEvidence, error) { return startup, nil },
+		SelectionCurrent: func(context.Context, RegistrationPair, bool) (bool, error) { return true, nil },
 		Readiness:        readiness, Now: func() time.Time { return now },
 	})
 	if err != nil {
@@ -865,7 +997,7 @@ func TestProviderRegistrationRetainsSettlementIdentityAndSharesCallbackCurrentne
 		GenerationID: exposure.ID, StartupAuthorityID: startup.GrantID,
 		ObservedAt: now, ExpiresAt: now.Add(EvidenceTTL),
 	})
-	pair := testRegistrationPair(t, registration, "hitl", "ingress:support:telegram")
+	pair := testRegistrationPair(t, registration, "hitl", "ingress:support:telegram", snapshotOwner)
 	if err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); !errors.Is(err, settlementErr) {
 		t.Fatalf("settlement acknowledgment loss = %v, want %v", err, settlementErr)
 	}
@@ -989,6 +1121,7 @@ func TestProviderRegistrationPrelaunchMarkerFailureRetriesWithoutEarlyDispatch(t
 				HTTP:    runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: transport}},
 				Posture: executionposture.Live, RuntimeInstanceID: uuid.NewString(),
 				StartupAuthority: func() (startupownership.GrantEvidence, error) { return startup, nil },
+				SelectionCurrent: func(context.Context, RegistrationPair, bool) (bool, error) { return true, nil },
 				Readiness:        readiness,
 			})
 			if err != nil {
@@ -998,7 +1131,7 @@ func TestProviderRegistrationPrelaunchMarkerFailureRetriesWithoutEarlyDispatch(t
 			exposure := Generation{ID: uuid.NewString(), Mode: ModeExternalOrigin, PublicOrigin: "https://hooks.example.test", ListenAddress: "127.0.0.1:8443", CreatedAt: now}
 			readiness.SetRuntimeReady(true)
 			readiness.SetExposure(ExposureEvidence{GenerationID: exposure.ID, StartupAuthorityID: startup.GrantID, ObservedAt: now, ExpiresAt: now.Add(EvidenceTTL)})
-			pair := testRegistrationPair(t, registration, "hitl", "ingress:support:telegram")
+			pair := testRegistrationPair(t, registration, "hitl", "ingress:support:telegram", credentials)
 
 			firstErr := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair})
 			firstOperation, ordinal, state := effectsStore.attempts()
@@ -1080,7 +1213,7 @@ func loadTelegramRegistrationPlan(t *testing.T) packs.CompiledChannelRegistratio
 	return registration
 }
 
-func testRegistrationPair(t *testing.T, registration packs.CompiledChannelRegistration, bindingID, selector string) RegistrationPair {
+func testRegistrationPair(t *testing.T, registration packs.CompiledChannelRegistration, bindingID, selector string, owner *runtimecredentials.SnapshotOwner) RegistrationPair {
 	t.Helper()
 	parsed, err := ParseTargetSelector(selector)
 	if err != nil {
@@ -1097,7 +1230,7 @@ func testRegistrationPair(t *testing.T, registration packs.CompiledChannelRegist
 		RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 1,
 		PlanGeneration: planGeneration, TargetGeneration: 1,
 	}
-	return RegistrationPair{
+	pair := RegistrationPair{
 		BindingID: bindingID, PlanGeneration: planGeneration, OnboardingOperationID: onboardingID, OnboardingRevision: 1,
 		OnboardingCoordinate: coordinate, PrebindingOperationID: onboardingID, Registration: registration,
 		CredentialKeys: map[string]string{"telegram_bot_token": "bot"},
@@ -1107,6 +1240,27 @@ func testRegistrationPair(t *testing.T, registration packs.CompiledChannelRegist
 			Generation: 1, PublicationSequence: 1, AdmissionPlanGeneration: triggergeneration.FromCanonicalBytes([]byte("admission-" + bindingID)), SigningCredentialKey: "signing",
 		},
 	}
+	if owner != nil {
+		pair = admitTestRegistrationPairCredentials(t, owner, pair)
+	}
+	return pair
+}
+
+func admitTestRegistrationPairCredentials(t *testing.T, owner *runtimecredentials.SnapshotOwner, pair RegistrationPair) RegistrationPair {
+	t.Helper()
+	pair.CredentialAdmissions = nil
+	pair.CredentialKeys = cloneStringMap(pair.CredentialKeys)
+	pair.CredentialKeys[pair.Registration.SigningCredential()] = pair.Target.SigningCredentialKey
+	for _, role := range append(pair.Registration.ProviderCredentials(), pair.Registration.SigningCredential()) {
+		evidence, err := owner.SealCurrentValue(context.Background(), pair.CredentialKeys[role])
+		if err != nil {
+			t.Fatal(err)
+		}
+		pair.CredentialAdmissions = append(pair.CredentialAdmissions, channelonboarding.CredentialAdmission{
+			Role: role, StoreKey: evidence.Key, ValueSeal: evidence.Seal, Kind: channelonboarding.CredentialAdmissionObserved,
+		})
+	}
+	return pair
 }
 
 func testStartupAuthority(t *testing.T, owner string) startupownership.GrantEvidence {

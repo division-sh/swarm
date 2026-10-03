@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -152,6 +153,16 @@ func (o *RegistrationSnapshotOwner) replaceSelected(pairs []admittedPair) {
 			selected[key] = state
 			routes[registrationRouteKey(pair.Target.Alias, pair.Target.Provider)] = struct{}{}
 		}
+		for key, prior := range next.registrations {
+			if _, remains := selected[key]; remains || !prior.unsettled() {
+				continue
+			}
+			prior.SelectedBase = ""
+			if prior.Failure == "" {
+				prior.Failure = "provider registration withdrawn with unresolved outcome"
+			}
+			selected[key] = prior
+		}
 		next.registrations = selected
 		next.routes = routes
 	})
@@ -197,9 +208,11 @@ func sameRegistrationSelection(left, right RegistrationPair) bool {
 		left.PlanGeneration.Diagnostic() == right.PlanGeneration.Diagnostic() &&
 		left.ChannelActivationGeneration.Diagnostic() == right.ChannelActivationGeneration.Diagnostic() &&
 		left.OnboardingRevision == right.OnboardingRevision &&
+		left.ActivationRevision == right.ActivationRevision &&
 		left.OnboardingCoordinate.Matches(right.OnboardingCoordinate) &&
 		strings.TrimSpace(left.PrebindingOperationID) == strings.TrimSpace(right.PrebindingOperationID) &&
 		maps.Equal(left.CredentialKeys, right.CredentialKeys) &&
+		slices.Equal(left.CredentialAdmissions, right.CredentialAdmissions) &&
 		left.Target.Selector == right.Target.Selector &&
 		left.Target.BundleHash == right.Target.BundleHash &&
 		left.Target.ServiceID == right.Target.ServiceID &&
@@ -261,6 +274,7 @@ type ReadinessOwner struct {
 	startupCurrent                     func(context.Context, string) (bool, error)
 	credentialObservationTokensCurrent func(context.Context, map[string]string) (bool, error)
 	effectAuthorityCurrent             func(context.Context, runtimeeffects.Authority) (bool, error)
+	selectionCurrent                   func(context.Context, RegistrationPair) (bool, error)
 }
 
 func NewReadinessOwner(enabled bool) *ReadinessOwner {
@@ -336,6 +350,7 @@ func (o *ReadinessOwner) evaluate(ctx context.Context, now time.Time) evaluatedR
 	startupCurrent := o.startupCurrent
 	credentialsCurrent := o.credentialObservationTokensCurrent
 	effectCurrent := o.effectAuthorityCurrent
+	selectionCurrent := o.selectionCurrent
 	o.mu.RUnlock()
 
 	process := o.registration.capture()
@@ -368,6 +383,16 @@ func (o *ReadinessOwner) evaluate(ctx context.Context, now time.Time) evaluatedR
 	for _, key := range keys {
 		state := process.registrations[key]
 		current, failure := registrationStateCurrent(ctx, now, state, process.exposure, exposureReady, credentialsCurrent, effectCurrent)
+		if current && selectionCurrent != nil {
+			selected, err := selectionCurrent(ctx, state.Pair)
+			if err != nil || !selected {
+				current = false
+				failure = "provider registration onboarding admission is no longer current"
+				if err != nil {
+					failure = err.Error()
+				}
+			}
+		}
 		currentByKey[key] = current
 		if !current {
 			registrationsReady = false

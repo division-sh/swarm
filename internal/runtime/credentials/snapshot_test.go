@@ -174,6 +174,62 @@ func TestSecretBindingProjectionScopedCurrentnessNeverAdoptsSiblingChanges(t *te
 	}
 }
 
+func TestAdmittedActivationCredentialRequiresExactValueAndReceipt(t *testing.T) {
+	ctx := context.Background()
+	for _, change := range []string{"healthy", "absent", "rotated", "restored_value", "new_receipt", "empty", "whitespace"} {
+		t.Run(change, func(t *testing.T) {
+			store, err := NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.AdmitWithReceipt(ctx, "provider", "original", "owner-receipt"); err != nil {
+				t.Fatal(err)
+			}
+			owner, err := NewSnapshotOwner(store)
+			if err != nil {
+				t.Fatal(err)
+			}
+			evidence, err := owner.SealCurrentValue(ctx, "provider")
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch change {
+			case "absent":
+				err = store.Delete(ctx, "provider")
+			case "rotated":
+				err = store.Set(ctx, "provider", "replacement")
+			case "restored_value":
+				if err = store.Set(ctx, "provider", "replacement"); err == nil {
+					err = store.Set(ctx, "provider", "original")
+				}
+			case "new_receipt":
+				_, err = store.AdmitWithReceipt(ctx, "provider", "original", "foreign-receipt")
+			case "empty":
+				err = store.Set(ctx, "provider", "")
+			case "whitespace":
+				err = store.Set(ctx, "provider", " \t\n")
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			projection := owner.BeginSecretBindingProjection()
+			_, current, err := projection.ObserveAdmittedActivationCredential(ctx, evidence, "owner-receipt")
+			if change == "empty" || change == "whitespace" {
+				if !errors.Is(err, ErrCredentialValueUnusable) {
+					t.Fatalf("unusable value became recovery success: %v", err)
+				}
+				return
+			}
+			if err != nil || current != (change == "healthy") {
+				t.Fatalf("admitted currentness = %t, %v", current, err)
+			}
+			if err := projection.ValidateCurrent(ctx); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestCredentialSnapshotOwnerUsesAtomicValueMetadataAndPrivateObservationToken(t *testing.T) {
 	ctx := context.Background()
 	store, err := NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))

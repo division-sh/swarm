@@ -424,6 +424,41 @@ func (p *SecretBindingProjection) ObserveActivationCredential(ctx context.Contex
 	return binding.snapshot, nil
 }
 
+// Learned authority requires its admitted value and, for written occurrences,
+// its exact receipt. An observed replacement is evidence, never new authority.
+func (p *SecretBindingProjection) ObserveAdmittedActivationCredential(ctx context.Context, evidence ValueEvidence, receipt string) (AdmittedSnapshot, bool, error) {
+	if err := evidence.Validate(); err != nil {
+		return AdmittedSnapshot{}, false, err
+	}
+	observed, err := p.ObserveActivationCredential(ctx, evidence.Key)
+	if err != nil {
+		return AdmittedSnapshot{}, false, err
+	}
+	current := false
+	if observed.Present {
+		checked, matches, err := p.owner.ObserveValueMatchingSeal(ctx, evidence)
+		if err != nil {
+			return AdmittedSnapshot{}, false, err
+		}
+		if checked.ObservationToken() != observed.ObservationToken() {
+			return AdmittedSnapshot{}, false, &SecretBindingProjectionStaleError{Key: evidence.Key}
+		}
+		current = matches
+	}
+	if receipt != "" {
+		owner, ok := p.owner.values.(ReceiptObserver)
+		if !ok {
+			return AdmittedSnapshot{}, false, fmt.Errorf("admitted activation requires exact credential receipt ownership")
+		}
+		_, matches, err := owner.ObserveReceipt(ctx, evidence.Key, receipt)
+		if err != nil {
+			return AdmittedSnapshot{}, false, err
+		}
+		current = current && matches
+	}
+	return observed, current, nil
+}
+
 func (p *SecretBindingProjection) ValidateCurrent(ctx context.Context) error {
 	if p == nil || len(p.bindings) == 0 {
 		return nil
