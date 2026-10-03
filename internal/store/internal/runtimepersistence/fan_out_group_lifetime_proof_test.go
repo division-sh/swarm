@@ -294,7 +294,7 @@ func TestFanOutPublicationGroupIndependentRunOverlapBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			first := newGroupProofFixture(t, backend, 1)
-			second := newGroupProofFixtureOn(t, backend, 1, first)
+			second := newGroupProofFixtureOn(t, backend, 1, first, false)
 			first.prepare(t)
 			first.seal(t)
 			first.commit(t)

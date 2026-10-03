@@ -282,10 +282,10 @@ type groupProofFixture struct {
 }
 
 func newGroupProofFixture(t *testing.T, backend string, count int) *groupProofFixture {
-	return newGroupProofFixtureOn(t, backend, count, nil)
+	return newGroupProofFixtureOn(t, backend, count, nil, false)
 }
 
-func newGroupProofFixtureOn(t *testing.T, backend string, count int, parent *groupProofFixture) *groupProofFixture {
+func newGroupProofFixtureOn(t *testing.T, backend string, count int, parent *groupProofFixture, rollbackJournal bool) *groupProofFixture {
 	t.Helper()
 	f := &groupProofFixture{postgres: backend == "postgres", probe: &groupProofConnector{}}
 	if parent != nil {
@@ -296,7 +296,18 @@ func newGroupProofFixtureOn(t *testing.T, backend string, count int, parent *gro
 			f.probe.driver = &pq.Driver{}
 		} else {
 			path := filepath.Join(t.TempDir(), "group-proof.sqlite")
-			newBootstrappedSQLiteRuntimeStoreForPath(t, path)
+			bootstrap := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
+			if rollbackJournal {
+				// Set native COMMIT contention mode before the process retains its
+				// proof connection; a live WAL connection cannot switch journals.
+				var mode string
+				if err := bootstrap.backend.ConstructionHandle().QueryRow(`PRAGMA journal_mode=DELETE`).Scan(&mode); err != nil || mode != "delete" {
+					t.Fatalf("rollback journal=%s err=%v", mode, err)
+				}
+				if err := bootstrap.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
 			f.probe.dsn = "file:" + path + "?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"
 			f.probe.driver = &sqlite.Driver{}
 		}

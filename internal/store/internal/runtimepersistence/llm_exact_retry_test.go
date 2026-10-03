@@ -29,9 +29,14 @@ func (p llmCandidateRetryProbe) WriteCompletionCandidateTx(ctx context.Context, 
 	return p.request(ctx, tx, run, due)
 }
 
-func llmSQLiteBusyBlocker(t *testing.T, db *sql.DB, path, phase string) *sql.Tx {
+func llmSQLiteBusyBlocker(t *testing.T, db *sql.DB, path, phase string, retainedConnections int) *sql.Tx {
 	t.Helper()
-	db.SetMaxOpenConns(1)
+	if got := db.Stats().InUse; got != retainedConnections {
+		t.Fatalf("native BUSY fixture has %d retained connections, want %d", got, retainedConnections)
+	}
+	// Keep exactly one workload connection for the connection-local PRAGMAs,
+	// without starving an already retained ownership-proof connection.
+	db.SetMaxOpenConns(1 + retainedConnections)
 	db.SetMaxIdleConns(1)
 	if _, err := db.Exec(`PRAGMA busy_timeout=1`); err != nil {
 		t.Fatal(err)
@@ -138,7 +143,7 @@ func TestLLMSQLiteResetBusyRetryPreservesExactSummary(t *testing.T) {
 			terminal := llmTerminalSnapshot(t, s, f.terminal)
 			var submitted []runlifecycle.Candidate
 			registerLLMResetSink(t, s, f.runs[0], &submitted)
-			blocker := llmSQLiteBusyBlocker(t, s.db, path, phase)
+			blocker := llmSQLiteBusyBlocker(t, s.db, path, phase, 0)
 			owner, calls := newLLMRetryOwner(t, store, blocker, phase, 2, nil)
 			probe, restore, err := store.backend.InstallTransactionProbeForTest(transactiontest.Options{})
 			if err != nil {
@@ -196,7 +201,7 @@ func TestLLMSQLiteGeneratedSessionBusyRetry(t *testing.T) {
 				}
 				var submitted []runlifecycle.Candidate
 				registerLLMResetSink(t, s, f.runID, &submitted)
-				blocker := llmSQLiteBusyBlocker(t, s.db, path, phase)
+				blocker := llmSQLiteBusyBlocker(t, s.db, path, phase, 0)
 				var generated []string
 				owner, calls := newLLMRetryOwner(t, store, blocker, phase, 1, func(ctx context.Context, tx *sql.Tx) error {
 					var id string
