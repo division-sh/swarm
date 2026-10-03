@@ -280,3 +280,26 @@ The subsequent canonical full at8b48e7518 passed six unit receipts, then was
 gracefully interrupted for the required rebase during scatter safety. Those
 partial receipts remain uncredited for whole qualification. No assertion,
 budget, source guard or runtime behavior is changed by this integration.
+
+### Final Frozen-Master Integration
+
+The user's final merge freeze pins origin/master at d043efecf (#2529), superseding
+the earlier rolling merge-notice policy. Rebase retains B's selected-lifecycle
+run fixture ownership, replacement-store negatives, strict persistence guard,
+and all C scenario tests. Review P1/P2 code, release-boundary exceptions and
+golden profile assertions remain byte-identical to the previous repaired head.
+No additional semantic gate is needed for this unchanged design integration.
+
+The source-provenance baseline conflict is resolved by retaining master first,
+then rebuilding exact master and candidate binaries. Only a measured 45-surface,
+two-repetition, provenance-only comparison may replace the ten JSON hashes;
+assertions and normalization remain unchanged. The independently measured
+complexity snapshot must retain all integrated master functions and the original
+573 -> 570 cognitive / 264 -> 263 cyclomatic hotspot ratchets.
+
+Canonical server2 full at ee3f53232 passed 33 unit receipts, then was gracefully
+interrupted during conformance-2 for the required last rebase. Its interrupted
+receipt has exit 130 and the aggregate refuses incomplete execution; it is not
+whole qualification or a runtime failure claim. Final local and hosted full must
+now bind the same new clean signed head above the frozen d043efecf base. All older
+red and partial evidence remains retained. No checkpoint push is authorized.
