@@ -44,8 +44,8 @@ func TestRunServeRuntimeRejectsRetiredConfiguredContractPathBeforeBundleLoad(t *
 		t.Fatalf("serve unexpectedly succeeded: %s", out.String())
 	}
 	for _, want := range []string{
-		`config key "paths.contracts_path" is recognized but not yet supported`,
 		`unknown config key "paths.contracts_path"`,
+		`Valid fields: agent_config_map_file, monitor_dir, platform_spec_path`,
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("serve boot output missing retired path rejection %q:\n%s", want, out.String())

@@ -91,8 +91,8 @@ func validateConfigValue(value yamlsource.Value, shape reflect.Type, owner strin
 			options[name] = struct{}{}
 		}
 		for _, field := range fields {
-			child, present := declared[field.Name]
-			if !present {
+			child := declared[field.Name]
+			if _, admitted := options[field.Name]; !admitted {
 				return runtimecontracts.NewUndefinedFieldDiagnostic(owner, field.Name, options, field)
 			}
 			if err := validateConfigValue(field.Value, child, owner+"."+field.Name); err != nil {

@@ -18,7 +18,7 @@ import (
 // Compile-only injection keeps the real producers, plans and transaction owners
 // intact without adding a production hook or a replaceable response projector.
 func TestMailboxResponseProjectionRollbackBothStores(t *testing.T) {
-	if os.Getenv("SWARM_MAILBOX_PROJECTION_OVERLAY") == "1" {
+	if os.Getenv("SWARM_TEST_MAILBOX_PROJECTION_OVERLAY") == "1" {
 		runMailboxResponseProjectionRollback(t)
 		return
 	}
@@ -38,8 +38,8 @@ func TestMailboxResponseProjectionRollbackBothStores(t *testing.T) {
 		if strings.Count(source, site.anchor) != 1 || strings.Count(source, "import (\n") != 1 {
 			t.Fatalf("projection injection no longer uniquely identifies %s", site.path)
 		}
-		injection := "\tif os.Getenv(\"SWARM_MAILBOX_PROJECTION_RESOURCE\") == " + site.identity + ` {
-        if err := os.WriteFile(os.Getenv("SWARM_MAILBOX_PROJECTION_WITNESS"), []byte(` + site.identity + `), 0600); err != nil {
+		injection := "\tif os.Getenv(\"SWARM_TEST_MAILBOX_PROJECTION_RESOURCE\") == " + site.identity + ` {
+        if err := os.WriteFile(os.Getenv("SWARM_TEST_MAILBOX_PROJECTION_WITNESS"), []byte(` + site.identity + `), 0600); err != nil {
             return apiidempotency.Completion{}, err
         }
         return apiidempotency.Completion{}, fmt.Errorf("mailbox_exact_response_projection_cut")
@@ -65,7 +65,7 @@ func TestMailboxResponseProjectionRollbackBothStores(t *testing.T) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "go", "test", "-overlay", overlay, "./internal/serveapp", "-run", "^TestMailboxResponseProjectionRollbackBothStores$", "-count=1", "-timeout=3m", "-v")
 	cmd.Dir = root
-	cmd.Env = append(os.Environ(), "SWARM_MAILBOX_PROJECTION_OVERLAY=1")
+	cmd.Env = append(os.Environ(), "SWARM_TEST_MAILBOX_PROJECTION_OVERLAY=1")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("real-transaction projection fault proof: %v\n%s", err, output)
@@ -89,8 +89,8 @@ func runMailboxResponseProjectionRollback(t *testing.T) {
 						req := mailboxPrincipalRequest(t, rt, method, params)
 						before := mailboxCompletionRunEffects(t, rt, f.base.RunID)
 						witness := filepath.Join(t.TempDir(), "projection-reached")
-						t.Setenv("SWARM_MAILBOX_PROJECTION_WITNESS", witness)
-						t.Setenv("SWARM_MAILBOX_PROJECTION_RESOURCE", req.ResourceID)
+						t.Setenv("SWARM_TEST_MAILBOX_PROJECTION_WITNESS", witness)
+						t.Setenv("SWARM_TEST_MAILBOX_PROJECTION_RESOURCE", req.ResourceID)
 						_, replayed, err := mailboxTokenlessMutation(f.ctx, rt, owner, req, params)
 						if err == nil || !strings.Contains(err.Error(), "mailbox_exact_response_projection_cut") || replayed {
 							t.Fatalf("exact response projection did not fail: replay=%t err=%v", replayed, err)
@@ -112,7 +112,7 @@ func runMailboxResponseProjectionRollback(t *testing.T) {
 								t.Fatalf("projection failure acknowledged notice: notified=%t err=%v", notified, err)
 							}
 						}
-						t.Setenv("SWARM_MAILBOX_PROJECTION_RESOURCE", "")
+						t.Setenv("SWARM_TEST_MAILBOX_PROJECTION_RESOURCE", "")
 						var result map[string]any
 						requireServedJSONRPCResult(t, rt.Endpoint, method, params, &result)
 						if result["ok"] != true || result["idempotency_replayed"] != false {

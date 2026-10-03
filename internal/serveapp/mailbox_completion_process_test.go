@@ -26,7 +26,7 @@ type mailboxCompletionChild struct {
 }
 
 func TestMailboxCompletionServeProcessHelper(t *testing.T) {
-	raw := os.Getenv("SWARM_MAILBOX_COMPLETION_CHILD")
+	raw := os.Getenv("SWARM_TEST_MAILBOX_COMPLETION_CHILD")
 	if raw == "" {
 		t.Skip("parent-owned process proof")
 	}
@@ -192,7 +192,7 @@ func mailboxCompletionProcessHarnessWithSelectionCut(t *testing.T, backend, root
 		if err != nil {
 			t.Fatal(err)
 		}
-		p := startServedCrashProcess(t, "TestMailboxCompletionServeProcessHelper", []string{"SWARM_MAILBOX_COMPLETION_CHILD=" + string(raw)}, readyW, releaseR)
+		p := startServedCrashProcess(t, "TestMailboxCompletionServeProcessHelper", []string{"SWARM_TEST_MAILBOX_COMPLETION_CHILD=" + string(raw)}, readyW, releaseR)
 		return p, servedControlProofRuntime{Endpoint: p.endpoint(t) + "/v1/rpc", DB: db, Backend: backend, BundleHash: servedEventPublishFixtureBundleHash(t, root)}
 	}
 	return start, readyR, releaseW

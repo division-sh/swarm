@@ -52,24 +52,6 @@ var projectFlowIngressDeliveryIDFields = map[string]struct{}{
 	"source": {}, "header": {}, "json_path": {},
 }
 
-var connectorPackFieldOptions = map[string]struct{}{
-	"imports": {},
-}
-
-var connectorPackImportFieldOptions = map[string]struct{}{
-	"provider": {},
-	"tool":     {},
-}
-
-var providerTriggerEventFieldOptions = map[string]struct{}{
-	"imports": {},
-}
-
-var providerTriggerEventImportFieldOptions = map[string]struct{}{
-	"provider": {},
-	"event":    {},
-}
-
 var flowConnectFieldOptions = map[string]struct{}{
 	"resolution": {},
 	"key_from":   {},

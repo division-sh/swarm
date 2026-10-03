@@ -17,7 +17,6 @@ type doctorOptions struct {
 	dataSourceSet       bool
 	workspaceBackend    string
 	workspaceBackendSet bool
-	platformSpecPath    string
 	apiListenAddr       string
 	mcpListenAddr       string
 	target              bool

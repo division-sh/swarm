@@ -82,7 +82,10 @@ func TestValidateFanOutWorkersDefersBackendCapacity(t *testing.T) {
 func TestFanOutWorkersRoundTripPreservesPresence(t *testing.T) {
 	zero, four := 0, 4
 	for _, workers := range []*int{nil, &zero, &four} {
-		raw, err := yaml.Marshal(RuntimeConfig{FanOutWorkers: workers})
+		// Author only the supported field; the runtime DTO also retains inert fields.
+		raw, err := yaml.Marshal(struct {
+			FanOutWorkers *int `yaml:"fan_out_workers,omitempty"`
+		}{workers})
 		if err != nil {
 			t.Fatal(err)
 		}

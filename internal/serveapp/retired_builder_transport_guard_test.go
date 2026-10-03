@@ -39,7 +39,7 @@ func TestRetiredBuilderSemanticReferencesStayExplicit(t *testing.T) {
 		"internal/apiv1/testdata/openrpc_compliance_matrix.yaml":                       1,
 		"internal/apiv1/testdata/public_surface_backend_matrix.yaml":                   1,
 		"internal/cliapp/api_consumption_boundary_test.go":                             3,
-		"internal/cliapp/env_guard.go":                                                 1,
+		"internal/cliapp/current_env_authority_test.go":                                1,
 		"internal/cliapp/main_test.go":                                                 1,
 		"internal/runtime/destructivereset/contracts.go":                               1,
 		"internal/runtime/destructivereset/coordinator_test.go":                        2,
@@ -48,7 +48,7 @@ func TestRetiredBuilderSemanticReferencesStayExplicit(t *testing.T) {
 		"internal/runtime/runforkexecution/runtime_container.go":                       1,
 		"internal/store/internal/runtimepersistence/postgres_store_additional_test.go": 6,
 		"openrpc.json":       2,
-		"platform-spec.yaml": 51,
+		"platform-spec.yaml": 50,
 	}
 	expectedUnrelatedTextCounts := map[string]int{
 		"internal/runtime/bootverify/workflow_transition_relation_test.go":                  1,
@@ -73,6 +73,7 @@ func TestRetiredBuilderSemanticReferencesStayExplicit(t *testing.T) {
 	rawRetirementFixtures := map[string]bool{
 		"internal/apiv1/handler_test.go":                                               true,
 		"internal/cliapp/api_consumption_boundary_test.go":                             true,
+		"internal/cliapp/current_env_authority_test.go":                                true,
 		"internal/runtime/destructivereset/coordinator_test.go":                        true,
 		"internal/runtime/manager/runtime_reset_test.go":                               true,
 		"internal/store/internal/runtimepersistence/postgres_store_additional_test.go": true,

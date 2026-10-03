@@ -656,7 +656,7 @@ vertical:
 `)
 
 	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
-	if err == nil || !strings.Contains(err.Error(), "schema.yaml entity") || !strings.Contains(err.Error(), "single entity authority") {
+	if err == nil || !strings.Contains(err.Error(), `schema field "entity" is not supported`) || !strings.Contains(err.Error(), "Valid fields: activation") {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want schema.yaml entity selector rejection", err)
 	}
 }
@@ -677,7 +677,7 @@ vertical:
 `)
 
 	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
-	if err == nil || !strings.Contains(err.Error(), "schema.yaml entity") || !strings.Contains(err.Error(), "single entity authority") {
+	if err == nil || !strings.Contains(err.Error(), `schema field "entity" is not supported`) || !strings.Contains(err.Error(), "Valid fields: activation") {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want root schema.yaml entity selector rejection", err)
 	}
 }
@@ -699,7 +699,7 @@ vertical:
 `)
 
 	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
-	if err == nil || !strings.Contains(err.Error(), "schema.yaml entity") || !strings.Contains(err.Error(), "single entity authority") {
+	if err == nil || !strings.Contains(err.Error(), `schema field "entity" is not supported`) || !strings.Contains(err.Error(), "Valid fields: activation") {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want schema.yaml entity selector rejection", err)
 	}
 }

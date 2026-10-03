@@ -1366,7 +1366,7 @@ rules:
       row: true
     advances_to: bad
 `,
-			contains: "second policy-sheet authoring owner",
+			contains: `rule field "policy" is not supported`,
 		},
 		{
 			name: "lookup into entity",
@@ -1541,6 +1541,9 @@ switch:
 			if err == nil || !strings.Contains(err.Error(), tt.contains) {
 				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tt.contains)
 			}
+			if tt.name == "policy field dual owner" && !strings.Contains(err.Error(), "Valid fields: activity") {
+				t.Fatalf("policy admission omitted current rule vocabulary: %v", err)
+			}
 		})
 	}
 }
@@ -1684,7 +1687,7 @@ func TestSystemNodeEventHandlerDecode_RejectsInvalidKeyedRuleShape(t *testing.T)
 	}{
 		{name: "empty label", raw: "rules:\n  \"\": {else: true}\n", want: "label must not be empty"},
 		{name: "whitespace label", raw: "rules:\n  \"   \": {else: true}\n", want: "label must not be empty"},
-		{name: "scalar child", raw: "rules:\n  selected: else\n", want: "must be a mapping"},
+		{name: "scalar child", raw: "rules:\n  selected: else\n", want: `rule field "selected" is not supported`},
 		{name: "empty collection", raw: "rules: {}\n", want: "must contain at least one row"},
 		{name: "null rules", raw: "rules: null\n", want: "rules handler rule collection must not be null"},
 		{name: "null on complete", raw: "on_complete: null\n", want: "on_complete handler rule collection must not be null"},
@@ -1695,6 +1698,9 @@ func TestSystemNodeEventHandlerDecode_RejectsInvalidKeyedRuleShape(t *testing.T)
 			err := decodeNodeTestYAML([]byte(tc.raw), &handler)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.want)
+			}
+			if tc.name == "scalar child" && !strings.Contains(err.Error(), "Valid fields: activity") {
+				t.Fatalf("unknown keyed rule omitted current vocabulary: %v", err)
 			}
 		})
 	}
@@ -1903,8 +1909,8 @@ func TestW2RejectsAuthoredPinName(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var schema FlowSchemaDocument
 			err := decodeNodeTestYAML([]byte(tc.raw), &schema)
-			if err == nil || !strings.Contains(err.Error(), "pin name is unsupported") {
-				t.Fatalf("yaml.Unmarshal error = %v, want retired pin-name rejection", err)
+			if err == nil || !strings.Contains(err.Error(), tc.name+`s event pin field "name" is not supported`) || !strings.Contains(err.Error(), "Valid fields: event") {
+				t.Fatalf("source admission error = %v, want pin-name rejection with current vocabulary", err)
 			}
 		})
 	}

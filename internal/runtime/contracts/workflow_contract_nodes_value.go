@@ -13,10 +13,6 @@ var guardOnFailEscalateFieldOptions = map[string]struct{}{
 	"event": {}, "from": {}, "fields": {},
 }
 
-var accumulateFieldOptions = map[string]struct{}{
-	"into": {}, "from": {}, "description": {}, "key": {},
-}
-
 var fanOutFieldOptions = map[string]struct{}{
 	"items_from": {}, "as": {}, "identity": {}, "max_items": {}, "emit": {},
 }
