@@ -195,7 +195,7 @@ func localReadinessFixture(t *testing.T, declarations int, frontier string) stri
 	}
 	for name, addition := range map[string]string{
 		"events.yaml":             "\nsource.prepare:\n  worker_id: text\n",
-		"nodes.yaml":              "\nprepare:\n  execution_type: system_node\n  subscribes_to: [source.prepare]\n  event_handlers:\n    source.prepare:\n      guard: {id: admitted, check: 'true'}\n",
+		"nodes.yaml":              "\nprepare:\n  execution_type: system_node\n  subscribes_to: [source.prepare]\n  event_handlers:\n    source.prepare:\n      guard: {id: admitted, check: true}\n",
 		"worker-flow/schema.yaml": "\nauto_emit_on_create:\n  event: " + event + ".requested\n",
 	} {
 		path := filepath.Join(root, name)

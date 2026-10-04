@@ -30,8 +30,8 @@ func CopyForkReceiverBusinessMutationOwnership(t testing.TB, entitylessProducer 
 	root := CopyForkReceiverOwnership(t, []ForkReceiver{{Path: "consumer", Policy: ForkReceiverRequiredExisting}}, entitylessProducer)
 	applyClosedReplacement(t, filepath.Join(root, "consumer/entities.yaml"), "  marker: text\n", "  marker: text\n  processed_token: text\n")
 	applyClosedReplacement(t, filepath.Join(root, "consumer/nodes.yaml"),
-		"          - {target_field: marker, value: 'consumer-owned'}\n",
-		"          - {target_field: marker, value: 'consumer-owned'}\n          - {target_field: processed_token, value: 'seeded'}\n")
+		"          - target_field: marker\n            value: \"consumer-owned\"\n",
+		"          - target_field: marker\n            value: \"consumer-owned\"\n          - {target_field: processed_token, value: 'seeded'}\n")
 	applyClosedReplacement(t, filepath.Join(root, "consumer/nodes.yaml"), `      emit:
         event: receiver.finished
         fields:

@@ -18,14 +18,14 @@ func TestGuardTerminationVerifiedExecutionAndRestartBothStores(t *testing.T) {
 		name, guard string
 		prefix      []string
 	}{
-		{"single", "      guard: {id: score_check, check: 'false', on_fail: kill}\n", []string{"score_check"}},
-		{"first failure", "      guard:\n        checks:\n          - {id: first, check: 'false'}\n          - {id: second, check: 'false'}\n        on_fail: kill\n", []string{"first"}},
-		{"second failure", "      guard:\n        checks:\n          - {id: first, check: 'true'}\n          - {id: second, check: 'false'}\n        on_fail: kill\n", []string{"first", "second"}},
-		{"unnamed single", "      guard: {check: ' false ', on_fail: kill}\n", []string{"false"}},
-		{"unnamed chain", "      guard: {checks: [{check: ' true '}, {check: ' false '}], on_fail: kill}\n", []string{"true", "false"}},
-		{"unnamed first failure", "      guard: {checks: [{check: ' false '}, {check: 'true'}], on_fail: kill}\n", []string{"false"}},
-		{"mixed chain", "      guard: {checks: [{}, {id: ' first ', check: 'true'}, {}, {check: ' false '}, {}], on_fail: kill}\n", []string{"first", "false"}},
-		{"padded named", "      guard: {id: ' score_check ', check: 'false', on_fail: kill}\n", []string{"score_check"}},
+		{"single", "      guard: {id: score_check, check: false, on_fail: kill}\n", []string{"score_check"}},
+		{"first failure", "      guard:\n        checks:\n          - {id: first, check: false}\n          - {id: second, check: false}\n        on_fail: kill\n", []string{"first"}},
+		{"second failure", "      guard:\n        checks:\n          - {id: first, check: true}\n          - {id: second, check: false}\n        on_fail: kill\n", []string{"first", "second"}},
+		{"unnamed single", "      guard: {check:   false , on_fail: kill}\n", []string{"false"}},
+		{"unnamed chain", "      guard: {checks: [{check:   true }, {check:   false }], on_fail: kill}\n", []string{"true", "false"}},
+		{"unnamed first failure", "      guard: {checks: [{check:   false }, {check: true}], on_fail: kill}\n", []string{"false"}},
+		{"mixed chain", "      guard: {checks: [{}, {id: ' first ', check: true}, {}, {check:   false }, {}], on_fail: kill}\n", []string{"first", "false"}},
+		{"padded named", "      guard: {id: ' score_check ', check: false, on_fail: kill}\n", []string{"score_check"}},
 		{"on fail only no op", "      guard: {on_fail: kill}\n", nil},
 		{"empty row no op", "      guard: {checks: [{}], on_fail: kill}\n", nil},
 		{"policy annotation no op", "      guard: {policy_ref: threshold, on_fail: kill}\n", nil},
