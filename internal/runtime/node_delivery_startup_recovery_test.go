@@ -755,7 +755,8 @@ func loadEntitylessStartupRecoveryBundle(t *testing.T) *runtimecontracts.Workflo
 stages: []
 pins:
   inputs:
-    events: [task.requested, task.completed]
+    - task.requested
+    - task.completed
 `
 	files["events.yaml"] += "task.completed:\n"
 	files["nodes.yaml"] = strings.ReplaceAll(files["nodes.yaml"], "task.requested:\n      advances_to: done", "task.requested: {}")

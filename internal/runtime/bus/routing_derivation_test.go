@@ -161,7 +161,7 @@ stages:
   active: {initial: true}
 pins:
   inputs:
-    events: [work.requested]
+    - work.requested
 `)
 	write(filepath.Join(flowRoot, "events.yaml"), "work.requested:\n")
 	write(filepath.Join(flowRoot, "agents.yaml"), `
@@ -252,7 +252,7 @@ func loadPackageCollisionRouteSource(t *testing.T, mode string, reverse bool) se
 name: exact-package-routes
 pins:
   inputs:
-    events: [root.start]
+    - root.start
 `)
 	write(filepath.Join(root, "events.yaml"), "root.start:\n")
 

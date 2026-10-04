@@ -2560,7 +2560,7 @@ func eventPublishRootTemplateCollisionSource(t *testing.T) *runtimecontracts.Wor
 	writeRunCompletionFixtureFile(t, root+"/schema.yaml", `name: review
 pins:
   inputs:
-    events: [review.requested]
+    - review.requested
 `)
 	writeRunCompletionFixtureFile(t, root+"/events.yaml", `review.requested:
   topic: text
@@ -2576,7 +2576,7 @@ pins:
 	writeRunCompletionFixtureFile(t, root+"/operating/schema.yaml", `name: operating
 pins:
   inputs:
-    events: [review.requested]
+    - review.requested
 `)
 	writeRunCompletionFixtureFile(t, root+"/operating/events.yaml", `review.requested:
   topic: text

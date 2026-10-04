@@ -8,6 +8,7 @@ https://github.com/division-sh/swarm/issues/2438#issuecomment-5974062605
 ```sh
 go run ./scripts/rewrite-pins-2438 -root .
 go run ./scripts/rewrite-pins-2438 -root . -write
+go run ./scripts/rewrite-pins-2438 -root . -go-sources -write
 go test ./scripts/rewrite-pins-2438
 ```
 
@@ -33,16 +34,19 @@ checked-in reply moves onto its response connection. The deferred initialize
 passenger and ordinary connection resolution/key_from are preserved. No
 activation, constructor or fan-in change.
 
-This is local preparation, not the complete slice or a current-runtime admission
-claim. Do not merge script/output separately from the interface-owner removal.
-Before the eventual one-PR publication, finish the schema reader and consumer
-cut, generated producers, retired fixture/reference removal, authoritative spec,
-I01-I29 proofs allocated to 2b, both-store supported surfaces and required CI.
-The constructor chain/I16 remains in 2c after E's qualified handoff.
+The script and its output land together with typed names-only admission, the
+reader/consumer cut, generated producers, reference removal and authoritative
+spec changes. `-go-sources` migrates the explicitly enumerated positive Go
+producers through the same source parser; closed mutation spellings move with
+their edited sources. Negative parser specimens are handled explicitly, never
+normalized into positives. The constructor chain/I16 remains in 2c after E's
+qualified handoff. I01-I29's allocated 2b proofs and required CI belong to the
+PR's source-pinned proof audit, not the historical preparation receipt below.
 
 ## Local Preparation Receipt
 
-`preview.json` records the applied plan on top of `b099a8aba`: 262 schema rewrites
+`preview.json` records the applied plan on top of `b099a8aba`, using the script's
+native compact JSON format: 262 schema rewrites
 and 31 file deletions (25 files in the two retired tier11 trees and six in the
 harness example). Reapplying the script produces no changes. The 14 retired
 field entries were nine grants in the preserved generic schemas and five in the
@@ -71,8 +75,7 @@ when the remaining reader cut is finished. Deleted mechanism-specific callers
 are not credited as execution of the removed trees. Ledger rows B059-B063 now
 identify explicit removal and their actual replacement proofs.
 
-These are script and focused checkpoint proofs, not runtime, both-store or merge
-qualification. Names-only admission, generated producers, harness consumer
-retirement and reply owners still need the rest of the local 2b implementation.
-The eventual PR must retain reviewer-set `CI-Tier: lifecycle` and
-`Local-Tier: lifecycle`. No push or PR is authorized at this checkpoint.
+These historical checkpoint results are not runtime or merge qualification.
+The complete PR retains reviewer-set `CI-Tier: lifecycle` and
+`Local-Tier: lifecycle`; its audit records actual supported-path and suite
+results separately, including failures and replaced qualification attempts.

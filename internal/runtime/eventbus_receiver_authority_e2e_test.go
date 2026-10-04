@@ -533,7 +533,7 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events: [task.assigned]
+    - task.assigned
 `,
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml": `task.assigned:

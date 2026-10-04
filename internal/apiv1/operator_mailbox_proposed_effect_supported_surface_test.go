@@ -285,7 +285,7 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events: [thing.created]
+    - thing.created
 `)
 	writeRunCompletionFixtureFile(t, root+"/events.yaml", `thing.created:
   text: text

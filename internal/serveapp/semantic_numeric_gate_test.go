@@ -39,7 +39,7 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events: [numeric.requested]
+    - numeric.requested
 `
 			if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte(schema), 0600); err != nil {
 				t.Fatal(err)

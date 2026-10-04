@@ -375,8 +375,7 @@ stages:
   done: {terminal: true}
 pins:
   outputs:
-    events:
-      - vertical.shortlisted
+    - vertical.shortlisted
 `)
 	writeFixtureFile(t, filepath.Join(root, "scoring", "events.yaml"), `
 vertical.shortlisted:
@@ -400,11 +399,9 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events:
-      - vertical.shortlisted
+    - vertical.shortlisted
   outputs:
-    events:
-      - validation.started
+    - validation.started
 `)
 	writeFixtureFile(t, filepath.Join(root, "validation", "events.yaml"), `
 validation.started:
@@ -453,8 +450,7 @@ stages:
   done: {terminal: true}
 pins:
   outputs:
-    events:
-      - vertical.shortlisted
+    - vertical.shortlisted
 `)
 	writeFixtureFile(t, filepath.Join(root, "scoring", "events.yaml"), `
 vertical.shortlisted:
@@ -478,12 +474,10 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events:
-      - vertical.shortlisted
+    - vertical.shortlisted
   outputs:
-    events:
-      - validation.rule
-      - validation.started
+    - validation.rule
+    - validation.started
 `)
 	writeFixtureFile(t, filepath.Join(root, "validation", "events.yaml"), `
 validation.rule:
@@ -551,11 +545,9 @@ item:
   done: {terminal: true}
 pins:
   inputs:
-    events:
-      - item.created
+    - item.created
   outputs:
-    events:
-      - evidence.recorded
+    - evidence.recorded
 `)
 	writeFixtureFile(t, filepath.Join(root, "agents.yaml"), `
 control-plane:
