@@ -13,10 +13,16 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/packadmission"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/bootverify"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/google/uuid"
@@ -301,16 +307,18 @@ func writeChannelAnchorJourneySource(t *testing.T, root string, withNotice bool)
 			}
 		}
 		if relative == "schema.yaml" {
-			var schema map[string]any
-			if err := yaml.Unmarshal(body, &schema); err != nil {
-				return err
+			pins := "pins:\n  inputs:\n    - work.requested\n    - effect.requested\n    - observer.requested\n"
+			outputs := "  outputs: [observer.requested]\nconnect:\n  - {event: observer.requested, from: ., to: observers}\n"
+			if withNotice {
+				pins += "    - notice.requested\n"
+				outputs = "  outputs: [observer.requested, notice.requested]\nconnect:\n  - {event: observer.requested, from: ., to: observers}\n  - {event: notice.requested, from: ., to: observers}\n"
 			}
-			schema["pins"] = map[string]any{"inputs": []string{"work.requested", "effect.requested"}}
-			delete(schema, "connect")
-			body, err = yaml.Marshal(schema)
-			if err != nil {
-				return err
+			// Keep the executable gate's scalar styles intact while relocating its pins.
+			old := pins + outputs
+			if strings.Count(string(body), old) != 1 {
+				return fmt.Errorf("channel anchor fixture changed its exact pins/connect declaration")
 			}
+			body = []byte(strings.Replace(string(body), old, "pins:\n  inputs:\n    - work.requested\n    - effect.requested\n", 1))
 		}
 		return os.WriteFile(target, body, 0o600)
 	}); err != nil {
@@ -321,31 +329,29 @@ func writeChannelAnchorJourneySource(t *testing.T, root string, withNotice bool)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var schema map[string]any
-	if err := yaml.Unmarshal(body, &schema); err != nil {
-		t.Fatal(err)
+	if string(body) != "name: telegram-agent\n" {
+		t.Fatalf("channel anchor fixture requires the isolated root declaration, got:\n%s", body)
 	}
-	inputs, outputs := []any{}, []any{}
-	connects := []any{}
+	var pins, connects strings.Builder
+	pins.WriteString("pins:\n  inputs:\n")
 	events := []string{"work.requested", "observer.requested", "effect.requested"}
 	if withNotice {
 		events = append(events, "notice.requested")
 	}
 	for _, event := range events {
-		inputs = append(inputs, event)
-		outputs = append(outputs, event)
+		fmt.Fprintf(&pins, "    - %s\n", event)
+	}
+	pins.WriteString("  outputs:\n")
+	connects.WriteString("connect:\n")
+	for _, event := range events {
+		fmt.Fprintf(&pins, "    - %s\n", event)
 		target := "reviews"
 		if event == "observer.requested" || event == "notice.requested" {
 			target = "observers"
 		}
-		connects = append(connects, map[string]any{"event": event, "from": ".", "to": target})
+		fmt.Fprintf(&connects, "  - {event: %s, from: ., to: %s}\n", event, target)
 	}
-	schema["pins"] = map[string]any{"inputs": inputs, "outputs": outputs}
-	schema["connect"] = connects
-	body, err = yaml.Marshal(schema)
-	if err != nil {
-		t.Fatal(err)
-	}
+	body = append(body, []byte(pins.String()+connects.String())...)
 	if err := os.WriteFile(path, body, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -355,6 +361,45 @@ func writeChannelAnchorJourneySource(t *testing.T, root string, withNotice bool)
 	}
 	if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte(eventDocument), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestScalar2556ChannelAnchorSourcePreservesGateText(t *testing.T) {
+	for _, withNotice := range []bool{false, true} {
+		t.Run(fmt.Sprintf("notice_%t", withNotice), func(t *testing.T) {
+			root := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
+			disableChannelOnboardingBusinessConsumers(t, root)
+			writeChannelAnchorJourneySource(t, root, withNotice)
+			raw, err := os.ReadFile(filepath.Join(root, "reviews", "schema.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, text := range []string{`fields: {result: "approved"}`, `fields: {result: "rejected"}`} {
+				if strings.Count(string(raw), text) != 1 {
+					t.Fatalf("relocation lost exact quoted gate text %s:\n%s", text, raw)
+				}
+			}
+			repo := canonicalrouting.RepoRoot(t)
+			bundle, err := contracts.LoadWorkflowContractBundleWithOptions(repo, root, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+			if err != nil {
+				t.Fatal(err)
+			}
+			hash, err := contracts.BundleHash(bundle)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fact, err := correlation.NewSourceArtifactFact(hash)
+			if err != nil {
+				t.Fatal(err)
+			}
+			projection, err := runtimepkg.AdmitEffectiveSourceProjection(runtimepkg.EffectiveSourceProjectionRequest{Source: semanticview.Wrap(bundle), SourceArtifactFact: fact})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if findings := bootverify.Run(context.Background(), projection.Source(), bootverify.Options{Purpose: bootverify.StructuralValidation}).HardInvalidities(); len(findings) != 0 {
+				t.Fatalf("composed channel anchor source is invalid: %#v", findings)
+			}
+		})
 	}
 }
 
