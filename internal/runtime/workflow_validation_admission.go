@@ -8,6 +8,19 @@ import (
 
 const workflowAdmissionOwner = "internal/runtime.ValidateWorkflowContractSurface"
 
+// BlockedWorkflowContractAdmission records the existing owners' unexecuted tail
+// when configuration or loading refuses the source before validation can start.
+func BlockedWorkflowContractAdmission(purpose bootverify.ValidationPurpose, subject, dependency, reason string) WorkflowContractValidationResult {
+	result := WorkflowContractValidationResult{BootReport: bootverify.Report{Purpose: purpose, Observations: workflowAdmissionObservations(purpose)}}
+	for i := range result.BootReport.Observations {
+		observation := &result.BootReport.Observations[i]
+		observation.Subject, observation.Reason = subject, reason
+		observation.Dependencies = []string{dependency}
+	}
+	result.BootReport.BlockRegisteredChecks(subject, dependency, reason)
+	return result
+}
+
 // This is evidence for the existing sequential clauses, not another check
 // registry: validation remains implemented by their canonical owners.
 func workflowAdmissionObservations(purpose bootverify.ValidationPurpose) []bootverify.AdmissionObservation {

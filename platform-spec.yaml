@@ -9033,6 +9033,15 @@ engine:
         read is incomplete. Source-artifact inspection validates exact stored bytes and identities,
         not presence alone. Neither inspection recovers execution, edits runs or reconstructs
         persisted source bytes from a query representation.
+      recovery_inspection: >
+        Boot and read-only admission share recovery inventory assembly, standing-run partitions,
+        manager-state counts and the recovery_on_startup decision. Every required delivery,
+        timer, standing-disposition and manager reader must be present and complete; failed or
+        cancelled reads never publish an empty or partially successful inventory. Ordinary-run
+        source applicability uses the existing durable run-binding classifier without minting
+        a generation grant, excludes selected-fork bindings, and is not execution ownership.
+        Dynamic readiness filtering shares the same standing-disposition owner. Boot separately
+        proves current process and generation ownership and retains recovery/hydration effects.
       observation_protocol: >
         Required observations have a 60-second aggregate budget, five seconds for local socket or
         metadata steps, fifteen seconds for configured subprocess or remote discovery steps and

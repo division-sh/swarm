@@ -9,7 +9,10 @@ import (
 	"testing"
 	"time"
 
+	runtimecore "github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/startuprecovery"
 	"github.com/division-sh/swarm/internal/runtime/timerobligation"
@@ -92,6 +95,9 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 			var retained *AdmissionSnapshot
 			result, err := inspection.Inspect(ctx, request, func(snapshot *AdmissionSnapshot) error {
 				retained = snapshot
+				if _, ok := any(snapshot).(manager.RunExecutionOwner); ok {
+					t.Fatal("inspection exposed generation-grant ownership")
+				}
 				if _, err := snapshot.InspectAuthority(ctx); err != nil {
 					return err
 				}
@@ -115,6 +121,23 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 				}
 				if _, err := snapshot.ListSelectedContractRouteRecoveryRecords(ctx); err != nil {
 					return err
+				}
+				source, err := correlation.NewSourceArtifactFact("bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+				if err != nil {
+					return err
+				}
+				state, err := manager.InspectRecoverableStateSnapshot(ctx, source, snapshot)
+				if err != nil || state.HasRecoverableWork() {
+					t.Fatalf("empty manager inventory: %+v, %v", state, err)
+				}
+				decision, err := runtimecore.InspectStartupRecoveryAdmission(ctx, runtimecore.StartupRecoveryReadRequest{
+					SourceArtifact: source, ObservedAt: time.Now().UTC(), Delivery: snapshot, Timers: snapshot, StandingRestarts: snapshot,
+					ReadManagerState: func(ctx context.Context) (manager.RecoverableStateSnapshot, error) {
+						return manager.InspectRecoverableStateSnapshot(ctx, source, snapshot)
+					},
+				})
+				if err != nil || decision["recovery_inspection_complete"] != true || decision["recoverable_work_present"] != false {
+					t.Fatalf("recovery inspection: %+v, %v", decision, err)
 				}
 				cancelled, cancel := context.WithCancel(ctx)
 				cancel()

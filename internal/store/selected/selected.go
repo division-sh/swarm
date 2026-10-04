@@ -31,7 +31,6 @@ import (
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	runtimerunstalled "github.com/division-sh/swarm/internal/runtime/runstalled"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
-	runtimestartuprecovery "github.com/division-sh/swarm/internal/runtime/startuprecovery"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
@@ -143,10 +142,10 @@ func (o DestructiveReset) Quiescence() runtimedestructivereset.QuiescenceStore {
 
 // StartupRecovery is the exact source-artifact availability projection.
 type StartupRecovery struct {
-	availability runtimestartuprecovery.AvailabilityReader
+	availability runbundle.ActiveAvailabilityReader
 }
 
-func (o StartupRecovery) Availability() runtimestartuprecovery.AvailabilityReader {
+func (o StartupRecovery) Availability() runbundle.ActiveAvailabilityReader {
 	return o.availability
 }
 

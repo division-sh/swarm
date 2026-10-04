@@ -4,15 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	runtimestanding "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimestanding "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 )
 
@@ -276,86 +277,140 @@ func (r startupRecoveryDecisionReport) bootPayload() map[string]any {
 	return payload
 }
 
-func (rt *Runtime) inspectStartupRecoverySnapshot(ctx context.Context, observedAt time.Time) (startupRecoverySnapshot, error) {
-	snapshot := startupRecoverySnapshot{
-		RecoveryOnStartup:  rt != nil && rt.Config != nil && rt.Config.Runtime.RecoveryOnStartup,
-		InspectionComplete: true,
+// StartupRecoveryReadRequest carries observations, not an execution grant. Both
+// boot and verification use the same partition and recovery-toggle decision.
+type StartupRecoveryReadRequest struct {
+	SourceArtifact    correlation.SourceArtifactFact
+	RecoveryOnStartup bool
+	ObservedAt        time.Time
+	Delivery          interface {
+		InspectDeliveryRecovery(context.Context, correlation.SourceArtifactFact) (runtimedelivery.RecoveryInventory, error)
 	}
-	if rt == nil {
-		return snapshot, nil
-	}
-	delivery, standingDelivery, err := rt.inspectDeliveryRecoveryInventory(ctx)
+	Timers           runtimetimerobligation.Reader
+	StandingRestarts runtimestanding.StandingRestartDispositionReader
+	ReadManagerState func(context.Context) (runtimemanager.RecoverableStateSnapshot, error)
+}
+
+func InspectStartupRecoveryAdmission(ctx context.Context, request StartupRecoveryReadRequest) (map[string]any, error) {
+	snapshot, err := inspectStartupRecoverySnapshot(ctx, request)
 	if err != nil {
-		snapshot.InspectionComplete = false
+		return snapshot.Detail(), err
+	}
+	decision := newStartupRecoveryDecisionReport(snapshot)
+	return decision.detail(), decision.denialError()
+}
+
+func (rt *Runtime) inspectStartupRecoverySnapshot(ctx context.Context, observedAt time.Time) (startupRecoverySnapshot, error) {
+	if rt == nil || rt.Config == nil {
+		return startupRecoverySnapshot{}, errors.New("startup recovery inspection requires resolved runtime config")
+	}
+	reader, err := rt.startupTimerObligationReader()
+	if err != nil {
+		return startupRecoverySnapshot{RecoveryOnStartup: rt.Config.Runtime.RecoveryOnStartup}, err
+	}
+	request := StartupRecoveryReadRequest{
+		SourceArtifact: rt.Options.SourceArtifactFact, RecoveryOnStartup: rt.Config.Runtime.RecoveryOnStartup,
+		ObservedAt: observedAt, Delivery: rt.deliveryStore, Timers: reader,
+		StandingRestarts: rt.standingRestartReader,
+	}
+	if rt.Pipeline != nil {
+		request.StandingRestarts = rt.Pipeline
+	}
+	if rt.Manager != nil {
+		request.ReadManagerState = rt.Manager.RecoverableStateSnapshot
+	}
+	return inspectStartupRecoverySnapshot(ctx, request)
+}
+
+func inspectStartupRecoverySnapshot(ctx context.Context, request StartupRecoveryReadRequest) (startupRecoverySnapshot, error) {
+	snapshot := startupRecoverySnapshot{
+		RecoveryOnStartup: request.RecoveryOnStartup,
+	}
+	if err := ctx.Err(); err != nil {
+		return snapshot, err
+	}
+	if err := request.SourceArtifact.Validate(); err != nil {
+		return snapshot, fmt.Errorf("startup recovery source: %w", err)
+	}
+	if request.ObservedAt.IsZero() || request.Delivery == nil || request.Timers == nil || request.StandingRestarts == nil || request.ReadManagerState == nil {
+		return snapshot, errors.New("startup recovery inspection requires an observation time and all delivery, timer, standing restart and manager readers")
+	}
+	delivery, standingDelivery, err := inspectDeliveryRecoveryInventory(ctx, request)
+	if err != nil {
 		return snapshot, err
 	}
 	snapshot.Delivery = delivery
 	snapshot.StandingDeliveryObligations = standingDelivery
-	reader, err := rt.startupTimerObligationReader()
+	obligations, err := request.Timers.ReadTimerObligations(ctx, runtimetimerobligation.All(), request.ObservedAt)
 	if err != nil {
-		snapshot.InspectionComplete = false
+		return snapshot, fmt.Errorf("inspect timer obligations: %w", err)
+	}
+	snapshot.TimerObligations = obligations
+	snapshot.StartupBlockingTimers += obligations.GlobalTotals().RecoverableCount
+	for _, run := range obligations.Runs {
+		recoverable := run.Totals().RecoverableCount
+		if recoverable == 0 {
+			continue
+		}
+		workflowTimers := 0
+		for _, family := range run.Families {
+			if family.Family == runtimetimerobligation.FamilyWorkflowTimer {
+				workflowTimers = family.RecoverableCount
+				break
+			}
+		}
+		disposition, err := request.StandingRestarts.StandingRunRestartDisposition(ctx, run.RunID)
+		if err != nil {
+			return snapshot, fmt.Errorf("classify standing timer obligations: %w", err)
+		}
+		if disposition.Executable() {
+			snapshot.StandingTimerObligations += recoverable
+			continue
+		}
+		if disposition.ExactCurrent() {
+			continue
+		}
+		snapshot.StartupBlockingTimers += recoverable
+		snapshot.StartupBlockingWorkflowTimers += workflowTimers
+	}
+	managerSnapshot, err := request.ReadManagerState(ctx)
+	if err != nil {
+		return snapshot, fmt.Errorf("inspect recoverable manager state: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
 		return snapshot, err
 	}
-	if reader != nil {
-		obligations, err := reader.ReadTimerObligations(ctx, runtimetimerobligation.All(), observedAt)
-		if err != nil {
-			snapshot.InspectionComplete = false
-			return snapshot, fmt.Errorf("inspect timer obligations: %w", err)
-		}
-		snapshot.TimerObligations = obligations
-		snapshot.StartupBlockingTimers += obligations.GlobalTotals().RecoverableCount
-		for _, run := range obligations.Runs {
-			recoverable := run.Totals().RecoverableCount
-			if recoverable == 0 {
-				continue
-			}
-			workflowTimers := 0
-			for _, family := range run.Families {
-				if family.Family == runtimetimerobligation.FamilyWorkflowTimer {
-					workflowTimers = family.RecoverableCount
-					break
-				}
-			}
-			if rt.Pipeline == nil {
-				snapshot.InspectionComplete = false
-				return snapshot, errors.New("classify timer obligations: standing restart disposition reader is required")
-			}
-			disposition, err := rt.Pipeline.StandingRunRestartDisposition(ctx, run.RunID)
-			if err != nil {
-				snapshot.InspectionComplete = false
-				return snapshot, fmt.Errorf("classify standing timer obligations: %w", err)
-			}
-			if disposition.Executable() {
-				snapshot.StandingTimerObligations += recoverable
-				continue
-			}
-			if disposition.ExactCurrent() {
-				continue
-			}
-			snapshot.StartupBlockingTimers += recoverable
-			snapshot.StartupBlockingWorkflowTimers += workflowTimers
-		}
-	}
-	if rt.Manager != nil {
-		managerSnapshot, err := rt.Manager.RecoverableStateSnapshot(ctx)
-		if err != nil {
-			snapshot.InspectionComplete = false
-			return snapshot, fmt.Errorf("inspect recoverable manager state: %w", err)
-		}
-		snapshot.Manager = managerSnapshot
-	}
+	snapshot.Manager = managerSnapshot
+	snapshot.InspectionComplete = true
 	return snapshot, nil
 }
 
 func (rt *Runtime) inspectDeliveryRecoveryInventory(ctx context.Context) (runtimedelivery.RecoveryInventory, int, error) {
-	if rt == nil || rt.deliveryStore == nil {
-		return runtimedelivery.RecoveryInventory{}, 0, nil
+	if rt == nil {
+		return runtimedelivery.RecoveryInventory{}, 0, errors.New("delivery recovery inspection requires runtime read dependencies")
 	}
-	inventory, err := rt.deliveryStore.InspectDeliveryRecovery(ctx, rt.Options.SourceArtifactFact)
+	request := StartupRecoveryReadRequest{SourceArtifact: rt.Options.SourceArtifactFact, Delivery: rt.deliveryStore, StandingRestarts: rt.standingRestartReader}
+	if rt.Pipeline != nil {
+		request.StandingRestarts = rt.Pipeline
+	}
+	return inspectDeliveryRecoveryInventory(ctx, request)
+}
+
+func inspectDeliveryRecoveryInventory(ctx context.Context, request StartupRecoveryReadRequest) (runtimedelivery.RecoveryInventory, int, error) {
+	if err := ctx.Err(); err != nil {
+		return runtimedelivery.RecoveryInventory{}, 0, err
+	}
+	if err := request.SourceArtifact.Validate(); err != nil {
+		return runtimedelivery.RecoveryInventory{}, 0, err
+	}
+	if request.Delivery == nil || request.StandingRestarts == nil {
+		return runtimedelivery.RecoveryInventory{}, 0, errors.New("delivery recovery inspection requires delivery and standing restart readers")
+	}
+	inventory, err := request.Delivery.InspectDeliveryRecovery(ctx, request.SourceArtifact)
 	if err != nil {
 		return runtimedelivery.RecoveryInventory{}, 0, fmt.Errorf("inspect executable delivery recovery: %w", err)
 	}
-	return partitionDeliveryRecoveryInventory(ctx, inventory, rt.Pipeline)
+	return partitionDeliveryRecoveryInventory(ctx, inventory, request.StandingRestarts)
 }
 
 func partitionDeliveryRecoveryInventory(

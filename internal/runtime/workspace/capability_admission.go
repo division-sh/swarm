@@ -85,10 +85,7 @@ func HostCapabilityTarget(cfg HostConfig, source semanticview.Source, actor mode
 			return nil, err
 		}
 	}
-	if strings.TrimSpace(cfg.SharedDataSource) != "" {
-		return nil, fmt.Errorf("workspace.data_source is unsupported")
-	}
-	root, err := hostWorkspaceRoot(cfg)
+	root, err := validateHostMountAdmission(cfg)
 	if err != nil {
 		return nil, err
 	}

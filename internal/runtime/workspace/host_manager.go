@@ -206,44 +206,37 @@ func (m *HostManager) ValidateSource(_ context.Context, source semanticview.Sour
 	if err := m.validateSharedMounts(); err != nil {
 		return err
 	}
-	classes, err := workspaceClassesForSource(source)
-	if err != nil {
-		return err
-	}
-	if err := validateAgentWorkspaceClasses(source, classes); err != nil {
-		return err
-	}
-	return nil
+	return ValidateHostSourceAdmission(m.cfg, source)
 }
 
-func (m *HostManager) EnsurePrereqs(context.Context) error {
+func (m *HostManager) EnsurePrereqs(ctx context.Context) error {
 	if err := m.beginProjectionOperation(); err != nil {
 		return err
 	}
 	defer m.projectionOps.Done()
-	return m.ensurePrereqs()
+	return m.ensurePrereqs(ctx)
 }
 
-func (m *HostManager) ensurePrereqs() error {
+func (m *HostManager) ensurePrereqs(ctx context.Context) error {
 	if err := m.validateSharedMounts(); err != nil {
 		return err
 	}
-	root, err := m.hostRoot()
+	inspection, err := InspectHostPrerequisites(ctx, m.cfg)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(root, 0o700); err != nil {
-		return fmt.Errorf("host workspace prerequisite failed: create workspace root %s: %w", root, err)
+	if err := os.MkdirAll(inspection.RootPath, 0o700); err != nil {
+		return fmt.Errorf("host workspace prerequisite failed: create workspace root %s: %w", inspection.RootPath, err)
 	}
-	return nil
+	return ctx.Err()
 }
 
-func (m *HostManager) EnsureSystemWorkspaces(context.Context) error {
+func (m *HostManager) EnsureSystemWorkspaces(ctx context.Context) error {
 	if err := m.beginProjectionOperation(); err != nil {
 		return err
 	}
 	defer m.projectionOps.Done()
-	if err := m.ensurePrereqs(); err != nil {
+	if err := m.ensurePrereqs(ctx); err != nil {
 		return err
 	}
 	for _, kind := range []durableWorkspaceKind{durableWorkspaceScaffold, durableWorkspaceSystem} {
@@ -457,14 +450,11 @@ func hostWorkspaceRoot(cfg HostConfig) (string, error) {
 }
 
 func (m *HostManager) validateSharedMounts() error {
-	if strings.TrimSpace(m.cfg.SharedDataSource) != "" {
-		return fmt.Errorf("workspace.data_source is unsupported")
-	}
-	sourceProjectionPath, err := validateSourceProjection(m.cfg.SourceProjection, m.cfg.BundleHash)
+	root, err := validateHostMountAdmission(m.cfg)
 	if err != nil {
 		return err
 	}
-	root, err := m.hostRoot()
+	sourceProjectionPath, err := validateSourceProjection(m.cfg.SourceProjection, m.cfg.BundleHash)
 	if err != nil {
 		return err
 	}
