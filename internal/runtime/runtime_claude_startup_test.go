@@ -217,6 +217,7 @@ func TestValidateClaudeStartupConfigForActiveAgents_RequiresFullCLIBindingForRec
 	}
 
 	opts.ToolGatewayBinding = testToolGatewayBinding("http://127.0.0.1:8081", "http://host.docker.internal:8081", "gateway-token")
+	opts.ProviderCredentials = testProviderCredentialStore(t, "", "")
 	err = validateClaudeStartupConfigForActiveAgents(testAuthorActivityContext(context.Background()), cfg, opts, claudeStartupAgentFreeSource(), manager)
 	failure, ok := runtimefailures.As(err)
 	if !ok || failure.Failure.Class != runtimefailures.ClassAuthenticationNeeded || failure.Failure.Detail.Code != "provider_credential_missing" {

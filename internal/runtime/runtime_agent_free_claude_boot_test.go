@@ -64,8 +64,9 @@ func TestNewRuntime_AgentPresentRequiresSelectedBackendCredential(t *testing.T) 
 	module := semanticOnlyWorkflowRuntime{source: loadPackageBackedRuntimeAgentMemorySource(t)}
 
 	_, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Options: RuntimeOptions{
-		SelfCheck:      false,
-		WorkflowModule: module,
+		SelfCheck:           false,
+		WorkflowModule:      module,
+		ProviderCredentials: testProviderCredentialStore(t, "", ""),
 	}})
 
 	failure, ok := runtimefailures.As(err)

@@ -193,15 +193,24 @@ func (am *AgentManager) InspectDynamicFlowRuntimeReadinessForSource(ctx context.
 	if err != nil {
 		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, err
 	}
+	return FilterDynamicFlowRuntimeReadiness(ctx, projection, am.roles.StandingRestarts, func(ctx context.Context, runID string) (bool, error) {
+		ownership, err := am.inspectRunExecutionOwnership(ctx, runID)
+		return ownership == RunExecutionOwned, err
+	})
+}
+
+// FilterDynamicFlowRuntimeReadiness consumes source applicability at inspection,
+// and actual grant ownership at boot. Its result never supplies either grant.
+func FilterDynamicFlowRuntimeReadiness(ctx context.Context, projection runtimepipeline.DynamicFlowRuntimeReadinessProjection, restarts runtimestanding.StandingRestartDispositionReader, applicable func(context.Context, string) (bool, error)) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error) {
 	if err := ctx.Err(); err != nil {
 		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, err
 	}
-	if am.roles.StandingRestarts == nil {
-		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, errors.New("dynamic flow runtime readiness requires standing restart disposition reader")
+	if restarts == nil || applicable == nil {
+		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, errors.New("dynamic flow runtime readiness requires standing restart and source applicability readers")
 	}
 	cache := make(map[string]runtimestanding.StandingRestartDisposition)
 	// This read-only inspection shares observations, never mutation authority.
-	ownershipCache := make(map[string]RunExecutionOwnership)
+	ownershipCache := make(map[string]bool)
 	filter := func(items []runtimepipeline.DynamicFlowRuntimeReadiness) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error) {
 		filtered := make([]runtimepipeline.DynamicFlowRuntimeReadiness, 0, len(items))
 		for _, item := range items {
@@ -212,19 +221,19 @@ func (am *AgentManager) InspectDynamicFlowRuntimeReadinessForSource(ctx context.
 			ownership, ok := ownershipCache[runID]
 			if !ok {
 				var err error
-				ownership, err = am.inspectRunExecutionOwnership(ctx, runID)
+				ownership, err = applicable(ctx, runID)
 				if err != nil {
 					return nil, fmt.Errorf("admit dynamic flow readiness run %s: %w", runID, err)
 				}
 				ownershipCache[runID] = ownership
 			}
-			if ownership != RunExecutionOwned {
+			if !ownership {
 				continue
 			}
 			disposition, ok := cache[runID]
 			if !ok {
 				var err error
-				disposition, err = am.roles.StandingRestarts.StandingRunRestartDisposition(ctx, runID)
+				disposition, err = restarts.StandingRunRestartDisposition(ctx, runID)
 				if err != nil {
 					return nil, fmt.Errorf("classify dynamic flow runtime readiness run %s: %w", runID, err)
 				}
@@ -236,6 +245,7 @@ func (am *AgentManager) InspectDynamicFlowRuntimeReadinessForSource(ctx context.
 		}
 		return filtered, nil
 	}
+	var err error
 	if projection.CurrentCompleted, err = filter(projection.CurrentCompleted); err != nil {
 		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, err
 	}

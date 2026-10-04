@@ -10,10 +10,8 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
-type AvailabilityReader = runbundle.ActiveAvailabilityReader
-
 type Request struct {
-	AvailabilityReader AvailabilityReader
+	AvailabilityReader runbundle.ActiveAvailabilityReader
 	ArtifactReader     ArtifactReader
 }
 

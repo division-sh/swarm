@@ -57,7 +57,6 @@ import (
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/devscratch"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
-	"github.com/division-sh/swarm/internal/versionmetadata"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
 )
@@ -2809,19 +2808,7 @@ func initializeLoadedServeRuntimeStateStores(ctx context.Context, schema store.S
 }
 
 func schemaBootstrapRequest(spec runtimecontracts.PlatformSpecDocument, platformPlans, statePlans []store.SchemaTableDDL) (store.SchemaBootstrapRequest, error) {
-	metadata, err := versionmetadata.Resolve(cliapp.InjectedBuildMetadata())
-	if err != nil {
-		return store.SchemaBootstrapRequest{}, fmt.Errorf("resolve schema bootstrap build identity: %w", err)
-	}
-	return store.SchemaBootstrapRequest{
-		PlatformPlans: platformPlans,
-		StatePlans:    statePlans,
-		Origin: store.RuntimeStoreOrigin{
-			SwarmVersion:    metadata.BinaryVersion,
-			PlatformVersion: strings.TrimSpace(spec.Platform.Version),
-			CreatedAt:       time.Now().UTC(),
-		},
-	}, nil
+	return cliapp.SchemaBootstrapRequest(spec, platformPlans, statePlans)
 }
 
 func ensureServeSchemaTables(ctx context.Context, schema store.SchemaBootstrapper, request store.SchemaBootstrapRequest) error {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -115,5 +116,81 @@ func TestVerifyAdmissionExitCategories(t *testing.T) {
 		if got := verifyAdmissionExitCode(item.decision); got != item.want {
 			t.Fatalf("decision=%#v exit=%d want=%d", item.decision, got, item.want)
 		}
+	}
+}
+
+func TestVerifyEarlyRefusalPreservesIncompleteLedgerOnPublicOutputs(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	root := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
+	missing := filepath.Join(t.TempDir(), "missing-config.yaml")
+	invalid := filepath.Join(t.TempDir(), "invalid-config.yaml")
+	writeRuntimeConfigText(t, invalid, "llm: [\n")
+	nonDirectory := filepath.Join(t.TempDir(), "not-a-directory")
+	writeRuntimeConfigText(t, nonDirectory, "not a source directory\n")
+	for _, item := range []struct {
+		name, source, config, check string
+	}{
+		{"missing_config", root, missing, "runtime_configuration"},
+		{"invalid_config", root, invalid, "runtime_configuration"},
+		{"non_directory_source", nonDirectory, writeTestVerifyRuntimeConfig(t), "source_path_selection"},
+	} {
+		for _, mode := range []string{"json", "text", "quiet"} {
+			t.Run(item.name+"/"+mode, func(t *testing.T) {
+				args := []string{"verify", item.source, "--config", item.config}
+				if mode != "text" {
+					args = append(args, "--"+mode)
+				}
+				var out, errOut bytes.Buffer
+				if code := executeRootCommand(context.Background(), RepoRoot(), args, &out, &errOut); code != CLIExitValidation {
+					t.Fatalf("exit=%d stdout=%s stderr=%s", code, out.String(), errOut.String())
+				}
+				if mode == "text" || mode == "quiet" {
+					if !strings.Contains(out.String(), "admission validation failed; startup execution not performed") || !strings.Contains(out.String(), "failed: "+item.check) || !strings.Contains(out.String(), "not_run:") {
+						t.Fatalf("refusal or unobserved tail was hidden: %s", out.String())
+					}
+					return
+				}
+				if errOut.Len() != 0 {
+					t.Fatalf("structured failure leaked to stderr: %s", errOut.String())
+				}
+				var result verifyCommandResult
+				if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+					t.Fatal(err)
+				}
+				if result.OK || result.ProductionValid || result.AdmissionComplete || result.ValidationScope != "deployment" || result.LiveReadiness != "not_evaluated" || result.Observations == nil || result.ExecutionObligations == nil || result.Members == nil {
+					t.Fatalf("early refusal fabricated readiness or omitted evidence: %#v", result)
+				}
+				failed, blocked := false, false
+				for _, observation := range result.Observations {
+					if observation.CheckID == item.check && observation.Status == runtimebootverify.AdmissionFailed {
+						failed = observation.Owner != "" && observation.Subject != "" && observation.Reason != "" && observation.FailureClass == failures.ClassSchemaInvalid
+					}
+					if observation.Status == runtimebootverify.AdmissionNotRun && len(observation.Dependencies) == 1 && observation.Dependencies[0] == item.check {
+						blocked = true
+					}
+				}
+				if !failed || !blocked {
+					t.Fatalf("missing refusal or dependency evidence: %#v", result.Observations)
+				}
+			})
+		}
+	}
+}
+
+func TestVerifyEarlyRefusalCancellationWinsExitDisposition(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var out, errOut bytes.Buffer
+	code := executeRootCommand(ctx, RepoRoot(), []string{"verify", ".", "--config", filepath.Join(t.TempDir(), "missing.yaml"), "--json"}, &out, &errOut)
+	if code != cliExitInterrupted || errOut.Len() != 0 {
+		t.Fatalf("cancellation lost precedence: exit=%d stdout=%s stderr=%s", code, out.String(), errOut.String())
+	}
+	var result verifyCommandResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.OK || result.AdmissionComplete || len(result.Observations) == 0 {
+		t.Fatalf("canceled admission became success: %#v", result)
 	}
 }

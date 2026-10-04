@@ -545,6 +545,8 @@ func TestRecoverRestoresSelectedContractRouteRecoveriesFromForkLocalOwner(t *tes
 	if len(bus.restored) != 0 {
 		t.Fatalf("current route restore was used for selected route recovery: %#v", bus.restored)
 	}
+	am.workflowInstances = &flowActivationTestInstanceStore{}
+	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(testFlowBundle(t, "")))
 	state, err := am.RecoverableStateSnapshot(testAuthorActivityContext(context.Background()))
 	if err != nil {
 		t.Fatalf("RecoverableStateSnapshot: %v", err)

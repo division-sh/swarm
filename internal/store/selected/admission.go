@@ -6,12 +6,16 @@ import (
 	"time"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -34,6 +38,12 @@ type admissionInspectionPort interface {
 	ListSelectedForkRecoveryEntries(context.Context) ([]runfork.SelectedForkRecoveryEntry, error)
 	ListSelectedContractRouteRecoveryRecords(context.Context) ([]manager.SelectedContractRouteRecoveryRecord, error)
 	ListActiveAgentDescriptors(context.Context, string) ([]runtimebus.ActiveAgentDescriptor, error)
+	StandingRunRestartDisposition(context.Context, string) (runlifecycle.StandingRestartDisposition, error)
+	InspectDynamicFlowRuntimeReadinessForSource(context.Context, correlation.SourceArtifactFact) (pipeline.DynamicFlowRuntimeReadinessProjection, error)
+	LoadAgents(context.Context) ([]manager.PersistedAgent, error)
+	ListFlowInstanceRoutes(context.Context) ([]flowidentity.RunScopedFlowInstance, error)
+	PipelineObligations() pipelineobligation.Store
+	ObserveOrdinaryRunSource(context.Context, correlation.SourceArtifactFact, string) (bool, error)
 }
 
 // AdmissionInspection is a read purpose, not an unactivated runtime owner.
@@ -101,6 +111,16 @@ type AdmissionSnapshot struct {
 	ctx   context.Context
 	store admissionInspectionPort
 	fresh bool
+}
+
+func (s *AdmissionSnapshot) RequiresSchemaPreparation() (bool, error) {
+	if s == nil || s.ctx == nil || s.store == nil {
+		return false, errors.New("selected admission read snapshot is required")
+	}
+	if err := s.ctx.Err(); err != nil {
+		return false, err
+	}
+	return s.fresh, nil
 }
 
 func (s *AdmissionSnapshot) readContext(caller context.Context) (context.Context, func(), error) {
@@ -206,4 +226,59 @@ func (s *AdmissionSnapshot) ListActiveAgentDescriptors(ctx context.Context, runI
 	}
 	defer done()
 	return s.store.ListActiveAgentDescriptors(ctx, runID)
+}
+
+func (s *AdmissionSnapshot) StandingRunRestartDisposition(ctx context.Context, runID string) (runlifecycle.StandingRestartDisposition, error) {
+	ctx, done, err := s.readContext(ctx)
+	if err != nil {
+		return runlifecycle.StandingRestartDisposition{}, err
+	}
+	defer done()
+	return s.store.StandingRunRestartDisposition(ctx, runID)
+}
+
+func (s *AdmissionSnapshot) InspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, source correlation.SourceArtifactFact) (pipeline.DynamicFlowRuntimeReadinessProjection, error) {
+	ctx, done, err := s.readContext(ctx)
+	if err != nil {
+		return pipeline.DynamicFlowRuntimeReadinessProjection{}, err
+	}
+	defer done()
+	projection, err := s.store.InspectDynamicFlowRuntimeReadinessForSource(ctx, source)
+	if err != nil {
+		return pipeline.DynamicFlowRuntimeReadinessProjection{}, err
+	}
+	return manager.FilterDynamicFlowRuntimeReadiness(ctx, projection, s, func(ctx context.Context, runID string) (bool, error) {
+		return s.store.ObserveOrdinaryRunSource(ctx, source, runID)
+	})
+}
+
+func (s *AdmissionSnapshot) LoadAgents(ctx context.Context) ([]manager.PersistedAgent, error) {
+	ctx, done, err := s.readContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	return s.store.LoadAgents(ctx)
+}
+
+func (s *AdmissionSnapshot) ListFlowInstanceRoutes(ctx context.Context) ([]flowidentity.RunScopedFlowInstance, error) {
+	ctx, done, err := s.readContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	return s.store.ListFlowInstanceRoutes(ctx)
+}
+
+func (s *AdmissionSnapshot) GlobalWorkPresence(ctx context.Context) (pipelineobligation.GlobalWorkPresence, error) {
+	ctx, done, err := s.readContext(ctx)
+	if err != nil {
+		return pipelineobligation.GlobalWorkPresence{}, err
+	}
+	defer done()
+	owner := s.store.PipelineObligations()
+	if owner == nil {
+		return pipelineobligation.GlobalWorkPresence{}, errors.New("selected pipeline obligation reader is required")
+	}
+	return owner.GlobalWorkPresence(ctx)
 }

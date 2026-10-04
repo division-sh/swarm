@@ -1,0 +1,292 @@
+package cliapp
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/bootverify"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/llm"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/publicingress"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"github.com/division-sh/swarm/internal/runtime/workspace"
+)
+
+const (
+	verifyObservationDeadline = 60 * time.Second
+	verifyLocalDeadline       = 5 * time.Second
+	verifyRemoteDeadline      = 15 * time.Second
+	verifyCleanupDeadline     = 5 * time.Second
+)
+
+func verifyDeploymentWorkflowOptions(ctx context.Context, cfg RuntimeConfigLoadResult, bundle *contracts.WorkflowContractBundle) (runtime.WorkflowContractValidationOptions, error) {
+	if err := ctx.Err(); err != nil {
+		return runtime.WorkflowContractValidationOptions{}, err
+	}
+	if cfg.Config == nil {
+		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("admitted runtime configuration is required")
+	}
+	credentials, err := BuildCredentialStore()
+	if err != nil {
+		return runtime.WorkflowContractValidationOptions{}, err
+	}
+	providerCredentials, err := BuildProviderCredentialStore()
+	if err != nil {
+		return runtime.WorkflowContractValidationOptions{}, err
+	}
+	managedCredentials, err := BuildManagedCredentialStore()
+	if err != nil {
+		return runtime.WorkflowContractValidationOptions{}, err
+	}
+	packs, err := LoadBundlePackRuntime(ctx, cfg, bundle, credentials, managedCredentials)
+	if err != nil {
+		return runtime.WorkflowContractValidationOptions{}, err
+	}
+	publication, err := channelonboarding.NewDeclaredOnlyChannelActivationPublication(packs.Channels.Bindings)
+	if err != nil {
+		return runtime.WorkflowContractValidationOptions{}, err
+	}
+	profile, err := cfg.Config.LLMBackendProfile()
+	if err != nil {
+		return runtime.WorkflowContractValidationOptions{}, err
+	}
+	opts := runtime.DefaultWorkflowContractValidationOptions(credentials, executionposture.Live)
+	opts.Purpose = bootverify.ExecutionValidation
+	opts.LLMProfile, opts.ModelAliases = profile, cfg.Config.LLM.Models
+	opts.ProviderCredentials, opts.ManagedCredentials = providerCredentials, managedCredentials
+	opts.ProviderTriggerCatalog, opts.ChannelPlans = packs.ProviderTriggers.Catalog, packs.Channels.Plans
+	opts.ChannelActivationPublication = publication
+	opts.MCPDiscoveryTimeout = verifyRemoteDeadline
+	return opts, nil
+}
+
+// This is presentation accounting around calls to existing semantic owners,
+// not a check registry or an alternative admission implementation.
+func verifyDeploymentObservation(ctx context.Context, result *runtime.WorkflowContractValidationResult, id, owner, subject string, failureClass failures.Class, inspect func(context.Context) error) bool {
+	observation := bootverify.AdmissionObservation{
+		CheckID: id, Owner: owner, Subject: subject, Class: bootverify.AdmissionDeploymentObservation,
+		StartedAt: time.Now().UTC(),
+	}
+	err := ctx.Err()
+	if err == nil {
+		err = inspect(ctx)
+	}
+	if ctx.Err() != nil {
+		err = ctx.Err()
+	}
+	observation.FinishedAt = time.Now().UTC()
+	if err == nil {
+		observation.Status = bootverify.AdmissionPassed
+		result.BootReport.Observations = append(result.BootReport.Observations, observation)
+		return true
+	}
+	if failure, ok := failures.As(err); ok {
+		failureClass = failure.Failure.Class
+	}
+	observation.Status, observation.FailureClass, observation.Reason = bootverify.AdmissionFailed, failureClass, FormatCLIAPIError(err)
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		observation.Status, observation.FailureClass = bootverify.AdmissionUnavailable, failures.ClassDependencyUnavailable
+		result.BootReport.Interrupted = result.BootReport.Interrupted || errors.Is(err, context.Canceled)
+	}
+	result.BootReport.Observations = append(result.BootReport.Observations, observation)
+	finding := bootverify.NewHardInvalidityFinding(id, subject, observation.Reason, "Resolve the named deployment admission prerequisite before startup.")
+	finding.FailureClass = observation.FailureClass
+	result.BootReport.Add(finding)
+	return false
+}
+
+func inspectVerifyDeployment(ctx context.Context, repo string, paths CLISourcePlatformSpecPaths, cfg RuntimeConfigLoadResult, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, result *runtime.WorkflowContractValidationResult) {
+	subject := "source:" + result.BootReport.SourceArtifactHash
+	verifyDeploymentObservation(ctx, result, "declared_model_admission", "internal/runtime.ValidateDeclaredAgentModelAdmission", subject, failures.ClassSchemaInvalid, func(context.Context) error {
+		return runtime.ValidateDeclaredAgentModelAdmission(executionposture.Live, cfg.Config, source)
+	})
+	var workspaceInspection workspace.Resolver
+	var backend WorkspaceBackendSelection
+	workspaceOK := verifyDeploymentObservation(ctx, result, "workspace_capability_admission", "internal/cliapp.DecideWorkspaceBackend", subject, failures.ClassSchemaInvalid, func(context.Context) error {
+		preference, err := ResolveWorkspaceBackend("", false, cfg.Config)
+		if err != nil {
+			return err
+		}
+		backend, err = DecideWorkspaceBackend(executionposture.Live, preference, cfg.Config, source)
+		if err != nil {
+			return err
+		}
+		switch backend.Backend {
+		case WorkspaceBackendNone:
+			return nil
+		case workspace.BackendDocker:
+			configured, configErr := dockerWorkspaceConfigFromRuntimeConfig(cfg.Config)
+			if configErr != nil {
+				return configErr
+			}
+			workspaceInspection, err = workspace.NewDockerCapabilityInspection(configured, source)
+		case workspace.BackendHost:
+			configured, configErr := hostWorkspaceConfigFromRuntimeConfig(cfg.Config)
+			if configErr != nil {
+				return configErr
+			}
+			workspaceInspection, err = workspace.NewHostCapabilityInspection(configured, source)
+		default:
+			return fmt.Errorf("unsupported admitted workspace backend %q", backend.Backend)
+		}
+		return err
+	})
+	verifyDeploymentObservation(ctx, result, "workspace_source_admission", "internal/runtime/workspace.ValidateSourceAdmission", subject, failures.ClassSchemaInvalid, func(context.Context) error {
+		if !workspaceOK {
+			return fmt.Errorf("workspace capability admission did not complete")
+		}
+		switch backend.Backend {
+		case WorkspaceBackendNone:
+			return nil
+		case workspace.BackendDocker:
+			configured, err := dockerWorkspaceConfigFromRuntimeConfig(cfg.Config)
+			if err != nil {
+				return err
+			}
+			return workspace.ValidateDockerSourceAdmission(configured, source)
+		case workspace.BackendHost:
+			configured, err := hostWorkspaceConfigFromRuntimeConfig(cfg.Config)
+			if err != nil {
+				return err
+			}
+			return workspace.ValidateHostSourceAdmission(configured, source)
+		default:
+			return fmt.Errorf("unsupported admitted workspace backend %q", backend.Backend)
+		}
+	})
+	providers, providerErr := llm.NewAgentProviderContracts(opts.LLMProfile)
+	verifyDeploymentObservation(ctx, result, "native_tool_admission", "internal/runtime/tools.ValidateNativeToolBootConfig", subject, failures.ClassSchemaInvalid, func(ctx context.Context) error {
+		if providerErr != nil {
+			return providerErr
+		}
+		if !workspaceOK {
+			return fmt.Errorf("workspace capability admission did not complete")
+		}
+		warnings, err := runtimetools.ValidateNativeToolBootConfig(ctx, executionposture.Live, opts.ModelAliases, source, opts.Credentials, providers, workspaceInspection)
+		for _, warning := range warnings {
+			result.BootReport.Add(bootverify.Finding{CheckID: "native_tool_admission", Location: subject, Severity: bootverify.SeveritySemanticDriftWarn, Message: warning.Error(), Remediation: "Review the canonical native-tool admission warning."})
+		}
+		return err
+	})
+	verifyDeploymentObservation(ctx, result, "declared_provider_prompt_admission", "internal/runtime.ManagedProviderStartupPrompt", subject, failures.ClassSchemaInvalid, func(ctx context.Context) error {
+		blueprints, err := manager.StaticAgentMaterializationBlueprints(source)
+		if err != nil {
+			return err
+		}
+		for _, blueprint := range blueprints {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			actor, err := manager.ResolveAgentMaterializationBlueprint(manager.AgentManagerOptions{
+				ExecutionPosture: executionposture.Live, LLMBackend: opts.LLMProfile.ID,
+				ModelAliases: opts.ModelAliases, RequireModelResolution: true,
+			}, blueprint)
+			if err != nil {
+				return err
+			}
+			if _, err := runtime.ManagedProviderStartupPrompt(actor.Config); err != nil {
+				return fmt.Errorf("agent %s provider prompt: %w", actor.Config.ID, err)
+			}
+			profile, err := llmselection.ResolveActiveBackend(actor.Config.ResolvedLLMBackend)
+			if err != nil {
+				return err
+			}
+			actorSubject := actor.Identity.Description()
+			verifyDeploymentObservation(ctx, result, "provider_environment_admission", "internal/runtime/llm.ValidateProviderAdmissionEnvironment", actorSubject, failures.ClassSchemaInvalid, func(context.Context) error {
+				return llm.ValidateProviderAdmissionEnvironment(profile)
+			})
+			verifyDeploymentObservation(ctx, result, "provider_credential_admission", "internal/runtime/llm.ProviderCredentialResolver.Resolve", actorSubject, failures.ClassAuthenticationNeeded, func(ctx context.Context) error {
+				_, err := llm.NewProviderCredentialResolver(opts.ProviderCredentials).Resolve(ctx, profile)
+				return err
+			})
+			if profile.ID == llmselection.BackendClaudeCLI {
+				result.BootReport.ExecutionObligations = append(result.BootReport.ExecutionObligations, bootverify.AdmissionExecutionObligation{
+					ID: "provider_visibility_and_gateway_handshake", Owner: "internal/runtime.ValidateManagedProviderPreflight", Subject: actorSubject,
+					Reason: "startup must settle provider-owned visibility and authorization under its own process capability and gateway binding",
+				})
+			}
+		}
+		return nil
+	})
+	inspectVerifyListeners(ctx, repo, cfg, result)
+	inspectVerifyWorkspaceDependencies(ctx, cfg, backend, workspaceOK, result)
+	inspectVerifyPublicIngress(ctx, result, subject)
+	inspectVerifySelectedStore(ctx, repo, paths, cfg, source, result)
+	// These prerequisites remain fail-closed until their audited consumers are
+	// connected; neither an empty error slice nor a structural pass settles them.
+	for _, pending := range []struct{ id, owner string }{
+		{"managed_provider_catalog_admission", "internal/runtime/llm.CompileManagedCapabilityAdmission"},
+	} {
+		result.BootReport.Observations = append(result.BootReport.Observations, bootverify.AdmissionObservation{
+			CheckID: pending.id, Owner: pending.owner, Subject: subject, Class: bootverify.AdmissionDeploymentObservation,
+			Status: bootverify.AdmissionNotRun, Reason: "required deployment observer has not completed",
+		})
+	}
+	result.BootReport.Sort()
+}
+
+func inspectVerifyPublicIngress(ctx context.Context, result *runtime.WorkflowContractValidationResult, subject string) {
+	intent := ServeOptions{}
+	mode, enabled, err := ResolveServePublicIngressMode(intent)
+	if err != nil {
+		verifyDeploymentObservation(ctx, result, "public_ingress_admission", "internal/cliapp.ResolveServePublicIngressMode", subject, failures.ClassSchemaInvalid, func(context.Context) error { return err })
+		return
+	}
+	if !enabled {
+		result.BootReport.Observations = append(result.BootReport.Observations, bootverify.AdmissionObservation{
+			CheckID: "public_ingress_admission", Owner: "internal/cliapp.ResolveServePublicIngressMode", Subject: subject, Class: bootverify.AdmissionDeploymentObservation,
+			Status: bootverify.AdmissionNotApplicable, Reason: "the selected non-dev serve intent does not request public exposure; different serve flags require separate admission",
+		})
+		return
+	}
+	verifyDeploymentObservation(ctx, result, "public_ingress_admission", "internal/runtime/publicingress.ValidateConfiguration", subject, failures.ClassSchemaInvalid, func(context.Context) error {
+		return publicingress.ValidateConfiguration(mode, intent.PublicWebhookBaseURL, intent.PublicWebhookListen)
+	})
+}
+
+func inspectVerifyListeners(ctx context.Context, repo string, cfg RuntimeConfigLoadResult, result *runtime.WorkflowContractValidationResult) {
+	var api, mcp string
+	valid := verifyDeploymentObservation(ctx, result, "serve_listener_configuration", "internal/cliapp.RuntimeConfigLoadResult.ResolveServeListeners", "project:"+repo, failures.ClassSchemaInvalid, func(context.Context) error {
+		var err error
+		api, mcp, err = cfg.ResolveServeListeners(ServeOptions{}, false, false)
+		return err
+	})
+	if !valid {
+		return
+	}
+	verifyDeploymentObservation(ctx, result, "serve_api_auth_admission", "internal/cliapp.ValidateServeAPIAuthBinding", "api:"+api, failures.ClassAuthenticationNeeded, func(context.Context) error {
+		root, err := NewInvocationRoot(repo)
+		if err != nil {
+			return err
+		}
+		auth, err := cfg.ResolveServeAPIAuth(root, ServeOptions{})
+		if err != nil {
+			return err
+		}
+		return ValidateServeAPIAuthBinding(api, auth)
+	})
+	for _, binding := range []struct{ name, addr string }{{"api", api}, {"mcp", mcp}} {
+		verifyDeploymentObservation(ctx, result, "listener_availability", "internal/cliapp.ListenServeHTTPListener", binding.name+":"+binding.addr, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
+			local, cancel := context.WithTimeout(ctx, verifyLocalDeadline)
+			defer cancel()
+			listener, err := ListenServeHTTPListenerInContext(local, binding.name, binding.addr)
+			if err != nil {
+				return err
+			}
+			return errors.Join(local.Err(), listener.Close())
+		})
+		result.BootReport.ExecutionObligations = append(result.BootReport.ExecutionObligations, bootverify.AdmissionExecutionObligation{
+			ID: "listener_binding", Owner: "internal/cliapp.ListenServeHTTPListener", Subject: binding.name + ":" + binding.addr,
+			Reason: "availability is an observation, not a reservation; startup must bind and publish its own listener",
+		})
+	}
+}

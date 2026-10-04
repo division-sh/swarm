@@ -841,8 +841,8 @@ func TestEnsurePrereqs_CreatesMissingNetworkAndFailsClosedForMissingImage(t *tes
 		switch {
 		case len(args) >= 3 && args[0] == "version":
 			return "26.1.0", nil
-		case len(args) >= 3 && args[0] == "network" && args[1] == "inspect":
-			return "", fmt.Errorf("no such network")
+		case len(args) >= 3 && args[0] == "network" && args[1] == "ls":
+			return "", nil // Successful exact-name observation: known absence.
 		case len(args) >= 3 && args[0] == "network" && args[1] == "create":
 			return "created", nil
 		case len(args) >= 3 && args[0] == "image" && args[1] == "inspect":
@@ -868,7 +868,7 @@ func TestEnsurePrereqs_CreatesMissingNetworkAndFailsClosedForMissingImage(t *tes
 	joined := flattenDockerCalls(calls)
 	for _, expected := range []string{
 		"version --format {{.Server.Version}}",
-		"network inspect test-network",
+		"network ls --filter name=test-network --format {{json .Name}}",
 		"network create test-network",
 		"image inspect test-image:latest",
 	} {

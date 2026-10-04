@@ -132,7 +132,7 @@ type runtimeShutdownDeliveryStore struct {
 	events    map[string]events.Event
 }
 
-func newRuntimeShutdownDeliveryStore(t *testing.T) *runtimeShutdownDeliveryStore {
+func newRuntimeShutdownDeliveryStore(t testing.TB) *runtimeShutdownDeliveryStore {
 	t.Helper()
 	db, err := sql.Open("sqlite", "file:"+uuid.NewString()+"?mode=memory&cache=shared")
 	if err != nil {

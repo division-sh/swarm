@@ -592,6 +592,14 @@ func (startupRecoveryMinimalEventStore) ListEventDeliveryRecipients(context.Cont
 
 func (startupRecoveryMinimalEventStore) SupportsPersistedReplay() bool { return false }
 
+func (startupRecoveryMinimalEventStore) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
+	return nil, nil
+}
+
+func (startupRecoveryMinimalEventStore) ListSelectedContractRouteRecoveryRecords(context.Context) ([]runtimemanager.SelectedContractRouteRecoveryRecord, error) {
+	return nil, nil
+}
+
 type startupRecoveryEventStore struct {
 	missing     []events.PersistedReplayEvent
 	routes      []runtimeflowidentity.RunScopedFlowInstance
@@ -628,6 +636,10 @@ func (startupRecoveryEventStore) DeleteFlowInstanceRoute(context.Context, runtim
 
 func (s startupRecoveryEventStore) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
 	return append([]runtimeflowidentity.RunScopedFlowInstance(nil), s.routes...), nil
+}
+
+func (startupRecoveryEventStore) ListSelectedContractRouteRecoveryRecords(context.Context) ([]runtimemanager.SelectedContractRouteRecoveryRecord, error) {
+	return nil, nil
 }
 
 func testRecoveryDiagnosticsConfig(recoveryOnStartup bool) *config.Config {
