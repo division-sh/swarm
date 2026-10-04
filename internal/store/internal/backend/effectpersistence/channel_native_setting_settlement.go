@@ -1,13 +1,10 @@
 package effectpersistence
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 
-	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 )
@@ -21,29 +18,31 @@ func requireChannelNativeSettingSettlementAuthorityTx(ctx context.Context, tx *s
 		settlement.OperationID != authority.ChannelNativeSetting.EffectOperationID {
 		return fmt.Errorf("native setting settlement authority is invalid")
 	}
-	query := `SELECT operation.authority_evidence, operation.authority_kind, operation.effect_kind,
+	query := `SELECT attempt.authority_evidence, original.authority_evidence, operation.authority_evidence, operation.authority_kind, operation.effect_kind,
 		operation.bundle_hash, attempt.state, attempt.execution_owner, attempt.fence_generation,
 		setting.generation, setting.install_operation_id
 		FROM runtime_external_effect_operations operation
 		JOIN runtime_external_effect_attempts attempt ON attempt.operation_id=operation.operation_id
+		JOIN runtime_external_effect_attempts original ON original.operation_id=operation.operation_id AND original.attempt_ordinal=1
 		JOIN channel_native_settings setting ON setting.setting_id=?
 		WHERE operation.operation_id=? AND attempt.attempt_id=?`
 	if postgres {
-		query = `SELECT operation.authority_evidence, operation.authority_kind, operation.effect_kind,
+		query = `SELECT attempt.authority_evidence, original.authority_evidence, operation.authority_evidence, operation.authority_kind, operation.effect_kind,
 			operation.bundle_hash, attempt.state, attempt.execution_owner, attempt.fence_generation,
 			setting.generation, setting.install_operation_id::text
 			FROM runtime_external_effect_operations operation
 			JOIN runtime_external_effect_attempts attempt ON attempt.operation_id=operation.operation_id
+			JOIN runtime_external_effect_attempts original ON original.operation_id=operation.operation_id AND original.attempt_ordinal=1
 			JOIN channel_native_settings setting ON setting.setting_id=$1::uuid
 			WHERE operation.operation_id=$2::uuid AND attempt.attempt_id=$3::uuid
 			FOR UPDATE OF operation, attempt, setting`
 	}
-	var storedEvidence []byte
+	var storedEvidence, originalEvidence, operationEvidence []byte
 	var kind, effectKind, bundleHash, state, owner, installOperationID string
 	var fence uint64
 	var generation int64
 	if err := tx.QueryRowContext(ctx, query, authority.ChannelNativeSetting.SettingID, settlement.OperationID, settlement.AttemptID).Scan(
-		&storedEvidence, &kind, &effectKind, &bundleHash, &state, &owner, &fence, &generation, &installOperationID,
+		&storedEvidence, &originalEvidence, &operationEvidence, &kind, &effectKind, &bundleHash, &state, &owner, &fence, &generation, &installOperationID,
 	); err != nil {
 		return fmt.Errorf("load exact native setting settlement attempt: %w", err)
 	}
@@ -53,17 +52,8 @@ func requireChannelNativeSettingSettlementAuthorityTx(ctx context.Context, tx *s
 		installOperationID != settlement.OperationID {
 		return fmt.Errorf("native setting settlement attempt contradicts authority")
 	}
-	wantRaw, err := json.Marshal(authority.Evidence())
-	if err != nil {
+	if err := requireChannelSettlementEvidence(authority, storedEvidence, originalEvidence, operationEvidence); err != nil {
 		return err
-	}
-	want, err := canonicaljson.Canonicalize(wantRaw)
-	if err != nil {
-		return err
-	}
-	got, err := canonicaljson.Canonicalize(storedEvidence)
-	if err != nil || !bytes.Equal(want, got) {
-		return fmt.Errorf("native setting settlement evidence contradicts original authority")
 	}
 	switch settlement.State {
 	case runtimeeffects.StateSettled, runtimeeffects.StateOutcomeUncertain:
