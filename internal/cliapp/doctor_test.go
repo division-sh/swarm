@@ -556,7 +556,7 @@ func TestPlatformSpecLocalClaudeCLIPreflightAdmissionPromoted(t *testing.T) {
 		}
 	}
 	doctor := spec.CLISpecification.CommandCatalog.Doctor
-	if doctor.Command != "swarm doctor [--backend claude_cli] [--target] [--schema-inventory] [--json]" || doctor.ImplementationStatus != "implemented" || !strings.Contains(doctor.Owner, "local_claude_cli_preflight_admission") {
+	if doctor.Command != "swarm doctor [--backend claude_cli] [--target] [--schema-inventory] [--gateway-probe] [--json]" || doctor.ImplementationStatus != "implemented" || !strings.Contains(doctor.Owner, "local_claude_cli_preflight_admission") {
 		t.Fatalf("doctor command catalog = %#v", doctor)
 	}
 	if !strings.Contains(doctor.Owner, "local_target_resolution_authority") {

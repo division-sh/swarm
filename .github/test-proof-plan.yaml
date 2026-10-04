@@ -490,7 +490,7 @@ units:
   hitl-releasee2e-rest:
     packages:
       - github.com/division-sh/swarm/internal/releasee2e
-    run: '^(Test($|[^CDG].*|DeclaredClockFiniteAndPublicReadbackBothStores|DeclaredClockNestedBinaryDeliveryBothStores|DurableDataOperationAggregatePublicRestartBothStores|GoldenI.*|Channel.*|Claude.*|Command.*|CompiledProcessLifecycle.*)|Example.*|Fuzz.*)$'
+    run: '^(Test($|[^CDG].*|DeclaredClockFiniteAndPublicReadbackBothStores|DeclaredClockNestedBinaryDeliveryBothStores|DurableDataOperationAggregatePublicRestartBothStores|GoldenI.*|Channel.*|Claude.*|Command.*|CompiledProcessLifecycle.*|CompiledWorkspace.*)|Example.*|Fuzz.*)$'
     required_children:
       TestDeclaredClockFiniteAndPublicReadbackBothStores: [sqlite, postgres]
       TestDeclaredClockNestedBinaryDeliveryBothStores: [sqlite, postgres]

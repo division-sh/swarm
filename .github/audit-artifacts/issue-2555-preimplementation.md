@@ -808,3 +808,39 @@ host-Claude permission or fallback was added to make the fixture pass.
 
 The complete 48-row gate and all remaining final-head/hosted/dependency
 conditions above remain unchanged.
+
+### Rebased source-census and fixture qualification
+
+Implementation is committed locally and rebased onto master dd27e4374,
+including C's forward repair. The exact complexity ratchet passes on ddc6e5fd5
+after extraction of the existing transport stages: cognitive hotspot counts
+564/189 remain 564/189, cyclomatic counts 263/54 remain 263/54. The existing
+maximum cyclomatic score moves 184 -> 186 and is not hidden by a baseline edit.
+
+`worker-rebased-owner-expanded-matrix.log` is an independently expanded
+seven-package RED receipt. It identified G-owned stale public CLI and proof
+inventory assertions, mock fixtures lacking required native/HTTP dependencies,
+and a credential fixture borrowing invented fork permissions. No master-red
+attribution or green closure is inferred. Corrected fixtures preserve exact
+catalogue visibility, credential dispatch cardinality and API-provider behavior;
+the mock notify-human branch now uses the native child and real HTTP gateway.
+Its injected host target is not workspace-adoption or Docker proof.
+
+The Q05/M13 source-derived ledger explicitly covers the ten added launch/write
+primitives. Their consumer partition is:
+
+| Primitive/consumer | Owner consumption and proof |
+| --- | --- |
+| `MockRuntime.continueSession -> executeMockCompletionWithExecutor -> executeWorkspaceMockModel -> RunWorker` (host Start and Docker exec Start) | Existing managed completion admission: Begin, initial heartbeat and committed MarkLaunched precede the exact model callback. Registration names both launch primitives; the dedicated delegated-source guard checks the chain and rejects missing admission/heartbeat/marker, wrong callback, tool mode and foreign model input. Existing managed-provider launch-boundary refusal and actual native mock frame proofs remain required execution evidence. |
+| `RunWorker` identity/list observation and `workerCommand` inspection | Existing workspace dependency owner; no model-attempt authority inferred from shared transport. Target/native identity and zero-model probe controls remain the execution oracle. |
+| Docker launch handshake and exact worker-exit observation | Same workspace/worker lifetime owner; protocol/real-Docker M09 proofs require exact invocation, retained failure and request/process join, never whole-container retirement. |
+| `toolgateway.HTTPObservation.rpc` | Internal MCP transport, not an authored HTTP tool or external provider effect owner. Real gateway auth/occurrence, both-store exact effect replay-refusal and no redispatch proofs bind actual effect admission to the existing gateway/executor owner. |
+| `ResolveForkChatWorkspace` isolated directory writes | Existing exact fork-chat workspace projection; no source/sibling writable authority. Public-H/real-Docker both-store source-continuity and foreign/stale pre-mutation refusal proofs remain binding. |
+| `VerifyBuiltWorker` identity-only image check | Existing operator image-build owner; no provider call or model execution. Compiled entry/image identity/ABI controls prove the different concept. |
+
+This is a source-census/proof correction within Q05/M13, not a new semantic
+owner, effect bypass or framework. General primitive-order checks remain strict;
+the sole shared-worker exception is adapter `mock_python` on the two exact
+registered branches, and negative mutation proofs reject other adapters/sites.
+Historical RED receipts, the expanded clean-head rerun, remaining 48-row proof,
+#2525 integration, hosted default-Linux proof and full/full remain separate.

@@ -872,6 +872,7 @@ var cliIdentifierNonResourceStringFlags = map[string]bool{
 	cliIdentifierRegistryKey("swarm new", "flag:output"):                            true,
 	cliIdentifierRegistryKey("swarm test", "flag:derive"):                           true,
 	cliIdentifierRegistryKey("swarm test", "flag:input"):                            true,
+	cliIdentifierRegistryKey("swarm test", "flag:workspace-backend"):                true,
 	cliIdentifierRegistryKey("swarm agent frame", "flag:scope"):                     true,
 	cliIdentifierRegistryKey("swarm agent deliveries", "flag:cursor"):               true,
 	cliIdentifierRegistryKey("swarm agent deliveries", "flag:delivery-status"):      true,
@@ -964,6 +965,7 @@ var cliIdentifierNonResourceStringFlags = map[string]bool{
 	cliIdentifierRegistryKey("swarm workspace build", "flag:backend"):               true,
 	cliIdentifierRegistryKey("swarm workspace build", "flag:docker-bin"):            true,
 	cliIdentifierRegistryKey("swarm workspace build", "flag:image"):                 true,
+	cliIdentifierRegistryKey("swarm workspace build", "flag:worker-binary"):         true,
 }
 
 func writeIdentifierRPCError(t *testing.T, w http.ResponseWriter, id, code string) {

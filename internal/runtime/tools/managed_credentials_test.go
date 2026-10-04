@@ -12,7 +12,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
-	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
@@ -303,25 +303,17 @@ func TestExecutorHTTPToolManagedCredentialServedAndMCPTransportsUseSameOwner(t *
 		}),
 	})
 	actor := managedCredentialActor()
+	actor.Identity = agentidentitytest.RuntimeForRun(t, "33333333-3333-4333-8333-333333333333", actor.ID, "managed-credential-gateway", "worker", "instance-1", actor.FlowPath)
 	gateway := runtimemcp.NewGateway(exec, "gateway-token", runtimemcp.GatewayHooks{
 		WithActor:        models.WithActor,
 		ActorFromContext: models.ActorFromContext,
-		ResolveTurnContext: func(token string) (runtimemcp.TurnContext, bool) {
-			if token != "ctx-managed" {
-				return runtimemcp.TurnContext{}, false
-			}
-			return runtimemcp.TurnContext{
-				Actor:              actor,
-				ForkSandboxAllowed: map[string]struct{}{"send_provider": {}},
-				DifferentOwner:     runtimeeffects.OwnerBuildTestInfrastructure,
-			}, true
-		},
+		ResolveTurnContext: fixedTurnContextResolver(t, actor),
 	})
 
 	toolBody, _ := json.Marshal(map[string]any{"input": map[string]any{}})
 	toolReq := httptest.NewRequest(http.MethodPost, "/tools/send_provider", bytes.NewReader(toolBody))
 	toolReq.Header.Set("Authorization", "Bearer gateway-token")
-	toolReq.Header.Set("X-SWARM-Context-Token", "ctx-managed")
+	toolReq.Header.Set("X-SWARM-Context-Token", "ctx-rate-limit")
 	toolRec := httptest.NewRecorder()
 	gateway.Handler().ServeHTTP(toolRec, toolReq)
 	if toolRec.Code != http.StatusOK {
@@ -339,7 +331,7 @@ func TestExecutorHTTPToolManagedCredentialServedAndMCPTransportsUseSameOwner(t *
 	})
 	mcpReq := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(mcpBody))
 	mcpReq.Header.Set("Authorization", "Bearer gateway-token")
-	mcpReq.Header.Set("X-SWARM-Context-Token", "ctx-managed")
+	mcpReq.Header.Set("X-SWARM-Context-Token", "ctx-rate-limit")
 	mcpRec := httptest.NewRecorder()
 	gateway.Handler().ServeHTTP(mcpRec, mcpReq)
 	if mcpRec.Code != http.StatusOK {
