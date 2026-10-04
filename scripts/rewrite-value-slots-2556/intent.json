@@ -760,26 +760,6 @@
     ]
   },
   {
-    "file": "internal/providertriggers/manifest_field_matrix_test.go",
-    "before_hash": "65e1951233a824b942f707c6164002a32edb9d4c83a0ae39fabaec88e1aec0f7",
-    "after_hash": "c7ade3d3cdd6d2877331eb5f3c1abd981a4e804032024401e30a804174333bca",
-    "edits": [
-      {
-        "start": 29,
-        "remove": [
-          "  when: {json_path: '$.kind', equals: challenge, normalize: false, missing_error: kind missing, mismatch_error: kind mismatch}"
-        ],
-        "add": [
-          "  when: {json_path: $.kind, equals: challenge, normalize: false, missing_error: kind missing, mismatch_error: kind mismatch}"
-        ]
-      }
-    ],
-    "slots": [
-      "challenge.when.json_path: unquote boolean control",
-      "reviewed generator, partial replacement anchors and typed/negative oracles migrate together; no data-file grammar change"
-    ]
-  },
-  {
     "file": "internal/releasee2e/entity_progressive_presence_test.go",
     "before_hash": "e31868aedfad47227d37145aaa41edf20b0f7fee1b3f28cd63cca8b5b8a5b773",
     "after_hash": "b8b89b0b3cefb2051b531b7eba3457caf6c1916bc6f9e9b03f41e7052f19a9ac",
@@ -6301,7 +6281,7 @@
   {
     "file": "internal/runtime/testfixtures/canonicalrouting/publication_sites.go",
     "before_hash": "3ffac539a3948dc55691e2e2201b9294cc7a27f387f961f025c0f3ebb578c1aa",
-    "after_hash": "703da8e1dfc844e4f7d03ec5336d083ac34f5111b797599c0f813ff2c0d974d8",
+    "after_hash": "82b68c03a27aa7fd268d106300158c9e222a05151ef894b33571a7ee14f437a5",
     "edits": [
       {
         "start": 34,
@@ -6363,43 +6343,23 @@
           "\t\t\t\t\tselected = fmt.Sprintf(\"{fields: {value: {literal: %s}}}\", literal)"
         ],
         "add": [
-          "\t\t\t\t\tselected = fmt.Sprintf(\"{fields: {value: %s}}\", literal)",
-          "\t\t\t\t}",
-          "\t\t\t\tpredicate := \"\"",
-          "\t\t\t\tif choice.condition != \"else\" {",
-          "\t\t\t\t\tpredicate = fmt.Sprintf(\"          condition: %s\\n\", choice.condition)"
+          "\t\t\t\t\tselected = fmt.Sprintf(\"{fields: {value: %s}}\", literal)"
         ]
       },
       {
         "start": 85,
         "remove": [
-          "\t\t\t\tpredicate := fmt.Sprintf(\"condition: '%s'\", choice.condition)"
-        ]
-      },
-      {
-        "start": 87,
-        "remove": [
-          "\t\t\t\t\tpredicate = fmt.Sprintf(\"when: '%s'\", choice.condition)"
-        ],
-        "add": [
-          "\t\t\t\t\tpredicate = fmt.Sprintf(\"          when: %s\\n\", choice.condition)"
-        ]
-      },
-      {
-        "start": 89,
-        "remove": [
-          "\t\t\t\t\t\tpredicate = \"else: true\""
-        ],
-        "add": [
-          "\t\t\t\t\t\tpredicate = \"          else: true\\n\""
-        ]
-      },
-      {
-        "start": 92,
-        "remove": [
+          "\t\t\t\tpredicate := fmt.Sprintf(\"condition: '%s'\", choice.condition)",
+          "\t\t\t\tif placement == \"rules\" {",
+          "\t\t\t\t\tpredicate = fmt.Sprintf(\"when: '%s'\", choice.condition)",
+          "\t\t\t\t\tif choice.condition == \"else\" {",
+          "\t\t\t\t\t\tpredicate = \"else: true\"",
+          "\t\t\t\t\t}",
+          "\t\t\t\t}",
           "\t\t\t\tbody += fmt.Sprintf(\"        - id: %s\\n          %s\\n          emit: %s\\n\", choice.name, predicate, selected)"
         ],
         "add": [
+          "\t\t\t\tpredicate := publicationChoicePredicate(placement, choice.condition)",
           "\t\t\t\tbody += fmt.Sprintf(\"        - id: %s\\n%s          emit: %s\\n\", choice.name, predicate, selected)"
         ]
       },
@@ -6464,6 +6424,24 @@
         ],
         "add": [
           "\t\t\t\tdriver += fmt.Sprintf(\"%s:\\n  execution_type: system_node\\n  subscribes_to: [%s]\\n  event_handlers:\\n    %s:\\n      emit: {event: %s, fields: {case_id: payload.case_id, choice: payload.choice, items: payload.items}}\\n\", family, request, request, dispatch)"
+        ]
+      },
+      {
+        "start": 176,
+        "add": [
+          "func publicationChoicePredicate(placement, condition string) string {",
+          "\tif placement == \"rules\" {",
+          "\t\tif condition == \"else\" {",
+          "\t\t\treturn \"          else: true\\n\"",
+          "\t\t}",
+          "\t\treturn fmt.Sprintf(\"          when: %s\\n\", condition)",
+          "\t}",
+          "\tif condition == \"else\" {",
+          "\t\treturn \"\"",
+          "\t}",
+          "\treturn fmt.Sprintf(\"          condition: %s\\n\", condition)",
+          "}",
+          ""
         ]
       }
     ],

@@ -160,31 +160,43 @@ func apply(root, ledger string, write, check bool) error {
 	if err := json.Unmarshal(data, &plan); err != nil {
 		return err
 	}
+	outputs, err := prepareOutputs(root, plan, check)
+	if err != nil {
+		return err
+	}
+	return writeOutputs(root, plan, outputs, write)
+}
+
+func prepareOutputs(root string, plan []change, check bool) (map[string][]byte, error) {
 	outputs := map[string][]byte{}
 	for _, c := range plan {
 		if filepath.IsAbs(c.File) || filepath.Clean(c.File) != c.File || strings.HasPrefix(c.File, "..") {
-			return fmt.Errorf("invalid ledger path %q", c.File)
+			return nil, fmt.Errorf("invalid ledger path %q", c.File)
 		}
 		if _, duplicate := outputs[c.File]; duplicate {
-			return fmt.Errorf("duplicate reviewed file %s", c.File)
+			return nil, fmt.Errorf("duplicate reviewed file %s", c.File)
 		}
 		data, err := os.ReadFile(filepath.Join(root, c.File))
 		if err != nil {
-			return err
+			return nil, err
 		}
 		output, err := rewriteFile(c.File, data, []change{c})
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if bytes.Equal(output, data) {
 			outputs[c.File] = nil
 			continue
 		}
 		if check {
-			return fmt.Errorf("unapplied reviewed changes in %s", c.File)
+			return nil, fmt.Errorf("unapplied reviewed changes in %s", c.File)
 		}
 		outputs[c.File] = output
 	}
+	return outputs, nil
+}
+
+func writeOutputs(root string, plan []change, outputs map[string][]byte, write bool) error {
 	// Refuse the entire plan before writing any output if any anchor drifted.
 	changed := 0
 	for _, c := range plan {

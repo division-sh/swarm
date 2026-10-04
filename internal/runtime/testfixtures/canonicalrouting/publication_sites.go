@@ -83,16 +83,7 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 				if family == "specialized" {
 					selected = fmt.Sprintf("{fields: {value: %s}}", literal)
 				}
-				predicate := ""
-				if choice.condition != "else" {
-					predicate = fmt.Sprintf("          condition: %s\n", choice.condition)
-				}
-				if placement == "rules" {
-					predicate = fmt.Sprintf("          when: %s\n", choice.condition)
-					if choice.condition == "else" {
-						predicate = "          else: true\n"
-					}
-				}
+				predicate := publicationChoicePredicate(placement, choice.condition)
 				body += fmt.Sprintf("        - id: %s\n%s          emit: %s\n", choice.name, predicate, selected)
 			}
 		case "success":
@@ -175,6 +166,19 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 	writeClosedVariantFile(t, root, "sibling/events.yaml", siblingEvents)
 	writeClosedVariantFile(t, root, "sibling/nodes.yaml", siblingProducers+local)
 	return root
+}
+
+func publicationChoicePredicate(placement, condition string) string {
+	if placement == "rules" {
+		if condition == "else" {
+			return "          else: true\n"
+		}
+		return fmt.Sprintf("          when: %s\n", condition)
+	}
+	if condition == "else" {
+		return ""
+	}
+	return fmt.Sprintf("          condition: %s\n", condition)
 }
 
 func requestSchemasToPins(families []string) string {

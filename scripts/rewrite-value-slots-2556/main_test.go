@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -120,5 +121,34 @@ func TestRewrite2556ExactFilePlanOutsideRepository(t *testing.T) {
 	}
 	if err := apply(root, "plan.json", true, false); err == nil {
 		t.Fatal("unknown source accepted")
+	}
+}
+
+func TestRewrite2556RefusesEntirePlanBeforeWrites(t *testing.T) {
+	root := t.TempDir()
+	before, after := []byte("value: ${payload.value}\n"), []byte("value: payload.value\n")
+	var plan []change
+	for _, name := range []string{"first.yaml", "last.yaml"} {
+		if err := os.WriteFile(filepath.Join(root, name), before, 0600); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, change{File: name, BeforeHash: digest(before), AfterHash: digest(after), Edits: []lineEdit{{Start: 0, Remove: []string{"value: ${payload.value}"}, Add: []string{"value: payload.value"}}}})
+	}
+	plan[1].Edits[0].Remove = []string{"unmatched anchor"}
+	data, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "plan.json"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := apply(root, "plan.json", true, false); err == nil || !strings.Contains(err.Error(), "anchor drift") {
+		t.Fatalf("missing late-anchor refusal: %v", err)
+	}
+	for _, c := range plan {
+		got, err := os.ReadFile(filepath.Join(root, c.File))
+		if err != nil || string(got) != string(before) {
+			t.Fatalf("partial write to %s: %q, %v", c.File, got, err)
+		}
 	}
 }
