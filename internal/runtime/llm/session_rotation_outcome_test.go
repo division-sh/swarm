@@ -166,7 +166,7 @@ func TestSessionPreparationAndProvidersReleaseAcknowledgedAcquireOnError(t *test
 			case "responses":
 				_, err = NewOpenAIResponsesRuntime(cfg, registry, "worker-1", nil, nil).continueSession(ctx, session, Message{}, nil)
 			case "mock":
-				_, err = NewMockRuntime(cfg, registry, "worker-1", nil, nil, nil).continueSession(ctx, session, Message{}, nil)
+				_, err = NewMockRuntime(cfg, registry, "worker-1", nil, nil, nil, MockRuntimeOptions{}).continueSession(ctx, session, Message{}, nil)
 			}
 			if !errors.Is(err, failure) || !errors.Is(err, cleanup) {
 				t.Fatalf("lost independent error: %v", err)
@@ -209,7 +209,7 @@ func TestSessionStartReleasesCommittedAcquireOnErrorOrCancellation(t *testing.T)
 				case "responses":
 					runtime = NewOpenAIResponsesRuntime(cfg, registry, "worker-1", nil, publisher)
 				case "mock":
-					runtime = NewMockRuntime(cfg, registry, "worker-1", nil, publisher, nil)
+					runtime = NewMockRuntime(cfg, registry, "worker-1", nil, publisher, nil, MockRuntimeOptions{})
 				}
 				result, err := runtime.StartSession(ctx, identity.AgentID(), "system", nil)
 				if result != nil || !errors.Is(err, cleanup) || phase == "handoff_error" && !errors.Is(err, failure) {

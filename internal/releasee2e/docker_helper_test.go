@@ -1,7 +1,9 @@
 package releasee2e
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
@@ -14,12 +16,17 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
+	"os/signal"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/workspace/worker"
 )
 
 const (
@@ -70,6 +77,8 @@ type fakeDockerContainer struct {
 	Running     bool              `json:"running"`
 	Labels      map[string]string `json:"labels,omitempty"`
 	ProviderKey string            `json:"provider_key,omitempty"`
+	WorkerPath  string            `json:"worker_path,omitempty"`
+	ExtraHosts  []string          `json:"extra_hosts,omitempty"`
 }
 
 type fakeDockerState struct {
@@ -89,6 +98,7 @@ type fakeDockerRecord struct {
 	RawMCPURL   string   `json:"raw_mcp_url,omitempty"`
 	MCPURL      string   `json:"mcp_url,omitempty"`
 	Reason      string   `json:"reason,omitempty"`
+	WorkerMode  string   `json:"worker_mode,omitempty"`
 }
 
 type fakeClaudeInvocation struct {
@@ -102,6 +112,9 @@ type fakeClaudeInvocation struct {
 }
 
 func TestMain(m *testing.M) {
+	if len(os.Args) > 1 && os.Args[1] == realDockerProxyArgument {
+		os.Exit(runWorkspaceDockerProxy(os.Args[2:]))
+	}
 	if os.Getenv(fakeDockerHelperEnv) == "1" {
 		os.Exit(runFakeDocker(fakeDockerArgs(os.Args)))
 	}
@@ -262,6 +275,11 @@ func runFakeDocker(args []string) int {
 		return 0
 	case "inspect":
 		return fakeDockerInspect(root, args)
+	case "top":
+		// This fixture joins its native subprocess before returning from exec.
+		// It does not earn real Docker remote-lifetime proof.
+		fmt.Fprintln(os.Stdout, "PID COMMAND\n1 sleep infinity")
+		return 0
 	case "create":
 		return fakeDockerCreate(root, args)
 	case "start":
@@ -318,13 +336,17 @@ func validateReleaseDockerCommand(root string, args []string) error {
 			return fmt.Errorf("unsupported Docker inspect shape")
 		}
 		switch args[2] {
-		case "{{.State.Running}}", "{{json .}}", "{{json .Mounts}}", "{{json .Config.Labels}}":
+		case "{{.Id}}", "{{.State.Running}}", "{{json .}}", "{{json .Mounts}}", "{{json .Config.Labels}}", `{"hosts":{{json .HostConfig.ExtraHosts}},"mounts":{{json .Mounts}}}`:
 		default:
 			return fmt.Errorf("unsupported Docker inspect format")
 		}
 	case "create":
 		if err := validateReleaseDockerCreate(root, args); err != nil {
 			return err
+		}
+	case "top":
+		if len(args) != 4 || !releaseDockerKnownTarget(root, args[1]) || args[2] != "-eo" || args[3] != "pid,args" {
+			return fmt.Errorf("unsupported exact worker process observation")
 		}
 	case "start", "stop":
 		if len(args) != 2 || !releaseDockerKnownTarget(root, args[1]) {
@@ -368,6 +390,8 @@ type releaseDockerCreate struct {
 	volumesFrom   string
 	providerMount string
 	providerTmpfs string
+	workerPath    string
+	extraHosts    []string
 }
 
 func validateReleaseDockerCreate(root string, args []string) error {
@@ -386,6 +410,15 @@ func validateReleaseDockerCreate(root string, args []string) error {
 	}
 	if base, provider := releaseProviderContainerBase(create.name); provider {
 		return validateReleaseProviderCreate(root, base, create)
+	}
+	if runtime.GOOS == "linux" {
+		if !equalStrings(create.extraHosts, []string{"host.docker.internal:host-gateway"}) || !filepath.IsAbs(create.workerPath) {
+			return fmt.Errorf("workspace create omitted exact gateway alias or native worker mount")
+		}
+		info, err := os.Stat(create.workerPath)
+		if err != nil || !info.Mode().IsRegular() || info.Mode()&0o111 == 0 {
+			return fmt.Errorf("workspace worker mount is not an executable regular file")
+		}
 	}
 	if create.volumesFrom != "" || create.providerMount != "" || create.providerTmpfs != "" {
 		return fmt.Errorf("provider mounts on ordinary workspace")
@@ -473,7 +506,7 @@ func parseReleaseDockerCreate(args []string) (releaseDockerCreate, error) {
 	}
 	for index := 1; index < len(args); {
 		switch args[index] {
-		case "--name", "--network", "-w", "-v", "--label", "--volumes-from", "--mount", "--tmpfs":
+		case "--name", "--network", "-w", "-v", "--label", "--volumes-from", "--mount", "--tmpfs", "--add-host":
 			if index+1 >= len(args) {
 				return create, fmt.Errorf("create option %s omitted its value", args[index])
 			}
@@ -502,10 +535,19 @@ func parseReleaseDockerCreate(args []string) (releaseDockerCreate, error) {
 				}
 				create.volumesFrom = value
 			case "--mount":
+				if strings.HasPrefix(value, "type=bind,source=") && strings.HasSuffix(value, ",destination=/opt/swarm/bin/swarm,readonly") {
+					if create.workerPath != "" {
+						return create, fmt.Errorf("duplicate worker mount")
+					}
+					create.workerPath = strings.TrimSuffix(strings.TrimPrefix(value, "type=bind,source="), ",destination=/opt/swarm/bin/swarm,readonly")
+					break
+				}
 				if create.providerMount != "" {
 					return create, fmt.Errorf("duplicate --mount")
 				}
 				create.providerMount = value
+			case "--add-host":
+				create.extraHosts = append(create.extraHosts, value)
 			case "--tmpfs":
 				if create.providerTmpfs != "" {
 					return create, fmt.Errorf("duplicate --tmpfs")
@@ -768,9 +810,13 @@ func validateReleaseDockerLabels(create releaseDockerCreate, bundleScope, kind, 
 			if !validReleaseUUID(runID) {
 				return fmt.Errorf("create agent run identity is invalid")
 			}
-			allowed["dev.swarm.data_projection_id"] = true
-			if !validReleaseDataProjectionID(projectionID) {
-				return fmt.Errorf("create agent data projection identity is invalid")
+			// Activation observes the gateway before a live data projection is
+			// materialized. Execution containers still carry and validate it.
+			if projectionID != "" {
+				allowed["dev.swarm.data_projection_id"] = true
+				if !validReleaseDataProjectionID(projectionID) {
+					return fmt.Errorf("create agent data projection identity is invalid")
+				}
 			}
 		} else if projectionID != "" {
 			return fmt.Errorf("create run-independent agent carries data projection identity")
@@ -922,6 +968,8 @@ func fakeDockerInspect(root string, args []string) int {
 		return 1
 	}
 	switch format {
+	case "{{.Id}}":
+		fmt.Fprintln(os.Stdout, container.ID)
 	case "{{.State.Running}}":
 		fmt.Fprintln(os.Stdout, container.Running)
 	case "{{json .Config.Labels}}":
@@ -934,6 +982,12 @@ func fakeDockerInspect(root string, args []string) int {
 		})
 	case "{{json .Mounts}}":
 		fmt.Fprintln(os.Stdout, "[]")
+	case `{"hosts":{{json .HostConfig.ExtraHosts}},"mounts":{{json .Mounts}}}`:
+		var mounts []map[string]any
+		if container.WorkerPath != "" {
+			mounts = append(mounts, map[string]any{"Type": "bind", "Source": container.WorkerPath, "Destination": "/opt/swarm/bin/swarm", "RW": false})
+		}
+		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"hosts": container.ExtraHosts, "mounts": mounts})
 	default:
 		return fakeDockerUnexpected(root, args, "unsupported inspect format")
 	}
@@ -941,6 +995,10 @@ func fakeDockerInspect(root string, args []string) int {
 }
 
 func fakeDockerCreate(root string, args []string) int {
+	create, err := parseReleaseDockerCreate(args)
+	if err != nil {
+		return fakeDockerUnexpected(root, args, err.Error())
+	}
 	name := dockerOptionValue(args, "--name")
 	if name == "" {
 		return fakeDockerUnexpected(root, args, "create omitted --name")
@@ -966,7 +1024,7 @@ func fakeDockerCreate(root string, args []string) int {
 			state.ContainerIDs = map[string]string{}
 		}
 		state.ContainerIDs[id] = name
-		container := fakeDockerContainer{ID: id, Labels: labels}
+		container := fakeDockerContainer{ID: id, Labels: labels, WorkerPath: create.workerPath, ExtraHosts: create.extraHosts}
 		if mount := dockerOptionValue(args, "--mount"); os.Getenv(releaseResourceReadEnv) == "1" && mount != "" {
 			container.ProviderKey = strings.TrimSuffix(strings.TrimPrefix(mount, "type=volume,source="), ",target=/opt/swarm/provider/claude")
 			if state.ProviderVolumes == nil {
@@ -1016,16 +1074,18 @@ func fakeDockerRemove(root string, args []string) int {
 	}
 	name := args[2]
 	var exists bool
+	var removedID string
 	withFakeDockerState(root, func(state *fakeDockerState) {
 		name = releaseDockerTargetName(state, name)
-		_, exists = state.Containers[name]
+		container, ok := state.Containers[name]
+		exists, removedID = ok, container.ID
 		delete(state.Containers, name)
 	})
 	if !exists {
 		fmt.Fprintf(os.Stderr, "Error: No such object: %s\n", name)
 		return 1
 	}
-	recordFakeDocker(root, fakeDockerRecord{Class: "container_remove", Args: redactDockerArgs(args)})
+	recordFakeDocker(root, fakeDockerRecord{Class: "container_remove", ContainerID: removedID, Args: redactDockerArgs(args)})
 	return 0
 }
 
@@ -1298,6 +1358,9 @@ func validateReleaseMCPConfig(raw string) (string, string, map[string]string, er
 }
 
 func fakeDockerExec(root string, args []string) int {
+	if len(args) == 7 && args[1] == "-i" && args[2] == "-w" && args[5] == "/opt/swarm/bin/swarm" && strings.HasPrefix(args[6], worker.Argument+"=") {
+		return fakeDockerWorker(root, args)
+	}
 	input, err := io.ReadAll(os.Stdin)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "read Docker exec stdin: %v\n", err)
@@ -1333,6 +1396,90 @@ func fakeDockerExec(root string, args []string) int {
 		return 0
 	}
 	return runFakeClaudeTurn(root, invocation)
+}
+
+// The legacy Docker emulator executes the mounted native worker and real HTTP
+// probe. Endpoint translation models its host process; it earns no Docker proof.
+func fakeDockerWorker(root string, args []string) int {
+	if _, err := worker.InvocationArgument(strings.TrimPrefix(args[6], worker.Argument+"=")); err != nil {
+		return fakeDockerUnexpected(root, args, "invalid native worker launch coordinate")
+	}
+	ownedInput, err := worker.InterruptibleInput(os.Stdin)
+	if err != nil {
+		return fakeDockerUnexpected(root, args, "native worker input cannot be joined")
+	}
+	defer ownedInput.Close()
+	reader := bufio.NewReader(ownedInput)
+	input, err := worker.ReadFrame(reader)
+	if err != nil {
+		return fakeDockerUnexpected(root, args, "invalid native worker request frame")
+	}
+	var container fakeDockerContainer
+	withFakeDockerState(root, func(state *fakeDockerState) {
+		container = state.Containers[releaseDockerTargetName(state, args[4])]
+	})
+	if !container.Running || container.WorkerPath == "" || (args[3] != releaseE2EAgentWorkdir && args[3] != releaseE2ESystemWorkdir) {
+		return fakeDockerUnexpected(root, args, "worker target is not a running admitted workspace")
+	}
+	var request map[string]json.RawMessage
+	var mode string
+	if err := json.Unmarshal(input, &request); err != nil {
+		return fakeDockerUnexpected(root, args, "invalid native worker request")
+	}
+	if err := json.Unmarshal(request["mode"], &mode); err != nil || (mode != "identity" && mode != "probe" && mode != "gateway") {
+		return fakeDockerUnexpected(root, args, "unsupported native worker request")
+	}
+	var gateway struct {
+		URL     string            `json:"url"`
+		Headers map[string]string `json:"headers"`
+	}
+	if err := json.Unmarshal(request["gateway"], &gateway); err != nil {
+		return fakeDockerUnexpected(root, args, "invalid native worker gateway")
+	}
+	if gateway.URL != "" {
+		endpoint, err := hostReachableMCPURL(gateway.URL)
+		if err != nil {
+			return fakeDockerUnexpected(root, args, err.Error())
+		}
+		gateway.URL = endpoint
+		request["gateway"], err = json.Marshal(gateway)
+		if err != nil {
+			return fakeDockerUnexpected(root, args, err.Error())
+		}
+	}
+	raw, err := json.Marshal(request)
+	if err != nil {
+		return fakeDockerUnexpected(root, args, err.Error())
+	}
+	recordFakeDocker(root, fakeDockerRecord{Class: "workspace_worker", ContainerID: container.ID, WorkerMode: mode})
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	command := exec.CommandContext(ctx, container.WorkerPath, args[6])
+	stdin, err := command.StdinPipe()
+	if err != nil {
+		return fakeDockerUnexpected(root, args, "native worker pipe failed")
+	}
+	defer stdin.Close()
+	command.Stdout, command.Stderr = os.Stdout, os.Stderr
+	if err := command.Start(); err != nil {
+		return fakeDockerUnexpected(root, args, "native worker process failed")
+	}
+	joined := make(chan struct{})
+	go func() {
+		defer close(joined)
+		defer stdin.Close()
+		if _, err := stdin.Write(append(raw, '\n')); err == nil {
+			_, _ = io.Copy(stdin, reader)
+		}
+	}()
+	err = command.Wait()
+	_ = ownedInput.Close()
+	_ = os.Stdin.Close()
+	<-joined
+	if err != nil {
+		return fakeDockerUnexpected(root, args, "native worker process failed")
+	}
+	return 0
 }
 
 func runFakeClaudeTurn(root string, invocation fakeClaudeInvocation) int {

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,7 +25,6 @@ import (
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -50,6 +50,7 @@ func TestForkChatSandboxBuildsCanonicalMockAdapter(t *testing.T) {
 		&config.Config{Runtime: config.RuntimeConfig{}, LLM: config.LLMConfig{Backend: "claude_cli"}},
 		nil,
 		toolgateway.Binding{},
+		nil,
 		nil,
 		harness,
 		harness,
@@ -81,7 +82,7 @@ func TestForkChatSandboxBuildsCanonicalMockAdapter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fork-chat mock provider contract: %v", err)
 	}
-	if contract.Provider != "mock" || contract.Transport != runtimellm.ProviderTransportInProcess {
+	if contract.Provider != "mock" || contract.Transport != runtimellm.ProviderTransportCLI {
 		t.Fatalf("fork-chat mock provider contract = %#v", contract)
 	}
 }
@@ -116,7 +117,6 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	switch backend {
 	case "sqlite":
 		unsetStoreSelectorEnv(t)
-		stubServeRuntimeWorkspaceLifecycle(t)
 		location = filepath.Join(t.TempDir(), "mock.sqlite")
 		opts.ConfigPath = writeMockAgentRuntimeConfig(t, "sqlite", location)
 		opts.StoreMode = "sqlite"
@@ -134,17 +134,12 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 		}
 		openStore()
 		oldBuildStores := buildStoresForServe
-		oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
 		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
 			storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
 			return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(runtimePG), cfg), nil
 		}
-		cliapp.ConfiguredWorkspaceLifecycleForServe = func(*config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
-			return serveRuntimeWorkspaceStub{}, nil
-		}
 		t.Cleanup(func() {
 			buildStoresForServe = oldBuildStores
-			cliapp.ConfiguredWorkspaceLifecycleForServe = oldWorkspace
 		})
 		prepareRestart = openStore
 		opts.ConfigPath = writeMockAgentRuntimeConfig(t, "postgres", "")
@@ -156,6 +151,21 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 
 	servedPathStarted := time.Now()
 	retainedRoot := t.TempDir()
+	// The real host lifecycle creates intentionally read-only data projections.
+	// Restore directory removal permission only after all children have joined.
+	t.Cleanup(func() {
+		if err := filepath.WalkDir(retainedRoot, func(path string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() {
+				return os.Chmod(path, 0o700)
+			}
+			return nil
+		}); err != nil {
+			t.Errorf("release retained proof directories: %v", err)
+		}
+	})
 	first := startOwnedMockLifecycleTestProcess(t, repoRootForTest(), retainedRoot, opts)
 	first.waitForReadyLine()
 	firstURL := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString())

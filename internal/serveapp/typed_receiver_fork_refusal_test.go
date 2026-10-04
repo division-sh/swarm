@@ -16,7 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/servedparity"
 )
 
-// H: real HTTP/native stores through the retained in-process mock lifecycle.
+// H: real HTTP/native stores through the retained workspace-worker mock lifecycle.
 // Source node consumption is supported; this does not claim dynamic fork success.
 func TestTypedReceiverConfigSourceAndForkRefusalBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {

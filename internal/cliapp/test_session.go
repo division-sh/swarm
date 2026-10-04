@@ -9,7 +9,8 @@ import (
 )
 
 // TestSessionRequest carries admitted source and model policy, never deployment
-// connection, store, credential, listener or workspace settings.
+// connection, store, credential or listener settings. The workspace selector
+// belongs only to this private execution, never the deployment configuration.
 type TestSessionRequest struct {
 	Bundle           *runtimecontracts.WorkflowContractBundle
 	SourceRoot       string
@@ -17,6 +18,7 @@ type TestSessionRequest struct {
 	PlatformPackBase *packartifact.PlatformPackInventory
 	LiveBackend      string
 	ModelAliases     llmselection.ModelAliases
+	WorkspaceBackend string
 }
 
 type TestSessionEndpoint struct {

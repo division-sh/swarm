@@ -319,9 +319,26 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 	startupIndex, liveIndex, notifyIndex, emitIndex := -1, -1, -1, -1
 	startupSession, liveSession := "", ""
 	containerNames := map[string]string{}
+	currentIDs := map[string]string{}
+	admissionContainers := map[string]bool{}
+	probedContainers := map[string]bool{}
 	for index, record := range records {
 		if record.Class == "container_create" && record.ContainerID != "" {
 			containerNames[record.ContainerID] = dockerOptionValue(record.Args, "--name")
+			currentIDs[containerNames[record.ContainerID]] = record.ContainerID
+			labels := map[string]string{}
+			for i := 0; i+1 < len(record.Args); i++ {
+				if record.Args[i] == "--label" {
+					key, value, ok := strings.Cut(record.Args[i+1], "=")
+					if ok {
+						labels[key] = value
+					}
+				}
+			}
+			admissionContainers[record.ContainerID] = labels["dev.swarm.run_id"] != "" && labels["dev.swarm.data_projection_id"] == ""
+		}
+		if record.Class == "workspace_worker" && record.WorkerMode == "probe" {
+			probedContainers[record.ContainerID] = true
 		}
 		if record.Class == "unexpected" {
 			return fmt.Errorf("strict Docker emulator observed an unexpected command: %#v", record.Args)
@@ -330,9 +347,16 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 			if len(record.Args) != 3 {
 				return fmt.Errorf("invalid container removal evidence")
 			}
-			name := containerNames[record.Args[len(record.Args)-1]]
+			id := record.Args[len(record.Args)-1]
+			if current := currentIDs[id]; current != "" && admissionContainers[current] && probedContainers[current] {
+				id = current
+			}
+			name := containerNames[id]
 			if _, provider := releaseProviderContainerBase(name); !provider {
-				return fmt.Errorf("release lifecycle replaced a workspace container between runless startup admission and live execution")
+				kind, _, ok := releaseE2EContainerIdentity(name)
+				if !ok || kind != "agent" || liveIndex >= 0 || !admissionContainers[id] || !probedContainers[id] {
+					return fmt.Errorf("release lifecycle replaced a workspace container without proven unlaunched admission: name=%s kind=%s live_index=%d admission=%t probed=%t", name, kind, liveIndex, admissionContainers[id], probedContainers[id])
+				}
 			}
 		}
 		if _, ok := required[record.Class]; ok {
@@ -509,7 +533,11 @@ func assertReleaseProjectionWorkspacesReleased(t *testing.T, root string, record
 			}
 		case "container_remove":
 			if len(record.Args) == 3 && record.Args[0] == "rm" && record.Args[1] == "--force" {
-				name, ok := state.ContainerIDs[record.Args[2]]
+				id := record.Args[2]
+				if record.ContainerID != "" {
+					id = record.ContainerID
+				}
+				name, ok := state.ContainerIDs[id]
 				if !ok {
 					t.Fatalf("projection teardown did not select a created immutable Docker object: %v", record.Args)
 				}

@@ -78,9 +78,11 @@ func TestSelectedPreparationBindingClosedCensus(t *testing.T) {
 		{"noncanonical_backend", func(b *SelectedForkPreparationBinding) { b.Actors[0].Backend += " " }},
 		{"wrong_mode", func(b *SelectedForkPreparationBinding) { b.Actors[0].Mode = executionmode.Mock }},
 		{"native_with_receipt", func(b *SelectedForkPreparationBinding) { b.Actors[0].Backend = selection.BackendAnthropic }},
-		{"mock_with_receipt", func(b *SelectedForkPreparationBinding) {
+		{"mock_without_receipt", func(b *SelectedForkPreparationBinding) {
 			b.Actors[0].Backend = selection.BackendMock
 			b.Actors[0].Mode = executionmode.Mock
+			b.Actors[0].SurfaceID = ""
+			b.Actors[0].SurfaceIntegrity = ""
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -92,7 +94,7 @@ func TestSelectedPreparationBindingClosedCensus(t *testing.T) {
 			}
 		})
 	}
-	for _, backend := range []string{selection.BackendMock, selection.BackendAnthropic, selection.BackendOpenAICompatible, selection.BackendOpenAIResponses} {
+	for _, backend := range []string{selection.BackendAnthropic, selection.BackendOpenAICompatible, selection.BackendOpenAIResponses} {
 		t.Run(backend, func(t *testing.T) {
 			binding := base
 			actor := base.Actors[0]
@@ -113,6 +115,12 @@ func TestSelectedPreparationBindingClosedCensus(t *testing.T) {
 				t.Fatal("invented receipt")
 			}
 		})
+	}
+	mock := base
+	mock.Actors = append([]SelectedForkPreparedActor(nil), base.Actors...)
+	mock.Actors[0].Backend, mock.Actors[0].Mode = selection.BackendMock, executionmode.Mock
+	if !mock.Actors[0].RequiresProbe() || mock.Validate() != nil || len(mock.SurfaceIDs()) != 1 {
+		t.Fatal("subprocess mock lost its exact preparation receipt")
 	}
 	empty := base
 	empty.Actors = []SelectedForkPreparedActor{}

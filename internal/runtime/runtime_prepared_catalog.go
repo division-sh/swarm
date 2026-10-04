@@ -8,14 +8,22 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/runtime/toolgateway"
+	"github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/google/uuid"
 )
 
 // PreparedSelectedForkProviderCatalog freezes the resolved prospective inputs.
@@ -38,6 +46,67 @@ func (p *PreparedSelectedForkProviderCatalog) Fingerprint() string {
 		return ""
 	}
 	return p.fingerprint
+}
+
+// ObserveActivationGateway reuses the frozen, non-executable catalog. The
+// lifecycle caller separately proves the exact unpublished receiver generation.
+func (p *PreparedSelectedForkProviderCatalog) ObserveActivationGateway(ctx context.Context, cfg *config.Config, gateway toolgateway.Binding, turns llm.MCPTurnContextStore, resolver workspace.Resolver, actor actors.AgentConfig, preparationID string, coordinates managedcapabilities.SelectedForkPreparationCoordinates, process startupownership.ProcessCapability) error {
+	if p == nil || p.fingerprint == "" || coordinates.CatalogFingerprint != p.fingerprint || process == nil {
+		return fmt.Errorf("selected activation requires its exact frozen provider catalog")
+	}
+	plan, err := actor.Identity.Plan()
+	if err != nil {
+		return err
+	}
+	target, ok := p.targets[plan]
+	if !ok {
+		return fmt.Errorf("selected activation has no prepared actor plan")
+	}
+	revision, err := manager.AgentConfigPlanRevision(actor, plan)
+	if err != nil {
+		return fmt.Errorf("selected activation configuration differs from preparation: %w", err)
+	}
+	if revision != target.revision {
+		return fmt.Errorf("selected activation configuration differs from preparation")
+	}
+	if target.resolved.Selection.Profile.ID != selection.BackendClaudeCLI && target.resolved.Selection.Mode != effects.ExecutionModeMock {
+		return nil
+	}
+	target, err = target.snapshot()
+	if err != nil {
+		return err
+	}
+	if err := process.ProveCurrent(ctx); err != nil {
+		return err
+	}
+	evidence, err := process.Evidence()
+	if err != nil {
+		return err
+	}
+	if evidence.AuthorityID != coordinates.ProcessAuthorityID || evidence.OwnerID != coordinates.ProcessOwnerID || evidence.BootID != coordinates.ProcessBootID {
+		return fmt.Errorf("selected activation process possession differs from preparation")
+	}
+	fingerprint, err := plan.Fingerprint()
+	if err != nil {
+		return err
+	}
+	preparation := managedcapabilities.PreparedSelectedForkProbeAuthority{SelectedForkPreparationCoordinates: coordinates, ActorPlanFingerprint: fingerprint}
+	if err := preparation.Validate(); err != nil {
+		return err
+	}
+	ctx = actors.WithActor(ctx, target.resolved.Actor)
+	surface, err := llm.ManagedCapabilitySurfaceForStartup(ctx, plan, target.resolved.Runtime, target.tools, target.capabilities, managedcapabilities.Authority{
+		Kind: managedcapabilities.AuthorityStartupProbe, ID: uuid.NewString(), ExecutionKind: managedcapabilities.ExecutionSelectedForkPreparation,
+		ExecutionAuthorityID: preparationID, Preparation: &preparation,
+	})
+	if err != nil {
+		return err
+	}
+	ctx = managedcapabilities.WithContext(ctx, surface)
+	if _, err := llm.ObserveWorkspaceGateway(ctx, cfg, turns, actor, target.tools, gateway, resolver); err != nil {
+		return err
+	}
+	return process.ProveCurrent(ctx)
 }
 
 // Actors returns values, not the mutable resolved configuration or tool plans.
