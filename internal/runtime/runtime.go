@@ -1501,9 +1501,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		rt.InboundGateway.SetChannelPlans(opts.ChannelPlans)
 		rt.InboundGateway.SetAdmissionGuard(rt.shutdownGate.BeginContext)
 		rt.InboundGateway.SetRuntimeIngress(rt.RuntimeIngress)
-		if err := rt.InboundGateway.SetCredentialStore(opts.ProviderCredentials); err != nil {
-			return nil, fmt.Errorf("configure inbound gateway provider credentials: %w", err)
-		}
+		rt.InboundGateway.SetCredentialAdmission(rt.AdmitInboundCredentials)
 	}
 	if opts.EnableToolGateway {
 		toolGatewayToken := opts.ToolGatewayBinding.AuthToken()

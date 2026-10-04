@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
@@ -56,7 +57,7 @@ func (s *standingRoleObservationErrorStore) Snapshot(ctx context.Context, key st
 
 func TestStandingLearnedAuthorityCredentialMatrix(t *testing.T) {
 	for _, role := range []string{"provider", "signing"} {
-		for _, state := range []string{"current", "changed_value", "same_value_new_receipt", "deleted", "empty", "whitespace", "read_error", "other_role_invalid", "other_role_read_error", "preparing_after_reset", "duplicate_role", "missing_role", "owner_read_error", "healthy_same_service_sibling", "completed_activation_pending_reconnect", "competing_pending_owners"} {
+		for _, state := range []string{"current", "changed_value", "same_value_new_receipt", "deleted", "empty", "whitespace", "read_error", "other_role_invalid", "other_role_read_error", "preparing_after_reset", "duplicate_role", "missing_role", "owner_read_error", "healthy_same_service_sibling", "completed_activation_pending_reconnect", "competing_pending_owners", "after_boot_rotation", "after_boot_receipt", "after_boot_deletion", "after_boot_ABA"} {
 			t.Run(role+"/"+state, func(t *testing.T) {
 				ctx := context.Background()
 				source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram")
@@ -223,6 +224,9 @@ func TestStandingLearnedAuthorityCredentialMatrix(t *testing.T) {
 					if len(targets) != 1 || targets[0].SigningSecret != operation.CredentialAdmissions[1].StoreKey {
 						t.Fatalf("learned exact target = %#v", targets)
 					}
+					if strings.HasPrefix(state, "after_boot_") {
+						proveLearnedIngressMutationAfterBoot(t, rt, targets[0], file, selected, operation, state)
+					}
 					return
 				}
 				ineligible, err := rt.IneligibleStandingIngress()
@@ -259,6 +263,56 @@ func TestStandingLearnedAuthorityCredentialMatrix(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func proveLearnedIngressMutationAfterBoot(t *testing.T, rt *Runtime, target StandingTarget, file *runtimecredentials.FileStore, selected channelonboarding.CredentialAdmission, operation channelonboarding.Operation, state string) {
+	t.Helper()
+	ctx := context.Background()
+	inbound := InboundTarget{BundleHash: target.BundleHash, FlowPath: target.FlowPath, Alias: target.Alias, Provider: target.Provider, SigningSecret: target.SigningSecret, AdmissionPlan: target.AdmissionPlan}
+	_, validate, err := rt.AdmitInboundCredentials(ctx, inbound)
+	if err != nil {
+		t.Fatal(err)
+	}
+	switch state {
+	case "after_boot_rotation":
+		err = file.Set(ctx, selected.StoreKey, "unadmitted-replacement")
+	case "after_boot_receipt":
+		_, err = file.AdmitWithReceipt(ctx, selected.StoreKey, "original-"+selected.Role, "unadmitted-receipt")
+	case "after_boot_deletion", "after_boot_ABA":
+		err = file.Delete(ctx, selected.StoreKey)
+		if err == nil && state == "after_boot_ABA" {
+			_, err = file.AdmitWithReceipt(ctx, selected.StoreKey, "original-"+selected.Role, selected.Receipt)
+		}
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validate(ctx); err == nil {
+		t.Fatal("in-flight request kept stale learned credential authority")
+	}
+	if _, _, err := rt.AdmitInboundCredentials(ctx, inbound); err == nil {
+		t.Fatal("request adopted changed learned value or receipt")
+	}
+	owner, err := runtimecredentials.NewSnapshotOwner(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject, err := target.CapabilitySubject()
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, _, err := rt.evaluateStandingIngressAdmission(ctx, target, subject, owner.BeginSecretBindingProjection())
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalized, err := packs.NormalizeSubjects([]packs.Subject{current})
+	if err != nil {
+		t.Fatal(err)
+	}
+	current = normalized[0]
+	if current.Status != packs.StatusNotReady || current.TriggerAdmission.BindingBlockReason != string(runtimerunlifecycle.StandingBindingRecoveryRequired) || current.TriggerAdmission.RecoveryOperationID != operation.OperationID || current.TriggerAdmission.RecoveryCommand != operation.CredentialRecoveryCommand() {
+		t.Fatalf("stale learned readback lost exact recovery: %#v, %v", current, err)
 	}
 }
 

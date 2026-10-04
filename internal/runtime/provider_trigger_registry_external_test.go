@@ -47,7 +47,22 @@ func newTestInboundGateway(t *testing.T, bus *runtimebus.EventBus, logger *runti
 		bus.SetProviderOutputAuthorizationVerifier(testProviderTriggerCatalog(t))
 	}
 	gateway := runtimepkg.NewInboundGateway(bus, logger, shutdownAdmissionClosed, executionposture.Live, stores...)
-	gateway.SetCredentialStore(boundedProviderCredentialStore{})
+	owner, err := runtimecredentials.NewSnapshotOwner(boundedProviderCredentialStore{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gateway.SetCredentialAdmission(func(ctx context.Context, target runtimepkg.InboundTarget) (runtimecredentials.SecretBinding, func(context.Context) error, error) {
+		projection := owner.BeginSecretBindingProjection()
+		var binding runtimecredentials.SecretBinding
+		if target.AdmissionPlan.RequiresSecret() && target.SigningSecret != "" {
+			var err error
+			binding, err = projection.ObserveSecretBinding(ctx, target.SigningSecret)
+			if err != nil {
+				return binding, nil, err
+			}
+		}
+		return binding, projection.ValidateCurrent, nil
+	})
 	return gateway
 }
 

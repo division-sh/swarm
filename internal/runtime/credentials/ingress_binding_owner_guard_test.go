@@ -19,13 +19,16 @@ func TestIngressSigningUsabilityHasNoSecondProductionInterpreter(t *testing.T) {
 	}
 
 	inbound := read("internal/runtime/inbound.go")
-	for _, forbidden := range []string{"credentials.Get(", "strings.TrimSpace(resolved)", "SigningBound"} {
+	for _, forbidden := range []string{"credentials.Get(", "strings.TrimSpace(resolved)", "SigningBound", "ObserveSecretBinding(", "SetCredentialStore("} {
 		if strings.Contains(inbound, forbidden) {
 			t.Errorf("inbound gateway retains target-signing interpreter %q", forbidden)
 		}
 	}
-	if !strings.Contains(inbound, "ObserveSecretBinding(") {
-		t.Error("inbound gateway does not consume the canonical secret-binding owner")
+	if !strings.Contains(inbound, "g.admitCredentials(") || !strings.Contains(read("internal/runtime/runtime.go"), "SetCredentialAdmission(rt.AdmitInboundCredentials)") {
+		t.Error("inbound gateway does not consume the exact frozen standing credential admission owner")
+	}
+	if !strings.Contains(read("internal/runtime/context_manager.go"), "evaluateStandingIngressAdmission(") {
+		t.Error("runtime readiness bypasses frozen standing credential admission")
 	}
 
 	registration := read("internal/runtime/publicingress/registration.go")

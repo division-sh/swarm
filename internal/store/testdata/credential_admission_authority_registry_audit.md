@@ -7,6 +7,13 @@ The refresh adds 31 exact findings and removes 11 superseded findings. Each entr
 retains its resolved type, enclosing function and operation ordinal. The scanner,
 raw-authority dispositions and public effective-method restrictions are unchanged.
 
+The cycle-1 repair adds five more typed process-local findings: the inbound
+admission callback field/parameter and the three returned scoped currentness
+validators. They return only frozen credential evidence and an error validator;
+no store, SQL connection, transaction or generic persistence carrier crosses
+these boundaries. The gateway cannot refresh the frozen projection. The exact
+registry is regenerated only after these five signatures are classified.
+
 | Changed owner family | Classification and reason |
 | --- | --- |
 | `channelactivation.Owner` admission parameters and retained snapshot callback | Typed process-local. They validate an exact compiled publication or admitted lease; no SQL, transaction or generic persistence capability crosses the callback. |

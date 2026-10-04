@@ -119,7 +119,7 @@ func startProviderTriggerSmokeServer(
 		bus.SetProviderOutputAuthorizationVerifier(testProviderTriggerCatalog(t))
 	}
 	gateway := runtimepkg.NewInboundGateway(bus, nil, nil, executionposture.Live)
-	gateway.SetCredentialStore(providerTriggerSmokeCredentialStore{target.SigningSecret: signingSecret})
+	setTestInboundCredentialAdmission(t, gateway, providerTriggerSmokeCredentialStore{target.SigningSecret: signingSecret})
 	inboundHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec := &providerTriggerSmokeCaptureWriter{ResponseWriter: w, status: http.StatusOK}
 		gateway.HandleResolvedWebhook(rec, r.WithContext(ctx), target, nil)
@@ -143,6 +143,26 @@ func startProviderTriggerSmokeServer(
 	server.Start()
 	t.Cleanup(server.Close)
 	return "http://" + providerTriggerSmokeHTTPHostPort(t, listener.Addr(), listenAddr)
+}
+
+func setTestInboundCredentialAdmission(t *testing.T, gateway *runtimepkg.InboundGateway, store runtimecredentials.Store) {
+	t.Helper()
+	owner, err := runtimecredentials.NewSnapshotOwner(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projection := owner.BeginSecretBindingProjection()
+	gateway.SetCredentialAdmission(func(ctx context.Context, target runtimepkg.InboundTarget) (runtimecredentials.SecretBinding, func(context.Context) error, error) {
+		var binding runtimecredentials.SecretBinding
+		if target.AdmissionPlan.RequiresSecret() && target.SigningSecret != "" {
+			var err error
+			binding, err = projection.ObserveSecretBinding(ctx, target.SigningSecret)
+			if err != nil {
+				return binding, nil, err
+			}
+		}
+		return binding, projection.ValidateCurrent, nil
+	})
 }
 
 func providerTriggerSmokeHTTPHostPort(t *testing.T, addr net.Addr, requestedListenAddr string) string {

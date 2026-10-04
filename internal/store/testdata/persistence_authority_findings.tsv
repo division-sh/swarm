@@ -568,8 +568,10 @@ typed-process-local	interface-method	typed	internal/runtime/genericschedule/owne
 typed-process-local	interface-method	typed	internal/runtime/genericschedule/owner.go	Store	method:ReleaseGenericScheduleClaims	func(context.Context) error
 typed-process-local	interface-method	typed	internal/runtime/genericschedule/owner.go	Store	method:ReleaseGenericScheduleWakeup	func(context.Context, github.com/division-sh/swarm/internal/runtime/genericschedule.Wakeup) error
 typed-process-local	callback-type	typed	internal/runtime/inbound.go	(*github.com/division-sh/swarm/internal/runtime.InboundGateway).SetAdmissionGuard	param:begin	func(context.Context) (context.Context, func(), bool)
+typed-process-local	callback-type	typed	internal/runtime/inbound.go	(*github.com/division-sh/swarm/internal/runtime.InboundGateway).SetCredentialAdmission	param:admit	func(context.Context, github.com/division-sh/swarm/internal/runtime.InboundTarget) (github.com/division-sh/swarm/internal/runtime/credentials.SecretBinding, func(context.Context) error, error)
 typed-process-local	callback-type	typed	internal/runtime/inbound.go	(*github.com/division-sh/swarm/internal/runtime.InboundGateway).beginStandingServiceAdmission	result:#2	func()
 typed-process-local	callback-type	typed	internal/runtime/inbound.go	(*github.com/division-sh/swarm/internal/runtime.InboundGateway).claimPublicationFlight	result:#3	func()
+typed-process-local	callback-type	typed	internal/runtime/inbound.go	InboundGateway	field:admitCredentials	func(context.Context, github.com/division-sh/swarm/internal/runtime.InboundTarget) (github.com/division-sh/swarm/internal/runtime/credentials.SecretBinding, func(context.Context) error, error)
 typed-process-local	callback-type	typed	internal/runtime/inbound.go	InboundGateway	field:beginAdmission	func(context.Context) (context.Context, func(), bool)
 typed-process-local	callback-type	typed	internal/runtime/inbound.go	InboundGateway	field:shutdownAdmissionClosed	func() bool
 typed-process-local	callback-type	typed	internal/runtime/inbound.go	NewInboundGateway	param:shutdownAdmissionClosed	func() bool
@@ -1240,6 +1242,9 @@ typed-process-local	interface-method	typed	internal/runtime/sessions/registry.go
 typed-process-local	interface-method	typed	internal/runtime/sessions/registry.go	Resetter	method:ResetAll	func(metadata github.com/division-sh/swarm/internal/runtime/sessions.ResetMetadata) (github.com/division-sh/swarm/internal/runtime/sessions.ResetSummary, error)
 typed-process-local	callback-type	typed	internal/runtime/shutdown_admission.go	(*github.com/division-sh/swarm/internal/runtime.shutdownAdmission).Begin	result:#1	func()
 typed-process-local	callback-type	typed	internal/runtime/shutdown_admission.go	(*github.com/division-sh/swarm/internal/runtime.shutdownAdmission).BeginContext	result:#2	func()
+typed-process-local	callback-type	typed	internal/runtime/standing_ingress_credentials.go	(*github.com/division-sh/swarm/internal/runtime.Runtime).AdmitInboundCredentials	result:#2	func(context.Context) error
+typed-process-local	callback-type	typed	internal/runtime/standing_ingress_credentials.go	(*github.com/division-sh/swarm/internal/runtime.Runtime).evaluateStandingIngressAdmission	result:#2	func(context.Context) error
+typed-process-local	callback-type	typed	internal/runtime/standing_ingress_credentials.go	(*github.com/division-sh/swarm/internal/runtime.Runtime).standingIngressCredentialScope	result:#3	func(context.Context) error
 typed-process-local	callback-type	typed	internal/runtime/standing_targets.go	(*github.com/division-sh/swarm/internal/runtime.Runtime).PrepareStandingTargets	result:#3	func() error
 typed-process-local	callback-type	typed	internal/runtime/standing_targets.go	(*github.com/division-sh/swarm/internal/runtime.Runtime).standingTargetsMutation	result:#3	func() error
 typed-process-local	callback-type	typed	internal/runtime/startup_recovery_diagnostics.go	StartupRecoveryReadRequest	field:ReadManagerState	func(context.Context) (github.com/division-sh/swarm/internal/runtime/manager.RecoverableStateSnapshot, error)
