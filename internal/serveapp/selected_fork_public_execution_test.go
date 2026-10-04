@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"sync"
 	"testing"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -21,14 +24,18 @@ import (
 // Artifact admission below is private setup. This proves the public fork and
 // readback boundary, not the publication-to-fork journey owned by #2376/#2322.
 func TestSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T) {
-	proveSelectedForkPublicChangedTargetExecutionBothStores(t, false)
+	proveSelectedForkPublicChangedTargetExecutionBothStores(t, false, false)
 }
 
 func TestSelectedForkPublicChangedTargetAfterResetBothStores(t *testing.T) {
-	proveSelectedForkPublicChangedTargetExecutionBothStores(t, true)
+	proveSelectedForkPublicChangedTargetExecutionBothStores(t, true, false)
 }
 
-func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, reset bool) {
+func TestSelectedForkPublicNativeMCPReadBothStores(t *testing.T) {
+	proveSelectedForkPublicChangedTargetExecutionBothStores(t, false, true)
+}
+
+func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, reset, nativeRead bool) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			supervisors := make(chan *processLifecycleSupervisor, 1)
@@ -90,6 +97,36 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, reset
 				"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "public-selected-seed",
 			})
+			if nativeRead {
+				t.Cleanup(func() {
+					if !t.Failed() {
+						return
+					}
+					var forkRun string
+					if err := rt.DB.QueryRow(`SELECT run_id FROM runs WHERE forked_from_run_id=$1`, seed.RunID).Scan(&forkRun); err != nil {
+						t.Logf("selected failure run lookup: %v", err)
+					} else {
+						t.Log(servedEventPublishDebugSummary(t, rt.DB, rt.Backend, forkRun))
+					}
+					rows, err := rt.DB.Query(`SELECT state, CAST(failure AS TEXT) FROM runtime_external_effect_attempts WHERE failure IS NOT NULL`)
+					if err != nil {
+						t.Logf("selected effect failure evidence: %v", err)
+						return
+					}
+					defer rows.Close()
+					for rows.Next() {
+						var state, failure string
+						if err := rows.Scan(&state, &failure); err != nil {
+							t.Logf("selected effect failure decode: %v", err)
+							return
+						}
+						t.Logf("selected effect: state=%s failure=%s", state, failure)
+					}
+					if err := rows.Err(); err != nil {
+						t.Logf("selected effect failure read: %v", err)
+					}
+				})
+			}
 			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
 			requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "start.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,
@@ -102,7 +139,34 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, reset
 			}
 			sourceBefore := readServedForkRecipientSourceDomain(t, rt, seed.RunID)
 			targetRoot := canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, false)
-			writeSelectedForkAgentProofFixture(t, targetRoot, "observer", "[work.ready]", "Observe the explicitly delivered closure event.", "return {'text': 'Observed delivery.', 'usage': {'input_tokens': 1, 'output_tokens': 1}}")
+			body := "return {'text': 'Observed delivery.', 'usage': {'input_tokens': 1, 'output_tokens': 1}}"
+			if nativeRead {
+				data := filepath.Join(targetRoot, "consumer", "data")
+				if err := os.MkdirAll(data, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(data, "selected-only.txt"), []byte("selected-only-mcp-resource\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				body = `results = input["tool_results"] or []
+    if not results:
+        tool = [tool for tool in input["tools"] if tool["name"] == "read_flow_data"][0]
+        static_id = tool["schema"]["properties"]["static_id"]["enum"][0]
+        return {"calls": [{"name": "read_flow_data", "arguments": {"kind": "static_file", "static_id": static_id}}], "usage": {"input_tokens": 1, "output_tokens": 1}}
+    assert "selected-only-mcp-resource" in str(results), results
+    return {"text": "selected-only-mcp-resource verified", "usage": {"input_tokens": 1, "output_tokens": 1}}`
+			}
+			writeSelectedForkAgentProofFixture(t, targetRoot, "observer", "[work.ready]", "Observe the explicitly delivered closure event.", body)
+			if nativeRead {
+				path := filepath.Join(targetRoot, "consumer", "agents.yaml")
+				data, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, append(data, []byte("  flow_data_access: [selected-only.txt]\n")...), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			target := loadWorkflowValidationBundleAt(t, targetRoot)
 			fact, err := prepareServeSourceArtifact(servedControlProofAuthorActivityContext(t, rt), selected.SourceArtifactWriter(), target)
 			if err != nil || fact.BundleHash() == rt.BundleHash {
@@ -124,6 +188,9 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, reset
 			}
 			rows := readForkReceiverRows(t, rt, fork.ForkRunID)
 			requireSelectedForkMixedBusinessMutation(t, rt, fork.ForkRunID, childEvent, rows["consumer"].ID)
+			if nativeRead {
+				requireSelectedForkNativeMCPRead(t, rt, fork.ForkRunID, childEvent)
+			}
 			diagnostics := readServedLifecycleDiagnosticReceipts(t, rt.DB, fork.ForkRunID)
 			if len(diagnostics) == 0 {
 				t.Fatal("selected agent lifecycle produced no diagnostic receipts")
@@ -144,14 +211,73 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, reset
 			if !reflect.DeepEqual(sourceBefore, readServedForkRecipientSourceDomain(t, rt, seed.RunID)) {
 				t.Fatal("public selected execution changed source domain")
 			}
-			requireSelectedForkPublicControlBoundary(t, rt, fork.ForkRunID, childEvent, true)
+			completionCount := 1
+			if nativeRead {
+				completionCount = 2
+			}
+			requireSelectedForkPublicControlBoundary(t, rt, fork.ForkRunID, childEvent, true, completionCount)
 			t.Run("terminal_public_readback", func(t *testing.T) {
-				requireSelectedForkDeclaredAgentReads(t, rt, fork.ForkRunID)
+				requireSelectedForkDeclaredAgentReads(t, rt, fork.ForkRunID, completionCount)
 				if !reflect.DeepEqual(sourceBefore, readServedForkRecipientSourceDomain(t, rt, seed.RunID)) {
 					t.Fatal("terminal selected readback changed source domain")
 				}
 			})
 		})
+	}
+}
+
+func requireSelectedForkNativeMCPRead(t *testing.T, rt servedControlProofRuntime, runID, eventID string) {
+	t.Helper()
+	rows, err := rt.DB.Query(`SELECT CAST(tool_calls AS TEXT), CAST(response_payload AS TEXT), CAST(emitted_events AS TEXT), session_id
+		FROM agent_turns WHERE run_id=$1 AND trigger_event_id=$2 AND agent_id='same-name' AND execution_mode='mock'
+		ORDER BY created_at, turn_id`, runID, eventID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	count, sessionID := 0, ""
+	for rows.Next() {
+		var callsRaw, responseRaw, emittedRaw, currentSession string
+		if err := rows.Scan(&callsRaw, &responseRaw, &emittedRaw, &currentSession); err != nil {
+			t.Fatal(err)
+		}
+		if count == 0 {
+			sessionID = currentSession
+		}
+		if sessionID == "" || currentSession != sessionID {
+			t.Fatalf("selected transport changed session between completions: %q -> %q", sessionID, currentSession)
+		}
+		var calls []llm.ToolCall
+		if err := json.Unmarshal([]byte(callsRaw), &calls); err != nil {
+			t.Fatal(err)
+		}
+		switch count {
+		case 0:
+			if len(calls) != 1 || calls[0].Name != "read_flow_data" {
+				t.Fatalf("selected native tool-call cardinality/authority: %s", callsRaw)
+			}
+			arguments, ok := calls[0].Arguments.(map[string]any)
+			if !ok || arguments["kind"] != "static_file" {
+				t.Fatalf("selected call lost its typed static-resource arguments: %s", callsRaw)
+			}
+		case 1:
+			var response struct {
+				Text string `json:"text"`
+			}
+			if err := json.Unmarshal([]byte(responseRaw), &response); err != nil || response.Text != "selected-only-mcp-resource verified" || len(calls) != 0 {
+				t.Fatalf("selected child did not consume the target resource result: %s, calls=%s err=%v", responseRaw, callsRaw, err)
+			}
+		default:
+			t.Fatal("selected transport persisted an extra completion")
+		}
+		var emitted []json.RawMessage
+		if err := json.Unmarshal([]byte(emittedRaw), &emitted); err != nil || len(emitted) != 0 {
+			t.Fatalf("read-only selected transport widened publication: %s, err=%v", emittedRaw, err)
+		}
+		count++
+	}
+	if err := rows.Err(); err != nil || count != 2 {
+		t.Fatalf("selected native turn persisted %d completions: %v", count, err)
 	}
 }
 
