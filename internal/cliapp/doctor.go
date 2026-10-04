@@ -19,9 +19,11 @@ type doctorOptions struct {
 	workspaceBackendSet bool
 	apiListenAddr       string
 	mcpListenAddr       string
+	mcpListenAddrSource ListenerAddressSource
 	target              bool
 	asJSON              bool
 	schemaInventory     bool
+	gatewayProbe        bool
 	apiOptions          rootCommandOptions
 }
 
@@ -43,6 +45,9 @@ func newDoctorCommand(ctx context.Context, root InvocationRoot, rootOpts rootCom
 			}
 			if opts.target && opts.schemaInventory {
 				return fmt.Errorf("--schema-inventory cannot be combined with --target")
+			}
+			if opts.gatewayProbe && (opts.target || opts.schemaInventory) {
+				return fmt.Errorf("--gateway-probe cannot be combined with --target or --schema-inventory")
 			}
 			if path, set, err := effectiveCommandConfigPath(cmd, opts.configPath, cmd.Flags().Changed("config")); err != nil {
 				return err
@@ -74,6 +79,7 @@ func newDoctorCommand(ctx context.Context, root InvocationRoot, rootOpts rootCom
 	cmd.Flags().BoolVar(&opts.target, "target", false, "Explain local target, state directory, project, and context resolution without runtime preflight")
 	cmd.Flags().BoolVar(&opts.asJSON, "json", false, "Render the diagnostic report as JSON")
 	cmd.Flags().BoolVar(&opts.schemaInventory, "schema-inventory", false, "Show the generated state-store table and column inventory without starting runtime")
+	cmd.Flags().BoolVar(&opts.gatewayProbe, "gateway-probe", false, "Perform a free gateway network/authentication probe from a temporary workspace; no model call")
 	bindCLIAPIConnectionFlags(cmd, &opts.apiOptions)
 	return cmd
 }
@@ -146,7 +152,7 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 		report.add(localPreflightProviderPackPrerequisite, "channel_managed_credentials_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix managed credential configuration")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
-	apiListenAddr, mcpListenAddr, err := resolveCLIServeListenerAddresses(cliServeListenerAddressOptions{
+	apiListenAddr, mcpListenAddr, mcpSource, err := resolveCLIServeListenerAddresses(cliServeListenerAddressOptions{
 		APIListenAddr:        opts.apiListenAddr,
 		MCPListenAddr:        opts.mcpListenAddr,
 		APIListenAddrFlagSet: cmd.Flags().Changed("api-listen-addr"),
@@ -162,6 +168,7 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 	}
 	opts.apiListenAddr = apiListenAddr
 	opts.mcpListenAddr = mcpListenAddr
+	opts.mcpListenAddrSource = mcpSource
 	if err := ValidateServeListenAddr("--api-listen-addr", opts.apiListenAddr); err != nil {
 		report := configReport
 		report.add(localPreflightServeListenerPrerequisite, "api_listener_invalid", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix --api-listen-addr or config serve.api_listen_addr")
@@ -214,12 +221,15 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 		MountSources:     localState.MountSources,
 		WorkspaceBackend: workspaceBackend,
 		APIListenAddr:    opts.apiListenAddr,
-		MCPListenAddr:    opts.mcpListenAddr,
+		MCPListenAddr:    WorkspaceMCPListenAddr(opts.mcpListenAddr, opts.mcpListenAddrSource, workspaceBackend),
 		CheckListeners:   true,
 		CheckGatewayEnv:  true,
 		PlatformPackBase: platformPackBase,
 	})
 	report.SchemaInventory = configReport.SchemaInventory
+	if opts.gatewayProbe {
+		applyDoctorGatewayProbe(ctx, &report, cfgResult.Config, workspaceBackend, WorkspaceMCPListenAddr(opts.mcpListenAddr, opts.mcpListenAddrSource, workspaceBackend))
+	}
 	addUnifiedConfigDiagnosticsToReport(&report, cfgResult.Diagnostics)
 	addSwarmEnvFindingsToLocalPreflightReport(&report, envFindings)
 	return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)

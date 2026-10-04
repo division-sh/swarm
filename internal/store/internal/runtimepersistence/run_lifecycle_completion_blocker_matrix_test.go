@@ -406,7 +406,7 @@ func insertCompletionBlockerEffect(
 				attempt_id, operation_id, attempt_ordinal, adapter, transport,
 				execution_mode, generation, execution_owner, lease_expires_at, fence_generation,
 				usage_target_kind, usage_target_id, target_ordinal, capability_surface_id, state, authorized_at
-			) VALUES (?, ?, ?, 'matrix', 'in_process', 'live', 1, 'matrix-worker', ?, 1,
+			) VALUES (?, ?, ?, 'matrix', 'cli', 'live', 1, 'matrix-worker', ?, 1,
 			          'agent_turn', ?, NULL, ?, ?, ?)`
 		now := time.Date(2026, 7, 29, 11, 0, 0, 0, time.UTC)
 		args = []any{latestAttemptID, operationID, ordinal, now.Add(time.Hour), targetID, surface.ID, state, now}
@@ -416,7 +416,7 @@ func insertCompletionBlockerEffect(
 					attempt_id, operation_id, attempt_ordinal, adapter, transport,
 					execution_mode, generation, execution_owner, lease_expires_at, fence_generation,
 					usage_target_kind, usage_target_id, target_ordinal, capability_surface_id, state, authorized_at
-				) VALUES ($1::uuid, $2::uuid, $3, 'matrix', 'in_process', 'live', 1, 'matrix-worker', $4, 1,
+				) VALUES ($1::uuid, $2::uuid, $3, 'matrix', 'cli', 'live', 1, 'matrix-worker', $4, 1,
 				          'agent_turn', $5::uuid, NULL, $6::uuid, $7, $8)`
 		}
 		if _, err := fixture.db.ExecContext(ctx, query, args...); err != nil {

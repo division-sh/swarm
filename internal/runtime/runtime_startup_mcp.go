@@ -21,10 +21,20 @@ func (rt *Runtime) AcquireStartupMCPRequest(r *http.Request) (http.Handler, *wor
 		return nil, nil, nil
 	}
 	grant, err := rt.CurrentStartupGrantEvidence()
-	if err != nil || grant.State != startupownership.GrantPrepared ||
+	if err != nil ||
 		authority.StartupProbe.StartupAuthorityID != grant.GrantID ||
 		authority.StartupProbe.StartupStateVersion != grant.StateVersion ||
 		authority.ExecutionOwner != grant.ProcessOwnerID || authority.FenceGeneration != grant.RuntimeGeneration {
+		return nil, nil, nil
+	}
+	switch grant.State {
+	case startupownership.GrantPrepared:
+	case startupownership.GrantAdmitted:
+		token, ok := rt.ToolGateway.ActivationProbeToken(r)
+		if !ok || rt.Manager == nil || rt.Manager.ProveUnpublishedActivation(token) != nil {
+			return nil, nil, nil
+		}
+	default:
 		return nil, nil, nil
 	}
 	lease, err := rt.workOccurrence.Begin(r.Context())
