@@ -322,19 +322,9 @@ func (d *serveChannelDeliveryDispatcher) acknowledgeChannelAction(ctx context.Co
 		return fmt.Errorf("channel callback runtime publication is unavailable")
 	}
 	defer lease.Release()
-	var compiled channelonboarding.CompiledActivation
-	for _, activation := range lease.Activations() {
-		if activation.Source == channelonboarding.ActivationSourceLearned &&
-			activation.OnboardingOperationID == selected.OperationID && activation.ActivationRevision == selected.Revision &&
-			activation.Coordinate.Matches(selected.Coordinate) {
-			if compiled.OnboardingOperationID != "" {
-				return fmt.Errorf("channel callback compiled activation is duplicated")
-			}
-			compiled = activation
-		}
-	}
-	if compiled.OnboardingOperationID == "" {
-		return fmt.Errorf("channel callback compiled activation is absent")
+	compiled, err := channelActionCompiledActivation(lease.Activations(), selected)
+	if err != nil {
+		return err
 	}
 	ctx, err = withChannelProviderAdmission(ctx, lease, compiled.Plan)
 	if err != nil {
@@ -385,6 +375,24 @@ func (d *serveChannelDeliveryDispatcher) acknowledgeChannelAction(ctx context.Co
 		effectCtx, toolID, tool, input, credentials, map[string]string{"publication_id": pending.PublicationID},
 	)
 	return err
+}
+
+func channelActionCompiledActivation(activations []channelonboarding.CompiledActivation, selected channelonboarding.ConnectedChannelActivation) (channelonboarding.CompiledActivation, error) {
+	var compiled channelonboarding.CompiledActivation
+	for _, activation := range activations {
+		if activation.Source == channelonboarding.ActivationSourceLearned &&
+			activation.OnboardingOperationID == selected.OperationID && activation.ActivationRevision == selected.Revision &&
+			activation.Coordinate.Matches(selected.Coordinate) {
+			if compiled.OnboardingOperationID != "" {
+				return compiled, fmt.Errorf("channel callback compiled activation is duplicated")
+			}
+			compiled = activation
+		}
+	}
+	if compiled.OnboardingOperationID == "" {
+		return compiled, fmt.Errorf("channel callback compiled activation is absent")
+	}
+	return compiled, nil
 }
 
 func channelAcknowledgmentInput(plan packs.OutboundBindingPlan, storedInteraction string) (map[string]any, error) {
