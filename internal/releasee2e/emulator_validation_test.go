@@ -239,6 +239,28 @@ func TestReleaseDockerExecAdmissionRejectsCredentialTargetAndClaudeMutations(t *
 	if _, err := validateReleaseDockerExec(validStartup, []byte("complete the authored work")); err == nil {
 		t.Fatal("live turn accepted runless startup infrastructure")
 	}
+	t.Run("activation probe uses exact isolated agent target", func(t *testing.T) {
+		args := append([]string(nil), validStartup...)
+		for i, arg := range args {
+			if arg == "swarm-"+releaseE2EFixtureScope+"-system" {
+				args[i] = releaseE2EFixtureAgent + "-claude-" + strings.Repeat("a", 24)
+			}
+		}
+		replaceReleaseArgValue(args, "-w", releaseE2EAgentWorkdir)
+		args = append(args[:2:2], append([]string{"-e", "CLAUDE_CONFIG_DIR=/opt/swarm/provider/claude"}, args[2:]...)...)
+		if _, err := validateReleaseDockerExec(args, startupPrompt); err != nil {
+			t.Fatalf("exact agent activation probe rejected: %v", err)
+		}
+		wrongWorkdir := append([]string(nil), args...)
+		replaceReleaseArgValue(wrongWorkdir, "-w", releaseE2ESystemWorkdir)
+		if _, err := validateReleaseDockerExec(wrongWorkdir, startupPrompt); err == nil {
+			t.Fatal("agent probe borrowed system workdir")
+		}
+		withoutIsolation := removeReleaseOptionPair(append([]string(nil), args...), "-e", "CLAUDE_CONFIG_DIR=")
+		if _, err := validateReleaseDockerExec(withoutIsolation, startupPrompt); err == nil {
+			t.Fatal("agent probe omitted exact provider-state isolation")
+		}
+	})
 
 	credentialCases := map[string]func([]string) []string{
 		"missing": func(args []string) []string {
