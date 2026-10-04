@@ -913,3 +913,16 @@ negative controls. This is proof venue correction, not Q01/M09 waiver: ordinary
 skips give no transport, remote-join, default-network or class-closure credit.
 Public default Linux Docker Q01, E's merged compensation L01/L04, every original
 48-row obligation and fresh full/full qualification remain required.
+
+At clean `e83a414a1`, the canonical Telegram memory/restart test passes all four
+SQLite/PostgreSQL x recovery-policy cells through the actual host worker and
+HTTP gateway (44.590s). The release aggregate retains a further RED: after the
+provider-volume fix, resource startup now reaches an exact isolated agent
+provider target that the emulator only allowed for runless system probes.
+Correct the finite target/workdir validator for that actual activation-probe
+variant, preserving ordinary-agent/system live-turn refusal, isolated provider
+state, credential/tool/MCP admission and negative target mutations. This is
+fixture classification, not a runtime fallback or paid-provider proof.
+The compiled read surface, boundary, provider-mount and native-identity leaves
+pass in that same RED aggregate. Its failed resource leaf remains retained;
+fresh committed-head execution is required before claiming repair.
