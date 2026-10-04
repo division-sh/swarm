@@ -672,6 +672,7 @@ var handlerRuleEntryEntityClassifiers = map[string]handlerRuleEntityFieldClassif
 	"FanOut":              noHandlerRuleEntityRequirement,
 	"declarationIdentity": noHandlerRuleEntityRequirement,
 	"authored":            noHandlerRuleEntityRequirement,
+	"admissionProvenance": noHandlerRuleEntityRequirement,
 }
 
 func handlerExecutionEntityRequirement(source semanticview.Source, flowID string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
