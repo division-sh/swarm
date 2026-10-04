@@ -1527,7 +1527,7 @@
     "owner": "internal/runtime/runtime.go::*Runtime.ReplaceChannelActivationsContext",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "95a67739dd6c8e27fae203cd6fb853d73fc91617125066906fd8720dd4caed4a"
+    "body_sha256": "657f2987e95ffab45a45eb54ab7d8973516fca60735258e371d8002bffa9af3c"
   },
   {
     "owner": "internal/runtime/runtime.go::*Runtime.Shutdown",
@@ -1737,7 +1737,7 @@
     "owner": "internal/runtime/runtime.go::newRuntime",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "1cee67d9739fd1c7525cdd7395b356bbd18e61ad3d89d500a9a419b016cd7da7"
+    "body_sha256": "c3fae9c20bfa726789ad8ec6f3f0c03a58e2196851e60db47a4149345118ee3d"
   },
   {
     "owner": "internal/runtime/runtime.go::providerCredentialResolverForRuntimeOptions",
@@ -2418,6 +2418,12 @@
     "body_sha256": "3e166a7acbdbf61aba966ef790ec25a9d133caf9de4ff94ef5a205f51365165c"
   },
   {
+    "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.AdmitChannelTarget",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "3a60e4306d9934023a4b7086304cbaecacec69cb55196b11dc3d4f0f1d7ba0ee"
+  },
+  {
     "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.PreflightChannelActivation",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21",
@@ -2439,7 +2445,7 @@
     "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.RefreshChannelActivationCandidates",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21",
-    "body_sha256": "d58f29c7f77bc28f1dee6d13ac81fb9c0afbe544970bfc7f5e306f9fd14c951d"
+    "body_sha256": "41b87a935e988c00b62783d658167821a747d53c71e79e90c3429aedd84877cb"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.RefreshChannelActivations",
@@ -2451,7 +2457,7 @@
     "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.publishChannelActivations",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21",
-    "body_sha256": "4af459fbe189aa59a2d126df546436848d7d1836754e4d30b92fcff9ec2bb6f0"
+    "body_sha256": "62ec2e01a2995016fbb1a06f0258cbd508f2fb6bc46c795e73fc215be388a85b"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.reconcileChannelRegistrations",
@@ -2463,7 +2469,7 @@
     "owner": "internal/serveapp/channel_onboarding.go::*serveChannelConfirmationDispatcher.DispatchChannelConfirmation",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21",
-    "body_sha256": "7addc3ce09304154351f197fcea04cb929035e8109e54e9ea7503a5d4af1b737"
+    "body_sha256": "8e69d19fd614bbeee4104b9aebda966cb952a5318ec31f0ba7c66f82d9d68aa4"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::*serveChannelConfirmationDispatcher.ReconcileChannelEffectsBeforeRebind",
@@ -2475,7 +2481,7 @@
     "owner": "internal/serveapp/channel_onboarding.go::*serveConnectedChannelReadiness.ProjectConnectedChannelReadiness",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21",
-    "body_sha256": "30a24eb89b2c223eca501ad7084b3baffaa144ec0b631e42a12e6532ce25674b"
+    "body_sha256": "f093bbdee8c9a08e43ab2102b806a2a9de8eaf5791dce698e6f9ba01d15730a6"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::*serveConnectedChannelReadiness.observedAt",
@@ -2511,7 +2517,25 @@
     "owner": "internal/serveapp/channel_onboarding.go::compileServeChannelActivationSnapshot",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21",
-    "body_sha256": "4223f8b17c8384e553d97fbe0def0e7982248bfc0f00bc115f6bb2d6625b40c9"
+    "body_sha256": "f6c12b1a169fb7dba783bac40c6f8f2a20b8b2afad8df8ad71f04dc068d2a217"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::compileServeDeclaredChannelActivations",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "257a1d6d9b59ff1eef10e4e27a7a11b5787069b04469bd17f96fa2c7e3a84770"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::compileServeLearnedChannelActivations",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "3a80233bd761ef4281e453e4d153d2e251797787ae7dc9be736312cbd2e0ce33"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::compileServePrebindingActivations",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "93663908e9819ea964b1620b49bcd1004d820fe50fc09ffd1e809ce1fef16603"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::declaredActivationCoordinate",
@@ -2538,10 +2562,34 @@
     "body_sha256": "7bd9953371b72ef1e3322f820d0e495befa117301182985b0884319feef5c170"
   },
   {
+    "owner": "internal/serveapp/channel_onboarding.go::observeChannelActivationAdmissions",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "4afc54c5c08b91e5bf3b04ee213ad374b7ceac17e369859d61b0d668b1b28b72"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::priorServeDeclaredActivations",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "af7204fa46877ddcc97e1112c5ff581d484cbfe12a622fac198da77d93205bd7"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::publishServeChannelActivationSnapshot",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "5950584293771ca00284937c233aff5d66393467535811e6e9af32503763568d"
+  },
+  {
     "owner": "internal/serveapp/channel_onboarding.go::reconcileRetiredConnectedChannelContexts",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21",
     "body_sha256": "e6247b44be304dd50828724ebe4f3374a545c852faff4681f9b38c1b1cb52f06"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::reconcileServeProviderRegistrations",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "0946f643b38c54e236eb731fd21428633f30ec942a89291607184ef37b8b4c27"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::rejectWebhookPrebindingWithoutPublicIngress",
@@ -2550,10 +2598,28 @@
     "body_sha256": "7359011c1db7453430c465b9e27e567d12edc847246227ed5acadbe701fb1e15"
   },
   {
+    "owner": "internal/serveapp/channel_onboarding.go::serveChannelCandidatesForPlan",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "88e2051cf9e4e7fbee8b1fdce006ee62422ef0493eb7d0933551f2cdaf073ee6"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::serveChannelDeclarationTarget",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "319b866d5ab29991bc7743144ef18282bbbf50cc416ea4bd0a2f6a7f1334bb9c"
+  },
+  {
     "owner": "internal/serveapp/channel_onboarding.go::serveChannelOnboardingCatalog",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21",
-    "body_sha256": "3443cb93dc205f55772ec79743ea2b9bc234b0b9b9cedcaad35df759d6a4969e"
+    "body_sha256": "e1cd6dbd1a500026eea6df735d2217de7f1f81ca417892a90051f73f7848edb4"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::serveDeclaredRegistrationEnabled",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "372ecf09c60e74ed35c401e67532b855a508b4887ecdd1c595135585e37b5539"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::validateChannelEffectProvenance",
@@ -2601,7 +2667,7 @@
     "owner": "internal/serveapp/main.go::*serveStandingServiceController.mutateStandingService",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "9bb2216fb92e37dfbd918ab4e2c3d362e6b565ded53ecd1150192f8b1ae260f5"
+    "body_sha256": "553e7fb29b87135835dd2699be4cf6720a896794d91e5738578c017721621c5c"
   },
   {
     "owner": "internal/serveapp/main.go::*serveStandingServiceController.publishActiveService",
@@ -2661,13 +2727,13 @@
     "owner": "internal/serveapp/main.go::buildRuntimeComposition",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "f085db29f5bb1e168c064cb2bd088e5516a1b982017d2ab586754780ee2dcac8"
+    "body_sha256": "250b71d984ec9309972c59afe58b62be0f72836ee2d6b398fad5de3825fe00a6"
   },
   {
     "owner": "internal/serveapp/main.go::buildServeRuntimeBundleContext",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "d3be0d1f99def888bd599a764b8ca37ecd20f5279dd2f82ee33fb160af81d978"
+    "body_sha256": "902db28d9c308fb75abc5e47e7612015cccf67176f2a7dedb51aa293aa6c00fd"
   },
   {
     "owner": "internal/serveapp/main.go::buildStores",
@@ -2865,7 +2931,7 @@
     "owner": "internal/serveapp/main.go::reportServeStandingReadiness",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "b11a273813071818b873b4b7c5fcafbd9f3d75d59c8e2ac9bee2ff92090148e1"
+    "body_sha256": "d30eac1f5302d9a18ad20e755985fb1bcb66ab7005e29c4c4e36e01c2b6c9bac"
   },
   {
     "owner": "internal/serveapp/main.go::runServeSourceArtifactStartupRecovery",
