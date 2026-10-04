@@ -1,6 +1,7 @@
 package releasee2e
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -8,6 +9,39 @@ import (
 )
 
 func TestResourceProviderBackingRejectsMissingAuthority(t *testing.T) {
+	t.Run("worker mount never becomes provider backing", func(t *testing.T) {
+		t.Setenv(releaseResourceReadEnv, "1")
+		workerPath, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		key := "swarm-claude-state-v1-" + strings.Repeat("a", 64)
+		for _, retained := range []bool{false, true} {
+			root := t.TempDir()
+			name := releaseE2EFixtureAgent + "-claude-" + strings.Repeat("a", 24)
+			args := []string{"create", "--name", name, "--network", releaseE2ENetwork, "-w", releaseE2EAgentWorkdir, "--mount", "type=bind,source=" + workerPath + ",destination=/opt/swarm/bin/swarm,readonly"}
+			wantKey := ""
+			if retained {
+				wantKey = key
+				args = append(args, "--mount", "type=volume,source="+key+",target=/opt/swarm/provider/claude")
+			} else {
+				args = append(args, "--tmpfs", "/opt/swarm/provider/claude:rw,mode=0700,uid=10001,gid=10001")
+			}
+			args = append(args, releaseE2EWorkspaceImage, "sleep", "infinity")
+			if code := fakeDockerCreate(root, args); code != 0 {
+				t.Fatalf("fixture create retained=%t: exit=%d", retained, code)
+			}
+			withFakeDockerState(root, func(state *fakeDockerState) {
+				container := state.Containers[name]
+				if container.WorkerPath != workerPath || container.ProviderKey != wantKey {
+					t.Fatalf("fixture mount identities retained=%t: %#v", retained, container)
+				}
+				if !retained && len(state.ProviderVolumes) != 0 {
+					t.Fatal("disposable provider acquired retained backing")
+				}
+			})
+		}
+	})
 	root := t.TempDir()
 	key := "swarm-claude-state-v1-" + strings.Repeat("a", 64)
 	head := uuid.NewString()
