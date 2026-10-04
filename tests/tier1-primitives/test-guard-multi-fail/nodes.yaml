@@ -7,8 +7,8 @@ test-node:
       guard:
         checks:
           - id: score_check
-            check: "payload.score >= policy.min_score"
+            check: payload.score >= policy.min_score
           - id: level_check
-            check: "payload.level >= policy.min_level"
+            check: payload.level >= policy.min_level
       advances_to: done
       emit: check.passed

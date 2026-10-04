@@ -16,7 +16,7 @@ func TestProjectNodeDataAccumulationValue(t *testing.T) {
         writes:
           - name
           - target_field: dispatch_count
-            value: ${payload.count}
+            value: payload.count
           - op: clear
             target: entity.old_value
 `))

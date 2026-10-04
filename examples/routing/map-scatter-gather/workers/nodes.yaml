@@ -12,6 +12,6 @@ worker:
       emit:
         event: item.reported
         fields:
-          member_id: ${payload.member_id}
-          result: ${payload.values}
+          member_id: payload.member_id
+          result: payload.values
       advances_to: complete

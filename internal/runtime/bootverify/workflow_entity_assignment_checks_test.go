@@ -33,7 +33,7 @@ func TestEntityProgressivePresenceSourceLoadedFullVerify(t *testing.T) {
 					case "missing assessment write":
 						contents = strings.Replace(contents, "          - business_brief\n", "", 1)
 					case "read before write":
-						contents = strings.Replace(contents, `check: "_entity.current_state == 'assess'"`, `check: "_entity.current_state == 'assess' && entity.business_brief != ''"`, 1)
+						contents = strings.Replace(contents, `check: _entity.current_state == 'assess'`, `check: _entity.current_state == 'assess' && entity.business_brief != ''`, 1)
 					case "retired stage spelling":
 						contents = strings.ReplaceAll(contents, "_entity.current_state", "_entity.stage")
 					case "naive optional without decision", "naive optional fallback":
@@ -189,12 +189,12 @@ worker:
       create_entity: true
       on_complete:
         - id: early
-          condition: "entity.base_score > 0"
+          condition: entity.base_score > 0
           advances_to: done
       data_accumulation:
         writes:
           - target_field: base_score
-            value: {literal: 7}
+            value: 7
 `)
 	repo := repoRootForBootverifyTest(t)
 	bundle := loadFixtureBundleAt(t, repo, root, c.DefaultPlatformSpecFile(repo))
@@ -238,29 +238,29 @@ work.result:
       create_entity: true
       advances_to: assess
     work.scored:
-      guard: {check: "_entity.current_state == 'assess'"}
+      guard: {check: _entity.current_state == 'assess'}
       data_accumulation:
         writes: [score]
       advances_to: consume
     work.consume:
-      guard: {check: "_entity.current_state == 'consume'"}
+      guard: {check: _entity.current_state == 'consume'}
       emit:
         event: work.result
         fields:
-          score: ${entity.score}
+          score: entity.score
       advances_to: done
 `
 			if variant == "bypass" {
-				nodes += "    work.bypass:\n      guard: {check: \"_entity.current_state == 'assess'\"}\n      advances_to: consume\n"
+				nodes += "    work.bypass:\n      guard: {check: _entity.current_state == 'assess'}\n      advances_to: consume\n"
 			}
 			if variant == "guard stage then value" {
-				nodes = strings.Replace(nodes, `guard: {check: "_entity.current_state == 'consume'"}`, `guard:
+				nodes = strings.Replace(nodes, `guard: {check: _entity.current_state == 'consume'}`, `guard:
         checks:
-          - check: "_entity.current_state == 'consume'"
-          - check: "entity.score > 0"`, 1)
+          - check: _entity.current_state == 'consume'
+          - check: entity.score > 0`, 1)
 			}
 			if variant == "guard short circuit" {
-				nodes = strings.Replace(nodes, `guard: {check: "_entity.current_state == 'consume'"}`, `guard: {check: "_entity.current_state == 'consume' && entity.score > 0"}`, 1)
+				nodes = strings.Replace(nodes, `guard: {check: _entity.current_state == 'consume'}`, `guard: {check: _entity.current_state == 'consume' && entity.score > 0}`, 1)
 			}
 			if variant == "nontransitioning guarded reader" {
 				nodes = strings.Replace(nodes, "      advances_to: done\n", "", 1)
@@ -268,7 +268,7 @@ work.result:
 			if variant == "nontransitioning clear" {
 				nodes = strings.Replace(nodes, "subscribes_to: [work.opened, work.scored, work.consume, work.bypass]", "subscribes_to: [work.opened, work.scored, work.consume, work.bypass, work.clear]", 1)
 				nodes += `    work.clear:
-      guard: {check: "_entity.current_state == 'consume'"}
+      guard: {check: _entity.current_state == 'consume'}
       data_accumulation:
         writes:
           - {op: clear, target: entity.score}
@@ -288,7 +288,7 @@ work.result:
           data_accumulation:
             writes: [score]
           advances_to: consume
-        - condition: else
+        -
           advances_to: consume`
 				}
 				nodes = strings.Replace(nodes, "      data_accumulation:\n        writes: [score]\n      advances_to: consume", replacement, 1)
@@ -299,7 +299,7 @@ work.result:
   subscribes_to: [work.scored]
   event_handlers:
     work.scored:
-      guard: {check: "_entity.current_state == 'assess'"}
+      guard: {check: _entity.current_state == 'assess'}
       advances_to: consume
 `
 			}
@@ -308,7 +308,7 @@ work.result:
 			}
 			if variant == "backedge cannot prove first entry" {
 				nodes = strings.Replace(nodes, "      advances_to: assess", "      advances_to: consume", 1)
-				nodes += "    work.bypass:\n      guard: {check: \"_entity.current_state == 'consume'\"}\n      advances_to: assess\n"
+				nodes += "    work.bypass:\n      guard: {check: _entity.current_state == 'consume'}\n      advances_to: assess\n"
 			}
 			writeBootverifyFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), nodes)
 			if variant == "same event different node" {
@@ -341,35 +341,35 @@ func TestEntityDefiniteAssignmentStructuralMutations(t *testing.T) {
 		missing      bool
 	}{
 		{"missing named parent", `        - target_field: profile.id
-          value: replacement
+          value: "replacement"
 `, true},
 		{"earlier complete parent", `        - target_field: profile
-          value: {id: original}
+          value: {id: "original"}
         - target_field: profile.id
-          value: replacement
+          value: "replacement"
 `, false},
 		{"literal optional member", `        - target_field: profile
-          value: {id: original, note: supplied}
+          value: {id: "original", note: "supplied"}
         - target_field: observed
-          value: ${entity.profile.note}
+          value: entity.profile.note
 `, false},
 		{"replacement forgets optional member", `        - target_field: profile
-          value: {id: original, note: supplied}
+          value: {id: "original", note: "supplied"}
         - target_field: profile
-          value: {id: replacement}
+          value: {id: "replacement"}
         - target_field: observed
-          value: ${entity.profile.note}
+          value: entity.profile.note
 `, true},
 		{"constructive root append", `        - op: append
           target: entity.notes
-          value: supplied
+          value: "supplied"
         - target_field: observed
-          value: "${string(entity.notes.size())}"
+          value: string(entity.notes.size())
 `, false},
 		{"merge cannot construct", `        - op: merge
           target: entity.by_id
-          key: one
-          value: {id: supplied}
+          key: "one"
+          value: {id: "supplied"}
 `, true},
 		{"clear absent parent is noop", `        - op: clear
           target: entity.profile.note

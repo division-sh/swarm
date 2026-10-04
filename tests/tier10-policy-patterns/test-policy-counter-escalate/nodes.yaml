@@ -6,9 +6,9 @@ processor:
     attempt.requested:
       guard:
         id: below_limit
-        check: "has(entity.attempt_count) && entity.attempt_count < policy.max_attempts"
+        check: has(entity.attempt_count) && entity.attempt_count < policy.max_attempts
         on_fail: "escalate:attempt.limit_hit"
       data_accumulation:
         writes:
           - target_field: attempt_count
-            value: ${entity.attempt_count + 1}
+            value: entity.attempt_count + 1

@@ -318,10 +318,10 @@ func a2CountJoinFiles(count int) map[string]string {
           advances_to: ready
           data_accumulation:
             writes:
-              - {target_field: final_expected, value: "${join.expected}"}
-              - {target_field: final_completed, value: "${join.completed}"}
-              - {target_field: final_results, value: "${join.results}"}
-              - {target_field: final_reason, value: "${join.close_reason}"}
+              - {target_field: final_expected, value: join.expected}
+              - {target_field: final_completed, value: join.completed}
+              - {target_field: final_results, value: join.results}
+              - {target_field: final_reason, value: join.close_reason}
 `, count),
 	}
 }

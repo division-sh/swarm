@@ -11,12 +11,12 @@ worker:
     item.finished:
       guard:
         id: still_registered
-        check: "_entity.current_state == 'registered' && has(entity.batch_id) && has(entity.item_id) && has(entity.value)"
+        check: _entity.current_state == 'registered' && has(entity.batch_id) && has(entity.item_id) && has(entity.value)
         on_fail: discard
       emit:
         event: item.reported
         fields:
-          item_id: ${entity.item_id}
-          batch_id: ${entity.batch_id}
-          value: ${entity.value}
+          item_id: entity.item_id
+          batch_id: entity.batch_id
+          value: entity.value
       advances_to: complete

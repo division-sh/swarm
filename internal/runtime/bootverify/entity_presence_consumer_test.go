@@ -4,7 +4,6 @@ import (
 	"context"
 	rc "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"strconv"
 	"strings"
 	"testing"
 )
@@ -24,7 +23,7 @@ func TestEntityNestedPresenceAcrossBootConsumers(t *testing.T) {
 				case "guard":
 					handler.Guard = &rc.GuardSpec{Check: value + ` == "fallback"`}
 				case "rule":
-					handler.Rules = mustBootHandlerFixture(t, "rules:\n  - id: accept\n    when: "+strconv.Quote(value+` == "fallback"`)+"\n  - else: true\n").Rules
+					handler.Rules = mustBootHandlerFixture(t, "rules:\n  - id: accept\n    when: "+value+` == "fallback"`+"\n  - else: true\n").Rules
 				case "write":
 					handler.DataAccumulation = rc.WorkflowDataAccumulation{Writes: []rc.WorkflowDataWrite{{TargetField: "captured", Value: rc.CELExpression(value)}}}
 				case "emit":

@@ -57,7 +57,6 @@ collector:
       loop: {admit: revision, from: drafting}
       on_complete:
         - id: review
-          condition: else
           advances_to: review
 repeater:
   event_handlers:

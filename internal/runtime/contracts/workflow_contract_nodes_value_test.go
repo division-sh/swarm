@@ -88,7 +88,7 @@ func TestProjectNodeTimerValuePreservesNestedCoordinates(t *testing.T) {
 }
 
 func TestProjectNodeEmitValuePreservesR2AndRetiredRouting(t *testing.T) {
-	source, err := yamlsource.Load([]byte("emit: &reply\n  event: task.completed\n  fields: {answer: '${payload.answer}', fixed: null}\nother: *reply\n"))
+	source, err := yamlsource.Load([]byte("emit: &reply\n  event: task.completed\n  fields: {answer: payload.answer, fixed: null}\nother: *reply\n"))
 	if err != nil {
 		t.Fatal(err)
 	}

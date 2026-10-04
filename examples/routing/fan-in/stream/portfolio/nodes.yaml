@@ -13,7 +13,7 @@ portfolio-collector:
             target_field: period_id
           - op: set
             target: entity.reports
-            key: ${payload.operating_id}
-            value: ${payload}
+            key: payload.operating_id
+            value: payload
           - source_field: revenue
             target_field: last_revenue

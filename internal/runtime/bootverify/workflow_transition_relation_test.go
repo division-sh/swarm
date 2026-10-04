@@ -328,17 +328,17 @@ func transitionRelationDeclarations(family string) (schema, handlers, events str
     created: {create_entity: true, advances_to: working}
     selected:
       rules:
-        first: {when: "true", advances_to: done}
+        first: {when: true, advances_to: done}
         second: {else: true, advances_to: done}
     inherited:
       advances_to: done
       rules:
-        first: {when: "true"}
+        first: {when: true}
         second: {else: true}
     completed:
       on_complete:
-        - {condition: "true", advances_to: done}
-        - {condition: else, advances_to: done}
+        - {condition: true, advances_to: done}
+        - {advances_to: done}
     arrived:
       join:
         stage: awaiting

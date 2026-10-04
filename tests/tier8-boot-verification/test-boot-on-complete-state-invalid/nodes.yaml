@@ -5,5 +5,5 @@ test-node:
   event_handlers:
     task.requested:
       on_complete:
-        - condition: "payload.score >= 70"
+        - condition: payload.score >= 70
           advances_to: nonexistent

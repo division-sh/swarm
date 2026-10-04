@@ -6,7 +6,7 @@ test-node:
     check.requested:
       guard:
         id: region_check
-        check: "payload.region == policy.allowed_region"
+        check: payload.region == policy.allowed_region
       advances_to: done
       emit:
         event: check.passed

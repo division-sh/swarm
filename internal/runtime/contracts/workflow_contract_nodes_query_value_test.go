@@ -12,7 +12,7 @@ func TestProjectNodeQueryValueRetiresInertFormsAndPreservesActiveSelectors(t *te
 	for _, test := range []struct {
 		name, body, errorText string
 	}{
-		{"entity source", "query: {entities: Product, filter: 'state == 1', store_as: computed.items, count: true}\n", ""},
+		{"entity source", "query: {entities: Product, filter: state == 1, store_as: computed.items, count: true}\n", ""},
 		{"collection source", "query: {source: payload.items, select: [id], store_as: computed.items}\n", ""},
 		{"inert operation", "query: {source: payload.items, operation: count}\n", "operation"},
 		{"sequence", "query: [{source: payload.items}]\n", "must be a mapping"},

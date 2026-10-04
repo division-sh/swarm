@@ -809,7 +809,7 @@ contract_formats:
               emit:
                 event: review.escalated
                 fields:
-                  revision_id: ${loop.revision_id}
+                  revision_id: loop.revision_id
 
         event_handlers:
           work.started:
@@ -4012,16 +4012,15 @@ handler_specification:
           shape: '{target_field: entity_key, value: constant}'
           meaning: 'Write a constant value directly to entity.entity_key. No expression evaluation.'
           example: "- target_field: revision_count\n  value: 0"
-          note: '{target_field, literal} is NOT valid. The field name is value, not literal.
-            A scalar without `${...}` is a typed constant.'
+          note: 'The field name is value. Quote text constants; unquoted native numbers, booleans and null retain their types.'
         computed:
-          shape: '{target_field: entity_key, value: "${CEL_expression}"}'
-          meaning: 'The interpolated value is evaluated against handler context → entity.entity_key.'
+          shape: '{target_field: entity_key, value: CEL_expression}'
+          meaning: 'The unquoted expression is evaluated against handler context → entity.entity_key.'
           context: 'The value expression is evaluated against: entity, payload, policy, fan_out. The fan_out
             namespace is available when the handler includes a fan_out step (e.g., fan_out.count).
             accumulated is available after the current open-stream arrival has been admitted.'
-          example: "- target_field: revision_count\n  value: ${entity.revision_count + 1}"
-          note: 'Use the same value key for literals and computed values. Only `${...}` selects CEL.'
+          example: "- target_field: revision_count\n  value: entity.revision_count + 1"
+          note: 'Use the same value key for literals and computed values; YAML quote style selects text versus expressions.'
         contained_operation:
           promoted_by: '#1548'
           canonical_code_owner: internal/runtime/contracts.WorkflowDataWrite.Operation + internal/runtime/entityruntime.MutationPlan
@@ -4032,9 +4031,9 @@ handler_specification:
             MUST use `entity.` scope. For map-scoped operations, `key` is the
             explicit map key expression; dynamic bracket targets such as
             `entity.map[payload.key]` are not valid operation syntax. `value`,
-            `key`, and `index` use `expression_value_grammar`: a scalar without
-            `${...}` is literal, `${payload.field}` reads a typed scoped value,
-            and nested maps/lists interpolate recursively.
+            `key`, and `index` use `expression_value_grammar`: quoted scalars are
+            text, unquoted string scalars such as `payload.field` are CEL,
+            and nested maps/lists classify each executable leaf recursively.
           map_operations:
             set: >
               Requires `target`, `key`, and `value`. The target root must be
@@ -4082,11 +4081,11 @@ handler_specification:
           - paths.Parse dynamic segments
           - whole-map/list CEL rebuilds used as keyed operation proof
           - connect/direct delivery/RouteTable/descriptor lookup for contained items
-          example: "data_accumulation:\n  writes:\n  - op: append\n    target: entity.verticals.active_jobs\n    key: ${payload.vertical_id}\n    value: ${payload.job}\n  - op: update\n    target: entity.review_queue\n    index: 0\n    value: reviewed"
+          example: "data_accumulation:\n  writes:\n  - op: append\n    target: entity.verticals.active_jobs\n    key: payload.vertical_id\n    value: payload.job\n  - op: update\n    target: entity.review_queue\n    index: 0\n    value: \"reviewed\""
       rules:
       - writes is always a list
       - each item is exactly one of the six forms above
-      - the retired expression key is invalid; value owns both literal and interpolated writes
+      - value owns both literal and computed writes through the shared scalar grammar
       - source_event is optional — if omitted, the trigger event is the source; this effective default must be visible in
         the normalized handler semantics used by boot and runtime
       - source_event payload must contain all fields referenced by direct and mapped writes (verified at boot)
@@ -4096,7 +4095,7 @@ handler_specification:
       example: "data_accumulation:\n  writes:\n  - geography                              # direct\n\
         \  - source_field: vertical_name             # mapped\n    target_field: name\n  - target_field:\
         \ revision_count                # literal\n    value: 0\n  - target_field: expected_count\
-        \              # computed\n    value: ${fan_out.count}\n  source_event: scan.requested\
+        \              # computed\n    value: fan_out.count\n  source_event: scan.requested\
         \               # optional"
     emit:
       field: emit
@@ -4139,9 +4138,9 @@ handler_specification:
         lowering: "`emit.from: <source>` fills required declared payload fields for the emitted event when the same-named
           field exists in the source and the target field is not explicitly present in `emit.fields`. Optional payload fields
           are never auto-filled; authors opt into optionals through explicit `emit.fields` entries."
-        field_values: "All `emit.fields` values use the R2 expression-value grammar. Bare `payload` and `entity` are literal
-          strings, not same-named source-field selectors. Use `${payload.interest_score}` or `${entity.bucket}` for exact
-          typed selections."
+        field_values: "All `emit.fields` values use the shared scalar grammar. Unquoted `payload` and `entity` are CEL
+          roots, not same-named source-field selectors. Use `payload.interest_score` or `entity.bucket` for exact
+          typed selections, and quote literal text."
         canonical_output: The generated/semantic view and every validator/runtime consumer see the lowered canonical explicit
           `emit.fields` map with `emit.from` removed. Runtime evaluates only that explicit map; it never performs implicit
           entity or trigger-payload passthrough.
@@ -4152,24 +4151,45 @@ handler_specification:
           remain separate mapping surfaces and must not inherit emitted-payload lowering."
       expression_value_grammar:
         scope: "Every executable value slot in emit.fields (including guard escalation and fan_out emits), activity.input,
-          stage gate context, and data_accumulation write value/key/index. Predicates, path selectors, fan_out.identity,
-          and inert sets_gate.value are not expression-value slots."
-        scalar: "A YAML scalar without `${...}` is a typed literal, including empty string, zero and false. A scalar
-          exactly equal to one `${CEL}` evaluates to the typed CEL result. A scalar mixing text and one or more `${CEL}`
-          fragments evaluates to a string. Mixed fragments format strings without quotes and all other supported
-          values as canonical JSON text (null as `null`, lists/objects with deterministic key order). The shared
-          workflow value owner applies this formatting once; sole-interpolation results remain typed. Missing or
-          invalid expressions fail closed. Generated CEL boundaries preserve stock CEL comment termination, including
-          newlines before generated closing syntax; comments must not consume a wrapper or a later fragment."
+          stage gate context/outcome emits, and data_accumulation write value/key/index. Predicate and fan_out.identity
+          string carriers consume the same source classification before their existing scoped validators. Path
+          selectors and inert sets_gate.value are separate categories."
+        scalar: >-
+          Unquoted string scalars (plain, literal block |, or folded block >) are CEL expressions. Quoted scalars
+          (single and double quotes identically) are text, including empty text, with ${CEL} interpolation. Even
+          sole quoted interpolation produces text, never a typed-result escape. Fragments format strings without
+          quotes and other supported values as canonical JSON (null as null, lists/objects with deterministic
+          key order). Unquoted native numbers, booleans and null remain typed literals. Quotes take precedence
+          over explicit scalar tags in expression slots, including quoted numeric/null tags. Style flags survive
+          alias/merge resolution; generic data admission retains its own tag semantics. CEL ternaries and CEL
+          map/list literals use an unquoted block scalar. Generated CEL boundaries preserve stock comment
+          termination, including newlines before closing syntax. Missing/invalid expressions fail closed.
         recursive: "Lists and object values recursively apply the same rule to leaves; object keys remain literal names.
           Dynamic containers evaluate to a typed list or object. Destination checking inspects list/map constructors
           recursively before rejecting their inferred generic CEL collection type; declared record fields remain closed
           and exact, while already-typed record selections retain structural identity. Optional constructor entries
           preserve omission and validate the unwrapped present value against the declared element or optional field.
           Literal numeric kinds must not change during lowering."
-        escape: "`{literal: <value>}` preserves its entire value without interpolation, including nested `${` text."
-        retired: "Authored `{ref: ...}`, `{cel: ...}`, `{expression: ...}`, expression `kind` metadata and data-write
-          `expression:` aliases are rejected. Use `${...}` for CEL and `{literal: ...}` only to escape interpolation."
+        objects: >-
+          A field named literal is ordinary business data, not an escape. There is no raw-text escape,
+          sole-interpolation typed escape, predicate exception, or source translator. Reserved expression metadata
+          forms remain rejected by the existing closed shape owner.
+        predicates: >-
+          rules.when, ordinary on_complete.condition, guard.check/checks[].check, query.filter, filter.condition
+          and count.condition expect boolean expressions. Quoted source is a verification error naming the source,
+          semantic slot, and fix: remove YAML quotes. Optional omission preserves the existing absence behavior.
+          An unconditional completion omits condition; authored condition: else is invalid. Explicit rules
+          else: true/default: true retain their separate typed default identity. Native boolean predicates do
+          not create new definite-assignment exhaustiveness evidence.
+        diagnostics: >-
+          Expression errors identify the source and semantic slot category. An undeclared plain reference retains
+          CEL's undeclared-reference error and adds: quote text or use a declared reference. Other parser/type/program
+          errors retain their own cause. Unquoted ${...} is ordinary invalid CEL, without special migration teaching.
+        slot_categories:
+          expression: "Executable values and boolean controls above, plus fan_out.identity; quote style selects meaning."
+          path: "emit.from, write source/target paths, collection sources, receiver initialization and connection paths retain their structural path grammar."
+          data: "Policy R3, schema/event defaults, scenario documents (#2532), manifests, test input and CLI --data retain literal-by-default data admission; state.yaml retains its own type/initial-value grammar."
+        stability: "The contract value-slot grammar is frozen after #2556; no parallel spellings or compatibility surface."
         lowered_owner: "Authoring admission materializes one literal or CEL expression value. Verification and runtime
           consume that materialized value; they do not reinterpret bare scalars by context."
       on_success:
@@ -4307,7 +4327,7 @@ handler_specification:
           `emit.event` to add branch-specific fields. `emit` remains one object shape everywhere, `{event?, from?, fields?}`.
         field_values: >-
           All template and rule `emit.fields` values use `expression_value_grammar`, identical to ordinary
-          emits. For example `bucket: high` is a literal and `bucket: ${payload.bucket}` is a typed selection. There is
+          emits. For example `bucket: "high"` is text and `bucket: payload.bucket` is a typed selection. There is
           no CEL-only restriction or second field-value dialect for specialization. `emit_fields` and flattened rule
           payload maps remain unsupported.
         matching: Rules keep ordered first-match semantics. Threshold-style overlapping rules are valid when ordered from
@@ -5071,12 +5091,12 @@ handler_specification:
         resolves_to: 'Handler context produced while creating the durable fan_out obligation. fan_out.count is the
           immutable source cardinality owed by that obligation, not publications committed, deliveries settled,
           successes, or remaining work. fan_out.index is scoped to deferred fan_out.emit.fields evaluation only.'
-        available_in: 'data_accumulation.writes[].value with `${fan_out.count}` is the canonical way to write fan_out results to entity
+        available_in: 'data_accumulation.writes[].value with `fan_out.count` is the canonical way to write fan_out results to entity
           state. This writes the obligation cardinality to an entity field for
           downstream open-stream processing.'
         not_available_in: 'guard.check — guards run before fan_out. on_complete.condition — use entity
           fields written by data_accumulation instead.'
-        usage_example: "data_accumulation:\n  writes:\n  - target_field: expected_count\n    value: ${fan_out.count}"
+        usage_example: "data_accumulation:\n  writes:\n  - target_field: expected_count\n    value: fan_out.count"
       computed:
         resolves_to: 'Turn-scoped derived handler values written by compute-owned operations. Public authors may read
           computed.* in rule conditions and expression-value surfaces after the value has been produced by the handler
@@ -8520,6 +8540,10 @@ engine:
   expression_language:
     description: All guard checks, rule conditions, query/filter conditions, and on_complete branch conditions are evaluated using
       CEL (Common Expression Language). CEL is a non-Turing-complete, safe expression language designed for policy evaluation.
+    authored_scalar_rule: >-
+      Contract expression slots use handler_specification.handler_fields.emit.expression_value_grammar.
+      Unquoted plain/block string scalars are CEL; single/double quoted scalars are text with interpolation.
+      Programmatic admitted CEL carriers and literal-by-default data files do not acquire another source dialect.
     specification: https://github.com/google/cel-spec
     go_implementation: https://github.com/google/cel-go
     context_variables:

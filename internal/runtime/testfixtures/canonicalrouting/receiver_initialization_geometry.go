@@ -12,7 +12,7 @@ func CopyReceiverInitializationAgentGeometry(t testing.TB) string {
   subscribes_to: [worker.requested]
   event_handlers:
     worker.requested:
-      guard: {check: "payload.worker_id != ''"}
+      guard: {check: payload.worker_id != ''}
 `)
 	writeClosedVariantFile(t, root, "worker/agents.yaml", `bridge:
   model: regular
@@ -59,9 +59,9 @@ worker.requested:
       emit:
         event: worker.requested
         fields:
-          worker_id: ${payload.worker_id}
-          label: ${payload.label}
-          count: ${payload.count}
+          worker_id: payload.worker_id
+          label: payload.label
+          count: payload.count
 `,
 		"worker/schema.yaml": `name: worker
 instance: worker_id
@@ -100,14 +100,15 @@ leaf.requested:
   produces: [leaf.requested]
   event_handlers:
     worker.requested:
-      guard: {check: "payload.worker_id != ''"}
+      guard: {check: payload.worker_id != ''}
     worker.ready:
       emit:
         event: leaf.requested
         fields:
-          worker_id: "${payload.worker_id + '-leaf'}"
-          label: "${'leaf-' + payload.label}"
-          count: ${payload.count + 1}
+          worker_id: payload.worker_id + '-leaf'
+          label: |-
+                   'leaf-' + payload.label
+          count: payload.count + 1
 `,
 		"worker/leaf/schema.yaml": `name: leaf
 instance: worker_id
@@ -139,7 +140,7 @@ pins:
   subscribes_to: [leaf.requested, leaf.ready]
   event_handlers:
     leaf.requested:
-      guard: {check: "payload.worker_id != ''"}
+      guard: {check: payload.worker_id != ''}
     leaf.ready:
       data_accumulation:
         source_event: leaf.ready

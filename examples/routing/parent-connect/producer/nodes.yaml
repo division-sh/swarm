@@ -7,4 +7,4 @@ producer-node:
       emit:
         event: work.ready
         fields:
-          work_id: ${payload.work_id}
+          work_id: payload.work_id

@@ -6,9 +6,9 @@ retrier:
     retry.requested:
       guard:
         id: under_limit
-        check: "entity.retry_count < policy.max_retries"
+        check: entity.retry_count < policy.max_retries
         on_fail: "escalate:limit.reached"
       data_accumulation:
         writes:
           - target_field: retry_count
-            value: ${entity.retry_count + 1}
+            value: entity.retry_count + 1

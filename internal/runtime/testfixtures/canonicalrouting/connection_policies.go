@@ -21,10 +21,10 @@ func CopyConnectionPolicies(t testing.TB, reverse bool) string {
 		"schema.yaml":          "name: edge-policy\npins:\n  inputs: [work.requested]\n  outputs: [work.ready]\nconnect:\n" + edges,
 		"events.yaml":          "work.requested:\n  creation_id: text\n  reuse_id: text\nwork.ready:\n  creation_id: text\n  reuse_id: text\n",
 		"entities.yaml":        "run: {}\n",
-		"nodes.yaml":           "relay:\n  execution_type: system_node\n  event_handlers:\n    work.requested:\n      create_entity: true\n      emit:\n        event: work.ready\n        fields:\n          creation_id: ${payload.creation_id}\n          reuse_id: ${payload.reuse_id}\n",
+		"nodes.yaml":           "relay:\n  execution_type: system_node\n  event_handlers:\n    work.requested:\n      create_entity: true\n      emit:\n        event: work.ready\n        fields:\n          creation_id: payload.creation_id\n          reuse_id: payload.reuse_id\n",
 		"worker/schema.yaml":   "name: worker\ninstance: worker_id\npins:\n  inputs:\n    - work.ready\n",
 		"worker/entities.yaml": "work:\n  worker_id: {type: text, _unused_reason: receiver identity}\n",
-		"worker/nodes.yaml":    "worker:\n  execution_type: system_node\n  event_handlers:\n    work.ready:\n      guard: {check: \"payload.creation_id != ''\"}\n",
+		"worker/nodes.yaml":    "worker:\n  execution_type: system_node\n  event_handlers:\n    work.ready:\n      guard: {check: payload.creation_id != ''}\n",
 	} {
 		writeClosedVariantFile(t, root, path, source)
 	}
@@ -64,7 +64,7 @@ func CopyNonCreatingInitialization(t testing.TB, connected bool) string {
 		"schema.yaml":        "name: init-test\npins:\n  inputs:\n    - work.ready\n  outputs:\n    - work.ready\nconnect:\n  - {event: work.ready, from: ., to: worker}\n",
 		"events.yaml":        "work.ready:\n  label: text\n",
 		"worker/schema.yaml": "name: worker\ninstance_variables:\n  variables:\n    label: text\npins:\n  inputs:\n    - event: work.ready\n      initialize:\n        label: payload.label\n",
-		"worker/nodes.yaml":  "worker:\n  execution_type: system_node\n  event_handlers:\n    work.ready:\n      guard: {check: \"payload.label != ''\"}\n",
+		"worker/nodes.yaml":  "worker:\n  execution_type: system_node\n  event_handlers:\n    work.ready:\n      guard: {check: payload.label != ''}\n",
 	}
 	if !connected {
 		files["schema.yaml"] = strings.Split(files["schema.yaml"], "connect:\n")[0]

@@ -100,7 +100,7 @@ func TestPublicationDiagnosticDoesNotInventReceiverLocalIdentity(t *testing.T) {
     thing.reviewed:
       guard:
         id: selected_owner
-        check: '_entity.id != ""'
+        check: _entity.id != ""
 `)
 	eb := &EventBus{semanticSource: loadConnectRoutePlanCanonicalSource(t, root)}
 	subscriber := Subscriber{

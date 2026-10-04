@@ -17,8 +17,8 @@ func TestReviewer2492ClosedNodeAdmission(t *testing.T) {
 		"mapped_empty_op":            "data_accumulation: {writes: [{source_field: items, target_field: items, op: ''}]}",
 		"mapped_empty_second_target": "data_accumulation: {writes: [{source_field: items, target_field: items, target_path: ''}]}",
 		"ordinary_empty_source":      "data_accumulation: {writes: [{target_field: items, value: 1, source_field: ''}]}",
-		"fanout_empty_identity":      "fan_out: {items_from: payload.rows, as: row, identity: '', emit: {event: task.done, fields: {id: '${row}'}}}",
-		"fanout_fractional_bound":    "fan_out: {items_from: payload.rows, as: row, max_items: 1.5, emit: {event: task.done, fields: {id: '${row}'}}}",
+		"fanout_empty_identity":      "fan_out:\n  items_from: payload.rows\n  as: row\n  identity: \"\"\n  emit:\n    event: task.done\n    fields:\n      id: row",
+		"fanout_fractional_bound":    "fan_out: {items_from: payload.rows, as: row, max_items: 1.5, emit: {event: task.done, fields: {id: row}}}",
 		"reduce_empty_source":        "reduce: {operation: sum, items_from: payload.rows, source: ''}",
 		"count_empty_source":         "count: {items_from: payload.rows, source: ''}",
 		"completion_activity":        "on_complete: [{activity: {tool: search}}]",
@@ -40,7 +40,7 @@ func TestReviewer2492ValidControls(t *testing.T) {
 		"compute: {operation: pick_or_average}",
 		"data_accumulation: {writes: [{op: clear, target: entity.items}]}",
 		"data_accumulation: {writes: [{source_field: items, target_field: items}]}",
-		"fan_out: {items_from: payload.rows, as: row, max_items: 2, emit: {event: task.done, fields: {id: '${row}'}}}",
+		"fan_out: {items_from: payload.rows, as: row, max_items: 2, emit: {event: task.done, fields: {id: row}}}",
 		"reduce: {operation: sum, items_from: payload.rows}",
 		"activity: {tool: search}",
 	} {
@@ -208,7 +208,7 @@ func TestNodeClosedComputeAndCompletionPresence(t *testing.T) {
 			}
 		}
 	}
-	for _, body := range []string{"activity: {tool: search}", "rules: [{when: 'true', activity: {tool: search}}, {else: true}]", "on_complete: [{condition: 'true', emit: task.done}]", "sets_gate: done"} {
+	for _, body := range []string{"activity: {tool: search}", "rules: [{when: true, activity: {tool: search}}, {else: true}]", "on_complete: [{condition: true, emit: task.done}]", "sets_gate: done"} {
 		if _, err := admitReviewNode(t, body); err != nil {
 			t.Fatalf("supported context %s: %v", body, err)
 		}
@@ -259,7 +259,7 @@ func TestNodeAnnotationAliasDoesNotExemptActiveData(t *testing.T) {
 	if _, err := admitReviewNode(t, body.String()); err == nil || !strings.Contains(err.Error(), "YAML-EXPANSION-LIMIT") {
 		t.Fatalf("active annotation alias must remain bounded: %v", err)
 	}
-	node, err := admitReviewNode(t, "emit: {event: task.done, fields: {_note: {business: value}}}")
+	node, err := admitReviewNode(t, "emit: {event: task.done, fields: {_note: {business: \"value\"}}}")
 	if err != nil {
 		t.Fatal(err)
 	}

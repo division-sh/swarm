@@ -37,23 +37,24 @@ direct:
     rules.fallback:
       rules:
         - id: never-rules
-          when: "false"
+          when: |-
+                  false
         - id: unmatched-rules
           else: true
     rules.evaluation_failed:
       rules:
         - id: failed-rules
-          when: "payload.proof > 0"
+          when: payload.proof > 0
         - id: unmatched-evaluation
           else: true
     complete.selected:
       on_complete:
         - id: complete-label
-          condition: else
     complete.no_match:
       on_complete:
         - id: never-complete
-          condition: "false"
+          condition: |-
+                       false
     direct: {}
 `)
 	return root
@@ -181,7 +182,7 @@ connect:
     deploy.done:
       guard:
         id: selected_owner
-        check: '_entity.id != ""'
+        check: _entity.id != ""
 `)
 	removeClosedVariantFiles(t, root, "producer/nodes.yaml", "producer/agents.yaml")
 	writeLegacyInstanceFlow(t, root, "producer", `name: producer

@@ -10,7 +10,7 @@ intake:
           - {source_field: request_key, target_field: request_key}
       emit:
         event: child.work
-        fields: {request_key: "${payload.request_key}"}
+        fields: {request_key: payload.request_key}
 completion:
   execution_type: system_node
   subscribes_to: [child.completed]

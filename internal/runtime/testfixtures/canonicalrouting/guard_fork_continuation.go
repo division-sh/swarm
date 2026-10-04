@@ -46,7 +46,7 @@ pins:
   event_handlers:
     check.requested:
       create_entity: true
-      guard: {id: score_check, check: 'payload.score >= 100', on_fail: kill}
+      guard: {id: score_check, check: payload.score >= 100, on_fail: kill}
 `)
 	return root
 }

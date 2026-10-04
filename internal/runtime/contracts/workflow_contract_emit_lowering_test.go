@@ -113,7 +113,7 @@ target:
   match:
     account_id: payload
 fields:
-  interest_score: payload
+  interest_score: "payload"
 `), &spec)
 	if err == nil || !strings.Contains(err.Error(), `emit field "target" is not supported`) {
 		t.Fatalf("yaml.Unmarshal error = %v, want hard retirement", err)

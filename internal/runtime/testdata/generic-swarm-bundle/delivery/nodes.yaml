@@ -31,4 +31,4 @@ delivery-node:
           - target_field: timed_out
             value: true
           - target_field: status
-            value: completed
+            value: "completed"

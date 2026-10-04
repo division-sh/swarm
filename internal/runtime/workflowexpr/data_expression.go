@@ -244,7 +244,13 @@ func compileValueExpression(env *cel.Env, expression string, opts ValueExpressio
 	}
 	compiled, issues := env.Check(parsed)
 	if issues != nil && issues.Err() != nil {
-		return nil, workflowNumericCheckError(issues.Err())
+		err := workflowNumericCheckError(issues.Err())
+		for _, issue := range issues.Errors() {
+			if strings.HasPrefix(issue.Message, "undeclared reference to ") {
+				return nil, fmt.Errorf("%w; expression slot: quote text or use a declared reference", err)
+			}
+		}
+		return nil, err
 	}
 	if err := validateLoopAccesses(compiled, opts); err != nil {
 		return nil, err

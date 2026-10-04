@@ -42,14 +42,14 @@ func CopyRootReplyBoundary(t testing.TB, rootRequester, explicitCorrelation bool
       emit:
         event: provider.requested
         fields:
-          account_id: ${payload.account_id}
-          request_id: ${payload.request_id}
+          account_id: payload.account_id
+          request_id: payload.request_id
     provider.replied:
       emit:
         event: request.finished
         fields:
-          request_id: ${payload.request_id}
-          result: ${payload.result}
+          request_id: payload.request_id
+          result: payload.result
 `
 	providerNode := `provider-node:
   execution_type: system_node
@@ -59,9 +59,9 @@ func CopyRootReplyBoundary(t testing.TB, rootRequester, explicitCorrelation bool
       emit:
         event: provider.replied
         fields:
-          account_id: ${payload.account_id}
-          request_id: ${payload.request_id}
-          result: {literal: approved}
+          account_id: payload.account_id
+          request_id: payload.request_id
+          result: "approved"
 `
 	stopNode := `stop-node:
   execution_type: system_node

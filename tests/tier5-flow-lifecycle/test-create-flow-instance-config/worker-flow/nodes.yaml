@@ -8,7 +8,7 @@ worker-node:
         check: payload.worker_id != ''
       rules:
         - id: ready_already_settled
-          when: "_entity.current_state == 'awaiting_spawned'"
+          when: _entity.current_state == 'awaiting_spawned'
           advances_to: complete
         - id: await_ready
           else: true
@@ -16,7 +16,7 @@ worker-node:
     worker.ready:
       rules:
         - id: spawned_already_settled
-          when: "_entity.current_state == 'awaiting_ready'"
+          when: _entity.current_state == 'awaiting_ready'
           advances_to: complete
         - id: await_spawned
           else: true

@@ -34,7 +34,7 @@ stages:
           emit:
             event: numeric.approved
             fields:
-              value: ${decision.score}
+              value: decision.score
   approved: {}
   done: {terminal: true}
 pins:

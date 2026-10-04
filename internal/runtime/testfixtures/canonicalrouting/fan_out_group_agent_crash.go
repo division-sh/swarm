@@ -31,7 +31,7 @@ func CopyFanOutGroupAgentCrash(t testing.TB) string {
         emit:
           event: items.child
           fields:
-            value: "${entry}"
+            value: entry
 result-consumer:
   execution_type: system_node
   subscribes_to: [items.processed]
@@ -39,7 +39,7 @@ result-consumer:
     items.processed:
       data_accumulation:
         writes:
-          - {target_field: processed_value, value: "${payload.value}"}
+          - {target_field: processed_value, value: payload.value}
 `)
 	writeClosedVariantFile(t, root, "mocks/item-worker.py", `import json
 

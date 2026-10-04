@@ -83,7 +83,7 @@ platform_version: ">=0.7.0 <0.8.0"
 	rootNodes := ""
 	if emit != RootConnectNoEmitter {
 		rootInput = "  inputs: [root.start]\n"
-		emitBody := "      emit:\n        event: root.ready\n        fields:\n          entity_id: ${payload.entity_id}\n"
+		emitBody := "      emit:\n        event: root.ready\n        fields:\n          entity_id: payload.entity_id\n"
 		if emit != RootConnectCanonicalEmit {
 			t.Fatalf("unsupported root connect emitter %d", emit)
 		}
@@ -105,7 +105,7 @@ pins:
     root.ready:
       guard:
         id: selected_owner
-        check: '_entity.id != ""'
+        check: _entity.id != ""
 `)
 	return root
 }
@@ -204,7 +204,7 @@ connect:
     scout.completed:
       guard:
         id: selected_owner
-        check: '_entity.id != ""'
+        check: _entity.id != ""
 `)
 	writeLegacyInstanceFlow(t, root, scoutPath, `name: scout
 pins:
@@ -247,7 +247,7 @@ connect:
     work.pong:
       guard:
         id: selected_owner
-        check: '_entity.id != ""'
+        check: _entity.id != ""
 `)
 	writeLegacyInstanceFlow(t, root, "boomerang", `name: boomerang
 pins:
@@ -262,7 +262,7 @@ pins:
     work.ping:
       guard:
         id: selected_owner
-        check: '_entity.id != ""'
+        check: _entity.id != ""
 `)
 	return root
 }

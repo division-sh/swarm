@@ -6,9 +6,9 @@ processor:
     process.requested:
       guard:
         id: counter_check
-        check: "has(entity.counter) && entity.counter < 3"
+        check: has(entity.counter) && entity.counter < 3
       data_accumulation:
         writes:
           - target_field: counter
-            value: ${entity.counter + 1}
+            value: entity.counter + 1
       advances_to: processing

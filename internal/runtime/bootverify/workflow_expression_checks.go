@@ -91,6 +91,7 @@ func (c *checkerContext) conditionExpressions() []Finding {
 					continue
 				}
 				if err := validateConditionCELLocal(expr, cond.ConditionContext, options); err != nil {
+					err = c.authoredExpressionError(record, eventType, cond, err)
 					c.conditionExprFindings = append(c.conditionExprFindings, Finding{
 						CheckID:  "condition_expression_validation",
 						Severity: "error",
@@ -184,6 +185,7 @@ func (c *checkerContext) dataAccumulationExpressions() []Finding {
 				}
 				options := executableReaderExpressionOptions(expr, payloadType, entityType)
 				if err := workflowexpr.ValidateValueExpressionWithOptions(expr.Expression, options); err != nil {
+					err = c.authoredExpressionError(record, eventType, expr, err)
 					c.dataAccumulationExprFindings = append(c.dataAccumulationExprFindings, Finding{
 						CheckID:  "data_accumulation_expression_validation",
 						Severity: "error",
@@ -231,6 +233,7 @@ func (c *checkerContext) emitFieldExpressions() []Finding {
 				}
 				options := executableReaderExpressionOptions(expr, payloadType, entityType)
 				if err := workflowexpr.ValidateValueExpressionWithOptions(expr.Expression, options); err != nil {
+					err = c.authoredExpressionError(record, eventType, expr, err)
 					c.emitFieldExprFindings = append(c.emitFieldExprFindings, Finding{
 						CheckID:  "emit_field_expression_validation",
 						Severity: "error",
@@ -304,6 +307,7 @@ func (c *checkerContext) executableReaderExpressions() []Finding {
 					continue
 				}
 				if err := workflowexpr.ValidateValueExpressionWithOptions(expr.Expression, executableReaderExpressionOptions(expr, payloadType, entityType)); err != nil {
+					err = c.authoredExpressionError(record, eventType, expr, err)
 					c.executableReaderExprFindings = append(c.executableReaderExprFindings, Finding{
 						CheckID: "executable_reader_expression_validation", Severity: SeverityHardInvalidity,
 						Message: fmt.Sprintf("node %s handler %s %s %q is invalid: %v", nodeID, eventType, expr.Kind, expr.Expression, err), Location: nodeID,

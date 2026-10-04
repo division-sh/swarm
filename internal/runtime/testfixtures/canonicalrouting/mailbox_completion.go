@@ -42,8 +42,8 @@ func CopyMailboxCompletionMatrix(t testing.TB) string {
         tool: telegram.send_message
         approval: {decision: send_telegram_message}
         input:
-          chat_id: {literal: "42"}
-          text: {literal: review}
+          chat_id: "42"
+          text: "review"
 effect-revision:
   execution_type: system_node
   subscribes_to: [telegram_send_message.revision_requested]
@@ -104,7 +104,7 @@ func CopyHumanTaskOwnership(t testing.TB, mode string) string {
 	switch mode {
 	case "singleton":
 	case "static":
-		applyClosedReplacement(t, filepath.Join(root, "observers/nodes.yaml"), "      create_entity: true\n", "      emit:\n        event: observer.started\n        fields: {seed: \"${payload.seed}\", deadline_at: \"${payload.deadline_at}\"}\n")
+		applyClosedReplacement(t, filepath.Join(root, "observers/nodes.yaml"), "      create_entity: true\n", "      emit:\n        event: observer.started\n        fields: {seed: payload.seed, deadline_at: payload.deadline_at}\n")
 		writeClosedVariantFile(t, root, "observers/events.yaml", "observer.started:\n  seed: boolean\n  deadline_at: text\n")
 		applyClosedReplacement(t, filepath.Join(root, "observers/agents.yaml"), "subscriptions: [observer.requested,", "subscriptions: [observer.started,")
 		applyClosedReplacement(t, filepath.Join(root, "observers/mocks/observer.py"), "endswith(\"observer.requested\")", "endswith(\"observer.started\")")
@@ -132,7 +132,7 @@ func CopyHumanTaskOwnership(t testing.TB, mode string) string {
 		removeClosedVariantFiles(t, root, "observers/mocks/observer.py", "observers/mocks", "observers/agents.yaml", "observers/entities.yaml", "observers/nodes.yaml", "observers/schema.yaml", "observers")
 	case "template":
 		writeClosedVariantFile(t, root, "observers/entities.yaml", "observer:\n  case_id: text\n")
-		applyClosedReplacement(t, filepath.Join(root, "observers/nodes.yaml"), "      create_entity: true\n", "      create_entity: true\n      data_accumulation:\n        writes:\n          - {target_field: case_id, value: \"${payload.case_id}\"}\n")
+		applyClosedReplacement(t, filepath.Join(root, "observers/nodes.yaml"), "      create_entity: true\n", "      create_entity: true\n      data_accumulation:\n        writes:\n          - {target_field: case_id, value: payload.case_id}\n")
 		applyClosedReplacement(t, filepath.Join(root, "observers/schema.yaml"), "name: observers\n", "name: observers\ninstance: case_id\n")
 		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - {event: observer.requested, from: ., to: observers}\n", "  - {event: observer.requested, from: ., to: observers, resolution: create}\n")
 		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - observer.requested\n", "    - observer.requested\n    - observer.seed\n")
@@ -147,7 +147,7 @@ func CopyHumanTaskOwnership(t testing.TB, mode string) string {
     observer.seed:
       emit:
         event: observer.requested
-        fields: {case_id: "${payload.case_id}", seed: {literal: true}}
+        fields: {case_id: payload.case_id, seed: true}
 `,
 		} {
 			parent, err := os.ReadFile(filepath.Join(root, name))
@@ -166,7 +166,7 @@ func CopyHumanTaskOwnership(t testing.TB, mode string) string {
 	if mode == "template" {
 		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "observer.seed:\n  case_id: text\n", "observer.seed:\n  case_id: text\n  deadline_at: text\n")
 		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "observer.requested:\n  case_id: text\n", "observer.requested:\n  case_id: text\n  deadline_at: text\n")
-		applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "fields: {case_id: \"${payload.case_id}\", seed: {literal: true}}", "fields: {case_id: \"${payload.case_id}\", seed: {literal: true}, deadline_at: \"${payload.deadline_at}\"}")
+		applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "fields: {case_id: payload.case_id, seed: true}", "fields: {case_id: payload.case_id, seed: true, deadline_at: payload.deadline_at}")
 	} else {
 		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "observer.requested:\n  seed: boolean\n", "observer.requested:\n  seed: boolean\n  deadline_at: text\n")
 	}

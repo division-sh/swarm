@@ -21,8 +21,8 @@ intake-router:
         emit:
           event: item.processed
           fields:
-            item_id: ${intake_item.id}
-            score: ${intake_item.score}
+            item_id: intake_item.id
+            score: intake_item.score
     item.processed:
       accumulate:
         into: processed_items
@@ -30,7 +30,7 @@ intake-router:
       emit:
         event: item.review_requested
         fields:
-          score: ${payload.score}
+          score: payload.score
       sets_gate: intake_ready
       clear_gates:
         - needs_revision

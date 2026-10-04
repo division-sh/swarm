@@ -5,9 +5,9 @@ test-node:
   event_handlers:
     item.evaluated:
       on_complete:
-        - condition: "payload.score >= 70"
+        - condition: payload.score >= 70
           advances_to: passed
-        - condition: "else"
+        -
           emit:
             event: item.failed
           advances_to: failed

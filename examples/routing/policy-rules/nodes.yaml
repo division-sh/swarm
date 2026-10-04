@@ -11,17 +11,17 @@ validator:
           emit:
             event: work.accepted
             fields:
-              proof: ${policy.business.description}
-              limit: ${policy.business.value}
+              proof: policy.business.description
+              limit: policy.business.value
         - when: computed.validation.matches.valid == false
           emit:
             event: work.rejected
             fields:
-              proof: ${policy.business.description}
-              limit: ${policy.business.value}
+              proof: policy.business.description
+              limit: policy.business.value
         - default: true
           emit:
             event: work.rejected
             fields:
-              proof: invalid validation result
+              proof: "invalid validation result"
               limit: 0

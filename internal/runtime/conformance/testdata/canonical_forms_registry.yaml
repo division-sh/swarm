@@ -451,17 +451,17 @@ rows:
     corpus: {rows: 0}
 
   - id: handler.expression
-    ruled: R2
-    paths: "handler/rule/on_success/fan_out emit.fields.*, activity.input.*, guard.on_fail.escalate.fields.*, stage_gate.context.*, data_accumulation.writes[].value/key/index; reduce.params and sets_gate.value are rejected on presence"
-    owners: [projectNodeExpressionValue, projectSchemaGateValue, projectSchemaEmitValue, LowerEmitSpecFields, validateEmitTemplateFields, CarriesLoopRevision, evalExpressionValue, evalWorkflowGateContext]
+    ruled: scalar-style-2556-frozen
+    paths: "handler/rule/on_success/fan_out emit.fields.*, activity.input.*, guard.on_fail.escalate.fields.*, stage_gate.context/outcome fields, data_accumulation.writes[].value/key/index; rules.when, on_complete.condition, guard.check/checks[].check, query.filter, filter/count.condition and fan_out.identity share source classification; path/data slots are separate"
+    owners: [projectNodeExpressionValue, projectNodeScalarExpression, projectSchemaGateValue, projectSchemaEmitValue, LowerEmitSpecFields, validateEmitTemplateFields, CarriesLoopRevision, evalExpressionValue, evalWorkflowGateContext]
     information:
       fact: [literal values and references]
-      choice: [typed_literal, exact_typed_interpolation, mixed_string_interpolation, recursive_container]
+      choice: [unquoted_CEL, quoted_text_interpolation, native_typed_literal, recursive_container]
     spelling:
-      canonical_candidate: "R2: literal YAML by default; one ${...} returns a typed expression value; mixed text interpolates to string; {literal: ...} escapes interpretation"
-      retired_duplicates: ["authored {expression: X}", "authored {cel: X}", "authored {ref: X} and kind metadata", "bare CEL scalar and emit namespace shorthand", "stage-gate literal-to-CEL rewrite", "emit-template CEL-only validation"]
-      distinct_overrides: [typed_exact_interpolation, mixed_text_interpolation, explicit_literal_escape, structural_emit_from]
-    f2_resolution: "#2305 owns R2 lowering and evaluation; #2489 and #2490 consume projectNodeExpressionValue for node/schema values. The raw ExpressionValue/EmitSpec decoders are deleted; reduce.params remains rejected."
+      canonical_candidate: "Unquoted plain/|/> string scalars are CEL; single/double quoted text interpolates ${...}, always to text; native numbers/bools/null preserve type; literal is an ordinary business object key"
+      retired_duplicates: ["quoted sole-interpolation typed escape", "{literal: ...} escape", "quote-blind predicates", "authored {expression: X}", "authored {cel: X}", "authored {ref: X} and kind metadata", "emit namespace shorthand", "stage-gate literal-to-CEL rewrite", "emit-template CEL-only validation"]
+      distinct_overrides: [quoted_text_interpolation, native_typed_literal, structural_emit_from]
+    f2_resolution: "#2556 supersedes only #2305's scalar classification; constructor/null/comment/alias/type fixes survive. Node/schema values and predicate/identity carriers consume the same source owner. Quoted predicates fail with source/slot and remove-YAML-quotes guidance. Path slots, R3 policy and #2532 scenario data remain unchanged."
     corpus: {expression_alias_uses: 0}
 
   - id: handler.data_write

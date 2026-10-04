@@ -21,14 +21,14 @@ func CopyMaterializingSenderExistingReceiver(t testing.TB, requiresExisting bool
   event_handlers:
     start:
       data_accumulation:
-        writes: [{target_field: case_id, value: "${payload.case_id}"}]
-      emit: {event: work.ready, fields: {case_id: "${payload.case_id}"}}
+        writes: [{target_field: case_id, value: payload.case_id}]
+      emit: {event: work.ready, fields: {case_id: payload.case_id}}
 receiver:
   execution_type: system_node
   subscribes_to: [work.ready]
   event_handlers:
     work.ready:
-      guard: {id: exact_owner, check: "has(entity.case_id) && entity.case_id == payload.case_id"}
+      guard: {id: exact_owner, check: has(entity.case_id) && entity.case_id == payload.case_id}
 `
 	if !requiresExisting {
 		nodes = strings.Replace(nodes, "has(entity.case_id) && entity.case_id == payload.case_id", "payload.case_id == 'exact'", 1)

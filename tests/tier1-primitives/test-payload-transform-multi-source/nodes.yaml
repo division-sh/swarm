@@ -8,9 +8,9 @@ test-node:
       emit:
         event: item.exported
         fields:
-          id: ${_entity.id}
-          name: ${entity.name}
-          status: ${_entity.current_state}
+          id: _entity.id
+          name: entity.name
+          status: _entity.current_state
   state_schema:
     fields:
       name: string

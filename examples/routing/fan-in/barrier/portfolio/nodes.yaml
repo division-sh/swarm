@@ -11,14 +11,14 @@ portfolio-router:
       emit:
         event: period.setup
         fields:
-          portfolio_id: ${payload.portfolio_id}
-          period_id: ${payload.period_id}
-          expected_operating_ids: ${payload.expected_operating_ids}
+          portfolio_id: payload.portfolio_id
+          period_id: payload.period_id
+          expected_operating_ids: payload.expected_operating_ids
     operating.reported:
       emit:
         event: period.reported
         fields:
-          portfolio_id: ${payload.portfolio_id}
-          period_id: ${payload.period_id}
-          operating_id: ${payload.operating_id}
-          revenue: ${payload.revenue}
+          portfolio_id: payload.portfolio_id
+          period_id: payload.period_id
+          operating_id: payload.operating_id
+          revenue: payload.revenue

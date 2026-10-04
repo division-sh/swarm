@@ -21,9 +21,6 @@ func decodeInterpolatedScalar(value string) (ExpressionValue, error) {
 	if len(expressions) == 0 {
 		return LiteralExpression(value), nil
 	}
-	if len(expressions) == 1 && parts[0] == "" && parts[1] == "" {
-		return CELExpression(expressions[0]), nil
-	}
 	terms := make([]string, 0, len(expressions)*2+1)
 	for i, expr := range expressions {
 		if parts[i] != "" {

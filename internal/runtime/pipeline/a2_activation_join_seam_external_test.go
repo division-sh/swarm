@@ -338,10 +338,10 @@ func a2ActivationJoinFiles(count int) map[string]string {
         deadline: {after: 1h, from: stage_entry}
         on_complete:
           data_accumulation:
-            writes: [{target_field: final_count, value: "${join.completed}"}]
+            writes: [{target_field: final_count, value: join.completed}]
         on_deadline:
           data_accumulation:
-            writes: [{target_field: final_count, value: "${join.completed}"}]
+            writes: [{target_field: final_count, value: join.completed}]
 `, count),
 	}
 }

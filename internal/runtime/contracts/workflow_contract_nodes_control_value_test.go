@@ -14,14 +14,14 @@ func TestProjectNodeControlValues(t *testing.T) {
       activity:
         id: provision
         tool: infra.provision
-        input: {component_id: '${payload.component_id}'}
+        input: {component_id: payload.component_id}
         approval: {decision: provision}
       guard:
-        checks: [{id: known_component, check: 'payload.component_id != ""'}]
+        checks: [{id: known_component, check: payload.component_id != ""}]
         on_fail:
           escalate:
             event: task.rejected
-            fields: {component_id: '${payload.component_id}'}
+            fields: {component_id: payload.component_id}
 `))
 	if err != nil {
 		t.Fatal(err)

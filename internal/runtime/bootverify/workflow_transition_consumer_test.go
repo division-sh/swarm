@@ -362,16 +362,16 @@ worker:
     direct: {advances_to: awaiting}
     selected:
       rules:
-        first: {when: "true", advances_to: done}
+        first: {when: true, advances_to: done}
         second: {else: true, advances_to: done}
     inherited:
       advances_to: done
       rules:
-        first: {when: "true"}
+        first: {when: true}
         second: {else: true}
     completed:
       on_complete:
-        - {condition: "true", advances_to: done}
+        - {condition: true, advances_to: done}
     tick: {}
     arrived:
       join:

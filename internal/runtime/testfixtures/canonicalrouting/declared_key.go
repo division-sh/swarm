@@ -31,9 +31,9 @@ connect:
       emit:
         event: work.keyed
         fields:
-          receiver_id: "${payload.receiver_id}"
-          account_id: "${payload.account_id}"
-          item: "${payload.item}"
+          receiver_id: payload.receiver_id
+          account_id: payload.account_id
+          item: payload.item
 `)
 	writeClosedVariantFile(t, root, "review/schema.yaml", fmt.Sprintf(`name: review
 instance: %s

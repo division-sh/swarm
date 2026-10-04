@@ -15,7 +15,7 @@ func CopyNotifyAllChildrenNestedServing(t testing.TB) string {
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - portfolio.notify.requested\nconnect:\n", "    - portfolio.notify.requested\n    - account.tasks.completed\n    - account.task.completed\nconnect:\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - event: account.notify.requested\n    from: portfolio\n    to: account\n    resolution: select\n", "  - event: account.notify.requested\n    from: portfolio\n    to: account\n    resolution: select\n  - event: account.tasks.completed\n    from: account\n    to: .\n  - event: account.task.completed\n    from: account/task\n    to: .\n")
 	applyClosedReplacement(t, filepath.Join(root, "portfolio", "nodes.yaml"),
-		"            command: ${payload.command}\n", "            command: ${payload.command}\n            task_ids: {literal: [prepare, publish]}\n")
+		"            command: payload.command\n", "            command: payload.command\n            task_ids: [\"prepare\", \"publish\"]\n")
 	applyClosedReplacement(t, filepath.Join(root, "portfolio", "events.yaml"),
 		"  command: text\nportfolio.notify.completed:", "  command: text\n  task_ids: '[text]'\nportfolio.notify.completed:")
 	// This closed variant uses business system-node recipients, not the example's
@@ -73,9 +73,9 @@ account.tasks.completed:
         emit:
           event: account.task.requested
           fields:
-            account_id: ${payload.account_id}
-            task: ${task}
-            task_key: '${payload.account_id + ":" + task}'
+            account_id: payload.account_id
+            task: task
+            task_key: payload.account_id + ":" + task
       join:
         id: direct-account-tasks-delivered
         members:
@@ -84,13 +84,13 @@ account.tasks.completed:
           emit:
             event: account.tasks.completed
             fields:
-              account_id: ${entity.account_id}
-              total: ${join.total}
-              succeeded: ${join.dispositions.succeeded}
-              dead_lettered: ${join.dispositions.dead_lettered}
-              no_route: ${join.dispositions.no_route}
-              semantic_rejected: ${join.dispositions.semantic_rejected}
-              canceled: ${join.dispositions.canceled}
+              account_id: entity.account_id
+              total: join.total
+              succeeded: join.dispositions.succeeded
+              dead_lettered: join.dispositions.dead_lettered
+              no_route: join.dispositions.no_route
+              semantic_rejected: join.dispositions.semantic_rejected
+              canceled: join.dispositions.canceled
 `)
 	writeClosedVariantFile(t, root, "account/task/schema.yaml", `name: account-task
 instance: task_key
@@ -130,8 +130,8 @@ pins:
       emit:
         event: account.task.completed
         fields:
-          account_id: ${payload.account_id}
-          task: ${payload.task}
+          account_id: payload.account_id
+          task: payload.task
 `)
 	return root
 }

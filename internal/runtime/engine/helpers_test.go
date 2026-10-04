@@ -163,12 +163,12 @@ func TestEmitFieldsPayload_EvaluatesYAMLLoadedR2Values(t *testing.T) {
 	handler, err := loadNodeHandlerFixture(`emit:
   event: signals.category_ready
   fields:
-    mode: ${payload.mode}
-    batch: {scan_id: "${payload.scan_id}", geography: "${payload.geography}"}
+    mode: payload.mode
+    batch: {scan_id: payload.scan_id, geography: payload.geography}
     count: 0
-    quoted_literal: ready
+    quoted_literal: "ready"
     explicit_literal:
-      literal: ready
+      "ready"
 `)
 	if err != nil {
 		t.Fatalf("source admission: %v", err)

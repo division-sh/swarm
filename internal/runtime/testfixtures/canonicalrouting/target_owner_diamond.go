@@ -31,7 +31,7 @@ connect:
     branch.done:
       guard:
         id: root_owner
-        check: '_entity.id != ""'
+        check: _entity.id != ""
 `,
 		"branch/schema.yaml": `name: branch
 instance: branch_id
@@ -57,7 +57,7 @@ connect:
     branch.start:
       guard:
         id: branch_owner
-        check: '_entity.id != ""'
+        check: _entity.id != ""
 `,
 
 		"branch/worker/result-static/schema.yaml": `name: static-result
@@ -71,7 +71,7 @@ pins:
     work.ready:
       guard:
         id: inherited_owner
-        check: '_entity.id != ""'
+        check: _entity.id != ""
 `,
 		"branch/worker/result/schema.yaml": `name: singleton-result
 pins:
@@ -102,7 +102,7 @@ pins:
     work.ready:
       guard:
         id: hostile_owner
-        check: '_entity.id != ""'
+        check: _entity.id != ""
 `,
 	}
 	for name, body := range files {

@@ -9,8 +9,8 @@ search-intake:
       emit:
         event: scout.requested
         fields:
-          query: ${payload.query}
-          candidate_ids: ${payload.candidate_ids}
+          query: payload.query
+          candidate_ids: payload.candidate_ids
 scout-collector:
   execution_type: system_node
   subscribes_to: [scout.completed]
@@ -31,8 +31,8 @@ scout-collector:
         emit:
           event: candidate.requested
           fields:
-            batch_id: ${payload.batch_id}
-            candidate_id: ${candidate_id}
+            batch_id: payload.batch_id
+            candidate_id: candidate_id
 candidate-collector:
   execution_type: system_node
   subscribes_to: [candidate.completed]

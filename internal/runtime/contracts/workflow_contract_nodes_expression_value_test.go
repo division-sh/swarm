@@ -7,15 +7,15 @@ import (
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
-func TestProjectNodeExpressionValueUsesExistingR2Semantics(t *testing.T) {
+func TestProjectNodeExpressionValueUsesRatifiedScalarSemantics(t *testing.T) {
 	for _, test := range []struct {
 		name, source string
 		wantCEL      bool
 	}{
-		{"literal", "value: hello\n", false},
-		{"whole interpolation", "value: ${payload.name}\n", true},
+		{"literal", "value: 'hello'\n", false},
+		{"plain expression", "value: payload.name\n", true},
 		{"nested interpolation", "value: {name: '${payload.name}', fixed: null}\n", true},
-		{"escaped literal", "value: {literal: '${payload.name}'}\n", false},
+		{"ordinary business object", "value: {literal: 'text'}\n", false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			snapshot, err := yamlsource.Load([]byte(test.source))

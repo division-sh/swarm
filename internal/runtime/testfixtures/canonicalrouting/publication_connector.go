@@ -22,7 +22,7 @@ func CopyPublicationConnector(t testing.TB, mode string) string {
 	}
 	applyClosedReplacement(t, filepath.Join(path, "schema.yaml"), "name: publication-activity\n", "name: publication-activity\nimports:\n  connector_packs:\n    - {provider: telegram, tool: telegram.send_message}\n")
 	applyClosedReplacement(t, filepath.Join(path, "nodes.yaml"), "tool: send\n", "tool: telegram.send_message\n")
-	applyClosedReplacement(t, filepath.Join(path, "nodes.yaml"), "input: {message: \"${payload.message}\"}", "input: {chat_id: {literal: \"42\"}, text: \"${payload.message}\"}")
+	applyClosedReplacement(t, filepath.Join(path, "nodes.yaml"), "input: {message: payload.message}", "input: {chat_id: \"42\", text: payload.message}")
 	for _, nodes := range []string{filepath.Join(path, "nodes.yaml"), filepath.Join(root, "sink", "nodes.yaml")} {
 		applyClosedReplacement(t, nodes, "payload.result.delivered == true", "payload.result.message_id > 0")
 	}

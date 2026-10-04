@@ -6,7 +6,7 @@ test-node:
     check.requested:
       rules:
         - id: empty_schema_rule
-          when: "payload.empty_schema_rule == true"
+          when: payload.empty_schema_rule == true
           advances_to: done
         - id: unmatched
           else: true

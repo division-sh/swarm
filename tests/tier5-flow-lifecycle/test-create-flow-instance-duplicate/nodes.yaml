@@ -8,6 +8,6 @@ test-node:
       emit:
         event: flow.spawned
         fields:
-          worker_id: ${payload.worker_id}
+          worker_id: payload.worker_id
     flow.finished:
       advances_to: done

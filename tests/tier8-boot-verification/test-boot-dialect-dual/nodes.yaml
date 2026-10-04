@@ -5,11 +5,11 @@ dual-dialect-node:
   event_handlers:
     check.requested:
       on_complete:
-        - condition: "payload.score >= 70"
+        - condition: payload.score >= 70
           advances_to: done
       rules:
         - id: high_score
-          when: "payload.score >= 70"
+          when: payload.score >= 70
         - id: unmatched
           else: true
       advances_to: done

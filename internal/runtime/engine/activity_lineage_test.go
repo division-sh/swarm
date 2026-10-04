@@ -80,7 +80,7 @@ func TestActivityLoopLineageRetainsHistoryWithoutReadmission(t *testing.T) {
 	check(t, intent, nil, false)
 	// The selected rule, not another reachable rule or the loop's present stage,
 	// owns the transition before the activity dispatch.
-	handler, err = loadNodeHandlerFixture("loop: {admit: revision, from: working}\nadvances_to: executing\nrules:\n  - when: 'true'\n    advances_to: selected\n  - else: true\n    advances_to: unselected\n")
+	handler, err = loadNodeHandlerFixture("loop: {admit: revision, from: working}\nadvances_to: executing\nrules:\n  - when: |-\n            true\n    advances_to: selected\n  - else: true\n    advances_to: unselected\n")
 	if err != nil {
 		t.Fatal(err)
 	}

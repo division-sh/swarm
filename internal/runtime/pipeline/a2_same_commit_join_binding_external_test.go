@@ -339,8 +339,8 @@ pins:
       emit:
         event: item.completed
         fields:
-          member_id: a
-          result: {value: same-commit}
+          member_id: "a"
+          result: {value: "same-commit"}
 collector:
   execution_type: system_node
   event_handlers:

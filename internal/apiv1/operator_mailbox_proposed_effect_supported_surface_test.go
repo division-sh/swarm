@@ -304,7 +304,7 @@ pins:
         id: send_support_reply
         tool: provider_write
         input:
-          text: ${payload.text}
+          text: payload.text
         approval: {decision: support_reply}
 `)
 	writeRunCompletionFixtureFile(t, root+"/tools.yaml", fmt.Sprintf(`provider_write:

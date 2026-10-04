@@ -8,7 +8,7 @@ import (
 )
 
 func TestProjectNodeFanOutValuePreservesMetadataAndRejectsRetiredAddress(t *testing.T) {
-	snapshot, err := yamlsource.Load([]byte("fan_out: {items_from: payload.items, as: component, max_items: 3, emit: {event: child.created, fields: {id: '${component.id}'}}}\n"))
+	snapshot, err := yamlsource.Load([]byte("fan_out: {items_from: payload.items, as: component, max_items: 3, emit: {event: child.created, fields: {id: component.id}}}\n"))
 	if err != nil {
 		t.Fatal(err)
 	}

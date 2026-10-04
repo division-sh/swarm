@@ -7,5 +7,5 @@ requester-node:
       emit:
         event: provider.requested
         fields:
-          account_id: ${payload.account_id}
+          account_id: payload.account_id
     provider.replied: {}

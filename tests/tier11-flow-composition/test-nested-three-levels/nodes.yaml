@@ -6,7 +6,7 @@ root-dispatcher:
     pipeline.start:
       guard:
         id: selected_owner
-        check: '_entity.id != ""'
+        check: _entity.id != ""
       emit: step.begin
 
 root-collector:

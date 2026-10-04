@@ -5360,7 +5360,7 @@ fan_out:
   emit:
     event: item.requested
     fields:
-      item: ${fan_item}
+      item: fan_item
 join:
   id: all-items-delivered
   members:
@@ -5369,8 +5369,8 @@ join:
     emit:
       event: batch.completed
       fields:
-        total: ${join.total}
-        succeeded: ${join.dispositions.succeeded}
+        total: join.total
+        succeeded: join.dispositions.succeeded
 `)
 	if err != nil {
 		t.Fatal(err)

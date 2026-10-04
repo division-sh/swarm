@@ -43,9 +43,9 @@ fulfillment.completed:
       emit:
         event: fulfillment.completed
         fields:
-          value: "${payload.value + 1}"
-          fraction: "${double(payload.fraction) + 0.5}"
-          explicit_double: "${double(payload.value) + 1.0}"
+          value: payload.value + 1
+          fraction: double(payload.fraction) + 0.5
+          explicit_double: double(payload.value) + 1.0
 collector:
   execution_type: system_node
   subscribes_to: [fulfillment.completed]

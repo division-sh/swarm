@@ -17,14 +17,15 @@ func TestExpressionValueR2Authoring(t *testing.T) {
 		literal any
 		cel     string
 	}{
-		{"bare string", "ready", ExpressionKindLiteral, "ready", ""},
+		{"bare expression", "payload.count", ExpressionKindCEL, nil, "payload.count"},
+		{"quoted text", `"ready"`, ExpressionKindLiteral, "ready", ""},
 		{"empty string", `""`, ExpressionKindLiteral, "", ""},
 		{"number", "42", ExpressionKindLiteral, 42, ""},
-		{"typed expression", `"${payload.count}"`, ExpressionKindCEL, nil, "payload.count"},
+		{"sole text interpolation", `"${payload.count}"`, ExpressionKindCEL, nil, "__swarm_r2_format((payload.count\n))"},
 		{"mixed string", `"count=${payload.count}!"`, ExpressionKindCEL, nil, "\"count=\" + __swarm_r2_format((payload.count\n)) + \"!\""},
-		{"escaped", `{literal: "${payload.count}"}`, ExpressionKindLiteral, "${payload.count}", ""},
-		{"object", `{a: "${payload.count}", b: [true, "x"]}`, ExpressionKindCEL, nil, "{\"a\": (payload.count\n), \"b\": [true, \"x\"]}"},
-		{"escaped nested", `{a: {literal: "${payload.count}"}}`, ExpressionKindLiteral, map[string]any{"a": "${payload.count}"}, ""},
+		{"ordinary literal key", `{literal: "text"}`, ExpressionKindLiteral, map[string]any{"literal": "text"}, ""},
+		{"object", `{a: payload.count, b: [true, "x"]}`, ExpressionKindCEL, nil, "{\"a\": (payload.count\n), \"b\": [true, \"x\"]}"},
+		{"nested business object", `{a: {literal: "text"}}`, ExpressionKindLiteral, map[string]any{"a": map[string]any{"literal": "text"}}, ""},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -44,9 +45,9 @@ func TestExpressionValueR2PreservesYAMLAliases(t *testing.T) {
 		source string
 		want   any
 	}{
-		{"key: &label abc\nvalue: *label\n", "abc"},
+		{"key: &label \"abc\"\nvalue: *label\n", "abc"},
 		{"value: {a: &v 1, b: *v}\n", map[string]any{"a": 1, "b": 1}},
-		{"value: {a: &v null, b: {literal: *v}}\n", map[string]any{"a": nil, "b": nil}},
+		{"value: {a: &v null, b: *v}\n", map[string]any{"a": nil, "b": nil}},
 	} {
 		var row struct {
 			Value ExpressionValue `yaml:"value"`
@@ -70,7 +71,7 @@ func TestExpressionValueR2DataWriteAliasOperands(t *testing.T) {
 		source string
 		want   any
 	}{
-		{"op: set\ntarget: entity.name\nkey: &label abc\nvalue: *label\n", "abc"},
+		{"op: set\ntarget: entity.name\nkey: &label \"abc\"\nvalue: *label\n", "abc"},
 		{"op: set\ntarget: entity.details\nkey: details\nvalue: {a: &v 1, b: *v}\n", map[string]any{"a": 1, "b": 1}},
 	} {
 		var write WorkflowDataWrite
@@ -156,9 +157,10 @@ func TestExpressionValueR2SharedAuthoringSurfaces(t *testing.T) {
 		{"empty text", `""`, "", "", ExpressionKindLiteral},
 		{"empty list", "[]", "", []any{}, ExpressionKindLiteral},
 		{"empty object", "{}", "", map[string]any{}, ExpressionKindLiteral},
-		{"typed", `"${payload.count}"`, "payload.count", nil, ExpressionKindCEL},
+		{"typed", `payload.count`, "payload.count", nil, ExpressionKindCEL},
+		{"sole text interpolation", `"${payload.count}"`, "__swarm_r2_format((payload.count\n))", nil, ExpressionKindCEL},
 		{"mixed", `"count=${payload.count}"`, "\"count=\" + __swarm_r2_format((payload.count\n))", nil, ExpressionKindCEL},
-		{"escaped", `{literal: "${payload.count}"}`, "", "${payload.count}", ExpressionKindLiteral},
+		{"ordinary business key", `{literal: "text"}`, "", map[string]any{"literal": "text"}, ExpressionKindLiteral},
 	}
 	for _, surface := range surfaces {
 		t.Run(surface.name, func(t *testing.T) {
@@ -220,12 +222,9 @@ func TestExpressionValueR2RejectsRetiredAndMalformedForms(t *testing.T) {
 			}
 		})
 	}
-	var escaped ExpressionValue
-	if err := decodeNodeTestYAML([]byte(`{literal: {kind: cel, cel: payload.id}}`), &escaped); err != nil {
-		t.Fatal(err)
-	}
-	if !escaped.HasLiteralValue() || !reflect.DeepEqual(escaped.Literal, map[string]any{"kind": "cel", "cel": "payload.id"}) {
-		t.Fatalf("escaped literal = %#v", escaped)
+	var nested ExpressionValue
+	if err := decodeNodeTestYAML([]byte(`{literal: {kind: cel, cel: payload.id}}`), &nested); err == nil {
+		t.Fatal("literal key bypassed reserved expression-shape admission")
 	}
 }
 

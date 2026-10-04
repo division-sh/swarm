@@ -165,15 +165,15 @@ func writePresenceLastFieldFixture(t *testing.T, root string) {
       create_entity: true
       advances_to: assess
     work.annotated:
-      guard: {check: "_entity.current_state == 'assess'"}
+      guard: {check: _entity.current_state == 'assess'}
       data_accumulation:
         writes: [review_note]
     work.assessed:
-      guard: {check: "_entity.current_state == 'assess'"}
+      guard: {check: _entity.current_state == 'assess'}
       advances_to: consume
       emit: {event: work.consume}
     work.consume:
-      guard: {check: "_entity.current_state == 'consume'"}
+      guard: {check: _entity.current_state == 'consume'}
       data_accumulation:
         writes:
           - op: clear
@@ -181,11 +181,11 @@ func writePresenceLastFieldFixture(t *testing.T, root string) {
       emit:
         event: work.completed
         fields:
-          business_brief: An assessed brief
+          business_brief: "An assessed brief"
           attempt_count: 1
-          note_supplied: ${has(entity.review_note)}
+          note_supplied: has(entity.review_note)
     work.completed:
-      guard: {check: "_entity.current_state == 'consume' && !payload.note_supplied && !has(entity.review_note)"}
+      guard: {check: _entity.current_state == 'consume' && !payload.note_supplied && !has(entity.review_note)}
       advances_to: done
 `)
 }

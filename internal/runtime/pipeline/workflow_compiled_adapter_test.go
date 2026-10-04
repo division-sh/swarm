@@ -42,56 +42,97 @@ func compiledAdapterSourceWithKillStages(t *testing.T, killStages string, initia
 		"nodes.yaml": `router:
   execution_type: system_node
   event_handlers:
-    direct: {advances_to: done}
+    direct:
+      advances_to: done
     inherited:
       advances_to: done
       rules:
-        - {id: inherited-choice, else: true}
+        - id: inherited-choice
+          else: true
     rule:
       rules:
-        - {id: not-selected, when: "false", advances_to: done}
-        - {id: explicit-choice, when: "true", advances_to: done}
-        - {id: fallback, else: true, advances_to: done}
+        - id: not-selected
+          when: |-
+            false
+          advances_to: done
+        - id: explicit-choice
+          when: |-
+            true
+          advances_to: done
+        - id: fallback
+          else: true
+          advances_to: done
     complete:
       data_accumulation:
         writes:
-          - {target_field: marker, value: "${'completed'}"}
+          - target_field: marker
+            value: |-
+              'completed'
       on_complete:
-        - {id: completion-choice, condition: else, advances_to: done}
-    self: {advances_to: ready}
+        - id: completion-choice
+          advances_to: done
+    self:
+      advances_to: ready
     write_only:
       data_accumulation:
         writes:
-          - {target_field: marker, value: "${'written'}"}
+          - target_field: marker
+            value: |-
+              'written'
     fallback:
       rules:
-        - {id: never, when: "false", advances_to: done}
-        - {id: fallback-choice, else: true}
-    emit_only: {emit: observed}
+        - id: never
+          when: |-
+            false
+          advances_to: done
+        - id: fallback-choice
+          else: true
+    emit_only:
+      emit: observed
     guarded:
       guard:
         checks:
-          - {id: first-pass, check: "true"}
-          - {check: "true"}
+          - id: first-pass
+            check: |-
+              true
+          - check: |-
+              true
       data_accumulation:
         writes:
-          - {target_field: marker, value: "${'guarded'}"}
+          - target_field: marker
+            value: |-
+              'guarded'
       rules:
         - id: explicit-choice
-          when: "true"
+          when: |-
+            true
           advances_to: done
           emit:
             event: guard_observed
-            fields: {marker: guard-output}
-        - {id: guard-fallback, else: true}
+            fields:
+              marker: "guard-output"
+        - id: guard-fallback
+          else: true
     kill:
-      guard: {id: kill-check, check: "false", on_fail: kill}
+      guard:
+        id: kill-check
+        check: |-
+          false
+        on_fail: kill
       advances_to: done
     reject:
-      guard: {id: reject-check, check: "false", on_fail: reject}
+      guard:
+        id: reject-check
+        check: |-
+          false
+        on_fail: reject
       advances_to: done
     discard:
-      guard: {id: discard-check, check: "false", on_fail: discard}
+      guard:
+        id: discard-check
+        check: |-
+          false
+        on_fail: discard
       advances_to: done
 `,
 		"child/schema.yaml":   "name: child\nstages:\n  ready: {initial: true}\n  shared: {terminal: true}\n  foreign_only: {}\n  done: {terminal: true}\n  killed: {terminal: true}\n",
@@ -100,26 +141,39 @@ func compiledAdapterSourceWithKillStages(t *testing.T, killStages string, initia
 		"child/nodes.yaml": `router:
   execution_type: system_node
   event_handlers:
-    direct: {advances_to: done}
+    direct:
+      advances_to: done
     kill:
-      guard: {id: child-kill, check: 'false', on_fail: kill}
+      guard:
+        id: child-kill
+        check: |-
+          false
+        on_fail: kill
       advances_to: done
     guarded:
       guard:
         checks:
-          - {id: first-pass, check: "true"}
-          - {check: "true"}
+          - id: first-pass
+            check: |-
+              true
+          - check: |-
+              true
       data_accumulation:
         writes:
-          - {target_field: marker, value: "${'guarded'}"}
+          - target_field: marker
+            value: |-
+              'guarded'
       rules:
         - id: explicit-choice
-          when: "true"
+          when: |-
+            true
           advances_to: done
           emit:
             event: guard_observed
-            fields: {marker: guard-output}
-        - {id: guard-fallback, else: true}
+            fields:
+              marker: "guard-output"
+        - id: guard-fallback
+          else: true
 `,
 	}
 	if len(initialTimer) > 0 && initialTimer[0] {

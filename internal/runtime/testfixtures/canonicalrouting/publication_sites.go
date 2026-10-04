@@ -32,9 +32,9 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 		t.Fatalf("unsupported publication topology %q", mode)
 	}
 	root := t.TempDir()
-	valueType, valueExpr := "integer", `"${payload.choice}"`
+	valueType, valueExpr := "integer", `payload.choice`
 	if textValues {
-		valueType, valueExpr = "text", `"${string(payload.choice)}"`
+		valueType, valueExpr = "text", `string(payload.choice)`
 	}
 	families := []string{"direct", "rules", "specialized", "completion", "success", "fanout", "rulefanout", "completefanout"}
 	if len(selectedFamilies) != 0 {
@@ -51,14 +51,14 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 		siblingRequest := "sibling." + family + ".requested"
 		siblingInputPins += "    - " + siblingRequest + "\n"
 		siblingRequestSchemas += fmt.Sprintf("%s:\n  case_id: text\n  value: %s\n", siblingRequest, valueType)
-		siblingProducers += fmt.Sprintf("sibling-%s:\n  execution_type: system_node\n  subscribes_to: [%s]\n  event_handlers:\n    %s:\n      emit: {event: %s, fields: {case_id: \"${payload.case_id}\", value: \"${payload.value}\"}}\n", family, siblingRequest, siblingRequest, result)
+		siblingProducers += fmt.Sprintf("sibling-%s:\n  execution_type: system_node\n  subscribes_to: [%s]\n  event_handlers:\n    %s:\n      emit: {event: %s, fields: {case_id: payload.case_id, value: payload.value}}\n", family, siblingRequest, siblingRequest, result)
 		connects += fmt.Sprintf("  - {event: %s, from: ., to: sibling}\n", siblingRequest)
 		inputPins += "    - " + request + "\n"
 		outputPins += "    - " + result + "\n"
 		connects += fmt.Sprintf("  - {event: %s, from: %s, to: sink}\n", result, scope)
 		requestSchemas += fmt.Sprintf("%s:\n  key: case_id\n  case_id: text\n  choice: integer\n  items: '[%s]'\n", request, valueType)
 		eventSchemas += fmt.Sprintf("%s:\n  case_id: text\n  value: %s\n", result, valueType)
-		emit := fmt.Sprintf("{event: %s, fields: {case_id: \"${payload.case_id}\", value: %s}}", result, valueExpr)
+		emit := fmt.Sprintf("{event: %s, fields: {case_id: payload.case_id, value: %s}}", result, valueExpr)
 		body := "      emit: " + emit + "\n"
 		switch family {
 		case "rules", "specialized", "completion":
@@ -68,7 +68,7 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 			}
 			body = ""
 			if family == "specialized" {
-				body = fmt.Sprintf("      emit: {event: %s, fields: {case_id: \"${payload.case_id}\"}}\n", result)
+				body = fmt.Sprintf("      emit: {event: %s, fields: {case_id: payload.case_id}}\n", result)
 			}
 			body += "      " + placement + ":\n"
 			for _, choice := range []struct {
@@ -79,18 +79,21 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 				if textValues {
 					literal = strconv.Quote(literal)
 				}
-				selected := fmt.Sprintf("{event: %s, fields: {case_id: \"${payload.case_id}\", value: {literal: %s}}}", result, literal)
+				selected := fmt.Sprintf("{event: %s, fields: {case_id: payload.case_id, value: %s}}", result, literal)
 				if family == "specialized" {
-					selected = fmt.Sprintf("{fields: {value: {literal: %s}}}", literal)
+					selected = fmt.Sprintf("{fields: {value: %s}}", literal)
 				}
-				predicate := fmt.Sprintf("condition: '%s'", choice.condition)
+				predicate := ""
+				if choice.condition != "else" {
+					predicate = fmt.Sprintf("          condition: %s\n", choice.condition)
+				}
 				if placement == "rules" {
-					predicate = fmt.Sprintf("when: '%s'", choice.condition)
+					predicate = fmt.Sprintf("          when: %s\n", choice.condition)
 					if choice.condition == "else" {
-						predicate = "else: true"
+						predicate = "          else: true\n"
 					}
 				}
-				body += fmt.Sprintf("        - id: %s\n          %s\n          emit: %s\n", choice.name, predicate, selected)
+				body += fmt.Sprintf("        - id: %s\n%s          emit: %s\n", choice.name, predicate, selected)
 			}
 		case "success":
 			body = "      rules:\n        - {id: selected, else: true}\n      on_success:\n        emit: " + emit + "\n"
@@ -102,14 +105,14 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 				if family == "completefanout" {
 					placement = "on_complete"
 				}
-				predicate := "condition: else"
+				predicate := ""
 				if placement == "rules" {
-					predicate = "else: true"
+					predicate = "          else: true\n"
 				}
-				body = "      " + placement + ":\n        - id: dispatch\n          " + predicate + "\n"
+				body = "      " + placement + ":\n        - id: dispatch\n" + predicate
 				indent = "          "
 			}
-			body += indent + "fan_out:\n" + indent + "  items_from: payload.items\n" + indent + "  as: element\n" + indent + "  identity: element\n" + indent + "  emit: " + strings.Replace(emit, "value: "+valueExpr, `value: "${element}"`, 1) + "\n"
+			body += indent + "fan_out:\n" + indent + "  items_from: payload.items\n" + indent + "  as: element\n" + indent + "  identity: element\n" + indent + "  emit: " + strings.Replace(emit, "value: "+valueExpr, `value: element`, 1) + "\n"
 		}
 		handlers += fmt.Sprintf("%s:\n  execution_type: system_node\n  subscribes_to: [%s]\n  event_handlers:\n    %s:\n%s", family, request, request, body)
 	}
@@ -119,9 +122,9 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 	}
 	local := "local:\n  execution_type: system_node\n  subscribes_to: [" + strings.Join(results, ", ") + "]\n  event_handlers:\n"
 	for _, result := range results {
-		local += "    " + result + ":\n      guard: {id: observed, check: 'int(payload.value) >= 0'}\n"
+		local += "    " + result + ":\n      guard: {id: observed, check: int(payload.value) >= 0}\n"
 	}
-	wildcard := "wildcard:\n  execution_type: system_node\n  subscribes_to: [result.*]\n  event_handlers:\n    result.*:\n      guard: {id: observed, check: 'int(payload.value) >= 0'}\n"
+	wildcard := "wildcard:\n  execution_type: system_node\n  subscribes_to: [result.*]\n  event_handlers:\n    result.*:\n      guard: {id: observed, check: int(payload.value) >= 0}\n"
 	sourceSchema := "name: publication-source\npins:\n  inputs:\n" + inputPins + "  outputs:\n" + outputPins
 	if mode == "root" {
 		sourceSchema = strings.Replace(sourceSchema, "  outputs:\n", siblingInputPins+"  outputs:\n"+siblingInputPins, 1)
@@ -140,7 +143,7 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 				connects += fmt.Sprintf("  - {event: %s, from: ., to: source, rename: %s, resolution: select-or-create}\n", dispatch, request)
 				driverSchemas += fmt.Sprintf("%s:\n  key: case_id\n  case_id: text\n  choice: integer\n  items: '[%s]'\n", request, valueType)
 				driverSchemas += fmt.Sprintf("%s:\n  key: case_id\n  case_id: text\n  choice: integer\n  items: '[%s]'\n", dispatch, valueType)
-				driver += fmt.Sprintf("%s:\n  execution_type: system_node\n  subscribes_to: [%s]\n  event_handlers:\n    %s:\n      emit: {event: %s, fields: {case_id: \"${payload.case_id}\", choice: \"${payload.choice}\", items: \"${payload.items}\"}}\n", family, request, request, dispatch)
+				driver += fmt.Sprintf("%s:\n  execution_type: system_node\n  subscribes_to: [%s]\n  event_handlers:\n    %s:\n      emit: {event: %s, fields: {case_id: payload.case_id, choice: payload.choice, items: payload.items}}\n", family, request, request, dispatch)
 			}
 			writeClosedVariantFile(t, root, "nodes.yaml", driver)
 			writeClosedVariantFile(t, root, "events.yaml", driverSchemas+siblingRequestSchemas)

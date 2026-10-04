@@ -34,9 +34,9 @@ func ArrivalJoinRoutingFiles(t testing.TB, variant ArrivalJoinRoutingFixture) ma
       emit:
         event: provider.notified
         fields:
-          order_id: "${payload.order_id}"
-          member_id: "${payload.member_id}"
-          result: "${payload.result}"
+          order_id: payload.order_id
+          member_id: payload.member_id
+          result: payload.result
 `
 			files["observer/schema.yaml"] = strings.Replace(files["requester/schema.yaml"], "name: requester", "name: observer", 1)
 			files["observer/schema.yaml"] = strings.Replace(files["observer/schema.yaml"], "  outputs:\n    - provider.requested\n", "", 1)
@@ -47,7 +47,7 @@ func ArrivalJoinRoutingFiles(t testing.TB, variant ArrivalJoinRoutingFixture) ma
 			files["observer/nodes.yaml"] = files["requester/nodes.yaml"][start:end] + `    provider.notified:
       data_accumulation:
         writes:
-          - {target_field: ordinary_result, value: "${payload.result}"}
+          - {target_field: ordinary_result, value: payload.result}
 `
 		}
 		return files
@@ -88,13 +88,13 @@ func arrivalJoinPayloadDirectedFiles() map[string]string {
     work.requested:
       data_accumulation:
         writes:
-          - {target_field: work_count, value: "${entity.work_count + 1}"}
+          - {target_field: work_count, value: entity.work_count + 1}
       emit:
         event: item.completed
         fields:
-          order_id: "${payload.prefix + payload.suffix}"
-          member_id: a
-          result: {value: computed-by-worker}
+          order_id: payload.prefix + payload.suffix
+          member_id: "a"
+          result: {value: "computed-by-worker"}
 `,
 		"orders/schema.yaml": `name: orders
 instance: order_id
@@ -154,7 +154,7 @@ pins:
     request.send:
       emit:
         event: provider.requested
-        fields: {order_id: "${entity.order_id}"}
+        fields: {order_id: entity.order_id}
 collector:
   execution_type: system_node
   event_handlers:
@@ -181,9 +181,9 @@ dispatcher:
       emit:
         event: provider.replied
         fields:
-          order_id: "${payload.order_id}"
-          member_id: a
-          result: {value: provider-result}
+          order_id: payload.order_id
+          member_id: "a"
+          result: {value: "provider-result"}
 `,
 	}
 }
@@ -206,14 +206,14 @@ pins:
     request.send:
       emit:
         event: provider.requested
-        fields: {token: "${payload.token}"}
+        fields: {token: payload.token}
 receiver:
   execution_type: system_node
   event_handlers:
     provider.replied:
       emit:
         event: reply.observed
-        fields: {token: "${payload.token}", value: "${payload.value}"}
+        fields: {token: payload.token, value: payload.value}
 `,
 		"provider/schema.yaml": "name: provider\npins:\n  inputs:\n    - provider.requested\n  outputs:\n    - provider.replied\n",
 		"provider/events.yaml": "provider.replied:\n  token: text\n  value: text\n",
@@ -223,7 +223,7 @@ receiver:
     provider.requested:
       emit:
         event: provider.replied
-        fields: {token: "${payload.token}", value: provider-result}
+        fields: {token: payload.token, value: "provider-result"}
 `,
 	}
 }
@@ -249,7 +249,7 @@ connect:
     stop.requested:
       emit:
         event: halt.requested
-        fields: {order_id: "${payload.order_id}"}
+        fields: {order_id: payload.order_id}
 `
 	for _, flow := range []string{"orders", "mirror"} {
 		files[flow+"/schema.yaml"] = fmt.Sprintf(`name: %s
@@ -284,12 +284,12 @@ pins:
           emit:
             event: first.closed
             fields:
-              expected: "${join.expected}"
-              completed: "${join.completed}"
-              missing: "${join.missing}"
-              results: "${join.results}"
-              timed_out: "${join.timed_out}"
-              close_reason: "${join.close_reason}"
+              expected: join.expected
+              completed: join.completed
+              missing: join.missing
+              results: join.results
+              timed_out: join.timed_out
+              close_reason: join.close_reason
     alternate.completed:
       join:
         id: alternate
@@ -303,19 +303,19 @@ pins:
           emit:
             event: second.closed
             fields:
-              expected: "${join.expected}"
-              completed: "${join.completed}"
-              missing: "${join.missing}"
-              results: "${join.results}"
-              timed_out: "${join.timed_out}"
-              close_reason: "${join.close_reason}"
+              expected: join.expected
+              completed: join.completed
+              missing: join.missing
+              results: join.results
+              timed_out: join.timed_out
+              close_reason: join.close_reason
     halt.requested:
       data_accumulation:
         writes:
-          - {target_field: halt_count, value: "${entity.halt_count + 1}"}
+          - {target_field: halt_count, value: entity.halt_count + 1}
       emit:
         event: halt.observed
-        fields: {order_id: "${entity.order_id}", count: "${entity.halt_count}"}
+        fields: {order_id: entity.order_id, count: entity.halt_count}
 dispatcher:
   execution_type: system_node
   event_handlers:

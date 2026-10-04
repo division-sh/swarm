@@ -7,9 +7,9 @@ initiator-node:
       emit:
         event: requester.setup
         fields:
-          account_id: ${payload.account_id}
+          account_id: payload.account_id
     request.submitted:
       emit:
         event: requester.requested
         fields:
-          account_id: ${payload.account_id}
+          account_id: payload.account_id

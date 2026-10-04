@@ -1334,7 +1334,7 @@ indexer:
             target_field: id
           - op: set
             target: entity.items
-            key: ${payload.item_id}
+            key: payload.item_id
             value:
               name: payload.item.name
 `)

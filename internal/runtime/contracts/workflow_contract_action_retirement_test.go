@@ -138,12 +138,12 @@ func TestHandlerActionRetirementPreservesOtherActionConcepts(t *testing.T) {
 	})
 	t.Run("emit_template_specialization", func(t *testing.T) {
 		var handler SystemNodeEventHandler
-		err := decodeNodeTestYAML([]byte(`emit: {event: scored, fields: {id: "${payload.id}"}}
+		err := decodeNodeTestYAML([]byte(`emit: {event: scored, fields: {id: payload.id}}
 rules:
   - when: payload.score > 0
-    emit: {fields: {label: positive}}
+    emit: {fields: {label: "positive"}}
   - else: true
-    emit: {fields: {label: other}}
+    emit: {fields: {label: "other"}}
 `), &handler)
 		if err != nil {
 			t.Fatal(err)

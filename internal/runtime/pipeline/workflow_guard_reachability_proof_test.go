@@ -38,7 +38,7 @@ func TestGuardTerminationVerifiedExecutionAndRestartBothStores(t *testing.T) {
 			"schema.yaml":   "stages:\n  ready: {initial: true}\n  " + target + ": {terminal: true}\npins:\n  inputs: [kill]\n",
 			"events.yaml":   "kill:\n",
 			"entities.yaml": "test_entity:\n  marker: text\n",
-			"nodes.yaml":    "router:\n  execution_type: system_node\n  subscribes_to: [kill]\n  event_handlers:\n    kill:\n" + tc.guard + advance + "      data_accumulation:\n        writes:\n          - {target_field: marker, value: skipped}\n",
+			"nodes.yaml":    "router:\n  execution_type: system_node\n  subscribes_to: [kill]\n  event_handlers:\n    kill:\n" + tc.guard + advance + "      data_accumulation:\n        writes:\n          - {target_field: marker, value: \"skipped\"}\n",
 		}
 		root := t.TempDir()
 		for label, body := range files {

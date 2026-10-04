@@ -109,11 +109,12 @@ func TestSelectedHandlerSparsePresenceWriteAndEmitBothStores(t *testing.T) {
       data_accumulation:
         writes:
           - target_field: observed_absence
-            value: "${!has(entity.kill_reason)}"
+            value: |-
+                     !has(entity.kill_reason)
       emit:
         event: work.emitted
         fields:
-          observed_absence: ${entity.observed_absence}
+          observed_absence: entity.observed_absence
 `,
 			})
 			pc := newDurablePipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
@@ -176,9 +177,10 @@ func TestSelectedHandlerSparseEqualityMutationsBothStores(t *testing.T) {
       data_accumulation:
         writes:
           - target_field: left
-            value: "${'new'}"
+            value: |-
+                     'new'
           - target_field: right
-            value: ${entity.left}
+            value: entity.left
     work.clear:
       data_accumulation:
         writes:

@@ -26,11 +26,11 @@ func TestIssue2394ServedFanOutFailureIncidentBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			const expression = "gem_score: ${account.gem_score}"
+			const expression = "gem_score: account.gem_score"
 			if strings.Count(string(raw), expression) != 1 {
 				t.Fatal("incident fixture lost exact authored evaluation site")
 			}
-			writeWorkflowValidationFixtureFile(t, path, strings.Replace(string(raw), expression, "gem_score: ${int(account.gem_score)}", 1))
+			writeWorkflowValidationFixtureFile(t, path, strings.Replace(string(raw), expression, "gem_score: int(account.gem_score)", 1))
 			opts, start := lifecycleRestartHarness(t, backend, root)
 			opts.TestLLMRuntime = servedNoopLLMRuntime{}
 			_, rt := start()
