@@ -1186,7 +1186,7 @@ payload:
 
 	report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
 
-	if !reportContains(report.Errors(), "platform_namespace_violation", "root schema pins.outputs.events references platform-emitted event mailbox.card_decided; platform owns this event") {
+	if !reportContains(report.Errors(), "platform_namespace_violation", "root schema pins.outputs references platform-emitted event mailbox.card_decided; platform owns this event") {
 		t.Fatalf("expected platform-emitted event output pin error, got %#v", report.Errors())
 	}
 }

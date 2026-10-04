@@ -375,6 +375,6 @@ func copy2376ForkSourceWithFeed(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	write2376SourceFile(t, root, "schema.yaml", string(raw)+"  outputs:\n    events: [work.requested]\n")
+	write2376SourceFile(t, root, "schema.yaml", string(raw)+"  outputs: [work.requested]\n")
 	return root
 }

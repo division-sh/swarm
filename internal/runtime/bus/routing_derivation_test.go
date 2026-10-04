@@ -265,8 +265,7 @@ pins:
   active: {initial: true}
   done: {terminal: true}
 pins:
-  inputs:
-    events: [root.start]
+  inputs: [root.start]
 `)
 	write(filepath.Join(root, "orders", "events.yaml"), "root.start:\naddon_a.start:\naddon_b.start:\n")
 	write(filepath.Join(root, "orders", "nodes.yaml"), `

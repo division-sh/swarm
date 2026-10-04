@@ -198,30 +198,31 @@ rows:
     corpus: {loops: 0}
 
   - id: flow.pin_event_entry
-    ruled: issue-2352
-    paths: "schema.pins.inputs.events[].event/source, schema.pins.outputs.events[].event/sink"
+    ruled: issue-2438-slice-2b
+    paths: "schema.pins.inputs[], schema.pins.outputs[]; deferred input {event, initialize} until slice 2c"
     owners: [projectSchemaPinValue, CompileFlowInputPin, CompileFlowOutputPin]
     information:
       fact: [exact_local_event_identity]
-      choice: [source, sink]
+      choice: [deferred_receiver_initialization]
     spelling:
-      canonical_candidate: scalar_event_by_default_mapping_only_for_non_default_source_or_sink
-      retired_duplicates: [authored_name, qualified_event, wildcard_event]
-      distinct_overrides: [harness_source, harness_sink]
-    boundary_retirement: "#2304 retires source: external; selected-root public position and admitted provider declarations own ingress. Private inputs require actual producer relations."
+      canonical: names_only_direction_lists_with_deferred_initialize_exception
+      retired_duplicates: [authored_name, qualified_event, wildcard_event, events_wrapper, source, sink]
+      distinct_overrides: [initialize_until_slice_2c]
+    boundary_retirement: "#2304/#2438: selected-root public position and admitted provider declarations own ingress. Private inputs require actual producer relations. Harness markers have no authority."
+    # Historical observations at census_head; not counts of the rewritten corpus.
     corpus:
       input: {rows: 280, scalar: 210, mapping: 70, authored_names: 0, qualified_or_wildcard: 0}
       output: {rows: 147, scalar: 16, mapping: 131, authored_names: 0, qualified_or_wildcard: 0}
 
   - id: flow.input_pin_resolution
-    ruled: issue-1994-1949-a2
-    paths: "schema.pins.inputs.events[].resolution.mode/replies_to/correlation_key for retained fan-out/reply policies only"
-    owners: [projectSchemaResolutionValue, CompileFlowInputPin, CompileConnectGraph]
+    ruled: issue-2438-slice-2b
+    paths: "schema.connect[].resolution/key_from and response connection replies_to/correlation_key; no pin policy bag"
+    owners: [projectSchemaConnectValue, CompiledConnectionInput, CompileConnectGraph]
     information:
-      choice: [fan_out_or_reply_mode, replies_to, correlation_key]
+      choice: [connection_instance_resolution, replies_to, correlation_key]
     spelling:
-      canonical_candidate: retained_fan_out_and_reply_pin_policies_only
-      retired_duplicates: [carries, carry_type, carry_optional, carry_convert, ordinary_pin_resolution, resolution.from, fan_in_mode, resolution.aggregation, resolution.window, resolution.dedup_by, resolution.singleton]
+      canonical: connection_owned_resolution_and_reply
+      retired_duplicates: [pin_resolution, pin_fan_out_placeholder, pin_replies_to, pin_correlation_key, carries, carry_type, carry_optional, carry_convert, ordinary_pin_resolution, resolution.from, fan_in_mode, resolution.aggregation, resolution.window, resolution.dedup_by, resolution.singleton]
       distinct_overrides: []
     corpus: {carry_rows: 0, from_overrides: 0}
 

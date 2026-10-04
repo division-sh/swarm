@@ -387,10 +387,10 @@ func writeProviderAliasAuthorityFixture(t *testing.T, scenario providerAliasScen
 		}
 		nodes += "    " + name + ":\n      guard: {id: admit, check: 'true'}\n"
 	}
-	pins := "pins:\n  inputs:\n    events: [" + strings.Join(names, ", ") + "]\n"
-	rootSchema := "name: provider-authority\n" + imports + "pins:\n  inputs:\n    events: [" + strings.Join(names[1:], ", ") + "]\nconnect:\n"
+	pins := "pins:\n  inputs: [" + strings.Join(names, ", ") + "]\n"
+	rootSchema := "name: provider-authority\n" + imports + "pins:\n  inputs: [" + strings.Join(names[1:], ", ") + "]\nconnect:\n"
 	if scenario.publicConnected {
-		rootSchema = strings.Replace(rootSchema, "\nconnect:\n", "\n  outputs:\n    events: ["+strings.Join(names[1:], ", ")+"]\nconnect:\n", 1)
+		rootSchema = strings.Replace(rootSchema, "\nconnect:\n", "\n  outputs: ["+strings.Join(names[1:], ", ")+"]\nconnect:\n", 1)
 		for _, name := range names[1:] {
 			rootSchema += "  - {event: " + name + ", from: ., to: " + scenario.alphaReceiver + "}\n"
 		}
@@ -411,7 +411,7 @@ func writeProviderAliasAuthorityFixture(t *testing.T, scenario providerAliasScen
 				rootSchema += "  - {event: " + name + ", from: " + alias + ", to: " + receiver + "}\n"
 			}
 		}
-		files[alias+"/schema.yaml"] = "name: " + alias + "\nactivation: standing\nstages: []\n" + imports + pins + "  outputs:\n    events: [" + strings.Join(connectedNames, ", ") + "]\ningress:\n  alias: " + alias + "\n  providers:\n    - {provider: telegram, signing_secret: webhook_signing." + alias + "}\n"
+		files[alias+"/schema.yaml"] = "name: " + alias + "\nactivation: standing\nstages: []\n" + imports + pins + "  outputs: [" + strings.Join(connectedNames, ", ") + "]\ningress:\n  alias: " + alias + "\n  providers:\n    - {provider: telegram, signing_secret: webhook_signing." + alias + "}\n"
 		files[alias+"/entities.yaml"] = "service: {}\n"
 		files[alias+"/nodes.yaml"] = nodes
 		if scenario.noLocalConsumers {
@@ -420,7 +420,7 @@ func writeProviderAliasAuthorityFixture(t *testing.T, scenario providerAliasScen
 		files[alias+"-receiver/schema.yaml"] = "name: " + alias + "-receiver\n"
 		hasReceiver := scenario.receiver("alpha") == alias+"-receiver" || scenario.receiver("beta") == alias+"-receiver" || (scenario.publicConnected && scenario.alphaReceiver == alias+"-receiver")
 		if hasReceiver {
-			files[alias+"-receiver/schema.yaml"] += imports + "pins:\n  inputs:\n    events: [" + strings.Join(connectedNames, ", ") + "]\n"
+			files[alias+"-receiver/schema.yaml"] += imports + "pins:\n  inputs: [" + strings.Join(connectedNames, ", ") + "]\n"
 		}
 		if scenario.rawConnected {
 			raw, err := yaml.Marshal(map[string]any{"inbound.telegram": providertriggers.RawEventCatalogEntry().Payload.Properties})

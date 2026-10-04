@@ -93,7 +93,7 @@ func deriveSchemaProvenance(out *FlowSchemaDocument) {
 			count = len(out.Pins.Outputs.EventPins)
 		}
 		for i := 0; i < count; i++ {
-			path := fmt.Sprintf("pins.%s.events[%d]", direction, i)
+			path := fmt.Sprintf("pins.%s[%d]", direction, i)
 			if fact := out.admissionProvenance[path]; fact.SourcePresence == yamlsource.PresenceScalar.String() {
 				out.admissionProvenance[path+".event"] = EffectiveValueProvenance{Origin: EffectiveValueOriginDerived, RuleID: "flow.pin_local_event_identity", InputPaths: []string{path}}
 			}

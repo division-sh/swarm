@@ -190,14 +190,14 @@ func cliRootInputDiagnosticParts(err error) (cliRootInputDiagnostic, bool) {
 
 func formatCLIRootInputDiagnostic(err error, diagnostic cliRootInputDiagnostic) string {
 	problem := fmt.Sprintf("event %q is not a declared root input.", diagnostic.eventName)
-	remediation := fmt.Sprintf("Declare %q under `pins.inputs.events` and connect it to a runtime handler, or start the run with a declared routable input.", diagnostic.eventName)
+	remediation := fmt.Sprintf("Declare %q under `pins.inputs` and connect it to a runtime handler, or start the run with a declared routable input.", diagnostic.eventName)
 	if diagnostic.reason == runtimerunstart.RootInputNotRoutable {
 		problem = fmt.Sprintf("root input %q has no runtime route.", diagnostic.eventName)
 		remediation = fmt.Sprintf("Connect %q to a runtime handler, or start the run with a routable root input.", diagnostic.eventName)
 	}
 	return strings.Join([]string{
 		"ERROR: " + cliAPIProblemWithWrapper(err, diagnostic.leaf, problem),
-		"  A root input is an event declared in the root flow's `pins.inputs.events`.",
+		"  A root input is an event declared in the root flow's `pins.inputs`.",
 		"  Declared root inputs: " + formatCLIStringDomain(diagnostic.declaredEvents) + ".",
 		"  Routable root inputs: " + formatCLIStringDomain(diagnostic.routableEvents) + ".",
 		"  Remediation: " + remediation,
