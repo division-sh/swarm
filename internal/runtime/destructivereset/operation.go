@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 // OperationPhase records durable effects, not the availability of a runtime in
@@ -59,6 +60,40 @@ type OperationStore interface {
 	ReadResetOperation(context.Context, string) (Operation, error)
 	PendingResetOperations(context.Context) ([]Operation, error)
 	AdvanceResetOperation(context.Context, Operation, Operation) error
+}
+
+type PendingOperationReader interface {
+	PendingResetOperations(context.Context) ([]Operation, error)
+}
+
+// InspectPendingOperations shares boot's durable preconditions without taking
+// its reset lock or advancing any operation/effect.
+func InspectPendingOperations(ctx context.Context, reader PendingOperationReader) ([]Operation, error) {
+	if ctx == nil || reader == nil {
+		return nil, errors.New("pending reset inspection requires context and ledger reader")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	pending, err := reader.PendingResetOperations(ctx)
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	if err != nil {
+		return nil, err
+	}
+	if len(pending) > 1 {
+		return nil, failures.New(failures.ClassLifecycleConflict, "pending_reset_admission_invalid", "destructive-reset", "inspect_pending", map[string]any{"reason": "multiple active destructive reset operations"})
+	}
+	for _, operation := range pending {
+		if err := operation.Validate(); err != nil {
+			return nil, failures.Wrap(failures.ClassLifecycleConflict, "pending_reset_admission_invalid", "destructive-reset", "inspect_pending", map[string]any{"operation_id": operation.Request.OperationID}, err)
+		}
+		if operation.Phase == PhaseCompleted {
+			return nil, failures.New(failures.ClassLifecycleConflict, "pending_reset_admission_invalid", "destructive-reset", "inspect_pending", map[string]any{"reason": "pending reset enumeration returned a completed operation"})
+		}
+	}
+	return pending, nil
 }
 
 func NewOperation(req Request) (Operation, error) {

@@ -53,7 +53,7 @@ func Test2376SourceInvocationParity(t *testing.T) {
 		{"bare", root, ""}, {"dot", root, "."}, {"relative", filepath.Dir(root), filepath.Base(root)}, {"absolute", t.TempDir(), root}, {"root_alias", filepath.Dir(alias), "alias"}, {"symlink_invocation", alias, "."},
 	} {
 		t.Run(row.name, func(t *testing.T) {
-			args := []string{"verify"}
+			args := []string{"verify", "--portable"}
 			if row.operand != "" {
 				args = append(args, row.operand)
 			}
@@ -93,6 +93,7 @@ func Test2376VerifyJSONExactMemberTable(t *testing.T) {
 			}
 			var out, errOut bytes.Buffer
 			opts := defaultVerifyCommandOptions()
+			opts.portable = true
 			opts.sourceRoot, opts.configPath, opts.output.asJSON = root, writeTestVerifyRuntimeConfig(t), true
 			if code := runVerifyCommandWithOutput(context.Background(), RepoRoot(), opts, &out, &errOut); code != 0 {
 				t.Fatalf("code=%d out=%s err=%s", code, &out, &errOut)

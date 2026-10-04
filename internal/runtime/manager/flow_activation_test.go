@@ -3751,6 +3751,13 @@ func TestDynamicFlowRuntimeReadinessTerminalBeforeCreationCommitRetiresMateriali
 	}
 }
 
+type readinessRecoveryTestBus struct {
+	*flowActivationTestBus
+	store *recoveryTestBus
+}
+
+func (b *readinessRecoveryTestBus) Store() runtimebus.EventStore { return b.store }
+
 func TestRecoverableStateSnapshotIncludesReadinessOnlyPendingWork(t *testing.T) {
 	runID := uuid.NewString()
 	path := "review/inst-1"
@@ -3771,7 +3778,7 @@ func TestRecoverableStateSnapshotIncludesReadinessOnlyPendingWork(t *testing.T) 
 			},
 		},
 	}
-	am := newFlowActivationManager(t, &flowActivationTestBus{}, instances)
+	am := newFlowActivationManager(t, &readinessRecoveryTestBus{flowActivationTestBus: &flowActivationTestBus{}, store: &recoveryTestBus{}}, instances)
 	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(testFlowBundle(t, "")))
 	seedForeignMalformedDynamicFlowRuntimeReadiness(t, instances)
 	snapshot, err := am.RecoverableStateSnapshot(testAuthorActivityContext(context.Background()))

@@ -109,9 +109,14 @@ func TestReleaseDockerCommandAdmissionRejectsMalformedShapes(t *testing.T) {
 	if err := validateReleaseDockerCommand(root, []string{"inspect", "--format", "{{json .Config.Labels}}", "swarm-" + releaseE2EFixtureScope + "-scaffold"}); err != nil {
 		t.Fatalf("runtime identity label inspection rejected: %v", err)
 	}
+	if err := validateReleaseDockerCommand(root, []string{"network", "ls", "--filter", "name=" + releaseE2ENetwork, "--format", "{{json .Name}}"}); err != nil {
+		t.Fatalf("exact network observation rejected: %v", err)
+	}
 	cases := map[string][]string{
 		"version shape":    {"version"},
 		"network name":     {"network", "inspect", "wrong-network"},
+		"network filter":   {"network", "ls", "--filter", "name=wrong-network", "--format", "{{json .Name}}"},
+		"network format":   {"network", "ls", "--filter", "name=" + releaseE2ENetwork, "--format", "{{json .}}"},
 		"image name":       {"image", "inspect", "wrong-image"},
 		"preflight shape":  {"run", "definitely-not-a-valid-preflight"},
 		"inspect target":   {"inspect", "--format", "{{.State.Running}}", "wrong-container"},
@@ -556,7 +561,7 @@ func validReleaseAgentCreateArgs(sourceProjection string, runBound bool) []strin
 func validReleaseEvidence() []fakeDockerRecord {
 	return []fakeDockerRecord{
 		{Class: "docker_version"},
-		{Class: "network_inspect"},
+		{Class: "network_list"},
 		{Class: "image_inspect"},
 		{Class: "cli_preflight"},
 		{Class: "container_create"},

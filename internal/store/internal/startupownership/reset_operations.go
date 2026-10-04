@@ -11,6 +11,36 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/adminpersistence"
 )
 
+func (s *StartupPostgresOwner) InspectPendingResetOperations(ctx context.Context) (out []destructivereset.Operation, err error) {
+	if s == nil || s.backend == nil || s.schemaGuard == nil {
+		return nil, errors.New("pending PostgreSQL reset inspection requires its selected owner")
+	}
+	if err := s.schemaGuard(); err != nil {
+		return nil, err
+	}
+	err = s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var e error
+		out, e = adminpersistence.PendingResetOperationsTx(ctx, tx)
+		return e
+	})
+	return
+}
+
+func (s *StartupSQLiteOwner) InspectPendingResetOperations(ctx context.Context) (out []destructivereset.Operation, err error) {
+	if s == nil || s.backend == nil || s.schemaGuard == nil {
+		return nil, errors.New("pending SQLite reset inspection requires its selected owner")
+	}
+	if err := s.schemaGuard(); err != nil {
+		return nil, err
+	}
+	err = s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var e error
+		out, e = adminpersistence.PendingResetOperationsTx(ctx, tx)
+		return e
+	})
+	return
+}
+
 func (s *postgresSession) LookupResetOperation(ctx context.Context, req destructivereset.Request) (out *destructivereset.Operation, err error) {
 	err = s.lease.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var e error

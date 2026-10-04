@@ -59,6 +59,25 @@ func TestSelectedForkCommittedProcessDeathBothStores(t *testing.T) {
 				checkpoint := killSelectedForkAtCheckpoint(t, backend, dsn, cut)
 				before := selectedPreparationDatabaseSnapshot(t, db, backend)
 				ctx := runForkTestContext(t)
+				want := runfork.SelectedForkRecoveryControlOnly
+				if cut == "materialized" {
+					want = runfork.SelectedForkRecoveryStaged
+				} else if cut == "event_committed" || cut == "execution_issued" || cut == "execution_claimed" {
+					want = runfork.SelectedForkRecoveryFailed
+				}
+				reader := capabilityStore.(SelectedForkRecoveryInspectionReader)
+				inspected, err := InspectSelectedForkRecoveries(ctx, reader, SourceArtifactSelectedContractSourceLoader{RepoRoot: runForkExecutionRepoRoot(t)})
+				if cut == "before_materialization" {
+					if err != nil || len(inspected) != 0 {
+						t.Fatalf("uncommitted preparation created inspection work: %+v %v", inspected, err)
+					}
+				} else if err != nil || len(inspected) != 1 || inspected[0].Evidence.Plan.Disposition != want ||
+					inspected[0].SelectedSource.RuntimeProjection != nil || inspected[0].SelectedSource.Cleanup != nil {
+					t.Fatalf("read-only crash inspection after %s: %+v %v", cut, inspected, err)
+				}
+				if !reflect.DeepEqual(before, selectedPreparationDatabaseSnapshot(t, db, backend)) {
+					t.Fatal("read-only crash inspection changed retained tables before process acquisition")
+				}
 				capability := selectedContractTestProcessCapability(t, ctx, capabilityStore)
 				owner := construct()
 				process, _ := worklifetime.ProcessFromContext(ctx)
@@ -66,12 +85,6 @@ func TestSelectedForkCommittedProcessDeathBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				recovered, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{})
-				want := runfork.SelectedForkRecoveryControlOnly
-				if cut == "materialized" {
-					want = runfork.SelectedForkRecoveryStaged
-				} else if cut == "event_committed" || cut == "execution_issued" || cut == "execution_claimed" {
-					want = runfork.SelectedForkRecoveryFailed
-				}
 				if cut == "before_materialization" {
 					if err != nil || len(recovered) != 0 {
 						t.Fatalf("uncommitted preparation acquired durable recovery work: %+v %v", recovered, err)

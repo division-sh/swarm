@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
@@ -75,14 +76,7 @@ func (o SelectedContractExecutionOwner) RecoverSelectedForkContexts(ctx context.
 	finite := make([]runfork.SelectedForkRecoveryResult, 0)
 	var diagnostics error
 	for _, entry := range entries {
-		availability, err := ports.fork.LoadRunBundleAvailability(ctx, entry.Binding.ForkRunID)
-		if err != nil {
-			return results, errors.Join(diagnostics, err)
-		}
-		if availability.DataIntegrityError() || availability.BundleHash != entry.BundleHash {
-			return results, errors.Join(diagnostics, fmt.Errorf("selected recovery source integrity: %s", availability.DetailString()))
-		}
-		fact, err := correlation.NewSourceArtifactFact(entry.BundleHash)
+		fact, err := admitSelectedRecoverySource(ctx, ports.fork, entry)
 		if err != nil {
 			return results, errors.Join(diagnostics, err)
 		}
@@ -141,6 +135,19 @@ func (o SelectedContractExecutionOwner) RecoverSelectedForkContexts(ctx context.
 	}
 	admissionFailed = false
 	return results, diagnostics
+}
+
+func admitSelectedRecoverySource(ctx context.Context, reader interface {
+	LoadRunBundleAvailability(context.Context, string) (runbundle.Availability, error)
+}, entry runfork.SelectedForkRecoveryEntry) (correlation.SourceArtifactFact, error) {
+	availability, err := reader.LoadRunBundleAvailability(ctx, entry.Binding.ForkRunID)
+	if err != nil {
+		return correlation.SourceArtifactFact{}, err
+	}
+	if availability.DataIntegrityError() || availability.BundleHash != entry.BundleHash {
+		return correlation.SourceArtifactFact{}, fmt.Errorf("selected recovery source integrity: %s", availability.DetailString())
+	}
+	return correlation.NewSourceArtifactFact(entry.BundleHash)
 }
 
 type selectedRecoveryAction uint8

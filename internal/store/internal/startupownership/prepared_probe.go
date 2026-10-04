@@ -47,6 +47,20 @@ func PreparedProcessCurrent(ctx context.Context, q authorityQueryer, preparation
 // PreparedProcessPredecessor proves recorded ancestry, rather than inferring
 // abandonment from a different UUID or an elapsed lease.
 func PreparedProcessPredecessor(ctx context.Context, q authorityQueryer, preparation managedcapabilities.SelectedForkPreparationCoordinates, generation uint64, current runtimeownership.Authority, sqlite bool) (bool, error) {
+	return preparedProcessInLineage(ctx, q, preparation, generation, current.PredecessorAuthorityID, sqlite)
+}
+
+// PreparedProcessRecorded observes the existing head and its ancestry. It does
+// not predict currentness under a future process acquisition or authorize it.
+func PreparedProcessRecorded(ctx context.Context, q authorityQueryer, preparation managedcapabilities.SelectedForkPreparationCoordinates, generation uint64, sqlite bool) (bool, error) {
+	record, found, err := loadAuthorityHeadRecord(ctx, q, sqlite, false)
+	if err != nil || !found {
+		return false, err
+	}
+	return preparedProcessInLineage(ctx, q, preparation, generation, record.AuthorityID, sqlite)
+}
+
+func preparedProcessInLineage(ctx context.Context, q authorityQueryer, preparation managedcapabilities.SelectedForkPreparationCoordinates, generation uint64, firstID string, sqlite bool) (bool, error) {
 	if err := preparation.Validate(); err != nil {
 		return false, err
 	}
@@ -54,7 +68,7 @@ func PreparedProcessPredecessor(ctx context.Context, q authorityQueryer, prepara
 	if sqlite {
 		backend = "sqlite_retained_owner"
 	}
-	for id := current.PredecessorAuthorityID; id != ""; {
+	for id := firstID; id != ""; {
 		record, found, err := loadAuthorityRecord(ctx, q, id, nil, sqlite)
 		if err != nil {
 			return false, err

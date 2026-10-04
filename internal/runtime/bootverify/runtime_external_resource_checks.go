@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -20,13 +22,18 @@ func (c *checkerContext) credentials() []Finding {
 		return c.credentialFindings
 	}
 	c.credentialLoaded = true
+	c.credentialObservation = &AdmissionObservation{Status: AdmissionPassed, StartedAt: time.Now().UTC()}
+	defer func() { c.credentialObservation.FinishedAt = time.Now().UTC() }()
 	missing, err := MissingStaticCredentialRequirements(c.ctx, c.source, c.opts)
 	if err != nil {
+		c.credentialObservation.Status, c.credentialObservation.Reason = AdmissionUnavailable, "required static credential inspection failed"
+		c.credentialObservation.FailureClass = failures.ClassDependencyUnavailable
 		c.credentialFindings = append(c.credentialFindings, Finding{
-			CheckID:  "credential_key_exists",
-			Severity: "error",
-			Message:  strings.TrimSpace(err.Error()),
-			Location: "global",
+			CheckID:      "credential_key_exists",
+			Severity:     "error",
+			Message:      strings.TrimSpace(err.Error()),
+			Location:     "global",
+			FailureClass: failures.ClassDependencyUnavailable,
 		})
 		return c.credentialFindings
 	}
@@ -44,19 +51,23 @@ func (c *checkerContext) credentials() []Finding {
 			message = AppendLiveEffectReachability(message, c.opts.EffectReachability, toolRequirements)
 		}
 		c.credentialFindings = append(c.credentialFindings, Finding{
-			CheckID:  "credential_key_exists",
-			Severity: "warning",
-			Message:  message,
-			Location: item.Key,
+			CheckID:      "credential_key_exists",
+			Severity:     "warning",
+			Message:      message,
+			Location:     item.Key,
+			FailureClass: failures.ClassAuthenticationNeeded,
 		})
 	}
 	managed, err := MissingManagedCredentialRequirements(c.ctx, c.source, c.opts)
 	if err != nil {
+		c.credentialObservation.Status, c.credentialObservation.Reason = AdmissionUnavailable, "required managed credential inspection failed"
+		c.credentialObservation.FailureClass = failures.ClassDependencyUnavailable
 		c.credentialFindings = append(c.credentialFindings, Finding{
-			CheckID:  "managed_credential_state",
-			Severity: "error",
-			Message:  strings.TrimSpace(err.Error()),
-			Location: "global",
+			CheckID:      "managed_credential_state",
+			Severity:     "error",
+			Message:      strings.TrimSpace(err.Error()),
+			Location:     "global",
+			FailureClass: failures.ClassDependencyUnavailable,
 		})
 		return c.credentialFindings
 	}
@@ -71,10 +82,11 @@ func (c *checkerContext) credentials() []Finding {
 		}
 		message := AppendLiveEffectReachability(fmtManagedCredentialWarning(item, requiredBy), c.opts.EffectReachability, toolRequirements)
 		c.credentialFindings = append(c.credentialFindings, Finding{
-			CheckID:  "managed_credential_state",
-			Severity: "warning",
-			Message:  message,
-			Location: item.Key,
+			CheckID:      "managed_credential_state",
+			Severity:     "warning",
+			Message:      message,
+			Location:     item.Key,
+			FailureClass: failures.ClassAuthenticationNeeded,
 		})
 	}
 	return c.credentialFindings
@@ -109,21 +121,32 @@ func AppendLiveEffectReachability(message string, reachability SourceBootEffectR
 }
 
 func MissingStaticCredentialRequirements(ctx context.Context, source semanticview.Source, opts Options) ([]runtimecredentials.Descriptor, error) {
-	if opts.Credentials == nil {
-		return nil, nil
-	}
-	missing, err := runtimecredentials.MissingRequired(ctx, opts.Credentials, source)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]runtimecredentials.Descriptor, 0, len(missing))
-	for _, descriptor := range missing {
-		descriptor.RequiredBy = liveStaticCredentialRequirements(source, opts, descriptor.RequiredBy)
-		if len(descriptor.RequiredBy) > 0 {
+	index := runtimecredentials.BuildRequirementIndex(source)
+	keys := sortedSetKeysLocal(index)
+	out := make([]runtimecredentials.Descriptor, 0, len(keys))
+	for _, key := range keys {
+		requirements := liveStaticCredentialRequirements(source, opts, index[key])
+		if len(requirements) == 0 {
+			continue
+		}
+		if opts.Credentials == nil {
+			return nil, staticCredentialInspectionError(key, fmt.Errorf("credential store is not configured"))
+		}
+		descriptor, err := runtimecredentials.Describe(ctx, opts.Credentials, source, key)
+		if err != nil {
+			return nil, staticCredentialInspectionError(key, err)
+		}
+		descriptor.RequiredBy = requirements
+		if !descriptor.Present {
 			out = append(out, descriptor)
 		}
 	}
 	return out, nil
+}
+
+func staticCredentialInspectionError(key string, cause error) error {
+	failure := failures.Wrap(failures.ClassDependencyUnavailable, "credential_inspection_unavailable", "bootverify", "static_credential_inspection", map[string]any{"credential_key": key}, cause)
+	return fmt.Errorf("required static credential inspection is unavailable for %s: %w", key, failure)
 }
 
 func liveStaticCredentialRequirements(_ semanticview.Source, opts Options, requirements []runtimecredentials.Requirement) []runtimecredentials.Requirement {
@@ -151,9 +174,24 @@ func requiresLiveCredential(opts Options, kind, name string) bool {
 }
 
 func MissingManagedCredentialRequirements(ctx context.Context, source semanticview.Source, opts Options) ([]runtimemanagedcredentials.RequirementDescriptor, error) {
+	index := runtimemanagedcredentials.BuildRequirementIndex(source)
+	applicable := false
+	for _, key := range sortedSetKeysLocal(index) {
+		if len(liveManagedCredentialRequirements(source, opts, index[key])) == 0 {
+			continue
+		}
+		applicable = true
+		if opts.ManagedCredentials == nil {
+			failure := failures.New(failures.ClassDependencyUnavailable, "managed_credential_inspection_unavailable", "bootverify", "managed_credential_inspection", map[string]any{"credential_key": key})
+			return nil, fmt.Errorf("required managed credential inspection is unavailable for %s: %w", key, failure)
+		}
+	}
+	if !applicable {
+		return nil, nil
+	}
 	descriptors, err := runtimemanagedcredentials.ListRequirementDescriptors(ctx, opts.ManagedCredentials, source)
 	if err != nil {
-		return nil, err
+		return nil, failures.Wrap(failures.ClassDependencyUnavailable, "managed_credential_inspection_unavailable", "bootverify", "managed_credential_inspection", map[string]any{"requirement_keys": sortedSetKeysLocal(index)}, err)
 	}
 	out := make([]runtimemanagedcredentials.RequirementDescriptor, 0)
 	for _, descriptor := range descriptors {
@@ -221,10 +259,40 @@ func (c *checkerContext) ensureMCPDiscovery() {
 		return
 	}
 	c.mcpDiscoveryLoaded = true
-	if c.opts.Purpose == StructuralValidation || !c.opts.CheckMCPReachable {
+	c.mcpObservation = &AdmissionObservation{Status: AdmissionNotRun, Reason: "portable validation does not perform MCP discovery"}
+	if c.opts.Purpose == StructuralValidation {
 		return
 	}
+	configs, err := runtimemcp.ServerConfigs(c.source)
+	if err != nil {
+		c.mcpDiscoveryErrors = []error{err}
+		c.mcpObservation.Status, c.mcpObservation.Reason = AdmissionFailed, "MCP configuration admission failed"
+		c.mcpObservation.FailureClass = failures.ClassSchemaInvalid
+		return
+	}
+	if len(configs) == 0 {
+		c.mcpObservation.Status, c.mcpObservation.Reason = AdmissionNotApplicable, "the selected source declares no MCP server"
+		return
+	}
+	if !c.opts.CheckMCPReachable {
+		c.mcpObservation.Reason = "MCP discovery is disabled for the declared servers"
+		c.mcpObservation.FailureClass = failures.ClassDependencyUnavailable
+		return
+	}
+	c.mcpObservation.Status, c.mcpObservation.Reason = AdmissionPassed, ""
+	c.mcpObservation.StartedAt = time.Now().UTC()
 	client := runtimemcp.NewClient(c.opts.Credentials)
-	c.mcpDiscoveryErrors = client.Refresh(c.ctx, c.source)
+	c.mcpDiscoveryErrors = client.Refresh(c.ctx, c.source, runtimemcp.DiscoveryOptions{ServerTimeout: c.opts.MCPDiscoveryTimeout})
 	c.mcpDiscoveredTools = client.DiscoveredTools()
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(c.ctx), 5*time.Second)
+	cleanupErr := client.Close(cleanupCtx)
+	cancel()
+	if cleanupErr != nil {
+		c.mcpDiscoveryErrors = append(c.mcpDiscoveryErrors, fmt.Errorf("MCP discovery cleanup failed: %w", cleanupErr))
+	}
+	c.mcpObservation.FinishedAt = time.Now().UTC()
+	if len(c.mcpDiscoveryErrors) > 0 {
+		c.mcpObservation.Status, c.mcpObservation.Reason = AdmissionUnavailable, "MCP discovery or owned resource cleanup failed"
+		c.mcpObservation.FailureClass = failures.ClassDependencyUnavailable
+	}
 }

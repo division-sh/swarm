@@ -18,6 +18,7 @@ func TestChannelActivationExecutableReaderCensus(t *testing.T) {
 	want := []string{
 		"internal/channelonboarding/model.go",
 		"internal/channelonboarding/publication.go",
+		"internal/cliapp/verify_deployment.go",
 		"internal/runtime/channelactivation/owner.go",
 		"internal/runtime/context_manager.go",
 		"internal/runtime/engine/types.go",

@@ -29,6 +29,11 @@ type AdvisoryLockLease struct {
 	testBeforeBeginOperation func()
 }
 
+const (
+	tryAdvisoryLockSQL    = "SELECT pg_try_advisory_lock(hashtext($1))"
+	unlockAdvisoryLockSQL = "SELECT pg_advisory_unlock(hashtext($1))"
+)
+
 type SessionAuthority struct {
 	testTransactions        *transactiontest.Slot
 	operationMu             sync.Mutex
@@ -507,7 +512,7 @@ func (l *AdvisoryLockLease) releaseWithPublicationAdmission(ctx context.Context,
 		if l.testUnlock != nil {
 			unlocked, err = l.testUnlock(ctx, session, l.lockKey)
 		} else {
-			err = session.queryRowContext(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, l.lockKey).Scan(&unlocked)
+			err = session.queryRowContext(ctx, unlockAdvisoryLockSQL, l.lockKey).Scan(&unlocked)
 		}
 		if err != nil {
 			releaseErr := fmt.Errorf("release advisory lock: %w", err)
@@ -708,7 +713,7 @@ func acquireAdvisoryLockLeaseForPublication(
 		// original context. They must not reenter another session owner.
 		acquired, err = acquire(ctx, authority, lockKey)
 	} else {
-		err = authority.queryRowContext(context.WithoutCancel(ctx), `SELECT pg_try_advisory_lock(hashtext($1))`, lockKey).Scan(&acquired)
+		err = authority.queryRowContext(context.WithoutCancel(ctx), tryAdvisoryLockSQL, lockKey).Scan(&acquired)
 	}
 	if err != nil {
 		return nil, false, errors.Join(ctx.Err(), fmt.Errorf("acquire advisory lock: %w", err))
@@ -719,7 +724,7 @@ func acquireAdvisoryLockLeaseForPublication(
 	}
 	if callerErr := ctx.Err(); callerErr != nil {
 		var unlocked bool
-		unlockErr := authority.queryRowContext(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock(hashtext($1))`, lockKey).Scan(&unlocked)
+		unlockErr := authority.queryRowContext(context.WithoutCancel(ctx), unlockAdvisoryLockSQL, lockKey).Scan(&unlocked)
 		if unlockErr == nil && !unlocked {
 			unlockErr = errors.New("canceled PostgreSQL advisory acquisition did not hold its lock")
 		}

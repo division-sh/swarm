@@ -1243,7 +1243,7 @@ func TestVerifyCommandIgnoresInvocationRootDotEnv(t *testing.T) {
 	chdirForTest(t, repo)
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommand(context.Background(), "", []string{"verify", "--config", configPath}, &stdout, &stderr)
+	code := executeRootCommand(context.Background(), "", []string{"verify", "--portable", "--config", configPath}, &stdout, &stderr)
 	if code == 0 {
 		t.Fatalf("verify unexpectedly consumed contracts path from repo .env: stdout=%s stderr=%s", stdout.String(), stderr.String())
 	}
@@ -1253,7 +1253,7 @@ func TestVerifyCommandIgnoresInvocationRootDotEnv(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	code = executeRootCommand(context.Background(), "", []string{"verify", sourceRoot, "--config", configPath}, &stdout, &stderr)
+	code = executeRootCommand(context.Background(), "", []string{"verify", sourceRoot, "--portable", "--config", configPath}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("verify with explicit contracts code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -2590,8 +2590,8 @@ func TestCLI_VerifyPreservesLocalContractCarveOut(t *testing.T) {
 	if code != CLIExitValidation {
 		t.Fatalf("verify code = %d, want %d stderr=%s stdout=%s", code, CLIExitValidation, stderr.String(), stdout.String())
 	}
-	if strings.TrimSpace(stdout.String()) != "" {
-		t.Fatalf("verify stdout = %q, want empty on error", stdout.String())
+	if !strings.Contains(stdout.String(), "admission validation failed; startup execution not performed") {
+		t.Fatalf("verify stdout omitted the failed admission ledger: %q", stdout.String())
 	}
 	if !strings.Contains(stderr.String(), "source directory") {
 		t.Fatalf("verify stderr = %q, want local contract resolution failure", stderr.String())
@@ -3073,6 +3073,8 @@ func runVerifyCommandWithContractsOutputForTest(t *testing.T, ctx context.Contex
 		repo = t.TempDir()
 	}
 	opts := defaultVerifyCommandOptions()
+	// These fixtures prove declaration semantics, not deployment readiness.
+	opts.portable = true
 	opts.sourceRoot = sourceRoot
 	opts.configPath = writeTestVerifyRuntimeConfig(t)
 	return runVerifyCommandWithOutput(ctx, repo, opts, out, errOut)
@@ -3188,6 +3190,7 @@ func TestRunVerifyCommand_SurfacesLintEvidence(t *testing.T) {
 	}
 
 	opts := defaultVerifyCommandOptions()
+	opts.portable = true
 	opts.sourceRoot = root
 	opts.configPath = writeTestVerifyRuntimeConfig(t)
 	opts.output.asJSON = true
@@ -3212,6 +3215,7 @@ func TestRunVerifyCommand_JSONDoesNotHideLaterValidationErrorBehindAdvisoryBootF
 
 	root := writeVerifyLintEvidenceWithMissingEmitSchemaFixture(t)
 	opts := defaultVerifyCommandOptions()
+	opts.portable = true
 	opts.sourceRoot = root
 	opts.configPath = writeTestVerifyRuntimeConfig(t)
 	opts.output.asJSON = true
@@ -3261,12 +3265,11 @@ func TestRunVerifyCommand_RejectsBootTimerWithCancelOn(t *testing.T) {
 	if code == 0 {
 		t.Fatalf("runVerifyCommand exit code = 0, stdout = %q stderr = %q", stdout.String(), stderr.String())
 	}
-	if strings.TrimSpace(stdout.String()) != "" {
-		t.Fatalf("verify stdout = %q, want empty for hard invalidity", stdout.String())
+	if !strings.Contains(stdout.String(), "admission validation failed; startup execution not performed") {
+		t.Fatalf("verify stdout omitted the failed admission ledger: %q", stdout.String())
 	}
 	errText := stderr.String()
 	for _, want := range []string{
-		"verify failed: boot verification failed:",
 		"[BLOCKER] timer_validation @",
 		"start_on boot does not support cancel_on state:done",
 		"remediation:",
@@ -3277,6 +3280,7 @@ func TestRunVerifyCommand_RejectsBootTimerWithCancelOn(t *testing.T) {
 	}
 
 	opts := defaultVerifyCommandOptions()
+	opts.portable = true
 	opts.sourceRoot = root
 	opts.configPath = writeTestVerifyRuntimeConfig(t)
 	opts.output.asJSON = true
@@ -3317,8 +3321,8 @@ func TestRunVerifyCommandRejectsAncestorEventNameWithoutReceiverLocalDeclaration
 	if code == 0 {
 		t.Fatalf("verify exit code = 0, stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
-	if strings.TrimSpace(stdout.String()) != "" {
-		t.Fatalf("verify stdout = %q, want empty for hard invalidity", stdout.String())
+	if !strings.Contains(stdout.String(), "admission validation failed; startup execution not performed") {
+		t.Fatalf("verify stdout omitted the failed admission ledger: %q", stdout.String())
 	}
 	for _, want := range []string{"receiver-local event", "input pin", "nearest common ancestor schema.yaml", "root.started"} {
 		if !strings.Contains(stderr.String(), want) {
@@ -3342,12 +3346,11 @@ func TestRunVerifyCommand_UnreachableStageUsesBlockingAnalyzerOutput(t *testing.
 	if code == 0 {
 		t.Fatalf("runVerifyCommand exit code = 0, stdout = %q stderr = %q", stdout.String(), stderr.String())
 	}
-	if strings.TrimSpace(stdout.String()) != "" {
-		t.Fatalf("verify stdout = %q, want empty for blocking analyzer failure", stdout.String())
+	if !strings.Contains(stdout.String(), "admission validation failed; startup execution not performed") {
+		t.Fatalf("verify stdout omitted the failed admission ledger: %q", stdout.String())
 	}
 	errText := stderr.String()
 	for _, want := range []string{
-		"verify failed: boot verification failed:",
 		"[BLOCKER] semantic_drift_unreachable_state @",
 		"declares stage review but no lawful lifecycle path",
 	} {
@@ -3360,6 +3363,7 @@ func TestRunVerifyCommand_UnreachableStageUsesBlockingAnalyzerOutput(t *testing.
 	}
 
 	opts := defaultVerifyCommandOptions()
+	opts.portable = true
 	opts.sourceRoot = root
 	opts.configPath = writeTestVerifyRuntimeConfig(t)
 	opts.output.asJSON = true
@@ -3494,6 +3498,7 @@ func TestRunVerifyCommand_UsesUnifiedRuntimeConfigModelAliases(t *testing.T) {
 
 	var buf bytes.Buffer
 	opts := defaultVerifyCommandOptions()
+	opts.portable = true
 	opts.sourceRoot = root
 	code := runVerifyCommandWithOutput(context.Background(), RepoRoot(), opts, &buf, &buf)
 	if code != 0 {
@@ -3554,12 +3559,11 @@ Use save_entity_field for `+"`business_brief`"+`.
 	if code == 0 {
 		t.Fatalf("expected non-zero exit code, stdout = %q stderr = %q", stdout.String(), stderr.String())
 	}
-	if strings.TrimSpace(stdout.String()) != "" {
-		t.Fatalf("verify stdout = %q, want empty for hard invalidity", stdout.String())
+	if !strings.Contains(stdout.String(), "admission validation failed; startup execution not performed") {
+		t.Fatalf("verify stdout omitted the failed admission ledger: %q", stdout.String())
 	}
 	errText := stderr.String()
 	for _, want := range []string{
-		"verify failed: boot verification failed:",
 		"[BLOCKER] entity_writer_coverage @",
 		"business_brief",
 	} {
@@ -3649,12 +3653,11 @@ func TestRunVerifyCommand_FailsForAccumulatorInputWithoutProducerPath(t *testing
 	if code == 0 {
 		t.Fatalf("expected non-zero exit code, stdout = %q stderr = %q", stdout.String(), stderr.String())
 	}
-	if strings.TrimSpace(stdout.String()) != "" {
-		t.Fatalf("verify stdout = %q, want empty for hard invalidity", stdout.String())
+	if !strings.Contains(stdout.String(), "admission validation failed; startup execution not performed") {
+		t.Fatalf("verify stdout omitted the failed admission ledger: %q", stdout.String())
 	}
 	errText := stderr.String()
 	for _, want := range []string{
-		"verify failed: boot verification failed:",
 		"[BLOCKER] accumulator_input_producer_path @",
 		"no accepted producer/source path",
 		"remediation:",

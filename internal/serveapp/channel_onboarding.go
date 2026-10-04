@@ -265,27 +265,17 @@ func reconcileRetiredConnectedChannelContexts(ctx context.Context, manager *runt
 	if err != nil {
 		return err
 	}
-	operations, err := store.ListChannelOnboardingOperations(ctx)
+	inventory, err := channelonboarding.InspectRetainedActivations(ctx, store)
 	if err != nil {
 		return err
 	}
-	operationByID := make(map[string]channelonboarding.Operation, len(operations))
-	for _, operation := range operations {
-		if _, duplicate := operationByID[operation.OperationID]; duplicate {
-			return fmt.Errorf("duplicate connected channel onboarding operation %s during context retirement reconciliation", operation.OperationID)
-		}
+	operationByID := make(map[string]channelonboarding.Operation, len(inventory.Operations))
+	for _, operation := range inventory.Operations {
 		operationByID[operation.OperationID] = operation
 	}
-	activations, err := store.ListCurrentConnectedChannelActivations(ctx)
-	if err != nil {
-		return err
-	}
 	retired := map[string]struct{}{}
-	for _, activation := range activations {
-		operation, found := operationByID[activation.OperationID]
-		if !found || operation.SlotKey != activation.SlotKey || !operation.Coordinate.Matches(activation.Coordinate) {
-			return fmt.Errorf("current connected channel activation %s has no exact owning onboarding operation", activation.ActivationID)
-		}
+	for _, activation := range inventory.Activations {
+		operation := operationByID[activation.OperationID]
 		if _, current := catalog.FindDurableSuccessor(
 			operation.Provider, operation.Interface, operation.Coordinate, operation.TargetSelector, operation.Posture, operation.Ceremony,
 		); current {

@@ -735,30 +735,14 @@ func newScopedTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps, d
 			deps.ManagerPersistenceRoles.LifecycleState = retainedSession
 		}
 	}
-	if deps.WorkflowPersistence.Valid() {
-		if deps.DecisionCards == nil {
-			deps.DecisionCards = &runtimeTestUnavailableDecisionCards{}
-		}
-		if deps.ProposedEffects == nil {
-			deps.ProposedEffects = &runtimeTestUnavailableProposedEffects{}
-		}
-		if deps.DecisionCardHumanTasks == nil {
-			deps.DecisionCardHumanTasks = &runtimeTestUnavailableHumanTasks{}
-		}
-		if deps.DecisionCardDraftExpiry == nil {
-			deps.DecisionCardDraftExpiry = &runtimeTestUnavailableDecisionCardDraftExpiry{}
-		}
-		if deps.HumanTaskExpiry == nil {
-			deps.HumanTaskExpiry = &runtimeTestUnavailableHumanTaskExpiry{}
+	if !deps.WorkflowPersistence.Configured() {
+		if installTestGrant && len(decorators) == 0 {
+			decorators = append(decorators, func(session *runtimeTestRetainedSession) runtimestartupownership.RetainedSession {
+				return &startupRecoveryFanOutSession{runtimeTestRetainedSession: session, capacity: runtimestartupownership.SQLiteFanOutCapacity()}
+			})
 		}
 	}
-	if deps.WorkflowPersistence.Configured() && deps.RunLifecycleCandidates == nil {
-		if candidates, ok := deps.EventStore.(runtimerunlifecycle.CandidateOwner); ok {
-			deps.RunLifecycleCandidates = candidates
-		} else {
-			deps.RunLifecycleCandidates = runtimeTestCandidateOwner{}
-		}
-	}
+	deps = completeRuntimeRecoveryTestDeps(t, deps)
 	runtime, err := NewRuntime(ctx, deps)
 	if err == nil {
 		if installTestGrant {
@@ -795,6 +779,59 @@ func newScopedTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps, d
 		})
 	}
 	return runtime, err
+}
+
+func completeRuntimeRecoveryTestDeps(t testing.TB, deps RuntimeDeps) RuntimeDeps {
+	t.Helper()
+	if !deps.WorkflowPersistence.Configured() {
+		deps.WorkflowPersistence = startupRecoveryWorkflowPersistence(nil, deps.TimerObligationReader)
+	}
+	if deps.DeliveryStore == nil {
+		deps.DeliveryStore = newRuntimeShutdownDeliveryStore(t)
+	}
+	if deps.EventStore == nil {
+		deps.EventStore = startupRecoveryMinimalEventStore{}
+	}
+	if deps.PipelineObligations == nil {
+		if provider, ok := deps.EventStore.(interface {
+			PipelineObligations() runtimepipelineobligation.Store
+		}); ok {
+			deps.PipelineObligations = provider.PipelineObligations()
+		} else if _, ok := deps.EventStore.(*bootSelfCheckDescriptorStore); ok {
+			deps.PipelineObligations = newStartupRecoveryPipelineOwner(nil, nil)
+		}
+	}
+	if deps.ManagerPersistenceRoles.StandingRestarts == nil {
+		deps.ManagerPersistenceRoles.StandingRestarts = startupRecoveryWorkflowOwner{}
+	}
+	if deps.WorkflowPersistence.Valid() {
+		if deps.EventBusDurable.RunLifecycle == nil {
+			deps.EventBusDurable = runtimeTestSyntheticDurableDependencies(deps.DeliveryStore)
+		}
+		if deps.DecisionCards == nil {
+			deps.DecisionCards = &runtimeTestUnavailableDecisionCards{}
+		}
+		if deps.ProposedEffects == nil {
+			deps.ProposedEffects = &runtimeTestUnavailableProposedEffects{}
+		}
+		if deps.DecisionCardHumanTasks == nil {
+			deps.DecisionCardHumanTasks = &runtimeTestUnavailableHumanTasks{}
+		}
+		if deps.DecisionCardDraftExpiry == nil {
+			deps.DecisionCardDraftExpiry = &runtimeTestUnavailableDecisionCardDraftExpiry{}
+		}
+		if deps.HumanTaskExpiry == nil {
+			deps.HumanTaskExpiry = &runtimeTestUnavailableHumanTaskExpiry{}
+		}
+	}
+	if deps.WorkflowPersistence.Configured() && deps.RunLifecycleCandidates == nil {
+		if candidates, ok := deps.EventStore.(runtimerunlifecycle.CandidateOwner); ok {
+			deps.RunLifecycleCandidates = candidates
+		} else {
+			deps.RunLifecycleCandidates = runtimeTestCandidateOwner{}
+		}
+	}
+	return deps
 }
 
 func admitRuntimeTestBundle(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle) {

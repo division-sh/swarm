@@ -107,7 +107,7 @@ func testDurableDataInvocation(t *testing.T, shard int) {
 			foreignProven := false
 			for _, cell := range cells {
 				t.Run(cell.name, func(t *testing.T) {
-					args := []string{"verify", "--config", config, "--json"}
+					args := []string{"verify", "--config", config, "--portable", "--json"}
 					if cell.operand != "" {
 						args = append(args, cell.operand)
 					}

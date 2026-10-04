@@ -10,12 +10,8 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
-type AvailabilityReader interface {
-	ActiveNonStandingRunBundleAvailabilities(context.Context) ([]runbundle.Availability, error)
-}
-
 type Request struct {
-	AvailabilityReader AvailabilityReader
+	AvailabilityReader runbundle.ActiveAvailabilityReader
 	ArtifactReader     ArtifactReader
 }
 
@@ -45,9 +41,13 @@ func IsDataIntegrityError(err error) bool {
 	return errors.As(err, &target)
 }
 
-func Recover(ctx context.Context, req Request) (Result, error) {
+// Inspect reads and validates retained artifacts. It does not recover execution.
+func Inspect(ctx context.Context, req Request) (Result, error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
 	}
 	if req.AvailabilityReader == nil {
 		return Result{}, fmt.Errorf("startup recovery availability reader is required")
@@ -56,18 +56,27 @@ func Recover(ctx context.Context, req Request) (Result, error) {
 		return Result{}, fmt.Errorf("startup recovery source artifact reader is required")
 	}
 	availabilities, err := req.AvailabilityReader.ActiveNonStandingRunBundleAvailabilities(ctx)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return Result{}, ctxErr
+	}
 	if err != nil {
 		return Result{}, err
 	}
 	result := Result{CheckedAvailabilities: append([]runbundle.Availability(nil), availabilities...)}
 	verified := make(map[string]bool)
 	for _, availability := range availabilities {
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
 		switch {
 		case availability.Available():
 			if verified[availability.BundleHash] {
 				continue
 			}
 			artifact, err := req.ArtifactReader.GetSourceArtifact(ctx, availability.BundleHash)
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return result, ctxErr
+			}
 			if err != nil {
 				return result, fmt.Errorf("startup recovery run %s source artifact %s: %w", availability.RunID, availability.BundleHash, err)
 			}

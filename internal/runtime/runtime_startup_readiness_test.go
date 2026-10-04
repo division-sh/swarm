@@ -80,10 +80,12 @@ func newStartupReadinessTestRuntime(t testing.TB, nodes ...runtimepipeline.Backg
 		t.Fatalf("construct startup readiness generation grant: %v", err)
 	}
 	return &Runtime{
-		Config:         testOperationalRuntimeConfig(),
-		SystemNodes:    nodes,
-		workOccurrence: runtimeTestOccurrence(t, runtimeTestBundleHash),
-		startupGrant:   grant,
+		Config:                testOperationalRuntimeConfig(),
+		SystemNodes:           nodes,
+		workOccurrence:        runtimeTestOccurrence(t, runtimeTestBundleHash),
+		startupGrant:          grant,
+		deliveryStore:         newRuntimeShutdownDeliveryStore(t),
+		standingRestartReader: startupRecoveryWorkflowOwner{},
 		Options: RuntimeOptions{
 			DisablePersistentStartupRecovery: true,
 			WorkflowModule:                   startupReadinessWorkflowModule{},

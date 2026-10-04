@@ -696,13 +696,9 @@ func acquireAuthorityTx(ctx context.Context, tx *sql.Tx, req runtimestartupowner
 	if exists {
 		generation = prior.AuthorityGeneration + 1
 		predecessorID = prior.AuthorityID
-		switch prior.State {
-		case runtimestartupownership.StateReleased:
-			kind = runtimestartupownership.AcquisitionCleanHandoff
-		case runtimestartupownership.StateActive:
-			kind = runtimestartupownership.AcquisitionCrashTakeover
-		default:
-			return runtimestartupownership.Authority{}, &runtimestartupownership.AcquisitionError{Failure: runtimestartupownership.AcquisitionPriorOwnerAmbiguous, Detail: "durable process authority head is terminal without a current successor"}
+		kind, err = runtimestartupownership.SuccessorAcquisitionKind(prior.State)
+		if err != nil {
+			return runtimestartupownership.Authority{}, err
 		}
 	}
 	next, err := runtimestartupownership.NewAuthority(req, backend, generation, predecessorID, kind)

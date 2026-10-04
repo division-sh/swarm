@@ -96,7 +96,7 @@ func runStandingOrphanRestorationPublic(t *testing.T, binary, lifecycle, root st
 		}
 	}
 	writeReleaseFile(t, schemaPath, "name: telegram-lifecycle\n")
-	verified := runReleaseCommand(t, fullLifecycleStartupLimit, spec.WorkingDir, spec.Env, "", binary, "verify", spec.Source, "--config", spec.ConfigPath, "--json")
+	verified := runReleaseCommand(t, fullLifecycleStartupLimit, spec.WorkingDir, spec.Env, "", binary, "verify", spec.Source, "--config", spec.ConfigPath, "--portable", "--json")
 	if verified.err != nil {
 		t.Fatalf("removed-declaration source is not admitted: %v\n%s", verified.err, verified.output)
 	}

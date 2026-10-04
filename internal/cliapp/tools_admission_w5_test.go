@@ -30,7 +30,7 @@ func TestW5ToolsVerifyAndDescribeSupportedSurface(t *testing.T) {
 	writeDescribeTestFile(t, filepath.Join(root, "tools.yaml"), module+"explicit_any: {handler_type: http, http: {method: POST, url: 'https://example.invalid'}, input_schema: {}}\nomitted: {handler_type: http, http: {method: POST, url: 'https://example.invalid'}}\n")
 	var stdout, stderr bytes.Buffer
 	config := writeTestVerifyRuntimeConfig(t)
-	for _, command := range [][]string{{"verify", root, "--config", config, "--json"}, {"describe", root, "--json"}} {
+	for _, command := range [][]string{{"verify", root, "--portable", "--config", config, "--json"}, {"describe", root, "--json"}} {
 		stdout.Reset()
 		stderr.Reset()
 		if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), command, &stdout, &stderr, defaultRootCommandOptions()); code != 0 {
@@ -45,7 +45,7 @@ func TestW5ToolsVerifyAndDescribeSupportedSurface(t *testing.T) {
 			writeDescribeTestFile(t, filepath.Join(root, "tools.yaml"), "invalid: {"+fields+"}\n")
 			stdout.Reset()
 			stderr.Reset()
-			code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", root, "--config", config, "--json"}, &stdout, &stderr, defaultRootCommandOptions())
+			code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", root, "--portable", "--config", config, "--json"}, &stdout, &stderr, defaultRootCommandOptions())
 			if code == 0 || !strings.Contains(stdout.String()+stderr.String(), "tools.yaml") {
 				t.Fatalf("invalid source accepted/lost: code=%d stdout=%s stderr=%s", code, &stdout, &stderr)
 			}
@@ -55,7 +55,7 @@ func TestW5ToolsVerifyAndDescribeSupportedSurface(t *testing.T) {
 	writeDescribeTestFile(t, filepath.Join(root, "agents.yaml"), "worker:\n  intent: {inline: business intent}\n  tools: [renderer]\n")
 	stdout.Reset()
 	stderr.Reset()
-	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", root, "--config", config, "--json"}, &stdout, &stderr, defaultRootCommandOptions()); code == 0 || !strings.Contains(stdout.String()+stderr.String(), "module") {
+	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", root, "--portable", "--config", config, "--json"}, &stdout, &stderr, defaultRootCommandOptions()); code == 0 || !strings.Contains(stdout.String()+stderr.String(), "module") {
 		t.Fatalf("module grant accepted: code=%d stdout=%s stderr=%s", code, &stdout, &stderr)
 	}
 	if err := os.Remove(filepath.Join(root, "agents.yaml")); err != nil {
@@ -64,7 +64,7 @@ func TestW5ToolsVerifyAndDescribeSupportedSurface(t *testing.T) {
 	writeDescribeTestFile(t, filepath.Join(root, "policy.yaml"), "modules: {}\n")
 	stdout.Reset()
 	stderr.Reset()
-	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", root, "--config", config, "--json"}, &stdout, &stderr, defaultRootCommandOptions()); code != 0 {
+	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", root, "--portable", "--config", config, "--json"}, &stdout, &stderr, defaultRootCommandOptions()); code != 0 {
 		t.Fatalf("literal modules key rejected: code=%d stdout=%s stderr=%s", code, &stdout, &stderr)
 	}
 	stdout.Reset()

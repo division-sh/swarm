@@ -1148,60 +1148,14 @@ func (s RecoverableStateSnapshot) Detail() map[string]any {
 }
 
 func (am *AgentManager) RecoverableStateSnapshot(ctx context.Context) (RecoverableStateSnapshot, error) {
-	snapshot := RecoverableStateSnapshot{}
 	if am == nil {
-		return snapshot, nil
+		return RecoverableStateSnapshot{}, errors.New("recoverable manager state reader is required")
 	}
-	if am.workflowInstances != nil {
-		source, err := am.dynamicFlowRuntimeReadinessSource(ctx)
-		if err != nil {
-			return RecoverableStateSnapshot{}, err
-		}
-		projection, err := am.InspectDynamicFlowRuntimeReadinessForSource(ctx, source.fact)
-		if err != nil {
-			return RecoverableStateSnapshot{}, fmt.Errorf("inspect source-scoped dynamic flow runtime readiness: %w", err)
-		}
-		snapshot.PendingDynamicFlowRuntimeReadinessCount = len(projection.CurrentPending)
-		for _, item := range projection.SourceTransitionRequired {
-			if item.Pending() {
-				snapshot.PendingDynamicFlowRuntimeReadinessCount++
-			}
-		}
-	}
-	if am.store != nil {
-		agents, err := am.store.LoadAgents(ctx)
-		if err != nil {
-			return RecoverableStateSnapshot{}, fmt.Errorf("load persisted agents: %w", err)
-		}
-		snapshot.PersistedAgentCount = len(agents)
-	}
-	if am.bus == nil {
-		return snapshot, nil
-	}
-	store := am.bus.Store()
-	if store == nil {
-		return snapshot, nil
-	}
-	if routeStore, ok := store.(runtimebus.FlowInstanceRoutePersistence); ok && routeStore != nil {
-		routes, err := routeStore.ListFlowInstanceRoutes(ctx)
-		if err != nil {
-			return RecoverableStateSnapshot{}, fmt.Errorf("list persisted flow instance routes: %w", err)
-		}
-		snapshot.PersistedFlowInstanceRouteCount = len(routes)
-	}
-	if routeRecoveryStore, ok := store.(selectedContractRouteRecoveryLister); ok && routeRecoveryStore != nil {
-		recoveries, err := routeRecoveryStore.ListSelectedContractRouteRecoveryRecords(ctx)
-		if err != nil {
-			return RecoverableStateSnapshot{}, fmt.Errorf("list selected-contract route recoveries: %w", err)
-		}
-		snapshot.PersistedSelectedContractRouteRecoveryCount = len(recoveries)
-	}
-	presence, err := am.bus.PipelineWorkPresence(ctx)
+	source, err := am.dynamicFlowRuntimeReadinessSource(ctx)
 	if err != nil {
-		return RecoverableStateSnapshot{}, fmt.Errorf("load pipeline work presence: %w", err)
+		return RecoverableStateSnapshot{}, err
 	}
-	snapshot.ReplayEligibleEventPresent = presence.Any()
-	return snapshot, nil
+	return InspectRecoverableStateSnapshot(ctx, source.fact, managerRecoveryReads{am: am})
 }
 
 func (am *AgentManager) readinessReconciliationLoop(ctx context.Context) {

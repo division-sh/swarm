@@ -10,6 +10,7 @@ type RuntimeStoreOrigin = private.RuntimeStoreOrigin
 type SQLiteRuntimeStore = private.SQLiteRuntimeStore
 type SchemaBootstrapRequest = private.SchemaBootstrapRequest
 type SchemaBootstrapper = private.SchemaBootstrapper
+type SchemaInspection = private.SchemaInspection
 type SchemaCompatibilityError = private.SchemaCompatibilityError
 type SchemaDialect = private.SchemaDialect
 type SchemaTableDDL = private.SchemaTableDDL

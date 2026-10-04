@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -15,8 +16,24 @@ func TestBootVerifyReportsManagedCredentialState(t *testing.T) {
 
 	t.Run("missing store", func(t *testing.T) {
 		report := Run(context.Background(), source, Options{})
-		if !managedCredentialFindingContains(report.Findings, "managed credential github is missing") {
-			t.Fatalf("findings = %#v, want missing managed credential", report.Findings)
+		if !managedCredentialFindingContains(report.Errors(), "required managed credential inspection is unavailable for github") {
+			t.Fatalf("findings = %#v, want unavailable observation, not a missing credential", report.Findings)
+		}
+		observed := false
+		for _, observation := range report.Observations {
+			if observation.CheckID == "credential_key_exists" && observation.Class == AdmissionDeploymentObservation {
+				observed = observation.Status == AdmissionUnavailable && observation.FailureClass == failures.ClassDependencyUnavailable
+			}
+		}
+		if !observed || report.AdmissionDecision(AdmissionFindingPolicy{}).Complete {
+			t.Fatalf("missing reader became completed credential inspection: %+v", report.Observations)
+		}
+	})
+
+	t.Run("missing credential", func(t *testing.T) {
+		report := Run(context.Background(), source, Options{ManagedCredentials: runtimemanagedcredentials.NewMemoryStore()})
+		if !managedCredentialFindingContains(report.Warnings(), "managed credential github is missing") {
+			t.Fatalf("findings = %#v, want inspected missing credential with preserved warning severity", report.Findings)
 		}
 	})
 

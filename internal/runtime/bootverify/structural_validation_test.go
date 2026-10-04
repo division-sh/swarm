@@ -133,7 +133,6 @@ func TestStructuralCheckPurposeCensus(t *testing.T) {
 		"flow_boundary_create_entity_validation":  "structural",
 		"flow_data_access_validation":             "structural",
 		"impl.platform_metadata_validation":       "structural",
-		"impl.deprecated_contract_alias":          "structural",
 		"agent_prompt_lint_structural":            "structural",
 	}
 	seen := map[string]bool{}
@@ -143,6 +142,10 @@ func TestStructuralCheckPurposeCensus(t *testing.T) {
 				t.Errorf("unclassified or duplicate check %q", check.ID)
 			}
 			seen[check.ID] = true
+			wantMode := map[string]CheckMode{"structural": CheckSource, "execution": CheckDeployment, "mixed": CheckMixed}[classified[check.ID]]
+			if check.Mode != wantMode {
+				t.Errorf("check %q has mode %d, want %d", check.ID, check.Mode, wantMode)
+			}
 		}
 	}
 	for id := range classified {

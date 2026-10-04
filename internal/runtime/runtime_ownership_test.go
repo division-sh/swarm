@@ -51,8 +51,9 @@ func TestRuntimeShutdownRetiresGrantWithoutReleasingProcessCapability(t *testing
 		t.Fatalf("new cold authority: %v", err)
 	}
 	selected := &runtimeTestRetainedSession{authority: authority, agents: map[string]runtimemanager.PersistedAgent{}}
-	rt, err := NewRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{
-		Config: cfg,
+	rt, err := NewRuntime(testAuthorActivityContext(context.Background()), completeRuntimeRecoveryTestDeps(t, RuntimeDeps{
+		Config:       cfg,
+		ManagerStore: selected,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
 			LifecycleCensus: selected,
 		},
@@ -62,11 +63,13 @@ func TestRuntimeShutdownRetiresGrantWithoutReleasingProcessCapability(t *testing
 			RuntimeInstanceID:  authorActivityTestRuntimeInstanceID,
 			SourceArtifactFact: fact, ProcessWorkOwner: runtimeTestProcessWorkOwner(t),
 		},
-	})
+	}))
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	capability, grant, err := newRuntimeTestProcessCapabilityWithSession(t, rt.Manager, module.source, fact, authorActivityTestRuntimeInstanceID, selected)
+	capability, grant, err := newRuntimeTestProcessCapabilityWithSession(t, rt.Manager, module.source, fact, authorActivityTestRuntimeInstanceID, selected, func(session *runtimeTestRetainedSession) runtimestartupownership.RetainedSession {
+		return &startupRecoveryFanOutSession{runtimeTestRetainedSession: session, capacity: runtimestartupownership.SQLiteFanOutCapacity()}
+	})
 	if err != nil {
 		t.Fatalf("new process capability: %v", err)
 	}

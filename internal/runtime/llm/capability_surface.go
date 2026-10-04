@@ -240,10 +240,34 @@ func managedCapabilityPlanForActor(actor models.AgentConfig, actorIdentity runti
 	if strings.TrimSpace(runtimeMode) == "" {
 		runtimeMode = contract.RuntimeMode
 	}
+	planned, err := CompileManagedCapabilityAdmission(actor, contract, tools, capabilities)
+	if err != nil {
+		return managedcapabilities.Surface{}, err
+	}
+	surface, err := managedcapabilities.New(managedcapabilities.Plan{
+		ActorIdentity:    actorIdentity,
+		ActorPlan:        actorPlan,
+		RuntimeMode:      strings.TrimSpace(runtimeMode),
+		Provider:         contract.Provider,
+		Transport:        string(contract.Transport),
+		ProviderContract: hashJSON(contract),
+		Authority:        authority,
+		Tools:            planned,
+		CreatedAt:        time.Now().UTC(),
+	})
+	return surface, err
+}
+
+// CompileManagedCapabilityAdmission shares the provider/tool input compiler
+// without creating a runtime, authority, surface or delivery receipt.
+func CompileManagedCapabilityAdmission(actor models.AgentConfig, contract ProviderContract, tools []ToolDefinition, capabilities toolcapabilities.Set) ([]managedcapabilities.PlannedTool, error) {
+	if err := contract.Validate(); err != nil {
+		return nil, err
+	}
 	nativeNames := nativeCapabilityNames(actor)
 	providerNative, err := managedProviderNativeNames(contract, nativeNames)
 	if err != nil {
-		return managedcapabilities.Surface{}, err
+		return nil, err
 	}
 	planned := make([]managedcapabilities.PlannedTool, 0, len(tools)+4)
 	seen := map[string]struct{}{}
@@ -256,7 +280,7 @@ func managedCapabilityPlanForActor(actor models.AgentConfig, actorIdentity runti
 			continue
 		}
 		if _, duplicate := seen[name]; duplicate {
-			return managedcapabilities.Surface{}, fmt.Errorf("managed capability tool %s is duplicated", name)
+			return nil, fmt.Errorf("managed capability tool %s is duplicated", name)
 		}
 		seen[name] = struct{}{}
 		capability, found := capabilities.Capability(name)
@@ -275,11 +299,11 @@ func managedCapabilityPlanForActor(actor models.AgentConfig, actorIdentity runti
 			continue
 		}
 		if _, providerOwned := providerNative[nativeName]; !providerOwned {
-			return managedcapabilities.Surface{}, fmt.Errorf("authored native capability %s has no selected provider-native support or concrete fallback definition", nativeName)
+			return nil, fmt.Errorf("authored native capability %s has no selected provider-native support or concrete fallback definition", nativeName)
 		}
 		bindings := managedProviderNativeBindings(actor, nativeName)
 		if len(bindings) == 0 {
-			return managedcapabilities.Surface{}, fmt.Errorf("provider-native capability %s has no exact provider binding", nativeName)
+			return nil, fmt.Errorf("provider-native capability %s has no exact provider binding", nativeName)
 		}
 		seen[nativeName] = struct{}{}
 		planned = append(planned, managedcapabilities.PlannedTool{
@@ -294,21 +318,10 @@ func managedCapabilityPlanForActor(actor models.AgentConfig, actorIdentity runti
 			Bindings: bindings,
 		})
 	}
-	surface, err := managedcapabilities.New(managedcapabilities.Plan{
-		ActorIdentity:    actorIdentity,
-		ActorPlan:        actorPlan,
-		RuntimeMode:      strings.TrimSpace(runtimeMode),
-		Provider:         contract.Provider,
-		Transport:        string(contract.Transport),
-		ProviderContract: hashJSON(contract),
-		Authority:        authority,
-		Tools:            planned,
-		CreatedAt:        time.Now().UTC(),
-	})
-	if err != nil {
-		return managedcapabilities.Surface{}, err
+	if err := managedcapabilities.ValidatePlannedTools(planned); err != nil {
+		return nil, err
 	}
-	return surface, nil
+	return planned, nil
 }
 
 // ConcreteManagedToolDefinitions removes provider-owned native capabilities

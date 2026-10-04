@@ -1,0 +1,6 @@
+worker:
+  role: worker
+  intent: {inline: "Complete the requested work, preserving its work_id."}
+  model: regular
+  subscriptions: [work.requested]
+  emit_events: [work.completed]

@@ -206,44 +206,37 @@ func (m *HostManager) ValidateSource(_ context.Context, source semanticview.Sour
 	if err := m.validateSharedMounts(); err != nil {
 		return err
 	}
-	classes, err := workspaceClassesForSource(source)
-	if err != nil {
-		return err
-	}
-	if err := validateAgentWorkspaceClasses(source, classes); err != nil {
-		return err
-	}
-	return nil
+	return ValidateHostSourceAdmission(m.cfg, source)
 }
 
-func (m *HostManager) EnsurePrereqs(context.Context) error {
+func (m *HostManager) EnsurePrereqs(ctx context.Context) error {
 	if err := m.beginProjectionOperation(); err != nil {
 		return err
 	}
 	defer m.projectionOps.Done()
-	return m.ensurePrereqs()
+	return m.ensurePrereqs(ctx)
 }
 
-func (m *HostManager) ensurePrereqs() error {
+func (m *HostManager) ensurePrereqs(ctx context.Context) error {
 	if err := m.validateSharedMounts(); err != nil {
 		return err
 	}
-	root, err := m.hostRoot()
+	inspection, err := InspectHostPrerequisites(ctx, m.cfg)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(root, 0o700); err != nil {
-		return fmt.Errorf("host workspace prerequisite failed: create workspace root %s: %w", root, err)
+	if err := os.MkdirAll(inspection.RootPath, 0o700); err != nil {
+		return fmt.Errorf("host workspace prerequisite failed: create workspace root %s: %w", inspection.RootPath, err)
 	}
-	return nil
+	return ctx.Err()
 }
 
-func (m *HostManager) EnsureSystemWorkspaces(context.Context) error {
+func (m *HostManager) EnsureSystemWorkspaces(ctx context.Context) error {
 	if err := m.beginProjectionOperation(); err != nil {
 		return err
 	}
 	defer m.projectionOps.Done()
-	if err := m.ensurePrereqs(); err != nil {
+	if err := m.ensurePrereqs(ctx); err != nil {
 		return err
 	}
 	for _, kind := range []durableWorkspaceKind{durableWorkspaceScaffold, durableWorkspaceSystem} {
@@ -267,31 +260,19 @@ func (m *HostManager) ResolveWorkspaceForCapabilityAdmission(_ context.Context, 
 		return nil, err
 	}
 	defer m.projectionOps.Done()
-	class, err := workspaceClassForSource(m.source, actor)
+	target, err := HostCapabilityTarget(m.cfg, m.source, actor)
 	if err != nil {
 		return nil, err
-	}
-	if workspaceRouteClass(class) == "" {
-		if _, err := workspaceScopeForCapabilityAdmission(m.source, actor); err != nil {
-			return nil, err
-		}
 	}
 	if err := m.validateSharedMounts(); err != nil {
 		return nil, err
 	}
-	root, err := m.hostRoot()
+	mounts, err := m.hostExecutionMounts(target.Workdir, "")
 	if err != nil {
 		return nil, err
 	}
-	mounts, err := m.hostExecutionMounts(root, "")
-	if err != nil {
-		return nil, err
-	}
-	return &Target{
-		Workdir: root,
-		Backend: BackendHost,
-		Mounts:  mounts,
-	}, nil
+	target.Mounts = mounts
+	return target, nil
 }
 
 func (m *HostManager) resolveWorkspace(ctx context.Context, actor models.AgentConfig, materializeData bool) (*Target, error) {
@@ -454,25 +435,26 @@ func (m *HostManager) hostRoot() (string, error) {
 	if m == nil {
 		return "", fmt.Errorf("host workspace manager is required")
 	}
-	root, err := cleanAbsPath(m.cfg.WorkspaceRoot, "host workspace root")
+	return hostWorkspaceRoot(m.cfg)
+}
+
+func hostWorkspaceRoot(cfg HostConfig) (string, error) {
+	root, err := cleanAbsPath(cfg.WorkspaceRoot, "host workspace root")
 	if err != nil {
 		return "", err
 	}
-	if scope := strings.TrimSpace(m.cfg.BundleScope); scope != "" {
+	if scope := strings.TrimSpace(cfg.BundleScope); scope != "" {
 		root = filepath.Join(root, scope)
 	}
 	return canonicalPathForOverlap(root, "host workspace root")
 }
 
 func (m *HostManager) validateSharedMounts() error {
-	if strings.TrimSpace(m.cfg.SharedDataSource) != "" {
-		return fmt.Errorf("workspace.data_source is unsupported")
-	}
-	sourceProjectionPath, err := validateSourceProjection(m.cfg.SourceProjection, m.cfg.BundleHash)
+	root, err := validateHostMountAdmission(m.cfg)
 	if err != nil {
 		return err
 	}
-	root, err := m.hostRoot()
+	sourceProjectionPath, err := validateSourceProjection(m.cfg.SourceProjection, m.cfg.BundleHash)
 	if err != nil {
 		return err
 	}

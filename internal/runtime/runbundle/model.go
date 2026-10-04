@@ -10,6 +10,10 @@ import (
 // non-standing active-run projection used by startup and admission owners.
 type AvailabilityStore interface {
 	LoadRunBundleAvailability(context.Context, string) (Availability, error)
+	ActiveAvailabilityReader
+}
+
+type ActiveAvailabilityReader interface {
 	ActiveNonStandingRunBundleAvailabilities(context.Context) ([]Availability, error)
 }
 

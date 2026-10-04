@@ -47,7 +47,7 @@ func TestScaffoldAdmittedArchetypesAndTeachNextCommands(t *testing.T) {
 					t.Fatalf("scaffold retains redundant %s wrapper: %v", wrapper, err)
 				}
 			}
-			for _, command := range []string{"swarm verify", "swarm serve", "swarm test"} {
+			for _, command := range []string{"swarm verify . --portable", "swarm serve", "swarm test"} {
 				if !strings.Contains(out.String(), command) {
 					t.Fatalf("output %q does not teach %s", out.String(), command)
 				}

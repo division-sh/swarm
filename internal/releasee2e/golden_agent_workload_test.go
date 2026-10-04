@@ -7,8 +7,10 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -107,8 +109,29 @@ func TestGoldenSQLitePossessionServeJourney(t *testing.T) {
 	env := goldenProcessEnv(t, root, "", 0)
 	assertGoldenProcessHasNoExternalExecutables(t, env)
 
-	verify := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binaryPath,
+	// Fresh-store creation belongs to startup, never a read-only verifier.
+	refused := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binaryPath,
 		"verify", contracts, "--config", configPath, "--json")
+	var incomplete struct {
+		OK                bool   `json:"ok"`
+		ValidationScope   string `json:"validation_scope"`
+		AdmissionComplete bool   `json:"admission_complete"`
+		LiveReadiness     string `json:"live_readiness"`
+	}
+	var exit *exec.ExitError
+	if err := json.Unmarshal([]byte(refused.output), &incomplete); !errors.As(refused.err, &exit) || exit.ExitCode() != 3 || err != nil || incomplete.OK ||
+		incomplete.ValidationScope != "deployment" || incomplete.AdmissionComplete || incomplete.LiveReadiness != "not_evaluated" ||
+		!strings.Contains(refused.output, "selected_store_access") {
+		t.Fatalf("fresh-store default admission: command=%v decode=%v\n%s", refused.err, err, refused.output)
+	}
+	for _, path := range []string{store.inspectionSQLitePath, store.inspectionSQLitePath + ".possession"} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("default verify created fresh store state %s: %v", path, err)
+		}
+	}
+
+	verify := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binaryPath,
+		"verify", contracts, "--config", configPath, "--portable", "--json")
 	if verify.err != nil {
 		t.Fatalf("release verify failed: %v\n%s", verify.err, verify.output)
 	}
@@ -156,6 +179,10 @@ func TestGoldenSQLitePossessionServeJourney(t *testing.T) {
 			}
 			if info, err := os.Stat(test.possessionPath); err != nil || !info.Mode().IsRegular() {
 				t.Fatalf("persistent possession coordinate after teardown %s: info=%v err=%v", test.possessionPath, info, err)
+			}
+			if !test.dev {
+				assertReleaseDeploymentAdmission(t, runReleaseCommand(t, goldenStartupTimeout, root, env, "", binaryPath,
+					"verify", contracts, "--config", configPath, "--json"))
 			}
 		})
 	}
@@ -350,7 +377,7 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 			assertGoldenProcessHasNoExternalExecutables(t, env)
 
 			contracts := filepath.Join(test.root, "contracts")
-			verify := runReleaseCommand(t, goldenStartupTimeout, test.root, env, "", binaryPath, "verify", contracts, "--json")
+			verify := runReleaseCommand(t, goldenStartupTimeout, test.root, env, "", binaryPath, "verify", contracts, "--portable", "--json")
 			if verify.err != nil {
 				t.Fatalf("relative invocation-root verify failed: %v\n%s", verify.err, verify.output)
 			}
@@ -613,7 +640,7 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 	writeReleaseFile(t, tokenFile, goldenAPIToken+"\n")
 	env := goldenProcessEnv(t, root, store.passwordEnv, options.processGOMAXPROCS)
 	assertGoldenProcessHasNoExternalExecutables(t, env)
-	verify := runReleaseCommand(t, goldenStartupTimeout, projectRoot, env, "", binaryPath, "verify", contractsOperand, "--config", configOperand, "--json")
+	verify := runReleaseCommand(t, goldenStartupTimeout, projectRoot, env, "", binaryPath, "verify", contractsOperand, "--config", configOperand, "--portable", "--json")
 	if verify.err != nil {
 		t.Fatalf("golden release verify failed: %v\n%s", verify.err, verify.output)
 	}

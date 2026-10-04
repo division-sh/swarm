@@ -2,6 +2,8 @@ package llm
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -37,6 +39,49 @@ func TestProviderCredentialResolver_StoreWinsOverEnvForActiveProfiles(t *testing
 				t.Fatalf("credential env diagnostics = present:%v shadowed:%v, want true/true", credential.EnvPresent, credential.EnvShadowed)
 			}
 		})
+	}
+}
+
+func TestProviderCredentialResolverMissingPortIsUnavailableNotMissingSecret(t *testing.T) {
+	profile, err := llmselection.ResolveActiveBackend(llmselection.BackendClaudeCLI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := NewProviderCredentialResolver(nil)
+	for _, operation := range []func(context.Context, llmselection.Profile) (ProviderCredential, error){resolver.Resolve, resolver.Inspect} {
+		_, err := operation(context.Background(), profile)
+		failure, ok := runtimefailures.As(err)
+		if !ok || failure.Failure.Class != runtimefailures.ClassDependencyUnavailable || IsMissingProviderCredential(err) {
+			t.Fatalf("missing read port was treated as empty credentials: %v", err)
+		}
+	}
+}
+
+type failedProviderCredentialStore struct {
+	runtimecredentials.Store
+	cause error
+}
+
+func (s failedProviderCredentialStore) Get(context.Context, string) (string, bool, error) {
+	return "", false, s.cause
+}
+
+func TestProviderCredentialResolverReadFailurePreservesCauseWithoutSecretDisclosure(t *testing.T) {
+	profile, err := llmselection.ResolveActiveBackend(llmselection.BackendAnthropic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cause := errors.New("untrusted credential reader: secret-token-value")
+	resolver := NewProviderCredentialResolver(failedProviderCredentialStore{cause: cause})
+	for _, operation := range []func(context.Context, llmselection.Profile) (ProviderCredential, error){resolver.Resolve, resolver.Inspect} {
+		_, err := operation(context.Background(), profile)
+		if !errors.Is(err, cause) || strings.Contains(err.Error(), "secret-token-value") {
+			t.Fatalf("read failure lost causal identity or exposed secret: %v", err)
+		}
+		failure, ok := runtimefailures.As(err)
+		if !ok || failure.Failure.Class != runtimefailures.ClassDependencyUnavailable {
+			t.Fatalf("read failure lacks dependency classification: %v", err)
+		}
 	}
 }
 

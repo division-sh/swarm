@@ -464,6 +464,7 @@ func proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t *testing.T, fixt
 	}
 	recovery := fixture.store.(interface {
 		ListSelectedForkRecoveryEntries(context.Context) ([]runfork.SelectedForkRecoveryEntry, error)
+		InspectSelectedForkRecovery(context.Context, runfork.SelectedForkRecoveryEntry) (runfork.SelectedForkRecoveryInspection, error)
 		RecoverSelectedFork(context.Context, runcontrol.SelectedForkRecoveryRequest) (runfork.SelectedForkRecoveryResult, error)
 	})
 	entries, err := recovery.ListSelectedForkRecoveryEntries(ctx)
@@ -472,6 +473,13 @@ func proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t *testing.T, fixt
 	}
 	recoveryRequest := runcontrol.SelectedForkRecoveryRequest{Entry: entries[0], Process: process, Effects: liveExternalEffectRecoveryRequest(time.Now().UTC())}
 	beforeRecovery := snapshotForkHistoricalExecutionTables(t, fixture.db, !fixture.sqlite)
+	inspection, err := recovery.InspectSelectedForkRecovery(ctx, entries[0])
+	if err != nil || inspection.ExecutionState != "running" || inspection.Plan.Disposition != runfork.SelectedForkRecoveryFailed || inspection.Plan.Effects != (runtimeeffects.RecoverySummary{}) {
+		t.Fatalf("read-only recovery admission: %+v %v", inspection, err)
+	}
+	if !reflect.DeepEqual(beforeRecovery, snapshotForkHistoricalExecutionTables(t, fixture.db, !fixture.sqlite)) {
+		t.Fatal("read-only recovery admission settled or fenced retained evidence")
+	}
 	assertRecoveryRolledBack := func() {
 		t.Helper()
 		after := snapshotForkHistoricalExecutionTables(t, fixture.db, !fixture.sqlite)
@@ -521,6 +529,9 @@ func proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t *testing.T, fixt
 			t.Fatal(err)
 		}
 		before := snapshotForkHistoricalExecutionTables(t, fixture.db, !fixture.sqlite)
+		if _, err := recovery.InspectSelectedForkRecovery(ctx, entries[0]); err == nil {
+			t.Fatalf("inspection accepted corrupt %s", column)
+		}
 		if _, err := recovery.RecoverSelectedFork(ctx, recoveryRequest); err == nil {
 			t.Fatalf("recovery accepted corrupt %s", column)
 		}
@@ -592,6 +603,50 @@ func proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t *testing.T, fixt
 	var repeatedFence int64
 	if err := fixture.db.QueryRowContext(ctx, `SELECT fence_generation FROM run_fork_selected_contract_runtime_executions WHERE execution_id=$1`, issued.ExecutionID).Scan(&repeatedFence); err != nil || repeatedFence != fence {
 		t.Fatalf("repeat recovery mutated fence: %d -> %d %v", fence, repeatedFence, err)
+	}
+}
+
+func TestSelectedForkRecoveryInspectionWithoutProcessAcquisitionBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			var fixture selectedCompletionFixture
+			if backend == "sqlite" {
+				s := newBootstrappedSQLiteRuntimeStoreForTest(t)
+				fixture = newSelectedCompletionFixture(t, s, s.backend.ConstructionHandle(), true)
+			} else {
+				_, db, _ := testutil.StartPostgres(t)
+				fixture = newSelectedCompletionFixture(t, admitTestPostgresStore(t, db), db, false)
+			}
+			ctx := testAuthorActivityContext()
+			issued, err := fixture.store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := fixture.process.Release(ctx); err != nil {
+				t.Fatal(err)
+			}
+			reader := fixture.store.(interface {
+				ListSelectedForkRecoveryEntries(context.Context) ([]runfork.SelectedForkRecoveryEntry, error)
+				InspectSelectedForkRecovery(context.Context, runfork.SelectedForkRecoveryEntry) (runfork.SelectedForkRecoveryInspection, error)
+			})
+			entries, err := reader.ListSelectedForkRecoveryEntries(ctx)
+			if err != nil || len(entries) != 1 {
+				t.Fatalf("retained entries: %+v %v", entries, err)
+			}
+			before := snapshotForkHistoricalExecutionTables(t, fixture.db, !fixture.sqlite)
+			inspection, err := reader.InspectSelectedForkRecovery(ctx, entries[0])
+			if err != nil || inspection.Plan.ExecutionID != issued.ExecutionID || inspection.ExecutionState != "prepared" || inspection.Plan.Disposition != runfork.SelectedForkRecoveryFailed {
+				t.Fatalf("released predecessor inspection: %+v %v", inspection, err)
+			}
+			cancelled, cancel := context.WithCancel(ctx)
+			cancel()
+			if _, err := reader.InspectSelectedForkRecovery(cancelled, entries[0]); !errors.Is(err, context.Canceled) {
+				t.Fatalf("cancelled inspection: %v", err)
+			}
+			if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, fixture.db, !fixture.sqlite)) {
+				t.Fatal("inspection acquired authority or mutated selected execution")
+			}
+		})
 	}
 }
 

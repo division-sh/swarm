@@ -5,16 +5,22 @@ import (
 	"database/sql"
 	"fmt"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
+	"github.com/lib/pq"
 )
 
 // Backend is the private owner of a PostgreSQL pool. Only store-private
 // persistence adapters may retain it; public selected-store facades expose
 // closed semantic operations instead.
 type Backend struct {
-	db               *sql.DB
-	testTransactions transactiontest.Slot
+	db                 *sql.DB
+	inspectionConfig   *pq.Config
+	inspectionDialer   *observationDialer
+	inspectionIOActive atomic.Bool
+	testTransactions   transactiontest.Slot
 
 	capacityMu           sync.Mutex
 	baseOpenConnections  int
@@ -91,6 +97,18 @@ func New(db *sql.DB) (*Backend, error) {
 	return &Backend{db: db}, nil
 }
 
+// NewWithInspectionConfig freezes the same native configuration used by the
+// selected pool. A possession observation never borrows its runtime session.
+func NewWithInspectionConfig(db *sql.DB, cfg pq.Config) (*Backend, error) {
+	b, err := New(db)
+	if err != nil {
+		return nil, err
+	}
+	frozen := cfg.Clone()
+	b.inspectionConfig = &frozen
+	return b, nil
+}
+
 func (b *Backend) Valid() bool {
 	return b != nil && b.db != nil
 }
@@ -99,12 +117,24 @@ func (b *Backend) Ping(ctx context.Context) error {
 	if !b.Valid() {
 		return fmt.Errorf("postgres backend is required")
 	}
+	if b.inspectionDialer != nil {
+		return b.withInspectionIO(ctx, func(native context.Context, _ func() error) error {
+			return b.db.PingContext(native)
+		})
+	}
 	return b.db.PingContext(ctx)
 }
 
 func (b *Backend) Close() error {
 	if !b.Valid() {
 		return nil
+	}
+	if b.inspectionDialer != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return b.withInspectionIO(ctx, func(context.Context, func() error) error {
+			return b.db.Close()
+		})
 	}
 	return b.db.Close()
 }
@@ -119,6 +149,9 @@ func (b *Backend) ConstructionHandle() *sql.DB {
 }
 
 func (b *Backend) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
+	if err := b.refuseInspectionMutation(ctx); err != nil {
+		return nil, err
+	}
 	if !b.Valid() {
 		return nil, fmt.Errorf("postgres backend is required")
 	}
@@ -126,6 +159,9 @@ func (b *Backend) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, er
 }
 
 func (b *Backend) Conn(ctx context.Context) (*sql.Conn, error) {
+	if err := b.refuseInspectionMutation(ctx); err != nil {
+		return nil, err
+	}
 	if !b.Valid() {
 		return nil, fmt.Errorf("postgres backend is required")
 	}
@@ -133,6 +169,9 @@ func (b *Backend) Conn(ctx context.Context) (*sql.Conn, error) {
 }
 
 func (b *Backend) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	if err := b.refuseInspectionMutation(ctx); err != nil {
+		return nil, err
+	}
 	if !b.Valid() {
 		return nil, fmt.Errorf("postgres backend is required")
 	}
@@ -147,6 +186,11 @@ func (b *Backend) Exec(query string, args ...any) (sql.Result, error) {
 }
 
 func (b *Backend) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	if tx, err := b.inspectionTransaction(ctx); err != nil {
+		return nil, err
+	} else if tx != nil {
+		return tx.QueryContext(b.inspectionSQLContext(ctx), query, args...)
+	}
 	if !b.Valid() {
 		return nil, fmt.Errorf("postgres backend is required")
 	}
@@ -161,6 +205,11 @@ func (b *Backend) Query(query string, args ...any) (*sql.Rows, error) {
 }
 
 func (b *Backend) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	if tx, err := b.inspectionTransaction(ctx); err != nil {
+		return invalidRow(err.Error())
+	} else if tx != nil {
+		return tx.QueryRowContext(b.inspectionSQLContext(ctx), query, args...)
+	}
 	if !b.Valid() {
 		return invalidRow("postgres backend is required")
 	}

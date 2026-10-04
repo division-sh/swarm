@@ -33,7 +33,7 @@ func TestVerifyCommandLoadsFlowRelativeMockModuleStandaloneAndNested(t *testing.
 			var stdout bytes.Buffer
 			var stderr bytes.Buffer
 			code := executeRootCommand(context.Background(), RepoRoot(), []string{
-				"verify", sourceRoot, "--config", config,
+				"verify", sourceRoot, "--portable", "--config", config,
 			}, &stdout, &stderr)
 			if code != 0 {
 				t.Fatalf("verify %s code=%d stdout=%s stderr=%s", sourceRoot, code, stdout.String(), stderr.String())

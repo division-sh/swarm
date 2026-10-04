@@ -72,7 +72,7 @@ func (p *PreparedSelectedForkProviderCatalog) ValidateActors(blueprints []manage
 		if !ok || err != nil || revision != target.revision {
 			return fmt.Errorf("prepared provider catalog actor configuration changed")
 		}
-		prompt, err := preparedProviderPrompt(blueprint.Config)
+		prompt, err := ManagedProviderStartupPrompt(blueprint.Config)
 		if err != nil || prompt != target.prompt {
 			return fmt.Errorf("prepared provider catalog actor prompt changed")
 		}
@@ -141,7 +141,7 @@ func PrepareSelectedForkProviderCatalog(ctx context.Context, runtimes *llm.Agent
 		if err != nil {
 			return nil, err
 		}
-		prompt, err := preparedProviderPrompt(resolved.Actor)
+		prompt, err := ManagedProviderStartupPrompt(resolved.Actor)
 		if err != nil {
 			return nil, err
 		}
@@ -154,6 +154,13 @@ func PrepareSelectedForkProviderCatalog(ctx context.Context, runtimes *llm.Agent
 			return clonePreparedProviderTools(definitions, capabilities)
 		}()
 		if err != nil {
+			return nil, err
+		}
+		contract, err := llm.RequireProviderContractForProfile(resolved.Selection.Profile, resolved.Runtime)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := llm.CompileManagedCapabilityAdmission(resolved.Actor, contract, frozenTools, frozenCapabilities); err != nil {
 			return nil, err
 		}
 		plannedTools := make([]definition, len(frozenTools))
@@ -183,7 +190,9 @@ func PrepareSelectedForkProviderCatalog(ctx context.Context, runtimes *llm.Agent
 	return catalog, nil
 }
 
-func preparedProviderPrompt(actor actors.AgentConfig) (string, error) {
+// ManagedProviderStartupPrompt consumes the canonical immutable prompt value.
+// It renders input only: no provider, turn, grant or persistence is involved.
+func ManagedProviderStartupPrompt(actor actors.AgentConfig) (string, error) {
 	prompt, err := actor.ProviderPrompt(agentintent.RuntimeEnvironmentContext())
 	if err != nil {
 		return "", err
