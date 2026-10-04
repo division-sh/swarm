@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startuprecovery"
 	"github.com/division-sh/swarm/internal/store"
+	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 )
 
@@ -22,6 +23,17 @@ func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourc
 	subject := "project:" + repo
 	var selected *storeselected.AdmissionInspection
 	var schemaRequest store.SchemaBootstrapRequest
+	storeBudget := verifyLocalDeadline
+	defer func() {
+		if selected == nil {
+			return
+		}
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), verifyCleanupDeadline)
+		defer cancel()
+		verifyDeploymentObservation(cleanup, result, "selected_store_cleanup", "internal/store/selected.AdmissionInspection.Close", subject, failures.ClassDependencyUnavailable, func(context.Context) error {
+			return selected.Close()
+		})
+	}()
 	opened := verifyDeploymentObservation(ctx, result, "selected_store_access", "internal/store/selected.OpenAdmissionInspection", subject, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
 		root, err := NewInvocationRoot(repo)
 		if err != nil {
@@ -53,29 +65,30 @@ func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourc
 		if err != nil {
 			return err
 		}
-		selected, err = storeselected.OpenAdmissionInspection(ctx, request)
+		if request.Selection.Backend == storebackend.BackendPostgres {
+			storeBudget = verifyRemoteDeadline
+		}
+		bounded, cancel := context.WithTimeout(ctx, storeBudget)
+		defer cancel()
+		selected, err = storeselected.OpenAdmissionInspection(bounded, request)
+		if bounded.Err() != nil {
+			return bounded.Err()
+		}
 		return err
 	})
 	if !opened {
 		blockVerifyStoreTail(result, subject, "selected store access did not complete")
 		return
 	}
-	defer func() {
-		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), verifyCleanupDeadline)
-		defer cancel()
-		verifyDeploymentObservation(cleanup, result, "selected_store_cleanup", "internal/store/selected.AdmissionInspection.Close", subject, failures.ClassDependencyUnavailable, func(context.Context) error {
-			return selected.Close()
-		})
-	}()
 	tailAccounted := false
-	verifyDeploymentObservation(ctx, result, "selected_store_schema", "internal/store/selected.AdmissionInspection.Inspect", subject, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
+	verifyDeploymentBoundedObservation(ctx, storeBudget, result, "selected_store_schema", "internal/store/selected.AdmissionInspection.Inspect", subject, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
 		_, err := selected.Inspect(ctx, schemaRequest, func(snapshot *storeselected.AdmissionSnapshot) error {
 			fresh, err := snapshot.RequiresSchemaPreparation()
 			if err != nil {
 				return err
 			}
 			if fresh {
-				blockVerifyStoreTail(result, subject, "selected store requires schema preparation before domain inspection")
+				accountVerifyStoreTail(result, subject, "canonical schema inspection proves the fresh store has no retained platform state", true)
 				tailAccounted = true
 				result.BootReport.ExecutionObligations = append(result.BootReport.ExecutionObligations, bootverify.AdmissionExecutionObligation{
 					ID: "store_schema_preparation", Owner: "internal/store.SchemaBootstrapper.BootstrapSchema", Subject: subject,
@@ -149,6 +162,10 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 }
 
 func blockVerifyStoreTail(result *runtime.WorkflowContractValidationResult, subject, reason string) {
+	accountVerifyStoreTail(result, subject, reason, false)
+}
+
+func accountVerifyStoreTail(result *runtime.WorkflowContractValidationResult, subject, reason string, fresh bool) {
 	for _, blocked := range []struct{ id, owner string }{
 		{"pinned_source_admission", "internal/runtime/runbundle.AdmitPinnedSources"},
 		{"retained_source_integrity", "internal/runtime/startuprecovery.Inspect"},
@@ -159,9 +176,18 @@ func blockVerifyStoreTail(result *runtime.WorkflowContractValidationResult, subj
 		{"selected_fork_recovery_admission", "internal/runtime/runforkexecution"},
 		{"retained_actor_admission", "internal/runtime/manager"},
 	} {
-		result.BootReport.Observations = append(result.BootReport.Observations, bootverify.AdmissionObservation{
+		observation := bootverify.AdmissionObservation{
 			CheckID: blocked.id, Owner: blocked.owner, Subject: subject, Class: bootverify.AdmissionDeploymentObservation,
 			Status: bootverify.AdmissionNotRun, Reason: reason, Dependencies: []string{"selected_store_access"},
-		})
+		}
+		if fresh {
+			observation.Dependencies = []string{"selected_store_schema"}
+			if blocked.id == "startup_process_possession" {
+				observation.Reason = "fresh schema does not prove that process possession is available"
+			} else {
+				observation.Status = bootverify.AdmissionNotApplicable
+			}
+		}
+		result.BootReport.Observations = append(result.BootReport.Observations, observation)
 	}
 }
