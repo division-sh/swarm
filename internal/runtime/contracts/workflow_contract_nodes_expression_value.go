@@ -45,6 +45,9 @@ func projectNodeScalarExpression(value yamlsource.Value, owner string, predicate
 	if predicate && quoted {
 		return "", nodeValueError(value, fmt.Errorf("expression slot %s expects a boolean expression; remove YAML quotes", owner))
 	}
+	if predicate && strings.EqualFold(strings.TrimSpace(scalar.Value), "else") {
+		return "", nodeValueError(value, fmt.Errorf("expression slot %s must be a CEL predicate, not the internal default marker else", owner))
+	}
 	if !quoted && value.Presence() == yamlsource.PresenceNull {
 		return "", nodeValueError(value, fmt.Errorf("expression slot %s must not be null", owner))
 	}

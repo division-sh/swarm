@@ -101,9 +101,9 @@ func deriveSchemaProvenance(out *FlowSchemaDocument) {
 	}
 	for _, stage := range out.StageDeclarations.Entries {
 		for i := range stage.Timers {
-			path := nodeProvenanceMapPath("stages", stage.ID) + fmt.Sprintf(".timers[%d]", i)
+			path := NodeProvenanceMapPath("stages", stage.ID) + fmt.Sprintf(".timers[%d]", i)
 			if _, authored := out.admissionProvenance[path+".id"]; !authored {
-				inputs := []string{nodeProvenanceMapPath("stages", stage.ID)}
+				inputs := []string{NodeProvenanceMapPath("stages", stage.ID)}
 				for _, key := range []string{"emit", "advances_to"} {
 					if _, present := out.admissionProvenance[path+"."+key]; present {
 						inputs = append(inputs, path+"."+key)

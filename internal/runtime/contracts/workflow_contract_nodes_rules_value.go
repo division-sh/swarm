@@ -151,9 +151,6 @@ func projectNodeRuleEntryValue(value yamlsource.Value, context handlerRuleDecode
 			return HandlerRuleEntry{}, err
 		}
 		out.Condition = strings.TrimSpace(out.Condition)
-		if strings.EqualFold(out.Condition, "else") {
-			return HandlerRuleEntry{}, nodeValueError(condition, fmt.Errorf("expression slot on_complete.condition expects a boolean expression; omit condition for an unconditional completion"))
-		}
 	}
 	for _, entry := range []struct {
 		key     string
@@ -175,6 +172,10 @@ func projectNodeRuleEntryValue(value yamlsource.Value, context handlerRuleDecode
 		}
 	}
 	if err := projectNodeRulePolicyValue(value, fields, context, &out); err != nil {
+		return HandlerRuleEntry{}, err
+	}
+	out.admissionProvenance = make(map[string]EffectiveValueProvenance)
+	if err := collectNodeValueProvenance(value, "", out.admissionProvenance, nil); err != nil {
 		return HandlerRuleEntry{}, err
 	}
 	return out, nil
@@ -199,9 +200,6 @@ func projectNodeRulePolicyValue(value yamlsource.Value, fields map[string]yamlso
 		when, err := projectNodeScalarExpression(fields["when"], "rule.when", true)
 		if err != nil {
 			return err
-		}
-		if strings.EqualFold(strings.TrimSpace(when), "else") {
-			return nodeValueError(fields["when"], fmt.Errorf("POLICY-SHEET-ROW: when must be a CEL predicate; use else: true"))
 		}
 		out.Condition = strings.TrimSpace(when)
 		out.PolicyRow = PolicySheetRowMetadata{Kind: PolicySheetRowKindWhen}
