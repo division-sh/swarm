@@ -385,7 +385,7 @@ func writeProviderAliasAuthorityFixture(t *testing.T, scenario providerAliasScen
 		if name != "inbound.telegram" {
 			imports += "    - {provider: telegram, event: " + name + "}\n"
 		}
-		nodes += "    " + name + ":\n      guard: {id: admit, check: 'true'}\n"
+		nodes += "    " + name + ":\n      guard: {id: admit, check: true}\n"
 	}
 	pins := "pins:\n  inputs: [" + strings.Join(names, ", ") + "]\n"
 	rootSchema := "name: provider-authority\n" + imports + "pins:\n  inputs: [" + strings.Join(names[1:], ", ") + "]\nconnect:\n"
@@ -396,7 +396,7 @@ func writeProviderAliasAuthorityFixture(t *testing.T, scenario providerAliasScen
 		}
 	}
 	rootNodes := strings.Replace(nodes, "subscribes_to: ["+strings.Join(names, ", ")+"]", "subscribes_to: ["+strings.Join(names[1:], ", ")+"]", 1)
-	rootNodes = strings.Replace(rootNodes, "    inbound.telegram:\n      guard: {id: admit, check: 'true'}\n", "", 1)
+	rootNodes = strings.Replace(rootNodes, "    inbound.telegram:\n      guard: {id: admit, check: true}\n", "", 1)
 	connectedNames := names[1:]
 	if scenario.rawConnected {
 		connectedNames = names
@@ -431,7 +431,7 @@ func writeProviderAliasAuthorityFixture(t *testing.T, scenario providerAliasScen
 		}
 		receiverNodes := "observer:\n  execution_type: system_node\n  subscribes_to: [" + strings.Join(connectedNames, ", ") + "]\n  event_handlers:\n"
 		for _, name := range connectedNames {
-			receiverNodes += "    " + name + ":\n      guard: {id: admit, check: 'true'}\n"
+			receiverNodes += "    " + name + ":\n      guard: {id: admit, check: true}\n"
 		}
 		if hasReceiver {
 			files[alias+"-receiver/nodes.yaml"] = receiverNodes

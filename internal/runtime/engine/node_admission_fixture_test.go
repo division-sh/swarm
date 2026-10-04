@@ -36,7 +36,7 @@ func loadNodeHandlerFixture(raw string) (runtimecontracts.SystemNodeEventHandler
 // Struct-based executor fixtures borrow only the admitted authored marker. Their
 // exact node/event/context identity is still qualified by the canonical owner.
 var admittedFixtureRule = sync.OnceValues(func() (runtimecontracts.HandlerRuleEntry, error) {
-	handler, err := loadNodeHandlerFixture("on_complete:\n  - {}\n")
+	handler, err := loadNodeHandlerFixture("on_complete:\n  - id: fixture_rule\n")
 	if err != nil {
 		return runtimecontracts.HandlerRuleEntry{}, err
 	}

@@ -36,7 +36,7 @@ func TestRetiredHandlerActionOptionsRejected(t *testing.T) {
 		{"rules_singleton", "rules: {else: true, %s: %s}\n"},
 		{"rules_lone_field", "rules: {%s: %s}\n"},
 		{"rules_keyed", "rules: {chosen: {else: true, %s: %s}}\n"},
-		{"completion", "on_complete: [{condition: 'true', %s: %s}]\n"},
+		{"completion", "on_complete: [{condition: true, %s: %s}]\n"},
 		{"success", "on_success: {%s: %s}\n"},
 		{"join", "join: {%s: %s}\n"},
 		{"join_completion", "join: {stage: waiting, members: {from: state.ids, by: payload.id}, output: payload.result, on_complete: {%s: %s}}\n"},

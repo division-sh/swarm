@@ -1787,6 +1787,63 @@
     ]
   },
   {
+    "file": "internal/runtime/bus/root_subscription_authority_test.go",
+    "before_hash": "008768271c0f14bdc4a17e0367b12b8a96ac7ecfe704c38b473fc012c2c50374",
+    "after_hash": "1a98f64bfebc06a530a685901dfa068d409bcc956ba649d6371482a04d982c63",
+    "edits": [
+      {
+        "start": 29,
+        "remove": [
+          "\t\t\t\t\tnode := \"observer:\\n  execution_type: system_node\\n  subscribes_to: [thing.created]\\n  event_handlers:\\n    thing.created:\\n      guard: {id: admit, check: 'true'}\\n\""
+        ],
+        "add": [
+          "\t\t\t\t\tnode := \"observer:\\n  execution_type: system_node\\n  subscribes_to: [thing.created]\\n  event_handlers:\\n    thing.created:\\n      guard: {id: admit, check: true}\\n\""
+        ]
+      }
+    ],
+    "slots": [
+      "reviewed generator, partial replacement anchors and typed/negative oracles migrate together; no data-file grammar change"
+    ]
+  },
+  {
+    "file": "internal/runtime/bus/root_subscription_verify_test.go",
+    "before_hash": "9bf5d5085418ab3539bb9f1d15f53b7135d56a6f7be5f26af88f97d04774b17e",
+    "after_hash": "883bfcf55ff910e6f6df3047131b0277e61267486311969378e9603dab94ee3f",
+    "edits": [
+      {
+        "start": 29,
+        "remove": [
+          "\t\t\t\t\t\"child/nodes.yaml\":  \"observer:\\n  execution_type: system_node\\n  subscribes_to: [thing.created]\\n  event_handlers:\\n    thing.created:\\n      guard: {id: admit, check: 'true'}\\n\","
+        ],
+        "add": [
+          "\t\t\t\t\t\"child/nodes.yaml\":  \"observer:\\n  execution_type: system_node\\n  subscribes_to: [thing.created]\\n  event_handlers:\\n    thing.created:\\n      guard: {id: admit, check: true}\\n\","
+        ]
+      }
+    ],
+    "slots": [
+      "reviewed generator, partial replacement anchors and typed/negative oracles migrate together; no data-file grammar change"
+    ]
+  },
+  {
+    "file": "internal/runtime/cataloge2e/local_readiness_source_test.go",
+    "before_hash": "31fcc02e6edd64a2b4423f20d141bb53b4d15cea1d7d03c9740ef0e2bc769069",
+    "after_hash": "37fcae4d65b62a887eed43577f8a1873afc4686187ff13649cc257532f83db9d",
+    "edits": [
+      {
+        "start": 197,
+        "remove": [
+          "\t\t\"nodes.yaml\":              \"\\nprepare:\\n  execution_type: system_node\\n  subscribes_to: [source.prepare]\\n  event_handlers:\\n    source.prepare:\\n      guard: {id: admitted, check: 'true'}\\n\","
+        ],
+        "add": [
+          "\t\t\"nodes.yaml\":              \"\\nprepare:\\n  execution_type: system_node\\n  subscribes_to: [source.prepare]\\n  event_handlers:\\n    source.prepare:\\n      guard: {id: admitted, check: true}\\n\","
+        ]
+      }
+    ],
+    "slots": [
+      "reviewed generator, partial replacement anchors and typed/negative oracles migrate together; no data-file grammar change"
+    ]
+  },
+  {
     "file": "internal/runtime/cataloge2e/testdata/scatter-gather-safety/nodes.yaml",
     "before_hash": "de35e6f34a1e81d0ef7c7d58d988cd9c41521da8b773603c8749e95e5506d937",
     "after_hash": "9c689d2a6e5576d8eb8aaaa9e699f01803ed35e32d224437d9d16e42f11a68f1",
@@ -1860,6 +1917,34 @@
       "worker.event_handlers.item.finished.emit.fields.item_id: unwrap typed expression",
       "worker.event_handlers.item.finished.emit.fields.batch_id: unwrap typed expression",
       "worker.event_handlers.item.finished.emit.fields.value: unwrap typed expression"
+    ]
+  },
+  {
+    "file": "internal/runtime/cataloge2e/testdata/terminal-retirement/inspect-loop-activity-node.yaml",
+    "before_hash": "7d5503b32ecc675081c02a409d20bb9a05922287e01cc6582e8a75471edd8f0f",
+    "after_hash": "f76c77a40bff950875b51d6387dcc039bb97718faa103beb5691c3e5f26e18e8",
+    "edits": [
+      {
+        "start": 9,
+        "remove": [
+          "        fields: {revision_id: \"${loop.revision_id}\"}"
+        ],
+        "add": [
+          "        fields: {revision_id: loop.revision_id}"
+        ]
+      },
+      {
+        "start": 37,
+        "remove": [
+          "        fields: {revision_id: \"${loop.revision_id}\"}"
+        ],
+        "add": [
+          "        fields: {revision_id: loop.revision_id}"
+        ]
+      }
+    ],
+    "slots": [
+      "contract source fragment copied to worker-flow/nodes.yaml: both loop revision_id emit fields are typed references, not fixture data"
     ]
   },
   {
@@ -2044,8 +2129,17 @@
   {
     "file": "internal/runtime/contracts/workflow_contract_action_retirement_test.go",
     "before_hash": "1635796f5baf6c0e0cc3571f2b0da0d4f89fe6d077e3da810510282f2136c7a7",
-    "after_hash": "2b359cfae2a2359973b2d9a8d42287ad4f600f1ea1db78c289de59ec8e8f4b61",
+    "after_hash": "d286b7dbee491d7fc524df888e124507ed618c56cff48db73680db84be963e64",
     "edits": [
+      {
+        "start": 38,
+        "remove": [
+          "\t\t{\"completion\", \"on_complete: [{condition: 'true', %s: %s}]\\n\"},"
+        ],
+        "add": [
+          "\t\t{\"completion\", \"on_complete: [{condition: true, %s: %s}]\\n\"},"
+        ]
+      },
       {
         "start": 140,
         "remove": [
@@ -2763,7 +2857,7 @@
   {
     "file": "internal/runtime/engine/node_admission_fixture_test.go",
     "before_hash": "66aad52b75a1c35274570bb698b8449f6aa1cd4b056597f8f69c8d64e469c989",
-    "after_hash": "2eba1f3c16f7df2a363059dc8f1cb9fcb9b0f3730ec7d4038cf5493a665b71fb",
+    "after_hash": "3d062879ef9f4ea022b8762c989c89d309d1ce7e100457446d0c7f8956b80784",
     "edits": [
       {
         "start": 38,
@@ -2771,7 +2865,7 @@
           "\thandler, err := loadNodeHandlerFixture(\"on_complete:\\n  - condition: else\\n\")"
         ],
         "add": [
-          "\thandler, err := loadNodeHandlerFixture(\"on_complete:\\n  - {}\\n\")"
+          "\thandler, err := loadNodeHandlerFixture(\"on_complete:\\n  - id: fixture_rule\\n\")"
         ]
       }
     ],
@@ -3206,6 +3300,25 @@
         ],
         "add": [
           "\t\t\t\twrite := \"          - {target_field: marker, value: \\\"consumer-engine\\\"}\\n\""
+        ]
+      }
+    ],
+    "slots": [
+      "reviewed generator, partial replacement anchors and typed/negative oracles migrate together; no data-file grammar change"
+    ]
+  },
+  {
+    "file": "internal/runtime/pipeline/handler_committed_cleanup_test.go",
+    "before_hash": "b95599e31700af4faeb233ac1c5ab6a841bfdeab5e43779c3a812dacfb10e72e",
+    "after_hash": "90b0a941f6be2a1ea92586eb522aeca65ccb6d3fec5ddc10830bc6c1bcb53024",
+    "edits": [
+      {
+        "start": 93,
+        "remove": [
+          "\t\t\t\t\"nodes.yaml\":    \"node-a:\\n  execution_type: system_node\\n  subscribes_to: [source.evt]\\n  event_handlers:\\n    source.evt:\\n      guard: {id: reject-check, check: 'false', on_fail: reject}\\n      advances_to: done\\n\","
+        ],
+        "add": [
+          "\t\t\t\t\"nodes.yaml\":    \"node-a:\\n  execution_type: system_node\\n  subscribes_to: [source.evt]\\n  event_handlers:\\n    source.evt:\\n      guard: {id: reject-check, check: false, on_fail: reject}\\n      advances_to: done\\n\","
         ]
       }
     ],
@@ -3719,8 +3832,31 @@
   {
     "file": "internal/runtime/pipeline/workflow_guard_reachability_proof_test.go",
     "before_hash": "0bf46a0b7cbe5a9e2dd08d4f27b43357b6654ac5184318d074b80201bb60afef",
-    "after_hash": "fe5db59406b2feed804258ac469d4c48b218172e7c514d1d8b0263cfc6d2af00",
+    "after_hash": "3e8dedad8463b3115253d85746cbc64cf99b6d11ce73ec5988036d84b5d1c07a",
     "edits": [
+      {
+        "start": 20,
+        "remove": [
+          "\t\t{\"single\", \"      guard: {id: score_check, check: 'false', on_fail: kill}\\n\", []string{\"score_check\"}},",
+          "\t\t{\"first failure\", \"      guard:\\n        checks:\\n          - {id: first, check: 'false'}\\n          - {id: second, check: 'false'}\\n        on_fail: kill\\n\", []string{\"first\"}},",
+          "\t\t{\"second failure\", \"      guard:\\n        checks:\\n          - {id: first, check: 'true'}\\n          - {id: second, check: 'false'}\\n        on_fail: kill\\n\", []string{\"first\", \"second\"}},",
+          "\t\t{\"unnamed single\", \"      guard: {check: ' false ', on_fail: kill}\\n\", []string{\"false\"}},",
+          "\t\t{\"unnamed chain\", \"      guard: {checks: [{check: ' true '}, {check: ' false '}], on_fail: kill}\\n\", []string{\"true\", \"false\"}},",
+          "\t\t{\"unnamed first failure\", \"      guard: {checks: [{check: ' false '}, {check: 'true'}], on_fail: kill}\\n\", []string{\"false\"}},",
+          "\t\t{\"mixed chain\", \"      guard: {checks: [{}, {id: ' first ', check: 'true'}, {}, {check: ' false '}, {}], on_fail: kill}\\n\", []string{\"first\", \"false\"}},",
+          "\t\t{\"padded named\", \"      guard: {id: ' score_check ', check: 'false', on_fail: kill}\\n\", []string{\"score_check\"}},"
+        ],
+        "add": [
+          "\t\t{\"single\", \"      guard: {id: score_check, check: false, on_fail: kill}\\n\", []string{\"score_check\"}},",
+          "\t\t{\"first failure\", \"      guard:\\n        checks:\\n          - {id: first, check: false}\\n          - {id: second, check: false}\\n        on_fail: kill\\n\", []string{\"first\"}},",
+          "\t\t{\"second failure\", \"      guard:\\n        checks:\\n          - {id: first, check: true}\\n          - {id: second, check: false}\\n        on_fail: kill\\n\", []string{\"first\", \"second\"}},",
+          "\t\t{\"unnamed single\", \"      guard: {check:   false , on_fail: kill}\\n\", []string{\"false\"}},",
+          "\t\t{\"unnamed chain\", \"      guard: {checks: [{check:   true }, {check:   false }], on_fail: kill}\\n\", []string{\"true\", \"false\"}},",
+          "\t\t{\"unnamed first failure\", \"      guard: {checks: [{check:   false }, {check: true}], on_fail: kill}\\n\", []string{\"false\"}},",
+          "\t\t{\"mixed chain\", \"      guard: {checks: [{}, {id: ' first ', check: true}, {}, {check:   false }, {}], on_fail: kill}\\n\", []string{\"first\", \"false\"}},",
+          "\t\t{\"padded named\", \"      guard: {id: ' score_check ', check: false, on_fail: kill}\\n\", []string{\"score_check\"}},"
+        ]
+      },
       {
         "start": 40,
         "remove": [
@@ -3770,6 +3906,34 @@
     ]
   },
   {
+    "file": "internal/runtime/pipeline/workflow_transition_hydration_proof_test.go",
+    "before_hash": "c07980994d5239ac505b219b0335c2275fbb3ad9e296f952c06baa524fc11daa",
+    "after_hash": "f5e68ca63a9d3823c040f19be769aec5dc96b1065650a3cb7e2dfd8a8a2d7678",
+    "edits": [
+      {
+        "start": 27,
+        "remove": [
+          "      guard: {id: admitted-check, check: \"true\", on_fail: reject}"
+        ],
+        "add": [
+          "      guard: {id: admitted-check, check: true, on_fail: reject}"
+        ]
+      },
+      {
+        "start": 29,
+        "remove": [
+          "        - {id: unselected, when: \"false\", advances_to: waiting}"
+        ],
+        "add": [
+          "        - {id: unselected, when: false, advances_to: waiting}"
+        ]
+      }
+    ],
+    "slots": [
+      "reviewed generator, partial replacement anchors and typed/negative oracles migrate together; no data-file grammar change"
+    ]
+  },
+  {
     "file": "internal/runtime/runforkexecution/module_fork_w5_test.go",
     "before_hash": "e285c8cbee49c4347a532ec1c4e9227c817a18914473b927d8453c365ef783e2",
     "after_hash": "69532de13b0af691d14143b087771c598ffa9b8180923af8d9b1ca938068be01",
@@ -3792,7 +3956,7 @@
   {
     "file": "internal/runtime/semanticview/authored_emit_sites_test.go",
     "before_hash": "ff21fe0f5e473fda1506adb9ef329f9caf248417c1de066842ea0166faa98e4d",
-    "after_hash": "5009ecd14d861b1169bc9828d22876d615be5404a0c5113b05a906480d99f50a",
+    "after_hash": "f571a5b6522aad1f3210da09e8bbe9c16315dc630e6eff701d9cd84250697bdf",
     "edits": [
       {
         "start": 276,
@@ -3801,6 +3965,24 @@
         ],
         "add": [
           "          geography: payload.geography"
+        ]
+      },
+      {
+        "start": 293,
+        "remove": [
+          "        check: \"false\""
+        ],
+        "add": [
+          "        check: false"
+        ]
+      },
+      {
+        "start": 317,
+        "remove": [
+          "        check: \"false\""
+        ],
+        "add": [
+          "        check: false"
         ]
       },
       {
@@ -4773,7 +4955,7 @@
   {
     "file": "internal/runtime/testfixtures/canonicalrouting/fork_receiver_ownership.go",
     "before_hash": "0e3bb409f220585bdb251be302e06c3d2e0deba79ac4e40aafc0742f0409d750",
-    "after_hash": "8ccae717464660288d0f2afe5f5b39b7e06a42556b508d85cbb99fe838f415a9",
+    "after_hash": "65d7835d8c7606ea59435ab26944acba7503a5a21033c2947c2b01dfeb79f1a8",
     "edits": [
       {
         "start": 32,
@@ -4782,8 +4964,8 @@
           "\t\t\"          - {target_field: marker, value: \\\"${'consumer-owned'}\\\"}\\n          - {target_field: processed_token, value: \\\"${'seeded'}\\\"}\\n\")"
         ],
         "add": [
-          "\t\t\"          - {target_field: marker, value: 'consumer-owned'}\\n\",",
-          "\t\t\"          - {target_field: marker, value: 'consumer-owned'}\\n          - {target_field: processed_token, value: 'seeded'}\\n\")"
+          "\t\t\"          - target_field: marker\\n            value: \\\"consumer-owned\\\"\\n\",",
+          "\t\t\"          - target_field: marker\\n            value: \\\"consumer-owned\\\"\\n          - {target_field: processed_token, value: 'seeded'}\\n\")"
         ]
       },
       {
@@ -7863,6 +8045,43 @@
         ],
         "add": [
           "\t\t\twriteWorkflowValidationFixtureFile(t, path, strings.Replace(string(raw), expression, \"gem_score: int(account.gem_score)\", 1))"
+        ]
+      }
+    ],
+    "slots": [
+      "reviewed generator, partial replacement anchors and typed/negative oracles migrate together; no data-file grammar change"
+    ]
+  },
+  {
+    "file": "internal/serveapp/provider_alias_authority_test.go",
+    "before_hash": "d9669df028c9bb863788635283191fb9af8cac609e7c956f825d2c45590df867",
+    "after_hash": "dab2c1f56d951c14b3fc2119b49347141e7c849a849eecd1d79071cc65f596b0",
+    "edits": [
+      {
+        "start": 387,
+        "remove": [
+          "\t\tnodes += \"    \" + name + \":\\n      guard: {id: admit, check: 'true'}\\n\""
+        ],
+        "add": [
+          "\t\tnodes += \"    \" + name + \":\\n      guard: {id: admit, check: true}\\n\""
+        ]
+      },
+      {
+        "start": 398,
+        "remove": [
+          "\trootNodes = strings.Replace(rootNodes, \"    inbound.telegram:\\n      guard: {id: admit, check: 'true'}\\n\", \"\", 1)"
+        ],
+        "add": [
+          "\trootNodes = strings.Replace(rootNodes, \"    inbound.telegram:\\n      guard: {id: admit, check: true}\\n\", \"\", 1)"
+        ]
+      },
+      {
+        "start": 433,
+        "remove": [
+          "\t\t\treceiverNodes += \"    \" + name + \":\\n      guard: {id: admit, check: 'true'}\\n\""
+        ],
+        "add": [
+          "\t\t\treceiverNodes += \"    \" + name + \":\\n      guard: {id: admit, check: true}\\n\""
         ]
       }
     ],

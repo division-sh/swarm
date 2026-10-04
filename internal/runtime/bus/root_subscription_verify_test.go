@@ -27,7 +27,7 @@ func TestRootPinCannotSatisfyUnconnectedPrivateSourceInput(t *testing.T) {
 					"schema.yaml":       rootSchema,
 					"events.yaml":       "thing.created:\n",
 					"child/schema.yaml": "name: child\npins:\n  inputs:\n    - thing.created\n",
-					"child/nodes.yaml":  "observer:\n  execution_type: system_node\n  subscribes_to: [thing.created]\n  event_handlers:\n    thing.created:\n      guard: {id: admit, check: 'true'}\n",
+					"child/nodes.yaml":  "observer:\n  execution_type: system_node\n  subscribes_to: [thing.created]\n  event_handlers:\n    thing.created:\n      guard: {id: admit, check: true}\n",
 				} {
 					file := filepath.Join(root, path)
 					if err := os.MkdirAll(filepath.Dir(file), 0700); err != nil {

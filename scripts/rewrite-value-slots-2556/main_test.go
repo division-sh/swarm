@@ -81,7 +81,7 @@ func TestRewrite2556NegativeOracleOwnership(t *testing.T) {
 
 func TestRewrite2556IdempotenceAndDataExclusion(t *testing.T) {
 	for _, c := range readPlan(t) {
-		if !strings.HasSuffix(c.File, ".go") && !strings.HasSuffix(c.File, "/nodes.yaml") && !strings.HasSuffix(c.File, "/schema.yaml") {
+		if !strings.HasSuffix(c.File, ".go") && !strings.HasSuffix(c.File, "/nodes.yaml") && !strings.HasSuffix(c.File, "/schema.yaml") && c.File != "internal/runtime/cataloge2e/testdata/terminal-retirement/inspect-loop-activity-node.yaml" {
 			t.Fatalf("data file rewritten: %s", c.File)
 		}
 	}

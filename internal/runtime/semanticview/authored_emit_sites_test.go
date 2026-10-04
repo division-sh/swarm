@@ -291,7 +291,7 @@ func authoredEmitSiteNodeYAML(nodeID, trigger, eventType, guardEventType string)
 	if strings.TrimSpace(guardEventType) != "" {
 		guardYAML = `      guard:
         id: guard-escalate
-        check: "false"
+        check: false
         on_fail: "escalate:` + guardEventType + `"
 `
 	}
@@ -315,7 +315,7 @@ func authoredEmitSiteNodeYAMLWithGuardObject(nodeID, trigger, eventType, guardEv
     ` + trigger + `:
       guard:
         id: guard-escalate
-        check: "false"
+        check: false
         on_fail:
           escalate:
             event: ` + guardEventType + `
