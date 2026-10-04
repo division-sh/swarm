@@ -45,7 +45,8 @@ func conformance2394Fixture(t *testing.T) (Policy, []string, string) {
 		}
 		for _, decl := range file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
-			if ok && fn.Recv == nil && (strings.HasPrefix(fn.Name.Name, "Test") || strings.HasPrefix(fn.Name.Name, "Example") || strings.HasPrefix(fn.Name.Name, "Fuzz")) {
+			// TestMain owns native worker entry but is not an executable test root.
+			if ok && fn.Recv == nil && fn.Name.Name != "TestMain" && (strings.HasPrefix(fn.Name.Name, "Test") || strings.HasPrefix(fn.Name.Name, "Example") || strings.HasPrefix(fn.Name.Name, "Fuzz")) {
 				names = append(names, fn.Name.Name)
 			}
 		}
