@@ -16398,6 +16398,8 @@ platform_tables:
         delete mutable origin history only after all provider authority is terminal, while no-redispatch evidence survives.
         Successful normal-provider settlement evidence also owns the canonical parsed response required to continue the
         exact durable delivery after a crash between completion settlement and delivery settlement.
+        Each attempt freezes its own exact admitted authority; a permitted proven-unlaunched retry cannot rewrite the
+        operation's original authority or borrow that first attempt's execution owner for settlement.
       ddl: |
         CREATE TABLE runtime_external_effect_attempts (
             attempt_id         UUID PRIMARY KEY,
@@ -16411,6 +16413,7 @@ platform_tables:
             execution_owner    TEXT NOT NULL,
             lease_expires_at   TIMESTAMPTZ NOT NULL,
             fence_generation   BIGINT NOT NULL CHECK (fence_generation > 0),
+            authority_evidence JSONB NOT NULL DEFAULT '{}',
             usage_target_kind  TEXT CHECK (usage_target_kind IN ('agent_turn', 'conversation_fork_turn_completion')),
             usage_target_id    UUID,
             target_ordinal     INTEGER CHECK (target_ordinal IS NULL OR target_ordinal > 0),
@@ -39532,6 +39535,9 @@ managed_external_effect_authority:
       retirement or a newer render, but cannot borrow current activation authority, move a
       successor receipt pointer, or authorize another send/edit. A conflict rolls back all
       settlement writes; selected-fork recovery does not admit this authority.
+      The exact attempt's frozen authority is settlement authority, including after a permitted
+      prelaunch retry by a fresh execution owner. The operation's original authority remains
+      immutable history and must still match its first attempt; it is not the later attempt's authority.
       No agent, run, entity, or synthetic token is required.
     channel_native_setting: >
       A native-entry install requires the exact physical setting, generation, install operation,
@@ -39543,6 +39549,8 @@ managed_external_effect_authority:
       A retired consumer does not erase historical outcome evidence, and a changed generation
       or install operation cannot consume predecessor settlement. Selected-fork recovery
       excludes this authority; settlement grants no new provider-write or entry capability.
+      Each permitted prelaunch retry retains its own frozen authority, consumed by foreground
+      and startup settlement without changing the original operation or predecessor attempt.
     channel_action_ack: >
       A callback acknowledgment is a separate runless managed provider effect keyed by the verified inbound action
       publication. Before launch, the selected store requires the exact pending fact, current receipt/render,

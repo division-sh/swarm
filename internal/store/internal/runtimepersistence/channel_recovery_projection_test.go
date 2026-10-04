@@ -25,12 +25,12 @@ func channelRecoveryProofModes() []string {
 	var modes []string
 	for _, source := range []string{"notice", "response"} {
 		for _, operation := range []string{"send", "edit"} {
-			for _, cut := range []string{"authorized", "launched", "observed", "settled", "retired", "renderadvanced", "predecessorconflict", "authorityconflict", "evidenceconflict", "renderconflict"} {
+			for _, cut := range []string{"authorized", "launched", "observed", "settled", "retired", "renderadvanced", "predecessorconflict", "authorityconflict", "evidenceconflict", "renderconflict", "retryauthorized", "retrylaunched", "retryobserved", "retrysettled", "retryownerconflict", "retryattemptevidenceconflict", "retrymissingconflict", "retryevidenceconflict"} {
 				modes = append(modes, "recovery_"+source+"_"+operation+"_"+cut)
 			}
 		}
 	}
-	for _, cut := range []string{"authorized", "launched", "observed", "settled", "retired", "generationconflict", "installconflict", "authorityconflict", "evidenceconflict"} {
+	for _, cut := range []string{"authorized", "launched", "observed", "settled", "retired", "generationconflict", "installconflict", "authorityconflict", "evidenceconflict", "retryauthorized", "retrylaunched", "retryobserved", "retrysettled", "retryownerconflict", "retryattemptevidenceconflict", "retrymissingconflict", "retryevidenceconflict"} {
 		modes = append(modes, "recovery_native_install_"+cut)
 	}
 	return modes
@@ -119,6 +119,31 @@ func proveChannelRecoveryProjection(t *testing.T, mode string, selected selected
 	if err != nil {
 		t.Fatal(err)
 	}
+	var originalEvidence []byte
+	var originalAttemptID string
+	recovery := selected.(interface {
+		ReconcileExternalEffectAttempts(context.Context, runtimeeffects.RecoveryRequest) (runtimeeffects.RecoverySummary, error)
+	})
+	if strings.HasPrefix(cut, "retry") {
+		cut = strings.TrimPrefix(cut, "retry")
+		originalAttemptID = handle.Attempt().AttemptID
+		if err := db.QueryRowContext(ctx, `SELECT authority_evidence FROM runtime_external_effect_operations WHERE operation_id=$1`, authority.ID).Scan(&originalEvidence); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := recovery.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(time.Now().Add(time.Hour))); err != nil {
+			t.Fatal(err)
+		}
+		authority.ExecutionOwner = "admitted-retry-owner"
+		effectCtx = runtimeeffects.WithAuthority(effectCtx, authority)
+		if source == "native" {
+			handle, err = runtimeeffects.BeginChannelNativeSetting(effectCtx, []byte("install recovery"), nil)
+		} else {
+			handle, err = runtimeeffects.BeginChannelDelivery(effectCtx, []byte(authority.ID), nil)
+		}
+		if err != nil || handle.Attempt().Ordinal != 2 {
+			t.Fatalf("exact prelaunch retry was not admitted: %v", err)
+		}
+	}
 	initial, want := "authorized", "terminal_failure"
 	if cut != "authorized" {
 		if err := handle.MarkLaunched(effectCtx); err != nil {
@@ -174,6 +199,21 @@ func proveChannelRecoveryProjection(t *testing.T, mode string, selected selected
 	if cut == "authorityconflict" {
 		exec(`UPDATE runtime_external_effect_attempts SET fence_generation=fence_generation+1 WHERE attempt_id=$1`, handle.Attempt().AttemptID)
 	}
+	if cut == "ownerconflict" {
+		exec(`UPDATE runtime_external_effect_attempts SET execution_owner='unadmitted-owner' WHERE attempt_id=$1`, handle.Attempt().AttemptID)
+	}
+	if cut == "missingconflict" {
+		exec(`UPDATE runtime_external_effect_attempts SET authority_evidence='{}' WHERE attempt_id=$1`, handle.Attempt().AttemptID)
+	}
+	if cut == "attemptevidenceconflict" {
+		evidence := authority.Evidence()
+		evidence["unadmitted_attempt_authority"] = "successor"
+		raw, err := canonicaljson.Bytes(evidence)
+		if err != nil {
+			t.Fatal(err)
+		}
+		exec(`UPDATE runtime_external_effect_attempts SET authority_evidence=$1 WHERE attempt_id=$2`, string(raw), handle.Attempt().AttemptID)
+	}
 	if cut == "evidenceconflict" {
 		evidence := authority.Evidence()
 		// Unknown evidence cannot be dropped by decoding into a typed struct.
@@ -193,9 +233,6 @@ func proveChannelRecoveryProjection(t *testing.T, mode string, selected selected
 			t.Fatal(err)
 		}
 	}
-	recovery := selected.(interface {
-		ReconcileExternalEffectAttempts(context.Context, runtimeeffects.RecoveryRequest) (runtimeeffects.RecoverySummary, error)
-	})
 	_, err = recovery.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(time.Now().Add(time.Hour)))
 	conflict := strings.HasSuffix(cut, "conflict")
 	if conflict != (err != nil) {
@@ -216,6 +253,16 @@ func proveChannelRecoveryProjection(t *testing.T, mode string, selected selected
 	}
 	if attemptState != want || operationState != want {
 		t.Fatalf("journal mismatch attempt=%s operation=%s want=%s", attemptState, operationState, want)
+	}
+	if originalAttemptID != "" {
+		var after []byte
+		var originalState string
+		if err := db.QueryRowContext(ctx, `SELECT o.authority_evidence,a.state FROM runtime_external_effect_operations o JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id WHERE a.attempt_id=$1`, originalAttemptID).Scan(&after, &originalState); err != nil {
+			t.Fatal(err)
+		}
+		if cut != "evidenceconflict" && !bytes.Equal(originalEvidence, after) || originalState != "terminal_failure" {
+			t.Fatal("retry rewrote original operation or predecessor attempt evidence")
+		}
 	}
 	if cut == "observed" {
 		var raw []byte
