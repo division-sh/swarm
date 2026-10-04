@@ -197,6 +197,16 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/tools/tool_result_relay.go:writeToolResultRelayFile:filesystem_write:6":                                             ownerManagedAgent,
 	"internal/runtime/workspace/host_manager.go:ensurePrereqs:filesystem_write:1":                                                         ownerRuntimeDependency,
 	"internal/runtime/workspace/host_manager.go:ensureHostWorkspaceDir:filesystem_write:1":                                                ownerRuntimeDependency,
+	"internal/runtime/toolgateway/client.go:rpc:http_do:1":                                                                                ownerRuntimeDependency, // Internal transport; the gateway admits the actual effect.
+	"internal/runtime/workspace/fork_chat.go:ResolveForkChatWorkspace:filesystem_write:1":                                                 ownerRuntimeDependency,
+	"internal/runtime/workspace/fork_chat.go:ResolveForkChatWorkspace:filesystem_write:2":                                                 ownerRuntimeDependency,
+	"internal/runtime/workspace/worker_execution.go:RunWorker:process_launch:1":                                                           ownerRuntimeDependency, // Shared transport; model delegation is checked separately below.
+	"internal/runtime/workspace/worker_execution.go:VerifyBuiltWorker:process_launch:1":                                                   ownerOperatorInfra,
+	"internal/runtime/workspace/worker_execution.go:workerCommand:process_launch:1":                                                       ownerRuntimeDependency,
+	"internal/runtime/workspace/worker_remote_execution.go:acknowledgeDockerWorker:stdio_write:1":                                         ownerRuntimeDependency,
+	"internal/runtime/workspace/worker_remote_execution.go:observeDockerWorkerGone:process_launch:1":                                      ownerRuntimeDependency,
+	"internal/runtime/workspace/worker_remote_execution.go:runDockerWorker:process_launch:1":                                              ownerRuntimeDependency,
+	"internal/runtime/workspace/worker_remote_execution.go:runDockerWorker:process_launch:2":                                              ownerRuntimeDependency, // Shared transport; model delegation is checked separately below.
 }
 
 func TestDirectPrimitiveOwnershipManifestIsTotal(t *testing.T) {
@@ -287,6 +297,12 @@ func TestManagedEffectRegistrationsAreCompleteAndLive(t *testing.T) {
 	}
 	for primitiveKey, adapters := range primitiveAdapters {
 		owner := sourcePrimitiveOwners[primitiveKey]
+		if delegatedMockWorkerPrimitive(primitiveKey, adapters, owner) {
+			if err := verifyMockWorkerDelegation(root, primitiveKey); err != nil {
+				t.Errorf("managed worker contract %s -> %v: %v", primitiveKey, adapters, err)
+			}
+			continue
+		}
 		if owner != ownerManagedAgent && !serveRegistrationPrimitive(adapters, owner) {
 			t.Errorf("adapter contract %s -> %v does not name a live managed primitive", primitiveKey, adapters)
 			continue
