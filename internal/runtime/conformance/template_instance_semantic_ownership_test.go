@@ -48,7 +48,7 @@ func TestTemplateInstanceSemanticOwnersRemainTypedAndOpaque(t *testing.T) {
 	}
 
 	seen := map[runtimecontracts.FlowInputResolutionMode]struct{}{}
-	for _, authored := range []string{"create", "select", "select-or-create", "fan-out", "reply"} {
+	for _, authored := range []string{"create", "select", "select-or-create"} {
 		mode, err := runtimecontracts.ParseFlowInputResolutionMode(authored)
 		if err != nil || !mode.Valid() || runtimecontracts.FlowInputResolutionModeCode(mode) != authored {
 			t.Fatalf("resolution mode %q parse/round trip = %v/%v/%q", authored, mode, err, runtimecontracts.FlowInputResolutionModeCode(mode))
@@ -58,8 +58,13 @@ func TestTemplateInstanceSemanticOwnersRemainTypedAndOpaque(t *testing.T) {
 		}
 		seen[mode] = struct{}{}
 	}
-	if _, err := runtimecontracts.ParseFlowInputResolutionMode("create-or-select"); err == nil {
-		t.Fatal("unknown resolution mode was admitted")
+	if mode := runtimecontracts.FlowInputResolutionModeReply; !mode.Valid() || runtimecontracts.FlowInputResolutionModeCode(mode) != "reply" {
+		t.Fatal("derived reply resolution lost its typed variant")
+	}
+	for _, authored := range []string{"create-or-select", "fan-out", "reply"} {
+		if _, err := runtimecontracts.ParseFlowInputResolutionMode(authored); err == nil {
+			t.Fatalf("retired or unknown resolution mode %q was admitted", authored)
+		}
 	}
 }
 

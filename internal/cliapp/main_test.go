@@ -4336,13 +4336,15 @@ func TestExecutionValidation_InputPinProducerPathReturnsHardInvaliditySurface(t 
 		"Selected-root public input: not found",
 		"Admitted provider ingress: not found",
 		"Parent connect: not found",
-		"Validation-only harness input: not found",
 		"Platform source: not found",
 		"Internal topology producer: not found",
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("validateExecutionFixture error = %v, want substring %q", err, want)
 		}
+	}
+	if strings.Contains(err.Error(), "harness") {
+		t.Fatalf("missing producer diagnostic retained retired harness authority: %v", err)
 	}
 }
 

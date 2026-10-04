@@ -240,7 +240,8 @@ stages:
             fields: {result: {literal: %s}}
   approved: {terminal: true}
 pins:
-  inputs: [loop.escaped]
+      - loop.escaped
+
   outputs: [work.completed]
 connect:
   - {event: work.completed, from: ., to: final}
@@ -495,7 +496,7 @@ pins:
 	case LifecycleLoopRepeatEmits:
 		writeLifecycleLoopConnected(t, root)
 		for _, edit := range []struct{ path, old, replacement string }{
-			{"schema.yaml", "inputs: [loop.escaped]", "inputs: [loop.escaped, ordinary.repeated]"},
+			{"schema.yaml", "    - loop.escaped\n", "    - loop.escaped\n    - ordinary.repeated\n"},
 			{"schema.yaml", "    to: sink\n", "    to: sink\n  - event: ordinary.repeated\n    from: .\n    to: ordinary\n"},
 			{"events.yaml", "work.requested:\n", "ordinary.repeated:\n  token: text\n  revision_id: text\nwork.requested:\n"},
 			{"nodes.yaml", "loop: {repeat: revision, from: review}\n      advances_to: drafting", "loop: {repeat: revision, from: review}\n      advances_to: drafting\n      emit:\n        event: ordinary.repeated\n        fields: {token: {literal: ordinary}, revision_id: \"${loop.revision_id}\"}"},

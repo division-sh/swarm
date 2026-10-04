@@ -45,7 +45,7 @@ func TestConnectorGeneratedSchemaRejectsToolFromAnotherFlow(t *testing.T) {
 func TestConnectorAndProviderSchemaCompositionPreservesBindingsAndGeneration(t *testing.T) {
 	root := canonicalrouting.CopyPublicationConnector(t, "static")
 	replaceConnectorProofText(t, filepath.Join(root, "source", "schema.yaml"), "imports:\n", "imports:\n  provider_trigger_events:\n    - {provider: telegram, event: inbound.telegram.text_message}\n")
-	replaceConnectorProofText(t, filepath.Join(root, "source", "schema.yaml"), "      - activity.requested", "      - activity.requested\n      - inbound.telegram.text_message")
+	replaceConnectorProofText(t, filepath.Join(root, "source", "schema.yaml"), "    - activity.requested", "    - activity.requested\n    - inbound.telegram.text_message")
 	bundle := loadRuntimeBundleRoot(t, root)
 	projection, err := packadmission.FromBundle(bundle)
 	if err != nil {

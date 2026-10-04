@@ -34,10 +34,10 @@ func CopyReceiverAgentCollision(t testing.TB) string {
 	for _, key := range keys {
 		fmt.Fprintf(&types, "    %s: json?\n", key)
 		fmt.Fprintf(&variables, "    %s: json\n", key)
-		fmt.Fprintf(&initialize, "          %s: payload.values.%s\n", key, key)
+		fmt.Fprintf(&initialize, "        %s: payload.values.%s\n", key, key)
 	}
 	writeClosedVariantFile(t, root, "types.yaml", types.String())
-	writeClosedVariantFile(t, root, "account/schema.yaml", "name: account\ninstance: account_id\ninstance_variables:\n  variables:\n"+variables.String()+"pins:\n  inputs:\n    - event: work.ready\n        initialize:\n"+initialize.String())
+	writeClosedVariantFile(t, root, "account/schema.yaml", "name: account\ninstance: account_id\ninstance_variables:\n  variables:\n"+variables.String()+"pins:\n  inputs:\n    - event: work.ready\n      initialize:\n"+initialize.String())
 	writeClosedVariantFile(t, root, "account/agents.yaml", `observer:
   role: observer
   model: regular

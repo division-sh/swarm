@@ -728,7 +728,6 @@ func mustConcreteRoutingSource(t *testing.T, flowID, flowInstance string) events
 	return source
 }
 
-
 func TestProviderConnectUsesCanonicalRenamedIdentitySource(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
 	root := canonicalrouting.CopyProviderRollbackRenamedSource(t, true)
@@ -863,7 +862,7 @@ func TestLowerCompositionConnectRoutePlanWithLocationRejectsOtherwiseValidConnec
 	connects[0].SourceFile = ""
 	connects[0].SourceLine = 0
 
-	plan, issue := lowerCompositionConnectRoutePlanWithLocation(source, connects[0])
+	plan, issue := lowerCompositionConnectRoutePlanWithLocation(source, connects[0], semanticview.BuildAuthoredEventEndpointCensus(source))
 	if issue.Failure != ConnectFailureSourceLocationMissing || issue.AuthoredLocation != "" || plan.Readback().AuthoredLocation != "" {
 		t.Fatalf("plan = %#v issue = %#v, want source-location issue and no plan", plan, issue)
 	}
@@ -1906,7 +1905,7 @@ func TestLowerCompositionConnectRoutePlanUsesExactEventPinIdentity(t *testing.T)
 	if !ok || bundle == nil || len(bundle.CompositionConnects()) != 1 {
 		t.Fatal("compiled connect input is unavailable")
 	}
-	plan, issue := lowerCompositionConnectRoutePlanWithLocation(source, bundle.CompositionConnects()[0])
+	plan, issue := lowerCompositionConnectRoutePlanWithLocation(source, bundle.CompositionConnects()[0], semanticview.BuildAuthoredEventEndpointCensus(source))
 	if !issue.Failure.Empty() {
 		t.Fatalf("issue = %#v, want none", issue)
 	}
@@ -1954,7 +1953,7 @@ func TestLowerCompositionConnectRoutePlanWithLocationFailsClosedForInvalidInputs
 	}, nil)
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, issue := lowerCompositionConnectRoutePlanWithLocation(source, tc.connect)
+			_, issue := lowerCompositionConnectRoutePlanWithLocation(source, tc.connect, semanticview.BuildAuthoredEventEndpointCensus(source))
 			if issue.Failure != tc.want {
 				t.Fatalf("Failure = %q, want %q (issue %#v)", issue.Failure, tc.want, issue)
 			}

@@ -2078,10 +2078,11 @@ func compileConnectGraphWithCensus(source semanticview.Source) (CompiledConnectG
 		return CompiledConnectGraph{issues: []ConnectRoutePlanIssue{{Failure: ConnectFailureSourceMissing, Detail: "compiled connect input is unavailable"}}}, semanticview.BuildAuthoredEventEndpointCensus(source)
 	}
 	connects := bundle.CompositionConnects()
+	census := semanticview.BuildAuthoredEventEndpointCensus(source)
 	plans := make([]ConnectRoutePlan, 0, len(connects))
 	var issues []ConnectRoutePlanIssue
 	for _, connect := range connects {
-		plan, issue := lowerCompositionConnectRoutePlanWithLocation(source, connect)
+		plan, issue := lowerCompositionConnectRoutePlanWithLocation(source, connect, census)
 		if !issue.Failure.Empty() {
 			issue = admitConnectRoutePlanIssueEndpoints(source, connect, issue)
 			if authorization, ok := source.SemanticCapabilities().ProviderTriggerOutputAuthorization(issue.sourceEndpoint.flowID.value, string(issue.sourceEndpoint.event.value)); ok {
@@ -2092,7 +2093,6 @@ func compileConnectGraphWithCensus(source semanticview.Source) (CompiledConnectG
 		}
 		plans = append(plans, plan)
 	}
-	census := semanticview.BuildAuthoredEventEndpointCensus(source)
 	receiverPlans := lowerTemplateInputReceiverPlans(plans)
 	sortConnectRoutePlans(plans)
 	sortConnectRoutePlans(receiverPlans)
@@ -2367,8 +2367,8 @@ func cloneProviderOutputAuthorization(authorization *runtimeprovideroutput.Autho
 	return &cloned
 }
 
-func lowerCompositionConnectRoutePlanWithLocation(source semanticview.Source, connect runtimecontracts.FlowConnect) (ConnectRoutePlan, ConnectRoutePlanIssue) {
-	plan, issue := lowerCompositionConnectRoutePlan(source, connect)
+func lowerCompositionConnectRoutePlanWithLocation(source semanticview.Source, connect runtimecontracts.FlowConnect, census semanticview.AuthoredEventEndpointCensus) (ConnectRoutePlan, ConnectRoutePlanIssue) {
+	plan, issue := lowerCompositionConnectRoutePlan(source, connect, census)
 	authoredLocation := connect.AuthoredLocation()
 	plan.authoredLocation = authoredLocation
 	issue.AuthoredLocation = authoredLocation
@@ -2580,7 +2580,7 @@ func inputPinNames(pins []runtimecontracts.CompiledFlowInputPin) []string {
 	return out
 }
 
-func lowerCompositionConnectRoutePlan(source semanticview.Source, connect runtimecontracts.FlowConnect) (ConnectRoutePlan, ConnectRoutePlanIssue) {
+func lowerCompositionConnectRoutePlan(source semanticview.Source, connect runtimecontracts.FlowConnect, census semanticview.AuthoredEventEndpointCensus) (ConnectRoutePlan, ConnectRoutePlanIssue) {
 	if source == nil {
 		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureSourceMissing, Detail: "semantic source is required"}
 	}
@@ -2592,6 +2592,9 @@ func lowerCompositionConnectRoutePlan(source semanticview.Source, connect runtim
 	sourceEndpoint, producerSchema, issue := connectRoutePlanSourceEndpoint(source, from, connect)
 	if !issue.Failure.Empty() {
 		return ConnectRoutePlan{}, issue
+	}
+	if to.Local && !localConnectReceiverHasConsumer(source, to, census) {
+		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureDeliveryTopologyInvalid, Detail: "parent-local receiver requires a genuine consumer or selected-root output export: " + to.Pin}
 	}
 	receiverEndpoint, receiverSchema, ok := connectRoutePlanReceiverEndpointRole(source, to)
 	if !ok {
@@ -2740,6 +2743,19 @@ func connectRoutePlanReceiverEndpointRole(source semanticview.Source, to composi
 		}
 	}
 	return ConnectRoutePlanEndpoint{}, runtimecontracts.CompiledEventSchema{}, false
+}
+
+func localConnectReceiverHasConsumer(source semanticview.Source, to compositionConnectPinRef, census semanticview.AuthoredEventEndpointCensus) bool {
+	if to.Root {
+		if _, exported := semanticview.SelectedRootOutputPin(source, to.Pin); exported {
+			return true
+		}
+	}
+	endpoint := semanticview.AuthoredEventEndpoint{
+		FlowID: to.FlowID,
+		Event:  semanticview.ResolveFlowEventProof(source, to.FlowID, to.Pin),
+	}
+	return len(census.ResolveTypedPubSubConsumerMatches(endpoint)) > 0
 }
 
 func MaterializeConnectRoutePlan(plan ConnectRoutePlan, input ConnectRoutePlanMaterializationInput) ConnectRoutePlanMaterialization {
@@ -2948,8 +2964,8 @@ func connectReplyResponseResolution(source semanticview.Source, connect runtimec
 	if request.to.FlowID != provider.flowID.value {
 		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReplyLineageMissing, Detail: "request and reply edges must connect the same provider flow"}
 	}
-	if connect.CorrelationKey != "" && !connectRequiredPayloadFieldExists(source, receiver.FlowID, connect.RepliesTo, connect.CorrelationKey) {
-		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReplyLineageMissing, Detail: fmt.Sprintf("correlation_key %q must name a required scalar payload field declared by request event %s", connect.CorrelationKey, connect.RepliesTo)}
+	if issue := connectReplyCorrelationIssue(source, connect, provider, receiver); !issue.Failure.Empty() {
+		return nil, issue
 	}
 	if len(resolvedCompositionReplyConnections(source, receiver.FlowID, connect.RepliesTo)) != 1 {
 		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReplyLineageMissing, Detail: "request event must have exactly one reply connection"}
@@ -2975,19 +2991,37 @@ func resolvedCompositionReplyConnections(source semanticview.Source, flowID, req
 	return out
 }
 
-func connectRequiredPayloadFieldExists(source semanticview.Source, flowID, event, field string) bool {
+func connectReplyCorrelationIssue(source semanticview.Source, connect runtimecontracts.FlowConnect, provider ConnectRoutePlanEndpoint, receiver compositionConnectPinRef) ConnectRoutePlanIssue {
+	if connect.CorrelationKey == "" {
+		return ConnectRoutePlanIssue{}
+	}
+	request, ok := connectRequiredPayloadField(source, receiver.FlowID, connect.RepliesTo, connect.CorrelationKey)
+	if !ok {
+		return ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReplyLineageMissing, Detail: fmt.Sprintf("correlation_key %q must name a required scalar payload field declared by request event %s", connect.CorrelationKey, connect.RepliesTo)}
+	}
+	reply, ok := connectRequiredPayloadField(source, provider.flowID.value, provider.pin.value, connect.CorrelationKey)
+	if !ok {
+		return ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReplyLineageMissing, Detail: fmt.Sprintf("correlation_key %q must name a required scalar payload field declared by reply event %s", connect.CorrelationKey, provider.pin.value)}
+	}
+	if !runtimecontracts.StructuralCatalogTypeAssignable(request, reply) {
+		return ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReplyLineageMissing, Detail: fmt.Sprintf("correlation_key %q request type %s is incompatible with reply type %s", connect.CorrelationKey, request.Kind, reply.Kind)}
+	}
+	return ConnectRoutePlanIssue{}
+}
+
+func connectRequiredPayloadField(source semanticview.Source, flowID, event, field string) (runtimecontracts.ResolvedCatalogType, bool) {
 	if field == "" || strings.Contains(field, ".") {
-		return false
+		return runtimecontracts.ResolvedCatalogType{}, false
 	}
 	resolved, ok := semanticview.ResolveEventSchema(source, flowID, event).Field(field)
 	if !ok || resolved.IsOptional {
-		return false
+		return runtimecontracts.ResolvedCatalogType{}, false
 	}
 	switch resolved.Type.Kind {
 	case runtimecontracts.CatalogTypeText, runtimecontracts.CatalogTypeInteger, runtimecontracts.CatalogTypeNumber, runtimecontracts.CatalogTypeBoolean:
-		return true
+		return resolved.Type, true
 	default:
-		return false
+		return runtimecontracts.ResolvedCatalogType{}, false
 	}
 }
 

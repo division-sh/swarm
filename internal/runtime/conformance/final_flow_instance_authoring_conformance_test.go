@@ -89,7 +89,7 @@ func TestFinalFlowInstanceAuthoringFixture_FailClosedMatrix(t *testing.T) {
 		{
 			name:        "retired receiver instance key",
 			opts:        finalflowinstanceauthoring.Options{RetiredInstanceKey: true},
-			wantMessage: "input pin resolution field \"instance_key\" is not supported",
+			wantMessage: "connect field \"instance_key\" is not supported",
 			loadError:   true,
 		},
 		{

@@ -1129,7 +1129,6 @@ typed-process-local	callback-type	typed	internal/runtime/scenariodocument/prepar
 typed-process-local	context-value	typed	internal/runtime/scenarioexecution/profile.go	AdmittedProfileFromContext	context:Value#1	func(key any) any|arg=github.com/division-sh/swarm/internal/runtime/scenarioexecution.admittedProfileContextKey
 typed-process-local	context-withvalue	typed	internal/runtime/scenarioexecution/profile.go	WithAdmittedProfile	context:WithValue#1	func(parent context.Context, key any, val any) context.Context|arg=context.Context|arg=github.com/division-sh/swarm/internal/runtime/scenarioexecution.admittedProfileContextKey|arg=github.com/division-sh/swarm/internal/runtime/scenarioexecution.Profile
 typed-process-local	callback-type	typed	internal/runtime/semanticview/flow_input_producer.go	appendBoundaryIngressEvidence	param:appendEvidence	func(github.com/division-sh/swarm/internal/runtime/contracts.FlowInputProducerEvidence)
-typed-process-local	callback-type	typed	internal/runtime/semanticview/flow_input_producer.go	appendHarnessInputEvidence	param:appendEvidence	func(github.com/division-sh/swarm/internal/runtime/contracts.FlowInputProducerEvidence)
 typed-process-local	callback-type	typed	internal/runtime/semanticview/flow_input_producer.go	appendInternalTopologyEvidence	param:appendEvidence	func(github.com/division-sh/swarm/internal/runtime/contracts.FlowInputProducerEvidence)
 typed-process-local	callback-type	typed	internal/runtime/semanticview/flow_input_producer.go	appendPlatformSourceEvidence	param:appendEvidence	func(github.com/division-sh/swarm/internal/runtime/contracts.FlowInputProducerEvidence)
 typed-process-local	callback-type	typed	internal/runtime/semanticview/flow_input_producer.go	appendProviderIngressEvidence	param:appendEvidence	func(github.com/division-sh/swarm/internal/runtime/contracts.FlowInputProducerEvidence)
@@ -1173,7 +1172,6 @@ typed-process-local	interface-method	typed	internal/runtime/semanticview/source.
 typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:FlowScopes	func() []github.com/division-sh/swarm/internal/runtime/semanticview.FlowScope
 typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:FlowStates	func(flowID string) []string
 typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:FlowTerminalStages	func(flowID string) []string
-typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:FlowWritePins	func(flowID string) []string
 typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:GuardInstructionByID	func(id string) (github.com/division-sh/swarm/internal/runtime/core/registry.GuardInstruction, bool)
 typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:GuardInstructions	func() []github.com/division-sh/swarm/internal/runtime/core/registry.GuardInstruction
 typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:PlatformSpec	func() github.com/division-sh/swarm/internal/runtime/contracts.PlatformSpecDocument
@@ -1206,7 +1204,6 @@ typed-process-local	interface-method	typed	internal/runtime/semanticview/source.
 typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:WorkflowStages	func() []github.com/division-sh/swarm/internal/runtime/contracts.WorkflowStageContract
 typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:WorkflowTimers	func() []github.com/division-sh/swarm/internal/runtime/contracts.WorkflowTimerContract
 typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:WorkflowVersion	func() string
-typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:WritePinOwners	func(pin string) []string
 typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:semanticSourceCore	func() github.com/division-sh/swarm/internal/runtime/semanticview.sourceCore
 typed-process-local	callback-type	typed	internal/runtime/sessions/heartbeat.go	StartLeaseHeartbeat	result:#1	func()
 typed-process-local	callback-type	typed	internal/runtime/sessions/heartbeat.go	StartLeaseHeartbeatWithErrorHandler	param:onError	func(error)
@@ -1281,6 +1278,7 @@ typed-process-local	interface-method	typed	internal/runtime/startupownership/sta
 typed-process-local	interface-method	typed	internal/runtime/startuprecovery/recovery.go	ArtifactReader	method:GetSourceArtifact	func(context.Context, string) (github.com/division-sh/swarm/internal/sourceartifact.Persisted, error)
 typed-process-local	interface-method	typed	internal/runtime/startuprecovery/recovery.go	AvailabilityReader	method:ActiveNonStandingRunBundleAvailabilities	func(context.Context) ([]github.com/division-sh/swarm/internal/runtime/runbundle.Availability, error)
 typed-process-local	callback-type	typed	internal/runtime/testfixtures/canonicalrouting/fixture.go	ExecuteSource	param:constructor	func()
+typed-process-local	callback-type	typed	internal/runtime/testfixtures/canonicalrouting/root_reply.go	RemoveRootReplyConsumer	result:#1	func()
 typed-process-local	interface-method	typed	internal/runtime/timercancellation/reconciler.go	GenericScheduleWakeupOwner	method:ReconcileWakeupWithRecovery	func(context.Context, string) (bool, error)
 typed-process-local	interface-method	typed	internal/runtime/timercancellation/reconciler.go	WorkflowTimerWakeupOwner	method:ReconcileWakeupWithRecovery	func(context.Context, github.com/division-sh/swarm/internal/runtime/core/timeridentity.WorkflowTimerActivationRef) (bool, error)
 typed-process-local	interface-method	typed	internal/runtime/timerobligation/reader.go	Reader	method:ReadTimerObligations	func(context.Context, github.com/division-sh/swarm/internal/runtime/timerobligation.Scope, time.Time) (github.com/division-sh/swarm/internal/runtime/timerobligation.Snapshot, error)

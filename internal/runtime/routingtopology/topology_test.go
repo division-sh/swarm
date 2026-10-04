@@ -17,22 +17,22 @@ import (
 )
 
 func TestRootExportHasNoSyntheticDeliveryEdge(t *testing.T) {
- topology := Build(loadTopologySource(t, canonicalrouting.CopyReceiverEntitylessRootExport(t)))
- if len(topology.InputPins) != 1 || topology.InputPins[0].FlowID != "." {
-  t.Fatalf("root input endpoints = %#v", topology.InputPins)
- }
- if len(topology.OutputPins) != 1 || topology.OutputPins[0].FlowID != "." || topology.OutputPins[0].Event.Canonical != "child.finished" {
-  t.Fatalf("root output endpoints = %#v", topology.OutputPins)
- }
- outputID := topology.OutputPins[0].ID
- for _, edge := range topology.Edges {
-  if edge.Producer.ID == outputID || edge.Consumer.ID == outputID {
-   t.Fatalf("root export acquired synthetic delivery edge %#v", edge)
-  }
- }
- if len(topology.BoundaryExposures) != 1 || topology.BoundaryExposures[0].Output.ID != outputID {
-  t.Fatalf("root export observation boundary = %#v", topology.BoundaryExposures)
- }
+	topology := Build(loadTopologySource(t, canonicalrouting.CopyReceiverEntitylessRootExport(t)))
+	if len(topology.InputPins) != 1 || topology.InputPins[0].FlowID != "." {
+		t.Fatalf("root input endpoints = %#v", topology.InputPins)
+	}
+	if len(topology.OutputPins) != 1 || topology.OutputPins[0].FlowID != "." || topology.OutputPins[0].Event.Canonical != "child.finished" {
+		t.Fatalf("root output endpoints = %#v", topology.OutputPins)
+	}
+	outputID := topology.OutputPins[0].ID
+	for _, edge := range topology.Edges {
+		if edge.Producer.ID == outputID || edge.Consumer.ID == outputID {
+			t.Fatalf("root export acquired synthetic delivery edge %#v", edge)
+		}
+	}
+	if len(topology.BoundaryExposures) != 1 || topology.BoundaryExposures[0].Output.ID != outputID {
+		t.Fatalf("root export observation boundary = %#v", topology.BoundaryExposures)
+	}
 }
 
 func loadTopologySource(t *testing.T, root string) semanticview.Source {

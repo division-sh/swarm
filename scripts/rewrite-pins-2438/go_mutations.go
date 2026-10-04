@@ -34,9 +34,17 @@ var pinMutationSpellings = map[string][]string{
 		"    events:\n      - work.requested\n      - producer.closed", "    - work.requested\n    - producer.closed",
 		"events: [work.requested", "outputs: [work.requested",
 		"events: [producer.closed, work.requested", "outputs: [producer.closed, work.requested",
+		"  outputs:\n    [", "  outputs: [",
 	},
+	"fork_receiver_acquisition_effect_only.go": {"  outputs: [receiver.finished]\n", "  outputs:\n    - receiver.finished\n"},
+	"fork_receiver_notice_effect.go":           {"  outputs: [receiver.finished]\n", "  outputs:\n    - receiver.finished\n"},
+	"receiver_agent_collision.go": {
+		"    - event: work.ready\n        initialize:\n", "    - event: work.ready\n      initialize:\n",
+		"          %s: payload.values.%s\n", "        %s: payload.values.%s\n",
+	},
+	"lifecycle_emitters.go":   {"inputs: [loop.escaped]", "    - loop.escaped\n", "inputs: [loop.escaped, ordinary.repeated]", "    - loop.escaped\n    - ordinary.repeated\n"},
 	"receiver_composition.go": {"events: [work.completed", "outputs: [work.completed"},
-	"channel_delivery.go":     {"  inputs: {events: [work.requested]}", "  inputs: [work.requested]"},
+	"channel_delivery.go":     {"  inputs: {events: [work.requested]}", "  inputs: [work.requested]", "      - observer.requested\n", "    - observer.requested\n"},
 }
 
 var inlinePinSpellings = map[string][]string{
@@ -51,7 +59,12 @@ var inlinePinSpellings = map[string][]string{
 		"  outputs:\n    events:\n", "  outputs:\n",
 		"      - event: task.assigned\n        sink: harness\n", "    - task.assigned\n",
 	},
-	"internal/cliapp/main_test.go": {"pins:\n  inputs:\n    events: [item.arrived]", "pins:\n  inputs: [item.arrived]"},
+	"internal/store/internal/runtimepersistence/mutation_protocol_composed_journey_test.go": {"      - start.closed\n", "    - start.closed\n", "      - fanout.requested\n", "    - fanout.requested\n", "events: [work.requested", "outputs: [work.requested", "events: [fanout.child, work.requested", "outputs: [fanout.child, work.requested"},
+	"internal/cliapp/main_test.go":                                        {"pins:\n  inputs:\n    events: [item.arrived]", "pins:\n  inputs: [item.arrived]"},
+	"internal/runtime/connector_schema_binding_test.go":                   {"      - activity.requested", "    - activity.requested", "      - inbound.telegram.text_message", "    - inbound.telegram.text_message"},
+	"internal/runtime/conformance/fan_out_semantic_proof_helpers_test.go": {"      - %s\n", "    - %s\n"},
+	"internal/runtime/conformance/fan_out_b17_mixed_dependency_test.go":   {"      - account.task.completed", "    - account.task.completed", "      - account.tasks.completed", "    - account.tasks.completed", "      - account.notification.completed", "    - account.notification.completed"},
+	"internal/runtime/conformance/data_text_file_journey_2456_test.go":    {"events: [root.ready]", "    - root.ready\n", "events: [root.ready, root.ready.body]", "    - root.ready\n    - root.ready.body\n"},
 }
 
 func rewritePinMutationLiteral(name, text string) string {

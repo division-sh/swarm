@@ -1247,29 +1247,29 @@ type FlowOutputPins struct {
 	EventPins []FlowOutputEventPin `yaml:"-"`
 }
 type FlowInputEventPin struct {
-	Event      string                 `yaml:"event"`
-	Initialize map[string]string      `yaml:"initialize,omitempty"`
+	Event      string            `yaml:"event"`
+	Initialize map[string]string `yaml:"initialize,omitempty"`
 	sourceLine int
 	sourceCol  int
 }
 type FlowOutputEventPin struct {
-	Event      string         `yaml:"event"`
+	Event      string `yaml:"event"`
 	sourceLine int
 	sourceCol  int
 }
 
 type FlowConnect struct {
-	OwnerFlowPath string                  `yaml:"-"`
-	SourceFile    string                  `yaml:"-"`
-	SourceLine    int                     `yaml:"-"`
-	Event         string                  `yaml:"event"`
-	From          string                  `yaml:"from"`
-	To            string                  `yaml:"to"`
-	Rename        string                  `yaml:"rename"`
-	Resolution    FlowInputResolutionMode `yaml:"resolution"`
-	KeyFrom       string                  `yaml:"key_from"`
-	RepliesTo     string                  `yaml:"replies_to"`
-	CorrelationKey string                 `yaml:"correlation_key"`
+	OwnerFlowPath  string                  `yaml:"-"`
+	SourceFile     string                  `yaml:"-"`
+	SourceLine     int                     `yaml:"-"`
+	Event          string                  `yaml:"event"`
+	From           string                  `yaml:"from"`
+	To             string                  `yaml:"to"`
+	Rename         string                  `yaml:"rename"`
+	Resolution     FlowInputResolutionMode `yaml:"resolution"`
+	KeyFrom        string                  `yaml:"key_from"`
+	RepliesTo      string                  `yaml:"replies_to"`
+	CorrelationKey string                  `yaml:"correlation_key"`
 }
 type FlowRequiredAgent struct {
 	Role         string   `yaml:"role"`

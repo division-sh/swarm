@@ -37,7 +37,7 @@ func CopyChannelLearnedObjectAnchorJourney(t testing.TB) string {
 	copyTree(t, filepath.Join(mailbox, "observers"), filepath.Join(root, "observers"))
 	removeClosedVariantFiles(t, root, "reviews/observers/mocks/observer.py", "reviews/observers/mocks", "reviews/observers/agents.yaml", "reviews/observers/entities.yaml", "reviews/observers/nodes.yaml", "reviews/observers/schema.yaml", "reviews/observers")
 	applyClosedReplacement(t, filepath.Join(root, "reviews/schema.yaml"), "provider: telegram\n      tool: telegram.send_message", "provider: mock\n      tool: mock.deliver")
-	applyClosedReplacement(t, filepath.Join(root, "reviews/schema.yaml"), "      - observer.requested\n  outputs: [observer.requested]\nconnect:\n  - {event: observer.requested, from: ., to: observers}\n", "")
+	applyClosedReplacement(t, filepath.Join(root, "reviews/schema.yaml"), "    - observer.requested\n  outputs: [observer.requested]\nconnect:\n  - {event: observer.requested, from: ., to: observers}\n", "")
 	applyClosedReplacement(t, filepath.Join(root, "reviews/nodes.yaml"), "tool: telegram.send_message", "tool: mock.deliver")
 	applyClosedReplacement(t, filepath.Join(root, "reviews/nodes.yaml"), "          chat_id: {literal: \"42\"}\n          text: {literal: review}", "          queue: {literal: queue-b}\n          body: {literal: approved-effect}\n          controls: {literal: []}")
 	writeClosedVariantFile(t, root, "reviews/events.yaml", "work.completed:\n  result: text\n")

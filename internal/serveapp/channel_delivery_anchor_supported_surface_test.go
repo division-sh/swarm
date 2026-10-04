@@ -305,7 +305,7 @@ func writeChannelAnchorJourneySource(t *testing.T, root string, withNotice bool)
 			if err := yaml.Unmarshal(body, &schema); err != nil {
 				return err
 			}
-			schema["pins"] = map[string]any{"inputs": map[string]any{"events": []string{"work.requested", "effect.requested"}}}
+			schema["pins"] = map[string]any{"inputs": []string{"work.requested", "effect.requested"}}
 			delete(schema, "connect")
 			body, err = yaml.Marshal(schema)
 			if err != nil {
@@ -325,22 +325,22 @@ func writeChannelAnchorJourneySource(t *testing.T, root string, withNotice bool)
 	if err := yaml.Unmarshal(body, &schema); err != nil {
 		t.Fatal(err)
 	}
-	inputs, outputs := map[string]any{"events": []any{}}, map[string]any{"events": []any{}}
-	schema["pins"] = map[string]any{"inputs": inputs, "outputs": outputs}
+	inputs, outputs := []any{}, []any{}
 	connects := []any{}
 	events := []string{"work.requested", "observer.requested", "effect.requested"}
 	if withNotice {
 		events = append(events, "notice.requested")
 	}
 	for _, event := range events {
-		inputs["events"] = append(inputs["events"].([]any), event)
-		outputs["events"] = append(outputs["events"].([]any), event)
+		inputs = append(inputs, event)
+		outputs = append(outputs, event)
 		target := "reviews"
 		if event == "observer.requested" || event == "notice.requested" {
 			target = "observers"
 		}
 		connects = append(connects, map[string]any{"event": event, "from": ".", "to": target})
 	}
+	schema["pins"] = map[string]any{"inputs": inputs, "outputs": outputs}
 	schema["connect"] = connects
 	body, err = yaml.Marshal(schema)
 	if err != nil {

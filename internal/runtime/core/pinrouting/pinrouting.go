@@ -107,8 +107,8 @@ const (
 )
 
 type OutputConsumerClassification struct {
-	classes     map[OutputConsumerClass]struct{}
-	connects    []ConnectRoutePlan
+	classes  map[OutputConsumerClass]struct{}
+	connects []ConnectRoutePlan
 }
 
 func (c OutputConsumerClassification) Has(class OutputConsumerClass) bool {

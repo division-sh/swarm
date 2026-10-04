@@ -474,11 +474,14 @@ func TestSwarmTestCatalogCompanionsAreProtocolOnly(t *testing.T) {
 		t.Fatalf("load catalog inventory: %v", err)
 	}
 	companions := inventory.PublicCompanions()
-	if len(companions) != 87 {
-		t.Fatalf("public catalog companions = %d, want 87", len(companions))
+	if len(companions) != 86 {
+		t.Fatalf("public catalog companions = %d, want 86 after harness-injection retirement", len(companions))
 	}
 	retiredActions := 0
 	for _, fixture := range companions {
+		if fixture.RelativePath == "examples/routing/harness-injection" {
+			t.Fatal("retired harness-injection fixture remains a public catalog companion")
+		}
 		fixture := fixture
 		t.Run(fixture.RelativePath, func(t *testing.T) {
 			if fixture.Metadata.PublicCompanion == nil || fixture.Metadata.PublicCompanion.ProofRole != "protocol-only" {

@@ -59,6 +59,36 @@ func TestRewriteKnownPinMutationMovesBothSides(t *testing.T) {
 	}
 }
 
+func TestRewritePinMutationConsumersTrackCurrentSequences(t *testing.T) {
+	for _, tc := range []struct {
+		file, before, after string
+	}{
+		{"internal/runtime/conformance/data_text_file_journey_2456_test.go", "events: [root.ready]", "    - root.ready\n"},
+		{"internal/runtime/conformance/data_text_file_journey_2456_test.go", "events: [root.ready, root.ready.body]", "    - root.ready\n    - root.ready.body\n"},
+		{"internal/runtime/conformance/fan_out_semantic_proof_helpers_test.go", "      - %s\n", "    - %s\n"},
+		{"internal/runtime/conformance/fan_out_b17_mixed_dependency_test.go", "      - account.task.completed\n", "    - account.task.completed\n"},
+		{"internal/runtime/connector_schema_binding_test.go", "      - inbound.telegram.text_message\n", "    - inbound.telegram.text_message\n"},
+		{"internal/store/internal/runtimepersistence/mutation_protocol_composed_journey_test.go", "events: [work.requested", "outputs: [work.requested"},
+		{"internal/runtime/testfixtures/canonicalrouting/channel_delivery.go", "      - observer.requested\n", "    - observer.requested\n"},
+		{"internal/runtime/testfixtures/canonicalrouting/fork_receiver_acquisition_effect_only.go", "  outputs: [receiver.finished]\n", "  outputs:\n    - receiver.finished\n"},
+		{"internal/runtime/testfixtures/canonicalrouting/fork_receiver_notice_effect.go", "  outputs: [receiver.finished]\n", "  outputs:\n    - receiver.finished\n"},
+		{"internal/runtime/testfixtures/canonicalrouting/fork_receiver_ownership.go", "  outputs:\n    [producer.closed]", "  outputs: [producer.closed]"},
+		{"internal/runtime/testfixtures/canonicalrouting/receiver_agent_collision.go", "    - event: work.ready\n        initialize:\n", "    - event: work.ready\n      initialize:\n"},
+		{"internal/runtime/testfixtures/canonicalrouting/lifecycle_emitters.go", "inputs: [loop.escaped]", "    - loop.escaped\n"},
+		{"internal/runtime/testfixtures/canonicalrouting/lifecycle_emitters.go", "inputs: [loop.escaped, ordinary.repeated]", "    - loop.escaped\n    - ordinary.repeated\n"},
+	} {
+		t.Run(tc.file+"/"+tc.before, func(t *testing.T) {
+			got := rewritePinMutationLiteral(tc.file, tc.before)
+			if got != tc.after || rewritePinMutationLiteral(tc.file, got) != got {
+				t.Fatalf("mutation rewrite = %q, want stable %q", got, tc.after)
+			}
+			if rewritePinMutationLiteral("unregistered.go", tc.before) != tc.before {
+				t.Fatal("unregistered mutation changed")
+			}
+		})
+	}
+}
+
 func generatedSourceLiteral(t testing.TB, source []byte) string {
 	t.Helper()
 	file, err := parser.ParseFile(token.NewFileSet(), "producer.go", source, 0)
