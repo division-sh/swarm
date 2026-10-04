@@ -53,11 +53,9 @@ func newRetainedMailboxCompletionRuntimeConfigured(t *testing.T, backend servedp
 	name := "sqlite"
 	if backend == servedparity.BackendDefaultSQLite {
 		unsetStoreSelectorEnv(t)
-		stubServeRuntimeWorkspaceLifecycle(t)
 		opts.ConfigPath = writeMockAgentRuntimeConfig(t, name, filepath.Join(t.TempDir(), "completion.sqlite"))
 	} else {
 		name = "postgres"
-		stubServeRuntimeWorkspaceLifecycle(t)
 		dsn, _, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
 		original := buildStoresForServe
@@ -87,6 +85,11 @@ func newRetainedMailboxCompletionRuntimeConfigured(t *testing.T, backend servedp
 	var sq *store.SQLiteRuntimeStore
 	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, pg, sq = selectedRuntimeStoreForTest(t, p) })
 	retained := t.TempDir()
+	t.Cleanup(func() {
+		if err := removePrivateTestRoot(retained); err != nil {
+			t.Errorf("release retained mailbox lifecycle root: %v", err)
+		}
+	})
 	var process *serveRuntimeTestProcess
 	start := func() (servedControlProofRuntime, cursorMailboxStore) {
 		if process != nil {
