@@ -8594,8 +8594,17 @@
   {
     "file": "internal/store/internal/runtimepersistence/mutation_protocol_composed_journey_test.go",
     "before_hash": "7e1ae705734d2fde3b25c53e8a261fa7bad22356fff5ed54e11c54261b77a692",
-    "after_hash": "2822e8427c05f5c14f52fa8a2a39725730e1d914528b747dc096ae97f41ddb8d",
+    "after_hash": "df699908391caeb98858a86dffb94d97a252d44d41bea08e46f65ddc15cdb308",
     "edits": [
+      {
+        "start": 68,
+        "remove": [
+          "\t\t{\"nodes.yaml\", \"subscribes_to: [start.seeded, start.requested, start.closed]\", \"subscribes_to: [start.seeded, start.requested, start.closed, fanout.requested]\"},"
+        ],
+        "add": [
+          "\t\t{\"nodes.yaml\", \"  subscribes_to:\\n    - start.seeded\\n    - start.requested\\n    - start.closed\\n\", \"  subscribes_to:\\n    - start.seeded\\n    - start.requested\\n    - start.closed\\n    - fanout.requested\\n\"},"
+        ]
+      },
       {
         "start": 84,
         "remove": [
@@ -8608,6 +8617,7 @@
     ],
     "slots": [
       "fanout.requested.fan_out.emit.fields.value: unwrap typed expression",
+      "mutationProtocolFanOutRoot: preserve the same added subscription using exact old/new block anchors from CopyForkReceiverBusinessMutationOwnership; retain grouped-cut, rollback and fork-readback assertions",
       "reviewed generator, partial replacement anchors and typed/negative oracles migrate together; no data-file grammar change"
     ]
   },
