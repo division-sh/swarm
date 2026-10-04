@@ -103,6 +103,41 @@ func TestVerifyDeploymentObservationPreservesFailureAndCancellation(t *testing.T
 	}
 }
 
+func TestVerifyDeploymentManagedCatalogConsumesLoadedSourceWithoutExecution(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	root := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
+	configPath := filepath.Join(t.TempDir(), "runtime.yaml")
+	writeRuntimeConfigText(t, configPath, withTestProviderTriggerPlatformInventory(t,
+		"llm: {backend: anthropic}\nserve: {api_listen_addr: '127.0.0.1:0', mcp_listen_addr: '127.0.0.1:0'}\n"))
+	var out, diagnostic bytes.Buffer
+	code := executeRootCommand(context.Background(), root, []string{"verify", root, "--config", configPath, "--json"}, &out, &diagnostic)
+	var result verifyCommandResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("public result: %v exit=%d stderr=%s", err, code, &diagnostic)
+	}
+	var catalog, selected *bootverify.AdmissionObservation
+	for i := range result.Observations {
+		switch result.Observations[i].CheckID {
+		case "managed_provider_catalog_admission":
+			catalog = &result.Observations[i]
+		case "selected_store_access":
+			selected = &result.Observations[i]
+		}
+	}
+	if catalog == nil || catalog.Status != bootverify.AdmissionPassed {
+		t.Fatalf("loaded static catalog did not complete: %+v stderr=%s", catalog, &diagnostic)
+	}
+	if code == 0 || result.OK || result.AdmissionComplete || selected == nil || selected.Status == bootverify.AdmissionPassed {
+		t.Fatalf("catalog admission erased absent store observation: exit=%d result=%+v", code, result)
+	}
+	if result.LiveReadiness != "not_evaluated" {
+		t.Fatalf("static catalog manufactured provider execution: %+v", result)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".swarm")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("static catalog verification created runtime state: %v", err)
+	}
+}
+
 func TestVerifyListenerObservationReleasesPortAndRetainsExecutionObligation(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	root := t.TempDir()

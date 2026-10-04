@@ -221,16 +221,45 @@ func inspectVerifyDeployment(ctx context.Context, repo string, paths CLISourcePl
 	inspectVerifyWorkspaceDependencies(ctx, cfg, backend, workspaceOK, result)
 	inspectVerifyPublicIngress(ctx, result, subject)
 	inspectVerifySelectedStore(ctx, repo, paths, cfg, source, result)
-	// These prerequisites remain fail-closed until their audited consumers are
-	// connected; neither an empty error slice nor a structural pass settles them.
-	for _, pending := range []struct{ id, owner string }{
-		{"managed_provider_catalog_admission", "internal/runtime/llm.CompileManagedCapabilityAdmission"},
-	} {
-		result.BootReport.Observations = append(result.BootReport.Observations, bootverify.AdmissionObservation{
-			CheckID: pending.id, Owner: pending.owner, Subject: subject, Class: bootverify.AdmissionDeploymentObservation,
-			Status: bootverify.AdmissionNotRun, Reason: "required deployment observer has not completed",
-		})
-	}
+	verifyDeploymentObservation(ctx, result, "managed_provider_catalog_admission", "internal/runtime/llm.CompileManagedCapabilityAdmission", subject, failures.ClassSchemaInvalid, func(ctx context.Context) error {
+		if providerErr != nil {
+			return providerErr
+		}
+		if !workspaceOK {
+			return fmt.Errorf("workspace capability admission did not complete")
+		}
+		discovered, err := result.BootReport.DiscoveredToolAdmission()
+		if err != nil {
+			return failures.New(failures.ClassDependencyUnavailable, "mcp_catalog_observation_incomplete", "verify", "managed_provider_catalog_admission", map[string]any{"reason": err.Error()})
+		}
+		blueprints, err := manager.StaticAgentMaterializationBlueprints(source)
+		if err != nil {
+			return err
+		}
+		for _, blueprint := range blueprints {
+			actor, err := manager.ResolveAgentMaterializationBlueprint(manager.AgentManagerOptions{
+				ExecutionPosture: executionposture.Live, LLMBackend: opts.LLMProfile.ID,
+				ModelAliases: opts.ModelAliases, RequireModelResolution: true,
+			}, blueprint)
+			if err != nil {
+				return err
+			}
+			contract, err := providers.ResolveAgentProviderContract(actor.Config)
+			if err != nil {
+				return err
+			}
+			definitions, capabilities, err := runtimetools.PrepareActorToolAdmission(ctx, source, actor.Config, discovered, runtimetools.NativeToolAdmissionOptions{
+				ProviderContract: contract, Credentials: opts.Credentials, Workspaces: workspaceInspection,
+			})
+			if err != nil {
+				return fmt.Errorf("agent %s tool admission: %w", actor.Config.ID, err)
+			}
+			if _, err := llm.CompileManagedCapabilityAdmission(actor.Config, contract, definitions, capabilities); err != nil {
+				return fmt.Errorf("agent %s managed capability input: %w", actor.Config.ID, err)
+			}
+		}
+		return nil
+	})
 	result.BootReport.Sort()
 }
 

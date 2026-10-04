@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
+	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -162,6 +164,17 @@ type Report struct {
 	ExecutionObligations []AdmissionExecutionObligation
 	Interrupted          bool
 	SourceArtifactHash   string
+	mcpTools             map[string]runtimemcp.DiscoveredTool
+	mcpObservation       *AdmissionObservation
+}
+
+// DiscoveredToolAdmission returns only the catalog from this completed
+// observation. Failed or skipped discovery cannot masquerade as an empty one.
+func (r Report) DiscoveredToolAdmission() (map[string]runtimemcp.DiscoveredTool, error) {
+	if r.mcpObservation == nil || (r.mcpObservation.Status != AdmissionPassed && r.mcpObservation.Status != AdmissionNotApplicable) {
+		return nil, fmt.Errorf("required MCP catalog observation did not complete")
+	}
+	return maps.Clone(r.mcpTools), nil
 }
 
 type Options struct {
@@ -218,6 +231,11 @@ func Run(ctx context.Context, source semanticview.Source, opts Options) Report {
 	}
 	for _, check := range supplementalChecks {
 		report.runAdmissionCheck(checkCtx, check)
+	}
+	report.mcpTools = maps.Clone(checkCtx.mcpDiscoveredTools)
+	if checkCtx.mcpObservation != nil {
+		observation := *checkCtx.mcpObservation
+		report.mcpObservation = &observation
 	}
 
 	report.Sort()

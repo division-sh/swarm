@@ -148,6 +148,7 @@ func TestVerifyCLIImageProbeLifecycleRealDocker(t *testing.T) {
 			probe := NewDockerManager()
 			probe.SetConfig(cfg)
 			var name, id string
+			created, started, cancellationInjected := false, false, false
 			probe.SetRunDockerFnForTest(func(ctx context.Context, args ...string) (string, error) {
 				if args[0] == "create" {
 					for i := range args {
@@ -159,8 +160,17 @@ func TestVerifyCLIImageProbeLifecycleRealDocker(t *testing.T) {
 						}
 					}
 				}
+				if args[0] == "start" {
+					started = true
+				}
+				began := time.Now()
 				out, err := actual.runDockerObservation(ctx, args...)
+				t.Logf("Docker %s elapsed=%s error=%v", args[0], time.Since(began), err)
+				if args[0] == "create" && err == nil {
+					created = true
+				}
 				if args[0] == "create" && err == nil && outcome == "cancel_after_create" {
+					cancellationInjected = true
 					cancel()
 				}
 				return out, err
@@ -170,10 +180,16 @@ func TestVerifyCLIImageProbeLifecycleRealDocker(t *testing.T) {
 				command = "/no-such-swarmed-command"
 			}
 			err := probe.ProbeWorkspaceCLICommand(ctx, imageID, command)
+			if !created {
+				t.Fatalf("required real create step did not complete; %s witness not reached: %v", outcome, err)
+			}
+			if !started {
+				t.Fatalf("required start step not reached for %s", outcome)
+			}
 			if (err == nil) != (outcome == "success") {
 				t.Fatalf("probe outcome %s: %v", outcome, err)
 			}
-			if outcome == "cancel_after_create" && !errors.Is(err, context.Canceled) {
+			if outcome == "cancel_after_create" && (!cancellationInjected || !errors.Is(err, context.Canceled)) {
 				t.Fatalf("lost caller cancellation: %v", err)
 			}
 			if name == "" || id == "" {
