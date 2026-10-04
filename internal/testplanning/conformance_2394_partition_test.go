@@ -237,7 +237,8 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 	// #2486 adds the accepted-base fixture-relocation ratchet; no root is removed.
 	// #2241 adds the backend/delay isolation proof for the authorized reporter ceiling.
 	// #2376 adds one manifest-reader ledger ratchet without moving existing roots.
-	want := []int{163, 14, 5, 1}
+	// #2438 adds the names-only output ledger mutation proof; all prior roots remain.
+	want := []int{164, 14, 5, 1}
 	for i, group := range groups {
 		if len(group) != want[i] {
 			t.Fatalf("%s census=%d, want reviewed %d; account new roots explicitly", conformance2394Units[i], len(group), want[i])

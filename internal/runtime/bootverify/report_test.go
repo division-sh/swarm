@@ -5935,8 +5935,8 @@ func TestRun_ReportsMissingRuntimeExecutorForOwnedRuntimeEvent(t *testing.T) {
 }
 
 func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 69 {
-		t.Fatalf("bootCheckRegistry count = %d, want 69", got)
+	if got := len(bootCheckRegistry); got != 68 {
+		t.Fatalf("bootCheckRegistry count = %d, want 68", got)
 	}
 	if got := len(supplementalChecks); got != 3 {
 		t.Fatalf("supplementalChecks count = %d, want 3", got)
@@ -6668,8 +6668,7 @@ stages:
   done: {terminal: true}
 pins:
   outputs:
-    events:
-      - ticket.ready
+    - ticket.ready
 `)
 		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "events.yaml"), `
 ticket.ready:
@@ -6813,77 +6812,7 @@ support-node:
 
 func writeWave1ExpressionFixture(t *testing.T) string {
 	t.Helper()
-	root := t.TempDir()
-
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: wave1-expression-fixture
-pins:
-  inputs: [task.assigned, task.feedback]
-  outputs: [task.result]
-connect:
-  - {event: task.assigned, from: ., to: child}
-  - {event: task.feedback, from: ., to: child}
-  - {event: task.result, from: child, to: .}
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "task.assigned:\n  score: numeric\ntask.feedback:\n  comment: string\n")
-
-	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `name: child
-stages:
-  idle: {initial: true}
-  working: {}
-  done: {terminal: true}
-pins:
-  inputs: [task.assigned, task.feedback]
-  outputs: [task.result]
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "entities.yaml"), `
-task:
-  retry_count:
-    type: integer
-    initial: 0
-  revision_count:
-    type: integer
-    initial: 0
-  kill_reason:
-    type: text
-    _unused_reason: optional test surface field
-  base_score:
-    type: numeric
-    _unused_reason: optional test surface field
-  adjusted_score:
-    type: numeric
-    _unused_reason: optional test surface field
-  filtered_score:
-    type: numeric
-    _unused_reason: optional test surface field
-  filtered_items:
-    type: text
-    _unused_reason: optional test surface field
-  composite_score:
-    type: numeric
-    _unused_reason: optional test surface field
-  expected_count:
-    type: integer
-    initial: 1
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "events.yaml"), `
-task.result:
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), `
-worker:
-  execution_type: system_node
-  subscribes_to: [task.assigned, task.feedback]
-  produces: [task.result]
-  event_handlers:
-    task.assigned:
-      create_entity: true
-      advances_to: working
-    task.feedback:
-      create_entity: true
-      advances_to: done
-      emit: task.result
-`)
-
-	return root
+	return canonicalrouting.CopyWave1Expression(t)
 }
 
 func loadWave1ExpressionFixtureBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {

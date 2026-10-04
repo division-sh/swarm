@@ -324,9 +324,9 @@ stages:
   attention: {terminal: true}
 pins:
   inputs:
-    events: [dispatch.completed]
+    - dispatch.completed
   outputs:
-    events: [item.completed]
+    - item.completed
 `,
 		"entities.yaml": "join_state:\n  expected: \"[text]\"\n",
 		"types.yaml":    "types:\n  JoinResult:\n    value: text\n",

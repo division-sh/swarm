@@ -282,7 +282,7 @@ func CopyReceiverEntitylessUnrouted(t testing.TB) string {
 func CopyReceiverMixedAgent(t testing.TB) string {
 	t.Helper()
 	root := CopyReceiverOptionalChild(t, true)
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "events: [work.completed]", "events: [work.completed, child.seeded]")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "outputs: [work.completed]", "outputs: [work.completed, child.seeded]")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "connect:\n", "connect:\n  - {event: child.seeded, from: ., to: sink}\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "work.seeded:\n", "child.seeded:\n  seed: boolean\nwork.seeded:\n")
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "      advances_to: active\n", "      advances_to: active\n      emit:\n        event: child.seeded\n        fields: {seed: {literal: true}}\n")
@@ -297,8 +297,8 @@ pins:
     - work.completed
     - child.closed
 `)
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - work.requested\n", "      - work.requested\n      - child.closed\n")
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "events: [work.completed, child.seeded]", "events: [work.completed, child.seeded, child.closed]")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - work.requested\n", "    - work.requested\n    - child.closed\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "outputs: [work.completed, child.seeded]", "outputs: [work.completed, child.seeded, child.closed]")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "connect:\n", "connect:\n  - {event: child.closed, from: ., to: sink}\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "work.seeded:\n", "child.closed:\n  seed: boolean\nwork.seeded:\n")
 	writeClosedVariantFile(t, root, "sink/nodes.yaml", `collector:

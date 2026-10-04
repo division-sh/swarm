@@ -82,11 +82,9 @@ parent-listener:
 name: worker
 `+instance+`pins:
   inputs:
-    events:
-      - work.requested
+    - work.requested
   outputs:
-    events:
-      - work.completed
+    - work.completed
 `)
 	workerEvents := "work.completed:\n"
 	if !connected {

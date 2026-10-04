@@ -77,7 +77,7 @@ func CopyNotifyAllChildren(t testing.TB, opts NotifyAllChildrenOptions) string {
 `, "")
 	}
 	if opts.OmitOutputPin {
-		applyClosedReplacement(t, ownerSchema, "      - account.notify.requested\n", "")
+		applyClosedReplacement(t, ownerSchema, "    - account.notify.requested\n", "")
 	}
 	if opts.MissingEmitField {
 		applyClosedReplacement(t, ownerNodes, "            command: ${payload.command}\n", "")
@@ -117,11 +117,10 @@ account.created:
 auto_emit_on_create:
   event: account.created
 `)
-		applyClosedReplacement(t, accountSchema, `      - account.notify.requested
-`, `      - account.notify.requested
+		applyClosedReplacement(t, accountSchema, `    - account.notify.requested
+`, `    - account.notify.requested
   outputs:
-    events:
-      - account.created
+    - account.created
 `)
 	}
 	if opts.FanOutDeliveryBarrier {
@@ -158,9 +157,9 @@ portfolio.notify.completed:
   semantic_rejected: integer
   canceled: integer
 `)
-		applyClosedReplacement(t, ownerSchema, `      - account.notify.requested
-`, `      - account.notify.requested
-      - portfolio.notify.completed
+		applyClosedReplacement(t, ownerSchema, `    - account.notify.requested
+`, `    - account.notify.requested
+    - portfolio.notify.completed
 `)
 		applyClosedReplacement(t, ownerNodes, "              canceled: ${join.dispositions.canceled}\n", "              canceled: ${join.dispositions.canceled}\n    portfolio.notify.completed: {}\n")
 	}
@@ -281,7 +280,7 @@ portfolio.notify.completed:
           - source_field: eligible
             target_field: eligible
 `, "")
-			applyClosedReplacement(t, accountSchema, "      - account.registered\n", "")
+			applyClosedReplacement(t, accountSchema, "    - account.registered\n", "")
 		}
 		if opts.NumericReporterSink {
 			applyClosedReplacement(t, connectFile, `  - event: account.registered
@@ -292,8 +291,8 @@ portfolio.notify.completed:
     from: portfolio
     to: .
 `)
-			applyClosedReplacement(t, connectFile, "      - portfolio.notify.requested\n", "      - portfolio.notify.requested\n      - account.registered\n")
-			applyClosedReplacement(t, connectFile, "      - portfolio.notify.requested\nconnect:\n", "      - portfolio.notify.requested\n      - account.registered\nconnect:\n")
+			applyClosedReplacement(t, connectFile, "    - portfolio.notify.requested\n", "    - portfolio.notify.requested\n    - account.registered\n")
+			applyClosedReplacement(t, connectFile, "    - portfolio.notify.requested\nconnect:\n", "    - portfolio.notify.requested\n    - account.registered\nconnect:\n")
 			writeClosedVariantFile(t, root, "nodes.yaml", `numeric-registration-reporter:
   execution_type: system_node
   subscribes_to: [account.registered]

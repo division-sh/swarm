@@ -60,7 +60,7 @@ stages:
         unmatched:
           else: true
 `)
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - item.received\n", "      - item.received\n      - item.processed\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - item.received\n", "    - item.received\n    - item.processed\n")
 	return root
 }
 
@@ -99,7 +99,7 @@ func CopyRootIngressServedExternalEvent(t testing.TB) string {
   item_id: text?
 external.observed:
 `)
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - item.processed\n", "      - item.processed\n      - external.observed\n  outputs: [external.observed]\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - item.processed\n", "    - item.processed\n    - external.observed\n  outputs: [external.observed]\n")
 	return root
 }
 
@@ -119,8 +119,8 @@ pins:
     - fork.source_message
     - item.processed
 `)
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - external.observed\n", "      - external.observed\n      - fork.source_message\n")
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "events: [external.observed]\n", "events: [external.observed, fork.source_message, item.processed]\nconnect:\n  - {event: fork.source_message, from: ., to: fork-source}\n  - {event: item.processed, from: ., to: fork-source}\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - external.observed\n", "    - external.observed\n    - fork.source_message\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "outputs: [external.observed]\n", "outputs: [external.observed, fork.source_message, item.processed]\nconnect:\n  - {event: fork.source_message, from: ., to: fork-source}\n  - {event: item.processed, from: ., to: fork-source}\n")
 	writeClosedVariantFile(t, root, "fork-source/entities.yaml", "conversation: {}\n")
 	writeClosedVariantFile(t, root, "fork-source/nodes.yaml", "owner:\n  execution_type: system_node\n  event_handlers:\n    fork.source_message:\n      create_entity: true\n      advances_to: active\n    item.processed:\n      advances_to: done\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "external.observed:\n", "external.observed:\nfork.source_message:\n  note: text\n")
@@ -161,7 +161,7 @@ pins:
     - item.agent_hold
     - item.processed
 `)
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - item.processed\n", "      - item.processed\n      - item.agent_hold\n  outputs: [item.agent_hold, item.processed]\nconnect:\n  - {event: item.agent_hold, from: ., to: hold}\n  - {event: item.processed, from: ., to: hold}\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - item.processed\n", "    - item.processed\n    - item.agent_hold\n  outputs: [item.agent_hold, item.processed]\nconnect:\n  - {event: item.agent_hold, from: ., to: hold}\n  - {event: item.processed, from: ., to: hold}\n")
 	writeClosedVariantFile(t, root, "hold/entities.yaml", "session: {}\n")
 	writeClosedVariantFile(t, root, "hold/nodes.yaml", "owner:\n  execution_type: system_node\n  event_handlers:\n    item.agent_hold:\n      create_entity: true\n      advances_to: active\n    item.processed:\n      advances_to: done\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "item.processed:\n", "item.agent_hold:\n  note: text\nitem.processed:\n")
@@ -255,15 +255,14 @@ lifecycle-orchestrator:
             target_field: note
       advances_to: ready
 `)
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), `      - opco.spinup_requested
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), `    - opco.spinup_requested
   outputs:
-    events: [opco.create_requested]
+    - opco.create_requested
 connect:
   - {event: opco.create_requested, from: ., to: operating, resolution: create}
-`, `      - opco.spinup_requested
-      - opco.product_review_requested
-  outputs:
-    events: [opco.create_requested, opco.product_review_requested]
+`, `    - opco.spinup_requested
+    - opco.product_review_requested
+  outputs: [opco.create_requested, opco.product_review_requested]
 connect:
   - {event: opco.create_requested, from: ., to: operating, resolution: create}
   - {event: opco.product_review_requested, from: ., to: operating, resolution: select}

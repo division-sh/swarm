@@ -7844,12 +7844,9 @@ stages:
   scored: {terminal: true}
 pins:
   inputs:
-    events:
-      - score.dimension_complete
+    - score.dimension_complete
   outputs:
-    events:
-      - event: vertical.scored
-        sink: harness
+    - vertical.scored
 `)
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "scoring", "types.yaml"), `
 types:
@@ -7889,6 +7886,10 @@ scoring-node:
   state_schema:
     fields:
       dimensions_received: "[DimensionScore]"
+result-observer:
+  execution_type: system_node
+  event_handlers:
+    vertical.scored: {}
 `)
 
 	repoRoot := repoRootForEngineProjectionTest(t)
@@ -7909,8 +7910,7 @@ stages:
   active: {initial: true}
 pins:
   inputs:
-    events:
-      - job.received
+    - job.received
 `)
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "coordinator", "types.yaml"), `
 types:

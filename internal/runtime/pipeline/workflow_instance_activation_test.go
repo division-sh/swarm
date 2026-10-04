@@ -862,8 +862,7 @@ func TestHandlerEmitEnvelope_RootFlowOutputUsesLocalEntity(t *testing.T) {
 		"scoring/schema.yaml": `name: scoring
 pins:
   outputs:
-    events:
-      - scoring.requested
+    - scoring.requested
 `,
 		"scoring/nodes.yaml": `scoring-node:
   execution_type: system_node

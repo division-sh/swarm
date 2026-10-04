@@ -16,7 +16,7 @@ func TestRun_ValidatesSingletonCoordinatorWithContainedState(t *testing.T) {
 name: coordinator
 pins:
   inputs:
-    events: [job.received]
+    - job.received
 `, singletonCoordinatorEntitiesYAML(), "", "")
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -31,7 +31,7 @@ func TestRun_AllowsStatelessSingletonWithIndependentAgentMemory(t *testing.T) {
 name: coordinator
 pins:
   inputs:
-    events: [job.received]
+    - job.received
 `, `
 coordinator_state: {}
 `, `
@@ -57,7 +57,7 @@ name: coordinator
 instance: vertical_id
 pins:
   inputs:
-    events: [job.received]
+    - job.received
 `, `
 coordinator_state:
   vertical_id: text
@@ -76,7 +76,7 @@ func TestRun_RejectsSingletonCoordinatorUnresolvedContainedType(t *testing.T) {
 name: coordinator
 pins:
   inputs:
-    events: [job.received]
+    - job.received
 `, `
 coordinator_state:
   verticals: map[text]MissingType
@@ -94,7 +94,7 @@ func TestRun_DoesNotTreatBareStaticFlowAsSingletonCoordinator(t *testing.T) {
 name: coordinator
 pins:
   inputs:
-    events: [job.received]
+    - job.received
 `, `
 coordinator_state:
   status: text
@@ -112,7 +112,7 @@ func TestRun_SingletonCoordinatorRejectsDynamicContainedTargetPath(t *testing.T)
 name: coordinator
 pins:
   inputs:
-    events: [job.received]
+    - job.received
 `, singletonCoordinatorEntitiesYAML(), "", `
 coordinator-node:
   execution_type: system_node
@@ -228,7 +228,7 @@ stages:
   failed: {terminal: true}
 pins:
   inputs:
-    events: [job.received]
+    - job.received
 `, tc.entities, "", tc.nodes)
 			demands := BuildSingletonCoordinatorDemandProjection(semanticview.Wrap(bundle))
 			var matched *SingletonCoordinatorDemand
@@ -274,7 +274,7 @@ func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatQuerySelectAsExpr
 name: coordinator
 pins:
   inputs:
-    events: [job.received]
+    - job.received
 `, `
 coordinator_state:
   verticals:
@@ -399,7 +399,7 @@ func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFields
 name: coordinator
 pins:
   inputs:
-    events: [job.received]
+    - job.received
 `, `
 coordinator_state:
   verticals:
@@ -438,7 +438,7 @@ loops:
       advances_to: exhausted
 pins:
   inputs:
-    events: [job.received]
+    - job.received
 `, `
 coordinator_state:
   verticals:
@@ -474,7 +474,7 @@ stages:
   failed: {terminal: true}
 pins:
   inputs:
-    events: [job.received]
+    - job.received
 `
 	const nodes = `
 coordinator-node:

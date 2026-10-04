@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -10,7 +11,7 @@ import (
 )
 
 func TestRewriteGeneratedPositivePins(t *testing.T) {
-	before := "name: generated\nstages:\n  active: {initial: true}\npins:\n  inputs:\n    events:\n      - {event: work.requested, source: harness}\n  outputs:\n    events:\n      - {event: work.completed, sink: harness}\nconnect:\n  - {event: work.completed, from: ., to: .}\n"
+	before := canonicalrouting.PinRewriteSyntaxSource(t, "RewriteGeneratedPositivePins-1")
 	after, err := rewriteGoSource("producer.go", []byte("package fixture\nconst source = "+strconv.Quote(before)+"\n"))
 	if err != nil {
 		t.Fatal(err)
@@ -38,11 +39,23 @@ func TestRewriteGeneratedPinsSkipsMutationAndCompoundFragments(t *testing.T) {
 }
 
 func TestRewriteGeneratedPinsRejectsUnratifiedOptions(t *testing.T) {
-	for _, option := range []string{"source: external", "other: true", "resolution: {mode: select}", "initialize: {}"} {
+	for _, option := range []string{"source: external", "other: true", canonicalrouting.PinRewriteSyntaxSource(t, "RewriteGeneratedPinsRejectsUnratifiedOptions-2"), "initialize: {}"} {
 		source := "pins:\n  inputs:\n    events:\n      - {event: work.requested, " + option + "}\n"
 		if _, err := rewriteGoSource("producer.go", []byte("package fixture\nconst source = "+strconv.Quote(source)+"\n")); err == nil {
 			t.Fatalf("rewrite accepted unratified option %s", option)
 		}
+	}
+}
+
+func TestRewriteKnownPinMutationMovesBothSides(t *testing.T) {
+	name := "internal/runtime/testfixtures/canonicalrouting/fork_receiver_ownership.go"
+	before := "      - receiver.closed\n"
+	after := rewritePinMutationLiteral(name, before)
+	if after != "    - receiver.closed\n" || rewritePinMutationLiteral(name, after) != after {
+		t.Fatalf("pin mutation rewrite = %q", after)
+	}
+	if got := rewritePinMutationLiteral("other.go", before); got != before {
+		t.Fatalf("unregistered fragment changed: %q", got)
 	}
 }
 

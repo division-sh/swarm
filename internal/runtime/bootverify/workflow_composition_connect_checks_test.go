@@ -210,7 +210,7 @@ func TestCanonicalResolutionAdmissionBlocksOutOfModeFromBeforeBootVerification(t
 		{name: "reply", root: canonicalrouting.CopyTemplateReplyWithInertFrom},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, tc.root(t), runtimecontracts.DefaultPlatformSpecFile(repoRoot)); err == nil || !strings.Contains(err.Error(), "input pin resolution field \"from\" is not supported") {
+			if _, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, tc.root(t), runtimecontracts.DefaultPlatformSpecFile(repoRoot)); err == nil || !strings.Contains(err.Error(), "field \"from\" is not supported") {
 				t.Fatalf("bundle load error = %v, want canonical rejection before boot verification", err)
 			}
 		})
@@ -384,7 +384,7 @@ func TestCompositionSourceRejectsRetiredFanInGrammarBeforeBoot(t *testing.T) {
 		name, diagnostic string
 		variant          canonicalrouting.RetiredFanInGrammar
 	}{
-		{"pin mode", "mode", canonicalrouting.RetiredFanInPinMode},
+		{"pin mode", "resolution", canonicalrouting.RetiredFanInPinMode},
 		{"legacy aggregate", "resolution", canonicalrouting.RetiredFanInAggregate},
 		{"connect mode", "connect.resolution", canonicalrouting.RetiredFanInConnectMode},
 	} {

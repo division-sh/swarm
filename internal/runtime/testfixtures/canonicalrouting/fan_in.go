@@ -45,8 +45,8 @@ func CopyRetiredFanInPin(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, FanInStream)
 	applyClosedReplacement(t, filepath.Join(root, "portfolio", "schema.yaml"),
-		"      - operating.reported\n",
-		"      - event: operating.reported\n        resolution: {mode: fan-in, from: payload.ignored, aggregation: stream, window: payload.period_id, dedup_by: [payload.operating_id], singleton: portfolio}\n")
+		"    - operating.reported\n",
+		"    - event: operating.reported\n      resolution: {mode: fan-in, from: payload.ignored, aggregation: stream, window: payload.period_id, dedup_by: [payload.operating_id], singleton: portfolio}\n")
 	return root
 }
 

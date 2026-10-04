@@ -9,10 +9,10 @@ import (
 func CopyMailboxNoticeCompletion(t testing.TB) string {
 	t.Helper()
 	root := CopyMailboxCompletionMatrix(t)
-	applyClosedReplacement(t, filepath.Join(root, "observers/schema.yaml"), "    events: [observer.requested]\n", "    events: [observer.requested, notice.requested]\n")
+	applyClosedReplacement(t, filepath.Join(root, "observers/schema.yaml"), "    - observer.requested\n", "    - observer.requested\n    - notice.requested\n")
 	applyClosedReplacement(t, filepath.Join(root, "observers/nodes.yaml"), "    observer.requested:\n      create_entity: true\n", "    observer.requested:\n      create_entity: true\n    notice.requested:\n      create_entity: true\n")
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - observer.requested\n", "      - observer.requested\n      - notice.requested\n")
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    events: [observer.requested]\nconnect:\n", "    events: [observer.requested, notice.requested]\nconnect:\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - observer.requested\n", "    - observer.requested\n    - notice.requested\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  outputs: [observer.requested]\nconnect:\n", "  outputs: [observer.requested, notice.requested]\nconnect:\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - {event: observer.requested, from: ., to: observers}\n", "  - {event: observer.requested, from: ., to: observers}\n  - {event: notice.requested, from: ., to: observers}\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "observer.requested:\n  seed: boolean\n", "observer.requested:\n  seed: boolean\nnotice.requested:\n  seed: boolean\n")
 	applyClosedReplacement(t, filepath.Join(root, "observers/agents.yaml"), "subscriptions: [observer.requested,", "subscriptions: [notice.requested, observer.requested,")
@@ -27,7 +27,7 @@ func CopyMailboxCompletionMatrix(t testing.TB) string {
 	root := CopyGateCompletionDiagnostic(t)
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "        reject:\n", "        reject:\n          input:\n            reason: {type: text, required: true}\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "stages:\n", "imports:\n  connector_packs:\n    - provider: telegram\n      tool: telegram.send_message\nstages:\n")
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - work.requested\n", "      - work.requested\n      - effect.requested\n      - observer.requested\n  outputs: [observer.requested]\nconnect:\n  - {event: observer.requested, from: ., to: observers}\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - work.requested\n", "    - work.requested\n    - effect.requested\n    - observer.requested\n  outputs: [observer.requested]\nconnect:\n  - {event: observer.requested, from: ., to: observers}\n")
 	nodes, err := os.ReadFile(filepath.Join(root, "nodes.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -135,7 +135,7 @@ func CopyHumanTaskOwnership(t testing.TB, mode string) string {
 		applyClosedReplacement(t, filepath.Join(root, "observers/nodes.yaml"), "      create_entity: true\n", "      create_entity: true\n      data_accumulation:\n        writes:\n          - {target_field: case_id, value: \"${payload.case_id}\"}\n")
 		applyClosedReplacement(t, filepath.Join(root, "observers/schema.yaml"), "name: observers\n", "name: observers\ninstance: case_id\n")
 		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - {event: observer.requested, from: ., to: observers}\n", "  - {event: observer.requested, from: ., to: observers, resolution: create}\n")
-		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - observer.requested\n", "      - observer.requested\n      - observer.seed\n")
+		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - observer.requested\n", "    - observer.requested\n    - observer.seed\n")
 		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "observer.requested:\n  seed: boolean\n", "observer.requested:\n  case_id: text\n  seed: boolean\n")
 		for name, suffix := range map[string]string{
 			"events.yaml": "observer.seed:\n  case_id: text\n",

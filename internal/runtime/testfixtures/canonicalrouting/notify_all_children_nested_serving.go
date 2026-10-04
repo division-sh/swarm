@@ -11,8 +11,8 @@ import (
 func CopyNotifyAllChildrenNestedServing(t testing.TB) string {
 	t.Helper()
 	root := CopyNotifyAllChildren(t, NotifyAllChildrenOptions{FanOutDeliveryBarrier: true})
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - portfolio.notify.requested\n  outputs:\n", "      - portfolio.notify.requested\n      - account.tasks.completed\n      - account.task.completed\n  outputs:\n")
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - portfolio.notify.requested\nconnect:\n", "      - portfolio.notify.requested\n      - account.tasks.completed\n      - account.task.completed\nconnect:\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - portfolio.notify.requested\n  outputs:\n", "    - portfolio.notify.requested\n    - account.tasks.completed\n    - account.task.completed\n  outputs:\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - portfolio.notify.requested\nconnect:\n", "    - portfolio.notify.requested\n    - account.tasks.completed\n    - account.task.completed\nconnect:\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - event: account.notify.requested\n    from: portfolio\n    to: account\n    resolution: select\n", "  - event: account.notify.requested\n    from: portfolio\n    to: account\n    resolution: select\n  - event: account.tasks.completed\n    from: account\n    to: .\n  - event: account.task.completed\n    from: account/task\n    to: .\n")
 	applyClosedReplacement(t, filepath.Join(root, "portfolio", "nodes.yaml"),
 		"            command: ${payload.command}\n", "            command: ${payload.command}\n            task_ids: {literal: [prepare, publish]}\n")
