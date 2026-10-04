@@ -35,6 +35,7 @@ type admissionInspectionPort interface {
 	InspectDeliveryRecovery(context.Context, correlation.SourceArtifactFact) (deliverylifecycle.RecoveryInventory, error)
 	ReadTimerObligations(context.Context, timerobligation.Scope, time.Time) (timerobligation.Snapshot, error)
 	ReadResetInventory(context.Context) (destructivereset.Inventory, error)
+	InspectPendingResetOperations(context.Context) ([]destructivereset.Operation, error)
 	ListSelectedForkRecoveryEntries(context.Context) ([]runfork.SelectedForkRecoveryEntry, error)
 	ListSelectedContractRouteRecoveryRecords(context.Context) ([]manager.SelectedContractRouteRecoveryRecord, error)
 	ListActiveAgentDescriptors(context.Context, string) ([]runtimebus.ActiveAgentDescriptor, error)
@@ -199,6 +200,15 @@ func (s *AdmissionSnapshot) ReadResetInventory(ctx context.Context) (destructive
 	}
 	defer done()
 	return s.store.ReadResetInventory(ctx)
+}
+
+func (s *AdmissionSnapshot) PendingResetOperations(ctx context.Context) ([]destructivereset.Operation, error) {
+	ctx, done, err := s.readContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	return s.store.InspectPendingResetOperations(ctx)
 }
 
 func (s *AdmissionSnapshot) ListSelectedForkRecoveryEntries(ctx context.Context) ([]runfork.SelectedForkRecoveryEntry, error) {

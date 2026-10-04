@@ -84,20 +84,11 @@ func (c *Coordinator) RecoverPending(ctx context.Context) (recovery *PendingReco
 			retErr = errors.Join(retErr, lease.Release(context.WithoutCancel(ctx)))
 		}
 	}()
-	pending, err := c.Operations.PendingResetOperations(ctx)
+	pending, err := InspectPendingOperations(ctx, c.Operations)
 	if err != nil {
 		return nil, err
 	}
-	if len(pending) > 1 {
-		return nil, errors.New("multiple active destructive reset operations")
-	}
 	for _, operation := range pending {
-		if err := operation.Validate(); err != nil {
-			return nil, err
-		}
-		if operation.Phase == PhaseCompleted {
-			return nil, errors.New("pending reset enumeration returned a completed operation")
-		}
 		runtimeReset, err := c.RuntimeContexts.BeginDestructiveReset(ctx, operation.Request.OperationID)
 		if err != nil {
 			return nil, err

@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
@@ -117,9 +118,27 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 		})
 		return err
 	})
+	verifyDeploymentObservation(ctx, result, "pending_reset_admission", "internal/runtime/destructivereset.InspectPendingOperations", subject, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
+		pending, err := destructivereset.InspectPendingOperations(ctx, snapshot)
+		if err != nil {
+			return err
+		}
+		for _, operation := range pending {
+			result.BootReport.ExecutionObligations = append(result.BootReport.ExecutionObligations, bootverify.AdmissionExecutionObligation{
+				ID: "pending_reset_recovery", Owner: "internal/runtime/destructivereset.Coordinator.RecoverPending",
+				Subject: "reset:" + operation.Request.OperationID,
+				Reason:  "boot must settle the inspected " + string(operation.Phase) + " reset under current process authority before source ingestion",
+			})
+		}
+		return nil
+	})
+	verifyDeploymentObservation(ctx, result, "retained_route_admission", "internal/runtime/manager.InspectSelectedContractRouteRecoveries", subject, failures.ClassLifecycleConflict, func(ctx context.Context) error {
+		_, err := manager.InspectSelectedContractRouteRecoveries(ctx, snapshot)
+		return err
+	})
 	for _, pending := range []struct{ id, owner string }{
 		{"startup_process_possession", "internal/runtime/startupownership.InspectAuthority"},
-		{"reset_and_fork_prerequisites", "internal/store/selected.AdmissionSnapshot"},
+		{"selected_fork_recovery_admission", "internal/runtime/runforkexecution"},
 		{"retained_actor_admission", "internal/runtime/manager"},
 	} {
 		result.BootReport.Observations = append(result.BootReport.Observations, bootverify.AdmissionObservation{
@@ -135,7 +154,9 @@ func blockVerifyStoreTail(result *runtime.WorkflowContractValidationResult, subj
 		{"retained_source_integrity", "internal/runtime/startuprecovery.Inspect"},
 		{"startup_recovery_admission", "internal/runtime.InspectStartupRecoveryAdmission"},
 		{"startup_process_possession", "internal/runtime/startupownership.InspectAuthority"},
-		{"reset_and_fork_prerequisites", "internal/store/selected.AdmissionSnapshot"},
+		{"pending_reset_admission", "internal/runtime/destructivereset.InspectPendingOperations"},
+		{"retained_route_admission", "internal/runtime/manager.InspectSelectedContractRouteRecoveries"},
+		{"selected_fork_recovery_admission", "internal/runtime/runforkexecution"},
 		{"retained_actor_admission", "internal/runtime/manager"},
 	} {
 		result.BootReport.Observations = append(result.BootReport.Observations, bootverify.AdmissionObservation{
