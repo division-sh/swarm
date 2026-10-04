@@ -42,6 +42,7 @@ var rootDeferralReasons = map[string]map[string]string{
 		"TestResetContainerIntentRealDocker":                             "opt-in real Docker proof",
 	},
 	"internal/serveapp": {
+		"TestSelectedForkRealDockerGatewayTransportBothStores":          "opt-in real Docker selected-fork transport proof; both-store execution is qualified separately",
 		"TestMockForkChatRealDockerPublicMCPTransportBothStores":        "opt-in real Docker public fork-chat proof; both-store execution is qualified separately",
 		"TestMockNormalRealDockerEmissionBothStores":                    "opt-in real Docker retained H emission proof; both-store execution is qualified separately",
 		"TestChannelOnboardingCrashServeProcessHelper":                  "subprocess entry point, not a standalone proof",
