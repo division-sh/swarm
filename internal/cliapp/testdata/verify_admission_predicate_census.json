@@ -204,6 +204,12 @@
     "body_sha256": "eab36864894da7b750b59938369e547c923cac69818aedac54b06e08bc1ea1bd"
   },
   {
+    "owner": "internal/cliapp/verify_deployment.go::inspectVerifyDeclaredProviderAdmission",
+    "audit_rows": "A02,A11,A12,A13,A15,A18,A26,A27,A28",
+    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24",
+    "body_sha256": "945020deea4f725d542ea1a1c2b086ecd0fa3f76be0f6d0a31099ee88e7731e9"
+  },
+  {
     "owner": "internal/cliapp/verify_deployment.go::inspectVerifyDeployment",
     "audit_rows": "A02,A11,A12,A13,A15,A18,A26,A27,A28",
     "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24",
@@ -216,6 +222,12 @@
     "body_sha256": "0cc52df641050ae66b965e777e936c5c9185741d6c456984b373b4a0defebf85"
   },
   {
+    "owner": "internal/cliapp/verify_deployment.go::inspectVerifyManagedCatalogAdmission",
+    "audit_rows": "A02,A11,A12,A13,A15,A18,A26,A27,A28",
+    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24",
+    "body_sha256": "39e2be2b528783561ca954b65e49c3285d6d78901a67847aec4f5e710ff5b828"
+  },
+  {
     "owner": "internal/cliapp/verify_deployment.go::inspectVerifyPublicIngress",
     "audit_rows": "A02,A11,A12,A13,A15,A18,A26,A27,A28",
     "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24",
@@ -225,7 +237,13 @@
     "owner": "internal/cliapp/verify_deployment.go::inspectVerifySourceAdmission",
     "audit_rows": "A02,A11,A12,A13,A15,A18,A26,A27,A28",
     "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24",
-    "body_sha256": "343c420272ef447a31d892606a6dc6fa3a1208de1025cef564de766cf81af0b0"
+    "body_sha256": "a84ec5f07305e1b53979251150ffbb70025ea06822a487ada8d9099c3d53bb15"
+  },
+  {
+    "owner": "internal/cliapp/verify_deployment.go::inspectVerifyWorkspaceAdmission",
+    "audit_rows": "A02,A11,A12,A13,A15,A18,A26,A27,A28",
+    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24",
+    "body_sha256": "12ce0639995161b8c9a5ca5ff11acdf17e44bb826defca5d9cce9e6ffca7a0af"
   },
   {
     "owner": "internal/cliapp/verify_deployment.go::verifyDeploymentBoundedObservation",
@@ -490,6 +508,42 @@
     "audit_rows": "A15",
     "proof_families": "P13,P14",
     "body_sha256": "c6e50b64e43bb54fa8c9aa50fe0d81d7d4cde72e20c4b3d733486311b83c5813"
+  },
+  {
+    "owner": "internal/runtime/bootverify/admission_report.go::AdmissionExecutionObligation.validIdentity",
+    "audit_rows": "A28,A29,A30",
+    "proof_families": "P23,P24",
+    "body_sha256": "a2d6c0990bffe428cdd7d4532c1f28e22b3f69c1c2b6cf4b2f338fc7000f472e"
+  },
+  {
+    "owner": "internal/runtime/bootverify/admission_report.go::AdmissionObservation.decision",
+    "audit_rows": "A28,A29,A30",
+    "proof_families": "P23,P24",
+    "body_sha256": "3e3a7e008c9127c022af905f7a7f9c84df1cde5bd4180c93b44c69ada7738d02"
+  },
+  {
+    "owner": "internal/runtime/bootverify/admission_report.go::AdmissionObservation.validIdentity",
+    "audit_rows": "A28,A29,A30",
+    "proof_families": "P23,P24",
+    "body_sha256": "610bb196cb87023a5d461ee5842edbfec1aca876770cccc394913c36051e8bca"
+  },
+  {
+    "owner": "internal/runtime/bootverify/admission_report.go::Report.AdmissionDecision",
+    "audit_rows": "A28,A29,A30",
+    "proof_families": "P23,P24",
+    "body_sha256": "63e313f5c0f1614ed533d2258e393cb9f00c7ad588696d2f098125cc3167d96b"
+  },
+  {
+    "owner": "internal/runtime/bootverify/admission_report.go::admissionExcludedWarning",
+    "audit_rows": "A28,A29,A30",
+    "proof_families": "P23,P24",
+    "body_sha256": "3e8d0144ef3a3a3bb616a45d75157957c1855b9f12fc3a8c938372205a9b2686"
+  },
+  {
+    "owner": "internal/runtime/bootverify/admission_report.go::admissionFailurePriority",
+    "audit_rows": "A28,A29,A30",
+    "proof_families": "P23,P24",
+    "body_sha256": "08d2ca58a9bfa244bf9cb837898fec5cf892ba6d55346c0b053e6f05732b8951"
   },
   {
     "owner": "internal/runtime/llm/provider_admission.go::*ProviderAdmissionRegistry.Admit",
@@ -879,7 +933,25 @@
     "owner": "internal/runtime/manager/retained_actor_inspection.go::InspectRetainedActors",
     "audit_rows": "A11,A24",
     "proof_families": "P09,P20,P21",
-    "body_sha256": "f7162192cd8e093499c2401061d99528ae36f4fb17c58cf5f442d043804f9741"
+    "body_sha256": "34ea0bc0caaee6328ca2caef79a210a4544fa3fce887225e4004484c48eb19a3"
+  },
+  {
+    "owner": "internal/runtime/manager/retained_actor_inspection.go::inspectRetainedActorHydrationConfiguration",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "b40b4fcbe3749949b5842ae549464f8e12890b1ac639622260b917528783610f"
+  },
+  {
+    "owner": "internal/runtime/manager/retained_actor_inspection.go::projectRetainedActorDeclaration",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "adf24029b1a531677eb384a5651f63c3a7dbd87dd0bf84574de9bd196469715f"
+  },
+  {
+    "owner": "internal/runtime/manager/retained_actor_inspection.go::retainedActorDeclarationAdmission",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "97ebb4dc4c179d768cc6473a80164f33f788917a7aa20c6f5c0af6cb899ab76c"
   },
   {
     "owner": "internal/runtime/manager/static_topology.go::*AgentManager.CompileStaticTopologyDesiredAgents",
@@ -1779,7 +1851,7 @@
     "owner": "internal/runtime/workflow_validation.go::ValidateWorkflowContractSurface",
     "audit_rows": "A05,A06,A07,A08,A09,A10,A13,A14,A29",
     "proof_families": "P00,P04,P05,P06,P07,P08,P11,P12",
-    "body_sha256": "09ec7ad43669efa91d0203917a61bab60e48d9ef12e1d28e4276872607e4e5b2"
+    "body_sha256": "980a9aed5e152a8d7da01b164b11ece0b056ab278ade807b74ecd5b586cde386"
   },
   {
     "owner": "internal/runtime/workflow_validation.go::filterWorkflowValidationFindings",
@@ -1828,6 +1900,54 @@
     "audit_rows": "A05,A06,A07,A08,A09,A10,A13,A14,A29",
     "proof_families": "P00,P04,P05,P06,P07,P08,P11,P12",
     "body_sha256": "97e9ce7b460c6f1cc93b4e36ba1736ff199b1c1f618e28f3f97cf46a9779651f"
+  },
+  {
+    "owner": "internal/runtime/workflow_validation_admission.go::*WorkflowContractValidationResult.bindAdmissionSourceSubject",
+    "audit_rows": "A05,A06,A07,A08,A09,A10,A13,A14,A29",
+    "proof_families": "P00,P04,P05,P06,P07,P08,P11,P12",
+    "body_sha256": "b3e1edb3d9bd7c7e039a9bdf8a69fd56f15a64fb95a9d6bd68ff86ef12f13c0b"
+  },
+  {
+    "owner": "internal/runtime/workflow_validation_admission.go::*WorkflowContractValidationResult.blockAdmissionTail",
+    "audit_rows": "A05,A06,A07,A08,A09,A10,A13,A14,A29",
+    "proof_families": "P00,P04,P05,P06,P07,P08,P11,P12",
+    "body_sha256": "ab4c0fb0ec7fbc7c8cc7f577de41031586323fc7a58686b6b090d5a8fbf684bf"
+  },
+  {
+    "owner": "internal/runtime/workflow_validation_admission.go::*WorkflowContractValidationResult.failAdmissionClause",
+    "audit_rows": "A05,A06,A07,A08,A09,A10,A13,A14,A29",
+    "proof_families": "P00,P04,P05,P06,P07,P08,P11,P12",
+    "body_sha256": "7ce368e3584aecb9d3410cd055bc0522ef79c83d22fe5fa66d07b03e8c5ce9b6"
+  },
+  {
+    "owner": "internal/runtime/workflow_validation_admission.go::*WorkflowContractValidationResult.finishAdmissionClause",
+    "audit_rows": "A05,A06,A07,A08,A09,A10,A13,A14,A29",
+    "proof_families": "P00,P04,P05,P06,P07,P08,P11,P12",
+    "body_sha256": "88fccb7a8eb2c560b04f7ef7cdf9bbd715f5975a91f39ea1da6660a53392e626"
+  },
+  {
+    "owner": "internal/runtime/workflow_validation_admission.go::*WorkflowContractValidationResult.settleWorkflowAdmission",
+    "audit_rows": "A05,A06,A07,A08,A09,A10,A13,A14,A29",
+    "proof_families": "P00,P04,P05,P06,P07,P08,P11,P12",
+    "body_sha256": "ef8d4ba63d417c85b60867e7b61fb1adc31ce81e33c10c916dc2fa8b90e220b8"
+  },
+  {
+    "owner": "internal/runtime/workflow_validation_admission.go::*WorkflowContractValidationResult.startAdmissionClause",
+    "audit_rows": "A05,A06,A07,A08,A09,A10,A13,A14,A29",
+    "proof_families": "P00,P04,P05,P06,P07,P08,P11,P12",
+    "body_sha256": "fc34c9d5fb3c7b83f2ae27d15f266a5054a9dde82e2f08b70c90af9650922532"
+  },
+  {
+    "owner": "internal/runtime/workflow_validation_admission.go::BlockedWorkflowContractAdmission",
+    "audit_rows": "A05,A06,A07,A08,A09,A10,A13,A14,A29",
+    "proof_families": "P00,P04,P05,P06,P07,P08,P11,P12",
+    "body_sha256": "cc59abe99116bae5d4002413bedf1a2a97b09630ddb473f71dd2bbffdd1d1a80"
+  },
+  {
+    "owner": "internal/runtime/workflow_validation_admission.go::workflowAdmissionObservations",
+    "audit_rows": "A05,A06,A07,A08,A09,A10,A13,A14,A29",
+    "proof_families": "P00,P04,P05,P06,P07,P08,P11,P12",
+    "body_sha256": "e7961ab3e4798c88a5d9ff533ba3304de8722319432ed1a6c379cbca26c32d23"
   },
   {
     "owner": "internal/runtime/workspace/capability_admission.go::DockerCapabilityTarget",

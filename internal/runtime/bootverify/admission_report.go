@@ -79,42 +79,23 @@ func (r Report) AdmissionDecision(policy AdmissionFindingPolicy) AdmissionDecisi
 	seen := make(map[string]bool, len(r.Observations))
 	for _, observation := range r.Observations {
 		identity := observation.CheckID + "\x00" + observation.Subject + "\x00" + string(observation.Class)
-		valid := strings.TrimSpace(observation.CheckID) != "" && strings.TrimSpace(observation.Owner) != "" && strings.TrimSpace(observation.Subject) != "" &&
-			(observation.Class == AdmissionSourceObservation || observation.Class == AdmissionDeploymentObservation)
-		if !valid || seen[identity] {
+		if !observation.validIdentity() || seen[identity] {
 			d.Complete = false
 			block(failures.ClassSchemaInvalid)
 		}
 		seen[identity] = true
-		switch observation.Status {
-		case AdmissionPassed:
-			if observation.FailureClass != "" || observation.StartedAt.IsZero() || observation.FinishedAt.Before(observation.StartedAt) {
-				d.Complete = false
-				block(failures.ClassSchemaInvalid)
-			}
-		case AdmissionNotApplicable:
-			if strings.TrimSpace(observation.Reason) == "" || observation.FailureClass != "" {
-				d.Complete = false
-				block(failures.ClassSchemaInvalid)
-			}
-		case AdmissionNotRun, AdmissionUnavailable:
+		complete, class := observation.decision(r.Purpose)
+		if !complete {
 			d.Complete = false
-			if r.Purpose == StructuralValidation && observation.Class == AdmissionDeploymentObservation && observation.Status == AdmissionNotRun && observation.Reason != "" {
-				continue
-			}
-			block(observation.FailureClass)
-		case AdmissionFailed:
-			d.Complete = false
-			block(observation.FailureClass)
-		default:
-			d.Complete = false
-			block(failures.ClassSchemaInvalid)
+		}
+		if class != "" {
+			block(class)
 		}
 	}
 	obligations := make(map[string]bool, len(r.ExecutionObligations))
 	for _, obligation := range r.ExecutionObligations {
 		identity := obligation.ID + "\x00" + obligation.Subject
-		if strings.TrimSpace(obligation.ID) == "" || strings.TrimSpace(obligation.Owner) == "" || strings.TrimSpace(obligation.Subject) == "" || strings.TrimSpace(obligation.Reason) == "" || obligations[identity] {
+		if !obligation.validIdentity() || obligations[identity] {
 			d.Complete = false
 			block(failures.ClassSchemaInvalid)
 		}
@@ -146,6 +127,41 @@ func (r Report) AdmissionDecision(policy AdmissionFindingPolicy) AdmissionDecisi
 		d.Complete = false
 	}
 	return d
+}
+
+func (o AdmissionObservation) validIdentity() bool {
+	return strings.TrimSpace(o.CheckID) != "" && strings.TrimSpace(o.Owner) != "" && strings.TrimSpace(o.Subject) != "" &&
+		(o.Class == AdmissionSourceObservation || o.Class == AdmissionDeploymentObservation)
+}
+
+func (o AdmissionObservation) decision(purpose ValidationPurpose) (bool, failures.Class) {
+	switch o.Status {
+	case AdmissionPassed:
+		if o.FailureClass != "" || o.StartedAt.IsZero() || o.FinishedAt.Before(o.StartedAt) {
+			return false, failures.ClassSchemaInvalid
+		}
+		return true, ""
+	case AdmissionNotApplicable:
+		if strings.TrimSpace(o.Reason) == "" || o.FailureClass != "" {
+			return false, failures.ClassSchemaInvalid
+		}
+		return true, ""
+	case AdmissionNotRun, AdmissionUnavailable:
+		if purpose == StructuralValidation && o.Class == AdmissionDeploymentObservation && o.Status == AdmissionNotRun && o.Reason != "" {
+			return false, ""
+		}
+	case AdmissionFailed:
+	default:
+		return false, failures.ClassSchemaInvalid
+	}
+	if o.FailureClass == "" {
+		return false, failures.ClassDependencyUnavailable
+	}
+	return false, o.FailureClass
+}
+
+func (o AdmissionExecutionObligation) validIdentity() bool {
+	return strings.TrimSpace(o.ID) != "" && strings.TrimSpace(o.Owner) != "" && strings.TrimSpace(o.Subject) != "" && strings.TrimSpace(o.Reason) != ""
 }
 
 func admissionExcludedWarning(id string, excluded []string) bool {

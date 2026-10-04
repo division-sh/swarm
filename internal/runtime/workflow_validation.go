@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -17,7 +16,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	"github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -107,53 +105,7 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	phase := "source_validation"
 	result.startAdmissionClause(phase)
 	defer func() {
-		if result.BootReport.SourceArtifactHash != "" {
-			for i := range result.BootReport.Observations {
-				observation := &result.BootReport.Observations[i]
-				if observation.Owner == workflowAdmissionOwner {
-					observation.Subject = "source:" + result.BootReport.SourceArtifactHash
-				}
-			}
-		}
-		if ctx.Err() != nil {
-			result.BootReport.Interrupted = result.BootReport.Interrupted || errors.Is(ctx.Err(), context.Canceled)
-			if err == nil {
-				err = ctx.Err()
-			}
-		}
-		if err != nil && !reportBlocks {
-			finding := runtimebootverify.NewHardInvalidityFinding("workflow_contract_validation", "global", err.Error(), "Fix the named admission input before validation or execution.")
-			finding.FailureClass = failures.ClassSchemaInvalid
-			if failure, ok := failures.As(err); ok {
-				finding.FailureClass = failure.Failure.Class
-			} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				finding.FailureClass = failures.ClassDependencyUnavailable
-			}
-			result.BootReport.Add(finding)
-			for i := range result.BootReport.Observations {
-				observation := &result.BootReport.Observations[i]
-				if observation.CheckID == phase && observation.Owner == workflowAdmissionOwner {
-					observation.Status, observation.Reason = runtimebootverify.AdmissionFailed, "canonical admission clause rejected the selected subject; see findings"
-					observation.FinishedAt, observation.FailureClass = time.Now().UTC(), finding.FailureClass
-				}
-			}
-		}
-		if err != nil {
-			dependency := phase
-			if reportBlocks {
-				dependency = blockingPrerequisite
-			}
-			for i := range result.BootReport.Observations {
-				observation := &result.BootReport.Observations[i]
-				if observation.Owner == workflowAdmissionOwner && observation.Status == runtimebootverify.AdmissionNotRun && dependency != "" {
-					observation.Dependencies = []string{dependency}
-				}
-			}
-			if !registryExecuted {
-				result.BootReport.BlockRegisteredChecks("selected_source", dependency, "source admission prerequisite failed before registered checks could run")
-			}
-		}
-		result.BootReport.Sort()
+		err = result.settleWorkflowAdmission(ctx, err, phase, reportBlocks, registryExecuted, blockingPrerequisite)
 	}()
 	if source == nil {
 		return result, fmt.Errorf("semantic source is required")

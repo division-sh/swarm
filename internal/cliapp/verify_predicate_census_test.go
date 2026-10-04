@@ -39,6 +39,8 @@ var admissionPredicateSurfaces = []admissionPredicateSurface{
 	{"internal/serveapp/main.go", "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27", "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22"},
 	{"internal/runtime/runtime.go", "A05,A08,A11,A13,A18,A23,A24,A25", "P04,P08,P09,P11,P15,P20,P21"},
 	{"internal/runtime/workflow_validation.go", "A05,A06,A07,A08,A09,A10,A13,A14,A29", "P00,P04,P05,P06,P07,P08,P11,P12"},
+	{"internal/runtime/workflow_validation_admission.go", "A05,A06,A07,A08,A09,A10,A13,A14,A29", "P00,P04,P05,P06,P07,P08,P11,P12"},
+	{"internal/runtime/bootverify/admission_report.go", "A28,A29,A30", "P23,P24"},
 	{"internal/runtime/runtime_claude_startup.go", "A11,A12,A18,A25", "P09,P10,P15,P21"},
 	{"internal/runtime/runtime_prepared_catalog.go", "A11,A13,A25", "P09,P11,P15,P21"},
 	{"internal/runtime/manager/agent_manager.go", "A11,A23,A24", "P09,P20,P21"},

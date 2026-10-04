@@ -41,30 +41,9 @@ func InspectRetainedActors(ctx context.Context, reader RetainedActorInspectionRe
 	if !ok || bundle == nil || bundle.SourceArtifact == nil || bundle.SourceArtifact.BundleHash() != fact.BundleHash() {
 		return inspection, fmt.Errorf("retained actor source differs from its exact artifact fact")
 	}
-	blueprints, err := ResolveStaticTopologyBlueprints(options, source)
+	byKey, admission, err := retainedActorDeclarationAdmission(options, source, fact)
 	if err != nil {
 		return inspection, err
-	}
-	coordinate := agenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
-	desired, err := desiredAgentsFromBlueprints(blueprints, coordinate)
-	if err != nil {
-		return inspection, err
-	}
-	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, desired)
-	if err != nil {
-		return inspection, err
-	}
-	admission, err := agenttopology.StaticAdmission(plan.Revision, fact.BundleHash(), agenttopology.LifetimeDurableManaged)
-	if err != nil {
-		return inspection, err
-	}
-	byKey := make(map[string]staticAgentBlueprint, len(blueprints))
-	for _, blueprint := range blueprints {
-		key, err := blueprint.Identity.Fingerprint()
-		if err != nil {
-			return inspection, err
-		}
-		byKey[key] = blueprint
 	}
 	actors, err := reader.LoadAgents(ctx)
 	if err != nil {
@@ -90,48 +69,86 @@ func InspectRetainedActors(ctx context.Context, reader RetainedActorInspectionRe
 			inspection.Foreign++
 			continue
 		}
-		if actor.Topology.Authority.Kind == agenttopology.AuthorityStaticDeclarationPlan {
-			if actor.LifecyclePhase != AgentLifecycleTerminated {
-				if actor.Topology.Authority.Static.BundleHash != fact.BundleHash() {
-					inspection.Retiring++
-					continue
-				}
-				projected, changed, err := projectStaticTopologyActor(actor, byKey, admission)
-				if err != nil {
-					return inspection, err
-				}
-				if projected == nil {
-					inspection.Retiring++
-					continue
-				}
-				actor = *projected
-				if changed {
-					inspection.Reconciliations++
-				}
-			} else if !actor.Topology.Equal(admission) {
-				inspection.Retiring++
-				continue
-			}
-		}
-		if err := ValidatePersistedAgentExecution(options, actor.Config); err != nil {
+		projected, changed, err := projectRetainedActorDeclaration(actor, byKey, admission, fact)
+		if err != nil {
 			return inspection, err
 		}
-		if err := options.ExecutionPosture.Admit(actor.Config.ExecutionMode, "agent lifecycle reconstruction"); err != nil {
-			return inspection, err
+		if projected == nil {
+			inspection.Retiring++
+			continue
 		}
-		if err := bindCanonicalAgentPrompt(source, &actor.Config); err != nil {
-			return inspection, err
+		if changed {
+			inspection.Reconciliations++
 		}
-		if _, err := admitAgentConfigSubscriptions(source, &actor.Config, nil); err != nil {
-			return inspection, err
-		}
-		if err := agentmemory.ValidateFlowOwnership(actor.Config.Memory, actor.Config.CanonicalFlowPath()); err != nil {
-			return inspection, err
-		}
-		if err := ValidateAgentBuildConfiguration(actor.Config); err != nil {
+		actor = *projected
+		if err := inspectRetainedActorHydrationConfiguration(options, source, &actor.Config); err != nil {
 			return inspection, err
 		}
 		inspection.Configurations = append(inspection.Configurations, actor.Config)
 	}
 	return inspection, ctx.Err()
+}
+
+func retainedActorDeclarationAdmission(options AgentManagerOptions, source semanticview.Source, fact correlation.SourceArtifactFact) (map[string]staticAgentBlueprint, agenttopology.Admission, error) {
+	blueprints, err := ResolveStaticTopologyBlueprints(options, source)
+	if err != nil {
+		return nil, agenttopology.Admission{}, err
+	}
+	coordinate := agenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
+	desired, err := desiredAgentsFromBlueprints(blueprints, coordinate)
+	if err != nil {
+		return nil, agenttopology.Admission{}, err
+	}
+	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, desired)
+	if err != nil {
+		return nil, agenttopology.Admission{}, err
+	}
+	admission, err := agenttopology.StaticAdmission(plan.Revision, fact.BundleHash(), agenttopology.LifetimeDurableManaged)
+	if err != nil {
+		return nil, agenttopology.Admission{}, err
+	}
+	byKey := make(map[string]staticAgentBlueprint, len(blueprints))
+	for _, blueprint := range blueprints {
+		key, err := blueprint.Identity.Fingerprint()
+		if err != nil {
+			return nil, agenttopology.Admission{}, err
+		}
+		byKey[key] = blueprint
+	}
+	return byKey, admission, nil
+}
+
+func projectRetainedActorDeclaration(actor PersistedAgent, byKey map[string]staticAgentBlueprint, admission agenttopology.Admission, fact correlation.SourceArtifactFact) (*PersistedAgent, bool, error) {
+	if actor.Topology.Authority.Kind != agenttopology.AuthorityStaticDeclarationPlan {
+		return &actor, false, nil
+	}
+	if actor.LifecyclePhase == AgentLifecycleTerminated {
+		if !actor.Topology.Equal(admission) {
+			return nil, false, nil
+		}
+		return &actor, false, nil
+	}
+	if actor.Topology.Authority.Static.BundleHash != fact.BundleHash() {
+		return nil, false, nil
+	}
+	return projectStaticTopologyActor(actor, byKey, admission)
+}
+
+func inspectRetainedActorHydrationConfiguration(options AgentManagerOptions, source semanticview.Source, config *models.AgentConfig) error {
+	if err := ValidatePersistedAgentExecution(options, *config); err != nil {
+		return err
+	}
+	if err := options.ExecutionPosture.Admit(config.ExecutionMode, "agent lifecycle reconstruction"); err != nil {
+		return err
+	}
+	if err := bindCanonicalAgentPrompt(source, config); err != nil {
+		return err
+	}
+	if _, err := admitAgentConfigSubscriptions(source, config, nil); err != nil {
+		return err
+	}
+	if err := agentmemory.ValidateFlowOwnership(config.Memory, config.CanonicalFlowPath()); err != nil {
+		return err
+	}
+	return ValidateAgentBuildConfiguration(*config)
 }

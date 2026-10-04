@@ -130,6 +130,29 @@ func inspectVerifySourceAdmission(ctx context.Context, cfg RuntimeConfigLoadResu
 	verifyDeploymentObservation(ctx, result, "declared_model_admission", "internal/runtime.ValidateDeclaredAgentModelAdmission", subject, failures.ClassSchemaInvalid, func(context.Context) error {
 		return runtime.ValidateDeclaredAgentModelAdmission(executionposture.Live, cfg.Config, source)
 	})
+	backend, workspaceInspection, workspaceOK := inspectVerifyWorkspaceAdmission(ctx, cfg, source, result)
+	providers, providerErr := llm.NewAgentProviderContracts(opts.LLMProfile)
+	verifyDeploymentObservation(ctx, result, "native_tool_admission", "internal/runtime/tools.ValidateNativeToolBootConfig", subject, failures.ClassSchemaInvalid, func(ctx context.Context) error {
+		if providerErr != nil {
+			return providerErr
+		}
+		if !workspaceOK {
+			return fmt.Errorf("workspace capability admission did not complete")
+		}
+		warnings, err := runtimetools.ValidateNativeToolBootConfig(ctx, executionposture.Live, opts.ModelAliases, source, opts.Credentials, providers, workspaceInspection)
+		for _, warning := range warnings {
+			result.BootReport.Add(bootverify.Finding{CheckID: "native_tool_admission", Location: subject, Severity: bootverify.SeveritySemanticDriftWarn, Message: warning.Error(), Remediation: "Review the canonical native-tool admission warning."})
+		}
+		return err
+	})
+	inspectVerifyDeclaredProviderAdmission(ctx, source, opts, result)
+	inspectVerifyManagedCatalogAdmission(ctx, source, opts, providers, providerErr, workspaceInspection, workspaceOK, result)
+	result.BootReport.Sort()
+	return backend, workspaceInspection, workspaceOK
+}
+
+func inspectVerifyWorkspaceAdmission(ctx context.Context, cfg RuntimeConfigLoadResult, source semanticview.Source, result *runtime.WorkflowContractValidationResult) (WorkspaceBackendSelection, workspace.Resolver, bool) {
+	subject := "source:" + result.BootReport.SourceArtifactHash
 	var workspaceInspection workspace.Resolver
 	var backend WorkspaceBackendSelection
 	workspaceOK := verifyDeploymentObservation(ctx, result, "workspace_capability_admission", "internal/cliapp.DecideWorkspaceBackend", subject, failures.ClassSchemaInvalid, func(context.Context) error {
@@ -184,20 +207,11 @@ func inspectVerifySourceAdmission(ctx context.Context, cfg RuntimeConfigLoadResu
 			return fmt.Errorf("unsupported admitted workspace backend %q", backend.Backend)
 		}
 	})
-	providers, providerErr := llm.NewAgentProviderContracts(opts.LLMProfile)
-	verifyDeploymentObservation(ctx, result, "native_tool_admission", "internal/runtime/tools.ValidateNativeToolBootConfig", subject, failures.ClassSchemaInvalid, func(ctx context.Context) error {
-		if providerErr != nil {
-			return providerErr
-		}
-		if !workspaceOK {
-			return fmt.Errorf("workspace capability admission did not complete")
-		}
-		warnings, err := runtimetools.ValidateNativeToolBootConfig(ctx, executionposture.Live, opts.ModelAliases, source, opts.Credentials, providers, workspaceInspection)
-		for _, warning := range warnings {
-			result.BootReport.Add(bootverify.Finding{CheckID: "native_tool_admission", Location: subject, Severity: bootverify.SeveritySemanticDriftWarn, Message: warning.Error(), Remediation: "Review the canonical native-tool admission warning."})
-		}
-		return err
-	})
+	return backend, workspaceInspection, workspaceOK
+}
+
+func inspectVerifyDeclaredProviderAdmission(ctx context.Context, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, result *runtime.WorkflowContractValidationResult) {
+	subject := "source:" + result.BootReport.SourceArtifactHash
 	verifyDeploymentObservation(ctx, result, "declared_provider_prompt_admission", "internal/runtime.ManagedProviderStartupPrompt", subject, failures.ClassSchemaInvalid, func(ctx context.Context) error {
 		blueprints, err := manager.ResolveStaticTopologyBlueprints(manager.AgentManagerOptions{
 			ExecutionPosture: executionposture.Live, LLMBackend: opts.LLMProfile.ID,
@@ -234,6 +248,10 @@ func inspectVerifySourceAdmission(ctx context.Context, cfg RuntimeConfigLoadResu
 		}
 		return nil
 	})
+}
+
+func inspectVerifyManagedCatalogAdmission(ctx context.Context, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, providers llm.AgentProviderContracts, providerErr error, workspaceInspection workspace.Resolver, workspaceOK bool, result *runtime.WorkflowContractValidationResult) {
+	subject := "source:" + result.BootReport.SourceArtifactHash
 	verifyDeploymentObservation(ctx, result, "managed_provider_catalog_admission", "internal/runtime/llm.CompileManagedCapabilityAdmission", subject, failures.ClassSchemaInvalid, func(ctx context.Context) error {
 		if providerErr != nil {
 			return providerErr
@@ -269,8 +287,6 @@ func inspectVerifySourceAdmission(ctx context.Context, cfg RuntimeConfigLoadResu
 		}
 		return nil
 	})
-	result.BootReport.Sort()
-	return backend, workspaceInspection, workspaceOK
 }
 
 func inspectVerifyPublicIngress(ctx context.Context, result *runtime.WorkflowContractValidationResult, subject string) {

@@ -1,12 +1,79 @@
 package runtime
 
 import (
+	"context"
+	"errors"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 const workflowAdmissionOwner = "internal/runtime.ValidateWorkflowContractSurface"
+
+func (result *WorkflowContractValidationResult) settleWorkflowAdmission(ctx context.Context, err error, phase string, reportBlocks, registryExecuted bool, blockingPrerequisite string) error {
+	result.bindAdmissionSourceSubject()
+	if ctx.Err() != nil {
+		result.BootReport.Interrupted = result.BootReport.Interrupted || errors.Is(ctx.Err(), context.Canceled)
+		if err == nil {
+			err = ctx.Err()
+		}
+	}
+	if err != nil && !reportBlocks {
+		result.failAdmissionClause(phase, err)
+	}
+	if err != nil {
+		dependency := phase
+		if reportBlocks {
+			dependency = blockingPrerequisite
+		}
+		result.blockAdmissionTail(dependency, registryExecuted)
+	}
+	result.BootReport.Sort()
+	return err
+}
+
+func (result *WorkflowContractValidationResult) bindAdmissionSourceSubject() {
+	if result.BootReport.SourceArtifactHash == "" {
+		return
+	}
+	for i := range result.BootReport.Observations {
+		observation := &result.BootReport.Observations[i]
+		if observation.Owner == workflowAdmissionOwner {
+			observation.Subject = "source:" + result.BootReport.SourceArtifactHash
+		}
+	}
+}
+
+func (result *WorkflowContractValidationResult) failAdmissionClause(phase string, err error) {
+	finding := bootverify.NewHardInvalidityFinding("workflow_contract_validation", "global", err.Error(), "Fix the named admission input before validation or execution.")
+	finding.FailureClass = failures.ClassSchemaInvalid
+	if failure, ok := failures.As(err); ok {
+		finding.FailureClass = failure.Failure.Class
+	} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		finding.FailureClass = failures.ClassDependencyUnavailable
+	}
+	result.BootReport.Add(finding)
+	for i := range result.BootReport.Observations {
+		observation := &result.BootReport.Observations[i]
+		if observation.CheckID == phase && observation.Owner == workflowAdmissionOwner {
+			observation.Status, observation.Reason = bootverify.AdmissionFailed, "canonical admission clause rejected the selected subject; see findings"
+			observation.FinishedAt, observation.FailureClass = time.Now().UTC(), finding.FailureClass
+		}
+	}
+}
+
+func (result *WorkflowContractValidationResult) blockAdmissionTail(dependency string, registryExecuted bool) {
+	for i := range result.BootReport.Observations {
+		observation := &result.BootReport.Observations[i]
+		if observation.Owner == workflowAdmissionOwner && observation.Status == bootverify.AdmissionNotRun && dependency != "" {
+			observation.Dependencies = []string{dependency}
+		}
+	}
+	if !registryExecuted {
+		result.BootReport.BlockRegisteredChecks("selected_source", dependency, "source admission prerequisite failed before registered checks could run")
+	}
+}
 
 // BlockedWorkflowContractAdmission records the existing owners' unexecuted tail
 // when configuration or loading refuses the source before validation can start.
