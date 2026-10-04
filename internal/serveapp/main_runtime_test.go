@@ -7456,6 +7456,9 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryFailsPersistedMissingBef
 
 func installServeRuntimePostgresTestStores(t *testing.T, workspaceFactory func() cliapp.ServeWorkspaceLifecycle) (string, *sql.DB, *store.PostgresStore) {
 	t.Helper()
+	if workspaceFactory == nil {
+		return installServeRuntimePostgresTestStoresForDatabase(t, nil, true)
+	}
 	return installServeRuntimePostgresTestStoresWithWorkspaceFactory(t, func(cliapp.WorkspaceMountSources) cliapp.ServeWorkspaceLifecycle {
 		return workspaceFactory()
 	})
@@ -7463,6 +7466,9 @@ func installServeRuntimePostgresTestStores(t *testing.T, workspaceFactory func()
 
 func installServeRuntimeEmptyPostgresTestStores(t *testing.T, workspaceFactory func() cliapp.ServeWorkspaceLifecycle) (string, *sql.DB, *store.PostgresStore) {
 	t.Helper()
+	if workspaceFactory == nil {
+		return installServeRuntimePostgresTestStoresForDatabase(t, nil, false)
+	}
 	return installServeRuntimePostgresTestStoresForDatabase(t, func(cliapp.WorkspaceMountSources) cliapp.ServeWorkspaceLifecycle {
 		return workspaceFactory()
 	}, false)
@@ -7588,8 +7594,10 @@ func installServeRuntimePostgresTestStoresForDatabase(t *testing.T, workspaceFac
 		storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
 		return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(runtimePG), cfg), nil
 	}
-	cliapp.ConfiguredWorkspaceLifecycleForServe = func(_ *config.Config, _ *sourceartifact.RuntimeProjection, _ semanticview.Source, mountSources cliapp.WorkspaceMountSources, _ cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
-		return workspaceFactory(mountSources), nil
+	if workspaceFactory != nil {
+		cliapp.ConfiguredWorkspaceLifecycleForServe = func(_ *config.Config, _ *sourceartifact.RuntimeProjection, _ semanticview.Source, mountSources cliapp.WorkspaceMountSources, _ cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+			return workspaceFactory(mountSources), nil
+		}
 	}
 	t.Cleanup(func() {
 		buildStoresForServe = oldBuildStores
