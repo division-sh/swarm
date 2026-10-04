@@ -14,9 +14,11 @@ flows:
     instance: field=validation_case_id identity=run + flow + instance_key
 routing topology: routing-topology/v1
   source authority: projection_only_existing_contract_owners
-  - [inter_flow_connect] validator/validation.started: validator.validator-node -> producer.validation.started
-    connect: validator.validation.started -> producer.validation.started (schema.yaml:<line>)
+  - [inter_flow_connect] validation.triggered: ..validation.triggered -> producer.validation.triggered
+    connect: .validation.triggered -> producer.validation.triggered (schema.yaml:<line>)
     resolution: mode=static target=target
+  - [typed_pubsub] producer/validation.triggered: producer.validation.triggered -> producer.producer-node
+    typed pub/sub: match=exact boundary=same_flow
   - [typed_pubsub] validator/validation.requested: validator.validation.requested -> validator.validator-node
     typed pub/sub: match=exact boundary=same_flow
   - [inter_flow_connect] producer/validation.requested: producer.producer-node -> validator.validation.requested
@@ -24,10 +26,8 @@ routing topology: routing-topology/v1
     resolution: mode=create target=target field=validation_case_id source_kind=generated_uuid source=generated.uuid derived_from="instance.validation_case_id + carries.validation_case_id.from"
   - [typed_pubsub] producer/validation.started: producer.validation.started -> producer.producer-node
     typed pub/sub: match=exact boundary=same_flow
-  - [typed_pubsub] producer/validation.triggered: producer.validation.triggered -> producer.producer-node
-    typed pub/sub: match=exact boundary=same_flow
-  - [inter_flow_connect] validation.triggered: ..validation.triggered -> producer.validation.triggered
-    connect: .validation.triggered -> producer.validation.triggered (schema.yaml:<line>)
+  - [inter_flow_connect] validator/validation.started: validator.validator-node -> producer.validation.started
+    connect: validator.validation.started -> producer.validation.started (schema.yaml:<line>)
     resolution: mode=static target=target
   boundary exposures:
     - validator/validation.started: validator.validator-node -> output validator.validation.started
