@@ -844,3 +844,35 @@ the sole shared-worker exception is adapter `mock_python` on the two exact
 registered branches, and negative mutation proofs reject other adapters/sites.
 Historical RED receipts, the expanded clean-head rerun, remaining 48-row proof,
 #2525 integration, hosted default-Linux proof and full/full remain separate.
+
+### Clean-head qualification and host cancellation counterexample
+
+The expanded seven-package rerun at `80d4f8216` is GREEN:
+`worker-rebased-owner-expanded-final-matrix.log` passes complete CLI, API-spec,
+effects, tools, LLM, MCP and workspace packages. All seven real-Docker worker
+leaves execute without skips under explicit bridge. The exact complexity,
+source-manifest mutation, native protocol and proof-plan guards also pass.
+These are package/owner receipts, not complete-class or whole-suite closure.
+
+The fresh native race x3 aggregate at that same head is RED on the unchanged
+host request-retirement oracle: default abrupt child termination can return
+before the held HTTP handler retires. All seven real-Docker leaves pass their
+three repetitions. M09 therefore is not closed by the earlier WIP host pass.
+The bounded correction stays in the same worker owner: host cancellation asks
+the native worker to cancel and join its interpreter/HTTP work, retaining the
+observed possible-commit envelope, before bounded exact-child disposal. No
+retry, independent lifetime owner or request-retirement assertion relaxation
+is introduced. The corrected host control passes race x20 locally; a fresh
+committed-head owner/public rerun is still required.
+
+`worker-rebased-public-both-store-final-matrix.log` passes both-store public-H
+host and actual-Docker fork-chat, real native lost-response/exact durable replay
+controls, and activation unit controls. Its compiled host and live boot checks
+are RED before execution because G's authored fixture still used the retired
+input-pin mapping. The fixture now consumes the current names-only sequence;
+the verifier is unchanged and no legacy reader is added. Requalification must
+reach the real transport assertions; this admission failure earns no proof.
+
+The original RED receipts remain retained. The complete 48-row class, E-owned
+#2525 compensation integration, public hosted default-Linux Docker proof and
+full/full exact-head qualification remain open.
