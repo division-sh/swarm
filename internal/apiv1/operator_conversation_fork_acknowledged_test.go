@@ -165,6 +165,12 @@ func TestForkChatCommittedAssistantSurvivesCleanupErrorThroughAPI(t *testing.T) 
 
 type forkChatAckHostWorkspace struct{ root string }
 
+// This completion-acknowledgement fixture owns only its private test target;
+// the real workspace authority/source-isolation proofs live in serveapp.
+func (w forkChatAckHostWorkspace) ResolveForkChatWorkspace(ctx context.Context, actor runtimeactors.AgentConfig) (*workspace.Target, error) {
+	return w.ResolveWorkspace(ctx, actor)
+}
+
 func (w forkChatAckHostWorkspace) ResolveWorkspace(context.Context, runtimeactors.AgentConfig) (*workspace.Target, error) {
 	return &workspace.Target{Backend: workspace.BackendHost, Workdir: w.root}, nil
 }
