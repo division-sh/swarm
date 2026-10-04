@@ -320,98 +320,104 @@
   {
     "owner": "internal/cliapp/verify_deployment.go::inspectVerifyDeclaredProviderAdmission",
     "audit_rows": "A02,A11,A12,A13,A15,A18,A26,A27,A28",
-    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24",
+    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24,P26",
     "body_sha256": "945020deea4f725d542ea1a1c2b086ecd0fa3f76be0f6d0a31099ee88e7731e9"
   },
   {
     "owner": "internal/cliapp/verify_deployment.go::inspectVerifyDeployment",
     "audit_rows": "A02,A11,A12,A13,A15,A18,A26,A27,A28",
-    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24",
-    "body_sha256": "d241f3f7061ef5b5a5dc294b10c378e6796f741e3be9e3d0cdb998eb8ef4c2a0"
+    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24,P26",
+    "body_sha256": "b77261f479fbfcf774da60793a479dab3867e656948aa42b93a0ce1e7600b391"
   },
   {
     "owner": "internal/cliapp/verify_deployment.go::inspectVerifyListeners",
     "audit_rows": "A02,A11,A12,A13,A15,A18,A26,A27,A28",
-    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24",
-    "body_sha256": "0cc52df641050ae66b965e777e936c5c9185741d6c456984b373b4a0defebf85"
+    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24,P26",
+    "body_sha256": "0d2f947554a951992188d18d440244abcd71a15f0021fce9c3b3706d28ec73ec"
   },
   {
     "owner": "internal/cliapp/verify_deployment.go::inspectVerifyManagedCatalogAdmission",
     "audit_rows": "A02,A11,A12,A13,A15,A18,A26,A27,A28",
-    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24",
+    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24,P26",
     "body_sha256": "39e2be2b528783561ca954b65e49c3285d6d78901a67847aec4f5e710ff5b828"
   },
   {
     "owner": "internal/cliapp/verify_deployment.go::inspectVerifyPublicIngress",
     "audit_rows": "A02,A11,A12,A13,A15,A18,A26,A27,A28",
-    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24",
+    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24,P26",
     "body_sha256": "4a61c7d06fb8d71e63fdac11b094bc3376b333488bb9d79082b298f8560a1c07"
   },
   {
     "owner": "internal/cliapp/verify_deployment.go::inspectVerifySourceAdmission",
     "audit_rows": "A02,A11,A12,A13,A15,A18,A26,A27,A28",
-    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24",
+    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24,P26",
     "body_sha256": "a84ec5f07305e1b53979251150ffbb70025ea06822a487ada8d9099c3d53bb15"
   },
   {
     "owner": "internal/cliapp/verify_deployment.go::inspectVerifyWorkspaceAdmission",
     "audit_rows": "A02,A11,A12,A13,A15,A18,A26,A27,A28",
-    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24",
+    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24,P26",
     "body_sha256": "12ce0639995161b8c9a5ca5ff11acdf17e44bb826defca5d9cce9e6ffca7a0af"
   },
   {
     "owner": "internal/cliapp/verify_deployment.go::verifyDeploymentBoundedObservation",
     "audit_rows": "A02,A11,A12,A13,A15,A18,A26,A27,A28",
-    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24",
+    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24,P26",
     "body_sha256": "6192cfd856168d3b61e07dc16dc6f5e0a9760a9ae46e9633be87af1c6052c2ab"
   },
   {
     "owner": "internal/cliapp/verify_deployment.go::verifyDeploymentObservation",
     "audit_rows": "A02,A11,A12,A13,A15,A18,A26,A27,A28",
-    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24",
+    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24,P26",
     "body_sha256": "7d454382aee554c698be9d423c2138c269470c37b16abacb0adf45ebda999536"
   },
   {
     "owner": "internal/cliapp/verify_deployment.go::verifyDeploymentWorkflowOptions",
     "audit_rows": "A02,A11,A12,A13,A15,A18,A26,A27,A28",
-    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24",
+    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24,P26",
     "body_sha256": "43fd0e1525169dd1c5177d95e0b6cda379383a86c9e92357e0f485e617620f16"
   },
   {
     "owner": "internal/cliapp/verify_deployment_store.go::accountVerifyStoreTail",
     "audit_rows": "A10,A19,A20,A21,A22,A23,A24,A27",
-    "proof_families": "P08,P17,P18,P19,P20,P21",
+    "proof_families": "P08,P17,P18,P19,P20,P21,P27,P28",
     "body_sha256": "70542e0f45c2f90f956228dc6189ff3f4f428754cfb338eb76e20e416a0fe1bb"
   },
   {
     "owner": "internal/cliapp/verify_deployment_store.go::blockVerifyStoreTail",
     "audit_rows": "A10,A19,A20,A21,A22,A23,A24,A27",
-    "proof_families": "P08,P17,P18,P19,P20,P21",
+    "proof_families": "P08,P17,P18,P19,P20,P21,P27,P28",
     "body_sha256": "ac54664affc5d34a5ffb76d69a0641f5b8c9c2d1a217ee6ce5f2243b822aab45"
   },
   {
     "owner": "internal/cliapp/verify_deployment_store.go::inspectVerifyRecoverySnapshot",
     "audit_rows": "A10,A19,A20,A21,A22,A23,A24,A27",
-    "proof_families": "P08,P17,P18,P19,P20,P21",
-    "body_sha256": "f078c79dc8a4f28e6b4fd20556132f5163fb023db50f487f29c780fb344eb026"
+    "proof_families": "P08,P17,P18,P19,P20,P21,P27,P28",
+    "body_sha256": "d7b47ebc06f28409fbc9fcea7282b83f6438537fd6cedab2e4663a67128f1516"
   },
   {
     "owner": "internal/cliapp/verify_deployment_store.go::inspectVerifyRetainedChannels",
     "audit_rows": "A10,A19,A20,A21,A22,A23,A24,A27",
-    "proof_families": "P08,P17,P18,P19,P20,P21",
+    "proof_families": "P08,P17,P18,P19,P20,P21,P27,P28",
     "body_sha256": "4ce50d7a52c5d3ce9a948c689b1c6c5ca05b24674342b19abbb592b89e14c5ff"
   },
   {
     "owner": "internal/cliapp/verify_deployment_store.go::inspectVerifySelectedStore",
     "audit_rows": "A10,A19,A20,A21,A22,A23,A24,A27",
-    "proof_families": "P08,P17,P18,P19,P20,P21",
-    "body_sha256": "92a991e5c319af6b3f059128671eb4afe34e65f49c78606af448e39e916deb15"
+    "proof_families": "P08,P17,P18,P19,P20,P21,P27,P28",
+    "body_sha256": "c85d10460459e36a400d924c27326dd63891e4dabefe06560bdf1a318a1c20db"
   },
   {
     "owner": "internal/cliapp/verify_deployment_store.go::prepareVerifySelectedStoreInspection",
     "audit_rows": "A10,A19,A20,A21,A22,A23,A24,A27",
-    "proof_families": "P08,P17,P18,P19,P20,P21",
+    "proof_families": "P08,P17,P18,P19,P20,P21,P27,P28",
     "body_sha256": "62fcd3c10ab77f2ae7d290f80584d60afbe8ab9fcd3f3e3d68537b5f7d08a8ff"
+  },
+  {
+    "owner": "internal/cliapp/verify_deployment_store.go::verifyRetainedSourceLoader",
+    "audit_rows": "A10,A19,A20,A21,A22,A23,A24,A27",
+    "proof_families": "P08,P17,P18,P19,P20,P21,P27,P28",
+    "body_sha256": "740cb389acdf87b5b3acbff11cdbfaec31a8d46bffb1b8bdc57b989a5bf765c7"
   },
   {
     "owner": "internal/cliapp/verify_deployment_workspace.go::inspectVerifyWorkspaceDependencies",
@@ -446,85 +452,85 @@
   {
     "owner": "internal/cliapp/verify_runtime.go::admitStructuralSource",
     "audit_rows": "A01,A28,A29,A30",
-    "proof_families": "P01,P02,P23,P24",
+    "proof_families": "P01,P02,P23,P24,P27,P29",
     "body_sha256": "7968359102482c79b9e7dc2cc2834c100a49b2c644576af2b993dcfe775ec0b9"
   },
   {
     "owner": "internal/cliapp/verify_runtime.go::defaultVerifyCommandOptions",
     "audit_rows": "A01,A28,A29,A30",
-    "proof_families": "P01,P02,P23,P24",
+    "proof_families": "P01,P02,P23,P24,P27,P29",
     "body_sha256": "6130bc86cc80a845c5e998bc7dc8f16ec3e61bfd2586e9c733a21c8bc4b4f1ba"
   },
   {
     "owner": "internal/cliapp/verify_runtime.go::renderVerifyAdmissionRefusal",
     "audit_rows": "A01,A28,A29,A30",
-    "proof_families": "P01,P02,P23,P24",
+    "proof_families": "P01,P02,P23,P24,P27,P29",
     "body_sha256": "e26408d284e5795166afc46913d8bd3b6779c981e43b345b9d231ac0ad8abf23"
   },
   {
     "owner": "internal/cliapp/verify_runtime.go::renderVerifyCommandResult",
     "audit_rows": "A01,A28,A29,A30",
-    "proof_families": "P01,P02,P23,P24",
+    "proof_families": "P01,P02,P23,P24,P27,P29",
     "body_sha256": "d10702b5fa32cb72fafc2f966a3e8b4432d898e56afc77f8295e457aa20d56ef"
   },
   {
     "owner": "internal/cliapp/verify_runtime.go::runVerifyCommandWithOutput",
     "audit_rows": "A01,A28,A29,A30",
-    "proof_families": "P01,P02,P23,P24",
-    "body_sha256": "3583e976a3198532920ebc38a2112d5bef2d4521ce79f96505c7f935c6c5b611"
+    "proof_families": "P01,P02,P23,P24,P27,P29",
+    "body_sha256": "ec3af5d80f298412e778db94597c277267e82177470357a51e86864a46ff295f"
   },
   {
     "owner": "internal/cliapp/verify_runtime.go::trimmedStringSlice",
     "audit_rows": "A01,A28,A29,A30",
-    "proof_families": "P01,P02,P23,P24",
+    "proof_families": "P01,P02,P23,P24,P27,P29",
     "body_sha256": "72757cc3d27601b7c5df28488d1b0ea5d7a1f107d5bb9f4261397146a2e41899"
   },
   {
     "owner": "internal/cliapp/verify_runtime.go::verifyAdmissionExitCode",
     "audit_rows": "A01,A28,A29,A30",
-    "proof_families": "P01,P02,P23,P24",
+    "proof_families": "P01,P02,P23,P24,P27,P29",
     "body_sha256": "cc10ada2d44a7de2895f8fd16c85c5b5426659790079ca273b9b8a62abf734fb"
   },
   {
     "owner": "internal/cliapp/verify_runtime.go::verifyAdmissionTextLines",
     "audit_rows": "A01,A28,A29,A30",
-    "proof_families": "P01,P02,P23,P24",
+    "proof_families": "P01,P02,P23,P24,P27,P29",
     "body_sha256": "f7089c4894c63c42b9f66e8615dd0f09bff5de5e9cdd22ee207cf102b62233d3"
   },
   {
     "owner": "internal/cliapp/verify_runtime.go::verifyAdmissionTextSubject",
     "audit_rows": "A01,A28,A29,A30",
-    "proof_families": "P01,P02,P23,P24",
+    "proof_families": "P01,P02,P23,P24,P27,P29",
     "body_sha256": "aecc2c80e08ce5a446aaeb54ddb00e183a5a829329398646cd38025fb5e6dbd4"
   },
   {
     "owner": "internal/cliapp/verify_runtime.go::verifyBundleResultWithOptions",
     "audit_rows": "A01,A28,A29,A30",
-    "proof_families": "P01,P02,P23,P24",
+    "proof_families": "P01,P02,P23,P24,P27,P29",
     "body_sha256": "bb2529b531543c93c2a4e00268c58ccec604cbf13c201e0703cadba4a5710cd4"
   },
   {
     "owner": "internal/cliapp/verify_runtime.go::verifyCommandOutput",
     "audit_rows": "A01,A28,A29,A30",
-    "proof_families": "P01,P02,P23,P24",
+    "proof_families": "P01,P02,P23,P24,P27,P29",
     "body_sha256": "0fc6359ca1000c34d0f6733d0ac524dd7f79a908266d8219f20f793cccfafcb0"
   },
   {
     "owner": "internal/cliapp/verify_runtime.go::verifyFindingOutputs",
     "audit_rows": "A01,A28,A29,A30",
-    "proof_families": "P01,P02,P23,P24",
+    "proof_families": "P01,P02,P23,P24,P27,P29",
     "body_sha256": "38fda618fa248c51b9610545e6ca1a039d6ff8c3618654fb84f0cc01131c6395"
   },
   {
     "owner": "internal/cliapp/verify_runtime.go::verifyWorkflowContractValidationOptions",
     "audit_rows": "A01,A28,A29,A30",
-    "proof_families": "P01,P02,P23,P24",
+    "proof_families": "P01,P02,P23,P24,P27,P29",
     "body_sha256": "b305c4c04f48605005000baadf3ab2518db111ed903dc75473b9f295c0b84274"
   },
   {
     "owner": "internal/cliapp/verify_runtime.go::writeVerifyFindings",
     "audit_rows": "A01,A28,A29,A30",
-    "proof_families": "P01,P02,P23,P24",
+    "proof_families": "P01,P02,P23,P24,P27,P29",
     "body_sha256": "60885a73ad113735ef3811a77484a3589bfe98d1728a0d422ee2d0f1118c715a"
   },
   {

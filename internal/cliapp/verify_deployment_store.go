@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -25,7 +27,7 @@ import (
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 )
 
-func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourcePlatformSpecPaths, cfg RuntimeConfigLoadResult, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, workspaces workspace.Resolver, workspaceOK bool, result *runtime.WorkflowContractValidationResult) {
+func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourcePlatformSpecPaths, cfg RuntimeConfigLoadResult, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, packBases packartifact.PlatformPackBaseResolver, workspaces workspace.Resolver, workspaceOK bool, result *runtime.WorkflowContractValidationResult) {
 	subject := "project:" + repo
 	var selected *storeselected.AdmissionInspection
 	var schemaRequest store.SchemaBootstrapRequest
@@ -89,7 +91,7 @@ func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourc
 	tailAccounted := false
 	var retained *verifyRetainedAdmissionInventory
 	schemaOK := verifyDeploymentBoundedObservation(ctx, storeBudget, result, "selected_store_schema", "internal/store/selected.AdmissionInspection.Inspect", subject, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
-		_, err := selected.Inspect(ctx, schemaRequest, func(snapshot *storeselected.AdmissionSnapshot) error {
+		inspection, err := selected.Inspect(ctx, schemaRequest, func(snapshot *storeselected.AdmissionSnapshot) error {
 			fresh, err := snapshot.RequiresSchemaPreparation()
 			if err != nil {
 				return err
@@ -103,10 +105,16 @@ func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourc
 				})
 				return nil
 			}
-			retained = inspectVerifyRecoverySnapshot(ctx, snapshot, repo, paths, cfg, source, opts, result)
+			retained = inspectVerifyRecoverySnapshot(ctx, snapshot, repo, paths, cfg, source, opts, packBases, result)
 			tailAccounted = true
 			return nil
 		})
+		if err == nil && !inspection.Fresh && len(inspection.MissingStateTables) != 0 {
+			result.BootReport.ExecutionObligations = append(result.BootReport.ExecutionObligations, bootverify.AdmissionExecutionObligation{
+				ID: "store_schema_preparation", Owner: "internal/store.SchemaBootstrapper.BootstrapSchema", Subject: subject,
+				Reason: "boot must prepare missing generated state tables: " + strings.Join(inspection.MissingStateTables, ", ") + "; verification never creates tables",
+			})
+		}
 		return err
 	})
 	if !tailAccounted {
@@ -155,7 +163,7 @@ type verifyRetainedAdmissionInventory struct {
 	actorsOK bool
 }
 
-func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.AdmissionSnapshot, repo string, paths CLISourcePlatformSpecPaths, cfg RuntimeConfigLoadResult, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, result *runtime.WorkflowContractValidationResult) *verifyRetainedAdmissionInventory {
+func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.AdmissionSnapshot, repo string, paths CLISourcePlatformSpecPaths, cfg RuntimeConfigLoadResult, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, packBases packartifact.PlatformPackBaseResolver, result *runtime.WorkflowContractValidationResult) *verifyRetainedAdmissionInventory {
 	retained := &verifyRetainedAdmissionInventory{}
 	hash := result.BootReport.SourceArtifactHash
 	subject := "source:" + hash
@@ -207,9 +215,11 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 	})
 	inspectVerifyRetainedChannels(ctx, snapshot, subject, result)
 	retained.forksOK = verifyDeploymentObservation(ctx, result, "selected_fork_recovery_admission", "internal/runtime/runforkexecution.InspectSelectedForkRecoveries", subject, failures.ClassLifecycleConflict, func(ctx context.Context) error {
-		forks, err := runforkexecution.InspectSelectedForkRecoveries(ctx, snapshot, runforkexecution.SourceArtifactSelectedContractSourceLoader{
-			RepoRoot: repo, PlatformSpecPath: paths.PlatformSpecPath,
-		})
+		loader, err := verifyRetainedSourceLoader(repo, paths, packBases)
+		if err != nil {
+			return err
+		}
+		forks, err := runforkexecution.InspectSelectedForkRecoveries(ctx, snapshot, loader)
 		if err != nil {
 			return err
 		}
@@ -245,6 +255,15 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 		return nil
 	})
 	return retained
+}
+
+func verifyRetainedSourceLoader(repo string, paths CLISourcePlatformSpecPaths, packBases packartifact.PlatformPackBaseResolver) (runforkexecution.SourceArtifactSelectedContractSourceLoader, error) {
+	if packBases == nil {
+		return runforkexecution.SourceArtifactSelectedContractSourceLoader{}, fmt.Errorf("invocation-selected platform pack generation is required for retained inspection")
+	}
+	return runforkexecution.SourceArtifactSelectedContractSourceLoader{
+		RepoRoot: repo, PlatformSpecPath: paths.PlatformSpecPath, PlatformPackBases: packBases,
+	}, nil
 }
 
 func inspectVerifyRetainedChannels(ctx context.Context, snapshot *storeselected.AdmissionSnapshot, subject string, result *runtime.WorkflowContractValidationResult) {

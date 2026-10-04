@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
@@ -117,12 +119,12 @@ func verifyDeploymentObservation(ctx context.Context, result *runtime.WorkflowCo
 	return false
 }
 
-func inspectVerifyDeployment(ctx context.Context, repo string, paths CLISourcePlatformSpecPaths, cfg RuntimeConfigLoadResult, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, result *runtime.WorkflowContractValidationResult) {
+func inspectVerifyDeployment(ctx context.Context, repo string, paths CLISourcePlatformSpecPaths, cfg RuntimeConfigLoadResult, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, packBases packartifact.PlatformPackBaseResolver, result *runtime.WorkflowContractValidationResult) {
 	backend, workspaces, workspaceOK := inspectVerifySourceAdmission(ctx, cfg, source, opts, result)
 	inspectVerifyListeners(ctx, repo, cfg, result)
 	inspectVerifyWorkspaceDependencies(ctx, cfg, backend, workspaceOK, result)
 	inspectVerifyPublicIngress(ctx, result, "source:"+result.BootReport.SourceArtifactHash)
-	inspectVerifySelectedStore(ctx, repo, paths, cfg, source, opts, workspaces, workspaceOK, result)
+	inspectVerifySelectedStore(ctx, repo, paths, cfg, source, opts, packBases, workspaces, workspaceOK, result)
 	result.BootReport.Sort()
 }
 
@@ -310,6 +312,19 @@ func inspectVerifyPublicIngress(ctx context.Context, result *runtime.WorkflowCon
 }
 
 func inspectVerifyListeners(ctx context.Context, repo string, cfg RuntimeConfigLoadResult, result *runtime.WorkflowContractValidationResult) {
+	var held []struct {
+		subject  string
+		listener net.Listener
+	}
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), verifyCleanupDeadline)
+		defer cancel()
+		for _, binding := range held {
+			verifyDeploymentObservation(cleanup, result, "listener_cleanup", "net.Listener.Close", binding.subject, failures.ClassDependencyUnavailable, func(context.Context) error {
+				return binding.listener.Close()
+			})
+		}
+	}()
 	var api, mcp string
 	valid := verifyDeploymentObservation(ctx, result, "serve_listener_configuration", "internal/cliapp.RuntimeConfigLoadResult.ResolveServeListeners", "project:"+repo, failures.ClassSchemaInvalid, func(context.Context) error {
 		var err error
@@ -338,7 +353,12 @@ func inspectVerifyListeners(ctx context.Context, repo string, cfg RuntimeConfigL
 			if err != nil {
 				return err
 			}
-			return errors.Join(local.Err(), listener.Close())
+			// Boot binds this set concurrently; isolated probes miss conflicts.
+			held = append(held, struct {
+				subject  string
+				listener net.Listener
+			}{binding.name + ":" + binding.addr, listener})
+			return local.Err()
 		})
 		result.BootReport.ExecutionObligations = append(result.BootReport.ExecutionObligations, bootverify.AdmissionExecutionObligation{
 			ID: "listener_binding", Owner: "internal/cliapp.ListenServeHTTPListener", Subject: binding.name + ":" + binding.addr,

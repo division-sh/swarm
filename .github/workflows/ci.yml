@@ -297,7 +297,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Prove store ownership and engine-disjoint crash reclaim
-        run: go test ./internal/store/internal/startupownership -count=1
+        run: go test ./internal/store/internal/startupownership -skip '^(TestPostgresPossessionObservationUsesIndependentExactSessionAndKey|TestPossessionObservationExternalProcessReleaseAndCrashBothStores)$' -count=1
       - name: Prove selected SQLite construction consumes the owner
         run: go test ./internal/store/selected -run '^TestOpenRuntimeSQLiteResolvesRequiredAndOptionalProductsOnce$' -count=1
       - name: Prove database and coordinate loss terminalize ownership

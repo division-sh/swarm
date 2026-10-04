@@ -8,6 +8,10 @@ mapfile -t units < <(jq -er --arg id "$BATCH_ID" '.batches[] | select(.id == $id
 test "${#units[@]}" -gt 0
 failed=0
 for UNIT_ID in "${units[@]}"; do
+  # Prepare the fixture, never let the admission observer pull an image.
+  if jq -e --arg id "$UNIT_ID" '.units[] | select(.id == $id) | any(.required_tests[]?; .package == "github.com/division-sh/swarm/internal/runtime/workspace" and .name == "TestVerifyCLIImageProbeLifecycleRealDocker")' "$plan" >/dev/null; then
+    docker pull golang:1.25-bookworm
+  fi
   primary_json="test-results/evidence/${UNIT_ID}-primary.json"
   primary_evidence="test-results/evidence/${UNIT_ID}-primary-evidence.json"
   unit_tmp=$(mktemp -d)

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/packadmission"
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -104,8 +105,16 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 	if err != nil {
 		return refuse("source_directory", "internal/cliapp.NormalizeSourceRoot", "source:"+resolvedContractsPath, err, nil)
 	}
-	if _, bundle, err := NewSwarmWorkflowModuleWithRuntimeConfig(repo, sourceRoot, resolvedPlatformSpecPath, configResult); err != nil {
-		return refuse("source_loading", "internal/cliapp.NewSwarmWorkflowModuleWithRuntimeConfig", "source:"+sourceRoot, err, nil)
+	base, err := LoadConfiguredPlatformPackBase(repo, configResult)
+	if err != nil {
+		return refuse("source_loading", "internal/cliapp.LoadConfiguredPlatformPackBase", "source:"+sourceRoot, err, nil)
+	}
+	packBases, err := packartifact.NewPlatformPackBaseGenerationOwner(base)
+	if err != nil {
+		return refuse("source_loading", "internal/packartifact.NewPlatformPackBaseGenerationOwner", "source:"+sourceRoot, err, nil)
+	}
+	if _, bundle, err := NewSwarmWorkflowModuleWithPackBase(repo, sourceRoot, resolvedPlatformSpecPath, base); err != nil {
+		return refuse("source_loading", "internal/cliapp.NewSwarmWorkflowModuleWithPackBase", "source:"+sourceRoot, err, nil)
 	} else {
 		packReadback := packInventoryReadbackFromInventory(bundle.PackInventory)
 		source, validationOpts, err := admitStructuralSource(configResult, bundle)
@@ -120,7 +129,7 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 		}
 		result, err := verifyBundleResultWithOptions(ctx, source, validationOpts)
 		if purpose == runtimebootverify.ExecutionValidation {
-			inspectVerifyDeployment(ctx, repo, resolvedPaths, configResult, source, validationOpts, &result)
+			inspectVerifyDeployment(ctx, repo, resolvedPaths, configResult, source, validationOpts, packBases, &result)
 		} else {
 			reason := "no explicit, project or local operator deployment configuration was selected"
 			if opts.portable {
