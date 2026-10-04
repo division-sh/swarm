@@ -117,9 +117,9 @@ func TestMockNormalRealDockerEmissionBothStores(t *testing.T) {
 				t.Fatalf("gateway emission lost the exact native call: %s, err=%v", marker, err)
 			}
 			for query, destination := range map[string]*int{
-				`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='items.processed'`: &events,
-				`SELECT COUNT(*) FROM agent_turns WHERE run_id=$1 AND agent_id='item-worker'`:  &turns,
-				`SELECT COUNT(*) FROM dead_letters WHERE run_id=$1`:                            &failures,
+				`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='items.processed'`:                          &events,
+				`SELECT COUNT(*) FROM agent_turns WHERE run_id=$1 AND agent_id='item-worker'`:                           &turns,
+				`SELECT COUNT(*) FROM dead_letters d JOIN events e ON e.event_id=d.original_event_id WHERE e.run_id=$1`: &failures,
 				`SELECT COUNT(*) FROM runtime_external_effect_attempts a JOIN agent_turns t ON t.completion_attempt_id=a.attempt_id WHERE t.run_id=$1 AND t.agent_id='item-worker' AND a.state='settled' AND a.completion_projection_phase='response_consumed'`: &consumed,
 			} {
 				if err := rt.DB.QueryRow(query, published.RunID).Scan(destination); err != nil {
