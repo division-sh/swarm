@@ -27,28 +27,11 @@ type AuthorityInspection struct {
 }
 
 func OpenAuthorityInspection(ctx context.Context, req AuthorityRequest) (*AuthorityInspection, error) {
-	switch req.Selection.Backend {
-	case storebackend.BackendSQLite:
-		selected, err := storeconstruction.OpenSQLiteRuntimeReadOnly(req.Selection.SQLitePath)
-		if err != nil {
-			return nil, err
-		}
-		if err := selected.Ping(ctx); err != nil {
-			return nil, errors.Join(err, selected.Close())
-		}
-		return &AuthorityInspection{store: selected, close: selected}, nil
-	case storebackend.BackendPostgres:
-		selected, _, err := storeconstruction.OpenPostgres(req.PostgresDSN)
-		if err != nil {
-			return nil, err
-		}
-		if err := selected.Ping(ctx); err != nil {
-			return nil, errors.Join(err, selected.Close())
-		}
-		return &AuthorityInspection{store: selected, close: selected}, nil
-	default:
-		return nil, errors.New("selected store backend is required")
+	selected, err := openInspectionStore(ctx, req)
+	if err != nil {
+		return nil, err
 	}
+	return &AuthorityInspection{store: selected, close: selected}, nil
 }
 
 func (s *AuthorityInspection) InspectAuthority(ctx context.Context) (runtimestartupownership.AuthorityInspection, error) {

@@ -5,10 +5,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -44,13 +46,25 @@ type DiscoveredTool struct {
 	Contract   runtimecontracts.ToolSchemaEntry
 }
 
+type DiscoveryOptions struct {
+	ServerTimeout time.Duration
+}
+
 type Client struct {
 	store      runtimecredentials.Store
 	httpClient *http.Client
 
-	mu      sync.RWMutex
-	servers map[string]*registeredServer
-	tools   map[string]DiscoveredTool
+	mu            sync.RWMutex
+	servers       map[string]*registeredServer
+	tools         map[string]DiscoveredTool
+	closed        bool
+	refreshMu     sync.Mutex
+	refreshCancel context.CancelFunc
+	refreshDone   chan struct{}
+	closeOnce     sync.Once
+	closeDone     chan struct{}
+	closeErr      error
+	cleanupErr    error
 }
 
 type CredentialKeyResolver func(string) (string, error)
@@ -61,19 +75,49 @@ type registeredServer struct {
 }
 
 func NewClient(store runtimecredentials.Store) *Client {
+	transport := http.DefaultTransport
+	if owned, ok := transport.(*http.Transport); ok {
+		transport = owned.Clone()
+	}
 	return &Client{
 		store: store,
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout:   30 * time.Second,
+			Transport: transport,
 		},
-		servers: map[string]*registeredServer{},
-		tools:   map[string]DiscoveredTool{},
+		servers:   map[string]*registeredServer{},
+		tools:     map[string]DiscoveredTool{},
+		closeDone: make(chan struct{}),
 	}
 }
 
-func (c *Client) Refresh(ctx context.Context, source semanticview.Source) []error {
+func (c *Client) Refresh(ctx context.Context, source semanticview.Source, opts DiscoveryOptions) []error {
+	c.refreshMu.Lock()
+	defer c.refreshMu.Unlock()
+	if opts.ServerTimeout < 0 {
+		return []error{fmt.Errorf("MCP discovery timeout must not be negative")}
+	}
+	if err := ctx.Err(); err != nil {
+		return []error{err}
+	}
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return []error{fmt.Errorf("MCP client is closed")}
+	}
+	ctx, cancelRefresh := context.WithCancel(ctx)
+	refreshDone := make(chan struct{})
+	c.refreshCancel, c.refreshDone = cancelRefresh, refreshDone
+	c.mu.Unlock()
+	defer func() {
+		cancelRefresh()
+		c.mu.Lock()
+		c.refreshCancel, c.refreshDone = nil, nil
+		close(refreshDone)
+		c.mu.Unlock()
+	}()
 	ctx = runtimeeffects.WithDifferentOwner(ctx, runtimeeffects.OwnerRuntimeDependency)
-	configs, err := parseServerConfigs(source)
+	configs, err := ServerConfigs(source)
 	if err != nil {
 		return []error{err}
 	}
@@ -82,6 +126,10 @@ func (c *Client) Refresh(ctx context.Context, source semanticview.Source) []erro
 	errs := make([]error, 0)
 
 	for _, cfg := range configs {
+		if err := ctx.Err(); err != nil {
+			errs = append(errs, err)
+			break
+		}
 		server := &registeredServer{cfg: cfg}
 		if strings.EqualFold(strings.TrimSpace(cfg.Transport), "stdio") {
 			stdio, stdioErr := newStdioRPCClient(cfg.Command, cfg.Args)
@@ -91,10 +139,20 @@ func (c *Client) Refresh(ctx context.Context, source semanticview.Source) []erro
 			}
 			server.stdio = stdio
 		}
-		tools, toolErr := c.discoverServerTools(ctx, source, server)
+		serverCtx := ctx
+		cancelServer := func() {}
+		if opts.ServerTimeout > 0 {
+			serverCtx, cancelServer = context.WithTimeout(ctx, opts.ServerTimeout)
+		}
+		tools, toolErr := c.discoverServerTools(serverCtx, source, server)
+		cancelServer()
 		if toolErr != nil {
 			if server.stdio != nil {
-				_ = server.stdio.Close()
+				cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				cleanupErr := server.stdio.Close(cleanupCtx)
+				c.recordCleanupError(cleanupErr)
+				toolErr = errors.Join(toolErr, cleanupErr)
+				cancel()
 			}
 			errs = append(errs, fmt.Errorf("mcp server %s: %w", cfg.Name, toolErr))
 			continue
@@ -112,18 +170,85 @@ func (c *Client) Refresh(ctx context.Context, source semanticview.Source) []erro
 	}
 
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	for name, server := range c.servers {
-		if _, keep := nextServers[name]; keep {
-			continue
+	previous := c.servers
+	if c.closed {
+		previous = nextServers
+		errs = append(errs, fmt.Errorf("MCP client closed during discovery"))
+	} else {
+		c.servers, c.tools = nextServers, nextTools
+	}
+	c.mu.Unlock()
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	if err := closeRegisteredServers(cleanupCtx, previous); err != nil {
+		c.recordCleanupError(err)
+		errs = append(errs, err)
+	}
+	cancel()
+	return errs
+}
+
+func (c *Client) Close(ctx context.Context) error {
+	if c == nil {
+		return nil
+	}
+	c.closeOnce.Do(func() {
+		c.mu.Lock()
+		servers, cancelRefresh, refreshDone := c.servers, c.refreshCancel, c.refreshDone
+		c.closed = true
+		c.servers, c.tools = nil, nil
+		c.mu.Unlock()
+		if cancelRefresh != nil {
+			cancelRefresh()
 		}
-		if server.stdio != nil {
-			_ = server.stdio.Close()
+		go func() {
+			defer close(c.closeDone)
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			c.httpClient.CloseIdleConnections()
+			cleanupErr := closeRegisteredServers(cleanupCtx, servers)
+			if refreshDone != nil {
+				select {
+				case <-refreshDone:
+				case <-cleanupCtx.Done():
+					cleanupErr = errors.Join(cleanupErr, fmt.Errorf("MCP discovery did not join during cleanup: %w", cleanupCtx.Err()))
+				}
+			}
+			c.mu.Lock()
+			c.closeErr = errors.Join(c.cleanupErr, cleanupErr)
+			c.mu.Unlock()
+		}()
+	})
+	select {
+	case <-c.closeDone:
+		return c.closeErr
+	case <-ctx.Done():
+		return fmt.Errorf("MCP client cleanup did not complete: %w", ctx.Err())
+	}
+}
+
+func (c *Client) recordCleanupError(err error) {
+	if err != nil {
+		c.mu.Lock()
+		c.cleanupErr = errors.Join(c.cleanupErr, err)
+		c.mu.Unlock()
+	}
+}
+
+func closeRegisteredServers(ctx context.Context, servers map[string]*registeredServer) error {
+	names := make([]string, 0, len(servers))
+	for name := range servers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var errs []error
+	for _, name := range names {
+		if stdio := servers[name].stdio; stdio != nil {
+			if err := stdio.Close(ctx); err != nil {
+				errs = append(errs, fmt.Errorf("mcp server %s cleanup: %w", name, err))
+			}
 		}
 	}
-	c.servers = nextServers
-	c.tools = nextTools
-	return errs
+	return errors.Join(errs...)
 }
 
 func (c *Client) DiscoveredTools() map[string]DiscoveredTool {
@@ -223,11 +348,13 @@ func (c *Client) discoverServerTools(ctx context.Context, source semanticview.So
 	if initializeResponse.Error != nil {
 		return nil, externalMCPRPCExecutionFailure(initializeResponse.Error, server.cfg, initializeRequest)
 	}
-	_, _ = c.callServer(ctx, server, RPCRequest{
+	if _, err := c.callServer(ctx, server, RPCRequest{
 		JSONRPC: "2.0",
 		Method:  "notifications/initialized",
 		Params:  map[string]any{},
-	})
+	}); err != nil {
+		return nil, err
+	}
 	toolsListRequest := RPCRequest{
 		JSONRPC: "2.0",
 		Method:  "tools/list",
@@ -314,7 +441,7 @@ func (c *Client) callHTTPServer(ctx context.Context, cfg ServerConfig, req RPCRe
 	return c.callHTTPServerWithCredentialKeyResolver(ctx, cfg, req, nil)
 }
 
-func (c *Client) callHTTPServerWithCredentialKeyResolver(ctx context.Context, cfg ServerConfig, req RPCRequest, resolver CredentialKeyResolver) (RPCResponse, error) {
+func (c *Client) callHTTPServerWithCredentialKeyResolver(ctx context.Context, cfg ServerConfig, req RPCRequest, resolver CredentialKeyResolver) (response RPCResponse, resultErr error) {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return RPCResponse{}, externalMCPTransportFailure(err, cfg, req)
@@ -362,7 +489,11 @@ func (c *Client) callHTTPServerWithCredentialKeyResolver(ctx context.Context, cf
 		cause := externalMCPTransportFailure(err, cfg, req)
 		return RPCResponse{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "mcp_http_attempt_outcome_unconfirmed", "mcp-client", req.Method, map[string]any{"server": cfg.Name, "method": req.Method, "stage": "transport"}, cause)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("MCP HTTP response cleanup failed: %w", err))
+		}
+	}()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		cause := externalMCPHTTPStatusFailure(resp.StatusCode, cfg, req)
 		return RPCResponse{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "mcp_http_status_effect_outcome_unconfirmed", "mcp-client", req.Method, map[string]any{"server": cfg.Name, "method": req.Method, "status": resp.StatusCode}, cause)
@@ -375,6 +506,9 @@ func (c *Client) callHTTPServerWithCredentialKeyResolver(ctx context.Context, cf
 	if actual > MaxWireResponseBytes {
 		cause := externalMCPWireLimitFailure(actual, cfg, req)
 		return RPCResponse{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "mcp_http_attempt_outcome_unconfirmed", "mcp-client", req.Method, map[string]any{"server": cfg.Name, "method": req.Method, "stage": "wire_limit"}, cause)
+	}
+	if req.ID == nil && strings.HasPrefix(req.Method, "notifications/") && len(bytes.TrimSpace(raw)) == 0 {
+		return RPCResponse{}, attempt.Succeed(ctx, map[string]any{"server": cfg.Name, "method": req.Method})
 	}
 	decoded, err := DecodeRPCResponse(raw, req)
 	if err != nil {
@@ -401,11 +535,18 @@ func (c *Client) credentialValue(ctx context.Context, key string) (string, bool,
 }
 
 type stdioRPCClient struct {
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	stdout *bufio.Reader
-	mu     sync.Mutex
-	nextID atomic.Int64
+	cmd        *exec.Cmd
+	stdin      io.WriteCloser
+	stdout     *bufio.Reader
+	mu         sync.Mutex
+	stdoutPipe io.ReadCloser
+	stderrPipe io.ReadCloser
+	stderrDone chan struct{}
+	stderrErr  error
+	closeOnce  sync.Once
+	closeDone  chan struct{}
+	closeErr   error
+	nextID     atomic.Int64
 }
 
 func newStdioRPCClient(command string, args []string) (*stdioRPCClient, error) {
@@ -414,50 +555,101 @@ func newStdioRPCClient(command string, args []string) (*stdioRPCClient, error) {
 		return nil, fmt.Errorf("stdio command is required")
 	}
 	cmd := exec.Command(command, args...)
+	configureStdioProcess(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		_ = stdin.Close()
 		return nil, err
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
 		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
+		_ = stderr.Close()
 		return nil, err
 	}
 	client := &stdioRPCClient{
-		cmd:    cmd,
-		stdin:  stdin,
-		stdout: bufio.NewReader(stdout),
+		cmd:        cmd,
+		stdin:      stdin,
+		stdout:     bufio.NewReader(stdout),
+		stdoutPipe: stdout,
+		stderrPipe: stderr,
+		stderrDone: make(chan struct{}),
+		closeDone:  make(chan struct{}),
 	}
 	go func() {
-		scanner := bufio.NewScanner(stderr)
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if line == "" {
-				continue
-			}
-			slog.Warn("mcp stdio stderr", "line", line)
-		}
+		defer close(client.stderrDone)
+		// Provider stderr may contain credentials; drain it without public logging.
+		_, client.stderrErr = io.Copy(io.Discard, stderr)
 	}()
 	return client, nil
 }
 
-func (c *stdioRPCClient) Close() error {
+func (c *stdioRPCClient) Close(ctx context.Context) error {
 	if c == nil || c.cmd == nil || c.cmd.Process == nil {
 		return nil
 	}
-	_ = c.stdin.Close()
-	return c.cmd.Process.Kill()
+	c.closeOnce.Do(func() {
+		go func() {
+			defer close(c.closeDone)
+			var errs []error
+			killErr := killStdioProcess(c.cmd)
+			if killErr != nil && !errors.Is(killErr, os.ErrProcessDone) {
+				errs = append(errs, killErr)
+			}
+			for _, pipe := range []io.Closer{c.stdin, c.stdoutPipe, c.stderrPipe} {
+				if pipe == nil {
+					continue
+				}
+				if err := pipe.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
+					errs = append(errs, err)
+				}
+			}
+			<-c.stderrDone
+			if c.stderrErr != nil && !errors.Is(c.stderrErr, os.ErrClosed) {
+				errs = append(errs, fmt.Errorf("MCP stderr drain failed"))
+			}
+			if err := c.cmd.Wait(); err != nil && !stdioProcessWasKilled(err) {
+				errs = append(errs, err)
+			}
+			c.closeErr = errors.Join(errs...)
+		}()
+	})
+	select {
+	case <-c.closeDone:
+		return c.closeErr
+	case <-ctx.Done():
+		return fmt.Errorf("MCP stdio process cleanup did not complete: %w", ctx.Err())
+	}
 }
 
 func (c *stdioRPCClient) Call(ctx context.Context, cfg ServerConfig, req RPCRequest) (RPCResponse, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return RPCResponse{}, externalMCPTransportFailure(err, cfg, req)
+	}
+	cancelDone := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		defer close(cancelDone)
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = c.Close(cleanupCtx)
+	})
+	defer func() {
+		if !stop() {
+			<-cancelDone
+		}
+	}()
 	if req.ID == nil && !strings.HasPrefix(strings.TrimSpace(req.Method), "notifications/") {
 		req.ID = c.nextID.Add(1)
 	}
@@ -501,8 +693,14 @@ func (c *stdioRPCClient) Call(ctx context.Context, cfg ServerConfig, req RPCRequ
 		var read frameResult
 		select {
 		case <-ctx.Done():
-			_ = c.Close()
-			cause := externalMCPTransportFailure(ctx.Err(), cfg, req)
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			cleanupErr := c.Close(cleanupCtx)
+			cancel()
+			// Closing the owned pipe releases and joins the frame reader.
+			if c.stdoutPipe != nil {
+				<-frameCh
+			}
+			cause := externalMCPTransportFailure(errors.Join(ctx.Err(), cleanupErr), cfg, req)
 			return RPCResponse{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "mcp_stdio_attempt_outcome_unconfirmed", "mcp-client", req.Method, map[string]any{"server": cfg.Name, "method": req.Method, "stage": "wait"}, cause)
 		case read = <-frameCh:
 		}
@@ -511,8 +709,10 @@ func (c *stdioRPCClient) Call(ctx context.Context, cfg ServerConfig, req RPCRequ
 			return RPCResponse{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "mcp_stdio_attempt_outcome_unconfirmed", "mcp-client", req.Method, map[string]any{"server": cfg.Name, "method": req.Method, "stage": "read"}, cause)
 		}
 		if read.actual > MaxWireResponseBytes {
-			_ = c.Close()
-			cause := externalMCPWireLimitFailure(read.actual, cfg, req)
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			cleanupErr := c.Close(cleanupCtx)
+			cancel()
+			cause := errors.Join(externalMCPWireLimitFailure(read.actual, cfg, req), cleanupErr)
 			return RPCResponse{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "mcp_stdio_attempt_outcome_unconfirmed", "mcp-client", req.Method, map[string]any{"server": cfg.Name, "method": req.Method, "stage": "wire_limit"}, cause)
 		}
 		line := bytes.TrimSpace(read.frame)
@@ -557,7 +757,7 @@ func readBoundedStdioFrame(reader *bufio.Reader) ([]byte, int, error) {
 	}
 }
 
-func parseServerConfigs(source semanticview.Source) ([]ServerConfig, error) {
+func ServerConfigs(source semanticview.Source) ([]ServerConfig, error) {
 	value, ok := semanticview.PolicyValueForFlow(source, "", "mcp_servers")
 	if !ok {
 		return nil, nil

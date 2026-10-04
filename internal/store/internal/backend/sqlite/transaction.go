@@ -41,6 +41,9 @@ func (b *Backend) RunTransaction(ctx context.Context, label string, operation fu
 // RunTransactionOutcome keeps acknowledged COMMIT separate from later cleanup
 // errors. False is not evidence that an uncertain COMMIT rolled back.
 func (b *Backend) RunTransactionOutcome(ctx context.Context, label string, operation func(context.Context, *sql.Tx) error) (bool, error) {
+	if err := b.refuseInspectionMutation(ctx); err != nil {
+		return false, err
+	}
 	if !b.Valid() {
 		return false, fmt.Errorf("sqlite backend is required")
 	}
@@ -139,6 +142,17 @@ func (b *Backend) RunTransactionOutcome(ctx context.Context, label string, opera
 // RunReadTransaction owns the lifecycle of one caller-scoped consistent read.
 // Reads deliberately bypass mutation admission and busy-recovery accounting.
 func (b *Backend) RunReadTransaction(ctx context.Context, operation func(context.Context, *sql.Tx) error) error {
+	if tx, err := b.inspectionTransaction(ctx); err != nil {
+		return err
+	} else if tx != nil {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if operation == nil {
+			return nil
+		}
+		return errors.Join(operation(ctx, tx), ctx.Err())
+	}
 	if !b.Valid() {
 		return fmt.Errorf("sqlite backend is required")
 	}

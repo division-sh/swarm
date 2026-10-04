@@ -105,6 +105,25 @@ func (l SourceArtifactSelectedContractSourceLoader) LoadRunForkSelectedContractS
 }
 
 func (l SourceArtifactSelectedContractSourceLoader) LoadRunForkSelectedContractSourceForRequest(ctx context.Context, req SelectedContractSourceLoadRequest) (LoadedSelectedContractSource, error) {
+	loaded, err := l.InspectRunForkSelectedContractSourceForRequest(ctx, req)
+	if err != nil {
+		return LoadedSelectedContractSource{}, err
+	}
+	bundle, ok := semanticview.Bundle(loaded.Source)
+	if !ok || bundle == nil || bundle.SourceArtifact == nil {
+		return LoadedSelectedContractSource{}, fmt.Errorf("selected source inspection did not retain its admitted artifact")
+	}
+	runtimeProjection, err := sourceartifact.MaterializeRuntimeProjection(bundle.SourceArtifact)
+	if err != nil {
+		return LoadedSelectedContractSource{}, fmt.Errorf("%s: materialize DB-backed selected-contract source %s: %w", runbundle.CodeBundleDataIntegrityError, loaded.SourceArtifactFact.BundleHash(), err)
+	}
+	loaded.RuntimeProjection, loaded.Cleanup = runtimeProjection, runtimeProjection.Release
+	return loaded, nil
+}
+
+// InspectRunForkSelectedContractSourceForRequest shares boot's exact immutable
+// source/compiler admission, stopping before execution projection allocation.
+func (l SourceArtifactSelectedContractSourceLoader) InspectRunForkSelectedContractSourceForRequest(ctx context.Context, req SelectedContractSourceLoadRequest) (LoadedSelectedContractSource, error) {
 	if err := ctx.Err(); err != nil {
 		return LoadedSelectedContractSource{}, err
 	}
@@ -157,6 +176,9 @@ func (l SourceArtifactSelectedContractSourceLoader) LoadRunForkSelectedContractS
 	if err != nil {
 		return LoadedSelectedContractSource{}, err
 	}
+	if record.BundleHash != bundleHash {
+		return LoadedSelectedContractSource{}, fmt.Errorf("%s: requested selected source %s, reader returned %s", runbundle.CodeBundleDataIntegrityError, bundleHash, record.BundleHash)
+	}
 	artifact, err := record.Decode()
 	if err != nil {
 		return LoadedSelectedContractSource{}, fmt.Errorf("%s: decode DB-backed selected-contract source %s: %w", runbundle.CodeBundleDataIntegrityError, bundleHash, err)
@@ -182,24 +204,22 @@ func (l SourceArtifactSelectedContractSourceLoader) LoadRunForkSelectedContractS
 	if err != nil {
 		return LoadedSelectedContractSource{}, err
 	}
-	runtimeProjection, err := sourceartifact.MaterializeRuntimeProjection(artifact)
-	if err != nil {
-		return LoadedSelectedContractSource{}, fmt.Errorf("%s: materialize DB-backed selected-contract source %s: %w", runbundle.CodeBundleDataIntegrityError, bundleHash, err)
-	}
-	return LoadedSelectedContractSource{
+	loaded := LoadedSelectedContractSource{
 		Selection:               selection,
 		Source:                  source,
 		SourceArtifactFact:      sourceFact,
 		EffectiveSourceIdentity: effectiveSourceIdentity,
 		MockConnectorResponses:  mockConnectorResponses,
-		RuntimeProjection:       runtimeProjection,
-		Cleanup:                 runtimeProjection.Release,
 		Module: selectedContractWorkflowModule{
 			source:        source,
 			nodes:         nodes,
 			guardRegistry: runtimepipeline.NewContractGuardRegistry(source),
 		},
-	}, nil
+	}
+	if err := validateLoadedSelectedContractSource(req, loaded); err != nil {
+		return LoadedSelectedContractSource{}, err
+	}
+	return loaded, nil
 }
 
 func compileSelectedContractSource(source semanticview.Source, sourceFact runtimecorrelation.SourceArtifactFact) (semanticview.Source, *providerconnectors.MockResponsePlan, scenarioexecution.EffectiveSourceIdentity, error) {
@@ -228,12 +248,19 @@ func loadRunForkSelectedContractSource(ctx context.Context, loader SelectedContr
 	if err != nil {
 		return LoadedSelectedContractSource{}, err
 	}
+	if err := validateLoadedSelectedContractSource(req, loaded); err != nil {
+		return LoadedSelectedContractSource{}, err
+	}
+	return loaded, nil
+}
+
+func validateLoadedSelectedContractSource(req SelectedContractSourceLoadRequest, loaded LoadedSelectedContractSource) error {
 	loadedFact := loaded.SourceArtifactFact
 	if err := loadedFact.Validate(); err != nil {
-		return LoadedSelectedContractSource{}, fmt.Errorf("%s: selected-contract loader returned invalid bundle source fact: %w", runbundle.CodeBundleDataIntegrityError, err)
+		return fmt.Errorf("%s: selected-contract loader returned invalid bundle source fact: %w", runbundle.CodeBundleDataIntegrityError, err)
 	}
 	if expectedHash := strings.TrimSpace(req.BundleHash); expectedHash != "" && expectedHash != loadedFact.BundleHash() {
-		return LoadedSelectedContractSource{}, fmt.Errorf(
+		return fmt.Errorf(
 			"%s: selected-contract bundle_hash mismatch: expected %s loaded %s",
 			runbundle.CodeBundleDataIntegrityError,
 			expectedHash,
@@ -243,13 +270,13 @@ func loadRunForkSelectedContractSource(ctx context.Context, loader SelectedContr
 	expectedFact := req.SourceArtifactFact
 	if expectedFact.BundleHash() != "" {
 		if err := expectedFact.Validate(); err != nil {
-			return LoadedSelectedContractSource{}, fmt.Errorf("%s: expected selected-contract bundle source fact is invalid: %w", runbundle.CodeBundleDataIntegrityError, err)
+			return fmt.Errorf("%s: expected selected-contract bundle source fact is invalid: %w", runbundle.CodeBundleDataIntegrityError, err)
 		}
 		if expectedFact.BundleHash() != loadedFact.BundleHash() {
-			return LoadedSelectedContractSource{}, fmt.Errorf("%s: selected-contract bundle_hash mismatch: expected %s loaded %s", runbundle.CodeBundleDataIntegrityError, expectedFact.BundleHash(), loadedFact.BundleHash())
+			return fmt.Errorf("%s: selected-contract bundle_hash mismatch: expected %s loaded %s", runbundle.CodeBundleDataIntegrityError, expectedFact.BundleHash(), loadedFact.BundleHash())
 		}
 	}
-	return loaded, nil
+	return nil
 }
 
 func cleanupLoadedSelectedContractSource(source LoadedSelectedContractSource) error {

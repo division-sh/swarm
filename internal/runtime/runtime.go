@@ -255,6 +255,7 @@ type Runtime struct {
 	runLifecycleCandidates     runtimerunlifecycle.CandidateOwner
 	deliveryStore              runtimedelivery.Store
 	timerObligationReader      runtimetimerobligation.Reader
+	standingRestartReader      runtimerunlifecycle.StandingRestartDispositionReader
 	mailboxStore               runtimetools.MailboxPersistence
 	effectsStore               runtimeeffects.Store
 	managedCapabilitiesStore   managedcapabilities.Persistence
@@ -880,7 +881,7 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("workflow contract validation failed: %w", err)
 	}
-	if err := validateSelectedBackendModelAliasesForDeclaredAgents(posture, cfg, source); err != nil {
+	if err := ValidateDeclaredAgentModelAdmission(posture, cfg, source); err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("llm model alias validation failed: %w", err)
 	}
 	providerCredentialResolver := providerCredentialResolverForRuntimeOptions(opts)
@@ -1147,6 +1148,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		runLifecycleCandidates:    runtimeDeps.RunLifecycleCandidates,
 		deliveryStore:             runtimeDeps.DeliveryStore,
 		timerObligationReader:     runtimeDeps.TimerObligationReader,
+		standingRestartReader:     runtimeDeps.ManagerPersistenceRoles.StandingRestarts,
 		mailboxStore:              runtimeDeps.MailboxStore,
 		effectsStore:              runtimeDeps.EffectsStore,
 		managedCapabilitiesStore:  runtimeDeps.ManagedCapabilitiesStore,

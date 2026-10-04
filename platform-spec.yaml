@@ -8976,11 +8976,176 @@ engine:
       note: Chain depth overflow is NOT a handler failure. It is an emission interception. The dead_letter is for the downstream
         event, not the handler that produced it.
   boot_verification:
+    admission_evidence:
+      promoted_by: '#2286'
+      owner: internal/runtime/bootverify.Report and internal/runtime.ValidateWorkflowContractSurface
+      rule: >
+        Admission findings and observation completeness have one owner, independent of CLI rendering.
+        Registered checks declare source, deployment, or mixed purpose in the existing registry.
+        Mixed checks retain source validation and separately account for concrete fulfillment.
+        Post-registry clauses record their own execution and an early refusal leaves a named unperformed
+        tail, not an empty success list. Observations are scoped to the admitted source identity and
+        selected configuration; they never grant execution authority or a future lease.
+      observation_fields: [check_id, owner, subject, class, status, reason, started_at, finished_at, dependencies, failure_class]
+      observation_classes: [source, deployment]
+      observation_statuses: [passed, failed, unavailable, not_run, not_applicable]
+      applicability: >
+        not_applicable requires proof from the canonical applicability owner. A missing required read
+        port, unavailable dependency, timeout or failed cleanup is never evidence of empty state.
+        Portable validation may succeed with explicitly named unobserved deployment prerequisites,
+        but admission_complete remains false. Lint and warning fatality retain their existing policy.
+      execution_obligations: >
+        Production-only acquisition, preparation, provider visibility/authorization settlement and
+        gateway handshake are separately named by id, exact subject, owner and reason. They are neither
+        passed observations nor applicability exclusions. Complete admission with outstanding execution
+        obligations retains live_readiness: not_evaluated and does not promise successful startup.
+      reduction: >
+        Preserve every finding and observation. Numeric outcome priority is interruption 130, hard
+        invalidity 2, authentication 4, conflict 6, dependency/incomplete 3, otherwise 0. Applicable
+        unobserved admission cannot become an execution obligation merely to obtain exit 0.
+    deployment_validation:
+      promoted_by: '#2286'
+      owner: Existing source/config admission, selected-store inspection and consumer-owned admission predicates
+      selection: >
+        Default verify validates the exact ordinary live serve intent when the configuration owner's
+        admitted layer facts identify explicit, project or local operator configuration. Built-in
+        defaults and unrelated user-global configuration do not identify a project deployment.
+        Missing or malformed declared configuration is a refusal, not a portable fallback.
+        Explicit --portable opts down to structural validation; absence of deployment context may
+        also return structural success, with the reason and every unchecked family visible.
+      immutable_context: >
+        Source bytes, effective source identity, selected model/catalog and admitted configuration
+        are frozen once. Shared projections consume those values instead of reloading the file or
+        selecting another context. The result covers only that invocation's resolved intent, not
+        different later flags, contexts or observations. Token and credential observations never
+        expose secret values in findings or readback.
+      store_inspection: >
+        Selected-store observations share one consistent read-only snapshot: PostgreSQL repeatable
+        read and SQLite read transaction. Schema compatibility consumes the bootstrap owner's
+        decision without DDL, schema stamping, process possession or domain writes. Fresh supported
+        state names boot preparation as unperformed; unavailable or partial domain readers never
+        mean empty state. Inspection scope is revoked when the callback ends and cannot be escaped
+        by supplying a different context. The PostgreSQL inspection-only pool uses the existing
+        observation socket owner to bound native connection, read and transaction cleanup I/O;
+        a context deadline alone is not proof that driver I/O is bounded. Runtime pools and
+        retained process-authority sessions do not inherit verifier deadlines. Cancellation or
+        uncertain transaction cleanup disposes the exact observation transport and is visible.
+      possession_observation: >
+        Selected inspection may make one transient nonblocking try-lock and checked immediate
+        release through the existing process-possession owner. This is a separately timed kernel
+        observation outside the MVCC snapshot, not authority, holder identity, a retained lease,
+        or evidence that future boot acquisition will succeed. It may momentarily contend with
+        another observer. Durable lineage is inspected independently in the consistent snapshot;
+        a free kernel lock cannot override corrupt or repair-required lineage. SQLite uses only
+        the existing safe engine-disjoint .possession coordinate: canonical path, supported local
+        filesystem, owner-only mode on the possession coordinate, current-user-owned regular
+        single-link files, no symlinks, and opened/current
+        database and coordinate identities. Missing, unsafe or replaced coordinates are incomplete
+        or refused, never free. Observation never creates, truncates, repairs, replaces or removes
+        either file and never locks database or WAL bytes. PostgreSQL uses an independent session
+        with the same frozen native configuration and exact production advisory-lock key. Native
+        I/O is deadline-bound; acquisition ambiguity, cancellation or failed exact-session unlock
+        physically discards that session instead of returning possible possession to a pool.
+        Release, disposal and cancellation callbacks are joined within the separate five-second
+        cleanup tail; cleanup failures are visible and nonzero. Boot independently acquires and
+        retains actual process possession and records its authority. Portable verify and describe
+        do not run this observation.
+      retained_sources: >
+        Run-bundle availability owns ordinary-versus-standing eligibility. Pinned-source admission
+        consumes that reader and the exact admitted hash set; a required missing reader or failed
+        read is incomplete. Source-artifact inspection validates exact stored bytes and identities,
+        not presence alone. Neither inspection recovers execution, edits runs or reconstructs
+        persisted source bytes from a query representation.
+      recovery_inspection: >
+        Boot and read-only admission share recovery inventory assembly, standing-run partitions,
+        manager-state counts and the recovery_on_startup decision. Every required delivery,
+        timer, standing-disposition and manager reader must be present and complete; failed or
+        cancelled reads never publish an empty or partially successful inventory. Ordinary-run
+        source applicability uses the existing durable run-binding classifier without minting
+        a generation grant, excludes selected-fork bindings, and is not execution ownership.
+        Dynamic readiness filtering shares the same standing-disposition owner. Boot separately
+        proves current process and generation ownership and retains recovery/hydration effects.
+      connected_channel_inspection: >
+        The same selected-store read snapshot consumes canonical onboarding, current activation
+        and teardown readers. Verification and boot share the exact durable activation-to-operation
+        ownership check and pending teardown kind admission. Missing readers, malformed evidence
+        and failed reads never become an empty connection inventory. Retained rows do not grant
+        successor runtime identity, executable channel publication, credential admission or live
+        readiness. Boot independently reconciles successor context and credential/identity facts,
+        retires obsolete contexts and settles provider effects, teardown and confirmation delivery;
+        verification names these outstanding responsibilities without performing any of them.
+      retained_fork_actor_admission: >
+        Selected-fork inspection shares the actual retained binding, preparation, execution,
+        source-artifact fingerprint, finite-feed and recovery-disposition owners. Its prospective
+        disposition is not an acknowledged recovery, executable process authority or a grant.
+        Immutable retained artifacts are decoded by the existing loader without filesystem
+        projection. Retained ordinary actors first consume the same declaration reconciliation
+        projection as startup, then the same persisted descriptor, posture, intent, subscription,
+        memory-ownership and build-configuration checks. Flow-readiness actors do not borrow
+        static declaration replacement. Foreign selected-fork actors consume their exact selected
+        source rather than the ordinary source's configuration. Inspection neither persists
+        reconciliation nor hydrates a manager or constructs an actor/provider runtime.
+        After the consistent read callback ends, retained source/configuration values consume
+        the existing scoped model, prompt, workspace, credential and completed MCP-catalog
+        admission owners. Remote observations do not retain an MVCC transaction or escape its
+        revoked read role. Actual recovery, lifecycle replacement, workspace preparation and
+        provider-owned visibility/authorization remain separately named execution obligations.
+        Composed retained-fork findings, observations and obligations retain their exact fork
+        invocation coordinate, including when multiple forks use the same source artifact.
+        Private fork catalogs never replace the ordinary source's completed catalog.
+      predicate_ratchet: >
+        In addition to the existing registered-check purpose census, a test-only source census
+        pins the audited startup predicate owners and verify consumers, including boot-local
+        refusals and post-registry clauses. A changed owner, added local refusal, removed consumer
+        or reclassified clause requires explicit audit-row/proof accounting and reviewed refresh.
+        It is not a second production validator or registry; source hashes are change detectors,
+        not execution proof or permission to claim semantic closure.
+      observation_protocol: >
+        Required observations have a 60-second aggregate budget, five seconds for local socket or
+        metadata steps, fifteen seconds for configured subprocess or remote discovery steps and
+        a separate bounded five-second cleanup tail. Caller cancellation wins. Permitted protocols
+        are exact configured HTTP/stdio MCP initialize/list (never tools/call), configured executable
+        version, inspect-only Docker metadata, and immediate bind-and-close. A CLI image version
+        probe uses an observed existing immutable image digest, read-only root, no mounts, ports,
+        network, privileges or credentials, dropped capabilities, no-new-privileges and a uniquely
+        owned cleanup identity. No pull, workspace/network preparation, store mutation, provider
+        turn, token refresh, tunnel or channel activation is a verification operation. Owned
+        children and readers must be canceled, drained and joined; sessions closed and probe
+        containers removed. Failed cleanup remains incomplete, never ignored successful admission.
+      execution_boundary: >
+        Derivable source, profile, catalog, permission, credential, binding-shape and static prompt/
+        tool-plan predicates are shared before persistence on both normal and selected-fork paths.
+        Actual provider-owned visibility/authorization settlement and runtime-gateway handshake
+        retain current execution authority and durable evidence. Verification cannot preconfirm
+        visibility, construct an actor runtime, reuse stale authorization or manufacture a grant.
+        Boot repeats applicable observations and retains final currentness and commit fences.
+      provider_capability_admission: >
+        Native-tool admission consumes the selected profile's existing provider contract and the
+        same native/fallback decision owner on verify and boot. Reading shipped capability facts
+        never constructs a provider runtime or session. Scoped agent selection and persisted
+        descriptor identity remain validated. Runtime execution independently requires the actual
+        adapter's valid provider contract and typed managed-call boundaries; static admission is
+        not provider-visible tool evidence or permission to execute a fallback tool.
+      workspace_capability_admission: >
+        Configured target capability and scoped workspace routing use the same workspace owner
+        on inspection and boot. Inspection reads planned host roots without creating them,
+        executing Docker, materializing source/data, or inventing physical source bindings. Its
+        resolver refuses execution workspace resolution and exposes no runtime lifecycle. Actual
+        source binding, host overlap, lifetime/revocation and run-bound data checks remain on boot
+        and execution paths; capability shape is not evidence of their successful settlement.
+      output: >
+        Complete passing deployment admission reports validation_scope: deployment,
+        admission_complete: true and live_readiness: not_evaluated. Text and quiet say admission
+        checks passed; startup execution not performed, with all outstanding execution obligations.
+        Required missing, failed, disallowed, timed-out or uncleaned observations are incomplete
+        and nonzero. Portable success reports structural scope and admission_complete: false,
+        including whether --portable was explicitly requested or no deployment context existed.
     structural_validation:
       owner: internal/runtime.ValidateWorkflowContractSurface and internal/runtime/bootverify
       source_owner: internal/runtime.AdmitEffectiveSourceProjection over internal/packadmission.FromBundle metadata
       rule: >
-        Bare verify, describe, describe --graph and describe routes validate one admitted effective source,
+        Explicit portable verify, verify without deployment context, describe, describe --graph and
+        describe routes validate one admitted effective source,
         including provider/channel declarations. Structural validation is an explicit validation purpose,
         not a live or mock execution selection. It acquires no credential owner, probes no MCP/Claude/Docker,
         constructs no actor and claims no selected store. It keeps declared schema, field, scope, model
@@ -8988,11 +9153,15 @@ engine:
         Missing test performances and live machine readiness are separate admission concerns.
       check_boundary: >
         Existing bootcheck and post-boot declaration owners remain authoritative. Credential state and
-        concrete MCP availability/discovery are execution observations, absent from structural reports.
+        concrete MCP availability/discovery are deployment observations, explicitly unperformed in
+        structural reports.
         Mixed tool/model checks retain declaration validation without inventing successful discovery or
         selecting an execution backend. Runtime boot and doctor retain concrete live readiness checks.
       output: >
-        Verify and describe report validation_scope: structural and live_readiness: not_evaluated.
+        Portable verify and describe report validation_scope: structural and live_readiness:
+        not_evaluated. Portable verify additionally reports admission_complete: false; describe
+        retains its structural readback contract. Default verify with admitted deployment context
+        consumes deployment_validation instead.
         Structural workspace_backend and verify capability_subjects are retired without aliases.
         Verify retains pack_inventory and source capability validation. Operational capability subjects
         remain on their existing live diagnostic surfaces. production_valid and authored-harness counts/provenance
@@ -9343,10 +9512,11 @@ engine:
         non_blocking_warning: Non-blocking warning-level findings in typed diagnostic lists use `[WARN]`.
         informational: Audit/informational lint evidence in typed diagnostic lists uses `[INFO]`.
       stream_contract:
-        stdout: Successful load-bearing command result only, such as `verify ok` for human output, the single JSON document
-          for `--json`, or `ok` for `--quiet`.
+        stdout: Scoped admission result, the single JSON document for --json, or the same scoped outcome for --quiet.
+          Unperformed observations and startup execution obligations remain visible; never bare ok or an unconditional
+          promise of live readiness. Portable validation explicitly reports structural scope.
         stderr: Human-readable analyzer diagnostics, advisory lint evidence, warnings, and blocking failures.
-    check_count: 43 primary checks plus 3 supplemental checks
+    check_count: 69 primary checks plus 2 supplemental checks; managed credentials share the primary credential observation
     implementation_notes:
       framework: Each check is a named function that receives the loaded contract bundle and returns a list of findings. Each
         finding has the check ID, severity, message, location (flow, node, agent, or event name), optional evidence, and
@@ -21404,8 +21574,10 @@ workspace_model:
     scope: >
       Defines the capability-derived effective workspace backend requirement for `swarm serve` boot,
       selected-contract run-fork lifecycle consumers, local foreground `swarm run start`, `swarm doctor`,
-      and the `conversation.fork_chat` sandbox runtime. Bare verify and describe are structural readers and
-      do not select a workspace backend or observe machine readiness. The loaded contract and effective runtime
+      and the `conversation.fork_chat` sandbox runtime. Default verify with admitted deployment context consumes
+      the same backend requirement as an admission observation, without preparing a workspace. Portable verify
+      and describe are structural readers and do not select a workspace backend or observe machine readiness.
+      The loaded contract and effective runtime
       backend decide whether a workspace is needed, whether host is sufficient, or whether container isolation is required.
       Operator backend input is a preference or explicit unsafe opt-out; it is not the semantic source of the requirement.
     cli_flag: --workspace-backend <docker|host>
@@ -25004,8 +25176,11 @@ cli_specification:
               classification: shared_output
               fact_owner: local contract verification
               json_shape: >
-                object with ok, source_root, validation_scope: structural, live_readiness: not_evaluated,
-                pack_inventory, errors, warnings, and lint_evidence.
+                object with ok, source_root, validation_scope (structural or deployment), live_readiness,
+                admission_complete, bundle_hash, source_label, members, optional manifest,
+                observations and execution_obligations. The deployment_context observation records
+                whether --portable was explicitly requested or deployment configuration was absent.
+                The object also includes pack_inventory, errors, warnings, and lint_evidence.
                 workspace_backend and operational capability_subjects are retired from structural verify.
                 Structural verification does not claim deployment readiness. `errors`, `warnings`,
                 and `lint_evidence` are arrays of structured boot verification findings with canonical `check_id`,
@@ -25014,10 +25189,11 @@ cli_specification:
                 this same object for structured boot verification failures with `ok: false` instead of requiring consumers
                 to parse human stderr.
               human_text_streams:
-                stdout: "successful load-bearing `verify ok: source=...` result only"
+                stdout: "scoped admission result and explicitly unperformed checks/obligations; portable success never claims deployment readiness"
                 stderr: "analyzer diagnostics and advisory findings rendered as typed diagnostic lists with `[BLOCKER]`, `[WARN]`, or `[INFO]`; single command-outcome failures still use `ERROR:`/`WARNING:`"
               quiet_values:
-              - ok
+              - scoped admission outcome; never bare ok
+              - named unperformed or failed observations and startup execution obligations
             runs:
               command: swarm run list
               classification: shared_output

@@ -50,7 +50,7 @@ func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
 	emitGate := filepath.Join(fakeRoot, "release-mcp-emit")
 	env := append(releaseProcessEnv(fakeBin, fakeRoot, home), fakeDockerMCPEmitGateEnv+"="+emitGate)
 	contracts := filepath.Join(releaseRoot, "contracts")
-	verify := runReleaseCommand(t, 30*time.Second, releaseRoot, env, "", binaryPath, "verify", contracts)
+	verify := runReleaseCommand(t, 30*time.Second, releaseRoot, env, "", binaryPath, "verify", contracts, "--portable")
 	if verify.err != nil {
 		t.Fatalf("release overflow fixture verification failed: %v\n%s", verify.err, verify.output)
 	}

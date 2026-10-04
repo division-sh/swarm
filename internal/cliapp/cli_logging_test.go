@@ -57,7 +57,7 @@ func TestCLILoggingForSharedOutputConsumers(t *testing.T) {
 		{
 			name: "verify",
 			args: func(t *testing.T) []string {
-				return []string{"verify", outputModeVerifyFixture(t), "--config", writeTestVerifyRuntimeConfig(t)}
+				return []string{"verify", outputModeVerifyFixture(t), "--portable", "--config", writeTestVerifyRuntimeConfig(t)}
 			},
 			repo: func(*testing.T) string { return RepoRoot() },
 		},
@@ -210,8 +210,8 @@ func TestCLILoggingInvalidLevelFailsBeforeSideEffects(t *testing.T) {
 	if strings.Contains(stderr.String(), "resolve contracts") {
 		t.Fatalf("verify stderr = %q, local verification path ran before log-level validation", stderr.String())
 	}
-	if strings.TrimSpace(stdout.String()) != "" {
-		t.Fatalf("verify stdout = %q, want empty", stdout.String())
+	if !strings.Contains(stdout.String(), "failed: verify_logging_options @") || !strings.Contains(stdout.String(), "not_run: source_validation @") {
+		t.Fatalf("verify stdout lost early-refusal and unperformed-source evidence: %q", stdout.String())
 	}
 
 	stdout.Reset()
@@ -226,8 +226,8 @@ func TestCLILoggingInvalidLevelFailsBeforeSideEffects(t *testing.T) {
 	if strings.Contains(stderr.String(), "resolve contracts") || strings.Contains(stderr.String(), "load Swarm contracts") {
 		t.Fatalf("verify positional stderr = %q, local verification path ran before log-level validation", stderr.String())
 	}
-	if strings.TrimSpace(stdout.String()) != "" {
-		t.Fatalf("verify positional stdout = %q, want empty", stdout.String())
+	if !strings.Contains(stdout.String(), "failed: verify_logging_options @") || !strings.Contains(stdout.String(), "not_run: source_validation @") {
+		t.Fatalf("verify positional stdout lost early-refusal and unperformed-source evidence: %q", stdout.String())
 	}
 }
 

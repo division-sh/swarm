@@ -179,7 +179,7 @@ func prepareFullLifecycleProject(t *testing.T, binary, root string, store golden
 	credentialFreeEnv := goldenProcessEnv(t, projectRoot, "", 0)
 	assertGoldenProcessHasNoExternalExecutables(t, env)
 	verify := runReleaseCommand(t, fullLifecycleStartupLimit, projectRoot, env, "", binary,
-		"verify", "contracts", "--config", "swarm.yaml", "--json")
+		"verify", "contracts", "--config", "swarm.yaml", "--portable", "--json")
 	assertFullLifecycleVerifySuccess(t, verify)
 	for key, value := range map[string]string{
 		"webhook_signing.telegram": fullLifecycleSigningSecret,
@@ -239,7 +239,7 @@ func assertFullLifecycleSourceAdmission(t *testing.T, binary, root string) {
 			env := goldenProcessEnv(t, project, "", 0)
 			assertGoldenProcessHasNoExternalExecutables(t, env)
 			result := runReleaseCommand(t, fullLifecycleStartupLimit, project, env, "", binary,
-				"verify", "contracts", "--config", "swarm.yaml", "--json")
+				"verify", "contracts", "--config", "swarm.yaml", "--portable", "--json")
 			assertFullLifecycleVerifySuccess(t, result)
 			if !test.mutate {
 				return
@@ -260,9 +260,13 @@ func assertFullLifecycleVerifySuccess(t *testing.T, result releaseCommandResult)
 		t.Fatalf("full lifecycle verify failed: %v\n%s", result.err, result.output)
 	}
 	var payload struct {
-		OK bool `json:"ok"`
+		OK                bool   `json:"ok"`
+		ValidationScope   string `json:"validation_scope"`
+		AdmissionComplete bool   `json:"admission_complete"`
+		LiveReadiness     string `json:"live_readiness"`
 	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(result.output)), &payload); err != nil || !payload.OK {
+	if err := json.Unmarshal([]byte(strings.TrimSpace(result.output)), &payload); err != nil || !payload.OK ||
+		payload.ValidationScope != "structural" || payload.AdmissionComplete || payload.LiveReadiness != "not_evaluated" {
 		t.Fatalf("full lifecycle verify result = err:%v output:%s", err, result.output)
 	}
 }

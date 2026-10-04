@@ -57,7 +57,7 @@ func TestVerifyAgentMessageRetirementSupportedCLI(t *testing.T) {
 				}
 				writeDescribeTestFile(t, filepath.Join(dir, "agents.yaml"), agent)
 				var stdout, stderr bytes.Buffer
-				code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", root, "--config", config, "--json"}, &stdout, &stderr, defaultRootCommandOptions())
+				code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", root, "--portable", "--config", config, "--json"}, &stdout, &stderr, defaultRootCommandOptions())
 				var result verifyCommandResult
 				if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
 					t.Fatalf("verify JSON: %v code=%d stdout=%s stderr=%s", err, code, &stdout, &stderr)
@@ -131,7 +131,7 @@ func TestVerifyPermissionBundleShapeAdmission(t *testing.T) {
 				}
 				writeDescribeTestFile(t, path, string(original)+"\n"+tc.declaration)
 				var stdout, stderr bytes.Buffer
-				code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", root, "--config", config, "--json"}, &stdout, &stderr, defaultRootCommandOptions())
+				code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", root, "--portable", "--config", config, "--json"}, &stdout, &stderr, defaultRootCommandOptions())
 				var result verifyCommandResult
 				if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
 					t.Fatalf("verify JSON: %v, code=%d stdout=%s stderr=%s", err, code, &stdout, &stderr)

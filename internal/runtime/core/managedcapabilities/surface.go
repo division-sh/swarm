@@ -373,35 +373,10 @@ func New(plan Plan) (Surface, error) {
 	if s.CreatedAt.IsZero() {
 		s.CreatedAt = time.Now().UTC()
 	}
-	seen := make(map[string]struct{}, len(plan.Tools))
-	for _, planned := range plan.Tools {
-		name := toolidentity.CanonicalName(planned.Name)
-		if name == "" {
-			return Surface{}, fmt.Errorf("managed capability planned tool name is required")
-		}
-		if _, duplicate := seen[name]; duplicate {
-			return Surface{}, fmt.Errorf("managed capability planned tool %s is duplicated", name)
-		}
-		seen[name] = struct{}{}
-		capability := planned.Capability
-		capability.Name = name
-		bindings, err := normalizeBindings(planned.Bindings)
-		if err != nil {
-			return Surface{}, fmt.Errorf("managed capability planned tool %s: %w", name, err)
-		}
-		tool := Tool{
-			Name:           name,
-			DefinitionHash: strings.TrimSpace(planned.DefinitionHash),
-			Capability:     capability,
-			Bindings:       bindings,
-		}
-		if tool.DefinitionHash == "" {
-			return Surface{}, fmt.Errorf("managed capability planned tool %s requires definition identity", name)
-		}
-		resolveTool(&tool)
-		s.Tools = append(s.Tools, tool)
+	s.Tools, err = normalizePlannedTools(plan.Tools)
+	if err != nil {
+		return Surface{}, err
 	}
-	slices.SortFunc(s.Tools, func(a, b Tool) int { return strings.Compare(a.Name, b.Name) })
 	planHash, err := hashValue(struct {
 		Version          string
 		ActorIdentity    agentidentity.Identity
@@ -421,6 +396,47 @@ func New(plan Plan) (Surface, error) {
 		return Surface{}, err
 	}
 	return s, s.Validate()
+}
+
+// ValidatePlannedTools checks definition and binding shape without minting
+// authority, a capability surface, or provider delivery evidence.
+func ValidatePlannedTools(planned []PlannedTool) error {
+	_, err := normalizePlannedTools(planned)
+	return err
+}
+
+func normalizePlannedTools(plannedTools []PlannedTool) ([]Tool, error) {
+	var tools []Tool
+	seen := make(map[string]struct{}, len(plannedTools))
+	for _, planned := range plannedTools {
+		name := toolidentity.CanonicalName(planned.Name)
+		if name == "" {
+			return nil, fmt.Errorf("managed capability planned tool name is required")
+		}
+		if _, duplicate := seen[name]; duplicate {
+			return nil, fmt.Errorf("managed capability planned tool %s is duplicated", name)
+		}
+		seen[name] = struct{}{}
+		capability := planned.Capability
+		capability.Name = name
+		bindings, err := normalizeBindings(planned.Bindings)
+		if err != nil {
+			return nil, fmt.Errorf("managed capability planned tool %s: %w", name, err)
+		}
+		tool := Tool{
+			Name:           name,
+			DefinitionHash: strings.TrimSpace(planned.DefinitionHash),
+			Capability:     capability,
+			Bindings:       bindings,
+		}
+		if tool.DefinitionHash == "" {
+			return nil, fmt.Errorf("managed capability planned tool %s requires definition identity", name)
+		}
+		resolveTool(&tool)
+		tools = append(tools, tool)
+	}
+	slices.SortFunc(tools, func(a, b Tool) int { return strings.Compare(a.Name, b.Name) })
+	return tools, nil
 }
 
 func (s Surface) Validate() error {

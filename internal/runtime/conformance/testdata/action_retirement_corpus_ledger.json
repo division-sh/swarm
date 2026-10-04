@@ -3258,6 +3258,9 @@
   ],
   "new_reference_files": {
     "internal/apiv1/operator_mailbox_event_fixture_test.go": "d43a2ba2b retained mailbox event/selected-store helper split; action materializer is not retained",
+    "internal/cliapp/testdata/verify_admission_predicate_census.json": "Test-only boot-admission function identities/body hashes name nativeToolConfigFromContract, an existing tool configuration projection, not the retired authored config_from action. TestVerifyBootStartupPredicateCensus and its startup/provider/removed-consumer mutations prove drift detection, not action execution or route authority.",
+    "internal/cliapp/verify_deployment.go": "Deployment verification consumes existing hostWorkspaceConfigFromRuntimeConfig and dockerWorkspaceConfigFromRuntimeConfig for typed workspace capability/source admission. These configuration-projection homonyms do not interpret authored config_from or restore actions. TestBootFloorExplicitHostRefusalIsLiveAdmissionNotStructuralValidity preserves the supported admission boundary.",
+    "internal/cliapp/verify_deployment_workspace.go": "Read-only prerequisite observation consumes existing hostWorkspaceConfigFromRuntimeConfig and dockerWorkspaceConfigFromRuntimeConfig; neither helper is the retired authored config_from interpreter. TestHostPrerequisiteObservationPreservesMissingRoot and TestCLIImageAdmissionProbeRestrictionsAndCleanup preserve observation versus preparation/effects.",
     "internal/runtime/conformance/action_retirement_corpus_test.go": "historical corpus census and live-source/negative guards",
     "internal/runtime/conformance/handler_action_retirement_guard_test.go": "repository AST retirement guard and hostile mutations",
     "internal/runtime/contracts/workflow_contract_action_retirement_test.go": "hostile rejection and distinct homonym preservation",

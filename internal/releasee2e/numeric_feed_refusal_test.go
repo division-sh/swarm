@@ -37,7 +37,7 @@ func TestGoldenNumericDataScatterParkRefusalBothStores(t *testing.T) {
 			writeReleaseFile(t, filepath.Join(root, "home/.config/swarm/swarm.yaml"), "connection:\n  api_token_file: api-token\n")
 			env := goldenProcessEnv(t, root, selected.passwordEnv, 0)
 			verified := runReleaseCommand(t, goldenStartupTimeout, project, env, "", binary,
-				"verify", "contracts", "--config", ".swarm/swarm.yaml", "--json")
+				"verify", "contracts", "--config", ".swarm/swarm.yaml", "--portable", "--json")
 			if verified.err != nil {
 				t.Fatalf("admitted refusal source: %v\n%s", verified.err, verified.output)
 			}

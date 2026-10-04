@@ -10,6 +10,8 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/manager"
 )
 
 type bootSelfCheckDescriptorStore struct {
@@ -35,6 +37,14 @@ func (s *bootSelfCheckDescriptorStore) CommitPublication(ctx context.Context, co
 }
 
 func (*bootSelfCheckDescriptorStore) SupportsPersistedReplay() bool { return false }
+
+func (*bootSelfCheckDescriptorStore) ListFlowInstanceRoutes(context.Context) ([]flowidentity.RunScopedFlowInstance, error) {
+	return nil, nil
+}
+
+func (*bootSelfCheckDescriptorStore) ListSelectedContractRouteRecoveryRecords(context.Context) ([]manager.SelectedContractRouteRecoveryRecord, error) {
+	return nil, nil
+}
 
 func (s *bootSelfCheckDescriptorStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
 	s.mu.Lock()

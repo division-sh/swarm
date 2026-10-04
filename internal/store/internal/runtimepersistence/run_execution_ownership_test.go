@@ -13,11 +13,79 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	actors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
 )
+
+func TestOrdinaryRunSourceObservationDoesNotAuthorizeExecutionBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			selected, db, sqlite := selectedForkDiscardTestStore(t, backend)
+			fixture := newSelectedCompletionFixture(t, selected, db, sqlite)
+			reader := selected.(interface {
+				ObserveOrdinaryRunSource(context.Context, correlation.SourceArtifactFact, string) (bool, error)
+				InspectSnapshot(context.Context, func(context.Context) error) error
+			})
+			if _, ok := any(reader).(manager.RunExecutionOwner); ok {
+				t.Fatal("read-only source observation exposed execution ownership")
+			}
+			ctx := testAuthorActivityContext()
+			var hash string
+			if err := db.QueryRowContext(ctx, `SELECT bundle_hash FROM runs WHERE run_id=$1`, fixture.sourceRun).Scan(&hash); err != nil {
+				t.Fatal(err)
+			}
+			source, err := correlation.NewSourceArtifactFact(hash)
+			if err != nil {
+				t.Fatal(err)
+			}
+			other, err := correlation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("f", 64))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var before int
+			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_generation_grants`).Scan(&before); err != nil {
+				t.Fatal(err)
+			}
+			if err := reader.InspectSnapshot(ctx, func(ctx context.Context) error {
+				for _, test := range []struct {
+					name, runID    string
+					source         correlation.SourceArtifactFact
+					want, rejected bool
+				}{
+					{"ordinary", fixture.sourceRun, source, true, false},
+					{"selected", fixture.forkRun, source, false, false},
+					{"other source", fixture.sourceRun, other, false, false},
+					{"absent", uuid.NewString(), source, false, true},
+					{"malformed", " " + fixture.sourceRun, source, false, true},
+					{"missing source", fixture.sourceRun, correlation.SourceArtifactFact{}, false, true},
+				} {
+					matches, err := reader.ObserveOrdinaryRunSource(ctx, test.source, test.runID)
+					if matches != test.want || (err != nil) != test.rejected {
+						t.Fatalf("%s observation=%v, error=%v", test.name, matches, err)
+					}
+				}
+				cancelled, cancel := context.WithCancel(ctx)
+				cancel()
+				if matches, err := reader.ObserveOrdinaryRunSource(cancelled, source, fixture.sourceRun); matches || !errors.Is(err, context.Canceled) {
+					t.Fatalf("cancelled observation=%v, %v", matches, err)
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			var after int
+			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_generation_grants`).Scan(&after); err != nil {
+				t.Fatal(err)
+			}
+			if before != after {
+				t.Fatal("read observation changed execution grants")
+			}
+		})
+	}
+}
 
 func TestRunExecutionOwnershipBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {

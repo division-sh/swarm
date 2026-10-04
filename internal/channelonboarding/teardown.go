@@ -344,14 +344,11 @@ func (s *DestructiveService) RetireInterface(ctx context.Context, identity opera
 }
 
 func (s *DestructiveService) Recover(ctx context.Context) error {
-	operations, err := s.store.ListChannelTeardowns(ctx)
+	operations, err := InspectPendingTeardowns(ctx, s.store)
 	if err != nil {
 		return err
 	}
 	for _, op := range operations {
-		if op.Phase.Terminal() {
-			continue
-		}
 		resumeCtx := context.WithoutCancel(ctx)
 		switch op.Kind {
 		case TeardownUnbind:

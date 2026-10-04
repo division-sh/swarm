@@ -10,33 +10,11 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
-	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimechannelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
 )
-
-func resolveServePublicIngressMode(opts cliapp.ServeOptions) (string, bool, error) {
-	externalOrigin := strings.TrimSpace(opts.PublicWebhookBaseURL)
-	externalListen := strings.TrimSpace(opts.PublicWebhookListen)
-	if opts.Expose && (externalOrigin != "" || externalListen != "") {
-		return "", false, fmt.Errorf("--expose is mutually exclusive with --public-webhook-base-url and --public-webhook-listen")
-	}
-	if opts.Expose && !opts.Dev {
-		return "", false, fmt.Errorf("--expose requires --dev")
-	}
-	if (externalOrigin == "") != (externalListen == "") {
-		return "", false, fmt.Errorf("--public-webhook-base-url and --public-webhook-listen must be set together")
-	}
-	if opts.Expose {
-		return runtimepublicingress.ModeManagedQuickTunnel, true, nil
-	}
-	if externalOrigin != "" {
-		return runtimepublicingress.ModeExternalOrigin, true, nil
-	}
-	return "", false, nil
-}
 
 type serveRegistrationSelection struct {
 	Pairs  []runtimepublicingress.RegistrationPair

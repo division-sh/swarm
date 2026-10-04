@@ -581,14 +581,22 @@ func (am *AgentManager) adoptPersistedAgentLifecycleOnly(ctx context.Context, re
 }
 
 func (am *AgentManager) validatePersistedAgentExecution(cfg models.AgentConfig) error {
-	profile, err := llmselection.ResolveLiveBackend(am.llmBackend)
+	return ValidatePersistedAgentExecution(AgentManagerOptions{
+		LLMBackend: am.llmBackend, RequireModelResolution: am.requireModelResolution,
+	}, cfg)
+}
+
+// ValidatePersistedAgentExecution is hydration's descriptor admission, without
+// constructing a manager, resolving credentials or launching a provider.
+func ValidatePersistedAgentExecution(options AgentManagerOptions, cfg models.AgentConfig) error {
+	profile, err := llmselection.ResolveLiveBackend(options.LLMBackend)
 	if err != nil {
 		return err
 	}
 	if _, err := runtimellm.ValidateAgentExecutionDescriptor(profile, cfg); err != nil {
 		return fmt.Errorf("agent %s execution descriptor: %w", cfg.ID, err)
 	}
-	if am.requireModelResolution && strings.TrimSpace(cfg.Model) == "" {
+	if options.RequireModelResolution && strings.TrimSpace(cfg.Model) == "" {
 		return fmt.Errorf("agent %s missing model", cfg.ID)
 	}
 	return nil
@@ -647,19 +655,26 @@ func (am *AgentManager) validateNativeToolAdmission(ctx context.Context, cfg mod
 }
 
 func (am *AgentManager) buildAgent(cfg models.AgentConfig) (Agent, error) {
-	if err := cfg.ValidateReceiverConfig(); err != nil {
-		return nil, err
-	}
-	if err := models.ValidateNoAuthoredSystemPrompt(cfg.Config); err != nil {
-		return nil, err
-	}
-	if err := cfg.ValidateIntentCarrier(); err != nil {
+	if err := ValidateAgentBuildConfiguration(cfg); err != nil {
 		return nil, err
 	}
 	if am.factory != nil {
 		return am.factory(cfg)
 	}
 	return newGenericAgent(cfg), nil
+}
+
+func ValidateAgentBuildConfiguration(cfg models.AgentConfig) error {
+	if err := cfg.ValidateReceiverConfig(); err != nil {
+		return err
+	}
+	if err := models.ValidateNoAuthoredSystemPrompt(cfg.Config); err != nil {
+		return err
+	}
+	if err := cfg.ValidateIntentCarrier(); err != nil {
+		return err
+	}
+	return nil
 }
 
 func bindCanonicalAgentPrompt(source semanticview.Source, cfg *models.AgentConfig) error {

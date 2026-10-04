@@ -6,29 +6,34 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 type verifyCommandResult struct {
-	BundleHash      string                          `json:"bundle_hash"`
-	SourceLabel     string                          `json:"source_label"`
-	Members         []sourceartifact.MemberEvidence `json:"members"`
-	Manifest        *sourceartifact.Manifest        `json:"manifest,omitempty"`
-	OK              bool                            `json:"ok"`
-	SourceRoot      string                          `json:"source_root"`
-	ValidationScope string                          `json:"validation_scope"`
-	LiveReadiness   string                          `json:"live_readiness"`
-	Errors          []verifyFindingOutput           `json:"errors"`
-	Warnings        []verifyFindingOutput           `json:"warnings"`
-	LintEvidence    []verifyFindingOutput           `json:"lint_evidence"`
-	PackInventory   packInventoryReadback           `json:"pack_inventory"`
+	BundleHash           string                                           `json:"bundle_hash"`
+	SourceLabel          string                                           `json:"source_label"`
+	Members              []sourceartifact.MemberEvidence                  `json:"members"`
+	Manifest             *sourceartifact.Manifest                         `json:"manifest,omitempty"`
+	OK                   bool                                             `json:"ok"`
+	SourceRoot           string                                           `json:"source_root"`
+	ValidationScope      string                                           `json:"validation_scope"`
+	LiveReadiness        string                                           `json:"live_readiness"`
+	AdmissionComplete    bool                                             `json:"admission_complete"`
+	Observations         []runtimebootverify.AdmissionObservation         `json:"observations"`
+	ExecutionObligations []runtimebootverify.AdmissionExecutionObligation `json:"execution_obligations"`
+	Errors               []verifyFindingOutput                            `json:"errors"`
+	Warnings             []verifyFindingOutput                            `json:"warnings"`
+	LintEvidence         []verifyFindingOutput                            `json:"lint_evidence"`
+	PackInventory        packInventoryReadback                            `json:"pack_inventory"`
 }
 
 type verifyFindingOutput struct {
@@ -44,6 +49,7 @@ type verifyCommandOptions struct {
 	sourceRoot       string
 	platformSpecPath string
 	configPath       string
+	portable         bool
 	output           cliOutputOptions
 	logging          cliLoggingOptions
 }
@@ -55,83 +61,132 @@ func defaultVerifyCommandOptions() verifyCommandOptions {
 }
 
 func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCommandOptions, out, errOut io.Writer) int {
-	if err := opts.logging.validate(); err != nil {
-		if errOut != nil {
-			fmt.Fprintf(errOut, "verify failed: %v\n", err)
-		}
-		return 2
-	}
+	ctx, cancel := context.WithTimeout(ctx, verifyObservationDeadline)
+	defer cancel()
 	if err := opts.output.validate(); err != nil {
 		if errOut != nil {
 			fmt.Fprintf(errOut, "verify failed: %v\n", err)
 		}
 		return 2
 	}
-	resolvedPaths, err := ResolveCLISourcePlatformSpecPaths(repo, CLISourcePlatformSpecPathOptions{
+	purpose := runtimebootverify.StructuralValidation
+	if opts.configPath != "" && !opts.portable {
+		purpose = runtimebootverify.ExecutionValidation
+	}
+	refuse := func(checkID, owner, subject string, err error, artifact *sourceartifact.AdmittedSourceArtifact) int {
+		return renderVerifyAdmissionRefusal(ctx, opts, purpose, checkID, owner, subject, err, artifact, out, errOut)
+	}
+	if err := opts.logging.validate(); err != nil {
+		return refuse("verify_logging_options", "internal/cliapp.cliLoggingOptions.validate", "verify", err, nil)
+	}
+	configResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: opts.configPath})
+	if configResult.DeploymentConfigured() && !opts.portable {
+		purpose = runtimebootverify.ExecutionValidation
+	}
+	if err != nil {
+		subject := "configuration:" + repo
+		if opts.configPath != "" {
+			subject = "configuration:" + opts.configPath
+		}
+		return refuse("runtime_configuration", "internal/cliapp.LoadRuntimeConfigWithOptions", subject, err, nil)
+	}
+	resolvedPaths, err := resolveCLISourcePlatformSpecPathsFromConfig(repo, CLISourcePlatformSpecPathOptions{
 		SourceRoot:       opts.sourceRoot,
 		PlatformSpecPath: opts.platformSpecPath,
 		ConfigPath:       opts.configPath,
-	})
+	}, configResult.cli)
 	if err != nil {
-		if errOut != nil {
-			fmt.Fprintf(errOut, "verify failed: resolve path config: %v\n", err)
-		}
-		return cliAPIErrorExitCode(err, cliAPIErrorClassifier{})
+		return refuse("source_path_selection", "internal/cliapp.resolveCLISourcePlatformSpecPathsFromConfig", "project:"+repo, err, nil)
 	}
 	resolvedContractsPath := resolvedPaths.SourceRoot
 	resolvedPlatformSpecPath := resolvedPaths.PlatformSpecPath
 	sourceRoot, err := NormalizeSourceRoot(resolvedContractsPath)
 	if err != nil {
-		writeCLIAPIError(errOut, err)
-		return CLIExitValidation
-	}
-	configResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: opts.configPath})
-	if err != nil {
-		writeCLIAPIError(errOut, err)
-		return CLIExitValidation
+		return refuse("source_directory", "internal/cliapp.NormalizeSourceRoot", "source:"+resolvedContractsPath, err, nil)
 	}
 	if _, bundle, err := NewSwarmWorkflowModuleWithRuntimeConfig(repo, sourceRoot, resolvedPlatformSpecPath, configResult); err != nil {
-		writeCLIAPIError(errOut, err)
-		return CLIExitValidation
+		return refuse("source_loading", "internal/cliapp.NewSwarmWorkflowModuleWithRuntimeConfig", "source:"+sourceRoot, err, nil)
 	} else {
 		packReadback := packInventoryReadbackFromInventory(bundle.PackInventory)
-		source, validationOpts, err := admitStructuralSource(repo, opts.configPath, bundle)
+		source, validationOpts, err := admitStructuralSource(configResult, bundle)
 		if err != nil {
-			if errOut != nil {
-				fmt.Fprintf(errOut, "verify failed: admit effective source: %v\n", err)
+			return refuse("effective_source_admission", "internal/runtime.AdmitEffectiveSourceProjection", "source:"+bundle.SourceArtifact.BundleHash(), err, bundle.SourceArtifact)
+		}
+		if purpose == runtimebootverify.ExecutionValidation {
+			validationOpts, err = verifyDeploymentWorkflowOptions(ctx, configResult, bundle)
+			if err != nil {
+				return refuse("deployment_configuration", "internal/cliapp.verifyDeploymentWorkflowOptions", "source:"+bundle.SourceArtifact.BundleHash(), err, bundle.SourceArtifact)
 			}
-			return 1
 		}
 		result, err := verifyBundleResultWithOptions(ctx, source, validationOpts)
-		if err != nil {
-			if opts.output.asJSON && verifyValidationResultHasBlockingBootFindings(result, validationOpts) {
-				output := verifyCommandOutput(false, sourceRoot, result, packReadback, bundle.SourceArtifact)
-				if renderErr := renderCLIOutput(out, errOut, opts.output, output, nil, nil); renderErr != nil {
-					return 2
-				}
-				return 1
+		if purpose == runtimebootverify.ExecutionValidation {
+			inspectVerifyDeployment(ctx, repo, resolvedPaths, configResult, source, validationOpts, &result)
+		} else {
+			reason := "no explicit, project or local operator deployment configuration was selected"
+			if opts.portable {
+				reason = "--portable explicitly requests structural validation without deployment observations"
 			}
-			if errOut != nil {
-				fmt.Fprintf(errOut, "verify failed: %v\n", err)
-			}
-			return 1
+			result.BootReport.Observations = append(result.BootReport.Observations, runtimebootverify.AdmissionObservation{
+				CheckID: "deployment_context", Owner: "internal/cliapp.RuntimeConfigLoadResult.DeploymentConfigured", Subject: "project:" + repo,
+				Class: runtimebootverify.AdmissionDeploymentObservation, Status: runtimebootverify.AdmissionNotRun, Reason: reason,
+			})
 		}
-		output := verifyCommandOutput(true, sourceRoot, result, packReadback, bundle.SourceArtifact)
-		if err := renderCLIOutput(out, errOut, opts.output, output, func(_ io.Writer) {
-			writeVerifyFindings(errOut, result.BootReport.Warnings(), false)
-			writeVerifyFindings(errOut, result.BootReport.LintEvidence(), false)
-			if out != nil {
-				fmt.Fprintf(out, "verify ok: source=%s\n", output.SourceLabel)
-				fmt.Fprintln(out, "validation: structural; live readiness: not evaluated")
-				writePackInventory(out, packReadback)
-			}
-		}, func() ([]string, error) {
-			return []string{"ok"}, nil
-		}); err != nil {
-			return 2
-		}
+		decision := result.BootReport.AdmissionDecision(runtimebootverify.AdmissionFindingPolicy{
+			FatalWarnings: validationOpts.FatalBootWarnings, ExcludedFatalWarningChecks: validationOpts.ExcludedFatalBootWarningChecks,
+		})
+		output := verifyCommandOutput(err == nil && decision.FailureClass == "" && !decision.Interrupted, sourceRoot, result, packReadback, bundle.SourceArtifact)
+		output.AdmissionComplete = decision.Complete
+		return renderVerifyCommandResult(opts, output, result, decision, out, errOut)
 	}
 	return 0
+}
+
+func renderVerifyAdmissionRefusal(ctx context.Context, opts verifyCommandOptions, purpose runtimebootverify.ValidationPurpose, id, owner, subject string, cause error, artifact *sourceartifact.AdmittedSourceArtifact, out, errOut io.Writer) int {
+	result := runtime.BlockedWorkflowContractAdmission(purpose, subject, id, "prerequisite refused the selected source or configuration before validation")
+	class := failures.ClassSchemaInvalid
+	if failure, ok := failures.As(cause); ok {
+		class = failure.Failure.Class
+	}
+	if errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded) {
+		class = failures.ClassDependencyUnavailable
+	}
+	result.BootReport.Interrupted = errors.Is(ctx.Err(), context.Canceled) || errors.Is(cause, context.Canceled)
+	message := FormatCLIAPIError(cause)
+	observedAt := time.Now().UTC()
+	result.BootReport.Observations = append(result.BootReport.Observations, runtimebootverify.AdmissionObservation{
+		CheckID: id, Owner: owner, Subject: subject, Class: runtimebootverify.AdmissionSourceObservation,
+		Status: runtimebootverify.AdmissionFailed, Reason: message, StartedAt: observedAt, FinishedAt: observedAt, FailureClass: class,
+	})
+	finding := runtimebootverify.NewHardInvalidityFinding(id, subject, message, "Fix the named admission prerequisite before verification or startup.")
+	finding.FailureClass = class
+	result.BootReport.Add(finding)
+	result.BootReport.Sort()
+	decision := result.BootReport.AdmissionDecision(runtimebootverify.AdmissionFindingPolicy{})
+	output := verifyCommandOutput(false, opts.sourceRoot, result, packInventoryReadback{}, artifact)
+	return renderVerifyCommandResult(opts, output, result, decision, out, errOut)
+}
+
+func renderVerifyCommandResult(opts verifyCommandOptions, output verifyCommandResult, result runtime.WorkflowContractValidationResult, decision runtimebootverify.AdmissionDecision, out, errOut io.Writer) int {
+	if err := renderCLIOutput(out, errOut, opts.output, output, func(w io.Writer) {
+		writeVerifyFindings(errOut, result.BootReport.Errors(), true)
+		writeVerifyFindings(errOut, result.BootReport.Warnings(), false)
+		writeVerifyFindings(errOut, result.BootReport.LintEvidence(), false)
+		if w == nil {
+			return
+		}
+		if !output.OK {
+			fmt.Fprintf(w, "verify failed: source=%s\n", output.SourceLabel)
+		} else {
+			fmt.Fprintf(w, "verify ok: source=%s\n", output.SourceLabel)
+		}
+		for _, line := range verifyAdmissionTextLines(output) {
+			fmt.Fprintln(w, line)
+		}
+		writePackInventory(w, output.PackInventory)
+	}, func() ([]string, error) { return verifyAdmissionTextLines(output), nil }); err != nil {
+		return CLIExitValidation
+	}
+	return verifyAdmissionExitCode(decision)
 }
 
 func verifyCommandOutput(ok bool, sourceRoot string, result runtime.WorkflowContractValidationResult, packInventory packInventoryReadback, artifact *sourceartifact.AdmittedSourceArtifact) verifyCommandResult {
@@ -139,42 +194,74 @@ func verifyCommandOutput(ok bool, sourceRoot string, result runtime.WorkflowCont
 	if metadata, present := artifact.RootManifest(); present {
 		manifest = &metadata
 	}
+	scope := "structural"
+	if result.BootReport.Purpose == runtimebootverify.ExecutionValidation {
+		scope = "deployment"
+	}
 	return verifyCommandResult{
-		BundleHash:      artifact.BundleHash(),
-		SourceLabel:     artifact.HumanLabel(),
-		Members:         artifact.MemberTable(),
-		Manifest:        manifest,
-		OK:              ok,
-		SourceRoot:      sourceRoot,
-		ValidationScope: "structural",
-		LiveReadiness:   "not_evaluated",
-		Errors:          verifyFindingOutputs(result.BootReport.Errors()),
-		Warnings:        verifyFindingOutputs(result.BootReport.Warnings()),
-		LintEvidence:    verifyFindingOutputs(result.BootReport.LintEvidence()),
-		PackInventory:   packInventory,
+		BundleHash:           artifact.BundleHash(),
+		SourceLabel:          artifact.HumanLabel(),
+		Members:              append([]sourceartifact.MemberEvidence{}, artifact.MemberTable()...),
+		Manifest:             manifest,
+		OK:                   ok,
+		SourceRoot:           sourceRoot,
+		ValidationScope:      scope,
+		LiveReadiness:        "not_evaluated",
+		Observations:         append([]runtimebootverify.AdmissionObservation{}, result.BootReport.Observations...),
+		ExecutionObligations: append([]runtimebootverify.AdmissionExecutionObligation{}, result.BootReport.ExecutionObligations...),
+		Errors:               verifyFindingOutputs(result.BootReport.Errors()),
+		Warnings:             verifyFindingOutputs(result.BootReport.Warnings()),
+		LintEvidence:         verifyFindingOutputs(result.BootReport.LintEvidence()),
+		PackInventory:        packInventory,
 	}
 }
 
-func verifyValidationResultHasBlockingBootFindings(result runtime.WorkflowContractValidationResult, opts runtime.WorkflowContractValidationOptions) bool {
-	if len(result.BootReport.Errors()) > 0 {
-		return true
+func verifyAdmissionExitCode(decision runtimebootverify.AdmissionDecision) int {
+	if decision.Interrupted {
+		return cliExitInterrupted
 	}
-	if !opts.FatalBootWarnings {
-		return false
+	switch decision.FailureClass {
+	case "":
+		return cliExitOK
+	case failures.ClassSchemaInvalid:
+		return CLIExitValidation
+	case failures.ClassAuthenticationNeeded, failures.ClassAuthorizationDenied:
+		return cliExitAuth
+	case failures.ClassLifecycleConflict, failures.ClassConflictingDuplicate:
+		return cliExitConflict
+	default:
+		return CLIExitRuntime
 	}
-	excluded := make(map[string]struct{}, len(opts.ExcludedFatalBootWarningChecks))
-	for _, checkID := range opts.ExcludedFatalBootWarningChecks {
-		if checkID = strings.TrimSpace(checkID); checkID != "" {
-			excluded[checkID] = struct{}{}
-		}
+}
+
+func verifyAdmissionTextLines(output verifyCommandResult) []string {
+	message := "admission validation failed; startup execution not performed"
+	if output.OK && output.ValidationScope == "structural" {
+		message = "portable structural checks passed; deployment admission not evaluated"
+	} else if output.OK {
+		message = "admission checks passed; startup execution not performed"
 	}
-	for _, finding := range result.BootReport.Warnings() {
-		if _, skip := excluded[strings.TrimSpace(finding.CheckID)]; skip {
+	lines := []string{message}
+	for _, observation := range output.Observations {
+		if observation.Status == runtimebootverify.AdmissionPassed || observation.Status == runtimebootverify.AdmissionNotApplicable {
 			continue
 		}
-		return true
+		lines = append(lines, fmt.Sprintf("%s: %s @ %s (%s)", observation.Status, observation.CheckID, verifyAdmissionTextSubject(output, observation.Subject), observation.Reason))
 	}
-	return false
+	for _, obligation := range output.ExecutionObligations {
+		lines = append(lines, fmt.Sprintf("startup not performed: %s @ %s (%s)", obligation.ID, verifyAdmissionTextSubject(output, obligation.Subject), obligation.Reason))
+	}
+	return lines
+}
+
+func verifyAdmissionTextSubject(output verifyCommandResult, subject string) string {
+	if output.BundleHash != "" && output.SourceLabel != "" {
+		exact := "source:" + output.BundleHash
+		if subject == exact || strings.HasSuffix(subject, "/"+exact) {
+			return strings.TrimSuffix(subject, exact) + "source:" + output.SourceLabel
+		}
+	}
+	return subject
 }
 
 func verifyFindingOutputs(findings []runtimebootverify.Finding) []verifyFindingOutput {
@@ -212,10 +299,9 @@ func verifyBundleResultWithOptions(ctx context.Context, source semanticview.Sour
 	return runtime.ValidateWorkflowContractSurface(ctx, source, opts)
 }
 
-func verifyWorkflowContractValidationOptions(repo, configPath string, source semanticview.Source) (runtime.WorkflowContractValidationOptions, error) {
-	configResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: configPath})
-	if err != nil {
-		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("load runtime config: %w", err)
+func verifyWorkflowContractValidationOptions(configResult RuntimeConfigLoadResult, source semanticview.Source) (runtime.WorkflowContractValidationOptions, error) {
+	if configResult.Config == nil {
+		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("admitted runtime configuration is required")
 	}
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle == nil {
@@ -232,9 +318,9 @@ func verifyWorkflowContractValidationOptions(repo, configPath string, source sem
 	return opts, nil
 }
 
-func admitStructuralSource(repo, configPath string, bundle *runtimecontracts.WorkflowContractBundle) (semanticview.Source, runtime.WorkflowContractValidationOptions, error) {
+func admitStructuralSource(configResult RuntimeConfigLoadResult, bundle *runtimecontracts.WorkflowContractBundle) (semanticview.Source, runtime.WorkflowContractValidationOptions, error) {
 	source := semanticview.Wrap(bundle)
-	opts, err := verifyWorkflowContractValidationOptions(repo, configPath, source)
+	opts, err := verifyWorkflowContractValidationOptions(configResult, source)
 	if err != nil {
 		return nil, opts, err
 	}

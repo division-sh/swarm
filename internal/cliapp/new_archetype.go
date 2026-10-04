@@ -104,7 +104,7 @@ func scaffoldArchetype(root InvocationRoot, out io.Writer, rawName, rawOutput st
 	if source.WorkingDir != "." {
 		fmt.Fprintf(out, "  cd %s\n", source.WorkingDir)
 	}
-	fmt.Fprintln(out, "  swarm verify .")
+	fmt.Fprintln(out, "  swarm verify . --portable")
 	fmt.Fprintln(out, "  swarm test . tests/smoke.yaml")
 	fmt.Fprintln(out, "  swarm serve . --dev")
 	return nil

@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -349,7 +350,7 @@ func TestRun_FailsClosedForMissingContractMCPTool(t *testing.T) {
 				},
 			})
 		case "notifications/initialized":
-			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "result": map[string]any{}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req["id"], "result": map[string]any{}})
 		case "tools/list":
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"jsonrpc": "2.0",
@@ -414,7 +415,7 @@ func TestRun_FailsClosedForRequiredMCPToolWhenDiscoveryFails(t *testing.T) {
 				},
 			})
 		case "notifications/initialized":
-			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "result": map[string]any{}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req["id"], "result": map[string]any{}})
 		case "tools/list":
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"jsonrpc": "2.0",
@@ -509,13 +510,16 @@ func TestRun_MapsMissingRuntimeExternalCredentialsToCredentialKeyExistsWarnings(
 	}
 }
 
-func TestRun_SkipsCredentialKeyExistsWhenNoCredentialStoreIsSupplied(t *testing.T) {
+func TestRun_MissingCredentialStoreIsUnavailableNotUncheckedSuccess(t *testing.T) {
 	source := runtimeExternalResourceSource("http://127.0.0.1:1")
 
 	report := Run(context.Background(), source, Options{})
 
-	if reportContains(report.Warnings(), "credential_key_exists", "credential") {
-		t.Fatalf("expected no credential_key_exists warning without credential store, got %#v", report.Warnings())
+	if !reportContains(report.Errors(), "credential_key_exists", "required static credential inspection is unavailable") {
+		t.Fatalf("required missing reader was not reported: %#v", report.Findings)
+	}
+	if decision := report.AdmissionDecision(AdmissionFindingPolicy{}); decision.Complete || decision.FailureClass != failures.ClassDependencyUnavailable {
+		t.Fatalf("missing reader became empty successful inspection: %+v", decision)
 	}
 }
 
@@ -523,11 +527,17 @@ func TestRun_MapsCredentialStoreErrorsToCredentialKeyExistsError(t *testing.T) {
 	source := runtimeExternalResourceSource("http://127.0.0.1:1")
 
 	report := Run(context.Background(), source, Options{
-		Credentials: bootverifyCredentialStore{listErr: errors.New("credential store unavailable")},
+		Credentials: bootverifyCredentialStore{getErr: errors.New("private credential store unavailable")},
 	})
 
-	if !reportContains(report.Errors(), "credential_key_exists", "credential store unavailable") {
-		t.Fatalf("expected credential_key_exists error for store failure, got %#v", report.Errors())
+	if !reportContains(report.Errors(), "credential_key_exists", "required static credential inspection is unavailable") {
+		t.Fatalf("expected credential_key_exists error for required read failure, got %#v", report.Errors())
+	}
+	if decision := report.AdmissionDecision(AdmissionFindingPolicy{}); decision.Complete || decision.FailureClass != failures.ClassDependencyUnavailable {
+		t.Fatalf("failed required read became successful inspection: %+v", decision)
+	}
+	if strings.Contains(fmt.Sprint(report.Findings), "private credential store unavailable") {
+		t.Fatal("private credential-store cause leaked into findings")
 	}
 }
 
@@ -549,7 +559,7 @@ func TestRun_MapsMCPDiscoveryFailureToMCPServerReachableWarning(t *testing.T) {
 				},
 			})
 		case "notifications/initialized":
-			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "result": map[string]any{}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req["id"], "result": map[string]any{}})
 		case "tools/list":
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"jsonrpc": "2.0",
@@ -5938,8 +5948,8 @@ func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
 	if got := len(bootCheckRegistry); got != 68 {
 		t.Fatalf("bootCheckRegistry count = %d, want 68", got)
 	}
-	if got := len(supplementalChecks); got != 3 {
-		t.Fatalf("supplementalChecks count = %d, want 3", got)
+	if got := len(supplementalChecks); got != 2 {
+		t.Fatalf("supplementalChecks count = %d, want 2; managed credentials share the primary credential observation", got)
 	}
 }
 

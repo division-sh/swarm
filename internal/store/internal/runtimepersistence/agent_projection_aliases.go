@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 )
@@ -27,6 +28,14 @@ func (s *PostgresStore) LoadAgents(ctx context.Context) ([]runtimemanager.Persis
 
 func (s *SQLiteRuntimeStore) LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
 	return s.agentSQLiteOwner.LoadAgents(ctx)
+}
+
+func (s *PostgresStore) ObserveOrdinaryRunSource(ctx context.Context, source correlation.SourceArtifactFact, runID string) (bool, error) {
+	return s.agentPostgresOwner.ObserveOrdinaryRunSource(ctx, source, runID)
+}
+
+func (s *SQLiteRuntimeStore) ObserveOrdinaryRunSource(ctx context.Context, source correlation.SourceArtifactFact, runID string) (bool, error) {
+	return s.agentSQLiteOwner.ObserveOrdinaryRunSource(ctx, source, runID)
 }
 
 func (s *PostgresStore) loadAgentsSpec(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {

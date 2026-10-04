@@ -247,28 +247,9 @@ func executePostgresPlans(ctx context.Context, tx *sql.Tx, plans []SchemaTableDD
 }
 
 func ensurePostgresStatePlans(ctx context.Context, tx *sql.Tx, plans []SchemaTableDDL, diagnostic schemaCompatibilityDiagnostic) error {
-	for _, plan := range plans {
-		expected, err := expectedSchemaShape([]SchemaTableDDL{plan}, SchemaDialectPostgres)
-		if err != nil {
-			return err
-		}
-		tables, err := postgresPublicTables(ctx, tx)
-		if err != nil {
-			return err
-		}
-		if _, exists := tables[plan.TableName]; !exists {
-			if err := executePostgresPlans(ctx, tx, []SchemaTableDDL{plan}); err != nil {
-				return err
-			}
-			continue
-		}
-		actual, err := loadPostgresSchemaShape(ctx, tx, expected)
-		if err != nil {
-			return err
-		}
-		if drift := compareSchemaShapes(expected, actual); len(drift) > 0 {
-			return diagnostic.failure(generatedStateDrift(plan.TableName, drift))
-		}
+	missing, err := inspectStatePlans(ctx, tx, plans, SchemaDialectPostgres, diagnostic)
+	if err != nil {
+		return err
 	}
-	return nil
+	return executePostgresPlans(ctx, tx, missing)
 }

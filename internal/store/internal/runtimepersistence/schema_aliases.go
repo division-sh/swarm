@@ -9,6 +9,7 @@ import (
 type RuntimeStoreOrigin = storeschema.RuntimeStoreOrigin
 type SchemaBootstrapRequest = storeschema.SchemaBootstrapRequest
 type SchemaBootstrapper = storeschema.SchemaBootstrapper
+type SchemaInspection = storeschema.SchemaInspection
 type SchemaCompatibilityError = storeschema.SchemaCompatibilityError
 type SchemaDialect = storeschema.SchemaDialect
 type SchemaTableDDL = storeschema.SchemaTableDDL

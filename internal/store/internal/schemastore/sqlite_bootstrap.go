@@ -181,28 +181,9 @@ func executeSQLitePlans(ctx context.Context, conn *sql.Conn, plans []SchemaTable
 }
 
 func ensureSQLiteStatePlans(ctx context.Context, conn *sql.Conn, plans []SchemaTableDDL, diagnostic schemaCompatibilityDiagnostic) error {
-	for _, plan := range plans {
-		expected, err := expectedSchemaShape([]SchemaTableDDL{plan}, SchemaDialectSQLite)
-		if err != nil {
-			return err
-		}
-		tables, err := sqliteUserTables(ctx, conn)
-		if err != nil {
-			return err
-		}
-		if _, exists := tables[plan.TableName]; !exists {
-			if err := executeSQLitePlans(ctx, conn, []SchemaTableDDL{plan}); err != nil {
-				return err
-			}
-			continue
-		}
-		actual, err := loadSQLiteSchemaShape(ctx, conn, expected)
-		if err != nil {
-			return err
-		}
-		if drift := compareSchemaShapes(expected, actual); len(drift) > 0 {
-			return diagnostic.failure(generatedStateDrift(plan.TableName, drift))
-		}
+	missing, err := inspectStatePlans(ctx, conn, plans, SchemaDialectSQLite, diagnostic)
+	if err != nil {
+		return err
 	}
-	return nil
+	return executeSQLitePlans(ctx, conn, missing)
 }

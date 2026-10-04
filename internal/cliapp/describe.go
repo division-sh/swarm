@@ -110,14 +110,19 @@ func runDescribeRoutesCommandWithOutput(ctx context.Context, repo string, opts d
 		writeDescribeRoutesError(errOut, "describe routes failed: %v\n", err)
 		return 2
 	}
-	_, bundle, _, err := loadConfiguredCLIWorkflowModule(repo, CLISourcePlatformSpecPathOptions{
-		SourceRoot: opts.sourceRoot, PlatformSpecPath: opts.platformSpecPath, ConfigPath: opts.configPath,
-	})
+	configResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: opts.configPath})
 	if err != nil {
 		writeCLIAPIError(errOut, err)
 		return CLIExitValidation
 	}
-	source, validationOpts, err := admitStructuralSource(repo, opts.configPath, bundle)
+	_, bundle, _, err := loadCLIWorkflowModuleWithRuntimeConfig(repo, CLISourcePlatformSpecPathOptions{
+		SourceRoot: opts.sourceRoot, PlatformSpecPath: opts.platformSpecPath, ConfigPath: opts.configPath,
+	}, configResult)
+	if err != nil {
+		writeCLIAPIError(errOut, err)
+		return CLIExitValidation
+	}
+	source, validationOpts, err := admitStructuralSource(configResult, bundle)
 	if err != nil {
 		writeDescribeRoutesError(errOut, "describe routes failed: %v\n", err)
 		return CLIExitValidation
@@ -166,16 +171,21 @@ func runDescribeCommandWithOutput(ctx context.Context, repo string, opts describ
 		}
 		return 2
 	}
-	_, bundle, _, err := loadConfiguredCLIWorkflowModule(repo, CLISourcePlatformSpecPathOptions{
-		SourceRoot:       opts.sourceRoot,
-		PlatformSpecPath: opts.platformSpecPath,
-		ConfigPath:       opts.configPath,
-	})
+	configResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: opts.configPath})
 	if err != nil {
 		writeCLIAPIError(errOut, err)
 		return CLIExitValidation
 	}
-	source, validationOpts, err := admitStructuralSource(repo, opts.configPath, bundle)
+	_, bundle, _, err := loadCLIWorkflowModuleWithRuntimeConfig(repo, CLISourcePlatformSpecPathOptions{
+		SourceRoot:       opts.sourceRoot,
+		PlatformSpecPath: opts.platformSpecPath,
+		ConfigPath:       opts.configPath,
+	}, configResult)
+	if err != nil {
+		writeCLIAPIError(errOut, err)
+		return CLIExitValidation
+	}
+	source, validationOpts, err := admitStructuralSource(configResult, bundle)
 	if err != nil {
 		if errOut != nil {
 			fmt.Fprintf(errOut, "describe failed: admit source: %v\n", err)

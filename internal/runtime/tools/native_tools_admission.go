@@ -15,10 +15,10 @@ import (
 )
 
 type NativeToolAdmissionOptions struct {
-	Runtime     llm.Runtime
-	Credentials runtimecredentials.Store
-	Source      semanticview.Source
-	Workspaces  workspace.Resolver
+	ProviderContract llm.ProviderContract
+	Credentials      runtimecredentials.Store
+	Source           semanticview.Source
+	Workspaces       workspace.Resolver
 }
 
 type workspaceResolutionPurpose uint8
@@ -100,19 +100,22 @@ func nativeToolAdmissionDecision(ctx context.Context, actor models.AgentConfig, 
 		decision.DenialReason = "native tool capability is empty"
 		return decision
 	}
-	providerCaps := llm.NativeToolCapabilitiesForRuntime(opts.Runtime)
-	if nativeToolCapabilitySupported(providerCaps, capability) {
+	contract := opts.ProviderContract
+	if err := contract.Validate(); err != nil {
+		decision.DenialReason = err.Error()
+		return decision
+	}
+	if nativeToolCapabilitySupported(contract.NativeTools.Capabilities, capability) {
 		decision.Admitted = true
 		decision.ProviderNativeAdmitted = true
 		decision.Owner = nativeToolOwnerProviderNative
 		return decision
 	}
-	contract, hasContract := llm.ProviderContractForRuntime(opts.Runtime)
-	if llm.RuntimeEnforcesProviderNativeTools(opts.Runtime) {
+	if contract.NativeTools.StrictProviderNativeSupport {
 		decision.DenialReason = "selected runtime is strict provider-native and does not support provider-native capability"
 		return decision
 	}
-	if !hasContract || !contract.NativeTools.FallbackToolsAllowed {
+	if !contract.NativeTools.FallbackToolsAllowed {
 		decision.DenialReason = "selected runtime does not allow native tool fallback"
 		return decision
 	}

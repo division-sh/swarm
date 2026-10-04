@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -54,12 +55,16 @@ func (*recoveryGuardManagerStore) EnsureEntitySchema(context.Context, string) er
 type recoveryGuardEventStore struct {
 	runtimeagentcontrol.DirectiveOperationStore
 	missing                 []events.PersistedReplayEvent
-	routes                  []runtimeflowidentity.Route
+	routes                  []runtimeflowidentity.RunScopedFlowInstance
 	directiveReconcileCalls atomic.Int32
 	directiveReconcileErr   error
 }
 
 type recoveryGuardEventLease struct{}
+
+func (s *recoveryGuardEventStore) PipelineObligations() runtimepipelineobligation.Store {
+	return newStartupRecoveryPipelineOwner(s.missing, nil)
+}
 
 func (recoveryGuardEventLease) Release(context.Context) error { return nil }
 
@@ -76,11 +81,15 @@ func (*recoveryGuardEventStore) SupportsPersistedReplay() bool { return true }
 func (*recoveryGuardEventStore) UpsertFlowInstanceRoute(context.Context, runtimebus.FlowInstanceRouteRecord) error {
 	return nil
 }
-func (*recoveryGuardEventStore) DeleteFlowInstanceRoute(context.Context, runtimeflowidentity.Route) error {
+func (*recoveryGuardEventStore) DeleteFlowInstanceRoute(context.Context, runtimeflowidentity.RunScopedFlowInstance) error {
 	return nil
 }
-func (s *recoveryGuardEventStore) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.Route, error) {
-	return append([]runtimeflowidentity.Route(nil), s.routes...), nil
+func (s *recoveryGuardEventStore) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
+	return append([]runtimeflowidentity.RunScopedFlowInstance(nil), s.routes...), nil
+}
+
+func (*recoveryGuardEventStore) ListSelectedContractRouteRecoveryRecords(context.Context) ([]runtimemanager.SelectedContractRouteRecoveryRecord, error) {
+	return nil, nil
 }
 func (s *recoveryGuardEventStore) ListEventsMissingPipelineReceipt(context.Context, time.Time, int) ([]events.PersistedReplayEvent, error) {
 	return append([]events.PersistedReplayEvent(nil), s.missing...), nil
@@ -98,6 +107,10 @@ func (s *recoveryGuardEventStore) ReconcileDirectiveOperations(context.Context, 
 
 type minimalRuntimeEventStore struct{}
 
+func (*minimalRuntimeEventStore) PipelineObligations() runtimepipelineobligation.Store {
+	return newStartupRecoveryPipelineOwner(nil, nil)
+}
+
 func (*minimalRuntimeEventStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
 	return runtimebustest.CommitPublishNoop(ctx, command)
 }
@@ -105,6 +118,13 @@ func (*minimalRuntimeEventStore) ListEventDeliveryRecipients(context.Context, st
 	return nil, nil
 }
 func (*minimalRuntimeEventStore) SupportsPersistedReplay() bool { return false }
+
+func (*minimalRuntimeEventStore) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
+	return nil, nil
+}
+func (*minimalRuntimeEventStore) ListSelectedContractRouteRecoveryRecords(context.Context) ([]runtimemanager.SelectedContractRouteRecoveryRecord, error) {
+	return nil, nil
+}
 
 type recoveryDisabledScheduleStore struct {
 	active      []runtimegenericschedule.Activation
@@ -287,6 +307,7 @@ func TestRuntimeStart_FailsWhenRecoveryDisabledAndActiveSchedulesExist(t *testin
 
 func TestRuntimeStart_AllowsRecoveryDisabledWithManagerSnapshotWork(t *testing.T) {
 	bundle := testRuntimeWorkflowValidationBundle()
+	bundle.SourceArtifact = sourceartifactfixture.Artifact()
 	bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
 		"persisted-agent": testRuntimeWorkflowValidationAgent("persisted-agent"),
 	}
@@ -296,8 +317,8 @@ func TestRuntimeStart_AllowsRecoveryDisabledWithManagerSnapshotWork(t *testing.T
 			Event: eventtest.RunCreatingRootIngress("evt-1",
 				"support.item_created", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		}},
-		routes: []runtimeflowidentity.Route{
-			runtimeflowidentity.DeriveRoute("child", "inst-1"),
+		routes: []runtimeflowidentity.RunScopedFlowInstance{
+			{RunID: "99999999-9999-4999-8999-999999999901", Route: runtimeflowidentity.DeriveRoute("child", "inst-1")},
 		},
 	}
 	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(),

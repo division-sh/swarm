@@ -242,10 +242,14 @@ func runFakeDocker(args []string) int {
 	case "network":
 		class := map[string]string{
 			"inspect": "network_inspect",
+			"ls":      "network_list",
 			"create":  "network_create",
 			"connect": "network_connect",
 		}[args[1]]
 		recordFakeDocker(root, fakeDockerRecord{Class: class, Args: redactDockerArgs(args)})
+		if args[1] == "ls" {
+			fmt.Fprintf(os.Stdout, "%q\n", releaseE2ENetwork)
+		}
 		return 0
 	case "image":
 		recordFakeDocker(root, fakeDockerRecord{Class: "image_inspect", Args: redactDockerArgs(args)})
@@ -286,6 +290,7 @@ func validateReleaseDockerCommand(root string, args []string) error {
 	case "network":
 		switch {
 		case equalStrings(args, []string{"network", "inspect", releaseE2ENetwork}):
+		case equalStrings(args, []string{"network", "ls", "--filter", "name=" + releaseE2ENetwork, "--format", "{{json .Name}}"}):
 		case equalStrings(args, []string{"network", "create", releaseE2ENetwork}):
 		case len(args) == 4 && args[1] == "connect" && args[2] == releaseE2ENetwork && releaseE2EContainerName(args[3]):
 		default:

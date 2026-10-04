@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -67,6 +68,9 @@ func TestBootFloorStructuralReadersDoNotClaimNativeWorkspaceReadiness(t *testing
 		for _, asJSON := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/json=%t", command, asJSON), func(t *testing.T) {
 				args := []string{command, sourceRoot, "--config", configPath}
+				if command == "verify" {
+					args = append(args, "--portable")
+				}
 				if asJSON {
 					args = append(args, "--json")
 				}
@@ -87,8 +91,14 @@ func TestBootFloorStructuralReadersDoNotClaimNativeWorkspaceReadiness(t *testing
 							t.Fatalf("structural output still claims %s", retired)
 						}
 					}
-				} else if !strings.Contains(stdout.String(), "validation: structural; live readiness: not evaluated") {
-					t.Fatalf("structural classification missing: %s", stdout.String())
+				} else {
+					want := "validation: structural; live readiness: not evaluated"
+					if command == "verify" {
+						want = "portable structural checks passed; deployment admission not evaluated"
+					}
+					if !strings.Contains(stdout.String(), want) {
+						t.Fatalf("structural classification missing: %s", stdout.String())
+					}
 				}
 				if strings.Contains(stdout.String(), "workspace backend:") {
 					t.Fatal("structural read performed deployment workspace selection")
@@ -114,10 +124,62 @@ func TestBootFloorExplicitHostRefusalIsLiveAdmissionNotStructuralValidity(t *tes
 		}
 		assertClaudeHostRefusal(t, out.String())
 	})
+	for _, mode := range []string{"text", "json", "quiet"} {
+		t.Run("verify_deployment/"+mode, func(t *testing.T) {
+			args := []string{"verify", sourceRoot, "--config", configPath}
+			if mode != "text" {
+				args = append(args, "--"+mode)
+			}
+			var stdout, stderr bytes.Buffer
+			if code := executeCLIFrom(context.Background(), repoRootForTest(), args, &stdout, &stderr, Run); code != cliapp.CLIExitValidation {
+				t.Fatalf("default verification missed boot's host refusal: code=%d stdout=%s stderr=%s", code, &stdout, &stderr)
+			}
+			if mode == "json" {
+				var output struct {
+					OK                bool   `json:"ok"`
+					AdmissionComplete bool   `json:"admission_complete"`
+					ValidationScope   string `json:"validation_scope"`
+					LiveReadiness     string `json:"live_readiness"`
+					Errors            []struct {
+						CheckID string `json:"check_id"`
+						Message string `json:"message"`
+					} `json:"errors"`
+				}
+				if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
+					t.Fatal(err)
+				}
+				if output.OK || output.AdmissionComplete || output.ValidationScope != "deployment" || output.LiveReadiness != "not_evaluated" {
+					t.Fatalf("host refusal became readiness: %s", &stdout)
+				}
+				found := false
+				for _, finding := range output.Errors {
+					if finding.CheckID == "workspace_capability_admission" {
+						assertClaudeHostRefusal(t, finding.Message)
+						found = true
+					}
+				}
+				if !found {
+					t.Fatal("JSON omitted the shared host/backend refusal")
+				}
+			} else {
+				assertClaudeHostRefusal(t, stdout.String()+stderr.String())
+				if !strings.Contains(stdout.String(), "failed: workspace_capability_admission @") {
+					t.Fatalf("%s erased the default admission refusal: %s", mode, &stdout)
+				}
+			}
+			if _, err := os.Stat(filepath.Join(sourceRoot, ".swarm")); !os.IsNotExist(err) {
+				t.Fatalf("default verify created source runtime state: %v", err)
+			}
+		})
+	}
 	for _, command := range []string{"verify", "describe"} {
 		t.Run(command, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			if code := executeCLIFrom(context.Background(), repoRootForTest(), []string{command, sourceRoot, "--config", configPath}, &stdout, &stderr, Run); code != 0 {
+			args := []string{command, sourceRoot, "--config", configPath}
+			if command == "verify" {
+				args = append(args, "--portable")
+			}
+			if code := executeCLIFrom(context.Background(), repoRootForTest(), args, &stdout, &stderr, Run); code != 0 {
 				t.Fatalf("structural read confused deployment readiness with validity: code=%d stderr=%s", code, stderr.String())
 			}
 		})

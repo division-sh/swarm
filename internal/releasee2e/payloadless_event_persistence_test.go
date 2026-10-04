@@ -39,7 +39,7 @@ func TestPayloadlessEventPublicPersistenceJourneyBothStores(t *testing.T) {
 			token := filepath.Join(root, "api-token")
 			writeReleaseFile(t, token, goldenAPIToken+"\n")
 			env := goldenProcessEnv(t, root, store.passwordEnv, 0)
-			verify := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "verify", contracts, "--config", config, "--json")
+			verify := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "verify", contracts, "--config", config, "--portable", "--json")
 			var verified struct {
 				OK bool `json:"ok"`
 			}

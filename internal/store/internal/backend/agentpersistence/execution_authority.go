@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
 	runtimeprocessbinding "github.com/division-sh/swarm/internal/runtime/core/processbinding"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -285,13 +286,7 @@ func inspectRunExecutionOwnershipModeTx(ctx context.Context, tx *sql.Tx, evidenc
 		return 0, err
 	}
 	if evidence.SelectedFork == nil {
-		if bindingID.Valid {
-			return manager.RunExecutionForeign, nil
-		}
-		if hash != evidence.BundleHash {
-			return manager.RunExecutionOtherNormalSource, nil
-		}
-		return manager.RunExecutionOwned, nil
+		return classifyOrdinaryRunSource(hash, bindingID, evidence.BundleHash), nil
 	}
 	if err := ProveSelectedForkGenerationGrantTx(ctx, tx, evidence, sqlite); err != nil {
 		return 0, err
@@ -300,6 +295,49 @@ func inspectRunExecutionOwnershipModeTx(ctx context.Context, tx *sql.Tx, evidenc
 		return manager.RunExecutionForeign, nil
 	}
 	return manager.RunExecutionOwned, nil
+}
+
+func classifyOrdinaryRunSource(hash string, bindingID sql.NullString, sourceHash string) manager.RunExecutionOwnership {
+	if bindingID.Valid {
+		return manager.RunExecutionForeign
+	}
+	if hash != sourceHash {
+		return manager.RunExecutionOtherNormalSource
+	}
+	return manager.RunExecutionOwned
+}
+
+// ObserveOrdinaryRunSource shares durable binding classification with grant
+// admission. It proves only source applicability, never process possession or
+// execution ownership; selected-fork bindings are always excluded.
+func (s *AgentPostgresOwner) ObserveOrdinaryRunSource(ctx context.Context, source correlation.SourceArtifactFact, runID string) (bool, error) {
+	if s == nil || s.backend == nil {
+		return false, errors.New("ordinary run source observation requires the selected PostgreSQL reader")
+	}
+	return observeOrdinaryRunSource(ctx, source, runID, false, s.backend.RunReadTransaction)
+}
+
+func (s *AgentSQLiteOwner) ObserveOrdinaryRunSource(ctx context.Context, source correlation.SourceArtifactFact, runID string) (bool, error) {
+	if s == nil || s.backend == nil {
+		return false, errors.New("ordinary run source observation requires the selected SQLite reader")
+	}
+	return observeOrdinaryRunSource(ctx, source, runID, true, s.backend.RunReadTransaction)
+}
+
+func observeOrdinaryRunSource(ctx context.Context, source correlation.SourceArtifactFact, runID string, sqlite bool, read func(context.Context, func(context.Context, *sql.Tx) error) error) (bool, error) {
+	if err := source.Validate(); err != nil {
+		return false, err
+	}
+	var matches bool
+	err := read(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		hash, binding, err := loadRunExecutionBindingModeTx(ctx, tx, runID, sqlite, false)
+		if err != nil {
+			return err
+		}
+		matches = classifyOrdinaryRunSource(hash, binding, source.BundleHash()) == manager.RunExecutionOwned
+		return ctx.Err()
+	})
+	return matches && err == nil, err
 }
 
 func loadRunExecutionBindingModeTx(ctx context.Context, tx *sql.Tx, runID string, sqlite, lock bool) (string, sql.NullString, error) {

@@ -65,6 +65,7 @@ import (
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
@@ -281,7 +282,7 @@ func TestValidateServeAPIAuthBindingDefaultTokenLoopbackBoundary(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := validateServeAPIAuthBinding(tc.addr, tc.auth)
+			err := cliapp.ValidateServeAPIAuthBinding(tc.addr, tc.auth)
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatalf("validateServeAPIAuthBinding: %v", err)
@@ -590,7 +591,7 @@ func TestServePinnedHashAdmissionExcludesCurrentStandingAndRejectsOrdinaryMismat
 		Artifact: otherArtifact,
 	})
 
-	err := enforceServePinnedBundleAdmissionForHashes(ctx, pg, pinnedHash, []string{pinnedHash})
+	err := runbundle.AdmitPinnedSources(ctx, pg, pinnedHash, []string{pinnedHash})
 	if err == nil {
 		t.Fatal("enforceServePinnedBundleAdmissionForHashes error = nil, want pinned bundle_hash conflict")
 	}
@@ -609,7 +610,7 @@ func TestServePinnedHashAdmissionExcludesCurrentStandingAndRejectsOrdinaryMismat
 		t.Fatalf("pinned-hash admission claimed current standing run %s: %q", standingOtherRunID, got)
 	}
 
-	if err := enforceServePinnedBundleAdmissionForHashes(ctx, pg, pinnedHash, nil); err != nil {
+	if err := runbundle.AdmitPinnedSources(ctx, pg, pinnedHash, nil); err != nil {
 		t.Fatalf("unpinned admission = %v, want no pinned-context constraint", err)
 	}
 }

@@ -3,7 +3,16 @@ package runfork
 import (
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
+
+// SelectedForkRecoveryInspection contains a prospective, read-only plan. It is
+// never an acknowledged recovery result, an execution grant, or currentness proof.
+type SelectedForkRecoveryInspection struct {
+	RunState       runlifecycle.State
+	ExecutionState string
+	Plan           SelectedForkRecoveryResult
+}
 
 type SelectedForkRecoveryEntry struct {
 	Binding    RunForkSelectedContractBinding
