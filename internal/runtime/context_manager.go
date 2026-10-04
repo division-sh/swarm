@@ -2097,11 +2097,7 @@ func (m *RuntimeContextManager) publishStandingServiceTargets(serviceID string, 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if admitted != nil {
-		current := m.contexts[admitted.Context.BundleHash()]
-		if !runtimeContextEntryLoaded(current) || current.runtime != admitted.Runtime() || current.context.RuntimeInstanceID != admitted.Context.RuntimeInstanceID || current.context.PublicationGeneration != admitted.Context.PublicationGeneration || admitted.WorkContext().Err() != nil || m.resetExecutionFenced {
-			return fmt.Errorf("%w: channel target runtime ownership changed at publication", channelonboarding.ErrRevisionConflict)
-		}
-		if err := admitted.Runtime().ValidateStandingIngressCredentials(admitted.WorkContext()); err != nil {
+		if err := m.validateAdmittedStandingPublicationLocked(admitted); err != nil {
 			return err
 		}
 	}
@@ -2222,6 +2218,14 @@ func (m *RuntimeContextManager) publishStandingServiceTargets(serviceID string, 
 		occurrenceEntry.standing[serviceID] = newOccurrence
 	}
 	return nil
+}
+
+func (m *RuntimeContextManager) validateAdmittedStandingPublicationLocked(admitted *RuntimeContextUse) error {
+	current := m.contexts[admitted.Context.BundleHash()]
+	if !runtimeContextEntryLoaded(current) || current.runtime != admitted.Runtime() || current.context.RuntimeInstanceID != admitted.Context.RuntimeInstanceID || current.context.PublicationGeneration != admitted.Context.PublicationGeneration || admitted.WorkContext().Err() != nil || m.resetExecutionFenced {
+		return fmt.Errorf("%w: channel target runtime ownership changed at publication", channelonboarding.ErrRevisionConflict)
+	}
+	return admitted.Runtime().ValidateStandingIngressCredentials(admitted.WorkContext())
 }
 
 func validateTargetsGeneration(contextDef BundleContext, generation triggergeneration.Generation) error {
