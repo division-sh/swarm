@@ -1212,7 +1212,15 @@ func TestGatewayMCPToolsForRequest_PreservesExecutorOrderAndRejectsCanonicalDupl
 				ResolveTurnContext: registry.ResolveTurnContext,
 			})
 
-			tools := mustMCPToolsForRequest(t, gateway, withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", nil), "ctx-order"))
+			request := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", nil), "ctx-order")
+			if testCase.name == "forkchat" {
+				// A bare allowlist is not the conversation's snapshot/stub owner.
+				if tools, err := gateway.mcpToolsForRequest(request); err == nil || len(tools) != 0 {
+					t.Fatalf("unowned sandbox catalog accepted: %v / %v", tools, err)
+				}
+				return
+			}
+			tools := mustMCPToolsForRequest(t, gateway, request)
 			names := make([]string, 0, len(tools))
 			for _, tool := range tools {
 				names = append(names, tool.Name)
@@ -1258,6 +1266,12 @@ func TestGatewayMCPToolsForRequest_PreservesExecutorOrderAndRejectsCanonicalDupl
 				t.Fatalf("duplicate canonical catalog returned tools=%#v err=%v, want fail closed", tools, err)
 			}
 			protocolErr, ok := err.(*ProtocolError)
+			if testCase.name == "forkchat" {
+				if !ok || protocolErr.Payload.Detail["reason"] != "sandbox_executor_missing_or_foreign" {
+					t.Fatalf("unowned sandbox catalog error = %#v", err)
+				}
+				return
+			}
 			if !ok || protocolErr.Payload.Operation != "mcp.tools.list.catalog" || protocolErr.Payload.Detail["reason"] != "executor_catalog_invalid" {
 				t.Fatalf("duplicate canonical catalog error = %#v", err)
 			}

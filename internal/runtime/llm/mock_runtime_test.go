@@ -20,10 +20,11 @@ import (
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	"github.com/google/uuid"
 )
 
-func TestObserveMockRuntimeCapabilitySurfaceBindsExactInterpreterInput(t *testing.T) {
+func TestMockRuntimeCapabilitySurfaceRequiresMCPInsteadOfLocalInterpreterProof(t *testing.T) {
 	tool := ToolDefinition{Name: "echo", Description: "Echo text", Schema: map[string]any{"type": "object"}}
 	actor := runtimeactors.AgentConfig{ID: "mock-agent", ExecutionMode: runtimeeffects.ExecutionModeMock}
 	actor.Identity = testAgentIdentity(actor.ID, "")
@@ -37,18 +38,17 @@ func TestObserveMockRuntimeCapabilitySurfaceBindsExactInterpreterInput(t *testin
 	if err != nil {
 		t.Fatalf("plan mock capability surface: %v", err)
 	}
-	if got := surface.PlannedBindingNames(managedcapabilities.BindingLocalRuntime); !slices.Equal(got, []string{"echo"}) {
-		t.Fatalf("local-runtime bindings = %v", got)
+	if got := surface.PlannedBindingNames(managedcapabilities.BindingKind("local_runtime")); len(got) != 0 {
+		t.Fatalf("obsolete local-runtime bindings = %v", got)
 	}
 	if got := surface.EffectiveNames(); len(got) != 0 {
 		t.Fatalf("effective tools before interpreter observation = %v", got)
 	}
-	observed, err := ObserveMockRuntimeCapabilitySurface(surface, []ToolDefinition{tool}, "sha256:module")
-	if err != nil {
-		t.Fatalf("observe mock capability surface: %v", err)
+	if err := validatePlannedWorkspaceMCPDefinitions(surface, []toolgateway.ListedDefinition{{Name: tool.Name, Description: tool.Description, InputSchema: json.RawMessage(`{"type":"object"}`)}}); err != nil {
+		t.Fatalf("validate planned mock definitions: %v", err)
 	}
-	if got := observed.EffectiveNames(); !slices.Equal(got, []string{"echo"}) {
-		t.Fatalf("effective tools after interpreter observation = %v", got)
+	if got := surface.PlannedBindingNames(managedcapabilities.BindingMCPTool); !slices.Equal(got, []string{"mcp__runtime-tools__echo"}) {
+		t.Fatalf("exact MCP tools after target observation = %v", got)
 	}
 }
 
@@ -71,7 +71,7 @@ def handle(input):
 		Mock: mockperformance.Performance{Kind: "python", SourcePath: "mocks/assistant.py", Source: source, Digest: pythonSourceDigest(source)},
 	}
 	request := []byte(`{"messages":[{"role":"user","content":"{\"event\":{\"type\":\"message.received\"}}"}],"tools":[{"name":"notify_human","schema":{"type":"object","required":["summary"],"properties":{"summary":{"type":"string"},"context":{}},"additionalProperties":false}}],"tool_results":[],"round":1}`)
-	response, _, usage, _, err := executeMockCompletion(ctx, actor, []ToolDefinition{notifyHumanTestToolDefinition()}, request, llmselection.ResolvedModel{ModelAlias: "regular", ConcreteModel: "mock-frame-model"}, false, managedProviderCallForEffectTest(t, ctx))
+	response, _, usage, _, err := executeMockCompletionWithExecutor(ctx, actor, []ToolDefinition{notifyHumanTestToolDefinition()}, request, llmselection.ResolvedModel{ModelAlias: "regular", ConcreteModel: "mock-frame-model"}, false, managedProviderCallForEffectTest(t, ctx), mockHostCompletionExecutor(t))
 	if err != nil {
 		t.Fatalf("execute mock completion: %v", err)
 	}
@@ -98,7 +98,7 @@ def handle(input):
 	registry := sessions.NewInMemoryRegistry(time.Second)
 	runtime := NewMockRuntime(&config.Config{LLM: config.LLMConfig{Models: llmselection.ModelAliases{
 		"hostile-alias": {llmselection.BackendMock: "hostile-config-model"},
-	}}}, registry, "worker-1", nil, nil, liveTestCompletionController(harness, harness, harness, harness))
+	}}}, registry, "worker-1", nil, nil, liveTestCompletionController(harness, harness, harness, harness), mockHostRuntimeOptions(t))
 	ctx := testManagedConversationContext(t, harness, "mock-agent", "mock/inst-1", "worker")
 	actor, _ := runtimeactors.ActorFromContext(ctx)
 	actor.ExecutionMode = runtimeeffects.ExecutionModeMock

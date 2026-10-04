@@ -51,7 +51,7 @@ func TestSelectedManagedRotationRequiresLifecycleAuthorityBothStores(t *testing.
 		}
 		session := &runtimellm.Session{ID: acquired.SessionID, AgentID: identity.AgentID(), Memory: agentmemory.Plan{Enabled: true}, MemoryIdentity: identity,
 			TurnCount: 1, Messages: []runtimellm.Message{{Role: "assistant", Content: "first turn"}}}
-		adapter := runtimellm.NewMockRuntime(&config.Config{LLM: config.LLMConfig{Session: config.LLMSessionConfig{RotateAfterTurns: 1}}}, registry, "managed-worker", nil, nil, nil)
+		adapter := runtimellm.NewMockRuntime(&config.Config{LLM: config.LLMConfig{Session: config.LLMSessionConfig{RotateAfterTurns: 1}}}, registry, "managed-worker", nil, nil, nil, runtimellm.MockRuntimeOptions{})
 		if err := adapter.PrepareManagedSession(ctx, session); err != nil || session.ID == acquired.SessionID {
 			t.Fatalf("managed adapter turn rotation: session=%+v err=%v", session, err)
 		}
