@@ -2075,6 +2075,15 @@ func proveSelectedForkClaudeOAuth(t *testing.T, backend string, db *sql.DB, sele
 	dockerPath := filepath.Join(captureDir, "fake-docker.sh")
 	script := `#!/bin/sh
 set -eu
+case "$1" in
+  inspect) printf '%064d\n' 1; exit 0 ;;
+  top) printf 'PID COMMAND\n1 sleep infinity\n'; exit 0 ;;
+esac
+for argument in "$@"; do
+  case "$argument" in
+    --internal-workspace-worker=*) exec "$SELECTED_FORK_WORKER_BINARY" --selected-fork-provider-worker-fixture "$argument" ;;
+  esac
+done
 capture_dir="${SELECTED_FORK_CLAUDE_CAPTURE_DIR}"
 counter="$capture_dir/count"
 count=0
@@ -2160,6 +2169,11 @@ fi
 		t.Fatalf("write fake Docker executable: %v", err)
 	}
 	t.Setenv("SELECTED_FORK_CLAUDE_CAPTURE_DIR", captureDir)
+	workerBinary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SELECTED_FORK_WORKER_BINARY", workerBinary)
 
 	providerCredentials, err := runtimecredentials.NewFileStore(filepath.Join(captureDir, "provider-credentials.json"))
 	if err != nil {

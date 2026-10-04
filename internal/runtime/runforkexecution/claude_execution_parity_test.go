@@ -26,6 +26,11 @@ import (
 
 func seedSelectedClaudeExecutionSource(t *testing.T, ctx context.Context, backend string, db *sql.DB, selected startupownership.Store, loaded LoadedSelectedContractSource, runID, eventID string, at time.Time) {
 	t.Helper()
+	seedSelectedAgentExecutionSource(t, ctx, backend, db, selected, loaded, runID, eventID, at, executionmode.Live)
+}
+
+func seedSelectedAgentExecutionSource(t *testing.T, ctx context.Context, backend string, db *sql.DB, selected startupownership.Store, loaded LoadedSelectedContractSource, runID, eventID string, at time.Time, mode executionmode.Mode) {
+	t.Helper()
 	artifact := selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash())
 	fixture := runlifecyclefixture.Fixture{
 		RunID: runID, Origin: runlifecyclefixture.ScenarioSetupOrigin(), Source: loaded.SourceArtifactFact,
@@ -53,7 +58,7 @@ func seedSelectedClaudeExecutionSource(t *testing.T, ctx context.Context, backen
 		t.Fatal(err)
 	}
 	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "task.assigned", "source-runtime", "", payload, 0, runID,
-		events.EventEnvelope{Scope: events.EventScopeGlobal}, eventtest.RootRoutingSource(runID), at, executionmode.Live)
+		events.EventEnvelope{Scope: events.EventScopeGlobal}, eventtest.RootRoutingSource(runID), at, mode)
 	route := selectedExecutionTestAgentRoute(t, runID, "test-agent", "worker")
 	route.Target = events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "worker", FlowInstance: "worker", EntityID: entityID})
 	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{route}, pipelineobligation.ScopeSubscribed)
