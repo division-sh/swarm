@@ -1485,8 +1485,9 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		NativeToolAdmissionValidator: func(ctx context.Context, cfg runtimeactors.AgentConfig) error {
 			return rt.ToolExecutor.ValidateNativeToolCapabilityAdmission(ctx, cfg)
 		},
-		ThrottleSuppressPrefixes: runtimeThrottleSuppressPrefixes(source),
-		DisableSpinupControl:     true,
+		WorkspaceGatewayAdmission: rt.observeActivationWorkspaceGateway,
+		ThrottleSuppressPrefixes:  runtimeThrottleSuppressPrefixes(source),
+		DisableSpinupControl:      true,
 	}
 	if rt.Pipeline != nil {
 		managerOptions.PersistenceRoles.FlowTermination = rt.Pipeline
@@ -1517,13 +1518,15 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		if toolGatewayToken == "" {
 			return nil, fmt.Errorf("tool gateway binding token is required")
 		}
-		rt.ToolGateway = runtimemcp.NewGateway(rt.ToolExecutor, toolGatewayToken, RuntimeMCPGatewayHooks(rt.Logger, rt.RuntimeIngress, func(identity runtimeagentidentity.Identity) (runtimeactors.AgentConfig, bool) {
+		hooks := RuntimeMCPGatewayHooks(rt.Logger, rt.RuntimeIngress, func(identity runtimeagentidentity.Identity) (runtimeactors.AgentConfig, bool) {
 			if rt.Manager == nil {
 				return runtimeactors.AgentConfig{}, false
 			}
 			cfg, err := rt.Manager.ResolveAgentConfig(identity.RunID, identity.AgentID(), identity.FlowInstance())
 			return cfg, err == nil
-		}, rt.shutdownAdmissionClosed, rt.MCPTurns))
+		}, rt.shutdownAdmissionClosed, rt.MCPTurns)
+		hooks.ValidateActivationProbe = rt.Manager.ProveUnpublishedActivation
+		rt.ToolGateway = runtimemcp.NewGateway(rt.ToolExecutor, toolGatewayToken, hooks)
 	}
 
 	workOccurrenceOwned = false
@@ -1768,9 +1771,7 @@ func (rt *Runtime) prepareStartLocked(ctx context.Context) (*PreparedStartup, er
 	if err != nil {
 		return nil, err
 	}
-	if claudeEnabled, backendErr := isClaudeCLIBackend(rt.Config); backendErr != nil {
-		return nil, backendErr
-	} else if claudeEnabled && hasManagedAgents {
+	if hasManagedAgents {
 		preflightAuthority, err = rt.managedProviderPreflightAuthority(startupAuthority)
 		if err != nil {
 			rt.emitBootProgress(15, "mcp_tool_validation", "FAILED", err.Error())

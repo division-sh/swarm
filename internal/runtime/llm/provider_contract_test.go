@@ -136,7 +136,7 @@ func TestRuntimeFactoryValidatesProviderContract(t *testing.T) {
 }
 
 func TestMockRuntimeUsesCanonicalProviderContractWithoutPublicBackendSelector(t *testing.T) {
-	runtime := NewMockRuntime(nil, sessions.NewInMemoryRegistry(0), "", nil, nil, nil)
+	runtime := NewMockRuntime(nil, sessions.NewInMemoryRegistry(0), "", nil, nil, nil, MockRuntimeOptions{})
 	contract, err := RequireProviderContract("mock", runtime)
 	if err != nil || contract.Provider != "mock" {
 		t.Fatalf("mock provider contract = %#v, error=%v", contract, err)

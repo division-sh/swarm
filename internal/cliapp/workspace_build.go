@@ -3,6 +3,9 @@ package cliapp
 import (
 	"bytes"
 	"context"
+	"debug/elf"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,17 +17,19 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/platform"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/runtime/workspace/worker"
 	"github.com/spf13/cobra"
 )
 
 const workspaceBuildClaudeCommand = "claude"
 
 type workspaceBuildOptions struct {
-	backend    string
-	configPath string
-	RepoRoot   string
-	image      string
-	dockerBin  string
+	backend      string
+	configPath   string
+	RepoRoot     string
+	image        string
+	dockerBin    string
+	workerBinary string
 }
 
 func newWorkspaceCommand(ctx context.Context, root InvocationRoot) *cobra.Command {
@@ -84,6 +89,7 @@ func newWorkspaceBuildCommand(ctx context.Context, RepoRoot string) *cobra.Comma
 	cmd.Flags().StringVar(&opts.configPath, "config", opts.configPath, "Path to swarm.yaml config for workspace.image/workspace.docker_bin")
 	cmd.Flags().StringVar(&opts.image, "image", opts.image, "Workspace image tag to build; defaults to workspace.image or swarm-workspace:latest")
 	cmd.Flags().StringVar(&opts.dockerBin, "docker-bin", opts.dockerBin, "Docker-compatible CLI binary; defaults to workspace.docker_bin or docker")
+	cmd.Flags().StringVar(&opts.workerBinary, "worker-binary", "", "Compatible Linux swarm executable to pin in the workspace image (required for Docker mocks from macOS)")
 	return cmd
 }
 
@@ -117,6 +123,15 @@ func runWorkspaceBuildCommand(ctx context.Context, out io.Writer, opts workspace
 		return fmt.Errorf("workspace image build failed: %w", err)
 	}
 	defer cleanup()
+	var workerIdentity *worker.Identity
+	if opts.workerBinary != "" {
+		identity, err := provisionWorkspaceBuildWorker(contextDir, opts.workerBinary)
+		if err != nil {
+			return fmt.Errorf("workspace image build failed: %w", err)
+		}
+		workerIdentity = &identity
+		dockerfile = filepath.Join(contextDir, platform.DefaultWorkspaceDockerfilePath)
+	}
 
 	dockerBin := strings.TrimSpace(opts.dockerBin)
 	if dockerBin == "" {
@@ -134,19 +149,32 @@ func runWorkspaceBuildCommand(ctx context.Context, out io.Writer, opts workspace
 		fmt.Fprintf(out, "Building workspace image %s for backend claude_cli\n", image)
 	}
 	tempImage := temporaryWorkspaceBuildImageTag()
-	if _, err := runWorkspaceBuildDocker(ctx, dockerBin,
+	buildArgs := []string{
 		"build",
 		"-t", tempImage,
 		"-f", dockerfile,
 		"--build-arg", "INSTALL_CLAUDE_CLI=true",
 		"--build-arg", "INSTALL_CODEX_CLI=false",
-		contextDir,
-	); err != nil {
+	}
+	if workerIdentity != nil {
+		raw, err := json.Marshal(workerIdentity)
+		if err != nil {
+			return err
+		}
+		buildArgs = append(buildArgs, "--label", workspace.WorkerImageIdentityLabel+"="+string(raw))
+	}
+	buildArgs = append(buildArgs, contextDir)
+	if _, err := runWorkspaceBuildDocker(ctx, dockerBin, buildArgs...); err != nil {
 		return fmt.Errorf("workspace image build failed for image %q: %w", image, err)
 	}
 	defer func() {
 		_, _ = runWorkspaceBuildDocker(ctx, dockerBin, "image", "rm", tempImage)
 	}()
+	if workerIdentity != nil {
+		if err := workspace.VerifyBuiltWorker(ctx, dockerBin, tempImage, *workerIdentity); err != nil {
+			return fmt.Errorf("workspace image worker validation failed: %w", err)
+		}
+	}
 
 	if out != nil {
 		fmt.Fprintf(out, "Validating workspace image %s can execute %s\n", image, workspaceBuildClaudeCommand)
@@ -165,6 +193,57 @@ func runWorkspaceBuildCommand(ctx context.Context, out io.Writer, opts workspace
 		fmt.Fprintf(out, "Workspace image %s is ready for claude_cli\n", image)
 	}
 	return nil
+}
+
+func provisionWorkspaceBuildWorker(contextDir, binary string) (worker.Identity, error) {
+	current, err := worker.ExecutableIdentity()
+	if err != nil {
+		return worker.Identity{}, err
+	}
+	artifact, err := elf.Open(binary)
+	if err != nil {
+		return worker.Identity{}, fmt.Errorf("--worker-binary must be a runnable Linux swarm executable: %w", err)
+	}
+	defer artifact.Close()
+	identity := current
+	identity.OS = "linux"
+	switch artifact.Machine {
+	case elf.EM_X86_64:
+		identity.Arch = "amd64"
+	case elf.EM_AARCH64:
+		identity.Arch = "arm64"
+	default:
+		return worker.Identity{}, fmt.Errorf("workspace worker requires Linux amd64 or arm64")
+	}
+	identity.BinaryDigest, err = worker.ArtifactDigest(binary)
+	if err != nil {
+		return worker.Identity{}, err
+	}
+	if err := worker.ValidateLinuxArtifact(current, identity); err != nil {
+		return worker.Identity{}, err
+	}
+	source, err := os.Open(binary)
+	if err != nil {
+		return worker.Identity{}, err
+	}
+	defer source.Close()
+	destination, err := os.OpenFile(filepath.Join(contextDir, "swarm-worker"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o755)
+	if err != nil {
+		return worker.Identity{}, err
+	}
+	_, copyErr := io.Copy(destination, source)
+	if err := errors.Join(copyErr, destination.Close()); err != nil {
+		return worker.Identity{}, err
+	}
+	dockerfile, err := os.OpenFile(filepath.Join(contextDir, platform.DefaultWorkspaceDockerfilePath), os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		return worker.Identity{}, err
+	}
+	_, writeErr := io.WriteString(dockerfile, "\nCOPY --chmod=0555 swarm-worker "+workspace.WorkerContainerPath+"\n")
+	if err := errors.Join(writeErr, dockerfile.Close()); err != nil {
+		return worker.Identity{}, err
+	}
+	return identity, nil
 }
 
 func normalizeWorkspaceBuildDockerBin(raw, source string) (string, error) {

@@ -273,6 +273,12 @@ jobs:
         run: go build ./cmd/swarm
       - name: Build workspace image
         run: docker build -t swarm-workspace:latest -f Dockerfile.workspace .
+      - name: Prove real container MCP emission and successor refusal
+        env:
+          SWARM_TEST_WORKSPACE_MCP_DOCKER: "1"
+        run: |
+          go test ./internal/runtime/workspace -run '^TestWorkerRealDocker' -count=1 -timeout=2m -v
+          go test ./internal/releasee2e -run '^TestWorkspaceMCPCompiledDocker(Conformance|DoctorAndLiveBootRefusal)$' -count=1 -timeout=4m -v
       - name: Prove no-selector SQLite local run
         run: |
           payload=$(mktemp)

@@ -47,7 +47,12 @@ type SelectedForkPreparedActor struct {
 }
 
 func (a SelectedForkPreparedActor) RequiresProbe() bool {
-	return a.Backend == selection.BackendClaudeCLI && a.Mode == executionmode.Live
+	profile, err := selection.ResolveActiveBackend(a.Backend)
+	if err != nil || profile.Transport != selection.TransportCLI {
+		return false
+	}
+	mode, err := selection.ExecutionModeForProfile(profile)
+	return err == nil && mode == a.Mode
 }
 
 func (b SelectedForkPreparationBinding) Validate() error {
