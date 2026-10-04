@@ -275,7 +275,7 @@ func TestOwnedLifecycleStartupEvidence(t *testing.T) {
 	}
 }
 
-func startOwnedMockLifecycleFollowUpRuntime(t *testing.T, opts cliapp.ServeOptions) (string, *runtimepkg.Runtime) {
+func ownedMockLifecycleRoot(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	// The process cleanup registered below joins children before this restores
@@ -293,6 +293,12 @@ func startOwnedMockLifecycleFollowUpRuntime(t *testing.T, opts cliapp.ServeOptio
 			t.Errorf("release retained proof directories: %v", err)
 		}
 	})
+	return root
+}
+
+func startOwnedMockLifecycleFollowUpRuntime(t *testing.T, opts cliapp.ServeOptions) (string, *runtimepkg.Runtime) {
+	t.Helper()
+	root := ownedMockLifecycleRoot(t)
 	process := startOwnedMockLifecycleTestProcess(t, repoRootForTest(), root, opts)
 	process.waitForReadyLine()
 	return "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc", servedTestProcessRuntime(t, process)
