@@ -73,6 +73,7 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/managedcredentials/store.go:writeLocked:filesystem_write:1":                                                         ownerCredentialLifecycle,
 	"internal/runtime/managedcredentials/store.go:writeLocked:filesystem_write:2":                                                         ownerCredentialLifecycle,
 	"internal/runtime/mcp/client.go:callHTTPServerWithCredentialKeyResolver:http_do:1":                                                    ownerManagedAgent,
+	"internal/runtime/mcp/client.go:Close:http_do:1":                                                                                      ownerRuntimeDependency, // sync.Once joined discovery cleanup, not HTTP.
 	"internal/runtime/mcp/client.go:newStdioRPCClient:process_launch:1":                                                                   ownerRuntimeDependency,
 	"internal/runtime/mcp/client.go:Call:stdio_write:1":                                                                                   ownerManagedAgent,
 	"internal/runtime/pipeline/activity_engine.go:executePreparedActivityHTTPTool:http_do:1":                                              ownerPipelineActivity,
@@ -157,6 +158,7 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/tools/tool_result_relay.go:writeToolResultRelayFile:filesystem_write:1":                                             ownerManagedAgent,
 	"internal/runtime/tools/tool_result_relay.go:writeToolResultRelayFile:filesystem_write:2":                                             ownerManagedAgent,
 	"internal/runtime/workspace/manager.go:RunDocker:process_launch:1":                                                                    ownerRuntimeDependency,
+	"internal/runtime/workspace/admission_probe.go:runDockerObservation:process_launch:1":                                                 ownerRuntimeDependency, // bounded declared inspection/version probe with checked cleanup; no workspace provisioning.
 	"internal/runtime/credentials/file_lock_unix.go:lockCredentialFile:filesystem_write:1":                                                ownerCredentialLifecycle,
 	"internal/runtime/credentials/file_lock_windows.go:lockCredentialFile:filesystem_write:1":                                             ownerCredentialLifecycle,
 	"internal/runtime/credentials/file_store.go:saveLocked:filesystem_write:3":                                                            ownerCredentialLifecycle,

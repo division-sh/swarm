@@ -137,12 +137,6 @@ func postgresEnvironmentAuthorityViolations(root string) ([]string, error) {
 				violations = append(violations, fmt.Sprintf("manual Postgres DSN interpreter %q survives in %s", fragment, rel))
 			}
 		}
-		if isProduction && strings.Contains(text, `pq.NewConfig(`) && filepath.ToSlash(rel) != "internal/testpostgres/connection.go" {
-			violations = append(violations, fmt.Sprintf("competing pq.NewConfig owner survives in %s", rel))
-		}
-		if isProduction && strings.Contains(text, `pq.NewConnectorConfig(`) && filepath.ToSlash(rel) != "internal/testpostgres/connection.go" {
-			violations = append(violations, fmt.Sprintf("competing pq.NewConnectorConfig owner survives in %s", rel))
-		}
 		if isProduction && filepath.ToSlash(rel) != "internal/testpostgres/connection.go" {
 			file, err := parser.ParseFile(token.NewFileSet(), path, data, 0)
 			if err != nil {
@@ -151,10 +145,104 @@ func postgresEnvironmentAuthorityViolations(root string) ([]string, error) {
 			for _, violation := range postgresSourceAuthorityViolations(file) {
 				violations = append(violations, fmt.Sprintf("%s survives in %s", violation, rel))
 			}
+			violations = append(violations, postgresProductionConnectorViolations(filepath.ToSlash(rel), file)...)
 		}
 		return nil
 	})
 	return violations, err
+}
+
+// Production selected-store connectors consume an admitted deployment DSN,
+// not the test environment. Exact sites/counts leave unknown callers forbidden.
+var postgresProductionConnectorSites = map[string]int{
+	"internal/store/construction/open.go\x00OpenPostgres\x00NewConfig":                                                1,
+	"internal/store/construction/open.go\x00OpenPostgres\x00NewConnectorConfig":                                       1,
+	"internal/store/construction/open.go\x00OpenPostgresReadOnly\x00NewConfig":                                        1,
+	"internal/store/internal/backend/postgres/inspection_io.go\x00OpenForInspection\x00NewConnectorConfig":            1,
+	"internal/store/internal/backend/postgres/possession_observation.go\x00observeAdvisoryLock\x00NewConnectorConfig": 1,
+}
+
+func postgresProductionConnectorViolations(relative string, file *ast.File) []string {
+	pqAliases := map[string]bool{"pq": true}
+	for _, imp := range file.Imports {
+		path, _ := strconv.Unquote(imp.Path.Value)
+		if path == "github.com/lib/pq" && imp.Name != nil {
+			pqAliases[imp.Name.Name] = true
+		}
+	}
+	found := map[string]int{}
+	for _, decl := range file.Decls {
+		function := "<package>"
+		if fn, ok := decl.(*ast.FuncDecl); ok {
+			function = fn.Name.Name
+		}
+		ast.Inspect(decl, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			selector, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			pkg, ok := selector.X.(*ast.Ident)
+			if !ok || !pqAliases[pkg.Name] || (selector.Sel.Name != "NewConfig" && selector.Sel.Name != "NewConnectorConfig") {
+				return true
+			}
+			found[relative+"\x00"+function+"\x00"+selector.Sel.Name]++
+			return true
+		})
+	}
+	var violations []string
+	for key, count := range found {
+		if want := postgresProductionConnectorSites[key]; count != want {
+			violations = append(violations, fmt.Sprintf("unclassified production Postgres connector %q: found %d, classified %d", key, count, want))
+		}
+	}
+	for key, count := range postgresProductionConnectorSites {
+		if strings.HasPrefix(key, relative+"\x00") && found[key] == 0 {
+			violations = append(violations, fmt.Sprintf("missing production Postgres connector %q: classified %d", key, count))
+		}
+	}
+	return violations
+}
+
+func TestPostgresGuardClassifiesExactProductionConnectorsWithoutTestAuthority(t *testing.T) {
+	const relative = "internal/store/construction/open.go"
+	const admitted = `package construction
+import native "github.com/lib/pq"
+func OpenPostgres() { native.NewConfig(); native.NewConnectorConfig() }
+func OpenPostgresReadOnly() { native.NewConfig() }
+`
+	for _, tc := range []struct {
+		name, source string
+		wantRefusal  bool
+	}{
+		{name: "exact deployment connectors", source: admitted},
+		{name: "unknown caller in owner file", source: admitted + "func unknown() { native.NewConfig() }", wantRefusal: true},
+		{name: "duplicate classified call", source: strings.Replace(admitted, "native.NewConnectorConfig()", "native.NewConnectorConfig(); native.NewConnectorConfig()", 1), wantRefusal: true},
+		{name: "missing classified call", source: strings.Replace(admitted, "native.NewConnectorConfig()", "", 1), wantRefusal: true},
+		{name: "test environment read in classified owner", source: strings.Replace(admitted, "native.NewConfig();", `os.Getenv("SWARM_TEST_POSTGRES_DSN"); native.NewConfig();`, 1), wantRefusal: true},
+		{name: "test source parser in classified owner", source: strings.Replace(admitted, "native.NewConfig();", "testpostgres.ParseConnection(); native.NewConfig();", 1) + "\n", wantRefusal: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := tc.source
+			if strings.Contains(source, "os.Getenv") {
+				source = strings.Replace(source, `import native "github.com/lib/pq"`, "import (native \"github.com/lib/pq\"; \"os\")", 1)
+			}
+			if strings.Contains(source, "testpostgres.ParseConnection") {
+				source = strings.Replace(source, `import native "github.com/lib/pq"`, "import (native \"github.com/lib/pq\"; \"github.com/division-sh/swarm/internal/testpostgres\")", 1)
+			}
+			file, err := parser.ParseFile(token.NewFileSet(), "fixture.go", source, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			violations := append(postgresProductionConnectorViolations(relative, file), postgresSourceAuthorityViolations(file)...)
+			if (len(violations) > 0) != tc.wantRefusal {
+				t.Fatalf("violations=%v; want refusal=%v", violations, tc.wantRefusal)
+			}
+		})
+	}
 }
 
 func TestPostgresGuardIgnoresNestedCheckoutAndRejectsCurrentSource(t *testing.T) {

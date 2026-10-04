@@ -17,6 +17,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"gopkg.in/yaml.v3"
@@ -251,10 +252,20 @@ func TestReleaseE2EFullLifecycleFixtureLoadsAndVerifies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("admit release E2E full lifecycle effective source: %v", err)
 	}
-	report := runtimebootverify.Run(context.Background(), projection.Source(), runtimebootverify.Options{})
+	report := runtimebootverify.Run(context.Background(), projection.Source(), runtimebootverify.Options{Purpose: runtimebootverify.StructuralValidation})
 	if findings := report.HardInvalidities(); len(findings) != 0 {
 		t.Fatalf("release E2E full lifecycle fixture hard invalidities: %#v", findings)
 	}
+	if report.AdmissionDecision(runtimebootverify.AdmissionFindingPolicy{}).Complete {
+		t.Fatal("source-only fixture verification claimed complete deployment admission")
+	}
+	execution := runtimebootverify.Run(context.Background(), projection.Source(), runtimebootverify.Options{})
+	for _, finding := range execution.HardInvalidities() {
+		if finding.CheckID == "credential_key_exists" && finding.FailureClass == runtimefailures.ClassDependencyUnavailable {
+			return
+		}
+	}
+	t.Fatalf("execution-purpose fixture verification hid the missing credential reader: %#v", execution)
 }
 
 func TestSelectedForkFlowScopedMCPFixtureLoadsAndVerifies(t *testing.T) {
