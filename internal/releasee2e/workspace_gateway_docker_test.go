@@ -259,6 +259,68 @@ func TestWorkspaceMCPCompiledHostConformance(t *testing.T) {
 	}
 }
 
+func TestWorkspaceMCPCompiledStaticDoctorProofCredit(t *testing.T) {
+	root := goldenReleaseRoot(t)
+	binary := buildReleaseBinary(t, root)
+	env := goldenProcessEnv(t, root, "", 0)
+	assertGoldenProcessHasNoExternalExecutables(t, env)
+	for _, asJSON := range []bool{false, true} {
+		t.Run(fmt.Sprintf("json=%v", asJSON), func(t *testing.T) {
+			args := []string{"doctor", "--backend", "claude_cli", "--workspace-backend", "host", "--api-listen-addr", "127.0.0.1:0", "--mcp-listen-addr", "127.0.0.1:0"}
+			if asJSON {
+				args = append(args, "--json")
+			}
+			result := runReleaseCommand(t, 20*time.Second, root, env, "", binary, args...)
+			if result.err != nil {
+				exit, ok := result.err.(*exec.ExitError)
+				if !ok || exit.ExitCode() != 1 {
+					t.Fatalf("static doctor failed outside prerequisite admission: %v\n%s", result.err, result.output)
+				}
+			}
+			if !strings.Contains(result.output, "not checked from inside a container") || !strings.Contains(result.output, "credential validity not probed") {
+				t.Fatalf("static doctor manufactured network or credential proof: %s", result.output)
+			}
+			if strings.Contains(result.output, "workspace_gateway_probed") {
+				t.Fatalf("static doctor claimed a live gateway observation: %s", result.output)
+			}
+			if asJSON {
+				var report struct {
+					Mode, Backend string
+					Findings      []struct {
+						Category, Code, Status, Severity string
+					}
+				}
+				if err := json.Unmarshal([]byte(result.output), &report); err != nil || report.Mode != "doctor" || report.Backend != "claude_cli" {
+					t.Fatalf("static doctor's public JSON is not its prerequisite report: %+v, %v\n%s", report, err, result.output)
+				}
+				var unprobed int
+				for _, finding := range report.Findings {
+					if finding.Code == "workspace_gateway_not_probed" {
+						unprobed++
+						if finding.Category != "gateway_prerequisite" || finding.Status != "skipped" || finding.Severity != "info" {
+							t.Fatalf("static gateway finding granted execution credit: %+v", finding)
+						}
+					}
+				}
+				if unprobed != 1 {
+					t.Fatalf("static doctor did not report exactly one unprobed gateway: %+v", report)
+				}
+			}
+		})
+	}
+	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if strings.HasPrefix(entry.Name(), "swarm-test-session-") || (!entry.IsDir() && filepath.Ext(path) == ".db") {
+			t.Errorf("static doctor acquired test execution or retained state: %s", path)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestWorkspaceMCPCompiledDockerConformance(t *testing.T) {
 	if os.Getenv("SWARM_TEST_WORKSPACE_MCP_DOCKER") != "1" {
 		t.Skip("real Linux Docker proof runs in the workspace-image CI job; no Docker proof credit from a skip")
