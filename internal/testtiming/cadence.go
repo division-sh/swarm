@@ -36,28 +36,30 @@ type CadenceFinding struct {
 }
 
 type CadenceObservation struct {
-	Version                       int              `json:"version"`
-	RunID                         int64            `json:"workflow_run_id"`
-	Attempt                       int              `json:"workflow_attempt"`
-	HeadSHA                       string           `json:"head_sha"`
-	PlanDigest                    string           `json:"plan_digest"`
-	Venue                         string           `json:"venue"`
-	ObservedUnits                 int              `json:"observed_units"`
-	PlannedUnits                  int              `json:"planned_units"`
-	Problems                      []string         `json:"problems"`
-	Findings                      []CadenceFinding `json:"findings"`
-	EligibleClassifiedRegressions int              `json:"eligible_classified_regressions"`
-	ConfirmedCoreEscapes          int              `json:"confirmed_core_escapes"`
-	EscapeRate                    *float64         `json:"escape_rate,omitempty"`
+	Version              int              `json:"version"`
+	RunID                int64            `json:"workflow_run_id"`
+	Attempt              int              `json:"workflow_attempt"`
+	HeadSHA              string           `json:"head_sha"`
+	PlanDigest           string           `json:"plan_digest"`
+	Venue                string           `json:"venue"`
+	ObservedUnits        int              `json:"observed_units"`
+	PlannedUnits         int              `json:"planned_units"`
+	Problems             []string         `json:"problems"`
+	Findings             []CadenceFinding `json:"findings"`
+	ReviewedRegressions  int              `json:"reviewed_regressions"`
+	ConfirmedCoreEscapes int              `json:"confirmed_core_escapes"`
+	EscapeRateStatus     string           `json:"escape_rate_status"`
 }
 
 type CadenceCoreProof struct {
 	CadenceAttempt
 	SuccessfulRun bool
+	// Only the existing merged-proof observer may establish an exact master landing.
+	LandedHeadSHA string
 }
 
 func ObserveFullCadence(full CadenceAttempt, core *CadenceCoreProof, attributions []CadenceAttribution, firstParentLineage []string) (CadenceObservation, error) {
-	result := CadenceObservation{Version: 1, RunID: full.RunID, Attempt: full.Attempt, HeadSHA: full.Plan.HeadSHA, PlanDigest: full.Plan.Digest, Venue: full.Plan.Venue, PlannedUnits: len(full.Plan.Units), Problems: []string{}, Findings: []CadenceFinding{}}
+	result := CadenceObservation{Version: 1, RunID: full.RunID, Attempt: full.Attempt, HeadSHA: full.Plan.HeadSHA, PlanDigest: full.Plan.Digest, Venue: full.Plan.Venue, PlannedUnits: len(full.Plan.Units), Problems: []string{}, Findings: []CadenceFinding{}, EscapeRateStatus: "unmeasured"}
 	if err := full.Plan.Validate(); err != nil {
 		return result, err
 	}
@@ -90,18 +92,24 @@ func ObserveFullCadence(full CadenceAttempt, core *CadenceCoreProof, attribution
 	if err != nil {
 		return result, err
 	}
+	if core != nil {
+		if err := cadenceCoreCompleteness(core.CadenceAttempt); err != nil {
+			result.Problems = append(result.Problems, err.Error())
+			core = nil
+		}
+	}
 	for root := range findings {
 		finding := CadenceFinding{TestRoot: root, Classification: "unclassified_candidate"}
 		if attribution, ok := classified[root]; ok {
 			finding.Classification, finding.Review = attribution.Kind, attribution.Review
 			if attribution.Kind == "regression" {
+				result.ReviewedRegressions++
 				lag, err := cadenceRegressionLag(full, core, attribution, firstParentLineage)
 				if err != nil {
 					result.Problems = append(result.Problems, root.Name+": "+err.Error())
 				} else {
 					finding.FirstParentLag = &lag
 					finding.ConfirmedCoreEscape = true
-					result.EligibleClassifiedRegressions++
 					result.ConfirmedCoreEscapes++
 				}
 			}
@@ -112,10 +120,6 @@ func ObserveFullCadence(full CadenceAttempt, core *CadenceCoreProof, attribution
 		a, b := result.Findings[i], result.Findings[j]
 		return a.Package+"\x00"+a.Name < b.Package+"\x00"+b.Name
 	})
-	if result.EligibleClassifiedRegressions > 0 {
-		rate := float64(result.ConfirmedCoreEscapes) / float64(result.EligibleClassifiedRegressions)
-		result.EscapeRate = &rate
-	}
 	return result, nil
 }
 
@@ -169,7 +173,11 @@ func cadenceRegressionLag(full CadenceAttempt, core *CadenceCoreProof, item Cade
 	if core == nil || !core.SuccessfulRun || core.Plan.Profile != testplanning.ProfileCore || core.Plan.Venue != testplanning.VenueCI || core.Plan.BuildContext.GOOS == "" || core.RunID >= full.RunID || core.RunID < 1 || core.Attempt < 1 || len(core.LoadProblems) != 0 {
 		return 0, fmt.Errorf("preceding actual successful core proof is unavailable")
 	}
-	position, ok := positions[core.Plan.HeadSHA]
+	coreHead := core.Plan.HeadSHA
+	if core.LandedHeadSHA != "" {
+		coreHead = core.LandedHeadSHA
+	}
+	position, ok := positions[coreHead]
 	if !ok || position > introduced {
 		return 0, fmt.Errorf("core proof does not cover the introducing master lineage")
 	}
@@ -190,6 +198,12 @@ func cadenceRegressionLag(full CadenceAttempt, core *CadenceCoreProof, item Cade
 }
 
 func cadenceCoreCompleteness(core CadenceAttempt) error {
+	if err := core.Plan.Validate(); err != nil {
+		return err
+	}
+	if core.Plan.Profile != testplanning.ProfileCore || core.Plan.Venue != testplanning.VenueCI || core.Plan.BuildContext.GOOS == "" || core.RunID < 1 || core.Attempt < 1 || len(core.LoadProblems) != 0 {
+		return fmt.Errorf("preceding core execution is not a bound complete CI core attempt")
+	}
 	seen := map[string]bool{}
 	for _, evidence := range core.Evidence {
 		if evidence.WorkflowRunID != core.RunID || evidence.WorkflowAttempt != core.Attempt || seen[evidence.UnitID] || evidence.ExitCode != 0 || evidence.Report.Summary.FailedPackages != 0 || evidence.Report.Summary.FailedTests != 0 || len(ValidateCommandEvidence(evidence, core.Plan)) != 0 {
@@ -204,11 +218,7 @@ func cadenceCoreCompleteness(core CadenceAttempt) error {
 }
 
 func WriteCadenceMarkdown(out io.Writer, observation CadenceObservation) error {
-	rate := "N/A"
-	if observation.EscapeRate != nil {
-		rate = fmt.Sprintf("%.1f%%", *observation.EscapeRate*100)
-	}
-	_, err := fmt.Fprintf(out, "## Full cadence observation\n\nRun %d attempt %d; source `%s`; plan `%s`; venue `%s`. Observed %d/%d units.\n\nConfirmed core escapes: %d / %d eligible classified regressions; rate **%s**. This observation grants no qualification or defect closure. Unknown provenance/lag remains unknown.\n\n", observation.RunID, observation.Attempt, observation.HeadSHA, observation.PlanDigest, observation.Venue, observation.ObservedUnits, observation.PlannedUnits, observation.ConfirmedCoreEscapes, observation.EligibleClassifiedRegressions, rate)
+	_, err := fmt.Fprintf(out, "## Full cadence observation\n\nRun %d attempt %d; source `%s`; plan `%s`; venue `%s`. Observed %d/%d units.\n\nReviewed regression findings: %d; confirmed core escapes: %d. Escape rate **N/A**: no independently admitted comparable escape/non-escape population; rate acceptance remains #2535. This observation grants no qualification or defect closure. Unknown provenance/lag remains unknown.\n\n", observation.RunID, observation.Attempt, observation.HeadSHA, observation.PlanDigest, observation.Venue, observation.ObservedUnits, observation.PlannedUnits, observation.ReviewedRegressions, observation.ConfirmedCoreEscapes)
 	if err != nil {
 		return err
 	}

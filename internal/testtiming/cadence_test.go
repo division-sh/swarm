@@ -74,6 +74,7 @@ func TestFullCadenceEvidenceAndHonestUnknowns(t *testing.T) {
 	fullHead, coreHead, intro := strings.Repeat("c", 40), strings.Repeat("b", 40), strings.Repeat("a", 40)
 	full := cadenceFixtureAttempt(t, testplanning.ProfileFull, fullHead, 20, true)
 	core := CadenceCoreProof{CadenceAttempt: cadenceFixtureAttempt(t, testplanning.ProfileCore, coreHead, 10, false), SuccessfulRun: true}
+	landed := CadenceCoreProof{CadenceAttempt: cadenceFixtureAttempt(t, testplanning.ProfileCore, strings.Repeat("d", 40), 10, false), SuccessfulRun: true, LandedHeadSHA: coreHead}
 	lineage := []string{fullHead, coreHead, intro}
 	review := CadenceAttribution{Package: "module/extra", Root: "TestFull", Kind: "regression", Review: "https://github.com/division-sh/swarm/issues/2353#issuecomment-1", IntroducingCommit: intro, FirstDetectionRunID: 20}
 	for _, row := range []struct {
@@ -85,6 +86,7 @@ func TestFullCadenceEvidenceAndHonestUnknowns(t *testing.T) {
 	}{
 		{"unattributed", nil, nil, lineage, false},
 		{"confirmed", &core, []CadenceAttribution{review}, lineage, true},
+		{"owner_verified_core_landing", &landed, []CadenceAttribution{review}, lineage, true},
 		{"no_core", nil, []CadenceAttribution{review}, lineage, false},
 		{"no_master_lineage", &core, []CadenceAttribution{review}, nil, false},
 	} {
@@ -97,10 +99,10 @@ func TestFullCadenceEvidenceAndHonestUnknowns(t *testing.T) {
 				t.Fatalf("wrong credit: %+v", got)
 			}
 			if row.confirmed {
-				if got.EscapeRate == nil || *got.EscapeRate != 1 || got.Findings[0].FirstParentLag == nil || *got.Findings[0].FirstParentLag != 2 {
+				if got.ConfirmedCoreEscapes != 1 || got.ReviewedRegressions != 1 || got.EscapeRateStatus != "unmeasured" || got.Findings[0].FirstParentLag == nil || *got.Findings[0].FirstParentLag != 2 {
 					t.Fatal(got)
 				}
-			} else if got.EscapeRate != nil || got.Findings[0].FirstParentLag != nil {
+			} else if got.EscapeRateStatus != "unmeasured" || got.Findings[0].FirstParentLag != nil {
 				t.Fatal("unknown became zero/known credit")
 			}
 		})
@@ -108,7 +110,7 @@ func TestFullCadenceEvidenceAndHonestUnknowns(t *testing.T) {
 	green := cadenceFixtureAttempt(t, testplanning.ProfileFull, fullHead, 20, false)
 	got, err := ObserveFullCadence(green, nil, nil, lineage)
 	var markdown bytes.Buffer
-	if err != nil || len(got.Findings) != 0 || got.EscapeRate != nil {
+	if err != nil || len(got.Findings) != 0 || got.EscapeRateStatus != "unmeasured" {
 		t.Fatal(got, err)
 	}
 	if err := WriteCadenceMarkdown(&markdown, got); err != nil || !strings.Contains(markdown.String(), "**N/A**") {
@@ -118,7 +120,7 @@ func TestFullCadenceEvidenceAndHonestUnknowns(t *testing.T) {
 		classified := review
 		classified.Kind = kind
 		got, err := ObserveFullCadence(full, nil, []CadenceAttribution{classified}, lineage)
-		if err != nil || got.EscapeRate != nil || got.Findings[0].Classification != kind {
+		if err != nil || got.EscapeRateStatus != "unmeasured" || got.Findings[0].Classification != kind {
 			t.Fatal(got, err)
 		}
 	}
@@ -152,7 +154,7 @@ func TestFullCadenceEvidenceAndHonestUnknowns(t *testing.T) {
 			}
 		}
 		got, err := ObserveFullCadence(broken, nil, nil, lineage)
-		if err != nil || len(got.Problems) == 0 || got.EscapeRate != nil {
+		if err != nil || len(got.Problems) == 0 || got.EscapeRateStatus != "unmeasured" {
 			t.Fatalf("%s incomplete evidence lost: %+v %v", kind, got, err)
 		}
 	}
@@ -172,7 +174,7 @@ func TestFullCadenceEvidenceAndHonestUnknowns(t *testing.T) {
 			prior.Evidence = nil
 		}
 		got, err := ObserveFullCadence(full, &prior, []CadenceAttribution{classified}, lineage)
-		if err != nil || got.EscapeRate != nil || len(got.Problems) == 0 {
+		if err != nil || got.EscapeRateStatus != "unmeasured" || len(got.Problems) == 0 {
 			t.Fatalf("%s claimed known escape: %+v %v", kind, got, err)
 		}
 	}
@@ -210,10 +212,35 @@ func TestFullCadenceDoesNotCreditCoreSelectedFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Findings) != 1 || got.Findings[0].ConfirmedCoreEscape || got.Findings[0].FirstParentLag != nil || got.EscapeRate != nil || got.EligibleClassifiedRegressions != 0 {
+	if len(got.Findings) != 1 || got.Findings[0].ConfirmedCoreEscape || got.Findings[0].FirstParentLag != nil || got.EscapeRateStatus != "unmeasured" || got.ReviewedRegressions != 1 || got.ConfirmedCoreEscapes != 0 {
 		t.Fatalf("core-selected failure earned escape credit: %+v", got)
 	}
 	if !strings.Contains(strings.Join(got.Problems, "\n"), "failure is not a full-only root") {
 		t.Fatalf("missing exact core-membership refusal: %+v", got)
 	}
+	t.Run("mixed_reviewed_findings_do_not_invent_rate", func(t *testing.T) {
+		for i := range full.Evidence {
+			evidence := &full.Evidence[i]
+			for j := range evidence.Report.Tests {
+				result := &evidence.Report.Tests[j]
+				if result.Package == "module/extra" && result.Test == "TestFull" {
+					result.Result = "fail"
+					evidence.ExitCode = 1
+					evidence.Report.Summary.FailedTests++
+					evidence.Report.Summary.FailedPackages++
+					evidence.Report.Packages[0].Result = "fail"
+				}
+			}
+		}
+		escape := review
+		escape.Package, escape.Root = "module/extra", "TestFull"
+		mixed, err := ObserveFullCadence(full, &core, []CadenceAttribution{review, escape}, []string{fullHead, coreHead, intro})
+		if err != nil || mixed.ReviewedRegressions != 2 || mixed.ConfirmedCoreEscapes != 1 || mixed.EscapeRateStatus != "unmeasured" {
+			t.Fatal("counts became a tautological rate", mixed, err)
+		}
+		var markdown bytes.Buffer
+		if err := WriteCadenceMarkdown(&markdown, mixed); err != nil || !strings.Contains(markdown.String(), "**N/A**") || strings.Contains(markdown.String(), "100.0%") {
+			t.Fatal("mixed outcomes earned an unsupported rate", markdown.String(), err)
+		}
+	})
 }

@@ -65,6 +65,19 @@ func observeMergedProof(ctx context.Context, cfg config) (testplanning.RunPlan, 
 	if err := testplanning.CheckMasterPush(event, cfg.repository, cfg.branchRef, cfg.headSHA); err != nil {
 		return plan, run, err
 	}
+	plan, run, err = observeMergedQualification(ctx, cfg)
+	if err == nil {
+		err = validateCurrentPlan(plan, cfg)
+	}
+	return plan, run, err
+}
+
+func observeMergedQualification(ctx context.Context, cfg config) (testplanning.RunPlan, testplanning.QualifiedRun, error) {
+	var plan testplanning.RunPlan
+	var run testplanning.QualifiedRun
+	if cfg.repository != "division-sh/swarm" || cfg.branchRef != "refs/heads/master" {
+		return plan, run, fmt.Errorf("not the trusted master qualification")
+	}
 	if decoded, err := hex.DecodeString(cfg.headSHA); err != nil || len(decoded) != 20 {
 		return plan, run, fmt.Errorf("invalid master source SHA")
 	}
@@ -144,9 +157,6 @@ func observeMergedProof(ctx context.Context, cfg config) (testplanning.RunPlan, 
 		return plan, run, err
 	}
 	if err := testplanning.ValidateMasterReplay(cfg.repository, cfg.branchRef, cfg.headSHA, masterTree, planTree, []testplanning.MergedPR{pr}, run, checks, branch.Protection.Required.Checks, plan); err != nil {
-		return plan, run, err
-	}
-	if err := validateCurrentPlan(plan, cfg); err != nil {
 		return plan, run, err
 	}
 	if err := revalidateMergedObservation(ctx, cfg, pr, run, plan); err != nil {
