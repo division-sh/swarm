@@ -183,8 +183,8 @@ func TestVerifyCLIImageProbeLifecycleRealDocker(t *testing.T) {
 			if !created {
 				t.Fatalf("required real create step did not complete; %s witness not reached: %v", outcome, err)
 			}
-			if !started {
-				t.Fatalf("required start step not reached for %s", outcome)
+			if started != (outcome != "cancel_after_create") {
+				t.Fatalf("incorrect start chronology for %s: started=%v", outcome, started)
 			}
 			if (err == nil) != (outcome == "success") {
 				t.Fatalf("probe outcome %s: %v", outcome, err)

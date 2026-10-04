@@ -9461,10 +9461,11 @@ engine:
         non_blocking_warning: Non-blocking warning-level findings in typed diagnostic lists use `[WARN]`.
         informational: Audit/informational lint evidence in typed diagnostic lists uses `[INFO]`.
       stream_contract:
-        stdout: Successful load-bearing command result only, such as `verify ok` for human output, the single JSON document
-          for `--json`, or `ok` for `--quiet`.
+        stdout: Scoped admission result, the single JSON document for --json, or the same scoped outcome for --quiet.
+          Unperformed observations and startup execution obligations remain visible; never bare ok or an unconditional
+          promise of live readiness. Portable validation explicitly reports structural scope.
         stderr: Human-readable analyzer diagnostics, advisory lint evidence, warnings, and blocking failures.
-    check_count: 43 primary checks plus 3 supplemental checks
+    check_count: 69 primary checks plus 2 supplemental checks; managed credentials share the primary credential observation
     implementation_notes:
       framework: Each check is a named function that receives the loaded contract bundle and returns a list of findings. Each
         finding has the check ID, severity, message, location (flow, node, agent, or event name), optional evidence, and
