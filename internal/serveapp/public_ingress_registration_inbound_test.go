@@ -30,7 +30,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
 	runtimeregistration "github.com/division-sh/swarm/internal/runtime/registration"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/division-sh/swarm/internal/yamlsource"
@@ -336,12 +335,32 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 }
 
 func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T) {
-	catalog, err := providertriggers.NewCatalogSnapshot()
+	sourceRoot := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
+	module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), sourceRoot, cliapp.ResolvePath(repoRootForTest(), defaultPlatformSpecPath))
 	if err != nil {
-		t.Fatalf("NewCatalogSnapshot: %v", err)
+		t.Fatalf("load standing fixture: %v", err)
+	}
+	catalog := testProviderTriggerCatalog(t)
+	source := processIngressTransportSource(t, bundle, catalog)
+	credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, value := range map[string]string{"bot": "telegram-bot-token", "webhook_signing.telegram": "telegram-secret"} {
+		if err := credentialStore.Set(context.Background(), key, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	credentialOwner, err := runtimecredentials.NewSnapshotOwner(credentialStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	botSeal, err := credentialOwner.SealCurrentValue(context.Background(), "bot")
+	if err != nil {
+		t.Fatal(err)
 	}
 	admission, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
-		Alias: "chat", Provider: "telegram",
+		Alias: "chat", Provider: "telegram_raw",
 		Declaration: providertriggers.AdmissionDeclaration{
 			Kind: "raw", Acknowledge: providertriggers.UnsignedWebhookAcknowledgement,
 			Authentication: providertriggers.RawAuthenticationDeclaration{Kind: "none"},
@@ -363,7 +382,7 @@ func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T)
 	t.Cleanup(func() { _ = bus.ResetInMemoryState() })
 	target := runtimepkg.StandingTarget{
 		BundleHash: bundleHash, ServiceID: "43000000-0000-0000-0000-000000000001",
-		FlowPath: "telegram-ingress", Alias: "chat", Provider: "telegram",
+		FlowPath: "telegram-ingress", Alias: "chat", Provider: "telegram_raw",
 		RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "telegram-ingress",
 		InstanceID: "chat", EntityID: "41000000-0000-0000-0000-000000000002",
 		Generation: 1, PublicationSequence: 1, AdmissionPlan: admission,
@@ -376,15 +395,16 @@ func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
+	manager, err := runtimepkg.NewRuntimeContextManager(nil, completeServeTestPackContext(t, runtimepkg.BundleContext{
 		SourceArtifactFact: mustServeTestEphemeralSourceArtifactFact(bundleHash),
-		Source:             semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		Source:             source,
 		Runtime: &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus, ChannelActivations: activationOwner,
-			Options: runtimepkg.RuntimeOptions{RuntimeInstanceID: uuid.NewString()}},
+			Options: runtimepkg.RuntimeOptions{RuntimeInstanceID: uuid.NewString(), WorkflowModule: module,
+				ProviderTriggerCatalog: catalog, ProviderCredentials: credentialStore}},
 		WorkOwner:                 workOwner,
 		StandingTargets:           []runtimepkg.StandingTarget{target},
 		ProviderTriggerGeneration: catalog.Generation(),
-	})
+	}))
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
@@ -394,29 +414,24 @@ func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T)
 	binding, err := packs.NewOutboundBindingPlanWithRegistration(
 		"telegram", plan, "42", nil,
 		map[string]string{"telegram_bot_token": "bot"},
-		"ingress:telegram-ingress:telegram",
+		"ingress:telegram-ingress:telegram_raw",
 	)
 	if err != nil {
 		t.Fatalf("NewOutboundBindingPlanWithRegistration: %v", err)
 	}
 	contextDef := manager.LoadedContexts()[0]
-	generation, err := binding.PlanGeneration()
+	coordinate, err := declaredActivationCoordinate(contextDef, binding)
 	if err != nil {
 		t.Fatal(err)
 	}
 	bundleHash = contextDef.SourceArtifactFact.BundleHash()
 	compiled := channelonboarding.CompiledActivation{
-		Source: channelonboarding.ActivationSourceDeclared,
-		Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{
-			BundleHash: bundleHash, BundleIdentity: "test-bundle",
-			PackInventoryGeneration: "sha256:test", RuntimeInstanceID: contextDef.RuntimeInstanceID,
-			ContextPublicationGeneration: contextDef.PublicationGeneration,
-			PlanGeneration:               generation, TargetGeneration: 1,
-		},
-		Plan: binding,
+		Source:     channelonboarding.ActivationSourceDeclared,
+		Coordinate: coordinate,
+		Plan:       binding,
 		CredentialAdmissions: []channelonboarding.CredentialAdmission{{
 			Role: "telegram_bot_token", StoreKey: "bot", Kind: channelonboarding.CredentialAdmissionObserved,
-			ValueSeal: serveTestValueSeal('c'),
+			ValueSeal: botSeal.Seal,
 		}},
 	}
 	publication, err := channelonboarding.NewChannelActivationPublication([]channelonboarding.CompiledActivation{compiled})
@@ -436,10 +451,9 @@ func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T)
 	if err == nil || !strings.Contains(err.Error(), "requires a signing credential role") || !strings.Contains(err.Error(), "UNAUTHENTICATED") {
 		t.Fatalf("resolveServeRegistrationPairs pairs=%#v err=%v, want unsigned signing-role contradiction", pairs, err)
 	}
-}
-
-func serveTestValueSeal(digit byte) runtimecredentials.ValueSeal {
-	return runtimecredentials.ValueSeal("credential-value-seal-v1:" + strings.Repeat(string(digit), 64))
+	if selection != nil || len(pairs) != 0 {
+		t.Fatalf("unsigned target retained registration authority: selection=%#v pairs=%#v", selection, pairs)
+	}
 }
 
 func TestDeclaredActivationRejectsUnusableCredentialValues(t *testing.T) {
