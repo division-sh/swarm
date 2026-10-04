@@ -29,20 +29,8 @@ func (rt *Runtime) validateChannelActivationPublication(ctx context.Context, pub
 			}
 		}
 		if activation.Source == channelonboarding.ActivationSourceLearned {
-			profile, ok := activation.Plan.OnboardingProfile()
-			if !ok {
-				return fmt.Errorf("learned channel publication requires its onboarding profile")
-			}
-			current, err := channelonboarding.AdmissionResponsibilityCurrent(ctx, rt.Options.ChannelOnboardingStore, channelonboarding.AdmissionResponsibility{
-				OperationID: activation.OnboardingOperationID, OperationRevision: activation.OnboardingRevision,
-				ActivationRevision: activation.ActivationRevision, Coordinate: activation.Coordinate,
-				TargetSelector: activation.Plan.RegistrationTarget(), Provider: profile.Provider(), Credentials: activation.CredentialAdmissions,
-			}, true)
-			if err != nil {
+			if err := rt.validateLearnedChannelPublication(ctx, activation); err != nil {
 				return err
-			}
-			if !current {
-				return fmt.Errorf("%w: learned channel publication lost its exact admission responsibility", channelonboarding.ErrRevisionConflict)
 			}
 		}
 		for _, admission := range activation.CredentialAdmissions {
@@ -58,4 +46,23 @@ func (rt *Runtime) validateChannelActivationPublication(ctx context.Context, pub
 		return fmt.Errorf("%w: channel publication credential admission is no longer current", channelonboarding.ErrRevisionConflict)
 	}
 	return projection.ValidateCurrent(ctx)
+}
+
+func (rt *Runtime) validateLearnedChannelPublication(ctx context.Context, activation channelonboarding.CompiledActivation) error {
+	profile, ok := activation.Plan.OnboardingProfile()
+	if !ok {
+		return fmt.Errorf("learned channel publication requires its onboarding profile")
+	}
+	current, err := channelonboarding.AdmissionResponsibilityCurrent(ctx, rt.Options.ChannelOnboardingStore, channelonboarding.AdmissionResponsibility{
+		OperationID: activation.OnboardingOperationID, OperationRevision: activation.OnboardingRevision,
+		ActivationRevision: activation.ActivationRevision, Coordinate: activation.Coordinate,
+		TargetSelector: activation.Plan.RegistrationTarget(), Provider: profile.Provider(), Credentials: activation.CredentialAdmissions,
+	}, true)
+	if err != nil {
+		return err
+	}
+	if !current {
+		return fmt.Errorf("%w: learned channel publication lost its exact admission responsibility", channelonboarding.ErrRevisionConflict)
+	}
+	return nil
 }

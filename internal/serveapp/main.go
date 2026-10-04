@@ -1578,19 +1578,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		}
 		reconcilePublicIngress = func(reconcileCtx context.Context, generation runtimepublicingress.Generation) error {
 			_, manager := supervisor.PublicIngressState()
-			snapshot, pairErr := compileServeChannelActivationSnapshot(reconcileCtx, manager, channelOnboardingStore, operatorChannels, providerCredentialOwner)
-			if pairErr != nil {
-				return pairErr
-			}
-			if err := publishServeChannelActivationSnapshot(reconcileCtx, manager, snapshot); err != nil {
-				return err
-			}
-			selection, pairErr := resolveServeRegistrationPairs(snapshot, manager)
-			if pairErr != nil {
-				return pairErr
-			}
-			defer selection.Release()
-			return registrationController.Reconcile(reconcileCtx, generation, selection.Pairs)
+			return reconcileServeProviderRegistrations(reconcileCtx, generation, manager, channelOnboardingStore, operatorChannels, providerCredentialOwner, registrationController)
 		}
 		publicHandler := http.NotFoundHandler()
 		if inboundHandler != nil {

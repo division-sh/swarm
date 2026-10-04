@@ -409,51 +409,63 @@ func (s *standingServiceAdapter) ReconcileStandingServiceSet(ctx context.Context
 	}
 
 	results := make([]runtimepipeline.StandingServiceReconciliation, 0, len(normalized))
-	signalQueued := false
 	err = s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		persisted, err := s.loadAllStandingServicesTx(txctx, tx)
-		if err != nil {
-			return err
-		}
-		declared := make(map[string]struct{}, len(normalized))
-		for _, candidate := range normalized {
-			declared[candidate.ServiceID] = struct{}{}
-			result, err := s.reconcileStandingServiceTx(txctx, tx, candidate)
-			if err != nil {
-				return err
-			}
-			if result.RunID != "" {
-				results = append(results, result)
-			}
-			if result.DeliveryContinuationRequired && !signalQueued {
-				if err := s.queueDeliveryContinuationSignal(txctx); err != nil {
-					return err
-				}
-				signalQueued = true
-			}
-		}
-		for _, current := range persisted {
-			if _, ok := declared[current.ServiceID]; ok || !current.DeclarationPresent {
-				continue
-			}
-			result, err := s.orphanStandingServiceTx(txctx, tx, current)
-			if err != nil {
-				return err
-			}
-			if result.RestartDisposition.Kind != runtimerunlifecycle.StandingRestartInvalidCurrent && !signalQueued {
-				if err := s.queueDeliveryContinuationSignal(txctx); err != nil {
-					return err
-				}
-				signalQueued = true
-			}
-			results = append(results, result)
-		}
-		return nil
+		var err error
+		results, err = s.reconcileStandingServiceSetTx(txctx, tx, normalized)
+		return err
 	})
 	if !s.committed {
 		return nil, err
 	}
 	return results, err
+}
+
+func (s *standingServiceAdapter) reconcileStandingServiceSetTx(ctx context.Context, tx *sql.Tx, candidates []runtimepipeline.StandingServiceCandidate) ([]runtimepipeline.StandingServiceReconciliation, error) {
+	persisted, err := s.loadAllStandingServicesTx(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	results := make([]runtimepipeline.StandingServiceReconciliation, 0, len(candidates))
+	declared := make(map[string]struct{}, len(candidates))
+	signalQueued := false
+	for _, candidate := range candidates {
+		declared[candidate.ServiceID] = struct{}{}
+		result, err := s.reconcileStandingServiceTx(ctx, tx, candidate)
+		if err != nil {
+			return nil, err
+		}
+		if result.RunID != "" {
+			results = append(results, result)
+		}
+		if err := s.queueStandingSetContinuation(ctx, result.DeliveryContinuationRequired, &signalQueued); err != nil {
+			return nil, err
+		}
+	}
+	for _, current := range persisted {
+		if _, ok := declared[current.ServiceID]; ok || !current.DeclarationPresent {
+			continue
+		}
+		result, err := s.orphanStandingServiceTx(ctx, tx, current)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.queueStandingSetContinuation(ctx, result.RestartDisposition.Kind != runtimerunlifecycle.StandingRestartInvalidCurrent, &signalQueued); err != nil {
+			return nil, err
+		}
+		results = append(results, result)
+	}
+	return results, nil
+}
+
+func (s *standingServiceAdapter) queueStandingSetContinuation(ctx context.Context, required bool, queued *bool) error {
+	if !required || *queued {
+		return nil
+	}
+	if err := s.queueDeliveryContinuationSignal(ctx); err != nil {
+		return err
+	}
+	*queued = true
+	return nil
 }
 
 func normalizeStandingServiceCandidates(candidates []runtimepipeline.StandingServiceCandidate) ([]runtimepipeline.StandingServiceCandidate, error) {
