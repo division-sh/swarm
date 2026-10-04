@@ -138,7 +138,6 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 		output.AdmissionComplete = decision.Complete
 		return renderVerifyCommandResult(opts, output, result, decision, out, errOut)
 	}
-	return 0
 }
 
 func renderVerifyAdmissionRefusal(ctx context.Context, opts verifyCommandOptions, purpose runtimebootverify.ValidationPurpose, id, owner, subject string, cause error, artifact *sourceartifact.AdmittedSourceArtifact, out, errOut io.Writer) int {
