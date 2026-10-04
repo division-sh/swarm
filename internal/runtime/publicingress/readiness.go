@@ -383,15 +383,8 @@ func (o *ReadinessOwner) evaluate(ctx context.Context, now time.Time) evaluatedR
 	for _, key := range keys {
 		state := process.registrations[key]
 		current, failure := registrationStateCurrent(ctx, now, state, process.exposure, exposureReady, credentialsCurrent, effectCurrent)
-		if current && selectionCurrent != nil {
-			selected, err := selectionCurrent(ctx, state.Pair)
-			if err != nil || !selected {
-				current = false
-				failure = "provider registration onboarding admission is no longer current"
-				if err != nil {
-					failure = err.Error()
-				}
-			}
+		if current {
+			current, failure = registrationSelectionCurrent(ctx, state.Pair, selectionCurrent)
 		}
 		currentByKey[key] = current
 		if !current {
@@ -417,6 +410,20 @@ func (o *ReadinessOwner) evaluate(ctx context.Context, now time.Time) evaluatedR
 	output.PublicIngressReady = exposureReady && registrationsReady
 	output.Ready = output.RuntimeReady && output.PublicIngressReady
 	return evaluatedRegistrationSnapshot{snapshot: process, output: output, current: currentByKey}
+}
+
+func registrationSelectionCurrent(ctx context.Context, pair RegistrationPair, selectionCurrent func(context.Context, RegistrationPair) (bool, error)) (bool, string) {
+	if selectionCurrent == nil {
+		return true, ""
+	}
+	selected, err := selectionCurrent(ctx, pair)
+	if err != nil {
+		return false, err.Error()
+	}
+	if !selected {
+		return false, "provider registration onboarding admission is no longer current"
+	}
+	return true, ""
 }
 
 func registrationStateCurrent(

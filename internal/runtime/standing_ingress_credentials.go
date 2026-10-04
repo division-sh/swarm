@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -155,78 +156,9 @@ func (rt *Runtime) observeStandingCredentials(ctx context.Context) (*standingCre
 	for _, declaration := range declarations {
 		for _, binding := range declaration.Ingress {
 			selector := standingIngressSelector(declaration.FlowPath, binding.Provider)
-			keys := map[string]string{}
-			if binding.AdmissionPlan.RequiresSecret() {
-				keys["signing"] = binding.SigningSecret
-			}
-			signingRole := "signing"
-			for _, outbound := range rt.Options.DeclaredChannelPublication.Bindings() {
-				if outbound.RegistrationTarget() != selector {
-					continue
-				}
-				registration, present := outbound.Registration()
-				if !present {
-					return nil, fmt.Errorf("channel binding %s selects registration without a compiled recipe", outbound.BindingID())
-				}
-				roleKeys := outbound.CredentialStoreKeys()
-				keys = map[string]string{}
-				signingRole = registration.SigningCredential()
-				for _, role := range append(registration.ProviderCredentials(), signingRole) {
-					key := strings.TrimSpace(roleKeys[role])
-					if key == "" {
-						return nil, fmt.Errorf("channel binding %s registration credential role %s has no exact key", outbound.BindingID(), role)
-					}
-					keys[role] = key
-				}
-			}
-			sealed := map[string]channelonboarding.CredentialAdmission{}
-			result := standingBindingCredentials{enabled: true, signingKey: binding.SigningSecret}
-			if current, present := learned[selector]; present {
-				keys = map[string]string{}
-				for _, credential := range current.admissions {
-					keys[credential.Role] = credential.StoreKey
-					sealed[credential.Role] = credential
-				}
-				signingRole = current.signingRole
-				result.operationID = current.operationID
-				result.recoveryCommand = current.recoveryCommand
-				if current.awaitingAdmission {
-					result.enabled, result.blockReason = false, runtimerunlifecycle.StandingBindingRecoveryRequired
-					result.signingKey = ""
-				}
-			}
-			roles := make([]string, 0, len(keys))
-			for role := range keys {
-				roles = append(roles, role)
-			}
-			sort.Strings(roles)
-			for _, role := range roles {
-				key := keys[role]
-				result.credentialKeys = append(result.credentialKeys, key)
-				var observed runtimecredentials.AdmittedSnapshot
-				if credential, present := sealed[role]; present {
-					var current bool
-					observed, current, err = admission.projection.ObserveAdmittedActivationCredential(ctx,
-						runtimecredentials.ValueEvidence{Key: key, Seal: credential.ValueSeal}, credential.Receipt)
-					if err == nil && !current {
-						result.enabled, result.blockReason = false, runtimerunlifecycle.StandingBindingRecoveryRequired
-					}
-				} else {
-					observed, err = admission.projection.ObserveActivationCredential(ctx, key)
-				}
-				if err != nil {
-					return nil, fmt.Errorf("%s %s credential %q: %w", declaration.SourcePath, selector, key, err)
-				}
-				if !observed.Present {
-					result.enabled = false
-					if result.blockReason == "" {
-						result.blockReason = runtimerunlifecycle.StandingBindingCredentialsAbsent
-					}
-					result.missing = append(result.missing, key)
-				}
-				if role == signingRole {
-					result.signingKey = key
-				}
+			result, err := rt.observeStandingBindingCredentials(ctx, admission.projection, declaration, binding, learned)
+			if err != nil {
+				return nil, err
 			}
 			admission.bindings[selector] = result
 		}
@@ -235,6 +167,93 @@ func (rt *Runtime) observeStandingCredentials(ctx context.Context) (*standingCre
 		return nil, err
 	}
 	return admission, nil
+}
+
+func (rt *Runtime) standingBindingCredentialRoles(selector string, binding StandingIngressBinding) (map[string]string, string, error) {
+	keys := map[string]string{}
+	if binding.AdmissionPlan.RequiresSecret() {
+		keys["signing"] = binding.SigningSecret
+	}
+	signingRole := "signing"
+	for _, outbound := range rt.Options.DeclaredChannelPublication.Bindings() {
+		if outbound.RegistrationTarget() != selector {
+			continue
+		}
+		registration, present := outbound.Registration()
+		if !present {
+			return nil, "", fmt.Errorf("channel binding %s selects registration without a compiled recipe", outbound.BindingID())
+		}
+		roleKeys := outbound.CredentialStoreKeys()
+		keys = map[string]string{}
+		signingRole = registration.SigningCredential()
+		for _, role := range append(registration.ProviderCredentials(), signingRole) {
+			key := strings.TrimSpace(roleKeys[role])
+			if key == "" {
+				return nil, "", fmt.Errorf("channel binding %s registration credential role %s has no exact key", outbound.BindingID(), role)
+			}
+			keys[role] = key
+		}
+	}
+	return keys, signingRole, nil
+}
+
+func (rt *Runtime) observeStandingBindingCredentials(ctx context.Context, projection *runtimecredentials.SecretBindingProjection, declaration StandingTargetDeclaration, binding StandingIngressBinding, learned map[string]standingLearnedCredentials) (standingBindingCredentials, error) {
+	selector := standingIngressSelector(declaration.FlowPath, binding.Provider)
+	keys, signingRole, err := rt.standingBindingCredentialRoles(selector, binding)
+	if err != nil {
+		return standingBindingCredentials{}, err
+	}
+	sealed := map[string]channelonboarding.CredentialAdmission{}
+	result := standingBindingCredentials{enabled: true, signingKey: binding.SigningSecret}
+	if current, present := learned[selector]; present {
+		keys = map[string]string{}
+		for _, credential := range current.admissions {
+			keys[credential.Role] = credential.StoreKey
+			sealed[credential.Role] = credential
+		}
+		signingRole = current.signingRole
+		result.operationID, result.recoveryCommand = current.operationID, current.recoveryCommand
+		if current.awaitingAdmission {
+			result.enabled, result.blockReason = false, runtimerunlifecycle.StandingBindingRecoveryRequired
+			result.signingKey = ""
+		}
+	}
+	roles := make([]string, 0, len(keys))
+	for role := range keys {
+		roles = append(roles, role)
+	}
+	sort.Strings(roles)
+	for _, role := range roles {
+		key := keys[role]
+		result.credentialKeys = append(result.credentialKeys, key)
+		credential, hasSeal := sealed[role]
+		observed, current, err := observeStandingCredentialRole(ctx, projection, key, credential, hasSeal)
+		if err != nil {
+			return standingBindingCredentials{}, fmt.Errorf("%s %s credential %q: %w", declaration.SourcePath, selector, key, err)
+		}
+		if !current {
+			result.enabled, result.blockReason = false, runtimerunlifecycle.StandingBindingRecoveryRequired
+		}
+		if !observed.Present {
+			result.enabled = false
+			if result.blockReason == "" {
+				result.blockReason = runtimerunlifecycle.StandingBindingCredentialsAbsent
+			}
+			result.missing = append(result.missing, key)
+		}
+		if role == signingRole {
+			result.signingKey = key
+		}
+	}
+	return result, nil
+}
+
+func observeStandingCredentialRole(ctx context.Context, projection *runtimecredentials.SecretBindingProjection, key string, credential channelonboarding.CredentialAdmission, hasSeal bool) (runtimecredentials.AdmittedSnapshot, bool, error) {
+	if hasSeal {
+		return projection.ObserveAdmittedActivationCredential(ctx, runtimecredentials.ValueEvidence{Key: key, Seal: credential.ValueSeal}, credential.Receipt)
+	}
+	observed, err := projection.ObserveActivationCredential(ctx, key)
+	return observed, true, err
 }
 
 type standingLearnedCredentials struct {
@@ -274,109 +293,138 @@ func (rt *Runtime) currentStandingCredentialAdmissions(ctx context.Context) (map
 		return nil, fmt.Errorf("learned standing credentials require the exact admitted source inventory")
 	}
 	for _, plan := range rt.Options.ChannelPlans {
-		profile, present := plan.OnboardingProfile()
-		if !present || channelonboarding.ActivationPosture(profile.ActivationPosture()) != channelonboarding.ActivationWebhookRegistration {
+		scope, present, err := rt.standingCredentialPlanScope(plan, bundle.PackInventory.Digest())
+		if err != nil {
+			return nil, err
+		}
+		if !present {
 			continue
 		}
-		identity, err := plan.InterfaceIdentity()
-		if err != nil {
+		if err := scope.addCurrentActivations(activations, operationsByID, out); err != nil {
 			return nil, err
 		}
-		generation, err := plan.Generation()
-		if err != nil {
+		if err := scope.addPendingOperations(operations, out); err != nil {
 			return nil, err
-		}
-		registration, present := plan.Registration()
-		if !present {
-			return nil, fmt.Errorf("webhook channel plan has no compiled registration credential owner")
-		}
-		required := append(registration.ProviderCredentials(), registration.SigningCredential())
-		admitLearned := func(admissions []channelonboarding.CredentialAdmission) (standingLearnedCredentials, error) {
-			byRole := make(map[string]channelonboarding.CredentialAdmission, len(admissions))
-			for _, credential := range admissions {
-				if err := credential.Validate(); err != nil {
-					return standingLearnedCredentials{}, err
-				}
-				if _, duplicate := byRole[credential.Role]; duplicate {
-					return standingLearnedCredentials{}, fmt.Errorf("learned ingress has duplicate credential role %q", credential.Role)
-				}
-				byRole[credential.Role] = credential
-			}
-			if len(byRole) != len(required) {
-				return standingLearnedCredentials{}, fmt.Errorf("learned ingress credential census contradicts its compiled registration")
-			}
-			for _, role := range required {
-				if _, present := byRole[role]; !present {
-					return standingLearnedCredentials{}, fmt.Errorf("learned ingress is missing compiled credential role %q", role)
-				}
-			}
-			return standingLearnedCredentials{admissions: admissions, signingRole: registration.SigningCredential()}, nil
-		}
-		matches := func(coordinate channelonboarding.ChannelRuntimeContextCoordinate) bool {
-			return coordinate.BundleHash == rt.Options.SourceArtifactFact.BundleHash() &&
-				coordinate.PackInventoryGeneration == bundle.PackInventory.Digest() && coordinate.PlanGeneration.Equal(generation)
-		}
-		for _, activation := range activations {
-			if activation.Provider != profile.Provider() || activation.Interface.Normalized() != identity.Normalized() || !matches(activation.Coordinate) {
-				continue
-			}
-			if _, exists := out[activation.TargetSelector]; exists {
-				return nil, fmt.Errorf("ingress %s has competing learned credential owners", activation.TargetSelector)
-			}
-			admitted, err := admitLearned(activation.CredentialAdmissions)
-			if err != nil {
-				return nil, fmt.Errorf("ingress %s learned activation: %w", activation.TargetSelector, err)
-			}
-			admitted.operationID = activation.OperationID
-			operation, found := operationsByID[activation.OperationID]
-			if !found || operation.Provider != activation.Provider || operation.Interface.Normalized() != activation.Interface.Normalized() || operation.TargetSelector != activation.TargetSelector || !matches(operation.Coordinate) {
-				return nil, fmt.Errorf("ingress %s activation contradicts its exact onboarding responsibility", activation.TargetSelector)
-			}
-			admitted.recoveryCommand = operation.CredentialRecoveryCommand()
-			out[activation.TargetSelector] = admitted
-		}
-		pendingOwners := make(map[string]string)
-		for _, operation := range operations {
-			if operation.Provider != profile.Provider() || operation.Interface.Normalized() != identity.Normalized() || !matches(operation.Coordinate) {
-				continue
-			}
-			if !operation.Phase.Terminal() {
-				if predecessor, found := pendingOwners[operation.TargetSelector]; found {
-					return nil, fmt.Errorf("ingress %s has competing pending responsibilities %s and %s", operation.TargetSelector, predecessor, operation.OperationID)
-				}
-				pendingOwners[operation.TargetSelector] = operation.OperationID
-			}
-			switch operation.Phase {
-			case channelonboarding.PhasePreparing:
-				// Cleanup must not turn a retained responsibility into permission
-				// to adopt the declaration's unrelated credential keys.
-				if _, current := out[operation.TargetSelector]; !current {
-					out[operation.TargetSelector] = standingLearnedCredentials{
-						signingRole: registration.SigningCredential(), operationID: operation.OperationID, recoveryCommand: operation.CredentialRecoveryCommand(), awaitingAdmission: true,
-					}
-				} else {
-					// Retain the predecessor's exact credential evidence, but
-					// direct recovery to the already-created reconnect owner.
-					admitted := out[operation.TargetSelector]
-					admitted.operationID, admitted.recoveryCommand = operation.OperationID, operation.CredentialRecoveryCommand()
-					out[operation.TargetSelector] = admitted
-				}
-			case channelonboarding.PhaseCredentialsAdmitted, channelonboarding.PhaseActivatingProvider,
-				channelonboarding.PhaseAwaitingExternalIdentity, channelonboarding.PhaseAwaitingOperatorConfirmation,
-				channelonboarding.PhasePublishingActivation, channelonboarding.PhasePublishingProcessActivation,
-				channelonboarding.PhasePromotingRegistration, channelonboarding.PhaseRetiringPredecessor,
-				channelonboarding.PhaseDeliveringConfirmation:
-				admitted, err := admitLearned(operation.CredentialAdmissions)
-				if err != nil {
-					return nil, fmt.Errorf("ingress %s pending activation: %w", operation.TargetSelector, err)
-				}
-				admitted.operationID = operation.OperationID
-				admitted.recoveryCommand = operation.CredentialRecoveryCommand()
-				out[operation.TargetSelector] = admitted
-			}
 		}
 	}
 	return out, nil
+}
+
+type standingCredentialPlanScope struct {
+	provider    string
+	identity    operatorchannel.InterfaceIdentity
+	coordinate  channelonboarding.ChannelRuntimeContextCoordinate
+	required    []string
+	signingRole string
+}
+
+func (rt *Runtime) standingCredentialPlanScope(plan packs.SatisfactionPlan, inventory string) (standingCredentialPlanScope, bool, error) {
+	profile, present := plan.OnboardingProfile()
+	if !present || channelonboarding.ActivationPosture(profile.ActivationPosture()) != channelonboarding.ActivationWebhookRegistration {
+		return standingCredentialPlanScope{}, false, nil
+	}
+	identity, err := plan.InterfaceIdentity()
+	if err != nil {
+		return standingCredentialPlanScope{}, false, err
+	}
+	generation, err := plan.Generation()
+	if err != nil {
+		return standingCredentialPlanScope{}, false, err
+	}
+	registration, present := plan.Registration()
+	if !present {
+		return standingCredentialPlanScope{}, false, fmt.Errorf("webhook channel plan has no compiled registration credential owner")
+	}
+	return standingCredentialPlanScope{provider: profile.Provider(), identity: identity,
+		coordinate: channelonboarding.ChannelRuntimeContextCoordinate{BundleHash: rt.Options.SourceArtifactFact.BundleHash(), PackInventoryGeneration: inventory, PlanGeneration: generation},
+		required:   append(registration.ProviderCredentials(), registration.SigningCredential()), signingRole: registration.SigningCredential()}, true, nil
+}
+
+func (s standingCredentialPlanScope) matches(provider string, identity operatorchannel.InterfaceIdentity, coordinate channelonboarding.ChannelRuntimeContextCoordinate) bool {
+	return provider == s.provider && identity.Normalized() == s.identity.Normalized() &&
+		coordinate.BundleHash == s.coordinate.BundleHash && coordinate.PackInventoryGeneration == s.coordinate.PackInventoryGeneration && coordinate.PlanGeneration.Equal(s.coordinate.PlanGeneration)
+}
+
+func (s standingCredentialPlanScope) admit(admissions []channelonboarding.CredentialAdmission) (standingLearnedCredentials, error) {
+	byRole := make(map[string]channelonboarding.CredentialAdmission, len(admissions))
+	for _, credential := range admissions {
+		if err := credential.Validate(); err != nil {
+			return standingLearnedCredentials{}, err
+		}
+		if _, duplicate := byRole[credential.Role]; duplicate {
+			return standingLearnedCredentials{}, fmt.Errorf("learned ingress has duplicate credential role %q", credential.Role)
+		}
+		byRole[credential.Role] = credential
+	}
+	if len(byRole) != len(s.required) {
+		return standingLearnedCredentials{}, fmt.Errorf("learned ingress credential census contradicts its compiled registration")
+	}
+	for _, role := range s.required {
+		if _, present := byRole[role]; !present {
+			return standingLearnedCredentials{}, fmt.Errorf("learned ingress is missing compiled credential role %q", role)
+		}
+	}
+	return standingLearnedCredentials{admissions: admissions, signingRole: s.signingRole}, nil
+}
+
+func (s standingCredentialPlanScope) addCurrentActivations(activations []channelonboarding.ConnectedChannelActivation, operations map[string]channelonboarding.Operation, out map[string]standingLearnedCredentials) error {
+	for _, activation := range activations {
+		if !s.matches(activation.Provider, activation.Interface, activation.Coordinate) {
+			continue
+		}
+		if _, exists := out[activation.TargetSelector]; exists {
+			return fmt.Errorf("ingress %s has competing learned credential owners", activation.TargetSelector)
+		}
+		admitted, err := s.admit(activation.CredentialAdmissions)
+		if err != nil {
+			return fmt.Errorf("ingress %s learned activation: %w", activation.TargetSelector, err)
+		}
+		operation, found := operations[activation.OperationID]
+		if !found || !s.matches(operation.Provider, operation.Interface, operation.Coordinate) || operation.TargetSelector != activation.TargetSelector {
+			return fmt.Errorf("ingress %s activation contradicts its exact onboarding responsibility", activation.TargetSelector)
+		}
+		admitted.operationID, admitted.recoveryCommand = activation.OperationID, operation.CredentialRecoveryCommand()
+		out[activation.TargetSelector] = admitted
+	}
+	return nil
+}
+
+func (s standingCredentialPlanScope) addPendingOperations(operations []channelonboarding.Operation, out map[string]standingLearnedCredentials) error {
+	pendingOwners := make(map[string]string)
+	for _, operation := range operations {
+		if !s.matches(operation.Provider, operation.Interface, operation.Coordinate) {
+			continue
+		}
+		if !operation.Phase.Terminal() {
+			if predecessor, found := pendingOwners[operation.TargetSelector]; found {
+				return fmt.Errorf("ingress %s has competing pending responsibilities %s and %s", operation.TargetSelector, predecessor, operation.OperationID)
+			}
+			pendingOwners[operation.TargetSelector] = operation.OperationID
+		}
+		switch operation.Phase {
+		case channelonboarding.PhasePreparing:
+			// Keep predecessor evidence while directing recovery to the exact
+			// reconnect owner; cleanup never authorizes declaration fallback.
+			admitted, current := out[operation.TargetSelector]
+			if !current {
+				admitted = standingLearnedCredentials{signingRole: s.signingRole, awaitingAdmission: true}
+			}
+			admitted.operationID, admitted.recoveryCommand = operation.OperationID, operation.CredentialRecoveryCommand()
+			out[operation.TargetSelector] = admitted
+		case channelonboarding.PhaseCredentialsAdmitted, channelonboarding.PhaseActivatingProvider,
+			channelonboarding.PhaseAwaitingExternalIdentity, channelonboarding.PhaseAwaitingOperatorConfirmation,
+			channelonboarding.PhasePublishingActivation, channelonboarding.PhasePublishingProcessActivation,
+			channelonboarding.PhasePromotingRegistration, channelonboarding.PhaseRetiringPredecessor,
+			channelonboarding.PhaseDeliveringConfirmation:
+			admitted, err := s.admit(operation.CredentialAdmissions)
+			if err != nil {
+				return fmt.Errorf("ingress %s pending activation: %w", operation.TargetSelector, err)
+			}
+			admitted.operationID, admitted.recoveryCommand = operation.OperationID, operation.CredentialRecoveryCommand()
+			out[operation.TargetSelector] = admitted
+		}
+	}
+	return nil
 }
 
 func (rt *Runtime) ValidateStandingIngressCredentials(ctx context.Context) error {
@@ -403,32 +451,7 @@ func (rt *Runtime) AdmitChannelStandingTarget(ctx context.Context, operation cha
 	if current.Phase != channelonboarding.PhaseCredentialsAdmitted || current.Revision != operation.Revision || !current.Coordinate.MatchesDeclaration(candidate.Coordinate) || current.TargetSelector != candidate.Target.Selector || current.Coordinate.BundleHash != rt.Options.SourceArtifactFact.BundleHash() {
 		return nil, fmt.Errorf("%w: channel target promotion has no exact admitted credential responsibility", channelonboarding.ErrRevisionConflict)
 	}
-	rt.standingCredentialMu.Lock()
-	var siblingKeys []string
-	frozen := rt.standingCredentialAdmission
-	if frozen != nil {
-		for selector, binding := range frozen.bindings {
-			if selector != candidate.Target.Selector {
-				siblingKeys = append(siblingKeys, binding.credentialKeys...)
-			}
-		}
-		if err := frozen.projection.ValidateCurrentKeys(ctx, siblingKeys); err != nil {
-			rt.standingCredentialMu.Unlock()
-			return nil, fmt.Errorf("channel target admission cannot refresh sibling authority: %w", err)
-		}
-	}
-	admission, err := rt.observeStandingCredentials(ctx)
-	if err == nil && frozen != nil {
-		err = frozen.projection.ValidateCurrentKeys(ctx, siblingKeys)
-	}
-	if err == nil && !admission.bindings[candidate.Target.Selector].enabled {
-		err = fmt.Errorf("channel target %s remains credential-dormant", candidate.Target.Selector)
-	}
-	if err == nil {
-		rt.standingCredentialAdmission = admission
-	}
-	rt.standingCredentialMu.Unlock()
-	if err != nil {
+	if err := rt.refreshStandingCredentialAdmission(ctx, candidate.Target.Selector); err != nil {
 		return nil, err
 	}
 	plans, err := rt.standingTargetPlans()
@@ -465,4 +488,32 @@ func (rt *Runtime) AdmitChannelStandingTarget(ctx context.Context, operation cha
 		return nil, fmt.Errorf("channel target %s has no executable standing owner; inspect standing service %s", candidate.Target.Selector, candidate.Target.ServiceID)
 	}
 	return targets, nil
+}
+
+func (rt *Runtime) refreshStandingCredentialAdmission(ctx context.Context, selected string) error {
+	rt.standingCredentialMu.Lock()
+	defer rt.standingCredentialMu.Unlock()
+	var siblingKeys []string
+	frozen := rt.standingCredentialAdmission
+	if frozen != nil {
+		for selector, binding := range frozen.bindings {
+			if selector != selected {
+				siblingKeys = append(siblingKeys, binding.credentialKeys...)
+			}
+		}
+		if err := frozen.projection.ValidateCurrentKeys(ctx, siblingKeys); err != nil {
+			return fmt.Errorf("channel target admission cannot refresh sibling authority: %w", err)
+		}
+	}
+	admission, err := rt.observeStandingCredentials(ctx)
+	if err == nil && frozen != nil {
+		err = frozen.projection.ValidateCurrentKeys(ctx, siblingKeys)
+	}
+	if err == nil && !admission.bindings[selected].enabled {
+		err = fmt.Errorf("channel target %s remains credential-dormant", selected)
+	}
+	if err == nil {
+		rt.standingCredentialAdmission = admission
+	}
+	return err
 }
