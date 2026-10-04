@@ -93,11 +93,11 @@ func TestExternalMCPDiscoveryRejectsMissingAndMalformedSchemasBeforePublication(
 				w.Header().Set("Content-Type", "application/json")
 				switch request.Method {
 				case "initialize":
-					_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":"test-initialize","result":{}}`)
+					_ = json.NewEncoder(w).Encode(RPCResponse{JSONRPC: "2.0", ID: request.ID, Result: map[string]any{}})
 				case "notifications/initialized":
-					_, _ = io.WriteString(w, `{"jsonrpc":"2.0","result":{}}`)
+					w.WriteHeader(http.StatusNoContent)
 				case "tools/list":
-					_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":"test-tools-list","result":{"tools":[`+tc.inputEntry+`]}}`)
+					_ = json.NewEncoder(w).Encode(RPCResponse{JSONRPC: "2.0", ID: request.ID, Result: json.RawMessage(`{"tools":[` + tc.inputEntry + `]}`)})
 				default:
 					t.Fatalf("unexpected MCP method %q", request.Method)
 				}

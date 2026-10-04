@@ -467,6 +467,10 @@ type cliHumanCodeRawOutputAllowance struct {
 }
 
 var cliHumanCodeRawOutputAllowances = map[string]cliHumanCodeRawOutputAllowance{
+	"verify_runtime.go\x00renderVerifyCommandResult": {
+		Names:  []string{"status"},
+		Reason: "typed admission observation status is the bootverify evidence taxonomy, not a registered runtime lifecycle status; the public witness preserves exact machine evidence",
+	},
 	"data.go\x00runDataImportCommand": {
 		Names:  []string{"outcome"},
 		Reason: "resource source-operation outcome is a separate immutable-data operation taxonomy",
