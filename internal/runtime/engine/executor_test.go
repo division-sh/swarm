@@ -6856,12 +6856,17 @@ func sourceWithChildOutputPinAndRootConnect(t testing.TB) semanticview.Source {
 		Events: map[string]runtimecontracts.EventCatalogEntry{"child.done": {}},
 		Path:   "child",
 	}
-	rootInput := runtimecontracts.FlowInputEventPin{Event: "child.done"}
 	connect := runtimecontracts.FlowConnect{Event: "child.done", From: "child", To: ".", SourceFile: "schema.yaml", SourceLine: 1}
-	rootSchema := runtimecontracts.FlowSchemaDocument{Connect: []runtimecontracts.FlowConnect{connect}, Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{rootInput}}}}
-	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: ".", SchemaFile: "schema.yaml"}, Schema: rootSchema, Children: []runtimecontracts.FlowContractView{child}}
+	rootSchema := runtimecontracts.FlowSchemaDocument{Connect: []runtimecontracts.FlowConnect{connect}}
+	rootNodes := map[string]runtimecontracts.SystemNodeContract{"root-receiver": {
+		ExecutionType: runtimecontracts.SystemNodeExecutionType,
+		SubscribesTo:  []string{"child.done"},
+		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"child.done": {}},
+	}}
+	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: ".", SchemaFile: "schema.yaml"}, Schema: rootSchema, Nodes: rootNodes, Children: []runtimecontracts.FlowContractView{child}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema:  &rootSchema,
+		Nodes:       rootNodes,
 		Events:      map[string]runtimecontracts.EventCatalogEntry{"child.done": {}},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"child": child.Schema},
 		FlowSources: map[string]runtimecontracts.FlowSource{

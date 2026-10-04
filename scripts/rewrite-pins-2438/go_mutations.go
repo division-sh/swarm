@@ -42,7 +42,6 @@ var pinMutationSpellings = map[string][]string{
 		"    - event: work.ready\n        initialize:\n", "    - event: work.ready\n      initialize:\n",
 		"          %s: payload.values.%s\n", "        %s: payload.values.%s\n",
 	},
-	"lifecycle_emitters.go":   {"inputs: [loop.escaped]", "    - loop.escaped\n", "inputs: [loop.escaped, ordinary.repeated]", "    - loop.escaped\n    - ordinary.repeated\n"},
 	"receiver_composition.go": {"events: [work.completed", "outputs: [work.completed"},
 	"channel_delivery.go":     {"  inputs: {events: [work.requested]}", "  inputs: [work.requested]", "      - observer.requested\n", "    - observer.requested\n"},
 }
@@ -78,6 +77,14 @@ func rewritePinMutationLiteral(name, text string) string {
 		return text
 	}
 	base := filepath.Base(name)
+	if base == "lifecycle_emitters.go" {
+		switch text {
+		case "inputs: [loop.escaped]":
+			return "    - loop.escaped\n"
+		case "inputs: [loop.escaped, ordinary.repeated]":
+			return "    - loop.escaped\n    - ordinary.repeated\n"
+		}
+	}
 	for _, event := range pinMutationEvents[base] {
 		text = strings.ReplaceAll(text, "      - "+event, "    - "+event)
 	}

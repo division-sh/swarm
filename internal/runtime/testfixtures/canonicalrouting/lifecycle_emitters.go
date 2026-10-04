@@ -240,8 +240,7 @@ stages:
             fields: {result: {literal: %s}}
   approved: {terminal: true}
 pins:
-      - loop.escaped
-
+  inputs: [loop.escaped]
   outputs: [work.completed]
 connect:
   - {event: work.completed, from: ., to: final}
