@@ -98,11 +98,14 @@ func TestMockNormalRealDockerEmissionBothStores(t *testing.T) {
 				t.Fatalf("normal container tool call: %s, err=%v", callsRaw, err)
 			}
 			var emitted []json.RawMessage
-			if err := json.Unmarshal([]byte(emittedRaw), &emitted); err != nil || len(emitted) != 1 {
-				t.Fatalf("normal container turn emission: %s, err=%v", emittedRaw, err)
+			// Provider completion commits before Conversation executes its tool
+			// output. Prove that output at its event and consumed receipt, not by
+			// attributing a later emit to this earlier model-completion snapshot.
+			if err := json.Unmarshal([]byte(emittedRaw), &emitted); err != nil || len(emitted) != 0 {
+				t.Fatalf("model completion claimed a later emission: %s, err=%v", emittedRaw, err)
 			}
 			var marker string
-			var events, turns, failures int
+			var events, turns, failures, consumed int
 			if err := rt.DB.QueryRow(`SELECT CAST(payload AS TEXT) FROM events WHERE run_id=$1 AND event_name='items.processed' AND parent_event_id=$2`, published.RunID, triggerID).Scan(&marker); err != nil {
 				t.Fatal(err)
 			}
@@ -117,13 +120,14 @@ func TestMockNormalRealDockerEmissionBothStores(t *testing.T) {
 				`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='items.processed'`: &events,
 				`SELECT COUNT(*) FROM agent_turns WHERE run_id=$1 AND agent_id='item-worker'`:  &turns,
 				`SELECT COUNT(*) FROM dead_letters WHERE run_id=$1`:                            &failures,
+				`SELECT COUNT(*) FROM runtime_external_effect_attempts a JOIN agent_turns t ON t.completion_attempt_id=a.attempt_id WHERE t.run_id=$1 AND t.agent_id='item-worker' AND a.state='settled' AND a.completion_projection_phase='response_consumed'`: &consumed,
 			} {
 				if err := rt.DB.QueryRow(query, published.RunID).Scan(destination); err != nil {
 					t.Fatal(err)
 				}
 			}
-			if events != 1 || turns != 1 || failures != 0 {
-				t.Fatalf("normal Docker cardinality: events=%d turns=%d failures=%d", events, turns, failures)
+			if events != 1 || turns != 1 || failures != 0 || consumed != 1 {
+				t.Fatalf("normal Docker cardinality: events=%d turns=%d failures=%d consumed=%d", events, turns, failures, consumed)
 			}
 			for _, actor := range rt.Runtime.Manager.ListAgentConfigs() {
 				if actor.ID != "item-worker" || actor.Identity.RunID != published.RunID {
