@@ -139,15 +139,31 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 	stale.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret")
 	staleRecorder := httptest.NewRecorder()
 	runtimeProcessInboundHandler{contexts: manager}.ServeHTTP(staleRecorder, stale)
-	if staleRecorder.Code != http.StatusUnauthorized || len(eventsB.events) != 2 {
-		t.Fatalf("stale signing secret status/events = %d/%d, want 401/2", staleRecorder.Code, len(eventsB.events))
+	if staleRecorder.Code != http.StatusServiceUnavailable || len(eventsB.events) != 2 {
+		t.Fatalf("stale credential admission status/events = %d/%d, want 503/2", staleRecorder.Code, len(eventsB.events))
 	}
 	current := httptest.NewRequest(http.MethodPost, "/webhooks/chat-b/telegram", strings.NewReader(rotatedBody))
 	current.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret-v2")
 	currentRecorder := httptest.NewRecorder()
 	runtimeProcessInboundHandler{contexts: manager}.ServeHTTP(currentRecorder, current)
-	if currentRecorder.Code != http.StatusAccepted || len(eventsB.events) != 4 {
-		t.Fatalf("current signing secret status/events = %d/%d, want 202/4", currentRecorder.Code, len(eventsB.events))
+	if currentRecorder.Code != http.StatusServiceUnavailable || len(eventsB.events) != 2 {
+		t.Fatalf("unadmitted replacement status/events = %d/%d, want 503/2", currentRecorder.Code, len(eventsB.events))
+	}
+	if !strings.Contains(currentRecorder.Body.String(), "restart or explicitly admit fresh credentials") {
+		t.Fatalf("unadmitted replacement has no recovery instruction: %q", currentRecorder.Body.String())
+	}
+	if strings.Contains(currentRecorder.Body.String(), "telegram-secret") {
+		t.Fatalf("unadmitted replacement exposed a signing value: %q", currentRecorder.Body.String())
+	}
+	sibling := httptest.NewRequest(http.MethodPost, "/webhooks/chat-a/telegram", strings.NewReader(rotatedBody))
+	sibling.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret")
+	siblingRecorder := httptest.NewRecorder()
+	runtimeProcessInboundHandler{contexts: manager}.ServeHTTP(siblingRecorder, sibling)
+	if siblingRecorder.Code != http.StatusAccepted || len(eventsA.events) != 2 || len(eventsB.events) != 2 {
+		t.Fatalf("unaffected context status/events A/B = %d/%d/%d, want 202/2/2", siblingRecorder.Code, len(eventsA.events), len(eventsB.events))
+	}
+	if got := eventsA.events[0].RunID(); got != contextA.StandingTargets[0].RunID {
+		t.Fatalf("unaffected context event run_id = %q, want %q", got, contextA.StandingTargets[0].RunID)
 	}
 }
 
