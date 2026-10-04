@@ -2763,7 +2763,7 @@
   {
     "file": "internal/runtime/engine/node_admission_fixture_test.go",
     "before_hash": "66aad52b75a1c35274570bb698b8449f6aa1cd4b056597f8f69c8d64e469c989",
-    "after_hash": "91a4a9c083500e27988a2f02526995ebf5d67966f9a212358827d15be98de0a0",
+    "after_hash": "2eba1f3c16f7df2a363059dc8f1cb9fcb9b0f3730ec7d4038cf5493a665b71fb",
     "edits": [
       {
         "start": 38,
@@ -2771,7 +2771,7 @@
           "\thandler, err := loadNodeHandlerFixture(\"on_complete:\\n  - condition: else\\n\")"
         ],
         "add": [
-          "\thandler, err := loadNodeHandlerFixture(\"on_complete:\\n  -\\n\")"
+          "\thandler, err := loadNodeHandlerFixture(\"on_complete:\\n  - {}\\n\")"
         ]
       }
     ],

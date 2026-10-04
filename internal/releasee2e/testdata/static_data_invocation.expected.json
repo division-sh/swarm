@@ -2,11 +2,11 @@
   "readback": {
     "read.completed": {
       "content": "Root resume: exact admitted bytes.\n",
-      "static_id": "static-data-v1:sha256:270189640cd6bb567506ca91f2aa849f2ed7e65056fb9f9efac0066fa6a8e0a9"
+      "static_id": "static-data-v1:sha256:fcf3592fd00f44d7781c98593cfc810f932207579df4a48750d6f3d5128f09b9"
     },
     "registry/child.completed": {
       "content": "Child resume: different admitted bytes.\n",
-      "static_id": "static-data-v1:sha256:8da3b58aea1686bc8288aca22b019117d24c5df54346c24aff0a49ecc511864d"
+      "static_id": "static-data-v1:sha256:d1201f5ffe4ee17b6a73e16cd309048147417e5d29f2bba51284ee724bc037fd"
     }
   }
 }
