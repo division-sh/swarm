@@ -1038,7 +1038,7 @@ not the hosted Docker path, paid doctor, final-head qualification or L06.
 
 ## Independent selected-fork Docker gateway proof
 
-`TestSelectedForkRealDockerGatewayTransportBothStores` adds the remaining
+`TestSelectedForkDockerGatewayTransportBothStores` adds the remaining
 L06/A08 selected gateway-loss branch through public `run.fork` on an internal
 retained MockOnly H composition, not public live serve. Both stores execute a
 real Docker native worker against the isolated selected gateway. The reachable
@@ -1062,5 +1062,12 @@ no Docker credit; the finite root deferral requires this separate execution.
 No runtime code, timeout, production authority, firewall or tier is changed.
 Same-head focused/race qualification still follows this commit; final E-crossed
 activation and the one final full remain blocked on #2525 actual merge.
+
+The first clean-head selection census rejected the original `RealDocker`
+root spelling: the existing selected-rest regex excludes `R` and the selected
+partition admits only Receiver/Required. Rename this new proof to `Docker`
+so the existing selected-rest partition owns it exactly once. No plan, tier,
+timeout or budget changes; the original d201f640e race receipt retains its
+historical name, and new-name focused qualification follows this correction.
 The new root is consumed by the existing mandatory release-rest partition;
 no planner, timeout, tier, runtime or production assertion changes are made.
