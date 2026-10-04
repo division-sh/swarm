@@ -53,6 +53,7 @@ func checkStageGateValidation(c *checkerContext) []Finding {
 		}
 		for name, expression := range plan.Context {
 			if err := validateStageGateContextExpression(expression, entityType, known...); err != nil {
+				err = c.authoredGateContextError(plan, name, err)
 				findings = append(findings, stageGateFinding(location, fmt.Sprintf("context field %s is invalid: %v", strings.TrimSpace(name), err)))
 			}
 		}

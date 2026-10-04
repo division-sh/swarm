@@ -54,7 +54,7 @@ func NewEntityPredicateEnv(entity runtimecontracts.ResolvedCatalogType, extra ..
 func (e *StructuralPredicateEnv) CompilePredicate(expression string) (cel.Program, error) {
 	compiled, issues := e.Env.Compile(expression)
 	if issues != nil && issues.Err() != nil {
-		return nil, workflowNumericCheckError(issues.Err())
+		return nil, workflowExpressionCheckError(issues)
 	}
 	return e.PredicateProgram(compiled)
 }
