@@ -379,13 +379,22 @@ func admitTriggerPattern(value yamlsource.Value, out *NormalizedEventFieldProjec
 		if name == "" {
 			continue
 		}
-		if _, present := out.Schema.Property(name); !present {
+		property, present := out.Schema.Property(name)
+		if !present {
 			return triggerSourceError(value, "capture "+name+" is not a declared output property")
+		}
+		if property.Kind() != runtimecontracts.ToolSchemaString {
+			return triggerSourceError(value, "capture "+name+" requires a string output property")
 		}
 		if seen[name] {
 			return triggerSourceError(value, "duplicate named capture "+name)
 		}
 		seen[name] = true
+	}
+	for _, name := range out.Schema.RequiredProperties() {
+		if !seen[name] {
+			return triggerSourceError(value, "required output property "+name+" has no named capture")
+		}
 	}
 	out.pattern = compiled
 	return nil
