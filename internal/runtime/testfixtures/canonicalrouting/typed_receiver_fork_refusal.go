@@ -41,7 +41,7 @@ auto_emit_on_create:
   instance_id: text
   workflow_version: numeric
 `)
-	applyClosedReplacement(t, filepath.Join(root, "account/nodes.yaml"), "subscribes_to: [work.ready]", "subscribes_to: [work.ready, account.initialized]")
+	applyClosedReplacement(t, filepath.Join(root, "account/nodes.yaml"), "  subscribes_to:\n    - work.ready\n", "  subscribes_to:\n    - work.ready\n    - account.initialized\n")
 	applyClosedReplacement(t, filepath.Join(root, "account/nodes.yaml"), "  event_handlers:\n", `  event_handlers:
     account.initialized:
       data_accumulation:

@@ -8045,6 +8045,26 @@
     ]
   },
   {
+    "file": "internal/runtime/testfixtures/canonicalrouting/typed_receiver_fork_refusal.go",
+    "before_hash": "2e3cc179f16648695dcbb52f6c6d5842819ccd87e112487ba9720685ac0a26a8",
+    "after_hash": "284df18acee755d91176e626249b0ff3bde668314572511a04bba07f2b2121bb",
+    "edits": [
+      {
+        "start": 43,
+        "remove": [
+          "\tapplyClosedReplacement(t, filepath.Join(root, \"account/nodes.yaml\"), \"subscribes_to: [work.ready]\", \"subscribes_to: [work.ready, account.initialized]\")"
+        ],
+        "add": [
+          "\tapplyClosedReplacement(t, filepath.Join(root, \"account/nodes.yaml\"), \"  subscribes_to:\\n    - work.ready\\n\", \"  subscribes_to:\\n    - work.ready\\n    - account.initialized\\n\")"
+        ]
+      }
+    ],
+    "slots": [
+      "recorded receiver overlay: preserve the same two subscriptions through the block-form source produced by CopyServedReceiverInitialization; both exact replacement anchors are updated",
+      "reviewed generator, partial replacement anchors and typed/negative oracles migrate together; no data-file grammar change"
+    ]
+  },
+  {
     "file": "internal/runtime/workflow_validation_test.go",
     "before_hash": "fe06062649110baab51e886f688eb3641530819825b4f1e09c84be324eb779b0",
     "after_hash": "dcf6c6b9f21678dac3577569adce450d77194801396e180dfcff91f2794e9f59",
@@ -8495,8 +8515,17 @@
   {
     "file": "internal/serveapp/semantic_numeric_gate_test.go",
     "before_hash": "3724d6400756673b1ef2cad1d70f477017d9709f575b188511bd44d8661e4ca5",
-    "after_hash": "b682141c89b543e2e5b50d797836084778bd62df6442efab54d8129b931c2054",
+    "after_hash": "bcc105b318fbc82febe78bf9f5988ed3602cbef86a5931b3240dddb953db5a16",
     "edits": [
+      {
+        "start": 25,
+        "remove": [
+          "        label: entity.name"
+        ],
+        "add": [
+          "        label: \"entity.name\""
+        ]
+      },
       {
         "start": 36,
         "remove": [
@@ -8509,6 +8538,7 @@
     ],
     "slots": [
       "stages.review.gate.outcomes.approve.emit.fields.value: unwrap typed expression",
+      "stages.review.gate.context.label: intentional display text entity.name; quote it and retain the exact frozen-card assertion, not an entity read",
       "reviewed generator, partial replacement anchors and typed/negative oracles migrate together; no data-file grammar change"
     ]
   },
