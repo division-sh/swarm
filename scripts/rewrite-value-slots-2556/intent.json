@@ -850,6 +850,43 @@
     ]
   },
   {
+    "file": "internal/releasee2e/run_observer_overflow_test.go",
+    "before_hash": "e1727ea2b8173f98ca3f65eb3fffa07fefb30ad35b87e26215164487d73f34e3",
+    "after_hash": "5f3897f39e2028125e8e855a77f58e6a5be9fc1b01967959453bea34b6f874b9",
+    "edits": [
+      {
+        "start": 326,
+        "remove": [
+          "        check: \"_entity.current_state == 'active'\""
+        ],
+        "add": [
+          "        check: _entity.current_state == 'active'"
+        ]
+      },
+      {
+        "start": 335,
+        "remove": [
+          "            request: ${completed_request}"
+        ],
+        "add": [
+          "            request: completed_request"
+        ]
+      },
+      {
+        "start": 343,
+        "remove": [
+          "        check: \"_entity.current_state == 'active'\""
+        ],
+        "add": [
+          "        check: _entity.current_state == 'active'"
+        ]
+      }
+    ],
+    "slots": [
+      "reviewed generator, partial replacement anchors and typed/negative oracles migrate together; no data-file grammar change"
+    ]
+  },
+  {
     "file": "internal/releasee2e/testdata/full_lifecycle/standing_telegram/telegram-chat/nodes.yaml",
     "before_hash": "3feba6210d44907eacfb51d0cd88f1a597a02eb7f0c8557755ea5f729d0cfdd1",
     "after_hash": "f527112bed4f93cf5bf0c9cd1e2cc0f340d54c72c38d1cd3bae4174e0f7fdbd9",
@@ -1948,6 +1985,59 @@
     ]
   },
   {
+    "file": "internal/runtime/conformance/fan_out_semantic_proof_helpers_test.go",
+    "before_hash": "50dbba06015bef9c8e6bdf2d633c71538b2a052bb236548f3a4b614d460714c1",
+    "after_hash": "307a6cae5709babe5363ec76231ed27397519973aec3d13cc4617cd7d80fd836",
+    "edits": [
+      {
+        "start": 125,
+        "remove": [
+          "\t\traw = replace(raw, \"            eligible: ${entity.threshold \u003e= 70}\\n\", \"            eligible: ${entity.threshold \u003e= 70}\\n            ordinal: ${fan_out.index}\\n            source_count: ${fan_out.count}\\n            snapshot_threshold: ${entity.threshold}\\n\")"
+        ],
+        "add": [
+          "\t\traw = replace(raw, \"            eligible: entity.threshold \u003e= 70\\n\", \"            eligible: entity.threshold \u003e= 70\\n            ordinal: fan_out.index\\n            source_count: fan_out.count\\n            snapshot_threshold: entity.threshold\\n\")"
+        ]
+      },
+      {
+        "start": 130,
+        "remove": [
+          "\t\t\tpredicate := \"condition: else\""
+        ],
+        "add": [
+          "\t\t\tpredicate := \"\""
+        ]
+      },
+      {
+        "start": 152,
+        "remove": [
+          "                portfolio_id: ${payload.portfolio_id}",
+          "                account_id: ${account.account_id}",
+          "                eng_roles: ${account.eng_roles}",
+          "                gem_score: ${account.gem_score}",
+          "                external_id: ${account.external_id}",
+          "                eligible: ${entity.threshold \u003e= 70}",
+          "                ordinal: ${fan_out.index}",
+          "                source_count: ${fan_out.count}",
+          "                snapshot_threshold: ${entity.threshold}"
+        ],
+        "add": [
+          "                portfolio_id: payload.portfolio_id",
+          "                account_id: account.account_id",
+          "                eng_roles: account.eng_roles",
+          "                gem_score: account.gem_score",
+          "                external_id: account.external_id",
+          "                eligible: entity.threshold \u003e= 70",
+          "                ordinal: fan_out.index",
+          "                source_count: fan_out.count",
+          "                snapshot_threshold: entity.threshold"
+        ]
+      }
+    ],
+    "slots": [
+      "reviewed generator, partial replacement anchors and typed/negative oracles migrate together; no data-file grammar change"
+    ]
+  },
+  {
     "file": "internal/runtime/contracts/compiled_event_schema_test.go",
     "before_hash": "3f8497f273abf6358c073f96988177ae45a691ddf08ac13b9ae7d4275f93a715",
     "after_hash": "98928f8b5a614019da186a38d105e60d46ac31b53bd4de566b390d698eaa76e9",
@@ -2811,6 +2901,36 @@
     ]
   },
   {
+    "file": "internal/runtime/engine/expression_value_r2_test.go",
+    "before_hash": "17dd4074f44663f1fce5fafee5d1807c0a427bdd837c451c4d6edf966273093e",
+    "after_hash": "ffb5535fd9e527ba4d3d5d886653e7fb974498e2b105181c3302e0878380bac9",
+    "edits": [
+      {
+        "start": 23,
+        "remove": [
+          "\t\t{\"literal\", `hello`, \"hello\"},",
+          "\t\t{\"typed\", `\"${payload.count}\"`, int64(7)},"
+        ],
+        "add": [
+          "\t\t{\"literal\", `\"hello\"`, \"hello\"},",
+          "\t\t{\"typed\", `payload.count`, int64(7)},"
+        ]
+      },
+      {
+        "start": 26,
+        "remove": [
+          "\t\t{\"nested\", `{name: \"${payload.name}\", counts: [\"${payload.count}\", 8, 1.0]}`, map[string]any{\"name\": \"Ada\", \"counts\": []any{int64(7), int64(8), float64(1)}}},"
+        ],
+        "add": [
+          "\t\t{\"nested\", `{name: payload.name, counts: [payload.count, 8, 1.0]}`, map[string]any{\"name\": \"Ada\", \"counts\": []any{int64(7), int64(8), float64(1)}}},"
+        ]
+      }
+    ],
+    "slots": [
+      "reviewed generator, partial replacement anchors and typed/negative oracles migrate together; no data-file grammar change"
+    ]
+  },
+  {
     "file": "internal/runtime/engine/helpers_test.go",
     "before_hash": "82b2e4a9d4b3bfba81b15d488de158d35cdb7b0d1fca4208f855f155a285c211",
     "after_hash": "9cc2ffd75851c05c8e643f4562fe3a86dd2d5146ac7e2661753e15ccd2cf917a",
@@ -3203,6 +3323,27 @@
     ],
     "slots": [
       "node-a.event_handlers.source.evt.rules.0.when: unquote boolean control",
+      "reviewed generator, partial replacement anchors and typed/negative oracles migrate together; no data-file grammar change"
+    ]
+  },
+  {
+    "file": "internal/runtime/pipeline/authored_selection_changed_state_retry_test.go",
+    "before_hash": "14c19df8b19671c36604618a0cb9c11339ff80f61cc2d716ac060a8f26f01c85",
+    "after_hash": "e072f15d510196314e7c58c83f62ddb8783817591afdf19c138d933d688d5e36",
+    "edits": [
+      {
+        "start": 51,
+        "remove": [
+          "        - {id: first, when: \"entity.marker == 'first'\", advances_to: done}",
+          "        - {id: second, when: \"entity.marker == 'second'\", advances_to: done}"
+        ],
+        "add": [
+          "        - {id: first, when: entity.marker == 'first', advances_to: done}",
+          "        - {id: second, when: entity.marker == 'second', advances_to: done}"
+        ]
+      }
+    ],
+    "slots": [
       "reviewed generator, partial replacement anchors and typed/negative oracles migrate together; no data-file grammar change"
     ]
   },
@@ -3956,7 +4097,7 @@
   {
     "file": "internal/runtime/semanticview/authored_emit_sites_test.go",
     "before_hash": "ff21fe0f5e473fda1506adb9ef329f9caf248417c1de066842ea0166faa98e4d",
-    "after_hash": "f571a5b6522aad1f3210da09e8bbe9c16315dc630e6eff701d9cd84250697bdf",
+    "after_hash": "73affdb7dae58d2fea274e877b595dfa227d4aa41c80bd9de4e28f64a941a6cc",
     "edits": [
       {
         "start": 276,
@@ -4001,6 +4142,33 @@
         ],
         "add": [
           "                \"score_below_threshold\""
+        ]
+      },
+      {
+        "start": 362,
+        "remove": [
+          "          when: \"payload.score \u003e= 80\""
+        ],
+        "add": [
+          "          when: payload.score \u003e= 80"
+        ]
+      },
+      {
+        "start": 365,
+        "remove": [
+          "              bucket: '\"high\"'"
+        ],
+        "add": [
+          "              bucket: 'high'"
+        ]
+      },
+      {
+        "start": 370,
+        "remove": [
+          "              bucket: '\"low\"'"
+        ],
+        "add": [
+          "              bucket: 'low'"
         ]
       }
     ],
@@ -4955,7 +5123,7 @@
   {
     "file": "internal/runtime/testfixtures/canonicalrouting/fork_receiver_ownership.go",
     "before_hash": "0e3bb409f220585bdb251be302e06c3d2e0deba79ac4e40aafc0742f0409d750",
-    "after_hash": "65d7835d8c7606ea59435ab26944acba7503a5a21033c2947c2b01dfeb79f1a8",
+    "after_hash": "239354f7445b571602094e1cf149a24f747c1524e4579adaaed8cfae937c960e",
     "edits": [
       {
         "start": 32,
@@ -5004,6 +5172,15 @@
         ],
         "add": [
           "        fields: {token: payload.token}"
+        ]
+      },
+      {
+        "start": 204,
+        "remove": [
+          "\tapplyClosedReplacement(t, filepath.Join(inner, \"nodes.yaml\"), \"  subscribes_to: [start.seeded, start.requested, start.closed]\", \"  subscribes_to: [start.seeded, start.requested, start.closed, receiver.close.requested]\")"
+        ],
+        "add": [
+          "\tapplyClosedReplacement(t, filepath.Join(inner, \"nodes.yaml\"), \"    - start.closed\\n  event_handlers:\\n\", \"    - start.closed\\n    - receiver.close.requested\\n  event_handlers:\\n\")"
         ]
       },
       {

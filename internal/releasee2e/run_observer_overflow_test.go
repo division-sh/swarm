@@ -324,7 +324,7 @@ worker-completion:
   event_handlers:
     agent.completed:
       guard:
-        check: "_entity.current_state == 'active'"
+        check: _entity.current_state == 'active'
       fan_out:
         items_from: entity.requests
         as: completed_request
@@ -333,7 +333,7 @@ worker-completion:
         emit:
           event: completion.item
           fields:
-            request: ${completed_request}
+            request: completed_request
 
 completion-sink:
   execution_type: system_node
@@ -341,7 +341,7 @@ completion-sink:
   event_handlers:
     completion.item:
       guard:
-        check: "_entity.current_state == 'active'"
+        check: _entity.current_state == 'active'
       advances_to: active
 `, eventCount))
 }

@@ -360,15 +360,15 @@ func authoredEmitSiteTemplateNodeYAML(nodeID, trigger, eventType string) string 
           shared: payload.shared
       rules:
         high:
-          when: "payload.score >= 80"
+          when: payload.score >= 80
           emit:
             fields:
-              bucket: '"high"'
+              bucket: 'high'
         low:
           else: true
           emit:
             fields:
-              bucket: '"low"'
+              bucket: 'low'
 `
 }
 

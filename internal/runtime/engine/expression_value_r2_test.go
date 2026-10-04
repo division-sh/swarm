@@ -21,10 +21,10 @@ func TestExpressionValueR2RuntimeTypedAndRecursive(t *testing.T) {
 		name, source string
 		want         any
 	}{
-		{"literal", `hello`, "hello"},
-		{"typed", `"${payload.count}"`, int64(7)},
+		{"literal", `"hello"`, "hello"},
+		{"typed", `payload.count`, int64(7)},
 		{"mixed", `"Hello ${payload.name}, count=${payload.count}"`, "Hello Ada, count=7"},
-		{"nested", `{name: "${payload.name}", counts: ["${payload.count}", 8, 1.0]}`, map[string]any{"name": "Ada", "counts": []any{int64(7), int64(8), float64(1)}}},
+		{"nested", `{name: payload.name, counts: [payload.count, 8, 1.0]}`, map[string]any{"name": "Ada", "counts": []any{int64(7), int64(8), float64(1)}}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			handler, err := loadNodeHandlerFixture("emit:\n  event: value.completed\n  fields:\n    value:\n      " + strings.ReplaceAll(test.source, "\n", "\n      "))

@@ -49,8 +49,8 @@ func TestAuthoredSelectionRetryReloadsCurrentStateBothStores(t *testing.T) {
   event_handlers:
     source.evt:
       rules:
-        - {id: first, when: "entity.marker == 'first'", advances_to: done}
-        - {id: second, when: "entity.marker == 'second'", advances_to: done}
+        - {id: first, when: entity.marker == 'first', advances_to: done}
+        - {id: second, when: entity.marker == 'second', advances_to: done}
         - {id: unmatched, else: true}
 `
 				if first == "evaluation_failed" {

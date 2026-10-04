@@ -202,7 +202,7 @@ func CopyForkReceiverNestedOwnership(t testing.TB, receivers []ForkReceiver) str
 	applyClosedReplacement(t, filepath.Join(inner, "schema.yaml"), "start.requested", "start.requested")
 	applyClosedReplacement(t, filepath.Join(inner, "events.yaml"), "start.seeded:\n  token: text\nstart.requested:\n  token: text\nstart.closed:\n", "")
 	applyClosedReplacement(t, filepath.Join(inner, "schema.yaml"), "    - receiver.closed\n", "    - receiver.close.requested\n")
-	applyClosedReplacement(t, filepath.Join(inner, "nodes.yaml"), "  subscribes_to: [start.seeded, start.requested, start.closed]", "  subscribes_to: [start.seeded, start.requested, start.closed, receiver.close.requested]")
+	applyClosedReplacement(t, filepath.Join(inner, "nodes.yaml"), "    - start.closed\n  event_handlers:\n", "    - start.closed\n    - receiver.close.requested\n  event_handlers:\n")
 	applyClosedReplacement(t, filepath.Join(inner, "nodes.yaml"), "  event_handlers:\n    start.seeded:", "  event_handlers:\n    receiver.close.requested:\n      emit: {event: receiver.closed}\n    start.seeded:")
 	root := t.TempDir()
 	copyTree(t, inner, filepath.Join(root, "branch"))
