@@ -209,6 +209,10 @@ func TestProviderDirectiveOriginRecoveryParity(t *testing.T) {
 
 func admitProviderDirectiveOrigin(t *testing.T, fixture completionSettlementFixture, store providerDirectiveTestStore, label string) (runtimeagentcontrol.DirectiveExecutionOrigin, runtimeagentcontrol.DirectiveOperation, events.Event) {
 	t.Helper()
+	posture := executionposture.Live
+	if fixture.authority.ExecutionMode == runtimeeffects.ExecutionModeMock {
+		posture = executionposture.MockOnly
+	}
 	now := time.Now().UTC()
 	operationID, eventID := uuid.NewString(), uuid.NewString()
 	request := runtimeagentcontrol.SendDirectiveRequest{
@@ -218,7 +222,7 @@ func admitProviderDirectiveOrigin(t *testing.T, fixture completionSettlementFixt
 	}
 	event, err := runtimeagentcontrol.NewDirectiveEvent(request, runtimeagentcontrol.RunTargetResolution{
 		RunID: fixture.authority.Target.RunID, Mode: runtimeagentcontrol.RunResolutionSpecified,
-	}, operationID, eventID, now, executionposture.Live)
+	}, operationID, eventID, now, posture)
 	if err != nil {
 		t.Fatalf("construct directive event: %v", err)
 	}
@@ -243,7 +247,7 @@ func admitProviderDirectiveOrigin(t *testing.T, fixture completionSettlementFixt
 	ownerID := uuid.NewString()
 	admission, err := store.AdmitDirectiveExecution(testAuthorActivityContext(), runtimeagentcontrol.DirectiveExecutionAdmissionRequest{
 		OperationID: operationID, OwnerID: ownerID, Now: now.Add(time.Millisecond), Lease: time.Minute,
-		ExecutionPosture: executionposture.Live,
+		ExecutionPosture: posture,
 	})
 	if err != nil {
 		t.Fatalf("admit directive execution: %v", err)

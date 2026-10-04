@@ -926,3 +926,39 @@ fixture classification, not a runtime fallback or paid-provider proof.
 The compiled read surface, boundary, provider-mount and native-identity leaves
 pass in that same RED aggregate. Its failed resource leaf remains retained;
 fresh committed-head execution is required before claiming repair.
+
+### Remaining ordinary fixture and A04/A07 proof accounting
+
+The next full plan at clean `1e5362c8c` is also RED, not closure. Its mixed
+node/agent composition used the same non-executable workspace stub and refused
+startup with `workspace_worker_target_missing` on both stores. Remove the stub
+at that existing H entrance; preserve the exact one agent/four node delivery,
+one turn, child-versus-parent identity and public-readback assertions. SQLite's
+corrected focused journey passes through the native host worker and real HTTP;
+committed-head both-store proof and a fresh complete qualification remain due.
+
+The original A04 plan also requires explicit HTTP 5xx and DNS failures. The HTTP
+matrix now names both 503 before dispatch (dependency unavailable) and 503 after
+a tool call (uncertain, nonretryable, exactly one call). A hermetic failing DNS
+resolver proves actual resolution was attempted without timeout or alternate
+endpoint execution; a numeric-address real-HTTP control still succeeds. These
+store-neutral controls pass race x3, but do not substitute for native target
+admission or hosted network proof.
+
+A07's previous injected in-memory outcomes cannot earn selected-store credit.
+`TestWorkspaceGatewayRefusalBeforeProviderTurnBothStores` now enters the real
+managed mock conversation with exact durable delivery or directive authority,
+selected session, real native host probe and real HTTP 503. Its assertions
+require observed pre-model/proven-join evidence, typed dependency refusal,
+zero provider attempts, turns, spend, tool dispatch or output events, unchanged
+session history/turn count and no fabricated delivered/directive-success state.
+It does not fabricate a completion operation before the probe or claim the
+manager's directive-failure settlement; that enclosing lifecycle proof remains
+separate. Safe pre-model dependency retryability is not confused with the
+nonretryable possibly committed M09 outcome. The shared fixture preserves all
+existing live defaults while accepting an explicit captured mock actor, and
+directive admission uses that fixture's exact existing execution posture.
+
+No production or schema/owner change is authorized by these proof corrections.
+E's actual #2525 merge and crossed L01/L04, hosted default Q01, complete 48-row
+mapping, fresh final-head full/full and CI/audit remain required.

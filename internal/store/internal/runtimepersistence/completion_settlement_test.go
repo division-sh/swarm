@@ -1487,6 +1487,13 @@ func newCompletionSettlementFixture(t *testing.T, store completionSettlementTest
 
 func newCompletionSettlementFixtureWithMemory(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool, memory agentmemory.Plan) completionSettlementFixture {
 	t.Helper()
+	return newCompletionSettlementFixtureWithActor(t, store, db, sqlite, memory, runtimeactors.AgentConfig{
+		ExecutionMode: "live", LLMBackend: "claude_cli", ResolvedLLMBackend: "claude_cli",
+	})
+}
+
+func newCompletionSettlementFixtureWithActor(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool, memory agentmemory.Plan, actor runtimeactors.AgentConfig) completionSettlementFixture {
+	t.Helper()
 	ctx := testAuthorActivityContext()
 	now := time.Now().UTC()
 	agentID := "completion-settlement-agent"
@@ -1500,12 +1507,10 @@ func newCompletionSettlementFixtureWithMemory(t *testing.T, store completionSett
 	if err != nil {
 		t.Fatalf("completion agent identity: %v", err)
 	}
+	actor.ID, actor.Identity, actor.Role, actor.Type = agentID, identity, "worker", "managed"
+	actor.Model, actor.Memory, actor.FlowID, actor.FlowPath = "regular", memory, "global", flowInstance
 	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
-		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
-			ExecutionMode: "live", ID: agentID, Identity: identity, Role: "worker", Type: "managed",
-			Model: "regular", LLMBackend: "claude_cli", ResolvedLLMBackend: "claude_cli",
-			Memory: memory, FlowID: "global", FlowPath: flowInstance,
-		}),
+		Config: withRuntimePersistenceTestIntent(t, actor),
 		Status: "active", StartedAt: now,
 	}); err != nil {
 		t.Fatalf("admit completion agent: %v", err)
@@ -1537,6 +1542,7 @@ func newCompletionSettlementFixtureWithMemory(t *testing.T, store completionSett
 	}
 	token := runtimeeffects.LifecycleToken{RuntimeEpoch: lifecycle.RuntimeEpoch, Identity: identity, AgentID: agentID, Generation: lifecycle.Generation}
 	authority := runtimeeffects.NormalAgentAuthority(token, leaseHolder, now.Add(10*time.Minute))
+	authority.ExecutionMode = actor.ExecutionMode
 	authority.Target = runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(), AgentID: agentID, AgentIdentity: identity,
 		RunID: runID, SessionID: sessionID, Memory: memory, FlowInstance: flowInstance,
