@@ -1885,7 +1885,7 @@
   {
     "file": "internal/runtime/contracts/expression_value_r2_test.go",
     "before_hash": "11ea9d3086cb01eff054d4de39d530537a9fd5f3a4069be0594df51153b6c4f4",
-    "after_hash": "7464a50718ccd2e8cf1c1b8bfb4d621b650cf97081830a3ebab9e351a98911e9",
+    "after_hash": "6fc2a9a9fbce8ba285f2fb708d81d0405a21dd8525093c0de2899e85c0e534b8",
     "edits": [
       {
         "start": 19,
@@ -1953,6 +1953,10 @@
         ],
         "add": [
           "\t\t{\"typed\", `payload.count`, \"payload.count\", nil, ExpressionKindCEL},",
+          "\t\t{\"single quoted text\", `'payload.count'`, \"\", \"payload.count\", ExpressionKindLiteral},",
+          "\t\t{\"double quoted text\", `\"payload.count\"`, \"\", \"payload.count\", ExpressionKindLiteral},",
+          "\t\t{\"tagged quoted null is text\", `!!null \"null\"`, \"\", \"null\", ExpressionKindLiteral},",
+          "\t\t{\"tagged quoted bool is text\", `!!bool 'true'`, \"\", \"true\", ExpressionKindLiteral},",
           "\t\t{\"sole text interpolation\", `\"${payload.count}\"`, \"__swarm_r2_format((payload.count\\n))\", nil, ExpressionKindCEL},"
         ]
       },

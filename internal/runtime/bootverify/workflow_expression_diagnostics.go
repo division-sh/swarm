@@ -35,3 +35,13 @@ func (c *checkerContext) authoredExpressionError(record contracts.ScopedNodeReco
 	}
 	return fmt.Errorf("expression slot %s in %s: %w", slot, record.Source.File, err)
 }
+
+func (c *checkerContext) authoredGateContextError(plan contracts.WorkflowGatePlan, field string, err error) error {
+	slot := "stages." + plan.Stage + ".gate.context." + field
+	if bundle, ok := semanticview.Bundle(c.source); ok && bundle != nil {
+		if source, found := bundle.GateContextProvenance(plan.FlowID, plan.Stage, field); found {
+			return fmt.Errorf("expression slot %s at %s:%d:%d: %w", slot, source.SourceFile, source.SourceLine, source.SourceColumn, err)
+		}
+	}
+	return fmt.Errorf("expression slot %s: %w", slot, err)
+}

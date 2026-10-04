@@ -75,6 +75,14 @@ func (b *WorkflowContractBundle) HandlerValueProvenance(node runtimeidentity.Exe
 	return b.effectiveProvenance.Lookup(path)
 }
 
+func (b *WorkflowContractBundle) GateContextProvenance(flow, stage, field string) (EffectiveValueProvenance, bool) {
+	if b == nil {
+		return EffectiveValueProvenance{}, false
+	}
+	path := "schemas[" + strconv.Quote(flow) + "]." + nodeProvenanceMapPath("stages", stage) + ".gate." + nodeProvenanceMapPath("context", field)
+	return b.effectiveProvenance.Lookup(path)
+}
+
 func cloneEffectiveProvenanceLedger(in EffectiveProvenanceLedger) EffectiveProvenanceLedger {
 	out := EffectiveProvenanceLedger{entries: make(map[string]EffectiveValueProvenance, len(in.entries))}
 	for path, provenance := range in.entries {

@@ -134,3 +134,91 @@ func TestScalar2556CompletionFallbackSelectionAndAssignment(t *testing.T) {
 		}
 	}
 }
+
+func TestScalar2556EveryValueSurface(t *testing.T) {
+	for _, tc := range []struct {
+		name, prefix string
+		get          func(SystemNodeEventHandler) ExpressionValue
+	}{
+		{"handler emit", "emit:\n  event: done\n  fields:\n    value: ", func(h SystemNodeEventHandler) ExpressionValue { return h.Emit.Fields["value"] }},
+		{"rule emit", "rules:\n  - else: true\n    emit:\n      event: done\n      fields:\n        value: ", func(h SystemNodeEventHandler) ExpressionValue { return h.Rules[0].Emit.Fields["value"] }},
+		{"completion emit", "on_complete:\n  - emit:\n      event: done\n      fields:\n        value: ", func(h SystemNodeEventHandler) ExpressionValue { return h.OnComplete[0].Emit.Fields["value"] }},
+		{"success emit", "rules:\n  - else: true\non_success:\n  emit:\n    event: done\n    fields:\n      value: ", func(h SystemNodeEventHandler) ExpressionValue { return h.OnSuccess.Emit.Fields["value"] }},
+		{"handler fanout", "fan_out:\n  items_from: payload.items\n  as: element\n  identity: element\n  emit:\n    event: done\n    fields:\n      value: ", func(h SystemNodeEventHandler) ExpressionValue { return h.FanOut.Emit.Fields["value"] }},
+		{"rule fanout", "rules:\n  - else: true\n    fan_out:\n      items_from: payload.items\n      as: element\n      identity: element\n      emit:\n        event: done\n        fields:\n          value: ", func(h SystemNodeEventHandler) ExpressionValue { return h.Rules[0].FanOut.Emit.Fields["value"] }},
+		{"completion fanout", "on_complete:\n  - fan_out:\n      items_from: payload.items\n      as: element\n      identity: element\n      emit:\n        event: done\n        fields:\n          value: ", func(h SystemNodeEventHandler) ExpressionValue { return h.OnComplete[0].FanOut.Emit.Fields["value"] }},
+		{"rule activity", "rules:\n  - else: true\n    activity:\n      tool: send\n      input:\n        value: ", func(h SystemNodeEventHandler) ExpressionValue { return h.Rules[0].Activity.Input["value"] }},
+		{"rule write", "rules:\n  - else: true\n    data_accumulation:\n      writes:\n        - target_field: count\n          value: ", func(h SystemNodeEventHandler) ExpressionValue { return h.Rules[0].DataAccumulation.Writes[0].Value }},
+		{"completion write", "on_complete:\n  - data_accumulation:\n      writes:\n        - target_field: count\n          value: ", func(h SystemNodeEventHandler) ExpressionValue {
+			return h.OnComplete[0].DataAccumulation.Writes[0].Value
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, scalar := range []string{"payload.count", `"payload.count"`, `'payload.count'`, `"${payload.count}"`, "null", "false", "0"} {
+				var h SystemNodeEventHandler
+				if err := decodeNodeTestYAML([]byte(tc.prefix+scalar+"\n"), &h); err != nil {
+					t.Fatalf("%s: %v", scalar, err)
+				}
+				var want ExpressionValue
+				if err := decodeNodeTestYAML([]byte(scalar), &want); err != nil {
+					t.Fatal(err)
+				}
+				got := tc.get(h)
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("%s: got %#v, want %#v", scalar, got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestScalar2556AliasesMergesAndOrdinaryLiteralField(t *testing.T) {
+	for _, scalar := range []string{"payload.count", `"payload.count"`, `'payload.count'`, "!!null \"null\"", "|-\n  payload.count"} {
+		for _, merged := range []bool{false, true} {
+			source := "anchor: &scalar " + scalar + "\nvalue: *scalar\n"
+			if merged {
+				source = "node:\n  execution_type: system_node\n  event_handlers:\n    work:\n      _note: &fields\n        value: " + strings.ReplaceAll(scalar, "\n", "\n        ") + "\n      emit:\n        event: done\n        fields:\n          <<: *fields\n"
+			}
+			var got ExpressionValue
+			if merged {
+				var node SystemNodeContract
+				if err := decodeNodeTestMember([]byte(source), "node", &node); err != nil {
+					t.Fatal(err)
+				}
+				got = node.EventHandlers["work"].Emit.Fields["value"]
+			} else if err := decodeNodeTestMember([]byte(source), "value", &got); err != nil {
+				t.Fatal(err)
+			}
+			var want ExpressionValue
+			if err := decodeNodeTestYAML([]byte(scalar), &want); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("%s merged=%t: got %#v want %#v", scalar, merged, got, want)
+			}
+		}
+	}
+}
+
+func TestScalar2556FanOutIdentityAdmission(t *testing.T) {
+	for _, tc := range []struct{ scalar, want string }{
+		{"element.id", "element.id"},
+		{`"element.id"`, `"element.id"`},
+		{`'element.id'`, `"element.id"`},
+		{`"${element.id}"`, "__swarm_r2_format((element.id\n))"},
+	} {
+		var fanout FanOutSpec
+		if err := decodeNodeTestYAML([]byte("items_from: payload.items\nas: element\nidentity: "+tc.scalar+"\nemit: done\n"), &fanout); err != nil {
+			t.Fatal(err)
+		}
+		if fanout.Identity != tc.want {
+			t.Fatalf("%s became %q, want %q", tc.scalar, fanout.Identity, tc.want)
+		}
+	}
+	for _, scalar := range []string{"null", `""`, "[]", "{}"} {
+		var fanout FanOutSpec
+		if err := decodeNodeTestYAML([]byte("items_from: payload.items\nas: element\nidentity: "+scalar+"\nemit: done\n"), &fanout); err == nil {
+			t.Fatalf("invalid authored identity %s derived silently", scalar)
+		}
+	}
+}

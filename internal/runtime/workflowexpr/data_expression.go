@@ -244,13 +244,7 @@ func compileValueExpression(env *cel.Env, expression string, opts ValueExpressio
 	}
 	compiled, issues := env.Check(parsed)
 	if issues != nil && issues.Err() != nil {
-		err := workflowNumericCheckError(issues.Err())
-		for _, issue := range issues.Errors() {
-			if strings.HasPrefix(issue.Message, "undeclared reference to ") {
-				return nil, fmt.Errorf("%w; expression slot: quote text or use a declared reference", err)
-			}
-		}
-		return nil, err
+		return nil, workflowExpressionCheckError(issues)
 	}
 	if err := validateLoopAccesses(compiled, opts); err != nil {
 		return nil, err
@@ -277,6 +271,16 @@ func compileValueExpression(env *cel.Env, expression string, opts ValueExpressio
 		return nil, err
 	}
 	return compiled, nil
+}
+
+func workflowExpressionCheckError(issues *cel.Issues) error {
+	err := workflowNumericCheckError(issues.Err())
+	for _, issue := range issues.Errors() {
+		if strings.HasPrefix(issue.Message, "undeclared reference to ") {
+			return fmt.Errorf("%w; expression slot: quote text or use a declared reference", err)
+		}
+	}
+	return err
 }
 
 func validateJoinAccesses(compiled *cel.Ast, context JoinContext) error {
