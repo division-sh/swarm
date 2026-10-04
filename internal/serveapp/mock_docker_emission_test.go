@@ -106,7 +106,7 @@ func TestMockNormalRealDockerEmissionBothStores(t *testing.T) {
 			}
 			var marker string
 			var events, turns, failures, consumed int
-			if err := rt.DB.QueryRow(`SELECT CAST(payload AS TEXT) FROM events WHERE run_id=$1 AND event_name='items.processed' AND parent_event_id=$2`, published.RunID, triggerID).Scan(&marker); err != nil {
+			if err := rt.DB.QueryRow(`SELECT CAST(payload AS TEXT) FROM events WHERE run_id=$1 AND event_name='items.processed' AND source_event_id=$2`, published.RunID, triggerID).Scan(&marker); err != nil {
 				t.Fatal(err)
 			}
 			var payload struct {
