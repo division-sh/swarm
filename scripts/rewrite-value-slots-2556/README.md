@@ -6,12 +6,13 @@ the file, exact input/output hashes, line edits, executable slots,
 and the chosen rewrite. Unknown source bytes and missing replacement anchors
 fail before writing any file. A second application is byte-identical.
 
-Run from any directory with an explicit checkout root:
+Build once, then run from any directory with an explicit checkout root:
 
 ```sh
-go run ./scripts/rewrite-value-slots-2556 -root /path/to/swarm
-go run ./scripts/rewrite-value-slots-2556 -root /path/to/swarm -write
-go run ./scripts/rewrite-value-slots-2556 -root /path/to/swarm -check
+go -C /path/to/swarm build -o /path/to/rewrite2556 ./scripts/rewrite-value-slots-2556
+/path/to/rewrite2556 -root /path/to/swarm
+/path/to/rewrite2556 -root /path/to/swarm -write
+/path/to/rewrite2556 -root /path/to/swarm -check
 ```
 
 The source decisions were reviewed against the approved #2556 checked-in/generated

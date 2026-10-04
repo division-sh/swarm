@@ -99,8 +99,8 @@ func applyTemplateReplyHumanContinuation(t testing.TB, root, requestKey, account
       emit:
         event: provider.replied
         fields:
-          provider_request_id: `+requestKey+`
-          account_id: `+accountID+`
+          provider_request_id: `+strconv.Quote(requestKey)+`
+          account_id: `+strconv.Quote(accountID)+`
           result: "approved"
 `)
 }
@@ -114,7 +114,7 @@ func closedScalarLiteral(t testing.TB, label, value, fallback string) string {
 	if strings.ContainsAny(value, "\r\n{}[],:#&*!|>'\"%@`") {
 		t.Fatalf("template reply %s %q is not a plain YAML scalar", label, value)
 	}
-	return strconv.Quote(value)
+	return value
 }
 
 func writeClosedVariantFile(t testing.TB, root, relativePath, source string) {

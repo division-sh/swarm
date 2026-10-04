@@ -7866,7 +7866,7 @@
   {
     "file": "internal/runtime/testfixtures/canonicalrouting/template_reply.go",
     "before_hash": "1066522ca4a331a8da43c6182a35826343b305ac4871af477ad28d07584f2144",
-    "after_hash": "d3a8ac12cedca65ed6c166eb2f07cc73bbb54c431bf6aa24b4e2dd4438e25998",
+    "after_hash": "80b4839e2a28cfacdae5262ff466dd5f775868fd4771d583c3e4b06b022e1c59",
     "edits": [
       {
         "start": 4,
@@ -7915,18 +7915,9 @@
           "          result: {literal: approved}"
         ],
         "add": [
-          "          provider_request_id: `+requestKey+`",
-          "          account_id: `+accountID+`",
+          "          provider_request_id: `+strconv.Quote(requestKey)+`",
+          "          account_id: `+strconv.Quote(accountID)+`",
           "          result: \"approved\""
-        ]
-      },
-      {
-        "start": 115,
-        "remove": [
-          "\treturn value"
-        ],
-        "add": [
-          "\treturn strconv.Quote(value)"
         ]
       }
     ],
@@ -7935,6 +7926,7 @@
       "fields.provider_request_id: unwrap typed expression",
       "request.submitted.emit.fields.account_id: unwrap typed expression",
       "request.submitted.emit.fields.provider_request_id: unwrap typed expression",
+      "human_task.approved.emit.fields: quote only text value slots; preserve raw validated agent/workflow identifiers and intent paths in the shared helper's other callers",
       "reviewed generator, partial replacement anchors and typed/negative oracles migrate together; no data-file grammar change"
     ]
   },
