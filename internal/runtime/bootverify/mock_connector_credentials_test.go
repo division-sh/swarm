@@ -12,6 +12,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
@@ -268,6 +269,7 @@ func TestManagedCredentialChecksRetainMixedSourceRequirement(t *testing.T) {
 	reachability := mockConnectorEffectReachability(t, source, plan)
 	findings := newCheckerContext(context.Background(), source, Options{
 		EffectReachability: reachability,
+		ManagedCredentials: runtimemanagedcredentials.NewMemoryStore(),
 	}).credentials()
 	if !credentialFindingContains(findings, "provider_credential", "tool provider.send") || !credentialFindingContains(findings, "provider_credential", "live-agent") {
 		t.Fatalf("managed credential findings = %#v, want exact live actor and tool requirement", findings)
