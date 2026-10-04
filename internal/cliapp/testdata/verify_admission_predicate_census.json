@@ -663,7 +663,13 @@
     "owner": "internal/runtime/bootverify/admission_report.go::Report.AdmissionDecision",
     "audit_rows": "A28,A29,A30",
     "proof_families": "P23,P24",
-    "body_sha256": "63e313f5c0f1614ed533d2258e393cb9f00c7ad588696d2f098125cc3167d96b"
+    "body_sha256": "52ea5d2f6e72951e31bfc04b7098d63b9bf11fef5a57e43d3405a56a2622ef2a"
+  },
+  {
+    "owner": "internal/runtime/bootverify/admission_report.go::Report.admissionBlockingFindings",
+    "audit_rows": "A28,A29,A30",
+    "proof_families": "P23,P24",
+    "body_sha256": "dac7cc6cb306d140b3d486411df3e0b86a8d556dd8b8dafcfc262de71536492e"
   },
   {
     "owner": "internal/runtime/bootverify/admission_report.go::admissionExcludedWarning",
