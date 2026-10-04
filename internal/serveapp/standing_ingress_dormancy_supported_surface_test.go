@@ -133,6 +133,7 @@ func TestDormantIngressProvisionRestartSignedInputBothStores(t *testing.T) {
 			}
 			assertDormant := func(process *serveRuntimeTestProcess, endpoint string) {
 				t.Helper()
+				waitForInboundAdmissionServeOutput(t, process, "DORMANT ingress telegram-ingress/telegram")
 				output := process.outputString()
 				for _, want := range []string{"DORMANT ingress telegram-ingress/telegram", "webhook_signing.telegram", "then restart", "NOT READY"} {
 					if !strings.Contains(output, want) {
@@ -367,7 +368,7 @@ stages: []
         tool: telegram.send_message
         input:
           chat_id: "1234"
-          text: independent notice
+          text: "independent notice"
 `)
 	var output bytes.Buffer
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
@@ -143,6 +144,18 @@ func TestScalar2556LoadedPredicatesRefuseBeforeExecution(t *testing.T) {
 					t.Fatalf("invalid predicate reached an executable bundle: %v, %v", bundle, err)
 				}
 			})
+		}
+	}
+}
+
+func TestScalar2556ReaderCensusExcludesOnlyInternalDefaults(t *testing.T) {
+	for _, expression := range []string{"else", "ELSE", "eLsE"} {
+		var readers []expressionReference
+		appendExecutableReader(&readers, "activity.input.value.cel", expression, pipeline.WorkflowEntityFieldLifecycleRule)
+		appendConditionExecutableReader(&readers, "guard.check", expression, pipeline.WorkflowEntityFieldLifecycleGuard, pipeline.WorkflowConditionContextGuard)
+		appendConditionExecutableReader(&readers, "rules[0].condition", expression, pipeline.WorkflowEntityFieldLifecycleRule, pipeline.WorkflowConditionContextRule)
+		if len(readers) != 2 || readers[0].Expression != expression || readers[1].ConditionContext != pipeline.WorkflowConditionContextGuard {
+			t.Fatalf("non-default expression hidden from validation: %#v", readers)
 		}
 	}
 }

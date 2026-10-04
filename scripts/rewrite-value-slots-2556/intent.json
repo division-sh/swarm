@@ -8569,6 +8569,26 @@
     ]
   },
   {
+    "file": "internal/serveapp/standing_ingress_dormancy_supported_surface_test.go",
+    "before_hash": "3d1986d252d919e9d08ba3867ef627aec1bf47cb003243c63b9a5d8469f1d07b",
+    "after_hash": "9d3cd705dc5adeeb0f40c694198b96cc8d4f3912bc8d95da21c5499c489bac8d",
+    "edits": [
+      {
+        "start": 135,
+        "add": ["\t\t\t\twaitForInboundAdmissionServeOutput(t, process, \"DORMANT ingress telegram-ingress/telegram\")"]
+      },
+      {
+        "start": 369,
+        "remove": ["          text: independent notice"],
+        "add": ["          text: \"independent notice\""]
+      }
+    ],
+    "slots": [
+      "#2558 independent-notifier.event_handlers.platform.boot.activity.input.text: intentional text; quote the scalar without changing credential-readiness assertions",
+      "#2558 dormant restart observation: await the existing output-evidence barrier before taking the diagnostic snapshot; retain every dormant/readiness/state/signature assertion and existing deadline"
+    ]
+  },
+  {
     "file": "internal/serveapp/test_command_runtime_test.go",
     "before_hash": "4fdb01540b250d8b495005e3ba441c557622230d73c99ed586197ac5127c126a",
     "after_hash": "f7f63bb2b8e88720da3d753f4f0d7abfb87fe070099c8b38d9fe741f6c32b98a",
