@@ -315,7 +315,7 @@ func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, bac
 		deps.Options.LLMRuntime = &terminalManagedProvider{scriptedLLMRuntime: llmRuntime, probe: provider,
 			controller: runtimeeffects.NewCompletionController(deps.EffectsStore, deps.CompletionStore, deps.CompletionHeartbeatStore, nil).WithExecutionPosture(deps.Options.ExecutionPosture)}
 	}
-	rt, err := runtime.New(ctx, deps)
+	rt, err := runtime.NewRuntime(ctx, deps)
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -678,7 +678,7 @@ func (h *runtimeHarness) reopenFromTranscript(transcript *catalogExecutionTransc
 		workflowPersistence = runtimepipeline.NewWorkflowPersistence(sqlite)
 		deps = catalogSQLiteRuntimeDeps(cfg, sqlite, workflowPersistence, module, llmRuntime, processOwner, sourceArtifactFact)
 	}
-	rt, err := runtime.New(ctx, deps)
+	rt, err := runtime.NewRuntime(ctx, deps)
 	if err != nil {
 		cancel()
 		h.t.Fatalf("reopen catalog runtime: %v", err)

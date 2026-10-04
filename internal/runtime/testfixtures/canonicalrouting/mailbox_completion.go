@@ -27,7 +27,7 @@ func CopyMailboxCompletionMatrix(t testing.TB) string {
 	root := CopyGateCompletionDiagnostic(t)
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "        reject:\n", "        reject:\n          input:\n            reason: {type: text, required: true}\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "stages:\n", "imports:\n  connector_packs:\n    - provider: telegram\n      tool: telegram.send_message\nstages:\n")
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - work.requested\n", "      - work.requested\n      - effect.requested\n      - observer.requested\n  outputs:\n    events: [observer.requested]\nconnect:\n  - {event: observer.requested, from: ., to: observers}\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - work.requested\n", "      - work.requested\n      - effect.requested\n      - observer.requested\n  outputs: [observer.requested]\nconnect:\n  - {event: observer.requested, from: ., to: observers}\n")
 	nodes, err := os.ReadFile(filepath.Join(root, "nodes.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -128,7 +128,7 @@ func CopyHumanTaskOwnership(t testing.TB, mode string) string {
 			}
 			writeClosedVariantFile(t, root, name, string(child))
 		}
-		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  outputs:\n    events: [observer.requested]\nconnect:\n  - {event: observer.requested, from: ., to: observers}\n", "")
+		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  outputs: [observer.requested]\nconnect:\n  - {event: observer.requested, from: ., to: observers}\n", "")
 		removeClosedVariantFiles(t, root, "observers/mocks/observer.py", "observers/mocks", "observers/agents.yaml", "observers/entities.yaml", "observers/nodes.yaml", "observers/schema.yaml", "observers")
 	case "template":
 		writeClosedVariantFile(t, root, "observers/entities.yaml", "observer:\n  case_id: text\n")

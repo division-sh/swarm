@@ -29,7 +29,7 @@ func TestStructuralReadersShareAdmittedSource(t *testing.T) {
 			if err := json.Unmarshal(out.Bytes(), &fields); err != nil {
 				t.Fatal(err)
 			}
-			for _, retired := range []string{"workspace_backend", "capability_subjects"} {
+			for _, retired := range []string{"workspace_backend", "capability_subjects", "production_valid"} {
 				if _, exists := fields[retired]; exists {
 					t.Fatalf("structural command reports %s: %s", retired, out.String())
 				}
@@ -40,7 +40,7 @@ func TestStructuralReadersShareAdmittedSource(t *testing.T) {
 				}
 			}
 			if command[0] == "verify" {
-				if string(fields["ok"]) != "true" || string(fields["production_valid"]) != "true" {
+				if string(fields["ok"]) != "true" {
 					t.Fatalf("admitted source rejected: %s", out.String())
 				}
 				return

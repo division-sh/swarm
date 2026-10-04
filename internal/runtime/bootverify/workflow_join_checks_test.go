@@ -201,8 +201,7 @@ stages:
   failed: {}
 pins:
   inputs:
-    events:
-      - {event: item.received, source: harness}
+    - item.received
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "a", "entities.yaml"), `
 state:

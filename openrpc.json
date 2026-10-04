@@ -6100,7 +6100,7 @@
                 "description": "The requested event is not admitted by the selected event catalog, root-input contract, target, or recipient plan. Root-input reasons preserve the canonical declared and routable domains.",
                 "properties": {
                   "declared_events": {
-                    "description": "Deterministically sorted event domain from the owning server validator. For root-input reasons this is the root flow pins.inputs.events declaration.",
+                    "description": "Deterministically sorted event domain from the owning server validator. For root-input reasons this is the root flow pins.inputs declaration.",
                     "items": {
                       "type": "string"
                     },
@@ -10732,7 +10732,7 @@
                 "description": "The requested event is not admitted by the selected event catalog, root-input contract, target, or recipient plan. Root-input reasons preserve the canonical declared and routable domains.",
                 "properties": {
                   "declared_events": {
-                    "description": "Deterministically sorted event domain from the owning server validator. For root-input reasons this is the root flow pins.inputs.events declaration.",
+                    "description": "Deterministically sorted event domain from the owning server validator. For root-input reasons this is the root flow pins.inputs declaration.",
                     "items": {
                       "type": "string"
                     },
@@ -23597,7 +23597,7 @@
               "description": "The requested event is not admitted by the selected event catalog, root-input contract, target, or recipient plan. Root-input reasons preserve the canonical declared and routable domains.",
               "properties": {
                 "declared_events": {
-                  "description": "Deterministically sorted event domain from the owning server validator. For root-input reasons this is the root flow pins.inputs.events declaration.",
+                  "description": "Deterministically sorted event domain from the owning server validator. For root-input reasons this is the root flow pins.inputs declaration.",
                   "items": {
                     "type": "string"
                   },

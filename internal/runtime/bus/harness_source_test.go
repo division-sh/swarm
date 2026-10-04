@@ -9,38 +9,28 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
-func TestRouteFlowInputHarnessSourceSuppressesProducerFallbackWithoutAddingRoute(t *testing.T) {
-	harness := loadHarnessRouteSource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection))
-	withoutSource := loadHarnessRouteSource(t, canonicalrouting.CopyHarnessInjectionWithoutSource(t))
-	if !routeFlowInputHasExternalProducer(harness, "worker", "work.requested") {
-		t.Fatal("harness input did not suppress the local-producer fallback")
+func TestNamesOnlyPrivateInputDoesNotInventExternalProducer(t *testing.T) {
+	source := loadNamesOnlyRouteSource(t, canonicalrouting.WritePublicTemplateInputRoute(t))
+	if routeFlowInputHasExternalProducer(source, "operating", "opco.product_initialization_requested") {
+		t.Fatal("unconnected private input acquired external producer authority")
 	}
 
-	harnessRoutes, err := DeriveRouteTable(harness)
+	routes, err := DeriveRouteTable(source)
 	if err != nil {
-		t.Fatalf("DeriveRouteTable(harness): %v", err)
+		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	plainRoutes, err := DeriveRouteTable(withoutSource)
-	if err != nil {
-		t.Fatalf("DeriveRouteTable(without source): %v", err)
-	}
-	for _, eventType := range []string{"work.requested", "worker/work.requested"} {
-		got := harnessRoutes.ResolveForRun(busInternalTestRunID, eventType)
-		want := plainRoutes.ResolveForRun(busInternalTestRunID, eventType)
-		if subscriberSignature(got) != subscriberSignature(want) {
-			t.Fatalf("routes for %s changed by harness source: got %#v want %#v", eventType, got, want)
-		}
-		for _, subscriber := range got {
+	for _, eventType := range []string{"opco.product_initialization_requested", "operating/opco.product_initialization_requested"} {
+		for _, subscriber := range routes.ResolveForRun(busInternalTestRunID, eventType) {
 			if subscriber.RouteSourceCode() != "subscription" {
-				t.Fatalf("harness-created route authority survived: %#v", subscriber)
+				t.Fatalf("unconnected input invented route authority: %#v", subscriber)
 			}
 		}
 	}
 }
 
-func TestRouteResolveSubscriberPatterns_HarnessAddsNoProducerPattern(t *testing.T) {
-	source := loadHarnessRouteSource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection))
-	scope, ok := source.FlowScopeByID("worker")
+func TestRouteResolveSubscriberPatterns_PrivatePinKeepsOrdinarySubscription(t *testing.T) {
+	source := loadNamesOnlyRouteSource(t, canonicalrouting.WritePublicTemplateInputRoute(t))
+	scope, ok := source.FlowScopeByID("operating")
 	if !ok {
 		t.Fatal("worker flow scope missing")
 	}
@@ -52,7 +42,7 @@ func TestRouteResolveSubscriberPatterns_HarnessAddsNoProducerPattern(t *testing.
 		scope.Path,
 		scope.Path,
 		routeFlowLocalEventSet(source, scope),
-		"work.requested",
+		"opco.product_initialization_requested",
 	)
 	if err != nil {
 		t.Fatalf("resolve subscriber patterns: %v", err)
@@ -67,7 +57,7 @@ func TestRouteResolveSubscriberPatterns_HarnessAddsNoProducerPattern(t *testing.
 	}
 }
 
-func loadHarnessRouteSource(t *testing.T, root string) semanticview.Source {
+func loadNamesOnlyRouteSource(t *testing.T, root string) semanticview.Source {
 	t.Helper()
 	repoRoot := canonicalrouting.RepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
@@ -76,7 +66,7 @@ func loadHarnessRouteSource(t *testing.T, root string) semanticview.Source {
 		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
 	)
 	if err != nil {
-		t.Fatalf("load harness injection artifact: %v", err)
+		t.Fatalf("load names-only interface artifact: %v", err)
 	}
 	return semanticview.Wrap(bundle)
 }

@@ -45,8 +45,7 @@ func CopyDuplicateScopedSingletonDemand(t testing.TB) string {
 name: `+flowID+`
 pins:
   inputs:
-    events:
-      - {event: item.received, source: harness}
+    - item.received
 `)
 		writeSingletonCoordinatorFile(t, root, filepath.Join(flowID, "events.yaml"), "item.received:\n  items: '[text]'\n")
 		entities := "state: {}\n"

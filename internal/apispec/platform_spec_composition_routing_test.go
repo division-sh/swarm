@@ -18,23 +18,23 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarValue(t, mustMappingValue(t, composition, "parent_decision"), "#1466")
 	assertScalarValue(t, mustMappingValue(t, composition, "owner"), "platform-spec.yaml#flow_model.composition_routing")
 	wave2 := mustMappingValue(t, composition, "w2_compiled_pin_edge_ownership")
-	assertScalarContains(t, mustMappingValue(t, wave2, "rule"), "Ordinary selection and exceptional key source belong to each connect row")
-	assertScalarContains(t, mustMappingValue(t, wave2, "rule"), "CompiledConnectionInput owns immutable typed source and receiver acceptance projection")
-	assertScalarContains(t, mustMappingValue(t, wave2, "rule"), "composition recompiles that connection evidence after exact schema binding")
-	assertScalarContains(t, mustMappingValue(t, wave2, "rule"), "no ordinary template registration authority")
+	assertScalarContains(t, mustMappingValue(t, wave2, "rule"), "CompiledConnectionInput owns immutable ordinary source/receiver projection and initialization")
+	assertScalarContains(t, mustMappingValue(t, wave2, "rule"), "Compiled connect owns exact child boundary pins or parent-local event schemas")
+	assertScalarContains(t, mustMappingValue(t, wave2, "rule"), "without authored-map fallback or synthetic private input edges")
 	assertScalarContains(t, mustMappingValue(t, composition, "rule"), "LCA-owned schema.yaml connect is the sole authored cross-flow edge and ordinary resolution/source owner")
 	assertScalarContains(t, mustMappingValue(t, composition, "rule"), "without producer routing")
 
 	authored := mustMappingValue(t, composition, "authored_shapes")
 	outputPin := mustMappingValue(t, authored, "output_event_pin")
-	assertScalarContains(t, mustMappingValue(t, outputPin, "canonical_form"), "{event, sink}")
+	assertScalarContains(t, mustMappingValue(t, outputPin, "canonical_form"), "names-only sequence")
 	assertScalarContains(t, mustMappingValue(t, outputPin, "canonical_form"), "Event-level schema and business-key declarations")
-	assertScalarContains(t, mustMappingValue(t, outputPin, "canonical_form"), "production_valid:false")
-	assertScalarContains(t, mustMappingValue(t, outputPin, "harness_sink"), "mutually exclusive")
-	assertScalarContains(t, mustMappingValue(t, outputPin, "harness_sink"), "creates no semantic")
+	if hasMappingKey(outputPin, "harness_sink") {
+		t.Fatal("output pins retain harness authority")
+	}
 	assertScalarContains(t, mustMappingValue(t, outputPin, "scalar_form"), "never inferred")
 	resolved := mustMappingValue(t, authored, "resolved_input_pin")
-	assertScalarContains(t, mustMappingValue(t, resolved, "canonical_form"), "{event, source, resolution, initialize}")
+	assertScalarContains(t, mustMappingValue(t, resolved, "canonical_form"), "{event, initialize}")
+	assertScalarContains(t, mustMappingValue(t, resolved, "canonical_form"), "response connect row")
 	initialization := mustMappingValue(t, resolved, "receiver_initialization")
 	assertScalarContains(t, mustMappingValue(t, initialization, "declarations"), "instance_variables.variables")
 	assertScalarContains(t, mustMappingValue(t, initialization, "admission"), "Absence is different from explicit null")
@@ -56,7 +56,7 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	if hasMappingKey(mustMappingValue(t, connect, "fields"), "delivery") || hasMappingKey(mustMappingValue(t, connect, "fields"), "reply") {
 		t.Fatal("parent connect fields retain retired delivery/reply authoring")
 	}
-	assertScalarContains(t, mustMappingValue(t, connect, "admission_rule"), "reply/fan-out remain receiver-owned")
+	assertScalarContains(t, mustMappingValue(t, connect, "admission_rule"), "reply pairing belongs to the response edge")
 	assertScalarContains(t, mustMappingValue(t, connect, "admission_rule"), "connect.key_from")
 	if hasMappingKey(connect, "retired_fields") {
 		t.Fatal("connect retains a removed-spelling table")
@@ -64,7 +64,7 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 
 	ownership := mustMappingValue(t, composition, "ownership_split")
 	assertScalarContains(t, mustMappingValue(t, ownership, "parent_connect"), "owns the directed inter-flow event edge")
-	assertScalarContains(t, mustMappingValue(t, ownership, "receiver_input_resolution"), "reply/fan-out")
+	assertScalarContains(t, mustMappingValue(t, ownership, "receiver_input_resolution"), "connection-owned")
 	assertScalarContains(t, mustMappingValue(t, ownership, "output_pins"), "never receiver identity")
 	assertScalarContains(t, mustMappingValue(t, ownership, "input_pins"), "typed creating-input initialization")
 	assertScalarContains(t, mustMappingValue(t, ownership, "producer_emit"), "retired on presence")
@@ -105,7 +105,7 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	}
 	for _, want := range []string{
 		"concrete target routes derived from receiver-owned scalar identity and connection-owned source/resolution facts",
-		"typed reply resolution derived from receiver input resolution and paired connect edges",
+		"typed reply resolution derived from response-edge replies_to/correlation_key and paired connect edges",
 	} {
 		if !sequenceContainsScalar(mustMappingValue(t, lowering, "produces"), want) {
 			t.Fatalf("route_plan_lowering produces missing %q", want)
@@ -139,8 +139,8 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarValue(t, mustMappingValue(t, retirement, "status"), "merge_bearing_aggressive_retirement")
 	assertScalarContains(t, mustMappingValue(t, retirement, "rule"), "ConnectRoutePlan expose no delivery or raw reply compatibility fields")
 	assertScalarContains(t, mustYAMLPath(t, retirement, "admission", "rule"), "no codemod or compatibility reader exists")
-	if !sequenceContainsScalar(mustMappingValue(t, retirement, "preserved"), "connection resolution create, select and select-or-create; retained receiver fan-out and reply") {
-		t.Fatal("connect retirement must preserve receiver-owned reply semantics")
+	if !sequenceContainsScalar(mustMappingValue(t, retirement, "preserved"), "connection resolution create, select and select-or-create; response-edge paired reply facts") {
+		t.Fatal("connect retirement must preserve connection-owned reply semantics")
 	}
 
 	slice1546 := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1546")
@@ -209,7 +209,7 @@ func TestPlatformSpecInstanceIdentityAuthoringSourceAuthority(t *testing.T) {
 	assertScalarValue(t, mustMappingValue(t, owner, "status"), "scalar_typed_owner_finalized_by_2087")
 	assertScalarValue(t, mustMappingValue(t, owner, "authored_identity_owner"), "flow instance: <field>")
 	assertScalarValue(t, mustMappingValue(t, owner, "authored_source_owner"), "connection key_from, with omission deriving the same-named required payload field")
-	assertScalarValue(t, mustMappingValue(t, owner, "authored_behavior_owner"), "connection resolution for ordinary variants; retained pin resolution for reply/fan-out")
+	assertScalarValue(t, mustMappingValue(t, owner, "authored_behavior_owner"), "connection resolution for ordinary variants; response-edge replies_to and optional correlation_key for replies")
 	assertScalarContains(t, mustMappingValue(t, owner, "effective_owner"), "opaque validated Field")
 	assertScalarContains(t, mustMappingValue(t, owner, "effective_owner"), "No second representation")
 	assertScalarContains(t, mustMappingValue(t, owner, "retirement"), "hard-invalid")
@@ -289,23 +289,26 @@ func TestPlatformSpecCompositionRoutingRetiresProducerTargetAuthority(t *testing
 	assertScalarContains(t, mustYAMLPath(t, crossFlow, "parent_route", "read_rule"), "does not read it as consumer or target authority")
 
 	pinAuthority := mustYAMLPath(t, root, "flow_model", "pins", "routing_authority")
-	assertScalarContains(t, pinAuthority, "least-common-ancestor FlowNode schema.yaml connect entries own inter-flow topology")
-	assertScalarContains(t, pinAuthority, "flow_model.composition_routing")
+	assertScalarContains(t, pinAuthority, "exact least-common-ancestor schema.yaml connect")
+	assertScalarContains(t, pinAuthority, "pins never own those policies")
 	assertScalarContains(t, mustYAMLPath(t, root, "flow_model", "pins", "output_event_pins", "description"), "A parent or current delivery address is not a consumer")
 
 	pinTargetResolution := mustYAMLPath(t, root, "static_analyzer", "slice_3a_pin_target_resolution")
 	assertScalarValue(t, mustMappingValue(t, pinTargetResolution, "canonical_replacement"), "flow_model.composition_routing.analyzer_verify_requirements")
 	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "accepted_target_mechanisms", "lowered_parent_connect", "rule"), "Parent connect")
 	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "accepted_target_mechanisms", "typed_same_flow_consumer", "rule"), "typed pub/sub")
-	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "accepted_target_mechanisms", "harness_sink", "rule"), "Production admission rejects")
-	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "accepted_target_mechanisms", "harness_sink", "rule"), "no runtime recipient")
+	if hasMappingKey(mustMappingValue(t, pinTargetResolution, "accepted_target_mechanisms"), "harness_sink") {
+		t.Fatal("target mechanisms retain harness authority")
+	}
 	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "accepted_target_mechanisms", "selected_root_export", "rule"), "no fabricated target or delivery")
 	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "scope", "description"), "typed same-flow consumer")
 	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "scope", "description"), "selected-root export")
 	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "scope", "description"), "agent emit_events")
 	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "scope", "description"), "never author recipient identity")
 	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "static_failure_reasons", "retired_emit_routing"), "present in any shape")
-	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "static_failure_reasons", "harness_consumer_conflict"), "combined with a real")
+	if hasMappingKey(mustMappingValue(t, pinTargetResolution, "static_failure_reasons"), "harness_consumer_conflict") {
+		t.Fatal("retired harness policy remains")
+	}
 	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "implementation_slice_1444", "rule"), "Agent emit_events declarations")
 	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "implementation_slice_1444", "rule"), "MUST NOT require producer routing fields")
 	implementationSlice1444 := mustYAMLPath(t, pinTargetResolution, "implementation_slice_1444")
@@ -492,11 +495,9 @@ func TestPlatformSpecCompositionRoutingCatalogSurfacesConsumeConnectAuthority(t 
 
 	bootSteps := mustYAMLPath(t, root, "engine", "boot_sequence", "steps")
 	validatePins := mustSequenceMappingByScalarField(t, bootSteps, "name", "validate_pins")
-	assertScalarContains(t, mustMappingValue(t, validatePins, "action"), "canonical input-source resolver")
-	assertScalarContains(t, mustMappingValue(t, validatePins, "action"), "typed same-flow consumer")
-	assertScalarContains(t, mustMappingValue(t, validatePins, "action"), "sink:harness")
-	assertScalarContains(t, mustMappingValue(t, validatePins, "action"), "production admission rejects")
-	assertScalarContains(t, mustMappingValue(t, validatePins, "action"), "emit.target and emit.broadcast are rejected on presence")
+	assertScalarContains(t, mustMappingValue(t, validatePins, "action"), "canonical selected-root ingress")
+	assertScalarContains(t, mustMappingValue(t, validatePins, "action"), "Private outputs require real local consumers or explicit compiled connections")
+	assertScalarContains(t, mustMappingValue(t, validatePins, "action"), "source/sink/field grants and option bags are unsupported")
 }
 
 func TestPlatformSpecCompositionRoutingRejectsStaleParentRouteAuthorityPhrases(t *testing.T) {

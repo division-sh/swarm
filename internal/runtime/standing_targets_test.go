@@ -23,15 +23,15 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/singletoncoordinatorpilot"
 )
 
-func TestDeriveStandingTargets_HarnessSourceCreatesNoTarget(t *testing.T) {
+func TestDeriveStandingTargets_OrdinaryRootInputCreatesNoStandingTarget(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
 		repoRoot,
-		canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection),
+		canonicalrouting.ExampleRoot(t, canonicalrouting.RootIngress),
 		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
 	)
 	if err != nil {
-		t.Fatalf("load harness injection artifact: %v", err)
+		t.Fatalf("load root ingress artifact: %v", err)
 	}
 	declarations, err := ResolveStandingTargetDeclarations(semanticview.Wrap(bundle), nil)
 	if err != nil {
@@ -62,10 +62,10 @@ func TestResolveStandingTargetDeclarationsConsumesCanonicalInputAssociation(t *t
 	source, registry := standingTelegramDeclarationSource(t, "inbound.telegram")
 	bundle, _ := semanticview.Bundle(source)
 	schema := bundle.FlowSchemas["coordinator"]
-	schema.Pins.Inputs.EventPins[0].Source = runtimecontracts.FlowInputPinSourceHarness
+	schema.Pins.Inputs.EventPins[0].Event = "lead.observed"
 	bundle.FlowSchemas["coordinator"] = schema
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		t.Fatalf("compile harness-only input semantics: %v", err)
+		t.Fatalf("compile changed input semantics: %v", err)
 	}
 	_, err := ResolveStandingTargetDeclarations(source, registry)
 	if err == nil || !strings.Contains(err.Error(), `add an exact production input pin for "inbound.telegram"`) {

@@ -288,7 +288,7 @@ vocabulary:
         has_prompt: false
         has_model: false
   flow:
-    description: A self-contained building block with input/output pins (events and data), system nodes that orchestrate state
+    description: A self-contained building block with names-only event input/output pins, system nodes that orchestrate state
       transitions, and required agent roles. The marketplace unit. Analogous to an IC chip in circuit design.
     required_files: []
     source_owner: platform-spec.yaml#filesystem_source_model
@@ -511,8 +511,8 @@ contract_formats:
     owned_concepts:
     - stages
     - loops
-    - pins.inputs.events
-    - pins.outputs.events
+    - pins.inputs
+    - pins.outputs
     rule: Flow reachability, declared state membership, and flow-local pin event declarations resolve against this parsed
       owner. Runtime liveness and temporal progress are separate runtime concerns. Entity ownership is not selected in
       schema.yaml for normal flows; the single flow-owned `entities.yaml` entry is authoritative.
@@ -1210,8 +1210,7 @@ contract_formats:
           rule: Pin-declared private output emits MUST have an actual typed same-flow consumer or explicit compiled
             connection before receiver-owned target materialization. A complete ParentRoute or current delivery address
             never establishes consumption. Selected-root output pins are public observations and require no invented
-            recipient or delivery. A validation-only output pin may instead declare
-            sink:harness, but production admission rejects it and it creates no target or delivery authority.
+            recipient or delivery. Authored source/sink markers are absent, including in fixtures.
           absent_means: event.target is absent when event.target_set is present or when uncontrolled external ingress has not yet been receiver-bound.
           mutual_exclusion: event.target and event.target_set MUST NOT both be populated on the persisted event.
         target_set:
@@ -1767,11 +1766,9 @@ contract_formats:
         rule: |
           Flow input producer proof is resolved once through a typed source taxonomy and consumed by boot verification,
           RouteTable derivation, and workflow-node subscription projection. The accepted proof classes are boundary external
-          ingress at the selected root, flow-local admitted provider ingress, parent connect, validation-only harness
-          intent (`source: harness` on the input pin), platform source, and internal topology producer. Harness intent is
-          static producer proof only: it MUST be exclusive of every other accepted producer source and MUST NOT create a
-          route, topology edge, producer pattern, alias, standing target, provider ingress, subscriber, or runtime delivery
-          authority. Internal topology producer proof is exact-flow-local: same-flow agent or node emits, timers, fan_out,
+          ingress at the selected root, flow-local admitted provider ingress, parent connect, platform source, and
+          internal topology producer. Authored harness source/sink markers are not admitted and confer no authority.
+          Internal topology producer proof is exact-flow-local: same-flow agent or node emits, timers, fan_out,
           or `auto_emit_on_create` may satisfy the input, but a producer or output pin in any other flow cannot. Cross-flow
           producer proof exists only through the immutable compiled parent-connect edge, regardless of matching event spelling,
           qualification, or filesystem ancestry. Internal proof MUST NOT generate producer-scoped auto-wire route patterns.
@@ -1780,7 +1777,7 @@ contract_formats:
           Source-distinct compiled connections may enter the same input. Every edge independently satisfies its exact
           event, schema, projection, key and receiver-resolution contract; the admitted source selects the edge.
           Counting producer evidence is not an ambiguity check. The compiled graph still rejects duplicate edges,
-          unresolvable endpoints, incompatible schemas and receiver-pin collisions; harness intent remains exclusive.
+          unresolvable endpoints, incompatible schemas and receiver-pin collisions.
           Root admission and exact root-input API endpoints authenticate entry only; they MUST NOT subscribe a private
           child by event name. Declaring-flow provider entry uses ordinary exact same-instance consumers. Cross-flow
           delivery requires an explicit compiled connection; schema imports, root pins and complete destination
@@ -2413,9 +2410,9 @@ contract_formats:
               - nodes.yaml subscribes_to entries
               - agents.yaml subscriptions
               - event_handlers keys
-              - pins.inputs.events and pins.outputs.events
+              - pins.inputs and pins.outputs
             rule: Semantic route topology is the source for recipient
-              derivation. Parent connect topology and its ordinary resolution, together with retained reply/fan-out input policies, are
+              derivation. Parent connect topology, its ordinary resolution and paired reply edges are
               the authored cross-flow source authority; RouteTable and RoutePlan
               consume the lowered facts. Live subscription channels, active
               descriptors, and handler lookup are not topology authority.
@@ -2660,8 +2657,7 @@ contract_formats:
       platform_version: ">=0.7.0 <0.8.0"
 
       flows: []'
-    schema_yaml: "stages:\n  waiting: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    events:\
-      \ [hello.requested]\n  outputs:\n    events: [hello.completed]"
+    schema_yaml: "stages:\n  waiting: {initial: true}\n  done: {terminal: true}\npins:\n  inputs: [hello.requested]\n  outputs: [hello.completed]"
     nodes_yaml: "hello-node:\n  event_handlers:\n    hello.requested:\n      advances_to: done\n      emit:\n        event: hello.completed\n\
       \        fields:\n          result: payload.message"
     events_yaml: "hello.requested:\n  message: text\nhello.completed:\n  result: text"
@@ -4119,13 +4115,12 @@ handler_specification:
         receiver resolution/reply, structural routes, or accepted external boundaries. Static fan-out uses repeated
         connect edges; runtime-discovered instance fan-out remains #1934. No removed-spelling translator or teaching table exists.
       pin_routing_activation:
-        rule: Pin routing activates if and only if the emitted event is declared in the emitter flow's schema.yaml pins.outputs.events.
-        ad_hoc_emits: Emits not declared in pins.outputs.events are ordinary event-loop emits and never authorize recipients.
+        rule: Compiled connections authorize exact inter-flow publications; crossed child boundaries require their declared pins. Parent-local endpoints do not require artificial parent pins.
+        ad_hoc_emits: Emits with neither a compiled connection nor a declared output use ordinary same-flow pub/sub and never authorize cross-flow recipients.
         target_requirement: A private pin-declared output MUST have a typed same-flow consumer or an explicit compiled
           connection to a consuming receiver. ParentRoute and current delivery addresses do not prove consumption.
           Selected-root output pins are persisted public exports and need no internal consumer or synthetic delivery.
-          A structured output pin with sink:harness is validation-only, mutually exclusive with real consumers,
-          and rejected by production admission. No silent event-type broadcast fallback is allowed.
+          No authored harness source/sink exists. No silent event-type broadcast fallback is allowed.
       target_failures:
         target_required_missing: A private pin-declared production output has no canonical typed same-flow consumer or
           explicit compiled connection. Complete parent or delivery addresses cannot satisfy this requirement.
@@ -5372,10 +5367,10 @@ engine:
     canonical_owner: platform-spec.yaml#flow_model.composition_routing
     implementation_status: typed_composition_authority_complete_for_supported_surface
     activation:
-      rule: Pin routing activates when the emitter flow declares the emitted event in schema.yaml pins.outputs.events.
+      rule: Pin routing activates when the emitter flow declares the emitted event in schema.yaml pins.outputs.
         Private outputs require a typed same-flow consuming relation or explicit compiled connection. Selected-root
         outputs are persisted public exports without a fake recipient. ParentRoute and delivery addresses never prove
-        consumption. Production admission rejects validation-only sink:harness.
+        consumption. Parent-local connection endpoints consume exact compiled event schema evidence without artificial public pins.
       no_separate_flag: The output pin declaration is the activation switch.
       ad_hoc_emits: Events not declared in the emitter flow's output pins remain ordinary event-loop emits.
       aggressive_day_one: Pin routing is the default for pin-declared outputs; implicit event-type broadcast is not a compatibility mode.
@@ -5392,23 +5387,23 @@ engine:
         resolution mode. ParentRoute does not replace a consuming relation.
     reply_resolution:
       status: runnable_v1
-      description: Receiver-declared request/reply routing returns one terminal provider result to the exact route that
+      description: Connection-declared request/reply routing returns one terminal provider result to the exact route that
         emitted the paired request. The runtime carries this authority as opaque route-scoped delivery context; business
         payload, event envelope, source lineage, flow-instance metadata, requester_agent_id, and card_id are never routing owners.
       authoring:
         request_output:
-          shape: 'pins.outputs.events[] provider.requested with events.provider.requested.provider_request_id required'
+          shape: 'A declared child output provider.requested, or an exact requester-local event when the requester owns the connection.'
           correlation: The optional correlation_key must name one required scalar field in the producer event schema.
         reply_input:
-          shape: 'pins.inputs.events[] {event: provider.replied, resolution: {mode: reply, replies_to: provider.requested, correlation_key: provider_request_id}}'
-          replies_to: Required. Names exactly one exact output event pin on the same requester flow.
+          shape: 'connect: [{event: provider.replied, from: provider, to: requester, replies_to: provider.requested, correlation_key: provider_request_id}]'
+          replies_to: Names the exact request event on the originating requester. Child boundaries require their declared pins; parent-local endpoints require no artificial parent pins.
         topology: Parent connect must contain exactly one request edge from the paired requester output to one provider
           counterpart and exactly one response edge from that same counterpart to the reply input.
         default_correlation: Stable request event id when correlation_key is absent.
       lowering:
         owner: runtime/core/pinrouting.ConnectRoutePlan.ReplyResolution
         result: One typed request role and one typed response role share requester pins, provider pins, and optional correlation key.
-        ambiguity: Missing pins, undeclared required correlation fields, multiple request counterparts, multiple response counterparts,
+        ambiguity: Missing child pins or parent-local schemas, undeclared/non-scalar/optional correlation fields, multiple request counterparts, multiple response counterparts,
           or different provider counterparts are hard boot invalidities.
       delivery_context:
         type: 'events.DeliveryContext{Reply: *ReplyContextRef{ID string}}'
@@ -5904,7 +5899,7 @@ engine:
         action: Resolve all agent and node subscriptions through the typed subscription owners. Node exact values resolve from local names within the same flow. Flow-owned agent admission may retain an already-normalized same-scope identity. Slash-qualified or full-URI exact values that cross a flow boundary fail closed. Wildcards are slash-free and expand only inside the exact same flow identity.
       - step: 7
         name: validate_pins
-        action: 'For each flow: required input event pins must be satisfied by the canonical input-source resolver: selected-root public input, explicit parent connect, declaration-owned provider ingress, validation-only input pin source:harness, platform source, or internal topology producer. source:external is retired on presence. Schema imports and complete parent/delivery addresses do not prove a producer or consumer. Harness source is accepted only by the verify policy, is labeled non-production-valid in human and machine readback, and MUST be rejected by serve and every shared production boot path before route/runtime materialization. Pin-declared production outputs require a typed same-flow consumer, explicit compiled connection, or selected-root persisted public export. A structured output pin may instead declare sink:harness only for explicit validation/catalog observation; readback marks production_valid:false, production admission rejects it, and it creates no route or delivery authority. emit.target and emit.broadcast are rejected on presence. No two flows may write the same entity field (write conflict = boot error).'
+        action: 'Every required input pin consumes canonical selected-root ingress, declaration-owned provider ingress, explicit compiled connect, platform source or exact local producer evidence. Schemas and addresses never grant delivery. Private outputs require real local consumers or explicit compiled connections; selected-root outputs are committed public N=0 exports. Pins are names-only; source/sink/field grants and option bags are unsupported. Each flow writes only its own state through the existing scoped mutation owner.'
       - step: 8
         name: validate_required_agents
         action: Build effective required-agent facts for every scope. If schema.required_agents is omitted, infer facts from same-scope agents.yaml map keys, subscriptions, and emit_events. If schema.required_agents is present, including an empty list, validate that explicit boundary strictly against same-scope agents.yaml by exact map key and required subscription/emit coverage.
@@ -8997,8 +8992,8 @@ engine:
         Verify and describe report validation_scope: structural and live_readiness: not_evaluated.
         Structural workspace_backend and verify capability_subjects are retired without aliases.
         Verify retains pack_inventory and source capability validation. Operational capability subjects
-        remain on their existing live diagnostic surfaces. production_valid continues to mean absence
-        of validation-only harness dependence, never machine or credential readiness. Describe routes
+        remain on their existing live diagnostic surfaces. production_valid and authored-harness counts/provenance
+        are absent; structural verification does not claim machine or credential readiness. Describe routes
         preserves routing-topology/v1 and stable quiet IDs over the admitted source/report.
     description: The platform runs contract verification at boot, after loading all contracts and before starting any nodes
       or agents. If any check fails, boot aborts. These checks are the authoritative integration test.
@@ -9277,10 +9272,9 @@ engine:
     - id: input_pin_wiring
       severity: hard_invalidity
       scope: per-flow
-      trigger: 'A flow''s required input event pin (from schema.yaml pins.inputs.events) has no satisfiable authored producer
+      trigger: 'A flow''s required input event pin (from schema.yaml pins.inputs) has no satisfiable authored producer
         source on the static verify surface. The hard invalidity consumes internal/runtime/core/pinrouting.ResolveFlowInputProducer
-        evidence: boundary external ingress, flow-local admitted provider ingress, parent connect, validation-only input-pin
-        source:harness,
+        evidence: boundary external ingress, flow-local admitted provider ingress, parent connect,
         platform source, and internal topology producer. It does not use unique same-name sibling output-pin inference as
         producer-pattern authority, events.yaml swarm.source:external as input-pin proof, produces, or swarm.status: planned.'
       when: boot-only
@@ -9290,7 +9284,7 @@ engine:
       trigger: A handler declares an accumulator over an input event but the authored bundle has no accepted static producer
         or source path for that event. This check consumes the same canonical producer-source resolver as input_pin_wiring
         with non-input producer checking enabled. Accepted proof classes are admitted provider ingress,
-        parent connect, validation-only input-pin source:harness, platform source, and internal topology producer (including handler emits,
+        parent connect, platform source, and internal topology producer (including handler emits,
         agent emit_events, flow output pins, and timers). produces declarations and swarm.status planned do not satisfy this
         proof.
       when: boot-only
@@ -9299,8 +9293,7 @@ engine:
       scope: per-emit-site
       trigger: A pin-declared production output emit or agent emit_events declaration lacks a typed same-flow consumer,
         lowered parent connect route, or selected-root export. A complete ParentRoute or static child delivery address
-        is not a consuming relation. A structured output pin with sink:harness is validation-only and is rejected by
-        production admission before this check can authorize runtime construction. Authored emit.target and emit.broadcast
+        is not a consuming relation. Authored pin source/sink markers and output mappings fail strict admission. Authored emit.target and emit.broadcast
         fail strict loading on presence and never reach this verifier.
       when: boot-only
     - id: semantic_drift_dead_event_schema
@@ -12418,7 +12411,7 @@ flow_model:
         or multi-row acquisition remains invalid. No placeholder entity fields
         or permissive resolver fallback may satisfy these obligations.
         An entity_id field in an admitted provider envelope is transport data,
-        not primary-entity selection authority; public or harness input authority
+        not primary-entity selection authority; public input authority
         still requires caller-selection rejection even if provider evidence is
         also present. Selected-root contained state uses the root primary owner,
         never a child-only singleton coordinator contract.
@@ -12437,7 +12430,7 @@ flow_model:
         - import boundaries
         - resolver plumbing
         - fail-closed verification
-        revise: retire shared-pin ordinary policy and fan-in semantics without changing retained reply/fan-out syntax
+        revise: retire shared-pin policy; reply pairing belongs to the response connection, and unsupported pin fan-out syntax is absent
         prefer: receiver-owned scalar instance + connection-owned ordinary resolution/key_from
       split_children:
         output_pin_key_carries: '#1544'
@@ -12945,7 +12938,7 @@ flow_model:
             Output pins are interface exposures and become delivery only through a lowered connect edge.
           resolution_rule: >
             Runnable connect edges preserve connection-owned create, select and select-or-create policies alongside
-            retained receiver-owned reply/fan-out declarations, plus derived static,
+            response-connection replies_to/correlation_key, plus derived static,
             target, target_set, instance-key, and typed-reply facts, without claiming a concrete runtime
             recipient. Receiver resolution.mode fan-out remains non-runnable under #1934. Invalid or unlowerable
             declarations appear only as typed issues and never as executable edges.
@@ -12977,24 +12970,21 @@ flow_model:
     canonical_owner: platform-spec.yaml#filesystem_source_model.flow_tree
     rule: Nested flows are ordinary live child directories; resource branches are not flows.
   pins:
-    description: Flows have typed input/output pins, like IC chips in a circuit. The platform validates pin wiring at boot.
+    description: Pins are declared names-only event interfaces. The platform validates exact boundary wiring at boot.
     input_event_pins:
       description: |
         Events accepted by the flow receiver interface. Only selected-root inputs are public. Private required pins
         need explicit compiled connections, declaration-owned provider ingress, platform facts, or internal producer
-        proof. Schema imports are not subscriptions. source:external is retired on presence; the only authored source
-        choice is validation-only harness. Harness is exclusive static
-        producer proof only: verify reports its count and production_valid:false, while serve and shared production boot
-        validation reject it before runtime construction. It never creates delivery authority.
+        proof. Schema imports are not subscriptions. Inputs are scalar event identities; the only transient mapping
+        is {event, initialize} until the separately allocated constructor cut. No source/resolution option is admitted.
       required: true
     output_event_pins:
       description: |
         Events the flow emits across its public interface. Optional, but when an emit site emits one of these
         events, pin routing is active. Private outputs require typed same-flow consumers or explicit compiled connections.
         Selected-root outputs are public persisted exports. A parent or current delivery address is not a consumer.
-        Structured output pins may declare validation-only
-        `sink: harness`, which production admission rejects and which creates no route or delivery authority. Output pins may
-        not declare retired `key` or `carries`; event-level schema and business-key declarations own producer payload guarantees.
+        Outputs are scalar event identities, with no sink/key/carries mapping. Event-level schema and business-key
+        declarations own producer payload guarantees. Root exemption is positional, never an authored harness marker.
       required: false
     field_access_rule: >-
       Pins declare events, never cross-flow field grants. inputs.reads and outputs.writes are unsupported keys.
@@ -13005,7 +12995,7 @@ flow_model:
       a flow (e.g., spec.requested between two agents in the same flow) exist in events.yaml but are NOT listed in schema
       pins. They are implementation details, not part of the flow's public contract. Only events that cross flow boundaries
       or trigger/complete the flow appear in pins.
-    routing_authority: Output event pins are the activation switch for source/target pin routing. Input event pins define the allowed receiving interface and receiver-owned typed resolution. Exact least-common-ancestor FlowNode schema.yaml connect entries own inter-flow topology. Runtime implementation and flow migration must consume flow_model.composition_routing and engine.cross_flow_routing as the authoritative source for composed route semantics.
+    routing_authority: Child output/input pins declare the boundary crossed by an exact least-common-ancestor schema.yaml connect. Parent-local endpoints consume compiled local event schemas without artificial parent pins. Connections own topology, instance selection and paired reply facts; pins never own those policies. Runtime consumers use the compiled edge and its declared-pin or parent-local-schema evidence.
   required_agents:
     description: 'Each flow has effective required-agent facts. If schema.required_agents is omitted, the platform derives
       those facts from same-scope agents.yaml map keys plus subscriptions and emit_events. If schema.required_agents is
@@ -13254,25 +13244,25 @@ flow_model:
         - internal/runtime/contracts.CompiledConnectionInput
         - internal/runtime/core/pinrouting.ConnectRoutePlan
       rule: |
-        Each admitted flow pin has one exact local event identity. Scalar entries are the default; mappings may add only a closed non-default source, sink, retained reply/fan-out policy, or creation-only initialize choice. Missing event containers mean no pins. Null, explicit empty, duplicate, non-exact, qualified, wildcard, alias-bearing, carry-bearing, or output-key/carries entries fail at admission. Producer event declarations own payload schema and business key. Every mapping key is byte-exact; alternate spellings fail rather than normalize. Ordinary selection and exceptional key source belong to each connect row, never the shared pin. CompiledConnectionInput owns immutable typed source and receiver acceptance projection from the bound producer schema. Provider/activity composition recompiles that connection evidence after exact schema binding, rejects producer-field collision and validates initialization through the existing typed owners. No connection means no ordinary template registration authority. The immutable edge contains endpoint, schema, projection, resolution, initialization, retained reply/fan-out, provenance and digest evidence. Verify, runtime, durable claims, restart, retry, replay, selected fork, graph and readback consume that evidence without authored-map fallback or synthetic private input edges. Stream partitioning, accumulation keys and finite join membership or closure are never pin or edge passengers.
+        Each admitted flow pin has one exact scalar local event identity. The sole transient input mapping carries event and nonempty initialize pending the constructor cut. No events wrapper, source, sink, resolution, field grant or reply option bag is admitted. Null, explicit empty, duplicate, non-exact, qualified, wildcard or alias-bearing entries fail ordinary admission. Event declarations own payload schema and business keys. CompiledConnectionInput owns immutable ordinary source/receiver projection and initialization. Compiled connect owns exact child boundary pins or parent-local event schemas, ordinary resolution, paired reply facts, provenance and execution digests. Verify, runtime, durable claims, restart, retry, replay, selected fork, graph and readback consume that evidence without authored-map fallback or synthetic private input edges. Stream partitioning, accumulation keys and finite joins remain handler-owned.
       retired_on_presence:
         - pins.inputs.reads
         - pins.outputs.writes
-        - pins.inputs.events[].name
-        - pins.outputs.events[].name
-        - pins.inputs.events[].carries
-        - pins.inputs.events[].resolution.mode_create_select_select-or-create
-        - pins.inputs.events[].resolution.from
-        - pins.inputs.events[].resolution.mode_fan-in
-        - pins.inputs.events[].resolution.aggregation
-        - pins.inputs.events[].resolution.window
-        - pins.inputs.events[].resolution.dedup_by
-        - pins.inputs.events[].resolution.singleton
+        - pins.inputs[].name
+        - pins.outputs[].name
+        - pins.inputs[].carries
+        - pins.inputs[].resolution.mode_create_select_select-or-create
+        - pins.inputs[].resolution.from
+        - pins.inputs[].resolution.mode_fan-in
+        - pins.inputs[].resolution.aggregation
+        - pins.inputs[].resolution.window
+        - pins.inputs[].resolution.dedup_by
+        - pins.inputs[].resolution.singleton
         - carry.type
         - carry.optional
         - carry.convert
-        - pins.outputs.events[].key
-        - pins.outputs.events[].carries
+        - pins.outputs[].key
+        - pins.outputs[].carries
         - qualified_or_wildcard_flow_pin_event
         - package.connect[].adapter
       compatibility: none; old stores, aliases, adapters, migrations, and dual digests are unsupported
@@ -13327,31 +13317,28 @@ flow_model:
         - rejection and corruption cause no partial state, route or schedule mutation; lost acknowledgement, restart and supported historical readback preserve exact committed evidence and separate unsupported #642 refusals
         - canonical portfolio stream and finite-join examples plus the original scatter-gather fixture execute through normal verify, boot, publication and settlement on SQLite and PostgreSQL
       preserved_boundaries: |
-        Reply and fan-out pin policies retain their own capability contracts. Exact reply/continuation obligations
+        Reply connection policies retain their own capability contracts; the unsupported pin fan-out placeholder is absent. Exact reply/continuation obligations
         do not expand into ordinary sibling subscriptions. Ordinary construction/readiness consumes the existing
         activation owner; this change adds no join-owned constructor or new #2496 capability. Broader routing and
         addressing taxonomy remains the separately tracked #2413 R7 work. Selected deferred execution remains
         fail-closed under #642; retained history and a join declaration never grant unsupported execution.
     authored_shapes:
       output_event_pin:
-        location: schema.yaml pins.outputs.events
+        location: schema.yaml pins.outputs
         canonical_form: |
-          An output event pin is normally one scalar exact local event identity. A mapping `{event, sink}` is valid only when the non-default `sink` choice is required. Event-level schema and business-key declarations own producer payload guarantees. `sink` is a closed enum whose only current value is `harness`; it is accepted only by explicit validation/catalog harness policy, reported as production_valid:false, and rejected by serve and every shared production admission path before runtime construction.
+          Each output is one scalar exact local event identity in a names-only sequence. Mappings and an events wrapper are not admitted. Event-level schema and business-key declarations own producer payload guarantees.
         scalar_form: |
-          Scalar output event identity is the default authoring form. Receiver identity is never inferred from retired output-pin key/carries. Scalar pins cannot declare sink.
-        harness_sink: |
-          sink:harness is mutually exclusive with same-flow subscribers, parent connect, and every other real consumer. It creates no semantic external endpoint, subscriber, route, connect edge, recipient manifest, delivery row, persistence authority, retry/replay route, or production no-consumer bypass.
+          Scalar output event identity is the only authoring form. Receiver identity is never inferred from output pins.
         example: |
           pins:
             outputs:
-              events:
-                - deploy.completed
+              - deploy.completed
       resolved_input_pin:
-        location: schema.yaml pins.inputs.events
+        location: schema.yaml pins.inputs
         canonical_form: |
-          An input event pin MAY be authored as an object `{event, source, resolution, initialize}` only when non-default choices are required. Otherwise it is one scalar exact local event identity. `source` admits only validation-only `harness`; `external` is retired. Pin resolution retains fan-out and reply with their existing passengers and capability limits. Fan-in mode and aggregation/window/dedup_by/singleton passengers are invalid on presence. Ordinary create/select/select-or-create and every pin resolution.from are invalid on presence and teach connection-owned resolution/key_from. `initialize` requires a creating connection and never supplies an alternate instance identity. A select edge cannot consume a pin with initialization bindings.
+          Inputs form one names-only sequence. A scalar exact event identity is the ordinary form. The sole transient mapping is {event, initialize} with nonempty initialization, pending the separately allocated constructor cut. No events wrapper, source, resolution, replies_to or correlation_key is admitted on a pin. Reply facts belong on the response connect row; ordinary instance selection belongs on each connect. initialize requires a creating connection and never supplies an alternate instance identity. A select edge cannot consume a pin with initialization bindings.
         scalar_form: |
-          A scalar input event pin is valid when no source or resolution choice is needed. A scalar input pin on a template receiver is not a selector.
+          A scalar input pin on a template receiver is not a selector. Declared interfaces are never inferred from subscriptions or emits.
         receiver_initialization:
           syntax: 'initialize: {priority: payload.priority, timeout_ms: payload.settings.timeout_ms}'
           declarations: |
@@ -13372,13 +13359,12 @@ flow_model:
         instance_fields:
           identity: 'The template flow''s scalar `instance: <field>` is the only receiver identity owner.'
           source: Omitted connect.key_from derives required payload.<instance>; a different top-level payload field is supported, while generated.uuid and event.id require create. Explicit same-name key_from is redundant and rejected.
-          mode: connect.resolution is an exhaustive typed ordinary value. No policy default or string fallback exists; retained reply/fan-out policy remains on the pin, never stream or join policy.
+          mode: connect.resolution is an exhaustive typed ordinary value. No policy default or string fallback exists. Paired replies_to/correlation_key are response-connection facts; stream/join semantics remain handler-owned.
         example: |
           instance: vertical_id
           pins:
             inputs:
-              events:
-                - deploy.completed
+              - deploy.completed
       parent_connect:
         location: schema.yaml connect at the exact least common ancestor FlowNode
         canonical_form: |
@@ -13390,12 +13376,14 @@ flow_model:
           to: Required exact receiver flow ID, or `.` for this row's authoring flow.
           rename: |
             Optional exact canonical receiver-visible event identity when it differs from `event`. It follows the same admission grammar as `event`; a value equal after canonical event normalization is hard-invalid redundancy rather than an accepted alternate spelling.
-          resolution: Exact scalar create, select or select-or-create for an ordinary template edge; explicit empty, null, mappings, lists, retired fan-in and retained reply/fan-out values are invalid here.
+          resolution: Exact scalar create, select or select-or-create for an ordinary template edge; explicit empty, null, mappings, lists, fan-in, reply and fan-out values are invalid here.
           key_from: Exact top-level payload.<different-field>, generated.uuid or event.id source; requires resolution, and intrinsic sources require create. Omit the same-name payload source rather than restating it.
+          replies_to: Exact request event on the reverse connection, owned by this response edge.
+          correlation_key: Optional required scalar request/reply payload field; requires replies_to. Omission uses the original request event ID.
         admission_rule: |
-          Connect rows admit only event, from, to, rename, resolution and key_from. Unknown fields fail strict
+          Connect rows admit only event, from, to, rename, resolution, key_from, replies_to and correlation_key. Unknown fields fail strict
           current-vocabulary admission on authored presence. Endpoints remain exact flow identities, not pin
-          endpoints; reply/fan-out remain receiver-owned policies. Ordinary source selection belongs only to
+          endpoints; reply pairing belongs to the response edge and pin fan-out has no admitted spelling. Ordinary source selection belongs only to
           connect.key_from. No payload-transform registry, compatibility executor or removed-spelling table exists.
         example: |
           connect:
@@ -13408,10 +13396,10 @@ flow_model:
               to: consumer
               rename: work.accepted
     ownership_split:
-      output_pins: Output pins own exact local producer event identity and optional harness sink, never receiver identity.
-      input_pins: Input pins own receiver interface, retained reply/fan-out policy and typed creating-input initialization.
-      parent_connect: Parent connect owns the directed inter-flow event edge, optional rename and ordinary resolution/key_from.
-      receiver_input_resolution: Receiver input pins retain reply/fan-out resolution; ordinary instance selection is connection-owned. Accumulation and finite joins remain handler-owned and do not select recipients.
+      output_pins: Output pins own exact local producer event interface identity, never receiver identity or observation policy.
+      input_pins: Input pins own receiver interface identity and transient typed creating-input initialization pending slice 2c.
+      parent_connect: Parent connect owns the directed inter-flow event edge, optional rename, ordinary resolution/key_from and paired reply facts.
+      receiver_input_resolution: Instance selection and paired reply resolution are connection-owned. Accumulation and finite joins remain handler-owned and do not select recipients.
       analyzer: Analyzer owns validation, bind-visible event projection, explicit rename, and lowering to concrete immutable route-plan facts.
       route_plan: Runtime RoutePlan owns publish-time concrete recipient authority after lowering; it consumes authored topology and MUST NOT reconstruct it from live subscribers.
       producer_emit: Producer emit owns event identity and payload construction only. emit.target and emit.broadcast are retired on presence.
@@ -13419,11 +13407,11 @@ flow_model:
       producer_flow_exists: |
         The `from` flow must exist in the finite filesystem subtree rooted at the authoring FlowNode; `.` resolves to that authoring flow.
       producer_output_pin_exists: |
-        Exactly one output pin on `from` must expose `event` to the authoring flow. Zero or multiple candidates fail with authoring flow, endpoint, requested event, and candidate event identities.
+        A child `from` requires exactly one output pin exposing event. The authoring flow's local `from: .` instead requires the exact compiled local event schema; it does not require an artificial parent output pin. Missing or ambiguous evidence fails closed.
       receiver_flow_exists: |
         The `to` flow must exist in the finite filesystem subtree rooted at the authoring FlowNode; `.` resolves to that authoring flow.
       receiver_input_pin_exists: |
-        Exactly one input pin on `to` must expose `rename` when present, otherwise `event`, to the authoring flow. Zero or multiple candidates fail with complete candidate evidence.
+        A child `to` requires exactly one input pin exposing rename or event. The authoring flow's local `to: .` consumes the compiled receiver-event projection and a genuine local consumer without an artificial parent input pin. Local event presence never invents a connection or public interface.
       event_rename_valid: |
         `rename` is the sole explicit receiver-event change. Bind projections may supply boundary-visible names without redundant rename authoring.
       adapter_retired: '`adapter` is invalid on presence; no transform owner is compiled.'
@@ -13431,7 +13419,7 @@ flow_model:
       receiver_route_key_present: Ordinary template edges must resolve one valid receiver instance field, required default payload source or exact connect.key_from override, and explicit connect.resolution. Static receivers that need no runtime selection may lower to a statically unique receiver.
       key_types_compatible: |
         Source and target key types must be directionally compatible before route-plan lowering. Integer sources may widen to numeric receiver fields; numeric sources MUST NOT narrow to integer receiver fields.
-      receiver_resolution_valid: Connection-owned ordinary resolution/source, receiver scalar identity, and retained receiver reply/fan-out facts must be internally valid and unambiguous. Retired fan-in policy cannot repair missing or ambiguous receiver authority.
+      receiver_resolution_valid: Connection-owned ordinary resolution/source, receiver scalar identity, and response-edge paired reply facts must be internally valid and unambiguous. Retired fan-in/fan-out pin policy cannot repair missing or ambiguous receiver authority.
       inference_unambiguous: |
         Compiler resolution is allowed only when exactly one producer output and receiver input match their authoring-flow-visible event identities. There is no first-match, pin-name fallback, suffix/leaf match, dot-to-underscore guess, or global resolved-event search.
       lowered_route_plan_concrete: Accepted connections must lower to concrete route-plan inputs; no runtime path may recover by broadcasting or reinterpreting authored aliases.
@@ -13456,13 +13444,13 @@ flow_model:
         - external persisted event identity
         - receiver-local handler event identity
         - concrete target routes derived from receiver-owned scalar identity and connection-owned source/resolution facts
-        - typed reply resolution derived from receiver input resolution and paired connect edges
+        - typed reply resolution derived from response-edge replies_to/correlation_key and paired connect edges
         - typed failure reason when lowering cannot produce a concrete plan
       target_mapping:
-        singular: Connection-owned ordinary resolution or retained receiver pin resolution lowers to event.target and one delivery row.
+        singular: Connection-owned ordinary or paired reply resolution lowers to event.target and one delivery row.
         set: Receiver-owned set cardinality lowers to event.target_set and one delivery row per concrete recipient.
         reply: |
-          Receiver `resolution.mode: reply` lowers through typed paired-edge request lineage; missing or ambiguous lineage fails closed.
+          Response connect.replies_to lowers through typed paired-edge request lineage; missing or ambiguous lineage fails closed.
       receiver_pin_delivery_collision:
         owner: internal/runtime/core/pinrouting.CompiledConnectGraph and ConnectReceiverPinAdmission
         rule: |
@@ -13477,14 +13465,14 @@ flow_model:
         status: merge_bearing_aggressive_retirement
         canonical_code_owner: internal/runtime/contracts.FlowConnect + internal/runtime/core/pinrouting.ConnectRoutePlan
         rule: |
-          Authored `connect.delivery` and `connect.reply` are invalid on presence. FlowConnect and ConnectRoutePlan expose no delivery or raw reply compatibility fields. Connect lowering consumes the directed edge, optional rename and connection-owned ordinary instance policy. Retained fan-out cardinality and typed reply resolution derive from receiver input resolution. Runtime dispatch, persistence, replay, topology readback, and describe output consume only target/target_set and typed ReplyResolution facts. No fan-in route-plan metadata or resolution branch remains.
+          Authored `connect.delivery` and `connect.reply` are invalid on presence. FlowConnect and ConnectRoutePlan expose no delivery or raw reply compatibility fields. Connect lowering consumes the directed edge, optional rename, connection-owned ordinary instance policy and response-edge replies_to/correlation_key. Runtime dispatch, persistence, replay, topology readback, and describe output consume only target/target_set and typed ReplyResolution facts. No fan-in or pin fan-out route-plan metadata or resolution branch remains.
         admission:
           rule: Only the current connect vocabulary is admitted; no codemod or compatibility reader exists.
         fail_closed:
           - delivery or reply present with any scalar, mapping, sequence, empty, or malformed value
           - runtime attempt to reconstruct retired delivery or raw reply authority
         preserved:
-          - connection resolution create, select and select-or-create; retained receiver fan-out and reply
+          - connection resolution create, select and select-or-create; response-edge paired reply facts
           - derived DeliveryRoute persistence, replay, and typed reply context
       implementation_slice_1472:
         status: merge_bearing_runtime_artifact
@@ -13504,9 +13492,9 @@ flow_model:
           resolution_kind: |
             static, instance_key, or reply; materialization MUST
             consume this discriminant and MUST NOT select route authority from
-            nil-field ordering. Reply is derived only from receiver input resolution and paired edges.
+            nil-field ordering. Reply is derived only from response-edge pairing and exact compiled counterparts.
           instance_key_rule: Receiver-owned scalar template instance field, connection-owned required payload or key_from Source, and exhaustive ordinary Mode.
-          reply_resolution: The typed request/response role and correlation facts derived from receiver input resolution and paired edges.
+          reply_resolution: The typed request/response role and correlation facts derived from response-connect replies_to/correlation_key and exact paired edges.
           static_target_route: Static receiver flows may lower immediately to a concrete target or single target_set member using the receiver flow path and canonical flow-instance entity id.
           runtime_resolution_flag: Template or dynamic receivers keep an explicit runtime-resolution requirement instead of fabricating concrete delivery rows.
         materialization_boundary:
@@ -13631,7 +13619,7 @@ flow_model:
           status: scalar_typed_owner_finalized_by_2087
           authored_identity_owner: 'flow instance: <field>'
           authored_source_owner: connection key_from, with omission deriving the same-named required payload field
-          authored_behavior_owner: connection resolution for ordinary variants; retained pin resolution for reply/fan-out
+          authored_behavior_owner: connection resolution for ordinary variants; response-edge replies_to and optional correlation_key for replies
           effective_owner: |
             internal/runtime/core/pinrouting.ConnectRoutePlan.InstanceKey carries one opaque validated Field, one typed Source, and one exhaustive typed Mode. No second representation exists.
           readback: |
@@ -13640,9 +13628,9 @@ flow_model:
             Mapping/list/composite instance declarations, lifecycle policy fields, resolution.instance_key, instance.key sources, input address, connect map, and connect using.instance are hard-invalid during strict load. No warning, codemod, alias, fallback reader, compatibility DTO, or dual semantic owner exists.
         rule: |
           Ordinary instance-resolution belongs to flat connection resolution
-          and optional key_from. Receiver pins retain reply/fan-out resolution
-          under their existing `resolution:{mode,...}` shape and capability limits. Route planning
-          consumes these separate typed owners and lowers them into
+          and optional key_from. Reply pairing belongs to response-edge replies_to
+          and optional correlation_key, never to an input pin. Route planning
+          consumes these connection-owned facts and lowers them into
           ConnectRoutePlan evidence before EventBus delivery. Runtime must not
           infer resolution authority from producer emit targets, live
           subscribers, delivery rows, replay rows, route-table lookup before a
@@ -13660,17 +13648,14 @@ flow_model:
           and finite join obligations are handler semantics at the ordinarily selected
           instance, never additional resolution modes. Reply resolution is also
           runnable through the route-scoped reply-context contract under
-          `engine.cross_flow_routing.reply_resolution`. Fan-out remains
-          design-locked and fail-closed until its implementation slice lands.
-          Static root ingress, parent-connect static delivery, and
-          harness-injected inputs remain existing #1807 input-source /
-          connect behavior; they are not instance-resolution runtime modes.
+          `engine.cross_flow_routing.reply_resolution`. The unimplemented pin fan-out placeholder
+          is deleted; its future capability remains tracked by #1934.
+          Static root ingress and parent-connect static delivery retain their ordinary input-source /
+          connect behavior; they are not instance-resolution runtime modes. Authored harness markers are absent.
         authoring_shape: |
           instance: validation_case_id
           pins:
-            inputs:
-              events:
-                - validation.requested
+            inputs: [validation.requested]
           # In the parent's schema.yaml:
           connect:
             - {event: validation.requested, from: producer, to: validator, resolution: create, key_from: generated.uuid}
@@ -13945,7 +13930,7 @@ flow_model:
           producer: '`from: .` selects the authoring flow; `event` must identify exactly one visible output pin there.'
           receiver: '`to: .` selects the authoring flow; `rename` or `event` must identify exactly one visible input pin there.'
         consumes:
-          - root schema.yaml pins.outputs.events
+          - root schema.yaml pins.outputs
           - 'event-centric LCA-owned schema.yaml connect entries with `from: .` or `to: .`'
           - receiver flow or exact authoring-flow input pin declarations and canonical route-plan lowering
         produces:
@@ -20040,11 +20025,11 @@ platform_events:
     - Event names in agent emit_events declarations
     - Event names in node handler emit sites
     - Event names in node produces lists
-    - Event names in flow schema.yaml pins.outputs.events (platform.* events are produced by the engine, not by flows)
+    - Event names in flow schema.yaml pins.outputs (platform.* events are produced by the engine, not by flows)
     not_violations:
     - Agent subscriptions to platform.* events (subscribing is allowed — products SHOULD subscribe to platform events)
     - Wildcard subscriptions that match platform.* events (e.g., platform.* subscription pattern)
-    - Flow schema.yaml pins.inputs.events listing platform.* events (flows MAY declare them as inputs to receive routing)
+    - Flow schema.yaml pins.inputs listing platform.* events (flows MAY declare them as inputs to receive routing)
     - Product subscriptions, handlers, or input pins that reference non-platform.* catalog-owned events such as mailbox.card_decided
   schema_authority_ref_syntax:
     description: >-
@@ -21834,10 +21819,10 @@ static_analyzer:
       - engine.event_identity
       - contract_formats.event_schema
     scope:
-      description: For every flow input pin event declared in schema.yaml pins.inputs.events, verify that at least one accepted
+      description: For every flow input pin event declared in schema.yaml pins.inputs, verify that at least one accepted
         producer source exists in the authored bundle through the canonical input-source resolver on the static verify surface.
       applies_to:
-      - schema.yaml pins.inputs.events
+      - schema.yaml pins.inputs
       excludes:
       - runtime routing correctness
       - payload compatibility
@@ -21846,15 +21831,11 @@ static_analyzer:
       - swarm.status-based lifecycle suppression
     accepted_producer_sources:
       boundary_external_ingress:
-        rule: Only the selected-root input pin is externally ingressible by public boundary contract. Public eligibility may coexist with admitted providers and exact compiled connections. Source-distinct explicit producers are not ambiguous inference; compiled-edge validity and harness exclusivity remain checked. Private child inputs require actual local or connected producer evidence.
+        rule: Only the selected-root input pin is externally ingressible by public boundary contract. Public eligibility may coexist with admitted providers and exact compiled connections. Source-distinct explicit producers are not ambiguous inference; compiled-edge validity and exact declared boundary evidence remain checked. Private child inputs require actual local or connected producer evidence.
       admitted_provider_ingress:
         rule: An exact input pin belongs to its flow-local admitted ingress.providers plan. Pack-backed and explicit raw plans are distinct admitted provider entry; schema imports are not subscriptions.
       parent_connect:
         rule: An LCA-owned schema.yaml connect row binds the producer output pin to this receiver input pin and lowers to a concrete RoutePlan. Multiple source-distinct rows are lawful when each independently validates; the exact admitted source chooses its relation, never schema visibility or producer-count inference.
-      harness_injection:
-        rule: 'The input pin declares source: harness. This is exclusive validation-only static producer proof: verify may
-          accept it only with explicit non-production readback, while all production admission rejects it. It creates no
-          producer pattern, alias, route, topology edge, standing target, provider ingress, subscriber, or runtime delivery.'
       platform_source:
         rule: The input pin event exactly matches an authoritative platform_events.catalog key. Name prefixes and authored annotations confer no authority.
       internal_topology_producer:
@@ -21882,10 +21863,9 @@ static_analyzer:
     canonical_replacement: flow_model.composition_routing.analyzer_verify_requirements
     scope:
       description: For every system-node emit site or agent emit_events declaration whose emitted event is declared in the
-        emitter flow's pins.outputs.events, verify that the authored contract supplies a typed same-flow consumer,
-        explicit compiled connection, selected-root export, or validation-only sink:harness.
-        Harness is mutually exclusive with real consumers and makes
-        the bundle production-invalid. Producers never author recipient identity or cardinality.
+        emitter flow's pins.outputs, verify that the authored contract supplies a typed same-flow consumer,
+        explicit compiled connection or selected-root export.
+        No harness marker supplies an exemption. Producers never author recipient identity or cardinality.
       applies_to:
       - handler top-level single-emit
       - rules entries
@@ -21906,14 +21886,10 @@ static_analyzer:
           consumer and creates no fabricated target or delivery. A matching failed connection still fails closed.
       lowered_parent_connect:
         rule: Parent connect plus receiver-owned scalar instance and connection-owned resolution/key_from lowering provides concrete route-plan facts before runtime dispatch.
-      harness_sink:
-        rule: A structured output pin may declare sink:harness only for explicit validation/catalog observation. Production
-          admission rejects it, and it creates no runtime recipient or route fact.
     static_failure_reasons:
       target_required_missing: No actual typed same-flow consumer, compiled connection, or selected-root export exists.
         Complete or incomplete parent/current-delivery addresses and template mode or static path depth are not consumers.
       retired_emit_routing: emit.target or emit.broadcast is present in any shape.
-      harness_consumer_conflict: sink:harness is combined with a real same-flow or compiled-connect consumer.
     runtime_failure_reasons:
       publish_time_dead_letter:
       - target_unreachable_no_subscriber
@@ -21937,7 +21913,7 @@ static_analyzer:
       consumes:
         - root/project agent emit_events declarations
         - flow-scoped agent emit_events declarations
-        - flow pins.outputs.events event identity
+        - flow pins.outputs event identity
         - lowered parent connect proof from flow_model.composition_routing
         - existing node/system pin_target_resolution canonical-consumer validation owner
       runtime_consumers:
@@ -22013,7 +21989,7 @@ static_analyzer:
         field. Integer sources may widen to numeric receiver fields; numeric
         sources MUST NOT narrow to integer receiver fields because their event
         schema admits fractional values.
-      receiver_resolution_valid: Connection-owned typed ordinary mode, lifecycle action, retained fan-out policy and typed reply lineage must be valid and unambiguous. Accumulation and finite joins cannot supply missing routing authority.
+      receiver_resolution_valid: Connection-owned typed ordinary mode, lifecycle action and paired reply lineage must be valid and unambiguous. Accumulation and finite joins cannot supply missing routing authority.
       event_topology_roles_consume_connect: Verify-time producer/consumer and dead-event schema checks must treat valid
         connect output/input facts as authored event roles so parent topology does not require runtime reconstruction to
         silence missing producer, missing consumer, or dead-schema diagnostics.
@@ -24180,7 +24156,7 @@ cli_specification:
           root_input_rejections: >
             A `run.start` EVENT_NOT_DECLARED rejection with reason `not_declared_root_input` or
             `declared_root_input_not_routable` MUST consume the server-owned root-input facts. Human output defines a
-            root input as an event declared in the root flow's `pins.inputs.events`, renders the declared and routable
+            root input as an event declared in the root flow's `pins.inputs`, renders the declared and routable
             domains with `none` for an empty domain, and gives a contract-field remediation. CLI consumers
             MUST NOT reload contracts, infer the domains independently, normalize malformed server facts, or flatten the
             structured facts to raw error text. The CLI renders `none` only from an explicit canonical empty array; missing,
@@ -25025,9 +25001,9 @@ cli_specification:
               fact_owner: local contract verification
               json_shape: >
                 object with ok, source_root, validation_scope: structural, live_readiness: not_evaluated,
-                production_valid, harness counts/provenance, pack_inventory, errors, warnings, and lint_evidence.
+                pack_inventory, errors, warnings, and lint_evidence.
                 workspace_backend and operational capability_subjects are retired from structural verify.
-                production_valid describes harness independence, not deployment readiness. `errors`, `warnings`,
+                Structural verification does not claim deployment readiness. `errors`, `warnings`,
                 and `lint_evidence` are arrays of structured boot verification findings with canonical `check_id`,
                 `severity`, `location`, and `message` fields plus optional additive `remediation` and `evidence` fields.
                 `message` remains the problem text. `--json` renders
@@ -34245,7 +34221,7 @@ api_specification:
       root_input_rejection_contract:
         canonical_owner: internal/runtime/runstart.RootInputSet, DeriveRootInputSet, ValidateInputEvents, and RootInputValidationError
         reasons:
-          not_declared_root_input: The requested run-start event is absent from the root flow pins.inputs.events declaration.
+          not_declared_root_input: The requested run-start event is absent from the root flow pins.inputs declaration.
           declared_root_input_not_routable: The requested event is declared as a root input but has no derived runtime route.
         absent_root_schema_rule: A workflow with no root schema has an empty declared and routable root-input domain; absence is not a validator failure.
         lossless_consumers:
@@ -34610,7 +34586,7 @@ api_specification:
           event_name:
             type: string
           declared_events:
-            description: Deterministically sorted event domain from the owning server validator. For root-input reasons this is the root flow pins.inputs.events declaration.
+            description: Deterministically sorted event domain from the owning server validator. For root-input reasons this is the root flow pins.inputs declaration.
             type: array
             items:
               type: string

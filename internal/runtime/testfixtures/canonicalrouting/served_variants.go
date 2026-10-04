@@ -99,7 +99,7 @@ func CopyRootIngressServedExternalEvent(t testing.TB) string {
   item_id: text?
 external.observed:
 `)
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - item.processed\n", "      - item.processed\n      - external.observed\n  outputs:\n    events: [external.observed]\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - item.processed\n", "      - item.processed\n      - external.observed\n  outputs: [external.observed]\n")
 	return root
 }
 
@@ -161,7 +161,7 @@ pins:
     - item.agent_hold
     - item.processed
 `)
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - item.processed\n", "      - item.processed\n      - item.agent_hold\n  outputs:\n    events: [item.agent_hold, item.processed]\nconnect:\n  - {event: item.agent_hold, from: ., to: hold}\n  - {event: item.processed, from: ., to: hold}\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - item.processed\n", "      - item.processed\n      - item.agent_hold\n  outputs: [item.agent_hold, item.processed]\nconnect:\n  - {event: item.agent_hold, from: ., to: hold}\n  - {event: item.processed, from: ., to: hold}\n")
 	writeClosedVariantFile(t, root, "hold/entities.yaml", "session: {}\n")
 	writeClosedVariantFile(t, root, "hold/nodes.yaml", "owner:\n  execution_type: system_node\n  event_handlers:\n    item.agent_hold:\n      create_entity: true\n      advances_to: active\n    item.processed:\n      advances_to: done\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "item.processed:\n", "item.agent_hold:\n  note: text\nitem.processed:\n")

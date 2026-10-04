@@ -767,11 +767,13 @@ func TestSelectedForkReceiverCreateCompilationIsNotDynamicFlowCreation(t *testin
 					}
 				}
 			}
-			for flowID := range source.FlowSchemaEntries() {
-				for _, pin := range source.FlowInputEventPins(flowID) {
-					if pin.Resolution().Mode != runtimecontracts.FlowInputResolutionModeNone {
-						t.Fatalf("ordinary create fixture gained resolution: %s %+v", flowID, pin.Resolution())
-					}
+			bundle, ok := semanticview.Bundle(source)
+			if !ok {
+				t.Fatal("fixture bundle missing")
+			}
+			for _, edge := range bundle.CompositionConnects() {
+				if edge.Resolution != runtimecontracts.FlowInputResolutionModeNone {
+					t.Fatalf("ordinary create fixture gained edge resolution: %+v", edge)
 				}
 			}
 			if !found {

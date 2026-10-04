@@ -392,7 +392,7 @@ func TestProviderTriggerCatalogRejectsDifferentPackEventOwnership(t *testing.T) 
 	}
 }
 
-func TestSourceWithProviderTriggerEvents_HarnessInputIsNotIngress(t *testing.T) {
+func TestSourceWithProviderTriggerEvents_RequiresExactDeclaredIngressPin(t *testing.T) {
 	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram")
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
@@ -402,12 +402,11 @@ func TestSourceWithProviderTriggerEvents_HarnessInputIsNotIngress(t *testing.T) 
 	if !ok || len(flow.Schema.Pins.Inputs.EventPins) != 1 {
 		t.Fatal("coordinator typed input pin missing")
 	}
-	flow.Schema.Pins.Inputs.EventPins[0].Source = runtimecontracts.FlowInputPinSourceHarness
 	schema := bundle.FlowSchemas["coordinator"]
-	schema.Pins.Inputs.EventPins[0].Source = runtimecontracts.FlowInputPinSourceHarness
+	schema.Pins.Inputs.EventPins[0].Event = "lead.observed"
 	bundle.FlowSchemas["coordinator"] = schema
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		t.Fatalf("compile harness input semantics: %v", err)
+		t.Fatalf("compile changed input semantics: %v", err)
 	}
 
 	wrapped, err := SourceWithProviderTriggerEvents(source, catalog)
@@ -415,7 +414,7 @@ func TestSourceWithProviderTriggerEvents_HarnessInputIsNotIngress(t *testing.T) 
 		t.Fatalf("SourceWithProviderTriggerEvents: %v", err)
 	}
 	if _, err := ResolveStandingTargetDeclarations(wrapped, catalog); err == nil || !strings.Contains(err.Error(), `add an exact production input pin for "inbound.telegram"`) {
-		t.Fatalf("standing ingress error = %v, want harness excluded from provider ingress", err)
+		t.Fatalf("standing ingress error = %v, want exact ingress association", err)
 	}
 }
 

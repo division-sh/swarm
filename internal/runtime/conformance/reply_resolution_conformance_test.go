@@ -122,17 +122,28 @@ func TestReplyResolutionConformance_DefaultCorrelationUsesStableRequestEventID(t
 
 func TestReplyResolutionConformance_VerifierFailsClosedForInvalidPairedTopology(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		opts templatereply.Options
-		want string
+		name      string
+		opts      templatereply.Options
+		want      string
+		admission bool
 	}{
-		{name: "missing replies_to", opts: templatereply.Options{MissingRepliesTo: true}, want: "requires replies_to"},
-		{name: "correlation field not declared", opts: templatereply.Options{MissingCorrelationField: true}, want: "must name a required payload field"},
+		{name: "missing replies_to", opts: templatereply.Options{MissingRepliesTo: true}, want: "connect.correlation_key requires replies_to", admission: true},
+		{name: "correlation field not declared", opts: templatereply.Options{MissingCorrelationField: true}, want: "must name a required scalar payload field"},
 		{name: "ambiguous request counterpart", opts: templatereply.Options{AmbiguousRequestEdge: true}, want: "exactly one connected counterpart"},
 		{name: "different provider counterpart", opts: templatereply.Options{MismatchedProvider: true}, want: "same provider flow"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			source := templatereply.LoadSource(t, tc.opts)
+			bundle, err := templatereply.LoadBundleResult(t, tc.opts)
+			if tc.admission {
+				if err == nil || bundle != nil || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("admission bundle=%v error=%v, want rejection %q", bundle, err, tc.want)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := semanticview.Wrap(bundle)
 			report := runtimebootverify.Run(testAuthorActivityContext(context.Background()), source, runtimebootverify.Options{})
 			found := false
 			for _, finding := range report.HardInvalidities() {

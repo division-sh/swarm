@@ -14,9 +14,9 @@ func CopyStateOnlyAcquisition(t testing.TB, workflowName string, modes map[strin
 		t.Fatal("state-only acquisition fixture requires an exact target flow")
 	}
 	root := t.TempDir()
-	rootSchema := "name: " + workflowName + "\npins:\n  inputs:\n    events: [test.node_emitted.selector, test.node_emitted.upserter]\n"
+	rootSchema := "name: " + workflowName + "\npins:\n  inputs: [test.node_emitted.selector, test.node_emitted.upserter]\n"
 	if targetFlow != "." {
-		rootSchema += "  outputs:\n    events: [test.node_emitted.selector, test.node_emitted.upserter]\nconnect:\n"
+		rootSchema += "  outputs: [test.node_emitted.selector, test.node_emitted.upserter]\nconnect:\n"
 		for _, name := range []string{"test.node_emitted.selector", "test.node_emitted.upserter"} {
 			policy := ""
 			if modes[targetFlow] == "template" {

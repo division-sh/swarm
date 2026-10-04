@@ -237,6 +237,19 @@ func compileReceiverEventBindings(bundle *WorkflowContractBundle, pins Connectio
 				bindings.localNames[name] = pin.EventType()
 			}
 		}
+		for _, row := range eventSchemaOwnershipRowsForReceiver(bundle, flowID) {
+			if row.receiverEndpoint != "." {
+				continue
+			}
+			schema, ok, err := bundle.ResolveCompiledFlowEventSchema(row.producerFlowID, row.producerEvent)
+			if err != nil || !ok {
+				continue
+			}
+			for _, name := range uniqueNormalizedEventSchemaKeys(row.receiverEvent, row.receiverQualifiedName) {
+				bindings.scope.bindings[name] = schema
+				bindings.localNames[name] = row.receiverEvent
+			}
+		}
 		out[flowID] = bindings
 	}
 	return out

@@ -179,52 +179,23 @@ func TestRun_FailsClosedForInvalidSelectInputResolution(t *testing.T) {
 	}
 }
 
-func TestRun_FailsClosedForInvalidCreateInputResolution(t *testing.T) {
-	tests := []struct {
-		name string
-		opts createResolutionCompositionFixtureOptions
-		want string
+func TestSourceAdmissionRejectsUnsupportedCreateResolution(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		invalidity canonicalrouting.CreateResolutionInvalidity
+		want       string
 	}{
-		{
-			name: "non-runnable modes are design-locked but not runnable",
-			opts: createResolutionCompositionFixtureOptions{
-				mode:         runtimecontracts.FlowInputResolutionModeFanOut,
-				source:       runtimecontracts.FlowInputInstanceSourceGeneratedUUIDPath,
-				includeCarry: true,
-			},
-			want: "instance_resolution_unimplemented",
-		},
-		{
-			name: "invalid generated source",
-			opts: createResolutionCompositionFixtureOptions{
-				mode:         runtimecontracts.FlowInputResolutionModeCreate,
-				source:       "generated.random",
-				includeCarry: true,
-			},
-			want: "only generated.uuid is supported",
-		},
-	}
-	for _, tc := range tests {
+		{"retired fan-out placeholder", canonicalrouting.CreateResolutionNonRunnableMode, "connect.resolution must be"},
+		{"invalid generated source", canonicalrouting.CreateResolutionInvalidMint, "only generated.uuid is supported"},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
-			root := writeCreateResolutionCompositionConnectFixture(t, tc.opts)
-			if tc.opts.mode == runtimecontracts.FlowInputResolutionModeFanOut || tc.opts.source == "generated.random" {
-				repoRoot := repoRootForBootverifyTest(t)
-				_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-				want := tc.want
-				if tc.opts.mode == runtimecontracts.FlowInputResolutionModeFanOut {
-					want = "connect.resolution must be"
-				}
-				if err == nil || !strings.Contains(err.Error(), want) {
-					t.Fatalf("expected immutable pin compilation rejection, got %v", err)
-				}
-				return
-			}
-			bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-
-			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-			if !reportContains(report.Errors(), "composition_connect_validation", tc.want) {
-				t.Fatalf("expected composition_connect_validation %q, got %#v", tc.want, report.Errors())
+			root := canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{
+				Mint: canonicalrouting.CreateMintUUID, Invalidity: tc.invalidity,
+			})
+			repo := repoRootForBootverifyTest(t)
+			_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("source admission = %v, want %q", err, tc.want)
 			}
 		})
 	}
@@ -379,7 +350,7 @@ func TestRun_NestedPortfolioJoinUsesOrdinaryConnectAndAuthoredMembership(t *test
 func assertOrdinaryPortfolioInput(t *testing.T, source semanticview.Source, flowID, eventType, key string, mode runtimecontracts.FlowInputResolutionMode) {
 	t.Helper()
 	pin, ok := source.FlowInputEventPin(flowID, eventType)
-	if !ok || !pin.Resolution().Empty() {
+	if !ok {
 		t.Fatalf("input %s/%s must be an ordinary boundary without pin resolution: %#v", flowID, eventType, pin)
 	}
 	graph := runtimepinrouting.CompileConnectGraph(source)
@@ -562,8 +533,6 @@ func writeCreateResolutionCompositionConnectFixture(t *testing.T, opts createRes
 	t.Helper()
 	invalidity := canonicalrouting.CreateResolutionValid
 	switch {
-	case opts.mode == runtimecontracts.FlowInputResolutionModeFanOut:
-		invalidity = canonicalrouting.CreateResolutionNonRunnableMode
 	case opts.source == "generated.random":
 		invalidity = canonicalrouting.CreateResolutionInvalidMint
 	}

@@ -23,7 +23,7 @@ import (
 // remediation — and never surfaces raw driver text.
 func TestServeBootLegacySchemaRendersTeachingError(t *testing.T) {
 	repo := repoRootForTest()
-	root := canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection)
+	root := canonicalrouting.ExampleRoot(t, canonicalrouting.RootIngress)
 	loaded, err := loadServeRuntimeBundle(context.Background(), repo, nil, cliapp.CLISourcePlatformSpecPaths{
 		SourceRoot: root, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo),
 	}, cliapp.ServeOptions{}, testPlatformPackBaseGenerations(t))
