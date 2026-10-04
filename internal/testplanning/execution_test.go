@@ -64,6 +64,7 @@ func TestCurrentProofPlansBindActiveRequiredRoots(t *testing.T) {
 			if plan.BuildContext.GOOS == "" || len(plan.Units) == 0 {
 				t.Fatalf("unbound plan: %+v", plan)
 			}
+			assertCatalogOracleCoverage(t, plan)
 			if profile == ProfileCore {
 				if err := validateLocalBusCoverage(plan, inventory, policy.Module+"/internal/runtime/bus"); err != nil {
 					t.Fatal(err)
@@ -174,6 +175,40 @@ func TestCurrentProofPlansBindActiveRequiredRoots(t *testing.T) {
 				t.Errorf("%s has no required proof", id)
 			}
 		}
+	}
+}
+
+func assertCatalogOracleCoverage(t *testing.T, plan RunPlan) {
+	t.Helper()
+	const catalog = "github.com/division-sh/swarm/internal/runtime/cataloge2e"
+	guards := []string{
+		"TestCatalogReplayCleanCensus",
+		"TestCatalogReplayProofReferences",
+		"TestStaticDataInvocationGoldenConsumesAdmittedIdentity",
+	}
+	for _, name := range guards {
+		owners := 0
+		for _, unit := range plan.Units {
+			for _, root := range unit.RequiredTests {
+				if root.Package == catalog && root.Name == name {
+					owners++
+				}
+			}
+		}
+		if owners != 1 {
+			t.Errorf("%s requires %d owners for %s, want exactly one", plan.Profile, owners, name)
+		}
+	}
+	if plan.Profile == ProfileFull {
+		return
+	}
+	unit, err := plan.Unit("catalog-oracle-guards")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(unit.Packages, []string{catalog}) || unit.CountMode != "count-1" || unit.Skip != "" ||
+		len(unit.SelectedRoots) != len(guards) || len(unit.RequiredTests) != len(guards) || len(unit.DeferredTests) != 0 {
+		t.Fatalf("%s oracle unit must require only the three complete uncached guards: %+v", plan.Profile, unit)
 	}
 }
 
