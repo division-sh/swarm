@@ -1000,3 +1000,28 @@ No runtime owner, authority, schema, compatibility path or assertion waiver is
 introduced by this delta. The full 48-row gate is unchanged. Selected-agent
 gateway-loss/pre-model refusal, E's integrated durable activation proof, hosted
 default-Linux Q01, final qualification and final PR proof audit remain open.
+
+### Diagnostic full and qualification ladder
+
+The clean `77e9de2ac` full run is diagnostic-only under the user's instruction,
+not final qualification because #2525 is not integrated. Its provider-alias
+agent-consumers and agent-replay fixtures still selected the workspace stub;
+both stores correctly refused the missing native execution target. Those two
+scenarios now select the existing real host-workspace helper, while agent-free
+scenarios retain their original composition. All routing, exact receipts,
+authentication, replay, source ownership and cardinality assertions remain.
+The focused two-scenario run and complete 14-scenario both-store root pass.
+
+The same diagnostic unit exhausts its cumulative ten-minute package timeout
+during `TestServedPublicationDirectRestartBothStores/postgres/static`, which
+had run for only four seconds. The direct restart root separately passes all
+six SQLite/PostgreSQL root/static/template cases. That isolated success is
+not aggregate qualification or a claimed performance fix. Preserve the full
+counterexample and inspect accumulated unit cost before changing partitioning;
+do not relax a performance assertion or timeout to hide it.
+
+The user's ladder is focused iteration, then core, then one final full on the
+head integrating actually merged #2525. No further pre-merge full is allowed.
+E's critical-path qualification has priority over G's server2 capacity. Final
+L01/L04 refusal/join/new-attempt retry remains explicitly dependent on that
+merge; G does not duplicate E's compensation repair.
