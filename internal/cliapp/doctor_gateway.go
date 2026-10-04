@@ -90,16 +90,7 @@ func probeDoctorGateway(ctx context.Context, cfg *config.Config, backend Workspa
 		defer func() {
 			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 			defer cancel()
-			id, inspectErr := manager.RunDocker(cleanupCtx, "inspect", "--format", "{{.Id}}", name)
-			if inspectErr != nil && strings.Contains(inspectErr.Error(), "No such object") {
-				return
-			}
-			if inspectErr != nil {
-				retErr = errors.Join(retErr, inspectErr)
-				return
-			}
-			_, removeErr := manager.RunDocker(cleanupCtx, "rm", "--force", strings.TrimSpace(id))
-			retErr = errors.Join(retErr, removeErr)
+			retErr = errors.Join(retErr, removeDoctorGatewayContainer(cleanupCtx, manager, name))
 		}()
 		if err := manager.EnsureContainerRunning(ctx, name, []string{"--entrypoint", "sleep", dockerCfg.WorkspaceImage, "infinity"}); err != nil {
 			return err
@@ -115,5 +106,17 @@ func probeDoctorGateway(ctx context.Context, cfg *config.Config, backend Workspa
 		target.Workdir = root
 	}
 	_, err = workspace.RunWorker(ctx, target, dockerBin, worker.Request{Mode: "gateway", Gateway: toolgateway.HTTPObservation{URL: endpoint, Headers: map[string]string{"Authorization": "Bearer " + token}}})
+	return err
+}
+
+func removeDoctorGatewayContainer(ctx context.Context, manager *workspace.DockerManager, name string) error {
+	id, err := manager.RunDocker(ctx, "inspect", "--format", "{{.Id}}", name)
+	if err != nil && strings.Contains(err.Error(), "No such object") {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	_, err = manager.RunDocker(ctx, "rm", "--force", strings.TrimSpace(id))
 	return err
 }

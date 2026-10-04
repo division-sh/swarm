@@ -567,32 +567,7 @@ func (c *Conversation) executeToolResponse(ctx context.Context, response *Respon
 		terminal := toolIsTerminalInContext(ctx, tc.Name)
 		callIdentity := fmt.Sprintf("tool_call:%d:%d:%s:%s", c.TurnCount, callIndex, strings.TrimSpace(tc.ID), strings.TrimSpace(tc.Name))
 		callCtx := runtimeeffects.WithLogicalOperationIdentitySegment(ctx, callIdentity)
-		var out any
-		var err error
-		transported := false
-		if mock, ok := c.runtime.(*MockRuntime); ok {
-			if terminal && response.ToolOutputAuthority == nil && managedAgentExecutionContext(ctx) {
-				err = runtimefailures.New(runtimefailures.ClassLifecycleConflict, "tool_output_authority_missing", "llm-conversation", "execute_tool", map[string]any{"tool": strings.TrimSpace(tc.Name)})
-			} else {
-				var authority *ToolOutputAuthority
-				if terminal {
-					authority = response.ToolOutputAuthority
-				}
-				out, err = mock.executeTransportTool(callCtx, c.Session, tc, authority, callIdentity)
-				transported = true
-			}
-		} else if terminal && response.ToolOutputAuthority != nil {
-			identity, identityErr := response.ToolOutputAuthority.eventIdentity(callIdentity)
-			if identityErr != nil {
-				err = runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "tool_output_event_identity_invalid", "llm-conversation", "execute_tool", map[string]any{"tool": strings.TrimSpace(tc.Name)}, identityErr)
-			} else {
-				out, err = c.safeExecuteOutputEvent(callCtx, tc.Name, tc.Arguments, identity)
-			}
-		} else if terminal && managedAgentExecutionContext(ctx) {
-			err = runtimefailures.New(runtimefailures.ClassLifecycleConflict, "tool_output_authority_missing", "llm-conversation", "execute_tool", map[string]any{"tool": strings.TrimSpace(tc.Name)})
-		} else {
-			out, err = c.safeExecuteTool(callCtx, tc.Name, tc.Arguments)
-		}
+		out, transported, err := c.executeResponseToolCall(callCtx, response, tc, terminal, callIdentity)
 		entry := map[string]any{
 			"name": tc.Name,
 		}
@@ -652,6 +627,33 @@ func (c *Conversation) executeToolResponse(ctx context.Context, response *Respon
 		})
 	}
 	return strings.TrimSpace(string(b)), executed, nil
+}
+
+func (c *Conversation) executeResponseToolCall(ctx context.Context, response *Response, call ToolCall, terminal bool, occurrence string) (any, bool, error) {
+	if mock, ok := c.runtime.(*MockRuntime); ok {
+		if terminal && response.ToolOutputAuthority == nil && managedAgentExecutionContext(ctx) {
+			return nil, false, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "tool_output_authority_missing", "llm-conversation", "execute_tool", map[string]any{"tool": strings.TrimSpace(call.Name)})
+		}
+		var authority *ToolOutputAuthority
+		if terminal {
+			authority = response.ToolOutputAuthority
+		}
+		out, err := mock.executeTransportTool(ctx, c.Session, call, authority, occurrence)
+		return out, true, err
+	}
+	if terminal && response.ToolOutputAuthority != nil {
+		identity, err := response.ToolOutputAuthority.eventIdentity(occurrence)
+		if err != nil {
+			return nil, false, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "tool_output_event_identity_invalid", "llm-conversation", "execute_tool", map[string]any{"tool": strings.TrimSpace(call.Name)}, err)
+		}
+		out, err := c.safeExecuteOutputEvent(ctx, call.Name, call.Arguments, identity)
+		return out, false, err
+	}
+	if terminal && managedAgentExecutionContext(ctx) {
+		return nil, false, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "tool_output_authority_missing", "llm-conversation", "execute_tool", map[string]any{"tool": strings.TrimSpace(call.Name)})
+	}
+	out, err := c.safeExecuteTool(ctx, call.Name, call.Arguments)
+	return out, false, err
 }
 
 func (c *Conversation) safeExecuteOutputEvent(ctx context.Context, name string, input any, identity ToolOutputEventIdentity) (out any, err error) {
