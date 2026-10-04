@@ -1,8 +1,9 @@
 ## M09 implementation progress under ruling 5978927926
 
 The bounded existing-owner repair is implemented locally. This is WIP proof,
-not the final PR audit or closure of the complete 48-row class. Audit-only HEAD
-remains baadec1e4 plus uncommitted implementation; no production push was made.
+not the final PR audit or closure of the complete 48-row class. Implementation
+is committed locally and rebased onto master dd27e4374. No production push or
+review-ready PR is claimed; the earlier WIP receipts retain their original scope.
 
 - Each Docker launch binds an immutable container and an ephemeral invocation
   coordinate. The native identity/ready frame requires an exact launch
@@ -78,6 +79,17 @@ source-sync exclusion accidentally omitted `cmd/swarm`; that is corrected and
 checksum-verified, with a private-entry regression. The observer now forwards
 the real handshake and joins its own input; it never executes/simulates tools.
 
+**Rebased qualification:** complexity passes after extracting existing stages,
+without changing the baseline or ratchet. The first expanded seven-package run
+is RED on G-owned stale proof/CLI inventories and fixtures, not C's forward
+repair. The fixture corrections retain Docker simulation versus native Docker
+credit, real native mock/HTTP transport and exact current MCP authority.
+The source primitive census now checks both shared worker model-launch branches
+through the existing completion owner, with fail-closed admission/mode/input
+negative controls; free probes and gateway-owned effects remain distinct.
+Focused CLI/effect controls and API/mock notify-human/credential transport
+controls pass (the latter race x3). Expanded clean-head rerun remains required.
+
 **Still open:** public Docker test/default-Linux positive and successor refusal
 on hosted Ubuntu, remaining original 48-row qualification, clean-head full/full,
 exact-head CI and final proof audit. The five-package result is not whole-suite
@@ -90,6 +102,6 @@ inheritance was introduced to bypass that boundary.
 **#2525 remains open and E-owned.** Its compensation hunk is untouched here;
 L01/L04/final closure still require its actual merge, integration and G's
 both-store activation-refusal/retry proof. #2525 is not the only remaining
-work item. The master-red jobs attributed to #2557 remain C's forward repair,
-not silently absorbed into this PR. No new ruling or reduced closure claim is
+work item. C's master forward repair is integrated; G-owned failures are not
+attributed to it. No new ruling or reduced closure claim is
 requested: the approved complete-class/one-PR boundary remains unchanged.
