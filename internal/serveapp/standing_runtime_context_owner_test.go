@@ -132,6 +132,7 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 			faults := &standingRuntimeContextFaultOwner{}
 			selected := newStandingRuntimeContextRuntime(t, process, selectedStores, selectedModule, selectedFact, runtimeInstanceID, catalog, faults)
 			selected.InboundGateway = runtimepkg.NewInboundGateway(nil, nil, nil, executionposture.Live)
+			selected.InboundGateway.SetCredentialAdmission(selected.AdmitInboundCredentials)
 			capability, _, grant := installSelectedStoreTestProcessTopology(t, selectedStores, selected, selectedModule.SemanticSource(), selectedFact, runtimeInstanceID)
 			t.Cleanup(func() {
 				if err := selected.Shutdown(); err != nil {
@@ -271,9 +272,11 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 			ingressDone := make(chan struct{})
 			go func() {
 				defer close(ingressDone)
+				defer body.Close()
 				request := httptest.NewRequest(http.MethodPost, "/webhooks/chat/telegram", body)
 				target := targets[0]
 				selected.InboundGateway.HandleResolvedWebhook(httptest.NewRecorder(), request, runtimepkg.InboundTarget{
+					BundleHash: target.BundleHash, FlowPath: target.FlowPath,
 					ServiceID: target.ServiceID, Provider: target.Provider, Alias: target.Alias,
 					AdmissionPlan: target.AdmissionPlan, SigningSecret: target.SigningSecret,
 				}, selectedModule.SemanticSource())
