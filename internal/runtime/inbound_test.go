@@ -2913,6 +2913,7 @@ func TestInboundGateway_PreservesExactEmptyBodyForCompiledAdmission(t *testing.T
 	}
 	jsonStore := &recordingInboundStore{inserted: true, store: eventStore}
 	jsonGateway := NewInboundGateway(bus, nil, nil, executionposture.Live, jsonStore)
+	jsonGateway.SetCredentialAdmission(testInboundCredentialAdmission(t, identityInboundCredentialStore{}))
 	jsonReq := httptest.NewRequest(http.MethodPost, "/webhooks/json/json-events", nil)
 	jsonRec := httptest.NewRecorder()
 	jsonGateway.HandleResolvedWebhook(jsonRec, jsonReq, InboundTarget{
