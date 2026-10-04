@@ -9151,9 +9151,10 @@ engine:
         Mixed tool/model checks retain declaration validation without inventing successful discovery or
         selecting an execution backend. Runtime boot and doctor retain concrete live readiness checks.
       output: >
-        Portable verify and describe report validation_scope: structural, admission_complete: false
-        and live_readiness: not_evaluated. Default verify with admitted deployment context consumes
-        deployment_validation instead.
+        Portable verify and describe report validation_scope: structural and live_readiness:
+        not_evaluated. Portable verify additionally reports admission_complete: false; describe
+        retains its structural readback contract. Default verify with admitted deployment context
+        consumes deployment_validation instead.
         Structural workspace_backend and verify capability_subjects are retired without aliases.
         Verify retains pack_inventory and source capability validation. Operational capability subjects
         remain on their existing live diagnostic surfaces. production_valid continues to mean absence
@@ -21579,8 +21580,10 @@ workspace_model:
     scope: >
       Defines the capability-derived effective workspace backend requirement for `swarm serve` boot,
       selected-contract run-fork lifecycle consumers, local foreground `swarm run start`, `swarm doctor`,
-      and the `conversation.fork_chat` sandbox runtime. Bare verify and describe are structural readers and
-      do not select a workspace backend or observe machine readiness. The loaded contract and effective runtime
+      and the `conversation.fork_chat` sandbox runtime. Default verify with admitted deployment context consumes
+      the same backend requirement as an admission observation, without preparing a workspace. Portable verify
+      and describe are structural readers and do not select a workspace backend or observe machine readiness.
+      The loaded contract and effective runtime
       backend decide whether a workspace is needed, whether host is sufficient, or whether container isolation is required.
       Operator backend input is a preference or explicit unsafe opt-out; it is not the semantic source of the requirement.
     cli_flag: --workspace-backend <docker|host>
@@ -25189,8 +25192,10 @@ cli_specification:
               fact_owner: local contract verification
               json_shape: >
                 object with ok, source_root, validation_scope (structural or deployment), live_readiness,
-                admission_complete, source_artifact_hash, observations, execution_obligations,
-                portable_requested and the portable-context reason when applicable,
+                admission_complete, bundle_hash, source_label, members, optional manifest,
+                observations and execution_obligations. The deployment_context observation records
+                whether --portable was explicitly requested or deployment configuration was absent.
+                The object also includes
                 production_valid, harness counts/provenance, pack_inventory, errors, warnings, and lint_evidence.
                 workspace_backend and operational capability_subjects are retired from structural verify.
                 production_valid describes harness independence, not deployment readiness. `errors`, `warnings`,
