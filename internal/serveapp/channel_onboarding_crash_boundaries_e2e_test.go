@@ -82,6 +82,8 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 				if predecessor.Activation == nil || predecessor.Readiness == nil || !predecessor.Readiness.Ready {
 					t.Fatalf("%s E2E-14 predecessor = %#v", backend, predecessor)
 				}
+				// Rebind retires predecessor execution before its publication barrier.
+				_ = waitChannelCardMessageID(t, harness.provider, "telegram-ingress")
 				predecessorCredentialCount = channelOnboardingCredentialCount(t, harness.credentialPath)
 				predecessorCallback, predecessorSigning, _ = harness.provider.Registration()
 				harness.provider.SetResourceID("crash-boundary-rebind-token", 420114)
