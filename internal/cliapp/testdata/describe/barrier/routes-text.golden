@@ -2,7 +2,27 @@ routing topology: routing-topology/v1
   source authority: projection_only_existing_contract_owners
   - [typed_pubsub] portfolio/operating.reported: portfolio.operating.reported -> portfolio.portfolio-router
     typed pub/sub: match=exact boundary=same_flow
+  - [inter_flow_connect] ingress/operating.report.requested: ingress.ingress-node -> operating.operating.report.requested
+    connect: ingress.operating.report.requested -> operating.operating.report.requested (schema.yaml:<line>)
+    resolution: mode=create target=target field=operating_instance_id source_kind=event_id source=event.id derived_from="instance.operating_instance_id + carries.operating_instance_id.from"
+  - [typed_pubsub] portfolio/period/period.reported: portfolio/period.period.reported -> portfolio/period.portfolio-collector
+    typed pub/sub: match=exact boundary=same_flow
+  - [inter_flow_connect] portfolio/period.reported: portfolio.portfolio-router -> portfolio/period.period.reported
+    connect: portfolio.period.reported -> portfolio/period.period.reported (portfolio/schema.yaml:<line>)
+    resolution: mode=select target=target field=period_id source_kind=payload source=payload.period_id derived_from="instance.period_id + carries.period_id.from"
   - [typed_pubsub] portfolio/portfolio.setup: portfolio.portfolio.setup -> portfolio.portfolio-router
+    typed pub/sub: match=exact boundary=same_flow
+  - [inter_flow_connect] operating/operating.reported: operating.operating-node -> portfolio.operating.reported
+    connect: operating.operating.reported -> portfolio.operating.reported (schema.yaml:<line>)
+    resolution: mode=select target=target field=portfolio_id source_kind=payload source=payload.portfolio_id derived_from="instance.portfolio_id + carries.portfolio_id.from"
+  - [inter_flow_connect] portfolio.setup: ..portfolio.setup -> portfolio.portfolio.setup
+    connect: .portfolio.setup -> portfolio.portfolio.setup (schema.yaml:<line>)
+    resolution: mode=select-or-create target=target field=portfolio_id source_kind=payload source=payload.portfolio_id derived_from="instance.portfolio_id + carries.portfolio_id.from"
+  - [typed_pubsub] operating/operating.report.requested: operating.operating.report.requested -> operating.operating-node
+    typed pub/sub: match=exact boundary=same_flow
+  - [typed_pubsub] ingress/operating.report.triggered: ingress.operating.report.triggered -> ingress.ingress-node
+    typed pub/sub: match=exact boundary=same_flow
+  - [typed_pubsub] portfolio/period/period.setup: portfolio/period.period.setup -> portfolio/period.portfolio-collector
     typed pub/sub: match=exact boundary=same_flow
   - [inter_flow_connect] portfolio/period.setup: portfolio.portfolio-router -> portfolio/period.period.setup
     connect: portfolio.period.setup -> portfolio/period.period.setup (portfolio/schema.yaml:<line>)
@@ -10,26 +30,6 @@ routing topology: routing-topology/v1
   - [inter_flow_connect] operating.report.triggered: ..operating.report.triggered -> ingress.operating.report.triggered
     connect: .operating.report.triggered -> ingress.operating.report.triggered (schema.yaml:<line>)
     resolution: mode=static target=target
-  - [typed_pubsub] operating/operating.report.requested: operating.operating.report.requested -> operating.operating-node
-    typed pub/sub: match=exact boundary=same_flow
-  - [inter_flow_connect] ingress/operating.report.requested: ingress.ingress-node -> operating.operating.report.requested
-    connect: ingress.operating.report.requested -> operating.operating.report.requested (schema.yaml:<line>)
-    resolution: mode=create target=target field=operating_instance_id source_kind=event_id source=event.id derived_from="instance.operating_instance_id + carries.operating_instance_id.from"
-  - [inter_flow_connect] portfolio.setup: ..portfolio.setup -> portfolio.portfolio.setup
-    connect: .portfolio.setup -> portfolio.portfolio.setup (schema.yaml:<line>)
-    resolution: mode=select-or-create target=target field=portfolio_id source_kind=payload source=payload.portfolio_id derived_from="instance.portfolio_id + carries.portfolio_id.from"
-  - [inter_flow_connect] portfolio/period.reported: portfolio.portfolio-router -> portfolio/period.period.reported
-    connect: portfolio.period.reported -> portfolio/period.period.reported (portfolio/schema.yaml:<line>)
-    resolution: mode=select target=target field=period_id source_kind=payload source=payload.period_id derived_from="instance.period_id + carries.period_id.from"
-  - [inter_flow_connect] operating/operating.reported: operating.operating-node -> portfolio.operating.reported
-    connect: operating.operating.reported -> portfolio.operating.reported (schema.yaml:<line>)
-    resolution: mode=select target=target field=portfolio_id source_kind=payload source=payload.portfolio_id derived_from="instance.portfolio_id + carries.portfolio_id.from"
-  - [typed_pubsub] portfolio/period/period.setup: portfolio/period.period.setup -> portfolio/period.portfolio-collector
-    typed pub/sub: match=exact boundary=same_flow
-  - [typed_pubsub] portfolio/period/period.reported: portfolio/period.period.reported -> portfolio/period.portfolio-collector
-    typed pub/sub: match=exact boundary=same_flow
-  - [typed_pubsub] ingress/operating.report.triggered: ingress.operating.report.triggered -> ingress.ingress-node
-    typed pub/sub: match=exact boundary=same_flow
   boundary exposures:
     - portfolio/period.setup: portfolio.portfolio-router -> output portfolio.period.setup
     - ingress/operating.report.requested: ingress.ingress-node -> output ingress.operating.report.requested

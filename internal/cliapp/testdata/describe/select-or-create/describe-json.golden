@@ -56,7 +56,7 @@
           "producer_schema_digest": "sha256:c764feffa8a6f0df5e5698547a511086d65d15620a3b5044fa7b3ee679e9eef3",
           "receiver_schema_digest": "sha256:c764feffa8a6f0df5e5698547a511086d65d15620a3b5044fa7b3ee679e9eef3",
           "business_key": "account_id",
-          "pin_digest": "sha256:5d274afa863831607de0e647db5fe2ba2f14f3868c2ff09ec593980c8d6f241e",
+          "pin_digest": "sha256:8723ff561dbb7e84d326a135a0021f47a24c2eba537740db19222704798084a8",
           "source_file": "account/schema.yaml",
           "source_line": 1,
           "source_column": 1
@@ -92,7 +92,7 @@
           "flow_path": "producer",
           "producer_schema_digest": "sha256:c764feffa8a6f0df5e5698547a511086d65d15620a3b5044fa7b3ee679e9eef3",
           "receiver_schema_digest": "sha256:c764feffa8a6f0df5e5698547a511086d65d15620a3b5044fa7b3ee679e9eef3",
-          "pin_digest": "sha256:d6783b0f389aa03cb804cd5a03ffe549fffb2b54f579443b438006b7d2ca0f1c",
+          "pin_digest": "sha256:70b7b7fb3593f199efb63d25db7098cc9eace113aeaad156ec9d4e2fa9d74508",
           "source_file": "producer/schema.yaml",
           "source_line": 1,
           "source_column": 1
@@ -105,7 +105,7 @@
           "flow_path": "producer",
           "schema_digest": "sha256:c764feffa8a6f0df5e5698547a511086d65d15620a3b5044fa7b3ee679e9eef3",
           "business_key": "account_id",
-          "pin_digest": "sha256:f9e2c8ea5cb4fc92ca190194da9eec4133e7f747ffc9aa1acbf4fce78991ead3",
+          "pin_digest": "sha256:2eb83a645c0e558cf0afdfd7ada9f099a696d066ee09b34bfb2c23c77096d1cb",
           "source_file": "producer/schema.yaml",
           "source_line": 1,
           "source_column": 1
@@ -174,20 +174,7 @@
     ],
     "input_pins": [
       {
-        "id": "endpoint-2d10fb15dd2ba588",
-        "direction": "input_pin",
-        "kind": "flow_input_pin",
-        "flow_id": ".",
-        "event": {
-          "authored": "account.requested",
-          "local": "account.requested",
-          "canonical": "account.requested"
-        },
-        "pin_name": "account.requested",
-        "source_location": "pins.inputs.events.account.requested"
-      },
-      {
-        "id": "endpoint-9a9b9f4a8a40940d",
+        "id": "endpoint-146c807cf716b5e7",
         "direction": "input_pin",
         "kind": "flow_input_pin",
         "flow_id": "producer",
@@ -198,10 +185,10 @@
           "canonical": "producer/account.requested"
         },
         "pin_name": "account.requested",
-        "source_location": "pins.inputs.events.account.requested"
+        "source_location": "pins.inputs.account.requested"
       },
       {
-        "id": "endpoint-c19d28d4a096b1b0",
+        "id": "endpoint-db528a138184b678",
         "direction": "input_pin",
         "kind": "flow_input_pin",
         "flow_id": "account",
@@ -212,12 +199,25 @@
           "canonical": "account/account.ready"
         },
         "pin_name": "account.ready",
-        "source_location": "pins.inputs.events.account.ready"
+        "source_location": "pins.inputs.account.ready"
+      },
+      {
+        "id": "endpoint-eb7fe6f2226414be",
+        "direction": "input_pin",
+        "kind": "flow_input_pin",
+        "flow_id": ".",
+        "event": {
+          "authored": "account.requested",
+          "local": "account.requested",
+          "canonical": "account.requested"
+        },
+        "pin_name": "account.requested",
+        "source_location": "pins.inputs.account.requested"
       }
     ],
     "output_pins": [
       {
-        "id": "endpoint-728164033b68e60c",
+        "id": "endpoint-163b786f627ec875",
         "direction": "output_pin",
         "kind": "flow_output_pin",
         "flow_id": ".",
@@ -227,10 +227,10 @@
           "canonical": "account.requested"
         },
         "pin_name": "account.requested",
-        "source_location": "pins.outputs.events.account.requested"
+        "source_location": "pins.outputs.account.requested"
       },
       {
-        "id": "endpoint-830f6a4332d73334",
+        "id": "endpoint-dd716587edfa3852",
         "direction": "output_pin",
         "kind": "flow_output_pin",
         "flow_id": "producer",
@@ -241,13 +241,13 @@
           "canonical": "producer/account.ready"
         },
         "pin_name": "account.ready",
-        "source_location": "pins.outputs.events.account.ready"
+        "source_location": "pins.outputs.account.ready"
       }
     ],
     "root_input_sources": [],
     "boundary_exposures": [
       {
-        "id": "endpoint-98ce77aaac97d518-\u003eendpoint-830f6a4332d73334",
+        "id": "endpoint-98ce77aaac97d518-\u003eendpoint-dd716587edfa3852",
         "event": {
           "authored": "account.ready",
           "local": "account.ready",
@@ -271,7 +271,7 @@
           "source_location": "handler.emit"
         },
         "output": {
-          "id": "endpoint-830f6a4332d73334",
+          "id": "endpoint-dd716587edfa3852",
           "direction": "output_pin",
           "kind": "flow_output_pin",
           "flow_id": "producer",
@@ -282,13 +282,62 @@
             "canonical": "producer/account.ready"
           },
           "pin_name": "account.ready",
-          "source_location": "pins.outputs.events.account.ready"
+          "source_location": "pins.outputs.account.ready"
         }
       }
     ],
     "edges": [
       {
-        "id": "route-0b717c30b8b6dc1a",
+        "id": "route-28c991e8b797a85a",
+        "scope": "inter_flow_connect",
+        "event": {
+          "authored": "account.requested",
+          "local": "account.requested",
+          "canonical": "account.requested"
+        },
+        "producer": {
+          "id": "endpoint-163b786f627ec875",
+          "direction": "output_pin",
+          "kind": "flow_output_pin",
+          "flow_id": ".",
+          "event": {
+            "authored": "account.requested",
+            "local": "account.requested",
+            "canonical": "account.requested"
+          },
+          "pin_name": "account.requested",
+          "source_location": "pins.outputs.account.requested"
+        },
+        "consumer": {
+          "id": "endpoint-146c807cf716b5e7",
+          "direction": "input_pin",
+          "kind": "flow_input_pin",
+          "flow_id": "producer",
+          "flow_path": "producer",
+          "event": {
+            "authored": "account.requested",
+            "local": "account.requested",
+            "canonical": "producer/account.requested"
+          },
+          "pin_name": "account.requested",
+          "source_location": "pins.inputs.account.requested"
+        },
+        "boundary": {
+          "owner_flow_path": ".",
+          "authored_location": "schema.yaml:\u003cline\u003e",
+          "from": ".account.requested",
+          "to": "producer.account.requested",
+          "output_pin": "account.requested",
+          "input_pin": "account.requested"
+        },
+        "resolution": {
+          "mode": "static",
+          "target_kind": "target"
+        },
+        "requires_runtime_resolution": false
+      },
+      {
+        "id": "route-7b620ec874121151",
         "scope": "inter_flow_connect",
         "event": {
           "authored": "account.ready",
@@ -313,7 +362,7 @@
           "source_location": "handler.emit"
         },
         "consumer": {
-          "id": "endpoint-c19d28d4a096b1b0",
+          "id": "endpoint-db528a138184b678",
           "direction": "input_pin",
           "kind": "flow_input_pin",
           "flow_id": "account",
@@ -324,7 +373,7 @@
             "canonical": "account/account.ready"
           },
           "pin_name": "account.ready",
-          "source_location": "pins.inputs.events.account.ready"
+          "source_location": "pins.inputs.account.ready"
         },
         "boundary": {
           "owner_flow_path": ".",
@@ -348,7 +397,7 @@
         "requires_runtime_resolution": true
       },
       {
-        "id": "route-d154014061a15bc8",
+        "id": "route-8fdf2ccce2d98540",
         "scope": "typed_pubsub",
         "event": {
           "authored": "account.requested",
@@ -356,7 +405,7 @@
           "canonical": "producer/account.requested"
         },
         "producer": {
-          "id": "endpoint-9a9b9f4a8a40940d",
+          "id": "endpoint-146c807cf716b5e7",
           "direction": "input_pin",
           "kind": "flow_input_pin",
           "flow_id": "producer",
@@ -367,7 +416,7 @@
             "canonical": "producer/account.requested"
           },
           "pin_name": "account.requested",
-          "source_location": "pins.inputs.events.account.requested"
+          "source_location": "pins.inputs.account.requested"
         },
         "consumer": {
           "id": "endpoint-9020afb6832e4e3c",
@@ -393,7 +442,7 @@
         "requires_runtime_resolution": false
       },
       {
-        "id": "route-eb723ede5ec6b06c",
+        "id": "route-d91742c5ef967383",
         "scope": "typed_pubsub",
         "event": {
           "authored": "account.ready",
@@ -401,7 +450,7 @@
           "canonical": "account/account.ready"
         },
         "producer": {
-          "id": "endpoint-c19d28d4a096b1b0",
+          "id": "endpoint-db528a138184b678",
           "direction": "input_pin",
           "kind": "flow_input_pin",
           "flow_id": "account",
@@ -412,7 +461,7 @@
             "canonical": "account/account.ready"
           },
           "pin_name": "account.ready",
-          "source_location": "pins.inputs.events.account.ready"
+          "source_location": "pins.inputs.account.ready"
         },
         "consumer": {
           "id": "endpoint-b1261409d75e2f37",
@@ -434,55 +483,6 @@
         "typed_pubsub": {
           "match": "exact",
           "boundary": "same_flow"
-        },
-        "requires_runtime_resolution": false
-      },
-      {
-        "id": "route-edbe898a3d67e4dc",
-        "scope": "inter_flow_connect",
-        "event": {
-          "authored": "account.requested",
-          "local": "account.requested",
-          "canonical": "account.requested"
-        },
-        "producer": {
-          "id": "endpoint-728164033b68e60c",
-          "direction": "output_pin",
-          "kind": "flow_output_pin",
-          "flow_id": ".",
-          "event": {
-            "authored": "account.requested",
-            "local": "account.requested",
-            "canonical": "account.requested"
-          },
-          "pin_name": "account.requested",
-          "source_location": "pins.outputs.events.account.requested"
-        },
-        "consumer": {
-          "id": "endpoint-9a9b9f4a8a40940d",
-          "direction": "input_pin",
-          "kind": "flow_input_pin",
-          "flow_id": "producer",
-          "flow_path": "producer",
-          "event": {
-            "authored": "account.requested",
-            "local": "account.requested",
-            "canonical": "producer/account.requested"
-          },
-          "pin_name": "account.requested",
-          "source_location": "pins.inputs.events.account.requested"
-        },
-        "boundary": {
-          "owner_flow_path": ".",
-          "authored_location": "schema.yaml:\u003cline\u003e",
-          "from": ".account.requested",
-          "to": "producer.account.requested",
-          "output_pin": "account.requested",
-          "input_pin": "account.requested"
-        },
-        "resolution": {
-          "mode": "static",
-          "target_kind": "target"
         },
         "requires_runtime_resolution": false
       }
@@ -33517,21 +33517,11 @@
         "source_file": "schema.yaml",
         "source_line": 1,
         "source_column": 1,
-        "source_presence": "mapping"
-      }
-    },
-    {
-      "path": "schemas[\".\"].pins.inputs.events",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "schema.yaml",
-        "source_line": 1,
-        "source_column": 1,
         "source_presence": "sequence"
       }
     },
     {
-      "path": "schemas[\".\"].pins.inputs.events[0]",
+      "path": "schemas[\".\"].pins.inputs[0]",
       "provenance": {
         "origin": "authored",
         "source_file": "schema.yaml",
@@ -33541,12 +33531,12 @@
       }
     },
     {
-      "path": "schemas[\".\"].pins.inputs.events[0].event",
+      "path": "schemas[\".\"].pins.inputs[0].event",
       "provenance": {
         "origin": "derived",
         "rule_id": "flow.pin_local_event_identity",
         "input_paths": [
-          "schemas[\".\"].pins.inputs.events[0]"
+          "schemas[\".\"].pins.inputs[0]"
         ]
       }
     },
@@ -33557,21 +33547,11 @@
         "source_file": "schema.yaml",
         "source_line": 1,
         "source_column": 1,
-        "source_presence": "mapping"
-      }
-    },
-    {
-      "path": "schemas[\".\"].pins.outputs.events",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "schema.yaml",
-        "source_line": 1,
-        "source_column": 1,
         "source_presence": "sequence"
       }
     },
     {
-      "path": "schemas[\".\"].pins.outputs.events[0]",
+      "path": "schemas[\".\"].pins.outputs[0]",
       "provenance": {
         "origin": "authored",
         "source_file": "schema.yaml",
@@ -33581,12 +33561,12 @@
       }
     },
     {
-      "path": "schemas[\".\"].pins.outputs.events[0].event",
+      "path": "schemas[\".\"].pins.outputs[0].event",
       "provenance": {
         "origin": "derived",
         "rule_id": "flow.pin_local_event_identity",
         "input_paths": [
-          "schemas[\".\"].pins.outputs.events[0]"
+          "schemas[\".\"].pins.outputs[0]"
         ]
       }
     },
@@ -33647,21 +33627,11 @@
         "source_file": "account/schema.yaml",
         "source_line": 1,
         "source_column": 1,
-        "source_presence": "mapping"
-      }
-    },
-    {
-      "path": "schemas[\"account\"].pins.inputs.events",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "account/schema.yaml",
-        "source_line": 1,
-        "source_column": 1,
         "source_presence": "sequence"
       }
     },
     {
-      "path": "schemas[\"account\"].pins.inputs.events[0]",
+      "path": "schemas[\"account\"].pins.inputs[0]",
       "provenance": {
         "origin": "authored",
         "source_file": "account/schema.yaml",
@@ -33671,12 +33641,12 @@
       }
     },
     {
-      "path": "schemas[\"account\"].pins.inputs.events[0].event",
+      "path": "schemas[\"account\"].pins.inputs[0].event",
       "provenance": {
         "origin": "derived",
         "rule_id": "flow.pin_local_event_identity",
         "input_paths": [
-          "schemas[\"account\"].pins.inputs.events[0]"
+          "schemas[\"account\"].pins.inputs[0]"
         ]
       }
     },
@@ -33728,21 +33698,11 @@
         "source_file": "producer/schema.yaml",
         "source_line": 1,
         "source_column": 1,
-        "source_presence": "mapping"
-      }
-    },
-    {
-      "path": "schemas[\"producer\"].pins.inputs.events",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "producer/schema.yaml",
-        "source_line": 1,
-        "source_column": 1,
         "source_presence": "sequence"
       }
     },
     {
-      "path": "schemas[\"producer\"].pins.inputs.events[0]",
+      "path": "schemas[\"producer\"].pins.inputs[0]",
       "provenance": {
         "origin": "authored",
         "source_file": "producer/schema.yaml",
@@ -33752,12 +33712,12 @@
       }
     },
     {
-      "path": "schemas[\"producer\"].pins.inputs.events[0].event",
+      "path": "schemas[\"producer\"].pins.inputs[0].event",
       "provenance": {
         "origin": "derived",
         "rule_id": "flow.pin_local_event_identity",
         "input_paths": [
-          "schemas[\"producer\"].pins.inputs.events[0]"
+          "schemas[\"producer\"].pins.inputs[0]"
         ]
       }
     },
@@ -33768,21 +33728,11 @@
         "source_file": "producer/schema.yaml",
         "source_line": 1,
         "source_column": 1,
-        "source_presence": "mapping"
-      }
-    },
-    {
-      "path": "schemas[\"producer\"].pins.outputs.events",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "producer/schema.yaml",
-        "source_line": 1,
-        "source_column": 1,
         "source_presence": "sequence"
       }
     },
     {
-      "path": "schemas[\"producer\"].pins.outputs.events[0]",
+      "path": "schemas[\"producer\"].pins.outputs[0]",
       "provenance": {
         "origin": "authored",
         "source_file": "producer/schema.yaml",
@@ -33792,12 +33742,12 @@
       }
     },
     {
-      "path": "schemas[\"producer\"].pins.outputs.events[0].event",
+      "path": "schemas[\"producer\"].pins.outputs[0].event",
       "provenance": {
         "origin": "derived",
         "rule_id": "flow.pin_local_event_identity",
         "input_paths": [
-          "schemas[\"producer\"].pins.outputs.events[0]"
+          "schemas[\"producer\"].pins.outputs[0]"
         ]
       }
     }
