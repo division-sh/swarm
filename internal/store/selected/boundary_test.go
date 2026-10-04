@@ -82,6 +82,14 @@ func TestSelectedStoreBoundaryIgnoresNestedCheckoutAndRejectsCurrentSource(t *te
 
 func TestProductionSelectedStoreBoundaryGuardRejectsOldInterpreters(t *testing.T) {
 	fixtures := map[string]string{
+		"internal/cliapp/unaudited_selected_reader.go": `package cliapp
+import "github.com/division-sh/swarm/internal/store/selected"
+var _ = selected.OpenAdmissionInspection
+`,
+		"internal/cliapp/verify_deployment_store.go": `package cliapp
+import "github.com/division-sh/swarm/internal/store/construction"
+var _ = construction.OpenPostgres
+`,
 		"internal/runtime/direct_constructor.go": `package runtime
 import "github.com/division-sh/swarm/internal/store/construction"
 var _ = construction.OpenPostgres
@@ -118,6 +126,9 @@ func selectedStoreBoundaryViolations(path, body string) []string {
 		"internal/serveapp/serve_runtime_execution.go":      true,
 		"internal/serveapp/store_runtime.go":                true,
 		"internal/cliapp/store_authority.go":                true,
+		// Verification borrows a revocable, consistent read-only inspection;
+		// construction and concrete backend handles remain forbidden here.
+		"internal/cliapp/verify_deployment_store.go": true,
 	}
 	insideSelected := strings.HasPrefix(path, "internal/store/selected/")
 	insideStore := strings.HasPrefix(path, "internal/store/")
