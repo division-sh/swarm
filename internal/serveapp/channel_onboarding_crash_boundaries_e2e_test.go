@@ -142,8 +142,10 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 				if delivery := harness.provider.Delivery(1); delivery == nil || !strings.HasPrefix(fmt.Sprint(delivery["text"]), "Retire service") {
 					t.Fatalf("%s E2E-14 predecessor card delivery = %v", backend, delivery)
 				}
-				requireChannelClaimDisposition(t, "E2E-14 predecessor callback before publication",
-					submitChannelOnboardingClaim(t, predecessorCallback, predecessorSigning, "SWARM-AAAAAAAAAAAAAAAA", 7215, "predecessor_before_publication"), "rejected_binding_claim")
+				stale := submitChannelOnboardingClaim(t, predecessorCallback, predecessorSigning, "SWARM-AAAAAAAAAAAAAAAA", 7215, "predecessor_before_publication")
+				if stale.StatusCode != http.StatusNotFound || stale.Disposition != "" || len(stale.EventIDs) != 0 || len(stale.EventNames) != 0 {
+					t.Fatalf("%s E2E-14 superseded durable authority retained its predecessor callback: %#v", backend, stale)
+				}
 			case channelonboarding.TestAfterProcessPublicationBeforePromotion:
 				if before.Operation.Phase != channelonboarding.PhasePublishingProcessActivation || before.Operation.ActivationRevision < 1 {
 					t.Fatalf("%s E2E-16 predecessor checkpoint = %#v", backend, before.Operation)
