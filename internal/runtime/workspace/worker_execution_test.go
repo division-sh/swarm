@@ -238,7 +238,7 @@ func TestWorkerNativeHostCanceledCommittedCallIsUncertainAndNotReplayed(t *testi
 	stop()
 	err := <-completed
 	var execution *WorkerExecutionError
-	if !errors.As(err, &execution) || !execution.Started || execution.Observed || !errors.Is(err, context.Canceled) || failures.FromError(err, "test", "cancel").Failure.Class != failures.ClassOutcomeUncertain {
+	if !errors.As(err, &execution) || !execution.Started || !execution.Observed || !errors.Is(err, context.Canceled) || failures.FromError(err, "test", "cancel").Failure.Class != failures.ClassOutcomeUncertain {
 		t.Fatalf("canceled launched call lost its uncertain outcome or cause: %v", err)
 	}
 	select {
